@@ -2,7 +2,7 @@ import type { Type, TypeReference } from './types.js';
 
 /**
  * Applied references to a parameterized NOMINAL type — the one node shape
- * `docs/plans/2026-08-06-parameterized-nominal-types-design.md` §3 adds.
+ * `docs/TYPE-SYSTEM.md` adds.
  *
  * An application (`tree<integer>`) is a DISTINCT object from the declaration
  * record held in the scope (one record, many applications), but its `def` must

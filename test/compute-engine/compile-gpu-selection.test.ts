@@ -3,7 +3,7 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 // Element-wise `Which`/`If` selection on the GPU shader targets
-// (docs/plans/2026-07-27-elementwise-which-design.md, R1–R4): a statically
+// (docs/BROADCAST-MODEL.md, R1–R4): a statically
 // shaped (vec2–vec4) condition lowers to boolean-vector masks combined with
 // GLSL `mix` / WGSL `select`; anything with no static shape fails closed (D6).
 //

@@ -5,7 +5,7 @@ import { isValueDef } from '../../src/compute-engine/boxed-expression/utils';
 
 //
 // The static checking pass runs under an inference ROLLBACK FRAME (phase 2b
-// of `docs/plans/2026-08-13-inference-tx-design.md`): a
+// of `docs/TYPE-SYSTEM.md`): a
 // checked-but-never-run program must leave the engine exactly as it found
 // it — including the type inference the pass's pushed scope never shielded
 // (writes onto pre-existing outer definitions) and the forward-reference

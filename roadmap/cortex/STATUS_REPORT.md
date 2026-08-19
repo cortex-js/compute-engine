@@ -145,7 +145,7 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
   observationally identical; compiles on all targets as
   `s >= lo && s <= hi`; serializer round-trips `lo .. hi` in pattern
   position. Spec recorded as §8 of
-  `docs/plans/2026-07-12-cortex-match-design.md`. Carve-out: a literal
+  `docs/LANGUAGE-MODEL.md`. Carve-out: a literal
   `Range` value is no longer structurally matchable at pattern top level
   (nested positions stay structural). Known papercut (pre-existing lexer
   maximal-munch, same as `3!^2`): a negative upper bound needs spacing

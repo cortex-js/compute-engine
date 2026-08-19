@@ -18,8 +18,7 @@ import type {
 
 //
 // Parameterized NOMINAL types — `type tree<out T> = tuple<value: T, children:
-// list<tree<T>>>` (`docs/plans/2026-08-06-parameterized-nominal-types-
-// design.md`), PHASE 0 (representation).
+// list<tree<T>>>` (`docs/TYPE-SYSTEM.md`), representation tier.
 //
 // A nominal type is OPAQUE, so an applied reference is never expanded: the
 // node KEEPS its arguments. That is the whole reason a recursive parametric

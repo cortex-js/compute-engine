@@ -10,7 +10,7 @@ import type {
 /**
  * The `k` operand of `RandomChoice` (`library/core.ts`) and `RandomSample`
  * (`library/statistics.ts`), rounded and validated — the shared half of the
- * `k` table in `docs/plans/2026-07-25-random-signature-redesign.md` §4.
+ * `k` table in `docs/RANDOMNESS-MODEL.md` §4.
  *
  * `k` is typed `number`, not `integer`: a caller who computes a count
  * (`Count(xs)/2`, a fitted value, `4N` for a slider `N`) should not have to

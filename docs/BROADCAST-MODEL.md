@@ -94,7 +94,7 @@ Corollary rules for the strict regime:
   (`JAVASCRIPT_FUNCTIONS.PointList`, `javascript-target.ts`) emits
   shortest-zip via `Math.min` over the source lengths — the pairing-regime
   contract carried into compiled code. Design:
-  `docs/plans/2026-07-31-pointlist-compile-design.md`.
+  `docs/COLLECTIONS-MODEL.md`.
 - Pins: `compiled-elementwise-boolean.test.ts` ("the mismatch ruling reaches
   every broadcast path", including the `PointList` opt-out),
   `pointlist-compile-zip.test.ts` (compiled shortest-zip — the pairing
@@ -107,8 +107,8 @@ Corollary rules for the strict regime:
 - Selection (2026-07-27): elementwise `Which`/`If` over list-valued
   conditions belongs to the LIFTED regime — every list-valued participant
   (conditions and selected arms) must share one length, checked through the
-  same `broadcastLengthMismatch`. Semantics and rulings:
-  `docs/plans/2026-07-27-elementwise-which-design.md`.
+  same `broadcastLengthMismatch`. Selection is lazy per element and an
+  unmatched position preserves shape with the documented absence value.
 
 ## Audit record (2026-07-27)
 

@@ -29,7 +29,7 @@ import type { FunctionClause } from '../multi-clause.js';
  * containing carriers into the positional argument list the callee's signature
  * declares — or into a diagnostic.
  *
- * Design: `docs/plans/2026-08-12-named-arguments-design.md` §2–§3, implementing
+ * Design: `docs/LANGUAGE-MODEL.md`, implementing
  * `docs/TYPE_SYSTEM_ROADMAP.md` Appendix C (rulings C1–C6 and the sub-rulings
  * R1–R4 the design doc adopts).
  *

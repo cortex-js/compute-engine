@@ -304,7 +304,7 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
   });
 });
 
-describe('Fresh-matrix repair — phase 2a slot restore (docs/plans/2026-08-13-inference-tx-design.md)', () => {
+describe('Fresh-matrix repair — phase 2a slot restore (docs/TYPE-SYSTEM.md)', () => {
   const historyOf = (ce: ComputeEngine, name: string) =>
     (ce.lookupDefinition(name) as any).value._typeProvenance?.map(
       (e: any) => [e.kind, e.type.toString(), e.cause?.toString()]

@@ -1311,7 +1311,7 @@ export interface IComputeEngine {
    * current scope. Partial canonical forms (`canonical: ['Number']`) run this
    * way — their output is not fully canonical, so they follow the structural
    * symbol contract and write nothing to the caller's scope.
-   * See `docs/plans/2026-08-04-parse-scope-control-design.md` A1.
+   * See `docs/SCOPING-MODEL.md` A1.
    * @internal */
   _resolveOnly<T>(f: () => T): T;
 

@@ -8,7 +8,7 @@ import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 //
 // `DeclareProtocol` / `DeclareConformance` — the engine forms behind the Epsil
 // `protocol` and `type X is P` statements (phase 1 of the protocols design,
-// `docs/plans/2026-08-12-protocols-design.md`).
+// `docs/TYPE-SYSTEM.md`).
 //
 // Both are LAZY operators registering from BOTH the canonical and the evaluate
 // handler — the route-parity requirement for a lazy operator (a lazy operator

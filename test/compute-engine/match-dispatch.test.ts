@@ -6,7 +6,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
  * Phase 2 of the Epsil `match` design
- * (docs/plans/2026-07-12-cortex-match-design.md §4): the classification ladder.
+ * (docs/LANGUAGE-MODEL.md §4): the classification ladder.
  *
  * Each case is classified once into a tier (0 constant dispatch / 1 literal
  * chain / 2 fixed-shape destructuring / 3 general matcher) and the dispatch
@@ -503,7 +503,7 @@ describe('MATCH ladder — property: laddered result ≡ tier-3 reference', () =
 
 /**
  * Rung 1 of the error-propagation design
- * (`docs/plans/2026-07-31-error-propagation-design.md` §2): an error subject
+ * (`docs/LANGUAGE-MODEL.md`): an error subject
  * must DECIDE, but it must not be destructured by a shape it does not really
  * have. The gate lives in `match-dispatch.ts` and is enforced on BOTH the
  * laddered path (tiers 0–2 reject outright; tier 3 goes through

@@ -5,7 +5,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
  * Phase 1 of the Epsil `match` design
- * (docs/plans/2026-07-12-cortex-match-design.md §6 item 1): the engine-level
+ * (docs/LANGUAGE-MODEL.md §6 item 1): the engine-level
  * `Match`/`MatchCase`/`Pin`/`Alternatives` heads with tier-3 reference
  * semantics via the generic matcher. Selection logic lives in
  * `src/compute-engine/boxed-expression/match-dispatch.ts`.
@@ -619,7 +619,7 @@ describe('MATCH — range patterns (membership)', () => {
 
 /**
  * Rung 1 of the error-propagation design
- * (`docs/plans/2026-07-31-error-propagation-design.md` §2/§6): `Match` is the
+ * (`docs/LANGUAGE-MODEL.md`): `Match` is the
  * RESCUE construct, so it must decide on an error subject instead of freezing
  * with it — restoring the "always decides" totality pinned in §1 of the match
  * design. Wider coverage (bubbling, `IsError`) lives in
@@ -709,7 +709,7 @@ describe('MATCH — error subjects (rung 1)', () => {
 
 //
 // Phase 3 of the parameterized-nominal design
-// (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §6): `match`
+// (`docs/TYPE-SYSTEM.md`): `match`
 // at an instantiated body. No `match` machinery changes for this — a case
 // binds the VALUES the tagged application carries, and a capture's type is
 // the bound expression's own type — so these are pins that the

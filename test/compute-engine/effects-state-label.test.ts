@@ -5,7 +5,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // The `state` effect label — Phase 0b of
-// `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`
+// `docs/TYPE-SYSTEM.md`
 // (spec: `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Changing a field is an
 // effect", and its "Changes to shipped documents" items 6-8).
 //

@@ -4,7 +4,7 @@ import { parseEpsil } from '../../src/epsil/parse-epsil';
 
 // The Epsil surface of first-class type values (phase 1):
 // `TypeFrom("...")` construction, the `type` annotation, `Subtype`, and the
-// `==` tier. Design: `docs/plans/2026-08-18-first-class-types.md`.
+// `==` tier. Design: `docs/TYPE-SYSTEM.md`.
 
 function run(ce: ComputeEngine, source: string): string {
   const r = executeEpsil(ce, source);

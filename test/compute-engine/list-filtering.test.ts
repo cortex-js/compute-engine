@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * Desmos list filtering `L[condition]` — see
- * docs/plans/2026-07-07-desmos-list-filtering.md.
+ * docs/COLLECTIONS-MODEL.md.
  *
  * The mechanism: relational operators broadcast element-wise over a list
  * operand (T1) producing a `list<boolean>` mask, which `At`'s boolean-mask

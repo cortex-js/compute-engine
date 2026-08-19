@@ -840,7 +840,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
   {
     // `k` elements drawn WITHOUT replacement — the twin of `RandomChoice`
     // (with replacement). See
-    // `docs/plans/2026-07-25-random-signature-redesign.md` §5.
+    // `docs/RANDOMNESS-MODEL.md` §5.
     RandomSample: {
       description:
         'RandomSample(xs, k): a list of k elements drawn from the indexed ' +

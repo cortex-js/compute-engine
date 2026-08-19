@@ -7,7 +7,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 // union, so every indexed-then-accessed chain (`S[n].x`) errored at
 // canonicalization. The accessors, the `First` family and `Distance` now
 // admit the `missing` arm through strip-before-validate (§3.B of
-// `docs/plans/2026-07-22-missing-value-typing-design.md`):
+// `docs/TYPE-SYSTEM.md`):
 //
 // - `PointX`/`PointY`/`PointZ` declare `propagate` — a coordinate is a
 //   numeric slot, so an absent point's coordinate is the numeric marker `NaN`;

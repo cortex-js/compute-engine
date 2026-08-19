@@ -31,7 +31,7 @@ import { journalDefinitionRecord } from './boxed-expression/boxed-value-definiti
 
 /**
  * Value constructors minted by a type declaration
- * (`docs/plans/2026-08-01-nominal-types-design.md`, §4.1/§4.1b/§4.1c, D4/D4b/
+ * (`docs/TYPE-SYSTEM.md`, D4/D4b/
  * D5/D10).
  *
  * Declaring a type claims BOTH namespaces: the type record in the engine's

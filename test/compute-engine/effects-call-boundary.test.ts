@@ -213,7 +213,7 @@ describe('blast radius: which library parameters carry an effect bound', () => {
       }
     }
 
-    // Design E (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`
+    // Design E (`docs/TYPE-SYSTEM.md`
     // §4): a converted operator's slot IS a signature — that is the point —
     // spelled with the EFFECT-TOP `any` slot so it cannot newly reject an
     // effectful callback. The enumeration therefore pins the converted

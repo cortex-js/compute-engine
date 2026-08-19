@@ -94,7 +94,7 @@ function singleArgCommand(
 // "shell" heads — parsed and serialized, but never evaluated (the library
 // declarations in `library/core.ts` have no `evaluate` handler). CE takes no
 // position on geometry semantics; the structural parse is for consumers that
-// render figures. See `docs/mathnet/parser-hardening-plan.md` (Tier 3, #6).
+// render figures. This vocabulary came from the MathNet parser corpus.
 // ---------------------------------------------------------------------------
 
 /** Parse a geometry *mark* — a prefix command (`\angle`, `\triangle`,

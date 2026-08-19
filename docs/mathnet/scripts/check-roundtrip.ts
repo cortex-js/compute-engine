@@ -1,7 +1,7 @@
 /**
  * Serialize→parse round-trip property over the regression corpus
  * (../parser-test-cases.json). Stage 3 "corpus lane" of
- * docs/plans/2026-08-04-parse-scope-control-design.md § D (Tycho item 153).
+ * The serialize/parse property described by docs/LANGUAGE-MODEL.md.
  *
  *   npx tsx check-roundtrip.ts [--failures] [--update]
  *

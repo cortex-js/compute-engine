@@ -12,7 +12,7 @@ import {
 
 /**
  * The EXACT-mode auto-compilation tier for lazy-`Map` `evaluate()` drains
- * (design: `docs/plans/2026-07-31-exact-map-drain-compile-design.md`, ratified
+ * (design: `docs/COMPILATION-MODEL.md`, ratified
  * 2026-07-31).
  *
  * An unmarked broadcast-shaped lambda that the static proof shows
@@ -839,7 +839,7 @@ describe('exact Map compile — coexistence with the float tier', () => {
 
 describe('exact Map compile — annotated parameters', () => {
   /**
-   * Follow-up (1) of `docs/plans/2026-08-08-lambda-param-element-inference.md`:
+   * Follow-up (1) of `docs/TYPE-SYSTEM.md`:
    * the broadcast-shape gate (`map-broadcast-shape.ts`, shared with Map
    * fusion) admits an ANNOTATED mapping-function parameter when the source's
    * element type provably satisfies the annotation, so such a literal reaches

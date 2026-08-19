@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * Overload resolution for intersection-of-signature types.
- * See `docs/plans/2026-07-25-overload-resolution-design.md`.
+ * See `docs/TYPE-SYSTEM.md`.
  */
 
 /** The three-arm signature from §1 of the design (with the §3 arm-1

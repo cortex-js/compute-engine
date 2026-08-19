@@ -2,7 +2,7 @@
  * The generator behind the random family — `Random`, `RandomChoice`,
  * `RandomSample`, `RandomShuffle` — and the `WithRandomSeed` frames that seed
  * them. See `docs/RANDOMNESS-MODEL.md` for the model, and
- * `docs/plans/2026-07-25-random-signature-redesign.md` for the design record.
+ * `docs/RANDOMNESS-MODEL.md` for the design record.
  *
  * The n-th draw of a frame is `hash(seed, n)` — a PURE function of the seed and
  * the draw index, computed with PCG3D over pure u32 arithmetic. Because there
@@ -23,7 +23,7 @@ export const MAX_RANDOM_ELEMENT_COUNT = 1_000_000;
 //
 // ─── Block-scoped seeding: PCG3D counter-based draws ────────────────────────
 //
-// See `docs/plans/2026-07-25-random-signature-redesign.md` §2 and §4. The
+// See `docs/RANDOMNESS-MODEL.md` §2 and §4. The
 // n-th draw of a `WithRandomSeed` frame is a PURE function of the seed and the
 // draw index: `hash(seed, n)`, with no mutable stream state. That is what lets
 // the interpreter, the JS target and (as f32) the GPU targets agree.
@@ -144,7 +144,7 @@ export function frameDraw(seedLo: number, seedHi: number, n: number): number {
 //
 // ─── Derived sub-streams ────────────────────────────────────────────────────
 //
-// `docs/plans/2026-07-28-derived-substreams.md`. The stochastic ESTIMATORS —
+// `docs/RANDOMNESS-MODEL.md`. The stochastic ESTIMATORS —
 // Monte-Carlo integration, the sampled equality probe — need to replay under a
 // `WithRandomSeed` frame without drawing FROM it: they consume 1e4–1e7
 // samples, and the sampling loop is deadline-truncated, so routing them

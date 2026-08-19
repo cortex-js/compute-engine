@@ -20,7 +20,7 @@
  * without a witness to write.
  *
  * Settled empirically as the exit criterion of stage C1 of the checkpoint
- * work — `docs/plans/2026-08-18-checkpoint-restore-design.md` §9, the
+ * work — `docs/CHECKPOINT-MODEL.md`, the
  * "all-constant-pure `undefined`-key memo question". A restore reaches the
  * same entries the same way, so leaving them unkeyed would have made
  * restore-then-replay serve pre-restore answers.

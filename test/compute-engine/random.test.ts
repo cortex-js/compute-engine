@@ -4,7 +4,7 @@ import { foldSeed, frameDraw } from '../../src/compute-engine/numerics/random';
 /**
  * The Random family: `Random`, `RandomChoice`, `RandomSample`,
  * `RandomShuffle` — domain-only, seedless, and bounded.
- * See `docs/plans/2026-07-25-random-signature-redesign.md` §§3–5, §8.
+ * See `docs/RANDOMNESS-MODEL.md` §§3–5, §8.
  *
  * `WithRandomSeed` itself (frames, nesting, seed folding, the stability
  * vectors) is covered by `with-random-seed.test.ts` and

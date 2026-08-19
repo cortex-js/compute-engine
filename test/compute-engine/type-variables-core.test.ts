@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * Phase 3b of the type-variables design
- * (`docs/plans/2026-08-01-type-variables-design.md` §7.3): the `core.ts`
+ * (`docs/TYPE-SYSTEM.md`): the `core.ts`
  * conversions from a weak signature + imperative `type:` handler to a `where`
  * signature.
  *

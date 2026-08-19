@@ -9,7 +9,7 @@ import { _clearElementMemoForTest } from '../../src/compute-engine/boxed-express
 
 /**
  * Auto-compilation of lazy-`Map` element lambdas on numeric drains
- * (design: docs/plans/2026-07-19-map-auto-compile-design.md, ratified
+ * (design: docs/COMPILATION-MODEL.md, ratified
  * 2026-07-19).
  *
  * Every test asserts **counter deltas** on `_mapAutoCompileStats` (reset

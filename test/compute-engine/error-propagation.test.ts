@@ -9,7 +9,7 @@ import {
 
 /**
  * Rungs 1 and 2 of the error-propagation design
- * (`docs/plans/2026-07-31-error-propagation-design.md`), plus the `Nothing`
+ * (`docs/LANGUAGE-MODEL.md`), plus the `Nothing`
  * route-parity ruling (§4).
  *
  * - **Rung 1** — `Match` DECIDES on an error subject (it is the rescue

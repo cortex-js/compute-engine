@@ -206,8 +206,8 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 (* --- Atomic and Primitive Types --- *)
 
 (* An APPLIED reference carries a type-argument list: `Pair<integer>`, the use
-   site of a generic type alias (`docs/plans/2026-08-04-generic-type-aliases-
-   design.md`). The list is EAGERLY EXPANDED into the substituted alias body
+   site of a generic type alias (`docs/TYPE-SYSTEM.md`). The list is EAGERLY
+   EXPANDED into the substituted alias body
    when the type is built, so no applied-reference node ever reaches the `Type`
    representation. An empty list (`Pair<>`), a wrong count, or arguments on a
    non-generic name are arity errors raised there — the grammar admits them.
@@ -687,7 +687,7 @@ export class Parser {
    * trailing `where` clause.
    *
    * Because the clause TRAILS the body, the parse is in three phases (the
-   * binding strategy of `docs/plans/2026-08-11-where-clause-type-constraints.md`):
+   * binding strategy of `docs/TYPE-SYSTEM.md`):
    *
    * 1. **Pre-scan** ({@link scanWhereClauseNames}): a purely lexical scan for
    *    a depth-0 `where`, collecting the clause's names. Resolves nothing, so
@@ -1943,7 +1943,7 @@ export class Parser {
 
   /**
    * The RETIRED `callback<…>` constructor (Design E,
-   * `docs/plans/2026-08-18-compatibility-admission-callbacks.md` §7): callback
+   * `docs/TYPE-SYSTEM.md`): callback
    * slots are ordinary arrow types now, admitted by compatibility rather than
    * subtyping, so the constructor no longer exists. A signature that still
    * spells it fails LOUDLY with a migration hint instead of silently resolving

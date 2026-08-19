@@ -1,6 +1,6 @@
 /**
  * The `state` EFFECT of a write through a mutable object — Phase 2 of
- * `docs/plans/2026-08-13-mutable-objects-implementation-plan.md` ("a
+ * `docs/TYPE-SYSTEM.md` ("a
  * `readwrite` requirement implies `state` on its setter"), whose normative
  * spec is `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, "Changing a field is an
  * effect".

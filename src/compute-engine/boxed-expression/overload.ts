@@ -46,12 +46,12 @@ import {
  * standard encoding of an overload set: the value inhabits every arm, i.e. it
  * is callable at each of them.
  *
- * See `docs/plans/2026-07-25-overload-resolution-design.md`. Two contracts
+ * See `docs/TYPE-SYSTEM.md`. Two contracts
  * from that document govern everything here:
  *
  * - **§4.2 — resolution leaves no writes behind.** Nothing in this file
  *   mutates a symbol definition. Since phase 2c
- *   (`docs/plans/2026-08-13-inference-tx-design.md`) the guarantee is
+ *   (`docs/TYPE-SYSTEM.md`) the guarantee is
  *   rollback-shaped rather than abstinence-shaped: admission may run a
  *   caller-supplied TRIAL ({@link ArmTrialFn}) — full `validateArguments`,
  *   whose in-loop `op._infer(param, 'narrow')` genuinely writes — but the
@@ -307,7 +307,7 @@ export interface AdmissionPolicies {
 
 /**
  * The cheap PREFILTER: true unless `op` **provably** cannot satisfy `param`
- * (phase 2c of `docs/plans/2026-08-13-inference-tx-design.md`).
+ * (phase 2c of `docs/TYPE-SYSTEM.md`).
  *
  * This replaced the write-free mirror filter (`operandAdmits`, sixteen
  * mirrored gate conditions kept in lockstep with `validateArguments` by
@@ -525,7 +525,7 @@ function samePermutation(
  * parameter, an optional hole). Name compatibility filters arms BEFORE type
  * admission, mirroring the arity pre-filter.
  *
- * `docs/plans/2026-08-12-named-arguments-design.md` §4. Computed by
+ * `docs/LANGUAGE-MODEL.md` Computed by
  * `named-arguments.ts`, which owns the per-arm algorithm; this module only
  * consumes the result.
  */

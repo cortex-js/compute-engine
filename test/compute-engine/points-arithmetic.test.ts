@@ -654,7 +654,7 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
 // `scalar + tuple` guard (canonicalAdd) and the `At` value-operand check must
 // NOT treat such an expression as a provable scalar and reject a valid Desmos
 // shape. STOPGAP regression — see
-// docs/plans/2026-07-07-honest-list-broadcast-typing.md.
+// docs/COLLECTIONS-MODEL.md.
 describe('POINT/TUPLE ARITHMETIC — dishonest collection-broadcast types', () => {
   test('Tuple + list-broadcast Multiply stays a valid symbolic Add', () => {
     const ce = new ComputeEngine();

@@ -1512,7 +1512,7 @@ volumes
       // indices. Not `drawsRandom` (that would shift every sibling draw), but
       // the pending gate must still keep the frame around an estimate that
       // could not finish — otherwise deferring it converts a seeded estimate
-      // to a live one. See `docs/plans/2026-07-28-derived-substreams.md` §6.
+      // to a live one. See `docs/RANDOMNESS-MODEL.md` §6.
       readsRandomFrame: true,
 
       lazy: true,
@@ -1520,7 +1520,7 @@ volumes
       // `canonicalLimits` used to pass through untouched — leaving the index
       // raw on the parse route and carrying the CALLER's binding on the
       // `ce.function` route (the `Series` defect, stage 5 of
-      // `docs/plans/2026-07-26-binder-mechanism-design.md`). The integrand's
+      // `docs/SCOPING-MODEL.md`). The integrand's
       // own variable stays owned by its `Function` literal.
       scoped: indexingSetSites(1),
       signature: '(function, limits+) -> number',
@@ -1894,7 +1894,7 @@ volumes
       // indices. Not `drawsRandom` (that would shift every sibling draw), but
       // the pending gate must still keep the frame around an estimate that
       // could not finish — otherwise deferring it converts a seeded estimate
-      // to a live one. See `docs/plans/2026-07-28-derived-substreams.md` §6.
+      // to a live one. See `docs/RANDOMNESS-MODEL.md` §6.
       readsRandomFrame: true,
       lazy: true,
       signature: '(function, limits:(tuple|symbol)?) -> number',

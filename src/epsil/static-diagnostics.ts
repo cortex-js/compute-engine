@@ -155,7 +155,7 @@ function isCanonicalizationError(code: string): boolean {
  * Diagnostics for the problems the engine detects at **canonicalization**
  * time: `"a" + 1` folds into a tree embedding `["Error", …]` nodes, a static
  * type error that would otherwise stay invisible until the program runs
- * (`docs/plans/2026-07-31-error-propagation-design.md` §5).
+ * (`docs/LANGUAGE-MODEL.md`).
  *
  * Nothing is evaluated. Each top-level statement is boxed canonically, in
  * source order: boxing resolves operators, signatures and types but never
@@ -256,7 +256,7 @@ export function staticDiagnostics(
   ce._staticAssignmentEvidence = new Map();
   try {
     // One INFERENCE ROLLBACK FRAME spans the whole pass (phase 2b of
-    // `docs/plans/2026-08-13-inference-tx-design.md`). It journals — and
+    // `docs/TYPE-SYSTEM.md`). It journals — and
     // rolls back on the way out — every inference-driven mutation the
     // checking makes: the FORWARD-REFERENCE registry entries a checked
     // `function` definition registers (that registry is keyed by ENGINE,
@@ -502,7 +502,7 @@ function canonicalizationDiagnostics(
   // static checker also runs with no batch at all (`epsil check` calls
   // `staticDiagnostics` directly, without `executeEpsil`), so a
   // stamp-keyed check could never fire on the tier the diagnostic is promised
-  // for. See `docs/plans/2026-08-14-redefinition-discipline.md`.
+  // for. See `docs/TYPE-SYSTEM.md`.
   const declaredInThisUnit = new Map<string, [number, number]>();
 
   // REDEFINITION DISCIPLINE, static tier — the function CLAUSES this unit
@@ -539,7 +539,7 @@ function canonicalizationDiagnostics(
     // THIS route may carry the batch stamp; a `ce.box(["DeclareType", …])`
     // performed re-entrantly by something the boxing triggers must stay
     // unstamped. Restored (not cleared) so nesting cannot leak.
-    // See `docs/plans/2026-08-14-redefinition-discipline.md`.
+    // See `docs/TYPE-SYSTEM.md`.
     const enclosingRoute = ce._epsilDeclarationRoute;
     ce._epsilDeclarationRoute = isDeclarationStatement(statement);
     try {
@@ -762,7 +762,7 @@ function canonicalizationDiagnostics(
  * A sum statement claims N+1 names — its own and every variant's — under that
  * ONE statement: the sugar is a declaration bundler, and the statement owns
  * everything it declares
- * (`docs/plans/2026-08-14-redefinition-discipline.md`, "the generated-name
+ * (`docs/TYPE-SYSTEM.md`, "the generated-name
  * rule").
  *
  * `kind` separates the two namespaces so that `type X = …` followed by
@@ -877,7 +877,7 @@ const DECLARATION_BLOCKING_CODES = new Set([
  * second sum reusing one variant name while renaming the others) exactly one
  * diagnostic rather than one per colliding name.
  *
- * See `docs/plans/2026-08-14-redefinition-discipline.md`.
+ * See `docs/TYPE-SYSTEM.md`.
  */
 function recordDeclaredNames(
   statement: MathJsonExpression,
@@ -906,7 +906,7 @@ function recordDeclaredNames(
  * diagnostic, so a sum reusing several of an earlier sum's names is still one
  * report anchored on the statement.
  *
- * See `docs/plans/2026-08-14-redefinition-discipline.md`.
+ * See `docs/TYPE-SYSTEM.md`.
  */
 function redefinitionDiagnostic(
   statement: MathJsonExpression,
@@ -1008,7 +1008,7 @@ function forgetReplacedClauses(
  * the recording only, never on the report: a clause the discipline itself
  * refuses is marked skipped too, and that one is exactly what must be reported.
  *
- * See `docs/plans/2026-08-14-redefinition-discipline.md`.
+ * See `docs/TYPE-SYSTEM.md`.
  */
 function clauseRedefinitionDiagnostic(
   ce: ComputeEngine,

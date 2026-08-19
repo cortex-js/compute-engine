@@ -144,7 +144,7 @@ clearest case is `At` with a boolean-mask index, documented in
 indexed_collection<boolean>)` filters `xs`, keeping element `i` where `mask[i]`
 is `True`. Relational operators broadcasting **in index position** is the
 documented Desmos-style idiom (`L[L>0]`,
-`docs/plans/2026-07-07-desmos-list-filtering.md`). Verified on the working tree:
+`docs/COLLECTIONS-MODEL.md`). Verified on the working tree:
 
 ```
 At([10,20,30,40],[True,False,True,False]):  ["List",10,30]        (list<finite_integer>)
@@ -178,8 +178,8 @@ Three broadcast sites already exist and share **one** predicate,
   over non-tensor finite collections, via a `broadcastOverIndexedCollections`
   helper (`collection-utils.ts`) wired into `add`/`addN`/`mul`/`mulN`. This is
   the state the typing rule must agree with — see §1.4b and §2.4.
-- **Type** (`:1706-1725`, the honest-typing wrapper from
-  `2026-07-07-honest-list-broadcast-typing.md`): if the operator *will*
+- **Type** (`:1706-1725`, the honest-typing wrapper described in
+  `docs/COLLECTIONS-MODEL.md`): if the operator *will*
   broadcast (same predicate), lift the handler's scalar element type `R` to
   `broadcastResultType(R)` = `list<R>` (`common/type/utils.ts:100`).
 
@@ -293,7 +293,7 @@ unbounded `list<…>` (it drops fixed length). Do **not** try to preserve
   `list<number>` and evaluates to a `List` — the wrapper and value agree.
 - A fixed `vector<n>` result is reachable only for **tensor** `Add`/`Multiply`,
   which are skip-listed from the wrapper and typed by their own handlers
-  (`2026-07-07-honest-list-broadcast-typing.md` T2). The lift does not touch
+  (`docs/COLLECTIONS-MODEL.md`). The lift does not touch
   them.
 
 `broadcastResultType` and `collectionElementType` (`common/type/utils.ts`)
@@ -580,9 +580,9 @@ L*(2,3):               evaluate list of Tuples [2,3],[4,6],[6,9]
 
 - Tycho `docs/COMPUTE_ENGINE.md`, Open Request 3 (broadcasting) and Open
   Request 4 (collection-valued conditions), the 687-state census table.
-- `docs/plans/2026-07-07-honest-list-broadcast-typing.md` — the typing wrapper
+- `docs/COLLECTIONS-MODEL.md` — the typing wrapper
   and `broadcastResultType`/`collectionElementType` this rule reuses.
-- `docs/plans/2026-07-07-desmos-list-filtering.md` — relational broadcast
+- `docs/COLLECTIONS-MODEL.md` — relational broadcast
   (`list<boolean>`), the `Equal`/`NotEqual` two-collection skip-list.
 - `doc/82-reference-collections.md` (~line 819) — the documented `At(xs, mask:
   indexed_collection<boolean>)` boolean-mask index and integer-list gather: the

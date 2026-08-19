@@ -7,7 +7,7 @@ import { typeToString } from '../../src/common/type/serialize';
 
 //
 // Phase 2 of the nominal-types design
-// (`docs/plans/2026-08-01-nominal-types-design.md` §4.6, D11): COMPILATION IS
+// (`docs/TYPE-SYSTEM.md`, D11): COMPILATION IS
 // TYPE ERASURE.
 //
 // The governing equivalence rule: a constructor application compiles exactly
@@ -375,7 +375,7 @@ describe('ABSENCE AXIS — the reference unfolds BEFORE the missing-strip', () =
 
 describe('PARAMETERIZED NOMINAL — erasure at the INSTANTIATED body', () => {
   //
-  // Phase 4 of `docs/plans/2026-08-06-parameterized-nominal-types-design.md`
+  // Phase 4 of `docs/TYPE-SYSTEM.md`
   // (§7). Nothing new is claimed: `tree<integer>` erases to whatever the
   // equivalent tuple compiles to, and declines identically where that would.
   // What is new is WHICH body answers — an applied reference unfolds to its

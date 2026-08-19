@@ -2,7 +2,7 @@
  * Stage C1 of the checkpoint work — the copy-on-write journal
  * (`src/compute-engine/checkpoint-journal.ts`), its window lifecycle, and the
  * §5.2/§5.3 hook set of
- * `docs/plans/2026-08-18-checkpoint-restore-design.md`.
+ * `docs/CHECKPOINT-MODEL.md`.
  *
  * C1 ships the MECHANISM, not the `checkpoint()`/`restore()`/`discard()` API
  * — that is C2 — so these tests drive the window directly: install one on the

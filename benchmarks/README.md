@@ -396,7 +396,7 @@ signature is an overload set, across arm counts (2/4/8) × operand categories
 (exact, subtype, inferred-narrowing, generic, rejected), plus a
 single-signature control and a plain-boxing canary. Median of `RUNS` runs of
 `ITERS` calls each, µs/call. It is the microbenchmark half of the phase-2c
-perf gate in `docs/plans/2026-08-13-inference-tx-design.md` (trial-based
+perf gate in `docs/TYPE-SYSTEM.md` (trial-based
 overload resolution: per-call ≤ 2× the write-free-filter baseline; the
 canonicalization corpus — `effects-registration.ts` — ≤ 3% median). To
 compare against a committed baseline, run it in a worktree of the baseline

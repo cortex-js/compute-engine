@@ -304,7 +304,7 @@ export type AssignValue<Expr = unknown, SemiExpr = unknown, CE = unknown> =
 
 /** A lexical scope holds VALUE bindings only. Declared types live in the
  * engine-level type registry (`IComputeEngine._typeRegistry`) — one namespace
- * per engine, not scoped (`docs/plans/2026-08-10-global-type-registry.md`).
+ * per engine, not scoped (`docs/TYPE-SYSTEM.md`).
  *
  * @category Definitions */
 export type Scope<Binding = unknown> = {

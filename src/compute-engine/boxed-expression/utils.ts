@@ -942,7 +942,7 @@ function isAssignedVariableName(
  * Run `fn` with a `WithRandomSeed` frame seeded by `seed` installed as the
  * innermost frame: for the duration of the call, every `ce._random()` draw is
  * the counter-based `hash(seed, n)` of that frame (§2 of
- * `docs/plans/2026-07-25-random-signature-redesign.md`).
+ * `docs/RANDOMNESS-MODEL.md`).
  *
  * Scoping is DYNAMIC — the frame is active through user-function calls, not
  * just lexically inside `fn` — and frames NEST with the innermost winning.
@@ -1152,7 +1152,7 @@ export function rebindEscapingCurrentScope(
  *
  * So the lift re-binds, exactly as `lambdaFromLiteral` does for a Jacobian's
  * body — see §Escaping results in
- * `docs/plans/2026-07-24-defining-scope-dereference-design.md`. A body that is
+ * `docs/SCOPING-MODEL.md`. A body that is
  * not a single-statement Block is handed over untouched; the callers unwrap
  * whatever they are given.
  *
@@ -1177,7 +1177,7 @@ export function isOperatorDef(
 
 /**
  * Is this definition callable-shaped for state-event classification
- * (`docs/plans/2026-08-09-state-event-invalidation-axes.md` §4): it has an
+ * (`docs/EFFECTS-MODEL.md` §4): it has an
  * operator half, its value type carries a signature arm anywhere (deep —
  * the R1 list-of-callbacks shape), or its stored value is (or contains one
  * level down) a `Function` literal.
@@ -1254,7 +1254,7 @@ export function updateDef(
   } else return;
 
   // Provenance-history survival + the redefinition (W1) effects entry
-  // (`docs/plans/2026-08-13-effects-axis-provenance.md`). A definition
+  // (`docs/EFFECTS-MODEL.md`). A definition
   // object's `_typeProvenance` would otherwise die with it on every
   // reassignment — this call constructs a FRESH half and discards the old
   // one — so a declaring site could never be named after a later
@@ -1321,7 +1321,7 @@ export function updateDef(
   // half this call itself constructed is disposed (see
   // `constructedValueHalf` above), and in debug builds it is tombstoned so
   // a use after the rollback throws with both stacks (the escape rule of
-  // `docs/plans/2026-08-13-inference-tx-design.md`).
+  // `docs/TYPE-SYSTEM.md`).
   const rollbackFrame = activeRollbackFrame(ce);
   if (rollbackFrame !== undefined) {
     const disposable = constructedValueHalf;

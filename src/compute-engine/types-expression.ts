@@ -2805,7 +2805,7 @@ export type ExpressionInput =
  * operators and the serialization walk reach the slots); user code reads and
  * writes fields through the language's property syntax, not through these.
  *
- * Design: `docs/plans/2026-08-14-object-representation-decision.md`;
+ * Design: `docs/TYPE-SYSTEM.md`;
  * semantics: `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B.
  *
  * @category Boxed Expression

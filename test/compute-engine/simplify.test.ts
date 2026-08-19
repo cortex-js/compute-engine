@@ -1817,7 +1817,7 @@ describe('Simplify with assumptions', () => {
   });
 });
 
-// Ruling 2026-07-24 (docs/plans/2026-07-23-simplify-together-scoping.md, end of
+// Ruling 2026-07-24 (docs/SCOPING-MODEL.md, end of
 // Item 1): the `.simplify()` METHOD is rule-driven and value-blind — it runs no
 // operator `evaluate` handler, so a structural head (`Determinant`, `Trace`,
 // `Transpose`, `Length`) whose result comes from a handler rather than a rule is
@@ -2028,7 +2028,7 @@ describe('simplify() METHOD does not run operator handlers', () => {
 // The `.simplify()` method is value-blind ACROSS A BINDER: a variable bound by
 // a Function/Block/Sum shadows a same-named global assignment, so its body must
 // NOT be folded to the global value. Regression for the §A defect in
-// docs/plans/2026-07-23-simplify-together-scoping.md.
+// docs/SCOPING-MODEL.md.
 describe('simplify() is value-blind across a binder', () => {
   test('a Function literal body is not folded to the global value', () => {
     const ce = new ComputeEngine();

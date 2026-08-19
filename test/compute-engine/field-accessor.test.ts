@@ -277,7 +277,7 @@ function g(s: seg) -> integer {
 
 //
 // Phase 3 of the parameterized-nominal design
-// (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §6): a field
+// (`docs/TYPE-SYSTEM.md`): a field
 // is read off the body INSTANTIATED at the reference's arguments. One
 // substitution against a finite body — the nested `tree<T>` becomes
 // `tree<integer>` and stays an UNEXPANDED reference, which is why recursion

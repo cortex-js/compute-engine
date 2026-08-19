@@ -45,7 +45,7 @@ function definitionIsInferred(def: BoxedDefinition): boolean {
 
 /**
  * A lexical scope the caller owns and can read back — see
- * `docs/plans/2026-08-04-parse-scope-control-design.md` B2/B3.
+ * `docs/SCOPING-MODEL.md` B2/B3.
  *
  * Structurally a `Scope` (`parent`/`bindings`), so it is accepted
  * anywhere a scope is; the read surface (`declarations`, `narrowings`) exists
@@ -195,7 +195,7 @@ class _InspectableScope implements InspectableScope {
  * binding for one of those names is recorded in `declarations()` but does
  * NOT shadow the interned symbol during boxing — same as `ce.declare`.
  *
- * See `docs/plans/2026-08-04-parse-scope-control-design.md` B2.
+ * See `docs/SCOPING-MODEL.md` B2.
  */
 export function createScope(
   ce: IComputeEngine,

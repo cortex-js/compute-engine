@@ -3,7 +3,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 /**
  * # Eager collection producers: delivery and enumerability
  *
- * Implements `docs/plans/2026-08-11-eager-collection-enumerability.md`.
+ * Implements `docs/COLLECTIONS-MODEL.md`.
  *
  * An EAGER collection operator (`Divisors`, `Characters`, … — no `collection`
  * handlers) produces its collection only as its `evaluate()` result. Two

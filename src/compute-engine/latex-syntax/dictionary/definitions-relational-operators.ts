@@ -175,7 +175,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     // `==` (double-equals, a programming-habit spelling of equality) parses as
     // `Equal` so it actually evaluates. It used to parse to an inert
     // `EqualEqual` head that no library handler ever reduced. Parse-only alias;
-    // serialization of `Equal` stays `=`. (See docs/LENIENT_PARSER.md: `== → =`.)
+    // serialization of `Equal` stays `=`; `==` is input-only loose syntax.
     latexTrigger: ['=', '='],
     kind: 'infix',
     associativity: 'right',
@@ -317,7 +317,7 @@ export const DEFINITIONS_INEQUALITIES: LatexDictionaryEntry[] = [
     parse: negatedRelation('GreaterEqual', 242),
   },
   {
-    // `!=` (ASCII not-equal, per docs/LENIENT_PARSER.md `!=` → `\neq`) parses
+    // `!=` is the input-only loose spelling of `\neq` and parses
     // as `NotEqual` so it actually evaluates — the inert `Unequal` head that no
     // handler reduced was the same dead-end as `EqualEqual`. `3!=2` is
     // not-equal; `3! = 2` (with a space) is still `Factorial(3) = 2` — see the

@@ -2166,7 +2166,7 @@ describe('EPSIL PARSING LIST SPREAD', () => {
 describe('EPSIL TYPE TEST `is`', () => {
   test('`x is integer` lowers to the MatchesType test', () => {
     // The single IR of every type test (first-class types phase 2,
-    // `docs/plans/2026-08-18-first-class-types.md` §3.2): the source text
+    // `docs/TYPE-SYSTEM.md`): the source text
     // rides a `TypeFrom` that settles engine-side.
     expect(validEpsil('x is integer')).toStrictEqual([
       'MatchesType',

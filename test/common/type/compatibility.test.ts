@@ -7,7 +7,7 @@ import type { FunctionSignature, Type } from '../../../src/common/type/types';
 
 /**
  * Phase E0 of Design E
- * (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §12):
+ * (`docs/TYPE-SYSTEM.md`):
  * direct unit tests for the disjointness half of the compatibility relation
  * (§3 rules 1, 3, 4), as a pure type-algebra function. Rule 2 (arity) and
  * rule 5 (effects) are exercised at the engine layer, not here.

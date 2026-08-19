@@ -9,9 +9,8 @@ import {
 } from '../../src/compute-engine/library/map-auto-compile';
 
 /**
- * Interpreted/compiled parity for the random family (Phase 3 of the
- * 2026-07-25 Random family redesign, `docs/plans/…-random-signature-redesign.md`
- * §7 and the compile half of §8).
+ * Interpreted/compiled parity for the random family
+ * (`docs/RANDOMNESS-MODEL.md`).
  *
  * These tests do the job the DELETED auto-compile eligibility gate used to do
  * (§6). With no purity backstop, a compile handler whose semantics diverge

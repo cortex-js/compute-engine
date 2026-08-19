@@ -128,7 +128,7 @@ export function isEnumerableSource(xs: Expression): boolean {
 /**
  * Resolve an eager producer's operand for a `canEnumerate` handler, WITHOUT
  * evaluating — the tri-state at the heart of the adoption recipe
- * (`docs/plans/2026-08-11-eager-collection-enumerability.md`):
+ * (`docs/COLLECTIONS-MODEL.md`):
  *
  * - an `Expression`: the operand's cheaply-readable ground form — a literal,
  *   or a symbol's assigned value (a symbol dereference is a scope lookup,
@@ -996,7 +996,7 @@ export function broadcastableResultTypeOf(
  * The `isSubtype(…, 'number')` gate already excludes list-broadcast results:
  * a broadcastable operator over a finite indexed collection (e.g.
  * `Multiply([0,0,1], x)`) is now honestly typed `list<…>` / `vector<n>` (see
- * `docs/plans/2026-07-07-honest-list-broadcast-typing.md`), so it is not a
+ * `docs/COLLECTIONS-MODEL.md`), so it is not a
  * subtype of `number` and never reaches the function-call clause.
  *
  * Everything else stays symbolic (the guards defer to evaluation). Inferred

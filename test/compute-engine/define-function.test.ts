@@ -2,11 +2,9 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
- * Phase 1 of the function-polymorphism design
- * (docs/plans/2026-08-01-function-polymorphism-design.md §4.2–§4.4, D5–D8;
- * implementation plan …-phase1-plan.md): multi-clause function definitions
- * via the `DefineFunction` head — clause accumulation, tri-state dispatch,
- * inert-on-undecidable, `no-matching-clause`, symbol-level effect row.
+ * Multi-clause function definitions (`docs/TYPE-SYSTEM.md`) via the
+ * `DefineFunction` head — clause accumulation, tri-state dispatch,
+ * inert-on-undecidable, `no-matching-clause`, and symbol-level effect row.
  *
  * Box/programmatic routes only (the Epsil surface is Phase 2).
  */

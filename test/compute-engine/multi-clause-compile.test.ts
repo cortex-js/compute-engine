@@ -5,7 +5,7 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 //
 // Phase 3 of the function-polymorphism design
-// (docs/plans/2026-08-01-function-polymorphism-design.md §8): a multi-clause
+// (docs/TYPE-SYSTEM.md §8): a multi-clause
 // function compiles (JavaScript target) to a guard chain — one helper per
 // clause plus a dispatcher testing the clauses most-specific-first
 // (declaration order breaking ties, the same total order as the runtime
@@ -192,7 +192,7 @@ describe('MULTI-CLAUSE COMPILE — complex-valued dispatch', () => {
     // The lambda's `w` is annotated complex: it is handed a `{re, im}` at
     // run time, and an UNANNOTATED lambda parameter is wide — shaped real by
     // the strict discipline — so the runner's D3 entry check would refuse
-    // the object (`docs/plans/2026-08-16-compile-complex-mode.md` §8 D3).
+    // the object (`docs/COMPILATION-MODEL.md` D3).
     const r = compile(
       ce.box(['Function', ['J', 'n', 'w'], 'n', p('w', 'complex')])
     );

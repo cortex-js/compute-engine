@@ -805,7 +805,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // The definition's own type, faithfully — Design E retired the R-D5
     // display projection with the `callback<S>` constructor: an honest arrow
     // slot displays as itself
-    // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §8).
+    // (`docs/TYPE-SYSTEM.md`).
     if (isValueDef(def)) return def.value.type;
     if (isOperatorDef(def)) return def.operator.signature;
     return BoxedType.unknown;

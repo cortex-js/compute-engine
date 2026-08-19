@@ -1,6 +1,6 @@
 /**
  * Migration step 2b of the state-event invalidation design
- * (`docs/plans/2026-08-09-state-event-invalidation-axes.md` §8): per-row
+ * (`docs/EFFECTS-MODEL.md` §8): per-row
  * unit tests pinning the parity dispatch table — every (kind, payload)
  * combination maps to EXACTLY the legacy counter mask transcribed from the
  * design's §2/§2b/§2c tables — plus end-to-end advancement probes through

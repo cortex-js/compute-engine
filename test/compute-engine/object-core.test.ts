@@ -4,7 +4,7 @@
  * An object is a reference to a record whose stored fields can change in
  * place: the class instance IS the heap record, so host reference identity of
  * the instance is object identity. These tests pin the representation's
- * contract (`docs/plans/2026-08-14-object-representation-decision.md`,
+ * contract (`docs/TYPE-SYSTEM.md`,
  * "Invariants") and the semantics of `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B
  * ("Equality", "Cycles", "Lifetime", "Serialization").
  *

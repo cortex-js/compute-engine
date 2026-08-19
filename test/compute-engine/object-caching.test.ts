@@ -3,7 +3,7 @@
  * inventory — `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B ("A store writes the
  * evaluated value", "Every construction makes a new object" (ruling B3),
  * "Changing a field is an effect", "Lifetime" (ruling B12)) and
- * `docs/plans/2026-08-14-object-representation-decision.md`
+ * `docs/TYPE-SYSTEM.md`
  * ("Per-entry object-version dependencies", "Exclusion list").
  *
  * This file is B3's acceptance matrix in miniature. Its shape, per cache

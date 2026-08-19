@@ -1,7 +1,7 @@
 /**
  * `At` on the shader targets (GLSL / WGSL).
  *
- * `docs/plans/2026-08-01-at-gpu-compile-design.md`. The witness shape is
+ * `docs/COMPILATION-MODEL.md`. The witness shape is
  * `p_0[i]` — a list with a STATICALLY DECLARED length, indexed by a loop or
  * instance variable inside a shader body. A runtime-length list has no shader
  * value at all, so the lowering is admissible only against a base whose

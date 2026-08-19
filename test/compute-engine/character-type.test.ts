@@ -194,9 +194,9 @@ describe('ordering bridges only a ONE-cluster string', () => {
   });
 
   test('a character vs a LONGER string stays inert', () => {
-    // A multi-cluster string is not a character, and the design leaves that
-    // mixed pair unordered (`docs/plans/2026-08-16-string-phase1-character-
-    // type.md`, decision D8) — so the comparison must not answer `True` by
+    // A multi-cluster string is not a character, and the string model leaves
+    // that mixed pair unordered (`docs/STRING_ROADMAP.md`) — so the comparison
+    // must not answer `True` by
     // falling through to a prefix comparison.
     const expr = ce
       .function('Less', [ce.character('a'), ce.string('ab')])

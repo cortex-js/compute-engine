@@ -6,7 +6,7 @@ import {
 
 //
 // Phase 2c acceptance — TRIAL-BASED overload resolution
-// (`docs/plans/2026-08-13-inference-tx-design.md`, "No new import cycle" /
+// (`docs/TYPE-SYSTEM.md`, "No new import cycle" /
 // "Repairs are not trialed" / phasing §2c).
 //
 // An overload arm is admitted by running full validation on it in TRIAL mode

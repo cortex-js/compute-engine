@@ -8,7 +8,7 @@ import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/i
 
 /**
  * `PointList` as a COMPILED VALUE
- * (`docs/plans/2026-07-31-pointlist-compile-design.md`).
+ * (`docs/COLLECTIONS-MODEL.md`).
  *
  * A `PointList` with one or more list SOURCES is a list of points — and on the
  * JavaScript target a list of points is an ordinary expression-level value

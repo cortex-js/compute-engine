@@ -14,7 +14,7 @@ import {
 
 //
 // Per-application element-type inference for callback lambda parameters
-// (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ratified
+// (`docs/TYPE-SYSTEM.md`, ratified
 // 2026-08-08 as option C).
 //
 // At canonicalization of a CALL, an INLINE `Function` literal argument whose
@@ -1092,7 +1092,7 @@ describe('signature-driven trigger: a user-defined callee', () => {
     // arrow a contextual slot, so the contextual solve now runs for USER
     // polytypes too: `T` is solved from the data operand (`3`) and the
     // literal's parameter is stamped with the instantiated type — never the
-    // bare variable (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
+    // bare variable (`docs/TYPE-SYSTEM.md`).
     const ce = new ComputeEngine();
     ce.declare('gen', '((T) -> boolean, T) -> T where T: number');
     const expr = ce.box(['gen', ['Function', ['Greater', 'n', 1], 'n'], 3]);

@@ -6,7 +6,7 @@ import { asSmallInteger } from '../boxed-expression/numerics.js';
 /**
  * Regular expressions (Strings Phase 3).
  *
- * Plan: `docs/plans/2026-08-17-string-phase3-regular-expressions.md`.
+ * Plan: `docs/STRING_ROADMAP.md`.
  * Spec: `docs/STRING_ROADMAP.md`, "Regular Expressions".
  *
  * THE DIALECT IS THE HOST'S (user ruling, 2026-08-17): patterns are compiled

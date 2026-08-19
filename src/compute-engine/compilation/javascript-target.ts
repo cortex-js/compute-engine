@@ -724,7 +724,7 @@ function compileJSCollectionBoolean(
     // answers a plausible-looking boolean. A character/one-cluster-string pair
     // does compare in the interpreter, but it lands on the mixed-string gate
     // below, which keeps it closed until that widening is decided.
-    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    // (`docs/STRING_ROADMAP.md`, decision D13.)
     if (args.some(isProvablyCharacterOperand)) {
       if (args.length === 2 && args.every(isProvablyCharacterOperand)) {
         const op =
@@ -1336,7 +1336,7 @@ function isProvablyNonScalarType(t: Type): boolean {
  * points — an array of arrays, exactly the value an evaluated `PointList`
  * compiles to when it is reached the other way round. Reached only when the
  * definition handler declined (it keeps the all-scalar, `Tuple`-identical
- * path); see `docs/plans/2026-07-31-pointlist-compile-design.md` § D1.
+ * path); see `docs/COLLECTIONS-MODEL.md`
  *
  * ```js
  * (() => { const _tv2 = <source>; const _tv3 = <slot>;
@@ -1684,7 +1684,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // A STRING source is SEGMENTED first: `"s"[0]` selects a UTF-16 code unit,
   // which for an astral character is half a surrogate pair and for a decomposed
   // sequence only the base letter, where the interpreter yields the whole
-  // grapheme cluster (`docs/plans/2026-08-16-string-phase1-character-type.md`,
+  // grapheme cluster (`docs/STRING_ROADMAP.md`,
   // decision D13).
   First: (args, compile) =>
     isProvablyStringOperand(args[0])
@@ -1752,7 +1752,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // interpreter's `BoxedString.count` reports. Never `.length` on the JS
     // string: that counts UTF-16 code units, so a ZWJ family emoji would
     // measure 8 and a decomposed `"é"` 2, where the interpreter answers 1.
-    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    // (`docs/STRING_ROADMAP.md`, decision D13.)
     if (isProvablyStringOperand(arg))
       return `_SYS.chars(${compile(arg)}).length`;
     if (!isIndexedCollectionOperand(arg))
@@ -1805,7 +1805,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `count + index + 1`, and anything out of range yields no value). Indexing
     // the JS string directly would select UTF-16 code units and hand back half
     // a surrogate pair.
-    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    // (`docs/STRING_ROADMAP.md`, decision D13.)
     const stringBase = isProvablyStringOperand(coll);
     const provablyIndexed = stringBase || isIndexedCollectionOperand(coll);
     if (!provablyIndexed && !couldBeIndexedCollectionOperand(coll))
@@ -1895,7 +1895,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `(_a, _b) => _a + _b` over one-cluster strings CONCATENATES and would
     // answer `"abc"` behind `success: true`. A CUSTOM combiner is unaffected —
     // whatever it does to a character, it does the same thing compiled.
-    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    // (`docs/STRING_ROADMAP.md`, decision D13.)
     if (combiner !== undefined && isProvablyStringOperand(coll))
       throw new Error(
         `Reduce: cannot compile — an ${(op as Expression & { symbol?: string }).symbol ?? 'arithmetic'} ` +
@@ -2160,7 +2160,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // (`String(Characters(s))` evaluates to `s`), whose declared result type is
   // still `list<character>` rather than `string`, so compiling it would pin a
   // shape whose static contract is unsettled.
-  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+  // (`docs/STRING_ROADMAP.md`, decision D13.)
   String: (args, compile) => {
     if (args.length === 0) return '""';
     if (
@@ -2201,7 +2201,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // go through `requirePrimitiveElements`, which admits only real/boolean/
   // string/character elements (and rejects complex CONTENT in a collection that
   // merely reports the generic `number` element type).
-  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.)
+  // (`docs/STRING_ROADMAP.md`, decision D8.)
 
   // The 1-based inclusive index SPAN of the first occurrence, or the
   // interpreter's `Nothing`. `Range(a, b)` lowers to the JS array
@@ -2348,7 +2348,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // time when it is not an ascending index range. See `guardedIntegerArg` and
   // `guardedNonEmptyStringArg`.
   // (User ruling 2026-08-16;
-  // `docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.)
+  // `docs/STRING_ROADMAP.md`, decision D8.)
 
   // --- Regular expressions ------------------------------------------------
   // A `regexp` VALUE is the `RegExp(pattern, flags)` expression itself, so a
@@ -2762,7 +2762,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `((_v, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; return Array.from({ length: _n }, () => _v); })(${compile(args[0])}, ${compile(args[1]!)})`;
   },
   // Add one or more elements at the end. `Append` is variadic
-  // (`docs/plans/2026-08-09-lazy-collection-evaluate-design.md`, Change 2):
+  // (`docs/COLLECTIONS-MODEL.md`, Change 2):
   // every trailing operand becomes one element, in order.
   Append: (args, compile) => {
     const coll = collArg('Append', args[0], compile);
@@ -3664,7 +3664,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // invoked from inside an interpreted frame), and the helper is what
   // branches. Emitting a bare `Math.random()` because no frame existed at
   // compile time would turn dynamic scope into lexical scope silently — see
-  // `docs/plans/2026-07-25-random-signature-redesign.md` §4/§7.
+  // `docs/RANDOMNESS-MODEL.md` §4/§7.
   //
   // Domains lower to DESCRIPTORS, never to compiled collections: a literal
   // `Interval`/`Range` folds to inline closed-form arithmetic, and a symbolic
@@ -3719,7 +3719,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // A STRING domain is segmented into its characters, sampled and re-joined: a
   // sample drawn from a string's own characters is a string (the
   // string-preservation rule, promoted in Phase 2 alongside `RandomShuffle` —
-  // `docs/plans/2026-08-16-string-phase2-join-search-ops.md` item 8). The
+  // `docs/STRING_ROADMAP.md` item 8). The
   // domain descriptor is built here rather than by `randomDomain`, whose
   // `collArg` funnel is shared with `Random`/`RandomChoice` and refuses a
   // string on purpose.
@@ -5026,7 +5026,7 @@ function bcastWith(
  * Element-wise conditional selection — the runtime side of a compiled
  * `Which`/`If` whose condition may be an indexed collection (`np.select`
  * semantics, R1–R4 of
- * `docs/plans/2026-07-27-elementwise-which-design.md`; the interpreter side is
+ * `docs/BROADCAST-MODEL.md`; the interpreter side is
  * `evaluateElementwiseSelection` in `library/control-structures.ts`).
  *
  * The clauses arrive as THUNKS, in `Which` order (condition, arm, …), so this
@@ -5556,7 +5556,7 @@ function matchesSequenceAtJS(
  *
  * The naive O(n·m) scan is the interpreter's own (`RangeOf` /
  * `ContainsSequence` in `library/collections.ts`; accepted for v1 by decision
- * D3 of `docs/plans/2026-08-16-string-phase2-join-search-ops.md`). An empty `p`
+ * D3 of `docs/STRING_ROADMAP.md`). An empty `p`
  * is found at `from`, which is `ContainsSequence`'s empty-needle `True`.
  * `RangeOf` — whose empty needle is an ERROR value, not a span — never reaches
  * here with one: its lowering admits only a provably non-empty needle.
@@ -5931,7 +5931,7 @@ const SYS_HELPERS = {
   // clusters by `chars`, so no comparison can straddle a cluster boundary.
   // See `matchesSequenceAtJS`, `findSequenceJS`, `replaceText`, `trimText`,
   // `padText` and `caseFoldText`.
-  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.)
+  // (`docs/STRING_ROADMAP.md`, decision D8.)
   // --- Regular expressions (Strings Phase 3) ----------------------------
   // The dialect is the HOST's, by user ruling 2026-08-17 — no feature subset
   // and no caps — which is exactly what makes compiled code and the
@@ -6806,7 +6806,7 @@ function makeSysHelpers(ce: ComputeEngine): SysHelpers {
  */
 /**
  * The D3 ENTRY CHECK of a compiled JavaScript runner (design §8 D3,
- * `docs/plans/2026-08-16-compile-complex-mode.md`): the one runtime input the
+ * `docs/COMPILATION-MODEL.md`): the one runtime input the
  * static analysis cannot see is the value a caller binds at `run()` time, so
  * each free symbol (expression route) or positional parameter (lambda route)
  * is checked against the SHAPE the compilation analyzed it as:
@@ -6872,7 +6872,7 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
 
 /**
  * The compiled JavaScript runner's RESULT CONVENTION (design §5,
- * `docs/plans/2026-08-16-compile-complex-mode.md`), applied at the boundary
+ * `docs/COMPILATION-MODEL.md`), applied at the boundary
  * of every `run()` call: a value whose imaginary part is EXACTLY zero comes
  * back as a plain `number`; otherwise as `{re, im}`. Both directions are
  * guaranteed — a returned `ComplexResult` always has `im !== 0`, and a real
@@ -7894,7 +7894,7 @@ function collArg(
  * is the element walk this reproduces. Anything else keeps calling `collArg`
  * and keeps failing closed on a string — notably the linear-algebra operators,
  * where the interpreter treats a string as a rank-0 leaf.
- * (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+ * (`docs/STRING_ROADMAP.md`, decision D13.)
  */
 function elementsArg(
   kind: string,
@@ -8070,7 +8070,7 @@ function literalStringContent(x: Expression | undefined): string | undefined {
  * is the precedent the `Slice` lowering in this file already sets, where a
  * non-literal span compiles and the emitted code throws a `RangeError` on a
  * span that is not an ascending index range.
- * (User ruling 2026-08-16; `docs/plans/2026-08-16-string-phase2-join-search-ops.md`,
+ * (User ruling 2026-08-16; `docs/STRING_ROADMAP.md`,
  * decision D8.)
  */
 function guardedIntegerArg(
@@ -8277,7 +8277,7 @@ function fnArg(
 // `_SYS.domain*` object otherwise — and NEVER to a compiled collection. The
 // JS `Range` collection handler materializes via `Array.from`, so compiling
 // the domain would allocate a million elements to draw three
-// (`docs/plans/2026-07-25-random-signature-redesign.md` §7).
+// (`docs/RANDOMNESS-MODEL.md` §7).
 //
 
 /** Reject a domain the interpreter would refuse (an unbounded or empty

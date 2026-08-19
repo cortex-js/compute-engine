@@ -54,7 +54,7 @@ import {
  * created and stayed EMPTY forever, so the quantified variable was bound
  * wherever the caller had it: `∀x. x > 4` with `x := 5` assigned evaluated to
  * `True`, the bound occurrence having resolved the global's value
- * (`docs/plans/2026-07-26-binder-mechanism-design.md` §2 stage 8).
+ * (`docs/SCOPING-MODEL.md` stage 8).
  */
 const QUANTIFIER_SITES = limitsIndexSites(0);
 

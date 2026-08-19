@@ -11,7 +11,7 @@ import { functionLiteralParameterName } from './function-literal.js';
 /**
  * The prebuilt binding-site selectors — the vocabulary an operator definition
  * uses to say **"this operand is my bound variable, bind it in my scope"**
- * (`docs/plans/2026-07-26-binder-mechanism-design.md` §1.2).
+ * (`docs/SCOPING-MODEL.md`).
  *
  * Before this existed, every binder answered that question its own way — by
  * name (`rubi`), by string (`RubiDriver.int`), by position inside a `Limits`
@@ -19,7 +19,7 @@ import { functionLiteralParameterName } from './function-literal.js';
  * relying on canonicalization order (pipe desugaring) — and each improvisation
  * bound the variable in a slightly different scope. Five wrong-scope defects
  * came out of that (see §The recurring defect in
- * `docs/plans/2026-07-24-defining-scope-dereference-design.md`).
+ * `docs/SCOPING-MODEL.md`).
  *
  * This module is a LEAF, in the same tier as `binders.ts`: it may import
  * `type-guards.js`, `function-literal.js` and `binders.js`, and nothing from

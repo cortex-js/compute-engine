@@ -1,6 +1,6 @@
 /**
  * The `popScope` debug invariant, Tier 1
- * (`docs/plans/2026-07-26-binder-mechanism-design.md` §3).
+ * (`docs/SCOPING-MODEL.md`).
  *
  * The operational half of "the binder constructor is the single authority for
  * its variable" is *no live result references a binding of the dying scope*.

@@ -1,6 +1,6 @@
 /**
  * The compile-target matrix for strings-as-collections and the `character`
- * type — `docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.
+ * type — `docs/STRING_ROADMAP.md`, decision D13.
  *
  * A string is an indexed collection of its GRAPHEME CLUSTERS (UAX #29). On the
  * JavaScript target it still lowers to a JS string, which is not array-shaped:
@@ -600,7 +600,7 @@ describe('D13: the `character` scalar row', () => {
   test('`StringJoin` refuses a SCALAR character subject, and joins a character COLLECTION', () => {
     // Phase 2 narrowed `StringJoin` to `(collection<string | character>,
     // separator: string?)` and removed the variadic concatenation form
-    // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D2).
+    // (`docs/STRING_ROADMAP.md`, decision D2).
     // A scalar `character` is ONE element, not a collection of them, so it is
     // now an `incompatible-type` error against the first parameter — and the
     // compiler refuses the resulting `Error` node.

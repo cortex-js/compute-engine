@@ -90,7 +90,7 @@ function isNumberCanonicalized(canonical?: CanonicalOptions): boolean {
  * scope. This is the symbol contract of the structural route, and the one a
  * partial canonical form (`canonical: ['Number']`) uses: such output is not
  * fully canonical, so it must not write to the caller's scope.
- * See `docs/plans/2026-08-04-parse-scope-control-design.md` A1.
+ * See `docs/SCOPING-MODEL.md` A1.
  *
  * (Not honored by the shadowed-parameter branch below: a `Function` literal's
  * parameter is a binder-local declaration, not a free symbol, and that branch
@@ -266,7 +266,7 @@ export function createSymbolExpression(
   // shape binds the two occurrences differently and compares `isSame` false
   // against every later one.
   // (First-boxing binding divergence, Tycho item 178(a)+(c) —
-  // `docs/plans/2026-08-13-first-boxing-binding-divergence.md`.)
+  // `docs/SCOPING-MODEL.md`.)
   if (engine._boxingState.isPersistentScope(autoScope) === false)
     engine._boxingState.noteTransientAutoDeclare(name);
   const freeSym = new BoxedSymbol(engine, name, { metadata, def });

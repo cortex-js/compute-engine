@@ -7,7 +7,7 @@ import type { CanonicalOptions } from '../../src/compute-engine/global-types';
  * must not write to the caller's scope: its output is not fully canonical, so
  * it follows the structural symbol contract — free symbols resolve against the
  * scope chain but are never auto-declared.
- * See `docs/plans/2026-08-04-parse-scope-control-design.md` A1.
+ * See `docs/SCOPING-MODEL.md` A1.
  */
 
 const PARTIAL_FORMS: CanonicalOptions[] = [
@@ -112,7 +112,7 @@ describe('PARTIAL FORMS: unchanged routes (pins)', () => {
  * Stage 1 (B1/B2/B3): a per-call `scope` that RECEIVES the parse's writes,
  * `ce.createScope()` as a declarations-as-data initializer, and the harvest
  * read surface.
- * See `docs/plans/2026-08-04-parse-scope-control-design.md` B1–B3.
+ * See `docs/SCOPING-MODEL.md` B1–B3.
  */
 
 describe('SCOPE OPTION contains the writes', () => {

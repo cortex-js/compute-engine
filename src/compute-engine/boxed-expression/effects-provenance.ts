@@ -1,6 +1,6 @@
 /**
  * Effects-axis PROVENANCE recording —
- * `docs/plans/2026-08-13-effects-axis-provenance.md`.
+ * `docs/EFFECTS-MODEL.md`.
  *
  * A separate module from `effects-inference.ts` deliberately: that module is
  * the `Function`-literal construction SEAM, guarded by an importer allowlist

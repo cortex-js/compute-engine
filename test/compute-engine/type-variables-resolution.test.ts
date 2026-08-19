@@ -11,7 +11,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
 // result).
 //
 // Regression pins for the review round on
-// `docs/plans/2026-08-01-type-variables-design.md`'s phase-3 implementation.
+// `docs/TYPE-SYSTEM.md`'s phase-3 implementation.
 // Each `describe` names the defect it locks out.
 //
 
@@ -183,7 +183,7 @@ describe('the value-arm JOIN runs on INSTANTIATED arms (§4.2)', () => {
 
 // SUPERSEDED by the generic-function-literals milestone (M1, phase 2): a
 // function-literal body under a generic declaration now INSTALLS on every
-// route (`docs/plans/2026-08-04-generic-function-literals-design.md` §2.4);
+// route (`docs/TYPE-SYSTEM.md`);
 // see `test/compute-engine/generic-function-literals.test.ts`. What survives
 // here is the discrimination the D7 gate introduced: a value with NO body — a
 // function-typed SYMBOL — is still an honest `Ground <: Poly` rejection.

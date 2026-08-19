@@ -18,7 +18,7 @@ import type { LoweredLevel, Slot } from './map-broadcast-shape.js';
 /**
  * The static proof behind the **exact-mode** auto-compilation tier for lazy
  * `Map` `evaluate()` drains (design:
- * `docs/plans/2026-07-31-exact-map-drain-compile-design.md`, ratified
+ * `docs/COMPILATION-MODEL.md`, ratified
  * 2026-07-31).
  *
  * §2 of that design: float64 arithmetic on integers is EXACT while every

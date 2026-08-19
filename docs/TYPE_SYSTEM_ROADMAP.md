@@ -15,30 +15,12 @@ prose rewritten as the spec (decisions folded in where they apply,
 with a compact decision record at the end) and the diagnostics table
 brought in line with the implementation; behaviors re-probed that day.
 
-Design docs for the shipped and in-flight tiers (each §1 item points to
-its own):
-
-- `docs/plans/2026-08-01-nominal-types-design.md` — nominal types,
-  constructors, D1–D11 (D11 = compile erasure, amended by §3 below)
-- `docs/plans/2026-08-06-parameterized-nominal-types-design.md` —
-  parameterized nominals, variance, N1–N12 ruling record (N11 = Rule U,
-  variables under a union arm)
-- `docs/plans/2026-08-04-generic-type-aliases-design.md` — A1–A8
-- `docs/plans/2026-08-01-type-variables-design.md` — type variables /
-  generics v1 (surface syntax superseded by the `where`-clause design below)
-- `docs/plans/2026-08-11-where-clause-type-constraints.md` — the trailing
-  `where` clause that replaced the prefix `forall` quantifier
-- `docs/plans/2026-08-04-generic-function-literals-design.md` — G1–G11,
-  `function f<T>()` and generic literals
-- `docs/plans/2026-08-01-function-polymorphism-design.md` and
-  `docs/plans/2026-07-25-overload-resolution-design.md` — multi-clause
-  functions, intersection arms, per-position join
-- `docs/EFFECTS-MODEL.md` — effect labels on function types
-- `docs/plans/2026-08-03-cortex-language-extensions-review.md` —
-  language-level backlog (sum sugar would slot there)
-- `src/epsil/docs/types.md` — Epsil-surface reference for the `type` /
-  `type alias` statements, plus user-facing background on how the type
-  system works (lattice, local generics, evidence-based inference)
+Implemented invariants are consolidated in `docs/TYPE-SYSTEM.md`. Effect rows
+are normative in `docs/EFFECTS-MODEL.md`, language lowering in
+`docs/LANGUAGE-MODEL.md`, and compilation representation in
+`docs/COMPILATION-MODEL.md`. This roadmap now contains only genuinely open
+direction, residuals, and the still-active mutable-object and sum initiatives.
+Public Epsil syntax remains in `src/epsil/docs/types.md`.
 
 ### Known residuals — parameterized nominal types
 
@@ -378,7 +360,7 @@ discharges it and erases.
 conformance, implementations, dispatch, `is`-slot constraints, properties,
 conditional conformance). Surface spec = Appendix A below; implementation
 architecture and ruling record (P1–P46) =
-`docs/plans/2026-08-12-protocols-design.md`. The `Iterable`/`Indexable`
+`docs/TYPE-SYSTEM.md`. The `Iterable`/`Indexable`
 bridge below is the remaining unshipped piece of this section (needs its
 own requirement-table design doc, §7 item 6(h)).
 
@@ -581,7 +563,7 @@ with three rulings needed in order (see §7).
    operators are user-visible type syntax or declarations-only at first.
 6. Protocol rulings introduced by the 2026-08-12 revision of Appendix A —
    **ratified 2026-08-12 and shipped the same day** (record: P1–P46 in
-   `docs/plans/2026-08-12-protocols-design.md`); only (h) remains open:
+   `docs/TYPE-SYSTEM.md`); only (h) remains open:
    (a) dispatch on the first `Self` argument, with `Self` bound
    statically from that argument (the join-across-arguments rule is
    withdrawn); (b) property assignment as rebinding sugar, non-variable
@@ -772,7 +754,7 @@ implementation of it; implementations left incomplete emit
 `protocol-implementation-missing`. On the host API, re-declaration throws
 — the same host/Epsil asymmetry already recorded for types under "Known
 residuals". **Replacement is the ACROSS-unit flow only** (amended by
-`docs/plans/2026-08-14-redefinition-discipline.md`): a second `protocol`
+`docs/TYPE-SYSTEM.md`): a second `protocol`
 or `type` declaration of the same name WITHIN one Epsil program is a
 diagnostic error (`protocol-redefinition` / `type-redefinition`, on both
 the static and evaluation tiers) — the batch boundary selects the
@@ -1110,7 +1092,7 @@ Rules (rulings):
 
 A function signature may declare that some of its arguments must conform to
 protocols, using the `is` slot of the `where` clause
-(`docs/plans/2026-08-11-where-clause-type-constraints.md` reserves the slot
+(`docs/TYPE-SYSTEM.md` reserves the slot
 and pins its parse):
 
 ```epsil
@@ -1302,7 +1284,7 @@ conformance could apply. Two consequences (rulings):
 
   *Implemented 2026-08-12* (JS target; function dispatch, bare and
   qualified, plus property GET/SET) —
-  `docs/plans/2026-08-12-protocol-compilation.md` records the two-tier
+  `docs/COMPILATION-MODEL.md` records the two-tier
   decision procedure, the guard model, and the deliberate divergences (a
   compiled miss throws where the interpreter yields the error value).
 
@@ -2746,7 +2728,7 @@ To `docs/EFFECTS-MODEL.md`:
 > are collected with their dates in the decision record at the end of
 > this appendix; the implementation design — seam placement, per-arm
 > permutations, the branch-elimination enforcement guard — is
-> `docs/plans/2026-08-12-named-arguments-design.md` (the "design
+> `docs/LANGUAGE-MODEL.md` (the "design
 > record"), and the deliberate v1 limits are tracked in `ROADMAP.md`
 > ("Named-argument calls — v1 residuals"). This appendix stands on its
 > own and landed **before** Appendix B, which needs it: object
@@ -2965,8 +2947,8 @@ the prose where it applies; this list only anchors their identifiers —
 which tests, `ROADMAP.md`, and the design record cite — to their dates.
 C1–C6 were this appendix's open questions when it was a proposal,
 ratified 2026-08-12; R1–R5 surfaced during implementation and were
-ratified 2026-08-13. Full statements with rationale:
-`docs/plans/2026-08-12-named-arguments-design.md` (§9 for R1–R5).
+ratified 2026-08-13. The implemented language contract is consolidated in
+`docs/LANGUAGE-MODEL.md`; detailed ruling chronology remains in Git history.
 
 - **C1** — grammar: `name: value` in call-argument position ("Rules").
 - **C2** — mixing: positional first, then named ("Rules").
@@ -3007,7 +2989,7 @@ proposed by Appendix B and are not implemented.
 | `protocol-implementation-pending` | (warning) conformance still unimplemented at end of a `ce.parse()` batch |
 | `protocol-implementation-missing` | requirement unimplemented; or dispatch through a pending conformance (runtime) |
 | `protocol-implementation-duplicate` | second implementation block for the same (type, protocol) pair |
-| `protocol-redefinition` | second `protocol` declaration of one name within one Epsil program (across programs, replacement — `docs/plans/2026-08-14-redefinition-discipline.md`) |
+| `protocol-redefinition` | second `protocol` declaration of one name within one Epsil program (across programs, replacement — `docs/TYPE-SYSTEM.md`) |
 | `type-redefinition` | second `type` declaration of one name within one Epsil program, including a sum statement's variant names (across programs, replacement — same ruling) |
 | `protocol-member-unknown` | implementation defines a member not in the protocol |
 | `protocol-signature-mismatch` | implementation signature not a subtype of the requirement |

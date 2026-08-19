@@ -1,6 +1,6 @@
 /**
  * Migration step 3 of the state-event invalidation design
- * (`docs/plans/2026-08-09-state-event-invalidation-axes.md` §6): the
+ * (`docs/EFFECTS-MODEL.md` §6): the
  * deterministic classifier matrix for the `_effects` re-key onto the
  * `callable` axis + ambient-scope identity stamp.
  *

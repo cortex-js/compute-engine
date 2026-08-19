@@ -3,7 +3,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 /**
  * Phase A of the tensor-unification design: honest, shape-derived typing of
  * literal `List` nodes (§D3 of
- * docs/plans/2026-07-20-tensor-unification-design.md).
+ * docs/COLLECTIONS-MODEL.md).
  *
  * A shape claim (`vector<n>`/`matrix<…>`/`list<C^dims>`) is emitted only for a
  * shape-regular list over atomic cells with a union-free global cell type; the

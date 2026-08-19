@@ -7,7 +7,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 //
 // COMPILING SUM TYPES — `docs/plans/2026-08-12-sum-type-sugar-and-
 // compilation.md` Part B, amending D11 of
-// `docs/plans/2026-08-01-nominal-types-design.md` §4.6.
+// `docs/TYPE-SYSTEM.md`
 //
 // **The tag is erased iff it is statically discharged.** A product discharges
 // its tag at type-check time and erases (D11, unchanged — pinned by

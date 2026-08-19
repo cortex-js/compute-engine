@@ -2,7 +2,7 @@
  * The SEQUENCE-SEARCH family — `RangeOf`, `ContainsSequence`, `StartsWith`,
  * `EndsWith` (Strings Phase 2, `docs/STRING_ROADMAP.md` — "Missing operations
  * (proposed)" → "Sequence-search operations";
- * `docs/plans/2026-08-16-string-phase2-join-search-ops.md` item 3).
+ * `docs/STRING_ROADMAP.md` item 3).
  *
  * Substring search generalized to CONTIGUOUS-SUBSEQUENCE search over any
  * indexed collection. Two properties are what the whole design rests on:

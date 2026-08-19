@@ -1,7 +1,6 @@
 /**
- * The **engine checkpoint / restore API** — stage C2 of
- * `docs/plans/2026-08-18-checkpoint-restore-design.md` (§3, the client
- * contract; §5.1, quiescence; §6, the ordered two-phase restore).
+ * The **engine checkpoint / restore API** described by
+ * `docs/CHECKPOINT-MODEL.md`.
  *
  * A notebook client takes a checkpoint at a cell boundary and later rewinds
  * to it, so "the user edited cell k" becomes *restore the checkpoint taken

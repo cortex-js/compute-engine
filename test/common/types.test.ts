@@ -989,7 +989,7 @@ describe('isSubtype POSITIVE', () => {
     expect(isSubtype('integer', 'real')).toBe(true);
     // A `character` is the TEXT scalar; `string` left `scalar` when strings
     // became indexed collections of characters
-    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D1).
+    // (`docs/STRING_ROADMAP.md`, decision D1).
     expect(isSubtype('character', 'scalar')).toBe(true);
   });
 
@@ -2267,7 +2267,7 @@ describe('isSubtype with an intersection on the left', () => {
 });
 
 describe('the `callback<…>` constructor is RETIRED (Design E §7)', () => {
-  // Design E (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`)
+  // Design E (`docs/TYPE-SYSTEM.md`)
   // deleted the constructor: callback slots are ordinary arrows admitted by
   // compatibility, and the spelling fails to parse with a migration hint.
   // (The union tie-break this block used to pin died with the constructor —

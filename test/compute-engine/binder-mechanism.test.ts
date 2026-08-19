@@ -5,7 +5,7 @@ import { sameBindingDef } from '../../src/compute-engine/boxed-expression/binder
 
 /**
  * Pins for the binders migrated onto the sanctioned binder mechanism in
- * stages 5–8 (`docs/plans/2026-07-26-binder-mechanism-design.md` §2).
+ * stages 5–8 (`docs/SCOPING-MODEL.md`).
  *
  * The shared guarantee: a binder's bound variable is bound in the binder's OWN
  * scope, so the parse, `ce.box()` and `ce.function()` routes agree about what
@@ -200,7 +200,7 @@ describe('D: the differentiation variables are bound by the derivative', () => {
  * A consumer that lifts a binder's body back OUT into the ambient scope must
  * therefore re-bind it (`rebindEscaping`) — `explain('D')`, `liftIntegrand`
  * and the Jacobian body lift all do. See
- * `docs/plans/2026-07-26-binder-mechanism-design.md` §Stages 5–8 round.
+ * `docs/SCOPING-MODEL.md` 5–8 round.
  */
 describe('a binder owns its bound variable: body identity is not ambient identity', () => {
   test('Sum: the index inside the sum is not the ambient index', () => {

@@ -842,7 +842,7 @@ describe('EPSIL EXECUTE — Count(xs, v) and Count(xs, p)', () => {
 
 /**
  * Rungs 1–2 of the error-propagation design
- * (`docs/plans/2026-07-31-error-propagation-design.md`), through the Epsil
+ * (`docs/LANGUAGE-MODEL.md`), through the Epsil
  * execution route. The engine-level pins are in
  * `test/compute-engine/error-propagation.test.ts`.
  */

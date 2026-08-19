@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * The `popScope` debug invariant, Tier 1
- * (`docs/plans/2026-07-26-binder-mechanism-design.md` §3).
+ * (`docs/SCOPING-MODEL.md`).
  *
  * A scope being discarded tombstones its value definitions; using one of those
  * bindings afterwards reports BOTH stacks — where the scope died and where the

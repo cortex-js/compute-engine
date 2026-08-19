@@ -94,7 +94,7 @@ function pyClampedCount(
  * them, so the whole `character` row of the compile matrix is closed on this
  * target for v1. Python's SCALAR string support is untouched: this asks about
  * `character` evidence only, and `character` and `string` are disjoint types.
- * (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+ * (`docs/STRING_ROADMAP.md`, decision D13.)
  */
 function assertPyNoCharacterOperand(
   kind: string,
@@ -1364,7 +1364,7 @@ function pyCollArg(
   // regional-indicator flag. Named separately from the generic diagnostic
   // below, so the reason is the target capability rather than a shape
   // mismatch (the shape now MATCHES).
-  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+  // (`docs/STRING_ROADMAP.md`, decision D13.)
   if (arg && arg.type.matches('string'))
     throw new Error(
       `${kind}: cannot compile a string collection to this target — a ` +
@@ -2304,7 +2304,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       .join(', ')}]`;
   },
   // Variadic, like the interpreter and the JavaScript target
-  // (`docs/plans/2026-08-09-lazy-collection-evaluate-design.md`, Change 2).
+  // (`docs/COLLECTIONS-MODEL.md`, Change 2).
   Append: (args, compile) => {
     const coll = pyCollArg('Append', args[0], compile);
     // No trailing values: the 1-ary identity form (valid in non-strict mode).

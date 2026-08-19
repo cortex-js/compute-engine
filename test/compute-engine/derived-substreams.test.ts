@@ -3,7 +3,7 @@ import { monteCarloEstimate } from '../../src/compute-engine/numerics/monte-carl
 import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
 
 /**
- * Derived sub-streams — `docs/plans/2026-07-28-derived-substreams.md`.
+ * Derived sub-streams — `docs/RANDOMNESS-MODEL.md`.
  *
  * The stochastic ESTIMATORS (Monte-Carlo integration, the sampled equality
  * probe) replay under a `WithRandomSeed` frame through a private stream

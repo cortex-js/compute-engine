@@ -2,9 +2,8 @@
 
 > **Historical review.** This document records the 2026-07-05 state and is not
 > the current language reference. Many gaps below have since been implemented.
-> See [`src/cortex/docs/`](../../src/cortex/docs/) for current behavior and the
-> [2026-08-03 extensions review](../../docs/plans/2026-08-03-cortex-language-extensions-review.md)
-> for current proposals and open questions.
+> See the [language model](../../docs/LANGUAGE-MODEL.md) for current behavior
+> and the Cortex roadmap for current proposals and open questions.
 
 _Reviewed 2026-07-05 against `src/cortex/docs/` (11 files, ~890 lines), the
 implementation in `src/cortex/`, and the confirmed architecture decisions in

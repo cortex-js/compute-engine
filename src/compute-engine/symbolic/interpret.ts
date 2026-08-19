@@ -28,7 +28,7 @@ import {
  * `library/arithmetic.ts`). Future recognizers (e.g. sequence closed-form
  * recognition) live alongside `inferContinuationPattern` here.
  *
- * See `docs/plans/2026-07-09-ellipsis-interpretation-design.md` for the gate
+ * See `docs/LANGUAGE-MODEL.md` for the gate
  * and the generalization ladder. Recognizers are tried in order: arithmetic
  * progression (v1) → polynomial via finite differences → geometric (v2) →
  * linear recurrence via Berlekamp–Massey + `RSolve` closed form (v3).

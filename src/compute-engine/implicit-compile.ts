@@ -61,7 +61,7 @@ export function implicitCompile(
  *
  * Returns `undefined` when the expression does not compile (same contract as
  * `implicitCompile`). Replaces the former `realOnly: true` option at these
- * call sites (`docs/plans/2026-08-16-compile-complex-mode.md` §5).
+ * call sites (`docs/COMPILATION-MODEL.md`).
  */
 export function implicitCompileNumeric(
   ce: IComputeEngine,

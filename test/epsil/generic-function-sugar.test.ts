@@ -5,7 +5,7 @@ import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 
 //
 // M2 of the generic-function-literals design
-// (docs/plans/2026-08-04-generic-function-literals-design.md §3): the SUGARED
+// (docs/TYPE-SYSTEM.md §3): the SUGARED
 // generic definition form
 //
 //     function f<T: number, U>(x: T, k: (T) any -> U) -> list<U> { … }
@@ -18,7 +18,7 @@ import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 //
 // Section (f) covers the SECOND binder spelling: the same clause written as a
 // trailing `where` on the definition head
-// (`docs/plans/2026-08-11-where-clause-type-constraints.md`). The two are
+// (`docs/TYPE-SYSTEM.md`). The two are
 // synonyms — and writing both is an error.
 //
 // Everything the type grammar already validates about a `where` clause —
@@ -549,7 +549,7 @@ describe('M2 SUGARED GENERICS — serialization (§3.3)', () => {
 
 //
 // (f) The SECOND binder spelling: a trailing `where` clause on the definition
-// head (`docs/plans/2026-08-11-where-clause-type-constraints.md`). The clause
+// head (`docs/TYPE-SYSTEM.md`). The clause
 // is always LAST — after the effects slot and after the return type — in every
 // declaration form, and its names must nevertheless be in scope from the FIRST
 // parameter annotation, which is what the lexical pre-scan buys.

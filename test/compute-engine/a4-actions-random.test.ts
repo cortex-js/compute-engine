@@ -60,7 +60,7 @@ describe('A4.1 — Block is sequential (regression)', () => {
 // per-operator `seed` arguments of `Shuffle`/`Sample`. The 2026-07-25 Random
 // family redesign removed all of them: the first operand of `Random` is
 // always a DOMAIN, and seeding is the block-scoped `WithRandomSeed` frame.
-// See `docs/plans/2026-07-25-random-signature-redesign.md` §1 (P1–P8).
+// See `docs/RANDOMNESS-MODEL.md` §1 (P1–P8).
 //
 // The exhaustive coverage lives in `random.test.ts`; what is kept here is the
 // A4 action-context shape — a randomized draw used inside an action-style

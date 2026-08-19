@@ -5,7 +5,7 @@ import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 //
-// Protocol DISPATCH — phase 3 of `docs/plans/2026-08-12-protocols-design.md`
+// Protocol DISPATCH — phase 3 of `docs/TYPE-SYSTEM.md`
 // (rulings P1, P13, P14, P16, P20, P29) and `docs/TYPE_SYSTEM_ROADMAP.md`
 // Appendix A, "Dispatching".
 //
@@ -836,7 +836,7 @@ Quartile([1, 2, 3, 4, 5])`
 });
 
 describe('compilation', () => {
-  // Since `docs/plans/2026-08-12-protocol-compilation.md` a compilable
+  // Since `docs/COMPILATION-MODEL.md` a compilable
   // dispatch COMPILES on the JS target (this pin previously recorded the
   // fail-closed posture): a single string-target conformance reifies to a
   // `typeof` guard chain, and a receiver no conformance covers THROWS where

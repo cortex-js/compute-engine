@@ -620,7 +620,7 @@ function predicateErrorValue(
  * The error a Filter facet consumer throws when its predicate operand cannot
  * be applied at all. A predicate the COMPATIBILITY GATE already rejected at
  * canonicalization (Design E,
- * `docs/plans/2026-08-18-compatibility-admission-callbacks.md` §3) arrives
+ * `docs/TYPE-SYSTEM.md`) arrives
  * here as an `Error` expression: its own diagnostic is the message — a
  * spell-check hint computed over the error payload is noise ("Unknown symbol
  * …" about the faulted lambda's parameter).
@@ -725,7 +725,7 @@ const FILL_SUPPLY: CallbackSupply = {
 
 /**
  * The LAZY route's compatibility gate (Design E §3/§6,
- * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`, phase E2):
+ * `docs/TYPE-SYSTEM.md`, phase E2):
  * the disjointness/effects half of compatibility admission for a callback
  * operand accepted by `canonicalCallbackOperand`, running at CANONICALIZATION
  * inside the operator's own canonical handler — the one gate lazy operators
@@ -1092,7 +1092,7 @@ function canonicalFunctionSlot(
  * read. Its parameter types are never consulted, so a callback narrower than
  * the source's elements still enters and is still judged per element at
  * application time — the compatibility-admission semantics (Design E §3,
- * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
+ * `docs/TYPE-SYSTEM.md`).
  *
  * BOTH an inline literal and a NAMED callback contribute (that is R-D2′). A
  * named one needs a second look: a `lazy` operator holds its callback operand
@@ -2515,7 +2515,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // (tuple/set/map, or a union with a collection member) has no statically
   // known PER-POINT representation, so lowering it would splice a whole
   // aggregate into every point. Lowering narrower than typing is intended.
-  // See `docs/plans/2026-07-31-pointlist-compile-design.md` § Shared predicate.
+  // See `docs/COLLECTIONS-MODEL.md` predicate.
   PointList: {
     description:
       'A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.',
@@ -5159,7 +5159,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // constraint 3).
     signature: '((T+) -> T where T: string) & ((collection<any>*) -> collection)',
     // Same-head flatten: `Join(Join(…inner), …outer)` → `Join(…inner, …outer)`
-    // (Change 2 of `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`).
+    // (Change 2 of `docs/COLLECTIONS-MODEL.md`).
     // Exact by construction — the head is unchanged, so every operand keeps
     // the position semantics it had (an inner `Join` is a collection operand
     // being spliced; its own tuple operands stay atomic after the splice).
@@ -5422,7 +5422,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // than materializing, so appending to an infinite collection stays inert
   // until forced.
   //
-  // VARIADIC (`docs/plans/2026-08-09-lazy-collection-evaluate-design.md`,
+  // VARIADIC (`docs/COLLECTIONS-MODEL.md`,
   // Change 2 v3.1): `Append(c, v₁, …, vₖ)` appends each trailing operand as ONE
   // element, in order. The binary MathJSON form `["Append", c, v]` is the k = 1
   // case, so this is fully backward compatible. `value+`, not `scalar+`: an
@@ -7836,8 +7836,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the number of elements in the collection satisfying the predicate.',
     complexity: 8200,
-    // Design E phase E1 (`docs/plans/2026-08-18-compatibility-admission-
-    // callbacks.md`): the predicate slot is an honest arrow. Admission is by
+    // Compatibility admission (`docs/TYPE-SYSTEM.md`): the predicate slot is
+    // an honest arrow. Admission is by
     // COMPATIBILITY, not subtyping (a narrower named predicate, a
     // `function`-typed symbol and an unknown-result literal all still pass;
     // a PROVABLY DISJOINT predicate — `Filter`-style `list<string>` source
@@ -8143,7 +8143,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // Randomize the order of the elements in the collection. Seeding is
   // `WithRandomSeed`; there is no seed argument (see
-  // `docs/plans/2026-07-25-random-signature-redesign.md` §5).
+  // `docs/RANDOMNESS-MODEL.md` §5).
   RandomShuffle: {
     description:
       'Randomize the order of the elements in the collection. ' +
@@ -9643,7 +9643,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 //
 // This is the "fix the compounding queries directly" half of the
 // conditional-handler over-threshold follow-up in
-// `docs/plans/2026-08-09-lazy-collection-evaluate-design.md` ("Affected
+// `docs/COLLECTIONS-MODEL.md` ("Affected
 // operator set"). The facets above consequently derive the source's
 // FINITENESS from the same `n` (`Number.isFinite(n)`) instead of asking
 // `op1.isFiniteCollection` — a second recursive walk that would restore the
@@ -11014,7 +11014,7 @@ function sliceResultType(
  *
  * The source contributes its ELEMENT type; each trailing operand contributes
  * its OWN type, because it becomes one element
- * (`docs/plans/2026-08-09-lazy-collection-evaluate-design.md`, Q2.1). The
+ * (`docs/COLLECTIONS-MODEL.md`, Q2.1). The
  * binary handler used to be `joinResultType([ops[0]])`, which ignored the
  * appended value's type entirely — so `Append([1,2], "x")` claimed
  * `list<finite_integer>`. Folding the trailing types in fixes that, and makes

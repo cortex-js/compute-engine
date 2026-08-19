@@ -383,7 +383,7 @@ describe('Last (shares `_SYS.at`) — regression', () => {
 });
 
 describe('Route parity with the GLSL lowering (`At` on the GPU)', () => {
-  // `docs/plans/2026-08-01-at-gpu-compile-design.md` § D5: the shader lowering
+  // `docs/COMPILATION-MODEL.md`: the shader lowering
   // is new, the interpreter and `_SYS.at` are untouched, and `_SYS.at` remains
   // the PARITY ORACLE — the GPU targets the same projection, so the two must
   // agree on every shape both can answer. Only fully constant-folded GPU

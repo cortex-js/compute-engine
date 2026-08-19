@@ -15,7 +15,7 @@
  * OEIS data is CC BY-NC: it is never bundled into the library. Candidates are
  * produced only by live lookup and always carry attribution (`id`/`name`/`url`).
  *
- * @see docs/plans/2026-07-09-ellipsis-interpretation-design.md (v4)
+ * @see docs/LANGUAGE-MODEL.md (v4)
  * @see https://oeis.org
  */
 

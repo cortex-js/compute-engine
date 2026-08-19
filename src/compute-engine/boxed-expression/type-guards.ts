@@ -53,7 +53,7 @@ export function isSymbol(
  * True when a value is an absence MARKER — the `Missing` symbol or a `NaN`
  * number — regardless of provenance (I6). This is the value-level test the
  * missing-value runtime gate and chained-`At` absorption use
- * (`docs/plans/2026-07-22-missing-value-typing-design.md`).
+ * (`docs/TYPE-SYSTEM.md`).
  */
 export function isAbsentValue(expr: Expression | null | undefined): boolean {
   return isSymbol(expr, 'Missing') || (isNumber(expr) && expr.isNaN === true);
@@ -155,7 +155,7 @@ export function isForeignEngineObject(
  * adopted expression is not enough, because a pre-boxed container is not
  * itself an object: `ce.box(otherList)` where `otherList` is a `List` holding
  * a foreign object adopts the container whole and smuggles the object in with
- * it. (`docs/plans/2026-08-14-object-representation-decision.md`,
+ * it. (`docs/TYPE-SYSTEM.md`,
  * "Cross-engine ingress", and invariant 8 in the same note.)
  *
  * The walk stops AT an object — an object's own slots were checked against

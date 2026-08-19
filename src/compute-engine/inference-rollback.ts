@@ -1,6 +1,6 @@
 /**
  * Inference **rollback frames** — phase 2b of
- * `docs/plans/2026-08-13-inference-tx-design.md`.
+ * `docs/TYPE-SYSTEM.md`.
  *
  * A rollback frame journals every inference-driven engine mutation made while
  * it is open — type-slot writes, operator-signature writes, binding-half

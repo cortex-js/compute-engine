@@ -10,7 +10,7 @@ import type { TypeProvenanceEntry } from '../../src/compute-engine/global-types'
 
 //
 // Effects-axis provenance and rollback —
-// `docs/plans/2026-08-13-effects-axis-provenance.md` (revision 3) acceptance.
+// `docs/EFFECTS-MODEL.md` (revision 3) acceptance.
 //
 // Post-construction changes to a definition's effects CONTRACT state record
 // `axis: 'effects'` entries in the shared `_typeProvenance` history; the

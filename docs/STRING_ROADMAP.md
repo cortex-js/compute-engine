@@ -1064,11 +1064,8 @@ count is bounded by the subject length).
    handled as collections" and documents `Characters` as `list<string>` —
    both false after this phase). Ships as one unit (constraint 8).
 
-   **Shipped 2026-08-16** (implementation plan with the decisions the spec
-   left open and a library signature audit:
-   `docs/plans/2026-08-16-string-phase1-character-type.md`). Deviations
-   from, and resolutions of, the text above — all recorded there as
-   decisions D1–D15:
+   **Shipped 2026-08-16.** Deviations and resolutions from the implementation
+   pass are folded below:
    - `string` LEFT `scalar`: it moved from the scalar kinds to the indexed
      collection kinds (`scalar` = boolean | character | number). The spec
      did not say; keeping it in both would have made `scalar` and
@@ -1128,9 +1125,8 @@ count is bounded by the subject length).
    future `collation` value). Update `doc/97-reference-strings.md` again
    with the new operators.
 
-   **Shipped 2026-08-16** (implementation plan:
-   `docs/plans/2026-08-16-string-phase2-join-search-ops.md`). Deviations
-   from and resolutions of the text above, all user-ruled the same day:
+   **Shipped 2026-08-16.** Deviations and resolutions, all user-ruled the same
+   day:
    - `StringJoin("ab", "cd")` is NOT a signature error: with strings as
      collections, `"ab"` satisfies the subject slot and `"cd"` the
      separator, so a string subject means ITS CHARACTERS joined with the
@@ -1167,9 +1163,7 @@ count is bounded by the subject length).
      header)` placed the piped value in the wrong slot once a string fit a
      collection slot (epsil-syntax), and `Join`/`Sort` string
      materialization above.
-3. **Regular expressions. SHIPPED 2026-08-17** —
-   `docs/plans/2026-08-17-string-phase3-regular-expressions.md` (decisions,
-   deviations and the two review defects). `regexp` is a primitive VALUE type
+3. **Regular expressions. SHIPPED 2026-08-17.** `regexp` is a primitive VALUE type
    (beside `color`, not a scalar and not a collection), built by
    `RegExp(pattern, flags?)`; `IsMatch`, `StringMatch`, `StringMatchAll`, and
    regex arms on `StringSplit`/`StringReplace` including a function

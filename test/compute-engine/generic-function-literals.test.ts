@@ -10,7 +10,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 //
 // Generic function literals (M1, PHASE 1 — the literal standing alone).
 //
-// `docs/plans/2026-08-04-generic-function-literals-design.md`: a whole-signature
+// `docs/TYPE-SYSTEM.md`: a whole-signature
 // `where` clause on a function literal is accepted, the literal's quantified
 // parameters are ERASED before the body canonicalizes (G1), and the literal's
 // `.type` becomes the polytype. Two spellings introduce the clause here:

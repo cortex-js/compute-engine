@@ -5,7 +5,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
  * # Design E — compatibility admission at arrow-typed callback slots
  *
  * Phase E1 acceptance
- * (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §13):
+ * (`docs/TYPE-SYSTEM.md`):
  * `CountIf`'s predicate slot is an honest, effect-top arrow
  * (`(T) any -> boolean`), and a callback operand is admitted unless it is
  * PROVABLY UNUSABLE — not-callable, arity-incapable (the shipped

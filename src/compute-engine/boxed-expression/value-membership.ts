@@ -9,7 +9,7 @@ import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
  * Value membership — does a *concrete value* inhabit a type containing
  * value-kind (literal) or bounded-numeric components?
  *
- * (`docs/plans/2026-08-01-function-polymorphism-design.md` §4.1, Phase 0.)
+ * See `docs/TYPE-SYSTEM.md`.
  *
  * Subtyping compares a value's *synthesized* type (`ce.box(0).type` is
  * `finite_integer`), which can never witness membership in a value type such
@@ -48,7 +48,7 @@ export function typeAcceptsValue(
 
 /**
  * Tri-state admission of one operand against one parameter type
- * (`docs/plans/2026-08-01-function-polymorphism-design.md` §4.4) — ONE
+ * (`docs/TYPE-SYSTEM.md`) — ONE
  * implementation consumed by both static resolution and the runtime clause
  * selector, so the two can never disagree.
  *

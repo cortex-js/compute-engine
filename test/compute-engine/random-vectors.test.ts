@@ -14,7 +14,7 @@ import {
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * These vectors pin the seed→stream mapping of the random family
- * (`docs/plans/2026-07-25-random-signature-redesign.md` §2, §4, §8):
+ * (`docs/RANDOMNESS-MODEL.md` §2, §4, §8):
  * `foldSeed`, the PCG3D words, and both presentations.
  *
  * A DIFF IN THIS TABLE IS A BREAKING CHANGE, not a test update. The mapping is
@@ -363,7 +363,7 @@ describe('draws are IEEE float64 regardless of precision mode', () => {
  *  DERIVED SUB-STREAMS — ALSO A BREAKING-CHANGE CONTRACT. DO NOT REGENERATE.
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * `docs/plans/2026-07-28-derived-substreams.md`. The stochastic estimators
+ * `docs/RANDOMNESS-MODEL.md`. The stochastic estimators
  * (Monte-Carlo integration, the sampled equality probe) replay under a
  * `WithRandomSeed` frame through a PRIVATE stream derived from the frame's
  * seed and a tag, consuming no frame indices. The `(seed, tag) → stream`

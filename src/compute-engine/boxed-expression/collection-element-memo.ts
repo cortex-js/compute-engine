@@ -31,7 +31,7 @@ import { containsObject } from './object-walk';
  * the operators' own iterator handlers stay untouched.
  *
  * Invalidation is DEPENDENCY-PRECISE (2026-08-02,
- * `docs/plans/2026-08-02-dependency-precise-memo-invalidation.md`). Every
+ * `docs/COLLECTIONS-MODEL.md`). Every
  * engine input that can change what an element evaluates to now bumps a
  * counter — including the configuration inputs (`tolerance` bumps directly,
  * `precision`/`angularUnit` through `_reset()`) — so the memo needs exactly

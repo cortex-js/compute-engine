@@ -3,7 +3,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // Annotation-bound parameters (the "lambda lift") — see
-// `docs/plans/2026-08-08-annotation-lambda-lift.md`.
+// `docs/LANGUAGE-MODEL.md`.
 //
 // A parameter name binds wherever it appears: a literal named function-type
 // annotation on a declaration turns a non-lambda initializer into the body of

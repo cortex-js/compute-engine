@@ -42,7 +42,7 @@ export function canonicalForm(
   // declared into the caller's scope. The suppression wraps the whole pipeline
   // because the forms reach `.canonical` on a symbol through many helpers
   // (`isImaginaryUnit`, `flatten`, `canonicalInvisibleOperator`, …), not just
-  // `symbolForm`. See `docs/plans/2026-08-04-parse-scope-control-design.md` A1.
+  // `symbolForm`. See `docs/SCOPING-MODEL.md` A1.
   //
   // The supplied scope is honored on this path too (B1): it steers the lookups
   // the forms perform, exactly as it does on the `forms === true` path above.

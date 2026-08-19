@@ -60,8 +60,8 @@ describe('Filter with an Error-valued predicate result', () => {
   });
 
   test('a genuine non-boolean predicate is rejected at CANONICALIZATION', () => {
-    // Design E §9 Q3 (`docs/plans/2026-08-18-compatibility-admission-
-    // callbacks.md`, ruled 2026-08-18): `Filter` converted in phase E2, so a
+    // Compatibility admission (`docs/TYPE-SYSTEM.md`): `Filter` uses an honest
+    // arrow slot, so a
     // provably non-boolean predicate no longer reaches evaluation — the
     // program could only ever throw per element.
     const ce = new ComputeEngine();
@@ -108,8 +108,8 @@ describe('Sibling predicate consumers with an Error-valued result', () => {
     });
 
     test(`${op} rejects a genuine non-boolean predicate at canonicalization`, () => {
-      // Design E §9 Q3 (`docs/plans/2026-08-18-compatibility-admission-
-      // callbacks.md`, ruled 2026-08-18): a provably non-boolean predicate is
+      // Compatibility admission (`docs/TYPE-SYSTEM.md`): a provably
+      // non-boolean predicate is
       // rejected at CANONICALIZATION — the program could only ever throw
       // `must return "True" or "False"` per element. The E3 sweep converted
       // the whole family.

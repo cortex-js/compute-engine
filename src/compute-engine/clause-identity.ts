@@ -9,14 +9,14 @@ import { isSubtype } from '../common/type/subtype.js';
  * CLAUSE IDENTITY — when two clauses of a multi-clause function are the SAME
  * clause, so that defining the second one REPLACES the first instead of adding
  * an arm to the dispatch
- * (`docs/plans/2026-08-01-function-polymorphism-design.md` §4.3).
+ * (`docs/TYPE-SYSTEM.md`).
  *
  * Extracted into this module because two tiers need the answer and they live on
  * opposite sides of the engine boundary: `multi-clause.ts` applies it when it
  * installs a clause, and the Epsil static checker (`src/epsil/
  * static-diagnostics.ts`) applies it to report a duplicated clause BEFORE the
  * program runs (the redefinition discipline's static tier —
- * `docs/plans/2026-08-14-redefinition-discipline.md`). The checker may only
+ * `docs/TYPE-SYSTEM.md`). The checker may only
  * import engine-free leaves at runtime, since the engine itself is injected
  * there, so the shared test cannot live in `multi-clause.ts`.
  *

@@ -3,7 +3,7 @@ import type { BoxedExpression } from '../../src/compute-engine/global-types';
 
 /**
  * Honest result typing for list-broadcast numeric operators.
- * See docs/plans/2026-07-07-honest-list-broadcast-typing.md.
+ * See docs/COLLECTIONS-MODEL.md.
  *
  * A broadcastable numeric operator applied to a finite indexed collection
  * produces a **List value**, so its declared `.type` must be a list/vector

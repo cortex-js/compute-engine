@@ -56,9 +56,7 @@ const COLLECTION_OPERATORS = new Set([
 export type ErrorFrame = { operator: string; index: number };
 
 /**
- * The error carried by a value, per the error-propagation design
- * (`docs/plans/2026-07-31-error-propagation-design.md` §2, §2a and the
- * implementation refinement in its Status block):
+ * The error carried by a value, per `docs/LANGUAGE-MODEL.md`:
  *
  * - an `Error`-headed value **is** its own error;
  * - an INVALID value — a frozen tree that *embeds* a validation error, e.g.

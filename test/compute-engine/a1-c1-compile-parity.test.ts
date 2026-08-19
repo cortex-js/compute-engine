@@ -21,7 +21,7 @@ describe('A1 — PointX/PointY/PointZ compile', () => {
       expect(result?.success).toBe(true);
       // `?? NaN`: an out-of-range coordinate answers the interpreter's `NaN`
       // absence marker rather than leaking `undefined` into the ABI (see
-      // `docs/plans/2026-07-31-pointlist-compile-design.md` § D4).
+      // `docs/COLLECTIONS-MODEL.md`).
       expect(result?.code).toBe('(_.p[0] ?? NaN)');
       expect(result?.run?.({ p: [10, 20] })).toEqual(10);
     });
@@ -241,7 +241,7 @@ describe('A1 — Variance/GCD/Median GPU compile', () => {
 // The 2026-07-25 Random family redesign removed `Random`'s seed argument:
 // `Random(n)` is now signature-invalid, and seeding is `WithRandomSeed`. The
 // GPU targets still emit the old `_gpu_random(seed)` lowering — Phase 3 of the
-// redesign (`docs/plans/2026-07-25-random-signature-redesign.md` §7) rewrites
+// redesign (`docs/RANDOMNESS-MODEL.md` §7) rewrites
 // them over the PCG3D frame stream, with a per-language/per-form matrix, the
 // GPU seed ABI, the GLSL stage check and the cross-domain fail-closed rule.
 // The suite that pinned `Random(seed)` on GLSL/WGSL is retired here rather

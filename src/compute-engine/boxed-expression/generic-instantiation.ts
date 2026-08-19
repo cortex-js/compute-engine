@@ -21,7 +21,7 @@ import type { Expression } from '../global-types.js';
 
 /**
  * The call-site solver's EMBEDDING (§4.3/§4.5 of
- * `docs/plans/2026-08-01-type-variables-design.md`).
+ * `docs/TYPE-SYSTEM.md`).
  *
  * The solver itself lives in `common/type/instantiate.ts` and knows nothing
  * about expressions. This module is the one place that maps the engine's
@@ -147,7 +147,7 @@ export function solveArm(
     p === undefined ? undefined : admissionSkeleton(p)
   );
 
-  // Design E R-E3 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`):
+  // Design E R-E3 (`docs/TYPE-SYSTEM.md`):
   // an operand at a PLAIN-ARROW contextual slot contributes no DOMAIN
   // constraints — a callback's parameter types must never constrain the solve.
   // Without this, respelling `CountIf`'s slot as `(T) any -> boolean` would
@@ -321,7 +321,7 @@ export interface ContextualCallbackPlan {
 
 /**
  * The signature a parameter slot offers a contextual stamp (Design E §6,
- * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`): a PLAIN
+ * `docs/TYPE-SYSTEM.md`): a PLAIN
  * ARROW slot is a contextual slot. A UNION slot resolves under the
  * forced-resolution rule — exactly one signature arm, every other arm closed
  * and provably unable to take a function, the only operand shape a stamp

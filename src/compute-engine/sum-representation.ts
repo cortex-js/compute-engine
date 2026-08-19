@@ -8,7 +8,7 @@ import type { IComputeEngine } from './global-types.js';
 /**
  * SUM-TYPE COMPILATION POLICY —
  * `docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §B1, amending D11
- * of `docs/plans/2026-08-01-nominal-types-design.md` §4.6.
+ * of `docs/TYPE-SYSTEM.md`
  *
  * **The tag is erased iff it is statically discharged.** A product type
  * discharges its tag at type-check time and erases (D11, unchanged). A SUM's

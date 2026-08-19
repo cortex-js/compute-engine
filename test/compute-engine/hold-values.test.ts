@@ -5,7 +5,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  * (all of them, or a listed subset), making them pure symbols — their declared
  * type and in-scope assumptions apply, their assigned value does NOT — then
  * evaluates the body. See §F of
- * `docs/plans/2026-07-23-simplify-together-scoping.md`.
+ * `docs/SCOPING-MODEL.md`.
  *
  * Every behavior is pinned on BOTH the `ce.box(['HoldValues', …])` route AND
  * the `ce.parse('\\operatorname{HoldValues}(…)')` route, because a lazy

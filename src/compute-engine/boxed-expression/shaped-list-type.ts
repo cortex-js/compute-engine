@@ -13,7 +13,7 @@ type ShapeAnalysis = { dims: number[]; cells: Type[] };
 
 /**
  * The **honest** shape-derived `Type` of a literal `List` node whose children
- * are `ops` (§D3 of `docs/plans/2026-07-20-tensor-unification-design.md`).
+ * are `ops` (§D3 of `docs/COLLECTIONS-MODEL.md`).
  *
  * Returns a **dimensioned** `list` type (`{kind:'list', elements: C,
  * dimensions:[…]}`) when the list is shape-regular over atomic cells; returns

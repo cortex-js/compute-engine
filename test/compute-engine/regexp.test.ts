@@ -4,7 +4,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 /**
  * Strings Phase 3 — regular expressions.
  *
- * Plan: `docs/plans/2026-08-17-string-phase3-regular-expressions.md`.
+ * Plan: `docs/STRING_ROADMAP.md`.
  *
  * The dialect is the HOST's, by user ruling 2026-08-17: no feature subset, no
  * caps. The tests that pin backreferences and lookbehind are there because

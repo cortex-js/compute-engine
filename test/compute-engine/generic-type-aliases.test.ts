@@ -4,7 +4,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // Transparent generic type aliases — `type alias Pair<T> = tuple<T, T>`
-// (`docs/plans/2026-08-04-generic-type-aliases-design.md`).
+// (`docs/TYPE-SYSTEM.md`).
 //
 // An applied reference is EAGERLY EXPANDED at type resolution into the
 // substituted alias body: no applied-reference node exists in the `Type`

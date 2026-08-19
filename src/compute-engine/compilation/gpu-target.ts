@@ -1154,7 +1154,7 @@ function gpuSelectionMask(
 /**
  * Lower a `Which`/`If` whose condition may be an indexed collection to the GPU
  * ELEMENT-WISE selection form (`np.select` semantics — R1–R4 of
- * `docs/plans/2026-07-27-elementwise-which-design.md`). Clauses arrive in
+ * `docs/BROADCAST-MODEL.md`). Clauses arrive in
  * `Which` shape (condition, arm, condition, arm, …); the base compiler
  * normalizes `If(c, t, f)` to `[c, t, True, f]`.
  *
@@ -5253,7 +5253,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   /**
    * One draw from the counter-based PCG3D stream — the GPU tier of the
    * random family redesign
-   * (`docs/plans/2026-07-25-random-signature-redesign.md` §2, §4, §7).
+   * (`docs/RANDOMNESS-MODEL.md` §2, §4, §7).
    *
    * Every form returns a GLSL `float` (WGSL `f32`), so it composes with the
    * surrounding float arithmetic without a cast. The domain forms return an
@@ -5339,7 +5339,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 //
 // ─── Counter-based random draws (PCG3D) ─────────────────────────────────────
 //
-// The GPU tier of `docs/plans/2026-07-25-random-signature-redesign.md`. The
+// The GPU tier of `docs/RANDOMNESS-MODEL.md`. The
 // n-th draw of a frame is `hash(seed, n)` — a pure function of the seed and
 // the draw index — so a shader, which has no persistent stream and cannot
 // carry mutable RNG state across invocations, can still replay a frame.

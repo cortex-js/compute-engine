@@ -1,7 +1,6 @@
 /**
- * The copy-on-write **checkpoint journal** — stage C1 of
- * `docs/plans/2026-08-18-checkpoint-restore-design.md` (§4b, the window
- * lifecycle, and §5.2/§5.3, the hook set).
+ * The copy-on-write **checkpoint journal** described by
+ * `docs/CHECKPOINT-MODEL.md`.
  *
  * A notebook client takes a checkpoint at a cell boundary and later rewinds
  * the engine to it, so that "the user edited cell k" becomes *restore the

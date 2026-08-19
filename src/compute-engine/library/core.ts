@@ -1446,7 +1446,7 @@ function declareTypeStatement(
     });
   } catch (e) {
     // A within-unit redefinition carries its own code, the SAME one the static
-    // pass reports (`docs/plans/2026-08-14-redefinition-discipline.md`), so
+    // pass reports (`docs/TYPE-SYSTEM.md`), so
     // one problem reads identically on both tiers.
     if (e instanceof RedefinitionError)
       return ce.error([e.code, e.message], e.declaredName);
@@ -4172,7 +4172,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 callableAfter: containsSignatureArm(parseType(type!)),
               });
               // Effects-axis provenance (W3 of
-              // `docs/plans/2026-08-13-effects-axis-provenance.md`): the
+              // `docs/EFFECTS-MODEL.md`): the
               // upgrade can turn the effects annotation into a CONTRACT
               // (`let f: (n) pure -> n` over an auto-declared `f`); a bare
               // typed `let` moves nothing (false→false, same spelling) and
@@ -4620,7 +4620,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'evaluate its operand. Recover the text with `StringFrom(Type(x))`; ' +
         'in a string interpolation a type value renders as its text ' +
         'directly. BREAKING (2026-08-19, ruling R3 of ' +
-        '`docs/plans/2026-08-18-first-class-types.md`): the result used to ' +
+        '`docs/TYPE-SYSTEM.md`): the result used to ' +
         'be a STRING, and `Type(x) == "some text"` is now always `False` — ' +
         'use `x is T`, `Subtype(Type(x), u)`, or compare `StringFrom` text.',
       lazy: true,
@@ -4742,7 +4742,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const xs = checkArity(ce, ops, 2);
         // Rewrite a LITERAL string operand to a settled type value, so a typo
         // errors at the author's line — the plan's per-operator string
-        // acceptance (`docs/plans/2026-08-18-first-class-types.md` §3.1,
+        // acceptance (`docs/TYPE-SYSTEM.md`,
         // "String acceptance"). A computed operand stays as written and is
         // parsed at evaluation.
         const rewritten = xs.map((op) => {
@@ -4926,7 +4926,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // of `conformsTo` verified, and `False`-now can flip when a
         // conformance is declared later in the program — so the unsettled
         // case stays symbolic this round
-        // (`docs/plans/2026-08-18-first-class-types.md` §3.3, outcome
+        // (`docs/TYPE-SYSTEM.md`, outcome
         // matrix).
         const heldText = settledTypeText(v);
         let asked: Type;
@@ -4938,7 +4938,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // A polytype VALUE is admissible, but asking whether a quantified
           // signature conforms would engage the existential matching machinery
           // the plan defers — the same rejection `Subtype` and `MatchesType`
-          // make (`docs/plans/2026-08-18-first-class-types.md`, "Polytypes").
+          // make (`docs/TYPE-SYSTEM.md`, "Polytypes").
           if (isPolytype(asked))
             return ce.error(
               [
@@ -5253,7 +5253,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     // Block-scoped seeding. See
-    // `docs/plans/2026-07-25-random-signature-redesign.md`: the n-th draw of a
+    // `docs/RANDOMNESS-MODEL.md`: the n-th draw of a
     // frame is `hash(seed, n)`, a pure function of the seed and the draw
     // index, so a frame replays exactly while repeated draws inside it still
     // differ.
@@ -5540,7 +5540,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     // One draw from a DOMAIN. There is no seed argument anywhere in the
     // random family: seeding is `WithRandomSeed`. See
-    // `docs/plans/2026-07-25-random-signature-redesign.md` §4.
+    // `docs/RANDOMNESS-MODEL.md` §4.
     Random: {
       description: [
         'Random(): non-deterministic real in [0, 1)',

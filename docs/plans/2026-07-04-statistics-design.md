@@ -1,10 +1,9 @@
 # Statistics for real data work — distributions, correlation, fitting (design proposal)
 
-**Status:** approved 2026-07-04 (§9 answers inline); Phase 1 in progress ·
-**Date:** 2026-07-04 ·
-**Roadmap:** Product feature track item 1 (agreed 2026-07-04): probability
-distributions (Normal/Binomial/Poisson PDF/CDF/quantile),
-correlation/covariance, and least-squares fitting.
+**Status:** ACTIVE RESIDUALS — the agreed distribution, relationship, and fit
+work shipped; Phase 3 kernels, additional distributions, sampling, and fit
+diagnostics remain demand-gated. **Date:** 2026-07-04 · **Roadmap:** Product
+feature track.
 
 ## 1. Goals and consumers
 

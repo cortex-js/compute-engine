@@ -60,7 +60,7 @@
  * no engine axis — not `any`, not `semantic`, not `world`, not `callable`
  * (ruled 2026-08-15; the `object-store` row of `axisMaskOf` in
  * `engine-configuration-lifecycle.ts` carries the argument, and
- * `docs/plans/2026-08-14-object-representation-decision.md` the fork it
+ * `docs/TYPE-SYSTEM.md` the fork it
  * settles). So a cache that only checks a generation is blind to mutation by
  * construction, and "we forgot one" is indistinguishable from "the engine
  * returns stale answers". Widening the mask would not have rescued a forgotten

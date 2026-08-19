@@ -38,7 +38,7 @@ function cannotContainAbsentValue(collection: Expression): boolean {
  * The absent-datum / empty-input gate shared by the 15 data-consuming
  * aggregates (`Mean`, `Variance`, …, `Max`, `Min`, `Mode`) — §3.C of the
  * missing-value typing design
- * (`docs/plans/2026-07-22-missing-value-typing-design.md`, revision 6).
+ * (`docs/TYPE-SYSTEM.md`, revision 6).
  *
  * A data-consuming aggregate over data that contains an ABSENT datum — a
  * `Missing` symbol or a `NaN` number, whether a direct scalar operand or an

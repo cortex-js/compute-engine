@@ -6,7 +6,7 @@ import type { Expression } from '../../src/math-json/types.ts';
 type BoxedExpr = ReturnType<ComputeEngine['box']>;
 
 /**
- * Change 1 of `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`:
+ * Change 1 of `docs/COLLECTIONS-MODEL.md`:
  * `BoxedFunction.evaluate()` memoizes the fall-through evaluation of a lazy
  * collection VIEW, so re-evaluating an already-evaluated view is O(1) and an
  * `xs := Append(xs, v)` accumulator loop is O(n) instead of O(n²).
@@ -409,7 +409,7 @@ describe('lazy collection evaluate memo', () => {
 
 //
 // Async parity — the "Async" follow-up of the plan
-// (`docs/plans/2026-08-09-lazy-collection-evaluate-design.md`), which left
+// (`docs/COLLECTIONS-MODEL.md`), which left
 // `evaluateAsync` with no materialization step and no memo at all.
 //
 // `evaluateAsync` now consults the SAME memo under the same eligibility test,
@@ -633,7 +633,7 @@ describe('lazy collection evaluate memo — async parity', () => {
 
 //
 // The conditional-handler regime — the plan's "over-threshold blowup"
-// follow-up (docs/plans/2026-08-09-lazy-collection-evaluate-design.md,
+// follow-up (docs/COLLECTIONS-MODEL.md,
 // "Affected operator set" / "Sequencing" item 5)
 //
 // Two independent defects, both fixed:

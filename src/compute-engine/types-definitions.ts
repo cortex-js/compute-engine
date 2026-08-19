@@ -692,7 +692,7 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * This is the operator's own decline test — the guard at the top of its
      * `evaluate` handler — exposed so the enumerability facet
      * (`isEnumerableCollection`) can answer without evaluating. Contract
-     * (see `docs/plans/2026-08-11-eager-collection-enumerability.md`):
+     * (see `docs/COLLECTIONS-MODEL.md`):
      *
      * - MUST be O(1), evaluation-free and side-effect free. An impure
      *   producer answers from its operands' facets, consuming no draws.
@@ -1169,7 +1169,7 @@ export type BoxedDefinition = TaggedValueDefinition | TaggedOperatorDefinition;
  * are the same object. The history therefore lives on the per-engine
  * definition, next to `inferredType`.
  *
- * Design: `docs/plans/2026-08-13-inference-provenance-journal.md`, phase 1.
+ * Design: `docs/TYPE-SYSTEM.md`, phase 1.
  *
  * @category Definitions
  */
@@ -1360,7 +1360,7 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * write wipes the value — a faithful restore cannot go through it).
    * Bumps `_writeVersion` rather than restoring it: monotone invalidation
    * counters only advance. Phase 2a of
-   * `docs/plans/2026-08-13-inference-tx-design.md`.
+   * `docs/TYPE-SYSTEM.md`.
    * @internal */
   _restoreTypeSlots(snapshot: unknown): void;
 
@@ -1496,7 +1496,7 @@ export type OperatorDefinitionFlags = {
    * `Error` value.
    *
    * These are the non-strict *observers* of the error-propagation design
-   * (`docs/plans/2026-07-31-error-propagation-design.md` §2): operators that
+   * (`docs/LANGUAGE-MODEL.md`): operators that
    * INSPECT their operands (`Match`, `Type`, `IsError`) or that are
    * application plumbing deciding what to do with an error operand (`Apply`,
    * `Pipe`). Every other operator freezes to its inert self when an operand
@@ -1536,7 +1536,7 @@ export type OperatorDefinitionFlags = {
   /**
    * How this operator treats an absent (`Missing`) operand, per the
    * missing-value typing design
-   * (`docs/plans/2026-07-22-missing-value-typing-design.md`, §3.A). The
+   * (`docs/TYPE-SYSTEM.md`). The
    * declarable states are:
    *
    * - `'propagate'` — the signature is implicitly lifted `(A) -> B` to

@@ -12,7 +12,7 @@ import {
 
 /**
  * The GPU tier of the Random family redesign
- * (`docs/plans/2026-07-25-random-signature-redesign.md` §2 "Parity is tiered",
+ * (`docs/RANDOMNESS-MODEL.md` §2 "Parity is tiered",
  * §4 "The GPU boundary is genuinely one-domain", §7 "GPU target", §8).
  *
  * A shader cannot run under jest, so the contract these tests enforce is the

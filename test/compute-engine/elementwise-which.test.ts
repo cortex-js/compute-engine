@@ -4,7 +4,7 @@ import { parseType } from '../../src/common/type/parse';
 /**
  * Element-wise `Which`/`If` over list-valued conditions.
  *
- * Spec: `docs/plans/2026-07-27-elementwise-which-design.md` (R1–R4 + R4′,
+ * Spec: `docs/BROADCAST-MODEL.md` (R1–R4 + R4′,
  * ratified 2026-07-27). Witness: Tycho item 102 — the Game-of-Life step
  * `S → {n=3: 1, n=2: S, 0}` over a 900-cell board.
  */

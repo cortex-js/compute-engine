@@ -267,7 +267,7 @@ function executeEpsilBatch(
     // handler cleared it around its own body — so it stays unstamped and
     // freely replaceable. Restored, not cleared, so a nested `executeEpsil`
     // leaves the outer marker intact.
-    // See `docs/plans/2026-08-14-redefinition-discipline.md`.
+    // See `docs/TYPE-SYSTEM.md`.
     const enclosingRoute = ce._epsilDeclarationRoute;
     ce._epsilDeclarationRoute = isDeclarationStatement(stmt);
     try {

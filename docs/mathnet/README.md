@@ -80,7 +80,7 @@ npm run check:roundtrip -- --update    # regenerate roundtrip-exceptions.json
 ```
 
 Stage 3 "corpus lane" of
-[docs/plans/2026-08-04-parse-scope-control-design.md](../plans/2026-08-04-parse-scope-control-design.md)
+[the parse/scope contract](../SCOPING-MODEL.md)
 § D (Tycho item 153). For every corpus input that parses cleanly, the checker
 asserts
 

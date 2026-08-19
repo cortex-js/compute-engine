@@ -484,7 +484,7 @@ export function isValidTypeName(name: string): boolean {
 
 /**
  * The type a **representation** question should be answered from
- * (`docs/plans/2026-08-01-nominal-types-design.md` §4.6 step 1).
+ * (`docs/TYPE-SYSTEM.md` step 1).
  *
  * Compilation is type erasure: the nominal/structural distinction is static
  * information, fully discharged by the checker before any code is emitted, so
@@ -512,7 +512,7 @@ export function isValidTypeName(name: string): boolean {
  * (a non-reference type) allocates nothing.
  *
  * An APPLIED reference to a parameterized nominal type
- * (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §7) unfolds to
+ * (`docs/TYPE-SYSTEM.md`) unfolds to
  * its definition INSTANTIATED at the application's arguments: `tree<integer>`
  * erases to whatever `tuple<value: integer, children: list<tree<integer>>>`
  * compiles to, and declines identically where that would. Without the
@@ -551,7 +551,7 @@ export function resolveTypeForCompilation(t: Readonly<Type>): Type {
  * True if `t` carries a `missing` arm at any nesting level (a scalar `missing`,
  * a `T | missing` union, or a `missing` cell nested inside a list/collection/
  * tuple/record). Used to gate the missing-value strip (§3.B of
- * `docs/plans/2026-07-22-missing-value-typing-design.md`) so that a
+ * `docs/TYPE-SYSTEM.md`) so that a
  * Missing-free program is never touched by the lift.
  */
 export function typeContainsMissing(t: Readonly<Type>): boolean {
@@ -693,7 +693,7 @@ export function numericMissingSlot(t: Readonly<Type>): boolean {
 
 /**
  * True if `t` denotes an **atomic** value type — a cell in the cell/axis model
- * (see `docs/plans/2026-07-20-tensor-unification-design.md`, §D5). Atomic
+ * (see `docs/COLLECTIONS-MODEL.md`). Atomic
  * types are the ones that may occupy a single tensor cell: numbers, booleans,
  * strings, symbols, colors, function/expression values, and all
  * product/aggregate values (tuples, sets, dictionaries, records). List- and
@@ -812,7 +812,7 @@ export function staticCollectionDims(t: Readonly<Type>): number[] | null {
 
 /**
  * Rank/shape-aware broadcast result type (§D6.1 of
- * `docs/plans/2026-07-20-tensor-unification-design.md`): mirror the
+ * `docs/COLLECTIONS-MODEL.md`): mirror the
  * shape-bearing operands' statically-provable structure onto the broadcast
  * result, in the **dimensioned** encoding (`list<R^2x2>`), so a fixed-shape
  * source (`Sqrt(M)` with `M: matrix<2x2>`) types compatibly with `matrix`/
@@ -897,7 +897,7 @@ function collectionLeafType(t: Readonly<Type>): Type | null {
 
 /**
  * Overlap test for **deferred validation** (§D6.2 of
- * `docs/plans/2026-07-20-tensor-unification-design.md`): called after
+ * `docs/COLLECTIONS-MODEL.md`): called after
  * `.matches(param)` failed, for a collection-kind `param` (a `matrix`/
  * `vector`/`list<…>` signature parameter). Returns `true` when the operand's
  * static type does not *refute* conformance — i.e. the operand could still
@@ -1094,7 +1094,7 @@ export function couldBeNonRealNumber(t: Readonly<Type>): boolean {
  * unions/intersections, negations, broadcastable bases, nominal references)?
  *
  * This is the `callable` write-classifier of the state-event design
- * (`docs/plans/2026-08-09-state-event-invalidation-axes.md` §4): a value
+ * (`docs/EFFECTS-MODEL.md` §4): a value
  * write or def retype is callable-relevant iff either side's effective type
  * passes this test. It deliberately reaches FARTHER than `couldBeCallable`
  * in `effects-of.ts`: the effects projection can surface an arm stored

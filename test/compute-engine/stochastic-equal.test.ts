@@ -3,7 +3,7 @@ import { engine as ce } from '../utils';
 // The stochastic sampler backs the PROVER tier only: `IdenticallyEqual`
 // (`\equiv`) / `.isIdenticallyEqual()`. Arithmetic `=` / `.isEqual()` is the
 // cheap tier and is inert on a free-variable identity — pinned alongside the
-// first case below. See docs/plans/2026-08-04-cheap-equal-audit.md.
+// first case below. See docs/LANGUAGE-MODEL.md.
 describe('STOCHASTIC EQUALITY', () => {
   it('trig identity: sin²(x) + cos²(x) = 1', () => {
     const a = ce.parse('\\sin^2(x) + \\cos^2(x)');

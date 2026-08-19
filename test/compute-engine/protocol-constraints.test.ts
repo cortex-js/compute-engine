@@ -3,8 +3,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseType } from '../../src/common/type/parse';
 
 //
-// The `is` slot of a `where` clause — phase 4 of
-// `docs/plans/2026-08-12-protocols-design.md` (ruling P19), whose surface is
+// The `is` slot of a `where` clause (`docs/TYPE-SYSTEM.md`), whose surface is
 // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix A, "Protocol Constraints".
 //
 // `where T is Comparable` DECLARES freely (conformance is monotone — the

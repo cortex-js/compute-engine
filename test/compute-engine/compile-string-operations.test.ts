@@ -1,6 +1,6 @@
 /**
  * The compile-target matrix for the Strings **Phase 2** operators —
- * `docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D8.
+ * `docs/STRING_ROADMAP.md`, decision D8.
  *
  * Phase 2 adds the sequence-search family (`RangeOf`, `ContainsSequence`,
  * `StartsWith`, `EndsWith`), the string-specific operations (`StringReplace`,

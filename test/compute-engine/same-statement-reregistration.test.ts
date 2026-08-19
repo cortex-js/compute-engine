@@ -1,6 +1,6 @@
 /**
  * SAME-STATEMENT RE-REGISTRATION IS A NO-OP — linear-posture R1,
- * `docs/plans/2026-08-18-linear-posture-audit.md` §2 (finding F2/R1).
+ * `docs/CHECKPOINT-MODEL.md` (finding F2/R1).
  *
  * One Epsil `Declare*` statement registers its declarations two or three times
  * per batch: the static pre-pass canonicalizes it (and rolls its registrations

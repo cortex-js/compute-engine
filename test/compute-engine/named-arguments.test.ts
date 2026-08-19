@@ -5,7 +5,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 //
 // Named-argument calls — `f(rate: 0.05, years: 3)`.
 //
-// Design: `docs/plans/2026-08-12-named-arguments-design.md`, implementing
+// Design: `docs/LANGUAGE-MODEL.md`, implementing
 // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix C (rulings C1–C6, sub-rulings R1–R4).
 //
 // These tests exercise the BOX route: the surface syntax emits one

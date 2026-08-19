@@ -126,7 +126,7 @@ describe('a parameterless operand is rejected at every callback slot', () => {
   // The diagnostic is the declared slot's, on both halves. The EAGER route
   // (`validateArguments`) names the honest INSTANTIATED arrow — strictly
   // more informative than the pre-Design-E erased `function`
-  // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §8) — with
+  // (`docs/TYPE-SYSTEM.md`) — with
   // the slot's own result (`boolean` for a predicate, `unknown` for a key).
   // The LAZY route's non-callable rejection (`canonicalCallbackOperand`'s
   // `reject()`) keeps the stable `function` expected type: "this operand is

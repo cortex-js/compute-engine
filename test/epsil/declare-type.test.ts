@@ -205,7 +205,7 @@ describe('EPSIL TYPE DECLARATION DIAGNOSTICS', () => {
 
 //
 // GENERIC type aliases: `type alias Pair<T> = tuple<T, T>`
-// (`docs/plans/2026-08-04-generic-type-aliases-design.md`).
+// (`docs/TYPE-SYSTEM.md`).
 //
 // The clause rides the attributes bag as its source TEXT (A1) — never without
 // `alias -> True`, a shape the lowering cannot produce. The body parses with
@@ -1056,7 +1056,7 @@ describe('EPSIL TYPE NAME IN CALL POSITION', () => {
 
 //
 // Phase 1 — value constructors minted by a type declaration
-// (`docs/plans/2026-08-01-nominal-types-design.md` §4.1/§4.1b/§4.1c, D4/D4b/
+// (`docs/TYPE-SYSTEM.md`, D4/D4b/
 // D5/D10). Engine-level coverage lives in
 // `test/compute-engine/type-constructors.test.ts`; these are the Epsil
 // end-to-end shapes.

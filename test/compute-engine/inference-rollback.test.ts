@@ -7,8 +7,7 @@ import {
 import { sameBindingDef } from '../../src/compute-engine/boxed-expression/binders';
 
 //
-// Phase 2b acceptance suite — inference ROLLBACK FRAMES
-// (`docs/plans/2026-08-13-inference-tx-design.md`, phasing §2b).
+// Acceptance suite for inference ROLLBACK FRAMES (`docs/TYPE-SYSTEM.md`).
 //
 // `ce._withRolledBackInference(fn)` journals every inference-driven engine
 // mutation made while it runs and undoes them all — on normal return and on

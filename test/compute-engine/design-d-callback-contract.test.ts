@@ -21,7 +21,7 @@ import type { FunctionSignature, Type } from '../../src/common/type/types';
 /**
  * # The converted-callback family — behavioral contract under Design E
  *
- * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`. Design E
+ * `docs/TYPE-SYSTEM.md`. Design E
  * retired the `callback<S>` type constructor: a callback slot is now written
  * as the plain, effect-top arrow it always meant (`predicate: (T) any ->
  * boolean`), an operand is ADMITTED at such a slot unless it is provably
@@ -87,7 +87,7 @@ const XS = ['List', 1, 2, 3, 4] as const;
 
 describe('the `callback<…>` constructor is RETIRED (Design E §7)', () => {
   // Design D's five-clause contract dissolved with the constructor
-  // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`): admission
+  // (`docs/TYPE-SYSTEM.md`): admission
   // is the compatibility relation of §3, contextual typing triggers on plain
   // arrow slots, and there is nothing left to erase. What this block pins is
   // the DELETION itself.
@@ -157,7 +157,7 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
     const ce = new ComputeEngine();
     // Design E phase E1: the slot is an honest, effect-top arrow — the
     // `callback<S>` constructor is retired from converted signatures
-    // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §5).
+    // (`docs/TYPE-SYSTEM.md`).
     expect(ce.type(declaredSignature(ce, 'CountIf')).toString()).toBe(
       '(collection<T>, predicate: (T) any -> boolean) -> integer where T'
     );
@@ -440,7 +440,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
   it.each(CONVERTED)(
     '%s displays its honest declared signature',
     (op, declared) => {
-      // Design E §8 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`)
+      // Design E §8 (`docs/TYPE-SYSTEM.md`)
       // voided R-D5's premise: the arrow now STATES the (compatibility) contract,
       // so printing it claims no narrowing and there is nothing left to ground.
       // Declaration and display are one string, on all three surfaces.
@@ -463,7 +463,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
   // route free of the scope side effect `.canonical` would have had (it
   // DECLARES an unknown symbol).
   // The answer itself is now the honest declared signature (Design E §8,
-  // `docs/plans/2026-08-18-compatibility-admission-callbacks.md`); what this
+  // `docs/TYPE-SYSTEM.md`); what this
   // test is about — that all three routes agree on it — is unchanged.
   it.each(CONVERTED)(
     '%s answers on the box and parse routes',
@@ -512,7 +512,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
   );
 
   it.each(CONVERTED)('%s admits a NAMED, narrower callback', (op) => {
-    // Design E §3 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`):
+    // Design E §3 (`docs/TYPE-SYSTEM.md`):
     // admission asks whether the operand is provably UNUSABLE, not whether it
     // is a subtype of the slot. `IsPrime: (number) -> boolean` overlaps the
     // solved `(finite_integer) any -> boolean` at every position, so it enters
@@ -541,7 +541,7 @@ describe('phase 1: `Any` / `All` — the OPTIONAL callback slot', () => {
     // preserves the effect specifier — so the solved slot reads
     // `(integer) any -> boolean`, not the pure `(integer) -> boolean` the
     // `callback<S>` spelling used to carry
-    // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
+    // (`docs/TYPE-SYSTEM.md`).
     expect(
       typeToString(
         instantiateCallbackSlots(ARM, plan, [
@@ -620,7 +620,7 @@ describe('phase 1: `FlatMap` — R-D2′ result inference', () => {
     // into `solveArm`, which drops an arrow-slot operand only when every
     // variable in the slot's parameters also occurs at a data position — the
     // FlatMap case, hence the engine-level admission below (R-E3′, §12b item 1
-    // of `docs/plans/2026-08-18-compatibility-admission-callbacks.md`). The RAW
+    // of `docs/TYPE-SYSTEM.md`). The RAW
     // solver, which has no such notion, reports the conflict.
     expect(solved.failures).toEqual([
       {
@@ -677,8 +677,8 @@ describe('phase 1: `FlatMap` — R-D2′ result inference', () => {
   });
 
   it('a PROVABLY DISJOINT named callback is rejected at canonicalization', () => {
-    // Design E §3 rule 3 (`docs/plans/2026-08-18-compatibility-admission-
-    // callbacks.md`): a `string` parameter can never receive an element of a
+    // Compatibility admission (`docs/TYPE-SYSTEM.md`): a `string` parameter
+    // can never receive an element of a
     // `list<integer>`, so this operand is provably unusable and the call is
     // statically invalid — where Design D admitted it and let the mismatch
     // surface as a per-element error VALUE. The diagnostic names both arrows:
@@ -829,7 +829,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
   it.each(CONVERTED)(
     '%s displays its honest declared signature',
     (op, declared) => {
-      // Design E §8 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`):
+      // Design E §8 (`docs/TYPE-SYSTEM.md`):
       // the R-D5 projection is gone, so the `unknown` accumulator and the `where`
       // clause are printed as declared on all three display surfaces.
       const ce = new ComputeEngine();
@@ -1035,7 +1035,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
     // Design E §9 item 4 kept the UNION spelling (compatibility applies to the
     // arrow arm), and §8 retired the R-D5 projection — so the display is now
     // the declared union verbatim rather than the grounded `function | integer`
-    // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
+    // (`docs/TYPE-SYSTEM.md`).
     expect(ce.box('Partition').type.toString()).toBe(DECLARED);
     expect(
       ce.function('Signature', [ce.symbol('Partition')]).evaluate().string
@@ -1098,7 +1098,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
     // A non-function, non-integer operand is rejected as before; what changed
     // is that the diagnostic now names the INSTANTIATED union rather than the
     // erased `function | integer` (Design E §12b item 3,
-    // `docs/plans/2026-08-18-compatibility-admission-callbacks.md`) — strictly
+    // `docs/TYPE-SYSTEM.md`) — strictly
     // more informative, since it says which element type the predicate arm
     // would have been applied to.
     expect(ce.box(['Partition', 'cs', { str: 'banana' }]).toString()).toBe(
@@ -1119,7 +1119,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
   it('the planner reads the callback out of the UNION slot', () => {
     // The instantiated slot is the ARROW ARM alone — the union resolves before
     // the solve — and it keeps the effect-top specifier the Design E respelling
-    // gave it (§5, `docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
+    // gave it (§5, `docs/TYPE-SYSTEM.md`).
     const ARM = parseType(DECLARED) as FunctionSignature;
     const plan = contextualCallbackPlan(ARM, 2)!;
     expect(plan.callbacks.map((c) => c.index)).toEqual([1]);
@@ -1342,7 +1342,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     // `contextualSlotSignature`: the trigger is now the PLAIN ARROW rather than
     // the retired `callback<S>` spelling, and the forced-resolution rule for a
     // union slot is carried over unchanged
-    // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`). An arrow
+    // (`docs/TYPE-SYSTEM.md`). An arrow
     // arm inside a union must be parenthesized, or its result swallows the
     // sibling arms.
     const cb = (spec: string) =>
@@ -1532,14 +1532,14 @@ describe('phase 2: route parity (box / Epsil / LaTeX)', () => {
 // this round originally added went out with the constructor: Design E deleted
 // `callback<S>`, so there is no longer a spelling for the subtype layer, the
 // argument-validation diagnostics or the dedup key to erase
-// (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §7).
+// (`docs/TYPE-SYSTEM.md`).
 //
 
 describe('runtime signature display is the HONEST declared polytype', () => {
   // R-D5 (ruled 2026-08-09) grounded every displayed signature that carried a
   // `callback<S>`, because printing the constructor's inner arrow would have
   // claimed a contravariant narrowing that admission did not perform. Design E
-  // §8 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`) voided
+  // §8 (`docs/TYPE-SYSTEM.md`) voided
   // that premise — the arrow now STATES the compatibility contract — and
   // deleted the projection outright, so declaration and display are one string
   // everywhere: `.type`, the `Signature` operator, `toJSON()`, the scope
@@ -1599,7 +1599,7 @@ describe('runtime signature display is the HONEST declared polytype', () => {
     const ce = new ComputeEngine();
     expect(ce.box('Add').type.toString()).toBe('(value+) -> value');
     // `Sort`'s comparator slots were ruled INTO the sweep (Design E §9 item 6,
-    // `docs/plans/2026-08-18-compatibility-admission-callbacks.md`) with the
+    // `docs/TYPE-SYSTEM.md`) with the
     // union spelling chosen for dual-mode slots — a unary key extractor or a
     // binary comparator — so both arms now print their honest slot type where
     // they used to print the bare `function`. `Sort` gained the leading
@@ -1631,7 +1631,7 @@ describe('runtime signature display is the HONEST declared polytype', () => {
     // …and the same for a user's own callback-bearing polytype, on the VALUE
     // definition surface: it now prints what its author wrote, where R-D5 used
     // to project it to `(collection, p: function) -> integer` (Design E §8,
-    // `docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
+    // `docs/TYPE-SYSTEM.md`).
     const MY_COUNT =
       '(collection<T>, p: (T) any -> boolean) -> integer where T';
     ce.declare('myCount', MY_COUNT);
@@ -1805,7 +1805,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
 // this round added for the `callback<S>` spelling itself — its ground stamp
 // and its display cache's re-grounding — went out with the constructor and
 // its display projection (Design E §7/§8,
-// `docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
+// `docs/TYPE-SYSTEM.md`).
 //
 
 describe('effects: an undeclared symbol at a converted slot reads `any`', () => {

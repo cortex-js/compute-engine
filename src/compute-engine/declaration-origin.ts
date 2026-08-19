@@ -3,7 +3,7 @@ import type { DeclarationOrigin } from '../common/type/types.js';
 /**
  * The REDEFINITION DISCIPLINE's runtime tier, shared by the type registry
  * (`engine-declarations.ts`) and the protocol registry (`engine-protocols.ts`)
- * — `docs/plans/2026-08-14-redefinition-discipline.md`.
+ * — `docs/TYPE-SYSTEM.md`.
  *
  * The rule: within ONE compilation unit (one Epsil program, i.e. one
  * `executeEpsil` batch) a second declaration of a name is an error; ACROSS
@@ -159,7 +159,7 @@ function sameStatement(a: DeclarationOrigin, b: DeclarationOrigin): boolean {
  * (e.g. a type record's `def` is set): a stamp on an unfulfilled placeholder
  * would otherwise skip the registration that was about to fulfill it.
  *
- * Provenance: `docs/plans/2026-08-18-linear-posture-audit.md` §2, finding
+ * Provenance: `docs/CHECKPOINT-MODEL.md`, finding
  * F2/R1 (~1.2 ms of `resettleTypeConformances` per `type` statement with zero
  * redefinition anywhere).
  */
@@ -187,7 +187,7 @@ export function isSameStatementReRegistration(
  * the program source, the same convention every `ParsingDiagnostic.range`
  * uses. A hand-built MathJSON operand carries no offsets, hence the fallback.
  *
- * See `docs/plans/2026-08-14-redefinition-discipline.md`.
+ * See `docs/TYPE-SYSTEM.md`.
  */
 function firstSite(existing: DeclarationOrigin): string {
   const range = existing.firstRange;

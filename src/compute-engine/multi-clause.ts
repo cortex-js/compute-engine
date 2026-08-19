@@ -72,9 +72,8 @@ import {
 import { journalDefinitionRecord } from './boxed-expression/boxed-value-definition.js';
 
 /**
- * Multi-clause function definitions — the engine half of
- * `docs/plans/2026-08-01-function-polymorphism-design.md` (Phase 1;
- * implementation plan `…-phase1-plan.md`).
+ * Multi-clause function definitions — the engine half of the contract in
+ * `docs/TYPE-SYSTEM.md`.
  *
  * A `DefineFunction` statement ACCUMULATES clauses on a symbol's operator
  * definition; `Assign` keeps full-replace semantics everywhere (D6). The
@@ -98,7 +97,7 @@ export interface FunctionClause {
   literal: Expression;
   /** REDEFINITION DISCIPLINE — which compilation unit and which defining
    * STATEMENT installed this clause, when it came in on the Epsil statement
-   * route (`docs/plans/2026-08-14-redefinition-discipline.md`). Present only
+   * route (`docs/TYPE-SYSTEM.md`). Present only
    * for a clause defined by an Epsil statement while a batch was live; a box-
    * route or host-API definition leaves it absent, which is what keeps those
    * routes freely replaceable. Consulted only when a later clause would
@@ -869,8 +868,8 @@ export function defineFunctionClause(
     // `function h(x: integer) -> integer { x }` kept `pure` on the signature,
     // and redeclaring it `random` was refused as `incompatible-type` against
     // the contract the author had just rewritten away. Cross-unit redefinition
-    // has REPLACEMENT semantics (`docs/plans/2026-08-14-redefinition-
-    // discipline.md`, "Across units"), so the incoming statement is the whole
+    // has REPLACEMENT semantics (`docs/TYPE-SYSTEM.md`), so the incoming
+    // statement is the whole
     // truth about its own effects.
     //
     // Only when there is no author DECLARATION in force: under

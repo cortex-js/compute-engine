@@ -496,7 +496,7 @@ export function declareSymbolValue(
   // every later one. A no-op outside a boxing construction, and for any name
   // the construction did not transiently auto-declare.
   // (First-boxing binding divergence, Tycho item 178(a)+(c) —
-  // `docs/plans/2026-08-13-first-boxing-binding-divergence.md`.)
+  // `docs/SCOPING-MODEL.md`.)
   ce._boxingState.noteDeclarationIn(scope, name);
 
   // State event: `shadowsCallable` must be captured BEFORE the placeholder
@@ -750,7 +750,7 @@ export function declareType(
     /** The declaring statement's identity, when this registration comes from
      * an Epsil `type` STATEMENT running inside a batch — the redefinition
      * discipline's runtime stamp
-     * (`docs/plans/2026-08-14-redefinition-discipline.md`). Absent on the box
+     * (`docs/TYPE-SYSTEM.md`). Absent on the box
      * route and on the host `ce.declareType()` API, whose records stay
      * unstamped and freely replaceable. */
     origin?: DeclarationOrigin;
@@ -804,7 +804,7 @@ export function declareType(
 
   // Is the type already defined? Types live in the ENGINE-LEVEL registry —
   // one namespace per engine, not lexically scoped
-  // (`docs/plans/2026-08-10-global-type-registry.md`).
+  // (`docs/TYPE-SYSTEM.md`).
   //
   // The VALUE half splits across two scopes:
   //
@@ -839,7 +839,7 @@ export function declareType(
   // namespace is touched: the replacement path below re-opens the existing
   // record IN PLACE, so a rejected duplicate that had started writing would
   // damage the first declaration and every type holding its record. See
-  // `docs/plans/2026-08-14-redefinition-discipline.md`.
+  // `docs/TYPE-SYSTEM.md`.
   if (existing !== undefined)
     checkSameUnitRedefinition('type', name, existing._declOrigin, origin);
 
@@ -857,7 +857,7 @@ export function declareType(
   // or not, it has no `def`) on the fulfilment path below; an unstamped
   // registration (the box route, a host `ce.declareType()`) never matches, so
   // those routes keep their replace semantics.
-  // Provenance: `docs/plans/2026-08-18-linear-posture-audit.md` §2 (R1).
+  // Provenance: `docs/CHECKPOINT-MODEL.md` (R1).
   if (
     existing !== undefined &&
     existing.def !== undefined &&
@@ -1334,7 +1334,7 @@ export function declareSumType(
     /** See `declareType`'s option of the same name. ALL N+1 names this one
      * statement registers carry the SAME origin: the statement owns every name
      * it declares, so a collision on any of them is one collision, reported
-     * once (`docs/plans/2026-08-14-redefinition-discipline.md`, "the
+     * once (`docs/TYPE-SYSTEM.md`, "the
      * generated-name rule"). */
     origin?: DeclarationOrigin;
   } = {}
@@ -1375,7 +1375,7 @@ export function declareSumType(
   // discipline's own `type-redefinition` rather than A5's "already names a
   // type"; and the first throw aborts the statement, so a collision is
   // reported ONCE however many of its names collide. See
-  // `docs/plans/2026-08-14-redefinition-discipline.md`.
+  // `docs/TYPE-SYSTEM.md`.
   if (origin !== undefined)
     for (const claimed of [name, ...variants.map((v) => v.name)])
       checkSameUnitRedefinition(
@@ -2634,7 +2634,7 @@ export function assignFn(
       // established semantics.
       if (!d11 && current === 'unknown') adopted = promotedValueType();
       // Assignment NARROWING (user-ruled 2026-08-13; the phase-3 question of
-      // docs/plans/2026-08-13-inference-provenance-journal.md): when the
+      // docs/TYPE-SYSTEM.md): when the
       // assigned value's type strictly REFINES a use-inferred guess (`x·v`
       // inferred `v: number`, now `v := 5`), adopt the value's promoted type
       // instead of keeping the wider guess — landing exactly where the

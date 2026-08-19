@@ -12,7 +12,7 @@ import {
  * Record one write to a definition's type (or an operator definition's
  * signature) in its provenance history — see `TypeProvenanceEntry` in
  * `types-definitions.ts` and the phase-1 design in
- * `docs/plans/2026-08-13-inference-provenance-journal.md`.
+ * `docs/TYPE-SYSTEM.md`.
  *
  * Callers only record writes that actually changed the type (the write sites
  * skip no-op re-inferences via reference equality), so the history stays

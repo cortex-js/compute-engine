@@ -5,7 +5,7 @@ import type { FunctionSignature, Type } from './types.js';
 
 /**
  * The DISJOINTNESS half of **compatibility admission** for callback operands
- * (Design E §3, `docs/plans/2026-08-18-compatibility-admission-callbacks.md`
+ * (Design E §3, `docs/TYPE-SYSTEM.md`
  * — rules 1, 3 and 4).
  *
  * A callback operand at an arrow-typed parameter slot is admitted unless it

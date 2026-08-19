@@ -127,7 +127,7 @@ export class EffectContractError extends Error {
     readonly inferred: EffectSet | undefined,
     /** Where the violated contract was STATED, when the effects-axis
      * provenance history recorded it (a post-construction declaration —
-     * `docs/plans/2026-08-13-effects-axis-provenance.md`). `undefined` for
+     * `docs/EFFECTS-MODEL.md`). `undefined` for
      * a construction-stated contract, which records no entry. Used for
      * RENDERING only (the escape rule of the rollback-frame design): the
      * message and the Epsil diagnostic show its `toString()`, and no
@@ -414,7 +414,7 @@ export function matchesDeclaredTypeAxes(
 
   // A `Function` LITERAL under a GENERIC declaration is judged by the
   // generic-literals acceptance rule (§2.4 of
-  // `docs/plans/2026-08-04-generic-function-literals-design.md`), NOT by
+  // `docs/TYPE-SYSTEM.md`), NOT by
   // `Ground <: Poly` — which is false (D3) and would reject every generic
   // literal, as the retired D7 gate did. Under erasure (G1) the literal is an
   // untyped lambda with the polytype as its call-site contract, so the axes
@@ -500,7 +500,7 @@ function typeAxesOf(sig: FunctionSignature): Type {
 
 /**
  * The generic-literal ACCEPTANCE RULE (§2.4 of
- * `docs/plans/2026-08-04-generic-function-literals-design.md`), shared by every
+ * `docs/TYPE-SYSTEM.md`), shared by every
  * declaration-boundary route.
  *
  * Rules 1 (arity, `assertFunctionLiteralArity`) and 2 (effects,

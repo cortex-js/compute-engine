@@ -90,7 +90,7 @@ import { journalDefinitionRecord } from './boxed-expression/boxed-value-definiti
 // Protocols are engine-global, like types, but protocol names are not types:
 // they never
 // enter `_typeRegistry`, `knownTypeNames`, or the type resolver.
-// `docs/plans/2026-08-12-protocols-design.md` records the full design.
+// `docs/TYPE-SYSTEM.md` records the full design.
 //
 
 /** `Self` is a textual substitution token, never a declarable type. It must
@@ -473,7 +473,7 @@ function conformanceTargetProblem(
  * The primitive `type` declares NO conformances — by ruling, not by accident:
  * `Conforms` reads a type-VALUE subject as asking about the HELD type, and
  * that branch is unambiguous only while the value's own type conforms to
- * nothing (`docs/plans/2026-08-18-first-class-types.md` §3.3).
+ * nothing (`docs/TYPE-SYSTEM.md`).
  *
  * Both routes that create a conformance edge must apply this, or the
  * invariant holds only for the one that does: the Epsil `type X is P`
@@ -498,7 +498,7 @@ function conformanceTargetProblem(
  * protocol. `Conforms` reads a type-VALUE subject as asking about the type
  * it HOLDS, and that branch is unambiguous only while the value's own
  * type conforms to nothing
- * (`docs/plans/2026-08-18-first-class-types.md` §3.3).
+ * (`docs/TYPE-SYSTEM.md`).
  *
  * Deliberately NOT caught here, verified harmless: a NOMINAL wrapper
  * (`ce.declareType('TNom', 'type')`) may conform — its values are TAGGED
@@ -3908,7 +3908,7 @@ function dispatcherDefinition(
  * against. Without the names, no name matches and the call is rejected instead
  * of dispatched; with them, `dispatcherCanonical` keeps reading the receiver as
  * `ops[0]` unchanged, whatever position the author wrote it in. See
- * `docs/plans/2026-08-12-named-arguments-design.md` §5 (ruling C6).
+ * `docs/LANGUAGE-MODEL.md` (ruling C6).
  *
  * Several protocols may declare a member of the same name with differently
  * named parameters. One dispatcher serves them all, so a position they do not

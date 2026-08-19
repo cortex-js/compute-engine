@@ -5,7 +5,7 @@ import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 
 //
 // Phase 0a of the mutable-objects plan
-// (`docs/plans/2026-08-13-mutable-objects-implementation-plan.md` §0a),
+// (`docs/TYPE-SYSTEM.md`),
 // whose normative spec is `docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B,
 // "Changing a field is an effect":
 //

@@ -59,7 +59,7 @@ function roundEstimateToError(
  * to be a sub-stream rather than `ce._random` because the sampling loop below
  * is deadline-truncated — charging its samples to the frame would make replay
  * depend on wall-clock time. See
- * `docs/plans/2026-07-28-derived-substreams.md`.
+ * `docs/RANDOMNESS-MODEL.md`.
  *
  * The 32-sample all-non-finite probe draws from the same source, deliberately:
  * it is part of the estimator's deterministic behavior, and excluding it would

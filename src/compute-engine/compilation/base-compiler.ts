@@ -1081,7 +1081,7 @@ export class BaseCompiler {
     // no runtime representation on any target, and the type-algebra
     // operators consult the engine's type registry, which compiled code does
     // not carry. This is the SHARED boundary the design prescribes
-    // (`docs/plans/2026-08-18-first-class-types.md` §3.3): one gate covers
+    // (`docs/TYPE-SYSTEM.md`): one gate covers
     // every target — including `interval-js`, whose unknown-operator path
     // emits empty code instead of rejecting (ROADMAP.md, "The `interval-js`
     // compile target emits EMPTY code"), and custom registered targets. Two
@@ -1379,7 +1379,7 @@ export class BaseCompiler {
    * Consulted by the analysis and the emitters through the three gates
    * `strictLanes` (strict, auto), `complexDiscipline` (complex) and
    * `promotionActive`/`runtimeRealGuards` (auto, complex); see
-   * `docs/plans/2026-08-16-compile-complex-mode.md` §2 for the disciplines.
+   * `docs/COMPILATION-MODEL.md` for the disciplines.
    */
   private static _mode: CompileMode = 'strict';
 
@@ -1391,7 +1391,7 @@ export class BaseCompiler {
    * Whether the compilation in progress runs under the STRICT discipline's
    * binding-boundary rule: a complex-shaped value reaching a binding the
    * compilation shaped real is a `LaneMismatch` decline (design §3,
-   * `docs/plans/2026-08-16-compile-complex-mode.md`), never a specialization
+   * `docs/COMPILATION-MODEL.md`), never a specialization
    * or a silent real-lane emission.
    *
    * In force for `mode: 'strict'` and for `mode: 'auto'`, whose FIRST attempt
@@ -1603,7 +1603,7 @@ export class BaseCompiler {
   }
 
   /**
-   * The D2/D6 RUNTIME RULE (design §8, `docs/plans/2026-08-16-compile-complex-mode.md`)
+   * The D2/D6 RUNTIME RULE (design §8, `docs/COMPILATION-MODEL.md`)
    * around a head `h` whose lowering is real-only — an ordering comparison,
    * an integer-only head (`Floor`, `Mod`, …), a real-only library helper
    * (`Erf`, …): when some SCALAR operand may be complex at run time (a
@@ -3590,7 +3590,7 @@ export class BaseCompiler {
     // grapheme segmentation, and GLSL/WGSL have no text at all, so both decline
     // here instead of emitting a target string that would then be compared with
     // the wrong order or indexed by the wrong unit.
-    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+    // (`docs/STRING_ROADMAP.md`, decision D13.)
     if (isCharacter(expr)) {
       if (target.character === undefined)
         throw new Error(
@@ -4029,7 +4029,7 @@ export class BaseCompiler {
     // merely UNKNOWN sign over a real kernel (`Sqrt(x)`) is not complex-valued
     // by `isComplexValued`'s carve-out, so `Less(Sqrt(x), 2)` still compiles.
     if (BaseCompiler.ORDERING_HEADS.has(h)) {
-      // D2 (design §8, `docs/plans/2026-08-16-compile-complex-mode.md`): an
+      // D2 (design §8, `docs/COMPILATION-MODEL.md`): an
       // operand that MAY be complex — a `complex`-typed symbol, a wide binding
       // under the complex discipline, a promoted radical — takes the RUNTIME
       // rule (bind once, compare the real parts when every imaginary part is
@@ -4220,7 +4220,7 @@ export class BaseCompiler {
           // wrong answer behind `success: true`. Declining here lets the head
           // fall through to the target's own ordering codegen, which emits a
           // code-point comparator on JavaScript and fails closed elsewhere.
-          // (`docs/plans/2026-08-16-string-phase1-character-type.md`, D8/D13.)
+          // (`docs/STRING_ROADMAP.md`, D8/D13.)
           const orderingOverCharacter =
             isRelationalOperator(h) && args.some(isProvablyCharacterOperand);
           // Compile as an operator (only for non-collection arguments). A
@@ -4655,7 +4655,7 @@ export class BaseCompiler {
         );
       // A condition that may be an indexed collection at run time selects
       // ELEMENT-WISE (`np.select`, R1–R4 of
-      // `docs/plans/2026-07-27-elementwise-which-design.md`): the target lowers
+      // `docs/BROADCAST-MODEL.md`): the target lowers
       // the whole clause list to its own selection helper. Consulted BEFORE the
       // target's `functions` entry (as in the `If` branch above), so a target
       // that has both — GPU, interval-js — gets the hook first. `null` — every
@@ -4969,7 +4969,7 @@ export class BaseCompiler {
     // mapping, which would otherwise compile the protocol-naming `Field`
     // operand and die inside it. When the dispatch tier declines, fail closed
     // for the whole unit rather than falling through to the generic `Apply`
-    // lowering (ruled 2026-08-12, `docs/plans/2026-08-12-protocol-compilation.md`).
+    // lowering (ruled 2026-08-12, `docs/COMPILATION-MODEL.md`).
     if (h === 'Apply' && args.length >= 2 && isFunction(args[0], 'Field')) {
       const fieldOps = args[0].ops;
       const record = protocolOfSymbol(engine, fieldOps[0]);
@@ -6488,7 +6488,7 @@ export class BaseCompiler {
    * whose enforcement the emitted code would silently drop.
    *
    * Under the annotation-as-contract ruling
-   * (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ruling 2) an
+   * (`docs/TYPE-SYSTEM.md`, ruling 2) an
    * annotated parameter must error LOUDLY on an argument that does not fit:
    * the interpreter applies the literal through `Apply`, which validates each
    * argument against its `Typed` annotation and yields an `Error` VALUE in the
@@ -7685,7 +7685,7 @@ export class BaseCompiler {
         // interpreter's own segmenter, so segment first and iterate the array.
         // Only JavaScript has that helper; every other target declines rather
         // than emit the code-point loop.
-        // (`docs/plans/2026-08-16-string-phase1-character-type.md`, D13.)
+        // (`docs/STRING_ROADMAP.md`, D13.)
         if (target.language !== 'javascript')
           throw new Error(
             `Cannot iterate a string on target '${target.language ?? '?'}': ` +
@@ -9716,7 +9716,7 @@ export class BaseCompiler {
 
   // ───────────────────────────────────────────────────────────────────────
   // `Match` compilation (Epsil structural pattern matching, Phase 4 —
-  // docs/plans/2026-07-12-cortex-match-design.md §5).
+  // docs/LANGUAGE-MODEL.md §5).
   //
   // Compilation reuses the classification ladder from `match-dispatch.ts`
   // (`getMatchPlan`): tier 0/1 (constant / literal / pin-of-constant) dispatch,
@@ -13303,7 +13303,7 @@ export class BaseCompiler {
    * for a compile reason — the reference analysis is guarded.
    *
    * The runner honors the compiled runner's value contract in both
-   * directions (design D7, `docs/plans/2026-08-16-compile-complex-mode.md`
+   * directions (design D7, `docs/COMPILATION-MODEL.md`
    * §8): each `vars` value is declared from its RUNTIME SHAPE (`complex` for
    * a `{re, im}` object, `number` for a number), and a scalar result comes
    * back as a plain `number` when its imaginary part is exactly zero, as a

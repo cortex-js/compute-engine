@@ -4,7 +4,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 /**
  * First-boxing binding divergence (Tycho items 178(a) and 178(c) — two
  * surfaces of one defect; design record:
- * `docs/plans/2026-08-13-first-boxing-binding-divergence.md`).
+ * `docs/SCOPING-MODEL.md`).
  *
  * The invariant under test: boxing the same MathJSON twice on the same
  * engine produces `isSame` expressions — including the FIRST-ever boxing of

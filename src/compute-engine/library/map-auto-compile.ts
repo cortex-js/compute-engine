@@ -32,7 +32,7 @@ import type { Interval } from './map-exact-proof.js';
  * (`ce._semanticVersion` + per-definition `_writeVersion`), with silent
  * per-element interpreter fallback.
  *
- * Design: `docs/plans/2026-07-19-map-auto-compile-design.md` (ratified
+ * Design: `docs/COMPILATION-MODEL.md` (ratified
  * 2026-07-19). The cache is keyed on the **rewrapped** `Map` instance, which
  * is stable per logical Map because `lazyMapNumericApproximation` memoizes
  * the rewrap (see `collection-utils.ts`); `subs()`/re-box copies are new
@@ -42,7 +42,7 @@ import type { Interval } from './map-exact-proof.js';
  *
  * - the **marked** (float) tier above, gated on the `Block(N(…))` marker and
  *   restricted to machine precision;
- * - the **exact** tier (`docs/plans/2026-07-31-exact-map-drain-compile-design.md`,
+ * - the **exact** tier (`docs/COMPILATION-MODEL.md`,
  *   ratified 2026-07-31): an UNMARKED broadcast-shaped lambda whose element
  *   function is provably integer-closed and overflow-free
  *   (`map-exact-proof.ts`) compiles too, and its results are re-boxed as
@@ -177,7 +177,7 @@ function markedMapLambda(
 // existed), and then the `pure: false` check that had subsumed it.
 //
 // Random draws inside a compiled `Map` are a REQUIREMENT of the 2026-07-25
-// Random family redesign (`docs/plans/2026-07-25-random-signature-redesign.md`
+// Random family redesign (`docs/RANDOMNESS-MODEL.md`
 // §6), not a follow-up: per-sample-point draws must stay in the hot path. The
 // divergence the gate stood on is gone with it — `ce.randomSeed` and the
 // compile-time bake path no longer exist, and every compiled draw goes through
@@ -603,7 +603,7 @@ export function mapAutoCompileRunner(
     // counts as a compile attempt, so it cannot burn the instance's
     // permanent no-compile state. (Rulings R1 "gated on a proof, not a
     // marker" and R4 "precision independence" in
-    // docs/plans/2026-07-31-exact-map-drain-compile-design.md.)
+    // docs/COMPILATION-MODEL.md.)
     const shape = exactTierShape(ce, expr);
     if (shape === undefined) return undefined;
     // Size floor: see `MIN_EXACT_COMPILE_COUNT`.

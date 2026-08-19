@@ -2,7 +2,7 @@
  * COMPILED element-wise `Which`/`If` selection (`_SYS.select`).
  *
  * The interpreter side landed 2026-07-27 (ratified spec:
- * `docs/plans/2026-07-27-elementwise-which-design.md`, R1–R4); this is the
+ * `docs/BROADCAST-MODEL.md`, R1–R4); this is the
  * JavaScript compile target's lowering of the same semantics. Tycho compiles
  * its drawing paths, so a piecewise-over-lists in a plotted expression hits
  * the compile path, which used to fail closed on a non-scalar condition.

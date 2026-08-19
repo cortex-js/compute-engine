@@ -34,7 +34,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  *
  * RESOLUTION for half 2 (ruled 2026-08-15, SUPERSEDED 2026-08-16): the
  * opt-in `complexPromotion` was the first answer. The compile-mode migration
- * (`docs/plans/2026-08-16-compile-complex-mode.md`, step 4) then made
+ * (`docs/COMPILATION-MODEL.md`, step 4) then made
  * promotion the DEFAULT: `mode: 'auto'` on `javascript`/`python` promotes
  * `Sqrt`/`Ln`/`Log` of an operand of unknown sign, and an ordering comparison
  * over such a value compiles under the D2 runtime rule instead of declining,

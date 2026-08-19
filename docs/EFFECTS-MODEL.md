@@ -67,7 +67,7 @@ v3 incorporated the round-2 review. Ratified decisions:
 **(b′ — supersedes v2's (b))** `RandomExpression` keeps raw `Math.random()`
 and is represented by the new `entropy` label — the v2 ruling to migrate it
 onto the seeded stream is **withdrawn**, deferring to
-`docs/plans/2026-07-28-derived-substreams.md` §7 (see "Randomness shapes");
+`docs/RANDOMNESS-MODEL.md` §7 (see "Randomness shapes");
 **(c)** unannotated function parameters keep the optimistic ruling —
 *annotation gets the contract*.
 
@@ -95,7 +95,7 @@ ruled **handler-backed** at the kernel boundary
 Stage 0 (assignment-time flag inference,
 `inferLambdaFlags`) shipped in `503728ed` (implementation + pinning tests,
 verified). Companions: `RANDOMNESS-MODEL.md` (frames, replay, lazy
-materialization) and `docs/plans/2026-07-28-derived-substreams.md` (the
+materialization) and `docs/RANDOMNESS-MODEL.md` (the
 estimator sub-stream design this document defers to for Monte-Carlo
 integration, `stochasticEqual`, and `RandomExpression`).
 
@@ -1400,7 +1400,7 @@ What it is — a **projection instruction, not a type variable**:
 - **Motivation drift, recorded honestly.** Protocol requirements *are*
   bodiless declared signatures — the corner this section called rare.
   The derived dispatcher effect unions built for mutable objects
-  (`docs/plans/2026-08-13-mutable-objects-implementation-plan.md`
+  (`docs/TYPE-SYSTEM.md`
   Phase 0a: `_deriveEffects`, conformance-version memo keys, the
   widening-guard rollback) are projection extended to dispatch, paid
   for in cache-invalidation machinery rather than type machinery. If a

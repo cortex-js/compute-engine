@@ -8,7 +8,7 @@ import type {
 
 //
 // Inference provenance (phase 1 of
-// docs/plans/2026-08-13-inference-provenance-journal.md): every write of
+// docs/TYPE-SYSTEM.md): every write of
 // inference evidence onto a definition's type records WHAT was installed, by
 // WHICH mechanism, and — for writes triggered by canonicalizing an
 // expression — the expression that triggered it. The history lives on the

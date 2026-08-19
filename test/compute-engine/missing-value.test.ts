@@ -5,7 +5,7 @@ import { parseType } from '../../src/common/type/parse';
 /**
  * Missing-Value Typing — Phase P0 (primitives & lattice).
  *
- * Spec: docs/plans/2026-07-22-missing-value-typing-design.md (revision 6).
+ * Spec: docs/TYPE-SYSTEM.md (revision 6).
  * P0 is value-behavior-neutral: it introduces the `missing` unit type and the
  * `Missing` symbol, plus the subtype union-self-membership fix. No runtime
  * absence semantics yet (those are P1–P3).

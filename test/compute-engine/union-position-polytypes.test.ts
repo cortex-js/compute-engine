@@ -10,7 +10,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // RULE U — a type variable may occur in a UNION arm.
 //
 // The rank-1 generics fragment originally forbade every union position
-// (`docs/plans/2026-08-01-type-variables-design.md` §3, "bespoke inference
+// (`docs/TYPE-SYSTEM.md`, "bespoke inference
 // rules… future work"). The restriction was a fence, not a soundness result:
 // every consumer of a type already handles unions, and the only gap was the
 // solver's pattern walk. Rule U closes it:

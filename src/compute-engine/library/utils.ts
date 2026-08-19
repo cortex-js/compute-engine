@@ -1921,7 +1921,7 @@ export function canonicalBigop(
   // `box.ts`: `Sum`/`Product` declare their index operands with
   // `scoped: indexingSetSites(1, 'integer')`. What that buys, beyond deleting
   // this prologue, is that the index is bound in the operator's OWN scope on
-  // every route — see `docs/plans/2026-07-26-binder-mechanism-design.md`.
+  // every route — see `docs/SCOPING-MODEL.md`.
   //
   // A defensive fallback for a caller that did not come through the hook.
   const bigOpScope: Scope = scope ?? {

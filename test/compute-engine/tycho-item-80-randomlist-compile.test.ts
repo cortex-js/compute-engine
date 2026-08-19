@@ -8,7 +8,7 @@ import { foldSeed, frameDraw } from '../../src/compute-engine/numerics/random';
  * Tycho item 80 — the compiled eager-draw list, on the JavaScript target.
  *
  * The 2026-07-25 Random family redesign
- * (`docs/plans/2026-07-25-random-signature-redesign.md`) removed `RandomList`
+ * (`docs/RANDOMNESS-MODEL.md`) removed `RandomList`
  * and every per-operator seed argument, and with them the compile-time bake
  * machinery this suite used to pin (`ce.randomSeed`, `target.randomSeed`,
  * `randomState.counter`, `makeRandomList`'s three modes). `RandomList(n)`

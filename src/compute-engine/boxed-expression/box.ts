@@ -1020,7 +1020,7 @@ function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
  *
  * Admission is untouched by the stamp either way: an arrow slot admits by
  * COMPATIBILITY (Design E §3,
- * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`), and what is
+ * `docs/TYPE-SYSTEM.md`), and what is
  * annotated here is the author's own declared contract.
  */
 function declaredCallbackParamTypes(t: Type): DeclaredCallbackSlot | undefined {
@@ -1079,7 +1079,7 @@ function concreteCallbackParamType(t: Type): Type | undefined {
 
 /**
  * The SIGNATURE-driven trigger of the per-application element-type inference
- * (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ruling 1): a
+ * (`docs/TYPE-SYSTEM.md`, ruling 1): a
  * callee whose signature declares a concrete arrow-typed parameter annotates
  * an INLINE `Function` literal passed at that position with the declared
  * parameter types — a plain concrete arrow (see
@@ -1172,8 +1172,8 @@ function annotateFromDeclaredParams(
 }
 
 /**
- * The CONTEXTUAL-CALLBACK trigger (Design D, `docs/plans/2026-08-09-design-d-
- * generic-callback-signatures.md` §5): a POLYMORPHIC callee with a
+ * The CONTEXTUAL-CALLBACK trigger (`docs/TYPE-SYSTEM.md`): a POLYMORPHIC
+ * callee with a
  * contextual arrow slot annotates an INLINE `Function` literal at that slot with
  * `S`'s parameter types, instantiated from the sibling operands.
  *
@@ -1440,7 +1440,7 @@ const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
  *   explicit-contract-only: the signature-driven trigger admits them
  *   because an author wrote them; this trigger never will because no one
  *   did. (Design record: the union section of
- *   docs/plans/2026-08-08-lambda-param-element-inference.md.)
+ *   docs/TYPE-SYSTEM.md.)
  * - an ABSTRACT supertype — `scalar`, `value`, `expression`, `symbol`,
  *   `missing`, … These are union-like (`scalar` covers number, boolean and
  *   string), so stamping one poisons the whole application at
@@ -1523,7 +1523,7 @@ function makeCanonicalFunctionCore(
   // signature. (`Add` and `List` declare no parameter names, so a named call
   // to either correctly reports `argument-name-unknown` rather than silently
   // taking the fast path.) See
-  // `docs/plans/2026-08-12-named-arguments-design.md` §3.
+  // `docs/LANGUAGE-MODEL.md`
   const named = hasNamedArguments(ops);
 
   if (!named) {
@@ -2028,7 +2028,7 @@ function makeCanonicalFunctionCore(
   // canonical handler canonicalizes the body against it), and the rebinding of
   // the site afterwards, so the parse, `ce.box()` and `ce.function()` routes
   // agree about which binding the variable denotes.
-  // See `docs/plans/2026-07-26-binder-mechanism-design.md` §1.3.
+  // See `docs/SCOPING-MODEL.md`
   const sites = opDef.bindingSites;
   if (sites !== undefined && scope !== undefined)
     return ce._boxingState.withScopedRepair(scope, () =>
@@ -2222,7 +2222,7 @@ function applyOperatorDefinition(
   // Before ANY operand is boxed and before any operand type is read: a
   // declared arrow-typed parameter annotates an inline `Function` literal
   // passed at that position (the signature-driven trigger of
-  // `docs/plans/2026-08-08-lambda-param-element-inference.md`). Skipped when
+  // `docs/TYPE-SYSTEM.md`). Skipped when
   // the caller supplied already-boxed operands (a binder's pre-phase) and when
   // a `Spread` makes the positions uncertain.
   //
@@ -2510,7 +2510,7 @@ function applyOperatorDefinition(
 
 /**
  * Canonicalize a **binder**: an operator whose `scoped` flag is a
- * binding-site selector (`docs/plans/2026-07-26-binder-mechanism-design.md`
+ * binding-site selector (`docs/SCOPING-MODEL.md`
  * §1.3). Two phases, because a canonical handler both *needs* the bound
  * variable declared before it canonicalizes the body and *may reshape* the
  * operands.

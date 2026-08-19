@@ -93,7 +93,7 @@ export type PrimitiveType =
   // same reason `character` is: a pattern is not text, and `IsMatch(s, p)`
   // wants the two apart in its signature so a plain string cannot be passed
   // where a pattern is meant. See `docs/STRING_ROADMAP.md` (Phase 3) and
-  // `docs/plans/2026-08-17-string-phase3-regular-expressions.md` (D1).
+  // `docs/STRING_ROADMAP.md` (D1).
   | 'regexp'
   | 'color'
   // A type value: a type expression reified as a first-class runtime value
@@ -103,7 +103,7 @@ export type PrimitiveType =
   // marker (`<type_reference> ::= ("type")? <identifier>`), so the parser
   // disambiguates by one token of lookahead: `type` followed by an identifier
   // is a forward reference, bare `type` otherwise is this primitive. See
-  // `docs/plans/2026-08-18-first-class-types.md` (ruling R7).
+  // `docs/TYPE-SYSTEM.md` (ruling R7).
   | 'type'
   | 'expression'
   | 'unknown'
@@ -207,7 +207,7 @@ export type EffectSet = 'any' | EffectLabel[];
 export type TypeVariable = { kind: 'variable'; name: string };
 
 /** How a parameterized NOMINAL type relates two of its applications
- * (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §4).
+ * (`docs/TYPE-SYSTEM.md`).
  *
  * Declared inside a type-parameter clause (`type tree<out T> = …`); the words
  * are contextual there and are never reserved. Only a nominal declaration
@@ -451,8 +451,7 @@ export type TypeReference = {
    * NOMINAL application is the opposite: it is opaque, so it KEEPS its
    * arguments (see `args`).
    *
-   * See `docs/plans/2026-08-04-generic-type-aliases-design.md` and
-   * `docs/plans/2026-08-06-parameterized-nominal-types-design.md`. */
+   * See `docs/TYPE-SYSTEM.md`. */
   typeParams?: TypeParameter[];
 
   /** The type ARGUMENTS of an applied reference to a parameterized nominal
@@ -501,7 +500,7 @@ export type TypeReference = {
 
   /** REDEFINITION DISCIPLINE bookkeeping — which declaring STATEMENT, of which
    * compilation unit, this record came from
-   * (`docs/plans/2026-08-14-redefinition-discipline.md`). Present only on a
+   * (`docs/TYPE-SYSTEM.md`). Present only on a
    * record registered through an Epsil `type` STATEMENT while a batch was
    * live; the box route and the host `ce.declareType()` API leave it absent,
    * which is what makes their records freely replaceable. Metadata about the
@@ -513,7 +512,7 @@ export type TypeReference = {
 /**
  * Which compilation unit and which declaring statement a registry record came
  * from — the runtime half of the redefinition discipline
- * (`docs/plans/2026-08-14-redefinition-discipline.md`, "Mechanics").
+ * (`docs/TYPE-SYSTEM.md`, "Mechanics").
  *
  * A second declaration of a name with the SAME `batch` and a DIFFERENT
  * `statementId` is a within-unit redefinition and is refused; the same
@@ -654,7 +653,7 @@ export type Type =
  * <multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
  *
  * (The `callback<…>` constructor of Design D was RETIRED by Design E
- * (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §7): callback
+ * (`docs/TYPE-SYSTEM.md`): callback
  * slots are ordinary arrow types, admitted by COMPATIBILITY rather than
  * subtyping. The spelling now fails to parse, with a migration hint.)
  *
@@ -735,7 +734,7 @@ export type TypeResolver = {
  * (`(T) -> T where T: indexed_collection`), rank-1 (quantifiers top-level
  * only), solved by
  * local inference at each call site. See `src/epsil/docs/types.md` for the
- * language model and `docs/plans/2026-08-01-type-variables-design.md` for the
+ * language model and `docs/TYPE-SYSTEM.md` for the
  * design record.
  *
  * ### Future considerations:

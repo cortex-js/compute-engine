@@ -15,7 +15,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
 
 /**
  * Compile-mode migration, step 1 — PLUMBING
- * (`docs/plans/2026-08-16-compile-complex-mode.md` §9, step 1).
+ * (`docs/COMPILATION-MODEL.md`, step 1).
  *
  * What this step delivers, and what these tests pin:
  * - the `mode` option is accepted end to end (option → target →

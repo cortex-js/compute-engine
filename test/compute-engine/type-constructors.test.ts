@@ -4,7 +4,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 //
 // Phase 1 of the nominal-types design
-// (`docs/plans/2026-08-01-nominal-types-design.md`): a type declaration mints
+// (`docs/TYPE-SYSTEM.md`): a type declaration mints
 // a value-level CONSTRUCTOR of the same name, in the same scope.
 //
 //   type point = tuple<x: number, y: number>   →  point: (x: number, y: number) -> point

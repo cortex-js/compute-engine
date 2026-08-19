@@ -15,7 +15,7 @@ import {
 
 /**
  * First-class type values (`TypeFrom`, `Subtype` — plan:
- * `docs/plans/2026-08-18-first-class-types.md`).
+ * `docs/TYPE-SYSTEM.md`).
  *
  * A type value SETTLES at construction: its text is parsed, reduced, and
  * re-serialized, and the node becomes `TypeFrom("<reduced canonical text>")`.
@@ -94,7 +94,7 @@ export function settledTypeText(x: Expression): string | undefined {
  * static type honestly), but the comparison operators reject them — comparing
  * quantified types engages the existential matching machinery, deferred by
  * the plan's "Polytypes" section
- * (`docs/plans/2026-08-18-first-class-types.md`).
+ * (`docs/TYPE-SYSTEM.md`).
  */
 export function isPolytype(t: Type): boolean {
   return isPolymorphicType(t);
@@ -125,7 +125,7 @@ const VALUE_CONTAINER_HEADS: ReadonlySet<string> = new Set([
  * A VALUE FORM: a node whose precise type derives from its own literal
  * structure, so the type is EXACT and a failed `matches()` against it is a
  * definitive `False` (ruling R9,
- * `docs/plans/2026-08-18-first-class-types.md` §5). Number, string,
+ * `docs/TYPE-SYSTEM.md`). Number, string,
  * character and boolean literals; `Nothing` and `Missing` (both absence
  * markers are values whose type is exactly themselves); error values; settled
  * type values; regexp values; collection literals — lists, tuples, sets and

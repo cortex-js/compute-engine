@@ -111,7 +111,7 @@ function isImpureHead(ce: ComputeEngine, body: Expression): boolean {
  * The lowered/fused path evaluates the level's application directly, bypassing
  * the per-application `Typed`-parameter enforcement the interpreter performs
  * (`withEnforcedParams`). Under the annotation-as-contract ruling
- * (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ruling 2) an
+ * (`docs/TYPE-SYSTEM.md`, ruling 2) an
  * annotated literal must error LOUDLY on a violating element, so the gate may
  * only accept an annotated parameter when that enforcement cannot fire: the
  * source's element type is provable AND every element it claims already

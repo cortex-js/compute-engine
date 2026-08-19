@@ -136,7 +136,7 @@ export function stochasticEqual(
   // `b` because `stochasticEqual(a, b)` and `stochasticEqual(b, a)` are the
   // same question and must not sample differently. It consumes no frame
   // indices, so an `isEqual` in a seeded block does not shift a sibling
-  // `Random()` draw. See `docs/plans/2026-07-28-derived-substreams.md`.
+  // `Random()` draw. See `docs/RANDOMNESS-MODEL.md`.
   const draw = ce._substream(mixTags(a.hash ^ b.hash));
   for (let i = 0; i < NUM_RANDOM; i++) {
     const vars: Record<string, number> = {};

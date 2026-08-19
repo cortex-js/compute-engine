@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * Phase 3b of the type-variables design
- * (`docs/plans/2026-08-01-type-variables-design.md`): the two bounded
+ * (`docs/TYPE-SYSTEM.md`): the two bounded
  * identity-echo conversions whose operands are numeric / matrix-shaped.
  *
  *   Conjugate  `(number) -> number` + `type: ([z]) => z.type`

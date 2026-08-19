@@ -4,7 +4,7 @@ import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 
 //
-// Protocol PROPERTIES — phase 4 of `docs/plans/2026-08-12-protocols-design.md`
+// Protocol PROPERTIES — phase 4 of `docs/TYPE-SYSTEM.md`
 // (rulings P18, P2, P6) and `docs/TYPE_SYSTEM_ROADMAP.md` Appendix A,
 // "Properties".
 //

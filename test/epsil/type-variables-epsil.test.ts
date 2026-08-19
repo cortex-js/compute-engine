@@ -6,9 +6,9 @@ import { validEpsil } from '../utils';
 
 //
 // Epsil surface of the type-variable feature — the D13 probes of
-// `docs/plans/2026-08-01-type-variables-design.md` §11, restated for the
+// `docs/TYPE-SYSTEM.md`, restated for the
 // trailing `where` clause that replaced the `forall` prefix
-// (`docs/plans/2026-08-11-where-clause-type-constraints.md`).
+// (`docs/TYPE-SYSTEM.md`).
 //
 // D13 splits the surface three ways:
 //
@@ -100,7 +100,7 @@ describe('EPSIL `where` ANNOTATIONS (D13: full-literal positions)', () => {
 
   // SUPERSEDED by the generic-function-literals milestone (M1, phase 2): the
   // annotated `const`/`let` route (E3) now INSTALLS the literal
-  // (`docs/plans/2026-08-04-generic-function-literals-design.md` §2.4). The
+  // (`docs/TYPE-SYSTEM.md`). The
   // annotation still parses through the shared type DSL, as it always did.
   test('a function-literal body INSTALLS, and instantiates per call', () => {
     expect(parseDiagnostics('let f: (T) -> T where T = x => x')).toEqual([]);

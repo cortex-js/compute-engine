@@ -5,7 +5,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
  * Phase 4 of the Epsil `match` design
- * (docs/plans/2026-07-12-cortex-match-design.md §5): `compile()` support for the
+ * (docs/LANGUAGE-MODEL.md §5): `compile()` support for the
  * `Match` head. Tier 0/1 (constant / literal / pin-of-constant) compile to
  * chained ternaries (or an integer `switch` on JS), tier 2 (fixed-shape
  * `List`/`Tuple`) to arrow-IIFE destructuring on JS; tier 3 and anything a

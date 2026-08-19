@@ -17,7 +17,7 @@ const TESTS: [string, string][] = [
 // Two relations are equivalent when they have the same SOLUTION SET — an
 // identity question in the free variables of the operands, hence the PROVER
 // tier (`.isIdenticallyEqual()`). The cheap arithmetic tier (`.isEqual()`)
-// declines with `undefined`. See docs/plans/2026-08-04-cheap-equal-audit.md.
+// declines with `undefined`. See docs/LANGUAGE-MODEL.md.
 const EQUIVALENT_RELATIONS: [string, string][] = [
   ['2x+1=0', '2x=-1'],
   ['2x+1=0', 'x=-\\frac12'],
@@ -32,7 +32,7 @@ const EQUIVALENT_RELATIONS: [string, string][] = [
 // Identities in the free variables. These belong to the PROVER tier
 // (`IdenticallyEqual` / `.isIdenticallyEqual()`) — expand+simplify and
 // stochastic sampling. Arithmetic `=` / `.isEqual()` is the cheap tier and
-// stays inert on them. See docs/plans/2026-08-04-cheap-equal-audit.md.
+// stays inert on them. See docs/LANGUAGE-MODEL.md.
 const IDENTITIES: [string, string][] = [
   ['x^2', 'x\\times x'],
   ['(x+1)^2', 'x^2+2x+1'],

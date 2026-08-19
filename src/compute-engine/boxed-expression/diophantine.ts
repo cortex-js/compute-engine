@@ -30,7 +30,7 @@ import {
  *   diagonal, reducing to unit coefficients with a two-vs-one sign pattern) —
  *   the two complete parametric leg-swap families over ℤ.
  *
- * Result contract (see `docs/plans/2026-07-04-solve-domain-design.md`, Phase 3):
+ * Result contract (see `ARCHITECTURE.md`, Phase 3):
  * - all unknowns constrained to a **bounded finite integer domain** → a
  *   concrete list of `Tuple`s (the members the family produces inside the box,
  *   each honoring the domain's step via `contains` and exact-confirmed);

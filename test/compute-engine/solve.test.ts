@@ -2218,7 +2218,7 @@ describe('Solve sees through list indexing', () => {
 // = 0, x)` with `x:=5` became `Solve(1=0,x)` -> []. The unknown is shielded by
 // shadow-declaring it VALUELESS across the transformer reduction, so it reduces
 // as a genuine unknown. See §B in
-// docs/plans/2026-07-23-simplify-together-scoping.md.
+// docs/SCOPING-MODEL.md.
 describe('Solve shields a value-bound unknown from a nested transformer', () => {
   test('Solve(Simplify(x-2)==0, x) with x:=5', () => {
     const ce = new ComputeEngine();

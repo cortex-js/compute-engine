@@ -5,7 +5,7 @@ import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 
 //
 // Phase 2 of the function-polymorphism design
-// (docs/plans/2026-08-01-function-polymorphism-design.md §4.5–§4.6): the
+// (docs/TYPE-SYSTEM.md §4.5–§4.6): the
 // Epsil surface of multi-clause function definitions.
 //
 // - Literal parameters (`f(0) = 1`, `f("yes") = …`, `f(true) = …`) in BOTH

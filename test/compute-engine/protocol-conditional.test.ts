@@ -5,7 +5,7 @@ import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 
 //
 // CONDITIONAL CONFORMANCE — phase 5 of
-// `docs/plans/2026-08-12-protocols-design.md`, surface spec
+// `docs/TYPE-SYSTEM.md`, surface spec
 // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix A "Conditional Conformance".
 //
 //   type list<T> is Comparable where T is Comparable { … }

@@ -11,7 +11,7 @@ import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascrip
  * | Arithmetic | `Equal` (`=`) | `.isEqual()` |
  * | Identity | `IdenticallyEqual` (`\equiv`) | `.isIdenticallyEqual()` |
  *
- * See `docs/plans/2026-08-04-cheap-equal-audit.md`.
+ * See `docs/LANGUAGE-MODEL.md`.
  */
 
 const ce = new ComputeEngine();

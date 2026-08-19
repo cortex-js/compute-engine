@@ -8,7 +8,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // symbol's type — the second half of a two-site type conflict. The bare
 // message shows only the failing use; the note shows where the conflicting
 // type came from (`_typeProvenance`, see
-// docs/plans/2026-08-13-inference-provenance-journal.md).
+// docs/TYPE-SYSTEM.md).
 //
 // Resolution is BINDING-ACCURATE (user-ruled 2026-08-13, option b): the
 // engine attaches the faulted operand itself as the error's site operand, so

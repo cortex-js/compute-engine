@@ -1237,7 +1237,7 @@ export class Parser {
 
   /**
    * Annotation-bound parameters (the "lambda lift") — see
-   * `docs/plans/2026-08-08-annotation-lambda-lift.md`.
+   * `docs/LANGUAGE-MODEL.md`.
    *
    * A parameter name binds wherever it appears. When a declaration's
    * annotation is a LITERAL function type whose parameters are all named and
@@ -3165,7 +3165,7 @@ export class Parser {
   //
   // Cases are separated like block statements (a linebreak or `;`). Each case
   // is `pattern [if guard] => body`. See the `parsePattern`/`patternize`
-  // helpers below and `docs/plans/2026-07-12-cortex-match-design.md` §2–3.
+  // helpers below and `docs/LANGUAGE-MODEL.md`–3.
   //
 
   private parseMatch(): MathJsonExpression | null {
@@ -3964,7 +3964,7 @@ export class Parser {
    *
    * A **type-parameter clause** may sit between the name and the parameter
    * list (`function map<T, U>(…)` — the M2 sugared generic form,
-   * `docs/plans/2026-08-04-generic-function-literals-design.md` §3). It turns
+   * `docs/TYPE-SYSTEM.md`). It turns
    * the ascription into a `where`-quantified full signature and ERASES the
    * annotations of the parameters it quantifies (they lower to bare symbols;
    * the signature is the single source of truth for their types). See
@@ -4317,7 +4317,7 @@ export class Parser {
   /**
    * The optional **type-parameter clause** of a `function` definition —
    * `<T>`, `<T: number, U>` — sitting between the name and the parameter list
-   * (`docs/plans/2026-08-04-generic-function-literals-design.md` §3.1).
+   * (`docs/TYPE-SYSTEM.md`).
    *
    * Returns `undefined` when there is no clause (the cursor is untouched),
    * `null` on a malformed one (already diagnosed), otherwise the declarations
@@ -4538,7 +4538,7 @@ export class Parser {
 
   /**
    * **Phase 0** of the trailing-`where` binding strategy
-   * (`docs/plans/2026-08-11-where-clause-type-constraints.md`): locate a
+   * (`docs/TYPE-SYSTEM.md`): locate a
    * definition head's clause and collect the variable NAMES it declares,
    * purely lexically — nothing is resolved, so no resolver side effect can
    * fire for a name the clause later reclassifies as a variable.
@@ -5219,7 +5219,7 @@ export class Parser {
    * A clause is appended as a trailing `where` SUFFIX — always last, after the
    * effects slot and the return type, in every declaration spelling (the
    * clause-placement ruling of
-   * `docs/plans/2026-08-11-where-clause-type-constraints.md`). Either binder
+   * `docs/TYPE-SYSTEM.md`). Either binder
    * supplies it: a `<T>` clause is RENDERED from `typeParams` (bounds verbatim
    * from the source), a trailing clause rides as `whereText`, the author's
    * verbatim `where …` slice. The result is SELF-CONTAINED — the clause
@@ -6111,7 +6111,7 @@ export class Parser {
    * consulted BEFORE the type subparser sees the name — the type grammar
    * diagnoses a protocol in type position, and this contextual slot is the
    * deliberate exception (ruling R5,
-   * `docs/plans/2026-08-18-first-class-types.md`). A `&` tail that MIXES a
+   * `docs/TYPE-SYSTEM.md`). A `&` tail that MIXES a
    * protocol with a type is diagnosed: an intersection of a type and a
    * protocol names no test.
    */

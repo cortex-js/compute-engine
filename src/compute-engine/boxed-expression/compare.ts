@@ -229,7 +229,7 @@ function extendBinders(
  * same spelling can name different bindings (a call frame's parameter `x` and
  * a stored value's free `x`), and treating them as one is what let a frame
  * capture a value's free symbols and let `Add` merge two unrelated `x` terms
- * into `2x`. See docs/plans/2026-07-24-defining-scope-dereference-design.md.
+ * into `2x`. See docs/SCOPING-MODEL.md.
  *
  * `bound` carries the names bound by binders ENCLOSING the current position
  * (a `Function`'s parameters, a scoped `Block`/`Sum`/`Comprehension`'s local
@@ -342,7 +342,7 @@ export function same(
   // — not a type conversion: `f(c: character)` still refuses a `string`-TYPED
   // argument. Without it, `c == "a"`, `"a" in "abc"` and `IndexOf("abc", "b")`
   // would each need their own narrowing hook, since all of them reduce to
-  // `isSame`. See `docs/plans/2026-08-16-string-phase1-character-type.md`
+  // `isSame`. See `docs/STRING_ROADMAP.md`
   // (decision D5).
   if (isString(a) || isString(b) || isCharacter(a) || isCharacter(b)) {
     const sa = isString(a) || isCharacter(a) ? a.string : undefined;
@@ -679,7 +679,7 @@ export function cmp(
   // optimization: without it an object compared against a function expression
   // falls into the function branch below, which computes `a.sub(b)` and
   // `.N()`s the difference on an operand that has no numeric view at all.
-  // (`docs/plans/2026-08-14-object-representation-decision.md`, "Equality":
+  // (`docs/TYPE-SYSTEM.md`, "Equality":
   // "`cmp()` keeps returning `undefined` (objects are unordered)".)
   if (isObject(a) || (typeof b !== 'number' && isObject(b))) return undefined;
 
@@ -1060,7 +1060,7 @@ export function cmp(
   // at 0xD800) BELOW U+E000–U+FFFF — an order no reader expects. The
   // character/string bridge applies here too, so a one-cluster string on
   // either side is compared by the same rule
-  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D8).
+  // (`docs/STRING_ROADMAP.md`, decision D8).
   // The bridge stops there: a string of two or more clusters is NOT a
   // character, and ordering it against one would answer a comparison the
   // design leaves inert, so that pair yields `undefined`. A string's `count`

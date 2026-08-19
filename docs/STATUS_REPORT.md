@@ -17,9 +17,9 @@ current system.
   [`docs/README.md`](./README.md).
 - Public behavior belongs in [`doc/`](../doc/). Internal documents should not
   duplicate public guides.
-- [`docs/plans/`](./plans/) contains only active work or a design that remains a
-  direct dependency of the implementation. Completed execution plans are
-  summarized here and retained in Git history.
+- [`docs/plans/`](./plans/) contains only active work. Completed execution
+  plans are summarized here and retained in Git history; source comments must
+  cite a normative model rather than keeping a completed plan alive.
 - Corpus programs, fixtures, and reproducibility tooling are engineering
   assets, even when they currently live below `docs/`; they are not treated as
   narrative documentation.
@@ -86,16 +86,33 @@ contracts live in the focused model documents and public guides. Remaining
 edge cases are tracked in [`ROADMAP.md`](../ROADMAP.md), not in completed
 implementation plans.
 
+### Normative-model consolidation — complete
+
+The August 2026 documentation pass retired the accumulated implementation
+plans for shipped type, scope, collection, compilation, language, string,
+randomness, and state work. Current contracts now live in the focused models
+indexed by [`docs/README.md`](./README.md), while source/test references point
+to those models. `docs/plans/` was reduced to the active working set; detailed
+decision chronology remains available from Git history.
+
 ### Type, protocol, object, and effect systems — active evolution
 
-Parameterized types, generic functions, sum types, protocols and compiled
-dispatch, named arguments, mutable objects, inference provenance, and effect
-provenance have substantial implemented foundations. These systems are still
-evolving, so their normative documents remain active:
+Parameterized types, generic functions, protocols and compiled dispatch,
+named arguments, first-class type values, inference provenance, and effect
+provenance have implemented foundations. Their current contracts live in:
 
+- [`TYPE-SYSTEM.md`](./TYPE-SYSTEM.md)
 - [`TYPE_SYSTEM_ROADMAP.md`](./TYPE_SYSTEM_ROADMAP.md)
 - [`EFFECTS-MODEL.md`](./EFFECTS-MODEL.md)
 - [`INFERENCE_ROADMAP.md`](./INFERENCE_ROADMAP.md)
+
+Sum compilation and mutable objects remain active implementation initiatives.
+
+The inference-rollback and trial-overload initiative is complete. Its
+microbenchmark finished within the approved gates: the post-optimization
+median was about 1.15× the filter baseline, the worst measured row about 1.5×,
+and workloads without overload sets stayed within noise. The implemented
+rollback invariant is in `TYPE-SYSTEM.md`; the benchmark remains executable.
 
 Implementation journals should be folded into these documents only when they
 state a current invariant; completed sequencing and review narratives belong

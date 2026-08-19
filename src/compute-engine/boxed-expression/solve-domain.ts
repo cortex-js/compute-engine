@@ -94,7 +94,7 @@ function keepUnderConditions(
  *
  * `Solve(equation, Element(unknown, domain[, condition]))` restricts the
  * unknown to a collection (typically an integer `Range`). See
- * `docs/plans/2026-07-04-solve-domain-design.md`.
+ * `ARCHITECTURE.md`.
  *
  * Strategy: symbolic solve first (for equations), then filter the roots to the
  * domain. When the symbolic solver comes up empty and the domain is finite and

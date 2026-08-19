@@ -4,7 +4,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 /**
- * Change 2 of `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`:
+ * Change 2 of `docs/COLLECTIONS-MODEL.md`:
  * a VARIADIC `Append` — `(collection, value+) -> collection` — plus a
  * same-head flatten at canonicalization so an accumulator chain stays at
  * depth 1.

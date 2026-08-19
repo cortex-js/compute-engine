@@ -539,7 +539,7 @@ export class ComputeEngine implements IComputeEngine {
   readonly _typeRegistry: Record<string, TypeReference> = Object.create(null);
 
   /** The engine-level PROTOCOL registry — the second kind of registry entry
-   * (`docs/TYPE-SYSTEM.md` §5), engine-global for the
+   * (`docs/TYPE-SYSTEM.md`), engine-global for the
    * same reason types are: a conformance is a fact about a TYPE, not about a
    * position in a scope chain. Protocol names are NOT types (P8).
    * @internal */

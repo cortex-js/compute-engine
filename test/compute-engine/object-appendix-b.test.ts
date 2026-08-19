@@ -15,12 +15,10 @@
  * - "The idea" / "Objects and protocols" — the `Person` birthday flow, in the
  *   appendix's full form: `Person` declared `is Identifiable { get fullName …
  *   function birthday … }`, with the four `readwrite` properties left to the
- *   stored fields of the same name. That form runs as of Phase 2 of the
- *   implementation plan
- *   (`docs/plans/2026-08-13-mutable-objects-implementation-plan.md`, "Phase 2
- *   — Protocol integration"): field-backed satisfaction covers the properties
- *   no accessor is written for. What the flow demonstrates is the `const`
- *   binding, `birthday` storing into `self` and returning it, and the
+ *   stored fields of the same name. The implemented object and protocol model
+ *   is in `docs/TYPE-SYSTEM.md`: field-backed satisfaction covers the
+ *   properties no accessor is written for. What the flow demonstrates is the
+ *   `const` binding, `birthday` storing into `self` and returning it, and the
  *   interpolated string reading the already-incremented `age` because its
  *   segments evaluate left to right.
  * - "Assigning to a property" — `MutableData` store, and the record refusal.
@@ -94,7 +92,7 @@ describe('"Objects and protocols" — the Person birthday flow', () => {
   // and a `function birthday`. The four `readwrite` properties carry no
   // accessor — the stored fields of the same name and type satisfy them
   // (field-backed satisfaction, Phase 2 of
-  // `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`).
+  // `docs/TYPE-SYSTEM.md`).
   const PERSON = `protocol Identifiable {
   readwrite firstName: string
   readwrite lastName: string

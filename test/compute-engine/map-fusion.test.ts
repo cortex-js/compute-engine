@@ -12,7 +12,7 @@ import {
 /**
  * Drain-time lowering of stacked lazy broadcast `Map`s ("Map fusion").
  *
- * Design: `docs/plans/2026-07-27-map-fusion-design.md` (ratified 2026-07-27,
+ * Design: `docs/COLLECTIONS-MODEL.md` (ratified 2026-07-27,
  * R1–R6). The lowering is an ITERATION DETAIL: canonical forms are untouched
  * and every element value must be byte-identical to the general path. These
  * tests are therefore all VALUE assertions (plus one canonical-shape pin and
@@ -733,7 +733,7 @@ describe('Map fusion: closed-over variables', () => {
 
 describe('Map fusion: annotated parameters', () => {
   /**
-   * Follow-up (1) of `docs/plans/2026-08-08-lambda-param-element-inference.md`
+   * Follow-up (1) of `docs/TYPE-SYSTEM.md`
    * (ruling 4): the structural gate accepts an ANNOTATED mapping-function
    * parameter when the source's element type provably satisfies the
    * annotation.

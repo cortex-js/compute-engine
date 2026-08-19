@@ -5,7 +5,7 @@
  *
  * A SELF-comparison harness (like `effects-registration.ts`): run it on two
  * builds of the engine and compare. It is the microbenchmark half of the
- * phase-2c perf gate in `docs/plans/2026-08-13-inference-tx-design.md`
+ * phase-2c perf gate in `docs/TYPE-SYSTEM.md`
  * ("trial-based overload resolution"): the gate requires the per-call cost
  * after the trial mechanism to stay ≤ 2× the write-free-filter baseline,
  * measured here, and the canonicalization corpus (`effects-registration.ts`)

@@ -7,7 +7,7 @@ import {
 
 /**
  * `WithRandomSeed` — block-scoped seeding (Phase 1 of the random family
- * redesign, `docs/plans/2026-07-25-random-signature-redesign.md`).
+ * redesign, `docs/RANDOMNESS-MODEL.md`).
  *
  * The headline contract: the n-th draw of a frame is `hash(seed, n)`, a pure
  * function of the seed and the draw index. So repeated draws WITHIN a frame

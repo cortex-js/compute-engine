@@ -813,7 +813,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /**
    * Snapshot EVERY mutable field of this record, for the checkpoint journal
    * (`checkpoint-journal.ts`; stage C1 of
-   * `docs/plans/2026-08-18-checkpoint-restore-design.md`, §5.2 funnel 6).
+   * `docs/CHECKPOINT-MODEL.md` funnel 6).
    * Wider than {@link _rederivationSnapshot}, which captures only what an
    * `{ evaluate }`-only update can touch: a checkpoint has to rewind a full
    * redefinition, which `_update` can drive through every field below.

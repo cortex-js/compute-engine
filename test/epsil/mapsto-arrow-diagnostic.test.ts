@@ -3,7 +3,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // The `->` / `=>` typo diagnostic — see the companion-diagnostics section of
-// `docs/plans/2026-08-08-annotation-lambda-lift.md`.
+// `docs/LANGUAGE-MODEL.md`.
 //
 // A `KeyValuePair` whose left side is shaped like a parameter list — a typed
 // parameter, a tuple of parameters, an empty `()`, or a bare symbol right

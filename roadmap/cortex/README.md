@@ -143,7 +143,7 @@ accepts a single collection of strings, including a lazy `Map` result, so
   `function f(x) -> real { … }`), anonymous `(x: integer) => …`, enforcement,
   return types, and faithful serialize round-trip all ship natively via
   `["Typed", …]` annotations on the `Function` literal — see
-  [`docs/plans/2026-07-12-typed-function-literals-design.md`](../../docs/plans/2026-07-12-typed-function-literals-design.md).
+  [`docs/LANGUAGE-MODEL.md`](../../docs/LANGUAGE-MODEL.md).
   Nothing remains for Cortex; the demand-gated engine follow-ons
   (optional/variadic annotations, strict-mode runtime return check) are
   tracked in the root `ROADMAP.md`.
@@ -263,7 +263,7 @@ CI-executed doc examples and the agents card + MCP server. Worth taking:
 
 - **Range patterns in `match` — landed 2026-07-31** (see the completed log
   in `STATUS_REPORT.md`; spec = §8 of
-  `docs/plans/2026-07-12-cortex-match-design.md`).
+  `docs/LANGUAGE-MODEL.md`).
 - **Effect surfacing in `cortex check` (S–M).** Hica marks any function
   using `random()` with an `ndet` effect reported by `hica check` — an
   independent validation of the paused effects model
@@ -306,7 +306,7 @@ CI-executed doc examples and the agents card + MCP server. Worth taking:
   review's divergence sweep — worse than a divergence, deserves its own
   fix; the other divergent lazy heads are `Simplify`/`Expand`/`Factor`/
   `Together`/`Hold`, see design-doc §8a). Full design + rationale:
-  `docs/plans/2026-07-31-error-propagation-design.md` (`f(⊥) = ⊥`
+  `docs/LANGUAGE-MODEL.md` (`f(⊥) = ⊥`
   bubbling, observers, `|>` stays application sugar, NaN short-circuit
   rejected, effects-model reconciliation).
 - **Exhaustiveness lint.** Already a v2 deferral in the match design (§7);
@@ -374,7 +374,7 @@ design decision or small feature, not a bug):
 operator covers left-to-right composition, but UFCS remains attractive for
 multi-argument calls. The collision with existing dictionary/record field
 access needs an explicit resolution; see the
-[2026-08-03 extensions review](../../docs/plans/2026-08-03-cortex-language-extensions-review.md#ufcs-and-the-pipe-operator).
+[2026-08-03 extensions review](../../docs/LANGUAGE-MODEL.md#ufcs-and-the-pipe-operator).
 
 **Declined from the review** (recorded so we don't re-derive): `?` error
 propagation — already declined under refutable binding above; Hica needs it to

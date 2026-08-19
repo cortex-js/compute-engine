@@ -34,7 +34,7 @@ import type { CheckpointHookKind } from '../checkpoint-journal.js';
 /**
  * Record this definition record's mutable state in the active checkpoint
  * journal window, once per window (`checkpoint-journal.ts`; §5.2 funnels 1, 2
- * and 5 of `docs/plans/2026-08-18-checkpoint-restore-design.md`).
+ * and 5 of `docs/CHECKPOINT-MODEL.md`).
  *
  * ONE key for the whole record rather than one per field: the snapshot is the
  * complete mutable field set, so a per-field key would take more snapshots to
@@ -145,7 +145,7 @@ export class _BoxedValueDefinition
 
   // History of writes to this definition's type (see `TypeProvenanceEntry`
   // in `types-definitions.ts` and the phase-1 design in
-  // `docs/plans/2026-08-13-inference-provenance-journal.md`). Declared here
+  // `docs/TYPE-SYSTEM.md`). Declared here
   // — rather than assigned on demand — so recording provenance does not
   // change the object's shape; allocated on the first recorded write.
   // Explicit declarations and value-promoted types record no entry (they
@@ -172,7 +172,7 @@ export class _BoxedValueDefinition
 
   // The STATIC binding this definition is a per-call activation of, when it is
   // a `Function` call frame's parameter binding (`markActivation`,
-  // `binders.ts`; `docs/plans/2026-07-26-binder-mechanism-design.md` §2.1).
+  // `binders.ts`; `docs/SCOPING-MODEL.md`).
   // Declared here — rather than assigned on demand — so a call frame's
   // definition keeps the same object shape as every other one.
   _activationOf: BoxedValueDefinition | undefined = undefined;
@@ -181,7 +181,7 @@ export class _BoxedValueDefinition
   // hide an enclosing binding's value (`withValueShield` in `utils.ts`,
   // `simplifyValueBlind` in `simplify.ts`). Read by `evaluateInOwnBindings`'s
   // restriction 2 (`markShieldDeclaration`, `binders.ts`;
-  // `docs/plans/2026-07-26-binder-mechanism-design.md` §4). Declared here —
+  // `docs/SCOPING-MODEL.md`). Declared here —
   // rather than assigned on demand — so a shield keeps the same object shape
   // as every other definition.
   _isShield: true | undefined = undefined;
@@ -452,7 +452,7 @@ export class _BoxedValueDefinition
       _isSelfReferential: this._isSelfReferential,
       // Effects annotation provenance rides in the tuple: the typed-`let`
       // upgrade writes it alongside `type`/`inferredType`
-      // (`docs/plans/2026-08-13-effects-axis-provenance.md`, rollback
+      // (`docs/EFFECTS-MODEL.md`, rollback
       // completeness), so a restore without it would leave the contract
       // bit stale.
       effectsDeclared: this.effectsDeclared,
@@ -469,7 +469,7 @@ export class _BoxedValueDefinition
    * deliberately bumped, not restored: monotone invalidation counters only
    * ever advance (over-invalidation is a recompute; resurrection of a
    * stale cache entry would be a wrong answer). Phase 2a of
-   * `docs/plans/2026-08-13-inference-tx-design.md`.
+   * `docs/TYPE-SYSTEM.md`.
    * @internal */
   _restoreTypeSlots(snapshot: unknown): void {
     const s = snapshot as {
@@ -496,7 +496,7 @@ export class _BoxedValueDefinition
   /**
    * Snapshot EVERY mutable field of this record, for the checkpoint journal
    * (`checkpoint-journal.ts`; stage C1 of
-   * `docs/plans/2026-08-18-checkpoint-restore-design.md`, §5.2). Deliberately
+   * `docs/CHECKPOINT-MODEL.md`). Deliberately
    * a different, wider tuple than {@link _typeSlotSnapshot}: that one covers
    * the six slots an inference re-derivation can move, and a checkpoint has
    * to rewind a whole cell's worth of arbitrary program writes.

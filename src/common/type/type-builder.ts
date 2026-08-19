@@ -423,13 +423,13 @@ export class TypeBuilder implements ASTVisitor<Type> {
    * A generic ALIAS is TRANSPARENT, so the application is EXPANDED here, once,
    * at type-resolution time: no applied-alias node exists in the `Type`
    * representation, and nothing downstream ever meets one
-   * (`docs/plans/2026-08-04-generic-type-aliases-design.md` §3.3).
+   * (`docs/TYPE-SYSTEM.md`).
    *
    * A parameterized NOMINAL type is OPAQUE, so the application is KEPT: the
    * node carries its `args` and delegates `def` to the declaration record, and
    * subtyping relates two applications by name plus arguments without ever
-   * consulting the body (`docs/plans/2026-08-06-parameterized-nominal-types-
-   * design.md` §3). That is what makes a RECURSIVE parametric type work: the
+   * consulting the body (`docs/TYPE-SYSTEM.md`). That is what makes a
+   * RECURSIVE parametric type work: the
    * `tree<T>` inside `tree`'s own body needs no definition to be built.
    *
    * Returns `undefined` — "not a generic application, carry on" — only when the

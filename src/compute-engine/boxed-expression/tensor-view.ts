@@ -1,6 +1,6 @@
 /**
  * Tensor view over the unified `List` representation (Phase C of
- * `docs/plans/2026-07-20-tensor-unification-design.md`, §D2/§D4).
+ * `docs/COLLECTIONS-MODEL.md`).
  *
  * Tensor-ness is a *view* on a canonical `List` value, not a distinct
  * representation:

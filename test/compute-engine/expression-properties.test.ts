@@ -393,7 +393,7 @@ describe('FREE_VARIABLES (structural tier)', () => {
   // The bound variables of a STRUCTURAL tree come from the operator
   // definition's binding sites, which know the raw parse spellings — so a
   // structural answer matches the canonical one. See
-  // `docs/plans/2026-08-04-parse-scope-control-design.md` A3.
+  // `docs/SCOPING-MODEL.md` A3.
   const body = ['Power', 'n', 2];
 
   it.each([

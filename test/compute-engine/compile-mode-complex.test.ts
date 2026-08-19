@@ -3,9 +3,8 @@ import { isCompileDeclineError } from '../../src/compute-engine/compilation/diag
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
- * Compile-mode migration, step 3 — the COMPLEX discipline
- * (`docs/plans/2026-08-16-compile-complex-mode.md` §9, step 3; §2 for the
- * discipline; §8 D2/D6/D8 for the runtime rules).
+ * The COMPLEX compile discipline and its runtime rules
+ * (`docs/COMPILATION-MODEL.md`).
  *
  * Under `mode: 'complex'` a numeric binding whose static type is wide is
  * complex-shaped and lifted at its use through `_SYS.cplx` (a number becomes

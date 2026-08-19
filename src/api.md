@@ -2704,7 +2704,7 @@ The members below are engine-internal (they are how the property-access
 operators and the serialization walk reach the slots); user code reads and
 writes fields through the language's property syntax, not through these.
 
-Design: `docs/plans/2026-08-14-object-representation-decision.md`;
+Design: `docs/TYPE-SYSTEM.md`;
 semantics: `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B.
 
 <MemberCard>
@@ -3926,7 +3926,7 @@ state?
 This is the operator's own decline test — the guard at the top of its
 `evaluate` handler — exposed so the enumerability facet
 (`isEnumerableCollection`) can answer without evaluating. Contract
-(see `docs/plans/2026-08-11-eager-collection-enumerability.md`):
+(see `docs/COLLECTIONS-MODEL.md`):
 
 - MUST be O(1), evaluation-free and side-effect free. An impure
   producer answers from its operands' facets, consuming no draws.
@@ -4496,7 +4496,7 @@ types are interned, deep-frozen, and shared across engines (the
 are the same object. The history therefore lives on the per-engine
 definition, next to `inferredType`.
 
-Design: `docs/plans/2026-08-13-inference-provenance-journal.md`, phase 1.
+Design: `docs/TYPE-SYSTEM.md`, phase 1.
 
 </MemberCard>
 
@@ -8589,7 +8589,7 @@ type InferenceWriteEvent = {
 One write of inference evidence onto a definition, as delivered to
 `IComputeEngine._noteInferenceWrite` — the single emission point whose
 subscribers are the provenance history, the fresh-inference set, and the
-narrowing sink. See `docs/plans/2026-08-13-inference-provenance-journal.md`
+narrowing sink. See `docs/TYPE-SYSTEM.md`
 (phase 1).
 
 </MemberCard>
@@ -15968,7 +15968,7 @@ type TypeVariance = "in" | "out" | "inout";
 ```
 
 How a parameterized NOMINAL type relates two of its applications
-(`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §4).
+(`docs/TYPE-SYSTEM.md`).
 
 Declared inside a type-parameter clause (`type tree<out T> = …`); the words
 are contextual there and are never reserved. Only a nominal declaration
@@ -16346,7 +16346,7 @@ type DeclarationOrigin = {
 
 Which compilation unit and which declaring statement a registry record came
 from — the runtime half of the redefinition discipline
-(`docs/plans/2026-08-14-redefinition-discipline.md`, "Mechanics").
+(`docs/TYPE-SYSTEM.md`, "Mechanics").
 
 A second declaration of a name with the SAME `batch` and a DIFFERENT
 `statementId` is a within-unit redefinition and is refused; the same
@@ -16494,7 +16494,7 @@ spelling that round-trips through serialization. See {@link EffectSet}.)
 <multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
 
 (The `callback<…>` constructor of Design D was RETIRED by Design E
-(`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §7): callback
+(`docs/TYPE-SYSTEM.md`): callback
 slots are ordinary arrow types, admitted by COMPATIBILITY rather than
 subtyping. The spelling now fails to parse, with a migration hint.)
 

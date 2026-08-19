@@ -277,7 +277,7 @@ declarative inventory** so the two passes cannot drift:
 
 **(a) Binder sites** — the body of every operator whose definition carries
 a `scoped` binding-site selector (the sanctioned inventory,
-`docs/plans/2026-07-26-binder-mechanism-design.md`: `Sum`/`Product`,
+`docs/SCOPING-MODEL.md`: `Sum`/`Product`,
 `Integrate`, `D`, comprehensions, any future `scoped:` operator — derived
 from the flag, never hand-listed). Also `Function`-literal bodies (covers
 `Reduce`/`Accumulate` combiners, which are `Function` literals — there is

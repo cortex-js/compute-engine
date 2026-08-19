@@ -366,7 +366,7 @@ varies is whether an operator **binds** a variable:
   `Product`, `Solve`, `Function` (lambda parameters), comprehension/table
   indices, quantifiers — bind their own variable. (Most declare their binding
   sites via a selector on the `scoped` definition flag — see
-  `docs/plans/2026-07-26-binder-mechanism-design.md`. `Minimize`/`Maximize`,
+  `docs/SCOPING-MODEL.md`. `Minimize`/`Maximize`,
   once listed here, have no library definition and would be a new feature.) That
   variable is shielded from any same-named global assignment for the whole
   operation, **including in the result**: with `x := 5`, `D(x², x)` is `2x`
@@ -398,9 +398,8 @@ Two footnotes:
 
 Implementation status: the convention is enforced across the binder operators
 (`D`, `Integrate`, `Limit`, `Solve` — positional and bundled — and
-`JacobianMatrix`), and `HoldValues` is implemented; history and per-site
-details are in
-[`docs/plans/2026-07-23-simplify-together-scoping.md`](./docs/plans/2026-07-23-simplify-together-scoping.md) §F.
+`JacobianMatrix`), and `HoldValues` is implemented. The complete binding and
+scope contract is in [`docs/SCOPING-MODEL.md`](./docs/SCOPING-MODEL.md).
 
 ## Type system
 
@@ -436,6 +435,11 @@ immutable wrapper used throughout the engine and exposed on every
 `src/common/` also hosts other shared utilities (an interruptible/cancellation
 helper, JSON/JSON5, Markdown rendering, grapheme handling, fuzzy string
 matching).
+
+The durable details for polymorphism, declarations, overloads, protocols,
+objects, provenance, and first-class type values are in
+[`docs/TYPE-SYSTEM.md`](./docs/TYPE-SYSTEM.md). Open proposals remain in
+`docs/TYPE_SYSTEM_ROADMAP.md` or an active plan.
 
 ## LaTeX syntax
 
@@ -480,6 +484,9 @@ public API groups into:
   `compile()` export. The target registry is internal
   (`_registerCompilationTarget()`, `_getCompilationTarget()`,
   `_listCompilationTargets()`, `_unregisterCompilationTarget()`).
+- **Replay**: `checkpoint()`, `restore()`, and `discard()` provide linear,
+  cell-boundary state rewind. See
+  [`docs/CHECKPOINT-MODEL.md`](./docs/CHECKPOINT-MODEL.md).
 - **Configuration**: `precision` (default 21 significant digits; `'machine'`
   selects 64-bit float), `tolerance` (default `1e-10`), `angularUnit`
   (default `'rad'`), `strict` (validation depth), `iterationLimit` /
@@ -491,7 +498,8 @@ Internally these responsibilities are delegated to focused services
 (`engine-startup-coordinator.ts`, `engine-scope.ts`, `engine-declarations.ts`,
 `engine-assumptions.ts`, `engine-numeric-configuration.ts`,
 `engine-runtime-state.ts`, `engine-cache.ts`,
-`engine-compilation-targets.ts`, `engine-extension-contracts.ts`, …).
+`engine-compilation-targets.ts`, `checkpoint.ts`, `checkpoint-journal.ts`,
+`engine-extension-contracts.ts`, …).
 
 **Scopes & assumptions.** Symbol and operator definitions live in lexical scopes
 with proper inheritance. Assumptions (e.g. "x > 0") are recorded per scope and
@@ -523,7 +531,7 @@ copied on push) but discards its own additions on `popScope()`; a
 subsequently-restored scope therefore recovers the parent's original facts. Any
 mutation reports a state event (`ce._noteStateEvent`, the sole writer of the
 invalidation axes since the 2026-08-11 state-event migration — see
-`docs/plans/2026-08-09-state-event-invalidation-axes.md`), advancing
+`docs/EFFECTS-MODEL.md`), advancing
 `ce._anyVersion` and the finer axes, which invalidates the cached rule sets
 and the FactIndex (below) so stale sign/bound answers cannot survive a scope
 change.

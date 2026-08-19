@@ -6,7 +6,7 @@ import { typeToString } from '../../src/common/type/serialize';
 
 /**
  * Phase 3b of the type-variables design
- * (`docs/plans/2026-08-01-type-variables-design.md` §7.3): the `collections.ts`
+ * (`docs/TYPE-SYSTEM.md`): the `collections.ts`
  * conversions from a weak signature + imperative `type:` handler to a `where`
  * signature.
  *

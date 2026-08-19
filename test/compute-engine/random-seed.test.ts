@@ -3,7 +3,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 /**
  * Seeding after the 2026-07-25 Random family redesign
- * (`docs/plans/2026-07-25-random-signature-redesign.md`).
+ * (`docs/RANDOMNESS-MODEL.md`).
  *
  * There were three seeding mechanisms, none composable: `ce.randomSeed`
  * (global, host-only), the `RandomSeed(n)` operator (global,

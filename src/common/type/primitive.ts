@@ -156,7 +156,7 @@ export const SCALAR_TYPES: PrimitiveType[] = [
   // `INDEXED_COLLECTION_TYPES` when strings became collections). Keeping
   // `string` in both would make `scalar` and `collection` overlap, and every
   // predicate that reads them as the two branches of `value` would carry a
-  // hidden exception. See `docs/plans/2026-08-16-string-phase1-character-type.md`
+  // hidden exception. See `docs/STRING_ROADMAP.md`
   // (decision D1).
   'character',
 ] as const as PrimitiveType[];

@@ -72,7 +72,7 @@ import { isFunction, isString, sym } from './type-guards.js';
  * different ambient chain (a clean scope pop then costs nothing). The
  * original spelling of this guard was the coarse `ce._anyVersion`; it moved
  * to the callable axis when `_effects` was re-keyed
- * (`docs/plans/2026-08-09-state-event-invalidation-axes.md` §6).
+ * (`docs/EFFECTS-MODEL.md` §6).
  */
 
 /**

@@ -1604,7 +1604,7 @@ describe('tier 2: Characters / GraphemeClusters', () => {
 
 describe('tier 2: StringJoin', () => {
   // Probed interpreter semantics, NARROWED in Phase 2 of the strings work
-  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decision D2):
+  // (`docs/STRING_ROADMAP.md`, decision D2):
   // `StringJoin(xs, sep?)` joins ONE collection of strings/characters, with
   // `sep` between consecutive elements. The variadic concatenation form was
   // REMOVED — once a string is itself a collection of characters, "a collection
@@ -2019,7 +2019,7 @@ describe('string COLLECTION operations lower grapheme-aware', () => {
   // every green cell with interpreter parity on ASCII, both spellings of "é",
   // a ZWJ emoji family and a regional-indicator flag, and every fail-closed
   // cell — lives in `compile-string-collection.test.ts`
-  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13).
+  // (`docs/STRING_ROADMAP.md`, decision D13).
 
   test('`Length` of a string literal counts grapheme clusters', () => {
     const expr = ce.box(['Length', { str: 'shop' }]);

@@ -139,7 +139,7 @@ export function signatureNotes(
  * use; where the conflicting type CAME from is recorded in the definition's
  * provenance history (`_typeProvenance`, see `TypeProvenanceEntry` in the
  * engine's `types-definitions.ts` and
- * `docs/plans/2026-08-13-inference-provenance-journal.md`).
+ * `docs/TYPE-SYSTEM.md`).
  *
  * Two resolution routes, in preference order:
  *

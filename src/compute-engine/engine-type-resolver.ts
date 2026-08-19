@@ -13,7 +13,7 @@ import { typeToDedupKey } from '../common/type/serialize.js';
  * the protocol registry the conformance oracle reads.
  *
  * Types are NOT lexically scoped — one namespace per engine, world state
- * (`docs/plans/2026-08-10-global-type-registry.md`). The `TypeResolver`
+ * (`docs/TYPE-SYSTEM.md`). The `TypeResolver`
  * interface is the seam: consumers are unaware of the backing store.
  *
  * The protocol registry is described STRUCTURALLY (only the conformance

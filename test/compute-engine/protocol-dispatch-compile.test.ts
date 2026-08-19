@@ -4,7 +4,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 //
 // Compiling protocol dispatch to JavaScript —
-// `docs/plans/2026-08-12-protocol-compilation.md`; the governing ruling is
+// `docs/COMPILATION-MODEL.md`; the governing ruling is
 // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix A, "Static resolution and compiled
 // code".
 //
@@ -359,7 +359,7 @@ type Person is Nameable {
 
   // A SETTABLE property, and therefore — by the same gate — an OBJECT
   // receiver. Objects have no compiled representation yet (Phase 4 of
-  // `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`), so every
+  // `docs/TYPE-SYSTEM.md`), so every
   // compiled SET below declines. The SET lowering in `base-compiler.ts` is
   // reachable again once objects compile; the interpreted behaviour it
   // mirrors is pinned in `protocol-properties.test.ts`.

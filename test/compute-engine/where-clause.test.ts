@@ -1,7 +1,7 @@
 /**
  * Acceptance tests for the trailing `where` type-constraint clause,
  * which replaced the prefix `forall` syntax
- * (`docs/plans/2026-08-11-where-clause-type-constraints.md`).
+ * (`docs/TYPE-SYSTEM.md`).
  *
  * This file covers the type-parser surface (`parseType`, `parseTypePrefix`,
  * the host API). The Epsil declaration surface (the five declaration

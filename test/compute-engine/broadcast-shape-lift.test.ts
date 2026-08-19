@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * Phase B of the tensor-unification design (§D6 of
- * `docs/plans/2026-07-20-tensor-unification-design.md`):
+ * `docs/COLLECTIONS-MODEL.md`):
  *
  * - D6.1 — rank/shape-aware broadcast lift: the static type of a broadcast
  *   application mirrors the shape-bearing operands' statically-provable

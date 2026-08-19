@@ -779,7 +779,7 @@ export function widenUnannotatedLiteralParams(fn: Expression, t: Type): Type {
 /**
  * The signature arms of an arrow-typed parameter slot, for compatibility
  * admission (Design E §3,
- * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`): the slot
+ * `docs/TYPE-SYSTEM.md`): the slot
  * itself when it is a signature, or the signature members of a union or
  * intersection (`Partition`'s `integer | ((T) any -> boolean)`; a user
  * overload set as a parameter). `undefined` when the slot has no arrow arm —
@@ -1013,7 +1013,7 @@ function strippedMatchesParam(
 }
 
 /** Engine-internal knobs of {@link validateArguments} (phase 2c of
- * `docs/plans/2026-08-13-inference-tx-design.md`). Not for library callers. */
+ * `docs/TYPE-SYSTEM.md`). Not for library callers. */
 export interface ValidateArgumentsInternals {
   /** Repair-free TRIAL mode: this call is an overload arm's trial, running
    * under a repair-forbidding rollback frame. The two construction-level
@@ -1102,8 +1102,8 @@ export function validateArguments(
   if (typeof signature === 'string') return null;
 
   // An intersection of signatures is an overload set. Resolve it to a single
-  // arm and validate against that (`docs/plans/2026-07-25-overload-resolution
-  // -design.md`). Resolution is write-free (§4.2), so no symbol is mutated on
+  // arm and validate against that (`docs/TYPE-SYSTEM.md`). Resolution is
+  // write-free, so no symbol is mutated on
   // account of an arm that is subsequently rejected.
   //
   // `viable` (not `selected`) drives the operand inference at the bottom of
@@ -2066,7 +2066,7 @@ function repairFreshMatrixInference(
   if (!names || names.size === 0) return null;
 
   // Per-name repair-local records for an EXACT failure-leg restore (phase 2a
-  // of docs/plans/2026-08-13-inference-tx-design.md). Three families:
+  // of docs/TYPE-SYSTEM.md). Three families:
   // - `snapshots`: the coupled type/value slots, restored setter-bypassing
   //   via `_restoreTypeSlots` — the old restore wrote through the `type`
   //   setter, which allocates fresh `BoxedType`s (defeating identity-keyed

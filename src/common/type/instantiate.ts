@@ -18,7 +18,7 @@ import { subtypingVarianceOf } from './variance.js';
  * A **polytype** is a function signature carrying a `where` clause
  * (`typeParams`); its variables (`{ kind: 'variable' }`) are quantified over
  * that one arm (rank-1, per-arm — see
- * `docs/plans/2026-08-01-type-variables-design.md`).
+ * `docs/TYPE-SYSTEM.md`).
  *
  * This module owns the three variable-level operations the rest of the type
  * layer needs: what a type's free variables are, how a substitution is applied
@@ -30,9 +30,8 @@ import { subtypingVarianceOf } from './variance.js';
 // ── Errors ───────────────────────────────────────────────────────────────────
 //
 
-/** The declaration-time violations of §7.2 of the design, plus the
- * generic-type-alias matrix (`docs/plans/2026-08-04-generic-type-aliases-
- * design.md`, error matrix). */
+/** The declaration-time violations and generic-alias error matrix of
+ * `docs/TYPE-SYSTEM.md`. */
 export type TypeVariableErrorCode =
   | 'unresolved-type-variable'
   | 'unsolvable-type-variable'

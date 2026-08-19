@@ -61,7 +61,7 @@ type Activated = { _activationOf?: BoxedValueDefinition };
  * Record that `activation` — the per-call definition a `Function` literal's
  * call frame declares for a parameter — is an ACTIVATION of `staticBinding`,
  * the binding the literal's body `Block` declares for that same parameter
- * (`docs/plans/2026-07-26-binder-mechanism-design.md` §2.1).
+ * (`docs/SCOPING-MODEL.md`).
  *
  * A binder with several simultaneous activations (recursion) produces N
  * definitions all pointing at ONE static binding. They are deliberately
@@ -124,7 +124,7 @@ type Shielded = { _isShield?: true };
  * shadowing binding holds no value", which is a proxy, not the property: an
  * ordinary inner `Declare(x, 'real')` shields nothing yet intercepted a stored
  * value's free `x` all the same. The marker states it instead
- * (`docs/plans/2026-07-26-binder-mechanism-design.md` §4).
+ * (`docs/SCOPING-MODEL.md`).
  *
  * A no-op for a name the scope does not bind, or binds to an operator
  * definition: `declare` may legitimately have declined (an exotic type that
@@ -330,7 +330,7 @@ export function rebindToBindings(
 /**
  * Evaluate `value` in the environment its OWN free symbols denote — the
  * dereference half of the name-vs-binder repair
- * (`docs/plans/2026-07-24-defining-scope-dereference-design.md`).
+ * (`docs/SCOPING-MODEL.md`).
  *
  * Two things were wrong with returning the stored value verbatim:
  *

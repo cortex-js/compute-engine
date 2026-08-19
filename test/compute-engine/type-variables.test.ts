@@ -19,7 +19,7 @@ import type { Type } from '../../src/common/type/types';
 //
 // Type variables (parametric polymorphism), PHASE 1 — the type layer only.
 //
-// `docs/plans/2026-08-01-type-variables-design.md`: a polytype is a `where`
+// `docs/TYPE-SYSTEM.md`: a polytype is a `where`
 // clause trailing a function signature. This file pins the type-layer half of
 // the §11 test plan: parse/serialize round trips, per-arm α-equivalence, the
 // §7.2 declaration-time rejections (with their exact error codes), the two
@@ -1498,9 +1498,8 @@ describe('EFFECTS (§4.6) — substitution never touches the effects slot', () =
   });
 });
 
-// The D7 boundary block, REWRITTEN for the generic-function-literals
-// milestone (M1, phase 2): `docs/plans/2026-08-04-generic-function-literals-
-// design.md` §2.4 replaces the D7 rejection with an INSTALL path on all three
+// The declaration boundary after generic function literals (`docs/TYPE-SYSTEM.md`)
+// replaces the former rejection with an INSTALL path on all three
 // v1 routes. The end-to-end behavior of an installed generic literal lives in
 // `test/compute-engine/generic-function-literals.test.ts`; what is pinned here
 // is the boundary itself — which values install, which are still refused, and

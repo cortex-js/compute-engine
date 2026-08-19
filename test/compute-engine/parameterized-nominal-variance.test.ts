@@ -7,7 +7,7 @@ import type { Type, TypeReference } from '../../src/common/type/types';
 
 //
 // Parameterized NOMINAL types — PHASE 1 (variance):
-// `docs/plans/2026-08-06-parameterized-nominal-types-design.md` §4.
+// `docs/TYPE-SYSTEM.md`
 //
 // Variance is VERIFIED, never inferred. Every parameter has a declared
 // variance — the marker the author wrote, or `out` when none is spelled — and

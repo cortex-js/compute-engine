@@ -3,7 +3,7 @@ import { typeAcceptsValue } from '../../src/compute-engine/boxed-expression/valu
 
 /**
  * Phase 0 of the function-polymorphism design
- * (docs/plans/2026-08-01-function-polymorphism-design.md §4.1, §7):
+ * (docs/TYPE-SYSTEM.md §4.1, §7):
  * value types are inhabitable. A concrete value is tested against a
  * value-component type by MEMBERSHIP (`typeAcceptsValue`), not by its
  * synthesized type — `ce.box(0).type` is `finite_integer`, which is not a

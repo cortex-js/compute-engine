@@ -45,7 +45,7 @@ parameter-shadowing repair. **0.96.0** (2026-07-26) carried the
 binding they were canonicalized against, not whatever an inner scope calls that
 name, with dereference (`evaluateInOwnBindings`), named-parameter rebind, and
 the sanctioned **binder mechanism** (binding sites declared by a `scoped:`
-selector; see `docs/plans/2026-07-26-binder-mechanism-design.md`) — plus
+selector; see `docs/SCOPING-MODEL.md`) — plus
 all-branch union assignability, the peaked-quadrature and non-finite-integrand
 fixes, and deletion of the 0.95.0 random-family tombstones. The 0.91–0.95 line
 carried `FindFit`/`FindRoot` (Tycho item 77), the `Nothing`-erasure/`Missing`
@@ -318,7 +318,7 @@ arrow slots could ever be judged, and an unbound operand's type reads `unknown`
 (admits everything), so only NAMED callbacks read through a side-effect-free
 `lookupDefinition` would be judged at all. Do this when a consumer actually
 declares lazy operators with arrow slots, not before. (Recorded with reasoning
-in `docs/plans/2026-08-18-compatibility-admission-callbacks.md` §12d item 8.)
+in `docs/TYPE-SYSTEM.md`.)
 
 ### Static arity for INLINE literals at user-declared arrow slots (OPEN, needs a ruling — opened 2026-08-19)
 
@@ -332,7 +332,7 @@ rejected at canonicalization with `callback-arity`. Closing the gap means
 carving literals out of the arity half of that leniency (or checking literal
 arity structurally before the match), which touches reconciliation semantics
 beyond callbacks — take it to a ruling before implementing. (Recorded in
-`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §12d item 6.)
+`docs/TYPE-SYSTEM.md`.)
 
 ### Element-typed comparator arms need multi-variable union arms (OPEN, type-system — opened 2026-08-19)
 
@@ -347,7 +347,7 @@ fails per element). Restoring the ruled spelling means lifting the
 one-variable-arm constraint in `parseType`/the solve, with its own blast radius
 across union solving. Low urgency: the key arm keeps `T`, and no shipped
 signature needs the second variable-bearing arm. (Deviation recorded in
-`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §12d item 1.)
+`docs/TYPE-SYSTEM.md`.)
 
 ### Parameter-side callback inference (OPTION, demand-gated — opened 2026-08-19)
 
@@ -1735,7 +1735,7 @@ the corresponding half reverted.
 
 ### A MULTI-CLAUSE function with a declared `complex` parameter compiles silently wrong (FIXED 2026-08-16 — the dispatcher lifts per clause)
 
-Fixed as part of step 2 of `docs/plans/2026-08-16-compile-complex-mode.md`: the
+Fixed as part of step 2 of `docs/COMPILATION-MODEL.md`: the
 emitted dispatcher now hands each clause helper its arguments in the shape that
 clause's body was compiled for — `_SYS.cplx(_$a[k])` for a parameter declared a
 non-real number type, the normalized value otherwise — AFTER dispatch has been
@@ -1773,7 +1773,7 @@ site wraps on neither side; the defect is independent of the argument gate.
 
 ### A protocol MEMBER whose parameter is declared `complex` is handed the argument unwrapped (FIXED 2026-08-16 — same wrap forms as the single-literal call)
 
-Fixed as part of step 2 of `docs/plans/2026-08-16-compile-complex-mode.md`: the
+Fixed as part of step 2 of `docs/COMPILATION-MODEL.md`: the
 `isProvablyRealValued(a)` precondition is gone; the coercion is gated on the
 PARAMETER's declared type alone (unanimous across candidates) and the wrap form
 is the shared `complexWrapCode` (literal complex passes through, provably real
@@ -3332,7 +3332,7 @@ instance of the same design property — the per-node analysis guesses REAL for 
 wide-typed binding site — and the fix under consideration is a compile MODE that
 flips the default direction (`complex` mode: anything not provably real is
 complex; `real` mode: complex evidence fails closed; `auto` default). See
-`docs/plans/2026-08-16-compile-complex-mode.md`, which lists this item among the
+`docs/COMPILATION-MODEL.md`, which lists this item among the
 ones it retires and the decisions it needs (one knob or two, comparison
 semantics, cost). The per-item fix below is what to do if that design is
 declined.
@@ -3494,8 +3494,9 @@ report.
 
 ### Named-argument calls — v1 residuals
 
-Named-argument calls shipped 2026-08-12 (design record:
-`docs/plans/2026-08-12-named-arguments-design.md`, §9 has the full statements).
+Named-argument calls shipped 2026-08-12; the durable lowering contract is in
+`docs/LANGUAGE-MODEL.md` and the full surface specification is in
+`docs/TYPE_SYSTEM_ROADMAP.md` Appendix C.
 One deliberate v1 limit remains open. (Three other candidates are resolved: a
 declared-only overload set declining a named call whose name-eliminated arm is
 more specific was RULED correct behavior on 2026-08-13 — when names and
@@ -3841,7 +3842,7 @@ otherwise have survived a redefinition that dropped it.
 rewrite. The cause is not the provenance (that is fixed) but `ce.assign`'s type
 check, which validates the incoming literal against the binding's EXISTING
 signature instead of replacing it — a redefinition should replace, per "Across
-units" in `docs/plans/2026-08-14-redefinition-discipline.md`. Not fixed here:
+units" in `docs/TYPE-SYSTEM.md`. Not fixed here:
 `ce.assign` is shared by every `f := …`, declare-then-define, multi-clause
 accumulation, generics and overloads, and the change could not be verified
 against those suites within this round. It does not block the ruling — removing
@@ -3875,7 +3876,7 @@ raising precision on one silently raises the effective precision — and the cos
 — of every other, and constructing a new engine silently resets the first's.
 Long documented as a test-suite trap (save/restore in `beforeAll`/`afterAll`),
 it was re-graded 2026-08-18 by Tycho's linear-posture answers (Q7a, recorded in
-`docs/plans/2026-08-18-linear-posture-tycho-questions.md`): a Tycho page
+`docs/plans/2026-08-18-checkpoint-restore-design.md`): a Tycho page
 routinely holds a notebook engine, plot-element engines, and validator engines
 simultaneously, so the hazard is live in their primary product surface. Fix
 shapes to evaluate: per-engine precision passed down to the BigDecimal call
@@ -3917,13 +3918,10 @@ clauses becomes an ERROR on the Epsil (`executeEpsil`) route only — the box
 route and host API keep today's replace/throw semantics permanently (Tycho's
 recompute passes re-assert declarations via the box route every 300 ms and
 depend on idempotency) — and the notebook edit gesture moves to a new engine
-`checkpoint()`/`restore()` API. The three governing documents, all
-self-contained: the deletion-dividend audit
-(`docs/plans/2026-08-18-linear-posture-audit.md`), the checkpoint API design at
-revision 2, dual-spec-reviewed and approved
-(`docs/plans/2026-08-18-checkpoint-restore-design.md`), and the Tycho Q&A with
-the ratified decisions
-(`docs/plans/2026-08-18-linear-posture-tycho-questions.md`).
+`checkpoint()`/`restore()` API. The API and replay contract is
+`docs/CHECKPOINT-MODEL.md`; the active differential-harness and posture-flip
+work remains in `docs/plans/2026-08-18-checkpoint-restore-design.md`. The
+completed deletion audit and Tycho Q&A remain in Git history.
 
 Implementation order (each stage independently valuable; nothing deletes until
 the last step):
@@ -3983,8 +3981,49 @@ the last step):
    `test/compute-engine/constant-node-cache-key.test.ts` (4, two of them
    fails-without-the-fix).
 
-3. **Stage C2 — the `EngineCheckpoint` API** (session-base v1, typed errors,
-   two-phase restore with poisoning semantics).
+3. **Stage C2 — the `EngineCheckpoint` API. SHIPPED 2026-08-19.**
+   `ce.checkpoint(label?)` / `ce.restore(cp)` / `ce.discard(cp)` in
+   `src/compute-engine/checkpoint.ts`: the checkpoint STACK (one linear
+   history, rewound and re-extended — restoring invalidates everything above
+   the target), the §4a eager snapshots (both registry rollback thunks reused
+   as shipped, plus assumptions with their `assumptionBindings` provenance,
+   host configuration, and a new structural snapshot of the two sequence
+   registries), the §6 ordered two-phase restore, and the typed
+   `CheckpointError` contract. Each checkpoint owns the journal window opened
+   when it was TAKEN, so restoring replays that window plus every younger one;
+   `discard()` of an interior checkpoint folds its window into the next-older
+   one, and of the oldest frees it.
+
+   Quiescence (§5.1) needed TWO counters the design named only one of.
+   `_inFlightAsyncEvaluations` covers the case the design does describe — an
+   `evaluateAsync` parked at an `await` holds its context and hands control
+   back to the host. But a SYNCHRONOUS evaluation turned out to be invisible
+   too: a plain `evaluate` handler pushes no eval context, so an operator
+   handler calling `ce.checkpoint()` looked exactly like the host calling it
+   between cells and was accepted. `_evaluationDepth` brackets
+   `BoxedFunction.evaluate` for that; its `finally` is correctness, not
+   tidiness, since a stranded count would make the engine refuse every later
+   checkpoint.
+
+   Pins: `test/compute-engine/checkpoint-api.test.ts` (26) — the §10
+   lifecycle and failure matrix, including forced phase-2 failure injection
+   and the fresh-engine oracle of §2. The exhaustive differential harness
+   over randomized cell sequences remains C3.
+
+   **Dual review found 13 findings (4 high), of which six were requirements
+   the design states explicitly and the implementation had simply missed** —
+   the public methods never reached `IComputeEngine`; `maxCollectionSize`,
+   `assumptionBindings` and the library-load idempotence markers were not
+   covered; `discard()` skipped the depth check `restore()` performs. Two
+   were bugs the reviewers found in the new code and the design does not
+   mention: the sequence restore replaced `meta.memo` with a fresh map while
+   the sequence HANDLER closes over the original, so every term memoized
+   after a checkpoint survived the rewind while `getSequenceInfo` reported an
+   empty cache; and `Object.assign` cannot clear a pending sequence's
+   `recurrence`, which is absent at creation and added in place, so a
+   window-added one survived into `getSequenceStatus`. Both are now fixed and
+   pinned. Worth carrying into C3: the full suite was green BEFORE any of
+   this was found, because none of those paths had a test.
 4. **Stage C3 — the differential harness** (fresh-engine oracle, comparator
    table, lifecycle/failure matrix, bypass canary).
 5. **Checkpoint v2 — in-scope checkpoints** (COMMITTED, not optional: Tycho's
@@ -4056,9 +4095,10 @@ were re-pointed to pin the fail-closed verdict instead
 claim they also carried was preserved by re-expressing it over a function
 member.
 
-With the sugar gone there is one mechanism for the syntax, and Phase 1D of
-`docs/plans/2026-08-13-mutable-objects-implementation-plan.md` is formally
-closed.
+With the sugar gone there is one mechanism for the syntax. The implemented
+object contract is in `docs/TYPE-SYSTEM.md`; only the remaining serialization
+and compilation phases stay in
+`docs/plans/2026-08-13-mutable-objects-implementation-plan.md`.
 
 ### A store through an UNANNOTATED parameter was not labelled at all (found and FIXED 2026-08-16)
 
@@ -4463,7 +4503,7 @@ outside.
   in-engine route is enforced. RULED-DEFERRED 2026-08-09 with the direction
   fixed (per-primitive check-emission table + "unenforceable → decline"); see
   the "Known limit" section of
-  `docs/plans/2026-08-08-lambda-param-element-inference.md`.
+  `docs/TYPE-SYSTEM.md`.
 - **`FlatMap`'s `evaluate` materializes on the SOURCE's finiteness alone** — it
   retains the optimistic assumption its `isFinite` facet dropped (2026-08-09);
   re-gating on `expr.isFiniteCollection` would make every unprovable-callback
@@ -4520,7 +4560,7 @@ unenforced (other positions behave as `function`); a union of two DIFFERENT
 - ~~Eager collection leaves under wrappers: wrong values on GROUND input,
   empty-reads on symbolic input~~ — **mechanisms SHIPPED 2026-08-11; adoption is
   incremental and OPEN** (design + rulings:
-  `docs/plans/2026-08-11-eager-collection-enumerability.md`; tests:
+  `docs/COLLECTIONS-MODEL.md`; tests:
   `eager-collection-enumerability.test.ts`). Defect A (wrong values on ground
   input — `Filter(Take(Divisors(12), 3), _ > 1)` → `[]`) is CLOSED for all pure
   eager producers: `at()` now has the materialize fallback `each()` always had
@@ -4697,7 +4737,7 @@ ours — 202/69 — and they corrected it in review. Use 82/25.)
   corpus sizing yet). A generic body (`function f<T>(x: T) -> T { … }`, or a
   literal assigned to a `forall` declaration) takes the standard decline in
   `ensureUserFunctionEmitted` (G3,
-  `docs/plans/2026-08-04-generic-function-literals-design.md` §2.7): a polytype
+  `docs/TYPE-SYSTEM.md`): a polytype
   has no ground parameter type to read (`userFunctionParamType` returns
   `undefined`, `userFunctionParamsAreScalar` answers `false`), so an emitted
   call boundary would lose both its coercion wrap and its broadcast wrap —
@@ -4730,7 +4770,7 @@ touches it.
 | `Integrate` | glsl   | 22 st | Quadrature inside a shader — which rule, what iteration budget, what happens on non-convergence. Large; do not start without deciding the budget question. **The remaining design-first entry** (former ranks 1 — `PointList`/`PointZ` and `At` — landed 2026-07-31/08-01, residuals below). |
 
 **A-2 residual — `At` on GPU (landed 2026-08-01; design + rulings in
-`docs/plans/2026-08-01-at-gpu-compile-design.md`).** Scalar-index and
+`docs/COMPILATION-MODEL.md`).** Scalar-index and
 literal-gather tiers over statically-sized numeric bases shipped (any N ≥ 2 via
 per-N `_gpu_atN` helpers; the `p_0[i]` census witness shape). Remaining, per the
 D4 disposition table — do not re-derive:
@@ -4752,7 +4792,7 @@ D4 disposition table — do not re-derive:
 - No retirement of the 26-state count without the consumer re-measure.
 
 **A-1 residual — `PointList`/`PointZ` (main design pass landed 2026-07-31;
-rulings + design in `docs/plans/2026-07-31-pointlist-compile-design.md`).** JS
+rulings + design in `docs/COLLECTIONS-MODEL.md`).** JS
 construction (shortest-zip lowering, `iterationBudget` truncation cap), JS/GPU
 coordinate projection, and the `?? NaN` missing-coordinate fix all landed; GPU
 _construction_ stays fail-closed **by ruling** (no runtime-length GPU expression
@@ -5458,7 +5498,7 @@ _importance_.
 
 ### Complex values in compiled scalar comparisons (RESOLVED 2026-08-16 — the D2 runtime rule under `auto`/`complex`)
 
-Resolved by step 4 of `docs/plans/2026-08-16-compile-complex-mode.md`: under the
+Resolved by step 4 of `docs/COMPILATION-MODEL.md`: under the
 default `auto` mode and under `complex`, an ordering comparison (and the
 integer-only heads) over an operand that MAY be complex — a `complex`-typed
 symbol, a promoted radical, a wide binding in complex mode — binds the operand
@@ -5490,7 +5530,7 @@ binding), measured against the plot benchmark.
 ### Kleene-absence residue (missing-value typing landed 2026-07-24)
 
 The `Missing`/`missing` feature shipped (record in `CHANGELOG.md` and
-`docs/plans/2026-07-22-missing-value-typing-design.md`).
+`docs/TYPE-SYSTEM.md`).
 
 **Ruling (2026-07-24):** comparisons are **IEEE over `NaN`** (`NaN == NaN` is
 `False`, orderings with `NaN` are `False`) and **Kleene over the `Missing`
@@ -5534,9 +5574,8 @@ coordinates).
 ### Symbol-identity residue (initiative complete, shipped 0.96.0)
 
 The name-vs-binder repair is done — phases 1–3 including the sanctioned binder
-mechanism. Records: `docs/plans/2026-07-24-defining-scope-dereference-design.md`
-(dereference) and `docs/plans/2026-07-26-binder-mechanism-design.md` (binder
-mechanism, 16 stages). What is genuinely left:
+mechanism. The current contract is `docs/SCOPING-MODEL.md`; the detailed
+implementation stages remain in Git history. What is genuinely left:
 
 - **Raw-name-fallback provenance** — the one open thread, deferred to a future
   phase. A pre-boxed operand can be applied twice through a raw name rather than
@@ -5549,9 +5588,8 @@ mechanism, 16 stages). What is genuinely left:
 
 ### Random-redesign residue (shipped 0.95.0/0.96.0)
 
-The redesign shipped and the one-release tombstones are deleted. Model
-reference: `docs/RANDOMNESS-MODEL.md`; spec:
-`docs/plans/2026-07-25-random-signature-redesign.md`. Remaining:
+The redesign shipped and the one-release tombstones are deleted. The current
+model is `docs/RANDOMNESS-MODEL.md`. Remaining:
 
 - **`compileShader` does not apply `rewriteAngularUnit`.** Both GLSL and WGSL
   `compileShader` route through `compileShaderBody`, never `compileOrThrow`
@@ -5577,9 +5615,9 @@ students and educators collaborate and communicate about scientific topics. The
 plotting/compile targets, units & quantities, logic/sets, linear algebra,
 equation systems, and number formatting — and thin in the areas below. The
 agreed items (`Series`, trig rewrites, statistics Phases 1–2, the explain API,
-significant-figures display, the `Measurement` MVP) have all landed — the record
-lives in `CHANGELOG.md` and the design docs under `docs/plans/`. What remains
-(effort S/M/L):
+significant-figures display, the `Measurement` MVP) have all landed. Their
+user-facing record lives in `CHANGELOG.md`; internal chronology lives in
+`docs/STATUS_REPORT.md` and Git history. What remains (effort S/M/L):
 
 **Statistics residue (demand-gated Phase 3, design doc §10):** inverse
 regularized incomplete gamma/beta kernels and the distributions that need them
@@ -5597,8 +5635,8 @@ conservative `BigO` (`assembleLaurent` has no exactness notion), combined
 distinct radicals grow `lcm(d)` uncapped inside add/mul (bounded by the deadline
 → clean defer), and `diffLaurent` asserts `d === 1` (polygamma ladder only).
 
-**Typed function literals residue (demand-gated, design doc
-`docs/plans/2026-07-12-typed-function-literals-design.md` §10):** the typed
+**Typed function literals residue (demand-gated; current contract in
+`docs/LANGUAGE-MODEL.md`):** the typed
 `Function`/`Typed` core landed 2026-07-12 (652a20fc); the signature-string sugar
 (`["Function", body, "'(x: integer) -> real'"]` canonicalizing into the
 structural form) landed 2026-07-19. Deferred until a consumer asks: **(S/M)**
@@ -5679,7 +5717,7 @@ _Next up (agreed 2026-07-09):_
   function-image head for expressions such as
   `f[\operatorname{divs}(m)] = \operatorname{divs}(n)`. **`Interpret` —
   generalization ladder (design:
-  `docs/plans/2026-07-09-ellipsis-interpretation-design.md`):** v1 landed
+  `docs/LANGUAGE-MODEL.md`):** v1 landed
   2026-07-09 — the explicit `Interpret(expr)` head turns continuation-bearing
   sums/products into formal `Sum`/`Product` under a strict arithmetic-
   progression gate (`1+2+\dots+n` → `Sum(k,(k,1,n))`; parity mismatches and
@@ -5782,8 +5820,8 @@ kept for that harness-artifact explanation, which the Fungrim track
 cross-references. Genuinely open Solve items:
 
 - **Diophantine deferrals** (Phase 3 shipped linear n-variable + Pell +
-  Pythagorean triples; design record in
-  `docs/plans/2026-07-04-solve-domain-design.md` Phase 3): sum-of-squares tier
+  Pythagorean triples; remaining porting assessment in
+  `docs/plans/2026-07-04-diophantine-assessment.md`): sum-of-squares tier
   (fits a representation function better than Solve), general binary quadratics
   via `transformation_to_DN`, half-bounded-Range instantiation (currently inert
   by design), `factor_list`-style auto-factoring. Ternary quadratics
@@ -5981,7 +6019,7 @@ this backlog:
   explicit-materialization route stays interpreted (ratified non-goal — do not
   reorder `_computeValue` steps 3/3b), and non-`Map` lazy collections (`Filter`,
   `Comprehension` bodies) and bignum drains are not attempted. See
-  [`docs/plans/2026-07-19-map-auto-compile-design.md`](./docs/plans/2026-07-19-map-auto-compile-design.md).
+  [`docs/COMPILATION-MODEL.md`](./docs/COMPILATION-MODEL.md).
 - **Structural rewrite layer — open design decision (user has not ruled).** The
   stacked-lazy-`Map` drain cost that motivated fusion is addressed: drain-time
   lowering (`map-lowering.ts`, shipped in this cycle's release) applies
@@ -5992,7 +6030,7 @@ this backlog:
   the broader question: `Count(f(x))`-through-eager-op cheapness needs
   canonical-level rewrites, a churn-heavy direction to decide deliberately.
   (Related closed rulings, recorded in
-  `docs/plans/2026-07-19-map-auto-compile-design.md` and the 0.95–0.98 CHANGELOG
+  `docs/COMPILATION-MODEL.md` and the 0.95–0.98 CHANGELOG
   entries: Map auto-compile stays machine-precision-only — no bignum-safe
   compile tier.)
 - **Latent issues: none remaining.** The 2026-07-19 latent sweep dispositioned
@@ -6006,9 +6044,8 @@ this backlog:
 
 Phase 1 of the strings work made `string` an indexed collection of `character`
 (`docs/STRING_ROADMAP.md`, "Decision: strings become indexed collections of
-characters"; implementation plan
-`docs/plans/2026-08-16-string-phase1-character-type.md`). The library audit done
-for that phase (Appendix A of the plan) classified every signature that admits
+characters"). The library audit from that phase, retained in the model,
+classified every signature that admits
 `collection<T>` / `indexed_collection<T>`. Phase 1 shipped the string-preserving
 arm for the operators the preservation rule makes mandatory; the entries below
 are the ones deliberately left out, each with the reason it is a judgement call
@@ -6669,7 +6706,7 @@ is in git history. The only items deliberately left open:
   not reach the transformer handler. Three sibling manifestations, all on
   doubly-contradictory input (a solve/differentiation/integration variable that
   also has a concrete value), all silent wrong/inert answers, documented with
-  repros in `docs/plans/2026-07-23-simplify-together-scoping.md` §B/C/D:
+  repros summarized by `docs/SCOPING-MODEL.md`:
   `Solve(Simplify(s)=2, w)` with `w` value-bound and appearing in `s` → `[]`
   (§B); `∫ Simplify(x²) dx` with `x:=5` → `25x` (§C); Solve shielding computed
   before bundled `Element` specs are lifted (§D, Codex-flagged, not yet

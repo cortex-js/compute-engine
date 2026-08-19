@@ -6,7 +6,7 @@ import type { Type } from '../../src/common/type/types';
 
 //
 // Phase 2 of the parameterized-nominal design
-// (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §5): the
+// (`docs/TYPE-SYSTEM.md`): the
 // QUANTIFIED constructor.
 //
 //   type tree<T> = tuple<value: T, children: list<tree<T>>>

@@ -7,7 +7,7 @@ import { validEpsil } from '../utils';
 
 //
 // Epsil `match` surface grammar (Phase 3 of the match design,
-// docs/plans/2026-07-12-cortex-match-design.md §2–3): parse, serialize, and
+// docs/LANGUAGE-MODEL.md §2–3): parse, serialize, and
 // execute a keyword-led `match subject { case… }` block. The engine `Match`/
 // `MatchCase`/`Pin`/`Alternatives` heads (Phases 1–2) are exercised in
 // test/compute-engine/match-expression.test.ts; here we cover the Epsil
@@ -271,7 +271,7 @@ describe('EPSIL MATCH — diagnostics', () => {
     // The guard prints as the explicit MatchesType call: both heads are
     // public operators, so the text re-parses to the same node. An `is`
     // print-sugar is a named follow-up of the first-class-types plan's R6
-    // sugar revisit (`docs/plans/2026-08-18-first-class-types.md`).
+    // sugar revisit (`docs/TYPE-SYSTEM.md`).
     expect(serializeEpsil(expr!)).toBe(
       'match n {\n  a => 1\n  b if MatchesType(b, TypeFrom("integer")) => 2\n  _ => 3\n}'
     );
@@ -637,7 +637,7 @@ describe('EPSIL MATCH — range patterns (execute)', () => {
 
 /**
  * Rung 1 of the error-propagation design
- * (`docs/plans/2026-07-31-error-propagation-design.md`): `match` is the rescue
+ * (`docs/LANGUAGE-MODEL.md`): `match` is the rescue
  * construct at the Epsil surface too. The MathJSON-level pins are in
  * `test/compute-engine/match-expression.test.ts`.
  */
@@ -690,7 +690,7 @@ describe('EPSIL MATCH — error subjects (rung 1)', () => {
     // Formerly a pinned GAP: non-simple annotations were diagnosed
     // `type-pattern-unsupported` and their cases fell through for every
     // subject. The typed-pattern work (first-class types phase 2,
-    // `docs/plans/2026-08-18-first-class-types.md` §3.2) lifted the
+    // `docs/TYPE-SYSTEM.md`) lifted the
     // restriction: the annotation lowers to `MatchesType(v, TypeFrom("T"))`
     // and full type expressions decide their cases.
     expect(diagnostics('match 5 {\n  v: !error => "bound"\n  _ => "fell"\n}')).toEqual(
@@ -741,7 +741,7 @@ describe('EPSIL MATCH — per-evaluation closures (regression, 2026-08-01)', () 
 
 //
 // Phase 3 of the parameterized-nominal design
-// (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §6 and the
+// (`docs/TYPE-SYSTEM.md` and the
 // §10 "Recursion" obligation): `match` reads a parameterized nominal at its
 // instantiated body. The `match` machinery itself is unchanged — a case binds
 // VALUES, so the tagged application matches structurally exactly as a

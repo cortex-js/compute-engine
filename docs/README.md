@@ -20,9 +20,15 @@ read the repository [`README.md`](../README.md).
 | Understand simplification invariants | [`SIMPLIFY.md`](./SIMPLIFY.md) |
 | Understand seeding, `Random` draws, and cross-target parity | [`RANDOMNESS-MODEL.md`](./RANDOMNESS-MODEL.md) |
 | Understand time budgets and cancellation | [`TIMEOUT-MODEL.md`](./TIMEOUT-MODEL.md) |
+| Understand checkpoint/restore and notebook replay | [`CHECKPOINT-MODEL.md`](./CHECKPOINT-MODEL.md) |
 | Understand broadcast length-mismatch policy (strict lifting vs shortest pairing) | [`BROADCAST-MODEL.md`](./BROADCAST-MODEL.md) |
 | Understand effects and effect inference | [`EFFECTS-MODEL.md`](./EFFECTS-MODEL.md) |
-| Understand type-system direction | [`TYPE_SYSTEM_ROADMAP.md`](./TYPE_SYSTEM_ROADMAP.md) |
+| Understand implemented type-system invariants | [`TYPE-SYSTEM.md`](./TYPE-SYSTEM.md) |
+| Understand binding and scope invariants | [`SCOPING-MODEL.md`](./SCOPING-MODEL.md) |
+| Understand collection representation and execution | [`COLLECTIONS-MODEL.md`](./COLLECTIONS-MODEL.md) |
+| Understand compilation invariants | [`COMPILATION-MODEL.md`](./COMPILATION-MODEL.md) |
+| Understand Epsil/Cortex lowering semantics | [`LANGUAGE-MODEL.md`](./LANGUAGE-MODEL.md) |
+| Understand open type-system direction | [`TYPE_SYSTEM_ROADMAP.md`](./TYPE_SYSTEM_ROADMAP.md) |
 | Understand collection-element inference | [`INFERENCE_ROADMAP.md`](./INFERENCE_ROADMAP.md) |
 | Understand string and character invariants | [`STRING_ROADMAP.md`](./STRING_ROADMAP.md) |
 | Reproduce parser corpus checks | [`mathnet/README.md`](./mathnet/README.md) |

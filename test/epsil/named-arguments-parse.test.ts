@@ -2,9 +2,8 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 
-// Work package A of the named-argument feature
-// (`docs/plans/2026-08-12-named-arguments-design.md` §1, §2, §7) is the SURFACE
-// half: the parser carries `f(rate: 0.05)` as
+// The surface half of the named-argument feature (`docs/LANGUAGE-MODEL.md`):
+// the parser carries `f(rate: 0.05)` as
 // `["NamedArgument", "'rate'", 0.05]`, and canonicalization consumes the
 // carrier by matching it against the callee's declared parameter names. The
 // consuming half is not built yet, so every pin below is on the RAW,

@@ -8,7 +8,7 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * The interpreter surfaces an Error VALUE per element when a callback's
  * `Typed`-parameter annotation rejects the element it is applied to (the
  * annotation-as-contract ruling,
- * `docs/plans/2026-08-08-lambda-param-element-inference.md` ruling 2). A
+ * `docs/TYPE-SYSTEM.md` ruling 2). A
  * compiled callback is a plain arrow / Python lambda — the annotation is not
  * emitted at all — so before this gate landed
  *
@@ -349,7 +349,7 @@ describe('unannotated callbacks are untouched', () => {
  *
  * The element-type inference never stamps a UNION element type — that
  * exclusion is ruled PERMANENT
- * (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ruling 4). But a
+ * (`docs/TYPE-SYSTEM.md`, ruling 4). But a
  * HAND-written union annotation is always spellable, and the compile admission
  * (`assertCallbackAnnotations`, an `isSubtype(union, union)` check) ADMITS it
  * when the source's element type provably satisfies it — the annotation is

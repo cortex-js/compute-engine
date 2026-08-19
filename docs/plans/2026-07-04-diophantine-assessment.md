@@ -6,7 +6,7 @@
 3,980 lines (single file) + 1,071-line test suite. Local copy in
 `venv/lib/python3.14/site-packages/sympy/solvers/diophantine/`.
 **Context:** Phases 1+2 (domain-constrained Solve) are implemented — see
-`docs/plans/2026-07-04-solve-domain-design.md`. Phase 3 adds symbolic integer
+`ARCHITECTURE.md`. Phase 3 adds symbolic integer
 solving so integer-typed/domained unknowns reach a closed-form solver before
 the enumeration fallback, and unbounded integer solves stop being inert.
 

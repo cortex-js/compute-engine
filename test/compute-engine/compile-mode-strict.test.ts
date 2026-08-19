@@ -4,9 +4,8 @@ import { isLaneMismatchError } from '../../src/compute-engine/compilation/diagno
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
- * Compile-mode migration, step 2 — the STRICT discipline
- * (`docs/plans/2026-08-16-compile-complex-mode.md` §9, step 2; §3 for the
- * boundary table; §8 D3 for the entry check).
+ * The STRICT compile discipline and its entry checks
+ * (`docs/COMPILATION-MODEL.md`).
  *
  * Under `mode: 'strict'` a complex-shaped value reaching a binding the
  * compilation shaped REAL is a `LaneMismatch` decline (`code:

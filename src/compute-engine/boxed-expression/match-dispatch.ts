@@ -20,7 +20,7 @@ import { errorOpsWithoutTrace } from './error-value.js';
 
 /**
  * `Match` dispatch — Epsil structural pattern matching
- * (see `docs/plans/2026-07-12-cortex-match-design.md`).
+ * (see `docs/LANGUAGE-MODEL.md`).
  *
  * `["Match", subject, case₁, …, caseₙ]` where each `caseᵢ` is
  * `["MatchCase", pattern, body]` or `["MatchCase", pattern, guard, body]`.

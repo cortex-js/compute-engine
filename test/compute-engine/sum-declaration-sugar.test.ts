@@ -386,7 +386,7 @@ describe('A5 — the variant-name collision guard, atomically', () => {
   });
 
   test('within ONE program the same collision is `type-redefinition`', () => {
-    // `docs/plans/2026-08-14-redefinition-discipline.md`: a sum statement owns
+    // `docs/TYPE-SYSTEM.md`: a sum statement owns
     // every name it declares, so reusing a name an earlier statement of the
     // SAME program declared is a redefinition — reported with that code on
     // both tiers, ahead of A5, so the static diagnostic and the runtime error

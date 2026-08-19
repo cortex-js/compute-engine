@@ -8,7 +8,7 @@ import { declarationOf } from './reference.js';
 
 /**
  * Variance of a parameterized NOMINAL type — the position analysis of
- * `docs/plans/2026-08-06-parameterized-nominal-types-design.md` §4.2, the
+ * `docs/TYPE-SYSTEM.md`, the
  * prescriptive diagnostic of §4.4, and the variance a subtype judgment may
  * actually use (§4.3, ruling C).
  *

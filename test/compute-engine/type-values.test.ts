@@ -10,7 +10,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
 // First-class type values, phase 1: the `type` primitive, the `TypeFrom`
 // container (which SETTLES to its reduced canonical text at construction),
 // and the `Subtype` predicate. Design and rulings R1–R9:
-// `docs/plans/2026-08-18-first-class-types.md`.
+// `docs/TYPE-SYSTEM.md`.
 
 const ce = new ComputeEngine();
 

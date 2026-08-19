@@ -933,7 +933,7 @@ describe('Python: the WHOLE string-collection row fails closed (D13)', () => {
   // one, and `for c in s` walks them — so any lowering would disagree with the
   // interpreter on a combining sequence, a ZWJ emoji family or a
   // regional-indicator flag.
-  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+  // (`docs/STRING_ROADMAP.md`, decision D13.)
   const S = { str: 'abc' };
   const pred = ['Function', ['Equal', 'c', { str: 'b' }], 'c'];
 

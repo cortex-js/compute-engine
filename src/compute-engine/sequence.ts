@@ -824,7 +824,7 @@ export function getSequenceInfo(
  */
 /**
  * Snapshot both sequence registries for a checkpoint (§4a of
- * `docs/plans/2026-08-18-checkpoint-restore-design.md`).
+ * `docs/CHECKPOINT-MODEL.md`).
  *
  * Sequences (`a_n := …`) bypass the binding model entirely into these
  * module-level `WeakMap`s, so the checkpoint journal never sees them and they

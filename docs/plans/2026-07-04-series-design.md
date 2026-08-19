@@ -1,8 +1,9 @@
 # `Series` — symbolic Taylor/Laurent expansion (design proposal)
 
-**Status:** approved 2026-07-04 (§8 answers inline); Phase 1 in progress ·
-**Date:** 2026-07-04 · **Roadmap:** Proposed product features item 1 (agreed
-2026-07-04).
+**Status:** ACTIVE RESIDUALS — core Taylor/Laurent/Puiseux implementation
+shipped; bare `O(…)` parsing, selected logarithmic expansions at infinity, and
+the remaining limit/residue adopters are demand-gated. **Date:** 2026-07-04 ·
+**Roadmap:** Product feature track.
 
 ## 1. Goals and consumers
 

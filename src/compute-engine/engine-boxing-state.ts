@@ -114,7 +114,7 @@ export class EngineBoxingState<Scope extends object> {
    * every later one. Recording the name here is what lets `noteDeclarationIn`
    * detect the conflict.
    * (First-boxing binding divergence, Tycho item 178(a)+(c) —
-   * `docs/plans/2026-08-13-first-boxing-binding-divergence.md`.)
+   * `docs/SCOPING-MODEL.md`.)
    */
   noteTransientAutoDeclare(name: string): void {
     if (!this._rootActive || !this._isPersistentScope) return;

@@ -7,7 +7,7 @@ import { typeToString } from '../../src/common/type/serialize';
 
 /**
  * Phase 1 of the typed-function-literals design
- * (docs/plans/2026-07-12-typed-function-literals-design.md):
+ * (docs/LANGUAGE-MODEL.md):
  * - the `Typed` ascription operator
  * - annotated `Function` parameters and return-type ascription
  * - named typed signatures from `type()`

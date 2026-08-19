@@ -472,7 +472,7 @@ describe('CALLBACK ARITY — the check DECLINES when the arity is not readable',
 
   test('the retired `callback<…>` spelling fails to parse; a plain arrow is checked', () => {
     const ce = new ComputeEngine();
-    // Design E §7 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`):
+    // Design E §7 (`docs/TYPE-SYSTEM.md`):
     // the constructor is gone from the type grammar, with a migration hint.
     expect(() =>
       ce.declare('cb', 'callback<(number, number) -> boolean>')

@@ -62,7 +62,7 @@ export function isTypeCompatibilityError(
  * `f : (number) -> number = x^2 + 1`, where the author read the annotation as
  * if it bound `x`. A signature's parameters bind only when they are NAMED
  * (the Epsil "lambda lift" — see
- * `docs/plans/2026-08-08-annotation-lambda-lift.md`), so with an unnamed
+ * `docs/LANGUAGE-MODEL.md`), so with an unnamed
  * annotation the initializer stays an ordinary expression: `x^2 + 1` is a
  * *number* in the unknown `x`, not a function of `x`. The mistake is
  * invisible to readers, who mentally auto-insert the missing name — the
@@ -155,7 +155,7 @@ export function declaredTypeError(
 
 /**
  * G11 (§2.4 of
- * `docs/plans/2026-08-04-generic-function-literals-design.md`) — the
+ * `docs/TYPE-SYSTEM.md`) — the
  * single-arm restriction.
  *
  * A function literal may implement a polymorphic declared type only when that
@@ -173,7 +173,7 @@ export const GENERIC_OVERLOAD_LITERAL_MESSAGE =
 
 /**
  * The rule a rejected generic spelling on a function LITERAL states
- * (`docs/plans/2026-08-04-generic-function-literals-design.md` §3.4).
+ * (`docs/TYPE-SYSTEM.md`).
  *
  * A type variable enters a literal ONLY through a whole-signature `where`
  * clause (G6) — never through a per-parameter annotation, which would be a

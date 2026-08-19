@@ -329,7 +329,7 @@ export function canonicalFunctionLiteral(
  * wrapped in `["Typed", param, type]`, from the operand's RAW structure.
  *
  * This is the shared rewrite of the per-application element-type inference
- * (`docs/plans/2026-08-08-lambda-param-element-inference.md`): a call site
+ * (`docs/TYPE-SYSTEM.md`): a call site
  * that knows what a callback's parameter will be bound to annotates the
  * literal it passes, so the literal behaves EXACTLY like the hand-annotated
  * spelling — the body scope declares the parameter with that type, every
@@ -765,7 +765,7 @@ function dependentLiteral(def: ProvisionalDependent): Expression | undefined {
  * Rollback journal: this is the ONE site that mutates a pre-existing
  * definition IN PLACE during the provisional-repair cascade — it does NOT
  * route through `updateDef`, whose half-swap journaling therefore cannot
- * capture it (`docs/plans/2026-08-13-inference-tx-design.md`, family 3 "As
+ * capture it (`docs/TYPE-SYSTEM.md`, family 3 "As
  * implemented" note). While a rollback frame is open, each kind snapshots
  * exactly what its install mutates: the operator kind the
  * `_update({evaluate})`-reachable fields (`_rederivationSnapshot`), the
@@ -780,7 +780,7 @@ function installRebuiltLiteral(
 ): void {
   const frame = activeRollbackFrame(ce);
   // Effects-axis provenance (W2 of
-  // `docs/plans/2026-08-13-effects-axis-provenance.md`): the re-derivation
+  // `docs/EFFECTS-MODEL.md`): the re-derivation
   // re-stamps the inferred effect set from the rebuilt body, and a change
   // records an entry whose cause is the REBUILT literal — deliberately
   // overriding any ambient canonicalization cause, which would
@@ -1067,7 +1067,7 @@ function illFormedPatternLeaf(pattern: Expression): string | undefined {
 /**
  * Make each PARAMETER OPERAND denote the binding the body `Block` declares for
  * it — step 5 of the binder discipline
- * (`docs/plans/2026-07-26-binder-mechanism-design.md` §1.3), for the one binder
+ * (`docs/SCOPING-MODEL.md`), for the one binder
  * that is not definition-driven.
  *
  * What arrived there differed by route, exactly as it did for `Series` and
@@ -1554,7 +1554,7 @@ export function canonicalWithFreshPlaceholders(expr: Expression): Expression {
 
 /**
  * How an application treats an argument whose value is — or embeds — an
- * `Error`. See `docs/plans/2026-07-31-error-propagation-design.md` §2.
+ * `Error`. See `docs/LANGUAGE-MODEL.md`
  *
  * - `'bubble'` (the default): error is the absorbing element of strict
  *   evaluation, so the application evaluates to that error value and the body
@@ -1825,7 +1825,7 @@ function hideBodyScopeParams(
  * Declare a parameter in a call frame's `freshScope`, and record that the
  * binding it creates is an ACTIVATION of the one the literal's body `Block`
  * declares for the same parameter
- * (`docs/plans/2026-07-26-binder-mechanism-design.md` §2.1).
+ * (`docs/SCOPING-MODEL.md`).
  *
  * The "two live bindings at once" state this repairs is not removable: the
  * call's value has to live somewhere other than the literal, or two

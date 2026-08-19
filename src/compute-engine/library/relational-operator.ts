@@ -328,7 +328,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // Restricted to the list-vs-scalar case: `skipBroadcastForVectorOps` skips
     // broadcasting when two-or-more operands are collections, so whole-list
     // equality `Equal(L, M)` stays a scalar boolean. See
-    // docs/plans/2026-07-07-desmos-list-filtering.md.
+    // docs/COLLECTIONS-MODEL.md.
     broadcastable: true,
 
     canonical: (args, { engine: ce }) => canonicalRelational(ce, 'Equal', args),
@@ -340,7 +340,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     eq: (a, b, prover) => {
       // Relation equivalence (same solution set) is an *identity* question in
       // the free variables of the operands: prover tier only, per the ratified
-      // audit (docs/plans/2026-08-04-cheap-equal-audit.md). The cheap
+      // audit (docs/LANGUAGE-MODEL.md). The cheap
       // arithmetic tier (`eq()` / `.isEqual()`) declines. `cmp()` passes no
       // flag, so its behavior is unchanged.
       if (prover === false) return undefined;

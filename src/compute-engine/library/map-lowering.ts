@@ -19,7 +19,7 @@ export type { Slot, LoweredLevel } from './map-broadcast-shape.js';
 
 /**
  * Drain-time lowering of a stacked lazy-`Map` broadcast chain
- * ("Map fusion" — `docs/plans/2026-07-27-map-fusion-design.md`, ratified
+ * ("Map fusion" — `docs/COLLECTIONS-MODEL.md`, ratified
  * 2026-07-27).
  *
  * Broadcast arithmetic over a lazy collection stacks lazy `Map`s: the

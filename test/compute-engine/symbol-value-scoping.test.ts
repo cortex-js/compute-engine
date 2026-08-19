@@ -1,7 +1,7 @@
 /**
  * EXECUTABLE SPEC — symbol-value dereference scoping.
  *
- * Design doc: docs/plans/2026-07-24-defining-scope-dereference-design.md
+ * Design doc: docs/SCOPING-MODEL.md
  *
  * A symbol's stored value is evaluated in the environment ITS OWN free symbols
  * denote (`evaluateInOwnBindings`, `binders.ts`), which settled two symptoms
@@ -118,7 +118,7 @@ describe('SPEC: the late-bound/early-bound ruling', () => {
 
 /**
  * Stage 14 of the binder mechanism
- * (`docs/plans/2026-07-26-binder-mechanism-design.md` §4, ruling 1): the
+ * (`docs/SCOPING-MODEL.md`, ruling 1): the
  * dereference used to defer to the ambient lookup whenever ANY valueless
  * shadow of the name existed. That blanket rule was only ever a proxy for the
  * shield idiom — `withValueShield`/`simplifyValueBlind` hide a symbol's value

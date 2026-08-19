@@ -1,10 +1,8 @@
 # Randomness Model — Design Note
 
-**Status**: ratified and implemented 2026-07-25. The design record — the
-problems it fixes, the alternatives rejected, the migration table — is
-[`docs/plans/2026-07-25-random-signature-redesign.md`](./plans/2026-07-25-random-signature-redesign.md).
-This note is the durable **model reference**: what the engine guarantees, and
-what a reimplementation must reproduce.
+**Status**: ratified and implemented 2026-07-25. This is the durable model
+reference: what the engine guarantees and what a reimplementation must
+reproduce. The superseded execution plans remain available in Git history.
 
 The frame stack is the second engine-wide, dynamically-scoped runtime mechanism
 alongside the deadline stack of [`TIMEOUT-MODEL.md`](./TIMEOUT-MODEL.md), and it
@@ -144,8 +142,7 @@ does not keep the expression wrapped:
 The stochastic **estimators** — Monte-Carlo integration, the sampled equality
 probe — are `drawsRandom: false` for the same reason, and deliberately so.
 They replay under a frame, but through a *derived sub-stream*: a private
-counter seeded from the frame that consumes **none** of its indices (see
-[`docs/plans/2026-07-28-derived-substreams.md`](./plans/2026-07-28-derived-substreams.md)).
+counter seeded from the frame that consumes **none** of its indices (see §7).
 An integral may take 1e7 samples and its sampling loop is deadline-truncated,
 so charging them to the frame would both shift every later `Random()` draw and
 make replay depend on wall-clock time. Because a completed estimate owes the

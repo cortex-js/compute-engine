@@ -390,8 +390,8 @@ describe('string-preserving operators', () => {
     ['TakeWhile', ['TakeWhile', str('aabba'), isA], 'aa'],
     ['DropWhile', ['DropWhile', str('aabba'), isA], 'bba'],
     ['Dedup', ['Dedup', str('aabbca')], 'abca'],
-    // Promoted in Phase 2 (`docs/plans/2026-08-16-string-phase2-join-search-
-    // ops.md`, item 8): what is left after removing one of a string's own
+    // String preservation (`docs/STRING_ROADMAP.md`): what is left after
+    // removing one of a string's own
     // characters is a string.
     ['DeleteAt', ['DeleteAt', str('abcd'), 2], 'acd'],
     ['DeleteAt (negative index)', ['DeleteAt', str('abcd'), -1], 'abc'],
@@ -810,7 +810,7 @@ describe('strings are atomic where the lattice would otherwise shred them', () =
 });
 
 describe('chunking and combinatorics over a string yield INNER STRINGS', () => {
-  // Ruling D9(b), 2026-08-16 (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`,
+  // Ruling D9(b), 2026-08-16 (`docs/STRING_ROADMAP.md`,
   // D9): every one of these operators cuts its result elements out of the
   // SOURCE'S OWN characters, so over a string source each inner element is
   // itself a string — `Partition("abcdef", 2)` is `["ab","cd","ef"]`, not

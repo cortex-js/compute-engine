@@ -3,7 +3,7 @@
  * (`docs/STRING_ROADMAP.md`: "`Join` vs. `StringJoin`", "Missing operations
  * (proposed)" → String-specific operations / Case operations / Conversions,
  * and "Future: locale-aware collation" → "Shape rules adopted now";
- * `docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decisions D2, D5,
+ * `docs/STRING_ROADMAP.md`, decisions D2, D5,
  * D6, D7, D10).
  *
  * Covers the narrowed `StringJoin`, `StringReplace`, `Trim`/`TrimStart`/

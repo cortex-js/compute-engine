@@ -536,7 +536,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     },
 
     // Structural pattern matching (Epsil `match`). See
-    // `docs/plans/2026-07-12-cortex-match-design.md` and
+    // `docs/LANGUAGE-MODEL.md` and
     // `boxed-expression/match-dispatch.ts`.
     Match: {
       description:
@@ -829,7 +829,7 @@ const CONDITION_CELL_TYPE = parseType('boolean | missing');
  * The materialized cells of a condition that activates the ELEMENT-WISE
  * selection path, or `undefined` when it does not.
  *
- * The gate (§3 of `docs/plans/2026-07-27-elementwise-which-design.md`) is
+ * The gate (§3 of `docs/BROADCAST-MODEL.md`) is
  * deliberately narrow: an indexed collection (never a `Set`, never a tuple —
  * tuples are points, not lists) of statically known finite length whose cells
  * are ALL condition values (`True`/`False`/`Missing`). A collection with a
@@ -853,7 +853,7 @@ function conditionCells(c: Expression): Expression[] | undefined {
 
 /**
  * Element-wise conditional selection: `np.select` semantics, ruled 2026-07-27
- * (`docs/plans/2026-07-27-elementwise-which-design.md`).
+ * (`docs/BROADCAST-MODEL.md`).
  *
  * `clauses[0]`'s condition has already been evaluated and materialized by the
  * caller (that is what activated the gate) and arrives as `first`; it is never
@@ -1159,7 +1159,7 @@ function evaluateWhich(
       // residual, resolved 2026-07-24.)
       if (cond === 'Missing') return absentConditionError(options.engine);
       // A LIST-VALUED condition selects element-wise (§3 of
-      // `docs/plans/2026-07-27-elementwise-which-design.md`). Every earlier
+      // `docs/BROADCAST-MODEL.md`). Every earlier
       // clause fell through (its condition was a scalar `False`/`Undefined`),
       // so it can never select and the remaining clauses carry the whole
       // selection.

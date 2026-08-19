@@ -85,7 +85,7 @@ export function _setNextObjectSerial(ce: ComputeEngine, serial: number): void {
  * weak-reference site can use `===` with no unwrap step.
  *
  * Two invariants shape every member below (the full list is in
- * `docs/plans/2026-08-14-object-representation-decision.md`, "Invariants"):
+ * `docs/TYPE-SYSTEM.md`, "Invariants"):
  *
  * 1. **One instance per object, forever.** No path may clone, rebuild or
  *    re-box one, so `canonical`, `structural`, `evaluate`, `N`, `simplify`,
@@ -530,7 +530,7 @@ export function makeObject(
  * so an instance holding the record would silently start reporting the NEW
  * layout while its slots still hold the old one, which is exactly the layout
  * migration invariant 7 forbids
- * (`docs/plans/2026-08-14-object-representation-decision.md`, "Type — pinned
+ * (`docs/TYPE-SYSTEM.md`, "Type — pinned
  * at construction"). Copying the reference node and its definition body cuts
  * that edge: no later registry write can reach the copy.
  *

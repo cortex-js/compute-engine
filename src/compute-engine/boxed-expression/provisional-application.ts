@@ -167,7 +167,7 @@ const REGISTRATIONS = new WeakMap<
  * membership AND the `REGISTRATIONS` reverse-index metadata restore
  * index-consistently. This replaced the snapshot-based
  * `provisionalRegistryRollbackPoint` (deleted in phase 2b of
- * `docs/plans/2026-08-13-inference-tx-design.md`), whose one restore
+ * `docs/TYPE-SYSTEM.md`), whose one restore
  * re-installed the snapshot's own `Set` objects — so a second rollback of
  * the same point restored already-mutated state. Undo actions manipulate
  * the module maps directly (never through the hooked functions), so a

@@ -699,7 +699,7 @@ function reduceIntersectionType(type: AlgebraicType): Type {
  * admit?
  *
  * The predicate protocol conformance uses to decide whether two conformance
- * targets collide (`docs/plans/2026-08-12-protocols-design.md` P4/P9). It is
+ * targets collide (`docs/TYPE-SYSTEM.md`). It is
  * built on the intersection REDUCTION above — `meet2`/`meetNumericRanges`/
  * `meetUnion` — deliberately NOT on `subtype.ts`'s `narrow()`, which
  * short-circuits incomparable pairs to `never` without consulting the numeric
