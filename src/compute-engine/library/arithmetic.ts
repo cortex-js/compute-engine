@@ -121,6 +121,7 @@ import {
   widen,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { parseType } from '../../common/type/parse.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import type { Type } from '../../common/type/types.js';
 import {
@@ -431,6 +432,55 @@ function isShapedNumericType(t: Type): boolean {
   );
 }
 
+/**
+ * Evaluate-time complement of `checkNumericArgs`: arithmetic operators are
+ * permissive at boxing time — a `value`-typed symbol is admitted because it
+ * COULD be a number, even though it may legally hold a string — so the
+ * numeric evaluate handlers must surface the mismatch once operand
+ * evaluation substitutes a value that PROVES non-numeric. Without this the
+ * mistake either lingers as an inert expression (`2 · "hello"`) or is
+ * silently absorbed into a numeric result (`Negate` and `Sqrt` turned a
+ * string into `NaN`).
+ *
+ * Returns a type error for the first VALID operand whose type is disjoint
+ * from every exempt reading: such an operand can neither be a number nor
+ * broadcast over one. The exemptions, and why each stays silent:
+ * - `broadcastable<number>`: could be a number, or a collection consumed by
+ *   broadcast;
+ * - `missing | nothing`: absence markers propagate as `NaN`, never error;
+ * - `function`: a function-valued symbol in a numeric position stays a
+ *   symbolic term throughout the engine, in EVERY operator, not only as a
+ *   product factor: at boxing time `checkNumericArgs` devolves an unapplied
+ *   operator symbol to a plain symbol (`N + 1` via
+ *   `devolveUnappliedOperator`) and accepts function-valued elements
+ *   without inference, and the pinned cached-expression contracts keep
+ *   `2·g` as `2g` after `g := x ↦ …` (pipeline-contracts,
+ *   definition-order). Whether a function in a numeric position should
+ *   instead be an error is a separate ruling; this guard only polices
+ *   VALUES that arithmetic can never consume;
+ * - `error`: the operand already carries its own problem — wrapping it
+ *   would bury the original report.
+ * `Quantity`/`Measurement` operands pass because their types (`value`,
+ * numeric) are not disjoint from the union. Invalid operands are skipped
+ * for the same reason as `error`-typed ones. Returns `undefined` when every
+ * operand could still be numeric.
+ */
+// Parsed once: the guard runs for every operand of every arithmetic
+// evaluation, so it must not re-resolve the type string per call.
+const NON_NUMERIC_EXEMPT_TYPE: Type = parseType(
+  'broadcastable<number> | missing | nothing | function | error'
+);
+function nonNumericOperandError(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  const bad = ops.find(
+    (x) => x.isValid && x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE)
+  );
+  if (bad === undefined) return undefined;
+  return ce.typeError('number', bad.type, bad);
+}
+
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   {
     //
@@ -503,6 +553,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `Add` is `lazy`, so the driver did NOT evaluate the operands —
         // this map is the (single) operand evaluation, not a re-evaluation.
         const evaluated = ops.map((x) => x.evaluate());
+        const nonNumeric = nonNumericOperandError(engine!, evaluated);
+        if (nonNumeric !== undefined) return nonNumeric;
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityAdd(engine!, evaluated);
           if (
@@ -813,6 +865,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([num, den], { numericApproximation, engine }) => {
         // Non-lazy operator: operands arrive already evaluated by the
         // driver (`_computeValue` step 4) — do not re-evaluate them.
+        const nonNumeric = nonNumericOperandError(engine!, [num, den]);
+        if (nonNumeric !== undefined) return nonNumeric;
         const evalNum = num;
         const evalDen = den;
         if (
@@ -1521,6 +1575,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([z], { numericApproximation, engine }) => {
         // Ln(a, b) = Log(a, b), so no need to check second argument
         // Non-lazy: `z` is already evaluated by the driver.
+        const nonNumeric = nonNumericOperandError(engine, [z]);
+        if (nonNumeric !== undefined) return nonNumeric;
         const evalZ = z;
         if (isMeasurement(evalZ)) {
           const r = measurementLn(engine, evalZ);
@@ -1573,6 +1629,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // },
       evaluate: (ops, { numericApproximation, engine }) => {
         // Non-lazy: operands are already evaluated by the driver.
+        // Covers the whole log family: Lb/Lg/Log2/Log10 canonicalize to Log.
+        const nonNumeric = nonNumericOperandError(engine, ops);
+        if (nonNumeric !== undefined) return nonNumeric;
         const evalArg = ops[0];
         if (evalArg && isMeasurement(evalArg)) {
           const base = ops[1] ?? engine.number(10);
@@ -2030,6 +2089,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `Multiply` is `lazy`, so the driver did NOT evaluate the operands —
         // this map is the (single) operand evaluation, not a re-evaluation.
         const evaluated = ops.map((x) => x.evaluate());
+        const nonNumeric = nonNumericOperandError(engine!, evaluated);
+        if (nonNumeric !== undefined) return nonNumeric;
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityMultiply(engine!, evaluated);
           if (
@@ -2095,6 +2156,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine }) => {
         // Non-lazy: `x` is already evaluated by the driver.
+        const nonNumeric = nonNumericOperandError(engine!, [x]);
+        if (nonNumeric !== undefined) return nonNumeric;
         const evalX = x;
         if (isQuantity(evalX)) {
           if (isMeasurement(evalX.op1)) {
@@ -2362,6 +2425,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // 2026-07-19 symbolic-recursion re-walk). Only LAZY operators
         // (`Add`, `Multiply`, `Sum`, …) receive raw operands and own their
         // evaluation.
+        const nonNumeric = nonNumericOperandError(engine!, [x, n]);
+        if (nonNumeric !== undefined) return nonNumeric;
         const evalBase = x;
         if (evalBase.operator === 'Quantity') {
           const r = quantityPower(engine!, evalBase, n);
@@ -2554,6 +2619,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x, n], { numericApproximation, engine }) => {
         // Non-lazy: operands are already evaluated by the driver.
+        const nonNumeric = nonNumericOperandError(engine, [x, n]);
+        if (nonNumeric !== undefined) return nonNumeric;
         const evalX = x;
         if (evalX.operator === 'Quantity') {
           const nVal = n.re;
@@ -2747,6 +2814,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine }) => {
         // Non-lazy: `x` is already evaluated by the driver.
+        const nonNumeric = nonNumericOperandError(engine, [x]);
+        if (nonNumeric !== undefined) return nonNumeric;
         const evalX = x;
         if (evalX.operator === 'Quantity') {
           const r = quantityPower(engine, evalX, engine.number(0.5));
