@@ -69,6 +69,7 @@ import {
   assignValueAsOperatorDef,
   reconcileFunctionLiteralReturn,
 } from './engine-declarations.js';
+import { journalDefinitionRecord } from './boxed-expression/boxed-value-definition.js';
 
 /**
  * Multi-clause function definitions — the engine half of
@@ -890,6 +891,23 @@ export function defineFunctionClause(
         ? existing.operator
         : undefined;
     const priorDeclared = retarget?.effectsDeclared;
+    // Checkpoint journal (funnel 5): `retarget` is the operator half in force
+    // BEFORE the install below, and the refusal path in the `catch` writes
+    // `effectsDeclared` back onto it — a write to a pre-existing record that
+    // reaches no other hook, since the install that would have journaled it
+    // is the one that just threw. Recorded here rather than in the `catch` so
+    // the snapshot predates the install's own writes.
+    //
+    // The write after a SUCCESSFUL install lands on an orphan: `ce.assign`
+    // routes to `updateDef`, which constructs a fresh
+    // `_BoxedOperatorDefinition` for a plain-object definition and swaps the
+    // record's pointer to it, so `retarget` is no longer what the binding
+    // holds. That write is dead rather than wrong — the installed half
+    // derives the same `effectsDeclared` from the incoming literal — but it
+    // is dead only for as long as that derivation agrees; see the ROADMAP
+    // entry "Dead post-install `effectsDeclared` write in
+    // `defineFunctionClause`".
+    if (retarget !== undefined) journalDefinitionRecord(ce, retarget, 'redefine');
     try {
       if (shadowsDispatcher) declareShadowingFunction(ce, id, literal);
       else ce.assign(id, literal);
@@ -1247,6 +1265,14 @@ function installClauseList(
       effectRow,
       declared,
     };
+    // Checkpoint journal (funnel 5): a bare-field write on a half that may
+    // pre-date this install. Today `updateDef` constructs a fresh operator
+    // half for every plain-object definition, so the target is always
+    // window-created and a restore drops it wholesale — but that is an
+    // invariant of `updateDef`'s dispatch, not of this call, and an
+    // identity-preserving fast path there would silently turn this write into
+    // an unjournaled mutation of a pre-existing record.
+    journalDefinitionRecord(ce, installed.operator, 'redefine');
     // Lets the call-time broadcast arms treat this definition as user code
     // (see `_BoxedOperatorDefinition._isMultiClause`).
     (installed.operator as { _isMultiClause?: boolean })._isMultiClause = true;

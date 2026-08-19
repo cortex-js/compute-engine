@@ -80,6 +80,8 @@ import {
 } from './boxed-expression/utils.js';
 import { checkArity, checkType } from './boxed-expression/validate.js';
 import { apply, lookup } from './function-utils.js';
+import { journalCheckpointMapEntry } from './checkpoint-journal.js';
+import { journalDefinitionRecord } from './boxed-expression/boxed-value-definition.js';
 
 //
 // PROTOCOLS — declarations, conformance, implementations, and dispatch.
@@ -3547,6 +3549,9 @@ export function syncProtocolDispatchers(ce: IComputeEngine): void {
   // before the surviving ones are refreshed.
   for (const [id, binding] of [...scope.bindings])
     if (!needed.has(id) && isProtocolDispatcher(binding)) {
+      // Checkpoint journal (funnel 4): dispatcher bindings are direct map
+      // surgery, like the minted constructors.
+      journalCheckpointMapEntry(ce, scope.bindings, id, id, 'declare');
       scope.bindings.delete(id);
       // Removing a binding is a context change the generation caches must see
       // (the same note `removeMintedTypeConstructor` makes).
@@ -3604,6 +3609,13 @@ function installDispatcher(
 
   const installed = scope.bindings.get(member);
   if (installed !== undefined && isOperatorDef(installed)) {
+    // Checkpoint journal (funnel 5): the dispatcher marker and the lazy
+    // effects deriver are written onto the operator half after the declare
+    // installed it — the same post-install shape as the minted-constructor
+    // markers in `type-constructors.ts`, and journaled for the same reason:
+    // the half is window-created only as long as `updateDef` keeps
+    // constructing a fresh one for every plain-object definition.
+    journalDefinitionRecord(ce, installed.operator, 'redefine');
     (installed.operator as unknown as DispatcherMarker)[DISPATCHER] = true;
     // The stored signature carries the DECLARED ceilings, which are fixed at
     // declaration time; the BARE requirements' contribution is the union over

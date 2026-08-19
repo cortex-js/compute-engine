@@ -125,6 +125,7 @@ import {
   mentionsQuantifiedVariable,
 } from './boxed-expression/function-literal.js';
 import { typeToString } from '../common/type/serialize.js';
+import { journalCheckpointMapEntry } from './checkpoint-journal.js';
 
 export function lookupDefinition(
   ce: IComputeEngine,
@@ -508,6 +509,15 @@ export function declareSymbolValue(
   const previousBinding =
     rollbackFrame === undefined ? undefined : scope.bindings.get(name);
 
+  // Checkpoint journal (funnel 4): the declare routes overwrite
+  // `scope.bindings[name]` unconditionally, and a FRESH declaration carries
+  // its value inside the constructed record, so no setter ever fires — this
+  // is the only hook that sees the very first assignment of a new name, the
+  // most common notebook write. The undo reinstates the previous binding
+  // OBJECT, or deletes the name when there was none: a name-only delete
+  // would destroy a binding this declare merely shadowed.
+  journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
+
   // Insert a placeholder in the bindings to handle recursive calls
   // (the value could be a function that references itself)
   scope.bindings.set(name, {
@@ -527,6 +537,9 @@ export function declareSymbolValue(
       previousBinding,
       boxedDef
     );
+  // The placeholder half is constructed here, so a restore through the
+  // current window orphans it and must dispose it (§6 step 5).
+  if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
   updateDef(ce, name, boxedDef, def);
 
   ce._noteStateEvent({
@@ -558,6 +571,9 @@ export function declareSymbolOperator(
   const previousBinding =
     rollbackFrame === undefined ? undefined : scope.bindings.get(name);
 
+  // Checkpoint journal (funnel 4) — see `declareSymbolValue` above.
+  journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
+
   // Insert a placeholder in the bindings to handle recursive calls
   // (the function is not yet defined)
   scope.bindings.set(name, {
@@ -574,6 +590,8 @@ export function declareSymbolOperator(
       previousBinding,
       boxedDef
     );
+  // The placeholder half is constructed here — see `declareSymbolValue`.
+  if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
   updateDef(ce, name, boxedDef, def);
 
   ce._noteStateEvent({ kind: 'declare', callable: true, shadowsCallable });

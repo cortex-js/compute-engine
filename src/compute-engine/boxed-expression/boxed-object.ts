@@ -28,6 +28,7 @@ import {
 } from './type-guards.js';
 import { hashCode } from './utils.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
+import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
 
 /**
  * The largest value a counter may reach before it stops being able to
@@ -337,15 +338,14 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
    * prevented: the constructor application carries the `state` effect label,
    * so it is impure and never folded (`type-constructors.ts`).
    *
-   * `isConstant` DOES reach cache keys, and answering `true` here is safe for
-   * a stated reason rather than by accident. Three cache-key selections ask
-   * whether an expression's operands are all constant and, when they are,
-   * choose a key no engine generation can invalidate:
-   * `BoxedFunction._lazyCollectionMemoKey` (`ops.every(x => x.isConstant)`)
-   * and the `_type` and `_eagerSource` keys beside it in `boxed-function.ts`,
-   * which `cachedValue()` then stamps onto those slots. Since
-   * an object answers `true`, a field-reading node such as `Field(p, 'age')`
-   * is itself `isConstant` and takes the generation-independent key. That is
+   * `isConstant` DOES reach a cache key, and answering `true` here is safe for
+   * a stated reason rather than by accident. One cache-key selection is left
+   * that asks whether an expression's operands are all constant and, when they
+   * are, chooses a key no engine generation can invalidate:
+   * `BoxedFunction._lazyCollectionMemoKey` (`ops.every(x => x.isConstant)`).
+   * Since an object answers `true`, a field-reading node such as
+   * `Field(p, 'age')` is itself `isConstant` and takes the
+   * generation-independent key. That is
    * correct, and answering `false` would not have made it safer: a field store
    * advances no engine invalidation axis at all — not `any`, not `semantic`,
    * not `world`, not `callable` — so a generation-keyed entry would be exactly
@@ -398,6 +398,29 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
         `Object version counter exhausted: too many stores to this "${this.typeName}" object`
       );
     }
+    // Checkpoint journal (design §5.3): the ONLY writer of `_slots` in the
+    // tree, so one hook covers every field store — including the compiled
+    // tier, which cannot reach a slot at all (`Assign(Field(…))` fails to
+    // compile). Placed after the identity no-op guard above, where the old
+    // value is already in hand, and before the store.
+    //
+    // The entry records PRESENCE alongside the value: this method can create
+    // a previously-absent slot, and `undefined` is ambiguous between "absent"
+    // and "present but undefined", so the undo needs an explicit delete for
+    // the absent case. `_version` is bumped on restore, never restored — the
+    // same monotone-counter rule as everywhere else.
+    //
+    // The OBJECT is the recorded owner, not its slot map: after replaying the
+    // slot undos a restore has to bump `_version` once per touched object, and
+    // there is no way back from a bare `Map` to the object that owns it.
+    journalCheckpointMapEntry(
+      this.engine,
+      this._slots,
+      name,
+      name,
+      'object-store',
+      this
+    );
     this._slots.set(name, value);
     this._version += 1;
     this.engine._noteStateEvent({ kind: 'object-store' });

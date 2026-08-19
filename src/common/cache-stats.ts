@@ -21,7 +21,7 @@
  */
 
 const CACHE_CLASSES = [
-  'sgn', // BoxedFunction._sgn — generation-or-constant key
+  'sgn', // BoxedFunction._sgn — generation key
   'type', // BoxedFunction._type — same key, plus the _typeGeneration fast path
   'effects', // BoxedFunction._effects — generation key, cycle-safe bespoke
   'lazyValue', // the lazy-collection evaluate memo — epoch + generation + scope

@@ -59,6 +59,7 @@ import {
 import { defaultCollectionHandlers } from '../collection-utils.js';
 import { registerProvisionalDependents } from './provisional-application.js';
 import { latestDeclaredEffectsSite } from './effects-provenance.js';
+import { journalDefinitionRecord } from './boxed-value-definition.js';
 
 const OPERATOR_DEF_KEYS = new Set([
   // Base
@@ -809,7 +810,156 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this._inferredDraws = s._inferredDraws;
   }
 
+  /**
+   * Snapshot EVERY mutable field of this record, for the checkpoint journal
+   * (`checkpoint-journal.ts`; stage C1 of
+   * `docs/plans/2026-08-18-checkpoint-restore-design.md`, §5.2 funnel 6).
+   * Wider than {@link _rederivationSnapshot}, which captures only what an
+   * `{ evaluate }`-only update can touch: a checkpoint has to rewind a full
+   * redefinition, which `_update` can drive through every field below.
+   *
+   * **Review rule: adding a mutable field to this class means extending this
+   * snapshot and its restore.** A field left out is silently carried across a
+   * rewind. The drift guard is
+   * `test/compute-engine/checkpoint-journal.test.ts`, which compares this
+   * tuple's key set against the record's own property names.
+   *
+   * `_signature` is read directly, never through the `signature` accessor:
+   * the getter runs {@link _refreshDerivedEffects} first, so snapshotting
+   * through it would re-derive a lazily-derived effect set as a side effect
+   * of taking a checkpoint. Excluded: `name` and `engine` are identity and
+   * never move.
+   * @internal */
+  _checkpointSnapshot(): unknown {
+    return {
+      description: this.description,
+      keywords: this.keywords,
+      url: this.url,
+      wikidata: this.wikidata,
+      broadcastable: this.broadcastable,
+      inspectsErrors: this.inspectsErrors,
+      namedArgumentsRequired: this.namedArgumentsRequired,
+      missingBehavior: this.missingBehavior,
+      missingStrip: this.missingStrip,
+      associative: this.associative,
+      commutative: this.commutative,
+      _commutativeMatch: this._commutativeMatch,
+      commutativeOrder: this.commutativeOrder,
+      idempotent: this.idempotent,
+      involution: this.involution,
+      _effects: this._effects,
+      _inferredDraws: this._inferredDraws,
+      effectsDeclared: this.effectsDeclared,
+      frameProtocol: this.frameProtocol,
+      invokes: this.invokes,
+      discharges: this.discharges,
+      holdClass: this.holdClass,
+      readsRandomFrame: this.readsRandomFrame,
+      complexity: this.complexity,
+      lazy: this.lazy,
+      scoped: this.scoped,
+      bindingSites: this.bindingSites,
+      _signature: this._signature,
+      inferredSignature: this.inferredSignature,
+      _deriveEffects: this._deriveEffects,
+      // COPIED, not aliased: provenance is appended to in place.
+      _typeProvenance: this._typeProvenance?.slice(),
+      _derivedSignature: this._derivedSignature,
+      _isLambda: this._isLambda,
+      _lambdaLiteral: this._lambdaLiteral,
+      _isMultiClause: this._isMultiClause,
+      type: this.type,
+      sgn: this.sgn,
+      eq: this.eq,
+      neq: this.neq,
+      canEnumerate: this.canEnumerate,
+      elementCount: this.elementCount,
+      even: this.even,
+      canonical: this.canonical,
+      evaluate: this.evaluate,
+      evaluateAsync: this.evaluateAsync,
+      evalDimension: this.evalDimension,
+      compile: this.compile,
+      collection: this.collection,
+    };
+  }
+
+  /** Restore the fields captured by {@link _checkpointSnapshot}, verbatim.
+   * No `_resyncEffects()` follows and the record object is never replaced,
+   * for the same two reasons as {@link _restoreRederivationSnapshot}: the
+   * captured signature/effect pair was consistent when snapshotted, and live
+   * boxed expressions hold the record by identity.
+   * @internal */
+  _restoreCheckpointSnapshot(snapshot: unknown): void {
+    const s = snapshot as Record<string, any>;
+    this.description = s.description;
+    this.keywords = s.keywords;
+    this.url = s.url;
+    this.wikidata = s.wikidata;
+    this.broadcastable = s.broadcastable;
+    this.inspectsErrors = s.inspectsErrors;
+    this.namedArgumentsRequired = s.namedArgumentsRequired;
+    this.missingBehavior = s.missingBehavior;
+    this.missingStrip = s.missingStrip;
+    this.associative = s.associative;
+    this.commutative = s.commutative;
+    this._commutativeMatch = s._commutativeMatch;
+    this.commutativeOrder = s.commutativeOrder;
+    this.idempotent = s.idempotent;
+    this.involution = s.involution;
+    this._effects = s._effects;
+    this._inferredDraws = s._inferredDraws;
+    this.effectsDeclared = s.effectsDeclared;
+    this.frameProtocol = s.frameProtocol;
+    this.invokes = s.invokes;
+    this.discharges = s.discharges;
+    this.holdClass = s.holdClass;
+    this.readsRandomFrame = s.readsRandomFrame;
+    this.complexity = s.complexity;
+    this.lazy = s.lazy;
+    this.scoped = s.scoped;
+    this.bindingSites = s.bindingSites;
+    // Written through the private field, not the `signature` accessor, so the
+    // restore does not run the derived-effects refresh against the state it is
+    // in the middle of rewinding. `_deriveEffects` is restored FIRST for the
+    // same reason the rederivation restore does it: leaving a deriver behind
+    // would keep re-deriving against the definition the restore discarded.
+    this._deriveEffects = s._deriveEffects;
+    this._signature = s._signature;
+    this.inferredSignature = s.inferredSignature;
+    this._typeProvenance = s._typeProvenance;
+    this._derivedSignature = s._derivedSignature;
+    this._isLambda = s._isLambda;
+    this._lambdaLiteral = s._lambdaLiteral;
+    this._isMultiClause = s._isMultiClause;
+    this.type = s.type;
+    this.sgn = s.sgn;
+    this.eq = s.eq;
+    this.neq = s.neq;
+    this.canEnumerate = s.canEnumerate;
+    this.elementCount = s.elementCount;
+    this.even = s.even;
+    this.canonical = s.canonical;
+    this.evaluate = s.evaluate;
+    this.evaluateAsync = s.evaluateAsync;
+    this.evalDimension = s.evalDimension;
+    this.compile = s.compile;
+    this.collection = s.collection;
+  }
+
   _update(def: OperatorDefinition): void {
+    // Checkpoint journal (funnel 6): `_update` is an IN-PLACE mutation that
+    // can move the signature, the handlers, the effect set and the lambda
+    // literal without any binding-half swap, so the window has to hold this
+    // record's whole field set. Recorded on ENTRY, before any of this
+    // method's own writes, because `_update` is not transactional: it assigns
+    // `lazy`, `scoped` and `bindingSites` before the idempotent/involution
+    // exclusion throws, and the handler fields before the collection-handler
+    // signature checks throw. A rejected update therefore leaves the record
+    // partially mutated, and only a snapshot taken ahead of the first write
+    // captures the true pre-update state whatever later throw lands.
+    journalDefinitionRecord(this.engine, this, 'redefine');
+
     if (this.engine.strict) {
       for (const key in def) {
         // Silently ignore private fields so that spreading an existing boxed

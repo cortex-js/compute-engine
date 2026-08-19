@@ -121,22 +121,122 @@ AST's `sourceOffsets`) ship with two deliberate, refusal-guarded gaps:
    occurrences of the resolved parameter and keeping the refusal only for
    unresolvable callees.
 
-### `reduceType` collapses an intersection of unrelated function signatures to `nothing` (OPEN, type system — opened 2026-08-19)
+### `reduceType` collapsed an intersection of unrelated function signatures to `nothing` (FIXED 2026-08-19 — opened 2026-08-19; no ruling needed, the reduction was simply wrong)
 
 An overload-set type written as an intersection —
-`((integer) -> integer) & ((string) -> string)` — reduces to `nothing` (the unit
-type, not even the bottom `never`), so the type cannot be expressed at all:
+`((integer) -> integer) & ((string) -> string)` — reduced to `nothing` (the unit
+type, not even the bottom `never`), so the type could not be expressed at all:
 observed via `TypeFrom("((T) -> T where T: number) & ((string) -> string)")`
 settling to `TypeFrom("nothing")` while adding the first-class-types phase-1
-tests. A multi-clause function legitimately inhabits such an intersection, so
-either the reduction is wrong (overload intersections should survive
-`reduceType`, in `src/common/type/reduce.ts`) or intersections are deliberately
-not the overload spelling — needs a ruling. The polytype-detection predicate
-(`isPolytype` in `src/compute-engine/library/type-value-utils.ts`) already
-handles the intersection case for when it becomes reachable; the test "an
-overload set with a generic arm counts as a polytype"
-(`test/compute-engine/type-values.test.ts`) pins the predicate and records the
-unreachability.
+tests.
+
+The entry asked whether intersections are deliberately not the overload
+spelling. They are the overload spelling, uncontroversially: `isSubtype`
+already reports such an intersection as a subtype of each of its arms, and the
+representation is documented as the overload set in `common/type/utils.ts`,
+`boxed-type.ts`, `instantiate.ts`, and the type parser's own error text. The
+reduction contradicted all of them.
+
+Cause: the pairwise meet (`meet2`, `src/common/type/reduce.ts`) ended in a bare
+`return 'nothing'`, so any pair it had no rule for was reported EMPTY rather
+than irreducible. Two signatures were such a pair. So were two same-constructor
+collections (`list<never>` inhabits both `list<integer>` and `list<string>`)
+and two records (width subtyping — `record{a: integer, b: string}` inhabits
+`record{a: integer} & record{b: string}`). `provablyDisjoint` in
+`subtype.ts` answers all three correctly, so the two predicates flatly
+contradicted each other.
+
+Fix: the fallthrough keeps the pair only on a POSITIVE witness, and the only
+witness is "both sides are signatures". A positive witness rather than
+`!provablyDisjoint`, because that oracle answers the conservative "may overlap"
+for a NOMINAL reference (its inhabitants are not its definition's), and the
+protocol-conformance overlap gate needs unrelated nominal types to have an
+empty meet — reading its conservative answer as "keep the intersection" made
+every unrelated nominal pair collide (8 protocol tests).
+`reduceIntersectionType` accumulates the irreducible members instead of folding
+into a single type, flattening nested intersections so reduction is
+associative, and preserving the WRITTEN arm order, which is what `overload.ts`
+breaks dispatch-ranking ties on. A member that merges keeps being offered to
+the remaining ones, so reduction reaches a fixed point — stopping at the first
+merge left it non-idempotent, which `settleTypeText` cannot afford.
+
+`meet2` reports "no rule for this pair" as `undefined` rather than by returning
+the pair itself: `meetUnion` legitimately RETURNS an intersection (its single
+surviving member), so a caller detecting the marker by kind mistook a computed
+meet for a give-up marker and kept the undistributed union
+(`(list<integer> | integer) & list<string>`).
+
+Beyond the reported symptom, the collapse also silently changed TUPLE ARITY:
+`tuple<((number) -> number) & ((string) -> string), integer>` settled to
+`tuple<integer>`, because a `nothing` slot is deliberately deleted (the
+value-level rule that writing `Nothing` into a positional slot removes it).
+
+Regressions: the `reduceType` intersection block in
+`test/common/types.test.ts` (arms kept, order preserved, associativity,
+nesting, fixed-point reduction, union distribution, and the pairs that must
+still collapse) and a route test in `test/compute-engine/type-values.test.ts` —
+the generic-arm overload set now REACHES `Subtype` and is rejected there as a
+polytype, which the `isPolytype` predicate had been pinned for while
+unreachable.
+
+### The meet has no structural rule for same-kind composites (OPEN, type system — found 2026-08-19 while fixing the entry above)
+
+`meet2` has rules for primitives, numeric ranges and unions, and now keeps an
+intersection of signatures. It has none for two same-kind COMPOSITES, so those
+still collapse to `nothing` even when a value inhabits both:
+
+```
+list<integer> & list<string>            reduces to  nothing
+record{a: integer} & record{b: string}  reduces to  nothing
+```
+
+`list<never>` — the empty list — is a subtype of both lists, and
+`record{a: integer, b: string}` is a subtype of both records (width
+subtyping), so neither meet is empty. `provablyDisjoint` in `subtype.ts`
+answers both correctly, so the two predicates disagree.
+
+Fixing it means giving the meet real structural rules — elementwise for a
+tuple (equal arity, or empty), key-merge for a record (shared keys meet), the
+element meet plus dimension compatibility for the collection constructors —
+NOT widening the keep-condition by kind. That shortcut was tried and reverted
+the same day: admitting a whole kind makes `typesOverlap` report tuples of
+different arity, and records whose shared key has disjoint types, as
+overlapping, and the protocol-conformance gate then refuses legitimately
+disjoint conformances.
+
+One case needs a ruling first: `record{a: integer} & record{a: string}` is
+inhabited by `record{a: never}` at the TYPE level (it is a subtype of both),
+while no VALUE inhabits it. Whether the meet algebra reasons about types or
+values decides the answer.
+
+### An empty meet is spelled `nothing`, the UNIT type, not the bottom `never` (OPEN, type system — found 2026-08-19 while fixing the entry above)
+
+`reduceIntersectionType` returns `'nothing'` for a genuinely disjoint pair, and
+`nothing` is the type whose one member is the symbol `Nothing` — not the empty
+type, which is `never`. So a refuted intersection does not vanish, it becomes a
+type that admits a value:
+
+```
+(number & boolean) | integer   reduces to   integer | nothing
+```
+
+and `nothing <: integer | nothing` is true, so the reduced union admits
+`Nothing` even though no value is both a number and a boolean. Through the
+`nothing`-slot deletion rule it also drops tuple slots:
+`tuple<number & boolean, integer>` reduces to `tuple<integer>`.
+
+This is the same conflation `reduceNegationType` already fixed for the
+complement (`!any` returned `nothing`, now `never` — see the SYM P2-21 comments
+in `src/common/type/reduce.ts`); the intersection path was not carried along.
+
+Not fixed with the entry above because the spelling is load-bearing: the empty
+meet is detected by an `=== 'nothing'` identity test in `assume.ts`
+(a contradictory assumption) and twice in `boxed-symbol.ts`
+(`isInteger`/`isRational` proving a symbol is definitely NOT one), and
+`test/common/types.test.ts` pins `number & boolean` → `nothing`. Changing it
+means moving those call sites to a shared "is the empty type" predicate that
+accepts both spellings, then flipping the return. Worth doing as its own
+change, with the union and tuple consequences above as the regression tests.
 
 ### Compatibility gate for USER-DECLARED lazy operators (OPEN, demand-gated — opened 2026-08-19)
 
@@ -3715,6 +3815,32 @@ shapes to evaluate: per-engine precision passed down to the BigDecimal call
 sites (invasive, correct), or save/set/restore of the static around every engine
 evaluation entry point (cheap, but async-evaluation interleaving needs care).
 Related trap record: `bigdecimal-precision-global` in auto-memory.
+
+### Dead post-install `effectsDeclared` write in `defineFunctionClause`
+
+Found 2026-08-19 while journaling the checkpoint hooks (dual review of stage
+C1). In `multi-clause.ts`'s `defineFunctionClause`, `retarget` is the operator
+half in force before the clause is installed, and after a SUCCESSFUL install
+the code writes `retarget.effectsDeclared = incomingExplicit !== undefined`.
+By then `retarget` is an orphan: `ce.assign` routes to `updateDef`, which
+constructs a fresh `_BoxedOperatorDefinition` for a plain-object definition
+and swaps the record's pointer to it, so the write lands on an object the
+binding no longer holds. Verified by probe: after `w(x: integer) = x + 1` then
+`w(x: string) = "s"`, the captured pre-assign half is not the installed one.
+
+Not an observable defect today — the installed half derives the same
+`effectsDeclared` from the incoming literal, so the live definition ends up
+with the value this write intends — and the same statement's REFUSAL path (the
+`catch`) does need the write, because there the old half is still installed.
+So the write is dead on one path and load-bearing on the other, and its
+comment describes only the second. Left as-is rather than "fixed" because
+re-deriving the target after the install would change which definition the
+effects-annotation contract is recorded on, and `contractViolation` reads that
+flag; that is a decision about the effects-provenance contract, not a
+mechanical repair. What to do when someone picks it up: either drop the
+success-path write and say in the comment that the install derives the flag,
+or re-fetch the live half and write it there — and pin whichever with a test
+that distinguishes the two.
 
 ### The strict linear posture initiative (RATIFIED 2026-08-18 — implementation queue)
 

@@ -22,6 +22,7 @@ import {
   checkDeadline,
   CancellationError,
 } from '../../common/interruptible.js';
+import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
 
 // The base `Expression` type exposes operands only after a type-guard narrows it
 // to a function (`isFunction`). Internally we always hold real boxed expressions
@@ -879,6 +880,10 @@ function compiledProbe(
   } catch {
     fn = null;
   }
+  // Checkpoint journal (funnel 7): the compiled probe closes over the
+  // definitions in force when it was built, and this memo carries no version
+  // stamp — a probe compiled during the window must not outlive a restore.
+  journalCheckpointMemoEntry(ce, probeCache, key, 'limit-probe');
   probeCache.set(key, fn);
   return fn;
 }

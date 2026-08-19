@@ -13,6 +13,7 @@ import {
 } from '../../common/type/utils.js';
 import { isFunction, isString, sym } from './type-guards.js';
 import { tuplePatternNames } from './tuple-pattern.js';
+import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
 
 /**
  * Shared accessors for the shape of a `Function` literal so that no call site
@@ -67,6 +68,16 @@ function parseTypeOperand(t: Expression | undefined): Type | undefined {
     // resolver-less (memo-cached) parse still carries the common case.
     try {
       const resolved = parseType(s, t.engine._typeResolver);
+      // Checkpoint journal (funnel 7): this memo carries no version stamp, so
+      // a node that predates the checkpoint but first resolved DURING the
+      // window would keep the window's resolution across a restore — the
+      // resolver reads the type registry, which the restore rewinds.
+      journalCheckpointMemoEntry(
+        t.engine,
+        RESOLVED_TYPE_OPERANDS,
+        t,
+        'resolved-type-operand'
+      );
       RESOLVED_TYPE_OPERANDS.set(t, resolved);
       return resolved;
     } catch {

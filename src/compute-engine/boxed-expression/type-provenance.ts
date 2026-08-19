@@ -3,6 +3,10 @@ import {
   activeRollbackFrame,
   type InferenceRollbackFrame,
 } from '../inference-rollback.js';
+import {
+  journalCheckpointField,
+  type CheckpointHost,
+} from '../checkpoint-journal.js';
 
 /**
  * Record one write to a definition's type (or an operator definition's
@@ -26,10 +30,30 @@ import {
  * mistake the count cap for a size bound.
  */
 export function recordTypeProvenance(
-  ce: { _rollbackFrames: ReadonlyArray<InferenceRollbackFrame> },
+  ce: { _rollbackFrames: ReadonlyArray<InferenceRollbackFrame> } & CheckpointHost,
   target: { _typeProvenance: TypeProvenanceEntry[] | undefined },
   entry: TypeProvenanceEntry
 ): void {
+  // Checkpoint journal (funnel 5): the history is mutated IN PLACE, so the
+  // window records a COPY of it as of the first append — restoring the array
+  // object itself would hand back one that the appends kept growing. The
+  // reinstated array is therefore a different object than the original; that
+  // is safe because nothing outside this function holds the list by identity
+  // past the call, and a rollback frame's own closure over it is always
+  // closed before a checkpoint operation is legal (the quiescence rule).
+  // The `.slice()` is INSIDE the window check, not an argument to a helper
+  // that checks: an argument is evaluated unconditionally, which would put an
+  // allocation and a copy on every provenance-worthy type write in every
+  // session, checkpointed or not.
+  if (ce._checkpointWindow !== undefined)
+    journalCheckpointField(
+      ce,
+      target,
+      '_typeProvenance',
+      target._typeProvenance?.slice(),
+      'type-write'
+    );
+
   const wasUnallocated = target._typeProvenance === undefined;
   const list = (target._typeProvenance ??= []);
   list.push(entry);

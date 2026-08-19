@@ -29,6 +29,48 @@ import { isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
 import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
+import type { CheckpointHookKind } from '../checkpoint-journal.js';
+
+/**
+ * Record this definition record's mutable state in the active checkpoint
+ * journal window, once per window (`checkpoint-journal.ts`; §5.2 funnels 1, 2
+ * and 5 of `docs/plans/2026-08-18-checkpoint-restore-design.md`).
+ *
+ * ONE key for the whole record rather than one per field: the snapshot is the
+ * complete mutable field set, so a per-field key would take more snapshots to
+ * cover the same state and restore it no more faithfully. `kind` therefore
+ * only classifies the write for the bypass canary — it does not select what
+ * is captured.
+ *
+ * A single field read when no checkpoint is live, which is every session that
+ * never takes one; the snapshot itself is built only on the FIRST write to
+ * this record in the window.
+ *
+ * Serves BOTH definition classes — the two snapshot tuples are different, but
+ * the journaling protocol around them is not, and each half of a binding is
+ * its own object, so the two never collide on a key.
+ */
+export function journalDefinitionRecord(
+  ce: ComputeEngine,
+  def: {
+    _checkpointSnapshot(): unknown;
+    _restoreCheckpointSnapshot(snapshot: unknown): void;
+  },
+  kind: CheckpointHookKind
+): void {
+  const w = ce._checkpointWindow;
+  if (w === undefined) return;
+  if (!w.claim(def, CHECKPOINT_DEF_KEY, kind)) return;
+  const snapshot = def._checkpointSnapshot();
+  w.push(() => def._restoreCheckpointSnapshot(snapshot));
+}
+
+/** The single journal key under which a definition record's whole mutable
+ * field set is recorded — see {@link journalDefinitionRecord}. Shared with the
+ * operator-definition hook so that a record whose two halves are both written
+ * in one window still takes one snapshot per HALF, keyed on the half object.
+ */
+export const CHECKPOINT_DEF_KEY = 'definition-fields';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -343,6 +385,11 @@ export class _BoxedValueDefinition
     // identity ONLY: structural equality (`.isSame`) is syntactic, not
     // binding-identity, and must not suppress (design §4's predicate table).
     if (v !== undefined && v === this._value) return;
+    // Checkpoint journal (funnel 1): the WHOLE coupled tuple, not just
+    // `_value` — a value write also moves `_isSelfReferential`, and the type
+    // setter next door moves `_value` — recorded once per window, after the
+    // no-op guard above so a suppressed write journals nothing.
+    journalDefinitionRecord(this._engine, this, 'value-write');
     const prev = this._value;
     this._value = v;
     this._isSelfReferential = isSelfReferentialValue(this.name, v);
@@ -446,6 +493,111 @@ export class _BoxedValueDefinition
     this._writeVersion += 1;
   }
 
+  /**
+   * Snapshot EVERY mutable field of this record, for the checkpoint journal
+   * (`checkpoint-journal.ts`; stage C1 of
+   * `docs/plans/2026-08-18-checkpoint-restore-design.md`, §5.2). Deliberately
+   * a different, wider tuple than {@link _typeSlotSnapshot}: that one covers
+   * the six slots an inference re-derivation can move, and a checkpoint has
+   * to rewind a whole cell's worth of arbitrary program writes.
+   *
+   * **Review rule: adding a mutable field to this class means extending this
+   * snapshot and its restore.** The completeness of the tuple is what makes
+   * the restore observationally equivalent to a fresh engine, and a field
+   * left out is silently carried across a rewind. The drift guard is
+   * `test/compute-engine/checkpoint-journal.test.ts`, which compares this
+   * tuple's key set against the record's own property names and fails on any
+   * field that is neither captured nor listed there as deliberately excluded.
+   *
+   * Excluded, each for a stated reason: `name` and `_engine` are identity and
+   * never move; `_writeVersion` is a monotone invalidation counter, which the
+   * restore BUMPS rather than restores (over-invalidation is a recompute,
+   * resurrecting a stale cache entry is a wrong answer); and
+   * `_unsubscribeFromConfigurationChange` is a live subscription handle owned
+   * by {@link dispose}, so writing an older one back would either double-
+   * unsubscribe or strand a listener.
+   *
+   * The result is OPAQUE to callers (typed `unknown`): it captures private
+   * fields and states no public setter can express — `_type === null` means
+   * "type derived from the value" — so constructing or peeking at one outside
+   * this class is meaningless.
+   * @internal */
+  _checkpointSnapshot(): unknown {
+    return {
+      wikidata: this.wikidata,
+      description: this.description,
+      keywords: this.keywords,
+      url: this.url,
+      _defValue: this._defValue,
+      _value: this._value,
+      _isSelfReferential: this._isSelfReferential,
+      _type: this._type,
+      inferredType: this.inferredType,
+      _placeholderSkeleton: this._placeholderSkeleton,
+      // COPIED, not aliased: provenance is appended to in place, so a
+      // snapshot sharing the array would grow with the writes it exists to
+      // undo and restore the post-write history.
+      _typeProvenance: this._typeProvenance?.slice(),
+      effectsDeclared: this.effectsDeclared,
+      _isConstant: this._isConstant,
+      _deadStack: this._deadStack,
+      _deadScope: this._deadScope,
+      _activationOf: this._activationOf,
+      _isShield: this._isShield,
+      _isDevolvedShadow: this._isDevolvedShadow,
+      holdUntil: this.holdUntil,
+      eq: this.eq,
+      neq: this.neq,
+      cmp: this.cmp,
+      collection: this.collection,
+      subscriptEvaluate: this.subscriptEvaluate,
+      _revisionVersion: this._revisionVersion,
+    };
+  }
+
+  /** Restore the fields captured by {@link _checkpointSnapshot}, verbatim and
+   * setter-bypassing — the public `type` setter is a computed view that
+   * allocates a fresh `BoxedType` and wipes `_value`/`_defValue` on a write
+   * to `unknown`, so a faithful restore must write the private fields. The
+   * record OBJECT is never replaced: live boxed expressions hold it by
+   * identity.
+   * @internal */
+  _restoreCheckpointSnapshot(snapshot: unknown): void {
+    const s = snapshot as ReturnType<
+      _BoxedValueDefinition['_checkpointSnapshot']
+    > &
+      Record<string, unknown>;
+    this.wikidata = s.wikidata as string | undefined;
+    this.description = s.description as string | string[] | undefined;
+    this.keywords = s.keywords as string[] | undefined;
+    this.url = s.url as string | undefined;
+    this._defValue = s._defValue as typeof this._defValue;
+    this._value = s._value as typeof this._value;
+    this._isSelfReferential = s._isSelfReferential as boolean;
+    this._type = s._type as typeof this._type;
+    this.inferredType = s.inferredType as boolean;
+    this._placeholderSkeleton = s._placeholderSkeleton as Type | undefined;
+    this._typeProvenance = s._typeProvenance as
+      | TypeProvenanceEntry[]
+      | undefined;
+    this.effectsDeclared = s.effectsDeclared as boolean;
+    this._isConstant = s._isConstant as boolean;
+    this._deadStack = s._deadStack as string | undefined;
+    this._deadScope = s._deadScope as string | undefined;
+    this._activationOf = s._activationOf as BoxedValueDefinition | undefined;
+    this._isShield = s._isShield as true | undefined;
+    this._isDevolvedShadow = s._isDevolvedShadow as true | undefined;
+    this.holdUntil = s.holdUntil as 'never' | 'evaluate' | 'N';
+    this.eq = s.eq as typeof this.eq;
+    this.neq = s.neq as typeof this.neq;
+    this.cmp = s.cmp as typeof this.cmp;
+    this.collection = s.collection as CollectionHandlers | undefined;
+    this.subscriptEvaluate = s.subscriptEvaluate as typeof this
+      .subscriptEvaluate;
+    this._revisionVersion = s._revisionVersion as number;
+    this._writeVersion += 1;
+  }
+
   get type(): BoxedType {
     const t = this._type;
     if (t === undefined || t === null)
@@ -517,6 +669,16 @@ export class _BoxedValueDefinition
     if (v.operator === 'Function') return recorded;
     const generation = this._engine._semanticVersion;
     if (generation === this._revisionVersion) return recorded;
+    // Checkpoint journal (funnel 2): a READ-driven type write. The revision
+    // below moves `_type` and `_revisionVersion` on a long-lived record that
+    // may have had no other write in the window, so there is no earlier
+    // snapshot to fall back on — and a restore that missed it would leave the
+    // widened type in place, because once the generation has moved the
+    // revision logic sees the restored narrower type match the widened
+    // recorded one and keeps the widened value. Recorded after the
+    // same-generation early return above, so a read that revises nothing
+    // journals nothing.
+    journalDefinitionRecord(this._engine, this, 'type-write');
     this._revisionVersion = generation;
     const live = v.type;
     if (live.isUnknown || live.matches(recorded)) return recorded;
@@ -535,6 +697,13 @@ export class _BoxedValueDefinition
       throw new Error(
         `The type of the constant "${this.name}" cannot be changed`
       );
+
+    // Checkpoint journal (funnel 2): the type setter is a hidden VALUE
+    // writer — a write to `unknown` below wipes `_defValue`/`_value` and
+    // reports no `value-write` event — so it journals the same coupled tuple
+    // the value setter does. Recorded after the constant guard, so a refused
+    // write leaves the window untouched.
+    journalDefinitionRecord(this._engine, this, 'type-write');
 
     this._type =
       t instanceof BoxedType ? t : new BoxedType(t, this._engine._typeResolver);
@@ -565,6 +734,8 @@ export class _BoxedValueDefinition
    * `_placeholderSkeleton`, unlike the public `type` setter above.
    * @internal */
   _setElementRefinement(t: BoxedType): void {
+    // Checkpoint journal (funnel 2): same coupled tuple as the setters above.
+    journalDefinitionRecord(this._engine, this, 'type-write');
     this._type = t;
     this._writeVersion += 1;
   }

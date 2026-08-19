@@ -1193,11 +1193,11 @@ export class BoxedFunction
     const nominal = this._measurementNominal;
     if (nominal) return nominal.sgn;
 
-    // Operands first — see the note on the same conjunction in `get type`.
-    const gen =
-      this._ops.every((x) => x.isConstant) && this.isPure
-        ? undefined
-        : this.engine._anyVersion;
+    // Keyed on the engine generation unconditionally: an all-constant, pure
+    // node's answer still moves when its OPERATOR's definition is rewritten
+    // in place, so a generation-independent key would never expire. The full
+    // account is on the same key in `get type`.
+    const gen = this.engine._anyVersion;
     const compute = (): Sign | undefined => {
       if (!this.isValid || this.isNumber !== true) return undefined;
       return sgn(this);
@@ -1794,16 +1794,27 @@ export class BoxedFunction
       return this._type.value ?? BoxedType.unknown;
     }
 
-    // `isConstant` is tested FIRST: it fails at the first free variable — the
-    // overwhelmingly common case for a row being canonicalized — whereas
-    // `isPure` runs the whole effect projection, which resolves symbol
-    // operands through their bindings and can force a stored function
-    // literal's arrow. Both are side-effect-free predicates, so the order is
-    // free; only the cost differs.
-    const gen =
-      this._ops.every((x) => x.isConstant) && this.isPure
-        ? undefined
-        : this.engine._anyVersion;
+    // Keyed on the engine generation, unconditionally. An earlier shape gave
+    // an all-constant, pure node a generation-INDEPENDENT key, on the premise
+    // that nothing could change such a node's answer. The premise holds for
+    // the operands and not for the OPERATOR: rewriting a user function's
+    // definition in place — `f(x) = x + 1`, then `f(x) = "hello"` — changes
+    // what `f(2)` types as, while `2` stays every bit as constant. An entry
+    // stamped with no generation is reached by no counter at all, so a node
+    // whose type had been read once went on answering from the
+    // pre-redefinition state for the rest of the engine's life. Keying it
+    // honestly measured free: the full suite ran 242 s against 250 s with the
+    // constant key, and the only workload that regressed was a synthetic loop
+    // re-reading a fixed set of constant nodes across hundreds of generation
+    // bumps (1800 reads, +6 ms). `sgn` and the `_eagerSource` slot in `at()`
+    // shared the key and lost it for the same reason.
+    //
+    // The lazy-collection evaluate memo keeps its constant key
+    // (`_lazyCollectionMemoKey`) because it carries a second gate the three
+    // slots here never had: a hit also requires `_lazyValueEpoch` to equal
+    // the engine's current `_worldVersion`, and a redefinition advances that
+    // version, so its generation-independent entries do expire.
+    const gen = this.engine._anyVersion;
     const compute = (): BoxedType =>
       new BoxedType(type(this), this.engine._typeResolver);
     const result =
@@ -2942,10 +2953,11 @@ export class BoxedFunction
     const can = this.operatorDefinition?.canEnumerate?.(this);
     if (can === false) return undefined;
 
-    const gen =
-      this._ops.every((x) => x.isConstant) && this.isPure
-        ? undefined
-        : this.engine._anyVersion;
+    // Keyed on the engine generation unconditionally: an all-constant, pure
+    // node's answer still moves when its OPERATOR's definition is rewritten
+    // in place, so a generation-independent key would never expire. The full
+    // account is on the same key in `get type`.
+    const gen = this.engine._anyVersion;
     const evaluated = cachedValue(
       this._eagerSource,
       gen,

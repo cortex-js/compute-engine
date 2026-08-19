@@ -72,6 +72,7 @@ import {
   returnTypeText,
   signatureEffects,
 } from '../common/type/utils.js';
+import { journalCheckpointMapEntry } from './checkpoint-journal.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
 // A static import would create a cycle: `validate.ts → utils.ts →
@@ -667,7 +668,21 @@ export function canonicalFunctionLiteralArguments(
         // the body's evidence, and the lambda auto-broadcast then wrongly maps
         // the function over a collection argument that the body consumes whole.
         const shared = shadowedDefs.get(name);
-        if (shared !== undefined) block.localScope!.bindings.set(name, shared);
+        if (shared !== undefined) {
+          // Checkpoint journal (funnel 4): a binding write outside the declare
+          // routes. The target is the literal's own block scope, which a
+          // restore normally discards along with the literal — journaled all
+          // the same, because a re-canonicalization of a literal that PREDATES
+          // the window writes into a scope the window must be able to rewind.
+          journalCheckpointMapEntry(
+            ce,
+            block.localScope!.bindings,
+            name,
+            name,
+            'declare'
+          );
+          block.localScope!.bindings.set(name, shared);
+        }
         else
           ce.declare(
             name,

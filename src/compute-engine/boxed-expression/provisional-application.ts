@@ -172,6 +172,17 @@ const REGISTRATIONS = new WeakMap<
  * the same point restored already-mutated state. Undo actions manipulate
  * the module maps directly (never through the hooked functions), so a
  * rollback is never re-journaled into an enclosing frame.
+ *
+ * The CHECKPOINT journal (`checkpoint-journal.ts`) extends the same three
+ * hooks: the registry holds STRONG references to definition halves, so a
+ * restore that rewinds a redefinition without rewinding these deltas leaves
+ * the reinstated half unregistered while the orphaned replacement stays in
+ * every dependents set it joined — later forward-reference fulfillment then
+ * repairs the orphan instead of the installed definition, and the orphan
+ * never becomes collectable. Recorded with `recordDelta`, NOT with the
+ * window's usual (owner, key) entries: each of these undos removes exactly
+ * what ITS call added, so first-write-wins dedup would drop every later
+ * call's delta and leave it applied.
  */
 
 /** Register `def` to be re-derived when one of the symbols its body read
@@ -191,6 +202,7 @@ export function registerProvisionalDependents(
   }
 
   const frame = activeRollbackFrame(ce);
+  const window = ce._checkpointWindow;
   const priorRegistration = REGISTRATIONS.get(def);
 
   let registration = priorRegistration;
@@ -203,6 +215,8 @@ export function registerProvisionalDependents(
   // removed by the undo — prior membership (`def` already waiting on a
   // name, a name already in the reverse index) is pre-frame evidence and
   // must survive.
+  // Membership deltas are collected only when something will journal them.
+  const journaling = frame !== undefined || window !== undefined;
   const addedToDependents: string[] = [];
   const addedToReverseIndex: string[] = [];
   for (const name of info.heads) {
@@ -211,32 +225,32 @@ export function registerProvisionalDependents(
       defs = new Set();
       byName.set(name, defs);
     }
-    if (frame !== undefined && !defs.has(def)) addedToDependents.push(name);
+    if (journaling && !defs.has(def)) addedToDependents.push(name);
     defs.add(def);
-    if (frame !== undefined && !registration.names.has(name))
+    if (journaling && !registration.names.has(name))
       addedToReverseIndex.push(name);
     registration.names.add(name);
   }
 
-  if (frame !== undefined) {
+  if (frame !== undefined || window !== undefined) {
     const installedRegistration = registration;
     const dependentsForEngine = byName;
-    frame.record({
-      undo: () => {
-        for (const name of addedToDependents) {
-          const defs = dependentsForEngine.get(name);
-          if (defs === undefined) continue;
-          defs.delete(def);
-          if (defs.size === 0) dependentsForEngine.delete(name);
-        }
-        for (const name of addedToReverseIndex)
-          installedRegistration.names.delete(name);
-        if (installedRegistration !== priorRegistration) {
-          if (priorRegistration === undefined) REGISTRATIONS.delete(def);
-          else REGISTRATIONS.set(def, priorRegistration);
-        }
-      },
-    });
+    const undo = (): void => {
+      for (const name of addedToDependents) {
+        const defs = dependentsForEngine.get(name);
+        if (defs === undefined) continue;
+        defs.delete(def);
+        if (defs.size === 0) dependentsForEngine.delete(name);
+      }
+      for (const name of addedToReverseIndex)
+        installedRegistration.names.delete(name);
+      if (installedRegistration !== priorRegistration) {
+        if (priorRegistration === undefined) REGISTRATIONS.delete(def);
+        else REGISTRATIONS.set(def, priorRegistration);
+      }
+    };
+    frame?.record({ undo });
+    window?.recordDelta(undo);
   }
 }
 
@@ -250,6 +264,7 @@ export function unregisterProvisionalDependent(def: object | undefined): void {
   if (registration === undefined) return;
   REGISTRATIONS.delete(def);
   const frame = activeRollbackFrame(registration.ce);
+  const window = registration.ce._checkpointWindow;
   const byName = DEPENDENTS.get(registration.ce);
   // Names whose dependents set actually held `def` — the delta the rollback
   // journal re-adds. The `registration` object itself is untouched (only
@@ -259,31 +274,49 @@ export function unregisterProvisionalDependent(def: object | undefined): void {
     for (const name of registration.names) {
       const defs = byName.get(name);
       if (defs === undefined) continue;
-      if (defs.delete(def as ProvisionalDependent) && frame !== undefined)
+      if (
+        defs.delete(def as ProvisionalDependent) &&
+        (frame !== undefined || window !== undefined)
+      )
         removedFrom.push(name);
       if (defs.size === 0) byName.delete(name);
     }
   }
-  if (frame !== undefined) {
-    frame.record({
-      undo: () => {
-        REGISTRATIONS.set(def, registration);
-        if (byName === undefined) return;
-        for (const name of removedFrom) {
-          let defs = byName.get(name);
-          if (defs === undefined) {
-            defs = new Set();
-            byName.set(name, defs);
-          }
-          defs.add(def as ProvisionalDependent);
+  if (frame !== undefined || window !== undefined) {
+    const undo = (): void => {
+      REGISTRATIONS.set(def, registration);
+      if (byName === undefined) return;
+      for (const name of removedFrom) {
+        let defs = byName.get(name);
+        if (defs === undefined) {
+          defs = new Set();
+          byName.set(name, defs);
         }
-      },
-    });
+        defs.add(def as ProvisionalDependent);
+      }
+    };
+    frame?.record({ undo });
+    window?.recordDelta(undo);
   }
 }
 
 /** The definitions waiting on `name`, removed from the registry. A repaired
  * definition re-registers itself for whatever names remain provisional. */
+/**
+ * How many definitions are currently waiting on `name` in this engine's
+ * forward-reference registry. **Test-only**: the registry is otherwise
+ * observable only through `takeProvisionalDependents`, which REMOVES what it
+ * reports, so there is no non-destructive way for a test to check that a
+ * checkpoint restore put the membership back.
+ * @internal
+ */
+export function _provisionalDependentCount(
+  ce: IComputeEngine,
+  name: string
+): number {
+  return DEPENDENTS.get(ce)?.get(name)?.size ?? 0;
+}
+
 export function takeProvisionalDependents(
   ce: IComputeEngine,
   name: string
@@ -293,28 +326,44 @@ export function takeProvisionalDependents(
   if (defs === undefined) return undefined;
   byName!.delete(name);
   const frame = activeRollbackFrame(ce);
+  const window = ce._checkpointWindow;
   // Reverse-index entries this take actually removed `name` from, captured
   // by identity for the rollback journal.
   const strippedRegistrations: { names: Set<string> }[] = [];
   for (const def of defs) {
     const registration = REGISTRATIONS.get(def);
     if (registration === undefined) continue;
-    if (registration.names.delete(name) && frame !== undefined)
+    if (
+      registration.names.delete(name) &&
+      (frame !== undefined || window !== undefined)
+    )
       strippedRegistrations.push(registration);
   }
-  if (frame !== undefined) {
-    frame.record({
-      undo: () => {
-        // The taken `Set` object was detached, not mutated — callers get a
-        // copy — so re-installing it by identity is exact. Any dependents
-        // re-registered under `name` AFTER this take were journaled by
-        // their own hook and removed by the time this (earlier) entry
-        // replays.
-        byName!.set(name, defs);
-        for (const registration of strippedRegistrations)
-          registration.names.add(name);
-      },
-    });
+  if (frame !== undefined || window !== undefined) {
+    const undo = (): void => {
+      // MERGED back into whatever set is currently under `name`, never
+      // installed over it. Re-installing the detached set by identity is
+      // exact only if nothing else can be under the name when this entry
+      // replays — true for an inference frame, whose strict-LIFO unwind has
+      // already removed every later re-registration, and NOT true for a
+      // checkpoint window: its replay reaches back past takes and
+      // registrations that interleaved across a whole cell, so a wholesale
+      // install discards membership the entries replayed before this one had
+      // just restored. Measured: a symbol applied before it was callable in
+      // one cell and again in the next lost its FIRST cell's dependent on
+      // restore. A merge is equally exact in the frame case, where the
+      // current set is empty or absent by the time it runs.
+      let current = byName!.get(name);
+      if (current === undefined) {
+        current = new Set();
+        byName!.set(name, current);
+      }
+      for (const def of defs) current.add(def);
+      for (const registration of strippedRegistrations)
+        registration.names.add(name);
+    };
+    frame?.record({ undo });
+    window?.recordDelta(undo);
   }
   return [...defs];
 }

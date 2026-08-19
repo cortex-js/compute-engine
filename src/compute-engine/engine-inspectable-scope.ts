@@ -12,6 +12,7 @@ import type {
 
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
 import { activeRollbackFrame } from './inference-rollback.js';
+import { journalCheckpointMapEntry } from './checkpoint-journal.js';
 
 /**
  * Is `value` a `BoxedDefinition` (as opposed to a structural `Type` object)?
@@ -216,6 +217,10 @@ export function createScope(
       // Definitions are engine-bound, so a definition harvested from ANOTHER
       // engine is out of contract. It is not enforced (a boxed definition
       // exposes no public engine back-reference to check against).
+      // Checkpoint journal (funnel 4): a host re-install is a binding write
+      // like any other, and this one can target a scope that outlives the
+      // window.
+      journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
       scope.bindings.set(name, value);
       // Held, not owned: `dispose()` must not release a definition another
       // scope is still using.

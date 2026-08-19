@@ -1364,6 +1364,20 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _restoreTypeSlots(snapshot: unknown): void;
 
+  /** Snapshot EVERY mutable field of this record for the checkpoint journal
+   * (`checkpoint-journal.ts`), so that a restore can rewind a whole cell's
+   * worth of arbitrary program writes IN PLACE. Wider than
+   * {@link _typeSlotSnapshot}, which covers only the slots an inference
+   * re-derivation moves. Opaque, for the same reason.
+   * @internal */
+  _checkpointSnapshot(): unknown;
+
+  /** Restore the fields captured by {@link _checkpointSnapshot}, verbatim and
+   * setter-bypassing. Never replaces the record object: live boxed
+   * expressions hold it by identity.
+   * @internal */
+  _restoreCheckpointSnapshot(snapshot: unknown): void;
+
   type: BoxedType;
 
   /**
@@ -2006,4 +2020,17 @@ export interface BoxedOperatorDefinition
    * signature/effect pair was consistent when snapshotted).
    * @internal */
   _restoreRederivationSnapshot(snapshot: unknown): void;
+
+  /** Snapshot EVERY mutable field of this record for the checkpoint journal
+   * (`checkpoint-journal.ts`). Wider than {@link _rederivationSnapshot},
+   * which covers only what an `{ evaluate }`-only update can touch: a
+   * checkpoint has to rewind a full redefinition. Opaque, for the same
+   * reason.
+   * @internal */
+  _checkpointSnapshot(): unknown;
+
+  /** Restore the fields captured by {@link _checkpointSnapshot}, verbatim
+   * and identity-preserving.
+   * @internal */
+  _restoreCheckpointSnapshot(snapshot: unknown): void;
 }

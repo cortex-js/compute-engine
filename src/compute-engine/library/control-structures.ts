@@ -56,6 +56,7 @@ import {
 } from '../boxed-expression/collection-element-memo.js';
 import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
 import { assignLoopIndex } from './utils.js';
+import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
@@ -1245,8 +1246,12 @@ function evaluateBlock(
       'value' in def &&
       def.value.value === undefined &&
       (def as { _declaredByStatement?: boolean })._declaredByStatement !== true
-    )
+    ) {
+      // Checkpoint journal (funnel 4): the block-exit sweep removes bindings
+      // by direct map surgery.
+      journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
       scope.bindings.delete(name);
+    }
   }
 
   // If the block's final value is a bare symbol bound to a user-defined

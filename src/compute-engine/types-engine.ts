@@ -29,6 +29,7 @@ import type { BigNum, Rational } from './numerics/types.js';
 import type { RandomSeedFrame, RandomSubstream } from './numerics/random.js';
 import type { EngineBoxingState } from './engine-boxing-state.js';
 import type { InferenceRollbackFrame } from './inference-rollback.js';
+import type { CheckpointWindow } from './checkpoint-journal.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
@@ -480,6 +481,26 @@ export interface IComputeEngine {
    * is one length check.
    * @internal */
   _rollbackFrames: InferenceRollbackFrame[];
+
+  /** The ACTIVE checkpoint journal window (`checkpoint-journal.ts`), or
+   * `undefined` when no checkpoint is live — which is the whole of a session
+   * that never takes one, so every journaling hook is one field read.
+   *
+   * At most one window is active at a time: it opens when a checkpoint is
+   * taken and closes at the next checkpoint or at a restore/discard involving
+   * that checkpoint. While it is open, each definition-record field write,
+   * scope-binding write, object-slot store and unstamped-memo store records
+   * the state it replaced, once per (record, field) — enough to rewind the
+   * engine to the checkpoint IN PLACE, which is required because live boxed
+   * expressions capture definition-record identity.
+   *
+   * Distinct from {@link _rollbackFrames} on purpose: an inference frame's
+   * undo advances no invalidation counter, so the effect derivers refuse to
+   * stamp memos while one is open — a rule that would disable memo stamping
+   * for the whole of a checkpointed cell. A checkpoint restore DOES advance
+   * the counters, so it needs no such rule.
+   * @internal */
+  _checkpointWindow: CheckpointWindow | undefined;
 
   /**
    * Run `fn` with a rollback frame open and ALWAYS roll the frame back — on

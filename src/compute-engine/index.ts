@@ -91,6 +91,10 @@ import {
   InferenceRollbackFrame,
   activeRollbackFrame,
 } from './inference-rollback.js';
+import {
+  CHECKPOINT_CANARY,
+  CheckpointWindow,
+} from './checkpoint-journal.js';
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
 import {
   _mapAutoCompileStats,
@@ -1019,9 +1023,19 @@ export class ComputeEngine implements IComputeEngine {
     this._configurationLifecycle.ephemeralWriteDepth = value;
   }
 
+  /** See `IComputeEngine._checkpointWindow`.
+   * @internal */
+  _checkpointWindow: CheckpointWindow | undefined = undefined;
+
   /** The state-event choke point — see `IComputeEngine._noteStateEvent`.
    * @internal */
   _noteStateEvent(event: StateEvent): void {
+    // Bypass canary (`CE_CHECKPOINT_CANARY`, off by default): tally the event
+    // against the active journal window, so the differential harness can find
+    // an event KIND the window saw with no journaling hook of that kind
+    // behind it. Counts are never compared — first-write dedup makes them
+    // incomparable by design.
+    if (CHECKPOINT_CANARY) this._checkpointWindow?.noteEvent(event.kind);
     this._configurationLifecycle.noteStateEvent(event);
   }
 

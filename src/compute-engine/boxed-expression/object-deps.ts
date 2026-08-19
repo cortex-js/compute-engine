@@ -64,9 +64,11 @@
  * settles). So a cache that only checks a generation is blind to mutation by
  * construction, and "we forgot one" is indistinguishable from "the engine
  * returns stale answers". Widening the mask would not have rescued a forgotten
- * family either: an object is `isConstant`, so a field-reading node takes a
- * generation-INDEPENDENT cache key that no axis bump reaches. This channel is
- * load-bearing, not a refinement.
+ * family either: an object is `isConstant`, so a field-reading node can take a
+ * generation-INDEPENDENT cache key that no axis bump reaches — the
+ * lazy-collection evaluate memo still selects one
+ * (`BoxedFunction._lazyCollectionMemoKey`). This channel is load-bearing, not
+ * a refinement.
  *
  * The disposition of each family is recorded at its own site; this is the
  * index. Each wired family carries an adversarial evaluate → store →

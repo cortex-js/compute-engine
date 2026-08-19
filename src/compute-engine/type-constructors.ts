@@ -26,6 +26,8 @@ import { updateDef, defIsCallableShaped } from './boxed-expression/utils.js';
 import { functionLiteralParameters } from './boxed-expression/function-literal.js';
 import { apply } from './function-utils.js';
 import { sumVariantInfo } from './sum-representation.js';
+import { journalCheckpointMapEntry } from './checkpoint-journal.js';
+import { journalDefinitionRecord } from './boxed-expression/boxed-value-definition.js';
 
 /**
  * Value constructors minted by a type declaration
@@ -159,6 +161,11 @@ function removeMintedTypeConstructor(
   name: string
 ): void {
   if (!isMintedConstructor(scope.bindings.get(name))) return;
+  // Checkpoint journal (funnel 4): a minted constructor is installed and
+  // removed by direct map surgery, outside the declare routes, so it needs
+  // its own hook — the registry rollback point covers the type RECORD, never
+  // the binding.
+  journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
   scope.bindings.delete(name);
   // Removing a binding is a context change: invalidate the caches keyed on
   // the generation (a re-mint bumps it again through `ce.declare()`, but the
@@ -535,10 +542,15 @@ export function mintTypeConstructor(
   ce.declare(name, def);
 
   const binding = scope.bindings.get(name);
-  if (binding !== undefined && 'operator' in binding)
+  if (binding !== undefined && 'operator' in binding) {
+    // Checkpoint journal (funnel 5): a bare marker written onto the operator
+    // half AFTER the declare installed it. See the note on the same shape in
+    // `installConstructorFunction` below.
+    journalDefinitionRecord(ce, binding.operator, 'redefine');
     (binding.operator as unknown as MintedMarker)[MINTED] = alias
       ? 'alias'
       : 'nominal';
+  }
 }
 
 //
@@ -1049,6 +1061,16 @@ export function installConstructorFunction(
   }
 
   const binding = scope.bindings.get(name);
-  if (binding !== undefined && 'operator' in binding)
+  if (binding !== undefined && 'operator' in binding) {
+    // Checkpoint journal (funnel 5): the marker is written onto the operator
+    // half after the declare/`updateDef` installed it. Today that half is
+    // always freshly constructed — `updateDef` builds a new
+    // `_BoxedOperatorDefinition` for every plain-object definition — so a
+    // restore drops it wholesale and the marker goes with it. That is an
+    // invariant of `updateDef`'s dispatch rather than of this call, and an
+    // identity-preserving fast path there would turn this into an
+    // unjournaled mutation of a pre-existing record.
+    journalDefinitionRecord(ce, binding.operator, 'redefine');
     (binding.operator as unknown as MintedMarker)[MINTED] = 'constructor';
+  }
 }
