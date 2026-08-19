@@ -687,6 +687,14 @@ export function loadIdentities(
   if (alreadyLoaded === undefined) {
     alreadyLoaded = new Set();
     loadedIdsByEngine.set(ce, alreadyLoaded);
+    // A checkpoint restore can roll back the declarations this loader
+    // installed. The marker below would then still claim those ids are
+    // present, so a replayed `loadIdentities()` would skip re-declaring rules
+    // the engine no longer has. Clearing it is registered as a hook ON the
+    // engine rather than being called from the checkpoint code, so the core
+    // checkpoint path does not import — and therefore does not bundle — the
+    // Fungrim payload. Registered once, on the first load for this engine.
+    (ce._checkpointResetHooks ??= []).push(() => loadedIdsByEngine.delete(ce));
   }
 
   const report: FungrimLoadReport = {

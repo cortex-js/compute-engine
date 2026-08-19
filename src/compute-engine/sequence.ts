@@ -822,6 +822,117 @@ export function getSequenceInfo(
 /**
  * List all defined sequences.
  */
+/**
+ * Snapshot both sequence registries for a checkpoint (§4a of
+ * `docs/plans/2026-08-18-checkpoint-restore-design.md`).
+ *
+ * Sequences (`a_n := …`) bypass the binding model entirely into these
+ * module-level `WeakMap`s, so the checkpoint journal never sees them and they
+ * have to be captured whole. The capture is STRUCTURAL, not by reference: a
+ * restore has to reinstate a sequence that was REPLACED during the window and
+ * undo additions to a pre-existing PENDING one, not merely delete the names
+ * the window created — and both the metadata records and their nested
+ * base-case maps are mutated in place.
+ *
+ * Value memos are deliberately NOT captured: they carry no version stamp, so
+ * the restore clears them wholesale (over-invalidation is a recompute).
+ *
+ * Bounded by design — sequence counts are small at a cell boundary.
+ * @internal
+ */
+export function _sequenceRegistrySnapshot(ce: ComputeEngine): unknown {
+  const registry = sequenceRegistry.get(ce);
+  const pending = pendingSequences.get(ce);
+  return {
+    registry:
+      registry === undefined
+        ? undefined
+        : [...registry.entries()].map(([name, meta]) => ({
+            name,
+            meta,
+            // The record is mutated in place (base cases and recurrences are
+            // added to an existing entry), so its fields ride along with it.
+            fields: { ...meta, base: new Map(meta.base) },
+          })),
+    pending:
+      pending === undefined
+        ? undefined
+        : [...pending.entries()].map(([name, entry]) => ({
+            name,
+            entry,
+            fields: { ...entry, base: new Map(entry.base) },
+          })),
+  };
+}
+
+/**
+ * Restore what {@link _sequenceRegistrySnapshot} captured, rewriting the
+ * existing records in place and dropping the ones the window created. Every
+ * value memo is cleared, whether or not its sequence moved.
+ * @internal
+ */
+export function _restoreSequenceRegistrySnapshot(
+  ce: ComputeEngine,
+  snapshot: unknown
+): void {
+  const s = snapshot as {
+    registry?: { name: string; meta: SequenceMetadata; fields: SequenceMetadata }[];
+    pending?: { name: string; entry: PendingSequence; fields: PendingSequence }[];
+  };
+
+  const registry = sequenceRegistry.get(ce);
+  if (registry !== undefined) {
+    const kept = new Map((s.registry ?? []).map((e) => [e.name, e]));
+    for (const name of [...registry.keys()])
+      if (!kept.has(name)) registry.delete(name);
+    for (const { name, meta, fields } of s.registry ?? []) {
+      // In place, so anything holding the metadata record keeps answering
+      // from it — the same identity rule the definition records follow.
+      Object.assign(meta, fields);
+      // `base` and `memo` are rebuilt rather than reassigned from `fields`
+      // for two different reasons, both about identity.
+      //
+      // `base` is COPIED out of the snapshot so a second restore of the same
+      // checkpoint does not hand the live record the snapshot's own map and
+      // then mutate it.
+      meta.base = new Map(fields.base);
+      // `memo` is cleared IN PLACE, never replaced. `createSequenceHandler`
+      // closes over the map it created and reads and writes THAT object
+      // directly; the metadata merely holds the same reference. Assigning a
+      // fresh map here would leave the handler consulting the old one, so
+      // every value memoized after the checkpoint would survive the rewind —
+      // the restore would look correct through `getSequenceInfo` and still
+      // serve stale terms. Cleared rather than restored because the memo
+      // carries no version stamp: there is nothing that could invalidate a
+      // stale entry, so over-invalidation (a recompute) is the only safe
+      // choice.
+      meta.memo?.clear();
+      registry.set(name, meta);
+    }
+  }
+
+  const pending = pendingSequences.get(ce);
+  if (pending !== undefined) {
+    const kept = new Map((s.pending ?? []).map((e) => [e.name, e]));
+    for (const name of [...pending.keys()])
+      if (!kept.has(name)) pending.delete(name);
+    for (const { name, entry, fields } of s.pending ?? []) {
+      Object.assign(entry, fields);
+      entry.base = new Map(fields.base);
+      // Assigned unconditionally, OUTSIDE the `Object.assign` above: a
+      // pending sequence is created without a `recurrence` key at all
+      // (`getOrCreatePending`), and the recurrence is added in place later.
+      // `Object.assign` only overwrites keys the source HAS, so a snapshot
+      // taken before the recurrence arrived would leave a window-added one
+      // in place — and `getSequenceStatus` reads `pending.recurrence`
+      // directly, so the restored engine would report a recurrence a fresh
+      // replay never had.
+      entry.recurrence = fields.recurrence;
+      pending.set(name, entry);
+    }
+  }
+}
+
 export function listSequences(ce: ComputeEngine): string[] {
   const registry = sequenceRegistry.get(ce);
   if (!registry) return [];

@@ -70,6 +70,7 @@ import type {
   ProtocolImplementationInput,
   InferenceWriteEvent,
   InferenceCauseContext,
+  EngineCheckpoint,
 } from './global-types.js';
 
 import type {
@@ -95,6 +96,12 @@ import {
   CHECKPOINT_CANARY,
   CheckpointWindow,
 } from './checkpoint-journal.js';
+import {
+  _EngineCheckpoint,
+  discardCheckpoint,
+  restoreCheckpoint,
+  takeCheckpoint,
+} from './checkpoint.js';
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
 import {
   _mapAutoCompileStats,
@@ -527,12 +534,12 @@ export class ComputeEngine implements IComputeEngine {
 
   /** The engine-level type registry: one namespace of declared types per
    * engine, world state alongside symbol assignment. Types are NOT lexically
-   * scoped (`docs/plans/2026-08-10-global-type-registry.md`).
+   * scoped (`docs/TYPE-SYSTEM.md`).
    * @internal */
   readonly _typeRegistry: Record<string, TypeReference> = Object.create(null);
 
   /** The engine-level PROTOCOL registry — the second kind of registry entry
-   * (`docs/plans/2026-08-10-global-type-registry.md` §5), engine-global for the
+   * (`docs/TYPE-SYSTEM.md` §5), engine-global for the
    * same reason types are: a conformance is a fact about a TYPE, not about a
    * position in a scope chain. Protocol names are NOT types (P8).
    * @internal */
@@ -603,7 +610,7 @@ export class ComputeEngine implements IComputeEngine {
         // fresh boxing carries a different statement identity), turning every
         // checked-then-run `type` statement into a false
         // `type-redefinition`. See
-        // `docs/plans/2026-08-14-redefinition-discipline.md`.
+        // `docs/TYPE-SYSTEM.md`.
         declOrigin: r._declOrigin,
       };
     });
@@ -742,7 +749,7 @@ export class ComputeEngine implements IComputeEngine {
         // and this thunk undoes it, so a leaked stamp would make the
         // evaluation loop's registration of that same statement a false
         // `protocol-redefinition`
-        // (`docs/plans/2026-08-14-redefinition-discipline.md`).
+        // (`docs/TYPE-SYSTEM.md`).
         declOrigin: r._declOrigin,
       };
     });
@@ -814,7 +821,7 @@ export class ComputeEngine implements IComputeEngine {
   _rollbackFrames: InferenceRollbackFrame[] = [];
 
   /** See `IComputeEngine._withRolledBackInference` — the rollback-frame
-   * primitive of `docs/plans/2026-08-13-inference-tx-design.md`, phase 2b.
+   * primitive of `docs/TYPE-SYSTEM.md`, phase 2b.
    * `options.forbidsRepairs` marks the frame as phase 2c's repair-free TRIAL
    * validation: the construction-level repair helpers
    * (`devolveUnappliedOperator`, `repairFreshMatrixInference`) assert they
@@ -1026,6 +1033,67 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._checkpointWindow`.
    * @internal */
   _checkpointWindow: CheckpointWindow | undefined = undefined;
+
+  /** See `IComputeEngine._checkpointStack`.
+   * @internal */
+  _checkpointStack: _EngineCheckpoint[] = [];
+
+  /** See `IComputeEngine._checkpointPoisoned`.
+   * @internal */
+  _checkpointPoisoned = false;
+
+  /** See `IComputeEngine._nextCheckpointId`.
+   * @internal */
+  _nextCheckpointId = 1;
+
+  /** See `IComputeEngine._checkpointBaseDepth`. Overwritten with the real
+   * depth at the end of the constructor.
+   * @internal */
+  _checkpointBaseDepth = 0;
+
+  /** See `IComputeEngine._inFlightAsyncEvaluations`.
+   * @internal */
+  _inFlightAsyncEvaluations = 0;
+
+  /** See `IComputeEngine._evaluationDepth`.
+   * @internal */
+  _evaluationDepth = 0;
+
+  /**
+   * Take a checkpoint of the engine's state at a quiescent cell boundary, so
+   * that a later {@link restore} can rewind to it — the notebook edit gesture
+   * "restore the checkpoint before cell k, replay cells k…n". Legal on a
+   * freshly constructed engine, which is how a client gets a `cp[0]` covering
+   * an edit of the first cell.
+   *
+   * Throws a `CheckpointError` (`checkpoint-not-quiescent`) if called while an
+   * evaluation, static pre-pass or declaration batch is in progress.
+   */
+  checkpoint(label?: string): EngineCheckpoint {
+    return takeCheckpoint(this, label);
+  }
+
+  /**
+   * Rewind to `cp`, invalidating every checkpoint taken after it. `cp` itself
+   * stays live and can be restored again.
+   *
+   * Expressions built BEFORE `cp` remain valid — their definitions are
+   * rewritten in place back to their `cp` state. Expressions built during the
+   * rewound window are NOT: they may reference disposed definition halves, and
+   * evaluating, typing or serializing one is undefined behavior. Cache cell
+   * outputs as serialized artifacts, not as live boxed nodes.
+   */
+  restore(cp: EngineCheckpoint): void {
+    restoreCheckpoint(this, cp);
+  }
+
+  /** Release `cp`'s restore capability. Restoring past a discarded INTERIOR
+   * checkpoint stays possible through any earlier live one; discarding the
+   * OLDEST live checkpoint makes the state before the next-younger one
+   * unreachable. */
+  discard(cp: EngineCheckpoint): void {
+    discardCheckpoint(this, cp);
+  }
 
   /** The state-event choke point — see `IComputeEngine._noteStateEvent`.
    * @internal */
@@ -1288,6 +1356,14 @@ export class ComputeEngine implements IComputeEngine {
       validateStyleOptions(options.latexOptions);
       this._latexOptions = { ...options.latexOptions };
     }
+
+    // The SESSION BASE for checkpoints: the eval-context depth a fully
+    // constructed engine sits at, once the system scope is pushed and the
+    // libraries are bootstrapped. Captured rather than hard-coded, so a
+    // change to how many frames construction leaves behind cannot silently
+    // turn every checkpoint call into a refusal. v1 takes and restores
+    // checkpoints only here; in-scope checkpoints are a committed v2 item.
+    this._checkpointBaseDepth = this._evalContextStack.length;
 
     hidePrivateProperties(this);
   }
@@ -1677,7 +1753,7 @@ export class ComputeEngine implements IComputeEngine {
    * that samples 1e7 points must not shift a sibling `Random()` draw, and its
    * sample count is deadline-dependent, so charging it to the frame would make
    * replay depend on wall-clock time. See
-   * `docs/plans/2026-07-28-derived-substreams.md`.
+   * `docs/RANDOMNESS-MODEL.md`.
    *
    * `tag` selects which sub-stream — pass a structural hash (`expr.hash`) so
    * the same expression samples the same points wherever it appears in the
@@ -3398,7 +3474,7 @@ export class ComputeEngine implements IComputeEngine {
     // ingress: an operand that is, or transitively contains, an object from
     // another engine would be adopted into this engine's expression with its
     // typing and invalidation still wired to the other one. (Invariant 8 of
-    // `docs/plans/2026-08-14-object-representation-decision.md`,
+    // `docs/TYPE-SYSTEM.md`,
     // "Cross-engine ingress".) The check is one boolean read until an object
     // has been constructed somewhere in the process.
     if (adoptsForeignEngineObject(ops, this))

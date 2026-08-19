@@ -194,7 +194,7 @@ export type ProtocolMember =
  * One write of inference evidence onto a definition, as delivered to
  * `IComputeEngine._noteInferenceWrite` — the single emission point whose
  * subscribers are the provenance history, the fresh-inference set, and the
- * narrowing sink. See `docs/plans/2026-08-13-inference-provenance-journal.md`
+ * narrowing sink. See `docs/TYPE-SYSTEM.md`
  * (phase 1).
  */
 export type InferenceWriteEvent = {
@@ -331,7 +331,7 @@ export type ProtocolRecord = {
   declaredByStatement: boolean;
   /** REDEFINITION DISCIPLINE — which compilation unit and which declaring
    * STATEMENT this record came from
-   * (`docs/plans/2026-08-14-redefinition-discipline.md`). The DECLARATION-level
+   * (`docs/TYPE-SYSTEM.md`). The DECLARATION-level
    * counterpart of {@link ConformanceRecord._implOrigin}, which stamps
    * implementation blocks: a second `protocol` statement for this name in the
    * same batch is `protocol-redefinition`, while a later batch replaces.
@@ -357,6 +357,19 @@ export type ProtocolImplementationInput = {
   getters?: Record<string, ProtocolHostHandler>;
   setters?: Record<string, ProtocolHostHandler>;
 };
+
+/** A handle on a saved engine state, from {@link IComputeEngine.checkpoint}.
+ * Deliberately opaque: `id` is for logging and `live` is the only state a
+ * client can act on. Declared here rather than in `checkpoint.ts` because it
+ * is part of the engine's public type surface — and because importing it from
+ * the implementation would make this file depend on it, closing a cycle
+ * through the sequence registry. */
+export interface EngineCheckpoint {
+  readonly id: number;
+  /** False once invalidated by a restore to an EARLIER checkpoint, or by
+   * `discard()`. A dead checkpoint can never be restored again. */
+  readonly live: boolean;
+}
 
 export interface IComputeEngine {
   /** The LatexSyntax instance used for LaTeX parsing/serialization.
@@ -419,7 +432,7 @@ export interface IComputeEngine {
   /** The engine-level type registry: one namespace of declared types per
    * engine, world state alongside symbol assignment. Types are NOT lexically
    * scoped — a name means the same thing everywhere in the engine, for the
-   * engine's lifetime (see `docs/plans/2026-08-10-global-type-registry.md`).
+   * engine's lifetime (see `docs/TYPE-SYSTEM.md`).
    * All reads and writes go through `_typeResolver` / `declareType()`.
    * @internal */
   readonly _typeRegistry: Record<string, TypeReference>;
@@ -474,7 +487,7 @@ export interface IComputeEngine {
 
   /** The stack of open inference **rollback frames**
    * (`inference-rollback.ts`; phase 2b of
-   * `docs/plans/2026-08-13-inference-tx-design.md`). While a frame is open,
+   * `docs/TYPE-SYSTEM.md`). While a frame is open,
    * every inference-driven mutation site journals an undo entry into the
    * innermost frame; `_withRolledBackInference` replays them (strict LIFO)
    * when the frame closes. Empty on the fast path — every journaling hook
@@ -501,6 +514,80 @@ export interface IComputeEngine {
    * the counters, so it needs no such rule.
    * @internal */
   _checkpointWindow: CheckpointWindow | undefined;
+
+  /** The live checkpoints, oldest first (`checkpoint.ts`). A STACK, not a
+   * tree: restoring invalidates everything above the target, so there is one
+   * linear history, rewound and re-extended. The newest checkpoint's window
+   * is {@link _checkpointWindow}. Typed `unknown[]` here because the handle
+   * class lives in `checkpoint.ts`, which imports this file.
+   * @internal */
+  _checkpointStack: unknown[];
+
+  /** True once a restore threw during its mutation phase. The engine's state
+   * is then no longer covered by the checkpoint contract, so every later
+   * checkpoint call refuses — the client's signal to rebuild the engine and
+   * replay from the baseline rather than trust it.
+   * @internal */
+  _checkpointPoisoned: boolean;
+
+  /** Monotone id source for checkpoint handles. Never reused, so a stale
+   * handle cannot be mistaken for a live one in a log.
+   * @internal */
+  _nextCheckpointId: number;
+
+  /** The eval-context stack depth that counts as the session base — the only
+   * depth at which v1 takes checkpoints. In-scope checkpoints are a committed
+   * v2 item (the consumer's cells always evaluate inside a host-pushed
+   * scope), which is what this field exists to make adjustable.
+   * @internal */
+  _checkpointBaseDepth: number;
+
+  /** How many `evaluateAsync` calls are in flight, including ones suspended
+   * at an `await`. A suspended async evaluation holds its eval context across
+   * the suspension and hands control back to the host, so — unlike a
+   * synchronous one — it is NOT visible as eval-context stack depth. The
+   * checkpoint quiescence check refuses while this is nonzero.
+   * @internal */
+  _inFlightAsyncEvaluations: number;
+
+  /** How many function-expression evaluations are on the host call stack.
+   * Nonzero means an evaluation is in progress, which no other engine signal
+   * reports: a plain `evaluate` handler pushes no eval context, so an
+   * operator handler that calls a checkpoint method is indistinguishable from
+   * the host calling it between cells. The checkpoint quiescence check
+   * refuses while this is nonzero.
+   * @internal */
+  _evaluationDepth: number;
+
+  /** Thunks that clear per-engine library-load idempotence markers, invoked
+   * by a checkpoint restore. Registered BY the loaders rather than imported
+   * by the checkpoint path, so taking a checkpoint does not pull the Fungrim
+   * and Rubi payloads into the bundle.
+   * @internal */
+  _checkpointResetHooks?: (() => void)[];
+
+  /**
+   * Take a checkpoint of the engine's state at a quiescent cell boundary, so
+   * a later {@link restore} can rewind to it. Legal on a freshly constructed
+   * engine, which is how a client gets a `cp[0]` covering an edit of the
+   * first cell. Throws a `CheckpointError` when the engine is mid-evaluation,
+   * mid-pre-pass, or inside a pushed scope.
+   */
+  checkpoint(label?: string): EngineCheckpoint;
+
+  /**
+   * Rewind to `cp`, invalidating every checkpoint taken after it; `cp` itself
+   * stays live and can be restored again. Expressions built BEFORE `cp` stay
+   * valid — their definitions are rewritten in place. Expressions built
+   * during the rewound window are not: cache cell outputs as serialized
+   * artifacts, never as live boxed nodes.
+   */
+  restore(cp: EngineCheckpoint): void;
+
+  /** Release `cp`'s restore capability. Restoring past a discarded INTERIOR
+   * checkpoint stays possible through any earlier live one; discarding the
+   * OLDEST makes the state before the next-younger one unreachable. */
+  discard(cp: EngineCheckpoint): void;
 
   /**
    * Run `fn` with a rollback frame open and ALWAYS roll the frame back — on
@@ -600,7 +687,7 @@ export interface IComputeEngine {
   /** `true` only while the Epsil interpreter is canonicalizing or evaluating a
    * top-level statement whose AST head is `DeclareType`, `DeclareSumType` or
    * `DeclareProtocol` — the REDEFINITION DISCIPLINE's statement-route marker
-   * (`docs/plans/2026-08-14-redefinition-discipline.md`).
+   * (`docs/TYPE-SYSTEM.md`).
    *
    * {@link IComputeEngine._epsilBatchId} alone cannot play this part: it is
    * ambient for the WHOLE `executeEpsil` extent, so a `ce.box(["DeclareType",
@@ -762,7 +849,7 @@ export interface IComputeEngine {
   _ephemeralWriteDepth: number;
 
   /** The state-event choke point
-   * (`docs/plans/2026-08-09-state-event-invalidation-axes.md` §3): write
+   * (`docs/EFFECTS-MODEL.md` §3): write
    * sites report what happened; the lifecycle's dispatch table
    * (`axisMaskOf`) decides which invalidation axes advance. Since the
    * step-2b cutover this is the SOLE writer of the axes — the axis members
@@ -877,7 +964,7 @@ export interface IComputeEngine {
   /** @internal A private stream for the stochastic ESTIMATORS, derived from
    *  the ambient `WithRandomSeed` frame but consuming NO indices from it.
    *  `tag` (a structural hash) selects which sub-stream. Live outside a frame.
-   *  See `docs/plans/2026-07-28-derived-substreams.md`. */
+   *  See `docs/RANDOMNESS-MODEL.md`. */
   _substream(tag: number): RandomSubstream;
 
   angularUnit: AngularUnit;

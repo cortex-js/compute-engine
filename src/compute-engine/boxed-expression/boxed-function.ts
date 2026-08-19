@@ -307,7 +307,7 @@ export class BoxedFunction
   /** The overload resolution this call was VALIDATED against, attached by
    * the construction site (`box.ts`) when the operator's signature is an
    * overload set (phase 2c of
-   * `docs/plans/2026-08-13-inference-tx-design.md`). Result typing
+   * `docs/TYPE-SYSTEM.md`). Result typing
    * (`resolvedArm`) reads it so `.type` reports the arm full validation
    * actually selected — the trial-admission set and the cheap prefilter's
    * can differ on overlapping-arm calls. `undefined` on expressions that
@@ -353,7 +353,7 @@ export class BoxedFunction
     generation: -1,
   };
   /** The runtime effect channel (`effects-of.ts`). Keyed — since migration
-   * step 3 of `docs/plans/2026-08-09-state-event-invalidation-axes.md` — on
+   * step 3 of `docs/EFFECTS-MODEL.md` — on
    * the **`callable` axis** (`ce._callableVersion`: the events that can
    * change what the projection reads) plus an ambient-scope identity stamp
    * (`_effectsScope`), instead of the broad `any` axis: the measured waste
@@ -426,7 +426,7 @@ export class BoxedFunction
    * kept as the PROMISE so that concurrent `evaluateAsync()` calls on the same
    * node await ONE walk instead of each running their own (the "Async"
    * follow-up of
-   * `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`). Cleared when
+   * `docs/COLLECTIONS-MODEL.md`). Cleared when
    * the computation settles, in both directions: an aborted or rejected walk
    * memoizes neither direction and leaves the slot empty, so the next call
    * recomputes.
@@ -1864,19 +1864,43 @@ export class BoxedFunction
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {
-    // A deadline is armed only by an enclosing `withTimeLimit` span; work
-    // outside a span runs unbounded. Evaluation checkpoints the ambient
-    // deadline (`engine._deadlineFrame`) if one is in effect.
-    const canonical = this._canonicalToEvaluate();
-    if (canonical) return canonical.evaluate(options);
-    if (this._isMemoizableLazyCollection(options))
-      return this._memoizedLazyCollectionValue(options);
-    return this._computeValue(options)();
+    // Checkpoint quiescence (`checkpoint.ts`): an evaluation must not be open
+    // when a checkpoint is taken or restored — the snapshot would capture
+    // state the evaluation is still about to move, and a later restore would
+    // rewind to a point inside a half-finished one. Eval-context depth cannot
+    // see this: a plain `evaluate` handler pushes no scope, so an operator
+    // handler calling `ce.checkpoint()` looks exactly like the host calling it
+    // between cells. Counting is the only signal there is.
+    //
+    // Two integer ops and a `finally` per function-expression evaluation.
+    // A/B against the same tree with the bracket removed put a notebook-shaped
+    // workload inside the run-to-run noise and a deliberately
+    // evaluation-saturated loop at a low single-digit percentage; no benchmark
+    // harness for it is committed, so treat those as the reason the bracket
+    // was kept rather than as figures to regress against.
+    //
+    // The `finally` is correctness, not tidiness: an evaluation that throws
+    // must not strand the count, or the engine would refuse every subsequent
+    // checkpoint for the rest of its life.
+    const engine = this.engine;
+    engine._evaluationDepth += 1;
+    try {
+      // A deadline is armed only by an enclosing `withTimeLimit` span; work
+      // outside a span runs unbounded. Evaluation checkpoints the ambient
+      // deadline (`engine._deadlineFrame`) if one is in effect.
+      const canonical = this._canonicalToEvaluate();
+      if (canonical) return canonical.evaluate(options);
+      if (this._isMemoizableLazyCollection(options))
+        return this._memoizedLazyCollectionValue(options);
+      return this._computeValue(options)();
+    } finally {
+      engine._evaluationDepth -= 1;
+    }
   }
 
   /**
    * Is this node in the set Change 1 of
-   * `docs/plans/2026-08-09-lazy-collection-evaluate-design.md` memoizes — a
+   * `docs/COLLECTIONS-MODEL.md` memoizes — a
    * lazy collection VIEW that reaches `_computeValue`'s generic operand walk
    * (step 4) and rebuilds an equivalent node on every call?
    *
@@ -1941,7 +1965,7 @@ export class BoxedFunction
 
   /**
    * The memoized fall-through evaluation of a lazy collection view (Change 1
-   * of `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`). The first
+   * of `docs/COLLECTIONS-MODEL.md`). The first
    * `evaluate()` runs today's walk byte-for-byte — it is load-bearing: it is
    * what resolves a symbol operand to its value and what performs an
    * effectful operand's effects. Only the REPEAT walks are eliminated.
@@ -2181,7 +2205,35 @@ export class BoxedFunction
   }
 
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
+    // Checkpoint quiescence (`checkpoint.ts`): an async evaluation suspended
+    // at an `await` holds its eval context across the suspension and hands
+    // control back to the host, so — unlike a synchronous evaluation, which
+    // the host simply cannot interleave a call with — it is invisible to the
+    // eval-context depth check. Counting it is what lets `checkpoint()` and
+    // `restore()` refuse rather than rewind state an evaluation is still
+    // standing on. Decremented in a `finally` on the promise, so a rejection
+    // does not strand the count.
+    this.engine._inFlightAsyncEvaluations += 1;
+    let promise: Promise<Expression>;
+    try {
+      promise = this._evaluateAsyncUncounted(options);
+    } catch (error) {
+      this.engine._inFlightAsyncEvaluations -= 1;
+      throw error;
+    }
+    return promise.finally(() => {
+      this.engine._inFlightAsyncEvaluations -= 1;
+    });
+  }
+
+  private _evaluateAsyncUncounted(
+    options?: Partial<EvaluateOptions>
+  ): Promise<Expression> {
     const canonical = this._canonicalToEvaluate();
+    // The recursive delegations below re-enter the PUBLIC entry point, so a
+    // nested evaluation is counted too — the check is "is any async
+    // evaluation open", not "how many", and a balanced count is easier to
+    // trust than a re-entrancy carve-out.
     if (canonical) return canonical.evaluateAsync(options);
     if (this._isMemoizableLazyCollection(options))
       return this._memoizedLazyCollectionValueAsync(options);
@@ -2191,7 +2243,7 @@ export class BoxedFunction
   /**
    * The async twin of {@link _memoizedLazyCollectionValue} — the "Async"
    * follow-up of
-   * `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`. It is the SAME
+   * `docs/COLLECTIONS-MODEL.md`. It is the SAME
    * memo, not a parallel one: a settled entry written by `evaluate()` is a
    * valid async hit and vice versa, under the same eligibility test, the same
    * dual key, and the same epoch/scope/settled/purity gates.
@@ -2430,7 +2482,7 @@ export class BoxedFunction
    *
    * Invalidation is DEPENDENCY-PRECISE, riding the element memo's machinery
    * (`snapshotMemoDeps`/`memoDepsStillValid`,
-   * `docs/plans/2026-08-02-dependency-precise-memo-invalidation.md`): an
+   * `docs/COLLECTIONS-MODEL.md`): an
    * entry is valid while `ce._worldVersion` is unmoved (assume/forget,
    * redefinition, configuration) AND every free-symbol dependency still has
    * the same inner definition, `_writeVersion`, and name resolution. A
@@ -2905,7 +2957,7 @@ export class BoxedFunction
   /**
    * Indexed-route twin of `each()`'s eager-source fallback (see the
    * materialize-then-iterate note there, and
-   * `docs/plans/2026-08-11-eager-collection-enumerability.md`). An EAGER
+   * `docs/COLLECTIONS-MODEL.md`). An EAGER
    * collection operator (`Divisors`, `Characters`, `Eigenvalues`, …) has no
    * collection handlers — its collection exists only as its `evaluate()`
    * result. The streaming route materializes on demand; without this twin,
@@ -3048,7 +3100,7 @@ export class BoxedFunction
   /**
    * The value of an INVALID expression — one whose tree embeds an `Error` —
    * or `undefined` to let the `evaluate` handler run anyway.
-   * See `docs/plans/2026-07-31-error-propagation-design.md`.
+   * See `docs/LANGUAGE-MODEL.md`.
    *
    * Three outcomes:
    *
@@ -3827,7 +3879,7 @@ export class BoxedFunction
       //
       // 2c/ Handle evaluation of lazy collections — mirrors the sync path's
       // step 3 (the "Async" follow-up of
-      // `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`: the async
+      // `docs/COLLECTIONS-MODEL.md`: the async
       // path had NO materialization step at all, so every `materialization`
       // form silently returned the lazy view). All four forms — `false`,
       // `true`, an integer, `[head, tail]` — now behave as they do
@@ -4277,7 +4329,7 @@ function skipBroadcastForVectorOps(
   // boolean rather than a list of element-wise comparisons. Any collection
   // counts, not just finite indexed ones: `Equal(Set(…), List(…))` must not
   // broadcast over the list either. See
-  // docs/plans/2026-07-07-desmos-list-filtering.md (highest-risk item).
+  // docs/COLLECTIONS-MODEL.md (highest-risk item).
   //
   // An operand that may only BECOME a collection at evaluation — a top-typed
   // application such as `q(2)` declared `(number) -> unknown`, or a
@@ -4510,8 +4562,8 @@ function type(expr: BoxedFunction): Type {
           : def.signature;
 
     // An overload set resolves to its most-specific viable arm, and the result
-    // type is read off THAT arm (`docs/plans/2026-07-25-overload-resolution-
-    // design.md` §6). Note the asymmetry with operand inference, which uses the
+    // type is read off THAT arm (`docs/TYPE-SYSTEM.md`). Note the asymmetry
+    // with operand inference, which uses the
     // JOIN over every viable arm (§4.3): a result type wants the most precise
     // arm, an operand constraint must be the weakest — conflating them
     // reintroduces the §4.5 unsoundness.
