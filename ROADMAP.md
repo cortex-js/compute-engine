@@ -93,6 +93,56 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
+
+The evaluator broadcasts `Which` elementwise over collection-valued operands
+(shipped for Tycho item 193 in 0.112.0), and the `javascript` compile target
+lowers the same shape (`compileJSSelection`, `javascript-target.ts`). The
+`glsl` and `interval-js` targets fail closed instead — correctly, given their
+value models: the interval target holds one interval per quantity (no
+collection values, by design), and the GPU elementwise selection
+(`compileGPUSelection`, `gpu-target.ts`) only lowers static `vec2`–`vec4`
+shapes. Tycho's Voronoi second-minimum idiom
+(`Min(Which(d == m, 10^9, True, d))` with `d` a broadcast expression over a
+20-point `PointList` literal) therefore declines at both targets even though
+every collection operand has a compile-time-known length.
+
+The clean design is NOT per-target: a target-independent static broadcast
+unroll before target lowering. When every collection leaf in the `Which`
+clauses is statically enumerable (materialized `List`/`PointList`/`Range`
+literals) with one common length N, project the broadcast expression per
+element and rewrite to N scalar selections — the compile-route twin of the
+evaluator half. The consumers already exist: `compileGPUExtremum` folds
+compile-time component lists of any length, and the interval `Min`/`Max`
+handlers fold n scalar arguments. The projection transform must be
+conservative — fail closed whenever a collection subterm is not statically
+enumerable, lengths disagree, or an index-sensitive operator (`Sort`,
+`Unique`, …) sits between the leaf and the selection, since those are not
+positionwise maps.
+
+Two cautions recorded while scoping (2026-08-19 probes against source at
+0.115.0):
+
+- On `glsl` the unroll alone is NOT sufficient for the witness: `Power`/
+  `Square` of a vec operand with a scalar exponent independently fails closed
+  (`_gpu_powi` is declared scalar-only, and the `pow` builtin requires
+  matching genTypes) — a known hole pinned in
+  `test/compute-engine/compile-gpu-shape-gate-holes.test.ts`. Unrolling to
+  SCALAR selections sidesteps it for the idiom (each projected element is
+  scalar), but any design that instead lifts the vec-width cap runs straight
+  into it.
+- The `javascript` target already compiles the exact witness shape and
+  returns the correct second minimum (verified by hand against the 20
+  distances), so the consumer-facing urgency is low: Tycho was told
+  (item 206 answer, 2026-08-19) to retry `to: 'javascript'` before dropping
+  to the interpreter-backed fallback, and to unroll on their side if they
+  need GPU-shaded rendering before this lands.
+
+Demand-gated: pick this up if Tycho (or another consumer) reports that the
+compiled-JS sampling path is not enough — e.g. an implicit-curve row that
+needs interval arithmetic for robustness, or a shaded-region row that needs
+the shader target.
+
 ### LSP navigation: two tracked gaps in the occurrence resolver (OPEN, vscode-epsil — opened 2026-08-19)
 
 The extension's navigation/rename features (go-to-definition, references,

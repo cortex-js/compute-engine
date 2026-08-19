@@ -220,8 +220,12 @@
   `number`-declared variable applied as a call — now produces an
   `expected-function` error at canonicalization (and a static diagnostic in the
   Epsil pre-run check) instead of silently staying inert with type `unknown`.
-  Undeclared heads and inferred-type symbols are untouched: they may still
-  become functions.
+  A head declared exactly `value` is rejected the same way — `value` excludes
+  functions — but only where call syntax is unambiguous (Epsil, raw MathJSON):
+  the LaTeX juxtaposition `x(x+1)` with `x: value` still reads as the product
+  `x · (x + 1)`, since a head that could be numeric keeps the multiplication
+  reading. Undeclared heads and inferred-type symbols are untouched: they may
+  still become functions.
 
 - **Declared bare collection types refine their element type from assignments.**
   A bare constructor annotation (`let a: list` — likewise `set`, `dictionary`,
@@ -311,7 +315,59 @@
   bare string in the type AST with no `.kind`, exactly like `string` and
   `character`.
 
+- **The Epsil language server gained code navigation, rename, and richer
+  diagnostics.** Go to Definition, Find All References and Rename Symbol now
+  work in the VS Code extension, backed by a scope-aware occurrence resolver
+  (declarations, parameters, `let` bindings, type and protocol names, with
+  shadowing respected). Hovers render rich Markdown — signatures,
+  documentation and values as formatted code — instead of plain text. And
+  every diagnostic whose code has an extended explanation now carries a link:
+  clicking the code in the editor opens that code's section of the errors
+  reference page, which is generated from the same registry that `epsil doc
+  <code>` prints, so the editor, the CLI and the site cannot drift apart.
+
 ### Improvements
+
+- **Arithmetic operators are permissive at boxing time and error at evaluation
+  time.** A numeric operator now admits any operand whose declared type merely
+  _overlaps_ `number` — `value`, `scalar`, a union with a numeric arm —
+  instead of rejecting it at canonicalization: with `a: value`, `a + 1` boxes
+  cleanly and evaluates normally once `a` holds a number. The other half of
+  the contract: once operand evaluation substitutes a value that _proves_
+  non-numeric, the evaluate handlers of `Add`, `Multiply`, `Divide`, `Negate`,
+  `Power`, `Root`, `Sqrt`, `Ln` and `Log` (the `Lb`/`Lg`/`Log2`/`Log10` family
+  canonicalizes to `Log`) return an `incompatible-type` error naming the
+  offending value. Previously the mistake either lingered as an inert
+  expression (`2 · "hello"`) or was silently absorbed into a numeric result:
+  `Negate` and `Sqrt` turned a string into `NaN`, and the `0 · x → 0` collapse
+  turned `0 · "hello"` into a plain `0`. Untouched, deliberately:
+  function-valued symbols in numeric positions stay symbolic (`2g` remains
+  `2g` after `g := x ↦ …`), the absence markers `Nothing`/`Missing` still
+  propagate as `NaN` rather than erroring, and operands that could still be
+  numeric — free symbols, `broadcastable` operands — evaluate as before.
+
+- **A deeply nested Epsil expression is now a diagnostic, not a stack
+  overflow.** Recursive expression descent in the parser is bounded at 256
+  levels; source that exceeds the bound gets the new
+  `expression-nesting-limit` diagnostic with a source location, instead of
+  letting the JavaScript call stack be the language's accidental — and
+  environment-dependent — resource limit. String interpolations share the
+  budget of the expression they are nested in, so nested `\(…)` spans cannot
+  restart the count and overflow the real stack.
+
+- **Epsil parsing and lexing now honor the evaluation time budget.** The lexer
+  and parser check the same deadline the evaluation loop enforces, so a
+  program whose parse exceeds the budget returns an in-band
+  `Error(…, "timeout")` value — the same shape an evaluation timeout produces
+  — instead of consuming unbounded host time before the first statement runs.
+
+- **A `Nothing` result is no longer echoed by the CLI and the REPL.** A
+  program whose last statement is a `print(…)`, a declaration or a loop
+  produces `Nothing`, and printing the word after the program's own output was
+  noise (the Python REPL treats `None` the same way). The machine-facing
+  surfaces are unchanged: the `json` and `epsil` output formats keep the
+  value, and the MCP server's `value` field keeps the literal `"Nothing"` so
+  that an empty string retains its one meaning — the source was empty.
 
 - **Declaration statements no longer pay for re-registering themselves.** One
   Epsil `type` / `protocol` / conformance statement registers its declarations
@@ -512,6 +568,56 @@
   non-indexed collection (any set) of exactly six elements previewed as five
   with no `...` continuation marker, claiming to be complete; it now shows
   `Set(1, 2, 3, 4, 5, ...)`.
+- **A bare type name now matches an intersection it belongs to.** `T <: A & B`
+  must hold exactly when `T <: A` and `T <: B`, but every type arriving as a
+  bare name in the type AST failed the check —
+  `ce.type('number').matches('number & number')` was `false`, breaking even
+  reflexivity. The conjunction rule now runs before the
+  primitive-versus-composite rejection that was short-circuiting it. In the
+  same pass: an unsized `vector<T>` now records its rank (it used to build the
+  identical type as a bare `list<T>`), and open-shape ranks 1 and 2 serialize
+  as `vector<T>`/`matrix<T>` instead of nested `list<list<T>>` — a spelling
+  that could never express rank 1, since the nested form re-parses with no
+  dimensions at all.
+- **Type intersections now reduce correctly instead of collapsing to the empty
+  type.** The type reducer declared any intersection it had no rule for to be
+  uninhabited, so an overload set written as a type — an intersection of
+  function signatures, which is this system's spelling for one name with
+  several arrows — reduced away entirely. Signature intersections are now
+  kept, in declaration order (dispatch ranking uses that order to break ties).
+  Alongside that fix, the meet algebra was made honest about emptiness:
+  - **A refuted meet now spells `never`** (the empty type) instead of
+    `nothing` (the unit type, whose value is `Nothing`). The conflation was
+    observable: `(number & boolean) | integer` kept a spurious `| nothing` arm
+    that admitted the value `Nothing`, and a `tuple` with an uninhabited slot
+    silently lost the slot — a `nothing` slot is deliberately deleted, while a
+    `never` slot now makes the tuple itself uninhabited.
+  - **Same-kind collections meet elementwise**: `list<integer> & list<string>`
+    is `list<never>` — the empty list inhabits both sides. Collections of
+    differing fixed shape still refute (no value is both a 2- and a
+    3-vector).
+  - **Negations meet by De Morgan** (`!A & !B` is `!(A | B)`), and a negation
+    against an ordinary type reduces to `never` only when that type lies
+    wholly inside the excluded one — `!integer & number` stays irreducible,
+    since `imaginary` inhabits it.
+  - **`broadcastable<T>` meets by expanding** to `T | indexed_collection<T>`,
+    never elementwise, so cross terms survive (`vector<3>` inhabits both
+    `broadcastable<vector<3>>` and `broadcastable<number>`).
+  - Two adjacent predicates fixed with it: narrowing by `never` returned the
+    other type unchanged (treating the bottom type as an identity the way the
+    top type `any` legitimately is), and the overlap test reported `nothing`
+    as not overlapping itself.
+  - `dictionary<nothing>` now reduces to itself — the type of the empty
+    dictionary, matching `list<nothing>` and `set<nothing>` — instead of
+    `error`.
+- **`Type` with extra arguments reports the arity error.** `Type` inspects
+  errors by design (`Type(Error(…))` reports the type `error`; it does not
+  propagate the operand), which also let it absorb the `unexpected-argument`
+  markers that arity validation inserts: `Type(x, 2)` reported `x`'s type as
+  if the stray `2` were not there. Malformed arity is now rejected before the
+  error-inspection contract applies, and a `Sequence` operand counts as the
+  arguments it supplies, so `Type(Sequence(a, b))` is the same arity error as
+  `Type(a, b)`.
 
 ### Documentation
 
