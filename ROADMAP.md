@@ -121,20 +121,6 @@ AST's `sourceOffsets`) ship with two deliberate, refusal-guarded gaps:
    occurrences of the resolved parameter and keeping the refusal only for
    unresolvable callees.
 
-### The `interval-js` compile target emits EMPTY code for unsupported operators (OPEN, compilation — opened 2026-08-19)
-
-Every other built-in target rejects an operator it has no entry for with "cannot
-compile — the operator is known to the engine but target '…' has no entry";
-`interval-js` instead compiles to an empty string
-(`target.compile(ce.box(['StringJoin', "a", "b"])).code === ''` — same for any
-non-numeric operator, observed while adding the first-class-types fail-closed
-tests, `docs/plans/2026-08-18-first-class-types.md` §3.3). An empty program
-silently yields no result instead of a compile-time diagnostic. Needs a ruling
-on whether empty-code is a deliberate decline convention some consumer
-(plotting?) relies on; if not, route the unknown-operator case through the same
-rejection the other targets use, and extend the fail-closed test pattern (which
-currently exempts `interval-js`, with a pointer here) to cover it.
-
 ### `reduceType` collapses an intersection of unrelated function signatures to `nothing` (OPEN, type system — opened 2026-08-19)
 
 An overload-set type written as an intersection —

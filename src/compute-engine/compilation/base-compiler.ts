@@ -1077,6 +1077,51 @@ export class BaseCompiler {
         `Cannot compile invalid expression: "${expr.toString()}"`
       );
     }
+    // First-class type values do not compile — a reified type expression has
+    // no runtime representation on any target, and the type-algebra
+    // operators consult the engine's type registry, which compiled code does
+    // not carry. This is the SHARED boundary the design prescribes
+    // (`docs/plans/2026-08-18-first-class-types.md` §3.3): one gate covers
+    // every target — including `interval-js`, whose unknown-operator path
+    // emits empty code instead of rejecting (ROADMAP.md, "The `interval-js`
+    // compile target emits EMPTY code"), and custom registered targets. Two
+    // checks, both deliberately narrow:
+    //
+    // 1. A node whose result type is EXACTLY the `type` primitive (a settled
+    //    `TypeFrom` node, a `type`-typed symbol or parameter). Exact
+    //    equality, never `matches('type')`: declared types are routinely
+    //    wider than runtime values, and a wide-typed operand must not trip a
+    //    static gate (the compile-type-gate rule, `docs` plan §3.3).
+    // 2. A type-comparison head whose operands are NOT all ground type
+    //    values or literal type text. A GROUND call is exempt on purpose:
+    //    constant folding evaluates it through the interpreter to its
+    //    correct boolean — right code, not wrong code — and the fold must
+    //    keep winning. (`MatchesType`/`Conforms` are listed ahead of their
+    //    phase-2 landing; the names are inert until then.)
+    if (expr.type.toString() === 'type')
+      throw new Error(
+        `Cannot compile a type value (type 'type') to target ` +
+          `'${target.language ?? 'unknown'}': a reified type expression has ` +
+          `no compiled representation. Fail closed (D6).`
+      );
+    if (
+      isFunction(expr, 'Subtype') ||
+      isFunction(expr, 'MatchesType') ||
+      isFunction(expr, 'Conforms')
+    ) {
+      const ground = expr.ops.every(
+        (op) =>
+          isString(op) ||
+          (isFunction(op, 'TypeFrom') && op.nops === 1 && isString(op.op1))
+      );
+      if (!ground)
+        throw new Error(
+          `${expr.operator}: cannot compile — a non-constant type ` +
+            `comparison needs the engine's type registry, which compiled ` +
+            `code does not carry (target '${target.language ?? 'unknown'}'). ` +
+            `Fail closed (D6).`
+        );
+    }
     // Install the naming context EAGERLY, on the outermost call, for a target
     // that arrived without one (a hand-rolled target driven through
     // `BaseCompiler.compile`). It must be installed before the first

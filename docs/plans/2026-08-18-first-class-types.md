@@ -1,12 +1,13 @@
 # First-Class Types: type values and type algebra in Epsil
 
-**Status:** Rulings R1–R8 DECIDED (2026-08-18). Pass-2 review applied same
-day; it introduced four items AWAITING RATIFICATION, marked `[PROPOSED]`
-below: the settling design (§3.1), the polytype relaxation (§3.1), the R5
-mechanics amendment (variadic `Conforms`, match-pattern exclusion), and R9.
-No implementation yet. Review record (pass 2; pass 1 applied and superseded):
+**Status:** Rulings R1–R8 DECIDED (2026-08-18); the pass-2 items (settling,
+polytype relaxation, R5 mechanics amendment, R9) RATIFIED 2026-08-19.
+**Phase 1 is IMPLEMENTED** (2026-08-19): the R7 lookahead spike PASSED — the
+name `type` stands — and the primitive, `TypeFrom` with settling, `Subtype`,
+and the `==`/`isSame` tiers are in, with engine and Epsil test suites.
+Phases 2–3 remain. Review record (pass 2; pass 1 applied and superseded):
 `docs/scratch/2026-08-18-first-class-types_SPEC_REVIEW.md`.
-**Date:** 2026-08-18
+**Date:** 2026-08-18 (rulings), 2026-08-19 (phase 1)
 
 ## 1. Motivation
 
@@ -101,8 +102,7 @@ value form must BE canonical, and an unsettled node is not yet a value.
   which is what makes evaluated type values serializable (§4 phase 1)
   without dedicated literal syntax (ruling R6).
 
-**Settling `[PROPOSED — pass-2 resolution of the identity/lifecycle
-conflict]`.** Constructing a type value SETTLES it: the text is parsed with
+**Settling `[RATIFIED 2026-08-19]`.** Constructing a type value SETTLES it: the text is parsed with
 the forwarding-disabled resolver (below), REDUCED, and the node becomes
 `TypeFrom("<reduced canonical text>")` — the stored operand IS the canonical
 text, and the parsed `Type` object rides the node from birth. Two routes:
@@ -153,7 +153,7 @@ runtime: literal settling, computed settling, and the consumer-side parse of
 a computed string handed directly to `Subtype`/`MatchesType`/`Conforms` —
 no route may mutate the registry as a side effect of asking a question.
 
-**Polytypes `[PROPOSED — pass-2 amendment]`.** Polytypes
+**Polytypes `[RATIFIED 2026-08-19]`.** Polytypes
 (`where`-quantified signatures) ARE admissible as type values: `Type` on a
 generic function must observe its static type honestly (R3), and the
 canonical text — `where` clause included — parses, prints, and round-trips
@@ -225,8 +225,8 @@ unblocks:
   `x is integer && y is string` stays a conjunction of two tests. The
   compound path already parses today; it just has nowhere to go.
 - The `type-pattern-unsupported` diagnostic retires for TYPE patterns.
-  **Protocol names in match patterns stay OUT this round `[PROPOSED —
-  pass-2 scope decision]`**: a match arm's `n: Hashable => …` annotation
+  **Protocol names in match patterns stay OUT this round `[RATIFIED
+  2026-08-19]`**: a match arm's `n: Hashable => …` annotation
   rides `finishBindingPattern` → `parseTypeAnnotation` — machinery SHARED
   with ordinary parameter and variable annotations, where a protocol name
   must NOT become silently legal — so admitting protocols there is a
@@ -267,7 +267,7 @@ All of these are thin wrappers over machinery the engine already has:
   `doc/08-guide-types.md` §"Which spelling, when" becomes user documentation
   for this operator too. Acceptance matrix in §5.
 - **`Conforms(subject: any, protocols: string+) -> boolean`** `[signature
-  amended pass-2 — PROPOSED]`: variadic over one or more protocol names,
+  amended pass-2, RATIFIED 2026-08-19]`: variadic over one or more protocol names,
   answering the CONJUNCTION, with the subject evaluated exactly once — this
   is what `x is Hashable & Comparable` lowers to
   (`Conforms(x, "Hashable", "Comparable")`), so the conjunction spelling the
@@ -283,7 +283,7 @@ All of these are thin wrappers over machinery the engine already has:
   gains conformances, this branch must be revisited.) The operator delegates
   to `TypeResolver.conformsTo`, whose full semantics — inherited,
   conditional, and pending conformances — are the contract, not a naive
-  registry lookup. **Outcome matrix `[PROPOSED]`**: a SETTLED subject (§5)
+  registry lookup. **Outcome matrix `[RATIFIED 2026-08-19]`**: a SETTLED subject (§5)
   is definitive both ways against the current registry (conformance is
   monotone, and the answer is correct at the moment asked — the version
   axis invalidates caches when declarations arrive later); an UNSETTLED
@@ -325,13 +325,28 @@ belongs in the SHARED compile machinery (the base compiler's type gate),
 not per-target, so custom registered targets fail closed too; each phase
 adds per-target rejection tests for the operators that phase introduces
 (§4), following the regexp plan's supported-vs-fail-closed test pattern.
+Facts established while implementing phase 1 (2026-08-19): the shared gate
+is IMPLEMENTED in `BaseCompiler.compile` — two narrow checks, (1) a node
+whose result type is EXACTLY the `type` primitive (exact equality, never
+`matches('type')`: declared types are routinely wider than runtime values,
+so a wide-typed operand must not trip a static gate), and (2) a
+`Subtype`/`MatchesType`/`Conforms` head whose operands are not all ground
+type values or literal text. CONSTANT FOLDING is an allowed outcome and the
+gate deliberately exempts ground calls — `Subtype("integer","number")`
+folds through the interpreter to its correct boolean, which is right code,
+not wrong code. All five targets fail closed through this one gate; note
+the FAILURE SHAPE differs by documented contract — `javascript`/`glsl`/
+`wgsl`/`python` throw from `compile()`, while `interval-js` converts the
+throw into its `success: false` result shape with the same diagnostic in
+`.error` (its `.code` is empty in that shape; a consumer reading `.code`
+without checking `.success` misreads failure as an empty program — that is
+the caller's contract to honor, not a target defect).
 
 ## 4. Phases
 
 The phases are **dependent increments** — each builds on the previous. All
-rulings are decided; the `[PROPOSED]` items (§3.1 settling and polytypes,
-§3.3 `Conforms` amendments, R9) need ratification before their phase
-starts; the one technical contingency is the R7 spike.
+rulings and pass-2 amendments are ratified; the R7 spike passed (2026-08-19),
+so no contingency remains open.
 
 1. **`type` primitive + `TypeFrom` + string acceptance.**
    *First step — the R7 lookahead spike*: verify that `parsePrimitiveType`
@@ -378,7 +393,7 @@ starts; the one technical contingency is the R7 spike.
   `TypeFrom("integer") is type` → `True`,
   `Subtype(TypeFrom("integer"), "number")` → `True` — all three on one
   fixture, so the value/type level split is pinned as a trio.
-- **The decision regime is by NODE FORM `[R9 — PROPOSED]`.** After the
+- **The decision regime is by NODE FORM (R9).** After the
   single evaluation, a **value form** — a node whose precise type derives
   from its own structure: number/string/character/boolean literals,
   collection values, function literals, nominal constructor values, error
@@ -442,8 +457,9 @@ starts; the one technical contingency is the R7 spike.
 
 ## 6. Rulings
 
-R1–R8 DECIDED 2026-08-18; R9 PROPOSED (pass-2). Reasoning retained for the
-record; the decision is the bolded line.
+R1–R8 DECIDED 2026-08-18; R9 (and the pass-2 amendments) RATIFIED
+2026-08-19. Reasoning retained for the record; the decision is the bolded
+line.
 
 **R1 — Which operator carries the dynamic type test?** Keeping `Element`
 would mean one lowering for both mental models (`3 ∈ ℤ` and type tests) but
@@ -481,7 +497,7 @@ spells conformance with `is` (`where T is Comparable`), and dispatch by
 registry lookup is unambiguous: a name can never be both a type and a
 protocol — declaring either over the other errors with "protocols and types
 share no names" (verified 2026-08-18, both directions). **DECIDED: (a) —
-yes.** Mechanics `[amended pass-2 — PROPOSED]`: the `is` tail consults the
+yes.** Mechanics `[amended pass-2, RATIFIED 2026-08-19]`: the `is` tail consults the
 registries BEFORE handing the name to the type subparser — the type grammar
 currently diagnoses a protocol name in type position, so this contextual
 slot needs a deliberate exception — and a protocol name (or a
@@ -531,7 +547,7 @@ and stored as the operand, so `isSame`/hash are plain text comparisons and
 identity is immune to later registry changes; the mutual-subtyping `==`
 side stays live.
 
-**R9 `[PROPOSED — pass-2]` — The dynamic test's decision regime.**
+**R9 `[RATIFIED 2026-08-19]` — The dynamic test's decision regime.**
 `MatchesType` decides by NODE FORM after the single evaluation: value forms
 (precise-by-construction) are definitive both ways; all other forms
 (typed-by-declaration-or-inference) are three-way on the static type —

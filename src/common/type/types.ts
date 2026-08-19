@@ -96,6 +96,15 @@ export type PrimitiveType =
   // `docs/plans/2026-08-17-string-phase3-regular-expressions.md` (D1).
   | 'regexp'
   | 'color'
+  // A type value: a type expression reified as a first-class runtime value
+  // (`TypeFrom("list<integer>")`). An OPAQUE value like `regexp` and `color`:
+  // not a `scalar`, not a `collection`, no hidden element type. In TYPE-STRING
+  // syntax the bare name `type` before an identifier is the forward-reference
+  // marker (`<type_reference> ::= ("type")? <identifier>`), so the parser
+  // disambiguates by one token of lookahead: `type` followed by an identifier
+  // is a forward reference, bare `type` otherwise is this primitive. See
+  // `docs/plans/2026-08-18-first-class-types.md` (ruling R7).
+  | 'type'
   | 'expression'
   | 'unknown'
   | 'error'

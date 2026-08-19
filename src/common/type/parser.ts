@@ -2096,6 +2096,23 @@ export class Parser {
     if (this.current.type === 'IDENTIFIER') {
       const name = this.current.value;
       if (PRIMITIVE_TYPES_SET.has(name as any)) {
+        // `type` is both a primitive (the type of a reified type value) and,
+        // before an identifier, the forward-reference marker of the reference
+        // grammar (`<type_reference> ::= ("type")? <identifier>`). Primitives
+        // are tried before references, so without lookahead `type node` would
+        // parse as the primitive and strand `node`. One token decides it:
+        // `type` followed by an identifier is a forward reference — decline
+        // here so `parseTypeReference` consumes both tokens; bare `type`
+        // (before `|`, `>`, `,`, `->`, end of input, …) is the primitive.
+        if (name === 'type') {
+          const savedLexerState = this.lexer.saveState();
+          const savedCurrent = this.current;
+          this.advance();
+          const isForwardRef = (this.current as Token).type === 'IDENTIFIER';
+          this.lexer.restoreState(savedLexerState);
+          this.current = savedCurrent;
+          if (isForwardRef) return undefined;
+        }
         this.advance();
         return this.createNode<PrimitiveTypeNode>('primitive', { name });
       }

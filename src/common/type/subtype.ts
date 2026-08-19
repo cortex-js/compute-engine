@@ -145,6 +145,9 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   // expansion `string`/`range` get in `isSubtype` — it has no element type to
   // expand to.
   regexp: [],
+  // A type value: an atom with no subtypes, like `regexp` — a reified type
+  // expression is not text, not a number, and not a collection of anything.
+  type: [],
   expression: EXPRESSION_TYPES,
 };
 

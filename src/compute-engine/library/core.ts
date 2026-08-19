@@ -43,6 +43,11 @@ import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { randomCount } from './random-utils.js';
 import { isRingConstant } from './ring-constructions.js';
 import { quotientRingType } from './type-handlers.js';
+import {
+  settleTypeText,
+  settledTypeText,
+  isPolytype,
+} from './type-value-utils.js';
 import { interval } from '../numerics/interval.js';
 import {
   fieldAssignmentVerdict,
@@ -191,6 +196,9 @@ import {
 } from '../boxed-expression/boxed-character.js';
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { splitByPattern, replaceByPattern } from './regexp.js';
+import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
+import { journalCheckpointField } from '../checkpoint-journal.js';
+import { journalDefinitionRecord } from '../boxed-expression/boxed-value-definition.js';
 
 /**
  * Literal narrowing at a typed declaration or assignment: the character a
@@ -4034,6 +4042,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             (existing as { _declaredByStatement?: boolean })
               ._declaredByStatement === true
           ) {
+            // Checkpoint journal (funnel 4): the statement-redeclare path
+            // drops the previous statement-scoped binding by direct map
+            // surgery.
+            journalCheckpointMapEntry(
+              ce,
+              currentScope.bindings,
+              symbolName,
+              symbolName,
+              'declare'
+            );
             currentScope.bindings.delete(symbolName);
             existing = undefined;
           }
@@ -4045,6 +4063,21 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             existingValueDef.value.value === undefined;
 
           if (isAutoDeclareHere && existingValueDef) {
+            // Checkpoint journal (funnel 5): this branch rewrites the record
+            // in place — `holdUntil`, `_isConstant` and, when the declaration
+            // is untyped, nothing that goes through a journaled setter. One
+            // whole-record snapshot covers every field it can touch.
+            journalDefinitionRecord(ce, existingValueDef.value, 'declare');
+            // `_declaredByStatement` lives on the BINDING record, not on
+            // either half, so it needs its own entry.
+            journalCheckpointField(
+              ce,
+              existingValueDef as { _declaredByStatement?: boolean },
+              '_declaredByStatement',
+              (existingValueDef as { _declaredByStatement?: boolean })
+                ._declaredByStatement,
+              'declare'
+            );
             // Upgrade the existing auto-declared binding in place.
             (
               existingValueDef as { _declaredByStatement?: boolean }
@@ -4504,6 +4537,144 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // for a symbol bound to an integer. Canonicalize, don't evaluate.
       evaluate: ([x], { engine: ce }) =>
         ce.string(x.canonical.type.toString() ?? 'unknown'),
+    },
+
+    /** A type expression reified as a first-class value. */
+    TypeFrom: {
+      description:
+        'A type expression as a first-class value, constructed from its ' +
+        'text: `TypeFrom("list<integer>")`. The value SETTLES at ' +
+        'construction — the text is parsed, reduced, and stored back as its ' +
+        'canonical form — so two values built from equivalent spellings ' +
+        '(`"integer|real"`, `"real|integer"`) are the same value. `==` ' +
+        'between two type values is mutual subtyping (it also equates an ' +
+        'alias with its body); `==` between a type value and anything else, ' +
+        'a string included, is `False`. Construction never touches the type ' +
+        'registry: a forward reference (`type X`) or an unknown name is an ' +
+        'error, not a registration.',
+      // A settled node IS the value (like `RegExp`), but unlike `RegExp` a
+      // COMPUTED operand cannot stay inert: identity compares the stored
+      // canonical text, so an unsettled node is a pending construction, and
+      // evaluation is what settles it. A literal operand settles at
+      // canonicalization instead, surfacing a typo at the author's line.
+      signature: '(text: string) -> type',
+      invokes: false,
+      canonical: (ops, { engine: ce }) => {
+        const xs = checkArity(ce, ops, 1);
+        // Surface an arity failure BEFORE the literal fast path below, which
+        // rebuilds the node from the first operand alone: `checkArity` reports
+        // a surplus operand by APPENDING an `unexpected-argument` Error node
+        // (and pads a missing one with `Error("missing")`), so a fast path
+        // that keeps only the first operand would drop the report and let
+        // `TypeFrom("integer", "typo")` canonicalize clean.
+        const err = xs.find((x) => isFunction(x, 'Error'));
+        if (err !== undefined) return err;
+        const [text] = xs;
+        if (text !== undefined && isString(text)) {
+          const settled = settleTypeText(ce, text.string);
+          if ('error' in settled)
+            return ce.error(['invalid-value', settled.error], text.toString());
+          return ce._fn('TypeFrom', [ce.string(settled.canonicalText)]);
+        }
+        return ce._fn('TypeFrom', xs);
+      },
+      evaluate: ([text], { engine: ce }) => {
+        // A literal operand was already settled by the canonical handler, and
+        // settling is idempotent — re-settling a canonical text is a no-op
+        // that rebuilds the same node. Only a COMPUTED operand does real work
+        // here: it has evaluated to a string by now (the operand is strict),
+        // and settling it completes the construction.
+        if (text === undefined || !isString(text)) return undefined;
+        const settled = settleTypeText(ce, text.string);
+        if ('error' in settled)
+          return ce.error(['invalid-value', settled.error], text.toString());
+        return ce._fn('TypeFrom', [ce.string(settled.canonicalText)]);
+      },
+      type: () => 'type',
+      // The `Equal` tier of type values: MUTUAL SUBTYPING, against the
+      // CURRENT registry — it equates what reduction cannot see (an alias
+      // name and its body), while `isSame` stays the immutable canonical-text
+      // identity. A settled type value never equals a non-type value — in
+      // particular `t == "integer"` is False, never a text comparison (plan
+      // ruling R8).
+      eq: (a: Expression, b: Expression) => {
+        const ta = settledTypeText(a);
+        if (ta === undefined) return undefined;
+        const tb = settledTypeText(b);
+        if (tb === undefined) {
+          // `b` is not a settled type value. Decide on its STATIC type: a
+          // value that cannot be a type value is definitively unequal — in
+          // particular `t == "integer"` is False, never a text comparison,
+          // and so is `t == True`. Only an operand that could still hold a
+          // type value stays undecided; `couldMatch` is the predicate for
+          // that (it answers "could a value of this type be a `type`?", so
+          // `unknown`, `any` and a union such as `type | nothing` all remain
+          // undecided, where `matches()` would wrongly rule them out).
+          return b.type.couldMatch('type') ? undefined : false;
+        }
+        const ce = a.engine;
+        return (
+          ce.type(ta).matches(ce.type(tb)) && ce.type(tb).matches(ce.type(ta))
+        );
+      },
+    },
+
+    /** The subtype relation between two types, as a predicate */
+    Subtype: {
+      description:
+        'True iff the FIRST operand is a subtype of the second — ' +
+        '`Subtype("integer", "number")` is `True`, `Subtype("number", ' +
+        '"integer")` is `False`. This is the same compatibility relation ' +
+        'annotations and signatures use. Operands are type values or type ' +
+        'text; a quantified (`where`) type is not comparable and errors.',
+      signature: '(subtype: string|type, supertype: string|type) -> boolean',
+      canonical: (ops, { engine: ce }) => {
+        const xs = checkArity(ce, ops, 2);
+        // Rewrite a LITERAL string operand to a settled type value, so a typo
+        // errors at the author's line — the plan's per-operator string
+        // acceptance (`docs/plans/2026-08-18-first-class-types.md` §3.1,
+        // "String acceptance"). A computed operand stays as written and is
+        // parsed at evaluation.
+        const rewritten = xs.map((op) => {
+          if (!isString(op)) return op;
+          const settled = settleTypeText(ce, op.string);
+          if ('error' in settled)
+            return ce.error(['invalid-value', settled.error], op.toString());
+          return ce._fn('TypeFrom', [ce.string(settled.canonicalText)]);
+        });
+        const err = rewritten.find((x) => isFunction(x, 'Error'));
+        if (err !== undefined) return err;
+        return ce._fn('Subtype', rewritten);
+      },
+      evaluate: ([a, b], { engine: ce }) => {
+        // Each operand is a settled type value, or a string that computed at
+        // evaluation time (settle it now — same forwarding-disabled parse as
+        // construction, so no route mutates the registry). Anything else
+        // stays symbolic. Settling happens EXACTLY ONCE per operand: the
+        // parsed `Type` is kept next to the canonical text, so the polytype
+        // check and the comparison below reuse it instead of re-parsing.
+        // Settling an already-settled value's stored text is a no-op on the
+        // text (settling is idempotent) and is what produces its `Type`.
+        const types: Type[] = [];
+        for (const op of [a, b]) {
+          const text = settledTypeText(op) ?? (isString(op) ? op.string : null);
+          if (text === null) return undefined;
+          const settled = settleTypeText(ce, text);
+          if ('error' in settled)
+            return ce.error(['invalid-value', settled.error], op.toString());
+          types.push(settled.type);
+        }
+        const [pa, pb] = types;
+        if (isPolytype(pa) || isPolytype(pb))
+          return ce.error(
+            [
+              'polytype-comparison-unsupported',
+              'a quantified ("where") type cannot be compared with Subtype',
+            ],
+            (isPolytype(pa) ? a : b).toString()
+          );
+        return ce.type(pa).matches(ce.type(pb)) ? ce.True : ce.False;
+      },
     },
 
     /** True if an expression is (or embeds) an error value */

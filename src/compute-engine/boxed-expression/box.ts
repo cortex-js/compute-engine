@@ -1408,6 +1408,9 @@ const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
   // A callback over a `list<regexp>` deserves the same contextual element
   // stamp a `list<color>` gets.
   'regexp',
+  // `type` (a reified type expression) is another such leaf: a callback over
+  // a `list<type>` deserves the same contextual element stamp.
+  'type',
 ]);
 
 /**

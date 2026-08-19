@@ -171,6 +171,11 @@ export const VALUE_TYPES: PrimitiveType[] = [
   // machinery entirely (`walkPattern`, `mapResultType`, `liftedElementTypeOf`
   // — the sites where a hidden element type is easy to forget).
   'regexp',
+  // `type` (a reified type expression, the value `TypeFrom(...)` constructs)
+  // sits beside `regexp` for the same reasons: an opaque value with no
+  // numeric/boolean reading and no hidden element type, clear of the
+  // parameterized-collection machinery.
+  'type',
   // `object` is a value, but deliberately NOT a collection: field access is
   // not element access, so it sits beside `record` rather than under
   // `collection` with it (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, ruling
