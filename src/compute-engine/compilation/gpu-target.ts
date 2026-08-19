@@ -1563,12 +1563,9 @@ const GPU_SCALAR_REDUCING_BUILTINS = [
  * replaced by a scalar literal — `dot(vec3(x, y, z), vec3(1.0, 2.0, 3.0)) + 1.0`
  * becomes `0.0 + 1.0`.
  *
- * Used before scanning a slot's source for an aggregate value: a `vec3`
- * constructor that is an ARGUMENT of `dot` is not a `vec3` standing in the
- * slot, and reading it as one declines source the driver accepts (Tycho item
- * 159: a point whose scalar component is itself an inner product). The
- * outermost reduction is replaced first, so the constructors nested inside it
- * go with it.
+ * Used before scanning a slot for an aggregate value. A constructor consumed
+ * by `dot`, for example, does not make the enclosing slot aggregate-valued.
+ * Replacing the outermost reduction also removes constructors nested inside it.
  */
 function gpuWithoutScalarReductions(code: string): string {
   const head = new RegExp(
@@ -1895,8 +1892,7 @@ function gpuMisplacedScalarArgument(
 }
 
 /**
- * Fail closed (D6) when a non-scalar operand — a collection, a matrix, an
- * array — reaches a lowering whose shader type system cannot accept it.
+ * Reject a non-scalar operand when the emitted shader cannot accept its shape.
  *
  * The counterpart of `compileGPUBroadcastUnary` for every emission that does
  * not go through the fan-out hook: the generic function-codegen and
@@ -1904,8 +1900,8 @@ function gpuMisplacedScalarArgument(
  * mixed generic types, arrays nested in vector constructors, and matrices
  * passed to scalar builtins before reporting success.
  *
- * Every decision is derived from the operands' shapes (`gpuOperandShape`) and
- * from the SHAPE OF THE EMITTED SOURCE (`gpuTopLevelCall`,
+ * Decisions are derived from the operands' shapes (`gpuOperandShape`) and
+ * from the shape of the emitted source (`gpuTopLevelCall`,
  * `gpuIsComponentwise`), never from a list of head names: a head that changes
  * its lowering is re-judged on the new source. The one exception is DECLARED
  * rather than inferred — a lowering that consumes its aggregate operands
@@ -1922,7 +1918,7 @@ function gpuCheckOperandShapes(
 ): void {
   const shapes = args.map(gpuOperandShape);
 
-  // A lowering that DESTRUCTURED its aggregate operands (`Max`/`Min`, whose
+  // A lowering that destructured its aggregate operands (`Max`/`Min`, whose
   // reduction folds every collection down to one scalar) has an emission the
   // operand shapes no longer describe. It says so explicitly, at its own
   // definition site; nothing about the shape of its emitted source is read as
@@ -1986,15 +1982,11 @@ function gpuCheckOperandShapes(
   const call = topCall;
 
   if (call === undefined) {
-    // Not a single call: an infix operator emission, or an ORDINARY COMPOUND
+    // Not a single call: an infix operator emission or a compound lowering
     // lowering (WGSL's `Mod` → `(((a % b) + b) % b)`, `Log10` →
-    // `log(a) / log(10.0)`). A lowering that consumes its aggregate operands
-    // has already returned above, on its own DECLARED capability — this branch
-    // used to infer that from "is not a single call and the head is absent
-    // from `GPU_OPERATORS`", which waved every compound lowering through:
-    // `Mod(P, Q)` over a `vector<3>` and a `vector<2>` emitted
-    // `(((P % Q) + Q) % Q)` behind `success: true` on WGSL, while GLSL — whose
-    // `Mod` IS a single `mod(…)` call — declined it correctly.
+    // `log(a) / log(10.0)`). Aggregate-consuming lowerings have already
+    // returned above through an explicit capability. Other compound lowerings
+    // still need array, matrix, and vector-width checks.
     const sym = GPU_OPERATORS[head]?.[0];
     if (sym === undefined || !/^[-+*/]$/.test(sym)) {
       // An emission that COMBINES nothing constrains nothing: a lowering that
@@ -2363,41 +2355,12 @@ function gpuScalarComponents(
 }
 
 /**
- * Compile `Max`/`Min`.
- *
- * These are REDUCTIONS: the interpreter (`evaluateMinMax`) and the JavaScript
- * target (`compileExtremum`) both FLATTEN every collection operand and fold the
- * lot to ONE scalar — `Max([1,2,3])` is `3`, `Max([1,2,3], 5)` is `5`. The
- * shader `max`/`min` builtins are COMPONENTWISE, so reusing the scalar variadic
- * fold on a collection operand returned an AGGREGATE where a scalar was owed:
- * `Max([1,2,3])` emitted `vec3(1.0, 2.0, 3.0)` and `Max([1,2,3], 5)` emitted
- * `max(vec3(1.0, 2.0, 3.0), 5.0)` — valid shader source, wrong value, behind
- * `success: true`.
- *
- * With every operand a scalar nothing changes (`foldNaryBuiltin`). Otherwise
- * each non-scalar operand is destructured into its scalar components
- * (`gpuScalarComponents`) and everything is folded pairwise down to one scalar;
- * an operand with no compile-time component list fails closed (D6).
- *
- * An EMPTY collection operand contributes NO components, and is recognized
- * before its constructor is compiled: an empty list has no shader lowering at
- * all (neither language has a zero-length array type), so compiling it would
- * decline a reduction that has a perfectly good answer. `Max([], 5)` is `5`,
- * and `Max([])` — nothing left to fold — is the target NaN, which is what both
- * the interpreter and the JavaScript target return.
- *
- * The gate must not judge this emission against the operand shapes, which it no
- * longer contains: `Max([1,2,3,4,5])` (an `array` operand, no array overload)
- * and, on WGSL, `Max([1,2,3], 5)` (a scalar mixed with a `vec3f`, which WGSL's
- * `max` has no overload for) would both be declined although both reduce
- * correctly — as would the empty-collection NaN, whose WGSL spelling is a
- * `bitcast<f32>(…)` CALL over an `array`-shaped `[]` operand. That is why the
- * `Max`/`Min` entries in `GPU_FUNCTIONS` are wrapped in
- * `markAggregateConsuming`, which DECLARES the capability
- * (`GPU_AGGREGATE_CONSUMING`); `compile-gpu-extremum.test.ts` pins it. The
- * parentheses around the emission are ordinary precedence hygiene and carry no
- * part of that claim — the gate used to infer it from them, which let every
- * unrelated compound lowering past as well.
+ * Compile `Max`/`Min` as scalar reductions. Shader `max`/`min` builtins are
+ * componentwise, so collection operands must first be expanded into their
+ * statically known scalar components. Each operand is compiled once, empty
+ * collections contribute no components, and an all-empty reduction yields
+ * NaN. `markAggregateConsuming` tells the generic shape gate that the original
+ * aggregate shapes are absent from the emitted expression.
  */
 function compileGPUExtremum(
   name: 'max' | 'min',
@@ -2487,18 +2450,12 @@ function isPointListSource(e: Expression): boolean {
 }
 
 /**
- * Project one coordinate out of a *symbolic* `PointList` application, as a
- * `vecN` — the GPU's half of the point-list story. Construction stays fail
- * closed on the shader targets (there is no runtime-length expression value:
- * const-size arrays, `vec` ≤ 4, WGSL runtime arrays are storage-buffer-only),
- * but the PROJECTION of a point list is an ordinary vector, and the point-list
- * dimension stays the consumer's instancing axis. See
- * `docs/plans/2026-07-31-pointlist-compile-design.md` § D3.
+ * Project one coordinate of a symbolic `PointList` as a `vecN`. Shader targets
+ * cannot represent a runtime-length point list as an expression, but a
+ * projection with a statically known width is an ordinary vector.
  *
- * Returns the emitted code, or `{ decline }` — so the caller can name the
- * actual cause in its fail-closed throw rather than blaming the operand shape
- * for every refusal (Tycho item 109a: a decline must say why). Every
- * admissibility condition must hold:
+ * Returns the emitted code or a specific decline reason. Every admissibility
+ * condition must hold:
  * - the coordinate index is within the point arity (`PointZ` on a 2-arity
  *   `PointList` stays declined);
  * - at least one component is a source, and EVERY source has a statically
@@ -2659,7 +2616,6 @@ function compilePointSwizzle(
 
 // ---------------------------------------------------------------------------
 // `At` — positional access on a shader target.
-// See `docs/plans/2026-08-01-at-gpu-compile-design.md`.
 //
 // CE's `At` is 1-based, counts a negative index from the end, and yields the
 // position-preserving absence marker for `0`, an out-of-range index or a
@@ -2670,13 +2626,11 @@ function compilePointSwizzle(
 //
 // Admissible only against a base whose element COUNT is static and whose
 // elements are provably scalar numeric: a shader value has a shape, and a
-// runtime-length list has none. Every other shape declines with its OWN
-// reason (Tycho item 109a) rather than a shared "no lowering" text.
+// runtime-length list has none. Every other shape returns a specific reason.
 //
-// Point-list bases are DEFERRED (design § D3): `At(PL, k)` types
-// `missing | tuple`, which the §3.F object-domain-absence gate intercepts
-// ahead of any target function table, so an entry here would be unreachable
-// for that shape.
+// Point-list bases are handled by coordinate projection instead. `At(PL, k)`
+// has type `missing | tuple`, so the object-domain absence gate intercepts it
+// before this target function can run.
 // ---------------------------------------------------------------------------
 
 /** The static element count of an `At` base, or why it has no shader shape. */
@@ -4179,9 +4133,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const r = Math.pow(bConst, eConst);
       // `Math.pow` (like the shader `pow`) is NaN for every negative base with
       // a non-integer exponent, which is narrower than CE's branch convention.
-      // WHICH value is folded is decided by the node's TYPE — the same ruling
-      // as the JavaScript target's `NO_REAL_VALUE_FOLD`, and as of 2026-07-30
-      // the type distinguishes the two branches:
+      // The node's type selects which value to fold:
       // - An EVEN reduced-rational denominator is the complex branch and the
       //   node is typed `finite_complex`, so the enclosing emission is the
       //   `vec2(re, im)` convention. Fold the principal complex value; a
@@ -4747,11 +4699,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const xConst = tryGetConstant(x);
     if (xConst !== undefined && nConst !== undefined) {
       const r = Math.pow(xConst, 1 / nConst);
-      // Negative base. WHICH value is folded is decided by the node's TYPE —
-      // the same ruling as the JS target's `NO_REAL_VALUE_FOLD`. An ODD
+      // For a negative base, the node's type selects which value to fold. An odd
       // integer degree has a real root (interpreter convention, e.g.
       // Root(-8, 3) = -2) and stays `finite_number`. An EVEN degree is the
-      // complex branch: as of the 2026-07-30 ruling the node is typed
+      // complex branch: the node is typed
       // `finite_complex`, so the enclosing emission is `vec2(re, im)` and the
       // fold must be the principal complex value — a scalar NaN there would be
       // silently scalar-broadcast into `vec2(NaN, NaN)`. (A canonical even root
@@ -7720,16 +7671,12 @@ export function formatGPUNumber(n: number, language?: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// User-defined function emission (Phase 2 of the compile-CSE design, §9.1 of
-// `docs/plans/2026-07-28-compile-cse-design.md`).
+// User-defined function emission.
 //
-// A user-defined function literal (`f(x) := …`) called from a shader-compiled
-// expression used to fail as an unknown operator, forcing consumers to inline
-// the body at every call site. The GPU targets now host the same
-// `userFunctions` registry the JS targets do (`base-compiler.ts`), with a
-// `lowering` hook supplying what the shader languages need and the JS form
-// cannot express: STATIC parameter/return types, a statement-position body,
-// declaration-before-use ordering, and fail-closed recursion.
+// GPU targets use the shared `userFunctions` registry with a lowering hook for
+// shader-specific requirements: static parameter and return types, a
+// statement-position body, declaration-before-use ordering, and recursion
+// rejection.
 // ---------------------------------------------------------------------------
 
 /** The shader scalar type. Always float: see `gpuTypeOfDeclaredType`. */
@@ -7809,10 +7756,9 @@ type GPUDeclaredType = {
  * GLSL ES nor WGSL promotes an integer to a float, so an integer-declared
  * name reaching float arithmetic bare (`float f(int K) { return K + 1.0; }`)
  * is a driver-side type error behind a reported success. Such a name is
- * therefore CONVERTED where it is referenced (`gpuDeclaredBodyTarget` binds it
+ * therefore converted where it is referenced (`gpuDeclaredBodyTarget` binds it
  * to `float(K)` / `f32(K)`), and every reading of it downstream is a float
- * (`gpuTypeOfValue`, `gpuAtFramedIndex`). User-ruled 2026-08-15 (cast at the
- * reference site rather than fail closed) while fixing Tycho item 191.
+ * (`gpuTypeOfValue`, `gpuAtFramedIndex`).
  *
  * The conversion is LOSSY above 2^24 (≈16.7M): a shader float has a 24-bit
  * significand, so an integer uniform carrying a larger count or identifier

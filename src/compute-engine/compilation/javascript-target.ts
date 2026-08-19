@@ -284,19 +284,19 @@ function hasPossiblyTextElements(e: Expression | undefined): boolean {
 }
 
 /**
- * True when `e`'s static type ADMITS text without proving it — a union with an
+ * True when `e`'s static type admits text without proving it: a union with an
  * arm that is a subtype of `string` or `character`, e.g. `string | list<number>`
  * (an alias is resolved first, by `jsType`).
  *
  * Such an operand is invisible to `isProvablyStringOperand` (the union is not a
- * subtype of `string`) yet IS a subtype of `indexed_collection` — string and
+ * subtype of `string`) yet is a subtype of `indexed_collection` — string and
  * list both are — so `isIndexedCollectionOperand` admits it and the list
  * lowerings would run `.slice()`, `.reverse()` and `...` spread over a JS
- * STRING at run time, operating on UTF-16 code units behind `success: true`
+ * string at run time, operating on UTF-16 code units behind `success: true`
  * (`Reverse` on a decomposed `"é"` would split the base letter from its
  * combining mark). `elementsArg` cannot rescue it either: segmenting is gated
  * on PROOF of a string, so the union is passed through unsegmented. The
- * collection funnels therefore fail closed on it (D6).
+ * collection funnels therefore fail closed on it.
  */
 function couldBeStringOperand(e: Expression): boolean {
   const t = jsType(e);
@@ -318,71 +318,30 @@ function isProvablyNumericOperand(x: Expression): boolean {
 }
 
 /**
- * The ADMISSION side of the string-equality rule (tier 2, 2026-08-08): a BINARY
- * `Equal`/`NotEqual` that lowers to a strict `===` / `!==` instead of declining
- * on `assertNoStringOperand`.
+ * Whether a binary `Equal` or `NotEqual` can use scalar text equality instead
+ * of declining in `assertNoStringOperand`.
  *
- * Strict equality is the interpreter's own string semantics: `compare.ts`
- * compares two strings with `a.string === b.string`, with NO tolerance. It is
- * the same inner the §3.F Kleene-guarded `string | missing` form already emits
- * (`base-compiler.ts`, shipped 2026-08-08); this generalizes that precedent to
- * the unguarded scalar case.
+ * Text equality uses no numeric tolerance. At least one participant must be
+ * provably text, none may be provably numeric or an unfaithful aggregate, and
+ * neither may be collection-valued at run time. Collection equality has a
+ * separate lowering.
  *
- * The rule — every clause is load-bearing:
- *
- *  - **at least one participant is provably string**. Nothing without string
- *    evidence changes: a plot equality (`x^2 + y^2 = 4`, `Equal(xq, 4)`) has
- *    none, so it keeps the numeric tolerance codegen BYTE-IDENTICALLY. Every
- *    shape this admits was DECLINING before, so no compiling shape moves.
- *  - **no participant is provably a NUMBER**. Probed, `Equal("a", 1)` is
- *    `False` in the interpreter (equality is total across sorts, unlike the
- *    orderings, which stay inert) and `"a" === 1` agrees — but the mixed
- *    string/number shape is ruled fail-closed for now, as in tier 0.
- *  - **no participant may be a COLLECTION at run time**
- *    (`couldBeCollectionParticipant`, which reads a UNION arm — a subtype test
- *    such as `.matches('collection')` is blind to `string | list<string>`),
- *    and none is an unfaithful aggregate: `Equal(["a","b"], "a")` broadcasts
- *    element-wise in the interpreter, which a scalar `===` cannot express.
- *    Those shapes go to the `_SYS.eq` route instead (see there), or fail
- *    closed when they are not provably flat all-string.
- *  - **BINARY only**. The chained form would need the impure-operand temp
- *    binding the numeric path has, for no known consumer; it stays closed.
- *
- * An `unknown`-typed participant opposite a provable string IS admitted, and
- * that is the deliberate widening over "both provably string": the realistic
- * consumer is a character scanner whose predicate parameter is inferred
- * (`isWs(c) = c == " " || c == "\t"` types `c` as `unknown`). It is faithful
- * for every scalar run-time value — a string compares exactly, and a number,
- * boolean or tuple answers `false`, which is the interpreter's `False`. The one
- * residual is a run-time ARRAY in the `unknown` slot, where the interpreter
- * broadcasts; that is the identical, settled hole the numeric fast path already
- * has for a bare unknown symbol (`Equal(xq, 4)` → `Math.abs(xq - 4) <= tol`),
- * not a new class.
- *
- * ACCEPTED RESIDUAL (flagged for ruling, 2026-08-08): the interpreter
- * NFC-normalizes every string at boxing time (`BoxedString`), so it answers
- * `True` for a decomposed/precomposed pair (`"é"` vs `"é"`), whereas
- * the emitted `===` compares the raw UTF-16 the HOST passed in. String
- * LITERALS are unaffected (they are boxed, hence NFC, before codegen), and
- * `_SYS.chars` normalizes so `Characters(s)[i] == "é"` is faithful too — only a
- * raw non-NFC string handed to a compiled parameter diverges. Closing it would
- * mean a `.normalize()` on both sides of every comparison, in the hottest loop
- * these lowerings exist for. The ORDERINGS shipped with the same residual (raw
- * `<`), as did the §3.F guarded `===`.
+ * An `unknown` scalar opposite provable text is admitted because `_SYS.eqt`
+ * conditions text operands and otherwise uses strict equality. A possibly
+ * collection-valued unknown is excluded because the interpreter broadcasts it.
  */
 function isStringScalarEquality(args: ReadonlyArray<Expression>): boolean {
   if (args.length !== 2) return false;
-  // A CHARACTER is text evidence too, on the same footing as a string: it
+  // A character is text evidence too, on the same footing as a string: it
   // lowers to the one-cluster JS string it denotes, and the interpreter's
-  // equality BRIDGES the two kinds (`compare.ts` / `BoxedCharacter.isSame` —
+  // equality bridges the two kinds (`compare.ts` / `BoxedCharacter.isSame` —
   // a character and a one-cluster string with the same NFC content are equal),
   // so the strict `===` is faithful for a character/character and a
   // character/string pair alike. Without this clause a two-character `Equal`
-  // had no text evidence at all and fell through to the NUMERIC tolerance
+  // would otherwise have no text evidence and fall through to numeric tolerance
   // lowering, which is `Math.abs("a" - "a") <= tol` — `NaN <= tol` — so
   // `CharacterFrom("a") == CharacterFrom("a")` compiled to `false` where the
-  // interpreter answers `True` (probed).
-  // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
+  // interpreter answers `True`.
   if (
     !args.some(
       (a) => isProvablyStringOperand(a) || isProvablyCharacterOperand(a)
@@ -397,18 +356,17 @@ function isStringScalarEquality(args: ReadonlyArray<Expression>): boolean {
 }
 
 /**
- * The ADMISSION side of the string-COLLECTION equality rule (tier 2,
- * 2026-08-08): a BINARY `Equal`/`NotEqual` whose every participant is a
- * provably FLAT all-string value (`isFlatAllStringComparisonParticipant`) and
+ * Whether binary collection equality can use `_SYS.eq` or `_SYS.neq`: every
+ * participant must be a provably flat all-string value
+ * (`isFlatAllStringComparisonParticipant`) and
  * at least one of which is a collection. It lowers to the `_SYS.eq`/`_SYS.neq`
  * dispatch, whose scalar leaf now compares two strings with `===` (see
  * `eqTensor`) — so both interpreter shapes come out right:
  * `Equal(["a","b"], ["a","b"])` is the whole-collection `True`, and
  * `Equal(["a","b"], "a")` the element-wise `[True, False]` (both probed).
  *
- * This is the JavaScript mirror of the Python target's `_ce_eqcoll` all-string
- * admission, and closes a documented JS/Python divergence. The admission side
- * is deliberately the same NARROW flat predicate Python uses: a MIXED
+ * This mirrors the Python target's `_ce_eqcoll` admission. The deliberately
+ * narrow predicate excludes a mixed
  * (`list<string | number>`) or NESTED all-string participant fails closed even
  * though the kernel was probed faithful on it, and a numeric participant
  * (`Equal(["a","b"], 1)`) fails closed under the tier-0 mixed ruling.
@@ -424,36 +382,29 @@ function isStringCollectionEquality(args: ReadonlyArray<Expression>): boolean {
 }
 
 /**
- * Fail closed (D6) when a COMPARISON participant is an aggregate whose
+ * Fail closed when a comparison participant is an aggregate whose
  * whole-value comparison neither kernel can reproduce — a `dictionary`, a
  * `record`, or a `tuple` (`unfaithfulComparisonAggregate`).
  *
- * The interpreter compares such an aggregate as ONE value; both compiled
+ * The interpreter compares such an aggregate as one value; both compiled
  * kernels see its JavaScript representation as something to look inside:
  *
  *  - `_SYS.eq`/`_SYS.neq` reduce to the numeric tolerance test, which for two
- *    EQUAL `dictionary<integer>` / `record{…}` values is `Math.abs(obj - obj)`
+ *    equal `dictionary<integer>` / `record{…}` values is `Math.abs(obj - obj)`
  *    → `NaN <= tol` → `false`, where the interpreter answers `True`;
- *  - a `tuple` lowers to a JS array, so `Equal(Tuple(1, 2), 1)` ran ELEMENT-WISE
+ *  - a `tuple` lowers to a JS array, so `Equal(Tuple(1, 2), 1)` runs element-wise
  *    to `[true, false]` and `Equal(Tuple(1, 2), List(1, 2))` to `true`, where
  *    the interpreter answers `False` to both (a point binds atomically);
  *  - `IndexOf`'s element test is the same tolerance test, so a tuple needle was
  *    never found — `IndexOf([[1,2],[3,4]], Tuple(3,4))` ran to `0` against the
  *    interpreter's `2`.
  *
- * These shapes were declining ALREADY, but for the wrong reason: the
- * string-evidence walk read the synthesized `tuple<string, V>` dictionary/record
- * entry — the always-string KEY — as string evidence, so `Equal(d1, d2)` over
- * `dictionary<integer>` reported "string-valued operands" with no string in
- * sight. With that key no longer counted, this gate is what keeps them closed,
- * and it says why.
- *
  * The ORDERINGS reach it too (via `compileJSCollectionBoolean`), where it
  * precedes the broader "no element-wise runtime dispatch" refusal that had been
  * catching the same shapes.
  *
- * ONE carve-out, applied by the caller and not here: a BINARY `Equal`/`NotEqual`
- * whose EVERY participant is provably tuple-typed with provably NUMERIC
+ * One carve-out, applied by the caller and not here: a binary `Equal`/`NotEqual`
+ * whose every participant is provably tuple-typed with provably numeric
  * components skips this gate — see `compileJSEquality`,
  * `isProvablyTupleParticipant` and `isNumericTupleParticipant`. The orderings and
  * `IndexOf` never take it.
@@ -478,20 +429,20 @@ function assertComparableAggregate(
 }
 
 /**
- * True when an ORDERING (`Less`/`LessEqual`/`Greater`/`GreaterEqual`) over these
+ * True when an ordering (`Less`/`LessEqual`/`Greater`/`GreaterEqual`) over these
  * operands must fail closed: at least one operand is provably string, but NOT
  * every operand is.
  *
- * All-string is SOUND and keeps compiling. The interpreter compares two strings
+ * All-string is sound and keeps compiling. The interpreter compares two strings
  * with the same raw JavaScript `<` this target emits (`compare.ts`:
  * `a.string < b.string ? '<' : '>'`), so `"Z" < "a"`, `"10" < "9"`,
  * `"ä" < "b"` and `"abc" < "abd"` all agree — verified against interpretation,
  * and pinned in `compile-string-fail-closed.test.ts`.
  *
- * The MIXED pair is the silently-wrong one: the interpreter leaves
- * `Less("a", 1)` SYMBOLIC (inert), whereas `"a" < 1` is a plausible-looking
+ * A mixed pair is silently wrong: the interpreter leaves
+ * `Less("a", 1)` symbolic, whereas `"a" < 1` is a plausible-looking
  * `false`. An operand of unknown type alongside a string counts as
- * POSSIBLY-mixed and declines too — it is not provable string evidence, so it
+ * possibly mixed and declines too: it is not provable string evidence, so it
  * could be the number that makes the pair mixed at run time.
  *
  * Chained (n-ary) orderings follow the same rule: `every`/`some` range over all
@@ -512,7 +463,7 @@ function isMixedStringOrdering(args: ReadonlyArray<Expression>): boolean {
   );
 }
 
-/** Fail closed (D6) on a mixed / possibly-mixed string ordering. */
+/** Fail closed on a mixed or possibly mixed string ordering. */
 function assertNoMixedStringOrdering(
   kind: string,
   args: ReadonlyArray<Expression>
@@ -546,20 +497,17 @@ function compileJSEquality(
 ): string {
   if (args.length < 2)
     throw new Error(`${kind}: expected at least two arguments`);
-  // Ahead of BOTH lowerings below: the `_SYS.eq`/`_SYS.neq` runtime dispatch
+  // Check before both lowerings: the `_SYS.eq`/`_SYS.neq` runtime dispatch
   // compares scalars tolerantly too, so a string operand is as wrong there as
   // on the scalar tolerance path.
   //
-  // The one carve-out in the aggregate gate (maintainer-ruled): a BINARY
-  // equality whose EVERY participant is provably tuple-typed
-  // (`isProvablyTupleParticipant`) with provably NUMERIC components
-  // (`isNumericTupleParticipant`) keeps the `_SYS.eq`/`_SYS.neq` lowering it
-  // had before the gate existed. Its array-vs-array branch is whole-value
+  // A binary equality whose every participant is provably tuple-typed
+  // (`isProvablyTupleParticipant`) with provably numeric components
+  // (`isNumericTupleParticipant`) may use `_SYS.eq`/`_SYS.neq`. Its
+  // array-vs-array branch is whole-value
   // equality, which is exactly the interpreter's atomic point comparison — at
-  // equal arity and at unequal arity (a length mismatch is `false`, and so is
-  // the interpreter's answer). Only the MIXED shapes were wrong, and those
-  // still decline: one non-tuple participant and `every` fails. The CHAINED
-  // (n-ary) form is excluded — it keeps failing closed here, as it does below.
+  // equal or unequal arity. Mixed shapes still decline because one non-tuple
+  // participant makes `every` fail. Chained forms are excluded.
   //
   // The numeric-component requirement mirrors the Python target's and closes
   // that helper's numeric element leaf: its tolerance test coerces a boolean
@@ -568,8 +516,8 @@ function compileJSEquality(
   // `False`/`True`. A boolean, `unknown` or otherwise non-numeric component now
   // declines and the interpreter answers.
   //
-  // Gate ORDER is load-bearing: `assertNoStringOperand` runs unconditionally
-  // AFTER this, so a NON-tuple participant with string evidence still declines
+  // Gate order matters: `assertNoStringOperand` runs unconditionally after
+  // this, so a non-tuple participant with string evidence still declines
   // on it. A tuple with a string component
   // (`Equal(Tuple(1, "a"), Tuple(1, "a"))`) is now caught one step earlier, by
   // the numeric-component requirement — the tolerance test is NaN on that
@@ -580,26 +528,21 @@ function compileJSEquality(
     args.every(isProvablyTupleParticipant) &&
     args.every(isNumericTupleParticipant);
   if (!tupleEquality) assertComparableAggregate(kind, args);
-  // The two string carve-outs (tier 2, 2026-08-08) — see
-  // `isStringScalarEquality` and `isStringCollectionEquality` for the rules and
-  // the probe evidence. Everything else with string evidence still declines.
+  // See `isStringScalarEquality` and `isStringCollectionEquality` for the two
+  // text-specific admissions. Everything else with string evidence declines.
   const stringScalar = isStringScalarEquality(args);
   const stringCollection = !stringScalar && isStringCollectionEquality(args);
   if (!stringScalar && !stringCollection) assertNoStringOperand(kind, args);
   if (stringScalar) {
-    // Content equality with NO tolerance — the interpreter's text semantics
+    // Content equality uses no tolerance. `_SYS.eqt`
     // (`compare.ts` compares `a.string === b.string`) — emitted as `_SYS.eqt`.
     //
-    // `eqt` puts a STRING/STRING pair through the same ingress conditioning the
+    // puts a string/string pair through the same ingress conditioning the
     // interpreter applies when it boxes a string or a character (NFC, then the
     // lone-surrogate replacement) before comparing, which a bare `===` does
     // not: `===` answers `false` for a decomposed host string bound to a
-    // parameter that the interpreter reads as equal to its precomposed
-    // literal. Both operands are normalized — maintainer ruling, 2026-08-16,
-    // closing what was pinned until then as "DOCUMENTED DIVERGENCE: a non-NFC
-    // runtime string is not normalized" in
-    // `compile-string-fail-closed.test.ts`. Literals are unaffected: they are
-    // boxed, hence already conditioned, before codegen.
+    // parameter that the interpreter reads as equal to its precomposed literal.
+    // Literals are already conditioned during boxing.
     //
     // Every other pair falls back to strict `===` inside `eqt`, which is what
     // keeps the admitted possibly-text participants honest: this lowering also
@@ -609,15 +552,14 @@ function compileJSEquality(
     // than the `_SYS.cmpc` comparator the character ORDERINGS use — the two
     // agree on every text pair, since `cmpc` conditions its operands
     // identically.
-    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
     const eq = `_SYS.eqt(${compile(args[0])}, ${compile(args[1])})`;
     return kind === 'Equal' ? `(${eq})` : `(!${eq})`;
   }
   // Equality over a (possibly-)collection operand: a raw `Math.abs(a - b)`
   // over a list silently coerces (`[1,2,3] - 2` → NaN), so the scalar codegen
-  // below would return a wrong boolean behind a `success: true`. The BINARY
+  // below would return a wrong boolean behind a `success: true`. The binary
   // form lowers to the interpreter-faithful runtime dispatch `_SYS.eq`/
-  // `_SYS.neq` instead (Tycho item 41, the item-34 treatment): scalar
+  // `_SYS.neq` instead: scalar
   // operands compare tolerantly, an array-vs-scalar pair is element-wise, an
   // array-vs-array pair is whole-collection equality — see `eqTensor`. The
   // gate uses the declared type (not `.isCollection`, which is false for a
@@ -628,8 +570,7 @@ function compileJSEquality(
   // excluded by the predicate, so plot equalities (`x^2 + y^2 = 4`) stay on
   // the scalar fast path below.
   //
-  // The CHAINED (n-ary) form keeps failing closed (D6), and was NOT relaxed
-  // with the orderings and connectives (2026-07-27, Tycho item 86). It is not
+  // The chained form fails closed. It is not
   // a pairwise conjunction the way `a < b < c` is: the interpreter's n-ary
   // `Equal` switches SHAPE on how many operands are collections at run time —
   // `Equal([1,2,3], 3, 3)` is element-wise `[False,False,True]`, while
@@ -894,20 +835,18 @@ function compileJSCollectionBoolean(
 
 /**
  * Codegen for `Which`/`If` (clauses in `Which` shape) when a CONDITION may be
- * an indexed collection at run time: the element-wise selection lowering
- * (`_SYS.select`, R1–R4 of
- * `docs/plans/2026-07-27-elementwise-which-design.md`).
+ * an indexed collection at run time: the `_SYS.select` element-wise lowering.
  *
- * Each clause is emitted as a THUNK so the runtime helper owns evaluation
+ * Each clause is emitted as a thunk so the runtime helper owns evaluation
  * order: conditions in clause order, an arm only if selection reaches it, and
- * then exactly once (R2). The helper also handles the case where every
- * condition turns out SCALAR at run time — it returns the selected arm whole —
+ * then exactly once. The helper also handles the case where every
+ * condition turns out scalar at run time: it returns the selected arm whole,
  * so routing a merely-possibly-collection condition here is value-safe.
  *
  * Returns `null` when every condition is provably scalar: the base compiler
  * then emits its ternary chain, unchanged.
  *
- * Declines (fail closed, D6) when a value arm is complex-valued: the compiled
+ * Declines when a value arm is complex-valued: the compiled
  * complex convention is a `{ re, im }` object, and a selection array mixing
  * those with real cells has no settled rendering. Scalar complex
  * `Which`/`If` is untouched — it never reaches here.
@@ -2086,19 +2025,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // Flat concatenation of the (top-level) elements of each collection operand.
   //
-  // The STRING-PRESERVING arm comes first: when every operand is provably a
-  // string, `Join` is THE variadic concatenation and answers a `string`, not a
+  // The string-preserving arm comes first: when every operand is provably a
+  // string, `Join` is variadic concatenation and answers a `string`, not a
   // `list<character>` (`Join("ab", "cd")` is `"abcd"`, probed). Spreading the
   // operands into an array would answer `["a","b","c","d"]` instead, and would
   // spread UTF-16 code units at that. Each operand goes through the
   // interpreter's ingress conditioning (`_SYS.ct`) and the concatenation is
   // NFC-normalized, since `engine.string()` stores every string in NFC.
-  // A MIXED call (`Join("ab", ["c"])`) takes the generic arm in the
+  // A mixed call (`Join("ab", ["c"])`) takes the generic arm in the
   // interpreter and answers a `list<character | string>`; here it keeps
   // failing closed, because `collArg` refuses a string operand — a string does
   // not lower to a JS array.
-  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decisions D1
-  // and D8.)
   Join: (args, compile) => {
     if (args.length === 0) return '[]';
     if (args.every(isProvablyStringOperand))
@@ -2110,30 +2047,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       .join(', ')}]`;
   },
   // Split a string into a list of user-perceived characters. The interpreter
-  // segments GRAPHEME CLUSTERS (UAX #29 via `Intl.Segmenter`, `library/core.ts`
-  // `splitGraphemeClusters`) — NOT code points and NOT UTF-16 units, so neither
+  // segments grapheme clusters (UAX #29 via `Intl.Segmenter`, `library/core.ts`
+  // `splitGraphemeClusters`), not code points or UTF-16 units, so neither
   // `[...s]` nor `s.split('')` is faithful: probed, `Characters` answers 1
   // element for a ZWJ family emoji and for a regional-indicator flag (5 and 2
   // code points), and 1 for a decomposed `"e" + U+0301`. `_SYS.chars` runs the
   // same segmenter. A non-string operand leaves the interpreter's `Characters`
-  // inert (or an `incompatible-type` error), so it fails closed (D6).
+  // inert (or an `incompatible-type` error), so it fails closed.
   Characters: (args, compile) =>
     compileJSCharacters('Characters', args, compile),
   // Shipped synonym of `Characters` (v0.30), same interpreter handler.
   GraphemeClusters: (args, compile) =>
     compileJSCharacters('GraphemeClusters', args, compile),
   // `StringJoin(xs, sep?)` — join ONE collection of strings/characters, with
-  // `sep` between consecutive elements. The variadic concatenation form was
-  // REMOVED in Phase 2 of the strings work: once a string is itself a
+  // `sep` between consecutive elements. Once a string is itself a collection
+  // of characters,
   // collection of characters, "a collection and a separator" and "two strings
   // to concatenate" are the same shape and cannot both be supported. So a
   // two-string call now means the SEPARATOR form, exactly as Python's
-  // `"-".join("abc")` is `"a-b-c"` — variadic concatenation is `Join(a, b, …)`.
-  // (`docs/plans/2026-08-16-string-phase2-join-search-ops.md`, decisions D2 and
-  // D8.)
+  // `"-".join("abc")` is `"a-b-c"`; variadic concatenation is `Join(a, b, …)`.
   //
   // Two subject shapes compile:
-  //  - a provably STRING subject, whose elements are its grapheme clusters, so
+  //  - a provably string subject, whose elements are its grapheme clusters, so
   //    it is segmented with `_SYS.chars` first — indexing the JS string
   //    directly would join UTF-16 code units and cut a ZWJ family apart;
   //  - an indexed collection whose elements are provably strings or characters
@@ -2141,8 +2076,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   //    one-cluster-or-longer strings.
   //
   // Everything else fails closed, because the interpreter leaves it
-  // UNEVALUATED or reports a type error rather than coercing: a non-text
-  // ELEMENT (`StringJoin([1, 2])` is inert — coercion is `String`, a different
+  // unevaluated or reports a type error rather than coercing: a non-text
+  // element (`StringJoin([1, 2])` is inert — coercion is `String`, a different
   // operator), a non-string separator, and a SCALAR `character` subject, which
   // is an `incompatible-type` error against the `collection<string |
   // character>` parameter (a character is one element, not a collection of
@@ -2151,7 +2086,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // The elements and the separator go through the interpreter's ingress
   // conditioning (`_SYS.ct`: NFC normalization then the lone-surrogate
   // replacement) because the interpreter joins the content of ALREADY-BOXED
-  // strings; only a raw host string bound to a compiled parameter differs.
+  // strings.
   // Everything `_SYS.chars` produces is conditioned already, so that branch
   // needs no `map`. The result is `.normalize()`d because `engine.string()`
   // stores every string in Unicode NFC: joining `"e"` and `U+0301` yields the
@@ -3042,11 +2977,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // here (it is in the interpreter too) — unlike the sampling operators, whose
   // domains stay descriptors.
   //
-  // A STRING source is segmented into its characters, shuffled and re-joined:
+  // A string source is segmented into its characters, shuffled and rejoined:
   // a permutation of a string's own characters is a string (the
-  // string-preservation rule, promoted in Phase 2 as an ELEMENT-PRESERVING
-  // list-out operator — `docs/plans/2026-08-16-string-phase2-join-search-ops.md`
-  // item 8). Re-segmentation caveat, shared with the interpreter: rejoining the
+  // string-preservation rule for element-preserving list-out operators.
+  // Re-segmentation caveat, shared with the interpreter: rejoining the
   // permuted characters can merge or split clusters, so the result may hold a
   // different number of characters than the source.
   RandomShuffle: (args, compile) => {
@@ -4384,10 +4318,10 @@ function toRI(c: Complex): { re: number; im: number } {
 }
 
 /**
- * Folding a constant that has NO REAL VALUE (`√-2`, `(-2)^0.3`).
+ * Folding a constant that has no real value (`√-2`, `(-2)^0.3`).
  *
- * Policy (2026-07-30): such a constant is FOLDED, never refused. Fail-closed
- * (D6) exists to prevent silently WRONG output, not to prevent a non-real
+ * Such a constant is folded rather than refused. Failing closed prevents
+ * silently wrong output; it does not prohibit a non-real
  * one. `NaN` is the correct, self-describing answer for "no real value", it
  * is what every sibling head already returns (`Ln(-2)` → `Math.log(-2)`,
  * `Arcsin(2)` → `Math.asin(2)`), and it is what the SAME expression returns
@@ -4396,24 +4330,24 @@ function toRI(c: Complex): { re: number; im: number } {
  * runtime-variable case cannot be caught in principle, so the caller must
  * handle `NaN` either way.
  *
- * WHICH value is folded is decided by the node's TYPE, not by the ruling:
+ * The node's type decides which value is folded:
  * `BaseCompiler.isComplexValued` — a type query — is what makes the enclosing
  * expression emit real (`a + b`) or complex (`{re, im}`) arithmetic, so the
  * emitted constant must agree with it.
  * - A canonical `Sqrt(negative)` is typed `complex`, so it folds to the
  *   complex principal value (`√-2` → `1.414…i`, matching the interpreter) —
  *   `complexSqrtLiteral` below.
- * - A `Power`/`Root` on the COMPLEX branch of a negative base — the exponent's
+ * - A `Power`/`Root` on the complex branch of a negative base — the exponent's
  *   reduced-rational denominator is even (`(−2)^0.3`), or the root degree is
  *   even (`Root(−8, 4)`) — is typed `finite_complex`, so it folds to the
  *   principal complex value (`complexPowLiteral`). Returning a numeric `NaN`
  *   would violate the parent expression's `{re, im}` representation.
- * - A `Power`/`Root` on the REAL branch of a negative base — an ODD
+ * - A `Power`/`Root` on the real branch of a negative base — an odd
  *   reduced-rational denominator or root degree, where a real principal root
  *   exists (`(−8)^(2/3) = 4`, `Root(−8, 3) = −2`) — stays `finite_number` and
  *   folds to that real value, which `Math.pow` alone misses. See
  *   `negativeBaseRealPow`.
- * - Only when the branch is UNPROVABLE (a float exponent with no faithful
+ * - Only when the branch is unprovable (a float exponent with no faithful
  *   rational reconstruction) does a `Power`/`Root` fold to `NaN` — exactly what
  *   its own `Math.pow` lowering yields once the base is a runtime variable. A
  *   `{re, im}` object there would be consumed as a number by the enclosing real

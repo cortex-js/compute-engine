@@ -7,7 +7,7 @@
  * compiler consumes that output during emission.
  *
  * Analysis and emission share one declarative inventory of lazy operand
- * positions ({@link LAZY_OPERANDS} / {@link lazyOperandRegions}) so
+ * positions ({@link LAZY_OPERANDS} and {@link lazyOperandRegions}) so
  * their region boundaries cannot drift. See
  * `docs/plans/2026-07-28-compile-cse-design.md` for the full design.
  */
@@ -1306,14 +1306,14 @@ class Harvester {
    * named callback, a parameter, an opaque function value. Derived from the
    * operand, never from an operator list.
    *
-   * The type is authoritative when it is known; a HELD operand of a lazy
+   * The type is authoritative when it is known; a held operand of a lazy
    * operator may arrive with a `unknown` type (`Map(f, xs)` holds `f`
    * unbound), so a bare symbol also consults the engine definition.
    */
   private isOpaqueCallableOperand(operand: Expression): boolean {
     // Memoized per node object: a shared operand is re-checked once per
-    // parent, and the `type.matches` + definition lookups are measurable on
-    // large candidate-free trees. Engine state is constant during a harvest.
+    // parent. Engine state is constant during a harvest, so the type and
+    // definition lookups are stable.
     const cached = this.opaqueOperandMemo.get(operand);
     if (cached !== undefined) return cached;
     const before = this.calleeNeutralEdges;
@@ -1331,21 +1331,20 @@ class Harvester {
     if (!isSymbol(operand)) return operand.type.matches('function');
 
     const name = operand.symbol;
-    // A NAMED callback that resolves to a user-function LITERAL is no longer
-    // invisible where the harvest admits pure user functions: the same
+    // A named callback that resolves to a user-function literal is visible
+    // when the harvest admits pure user functions. The same
     // transitive gate applied to a call site (`isAdmissibleUserFnCallee` —
     // fresh per-level `body.isPure` plus the emission-purity scan) answers
     // "what does `f` do?" for `Map(f, xs)` too, and G1 (`node.isPure`) still
     // gates the whole application. Test before the type gate below: a
-    // DECLARED callback (`CountIf(xs, p)` with `p: (number) -> boolean`)
+    // declared callback (`CountIf(xs, p)` with `p: (number) -> boolean`)
     // carries a function-matching type on the operand node itself, which
     // would otherwise reject it before its literal was ever consulted. A
-    // SHADOWED name resolves to an enclosing binding, not to the global this
-    // would validate, so it is refused; likewise a `vars` KEY, which wins at
+    // shadowed name resolves to an enclosing binding, not to the global this
+    // would validate, so it is refused; likewise a `vars` key, which wins at
     // emission over both function-value routes, so the literal this would
-    // validate is not what the artifact calls. A symbol resolving to a
-    // Built-in operator definitions have no literal and are handled by the
-    // clause below.
+    // validate is not what the artifact calls. Built-in operator definitions
+    // have no literal and are handled by the clause below.
     if (
       this.admitPureUserFunctions &&
       !this.shadowedNames.has(name) &&
@@ -1356,17 +1355,17 @@ class Harvester {
       return false;
 
     // A callback naming a pure built-in operator (`Map(Sin, xs)`,
-    // `CountIf(xs, IsPrime)`) is likewise no longer invisible: the compiler
+    // `CountIf(xs, IsPrime)`) is also visible: the compiler
     // eta-expands it into `(p) ↦ Sin(p)` and emits it as a shared local
     // (`BaseCompiler.ensureBuiltinCallbackEmitted`), so what it does is
     // exactly the built-in's own deterministic, effect-free emission — the
     // same trust class as the table mapping an inline `x ↦ Sin(x)` callback
-    // would have gone through. Admitted only when ALL hold, mirroring
+    // would have gone through. Admit it only when all of these hold, mirroring
     // emission so an operand that cannot emit never becomes CSE-eligible:
     // the name is not shadowed, it is not a `vars` key (the caller's external
-    // input wins at emission, so the artifact does not call the built-in at
-    // all), it is not a caller `functions`/`operators` override (unknowable
-    // emitted purity — must stay opaque for MERGING even though emission does
+    // input wins at emission, so the artifact does not call the built-in), it
+    // is not a caller `functions`/`operators` override (unknowable emitted
+    // purity, so it must stay opaque for merging even though emission does
     // route through it), it resolves to the engine-authored system-scope
     // definition, it is `pure`, and it is eta-expandable at its required
     // arity (`Random` and the variadic operators decline). Same

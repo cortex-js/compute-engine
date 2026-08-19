@@ -6,11 +6,11 @@ import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 import { checkSource } from '../../src/cli/check';
 
 //
-// Epsil execution (Phase 4, Stage 2). `executeEpsil` parses a program and
+// `executeEpsil` parses a program and
 // evaluates each top-level statement sequentially in the engine's current
 // scope (a notebook cell-chain), symbolic-by-default (the exactness contract),
 // with runtime problems flowing as `["Error", …]` *values* and parse problems
-// as diagnostics. See `roadmap/epsil/phase-4-semantics.md`.
+// as diagnostics.
 //
 
 /** Run an Epsil program against a fresh engine, injecting the engine's own

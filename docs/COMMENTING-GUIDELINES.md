@@ -56,6 +56,25 @@ alternatives, measurements, or a decision history.
   near the code and keep benchmark conditions and raw numbers in a benchmark
   or design document.
 
+## Use plain english
+
+- Be concise. Avoid filler words. Eliminate unnecessary qualifiers.
+
+- Avoid jargon (shape, lane, width, gate, admission, blast radius, fan-out, lowering, fail closed, failure mode, ...)
+
+  - Dense example: “the lowering declines before emission.”
+  - Clearer: “This target does not compile the expression, so no source is produced.”
+
+  - Dense example: “the aggregate-consuming capability steps the shape gate aside.”
+  - Clearer: “Skip the generic shape check because this handler has already reduced every collection to scalars.”
+
+  - Dense example: “a wide parameter admits a complex-shaped scalar but shapes the body real.”
+  - Clearer: “The parameter accepts a complex value, but the compiled function body expects a plain real number.”
+
+  - Dense example: “a scalar in a mandatory-vector slot of the emitted call tree.”
+  - Clearer: “Argument 2 must be a vector, but this expression produces a scalar.”
+
+
 ## Action comments
 
 Avoid bare `TODO` and `FIXME` markers. An action comment must say:

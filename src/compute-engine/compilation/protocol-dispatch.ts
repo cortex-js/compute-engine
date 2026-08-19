@@ -19,23 +19,19 @@ import {
 } from '../sum-representation.js';
 
 /**
- * PROTOCOL DISPATCH COMPILATION PLANNING — the JS-target lowering of protocol
- * calls (`docs/plans/2026-08-12-protocol-compilation.md`; the governing ruling
- * is `docs/TYPE_SYSTEM_ROADMAP.md` Appendix A, "Static resolution and
- * compiled code").
+ * Plan the JavaScript-target lowering of protocol calls.
  *
  * Two tiers, decided here and rendered by `base-compiler.ts`:
  *
  * - **static**: the receiver's static type pins the same implementation the
- *   interpreter would select at EVERY possible runtime receiver — the call
+ *   interpreter would select at every possible runtime receiver — the call
  *   compiles to a direct call of that implementation, no guards.
  * - **dynamic**: the receiver's runtime representation is reified enough
  *   (machine `typeof` classes, `{_tag}` objects) to replicate the
  *   interpreter's selection with a guard chain, most-specific-first.
  *
- * Anything the plan cannot prove faithful DECLINES (returns `undefined`) —
- * the compiler's D6 fail-closed posture, matching sum compilation. Like the
- * sum policy, a plan is a SNAPSHOT of the protocol registry: a later
+ * Anything the plan cannot prove faithful returns `undefined`. Like sum
+ * compilation, a plan is a snapshot of the protocol registry: a later
  * conformance is a `config` state event, and compiled artifacts bake the
  * candidate set they saw.
  */
@@ -114,7 +110,7 @@ function receiverGuardOf(
     };
   }
   const { bucket } = bucketOf(target);
-  // `array` admits ANY array regardless of element type — not faithful for a
+  // `array` admits any array regardless of element type, which is not faithful for a
   // `list<…>`/`tuple<…>` target (a `list<integer>` receiver would take a
   // `list<string>` arm the interpreter refuses).
   if (bucket === undefined || bucket === 'array') return undefined;
@@ -143,7 +139,7 @@ function guardsDisjoint(a: ReceiverGuard, b: ReceiverGuard): boolean {
  * - `receiverType`: the receiver's STATIC type when the call site has one.
  * - `protocol`: restrict to one protocol — the qualified forms.
  *
- * Returns `undefined` to decline (fail closed, D6).
+ * Returns `undefined` when no faithful plan is available.
  */
 export function planProtocolDispatch(
   ce: IComputeEngine,
@@ -168,8 +164,8 @@ export function planProtocolDispatch(
       if (requirementArityOf(ce, record, implKey) !== argc) return undefined;
   }
 
-  // ── Tier A — static resolution ─────────────────────────────────────────
-  // Only a UNIQUE static winner can short-circuit to a direct call. Every
+  // ── Static resolution ──────────────────────────────────────────────────
+  // Only a unique static winner can short-circuit to a direct call. Every
   // other verdict falls through to the dynamic tier: `undecided` by design;
   // `none` because the static type may be a supertype of the admitted
   // targets — the central sum case, where the receiver types as the sum
@@ -183,7 +179,7 @@ export function planProtocolDispatch(
     if (r.status === 'unique') {
       const winner = cands.find((c) => c.edge === r.edge);
       if (winner !== undefined && !winner.conditional && !winner.host) {
-        // Domination: selection at EVERY runtime `r ≤ receiverType` must
+        // Domination: selection at every runtime `r ≤ receiverType` must
         // still pick this edge. Any other edge either admits no such `r`
         // (no overlap with the receiver type), or is a strict supertype of
         // the winner's target — admitted only where the winner also is, and

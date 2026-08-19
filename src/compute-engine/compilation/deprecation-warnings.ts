@@ -1,10 +1,8 @@
 /**
- * One-time console warnings — and the alias normalization they describe — for
- * the deprecated pre-`mode` compile options (design §5,
- * `docs/plans/2026-08-16-compile-complex-mode.md`).
+ * One-time warnings and alias normalization for deprecated compile options.
  *
  * This lives in its own module because there are TWO public routes into a
- * compilation and both owe the caller the same warning AND the same option
+ * compilation and both owe the caller the same warning and option
  * semantics:
  *
  * - the standalone `compile()` export (`compile-expression.ts`), and
@@ -12,28 +10,9 @@
  *   through its own `.compile()`, which reaches `BaseCompiler` directly and
  *   never passes through the standalone entry.
  *
- * Warning without normalizing made the message a lie on the second route: it
- * announces that `complexPromotion` "now maps to `mode: 'complex'`" and is
- * "ignored when `mode` is given", but an un-normalized `complexPromotion:
- * true` reaches `BaseCompiler`'s legacy promotion latch, which is consulted
- * independently of the mode — so under an explicit `mode: 'strict'` the flag
- * was still honored and the compile promoted unknown-sign radicals. The
- * normalization therefore lives here, next to the wording it justifies, and
- * both routes call it.
- *
- * Before this module existed the warnings were private to
- * `compile-expression.ts`, so the target-level route was silent: the
- * deprecated options kept working there (each target reads `realOnly` itself,
- * and `complexPromotion` reached the promotion latch un-normalized) but no
- * consumer on that path was ever told the clock was running. That route is the one an integration takes once it needs
- * a specific target — i.e. exactly the consumers with the most call sites to
- * migrate. Reported by the Tycho consumer as item 202, 2026-08-17, with all
- * twelve of their production `realOnly: true` sites on the silent path.
- *
- * `base-compiler.ts` cannot import from `compile-expression.ts` (that module
- * imports the targets, which import `BaseCompiler`), so the shared text is
- * extracted here rather than re-exported — the standard fix for this repo's
- * zero-circular-dependency budget (`docs/architecture/ZERO-CYCLES-PLAN.md`).
+ * Normalization lives beside the warnings so both routes interpret aliases
+ * identically. This separate module also avoids a dependency cycle between
+ * `compile-expression.ts`, the targets, and `BaseCompiler`.
  */
 
 /** The deprecated options already warned about, once per process each. */
@@ -119,25 +98,20 @@ function warnDeprecatedCompileOptions(options: {
  * Warn about the deprecated pre-`mode` options present on `options`, and
  * return a copy in which the `complexPromotion` alias has been resolved:
  *
- * - `complexPromotion` — when `mode` is absent and the flag is `true`, it
+ * - `complexPromotion`: when `mode` is absent and the flag is `true`, it
  *   becomes `mode: 'complex'` and `modeFromAlias` is `true`; with an explicit
  *   `mode` the flag loses. Either way the key is cleared to `undefined`, so
- *   it cannot re-enter through `BaseCompiler`'s legacy promotion latch, which
- *   is read independently of the mode and would otherwise promote
- *   unknown-sign radicals under an explicit `mode: 'strict'`.
- * - `realOnly` — NOT normalized. It is a RESULT projection (`{re, im}` →
+ *   it cannot affect promotion independently of the selected mode.
+ * - `realOnly`: not normalized. It is a result projection (`{re, im}` →
  *   `NaN` unless the imaginary part is at roundoff scale, boolean → `NaN`)
  *   rather than an arithmetic discipline, and is kept working for one
  *   release; only the warning applies.
  *
  * `supportsComplexMode` is whether the target this compilation will run on
- * offers `mode: 'complex'` (its `supportedModes`). When it does not — the
- * shader and interval targets declare `['strict']` — the aliased mode is NOT
- * set: `complexPromotion` was documented as ignored there, so mapping it onto
- * a mode the target must reject would turn a compile that used to succeed
- * into an `unsupported-mode` decline. Callers that do not yet know the target
- * leave it at its default and drop the aliased mode themselves once they do,
- * using the returned `modeFromAlias`.
+ * offers `mode: 'complex'` (its `supportedModes`). Shader and interval targets
+ * do not, so the alias is ignored there instead of producing an unsupported
+ * mode. Callers that do not yet know the target use `modeFromAlias` to remove
+ * the aliased mode after selecting one that cannot support it.
  */
 export function normalizeDeprecatedCompileOptions<
   T extends { complexPromotion?: boolean; realOnly?: boolean; mode?: string },

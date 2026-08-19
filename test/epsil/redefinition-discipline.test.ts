@@ -6,22 +6,22 @@ import type { ParsingDiagnostic } from '../../src/epsil/diagnostics';
 import { typeToString } from '../../src/common/type/serialize';
 
 //
-// THE REDEFINITION DISCIPLINE — `docs/plans/2026-08-14-redefinition-discipline.md`
+// Redefinition rules for types, protocols, and function clauses.
 //
 // Redefinition means two different things depending on where it happens.
-// WITHIN one compilation unit (one Epsil program = one `executeEpsil` batch) a
+// Within one compilation unit (one Epsil program = one `executeEpsil` batch), a
 // second `type`/`protocol` declaration of a name is a mistake and errors;
-// ACROSS units it is the notebook gesture and keeps its per-construct
+// across units it is the notebook gesture and keeps its per-construct
 // replacement semantics. The boundary is the unit, not an engine mode.
 //
 // Two tiers detect the same condition by different means, because the static
 // checker also runs with no batch at all (`epsil check` calls
 // `staticDiagnostics` directly): a pass-local collector on the static tier, the
-// batch stamp on the runtime tier. Both mint the SAME codes —
+// batch stamp on the runtime tier. Both produce the same codes:
 // `type-redefinition` / `protocol-redefinition` / `function-redefinition`.
 //
-// Function CLAUSES join the discipline under the user ruling of 2026-08-14
-// (only a clause REPLACING one of the same unit; addition at a distinct
+// Function clauses follow the same rule when replacing a clause in the same
+// unit; adding one at a distinct
 // parameter list is untouched). Their static collector is keyed by parameter
 // DOMAIN rather than by name, since one name legitimately carries many clauses
 // — see "the discipline over function clauses" at the end of this file.

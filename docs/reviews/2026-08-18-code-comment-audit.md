@@ -109,8 +109,33 @@ removed archival prose, dead commented-out code, absent-document references,
 ambiguous cross-references, and bare action markers while preserving behavior.
 
 This is intentionally a high-confidence pass rather than a mechanical removal
-of every matching phrase. Remaining concentration areas include
-`engine-protocols.ts`, `compilation/base-compiler.ts`, the largest library
-definition files, and long regression narratives in Epsil tests. Files already
-modified in the working tree were not broadly rewritten during this pass, to
-avoid mixing the cleanup with in-progress functional changes.
+of every matching phrase. A follow-up pass addressed the initial concentration
+areas in `engine-protocols.ts`, `compilation/base-compiler.ts`,
+`library/collections.ts`, `library/core.ts`, `epsil/parser.ts`, and representative
+Epsil tests. That pass also found and removed orphaned doc comments whose helper
+had moved, and condensed active comments that still carried retired-feature or
+dated benchmark narratives.
+
+Those files remain naturally comment-dense because they enforce parser,
+dispatch, compilation-safety, and compatibility invariants. Further cleanup
+should proceed by subsystem alongside functional changes, not by deleting every
+remaining phase label or historical phrase mechanically.
+
+A compilation-focused pass then covered the shared compilation contracts,
+JavaScript, Python, GPU, protocol dispatch, common-subexpression elimination,
+and deprecated-option normalization. Besides reducing jargon and historical
+narratives, it found three concrete documentation defects:
+
+- the JavaScript string-equality comment described a normalization divergence
+  that the current `_SYS.eqt` lowering no longer has;
+- the Python broadcasting contract was attached to the complex-helper table
+  instead of the broadcast helper and contradicted the helper's current
+  length-mismatch behavior;
+- protocol-dispatch and CSE helpers had orphaned or incomplete doc comments.
+
+Those comments now describe the active lowering contracts at the relevant
+symbols. The largest residual compilation clusters are the random-stream and
+compiled-pattern paths in `gpu-target.ts`, the `Match` and multi-clause
+function paths in `base-compiler.ts`, and the CSE emission machinery. They
+should be revisited when those paths next receive functional changes because
+their safety explanations are tightly coupled to control flow.

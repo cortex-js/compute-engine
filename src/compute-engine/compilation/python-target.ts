@@ -232,14 +232,14 @@ function assertPyNoNestedTupleOrdering(
 }
 
 /**
- * Fail closed (D6) when EQUALITY has a provably string-valued participant.
+ * Fail closed when numeric equality has a provably string-valued participant.
  *
- * The scalar lowering is NUMERIC — `abs((a) - (b)) <= tol` — which for strings
+ * The scalar lowering is numeric — `abs((a) - (b)) <= tol` — which for strings
  * raises `TypeError` at run time (pure Python, no NumPy coercion), so
  * `Equal("a", "a")` never answered the interpreter's `True`. Evidence is tested
  * per PARTICIPANT, not per operand, exactly as on the JavaScript target.
  *
- * The ORDERINGS are governed by the narrower `assertPyNoMixedStringOrdering`:
+ * Orderings are governed by the narrower `assertPyNoMixedStringOrdering`:
  * all-string orderings agree with interpretation and keep compiling.
  */
 function assertPyNoStringOperand(
@@ -256,29 +256,27 @@ function assertPyNoStringOperand(
 }
 
 /**
- * The ADMISSION side of the SCALAR string-equality rule (tier 2, 2026-08-08) —
- * the mirror of the JavaScript target's `isStringScalarEquality`, clause for
- * clause; see there for the full rationale and the probe evidence.
+ * Whether binary scalar string equality can use Python `==`. This mirrors the
+ * JavaScript target's `isStringScalarEquality` admission.
  *
- * Python's `==` on `str` is exact structural comparison, which IS the
+ * Python's `==` on `str` is exact structural comparison, which is the
  * interpreter's string semantics (`compare.ts`: `a.string === b.string`, no
  * tolerance) — including the numeric-string trap (`"1" == 1.0` is `False` in
  * Python, matching the interpreter, where the numeric `abs(a - b)` form raised
  * `TypeError`). Cross-sort equality is total in the interpreter (`Equal("a", 1)`
  * → `False`) and Python's `==` agrees, so a participant of unknown type opposite
- * a provable string is admitted; a provably NUMERIC one is not (the tier-0 mixed
- * ruling), nor is anything that may be a collection or an unfaithful aggregate.
+ * a provable string is admitted; a provably numeric one is not, nor is anything
+ * that may be a collection or an unfaithful aggregate.
  *
- * The same NFC residual applies as on JavaScript: the interpreter normalizes at
- * boxing time, the emitted `==` compares the raw string the caller passed in.
+ * The interpreter normalizes strings during boxing, while emitted `==` compares
+ * raw caller input; that remains a boundary difference for non-NFC inputs.
  *
  * The collection disqualifier pairs `isPyCollectionOperand` (the SUBTYPE test,
  * which also decides the `_ce_eqcoll` routing below) with the union-aware
  * `couldBeCollectionParticipant`: a general union such as `string |
  * list<string>` is not a subtype of `list`, so the subtype test alone admitted
- * it and emitted a scalar `==` where the interpreter broadcasts element-wise —
- * the JavaScript target had the identical hole. Such a participant now declines
- * on `assertPyNoStringOperand` (fail closed, D6).
+ * it and would emit scalar `==` where the interpreter broadcasts element-wise.
+ * Such a participant declines in `assertPyNoStringOperand`.
  */
 function isPyStringScalarEquality(args: ReadonlyArray<Expression>): boolean {
   if (args.length !== 2) return false;
@@ -297,33 +295,24 @@ function isPyStringScalarEquality(args: ReadonlyArray<Expression>): boolean {
 }
 
 /**
- * Fail closed (D6) when an ORDERING (`Less`/`LessEqual`/`Greater`/
- * `GreaterEqual`) MIXES string evidence with a participant that is not provably
- * a FLAT string (`isMixedStringOrderingParticipants`, shared with the base
+ * Fail closed when an ordering (`Less`/`LessEqual`/`Greater`/`GreaterEqual`)
+ * mixes string evidence with a participant that is not provably flat text
+ * (`isMixedStringOrderingParticipants`, shared with the base
  * compiler's infix diverts).
  *
- * All-string is SOUND and keeps compiling, probe-verified against
+ * All-string is sound and keeps compiling against
  * interpretation: the scalar infix `"a" < "b"` and `np.less(["a","c"],
  * ["b","b"])` / `np.less(["a","c"], "b")` all agree with the interpreter's
  * code-unit string comparison (`compare.ts`), chains included.
  *
- * The MIXED case is the wrong one, and wrong in two different ways depending on
- * the shape and the NumPy version: `np.less(["a",10], ["b",9])` coerces `10` to
- * `"10"` and string-compares (a silent `[True, True]` where the interpreter
- * answers `10 < 9` → `False`), while `np.less("a", [1,2])` raises on NumPy 2.x
- * but historically returned a scalar `False` with a `FutureWarning`. Emitted
- * code runs against an arbitrary NumPy, so the shape is gated at COMPILE time
- * on static type evidence rather than trusted to be loud at run time.
+ * A mixed case may coerce numbers to strings or raise depending on shape and
+ * NumPy version, so it is gated at compile time on static type evidence.
  *
- * ACCEPTED RESIDUAL (ruled 2026-08-08): the all-string admission is faithful
- * per UTF-16 code UNIT, the interpreter's ordering (`compare.ts` uses raw JS
- * `<`), while Python's `<` compares code POINTS. The two disagree only when an
+ * One boundary difference remains: the interpreter orders UTF-16 code units,
+ * while Python orders code points. They disagree only when an
  * astral-plane character (≥ U+10000) is ordered against a BMP character in
- * U+E000–U+FFFF: the interpreter sees the leading surrogate (U+D800–U+DBFF)
- * and answers `Less("\u{10000}", "")` → True, Python answers False.
- * Deliberately NOT gated — the divergence needs an astral character on one
- * side, and closing it would mean declining every string ordering or emitting
- * a code-unit comparator. Revisit only if a real corpus hits it.
+ * U+E000–U+FFFF. Closing that gap would require a code-unit comparator or
+ * declining every string ordering.
  */
 function assertPyNoMixedStringOrdering(
   kind: string,
@@ -353,17 +342,14 @@ function assertPyNoMixedStringOrdering(
  * evaluate handlers in `library/relational-operator.ts`), which switches on how
  * many operands are collections:
  *
- * - **two or more** collection operands: whole-collection equality, a SCALAR
+ * - two or more collection operands: whole-collection equality, a scalar
  *   boolean (`Equal([1,2],[3,4],[5,6])` → `False`). Lowered to the
  *   `_ce_eqcoll` runtime helper, which compares within tolerance element-wise
  *   but folds to one `bool` — a length/shape mismatch is `False`, not an
- *   error. (The old `abs(a - b) <= tol` form was wrong for this shape: it
- *   raises `TypeError` on a plain Python list, and an n-ary chain over
- *   ndarrays conjoins arrays with the scalar `and` — a `ValueError`.)
- * - **exactly one** collection operand: the interpreter BROADCASTS, returning a
+ *   error. The scalar tolerance form cannot represent this shape.
+ * - exactly one collection operand: the interpreter broadcasts, returning a
  *   *list* of booleans (`Equal([1,2],5)` → `["False","False"]`), a different
- *   result kind than the scalar the 2026-07-31 ruling covers. Declined (D6)
- *   rather than guessed at.
+ *   different result kind and therefore declines rather than guessing.
  *
  * An operand whose type does not statically pin it as a collection is treated
  * as scalar (today's emission), as everywhere else on this target.
@@ -816,55 +802,6 @@ function pyStaticRank(e: Expression): number | undefined {
 }
 
 /**
- * Module-level runtime helper injected (once, only when referenced) so
- * `ElementMax`/`ElementMin`/`Clamp` broadcast exactly like the interpreter's
- * `broadcastOverIndexedCollections` — instead of NumPy's own broadcasting,
- * which raises `ValueError` on a length mismatch that is not 1-vs-N.
- *
- * Semantics reproduced (verified empirically against `.evaluate()`):
- * - array operands **zip to the shortest** participating length (each array is
- *   trimmed to `n = min(len)` before the vectorized NumPy op is applied — so
- *   the fast NumPy path is kept, no per-element Python loop);
- * - scalar operands broadcast over the arrays;
- * - a **length-1** result stays a length-1 array (`ElementMax([1,2],[3]) → [3]`,
- *   zipping to the shortest operand), matching the interpreter — which returns a
- *   one-element `List`, never a bare scalar, whenever any operand is a
- *   collection;
- * - all-scalar operands give a scalar (handled on the direct fast path, not
- *   here — this helper is only reached when some operand is a collection).
- *
- * Divergence: an **empty** participating array yields an empty NumPy array
- * here, whereas the interpreter returns `Nothing` (no numeric analogue).
- * `_op` selects the op: `'max'`→`np.maximum`, `'min'`→`np.minimum`,
- * `'clip'`→`np.clip(x, lo, hi)`.
- *
- * A length mismatch (and an empty operand alongside a non-empty one) yields
- * `nan`, matching the interpreter's `incompatible-dimensions` error projected
- * onto a numeric target, and the JavaScript `_SYS.bcast`. The helper used to
- * zip-to-shortest, mirroring the interpreter of the time; the 2026-07-24 ruling
- * replaced truncation with an error everywhere, so trimming here would now
- * reproduce a behavior the interpreter no longer has.
- *
- * The check recurses PER POSITION rather than testing the outer dimension only.
- * NumPy would otherwise recycle a mismatched inner dimension — `(2,2)` against
- * `(2,1)` broadcasts silently — where the interpreter reports each row's
- * mismatch, giving `[nan, nan]` and not a whole-result `nan`. The vectorized
- * NumPy call is kept as a fast path for the common case where every
- * participating array has exactly the same shape (scalars still lift), since no
- * recycling is possible there.
- *
- * This helper is **op-name-keyed** (a fixed set of NumPy routines), not a
- * generic scalar-closure broadcaster like the JavaScript target's `_SYS.bcast`.
- * So it does NOT cover arithmetic (`+`/`*`/…) over a possibly-collection-typed
- * operand (`2·h(x)` with an unknown-return `h`, or a `broadcastable<T>` symbol).
- * Such arithmetic cannot be compiled soundly on Python: the `+`/`*` operators
- * repeat/concatenate a plain `list` (`2 * [1, 2] → [1, 2, 1, 2]`) rather than
- * broadcasting element-wise like the interpreter, and while a NumPy-array
- * binding would broadcast, the artifact cannot constrain what the caller binds.
- * `base-compiler` therefore FAILS CLOSED (D6) on that shape — the engine falls
- * back to the interpreter — rather than emitting binding-dependent output.
- */
-/**
  * The complex-discipline helpers (`CompileTarget.complexLift` /
  * `complexIsReal` / `complexReal`): the idempotent number → complex lift that
  * leaves a non-number (a bool, a string, a list held by a wide binding)
@@ -878,6 +815,17 @@ def _ce_cisreal(_v):
 def _ce_creal(_v):
     return _v.real if isinstance(_v, complex) else _v`;
 
+/**
+ * Runtime broadcasting for `ElementMax`, `ElementMin`, and `Clamp`. Scalars
+ * lift over arrays; equal shapes use NumPy directly; mismatched outer lengths
+ * and empty collections become `nan`, matching the interpreter's numeric error
+ * projection. Unequal inner shapes recurse by position so NumPy cannot silently
+ * recycle a dimension.
+ *
+ * This helper is keyed to a fixed set of NumPy operations. General arithmetic
+ * over possibly collection-valued inputs still declines because Python lists
+ * repeat or concatenate instead of broadcasting element-wise.
+ */
 const PYTHON_BCAST_HELPER = `def _ce_bcast_apply(_op, _arrs):
     if _op == 'clip':
         return np.clip(_arrs[0], _arrs[1], _arrs[2])
@@ -1252,10 +1200,8 @@ function pythonAssertReturnableBody(subject: string, expr: Expression): void {
  * reduced with `np.max`/`np.min`; the per-operand results are then combined
  * with the element-wise `np.maximum`/`np.minimum`, which keeps scalar/array
  * operands (the plot variable) vectorized. `np.maximum`/`np.minimum` are
- * strictly binary, so an n-ary fold is emitted. (`np.maximum([…])` — a single
- * list to the element-wise function — is a runtime error and element-wise
- * anyway, which is why the old bare `'np.maximum'`/`'np.minimum'` string
- * mapping was wrong for the reduction.)
+ * strictly binary, so an n-ary fold is emitted. Passing one list directly to
+ * the element-wise function is both the wrong operation and a runtime error.
  */
 function compilePythonExtremum(
   reduce: 'np.max' | 'np.min',
@@ -1280,11 +1226,8 @@ function compilePythonExtremum(
  * The interpreter honors the explicit axes ONLY in the three-operand form
  * (`ops.length === 3`); with one or two operands it swaps the last two axes and
  * IGNORES a lone `axis1` — so dropping that operand here matches the
- * interpreter rather than diverging from it. The three-operand form used to
- * emit `np.transpose(m, i, j)`, whose second parameter is a whole permutation
- * (`axes`), not an axis index: a runtime TypeError for `Transpose`, and for
- * `ConjugateTranspose` a silently un-swapped result. `np.swapaxes` is the exact
- * analog of the 1-based axis pair.
+ * interpreter. In the three-operand form, `np.swapaxes` is the exact analogue
+ * of the 1-based axis pair; `np.transpose` expects a whole permutation instead.
  */
 function compilePythonTranspose(
   args: ReadonlyArray<Expression>,
@@ -1434,7 +1377,10 @@ function pyCollArg(
   if (arg) assertPyNoCharacterOperand(kind, [arg]);
   if (
     !arg ||
-    !(arg.type.matches('list<any>') || arg.type.matches('indexed_collection<any>'))
+    !(
+      arg.type.matches('list<any>') ||
+      arg.type.matches('indexed_collection<any>')
+    )
   )
     throw new Error(
       `${kind}: ${position !== undefined ? `operand ${position}` : 'operand'} ` +
@@ -1781,9 +1727,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // places (the signature is `(number, integer?)`), i.e. `Round(x·10ⁿ)/10ⁿ`
     // — what the interpreter, the JavaScript target and the interval target
     // all compute — and a negative `n` rounds to tens/hundreds/…
-    // (`Round(1234.5678, -2)` is 1200). This lowering used to consume only
-    // `args[0]`, so `Round(3.14159, 2)` reported success on code computing 3
-    // where the interpreter answers 157/50.
+    // (`Round(1234.5678, -2)` is 1200).
     //
     // Unlike the GPU targets, Python needs neither a compile-time-constant
     // guard nor a |n| range guard: `10 ** n` is an exact arbitrary-precision
@@ -2293,7 +2237,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // no compiled equivalent.
     const provablyIndexed =
       !base.type.matches('string') &&
-      (base.type.matches('list<any>') || base.type.matches('indexed_collection<any>'));
+      (base.type.matches('list<any>') ||
+        base.type.matches('indexed_collection<any>'));
     if (!provablyIndexed) {
       if (!pyCouldBeIndexedCollectionOperand(base))
         throw new Error(

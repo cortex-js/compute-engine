@@ -133,10 +133,9 @@ type TypeParamClause = {
  * namespace, not the Epsil binding namespace). */
 const TYPE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*/;
 
-/** The trailing `where` clause of a definition head — the names it quantifies
- * (Phase 0 of the binding strategy of
- * `docs/plans/2026-08-11-where-clause-type-constraints.md`), its VERBATIM
- * source text (which rides into the assembled signature) and its span. */
+/** The trailing `where` clause of a definition head: the names it quantifies,
+ * its verbatim source text (which rides into the assembled signature), and its
+ * span. */
 type WhereClause = {
   names: string[];
   text: string;
@@ -225,9 +224,8 @@ const ANY_TYPE_NAME_RESOLVER: TypeResolver = {
   },
   forward: () => undefined,
   resolve: (name: string) => name as any,
-  // Same posture for the `where T is P` slot: a purely syntactic reader
-  // accepts every conformance. The registry lives in the engine, which checks
-  // the constraint at each call site (protocols design P19).
+  // A purely syntactic reader also accepts every `where T is P` conformance.
+  // The engine checks the constraint at each call site.
   conformsTo: () => true,
 };
 
@@ -342,7 +340,7 @@ function boundInConformanceHead(text: string): string | null {
 //     the next statement boundary (a token preceded by a line break, or a
 //     `;`). Each recovery emits exactly one diagnostic for the skipped region.
 //
-// Grammar (Phase 2, Stage B — operators, calls, indexing, collections):
+// Grammar for operators, calls, indexing, and collections:
 //
 //   primary    = number | symbol | verbatim-symbol | string | pragma
 //              | parenthesized | tuple | list | set | dictionary
@@ -367,7 +365,7 @@ function boundInConformanceHead(text: string): string | null {
 // ─── The whitespace rule ────────────────────────────────────────────────────
 //
 // An infix operator continues the current expression only if it has whitespace
-// on **both** sides or **neither** (the Phase 1 `precededByWhitespace` flag):
+// on both sides or neither (recorded by `precededByWhitespace`):
 //
 //   • `a + b`, `a+b`  → infix.
 //   • `a +b`          → NOT infix: `a` ends; `+b` begins a new (prefix)
@@ -470,13 +468,13 @@ export class Parser {
    * type name would fail at parse time with `Unknown type`. */
   private readonly knownTypeNames: Set<string>;
 
-  /** The PROTOCOL names this program may refer to — the engine's registry,
+  /** The protocol names this program may refer to — the engine's registry,
    * seeded by `executeEpsil`, plus every name a `protocol` statement parsed so
    * far declares.
    *
-   * Kept strictly SEPARATE from {@link knownTypeNames}: a protocol name is not
-   * a type (ruling P8), and adding one there would make `x: Comparable` parse.
-   * It is consulted on the unknown-type path ONLY, to turn a generic
+   * Kept separate from {@link knownTypeNames}: a protocol name is not a type,
+   * and adding one there would make `x: Comparable` parse. It is consulted on
+   * the unknown-type path only, to turn a generic
    * `type-annotation-error` into the `protocol-in-type-position` guidance that
    * points at the constrained-variable spelling. */
   private readonly protocolNames: Set<string>;
@@ -499,7 +497,7 @@ export class Parser {
 
   /** Statement-block nesting depth (incremented by `parseBlock`). Types are
    * engine-global, so a `type` statement at depth > 0 is a hard error
-   * (`type-declaration-not-top-level`, ruled 2026-08-10 — no hoisting).
+   * (`type-declaration-not-top-level`; declarations are not hoisted).
    * Depth 0 permits redeclaration silently: a top-level redeclaration is the
    * legitimate statement-replace flow (re-running a notebook cell). */
   private blockDepth = 0;
@@ -568,7 +566,7 @@ export class Parser {
    *
    * Set ONLY by the combined declare-and-conform form
    * (`type Point = tuple<…> is Comparable`), which lowers to TWO statements:
-   * a `DeclareType` followed by a `DeclareConformance` (P15). Emitting a
+   * a `DeclareType` followed by a `DeclareConformance`. Emitting a
    * `Block` instead is not an option — a nested `Block` pushes a scope, and
    * both statements are top-level only. Drained by `parseProgram`; the form is
    * top-level only, so `parseBlock` never sees one. */
@@ -579,14 +577,6 @@ export class Parser {
    * only). `null` everywhere else. */
   private typeParamNames: ReadonlySet<string> | null = null;
 
-  /** Collector for the clause names {@link typeResolver} resolves during a
-   * single type subparse. Non-`null` only around the annotation whose "does it
-   * mention a quantified variable?" answer is being taken — that answer drives
-   * the erased lowering (§3.1): a parameter whose annotation mentions a clause
-   * name lowers to a BARE symbol. Reading it off the resolver is exact — it is
-   * the type parser itself reporting which identifiers it took as type
-   * references — where a text scan would have to guess about `list<T>`,
-   * `(T) -> real`, clause-name shadowing, and names like `Tx`. */
   /** The `bind`-marked parameters of the parameter list most recently
    * parsed (`parseParameterList`). Reset at every parameter list, so the
    * consumer must take them (`takeBindParams`) IMMEDIATELY after its own
@@ -601,6 +591,9 @@ export class Parser {
     return taken;
   }
 
+  /** Clause names resolved during one type subparse. The type parser provides
+   * an exact answer where a text scan would have to guess about nested types,
+   * shadowing, and names such as `T` versus `Tx`. */
   private typeParamHits: Set<string> | null = null;
 
   constructor(
@@ -1650,13 +1643,13 @@ export class Parser {
       return null;
     }
 
-    // Types are ENGINE-GLOBAL (`docs/plans/2026-08-10-global-type-registry.md`):
-    // a `type` statement is legal only at the top level of a program. Inside a
-    // block or a function body it is a hard error — no hoisting. The name is
-    // NOT seeded (a declaration that errors declares nothing), so a later
-    // annotation naming it gets an accurate `Unknown type`; recovery skips
-    // just this statement, keeping the rest of the block. The engine's
-    // `DeclareType` handler enforces the same rule for the box route.
+    // Types are engine-global, so a `type` statement is legal only at the top
+    // level of a program. Inside a block or a function body it is a hard error
+    // — no hoisting. The name is NOT seeded (a declaration that errors
+    // declares nothing), so a later annotation naming it gets an accurate
+    // `Unknown type`; recovery skips just this statement, keeping the rest of
+    // the block. The engine's`DeclareType` handler enforces the same rule for
+    // the box route.
     if (this.blockDepth > 0) {
       this.error(
         ['type-declaration-not-top-level', name],
@@ -1783,9 +1776,8 @@ export class Parser {
     // does not trigger falls through to the existing path untouched.
     // A trailing conformance clause takes the ordinary type-body path (which
     // stops at `is` — `is` cannot begin a type token): the sum scanner reads
-    // the RAW source to the end of the statement and would swallow the
-    // clause. Combining sum sugar with a conformance is not supported in
-    // phase 1.
+    // the raw source to the end of the statement and would swallow the clause.
+    // Sum sugar cannot be combined with a conformance.
     if (!isAlias && conf === null) {
       const sum = this.parseSumTypeArms(eq.end, name);
       if (sum !== undefined) {
@@ -1810,8 +1802,7 @@ export class Parser {
     // legal (every other route refuses the form with `object-type-not-inline`).
     // A `type alias` body is not one of them: an object type is nominal, and a
     // structural alias to a layout would make two aliases of the same shape
-    // interchangeable — exactly the subtyping between object types Appendix B
-    // rules out.
+    // interchangeable, which object types deliberately do not allow.
     const body = this.parseTypeBody(eq.end, {
       allowWhere: true,
       allowObjectType: !isAlias,
@@ -1864,7 +1855,7 @@ export class Parser {
 
     // The COMBINED form: the declaration is this statement's node, and the
     // conformance — whose target is the name just declared — is queued as the
-    // NEXT top-level statement (P15; both are top-level only, so a `Block`
+    // next top-level statement. Both are top-level only, so a `Block`
     // wrapper is not an option).
     if (
       conf !== null &&
@@ -1887,7 +1878,7 @@ export class Parser {
   //
   // ─── Protocol declarations and conformance ────────────────────────────────
   //
-  // `docs/TYPE_SYSTEM_ROADMAP.md` Appendix A. Three statement forms:
+  // Three protocol statement forms:
   //
   //   protocol Comparable {
   //     function compare(self: Self, other: Self) -> "<" | "=" | ">"
@@ -2208,15 +2199,15 @@ export class Parser {
   /** The `is P₁ & P₂ [where …] [{ … }]` tail shared by the standalone and the
    * combined conformance forms. The cursor is at the `is` word.
    *
-   * The trailing `where` clause makes the conformance CONDITIONAL (Appendix A
-   * "Conditional Conformance"): the head names the target's variables and the
-   * clause is their single BINDING site. Unlike a definition head — whose clause
+   * The trailing `where` clause makes the conformance conditional: the head
+   * names the target's variables and the clause is their single binding site.
+   * Unlike a definition head — whose clause
    * trails the annotations it quantifies, forcing the lexical pre-scan of
    * {@link scanWhereClause} — a conformance clause PRECEDES everything that
    * mentions its variables (the implementation block's member signatures), so
    * the names are seeded when it is consumed and no pre-scan is needed. The
-   * clause rides the lowering as its VERBATIM source text; the engine re-parses
-   * it (the P11 pattern). */
+   * clause rides the lowering as verbatim source text, which the engine
+   * re-parses. */
   private parseConformanceTail(
     start: number,
     targetNode: MathJsonExpression
@@ -2335,10 +2326,9 @@ export class Parser {
    * The implementation block of a conformance:
    * `{ (function|get|set) NAME(params) [effects] [-> T] { body } … }`.
    *
-   * Members are parsed SYNTACTICALLY only — they are not checked against the
-   * protocol's requirements, which is phase 2. Property handlers ride under
-   * the mangled keys `__get__<name>` / `__set__<name>` (an implementation
-   * detail, per Appendix A "Properties").
+   * Members are parsed syntactically only; the engine checks them against the
+   * protocol's requirements. Property handlers use the internal keys
+   * `__get__<name>` and `__set__<name>`.
    */
   private parseImplementationBlock(clause?: ConformanceClause): {
     node: MathJsonExpression;
@@ -2521,14 +2511,14 @@ export class Parser {
 
   /**
    * The `(params) ‹effects› -> result` signature of a protocol `function`
-   * member, with the P22 sugar applied.
+   * member, including first-parameter `Self` inference.
    *
-   * **First-parameter `Self` inference.** Appendix A allows
-   * `function compare(self, other: Self)`, but the type grammar rejects a
+   * `function compare(self, other: Self)` is accepted, but the type grammar
+   * rejects a
    * parameter list that mixes named and unnamed parameters, so the sugar is a
-   * parser-side SOURCE REWRITE rather than a grammar change (P22): `: Self` is
+   * parser-side source rewrite rather than a grammar change: `: Self` is
    * injected after an unannotated first parameter, and the captured signature
-   * text is the NORMALIZED one — `(self: Self, other: Self) -> …` — which is
+   * text is normalized to `(self: Self, other: Self) -> …`, which is
    * what the registry stores and what the serializer prints back.
    *
    * A first parameter annotated with anything else is left exactly as written:
@@ -2593,7 +2583,7 @@ export class Parser {
 
   /** Seed `Self` as a known type name for the duration of a protocol or
    * implementation block; the returned thunk restores the set. `Self` is a
-   * textual substitution token (P12): it is never declared, never reaches the
+   * textual substitution token: it is never declared, never reaches the
    * engine's type registry, and a user type of the same name survives. */
   private seedSelfTypeName(): () => void {
     if (this.knownTypeNames.has('Self')) return () => {};
@@ -2604,8 +2594,7 @@ export class Parser {
   //
   // ─── Sum-type declaration sugar ──────────────────────────────────────────
   //
-  // `docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §A. One
-  // statement declares the N nominal variants AND the transparent union that
+  // One statement declares the nominal variants and the transparent union that
   // names them:
   //
   //   type node = lit(num: number) | plus(op1: node, op2: node)
@@ -2619,16 +2608,16 @@ export class Parser {
   //          ["Tuple", {str:"leaf"}, {str:"nothing"}],
   //          ["Tuple", {str:"node"}, {str:"tuple<value: T, children: list<tree<T>>>"}]]
   //
-  // ONE node per statement is a parser invariant — `parseProgram` wraps a
+  // One node per statement is a parser invariant: `parseProgram` wraps a
   // multi-statement program in a `Block` that `executeEpsil` unwraps, and a
-  // NESTED `Block` here would push a scope, making every inner declaration
+  // nested `Block` here would push a scope, making every inner declaration
   // fail the top-level rule (`type-declaration-not-top-level`). So the N+1
   // desugaring happens engine-side (`declareSumType`), not here; the attributes
   // dictionary rides at operand 1 (ahead of the variadic variant list) and is
   // told apart from a variant by its head.
   //
-  // The variant payload is lowered to a type TEXT here, per the A2 table: no
-  // payload → `"nothing"` (a nullary constructor), one POSITIONAL payload →
+  // The variant payload is lowered to type text here: no payload → `"nothing"`
+  // (a nullary constructor), one positional payload →
   // that type verbatim (`jbool(boolean)` → `"boolean"`), anything else →
   // `tuple<…>` over the payload list verbatim, so a named element stays named.
   //

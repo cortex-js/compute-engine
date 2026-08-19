@@ -5,13 +5,7 @@ import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { validEpsil } from '../utils';
 
 //
-// Epsil PROTOCOLS — phase 1: declarations and conformance.
-//
-// `docs/TYPE_SYSTEM_ROADMAP.md` Appendix A is the surface specification;
-// `docs/plans/2026-08-12-protocols-design.md` is the ruling record. Phase 1
-// covers the `protocol` statement, the `type X is P` conformance forms and the
-// registry; implementation blocks are PARSED and carried through, but not
-// validated against the protocol (phase 2).
+// Epsil protocol declarations, conformances, implementations, and dispatch.
 //
 // The lowering (fixed contract, mirrored by the engine's operators):
 //
@@ -24,7 +18,7 @@ import { validEpsil } from '../utils';
 //   type string is Hashable & Comparable
 //     → ["DeclareConformance", {str: "string"}, ["List", "Hashable", "Comparable"]]
 //
-// Member signatures ride as SOURCE TEXT (like a `type` body): the engine
+// Member signatures travel as source text (like a `type` body): the engine
 // parses them, which is what keeps `Self` — a textual substitution token, not
 // a declarable type — engine-side.
 //
@@ -633,13 +627,13 @@ describe('EPSIL PROTOCOL EXECUTION', () => {
 });
 
 //
-// ── First-parameter `Self` inference (P22) ──────────────────────────────────
+// ── First-parameter `Self` inference ────────────────────────────────────────
 //
-// Appendix A allows `function compare(self, other: Self)`; the type grammar
+// `function compare(self, other: Self)` is accepted, but the type grammar
 // rejects a parameter list mixing named and unnamed parameters, so the sugar
-// is a parser-side SOURCE REWRITE (`: Self` injected on an unannotated first
+// is a parser-side source rewrite (`: Self` injected on an unannotated first
 // parameter), never a grammar change. The captured signature is the
-// NORMALIZED one, which is what the registry stores and the serializer prints.
+// normalized one, which is what the registry stores and the serializer prints.
 //
 
 describe('EPSIL PROTOCOL `Self` INFERENCE', () => {
@@ -734,7 +728,7 @@ describe('EPSIL PROTOCOL `Self` INFERENCE', () => {
 });
 
 //
-// ── Implementation blocks (phase 2, ruling P17) ─────────────────────────────
+// ── Implementation blocks ───────────────────────────────────────────────────
 //
 
 describe('EPSIL PROTOCOL IMPLEMENTATIONS', () => {
@@ -921,12 +915,12 @@ describe('EPSIL PROTOCOL IMPLEMENTATIONS', () => {
   });
 
   //
-  // ── P47: same batch = duplicate, later batch = re-run ─────────────────────
+  // ── Same batch = duplicate; later batch = replacement ─────────────────────
   //
   // A second implementation block for one (type, protocol) pair WITHIN one
   // `executeEpsil` run is `protocol-implementation-duplicate`; the same
-  // statement re-run in a LATER batch replaces (the notebook pattern). The
-  // batch spans the static pre-pass AND the evaluation loop, and one statement
+  // statement re-run in a later batch replaces it. The batch spans the static
+  // pre-pass and the evaluation loop, and one statement
   // registers its block up to three times per batch — none of which may read
   // as a duplicate of itself.
   //
@@ -1117,8 +1111,8 @@ type string is Comparable {
 describe('EPSIL CONDITIONAL CONFORMANCE (phase 5)', () => {
   //
   // `type list<T> is Comparable where T is Comparable { … }` — the head names
-  // the target's variables and the trailing `where` clause BINDS them. The
-  // clause rides the lowering as its VERBATIM source text (the P11 pattern),
+  // the target's variables and the trailing `where` clause binds them. The
+  // clause rides the lowering as verbatim source text,
   // ahead of the implementation block and told apart from it by its head.
   //
 

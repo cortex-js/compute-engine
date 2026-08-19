@@ -45,7 +45,7 @@ type CompileExpressionOptions<T extends string = string> = {
  * for JS-executable targets, a `run` function.
  *
  * When the deprecated `realOnly` is true, the return type of `run` is
- * narrowed to `number` (the old projection; the result convention already
+ * narrowed to `number`; the current result convention already
  * returns an exactly-real value as a plain number).
  *
  * `mode` selects the arithmetic discipline (`'strict'` | `'complex'` |
@@ -69,10 +69,10 @@ type CompileExpressionOptions<T extends string = string> = {
  * `Sqrt`, `Power`, …) dispatch to a complex helper when an argument is
  * complex-valued; the real-only special functions do not. A complex value
  * must never reach a real helper (a compiled `Erf(z)` would return −1): under
- * `mode: 'strict'` the compiler **fails closed** (D6) with the offending
+ * `mode: 'strict'` the compiler fails closed with the offending
  * head; under `auto` (the default) and `complex` a MAYBE-complex operand (a
  * `complex`-typed symbol, a promoted radical, a wide binding in complex mode)
- * takes the D2/D6 runtime rule — the real helper runs when the value's
+ * uses a runtime guard: the real helper runs when the value's
  * imaginary part is exactly zero, `NaN` otherwise — and only a STATICALLY
  * non-real operand (`Erf(2i)`) is the compile-time decline. The shader
  * targets always fail closed. (`Real`/`Imaginary`/`Argument`/`Conjugate` are
@@ -92,16 +92,15 @@ export function compile<T extends string = 'javascript'>(
 ): CompilationResult<T> {
   assertCompilationOptionsContract(options);
   // The deprecated `complexPromotion: true` maps to `mode: 'complex'` — but
-  // only where the target OFFERS complex mode. The flag was documented as
-  // ignored on the shader targets ("they keep the real kernel
-  // unconditionally"), so a caller passing it globally must not see a shader
-  // compile that used to succeed decline with `unsupported-mode`; on such a
+  // only where the target offers complex mode. The flag is ignored on shader
+  // targets, which keep the real kernel. A caller passing it globally must not
+  // see a shader compilation decline with `unsupported-mode`; on such a
   // target the alias is dropped and the target's default mode applies.
   const deprecated = applyDeprecatedModeOptions(options);
   options = deprecated.options;
   const modeFromAlias = deprecated.modeFromAlias;
 
-  // An option-contract violation, not a compilation failure: raised OUTSIDE
+  // An option-contract violation, not a compilation failure: raised outside
   // the `try` so the interpreter fallback cannot swallow it. A direct custom
   // target does not support CSE, so an explicit `cse: true` here
   // is a request that cannot be honored — silently stamping it off would leave
@@ -122,7 +121,7 @@ export function compile<T extends string = 'javascript'>(
       // and reuses, and per-compilation numbering must restart for each
       // `compile()` call (recompile-replay determinism).
       const rewritten = rewriteAngularUnit(expr);
-      // Stamp a FRESH naming context for the generated temporaries. Per-call,
+      // Install a fresh naming context for generated temporaries on every call,
       // so a target the caller reuses never carries stale numbering into the
       // next compilation; `compileRoot`'s signature is unchanged — this is the
       // options channel. Seeded with the names this compilation must not
@@ -372,18 +371,18 @@ function targetSupportsAuto(lt: {
 }
 
 /**
- * The deprecation mapping of the two pre-mode options (design §5,
- * `docs/plans/2026-08-16-compile-complex-mode.md`), applied at the public
- * entry before anything is compiled:
+ * Map the two deprecated pre-mode options at the public entry before anything
+ * is compiled:
  *
  * - `complexPromotion` — consulted only when `mode` is absent: `true` maps to
  *   `mode: 'complex'`; `false` selects nothing. With an explicit `mode` the
  *   flag is ignored (no conflict error). Every present spelling gets a
  *   one-time console warning. It is not passed on to the target: the
  *   discipline now carries the promotion.
- * - `realOnly` — kept for one release as the OLD result projection
+ * - `realOnly` — retains the previous result projection
  *   (`{re, im}` → `NaN` unless the imaginary part is at roundoff scale,
- *   boolean → `NaN`), with a one-time warning; the result convention (§5) —
+ *   boolean → `NaN`), with a one-time warning. Under the current result
+ *   convention,
  *   a real value is a plain `number`, a `ComplexResult` always has `im !==
  *   0` — replaces it.
  */
@@ -401,14 +400,14 @@ function applyDeprecatedModeOptions<T extends string>(
   // returned `modeFromAlias` lets the caller drop it once the target turns out
   // not to offer complex mode. `normalizeDeprecatedCompileOptions` warns at
   // most once per process per deprecated option, so a compilation that passes
-  // through this entry AND the target's own `compile()` still produces exactly
+  // through this entry and the target's own `compile()` still produces exactly
   // one warning.
   return normalizeDeprecatedCompileOptions(options);
 }
 
 /**
- * The effective compile mode for a DIRECT (caller-owned) target: the modes it
- * OFFERS are its declared `supportedModes` (default `['strict']`) narrowed by
+ * The effective compile mode for a direct, caller-owned target. Its declared
+ * `supportedModes` (default `['strict']`) are narrowed by
  * the hooks each needs — `'complex'` needs `complexLift` and `complexIsReal`
  * (the declaration contract already rejects a target declaring it without
  * them), `'auto'` needs those and `reset()`. A requested `'auto'` that is
@@ -417,8 +416,8 @@ function applyDeprecatedModeOptions<T extends string>(
  * Any other requested mode is returned as-is for `BaseCompiler.compile` to
  * validate against the declared list (the `unsupported-mode` decline).
  *
- * Only the per-call `options.mode` is "requested". The resolved value is
- * STAMPED onto `target.mode` by the caller (like `constantFold` and
+ * Only the per-call `options.mode` is requested. The resolved value is
+ * recorded on `target.mode` by the caller (like `constantFold` and
  * `complexPromotion`), so on a reused direct target `target.mode` holds the
  * PREVIOUS call's resolution — reading it back as a request would make an
  * omitted `mode` inherit the last explicit choice instead of resetting to the

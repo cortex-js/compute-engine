@@ -119,7 +119,7 @@ import {
 const GENERATED_NAME_RE = /(?<![\p{L}\p{N}_])_(?:tv|cse)[\p{L}\p{N}_]*/gu;
 
 /**
- * Time budget (ms) for evaluating ONE constant subtree at compile time
+ * Time budget (ms) for evaluating one constant subtree at compile time
  * (`tryConstantFold`). Typical folds complete in microseconds; the budget
  * exists so a pathological constant (a `Sum` over millions of terms, a
  * slow-converging quadrature) degrades to structural compilation instead of
@@ -129,20 +129,14 @@ const GENERATED_NAME_RE = /(?<![\p{L}\p{N}_])_(?:tv|cse)[\p{L}\p{N}_]*/gu;
 const CONSTANT_FOLD_BUDGET_MS = 2000;
 
 /**
- * The most estimated WORK UNITS a subtree may cost before the fold declines
+ * The maximum estimated work a subtree may cost before the fold declines
  * (`foldCostEstimate`). This is the eligibility decision, and it is a property
  * of the EXPRESSION alone, so the same input always compiles to the same
  * output.
  *
- * It replaced a wall-clock budget, which made the decision depend on machine
- * load: the folded value comes from `.N()` in bignum while the structural
- * lowering computes in doubles, so the two branches differ in the last digits,
- * and a timeout crossing silently swapped one for the other. A real case —
- * `A(0.3)` over a 7-term `Sum` of user functions — measured 37–89 ms against a
- * 100 ms budget, so under parallel test load it folded sometimes and not
- * others, and two engines compiling the same source disagreed at the 13th
- * digit. Compiled output must be reproducible for a given input, or it cannot
- * be regression-tested.
+ * A deterministic work estimate decides eligibility because bignum folding and
+ * double-based structural lowering can differ in their last digits. A
+ * wall-clock cutoff would make the chosen result depend on machine load.
  */
 const CONSTANT_FOLD_MAX_COST = 200_000;
 
@@ -151,7 +145,7 @@ const CONSTANT_FOLD_MAX_COST = 200_000;
  *
  * The estimator exists to keep the fold cheap, so it must not become the
  * expense it guards against: without a depth bound, a deeply nested tree costs
- * a full walk on EVERY node the top-down fold visits, which is quadratic in
+ * a full walk on every node the top-down fold visits, which is quadratic in
  * depth. A tree deeper than this is also very unlikely to be a constant worth
  * folding. Exceeding it yields an infinite estimate — the same "decline" the
  * cost ceiling produces, so there is one failure mode rather than two.
@@ -161,12 +155,9 @@ const CONSTANT_FOLD_MAX_DEPTH = 48;
 /**
  * How many nodes `foldCostEstimate` may visit before declining.
  *
- * The depth bound alone does not bound the estimator: a WIDE call graph —
- * composed helpers that each call the one below a few times — branches as
- * fan-out^depth while staying shallow. A 12-level, 4-way composition took
- * 26.6 s to analyze, far more than evaluating it would have cost, and nothing
- * bounded it because the estimate is computed BEFORE the anti-hang deadline
- * is armed. This makes the estimator's own work finite in every shape.
+ * The depth bound does not constrain a wide call graph, whose analysis can grow
+ * exponentially while remaining shallow. This limit keeps the estimator's own
+ * work finite before the evaluation deadline is armed.
  */
 const CONSTANT_FOLD_MAX_VISITS = 20_000;
 
@@ -186,8 +177,8 @@ type FoldCostContext = {
 };
 
 /**
- * Cap on `engine.maxCollectionSize` while a constant fold evaluates: bounds
- * the MEMORY a compile-time evaluation can commit to materializing a lazy
+ * Cap on `engine.maxCollectionSize` while a constant fold evaluates. It bounds
+ * the memory a compile-time evaluation can commit to materializing a lazy
  * collection, complementing the time budget above. Matches the engine's
  * default (10 000), so it only bites when the caller raised the engine cap
  * for run-time evaluation — that intent should not implicitly license
@@ -205,19 +196,14 @@ const MONTE_CARLO_FOLD_EXCLUSIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Cap on the element count of a constant COLLECTION folded to a literal list
+ * Cap on the element count of a constant collection folded to a literal list
  * (`tryConstantFold`). A larger constant collection compiles structurally,
- * exactly as before.
+ * rather than emitting a large literal.
  *
- * This is an INCLUSIVE maximum: a collection of exactly this many elements
- * still inlines. Stating it that way lets each target use the same number its
- * own lowering already uses, instead of an off-by-one translation. The
- * JavaScript `Range` handler inlines when `len < 50` — i.e. up to 49 — so the
- * default is 49, and a 49-element collection inlines while a 50-element one
- * does not, exactly matching it. The trade-off is source SIZE: inlining
- * removes the run-time construction but pays for it in emitted text.
+ * The maximum is inclusive. The default of 49 matches JavaScript `Range`,
+ * whose structural handler inlines when `len < 50`.
  *
- * This is the DEFAULT only. It is a source-SIZE trade-off, which describes
+ * This is the default only. It is a source-size trade-off for
  * the JavaScript and Python targets, where both emissions exist and both
  * compile. On the shader targets a dynamic collection has no lowering at
  * all, so for a constant one the inline literal is the only emission that can
@@ -279,19 +265,8 @@ function collectUsedNames(
 }
 
 /**
- * Compile-time guard around `isPossiblyCollectionTyped`. A `broadcastable<T>`
- * operand is an explicit declared type, reliable on any node. A top-typed
- * APPLICATION (`unknown`/`any`/`value` call), however, is only a genuine
- * possibly-collection signal when the node is BOUND: an UNBOUND (non-canonical,
- * non-structural) arithmetic subexpression — e.g. the `{ canonical: false }`
- * grouping-preservation path (P0-45), where binding is skipped — types
- * `unknown` merely because it was never bound, not because its collection-ness
- * is unknown. Admitting those would misroute plain scalar arithmetic through
- * `_SYS.bcast` / the fail-closed guard, so require the application to be bound.
- */
-/**
- * The type a compile-time **representation** question about `expr` is answered
- * from (nominal-types design §4.6 step 1): a `reference` type — a `type alias`
+ * The type used to answer compile-time representation questions about `expr`.
+ * A `reference` type — a `type alias`
  * or a nominal `type` — unfolds to its definition, because compilation is type
  * erasure and the tag carries no layout. Identity for every other type.
  *
@@ -303,14 +278,14 @@ export function compilationType(expr: Expression): Type {
 }
 
 /**
- * True when `a` is PROVABLY string-valued: a string literal, or an operand
+ * True when `a` is provably string-valued: a string literal, or an operand
  * whose (alias-resolved) static type is a subtype of `string`.
  *
  * Deliberately `isSubtype`, NOT `.matches('string')`: `matches` is the
  * "could be" direction, so an `unknown`-typed symbol would answer true and
  * gate a numeric plot equality such as `x^2 + y^2 = 4`, whose inferred
  * parameters must stay on the numeric fast path with byte-identical output.
- * Only positive string EVIDENCE gates. `never` is a subtype of every type and
+ * Only positive string evidence gates. `never` is a subtype of every type and
  * so is not evidence either.
  *
  * Shared by BaseCompiler's infix-ordering divert (which falls through to the
@@ -325,21 +300,20 @@ export function isProvablyStringOperand(x: Expression): boolean {
 }
 
 /**
- * True when `x` is PROVABLY a CHARACTER: a character value, or an operand whose
+ * True when `x` is provably a character: a character value, or an operand whose
  * (alias-resolved) static type is a subtype of `character`.
  *
- * `character` and `string` are DISJOINT siblings in the type lattice (neither is
+ * `character` and `string` are disjoint siblings in the type lattice (neither is
  * a subtype of the other), so `isProvablyStringOperand` never answers true for a
  * character and every character-specific lowering has to ask this question
  * separately. Same `isSubtype`-not-`.matches` discipline as the string
  * predicate: only positive evidence gates, so an `unknown`-typed operand is
  * never treated as a character.
  *
- * A character lowers to a ONE-CLUSTER target string, so it compares by value
- * with `===` — but NOT with `<`, which on JavaScript strings compares UTF-16
+ * A character lowers to a one-cluster target string, so it compares by value
+ * with `===` — but not with `<`, which on JavaScript strings compares UTF-16
  * code units while the interpreter orders characters by their NFC code-point
  * sequence (`compare.ts`).
- * (`docs/plans/2026-08-16-string-phase1-character-type.md`, decisions D8/D13.)
  */
 export function isProvablyCharacterOperand(x: Expression): boolean {
   if (isCharacter(x)) return true;
@@ -348,38 +322,27 @@ export function isProvablyCharacterOperand(x: Expression): boolean {
 }
 
 /**
- * True when a type admits values of EVERY basic sort — a string AND a number
- * AND a boolean AND an indexed collection — so "it could be a string" says no
- * more than the top type does. Such a type is the ABSENCE of information, not
- * evidence.
+ * True when a type admits every basic sort: string, number, boolean, and an
+ * indexed collection. Such a type supplies no useful string evidence.
  *
  * `unknown` has never been string evidence (see `isProvablyStringOperand`), and
- * this extends the same reading to the top type spelled as a UNION. The shape
- * that forced it is not exotic: `At`'s index slot is
+ * this extends the same reading to a top type spelled as a union. `At`'s index
+ * slot is
  * `boolean | indexed_collection | number | string` (a gather index may itself
- * be a collection or a dictionary key), so merely INDEXING with a local —
+ * be a collection or a dictionary key), so indexing with a local —
  * `cs[j]` — types `j` with that union, and the numeric operators never narrow
  * it back, because an operand that could be a collection is skipped by the
  * threadable-operator inference (`validate.ts`, Tycho item 121). A plain
  * `while j <= Length(cs)` next to such an index then declined as a "mixed
  * string ordering" although neither operand is remotely a string — a whole
- * class of ordinary scanner loops, on both targets.
+ * ordinary scanner loops, even though neither operand was a string.
  *
- * Deliberately requires all three disjoint scalar sorts AND a COLLECTION arm —
- * the four-armed inference artifact exactly, and nothing narrower. The genuinely
- * mixed unions keep failing closed: `number | string` (the shape a conditional
- * returning either produces) is still evidence and still declines, as are
- * `string | list<string>` and the DELIBERATE three-sort spelling
- * `string | number | boolean`, which a user writes to mean "any of these three"
- * — a real possibility of a string at run time, and a coercing `_.wq < 1` would
- * be a wrong answer where the interpreter stays inert.
+ * Requiring all three scalar sorts and a collection arm keeps narrower mixed
+ * unions such as `number | string` or `string | list<string>` on the
+ * fail-closed path because they represent a real run-time string possibility.
  *
- * A hand-written `boolean | indexed_collection | number | string` is exempt too.
- * That is accepted: the artifact and the deliberate spelling are indistinguishable
- * by construction, and a type that admits every scalar sort AND every indexed
- * collection is the top type in all but name. It lands exactly where a bare
- * `unknown` participant already lands — the accepted residual documented on
- * `couldBeCollectionParticipant`.
+ * A hand-written `boolean | indexed_collection | number | string` is also
+ * exempt because it is indistinguishable from the inferred top-like shape.
  */
 function carriesNoSortEvidence(t: Type): boolean {
   return (
@@ -391,7 +354,7 @@ function carriesNoSortEvidence(t: Type): boolean {
 }
 
 /**
- * True when ANY leaf type reachable from `t` is provably string: `t` itself,
+ * True when any leaf type reachable from `t` is provably string: `t` itself,
  * the element type of a collection (recursively — `list<list<string>>` carries
  * evidence), or a member of a union (`list<string | number>` carries evidence
  * even though the widened element type is not wholly string).
@@ -401,18 +364,12 @@ function carriesNoSortEvidence(t: Type): boolean {
  * bare `list`, and it must not gate numeric plot shapes), and neither is
  * `never` — the element type of the empty literal `[]`.
  *
- * A `dictionary`/`record` is walked through its VALUE types only. Its
- * `collectionElementType` is the synthesized entry `tuple<string, V>`, whose
- * first cell is the ALWAYS-string KEY — not a value any comparison compares —
- * so going through it reported string evidence for every keyed type, including
- * `dictionary<integer>`. (Those shapes still decline, on the honest
- * aggregate gate — see `unfaithfulComparisonAggregate`.)
+ * A `dictionary` or `record` is walked through its value types only. Its
+ * synthesized string key is metadata, not a value compared by these operators;
+ * aggregate fidelity is checked separately by `unfaithfulComparisonAggregate`.
  *
- * The walk is UNBOUNDED in depth: returning `false` early is the ADMITTING
- * direction, so a depth cutoff was an admission hole — a nesting deeper than
- * the bound reopened exactly the wrong-boolean miscompile this predicate
- * exists to prevent. Termination is structural instead (every step peels a
- * finite type), plus a cycle guard for the one non-structural step: a
+ * The walk has no depth cutoff because returning `false` admits compilation.
+ * Termination is structural, plus a cycle guard for the non-structural step: a
  * `reference` unfolds to its definition, so a recursive alias
  * (`type json = list<json> | integer`) would descend forever. The guard is the
  * repo's standard one for a `.def`-following walker — remember the reference
@@ -454,27 +411,22 @@ function typeHasStringEvidence(
 }
 
 /**
- * The aggregate KINDS whose whole-value comparison neither the `_SYS.eq`/
+ * The aggregate kinds whose whole-value comparison neither the `_SYS.eq`/
  * `_SYS.neq` tolerance kernel nor `_SYS.bcast` can reproduce faithfully —
  * returned by name for the diagnostic, or `null` when the participant is
  * comparable. See `assertComparableAggregate` (javascript-target.ts) for the
  * evidence.
  *
  * Keyed collections (`dictionary`, `record`) have no positional JS-array
- * lowering at all, and a heterogeneous fixed-arity `tuple` binds ATOMICALLY in
+ * lowering, and a heterogeneous fixed-arity `tuple` binds atomically in
  * the interpreter while both kernels treat its JS array as a collection to map
  * over. A union member counts: the run-time value could BE it.
  *
- * The two kinds are searched to DIFFERENT depths, and the asymmetry is
- * load-bearing:
+ * The two kinds are searched to different depths:
  *
- *  - a KEYED aggregate counts at any depth (`list<dictionary<integer>>` too).
- *    Those shapes were all declining before, because the string-evidence walk
- *    read their synthesized `tuple<string, V>` entry as string evidence; with
- *    that synthetic key no longer counted (`typeHasStringEvidence`), this is
- *    what keeps them closed — the same set of shapes, an honest reason.
- *  - a `tuple` counts only as the participant ITSELF (through unions). A tuple
- *    NESTED in an indexed collection is the settled point-list lowering
+ *  - a keyed aggregate counts at any depth (`list<dictionary<integer>>` too);
+ *  - a `tuple` counts only as the participant itself (through unions). A tuple
+ *    nested in an indexed collection is the point-list lowering
  *    (`list<tuple<number, number>>`), which compiles today and must keep
  *    compiling; whether the whole-list comparison of one agrees with
  *    interpretation is a separate, unverified question, not this gate's.
@@ -1228,9 +1180,9 @@ export class BaseCompiler {
     const prevPromotion = BaseCompiler._complexPromotion;
     const prevMode = BaseCompiler._mode;
     const prevHelperLookup = BaseCompiler._realOnlyHelperLookup;
-    // The report of a compilation that DECLINES must not be the previous
-    // compilation's: reset it first, so a fallback built for that decline
-    // reports `strict`/not promoted. This is the ONLY report a decline gets —
+    // A declined compilation must not report the previous compilation's mode.
+    // Reset first so a fallback built for the decline
+    // reports `strict`/not promoted. This is the only report a decline gets —
     // whether it throws before the latches below are written (an unsupported
     // requested mode throws in `resolveCompileMode`) or long after, since the
     // `finally` re-freezes only on the success path.
@@ -1275,10 +1227,10 @@ export class BaseCompiler {
     let emitted = false;
     try {
       // Compile-time constant folding, attempted top-down at every function
-      // node so the LARGEST constant subtree folds: a pure subtree with no
+      // node so the largest constant subtree folds: a pure subtree with no
       // free variables evaluates at compile time and emits as a literal
       // (`Sum(Take(Map(_ ↦ _^2, 1..20), 10))` → `385`) instead of lowering
-      // structurally. Runs BEFORE the CSE walk so eliminated regions are
+      // structurally. Runs before the CSE walk so eliminated regions are
       // never inventoried. All the safety gates live in `tryConstantFold`.
       if (isFunction(expr)) {
         const folded = BaseCompiler.tryConstantFold(expr, target, prec);
@@ -1497,7 +1449,7 @@ export class BaseCompiler {
    * Record, for the `promoted` report, that `head` (a promotable head) is
    * being lowered through a complex kernel because its operand is already
    * complex-valued — a promotion when that operand is complex only by
-   * WIDENESS (the complex discipline lifted it), a no-op otherwise. The
+   * wideness (the complex discipline lifted it), a no-op otherwise. The
    * emitters call this on their "operand is complex" branch, whose lowering
    * is the same kernel either way; the decision is
    * `promotesRadicalToComplex`, which does the recording.
@@ -1521,9 +1473,8 @@ export class BaseCompiler {
   } = { mode: 'strict', promoted: false };
 
   /**
-   * Whether the compilation in progress runs under the COMPLEX discipline
-   * (design §2, `docs/plans/2026-08-16-compile-complex-mode.md`): a numeric
-   * binding whose static type is WIDE (`unknown`, `number`, `finite_number`,
+   * Whether the compilation in progress uses complex-value promotion. A numeric
+   * binding whose static type is wide (`unknown`, `number`, `finite_number`,
    * an unannotated parameter, a block local not declared real) is
    * complex-shaped, and every wide value is lifted at its use through the
    * target's idempotent `complexLift` (`_SYS.cplx`) — a number becomes `{re,
@@ -2276,8 +2227,7 @@ export class BaseCompiler {
     // because `-1` selects the REAL element.
     const i = index < 0 ? elements.length + index : index - 1;
     // Any index that selects nothing — zero, fractional, or past either end —
-    // lowers to the plain number `NaN` (measured: `_SYS.at([10, 20, 30], 1.5)`
-    // and `…, 0)` both yield `NaN`, not a complex object). That is a REAL
+    // lowers to the plain number `NaN`, not a complex object. That is a real
     // value, so answer `false` rather than declining: declining would hand the
     // node back to the whole-collection verdict, which reports complex for any
     // collection holding one complex element and would read that `NaN` as
@@ -2417,13 +2367,10 @@ export class BaseCompiler {
    * they do not all share one (or cannot be identified).
    *
    * This is the answer for an indexed read whose index is only known at RUN
-   * TIME: no single element can be named, but when they all agree the verdict
-   * holds whichever one the index selects. Measured before this, on the DEFAULT
-   * path with `u(t) := [i·t, i]` — a body whose elements DO agree — the read
-   * `u(t)[k] + 1` compiled to the string `"[object Object]1"` where the
-   * interpreter answers `1 + 0.3i`.
+   * time: no single element can be named, but when they all agree the verdict
+   * holds whichever one the index selects.
    *
-   * When the elements DISAGREE, no static answer exists and this declines. The
+   * When the elements disagree, no static answer exists and this declines. The
    * read is then refused outright rather than lowered on a guess — see
    * {@link assertNoAmbiguousComplexElementRead}.
    */
@@ -2436,20 +2383,14 @@ export class BaseCompiler {
   }
 
   /**
-   * Whether ANY identifiable element of `collection` is complex-valued.
-   * `false` when none is, and also when the elements cannot be seen at all —
-   * callers pair it with a type-based test that covers the collections this
-   * one declines.
-   */
-  /**
-   * Whether an `At` index selects a SUB-COLLECTION rather than a single scalar
+   * Whether an `At` index selects a sub-collection rather than a single scalar
    * — a gather (`At(L, [1, 3])`) or a boolean mask, both of which the
    * JavaScript `At` lowering supports. Such a read produces a list, not an
    * element, so neither the per-element answer nor the mixed-element decline
    * applies to it; the enclosing analysis keeps whatever it did before.
    *
-   * Covers an index that is only POSSIBLY a collection as well as a definite
-   * one, because the distinction it guards is about which LOWERING runs, and a
+   * Covers an index that is only possibly a collection as well as a definite
+   * one, because the distinction it guards is about which lowering runs, and a
    * `broadcastable`/top-typed index could take either at run time.
    */
   private static isGatherIndex(index: Expression): boolean {
@@ -2465,7 +2406,7 @@ export class BaseCompiler {
   }
 
   /**
-   * Whether the elements of `collection` are identifiable AND disagree about
+   * Whether the elements of `collection` are identifiable and disagree about
    * being complex-valued — the case {@link uniformElementComplexness} declines
    * for a reason other than not being able to see the elements at all.
    */
@@ -2476,8 +2417,8 @@ export class BaseCompiler {
   }
 
   /**
-   * Fail closed (D6, user-ruled 2026-08-15) on an indexed read whose element
-   * SHAPE cannot be decided: the collection MIXES complex- and real-valued
+   * Fail closed on an indexed read whose element shape cannot be decided: the
+   * collection mixes complex- and real-valued
    * elements, and the index is known only at run time.
    *
    * A list is emitted element by element and each element picks its own
@@ -2489,12 +2430,9 @@ export class BaseCompiler {
    * third source of truth: the read is `{re, im}` for some indices and a plain
    * number for others, decided at run time.
    *
-   * Emitting anything is therefore a coin flip that lands on a silently wrong
-   * value. Measured before this guard, on the DEFAULT path with no compile
-   * option set: `[i·t, 1][k] + 1` at `k = 2` ran to `{re: NaN}` where the
-   * interpreter answers `2` — the whole-collection verdict read the plain
-   * number `1` as a complex object. Declining hands the expression to the
-   * interpreter, which indexes the value it actually built.
+   * Emitting either representation would be wrong for some index. Declining
+   * hands the expression to the interpreter, which indexes the value it
+   * actually built.
    *
    * The narrowness is the point: an all-complex or all-real collection is
    * unaffected, a literal index is unaffected, and a collection whose elements
@@ -9382,98 +9320,31 @@ export class BaseCompiler {
   }
 
   /**
-   * The LYING-declaration clause (2026-08-12 ruling): the body's DECLARED type
-   * PROVES a scalar (`isScalarDeclaredType` — an `integer`/`real`/`number` or
-   * `boolean` head, the spellings that sail through every gate above), yet the
-   * item-86 body look-through PROVES the named function's `Function` literal
-   * constructs a collection. Declaration and body contradict each other, and
-   * the compiler can see it.
+   * Whether a function promises a scalar result but provably constructs a
+   * collection. This is a contradiction check, not result-type inference:
+   * declarations remain authoritative unless the stored body disproves them.
    *
-   * Declarations stay authoritative everywhere else in the compiler — this is
-   * not a re-inference. It fires only where the contradiction is PROVEN, and
-   * the only sound response is to refuse to emit code we know is wrong (D6):
-   * JS emitted `_fn_a(0) + _fn_a(1) + _fn_a(2)`, which string-concatenates the
-   * arrays at run time ("1,00.5403…,0.8414…-0.4161…,0.9092…") behind
-   * `success: true`, and GLSL/WGSL emitted a `vec2` sum returned from a `float`
-   * function — shader source that does not even compile.
-   *
-   * Unlike `isCollectionValuedBigOpBodyByLookThrough` (which only fires where
-   * an item-121 EXEMPTION is doing the admitting, and which JS never reaches
-   * because its wider element-wise gate diverts those bodies first), this
-   * clause fires on ALL targets INCLUDING JavaScript: a `number`-declared body
-   * is not possibly-collection-typed, so `isElementwiseBigOpBody` declines it
-   * and there is no element-wise arm to fall into. That JS change is the
-   * ruling: garbage becomes a decline.
-   *
-   * The ruled exemptions are untouched — `isScalarDeclaredType` is disjoint
-   * from every one of them (`broadcastable<T>`, `unknown`/`any` and the union
-   * spelling of the top type all answer `false`), so the `-> unknown` shape
-   * (item 171) still compiles element-wise on JS and still declines on the
-   * non-JS targets through the clause above, on its own message. The `boolean`
-   * arm does not touch the item-121 boolean exemption either: that exemption
-   * protects the ABSENCE of evidence (a genuine boolean body — a comparison —
-   * produces none), while this clause additionally requires the look-through to
-   * PROVE a collection constructor.
+   * The guard applies on every target. JavaScript would otherwise consume the
+   * returned array as a number, while GLSL/WGSL could emit a vector from a
+   * scalar-returning function. Open and broadcastable result types do not count
+   * as scalar promises and retain their existing target-specific paths.
    */
   static isContradictedScalarDeclaration(body: Expression): boolean {
     if (!BaseCompiler.isScalarDeclaredType(body)) return false;
     return BaseCompiler.isProvablyCollectionValuedApplication(body, new Set());
   }
 
-  /**
-   * The declared-type half of the 2026-08-12 contradicted-declaration ruling:
-   * a declaration that PROMISES a scalar, i.e. a value the emitters read as one
-   * machine word — a number or a boolean.
-   *
-   * `boolean` was originally omitted, which let a head declared
-   * `(number) -> boolean` over a list-constructing body escape every gate.
-   * Measured before this, with `b` declared `(number) -> boolean` and assigned
-   * `t ↦ [cos t, sin t]`, all behind `success: true`:
-   *
-   * | shape             | javascript            | glsl / wgsl                  |
-   * | ----------------- | --------------------- | ---------------------------- |
-   * | `If(b(u), 1, 2)`  | the WRONG branch (`1`)| `bool _fn_b` returning `vec2`|
-   * | `Not(b(u))`       | a wrong `false`       | same                         |
-   * | `b(u) = True`     | a wrong `false`       | same                         |
-   * | `And(b(u), True)` | the ARRAY, unguarded  | same                         |
-   *
-   * — the JS ternary treats the run-time array as truthy and takes a branch the
-   * interpreter never takes (it throws: a condition must be `True`/`False`).
-   */
+  /** Whether a declaration promises a one-word scalar: number or boolean. */
   private static isScalarDeclaredType(body: Expression): boolean {
     const t = body.type;
     return t.matches('number') || t.matches('boolean');
   }
 
   /**
-   * The DEFINITION-SITE half of the same 2026-08-12 ruling (wave 3): the
-   * identical contradiction read off the function's own body rather than off a
-   * call site.
-   *
-   * Waves 1–2 gate CONSUMING positions, so a contradicted application declines
-   * wherever a scalar is read. What they cannot reach is the DEFINITION itself:
-   * a bare `a(u)` as the whole compiled expression has no consuming head, so on
-   * a target whose user functions are statically typed declarations the
-   * definition was still emitted — and its return type is synthesized from the
-   * body's DECLARED type while its `return` statement emits what the body
-   * actually builds. Measured before this gate, with `a` declared
-   * `(number) -> number` and assigned `t ↦ [cos t, sin t]`:
-   *
-   *     glsl:  float _fn_a(float t) { return vec2(cos(t), sin(t)); }
-   *     wgsl:  fn _fn_a(t: f32) -> f32 { return vec2f(cos(t), sin(t)); }
-   *
-   * — a `vec2` returned from a function declared scalar, i.e. shader source no
-   * driver accepts, shipped behind `success: true`.
-   *
-   * Same two halves as `isContradictedScalarDeclaration`, same shared body
-   * look-through and the same `isScalarDeclaredType` test; only the entry point
-   * differs. The body carries the declared result type as an ASCRIPTION
-   * (`Block(Typed(List(…), 'number'))`), so `isScalarDeclaredType` reads the
-   * DECLARATION here exactly as it reads the application's result type there —
-   * including its `boolean` arm, which is what refuses
-   * `bool _fn_b(float t) { return vec2(cos(t), sin(t)); }` and, with it, every
-   * GPU consuming shape whose own lowering has no condition guard (the
-   * `Which` element-wise entry).
+   * Definition-site form of {@link isContradictedScalarDeclaration}. Shader
+   * targets bake the declared result into the function signature, so the body
+   * must be checked even when a bare call has no scalar-consuming parent.
+   * Declared result ascriptions are unwrapped by the shared body look-through.
    */
   static isContradictedScalarFunctionBody(body: Expression): boolean {
     if (!BaseCompiler.isScalarDeclaredType(body)) return false;
@@ -9481,49 +9352,14 @@ export class BaseCompiler {
   }
 
   /**
-   * The ADJACENCY half of the same 2026-08-12 ruling: the contradicted-scalar
-   * application in an ordinary SCALAR-CONSUMING position, not just as a big-op
-   * body. With `a` declared `(number) -> number` and assigned
-   * `t ↦ [cos t, sin t]`, every such position emitted garbage behind
-   * `success: true` — measured before this gate:
+   * Reject a contradicted scalar declaration when an ordinary operator will
+   * consume the call as a scalar. The rule lives in the shared dispatcher
+   * because the contradiction belongs to the application, not to one target.
    *
-   * | shape             | javascript                    | glsl / wgsl        |
-   * | ----------------- | ----------------------------- | ------------------ |
-   * | `a(u) + 1`        | ran to the STRING `"…,…1"`    | `vec2` from `float`|
-   * | `2·a(u)`          | ran to `NaN`                  | `vec2` from `float`|
-   * | `sin(a(u))`       | ran to `NaN`                  | `vec2` from `float`|
-   * | `a(u)^2`          | ran to `NaN`                  | `vec2` from `float`|
-   * | `a(u) < 1`        | ran to a wrong scalar `false` | `vec2` from `float`|
-   * | `a(u) = 1`        | ran to a wrong scalar `false` | `vec2` from `float`|
-   * | `If(a(u)<1, 1, 2)`| took the WRONG branch         | `vec2` from `float`|
-   *
-   * (Python and interval-js already declined every one of them, for their own
-   * unrelated reasons — no user-function lowering / no `List` lowering.)
-   *
-   * ONE policy point rather than one gate per target: the contradiction is a
-   * property of the APPLICATION, not of any target, and `compileExpr` is the
-   * dispatcher every target funnels its operator lowering through — the same
-   * place the GPU non-scalar comparison gate and the JS/Python list-arithmetic
-   * gates already live.
-   *
-   * The position test is the union of the head classifications those gates
-   * already use — scalar arithmetic, a `broadcastable` operator definition, a
-   * relational, a logical connective. Every one of them consumes its operands
-   * as scalars whenever no lift is planned, and no lift is planned here: the
-   * declared type says `number`. Container and access heads (`List`, `Tuple`,
-   * `Block`, `At`, a user function) are NOT in it and keep compiling — probed,
-   * `[a(u), 1]` is correct today, and `At`/`Length` already decline on the
-   * declared type.
-   *
-   * What deliberately does NOT decline:
-   *  - the application as the WHOLE compiled expression (`a(u)`): no head
-   *    consumes it, the JS result coercion handles the array, and it runs
-   *    correctly today;
-   *  - the honest `(unknown) -> unknown` spelling of the same body — its type
-   *    is not `matches('number')`, so it keeps the `_SYS.bcast` route (item
-   *    171);
-   *  - a TRUTHFUL `-> number` head over a scalar body, and a truthful
-   *    `-> list<number>` head, neither of which is a contradiction.
+   * Scalar arithmetic, broadcastable operators, relations, and connectives are
+   * consuming positions. Containers, accessors, and a bare top-level call are
+   * not. Open result types also retain their element-wise or target-specific
+   * handling because they do not promise a scalar.
    */
   private static assertNoContradictedScalarOperand(
     engine: ComputeEngine,
@@ -9559,24 +9395,22 @@ export class BaseCompiler {
   }
 
   /**
-   * The body look-through behind the third `assertScalarBigOpBody` clause
-   * (Tycho item 171 residue): POSITIVE evidence that a big-op body whose
-   * DECLARED type says nothing is nonetheless collection-valued.
+   * Positive evidence that a big-operator body with an open declared type is
+   * nevertheless collection-valued.
    *
    * The first clause above already declines a body whose declared type matches
    * `list`/`indexed_collection`. Consumers, however, register helpers under the
    * open `(unknown) -> unknown` head (the spelling that keeps list-broadcasting
    * working), so `a(t) = [cos t, sin t]` applied inside a Sum types
    * `broadcastable<unknown>` and slips past that clause via the two documented
-   * EXEMPTIONS (top types and `broadcastable<T>` stay admitted — item-121
-   * closure). Those exemptions protect the ABSENCE of evidence; they were never
-   * meant to protect a body we can PROVE builds a collection.
+   * exemptions for top types and `broadcastable<T>`. Those exemptions protect
+   * an absence of evidence, not a body that provably builds a collection.
    *
    * So this fires only where an exemption is doing the admitting — the body's
    * type carries no sort evidence at all (`unknown`/`any`/… and the union
    * spelling of the top type) or is `broadcastable<T>` — and only on positive
-   * evidence: the operator names a USER function (`userFunctionLiteral`) whose
-   * `Function`-literal body has a type that MATCHES a collection (the subtype
+   * evidence: the operator names a user function (`userFunctionLiteral`) whose
+   * `Function`-literal body has a type that matches a collection (the subtype
    * direction, so a wide body type is not evidence). A nested user-function
    * application recurses, `visited` declining self/mutual recursion.
    *
@@ -9585,9 +9419,7 @@ export class BaseCompiler {
    * same shape through the value-safe `_SYS.bcast` element-wise fold) diverts
    * every body this predicate accepts before `assertScalarBigOpBody` is reached,
    * so JS emission is unchanged. The GPU/Python/interval targets have no
-   * element-wise arm — correct emission is not on the table there — so for them
-   * the only sound answer is to decline (D6). Left admitted, GLSL emitted a
-   * `vec2 + vec2 + vec2` sum from a function declared to return `float`.
+   * element-wise arm, so for them the only sound answer is to decline.
    */
   private static isCollectionValuedBigOpBodyByLookThrough(
     body: Expression
@@ -9602,9 +9434,8 @@ export class BaseCompiler {
 
   /**
    * See `isCollectionValuedBigOpBodyByLookThrough` — the body half of the
-   * look-through. A conservative WHITELIST whose only permitted failure mode is
-   * declining to see the evidence (the caller then keeps compiling), never a
-   * false positive: admission here DECLINES a compile that used to succeed.
+   * look-through. This conservative whitelist may miss evidence, but must never
+   * produce a false positive because a positive result declines compilation.
    */
   private static isProvablyCollectionValuedApplication(
     e: Expression,
@@ -9631,39 +9462,13 @@ export class BaseCompiler {
   }
 
   /**
-   * Wave 4 of the 2026-08-12 contradicted-declaration ruling: the same
-   * look-through for a MULTI-CLAUSE function (function-polymorphism design
-   * §8), which `userFunctionLiteral` cannot see — it has no single
-   * `_lambdaLiteral`, one literal per clause instead. Measured before this
-   * arm, with `a` DECLARED `(number) -> number` and two clauses whose bodies
-   * both build `[cos t, sin t]`, the JavaScript target emitted the guard chain
-   * and ran the scalar consuming positions over the returned array behind
-   * `success: true`:
+   * Multi-clause counterpart of the user-function body look-through.
+   * `userFunctionLiteral` has no single literal for such a function, so inspect
+   * each stored clause through the shared body predicate.
    *
-   * | shape       | before                                    |
-   * | ----------- | ----------------------------------------- |
-   * | `a(u) + 1`  | the STRING `"-0.98999…,0.141121"`         |
-   * | `2·a(u)`    | `NaN`                                     |
-   * | `sin(a(u))` | `NaN`                                     |
-   *
-   * — the identical failure wave 2 gates for a single-literal function, which
-   * simply never fired here because the literal lookup came back empty.
-   *
-   * Feeding the clause set into the SHARED body predicate (rather than adding
-   * a gate of its own) makes every wave inherit the fix at once: the big-op
-   * body clause (wave 1), the scalar-consuming positions (wave 2) and the
-   * `-> unknown` look-through all read this one predicate.
-   *
-   * ANY clause is enough — the conservative, fail-closed direction. A MIXED
-   * clause set (one scalar clause, one collection-constructing clause) is a
-   * contradiction on SOME branches only, but the consuming position compiles
-   * ONCE, statically, for all of them: measured, mixed `a(u) + 1` ran to `8`
-   * on the scalar branch and to the string `"0.29552…,0.955336…"` on the other.
-   * There is no per-branch code to keep, so the branch that is wrong decides.
-   *
-   * Only JavaScript (and interval-js) ever reach this: `tryEmitMultiClauseFunction`
-   * declines every other target outright (§8), so a multi-clause application on
-   * GLSL/WGSL already fails closed with its own "no lowering" diagnostic.
+   * Any collection-producing clause is enough to decline a scalar-consuming
+   * call because the consuming position is compiled once for every branch.
+   * Targets without multi-clause lowering decline before reaching this check.
    */
   private static isProvablyCollectionValuedClauseSet(
     engine: ComputeEngine,
@@ -9681,29 +9486,22 @@ export class BaseCompiler {
   }
 
   /**
-   * The BODY half of `isProvablyCollectionValuedApplication`: does this
+   * The body half of `isProvablyCollectionValuedApplication`: does this
    * function-literal body provably construct a collection?
    *
-   * Split out so the same evidence can be read from either end — from a CALL
-   * SITE (the application, waves 1–2) or from the body itself at DEFINITION
-   * EMISSION (`isContradictedScalarFunctionBody`, wave 3), which is handed the
+   * Split out so the same evidence can be read from either a call site or from
+   * definition emission (`isContradictedScalarFunctionBody`), which receives the
    * body directly and has no application in hand.
    *
-   * Canonical parse wraps a lambda body in `Block`, whose VALUE is its LAST
-   * statement — so that is the statement to judge, single- or multi-statement.
-   * Measured before this, with `a` DECLARED `(number) -> number` and assigned
-   * `t ↦ { w := cos t; [w, sin t] }`, the single-statement-only unwrap saw no
-   * evidence and every wave passed the call through behind `success: true`:
-   * JS `a(u) + 1` ran to the STRING `",0.29552…"`, `Σ a(i)` to
-   * `",0,0.84147…,0.90929…"`, and GLSL emitted
-   * `float _fn_a(float t) { w = cos(t); return vec2(w, sin(t)); }`.
+   * Canonical parsing wraps a lambda body in `Block`, whose value is its last
+   * statement, so that is the statement to judge for both single- and
+   * multi-statement bodies.
    *
-   * A `Return` anywhere in an EARLIER statement disqualifies the block: control
+   * A `Return` in an earlier statement disqualifies the block: control
    * may never reach the last statement, so it is not provably the value and
-   * this predicate — positive-evidence-only, whose admission DECLINES a compile
-   * — must answer `false`.
+   * this positive-evidence predicate must answer `false`.
    *
-   * A DECLARED result type additionally ASCRIBES the body: the
+   * A declared result type additionally ascribes the body: the
    * `ce.declare('a', { signature: '(number) -> number' })` +
    * `ce.assign('a', λ)` route stores `Block(Typed(List(…), 'number'))`, so the
    * ascription reports `number` and hides the `List` underneath. Unwrap it: the
@@ -12497,22 +12295,6 @@ export class BaseCompiler {
   }
 
   /**
-   * Recognize a PROTOCOL call head (`docs/plans/2026-08-12-protocol-compilation.md`):
-   *
-   * - a bare dispatcher (`compare(x, y)` where `compare` resolves to the
-   *   installed `_protocolDispatcher` operator — a user shadow of the name
-   *   drops the marker and wins, matching the interpreter);
-   * - the `ProtocolMember` operator (`(protocol, member, receiver, …args)`);
-   * - the `ProtocolProperty` operator — 3 operands GET; 4 operands is a
-   *   property store and is not a dispatchable call; {@link protocolCallParts}
-   *   declines it;
-   * - a bare `Field` read that the ordinary field routes already declined
-   *   (this runs in the `!fn` branch, AFTER `Field`'s own `compile` handler
-   *   declined). The bare-`Field` form is STATIC-tier only: an undecided
-   *   receiver may be an ordinary record/dictionary at runtime, whose keys
-   *   beat protocol properties (P46) — a guard chain cannot arbitrate that.
-   */
-  /**
    * For a bare `Field` read whose receiver is a RAW body local — `q.n`
    * where an enclosing statement list declared `q: Person` — the receiver's
    * own static type is `unknown` (a canonical function body's locals are
@@ -12572,6 +12354,13 @@ export class BaseCompiler {
     return null;
   }
 
+  /**
+   * Extract a protocol call from a dispatcher, `ProtocolMember`, property get,
+   * or unresolved `Field` read. Property stores are excluded because mutable
+   * objects have no compiled representation. An unresolved `Field` is eligible
+   * only for static dispatch: at runtime an ordinary record key takes
+   * precedence over a protocol property.
+   */
   private static protocolCallParts(
     engine: ComputeEngine,
     h: string,
@@ -12653,25 +12442,14 @@ export class BaseCompiler {
   }
 
   /**
-   * Compile a protocol call (`docs/plans/2026-08-12-protocol-compilation.md`;
-   * the governing ruling is Appendix A "Static resolution and compiled
-   * code"): a statically resolved call becomes a DIRECT call of the winning
-   * implementation; a dynamic one becomes a guard chain over the reified
-   * receiver representation, most-specific-first, throwing
-   * `protocol-implementation-missing` on fall-through (the multi-clause
-   * convention — the interpreter's error VALUE has no compiled analog).
+   * Compile a JavaScript protocol call. Static dispatch calls the selected
+   * implementation directly; dynamic dispatch emits a most-specific-first
+   * receiver guard chain and throws `protocol-implementation-missing` if no
+   * guard matches. The emitted code snapshots the current protocol registry.
    *
-   * `undefined` declines: the caller falls through to the standard
-   * fail-closed diagnostic. JavaScript only; the emitted code SNAPSHOTS the
-   * protocol registry (like the multi-clause chain snapshots its clause set).
-   *
-   * Divergences from the interpreter, both recorded in the design doc:
-   * non-receiver arguments are NOT guarded (the interpreter's
-   * `argumentTypeError` would answer an `incompatible-type` error value; the
-   * compiled body trusts the static check that ran at canonicalization —
-   * the P28 trusted-ascription posture), and guard fidelity is over the JS
-   * machine-value model (the same trust compiled `match` constructor
-   * patterns and multi-clause guards already extend).
+   * Non-receiver arguments rely on canonicalization-time type checks. Receiver
+   * guards operate on the JavaScript runtime representation, as do compiled
+   * `Match` patterns and multi-clause function guards.
    */
   private static tryCompileProtocolDispatch(
     engine: ComputeEngine,
@@ -12686,7 +12464,7 @@ export class BaseCompiler {
   ): TargetSource | undefined {
     const registry = target.userFunctions;
     if (!registry) return undefined;
-    // JS-only (§8): the interval target's runtime values are intervals and
+    // JavaScript only: interval runtime values need different guards, and
     // the shader targets cannot express the dispatcher. Fail closed there.
     if (target.language !== 'javascript' || registry.lowering) return undefined;
 
@@ -12755,10 +12533,6 @@ export class BaseCompiler {
     // — the same rule as the single-literal call site (`tryCompileUserFunction`):
     // every candidate body consumes such a parameter through complex slots,
     // so every call owes it a `{re, im}`, whatever the call site passes. The
-    // former precondition `isProvablyRealValued(a)` left a symbol DECLARED
-    // complex but holding a plain number at run time unwrapped (`{re: null}`
-    // behind `success: true`; ROADMAP "A protocol MEMBER whose parameter is
-    // declared `complex` is handed the argument unwrapped", 2026-08-16). The
     // wrap form itself is chosen per argument below (`protocolComplexWrap`).
     const coerceToComplex = call.args.map((_a, i) =>
       sigParams.every((params) => {
