@@ -138,11 +138,11 @@ const VALUE_CONTAINER_HEADS: ReadonlySet<string> = new Set([
  * Two deliberate exclusions, both in the CONSERVATIVE direction (a value
  * wrongly excluded answers symbolically instead of a definitive `False` —
  * never the reverse):
- * - FUNCTION LITERALS: ruling R9's ratified text lists them as value forms,
- *   but an unannotated literal's signature is inference-widened
- *   (`(x) -> x + 1` types looser than any one arrow), so a failed `matches`
- *   does NOT refute the value — `fn is (integer) -> integer` must stay
- *   symbolic, not answer `False`. Revisit when literal signatures become
+ * - FUNCTION LITERALS (the R9 amendment, ratified 2026-08-19): an
+ *   unannotated literal's signature is inference-widened (`(x) -> x + 1`
+ *   types `(unknown) -> number`), so a failed `matches` does NOT refute the
+ *   value — `fn is (integer) -> integer` must stay symbolic, not answer
+ *   `False`. Revisit when literal signatures become
  *   precise-by-construction.
  * - LAZY COLLECTIONS (`Range`, lazy `Map` results): per the ruling itself.
  */

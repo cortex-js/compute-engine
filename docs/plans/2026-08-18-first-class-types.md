@@ -11,10 +11,10 @@ work (`x is list<integer>`, `x is !error`, `x is Hashable & Comparable`);
 `type-pattern-unsupported` retired; snapshot blast radius measured at ZERO
 (13 AST pins across 4 suites updated to the new lowering — the ratified
 change, surfaced not absorbed). Two phase-2 notes: (a) FUNCTION LITERALS are
-excluded from R9's value forms in the conservative direction — an
-unannotated literal's inference-widened signature would make a failed
-`matches` a WRONG definitive False, so `fn is (integer) -> integer` stays
-symbolic (pinned; revisit when literal signatures become
+excluded from R9's value forms — RATIFIED as an R9 amendment 2026-08-19 (see
+R9): an unannotated literal's inference-widened signature would make a
+failed `matches` a WRONG definitive False, so `fn is (integer) -> integer`
+stays symbolic (pinned; revisit when literal signatures become
 precise-by-construction); (b) an unevaluated test PRINTS as the explicit
 `MatchesType(x, TypeFrom("T"))` call — it re-parses to the same node, and an
 `is` print-sugar is bundled into R6's sugar revisit. Phase 3 remains. Review record (pass 2; pass 1 applied and superseded):
@@ -415,8 +415,10 @@ so no contingency remains open.
 - **The decision regime is by NODE FORM (R9).** After the
   single evaluation, a **value form** — a node whose precise type derives
   from its own structure: number/string/character/boolean literals,
-  collection values, function literals, nominal constructor values, error
-  values, type values — is decided BOTH ways: `matches()` → `True`,
+  `Nothing`/`Missing`, collection and dictionary values, nominal
+  constructor values, error values, type values — is decided BOTH ways
+  (function literals are NOT value forms — the 2026-08-19 R9 amendment,
+  below): `matches()` → `True`,
   otherwise a definitive `False` (the precise type of a value form is
   exact, so the new operator must NOT inherit the
   `matches(...) ? true : undefined` asymmetry of the current `Element`
@@ -572,8 +574,15 @@ side stays live.
 (typed-by-declaration-or-inference) are three-way on the static type —
 subtype → `True`, provably disjoint → `False`, otherwise symbolic (§5).
 This subsumes the earlier valueless-symbol bullet and gives "settled" an
-implementable criterion. Saying no reverts to an unspecified boundary,
-which blocks phase 2.
+implementable criterion. **Amendment (RATIFIED 2026-08-19, phase-2
+review):** FUNCTION LITERALS are NOT value forms, despite the original
+text listing them — an unannotated literal's signature is
+inference-widened (`(x) -> x + 1` types `(unknown) -> number`), so a
+failed `matches` does not refute the value: `f is (integer) -> integer`
+must stay symbolic, never answer a wrong definitive `False`, even though
+`f(2)` is an integer. The `True` direction is unaffected (an annotated
+literal decides: `(x: integer) -> x + 1` `is (integer) -> number` →
+`True`). Revisit when literal signatures become precise-by-construction.
 
 ## 7. Interactions to keep in view
 
