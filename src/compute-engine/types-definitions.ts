@@ -1573,6 +1573,19 @@ export type OperatorDefinitionFlags = {
    */
   commutativeOrder: ((a: Expression, b: Expression) => number) | undefined;
 
+  /**
+   * If `true`, `match()` tries permutations of the operands when a pattern
+   * uses this operator — WITHOUT the canonical operand sort that
+   * `commutative` implies. For an operator whose VALUE is commutative but
+   * whose operand ORDER is part of the program (the short-circuit
+   * `And`/`Or`: evaluation is left-to-right and the canonical form
+   * preserves written order), this restores permutation matching on its
+   * own, so a rule pattern `p ∧ ¬p` still hits `¬p ∧ p`.
+   *
+   * **Default**: the value of `commutative`.
+   */
+  commutativeMatch: boolean;
+
   /** If `true`, when the operator is univariate, `["f", ["Multiply", x, c]]`
    * simplifies to `["Multiply", ["f", x], c]` where `c` is constant
    *

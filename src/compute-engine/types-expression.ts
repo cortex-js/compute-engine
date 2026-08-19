@@ -197,6 +197,9 @@ type OperatorDefinitionFlags = {
   missingStrip: 'all' | number[];
   associative: boolean;
   commutative: boolean;
+  /** Permutation matching without the canonical sort `commutative` implies.
+   * See `types-definitions.ts`. */
+  commutativeMatch: boolean;
   commutativeOrder: ((a: Expression, b: Expression) => number) | undefined;
   idempotent: boolean;
   involution: boolean;

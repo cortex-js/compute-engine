@@ -1154,7 +1154,30 @@ fixed:
   yields `Prime(F_0)` — pre-existing, whether `Prime` or `Derivative` is the
   canonical no-argument head is a convention question.
 
-### Symbolic-side commutativity for `And`/`Or` (OPEN, design settled 2026-08-16 — "Option B")
+### Symbolic-side commutativity for `And`/`Or` (STEPS 1–2 SHIPPED 2026-08-18; design settled 2026-08-16 — "Option B")
+
+**Shipped (2026-08-18, user go-ahead the same day):** steps 1 and 2 of the
+agreed shape. (1) `And`/`Or` carry an `eq` handler
+(`acEquivalentBoolean`, `symbolic/logic-utils.ts`) so
+`isEqual`/`isIdenticallyEqual` compare modulo permutation and nesting.
+Soundness shape (dual-review hardened, same day): impure operands decline
+up front (order and draw counts stay observable); both sides are EVALUATED
+first, so the order-sensitive parts of evaluation — short-circuit, Kleene
+absence, the error-valued-operand decider — are honored, and only the
+undecided residue is AC-matched (evaluation's dedup also makes
+`p ∧ p ∧ q ≡ p ∧ q` come out equal); the syntactic multiset pass is
+unbounded, and the value-level remainder uses polynomial augmenting-path
+matching (small residue bound on the evaluating pass only). Three-valued
+but never `false` — a failed operand pairing declines to `undefined`,
+since `And(p, q)` and `And(p, r)` coincide whenever `p` is `False`. (2) a new
+`commutativeMatch` definition flag (defaulting to `commutative`) drives the
+matcher's permutation branch, decoupled from canonical sorting; set on
+`And`/`Or` (`Xor` inherits it from its `commutative` flag). `isSame`, the
+written-order canonical form, and short-circuit evaluation are unchanged
+(pinned by `evaluation-order.test.ts`). New pins:
+`logic-ac-equivalence.test.ts`. Step 3 (the gated canonical sort inside
+`simplify()`) remains unbuilt by design — skip unless a concrete workflow
+needs it.
 
 Follow-up to the short-circuit conversion below, from a user design
 discussion (2026-08-16). Making `And`/`Or` ordered and lazy cost the
@@ -3635,6 +3658,26 @@ importable from `boxed-expression/` without a cycle, and route the setter's
 function branch through it. Until then the two routes diverge only for
 annotated literals on the host setter — a route that was entirely broken
 before 2026-08-18, so nothing shipped depends on the difference.
+
+**OPEN: `BigDecimal.precision` is process-global, and multi-engine
+processes are a consumer's NORMAL case, not an edge case.** The working
+decimal precision is a single static (`src/big-decimal/big-decimal.ts`),
+written by every engine's constructor and by `ce.precision = …`
+(`engine-numeric-configuration.ts`), which a user program reaches via
+`N(x, 200)`. In a process holding several engines, raising precision on
+one silently raises the effective precision — and the cost — of every
+other, and constructing a new engine silently resets the first's.
+Long documented as a test-suite trap (save/restore in
+`beforeAll`/`afterAll`), it was re-graded 2026-08-18 by Tycho's
+linear-posture answers (Q7a, recorded in
+`docs/plans/2026-08-18-linear-posture-tycho-questions.md`): a Tycho page
+routinely holds a notebook engine, plot-element engines, and validator
+engines simultaneously, so the hazard is live in their primary product
+surface. Fix shapes to evaluate: per-engine precision passed down to the
+BigDecimal call sites (invasive, correct), or save/set/restore of the
+static around every engine evaluation entry point (cheap, but
+async-evaluation interleaving needs care). Related trap record:
+`bigdecimal-precision-global` in auto-memory.
 
 **KNOWN, not scheduled: pinned layouts are SHALLOW.** `detachDefinitionBody`
 (`boxed-expression/boxed-object.ts`) copies an object body one level deep and

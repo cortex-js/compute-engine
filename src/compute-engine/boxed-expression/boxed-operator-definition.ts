@@ -82,6 +82,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'missingStrip',
   'associative',
   'commutative',
+  'commutativeMatch',
   'commutativeOrder',
   'idempotent',
   'involution',
@@ -181,6 +182,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   missingStrip: 'all' | number[] = 'all';
   associative = false;
   commutative = false;
+  /** Backing store for `commutativeMatch`: `undefined` until EXPLICITLY
+   * set, so the default can follow `commutative` however the two flags are
+   * updated over time — a partial `_update({ commutative: … })` must never
+   * clobber an explicit `commutativeMatch`, and vice versa. */
+  private _commutativeMatch: boolean | undefined;
+  /** Permutation matching without the canonical operand sort — see
+   * `OperatorDefinition.commutativeMatch`. Defaults to `commutative`. */
+  get commutativeMatch(): boolean {
+    return this._commutativeMatch ?? this.commutative;
+  }
   commutativeOrder: ((a: Expression, b: Expression) => number) | undefined;
   idempotent = false;
   involution = false;
@@ -559,6 +570,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     result.broadcastable = this.broadcastable;
     result.associative = this.associative;
     result.commutative = this.commutative;
+    // Only an EXPLICIT commutativeMatch is cloned; a derived one keeps
+    // deriving from `commutative` in the clone.
+    if (this._commutativeMatch !== undefined)
+      result.commutativeMatch = this._commutativeMatch;
     result.idempotent = this.idempotent;
     result.involution = this.involution;
     result.pure = this.pure;
@@ -854,6 +869,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.missingStrip = def.missingStrip ?? this.missingStrip;
     this.associative = def.associative ?? this.associative;
     this.commutative = def.commutative ?? this.commutative;
+    // Permutation matching WITHOUT canonical sorting. The default (follow
+    // `commutative`) lives in the getter, so it tracks later `commutative`
+    // updates; only an explicit value is stored here — a partial update
+    // that touches `commutative` alone must never clobber it.
+    if (def.commutativeMatch !== undefined)
+      this._commutativeMatch = def.commutativeMatch;
     this.commutativeOrder = def.commutativeOrder ?? this.commutativeOrder;
 
     if (this.commutativeOrder && !this.commutative)

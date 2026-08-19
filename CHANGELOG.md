@@ -64,6 +64,22 @@
 
 ### New Features
 
+- **`And`/`Or` are value-commutative again at the symbolic entry points.**
+  The short-circuit conversion made `And`/`Or` ordered — operands evaluate
+  left to right and the canonical form preserves written order — which had
+  cost two symbolic properties. Both are restored at the value level, where
+  commutativity belongs: `isEqual()`/`isIdenticallyEqual()` now compare
+  `And`/`Or` expressions modulo permutation and nesting of their operands
+  (`(A && B) == (B && A)` is `true`; a failed operand pairing stays
+  undecided, never `false`, since `A && B` and `A && C` coincide whenever
+  `A` is false), and `match()` tries operand permutations again, so a rule
+  pattern `p ∧ ¬p` matches `¬p ∧ p`. Operand ORDER remains part of the
+  program: `isSame()` stays strictly syntactic, the canonical form keeps
+  written order, and evaluation still short-circuits left to right.
+  Operator authors get the underlying mechanism as a new definition flag,
+  `commutativeMatch` — permutation matching decoupled from the canonical
+  operand sort that `commutative` implies (it defaults to `commutative`).
+
 - **Applying a non-function errors instead of going inert.** A symbol whose
   declared type is a concrete non-function — `Pi(2)`, `Nothing()`, a
   `number`-declared variable applied as a call — now produces an

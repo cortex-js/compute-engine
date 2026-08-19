@@ -258,7 +258,25 @@ via `WithRandomSeed`); `Print`/`Input` are not Tycho surfaces.
 surface types/protocols at all today; they note an engine-global type
 declared inside a cortex script leaks across sibling sections
 (violating their isolation model) — one more reason checkpoint/restore
-is the right reset primitive.
+is the right reset primitive. **Tycho-side ruling on that leak
+(2026-08-18, Arno, recorded in
+`tycho/docs/scratch/2026-08-18-linear-posture-tycho-answers.md`):
+defer-and-record.** No client-side gate ships; the current
+cross-section visibility is recorded as an ARTIFACT (run-order,
+engine-lifetime accumulation — deletion-insensitive, not
+model-derived), not ratified semantics; the section-vs-document scoping
+decision is deferred until types/protocols become a surfaced Tycho
+feature. If Tycho later rules FOR document-scoped types, their sketch
+is: capture type/protocol declarations into the cortex snapshot (like
+function clauses) and re-assert them per pass from the model **via the
+box route** — which leans on the box-route replace/idempotent
+commitment below, and asks us to confirm conformance-impl registration
+via the box route keeps the same semantics. CONFIRMED already, by pin:
+a box-route conformance block outside a batch REPLACES, unstamped —
+`test/compute-engine/protocols.test.ts:1096` ("P47: the BOX ROUTE
+outside a batch replaces, unstamped") — so per-pass re-assertion of
+conformance impls is idempotent today, and that pin joins the set the
+box-route commitment protects.
 
 **Q5 — no single-cell in-place re-run exists or is planned.** Their
 strongest push-back, which ANSWERS the audit's §4.4 ruling 2: **the box
@@ -293,10 +311,13 @@ rather than a "revisit if needed". **(c)** No branching need.
 **Ordering asks:** checkpoint API before any behavior flip (matches the
 design's §9); box-route strictness preferably never, at minimum not
 before their restore-before-pass migration; `executeEpsil`-route
-strictness may flip once restore-before-Run lands client-side (the only
+strictness may flip once restore-before-Run lands client-side. The only
 regressing surface would be a cortex script declaring types/protocols —
-unsupported-but-not-blocked on their side, and they prefer gating that
-client-side over keeping ~1,400 engine lines alive).
+unsupported-but-not-blocked on their side, and (per the Tycho-side
+defer-and-record ruling under Q4) there is deliberately NO interim
+client gate: the surface is unspecified/unsupported and its scoping
+decision deferred, which does not change the ordering — the flip still
+waits on restore-before-Run.
 
 ### Resulting decisions (awaiting Arno's ratification)
 

@@ -304,15 +304,30 @@ function matchOnce(
       //
       // 2. Both operator names match
       //
-      // For commutative operators, try permutations unless matchPermutations is false
+      // Operators that admit permutation matching (`commutativeMatch`,
+      // which defaults to `commutative`) try operand permutations unless
+      // matchPermutations is false. The flag is decoupled from canonical
+      // sorting so the ordered, short-circuit `And`/`Or` still match
+      // commutatively.
       const matchPerms = options.matchPermutations ?? true;
       // Note: the pattern operator may have no definition, e.g. a user-defined
       // function in a rule pattern (rules are boxed in a scope that only
       // inherits from the system scope)
       result =
-        pattern.operatorDefinition?.commutative && matchPerms
+        pattern.operatorDefinition?.commutativeMatch && matchPerms
           ? matchPermutation(expr, pattern, substitution, options)
           : matchArguments(expr, pattern.ops, substitution, options);
+      // The permutation search is bounded (its permutation generator
+      // refuses more than six operands, and the anchor-based path has its
+      // own combination cap), so a pattern it declines could still match
+      // in exact written order. Positional matching is one of the
+      // permutations — never let the bound lose it.
+      if (
+        result === null &&
+        pattern.operatorDefinition?.commutativeMatch &&
+        matchPerms
+      )
+        result = matchArguments(expr, pattern.ops, substitution, options);
 
       // When matchMissingTerms is enabled and the expression has fewer
       // operands than the pattern (e.g. `3x^2+5` vs pattern `ax^2+bx+c`),

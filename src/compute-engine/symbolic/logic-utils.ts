@@ -90,6 +90,105 @@ function flattenSame(
   return result;
 }
 
+/**
+ * AC-equivalence of two `And` (or two `Or`) expressions: equal modulo
+ * permutation and nesting of their operands ("Option B" step 1, user-ruled
+ * 2026-08-16 — see the ROADMAP entry "Symbolic-side commutativity for
+ * `And`/`Or`"). Commutativity is a property of the VALUE, honored here at
+ * the value-level entry points (`isEqual`/`isIdenticallyEqual`, via the
+ * operators' `eq` handlers); operand ORDER belongs to the program that
+ * computes the value, so the tree stays ordered, `isSame` stays strictly
+ * syntactic, and evaluation still short-circuits left to right.
+ *
+ * Soundness shape: both sides are EVALUATED first, by the real evaluator —
+ * short-circuit, the Kleene treatment of `Missing`, and the
+ * error-valued-operand decider are all order-sensitive, and only the
+ * evaluator applies them correctly. Only when both sides remain a same-
+ * operator residue of UNDECIDED operands is that residue AC-matched:
+ * there, permutation is unobservable. Impure operands (randomness,
+ * effects) are order- and count-sensitive and must not be evaluated
+ * speculatively, so they decline up front and stay with the generic
+ * machinery, which evaluates each side exactly once. (For pure operands
+ * the generic `eqImpl` path re-evaluates after this handler declines or
+ * on its `true`; that double evaluation is confined to pure, boolean-
+ * sized work.)
+ *
+ * Three-valued, but never `false`: a failed operand pairing does NOT prove
+ * the VALUES differ (`And(p, q)` and `And(p, r)` coincide whenever `p` is
+ * `False`), so anything short of a perfect matching declines with
+ * `undefined` and lets the generic machinery proceed.
+ */
+export function acEquivalentBoolean(
+  operator: 'And' | 'Or',
+  a: Expression,
+  b: Expression,
+  prover: boolean | undefined
+): boolean | undefined {
+  if (a.operator !== operator || b.operator !== operator) return undefined;
+  if (!isFunction(a) || !isFunction(b)) return undefined;
+
+  if (!a.ops.every((x) => x.isPure) || !b.ops.every((x) => x.isPure))
+    return undefined;
+
+  const ae = a.evaluate();
+  const be = b.evaluate();
+  if (ae.operator !== operator || be.operator !== operator) return undefined;
+  if (!isFunction(ae) || !isFunction(be)) return undefined;
+
+  const as = flattenSame(ae.ops, operator);
+  const bs = flattenSame(be.ops, operator);
+  if (as.length !== bs.length) return undefined;
+
+  // Pass 1 — syntactic multiset matching, unbounded: a 100-operand
+  // conjunction against its reverse permutation resolves entirely here.
+  // `isSame` is an equivalence relation, so operands with identical
+  // structure form classes whose members are interchangeable — greedily
+  // consuming a class member never destroys a perfect matching that the
+  // value-level pass could otherwise complete.
+  const bLeft: Expression[] = [...bs];
+  const aLeft: Expression[] = [];
+  for (const x of as) {
+    const j = bLeft.findIndex((y) => x.isSame(y));
+    if (j >= 0) bLeft.splice(j, 1);
+    else aLeft.push(x);
+  }
+  if (aLeft.length === 0) return true;
+
+  // Pass 2 — value-level pairing of the residue via augmenting paths
+  // (Kuhn's bipartite-matching algorithm: polynomial, no factorial
+  // backtracking). Each pair probe evaluates its two operands (`isEqual`)
+  // or engages the prover (`isIdenticallyEqual`), so the RESIDUE is
+  // bounded: past it the O(n²) probe cost stops being cheap-tier work and
+  // declining is the honest answer. Only value-distinct-looking leftovers
+  // count against the bound, never total operand count.
+  if (aLeft.length > 8) return undefined;
+  const cache: (boolean | undefined)[][] = aLeft.map(() => []);
+  const pairEq = (i: number, j: number): boolean => {
+    cache[i][j] ??=
+      (prover
+        ? aLeft[i].isIdenticallyEqual(bLeft[j])
+        : aLeft[i].isEqual(bLeft[j])) === true;
+    return cache[i][j]!;
+  };
+  const matchOfB = new Array<number>(bLeft.length).fill(-1);
+  const tryAugment = (i: number, visited: boolean[]): boolean => {
+    for (let j = 0; j < bLeft.length; j++) {
+      if (visited[j] || !pairEq(i, j)) continue;
+      visited[j] = true;
+      if (matchOfB[j] < 0 || tryAugment(matchOfB[j], visited)) {
+        matchOfB[j] = i;
+        return true;
+      }
+    }
+    return false;
+  };
+  for (let i = 0; i < aLeft.length; i++) {
+    if (!tryAugment(i, new Array<boolean>(bLeft.length).fill(false)))
+      return undefined;
+  }
+  return true;
+}
+
 export function evaluateAnd(
   args: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }

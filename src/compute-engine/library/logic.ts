@@ -7,6 +7,7 @@ import type {
   EvaluateOptions,
 } from '../global-types.js';
 import {
+  acEquivalentBoolean,
   evaluateAnd,
   evaluateOr,
   evaluateNot,
@@ -357,6 +358,14 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     // invokes, so effects inference does not project a held operand's latent
     // effects through the conjunction.
     invokes: false,
+    // "Option B" (user-ruled 2026-08-16): the VALUE is commutative even
+    // though the tree stays ordered. Permutation matching is restored via
+    // `commutativeMatch` (decoupled from the canonical sort `commutative`
+    // would impose), and `isEqual`/`isIdenticallyEqual` compare modulo
+    // permutation and nesting via the `eq` handler. `isSame` stays strictly
+    // syntactic and evaluation still short-circuits left to right.
+    commutativeMatch: true,
+    eq: (a, b, prover) => acEquivalentBoolean('And', a, b, prover),
     canonical: canonicalShortCircuit('And', true),
     evaluate: evaluateShortCircuit('And', decideAnd, evaluateAnd),
     evaluateAsync: evaluateShortCircuitAsync('And', decideAnd, evaluateAnd),
@@ -376,6 +385,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     // `Missing` operand propagates.
     missingBehavior: 'handle',
     invokes: false,
+    // "Option B" — see `And` above.
+    commutativeMatch: true,
+    eq: (a, b, prover) => acEquivalentBoolean('Or', a, b, prover),
     canonical: canonicalShortCircuit('Or', true),
     evaluate: evaluateShortCircuit('Or', decideOr, evaluateOr),
     evaluateAsync: evaluateShortCircuitAsync('Or', decideOr, evaluateOr),
