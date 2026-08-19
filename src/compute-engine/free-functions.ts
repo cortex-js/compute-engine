@@ -16,7 +16,11 @@ import {
   expandAll as expandAllExpr,
 } from './boxed-expression/expand.js';
 import { factorPolynomial as factorExpr } from './boxed-expression/factor.js';
-import { compile as compileExpr } from './compilation/compile-expression.js';
+import {
+  compile as compileExpr,
+  type CompileExpressionOptions,
+} from './compilation/compile-expression.js';
+import type { CompilationResult } from './compilation/types.js';
 
 let _defaultEngine: IComputeEngine | null = null;
 let _defaultEngineFactory: (() => IComputeEngine) | null = null;
@@ -166,9 +170,27 @@ export function factor(
   return factorExpr(toExpression(expr, options));
 }
 
+// The overloads mirror `compileExpr`'s: expressing the return as
+// `ReturnType<typeof compileExpr>` would instantiate the generic at its
+// constraint — `CompilationResult<string>`, losing the call site's target —
+// so the `T extends ExecutableTarget` conditional never sees a concrete
+// target and `run` types optional even for `javascript`. It would also lose
+// the `realOnly: true` overload that narrows `run`'s values to plain
+// numbers. The target name must flow through this wrapper's own type
+// parameter instead.
 export function compile<T extends string = 'javascript'>(
   expr: LatexString | ExpressionInput,
-  options?: Parameters<typeof compileExpr>[1] & { to?: T } & FreeFunctionOptions
-): ReturnType<typeof compileExpr> {
-  return compileExpr(toExpression(expr, options), options);
+  options: CompileExpressionOptions<T> & {
+    realOnly: true;
+  } & FreeFunctionOptions
+): CompilationResult<T, number>;
+export function compile<T extends string = 'javascript'>(
+  expr: LatexString | ExpressionInput,
+  options?: CompileExpressionOptions<T> & FreeFunctionOptions
+): CompilationResult<T>;
+export function compile<T extends string = 'javascript'>(
+  expr: LatexString | ExpressionInput,
+  options?: CompileExpressionOptions<T> & FreeFunctionOptions
+): CompilationResult<T> {
+  return compileExpr<T>(toExpression(expr, options), options);
 }

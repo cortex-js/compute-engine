@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **The root `compile()` export regained its precise result types.** Its
+  declared return type collapsed the target generic, so `run` was typed
+  optional even for executable targets such as `javascript`, and
+  `realOnly: true` no longer narrowed `run`'s values to plain `number` — a
+  type-precision regression against the internal target route
+  (`ce._getCompilationTarget(...).compile(...)`) that 0.116.0 told consumers
+  to migrate away from. The export's overloads now mirror the underlying
+  compile function's, so the target name flows through: `compile(expr).run`
+  is non-optional, `compile(expr, { realOnly: true }).run(...)` is a
+  `number`, and calling `run` unguarded on a source-only target (`python`)
+  is a type error. Runtime behavior was never affected. Reported by a
+  consumer at 0.116.0 adoption.
+
 ## 0.116.0 _2026-08-19_
 
 ### Breaking Changes
@@ -153,6 +170,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
 - Complex mode now treats broad or unannotated numeric inputs as complex-capable and promotes unknown-sign radicals consistently.
 - JavaScript runners now validate incoming values against the shapes used during compilation. For example, a complex object passed to a real-analyzed binding throws a clear `TypeError`.
 - Fixed compiled complex behavior for multi-clause functions, protocol methods, fallback evaluation, real-only special functions and promoted radicals.
+- _(Recorded after release.)_ A compiled `Reduce` or `Scan` whose accumulator becomes complex mid-fold through an unknown-sign radical — for example `Reduce([4, -4], (a, x) -> a + sqrt(x), 0)` — returned `success: true` with `value: null` in 0.114.0. The complex-mode migration in this release fixed it (the radical now promotes and the fold computes `{re: 2, im: 2}`, matching the interpreter). Documented here retroactively after a consumer traced the fix to this release; the change landed in commit `7cfa95b4`.
 
 ### Epsil
 

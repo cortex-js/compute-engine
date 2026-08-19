@@ -12,7 +12,7 @@ import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 
-type CompileExpressionOptions<T extends string = string> = {
+export type CompileExpressionOptions<T extends string = string> = {
   to?: T;
   target?: CompileTarget<Expression>;
   operators?:

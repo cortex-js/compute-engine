@@ -4,7 +4,7 @@
 
 <MemberCard>
 
-### AngularUnit
+### AngularUnit {#angularunit}
 
 ```ts
 type AngularUnit = "rad" | "deg" | "grad" | "turn";
@@ -30,7 +30,7 @@ ce.angularUnit = 'deg';
 
 <MemberCard>
 
-### AssignValue
+### AssignValue {#assignvalue}
 
 ```ts
 type AssignValue = KernelAssignValue<Expression, ExpressionInput, IComputeEngine>;
@@ -40,7 +40,7 @@ Assignable value for `ce.assign()`.
 
 </MemberCard>
 
-### ~~ExpressionComputeEngine~~
+### ~~ExpressionComputeEngine~~ {#expressioncomputeengine}
 
 Compute engine surface used by expression types.
 
@@ -59,7 +59,7 @@ this alias will be removed in a future release.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~latexSyntax~~
+##### ExpressionComputeEngine.~~latexSyntax~~ {#latexsyntax-1}
 
 ```ts
 readonly latexSyntax: ILatexSyntax | undefined;
@@ -72,7 +72,7 @@ The LatexSyntax instance used for LaTeX parsing/serialization.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~latexOptions~~
+##### ExpressionComputeEngine.~~latexOptions~~ {#latexoptions-1}
 
 ```ts
 latexOptions: Partial<ParseLatexOptions & SerializeLatexOptions>;
@@ -86,7 +86,7 @@ Engine-wide LaTeX parse/serialize options (e.g. `decimalSeparator`).
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~True~~
+##### ExpressionComputeEngine.~~True~~ {#true-1}
 
 ```ts
 readonly True: Expression;
@@ -96,7 +96,7 @@ readonly True: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~False~~
+##### ExpressionComputeEngine.~~False~~ {#false-1}
 
 ```ts
 readonly False: Expression;
@@ -106,7 +106,7 @@ readonly False: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Pi~~
+##### ExpressionComputeEngine.~~Pi~~ {#pi-1}
 
 ```ts
 readonly Pi: Expression;
@@ -116,7 +116,7 @@ readonly Pi: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~E~~
+##### ExpressionComputeEngine.~~E~~ {#e-1}
 
 ```ts
 readonly E: Expression;
@@ -126,7 +126,7 @@ readonly E: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Nothing~~
+##### ExpressionComputeEngine.~~Nothing~~ {#nothing-1}
 
 ```ts
 readonly Nothing: Expression;
@@ -136,7 +136,7 @@ readonly Nothing: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Missing~~
+##### ExpressionComputeEngine.~~Missing~~ {#missing-1}
 
 ```ts
 readonly Missing: Expression;
@@ -148,7 +148,7 @@ The `Missing` symbol: an absent value whose position is preserved.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Zero~~
+##### ExpressionComputeEngine.~~Zero~~ {#zero-1}
 
 ```ts
 readonly Zero: Expression;
@@ -158,7 +158,7 @@ readonly Zero: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~One~~
+##### ExpressionComputeEngine.~~One~~ {#one-1}
 
 ```ts
 readonly One: Expression;
@@ -168,7 +168,7 @@ readonly One: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Half~~
+##### ExpressionComputeEngine.~~Half~~ {#half-1}
 
 ```ts
 readonly Half: Expression;
@@ -178,7 +178,7 @@ readonly Half: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~NegativeOne~~
+##### ExpressionComputeEngine.~~NegativeOne~~ {#negativeone-1}
 
 ```ts
 readonly NegativeOne: Expression;
@@ -188,7 +188,7 @@ readonly NegativeOne: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Two~~
+##### ExpressionComputeEngine.~~Two~~ {#two-1}
 
 ```ts
 readonly Two: Expression;
@@ -198,7 +198,7 @@ readonly Two: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~I~~
+##### ExpressionComputeEngine.~~I~~ {#i-1}
 
 ```ts
 readonly I: Expression;
@@ -210,7 +210,7 @@ ImaginaryUnit
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~NaN~~
+##### ExpressionComputeEngine.~~NaN~~ {#nan-1}
 
 ```ts
 readonly NaN: Expression;
@@ -220,7 +220,7 @@ readonly NaN: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~PositiveInfinity~~
+##### ExpressionComputeEngine.~~PositiveInfinity~~ {#positiveinfinity-2}
 
 ```ts
 readonly PositiveInfinity: Expression;
@@ -230,7 +230,7 @@ readonly PositiveInfinity: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~NegativeInfinity~~
+##### ExpressionComputeEngine.~~NegativeInfinity~~ {#negativeinfinity-2}
 
 ```ts
 readonly NegativeInfinity: Expression;
@@ -240,7 +240,7 @@ readonly NegativeInfinity: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~ComplexInfinity~~
+##### ExpressionComputeEngine.~~ComplexInfinity~~ {#complexinfinity-1}
 
 ```ts
 readonly ComplexInfinity: Expression;
@@ -250,7 +250,7 @@ readonly ComplexInfinity: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~context~~
+##### ExpressionComputeEngine.~~context~~ {#context-1}
 
 ```ts
 readonly context: EvalContext;
@@ -260,7 +260,7 @@ readonly context: EvalContext;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~contextStack~~
+##### ExpressionComputeEngine.~~contextStack~~ {#contextstack-1}
 
 ```ts
 contextStack: readonly EvalContext[];
@@ -270,7 +270,7 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~iterationLimit~~
+##### ExpressionComputeEngine.~~iterationLimit~~ {#iterationlimit-1}
 
 ```ts
 iterationLimit: number;
@@ -280,7 +280,7 @@ iterationLimit: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~recursionLimit~~
+##### ExpressionComputeEngine.~~recursionLimit~~ {#recursionlimit-1}
 
 ```ts
 recursionLimit: number;
@@ -290,7 +290,7 @@ recursionLimit: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~maxCollectionSize~~
+##### ExpressionComputeEngine.~~maxCollectionSize~~ {#maxcollectionsize-1}
 
 ```ts
 maxCollectionSize: number;
@@ -300,7 +300,7 @@ maxCollectionSize: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~bignum~~
+##### ExpressionComputeEngine.~~bignum~~ {#bignum-2}
 
 ```ts
 bignum: (a) => BigDecimal;
@@ -310,7 +310,7 @@ bignum: (a) => BigDecimal;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~complex~~
+##### ExpressionComputeEngine.~~complex~~ {#complex-1}
 
 ```ts
 complex: (a, b?) => Complex;
@@ -320,7 +320,7 @@ complex: (a, b?) => Complex;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~tolerance~~
+##### ExpressionComputeEngine.~~tolerance~~ {#tolerance-1}
 
 ```ts
 tolerance: number;
@@ -330,7 +330,7 @@ tolerance: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~angularUnit~~
+##### ExpressionComputeEngine.~~angularUnit~~ {#angularunit-2}
 
 ```ts
 angularUnit: AngularUnit;
@@ -340,7 +340,7 @@ angularUnit: AngularUnit;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~costFunction~~
+##### ExpressionComputeEngine.~~costFunction~~ {#costfunction-2}
 
 ```ts
 costFunction: (expr) => number;
@@ -350,7 +350,7 @@ costFunction: (expr) => number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~simplificationRules~~
+##### ExpressionComputeEngine.~~simplificationRules~~ {#simplificationrules-1}
 
 ```ts
 simplificationRules: Rule[];
@@ -364,7 +364,7 @@ The rules used by `.simplify()` when no explicit `rules` option is passed.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~solveRules~~
+##### ExpressionComputeEngine.~~solveRules~~ {#solverules-1}
 
 ```ts
 solveRules: Rule[];
@@ -383,7 +383,7 @@ The rules used by `solve()` to find roots of univariate expressions.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~harmonizationRules~~
+##### ExpressionComputeEngine.~~harmonizationRules~~ {#harmonizationrules-1}
 
 ```ts
 harmonizationRules: Rule[];
@@ -397,7 +397,7 @@ The rules used by `solve()` to transform an equation into equivalent,
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~strict~~
+##### ExpressionComputeEngine.~~strict~~ {#strict-1}
 
 ```ts
 strict: boolean;
@@ -407,7 +407,7 @@ strict: boolean;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~jit~~
+##### ExpressionComputeEngine.~~jit~~ {#jit-1}
 
 ```ts
 jit: "auto" | "off";
@@ -423,7 +423,7 @@ compilation and latches to `'off'` engine-wide on the first CSP
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~trace~~
+##### ExpressionComputeEngine.~~trace~~ {#trace-1}
 
 ```ts
 trace: readonly string[];
@@ -435,7 +435,7 @@ A list of the function calls to the current evaluation context
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~precision~~
+##### ExpressionComputeEngine.~~precision~~ {#precision-1}
 
 ```ts
 get precision(): number
@@ -446,7 +446,7 @@ set precision(p: number | "auto" | "machine"): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~checkpoint()~~
+##### ExpressionComputeEngine.~~checkpoint()~~ {#checkpoint-1}
 
 ```ts
 checkpoint(label?): EngineCheckpoint
@@ -470,7 +470,7 @@ checkpoint was taken on.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~restore()~~
+##### ExpressionComputeEngine.~~restore()~~ {#restore-1}
 
 ```ts
 restore(cp): void
@@ -490,7 +490,7 @@ artifacts, never as live boxed nodes.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~discard()~~
+##### ExpressionComputeEngine.~~discard()~~ {#discard-1}
 
 ```ts
 discard(cp): void
@@ -508,7 +508,7 @@ OLDEST makes the state before the next-younger one unreachable.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~declareProtocol()~~
+##### ExpressionComputeEngine.~~declareProtocol()~~ {#declareprotocol-1}
 
 ```ts
 declareProtocol(name, members): void
@@ -529,7 +529,7 @@ on re-declaration — the Epsil statement route replaces instead (P5).
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~declareProtocolImplementation()~~
+##### ExpressionComputeEngine.~~declareProtocolImplementation()~~ {#declareprotocolimplementation-1}
 
 ```ts
 declareProtocolImplementation(
@@ -579,7 +579,7 @@ throws.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~withTimeLimit()~~
+##### ExpressionComputeEngine.~~withTimeLimit()~~ {#withtimelimit-1}
 
 ```ts
 withTimeLimit<T>(limit, fn): T
@@ -615,7 +615,7 @@ that point runs **outside** the deadline and is never cancelled (see
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~chop()~~
+##### ExpressionComputeEngine.~~chop()~~ {#chop-1}
 
 ###### chop(n)
 
@@ -651,7 +651,7 @@ chop(n): number | BigDecimal
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~expr()~~
+##### ExpressionComputeEngine.~~expr()~~ {#expr-3}
 
 ```ts
 expr(expr, options?): Expression
@@ -676,7 +676,7 @@ expr(expr, options?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~box()~~
+##### ExpressionComputeEngine.~~box()~~ {#box-1}
 
 ```ts
 box(expr, options?): Expression
@@ -705,7 +705,7 @@ Use `expr()` instead.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~parse()~~
+##### ExpressionComputeEngine.~~parse()~~ {#parse-2}
 
 ###### parse(latex, options)
 
@@ -770,7 +770,7 @@ parse(latex, options?): Expression | null
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~appliedNonFunctions()~~
+##### ExpressionComputeEngine.~~appliedNonFunctions()~~ {#appliednonfunctions-1}
 
 ```ts
 appliedNonFunctions(latex): string[]
@@ -796,7 +796,7 @@ juxtaposition analysis.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~function()~~
+##### ExpressionComputeEngine.~~function()~~ {#function-1}
 
 ```ts
 function(name, ops, options?): Expression
@@ -828,7 +828,7 @@ readonly [`ExpressionInput`](#expressioninput)[]
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~\_getCompilationTarget()~~
+##### ExpressionComputeEngine.~~\_getCompilationTarget()~~ {#_getcompilationtarget-1}
 
 ###### \_getCompilationTarget(name)
 
@@ -858,7 +858,7 @@ _getCompilationTarget(name):
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~number()~~
+##### ExpressionComputeEngine.~~number()~~ {#number-2}
 
 ```ts
 number(value, options?): Expression
@@ -889,7 +889,7 @@ number(value, options?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~symbol()~~
+##### ExpressionComputeEngine.~~symbol()~~ {#symbol-1}
 
 ```ts
 symbol(sym, options?): Expression
@@ -917,7 +917,7 @@ symbol(sym, options?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~string()~~
+##### ExpressionComputeEngine.~~string()~~ {#string-2}
 
 ```ts
 string(s, metadata?): Expression
@@ -935,7 +935,7 @@ string(s, metadata?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~character()~~
+##### ExpressionComputeEngine.~~character()~~ {#character-2}
 
 ```ts
 character(s, metadata?): Expression
@@ -959,7 +959,7 @@ it reports a diagnostic instead.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~error()~~
+##### ExpressionComputeEngine.~~error()~~ {#error-2}
 
 ```ts
 error(message, where?): Expression
@@ -977,7 +977,7 @@ error(message, where?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~typeError()~~
+##### ExpressionComputeEngine.~~typeError()~~ {#typeerror-1}
 
 ```ts
 typeError(expectedType, actualType, where?): Expression
@@ -1001,7 +1001,7 @@ typeError(expectedType, actualType, where?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~hold()~~
+##### ExpressionComputeEngine.~~hold()~~ {#hold-1}
 
 ```ts
 hold(expr): Expression
@@ -1015,7 +1015,7 @@ hold(expr): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~tuple()~~
+##### ExpressionComputeEngine.~~tuple()~~ {#tuple-1}
 
 ###### tuple(elements)
 
@@ -1041,7 +1041,7 @@ tuple(...elements): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~type()~~
+##### ExpressionComputeEngine.~~type()~~ {#type-9}
 
 ```ts
 type(type): BoxedType
@@ -1073,7 +1073,7 @@ type(type): BoxedType
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~rules()~~
+##### ExpressionComputeEngine.~~rules()~~ {#rules-2}
 
 ```ts
 rules(rules, options?): BoxedRuleSet
@@ -1100,7 +1100,7 @@ Default purpose applied to any rule in the set that doesn't carry
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getRuleSet()~~
+##### ExpressionComputeEngine.~~getRuleSet()~~ {#getruleset-1}
 
 ```ts
 getRuleSet(id?): BoxedRuleSet | undefined
@@ -1114,7 +1114,7 @@ getRuleSet(id?): BoxedRuleSet | undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~pushScope()~~
+##### ExpressionComputeEngine.~~pushScope()~~ {#pushscope-1}
 
 ```ts
 pushScope(scope?, name?): void
@@ -1132,7 +1132,7 @@ pushScope(scope?, name?): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~popScope()~~
+##### ExpressionComputeEngine.~~popScope()~~ {#popscope-1}
 
 ```ts
 popScope(): void
@@ -1142,7 +1142,7 @@ popScope(): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~createScope()~~
+##### ExpressionComputeEngine.~~createScope()~~ {#createscope-1}
 
 ```ts
 createScope(bindings?, parent?): InspectableScope
@@ -1180,7 +1180,7 @@ createScope(bindings?, parent?): InspectableScope
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~lookupDefinition()~~
+##### ExpressionComputeEngine.~~lookupDefinition()~~ {#lookupdefinition-1}
 
 ```ts
 lookupDefinition(id): BoxedDefinition | undefined
@@ -1194,7 +1194,7 @@ lookupDefinition(id): BoxedDefinition | undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~assign()~~
+##### ExpressionComputeEngine.~~assign()~~ {#assign-1}
 
 ###### assign(ids)
 
@@ -1236,7 +1236,7 @@ assign(arg1, arg2?): IComputeEngine
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~declareType()~~
+##### ExpressionComputeEngine.~~declareType()~~ {#declaretype-1}
 
 ```ts
 declareType(name, type, options?): void
@@ -1290,7 +1290,7 @@ declareType(name, type, options?): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~declare()~~
+##### ExpressionComputeEngine.~~declare()~~ {#declare-1}
 
 ###### declare(symbols)
 
@@ -1738,7 +1738,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~assume()~~
+##### ExpressionComputeEngine.~~assume()~~ {#assume-1}
 
 ```ts
 assume(predicate): AssumeResult
@@ -1752,7 +1752,7 @@ assume(predicate): AssumeResult
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~declareSequence()~~
+##### ExpressionComputeEngine.~~declareSequence()~~ {#declaresequence-1}
 
 ```ts
 declareSequence(name, def): IComputeEngine
@@ -1783,7 +1783,7 @@ ce.parse('F_{10}').evaluate();  // → 55
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getSequenceStatus()~~
+##### ExpressionComputeEngine.~~getSequenceStatus()~~ {#getsequencestatus-1}
 
 ```ts
 getSequenceStatus(name): SequenceStatus
@@ -1807,7 +1807,7 @@ ce.getSequenceStatus('F');
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getSequence()~~
+##### ExpressionComputeEngine.~~getSequence()~~ {#getsequence-1}
 
 ```ts
 getSequence(name): SequenceInfo | undefined
@@ -1824,7 +1824,7 @@ Returns `undefined` if the symbol is not a sequence.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~listSequences()~~
+##### ExpressionComputeEngine.~~listSequences()~~ {#listsequences-1}
 
 ```ts
 listSequences(): string[]
@@ -1837,7 +1837,7 @@ Returns an array of sequence names.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~isSequence()~~
+##### ExpressionComputeEngine.~~isSequence()~~ {#issequence-1}
 
 ```ts
 isSequence(name): boolean
@@ -1853,7 +1853,7 @@ Check if a symbol is a defined sequence.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~clearSequenceCache()~~
+##### ExpressionComputeEngine.~~clearSequenceCache()~~ {#clearsequencecache-1}
 
 ```ts
 clearSequenceCache(name?): void
@@ -1870,7 +1870,7 @@ If no name is provided, clears caches for all sequences.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getSequenceCache()~~
+##### ExpressionComputeEngine.~~getSequenceCache()~~ {#getsequencecache-1}
 
 ```ts
 getSequenceCache(name): 
@@ -1892,7 +1892,7 @@ For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getSequenceTerms()~~
+##### ExpressionComputeEngine.~~getSequenceTerms()~~ {#getsequenceterms-1}
 
 ```ts
 getSequenceTerms(
@@ -1940,7 +1940,7 @@ ce.getSequenceTerms('F', 0, 10);
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~lookupOEIS()~~
+##### ExpressionComputeEngine.~~lookupOEIS()~~ {#lookupoeis-1}
 
 ```ts
 lookupOEIS(terms, options?): Promise<OEISSequenceInfo[]>
@@ -1971,7 +1971,7 @@ const results = await ce.lookupOEIS([0, 1, 1, 2, 3, 5, 8, 13]);
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~checkSequenceOEIS()~~
+##### ExpressionComputeEngine.~~checkSequenceOEIS()~~ {#checksequenceoeis-1}
 
 ```ts
 checkSequenceOEIS(name, count?, options?): Promise<{
@@ -2012,7 +2012,7 @@ const result = await ce.checkSequenceOEIS('F', 10);
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~interpret()~~
+##### ExpressionComputeEngine.~~interpret()~~ {#interpret-1}
 
 ```ts
 interpret(expr, options?): Promise<InterpretResult>
@@ -2052,7 +2052,7 @@ const { expression, candidates } = await ce.interpret(
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~forget()~~
+##### ExpressionComputeEngine.~~forget()~~ {#forget-1}
 
 ```ts
 forget(symbol?): void
@@ -2066,7 +2066,7 @@ forget(symbol?): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~ask()~~
+##### ExpressionComputeEngine.~~ask()~~ {#ask-1}
 
 ```ts
 ask(pattern): BoxedSubstitution[]
@@ -2080,7 +2080,7 @@ ask(pattern): BoxedSubstitution[]
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~verify()~~
+##### ExpressionComputeEngine.~~verify()~~ {#verify-1}
 
 ```ts
 verify(query): boolean | undefined
@@ -2094,7 +2094,7 @@ verify(query): boolean | undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~operatorInfo()~~
+##### ExpressionComputeEngine.~~operatorInfo()~~ {#operatorinfo-2}
 
 ```ts
 operatorInfo(head): OperatorInfo | undefined
@@ -2119,7 +2119,7 @@ maintaining a parallel list of "known" operators.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~normalizeIdentifier()~~
+##### ExpressionComputeEngine.~~normalizeIdentifier()~~ {#normalizeidentifier-1}
 
 ```ts
 normalizeIdentifier(latex): string
@@ -2145,7 +2145,7 @@ name without the side-effect of auto-declaring the symbol.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~symbolInfo()~~
+##### ExpressionComputeEngine.~~symbolInfo()~~ {#symbolinfo-2}
 
 ```ts
 symbolInfo(name): SymbolInfo | undefined
@@ -2171,7 +2171,7 @@ two methods are non-overlapping).
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~searchDefinitions()~~
+##### ExpressionComputeEngine.~~searchDefinitions()~~ {#searchdefinitions-1}
 
 ```ts
 searchDefinitions(query, options?): DefinitionSearchResult[]
@@ -2203,7 +2203,7 @@ call for full detail.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~suggestOperatorName()~~
+##### ExpressionComputeEngine.~~suggestOperatorName()~~ {#suggestoperatorname-1}
 
 ```ts
 suggestOperatorName(name): string | undefined
@@ -2232,7 +2232,7 @@ ce.suggestOperatorName('foo');      // → undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~functionProperties()~~
+##### ExpressionComputeEngine.~~functionProperties()~~ {#functionproperties-2}
 
 ```ts
 functionProperties(name): FunctionProperties | undefined
@@ -2258,7 +2258,7 @@ residues that depend on parameters) are available via `entries`.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~toJSON()~~
+##### ExpressionComputeEngine.~~toJSON()~~ {#tojson-3}
 
 ```ts
 toJSON(): string
@@ -2272,7 +2272,7 @@ Debug representation, e.g. for `JSON.stringify()`.
 
 <MemberCard>
 
-### SimplifyOptions
+### SimplifyOptions {#simplifyoptions}
 
 ```ts
 type SimplifyOptions = {
@@ -2288,7 +2288,7 @@ Options for `Expression.simplify()`
 
 <MemberCard>
 
-### ExplainOptions
+### ExplainOptions {#explainoptions}
 
 ```ts
 type ExplainOptions = SimplifyOptions & {
@@ -2318,7 +2318,7 @@ matches `simplify(options)`):
 
 <MemberCard>
 
-### EvaluateOptions
+### EvaluateOptions {#evaluateoptions}
 
 ```ts
 type EvaluateOptions = KernelEvaluateOptions;
@@ -2332,7 +2332,7 @@ This is the compute-engine-specialized form of the generic kernel type.
 
 <MemberCard>
 
-### IntervalBounds
+### IntervalBounds {#intervalbounds}
 
 ```ts
 type IntervalBounds = {
@@ -2350,7 +2350,7 @@ Lower and upper bounds for a symbol extracted from a domain restriction.
 
 </MemberCard>
 
-### NumberLiteralInterface
+### NumberLiteralInterface {#numberliteralinterface}
 
 Narrowed interface for number literal expressions.
 
@@ -2358,7 +2358,7 @@ Obtained via `isNumber()`.
 
 <MemberCard>
 
-##### NumberLiteralInterface.numericValue
+##### NumberLiteralInterface.numericValue {#numericvalue}
 
 ```ts
 readonly numericValue: number | NumericValue;
@@ -2368,7 +2368,7 @@ readonly numericValue: number | NumericValue;
 
 <MemberCard>
 
-##### NumberLiteralInterface.isExact
+##### NumberLiteralInterface.isExact {#isexact-1}
 
 ```ts
 readonly isExact: boolean;
@@ -2378,7 +2378,7 @@ readonly isExact: boolean;
 
 <MemberCard>
 
-##### NumberLiteralInterface.isNumberLiteral
+##### NumberLiteralInterface.isNumberLiteral {#isnumberliteral}
 
 ```ts
 readonly isNumberLiteral: true;
@@ -2386,7 +2386,7 @@ readonly isNumberLiteral: true;
 
 </MemberCard>
 
-### SymbolInterface
+### SymbolInterface {#symbolinterface}
 
 Narrowed interface for symbol expressions.
 
@@ -2394,7 +2394,7 @@ Obtained via `isSymbol()`.
 
 <MemberCard>
 
-##### SymbolInterface.symbol
+##### SymbolInterface.symbol {#symbol-2}
 
 ```ts
 readonly symbol: string;
@@ -2402,7 +2402,7 @@ readonly symbol: string;
 
 </MemberCard>
 
-### FunctionInterface
+### FunctionInterface {#functioninterface}
 
 Narrowed interface for function expressions.
 
@@ -2410,7 +2410,7 @@ Obtained via `isFunction()`.
 
 <MemberCard>
 
-##### FunctionInterface.isFunctionExpression
+##### FunctionInterface.isFunctionExpression {#isfunctionexpression}
 
 ```ts
 readonly isFunctionExpression: true;
@@ -2420,7 +2420,7 @@ readonly isFunctionExpression: true;
 
 <MemberCard>
 
-##### FunctionInterface.ops
+##### FunctionInterface.ops {#ops-1}
 
 ```ts
 readonly ops: readonly Expression[];
@@ -2430,7 +2430,7 @@ readonly ops: readonly Expression[];
 
 <MemberCard>
 
-##### FunctionInterface.nops
+##### FunctionInterface.nops {#nops}
 
 ```ts
 readonly nops: number;
@@ -2440,7 +2440,7 @@ readonly nops: number;
 
 <MemberCard>
 
-##### FunctionInterface.op1
+##### FunctionInterface.op1 {#op1}
 
 ```ts
 readonly op1: Expression;
@@ -2450,7 +2450,7 @@ readonly op1: Expression;
 
 <MemberCard>
 
-##### FunctionInterface.op2
+##### FunctionInterface.op2 {#op2}
 
 ```ts
 readonly op2: Expression;
@@ -2460,7 +2460,7 @@ readonly op2: Expression;
 
 <MemberCard>
 
-##### FunctionInterface.op3
+##### FunctionInterface.op3 {#op3}
 
 ```ts
 readonly op3: Expression;
@@ -2468,7 +2468,7 @@ readonly op3: Expression;
 
 </MemberCard>
 
-### StringInterface
+### StringInterface {#stringinterface}
 
 Narrowed interface for string expressions.
 
@@ -2476,7 +2476,7 @@ Obtained via `isString()`.
 
 <MemberCard>
 
-##### StringInterface.string
+##### StringInterface.string {#string-3}
 
 ```ts
 readonly string: string;
@@ -2486,7 +2486,7 @@ readonly string: string;
 
 <MemberCard>
 
-##### StringInterface.buffer
+##### StringInterface.buffer {#buffer}
 
 ```ts
 readonly buffer: Uint8Array;
@@ -2498,7 +2498,7 @@ The UTF-8 encoding of the string, as a byte buffer.
 
 <MemberCard>
 
-##### StringInterface.unicodeScalars
+##### StringInterface.unicodeScalars {#unicodescalars}
 
 ```ts
 readonly unicodeScalars: number[];
@@ -2508,7 +2508,7 @@ The Unicode scalar values (code points) of the string.
 
 </MemberCard>
 
-### CharacterInterface
+### CharacterInterface {#characterinterface}
 
 Narrowed interface for a character expression — one NFC-normalized grapheme
 cluster (UAX #29).
@@ -2522,7 +2522,7 @@ property without first deciding which it has.
 
 <MemberCard>
 
-##### CharacterInterface.string
+##### CharacterInterface.string {#string-4}
 
 ```ts
 readonly string: string;
@@ -2534,7 +2534,7 @@ The content of the character: exactly one grapheme cluster.
 
 <MemberCard>
 
-##### CharacterInterface.unicodeScalars
+##### CharacterInterface.unicodeScalars {#unicodescalars-1}
 
 ```ts
 readonly unicodeScalars: number[];
@@ -2544,7 +2544,7 @@ The Unicode scalar values (code points) of the cluster.
 
 </MemberCard>
 
-### TensorInterface
+### TensorInterface {#tensorinterface}
 
 Narrowed interface for tensor expressions.
 
@@ -2552,7 +2552,7 @@ Obtained via `isTensor()`.
 
 <MemberCard>
 
-##### TensorInterface.shape
+##### TensorInterface.shape {#shape-3}
 
 ```ts
 readonly shape: number[];
@@ -2562,7 +2562,7 @@ readonly shape: number[];
 
 <MemberCard>
 
-##### TensorInterface.rank
+##### TensorInterface.rank {#rank-3}
 
 ```ts
 readonly rank: number;
@@ -2570,7 +2570,7 @@ readonly rank: number;
 
 </MemberCard>
 
-### CollectionInterface
+### CollectionInterface {#collectioninterface}
 
 Narrowed interface for collection expressions.
 
@@ -2582,7 +2582,7 @@ Obtained via `isCollection()`.
 
 <MemberCard>
 
-##### CollectionInterface.isCollection
+##### CollectionInterface.isCollection {#iscollection-2}
 
 ```ts
 readonly isCollection: true;
@@ -2592,7 +2592,7 @@ readonly isCollection: true;
 
 <MemberCard>
 
-##### CollectionInterface.count
+##### CollectionInterface.count {#count-2}
 
 ```ts
 readonly count: number | undefined;
@@ -2602,7 +2602,7 @@ readonly count: number | undefined;
 
 <MemberCard>
 
-##### CollectionInterface.isFiniteCollection
+##### CollectionInterface.isFiniteCollection {#isfinitecollection-1}
 
 ```ts
 readonly isFiniteCollection: boolean | undefined;
@@ -2612,7 +2612,7 @@ readonly isFiniteCollection: boolean | undefined;
 
 <MemberCard>
 
-##### CollectionInterface.isEmptyCollection
+##### CollectionInterface.isEmptyCollection {#isemptycollection-1}
 
 ```ts
 readonly isEmptyCollection: boolean | undefined;
@@ -2622,7 +2622,7 @@ readonly isEmptyCollection: boolean | undefined;
 
 <MemberCard>
 
-##### CollectionInterface.isEnumerableCollection
+##### CollectionInterface.isEnumerableCollection {#isenumerablecollection-1}
 
 ```ts
 readonly isEnumerableCollection: boolean | undefined;
@@ -2632,7 +2632,7 @@ readonly isEnumerableCollection: boolean | undefined;
 
 <MemberCard>
 
-##### CollectionInterface.each()
+##### CollectionInterface.each() {#each-1}
 
 ```ts
 each(): Generator<Expression>
@@ -2642,7 +2642,7 @@ each(): Generator<Expression>
 
 <MemberCard>
 
-##### CollectionInterface.contains()
+##### CollectionInterface.contains() {#contains-2}
 
 ```ts
 contains(rhs): boolean | undefined
@@ -2656,7 +2656,7 @@ contains(rhs): boolean | undefined
 
 <MemberCard>
 
-##### CollectionInterface.subsetOf()
+##### CollectionInterface.subsetOf() {#subsetof-2}
 
 ```ts
 subsetOf(other, strict): boolean | undefined
@@ -2672,7 +2672,7 @@ subsetOf(other, strict): boolean | undefined
 
 </MemberCard>
 
-### IndexedCollectionInterface
+### IndexedCollectionInterface {#indexedcollectioninterface}
 
 Narrowed interface for indexed collection expressions (lists, vectors,
 matrices, tuples).
@@ -2685,7 +2685,7 @@ Obtained via `isIndexedCollection()`.
 
 <MemberCard>
 
-##### IndexedCollectionInterface.isIndexedCollection
+##### IndexedCollectionInterface.isIndexedCollection {#isindexedcollection-1}
 
 ```ts
 readonly isIndexedCollection: true;
@@ -2695,7 +2695,7 @@ readonly isIndexedCollection: true;
 
 <MemberCard>
 
-##### IndexedCollectionInterface.at()
+##### IndexedCollectionInterface.at() {#at-3}
 
 ```ts
 at(index): Expression | undefined
@@ -2709,7 +2709,7 @@ at(index): Expression | undefined
 
 <MemberCard>
 
-##### IndexedCollectionInterface.indexWhere()
+##### IndexedCollectionInterface.indexWhere() {#indexwhere-2}
 
 ```ts
 indexWhere(predicate): number | undefined
@@ -2723,7 +2723,7 @@ indexWhere(predicate): number | undefined
 
 <MemberCard>
 
-### ExpressionInput
+### ExpressionInput {#expressioninput}
 
 ```ts
 type ExpressionInput = 
@@ -2751,7 +2751,7 @@ of an existing `Expression` while avoiding unboxing and reboxing.
 
 </MemberCard>
 
-### ObjectInterface
+### ObjectInterface {#objectinterface}
 
 Narrowed interface for **object** expressions — the engine's one mutable
 value kind (a reference to a record whose stored fields can be changed in
@@ -2771,7 +2771,7 @@ semantics: `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B.
 
 <MemberCard>
 
-##### ObjectInterface.typeName
+##### ObjectInterface.typeName {#typename}
 
 ```ts
 readonly typeName: string;
@@ -2786,7 +2786,7 @@ and `CircularReference` markers).
 
 <MemberCard>
 
-### ReplaceOptions
+### ReplaceOptions {#replaceoptions}
 
 ```ts
 type ReplaceOptions = {
@@ -2807,7 +2807,7 @@ Options for `Expression.replace()`.
 
 <MemberCard>
 
-### CanonicalForm
+### CanonicalForm {#canonicalform}
 
 ```ts
 type CanonicalForm = 
@@ -2827,7 +2827,7 @@ Canonical normalization transforms.
 
 <MemberCard>
 
-### CanonicalOptions
+### CanonicalOptions {#canonicaloptions}
 
 ```ts
 type CanonicalOptions = 
@@ -2840,7 +2840,7 @@ type CanonicalOptions =
 
 <MemberCard>
 
-### FormOption
+### FormOption {#formoption}
 
 ```ts
 type FormOption = 
@@ -2857,7 +2857,7 @@ Controls how expressions are created.
 
 <MemberCard>
 
-### Metadata
+### Metadata {#metadata-1}
 
 ```ts
 type Metadata = {
@@ -2875,7 +2875,7 @@ Metadata that can be associated with a MathJSON expression.
 
 <MemberCard>
 
-### Substitution
+### Substitution {#substitution}
 
 ```ts
 type Substitution<T> = KernelSubstitution<T>;
@@ -2895,7 +2895,7 @@ rule whose `match` is always a symbol.
 
 <MemberCard>
 
-### BoxedSubstitution
+### BoxedSubstitution {#boxedsubstitution}
 
 ```ts
 type BoxedSubstitution<T> = KernelBoxedSubstitution<T>;
@@ -2909,7 +2909,7 @@ type BoxedSubstitution<T> = KernelBoxedSubstitution<T>;
 
 <MemberCard>
 
-### PatternMatchOptions
+### PatternMatchOptions {#patternmatchoptions}
 
 ```ts
 type PatternMatchOptions<T> = KernelPatternMatchOptions<T>;
@@ -2927,7 +2927,7 @@ Control how a pattern is matched to an expression.
 
 <MemberCard>
 
-### RuleReplaceFunction
+### RuleReplaceFunction {#rulereplacefunction}
 
 ```ts
 type RuleReplaceFunction = KernelRuleReplaceFunction<Expression>;
@@ -2939,7 +2939,7 @@ Rule replacement callback specialized to boxed expressions.
 
 <MemberCard>
 
-### RuleConditionFunction
+### RuleConditionFunction {#ruleconditionfunction}
 
 ```ts
 type RuleConditionFunction = KernelRuleConditionFunction<Expression, IComputeEngine>;
@@ -2951,7 +2951,7 @@ Rule condition callback with access to the compute engine.
 
 <MemberCard>
 
-### RuleFunction
+### RuleFunction {#rulefunction}
 
 ```ts
 type RuleFunction = KernelRuleFunction<Expression>;
@@ -2963,7 +2963,7 @@ Dynamic rule callback.
 
 <MemberCard>
 
-### Rule
+### Rule {#rule}
 
 ```ts
 type Rule = KernelRule<Expression, ExpressionInput, IComputeEngine>;
@@ -2975,7 +2975,7 @@ Rule declaration specialized to boxed expression and compute engine types.
 
 <MemberCard>
 
-### RulePurpose
+### RulePurpose {#rulepurpose}
 
 ```ts
 type RulePurpose = "simplify" | "transform" | "expand";
@@ -2995,7 +2995,7 @@ the simplification cost policy:
 
 <MemberCard>
 
-### ExplainOperation
+### ExplainOperation {#explainoperation}
 
 ```ts
 type ExplainOperation = "simplify" | "solve" | "D" | "Integrate";
@@ -3007,7 +3007,7 @@ The operation that an `Explanation` traces. See `expr.explain()`.
 
 <MemberCard>
 
-### ExplainVerbosity
+### ExplainVerbosity {#explainverbosity}
 
 ```ts
 type ExplainVerbosity = "default" | "all";
@@ -3025,7 +3025,7 @@ How much of the raw rule trace `expr.explain()` returns:
 
 <MemberCard>
 
-### ExpressionMapInterface
+### ExpressionMapInterface {#expressionmapinterface}
 
 ```ts
 type ExpressionMapInterface<U> = KernelExpressionMapInterface<U, Expression>;
@@ -3041,7 +3041,7 @@ Map-like interface keyed by boxed expressions.
 
 <MemberCard>
 
-### Assumption
+### Assumption {#assumption}
 
 ```ts
 type Assumption = KernelAssumption<Expression, IComputeEngine>;
@@ -3053,7 +3053,7 @@ Assumption predicates bound to this compute engine.
 
 <MemberCard>
 
-### AssumeResult
+### AssumeResult {#assumeresult}
 
 ```ts
 type AssumeResult = 
@@ -3070,7 +3070,7 @@ type AssumeResult =
 
 <MemberCard>
 
-### CompiledType
+### CompiledType {#compiledtype}
 
 ```ts
 type CompiledType = boolean | number | string | object;
@@ -3080,7 +3080,7 @@ type CompiledType = boolean | number | string | object;
 
 <MemberCard>
 
-### JSSource
+### JSSource {#jssource}
 
 ```ts
 type JSSource = string;
@@ -3090,7 +3090,7 @@ type JSSource = string;
 
 <MemberCard>
 
-### CompiledExpression
+### CompiledExpression {#compiledexpression}
 
 ```ts
 type CompiledExpression = {
@@ -3102,7 +3102,7 @@ type CompiledExpression = {
 
 <MemberCard>
 
-### OperatorCompileContext
+### OperatorCompileContext {#operatorcompilecontext}
 
 ```ts
 type OperatorCompileContext = {
@@ -3118,7 +3118,7 @@ target-specific source without exposing the full internal machinery.
 
 <MemberCard>
 
-### OperatorCompileHandler
+### OperatorCompileHandler {#operatorcompilehandler}
 
 ```ts
 type OperatorCompileHandler = (args, compile, context) => string | undefined;
@@ -3158,7 +3158,7 @@ ce.declare('MyGcd', {
 
 <MemberCard>
 
-### EvaluateHandlerOptions
+### EvaluateHandlerOptions {#evaluatehandleroptions}
 
 ```ts
 type EvaluateHandlerOptions = Partial<EvaluateOptions> & {
@@ -3212,7 +3212,7 @@ invoked outside the evaluation driver may not receive one).
 
 <MemberCard>
 
-### ValueDefinition
+### ValueDefinition {#valuedefinition}
 
 ```ts
 type ValueDefinition = BaseDefinition & {
@@ -3308,7 +3308,7 @@ Contains the compute engine and evaluation options
 
 </MemberCard>
 
-### SequenceDefinition
+### SequenceDefinition {#sequencedefinition}
 
 Definition for a sequence declared with `ce.declareSequence()`.
 
@@ -3327,7 +3327,7 @@ ce.parse('F_{10}').evaluate();  // → 55
 
 <MemberCard>
 
-##### SequenceDefinition.variable?
+##### SequenceDefinition.variable? {#variable}
 
 ```ts
 optional variable?: string;
@@ -3340,7 +3340,7 @@ For multi-index sequences, use `variables` instead.
 
 <MemberCard>
 
-##### SequenceDefinition.variables?
+##### SequenceDefinition.variables? {#variables}
 
 ```ts
 optional variables?: string[];
@@ -3355,7 +3355,7 @@ If provided, this takes precedence over `variable`.
 
 <MemberCard>
 
-##### SequenceDefinition.base
+##### SequenceDefinition.base {#base}
 
 ```ts
 base: Record<number | string, number | Expression>;
@@ -3384,7 +3384,7 @@ variable appears multiple times (e.g., 'n,n'), the indices must be equal.
 
 <MemberCard>
 
-##### SequenceDefinition.recurrence
+##### SequenceDefinition.recurrence {#recurrence}
 
 ```ts
 recurrence: string | Expression;
@@ -3396,7 +3396,7 @@ Recurrence relation as LaTeX string or Expression
 
 <MemberCard>
 
-##### SequenceDefinition.memoize?
+##### SequenceDefinition.memoize? {#memoize}
 
 ```ts
 optional memoize?: boolean;
@@ -3408,7 +3408,7 @@ Whether to memoize computed values (default: true)
 
 <MemberCard>
 
-##### SequenceDefinition.domain?
+##### SequenceDefinition.domain? {#domain-1}
 
 ```ts
 optional domain?: 
@@ -3438,7 +3438,7 @@ domain: { n: { min: 0 }, k: { min: 0 } }
 
 <MemberCard>
 
-##### SequenceDefinition.constraints?
+##### SequenceDefinition.constraints? {#constraints}
 
 ```ts
 optional constraints?: string | Expression;
@@ -3452,13 +3452,13 @@ Example: `'k <= n'` for Pascal's triangle (only valid when k ≤ n)
 
 </MemberCard>
 
-### SequenceStatus
+### SequenceStatus {#sequencestatus}
 
 Status of a sequence definition.
 
 <MemberCard>
 
-##### SequenceStatus.status
+##### SequenceStatus.status {#status}
 
 ```ts
 status: "complete" | "pending" | "not-a-sequence";
@@ -3473,7 +3473,7 @@ Status of the sequence:
 
 <MemberCard>
 
-##### SequenceStatus.hasBase
+##### SequenceStatus.hasBase {#hasbase}
 
 ```ts
 hasBase: boolean;
@@ -3485,7 +3485,7 @@ Whether at least one base case is defined
 
 <MemberCard>
 
-##### SequenceStatus.hasRecurrence
+##### SequenceStatus.hasRecurrence {#hasrecurrence}
 
 ```ts
 hasRecurrence: boolean;
@@ -3497,7 +3497,7 @@ Whether a recurrence relation is defined
 
 <MemberCard>
 
-##### SequenceStatus.baseIndices
+##### SequenceStatus.baseIndices {#baseindices}
 
 ```ts
 baseIndices: (string | number)[];
@@ -3511,7 +3511,7 @@ For multi-index: string keys including patterns (e.g., ['0,0', 'n,0', 'n,n'])
 
 <MemberCard>
 
-##### SequenceStatus.variable?
+##### SequenceStatus.variable? {#variable-1}
 
 ```ts
 optional variable?: string;
@@ -3523,7 +3523,7 @@ Index variable name if recurrence is defined (single-index)
 
 <MemberCard>
 
-##### SequenceStatus.variables?
+##### SequenceStatus.variables? {#variables-1}
 
 ```ts
 optional variables?: string[];
@@ -3533,13 +3533,13 @@ Index variable names if recurrence is defined (multi-index)
 
 </MemberCard>
 
-### SequenceInfo
+### SequenceInfo {#sequenceinfo}
 
 Information about a defined sequence for introspection.
 
 <MemberCard>
 
-##### SequenceInfo.name
+##### SequenceInfo.name {#name-1}
 
 ```ts
 name: string;
@@ -3551,7 +3551,7 @@ The sequence name
 
 <MemberCard>
 
-##### SequenceInfo.variable?
+##### SequenceInfo.variable? {#variable-2}
 
 ```ts
 optional variable?: string;
@@ -3563,7 +3563,7 @@ Index variable name for single-index sequences (e.g., `"n"`)
 
 <MemberCard>
 
-##### SequenceInfo.variables?
+##### SequenceInfo.variables? {#variables-2}
 
 ```ts
 optional variables?: string[];
@@ -3575,7 +3575,7 @@ Index variable names for multi-index sequences (e.g., `["n", "k"]`)
 
 <MemberCard>
 
-##### SequenceInfo.baseIndices
+##### SequenceInfo.baseIndices {#baseindices-1}
 
 ```ts
 baseIndices: (string | number)[];
@@ -3589,7 +3589,7 @@ For multi-index: string keys including patterns
 
 <MemberCard>
 
-##### SequenceInfo.memoize
+##### SequenceInfo.memoize {#memoize-1}
 
 ```ts
 memoize: boolean;
@@ -3601,7 +3601,7 @@ Whether memoization is enabled
 
 <MemberCard>
 
-##### SequenceInfo.domain
+##### SequenceInfo.domain {#domain-2}
 
 ```ts
 domain: 
@@ -3623,7 +3623,7 @@ For multi-index: per-variable constraints
 
 <MemberCard>
 
-##### SequenceInfo.cacheSize
+##### SequenceInfo.cacheSize {#cachesize}
 
 ```ts
 cacheSize: number;
@@ -3635,7 +3635,7 @@ Number of cached values
 
 <MemberCard>
 
-##### SequenceInfo.isMultiIndex
+##### SequenceInfo.isMultiIndex {#ismultiindex}
 
 ```ts
 isMultiIndex: boolean;
@@ -3647,7 +3647,7 @@ Whether this is a multi-index sequence
 
 <MemberCard>
 
-### OperatorDefinition
+### OperatorDefinition {#operatordefinition}
 
 ```ts
 type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFlags> & {
@@ -4042,13 +4042,13 @@ a declared `count` owns the answer, including its `undefined`.
 
 </MemberCard>
 
-### BaseDefinition
+### BaseDefinition {#basedefinition}
 
 Metadata common to both symbols and functions.
 
 <MemberCard>
 
-##### BaseDefinition.description
+##### BaseDefinition.description {#description}
 
 ```ts
 description: string | string[];
@@ -4064,7 +4064,7 @@ May contain Markdown.
 
 <MemberCard>
 
-##### BaseDefinition.keywords?
+##### BaseDefinition.keywords? {#keywords}
 
 ```ts
 optional keywords?: string[];
@@ -4077,7 +4077,7 @@ Search keywords (synonyms, alternate names) used by
 
 <MemberCard>
 
-##### BaseDefinition.examples
+##### BaseDefinition.examples {#examples}
 
 ```ts
 examples: string | string[];
@@ -4092,7 +4092,7 @@ For example, `["Add", 1, 2]` or `$\\sin(\\pi/4)$`.
 
 <MemberCard>
 
-##### BaseDefinition.url
+##### BaseDefinition.url {#url-2}
 
 ```ts
 url: string;
@@ -4104,7 +4104,7 @@ A URL pointing to more information about this symbol or operator.
 
 <MemberCard>
 
-##### BaseDefinition.wikidata
+##### BaseDefinition.wikidata {#wikidata}
 
 ```ts
 wikidata: string;
@@ -4119,7 +4119,7 @@ for the `Pi` constant.
 
 <MemberCard>
 
-##### BaseDefinition.isConstant?
+##### BaseDefinition.isConstant? {#isconstant}
 
 ```ts
 readonly optional isConstant?: boolean;
@@ -4131,7 +4131,7 @@ If true, the value or type of the definition cannot be changed
 
 <MemberCard>
 
-### SymbolDefinition
+### SymbolDefinition {#symboldefinition}
 
 ```ts
 type SymbolDefinition = OneOf<[ValueDefinition, OperatorDefinition]>;
@@ -4150,7 +4150,7 @@ following rules are recommended:
 
 <MemberCard>
 
-### SymbolDefinitions
+### SymbolDefinitions {#symboldefinitions}
 
 ```ts
 type SymbolDefinitions = Readonly<{}>;
@@ -4158,7 +4158,7 @@ type SymbolDefinitions = Readonly<{}>;
 
 </MemberCard>
 
-### LibraryDefinition
+### LibraryDefinition {#librarydefinition}
 
 A library bundles symbol/operator definitions with their LaTeX dictionary
 entries and declares dependencies on other libraries.
@@ -4178,7 +4178,7 @@ const ce = new ComputeEngine({
 
 <MemberCard>
 
-##### LibraryDefinition.name
+##### LibraryDefinition.name {#name-4}
 
 ```ts
 name: string;
@@ -4190,7 +4190,7 @@ Library identifier
 
 <MemberCard>
 
-##### LibraryDefinition.requires?
+##### LibraryDefinition.requires? {#requires}
 
 ```ts
 optional requires?: string[];
@@ -4202,7 +4202,7 @@ Libraries that must be loaded before this one
 
 <MemberCard>
 
-##### LibraryDefinition.definitions?
+##### LibraryDefinition.definitions? {#definitions}
 
 ```ts
 optional definitions?: Readonly<{}> | Readonly<{}>[];
@@ -4212,7 +4212,7 @@ Symbol and operator definitions
 
 </MemberCard>
 
-### BaseCollectionHandlers
+### BaseCollectionHandlers {#basecollectionhandlers}
 
 These handlers are the primitive operations that can be performed on
 all collections, indexed or not.
@@ -4221,7 +4221,7 @@ all collections, indexed or not.
 
 <MemberCard>
 
-##### BaseCollectionHandlers.iterator
+##### BaseCollectionHandlers.iterator {#iterator}
 
 ```ts
 iterator: (collection) => 
@@ -4241,7 +4241,7 @@ different order.
 
 <MemberCard>
 
-##### BaseCollectionHandlers.count
+##### BaseCollectionHandlers.count {#count}
 
 ```ts
 count: (collection) => number | undefined;
@@ -4255,7 +4255,7 @@ An empty collection has a count of 0.
 
 <MemberCard>
 
-##### BaseCollectionHandlers.isEmpty?
+##### BaseCollectionHandlers.isEmpty? {#isempty}
 
 ```ts
 optional isEmpty?: (collection) => boolean | undefined;
@@ -4267,7 +4267,7 @@ Optional flag to quickly check if the collection is empty, without having to cou
 
 <MemberCard>
 
-##### BaseCollectionHandlers.isFinite?
+##### BaseCollectionHandlers.isFinite? {#isfinite}
 
 ```ts
 optional isFinite?: (collection) => boolean | undefined;
@@ -4279,7 +4279,7 @@ Optional flag to quickly check if the collection is finite, without having to co
 
 <MemberCard>
 
-##### BaseCollectionHandlers.isEnumerable?
+##### BaseCollectionHandlers.isEnumerable? {#isenumerable}
 
 ```ts
 optional isEnumerable?: (collection) => boolean | undefined;
@@ -4310,7 +4310,7 @@ cheaply" and does not fall back to the default.
 
 <MemberCard>
 
-##### BaseCollectionHandlers.isCollection?
+##### BaseCollectionHandlers.isCollection? {#iscollection}
 
 ```ts
 optional isCollection?: (collection) => boolean;
@@ -4329,7 +4329,7 @@ Default: `true` (an operator with a `collection` block is a collection).
 
 <MemberCard>
 
-##### BaseCollectionHandlers.isLazy?
+##### BaseCollectionHandlers.isLazy? {#islazy}
 
 ```ts
 optional isLazy?: (collection) => boolean;
@@ -4346,7 +4346,7 @@ Default: `true`
 
 <MemberCard>
 
-##### BaseCollectionHandlers.elementMemo?
+##### BaseCollectionHandlers.elementMemo? {#elementmemo}
 
 ```ts
 optional elementMemo?: boolean;
@@ -4368,7 +4368,7 @@ Default: `false`
 
 <MemberCard>
 
-##### BaseCollectionHandlers.contains?
+##### BaseCollectionHandlers.contains? {#contains}
 
 ```ts
 optional contains?: (collection, target) => boolean | undefined;
@@ -4383,7 +4383,7 @@ Return `undefined` if the membership cannot be determined.
 
 <MemberCard>
 
-##### BaseCollectionHandlers.subsetOf?
+##### BaseCollectionHandlers.subsetOf? {#subsetof}
 
 ```ts
 optional subsetOf?: (collection, other, strict) => boolean | undefined;
@@ -4405,7 +4405,7 @@ that cannot see far enough to answer must return `undefined` rather than
 
 <MemberCard>
 
-##### BaseCollectionHandlers.eltsgn?
+##### BaseCollectionHandlers.eltsgn? {#eltsgn}
 
 ```ts
 optional eltsgn?: (collection) => Sign | undefined;
@@ -4417,7 +4417,7 @@ Return the sign of all the elements of the collection.
 
 <MemberCard>
 
-##### BaseCollectionHandlers.elttype?
+##### BaseCollectionHandlers.elttype? {#elttype}
 
 ```ts
 optional elttype?: (collection) => Type | undefined;
@@ -4427,7 +4427,7 @@ Return the widest type of all the elements in the collection
 
 </MemberCard>
 
-### IndexedCollectionHandlers
+### IndexedCollectionHandlers {#indexedcollectionhandlers}
 
 These additional collection handlers are applicable to indexed
 collections only.
@@ -4437,7 +4437,7 @@ the order of the elements is defined.
 
 <MemberCard>
 
-##### IndexedCollectionHandlers.at
+##### IndexedCollectionHandlers.at {#at}
 
 ```ts
 at: (collection, index) => Expression | undefined;
@@ -4458,7 +4458,7 @@ If the index is invalid, return `undefined`.
 
 <MemberCard>
 
-##### IndexedCollectionHandlers.indexWhere
+##### IndexedCollectionHandlers.indexWhere {#indexwhere}
 
 ```ts
 indexWhere: (collection, predicate) => number | undefined;
@@ -4472,7 +4472,7 @@ If no element matches the predicate, return `undefined`.
 
 <MemberCard>
 
-### CollectionHandlers
+### CollectionHandlers {#collectionhandlers}
 
 ```ts
 type CollectionHandlers = BaseCollectionHandlers & Partial<IndexedCollectionHandlers>;
@@ -4485,7 +4485,7 @@ performed on collections, such as lists, sets, tuples, etc...
 
 <MemberCard>
 
-### TaggedValueDefinition
+### TaggedValueDefinition {#taggedvaluedefinition}
 
 ```ts
 type TaggedValueDefinition = {
@@ -4499,7 +4499,7 @@ The definition for a value, represented as a tagged object literal.
 
 <MemberCard>
 
-### TaggedOperatorDefinition
+### TaggedOperatorDefinition {#taggedoperatordefinition}
 
 ```ts
 type TaggedOperatorDefinition = {
@@ -4513,7 +4513,7 @@ The definition for an operator, represented as a tagged object literal.
 
 <MemberCard>
 
-### BoxedDefinition
+### BoxedDefinition {#boxeddefinition}
 
 ```ts
 type BoxedDefinition = 
@@ -4531,7 +4531,7 @@ references to the definition in bound expressions.
 
 <MemberCard>
 
-### TypeProvenanceEntry
+### TypeProvenanceEntry {#typeprovenanceentry}
 
 ```ts
 type TypeProvenanceEntry = {
@@ -4562,7 +4562,7 @@ Design: `docs/TYPE-SYSTEM.md`, phase 1.
 
 </MemberCard>
 
-### BoxedBaseDefinition
+### BoxedBaseDefinition {#boxedbasedefinition}
 
 #### Extends
 
@@ -4575,7 +4575,7 @@ Design: `docs/TYPE-SYSTEM.md`, phase 1.
 
 <MemberCard>
 
-##### BoxedBaseDefinition.collection?
+##### BoxedBaseDefinition.collection? {#collection}
 
 ```ts
 optional collection?: CollectionHandlers;
@@ -4587,7 +4587,7 @@ enumerating it, etc...).
 
 </MemberCard>
 
-### BoxedValueDefinition
+### BoxedValueDefinition {#boxedvaluedefinition}
 
 #### Extends
 
@@ -4595,7 +4595,7 @@ enumerating it, etc...).
 
 <MemberCard>
 
-##### BoxedValueDefinition.holdUntil
+##### BoxedValueDefinition.holdUntil {#holduntil}
 
 ```ts
 holdUntil: "never" | "evaluate" | "N";
@@ -4625,7 +4625,7 @@ Some examples:
 
 <MemberCard>
 
-##### BoxedValueDefinition.value
+##### BoxedValueDefinition.value {#value-2}
 
 ```ts
 value: Expression | undefined;
@@ -4639,7 +4639,7 @@ The current value of the symbol. For constants, this is immutable.
 
 <MemberCard>
 
-##### BoxedValueDefinition.isSelfReferential
+##### BoxedValueDefinition.isSelfReferential {#isselfreferential}
 
 ```ts
 readonly isSelfReferential: boolean;
@@ -4656,7 +4656,7 @@ overflowing the stack. Computed once when the value is assigned.
 
 <MemberCard>
 
-##### BoxedValueDefinition.eq?
+##### BoxedValueDefinition.eq? {#eq-1}
 
 ```ts
 optional eq?: (a) => boolean | undefined;
@@ -4666,7 +4666,7 @@ optional eq?: (a) => boolean | undefined;
 
 <MemberCard>
 
-##### BoxedValueDefinition.neq?
+##### BoxedValueDefinition.neq? {#neq}
 
 ```ts
 optional neq?: (a) => boolean | undefined;
@@ -4676,7 +4676,7 @@ optional neq?: (a) => boolean | undefined;
 
 <MemberCard>
 
-##### BoxedValueDefinition.cmp?
+##### BoxedValueDefinition.cmp? {#cmp}
 
 ```ts
 optional cmp?: (a) => "<" | ">" | "=" | undefined;
@@ -4686,7 +4686,7 @@ optional cmp?: (a) => "<" | ">" | "=" | undefined;
 
 <MemberCard>
 
-##### BoxedValueDefinition.inferredType
+##### BoxedValueDefinition.inferredType {#inferredtype}
 
 ```ts
 inferredType: boolean;
@@ -4701,7 +4701,7 @@ A type that is not inferred, but has been set explicitly, cannot be updated.
 
 <MemberCard>
 
-##### BoxedValueDefinition.effectsDeclared
+##### BoxedValueDefinition.effectsDeclared {#effectsdeclared}
 
 ```ts
 effectsDeclared: boolean;
@@ -4719,7 +4719,7 @@ accepted and re-stamped, never checked against the declaration.
 
 <MemberCard>
 
-##### BoxedValueDefinition.type
+##### BoxedValueDefinition.type {#type-4}
 
 ```ts
 type: BoxedType;
@@ -4729,7 +4729,7 @@ type: BoxedType;
 
 <MemberCard>
 
-##### BoxedValueDefinition.subscriptEvaluate?
+##### BoxedValueDefinition.subscriptEvaluate? {#subscriptevaluate-1}
 
 ```ts
 optional subscriptEvaluate?: (subscript, options) => Expression | undefined;
@@ -4742,7 +4742,7 @@ Called when evaluating `Subscript(symbol, index)`.
 
 <MemberCard>
 
-##### BoxedValueDefinition.dispose()
+##### BoxedValueDefinition.dispose() {#dispose}
 
 ```ts
 dispose(): void
@@ -4754,7 +4754,7 @@ Release resources owned by this definition when its scope is disposed.
 
 <MemberCard>
 
-### BindingSite
+### BindingSite {#bindingsite}
 
 ```ts
 type BindingSite = {
@@ -4771,7 +4771,7 @@ operator's **bound variables** sits, and how to declare it.
 
 <MemberCard>
 
-### BindingSiteSelector
+### BindingSiteSelector {#bindingsiteselector}
 
 ```ts
 type BindingSiteSelector = (ops, phase) => readonly BindingSite[];
@@ -4795,7 +4795,7 @@ may return fewer sites than `'post'` — return nothing rather than guess.
 
 <MemberCard>
 
-### OperatorDefinitionFlags
+### OperatorDefinitionFlags {#operatordefinitionflags}
 
 ```ts
 type OperatorDefinitionFlags = {
@@ -4831,7 +4831,7 @@ properties of the operator.
 
 <MemberCard>
 
-### LambdaDefinition
+### LambdaDefinition {#lambdadefinition}
 
 ```ts
 type LambdaDefinition = {
@@ -4850,7 +4850,7 @@ its body as a boxed expression. Returned by
 
 </MemberCard>
 
-### BoxedOperatorDefinition
+### BoxedOperatorDefinition {#boxedoperatordefinition}
 
 The definition includes information specific about an operator, such as
 handlers to canonicalize or evaluate a function expression with this
@@ -4862,7 +4862,7 @@ operator.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.scoped
+##### BoxedOperatorDefinition.scoped {#scoped-1}
 
 ```ts
 scoped: boolean;
@@ -4876,7 +4876,7 @@ binding-site selector.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.bindingSites?
+##### BoxedOperatorDefinition.bindingSites? {#bindingsites}
 
 ```ts
 optional bindingSites?: BindingSiteSelector;
@@ -4890,7 +4890,7 @@ bound variables) and for an unscoped operator.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.complexity
+##### BoxedOperatorDefinition.complexity {#complexity}
 
 ```ts
 complexity: number;
@@ -4900,7 +4900,7 @@ complexity: number;
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.inferredSignature
+##### BoxedOperatorDefinition.inferredSignature {#inferredsignature}
 
 ```ts
 inferredSignature: boolean;
@@ -4913,7 +4913,7 @@ as more information becomes available.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.signature
+##### BoxedOperatorDefinition.signature {#signature}
 
 ```ts
 signature: BoxedType;
@@ -4925,7 +4925,7 @@ The type of the arguments and return value of this function
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.resolvedMissingBehavior
+##### BoxedOperatorDefinition.resolvedMissingBehavior {#resolvedmissingbehavior}
 
 ```ts
 readonly resolvedMissingBehavior: "reject" | "propagate" | "handle" | "pass-through";
@@ -4941,7 +4941,7 @@ across a signature mutation.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.invokesNone
+##### BoxedOperatorDefinition.invokesNone {#invokesnone}
 
 ```ts
 readonly invokesNone: boolean;
@@ -4954,7 +4954,7 @@ pre-gate for the latent half of the projection rule.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.lambda
+##### BoxedOperatorDefinition.lambda {#lambda}
 
 ```ts
 readonly lambda: LambdaDefinition | undefined;
@@ -4974,7 +4974,7 @@ re-parsing or textually inlining its source.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.type?
+##### BoxedOperatorDefinition.type? {#type-6}
 
 ```ts
 optional type?: (ops, options) => 
@@ -5008,7 +5008,7 @@ should *not* be evaluated, only their types should be used.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.sgn?
+##### BoxedOperatorDefinition.sgn? {#sgn-1}
 
 ```ts
 optional sgn?: (ops, options) => Sign | undefined;
@@ -5028,7 +5028,7 @@ simplifications are valid.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.eq?
+##### BoxedOperatorDefinition.eq? {#eq-2}
 
 ```ts
 optional eq?: (a, b, prover?) => boolean | undefined;
@@ -5040,7 +5040,7 @@ See `OperatorDefinition.eq` for the meaning of `prover`.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.neq?
+##### BoxedOperatorDefinition.neq? {#neq-1}
 
 ```ts
 optional neq?: (a, b) => boolean | undefined;
@@ -5050,7 +5050,7 @@ optional neq?: (a, b) => boolean | undefined;
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.canEnumerate?
+##### BoxedOperatorDefinition.canEnumerate? {#canenumerate}
 
 ```ts
 optional canEnumerate?: (expr) => boolean | undefined;
@@ -5063,7 +5063,7 @@ The eager producer's enumerability precondition — see the
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.elementCount?
+##### BoxedOperatorDefinition.elementCount? {#elementcount}
 
 ```ts
 optional elementCount?: (expr) => number | undefined;
@@ -5076,7 +5076,7 @@ The eager producer's element count — see the `elementCount` contract on
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.canonical?
+##### BoxedOperatorDefinition.canonical? {#canonical}
 
 ```ts
 optional canonical?: (ops, options) => Expression | null;
@@ -5086,7 +5086,7 @@ optional canonical?: (ops, options) => Expression | null;
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.evaluate?
+##### BoxedOperatorDefinition.evaluate? {#evaluate}
 
 ```ts
 optional evaluate?: (ops, options) => Expression | undefined;
@@ -5096,7 +5096,7 @@ optional evaluate?: (ops, options) => Expression | undefined;
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.evaluateAsync?
+##### BoxedOperatorDefinition.evaluateAsync? {#evaluateasync}
 
 ```ts
 optional evaluateAsync?: (ops, options) => Promise<Expression | undefined>;
@@ -5106,7 +5106,7 @@ optional evaluateAsync?: (ops, options) => Promise<Expression | undefined>;
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.evalDimension?
+##### BoxedOperatorDefinition.evalDimension? {#evaldimension}
 
 ```ts
 optional evalDimension?: (ops, options) => Expression;
@@ -5116,7 +5116,7 @@ optional evalDimension?: (ops, options) => Expression;
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.compile?
+##### BoxedOperatorDefinition.compile? {#compile}
 
 ```ts
 optional compile?: OperatorCompileHandler;
@@ -5126,7 +5126,7 @@ optional compile?: OperatorCompileHandler;
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.stripsMissingAt()
+##### BoxedOperatorDefinition.stripsMissingAt() {#stripsmissingat}
 
 ```ts
 stripsMissingAt(i): boolean
@@ -5144,7 +5144,7 @@ selects the positions.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.invokesAt()
+##### BoxedOperatorDefinition.invokesAt() {#invokesat}
 
 ```ts
 invokesAt(i): boolean
@@ -5161,7 +5161,7 @@ through this accessor (or [invokesNone](#invokesnone)), never the raw field.
 
 </MemberCard>
 
-### EqHandlers
+### EqHandlers {#eqhandlers}
 
 These handlers compare two expressions.
 
@@ -5171,7 +5171,7 @@ Having both may be useful if comparing non-equality is faster than equality.
 
 <MemberCard>
 
-##### EqHandlers.eq
+##### EqHandlers.eq {#eq-3}
 
 ```ts
 eq: (a, b) => boolean | undefined;
@@ -5181,7 +5181,7 @@ eq: (a, b) => boolean | undefined;
 
 <MemberCard>
 
-##### EqHandlers.neq
+##### EqHandlers.neq {#neq-2}
 
 ```ts
 neq: (a, b) => boolean | undefined;
@@ -5191,7 +5191,7 @@ neq: (a, b) => boolean | undefined;
 
 <MemberCard>
 
-### Hold
+### Hold {#hold-2}
 
 ```ts
 type Hold = "none" | "all" | "first" | "rest" | "last" | "most";
@@ -5203,7 +5203,7 @@ type Hold = "none" | "all" | "first" | "rest" | "last" | "most";
 
 <MemberCard>
 
-### LatexToken
+### LatexToken {#latextoken}
 
 ```ts
 type LatexToken = string | "<{>" | "<}>" | "<space>" | "<$>" | "<$$>";
@@ -5219,7 +5219,7 @@ letters and punctuation.
 
 <MemberCard>
 
-### LatexString
+### LatexString {#latexstring}
 
 ```ts
 type LatexString = string;
@@ -5232,7 +5232,7 @@ A LatexString is a regular string of LaTeX, for example:
 
 <MemberCard>
 
-### Delimiter
+### Delimiter {#delimiter}
 
 ```ts
 type Delimiter = 
@@ -5262,7 +5262,7 @@ record to define new LaTeX dictionary entries.
 
 <MemberCard>
 
-### DelimiterScale
+### DelimiterScale {#delimiterscale}
 
 ```ts
 type DelimiterScale = "normal" | "scaled" | "big" | "none";
@@ -5272,7 +5272,7 @@ type DelimiterScale = "normal" | "scaled" | "big" | "none";
 
 <MemberCard>
 
-### LibraryCategory
+### LibraryCategory {#librarycategory}
 
 ```ts
 type LibraryCategory = 
@@ -5299,7 +5299,7 @@ type LibraryCategory =
 
 <MemberCard>
 
-### Precedence
+### Precedence {#precedence}
 
 ```ts
 type Precedence = number;
@@ -5375,7 +5375,7 @@ The JavaScript operator precedence is documented
 
 <MemberCard>
 
-### Terminator
+### Terminator {#terminator}
 
 ```ts
 type Terminator = {
@@ -5393,7 +5393,7 @@ This indicates a condition under which parsing should stop:
 
 <MemberCard>
 
-### ParseHandler
+### ParseHandler {#parsehandler}
 
 ```ts
 type ParseHandler = 
@@ -5432,7 +5432,7 @@ return `Nothing`.
 
 <MemberCard>
 
-### ExpressionParseHandler
+### ExpressionParseHandler {#expressionparsehandler}
 
 ```ts
 type ExpressionParseHandler = (parser, until?) => MathJsonExpression | null;
@@ -5442,7 +5442,7 @@ type ExpressionParseHandler = (parser, until?) => MathJsonExpression | null;
 
 <MemberCard>
 
-### PrefixParseHandler
+### PrefixParseHandler {#prefixparsehandler}
 
 ```ts
 type PrefixParseHandler = (parser, until?) => MathJsonExpression | null;
@@ -5452,7 +5452,7 @@ type PrefixParseHandler = (parser, until?) => MathJsonExpression | null;
 
 <MemberCard>
 
-### SymbolParseHandler
+### SymbolParseHandler {#symbolparsehandler}
 
 ```ts
 type SymbolParseHandler = (parser, until?) => MathJsonExpression | null;
@@ -5462,7 +5462,7 @@ type SymbolParseHandler = (parser, until?) => MathJsonExpression | null;
 
 <MemberCard>
 
-### FunctionParseHandler
+### FunctionParseHandler {#functionparsehandler}
 
 ```ts
 type FunctionParseHandler = (parser, until?) => MathJsonExpression | null;
@@ -5472,7 +5472,7 @@ type FunctionParseHandler = (parser, until?) => MathJsonExpression | null;
 
 <MemberCard>
 
-### EnvironmentParseHandler
+### EnvironmentParseHandler {#environmentparsehandler}
 
 ```ts
 type EnvironmentParseHandler = (parser, until?) => MathJsonExpression | null;
@@ -5482,7 +5482,7 @@ type EnvironmentParseHandler = (parser, until?) => MathJsonExpression | null;
 
 <MemberCard>
 
-### PostfixParseHandler
+### PostfixParseHandler {#postfixparsehandler}
 
 ```ts
 type PostfixParseHandler = (parser, lhs, until?) => MathJsonExpression | null;
@@ -5492,7 +5492,7 @@ type PostfixParseHandler = (parser, lhs, until?) => MathJsonExpression | null;
 
 <MemberCard>
 
-### InfixParseHandler
+### InfixParseHandler {#infixparsehandler}
 
 ```ts
 type InfixParseHandler = (parser, lhs, until) => MathJsonExpression | null;
@@ -5502,7 +5502,7 @@ type InfixParseHandler = (parser, lhs, until) => MathJsonExpression | null;
 
 <MemberCard>
 
-### MatchfixParseHandler
+### MatchfixParseHandler {#matchfixparsehandler}
 
 ```ts
 type MatchfixParseHandler = (parser, body) => MathJsonExpression | null;
@@ -5512,7 +5512,7 @@ type MatchfixParseHandler = (parser, body) => MathJsonExpression | null;
 
 <MemberCard>
 
-### LatexArgumentType
+### LatexArgumentType {#latexargumenttype}
 
 ```ts
 type LatexArgumentType = 
@@ -5534,7 +5534,7 @@ type LatexArgumentType =
 
 <MemberCard>
 
-### Trigger
+### Trigger {#trigger}
 
 ```ts
 type Trigger = {
@@ -5558,7 +5558,7 @@ LaTeX expressions that are equivalent, for example `\operatorname{gcd}` or
 
 <MemberCard>
 
-### BaseEntry
+### BaseEntry {#baseentry}
 
 ```ts
 type BaseEntry = {
@@ -5574,7 +5574,7 @@ Maps a string of LaTeX tokens to a function or symbol and vice-versa.
 
 <MemberCard>
 
-### DefaultEntry
+### DefaultEntry {#defaultentry}
 
 ```ts
 type DefaultEntry = BaseEntry & Trigger & {
@@ -5587,7 +5587,7 @@ type DefaultEntry = BaseEntry & Trigger & {
 
 <MemberCard>
 
-### ExpressionEntry
+### ExpressionEntry {#expressionentry}
 
 ```ts
 type ExpressionEntry = BaseEntry & Trigger & {
@@ -5602,7 +5602,7 @@ type ExpressionEntry = BaseEntry & Trigger & {
 
 <MemberCard>
 
-### MatchfixEntry
+### MatchfixEntry {#matchfixentry}
 
 ```ts
 type MatchfixEntry = BaseEntry & {
@@ -5636,7 +5636,7 @@ the open delimiter and the close delimiter.
 
 <MemberCard>
 
-### InfixEntry
+### InfixEntry {#infixentry}
 
 ```ts
 type InfixEntry = BaseEntry & Trigger & {
@@ -5675,7 +5675,7 @@ optional associativity?: "right" | "left" | "none" | "any";
 
 <MemberCard>
 
-### PostfixEntry
+### PostfixEntry {#postfixentry}
 
 ```ts
 type PostfixEntry = BaseEntry & Trigger & {
@@ -5699,7 +5699,7 @@ Example: `!`.
 
 <MemberCard>
 
-### PrefixEntry
+### PrefixEntry {#prefixentry}
 
 ```ts
 type PrefixEntry = BaseEntry & Trigger & {
@@ -5723,7 +5723,7 @@ Example: `-`, `\not`.
 
 <MemberCard>
 
-### EnvironmentEntry
+### EnvironmentEntry {#environmententry}
 
 ```ts
 type EnvironmentEntry = BaseEntry & {
@@ -5740,7 +5740,7 @@ construct using `\begin{...}...\end{...}`.
 
 <MemberCard>
 
-### SymbolEntry
+### SymbolEntry {#symbolentry}
 
 ```ts
 type SymbolEntry = BaseEntry & Trigger & {
@@ -5763,7 +5763,7 @@ Used for appropriate wrapping (i.e. when to surround it with parens)
 
 <MemberCard>
 
-### FunctionEntry
+### FunctionEntry {#functionentry}
 
 ```ts
 type FunctionEntry = BaseEntry & Trigger & {
@@ -5800,7 +5800,7 @@ How arguments are parsed:
 
 <MemberCard>
 
-### LatexDictionaryEntry
+### LatexDictionaryEntry {#latexdictionaryentry}
 
 ```ts
 type LatexDictionaryEntry = OneOf<[
@@ -5835,7 +5835,7 @@ const ce = new ComputeEngine({
 
 <MemberCard>
 
-### SymbolResolution
+### SymbolResolution {#symbolresolution}
 
 ```ts
 type SymbolResolution = {
@@ -5857,7 +5857,7 @@ type for an undeclared symbol.
 
 <MemberCard>
 
-### ParseLatexOptions
+### ParseLatexOptions {#parselatexoptions}
 
 ```ts
 type ParseLatexOptions = NumberFormat & {
@@ -6061,14 +6061,14 @@ Populated automatically from `ce.tolerance` by `ce.parse()`.
 
 </MemberCard>
 
-### Parser
+### Parser {#parser}
 
 An instance of `Parser` is provided to the `parse` handlers of custom
 LaTeX dictionary entries.
 
 <MemberCard>
 
-##### Parser.options
+##### Parser.options {#options}
 
 ```ts
 readonly options: Readonly<ParseLatexOptions>;
@@ -6078,7 +6078,7 @@ readonly options: Readonly<ParseLatexOptions>;
 
 <MemberCard>
 
-##### Parser.inQuantifierScope
+##### Parser.inQuantifierScope {#inquantifierscope}
 
 ```ts
 readonly inQuantifierScope: boolean;
@@ -6090,7 +6090,7 @@ True if currently parsing inside a quantifier body (ForAll, Exists, etc.)
 
 <MemberCard>
 
-##### Parser.index
+##### Parser.index {#index}
 
 ```ts
 index: number;
@@ -6102,7 +6102,7 @@ The index of the current token
 
 <MemberCard>
 
-##### Parser.atEnd
+##### Parser.atEnd {#atend}
 
 ```ts
 readonly atEnd: boolean;
@@ -6115,7 +6115,7 @@ Consider also `atTerminator()`.
 
 <MemberCard>
 
-##### Parser.peek
+##### Parser.peek {#peek}
 
 ```ts
 readonly peek: string;
@@ -6127,13 +6127,13 @@ Return the next token, without advancing the index
 
 <MemberCard>
 
-##### Parser.atBoundary
+##### Parser.atBoundary {#atboundary}
 
 </MemberCard>
 
 <MemberCard>
 
-##### Parser.resolveSymbol()
+##### Parser.resolveSymbol() {#resolvesymbol}
 
 ```ts
 resolveSymbol(id): 
@@ -6164,7 +6164,7 @@ resolves (with `type.isUnknown` true).
 
 <MemberCard>
 
-##### Parser.pushSymbolTable()
+##### Parser.pushSymbolTable() {#pushsymboltable}
 
 ```ts
 pushSymbolTable(): void
@@ -6174,7 +6174,7 @@ pushSymbolTable(): void
 
 <MemberCard>
 
-##### Parser.popSymbolTable()
+##### Parser.popSymbolTable() {#popsymboltable}
 
 ```ts
 popSymbolTable(): void
@@ -6184,7 +6184,7 @@ popSymbolTable(): void
 
 <MemberCard>
 
-##### Parser.addSymbol()
+##### Parser.addSymbol() {#addsymbol}
 
 ```ts
 addSymbol(id, type): void
@@ -6202,7 +6202,7 @@ addSymbol(id, type): void
 
 <MemberCard>
 
-##### Parser.enterQuantifierScope()
+##### Parser.enterQuantifierScope() {#enterquantifierscope}
 
 ```ts
 enterQuantifierScope(): void
@@ -6214,7 +6214,7 @@ Enter a quantifier scope for parsing the body of ForAll, Exists, etc.
 
 <MemberCard>
 
-##### Parser.exitQuantifierScope()
+##### Parser.exitQuantifierScope() {#exitquantifierscope}
 
 ```ts
 exitQuantifierScope(): void
@@ -6226,7 +6226,7 @@ Exit the current quantifier scope
 
 <MemberCard>
 
-##### Parser.atTerminator()
+##### Parser.atTerminator() {#atterminator}
 
 ```ts
 atTerminator(t): boolean
@@ -6243,7 +6243,7 @@ has been reached.
 
 <MemberCard>
 
-##### Parser.nextToken()
+##### Parser.nextToken() {#nexttoken}
 
 ```ts
 nextToken(): string
@@ -6255,7 +6255,7 @@ Return the next token and advance the index
 
 <MemberCard>
 
-##### Parser.latex()
+##### Parser.latex() {#latex}
 
 ```ts
 latex(start, end?): string
@@ -6276,7 +6276,7 @@ between `start` and `end` (default: the whole expression)
 
 <MemberCard>
 
-##### Parser.error()
+##### Parser.error() {#error}
 
 ```ts
 error(code, fromToken): MathJsonExpression
@@ -6301,7 +6301,7 @@ was expected.
 
 <MemberCard>
 
-##### Parser.sourceOffsets()
+##### Parser.sourceOffsets() {#sourceoffsets}
 
 ```ts
 sourceOffsets(startToken, endToken?): [number, number]
@@ -6324,7 +6324,7 @@ original input string.
 
 <MemberCard>
 
-##### Parser.skipSpace()
+##### Parser.skipSpace() {#skipspace}
 
 ```ts
 skipSpace(): boolean
@@ -6336,7 +6336,7 @@ If there are any space, advance the index until a non-space is encountered
 
 <MemberCard>
 
-##### Parser.skipVisualSpace()
+##### Parser.skipVisualSpace() {#skipvisualspace}
 
 ```ts
 skipVisualSpace(): void
@@ -6349,7 +6349,7 @@ includes space tokens, empty groups `{}`, and commands such as `\,` and `\!`
 
 <MemberCard>
 
-##### Parser.match()
+##### Parser.match() {#match}
 
 ```ts
 match(token): boolean
@@ -6366,7 +6366,7 @@ return false
 
 <MemberCard>
 
-##### Parser.matchAll()
+##### Parser.matchAll() {#matchall}
 
 ```ts
 matchAll(tokens): boolean
@@ -6382,7 +6382,7 @@ Return true if the next tokens match the argument, an array of tokens, or null o
 
 <MemberCard>
 
-##### Parser.matchAny()
+##### Parser.matchAny() {#matchany}
 
 ```ts
 matchAny(tokens): string
@@ -6398,7 +6398,7 @@ Return the next token if it matches any of the token in the argument or null oth
 
 <MemberCard>
 
-##### Parser.parseChar()
+##### Parser.parseChar() {#parsechar}
 
 ```ts
 parseChar(): string | null
@@ -6412,7 +6412,7 @@ defined in hex (^^ and ^^^^), the `\char` and `\unicode` command.
 
 <MemberCard>
 
-##### Parser.parseGroup()
+##### Parser.parseGroup() {#parsegroup}
 
 ```ts
 parseGroup(): MathJsonExpression | null
@@ -6429,7 +6429,7 @@ Return `Nothing` if an empty group `{}` was found
 
 <MemberCard>
 
-##### Parser.parseToken()
+##### Parser.parseToken() {#parsetoken}
 
 ```ts
 parseToken(): MathJsonExpression | null
@@ -6452,7 +6452,7 @@ The excluded tokens include `!"#$%&(),/;:?@[]`|~", `\left`, `\bigl`, etc...
 
 <MemberCard>
 
-##### Parser.parseOptionalGroup()
+##### Parser.parseOptionalGroup() {#parseoptionalgroup}
 
 ```ts
 parseOptionalGroup(): MathJsonExpression | null
@@ -6466,7 +6466,7 @@ Return `null` if none was found.
 
 <MemberCard>
 
-##### Parser.parseEnclosure()
+##### Parser.parseEnclosure() {#parseenclosure}
 
 ```ts
 parseEnclosure(): MathJsonExpression | null
@@ -6478,7 +6478,7 @@ Parse an enclosure (open paren/close paren, etc..) and return the expression ins
 
 <MemberCard>
 
-##### Parser.parseStringGroup()
+##### Parser.parseStringGroup() {#parsestringgroup}
 
 ```ts
 parseStringGroup(optional?, rawTokens?): string | null
@@ -6515,7 +6515,7 @@ to unicode, which is lossy).
 
 <MemberCard>
 
-##### Parser.parseSymbol()
+##### Parser.parseSymbol() {#parsesymbol}
 
 ```ts
 parseSymbol(until?): MathJsonExpression | null
@@ -6534,7 +6534,7 @@ A symbol can be:
 
 <MemberCard>
 
-##### Parser.parseTabular()
+##### Parser.parseTabular() {#parsetabular}
 
 ```ts
 parseTabular(): 
@@ -6552,7 +6552,7 @@ and empty cells are also indicated with `Nothing`.
 
 <MemberCard>
 
-##### Parser.parseArguments()
+##### Parser.parseArguments() {#parsearguments}
 
 ```ts
 parseArguments(kind?, until?): 
@@ -6582,7 +6582,7 @@ argument was found.
 
 <MemberCard>
 
-##### Parser.parseBraceArguments()
+##### Parser.parseBraceArguments() {#parsebracearguments}
 
 ```ts
 parseBraceArguments(): 
@@ -6607,7 +6607,7 @@ unambiguous even though the braces render invisibly.
 
 <MemberCard>
 
-##### Parser.parsePostfixOperator()
+##### Parser.parsePostfixOperator() {#parsepostfixoperator}
 
 ```ts
 parsePostfixOperator(lhs, until?): MathJsonExpression | null
@@ -6629,7 +6629,7 @@ Prefix, infix and matchfix operators are handled by `parseExpression()`
 
 <MemberCard>
 
-##### Parser.parseExpression()
+##### Parser.parseExpression() {#parseexpression}
 
 ```ts
 parseExpression(until?): MathJsonExpression | null
@@ -6668,7 +6668,7 @@ or the sequence of tokens `until.tokens` is encountered
 
 <MemberCard>
 
-##### Parser.parseNumber()
+##### Parser.parseNumber() {#parsenumber}
 
 ```ts
 parseNumber(): MathJsonExpression | null
@@ -6680,7 +6680,7 @@ Parse a number.
 
 <MemberCard>
 
-##### Parser.addBoundary()
+##### Parser.addBoundary() {#addboundary}
 
 ```ts
 addBoundary(boundary): void
@@ -6706,7 +6706,7 @@ parsing when it encounters the `\end{bmatrix}` boundary.
 
 <MemberCard>
 
-##### Parser.removeBoundary()
+##### Parser.removeBoundary() {#removeboundary}
 
 ```ts
 removeBoundary(): void
@@ -6716,7 +6716,7 @@ removeBoundary(): void
 
 <MemberCard>
 
-##### Parser.matchBoundary()
+##### Parser.matchBoundary() {#matchboundary}
 
 ```ts
 matchBoundary(): boolean
@@ -6726,7 +6726,7 @@ matchBoundary(): boolean
 
 <MemberCard>
 
-##### Parser.boundaryError()
+##### Parser.boundaryError() {#boundaryerror}
 
 ```ts
 boundaryError(msg): MathJsonExpression
@@ -6740,7 +6740,7 @@ boundaryError(msg): MathJsonExpression
 
 <MemberCard>
 
-### RootStyle
+### RootStyle {#rootstyle}
 
 ```ts
 type RootStyle = "radical" | "quotient" | "solidus";
@@ -6752,7 +6752,7 @@ How to serialize a root, i.e. `\sqrt{x}`, `x^{1/2}` or `x^\frac12`.
 
 <MemberCard>
 
-### FractionStyle
+### FractionStyle {#fractionstyle}
 
 ```ts
 type FractionStyle = 
@@ -6771,7 +6771,7 @@ How to serialize a fraction.
 
 <MemberCard>
 
-### LogicStyle
+### LogicStyle {#logicstyle}
 
 ```ts
 type LogicStyle = "word" | "boolean" | "uppercase-word" | "punctuation";
@@ -6783,7 +6783,7 @@ How to serialize the logic operators.
 
 <MemberCard>
 
-### PowerStyle
+### PowerStyle {#powerstyle}
 
 ```ts
 type PowerStyle = "root" | "solidus" | "quotient";
@@ -6795,7 +6795,7 @@ How to serialize a fractional power.
 
 <MemberCard>
 
-### NumericSetStyle
+### NumericSetStyle {#numericsetstyle}
 
 ```ts
 type NumericSetStyle = "compact" | "regular" | "interval" | "set-builder";
@@ -6807,7 +6807,7 @@ How to serialize a numeric set, i.e. `\R^*`, `\R \setminus \lbrace 0\rbrace`.
 
 <MemberCard>
 
-### IndexStyle
+### IndexStyle {#indexstyle}
 
 ```ts
 type IndexStyle = "subscript" | "bracket";
@@ -6819,7 +6819,7 @@ How to serialize collection indexing (the `At` operator).
 
 <MemberCard>
 
-### StyleOption
+### StyleOption {#styleoption}
 
 ```ts
 type StyleOption<T> = T | ((expr, level) => T);
@@ -6836,7 +6836,7 @@ expression and of its nesting level.
 
 <MemberCard>
 
-### SerializeLatexOptions
+### SerializeLatexOptions {#serializelatexoptions}
 
 ```ts
 type SerializeLatexOptions = NumberSerializationFormat & {
@@ -7092,7 +7092,7 @@ ce.expr(['Degrees', 370])
 
 <MemberCard>
 
-### ResolvedSerializeLatexOptions
+### ResolvedSerializeLatexOptions {#resolvedserializelatexoptions}
 
 ```ts
 type ResolvedSerializeLatexOptions = Omit<SerializeLatexOptions, 
@@ -7121,14 +7121,14 @@ to their function form.
 
 </MemberCard>
 
-### Serializer
+### Serializer {#serializer}
 
 An instance of `Serializer` is provided to the `serialize` handlers of custom
 LaTeX dictionary entries.
 
 <MemberCard>
 
-##### Serializer.options
+##### Serializer.options {#options-1}
 
 ```ts
 readonly options: Required<ResolvedSerializeLatexOptions>;
@@ -7138,7 +7138,7 @@ readonly options: Required<ResolvedSerializeLatexOptions>;
 
 <MemberCard>
 
-##### Serializer.dictionary
+##### Serializer.dictionary {#dictionary-1}
 
 ```ts
 readonly dictionary: SerializerDictionary;
@@ -7148,7 +7148,7 @@ readonly dictionary: SerializerDictionary;
 
 <MemberCard>
 
-##### Serializer.level
+##### Serializer.level {#level}
 
 ```ts
 level: number;
@@ -7169,7 +7169,7 @@ For example use `\Bigl(` for the top level, and `\bigl(` or `(` for others.
 
 <MemberCard>
 
-##### Serializer.serialize
+##### Serializer.serialize {#serialize-1}
 
 ```ts
 serialize: (expr) => string;
@@ -7181,7 +7181,7 @@ Output a LaTeX string representing the expression
 
 <MemberCard>
 
-##### Serializer.wrap
+##### Serializer.wrap {#wrap}
 
 ```ts
 wrap: (expr, prec?) => string;
@@ -7194,7 +7194,7 @@ an operator of precedence less than or equal to `prec`.
 
 <MemberCard>
 
-##### Serializer.applyFunctionStyle
+##### Serializer.applyFunctionStyle {#applyfunctionstyle}
 
 ```ts
 applyFunctionStyle: (expr, level) => DelimiterScale;
@@ -7206,7 +7206,7 @@ Styles
 
 <MemberCard>
 
-##### Serializer.groupStyle
+##### Serializer.groupStyle {#groupstyle}
 
 ```ts
 groupStyle: (expr, level) => DelimiterScale;
@@ -7216,7 +7216,7 @@ groupStyle: (expr, level) => DelimiterScale;
 
 <MemberCard>
 
-##### Serializer.rootStyle
+##### Serializer.rootStyle {#rootstyle-1}
 
 ```ts
 rootStyle: (expr, level) => "radical" | "quotient" | "solidus";
@@ -7226,7 +7226,7 @@ rootStyle: (expr, level) => "radical" | "quotient" | "solidus";
 
 <MemberCard>
 
-##### Serializer.fractionStyle
+##### Serializer.fractionStyle {#fractionstyle-1}
 
 ```ts
 fractionStyle: (expr, level) => 
@@ -7243,7 +7243,7 @@ fractionStyle: (expr, level) =>
 
 <MemberCard>
 
-##### Serializer.logicStyle
+##### Serializer.logicStyle {#logicstyle-1}
 
 ```ts
 logicStyle: (expr, level) => "boolean" | "word" | "uppercase-word" | "punctuation";
@@ -7253,7 +7253,7 @@ logicStyle: (expr, level) => "boolean" | "word" | "uppercase-word" | "punctuatio
 
 <MemberCard>
 
-##### Serializer.powerStyle
+##### Serializer.powerStyle {#powerstyle-1}
 
 ```ts
 powerStyle: (expr, level) => "quotient" | "solidus" | "root";
@@ -7263,7 +7263,7 @@ powerStyle: (expr, level) => "quotient" | "solidus" | "root";
 
 <MemberCard>
 
-##### Serializer.numericSetStyle
+##### Serializer.numericSetStyle {#numericsetstyle-1}
 
 ```ts
 numericSetStyle: (expr, level) => "compact" | "regular" | "interval" | "set-builder";
@@ -7273,7 +7273,7 @@ numericSetStyle: (expr, level) => "compact" | "regular" | "interval" | "set-buil
 
 <MemberCard>
 
-##### Serializer.indexStyle
+##### Serializer.indexStyle {#indexstyle-1}
 
 ```ts
 indexStyle: (expr, level) => "subscript" | "bracket";
@@ -7283,7 +7283,7 @@ indexStyle: (expr, level) => "subscript" | "bracket";
 
 <MemberCard>
 
-##### Serializer.serializeFunction()
+##### Serializer.serializeFunction() {#serializefunction}
 
 ```ts
 serializeFunction(expr, def?): string
@@ -7301,7 +7301,7 @@ serializeFunction(expr, def?): string
 
 <MemberCard>
 
-##### Serializer.serializeSymbol()
+##### Serializer.serializeSymbol() {#serializesymbol}
 
 ```ts
 serializeSymbol(expr): string
@@ -7315,7 +7315,7 @@ serializeSymbol(expr): string
 
 <MemberCard>
 
-##### Serializer.wrapString()
+##### Serializer.wrapString() {#wrapstring}
 
 ```ts
 wrapString(s, style, delimiters?): string
@@ -7341,7 +7341,7 @@ If `delimiters` is not specified, use `()`
 
 <MemberCard>
 
-##### Serializer.wrapArguments()
+##### Serializer.wrapArguments() {#wraparguments}
 
 ```ts
 wrapArguments(expr): string
@@ -7358,7 +7358,7 @@ commas.
 
 <MemberCard>
 
-##### Serializer.wrapShort()
+##### Serializer.wrapShort() {#wrapshort}
 
 ```ts
 wrapShort(expr): string
@@ -7377,7 +7377,7 @@ short (not a function)
 
 <MemberCard>
 
-### SerializeHandler
+### SerializeHandler {#serializehandler}
 
 ```ts
 type SerializeHandler = (serializer, expr) => string;
@@ -7390,7 +7390,7 @@ a function of this type.
 
 <MemberCard>
 
-### ParseDiagnostic
+### ParseDiagnostic {#parsediagnostic}
 
 ```ts
 type ParseDiagnostic = {
@@ -7451,7 +7451,7 @@ on `code` + `detail`.
 
 <MemberCard>
 
-### ExactNumericValueData
+### ExactNumericValueData {#exactnumericvaluedata}
 
 ```ts
 type ExactNumericValueData = {
@@ -7476,7 +7476,7 @@ component (e.g. `√2 + √3·i`) is NOT representable exactly.
 
 <MemberCard>
 
-### NumericValueData
+### NumericValueData {#numericvaluedata}
 
 ```ts
 type NumericValueData = {
@@ -7489,7 +7489,7 @@ type NumericValueData = {
 
 <MemberCard>
 
-### NumericValueFactory
+### NumericValueFactory {#numericvaluefactory}
 
 ```ts
 type NumericValueFactory = (data) => NumericValue;
@@ -7497,7 +7497,7 @@ type NumericValueFactory = (data) => NumericValue;
 
 </MemberCard>
 
-### `abstract` NumericValue
+### `abstract` NumericValue {#abstract-numericvalue}
 
 <MemberCard>
 
@@ -7511,7 +7511,7 @@ new NumericValue(): NumericValue
 
 <MemberCard>
 
-##### NumericValue.im
+##### NumericValue.im {#im-1}
 
 ```ts
 im: number;
@@ -7525,13 +7525,13 @@ Can be negative, zero or positive.
 
 <MemberCard>
 
-##### NumericValue.type
+##### NumericValue.type {#type-2}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.isExact
+##### NumericValue.isExact {#isexact}
 
 True if numeric value is the product of a rational and the square root of an integer.
 
@@ -7543,7 +7543,7 @@ But it doesn't include 0.5, 3.141592, etc...
 
 <MemberCard>
 
-##### NumericValue.asExact
+##### NumericValue.asExact {#asexact}
 
 If `isExact()`, returns an ExactNumericValue, otherwise returns undefined.
 
@@ -7551,7 +7551,7 @@ If `isExact()`, returns an ExactNumericValue, otherwise returns undefined.
 
 <MemberCard>
 
-##### NumericValue.re
+##### NumericValue.re {#re-1}
 
 The real part of this numeric value.
 
@@ -7561,7 +7561,7 @@ Can be negative, 0 or positive.
 
 <MemberCard>
 
-##### NumericValue.bignumRe
+##### NumericValue.bignumRe {#bignumre}
 
 bignum version of .re, if available
 
@@ -7569,67 +7569,67 @@ bignum version of .re, if available
 
 <MemberCard>
 
-##### NumericValue.bignumIm
+##### NumericValue.bignumIm {#bignumim}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.numerator
+##### NumericValue.numerator {#numerator}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.denominator
+##### NumericValue.denominator {#denominator}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.isNaN
+##### NumericValue.isNaN {#isnan}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.isPositiveInfinity
+##### NumericValue.isPositiveInfinity {#ispositiveinfinity}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.isNegativeInfinity
+##### NumericValue.isNegativeInfinity {#isnegativeinfinity}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.isComplexInfinity
+##### NumericValue.isComplexInfinity {#iscomplexinfinity}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.isZero
+##### NumericValue.isZero {#iszero}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.isOne
+##### NumericValue.isOne {#isone}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.isNegativeOne
+##### NumericValue.isNegativeOne {#isnegativeone}
 
 </MemberCard>
 
 <MemberCard>
 
-##### NumericValue.isZeroWithTolerance()
+##### NumericValue.isZeroWithTolerance() {#iszerowithtolerance}
 
 ```ts
 isZeroWithTolerance(_tolerance): boolean
@@ -7643,7 +7643,7 @@ isZeroWithTolerance(_tolerance): boolean
 
 <MemberCard>
 
-##### NumericValue.sgn()
+##### NumericValue.sgn() {#sgn}
 
 ```ts
 abstract sgn(): 0 | 1 | -1 | undefined
@@ -7655,7 +7655,7 @@ The sign of complex numbers is undefined
 
 <MemberCard>
 
-##### NumericValue.N()
+##### NumericValue.N() {#n}
 
 ```ts
 abstract N(): NumericValue
@@ -7667,7 +7667,7 @@ Return a non-exact representation of the numeric value
 
 <MemberCard>
 
-##### NumericValue.neg()
+##### NumericValue.neg() {#neg}
 
 ```ts
 abstract neg(): NumericValue
@@ -7677,7 +7677,7 @@ abstract neg(): NumericValue
 
 <MemberCard>
 
-##### NumericValue.inv()
+##### NumericValue.inv() {#inv}
 
 ```ts
 abstract inv(): NumericValue
@@ -7687,7 +7687,7 @@ abstract inv(): NumericValue
 
 <MemberCard>
 
-##### NumericValue.add()
+##### NumericValue.add() {#add}
 
 ```ts
 abstract add(other): NumericValue
@@ -7701,7 +7701,7 @@ abstract add(other): NumericValue
 
 <MemberCard>
 
-##### NumericValue.sub()
+##### NumericValue.sub() {#sub}
 
 ```ts
 abstract sub(other): NumericValue
@@ -7715,7 +7715,7 @@ abstract sub(other): NumericValue
 
 <MemberCard>
 
-##### NumericValue.mul()
+##### NumericValue.mul() {#mul}
 
 ```ts
 abstract mul(other): NumericValue
@@ -7729,7 +7729,7 @@ abstract mul(other): NumericValue
 
 <MemberCard>
 
-##### NumericValue.div()
+##### NumericValue.div() {#div}
 
 ```ts
 abstract div(other): NumericValue
@@ -7743,7 +7743,7 @@ abstract div(other): NumericValue
 
 <MemberCard>
 
-##### NumericValue.pow()
+##### NumericValue.pow() {#pow}
 
 ```ts
 abstract pow(n): NumericValue
@@ -7762,7 +7762,7 @@ abstract pow(n): NumericValue
 
 <MemberCard>
 
-##### NumericValue.root()
+##### NumericValue.root() {#root}
 
 ```ts
 abstract root(n): NumericValue
@@ -7776,7 +7776,7 @@ abstract root(n): NumericValue
 
 <MemberCard>
 
-##### NumericValue.sqrt()
+##### NumericValue.sqrt() {#sqrt}
 
 ```ts
 abstract sqrt(): NumericValue
@@ -7786,7 +7786,7 @@ abstract sqrt(): NumericValue
 
 <MemberCard>
 
-##### NumericValue.gcd()
+##### NumericValue.gcd() {#gcd}
 
 ```ts
 abstract gcd(other): NumericValue
@@ -7800,7 +7800,7 @@ abstract gcd(other): NumericValue
 
 <MemberCard>
 
-##### NumericValue.abs()
+##### NumericValue.abs() {#abs}
 
 ```ts
 abstract abs(): NumericValue
@@ -7810,7 +7810,7 @@ abstract abs(): NumericValue
 
 <MemberCard>
 
-##### NumericValue.ln()
+##### NumericValue.ln() {#ln}
 
 ```ts
 abstract ln(base?): NumericValue
@@ -7824,7 +7824,7 @@ abstract ln(base?): NumericValue
 
 <MemberCard>
 
-##### NumericValue.exp()
+##### NumericValue.exp() {#exp}
 
 ```ts
 abstract exp(): NumericValue
@@ -7834,7 +7834,7 @@ abstract exp(): NumericValue
 
 <MemberCard>
 
-##### NumericValue.floor()
+##### NumericValue.floor() {#floor}
 
 ```ts
 abstract floor(): NumericValue
@@ -7844,7 +7844,7 @@ abstract floor(): NumericValue
 
 <MemberCard>
 
-##### NumericValue.ceil()
+##### NumericValue.ceil() {#ceil}
 
 ```ts
 abstract ceil(): NumericValue
@@ -7854,7 +7854,7 @@ abstract ceil(): NumericValue
 
 <MemberCard>
 
-##### NumericValue.round()
+##### NumericValue.round() {#round}
 
 ```ts
 abstract round(): NumericValue
@@ -7864,7 +7864,7 @@ abstract round(): NumericValue
 
 <MemberCard>
 
-##### NumericValue.eq()
+##### NumericValue.eq() {#eq}
 
 ```ts
 abstract eq(other): boolean
@@ -7878,7 +7878,7 @@ abstract eq(other): boolean
 
 <MemberCard>
 
-##### NumericValue.lt()
+##### NumericValue.lt() {#lt}
 
 ```ts
 abstract lt(other): boolean | undefined
@@ -7892,7 +7892,7 @@ abstract lt(other): boolean | undefined
 
 <MemberCard>
 
-##### NumericValue.lte()
+##### NumericValue.lte() {#lte}
 
 ```ts
 abstract lte(other): boolean | undefined
@@ -7906,7 +7906,7 @@ abstract lte(other): boolean | undefined
 
 <MemberCard>
 
-##### NumericValue.gt()
+##### NumericValue.gt() {#gt}
 
 ```ts
 abstract gt(other): boolean | undefined
@@ -7920,7 +7920,7 @@ abstract gt(other): boolean | undefined
 
 <MemberCard>
 
-##### NumericValue.gte()
+##### NumericValue.gte() {#gte}
 
 ```ts
 abstract gte(other): boolean | undefined
@@ -7934,7 +7934,7 @@ abstract gte(other): boolean | undefined
 
 <MemberCard>
 
-##### NumericValue.valueOf()
+##### NumericValue.valueOf() {#valueof-1}
 
 ```ts
 valueOf(): string | number
@@ -7947,7 +7947,7 @@ Object.valueOf(): returns a primitive value, preferably a JavaScript
 
 <MemberCard>
 
-##### NumericValue.\[toPrimitive\]()
+##### NumericValue.\[toPrimitive\]() {#toprimitive-1}
 
 ```ts
 toPrimitive: string | number | null
@@ -7963,7 +7963,7 @@ Object.toPrimitive()
 
 <MemberCard>
 
-##### NumericValue.toJSON()
+##### NumericValue.toJSON() {#tojson-1}
 
 ```ts
 toJSON(): unknown
@@ -7975,7 +7975,7 @@ Object.toJSON
 
 <MemberCard>
 
-##### NumericValue.print()
+##### NumericValue.print() {#print}
 
 ```ts
 print(): void
@@ -7985,7 +7985,7 @@ print(): void
 
 <MemberCard>
 
-### SmallInteger
+### SmallInteger {#smallinteger}
 
 ```ts
 type SmallInteger = IsInteger<number>;
@@ -7997,7 +7997,7 @@ A `SmallInteger` is an integer < 1e6
 
 <MemberCard>
 
-### Rational
+### Rational {#rational-1}
 
 ```ts
 type Rational = 
@@ -8015,7 +8015,7 @@ a pair of big integers.
 
 <MemberCard>
 
-### BigNum
+### BigNum {#bignum}
 
 ```ts
 type BigNum = BigDecimal;
@@ -8025,7 +8025,7 @@ type BigNum = BigDecimal;
 
 <MemberCard>
 
-### Sign
+### Sign {#sign}
 
 ```ts
 type Sign = 
@@ -8042,13 +8042,13 @@ type Sign =
 
 ## OEIS
 
-### OEISSequenceInfo
+### OEISSequenceInfo {#oeissequenceinfo}
 
 Result from an OEIS lookup operation.
 
 <MemberCard>
 
-##### OEISSequenceInfo.id
+##### OEISSequenceInfo.id {#id-1}
 
 ```ts
 id: string;
@@ -8060,7 +8060,7 @@ OEIS sequence ID (e.g., 'A000045')
 
 <MemberCard>
 
-##### OEISSequenceInfo.name
+##### OEISSequenceInfo.name {#name-2}
 
 ```ts
 name: string;
@@ -8072,7 +8072,7 @@ Sequence name/description
 
 <MemberCard>
 
-##### OEISSequenceInfo.terms
+##### OEISSequenceInfo.terms {#terms}
 
 ```ts
 terms: number[];
@@ -8084,7 +8084,7 @@ First several terms of the sequence
 
 <MemberCard>
 
-##### OEISSequenceInfo.formula?
+##### OEISSequenceInfo.formula? {#formula}
 
 ```ts
 optional formula?: string;
@@ -8096,7 +8096,7 @@ Formula or recurrence (if available) — the first formula line
 
 <MemberCard>
 
-##### OEISSequenceInfo.formulas?
+##### OEISSequenceInfo.formulas? {#formulas}
 
 ```ts
 optional formulas?: string[];
@@ -8108,7 +8108,7 @@ All free-text formula lines, as returned by OEIS (if available)
 
 <MemberCard>
 
-##### OEISSequenceInfo.comments?
+##### OEISSequenceInfo.comments? {#comments}
 
 ```ts
 optional comments?: string[];
@@ -8120,7 +8120,7 @@ Comments about the sequence
 
 <MemberCard>
 
-##### OEISSequenceInfo.url
+##### OEISSequenceInfo.url {#url}
 
 ```ts
 url: string;
@@ -8130,13 +8130,13 @@ URL to the OEIS page
 
 </MemberCard>
 
-### OEISOptions
+### OEISOptions {#oeisoptions}
 
 Options for OEIS operations.
 
 <MemberCard>
 
-##### OEISOptions.timeout?
+##### OEISOptions.timeout? {#timeout}
 
 ```ts
 optional timeout?: number;
@@ -8148,7 +8148,7 @@ Request timeout in milliseconds (default: 10000)
 
 <MemberCard>
 
-##### OEISOptions.maxResults?
+##### OEISOptions.maxResults? {#maxresults}
 
 ```ts
 optional maxResults?: number;
@@ -8158,7 +8158,7 @@ Maximum number of results to return for lookups (default: 5)
 
 </MemberCard>
 
-### OEISCandidate
+### OEISCandidate {#oeiscandidate}
 
 An OEIS-attributed closed-form proposal produced by `ce.interpret()`.
 
@@ -8168,7 +8168,7 @@ is CC BY-NC, so a candidate must always carry a link back to its source.
 
 <MemberCard>
 
-##### OEISCandidate.expression
+##### OEISCandidate.expression {#expression}
 
 ```ts
 expression: Expression;
@@ -8180,7 +8180,7 @@ The parsed and sample-verified closed-form expression.
 
 <MemberCard>
 
-##### OEISCandidate.id
+##### OEISCandidate.id {#id-2}
 
 ```ts
 id: string;
@@ -8192,7 +8192,7 @@ OEIS sequence ID (e.g., 'A000217').
 
 <MemberCard>
 
-##### OEISCandidate.name
+##### OEISCandidate.name {#name-3}
 
 ```ts
 name: string;
@@ -8204,7 +8204,7 @@ Sequence name/description.
 
 <MemberCard>
 
-##### OEISCandidate.url
+##### OEISCandidate.url {#url-1}
 
 ```ts
 url: string;
@@ -8216,7 +8216,7 @@ URL to the OEIS page.
 
 <MemberCard>
 
-##### OEISCandidate.formula
+##### OEISCandidate.formula {#formula-1}
 
 ```ts
 formula: string;
@@ -8226,14 +8226,14 @@ The free-text OEIS formula line the expression was parsed from.
 
 </MemberCard>
 
-### InterpretResult
+### InterpretResult {#interpretresult}
 
 Result of `ce.interpret()`: the sync-recognized form of the input (the same
 value the `Interpret` head returns), plus any OEIS-attributed candidates.
 
 <MemberCard>
 
-##### InterpretResult.expression
+##### InterpretResult.expression {#expression-1}
 
 ```ts
 expression: Expression;
@@ -8245,7 +8245,7 @@ The recognized expression, or the input unchanged when nothing fired.
 
 <MemberCard>
 
-##### InterpretResult.candidates
+##### InterpretResult.candidates {#candidates}
 
 ```ts
 candidates: OEISCandidate[];
@@ -8257,14 +8257,14 @@ Verified, OEIS-attributed closed-form proposals (possibly empty).
 
 ## Other
 
-### FunctionPropertyRecord
+### FunctionPropertyRecord {#functionpropertyrecord}
 
 A single analytic-property record for an operator. The MathJSON fields are
 raw (as translated from Fungrim); box them with `ce.expr` to query.
 
 <MemberCard>
 
-##### FunctionPropertyRecord.id
+##### FunctionPropertyRecord.id {#id}
 
 ```ts
 readonly id: string;
@@ -8276,7 +8276,7 @@ The Fungrim entry id (provenance).
 
 <MemberCard>
 
-##### FunctionPropertyRecord.property
+##### FunctionPropertyRecord.property {#property}
 
 ```ts
 readonly property: string;
@@ -8290,7 +8290,7 @@ One of `Poles`, `Zeros`, `BranchPoints`, `BranchCuts`, `Residue`,
 
 <MemberCard>
 
-##### FunctionPropertyRecord.var
+##### FunctionPropertyRecord.var {#var}
 
 ```ts
 readonly var: string | null;
@@ -8302,7 +8302,7 @@ The distinguished variable the property is stated in (e.g. `z`).
 
 <MemberCard>
 
-##### FunctionPropertyRecord.argIndex
+##### FunctionPropertyRecord.argIndex {#argindex}
 
 ```ts
 readonly argIndex: number | null;
@@ -8315,7 +8315,7 @@ single argument position (parametric / composite).
 
 <MemberCard>
 
-##### FunctionPropertyRecord.expr
+##### FunctionPropertyRecord.expr {#expr}
 
 ```ts
 readonly expr: ExpressionInput | null;
@@ -8325,7 +8325,7 @@ readonly expr: ExpressionInput | null;
 
 <MemberCard>
 
-##### FunctionPropertyRecord.domain
+##### FunctionPropertyRecord.domain {#domain}
 
 ```ts
 readonly domain: ExpressionInput | null;
@@ -8335,7 +8335,7 @@ readonly domain: ExpressionInput | null;
 
 <MemberCard>
 
-##### FunctionPropertyRecord.point
+##### FunctionPropertyRecord.point {#point}
 
 ```ts
 readonly point: ExpressionInput | null;
@@ -8345,7 +8345,7 @@ readonly point: ExpressionInput | null;
 
 <MemberCard>
 
-##### FunctionPropertyRecord.condition
+##### FunctionPropertyRecord.condition {#condition}
 
 ```ts
 readonly condition: ExpressionInput | null;
@@ -8355,7 +8355,7 @@ readonly condition: ExpressionInput | null;
 
 <MemberCard>
 
-##### FunctionPropertyRecord.value
+##### FunctionPropertyRecord.value {#value}
 
 ```ts
 readonly value: ExpressionInput | null;
@@ -8365,7 +8365,7 @@ readonly value: ExpressionInput | null;
 
 <MemberCard>
 
-##### FunctionPropertyRecord.assumptions
+##### FunctionPropertyRecord.assumptions {#assumptions}
 
 ```ts
 readonly assumptions: ExpressionInput | null;
@@ -8373,7 +8373,7 @@ readonly assumptions: ExpressionInput | null;
 
 </MemberCard>
 
-### FunctionProperties
+### FunctionProperties {#functionproperties}
 
 Queryable analytic properties of an operator, returned by
 `ce.functionProperties(name)`. The set-valued accessors return a boxed set
@@ -8383,7 +8383,7 @@ Queryable analytic properties of an operator, returned by
 
 <MemberCard>
 
-##### FunctionProperties.operator
+##### FunctionProperties.operator {#operator}
 
 ```ts
 readonly operator: string;
@@ -8393,7 +8393,7 @@ readonly operator: string;
 
 <MemberCard>
 
-##### FunctionProperties.entries
+##### FunctionProperties.entries {#entries}
 
 ```ts
 readonly entries: readonly FunctionPropertyRecord[];
@@ -8405,7 +8405,7 @@ All analytic-property records for this operator.
 
 <MemberCard>
 
-##### FunctionProperties.poles
+##### FunctionProperties.poles {#poles}
 
 ```ts
 readonly poles: Expression | undefined;
@@ -8415,7 +8415,7 @@ readonly poles: Expression | undefined;
 
 <MemberCard>
 
-##### FunctionProperties.zeros
+##### FunctionProperties.zeros {#zeros}
 
 ```ts
 readonly zeros: Expression | undefined;
@@ -8425,7 +8425,7 @@ readonly zeros: Expression | undefined;
 
 <MemberCard>
 
-##### FunctionProperties.branchPoints
+##### FunctionProperties.branchPoints {#branchpoints}
 
 ```ts
 readonly branchPoints: Expression | undefined;
@@ -8435,7 +8435,7 @@ readonly branchPoints: Expression | undefined;
 
 <MemberCard>
 
-##### FunctionProperties.branchCuts
+##### FunctionProperties.branchCuts {#branchcuts}
 
 ```ts
 readonly branchCuts: Expression | undefined;
@@ -8445,7 +8445,7 @@ readonly branchCuts: Expression | undefined;
 
 <MemberCard>
 
-##### FunctionProperties.essentialSingularities
+##### FunctionProperties.essentialSingularities {#essentialsingularities}
 
 ```ts
 readonly essentialSingularities: Expression | undefined;
@@ -8455,7 +8455,7 @@ readonly essentialSingularities: Expression | undefined;
 
 <MemberCard>
 
-##### FunctionProperties.holomorphicDomain
+##### FunctionProperties.holomorphicDomain {#holomorphicdomain}
 
 ```ts
 readonly holomorphicDomain: Expression | undefined;
@@ -8467,7 +8467,7 @@ The domain on which the function is holomorphic.
 
 <MemberCard>
 
-##### FunctionProperties.isMeromorphic
+##### FunctionProperties.isMeromorphic {#ismeromorphic}
 
 ```ts
 readonly isMeromorphic: boolean | undefined;
@@ -8479,7 +8479,7 @@ Whether the function is meromorphic, when the corpus records it.
 
 <MemberCard>
 
-### SymbolTable
+### SymbolTable {#symboltable}
 
 ```ts
 type SymbolTable = {
@@ -8490,14 +8490,14 @@ type SymbolTable = {
 
 </MemberCard>
 
-### ILatexSyntax
+### ILatexSyntax {#ilatexsyntax}
 
 Minimal interface for a LaTeX parser/serializer.
  Structurally compatible with `LatexSyntax` without importing it.
 
 <MemberCard>
 
-##### ILatexSyntax.parse()
+##### ILatexSyntax.parse() {#parse}
 
 ```ts
 parse(latex, options?): MathJsonExpression | null
@@ -8515,7 +8515,7 @@ parse(latex, options?): MathJsonExpression | null
 
 <MemberCard>
 
-##### ILatexSyntax.serialize()
+##### ILatexSyntax.serialize() {#serialize-2}
 
 ```ts
 serialize(expr, options?): string
@@ -8533,7 +8533,7 @@ serialize(expr, options?): string
 
 <MemberCard>
 
-##### ILatexSyntax.getNamedTriggers()?
+##### ILatexSyntax.getNamedTriggers()? {#getnamedtriggers}
 
 ```ts
 optional getNamedTriggers(): readonly {
@@ -8550,7 +8550,7 @@ Named dictionary entries with their LaTeX trigger strings, for reverse
 
 <MemberCard>
 
-### OperatorInfo
+### OperatorInfo {#operatorinfo}
 
 ```ts
 type OperatorInfo = {
@@ -8564,7 +8564,7 @@ type OperatorInfo = {
 
 <MemberCard>
 
-### SymbolInfo
+### SymbolInfo {#symbolinfo}
 
 ```ts
 type SymbolInfo = {
@@ -8577,7 +8577,7 @@ type SymbolInfo = {
 
 <MemberCard>
 
-### DefinitionSearchResult
+### DefinitionSearchResult {#definitionsearchresult}
 
 ```ts
 type DefinitionSearchResult = {
@@ -8592,7 +8592,7 @@ One result of `ce.searchDefinitions()`.
 
 <MemberCard>
 
-### IntegrationProvider
+### IntegrationProvider {#integrationprovider}
 
 ```ts
 type IntegrationProvider = (integrand, variable, trace?) => Expression | null;
@@ -8611,7 +8611,7 @@ antiderivative was found. The argument is backward-compatible: the plain
 
 <MemberCard>
 
-### ProtocolMember
+### ProtocolMember {#protocolmember}
 
 ```ts
 type ProtocolMember = 
@@ -8633,7 +8633,7 @@ VERBATIM, with `Self` unsubstituted: `Self` is a textual substitution token
 
 <MemberCard>
 
-### InferenceWriteEvent
+### InferenceWriteEvent {#inferencewriteevent}
 
 ```ts
 type InferenceWriteEvent = {
@@ -8658,7 +8658,7 @@ narrowing sink. See `docs/TYPE-SYSTEM.md`
 
 <MemberCard>
 
-### InferenceCauseContext
+### InferenceCauseContext {#inferencecausecontext}
 
 ```ts
 type InferenceCauseContext = {
@@ -8680,7 +8680,7 @@ per canonicalization would not be).
 
 <MemberCard>
 
-### JSImplementation
+### JSImplementation {#jsimplementation}
 
 ```ts
 type JSImplementation = {
@@ -8698,7 +8698,7 @@ function literal (design P10).
 
 <MemberCard>
 
-### ProtocolHostHandler
+### ProtocolHostHandler {#protocolhosthandler}
 
 ```ts
 type ProtocolHostHandler = (...args) => unknown;
@@ -8713,7 +8713,7 @@ here.
 
 <MemberCard>
 
-### ConformanceRecord
+### ConformanceRecord {#conformancerecord}
 
 ```ts
 type ConformanceRecord = {
@@ -8739,7 +8739,7 @@ Conformances are add-only (monotone); only their implementations replace.
 
 <MemberCard>
 
-### ProtocolRecord
+### ProtocolRecord {#protocolrecord}
 
 ```ts
 type ProtocolRecord = {
@@ -8757,7 +8757,7 @@ A protocol declaration and every conformance registered against it.
 
 <MemberCard>
 
-### ProtocolMembersInput
+### ProtocolMembersInput {#protocolmembersinput}
 
 ```ts
 type ProtocolMembersInput = {
@@ -8775,7 +8775,7 @@ buckets (Appendix A "Host API").
 
 <MemberCard>
 
-### ProtocolImplementationInput
+### ProtocolImplementationInput {#protocolimplementationinput}
 
 ```ts
 type ProtocolImplementationInput = {
@@ -8792,7 +8792,7 @@ implementation detail, not part of the public surface).
 
 </MemberCard>
 
-### EngineCheckpoint
+### EngineCheckpoint {#enginecheckpoint}
 
 A handle on a saved engine state, from [IComputeEngine.checkpoint](#checkpoint).
 Deliberately opaque: `id` is for logging and `live` is the only state a
@@ -8803,7 +8803,7 @@ through the sequence registry.
 
 <MemberCard>
 
-##### EngineCheckpoint.id
+##### EngineCheckpoint.id {#id-4}
 
 ```ts
 readonly id: number;
@@ -8813,7 +8813,7 @@ readonly id: number;
 
 <MemberCard>
 
-##### EngineCheckpoint.live
+##### EngineCheckpoint.live {#live}
 
 ```ts
 readonly live: boolean;
@@ -8826,7 +8826,7 @@ restore). A dead checkpoint can never be restored again.
 
 </MemberCard>
 
-### IComputeEngine
+### IComputeEngine {#icomputeengine}
 
 #### Extended by
 
@@ -8834,7 +8834,7 @@ restore). A dead checkpoint can never be restored again.
 
 <MemberCard>
 
-##### IComputeEngine.latexSyntax
+##### IComputeEngine.latexSyntax {#latexsyntax}
 
 ```ts
 readonly latexSyntax: ILatexSyntax | undefined;
@@ -8847,7 +8847,7 @@ The LatexSyntax instance used for LaTeX parsing/serialization.
 
 <MemberCard>
 
-##### IComputeEngine.latexOptions
+##### IComputeEngine.latexOptions {#latexoptions}
 
 ```ts
 latexOptions: Partial<ParseLatexOptions & SerializeLatexOptions>;
@@ -8861,7 +8861,7 @@ Engine-wide LaTeX parse/serialize options (e.g. `decimalSeparator`).
 
 <MemberCard>
 
-##### IComputeEngine.True
+##### IComputeEngine.True {#true}
 
 ```ts
 readonly True: Expression;
@@ -8871,7 +8871,7 @@ readonly True: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.False
+##### IComputeEngine.False {#false}
 
 ```ts
 readonly False: Expression;
@@ -8881,7 +8881,7 @@ readonly False: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.Pi
+##### IComputeEngine.Pi {#pi}
 
 ```ts
 readonly Pi: Expression;
@@ -8891,7 +8891,7 @@ readonly Pi: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.E
+##### IComputeEngine.E {#e}
 
 ```ts
 readonly E: Expression;
@@ -8901,7 +8901,7 @@ readonly E: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.Nothing
+##### IComputeEngine.Nothing {#nothing}
 
 ```ts
 readonly Nothing: Expression;
@@ -8911,7 +8911,7 @@ readonly Nothing: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.Missing
+##### IComputeEngine.Missing {#missing}
 
 ```ts
 readonly Missing: Expression;
@@ -8923,7 +8923,7 @@ The `Missing` symbol: an absent value whose position is preserved.
 
 <MemberCard>
 
-##### IComputeEngine.Zero
+##### IComputeEngine.Zero {#zero}
 
 ```ts
 readonly Zero: Expression;
@@ -8933,7 +8933,7 @@ readonly Zero: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.One
+##### IComputeEngine.One {#one}
 
 ```ts
 readonly One: Expression;
@@ -8943,7 +8943,7 @@ readonly One: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.Half
+##### IComputeEngine.Half {#half}
 
 ```ts
 readonly Half: Expression;
@@ -8953,7 +8953,7 @@ readonly Half: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.NegativeOne
+##### IComputeEngine.NegativeOne {#negativeone}
 
 ```ts
 readonly NegativeOne: Expression;
@@ -8963,7 +8963,7 @@ readonly NegativeOne: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.Two
+##### IComputeEngine.Two {#two}
 
 ```ts
 readonly Two: Expression;
@@ -8973,7 +8973,7 @@ readonly Two: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.I
+##### IComputeEngine.I {#i}
 
 ```ts
 readonly I: Expression;
@@ -8985,7 +8985,7 @@ ImaginaryUnit
 
 <MemberCard>
 
-##### IComputeEngine.NaN
+##### IComputeEngine.NaN {#nan}
 
 ```ts
 readonly NaN: Expression;
@@ -8995,7 +8995,7 @@ readonly NaN: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.PositiveInfinity
+##### IComputeEngine.PositiveInfinity {#positiveinfinity-1}
 
 ```ts
 readonly PositiveInfinity: Expression;
@@ -9005,7 +9005,7 @@ readonly PositiveInfinity: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.NegativeInfinity
+##### IComputeEngine.NegativeInfinity {#negativeinfinity-1}
 
 ```ts
 readonly NegativeInfinity: Expression;
@@ -9015,7 +9015,7 @@ readonly NegativeInfinity: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.ComplexInfinity
+##### IComputeEngine.ComplexInfinity {#complexinfinity}
 
 ```ts
 readonly ComplexInfinity: Expression;
@@ -9025,7 +9025,7 @@ readonly ComplexInfinity: Expression;
 
 <MemberCard>
 
-##### IComputeEngine.context
+##### IComputeEngine.context {#context}
 
 ```ts
 readonly context: EvalContext;
@@ -9035,7 +9035,7 @@ readonly context: EvalContext;
 
 <MemberCard>
 
-##### IComputeEngine.contextStack
+##### IComputeEngine.contextStack {#contextstack}
 
 ```ts
 contextStack: readonly EvalContext[];
@@ -9045,7 +9045,7 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
-##### IComputeEngine.iterationLimit
+##### IComputeEngine.iterationLimit {#iterationlimit}
 
 ```ts
 iterationLimit: number;
@@ -9055,7 +9055,7 @@ iterationLimit: number;
 
 <MemberCard>
 
-##### IComputeEngine.recursionLimit
+##### IComputeEngine.recursionLimit {#recursionlimit}
 
 ```ts
 recursionLimit: number;
@@ -9065,7 +9065,7 @@ recursionLimit: number;
 
 <MemberCard>
 
-##### IComputeEngine.maxCollectionSize
+##### IComputeEngine.maxCollectionSize {#maxcollectionsize}
 
 ```ts
 maxCollectionSize: number;
@@ -9075,7 +9075,7 @@ maxCollectionSize: number;
 
 <MemberCard>
 
-##### IComputeEngine.bignum
+##### IComputeEngine.bignum {#bignum-1}
 
 ```ts
 bignum: (a) => BigDecimal;
@@ -9085,7 +9085,7 @@ bignum: (a) => BigDecimal;
 
 <MemberCard>
 
-##### IComputeEngine.complex
+##### IComputeEngine.complex {#complex}
 
 ```ts
 complex: (a, b?) => Complex;
@@ -9095,7 +9095,7 @@ complex: (a, b?) => Complex;
 
 <MemberCard>
 
-##### IComputeEngine.tolerance
+##### IComputeEngine.tolerance {#tolerance}
 
 ```ts
 tolerance: number;
@@ -9105,7 +9105,7 @@ tolerance: number;
 
 <MemberCard>
 
-##### IComputeEngine.angularUnit
+##### IComputeEngine.angularUnit {#angularunit-1}
 
 ```ts
 angularUnit: AngularUnit;
@@ -9115,7 +9115,7 @@ angularUnit: AngularUnit;
 
 <MemberCard>
 
-##### IComputeEngine.costFunction
+##### IComputeEngine.costFunction {#costfunction-1}
 
 ```ts
 costFunction: (expr) => number;
@@ -9125,7 +9125,7 @@ costFunction: (expr) => number;
 
 <MemberCard>
 
-##### IComputeEngine.simplificationRules
+##### IComputeEngine.simplificationRules {#simplificationrules}
 
 ```ts
 simplificationRules: Rule[];
@@ -9139,7 +9139,7 @@ The rules used by `.simplify()` when no explicit `rules` option is passed.
 
 <MemberCard>
 
-##### IComputeEngine.solveRules
+##### IComputeEngine.solveRules {#solverules}
 
 ```ts
 solveRules: Rule[];
@@ -9158,7 +9158,7 @@ The rules used by `solve()` to find roots of univariate expressions.
 
 <MemberCard>
 
-##### IComputeEngine.harmonizationRules
+##### IComputeEngine.harmonizationRules {#harmonizationrules}
 
 ```ts
 harmonizationRules: Rule[];
@@ -9172,7 +9172,7 @@ The rules used by `solve()` to transform an equation into equivalent,
 
 <MemberCard>
 
-##### IComputeEngine.strict
+##### IComputeEngine.strict {#strict}
 
 ```ts
 strict: boolean;
@@ -9182,7 +9182,7 @@ strict: boolean;
 
 <MemberCard>
 
-##### IComputeEngine.jit
+##### IComputeEngine.jit {#jit}
 
 ```ts
 jit: "auto" | "off";
@@ -9198,7 +9198,7 @@ compilation and latches to `'off'` engine-wide on the first CSP
 
 <MemberCard>
 
-##### IComputeEngine.trace
+##### IComputeEngine.trace {#trace}
 
 ```ts
 trace: readonly string[];
@@ -9210,7 +9210,7 @@ A list of the function calls to the current evaluation context
 
 <MemberCard>
 
-##### IComputeEngine.precision
+##### IComputeEngine.precision {#precision}
 
 ```ts
 get precision(): number
@@ -9221,7 +9221,7 @@ set precision(p: number | "auto" | "machine"): void
 
 <MemberCard>
 
-##### IComputeEngine.checkpoint()
+##### IComputeEngine.checkpoint() {#checkpoint}
 
 ```ts
 checkpoint(label?): EngineCheckpoint
@@ -9245,7 +9245,7 @@ checkpoint was taken on.
 
 <MemberCard>
 
-##### IComputeEngine.restore()
+##### IComputeEngine.restore() {#restore}
 
 ```ts
 restore(cp): void
@@ -9265,7 +9265,7 @@ artifacts, never as live boxed nodes.
 
 <MemberCard>
 
-##### IComputeEngine.discard()
+##### IComputeEngine.discard() {#discard}
 
 ```ts
 discard(cp): void
@@ -9283,7 +9283,7 @@ OLDEST makes the state before the next-younger one unreachable.
 
 <MemberCard>
 
-##### IComputeEngine.declareProtocol()
+##### IComputeEngine.declareProtocol() {#declareprotocol}
 
 ```ts
 declareProtocol(name, members): void
@@ -9304,7 +9304,7 @@ on re-declaration — the Epsil statement route replaces instead (P5).
 
 <MemberCard>
 
-##### IComputeEngine.declareProtocolImplementation()
+##### IComputeEngine.declareProtocolImplementation() {#declareprotocolimplementation}
 
 ```ts
 declareProtocolImplementation(
@@ -9354,7 +9354,7 @@ throws.
 
 <MemberCard>
 
-##### IComputeEngine.withTimeLimit()
+##### IComputeEngine.withTimeLimit() {#withtimelimit}
 
 ```ts
 withTimeLimit<T>(limit, fn): T
@@ -9390,7 +9390,7 @@ that point runs **outside** the deadline and is never cancelled (see
 
 <MemberCard>
 
-##### IComputeEngine.chop()
+##### IComputeEngine.chop() {#chop}
 
 ###### chop(n)
 
@@ -9426,7 +9426,7 @@ chop(n): number | BigDecimal
 
 <MemberCard>
 
-##### IComputeEngine.expr()
+##### IComputeEngine.expr() {#expr-2}
 
 ```ts
 expr(expr, options?): Expression
@@ -9451,7 +9451,7 @@ expr(expr, options?): Expression
 
 <MemberCard>
 
-##### IComputeEngine.~~box()~~
+##### IComputeEngine.~~box()~~ {#box}
 
 ```ts
 box(expr, options?): Expression
@@ -9480,7 +9480,7 @@ Use `expr()` instead.
 
 <MemberCard>
 
-##### IComputeEngine.parse()
+##### IComputeEngine.parse() {#parse-1}
 
 ###### parse(latex, options)
 
@@ -9545,7 +9545,7 @@ parse(latex, options?): Expression | null
 
 <MemberCard>
 
-##### IComputeEngine.appliedNonFunctions()
+##### IComputeEngine.appliedNonFunctions() {#appliednonfunctions}
 
 ```ts
 appliedNonFunctions(latex): string[]
@@ -9571,7 +9571,7 @@ juxtaposition analysis.
 
 <MemberCard>
 
-##### IComputeEngine.function()
+##### IComputeEngine.function() {#function}
 
 ```ts
 function(name, ops, options?): Expression
@@ -9603,7 +9603,7 @@ readonly [`ExpressionInput`](#expressioninput)[]
 
 <MemberCard>
 
-##### IComputeEngine.\_getCompilationTarget()
+##### IComputeEngine.\_getCompilationTarget() {#_getcompilationtarget}
 
 ###### \_getCompilationTarget(name)
 
@@ -9633,7 +9633,7 @@ _getCompilationTarget(name):
 
 <MemberCard>
 
-##### IComputeEngine.number()
+##### IComputeEngine.number() {#number-1}
 
 ```ts
 number(value, options?): Expression
@@ -9664,7 +9664,7 @@ number(value, options?): Expression
 
 <MemberCard>
 
-##### IComputeEngine.symbol()
+##### IComputeEngine.symbol() {#symbol}
 
 ```ts
 symbol(sym, options?): Expression
@@ -9692,7 +9692,7 @@ symbol(sym, options?): Expression
 
 <MemberCard>
 
-##### IComputeEngine.string()
+##### IComputeEngine.string() {#string-1}
 
 ```ts
 string(s, metadata?): Expression
@@ -9710,7 +9710,7 @@ string(s, metadata?): Expression
 
 <MemberCard>
 
-##### IComputeEngine.character()
+##### IComputeEngine.character() {#character-1}
 
 ```ts
 character(s, metadata?): Expression
@@ -9734,7 +9734,7 @@ it reports a diagnostic instead.
 
 <MemberCard>
 
-##### IComputeEngine.error()
+##### IComputeEngine.error() {#error-1}
 
 ```ts
 error(message, where?): Expression
@@ -9752,7 +9752,7 @@ error(message, where?): Expression
 
 <MemberCard>
 
-##### IComputeEngine.typeError()
+##### IComputeEngine.typeError() {#typeerror}
 
 ```ts
 typeError(expectedType, actualType, where?): Expression
@@ -9776,7 +9776,7 @@ typeError(expectedType, actualType, where?): Expression
 
 <MemberCard>
 
-##### IComputeEngine.hold()
+##### IComputeEngine.hold() {#hold}
 
 ```ts
 hold(expr): Expression
@@ -9790,7 +9790,7 @@ hold(expr): Expression
 
 <MemberCard>
 
-##### IComputeEngine.tuple()
+##### IComputeEngine.tuple() {#tuple}
 
 ###### tuple(elements)
 
@@ -9816,7 +9816,7 @@ tuple(...elements): Expression
 
 <MemberCard>
 
-##### IComputeEngine.type()
+##### IComputeEngine.type() {#type-8}
 
 ```ts
 type(type): BoxedType
@@ -9848,7 +9848,7 @@ type(type): BoxedType
 
 <MemberCard>
 
-##### IComputeEngine.rules()
+##### IComputeEngine.rules() {#rules-1}
 
 ```ts
 rules(rules, options?): BoxedRuleSet
@@ -9875,7 +9875,7 @@ Default purpose applied to any rule in the set that doesn't carry
 
 <MemberCard>
 
-##### IComputeEngine.getRuleSet()
+##### IComputeEngine.getRuleSet() {#getruleset}
 
 ```ts
 getRuleSet(id?): BoxedRuleSet | undefined
@@ -9889,7 +9889,7 @@ getRuleSet(id?): BoxedRuleSet | undefined
 
 <MemberCard>
 
-##### IComputeEngine.pushScope()
+##### IComputeEngine.pushScope() {#pushscope}
 
 ```ts
 pushScope(scope?, name?): void
@@ -9907,7 +9907,7 @@ pushScope(scope?, name?): void
 
 <MemberCard>
 
-##### IComputeEngine.popScope()
+##### IComputeEngine.popScope() {#popscope}
 
 ```ts
 popScope(): void
@@ -9917,7 +9917,7 @@ popScope(): void
 
 <MemberCard>
 
-##### IComputeEngine.createScope()
+##### IComputeEngine.createScope() {#createscope}
 
 ```ts
 createScope(bindings?, parent?): InspectableScope
@@ -9955,7 +9955,7 @@ createScope(bindings?, parent?): InspectableScope
 
 <MemberCard>
 
-##### IComputeEngine.lookupDefinition()
+##### IComputeEngine.lookupDefinition() {#lookupdefinition}
 
 ```ts
 lookupDefinition(id): BoxedDefinition | undefined
@@ -9969,7 +9969,7 @@ lookupDefinition(id): BoxedDefinition | undefined
 
 <MemberCard>
 
-##### IComputeEngine.assign()
+##### IComputeEngine.assign() {#assign}
 
 ###### assign(ids)
 
@@ -10011,7 +10011,7 @@ assign(arg1, arg2?): IComputeEngine
 
 <MemberCard>
 
-##### IComputeEngine.declareType()
+##### IComputeEngine.declareType() {#declaretype}
 
 ```ts
 declareType(name, type, options?): void
@@ -10065,7 +10065,7 @@ declareType(name, type, options?): void
 
 <MemberCard>
 
-##### IComputeEngine.declare()
+##### IComputeEngine.declare() {#declare}
 
 ###### declare(symbols)
 
@@ -10513,7 +10513,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 
 <MemberCard>
 
-##### IComputeEngine.assume()
+##### IComputeEngine.assume() {#assume}
 
 ```ts
 assume(predicate): AssumeResult
@@ -10527,7 +10527,7 @@ assume(predicate): AssumeResult
 
 <MemberCard>
 
-##### IComputeEngine.declareSequence()
+##### IComputeEngine.declareSequence() {#declaresequence}
 
 ```ts
 declareSequence(name, def): IComputeEngine
@@ -10558,7 +10558,7 @@ ce.parse('F_{10}').evaluate();  // → 55
 
 <MemberCard>
 
-##### IComputeEngine.getSequenceStatus()
+##### IComputeEngine.getSequenceStatus() {#getsequencestatus}
 
 ```ts
 getSequenceStatus(name): SequenceStatus
@@ -10582,7 +10582,7 @@ ce.getSequenceStatus('F');
 
 <MemberCard>
 
-##### IComputeEngine.getSequence()
+##### IComputeEngine.getSequence() {#getsequence}
 
 ```ts
 getSequence(name): SequenceInfo | undefined
@@ -10599,7 +10599,7 @@ Returns `undefined` if the symbol is not a sequence.
 
 <MemberCard>
 
-##### IComputeEngine.listSequences()
+##### IComputeEngine.listSequences() {#listsequences}
 
 ```ts
 listSequences(): string[]
@@ -10612,7 +10612,7 @@ Returns an array of sequence names.
 
 <MemberCard>
 
-##### IComputeEngine.isSequence()
+##### IComputeEngine.isSequence() {#issequence}
 
 ```ts
 isSequence(name): boolean
@@ -10628,7 +10628,7 @@ Check if a symbol is a defined sequence.
 
 <MemberCard>
 
-##### IComputeEngine.clearSequenceCache()
+##### IComputeEngine.clearSequenceCache() {#clearsequencecache}
 
 ```ts
 clearSequenceCache(name?): void
@@ -10645,7 +10645,7 @@ If no name is provided, clears caches for all sequences.
 
 <MemberCard>
 
-##### IComputeEngine.getSequenceCache()
+##### IComputeEngine.getSequenceCache() {#getsequencecache}
 
 ```ts
 getSequenceCache(name): 
@@ -10667,7 +10667,7 @@ For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
 
 <MemberCard>
 
-##### IComputeEngine.getSequenceTerms()
+##### IComputeEngine.getSequenceTerms() {#getsequenceterms}
 
 ```ts
 getSequenceTerms(
@@ -10715,7 +10715,7 @@ ce.getSequenceTerms('F', 0, 10);
 
 <MemberCard>
 
-##### IComputeEngine.lookupOEIS()
+##### IComputeEngine.lookupOEIS() {#lookupoeis}
 
 ```ts
 lookupOEIS(terms, options?): Promise<OEISSequenceInfo[]>
@@ -10746,7 +10746,7 @@ const results = await ce.lookupOEIS([0, 1, 1, 2, 3, 5, 8, 13]);
 
 <MemberCard>
 
-##### IComputeEngine.checkSequenceOEIS()
+##### IComputeEngine.checkSequenceOEIS() {#checksequenceoeis}
 
 ```ts
 checkSequenceOEIS(name, count?, options?): Promise<{
@@ -10787,7 +10787,7 @@ const result = await ce.checkSequenceOEIS('F', 10);
 
 <MemberCard>
 
-##### IComputeEngine.interpret()
+##### IComputeEngine.interpret() {#interpret}
 
 ```ts
 interpret(expr, options?): Promise<InterpretResult>
@@ -10827,7 +10827,7 @@ const { expression, candidates } = await ce.interpret(
 
 <MemberCard>
 
-##### IComputeEngine.forget()
+##### IComputeEngine.forget() {#forget}
 
 ```ts
 forget(symbol?): void
@@ -10841,7 +10841,7 @@ forget(symbol?): void
 
 <MemberCard>
 
-##### IComputeEngine.ask()
+##### IComputeEngine.ask() {#ask}
 
 ```ts
 ask(pattern): BoxedSubstitution[]
@@ -10855,7 +10855,7 @@ ask(pattern): BoxedSubstitution[]
 
 <MemberCard>
 
-##### IComputeEngine.verify()
+##### IComputeEngine.verify() {#verify}
 
 ```ts
 verify(query): boolean | undefined
@@ -10869,7 +10869,7 @@ verify(query): boolean | undefined
 
 <MemberCard>
 
-##### IComputeEngine.operatorInfo()
+##### IComputeEngine.operatorInfo() {#operatorinfo-1}
 
 ```ts
 operatorInfo(head): OperatorInfo | undefined
@@ -10894,7 +10894,7 @@ maintaining a parallel list of "known" operators.
 
 <MemberCard>
 
-##### IComputeEngine.normalizeIdentifier()
+##### IComputeEngine.normalizeIdentifier() {#normalizeidentifier}
 
 ```ts
 normalizeIdentifier(latex): string
@@ -10920,7 +10920,7 @@ name without the side-effect of auto-declaring the symbol.
 
 <MemberCard>
 
-##### IComputeEngine.symbolInfo()
+##### IComputeEngine.symbolInfo() {#symbolinfo-1}
 
 ```ts
 symbolInfo(name): SymbolInfo | undefined
@@ -10946,7 +10946,7 @@ two methods are non-overlapping).
 
 <MemberCard>
 
-##### IComputeEngine.searchDefinitions()
+##### IComputeEngine.searchDefinitions() {#searchdefinitions}
 
 ```ts
 searchDefinitions(query, options?): DefinitionSearchResult[]
@@ -10978,7 +10978,7 @@ call for full detail.
 
 <MemberCard>
 
-##### IComputeEngine.suggestOperatorName()
+##### IComputeEngine.suggestOperatorName() {#suggestoperatorname}
 
 ```ts
 suggestOperatorName(name): string | undefined
@@ -11007,7 +11007,7 @@ ce.suggestOperatorName('foo');      // → undefined
 
 <MemberCard>
 
-##### IComputeEngine.functionProperties()
+##### IComputeEngine.functionProperties() {#functionproperties-1}
 
 ```ts
 functionProperties(name): FunctionProperties | undefined
@@ -11033,7 +11033,7 @@ residues that depend on parameters) are available via `entries`.
 
 <MemberCard>
 
-##### IComputeEngine.toJSON()
+##### IComputeEngine.toJSON() {#tojson-2}
 
 ```ts
 toJSON(): string
@@ -11045,7 +11045,7 @@ Debug representation, e.g. for `JSON.stringify()`.
 
 <MemberCard>
 
-### RuleStep
+### RuleStep {#rulestep}
 
 ```ts
 type RuleStep = KernelRuleStep<Expression>;
@@ -11057,7 +11057,7 @@ A single rule application step with provenance.
 
 <MemberCard>
 
-### RuleSteps
+### RuleSteps {#rulesteps}
 
 ```ts
 type RuleSteps = KernelRuleSteps<Expression>;
@@ -11069,7 +11069,7 @@ A list of rule application steps.
 
 <MemberCard>
 
-### ExplainStep
+### ExplainStep {#explainstep}
 
 ```ts
 type ExplainStep = KernelExplainStep<Expression>;
@@ -11081,7 +11081,7 @@ One step of an `Explanation`. See `expr.explain()`.
 
 <MemberCard>
 
-### Explanation
+### Explanation {#explanation}
 
 ```ts
 type Explanation = KernelExplanation<Expression>;
@@ -11093,7 +11093,7 @@ A structured step-by-step explanation. See `expr.explain()`.
 
 <MemberCard>
 
-### BoxedRule
+### BoxedRule {#boxedrule}
 
 ```ts
 type BoxedRule = KernelBoxedRule<Expression, IComputeEngine>;
@@ -11105,7 +11105,7 @@ A boxed/normalized rule form.
 
 <MemberCard>
 
-### BoxedRuleSet
+### BoxedRuleSet {#boxedruleset}
 
 ```ts
 type BoxedRuleSet = KernelBoxedRuleSet<Expression, IComputeEngine>;
@@ -11117,7 +11117,7 @@ Collection of boxed rules.
 
 <MemberCard>
 
-### Scope
+### Scope {#scope}
 
 ```ts
 type Scope = KernelScope<BoxedDefinition>;
@@ -11129,7 +11129,7 @@ Lexical scope specialized to boxed definitions.
 
 <MemberCard>
 
-### InspectableScope
+### InspectableScope {#inspectablescope}
 
 ```ts
 type InspectableScope = KernelInspectableScope<BoxedDefinition>;
@@ -11142,7 +11142,7 @@ A caller-owned, readable lexical scope — the product of
 
 <MemberCard>
 
-### ScopeDeclaration
+### ScopeDeclaration {#scopedeclaration}
 
 ```ts
 type ScopeDeclaration = KernelScopeDeclaration<BoxedDefinition>;
@@ -11154,7 +11154,7 @@ One entry of an [InspectableScope](#inspectablescope) harvest.
 
 <MemberCard>
 
-### ScopeNarrowing
+### ScopeNarrowing {#scopenarrowing}
 
 ```ts
 type ScopeNarrowing = KernelScopeNarrowing<BoxedDefinition>;
@@ -11166,7 +11166,7 @@ One outer-definition narrowing observed by an [InspectableScope](#inspectablesco
 
 <MemberCard>
 
-### EvalContext
+### EvalContext {#evalcontext}
 
 ```ts
 type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;
@@ -11176,13 +11176,13 @@ Evaluation context specialized to this engine/runtime model.
 
 </MemberCard>
 
-### Expression
+### Expression {#expression-5}
 
 #### Function Expression
 
 <MemberCard>
 
-##### Expression.operator
+##### Expression.operator {#operator-3}
 
 ```ts
 readonly operator: string;
@@ -11206,7 +11206,7 @@ collapse to `"Number"`.
 
 <MemberCard>
 
-##### Expression.parseDiagnostics?
+##### Expression.parseDiagnostics? {#parsediagnostics}
 
 ```ts
 optional parseDiagnostics?: readonly ParseDiagnostic[];
@@ -11229,7 +11229,7 @@ See [ParseDiagnostic](#parsediagnostic) for the code enumeration and span conven
 
 <MemberCard>
 
-##### Expression.isEven
+##### Expression.isEven {#iseven}
 
 ```ts
 readonly isEven: boolean | undefined;
@@ -11241,7 +11241,7 @@ If the value of this expression is not an **integer** return `undefined`.
 
 <MemberCard>
 
-##### Expression.isOdd
+##### Expression.isOdd {#isodd}
 
 ```ts
 readonly isOdd: boolean | undefined;
@@ -11253,7 +11253,7 @@ If the value of this expression is not an **integer** return `undefined`.
 
 <MemberCard>
 
-##### Expression.re
+##### Expression.re {#re-2}
 
 ```ts
 readonly re: number;
@@ -11267,7 +11267,7 @@ Otherwise, return `NaN` (not a number).
 
 <MemberCard>
 
-##### Expression.im
+##### Expression.im {#im-2}
 
 ```ts
 readonly im: number;
@@ -11282,7 +11282,7 @@ Otherwise, return `NaN` (not a number).
 
 <MemberCard>
 
-##### Expression.bignumRe
+##### Expression.bignumRe {#bignumre-1}
 
 ```ts
 readonly bignumRe: BigDecimal | undefined;
@@ -11304,7 +11304,7 @@ otherwise as a number or `NaN` if the value is not a number.
 
 <MemberCard>
 
-##### Expression.bignumIm
+##### Expression.bignumIm {#bignumim-1}
 
 ```ts
 readonly bignumIm: BigDecimal | undefined;
@@ -11328,7 +11328,7 @@ When using this pattern, the value is returned as a bignum if available, otherwi
 
 <MemberCard>
 
-##### Expression.sgn
+##### Expression.sgn {#sgn-2}
 
 ```ts
 readonly sgn: Sign | undefined;
@@ -11350,7 +11350,7 @@ Non-canonical expressions return `undefined`.
 
 <MemberCard>
 
-##### Expression.isPositive
+##### Expression.isPositive {#ispositive}
 
 ```ts
 readonly isPositive: boolean | undefined;
@@ -11362,7 +11362,7 @@ The value of this expression is > 0, same as `isGreaterEqual(0)`
 
 <MemberCard>
 
-##### Expression.isNonNegative
+##### Expression.isNonNegative {#isnonnegative}
 
 ```ts
 readonly isNonNegative: boolean | undefined;
@@ -11374,7 +11374,7 @@ The value of this expression is >= 0, same as `isGreaterEqual(0)`
 
 <MemberCard>
 
-##### Expression.isNegative
+##### Expression.isNegative {#isnegative}
 
 ```ts
 readonly isNegative: boolean | undefined;
@@ -11386,7 +11386,7 @@ The value of this expression is &lt; 0, same as `isLess(0)`
 
 <MemberCard>
 
-##### Expression.isNonPositive
+##### Expression.isNonPositive {#isnonpositive}
 
 ```ts
 readonly isNonPositive: boolean | undefined;
@@ -11398,7 +11398,7 @@ The  value of this expression is &lt;= 0, same as `isLessEqual(0)`
 
 <MemberCard>
 
-##### Expression.isNaN
+##### Expression.isNaN {#isnan-1}
 
 ```ts
 readonly isNaN: boolean | undefined;
@@ -11416,7 +11416,7 @@ number).
 
 <MemberCard>
 
-##### Expression.isInfinity
+##### Expression.isInfinity {#isinfinity}
 
 ```ts
 readonly isInfinity: boolean | undefined;
@@ -11428,7 +11428,7 @@ The numeric value of this expression is `±Infinity` or ComplexInfinity.
 
 <MemberCard>
 
-##### Expression.isFinite
+##### Expression.isFinite {#isfinite-1}
 
 ```ts
 readonly isFinite: boolean | undefined;
@@ -11443,7 +11443,7 @@ This expression is a number, but not `±Infinity`, `ComplexInfinity` or
 
 <MemberCard>
 
-##### Expression.hash
+##### Expression.hash {#hash}
 
 ```ts
 readonly hash: number;
@@ -11479,7 +11479,7 @@ The contract:
 
 <MemberCard>
 
-##### Expression.engine
+##### Expression.engine {#engine}
 
 ```ts
 readonly engine: ExpressionComputeEngine;
@@ -11493,7 +11493,7 @@ and functions.
 
 <MemberCard>
 
-##### Expression.toMathJson()
+##### Expression.toMathJson() {#tomathjson}
 
 ```ts
 toMathJson(options?): MathJsonExpression
@@ -11513,7 +11513,7 @@ numbers to `ce.precision` significant digits. The default
 
 <MemberCard>
 
-##### Expression.json
+##### Expression.json {#json}
 
 ```ts
 readonly json: MathJsonExpression;
@@ -11547,7 +11547,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.latex
+##### Expression.latex {#latex-1}
 
 ```ts
 readonly latex: string;
@@ -11566,7 +11566,7 @@ transcendentals) are not displayed.
 
 <MemberCard>
 
-##### Expression.toLatex()
+##### Expression.toLatex() {#tolatex}
 
 ```ts
 toLatex(options?): string
@@ -11585,7 +11585,7 @@ Numeric values are rounded to `ce.precision` significant digits.
 
 <MemberCard>
 
-##### Expression.print()
+##### Expression.print() {#print-1}
 
 ```ts
 print(): void
@@ -11599,7 +11599,7 @@ Note that lazy collections are eagerly evaluated when printed.
 
 <MemberCard>
 
-##### Expression.verbatimLatex?
+##### Expression.verbatimLatex? {#verbatimlatex}
 
 ```ts
 optional verbatimLatex?: string;
@@ -11612,7 +11612,7 @@ If the expression was constructed from a LaTeX string, the verbatim LaTeX
 
 <MemberCard>
 
-##### Expression.sourceOffsets?
+##### Expression.sourceOffsets? {#sourceoffsets-1}
 
 ```ts
 optional sourceOffsets?: [number, number];
@@ -11624,7 +11624,7 @@ Source offsets in the original source string, when available.
 
 <MemberCard>
 
-##### Expression.isCanonical
+##### Expression.isCanonical {#iscanonical}
 
 If `true`, this expression is in a canonical form.
 
@@ -11632,7 +11632,7 @@ If `true`, this expression is in a canonical form.
 
 <MemberCard>
 
-##### Expression.isStructural
+##### Expression.isStructural {#isstructural}
 
 If `true`, this expression is in a structural form.
 
@@ -11644,7 +11644,7 @@ function expression instead of a `Expression` object.
 
 <MemberCard>
 
-##### Expression.canonical
+##### Expression.canonical {#canonical-1}
 
 Return the canonical form of this expression.
 
@@ -11678,7 +11678,7 @@ This means that, likewise for partially canonical expressions, the
 
 <MemberCard>
 
-##### Expression.structural
+##### Expression.structural {#structural}
 
 Return the structural form of this expression.
 
@@ -11695,7 +11695,7 @@ otherwise return `this`.
 
 <MemberCard>
 
-##### Expression.isValid
+##### Expression.isValid {#isvalid}
 
 ```ts
 readonly isValid: boolean;
@@ -11735,7 +11735,7 @@ an error code and the offending operand.
 
 <MemberCard>
 
-##### Expression.isPure
+##### Expression.isPure {#ispure}
 
 ```ts
 readonly isPure: boolean;
@@ -11771,7 +11771,7 @@ effect channel: "no impurity label in `effectsOf(expr)`" (see
 
 <MemberCard>
 
-##### Expression.effects
+##### Expression.effects {#effects-2}
 
 ```ts
 readonly effects: 
@@ -11810,7 +11810,7 @@ application's effects are computed from its operator and operands.
 
 <MemberCard>
 
-##### Expression.isConstant
+##### Expression.isConstant {#isconstant-1}
 
 ```ts
 readonly isConstant: boolean;
@@ -11833,7 +11833,7 @@ with constant arguments are all *constant*, i.e.:
 
 <MemberCard>
 
-##### Expression.errors
+##### Expression.errors {#errors}
 
 ```ts
 readonly errors: readonly Expression[];
@@ -11852,7 +11852,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.getSubexpressions()
+##### Expression.getSubexpressions() {#getsubexpressions}
 
 ```ts
 getSubexpressions(operator): readonly Expression[]
@@ -11880,7 +11880,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.subexpressions
+##### Expression.subexpressions {#subexpressions}
 
 ```ts
 readonly subexpressions: readonly Expression[];
@@ -11904,7 +11904,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.symbols
+##### Expression.symbols {#symbols}
 
 ```ts
 readonly symbols: readonly string[];
@@ -11930,7 +11930,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.unknowns
+##### Expression.unknowns {#unknowns}
 
 ```ts
 readonly unknowns: readonly string[];
@@ -11943,7 +11943,7 @@ associated with them, i.e. they are declared but not defined.
 
 <MemberCard>
 
-##### Expression.freeVariables
+##### Expression.freeVariables {#freevariables}
 
 ```ts
 readonly freeVariables: readonly string[];
@@ -11959,7 +11959,7 @@ This is an alias for [unknowns](#unknowns).
 
 <MemberCard>
 
-##### Expression.defines
+##### Expression.defines {#defines}
 
 ```ts
 readonly defines: readonly string[];
@@ -11983,7 +11983,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.referencedFunctions
+##### Expression.referencedFunctions {#referencedfunctions}
 
 ```ts
 readonly referencedFunctions: readonly string[];
@@ -12008,7 +12008,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.references
+##### Expression.references {#references}
 
 ```ts
 readonly references: readonly string[];
@@ -12038,7 +12038,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.toNumericValue()
+##### Expression.toNumericValue() {#tonumericvalue}
 
 ```ts
 toNumericValue(): [NumericValue, Expression]
@@ -12061,7 +12061,7 @@ Attempts to make `rest` a positive value (i.e. pulls out negative sign).
 
 <MemberCard>
 
-##### Expression.neg()
+##### Expression.neg() {#neg-2}
 
 ```ts
 neg(): Expression
@@ -12073,7 +12073,7 @@ Negate (additive inverse)
 
 <MemberCard>
 
-##### Expression.inv()
+##### Expression.inv() {#inv-1}
 
 ```ts
 inv(): Expression
@@ -12085,7 +12085,7 @@ Inverse (multiplicative inverse)
 
 <MemberCard>
 
-##### Expression.abs()
+##### Expression.abs() {#abs-1}
 
 ```ts
 abs(): Expression
@@ -12097,7 +12097,7 @@ Absolute value
 
 <MemberCard>
 
-##### Expression.add()
+##### Expression.add() {#add-3}
 
 ```ts
 add(rhs): Expression
@@ -12113,7 +12113,7 @@ Addition
 
 <MemberCard>
 
-##### Expression.sub()
+##### Expression.sub() {#sub-2}
 
 ```ts
 sub(rhs): Expression
@@ -12129,7 +12129,7 @@ Subtraction
 
 <MemberCard>
 
-##### Expression.mul()
+##### Expression.mul() {#mul-2}
 
 ```ts
 mul(rhs): Expression
@@ -12147,7 +12147,7 @@ Multiplication
 
 <MemberCard>
 
-##### Expression.div()
+##### Expression.div() {#div-2}
 
 ```ts
 div(rhs): Expression
@@ -12163,7 +12163,7 @@ Division
 
 <MemberCard>
 
-##### Expression.pow()
+##### Expression.pow() {#pow-2}
 
 ```ts
 pow(exp): Expression
@@ -12179,7 +12179,7 @@ Power
 
 <MemberCard>
 
-##### Expression.root()
+##### Expression.root() {#root-1}
 
 ```ts
 root(exp): Expression
@@ -12195,7 +12195,7 @@ Exponentiation
 
 <MemberCard>
 
-##### Expression.sqrt()
+##### Expression.sqrt() {#sqrt-1}
 
 ```ts
 sqrt(): Expression
@@ -12207,7 +12207,7 @@ Square root
 
 <MemberCard>
 
-##### Expression.ln()
+##### Expression.ln() {#ln-1}
 
 ```ts
 ln(base?): Expression
@@ -12223,7 +12223,7 @@ Logarithm (natural by default)
 
 <MemberCard>
 
-##### Expression.numerator
+##### Expression.numerator {#numerator-1}
 
 Return this expression expressed as a numerator.
 
@@ -12231,7 +12231,7 @@ Return this expression expressed as a numerator.
 
 <MemberCard>
 
-##### Expression.denominator
+##### Expression.denominator {#denominator-1}
 
 Return this expression expressed as a denominator.
 
@@ -12239,7 +12239,7 @@ Return this expression expressed as a denominator.
 
 <MemberCard>
 
-##### Expression.numeratorDenominator
+##### Expression.numeratorDenominator {#numeratordenominator}
 
 Return this expression expressed as a numerator and denominator.
 
@@ -12247,7 +12247,7 @@ Return this expression expressed as a numerator and denominator.
 
 <MemberCard>
 
-##### Expression.toRational()
+##### Expression.toRational() {#torational}
 
 ```ts
 toRational(): [number, number] | null
@@ -12276,7 +12276,7 @@ ce.number(1.5).toRational()             // null (machine float)
 
 <MemberCard>
 
-##### Expression.factors()
+##### Expression.factors() {#factors}
 
 ```ts
 factors(): readonly Expression[]
@@ -12301,7 +12301,7 @@ ce.parse('x + 1').factors()    // [x + 1]
 
 <MemberCard>
 
-##### Expression.polynomialCoefficients()
+##### Expression.polynomialCoefficients() {#polynomialcoefficients}
 
 ```ts
 polynomialCoefficients(variable?): readonly Expression[] | undefined
@@ -12348,7 +12348,7 @@ ce.parse('x^2*y + 3x + y^2').polynomialCoefficients(['x', 'y'])
 
 <MemberCard>
 
-##### Expression.polynomialRoots()
+##### Expression.polynomialRoots() {#polynomialroots}
 
 ```ts
 polynomialRoots(variable?): readonly Expression[] | undefined
@@ -12375,7 +12375,7 @@ ce.parse('sin(x)').polynomialRoots('x')           // undefined
 
 <MemberCard>
 
-##### Expression.isScoped
+##### Expression.isScoped {#isscoped}
 
 ```ts
 readonly isScoped: boolean;
@@ -12389,7 +12389,7 @@ function expression.
 
 <MemberCard>
 
-##### Expression.localScope
+##### Expression.localScope {#localscope}
 
 If this expression has a local scope, return it.
 
@@ -12397,7 +12397,7 @@ If this expression has a local scope, return it.
 
 <MemberCard>
 
-##### Expression.subs()
+##### Expression.subs() {#subs}
 
 ```ts
 subs(sub, options?): Expression
@@ -12436,7 +12436,7 @@ does not differ from that of this expr.: then a call this method is analagous to
 
 <MemberCard>
 
-##### Expression.map()
+##### Expression.map() {#map}
 
 ```ts
 map(fn, options?): Expression
@@ -12476,7 +12476,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.replace()
+##### Expression.replace() {#replace}
 
 ```ts
 replace(rules, options?): Expression | null
@@ -12527,7 +12527,7 @@ For simple symbol substitution, consider using `subs()` instead.
 
 <MemberCard>
 
-##### Expression.has()
+##### Expression.has() {#has}
 
 ```ts
 has(v): boolean
@@ -12547,7 +12547,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.match()
+##### Expression.match() {#match-1}
 
 ```ts
 match(pattern, options?): BoxedSubstitution<Expression> | null
@@ -12590,7 +12590,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.wikidata
+##### Expression.wikidata {#wikidata-1}
 
 ```ts
 readonly wikidata: string | undefined;
@@ -12604,7 +12604,7 @@ If not a canonical expression, return `undefined`.
 
 <MemberCard>
 
-##### Expression.description
+##### Expression.description {#description-1}
 
 ```ts
 readonly description: string[] | undefined;
@@ -12620,7 +12620,7 @@ If not a canonical expression, return `undefined`.
 
 <MemberCard>
 
-##### Expression.url
+##### Expression.url {#url-3}
 
 ```ts
 readonly url: string | undefined;
@@ -12635,7 +12635,7 @@ If not a canonical expression, return `undefined`.
 
 <MemberCard>
 
-##### Expression.complexity
+##### Expression.complexity {#complexity-1}
 
 ```ts
 readonly complexity: number | undefined;
@@ -12650,7 +12650,7 @@ If not a canonical expression, return `undefined`.
 
 <MemberCard>
 
-##### Expression.baseDefinition
+##### Expression.baseDefinition {#basedefinition-1}
 
 ```ts
 readonly baseDefinition: BoxedBaseDefinition | undefined;
@@ -12666,7 +12666,7 @@ If not a canonical expression, return `undefined`.
 
 <MemberCard>
 
-##### Expression.operatorDefinition
+##### Expression.operatorDefinition {#operatordefinition-1}
 
 ```ts
 readonly operatorDefinition: BoxedOperatorDefinition | undefined;
@@ -12683,7 +12683,7 @@ its value is `undefined`.
 
 <MemberCard>
 
-##### Expression.valueDefinition
+##### Expression.valueDefinition {#valuedefinition-1}
 
 ```ts
 readonly valueDefinition: BoxedValueDefinition | undefined;
@@ -12698,7 +12698,7 @@ If not a canonical expression, or not a value, its value is `undefined`.
 
 <MemberCard>
 
-##### Expression.simplify()
+##### Expression.simplify() {#simplify}
 
 ```ts
 simplify(options?): Expression
@@ -12730,7 +12730,7 @@ To manipulate symbolically non-canonical expressions, use `expr.replace()`.
 
 <MemberCard>
 
-##### Expression.explain()
+##### Expression.explain() {#explain}
 
 ```ts
 explain(operation?, options?): Explanation
@@ -12780,7 +12780,7 @@ debugging and rule authoring).
 
 <MemberCard>
 
-##### Expression.toSignedFunction()
+##### Expression.toSignedFunction() {#tosignedfunction}
 
 ```ts
 toSignedFunction(): Expression | undefined
@@ -12821,7 +12821,7 @@ Notes:
 
 <MemberCard>
 
-##### Expression.getInterval()
+##### Expression.getInterval() {#getinterval}
 
 ```ts
 getInterval(symbol): IntervalBounds | undefined
@@ -12854,7 +12854,7 @@ constraints, comparisons over multiple symbols, disjunctions).
 
 <MemberCard>
 
-##### Expression.evaluate()
+##### Expression.evaluate() {#evaluate-2}
 
 ```ts
 evaluate(options?): Expression
@@ -12892,7 +12892,7 @@ an interrupted evaluation from a symbolic (inert) result.
 
 <MemberCard>
 
-##### Expression.evaluateAsync()
+##### Expression.evaluateAsync() {#evaluateasync-1}
 
 ```ts
 evaluateAsync(options?): Promise<Expression>
@@ -12911,7 +12911,7 @@ The `options` argument can include a `signal` property, which is an
 
 <MemberCard>
 
-##### Expression.N()
+##### Expression.N() {#n-1}
 
 ```ts
 N(): Expression
@@ -12942,7 +12942,7 @@ not the mathematical value's tightest type.
 
 <MemberCard>
 
-##### Expression.solve()
+##### Expression.solve() {#solve}
 
 ```ts
 solve(vars?): 
@@ -12986,7 +12986,7 @@ console.log(nonlinear.solve(["x", "y"])); // Returns [{ x: 2, y: 3 }, { x: 3, y:
 
 <MemberCard>
 
-##### Expression.value
+##### Expression.value {#value-3}
 
 ```ts
 get value(): Expression | undefined
@@ -13043,7 +13043,7 @@ about it in the current scope.
 
 <MemberCard>
 
-##### Expression.isCollection
+##### Expression.isCollection {#iscollection-1}
 
 ```ts
 isCollection: boolean;
@@ -13112,7 +13112,7 @@ honest answer is that the shape is not statically visible at all.
 
 <MemberCard>
 
-##### Expression.isIndexedCollection
+##### Expression.isIndexedCollection {#isindexedcollection}
 
 ```ts
 isIndexedCollection: boolean;
@@ -13137,7 +13137,7 @@ When `isIndexedCollection` is `true`, the expression:
 
 <MemberCard>
 
-##### Expression.isLazyCollection
+##### Expression.isLazyCollection {#islazycollection}
 
 ```ts
 isLazyCollection: boolean;
@@ -13156,7 +13156,7 @@ lazy collections.
 
 <MemberCard>
 
-##### Expression.each()
+##### Expression.each() {#each}
 
 ```ts
 each(): Generator<Expression>
@@ -13176,7 +13176,7 @@ for (const e of expr.each()) {
 
 <MemberCard>
 
-##### Expression.contains()
+##### Expression.contains() {#contains-1}
 
 ```ts
 contains(rhs): boolean | undefined
@@ -13196,7 +13196,7 @@ iterating over the collection.
 
 <MemberCard>
 
-##### Expression.subsetOf()
+##### Expression.subsetOf() {#subsetof-1}
 
 ```ts
 subsetOf(other, strict): boolean | undefined
@@ -13224,7 +13224,7 @@ If true, the subset relation is strict (i.e., proper subset).
 
 <MemberCard>
 
-##### Expression.count
+##### Expression.count {#count-1}
 
 If this is a collection, return the number of elements in the collection.
 
@@ -13244,7 +13244,7 @@ be determined without iterating over the collection.
 
 <MemberCard>
 
-##### Expression.isFiniteCollection
+##### Expression.isFiniteCollection {#isfinitecollection}
 
 ```ts
 isFiniteCollection: boolean | undefined;
@@ -13256,7 +13256,7 @@ If this is a finite collection, return true.
 
 <MemberCard>
 
-##### Expression.isEmptyCollection
+##### Expression.isEmptyCollection {#isemptycollection}
 
 ```ts
 isEmptyCollection: boolean | undefined;
@@ -13270,7 +13270,7 @@ An empty collection has a size of 0.
 
 <MemberCard>
 
-##### Expression.isEnumerableCollection
+##### Expression.isEnumerableCollection {#isenumerablecollection}
 
 ```ts
 isEnumerableCollection: boolean | undefined;
@@ -13318,7 +13318,7 @@ a chain of wrappers.
 
 <MemberCard>
 
-##### Expression.at()
+##### Expression.at() {#at-2}
 
 ```ts
 at(index): Expression | undefined
@@ -13339,7 +13339,7 @@ The last element is at index -1.
 
 <MemberCard>
 
-##### Expression.get()
+##### Expression.get() {#get}
 
 ```ts
 get(key): Expression | undefined
@@ -13358,7 +13358,7 @@ If `key` is a `Expression`, it should be a string.
 
 <MemberCard>
 
-##### Expression.indexWhere()
+##### Expression.indexWhere() {#indexwhere-1}
 
 ```ts
 indexWhere(predicate): number | undefined
@@ -13377,7 +13377,7 @@ that matches the predicate.
 
 <MemberCard>
 
-##### Expression.valueOf()
+##### Expression.valueOf() {#valueof-2}
 
 ```ts
 valueOf(): string | number | boolean | number[] | number[][] | number[][][]
@@ -13413,7 +13413,7 @@ of the expression.
 
 <MemberCard>
 
-##### Expression.\[toPrimitive\]()
+##### Expression.\[toPrimitive\]() {#toprimitive-2}
 
 ```ts
 toPrimitive: string | number | null
@@ -13429,7 +13429,7 @@ Similar to`expr.valueOf()` but includes a hint.
 
 <MemberCard>
 
-##### Expression.toString()
+##### Expression.toString() {#tostring-1}
 
 ```ts
 toString(): string
@@ -13456,7 +13456,7 @@ their native `Number.toString()`.
 
 <MemberCard>
 
-##### Expression.toJSON()
+##### Expression.toJSON() {#tojson-4}
 
 ```ts
 toJSON(): MathJsonExpression
@@ -13480,7 +13480,7 @@ MathJSON output.
 
 <MemberCard>
 
-##### Expression.is()
+##### Expression.is() {#is-1}
 
 ```ts
 is(other, tolerance?): boolean
@@ -13527,7 +13527,7 @@ numeric comparison. Has no effect when the comparison is structural
 
 <MemberCard>
 
-##### Expression.isSame()
+##### Expression.isSame() {#issame}
 
 ```ts
 isSame(rhs): boolean
@@ -13560,7 +13560,7 @@ Applicable to canonical and non-canonical expressions.
 
 <MemberCard>
 
-##### Expression.isLess()
+##### Expression.isLess() {#isless}
 
 ```ts
 isLess(other): boolean | undefined
@@ -13578,7 +13578,7 @@ If the expressions cannot be compared, return `undefined`
 
 <MemberCard>
 
-##### Expression.isLessEqual()
+##### Expression.isLessEqual() {#islessequal}
 
 ```ts
 isLessEqual(other): boolean | undefined
@@ -13596,7 +13596,7 @@ If the expressions cannot be compared, return `undefined`
 
 <MemberCard>
 
-##### Expression.isGreater()
+##### Expression.isGreater() {#isgreater}
 
 ```ts
 isGreater(other): boolean | undefined
@@ -13614,7 +13614,7 @@ If the expressions cannot be compared, return `undefined`
 
 <MemberCard>
 
-##### Expression.isGreaterEqual()
+##### Expression.isGreaterEqual() {#isgreaterequal}
 
 ```ts
 isGreaterEqual(other): boolean | undefined
@@ -13632,7 +13632,7 @@ If the expressions cannot be compared, return `undefined`
 
 <MemberCard>
 
-##### Expression.isEqual()
+##### Expression.isEqual() {#isequal}
 
 ```ts
 isEqual(other): boolean | undefined
@@ -13685,7 +13685,7 @@ as `x = 4` could make true — is `undefined`, never a definitive
 
 <MemberCard>
 
-##### Expression.isIdenticallyEqual()
+##### Expression.isIdenticallyEqual() {#isidenticallyequal}
 
 ```ts
 isIdenticallyEqual(other): boolean | undefined
@@ -13727,7 +13727,7 @@ in LaTeX).
 
 <MemberCard>
 
-##### Expression.shape
+##### Expression.shape {#shape-2}
 
 ```ts
 readonly shape: number[];
@@ -13746,7 +13746,7 @@ When the expression is a `n` by `m` matrix, the shape is `[n, m]`.
 
 <MemberCard>
 
-##### Expression.rank
+##### Expression.rank {#rank-2}
 
 ```ts
 readonly rank: number;
@@ -13773,7 +13773,7 @@ singular values of a matrix.
 
 <MemberCard>
 
-##### Expression.type
+##### Expression.type {#type-10}
 
 ```ts
 get type(): BoxedType
@@ -13817,7 +13817,7 @@ If the type is not known, return `"unknown"`.
 
 <MemberCard>
 
-##### Expression.isNumber
+##### Expression.isNumber {#isnumber}
 
 ```ts
 readonly isNumber: boolean | undefined;
@@ -13841,7 +13841,7 @@ number and `expr.isNumber` is `true`, but `isNumberLiteral` is `false`.
 
 <MemberCard>
 
-##### Expression.isInteger
+##### Expression.isInteger {#isinteger}
 
 ```ts
 readonly isInteger: boolean | undefined;
@@ -13855,7 +13855,7 @@ Note that ±∞ and NaN are not integers.
 
 <MemberCard>
 
-##### Expression.isRational
+##### Expression.isRational {#isrational}
 
 ```ts
 readonly isRational: boolean | undefined;
@@ -13873,7 +13873,7 @@ Note that ±∞ and NaN are not rationals.
 
 <MemberCard>
 
-##### Expression.isReal
+##### Expression.isReal {#isreal}
 
 ```ts
 readonly isReal: boolean | undefined;
@@ -13889,7 +13889,7 @@ Note that ±∞ and NaN are not real numbers.
 
 <MemberCard>
 
-##### Expression.isFunction
+##### Expression.isFunction {#isfunction}
 
 ```ts
 readonly isFunction: boolean | undefined;
@@ -13911,7 +13911,7 @@ as `["Add", 1, 2]`).
 
 <MemberCard>
 
-##### Expression.constantValue
+##### Expression.constantValue {#constantvalue}
 
 ```ts
 readonly constantValue: string | number | boolean | object | undefined;
@@ -13922,32 +13922,32 @@ otherwise `undefined`.
 
 </MemberCard>
 
-### DictionaryInterface
+### DictionaryInterface {#dictionaryinterface}
 
 Interface for dictionary-like structures.
 Use `isDictionary()` to check if an expression is a dictionary.
 
 <MemberCard>
 
-##### DictionaryInterface.keys
+##### DictionaryInterface.keys {#keys}
 
 </MemberCard>
 
 <MemberCard>
 
-##### DictionaryInterface.entries
+##### DictionaryInterface.entries {#entries-1}
 
 </MemberCard>
 
 <MemberCard>
 
-##### DictionaryInterface.values
+##### DictionaryInterface.values {#values}
 
 </MemberCard>
 
 <MemberCard>
 
-##### DictionaryInterface.get()
+##### DictionaryInterface.get() {#get-1}
 
 ```ts
 get(key): Expression | undefined
@@ -13961,7 +13961,7 @@ get(key): Expression | undefined
 
 <MemberCard>
 
-##### DictionaryInterface.has()
+##### DictionaryInterface.has() {#has-1}
 
 ```ts
 has(key): boolean
@@ -13975,7 +13975,7 @@ has(key): boolean
 
 <MemberCard>
 
-### ~~BoxedExpression~~
+### ~~BoxedExpression~~ {#boxedexpression}
 
 ```ts
 type BoxedExpression = Expression;
@@ -13989,7 +13989,7 @@ Use `Expression` instead.
 
 <MemberCard>
 
-### ~~SemiBoxedExpression~~
+### ~~SemiBoxedExpression~~ {#semiboxedexpression}
 
 ```ts
 type SemiBoxedExpression = ExpressionInput;
@@ -14005,7 +14005,7 @@ Use `ExpressionInput` instead.
 
 <MemberCard>
 
-### NumberFormat
+### NumberFormat {#numberformat}
 
 ```ts
 type NumberFormat = {
@@ -14031,7 +14031,7 @@ These options control how numbers are parsed and serialized.
 
 <MemberCard>
 
-### NumberSerializationFormat
+### NumberSerializationFormat {#numberserializationformat}
 
 ```ts
 type NumberSerializationFormat = NumberFormat & {
@@ -14075,7 +14075,7 @@ Use [digits](#numberserializationformat) instead.
 
 <MemberCard>
 
-### DisplayDigits
+### DisplayDigits {#displaydigits}
 
 ```ts
 type DisplayDigits = 
@@ -14113,7 +14113,7 @@ controlled by the `notation` / `avoidExponentsInRange` options.
 
 <MemberCard>
 
-### JsonSerializationOptions
+### JsonSerializationOptions {#jsonserializationoptions}
 
 ```ts
 type JsonSerializationOptions = {
@@ -14136,7 +14136,7 @@ Options to control serialization to MathJSON when using
 
 <MemberCard>
 
-### DataTypeMap
+### DataTypeMap {#datatypemap}
 
 ```ts
 type DataTypeMap = {
@@ -14157,7 +14157,7 @@ Map of `TensorDataType` to JavaScript type.
 
 <MemberCard>
 
-### TensorDataType
+### TensorDataType {#tensordatatype}
 
 ```ts
 type TensorDataType = keyof DataTypeMap;
@@ -14167,7 +14167,7 @@ The type of the cells in a tensor.
 
 </MemberCard>
 
-### TensorData
+### TensorData {#tensordata}
 
 A record representing the type, shape and data of a tensor.
 
@@ -14177,7 +14177,7 @@ A record representing the type, shape and data of a tensor.
 
 <MemberCard>
 
-##### TensorData.dtype
+##### TensorData.dtype {#dtype}
 
 ```ts
 dtype: DT;
@@ -14187,7 +14187,7 @@ dtype: DT;
 
 <MemberCard>
 
-##### TensorData.shape
+##### TensorData.shape {#shape}
 
 ```ts
 shape: number[];
@@ -14197,7 +14197,7 @@ shape: number[];
 
 <MemberCard>
 
-##### TensorData.rank?
+##### TensorData.rank? {#rank}
 
 ```ts
 optional rank?: number;
@@ -14207,7 +14207,7 @@ optional rank?: number;
 
 <MemberCard>
 
-##### TensorData.data
+##### TensorData.data {#data}
 
 ```ts
 data: DataTypeMap[DT][];
@@ -14215,11 +14215,11 @@ data: DataTypeMap[DT][];
 
 </MemberCard>
 
-### TensorField
+### TensorField {#tensorfield}
 
 <MemberCard>
 
-##### TensorField.one
+##### TensorField.one {#one-2}
 
 ```ts
 readonly one: T;
@@ -14229,7 +14229,7 @@ readonly one: T;
 
 <MemberCard>
 
-##### TensorField.zero
+##### TensorField.zero {#zero-2}
 
 ```ts
 readonly zero: T;
@@ -14239,7 +14239,7 @@ readonly zero: T;
 
 <MemberCard>
 
-##### TensorField.nan
+##### TensorField.nan {#nan-2}
 
 ```ts
 readonly nan: T;
@@ -14249,7 +14249,7 @@ readonly nan: T;
 
 <MemberCard>
 
-##### TensorField.cast()
+##### TensorField.cast() {#cast}
 
 ###### cast(x, dtype)
 
@@ -14502,7 +14502,7 @@ keyof [`DataTypeMap`](#datatypemap)
 
 <MemberCard>
 
-##### TensorField.expression()
+##### TensorField.expression() {#expression-3}
 
 ```ts
 expression(x): Expression
@@ -14516,7 +14516,7 @@ expression(x): Expression
 
 <MemberCard>
 
-##### TensorField.isZero()
+##### TensorField.isZero() {#iszero-1}
 
 ```ts
 isZero(x): boolean
@@ -14530,7 +14530,7 @@ isZero(x): boolean
 
 <MemberCard>
 
-##### TensorField.isOne()
+##### TensorField.isOne() {#isone-1}
 
 ```ts
 isOne(x): boolean
@@ -14544,7 +14544,7 @@ isOne(x): boolean
 
 <MemberCard>
 
-##### TensorField.equals()
+##### TensorField.equals() {#equals}
 
 ```ts
 equals(lhs, rhs): boolean
@@ -14562,7 +14562,7 @@ equals(lhs, rhs): boolean
 
 <MemberCard>
 
-##### TensorField.add()
+##### TensorField.add() {#add-1}
 
 ```ts
 add(lhs, rhs): T
@@ -14580,7 +14580,7 @@ add(lhs, rhs): T
 
 <MemberCard>
 
-##### TensorField.addn()
+##### TensorField.addn() {#addn}
 
 ```ts
 addn(...xs): T
@@ -14594,7 +14594,7 @@ addn(...xs): T
 
 <MemberCard>
 
-##### TensorField.neg()
+##### TensorField.neg() {#neg-1}
 
 ```ts
 neg(x): T
@@ -14608,7 +14608,7 @@ neg(x): T
 
 <MemberCard>
 
-##### TensorField.sub()
+##### TensorField.sub() {#sub-1}
 
 ```ts
 sub(lhs, rhs): T
@@ -14626,7 +14626,7 @@ sub(lhs, rhs): T
 
 <MemberCard>
 
-##### TensorField.mul()
+##### TensorField.mul() {#mul-1}
 
 ```ts
 mul(lhs, rhs): T
@@ -14644,7 +14644,7 @@ mul(lhs, rhs): T
 
 <MemberCard>
 
-##### TensorField.muln()
+##### TensorField.muln() {#muln}
 
 ```ts
 muln(...xs): T
@@ -14658,7 +14658,7 @@ muln(...xs): T
 
 <MemberCard>
 
-##### TensorField.div()
+##### TensorField.div() {#div-1}
 
 ```ts
 div(lhs, rhs): T
@@ -14676,7 +14676,7 @@ div(lhs, rhs): T
 
 <MemberCard>
 
-##### TensorField.pow()
+##### TensorField.pow() {#pow-1}
 
 ```ts
 pow(rhs, n): T
@@ -14694,7 +14694,7 @@ pow(rhs, n): T
 
 <MemberCard>
 
-##### TensorField.conjugate()
+##### TensorField.conjugate() {#conjugate}
 
 ```ts
 conjugate(x): T
@@ -14706,7 +14706,7 @@ conjugate(x): T
 
 </MemberCard>
 
-### Tensor
+### Tensor {#tensor}
 
 #### Extends
 
@@ -14714,7 +14714,7 @@ conjugate(x): T
 
 <MemberCard>
 
-##### Tensor.dtype
+##### Tensor.dtype {#dtype-1}
 
 ```ts
 dtype: DT;
@@ -14724,7 +14724,7 @@ dtype: DT;
 
 <MemberCard>
 
-##### Tensor.shape
+##### Tensor.shape {#shape-1}
 
 ```ts
 shape: number[];
@@ -14734,7 +14734,7 @@ shape: number[];
 
 <MemberCard>
 
-##### Tensor.rank
+##### Tensor.rank {#rank-1}
 
 ```ts
 rank: number;
@@ -14744,7 +14744,7 @@ rank: number;
 
 <MemberCard>
 
-##### Tensor.data
+##### Tensor.data {#data-1}
 
 ```ts
 data: DataTypeMap[DT][];
@@ -14754,7 +14754,7 @@ data: DataTypeMap[DT][];
 
 <MemberCard>
 
-##### Tensor.field
+##### Tensor.field {#field}
 
 ```ts
 readonly field: TensorField<DataTypeMap[DT]>;
@@ -14764,7 +14764,7 @@ readonly field: TensorField<DataTypeMap[DT]>;
 
 <MemberCard>
 
-##### Tensor.expression
+##### Tensor.expression {#expression-4}
 
 ```ts
 readonly expression: Expression;
@@ -14774,7 +14774,7 @@ readonly expression: Expression;
 
 <MemberCard>
 
-##### Tensor.array
+##### Tensor.array {#array}
 
 ```ts
 readonly array: NestedArray<DataTypeMap[DT]>;
@@ -14784,7 +14784,7 @@ readonly array: NestedArray<DataTypeMap[DT]>;
 
 <MemberCard>
 
-##### Tensor.isSquare
+##### Tensor.isSquare {#issquare}
 
 ```ts
 readonly isSquare: boolean;
@@ -14794,7 +14794,7 @@ readonly isSquare: boolean;
 
 <MemberCard>
 
-##### Tensor.isSymmetric
+##### Tensor.isSymmetric {#issymmetric}
 
 ```ts
 readonly isSymmetric: boolean;
@@ -14804,7 +14804,7 @@ readonly isSymmetric: boolean;
 
 <MemberCard>
 
-##### Tensor.isSkewSymmetric
+##### Tensor.isSkewSymmetric {#isskewsymmetric}
 
 ```ts
 readonly isSkewSymmetric: boolean;
@@ -14814,7 +14814,7 @@ readonly isSkewSymmetric: boolean;
 
 <MemberCard>
 
-##### Tensor.isDiagonal
+##### Tensor.isDiagonal {#isdiagonal}
 
 ```ts
 readonly isDiagonal: boolean;
@@ -14824,7 +14824,7 @@ readonly isDiagonal: boolean;
 
 <MemberCard>
 
-##### Tensor.isUpperTriangular
+##### Tensor.isUpperTriangular {#isuppertriangular}
 
 ```ts
 readonly isUpperTriangular: boolean;
@@ -14834,7 +14834,7 @@ readonly isUpperTriangular: boolean;
 
 <MemberCard>
 
-##### Tensor.isLowerTriangular
+##### Tensor.isLowerTriangular {#islowertriangular}
 
 ```ts
 readonly isLowerTriangular: boolean;
@@ -14844,7 +14844,7 @@ readonly isLowerTriangular: boolean;
 
 <MemberCard>
 
-##### Tensor.isTriangular
+##### Tensor.isTriangular {#istriangular}
 
 ```ts
 readonly isTriangular: boolean;
@@ -14854,7 +14854,7 @@ readonly isTriangular: boolean;
 
 <MemberCard>
 
-##### Tensor.isIdentity
+##### Tensor.isIdentity {#isidentity}
 
 ```ts
 readonly isIdentity: boolean;
@@ -14864,7 +14864,7 @@ readonly isIdentity: boolean;
 
 <MemberCard>
 
-##### Tensor.isZero
+##### Tensor.isZero {#iszero-2}
 
 ```ts
 readonly isZero: boolean;
@@ -14874,7 +14874,7 @@ readonly isZero: boolean;
 
 <MemberCard>
 
-##### Tensor.at()
+##### Tensor.at() {#at-1}
 
 ```ts
 at(...indices): DataTypeMap[DT] | undefined
@@ -14888,7 +14888,7 @@ at(...indices): DataTypeMap[DT] | undefined
 
 <MemberCard>
 
-##### Tensor.diagonal()
+##### Tensor.diagonal() {#diagonal}
 
 ```ts
 diagonal(axis1?, axis2?): DataTypeMap[DT][] | undefined
@@ -14906,7 +14906,7 @@ diagonal(axis1?, axis2?): DataTypeMap[DT][] | undefined
 
 <MemberCard>
 
-##### Tensor.trace()
+##### Tensor.trace() {#trace-2}
 
 ```ts
 trace(axis1?, axis2?): 
@@ -14927,7 +14927,7 @@ trace(axis1?, axis2?):
 
 <MemberCard>
 
-##### Tensor.reshape()
+##### Tensor.reshape() {#reshape}
 
 ```ts
 reshape(...shape): Tensor<DT>
@@ -14941,7 +14941,7 @@ reshape(...shape): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.slice()
+##### Tensor.slice() {#slice}
 
 ```ts
 slice(index): Tensor<DT>
@@ -14955,7 +14955,7 @@ slice(index): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.flatten()
+##### Tensor.flatten() {#flatten}
 
 ```ts
 flatten(): DataTypeMap[DT][]
@@ -14965,7 +14965,7 @@ flatten(): DataTypeMap[DT][]
 
 <MemberCard>
 
-##### Tensor.upcast()
+##### Tensor.upcast() {#upcast}
 
 ```ts
 upcast<DT>(dtype): Tensor<DT>
@@ -14981,7 +14981,7 @@ upcast<DT>(dtype): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.transpose()
+##### Tensor.transpose() {#transpose}
 
 ```ts
 transpose(axis1?, axis2?): Tensor<DT> | undefined
@@ -14999,7 +14999,7 @@ transpose(axis1?, axis2?): Tensor<DT> | undefined
 
 <MemberCard>
 
-##### Tensor.conjugateTranspose()
+##### Tensor.conjugateTranspose() {#conjugatetranspose}
 
 ```ts
 conjugateTranspose(axis1?, axis2?): Tensor<DT> | undefined
@@ -15017,7 +15017,7 @@ conjugateTranspose(axis1?, axis2?): Tensor<DT> | undefined
 
 <MemberCard>
 
-##### Tensor.determinant()
+##### Tensor.determinant() {#determinant}
 
 ```ts
 determinant(): DataTypeMap[DT] | undefined
@@ -15027,7 +15027,7 @@ determinant(): DataTypeMap[DT] | undefined
 
 <MemberCard>
 
-##### Tensor.inverse()
+##### Tensor.inverse() {#inverse}
 
 ```ts
 inverse(): Tensor<DT> | undefined
@@ -15037,7 +15037,7 @@ inverse(): Tensor<DT> | undefined
 
 <MemberCard>
 
-##### Tensor.pseudoInverse()
+##### Tensor.pseudoInverse() {#pseudoinverse}
 
 ```ts
 pseudoInverse(): Tensor<DT> | undefined
@@ -15047,7 +15047,7 @@ pseudoInverse(): Tensor<DT> | undefined
 
 <MemberCard>
 
-##### Tensor.adjugateMatrix()
+##### Tensor.adjugateMatrix() {#adjugatematrix}
 
 ```ts
 adjugateMatrix(): Tensor<DT> | undefined
@@ -15057,7 +15057,7 @@ adjugateMatrix(): Tensor<DT> | undefined
 
 <MemberCard>
 
-##### Tensor.minor()
+##### Tensor.minor() {#minor}
 
 ```ts
 minor(axis1, axis2): DataTypeMap[DT] | undefined
@@ -15075,7 +15075,7 @@ minor(axis1, axis2): DataTypeMap[DT] | undefined
 
 <MemberCard>
 
-##### Tensor.map1()
+##### Tensor.map1() {#map1}
 
 ```ts
 map1(fn, scalar): Tensor<DT>
@@ -15093,7 +15093,7 @@ map1(fn, scalar): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.map2()
+##### Tensor.map2() {#map2}
 
 ```ts
 map2(fn, rhs): Tensor<DT>
@@ -15111,7 +15111,7 @@ map2(fn, rhs): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.add()
+##### Tensor.add() {#add-2}
 
 ```ts
 add(other): Tensor<DT>
@@ -15125,7 +15125,7 @@ add(other): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.subtract()
+##### Tensor.subtract() {#subtract}
 
 ```ts
 subtract(other): Tensor<DT>
@@ -15139,7 +15139,7 @@ subtract(other): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.multiply()
+##### Tensor.multiply() {#multiply}
 
 ```ts
 multiply(other): Tensor<DT>
@@ -15153,7 +15153,7 @@ multiply(other): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.divide()
+##### Tensor.divide() {#divide}
 
 ```ts
 divide(other): Tensor<DT>
@@ -15167,7 +15167,7 @@ divide(other): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.power()
+##### Tensor.power() {#power}
 
 ```ts
 power(other): Tensor<DT>
@@ -15181,7 +15181,7 @@ power(other): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.equals()
+##### Tensor.equals() {#equals-1}
 
 ```ts
 equals(other): boolean
@@ -15195,7 +15195,7 @@ equals(other): boolean
 
 ## Type
 
-### BoxedType
+### BoxedType {#boxedtype}
 
 <MemberCard>
 
@@ -15234,7 +15234,7 @@ new BoxedType(type, typeResolver?): BoxedType
 
 <MemberCard>
 
-##### BoxedType.unknown
+##### BoxedType.unknown {#unknown}
 
 ```ts
 static unknown: BoxedType;
@@ -15244,7 +15244,7 @@ static unknown: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.number
+##### BoxedType.number {#number}
 
 ```ts
 static number: BoxedType;
@@ -15254,7 +15254,7 @@ static number: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.non\_finite\_number
+##### BoxedType.non\_finite\_number {#non_finite_number}
 
 ```ts
 static non_finite_number: BoxedType;
@@ -15264,7 +15264,7 @@ static non_finite_number: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.finite\_number
+##### BoxedType.finite\_number {#finite_number}
 
 ```ts
 static finite_number: BoxedType;
@@ -15274,7 +15274,7 @@ static finite_number: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.finite\_integer
+##### BoxedType.finite\_integer {#finite_integer}
 
 ```ts
 static finite_integer: BoxedType;
@@ -15284,7 +15284,7 @@ static finite_integer: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.finite\_real
+##### BoxedType.finite\_real {#finite_real}
 
 ```ts
 static finite_real: BoxedType;
@@ -15294,7 +15294,7 @@ static finite_real: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.string
+##### BoxedType.string {#string}
 
 ```ts
 static string: BoxedType;
@@ -15304,7 +15304,7 @@ static string: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.character
+##### BoxedType.character {#character}
 
 ```ts
 static character: BoxedType;
@@ -15314,7 +15314,7 @@ static character: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.dictionary
+##### BoxedType.dictionary {#dictionary}
 
 ```ts
 static dictionary: BoxedType;
@@ -15324,7 +15324,7 @@ static dictionary: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.setNumber
+##### BoxedType.setNumber {#setnumber}
 
 ```ts
 static setNumber: BoxedType;
@@ -15334,7 +15334,7 @@ static setNumber: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.setComplex
+##### BoxedType.setComplex {#setcomplex}
 
 ```ts
 static setComplex: BoxedType;
@@ -15344,7 +15344,7 @@ static setComplex: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.setImaginary
+##### BoxedType.setImaginary {#setimaginary}
 
 ```ts
 static setImaginary: BoxedType;
@@ -15354,7 +15354,7 @@ static setImaginary: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.setReal
+##### BoxedType.setReal {#setreal}
 
 ```ts
 static setReal: BoxedType;
@@ -15364,7 +15364,7 @@ static setReal: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.setRational
+##### BoxedType.setRational {#setrational}
 
 ```ts
 static setRational: BoxedType;
@@ -15374,7 +15374,7 @@ static setRational: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.setFiniteInteger
+##### BoxedType.setFiniteInteger {#setfiniteinteger}
 
 ```ts
 static setFiniteInteger: BoxedType;
@@ -15384,7 +15384,7 @@ static setFiniteInteger: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.setInteger
+##### BoxedType.setInteger {#setinteger}
 
 ```ts
 static setInteger: BoxedType;
@@ -15394,7 +15394,7 @@ static setInteger: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.type
+##### BoxedType.type {#type}
 
 ```ts
 type: Type;
@@ -15404,7 +15404,7 @@ type: Type;
 
 <MemberCard>
 
-##### BoxedType.isPolymorphic
+##### BoxedType.isPolymorphic {#ispolymorphic}
 
 ```ts
 readonly isPolymorphic: boolean;
@@ -15422,7 +15422,7 @@ the computation itself is a shallow field test.
 
 <MemberCard>
 
-##### BoxedType.typeResolver
+##### BoxedType.typeResolver {#typeresolver}
 
 The resolver this type was created with, so a DERIVED boxed type (a
 projection of this one) can be built without losing the ability to name a
@@ -15432,7 +15432,7 @@ user-declared type.
 
 <MemberCard>
 
-##### BoxedType.unionMembers
+##### BoxedType.unionMembers {#unionmembers}
 
 The members of a union type, each boxed, or `[this]` for any other type.
 
@@ -15445,7 +15445,7 @@ usually what an arm walk was reaching for.
 
 <MemberCard>
 
-##### BoxedType.effects
+##### BoxedType.effects {#effects}
 
 The **latent** effects on this type's arrow: what fires if a value of this
 type is invoked. `undefined` when the type is not callable, or when its
@@ -15472,13 +15472,13 @@ ce.type('number').effects;                 // ➔ undefined
 
 <MemberCard>
 
-##### BoxedType.isUnknown
+##### BoxedType.isUnknown {#isunknown}
 
 </MemberCard>
 
 <MemberCard>
 
-##### BoxedType.widen()
+##### BoxedType.widen() {#widen}
 
 ```ts
 static widen(...types): BoxedType
@@ -15492,7 +15492,7 @@ static widen(...types): BoxedType
 
 <MemberCard>
 
-##### BoxedType.narrow()
+##### BoxedType.narrow() {#narrow}
 
 ```ts
 static narrow(...types): BoxedType
@@ -15506,7 +15506,7 @@ static narrow(...types): BoxedType
 
 <MemberCard>
 
-##### BoxedType.matches()
+##### BoxedType.matches() {#matches}
 
 ```ts
 matches(other): boolean
@@ -15552,7 +15552,7 @@ polymorphic one.
 
 <MemberCard>
 
-##### BoxedType.is()
+##### BoxedType.is() {#is}
 
 ```ts
 is(other): boolean
@@ -15584,7 +15584,7 @@ is(other): boolean
 
 <MemberCard>
 
-##### BoxedType.isDisjointFrom()
+##### BoxedType.isDisjointFrom() {#isdisjointfrom}
 
 ```ts
 isDisjointFrom(other): boolean
@@ -15630,7 +15630,7 @@ Throws if `other` is a string that is not a valid type.
 
 <MemberCard>
 
-##### BoxedType.couldMatch()
+##### BoxedType.couldMatch() {#couldmatch}
 
 ```ts
 couldMatch(other): boolean
@@ -15692,7 +15692,7 @@ Throws if `other` is a string that is not a valid type.
 
 <MemberCard>
 
-##### BoxedType.toString()
+##### BoxedType.toString() {#tostring}
 
 ```ts
 toString(): string
@@ -15702,7 +15702,7 @@ toString(): string
 
 <MemberCard>
 
-##### BoxedType.toJSON()
+##### BoxedType.toJSON() {#tojson}
 
 ```ts
 toJSON(): string
@@ -15712,7 +15712,7 @@ toJSON(): string
 
 <MemberCard>
 
-##### BoxedType.\[toPrimitive\]()
+##### BoxedType.\[toPrimitive\]() {#toprimitive}
 
 ```ts
 toPrimitive: string | null
@@ -15726,7 +15726,7 @@ toPrimitive: string | null
 
 <MemberCard>
 
-##### BoxedType.valueOf()
+##### BoxedType.valueOf() {#valueof}
 
 ```ts
 valueOf(): string
@@ -15740,7 +15740,7 @@ valueOf(): string
 
 <MemberCard>
 
-### MathJsonAttributes
+### MathJsonAttributes {#mathjsonattributes}
 
 ```ts
 type MathJsonAttributes = {
@@ -15764,7 +15764,7 @@ to provide additional information about the expression.
 
 <MemberCard>
 
-### MathJsonSymbol
+### MathJsonSymbol {#mathjsonsymbol}
 
 ```ts
 type MathJsonSymbol = string;
@@ -15774,7 +15774,7 @@ type MathJsonSymbol = string;
 
 <MemberCard>
 
-### MathJsonNumberObject
+### MathJsonNumberObject {#mathjsonnumberobject}
 
 ```ts
 type MathJsonNumberObject = {
@@ -15809,7 +15809,7 @@ For example:
 
 <MemberCard>
 
-### MathJsonSymbolObject
+### MathJsonSymbolObject {#mathjsonsymbolobject}
 
 ```ts
 type MathJsonSymbolObject = {
@@ -15821,7 +15821,7 @@ type MathJsonSymbolObject = {
 
 <MemberCard>
 
-### MathJsonStringObject
+### MathJsonStringObject {#mathjsonstringobject}
 
 ```ts
 type MathJsonStringObject = {
@@ -15833,7 +15833,7 @@ type MathJsonStringObject = {
 
 <MemberCard>
 
-### MathJsonFunctionObject
+### MathJsonFunctionObject {#mathjsonfunctionobject}
 
 ```ts
 type MathJsonFunctionObject = {
@@ -15845,7 +15845,7 @@ type MathJsonFunctionObject = {
 
 <MemberCard>
 
-### DictionaryValue
+### DictionaryValue {#dictionaryvalue}
 
 ```ts
 type DictionaryValue = 
@@ -15860,7 +15860,7 @@ type DictionaryValue =
 
 <MemberCard>
 
-### MathJsonDictionaryObject
+### MathJsonDictionaryObject {#mathjsondictionaryobject}
 
 ```ts
 type MathJsonDictionaryObject = {
@@ -15872,7 +15872,7 @@ type MathJsonDictionaryObject = {
 
 <MemberCard>
 
-### ExpressionObject
+### ExpressionObject {#expressionobject}
 
 ```ts
 type ExpressionObject = 
@@ -15887,7 +15887,7 @@ type ExpressionObject =
 
 <MemberCard>
 
-### MathJsonExpression
+### MathJsonExpression {#mathjsonexpression}
 
 ```ts
 type MathJsonExpression = 
@@ -15911,7 +15911,7 @@ The dictionary and function nodes can contain expressions themselves.
 
 <MemberCard>
 
-### PrimitiveType
+### PrimitiveType {#primitivetype}
 
 ```ts
 type PrimitiveType = 
@@ -15988,7 +15988,7 @@ A primitive type is a simple type that represents a concrete value.
 
 <MemberCard>
 
-### NumericPrimitiveType
+### NumericPrimitiveType {#numericprimitivetype}
 
 ```ts
 type NumericPrimitiveType = 
@@ -16027,7 +16027,7 @@ number`, with a parallel `finite_*` tower and a shared `non_finite_number`
 
 <MemberCard>
 
-### NamedElement
+### NamedElement {#namedelement}
 
 ```ts
 type NamedElement = {
@@ -16040,7 +16040,7 @@ type NamedElement = {
 
 <MemberCard>
 
-### EffectLabel
+### EffectLabel {#effectlabel}
 
 ```ts
 type EffectLabel = 
@@ -16070,7 +16070,7 @@ incomparable (in particular `fs_write` does not imply `fs_read`).
 
 <MemberCard>
 
-### EffectSet
+### EffectSet {#effectset}
 
 ```ts
 type EffectSet = "any" | EffectLabel[];
@@ -16099,7 +16099,7 @@ result stays `[]`).
 
 <MemberCard>
 
-### TypeVariable
+### TypeVariable {#typevariable}
 
 ```ts
 type TypeVariable = {
@@ -16119,7 +16119,7 @@ is substituted away by instantiation at a call site.
 
 <MemberCard>
 
-### TypeVariance
+### TypeVariance {#typevariance}
 
 ```ts
 type TypeVariance = "in" | "out" | "inout";
@@ -16137,7 +16137,7 @@ carries one — a transparent alias has no declaration-level variance, and a
 
 <MemberCard>
 
-### TypeParameter
+### TypeParameter {#typeparameter}
 
 ```ts
 type TypeParameter = {
@@ -16159,7 +16159,7 @@ declared type is boxed. An unbounded variable's implicit bound is `any`.
 
 <MemberCard>
 
-### TypeParamsOption
+### TypeParamsOption {#typeparamsoption}
 
 ```ts
 type TypeParamsOption = 
@@ -16188,7 +16188,7 @@ object-array form is validated directly by `normalizeDeclaredTypeParams`
 
 <MemberCard>
 
-### FunctionSignature
+### FunctionSignature {#functionsignature}
 
 ```ts
 type FunctionSignature = {
@@ -16207,7 +16207,7 @@ type FunctionSignature = {
 
 <MemberCard>
 
-### AlgebraicType
+### AlgebraicType {#algebraictype}
 
 ```ts
 type AlgebraicType = {
@@ -16220,7 +16220,7 @@ type AlgebraicType = {
 
 <MemberCard>
 
-### NegationType
+### NegationType {#negationtype}
 
 ```ts
 type NegationType = {
@@ -16233,7 +16233,7 @@ type NegationType = {
 
 <MemberCard>
 
-### ValueType
+### ValueType {#valuetype}
 
 ```ts
 type ValueType = {
@@ -16246,7 +16246,7 @@ type ValueType = {
 
 <MemberCard>
 
-### RecordType
+### RecordType {#recordtype}
 
 ```ts
 type RecordType = {
@@ -16267,7 +16267,7 @@ subtyping). It may contain additional keys.
 
 <MemberCard>
 
-### ObjectType
+### ObjectType {#objecttype}
 
 ```ts
 type ObjectType = {
@@ -16308,7 +16308,7 @@ and the lattice bullet of "The rest of the system" (ruling B6).
 
 <MemberCard>
 
-### DictionaryType
+### DictionaryType {#dictionarytype}
 
 ```ts
 type DictionaryType = {
@@ -16328,7 +16328,7 @@ A dictionary is suitable for use as cache or data storage.
 
 <MemberCard>
 
-### CollectionType
+### CollectionType {#collectiontype}
 
 ```ts
 type CollectionType = {
@@ -16346,7 +16346,7 @@ type CollectionType = {
 
 <MemberCard>
 
-### ListType
+### ListType {#listtype}
 
 ```ts
 type ListType = {
@@ -16370,7 +16370,7 @@ dimensions 2x3x4 is a 3D tensor with 2 layers, 3 rows and 4 columns.
 
 <MemberCard>
 
-### SymbolType
+### SymbolType {#symboltype}
 
 ```ts
 type SymbolType = {
@@ -16383,7 +16383,7 @@ type SymbolType = {
 
 <MemberCard>
 
-### ExpressionType
+### ExpressionType {#expressiontype}
 
 ```ts
 type ExpressionType = {
@@ -16396,7 +16396,7 @@ type ExpressionType = {
 
 <MemberCard>
 
-### NumericType
+### NumericType {#numerictype}
 
 ```ts
 type NumericType = {
@@ -16411,7 +16411,7 @@ type NumericType = {
 
 <MemberCard>
 
-### SetType
+### SetType {#settype}
 
 ```ts
 type SetType = {
@@ -16427,7 +16427,7 @@ The elements of a set are not indexed.
 
 <MemberCard>
 
-### BroadcastableType
+### BroadcastableType {#broadcastabletype}
 
 ```ts
 type BroadcastableType = {
@@ -16449,7 +16449,7 @@ scalar). See `subtype.ts` for the full relation.
 
 <MemberCard>
 
-### TupleType
+### TupleType {#tupletype}
 
 ```ts
 type TupleType = {
@@ -16465,7 +16465,7 @@ If one element is named, all elements must be named.
 
 <MemberCard>
 
-### TypeReference
+### TypeReference {#typereference}
 
 ```ts
 type TypeReference = {
@@ -16492,7 +16492,7 @@ Nominal typing
 
 <MemberCard>
 
-### DeclarationOrigin
+### DeclarationOrigin {#declarationorigin}
 
 ```ts
 type DeclarationOrigin = {
@@ -16522,7 +16522,7 @@ thread from their canonical handler into their evaluate handler. It is typed
 
 <MemberCard>
 
-### Type
+### Type {#type-3}
 
 ```ts
 type Type = 
@@ -16551,7 +16551,7 @@ type Type =
 
 <MemberCard>
 
-### TypeString
+### TypeString {#typestring}
 
 ```ts
 type TypeString = string;
@@ -16697,7 +16697,7 @@ Examples of types strings:
 
 <MemberCard>
 
-### TypeCompatibility
+### TypeCompatibility {#typecompatibility}
 
 ```ts
 type TypeCompatibility = "covariant" | "contravariant" | "bivariant" | "invariant";
@@ -16707,7 +16707,7 @@ type TypeCompatibility = "covariant" | "contravariant" | "bivariant" | "invarian
 
 <MemberCard>
 
-### TypeResolver
+### TypeResolver {#typeresolver}
 
 ```ts
 type TypeResolver = {
