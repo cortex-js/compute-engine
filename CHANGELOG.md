@@ -2,6 +2,45 @@
 
 ### Breaking Changes
 
+- **The `callback<…>` type constructor is retired; callback slots are honest
+  arrow types admitted by compatibility.** A collection operator's callback
+  slot now declares the arrow it supplies — `(T) any -> boolean` for a
+  predicate, `(T) any -> unknown` for a key — and a callback operand is
+  admitted unless it is **provably unusable**: not callable, unable to accept
+  the number of arguments the operator supplies, provably disjoint in a
+  parameter or the result, or violating the slot's effect bound. Everything
+  that could work still enters and resolves per element at evaluation,
+  exactly as before: a named callback narrower than the elements
+  (`CountIf(xs, IsPrime)` over integers), a wildcard `function`-typed
+  symbol, an unknown-typed operand, a numeric function mapped over a
+  mixed-element list. What changes:
+  - **Programs that could only fail now fail at canonicalization** with an
+    `incompatible-type` error naming both arrows: a predicate whose domain
+    is disjoint from the elements (`Filter` over a `list<string>` with a
+    number-only predicate), a predicate that provably returns a non-boolean
+    (`Filter(xs, k |-> k + 1)` — previously a per-element runtime throw),
+    and — at user-declared slots — a declared callback whose arity cannot
+    accept the supply (the `callback-arity` diagnostic, previously
+    library-only).
+  - **The `callback<…>` spelling no longer parses** — a declaration using
+    it fails with a migration hint. Rewrite `callback<S>` as `S` with the
+    effect slot set to `any` (parenthesized inside unions).
+  - **Displayed signatures are now the declared types**: `Signature(op)`,
+    `About(op)["signature"]`, and a boxed operator's `.type` report the
+    honest polytype — `(collection<T>, predicate: (T) any -> boolean) ->
+    integer where T` — instead of a grounded `function`-slot projection.
+    The key and comparator operators (`MaxBy`, `MinBy`, `ArgMax`, `ArgMin`,
+    `GroupBy`, `ChunkBy`, `Sort`, `Ordering`) gained element-typed slots in
+    the same pass; `Sort`/`Ordering` accept a unary key or a binary
+    comparator, spelled as a union.
+  - User polytypes with arrow-typed parameters follow the same rules: a
+    narrower-than-slot callback is newly admitted (resolving per element),
+    provably disjoint or effect-violating ones are rejected statically, and
+    a callback's **parameter** types no longer bind a type variable that a
+    data operand anchors (its **result** type still does — `apply(f, x)`
+    keeps its result type; `x` is no longer narrowed from `f`'s domain).
+  (Design record: `docs/plans/2026-08-18-compatibility-admission-callbacks.md`.)
+
 - **The minimum supported Node version is now 22.3.0** (previously 21.7.3;
   Node 21 has been end-of-life since June 2024). The new `Input` operator's
   synchronous stdin reader relies on `process.getBuiltinModule`, introduced
@@ -63,6 +102,28 @@
     `any <: unknown` edge).
 
 ### New Features
+
+- **First-class type values: the `type` primitive, `TypeFrom`, and
+  `Subtype`** (phase 1 of `docs/plans/2026-08-18-first-class-types.md`). A
+  type expression is now a runtime value: `TypeFrom("list<integer>")`
+  constructs one, and the value SETTLES at construction — the text is
+  parsed, reduced, and stored back in canonical form, so
+  `TypeFrom("integer|real")` and `TypeFrom("real|integer")` are the same
+  value (both settle to `TypeFrom("real")`). `Subtype(t, u)` answers
+  `t <: u` — the same compatibility relation annotations use —
+  accepting type values or type text: `Subtype("integer", "number")` is
+  `True`. `==` between two type values is mutual subtyping (an alias equals
+  its body; a nominal type does not equal its structure); `==` between a
+  type value and a string is always `False`. Constructing a type value
+  never touches the type registry: an unknown name, a syntax error, or a
+  forward reference (`type X`) is an error value at the construction site.
+  Note for consumers that classify type ASTs: **`type` is a new PRIMITIVE**
+  — like `range` at 0.112.0 and `string`/`character` at 0.114.0 it
+  serializes as the bare string `"type"`, not as an object with a `kind`,
+  so a classifier switching on `kind` must add the name explicitly. The
+  shape-agnostic test is `type.matches('type')`. In TYPE-STRING syntax,
+  bare `type` before an identifier still means a forward reference
+  (`type node`); bare `type` in any other position now names the primitive.
 
 - **`And`/`Or` are value-commutative again at the symbolic entry points.**
   The short-circuit conversion made `And`/`Or` ordered — operands evaluate

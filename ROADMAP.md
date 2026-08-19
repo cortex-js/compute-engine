@@ -96,6 +96,21 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### The `interval-js` compile target emits EMPTY code for unsupported operators (OPEN, compilation — opened 2026-08-19)
+
+Every other built-in target rejects an operator it has no entry for with
+"cannot compile — the operator is known to the engine but target '…' has no
+entry"; `interval-js` instead compiles to an empty string
+(`target.compile(ce.box(['StringJoin', "a", "b"])).code === ''` — same for
+any non-numeric operator, observed while adding the first-class-types
+fail-closed tests, `docs/plans/2026-08-18-first-class-types.md` §3.3). An
+empty program silently yields no result instead of a compile-time
+diagnostic. Needs a ruling on whether empty-code is a deliberate decline
+convention some consumer (plotting?) relies on; if not, route the
+unknown-operator case through the same rejection the other targets use, and
+extend the fail-closed test pattern (which currently exempts `interval-js`,
+with a pointer here) to cover it.
+
 ### Compatibility gate for USER-DECLARED lazy operators (OPEN, demand-gated — opened 2026-08-19)
 
 Design E's compatibility admission covers every eager slot and the library's
