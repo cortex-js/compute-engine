@@ -47,6 +47,8 @@ import {
   settleTypeText,
   settledTypeText,
   isPolytype,
+  isValueForm,
+  dynamicTypeTest,
 } from './type-value-utils.js';
 import { interval } from '../numerics/interval.js';
 import {
@@ -4674,6 +4676,177 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             (isPolytype(pa) ? a : b).toString()
           );
         return ce.type(pa).matches(ce.type(pb)) ? ce.True : ce.False;
+      },
+    },
+
+    /** The dynamic type test: does this VALUE inhabit this type? */
+    MatchesType: {
+      description:
+        'True iff the first operand, EVALUATED, is a value of the given ' +
+        'type — the engine form of the Epsil `x is T` test and of `match` ' +
+        'type patterns, which both lower here. The subject is never ' +
+        'unwrapped: a type VALUE is a value like any other, so ' +
+        '`MatchesType(TypeFrom("integer"), "number")` is `False` while ' +
+        '`MatchesType(TypeFrom("integer"), "type")` is `True`; the ' +
+        'type-to-type question is `Subtype`. A settled subject is decided ' +
+        'both ways; a valueless or unresolved subject answers from its ' +
+        'static type when that decides it, and stays symbolic otherwise.',
+      // An OBSERVER, like `IsError`: the subject is held so an `Error` value
+      // can be inspected (`err is error` → True) instead of propagating away
+      // before the test runs, and `inspectsErrors` extends that to the routes
+      // that hand over an already-canonical operand. The handler
+      // canonicalizes and evaluates the held subject exactly once.
+      lazy: true,
+      inspectsErrors: true,
+      signature: '(subject: any, type: string|type) -> boolean',
+      canonical: (ops, { engine: ce }) => {
+        const xs = checkArity(ce, ops, 2);
+        const err = xs.find((x) => isFunction(x, 'Error'));
+        // Arity errors only: a malformed call must surface its own problem.
+        // A well-formed call whose SUBJECT is an error value must NOT — the
+        // whole point of the observer contract is to test such a subject.
+        if (err !== undefined && xs.length !== 2) return err;
+        // The subject stays RAW (held); only the TYPE operand is normalized:
+        // a literal string settles to a type value here, at the author's
+        // line (§3.1's per-operator string acceptance).
+        const t = xs[1];
+        if (t !== undefined && isString(t)) {
+          const settled = settleTypeText(ce, t.string);
+          if ('error' in settled)
+            return ce.error(['invalid-value', settled.error], t.toString());
+          return ce._fn('MatchesType', [
+            xs[0],
+            ce._fn('TypeFrom', [ce.string(settled.canonicalText)]),
+          ]);
+        }
+        return ce._fn('MatchesType', xs);
+      },
+      evaluate: ([subject, t], { engine: ce }) => {
+        if (subject === undefined || t === undefined) return undefined;
+        // `lazy: true` holds BOTH operands, so the type operand arrives raw
+        // too: a symbol bound to a type value, or a computed string, resolves
+        // only once evaluated (without this it would stay symbolic forever).
+        // Canonicalize first, for the same reason the subject does: a held
+        // operand arrives unbound on the box/parse routes.
+        const tv = t.canonical.evaluate();
+        // Only the SUBJECT is inspected (that is the observer's point); an
+        // Error in the TYPE operand is the caller's mistake and propagates.
+        if (isFunction(tv, 'Error')) return tv;
+        // Resolve the TYPE operand: a settled type value, or a string that
+        // computed at evaluation (same forwarding-disabled parse as
+        // construction — no route mutates the registry).
+        const tText =
+          settledTypeText(tv) ?? (isString(tv) ? tv.string : undefined);
+        if (tText === undefined) return undefined;
+        const settled = settleTypeText(ce, tText);
+        if ('error' in settled)
+          return ce.error(['invalid-value', settled.error], tv.toString());
+        if (isPolytype(settled.type))
+          return ce.error(
+            [
+              'polytype-comparison-unsupported',
+              'a quantified ("where") type cannot be the target of a type test',
+            ],
+            tv.toString()
+          );
+        // The single evaluation of the held subject: canonicalize (a held
+        // operand arrives unbound on the box/parse routes), then evaluate.
+        const v = subject.canonical.evaluate();
+        const verdict = dynamicTypeTest(ce, v, settled.type);
+        if (verdict === undefined) return undefined;
+        return verdict ? ce.True : ce.False;
+      },
+    },
+
+    /** Protocol conformance test */
+    Conforms: {
+      description:
+        'True iff the subject conforms to EVERY named protocol. A `type` ' +
+        'VALUE subject asks whether that type conforms (the branch is ' +
+        'unambiguous because the `type` primitive itself declares no ' +
+        'conformances); any other subject is evaluated once and its precise ' +
+        'type is asked. This is the lowering of the Epsil ' +
+        '`x is Hashable & Comparable` test. A valueless or unresolved ' +
+        'subject stays symbolic; an unknown protocol name is an error; an ' +
+        'Error-valued subject answers `False` (the `error` type declares no ' +
+        'conformances). Conformance is monotone but late-bound: the answer ' +
+        'reflects the registry at the moment of evaluation.',
+      // An OBSERVER, exactly like `MatchesType` (all `is` lowerings share
+      // the contract, so `err is Hashable` and `err is error` route the same
+      // way).
+      lazy: true,
+      inspectsErrors: true,
+      signature: '(subject: any, protocols: string+) -> boolean',
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length < 2) {
+          const xs = checkArity(ce, ops, 2);
+          return (
+            xs.find((x) => isFunction(x, 'Error')) ?? ce._fn('Conforms', xs)
+          );
+        }
+        return ce._fn('Conforms', ops);
+      },
+      evaluate: (ops, { engine: ce }) => {
+        const [subject, ...protocols] = ops;
+        if (subject === undefined || protocols.length === 0) return undefined;
+        // Resolve every protocol NAME first: an unknown protocol is an error
+        // regardless of the subject (the internal `conformsTo` oracle answers
+        // `false` for an unknown name, but a name that does not exist is a
+        // mistake to surface, not a clean `False`).
+        const names: string[] = [];
+        for (const p of protocols) {
+          const pv = p.canonical.evaluate();
+          // Only the SUBJECT is inspected; an Error in a protocol operand is
+          // the caller's mistake and propagates.
+          if (isFunction(pv, 'Error')) return pv;
+          if (!isString(pv)) return undefined;
+          if (ce._protocolRegistry[pv.string] === undefined)
+            return ce.error(
+              ['unknown-protocol', `there is no protocol named "${pv.string}"`],
+              p.toString()
+            );
+          names.push(pv.string);
+        }
+        const conformsTo = ce._typeResolver.conformsTo;
+        if (conformsTo === undefined) return undefined;
+        // The single evaluation of the held subject.
+        const v = subject.canonical.evaluate();
+        // A type-value subject asks about the HELD type; anything else asks
+        // about the subject's own precise type — but only when that type is
+        // EXACT (a value form). A valueless symbol's declared type cannot
+        // answer soundly yet: `True` needs the downward-inheritance property
+        // of `conformsTo` verified, and `False`-now can flip when a
+        // conformance is declared later in the program — so the unsettled
+        // case stays symbolic this round
+        // (`docs/plans/2026-08-18-first-class-types.md` §3.3, outcome
+        // matrix).
+        const heldText = settledTypeText(v);
+        let asked: Type;
+        if (heldText !== undefined) {
+          const settled = settleTypeText(ce, heldText);
+          if ('error' in settled)
+            return ce.error(['invalid-value', settled.error], v.toString());
+          asked = settled.type;
+          // A polytype VALUE is admissible, but asking whether a quantified
+          // signature conforms would engage the existential matching machinery
+          // the plan defers — the same rejection `Subtype` and `MatchesType`
+          // make (`docs/plans/2026-08-18-first-class-types.md`, "Polytypes").
+          if (isPolytype(asked))
+            return ce.error(
+              [
+                'polytype-comparison-unsupported',
+                'a quantified ("where") type cannot be tested for conformance',
+              ],
+              v.toString()
+            );
+        } else if (isValueForm(ce, v)) {
+          asked = v.type.type;
+        } else {
+          return undefined;
+        }
+        for (const name of names)
+          if (!conformsTo(asked, name)) return ce.False;
+        return ce.True;
       },
     },
 

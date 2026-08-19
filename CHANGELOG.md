@@ -103,6 +103,29 @@
 
 ### New Features
 
+- **Typed patterns: full type expressions and protocol tests on `is` and in
+  `match` patterns** (phase 2 of `docs/plans/2026-08-18-first-class-types.md`).
+  The dynamic type test now takes any type expression — `x is list<integer>`,
+  `x is number | string`, `x is !error` — and `match` type patterns
+  (`n: list<integer> => …`) support the same forms with the same lowering,
+  closing the prerequisite for `if let`. Both surfaces lower to the new
+  `MatchesType(subject, type)` operator: a settled subject is decided both
+  ways (`["a"] is list<integer>` is `False`, definitively); a valueless or
+  unresolved subject answers from its static type when that decides it and
+  stays symbolic otherwise (`Ln(2) is integer` stays symbolic). An `Error`
+  value is inspectable — `err is error` is `True`, `err is !error` is
+  `False`. Protocol names work on the right of `is` — `x is Hashable`,
+  conjunctions included (`x is Hashable & Comparable`) — lowering to the new
+  variadic `Conforms(subject, protocols…)` operator, which also accepts a
+  type value as its subject to ask about the type itself; an unknown
+  protocol name is an error, never a silent `False`. Protocol names in
+  `match` patterns remain diagnosed (`protocol-in-type-position`) — test
+  with `is` in a guard instead. The `type-pattern-unsupported` diagnostic is
+  retired. Note: `x is integer` now parses to
+  `MatchesType(x, TypeFrom("integer"))` instead of `Element(x, integer)`
+  (`Element`'s own type-name arm is unchanged for direct MathJSON use).
+
+
 - **First-class type values: the `type` primitive, `TypeFrom`, and
   `Subtype`** (phase 1 of `docs/plans/2026-08-18-first-class-types.md`). A
   type expression is now a runtime value: `TypeFrom("list<integer>")`

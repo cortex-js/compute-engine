@@ -85,14 +85,18 @@ describe('EPSIL MATCH — parse (each §2 form → MathJSON)', () => {
     ]);
   });
 
-  test('typed binding `n: integer` → binding + implicit Element guard', () => {
+  test('typed binding `n: integer` → binding + implicit MatchesType guard', () => {
     expect(validEpsil('match n {\n  n: integer if n > 0 => "positive integer"\n  _ => "other"\n}')).toEqual([
       'Match',
       'n',
       [
         'MatchCase',
         '_n',
-        ['And', ['Element', 'n', 'integer'], ['Greater', 'n', 0]],
+        [
+          'And',
+          ['MatchesType', 'n', ['TypeFrom', { str: 'integer' }]],
+          ['Greater', 'n', 0],
+        ],
         { str: 'positive integer' },
       ],
       ['MatchCase', '_', { str: 'other' }],
@@ -103,7 +107,7 @@ describe('EPSIL MATCH — parse (each §2 form → MathJSON)', () => {
     expect(validEpsil('match n {\n  n: integer => 1\n  _ => 0\n}')).toEqual([
       'Match',
       'n',
-      ['MatchCase', '_n', ['Element', 'n', 'integer'], 1],
+      ['MatchCase', '_n', ['MatchesType', 'n', ['TypeFrom', { str: 'integer' }]], 1],
       ['MatchCase', '_', 0],
     ]);
   });
@@ -264,8 +268,12 @@ describe('EPSIL MATCH — diagnostics', () => {
       'match-irrefutable-case',
     ]);
     const [expr] = parseEpsil(source);
+    // The guard prints as the explicit MatchesType call: both heads are
+    // public operators, so the text re-parses to the same node. An `is`
+    // print-sugar is a named follow-up of the first-class-types plan's R6
+    // sugar revisit (`docs/plans/2026-08-18-first-class-types.md`).
     expect(serializeEpsil(expr!)).toBe(
-      'match n {\n  a => 1\n  b if b in integer => 2\n  _ => 3\n}'
+      'match n {\n  a => 1\n  b if MatchesType(b, TypeFrom("integer")) => 2\n  _ => 3\n}'
     );
   });
 
@@ -678,28 +686,27 @@ describe('EPSIL MATCH — error subjects (rung 1)', () => {
     ).toBe('"num"');
   });
 
-  test('GAP: `v: !error` is not a resolvable type annotation yet', () => {
-    // The design's §7 refutable-binding lowering wants `x: !error`. A negation
-    // type is NOT among the annotations the typed-pattern path resolves (§3
-    // Phase-3 note: "Only simple named types resolve"), so the guard stays
-    // symbolic and the case falls through for EVERY subject — including a
-    // non-error one. The FALLTHROUGH is still the pinned behavior (resolution
-    // is the if-let prerequisite); what is fixed is the SILENCE: a non-simple
-    // annotation now reports `type-pattern-unsupported` at parse time.
+  test('`v: !error` and compound annotations now RESOLVE (the if-let prerequisite)', () => {
+    // Formerly a pinned GAP: non-simple annotations were diagnosed
+    // `type-pattern-unsupported` and their cases fell through for every
+    // subject. The typed-pattern work (first-class types phase 2,
+    // `docs/plans/2026-08-18-first-class-types.md` §3.2) lifted the
+    // restriction: the annotation lowers to `MatchesType(v, TypeFrom("T"))`
+    // and full type expressions decide their cases.
     expect(diagnostics('match 5 {\n  v: !error => "bound"\n  _ => "fell"\n}')).toEqual(
-      ['type-pattern-unsupported']
+      []
     );
-    // A compound (non-negation) annotation is diagnosed the same way; a simple
-    // named type stays silent.
     expect(
       diagnostics('match 5 {\n  v: list<integer> => "L"\n  _ => "fell"\n}')
-    ).toEqual(['type-pattern-unsupported']);
+    ).toEqual([]);
     expect(
       diagnostics('match 5 {\n  v: number => "num"\n  _ => "fell"\n}')
     ).toEqual([]);
+    // A non-error subject BINDS through `v: !error`...
     expect(
       run('match 5 {\n  v: !error => "bound"\n  _ => "fell"\n}').value.toString()
-    ).toBe('"fell"');
+    ).toBe('"bound"');
+    // ...and an error subject falls through it.
     expect(
       run('match ("a" + 1) {\n  v: !error => "bound"\n  _ => "fell"\n}').value.toString()
     ).toBe('"fell"');

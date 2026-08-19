@@ -2164,41 +2164,45 @@ describe('EPSIL PARSING LIST SPREAD', () => {
 });
 
 describe('EPSIL TYPE TEST `is`', () => {
-  test('`x is integer` is the Element type test', () => {
+  test('`x is integer` lowers to the MatchesType test', () => {
+    // The single IR of every type test (first-class types phase 2,
+    // `docs/plans/2026-08-18-first-class-types.md` §3.2): the source text
+    // rides a `TypeFrom` that settles engine-side.
     expect(validEpsil('x is integer')).toStrictEqual([
-      'Element',
+      'MatchesType',
       'x',
-      'integer',
+      ['TypeFrom', { str: 'integer' }],
     ]);
   });
 
   test('it binds tighter than `&&`/`||`, so tests conjoin', () => {
     // The TYPE grammar's `&`/`|` must not swallow the EXPRESSION grammar's
-    // `&&`/`||`: the right operand is bounded to one identifier token.
+    // `&&`/`||`: the lexer munches `&&`/`||` into single tokens, so only a
+    // LONE `|`/`&` continues a type.
     expect(validEpsil('x is integer && y is string')).toStrictEqual([
       'And',
-      ['Element', 'x', 'integer'],
-      ['Element', 'y', 'string'],
+      ['MatchesType', 'x', ['TypeFrom', { str: 'integer' }]],
+      ['MatchesType', 'y', ['TypeFrom', { str: 'string' }]],
     ]);
     expect(validEpsil('x is integer || y is string')).toStrictEqual([
       'Or',
-      ['Element', 'x', 'integer'],
-      ['Element', 'y', 'string'],
+      ['MatchesType', 'x', ['TypeFrom', { str: 'integer' }]],
+      ['MatchesType', 'y', ['TypeFrom', { str: 'string' }]],
     ]);
   });
 
   test('it binds looser than arithmetic', () => {
     expect(validEpsil('x + 1 is integer')).toStrictEqual([
-      'Element',
+      'MatchesType',
       ['Add', 'x', 1],
-      'integer',
+      ['TypeFrom', { str: 'integer' }],
     ]);
   });
 
   test('it is usable as an `if` condition', () => {
     expect(validEpsil('if x is integer { 1 } else { 2 }')).toStrictEqual([
       'If',
-      ['Element', 'x', 'integer'],
+      ['MatchesType', 'x', ['TypeFrom', { str: 'integer' }]],
       ['Block', 1],
       ['Block', 2],
     ]);
@@ -2211,16 +2215,20 @@ describe('EPSIL TYPE TEST `is`', () => {
     );
   });
 
-  test('a COMPOUND type parses but is unsupported (as in a typed pattern)', () => {
-    for (const src of [
-      'x is integer | string',
-      'x is !error',
-      'x is list<integer>',
-    ]) {
+  test('a COMPOUND type is supported, carrying its source text', () => {
+    // Formerly diagnosed `type-pattern-unsupported`; the typed-pattern work
+    // (first-class types phase 2) lifted the simple-name restriction.
+    for (const [src, text] of [
+      ['x is integer | string', 'integer | string'],
+      ['x is !error', '!error'],
+      ['x is list<integer>', 'list<integer>'],
+    ] as const) {
       const [, diags] = parseEpsil(src);
-      expect([src, diags.map((d) => (d.message as string[])[0])]).toEqual([
-        src,
-        ['type-pattern-unsupported'],
+      expect([src, diags.length]).toEqual([src, 0]);
+      expect(validEpsil(src)).toStrictEqual([
+        'MatchesType',
+        'x',
+        ['TypeFrom', { str: text }],
       ]);
     }
   });

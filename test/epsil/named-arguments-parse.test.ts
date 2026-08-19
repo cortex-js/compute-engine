@@ -121,7 +121,13 @@ describe('what the named-argument production does NOT claim', () => {
           fn: [
             'MatchCase',
             { fn: ['P', { sym: '_a' }] },
-            { fn: ['Element', { sym: 'a' }, { sym: 'integer' }] },
+            {
+              fn: [
+                'MatchesType',
+                { sym: 'a' },
+                { fn: ['TypeFrom', { str: 'integer' }] },
+              ],
+            },
             { num: '1' },
           ],
         },

@@ -3733,10 +3733,16 @@ export class Parser {
 
     const binding = this.wrap({ sym: '_' + name }, start, end);
 
-    // Optional `: Type` → an implicit `Element(name, type)` guard, conjoined
-    // with any explicit guard by the caller. Comma-delimited, so `allowWhere`
-    // stays false (the default): a clause's own `,`-list would swallow the
-    // next pattern.
+    // Optional `: Type` → an implicit `MatchesType(name, TypeFrom("T"))`
+    // guard, conjoined with any explicit guard by the caller — the same
+    // lowering as the `is` tail, so the two surfaces agree by construction,
+    // and full type expressions (`!error`, `number | string`,
+    // `list<integer>`) are supported. Protocol names stay OUT of pattern
+    // position (ruling R5): the annotation subparser diagnoses them as
+    // protocol-in-type-position, which is correct here — spell the test with
+    // `is` in the arm's body or guard instead. Comma-delimited, so
+    // `allowWhere` stays false (the default): a clause's own `,`-list would
+    // swallow the next pattern.
     if (this.check('OPERATOR') && this.current.text === ':') {
       const annotation = this.parseTypeAnnotation();
       if (annotation === null) {
@@ -3747,24 +3753,19 @@ export class Parser {
         this.recoverInBracket(true);
       } else {
         const typeText = stringValue(annotation.node) ?? '';
-        // The guard below lowers to `Element(name, <type name>)`, which only
-        // resolves SIMPLE NAMED types. A compound annotation (`!error`,
-        // `number | string`, `list<integer>`, a signature) parses fine but
-        // never resolves, so the case silently becomes unreachable for every
-        // subject. Diagnose it rather than let it fail quietly; the guard is
-        // still emitted, so the fallthrough behavior is unchanged.
-        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(typeText))
-          this.error(
-            ['type-pattern-unsupported', typeText],
-            start,
-            annotation.end
-          );
         this.matchTypeGuards.push(
           this.wrap(
             [
-              'Element',
+              'MatchesType',
               this.wrap({ sym: name }, start, end),
-              this.wrap({ sym: typeText }, start, annotation.end),
+              this.wrap(
+                [
+                  'TypeFrom',
+                  this.wrap({ str: typeText }, start, annotation.end),
+                ],
+                start,
+                annotation.end
+              ),
             ] as MathJsonExpression[],
             start,
             annotation.end
@@ -6094,18 +6095,25 @@ export class Parser {
   }
 
   /**
-   * The tail of a dynamic type test — `is Type`, with the already-parsed
-   * `subject` to its left and the `is` current — yielding `["Element",
-   * subject, Type]`.
+   * The tail of a dynamic type test — `is T`, with the already-parsed
+   * `subject` to its left and the `is` current. Three lowerings, selected
+   * here at parse time:
    *
-   * `Element(value, <type name>)` is the engine's dynamic type test and is
-   * exactly what a `match` type pattern (`n: integer => …`) lowers to, so the
-   * two surfaces agree by construction. It resolves SIMPLE NAMED types only: a
-   * compound type parses (the subparser accepts the whole union, negation, or
-   * application) but never resolves, so it gets the same
-   * `type-pattern-unsupported` diagnostic the pattern form gets. Full type
-   * expressions in this position land with the typed-pattern work, in one
-   * place for both surfaces.
+   * - a PROTOCOL name (or a `&`-conjunction of protocol names) →
+   *   `["Conforms", subject, "P", …]` — the conformance test, subject
+   *   evaluated once for the whole conjunction;
+   * - any TYPE — a simple name or a full type expression (`list<integer>`,
+   *   `integer | string`, `!error`) → `["MatchesType", subject,
+   *   ["TypeFrom", "<source>"]]`.
+   *
+   * `MatchesType` is exactly what a `match` type pattern (`n: integer => …`)
+   * lowers to, so the two surfaces agree by construction. The registries are
+   * consulted BEFORE the type subparser sees the name — the type grammar
+   * diagnoses a protocol in type position, and this contextual slot is the
+   * deliberate exception (ruling R5,
+   * `docs/plans/2026-08-18-first-class-types.md`). A `&` tail that MIXES a
+   * protocol with a type is diagnosed: an intersection of a type and a
+   * protocol names no test.
    */
   private parseTypeTestTail(
     subject: MathJsonExpression
@@ -6117,8 +6125,8 @@ export class Parser {
     // The type must be on the SAME LINE as `is`, for the same reason `is`
     // itself must be on the same line as its subject: a linebreak is a
     // statement separator, so without this the test reaches across it and
-    // silently fuses two statements (`x is` / `integer + 1` became
-    // `Add(Element(x, integer), 1)` with no diagnostic at all).
+    // silently fuses two statements (`x is` / `integer + 1` became one
+    // expression with no diagnostic at all).
     if (tok.precededByLinebreak) {
       this.error(
         ['type-annotation-error', 'Expected a type on the same line as `is`'],
@@ -6128,13 +6136,18 @@ export class Parser {
       return null;
     }
 
-    // The right operand is exactly ONE identifier token. Bounding it that way
-    // — instead of handing the rest of the line to the type subparser — is
-    // what keeps the TYPE grammar's `|`/`&` from swallowing the EXPRESSION
-    // grammar's `||`/`&&`: `x is integer && y is string` must be a conjunction
-    // of two tests, not an intersection type. The lexer munches `&&`/`||` into
-    // single tokens, so a compound type is recognizable by a LONE `|`, `&`,
-    // `<`, or `->` after the name.
+    // The `&&`/`||` boundary: the lexer munches `&&`/`||` into single
+    // tokens, so a compound TYPE is recognizable by a LONE `|`, `&`, `<`, or
+    // `->` after the first name — `x is integer && y is string` stays a
+    // conjunction of two tests, never an intersection type.
+    //
+    // `{` is deliberately NOT in that set, even though a layout-record type
+    // (`record{a: integer}`) is spelled with one: a brace after the type
+    // name must stay available as a BLOCK opener, or `if x is record { 1 }
+    // else { 2 }` would swallow its consequent into the type. The
+    // parenthesized spelling `x is (record{a: integer})` is the layout-record
+    // route on this surface — it reaches the compound fallthrough below,
+    // where the brace is unambiguous.
     const next = this.peek();
     const continuesType =
       next.type === 'OPERATOR' &&
@@ -6143,6 +6156,89 @@ export class Parser {
         next.text === '<' ||
         next.text === '->');
 
+    // A PROTOCOL name: the conformance lowering. Consulted before the type
+    // subparser (which would diagnose protocol-in-type-position — correct
+    // everywhere EXCEPT this slot). Protocols and types share no names, so
+    // the branch is unambiguous. A conjunction consumes `& P2 & …`, each arm
+    // a protocol; a type name (or anything else) after `&` is the MIXED
+    // diagnostic — `Hashable & integer` names no test.
+    if (
+      tok.type === 'SYMBOL' &&
+      PLAIN_IDENTIFIER.test(tok.text) &&
+      this.protocolNames.has(tok.text) &&
+      !this.knownTypeNames.has(tok.text)
+    ) {
+      this.advance();
+      this.harvest(tok);
+      const names: MathJsonExpression[] = [
+        this.wrap({ str: tok.text }, tok.start, tok.end),
+      ];
+      let end = tok.end;
+      // A LONE `|`, `<`, or `->` after a protocol name (the same token set
+      // `continuesType` recognizes above) continues a TYPE, and a type
+      // cannot extend a conformance test. Diagnose it where it is written:
+      // `x is Marker | integer` is a plausible typo for the `&`
+      // conjunction, and left alone it returns `Conforms(x, "Marker")` and
+      // strands `| integer` for the expression grammar — an obscure
+      // downstream error, where the mixed `&` tail below gets a
+      // purpose-built one. `||`/`&&` are lexed as single tokens, so a
+      // boolean use of the conformance result (`x is Marker || …`) is
+      // untouched.
+      const typeTailAfterProtocol = (): boolean => {
+        if (!this.check('OPERATOR')) return false;
+        const op = this.current;
+        if (op.text !== '|' && op.text !== '<' && op.text !== '->')
+          return false;
+        this.error(
+          [
+            'type-annotation-error',
+            `Unexpected \`${op.text}\` after a protocol name — a conformance ` +
+              'test conjoins protocols with `&` only; `|`, `<` and `->` ' +
+              'build a type, which names no conformance test',
+          ],
+          op.start,
+          op.end
+        );
+        return true;
+      };
+      if (typeTailAfterProtocol()) return null;
+      while (this.check('OPERATOR') && this.current.text === '&') {
+        this.advance(); // '&'
+        const p = this.current;
+        if (
+          p.type !== 'SYMBOL' ||
+          !PLAIN_IDENTIFIER.test(p.text) ||
+          !this.protocolNames.has(p.text)
+        ) {
+          this.error(
+            [
+              'type-annotation-error',
+              'Expected a protocol name after `&` — a conformance test ' +
+                'conjoins protocols only; a type and a protocol cannot be ' +
+                'intersected',
+            ],
+            p.start,
+            p.end
+          );
+          return null;
+        }
+        this.advance();
+        this.harvest(p);
+        names.push(this.wrap({ str: p.text }, p.start, p.end));
+        end = p.end;
+        if (typeTailAfterProtocol()) return null;
+      }
+      return this.wrap(
+        ['Conforms', subject, ...names] as MathJsonExpression[],
+        start,
+        end
+      );
+    }
+
+    // A TYPE — simple name or full expression. The single-token fast path
+    // avoids the subparser for the common `x is integer`; both paths lower
+    // identically, carrying the SOURCE TEXT into a `TypeFrom` that settles
+    // (validates, reduces) engine-side at canonicalization.
     if (
       tok.type === 'SYMBOL' &&
       PLAIN_IDENTIFIER.test(tok.text) &&
@@ -6151,9 +6247,8 @@ export class Parser {
       this.advance();
       this.harvest(tok);
       // Validate the name against the type grammar in isolation, so a typo is
-      // caught here (`x is intger`) rather than becoming a comparison against
-      // an undeclared symbol. A bare name, so `allowWhere` is moot; it stays
-      // false (the default).
+      // caught here (`x is intger`) rather than at evaluation. A bare name,
+      // so `allowWhere` is moot; it stays false (the default).
       try {
         parseTypePrefix(tok.text, this.typeResolver);
       } catch (e) {
@@ -6164,34 +6259,34 @@ export class Parser {
       }
       return this.wrap(
         [
-          'Element',
+          'MatchesType',
           subject,
-          this.wrap({ sym: tok.text }, tok.start, tok.end),
+          this.wrap(
+            ['TypeFrom', this.wrap({ str: tok.text }, tok.start, tok.end)],
+            tok.start,
+            tok.end
+          ),
         ] as MathJsonExpression[],
         start,
         tok.end
       );
     }
 
-    // A compound type (`!error`, `integer | string`, `list<integer>`) or no
-    // type at all. Hand it to the type subparser so the diagnostic is precise
-    // and the cursor lands past the whole type, then report it as unsupported
-    // — the same verdict the equivalent `match` pattern gets. The operand of
-    // `is` is a ground type test, never a polytype, so `allowWhere` stays
-    // false (the default).
+    // A compound type (`!error`, `integer | string`, `list<integer>`). The
+    // subparser validates the whole expression (a protocol name inside it is
+    // its protocol-in-type-position diagnostic — only the LEADING name gets
+    // the conformance reading above) and the source text rides the lowering.
+    // The operand of `is` is a ground type test, never a polytype, so
+    // `allowWhere` stays false (the default).
     const annotation = this.parseTypeBody(kw.end);
     if (annotation === null) return null;
-    this.error(
-      ['type-pattern-unsupported', stringValue(annotation.node) ?? ''],
-      start,
-      annotation.end
-    );
+    const text = stringValue(annotation.node) ?? '';
     return this.wrap(
       [
-        'Element',
+        'MatchesType',
         subject,
         this.wrap(
-          { sym: stringValue(annotation.node) ?? '' },
+          ['TypeFrom', this.wrap({ str: text }, kw.end, annotation.end)],
           kw.end,
           annotation.end
         ),

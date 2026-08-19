@@ -2,10 +2,22 @@
 
 **Status:** Rulings R1–R8 DECIDED (2026-08-18); the pass-2 items (settling,
 polytype relaxation, R5 mechanics amendment, R9) RATIFIED 2026-08-19.
-**Phase 1 is IMPLEMENTED** (2026-08-19): the R7 lookahead spike PASSED — the
-name `type` stands — and the primitive, `TypeFrom` with settling, `Subtype`,
-and the `==`/`isSame` tiers are in, with engine and Epsil test suites.
-Phases 2–3 remain. Review record (pass 2; pass 1 applied and superseded):
+**Phases 1 AND 2 are IMPLEMENTED** (2026-08-19). Phase 1: the R7 lookahead
+spike PASSED — the name `type` stands — and the primitive, `TypeFrom` with
+settling, `Subtype`, and the `==`/`isSame` tiers are in. Phase 2:
+`MatchesType` (the R9 regime) and variadic `Conforms` are in; `is` and match
+type patterns re-lower to the single IR; compound types and the protocol arm
+work (`x is list<integer>`, `x is !error`, `x is Hashable & Comparable`);
+`type-pattern-unsupported` retired; snapshot blast radius measured at ZERO
+(13 AST pins across 4 suites updated to the new lowering — the ratified
+change, surfaced not absorbed). Two phase-2 notes: (a) FUNCTION LITERALS are
+excluded from R9's value forms in the conservative direction — an
+unannotated literal's inference-widened signature would make a failed
+`matches` a WRONG definitive False, so `fn is (integer) -> integer` stays
+symbolic (pinned; revisit when literal signatures become
+precise-by-construction); (b) an unevaluated test PRINTS as the explicit
+`MatchesType(x, TypeFrom("T"))` call — it re-parses to the same node, and an
+`is` print-sugar is bundled into R6's sugar revisit. Phase 3 remains. Review record (pass 2; pass 1 applied and superseded):
 `docs/scratch/2026-08-18-first-class-types_SPEC_REVIEW.md`.
 **Date:** 2026-08-18 (rulings), 2026-08-19 (phase 1)
 
@@ -280,7 +292,14 @@ All of these are thin wrappers over machinery the engine already has:
   in this round** — so a type-value subject can only intend the type-level
   question. (Engine-internal `isSame`/hash covers set and dictionary
   membership for type values without protocol `Hashable`; if `type` ever
-  gains conformances, this branch must be revisited.) The operator delegates
+  gains conformances, this branch must be revisited.) ENFORCEMENT GAP,
+  surfaced by the phase-2 review (2026-08-19): nothing REJECTS a
+  `DeclareConformance` targeting the primitive `type`, so a user can create
+  the ambiguous state today. The guard belongs in the conformance
+  declaration path (`src/compute-engine/engine-protocols.ts`) — deferred
+  only because that file holds another session's staged work at the time of
+  writing; it is phase-3 work, landed with the `Type` flip at the latest.
+  The operator delegates
   to `TypeResolver.conformsTo`, whose full semantics — inherited,
   conditional, and pending conformances — are the contract, not a naive
   registry lookup. **Outcome matrix `[RATIFIED 2026-08-19]`**: a SETTLED subject (§5)

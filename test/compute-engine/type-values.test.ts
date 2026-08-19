@@ -1,6 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseType } from '../../src/common/type/parse';
-import { isPolytype } from '../../src/compute-engine/library/type-value-utils';
+import {
+  isPolytype,
+  isValueForm,
+} from '../../src/compute-engine/library/type-value-utils';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 // First-class type values, phase 1: the `type` primitive, the `TypeFrom`
@@ -248,16 +252,40 @@ describe('Subtype: `Subtype(t, u)` is true iff t <: u', () => {
 
   test('an overload set with a generic arm counts as a polytype', () => {
     // The rejection predicate must see a `where` arm nested in an
-    // INTERSECTION, not only a top-level quantified signature. Pinned at the
-    // predicate: such a text cannot reach `Subtype` today, because settling
-    // reduces an intersection of two unrelated signatures away
-    // (`((T) -> T where T: number) & ((string) -> string)` reduces to
-    // `nothing`), so only the unit-level assertion can witness the arm.
+    // INTERSECTION, not only a top-level quantified signature.
     expect(
       isPolytype(parseType('((T) -> T where T: number) & ((string) -> string)'))
     ).toBe(true);
     expect(isPolytype(parseType('((integer) -> integer) & ((string) -> string)')))
       .toBe(false);
+  });
+
+  test('an overload set settles, and a generic arm in one is rejected', () => {
+    // An intersection of signatures is how an overload set is spelled, so
+    // settling must keep both arms. The meet had no rule for a pair of
+    // signatures and fell through to "disjoint", which reduced every overload
+    // set to `nothing` and made this the one polytype shape that could not
+    // reach `Subtype` at all.
+    expect(
+      ev([
+        'TypeFrom',
+        { str: '((integer) -> integer) & ((string) -> string)' },
+      ]).toString()
+    ).toBe('TypeFrom("((integer) -> integer) & ((string) -> string)")');
+    expect(
+      ev([
+        'Subtype',
+        { str: '((integer) -> integer) & ((string) -> string)' },
+        { str: 'function' },
+      ]).toString()
+    ).toBe('"True"');
+    expect(
+      ev([
+        'Subtype',
+        { str: '((T) -> T where T: number) & ((string) -> string)' },
+        { str: 'function' },
+      ]).toString()
+    ).toContain('polytype-comparison-unsupported');
   });
 
   test('a computed string operand settles at evaluation', () => {
@@ -322,5 +350,229 @@ describe('compile fail-closed (plan §3.3)', () => {
       ce.box(['Subtype', { str: 'integer' }, { str: 'number' }])
     );
     expect(String(r.code ?? r)).toContain('true');
+  });
+});
+
+describe('MatchesType: the R9 decision regime (phase 2)', () => {
+  test('a value form is decided BOTH ways', () => {
+    expect(ev(['MatchesType', ['List', 1, 2], { str: 'list<integer>' }]).toString())
+      .toBe('"True"');
+    // `["a"]`'s static type overlaps `list<integer>` (the empty list inhabits
+    // both), but the VALUE is concrete, so the answer is a definitive False —
+    // the asymmetry of the old Element arm must not return.
+    expect(ev(['MatchesType', ['List', { str: 'a' }], { str: 'list<integer>' }]).toString())
+      .toBe('"False"');
+    expect(ev(['MatchesType', ['List'], { str: 'list<integer>' }]).toString())
+      .toBe('"True"');
+  });
+
+  test('the TYPE operand is EVALUATED, like the subject', () => {
+    // `lazy: true` holds both operands, so a symbol bound to a type value —
+    // or to the type TEXT — arrives raw. Without evaluating it the test never
+    // resolves its target and stays symbolic forever.
+    const eng = new ComputeEngine();
+    eng.box(['Assign', 'tSym', ['TypeFrom', { str: 'integer' }]]).evaluate();
+    expect(eng.box(['MatchesType', 3, 'tSym']).evaluate().toString()).toBe(
+      '"True"'
+    );
+    eng.box(['Assign', 'tTxt3', { str: 'integer' }]).evaluate();
+    expect(eng.box(['MatchesType', 3, 'tTxt3']).evaluate().toString()).toBe(
+      '"True"'
+    );
+  });
+
+  test('a dictionary literal is a value form, decided both ways', () => {
+    // A boxed dictionary is not a function node, so the value-container head
+    // set could never reach it — dictionaries need their own branch.
+    const dict = ['Dictionary', ['KeyValuePair', { str: 'a' }, 1]];
+    expect(
+      ev(['MatchesType', dict, { str: 'record{a: integer}' }]).toString()
+    ).toBe('"True"');
+    expect(
+      ev(['MatchesType', dict, { str: 'dictionary<string>' }]).toString()
+    ).toBe('"False"');
+  });
+
+  test('an absence marker is a value form: `[Missing]` is not a `list<integer>`', () => {
+    // `["List", "Missing"]` evaluates to a one-element list of type
+    // `list<missing^1>`, which merely OVERLAPS `list<integer>` (neither
+    // matches nor provably disjoint) — only classifying `Missing` as a value
+    // form makes the answer definitive.
+    expect(
+      ev(['MatchesType', ['List', 'Missing'], { str: 'list<integer>' }])
+        .toString()
+    ).toBe('"False"');
+  });
+
+  test('an ALIAS-named application is not a nominal value form', () => {
+    // The nominal-constructor branch keys on a REGISTERED NON-ALIAS type with
+    // a definition: an ordinary application whose head collides with an alias
+    // name is not an exact value, so it must stay symbolic (R9), not answer a
+    // wrong definitive False.
+    const eng = new ComputeEngine();
+    eng.declareType('nomPt', 'tuple<x: integer, y: integer>');
+    eng.declareType('MyAl', 'list<T>', { alias: true, typeParams: ['T'] });
+    eng.declare('zq', 'integer');
+    expect(isValueForm(eng, eng.box(['nomPt', 1, 2]).evaluate())).toBe(true);
+    expect(isValueForm(eng, eng.box(['MyAl', 'zq']))).toBe(false);
+    expect(
+      eng
+        .box(['MatchesType', ['MyAl', 'zq'], { str: 'string' }])
+        .evaluate()
+        .toString()
+    ).toContain('MatchesType');
+  });
+
+  test('an unresolved exact application stays symbolic', () => {
+    // `Ln(2)` is exact and stays symbolic; its type (`finite_real`) overlaps
+    // `integer` without deciding it, and the node is NOT a value form — the
+    // type route cannot prove irrationality, so the test must not guess.
+    expect(ev(['MatchesType', ['Ln', 2], { str: 'integer' }]).toString())
+      .toContain('MatchesType');
+  });
+
+  test('a valueless symbol is three-way on its declared type', () => {
+    const eng = new ComputeEngine();
+    eng.declare('vx', 'integer');
+    eng.declare('vs', 'string');
+    eng.declare('vr', 'real');
+    const evx = (e: any) => eng.box(e).evaluate().toString();
+    expect(evx(['MatchesType', 'vx', { str: 'integer' }])).toBe('"True"');
+    expect(evx(['MatchesType', 'vs', { str: 'integer' }])).toBe('"False"');
+    // Overlapping but undecided: declared `real` asked `integer`.
+    expect(evx(['MatchesType', 'vr', { str: 'integer' }])).toContain(
+      'MatchesType'
+    );
+  });
+
+  test('the subject is never unwrapped (the trio)', () => {
+    expect(
+      ev(['MatchesType', ['TypeFrom', { str: 'integer' }], { str: 'number' }]).toString()
+    ).toBe('"False"');
+    expect(
+      ev(['MatchesType', ['TypeFrom', { str: 'integer' }], { str: 'type' }]).toString()
+    ).toBe('"True"');
+    expect(
+      ev(['Subtype', ['TypeFrom', { str: 'integer' }], { str: 'number' }]).toString()
+    ).toBe('"True"');
+  });
+
+  test('an Error subject is inspected, not propagated', () => {
+    expect(
+      ev(['MatchesType', ['Divide', { str: 'a' }, 0], { str: 'error' }]).toString()
+    ).toBe('"True"');
+    expect(
+      ev(['MatchesType', ['Divide', { str: 'a' }, 0], { str: '!error' }]).toString()
+    ).toBe('"False"');
+  });
+
+  test('an Error TYPE operand propagates (only the subject is inspected)', () => {
+    expect(ev(['MatchesType', 3, { str: 'intger' }]).toString()).toContain(
+      'invalid-value'
+    );
+  });
+
+  test('a polytype target is the named error', () => {
+    expect(
+      ev(['MatchesType', 3, { str: '(T) -> T where T: number' }]).toString()
+    ).toContain('polytype-comparison-unsupported');
+  });
+
+  test('a function literal stays symbolic (deliberate R9 narrowing)', () => {
+    // An unannotated literal's signature is inference-widened, so a failed
+    // `matches` does NOT refute the value — excluded from value forms in the
+    // conservative direction (see `isValueForm`).
+    const eng = new ComputeEngine();
+    const fn = eng.box(['Function', ['Add', 'x', 1], 'x']);
+    expect(
+      eng.box(['MatchesType', fn.json, { str: '(integer) -> integer' }])
+        .evaluate()
+        .toString()
+    ).toContain('MatchesType');
+  });
+});
+
+describe('Conforms: the outcome matrix (phase 2)', () => {
+  test('settled subjects are definitive both ways; type-value subjects ask the held type', () => {
+    const eng = new ComputeEngine();
+    // Epsil declarations exercise the same registry the operator reads.
+    executeEpsil(eng, 'protocol Marker { }');
+    executeEpsil(eng, 'type pt = tuple<x: integer, y: integer>');
+    executeEpsil(eng, 'type pt is Marker');
+    const evx = (e: any) => eng.box(e).evaluate().toString();
+    expect(evx(['Conforms', ['pt', 1, 2], { str: 'Marker' }])).toBe('"True"');
+    expect(evx(['Conforms', 3, { str: 'Marker' }])).toBe('"False"');
+    expect(evx(['Conforms', ['TypeFrom', { str: 'pt' }], { str: 'Marker' }]))
+      .toBe('"True"');
+    // Variadic conjunction: one missing conformance decides it.
+    executeEpsil(eng, 'protocol Marker2 { }');
+    expect(
+      evx(['Conforms', ['pt', 1, 2], { str: 'Marker' }, { str: 'Marker2' }])
+    ).toBe('"False"');
+  });
+
+  test('an unknown protocol is an error, never a clean False', () => {
+    expect(ev(['Conforms', 3, { str: 'Nope' }]).toString()).toContain(
+      'unknown-protocol'
+    );
+  });
+
+  test('a polytype type-value subject is the named error', () => {
+    // The held-type branch rejects a quantified type exactly as `Subtype` and
+    // `MatchesType` do — conformance of a `where`-quantified signature needs
+    // the deferred existential matching machinery.
+    const eng = new ComputeEngine();
+    executeEpsil(eng, 'protocol Marker { }');
+    expect(
+      eng
+        .box([
+          'Conforms',
+          ['TypeFrom', { str: '(T) -> T where T: number' }],
+          { str: 'Marker' },
+        ])
+        .evaluate()
+        .toString()
+    ).toContain('polytype-comparison-unsupported');
+  });
+
+  test('a valueless subject stays symbolic; an Error subject answers False', () => {
+    const eng = new ComputeEngine();
+    executeEpsil(eng, 'protocol Marker { }');
+    eng.declare('vq', 'integer');
+    expect(
+      eng.box(['Conforms', 'vq', { str: 'Marker' }]).evaluate().toString()
+    ).toContain('Conforms');
+    expect(
+      eng
+        .box(['Conforms', ['Divide', { str: 'a' }, 0], { str: 'Marker' }])
+        .evaluate()
+        .toString()
+    ).toBe('"False"');
+  });
+});
+
+describe('compile fail-closed: the phase-2 operators', () => {
+  test('non-ground MatchesType and Conforms reject on every target', () => {
+    // The shared gate lists all three comparison heads; ground calls fold.
+    const eng = new ComputeEngine();
+    eng.declare('gx', 'integer');
+    const mt = eng.box(['MatchesType', 'gx', { str: 'integer' }]);
+    for (const name of ['javascript', 'glsl', 'wgsl', 'python'])
+      expect(() =>
+        (eng as any)._getCompilationTarget(name).compile(mt)
+      ).toThrow(/cannot compile/i);
+    const r = (eng as any)._getCompilationTarget('interval-js').compile(mt);
+    expect(r.success).toBe(false);
+    // ...and the same for `Conforms`: a SYMBOL subject is not a ground
+    // operand (the gate exempts only calls whose operands are all literal
+    // type text or settled type values), so the call must fail closed too.
+    executeEpsil(eng, 'protocol MarkerC { }');
+    const cf = eng.box(['Conforms', 'gx', { str: 'MarkerC' }]);
+    for (const name of ['javascript', 'glsl', 'wgsl', 'python'])
+      expect(() =>
+        (eng as any)._getCompilationTarget(name).compile(cf)
+      ).toThrow(/cannot compile/i);
+    const rc = (eng as any)._getCompilationTarget('interval-js').compile(cf);
+    expect(rc.success).toBe(false);
   });
 });

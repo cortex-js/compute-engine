@@ -264,21 +264,28 @@ describe('EPSIL CONFORMANCE DECLARATIONS', () => {
   test('the expression-position `is` type test is UNAFFECTED', () => {
     // Statement position is disjoint from `TYPE_TEST_PRECEDENCE`.
     expect(validEpsil('x is integer')).toStrictEqual([
-      'Element',
+      'MatchesType',
       'x',
-      'integer',
+      ['TypeFrom', { str: 'integer' }],
     ]);
     expect(validEpsil('let b = x is integer')).toStrictEqual([
       'Declare',
       'b',
-      ['Dictionary', ['KeyValuePair', 'value', ['Element', 'x', 'integer']]],
+      [
+        'Dictionary',
+        [
+          'KeyValuePair',
+          'value',
+          ['MatchesType', 'x', ['TypeFrom', { str: 'integer' }]],
+        ],
+      ],
     ]);
     // A binding NAMED `type` keeps its type test: the conformance form needs
     // a non-empty target between `type` and `is`.
     expect(validEpsil('type is integer')).toStrictEqual([
-      'Element',
+      'MatchesType',
       'type',
-      'integer',
+      ['TypeFrom', { str: 'integer' }],
     ]);
   });
 
@@ -292,14 +299,14 @@ describe('EPSIL CONFORMANCE DECLARATIONS', () => {
     expect(validEpsil('let type = 5\ntype + 1 is integer')).toStrictEqual([
       'Block',
       ['Declare', 'type', ['Dictionary', ['KeyValuePair', 'value', 5]]],
-      ['Element', ['Add', 'type', 1], 'integer'],
+      ['MatchesType', ['Add', 'type', 1], ['TypeFrom', { str: 'integer' }]],
     ]);
 
     expect(diagnosticsOf('let type = 5\ntype.x is integer')).toStrictEqual([]);
     expect(validEpsil('let type = 5\ntype.x is integer')).toStrictEqual([
       'Block',
       ['Declare', 'type', ['Dictionary', ['KeyValuePair', 'value', 5]]],
-      ['Element', ['Field', 'type', { str: 'x' }], 'integer'],
+      ['MatchesType', ['Field', 'type', { str: 'x' }], ['TypeFrom', { str: 'integer' }]],
     ]);
   });
 
@@ -363,7 +370,7 @@ describe('EPSIL CONFORMANCE DECLARATIONS', () => {
         'Block',
         ['Declare', 'type', ['Dictionary', ['KeyValuePair', 'value', 5]]],
         'type',
-        ['Element', 'string', 'integer'],
+        ['MatchesType', 'string', ['TypeFrom', { str: 'integer' }]],
       ]
     );
   });
