@@ -1709,10 +1709,10 @@ export type GPUShapeRules = {
    * `smoothstep`, `mod` — has a matched all-genType overload alongside its
    * scalar-tailed one, so none of them belongs here.
    *
-   * Checked independently of `scalarGenTypeSlots`, and in particular when NO
+   * Check this independently of `scalarGenTypeSlots`, including when no
    * operand is a scalar: `refract(vec3, vec3, vec3)` has no overload at all,
    * but the permission table is only consulted once a scalar is present, so an
-   * all-vector call used to slip through behind `success: true`.
+   * all-vector call must be declined.
    */
   readonly mandatoryScalarSlots: ReadonlyMap<string, ReadonlySet<number>>;
   /**
@@ -1781,16 +1781,15 @@ function gpuShapeRules(
  * into scalars and combining those — rather than handing the aggregate to a
  * componentwise builtin. The `Max`/`Min` reduction (`compileGPUExtremum`),
  * `Median`'s sorting network and `Variance`'s inline mean/deviation sum are
- * the three. The operand shapes such a lowering was handed are no longer in
- * its emission at all, so judging the emission against them declines a
+ * the three. The original operand shapes are absent from the final emission,
+ * so judging the emission against them would decline a
  * perfectly good reduction.
  *
- * The capability is DECLARED, at the handler's own definition site
+ * The capability is declared at the handler's own definition site
  * (`markAggregateConsuming`) — never a table of CE head names kept elsewhere,
- * and never inferred from the shape of the emitted source. The gate used to
- * read "is not a single call and the head is absent from `GPU_OPERATORS`" as
- * the signal, which let every ORDINARY compound lowering (WGSL's `Mod` →
- * `(((a % b) + b) % b)`) past as well.
+ * and never inferred from the shape of the emitted source. This prevents an
+ * ordinary compound lowering such as WGSL's `Mod` from being mistaken for an
+ * aggregate-consuming one.
  *
  * The value is a PREDICATE over the operands, not a flag, because a handler
  * that destructures a LITERAL collection still passes scalar operands straight
@@ -1900,12 +1899,10 @@ function gpuMisplacedScalarArgument(
  * array — reaches a lowering whose shader type system cannot accept it.
  *
  * The counterpart of `compileGPUBroadcastUnary` for every emission that does
- * NOT go through the fan-out hook: the generic function-codegen and
- * string-mapped-helper paths, which the base compiler splices verbatim. Those
- * used to emit `atan(vec3, 1.0)`, `pow(2.71828182846, vec3(…))`,
- * `length(vec2(float[1](3.0), 4.0))` and `sin(mat2(…))` behind `success:
- * true` — mixed genTypes, an array constructor inside a vector constructor,
- * and a matrix handed to a scalar builtin, none of which a driver accepts.
+ * not go through the fan-out hook: the generic function-codegen and
+ * string-mapped-helper paths, which the base compiler splices directly. Reject
+ * mixed generic types, arrays nested in vector constructors, and matrices
+ * passed to scalar builtins before reporting success.
  *
  * Every decision is derived from the operands' shapes (`gpuOperandShape`) and
  * from the SHAPE OF THE EMITTED SOURCE (`gpuTopLevelCall`,
@@ -2225,10 +2222,10 @@ function gpuCheckOperandShapes(
   }
   // The OBLIGATIONS, last: a slot that must be scalar is violated by a `vecN`
   // standing in it, so — unlike everything above — this check does not depend
-  // on a scalar being present ANYWHERE, and is the only one an ALL-VECTOR call
+  // on a scalar being present anywhere, and is the only one an all-vector call
   // can fail. `refract(vec3, vec3, vec3)` is not a signature either language
   // declares, but the permission table above is consulted only once
-  // `shapes.includes('scalar')`, so such a call used to reach a driver.
+  // `shapes.includes('scalar')`.
   // Positional, so it needs the lowering to pass its operands through one for
   // one; and reported after the permission verdict, which names the more
   // specific fault when a scalar is ALSO misplaced.
@@ -4265,12 +4262,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return halfAway(gpuOperandOnce('Round', args[0], compile, target));
     }
     // The SECOND operand is a precision: `Round(x, n)` rounds to `n` DECIMAL
-    // PLACES (the Desmos/spreadsheet form the signature `(number, integer?)`
+    // places (the Desmos/spreadsheet form the signature `(number, integer?)`
     // declares) — `Round(x·10ⁿ)/10ⁿ`, which is what the interpreter and the
-    // JavaScript and interval targets all compute. This lowering used to
-    // consume only `args[0]`, so `Round(3.14159, 2)` emitted the round-to-
-    // integer form and reported success on a shader computing `3` where the
-    // interpreter answers `157/50`.
+    // JavaScript and interval targets all compute. Both operands are required;
+    // dropping the precision would silently round to an integer.
     //
     // The factor must be a compile-time constant. A shader `pow(10.0, n)` for
     // a RUNTIME `n` is spec-defined as `exp2(n·log2(10.0))`, which is not
@@ -8335,16 +8330,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // genuinely free symbol.
         return undefined;
       },
-      // TEXT has no shader representation, so a string literal in ANY
+      // Text has no shader representation, so a string literal in any
       // position fails closed (D6) rather than emitting one.
       //
       // GLSL and WGSL have no string type, no character type and no text
-      // storage class: there is nothing a quoted literal could be. This hook
-      // used to emit `JSON.stringify(str)`, so `List("a", "b")` came out as
-      // `vec2("a", "b")` and `Equal("a", "b")` as `"a" == "b"` — source no
-      // driver accepts, behind a reported `success: true`. Declining here
-      // covers every position at once, because this is the ONE hook the base
-      // compiler emits a string value through.
+      // storage class: there is nothing a quoted literal could be. Declining
+      // in this hook covers every position because all string values pass
+      // through it.
       string: (str) => {
         throw new Error(
           `A string literal (${JSON.stringify(str)}) is not supported on the ` +

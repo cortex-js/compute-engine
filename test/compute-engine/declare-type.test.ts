@@ -83,8 +83,12 @@ describe('DeclareType route parity', () => {
 
   test('a string name operand works like a symbol name', () => {
     const ce = new ComputeEngine();
-    ce.box(['DeclareType', { str: 'point' }, { str: 'tuple<integer, integer>' }, ALIAS])
-      .evaluate();
+    ce.box([
+      'DeclareType',
+      { str: 'point' },
+      { str: 'tuple<integer, integer>' },
+      ALIAS,
+    ]).evaluate();
     expect(ce.type('tuple<integer, integer>').matches(ce.type('point'))).toBe(
       true
     );
@@ -140,9 +144,9 @@ describe('DeclareType redeclaration', () => {
     expect(ce.type('tuple<integer, integer>').matches(ce.type('r'))).toBe(
       false
     );
-    expect(
-      ce.type('tuple<string, string, string>').matches(ce.type('r'))
-    ).toBe(true);
+    expect(ce.type('tuple<string, string, string>').matches(ce.type('r'))).toBe(
+      true
+    );
   });
 
   test('a host-declared type is not replaced: error value, definition intact', () => {
@@ -254,9 +258,8 @@ describe('DeclareType errors', () => {
 });
 
 //
-// Forward references (`type name` inside a type body) — the spelling
-// `doc/08-guide-types.md` documents for a mutually recursive set. The
-// reference installs an empty type record; the later declaration must FULFILL
+// A forward reference (`type name` inside a type body) installs an empty type
+// record. The later declaration must fulfill
 // that record in place rather than treat it as a redeclaration conflict, so
 // the types that captured it resolve through to the definition.
 //
@@ -302,9 +305,7 @@ describe('FORWARD REFERENCES', () => {
   test('a completed declaration still conflicts', () => {
     const ce = new ComputeEngine();
     ce.declareType('done', 'integer');
-    expect(() => ce.declareType('done', 'string')).toThrow(
-      /already defined/
-    );
+    expect(() => ce.declareType('done', 'string')).toThrow(/already defined/);
   });
 
   test('a failed fulfillment leaves the reference unfulfilled, not broken', () => {

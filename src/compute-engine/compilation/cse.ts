@@ -1,18 +1,15 @@
 /**
- * Compile-time common-subexpression elimination — **Stage H (harvest)**.
+ * Candidate harvesting for compile-time common-subexpression elimination.
  *
- * This module is the *analysis* half of the CSE design
- * (`docs/plans/2026-07-28-compile-cse-design.md`, §5). It is deliberately
- * free of any emission concern: it imports nothing from `base-compiler.ts`
- * (the dependency direction is `base-compiler` → `cse`), constructs no boxed
- * nodes, and mutates nothing. Its output — a region tree plus, per region, the
- * candidates whose occurrences that region may bind — is consumed by the
- * emission stage (§6).
+ * This module is the analysis half of CSE. It imports nothing from
+ * `base-compiler.ts`, constructs no boxed nodes, and mutates nothing. Its
+ * output is a region tree and the candidates each region may bind; the
+ * compiler consumes that output during emission.
  *
- * The two passes share ONE declarative inventory of conditionally-evaluated
- * operand positions ({@link LAZY_OPERANDS} / {@link lazyOperandRegions}) so
- * that harvest's static regions and emission's region instances cannot drift
- * (§5.1).
+ * Analysis and emission share one declarative inventory of lazy operand
+ * positions ({@link LAZY_OPERANDS} / {@link lazyOperandRegions}) so
+ * their region boundaries cannot drift. See
+ * `docs/plans/2026-07-28-compile-cse-design.md` for the full design.
  */
 
 import type {
@@ -36,32 +33,30 @@ import { symbolAtSite } from '../boxed-expression/binding-sites.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 
 // ---------------------------------------------------------------------------
-// Tunable constants (§5.2 G4, §5, §6.2). All named, all exported: the
-// threshold tests pin them by reference, never by literal.
+// Tunable thresholds are exported so tests can pin the named policy values.
 // ---------------------------------------------------------------------------
 
-/** Minimum node count of a candidate subtree (§5.2 G4). Skips `Negate(x)`
- * trivia while admitting the corpus's dominant size-4–7 patterns. */
+/** Minimum candidate size. Excludes `Negate(x)`-sized expressions while
+ * admitting the common size-4–7 patterns. */
 export const CSE_MIN_SIZE = 4;
 
-/** Minimum benefit score, `(regionCount − 1) × size`, where `regionCount` is
- * the PER-REGION occurrence count surviving steps 3–6 of §5.2 — never the
- * global bucket total. */
+/** Minimum benefit score, `(regionCount − 1) × size`, using the occurrence
+ * count within one region rather than the global hash-bucket count. */
 export const CSE_MIN_SCORE = 8;
 
-/** Upper bound on the number of temporaries bound at one region (§6.2).
- * Beyond it the highest-scoring candidates are kept (ties broken by first
+/** Upper bound on the temporaries bound in one region. Beyond it the
+ * highest-scoring candidates are kept (ties broken by first
  * occurrence, so the choice is deterministic) and the rest emit inline. */
 export const CSE_MAX_BINDINGS_PER_REGION = 32;
 
-/** Deterministic verification budget, in compared nodes, for ONE structural
- * hash bucket (§5). A bucket that exhausts it is dropped whole: its
+/** Deterministic verification budget, in compared nodes, for one structural
+ * hash bucket. A bucket that exhausts it is dropped whole: its
  * occurrences emit inline unchanged — a lost optimization, never a
  * correctness change. */
 export const CSE_MAX_VERIFY_NODES_PER_BUCKET = 10_000;
 
 // ---------------------------------------------------------------------------
-// The lazy-operand inventory (§5.1(b))
+// Lazy-operand inventory
 // ---------------------------------------------------------------------------
 
 /**
@@ -71,7 +66,7 @@ export const CSE_MAX_VERIFY_NODES_PER_BUCKET = 10_000;
 export interface LazyOperandSite {
   /** Operand index (0-based) that opens a region. */
   readonly index: number;
-  /** `true` when the region never binds a temporary (Phase 1 exclusions). */
+  /** `true` when the region never binds a temporary. */
   readonly inert: boolean;
   /** Short provenance note, for diagnostics and drift tests. */
   readonly reason: string;
@@ -81,16 +76,14 @@ export interface LazyOperandSite {
  * A `LAZY_OPERANDS` entry: the shape-dependent set of operand positions whose
  * *emission* is conditional.
  *
- * Emitter-author contract (§5.1, §6.2): a construct with
- * conditionally-evaluated operand positions needs an entry here plus a
- * conditionality test. A missing entry is a soundness bug (a temp would be
- * hoisted out of an unevaluated arm); a spurious entry only costs
- * optimization.
+ * A construct with conditionally evaluated operands needs an entry here and a
+ * conditionality test. A missing entry could hoist a temporary out of an
+ * unevaluated arm; a spurious entry only loses an optimization.
  */
 export interface LazyOperandEntry {
   /** Human-readable statement of the laziness this entry records. */
   readonly note: string;
-  /** Regions opened by these positions never bind (Phase 1). */
+  /** Regions opened by these positions never bind. */
   readonly inert?: boolean;
   /** The conditionally-evaluated operand indices, given the operand count. */
   readonly operands: (nops: number) => number[];
@@ -103,9 +96,9 @@ const from = (first: number) => (nops: number) => {
 };
 
 /**
- * The declarative inventory of conditionally-evaluated operand positions
- * (§5.1(b)). Consumed by harvest (this module, to open static regions) and —
- * at a later stage — by emission, to push the matching region instances.
+ * The declarative inventory of conditionally evaluated operand positions.
+ * Harvest uses it to open static regions; emission uses it to push matching
+ * region instances.
  *
  * Chained relations are NOT in the table: `a < m < b` lowers to
  * `(a<m) && (m<b)` with no `And` node in the boxed tree, so the shape is
@@ -113,7 +106,7 @@ const from = (first: number) => (nops: number) => {
  * more than two operands).
  */
 export const LAZY_OPERANDS: Readonly<Record<string, LazyOperandEntry>> = {
-  // `Which(cond1, value1, cond2, value2, …)`: only the FIRST condition
+  // `Which(cond1, value1, cond2, value2, …)`: only the first condition
   // (operand 0) is unconditionally evaluated. Every value arm and every later
   // condition sits behind a ternary test.
   Which: {
@@ -122,16 +115,15 @@ export const LAZY_OPERANDS: Readonly<Record<string, LazyOperandEntry>> = {
   },
   // `If(cond, then, else)` — one condition, both arms lazy.
   If: { note: 'both value arms', operands: from(1) },
-  // `When(value, cond)` lowers to `(cond) ? (value) : NaN`: the VALUE is the
+  // `When(value, cond)` lowers to `(cond) ? (value) : NaN`: the value is the
   // conditional position; the single condition is eager.
   When: { note: 'the value arm', operands: () => [0] },
   And: { note: 'operands after the first (short circuit)', operands: from(1) },
   Or: { note: 'operands after the first (short circuit)', operands: from(1) },
   // Compiled coalescing evaluates the defaults lazily, left to right.
   Coalesce: { note: 'operands after the first', operands: from(1) },
-  // `Match` is fully CSE-inert in Phase 1 (§2): its guards and bodies are
-  // compiled from plan-constructed closure trees, not from the harvested
-  // operands, so the occurrence machinery cannot see them.
+  // `Match` is CSE-inert because its guards and bodies compile from
+  // plan-constructed closure trees that harvesting cannot inspect.
   Match: {
     note: 'every operand position; Match is fully inert in Phase 1',
     inert: true,
@@ -141,7 +133,7 @@ export const LAZY_OPERANDS: Readonly<Record<string, LazyOperandEntry>> = {
 
 /**
  * The operand positions of `expr` that open a region because their emission is
- * conditional (§5.1(b)). Empty for anything that is not a function
+ * conditional. Empty for anything that is not a function
  * application, or whose operator evaluates all operands eagerly.
  */
 export function lazyOperandRegions(
@@ -165,7 +157,7 @@ export function lazyOperandRegions(
   }
 
   // Chained relation: `a < m < b` lowers to `(a<m) && (m<b)`. Operand 1 is
-  // evaluated by the FIRST comparison, so only operands from index 2 on are
+  // evaluated by the first comparison, so only operands from index 2 on are
   // conditional. Conservative for the mixed-operator chains the parser
   // produces as a single relational node.
   if (isRelationalOperator(expr.operator) && expr.nops > 2) {
@@ -182,7 +174,7 @@ export function lazyOperandRegions(
 const NO_LAZY_SITES: readonly LazyOperandSite[] = [];
 
 // ---------------------------------------------------------------------------
-// Output data model (§4.1, §5, §6.1)
+// Output data model
 // ---------------------------------------------------------------------------
 
 export type CseRegionKind =
@@ -190,7 +182,7 @@ export type CseRegionKind =
   | 'root'
   /** The body of a `scoped:` binder (`Sum`, `Integrate`, `Comprehension`, …). */
   | 'binder-body'
-  /** A binder's clause/bound-variable operand — inert in Phase 1 (§2). */
+  /** A binder's clause or bound-variable operand; never binds a temporary. */
   | 'binder-clause'
   /** The body of a `Function` literal. */
   | 'lambda-body'
@@ -198,9 +190,9 @@ export type CseRegionKind =
   | 'lambda-params'
   /** A conditionally-evaluated operand (the {@link LAZY_OPERANDS} table). */
   | 'lazy-operand'
-  /** A `Block` statement list or an imperative `Loop` body — inert (§5.1(c)). */
+  /** A `Block` statement list or imperative `Loop` body; inert. */
   | 'statement-list'
-  /** One statement's value expression — bindable (§5.1(c)). */
+  /** One statement's value expression; bindable. */
   | 'statement-value'
   /** A `scoped: true` operator with no declared binding sites — inert. */
   | 'opaque-scope';
@@ -218,7 +210,7 @@ export interface CseRegionSite {
 }
 
 /**
- * A static region of the expression tree (§5.1). Regions form a tree;
+ * A static region of the expression tree. Regions form a tree;
  * candidates bind at a region's top, and no binding ever crosses a region
  * boundary — which is what makes name-keyed matching capture-sound and
  * selection laziness free.
@@ -227,7 +219,7 @@ export interface CseRegion {
   /** Creation-ordered identity; stable for a given expression. */
   readonly id: number;
   readonly kind: CseRegionKind;
-  /** `true` when this region never binds a temporary (Phase 1 exclusions). */
+  /** `true` when this region never binds a temporary. */
   readonly inert: boolean;
   readonly parent: CseRegion | undefined;
   readonly depth: number;
@@ -239,7 +231,7 @@ export interface CseRegion {
   readonly boundNames: ReadonlyArray<string>;
   /**
    * Every symbol name that is the target of an `Assign`/`Declare` anywhere in
-   * this region's subtree, **including all descendant regions** (§5.2 G3).
+   * this region's subtree, including all descendant regions.
    */
   readonly assignedNames: ReadonlySet<string>;
   /** Surviving candidates that bind at this region, best score first. */
@@ -247,7 +239,7 @@ export interface CseRegion {
   /**
    * Emission lookup: is THIS node object an occurrence of a candidate of THIS
    * region? The same node object may appear in several regions' maps — that
-   * is the point (§6.1): a shared node under a different region is not in
+   * is intentional: a shared node under a different region is not in
    * that region's candidate set, which resolves the DAG ambiguity.
    */
   readonly candidateByNode: ReadonlyMap<Expression, CseCandidate>;
@@ -256,7 +248,7 @@ export interface CseRegion {
 /** One *edge-occurrence* of a subtree: a path, never a bare node object. */
 export interface CseOccurrence {
   readonly node: Expression;
-  /** The innermost enclosing region (§5.2). */
+  /** The innermost enclosing region. */
   readonly region: CseRegion;
   /** DFS enter/exit stamps — `a` is strictly inside `b` iff
    * `b.enter < a.enter && a.exit < b.exit` (O(1) containment). */
@@ -313,7 +305,7 @@ export interface CseHarvest {
   readonly candidates: ReadonlyArray<CseCandidate>;
   /**
    * Every symbol name occurring anywhere in the tree — the collision
-   * inventory the caller merges into its naming context (§4.1). Mutable by
+   * inventory the caller merges into its naming context. Mutable by
    * design: the caller adds `_cse`/`_tv` tokens found in caller-supplied
    * source strings.
    */
@@ -321,7 +313,7 @@ export interface CseHarvest {
   readonly diagnostics: CseHarvestDiagnostics;
 }
 
-/** Caller-supplied inputs to the emission-purity gate (§5.2 G1b). Provenance
+/** Caller-supplied inputs to the emission-purity gate. Provenance
  * is the caller's job: the registered-target `compile()` entries know the
  * override key sets, the resolver closures do not. */
 export interface CseHarvestOptions {
@@ -331,21 +323,21 @@ export interface CseHarvestOptions {
   /** Is this symbol backed by a *string*-valued `vars` entry? (Non-string
    * `vars` are baked constants and are safe.) */
   readonly isStringVar?: (name: string) => boolean;
-  /** Is this symbol a `vars` key AT ALL (of any value kind)? A `vars` entry
-   * is the caller's external-input contract and WINS at emission over both
+  /** Is this symbol a `vars` key of any value kind? A `vars` entry
+   * is the caller's external-input contract and takes precedence over both
    * function-value routes (`isBoundOrMapped` in `BaseCompiler.compile`), so a
    * name that is a `vars` key is not the user function or built-in operator
    * it happens to be spelled like — the callback relaxations below must not
    * classify it on that premise. Broader than `isStringVar`: a non-string
-   * `vars` entry is a safe baked constant for the SOURCE-splicing gate, but
+   * `vars` entry is a safe baked constant for the source-splicing gate, but
    * it still overrides the name. */
   readonly isVarsKey?: (name: string) => boolean;
 
   /**
-   * Admit PURE user-defined function applications as candidates (Tycho item
-   * 120). Off by default for direct `harvestCse` callers, but set by BOTH
-   * compiler harvest routes — the ROOT harvest (`openCseSession`) and the
-   * NESTED harvest over an emitted `_fn_*` definition body, where a repeated
+   * Admit pure user-defined function applications as candidates.
+   * Off by default for direct `harvestCse` callers, but set by both
+   * compiler harvest routes: the root harvest (`openCseSession`) and nested
+   * harvests over an emitted `_fn_*` definition body, where a repeated
    * self-call (`R(i-1,x,y)` twice in one body) makes the compiled recursion
    * exponential. Purity is enforced by the record-time G1 gate
    * (`node.isPure`, the effects-model projection, which resolves through the
@@ -374,7 +366,7 @@ export interface CseHarvestOptions {
    * The harvester unions this set with the binder names it collects from the
    * harvested tree itself (a lambda whose parameter shadows a global is
    * visible there); the option covers the names bound OUTSIDE the tree — the
-   * parameters of the definition whose body is being harvested (§5.4).
+   * parameters of the definition whose body is being harvested.
    */
   readonly shadowedNames?: ReadonlySet<string>;
 
@@ -387,7 +379,7 @@ export interface CseHarvestOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Emission-facing lookups (§6.1)
+// Emission-facing lookups
 // ---------------------------------------------------------------------------
 
 /**
@@ -451,7 +443,7 @@ type HashBucket = {
 };
 
 /**
- * Harvest the CSE regions, occurrences and candidates of `root` (§5).
+ * Harvest the CSE regions, occurrences, and candidates of `root`.
  *
  * One edge-DFS: a node object reached through two parent positions is visited
  * twice and yields two occurrences, which is what makes DAG-shaped trees safe.
@@ -475,7 +467,7 @@ class Harvester {
   private readonly isVarsKey: (name: string) => boolean;
   private readonly admitPureUserFunctions: boolean;
   /** Names no admission decision may resolve globally — see
-   * `CseHarvestOptions.shadowedNames`. Filled once, in a prepass, BEFORE any
+   * `CseHarvestOptions.shadowedNames`. Filled once, in a prepass, before any
    * eligibility check runs: the admission memos are name-keyed, so the set
    * must be fixed for the whole harvest. */
   private readonly shadowedNames: Set<string>;
@@ -606,9 +598,9 @@ class Harvester {
     const region: MutableRegion = {
       id: this.regions.length,
       kind,
-      // An inert parent cannot host a bindable child by accident: inertness of
-      // a STATEMENT LIST does not propagate (§5.1(c) — inertness applies to
-      // the list, not to its leaves), so it is set per site, not inherited.
+      // An inert parent can have a bindable child: statement-list inertness
+      // applies to the list, not its leaves, so it is set per site rather than
+      // inherited.
       inert,
       parent,
       depth: parent === undefined ? 0 : parent.depth + 1,
@@ -662,8 +654,8 @@ class Harvester {
 
   /**
    * @param asStatement the node sits in a statement position of a `Block` or
-   * imperative `Loop` body: its VALUE expressions become bindable child
-   * regions, but the statement list itself never binds (§5.1(c)).
+   * imperative `Loop` body: its value expressions become bindable child
+   * regions, but the statement list itself never binds.
    */
   private walk(
     node: Expression,
@@ -724,8 +716,8 @@ class Harvester {
    * `CseHarvestOptions.admitPureUserFunctions`). Exempt from the size/score
    * heuristics: a call's runtime cost is unrelated to its syntactic size —
    * `F(n)` is 2 nodes, and under recursion a repeated call is an exponential
-   * blowup (item 120) — so a twice-occurring pure call is always worth
-   * binding. Purity itself is the caller's `node.isPure` check (G1).
+   * expansion, so a twice-occurring pure call is always worth binding. Purity
+   * itself is the caller's `node.isPure` check.
    */
   private isAdmittedUserFnApp(node: Expression): boolean {
     return (
@@ -737,7 +729,7 @@ class Harvester {
 
   /** Record `Assign`/`Declare` targets into every region on the stack: a
    * candidate of region R is dropped when the name is assigned anywhere in
-   * R's subtree, descendant regions included (§5.2 G3).
+   * R's subtree, including descendant regions.
    *
    * A DESTRUCTURING target (`Declare(Tuple(a, b), …)`) writes every leaf
    * symbol of the pattern, so the pattern is walked rather than tested for
@@ -777,7 +769,7 @@ class Harvester {
   }
 
   /**
-   * Statement-position decomposition (§5.1(c)). Returns `true` when the node
+   * Statement-position decomposition. Returns `true` when the node
    * was consumed here.
    *
    * `region` is the enclosing (inert) statement-list region; each of the
@@ -951,15 +943,15 @@ class Harvester {
   }
 
   /**
-   * Per-operand region plan for a generic node: binder sites first (§5.1(a)),
-   * then the lazy-operand inventory (§5.1(b)), which may add a region to an
+   * Per-operand region plan for a generic node: binder sites first, then the
+   * lazy-operand inventory, which may add a region to an
    * operand a binder rule already claimed.
    *
    * The binder body/clause split is derived from the definition's `scoped`
    * binding-site SELECTOR, never from an operator-name list: the operand
    * indices the selector points at (and everything after the first of them)
    * are clause/bound operands — `Sum`/`Product`/comprehensions put the body at
-   * operand 0 with `Limits`/clauses after — and are inert in Phase 1 (§2).
+   * operand 0 with `Limits` or clauses after, and never bind temporaries.
    * A `scoped: true` operator with no selector declares a scope whose bound
    * variables are unknown here, so all of its operands are inert.
    */
@@ -977,9 +969,8 @@ class Harvester {
       // `Product` and the `Function` literal. Every other binder body
       // (`Integrate`, the comprehensions, …) is emitted under a target whose
       // `boundVars` the enclosing instance does not describe, so the
-      // blind-instance guard in `compileWithCse` degrades it to the pre-CSE
-      // emission — sound, at the cost of a wasted harvest. Wiring the rest is
-      // v2 (design §11).
+      // blind-instance guard in `compileWithCse` emits it without CSE. This is
+      // sound but wastes the harvested candidate.
       const { firstClause, boundNames } = binderSplit(def, node);
       for (let i = 0; i < node.nops; i++)
         plans[i] =
@@ -1034,18 +1025,18 @@ class Harvester {
   }
 
   /**
-   * G1b — emission purity (§5.2). `isPure` describes the boxed operator, not
-   * the emitted code. A subtree is eligible when NOTHING in it is:
+   * Emission purity. `isPure` describes the boxed operator, not the emitted
+   * code. A subtree is eligible when nothing in it is:
    *
    * - a node resolving through a caller-supplied `functions`/`operators`
    *   entry, a caller-supplied per-operator `compile` handler on its
    *   definition, or a *string*-valued `vars` symbol (all three splice live
-   *   source); a BUILT-IN definition's `compile` handler is exempt — it is
+   *   source); a built-in definition's `compile` handler is exempt because it is
    *   engine-authored emission, the same trust class as the built-in table
    *   mappings;
    * - a user-defined function application — unless the harvest opts in via
-   *   `admitPureUserFunctions` (both compiler harvest routes, item 120),
-   *   in which case the resolved callee's BODY is validated transitively
+   *   `admitPureUserFunctions`, in which case the resolved callee's body is
+   *   validated transitively
    *   (`isAdmissibleUserFnCallee`): the same emission-purity gates plus a
    *   fresh per-level semantic-purity check, because the application node's
    *   own `isPure` can be install-time stale one level removed
@@ -1082,7 +1073,7 @@ class Harvester {
     if (node.operator === 'Error') return false;
 
     if (this.isOverriddenOperator(node.operator)) return false;
-    // A CALLER-supplied per-operator `compile` handler is the definition-level
+    // A caller-supplied per-operator `compile` handler is the definition-level
     // twin of a `functions` entry: `BaseCompiler.compileExpr` consults it
     // before any built-in mapping and splices whatever source it returns, while
     // the definition itself defaults to `pure: true`. A built-in definition's
@@ -1090,11 +1081,11 @@ class Harvester {
     if (this.hasCallerCompileHandler(node)) return false;
     // A user-defined function application is admissible only where the
     // harvest opts in (`admitPureUserFunctions` — both compiler harvest
-    // routes, Tycho item 120) AND its resolved callee's body validates
+    // routes) and its resolved callee's body validates
     // transitively (`isAdmissibleUserFnCallee` — the call site alone proves
-    // nothing about what the emitted body splices or draws). Checked BEFORE
+    // nothing about what the emitted body splices or draws). Check this before
     // the fixed-built-in gate below: the declare-then-assign route stores the
-    // lambda as a VALUE definition, so its application nodes carry no
+    // lambda as a value definition, so its application nodes carry no
     // *operator* definition — the gate below would reject them before this
     // clause ever admitted one.
     if (this.isUserFunctionApplication(node)) {
@@ -1114,36 +1105,17 @@ class Harvester {
   }
 
   /**
-   * Does this head carry a **caller-supplied** per-operator `compile` handler
-   * (§5.2 G1b)?
+   * Does this head carry a caller-supplied per-operator `compile` handler?
    *
-   * `BaseCompiler.compileExpr` consults `def.operator.compile` BEFORE any
-   * built-in mapping and emits whatever source it returns, so the handler is a
-   * caller-controlled splice exactly like a `functions` entry — and an operator
-   * definition defaults to `pure: true`, so G1 does not catch it. Both channels
-   * are checked: the node's own definition, and (for a head whose node did not
-   * bind) the engine lookup the compiler itself performs.
+   * `BaseCompiler.compileExpr` emits the source returned by this handler, so a
+   * caller-supplied handler is a live-source splice even when the definition
+   * defaults to `pure: true`. Engine-authored handlers are safe under the same
+   * purity contract as built-in table mappings. Object identity against the
+   * system binding distinguishes built-ins from shadowing definitions;
+   * `_customLibraryOperators` excludes caller libraries installed in the
+   * system scope.
    *
-   * **Built-in exemption (2026-08-01).** The clause exists because
-   * `ce.declare(name, { compile })` is the same caller-supplied splice channel
-   * as a `functions` entry: the emitted code's purity is unknowable. A
-   * BUILT-IN definition's handler is engine-authored, deterministic,
-   * effect-free emission — exactly like the built-in TABLE mappings (`Sin`,
-   * `Add`), which were never under-mapped nor ineligible. Hoisting a pure
-   * subtree across a built-in table emission is already sanctioned; a built-in
-   * definition handler is the same trust class. G1 (`node.isPure`)
-   * independently excludes impure operators, so the exemption rides on the
-   * same purity guarantee the table path always relied on. Provenance test:
-   * the definition carrying the handler IS the system-scope binding for that
-   * name (object identity — the sanctioned test, mirroring
-   * `engine-declarations.ts`). A user `ce.declare(name, { compile })` in any
-   * non-system scope, and a user definition SHADOWING a built-in name (not
-   * identity-equal to the system binding), both stay ineligible. So is a
-   * definition installed by a CALLER-supplied library (constructor `libraries`
-   * option): those land in the system scope as well, and are told apart by the
-   * provenance recorded at bootstrap (`engine._customLibraryOperators`).
-   *
-   * Memoized per operator NAME, like `isUserFunctionApplication`: the memo
+   * Memoized per operator name, like `isUserFunctionApplication`: the memo
    * lives on the `Harvester` instance (one per harvest) and engine scope state
    * is constant for the duration of one harvest, so name-keying is sound even
    * though the classification now consults the scope chain.
@@ -1155,21 +1127,15 @@ class Harvester {
     const cached = this.compileHandlerMemo.get(id);
     if (cached !== undefined) return cached;
 
-    // A CALLER-supplied library passed to the constructor's `libraries` option
-    // is installed in the SYSTEM scope too (bootstrap runs between
-    // `pushScope('system')` and `pushScope('global')`), so scope identity alone
-    // would misclassify a caller-authored handler as engine-authored. The
-    // provenance recorded at bootstrap overrides the scope test: no system
-    // binding is offered for such a name, so both channels below classify it as
-    // a caller handler. The set is fixed once the engine is constructed, so the
-    // memo stays valid. (Shared with the built-in-callback predicates, which
-    // apply the same provenance test — `builtin-callback.ts`.)
+    // Caller libraries also install definitions in the system scope, so scope
+    // identity alone is insufficient. `systemScopeBinding` applies the shared
+    // custom-library provenance check.
     const systemDef = systemScopeBinding(this.engine, id);
 
     let result = false;
     const ownDef = node.operatorDefinition;
     if (typeof ownDef?.compile === 'function') {
-      // Exempt only when the definition the handler sits on IS the built-in.
+      // Exempt only when the handler belongs to the built-in definition.
       result = !(isOperatorDef(systemDef) && systemDef.operator === ownDef);
     }
     if (!result) {
@@ -1185,37 +1151,35 @@ class Harvester {
   }
 
   /**
-   * Is `id` safe to ADMIT as a merged call target? The call site alone
-   * proves nothing about what the emitted `_fn_id` BODY does, so the
-   * resolved literal body is validated transitively (review findings on
-   * item 120, both confirmed by reproduction):
+   * Is `id` safe to merge as a call target? The call site does not describe
+   * what the emitted `_fn_id` body does, so validate the resolved literal body
+   * transitively:
    *
-   * - **Emission purity**: the body is walked through the same
+   * - Emission purity: the body passes the same
    *   `isEligible` gates as the harvested tree — a string-`vars` symbol,
    *   an overridden operator, or a caller compile handler INSIDE the body
-   *   splices live source into `_fn_id`, and merging two calls would merge
+   *   splices live source into `_fn_id`, and merging calls would merge
    *   two live evaluations (`f(t) := u+t` with `vars: {u: 'next()'}`).
-   * - **Fresh semantic purity**: `body.isPure` is re-derived per level —
-   *   the application node's own `isPure` consults the caller's INSTALLED
+   * - Current semantic purity: `body.isPure` is derived at each level. The
+   *   application node's own `isPure` consults the caller's installed
    *   signature, which goes stale one level removed (`h` calling a `k`
    *   later reassigned to draw: the `k`-application is impure, but `h`'s
    *   installed signature still says pure). Nested user-fn applications in
    *   the body recurse back through this gate, so each level's body is
-   *   checked against CURRENT bindings.
+   *   checked against current bindings.
    *
-   * Recursion: a re-entrant edge to a name already being validated is
-   * NEUTRAL (report admissible and let the enclosing walk finish — the
-   * plain self-recursive case, item 120's flagship). A verdict that leaned
+   * A recursive edge to a name already being validated is neutral: allow the
+   * enclosing walk to finish. A verdict that depends
    * on a neutral edge to a partner still in flight (mutual recursion) is
-   * PROVISIONAL and not memoized, so a later standalone query recomputes it
+   * provisional and is not memoized, so a later standalone query recomputes it
    * against the partner's final verdict; the outermost verdict of a cycle
    * is final and memoizes.
    */
   private isAdmissibleUserFnCallee(id: string): boolean {
     // A name bound by an enclosing binder/parameter resolves to that binding
-    // at run time, but every lookup below is engine-GLOBAL: validating the
+    // at run time, but every lookup below is engine-global: validating the
     // same-named global would answer a question about the wrong callee. Fail
-    // closed (§5.2). The set is fixed for the whole harvest, so the verdict is
+    // closed. The set is fixed for the whole harvest, so the verdict is
     // still name-memoizable.
     if (this.shadowedNames.has(id)) return false;
     const cached = this.calleeVerdictMemo.get(id);
@@ -1250,7 +1214,7 @@ class Harvester {
   }
 
   /**
-   * The emission-purity scan over a callee's BODY — the same gates as
+   * The emission-purity scan over a callee's body: the same gates as
    * `computeEligible` (string-`vars` symbols, overridden operators, caller
    * compile handlers, unbound applications, opaque callable operands, and
    * recursive validation of nested user-function callees), but WITHOUT
@@ -1372,7 +1336,7 @@ class Harvester {
     // transitive gate applied to a call site (`isAdmissibleUserFnCallee` —
     // fresh per-level `body.isPure` plus the emission-purity scan) answers
     // "what does `f` do?" for `Map(f, xs)` too, and G1 (`node.isPure`) still
-    // gates the whole application. Tested BEFORE the type gate below: a
+    // gates the whole application. Test before the type gate below: a
     // DECLARED callback (`CountIf(xs, p)` with `p: (number) -> boolean`)
     // carries a function-matching type on the operand node itself, which
     // would otherwise reject it before its literal was ever consulted. A
@@ -1380,7 +1344,7 @@ class Harvester {
     // would validate, so it is refused; likewise a `vars` KEY, which wins at
     // emission over both function-value routes, so the literal this would
     // validate is not what the artifact calls. A symbol resolving to a
-    // BUILT-IN operator definition has no literal and is handled by the
+    // Built-in operator definitions have no literal and are handled by the
     // clause below.
     if (
       this.admitPureUserFunctions &&
@@ -1391,7 +1355,7 @@ class Harvester {
     )
       return false;
 
-    // A callback naming a PURE BUILT-IN operator (`Map(Sin, xs)`,
+    // A callback naming a pure built-in operator (`Map(Sin, xs)`,
     // `CountIf(xs, IsPrime)`) is likewise no longer invisible: the compiler
     // eta-expands it into `(p) ↦ Sin(p)` and emits it as a shared local
     // (`BaseCompiler.ensureBuiltinCallbackEmitted`), so what it does is
@@ -1457,7 +1421,7 @@ class Harvester {
   }
 
   // -------------------------------------------------------------------------
-  // Candidate selection (§5.2 steps 3–7, §6.2 cap)
+  // Candidate selection
   // -------------------------------------------------------------------------
 
   private selectCandidates(): CseCandidate[] {
@@ -1489,8 +1453,8 @@ class Harvester {
         // pass exists to find: its cost is proportional to the win, and
         // charging it disabled CSE on exactly the high-value corpus shapes
         // (a size-s candidate with k occurrences charged (k−1)·s, crossing
-        // the budget near size×count ≈ 10 000 — Tycho's 507-node ×128
-        // flagship yielded zero candidates).
+        // the budget near size×count ≈ 10,000 and can suppress the most
+        // valuable candidates).
         bucket.spent += Math.min(cls.size, occ.size);
         if (bucket.spent > this.maxVerifyNodesPerBucket) {
           bucket.exhausted = true;
@@ -1669,7 +1633,7 @@ type OperandPlan = {
  * The selector reports each bound variable as an operand PATH; the smallest
  * `path[0]` is the first clause operand. Everything before it is body
  * (`Sum(body, Limits(i, …))`, `D(f, x, y)`, `NDSolveFunction(…, Limits(…))`),
- * everything from it on is clause structure — inert in Phase 1. No selector,
+ * everything from it on is inert clause structure. No selector,
  * or a selector that resolves no site, means the bound variables are unknown
  * here: treat the whole node conservatively (`firstClause === 0`).
  */

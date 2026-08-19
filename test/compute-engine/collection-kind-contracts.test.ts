@@ -1,23 +1,18 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
 /**
- * Two contracts a collection owes the kind it claims to be. Both were being
- * broken, and both were found auditing `doc/82-reference-collections.md`
- * against the engine (2026-08-16); the documented answers below are the ones
- * that reference already gave.
+ * Two contracts a collection owes the kind it claims to be.
  *
  * 1. A collection LITERAL applies the operand-list rules to its elements: a
  *    `Sequence` operand is spliced ("these operands, inlined here") and a
  *    `Nothing` operand is erased. `Add` did this and `List`/`Set`/`Tuple` did
- *    not, so `["List", 1, ["Sequence", 2, 3], 4]` was a 3-element list whose
- *    middle element was a `tuple<…>`.
+ *    not.
  *
  * 2. A SET-kind collection holds distinct elements — including when it is
  *    produced lazily. `Join` and `Append` adopt the set kind from a set
  *    operand but wrap their operands instead of materializing, so their
- *    `count`/`each`/`at` reported the concatenation, duplicates and all,
- *    while forcing the same node through materialization answered the
- *    correctly deduplicated set.
+ *    `count`/`each`/`at` must report the same deduplicated elements as
+ *    materialization.
  */
 
 const ce = new ComputeEngine();

@@ -1261,7 +1261,7 @@ export interface IComputeEngine {
   ): void;
   /** @internal */
   _popShadowedParameters(): void;
-  /** True if `name` is an active shadowed parameter (see above). @internal */
+  /** True while `_pushShadowedParameters` has registered `name`. @internal */
   _isShadowedParameter(name: string): boolean;
   /** The declared type of an active shadowed parameter, if any. @internal */
   _shadowedParameterType(name: string): Type | undefined;
@@ -1509,7 +1509,9 @@ export interface IComputeEngine {
   _reset(): void;
 
   /** @internal */
-  _listenToConfigurationChange(tracker: ConfigurationChangeListener): () => void;
+  _listenToConfigurationChange(
+    tracker: ConfigurationChangeListener
+  ): () => void;
 
   /**
    * Introspect a registered operator head.

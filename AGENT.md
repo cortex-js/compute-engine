@@ -25,6 +25,13 @@ Guidance for coding agents working in this repository. Derived from `CLAUDE.md`.
 - `npm run lint` - Run ESLint with auto-fix
 - `npm run doc` - Generate documentation
 
+### Code Comments
+
+- Follow [`docs/COMMENTING-GUIDELINES.md`](./docs/COMMENTING-GUIDELINES.md).
+- Explain current intent and invariants locally; do not use design-section
+  coordinates, dated rulings, or review history as the explanation.
+- Do not leave commented-out code or bare `TODO`/`FIXME` markers.
+
 ### Test File Patterns
 
 - Tests live under `/test/`

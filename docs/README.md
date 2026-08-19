@@ -22,6 +22,7 @@ read the repository [`README.md`](../README.md).
 | Review playground sample outcomes | [`PLAYGROUND.md`](./PLAYGROUND.md) |
 | Validate arguments in custom function definitions | [`FUNCTION-VALIDATION.md`](./FUNCTION-VALIDATION.md) |
 | Review internal architecture boundaries | [`architecture/README.md`](./architecture/README.md) |
+| Write or review code comments | [`COMMENTING-GUIDELINES.md`](./COMMENTING-GUIDELINES.md) |
 
 ## Free Functions
 

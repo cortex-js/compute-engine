@@ -1246,7 +1246,8 @@ export function acceleratedInfiniteSum(
   // One schedule step contributes one series term — or, on the symmetric
   // doubly-infinite walk, the pair `f(j) + f(−j)` (`f(0)` alone at j = 0).
   // `absAccum` tracks the ABSOLUTE series alongside; the doubly-infinite
-  // acceptance requires it to settle (see below).
+  // acceptance requires it to settle in the convergence checks after the
+  // main loop.
   let absAccum = 0;
   const termAt = doubly
     ? (j: number): number => {

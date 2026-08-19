@@ -534,10 +534,10 @@ export class Parser {
 
   /**
    * The `Equal` node most recently built from a BARE `=` (never from `==`).
-   * Used to catch `a = b = 5`: the outer `=` assigns and the inner compares,
-   * so the statement silently means "assign a boolean" to anyone arriving from
-   * C or Python. Identity comparison against the assignment's right operand is
-   * exact — `wrap()` returns a fresh object per node.
+   * Detects `a = b = 5`: the outer `=` assigns while the inner one compares,
+   * an easily missed boolean assignment. Identity comparison against the
+   * assignment's right operand is exact because `wrap()` returns a fresh object
+   * for each node.
    */
   private lastBareEqualNode: MathJsonExpression | null = null;
 
@@ -716,8 +716,7 @@ export class Parser {
   //
   // ─── MathJSON node construction ───────────────────────────────────────────
   //
-  // Mirrors the old `exprOrigin`: every produced node carries
-  // `sourceOffsets: [start, end]` (absolute).
+  // Every produced node carries absolute `sourceOffsets: [start, end]`.
   //
 
   private wrap(
@@ -7360,16 +7359,15 @@ export class Parser {
     const parts = token.parts ?? [''];
 
     // Extended strings (`#"…"#`) contain no escape sequences and no
-    // interpolation: emit the raw cooked text verbatim (no `escapeJsonString`,
-    // so embedded `"` and `\` are preserved), matching the old
-    // `parseExtendedString` path.
+    // interpolation. Emit the cooked text directly so embedded `"` and `\`
+    // remain unchanged.
     if (token.text[0] === '#') {
       const raw = parts.map((p) => (typeof p === 'string' ? p : '')).join('');
       return this.wrap({ str: raw }, token.start, token.end);
     }
 
-    // Fold cooked segments and parsed interpolations into a `values` array of
-    // strings and expressions (mirrors the old `string` rule).
+    // Fold cooked segments and parsed interpolations into strings and
+    // expressions.
     const values: (string | MathJsonExpression)[] = [];
     let previous: string | undefined;
 
@@ -7904,10 +7902,8 @@ export class Parser {
   //
   // ─── Pragmas ──────────────────────────────────────────────────────────────
   //
-  // Ported from the old `parse-epsil.ts` pragma handlers, preserving the
-  // Phase-0 fixes: `#date` uses `getDate()`; `#warning`/`#error` do not write
-  // to the console; `#warning` evaluates to its message string; `#error`
-  // throws a `FatalParsingError`.
+  // Pragmas evaluate without writing to the console. `#warning` produces its
+  // message as a string value; `#error` throws a `FatalParsingError`.
   //
 
   private parsePragma(): MathJsonExpression {
@@ -7987,8 +7983,7 @@ export class Parser {
       const message = mapArgs<string>(args, (x) => expressionToString(x)).join(
         ' '
       );
-      // `#warning` no longer writes to the console (Phase 0); it evaluates to
-      // its interpolated message as a string value.
+      // Return the interpolated message as a string value.
       return { str: message };
     }
 
@@ -8079,12 +8074,8 @@ export class Parser {
 //
 //   • A plain decimal integer keeps every digit (no `parseFloat`), so a
 //     40-digit literal survives with full precision.
-//   • A decimal with a fractional part or exponent, and hex/binary literals,
-//     are normalized through the (ported) numeric-conversion arithmetic — this
-//     is what today's tests assert (e.g. `1.2000 → 1.2`, `0xdead.beef → …`).
-//
-// The conversion arithmetic is ported verbatim from the old combinator
-// library's numeric parsers, so the produced values are identical.
+//   • Decimal fractions and exponents, and hex/binary literals, are normalized
+//     by the numeric-conversion arithmetic (for example, `1.2000 → 1.2`).
 //
 
 /** Whether `expr` is a bare number literal node (`{num}`). */
@@ -8550,8 +8541,7 @@ function mentionsWildcard(node: MathJsonExpression): boolean {
   return false;
 }
 
-/** Render an argument expression as a plain string (for pragma messages).
- * Ported from the old `expressionToString`. */
+/** Render an argument expression as plain text for pragma messages. */
 function expressionToString(
   expr: MathJsonExpression | undefined | null
 ): string {

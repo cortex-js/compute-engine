@@ -2697,24 +2697,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // \expoentialE^{\operatorname{LogGamma}(x)} \\)
     // `["Multiply", ["GammaSgn", "x"], ["Exp", ["LogGamma", "x"]]]`.
 
-    // This function is called `gammasgn` in SciPy.
-
-    // **Reference**
-
-    // - NIST: https://dlmf.nist.gov/5.2#E1
-
-    // {% enddef %}
-    //     GammaSgn: {
-    //   description: 'The sign of the gamma function: -1 or +1',
-    //   complexity: 7900,
-    //   signature: {
-    //     domain: ['FunctionOf', 'Numbers', ['Range', -1, 1]],
-    //     evaluate: (ce, ops) => {
-    //     },
-    //   },
-    //   // @todo
-    // },
-
     Sqrt: {
       description: 'Square Root',
       keywords: ['square root', 'radical'],

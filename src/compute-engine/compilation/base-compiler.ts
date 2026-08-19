@@ -1992,7 +1992,11 @@ export class BaseCompiler {
     // its literal exponent is elementized into a temp, so `isNumber(exp)`
     // below could never see it. `notePromoted` is not re-fired here — the
     // node-level decision already ran it.
-    for (let i = BaseCompiler._broadcastRadicalVerdict.length - 1; i >= 0; i--) {
+    for (
+      let i = BaseCompiler._broadcastRadicalVerdict.length - 1;
+      i >= 0;
+      i--
+    ) {
       const frame = BaseCompiler._broadcastRadicalVerdict[i];
       if (
         frame.head === head &&
@@ -5113,8 +5117,7 @@ export class BaseCompiler {
             h,
             guardArgs,
             target,
-            () =>
-              BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+            () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
             BaseCompiler.realOnlyResultKind(h, args)
           );
           if (guarded !== undefined) return guarded;
@@ -5592,7 +5595,10 @@ export class BaseCompiler {
         if (isProvablyStringOperand(a)) return false;
         if (a.isCollection) return true;
         if (isSymbol(a))
-          return a.type.matches('list<any>') || a.type.matches('indexed_collection<any>');
+          return (
+            a.type.matches('list<any>') ||
+            a.type.matches('indexed_collection<any>')
+          );
         if (isFunction(a)) {
           const d = engine.lookupDefinition(a.operator);
           // A USER function's body is compiled as scalar code; only a built-in
@@ -5616,7 +5622,8 @@ export class BaseCompiler {
           (a) =>
             !compilesToArray(a) &&
             !isProvablyStringOperand(a) &&
-            (a.type.matches('collection<any>') || isBoundPossiblyCollectionTyped(a))
+            (a.type.matches('collection<any>') ||
+              isBoundPossiblyCollectionTyped(a))
         )
       )
         return null;
@@ -9336,7 +9343,10 @@ export class BaseCompiler {
    * is what the callers want (they fall back to expansion / the interpreter).
    */
   static assertScalarBigOpBody(kind: string, body: Expression): void {
-    if (body.type.matches('list<any>') || body.type.matches('indexed_collection<any>'))
+    if (
+      body.type.matches('list<any>') ||
+      body.type.matches('indexed_collection<any>')
+    )
       throw new Error(
         `${kind}: a collection-valued body does not compile — distribute the ` +
           `element access through the ${kind} (At(${kind}(…), k) → ` +
@@ -12494,7 +12504,8 @@ export class BaseCompiler {
    *   drops the marker and wins, matching the interpreter);
    * - the `ProtocolMember` operator (`(protocol, member, receiver, …args)`);
    * - the `ProtocolProperty` operator — 3 operands GET; 4 operands is a
-   *   property STORE and is NOT a dispatchable call (see below);
+   *   property store and is not a dispatchable call; {@link protocolCallParts}
+   *   declines it;
    * - a bare `Field` read that the ordinary field routes already declined
    *   (this runs in the `!fn` branch, AFTER `Field`'s own `compile` handler
    *   declined). The bare-`Field` form is STATIC-tier only: an undecided

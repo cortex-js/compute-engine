@@ -46,10 +46,6 @@ import { getRuleIndex, candidateRules } from './rule-index.js';
  * condition result" warning (see `applyRule`). */
 const _warnedNonBooleanCondition = new WeakSet<RuleConditionFunction>();
 
-// @todo:
-// export function fixPoint(rule: Rule);
-// export function chain(rules: RuleSet);
-
 // Conditions:
 // :boolean       - a boolean value, True or False
 // :string        - a string of characters
@@ -1182,8 +1178,9 @@ export function applyRule(
 
   //@note: '.subs()' acts like an expr. 'clone' here (in case of an empty substitution)
   // An exception thrown by a `replace` *function* is treated exactly like a
-  // condition exception (see above): log it and skip this one rule, rather than
-  // aborting the whole `replace()` pass. Deadline cancellations still propagate.
+  // condition exception handled by `matchRule`: log it and skip this rule
+  // rather than aborting the `replace()` pass. Deadline cancellations still
+  // propagate.
   let result: Expression | RuleStep | null | undefined;
   try {
     result =

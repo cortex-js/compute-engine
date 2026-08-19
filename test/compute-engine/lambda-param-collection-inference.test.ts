@@ -663,9 +663,8 @@ describe('callee defined after caller', () => {
 });
 
 //
-// A callee forward-DECLARED with the bare `function` wildcard
-// (`ce.declare('clean', 'function')` — the documented forward-declaration
-// form, `doc/06-guide-augmenting.md`).
+// A callee forward-declared with the bare `function` wildcard
+// (`ce.declare('clean', 'function')`).
 //
 // The wildcard is a widening, not a contract: it says only "this name is
 // callable". It therefore installs a function-typed VALUE definition whose

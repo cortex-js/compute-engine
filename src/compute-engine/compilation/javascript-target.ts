@@ -719,17 +719,14 @@ const JS_ORDERING_OPERATORS = {
  * The raw infix path in `BaseCompiler` is silently wrong on an array. JS
  * stringifies it for a comparison — `0 < [1, 0, 1]` compares against
  * `"1,0,1"` and yields the scalar `false` — and an array is TRUTHY, so
- * `m1 && m2` returns a whole operand and `!m` returns `false`. The
- * interpreter broadcasts element-wise in all of these, so each was a wrong
- * answer behind a `success: true`. The base compiler therefore declines the
- * infix path for these heads when an operand is collection-TYPED
- * (`.isCollection` is false for a computed `list<real>` such as `|L - k|`,
- * which is why this went unnoticed) and dispatches here.
+ * `m1 && m2` returns a whole operand and `!m` returns `false`. The interpreter
+ * broadcasts these operators element-wise. The base compiler therefore
+ * declines the infix path when an operand has a collection type and dispatches
+ * here.
  *
- * This used to fail closed (D6) for every such operand. It now emits the
- * RUNTIME dispatch `_SYS.bcast` over the head's scalar closure instead
- * (relaxed 2026-07-27, Tycho item 86): `bcast` applies the closure directly
- * when no argument turns out to be an array, recurses per POSITION otherwise
+ * This emits the runtime dispatch `_SYS.bcast` over the head's scalar closure:
+ * `bcast` applies the closure directly when no argument is an array, recurses
+ * per position otherwise
  * (so an empty or mismatched position never poisons a sibling), and projects a
  * length mismatch to NaN — the same substrate `tryCompileBroadcast` uses for
  * the provable-array case, which is what makes the two lowerings agree. The
@@ -993,8 +990,7 @@ function isIndexedCollectionOperand(e: Expression): boolean {
   // lattice, so it MATCHES `indexed_collection` — but it does not lower to a
   // JS array, and the generic lowerings would be wrong on it in ways that look
   // right: `Length` would emit `.length`, which counts UTF-16 code units, not
-  // characters. Excluded EXPLICITLY (it used to be excluded only as a side
-  // effect of `string` not matching `indexed_collection`), so string
+  // characters. Exclude it explicitly so string
   // operations fail closed here until the grapheme-aware lowerings exist.
   if (t.matches('string')) return false;
   // This is a SHAPE question — "does this lower to a JS array?" — so it is
@@ -1079,7 +1075,8 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
     return !isProvablyScalarApplication(
       e,
       new Set(),
-      (a) => !a.type.matches('collection<any>') && !isPossiblyCollectionTypedJS(a)
+      (a) =>
+        !a.type.matches('collection<any>') && !isPossiblyCollectionTypedJS(a)
     );
   }
   if (typeof t !== 'string' && t.kind === 'broadcastable') {
@@ -1110,10 +1107,12 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
           e,
           new Set(),
           (a) =>
-            !a.type.matches('collection<any>') && !isPossiblyCollectionTypedJS(a)
+            !a.type.matches('collection<any>') &&
+            !isPossiblyCollectionTypedJS(a)
         );
       return (e.ops ?? []).some(
-        (a) => a.type.matches('collection<any>') || isPossiblyCollectionTypedJS(a)
+        (a) =>
+          a.type.matches('collection<any>') || isPossiblyCollectionTypedJS(a)
       );
     }
     return true;
@@ -1905,7 +1904,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // or the strip is a no-op and the axis test misclassifies the domain.
     const eltT = collectionElementType(jsType(coll));
     const scalarIndex =
-      !isIndexedCollectionOperand(index) && !index.type.matches('collection<any>');
+      !isIndexedCollectionOperand(index) &&
+      !index.type.matches('collection<any>');
     const objectDomain =
       eltT !== undefined &&
       eltT !== 'unknown' &&
@@ -2605,23 +2605,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   IndexOf: (args, compile) => {
     const coll = elementsArg('IndexOf', args[0], compile);
     if (args[1] == null) throw new Error('IndexOf: missing value');
-    // TEXT is admitted on BOTH sides. The gates here used to close every text
-    // element and every text needle because the element test was a numeric
-    // tolerance comparison (`Math.abs(a - b) <= tol`, which is `NaN <= tol` for
-    // text, so a string needle was never found). That test is now the strict
-    // `===` emitted below, which is content equality with no tolerance — the
-    // interpreter's own `isSame` for a string or a character — and the
+    // Text is admitted on both sides. `_SYS.eqt` provides content equality
+    // with no numeric tolerance, matching the interpreter's own `isSame` for a
+    // string or character. The
     // interpreter's `BoxedString.contains`/`indexWhere` walk the same grapheme
     // clusters `_SYS.chars` produces. So `IndexOf(["a","b"], "b")` and
     // `IndexOf(Characters("abc"), "c")` compile and agree with interpretation.
-    // (`docs/plans/2026-08-16-string-phase1-character-type.md`, decision D13.)
-    //
     // The test is `_SYS.eqt`, not a bare `===`: it puts a text pair through the
     // interpreter's own ingress conditioning (NFC, then the lone-surrogate
     // replacement) before comparing, so a decomposed needle bound to a compiled
-    // parameter IS found in a haystack of precomposed literals — the same
-    // maintainer ruling (2026-08-16) that made the compiled string equality
-    // normalize both sides. Every non-text pair falls back to `===` unchanged.
+    // parameter is found in a haystack of precomposed literals. Every non-text
+    // pair falls back to `===` unchanged.
     if (isProvablyStringOperand(args[0])) {
       assertComparableAggregate('IndexOf', [args[1]]);
       return `((_v) => (${coll}).findIndex((_x) => _SYS.eqt(_x, _v)) + 1)(${compile(
@@ -3605,9 +3599,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Range: (args, compile) => {
     if (args.length === 0) return '[]';
-    // A non-finite bound never materializes to an array — historically this
-    // emitted `Array.from({length: Infinity})`, which compiles cleanly and
-    // throws a RangeError at run time. An infinite range compiles only as a
+    // A non-finite bound never materializes to an array. An infinite range
+    // compiles only as a
     // lazy stream under a bounding consumer (`Take`/`TakeWhile`, via
     // `emitLazyStream`, which never routes through this handler); reached
     // eagerly, it fails closed at compile time so the caller falls back to
@@ -4412,12 +4405,9 @@ function toRI(c: Complex): { re: number; im: number } {
  *   `complexSqrtLiteral` below.
  * - A `Power`/`Root` on the COMPLEX branch of a negative base — the exponent's
  *   reduced-rational denominator is even (`(−2)^0.3`), or the root degree is
- *   even (`Root(−8, 4)`) — is typed `finite_complex` as of the 2026-07-30
- *   ruling, so it folds to the principal complex value (`complexPowLiteral`).
- *   It previously folded to `NaN` on the (then-true) grounds that the type was
- *   the coarser `finite_number`; once the type narrowed, that fold became a
- *   regression — the parent emits `{re, im}` arithmetic and read `.re`/`.im`
- *   off a `NaN` *number*, yielding `{re: NaN, im: undefined}`.
+ *   even (`Root(−8, 4)`) — is typed `finite_complex`, so it folds to the
+ *   principal complex value (`complexPowLiteral`). Returning a numeric `NaN`
+ *   would violate the parent expression's `{re, im}` representation.
  * - A `Power`/`Root` on the REAL branch of a negative base — an ODD
  *   reduced-rational denominator or root degree, where a real principal root
  *   exists (`(−8)^(2/3) = 4`, `Root(−8, 3) = −2`) — stays `finite_number` and
@@ -5075,11 +5065,8 @@ function bcastWith(
   for (const a of args) {
     if (!Array.isArray(a)) continue;
     if (n < 0) n = a.length;
-    // Length mismatch: the interpreter answers `incompatible-dimensions`
-    // (2026-07-24 ruling — no truncation, no recycling), which projects onto a
-    // real target as NaN, exactly as `matmul` projects a dimension mismatch.
-    // Truncating to the shortest operand is what used to make compiled
-    // `Less([1,2,3],[2,2])` answer `[true,false]` where interpretation errors.
+    // A length mismatch projects the interpreter's `incompatible-dimensions`
+    // result to NaN. Do not truncate or recycle operands.
     else if (a.length !== n) return NaN;
   }
   if (n < 0) return f(...args);
@@ -7524,12 +7511,10 @@ function compileToTarget(
   // The discipline this compilation runs under, for the D3 entry plans built
   // after the compilation proper (when `BaseCompiler.mode` is restored).
   const mode = BaseCompiler.resolveCompileMode(target);
-  // A provably complex tuple/list COMPONENT used to be refused here (Tycho
-  // item 62). Retired 2026-07-30: `wrapRealOnly`'s `coerceComponents`
-  // recurses into array results, so `(1, i)` now runs to `[1, NaN]` — the
-  // same answer `(t, √t)` already gives at `t = -4`, where nothing can be
-  // caught statically. Fail-closed (D6) is about silently WRONG output, not
-  // about `NaN`.
+  // `wrapRealOnly`'s `coerceComponents` recurses into array results, so a
+  // provably complex tuple/list component such as `(1, i)` runs to `[1, NaN]`,
+  // the same answer `(t, √t)` gives at `t = -4`. A projected `NaN` is valid
+  // output here, not a silent miscompilation.
 
   if (isFunction(expr, 'Function')) {
     const args = expr.ops;
@@ -7750,8 +7735,7 @@ function compileBound(
  *
  * Multi-index forms — `Sum(body, Limits(i,…), Limits(j,…), …)` — are compiled
  * as nested single-index sums (`Σ_i Σ_j body`), so every indexing-set clause is
- * honored. (Previously only the first clause was read, leaving the trailing
- * indices dangling in the generated code.)
+ * honored.
  */
 function compileSumProduct(
   kind: 'Sum' | 'Product',
@@ -8067,15 +8051,16 @@ function literalPatternArg(
       `${operator}: cannot compile — the pattern must be a literal ` +
         `\`RegExp("...")\`. Fail closed (D6).`
     );
-  const flagText =
-    re.nops >= 2 && isString(re.op2) ? re.op2.string : '';
+  const flagText = re.nops >= 2 && isString(re.op2) ? re.op2.string : '';
   if (re.nops >= 2 && !isString(re.op2))
     throw new Error(
       `${operator}: cannot compile — the flags must be a literal string. ` +
         `Fail closed (D6).`
     );
   const withUnicode =
-    flagText.includes('u') || flagText.includes('v') ? flagText : flagText + 'u';
+    flagText.includes('u') || flagText.includes('v')
+      ? flagText
+      : flagText + 'u';
   return {
     source: JSON.stringify(re.op1.string),
     flags: JSON.stringify(withUnicode),
@@ -9157,11 +9142,9 @@ function compileIntegrate(
       .slice(1)
       .map((p) => functionLiteralParameterName(p));
     // `functionLiteralParameterName` returns `''` — never `undefined` — for a
-    // parameter operand that is not a name, so the emptiness test is what
-    // actually screens one out. (It used to read `n !== undefined`, which is
-    // vacuous for a `string`: a parameter with no name became the empty
-    // variable name, and the integrand body's references to what it really
-    // binds compiled as references to the ENCLOSING scope instead.)
+    // parameter operand that is not a name, so the emptiness test must screen
+    // one out. Otherwise references to the unreadable binding could resolve in
+    // the enclosing scope.
     if (names.length === limits.length && names.every((n) => n !== ''))
       lambdaVars = names;
     else if (names.some((n) => n === ''))

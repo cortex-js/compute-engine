@@ -59,14 +59,14 @@ describe('EPSIL TYPE DECLARATIONS', () => {
   });
 
   test('`type alias` lowers to a STRUCTURAL DeclareType', () => {
-    expect(
-      validEpsil('type alias pair = tuple<number, number>')
-    ).toStrictEqual([
-      'DeclareType',
-      'pair',
-      { str: 'tuple<number, number>' },
-      ['Dictionary', ['KeyValuePair', 'alias', 'True']],
-    ]);
+    expect(validEpsil('type alias pair = tuple<number, number>')).toStrictEqual(
+      [
+        'DeclareType',
+        'pair',
+        { str: 'tuple<number, number>' },
+        ['Dictionary', ['KeyValuePair', 'alias', 'True']],
+      ]
+    );
   });
 
   test('`type alias = …` declares a type NAMED `alias` (D8 lookahead pin)', () => {
@@ -256,7 +256,9 @@ describe('EPSIL GENERIC TYPE ALIASES (lowering)', () => {
 
   test('an empty clause is diagnosed and declares nothing', () => {
     expect(
-      diagnosticsOf('type alias Pair<> = tuple<integer, integer>\nlet p: Pair = 1')
+      diagnosticsOf(
+        'type alias Pair<> = tuple<integer, integer>\nlet p: Pair = 1'
+      )
     ).toEqual([
       ['empty-type-parameter-clause', 'Pair'],
       ['type-annotation-error', 'Unknown type "Pair"'],
@@ -267,7 +269,9 @@ describe('EPSIL GENERIC TYPE ALIASES (lowering)', () => {
     // Exactly ONE diagnostic for the duplicate (the source-range scanner's),
     // and the name is un-seeded: the next annotation reports it unknown.
     expect(
-      diagnosticsOf('type alias Pair<T, T> = tuple<T, T>\nlet p: Pair<integer> = 1')
+      diagnosticsOf(
+        'type alias Pair<T, T> = tuple<T, T>\nlet p: Pair<integer> = 1'
+      )
     ).toEqual([
       ['duplicate-type-parameter', 'T'],
       ['type-annotation-error', 'Unknown type "Pair"'],
@@ -546,14 +550,12 @@ describe('EPSIL TYPE SELF-REFERENCE', () => {
   });
 
   test('the `alias` form seeds its name too', () => {
-    expect(validEpsil('type alias json = list<json> | integer')).toStrictEqual(
-      [
-        'DeclareType',
-        'json',
-        { str: 'list<json> | integer' },
-        ['Dictionary', ['KeyValuePair', 'alias', 'True']],
-      ]
-    );
+    expect(validEpsil('type alias json = list<json> | integer')).toStrictEqual([
+      'DeclareType',
+      'json',
+      { str: 'list<json> | integer' },
+      ['Dictionary', ['KeyValuePair', 'alias', 'True']],
+    ]);
   });
 });
 
@@ -625,7 +627,9 @@ describe('EPSIL TYPE NAME SEEDING', () => {
 
   test('a `type` statement in an `if` branch is a hard error', () => {
     expect(
-      diagnosticsOf('if true {\n  type inner = integer\n  1\n}\nlet z: inner = 2')
+      diagnosticsOf(
+        'if true {\n  type inner = integer\n  1\n}\nlet z: inner = 2'
+      )
     ).toEqual([
       ['type-declaration-not-top-level', 'inner'],
       ['type-annotation-error', 'Unknown type "inner"'],
@@ -692,7 +696,9 @@ describe('EPSIL TYPE DECLARATIONS ARE TOP-LEVEL ONLY', () => {
 
   test('a fresh block-local name errors too', () => {
     expect(
-      diagnosticsOf('let a = 0\ndo {\n  type fresh = tuple<number, number>\n  1\n}')
+      diagnosticsOf(
+        'let a = 0\ndo {\n  type fresh = tuple<number, number>\n  1\n}'
+      )
     ).toEqual([['type-declaration-not-top-level', 'fresh']]);
   });
 
@@ -725,11 +731,7 @@ describe('EPSIL TYPE DECLARATION SERIALIZATION', () => {
 
   test('a nominal declaration (no attributes) serializes as a bare `type`', () => {
     expect(
-      serializeEpsil([
-        'DeclareType',
-        'point',
-        { str: 'tuple<number, number>' },
-      ])
+      serializeEpsil(['DeclareType', 'point', { str: 'tuple<number, number>' }])
     ).toBe('type point = tuple<number, number>');
   });
 
@@ -892,9 +894,9 @@ describe('EPSIL TYPE DECLARATIONS (end-to-end)', () => {
     const r = executeEpsil(ce, 'type taken = tuple<string, string>');
     expect(r.value.operator).toBe('Error');
     // The host definition is untouched (still nominal, same body).
-    expect(
-      ce.type('tuple<number, number>').matches(ce.type('taken'))
-    ).toBe(false);
+    expect(ce.type('tuple<number, number>').matches(ce.type('taken'))).toBe(
+      false
+    );
   });
 
   test('a parameterized nominal type declares end-to-end', () => {
@@ -1035,7 +1037,9 @@ describe('EPSIL TYPE NAME IN CALL POSITION', () => {
     expect(executeEpsil(ce, 'f(1, 2)').diagnostics).toEqual([]);
     // …and a near-miss still gets the did-you-mean path.
     const r = executeEpsil(new ComputeEngine(), 'Sqr(4)');
-    expect(r.diagnostics.map((d) => d.message[0])).toEqual(['unknown-function']);
+    expect(r.diagnostics.map((d) => d.message[0])).toEqual([
+      'unknown-function',
+    ]);
   });
 
   test('one diagnostic per name per program run', () => {
@@ -1136,7 +1140,9 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.value.toString()).toBe('(1, 2)');
-    expect(r.value.type.toString()).toBe('tuple<finite_integer, finite_integer>');
+    expect(r.value.type.toString()).toBe(
+      'tuple<finite_integer, finite_integer>'
+    );
   });
 
   test('a scalar newtype tags, a scalar alias does not', () => {
@@ -1328,7 +1334,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
 // A JSON value is the canonical recursive type: it refers to itself through
 // its own array and object arms. Two spellings must work — one self-recursive
 // alias, and a mutually recursive set closed by `type`-prefixed forward
-// references (the spelling `doc/08-guide-types.md` documents for the host API).
+// references.
 //
 // Each of these pinned a distinct defect:
 //  - `hasValueComponent` unfolded a structural alias with no cycle guard, so
@@ -1367,7 +1373,10 @@ describe('EPSIL RECURSIVE TYPES', () => {
 
       test('accepts `Missing` as a position-preserving null', () => {
         const ce = new ComputeEngine();
-        const r = executeEpsil(ce, def + 'let a: json = [1, Missing, 3]\nLength(a)');
+        const r = executeEpsil(
+          ce,
+          def + 'let a: json = [1, Missing, 3]\nLength(a)'
+        );
         expect(r.diagnostics).toEqual([]);
         expect(r.value.toString()).toBe('3');
       });
@@ -1522,7 +1531,9 @@ describe('EPSIL RECURSIVE TYPE FIELD ACCESS', () => {
       ].join('\n')
     );
     expect(r.diagnostics).toEqual([]);
-    expect(r.value.toString()).toBe('tree(10, [tree(20, [tree(40, [])]),tree(30, [])])');
+    expect(r.value.toString()).toBe(
+      'tree(10, [tree(20, [tree(40, [])]),tree(30, [])])'
+    );
   });
 });
 

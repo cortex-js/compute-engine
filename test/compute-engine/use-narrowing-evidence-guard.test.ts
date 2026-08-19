@@ -101,8 +101,8 @@ describe('use-narrowing evidence guard', () => {
   });
 
   test('the documented inference example is unchanged', () => {
-    // `doc/08-guide-types.md` §Type Inference: argument positions infer the
-    // type of an unknown symbol, and later uses refine it.
+    // Argument positions infer the type of an unknown symbol, and later uses
+    // refine it.
     const ce = new ComputeEngine();
     ce.declare('n', 'unknown');
     ce.declare('f', '(number) -> number');
@@ -195,21 +195,17 @@ describe('use-narrowing evidence guard', () => {
   test('STATIC: a destructuring assignment distributes the effect per leaf', () => {
     const r = executeEpsil(
       new ComputeEngine(),
-      [
-        'let k: (integer) -> integer',
-        'let (a, b) = (1, "s")',
-        'k(b)',
-      ].join('\n')
+      ['let k: (integer) -> integer', 'let (a, b) = (1, "s")', 'k(b)'].join(
+        '\n'
+      )
     );
     expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
     // The compatible leaf stays usable.
     const r2 = executeEpsil(
       new ComputeEngine(),
-      [
-        'let k: (integer) -> integer',
-        'let (a, b) = (1, "s")',
-        'k(a)',
-      ].join('\n')
+      ['let k: (integer) -> integer', 'let (a, b) = (1, "s")', 'k(a)'].join(
+        '\n'
+      )
     );
     expect(JSON.stringify(r2.diagnostics)).toBe('[]');
   });

@@ -57,7 +57,7 @@ function serializeFunction(expr: Expression): string | null {
   const h = operator(expr);
   if (!h) return null;
 
-  // @todo Convert special head:
+  // Special SymPy spellings are not implemented for these heads:
   // Add, Multiply, Root, Power, Exp, Subtract, Divide, Negate,
   // List, Tuple, Pair, KeyValuePair,
   // String, Number,
@@ -65,7 +65,7 @@ function serializeFunction(expr: Expression): string | null {
   const args = operands(expr);
   if (args.length === 0) return null;
   return `${h}(${args.map((x) => serializeExpression(x) ?? '')})`;
-  // @todo lambdas
+  // Lambda serialization is not supported.
 }
 
 function serializeExpression(expr: Expression): string {
@@ -79,8 +79,8 @@ function serializeExpression(expr: Expression): string {
 }
 
 function serializeString(_expr: Expression): string | null {
-  // @todo Handle head String  as well
-  return null; // @todo
+  // MathJSON string nodes do not yet have a SymPy representation.
+  return null;
 }
 
 export function serialize(expr: Expression): string {

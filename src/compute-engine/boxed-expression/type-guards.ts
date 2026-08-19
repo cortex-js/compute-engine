@@ -181,8 +181,8 @@ function containsForeignEngineObject(
 ): boolean {
   if (expr === null || typeof expr !== 'object') return false;
   const x = expr as Expression;
-  // A raw MathJSON array or dictionary literal has no `_kind`; see above for
-  // why it needs no scan.
+  // Raw MathJSON has no `_kind` and cannot contain boxed objects owned by
+  // another engine.
   if (x._kind === undefined) return false;
   if (isObject(x)) return x.engine !== ce;
   if (isFunction(x))

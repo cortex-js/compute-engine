@@ -103,7 +103,7 @@ export function compile<T extends string = 'javascript'>(
 
   // An option-contract violation, not a compilation failure: raised OUTSIDE
   // the `try` so the interpreter fallback cannot swallow it. A direct custom
-  // target never gets CSE in Phase 1 (§4.2), so an EXPLICIT `cse: true` here
+  // target does not support CSE, so an explicit `cse: true` here
   // is a request that cannot be honored — silently stamping it off would leave
   // the caller believing CSE ran.
   if (options?.target !== undefined && options.cse === true)
@@ -142,13 +142,14 @@ export function compile<T extends string = 'javascript'>(
         rewritten,
         namingSources
       );
-      // A DIRECT custom target gets no CSE in Phase 1 (design §4.2): a
-      // `cseBind` attests binding SYNTAX, not that the target's other emitters
+      // A direct custom target gets no CSE: a `cseBind` attests binding syntax,
+      // not that the target's other emitters
       // are pure and eager, and its resolver closures carry no override
       // provenance for the emission-purity gate (G1b) to consult. Stamped per
       // call, like the naming context, so a reused caller target never carries
       // stale state.
-      // An EXPLICIT `cse: true` is rejected up front (see above the `try`):
+      // The option-contract check before this `try` rejects explicit
+      // `cse: true`;
       // omitting the option keeps the silent off.
       options.target.cse = { enabled: false, instances: [] };
       // Stamp the caller's constant-folding choice per call, like the naming

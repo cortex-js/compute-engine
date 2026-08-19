@@ -272,20 +272,14 @@ export function withArrowEffects(t: Type, effects: EffectSet): Type {
  * corresponding slots of the value's inferred signature, before the two are
  * compared.
  *
- * A declared `unknown` is a PLACEHOLDER, not a contract (ruled 2026-08-15):
- * per "The `unknown` type" in `doc/08-guide-types.md` it "can be replaced or
- * refined as more information becomes available" — and the definition that
- * follows the declaration IS that information. Without this, a placeholder
- * declaration was strictly MORE restrictive than no declaration: checking the
- * body-inferred lambda against `(unknown) -> unknown` requires, by parameter
- * contravariance, `unknown <: ⟨inferred param⟩`, which is false in the
- * lattice — so `declare('f', '(unknown) -> unknown')` followed by
- * `f(P) := √(P[1]²+P[2]²)` was refused while declaring nothing at all
- * worked.
+ * A declared `unknown` is a placeholder, not a contract: the following
+ * definition supplies the information used to refine it. Comparing a body
+ * directly against `(unknown) -> unknown` would fail contravariantly because
+ * `unknown` is not a subtype of the inferred parameter type.
  *
- * `any` slots are deliberately NOT refined: `any` is a CONTRACT — the
+ * `any` slots are not refined: `any` is a contract. The
  * identity function is `(any) -> any`, a promise to accept every value — so a
- * body that cannot honor it is correctly refused (same ruling).
+ * body must honor it.
  *
  * Only top-level parameter and result slots of a plain fixed-arity ground
  * signature are refined; polymorphic declarations, optional/variadic

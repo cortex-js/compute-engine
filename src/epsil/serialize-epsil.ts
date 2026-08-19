@@ -227,9 +227,8 @@ export function serializeEpsil(
   }
 
   function serializeString(s: string): FormattingBlock {
-    // @todo:
-    // could be more clever: if `s` contains line feeds, use a `"""` string
-    // Also, if string doesn't fit margin, wrap it
+    // Strings always use the escaped single-line form; multiline selection and
+    // margin-aware wrapping are not implemented.
     return fmt.text(`"${escapeString(s)}"`);
   }
 
@@ -237,8 +236,8 @@ export function serializeEpsil(
     if (!(typeof expr === 'object')) return fmt.text();
     if ('comment' in expr) {
       if (expr.comment && expr.comment.length > 0) {
-        // @todo: could be more clever. Use /* */ or // depending on whether
-        // comment is multiline
+        // Metadata comments always use block syntax, including single-line
+        // content.
         return fmt.text(`/* ${expr.comment} */`);
       }
     }

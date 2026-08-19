@@ -3997,7 +3997,7 @@ export class BoxedFunction
       //
       const isScoped = this._localScope !== undefined;
 
-      // This path holds its context across an `await` (see below), so by the
+      // Later operand evaluation can suspend this path at an `await`, so by the
       // time it unwinds its frame is NOT necessarily on top: another
       // evaluation on the same engine may have pushed above it. Both popping
       // the top and unwinding by depth would then destroy a frame belonging to
@@ -4707,7 +4707,9 @@ function type(expr: BoxedFunction): Type {
           (isSubtype(sigResult, COLLECTION_SHAPE_TYPE) ||
             (typeof sigResult !== 'string' &&
               sigResult.kind === 'union' &&
-              sigResult.types.some((m) => isSubtype(m, COLLECTION_SHAPE_TYPE))));
+              sigResult.types.some((m) =>
+                isSubtype(m, COLLECTION_SHAPE_TYPE)
+              )));
         const broadcastingOps = expr.ops.filter(
           (x, i) =>
             // Per-slot when the signature DECLARES `broadcastable<T>` slots: an
@@ -4890,7 +4892,9 @@ function type(expr: BoxedFunction): Type {
             isSubtype(lambdaResult, COLLECTION_SHAPE_TYPE) ||
             (typeof lambdaResult !== 'string' &&
               lambdaResult.kind === 'union' &&
-              lambdaResult.types.some((m) => isSubtype(m, COLLECTION_SHAPE_TYPE)));
+              lambdaResult.types.some((m) =>
+                isSubtype(m, COLLECTION_SHAPE_TYPE)
+              ));
           if (collectionValued) return broadcastResultType(lambdaResult);
           // Shape-aware (§D6.1): the map preserves the source's structure.
           return broadcastShapedResultType(

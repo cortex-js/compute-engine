@@ -243,7 +243,7 @@ function bytesliteral(
   s: string,
   i: number
 ): [index: number, result: Expression | null] {
-  // @todo
+  // Python byte-string literals are not supported.
   return [i, null];
 }
 
@@ -251,9 +251,7 @@ function stringliteral(
   s: string,
   i: number
 ): [index: number, result: Expression | null] {
-  // if (/^(r|u|f|fr|rf)/i.test(s.slice(i))
-
-  //  @todo
+  // Python string prefixes and string literals are not supported.
   return [i, null];
 }
 
@@ -282,7 +280,8 @@ function enclosure(
 ): [index: number, result: Expression | null] {
   let r: Expression | null;
   [i, r] = parenth_form(s, i);
-  // @todo:
+  // Collection displays, comprehensions, and `yield` expressions are not
+  // supported, so parentheses are the only recognized enclosure.
   // if (r === null) [i, r] = list_display(s, i);
   // if (r === null) [i, r] = dict_display(s, i);
   // if (r === null) [i, r] = set_display(s, i);
@@ -332,7 +331,8 @@ function primary(
   s: string,
   start: number
 ): [index: number, result: Expression | null] {
-  // @todo:  atom | attributeref | subscription | slicing | call
+  // Attribute references, subscriptions, slices, and calls are not supported;
+  // only atoms are recognized here.
 
   // eslint-disable-next-line prefer-const
   let [i, e] = atom(s, start);

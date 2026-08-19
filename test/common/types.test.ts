@@ -379,10 +379,9 @@ describe('Collection Type Parser', () => {
     });
   });
 
-  // A `record` is a `dictionary` whose keys are statically known — the type
-  // tree in `doc/08-guide-types.md` nests `record` under `dictionary`, and the
-  // guide's "Compatibility" examples pin both the parameterized and the bare
-  // direction. Load-bearing for dictionary literals, which synthesize a
+  // A `record` is a `dictionary` whose keys are statically known. Pin both the
+  // parameterized and bare directions. This is required for dictionary
+  // literals, which synthesize a
   // `record{…}` and must still satisfy a `dictionary<T>` annotation.
   it('makes a record a subtype of a dictionary', () => {
     expect(
@@ -1410,7 +1409,9 @@ describe('reduceType Tests', () => {
     // `collection<any>` is the absence-admitting contract and survives; it
     // is the `<unknown>` spelling that is the synonym of the bare name and
     // collapses (user ruling 2026-08-17).
-    expect(reduce('collection<any>')).toMatchInlineSnapshot(`"collection<any>"`);
+    expect(reduce('collection<any>')).toMatchInlineSnapshot(
+      `"collection<any>"`
+    );
     expect(reduce('collection<unknown>')).toMatchInlineSnapshot(`"collection"`);
   });
 
@@ -2132,9 +2133,8 @@ describe('the element type of an UNPARAMETERIZED collection type', () => {
   // matching the `callback<…>` block above: this suite is otherwise free of
   // engine dependencies.
   test('the extraction operators agree with the helper', () => {
-    const {
-      ComputeEngine,
-    } = require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    const { ComputeEngine } =
+      require('../../src/compute-engine') as typeof import('../../src/compute-engine');
     const ce = new ComputeEngine();
     ce.declare('anIndexed', 'indexed_collection');
     ce.declare('aCollection', 'collection');
@@ -2163,13 +2163,11 @@ describe('a `string` actual at a BROADCASTABLE pattern is atomic', () => {
   // Imported lazily, like the blocks above: `inferTypeArguments` needs the
   // type algebra the engine installs at construction.
   const infer = (signature: string, actual: string): string | null => {
-    const {
-      ComputeEngine,
-    } = require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    const { ComputeEngine } =
+      require('../../src/compute-engine') as typeof import('../../src/compute-engine');
     new ComputeEngine();
-    const {
-      inferTypeArguments,
-    } = require('../../src/common/type/instantiate') as typeof import('../../src/common/type/instantiate');
+    const { inferTypeArguments } =
+      require('../../src/common/type/instantiate') as typeof import('../../src/common/type/instantiate');
     const r = inferTypeArguments(parseType(signature) as any, [actual]);
     return r ? typeToString(r.T) : null;
   };

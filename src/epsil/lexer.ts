@@ -42,39 +42,22 @@ import {
 //
 // The Epsil lexer turns a source string into a flat `Token[]`.
 //
-// It is modeled structurally on `src/common/type/lexer.ts`: a character
-// cursor (`pos`) with `cp`/`advance`/maximal-munch helpers and a `Lexer` class
-// producing a token array. The Epsil lexer is richer (composite strings,
-// pragmas, `$…$` islands) but the skeleton reads like that file.
-//
-// It **never throws**. Two kinds of lexical problems are surfaced:
+// It does not throw for lexical errors. Two kinds of problems are surfaced:
 //   - a wholly unrecognizable character run becomes an `ERROR` token; and
 //   - a recognizable-but-malformed token (unterminated string, invalid escape,
 //     unbalanced verbatim symbol, unterminated block comment, …) keeps its
 //     semantic type and carries `diagnostics`.
-// The number-scanning and string-scanning logic is ported from the old
-// combinator library's numeric and string parsers (the combinator wrappers are
-// stripped; only the character-level scanning remains).
 //
-// ─── Decisions settled during implementation (see the phase plan) ───────────
+// Lexical contracts:
 //
-// • Fullwidth digits (U+FF10–FF19) are SUPPORTED. The shared `DIGITS`/
-//   `HEX_DIGITS` tables imported from `characters.ts` already include them, and
-//   the Epsil docs (`literals.md`/`syntax.md`) accept them, so `１２３` lexes
-//   as one `NUMBER` token. The token `text` preserves the fullwidth glyphs as
-//   written; the parser normalizes later. Dropping support would mean building
-//   an ASCII-only table, contradicting the "reuse the shared tables"
-//   instruction — so we keep it.
+// • Fullwidth digits (U+FF10–FF19) are valid. The token preserves the written
+//   glyphs, and the parser normalizes them later.
 //
-// • Leading unary signs are NOT folded into number tokens. `+`/`-` lex as
-//   `OPERATOR` tokens; the parser resolves sign-vs-infix in Phase 2 using the
-//   `precededByWhitespace` flag (as the token model was explicitly designed
-//   to). Only the *internal* exponent sign (`1e-2`, `0xFp+1`) is part of a
-//   number, matching the ported scanner. This keeps the lexer context-free.
+// • Leading unary signs are separate `OPERATOR` tokens. Only an exponent sign
+//   (`1e-2`, `0xFp+1`) belongs to a number token, keeping the lexer
+//   context-free.
 //
-// • `ERROR` tokens cover a maximal *run* of consecutive unrecognizable
-//   characters (one token per run, not per character) — coarser but fewer
-//   diagnostics.
+// • One `ERROR` token covers a maximal run of unrecognized characters.
 //
 // • Lex errors are represented as `Token.diagnostics` (a `DiagnosticMessage[]`),
 //   plus the `ERROR` token type for unlexable runs. There is no diagnostic sink
@@ -109,7 +92,7 @@ const RBRACE_ESCAPE = 0x7d; // }
 
 // Characters that may appear in an operator. The lexer maximal-munches a run
 // of these into a single `OPERATOR` token; it does NOT classify the operator
-// or assign precedence (Phase 2). Comment sequences (`//`, `/*`) and the
+// or assign precedence. Comment sequences (`//`, `/*`) and the
 // number/string/bracket starters are handled before this set is consulted, so
 // including `/` here is safe. `.` is included so the range operator `..` lexes
 // as a single OPERATOR token; a bare `.` is the field-access clause (`p.x`,
@@ -501,9 +484,8 @@ export class Lexer {
   //
   // ─── Numbers ──────────────────────────────────────────────────────────────
   //
-  // Ported from `numeric-parsers.ts`. The lexer only captures the *extent* of
-  // the literal (raw text); the parser converts it to a MathJSON `{num}`
-  // preserving full precision. No `parseFloat`, no value computation here.
+  // Capture the literal's raw extent. The parser converts it to a MathJSON
+  // `{num}` without a `parseFloat` round trip.
   //
 
   private scanNumber(): Token {
@@ -567,8 +549,7 @@ export class Lexer {
    * Optionally scan an exponent. Decimal/binary allow `e`/`E`/`p`/`P`;
    * hexadecimal allows only `p`/`P` (`e`/`E` are hex digits). The marker is
    * consumed only when it is followed by an optional sign and at least one
-   * decimal digit — a deliberate improvement over the old scanner, which could
-   * half-consume a stray `e` (e.g. `2et`).
+   * decimal digit, so a stray `e` in `2et` remains outside the number token.
    */
   private scanExponent(allowE: boolean): void {
     const c = this.cp();
@@ -587,7 +568,7 @@ export class Lexer {
   //
   // ─── LaTeX islands ────────────────────────────────────────────────────────
   //
-  // `$…$`. Lexed here; unused until Phase 2. `\$` escapes a literal `$` inside
+  // `$…$`. `\$` escapes a literal `$` inside
   // the island so it does not close it. The `island` span covers the inner
   // content (between the delimiters).
   //
@@ -653,7 +634,7 @@ export class Lexer {
 
   /**
    * An extended string is delimited by `#"…"#`, `##"…"##`, etc. and contains
-   * no escape sequences. Ported from `string-parsers.ts` `parseExtendedString`.
+   * no escape sequences.
    */
   private scanExtendedString(): Token {
     const start = this.pos;
@@ -706,8 +687,7 @@ export class Lexer {
   }
 
   /**
-   * A single-line string. Ported from `string-parsers.ts`
-   * `parseSingleLineString`. Produces a `STRING` token whose `parts` are cooked
+   * A single-line string. Produces a `STRING` token whose `parts` are cooked
    * text segments interleaved with raw `\(…)` interpolation spans.
    */
   private scanSingleLineString(): Token {
@@ -948,10 +928,9 @@ export class Lexer {
   //
   // ─── Escape sequences ─────────────────────────────────────────────────────
   //
-  // Ported from `string-parsers.ts` `parseEscapeSequence`. Returns the cooked
-  // replacement text and appends any diagnostics. On an invalid escape it
-  // returns the offending source (backslash + char) so nothing is silently
-  // dropped.
+  // Return cooked replacement text and append any diagnostics. An invalid
+  // escape returns its source text (backslash + character) so input is not
+  // silently dropped.
   //
 
   private scanEscapeSequence(diagnostics: DiagnosticMessage[]): string {

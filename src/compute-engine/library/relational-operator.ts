@@ -1407,7 +1407,8 @@ function canonicalRelational(
   operator: string,
   ops: ReadonlyArray<Expression>
 ): Expression {
-  // Direction-aware handling for the core comparison operators (see below).
+  // Core comparisons need the direction-aware chain handling in
+  // `canonicalComparisonChain`.
   if (CHAINABLE_COMPARISON.has(operator))
     return canonicalComparisonChain(ce, operator, ops);
 

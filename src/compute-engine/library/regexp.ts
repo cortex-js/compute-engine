@@ -21,9 +21,8 @@ import { asSmallInteger } from '../boxed-expression/numerics.js';
  * length, and the engine cannot interrupt it. Deadlines are cooperative
  * polling BETWEEN evaluation steps (`docs/TIMEOUT-MODEL.md`) and one
  * `RegExp.exec()` is a single step, so no `withTimeLimit` span, abort signal
- * or timeout bounds it. A caller matching an untrusted pattern against
- * untrusted input is choosing that. This is documented for users next to
- * `RegExp` in `doc/97-reference-strings.md`.
+ * or timeout bounds it. Callers must not combine untrusted patterns with
+ * untrusted input when a bounded execution time is required.
  */
 
 /** Flags the host understands, minus the ones this library owns.
@@ -141,7 +140,7 @@ function patternOf(
 ): { pattern: string; flags: string } | undefined {
   if (expr === undefined) return undefined;
   // A `regexp`-typed symbol holds the `RegExp(…)` expression as its value.
-  const x = isFunction(expr, 'RegExp') ? expr : expr.value ?? expr;
+  const x = isFunction(expr, 'RegExp') ? expr : (expr.value ?? expr);
   if (!isFunction(x, 'RegExp') || x.nops < 1) return undefined;
   // Resolve each operand to a string VALUE. A literal already is one; a
   // COMPUTED operand (a symbol holding a string, a `Join(...)`) becomes one
@@ -244,7 +243,8 @@ function clusterSpan(
   if (!isBoundary[start] || !isBoundary[start + length]) return undefined;
   const first = index[start];
   const last = index[start + length - 1];
-  if (first === undefined || last === undefined || last < first) return undefined;
+  if (first === undefined || last === undefined || last < first)
+    return undefined;
   return [first, last];
 }
 

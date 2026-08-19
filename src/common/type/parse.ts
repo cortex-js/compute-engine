@@ -105,8 +105,8 @@ export function parseType(
     return parseTypeUncached(s, typeResolver, typeVars).type;
 
   // Sound for resolver-aware calls too: `cacheResult()` admits only strings
-  // whose resolver-less parse is resolver-INDEPENDENT (see below), so a hit
-  // is the answer any resolver would give.
+  // whose resolver-less parse is resolver-independent; `cacheResult` enforces
+  // that condition before inserting it.
   const cached = TYPE_CACHE.get(s);
   if (cached !== undefined) {
     if (CACHE_STATS) recordCache('typeParse', 'hit');

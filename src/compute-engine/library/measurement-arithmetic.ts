@@ -305,7 +305,9 @@ function measurementUnary(
   // Exact input (error 0): nothing to propagate.
   if (A.error.isSame(0)) return value;
   const d = fPrime(a);
-  if (d === undefined) return value; // domain edge — see docstring
+  // Outside the derivative's domain, keep the nominal value and drop the
+  // propagated error rather than producing NaN.
+  if (d === undefined) return value;
   const error = ce
     .function('Multiply', [ce.function('Abs', [d]), A.error])
     .evaluate();

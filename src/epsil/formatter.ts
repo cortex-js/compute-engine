@@ -285,23 +285,6 @@ export class WrapBlock extends FormattingBlock {
   }
 }
 
-// export class VerbatimBlock extends FormattingBlock {
-//   private block: FormattingBlock;
-//   constructor(fmt: Formatter, block: FormattingBlock) {
-//     super(fmt);
-//     this.block = block;
-//   }
-//   serialize(offset: number): string {
-//     return '';
-//   }
-//   nextCol(offset: number): number {
-//     return 0;
-//   }
-//   cost(offset: number): number {
-//     return 0;
-//   }
-// }
-
 export class ChoiceBlock extends FormattingBlock {
   private blocks: FormattingBlock[];
   constructor(fmt: Formatter, ...blocks: FormattingBlock[]) {
@@ -557,9 +540,4 @@ export class Formatter {
   ): FormattingBlock {
     return this.fencedList('', sep, '', blocks);
   }
-
-  /** A block that prints out several lines of text verbatim. */
-  // verbatim(block: FormattingBlock): FormattingBlock {
-  //   return new VerbatimBlock(this, block);
-  // }
 }

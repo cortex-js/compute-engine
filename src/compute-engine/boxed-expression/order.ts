@@ -559,7 +559,7 @@ export function lexicographicOrder(
   expr: Expression,
   vars?: ReadonlyArray<string>
 ): Expression {
-  // @todo
+  // This ordering is not implemented yet; preserve the input expression.
   const _vars = vars ?? expr.unknowns;
   return expr;
 }
@@ -568,7 +568,7 @@ export function degreeLexicographicOrder(
   expr: Expression,
   vars?: ReadonlyArray<string>
 ): Expression {
-  // @todo
+  // This ordering is not implemented yet; preserve the input expression.
   const _vars = vars ?? expr.unknowns;
   return expr;
 }
@@ -577,7 +577,7 @@ export function degreeReverseLexicographicOrder(
   expr: Expression,
   vars?: ReadonlyArray<string>
 ): Expression {
-  // @todo
+  // This ordering is not implemented yet; preserve the input expression.
   const _vars = vars ?? expr.unknowns;
   return expr;
 }
@@ -586,7 +586,7 @@ export function eliminationOrder(
   expr: Expression,
   vars?: ReadonlyArray<string>
 ): Expression {
-  // @todo
+  // This ordering is not implemented yet; preserve the input expression.
   const _vars = vars ?? expr.unknowns;
   return expr;
 }

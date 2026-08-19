@@ -742,7 +742,7 @@ export function loadIdentities(
     selected.push(r);
   }
 
-  // -- 2. Shell declarations: heads referenced by the selection (see above),
+  // -- 2. Shell declarations: heads collected by `collectReferenced`,
   //       in the current scope, skipping already-defined names (built-ins
   //       are never widened). Re-run unconditionally — idempotent-safe.
   for (const name of Object.keys(data.declarations).sort()) {

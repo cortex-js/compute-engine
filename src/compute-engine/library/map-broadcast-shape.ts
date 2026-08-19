@@ -209,7 +209,8 @@ export function hasAnnotatedParams(expr: Expression): boolean {
  * unwrapping a single-statement `Block` and then an optional `N` marker — is
  * either a bare parameter symbol or a single function application each of
  * whose operands is a parameter symbol or a parameter-free subexpression, and
- * whose head is not declared impure (scope safety, see below).
+ * whose head is not declared impure. {@link isImpureHead} performs that
+ * scope-safety check.
  *
  * Side-effect free: nothing is evaluated or materialized.
  */

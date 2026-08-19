@@ -1,8 +1,5 @@
 /**
- * Epsil parsing diagnostics.
- *
- * These types were ported from the old combinator library. They are the
- * **canonical** diagnostic types for the Phase 1 lexer/parser rewrite.
+ * Diagnostic codes shared by the Epsil lexer, parser, and presentation layer.
  */
 
 export type DiagnosticCode =

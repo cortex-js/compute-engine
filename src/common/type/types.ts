@@ -767,8 +767,9 @@ export type TypeResolver = {
  * trailing `where` clause with ground upper bounds
  * (`(T) -> T where T: indexed_collection`), rank-1 (quantifiers top-level
  * only), solved by
- * local inference at each call site. See `doc/08-guide-types.md` and
- * `docs/plans/2026-08-01-type-variables-design.md`.
+ * local inference at each call site. See `src/epsil/docs/types.md` for the
+ * language model and `docs/plans/2026-08-01-type-variables-design.md` for the
+ * design record.
  *
  * ### Future considerations:
  * - Add support for generic function literals and the `function f<T>(…)`

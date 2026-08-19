@@ -286,8 +286,8 @@ export async function cachedValueAsync<T>(
 
   v.value = result;
   v.generation = generation;
-  // This function records no dependencies (see above), so the entry it writes
-  // is constrained by its generation alone.
+  // An async call cannot safely use the stack-based dependency collector, so
+  // this entry is constrained by its generation alone.
   v.objectDeps = undefined;
   return result;
 }

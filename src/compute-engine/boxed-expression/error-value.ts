@@ -32,7 +32,7 @@ export function isCollectionHead(expr: Expression): boolean {
 
 /**
  * Collection heads whose contents are DATA, not the structure of a failing
- * computation. `errorValue()` does not descend into them — see below.
+ * computation. `firstEmbeddedError()` does not descend into them.
  *
  * This is deliberately the rung-2 list, NOT `isCollectionHead()`: it governs
  * descent into an APPLICATION's arguments (`f([1, err])`), a landed contract,

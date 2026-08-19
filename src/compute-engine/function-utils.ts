@@ -139,7 +139,8 @@ export function _setValidateArguments(fn: ValidateArgumentsFn): void {
 export function predicate(
   _expr: Expression
 ): (...args: Expression[]) => boolean {
-  // @todo
+  // Expression-backed predicates are not implemented; the conservative
+  // fallback rejects every candidate.
   return () => false;
 }
 
@@ -149,10 +150,8 @@ export function predicate(
 export function order(
   _expr: Expression
 ): (a: Expression, b: Expression) => -1 | 0 | 1 {
-  // @todo
-  //
-  // Default comparator
-  //
+  // Expression-backed comparators are not implemented. Use the canonical
+  // expression order as the fallback.
   return (a: Expression, b: Expression) => {
     const c = cmp(a, b);
     if (c === '=') return 0;

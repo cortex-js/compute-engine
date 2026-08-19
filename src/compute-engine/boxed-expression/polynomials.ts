@@ -44,61 +44,17 @@ export function coefficients(
   _poly: Expression,
   _vars: string | string[]
 ): UnivariateCoefficients | MultivariateCoefficients | null {
-  // @todo
+  // Coefficient extraction is not implemented. Retain the existing empty
+  // coefficient table until callers can handle an explicit unsupported result.
   return univariateCoefficients([[]]) ?? [[]];
 }
-
-/**
- * Return a polynomial expression of `vars` with coefficient
- * of powers `coefs`.
- *
- * `poly === polynomial(coefficients(poly), getVars(poly))`
- *
- */
-// export function polynomial(
-//   coefs: UnivariateCoefficients,
-//   vars: string
-// ): Expression;
-// export function polynomial(
-//   coefs: MultivariateCoefficients,
-//   vars: string[]
-// ): Expression;
-
-// export function polynomial(
-//   coefs: UnivariateCoefficients | MultivariateCoefficients,
-//   vars: string | string[]
-// ): Expression {
-//   if (typeof vars === 'string') vars = [vars];
-//   const terms: Expression[] = [];
-
-//   let degree = 0;
-//   for (const coef of coefs) {
-//     if (coef === null) continue;
-//     if (degree === 0) {
-//       // Constant term
-//       terms.push(coef[0]);
-//     } else if (degree === 1) {
-//       const term: Expression[] = [];
-//       for (const [i, v] of vars) {
-//         if (coef[i]) {
-//         }
-//       }
-//     } else {
-//     }
-//     degree += 1;
-//   }
-
-//   if (terms.length === 0) return 0;
-//   if (terms.length === 1) return terms[0];
-//   return ['Add', ...terms];
-// }
 
 /** If possible, attempt to return a UnivariateCoefficient.
  * If the coefficients really are multivariate, return `null` */
 function univariateCoefficients(
   _coefs: UnivariateCoefficients | MultivariateCoefficients
 ): UnivariateCoefficients | null {
-  // @todo
+  // Multivariate-to-univariate conversion is not implemented.
   const _result: UnivariateCoefficients = [];
 
   return null;
@@ -128,9 +84,6 @@ function _getDegree(expr: Expression | undefined): number {
   }
   return 0;
 }
-
-// totalDegree, maxDegree, lex, revlex are now in polynomial-degree.ts
-// and re-exported above
 
 //
 // ==================== POLYNOMIAL ARITHMETIC ====================
@@ -687,8 +640,9 @@ export function polynomialGCDMulti(
     for (let i = 2; i < ops.length; i++)
       result = polynomialGCD(result, ops[i], variable);
 
-    // Only surface a non-trivial common factor (degree ≥ 1). A constant GCD is
-    // deferred (see above).
+    // Return only a non-trivial common factor. A constant GCD is ambiguous
+    // with integer-GCD semantics for symbolic operands, as documented by
+    // `polynomialGCDMulti`.
     if (polynomialDegree(result, variable) < 1) return undefined;
     return result;
   }

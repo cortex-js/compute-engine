@@ -653,7 +653,7 @@ export const SIMPLIFY_RULES: Rule[] = [
       // structurally larger, e.g. ln(x^√2) -> √2·ln(x)): the
       // `purpose: 'transform'` tag replaces the former `because === 'ln'` match
       // in simplify.ts. The sibling `Log` branch (because 'log') carries the
-      // same tag — see below.
+      // same `purpose: 'transform'` tag.
       return { value: x.op1.ln(x.ops[1]), because: 'ln', purpose: 'transform' };
     }
     if (x.operator === 'Log') {

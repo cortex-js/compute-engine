@@ -126,8 +126,7 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   // ruling B6). Declared object types reach `object` through the nominal rule
   // in `isSubtype`, not through this table.
   object: [],
-  // `record` is a `dictionary` with statically-known keys — the type tree in
-  // `doc/08-guide-types.md` nests it under `dictionary`.
+  // A record is a dictionary with statically known keys.
   dictionary: ['record'],
   function: [],
   symbol: [],
@@ -1224,9 +1223,8 @@ export function isSubtype(
 
     // A dictionary is a subtype of `dictionary` = `dictionary<unknown>` when
     // its values are values (synonym note above). So is a record: a record
-    // is a dictionary with statically-known keys (`doc/08-guide-types.md`,
-    // the type tree places `record` under `dictionary`); the recursion's
-    // record-vs-`dictionary<unknown>` rule checks each field the same way.
+    // is a dictionary with statically known keys; the record-to-dictionary
+    // rule below checks every field the same way.
     if (rhs === 'dictionary')
       return isSubtype(lhs, BARE_DICTIONARY_STRUCTURAL_TYPE);
 
@@ -1647,8 +1645,7 @@ export function isSubtype(
   }
 
   // A record is a dictionary whose keys are statically known: it is a subtype
-  // of `dictionary<T>` when every one of its field types is a subtype of `T`.
-  // (`doc/08-guide-types.md` §Dictionary and Record, "Compatibility".)
+  // of `dictionary<T>` when every field type is a subtype of `T`.
   if (lhs.kind === 'record' && rhs.kind === 'dictionary')
     return Object.values(lhs.elements).every((t) => isSubtype(t, rhs.values));
 

@@ -3,14 +3,13 @@ import { DiagnosticMessage } from './diagnostics.js';
 /**
  * The set of token types produced by the Epsil {@link Lexer}.
  *
- * This is the initial (Phase 1) set. The lexer emits a single `OPERATOR`
- * type: it maximal-munches a run of operator characters but does **not**
- * classify the operator or assign precedence — that is the job of the Phase 2
- * shared operator table.
+ * The lexer emits a single `OPERATOR` type. It consumes a maximal run of
+ * operator characters; the parser's shared operator table classifies that run
+ * and assigns precedence.
  */
 export type TokenType =
   // Literals
-  | 'NUMBER' // Raw numeric literal (digits kept as written, see below)
+  | 'NUMBER' // Raw numeric literal; see `Token.text` for preservation rules
   | 'SYMBOL' // Identifier / symbol name
   | 'VERBATIM_SYMBOL' // Backtick-delimited symbol: `a+b`
   | 'STRING' // Composite string (see `parts`)
@@ -28,7 +27,7 @@ export type TokenType =
   | 'COMMA'
   | 'SEMICOLON'
   // Islands
-  | 'LATEX_ISLAND' // `$...$` (lexed here, consumed in Phase 2)
+  | 'LATEX_ISLAND' // `$...$` (lexed here, parsed later)
   // Special
   | 'EOF'
   | 'ERROR'; // An invalid character run — the lexer never throws
@@ -62,8 +61,7 @@ export type StringPart = string | SourceSpan;
  *
  * Doc comments are skipped like ordinary comments (they do not appear in the
  * token stream) but are attached to the following token so a later phase can
- * associate documentation with a declaration. Nothing consumes them in
- * Phase 1.
+ * associate documentation with a declaration.
  */
 export interface DocComment {
   /** Raw source slice of the comment, including its delimiters. */
@@ -128,7 +126,7 @@ export interface Token {
    * - A recognizable-but-malformed token (an unterminated string, an invalid
    *   escape sequence, an unbalanced verbatim symbol, an unterminated block
    *   comment, …) keeps its semantic token type but carries the diagnostics
-   *   here, mirroring the old "error result still produced a value" model.
+   *   here, allowing recovery without discarding the token's value.
    *
    * The parser stage collects these into the returned `ParsingDiagnostic[]`.
    */

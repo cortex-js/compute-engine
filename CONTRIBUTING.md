@@ -36,3 +36,10 @@ for it!
 
 Whether you have a fix for an issue, some improved test cases, or a brand new
 feature, we welcome contributions in the form of pull requests.
+
+## Code comments
+
+Comments should explain current intent, invariants, and non-obvious constraints
+rather than restate code or preserve its history. See the
+[code comment guidelines](./docs/COMMENTING-GUIDELINES.md) for examples,
+action-comment requirements, and the review checklist.
