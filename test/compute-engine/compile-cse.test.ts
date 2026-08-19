@@ -450,9 +450,14 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     // `Random` is impure AND has no expandable arity (zero required
     // parameters), so it never becomes CSE-eligible. Emission now REFUSES it
     // outright rather than emitting a broken artifact, so the opacity is
-    // pinned on the harvest itself.
+    // pinned on the harvest itself. The source is a list of LISTS: `Random`'s
+    // declared parameter is `collection<any> | set<real>?`, so Design E's
+    // compatibility gate statically rejects it over integer elements — the
+    // collection-element source keeps the call valid and the emission gate
+    // reachable.
     const engine = new ComputeEngine();
-    const expr = mappedTwice(engine, 'Random');
+    const mapped = ['Sum', ['Map', 'Random', ['List', ['List', 1, 2], ['List', 3, 4]]]];
+    const expr = engine.box(['Add', mapped, mapped] as any);
     expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
 
     const harvest = harvestCse(expr, { admitPureUserFunctions: true });
@@ -470,8 +475,13 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     // supplies one, so it is rejected while it is canonicalized. `Or`'s `+`
     // tail admits ONE argument, so the arity check declines on it, the call
     // stays valid, and the emission gate under test is reached.
+    // Boolean elements: `Or`'s `boolean+` tail is provably disjoint from an
+    // integer element, so the Design E gate rejects the historical integer
+    // source statically; a boolean list keeps the emission gate under test
+    // reachable.
     const engine = new ComputeEngine();
-    const expr = mappedTwice(engine, 'Or');
+    const mapped = ['Sum', ['Map', 'Or', ['List', 'True', 'False', 'True']]];
+    const expr = engine.box(['Add', mapped, mapped] as any);
     expect(expr.isValid).toBe(true);
     expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
 

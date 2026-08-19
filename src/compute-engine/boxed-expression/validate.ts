@@ -8,8 +8,12 @@ import {
 } from '../collection-utils.js';
 
 import { flatten, flattenHoldingBarriers } from './flatten.js';
+import { functionLiteralParameterType } from './function-literal.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
-import { callbackIncompatibility } from '../../common/type/compatibility.js';
+import {
+  arityProvablyIncapable,
+  callbackIncompatibility,
+} from '../../common/type/compatibility.js';
 import { deepEraseCallbackTypes } from '../../common/type/callback.js';
 import { admissionOf, hasValueComponent } from './value-membership.js';
 import {
@@ -18,7 +22,6 @@ import {
   couldBeNonRealNumber,
   narrowingPreservesEffects,
   overlapsForDeferredValidation,
-  signatureArms,
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
@@ -734,6 +737,46 @@ function narrowCharacterLiteral(
 }
 
 /**
+ * The operand type the compatibility gate JUDGES for an inline `Function`
+ * literal: parameter types that were not AUTHORED are widened to `unknown`.
+ *
+ * A literal's unannotated parameter gets its type INFERRED from body uses
+ * (`l => Length(l)` infers `l: collection`), and that inference is a guess
+ * about intent, not a contract — the pinned pipe behavior maps such a stage
+ * per element and lets the body go inert (`[1,2,3] |> (l => Length(l)) →
+ * [Length(1), …]`), which rule 3 would refuse on the guessed type. An
+ * authored `Typed` wrapper (the user's own annotation, or the contextual
+ * stamp — which is the slot's own solved type and cannot conflict with the
+ * supply by construction) keeps its full weight, and the literal's RESULT
+ * type stays authoritative either way (§9 Q3: `k => k + 1` rejects on its
+ * inferred `number` result). Non-literal operands are returned unchanged.
+ */
+export function widenUnannotatedLiteralParams(fn: Expression, t: Type): Type {
+  if (!isFunction(fn, 'Function')) return t;
+  if (typeof t !== 'object' || t.kind !== 'signature') return t;
+  const args = t.args ?? [];
+  if (args.length === 0) return t;
+  const params = fn.ops.slice(1);
+  let changed = false;
+  const widened = args.map((el, i) => {
+    const p = params[i];
+    // Only a `Typed` wrapper is AUTHORED — the same bareness test as
+    // `relaxBareParams` (`function-utils.ts`), via
+    // `functionLiteralParameterType`. A destructuring PATTERN's tuple shape
+    // is written by the author, but its element types are inferred guesses
+    // like a bare symbol's, and rule 3 must not refuse on a guess (the
+    // pattern's arity/shape mismatches are the arity machinery's business,
+    // with its tuple hint).
+    if (p === undefined || functionLiteralParameterType(p) !== undefined)
+      return el;
+    if (el.type === 'unknown') return el;
+    changed = true;
+    return { ...el, type: 'unknown' as Type };
+  });
+  return changed ? { ...t, args: widened } : t;
+}
+
+/**
  * The signature arms of an arrow-typed parameter slot, for compatibility
  * admission (Design E §3,
  * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`): the slot
@@ -815,7 +858,7 @@ function arrowSlotAdmission(
 ): Expression | 'admit' | undefined {
   const arms = paramArrowArms(param);
   if (arms === undefined) return undefined;
-  const opType = op.type.type;
+  const opType = widenUnannotatedLiteralParams(op, op.type.type);
   if (freeTypeVariables(opType).size > 0) return undefined;
   // Provably not a function value: the ordinary `incompatible-type` error
   // (minted by the caller) says the right thing — this gate has nothing to add.
@@ -845,26 +888,6 @@ function arrowSlotAdmission(
   return ce.typeError(displayParam ?? param, op.type, op);
 }
 
-/**
- * True when the operand's declared arity range provably cannot accept `n`
- * arguments — the decline condition that routes the diagnostic to the
- * `callback-arity` machinery instead of the compatibility gate. Conservative:
- * a shape with no readable arity (bare `function`, mixed unions) answers
- * `false` and stays with the gate.
- */
-function arityProvablyIncapable(opType: Type, n: number): boolean {
-  const arms = signatureArms(opType);
-  if (arms === undefined) return false;
-  for (const arm of arms) {
-    const required = arm.args?.length ?? 0;
-    const max =
-      arm.variadicArg !== undefined
-        ? Infinity
-        : required + (arm.optArgs?.length ?? 0);
-    if (n >= required && n <= max) return false;
-  }
-  return true;
-}
 
 export function checkTypes(
   ce: ComputeEngine,

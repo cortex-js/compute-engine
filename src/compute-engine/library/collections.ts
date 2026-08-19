@@ -4,6 +4,7 @@ import {
   checkTypes,
   spellCheckMessage,
   validateArguments,
+  widenUnannotatedLiteralParams,
 } from '../boxed-expression/validate.js';
 import { toInteger, toIntegerOperand } from '../boxed-expression/numerics.js';
 
@@ -55,6 +56,7 @@ import {
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
   DictionaryType,
+  FunctionSignature,
   ListType,
   ObjectType,
   RecordType,
@@ -65,9 +67,19 @@ import {
   collectionElementType,
   functionResult,
   functionArity,
+  narrowingPreservesEffects,
   staticCollectionDims,
   widen,
 } from '../../common/type/utils.js';
+import {
+  arityProvablyIncapable,
+  callbackIncompatibility,
+} from '../../common/type/compatibility.js';
+import { freeTypeVariables } from '../../common/type/instantiate.js';
+import {
+  contextualSlotCallback,
+  contextualSlotSignature,
+} from '../boxed-expression/generic-instantiation.js';
 import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import {
@@ -620,6 +632,23 @@ function predicateErrorValue(
 }
 
 /**
+ * The error a Filter facet consumer throws when its predicate operand cannot
+ * be applied at all. A predicate the COMPATIBILITY GATE already rejected at
+ * canonicalization (Design E,
+ * `docs/plans/2026-08-18-compatibility-admission-callbacks.md` §3) arrives
+ * here as an `Error` expression: its own diagnostic is the message — a
+ * spell-check hint computed over the error payload is noise ("Unknown symbol
+ * …" about the faulted lambda's parameter).
+ */
+function invalidPredicateError(pred: Expression): Error {
+  if (!pred.isValid) {
+    const diagnostic = pred.errors[0]?.toString() ?? pred.toString();
+    return new Error(`Invalid filter predicate: ${diagnostic}`);
+  }
+  return new Error(`Invalid filter predicate. ${spellCheckMessage(pred)}`);
+}
+
+/**
  * The error every predicate consumer throws when its predicate returns
  * something that is neither `True` nor `False` and is not an element-valued
  * failure ({@link predicateErrorValue}).
@@ -710,6 +739,122 @@ const FILL_SUPPLY: CallbackSupply = {
 };
 
 /**
+ * The LAZY route's compatibility gate (Design E §3/§6,
+ * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`, phase E2):
+ * the disjointness/effects half of compatibility admission for a callback
+ * operand accepted by `canonicalCallbackOperand`, running at CANONICALIZATION
+ * inside the operator's own canonical handler — the one gate lazy operators
+ * have (`validateArguments` skips their operands, and `Map` never runs it at
+ * all).
+ *
+ * Applies ONLY when the operator's DECLARED slot is a plain (converted)
+ * arrow: an unconverted `callback<S>` slot — and any operator with a bare
+ * `function` slot — declines, byte-identical to pre-E behavior until its own
+ * conversion lands. The supply arrow is built from the ACTUAL sources (one
+ * parameter per source, element-typed — `Map`'s zip form checks positionally
+ * against each source), with the declared slot's result; rules 1/3/4 run
+ * through `callbackIncompatibility`, rule 5 through the effect-subset check,
+ * and rule 2 (arity) already ran in `accept()` and owns its diagnostic — an
+ * operand whose arity is provably incapable is left to it.
+ *
+ * The operand's type is read SIDE-EFFECT-FREE: a symbol through
+ * `ce.lookupDefinition` (never `.canonical`, which would DECLARE an
+ * undeclared name — the same rule as `callbackResultType` below), an inline
+ * literal through its already-boxed type.
+ */
+function callbackCompatibilityError(
+  fn: Expression,
+  arity: {
+    operator: string;
+    supply: CallbackSupply | ReadonlyArray<CallbackSupply>;
+    source?: Expression;
+    sources?: ReadonlyArray<Expression>;
+  }
+): Expression | undefined {
+  const ce = fn.engine;
+  const def = ce.lookupDefinition(arity.operator);
+  const sig = def && 'operator' in def ? def.operator.signature.type : undefined;
+  if (sig === undefined || typeof sig === 'string') return undefined;
+  if (sig.kind !== 'signature') return undefined;
+
+  // The declared CONTEXTUAL arrow slot — first one wins (every operator on
+  // this route declares exactly one). A legacy `callback<S>` slot declines
+  // the gate outright.
+  let declared: FunctionSignature | undefined = undefined;
+  for (const el of [
+    ...(sig.args ?? []),
+    ...(sig.optArgs ?? []),
+    ...(sig.variadicArg ? [sig.variadicArg] : []),
+  ]) {
+    if (contextualSlotCallback(el.type) !== undefined) return undefined;
+    const arrow = contextualSlotSignature(el.type);
+    if (arrow !== undefined) {
+      declared = arrow;
+      break;
+    }
+  }
+  if (declared === undefined) return undefined;
+
+  // The operand's type, side-effect-free; every unreadable shape ADMITS.
+  let opType: Type | undefined;
+  if (isSymbol(fn)) {
+    // An OPERATOR name (`IsPrime`) reads its signature; a VALUE symbol its
+    // declared/held type — the same two-branch read `callbackArity` uses.
+    const fnDef = ce.lookupDefinition(fn.symbol);
+    opType =
+      fnDef && 'operator' in fnDef
+        ? fnDef.operator.signature.type
+        : fnDef && 'value' in fnDef
+          ? fnDef.value.type?.type
+          : undefined;
+  } else opType = widenUnannotatedLiteralParams(fn, fn.type.type);
+  if (opType === undefined || typeof opType === 'string') return undefined;
+  if (freeTypeVariables(opType).size > 0) return undefined;
+
+  const sources = arity.sources ?? (arity.source ? [arity.source] : []);
+  if (sources.length === 0) return undefined;
+  // Rule 2 owns an arity-incapable operand (its richer diagnostic already
+  // ran, or deliberately declined on an unreadable shape).
+  if (arityProvablyIncapable(opType, sources.length)) return undefined;
+
+  // The §3 supply arrow: one parameter per actual source, element-typed
+  // (`any` where unsolvable), with the DECLARED result (a free result
+  // variable is skipped by the relation).
+  const supplyArrow: FunctionSignature = {
+    kind: 'signature',
+    args: sources.map((src) => ({
+      type: collectionElementType(src.type.type) ?? ('any' as Type),
+    })),
+    result: declared.result,
+  };
+
+  // The error's EXPECTED side displays the instantiated supply with the
+  // declared effect slot, matching the eager gate's `incompatible-type`
+  // shape; an unsolved declared result reads `unknown`.
+  const mint = (): Expression => {
+    const displayResult =
+      typeof declared!.result === 'object' &&
+      freeTypeVariables(declared!.result).size > 0
+        ? ('unknown' as Type)
+        : declared!.result;
+    const display: FunctionSignature = {
+      ...supplyArrow,
+      result: displayResult,
+    };
+    if (declared!.effects !== undefined) display.effects = declared!.effects;
+    // Boxed, not the raw AST: `typeError`'s actual-side stringification
+    // handles a BoxedType (and primitive strings), not a composite `Type`.
+    return ce.typeError(display, ce.type(opType!), fn);
+  };
+
+  // Rule 5 — the effect bound, checked against the declared arrow.
+  if (!narrowingPreservesEffects(opType, declared as Type)) return mint();
+  // Rules 1/3/4.
+  if (callbackIncompatibility(supplyArrow, opType) !== undefined) return mint();
+  return undefined;
+}
+
+/**
  * The canonical function literal for a higher-order operator's callback slot,
  * or `undefined` when the operand is a plain VALUE that only a PARAMETERLESS
  * lift could turn into a function (`Map(5, xs)`, `Any(xs, True)`).
@@ -747,17 +892,29 @@ function canonicalCallbackOperand(
     operator: string;
     supply: CallbackSupply | ReadonlyArray<CallbackSupply>;
     source?: Expression;
+    /** EVERY source the operator supplies an argument from, in supply order
+     * — the Design E §3 supply arrow's parameter list (`Map`'s zip form
+     * passes one element per source). Absent means the single `source`. */
+    sources?: ReadonlyArray<Expression>;
   }
 ): Expression | undefined {
   if (op === undefined) return undefined;
   // An accepted callback, with the arity check applied when the caller wired
   // one. The check declines (returns `undefined`) whenever the operand's
   // parameter count is not statically readable.
-  const accept = (fn: Expression): Expression =>
-    arity === undefined
-      ? fn
-      : (callbackArityError(fn, arity.operator, arity.supply, arity.source) ??
-        fn);
+  const accept = (fn: Expression): Expression => {
+    if (arity === undefined) return fn;
+    // Rule 2 (arity) runs FIRST and owns its diagnostic (Design E §12b);
+    // only an operand it accepts or declines reaches the disjointness gate.
+    const arityErr = callbackArityError(
+      fn,
+      arity.operator,
+      arity.supply,
+      arity.source
+    );
+    if (arityErr !== undefined) return arityErr;
+    return callbackCompatibilityError(fn, arity) ?? fn;
+  };
   const fn = canonicalFunctionLiteral(op);
   // The operand a canonical handler REJECTS is replaced by the error, which is
   // how such a handler reports one, so the diagnostic matches the eager
@@ -3547,7 +3704,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     //    arity-mismatch rule, preserving the historical no-stamp behavior of
     //    the multi-collection form.
     signature:
-      '(mapping: callback<(T) -> U>, collection<T>+) -> indexed_collection where T, U',
+      '(mapping: (T) any -> U, collection<T>+) -> indexed_collection where T, U',
     // The mapped collection keeps the source's shape/indexed-ness, but its
     // elements are the lambda's RESULT type — not the source element type.
     // (If the input collection is indexed, the output collection is indexed.)
@@ -3640,6 +3797,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               // element, so its supply is not `destructurable` and the source
               // goes unread.
               source: collections[0],
+              // Design E §3: the supply ARROW takes one parameter per
+              // source, each element-typed — the zip disjointness check is
+              // positional against each source (a position-swapped callback
+              // is provably unusable even where the join of the sources is
+              // not).
+              sources: collections,
             }
       );
       if (
@@ -3880,7 +4043,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // indexedness", so converting the slot deliberately does not convert the
     // result (§7, rule 1).
     signature:
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T',
+      '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
     // If the input collection is indexed, the output collection is indexed —
     // but NOT the source's own type. Filtering changes the length, so echoing
     // the source type claimed `vector<3>` for a filtered 3-vector, `tuple<…>`
@@ -4027,9 +4190,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Mirror the iterator's verdicts on the predicate result, so a query
         // and a walk of the same `Filter` never disagree.
         if (applied === undefined)
-          throw new Error(
-            `Invalid filter predicate. ${spellCheckMessage(expr.op2)}`
-          );
+          throw invalidPredicateError(expr.op2);
         if (sym(applied) === 'True') return true;
         if (sym(applied) === 'False') return false;
         // An element-valued predicate failure (see `predicateErrorValue`)
@@ -4071,9 +4232,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               if (done) return { value: undefined, done: true };
               const pred = f([value]);
               if (!pred) {
-                throw new Error(
-                  `Invalid filter predicate. ${spellCheckMessage(expr.op2)}`
-                );
+                throw invalidPredicateError(expr.op2);
               }
               if (sym(pred) === 'True') return emit(value);
               if (sym(pred) !== 'False') {

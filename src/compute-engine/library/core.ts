@@ -94,6 +94,7 @@ import type {
   DeclarationOrigin,
 } from '../../common/type/types.js';
 import { deepEraseCallbackTypes } from '../../common/type/callback.js';
+import { provablyDisjoint } from '../../common/type/subtype.js';
 import {
   freeTypeVariables,
   substituteTypeVariables,
@@ -334,6 +335,23 @@ function pipeStageWithImplicitTopic(
   // for every admission decision (Design D contract clause 1), and a free
   // type variable (`collection<T>`) is substituted with `any` — the question
   // here is "could the topic belong in this slot", not the solve itself.
+  // Design E (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`
+  // §3): an arrow-typed slot admits callbacks by COMPATIBILITY, so for
+  // PLACEMENT — "could this belong here" — any function-shaped candidate
+  // fits an arrow slot. Strict contravariant `matches` refused the very
+  // stages the sugar exists for once `Map`'s slot became an honest arrow:
+  // the lambda of `xs |> Map(n => n^2)` types `(unknown) -> number`, which
+  // is not a SUBTYPE of the grounded `(any) any -> any`.
+  const couldBeCallbackAt = (t: Type, p: Type): boolean =>
+    signatureArms(p) !== undefined &&
+    // The TOP types are excluded: an `unknown`/`any` candidate is not
+    // function-shaped evidence, and admitting it here would let an
+    // ambiguous topic outcompete its semantically right slot; such
+    // candidates keep the pre-Design-E placement rules.
+    t !== 'unknown' &&
+    t !== 'any' &&
+    freeTypeVariables(t).size === 0 &&
+    !provablyDisjoint(t, 'function');
   const slotAccepts = (param: Type): boolean => {
     let p = deepEraseCallbackTypes(param);
     const vars = freeTypeVariables(p);
@@ -342,6 +360,7 @@ function pipeStageWithImplicitTopic(
       for (const v of vars) bindings[v] = 'any';
       p = substituteTypeVariables(p, bindings);
     }
+    if (couldBeCallbackAt(topic.type.type, p)) return true;
     return topic.type.matches(p);
   };
   // …AND whose written arguments still fit the slots they are displaced
@@ -360,6 +379,8 @@ function pipeStageWithImplicitTopic(
       for (const v of vars) bindings[v] = 'any';
       p = substituteTypeVariables(p, bindings);
     }
+    // Compatibility placement at an arrow slot — see `couldBeCallbackAt`.
+    if (couldBeCallbackAt(arg.type.type, p)) return true;
     return arg.type.matches(p);
   };
   //

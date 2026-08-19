@@ -1,8 +1,11 @@
 # Design E — Compatibility admission for callback slots; retiring `callback<S>`
 
-**Status: rev 4 (2026-08-18) — PHASES E0 AND E1 IMPLEMENTED (§12b records
-the as-built decisions, including R-E3′: data positions are authoritative
-for a domain variable, not exclusive). Rev 3 applied the dual spec review
+**Status: rev 5 (2026-08-18) — PHASES E0, E1 AND E2 IMPLEMENTED (§12b/§12c
+record the as-built decisions: R-E3′ — data positions are authoritative for
+a domain variable, not exclusive; the lazy-route gate lives in
+`canonicalCallbackOperand`; the pipe placement heuristic judges arrow slots
+by compatibility). Remaining: E3 (the sweep, the deletion, user-slot arity,
+the generic §6 pass) and the Tycho coordination window. Rev 3 applied the dual spec review
 (Claude + Codex, 11 findings;
 `docs/scratch/2026-08-18-compatibility-admission-callbacks_SPEC_REVIEW.md`)
 and the two review-round rulings (maintainer, same day): the EFFECT-SUBSET
@@ -645,6 +648,68 @@ review, 2026-08-18):
   §3 rule 2 delta (b)); the layering also demands it live there
   (`validate.ts` cannot import `library/callback-arity.ts` against the
   layer direction).
+
+## 12c. Phase E2 addendum (implemented 2026-08-18): the lazy route, as built
+
+`Filter` and `Map` are converted (`(collection<T>, predicate: (T) any ->
+boolean) -> collection where T`; `(mapping: (T) any -> U, collection<T>+) ->
+indexed_collection where T, U`). Decisions:
+
+1. **The lazy-route gate lives in the operators' own canonical funnel, not
+   a generic pass.** `canonicalCallbackOperand` (`library/collections.ts`)
+   — the shared route every lazy collection operator's canonical handler
+   already sends its callback through for the arity check — gained
+   `callbackCompatibilityError`: rule 2 runs first and owns its
+   diagnostic; rules 1/3/4 run through `callbackIncompatibility` against a
+   locally-built §3 supply arrow (one parameter per ACTUAL source,
+   element-typed, with the declared slot's result); rule 5 through the
+   effect-subset check. It runs at canonicalization on all three routes
+   (the canonical handler is the route-parity point), keys on the
+   operator's DECLARED slot being a plain arrow — an unconverted
+   `callback<S>` or bare-`function` slot declines byte-identically — and
+   reads the operand's type side-effect-free (an operator name through its
+   signature, a value symbol through its declaration, never `.canonical`).
+   Each E3 respell inherits the gate with no further wiring. The GENERIC
+   §6 pass for user-declared lazy operators remains E3 (unchanged from
+   §12b: it needs the binder-tripwire audit).
+2. **`Map`'s zip form checks positionally, as §5 specifies**: the handler
+   passes ALL its sources (`sources:` on the arity bag), so the supply
+   arrow distinguishes `(integer, string)` from the position-swapped
+   `(string, integer)` — which the declared unary `(T) any -> U` (whose
+   `T` is the sources' join) never could. Zip arity keeps the shipped
+   `callback-arity` diagnostic verbatim.
+3. **The pipe placement heuristic converts too** (regression found by the
+   full pin run): `pipeStageWithImplicitTopic` (`library/core.ts`) judged
+   displaced arguments by strict contravariant `matches`, so `xs |> Map(n
+   => n^2)` stopped lowering the moment `Map`'s slot became an honest
+   arrow — the lambda's `(unknown) -> number` is not a SUBTYPE of the
+   grounded `(any) any -> any`. Placement now treats any function-shaped
+   candidate as fitting an arrow slot (compatibility's "could belong"
+   question), restoring the sugar for every converted operator at once.
+4. **Facet queries on a statically-invalid `Filter` degrade honestly**
+   (Q3 fallout): the k+1-style predicate now rejects at canonicalization,
+   so the runtime `must return "True" or "False"` path is unreachable for
+   converted operators. `contains`/`count` throw carrying the static
+   diagnostic (`invalidPredicateError` — a spell-check hint computed over
+   an `Error` payload was noise), `isEmptyCollection` answers unknown, and
+   `Element`/`Contains` evaluate to error values.
+5. **Diagnostic parity with the eager gate is byte-level**: the lazy
+   flagship `Filter(names, IsPrime)` mints the identical
+   `incompatible-type` pair (`(string) any -> boolean` vs `(number) ->
+   boolean`) the eager `CountIf` gate produces.
+6. **Inferred literal parameters are not contracts** (full-suite finding,
+   both gates). A literal's unannotated parameter gets its type INFERRED
+   from body uses (`l => Length(l)` infers `l: collection`), and rule 3
+   on that guess refused the pinned pipe behavior
+   (`[1,2,3] |> (l => Length(l)) → [Length(1), …]`, admitted-inert per
+   element). Both gates now judge a `Function` literal through
+   `widenUnannotatedLiteralParams` (`validate.ts`): a bare-symbol
+   parameter's inferred type widens to `unknown`; an AUTHORED `Typed`
+   annotation (the user's own, or the contextual stamp — the slot's own
+   solved type, which cannot conflict with the supply) keeps full
+   weight; and the literal's RESULT stays authoritative (`k => k + 1`
+   still rejects on its inferred `number`, per Q3). Named callbacks'
+   declared types are contracts and are judged whole, as before.
 
 ## 13. Acceptance criteria
 

@@ -1,4 +1,5 @@
 import { eraseCallbackType } from './callback.js';
+import { signatureArms } from './utils.js';
 import { freeTypeVariables } from './instantiate.js';
 import { provablyDisjoint } from './subtype.js';
 import type { FunctionSignature, Type } from './types.js';
@@ -200,4 +201,27 @@ function armParamAt(arm: FunctionSignature, i: number): Type | undefined {
   const opt = arm.optArgs ?? [];
   if (i - req.length < opt.length) return opt[i - req.length].type;
   return arm.variadicArg?.type;
+}
+
+/**
+ * True when the operand's declared arity range provably cannot accept `n`
+ * arguments — the decline condition that routes the diagnostic to the
+ * `callback-arity` machinery (rule 2) instead of the disjointness rules —
+ * shared by the eager gate (`validate.ts`) and the lazy canonical route
+ * (`library/collections.ts`). Conservative:
+ * a shape with no readable arity (bare `function`, mixed unions) answers
+ * `false` and stays with the gate.
+ */
+export function arityProvablyIncapable(opType: Type, n: number): boolean {
+  const arms = signatureArms(opType);
+  if (arms === undefined) return false;
+  for (const arm of arms) {
+    const required = arm.args?.length ?? 0;
+    const max =
+      arm.variadicArg !== undefined
+        ? Infinity
+        : required + (arm.optArgs?.length ?? 0);
+    if (n >= required && n <= max) return false;
+  }
+  return true;
 }

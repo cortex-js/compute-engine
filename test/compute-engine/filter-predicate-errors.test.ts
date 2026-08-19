@@ -59,13 +59,15 @@ describe('Filter with an Error-valued predicate result', () => {
     );
   });
 
-  test('a genuine non-boolean predicate keeps the existing message', () => {
+  test('a genuine non-boolean predicate is rejected at CANONICALIZATION', () => {
+    // Design E §9 Q3 (`docs/plans/2026-08-18-compatibility-admission-
+    // callbacks.md`, ruled 2026-08-18): `Filter` converted in phase E2, so a
+    // provably non-boolean predicate no longer reaches evaluation — the
+    // program could only ever throw per element.
     const ce = new ComputeEngine();
-    const result = ce
-      .box(['Filter', ['List', 1, 2, 3], ['Function', ['Add', 'k', 1], 'k']])
-      .evaluate()
-      .toString();
-    expect(result).toContain('Filter predicate must return "True" or "False"');
+    const e = ce.box(['Filter', ['List', 1, 2, 3], ['Function', ['Add', 'k', 1], 'k']]);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain('incompatible-type');
   });
 
   test('a valid unannotated Filter is unchanged', () => {
@@ -557,23 +559,39 @@ describe('Filter contains with a non-boolean predicate result', () => {
   /** `k ↦ k + 1` — well-formed as a function, useless as a predicate. */
   const nonBoolean = ['Function', ['Add', 'k', 1], 'k'];
   const filter = ['Filter', ['List', 1, 2, 3], nonBoolean];
-  const MESSAGE = 'Filter predicate must return "True" or "False"';
+  // Design E §9 Q3 (phase E2): the predicate is rejected at CANONICALIZATION,
+  // so a facet query runs against an INVALID Filter — the throw carries the
+  // static `incompatible-type` diagnostic, never a spell-check hint computed
+  // over the error payload.
+  const MESSAGE = 'incompatible-type';
+
+  test('the Filter itself is invalid at canonicalization', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(filter).isValid).toBe(false);
+  });
 
   test('contains reports the malformed predicate instead of answering false', () => {
     const ce = new ComputeEngine();
     expect(() => ce.box(filter).contains(ce.number(2))).toThrow(MESSAGE);
   });
 
-  test('the other Filter facets already reported it the same way', () => {
+  test('the other Filter facets degrade honestly', () => {
     const ce = new ComputeEngine();
+    // `count` walks and throws the static diagnostic; emptiness of an
+    // INVALID collection is simply unknown — a definite answer about an
+    // expression that cannot evaluate would be unsound either way.
     expect(() => ce.box(filter).count).toThrow(MESSAGE);
-    expect(() => ce.box(filter).isEmptyCollection).toThrow(MESSAGE);
+    expect(ce.box(filter).isEmptyCollection).toBeUndefined();
   });
 
-  test('an Element query surfaces it, as the sibling consumers do', () => {
+  test('an Element query surfaces it as an error VALUE', () => {
     const ce = new ComputeEngine();
-    expect(() => ce.box(['Element', 2, filter]).evaluate()).toThrow(MESSAGE);
-    expect(() => ce.box(['Contains', filter, 2]).evaluate()).toThrow(MESSAGE);
+    // Evaluation of a query over the invalid Filter yields an `Error`
+    // value — `Contains` carries the full compatibility diagnostic.
+    expect(ce.box(['Element', 2, filter]).evaluate().operator).toBe('Error');
+    expect(ce.box(['Contains', filter, 2]).evaluate().toString()).toContain(
+      MESSAGE
+    );
   });
 
   test('boxing and canonicalization are unaffected', () => {

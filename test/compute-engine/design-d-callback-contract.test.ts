@@ -426,8 +426,9 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
 describe('phase 0b: `Filter` converts, on the LAZY path', () => {
   it('declares the contextual slot, keeps its result typing, drops the metadata', () => {
     const ce = new ComputeEngine();
+    // Design E phase E2: honest, effect-top arrow (the constructor is gone).
     expect(ce.type(declaredSignature(ce, 'Filter')).toString()).toBe(
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> collection where T'
+      '(collection<T>, predicate: (T) any -> boolean) -> collection where T'
     );
     expect(hasCallbackMetadata(ce, 'Filter')).toBe(false);
     // §7 rule 1: the result stays with the `type:` handler — the source's
@@ -1270,8 +1271,10 @@ describe('phase 3: `Map` — the callback-first signature', () => {
   // contextual at every arity; the zip form's n-ary callback stays unstamped
   // via the R-D6 arity gate against the unary `(T) -> U`.
   const DECLARED =
-    '(mapping: callback<(T) -> U>, collection<T>+) -> indexed_collection where T, U';
-  const DISPLAY = '(mapping: function, collection+) -> indexed_collection';
+    '(mapping: (T) any -> U, collection<T>+) -> indexed_collection where T, U';
+  // Design E phase E2 (§8): the display IS the honest declared polytype.
+  const DISPLAY =
+    '(mapping: (T) any -> U, collection<T>+) -> indexed_collection where T, U';
 
   it('declares the two clauses in one signature and drops the metadata', () => {
     const ce = new ComputeEngine();
@@ -1747,11 +1750,13 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
   // operator whose slot is an honest arrow displays its honest polytype —
   // the arrow now STATES the (compatibility) contract, so printing it no
   // longer claims a narrowing that did not happen. `CountIf` converted in
-  // phase E1; `Filter` still carries `callback<S>` and keeps the R-D5
-  // grounded display until phase E2 converts it.
+  // phase E1; `Filter` and `Map` in phase E2. The still-unconverted
+  // operators keep the R-D5 grounded display until the E3 sweep.
   const COUNT_IF_E =
     '(collection<T>, predicate: (T) any -> boolean) -> integer where T';
-  const FILTER = '(collection, predicate: function) -> collection';
+  // Design E phase E2: `Filter` converted — honest polytype display (§8).
+  const FILTER =
+    '(collection<T>, predicate: (T) any -> boolean) -> collection where T';
 
   it('a boxed operator NAME reports the signature honestly', () => {
     const ce = new ComputeEngine();

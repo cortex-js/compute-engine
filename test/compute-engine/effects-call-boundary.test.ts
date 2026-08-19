@@ -217,11 +217,11 @@ describe('blast radius: which library parameters carry an effect bound', () => {
     // §4): a converted operator's slot IS a signature — that is the point —
     // spelled with the EFFECT-TOP `any` slot so it cannot newly reject an
     // effectful callback. The enumeration therefore pins the converted
-    // inventory (phase E1: `CountIf`; the E3 sweep grows it), and the
+    // inventory (phases E1–E2: `CountIf`, `Filter`, `Map`; the E3 sweep grows it), and the
     // assertion below verifies the effect-top spelling for each: an entry
     // appearing here WITHOUT `effects: 'any'` on its arrow params is the
     // reviewed event this pin exists to force.
-    expect([...new Set(bounded)].sort()).toEqual(['CountIf']);
+    expect([...new Set(bounded)].sort()).toEqual(['CountIf', 'Filter', 'Map']);
     for (const name of new Set(bounded)) {
       const opDef = (scope.bindings as Map<string, any>).get(name)!.operator;
       for (const arm of armsOf(opDef.signature.type))

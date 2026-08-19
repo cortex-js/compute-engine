@@ -3322,8 +3322,11 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // (2026-08-15) declines on it and the call reaches the compiler.
     // The list is constant, so constant folding would answer from the
     // interpreter and never reach the callback check under test.
+    // Boolean list: `Or`'s `boolean+` element type is provably disjoint from
+    // an integer element, so the Design E gate rejects the historical integer
+    // source statically; booleans keep the compiler's own gate reachable.
     expect(() =>
-      js.compile(e.box(['Filter', L, 'Or']), {
+      js.compile(e.box(['Filter', ['List', 'True', 'False'], 'Or']), {
         realOnly: true,
         constantFold: false,
       })
@@ -3813,10 +3816,14 @@ describe('COMPILE built-in operator name as a callback', () => {
     // single wrapper arity. Rather than emitting a dangling `_.Random` that
     // throws `_f is not a function` at RUN time, they refuse at compile time.
     const e = new ComputeEngine();
-    // `Random` accepts a single argument, so it reaches the emission gate and
-    // pins the specific refusal message.
+    // `Random` reaches the emission gate over a list of LISTS (its declared
+    // parameter is `collection<any> | set<real>?`, so the Design E gate
+    // statically rejects it over integer elements) and pins the specific
+    // refusal message.
     expect(() =>
-      compile(e.box(['Map', 'Random', XS]), { fallback: false })
+      compile(e.box(['Map', 'Random', ['List', ['List', 1, 2], ['List', 3, 4]]]), {
+        fallback: false,
+      })
     ).toThrow(
       /Random: cannot compile as a first-class function[\s\S]*Fail closed/
     );

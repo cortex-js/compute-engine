@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 /**
  * # Design E — compatibility admission at arrow-typed callback slots
@@ -185,5 +186,153 @@ describe('route parity', () => {
     expect(viaParse.toString()).toContain(
       'ErrorCode("incompatible-type", "(string) any -> boolean", "(number) -> boolean")'
     );
+  });
+});
+
+//
+// ── Phase E2: the LAZY route (`Filter`, `Map`) ──────────────────────────────
+//
+
+describe('E2 — the lazy-route gate (`canonicalCallbackOperand`)', () => {
+  it('`Filter(names, IsPrime)` over `list<string>` rejects at canonicalization, same diagnostic as the eager gate', () => {
+    const ce = new ComputeEngine();
+    ce.declare('names', 'list<string>');
+    const e = ce.box(['Filter', 'names', 'IsPrime']);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain(
+      'ErrorCode("incompatible-type", "(string) any -> boolean", "(number) -> boolean")'
+    );
+    // Parse-route parity.
+    expect(
+      ce.parse(
+        '\\operatorname{Filter}(\\mathrm{names}, \\operatorname{IsPrime})'
+      ).isValid
+    ).toBe(false);
+  });
+
+  it('the KEEP table holds on the lazy route', () => {
+    const ce = new ComputeEngine();
+    // Messy-data broadcast: admitted, per-element at evaluation.
+    expect(
+      ce
+        .box([
+          'Map',
+          ['Function', ['Sqrt', 'x'], 'x'],
+          ['List', 16, -4, { str: 'banana' }, 81],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[4,2i,NaN,9]');
+    // Union source with a narrower predicate: admitted (partial overlap).
+    expect(
+      ce.box(['Filter', ['List', 2, 3, { str: 'a' }, 4], 'IsPrime']).isValid
+    ).toBe(true);
+    // Wildcard callback.
+    ce.declare('p', 'function');
+    expect(ce.box(['Filter', ['List', 1, 2, 3], 'p']).isValid).toBe(true);
+    // Empty source: `list<never>` elements are vacuously compatible.
+    expect(ce.box(['Filter', ['List'], 'IsPrime']).evaluate().toString()).toBe(
+      '[]'
+    );
+    // Effectful predicate at the effect-top slot.
+    ce.declare('re', '(number) random -> boolean');
+    expect(ce.box(['Filter', ['List', 1, 2, 3], 're']).isValid).toBe(true);
+    // Evaluation parity.
+    expect(
+      ce.box(['Filter', ['List', 1, 2, 3, 4], 'IsPrime']).evaluate().toString()
+    ).toBe('[2,3]');
+  });
+
+  it('`Map` zips check POSITIONALLY against each source (the §3 supply arrow)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g1', '(integer, string) -> boolean');
+    ce.declare('g2', '(string, integer) -> boolean');
+    ce.declare('ints', 'list<integer>');
+    ce.declare('strs', 'list<string>');
+    // Heterogeneous zip with a MATCHING callback: admitted.
+    expect(ce.box(['Map', 'g1', 'ints', 'strs']).isValid).toBe(true);
+    // Position-swapped: provably unusable at position 0 — rejected. The
+    // declared unary `(T) any -> U` could never catch this (its `T` is the
+    // JOIN of the sources); the per-source supply arrow does.
+    const sw = ce.box(['Map', 'g2', 'ints', 'strs']);
+    expect(sw.isValid).toBe(false);
+    expect(sw.toString()).toContain(
+      'ErrorCode("incompatible-type", "(integer, string) any -> unknown", "(string, integer) -> boolean")'
+    );
+    // Zip arity parity: a unary callback over two sources keeps the shipped
+    // `callback-arity` diagnostic (rule 2 owns arity).
+    const za = ce.box(['Map', ['Function', ['Sqrt', 'x'], 'x'], 'ints', 'strs']);
+    expect(za.isValid).toBe(false);
+    expect(za.toString()).toContain('callback-arity');
+    // Homogeneous zip evaluation parity.
+    expect(
+      ce
+        .box([
+          'Map',
+          ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+          ['List', 1, 2],
+          ['List', 3, 4],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[4,6]');
+  });
+
+  it('a provably non-boolean inline predicate rejects at canonicalization (Q3, lazy route)', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Filter',
+      ['List', 1, 2, 3],
+      ['Function', ['Add', 'k', 1], 'k'],
+    ]);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain('incompatible-type');
+  });
+});
+
+describe('E2 — inferred literal parameters are not contracts', () => {
+  it('a lambda whose parameter type was INFERRED from its body is admitted', () => {
+    // `l => Length(l)` infers `l: collection` from the body use — a guess
+    // about intent, not an authored contract, so rule 3 must not refuse it:
+    // the pinned product behavior applies it per element and lets the body
+    // go inert (`Length(1)` stays symbolic). The literal's RESULT stays
+    // authoritative (`k => k + 1` above still rejects on `number`).
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'CountIf',
+      ['List', 1, 2, 3],
+      ['Function', ['Greater', ['Length', 'l'], 0], 'l'],
+    ]);
+    expect(e.isValid).toBe(true);
+  });
+});
+
+describe('E2 — a destructuring-pattern parameter is judged like a bare one (review fix)', () => {
+  it('inferred element types inside a pattern do not reject the callback', () => {
+    // The pattern's tuple SHAPE is authored, but its element types are
+    // inferred from body uses — guesses, exactly like a bare symbol's type
+    // (`relaxBareParams` uses the same bareness test). Only a `Typed`
+    // annotation carries contractual weight at the gate.
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Filter',
+      ['List', ['Tuple', { str: 'a' }, { str: 'b' }]],
+      // ((a, b)) => Length(a) > 0 — `a` would infer non-string-ish shapes
+      // from other uses; the pattern must not become a rejection contract.
+      ['Function', ['Greater', ['Length', 'a'], 0], ['Tuple', 'a', 'b']],
+    ]);
+    expect(e.isValid).toBe(true);
+  });
+});
+
+describe('E2 — the pipe placement heuristic uses compatibility at arrow slots', () => {
+  it('`xs |> Map(f)` still lowers and evaluates (regression guard)', () => {
+    // The placement test for displaced arguments used strict contravariant
+    // `matches`, which refused the lambda at `Map`'s honest arrow slot
+    // (`(unknown) -> number` is not a SUBTYPE of the grounded
+    // `(any) any -> any`) and silently produced the inert legacy-order form.
+    const ce = new ComputeEngine();
+    const r = executeEpsil(ce, '[1,2,3] |> Map(n => n^2)');
+    expect(r.value?.toString()).toBe('[1,4,9]');
   });
 });
