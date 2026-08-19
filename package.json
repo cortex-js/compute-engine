@@ -162,6 +162,7 @@
     "serve-http": "^1.0.7",
     "ts-jest": "^29.4.11",
     "ts-node": "^10.9.2",
+    "tsx": "4.23.12",
     "typedoc": "^0.28.19",
     "typedoc-plugin-markdown": "^4.10.0",
     "typedoc-plugin-no-inherit": "^1.6.1",

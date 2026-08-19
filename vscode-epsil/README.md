@@ -25,7 +25,10 @@ fib(n: integer) = fib(n - 1) + fib(n - 2)
   no side effects and never runs a long computation. A call that does not match
   the function's signature explains itself: the diagnostic headline says which
   argument was at fault, and hovering it shows the callee's signature and the
-  declaration it points at, syntax-highlighted.
+  declaration it points at, syntax-highlighted. A diagnostic's code (like
+  `static-type-error`) is a link when an extended explanation exists — click
+  it to open that code's section of the error reference at
+  [epsil.dev/errors](https://epsil.dev/errors/).
 - **Hover** over a name to see what it is: for a library function or constant,
   its signature (or type and value) and description — the same entry
   `epsil doc <name>` prints; for a name your file declares, the declaration as

@@ -18,7 +18,12 @@ export class LspClient {
    * client without `relatedInformation`, say).
    */
   constructor(capabilities = {
-    textDocument: { publishDiagnostics: { relatedInformation: true } },
+    textDocument: {
+      publishDiagnostics: {
+        relatedInformation: true,
+        codeDescriptionSupport: true,
+      },
+    },
   }) {
     this.child = spawn('node', [SERVER, '--stdio'], {
       stdio: ['pipe', 'pipe', 'inherit'],

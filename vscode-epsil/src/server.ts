@@ -32,6 +32,7 @@ import {
   definitionSites,
   type DefinitionSite,
 } from '../../src/epsil/definition-sites.js';
+import { ERROR_EXPLANATIONS } from '../../src/epsil/error-explanations.js';
 import type { ParsingDiagnostic } from '../../src/epsil/diagnostics.js';
 import { tokenize } from '../../src/epsil/lexer.js';
 import type { Token } from '../../src/epsil/tokens.js';
@@ -47,7 +48,15 @@ const documents = new TextDocuments(TextDocument);
 
 let hasConfigurationCapability = false;
 let hasRelatedInformationCapability = false;
+let hasCodeDescriptionCapability = false;
 let diagnosticsEnabled = true;
+
+/** Where the extended error explanations are hosted — one section per
+ * documented code, anchored by the code itself. The page is generated from
+ * `ERROR_EXPLANATIONS` (the registry behind `epsil doc <code>`) into
+ * `src/epsil/docs/errors.md` by `npm run doc`, so the link target and the
+ * CLI print the same text. */
+const ERROR_DOCS_URL = 'https://epsil.dev/errors/';
 
 /** Pending debounce timer, per document URI. */
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -82,6 +91,12 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
   hasRelatedInformationCapability =
     params.capabilities.textDocument?.publishDiagnostics?.relatedInformation ===
     true;
+  // A client with this capability renders a diagnostic's code as a link to
+  // `codeDescription.href` (VS Code shows it as the clickable code in the
+  // pop-over and the Problems panel).
+  hasCodeDescriptionCapability =
+    params.capabilities.textDocument?.publishDiagnostics
+      ?.codeDescriptionSupport === true;
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -323,6 +338,13 @@ function toEntry(
       },
       message,
       code: json.code,
+      // A code with an extended explanation becomes a clickable link to its
+      // section of the hosted reference. Gated on the registry, so a code
+      // without an entry is never a dead link.
+      ...(hasCodeDescriptionCapability &&
+      ERROR_EXPLANATIONS[json.code] !== undefined
+        ? { codeDescription: { href: `${ERROR_DOCS_URL}#${json.code}` } }
+        : {}),
       source: 'epsil',
       ...(relatedInformation.length === 0 ? {} : { relatedInformation }),
     },

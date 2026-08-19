@@ -119,6 +119,13 @@ await scenario('signature notes', undefined, async (c) => {
     first?.code === 'static-type-error' && first.severity === 1,
     JSON.stringify(first)
   );
+  // A documented code links to its section of the hosted error reference.
+  check(
+    'the code links to its explanation',
+    first?.codeDescription?.href ===
+      'https://epsil.dev/errors/#static-type-error',
+    JSON.stringify(first?.codeDescription)
+  );
   const hover = await c.hover(URI, 0, 9);
   check(
     'the signature note appears in the hover instead',
@@ -284,6 +291,11 @@ await scenario(
       diagnostics[0]?.relatedInformation === undefined,
       JSON.stringify(diagnostics[0])
     );
+    check(
+      'and no codeDescription either, absent that capability',
+      diagnostics[0]?.codeDescription === undefined,
+      JSON.stringify(diagnostics[0])
+    );
   }
 );
 
@@ -377,7 +389,15 @@ await scenario('representation views', undefined, async (c) => {
 });
 
 await scenario('representation views on a broken program', undefined, async (c) => {
-  await c.open(URI, 'let = 42');
+  const diagnostics = await c.open(URI, 'let = 42');
+  // `symbol-expected` has no entry in the error reference: no link, even for
+  // a client with the capability — a code must never be a dead link.
+  check(
+    'an undocumented code carries no codeDescription',
+    diagnostics[0]?.code === 'symbol-expected' &&
+      diagnostics[0].codeDescription === undefined,
+    JSON.stringify(diagnostics[0])
+  );
 
   const ast = await c.request('epsil/view', { uri: URI, view: 'ast' });
   check(
