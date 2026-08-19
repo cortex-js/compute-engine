@@ -96,6 +96,70 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### Compatibility gate for USER-DECLARED lazy operators (OPEN, demand-gated — opened 2026-08-19)
+
+Design E's compatibility admission covers every eager slot and the library's
+lazy collection operators (through their canonical-handler funnel,
+`canonicalCallbackOperand`), but a user-declared `lazy: true` operator with an
+arrow-typed callback slot still admits every callback until application —
+`validateArguments`' lazy branches return each operand before the gate runs.
+Closing it takes a read-only planning pass at the lazy branches whose payoff
+is narrow by construction: the lazy solve contributes no bindings, so only
+GROUND arrow slots could ever be judged, and an unbound operand's type reads
+`unknown` (admits everything), so only NAMED callbacks read through a
+side-effect-free `lookupDefinition` would be judged at all. Do this when a
+consumer actually declares lazy operators with arrow slots, not before.
+(Recorded with reasoning in
+`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §12d item 8.)
+
+### Static arity for INLINE literals at user-declared arrow slots (OPEN, needs a ruling — opened 2026-08-19)
+
+A function literal's unwritten parameters type as placeholder `unknown`, and
+the subtype lattice deliberately lets such a signature `match` a lower-arity
+arrow (the placeholder-reconciliation leniency that serves inferred-signature
+narrowing broadly). Consequence: `myOp((a, b) |-> a + b)` at a user-declared
+unary slot passes strict matching, never reaches the compatibility gate, and
+fails only at application — while the same call with a DECLARED binary symbol
+is rejected at canonicalization with `callback-arity`. Closing the gap means
+carving literals out of the arity half of that leniency (or checking literal
+arity structurally before the match), which touches reconciliation semantics
+beyond callbacks — take it to a ruling before implementing. (Recorded in
+`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §12d item 6.)
+
+### Element-typed comparator arms need multi-variable union arms (OPEN, type-system — opened 2026-08-19)
+
+The ruled `Sort`/`Ordering` slot spelling was
+`((T) any -> unknown) | ((T, T) any -> number)` (Design E §9 item 6), but the
+type language enforces "at most one arm of a union may reference a type
+variable" — a solver-simplicity constraint predating Design E — so the
+comparator arm shipped grounded as `(any, any) any -> number`: arity duality
+and honest documentation kept, comparator-side disjointness rejection given
+up (a `(string, string) -> number` comparator over an integer list is
+admitted and fails per element). Restoring the ruled spelling means lifting
+the one-variable-arm constraint in `parseType`/the solve, with its own blast
+radius across union solving. Low urgency: the key arm keeps `T`, and no
+shipped signature needs the second variable-bearing arm. (Deviation recorded
+in `docs/plans/2026-08-18-compatibility-admission-callbacks.md` §12d item 1.)
+
+### Parameter-side callback inference (OPTION, demand-gated — opened 2026-08-19)
+
+Ruled deferred (Design E R-E3): a callback operand's parameter types never
+bind a data-anchored domain variable, so `apply2(IsPrime, x)` leaves `x`
+`unknown` where it once inferred `number`, and `CountIf(zs, IsPrime)` leaves
+`zs: collection<unknown>` (the ruling's anchor pin — binding it would
+manufacture a contract the slot deliberately does not carry, breaking a later
+`zs := [1, "a", 2]`). The seam is open in `solveArm`
+(`generic-instantiation.ts`): R-E3′ already lets a callback bind variables
+with NO data anchor (the ratified `comp`/`both` behavior), so the remaining
+question is only the data-anchored case. If a consumer asks for apply-style
+inference, the recommended shape is SOFT, PER-CALL, WRITE-FREE bounds: the
+callback's parameter types may sharpen the call's instantiation (stamping and
+result precision) but are droppable on conflict with any data bound (the
+union-source flagship must never conflict) and never reach an `_infer` write
+(no symbol narrowing, so the anchor pin holds). Full contribution with
+inference writes would need the `zs` KEEP pin re-ruled. Do not build ahead of
+demand.
+
 ### `Print`/`Input` should route through the Stage 4 capability registry (OPEN, effects — opened 2026-08-18)
 
 The console operators (`Print`, `Input`, Epsil `print`/`input`) declare the

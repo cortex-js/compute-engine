@@ -7,9 +7,11 @@ decisions — R-E3′ (data positions authoritative, not exclusive), the
 canonical-funnel lazy gate, the pipe-placement fix, the comparator-union
 spelling deviation (one variable-bearing arm), the declared-mode supply
 arrow, user-slot static arity. Consumer display deltas:
-`docs/plans/2026-08-18-design-e-tycho-display-deltas.md` — the Tycho
-notification window is the one remaining §8 step, before this lands in a
-release. Rev 3 applied the dual spec review
+`docs/plans/2026-08-18-design-e-tycho-display-deltas.md`. The §8 Tycho
+notification was FILED 2026-08-19 in their channel
+(`tycho/docs/COMPUTE_ENGINE.md`, "THIRD incoming batch"), with the
+adoption-obligations checklist — §8 is complete; the release ships when
+their window opens. Rev 3 applied the dual spec review
 (Claude + Codex, 11 findings;
 `docs/scratch/2026-08-18-compatibility-admission-callbacks_SPEC_REVIEW.md`)
 and the two review-round rulings (maintainer, same day): the EFFECT-SUBSET

@@ -771,7 +771,7 @@ readonly [`ExpressionInput`](#expressioninput)[]
 ###### \_getCompilationTarget(name)
 
 ```ts
-_getCompilationTarget(name):
+_getCompilationTarget(name): 
   | JavaScriptCompilationTarget<Expression>
   | undefined
 ```
@@ -783,7 +783,7 @@ _getCompilationTarget(name):
 ###### \_getCompilationTarget(name)
 
 ```ts
-_getCompilationTarget(name):
+_getCompilationTarget(name): 
   | LanguageTarget<Expression, string, unknown, number>
   | undefined
 ```
@@ -1002,7 +1002,6 @@ type(type): BoxedType
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -1105,7 +1104,6 @@ createScope(bindings?, parent?): InspectableScope
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -1203,7 +1201,6 @@ declareType(name, type, options?): void
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -1268,7 +1265,6 @@ declare(id, def, scope?): IComputeEngine
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -1289,7 +1285,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1319,7 +1314,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1341,7 +1335,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1383,7 +1376,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1413,7 +1405,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1435,7 +1426,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1492,7 +1482,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -1513,7 +1502,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1543,7 +1531,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1565,7 +1552,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1607,7 +1593,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1637,7 +1622,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -1659,7 +1643,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -4764,6 +4747,7 @@ type OperatorDefinitionFlags = {
   associative: boolean;
   commutative: boolean;
   commutativeOrder: ((a, b) => number) | undefined;
+  commutativeMatch: boolean;
   idempotent: boolean;
   involution: boolean;
   pure: boolean;
@@ -4947,7 +4931,6 @@ optional type?: (ops, options) =>
   | ExpressionType
   | NumericType
   | FunctionSignature
-  | CallbackType
   | ValueType
   | TypeVariable
   | TypeReference
@@ -9467,7 +9450,7 @@ readonly [`ExpressionInput`](#expressioninput)[]
 ###### \_getCompilationTarget(name)
 
 ```ts
-_getCompilationTarget(name):
+_getCompilationTarget(name): 
   | JavaScriptCompilationTarget<Expression>
   | undefined
 ```
@@ -9479,7 +9462,7 @@ _getCompilationTarget(name):
 ###### \_getCompilationTarget(name)
 
 ```ts
-_getCompilationTarget(name):
+_getCompilationTarget(name): 
   | LanguageTarget<Expression, string, unknown, number>
   | undefined
 ```
@@ -9698,7 +9681,6 @@ type(type): BoxedType
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -9801,7 +9783,6 @@ createScope(bindings?, parent?): InspectableScope
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -9899,7 +9880,6 @@ declareType(name, type, options?): void
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -9964,7 +9944,6 @@ declare(id, def, scope?): IComputeEngine
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -9985,7 +9964,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10015,7 +9993,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10037,7 +10014,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10079,7 +10055,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10109,7 +10084,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10131,7 +10105,6 @@ declare(id, def, scope?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10188,7 +10161,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -10209,7 +10181,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10239,7 +10210,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10261,7 +10231,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10303,7 +10272,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10333,7 +10301,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -10355,7 +10322,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ExpressionType`](#expressiontype)
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
-     \| [`CallbackType`](#callbacktype)
      \| [`ValueType`](#valuetype)
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
@@ -12867,11 +12833,8 @@ console.log(nonlinear.solve(["x", "y"])); // Returns [{ x: 2, y: 3 }, { x: 3, y:
 ```ts
 get value(): Expression | undefined
 set value(value: 
-  | string
-  | number
-  | boolean
   | number[]
-  | BigDecimal
+  | ExpressionInput
   | OnlyFirst<{
   re: number;
   im: number;
@@ -12939,7 +12902,7 @@ When `isCollection` is `true`, the expression:
 - has a `contains(other)` method that returns `true` if the `other`
   expression is in the collection.
 
-### `isCollection` is a CAPABILITY, `type.matches('collection')` is a SHAPE
+### `isCollection` is a CAPABILITY, `type.matches('collection<any>')` is a SHAPE
 
 This is the single most common source of collection-handling bugs in the
 engine, so it is worth stating precisely. The two predicates answer
@@ -12950,10 +12913,17 @@ different questions and neither implies the other:
   yet, and for an application whose head returns a collection (`L(1)`
   under `L: (number) -> vector<2>`): both are collection-shaped, but
   there is nothing to walk.
-- `type.matches('collection')` — "is this operand collection-**shaped**?"
-  It is `true` for those valueless cases, and `false` for a materialized
-  collection whose type is top (`unknown`/`any`), which `isCollection`
-  reports `true`.
+- `type.matches('collection<any>')` — "is this operand
+  collection-**shaped**?" It is `true` for those valueless cases, and
+  `false` for a materialized collection whose type is top
+  (`unknown`/`any`), which `isCollection` reports `true`.
+
+A shape test must spell the `<any>` FAMILY TOP, never the bare name:
+since the bare-synonym ruling (2026-08-17) bare `collection` is the
+values-only `collection<unknown>`, so `list<any>`, `list<nothing>` and
+`list<integer|missing>` — all collection-shaped — do NOT match it.
+(`COLLECTION_SHAPE_TYPE` and friends in `common/type/primitive.ts` are
+the same tops as `Type` constants, for `isSubtype` call sites.)
 
 Pick by the question you are actually asking:
 
@@ -12961,7 +12931,7 @@ Pick by the question you are actually asking:
   a capability question. Use `isCollection`.
 - Deciding whether an operand takes the SCALAR path or the
   collection/broadcast path — that is a shape question. Test
-  `isCollection || type.matches('collection')`, or the operand class
+  `isCollection || type.matches('collection<any>')`, or the operand class
   alone with `isValuelessCollectionTyped()` (`collection-utils.ts`).
 
 Getting this wrong has a characteristic signature: the operator takes its
@@ -13665,7 +13635,6 @@ set type(type:
   | ExpressionType
   | NumericType
   | FunctionSignature
-  | CallbackType
   | ValueType
   | TypeVariable
   | TypeReference
@@ -15095,7 +15064,6 @@ new BoxedType(type, typeResolver?): BoxedType
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -15417,7 +15385,6 @@ polymorphic one.
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -15450,7 +15417,6 @@ is(other): boolean
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -15497,7 +15463,6 @@ Throws if `other` is a string that is not a valid type.
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
@@ -15560,41 +15525,10 @@ Throws if `other` is a string that is not a valid type.
   \| [`ExpressionType`](#expressiontype)
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
-  \| [`CallbackType`](#callbacktype)
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| [`BoxedType`](#boxedtype)
-
-</MemberCard>
-
-<MemberCard>
-
-##### BoxedType.withDisplayString()
-
-```ts
-withDisplayString(display): BoxedType
-```
-
-A twin of this type that PRINTS as `display()` while remaining, in every
-other respect, byte-identical to this one — same `Type` object, same
-`isPolymorphic`, same subtype/`matches` answers.
-
-This is the whole seam of the R-D5 display projection (Design D §9 item 4):
-the projection is a property of the STRING a type shows a human, never of
-the type itself. Applying it to the `Type` instead — building a boxed type
-around the projected AST — made it semantics-visible: a callback-bearing
-overload set collapsed to `nothing` through `reduceType`, dropping the
-a `where` clause flipped `isPolymorphic` (and with it every `Ground <: Poly`
-answer), and re-validating the projected polytype could THROW out of a
-getter. Deferring to stringification makes all three impossible by
-construction.
-
-`display` is called at most once, on the first print.
-
-####### display
-
-() => `string`
 
 </MemberCard>
 
@@ -15840,7 +15774,9 @@ type PrimitiveType =
   | "boolean"
   | "string"
   | "character"
+  | "regexp"
   | "color"
+  | "type"
   | "expression"
   | "unknown"
   | "error"
@@ -16108,48 +16044,6 @@ type FunctionSignature = {
   result: Type;
 };
 ```
-
-</MemberCard>
-
-<MemberCard>
-
-### CallbackType
-
-```ts
-type CallbackType = {
-  kind: "callback";
-  signature: FunctionSignature;
-};
-```
-
-A **contextual callback** parameter type, spelled `callback<(T) -> boolean>`.
-
-It is the primitive `function` for every admission and subtyping decision,
-and carries — for CONTEXTUAL TYPING only — the signature `S` an INLINE
-`Function` literal at that slot is stamped with
-(`docs/plans/2026-08-09-design-d-generic-callback-signatures.md` §4). Its
-five-clause contract:
-
-1. **Ordinary admission and subtyping see only `function`.** Every subtype
-   query, `.matches` and argument-validation decision treats `callback<S>`
-   as the primitive `function`; `S` plays NO role in admission, so a named
-   callback narrower (or broader) than `S` enters exactly as it does today
-   and errors — or not — per element at application time.
-2. **The contextual domain solve traverses only `S`'s PARAMETER types.**
-3. **Inference from the operand traverses only `S`'s RESULT type** — a named
-   callback's own parameter types must never constrain a type variable.
-4. **Free-variable discovery and substitution retain variables inside `S`**:
-   `callback<(T) -> U>` contributes `T` and `U` to its signature's `where`
-   accounting, and instantiation substitutes inside `S` normally.
-5. **Internal serialization preserves it** (`typeToString`/`parseType`
-   round-trip, dedup keys), even where user-facing display erases it.
-
-Intended for a signature PARAMETER, where it replaces the bare `function`
-primitive a builtin callback slot declares — that is the only position in
-which `S` can do anything, contextual typing being its whole purpose. The
-position is NOT enforced: written anywhere else (a result type, a value's
-declared type, a collection's element type) the constructor simply behaves
-as `function`, by clause 1, and stamps nothing.
 
 </MemberCard>
 
@@ -16490,7 +16384,6 @@ type Type =
   | NumericType
   | NumericPrimitiveType
   | FunctionSignature
-  | CallbackType
   | ValueType
   | TypeVariable
   | TypeReference;
@@ -16523,7 +16416,6 @@ Types are described using the following BNF grammar:
 <primary_type> ::=  <primitive>
                | <tuple_type>
                | <signature>
-               | <callback>
                | <list_type>
                | <set>
                | <broadcastable>
@@ -16601,15 +16493,10 @@ spelling that round-trips through serialization. See {@link EffectSet}.)
 
 <multi_dimensional_size> ::= <positive-integer_literal> "x" <positive-integer_literal> ("x" <positive-integer_literal>)*
 
-<callback> ::= "callback<" <signature> ">"
-
-(A contextual callback slot. Semantically the primitive `function`; the
-signature it wraps types an inline literal at that position. See
-{@link CallbackType}. Like every other constructor keyword — `list`, `set`,
-`tuple`, `collection`, … — `callback` is RESERVED in APPLIED position: a
-user-declared generic type of that name can be declared but never referenced,
-since `callback<…>` always parses as this production. The BARE spelling is
-unaffected, so `type alias callback = integer` remains usable.)
+(The `callback<…>` constructor of Design D was RETIRED by Design E
+(`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §7): callback
+slots are ordinary arrow types, admitted by COMPATIBILITY rather than
+subtyping. The spelling now fails to parse, with a migration hint.)
 
 <set> ::= "set<" <type> ">"
 
