@@ -157,3 +157,43 @@ describe('union distribution reaches negation subtyping', () => {
     expect(isSubtype('integer | string', '!string')).toBe(false);
   });
 });
+
+describe('negations and intersections in disjointness', () => {
+  it('a negation is disjoint from the very type it excludes', () => {
+    // `!T` excludes `T` by construction, but neither side is a subtype of the
+    // other, so the subtype-based overlap test cannot see it; the negation
+    // rule answers by containment instead (`other <: T`).
+    expect(ce.type('!integer').isDisjointFrom('integer')).toBe(true);
+    expect(ce.type('integer').isDisjointFrom('!integer')).toBe(true);
+    // Containment, not overlap: every `integer` is a `number`, so `!number`
+    // has no integers either.
+    expect(ce.type('!number').isDisjointFrom('integer')).toBe(true);
+  });
+
+  it('stays conservative on a partial overlap and on two negations', () => {
+    // `imaginary` is a `number` outside `integer`, so the pair shares values.
+    expect(ce.type('!integer').isDisjointFrom('number')).toBe(false);
+    // `boolean` is outside both `integer` and `string`.
+    expect(ce.type('!integer').isDisjointFrom('!string')).toBe(false);
+  });
+
+  it('an intersection is disjoint as soon as any member is', () => {
+    // The intersection's inhabitants live inside every member, so one
+    // disjoint member leaves them nowhere to overlap the other side.
+    expect(ce.type('!integer & number').isDisjointFrom('integer')).toBe(true);
+    expect(ce.type('integer & finite_real').isDisjointFrom('string')).toBe(
+      true
+    );
+    // ...but a shared inhabitant keeps the conservative answer.
+    expect(ce.type('!integer & number').isDisjointFrom('number')).toBe(false);
+  });
+
+  it('makes an intersection a subtype of its own negation member', () => {
+    // `X <: !B` is decided by disjointness, so before the two rules above an
+    // intersection carrying a negation was not a subtype of that member.
+    expect(isSubtype('!integer & number', '!integer')).toBe(true);
+    expect(isSubtype('!integer & number', 'number')).toBe(true);
+    expect(isSubtype('imaginary', '!integer & number')).toBe(true);
+    expect(isSubtype('integer', '!integer & number')).toBe(false);
+  });
+});

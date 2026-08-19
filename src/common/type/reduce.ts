@@ -363,6 +363,41 @@ function meet2(a: Type, b: Type): Type | undefined {
   if (typeof a === 'object' && a.kind === 'union') return meetUnion(a.types, b);
   if (typeof b === 'object' && b.kind === 'union') return meetUnion(b.types, a);
 
+  // Two negations meet by De Morgan: excluding `A` and excluding `B` is
+  // excluding `A | B`. Without this the pair fell through to the refutation at
+  // the end and reduced to `never`, losing every value that is neither — a
+  // `boolean` is in both `!integer` and `!string`, and `provablyDisjoint`
+  // says so, which is the same disagreement between the two predicates that
+  // the rest of this function exists to remove.
+  //
+  const negA = typeof a === 'object' && a.kind === 'negation' ? a : undefined;
+  const negB = typeof b === 'object' && b.kind === 'negation' ? b : undefined;
+
+  if (negA !== undefined && negB !== undefined)
+    return reduceType({
+      kind: 'negation',
+      type: { kind: 'union', types: [negA.type, negB.type] },
+    });
+
+  // A negation against an ordinary type. The pair is empty exactly when the
+  // other side admits nothing outside the excluded type, i.e. when it is a
+  // subtype of it: every `integer` is a `number`, so `!number & integer` has
+  // no inhabitant.
+  //
+  // Anything else is NOT empty and must not be refuted. The wholly-outside
+  // case already returned above, through `isSubtype(other, !excluded)`, which
+  // holds when the two are provably disjoint. What reaches here is a partial
+  // overlap, which is inhabited in general — `imaginary` is both a `number`
+  // and provably disjoint from `integer`, so it inhabits `!integer & number`.
+  // Returning `undefined` keeps that pair as the intersection it was written
+  // as, rather than claiming it empty.
+  if (negA !== undefined || negB !== undefined) {
+    const excluded = (negA ?? negB!).type;
+    const other = negA !== undefined ? b : a;
+    if (isSubtype(other, excluded)) return 'never';
+    return undefined;
+  }
+
   if (typeof a === 'string' && typeof b === 'string') {
     const maximals = meetPrimitiveTypes(a as PrimitiveType, b as PrimitiveType);
     if (maximals.length === 0) return 'never';

@@ -207,6 +207,33 @@ subtype of both operands is necessary for a meet but NOT sufficient, since any
 under-approximation satisfies it, `never` included. The test that matters asks
 whether a type inhabiting both operands survives the meet.
 
+NEGATIONS (FIXED 2026-08-19, the same day, same saga): the meet had no negation
+rule either, so every pair involving one fell through to the refutation.
+
+- Two negations meet by De Morgan: `!integer & !string` is
+  `!(integer | string)` — it used to reduce to `never`, losing every value
+  that is neither (`boolean` inhabits both).
+- A negation against a type wholly inside it is genuinely empty
+  (`!number & integer` → `never`: every integer is a number).
+- A negation against a PARTIALLY overlapping type is kept as the irreducible
+  intersection (`!integer & number` stays written as itself: `imaginary`
+  inhabits both sides). The first version of this round refused to decide the
+  case, calling it "a question of what negation means", and pinned `never` in
+  a test — both reviewers refuted that with the `imaginary` witness. The
+  rationalized-deferral tripwire, again: a witness settles what a semantic
+  debate cannot.
+- `provablyDisjoint` gained the two rules the kept intersection needs:
+  a negation `!T` is disjoint from anything wholly inside `T` (this is what
+  makes `!integer` disjoint from `integer` itself, which no subtype test can
+  see), and an intersection is disjoint as soon as ANY member is. Both answer
+  only the positive direction; everything unproven stays the conservative
+  "may overlap". Without them `isSubtype('!integer & number', '!integer')`
+  was false — an intersection not a subtype of its own member.
+
+Tests: the negation-meet block in `test/common/types.test.ts` and the
+"negations and intersections in disjointness" block in
+`test/compute-engine/type-disjointness.test.ts`.
+
 TUPLES and RECORDS now meet structurally too (`meetTuples` / `meetRecords`).
 Records are WIDTH-subtyped, so the meet merges both key sets and meets any key
 they share; tuples meet slot-wise, requiring equal arity and agreeing slot

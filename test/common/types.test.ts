@@ -1596,6 +1596,60 @@ describe('reduceType Tests', () => {
     }
   });
 
+  describe('two negations meet by De Morgan', () => {
+    it('excludes the union rather than refuting the pair', () => {
+      // Excluding `integer` and excluding `string` is excluding
+      // `integer | string`. The pair used to fall through to the refutation at
+      // the end of the meet and reduce to `never`, losing every value that is
+      // neither.
+      expect(reduce('!integer & !string')).toBe('!(integer | string)');
+      const meet = reduceType(parseType('!integer & !string'));
+      // A `boolean` is in both operands, so it must survive.
+      expect(isSubtype(parseType('boolean'), parseType('!integer'))).toBe(true);
+      expect(isSubtype(parseType('boolean'), parseType('!string'))).toBe(true);
+      expect(isSubtype(parseType('boolean'), meet)).toBe(true);
+      // And the meet is a lower bound of both, as any meet must be.
+      expect(isSubtype(meet, parseType('!integer'))).toBe(true);
+      expect(isSubtype(meet, parseType('!string'))).toBe(true);
+    });
+
+    it('folds an n-ary chain of negations', () => {
+      // Grouping-independence comes from `flattenIntersectionMembers`, which
+      // is pinned separately; this verifies the fold cooperates with it.
+      expect(reduce('!integer & !string & !boolean')).toBe(
+        '!(boolean | integer | string)'
+      );
+    });
+
+    it('refutes a negation against a type that lies wholly inside it', () => {
+      // Empty exactly when the other side admits nothing outside the excluded
+      // type: every `integer` is a `number`, so nothing is left.
+      expect(reduce('!number & integer')).toBe('never');
+      expect(reduce('!integer & integer')).toBe('never');
+    });
+
+    it('keeps a negation against a type it only partly overlaps', () => {
+      // Not empty, so it must not be refuted: `imaginary` is a `number` and is
+      // provably disjoint from `integer`, so it inhabits `!integer & number`.
+      // The pair is kept as the intersection it was written as.
+      expect(reduce('!integer & number')).toBe('!integer & number');
+      const meet = reduceType(parseType('!integer & number'));
+      expect(isSubtype(parseType('imaginary'), parseType('!integer'))).toBe(
+        true
+      );
+      expect(isSubtype(parseType('imaginary'), parseType('number'))).toBe(true);
+      expect(isSubtype(parseType('imaginary'), meet)).toBe(true);
+    });
+
+    it('returns the other side when it lies wholly outside the negation', () => {
+      // Settled by the subtype tests before the negation rules run: a
+      // `boolean` is provably disjoint from `integer`, so it is already a
+      // subtype of `!integer`.
+      expect(reduce('!integer & boolean')).toBe('boolean');
+      expect(reduce('!nothing & integer')).toBe('integer');
+    });
+  });
+
   describe('`broadcastable` meets by expanding to the union it denotes', () => {
     // `broadcastable<T>` is exactly `T | indexed_collection<T>`, so its meet
     // distributes over those two arms. Meeting two broadcastables elementwise

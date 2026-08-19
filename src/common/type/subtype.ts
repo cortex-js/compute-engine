@@ -553,6 +553,31 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
       provablyDisjoint({ kind: 'indexed_collection', elements: a.elements }, b)
     );
 
+  // An intersection is disjoint from `other` as soon as ANY member is: the
+  // intersection's inhabitants are inside every member, so one disjoint member
+  // leaves them nowhere to overlap `other`. Only the positive direction is
+  // proven — no disjoint member means "may overlap", the safe answer, not
+  // "overlaps". Without this case an intersection fell through to the category
+  // test, which has no bucket for the kind, so `!integer & number` was not
+  // provably disjoint from `integer` and `isSubtype(!integer & number,
+  // !integer)` wrongly failed.
+  if (typeof a === 'object' && a.kind === 'intersection')
+    return a.types.some((t) => provablyDisjoint(t, b));
+  if (typeof b === 'object' && b.kind === 'intersection')
+    return b.types.some((t) => provablyDisjoint(a, t));
+
+  // A negation `!T` is disjoint from `other` exactly when `other` lies wholly
+  // inside `T`: everything `!T` excludes is everything `other` has. This is
+  // what makes `!integer` provably disjoint from `integer` itself — the
+  // subtype tests above cannot see it, since neither side is a subtype of the
+  // other. A failed containment stays the conservative "may overlap": two
+  // negations, or a partial overlap like `!integer` vs `number`, are not
+  // refuted here.
+  if (typeof a === 'object' && a.kind === 'negation' && isSubtype(b, a.type))
+    return true;
+  if (typeof b === 'object' && b.kind === 'negation' && isSubtype(a, b.type))
+    return true;
+
   // A value literal is a singleton `{v}`: having failed the subtype checks
   // above (it is not contained in the other type), it must be disjoint from it.
   if (
@@ -765,7 +790,6 @@ const BARE_COLLECTION_EXPANSIONS: Partial<Record<string, Type>> = Object.assign(
 );
 
 export function couldMatch(a: Type, b: Type): boolean {
-
   // `never` is uninhabited: no value is one.
   if (a === 'never' || b === 'never') return false;
 
