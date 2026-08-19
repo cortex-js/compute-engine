@@ -543,14 +543,41 @@ that phase-1 refusals really are no-ops and that poisoning is detected.
    first keeps the differential harness's baselines clean.
 2. **Stage C1 — journal infrastructure**: the copy-on-write journal, the
    §5.2/§5.3 hooks, window lifecycle (§4b), first-write dedup, unit
-   tests per family. **C1 exit criterion:** the all-constant-pure
-   `undefined`-key memo question (§10) is SETTLED empirically. If the
-   probe shows a restore can serve a stale answer through those entries,
-   the contingency is chosen and implemented here: either those entries
-   key on `_anyVersion` unconditionally (delete the `undefined`-key
-   fast path and measure the cost) or restore walks a per-engine epoch
-   that the fast-path read checks. The design does not proceed to C2 on
-   an unsettled answer.
+   tests per family. **SHIPPED 2026-08-19** —
+   `src/compute-engine/checkpoint-journal.ts` (a leaf module),
+   `ce._checkpointWindow` as the active window, and
+   `test/compute-engine/checkpoint-journal.test.ts`.
+
+   One departure from §5.2 worth recording: funnel 5's per-field
+   `journalDefField(def, field, oldValue)` was NOT built. Since the same
+   section requires the snapshot tuple to be the FULL mutable field set,
+   one whole-record snapshot per record per window covers funnels 1, 2,
+   5 and 6 together, and a per-field key would take more snapshots to
+   cover the same state while restoring it no more faithfully. The hook
+   is `journalDefinitionRecord(ce, def, kind)`; `kind` classifies the
+   write for the bypass canary only. The completeness the design asks
+   for is enforced rather than documented: a drift-guard test compares
+   each snapshot's key set against the record's own property names and
+   fails on any field that is neither captured nor listed as excluded.
+
+   **C1 exit criterion — SETTLED, and it reproduced.** With
+   `f(x) = x + 1`, reading `ce.box(['f', 2]).type` (`number`), then
+   redefining `f(x) = "hello"`: the same node kept answering `number`
+   while a freshly boxed one answered `string`, permanently. The premise
+   the `undefined` key rested on — "nothing can change an all-constant
+   pure node's answer" — holds for the OPERANDS and not for the
+   OPERATOR, and this is a live staleness defect independent of
+   checkpoint/restore; a restore reaches the same entries the same way.
+   Contingency taken: the first of the two named options — `_type`,
+   `_sgn` and the `_eagerSource` slot in `at()` key on `_anyVersion`
+   unconditionally. Measured cost: none (full suite 250.1 s → 242.4 s,
+   identical test and snapshot counts; the only regression is a
+   synthetic loop re-reading six constant nodes across 300 generation
+   bumps, +6 ms over 1800 reads). The lazy-collection evaluate memo
+   (`_lazyCollectionMemoKey`) KEEPS its constant key: a hit there also
+   requires `_lazyValueEpoch === _worldVersion`, and a redefinition
+   advances the world version, so its entries do expire — and a restore
+   bumps `config`, which advances it too.
 3. **Stage C2 — `EngineCheckpoint`**: compose journal + the two registry
    rollback points + snapshots + the §6 algorithm behind the §3 API,
    including the error table and poisoning semantics.
@@ -593,9 +620,11 @@ answer to those.
   refusal is a no-op; a forced phase-2 throw poisons detectably),
   checkpoint on a fresh engine (cp[0]), discard of top/middle/oldest,
   and history re-extension after restore.
-- **Targeted probes** from the audit's flagged uncertainties: the
-  all-constant-pure `undefined`-key memo entries
-  (`boxed-function.ts:1802-1806` — settled as a C1 exit criterion, §9),
+- **Targeted probes** from the audit's flagged uncertainties: ~~the
+  all-constant-pure `undefined`-key memo entries~~ RESOLVED 2026-08-19 —
+  it reproduced, and the entries now key on the generation (§9); what
+  remains for the harness is the lazy-collection memo, whose constant
+  key survives behind its `_lazyValueEpoch` gate,
   the `getOrBuild` first-closure trap, a REPLACED sequence and a
   pre-existing pending sequence extended in the window, dispatcher
   effects memoized mid-window, and a pre-checkpoint expression whose

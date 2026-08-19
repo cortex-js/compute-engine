@@ -264,6 +264,17 @@
 
 ### Bug Fixes
 
+- **A cached expression follows a redefinition of its operator.** An
+  expression whose operands are all constant and which is pure — `f(2)`,
+  say — cached its type, sign and eager-collection source under a key no
+  invalidation counter reached, on the premise that nothing could change its
+  answer. That premise holds for the operands and not for the operator:
+  after `f(x) = x + 1`, reading `f(2)`'s type (`number`) and then redefining
+  `f(x) = "hello"` left that expression reporting `number` for the rest of
+  the engine's life, while a freshly built `f(2)` reported `string`. These
+  three caches now key on the engine generation like every other
+  expression's.
+
 - **Type-variable bindings over bare collection operands stay in the
   values-only family.** The signature solver's element reading of a bare
   collection constructor had drifted from the bare-types ruling and answered
