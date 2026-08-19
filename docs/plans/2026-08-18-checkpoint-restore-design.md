@@ -1,9 +1,12 @@
 # Design: engine checkpoint/restore for cell-boundary replay
 
-**Date:** 2026-08-18 · **Status:** DRAFT, revision 2 (workstream 2 of the
-strict linear-posture investigation; revision 2 applies the 18 findings
-of the dual spec review — record with per-finding disposition in
-`docs/scratch/2026-08-18-checkpoint-restore-design_SPEC_REVIEW.md`) ·
+**Date:** 2026-08-18 · **Status:** APPROVED FOR IMPLEMENTATION
+(ratified by Arno 2026-08-18 with the rest of the linear-posture
+initiative — see the decisions section of
+`docs/plans/2026-08-18-linear-posture-tycho-questions.md`). Revision 2
+applies the 18 findings of the dual spec review — record with
+per-finding disposition in
+`docs/scratch/2026-08-18-checkpoint-restore-design_SPEC_REVIEW.md` ·
 **Requirements source:** `docs/plans/2026-08-18-linear-posture-audit.md`
 §3 (the global-state inventory — every coverage claim below traces to
 it) · **Depends on:** nothing shipped; independent of the §4.4 rulings

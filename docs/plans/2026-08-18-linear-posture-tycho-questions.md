@@ -4,7 +4,11 @@
 architect (answers verified against Tycho source, recorded durably in
 `tycho/docs/scratch/2026-08-18-linear-posture-tycho-answers.md`; the
 summary of answers and resulting decisions is at the end of this
-document) — awaiting Arno's ratification of the three decisions ·
+document) — **the three decisions were RATIFIED by Arno 2026-08-18**;
+the initiative is approved for implementation in the staged order
+(R1 → checkpoint v1 → differential harness → Epsil-route strictness
+flip gated on Tycho's restore-before-Run migration; checkpoint v2
+committed) ·
 **Companions:** `docs/plans/2026-08-18-linear-posture-audit.md` (what
 the engine would delete and what it must keep),
 `docs/plans/2026-08-18-checkpoint-restore-design.md` (the engine API
@@ -319,7 +323,7 @@ client gate: the surface is unspecified/unsupported and its scoping
 decision deferred, which does not change the ordering — the flip still
 waits on restore-before-Run.
 
-### Resulting decisions (awaiting Arno's ratification)
+### Resulting decisions (RATIFIED by Arno, 2026-08-18)
 
 1. **Adopt the strict posture on the `executeEpsil` route only.** The
    box route and host API keep today's semantics (replace / throw

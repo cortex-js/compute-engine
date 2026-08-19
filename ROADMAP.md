@@ -1107,6 +1107,19 @@ fixed:
   instead of `broadcastable<boolean>`, which Tycho's `matches('collection')`
   gate declines. Tycho is filing these separately; the CE-side fix is in the
   `Unique` and `At` type handlers (`library/collections.ts`).
+  **Status 2026-08-18 — both halves closed by intervening work:**
+  `Unique(indexed_collection<integer>)` now types `list<integer>` (element
+  preserved through the `(collection<T>) -> list<T>` signature), and
+  `At(U, i)` on a bare source answering `unknown` is CORRECT under the
+  bare≡`<unknown>` ruling (the element type IS `unknown`; with a declared
+  element type, `At` answers it through the §3.C access-mode matrix —
+  `integer` normalizes to `number` there because a numeric type absorbs its
+  own `NaN` absence marker, by design). One residual drift found and fixed
+  the same day: the signature solver's mirror of `collectionElementType`
+  still read a BARE operand's elements as `any`, so `Unique(bare)` typed
+  `list<any>` — outside the values-only family. Fixed in
+  `common/type/instantiate.ts` (`elementTypeOf`, `liftedElementTypeOf`);
+  pinned in `bare-element-solver-drift.test.ts`.
 - **`Add` and `Multiply` widen collection cells by different evidence.**
   `addType` (`boxed-expression/arithmetic-add.ts`) widens the cells by ANY
   numeric co-operand, including a merely inferred scalar; the `Multiply`
@@ -3678,6 +3691,49 @@ BigDecimal call sites (invasive, correct), or save/set/restore of the
 static around every engine evaluation entry point (cheap, but
 async-evaluation interleaving needs care). Related trap record:
 `bigdecimal-precision-global` in auto-memory.
+
+### The strict linear posture initiative (RATIFIED 2026-08-18 — implementation queue)
+
+Arno ratified (2026-08-18, with Tycho's code-verified concurrence):
+cross-program redefinition of types/protocols/conformances/same-signature
+clauses becomes an ERROR on the Epsil (`executeEpsil`) route only — the
+box route and host API keep today's replace/throw semantics permanently
+(Tycho's recompute passes re-assert declarations via the box route every
+300 ms and depend on idempotency) — and the notebook edit gesture moves
+to a new engine `checkpoint()`/`restore()` API. The three governing
+documents, all self-contained: the deletion-dividend audit
+(`docs/plans/2026-08-18-linear-posture-audit.md`), the checkpoint API
+design at revision 2, dual-spec-reviewed and approved
+(`docs/plans/2026-08-18-checkpoint-restore-design.md`), and the Tycho
+Q&A with the ratified decisions
+(`docs/plans/2026-08-18-linear-posture-tycho-questions.md`).
+
+Implementation order (each stage independently valuable; nothing
+deletes until the last step):
+
+1. **R1 — same-statement idempotent re-registration.** A `Declare*`
+   statement registers 2–3× per run (canonical + evaluate handlers);
+   the second registration currently takes the full REPLACE path,
+   including a `resettleTypeConformances` sweep costing a measured
+   ~1.2 ms per `type` statement (×N+1 for sums) with zero redefinition
+   anywhere. Make the same-statement re-registration a no-op. Blocking
+   prerequisite for any strictness change; pays for itself regardless.
+   (Audit §2, finding F2/R1.)
+2. **Checkpoint stage C1 — journal infrastructure** (design §5.2/§5.3
+   hook set, window lifecycle §4b). C1 exit criterion: the
+   all-constant-pure `undefined`-key memo question settled empirically
+   (design §9).
+3. **Stage C2 — the `EngineCheckpoint` API** (session-base v1, typed
+   errors, two-phase restore with poisoning semantics).
+4. **Stage C3 — the differential harness** (fresh-engine oracle,
+   comparator table, lifecycle/failure matrix, bypass canary).
+5. **Checkpoint v2 — in-scope checkpoints** (COMMITTED, not optional:
+   Tycho's cells always evaluate inside a host-pushed scope; v2 is what
+   unlocks their per-cell checkpointing).
+6. **The Epsil-route strictness flip + machinery deletion** (~1,384
+   source lines, ~1,891 test lines, ≈92 test flips — audit §5), gated
+   on Tycho shipping restore-before-Run client-side. Until then both
+   mechanisms coexist.
 
 **KNOWN, not scheduled: pinned layouts are SHALLOW.** `detachDefinitionBody`
 (`boxed-expression/boxed-object.ts`) copies an object body one level deep and
