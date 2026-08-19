@@ -8,6 +8,7 @@ import {
 import type { AddressInfo } from 'node:net';
 
 import { ComputeEngine, serializeEpsil, version } from '../epsil.js';
+import { isSymbol } from '../compute-engine/boxed-expression/type-guards.js';
 import { explainErrorCode } from '../epsil/error-explanations.js';
 
 import { CliUsageError, parseMcpArguments } from './arguments.js';
@@ -533,7 +534,13 @@ class McpServer {
     const json = formatValue(result, 'json');
     return toolResult({
       ok: !hasErrors(result),
-      value: formatValue(result, 'value'),
+      // `value` is the human-facing rendering, but an MCP consumer is a
+      // machine: a `Nothing` result stays spelled out here (the human mode
+      // of `formatValue` suppresses it), so that '' keeps its one meaning —
+      // "the source was empty".
+      value: isSymbol(result.value, 'Nothing')
+        ? 'Nothing'
+        : formatValue(result, 'value'),
       epsil: formatValue(result, 'epsil'),
       mathjson: json ? JSON.parse(json) : null,
       ...(output.length > 0 ? { output } : {}),

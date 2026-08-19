@@ -676,6 +676,23 @@ describe('Epsil CLI evaluation', () => {
     expect(JSON.parse(formatValue(result, 'json'))).toEqual(['Rational', 3, 2]);
   });
 
+  test('a Nothing result is not echoed in value mode', () => {
+    // A program that ends in a `print(…)` produces Nothing: its own output
+    // already went to the console, so echoing the word after it is noise.
+    // The machine modes keep the value — their consumers asked for it.
+    // The spy keeps the print itself out of the jest run's console.
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const result = makeEpsilSession(0).evaluate('let x = 3\nprint(x)');
+      expect(formatValue(result, 'value')).toBe('');
+      expect(formatValue(result, 'epsil')).toBe('Nothing');
+      expect(JSON.parse(formatValue(result, 'json'))).toEqual('Nothing');
+      expect(log).toHaveBeenCalledWith('3');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   test('JSON output materializes finite lazy collections', () => {
     const session = makeEpsilSession(0);
     expect(

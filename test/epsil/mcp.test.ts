@@ -192,6 +192,20 @@ describe('MCP server tools', () => {
     expect(result.diagnostics).toEqual([]);
   });
 
+  test('evaluate keeps a Nothing result spelled out', async () => {
+    // The CLI's human-facing mode suppresses a `Nothing` result, but an MCP
+    // consumer is a machine: `value` stays "Nothing" so that '' keeps its
+    // one meaning — "the source was empty".
+    const [response] = await runServer([
+      callTool(1, 'evaluate', { source: 'print(42)' }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe('Nothing');
+    expect(result.mathjson).toBe('Nothing');
+    expect(result.output).toEqual(['42']);
+  });
+
   test('evaluate reports diagnostics for a broken program', async () => {
     const [response] = await runServer([
       callTool(1, 'evaluate', { source: '1 +' }),

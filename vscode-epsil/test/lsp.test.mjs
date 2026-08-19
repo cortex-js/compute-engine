@@ -390,14 +390,24 @@ await scenario('representation views', undefined, async (c) => {
 
 await scenario('representation views on a broken program', undefined, async (c) => {
   const diagnostics = await c.open(URI, 'let = 42');
-  // `symbol-expected` has no entry in the error reference: no link, even for
-  // a client with the capability — a code must never be a dead link.
+  // `symbol-expected` has an entry in the error reference, so it links;
+  // `closing-bracket-expected` (below) has none, so it must not — a code is
+  // never a dead link.
   check(
-    'an undocumented code carries no codeDescription',
+    'a documented parse-error code links to the reference',
     diagnostics[0]?.code === 'symbol-expected' &&
-      diagnostics[0].codeDescription === undefined,
+      diagnostics[0].codeDescription?.href ===
+        'https://epsil.dev/errors/#symbol-expected',
     JSON.stringify(diagnostics[0])
   );
+  const unclosed = await c.open(URI, '(1');
+  check(
+    'an undocumented code carries no codeDescription',
+    unclosed[0]?.code === 'closing-bracket-expected' &&
+      unclosed[0].codeDescription === undefined,
+    JSON.stringify(unclosed[0])
+  );
+  await c.open(URI, 'let = 42');
 
   const ast = await c.request('epsil/view', { uri: URI, view: 'ast' });
   check(

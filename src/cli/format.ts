@@ -1,4 +1,5 @@
 import { serializeEpsil } from '../epsil.js';
+import { isSymbol } from '../compute-engine/boxed-expression/type-guards.js';
 import type {
   DiagnosticNote,
   ParsingDiagnostic,
@@ -52,6 +53,12 @@ export function formatValue(
     return serializeEpsil(
       result.value.toMathJson({ fractionalDigits: 'auto' })
     );
+  // A `Nothing` result is not echoed in the human-facing mode: a program
+  // whose last statement is a `print(…)` (or a declaration, or a loop)
+  // produces Nothing, and printing the word after the program's own output
+  // is noise (the Python REPL treats None the same way). The machine modes
+  // above keep the value — their consumers asked for the value itself.
+  if (isSymbol(result.value, 'Nothing')) return '';
   return result.value.toString();
 }
 
