@@ -1570,13 +1570,19 @@ function elementTypeOf(type: Type): Type | undefined {
   if (typeof type === 'string') {
     // An index span's element type is KNOWN (finite positive integers), so it
     // does not belong with the unparameterized types below, which report the
-    // opaque `any`. This mirrors `collectionElementType`
+    // values-only `unknown`. This mirrors `collectionElementType`
     // (`common/type/utils.ts`), which this function's contract promises to
     // match exactly.
     if (type === 'range') return 'integer';
     // A string's element type is likewise KNOWN: one index into a string
     // yields one grapheme cluster, i.e. a `character`.
     if (type === 'string') return 'character';
+    // Bare constructors are their `<unknown>` synonyms (user ruling
+    // 2026-08-17): their elements are VALUES — `unknown`, never the
+    // absence-admitting `any`. `collectionElementType` was updated in that
+    // round; this mirror had drifted and kept answering `any`, which leaked
+    // into type-variable bindings (`Unique(bare collection)` typed
+    // `list<any>`, taking the result out of the values-only family).
     if (
       type === 'collection' ||
       type === 'indexed_collection' ||
@@ -1586,7 +1592,7 @@ function elementTypeOf(type: Type): Type | undefined {
       type === 'dictionary' ||
       type === 'record'
     )
-      return 'any';
+      return 'unknown';
     return undefined;
   }
   if (type.kind === 'collection' || type.kind === 'indexed_collection')
@@ -1667,10 +1673,13 @@ function liftedElementTypeOf(actual: Type): Type {
     return algebra().widen(...actual.types.map((t) => liftedElementTypeOf(t)));
   }
 
-  // A bare `list`/`indexed_collection` carries no element information; peeling
-  // it to `any` still gets the RANK right (the wrapper re-adds one level),
-  // where contributing it whole would nest (`list<list>`).
-  if (actual === 'list' || actual === 'indexed_collection') return 'any';
+  // A bare `list`/`indexed_collection` carries no element information;
+  // peeling it to its element reading still gets the RANK right (the
+  // wrapper re-adds one level), where contributing it whole would nest
+  // (`list<list>`). The element reading is `unknown`, not `any`: bare
+  // constructors are their `<unknown>` synonyms (user ruling 2026-08-17)
+  // and their elements are values.
+  if (actual === 'list' || actual === 'indexed_collection') return 'unknown';
   // An index span peels to its KNOWN element type rather than to `any`: its
   // members are finite positive integers.
   if (actual === 'range') return 'integer';
@@ -1692,7 +1701,7 @@ function liftedElementTypeOf(actual: Type): Type {
 /** Whether an actual is one of the kinds a broadcast MAPS over — the union
  * members `liftedElementTypeOf` may distribute the peel across. The bare
  * `list`/`indexed_collection` spellings carry no element type but ARE mapped
- * (they peel to `any`). */
+ * (they peel to the values-only `unknown`). */
 function isMappedActual(t: Type): boolean {
   if (t === 'list' || t === 'indexed_collection' || t === 'range') return true;
   return typeof t === 'object' && MAPPED_KINDS.has(t.kind);
@@ -1875,6 +1884,12 @@ function walkPattern(
     case 'broadcastable': {
       // §4.4 three-shape decomposition: a scalar actual, an indexed collection
       // of `S`, or a `broadcastable<S>` all bind `T ≥ S`.
+      // A BARE `list`/`indexed_collection` actual binds `T` to its element
+      // reading, `unknown` — bare constructors are `<unknown>` synonyms
+      // (user ruling 2026-08-17) and their elements are values, so `any`
+      // here leaked the absence-admitting top into the binding, the same
+      // drift `elementTypeOf` had. Routed through `elementTypeOf` so the
+      // two can no longer diverge.
       const inner =
         typeof actual === 'object' &&
         (actual.kind === 'broadcastable' ||
@@ -1882,7 +1897,7 @@ function walkPattern(
           actual.kind === 'indexed_collection')
           ? elementTypeOf(actual)!
           : actual === 'list' || actual === 'indexed_collection'
-            ? 'any'
+            ? elementTypeOf(actual)!
             : actual;
       return walkPattern(
         s,

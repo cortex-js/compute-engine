@@ -180,6 +180,20 @@
 
 ### Improvements
 
+- **Declaration statements no longer pay for re-registering themselves.**
+  One Epsil `type` / `protocol` / conformance statement registers its
+  declarations up to three times per program run (the static pre-pass and
+  the evaluation loop each canonicalize it, then it evaluates). The second
+  same-statement registration used to take the full replacement path —
+  re-parsing the body, re-settling every conformance edge in the engine,
+  re-running the effect-widening checks — to rebuild exactly the state it
+  had just built. It is now recognized as a no-op from the statement's
+  declaration-origin stamp. Measured: a fresh `type` statement in an
+  engine holding 8 protocols dropped from ~1.7 ms to ~0.2 ms per program.
+  Notebook re-runs in a later program still replace, a duplicate
+  declaration in one program is still an error, and the raw MathJSON /
+  host API routes keep their idempotent replace semantics unchanged.
+
 - **Internal methods are now visibly internal.** Methods tagged `@internal`
   now start with `_`, including the compilation-target registry, expression
   inference/binding/cache-reset hooks, parser diagnostic helpers, operator
@@ -188,6 +202,18 @@
   apparent at call sites.
 
 ### Bug Fixes
+
+- **Type-variable bindings over bare collection operands stay in the
+  values-only family.** The signature solver's element reading of a bare
+  collection constructor had drifted from the bare-types ruling and answered
+  `any`: `Unique` over an operand declared bare `collection` (likewise
+  `list`, `set`, `indexed_collection`) instantiated its
+  `(collection<T>) -> list<T>` signature with `T := any` and produced
+  `list<any>` — an absence-admitting type outside the values-only collection
+  family the operand came from. Bare constructors are `<unknown>` synonyms,
+  so `T` now binds to `unknown` and the result is a plain values-only
+  `list`. The broadcast lift's element peel of a bare `list`/
+  `indexed_collection` is aligned the same way.
 
 - **Setting `expr.value` to a boxed expression no longer corrupts the
   value.** The setter's input dispatch sniffed for a `{re, im}`
@@ -1571,8 +1597,8 @@
   `tuple<x: integer, y: integer>` (element names are labels on positions, not
   keys) are unchanged. `record{}` and bare `record` / `object` are also
   unchanged. The old spelling is a parse error naming the brace form
-  (`A record type is written with braces: \`record{key: type,
-  …}\``); type strings serialize with braces, so `typeToString` output and
+  (``A record type is written with braces: `record{key: type,
+  …}` ``); type strings serialize with braces, so `typeToString` output and
   anything that snapshots it changes accordingly.
 
   ```epsil

@@ -3711,13 +3711,21 @@ Q&A with the ratified decisions
 Implementation order (each stage independently valuable; nothing
 deletes until the last step):
 
-1. **R1 — same-statement idempotent re-registration.** A `Declare*`
-   statement registers 2–3× per run (canonical + evaluate handlers);
-   the second registration currently takes the full REPLACE path,
-   including a `resettleTypeConformances` sweep costing a measured
-   ~1.2 ms per `type` statement (×N+1 for sums) with zero redefinition
-   anywhere. Make the same-statement re-registration a no-op. Blocking
-   prerequisite for any strictness change; pays for itself regardless.
+1. **R1 — same-statement idempotent re-registration. SHIPPED
+   2026-08-18.** A `Declare*` statement registers 2–3× per run
+   (canonical + evaluate handlers); the second same-statement
+   registration used to take the full REPLACE path, including the
+   `resettleTypeConformances` sweep, with zero redefinition anywhere.
+   Now recognized as a no-op from the declaration-origin stamp
+   (`isSameStatementReRegistration`, `declaration-origin.ts`) in
+   `declareType`, `declareSumType`, `declareProtocolImpl` and — via the
+   P47 `{batch, block}` stamp — `declareConformance`. Unstamped routes
+   (box route, host API) keep replace semantics untouched; the origin
+   stamps themselves are kept (the audit's R1/R2 self-collision
+   warning). Measured: a fresh `type` statement batch in an 8-protocol
+   engine dropped ~1.7 ms → ~0.2 ms. Pins (incl. fails-without-the-fix
+   identity witnesses and box-route/discipline preservation):
+   `test/compute-engine/same-statement-reregistration.test.ts`.
    (Audit §2, finding F2/R1.)
 2. **Checkpoint stage C1 — journal infrastructure** (design §5.2/§5.3
    hook set, window lifecycle §4b). C1 exit criterion: the
