@@ -111,6 +111,51 @@
 
 ### New Features
 
+- **Engine checkpoint / restore: `ce.checkpoint()`, `ce.restore(cp)`,
+  `ce.discard(cp)`.** A notebook client can take a checkpoint of engine
+  state at a statement boundary and later rewind to it, so "the user edited
+  cell k" becomes *restore the checkpoint taken before cell k, replay cells
+  k…n* — instead of relying on in-place redefinition. The contract
+  (`docs/CHECKPOINT-MODEL.md`):
+
+  - **Restore rewrites definition records in place and never swaps them**,
+    so expressions built before the checkpoint stay valid and
+    identity-keyed caches (such as a client's element memos) stay warm —
+    restore-then-replay is cheaper than a full re-run, not merely
+    equivalent to it. Monotone invalidation counters advance across a
+    restore; they never rewind.
+  - **Checkpoints form one linear history** — a stack, not a tree.
+    Restoring invalidates every younger checkpoint; the restored one stays
+    live and can be restored again. `discard()` releases a checkpoint while
+    keeping older ones able to undo the discarded interval.
+  - **Checkpoints are legal at any quiescent point, at any scope depth** —
+    including inside a host-pushed scope, which is how a notebook takes
+    per-cell checkpoints within an evaluation pass. A checkpoint captures
+    its scope frames by identity: `restore` requires the same frames back,
+    and popping a scope a checkpoint was taken inside retires that
+    checkpoint (its undo journal folds into the next-older one, so
+    restoring past it still unwinds the popped scope's writes).
+  - **Every refusal is a typed `CheckpointError`** thrown before any state
+    is written (`checkpoint-not-quiescent`, `checkpoint-dead`,
+    `checkpoint-foreign-engine`); a failure during a restore's mutation
+    phase poisons the engine (`checkpoint-restore-failed`), and the
+    documented remedy is to rebuild it and replay from the baseline.
+  - **What replay does NOT hide**: effects re-execute (`Print` re-prints,
+    `Random()` re-draws), object identities are fresh, and a
+    `BoxedExpression` created inside a discarded window is invalid after
+    the restore — cache cell outputs as serialized artifacts, never as
+    live boxed nodes.
+
+  Covered state spans the type/protocol registries, assumptions (including
+  their value-binding provenance), host configuration (precision restored
+  before tolerance, rule stores, compilation targets, runtime limits),
+  sequence registries, definition-record fields, scope bindings, and
+  mutable-object slots. Verified by a mutation-validated differential
+  harness that compares restore-then-replay against a fresh engine running
+  the equivalent linear program, at the session base and inside a pushed
+  scope alike (`test/compute-engine/checkpoint-differential.test.ts`); a
+  journal bypass canary runs with every `npm test`.
+
 - **Typed patterns: full type expressions and protocol tests on `is` and in
   `match` patterns** (phase 2 of `docs/plans/2026-08-18-first-class-types.md`).
   The dynamic type test now takes any type expression — `x is list<integer>`,
