@@ -1086,17 +1086,19 @@ describe('signature-driven trigger: a user-defined callee', () => {
     expect(expr.ops[2].type.toString()).toBe('(m: number) -> number');
   });
 
-  test('a POLYMORPHIC callee is skipped', () => {
-    // The inner parameter type `T` is bound by the callee's own `where`
-    // clause: stamping it on the literal would leave it unresolved outside
-    // that scope (or capture an unrelated nominal type named `T`).
-    // Instantiating it is design (D).
+  test('a POLYMORPHIC callee stamps with the INSTANTIATED variable (Design E)', () => {
+    // Pre-E this callee was skipped — stamping `T` verbatim would have left
+    // it unresolved outside its `where` scope. Design E §6b makes a plain
+    // arrow a contextual slot, so the contextual solve now runs for USER
+    // polytypes too: `T` is solved from the data operand (`3`) and the
+    // literal's parameter is stamped with the instantiated type — never the
+    // bare variable (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`).
     const ce = new ComputeEngine();
     ce.declare('gen', '((T) -> boolean, T) -> T where T: number');
     const expr = ce.box(['gen', ['Function', ['Greater', 'n', 1], 'n'], 3]);
     expect(expr.toMathJson()).toEqual([
       'gen',
-      ['Function', ['Less', 1, 'n'], 'n'],
+      ['Function', ['Less', 1, 'n'], ['Typed', 'n', "'finite_integer'"]],
       3,
     ]);
   });

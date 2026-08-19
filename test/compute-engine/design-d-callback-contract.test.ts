@@ -117,13 +117,15 @@ describe('clause 1: `callback<S>` IS the primitive `function` for subtyping', ()
     expect(ce.type('(integer) -> boolean').couldMatch(CB)).toBe(true);
   });
 
-  it('a non-function operand is still refused, and the message says `function`', () => {
+  it('a non-function operand is still refused, and the message names the arrow', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['CountIf', XS, 5]);
     expect(e.isValid).toBe(false);
-    // The erasure reaches the DIAGNOSTIC too: the converted slot reports
-    // exactly what the bare-`function` slot reported.
-    expect(e.toString()).toContain('"function"');
+    // Design E phase E1 (`docs/plans/2026-08-18-compatibility-admission-
+    // callbacks.md` §8): `CountIf`'s slot is an honest arrow, and the
+    // diagnostic now names it INSTANTIATED from the sources — strictly more
+    // informative than the erased `"function"` the callback<S> era reported.
+    expect(e.toString()).toContain('"(finite_integer) any -> boolean"');
     expect(e.toString()).not.toContain('callback<');
   });
 });
@@ -157,11 +159,17 @@ describe('clause 2: the contextual solve traverses `S`’s parameters only', () 
     expect(typeToString(slots.get(1)!)).toBe('(integer) -> U');
   });
 
-  it('declines when the arm has no callback slot, or no source for one', () => {
+  it('plans a PLAIN-ARROW slot too (Design E §6b), declines with no domain source', () => {
+    // Design E (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`
+    // §6b): the trigger no longer requires the `callback<S>` spelling — a
+    // plain arrow slot is a contextual slot, which is what lets a converted
+    // signature keep its stamp after the constructor is deleted.
     const plain = parseType(
       '(collection<T>, (T) -> boolean) -> integer where T'
     ) as FunctionSignature;
-    expect(contextualCallbackPlan(plain, 2)).toBeUndefined();
+    const plan = contextualCallbackPlan(plain, 2)!;
+    expect(plan.callbacks.map((c) => c.index)).toEqual([1]);
+    expect([...plan.domainVars]).toEqual(['T']);
     // `T` is read only by `S`'s RESULT: nothing to solve the domain from.
     const resultOnly = parseType(
       '(callback<() -> T>, T) -> integer where T'
@@ -311,13 +319,16 @@ describe('clause 5: `callback<S>` round-trips through serialize/parse', () => {
 describe('phase 0: `CountIf` converts to the contextual signature', () => {
   it('declares the contextual slot and NO metadata', () => {
     const ce = new ComputeEngine();
+    // Design E phase E1: the slot is an honest, effect-top arrow — the
+    // `callback<S>` constructor is retired from converted signatures
+    // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §5).
     expect(ce.type(declaredSignature(ce, 'CountIf')).toString()).toBe(
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T'
+      '(collection<T>, predicate: (T) any -> boolean) -> integer where T'
     );
     // Read through `typeToString`, not `ce.type()`: the slot is OPEN (it
     // mentions the arm's `T`), and an open type is deliberately not boxable.
     expect(typeToString(declaredParam(ce, 'CountIf', 1))).toBe(
-      'callback<(T) -> boolean>'
+      '(T) any -> boolean'
     );
     expect(hasCallbackMetadata(ce, 'CountIf')).toBe(false);
   });
@@ -1731,15 +1742,20 @@ describe('clause 1: the erasure is DEEP in argument validation', () => {
 });
 
 describe('R-D5: runtime signature display is the GROUND form', () => {
-  // Ruled 2026-08-09. A converted operator prints exactly its pre-conversion
-  // signature — `callback<S>` erased to `function`, the quantified variables at
-  // their ground skeleton — because neither carries admission information.
-  const COUNT_IF = '(collection, predicate: function) -> integer';
+  // Ruled 2026-08-09; superseded PER CONVERTED OPERATOR by Design E §8
+  // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`): an
+  // operator whose slot is an honest arrow displays its honest polytype —
+  // the arrow now STATES the (compatibility) contract, so printing it no
+  // longer claims a narrowing that did not happen. `CountIf` converted in
+  // phase E1; `Filter` still carries `callback<S>` and keeps the R-D5
+  // grounded display until phase E2 converts it.
+  const COUNT_IF_E =
+    '(collection<T>, predicate: (T) any -> boolean) -> integer where T';
   const FILTER = '(collection, predicate: function) -> collection';
 
-  it('a boxed operator NAME reports the pre-conversion string', () => {
+  it('a boxed operator NAME reports the signature honestly', () => {
     const ce = new ComputeEngine();
-    expect(ce.box('CountIf').type.toString()).toBe(COUNT_IF);
+    expect(ce.box('CountIf').type.toString()).toBe(COUNT_IF_E);
     expect(ce.box('Filter').type.toString()).toBe(FILTER);
   });
 
@@ -1747,14 +1763,14 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
     const ce = new ComputeEngine();
     const sig = (op: string) =>
       ce.function('Signature', [ce.symbol(op)]).evaluate().string;
-    expect(sig('CountIf')).toBe(COUNT_IF);
+    expect(sig('CountIf')).toBe(COUNT_IF_E);
     expect(sig('Filter')).toBe(FILTER);
   });
 
   it('the definition JSON and the scope listing agree', () => {
     const ce = new ComputeEngine();
     const def = ce.lookupDefinition('CountIf') as any;
-    expect(def.operator.toJSON().signature).toBe(COUNT_IF);
+    expect(def.operator.toJSON().signature).toBe(COUNT_IF_E);
 
     // The scope listing writes to the console; capture it, strip the ANSI
     // color codes, and read the operator's line back.
@@ -1779,7 +1795,7 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
     const countIfLine = lines
       .map((l) => l.replace(ansi, ''))
       .find((l) => l.startsWith('CountIf:'));
-    expect(countIfLine).toBe(`CountIf: ${COUNT_IF}`);
+    expect(countIfLine).toBe(`CountIf: ${COUNT_IF_E}`);
   });
 
   it('an UNCONVERTED operator is byte-identical to before', () => {
@@ -1796,11 +1812,11 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
     );
   });
 
-  it('DISPLAY ONLY: the definition still holds the contextual signature', () => {
+  it('definition and display COINCIDE for a Design E operator', () => {
+    // Under Design E there is no projection seam left for `CountIf`: the
+    // declared arrow is the displayed arrow.
     const ce = new ComputeEngine();
-    expect(typeToString(declaredSignature(ce, 'CountIf'))).toBe(
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T'
-    );
+    expect(typeToString(declaredSignature(ce, 'CountIf'))).toBe(COUNT_IF_E);
   });
 
   // The seam is STRINGIFICATION, not the type (review round A). `.type`
@@ -1809,15 +1825,11 @@ describe('R-D5: runtime signature display is the GROUND form', () => {
   it('the boxed type is FAITHFUL: polymorphic, and it matches its declaration', () => {
     const ce = new ComputeEngine();
     const t = ce.box('CountIf').type;
-    expect(t.toString()).toBe(COUNT_IF);
+    expect(t.toString()).toBe(COUNT_IF_E);
     // Dropping the `where` clause on the `.type` object flipped this, and with it
     // every `Ground <: Poly` answer (which is unconditionally false).
     expect(t.isPolymorphic).toBe(true);
-    expect(
-      t.matches(
-        '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T'
-      )
-    ).toBe(true);
+    expect(t.matches(COUNT_IF_E)).toBe(true);
 
     // …and the same for a user's own callback-bearing polytype, on the VALUE
     // definition surface.
@@ -2206,8 +2218,12 @@ describe('R-D5: the display cache re-grounds a REPLACED signature', () => {
     // whose signature is replaced is re-grounded on the next read rather than
     // serving a stale projection.
     const ce = new ComputeEngine();
+    // Design E: `CountIf`'s own display is the honest polytype (§8); the
+    // REPLACED signature below still carries a `callback<S>`, so what this
+    // pins — the cache re-grounding on replacement, not serving stale — is
+    // exercised across the two display regimes at once.
     expect(ce.symbol('CountIf').type.toString()).toBe(
-      '(collection, predicate: function) -> integer'
+      '(collection<T>, predicate: (T) any -> boolean) -> integer where T'
     );
     (ce.lookupDefinition('CountIf') as any).operator._update({
       signature:

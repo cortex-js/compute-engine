@@ -1,11 +1,14 @@
 # Design E — Compatibility admission for callback slots; retiring `callback<S>`
 
-**Status: DRAFT rev 3 (2026-08-18) — dual spec review (Claude + Codex, 11
-findings; `docs/scratch/2026-08-18-compatibility-admission-callbacks_SPEC_REVIEW.md`)
-applied end to end, including the two review-round rulings (maintainer, same
-day): the EFFECT-SUBSET check joins the relation as rule 5, and the
-comparator slots convert IN the sweep with UNION spellings (§9 items 5–6).
-All §9 questions RULED. Successor to Design D
+**Status: rev 4 (2026-08-18) — PHASES E0 AND E1 IMPLEMENTED (§12b records
+the as-built decisions, including R-E3′: data positions are authoritative
+for a domain variable, not exclusive). Rev 3 applied the dual spec review
+(Claude + Codex, 11 findings;
+`docs/scratch/2026-08-18-compatibility-admission-callbacks_SPEC_REVIEW.md`)
+and the two review-round rulings (maintainer, same day): the EFFECT-SUBSET
+check joins the relation as rule 5, and the comparator slots convert IN the
+sweep with UNION spellings (§9 items 5–6). All §9 questions RULED.
+Successor to Design D
 (`docs/plans/2026-08-09-design-d-generic-callback-signatures.md`), whose
 `callback<S>` constructor this design deletes. Rulings made in the
 2026-08-18 conversation:**
@@ -557,6 +560,91 @@ Measure both with a full-suite run before staging.
 5. Each phase: `npm run typecheck`, targeted suites, madge after the
    `callback.ts` deletion (breaking an import can create a new cycle), and
    the staging-status protocol.
+
+## 12b. Phases E0/E1 addendum (implemented 2026-08-18): as built
+
+Phase E0 and phase E1 (`CountIf`) are implemented. The relation lives in
+`src/common/type/compatibility.ts` (`callbackIncompatibility` — rules 1/3/4,
+bottom carve-outs, operand shapes; 23 direct unit tests in
+`test/common/type/compatibility.test.ts`); the gate lives in the three
+`!op.type.matches(param)` failure branches of `validateArguments`
+(`arrowSlotAdmission`, `validate.ts`) — an operand strict subtyping admits is
+a fortiori compatible, so the gate only decides what strict matching refuses.
+Acceptance pins: `test/compute-engine/design-e-compatibility.test.ts`. Five
+as-built decisions sharpen or correct the spec:
+
+1. **R-E3′ — data positions are AUTHORITATIVE, not exclusive.** The blanket
+   "callback parameters never constrain the solve" DELETED ratified
+   behavior: `type-variables.test.ts`'s end-to-end pins solve
+   `comp: ((T) -> U, (U) -> V) -> (T) -> V` and the multi-callback meet
+   `both: ((T) -> boolean, (T) -> boolean) -> T` FROM the callbacks — their
+   variables occur at no data position, so the callback is the only source.
+   As built (`solveArm`, `generic-instantiation.ts`): an arrow-slot operand
+   is skipped for domain solving iff EVERY variable in the slot's parameter
+   types also occurs at a data (non-arrow-slot) position; otherwise it
+   contributes exactly as before. All R-E1/R-E3 anchors hold
+   (`CountIf(zs, IsPrime)` leaves `zs: collection<unknown>`; the
+   union-source predicate never conflicts the data solve), and the one
+   user-visible delta is the data-anchored case:
+   `apply2: ((T) -> U, T) -> U` no longer infers `x: number` from
+   `apply2(IsPrime, x)` — `x` stays `unknown`, while the RESULT-side flow
+   (`U = boolean`) is preserved by a post-solve refinement that binds a
+   bare result variable from the callback operand's own result type.
+2. **Rule 2 owns the diagnostic, enforced by ordering.** A wrong-arity
+   callback is usually result-disjoint too; letting rules 3/4 reject first
+   replaced the shipped rich `callback-arity` message with a generic
+   `incompatible-type` (caught by `callback-arity.test.ts`). The gate
+   therefore ADMITS an operand whose declared arity provably cannot accept
+   the slot's supply, leaving the diagnostic to `callbackArityError`
+   downstream.
+3. **Diagnostics name the INSTANTIATED arrow** — `CountIf([1,2,3,4], 5)`
+   now reports `expected (finite_integer) any -> boolean`, not the erased
+   `function`. Display churn beyond §8's signature enumeration, judged
+   strictly more informative and re-pinned.
+4. **Polymorphic USER callees now stamp** (§6b's uniform trigger): the
+   lambda-param pin "a POLYMORPHIC callee is skipped" flips — `gen: ((T) ->
+   boolean, T) -> T` stamps an inline literal's parameter with the
+   INSTANTIATED `T` (`finite_integer` from the data operand), which is what
+   that pin's own comment had anticipated as "design (D)". Ground user
+   arrows still stamp on the pre-existing declared-params route; user
+   overload sets resolve through the unchanged R-D4 machinery.
+5. **Q3's rejection closed a real divergence.** `compile-cse.test.ts`
+   merged `CountIf(xs, Abs)` — under Q3, `Abs: (number) -> number` is
+   result-disjoint and statically invalid, which also closes a live
+   interpreter/compile split: the compiled `.filter` read `Abs` by JS
+   truthiness while the interpreter threw per element. The test now uses
+   `Not` (the one unary boolean builtin with a JS lowering) over a boolean
+   list, with `constantFold: false` since a VALID predicate over a literal
+   list folds away entirely. `filter-predicate-errors.test.ts`'s CountIf
+   case likewise moves from the runtime `must return "True" or "False"`
+   throw to canonicalization-time invalidity, per the Q3 ruling; the
+   unconverted siblings keep the runtime throw until E3.
+
+Admission writes: a compatibility-admitted operand joins `deferredIdx` (no
+final `_infer(param)` narrowing — the slot arrow is a per-call supply, not
+the operand's contract), and the evidence-narrow paths skip arrow-shaped
+params for the same reason. Verification: full suite green (30k tests),
+ZERO snapshot churn, typecheck clean, madge clean.
+
+Two review-round items are DEFERRED BY PHASE, not oversights (dual code
+review, 2026-08-18):
+
+- **The lazy routes do not run the gate yet.** The `validateArguments`
+  loops' `if (lazy) … continue` precedes it, so a LAZY operator's arrow
+  slot — user-declared or converted — still admits everything, exactly as
+  it did pre-E (lazy operators never validated operands). Phase E2's §6
+  planning pass is the deliverable that closes this; `Filter` is its
+  flagship.
+- **User-declared slots do not get the static arity rejection yet.** The
+  gate deliberately ADMITS an arity-incapable operand so rule 2's
+  machinery owns the diagnostic — and that machinery exists only in the
+  library's hand-wired canonical handlers. A binary lambda at a
+  user-declared unary slot therefore stays valid until application,
+  byte-identical to today. The §13 user-arity acceptance criterion is
+  E3's (generic `CallbackSupply` derivation at the §6 planning pass —
+  §3 rule 2 delta (b)); the layering also demands it live there
+  (`validate.ts` cannot import `library/callback-arity.ts` against the
+  layer direction).
 
 ## 13. Acceptance criteria
 

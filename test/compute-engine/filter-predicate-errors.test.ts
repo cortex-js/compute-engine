@@ -105,13 +105,25 @@ describe('Sibling predicate consumers with an Error-valued result', () => {
       expect(result.toString()).not.toContain('Did you mean');
     });
 
-    test(`${op} keeps the existing message for a genuine non-boolean predicate`, () => {
+    test(`${op} rejects (or errors on) a genuine non-boolean predicate`, () => {
       const ce = new ComputeEngine();
-      expect(() =>
-        ce
-          .box([op, ['List', 1, 2, 3], ['Function', ['Add', 'k', 1], 'k']])
-          .evaluate()
-      ).toThrow('must return "True" or "False"');
+      const e = ce.box([
+        op,
+        ['List', 1, 2, 3],
+        ['Function', ['Add', 'k', 1], 'k'],
+      ]);
+      if (op === 'CountIf') {
+        // Design E §9 Q3 (`docs/plans/2026-08-18-compatibility-admission-
+        // callbacks.md`, ruled 2026-08-18): a converted operator rejects a
+        // provably non-boolean predicate at CANONICALIZATION — the program
+        // could only ever throw `must return "True" or "False"` per element,
+        // so the failure moves to declaration time. The unconverted siblings
+        // keep the runtime throw until the E3 sweep converts them.
+        expect(e.isValid).toBe(false);
+        expect(e.toString()).toContain('incompatible-type');
+      } else {
+        expect(() => e.evaluate()).toThrow('must return "True" or "False"');
+      }
     });
   }
 

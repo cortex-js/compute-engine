@@ -8,7 +8,8 @@ import {
 } from '../collection-utils.js';
 
 import { flatten, flattenHoldingBarriers } from './flatten.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import { callbackIncompatibility } from '../../common/type/compatibility.js';
 import { deepEraseCallbackTypes } from '../../common/type/callback.js';
 import { admissionOf, hasValueComponent } from './value-membership.js';
 import {
@@ -17,6 +18,7 @@ import {
   couldBeNonRealNumber,
   narrowingPreservesEffects,
   overlapsForDeferredValidation,
+  signatureArms,
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
@@ -731,6 +733,139 @@ function narrowCharacterLiteral(
   return narrowStringLiteralToCharacter(ce, op);
 }
 
+/**
+ * The signature arms of an arrow-typed parameter slot, for compatibility
+ * admission (Design E §3,
+ * `docs/plans/2026-08-18-compatibility-admission-callbacks.md`): the slot
+ * itself when it is a signature, or the signature members of a union or
+ * intersection (`Partition`'s `integer | ((T) any -> boolean)`; a user
+ * overload set as a parameter). `undefined` when the slot has no arrow arm —
+ * the compatibility gate then does not apply. A `callback<S>` slot never
+ * reaches this: `groundParam` deep-erases the constructor first.
+ */
+function paramArrowArms(
+  param: Type
+): ReadonlyArray<FunctionSignature> | undefined {
+  if (typeof param !== 'object') return undefined;
+  // A transparent alias IS its definition (§6b closes the
+  // reference-hidden-slot gap: an alias that expands to an arrow is an
+  // arrow); a nominal reference stays opaque and the gate declines.
+  if (param.kind === 'reference') {
+    if (param.alias !== true || param.def === undefined) return undefined;
+    return paramArrowArms(param.def);
+  }
+  if (param.kind === 'signature') return [param];
+  // A UNION may mix an arrow arm with non-callable arms (`Partition`'s
+  // `integer | ((T) any -> boolean)`): the arrow members are the candidates.
+  if (param.kind === 'union') {
+    const arms: FunctionSignature[] = [];
+    for (const member of param.types)
+      if (typeof member === 'object' && member.kind === 'signature')
+        arms.push(member);
+    return arms.length > 0 ? arms : undefined;
+  }
+  // An INTERSECTION is a candidate set only when it is a genuine OVERLOAD
+  // SET — every member a signature (§3 notes: the runtime selects the
+  // applicable arm per call, so one usable arm suffices). A MIXED
+  // intersection (`((integer) -> integer) & list<boolean>`) is not reliably
+  // callable and must not be compatibility-admitted through its arrow half.
+  if (param.kind === 'intersection') {
+    const arms: FunctionSignature[] = [];
+    for (const member of param.types) {
+      if (typeof member !== 'object' || member.kind !== 'signature')
+        return undefined;
+      arms.push(member);
+    }
+    return arms.length > 0 ? arms : undefined;
+  }
+  return undefined;
+}
+// NOTE: deliberately NOT merged with `signatureArmsOf` above — the two now
+// differ in every dimension that matters: this one unfolds alias references,
+// admits MIXED unions' arrow members, requires intersections to be pure
+// overload sets, and answers `undefined` (gate does not apply) rather than
+// `[]`. Forcing them together would perturb `admitsPlaceholderSignature`'s
+// semantics for no shared code worth the risk.
+
+/**
+ * Compatibility admission at an arrow-typed parameter slot (Design E §3):
+ * called from the `!op.type.matches(param)` failure branches — an operand the
+ * strict subtype check ADMITS is a fortiori compatible, so this gate only
+ * decides the ones strict matching refuses.
+ *
+ * Returns `'admit'` (compatible — push the operand), an error `Expression`
+ * (provably unusable — push the error), or `undefined` when the gate does not
+ * apply (no arrow arm in the slot, an operand that is not function-valued, an
+ * open operand type) and the legacy repair/error paths should proceed.
+ *
+ * The rules, in order (rule 2 — arity — is the shipped `callbackArityError`
+ * in the operators' own canonical route, not here):
+ * - not-callable and open operands fall back to the legacy paths;
+ * - rule 5: the operand's declared effects must fit the slot's effect bound
+ *   (the EXISTING effect-subset check — `narrowingPreservesEffects` — kept
+ *   mandatory; a mixed-union slot has no arm bound to read and passes, which
+ *   is conservative-admit and moot for the library's effect-top slots);
+ * - rules 1/3/4: `callbackIncompatibility`, admitting if ANY arm admits.
+ */
+function arrowSlotAdmission(
+  ce: ComputeEngine,
+  op: Expression,
+  param: Type,
+  displayParam: Type | undefined
+): Expression | 'admit' | undefined {
+  const arms = paramArrowArms(param);
+  if (arms === undefined) return undefined;
+  const opType = op.type.type;
+  if (freeTypeVariables(opType).size > 0) return undefined;
+  // Provably not a function value: the ordinary `incompatible-type` error
+  // (minted by the caller) says the right thing — this gate has nothing to add.
+  if (provablyDisjoint(opType, 'function')) return undefined;
+  // Rule 2 OWNS arity (Design E §3): an operand whose arity provably cannot
+  // accept what a slot arm supplies is ADMITTED here so the shipped
+  // `callback-arity` machinery downstream mints its richer diagnostic
+  // ("`CountIf` calls its callback with 1 argument (each element of the
+  // collection); … declares 2 parameters", tuple-destructuring hint
+  // included). Rejecting on the type rules first — a wrong-arity callback is
+  // usually result-disjoint too — replaced that message with a generic
+  // `incompatible-type` (caught by `callback-arity.test.ts`).
+  //
+  // Rule 5 (effects) is checked PER CANDIDATE ARM, not against the whole
+  // slot: `narrowingPreservesEffects` reads no bound off a mixed union
+  // (`integer | pure-arrow`), so a whole-param check silently waved an
+  // effectful callback through a pure arrow arm. Admission requires one arm
+  // that is arity-capable AND effect-admitting AND type-compatible.
+  let sawArityCapableArm = false;
+  for (const arm of arms) {
+    if (arityProvablyIncapable(opType, arm.args?.length ?? 0)) continue;
+    sawArityCapableArm = true;
+    if (!narrowingPreservesEffects(opType, arm)) continue;
+    if (callbackIncompatibility(arm, opType) === undefined) return 'admit';
+  }
+  if (!sawArityCapableArm) return 'admit';
+  return ce.typeError(displayParam ?? param, op.type, op);
+}
+
+/**
+ * True when the operand's declared arity range provably cannot accept `n`
+ * arguments — the decline condition that routes the diagnostic to the
+ * `callback-arity` machinery instead of the compatibility gate. Conservative:
+ * a shape with no readable arity (bare `function`, mixed unions) answers
+ * `false` and stays with the gate.
+ */
+function arityProvablyIncapable(opType: Type, n: number): boolean {
+  const arms = signatureArms(opType);
+  if (arms === undefined) return false;
+  for (const arm of arms) {
+    const required = arm.args?.length ?? 0;
+    const max =
+      arm.variadicArg !== undefined
+        ? Infinity
+        : required + (arm.optArgs?.length ?? 0);
+    if (n >= required && n <= max) return false;
+  }
+  return true;
+}
+
 export function checkTypes(
   ce: ComputeEngine,
   args: ReadonlyArray<Expression>,
@@ -1230,6 +1365,12 @@ export function validateArguments(
       op.valueDefinition?.inferredType &&
       isSubtype(param, op.type.type) &&
       !hasValueComponent(param) &&
+      // Design E §3: never narrow a symbol's type TO an arrow slot's arrow —
+      // the slot is a per-call supply, not evidence of the symbol's own
+      // signature, and the write would manufacture a contract that makes a
+      // later, differently-instantiated call reject a symbol that both calls
+      // admit. The compatibility gate below admits with no write instead.
+      paramArrowArms(param) === undefined &&
       narrowingPreservesEffects(op.type.type, param)
     ) {
       // EVIDENCE BEATS REQUIREMENT (`docs/INFERENCE_ROADMAP.md`, Phase 0
@@ -1268,6 +1409,22 @@ export function validateArguments(
     }
 
     if (!op.type.matches(param)) {
+      // Design E §3: an arrow-typed slot admits by COMPATIBILITY, not
+      // subtyping. Admitted operands carry no evidence of the slot's arrow
+      // (it is a per-call supply, not the operand's own contract), so they
+      // are excluded from the final `_infer(param)` narrowing via
+      // `deferredIdx`, exactly like the other provisional admissions.
+      const compat = arrowSlotAdmission(ce, op, param, displayParams[idx]);
+      if (compat === 'admit') {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        continue;
+      }
+      if (compat !== undefined) {
+        result.push(compat);
+        isValid = false;
+        continue;
+      }
       // A one-cluster string literal at a `character` parameter narrows to
       // the character it denotes; a multi-cluster one falls through to the
       // ordinary type error below.
@@ -1412,12 +1569,14 @@ export function validateArguments(
     // Inferred (not declared) symbol type, and the required type is a subtype
     // of the current inferred type: narrow rather than error. NOT on the
     // effect axis (`narrowingPreservesEffects`); NOT to a value-component
-    // type (see the required-param gate).
+    // type; NOT to an arrow slot's arrow (Design E — see the required-param
+    // gate).
     if (
       !paramStillOpen &&
       op.valueDefinition?.inferredType &&
       isSubtype(param, op.type.type) &&
       !hasValueComponent(param) &&
+      paramArrowArms(param) === undefined &&
       narrowingPreservesEffects(op.type.type, param)
     ) {
       // Evidence-beats-requirement — see `evidenceGuardedNarrow`.
@@ -1434,6 +1593,25 @@ export function validateArguments(
       continue;
     }
     if (!op.type.matches(param)) {
+      // Design E §3 compatibility admission — see the required-param gate.
+      const compat = arrowSlotAdmission(
+        ce,
+        op,
+        param,
+        displayOptParams[i - params.length]
+      );
+      if (compat === 'admit') {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        i += 1;
+        continue;
+      }
+      if (compat !== undefined) {
+        result.push(compat);
+        isValid = false;
+        i += 1;
+        continue;
+      }
       // Literal narrowing at a `character` parameter — see the required-param
       // gate.
       const asCharacter = narrowCharacterLiteral(ce, op, param);
@@ -1533,6 +1711,7 @@ export function validateArguments(
         op.valueDefinition?.inferredType &&
         isSubtype(varParam, op.type.type) &&
         !hasValueComponent(varParam) &&
+        paramArrowArms(varParam) === undefined &&
         narrowingPreservesEffects(op.type.type, varParam)
       ) {
         // Evidence-beats-requirement — see `evidenceGuardedNarrow`.
@@ -1547,6 +1726,18 @@ export function validateArguments(
         continue;
       }
       if (!op.type.matches(varParam)) {
+        // Design E §3 compatibility admission — see the required-param gate.
+        const compat = arrowSlotAdmission(ce, op, varParam, displayVarParam);
+        if (compat === 'admit') {
+          result.push(op);
+          deferredIdx.add(result.length - 1);
+          continue;
+        }
+        if (compat !== undefined) {
+          result.push(compat);
+          isValid = false;
+          continue;
+        }
         // Literal narrowing at a `character` parameter — see the
         // required-param gate.
         const asCharacter = narrowCharacterLiteral(ce, op, varParam);

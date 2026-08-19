@@ -14,7 +14,7 @@ import {
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
 import {
-  contextualSlotCallback,
+  contextualSlotSignature,
   hasCallbackParam,
   isThreadableAt,
   solveArm,
@@ -196,7 +196,10 @@ export function resolveContextualArm(
   const slots: number[] = [];
   for (let i = 0; i < count; i++) {
     const p = paramAt(found, i);
-    if (p !== undefined && contextualSlotCallback(p) !== undefined)
+    // Design E: a plain-arrow slot is a contextual slot too (§6b) — this must
+    // agree with `hasCallbackParam` above, or a resolved arm's slots would be
+    // enumerated empty and the competing-arm audit vacuously pass.
+    if (p !== undefined && contextualSlotSignature(p) !== undefined)
       slots.push(i);
   }
   for (const arm of arms) {

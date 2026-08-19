@@ -1756,20 +1756,37 @@ describe('COMPILE CSE — typed named callback of an eager operator', () => {
     expect(occurrences(result.code, '.filter(')).toBe(3);
   });
 
-  it('merges repeated `CountIf(xs, Abs)` with a BUILT-IN predicate', () => {
+  it('merges repeated `CountIf(bs, Not)` with a BUILT-IN predicate', () => {
     // The same relaxation for a callback naming a pure, fixed-arity built-in.
-    // (`Abs` rather than `IsPrime`: the natural predicate has no JavaScript
-    // lowering, so its wrapper body would fail closed before merging is even
-    // reachable — see `compile.test.ts`.)
+    // (`Not` rather than the historical `Abs`: Design E's compatibility
+    // admission rejects a provably non-boolean predicate at canonicalization
+    // — `Abs: (number) -> number` is result-disjoint from the slot's
+    // `-> boolean`, so `CountIf(xs, Abs)` is now invalid, which also closes
+    // the old interpreter/compile divergence where the compiled `.filter`
+    // read `Abs` by JS truthiness while the interpreter errored per element.
+    // `Not` is the one unary BOOLEAN builtin with a JavaScript lowering —
+    // `IsEven`/`IsPrime` fail closed before merging is reachable.)
     const engine = new ComputeEngine();
-    const countIf = (): any => ['CountIf', ['List', 1, 2, 3, 4, 5], 'Abs'];
+    const countIf = (): any => [
+      'CountIf',
+      ['List', 'True', 'False', 'True'],
+      'Not',
+    ];
     const expr = engine.box(['Add', countIf(), countIf(), countIf()] as any);
-    const result = compile(expr, { fallback: false });
+    // `constantFold: false`, unlike the historical `Abs` variant: a valid
+    // predicate over a literal list folds to a number at compile time,
+    // leaving no `.filter` to merge (the `Abs` spelling only dodged folding
+    // because its evaluation errored).
+    const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
     expect(occurrences(result.code, '.filter(')).toBe(1);
 
-    const off = compile(expr, { fallback: false, cse: false });
+    const off = compile(expr, {
+      fallback: false,
+      cse: false,
+      constantFold: false,
+    });
     expect((result.run as (v: any) => number)({})).toBe(
       (off.run as (v: any) => number)({})
     );

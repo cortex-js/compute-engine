@@ -9,7 +9,7 @@ import {
 } from '../../common/type/instantiate.js';
 import { isCallbackType } from '../../common/type/callback.js';
 import { provablyDisjoint } from '../../common/type/subtype.js';
-import { typeContainsMissing } from '../../common/type/utils.js';
+import { functionResult, typeContainsMissing } from '../../common/type/utils.js';
 import type {
   CallbackType,
   FunctionSignature,
@@ -149,7 +149,60 @@ export function solveArm(
     p === undefined ? undefined : admissionSkeleton(p)
   );
 
-  return solveTypeArguments(
+  // Design E R-E3 (`docs/plans/2026-08-18-compatibility-admission-callbacks.md`):
+  // an operand at a PLAIN-ARROW contextual slot contributes no DOMAIN
+  // constraints — a callback's parameter types must never constrain the solve.
+  // Without this, respelling `CountIf`'s slot as `(T) any -> boolean` would
+  // make `CountIf(zs, IsPrime)` bind `T = number` from the predicate and
+  // manufacture `zs: collection<number>` out of a wildcard source (probed
+  // 2026-08-18 on a user polytype: `apply2: ((T) -> U, T) -> U` bound `T`
+  // from `IsPrime`). The slot's RESULT still flows — a bare result variable
+  // the data operands leave unbound is bound from the callback operand's own
+  // result type after the solve (Design D §4 clause 3, preserved). A legacy
+  // `callback<S>` slot keeps its pre-E path byte-identical until the E3 sweep.
+  const arrowSlots = positions.map((p) => {
+    if (p === undefined) return undefined;
+    if (contextualSlotCallback(p) !== undefined) return undefined;
+    return contextualSlotSignature(p);
+  });
+  // R-E3 as built: DATA positions are AUTHORITATIVE for a domain variable —
+  // an arrow-slot operand is consulted only for variables NO data position
+  // mentions. The full-suite round showed the blanket skip deleted ratified
+  // behavior (`type-variables.test.ts` end-to-end: `comp: ((T) -> U,
+  // (U) -> V) -> (T) -> V` and the multi-callback meet `both: ((T) ->
+  // boolean, (T) -> boolean) -> T`, whose variables occur ONLY at callback
+  // slots and are legitimately solved from them), while the ruling's anchor
+  // cases (`CountIf(zs, IsPrime)` leaving `zs: collection<unknown>`; the
+  // union-source predicate never conflicting the data solve) all have the
+  // variable at a data position. A slot whose parameter variables are ALL
+  // data-anchored is skipped; any un-anchored parameter variable lets the
+  // slot contribute, pre-E behavior unchanged.
+  const dataVars = new Set<string>();
+  positions.forEach((p, i) => {
+    if (p === undefined || arrowSlots[i] !== undefined) return;
+    // A legacy `callback<S>` position is not a DATA position either — its
+    // variables must not anchor (and so silence) a sibling plain-arrow
+    // slot. Dormant until a transition-period signature mixes the two
+    // spellings over a shared variable, but the authority test should match
+    // its own definition of "data".
+    if (contextualSlotCallback(p) !== undefined) return;
+    for (const v of freeTypeVariables(p)) dataVars.add(v);
+  });
+  const skippedArrowSlots = arrowSlots.map((s) => {
+    if (s === undefined) return undefined;
+    const paramVars = new Set<string>();
+    for (const el of [
+      ...(s.args ?? []),
+      ...(s.optArgs ?? []),
+      ...(s.variadicArg ? [s.variadicArg] : []),
+    ])
+      for (const v of freeTypeVariables(el.type)) paramVars.add(v);
+    if (paramVars.size === 0) return undefined;
+    for (const v of paramVars) if (!dataVars.has(v)) return undefined;
+    return s;
+  });
+
+  const solved = solveTypeArguments(
     arm,
     ops.map((op) => op?.type.type),
     {
@@ -162,6 +215,10 @@ export function solveArm(
         if (!op) return true;
         // An already-invalid operand: no bound, existing error path unchanged.
         if (!op.isValid) return true;
+        // Design E R-E3: no domain constraints from an arrow-slot operand
+        // whose parameter variables are data-anchored (see `skippedArrowSlots`
+        // above; the result-side flow runs after the solve).
+        if (skippedArrowSlots[i] !== undefined) return true;
         // Missing-value stripping: stripped before inference, contributes
         // nothing.
         if (ctx?.stripMissing?.(i) && typeContainsMissing(op.type.type))
@@ -195,6 +252,45 @@ export function solveArm(
       },
     }
   );
+  return refineResultSideFromCallbacks(solved, skippedArrowSlots, ops);
+}
+
+/**
+ * The RESULT-side flow at plain-arrow contextual slots (Design E R-E3, the
+ * preserved half of Design D §4 clause 3): a variable that occurs as the BARE
+ * result of an arrow slot (`(T) any -> U` — the `Map`/`FlatMap`/`apply` shape)
+ * and got no bound from the data operands is bound from the callback operand's
+ * own declared result type. Parameter-side variables were deliberately not
+ * solved from that operand (the `skip` above); this reads ONLY the arrow's
+ * result. A nested-variable result (`-> list<U>`) is left to the `unknown`
+ * fallback — conservative, and no converted signature spells one.
+ */
+function refineResultSideFromCallbacks(
+  solved: TypeInferenceResult,
+  arrowSlots: ReadonlyArray<FunctionSignature | undefined>,
+  ops: ReadonlyArray<Expression>
+): TypeInferenceResult {
+  let bindings: TypeInferenceResult['bindings'] | undefined;
+  let unbound: Set<string> | undefined;
+  for (let i = 0; i < arrowSlots.length; i++) {
+    const slot = arrowSlots[i];
+    if (slot === undefined) continue;
+    const r = slot.result;
+    if (typeof r !== 'object' || r.kind !== 'variable') continue;
+    if (!(unbound ?? solved.unbound).has(r.name)) continue;
+    const op = ops[i];
+    if (!op?.isValid) continue;
+    const fr = functionResult(op.type.type);
+    if (fr === undefined || hasFreeTypeVariables(fr)) continue;
+    // A top-typed result says nothing; keep the ordinary `unknown` fallback.
+    if (fr === 'unknown' || fr === 'any') continue;
+    bindings ??= { ...solved.bindings };
+    unbound ??= new Set(solved.unbound);
+    bindings[r.name] = fr;
+    unbound.delete(r.name);
+  }
+  if (bindings === undefined) return solved;
+  return { ...solved, bindings, unbound: unbound! };
 }
 
 // RETIRED 2026-08-04 (D10 re-ruling): `liftedEchoPositions`. While a
@@ -277,17 +373,62 @@ export function contextualSlotCallback(t: Type): CallbackType | undefined {
   return found;
 }
 
+/**
+ * The signature a parameter slot offers a contextual stamp, under Design E
+ * (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §6): a PLAIN
+ * ARROW slot is a contextual slot — the trigger no longer requires the
+ * `callback<S>` spelling, which the E3 sweep deletes. A legacy `callback<S>`
+ * slot still answers through {@link contextualSlotCallback} (byte-identical
+ * until the sweep), and a UNION slot resolves under the same forced-resolution
+ * rule: exactly one signature arm, every other arm closed and provably unable
+ * to take a function — the only operand shape a stamp rewrites.
+ *
+ * A GROUND arrow answers too: the callers that only care about a solvable slot
+ * (the planning pass) decline later for lack of domain variables, and the
+ * ground-stamp fallback path keeps its own narrower filter.
+ */
+export function contextualSlotSignature(t: Type): FunctionSignature | undefined {
+  const cb = contextualSlotCallback(t);
+  if (cb !== undefined) return cb.signature;
+  if (typeof t !== 'object') return undefined;
+  if (t.kind === 'signature') return t;
+  // A transparent alias IS its definition — §6b's claim that the
+  // reference-hidden-slot gap closes ("an alias that expands to an arrow is
+  // an arrow") requires the unfold HERE, at the trigger; a nominal
+  // reference stays opaque. Alias definitions are expanded eagerly at build
+  // time, so a cycle cannot reach this recursion.
+  if (t.kind === 'reference') {
+    if (t.alias !== true || t.def === undefined) return undefined;
+    return contextualSlotSignature(t.def);
+  }
+  if (t.kind !== 'union') return undefined;
+  let found: FunctionSignature | undefined;
+  for (const arm of t.types) {
+    if (typeof arm === 'object' && arm.kind === 'signature') {
+      if (found !== undefined) return undefined;
+      found = arm;
+    }
+  }
+  if (found === undefined) return undefined;
+  for (const arm of t.types) {
+    if (typeof arm === 'object' && arm.kind === 'signature') continue;
+    if (hasFreeTypeVariables(arm)) return undefined;
+    if (!provablyDisjoint(arm, 'function')) return undefined;
+  }
+  return found;
+}
+
 /** Does any DECLARED parameter of `arm` offer a contextual callback slot
  * ({@link contextualSlotCallback})? Allocation-free — the guard on the
  * contextual pass's whole cost. */
 export function hasCallbackParam(arm: FunctionSignature): boolean {
   for (const a of arm.args ?? [])
-    if (contextualSlotCallback(a.type) !== undefined) return true;
+    if (contextualSlotSignature(a.type) !== undefined) return true;
   for (const a of arm.optArgs ?? [])
-    if (contextualSlotCallback(a.type) !== undefined) return true;
+    if (contextualSlotSignature(a.type) !== undefined) return true;
   return (
     arm.variadicArg !== undefined &&
-    contextualSlotCallback(arm.variadicArg.type) !== undefined
+    contextualSlotSignature(arm.variadicArg.type) !== undefined
   );
 }
 
@@ -323,22 +464,22 @@ export function contextualCallbackPlan(
   if (!(hasCallbackSlot ?? hasCallbackParam(arm))) return undefined;
 
   const positions = parameterPositions(arm, count);
-  // ONE `contextualSlotCallback` per position: it walks a union's arms and can
+  // ONE `contextualSlotSignature` per position: it walks a union's arms and can
   // reach `provablyDisjoint`, and both loops below ask the same question of the
   // same slot.
   const slots = positions.map((p) =>
-    p === undefined ? undefined : contextualSlotCallback(p)
+    p === undefined ? undefined : contextualSlotSignature(p)
   );
 
   const callbacks: CallbackSlot[] = [];
   const domainVars = new Set<string>();
   slots.forEach((cb, index) => {
     if (cb === undefined) return;
-    callbacks.push({ index, signature: cb.signature });
+    callbacks.push({ index, signature: cb });
     for (const el of [
-      ...(cb.signature.args ?? []),
-      ...(cb.signature.optArgs ?? []),
-      ...(cb.signature.variadicArg ? [cb.signature.variadicArg] : []),
+      ...(cb.args ?? []),
+      ...(cb.optArgs ?? []),
+      ...(cb.variadicArg ? [cb.variadicArg] : []),
     ])
       for (const v of freeTypeVariables(el.type)) domainVars.add(v);
   });

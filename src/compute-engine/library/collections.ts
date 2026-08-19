@@ -7658,14 +7658,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the number of elements in the collection satisfying the predicate.',
     complexity: 8200,
-    // Design D phase 0: the element-of link lives in the SIGNATURE. The
-    // predicate slot is a CONTEXTUAL callback — admission-wise the primitive
-    // `function` it converted from (so a narrower named predicate, a
-    // `function`-typed symbol and an unknown-result literal all still pass),
-    // while `(T) -> boolean` contextually types an inline literal there. The
-    // result type is unchanged.
+    // Design E phase E1 (`docs/plans/2026-08-18-compatibility-admission-
+    // callbacks.md`): the predicate slot is an honest arrow. Admission is by
+    // COMPATIBILITY, not subtyping (a narrower named predicate, a
+    // `function`-typed symbol and an unknown-result literal all still pass;
+    // a PROVABLY DISJOINT predicate — `Filter`-style `list<string>` source
+    // with a number-only predicate — is now rejected at canonicalization),
+    // `(T)` contextually types an inline literal there, and the `any` effect
+    // slot keeps effectful predicates admitted. The result type is unchanged.
     signature:
-      '(collection<T>, predicate: callback<(T) -> boolean>) -> integer where T',
+      '(collection<T>, predicate: (T) any -> boolean) -> integer where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'CountIf', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {

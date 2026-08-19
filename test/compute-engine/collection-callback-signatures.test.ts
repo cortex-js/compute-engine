@@ -125,11 +125,20 @@ describe('a parameterless operand is rejected at every callback slot', () => {
 
   // The diagnostic is the declared slot's, identical on both halves — the
   // eager one from `validateArguments`, the lazy one from the operand the
-  // canonical handler replaced with it.
+  // canonical handler replaced with it. A Design E-converted operator
+  // (`CountIf`, phase E1) names its honest INSTANTIATED arrow instead of the
+  // erased `function` — strictly more informative, and the whole family
+  // converges on that spelling as the E3 sweep converts the rest
+  // (`docs/plans/2026-08-18-compatibility-admission-callbacks.md` §8).
+  const CONVERTED_EXPECTED: Record<string, string> = {
+    CountIf:
+      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "finite_integer"), 5)',
+  };
   it.each([...eager, ...lazy])('%s reports incompatible-type', (op) => {
     const ce = new ComputeEngine();
     expect(ce.box([op, XS, 5]).errors[0]?.toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "function", "finite_integer"), 5)'
+      CONVERTED_EXPECTED[op] ??
+        'Error(ErrorCode("incompatible-type", "function", "finite_integer"), 5)'
     );
   });
 });
