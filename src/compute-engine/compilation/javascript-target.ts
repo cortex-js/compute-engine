@@ -7232,8 +7232,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // answer for every inherited `Object.prototype` member, so a head named
     // `toString` would read as a user override that the caller never wrote.
     // `Object.values` below is unaffected — it returns own properties only.
-    const namedFunctions: { [k: string]: string } =
-      Object.create(null);
+    const namedFunctions: { [k: string]: string } = Object.create(null);
 
     if (functions) {
       for (const [k, v] of Object.entries(functions)) {

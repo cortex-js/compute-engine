@@ -617,11 +617,18 @@ function scanProtocolPropertyCalls(
   // destructuring or annotated parameter contributes its names too:
   // over-collecting only makes the scan quieter, which is the safe direction
   // for an advisory warning.
-  const inner =
-    head === 'Function' ? withBoundParameters(expr, bound) : bound;
+  const inner = head === 'Function' ? withBoundParameters(expr, bound) : bound;
 
   for (const op of operands(expr))
-    scanProtocolPropertyCalls(ce, op, reported, diagnostics, stmt, source, inner);
+    scanProtocolPropertyCalls(
+      ce,
+      op,
+      reported,
+      diagnostics,
+      stmt,
+      source,
+      inner
+    );
 }
 
 /**
