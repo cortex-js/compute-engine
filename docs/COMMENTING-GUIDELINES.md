@@ -94,6 +94,62 @@ when it clarifies a surprising fixture, identifies the boundary being pinned,
 or explains why a plausible assertion would be wrong. Prefer “This remains
 symbolic because…” to “This used to fail because…”.
 
+## Links in doc comments
+
+Doc comments on exported declarations are published as `src/api.md`, which
+mathlive.io renders at `/compute-engine/api/`. Typedoc rewrites links on the
+way out, and four rewrites turn a reasonable-looking comment into a dead or
+silently wrong link. Docusaurus reports the dead ones; nothing reports the
+wrong ones.
+
+**Use `{@link}` for symbols, markdown for URLs.** `{@link}` resolves a symbol
+name and nothing else. Given a path it fails, and the failure is quiet in the
+output: `{@link mathfield/guides/speech/ | Guide: Speech}` renders as the
+literal text `mathfield/guides/speech/ \| Guide: Speech`, not a link. Typedoc
+does warn — `Failed to resolve link to ...` — so read the warnings when
+regenerating.
+
+**Never put a `#fragment` on a site-absolute link.** Typedoc strips the path
+and keeps the fragment, so
+
+```
+[CSS variables](/mathfield/guides/customizing/#css-variables)
+```
+
+is published as `[CSS variables](#css-variables)` — a same-page link to a
+heading that does not exist. A path with no fragment survives untouched, and so
+does a full URL. Write one of:
+
+```
+[the customizing guide](/mathfield/guides/customizing/)
+[CSS variables](https://mathlive.io/mathfield/guides/customizing/#css-variables)
+```
+
+**Link to a type, not to a property of one.** A type alias is rendered as a
+single code block, so its properties get no heading of their own and there is
+nothing for a link to land on:
+
+```
+### OperatorDefinitionFlags
+  scoped: boolean | BindingSiteSelector;
+```
+
+`{@link OperatorDefinitionFlags.scoped}` resolves — typedoc assigns it an
+anchor — but the anchor is never emitted. Link to `{@link
+OperatorDefinitionFlags}` and name the property in the prose.
+
+**Avoid reusing a name across exported symbols.** Anchors are the lowercased
+member name, disambiguated by document order: a second `Expression` becomes
+`#expression-1`, a sixth `#expression-5`. Links inside `api.md` are generated
+in the same pass and stay consistent, but the numbering shifts whenever a
+same-named export is added, removed or renamed — so anything outside the file
+that points at a numbered anchor breaks silently. Distinct names give stable,
+readable anchors.
+
+Prose pages in the cortexjs.io repo should link to a symbol heading they can
+see in the generated `api.md`, and be re-checked after an API rename. `npm run
+build` there reports broken anchors.
+
 ## Review checklist
 
 Before accepting a comment, ask:
@@ -104,4 +160,6 @@ Before accepting a comment, ask:
 - Does every historical claim still affect current behavior?
 - Is the detail proportional to the code it protects?
 - Will a future behavior change make the comment visibly wrong?
+- Does every link follow the rules above, and did the typedoc run come back
+  without `Failed to resolve link` warnings?
 
