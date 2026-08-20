@@ -3576,18 +3576,46 @@ from the engine. Hoisting therefore has to make the derivative lowering's unit
 explicit rather than ambient, or degree-mode derivatives silently stop being
 rewritten. Raised by the compilation session, who own the folder.
 
-### Eleven test files leak `BigDecimal.precision`
+### `BigDecimal.precision` cannot leak between test files (REFUTED 2026-08-19 — the entry claimed eleven files leak it; audited and measured, no file in the repo exhibits the hazard)
 
-`BigDecimal.precision` is process-global, and eleven files under
-`test/compute-engine/` set it with no `afterAll`/`afterEach` restore:
-`bug-fixes`, `comparisons`, `deadline-regressions`, `lazy-collection-regimes`,
-`numbers`, `performance`, `pointlist-lazy-broadcast`, `random-compile`,
-`serialization`, `timeout`, `statistics`. It was probed and REFUTED as the cause
-of the 2026-08-14 `definition-order.test.ts` last-digit drift (that was the
-wall-clock constant-fold budget, since replaced by the deterministic
-`foldCostEstimate`), so this is hygiene rather than a known-live defect — but a
-leaked global precision is exactly the kind of state that makes a parallel run's
-failures unattributable.
+The premise was that `BigDecimal.precision` is process-global, so a test file
+that raises it without restoring poisons whatever runs next in the same jest
+worker. Measured, that does not happen: jest gives each test file its own
+module registry, so `BigDecimal` is re-instantiated per file and the global
+starts every file at the module default. Two probe files run in ONE worker
+(`-w 1`), the first ending at 200:
+
+```
+file A  start 50   end 200
+file B  start 50            ← not 200; a fresh module, not the leaked one
+```
+
+The mechanism the entry was reaching for is real but INTRA-file only, and it
+does not need an explicit `.precision =` to trigger — merely CONSTRUCTING an
+engine writes the global, so a later high-precision engine reprecisions an
+earlier shared one in the same file:
+
+```
+shared engine, sqrt2         21 digits
+new ComputeEngine({precision: 200})
+same shared engine, sqrt2   201 digits
+```
+
+A file is therefore at risk only if it changes precision AND uses an
+earlier-constructed shared engine afterwards. All 29 files that set precision
+(not eleven — the original list was built by grepping the WORD "precision",
+which in `numbers.test.ts` matches only comments and test titles) were audited
+against that criterion. The three that both change precision and import the
+shared engine without restoring — `canonical-folding`, `numeric`,
+`scope-advanced` — do not touch the shared engine after the change, so none is
+live. Several files the entry did not name already restore correctly, with the
+reason inline (`arithmetic`, `calculus`, `deadline-regressions`,
+`distributions`, `checkpoint-differential`).
+
+Adding `afterAll` restores would be a no-op against cross-file contamination,
+which cannot occur. Left here as a REFUTED record so the audit is not
+repeated; the intra-file mechanism is worth knowing when writing a new test
+that mixes a shared engine with a precision change.
 
 ### `BoxedDictionary` construction throws raw JS errors
 
