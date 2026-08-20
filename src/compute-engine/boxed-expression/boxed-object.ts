@@ -24,7 +24,9 @@ import { objectJson } from './object-walk.js';
 import {
   isExpression,
   isForeignEngineObject,
+  isNumber,
   isObject,
+  isString,
 } from './type-guards.js';
 import { hashCode } from './utils.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
@@ -101,6 +103,51 @@ export function _setNextObjectSerial(ce: ComputeEngine, serial: number): void {
  * route and no `box()` path ever mints one, which is what keeps "a parsed
  * snapshot is a record, never an object" true by construction.
  */
+/**
+ * Does storing `next` over `current` change anything a reader could observe?
+ *
+ * Identity alone is too narrow to be useful. The elision was licensed by the
+ * claim that equal small integers share one boxed node engine-wide, and that
+ * holds for a host-built `ce.number(1)` — but NOT for a literal that came
+ * through the parser, which carries its own source offsets and is a distinct
+ * instance. So `p.n = 1` over a stored `1` bumped the version and invalidated
+ * every cache entry that had read the field, once per iteration of any loop
+ * that wrote an unchanged value back.
+ *
+ * Value equality is checked only for NUMBER and STRING operands, and only
+ * alongside an identical TYPE. `isSame` is a value equivalence that spans
+ * REPRESENTATIONS by design — the exact rational `1/2` and the float `0.5`
+ * are `isSame`, as are the one-cluster string `"a"` and the character `'a'` —
+ * so value equality alone would suppress a store that changes `isExact`, the
+ * MathJSON, or the operand's type, all of which a reader can observe.
+ * Requiring the types to agree as well rules those out: `finite_rational` is
+ * not `finite_real`, and `string` is not `character`, while the case this
+ * exists for (`1` over a stored `1`) agrees on both and still elides.
+ *
+ * Confined to these two kinds because their comparison never walks the
+ * operand tree. `isSame` would be sound for any operand, but a structural
+ * walk would be paid on every store including the ones that genuinely change
+ * something, in exactly the store-heavy loops objects exist for. (The
+ * comparison is not strictly constant-time — two bignums bottom out in
+ * `Decimal.eq`, whose cost tracks the configured precision — but it is
+ * fixed-cost in the size of the expression, which is what the loop concern is
+ * about.)
+ *
+ * Anything else keeps the identity test, so this is strictly more elision
+ * than before and never less.
+ */
+function isRedundantStore(
+  current: Expression | undefined,
+  next: Expression
+): boolean {
+  if (current === next) return true;
+  if (current === undefined) return false;
+  if (current.type.toString() !== next.type.toString()) return false;
+  if (isNumber(current) && isNumber(next)) return current.isSame(next);
+  if (isString(current) && isString(next)) return current.isSame(next);
+  return false;
+}
+
 export class BoxedObject extends _BoxedExpression implements ObjectInterface {
   override readonly _kind = 'object';
 
@@ -367,12 +414,14 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
   /**
    * The SOLE slot writer.
    *
-   * Storing the identical node is observably nothing — everything storable is
-   * immutable except objects, which alias by design, so an identical node
-   * cannot differ in contents — and the suppression is TOTAL: no version
-   * bump, no state event. This is the identity-only no-op rule the binding
-   * machinery already applies to `Assign` (`boxed-value-definition.ts`'s
-   * value setter).
+   * A store a reader could not observe is suppressed TOTALLY: no version
+   * bump, no state event. That covers the identical node — everything
+   * storable is immutable except objects, which alias by design, so an
+   * identical node cannot differ in contents — and, for NUMBER and STRING
+   * operands of the same type, an equal value. See {@link isRedundantStore}
+   * for why the type has to match and why the widening stops at those two
+   * kinds. The binding machinery applies the narrower identity-only rule to
+   * `Assign` (`boxed-value-definition.ts`'s value setter).
    *
    * Any other store writes the slot, increments `_version` — the per-object
    * cache currency that lets a cached field-derived result tell whether the
@@ -391,7 +440,7 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
         `object-foreign-engine: cannot store an object that belongs to a different engine into "${this.typeName}.${name}"`
       );
     }
-    if (this._slots.get(name) === value) return;
+    if (isRedundantStore(this._slots.get(name), value)) return;
     if (this._version >= COUNTER_LIMIT) {
       console.assert(false, 'Object version counter exhausted');
       throw new Error(

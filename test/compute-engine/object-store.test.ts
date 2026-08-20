@@ -450,20 +450,20 @@ let p = P(n: 1)`,
     expect(p._version).toBe(1);
   });
 
-  test('an EQUAL-but-not-identical store still bumps — the guard is identity-only', () => {
-    // Documented reality, not an aspiration. Appendix B's licence for the
-    // no-op guard says the evaluated result "can be an interned node (equal
-    // small-integer literals share one boxed value engine-wide)", and that is
-    // true of `ce.number(1)` but NOT of a literal that came through the
-    // parser, which carries its own source offsets and is therefore a
-    // distinct instance. So `p.n = 1` over a stored `1` bumps the version and
-    // invalidates every cache entry that read the field, even though no
-    // reader can observe a difference.
+  test('an equal NUMBER or STRING literal does not bump — the guard reaches past identity', () => {
+    // Identity alone was too narrow to be useful. The elision was licensed by
+    // the claim that equal small integers share one boxed node engine-wide,
+    // which holds for a host-built `ce.number(1)` but NOT for a literal that
+    // came through the parser: it carries its own source offsets and is a
+    // distinct instance. So `p.n = 1` over a stored `1` used to bump the
+    // version and invalidate every cache entry that had read the field,
+    // although no reader could observe a difference.
     //
-    // Pinned so the gap is visible rather than assumed away: widening the
-    // guard to `isSame` would close it, but that contradicts the standing
-    // identity-only ruling and costs a structural walk per store, so it needs
-    // a product decision (recorded in `ROADMAP.md`).
+    // Widened to value equality for NUMBER and STRING literals only. Not for
+    // operands in general: `isSame` would be sound anywhere, but it walks
+    // structure, and that walk would be paid on every store — including the
+    // ones that genuinely change something — in exactly the store-heavy loops
+    // objects exist for.
     const engine = new ComputeEngine();
     value(
       `type P = object{n: integer}
@@ -472,13 +472,74 @@ let p = P(n: 1)`,
     );
     const p = objectAt('p', engine);
     value('p.n = 1', engine);
+    expect(p._version).toBe(0);
+    // A store that DOES change the value still bumps.
+    value('p.n = 2', engine);
     expect(p._version).toBe(1);
-    // …while the HOST route, whose literals are the interned ones, does
-    // suppress: the guard itself works, its reach is what is narrow.
+
+    const s = new ComputeEngine();
+    value(
+      `type S = object{t: string}
+let q = S(t: "a")`,
+      s
+    );
+    const q = objectAt('q', s);
+    value('q.t = "a"', s);
+    expect(q._version).toBe(0);
+    value('q.t = "b"', s);
+    expect(q._version).toBe(1);
+  });
+
+  test('a same-valued number reached by EVALUATION is suppressed too', () => {
+    // It is the operand arriving at `_store` that decides, not the syntax
+    // that produced it: `2 + 3` folds to a number literal equal to the stored
+    // 5, so the store is redundant and elided.
+    const engine = new ComputeEngine();
+    value(
+      `type P = object{n: integer}
+let p = P(n: 5)`,
+      engine
+    );
+    const p = objectAt('p', engine);
+    value('p.n = 2 + 3', engine);
+    expect(p._version).toBe(0);
+
+    // The HOST route, whose literals are the interned ones, suppresses too.
     const q = engine._object('P', { n: engine.number(5) });
     if (!isObject(q)) throw new Error('expected an object');
     q._store('n', engine.number(5));
     expect(q._version).toBe(0);
+  });
+
+  test('an equal value of a DIFFERENT type still bumps', () => {
+    // `isSame` is a value equivalence that spans representations: the exact
+    // rational 1/2 and the float 0.5 are `isSame`, as are the one-cluster
+    // string "a" and the character 'a'. Suppressing on value alone would drop
+    // a store that changes `isExact`, the MathJSON, or the operand's type —
+    // all observable — so the guard requires the types to agree as well.
+    const engine = new ComputeEngine();
+    value(
+      `type P = object{n: number}
+let p = P(n: 1/2)`,
+      engine
+    );
+    const p = objectAt('p', engine);
+    value('p.n = 0.5', engine);
+    expect(p._version).toBe(1);
+    expect(value('p.n', engine)?.toString()).toBe('0.5');
+  });
+
+  test('a NON-LITERAL operand keeps the identity-only guard', () => {
+    // The widening is confined to numbers and strings. Two structurally equal
+    // but distinct function expressions are NOT elided — deciding that would
+    // cost a structural walk on every store, which is the price the ruling
+    // declined to pay.
+    const engine = new ComputeEngine();
+    const q = engine._object('Q', { f: engine.parse('x + 1') });
+    if (!isObject(q)) throw new Error('expected an object');
+    const equalButDistinct = engine.parse('x + 1');
+    expect(q._store('f', equalButDistinct)).toBeUndefined();
+    expect(q._version).toBe(1);
   });
 });
 
