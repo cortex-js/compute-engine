@@ -190,6 +190,22 @@ compiled-JS sampling path is not enough — e.g. an implicit-curve row that
 needs interval arithmetic for robustness, or a shaded-region row that needs
 the shader target.
 
+**Demand measured at zero (2026-08-20).** Tycho retracted the escalation
+after measuring against 0.116.1: the blocker was on their side, one layer
+upstream of the compile route — a collection-carrier predicate that consulted
+their own definition table, returned early on a miss, and never reached its
+type arm, so a carrier owned by their computed-collection registry answered
+"not a collection" while their type predicate said it was. With that fixed,
+the witness expressions take the elementwise zip lowering and never construct
+a collection-valued `Which` at all; both remaining witnesses render. The two
+other expressions originally named were retired as never having been
+witnesses (neither reads the collection-valued definition; it appears only as
+its own definition head). Caveat recorded by the reporter: their oracle fix
+was still uncommitted in a working tree when measured, so this is "stop
+scoping", not "cause proven landed". The two cautions above about the
+`glsl` `Power`-of-vec hole and the vec-width cap remain accurate and remain
+unmotivated by any consumer.
+
 ### A symbol named after an `Object.prototype` member breaks symbol handling (OPEN, correctness — found 2026-08-19 while hardening the compile-target constants tables)
 
 A MathJSON symbol name is an arbitrary string, but several lookups key plain
