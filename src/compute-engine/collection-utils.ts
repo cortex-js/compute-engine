@@ -778,6 +778,35 @@ export function typeCouldBeNumericTuple(type: Type): boolean {
 }
 
 /**
+ * Return true if a type is an INDEXABLE COLLECTION whose ELEMENTS could be
+ * numeric tuples at runtime — a point LIST such as
+ * `list<tuple<number, number>>`, the shape a Desmos document carries for a
+ * set of points.
+ *
+ * Only `list` and `indexed_collection` kinds qualify, plus the generic
+ * `collection` kind: the elements of an unordered `set` are not scaled
+ * position-wise by the arithmetic handlers, and a bare kind name (`'list'`)
+ * carries no element type to inspect. A union qualifies when any arm does
+ * (COULD-semantics, matching `typeCouldBeNumericTuple`).
+ *
+ * `broadcastable<…>` deliberately does NOT qualify: the `Divide` type handler
+ * has a dedicated branch for a broadcast-lifted shaped numerator that must
+ * keep the lift in the result, and blessing it here would strip it.
+ */
+export function typeCouldBeNumericTupleCollection(type: Type): boolean {
+  if (typeof type === 'string') return false;
+  if (type.kind === 'union')
+    return type.types.some((t) => typeCouldBeNumericTupleCollection(t));
+  if (
+    type.kind === 'list' ||
+    type.kind === 'indexed_collection' ||
+    type.kind === 'collection'
+  )
+    return typeCouldBeNumericTuple(type.elements);
+  return false;
+}
+
+/**
  * True when `expr`'s TYPE is a matrix/vector/list-style collection (a `list`,
  * `collection`, or `indexed_collection` kind) — i.e. the kind of collection
  * that participates in linear-algebra arithmetic (`Add`/`Multiply`). Numeric

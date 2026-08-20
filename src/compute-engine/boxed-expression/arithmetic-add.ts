@@ -332,9 +332,27 @@ export function absorbScalarsIntoCells(
   // `type.matches('collection')` answer a confident `false`.
   let cell: Type;
   if (isSubtype(elt, COLLECTION_SHAPE_TYPE)) {
+    // A TUPLE cell is a point/vector, and a scalar scales each of its
+    // COMPONENTS: `[(3,4)] · 0.5` is `[(1.5, 2)]`, so a
+    // `list<tuple<integer, integer>>` scaled by a real has REAL components and
+    // echoing the integer ones would claim a type the value contradicts.
+    // Rebuild the tuple with each component widened, one arity-preserving
+    // level — unlike the kinds excluded below, whose parts are not uniformly
+    // scaled.
+    if (typeof elt !== 'string' && elt.kind === 'tuple')
+      return {
+        ...(collectionType as Extract<Type, { kind: string }>),
+        elements: {
+          kind: 'tuple',
+          elements: elt.elements.map((e) => ({
+            ...e,
+            type: widen(e.type, ...scalarTypes),
+          })),
+        },
+      } as Type;
     // Only the kinds whose `elements` is a single rebuildable cell type can be
-    // recursed into. A `tuple`/`record`/`dictionary` cell, or a `reference` to
-    // a (possibly recursive) alias, keeps the collection type unchanged: sound
+    // recursed into. A `record`/`dictionary` cell, or a `reference` to a
+    // (possibly recursive) alias, keeps the collection type unchanged: sound
     // but imprecise, and never a scalar-plus-collection union. Not following
     // `reference.def` here is also what keeps this recursion terminating — a
     // type cycle can only close through that edge.

@@ -1903,3 +1903,154 @@ describe('POINT/TUPLE ARITHMETIC — point-valued `\\mapsto` body', () => {
     ).toEqual(['Map', ['Function', ['Power', 'x', 2], 'x'], ['List', 1, 2, 3]]);
   });
 });
+
+describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', () => {
+  // A collection whose elements are numeric tuples is a point list. Dividing
+  // it by a scalar scales each point component-wise, so the quotient's
+  // ELEMENTS stay tuples. The type used to collapse to `list<number>` while
+  // the VALUE was a correct list of points, and `PointX`/`PointY` over that
+  // type take the element-INDEX reading instead of the elementwise one.
+  const pointListEngine = (denominatorType: string) => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list<tuple<number, number>>');
+    ce.declare('q', denominatorType as any);
+    return ce;
+  };
+
+  test.each([
+    'number',
+    'finite_number',
+    'list<number>',
+    'indexed_collection<number>',
+    'broadcastable<number>',
+    'any',
+    'unknown',
+  ])('list<tuple<number, number>> / %s keeps tuple elements', (den) => {
+    const ce = pointListEngine(den);
+    expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe(
+      'list<tuple<finite_number, finite_number>>'
+    );
+  });
+
+  test('a 3-component point list keeps its arity through Divide', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list<tuple<number, number, number>>');
+    ce.declare('q', 'number');
+    expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe(
+      'list<tuple<finite_number, finite_number, finite_number>>'
+    );
+  });
+
+  test('`p / q` and `p · (1/q)` agree on the element shape', () => {
+    const ce = pointListEngine('number');
+    const quotient = ce.box(['Divide', 'p', 'q']).type;
+    const scaled = ce.box(['Multiply', 'p', ['Divide', 1, 'q']]).type;
+    expect(quotient.matches('list<tuple<number, number>>')).toBe(true);
+    expect(scaled.matches('list<tuple<number, number>>')).toBe(true);
+  });
+
+  test('a tuple-shaped denominator still has no defined quotient', () => {
+    const ce = pointListEngine('tuple<number, number>');
+    expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe('error');
+  });
+
+  // A divisor that can PRESENT a tuple divides point by point, and a point has
+  // no reciprocal — the value is a list of `no-division-by-point` errors, so
+  // the quotient must not claim the numerator's tuple shape. A matrix divisor
+  // is excluded for a different reason: the value path leaves `p / M` inert.
+  test.each([
+    'list<tuple<number, number>>',
+    'indexed_collection<tuple<number, number>>',
+    'broadcastable<tuple<number, number>>',
+    'matrix<2x2>',
+  ])('a %s denominator does NOT keep the tuple shape', (den) => {
+    const ce = pointListEngine(den);
+    expect(ce.box(['Divide', 'p', 'q']).type.matches('list<tuple<number, number>>'))
+      .toBe(false);
+  });
+
+  test('dividing two point lists errors per element', () => {
+    const ce = new ComputeEngine();
+    const value = ce
+      .box([
+        'Divide',
+        ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]],
+        ['List', ['Tuple', 1, 2], ['Tuple', 2, 2]],
+      ])
+      .evaluate();
+    expect(value.toString()).toContain('no-division-by-point');
+  });
+
+  test('a `vector<n>` of scalars is a scalar divisor, not a shape', () => {
+    // The type a LITERAL list of numbers carries (`[5, 10]` is
+    // `vector<finite_integer^2>`), so excluding it would defeat the repair.
+    const ce = pointListEngine('vector<3>');
+    expect(
+      ce.box(['Divide', 'p', 'q']).type.matches('list<tuple<number, number>>')
+    ).toBe(true);
+  });
+
+  test('a matrix factor is a matrix product, not a per-point scale', () => {
+    const ce = pointListEngine('matrix<2x2>');
+    expect(
+      ce.box(['Multiply', 'p', 'q']).type.matches('list<tuple<number, number>>')
+    ).toBe(false);
+  });
+
+  test('scalar factors widen the point COMPONENTS', () => {
+    // `[(3,4)] · 0.5 = [(1.5, 2)]` — echoing the integer components would
+    // claim a type the value contradicts.
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list<tuple<integer, integer>>');
+    ce.declare('q', 'list<real>');
+    ce.declare('r', 'real');
+    expect(ce.box(['Multiply', 'p', 'q']).type.toString()).toBe(
+      'list<tuple<real, real>>'
+    );
+    expect(ce.box(['Multiply', 'p', 'r']).type.toString()).toBe(
+      'list<tuple<real, real>>'
+    );
+  });
+
+  test('a point list times a sibling list of scalars keeps tuple elements', () => {
+    const ce = pointListEngine('list<number>');
+    expect(ce.box(['Multiply', 'p', 'q']).type.toString()).toBe(
+      'list<tuple<number, number>>'
+    );
+  });
+
+  test('a collection of scalars is unaffected by either repair', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list<number>');
+    ce.declare('q', 'number');
+    expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe(
+      'list<finite_number>'
+    );
+    expect(ce.box(['Multiply', 'p', 'q']).type.toString()).toBe('list<number>');
+  });
+
+  test('a fixed-shape numerator keeps its dimensions', () => {
+    const ce = new ComputeEngine();
+    ce.declare('v', 'vector<3>');
+    ce.declare('m', 'matrix<2x2>');
+    ce.declare('q', 'number');
+    expect(ce.box(['Divide', 'v', 'q']).type.toString()).toBe(
+      'vector<finite_number^3>'
+    );
+    expect(ce.box(['Divide', 'm', 'q']).type.toString()).toBe(
+      'matrix<finite_number^(2x2)>'
+    );
+  });
+
+  test('the elementwise VALUE matches the repaired type', () => {
+    const ce = new ComputeEngine();
+    const points = ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]];
+    const quotient = ce.box(['Divide', points, ['List', 5, 10]]);
+    expect(quotient.type.matches('list<tuple<number, number>>')).toBe(true);
+    expect(quotient.evaluate().toString()).toBe('[(3/5, 4/5),(3/5, 4/5)]');
+    // The elementwise reading of `PointX`, not the element-INDEX one.
+    expect(ce.box(['PointX', quotient]).evaluate().toString()).toBe(
+      '[3/5,3/5]'
+    );
+  });
+});

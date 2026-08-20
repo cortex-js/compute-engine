@@ -187,6 +187,8 @@ import { aggregateAbsence } from './missing-data.js';
 import { expand } from '../boxed-expression/expand.js';
 import {
   couldBeNumericTuple,
+  typeCouldBeNumericTuple,
+  typeCouldBeNumericTupleCollection,
   isLinearAlgebraCollection,
   isBroadcastCollectionType,
   isDeclaredScalarNumber,
@@ -399,6 +401,59 @@ function quotientShapeType(t: Type, den: Expression): Type {
     // the spread.
     return { ...t, elements: quotientShapeType(t.elements, den) };
   return quotientComponentType(t, den);
+}
+
+/**
+ * The ELEMENT type of a list/indexed-collection/collection-kind type, or
+ * `undefined` when the type carries none — a bare kind name (`'list'`), a
+ * tuple, a set, or a scalar. Used by the `Multiply` type handler to tell a
+ * collection of scalars (which scales a paired point list element-wise) from
+ * one whose elements are themselves shaped.
+ */
+function collectionElementTypeOf(t: Type): Type | undefined {
+  if (typeof t === 'string') return undefined;
+  if (
+    t.kind === 'list' ||
+    t.kind === 'indexed_collection' ||
+    t.kind === 'collection'
+  )
+    return t.elements;
+  return undefined;
+}
+
+/**
+ * True when `den` can stand as the divisor of a SHAPE-PRESERVING quotient —
+ * one whose numerator's tuple structure survives because every division it
+ * performs is `tuple / scalar`.
+ *
+ * Rejected, in each case because the divisor can present a TUPLE where a
+ * scalar is required and a point has no reciprocal (`canonicalDivide` answers
+ * `no-division-by-point`):
+ * - a tuple itself;
+ * - a `broadcastable<tuple<…>>`, whose runtime value MAY be that tuple;
+ * - a collection of tuples, which pairs elementwise into `tuple / tuple`
+ *   (`[(3,4),(6,8)] / [(1,2),(2,2)]` evaluates to a list of
+ *   `no-division-by-point` errors).
+ *
+ * A MATRIX divisor is rejected for a different reason: the value path leaves
+ * `p / M` inert (`(3, 4) / [1,2]`) rather than distributing it, so no
+ * component-wise claim about the result holds.
+ *
+ * Admitted: a scalar, and a collection of scalars — dimensionless
+ * (`list<number>`) or `vector<n>`, which a literal list such as `[5, 10]`
+ * types as — since each divides one point by one scalar.
+ */
+function divisorKeepsNumeratorShape(den: Expression): boolean {
+  if (couldBeNumericTuple(den)) return false;
+  const dt = den.type.type;
+  if (typeCouldBeNumericTupleCollection(dt)) return false;
+  if (
+    typeof dt !== 'string' &&
+    dt.kind === 'broadcastable' &&
+    typeCouldBeNumericTuple(dt.elements)
+  )
+    return false;
+  return !den.type.matches('matrix');
 }
 
 /**
@@ -677,15 +732,39 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // 165). Hoisted above the NaN/finiteness early-returns for the same
         // reason `Multiply` hoists its tuple branch: a tuple's `isFinite` is
         // `false`, which would otherwise collapse it to `number`.
-        // COULD-semantics on the numerator, and the denominator must not itself
-        // be tuple-shaped — `tuple / tuple` has no defined quotient and
-        // `canonicalDivide` already rejects it. The STRUCTURE is preserved but
+        // COULD-semantics on the numerator, while the denominator must be one
+        // a shape-preserving quotient can divide by at all — see
+        // `divisorKeepsNumeratorShape`, which rules out every divisor that can
+        // present a TUPLE (`tuple / tuple` has no defined quotient and
+        // `canonicalDivide` rejects it) as well as a matrix, which the value
+        // path leaves inert. The STRUCTURE is preserved but
         // the components are NOT echoed: each is widened through
         // `quotientComponentType`, which applies the same tier rules as the
         // scalar branches below — echoing claimed integer components for
         // `tuple<finite_integer, …> / finite_integer` where the quotient is
         // rational (`[6,2]/4 = [3/2,1/2]`).
-        if (couldBeNumericTuple(num) && !couldBeNumericTuple(den))
+        if (couldBeNumericTuple(num) && divisorKeepsNumeratorShape(den))
+          return quotientShapeType(num.type.type, den);
+        // The ELEMENTWISE counterpart of the branch above (Tycho item 209): a
+        // COLLECTION whose elements are numeric tuples — a point LIST, e.g.
+        // the `N = P / l(P)` a Desmos document writes to normalize a set of
+        // points — divides component-wise INSIDE each element, so the
+        // quotient's elements stay tuples. Without this branch the scalar
+        // widening below claimed `finite_number`, and the broadcast wrapper in
+        // `boxed-function.ts` lifted that scalar per-element result, typing
+        // the quotient `list<number>`: `PointX`/`PointY` over it then took the
+        // element-INDEX reading and folded to `NaN` at bind time, even though
+        // the VALUE was a correct list of points. `Multiply` keeps the element
+        // tuple through its own collection branch, so this also restores the
+        // parity between `p / q` and the algebraically identical `p · (1/q)`.
+        // The denominator carries the same obligation as the tuple branch —
+        // `tuple / tuple` has no defined quotient — while a COLLECTION of
+        // scalars is admitted: it divides the point list elementwise, one
+        // scalar per point.
+        if (
+          typeCouldBeNumericTupleCollection(num.type.type) &&
+          divisorKeepsNumeratorShape(den)
+        )
           return quotientShapeType(num.type.type, den);
         // The broadcast-lifted counterpart, one wrapper out (Tycho item 188):
         // a numerator typed `broadcastable<vector<n>>` — a vector-valued call
@@ -1897,8 +1976,55 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             );
           return collectionOps[0].type;
         }
-        if (collectionOps.length > 1)
+        if (collectionOps.length > 1) {
+          // A point LIST paired with a sibling collection of SCALARS scales
+          // each point by the scalar it is paired with, and the value path
+          // returns a list of points (`[(3,4),(6,8)]·[5,10] = [(15,20),
+          // (60,80)]`), so the element tuple-ness survives. The widen below
+          // unions the two element types instead (`list<number | tuple<…>>`),
+          // and `PointX`/`PointY` over that union take the element-INDEX
+          // reading rather than the elementwise one, folding a normalized
+          // point list to `NaN` (Tycho item 209, secondary defect; the
+          // `Divide` twin is the point-list branch in its own type handler).
+          // Narrow on purpose: exactly ONE operand is a point list and every
+          // other collection operand must be a RANK-1 collection of SCALARS,
+          // so a pairing of two point lists (which has no defined
+          // component-wise reading) still widens, and so does a matrix
+          // product. Excluding a matrix takes an explicit `matches('matrix')`
+          // rather than a "carries dimensions" test: on a `list` kind a shape
+          // lives in `dimensions` while `elements` stays the scalar base, so a
+          // `matrix<2x2>` reports scalar elements exactly as a `vector<n>`
+          // does — and a vector MUST stay admitted, since that is the type a
+          // literal list of numbers (`[5, 10]`) carries.
+          //
+          // The scalars fold into the point's COMPONENTS rather than being
+          // dropped: `list<tuple<integer, integer>>` times a list of reals has
+          // real components (`[(3,4)]·[0.5] = [(1.5, 2)]`), so echoing the
+          // point list's type verbatim would claim integer components the
+          // value contradicts. `absorbScalarsIntoCells` performs the widening
+          // — the same helper, and the same reason, as the single-collection
+          // branch above.
+          const tupleCollections = collectionOps.filter((x) =>
+            typeCouldBeNumericTupleCollection(x.type.type)
+          );
+          const scalarSiblings: Type[] = [];
+          const siblingsAreRank1Scalars =
+            tupleCollections.length === 1 &&
+            collectionOps.every((x) => {
+              if (x === tupleCollections[0]) return true;
+              if (x.type.matches('matrix')) return false;
+              const el = collectionElementTypeOf(x.type.type);
+              if (el === undefined || !isSubtype(el, 'number')) return false;
+              scalarSiblings.push(el);
+              return true;
+            });
+          if (siblingsAreRank1Scalars)
+            return absorbScalarsIntoCells(
+              tupleCollections[0].type.type,
+              scalarSiblings
+            );
           return widen(...collectionOps.map((x) => x.type.type));
+        }
         // An operand whose collection-ness is not statically visible (a top
         // `unknown`/`any`/`value` leaf such as an undeclared `h(x)`, or an
         // already-`broadcastable<…>` inner node) makes the product

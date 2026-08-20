@@ -44,6 +44,39 @@
 
 ### Bug Fixes
 
+- **Dividing a list of points by a scalar keeps the points.** A collection
+  whose elements are numeric tuples — `list<tuple<number, number>>`, the shape
+  a set of points carries — typed its quotient `list<number>`, dropping the
+  element tuple-ness, while the equivalent product `p·(1/q)` kept it. The
+  values were always correct; only the type was wrong, and it was wrong in a
+  way that changed downstream readings: `PointX`/`PointY` over a
+  `list<number>` take the element-INDEX reading rather than the elementwise
+  one, so a normalized point list read as its own first coordinate. Every
+  denominator spelling is repaired (a scalar, a `broadcastable<number>`, a
+  sibling collection of scalars that divides elementwise), and a divisor that
+  can present a tuple — a point, a point list, or a `broadcastable<tuple<…>>`
+  — still has no defined quotient. The same repair applies to the product of a
+  point list with a sibling list of scalars, which used to widen to
+  `list<number | tuple<…>>`.
+
+- **Scaling a list of points widens the point's components.** A scalar factor
+  folded into a collection's cells but stopped at a tuple cell, so
+  `list<tuple<integer, integer>>` scaled by a real still claimed integer
+  components even though `[(3,4)]·0.5` is `[(1.5, 2)]`. Each component is now
+  widened with the scalar factors, as a non-tuple cell already was.
+
+- **The derivative of a vector-valued function no longer claims a scalar
+  result.** A head declared as a bare `function` and only then assigned a
+  tuple-valued lambda typed `f'(t)` as `number` even though evaluating it
+  returned a 3-tuple — so the declared type contradicted the value, and
+  type-strict consumers such as `Cross` and `Dot` rejected the call with
+  `incompatible-type`. `Derivative` now reads the codomain of an assigned
+  function literal when the declaration itself is uninformative, and `D` of a
+  tuple- or list-valued body reports the shape it actually evaluates to
+  (`D((cos t, sin 2t, t), t)` is a tuple, not a `number`). A head that is
+  declared `function` and never assigned still reports the long-standing
+  scalar compromise.
+
 - **A literal `0` operand is no longer dropped when serializing to LaTeX.**
   Several serializers tested an operand for truthiness where they meant to test
   for absence, and the MathJSON of the literal `0` is the number `0` — so a

@@ -1339,3 +1339,76 @@ describe('|v| over a TUPLE is a NORM, not a scalar absolute value', () => {
     expect(d.toString()).toContain('Sign');
   });
 });
+
+describe('VECTOR-VALUED DERIVATIVES — the declared type must not contradict the value', () => {
+  // A head declared as a bare `function` and only THEN assigned a
+  // tuple-valued lambda used to commit a SCALAR result for its derivative:
+  // `f'(t)` typed `number` while `.N()` returned a 3-tuple, so `Cross`/`Dot`
+  // rejected the call with `incompatible-type` for the rest of the session.
+  const curve = (ce: ComputeEngine) =>
+    ce.parse('(t) \\mapsto (\\cos t, \\sin 2t, t)');
+
+  test.each(['function', 'signature'] as const)(
+    'declared as %s: the derivative of the curve is tuple-valued',
+    (declareAs) => {
+      const ce = new ComputeEngine();
+      if (declareAs === 'function') ce.declare('f', 'function');
+      else ce.declare('f', { signature: '(unknown) -> unknown' } as any);
+      ce.assign('f', curve(ce));
+
+      expect(ce.parse("f'(0.25)").type.matches('tuple<number, number, number>'))
+        .toBe(true);
+      expect(ce.box(['Cross', ['Apply', ['Derivative', 'f', 1], 0.25],
+        ['Tuple', 1, 2, 3]]).isValid).toBe(true);
+    }
+  );
+
+  test('the normalized derivative keeps the tuple through a second level', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', 'function');
+    ce.declare('F_0', 'function');
+    ce.assign('f', curve(ce));
+    ce.assign(
+      'F_0',
+      ce.parse("(t) \\mapsto \\frac{f'(t)}{\\left|f'(t)\\right|}")
+    );
+    const call = ce.parse('F_0(0.25)');
+    expect(call.type.matches('tuple<number, number, number>')).toBe(true);
+    // The value the type must agree with: a unit-length 3-tuple.
+    const v = call.N();
+    expect(v.operator).toBe('Tuple');
+    expect(
+      Math.hypot(...v.ops!.map((op) => op.re!))
+    ).toBeCloseTo(1, 10);
+    expect(
+      ce.box(['Cross', ['F_0', 0.25], ['Tuple', 1, 2, 3]]).isValid
+    ).toBe(true);
+  });
+
+  test('an UNASSIGNED bare `function` head still reports a scalar derivative', () => {
+    // Nothing says what it returns, so the long-standing scalar compromise
+    // stands: passing `any` through would type every application `any`.
+    const ce = new ComputeEngine();
+    ce.declare('g', 'function');
+    expect(ce.box(['Derivative', 'g', 1]).type.toString()).toBe(
+      '(any*) -> number'
+    );
+  });
+
+  test('`D` of a tuple or list body keeps the shape it evaluates to', () => {
+    const ce = new ComputeEngine();
+    ce.declare('t', 'number');
+    const dTuple = ce.box(['D', ['Tuple', ['Cos', 't'], ['Sin', 't']], 't']);
+    expect(dTuple.type.matches('tuple<number, number>')).toBe(true);
+    expect(dTuple.evaluate().operator).toBe('Tuple');
+
+    const dList = ce.box(['D', ['List', ['Cos', 't'], ['Sin', 't']], 't']);
+    expect(dList.type.matches('list<number>')).toBe(true);
+    expect(dList.evaluate().operator).toBe('List');
+  });
+
+  test('`D` of a scalar body is unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['D', ['Sin', 'x'], 'x']).type.matches('number')).toBe(true);
+  });
+});

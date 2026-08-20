@@ -56,6 +56,10 @@ import {
   LIMIT_PROBE_ITERATION_BUDGET,
 } from '../numerics/numeric.js';
 import { derivative, differentiate } from '../symbolic/derivative.js';
+import {
+  couldBeNumericTuple,
+  typeCouldBeNumericCollection,
+} from '../collection-utils.js';
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
 import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
@@ -1010,11 +1014,38 @@ volumes
         const result = t !== undefined ? functionResult(t) : undefined;
         if (result !== undefined && result !== 'any' && result !== 'unknown')
           return engine.type(t!);
-        // The function's codomain is uninformative (e.g. a symbol declared
-        // plain `function`, whose type is `(any*) -> any`). Its derivative is
-        // still scalar-valued, so report a number-valued function — the same
-        // compromise as the `D` type handler below — rather than passing the
-        // `any` through, which would type applications as `any`.
+        // The DECLARED type is uninformative, but the symbol may nevertheless
+        // hold a function literal whose codomain is known: a head declared as
+        // a bare `function` and only then assigned `(t) ↦ (cos t, sin 2t, t)`
+        // keeps the declared `function` as its contract, so the branch above
+        // sees `unknown` while the assigned lambda types
+        // `(unknown) -> tuple<…>`. Reading the value's own type here is what
+        // stops the fallback below from committing a SCALAR result the
+        // evaluation then contradicts — `f'(0.25)` typed `number` while `.N()`
+        // returned a 3-tuple, and every type-strict consumer (`Cross`, `Dot`)
+        // rejected the call with `incompatible-type` (Tycho item 210).
+        const valueType =
+          fn !== undefined && isSymbol(fn) ? fn.value?.type.type : undefined;
+        if (
+          valueType !== undefined &&
+          typeof valueType !== 'string' &&
+          valueType.kind === 'signature'
+        ) {
+          const valueResult = functionResult(valueType);
+          if (
+            valueResult !== undefined &&
+            valueResult !== 'any' &&
+            valueResult !== 'unknown'
+          )
+            return engine.type(valueType);
+        }
+        // Neither the declaration nor a held value says what the function
+        // returns (e.g. a symbol declared plain `function` and never
+        // assigned, whose type is `(any*) -> any`). Its derivative is still
+        // scalar-valued in the overwhelmingly common case, so report a
+        // number-valued function — the same compromise as the `D` type
+        // handler below — rather than passing the `any` through, which would
+        // type applications as `any`.
         return engine.type('(any*) -> number');
       },
       canonical: (ops, { engine }) => {
@@ -1142,6 +1173,16 @@ volumes
         // The derivative of a numeric expression is numeric — preserve the
         // concrete numeric type (e.g. `finite_number` for `D(Sin(x),x)`).
         if (t.matches('number')) return t;
+        // A numeric TUPLE or COLLECTION body differentiates component-wise and
+        // the result keeps that shape: `D((cos t, sin 2t, t), t)` evaluates to
+        // `(-sin t, 2cos 2t, 1)`, and `D([cos t, sin t], t)` to a list. The
+        // scalar fallback below claimed `number` for both, so the declared
+        // type contradicted the value the same handler produced, and a
+        // type-strict consumer (`Cross`, `Dot`) rejected the derivative of a
+        // parametric curve outright (Tycho item 210). Echoing the body's type
+        // follows the same tier convention as the numeric branch above.
+        if (couldBeNumericTuple(body) || typeCouldBeNumericCollection(t.type))
+          return t;
         // A derivative is otherwise scalar-valued: report `number` rather than
         // the signature's `expression`. This covers the derivative of an
         // application of an undeclared function (`y(x)` has type `any`), a
