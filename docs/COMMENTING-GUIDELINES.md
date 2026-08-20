@@ -138,6 +138,15 @@ nothing for a link to land on:
 anchor — but the anchor is never emitted. Link to `{@link
 OperatorDefinitionFlags}` and name the property in the prose.
 
+The same applies to anything `@internal`: `excludeInternal` strips it from the
+output, so a link to it resolves for TypeScript and dangles in the docs
+(`Comment for X links to Y which was resolved but is not included in the
+documentation`). Write the name in backticks instead. Typedoc's suggested
+`externalSymbolLinkMappings` fix does not apply — that option is for symbols
+from other packages, not for our own excluded ones. A link between two
+`@internal` comments is fine: neither is published, and it still resolves in
+the IDE.
+
 **Avoid reusing a name across exported symbols.** Anchors are the lowercased
 member name, disambiguated by document order: a second `Expression` becomes
 `#expression-1`, a sixth `#expression-5`. Links inside `api.md` are generated

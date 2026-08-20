@@ -200,7 +200,7 @@ export type EffectSet = 'any' | EffectLabel[];
  * A universally quantified type variable (rank-1).
  *
  * Only legal inside a function signature; declared and scoped by its arm's
- * `where` clause ({@link FunctionSignature.typeParams}). A variable is
+ * `where` clause (the `typeParams` field of {@link FunctionSignature}). A variable is
  * **atomic and opaque**: it is never reduced, distributed or collapsed, and it
  * is substituted away by instantiation at a call site.
  */

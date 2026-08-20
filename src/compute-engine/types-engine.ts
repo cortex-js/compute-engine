@@ -291,7 +291,7 @@ export type ConformanceRecord = {
   _authored?: Record<string, Expression | JSImplementation>;
   /** Where {@link ConformanceRecord.impl} came from, when it was installed
    * from INSIDE an Epsil batch (ruling P47): the batch id
-   * ({@link IComputeEngine._epsilBatchId}) and the identity of the
+   * (`IComputeEngine._epsilBatchId`) and the identity of the
    * implementation BLOCK expression that installed it. A second, DIFFERENT
    * block for the same (type, protocol) pair in the SAME batch is
    * `protocol-implementation-duplicate`; a re-implementation in a later batch

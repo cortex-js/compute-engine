@@ -593,7 +593,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   /**
    * The *resolved* missing-value behavior (§3.A of the missing-value typing
-   * design). Computed from the declared {@link missingBehavior} and the current
+   * design). Computed from the declared `missingBehavior` flag of
+   * {@link OperatorDefinitionFlags} and the current
    * signature on every access — never cached, so a signature mutation
    * (`_update()`, `BoxedFunction._infer()`) is reflected immediately.
    */

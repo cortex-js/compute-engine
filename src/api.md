@@ -4779,7 +4779,7 @@ type BindingSiteSelector = (ops, phase) => readonly BindingSite[];
 
 Locate an operator's binding sites among its operands.
 
-Used as the value of the [OperatorDefinitionFlags.scoped](#scoped) flag to
+Used as the value of the `scoped` flag of [OperatorDefinitionFlags](#operatordefinitionflags) to
 declare that an operator is a *binder*: the framework mints the operator's
 scope, declares each site's symbol in it before the `canonical` handler
 runs, and rebinds the sites (and same-named occurrences elsewhere in the
@@ -4932,7 +4932,8 @@ readonly resolvedMissingBehavior: "reject" | "propagate" | "handle" | "pass-thro
 ```
 
 The *resolved* missing-value behavior (§3.A of the missing-value typing
-design): the declared [missingBehavior](#missingbehavior) when present, otherwise
+design): the declared `missingBehavior` flag of [OperatorDefinitionFlags](#operatordefinitionflags)
+when present, otherwise
 `'propagate'` for a declared all-numeric signature and `'pass-through'`
 for everything else. Recomputed from the current signature — never cached
 across a signature mutation.
@@ -5151,7 +5152,8 @@ invokesAt(i): boolean
 ```
 
 True if operand position `i` may INVOKE a function-valued operand — the
-per-position reader for [OperatorDefinitionFlags.invokes](#invokes). Missing
+per-position reader for the `invokes` flag of [OperatorDefinitionFlags](#operatordefinitionflags).
+Missing
 map indices default to `true`. Every consumer of the metadata goes
 through this accessor (or [invokesNone](#invokesnone)), never the raw field.
 
@@ -16111,7 +16113,7 @@ type TypeVariable = {
 A universally quantified type variable (rank-1).
 
 Only legal inside a function signature; declared and scoped by its arm's
-`where` clause ([FunctionSignature.typeParams](#typeparams)). A variable is
+`where` clause (the `typeParams` field of [FunctionSignature](#functionsignature)). A variable is
 **atomic and opaque**: it is never reduced, distributed or collapsed, and it
 is substituted away by instantiation at a call site.
 

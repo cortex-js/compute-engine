@@ -1422,7 +1422,7 @@ export type BindingSite = {
 /**
  * Locate an operator's binding sites among its operands.
  *
- * Used as the value of the {@link OperatorDefinitionFlags.scoped} flag to
+ * Used as the value of the `scoped` flag of {@link OperatorDefinitionFlags} to
  * declare that an operator is a *binder*: the framework mints the operator's
  * scope, declares each site's symbol in it before the `canonical` handler
  * runs, and rebinds the sites (and same-named occurrences elsewhere in the
@@ -1635,7 +1635,7 @@ export type OperatorDefinitionFlags = {
    * **Default:** `true`
    *
    * As an **authoring input** this flag is sugar for an effect set, translated
-   * once at registration (see {@link OperatorDefinitionFlags.effects} and the
+   * once at registration (see the `effects` flag of {@link OperatorDefinitionFlags} and the
    * truth table in `docs/EFFECTS-MODEL.md`, "One source of truth"). As
    * **readable state on a boxed definition** it is a *derived* getter: "no
    * impurity label is present in the operator's effect set".
@@ -1659,7 +1659,7 @@ export type OperatorDefinitionFlags = {
 
   /**
    * Annotation provenance (`docs/EFFECTS-MODEL.md`, "Annotation provenance"):
-   * `true` when the AUTHOR supplied {@link OperatorDefinitionFlags.effects} or
+   * `true` when the AUTHOR supplied the `effects` flag of {@link OperatorDefinitionFlags} or
    * an effect-bearing signature specifier, `false` when the effect set came
    * from the body inference.
    *
@@ -1682,7 +1682,7 @@ export type OperatorDefinitionFlags = {
    *
    * Consumed by the frame kind's obligation protocol (for `'seed'`: the
    * pending-draw walk in `library/core.ts`), and by the derived
-   * {@link OperatorDefinitionFlags.drawsRandom} getter.
+   * `drawsRandom` getter of {@link OperatorDefinitionFlags}.
    *
    * **Default:** none
    */
@@ -1869,7 +1869,8 @@ export interface BoxedOperatorDefinition
 
   /**
    * The *resolved* missing-value behavior (§3.A of the missing-value typing
-   * design): the declared {@link missingBehavior} when present, otherwise
+   * design): the declared `missingBehavior` flag of {@link OperatorDefinitionFlags}
+   * when present, otherwise
    * `'propagate'` for a declared all-numeric signature and `'pass-through'`
    * for everything else. Recomputed from the current signature — never cached
    * across a signature mutation.
@@ -1886,7 +1887,8 @@ export interface BoxedOperatorDefinition
   stripsMissingAt(i: number): boolean;
 
   /** True if operand position `i` may INVOKE a function-valued operand — the
-   * per-position reader for {@link OperatorDefinitionFlags.invokes}. Missing
+   * per-position reader for the `invokes` flag of {@link OperatorDefinitionFlags}.
+   * Missing
    * map indices default to `true`. Every consumer of the metadata goes
    * through this accessor (or {@link invokesNone}), never the raw field. */
   invokesAt(i: number): boolean;
