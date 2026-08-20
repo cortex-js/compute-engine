@@ -1,22 +1,26 @@
-let x;
-
-let f: () -> integer
-let g: () -> number
-let k: (integer) -> integer;
-
-x = f()
-print("After f: \(Type(x))")
-x = g()
-print("After g: \(Type(x))")
-k(x)
-print("After k \(Type(x))")
-
-// let f: (x: any) -> list<number>
-// let g: (x: any) -> list<integer>
 
 // let xs: list;
 // xs = f(0)
+// // expected `list`, got `unknown` at `xs`
 // Type(xs)  // -> "list" should be list<number>
+
+protocol Shape {
+  readonly area: number;
+}
+
+type Circle = object {
+    center: tuple<number, number>,
+    /* private */ _area: number
+}
+// type Circle is Shape;
+type Circle is Shape {
+    get area(self: Self) { self._area }
+}
+
+const c = Circle(center: (1, 1), _area: 1);
+c._area = 5;
+
+print(c, area(c));
 
 // let i : real;
 // i = 5
