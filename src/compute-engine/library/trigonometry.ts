@@ -1,7 +1,10 @@
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import { bignumPreferred } from '../boxed-expression/utils.js';
-import { checkArity } from '../boxed-expression/validate.js';
+import {
+  checkArity,
+  nonNumericOperandError,
+} from '../boxed-expression/validate.js';
 import {
   constructibleValues,
   evalTrig,
@@ -151,6 +154,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         return ce.number(fArg).div(180).mul(ce.Pi);
       },
       evaluate: (ops, options) => {
+        // The `canonical` handler above hands a non-number operand straight
+        // back unvalidated, so without this check the conversion below runs
+        // `"a".mul(π/180)` and answers a bare `NaN` — a silently absorbed
+        // type mistake, not a reported one.
+        const nonNumeric = nonNumericOperandError(options.engine, ops);
+        if (nonNumeric !== undefined) return nonNumeric;
         if (options.engine.angularUnit === 'deg') return ops[0];
         // Faithful `d·π/180` conversion, matching the canonical handler (no
         // mod-360 reduction — see the note there).
@@ -168,7 +177,18 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const min = ops[1]?.re ?? 0;
         const sec = ops[2]?.re ?? 0;
 
-        if (Number.isNaN(deg)) return ce._fn('DMS', ops);
+        // Every component is read with `.re`, which loses information for
+        // two kinds of operand: it is NaN for anything that is not a number
+        // LITERAL yet (an unevaluated call such as `At([30, 2], 1)` in the
+        // minutes slot), and it silently drops the imaginary part of a
+        // complex one. Folding either way is wrong — the NaN burns into
+        // `Degrees(NaN)` and puts the right answer out of reach even though
+        // the operand does resolve to 30, and the truncation makes
+        // `DMS(1, i)` answer exactly what `DMS(1, 0)` does. Leave the whole
+        // call unfolded whenever ANY component fails to read as a real
+        // number; `evaluate` runs after the operands are evaluated and
+        // retries there.
+        if (!foldableDMSComponents(ops)) return ce._fn('DMS', ops);
 
         // A lone exact degrees argument needs no decimal recovery: hand it to
         // `Degrees` intact. The `.re` reads above are a decimal-notation
@@ -190,11 +210,22 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, options) => {
         const ce = options.engine;
+        // A non-number component reads `.re` as NaN below, which either
+        // leaves the call inert (`DMS("a")`) or, for a minutes/seconds
+        // component, propagates into the arithmetic and answers a bare
+        // `NaN`. Report the operand instead — the `canonical` handler above
+        // replaces the default signature check, so nothing else does.
+        const nonNumeric = nonNumericOperandError(ce, ops);
+        if (nonNumeric !== undefined) return nonNumeric;
         const deg = ops[0]?.re ?? NaN;
         const min = ops[1]?.re ?? 0;
         const sec = ops[2]?.re ?? 0;
 
-        if (Number.isNaN(deg)) return ce._fn('DMS', ops);
+        // Same check as the canonical handler: a component that is still
+        // symbolic here (`DMS(x, 30)`) or is complex must leave the call
+        // unevaluated rather than fold to `Degrees(NaN)` or drop its
+        // imaginary part.
+        if (!foldableDMSComponents(ops)) return ce._fn('DMS', ops);
 
         // Match the canonical handler's exact-degrees passthrough.
         if (ops.length === 1 && isNumber(ops[0]) && ops[0].isExact)
@@ -921,6 +952,24 @@ function inverseHyperbolicPole(
   }
 }
 
+/**
+ * Can `DMS`'s degrees/minutes/seconds operands be folded into a single
+ * degree count by reading `.re`?
+ *
+ * Only when each present component is a REAL number: `.re` is NaN for an
+ * operand that is not a number literal (a symbol, or a call such as
+ * `At([30, 2], 1)` that has not been evaluated yet), and it drops the
+ * imaginary part of a complex one. The declared signature is
+ * `(real, real?, real?) -> real`, but `DMS` supplies its own `canonical`
+ * handler, which replaces the default signature-based argument validation —
+ * so nothing else enforces the `real` claim on the components.
+ *
+ * An absent optional component is foldable: the fold defaults it to 0.
+ */
+function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
+  return ops.every((op) => op === undefined || (isNumber(op) && op.im === 0));
+}
+
 function trigFunction(
   operator: string,
   complexity: number,
@@ -943,6 +992,16 @@ function trigFunction(
       return ce._fn(operator, ops);
     },
     evaluate: ([x], { numericApproximation, engine }) => {
+      // The `canonical` handler above replaces the default signature-based
+      // argument validation with an arity check, so an operand that is not a
+      // number reaches evaluation unreported. Left alone it stays inert
+      // (`sin("a")`), which reads as "symbolic, pending more information"
+      // rather than as the type mistake it is. This also covers the operand
+      // whose static type is a UNION that could still be numeric — the
+      // element type of a heterogeneous list, `Sin(At(["a", 2], 1))` — which
+      // no boxing-time check can settle.
+      const nonNumeric = nonNumericOperandError(engine, [x]);
+      if (nonNumeric !== undefined) return nonNumeric;
       // Measurement error propagation (Sin/Cos/Tan only; other operators fall
       // through). Guard on the evaluated argument being a Measurement.
       const evalX = x.evaluate();

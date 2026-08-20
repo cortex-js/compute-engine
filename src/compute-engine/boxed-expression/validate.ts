@@ -533,6 +533,63 @@ export function checkNumericArgs(
 }
 
 /**
+ * Evaluate-time complement of `checkNumericArgs`: numeric operators are
+ * permissive at boxing time — a `value`-typed symbol is admitted because it
+ * COULD be a number, even though it may legally hold a string — so the
+ * numeric evaluate handlers must surface the mismatch once operand
+ * evaluation substitutes a value that PROVES non-numeric. Without this the
+ * mistake either lingers as an inert expression (`2 · "hello"`, `sin("a")`)
+ * or is silently absorbed into a numeric result (`Negate` and `Sqrt` turned
+ * a string into `NaN`).
+ *
+ * An operator whose operand type is checked against its declared signature
+ * at canonicalization does not need this guard for a statically non-numeric
+ * operand — but it does for one whose static type is a UNION that could
+ * still be numeric, such as the element type of a heterogeneous list
+ * (`Sin(At(["a", 2], 1))` types `finite_integer | missing | number |
+ * string`). Only evaluation can settle that operand, so only an
+ * evaluate-time check can report it.
+ *
+ * Returns a type error for the first VALID operand whose type is disjoint
+ * from every exempt reading: such an operand can neither be a number nor
+ * broadcast over one. The exemptions, and why each stays silent:
+ * - `broadcastable<number>`: could be a number, or a collection consumed by
+ *   broadcast;
+ * - `missing | nothing`: absence markers propagate as `NaN`, never error;
+ * - `function`: a function-valued symbol in a numeric position stays a
+ *   symbolic term throughout the engine, in EVERY operator, not only as a
+ *   product factor: at boxing time `checkNumericArgs` devolves an unapplied
+ *   operator symbol to a plain symbol (`N + 1` via
+ *   `devolveUnappliedOperator`) and accepts function-valued elements
+ *   without inference, and the pinned cached-expression contracts keep
+ *   `2·g` as `2g` after `g := x ↦ …` (pipeline-contracts,
+ *   definition-order). Whether a function in a numeric position should
+ *   instead be an error is a separate ruling; this guard only polices
+ *   VALUES that arithmetic can never consume;
+ * - `error`: the operand already carries its own problem — wrapping it
+ *   would bury the original report.
+ * `Quantity`/`Measurement` operands pass because their types (`value`,
+ * numeric) are not disjoint from the union. Invalid operands are skipped
+ * for the same reason as `error`-typed ones. Returns `undefined` when every
+ * operand could still be numeric.
+ */
+// Parsed once: the guard runs for every operand of every numeric
+// evaluation, so it must not re-resolve the type string per call.
+const NON_NUMERIC_EXEMPT_TYPE: Type = parseType(
+  'broadcastable<number> | missing | nothing | function | error'
+);
+export function nonNumericOperandError(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  const bad = ops.find(
+    (x) => x.isValid && x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE)
+  );
+  if (bad === undefined) return undefined;
+  return ce.typeError('number', bad.type, bad);
+}
+
+/**
  * Check that an argument is of the expected type.
  *
  * Converts the arguments to canonical

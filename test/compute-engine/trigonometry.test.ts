@@ -490,3 +490,106 @@ describe('numericization is skipped for arguments that cannot numericize', () =>
     expect(ce.parse('\\sin(2+x)').N().toString()).toBe('sin(x + 2)');
   });
 });
+
+// A numeric operator whose `canonical` handler replaces the default
+// signature-based argument validation loses that validation entirely. The
+// trig/hyperbolic family (built by the shared `trigFunction` factory),
+// `Degrees` and `DMS` all supply one, so a non-numeric operand used to reach
+// evaluation unreported: `sin("a")` stayed inert and `Degrees("a")` answered a
+// bare `NaN`. Their evaluate handlers now run `nonNumericOperandError`
+// (`boxed-expression/validate.ts`), the same guard the arithmetic operators
+// use.
+//
+// `Arctan` is the CONTROL in the loop below, not a fixed operator: it declares
+// the same signature but has no `canonical` handler, so it keeps the default
+// validation and already rejected this operand. It is asked the same question
+// to pin that the two routes agree on the answer — if it ever gains a
+// `canonical` handler it will need the guard too, and this test is where that
+// shows up.
+//
+// The witness reaches evaluation through `At` on a heterogeneous list, because
+// only that shape is invisible to a boxing-time check: the operand's static
+// type is the union `finite_integer | missing | number | string`, which COULD
+// be numeric, so admitting it at canonicalization is correct and only
+// evaluation can settle it. A literal `Sin("a")` is already rejected earlier.
+describe('non-numeric operands are reported, not absorbed', () => {
+  // `At(["a", 2], 1)` — statically a union that could be a number, actually a
+  // string once evaluated.
+  const stringElement = ['At', ['List', "'a'", 2], 1];
+
+  for (const operator of [
+    'Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc',
+    'Arcsin', 'Arccos', 'Arctan',
+    'Sinh', 'Cosh', 'Tanh', 'Coth',
+    'Arsinh', 'Arcosh', 'Artanh', 'Arcoth', 'Arsech', 'Arcsch',
+    'Degrees',
+  ]) {
+    it(`${operator} of a string element is an error`, () => {
+      const ce = new ComputeEngine();
+      const result = ce.expr([operator, stringElement]).evaluate();
+      expect(result.isValid).toBe(false);
+      expect(result.toString()).toContain('incompatible-type');
+    });
+  }
+
+  it('DMS reports a string in any component', () => {
+    const ce = new ComputeEngine();
+    for (const ops of [
+      [stringElement],
+      [stringElement, 30],
+      [1, stringElement],
+      [1, 2, stringElement],
+    ]) {
+      const result = ce.expr(['DMS', ...ops]).evaluate();
+      expect(result.isValid).toBe(false);
+      expect(result.toString()).toContain('incompatible-type');
+    }
+  });
+
+  // Found while adding the guard above: `DMS` folds its components by reading
+  // `.re`, which is NaN for anything that is not a number LITERAL yet. Only
+  // the degrees slot bailed out on that read, so a minutes or seconds operand
+  // that merely needed evaluating first — an `At` over an all-numeric list —
+  // was folded into `Degrees(NaN)` and the correct answer became unreachable.
+  it('DMS resolves a component that is numeric but not yet a literal', () => {
+    const ce = new ComputeEngine();
+    const thirty = ['At', ['List', 30, 2], 1];
+    expect(ce.expr(['DMS', 1, thirty]).evaluate().toString()).toBe(
+      ce.expr(['DMS', 1, 30]).evaluate().toString()
+    );
+    expect(ce.expr(['DMS', 1, 2, thirty]).evaluate().toString()).toBe(
+      ce.expr(['DMS', 1, 2, 30]).evaluate().toString()
+    );
+  });
+
+  // The same `.re` read drops the imaginary part of a complex component, so
+  // `DMS(1, i)` used to answer exactly what `DMS(1, 0)` does. `DMS` cannot
+  // fold a complex component (the constructor does no symbolic arithmetic),
+  // so it must leave the call unevaluated rather than silently truncate.
+  it('DMS does not truncate a complex component', () => {
+    const ce = new ComputeEngine();
+    for (const ops of [['i'], [1, 'i'], [1, 2, 'i']]) {
+      const result = ce.expr(['DMS', ...ops]).evaluate();
+      expect(result.operator).toBe('DMS');
+      expect(result.isValid).toBe(true);
+    }
+    expect(ce.expr(['DMS', 1, 'i']).evaluate().toString()).not.toBe(
+      ce.expr(['DMS', 1, 0]).evaluate().toString()
+    );
+  });
+
+  // The guard must not fire on the operands that are legitimately admitted:
+  // symbols, exact constants, collections consumed by broadcast, and the
+  // absence markers.
+  it('leaves valid operands alone', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('\\sin x').evaluate().toString()).toBe('sin(x)');
+    expect(ce.parse('\\sin(\\frac{\\pi}{6})').evaluate().toString()).toBe('1/2');
+    expect(ce.parse('\\sin(2.5)').evaluate().re).toBeCloseTo(Math.sin(2.5), 12);
+    expect(ce.expr(['Sin', ['List', 0, 1]]).evaluate().toString()).toBe(
+      '[0,sin(1)]'
+    );
+    expect(ce.expr(['DMS', 'x', 30]).evaluate().toString()).toBe('DMS(x, 30)');
+    expect(ce.expr(['Degrees', 'x']).evaluate().isValid).toBe(true);
+  });
+});

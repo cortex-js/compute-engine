@@ -2,6 +2,21 @@
 
 ### Bug Fixes
 
+- **Trigonometric operators now report a non-numeric operand instead of
+  staying inert.** The trigonometric and hyperbolic functions, `Degrees` and
+  `DMS` validated only the NUMBER of arguments, not their types, so an operand
+  that turned out not to be a number was absorbed rather than reported:
+  `Sin(At(["a", 2], 1))` stayed as `sin("a")` and `Degrees(At(["a", 2], 1))`
+  answered a bare `NaN`. All of them now answer `incompatible-type`, matching
+  the arithmetic operators. This completes the numeric-operand checking
+  introduced in 0.116.0, which had covered arithmetic but not these operators.
+- **`DMS` no longer mis-folds a component that is not a plain real number.**
+  Its degrees, minutes and seconds components were read in a way that silently
+  discarded anything but a real number literal, so `DMS(1, At([30, 2], 1))`
+  answered `NaN` even though the minutes component resolves to 30, and
+  `DMS(1, i)` answered exactly what `DMS(1, 0)` does. Such a call now evaluates
+  its components first and, when one of them cannot be folded, is left
+  unevaluated instead of producing a wrong angle.
 - **The root `compile()` export regained its precise result types.** Its
   declared return type collapsed the target generic, so `run` was typed
   optional even for executable targets such as `javascript`, and
