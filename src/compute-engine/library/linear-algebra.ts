@@ -1303,13 +1303,37 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Cross: {
       description: 'Cross product of two 3-vectors.',
       complexity: 8300,
-      signature: '(vector, vector) -> vector',
+      // Numeric tuples (points in ℝ³, incl. a `PointList` row) are accepted
+      // alongside vectors, exactly as `Dot` accepts them: the two classic
+      // vector products must agree on what a vector is. The bare `tuple`
+      // param does the admission (the `Norm` pattern — the type language has
+      // no variadic tuple) and the handler narrows to provable numeric
+      // 3-tuples. The result is a `List` for tuple operands too — collection
+      // operators are not kind-preserving; a `tuple` operand yields
+      // `list<T>`.
+      signature: '(vector|tuple, vector|tuple) -> vector',
       // Provable declines only (both operands must be tensor values); success
       // also requires two 3-vectors — see `canEnumerateTensorOperands`.
       canEnumerate: canEnumerateTensorOperands,
       evaluate: ([a, b], { engine: ce }) => {
-        const A = a;
-        const B = b;
+        // Lower each fixed numeric tuple operand to its component vector,
+        // exactly as `Dot` does. A tuple operand that is not (yet) a
+        // provable numeric tuple with accessible components — a symbolic
+        // point, or a point list like `(-6, n)` with `n` a list — stays a
+        // symbolic `Cross`.
+        const lower = (op: Expression): Expression | undefined => {
+          if (!isTuple(op)) return op;
+          if (
+            !isFunction(op) ||
+            !hasAccessibleComponents(op) ||
+            !isNumericTuple(op)
+          )
+            return undefined;
+          return ce.function('List', op.ops);
+        };
+        const A = lower(a);
+        const B = lower(b);
+        if (A === undefined || B === undefined) return undefined;
         if (!isTensorValue(A) || !isTensorValue(B)) return undefined;
         const aTensor = packTensor(ce, A);
         const bTensor = packTensor(ce, B);

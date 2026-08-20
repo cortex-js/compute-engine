@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+### Improvements
+
+- **`Cross` accepts numeric tuples, like `Dot` always did.**
+  `Cross((1,2,3), (4,5,6))` computed nothing — the signature demanded
+  `vector`, so a point spelled as a tuple was rejected with
+  `incompatible-type` while the same point passed `Dot` — and the two
+  classic vector products disagreed about what a vector is. A provable
+  numeric 3-tuple (a point in ℝ³, including a `PointList` row) is now
+  lowered to its component vector exactly as `Dot` lowers it; the result is
+  a `List`, consistent with collection operators not preserving the `tuple`
+  kind. A tuple that is not provably numeric stays a symbolic `Cross`, and
+  a wrong-length tuple gets the `incompatible-dimensions` report, not a
+  type error. Affects code that builds `Cross` over `Tuple`/point operands
+  — previously an error, now a value.
+
 ### Bug Fixes
 
 - **`compile()` no longer reports the boolean literals as required inputs.**
