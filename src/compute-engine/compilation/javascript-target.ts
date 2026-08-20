@@ -7591,6 +7591,26 @@ function compileToTarget(
 const UNROLL_LIMIT = 100;
 
 /**
+ * Term count from which an unrolled Sum/Product is emitted as a sequence of
+ * accumulating STATEMENTS inside an IIFE rather than as one flat `a + b + c`
+ * chain.
+ *
+ * A flat chain has nowhere to put a statement, and that costs the unrolled
+ * form two things a loop gets for free. The accumulator cannot be tested
+ * between terms, so a term that makes the running total NaN does not stop the
+ * remaining ones — every one is evaluated to reach an answer already
+ * determined. And there is no place to bind a value, so an operand that does
+ * not depend on the index is re-emitted, and re-evaluated, once per term. The
+ * statement form recovers both.
+ *
+ * Below the threshold the flat chain is kept. A two- or three-term chain can
+ * skip at most one or two terms by exiting early, which does not pay for the
+ * closure the statement form introduces, and the flat chain is the more
+ * readable emission for the trivial sums that dominate that size.
+ */
+const UNROLL_STATEMENT_MIN_TERMS = 4;
+
+/**
  * Extract index, lower, and upper from a Limits expression.
  * Returns the raw Expression nodes so they can be compiled (not just evaluated
  * to numbers). Also provides numeric values when bounds are constant.
@@ -7688,6 +7708,16 @@ function compileBound(
  * When both bounds are constant integers, small ranges (<=UNROLL_LIMIT terms)
  * are unrolled into explicit additions/multiplications. Larger ranges or
  * symbolic bounds emit a while-loop wrapped in an IIFE.
+ *
+ * From `UNROLL_STATEMENT_MIN_TERMS` terms on, the unrolled form is emitted not
+ * as a flat `a + b + c` chain but as an IIFE accumulating in statements. That
+ * buys two things the chain has nowhere to put: index-invariant collection
+ * operands are bound once ahead of the terms instead of being rebuilt by each
+ * one, and the accumulator is tested between terms so that a NaN — which
+ * absorbs both `+` and `*` — returns immediately instead of evaluating terms
+ * that cannot change the answer. The NaN exit is emitted only when skipping
+ * those terms is unobservable; a term that splices caller-supplied source
+ * keeps the statement form without the exits.
  *
  * Multi-index forms — `Sum(body, Limits(i,…), Limits(j,…), …)` — are compiled
  * as nested single-index sums (`Σ_i Σ_j body`), so every indexing-set clause is
@@ -8827,18 +8857,71 @@ function emitSumProduct(
   if (bothConstant && !elementwiseBody) {
     const termCount = upperNum - lowerNum + 1;
     if (termCount <= UNROLL_LIMIT) {
-      const terms: string[] = [];
-      for (let k = lowerNum; k <= upperNum; k++) {
-        const innerTarget: CompileTarget<Expression> = {
-          ...target,
-          var: (id) => (id === index ? String(k) : target.var(id)),
-          boundVars: BaseCompiler.withBoundNames(target, [index]),
-        };
-        terms.push(`(${compileTerm(innerTarget)})`);
-      }
+      const emitTerms = (): string[] => {
+        const terms: string[] = [];
+        for (let k = lowerNum; k <= upperNum; k++) {
+          const innerTarget: CompileTarget<Expression> = {
+            ...target,
+            var: (id) => (id === index ? String(k) : target.var(id)),
+            boundVars: BaseCompiler.withBoundNames(target, [index]),
+          };
+          terms.push(`(${compileTerm(innerTarget)})`);
+        }
+        return terms;
+      };
+
+      // Every index the unrolled terms vary — this clause's plus the nested
+      // clauses', which the terms unroll or loop over in turn. A body
+      // subexpression free of all of them has the same value in every term.
+      const indexNames = [index, ...rest.map((c) => extractLimits(c).index)];
+
+      const asStatements = termCount >= UNROLL_STATEMENT_MIN_TERMS;
+      const { bindings, result: terms } = asStatements
+        ? BaseCompiler.hoistLoopInvariants(body, indexNames, target, emitTerms)
+        : { bindings: [], result: emitTerms() };
+
+      const hoisted = bindings
+        .map(([name, code]) => `const ${name} = ${code}; `)
+        .join('');
 
       if (!bodyIsComplex) {
-        return `(${terms.join(` ${op} `)})`;
+        if (!asStatements) return `(${terms.join(` ${op} `)})`;
+
+        // May the accumulation stop at the first NaN? Only if skipping the
+        // remaining terms is unobservable — a term that splices
+        // caller-supplied source (a `functions` entry, a string-valued `vars`
+        // symbol, an operator the caller re-mapped or gave a `compile`
+        // handler) can count its own calls or mutate shared state, so it has
+        // to run as many times as the flat chain ran it. The trees a term
+        // emits are the body plus the bounds of the nested clauses it unrolls
+        // or loops over.
+        const canExitEarly = BaseCompiler.isEmissionSkippable(
+          [
+            body,
+            ...rest.flatMap((c) => {
+              const l = extractLimits(c);
+              return [l.lowerExpr, l.upperExpr];
+            }),
+          ],
+          indexNames,
+          target
+        );
+
+        // Accumulate in statements so the accumulator can be tested between
+        // terms. NaN absorbs both `+` and `*`, so once it is NaN no remaining
+        // term can change the answer and evaluating them is pure cost — the
+        // same exit the element-wise fold loop below takes, in the same place
+        // (after each accumulation, before the next term is reached). The test
+        // after the LAST accumulation is omitted: `return` hands back the same
+        // NaN either way. Without `canExitEarly` the statement form is still
+        // emitted — the hoisted bindings need it — but every term runs.
+        const acc = BaseCompiler.tempVar(target);
+        const stmts = [`let ${acc} = ${terms[0]};`];
+        for (let i = 1; i < terms.length; i++) {
+          if (canExitEarly) stmts.push(`if (${acc} !== ${acc}) return NaN;`);
+          stmts.push(`${acc} ${op}= ${terms[i]};`);
+        }
+        return `(() => { ${hoisted}${stmts.join(' ')} return ${acc}; })()`;
       }
 
       const temps = terms.map((_, i) => `_t${i}`);
@@ -8849,7 +8932,7 @@ function emitSumProduct(
       if (isSum) {
         const reSum = temps.map((t) => `${t}.re`).join(' + ');
         const imSum = temps.map((t) => `${t}.im`).join(' + ');
-        return `(() => { ${assignments}; return { re: ${reSum}, im: ${imSum} }; })()`;
+        return `(() => { ${hoisted}${assignments}; return { re: ${reSum}, im: ${imSum} }; })()`;
       }
 
       let acc = temps[0];
@@ -8861,7 +8944,7 @@ function emitSumProduct(
           `const ${acc} = { re: ${prev}.re * ${temps[i]}.re - ${prev}.im * ${temps[i]}.im, im: ${prev}.re * ${temps[i]}.im + ${prev}.im * ${temps[i]}.re }`
         );
       }
-      return `(() => { ${parts.join('; ')}; return ${acc}; })()`;
+      return `(() => { ${hoisted}${parts.join('; ')}; return ${acc}; })()`;
     }
   }
 

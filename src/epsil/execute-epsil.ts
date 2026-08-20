@@ -268,6 +268,26 @@ function executeEpsilBatch(
     // `iterationLimit`/`recursionLimit`, which throw a `CancellationError`).
     let cancellation: CancellationCause | undefined;
     valueRange = statementRange(stmt, source);
+
+    // Run BEFORE the statement is boxed: this scan reads the RAW ast and needs
+    // no value, and boxing an application INFERS a function signature for an
+    // undeclared head — `area(c)` types `area` as `function`, which is exactly
+    // the evidence `bindsACallable` reads to tell a genuine local function
+    // binding from a bare name. Scanning afterwards let every call defeat its
+    // own diagnostic. It also runs ahead of `scanUnknownFunctions` below, so a
+    // head that is both a protocol property and a fuzzy match for some
+    // operator gets the specific message rather than a "did you mean?" guess;
+    // the two share `reportedUnknowns` and this scan adds to it only when it
+    // actually reports, so every head it passes over reaches the other scan
+    // unchanged.
+    scanProtocolPropertyCalls(
+      ce,
+      stmt,
+      reportedUnknowns,
+      diagnostics,
+      stmt,
+      source
+    );
     // REDEFINITION DISCIPLINE — the statement-route marker, raised only for a
     // statement that itself declares. BOTH registrations this loop causes
     // (canonicalization inside `box`, then evaluation) happen inside the
@@ -396,6 +416,11 @@ function executeEpsilBatch(
   // until it is fulfilled, so the reminder cannot be lost with the cell that
   // produced it. A SEMANTIC protocol (no requirements) is complete at
   // declaration and is never pending.
+  // Where each `type X is P` statement of THIS batch sits, so the warning can
+  // point at the declaration instead of the whole program. Collected once, then
+  // matched per pending edge.
+  const conformanceSites = conformanceStatementSites(statements, source);
+
   for (const protocol of Object.values(ce._protocolRegistry))
     for (const conformance of protocol.conformances)
       if (conformance.pending)
@@ -412,7 +437,17 @@ function executeEpsilBatch(
             // the empty string.
             conformance._pendingReason ?? '',
           ],
-          range: [0, source.length],
+          // The declaring statement when this batch contains it. The registry
+          // outlives the batch — the notebook pattern declares in one cell and
+          // implements in a later one, and every batch re-reports the edge —
+          // so an edge declared in an EARLIER batch has no range in this
+          // source; it falls back to the whole program, which is the honest
+          // "this cell is affected, the declaration is not in it" marker.
+          range: conformanceSiteRange(
+            conformanceSites,
+            conformance.targetKey,
+            protocol.name
+          ) ?? [0, source.length],
         });
 
   // The final statement's error stays a VALUE (no diagnostic, by design), so
@@ -510,17 +545,244 @@ function narrowErrorRange(
   );
 }
 
+/**
+ * Report a protocol PROPERTY member called as a function — `area(c)` where the
+ * protocol declares `readonly area: number`.
+ *
+ * The two member kinds are spelled differently: a `function` member is invoked
+ * in call position (`span(b)`), a property is read with a dot (`b.area`). The
+ * call form of a property resolves to no operator, so it stays a silently inert
+ * application — the program prints `area(Circle(…))` and nothing says why.
+ *
+ * Walks the RAW statement AST rather than the evaluated value that
+ * {@link scanUnknownFunctions} walks, for two reasons: an inert application
+ * consumed by an operator never reaches the result at all (`print(c, area(c))`
+ * evaluates to `Nothing`, which is the shape this was reported on), and the raw
+ * tree still carries `sourceOffsets`, so the warning underlines `area(c)`
+ * instead of the whole statement.
+ *
+ * Reports only a head that names NOTHING ELSE. A protocol member name is not
+ * reserved, so a program may legitimately bind it and call the binding, and
+ * every such spelling must stay silent:
+ *  - `let area = x => x + 1` installs a VALUE definition holding a lambda,
+ *    which `operatorInfo` alone does NOT see, so checking only the operator
+ *    table reported `area(3)` — valid code that evaluates to `4`. The test is
+ *    on that definition's TYPE (`matches('function')`), not on its mere
+ *    existence: boxing `area(c)` auto-declares `area` as a free symbol typed
+ *    `unknown`, and since this scan runs after the statement evaluated, a
+ *    presence check suppressed the very case the warning exists for;
+ *  - a PARAMETER (`function g(area) { area(1) }`, `xs |> Map(_, area => …)`)
+ *    is bound only inside its own body, so it exists in no table at all while
+ *    this scan runs; `bound` carries the enclosing binders' names down instead.
+ */
+function scanProtocolPropertyCalls(
+  ce: ComputeEngine,
+  expr: MathJsonExpression,
+  reported: Set<string>,
+  diagnostics: ParsingDiagnostic[],
+  stmt: MathJsonExpression,
+  source: string,
+  /** Names bound by function literals enclosing `expr`. */
+  bound: ReadonlySet<string> = new Set()
+): void {
+  const head = operator(expr);
+  if (head === '') return; // Not a function application (number/symbol/string).
+
+  if (
+    !reported.has(head) &&
+    !bound.has(head) &&
+    ce.operatorInfo(head) === undefined &&
+    !bindsACallable(ce, head)
+  ) {
+    const protocolName = protocolPropertyNamed(ce, head);
+    if (protocolName !== undefined) {
+      // Added only on an actual report, so a head this scan passes over is
+      // still fresh for `scanUnknownFunctions`.
+      reported.add(head);
+      diagnostics.push({
+        severity: 'warning',
+        message: ['protocol-property-not-callable', head, protocolName],
+        // The application's own span when the parser recorded one, so the
+        // squiggle sits on `area(c)`; the statement otherwise. Read directly
+        // rather than through `statementRange`, whose own fallback is the
+        // WHOLE PROGRAM — for a subexpression that is worse than the statement.
+        range: sourceOffsetsOf(expr) ?? statementRange(stmt, source),
+      });
+    }
+  }
+
+  // A function literal is `["Function", body, ...parameters]`, so everything
+  // after the body binds names over that body. Collected with a full symbol
+  // walk rather than by reading each operand as a plain name, so a
+  // destructuring or annotated parameter contributes its names too:
+  // over-collecting only makes the scan quieter, which is the safe direction
+  // for an advisory warning.
+  const inner =
+    head === 'Function' ? withBoundParameters(expr, bound) : bound;
+
+  for (const op of operands(expr))
+    scanProtocolPropertyCalls(ce, op, reported, diagnostics, stmt, source, inner);
+}
+
+/**
+ * Does `name` have a value definition that could be CALLED — a lambda stored
+ * under a `let`, say?
+ *
+ * Deliberately asks about the definition's type rather than its existence:
+ * evaluating an application auto-declares its head as a free symbol typed
+ * `unknown`, so by the time this scan runs every head it looks at HAS a
+ * definition. `unknown` is the top of the value types and is not a subtype of
+ * `function`, so an auto-declared name answers `false` here while a genuine
+ * function binding answers `true`.
+ */
+function bindsACallable(ce: ComputeEngine, name: string): boolean {
+  const def = ce.lookupDefinition(name);
+  if (def === undefined) return false;
+  // A definition is tagged either as a value or as an operator. An OPERATOR
+  // definition is callable by construction — `operatorInfo` catches those
+  // first, so this arm is only reached for a shape it does not report on.
+  if (!('value' in def)) return true;
+  return def.value.type.matches('function');
+}
+
+/** `bound` extended with every symbol appearing in a function literal's
+ * PARAMETER operands (everything after the body). */
+function withBoundParameters(
+  literal: MathJsonExpression,
+  bound: ReadonlySet<string>
+): ReadonlySet<string> {
+  const names = new Set(bound);
+  const params = [...operands(literal)].slice(1);
+  const collect = (e: MathJsonExpression): void => {
+    const name = symbol(e);
+    if (name !== null && name !== undefined) names.add(name);
+    for (const op of operands(e)) collect(op);
+  };
+  for (const p of params) collect(p);
+  return names;
+}
+
+/** One `type X is P` statement of this batch, as the pending-warning lookup
+ * needs to see it. `clause` is the verbatim `where …` text when the
+ * conformance is CONDITIONAL, `undefined` otherwise. */
+type ConformanceSite = {
+  target: string;
+  protocol: string;
+  clause: string | undefined;
+  range: [number, number];
+};
+
+/**
+ * Every `type X is P` statement in this batch — so a pending edge can be
+ * reported on the line that declared it instead of on the whole program.
+ *
+ * The shape is `["DeclareConformance", {str: target}, ["List", ...protocols],
+ * {str: whereClause}?]`: the target is a type SPELLING as a string, the
+ * protocol names are symbols, and a CONDITIONAL conformance carries its
+ * `where` clause as a third operand. One statement can name several protocols
+ * (`type X is P, Q`), each a separate edge that can be pending on its own, so
+ * every name in the list yields its own site at the same range.
+ */
+function conformanceStatementSites(
+  statements: MathJsonExpression[],
+  source: string
+): ConformanceSite[] {
+  const sites: ConformanceSite[] = [];
+  for (const stmt of statements) {
+    if (operator(stmt) !== 'DeclareConformance') continue;
+    const target = stringValue(operand(stmt, 1)) ?? symbol(operand(stmt, 1));
+    if (target === null || target === undefined) continue;
+    const raw = stringValue(operand(stmt, 3));
+    const clause = raw === null || raw === '' ? undefined : raw;
+    const range = statementRange(stmt, source);
+    for (const p of operands(operand(stmt, 2) ?? 'Nothing')) {
+      const protocol = symbol(p) ?? stringValue(p);
+      if (protocol !== null && protocol !== undefined)
+        sites.push({ target, protocol, clause, range });
+    }
+  }
+  return sites;
+}
+
+/**
+ * The statement range for a pending edge, or `undefined` when this batch does
+ * not contain its declaration (the notebook pattern declares in one cell and
+ * implements in a later one, so the registry outlives the batch).
+ *
+ * Matched STRUCTURALLY rather than by rebuilding the registry's key, because
+ * the two spellings are produced by different code from different inputs: the
+ * registry composes a conditional edge's `targetKey` as
+ * `<target> where <clause>` from PARSED type parameters, with its own
+ * canonical spacing, while a statement carries the author's verbatim text —
+ * `where T:number is Comparable` reaches the registry as
+ * `where T: number is Comparable`, and a string comparison of the two misses.
+ * So a conditional statement claims any key that begins `<target> where ` and
+ * an unconditional one claims the bare `<target>`, which is spelling-proof in
+ * the clause.
+ *
+ * An ambiguous match — two conditional statements in one batch for the same
+ * target and protocol, differing only in their clauses — resolves to nothing
+ * rather than to a guess, and falls back to the whole program.
+ */
+function conformanceSiteRange(
+  sites: ConformanceSite[],
+  targetKey: string,
+  protocol: string
+): [number, number] | undefined {
+  const matches = sites.filter(
+    (site) =>
+      site.protocol === protocol &&
+      (site.clause === undefined
+        ? targetKey === site.target
+        : targetKey.startsWith(`${site.target} where `))
+  );
+  return matches.length === 1 ? matches[0].range : undefined;
+}
+
+/**
+ * The name of a protocol declaring `member` as a PROPERTY requirement
+ * (`readonly`/`readwrite`), or `undefined` when no protocol does.
+ *
+ * `function` members are deliberately excluded: they are invoked exactly as
+ * written in call position (`span(b)`), so a function member's name as a call
+ * head is correct, not a mistake. Only the property kind has a different
+ * spelling (`b.area`) to point the author at.
+ *
+ * First match wins. Two protocols can require a property of the same name, and
+ * which one the author meant is not knowable here — but the advice the message
+ * gives (use a dot) is the same either way, and the protocol name only serves
+ * to say where the requirement came from.
+ */
+function protocolPropertyNamed(
+  ce: ComputeEngine,
+  member: string
+): string | undefined {
+  for (const protocol of Object.values(ce._protocolRegistry)) {
+    const kind = protocol.members[member]?.kind;
+    if (kind === 'readonly' || kind === 'readwrite') return protocol.name;
+  }
+  return undefined;
+}
+
+/** The source span the parser recorded on `expr`, or `undefined` when it
+ * carries none. Callers pick their own fallback: the whole program is right for
+ * a STATEMENT ({@link statementRange}) and wrong for a subexpression, which
+ * should fall back to its statement instead. */
+function sourceOffsetsOf(
+  expr: MathJsonExpression
+): [number, number] | undefined {
+  return typeof expr === 'object' && expr !== null && !Array.isArray(expr)
+    ? (expr as { sourceOffsets?: [number, number] }).sourceOffsets
+    : undefined;
+}
+
 /** The source range of a statement AST node, falling back to the whole
  * program when the node carries no offsets. */
 function statementRange(
   stmt: MathJsonExpression,
   source: string
 ): [number, number] {
-  return (
-    (typeof stmt === 'object' && stmt !== null && !Array.isArray(stmt)
-      ? (stmt as { sourceOffsets?: [number, number] }).sourceOffsets
-      : undefined) ?? [0, source.length]
-  );
+  return sourceOffsetsOf(stmt) ?? [0, source.length];
 }
 
 // Unresolved print-like ALIASES that get a did-you-mean toward the real

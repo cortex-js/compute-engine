@@ -104,7 +104,14 @@ import type {
 } from './types.js';
 import { CompileDeclineError, LaneMismatchError } from './diagnostics.js';
 import { chop, ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
-import { candidateAt, childRegionAt, harvestCse } from './cse.js';
+import {
+  candidateAt,
+  childRegionAt,
+  harvestCse,
+  isCallerMapped,
+  isCseAdmissible,
+  lazyOperandRegions,
+} from './cse.js';
 import type { CseHarvest, CseHarvestOptions, CseRegion } from './cse.js';
 import {
   builtinCallbackArity,
@@ -13591,10 +13598,6 @@ export class BaseCompiler {
       isVarsKey?: (name: string) => boolean;
     } = {}
   ): void {
-    if (options.enabled === false || typeof target.cseBind !== 'function') {
-      target.cse = { enabled: false, instances: [] };
-      return;
-    }
     const harvestOptions: CseHarvestOptions = {
       isOverriddenOperator: options.isOverriddenOperator,
       isStringVar: options.isStringVar,
@@ -13606,6 +13609,16 @@ export class BaseCompiler {
       // (`node.isPure`) independently keeps a drawing/writing call inert.
       admitPureUserFunctions: true,
     };
+    // A disabled session still records the predicates. They describe the
+    // CALLER's inputs — which names were re-mapped, which are string-valued
+    // `vars` — not the CSE transform, and an emitter that needs that fact for
+    // a decision of its own (`isEmissionSkippable`) must not have its answer
+    // change because sharing was turned off. Every transform that DOES share
+    // an emission checks `enabled` for itself.
+    if (options.enabled === false || typeof target.cseBind !== 'function') {
+      target.cse = { enabled: false, harvestOptions, instances: [] };
+      return;
+    }
     const harvest = harvestCse(expr, harvestOptions);
     BaseCompiler.mergeUsedNames(target, harvest.usedNames);
     target.cse = { enabled: true, harvest, harvestOptions, instances: [] };
@@ -13828,6 +13841,243 @@ export class BaseCompiler {
       BaseCompiler.cseHarvestOf(target)!.root,
       emit
     );
+  }
+
+  /**
+   * Emit, once and up front, the COLLECTION-valued subexpressions of `expr`
+   * whose value is the same in every repetition of `expr` that `emit`
+   * produces, then run `emit` with each of them replaced by a reference to
+   * its binding.
+   *
+   * This is what an UNROLLED binder needs and ordinary CSE cannot give it: an
+   * unrolled `Sum` compiles the same body nodes once per index value, and each
+   * of those compilations pushes a fresh CSE region instance (deliberately —
+   * a node-keyed reuse across instances would emit the first index's
+   * temporary for every later index). Subexpressions that do not mention the
+   * index are the exception: their value cannot differ between repetitions, so
+   * one binding serves them all.
+   *
+   * `varyingNames` are the names whose binding differs from one repetition to
+   * the next (the unrolled indices). A subexpression that mentions one of them
+   * anywhere is not invariant.
+   *
+   * Only COLLECTION-valued subexpressions are hoisted. Those are the ones
+   * whose duplication is expensive in both dimensions: a collection operand's
+   * emission materializes the whole collection (a `Range` lowers to an
+   * `Array.from` plus one `.map()` per element-wise step), so re-emitting it
+   * multiplies the source size AND re-runs the construction at run time. A
+   * scalar subexpression lowers to a few tokens that the target language's own
+   * compiler folds better than this pass could, and hoisting it would churn
+   * emission for no measurable gain.
+   *
+   * Hoisting changes how many TIMES a subexpression is evaluated, so a
+   * candidate has to clear the same bar as a CSE candidate: `isPure` plus the
+   * emission-purity gate (`isCseAdmissible`), and it must sit in an operand
+   * position that is evaluated unconditionally — a hoist out of a `Which` arm
+   * or a short-circuited operand would evaluate it even when the arm does not
+   * run, so `lazyOperandRegions` positions are never entered. Neither is a
+   * binder's own body: the names it binds do not exist at the point the
+   * bindings are emitted.
+   *
+   * Returns the bindings — mutually independent, so any order works — together
+   * with `emit`'s result. The caller emits them where its own construct
+   * declares locals, and must emit them ALL: a binding whose name the emitted
+   * code references but nothing declares is not valid source.
+   */
+  static hoistLoopInvariants<T>(
+    expr: Expression,
+    varyingNames: ReadonlyArray<string>,
+    target: CompileTarget<Expression>,
+    emit: () => T
+  ): { bindings: Array<[name: string, code: string]>; result: T } {
+    const nodes = BaseCompiler.loopInvariantCollections(
+      expr,
+      new Set(varyingNames),
+      target
+    );
+    if (nodes.length === 0) return { bindings: [], result: emit() };
+
+    const bindings: Array<[name: string, code: string]> = [];
+    const installed: Expression[] = [];
+    try {
+      for (const node of nodes) {
+        // Compiled under the ENCLOSING target, never a repetition's: the node
+        // mentions none of the varying names, so the only thing a repetition's
+        // target changes for it is the mapping of names it does not use.
+        //
+        // Compiling it OUT of its operand position can decline where the
+        // position would not have — an emitter is free to fold or reshape an
+        // operand instead of compiling it, so the operand's own lowering may
+        // never be reached. That is not this pass's decline to raise: dropping
+        // the candidate leaves the repetitions emitting it exactly as they did
+        // before, and if their emission does reach the same lowering it raises
+        // the decline itself.
+        let code: TargetSource;
+        try {
+          code = BaseCompiler.compile(node, target);
+        } catch {
+          continue;
+        }
+        const name = BaseCompiler.tempVar(target);
+        bindings.push([name, code]);
+        BaseCompiler._codeOverrides.set(node, name);
+        installed.push(node);
+      }
+      return { bindings, result: emit() };
+    } finally {
+      for (const node of installed) BaseCompiler._codeOverrides.delete(node);
+    }
+  }
+
+  /**
+   * The options an emission-purity check (`isCseAdmissible`,
+   * `isCallerMapped`) must run under at this point of `target`'s compilation,
+   * or `undefined` when no such check may be made at all.
+   *
+   * The gate needs the compilation's provenance predicates — which operator
+   * names the caller re-mapped through `functions`/`operators`, which symbols
+   * are backed by string-valued `vars`. They are recorded by the compilation
+   * boundary that opens the CSE session, whether or not sharing is enabled
+   * there; a target that never opened one has no way to tell a live-source
+   * splice from an ordinary emission, so a caller that gets `undefined` must
+   * fail closed rather than check against empty predicates.
+   *
+   * Every admission lookup inside the gate (a user-function callee, a named
+   * callback) is engine-GLOBAL, so a name an enclosing binder or parameter has
+   * rebound would be validated against the wrong definition. The names in
+   * scope here are exactly the ones the emission tracks as bound, plus
+   * `varying` — the names whose binding differs between the repetitions the
+   * caller is about to emit.
+   */
+  private static cseAdmission(
+    target: CompileTarget<Expression>,
+    varying: ReadonlySet<string>
+  ): CseHarvestOptions | undefined {
+    const options = target.cse?.harvestOptions as CseHarvestOptions | undefined;
+    if (options === undefined) return undefined;
+    return {
+      ...options,
+      shadowedNames: new Set([
+        ...(options.shadowedNames ?? []),
+        ...(target.boundVars ?? []),
+        ...varying,
+      ]),
+    };
+  }
+
+  /**
+   * Whether the emission of every tree in `nodes` may be SKIPPED at run time
+   * — under a guard that short-circuits it — without the skip being
+   * observable other than through the value it saves computing.
+   *
+   * An emission is skippable when nothing in it is caller-supplied source: a
+   * `functions`/`operators` entry, a symbol backed by a string-valued `vars`
+   * entry, or an operator carrying a caller-supplied `compile` handler splices
+   * code this compiler never sees, which is free to count its own calls, log,
+   * or mutate shared state — so running it fewer times is a change of
+   * behavior, not an optimization. That is the same provenance question
+   * `isCseAdmissible` answers for collapsing several emissions into one, and
+   * it is asked here in the same form, including its transitive check of a
+   * user-defined callee's body.
+   *
+   * `varyingNames` are the names bound differently across the repetitions
+   * being emitted (an unrolled binder's indices); they must not resolve
+   * globally inside the gate. Fails closed — returns `false` — when the
+   * compilation recorded no provenance predicates to check against.
+   */
+  static isEmissionSkippable(
+    nodes: ReadonlyArray<Expression>,
+    varyingNames: ReadonlyArray<string>,
+    target: CompileTarget<Expression>
+  ): boolean {
+    const admission = BaseCompiler.cseAdmission(target, new Set(varyingNames));
+    if (admission === undefined) return false;
+    return nodes.every((node) => isCseAdmissible(node, admission));
+  }
+
+  /**
+   * The maximal subexpressions of `expr` that {@link hoistLoopInvariants} may
+   * bind: collection-valued, mentioning none of `varying`, pure, and
+   * admissible to emit once. Maximal because a hoisted node is never
+   * descended into — binding both a node and a subexpression of it would emit
+   * the inner one twice, once on its own and once inside the outer binding's
+   * right-hand side.
+   */
+  private static loopInvariantCollections(
+    expr: Expression,
+    varying: ReadonlySet<string>,
+    target: CompileTarget<Expression>
+  ): Expression[] {
+    // Hoisting replaces many emissions of a subexpression with one binding
+    // referenced by name — the CSE transform, applied where CSE's own
+    // node-keyed reuse cannot reach. `cse: false` turns that sharing off here
+    // as it does everywhere else.
+    if (target.cse?.enabled !== true) return [];
+
+    const admission = BaseCompiler.cseAdmission(target, varying);
+    if (admission === undefined) return [];
+
+    const mentionsVarying = (node: Expression): boolean => {
+      if (isSymbol(node)) return varying.has(node.symbol);
+      if (!isFunction(node)) return false;
+      return node.ops.some(mentionsVarying);
+    };
+
+    const out: Expression[] = [];
+    const seen = new Set<Expression>();
+
+    const visit = (node: Expression): void => {
+      if (seen.has(node)) return;
+      seen.add(node);
+
+      // Two kinds of node the traversal must treat as OPAQUE — neither
+      // bindable itself, nor descended into — because the emission does not
+      // walk their subtree either, so nothing below them can ever reference a
+      // binding this pass mints.
+      //
+      // A node that already carries a code override emits as that NAME: its
+      // operands are not compiled at this site at all. The traversal reaches
+      // one when the same tree is walked twice — a multi-index unrolled
+      // binder walks its body once per clause level — and descending would
+      // discover an operand of an already-hoisted node as a fresh candidate,
+      // emitting a `const` binding that nothing ever references. (An override
+      // is also what the D2/D6 runtime real-operand rule installs on a
+      // maybe-complex operand; the `isComplexValued` clause below keeps this
+      // pass from installing one over it and dropping its real guard.)
+      //
+      // A caller-mapped node — an operator re-mapped through
+      // `functions`/`operators`, or one carrying a caller-supplied `compile`
+      // handler — emits through source this compiler never sees, which may
+      // evaluate an operand's text lazily, repeatedly, or not at all, and may
+      // hand a mutable array to user code. Hoisting from under it changes
+      // evaluation count and timing, and can share one JS array where each
+      // repetition built a fresh one. This is the harvest's own `underMapped`
+      // rule, which stops CSE candidates at the same boundary.
+      if (BaseCompiler._codeOverrides.has(node)) return;
+      if (isCallerMapped(node, admission)) return;
+
+      if (
+        node.type.matches('collection<any>') &&
+        !mentionsVarying(node) &&
+        node.isPure === true &&
+        !BaseCompiler.isComplexValued(node) &&
+        isCseAdmissible(node, admission)
+      ) {
+        out.push(node);
+        return;
+      }
+      if (!isFunction(node)) return;
+      // A binder's operands are written in terms of the names the binder
+      // introduces, which are out of scope where the bindings are emitted.
+      if (node.operator === 'Function' || node.operatorDefinition?.scoped)
+        return;
+      const lazy = lazyOperandRegions(node);
+      for (let i = 0; i < node.ops.length; i++)
+        if (!lazy.some((site) => site.index === i)) visit(node.ops[i]);
+    };
+
+    visit(expr);
+    return out;
   }
 
   /**

@@ -21,6 +21,74 @@
 
 ### Bug Fixes
 
+- **An unrolled `Sum`/`Product` now stops at the first NaN, and a constant
+  collection inside one is built once instead of once per term.** When both
+  bounds of a `Sum` or `Product` are constant and the range is small, the
+  JavaScript target unrolls it into explicit terms rather than emitting a
+  loop. That unrolled form evaluated every term even after the running total
+  had gone NaN — where the loop form exits on the first one — and it
+  re-emitted every subexpression per term, including subexpressions whose
+  value cannot depend on the index. A 31-term sum sampling a constant
+  101-element list built that list 31 times, in the source and again on every
+  call: 11 KB of emitted JavaScript with 31 `Array.from` constructions, all
+  evaluated even when the first term already answered NaN. Such a sum now
+  emits 4 KB with a single construction bound ahead of the accumulation, and
+  returns as soon as the total is NaN. This restores the cost a plot or
+  sampling loop over such an expression had before the typing improvement that
+  began steering these bodies into the unrolled form (they previously took the
+  element-wise fold loop, which already had both properties) — a plot that
+  went blank because every sample evaluated all 31 terms paints again. Values
+  are unchanged: NaN absorbs both `+` and `*`, so stopping early returns the
+  same answer. From four terms on, the emitted source for such a sum is a
+  statement sequence in an IIFE rather than a flat `a + b + c` chain; two- and
+  three-term sums keep the flat chain, and the loop form is untouched.
+
+- **Epsil: a protocol property called as a function is now reported.** A
+  protocol's two member kinds are spelled differently — a `function` member is
+  invoked in call position (`span(b)`), a `readonly`/`readwrite` property is
+  read with a dot (`b.area`) — and using the call form for a property resolved
+  to no operator, so it stayed a silently inert application: a program ending
+  in `print(c, area(c))` printed `area(Circle(…))` with nothing to say why. It
+  now raises a `protocol-property-not-callable` warning naming the property,
+  the protocol that declares it, and the dot spelling. The check runs over the
+  raw statement, so it fires even when the inert call is consumed by another
+  operator and never reaches the statement's value — the shape this was
+  reported on. Function members in call position are correct and untouched, and
+  a name that has a real operator definition (a user function that happens to
+  share a property's name) is never reported.
+
+- **Epsil: the `protocol-implementation-pending` warning no longer covers the
+  whole program.** It was emitted with a hardcoded whole-source range, because
+  the check walks the protocol registry — which outlives the batch — rather
+  than the source, so an editor squiggled the entire file. Each pending edge is
+  now anchored to the `type X is P` statement that declared it when that
+  statement is in this batch; one statement naming several protocols anchors
+  every one of its edges. An edge declared in an EARLIER batch (the
+  declare-in-one-cell, implement-in-the-next pattern the warning exists to
+  support) still falls back to the whole program, since this source contains no
+  statement to point at.
+
+- **A declared type now admits a value whose type is `unknown`.** Assigning an
+  expression the engine cannot type statically — a call to a function with no
+  signature, say — to a symbol with a declared type was refused:
+  `let xs: list` followed by `xs = f(0)` raised
+  `incompatible-type list unknown`, and so did the `let xs: list = f(0)`
+  spelling, for every declared type (`number`, `string`, `list<number>`, …).
+  A type of `unknown` states nothing about the value ("some value, not stated
+  which"), so there is nothing for the declaration to refute; it is admitted
+  and the verdict is left to run time, which is what the argument-position
+  boundary already did — the identical value passed to a `list` parameter was
+  accepted. Values the engine CAN type are still held to the contract
+  (`xs = 42` against `list` is still an error), and a bare-constructor
+  declaration still refines its element slot from real evidence: an admitted
+  `unknown` value leaves `xs` reporting `list`, and a later `xs = [1, 2, 3]`
+  refines it to `list<finite_integer>`. `any` is unaffected — it is a stated
+  contract, not a placeholder, and is still checked, and so is a declared
+  function SIGNATURE (`(number) pure -> number`), which keeps refusing an
+  `unknown` value rather than installing a definition that would be callable
+  under a contract nothing proved. Note the admission is unchecked: nothing
+  re-examines the value later, exactly as at a typed parameter.
+
 - **A compilation reached through a target now escalates to complex mode like
   the standalone `compile()` does.** Under the default `auto` mode a lane
   mismatch — a complex-shaped value, typically a promoted unknown-sign

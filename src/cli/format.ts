@@ -484,6 +484,8 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return args[2]
         ? `The conformance "type ${args[0]} is ${args[1]}" is not satisfied: ${args[2]}`
         : `The conformance "type ${args[0]} is ${args[1]}" has no implementation yet; provide one with "type ${args[0]} is ${args[1]} { … }"`;
+    case 'protocol-property-not-callable':
+      return `"${args[0]}" is a property of the "${args[1]}" protocol, not a function: read it with a dot, e.g. "x.${args[0]}" (only "function" members are called)`;
     case 'protocol-in-type-position':
       return `"${args[0]}" is a protocol, not a type. Use a constrained variable: "where T is ${args[0]}"`;
     case 'type-variables-unsupported':

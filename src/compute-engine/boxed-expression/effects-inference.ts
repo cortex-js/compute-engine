@@ -7,6 +7,7 @@ import type {
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import {
   collectionElementType,
+  hasFunctionSignature,
   signatureArms,
   signatureEffects,
 } from '../../common/type/utils.js';
@@ -380,6 +381,27 @@ export function matchesDeclaredTypeAxes(
   /** The symbol being declared/assigned, for the D7 diagnostic. */
   symbol?: string
 ): boolean {
+  // The mirror of the placeholder rule below, at whole-type granularity: a
+  // value whose type is `unknown` states nothing about itself ("some value,
+  // not stated which"), so a declaration has nothing to refute and admits it
+  // UNCHECKED — no later verification happens, here or on dereference, which
+  // is the same bargain the argument-position path in `validate.ts` already
+  // strikes (an `unknown`-typed argument is admitted at a typed parameter and
+  // never re-examined). Without this, a declared type was unwritable from any
+  // expression the engine cannot type statically: `xs = f(0)` for an
+  // undeclared `f` raised `incompatible-type list unknown` while the identical
+  // value passed to a `list` PARAMETER was accepted. `any` is the opposite
+  // case: it is a stated contract, is not `unknown`, and is still checked.
+  //
+  // A declared FUNCTION SIGNATURE is excluded, because admitting an unchecked
+  // value there gives up more than one axis at once: the branches below judge
+  // arity, the effects contract (`pure`) and polymorphic instantiation
+  // separately, and a shapeless `unknown` would satisfy all of them at once
+  // and install a definition that is CALLABLE under a contract nothing
+  // proved. Those declarations keep refusing an `unknown` value, as they did
+  // before this rule existed.
+  if (value.isUnknown && !hasFunctionSignature(declared.type)) return true;
+
   // A declared `unknown` slot is a placeholder the value refines, never a
   // constraint (see `refineDeclaredPlaceholders` above). Skipped for a
   // polymorphic declaration, whose slots are quantified variables with their

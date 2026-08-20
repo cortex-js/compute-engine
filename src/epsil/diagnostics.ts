@@ -47,6 +47,7 @@ export type DiagnosticCode =
   | 'unknown-function' // %0 = called name, %1 = suggested known operator ("did you mean")
   | 'print-not-available' // %0 = called name — an unresolved print-like alias (`puts`, `echo`, ...); the function that exists is `print`
   | 'type-not-callable' // %0 = type name — a type name used as a function; types have no constructor yet; annotate instead: `const p: %0 = …`
+  | 'protocol-property-not-callable' // %0 = member name, %1 = protocol name — a protocol PROPERTY (`readonly`/`readwrite`) member called as a function (`area(c)`). The two member kinds have different spellings: a `function` member is called (`span(b)`), a property is read with a dot (`b.area`). Only properties reach this — a function member in call position is exactly right
   | 'assign-in-condition' // `if flag := true { … }` — the assignment's VALUE becomes the test. A bare `=` in a condition compares (positional `=`), so only the explicit `:=` reaches this
   | 'chained-assignment' // `a = b = 5` — the outer `=` assigns and the inner COMPARES, so this assigns a boolean. Write `a := b := 5` to chain, or `a := (b == 5)` if the comparison was meant
   | 'destructuring-bare-equal' // `(a, b) = (b, a)` — a parenthesized left side is not a binding target, so this COMPARES two tuples and discards the result. Write `(a, b) := (b, a)` to destructure, or `==` if the comparison was meant

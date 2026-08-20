@@ -892,6 +892,22 @@ export class _Parser implements Parser {
   }
 
   /**
+   * Whether `name` is claimed by a `kind: 'function'` dictionary entry's
+   * `symbolTrigger` (`log`, `lcm`, `var`, …). Such a name owns its call
+   * syntax — including any subscript, which its parser may bind as an
+   * argument (`\operatorname{log}_2(x)` is `Log(x, 2)`) — so subscript
+   * absorption must not fold `name_sub` into a plain symbol and preempt the
+   * function reading (`peekDefinitions('function')` matches the
+   * speculatively parsed symbol against the trigger map, and an absorbed
+   * `log_2` candidate would miss the `log` claim).
+   */
+  isFunctionTriggerName(name: string): boolean {
+    return (
+      this._dictionary.symbolTriggerDefs.get('function')?.has(name) ?? false
+    );
+  }
+
+  /**
    * Shared emission point for a symbol *reference*: records an
    * `undeclared-symbol` diagnostic iff `id` does not resolve (see
    * {@link resolveSymbol}). No-op unless diagnostics are enabled. Every

@@ -543,11 +543,15 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
       // of them into the joined name; raw form matching that is the
       // script-independent fold rule (see the dictionary-symbol branch of
       // `Parser.parseSymbol()` in `parse.ts`, and
-      // `raw-subscript-fold-parity.test.ts`). Two guards, as everywhere: a
-      // base with `subscriptEvaluate` owns the meaning of its subscripts
-      // and never absorbs them, and an indexed-collection base absorbs only
-      // a DECLARED joined name, so the element-access reading survives.
-      if (parser.peek === '_') {
+      // `raw-subscript-fold-parity.test.ts`). Three guards: a base with
+      // `subscriptEvaluate` owns the meaning of its subscripts and never
+      // absorbs them; a name claimed as a FUNCTION trigger owns its call
+      // syntax including the subscript (`\operatorname{log}_2(x)` binds the
+      // 2 as the log base — folding `log_2` would preempt that parser, see
+      // `Parser.isFunctionTriggerName`); and an indexed-collection base
+      // absorbs only a DECLARED joined name, so the element-access reading
+      // survives.
+      if (parser.peek === '_' && !parser.isFunctionTriggerName(id)) {
         const info = parser.resolveSymbol(id);
         if (!info?.subscriptEvaluate)
           id = absorbSubscripts(

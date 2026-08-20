@@ -395,6 +395,56 @@ export function candidateAt(
 }
 
 /**
+ * Whether `node` may be emitted ONCE and referred to by name everywhere it
+ * would otherwise be emitted again — the admissibility question a CSE
+ * candidate answers, asked directly of a single node.
+ *
+ * Semantic purity (`node.isPure`) is not the whole test, which is why this is
+ * not a one-line check at the call site: a symbol backed by a *string*-valued
+ * `vars` entry, an operator the caller re-mapped through `functions`/
+ * `operators`, and an operator carrying a caller-supplied `compile` handler
+ * all splice LIVE source into the emitted code, so collapsing several
+ * emissions of them into one collapses several evaluations of whatever that
+ * source does. `options` carries those provenance predicates; a caller that
+ * cannot supply them (no compilation opened a CSE session) must not hoist at
+ * all rather than pass empty ones.
+ *
+ * The caller still owns the questions this cannot answer: that the node's
+ * value is the same at every emission point, that its emission position is
+ * unconditional, and `node.isPure` itself.
+ */
+export function isCseAdmissible(
+  node: Expression,
+  options: CseHarvestOptions = {}
+): boolean {
+  return new Harvester(node, options).admits(node);
+}
+
+/**
+ * Whether `node`'s emission is produced by CALLER-supplied source rather than
+ * by this compiler: an operator the caller re-mapped through
+ * `functions`/`operators`, or one carrying a caller-supplied per-operator
+ * `compile` handler.
+ *
+ * Such an emitter receives its operands as text and is free to drop, repeat,
+ * or defer them, and to hand a mutable array to code this compiler never
+ * sees — so the subtree below it is OPAQUE: whatever the emission does with
+ * an operand, it does not walk it the way this compiler would. Any pass that
+ * rewrites, binds, or skips subexpressions must stop at such a node, which is
+ * exactly what the harvest's own `underMapped` flag does for CSE candidates.
+ *
+ * A non-function node is never caller-mapped; the string-`vars` symbol class
+ * is a separate provenance test (`CseHarvestOptions.isStringVar`).
+ */
+export function isCallerMapped(
+  node: Expression,
+  options: CseHarvestOptions = {}
+): boolean {
+  if (!isFunction(node)) return false;
+  return new Harvester(node, options).isCallerMapped(node);
+}
+
+/**
  * The child region opened by `region`'s descendant edge `(node, opIndex)`, if
  * harvest opened one. Emission pushes a fresh *instance* of it when it
  * traverses that edge. Use `opIndex === -1` for a whole-node region (a `Block`
@@ -523,6 +573,33 @@ class Harvester {
       options.maxBindingsPerRegion ?? CSE_MAX_BINDINGS_PER_REGION;
     this.maxVerifyNodesPerBucket =
       options.maxVerifyNodesPerBucket ?? CSE_MAX_VERIFY_NODES_PER_BUCKET;
+  }
+
+  /**
+   * The eligibility half of the pipeline, run on its own for a caller that
+   * already knows WHICH node it wants to emit once (see {@link
+   * isCseAdmissible}) and only needs the emission-purity verdict.
+   *
+   * The shadow prepass runs first for the same reason `run()` does it first:
+   * the admission memos are name-keyed, so every binder-bound name in the
+   * subtree must be known before the first verdict is cached.
+   */
+  admits(node: Expression): boolean {
+    this.collectShadowedNames(this.root, new Set<Expression>());
+    return this.isEligible(node);
+  }
+
+  /**
+   * The node-level half of the `underMapped` test (see {@link
+   * isCallerMapped}): does this application emit through caller-supplied
+   * source? No shadow prepass is needed — both clauses key on the operator
+   * name alone.
+   */
+  isCallerMapped(node: Expression & FunctionInterface): boolean {
+    return (
+      this.isOverriddenOperator(node.operator) ||
+      this.hasCallerCompileHandler(node)
+    );
   }
 
   run(): CseHarvest {
@@ -671,10 +748,7 @@ class Harvester {
     if (isFunction(node)) {
       this.recordAssignment(node);
 
-      const nextUnderMapped =
-        underMapped ||
-        this.isOverriddenOperator(node.operator) ||
-        this.hasCallerCompileHandler(node);
+      const nextUnderMapped = underMapped || this.isCallerMapped(node);
 
       if (asStatement && this.walkStatement(node, region, nextUnderMapped)) {
         // handled as a statement

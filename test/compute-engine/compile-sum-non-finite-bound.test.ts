@@ -189,13 +189,26 @@ describe('finite Sum/Product still compiles and runs', () => {
     expect(result.run!({})).toBe(120);
   });
 
-  it('a constant-bounds sum still UNROLLS, with unchanged source', () => {
+  it('a constant-bounds sum still UNROLLS, with no bound guard', () => {
     const result = compile(ce.parse('\\sum_{i=1}^{10} i'), {
       constantFold: false,
     });
+    // Ten terms is past the threshold at which the unrolled terms accumulate
+    // as statements carrying a NaN exit between them, so the emission is no
+    // longer a flat `+` chain. It is still an UNROLL, which is what this
+    // pins: no loop, and no bound-finiteness guard — constant bounds are
+    // statically finite and never get one.
     expect(result.code).toBe(
-      '((1) + (2) + (3) + (4) + (5) + (6) + (7) + (8) + (9) + (10))'
+      '(() => { let _tv1 = (1); if (_tv1 !== _tv1) return NaN; _tv1 += (2); ' +
+        'if (_tv1 !== _tv1) return NaN; _tv1 += (3); if (_tv1 !== _tv1) return NaN; ' +
+        '_tv1 += (4); if (_tv1 !== _tv1) return NaN; _tv1 += (5); ' +
+        'if (_tv1 !== _tv1) return NaN; _tv1 += (6); if (_tv1 !== _tv1) return NaN; ' +
+        '_tv1 += (7); if (_tv1 !== _tv1) return NaN; _tv1 += (8); ' +
+        'if (_tv1 !== _tv1) return NaN; _tv1 += (9); if (_tv1 !== _tv1) return NaN; ' +
+        '_tv1 += (10); return _tv1; })()'
     );
+    expect(result.code).not.toMatch(/while/);
+    expect(result.code).not.toMatch(/Number\.isFinite/);
   });
 
   it('a large constant-bounds sum loops with NO added guard', () => {

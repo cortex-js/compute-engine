@@ -378,6 +378,14 @@ describe('literal narrowing at a `character` DECLARATION and ASSIGNMENT', () => 
     expect(ce.box(['Assign', 'cd5', { str: 'ab' }]).evaluate().operator).toBe(
       'Error'
     );
+    // `sv4` must be declared HERE: the engine is rebuilt before every test in
+    // this file, so the `string` declaration the sibling test above makes is
+    // gone by now. Without these two lines the operand is an UNDECLARED
+    // symbol, which types `unknown` and is admitted (a type that states
+    // nothing cannot be refuted) — so the assertion would pass for a reason
+    // that has nothing to do with the string-does-not-convert rule it pins.
+    ce.declare('sv4', 'string');
+    ce.assign('sv4', ce.string('a'));
     expect(ce.box(['Assign', 'cd5', 'sv4']).evaluate().operator).toBe('Error');
   });
 

@@ -3449,10 +3449,13 @@ function absorbPrimeSubscript(
   // `\operatorname{speed}_0'`) produce through `parseSymbol()` and the
   // dictionary-symbol branch — the two orders must stay in lockstep,
   // whatever the base's spelling. The same guards apply on every route: a
-  // `subscriptEvaluate` base owns its subscripts, and an indexed-collection
-  // base folds only a declared joined name.
+  // `subscriptEvaluate` base owns its subscripts, a name claimed as a
+  // FUNCTION trigger owns its call syntax including the subscript
+  // (`\operatorname{log}_2` binds the 2 as the log base — see
+  // `Parser.isFunctionTriggerName`), and an indexed-collection base folds
+  // only a declared joined name.
   const id = symbol(lhs);
-  if (id !== null) {
+  if (id !== null && !parser.isFunctionTriggerName(id)) {
     const info = parser.resolveSymbol(id);
     // A base with `subscriptEvaluate` owns the meaning of its subscripts and
     // never absorbs them; an indexed collection absorbs only a subscript whose

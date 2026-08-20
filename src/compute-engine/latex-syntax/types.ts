@@ -995,6 +995,16 @@ export interface Parser {
     id: MathJsonSymbol
   ): { type: BoxedType; subscriptEvaluate?: boolean } | undefined;
 
+  /**
+   * Whether `name` is claimed by a `kind: 'function'` dictionary entry's
+   * `symbolTrigger` (`log`, `lcm`, `var`, …). Such a name owns its call
+   * syntax — including any subscript, which its parser may bind as an
+   * argument (`\operatorname{log}_2(x)` is `Log(x, 2)`) — so subscript
+   * absorption must not fold `name_sub` into a plain symbol and preempt the
+   * function reading.
+   */
+  isFunctionTriggerName(name: string): boolean;
+
   pushSymbolTable(): void;
 
   popSymbolTable(): void;

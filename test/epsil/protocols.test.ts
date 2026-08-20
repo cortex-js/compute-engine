@@ -631,6 +631,200 @@ describe('EPSIL PROTOCOL EXECUTION', () => {
     expect(runCodes(ce, 'type string is Copyable')).toEqual([]);
     expect(ce._protocolRegistry.Copyable.conformances[0].pending).toBe(false);
   });
+
+  test('PENDING: the warning is anchored to the declaring statement', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, COMPARABLE);
+    const source = '1 + 1\ntype string is Comparable\n2 + 2';
+    const [d] = executeEpsil(ce, source).diagnostics;
+    expect(source.slice(...d.range!)).toBe('type string is Comparable');
+  });
+
+  test('PENDING: one statement, several protocols, each anchored', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, COMPARABLE);
+    executeEpsil(ce, 'protocol Hashable {\n  readonly hash: number\n}');
+    const source = 'type string is Comparable & Hashable';
+    for (const d of executeEpsil(ce, source).diagnostics)
+      expect(source.slice(...d.range!)).toBe(source);
+  });
+
+  test('PENDING: a target type SPELLING with spaces still anchors', () => {
+    // The (target, protocol) map key joins a type SPELLING to a protocol
+    // name, and a spelling is not an identifier — it can hold spaces and
+    // punctuation. A separator that could occur in either half would make the
+    // lookup miss and drop the warning back to the whole program.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'protocol Sized {\n  readonly area: number;\n}');
+    const source = '1 + 1\ntype list<integer | string> is Sized\n2 + 2';
+    const [d] = executeEpsil(ce, source).diagnostics;
+    expect(d.message).toEqual([
+      'protocol-implementation-pending',
+      'list<integer | string>',
+      'Sized',
+      '',
+    ]);
+    expect(source.slice(...d.range!)).toBe('type list<integer | string> is Sized');
+  });
+
+  test('PENDING: a CONDITIONAL conformance anchors to its statement', () => {
+    // The registry keys a conditional edge on the target JOINED to its
+    // `where` clause (`"list<T> where T is Comparable"`), while the statement
+    // carries the two as separate operands — so the site map registers both
+    // spellings rather than reproducing the registry's choice.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, COMPARABLE);
+    const decl = 'type list<T> is Comparable where T is Comparable';
+    const source = `1 + 1\n${decl}\n2 + 2`;
+    const [d] = executeEpsil(ce, source).diagnostics;
+    expect(d.message).toEqual([
+      'protocol-implementation-pending',
+      'list<T> where T is Comparable',
+      'Comparable',
+      '',
+    ]);
+    expect(source.slice(...d.range!)).toBe(decl);
+  });
+
+  test('PENDING: a conditional conformance anchors whatever the clause SPELLING', () => {
+    // The registry composes a conditional edge's key from PARSED type
+    // parameters with its own canonical spacing, so `where T:number is …`
+    // reaches it as `where T: number is …`. Matching on the `<target> where `
+    // prefix rather than on a rebuilt key keeps the two in step.
+    for (const decl of [
+      'type list<T> is Comparable where T:number is Comparable',
+      'type list<T> is Comparable where T is Comparable',
+      'type dictionary<T> is Comparable where T is Comparable & Hashable',
+    ]) {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, COMPARABLE);
+      executeEpsil(ce, 'protocol Hashable {\n  readonly hash: number\n}');
+      const source = `1 + 1\n${decl}\n2 + 2`;
+      const [d] = executeEpsil(ce, source).diagnostics;
+      expect(source.slice(...d.range!)).toBe(decl);
+    }
+  });
+
+  test('PENDING: an ambiguous pair of clauses falls back rather than guessing', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, COMPARABLE);
+    executeEpsil(ce, 'protocol Hashable {\n  readonly hash: number\n}');
+    // Same target, same protocol, two different clauses: nothing distinguishes
+    // which statement an edge came from, so both take the whole-program range
+    // instead of one of them being credited with the other's declaration.
+    const source = [
+      'type list<T> is Comparable where T is Comparable',
+      'type list<T> is Comparable where T is Hashable',
+    ].join('\n');
+    for (const d of executeEpsil(ce, source).diagnostics)
+      expect(d.range).toEqual([0, source.length]);
+  });
+
+  test('PENDING: an edge from an EARLIER batch falls back to the whole program', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, COMPARABLE);
+    executeEpsil(ce, 'type string is Comparable');
+    // The declaration is not in this source, so there is no statement to
+    // point at; the warning covers the cell it is reported in.
+    const source = '1 + 1';
+    const [d] = executeEpsil(ce, source).diagnostics;
+    expect(d.range).toEqual([0, source.length]);
+  });
+});
+
+describe('a protocol PROPERTY called as a function', () => {
+  // A `function` member is invoked in call position (`span(b)`); a
+  // `readonly`/`readwrite` property is read with a dot (`b.area`). The call
+  // form of a property resolves to no operator, so it used to stay a silently
+  // inert application.
+  const SIZED = [
+    'protocol Sized {',
+    '  function span(self: Self) -> number;',
+    '  readonly area: number;',
+    '}',
+    'type Box = object { w: number, h: number }',
+    'type Box is Sized {',
+    '  function span(self: Self) { self.w }',
+    '  get area(self: Self) { self.w * self.h }',
+    '}',
+    'const b = Box(w: 2, h: 3);',
+  ].join('\n');
+
+  test('is reported, and anchored to the CALL, not the statement', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, SIZED);
+    const source = 'print(b, area(b))';
+    const [d] = executeEpsil(ce, source).diagnostics;
+    expect(d.message).toEqual(['protocol-property-not-callable', 'area', 'Sized']);
+    expect(d.severity).toBe('warning');
+    // Anchored to `area(b)` — and reached at all only because the scan reads
+    // the raw statement: `print` evaluates to `Nothing`, so the inert
+    // application never appears in the result the other scan walks.
+    expect(source.slice(...d.range!)).toBe('area(b)');
+  });
+
+  test('a FUNCTION member in call position is correct and stays silent', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, SIZED);
+    expect(runCodes(ce, 'span(b)')).toEqual([]);
+    expect(executeEpsil(ce, 'span(b)').value.toString()).toBe('2');
+  });
+
+  test('the dot spelling the warning recommends is the working one', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, SIZED);
+    expect(runCodes(ce, 'b.area')).toEqual([]);
+    expect(executeEpsil(ce, 'b.area').value.toString()).toBe('6');
+  });
+
+  test('a real function of the same name is not reported', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, SIZED);
+    executeEpsil(ce, 'function area(x: number) { x + 1 }');
+    expect(runCodes(ce, 'area(4)')).toEqual([]);
+  });
+
+  test('a LOCAL function binding of the same name is not reported', () => {
+    // A protocol member name is not reserved. `let area = …` installs a VALUE
+    // definition holding a lambda — invisible to `operatorInfo` — and
+    // `area(3)` is a correct call that evaluates to 4.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, SIZED);
+    executeEpsil(ce, 'let area = x => x + 1');
+    expect(runCodes(ce, 'area(3)')).toEqual([]);
+    expect(executeEpsil(ce, 'area(3)').value.toString()).toBe('4');
+  });
+
+  test('a PARAMETER of the same name is not reported', () => {
+    // A parameter is bound only inside its own body, so it exists in no
+    // definition table while the scan runs; the scan carries the enclosing
+    // binders' names down instead.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, SIZED);
+    expect(runCodes(ce, 'function g(area) { area(1) }\ng(x => x)')).toEqual([]);
+  });
+
+  test('the scan runs before the statement is boxed', () => {
+    // Boxing an application INFERS a function signature for an undeclared
+    // head, so `area(b)` types `area` as `function` — the very evidence that
+    // distinguishes a local function binding from a bare name. Scanning after
+    // evaluation let every call defeat its own diagnostic.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, SIZED);
+    expect(runCodes(ce, 'area(b)')).toEqual(['protocol-property-not-callable']);
+  });
+
+  test('reported once per name, and it does not consume the did-you-mean path', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, SIZED);
+    expect(runCodes(ce, 'print(area(b), area(b))')).toEqual([
+      'protocol-property-not-callable',
+    ]);
+    // A head this scan passes over still reaches `scanUnknownFunctions`:
+    // assert the did-you-mean fired, not merely that this code did not — the
+    // negative alone holds even if nothing looked at the head at all.
+    expect(runCodes(ce, 'Lenght("ab")')).toEqual(['unknown-function']);
+  });
 });
 
 //

@@ -59,6 +59,14 @@ describe('raw-form subscript folding, Latin vs Greek parity', () => {
     expect(raw('e_{1}')).toEqual('e_1');
   });
 
+  test('a function-trigger name keeps its subscript-binding call parser', () => {
+    // `log` is claimed by a `kind: 'function'` dictionary entry whose parser
+    // binds the subscript as the log BASE. Absorption folding `log_2` into a
+    // symbol would make the trigger lookup miss and decay the call to a
+    // product (caught by the full-suite gate on first landing).
+    expect(ce.parse('\\operatorname{log}_2(x)').json).toEqual(['Log', 'x', 2]);
+  });
+
   test('function-claimed and subscript-owning bases stay structural', () => {
     // `\Gamma` is the Gamma FUNCTION — a function-kind dictionary entry never
     // reaches the symbol-absorption branch, so its subscript stays a node.
