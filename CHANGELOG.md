@@ -21,6 +21,26 @@
 
 ### Bug Fixes
 
+- **A literal `0` operand is no longer dropped when serializing to LaTeX.**
+  Several serializers tested an operand for truthiness where they meant to test
+  for absence, and the MathJSON of the literal `0` is the number `0` — so a
+  zero operand read as a missing one and was silently deleted. A domain
+  restriction on a zero lost BOTH operands (`When(0, x=x)` serialized to the
+  empty string), `Return(0)` printed as a bare `return`, a big operator lost
+  its body AND its indexing sets (`Sum(0, i=1..10)` became `\sum`), an integral
+  lost its integrand (`Integrate(0, x)` became `\int`), and `Delimiter(0)`
+  became an empty `()`. Each now serializes its zero, so an expression carrying
+  one round-trips through LaTeX again — which matters wherever serialized
+  LaTeX is a persistence boundary, since parsing was never at fault and the
+  loss was silent. `Log(x, 0)` also now renders its zero base as a base
+  (`\log_{0}(x)`) rather than falling back to the argument-list form.
+
+- **A negative subject of a `When` restriction keeps its precedence.**
+  `When(-1, cond)` serialized as `-1\left\{cond\right\}`, which reads back as
+  `Negate(When(1, cond))` — the negation applied to the restriction instead of
+  to its subject. The subject is now parenthesized whenever its own precedence
+  is below that of the restriction.
+
 - **A symbol named after a JavaScript object member no longer misbehaves.**
   Names such as `toString`, `constructor` and `valueOf` collide with members
   every JavaScript object inherits, and the engine looked symbol names up in
