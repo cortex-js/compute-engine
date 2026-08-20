@@ -1034,6 +1034,32 @@ for a `readonly` property, `protocol-property-readonly-set` is emitted. If
 a `get` handler is missing for a property,
 `protocol-implementation-missing` is emitted.
 
+`readonly` constrains the PROTOCOL's view of a property, not the object's
+storage. A holder of the object writes the field directly and succeeds:
+
+```epsil
+protocol Named { readonly name: string }
+type P = object{name: string} is Named
+let p = P(name: "Ada")
+
+p.name = "Grace"          // succeeds — reads back "Grace"
+p.(Named.name) = "Grace"  // protocol-property-readonly-set — stays "Ada"
+```
+
+That is deliberate, and the reason is that mutability is per-protocol: a type
+may conform to a `readonly Named` and a `readwrite Renameable` over the same
+field, so `readonly` cannot mean "this field is immutable" without making that
+combination unexpressible. Making the direct write fail would also mean that
+ADDING a read-only conformance to an existing type silently breaks code that
+already writes the field — conformance would stop being additive.
+
+The mechanism for restricting direct field access is **Access Control**
+(see that section): a field is `private` unless marked `public`, and a
+`private` field is reachable only from a protocol implementation for that
+object. `readonly` says how a property may be used THROUGH a protocol;
+`public`/`private` says who may touch the storage at all. (User ruling
+2026-08-20, choosing this over binding `readonly` to the object.)
+
 A stored field of an `object{…}` conforming type stands in for the handlers
 entirely: it satisfies the requirement with no `get`/`set` written, and the
 completeness check above then reports no hole for that property. Writing an
@@ -2562,6 +2588,35 @@ subscript?), and neither the object core nor `array` depends on it.
   qualified form `p.(Protocol.name)` remains available for conflicts
   between protocols. The dictionary-key precedence rule (P46) is not
   implicated: objects are not dictionaries.
+
+### Access Control
+
+The fields of an `object` have an access tag: `public` or `private`. If not
+specified, the field is `private`.
+
+A `private` field can only be accessed by a function in the implementation of a
+protocol for that object. Otherwise, it emits an error diagnostic during static
+analysis.
+
+```epsil
+protocol Shape {
+  readonly area: string
+}
+type Circle = object{
+    radius: number
+    public center: tuple<number, number>
+}
+type Circle is Shape {
+  get area(self: Self) {
+    Pi * self.radius^2
+  }
+}
+
+const ce = Circle(radius: 2, center: (0, 0))
+print(ce.area)      // ok
+c.center = (1, 1)   // ok
+print(ce.radius)    // error: the `radius` property of Circle is private
+```
 
 ### Deferred: deriving the shape from the protocol
 

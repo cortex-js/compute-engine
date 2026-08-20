@@ -276,19 +276,43 @@ arrow slots could ever be judged, and an unbound operand's type reads `unknown`
 declares lazy operators with arrow slots, not before. (Recorded with reasoning
 in `docs/TYPE-SYSTEM.md`.)
 
-### Static arity for INLINE literals at user-declared arrow slots (OPEN, needs a ruling — opened 2026-08-19)
+### Static arity for INLINE literals at user-declared arrow slots (RULED 2026-08-20 — close the gap; investigated, NOT yet landed)
 
-A function literal's unwritten parameters type as placeholder `unknown`, and the
-subtype lattice deliberately lets such a signature `match` a lower-arity arrow
-(the placeholder-reconciliation leniency that serves inferred-signature
-narrowing broadly). Consequence: `myOp((a, b) |-> a + b)` at a user-declared
-unary slot passes strict matching, never reaches the compatibility gate, and
-fails only at application — while the same call with a DECLARED binary symbol is
-rejected at canonicalization with `callback-arity`. Closing the gap means
-carving literals out of the arity half of that leniency (or checking literal
-arity structurally before the match), which touches reconciliation semantics
-beyond callbacks — take it to a ruling before implementing. (Recorded in
-`docs/TYPE-SYSTEM.md`.)
+**Ruled: extend the check so a user-declared arrow slot rejects a callback it
+cannot apply, the way the library's own slots do.**
+
+Investigated 2026-08-20 and NOT implemented, because the mechanism is narrower
+than this entry described and the last step needs a trace rather than a guess.
+What was established, so the next attempt does not re-derive it:
+
+- The check **already exists** for user-declared slots — Design E §12d in
+  `boxed-expression/validate.ts`, which mints `callbackArityError` from a
+  supply derived from the slot arms' own arities. This entry's framing (that
+  only the library path checks anything) is wrong.
+- It fires in one direction and not the other. With
+  `myOp: ((number) -> number) -> number` and
+  `myOp2: (((number, number) -> number)) -> number`:
+
+  | call                              | today                    |
+  | --------------------------------- | ------------------------ |
+  | `myOp2((a) \|-> a)` (unary at binary slot) | `callback-arity` error ✓ |
+  | `myOp((a, b) \|-> a + b)` (binary at unary slot) | ACCEPTED ✗ |
+
+- The capability probe is **not** the culprit: `arityProvablyIncapable`
+  answers `true` for BOTH directions when asked directly
+  (`arityProvablyIncapable((unknown, unknown) -> number, 1)` is `true`).
+  So §12d is never reached for the failing case — something upstream in the
+  admission ladder admits the operand first, and finding which arm does that
+  is the remaining work.
+- A gate added to `checkType` is the WRONG place and was reverted: a
+  user-declared operator's arguments do not flow through `checkType`, so the
+  gate was dead code that never fired.
+
+Trap for the next attempt: a type string like `((number) -> number) -> number`
+parses correctly, but reading its `args` through `typeToString` renders
+`"error"` because the elements are `{type: …}` wrapper records, not bare
+types — that reading cost this session an hour of chasing a parse bug that did
+not exist. Inspect `args` raw.
 
 ### Element-typed comparator arms need multi-variable union arms (OPEN, type-system — opened 2026-08-19)
 
@@ -1594,7 +1618,7 @@ object contract is in `docs/TYPE-SYSTEM.md`; only the remaining serialization
 and compilation phases stay in
 `docs/plans/2026-08-13-mutable-objects-implementation-plan.md`.
 
-### `readonly` in a protocol does not stop a holder of the OBJECT from writing the field (found 2026-08-16, OPEN — needs a product ruling)
+### `readonly` in a protocol does not stop a holder of the OBJECT from writing the field (RULED 2026-08-20 — kept as-is; `readonly` is the PROTOCOL view, and Access Control governs the storage)
 
 Declaring a property `readonly` in a protocol constrains the PROTOCOL view of
 it, not the object. With
@@ -1620,7 +1644,18 @@ spellings of one write disagree: the qualified one is refused, the unqualified
 surprise stated sharply rather than a second defect, and it is what the
 alternatives below have to resolve.
 
-Kept for now, and the reasons are real. Two protocols may legitimately see one
+**Ruled 2026-08-20: keep the current behavior and document it.** The user's
+reasoning names the missing half — restricting who may touch a field is the job
+of **Access Control** (`docs/TYPE_SYSTEM_ROADMAP.md`, "Access Control"), where a
+field is `private` unless marked `public` and a `private` field is reachable
+only from a protocol implementation. `readonly` says how a property may be used
+THROUGH a protocol; `public`/`private` says who may reach the storage. The two
+are complementary, not competing, which is why binding `readonly` to the object
+was rejected. Access Control is specified but NOT yet implemented — `public`
+does not parse today — so the direct write stays unrestricted until it lands.
+The behavior is now documented next to the `readonly` rules.
+
+Kept, and the reasons are real. Two protocols may legitimately see one
 field with different mutability — a type can conform to a `readonly Named` and a
 `readwrite Renameable` over the same `name` field — so `readonly` cannot mean
 "this field is immutable" without breaking that. And refusing the direct write
@@ -1642,7 +1677,7 @@ Current behaviour is pinned (both halves) by
 `test/compute-engine/protocol-field-backed.test.ts`, so whichever way this is
 ruled the change is visible.
 
-### A field store's no-op guard almost never fires (found 2026-08-15, OPEN — needs a product ruling)
+### A field store's no-op guard almost never fired (RULED + FIXED 2026-08-20 — widened to value equality for NUMBER and STRING literals only)
 
 `BoxedObject._store` suppresses a store whose new value is the **identical
 node** as the current one (no version bump, no state event). Appendix B licenses
@@ -1665,7 +1700,15 @@ entry that read the field, once per iteration, although no reader can observe a
 difference. Correctness is unaffected — the guard is an optimization, never a
 semantic requirement.
 
-The fix would be to widen the guard from `===` to `.isSame()`, which is sound
+**Ruled 2026-08-20: widen the guard for the cheap cases only.** `_store` now
+compares NUMBER and STRING literals by value (`isSame`, O(1) for these kinds)
+and keeps the identity test for everything else, so `p.n = 1` over a stored `1`
+no longer bumps the version while a store that genuinely changes the field still
+does. `p.n = 2 + 3` over a stored `5` is suppressed too — the operand reaching
+`_store` is a folded literal, and it is the operand that matters, not the
+syntax. Pins rewritten in `test/compute-engine/object-store.test.ts`.
+
+The rejected alternative was widening to `.isSame()` for every operand, which is sound
 (`isSame` is an unconditional equivalence relation and is reference identity for
 objects, so a suppressed store is still observably nothing). It is NOT applied
 unilaterally because it contradicts a standing ruling — the decision note
