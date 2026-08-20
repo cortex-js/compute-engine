@@ -252,6 +252,30 @@ export interface CompileTarget<Expr = unknown> {
   /** Get variable representation for the target language */
   var: (id: MathJsonSymbol) => string | undefined;
 
+  /**
+   * Get the target's inlined spelling of a mathematical CONSTANT, or
+   * `undefined` when the target has no constant by that name.
+   *
+   * This is deliberately narrower than `var`, and the two must not be
+   * conflated. `var` is the general variable emitter: for a symbol it does not
+   * recognize it falls back to a reference into the caller-supplied variables
+   * object (`_.x` on the JavaScript target), so `var(id) !== undefined` is
+   * true for EVERY symbol and says nothing about whether the symbol is an
+   * input. This lookup answers only from the target's own constants table, so
+   * a defined result means the symbol is baked into the emitted code and is
+   * not an input the caller has to supply.
+   *
+   * That distinction is what the reference analysis behind
+   * `CompilationResult.freeSymbols` needs: without it, a constant the target
+   * inlines but the engine holds no value for is reported as a required input
+   * (`Which(x > 0, 1, True, 2)` listed a phantom variable named `True`).
+   *
+   * Optional because `CompileTarget` is public: a target written outside this
+   * repo keeps working without it, and simply does not get constants filtered
+   * out of its free-symbol list.
+   */
+  constant?: (id: MathJsonSymbol) => string | undefined;
+
   /** Format string literals for the target language */
   string: (str: string) => string;
 

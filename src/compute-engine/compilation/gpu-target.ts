@@ -7641,8 +7641,25 @@ fn _gpu_powi(x: f32, n: f32) -> f32 {
 }
 `;
 
-/** Constants shared by both GLSL and WGSL */
+/**
+ * Constants shared by both GLSL and WGSL.
+ *
+ * Null-prototype so a lookup answers only for a key the table actually
+ * declares. A plain object literal inherits `Object.prototype`, so indexing it
+ * with an ordinary symbol named `toString`, `constructor` or `valueOf` returns
+ * an inherited function rather than `undefined` — which the reference analysis
+ * would read as "the target inlines this" and drop a genuine input from
+ * `freeSymbols`.
+ */
 const GPU_CONSTANTS: Record<string, string> = {
+  __proto__: null as never,
+  // The boolean literals are constants, not free symbols. Both shader
+  // languages spell them lowercase, so without these a bare `True` was
+  // emitted verbatim — an undeclared identifier that makes the shader fail to
+  // compile, behind a `success: true` result — and was also reported in
+  // `freeSymbols` as an input the caller must supply.
+  True: 'true',
+  False: 'false',
   Pi: '3.14159265359',
   ExponentialE: '2.71828182846',
   GoldenRatio: '1.61803398875',
@@ -8266,6 +8283,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         ),
       operators: (op) => GPU_OPERATORS[op],
       functions: (id) => functions[id],
+      constant: (id) =>
+        id === 'ImaginaryUnit' ? `${v2}(0.0, 1.0)` : constants[id],
       var: (id) => {
         if (id === 'ImaginaryUnit') return `${v2}(0.0, 1.0)`;
         if (id in constants) return constants[id];
@@ -8857,6 +8876,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         }
         return allFunctions[id];
       },
+      constant: (id) =>
+        id === 'ImaginaryUnit' ? `${v2}(0.0, 1.0)` : constants[id],
       var: (id) => {
         if (vars && id in vars) return vars[id] as string;
         if (id === 'ImaginaryUnit') return `${v2}(0.0, 1.0)`;

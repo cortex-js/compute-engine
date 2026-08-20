@@ -12881,16 +12881,22 @@ export class BaseCompiler {
           }
           return;
         }
-        // No mapping, no value, not a constant: a genuinely free symbol.
+        // A constant the target bakes into the emitted code is not an input
+        // the caller has to supply. Most constants never reach here — the
+        // engine holds a value for `Pi` and friends, so the fold above claims
+        // them — but one the engine has no value for does, and on the
+        // JavaScript target the boolean literals `True`/`False` are exactly
+        // that, so `Which(x > 0, 1, True, 2)` used to report a phantom input
+        // named `True`.
         //
-        // KNOWN GAP (see ROADMAP "Known defects"): the boolean literals
-        // `True`/`False` reach here and are reported free, even though the
-        // target inlines them to `true`/`false`. Do NOT fix this by testing
-        // `target.var(s) !== undefined` — `var` is the general variable
-        // emitter, not a constants lookup (the javascript target's main-path
-        // copy falls back to `_.${id}` for free symbols), so that check
-        // suppresses EVERY free symbol. A fix needs a constants-only lookup
-        // distinct from `var`, consulted after the `varsKeys` guard above.
+        // This must be `constant`, never `var`: `var` is the general variable
+        // emitter and falls back to a vars-object reference (`_.x`) for any
+        // symbol it does not recognize, so testing it here would suppress
+        // EVERY free symbol. Which constants exist is per-target — only the
+        // JavaScript target inlines the booleans — so the answer has to come
+        // from the target rather than from a fixed list here.
+        if (target.constant?.(s) !== undefined) return;
+        // No mapping, no value, not a constant: a genuinely free symbol.
         free.add(s);
         return;
       }

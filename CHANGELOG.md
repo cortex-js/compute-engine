@@ -1,109 +1,183 @@
-## 0.116.1 _2026-08-19_
+## [Unreleased]
 
 ### Bug Fixes
 
-- **Trigonometric operators now report a non-numeric operand instead of
-  staying inert.** The trigonometric and hyperbolic functions, `Degrees` and
-  `DMS` validated only the NUMBER of arguments, not their types, so an operand
-  that turned out not to be a number was absorbed rather than reported:
+- **`compile()` no longer reports the boolean literals as required inputs.**
+  `CompilationResult.freeSymbols` lists the identifiers a caller must supply,
+  and `True`/`False` were included even though every target either bakes them
+  into the emitted code or drops them entirely. Since consumers derive a
+  compiled function's variable list from `freeSymbols`, and `True` is the
+  idiomatic fallback condition of a `Which`, an ordinary piecewise such as
+  `Which(x > 0, 1, True, 2)` acquired a phantom variable named `True`.
+- **A boolean literal compiled to invalid code on the shader and interval
+  targets.** The `glsl` and `wgsl` targets emitted the undeclared identifier
+  `True` — a shader that fails to compile, reported behind a successful result —
+  and the interval target emitted a lookup for a caller-supplied variable named
+  `True` that threw at run time. Each target now emits its own spelling of the
+  literal.
+
+- **Trigonometric operators now report a non-numeric operand instead of staying
+  inert.** The trigonometric and hyperbolic functions, `Degrees` and `DMS`
+  validated only the NUMBER of arguments, not their types, so an operand that
+  turned out not to be a number was absorbed rather than reported:
   `Sin(At(["a", 2], 1))` stayed as `sin("a")` and `Degrees(At(["a", 2], 1))`
   answered a bare `NaN`. All of them now answer `incompatible-type`, matching
   the arithmetic operators. This completes the numeric-operand checking
   introduced in 0.116.0, which had covered arithmetic but not these operators.
-- **`DMS` no longer mis-folds a component that is not a plain real number.**
-  Its degrees, minutes and seconds components were read in a way that silently
+- **`DMS` no longer mis-folds a component that is not a plain real number.** Its
+  degrees, minutes and seconds components were read in a way that silently
   discarded anything but a real number literal, so `DMS(1, At([30, 2], 1))`
   answered `NaN` even though the minutes component resolves to 30, and
   `DMS(1, i)` answered exactly what `DMS(1, 0)` does. Such a call now evaluates
   its components first and, when one of them cannot be folded, is left
   unevaluated instead of producing a wrong angle.
 - **The root `compile()` export regained its precise result types.** Its
-  declared return type collapsed the target generic, so `run` was typed
-  optional even for executable targets such as `javascript`, and
-  `realOnly: true` no longer narrowed `run`'s values to plain `number` — a
-  type-precision regression against the internal target route
-  (`ce._getCompilationTarget(...).compile(...)`) that 0.116.0 told consumers
-  to migrate away from. The export's overloads now mirror the underlying
-  compile function's, so the target name flows through: `compile(expr).run`
-  is non-optional, `compile(expr, { realOnly: true }).run(...)` is a
-  `number`, and calling `run` unguarded on a source-only target (`python`)
-  is a type error. Runtime behavior was never affected. Reported by a
-  consumer at 0.116.0 adoption.
+  declared return type collapsed the target generic, so `run` was typed optional
+  even for executable targets such as `javascript`, and `realOnly: true` no
+  longer narrowed `run`'s values to plain `number` — a type-precision regression
+  against the internal target route
+  (`ce._getCompilationTarget(...).compile(...)`) that 0.116.0 told consumers to
+  migrate away from. The export's overloads now mirror the underlying compile
+  function's, so the target name flows through: `compile(expr).run` is
+  non-optional, `compile(expr, { realOnly: true }).run(...)` is a `number`, and
+  calling `run` unguarded on a source-only target (`python`) is a type error.
+  Runtime behavior was never affected. Reported by a consumer at 0.116.0
+  adoption.
 
 ## 0.116.0 _2026-08-19_
 
 ### Breaking Changes
 
-- **`Type` now returns a type value instead of text.** Use `StringFrom(Type(x))` if you need the type name as a string, or use type-aware checks such as `x is integer` and `Subtype(Type(x), TypeFrom("number"))`. Code such as `Type(3) == "integer"` now evaluates to `False`.
-- **Callback type declarations now use regular arrow types.** The old `callback<...>` spelling no longer parses. Declare the callback slot directly, for example `(T) any -> boolean` for a predicate. Calls that could only fail, such as filtering a `list<string>` with a number-only predicate, are now rejected before evaluation.
-- **The minimum supported Node.js version is now 22.3.0.** Older Node 21 releases are no longer supported.
-- **`About` now returns a dictionary.** Read fields such as `About(Pi)["type"]` or `About(f)["signature"]` instead of parsing a display string.
-- **Bare collection types now mean values-only collections.** `list`, `set` and similar bare types are synonyms for their `<unknown>` form, not `<any>`. Use `collection<any>` when absence markers such as `Missing` should be admitted.
-- **Dictionaries now print in dictionary literal form.** `toString()` and the Epsil REPL print dictionaries as `{"key" -> value}`, with `{->}` for an empty dictionary. MathJSON serialization is unchanged.
+- **`Type` now returns a type value instead of text.** Use `StringFrom(Type(x))`
+  if you need the type name as a string, or use type-aware checks such as
+  `x is integer` and `Subtype(Type(x), TypeFrom("number"))`. Code such as
+  `Type(3) == "integer"` now evaluates to `False`.
+- **Callback type declarations now use regular arrow types.** The old
+  `callback<...>` spelling no longer parses. Declare the callback slot directly,
+  for example `(T) any -> boolean` for a predicate. Calls that could only fail,
+  such as filtering a `list<string>` with a number-only predicate, are now
+  rejected before evaluation.
+- **The minimum supported Node.js version is now 22.3.0.** Older Node 21
+  releases are no longer supported.
+- **`About` now returns a dictionary.** Read fields such as `About(Pi)["type"]`
+  or `About(f)["signature"]` instead of parsing a display string.
+- **Bare collection types now mean values-only collections.** `list`, `set` and
+  similar bare types are synonyms for their `<unknown>` form, not `<any>`. Use
+  `collection<any>` when absence markers such as `Missing` should be admitted.
+- **Dictionaries now print in dictionary literal form.** `toString()` and the
+  Epsil REPL print dictionaries as `{"key" -> value}`, with `{->}` for an empty
+  dictionary. MathJSON serialization is unchanged.
 
 ### Types And Pattern Matching
 
-- Added first-class type values with `TypeFrom(...)`, `Subtype(...)` and the primitive `type`. Example: `Subtype("integer", "number")` evaluates to `True`.
-- `is` tests and `match` type patterns now accept full type expressions, including unions, negations and parameterized collections. Example: `x is list<integer>` and `x is number | string`.
-- Protocol tests can be written with `is`. Example: `x is Hashable & Comparable`.
-- Collection declarations with a bare element type can refine from assignments. Example: after `let xs: list; xs = [1, 2, 3]`, `xs` is typed as a list of integers.
-- Uses of assigned symbols are checked against their assigned type instead of narrowing the symbol silently. This reports incompatible uses earlier, before evaluation.
+- Added first-class type values with `TypeFrom(...)`, `Subtype(...)` and the
+  primitive `type`. Example: `Subtype("integer", "number")` evaluates to `True`.
+- `is` tests and `match` type patterns now accept full type expressions,
+  including unions, negations and parameterized collections. Example:
+  `x is list<integer>` and `x is number | string`.
+- Protocol tests can be written with `is`. Example:
+  `x is Hashable & Comparable`.
+- Collection declarations with a bare element type can refine from assignments.
+  Example: after `let xs: list; xs = [1, 2, 3]`, `xs` is typed as a list of
+  integers.
+- Uses of assigned symbols are checked against their assigned type instead of
+  narrowing the symbol silently. This reports incompatible uses earlier, before
+  evaluation.
 
 ### Epsil And VS Code Extension
 
-- Added console I/O with `print(...)` and `input(prompt?)`. `print` writes to the host console and returns `Nothing`; `input` reads one line of text where the host supports it.
-- The CLI and REPL no longer echo a final `Nothing` result, so a program ending with `print("done")` only displays `done`.
-- Very deeply nested Epsil expressions now produce an `expression-nesting-limit` diagnostic instead of overflowing the JavaScript stack.
-- Lexing and parsing now respect the evaluation time budget, so an oversized program can time out before execution begins.
-- The VS Code extension gained Go to Definition, Find All References, Rename Symbol, richer hovers and diagnostic links to the error reference.
+- Added console I/O with `print(...)` and `input(prompt?)`. `print` writes to
+  the host console and returns `Nothing`; `input` reads one line of text where
+  the host supports it.
+- The CLI and REPL no longer echo a final `Nothing` result, so a program ending
+  with `print("done")` only displays `done`.
+- Very deeply nested Epsil expressions now produce an `expression-nesting-limit`
+  diagnostic instead of overflowing the JavaScript stack.
+- Lexing and parsing now respect the evaluation time budget, so an oversized
+  program can time out before execution begins.
+- The VS Code extension gained Go to Definition, Find All References, Rename
+  Symbol, richer hovers and diagnostic links to the error reference.
 
 ### Strings And Regular Expressions
 
-- Added regular expressions with the `regexp` type and `RegExp(pattern, flags?)`. New operations include `IsMatch`, `StringMatch`, `StringMatchAll`, and regular-expression forms of `StringSplit` and `StringReplace`.
+- Added regular expressions with the `regexp` type and
+  `RegExp(pattern, flags?)`. New operations include `IsMatch`, `StringMatch`,
+  `StringMatchAll`, and regular-expression forms of `StringSplit` and
+  `StringReplace`.
 
   ```epsil
   IsMatch("abc123", RegExp("[0-9]+"))
   StringReplace("a1b22c", RegExp("[0-9]+"), "#")
   ```
 
-- Regular expressions use the host JavaScript regexp dialect. The `g` and `y` flags are rejected because their mutable position would make evaluation order visible.
-- `StringMatch` returns match text, ranges, numbered groups and named groups. Ranges are character-based, matching the rest of the string library.
+- Regular expressions use the host JavaScript regexp dialect. The `g` and `y`
+  flags are rejected because their mutable position would make evaluation order
+  visible.
+- `StringMatch` returns match text, ranges, numbered groups and named groups.
+  Ranges are character-based, matching the rest of the string library.
 
 ### Symbolic
 
-- `And` and `Or` once again compare and match symbolically without depending on operand order. Evaluation still runs left to right and still short-circuits.
-- Applying a value that is known not to be a function now reports `expected-function` instead of staying inert. Example: `Pi(2)` is now an error.
+- `And` and `Or` once again compare and match symbolically without depending on
+  operand order. Evaluation still runs left to right and still short-circuits.
+- Applying a value that is known not to be a function now reports
+  `expected-function` instead of staying inert. Example: `Pi(2)` is now an
+  error.
 
 ### Engine State
 
-- Added engine checkpoint APIs: `ce.checkpoint()`, `ce.restore(cp)` and `ce.discard(cp)`. Notebook-like clients can checkpoint before a cell, restore to that point after an edit, then replay later cells.
-- Checkpoints preserve expression validity and cache identity where possible. Restoring replays state changes, but effects still run again: `Random()` draws again and `Print(...)` prints again.
+- Added engine checkpoint APIs: `ce.checkpoint()`, `ce.restore(cp)` and
+  `ce.discard(cp)`. Notebook-like clients can checkpoint before a cell, restore
+  to that point after an edit, then replay later cells.
+- Checkpoints preserve expression validity and cache identity where possible.
+  Restoring replays state changes, but effects still run again: `Random()` draws
+  again and `Print(...)` prints again.
 
 ### Compilation And Numeric
 
-- Numeric operators now accept operands that may be numeric and report a typed error only when evaluation proves the value is non-numeric. Example: `a + 1` is allowed for `a: value`, but `a = "hello"` later produces an `incompatible-type` error.
-- Fixed several compiled complex-number cases that could return `NaN` or corrupt values while reporting success, including color functions, list broadcasts, complex-declared symbols with real values, and promoted radicals inside broadcasts.
-- `CompilationResult.mode` now reports the actual arithmetic mode used by the emitted code. A default compile that promotes to complex reports `mode: "complex"`.
-- Deprecation warnings for `realOnly` and `complexPromotion` now appear through target-level compile entry points as well as the standalone `compile()` export.
-- Consumers that discover the engine through the global registration object can now access the supported `compile()` helper there too.
+- Numeric operators now accept operands that may be numeric and report a typed
+  error only when evaluation proves the value is non-numeric. Example: `a + 1`
+  is allowed for `a: value`, but `a = "hello"` later produces an
+  `incompatible-type` error.
+- Fixed several compiled complex-number cases that could return `NaN` or corrupt
+  values while reporting success, including color functions, list broadcasts,
+  complex-declared symbols with real values, and promoted radicals inside
+  broadcasts.
+- `CompilationResult.mode` now reports the actual arithmetic mode used by the
+  emitted code. A default compile that promotes to complex reports
+  `mode: "complex"`.
+- Deprecation warnings for `realOnly` and `complexPromotion` now appear through
+  target-level compile entry points as well as the standalone `compile()`
+  export.
+- Consumers that discover the engine through the global registration object can
+  now access the supported `compile()` helper there too.
 
 ### Collections
 
-- `Sequence` now splices into `List`, `Set` and `Tuple` literals. Example: `List(1, Sequence(2, 3), 4)` becomes `[1, 2, 3, 4]`.
-- Lazy set operations now deduplicate consistently. `Join(Set(5, 2), Set(2, 3))` now has three elements, not four with a duplicate `2`.
-- `Map` over a set now returns the distinct image of the set. Example: `Map(x => x^2, Set(-1, 1, 2))` is `Set(1, 4)`.
-- Joining or appending dictionaries and records now merges keys with the last value winning. Example: `Join({"a" -> 1}, {"a" -> 2})` yields `{"a" -> 2}`.
+- `Sequence` now splices into `List`, `Set` and `Tuple` literals. Example:
+  `List(1, Sequence(2, 3), 4)` becomes `[1, 2, 3, 4]`.
+- Lazy set operations now deduplicate consistently. `Join(Set(5, 2), Set(2, 3))`
+  now has three elements, not four with a duplicate `2`.
+- `Map` over a set now returns the distinct image of the set. Example:
+  `Map(x => x^2, Set(-1, 1, 2))` is `Set(1, 4)`.
+- Joining or appending dictionaries and records now merges keys with the last
+  value winning. Example: `Join({"a" -> 1}, {"a" -> 2})` yields `{"a" -> 2}`.
 - Truncated set previews now show an ellipsis when more elements remain.
 
 ### Type Fixes
 
-- Fixed bare collection and type-variable inference so bare collection operands stay in the values-only family.
-- Fixed intersections, `never`, negated types, collection meets and function-signature intersections so type reductions are more consistent.
-- Fixed several type edge cases, including matching bare names against intersections, preserving vector and matrix spellings, and reporting arity errors for malformed `Type(...)` calls.
+- Fixed bare collection and type-variable inference so bare collection operands
+  stay in the values-only family.
+- Fixed intersections, `never`, negated types, collection meets and
+  function-signature intersections so type reductions are more consistent.
+- Fixed several type edge cases, including matching bare names against
+  intersections, preserving vector and matrix spellings, and reporting arity
+  errors for malformed `Type(...)` calls.
 
 ### Documentation
 
-- Removed documentation for the non-existent `Extract` and `Exclude` operators. Use `At`, `Slice`, `Reverse` or `DeleteAt` instead.
+- Removed documentation for the non-existent `Extract` and `Exclude` operators.
+  Use `At`, `Slice`, `Reverse` or `DeleteAt` instead.
 
 ### Benchmarks
 
@@ -129,10 +203,10 @@ Each cell is **how many times faster than Mathematica** that engine is on the
 case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
 `1×`). `—` means the engine can't do the case. Compare the **CE 0.116.0** and
 **CE 0.100.0** columns to see what is _new since the last published benchmark_
-(a `—` under `0.100.0` next to a number under the current build). The
-**CE + R/F** column is the current build with the opt-in Rubi integrator +
-Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the
-same minified bundle.
+(a `—` under `0.100.0` next to a number under the current build). The **CE +
+R/F** column is the current build with the opt-in Rubi integrator + Fungrim
+identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same
+minified bundle.
 
 | Operation                              | CE 0.116.0 | CE + R/F | CE 0.100.0 | SymPy  | math.js | Mathematica |
 | -------------------------------------- | :--------: | :------: | :--------: | :----: | :-----: | :---------: |
@@ -171,25 +245,56 @@ against an independent `mpmath` reference, never another tool. Reproduce with
 
 ### Breaking Changes
 
-- **The default JavaScript and Python compile mode is now `auto`.** Expressions such as `Sqrt(x)`, `Ln(x)` and non-integer powers may promote to complex arithmetic when the sign is unknown. For example, compiled `Sqrt(x)` now returns `{re: 0, im: 1}` at `x = -1` and `2` at `x = 4`. Use `mode: "strict"` for the previous real-only compile behavior.
-- **`complexPromotion` and `realOnly` are deprecated.** Use `mode: "complex"` or `mode: "strict"` instead. `realOnly` still works for this release but now warns.
-- **Compiled JavaScript returns plain numbers for exactly real results.** A complex result object `{re, im}` is now returned only when `im !== 0`. Use `typeof value === "number"` to test whether a sample is real.
-- **`StringJoin` now joins one collection, with an optional separator.** The old variadic concatenation form changed meaning for two strings. `StringJoin("ab", "cd")` is now `"acdb"` because `"cd"` is the separator between the characters of `"ab"`. Use `Join("ab", "cd")` or interpolation for string concatenation.
-- **Several string collection operators now preserve string results.** `RandomShuffle("abc")` and `DeleteAt("abcdef", 2)` return strings, not lists of characters. Chunking and combinatorics over strings now return lists of strings, for example `SlidingWindow("abcd", 2)` returns `["ab", "bc", "cd"]`.
+- **The default JavaScript and Python compile mode is now `auto`.** Expressions
+  such as `Sqrt(x)`, `Ln(x)` and non-integer powers may promote to complex
+  arithmetic when the sign is unknown. For example, compiled `Sqrt(x)` now
+  returns `{re: 0, im: 1}` at `x = -1` and `2` at `x = 4`. Use `mode: "strict"`
+  for the previous real-only compile behavior.
+- **`complexPromotion` and `realOnly` are deprecated.** Use `mode: "complex"` or
+  `mode: "strict"` instead. `realOnly` still works for this release but now
+  warns.
+- **Compiled JavaScript returns plain numbers for exactly real results.** A
+  complex result object `{re, im}` is now returned only when `im !== 0`. Use
+  `typeof value === "number"` to test whether a sample is real.
+- **`StringJoin` now joins one collection, with an optional separator.** The old
+  variadic concatenation form changed meaning for two strings.
+  `StringJoin("ab", "cd")` is now `"acdb"` because `"cd"` is the separator
+  between the characters of `"ab"`. Use `Join("ab", "cd")` or interpolation for
+  string concatenation.
+- **Several string collection operators now preserve string results.**
+  `RandomShuffle("abc")` and `DeleteAt("abcdef", 2)` return strings, not lists
+  of characters. Chunking and combinatorics over strings now return lists of
+  strings, for example `SlidingWindow("abcd", 2)` returns `["ab", "bc", "cd"]`.
 
 ### Compilation
 
-- Added explicit compile modes: `"strict"`, `"complex"` and `"auto"`. Unsupported modes now return a clear diagnostic instead of silently changing behavior.
-- `CompilationResult` now includes `mode`, `promoted`, `escalation` and structured `diagnostic` data so callers do not need to parse error messages.
-- Strict mode now rejects complex values where the generated code expects real numbers, with a `lane-mismatch` diagnostic.
-- Complex mode now treats broad or unannotated numeric inputs as complex-capable and promotes unknown-sign radicals consistently.
-- JavaScript runners now validate incoming values against the shapes used during compilation. For example, a complex object passed to a real-analyzed binding throws a clear `TypeError`.
-- Fixed compiled complex behavior for multi-clause functions, protocol methods, fallback evaluation, real-only special functions and promoted radicals.
-- _(Recorded after release.)_ A compiled `Reduce` or `Scan` whose accumulator becomes complex mid-fold through an unknown-sign radical — for example `Reduce([4, -4], (a, x) -> a + sqrt(x), 0)` — returned `success: true` with `value: null` in 0.114.0. The complex-mode migration in this release fixed it (the radical now promotes and the fold computes `{re: 2, im: 2}`, matching the interpreter). Documented here retroactively after a consumer traced the fix to this release; the change landed in commit `7cfa95b4`.
+- Added explicit compile modes: `"strict"`, `"complex"` and `"auto"`.
+  Unsupported modes now return a clear diagnostic instead of silently changing
+  behavior.
+- `CompilationResult` now includes `mode`, `promoted`, `escalation` and
+  structured `diagnostic` data so callers do not need to parse error messages.
+- Strict mode now rejects complex values where the generated code expects real
+  numbers, with a `lane-mismatch` diagnostic.
+- Complex mode now treats broad or unannotated numeric inputs as complex-capable
+  and promotes unknown-sign radicals consistently.
+- JavaScript runners now validate incoming values against the shapes used during
+  compilation. For example, a complex object passed to a real-analyzed binding
+  throws a clear `TypeError`.
+- Fixed compiled complex behavior for multi-clause functions, protocol methods,
+  fallback evaluation, real-only special functions and promoted radicals.
+- _(Recorded after release.)_ A compiled `Reduce` or `Scan` whose accumulator
+  becomes complex mid-fold through an unknown-sign radical — for example
+  `Reduce([4, -4], (a, x) -> a + sqrt(x), 0)` — returned `success: true` with
+  `value: null` in 0.114.0. The complex-mode migration in this release fixed it
+  (the radical now promotes and the fold computes `{re: 2, im: 2}`, matching the
+  interpreter). Documented here retroactively after a consumer traced the fix to
+  this release; the change landed in commit `7cfa95b4`.
 
 ### Epsil
 
-- Added definition attributes for user-defined functions: `bind` parameters, algebraic properties such as `commutative` and `associative`, and doc comments.
+- Added definition attributes for user-defined functions: `bind` parameters,
+  algebraic properties such as `commutative` and `associative`, and doc
+  comments.
 
   ```epsil
   /// Square a value.
@@ -197,268 +302,428 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   About(square)["description"]
   ```
 
-- Fixed pipe placement when a stage has a missing trailing argument. Examples such as `xs |> Fold(f, 10)` now put `xs` in the collection slot instead of displacing arguments incorrectly.
-- Multi-clause functions now map over collections the same way function literals do. Example: `fib(5..10)` evaluates element-wise.
-- `Which` and `If` now hold or broadcast correctly when a comparison's broadcast shape cannot be decided statically.
-- `Sum` and `Product` now substitute loop indexes correctly inside held `If` and `Which` terms.
-- A symbol's inferred type is updated when a later value proves the earlier guess was too narrow.
+- Fixed pipe placement when a stage has a missing trailing argument. Examples
+  such as `xs |> Fold(f, 10)` now put `xs` in the collection slot instead of
+  displacing arguments incorrectly.
+- Multi-clause functions now map over collections the same way function literals
+  do. Example: `fib(5..10)` evaluates element-wise.
+- `Which` and `If` now hold or broadcast correctly when a comparison's broadcast
+  shape cannot be decided statically.
+- `Sum` and `Product` now substitute loop indexes correctly inside held `If` and
+  `Which` terms.
+- A symbol's inferred type is updated when a later value proves the earlier
+  guess was too narrow.
 
 ### Strings
 
-- `Join` now concatenates strings. Example: `Join("ab", "cd", "ef")` returns `"abcdef"`.
-- Added contiguous sequence search: `RangeOf`, `ContainsSequence`, `StartsWith` and `EndsWith`. Example: `ContainsSequence("abc", "ab")` is `True`, while `Contains("abc", "ab")` is `False`.
-- `Slice` accepts `Nothing`, so `Slice(xs, RangeOf(xs, needle))` returns the match or `Nothing` without an extra branch.
-- Added `StringReplace`, `Trim`, `TrimStart`, `TrimEnd`, `StringRepeat`, `PadStart` and `PadEnd`.
-- Added case operations: `ToUpperCase`, `ToLowerCase` and `CaseFold`. Use `CaseFold` for case-insensitive comparison.
+- `Join` now concatenates strings. Example: `Join("ab", "cd", "ef")` returns
+  `"abcdef"`.
+- Added contiguous sequence search: `RangeOf`, `ContainsSequence`, `StartsWith`
+  and `EndsWith`. Example: `ContainsSequence("abc", "ab")` is `True`, while
+  `Contains("abc", "ab")` is `False`.
+- `Slice` accepts `Nothing`, so `Slice(xs, RangeOf(xs, needle))` returns the
+  match or `Nothing` without an extra branch.
+- Added `StringReplace`, `Trim`, `TrimStart`, `TrimEnd`, `StringRepeat`,
+  `PadStart` and `PadEnd`.
+- Added case operations: `ToUpperCase`, `ToLowerCase` and `CaseFold`. Use
+  `CaseFold` for case-insensitive comparison.
 - Added `StringCompare(a, b)` for deterministic code-point ordering.
-- Added `NumberFrom(s, base?)` for parsing numbers from strings. Failures return an error value, not `NaN`.
+- Added `NumberFrom(s, base?)` for parsing numbers from strings. Failures return
+  an error value, not `NaN`.
 
 ## 0.114.0 _2026-08-16_
 
 ### Breaking Changes
 
-- **Strings are now indexed collections of characters.** `Length("shop")` is `4`, `"abc"[2]` is `"b"`, and generic collection code can now accept strings. If a function should accept collections but not strings, use a type such as `collection & !string`.
-- **`string` is no longer a `scalar`.** Declare `string`, or `string | number`, when strings are intended.
-- **Added a distinct `character` type.** Characters are single user-perceived characters and are not one-character strings, although they compare equal by value where appropriate. `Characters("ab")` now returns `list<character>`.
-- **String-preserving collection operators now return strings for string input.** Examples: `Reverse("abc")` returns `"cba"` and `Take("abc", 2)` returns `"ab"`. Transforming operators such as `Map` still return lists.
-- **Materializers and set operators read strings as characters.** `ListFrom("abc")` is `["a", "b", "c"]`, and `[..."ab"]` is `["a", "b"]`.
-- **`Max`, `Min`, `GCD` and `LCM` no longer expand strings.** Strings are treated as non-numeric values for these operators.
-- **Invalid UTF-16 surrogate halves are normalized when strings enter the engine.** They are replaced with `U+FFFD` so all string operations work on well-formed Unicode.
-- **Compiled string collection operations are grapheme-correct in JavaScript and fail closed on targets that cannot support them.** Python and shader targets no longer emit approximate string collection code.
+- **Strings are now indexed collections of characters.** `Length("shop")` is
+  `4`, `"abc"[2]` is `"b"`, and generic collection code can now accept strings.
+  If a function should accept collections but not strings, use a type such as
+  `collection & !string`.
+- **`string` is no longer a `scalar`.** Declare `string`, or `string | number`,
+  when strings are intended.
+- **Added a distinct `character` type.** Characters are single user-perceived
+  characters and are not one-character strings, although they compare equal by
+  value where appropriate. `Characters("ab")` now returns `list<character>`.
+- **String-preserving collection operators now return strings for string
+  input.** Examples: `Reverse("abc")` returns `"cba"` and `Take("abc", 2)`
+  returns `"ab"`. Transforming operators such as `Map` still return lists.
+- **Materializers and set operators read strings as characters.**
+  `ListFrom("abc")` is `["a", "b", "c"]`, and `[..."ab"]` is `["a", "b"]`.
+- **`Max`, `Min`, `GCD` and `LCM` no longer expand strings.** Strings are
+  treated as non-numeric values for these operators.
+- **Invalid UTF-16 surrogate halves are normalized when strings enter the
+  engine.** They are replaced with `U+FFFD` so all string operations work on
+  well-formed Unicode.
+- **Compiled string collection operations are grapheme-correct in JavaScript and
+  fail closed on targets that cannot support them.** Python and shader targets
+  no longer emit approximate string collection code.
 
 ### Strings
 
-- Added `CharacterFrom(s)` and host API support for character values. `String(c)` converts a character back to a string.
-- Strings work with collection operations over grapheme clusters. Example: `Tally("mississippi")` counts characters, and `"7" in "0123456789"` is `True`.
-- `String(collection)` now joins a finite collection into one string. Example: `String([1, 2])` returns `"12"`; use `Map(String, [1, 2])` to convert each element separately.
+- Added `CharacterFrom(s)` and host API support for character values.
+  `String(c)` converts a character back to a string.
+- Strings work with collection operations over grapheme clusters. Example:
+  `Tally("mississippi")` counts characters, and `"7" in "0123456789"` is `True`.
+- `String(collection)` now joins a finite collection into one string. Example:
+  `String([1, 2])` returns `"12"`; use `Map(String, [1, 2])` to convert each
+  element separately.
 
 ### Epsil And Types
 
-- Added `hold` functions, whose arguments are bound as written and evaluated only when used in the function body. Example: `hold f(e) = Head(e)` lets `f(a + 1)` inspect the expression structure instead of the evaluated value.
-- Re-declaring an object type now re-checks protocol conformances that depend on its stored fields. This makes notebook-style re-runs update field-backed protocol behavior correctly.
-- Protocol member effect annotations in implementation blocks are now honored and checked.
+- Added `hold` functions, whose arguments are bound as written and evaluated
+  only when used in the function body. Example: `hold f(e) = Head(e)` lets
+  `f(a + 1)` inspect the expression structure instead of the evaluated value.
+- Re-declaring an object type now re-checks protocol conformances that depend on
+  its stored fields. This makes notebook-style re-runs update field-backed
+  protocol behavior correctly.
+- Protocol member effect annotations in implementation blocks are now honored
+  and checked.
 - Writes through mutable objects consistently carry the `state` effect.
-- `Head` and `Tail` now resolve a symbol's assigned expression during evaluation while staying structural for unbound symbols.
+- `Head` and `Tail` now resolve a symbol's assigned expression during evaluation
+  while staying structural for unbound symbols.
 
 ### Numeric And Symbolic Fixes
 
-- `Reduce` and `Scan` now handle complex accumulators correctly in both interpreted and compiled numeric paths.
-- `Abs` over a negation now returns the absolute value rather than the negated expression.
-- The derivative of a vector norm now uses the vector norm rule instead of the scalar absolute-value rule.
-- A declared subscripted symbol with a Greek base, such as `\eta_w`, now remains the declared joined symbol instead of being captured as an index when `\eta` becomes a collection.
-- A compiled user function with a `complex` parameter now receives and returns correctly shaped values.
+- `Reduce` and `Scan` now handle complex accumulators correctly in both
+  interpreted and compiled numeric paths.
+- `Abs` over a negation now returns the absolute value rather than the negated
+  expression.
+- The derivative of a vector norm now uses the vector norm rule instead of the
+  scalar absolute-value rule.
+- A declared subscripted symbol with a Greek base, such as `\eta_w`, now remains
+  the declared joined symbol instead of being captured as an index when `\eta`
+  becomes a collection.
+- A compiled user function with a `complex` parameter now receives and returns
+  correctly shaped values.
 
 ## 0.113.0 _2026-08-16_
 
 ### Breaking Changes
 
-- **Protocols that can mutate state now require object types.** A protocol with a `readwrite` property or a member declared with `state` effects can only be implemented by an `object{...}` type. Use an object type when writable protocol properties are needed.
-- **Assigning to a protocol property now stores into the object.** `p.name = "Ada"` mutates the object referred to by `p` and returns the assigned value. It no longer calls a setter that rebuilds and rebinds `p`.
-- **Collection operators now report result types by collection kind.** Operators such as `Reverse`, `RotateLeft`, `RotateRight`, `Rest`, `Most` and `Filter` no longer promise to preserve every indexed collection kind. For example, reversing a tuple now reports a list type.
+- **Protocols that can mutate state now require object types.** A protocol with
+  a `readwrite` property or a member declared with `state` effects can only be
+  implemented by an `object{...}` type. Use an object type when writable
+  protocol properties are needed.
+- **Assigning to a protocol property now stores into the object.**
+  `p.name = "Ada"` mutates the object referred to by `p` and returns the
+  assigned value. It no longer calls a setter that rebuilds and rebinds `p`.
+- **Collection operators now report result types by collection kind.** Operators
+  such as `Reverse`, `RotateLeft`, `RotateRight`, `Rest`, `Most` and `Filter` no
+  longer promise to preserve every indexed collection kind. For example,
+  reversing a tuple now reports a list type.
 
 ### Objects And Protocols
 
-- Stored object fields can now satisfy protocol property requirements with the same name. Example: `type Person = object{name: string} is Nameable` can satisfy a readonly `name` property without writing a getter.
+- Stored object fields can now satisfy protocol property requirements with the
+  same name. Example: `type Person = object{name: string} is Nameable` can
+  satisfy a readonly `name` property without writing a getter.
 - Field-backed writable properties store into the object in place.
-- A stored field and an explicit accessor for the same protocol property are now reported as a conflict.
+- A stored field and an explicit accessor for the same protocol property are now
+  reported as a conflict.
 
 ### Collections
 
-- `Slice` now accepts an index span. Example: `Slice(xs, 2..4)` is equivalent to `Slice(xs, 2, 4)`.
-- Bare collection element types now consistently read as `unknown` rather than `any`.
-- Assigning a value to a symbol declared `unknown` now refines the symbol from the assigned value. Declare `any` when the type should remain fully permissive.
-- Speculative parsing no longer narrows symbols declared `unknown` in the surrounding engine.
+- `Slice` now accepts an index span. Example: `Slice(xs, 2..4)` is equivalent to
+  `Slice(xs, 2, 4)`.
+- Bare collection element types now consistently read as `unknown` rather than
+  `any`.
+- Assigning a value to a symbol declared `unknown` now refines the symbol from
+  the assigned value. Declare `any` when the type should remain fully
+  permissive.
+- Speculative parsing no longer narrows symbols declared `unknown` in the
+  surrounding engine.
 
 ### Numeric, Compilation And Parsing
 
-- Fixed division by a scaled vector norm, which could incorrectly collapse to `0`.
-- Fixed compiled calls where a complex value is passed to a user function with a wide parameter.
-- Lowercase LaTeX operator names such as `\operatorname{unique}`, `\operatorname{sort}`, `\operatorname{reverse}` and `\operatorname{total}` now parse to their intended operators.
-- Overload diagnostics now display the declared type shape instead of confusing `...<unknown>` instantiations.
+- Fixed division by a scaled vector norm, which could incorrectly collapse to
+  `0`.
+- Fixed compiled calls where a complex value is passed to a user function with a
+  wide parameter.
+- Lowercase LaTeX operator names such as `\operatorname{unique}`,
+  `\operatorname{sort}`, `\operatorname{reverse}` and `\operatorname{total}` now
+  parse to their intended operators.
+- Overload diagnostics now display the declared type shape instead of confusing
+  `...<unknown>` instantiations.
 
 ## 0.112.0 _2026-08-15_
 
 ### Breaking Changes
 
-- **Epsil lambdas now use `=>`.** The old `|->` spelling reports a diagnostic with a fix-it. Function types still use `->`, and dictionary entries still use `->`.
+- **Epsil lambdas now use `=>`.** The old `|->` spelling reports a diagnostic
+  with a fix-it. Function types still use `->`, and dictionary entries still use
+  `->`.
 
   ```epsil
   let square = x => x^2
   [1, 2, 3] |> Map(_ => _^2, _)
   ```
 
-- **`record` and `object` field types now use braces.** Write `record{x: integer, y: integer}` and `object{name: string}` instead of the old angle-bracket form.
-- **`And`, `Or` and related boolean operators now short-circuit and preserve operand order.** This can change serialized order for expressions that were previously sorted during canonicalization.
+- **`record` and `object` field types now use braces.** Write
+  `record{x: integer, y: integer}` and `object{name: string}` instead of the old
+  angle-bracket form.
+- **`And`, `Or` and related boolean operators now short-circuit and preserve
+  operand order.** This can change serialized order for expressions that were
+  previously sorted during canonicalization.
 
 ### Epsil
 
-- Lambda parameters and `for` loop bindings can destructure tuple elements. Example: `pairs |> Map(((x, y)) => x + y, _)`.
-- Callback arity mismatches are now reported statically. Example: `Map((x, y) => x + y, [1, 2, 3])` reports that `Map` calls its callback with one argument.
-- A pipe stage that cannot accept exactly one piped value now reports `pipe-stage-arity` instead of returning a partially applied function.
+- Lambda parameters and `for` loop bindings can destructure tuple elements.
+  Example: `pairs |> Map(((x, y)) => x + y, _)`.
+- Callback arity mismatches are now reported statically. Example:
+  `Map((x, y) => x + y, [1, 2, 3])` reports that `Map` calls its callback with
+  one argument.
+- A pipe stage that cannot accept exactly one piped value now reports
+  `pipe-stage-arity` instead of returning a partially applied function.
 - Duplicate lambda parameter names are now parse diagnostics.
-- `for` and `while` loops now serialize back to Epsil loop syntax instead of generic `Loop(...)` calls when possible.
+- `for` and `while` loops now serialize back to Epsil loop syntax instead of
+  generic `Loop(...)` calls when possible.
 
 ### Types And Collections
 
-- Added the `range` type for ascending, contiguous 1-based index spans. It is still an indexed collection of integers, but can also be required by span-consuming operators.
-- A lazy collection callback now runs once per element per consumption, avoiding duplicate side effects from probing.
-- `Max`, `Min` and statistics over `Linspace` now handle descending, single-sample and symbolic cases correctly.
-- Pipes that implicitly map over a collection now report the mapped collection type.
-- Comparisons that may broadcast now report a `broadcastable<...>` type, allowing `Which` and `Sum` to type their results more accurately.
-- Scaling or shifting collections now widens element types correctly. Example: `(1..4)/2` reports rational elements, not integers.
-- Loop and comprehension binders can widen inferred element types when the iterated collection under-declares its elements.
+- Added the `range` type for ascending, contiguous 1-based index spans. It is
+  still an indexed collection of integers, but can also be required by
+  span-consuming operators.
+- A lazy collection callback now runs once per element per consumption, avoiding
+  duplicate side effects from probing.
+- `Max`, `Min` and statistics over `Linspace` now handle descending,
+  single-sample and symbolic cases correctly.
+- Pipes that implicitly map over a collection now report the mapped collection
+  type.
+- Comparisons that may broadcast now report a `broadcastable<...>` type,
+  allowing `Which` and `Sum` to type their results more accurately.
+- Scaling or shifting collections now widens element types correctly. Example:
+  `(1..4)/2` reports rational elements, not integers.
+- Loop and comprehension binders can widen inferred element types when the
+  iterated collection under-declares its elements.
 
 ### Compilation And Numeric
 
-- Shader compilation now emits valid integer conversions for symbolic `Sum` and `Product` bounds.
-- Statistics functions such as `Mean(x)` now compile correctly for a single value.
-- Differentiating point-valued functions installed through `assign` is componentwise again.
-- Primes before subscripts now attach to the subscripted function name. Example: `F'_{0}(t)` parses as the derivative of `F_0` applied to `t`.
-- Element-wise arithmetic over collections of complex values now compiles where a single real-or-complex convention fits.
-- Real-only numeric operations such as `Floor`, `Max` and `Mod` now decline complex operands instead of compiling to `NaN`.
+- Shader compilation now emits valid integer conversions for symbolic `Sum` and
+  `Product` bounds.
+- Statistics functions such as `Mean(x)` now compile correctly for a single
+  value.
+- Differentiating point-valued functions installed through `assign` is
+  componentwise again.
+- Primes before subscripts now attach to the subscripted function name. Example:
+  `F'_{0}(t)` parses as the derivative of `F_0` applied to `t`.
+- Element-wise arithmetic over collections of complex values now compiles where
+  a single real-or-complex convention fits.
+- Real-only numeric operations such as `Floor`, `Max` and `Mod` now decline
+  complex operands instead of compiling to `NaN`.
 
 ## 0.111.0 _2026-08-15_
 
 ### Breaking Changes
 
-- **`RecordFrom` has been removed.** Use `DictionaryFrom`. Given identifier keys, `DictionaryFrom([("a", 1), ("b", 2)])` already produces a value typed as a record.
+- **`RecordFrom` has been removed.** Use `DictionaryFrom`. Given identifier
+  keys, `DictionaryFrom([("a", 1), ("b", 2)])` already produces a value typed as
+  a record.
 
 ### Objects
 
-- Mutable object fields can now be assigned. Example: `p.age = p.age + 1` stores into the object in place, and all aliases see the update.
-- Assigning to fields of immutable values now reports `immutable-value-assignment` with guidance to use an object type or build an updated copy.
+- Mutable object fields can now be assigned. Example: `p.age = p.age + 1` stores
+  into the object in place, and all aliases see the update.
+- Assigning to fields of immutable values now reports
+  `immutable-value-assignment` with guidance to use an object type or build an
+  updated copy.
 
 ### Epsil And Performance
 
-- Epsil programs now stop when the active time budget expires, instead of continuing after a statement times out.
+- Epsil programs now stop when the active time budget expires, instead of
+  continuing after a statement times out.
 - Parsing long Epsil programs is now linear in program length.
 - Canonicalization now checks `withTimeLimit` deadlines while it runs.
 
 ### Collections And Numeric
 
-- Operators now stay symbolic for collection-typed symbols that have no value yet, instead of guessing scalar or empty behavior. Example: `Mean(L)` stays symbolic for unassigned `L: list<number>`.
-- Indexed reads from collections with complex elements now compile correctly or decline when no single result shape fits every possible index.
-- Collection comparisons no longer overflow the stack for declared-but-unassigned collection operands.
-- Subset and superset operators now use the documented operand order and handle ranges, intervals and strictness more accurately.
-- Closed degenerate intervals, such as `Interval(1, 1)`, are now treated as non-empty.
-- Declared fixed-size collection types now expose their `count` without requiring a value. Example: a `vector<2>` symbol has count `2`.
+- Operators now stay symbolic for collection-typed symbols that have no value
+  yet, instead of guessing scalar or empty behavior. Example: `Mean(L)` stays
+  symbolic for unassigned `L: list<number>`.
+- Indexed reads from collections with complex elements now compile correctly or
+  decline when no single result shape fits every possible index.
+- Collection comparisons no longer overflow the stack for
+  declared-but-unassigned collection operands.
+- Subset and superset operators now use the documented operand order and handle
+  ranges, intervals and strictness more accurately.
+- Closed degenerate intervals, such as `Interval(1, 1)`, are now treated as
+  non-empty.
+- Declared fixed-size collection types now expose their `count` without
+  requiring a value. Example: a `vector<2>` symbol has count `2`.
 
 ## 0.110.0 _2026-08-15_
 
 ### Breaking Changes
 
-- **Functions that write to outer variables must declare the `scope` effect.** Unannotated functions now guarantee they do not mutate outer bindings. Use `function bump(n) scope { total = total + n }` when mutation is intended.
+- **Functions that write to outer variables must declare the `scope` effect.**
+  Unannotated functions now guarantee they do not mutate outer bindings. Use
+  `function bump(n) scope { total = total + n }` when mutation is intended.
 
 ### Compilation
 
-- Added `complexPromotion` as an opt-in compile option for complex results from `Sqrt`, `Ln` and `Log` when their operand sign is unknown.
-- Compile-time constant folding now includes small constant indexed collections. Example: `At(Map(_ => _^2, 1..6), k)` can bake the mapped list into emitted code.
-- Computed `Range` bounds now use their runtime length when compiled, instead of being mistaken for numeric literals.
-- Compile-time folding is now deterministic and based on expression cost, not wall-clock timing.
-- Local function definitions now compile and stay local to their block instead of leaking into the global scope.
+- Added `complexPromotion` as an opt-in compile option for complex results from
+  `Sqrt`, `Ln` and `Log` when their operand sign is unknown.
+- Compile-time constant folding now includes small constant indexed collections.
+  Example: `At(Map(_ => _^2, 1..6), k)` can bake the mapped list into emitted
+  code.
+- Computed `Range` bounds now use their runtime length when compiled, instead of
+  being mistaken for numeric literals.
+- Compile-time folding is now deterministic and based on expression cost, not
+  wall-clock timing.
+- Local function definitions now compile and stay local to their block instead
+  of leaking into the global scope.
 
 ### Epsil And Types
 
-- Writes to a function's own parameters are treated as call-local and can remain pure.
-- Property writes are judged by the base variable, so writes to local objects do not incorrectly require `scope`.
-- Declared placeholder signatures using `unknown` now refine from the function body. Use `any` for a true accept-anything contract.
-- Declared function clauses can omit parameter annotations when a declared signature already supplies them.
-- Assigning to a declared subscripted name now prefers the joined symbol, and ambiguous undeclared function-family assignments now report an explicit error.
+- Writes to a function's own parameters are treated as call-local and can remain
+  pure.
+- Property writes are judged by the base variable, so writes to local objects do
+  not incorrectly require `scope`.
+- Declared placeholder signatures using `unknown` now refine from the function
+  body. Use `any` for a true accept-anything contract.
+- Declared function clauses can omit parameter annotations when a declared
+  signature already supplies them.
+- Assigning to a declared subscripted name now prefers the joined symbol, and
+  ambiguous undeclared function-family assignments now report an explicit error.
 
 ### Numeric And Collections
 
-- Adding three or more collections now handles lazy views correctly instead of nesting results.
-- Arithmetic on vector-valued calls with not-yet-defined arguments now remains valid when the eventual operation is element-wise.
-- Dividing a point or vector now widens component numeric types honestly. Example: `[6, 2] / 4` has rational components.
-- `Equal` and `NotEqual` between a collection-typed application and a list now produce one whole-collection boolean.
+- Adding three or more collections now handles lazy views correctly instead of
+  nesting results.
+- Arithmetic on vector-valued calls with not-yet-defined arguments now remains
+  valid when the eventual operation is element-wise.
+- Dividing a point or vector now widens component numeric types honestly.
+  Example: `[6, 2] / 4` has rational components.
+- `Equal` and `NotEqual` between a collection-typed application and a list now
+  produce one whole-collection boolean.
 - Nested-list broadcasts no longer retype inner collection-valued symbols.
-- Large counted `Take` and `Drop` operations in compiled code now honor the requested count instead of throwing at the iteration limit.
-- `Filter` and `Unique` now apply the iteration cap to unproductive pulls, so productive infinite filters can be consumed safely with `Take`.
+- Large counted `Take` and `Drop` operations in compiled code now honor the
+  requested count instead of throwing at the iteration limit.
+- `Filter` and `Unique` now apply the iteration cap to unproductive pulls, so
+  productive infinite filters can be consumed safely with `Take`.
 
 ### Performance
 
 - Long flat sums, products and related chains now parse in linear time.
-- Deep expression trees can be boxed more reliably before hitting the host stack limit.
-- Large documents involving comprehensions and broadcasted indexed reads now parse much faster.
+- Deep expression trees can be boxed more reliably before hitting the host stack
+  limit.
+- Large documents involving comprehensions and broadcasted indexed reads now
+  parse much faster.
 
 ## 0.109.0 _2026-08-14_
 
 ### Breaking Changes
 
-- **Defining the same function clause twice in one Epsil program is now an error.** Clauses with different parameter domains still accumulate for multi-clause functions, and re-running a later program still replaces definitions notebook-style.
+- **Defining the same function clause twice in one Epsil program is now an
+  error.** Clauses with different parameter domains still accumulate for
+  multi-clause functions, and re-running a later program still replaces
+  definitions notebook-style.
 
 ### Epsil
 
-- Spreading declared-but-unassigned dictionaries and records now stays symbolic instead of erroring. Example: `{->, ...d, "k" -> 3}` can be built before `d` has a value.
-- Dictionary conversion errors now return error expressions instead of throwing uncaught JavaScript exceptions.
+- Spreading declared-but-unassigned dictionaries and records now stays symbolic
+  instead of erroring. Example: `{->, ...d, "k" -> 3}` can be built before `d`
+  has a value.
+- Dictionary conversion errors now return error expressions instead of throwing
+  uncaught JavaScript exceptions.
 
 ### Compilation
 
-- Degree-mode compiled angular functions with constant arguments now agree with interpretation. Example: compiled `sin(90)` in degree mode now returns `1`.
-- Epsil programs that define a local function and call it can now compile to JavaScript, including recursive calls and use as callbacks where supported.
-- Lambda parameters named `_` no longer shadow the generated JavaScript vars object, fixing compiled callbacks that refer to free variables.
-- `Drop` with a negative count now reports the same element count it actually yields.
-- Compiled counted `Take` and `Drop` over infinite streams now work when the requested count is larger than `ce.iterationLimit`.
+- Degree-mode compiled angular functions with constant arguments now agree with
+  interpretation. Example: compiled `sin(90)` in degree mode now returns `1`.
+- Epsil programs that define a local function and call it can now compile to
+  JavaScript, including recursive calls and use as callbacks where supported.
+- Lambda parameters named `_` no longer shadow the generated JavaScript vars
+  object, fixing compiled callbacks that refer to free variables.
+- `Drop` with a negative count now reports the same element count it actually
+  yields.
+- Compiled counted `Take` and `Drop` over infinite streams now work when the
+  requested count is larger than `ce.iterationLimit`.
 
 ## 0.108.0 _2026-08-14_
 
 ### Breaking Changes
 
-- **`Map` now takes the function first: `Map(f, xs)`.** The legacy `Map(xs, f)` order now reports an `incompatible-type` error. Pipeline calls should use `xs |> Map(f, _)` or simply `xs |> Map(f)`.
+- **`Map` now takes the function first: `Map(f, xs)`.** The legacy `Map(xs, f)`
+  order now reports an `incompatible-type` error. Pipeline calls should use
+  `xs |> Map(f, _)` or simply `xs |> Map(f)`.
 
 ### Epsil
 
-- A type, protocol or sum name may only be declared once in a single Epsil program. Re-running a later program can still replace the declaration.
-- Added spread syntax in list and set literals and dictionary merges. Examples: `[...xs, 3]`, `{1, ...s}` and `{->, ...defaults, "verbose" -> true}`.
+- A type, protocol or sum name may only be declared once in a single Epsil
+  program. Re-running a later program can still replace the declaration.
+- Added spread syntax in list and set literals and dictionary merges. Examples:
+  `[...xs, 3]`, `{1, ...s}` and `{->, ...defaults, "verbose" -> true}`.
 
 ### Compilation And Numeric
 
-- Compiled code now folds pure constant subexpressions to literals. Example: `x + Sum(Map(_ => _^2, 1..5))` can compile as `x + 55`. Use `constantFold: false` to inspect structural output.
-- Difficult symbolic derivatives now fall back to numeric differentiation for `N()` and compiled evaluation when a closed form is too large. Exact `evaluate()` still stays symbolic.
-- `At(xs, indexes)` now preserves known selection counts, improving `Zip` and `Map` over gathered elements.
+- Compiled code now folds pure constant subexpressions to literals. Example:
+  `x + Sum(Map(_ => _^2, 1..5))` can compile as `x + 55`. Use
+  `constantFold: false` to inspect structural output.
+- Difficult symbolic derivatives now fall back to numeric differentiation for
+  `N()` and compiled evaluation when a closed form is too large. Exact
+  `evaluate()` still stays symbolic.
+- `At(xs, indexes)` now preserves known selection counts, improving `Zip` and
+  `Map` over gathered elements.
 - `expr.unknowns` no longer reports typed lambda parameters as free variables.
-- Numeric approximation of divergent infinite sums and products no longer returns silently truncated partial results.
+- Numeric approximation of divergent infinite sums and products no longer
+  returns silently truncated partial results.
 - `170!` no longer overflows to `Infinity` in machine-precision paths.
-- Python-compiled counts for `Take`, `Drop`, `Tabulate` and `Fill` now round like the interpreter.
+- Python-compiled counts for `Take`, `Drop`, `Tabulate` and `Fill` now round
+  like the interpreter.
 - Numeric quadrature now honors active time limits.
 
 ### Strings
 
-- `IntegerString` now preserves the minus sign. Example: `IntegerString(-42)` returns `"-42"`.
-- `StringSplit(s, "")` now splits into grapheme clusters instead of UTF-16 code units, avoiding corrupt non-BMP characters.
+- `IntegerString` now preserves the minus sign. Example: `IntegerString(-42)`
+  returns `"-42"`.
+- `StringSplit(s, "")` now splits into grapheme clusters instead of UTF-16 code
+  units, avoiding corrupt non-BMP characters.
 
 ### Performance
 
-- Large documents with symbolic range bounds now avoid major slowdowns and memory pressure.
+- Large documents with symbolic range bounds now avoid major slowdowns and
+  memory pressure.
 
 ## 0.107.0 _2026-08-13_
 
 ### Epsil
 
-- Pipelines gained concise stage forms. A missing argument is filled by the piped value, inline lambdas can appear directly after `|>`, and a one-parameter lambda stage over a collection maps each element.
+- Pipelines gained concise stage forms. A missing argument is filled by the
+  piped value, inline lambdas can appear directly after `|>`, and a
+  one-parameter lambda stage over a collection maps each element.
 
   ```epsil
   1..oo |> Take(10) |> _^2 |> Sum
   ```
 
 - `otherwise` is now accepted as the wildcard case in `match`.
-- Named calls to a function assigned earlier in the same program no longer produce false static diagnostics.
-- Diagnostics inside reordered named calls now underline the argument that actually failed.
-- Inline function literals now accept named arguments. Example: `((x, y) => x - y)(y: 2, x: 10)` returns `8`.
+- Named calls to a function assigned earlier in the same program no longer
+  produce false static diagnostics.
+- Diagnostics inside reordered named calls now underline the argument that
+  actually failed.
+- Inline function literals now accept named arguments. Example:
+  `((x, y) => x - y)(y: 2, x: 10)` returns `8`.
 
 ### Compilation
 
-- `Take`-bounded infinite pipelines now compile to JavaScript safely. Unbounded infinite pipelines fail at compile time instead of throwing a runtime range error.
-- Fractional `Take` and `Drop` counts in compiled JavaScript now round like the interpreter.
+- `Take`-bounded infinite pipelines now compile to JavaScript safely. Unbounded
+  infinite pipelines fail at compile time instead of throwing a runtime range
+  error.
+- Fractional `Take` and `Drop` counts in compiled JavaScript now round like the
+  interpreter.
 
 ### Performance And Static Checking
 
-- Canonicalizing or typing expressions that reference comprehension-bound names is much faster.
-- Static Epsil checking no longer mutates engine state. Inferred types, forward references and declarations from a check are discarded afterward.
+- Canonicalizing or typing expressions that reference comprehension-bound names
+  is much faster.
+- Static Epsil checking no longer mutates engine state. Inferred types, forward
+  references and declarations from a check are discarded afterward.
 
 ### Effects
 
-- Added the `state` effect label for object creation and mutation. It is available in type strings and effect contracts, preparing for mutable object support.
+- Added the `state` effect label for object creation and mutation. It is
+  available in type strings and effect contracts, preparing for mutable object
+  support.
 
 ## 0.106.1 _2026-08-13_
 

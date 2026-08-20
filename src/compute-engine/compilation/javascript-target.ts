@@ -172,6 +172,40 @@ import type {
  * JavaScript operator mappings
  */
 /**
+ * Mathematical constants the JavaScript target bakes into the emitted code,
+ * keyed by MathJSON symbol.
+ *
+ * Consulted by the target's `var` resolver (both the fast path and the main
+ * path) and, through `constant`, by the reference analysis that computes
+ * `freeSymbols` — a symbol spelled here is inlined, so it is never an input
+ * the caller has to supply.
+ *
+ * Null-prototype so a lookup answers only for a key the table actually
+ * declares. A plain object literal inherits `Object.prototype`, so indexing it
+ * with an ordinary symbol named `toString`, `constructor` or `valueOf` returns
+ * an inherited function rather than `undefined` — which the reference analysis
+ * would read as "the target inlines this" and drop a genuine input from
+ * `freeSymbols`.
+ */
+const JAVASCRIPT_CONSTANTS: Record<string, string> = {
+  __proto__: null as never,
+  Pi: 'Math.PI',
+  ExponentialE: 'Math.E',
+  // The boolean literals are constants, not free symbols: otherwise a
+  // literal mask (e.g. `p[[False, True, True]]`) compiles to a dangling
+  // `_.False`/`_.True` vars-object lookup and throws at run time.
+  True: 'true',
+  False: 'false',
+  NaN: 'Number.NaN',
+  ImaginaryUnit: '({ re: 0, im: 1 })',
+  Half: '0.5',
+  MachineEpsilon: 'Number.EPSILON',
+  GoldenRatio: '((1 + Math.sqrt(5)) / 2)',
+  CatalanConstant: '0.91596559417721901',
+  EulerGamma: '0.57721566490153286',
+};
+
+/**
  * Identifiers this target bakes into emitted source as literal tokens, which a
  * function parameter must therefore not be emitted under. `_SYS` is the
  * runtime helper namespace every `_SYS.…` lowering names; see
@@ -6992,6 +7026,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       language: 'javascript',
       operators: (op) => JAVASCRIPT_OPERATORS[op],
       functions: (id) => JAVASCRIPT_FUNCTIONS[id],
+      constant: (id) => JAVASCRIPT_CONSTANTS[id],
       // Free symbols read through the vars object bound to `_` (see the
       // `_.<id>` emissions below), so a lambda parameter spelled `_` must not
       // shadow it — see `CompileTarget.varsObjectName`.
@@ -7001,22 +7036,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // `CompileTarget.reservedEmittedNames`.
       reservedEmittedNames: JS_RESERVED_EMITTED_NAMES,
       var: (id) => {
-        const result = {
-          Pi: 'Math.PI',
-          ExponentialE: 'Math.E',
-          // The boolean literals are constants, not free symbols: otherwise a
-          // literal mask (e.g. `p[[False, True, True]]`) compiles to a dangling
-          // `_.False`/`_.True` vars-object lookup and throws at run time.
-          True: 'true',
-          False: 'false',
-          NaN: 'Number.NaN',
-          ImaginaryUnit: '({ re: 0, im: 1 })',
-          Half: '0.5',
-          MachineEpsilon: 'Number.EPSILON',
-          GoldenRatio: '((1 + Math.sqrt(5)) / 2)',
-          CatalanConstant: '0.91596559417721901',
-          EulerGamma: '0.57721566490153286',
-        }[id];
+        const result = JAVASCRIPT_CONSTANTS[id];
         return result;
       },
       string: (str) => JSON.stringify(str),
@@ -7233,6 +7253,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       varsObjectName: '_',
       // See `CompileTarget.reservedEmittedNames`.
       reservedEmittedNames: JS_RESERVED_EMITTED_NAMES,
+      constant: (id) => JAVASCRIPT_CONSTANTS[id],
       functions: (id) =>
         namedFunctions?.[id] ? namedFunctions[id] : JAVASCRIPT_FUNCTIONS[id],
       var: (id) => {
@@ -7256,22 +7277,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
           throw new Error(
             'Nothing: the erasure marker is not a value and cannot be compiled as a variable reference. Fail closed (D6).'
           );
-        const result = {
-          Pi: 'Math.PI',
-          ExponentialE: 'Math.E',
-          // The boolean literals are constants, not free symbols: otherwise a
-          // literal mask (e.g. `p[[False, True, True]]`) compiles to a dangling
-          // `_.False`/`_.True` vars-object lookup and throws at run time.
-          True: 'true',
-          False: 'false',
-          NaN: 'Number.NaN',
-          ImaginaryUnit: '({ re: 0, im: 1 })',
-          Half: '0.5',
-          MachineEpsilon: 'Number.EPSILON',
-          GoldenRatio: '((1 + Math.sqrt(5)) / 2)',
-          CatalanConstant: '0.91596559417721901',
-          EulerGamma: '0.57721566490153286',
-        }[id];
+        const result = JAVASCRIPT_CONSTANTS[id];
         if (result !== undefined) return result;
         if (unknowns.includes(id)) {
           varsObjectRefs.add(id);

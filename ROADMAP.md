@@ -93,6 +93,25 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A product of two points could name its alternatives (OPEN, diagnostics — consumer feedback 2026-08-19)
+
+`Multiply` of two tuples is correctly rejected (`tuple · tuple` has no
+implicit product — the `Dot` definition in `library/linear-algebra.ts`
+records the ruling), but the report is a bare
+`incompatible-type "number" "tuple"` that surfaces wherever the product was
+consumed, far from the source spelling. Because `\times`, `\cdot` and
+juxtaposition all parse to the same `Multiply`, a user who WROTE a cross
+product between two points gets no pointer toward what they meant. The
+consumer that reported this traced a five-mechanism blank-render hunt to
+exactly this shape (their importer preserved the `Multiply`; the error
+surfaced rows away) and noted a single message would have collapsed the
+hunt. The improvement: when both rejected operands of a `Multiply` are
+tuple-shaped, say so — "no product is defined between points; `Dot(a, b)`
+is the inner product, `Cross(a, b)` the cross product" — instead of the
+generic type report. The rejection site is `checkNumericArgs`
+(`boxed-expression/validate.ts`); the message likely wants an
+`ERROR_EXPLANATIONS` entry so the CLI/editor surfaces carry it too.
+
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 
 The evaluator broadcasts `Which` elementwise over collection-valued operands
@@ -142,6 +161,33 @@ Demand-gated: pick this up if Tycho (or another consumer) reports that the
 compiled-JS sampling path is not enough — e.g. an implicit-curve row that
 needs interval arithmetic for robustness, or a shaded-region row that needs
 the shader target.
+
+### A symbol named after an `Object.prototype` member breaks symbol handling (OPEN, correctness — found 2026-08-19 while hardening the compile-target constants tables)
+
+A MathJSON symbol name is an arbitrary string, but several lookups key plain
+JavaScript objects by it, so a name that collides with an inherited
+`Object.prototype` member resolves to the inherited function instead of
+missing. Measured at 0.116.1:
+
+```
+ce.box('toString')                       throws: Cannot read properties of undefined
+ce.symbol('toString')                    boxes as the symbol `Undefined`
+ce.function('Add', [ce.symbol('toString'), ce.number(1)])
+                                         compiles with freeSymbols ["Undefined"]
+```
+
+`constructor` and `valueOf` behave identically. The failure is upstream of
+compilation — `ce.box` throws before any target is consulted — so the fix
+belongs wherever symbol names index a plain object (a null-prototype table, or
+`Object.hasOwn` at the lookup). Note the throw is what currently HIDES the same
+hazard further down: the compile-target constants tables were indexed the same
+way, and were made null-prototype in the same session
+(`JAVASCRIPT_CONSTANTS`, `INTERVAL_JAVASCRIPT_CONSTANTS`, `PYTHON_CONSTANTS`,
+`PYTHON_BOOLEANS`, `GPU_CONSTANTS`), so that hardening cannot be witnessed by a
+test until this entry is fixed.
+
+Low urgency — no consumer has reported it and such a name is unidiomatic in
+mathematical notation — but it is silent wrong behavior, not a decline.
 
 ### LSP navigation: two tracked gaps in the occurrence resolver (OPEN, vscode-epsil — opened 2026-08-19)
 
@@ -6871,19 +6917,6 @@ is in git history. The only items deliberately left open:
   rename in the `Integrate`/`Limit`/`Solve` reduction paths. Deferred as
   vanishingly rare; do it if the transformer-resolution architecture is
   reworked.
-- **`simplify()` structural-head denylist (LOW) — 2026-07-23 review:**
-  `evaluateStructuralHead` (`boxed-expression/simplify.ts`) evaluates a
-  whitelisted structural head (`Determinant`/`Trace`/`Transpose`/`Length`) over
-  its whole operand tree, gated by a `HEAVY_COMPUTE_HEADS` **denylist** to keep
-  heavy pure descendants (`D`, `Integrate`, `Sum`, …) symbolic. A denylist
-  inherently leaks: benign-but-documented heads still fold during simplify —
-  `simplify(Transpose([[Max(3,5)]]))` → `[[5]]` though `docs/SIMPLIFY.md` says
-  `Max`/`Min` stay evaluation-only, and `Inverse` (real matrix compute) folds
-  too. Low harm (over-evaluation is the pre-fix behavior, value-preserving). The
-  complete fix is head-specific structural reduction over held operands (no
-  operand `.evaluate()`); the cheap mitigation is adding `Max`/`Min`/`Inverse`
-  to the denylist to honor the documented contract.
-
 - **List-valued big-op bodies on non-JS targets (2026-08-12, Tycho item 171
   residue), FIXED 2026-08-12 (same day):** measured first — GLSL/WGSL emitted
   shader source that does not even compile (a `vec2` sum returned from a `float`

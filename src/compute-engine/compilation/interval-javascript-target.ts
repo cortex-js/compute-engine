@@ -148,6 +148,43 @@ function compileIntervalFold(
 }
 
 /**
+ * Mathematical constants the interval target bakes into the emitted code,
+ * keyed by MathJSON symbol. Each is a degenerate (point) interval — the
+ * target's value model holds one interval per quantity.
+ *
+ * Consulted by the target's `var` resolver (both the fast path and the main
+ * path) and, through `constant`, by the reference analysis that computes
+ * `freeSymbols` — a symbol spelled here is inlined, so it is never an input
+ * the caller has to supply.
+ *
+ * Null-prototype so a lookup answers only for a key the table actually
+ * declares. A plain object literal inherits `Object.prototype`, so indexing it
+ * with an ordinary symbol named `toString`, `constructor` or `valueOf` returns
+ * an inherited function rather than `undefined` — which the reference analysis
+ * would read as "the target inlines this" and drop a genuine input from
+ * `freeSymbols`.
+ */
+const INTERVAL_JAVASCRIPT_CONSTANTS: Record<string, string> = {
+  __proto__: null as never,
+  Pi: '_IA.point(Math.PI)',
+  ExponentialE: '_IA.point(Math.E)',
+  // The boolean literals are constants, not free symbols: without them a bare
+  // `True` compiled to a dangling `_.True` vars-object lookup that throws at
+  // run time. This target's boolean domain is `BoolInterval`
+  // (`'true' | 'false' | 'maybe'` — see `interval/types.ts`), so the inlined
+  // spelling is the STRING, not a JavaScript boolean.
+  True: "'true'",
+  False: "'false'",
+  NaN: '{ lo: NaN, hi: NaN }',
+  ImaginaryUnit: '{ lo: NaN, hi: NaN }',
+  Half: '_IA.point(0.5)',
+  MachineEpsilon: '_IA.point(Number.EPSILON)',
+  GoldenRatio: '_IA.point((1 + Math.sqrt(5)) / 2)',
+  CatalanConstant: '_IA.point(0.91596559417721901)',
+  EulerGamma: '_IA.point(0.57721566490153286)',
+};
+
+/**
  * Interval arithmetic function implementations.
  */
 const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
@@ -828,19 +865,9 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         return null;
       },
       functions: (id) => INTERVAL_JAVASCRIPT_FUNCTIONS[id],
+      constant: (id) => INTERVAL_JAVASCRIPT_CONSTANTS[id],
       var: (id) => {
-        const result: Record<string, string> = {
-          Pi: '_IA.point(Math.PI)',
-          ExponentialE: '_IA.point(Math.E)',
-          NaN: '{ lo: NaN, hi: NaN }',
-          ImaginaryUnit: '{ lo: NaN, hi: NaN }',
-          Half: '_IA.point(0.5)',
-          MachineEpsilon: '_IA.point(Number.EPSILON)',
-          GoldenRatio: '_IA.point((1 + Math.sqrt(5)) / 2)',
-          CatalanConstant: '_IA.point(0.91596559417721901)',
-          EulerGamma: '_IA.point(0.57721566490153286)',
-        };
-        return result[id];
+        return INTERVAL_JAVASCRIPT_CONSTANTS[id];
       },
       string: (str) => JSON.stringify(str),
       number: (n) => `_IA.point(${n})`,
@@ -999,24 +1026,15 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // provide. Number LITERALS in the source are exact by definition and
       // stay point intervals, as before.
       constantFold: false,
+      constant: (id) => INTERVAL_JAVASCRIPT_CONSTANTS[id],
       functions: (id) =>
         namedFunctions?.[id]
           ? namedFunctions[id]
           : INTERVAL_JAVASCRIPT_FUNCTIONS[id],
       var: (id) => {
         if (vars && id in vars) return vars[id] as string;
-        const constants: Record<string, string> = {
-          Pi: '_IA.point(Math.PI)',
-          ExponentialE: '_IA.point(Math.E)',
-          NaN: '{ lo: NaN, hi: NaN }',
-          ImaginaryUnit: '{ lo: NaN, hi: NaN }',
-          Half: '_IA.point(0.5)',
-          MachineEpsilon: '_IA.point(Number.EPSILON)',
-          GoldenRatio: '_IA.point((1 + Math.sqrt(5)) / 2)',
-          CatalanConstant: '_IA.point(0.91596559417721901)',
-          EulerGamma: '_IA.point(0.57721566490153286)',
-        };
-        if (id in constants) return constants[id];
+        const constant = INTERVAL_JAVASCRIPT_CONSTANTS[id];
+        if (constant !== undefined) return constant;
         if (unknowns.includes(id)) return `_.${id}`;
         // An assigned value / declared constant: returning `undefined` lets
         // BaseCompiler fold it (see the JavaScript target) rather than emitting

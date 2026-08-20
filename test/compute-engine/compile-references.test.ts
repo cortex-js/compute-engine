@@ -239,4 +239,73 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       expect(compile(expr, { to: 'glsl' }).unsupported).toEqual([]);
     });
   });
+  // A symbol the TARGET bakes into the emitted code is not an input the caller
+  // has to supply. Most constants never reach the free-symbol branch — the
+  // engine holds a value for `Pi` and friends, so they are folded first — but
+  // the boolean literals have no engine value and did reach it, so
+  // `Which(x > 0, 1, True, 2)` reported a phantom input named `True`.
+  // Consumers derive a compiled function's variable list from `freeSymbols`
+  // (this is how a plot picks its variables), and `True` is the idiomatic
+  // `Which` fallback condition, so an ordinary piecewise grew a phantom
+  // variable.
+  //
+  // The lookup behind this is `CompileTarget.constant`, deliberately distinct
+  // from `var`: `var` falls back to a vars-object reference for any symbol it
+  // does not recognize, so consulting it here would suppress EVERY free
+  // symbol.
+  describe('a constant the target inlines is not a free symbol', () => {
+    const booleanShapes: [string, unknown][] = [
+      ['bare', 'True'],
+      ['Which fallback condition', ['Which', ['Greater', 'x', 0], 1, 'True', 2]],
+      ['conjunct', ['And', ['Greater', 'x', 0], 'True']],
+      ['mask element', ['At', ['List', 10, 20, 30], ['List', 'False', 'True', 'True']]],
+    ];
+
+    // Every target spells the boolean literals — `true` in JavaScript and both
+    // shader languages, `True` in Python, and the `BoolInterval` string
+    // `'true'` on the interval target — so none of them reports one as an
+    // input. Before this, GLSL/WGSL emitted the undeclared identifier `True`
+    // (a shader that fails to compile behind `success: true`) and the interval
+    // target emitted a dangling `_.True` vars-object lookup that threw at run
+    // time.
+    for (const to of ['javascript', 'python', 'glsl', 'wgsl', 'interval-js']) {
+      for (const [label, expr] of booleanShapes) {
+        it(`${to}: ${label}`, () => {
+          const ce = new ComputeEngine();
+          const r = compile(ce.box(expr as never), { to: to as never });
+          expect(r.freeSymbols ?? []).not.toContain('True');
+          expect(r.freeSymbols ?? []).not.toContain('False');
+        });
+      }
+    }
+
+    it("emits each language's own spelling of the literal", () => {
+      const ce = new ComputeEngine();
+      const src = (to: string) =>
+        String(compile(ce.box('True'), { to: to as never }).code ?? '');
+      expect(src('javascript')).toBe('true');
+      expect(src('python')).toBe('True');
+      expect(src('glsl')).toBe('true');
+      expect(src('wgsl')).toBe('true');
+      // The interval target's boolean domain is `BoolInterval`
+      // (`'true' | 'false' | 'maybe'`), so the value is the STRING.
+      expect(src('interval-js')).toBe("'true'");
+    });
+
+    // The guard must key on what the TARGET inlines, not on whether the ENGINE
+    // calls the symbol constant: a constant declared with no value is still an
+    // input the caller must supply, because the emitted code references it.
+    it('still reports a valueless declared constant', () => {
+      const ce = new ComputeEngine();
+      ce.declare('c', { type: 'real', isConstant: true });
+      expect(compile(ce.parse('c + 1')).freeSymbols).toContain('c');
+    });
+
+    it('leaves ordinary free symbols alone', () => {
+      const ce = new ComputeEngine();
+      expect(compile(ce.parse('x + y')).freeSymbols!.sort()).toEqual(['x', 'y']);
+      // `Pi` has an engine value, so it is folded rather than filtered here.
+      expect(compile(ce.parse('\\pi x')).freeSymbols).toEqual(['x']);
+    });
+  });
 });

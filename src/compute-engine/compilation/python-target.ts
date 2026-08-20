@@ -48,12 +48,44 @@ import {
 } from './javascript-target.js';
 
 /**
+ * The boolean literals, which Python spells exactly as MathJSON does.
+ *
+ * Deliberately NOT part of `PYTHON_CONSTANTS`: that table backs the target's
+ * `var` resolver, and a `var` answer is what licenses the constant folder to
+ * replace an expression with its folded value. Adding the booleans there let
+ * `Equal([1, 2], [3, 4])` fold to the literal `False` instead of lowering to
+ * the `_ce_eqcoll` runtime helper, which also bypassed the fail-closed gate
+ * that makes `compileLambda` decline a helper-dependent body. That is a
+ * codegen change on its own merits, not a side effect this table should
+ * cause.
+ *
+ * What IS true, and all the reference analysis needs, is that a boolean
+ * literal costs the caller nothing: an unmapped symbol falls through to a
+ * bare identifier, and for `True`/`False` that bare identifier is already
+ * Python's own literal. So they are inlined in the observable sense — never
+ * read from the variables object — even though they are not folded.
+ *
+ * Null-prototype so a lookup answers only for a key the table actually
+ * declares. A plain object literal inherits `Object.prototype`, so indexing it
+ * with an ordinary symbol named `toString`, `constructor` or `valueOf` returns
+ * an inherited function rather than `undefined` — which the reference analysis
+ * would read as "the target inlines this" and drop a genuine input from
+ * `freeSymbols`.
+ */
+const PYTHON_BOOLEANS: Record<string, string> = {
+  __proto__: null as never,
+  True: 'True',
+  False: 'False',
+};
+
+/**
  * Python mathematical constants, keyed by MathJSON symbol.
  *
  * Referenced both by the target's `var` resolver and — so an assigned value is
  * folded, matching the JavaScript target and `evaluate()` — by `compile()`.
  */
 const PYTHON_CONSTANTS: Record<string, string> = {
+  __proto__: null as never,
   Pi: 'np.pi',
   ExponentialE: 'np.e',
   ImaginaryUnit: '1j',
@@ -2740,6 +2772,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // bare identifier — a Python parameter name — only for a genuinely free
       // symbol.
       var: (id) => PYTHON_CONSTANTS[id],
+      constant: (id) => PYTHON_CONSTANTS[id] ?? PYTHON_BOOLEANS[id],
       complex: (re, im) => `complex(${re}, ${im})`,
       string: (str) => JSON.stringify(str),
       number: (n) => {
