@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+### Improvements
+
+- **Raw-form subscript folding no longer depends on the base's spelling.**
+  An undeclared subscripted name parsed with `form: 'raw'` folded to a
+  joined symbol for a Latin base (`a_{0}` → `"a_0"`) but stayed structural
+  for a command-spelled Greek base (`\eta_{w}` → `["Subscript","eta","w"]`)
+  and for a prefixed base (`\operatorname{speed}_{0}`), and the prime-first
+  spelling (`\alpha'_1`) diverged from the subscript-first one (`\alpha_1'`)
+  the same way. All spellings now fold to the joined symbol (`"eta_w"`,
+  `"alpha_1"`, `"speed_0"`), matching what canonical form always produced,
+  and the two prime orders agree on every spelling. Unchanged: an indexed-collection base keeps the element-access
+  reading unless the joined name is declared, a `subscriptEvaluate` base
+  (such as `\gamma` for the `EulerGamma` family) keeps its subscripts, and
+  dictionary-claimed constants such as unbraced `\mu_0` are untouched.
+  **If your code reads `form: 'raw'` output and pattern-matches
+  `["Subscript", base, sub]` nodes for undeclared names, re-measure it** —
+  those nodes are now plain symbols; code that folded them itself now
+  receives the already-folded name.
+
 ## 0.116.1 _2026-08-19_
 
 ### Improvements

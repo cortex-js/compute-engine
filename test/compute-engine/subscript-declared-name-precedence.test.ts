@@ -134,12 +134,17 @@ describe('SUBSCRIPT: declared-name precedence over index capture', () => {
 });
 
 /**
- * A trigger-spelled base (`\alpha`, `\theta`, …) followed by a subscript now
+ * A trigger-spelled base (`\alpha`, `\theta`, …) followed by a subscript
  * consults the same joined-name oracle the single-letter branch uses, so a
  * declared `alpha_1` can be a call head (`\alpha_1(x)`).
  *
- * Without a declaration nothing changes: the subscript keeps its default
- * reading (a `Subscript` expression, or a dictionary constant such as `\mu_0`).
+ * Without a declaration the subscript FOLDS into a plain joined symbol
+ * (`\alpha_1` reads as `"alpha_1"`), exactly as a Latin base does — ruled
+ * 2026-08-19 (a raw-form consumer saw `"a_0"` for Latin but a `Subscript`
+ * node for Greek; the asymmetry was an oversight). Dictionary constants such
+ * as unbraced `\mu_0` and `subscriptEvaluate` bases are untouched, and an
+ * indexed-collection base still requires the declaration (the `At` reading
+ * wins otherwise) — see `raw-subscript-fold-parity.test.ts`.
  */
 describe('SUBSCRIPT: trigger-spelled base with a declared joined name', () => {
   const json = (
@@ -153,14 +158,17 @@ describe('SUBSCRIPT: trigger-spelled base with a declared joined name', () => {
   const alpha1 = (id: string) =>
     id === 'alpha_1' ? { type: 'function' } : undefined;
 
-  describe('current behavior without an oracle (pinned first)', () => {
-    test('`\\alpha_1` and `\\alpha_1(x)` keep the Subscript reading', () => {
+  describe('behavior without an oracle (undeclared names fold)', () => {
+    test('`\\alpha_1` and `\\alpha_1(x)` read the joined symbol', () => {
       const ce = new ComputeEngine();
-      expect(json(ce, '\\alpha_1')).toBe('["Subscript","alpha",1]');
+      expect(json(ce, '\\alpha_1')).toBe('"alpha_1"');
+      // Juxtaposition, not a call: an undeclared symbol followed by a
+      // parenthesized group keeps the multiplication-vs-apply question for
+      // canonicalization. The DECLARED case below reads as a call.
       expect(json(ce, '\\alpha_1(x)')).toBe(
-        '["InvisibleOperator",["Subscript","alpha",1],["Delimiter","x"]]'
+        '["InvisibleOperator","alpha_1",["Delimiter","x"]]'
       );
-      expect(json(ce, '\\alpha_{1}')).toBe('["Subscript","alpha",1]');
+      expect(json(ce, '\\alpha_{1}')).toBe('"alpha_1"');
     });
   });
 
@@ -180,16 +188,20 @@ describe('SUBSCRIPT: trigger-spelled base with a declared joined name', () => {
       expect(json(ce, '\\alpha_1(x)')).toBe('["alpha_1","x"]');
       expect(json(ce, '\\alpha_1')).toBe('"alpha_1"');
       ce.popScope();
-      // Out of scope again: the default reading is restored
+      // Out of scope again: the name still folds (undeclared names fold
+      // unconditionally), but the call reading reverts to a juxtaposition —
+      // only a declaration makes `alpha_1` a call head.
       expect(json(ce, '\\alpha_1(x)')).toBe(
-        '["InvisibleOperator",["Subscript","alpha",1],["Delimiter","x"]]'
+        '["InvisibleOperator","alpha_1",["Delimiter","x"]]'
       );
     });
 
-    test('an undeclared sibling of a declared name is unaffected', () => {
+    test('an undeclared sibling of a declared name reads the same way', () => {
+      // The oracle knowing `alpha_1` changes nothing for its siblings: they
+      // fold to their joined names with or without it.
       const ce = new ComputeEngine();
-      expect(json(ce, '\\alpha_2', alpha1)).toBe('["Subscript","alpha",2]');
-      expect(json(ce, '\\theta_1', alpha1)).toBe('["Subscript","theta",1]');
+      expect(json(ce, '\\alpha_2', alpha1)).toBe('"alpha_2"');
+      expect(json(ce, '\\theta_1', alpha1)).toBe('"theta_1"');
     });
 
     test('round-trip: the committed joined name re-parses', () => {

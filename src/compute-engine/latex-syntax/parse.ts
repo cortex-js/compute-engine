@@ -2505,23 +2505,46 @@ export class _Parser implements Parser {
       const result =
         typeof def.parse === 'function' ? def.parse(this, until) : def.name!;
       if (result === null) continue;
-      // A dictionary-spelled symbol (`\eta`, `\alpha`, …) followed by `_`:
-      // if the joined name (`eta_w`) is itself declared, it wins over the
-      // postfix `_` parselet's reading of the subscript. Without this, a base
-      // that is (or later becomes) an indexed collection turns every mention
-      // of an EXISTING symbol `eta_w` into `At(eta, w)`, and the serializer's
-      // own spelling of `eta_w` (`\eta_{w}`) no longer round-trips. Same rule
-      // as the single-letter and trigger-spelled branches of `parseSymbol()`
-      // in `parse-symbol.ts`: only a resolvable joined name is absorbed, so an
-      // undeclared `\eta_w` keeps its default reading (a `Subscript`, joined
-      // to a symbol at canonicalization, or `At` on a collection base). A base
-      // with `subscriptEvaluate` owns its subscripts and never absorbs them.
-      if (
-        typeof result === 'string' &&
-        this.peek === '_' &&
-        !this.resolveSymbol(result)?.subscriptEvaluate
-      )
-        return absorbSubscripts(this, result, true);
+      // A dictionary-spelled symbol (`\eta`, `\alpha`, …) followed by `_`
+      // absorbs the subscript into a joined symbol name (`\eta_{w}` →
+      // `eta_w`), under the same rule as the single-letter and
+      // trigger-spelled branches of `parseSymbol()` in `parse-symbol.ts`:
+      // - a base with `subscriptEvaluate` owns its subscripts and never
+      //   absorbs them;
+      // - an indexed-collection base absorbs only a subscript whose joined
+      //   name is DECLARED — a declared `eta_w` must win over the `At(eta,
+      //   w)` element-access reading, or the serializer's own spelling of
+      //   `eta_w` (`\eta_{w}`) stops round-tripping — while an undeclared
+      //   one keeps the element-access reading;
+      // - any other base absorbs unconditionally, so raw-form output is a
+      //   plain symbol for `\eta_{w}` exactly as it is for `a_{0}`.
+      // The unconditional arm is the user-ruled half (2026-08-19, consumer
+      // item: a raw-form reader saw `"a_0"` for a Latin base but
+      // `["Subscript","eta","w"]` for a Greek one — the asymmetry was an
+      // oversight, this branch used to require a declaration for every
+      // base).
+      if (typeof result === 'string' && this.peek === '_') {
+        const info = this.resolveSymbol(result);
+        if (!info?.subscriptEvaluate) {
+          const joined = absorbSubscripts(
+            this,
+            result,
+            info?.type.matches('indexed_collection<any>') ?? false
+          );
+          // The fold can SYNTHESIZE a name no other path sees (`eta_w`
+          // from `\eta_{w}`), so the undeclared-symbol diagnostic must be
+          // emitted here for it, exactly as the generic `parseSymbol()`
+          // path below emits for the names it produces. Only a name the
+          // fold actually built is emitted — an unabsorbed base keeps this
+          // branch's historical no-diagnostic behavior.
+          if (
+            joined !== result &&
+            !this.resolveSymbol(joined)?.type.matches('error')
+          )
+            this.emitSymbolReference(joined, start, this.index);
+          return joined;
+        }
+      }
       return result;
     }
 

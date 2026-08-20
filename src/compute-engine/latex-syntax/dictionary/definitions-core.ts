@@ -3443,14 +3443,16 @@ function absorbPrimeSubscript(
 ): MathJsonExpression {
   if (parser.atEnd || parser.peek !== '_') return lhs;
 
-  // A base spelled with a single token (`F`) folds the subscript into the
-  // symbol NAME (`F_0`), which is exactly what `parseSymbol()` does for the
-  // `F_0'` spelling; a longer name — a LaTeX command such as `\alpha`, or a
-  // `\operatorname{…}` symbol — keeps the `Subscript` reading, again matching
-  // that spelling. The LaTeX spelling is no longer available here, but a
-  // one-code-point name can only have come from the single-token branch.
+  // A symbol base folds the subscript into the symbol NAME (`F'_0` → `F_0`,
+  // `\alpha'_1` → `alpha_1`, `\operatorname{speed}'_0` → `speed_0`), which
+  // is exactly what the subscript-first spellings (`F_0'`, `\alpha_1'`,
+  // `\operatorname{speed}_0'`) produce through `parseSymbol()` and the
+  // dictionary-symbol branch — the two orders must stay in lockstep,
+  // whatever the base's spelling. The same guards apply on every route: a
+  // `subscriptEvaluate` base owns its subscripts, and an indexed-collection
+  // base folds only a declared joined name.
   const id = symbol(lhs);
-  if (id !== null && [...id].length === 1) {
+  if (id !== null) {
     const info = parser.resolveSymbol(id);
     // A base with `subscriptEvaluate` owns the meaning of its subscripts and
     // never absorbs them; an indexed collection absorbs only a subscript whose

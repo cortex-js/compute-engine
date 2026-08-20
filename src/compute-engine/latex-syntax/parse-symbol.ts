@@ -536,18 +536,25 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
   if (id) {
     id = id.normalize();
     if (isValidSymbol(id)) {
-      // A trigger-spelled base followed by a subscript keeps its default
-      // reading (a `Subscript` expression, or a dictionary constant such as
-      // `\mu_0`) UNLESS the joined name (`alpha_1`) is itself declared: a
-      // declared name must be spellable, and must work as a call head
-      // (`\alpha_1(x)`). Same rule (and same accepted subscript shapes) as
-      // the single-letter branch above; the joined name is only committed
-      // when the oracle resolves it.
-      if (isTriggerSpelled && parser.peek === '_') {
-        // As in the single-letter branch, a base with `subscriptEvaluate`
-        // owns the meaning of its subscripts: never absorb them.
-        if (!parser.resolveSymbol(id)?.subscriptEvaluate)
-          id = absorbSubscripts(parser, id, true);
+      // A subscripted base folds the subscript into the symbol NAME under
+      // the same rule as the single-letter branch above, whatever the base's
+      // spelling — a single command (`\alpha`), a prefixed symbol
+      // (`\operatorname{speed}`), or an emoji run. Canonical form folds all
+      // of them into the joined name; raw form matching that is the
+      // script-independent fold rule (see the dictionary-symbol branch of
+      // `Parser.parseSymbol()` in `parse.ts`, and
+      // `raw-subscript-fold-parity.test.ts`). Two guards, as everywhere: a
+      // base with `subscriptEvaluate` owns the meaning of its subscripts
+      // and never absorbs them, and an indexed-collection base absorbs only
+      // a DECLARED joined name, so the element-access reading survives.
+      if (parser.peek === '_') {
+        const info = parser.resolveSymbol(id);
+        if (!info?.subscriptEvaluate)
+          id = absorbSubscripts(
+            parser,
+            id,
+            info?.type.matches('indexed_collection<any>') ?? false
+          );
       }
       return id;
     }
