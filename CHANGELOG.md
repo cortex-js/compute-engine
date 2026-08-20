@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## 0.116.1 _2026-08-19_
+
 ### Improvements
 
 - **`Cross` accepts numeric tuples, like `Dot` always did.**
