@@ -110,7 +110,7 @@ describe('Canonicalization: Others', () => {
     checkSimplify('2a < 4b', 'a < 2b'));
   test('2pi < 4pi simplifies to 1 < 2', () =>
     checkSimplify('2\\pi < 4\\pi', '1 < 2'));
-  test.skip('(2pi+2pi*e) < 4pi simplifies', () =>
+  test.skip('(2pi+2pi*e) < 4pi simplifies -- needs factor() to extract common factors from Add', () =>
     checkSimplify('(2\\pi + 2 \\pi e) < 4\\pi', '1 + e < 2'));
 });
 
@@ -428,8 +428,13 @@ describe('Rules: Negative Signs and Powers and Roots', () => {
   test('(-x)^4 = x^4', () => checkSimplify('(-x)^4', 'x^4'));
   test('(-x)^{3/5} = -(x^{3/5})', () =>
     checkSimplify('(-x)^{3/5}', '-(x^{3/5})'));
-  test.skip('(-x)^{3/4} = x^{3/4}', () =>
-    checkSimplify('(-x)^{3/4}', 'x^{3/4}'));
+  // `(-x)^{3/4}` must NOT simplify to `x^{3/4}`: an even root of a negative
+  // base is complex, so for x > 0 the left side is complex while the right is
+  // a real positive — at x = 16 they are -5.657 + 5.657i and 8. This stood as
+  // a skipped test asserting the two ARE equal, which is false; it is active
+  // now, asserting the expression is left alone. See REVIEW.md E6.
+  test('(-x)^{3/4} is left unchanged', () =>
+    checkSimplify('(-x)^{3/4}', '(-x)^{3/4}'));
   test('cbrt(-2) = -cbrt(2)', () =>
     checkSimplify('\\sqrt[3]{-2}', '-\\sqrt[3]{2}'));
 });
@@ -486,9 +491,9 @@ describe('Rules: Powers and Roots', () => {
 
 describe('Rules: Common Denominator', () => {
   test('3/x-1/x = 2/x', () => checkSimplify('3/x-1/x', '2/x'));
-  test.skip('1/(x+1)-1/x = -1/(x^2+x)', () =>
+  test.skip('1/(x+1)-1/x = -1/(x^2+x) -- common denominator for rational expressions not yet implemented', () =>
     checkSimplify('1/(x+1)-1/x', '-1 / (x^2 + x)'));
-  test.skip('1/x-1/(x+1) = 1/(x^2+x)', () =>
+  test.skip('1/x-1/(x+1) = 1/(x^2+x) -- common denominator for rational expressions not yet implemented', () =>
     checkSimplify('1/x-1/(x+1)', '1 / (x^2 + x)'));
 });
 
@@ -536,7 +541,7 @@ describe('Rules: Ln', () => {
   test('e^{ln(x)/3} = x^{1/3}', () =>
     checkSimplify('e^{\\ln(x)/3}', 'x^{1/3}'));
   test('ln(e^x*y) = x+ln(y)', () => checkSimplify('\\ln(e^x*y)', 'x+\\ln(y)'));
-  test.skip('ln((x+1)/e^{2x}) = ln(x+1)-2x', () =>
+  test.skip('ln((x+1)/e^{2x}) = ln(x+1)-2x -- canonicalization expands (x+1)/e^{2x} before log rules can fire', () =>
     checkSimplify('\\ln((x+1)/e^{2x})', '\\ln(x+1)-2x'));
 });
 
@@ -882,20 +887,20 @@ describe('Rules: Trig identities', () => {
 });
 
 describe('Rules: Inverse Hyperbolic Trig identities', () => {
-  test.skip('1/2*ln((x+1)/(x-1)) = arccoth(x)', () =>
+  test.skip('1/2*ln((x+1)/(x-1)) = arccoth(x) -- ln-to-inverse-hyperbolic rules not yet implemented', () =>
     checkSimplify(
       '\\frac{1}{2}\\ln(\\frac{x+1}{x-1})',
       '\\operatorname{arcoth}(x)'
     ));
-  test.skip('ln(x+sqrt(x^2+1)) = arsinh(x)', () =>
+  test.skip('ln(x+sqrt(x^2+1)) = arsinh(x) -- ln-to-inverse-hyperbolic rules not yet implemented', () =>
     checkSimplify('\\ln(x+\\sqrt{x^2+1})', '\\arsinh(x)'));
-  test.skip('ln(x+sqrt(x^2-1)) = arcosh(x)', () =>
+  test.skip('ln(x+sqrt(x^2-1)) = arcosh(x) -- ln-to-inverse-hyperbolic rules not yet implemented', () =>
     checkSimplify('\\ln(x+\\sqrt{x^2-1})', '\\arcosh(x)'));
-  test.skip('1/2*ln((1+x)/(1-x)) = artanh(x)', () =>
+  test.skip('1/2*ln((1+x)/(1-x)) = artanh(x) -- ln-to-inverse-hyperbolic rules not yet implemented', () =>
     checkSimplify('\\frac{1}{2}\\ln(\\frac{1+x}{1-x})', '\\artanh(x)'));
-  test.skip('ln((1+sqrt(1-x^2))/x) = arsech(x)', () =>
+  test.skip('ln((1+sqrt(1-x^2))/x) = arsech(x) -- ln-to-inverse-hyperbolic rules not yet implemented', () =>
     checkSimplify('\\ln(\\frac{1+\\sqrt{1-x^2}}{x})', '\\arsech(x)'));
-  test.skip('ln(1/x+sqrt(1/x^2+1)) = arcsch(x)', () =>
+  test.skip('ln(1/x+sqrt(1/x^2+1)) = arcsch(x) -- ln-to-inverse-hyperbolic rules not yet implemented', () =>
     checkSimplify(
       '\\ln(\\frac{1}{x} + \\sqrt{\\frac{1}{x^2}+1})',
       '\\arcsch(x)'
@@ -903,7 +908,7 @@ describe('Rules: Inverse Hyperbolic Trig identities', () => {
 });
 
 describe('Rules: Inverse Trig identities', () => {
-  test.skip('arctan(x/sqrt(1-x^2)) = arcsin(x)', () =>
+  test.skip('arctan(x/sqrt(1-x^2)) = arcsin(x) -- inverse trig conversion rules not yet implemented', () =>
     checkSimplify('\\arctan(x/\\sqrt{1-x^2})', '\\arcsin(x)'));
 });
 
@@ -1566,7 +1571,7 @@ describe('Fu Advanced Tests', () => {
     fuTestHelper('\\sin(x+h)+\\sin(x-h)', '2\\sin(x)\\cos(h)');
   });
 
-  test.skip('Fu paper: 1-(1/4)sin^2(2x)-sin^2(y)-cos^4(x) [Phase 14]', () => {
+  test.skip('Fu paper: 1-(1/4)sin^2(2x)-sin^2(y)-cos^4(x) [Phase 14] -- multi-step trig identity not yet implemented', () => {
     fuTestHelper(
       '1-(1/4)*\\sin^2(2x)-\\sin^2(y)-\\cos^4(x)',
       '\\sin(x+y)\\sin(x-y)'
