@@ -6,13 +6,21 @@ This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
 files, and `docs/rubi/RUBI.md` / `docs/fungrim/`.
 
-That rule had drifted — the file had accumulated 44 entries marked FIXED,
-RESOLVED, REFUTED or DELETED alongside the open ones, so "what is left to do"
-could not be read off it. They were removed on 2026-08-20 (recoverable from git
-history; each landed change is described in `CHANGELOG.md`). An entry whose
-heading says it is done belongs in neither this file nor a follow-up entry: if
-part of it is still open, the open part gets its own entry stating what remains,
-the way the cross-term CSE note below does.
+That rule had drifted, and was applied again on 2026-08-20 in two passes: 44
+whole entries whose HEADING said FIXED, RESOLVED, REFUTED or DELETED, and then
+22 individual bullets struck through as done inside entries that are otherwise
+open. Everything removed is recoverable from git history, and each landed
+change is described in `CHANGELOG.md`.
+
+Two conventions follow from that, both worth keeping:
+
+- An entry whose heading says it is done belongs in neither this file nor a
+  follow-up entry. If part of it is still open, the open part gets its OWN
+  entry stating what remains — the way the cross-term CSE note below does.
+- Inside a still-open entry, strike through a bullet (`~~…~~`) when it lands,
+  and delete it at the next pass. Keep a landed bullet only while a sibling
+  OPEN bullet needs it to make sense; say so in the surviving bullet rather
+  than relying on the reader to look upward, since the landed one will go.
 
 ## Current state
 
@@ -1840,102 +1848,6 @@ unenforced (other positions behave as `function`); a union of two DIFFERENT
 
 **Cleanups (opened here 2026-08-09; the first five CLOSED 2026-08-09):**
 
-- ~~Cross-operator asymmetries on degenerate inputs~~ — CLOSED. Ruled and
-  applied family-wide: a source with no value leaves every operator INERT
-  (matching `Length`/`Total`/`Sort`, which always did), and a PARAMETERLESS
-  operand at a callback slot reports the declared slot's `incompatible-type`
-  everywhere instead of thunk-lifting on the lazy half. Predicate errors now
-  name their own operator. See `isEnumerableSource` (collection-utils.ts) and
-  `canonicalCallbackOperand`/`predicateResultError` (collections.ts).
-- ~~Kleene-logic helper triplication~~ — CLOSED: one shared home,
-  `src/common/kleene.ts`.
-- ~~The `Signature` operator is inert on the box/parse routes~~ — CLOSED: the
-  name is resolved by lookup (read-only — canonicalizing the held operand would
-  DECLARE an unknown name).
-- ~~The signature-driven trigger's positional pairing has no arity guard~~ —
-  CLOSED: it declines the whole stamp, as the contextual-solve route does.
-- ~~`src/math-json/OPERATORS.json` is stale for `Map`~~ — CLOSED: regenerated
-  (it was stale for 41 more operators, and missing three); two generator arity
-  defects fixed with it.
-- ~~A WRAPPER over a valueless source still answers as if empty~~ — CLOSED
-  2026-08-10 by the enumerability facet this item asked for.
-  `isEnumerableCollection` (expression) / `isEnumerable` (collection handler)
-  answers "will `each()` produce the elements?" structurally, so an empty walk
-  is attributable: `true` means EMPTY, `false` means unwalkable (symbolic-bound
-  `Range`/`Linspace`/`Repeat`/`Tabulate`, a valueless symbol), `undefined` only
-  for an eager operator that has no collection handlers until evaluated. A
-  wrapper propagates from its source ALONE (`enumerableFromSource` /
-  `enumerableFromAllSources`) and never reads its own emptiness, which is what
-  keeps it cheap — the depth-d `Filter` chain went from 2^(d+1) − 2 predicate
-  calls to d(d+1)/2 (3/10/21/36 at depths 2/4/6/8), pinned in
-  `collection-callback-signatures.test.ts`. The dual review of 2026-08-10 found
-  the same misreading of `isFiniteCollection` as enumerability on eight more
-  guards (`CountIf`, `Position`, `Ordering`, the 2-arg `Count`, and the walking
-  `count` handlers of `Filter`/`TakeWhile`/`DropWhile`/`Dedup`/`ChunkBy` — all
-  finite because `Take(xs, 2)` caps at 2, all walkable only if `xs` is); they
-  are fixed and pinned too.
-- ~~Eager collection leaves under wrappers: wrong values on GROUND input,
-  empty-reads on symbolic input~~ — **mechanisms SHIPPED 2026-08-11; adoption is
-  incremental and OPEN** (design + rulings:
-  `docs/COLLECTIONS-MODEL.md`; tests:
-  `eager-collection-enumerability.test.ts`). Defect A (wrong values on ground
-  input — `Filter(Take(Divisors(12), 3), _ > 1)` → `[]`) is CLOSED for all pure
-  eager producers: `at()` now has the materialize fallback `each()` always had
-  (`_materializedAt`, `boxed-function.ts` — pure sources only, evaluated once
-  per instance/generation via the `cachedValue` idiom). Defect B (wrapped
-  symbolic source read as empty) is closed PER ADOPTED OPERATOR via the
-  `canEnumerate` definition handler; adopted so far: `Characters`,
-  `GraphemeClusters`, `UnicodeScalars`, `Utf8`, `Utf16`, `StringSplit`,
-  `Divisors`, `PrimeFactors`, `FactorInteger`, `IntegerDigits`, and
-  (decline-only) `Sort`/`Ordering`/`Unique`/ `Tally`. **Adoption round 2
-  (2026-08-11, three parallel passes) CLOSED the sweep: 45 of the 73 producers
-  now declare `canEnumerate`**, the other 28 are deliberate, categorized skips —
-  the sweep itself is DONE, not paused. Round-2 additions: `true`-capable
-  `Shape` (no decline path), `Keys`/`Values` (dictionary test), `AbsArg`,
-  `ComplexRoots`, `ExtendedGCD`, `PlusMinus`; decline-only
-  `Eigenvalues`/`Eigenvectors`/`Eigen`/`SingularValues`/`SVD`/
-  `LUDecomposition`/`QRDecomposition`, `Cross`/`MatrixMultiply`/
-  `HadamardProduct` (both operands), `Flatten` (scalar carve-out: `Flatten(5)`
-  succeeds, so a number operand is `undefined` not `false`), `Chunk`, `GroupBy`,
-  `ListFrom`/`SetFrom`/`TupleFrom` (collection-typed operands only — a scalar
-  operand is legitimate), `DictionaryFrom`/`RecordFrom`,
-  `BinCounts`/`Histogram`, `ContinuedFraction`, and the IMPURE trio
-  `RandomShuffle`/`RandomChoice`/`RandomSample` (domain-facet only, zero draws,
-  never `true`). The 28 skips, by category, all pinned or reasoned: **permanent
-  `undefined` tier** (success not cheaply decidable, by ruling): `Solve`,
-  `FindRoot`, `FindFit`, `NDSolve`, `PolynomialRoots`, `Kernel`,
-  `CoefficientList`, `QuotientRing`, `LinearRegression`, `PolynomialFit`,
-  `TruthTable`, `PrimeImplicants`/`PrimeImplicates`, `Table`, `Timing` (operand
-  purity is the operand's), `Position` (already guarded by
-  `isEnumerableSource`), `Dictionary`, `Limits`, `ColorFrom`/`ToColorspace`,
-  `Quartiles` (see the crash item below); **structurally ineligible**:
-  `Pair`/`Triple`/`Single`/ `KeyValuePair`/`Vector` (canonicalize away — no
-  canonical leaf ever exists), `Tail` (evaluates to `Nothing` for every
-  surviving form), `Adjoin` (inert by design, no evaluate handler). Candidate
-  noticed for a later look: `Dot` (linear-algebra.ts) has decline paths and no
-  handler. An IMPURE producer under an indexed wrapper
-  (`Take(RandomShuffle(xs), 2)`) still walks empty — the fallback is pure-only
-  by ruling (per-generation re-draws would mix draw-sets); that case belongs to
-  the draw-coherence item below.
-- ~~`Quartiles` throws a `TypeError` on a symbolic operand~~ — CLOSED
-  2026-08-11. The crash was `bigMedian` of an EMPTY half (`sorted[-1].add`),
-  reachable from a fully-ground single inexact datum too (`Quartiles(2.5)`
-  threw). Two fixes: `bigMedian([])` now returns NaN (matching `median([])`'s
-  arithmetic), and both `Quartiles` and `InterquartileRange` stay INERT on
-  symbolic data (a NaN LITERAL still takes the §3.C absence path). With
-  inertness in place `Quartiles` also gained its decline-only `canEnumerate`.
-  Pinned in `eager-collection-enumerability.test.ts`.
-- ~~`ListFrom(xs)` over a VALUELESS collection-typed symbol wraps the symbol as
-  a scalar~~ — CLOSED 2026-08-11, USER-RULED: inert. The `*From` scalar branch
-  now treats a collection-TYPED operand that is not a collection right now
-  (valueless symbol, unevaluated eager producer — `ListFrom(Divisors(n))` was
-  also scalar-wrapped) as UNRESOLVED and stays inert; genuine scalars still
-  contribute themselves (`ListFrom(5)` → `[5]`).
-  `canEnumerateCollectionOperands` mirrors the guard, so the facet answers
-  `false` without evaluating. `Dot` also adopted `canEnumerate` in this pass,
-  fixing a latent wrong-`false` facet on matrix·matrix (result typed `value`,
-  misread by the type fallthrough; unreachable through wrappers, which reject
-  `value` operands, but wrong at the API surface).
 - **An eager IMPURE collection source is evaluated several times**
   (pre-existing, measured 2026-08-09 during the above): counting handler
   invocations over a 5-element source, `Map(f, RandomShuffle(xs))` evaluates the
@@ -2135,33 +2047,6 @@ all demand-gated:
   the operand-shape gates even though the emission is a legal `vecN`. Fix = a
   dimensioned projection type — an interpreter-visible type-handler change,
   wants its own measured pass.
-- ~~CSE gate G1b still excludes PointList subtrees~~ — **LANDED 2026-08-01**:
-  built-in `compile` handlers are exempt (system-scope binding identity; design
-  amended in `2026-07-28-compile-cse-design.md` §5.2). Remaining CSE residue for
-  binder bodies (`Integrate` integrands) is the §11 emission wiring, no longer
-  the gate.
-- ~~CSE for user-function applications and named callbacks~~ — **LANDED in full
-  2026-08-03 (unreleased; definition bodies landed 2026-08-01 as item 120,
-  shipped 0.100.0).** Both compiler harvest routes now admit pure user-function
-  applications behind the transitive callee-body validation
-  (`admitPureUserFunctions`, design doc §5.2): a repeated pure call at the ROOT
-  of a compiled expression binds once, and a recursive body's repeated self-call
-  compiles to linear instead of exponential calls. A NAMED callback resolving to
-  a validated pure user-function literal no longer blocks eligibility — two
-  identical `Map(f, xs)` with a pure user `f` merge; a drawing `f` stays
-  un-merged (draw streams and call counts preserved). The measured pass that
-  gated the root flip: admission is inert on user-fn-free trees; per-callee
-  validation ≈ 0.02 ms, memoized per name per harvest; staleness is handled by
-  per-level re-derivation against current bindings at harvest time (post-compile
-  reassignment is the compile-wide artifact-snapshot policy). Callbacks naming
-  BUILT-IN operators (`Map(Sin, xs)`, `CountIf(xs, IsPrime)`) landed the same
-  day: such a name is eta-expanded into a shared emitted wrapper — which also
-  fixed an emission bug where it fell through to a free-variable read and the
-  artifact threw `_f is not a function` at run time — and is then admitted when
-  the operator is pure, is the engine's own definition by system-scope identity,
-  and has a fixed arity. Drawing (`Random`), variadic/optional-tail (`Add`,
-  `Ln`), shadowed and caller-overridden names stay opaque. See
-  `2026-07-28-compile-cse-design.md` §5.2/§11.
 - No corpus re-measure yet: how much of the 11 st / 36 mem + 2 st actually
   closed is the consumer's count to re-run — do not mark this bucket resolved on
   our numbers.
@@ -2254,15 +2139,6 @@ Known candidates, all currently defended as "documented and deliberate":
   — same static-type-assertion class as `Sin(L)` above.
 - The `Multiply` ≥2-arrayish carve-out and the complex-element deferral —
   preserved verbatim through the broadcast rework, never re-examined.
-- ~~**`Sqrt(a)` with `a := -2` folds to a real `NaN`, not the complex value**~~
-  — **RESOLVED 2026-07-31** by the Sqrt/Ln/Log dispatch rework: a PROVABLY
-  negative operand (literal or assigned) now routes through the complex helper
-  on both JS (`_SYS.csqrt` → `{re: 0, im: 1.414…}`) and GPU (`_gpu_csqrt`),
-  matching the interpreter; a free real symbol of unknown sign keeps the real
-  kernel (pinned in `compile-complex-result.test.ts`). The dispatch predicate
-  lives in the `isComplexValued` Sqrt/Ln/Log carve-out (`base-compiler.ts`) and
-  is mirrored by the three head emitters in each target, so parent and child
-  always agree on the value shape.
 
 **A‴. GPU invalid-source escapes — mostly closed 2026-07-30, three left.** The
 broadcast rework (item 112) plus a follow-up round closed the unary fan-out and
@@ -2291,11 +2167,7 @@ open.
 
 Reduction-family heads that still decline on GPU while JS and the interpreter
 compute a value — each needs its own lowering, all fail closed: `Sum([1,2,3])`,
-`Product([1,2,3])`, `LCM`, `GCD`, `Length`. ~~Also `Max([])`/`Min([])` decline
-in the empty-constructor guard where JS gives `NaN`~~ — already answered: they
-emit the target NaN (`(_gpu_nan())` / WGSL bitcast) on both GPU languages,
-pinned in `compile-gpu-extremum.test.ts` § "GPU Max/Min over an EMPTY
-collection" (verified 2026-08-02; this row was stale).
+`Product([1,2,3])`, `LCM`, `GCD`, `Length`.
 
 Still open, in rough priority:
 
@@ -2387,33 +2259,6 @@ digits, measured residual snap rate ~5e-5 on 2e6 random doubles). Docstring and
 test prose rewritten to state the RATE guarantee honestly (q cap ≈
 3e5·|v|^{-1/2}; ≤ ~1e-4 of arbitrary doubles can still snap by design).
 
-~~Residual the adversarial round PROVED unfixable at this layer~~ — **RESOLVED
-by the exact-provenance design, USER-APPROVED and LANDED 2026-08-03.** Evaluate
-handlers now receive `expression` in their options (the canonical node;
-`EvaluateHandlerOptions` in `types-definitions.ts`, threaded at both driver call
-sites in `boxed-function.ts`); `Power` forwards `expression.op2` as
-`rawExponent` into `pow()`, which prefers the exact rational — resolved through
-a symbol's binding when op2 is a symbol with a bound number literal — over the
-float reconstruction. All three legs now agree for exact rationals of ANY term
-size (`(-2)^{1000003/1000001}` real everywhere). A second adversarial round on
-the implementation then caught and fixed: parity decided on the narrowed
-`Number()` terms corrupted denominators > 2^53 (odd rounded to even — parity is
-now decided on the BIGINTS); the integer-ness test read the rounded double
-(`6000001/2000000` at precision 3 numericizes to exactly 3) instead of the raw
-reduced denominator (fixed; note the two paths coincide NUMERICALLY there —
-`cos(nπ) = (−1)^n` reproduces the integer power — so the observable is the TYPE,
-pinned); the `expression.ops` JSDoc overclaimed positional correspondence
-(holdMap flattens associative operators, unwraps `ReleaseHold`, drops operands —
-caveats now documented, plus the `lazy` exception) and the parallel
-handler-option type shapes in
-`types-expression.ts`/`boxed-operator-definition.ts` were unified onto the
-alias. Provenance residuals, PINNED as known-residual in
-`power-negative-base-branch.test.ts` (not silent): a lambda parameter, `Sum`
-body, `When`, or structural `Rational` exponent has no folded-literal provenance
-and keeps the reconstruction (complex past the cap) — extending those routes
-means exact-evaluating arbitrary op2 inside the hottest operator, deliberately
-not done.
-
 Residuals, recorded not fixed: (a) `_bignumComponent`'s `radical === 1` fast
 path (`exact-numeric-value.ts:284`) still numericizes an exact rational at
 ambient precision instead of nearest-double — the sibling radical branch
@@ -2440,11 +2285,6 @@ broader emission change with real snapshot risk.
 **Follow-ups from the 2026-07-30 review round** (each found while fixing
 something else; none is a regression):
 
-- ~~**A type/value disagreement at the source:** `Arcosh(a)` with `a := -2`
-  typed `finite_real` while `.N()` is complex.~~ — **RESOLVED as of
-  2026-07-31**: probes now give `finite_complex` (the assumptions/value
-  predicates reach the `boundedInverseTrigType` complex arm), consistent with
-  `.N()`.
 - **`Power`/`Root` still yield `NaN` where the interpreter returns a complex
   value.** This is the ratified `finite_number` policy, not a defect, but it is
   the same user-visible surprise the `realOnly` retirement removed for `Sqrt`.
@@ -2454,13 +2294,6 @@ something else; none is a regression):
   `gpu-target.ts` (~12 identical lines) because neither fixer could touch
   `base-compiler.ts`. `python-target.ts` very likely has the same `Sqrt`/`Ln`/
   `Log` split. Consolidate into `BaseCompiler` when fixing Python.
-- ~~**Evaluating a derivative can shadow the `D` operator for the engine's
-  lifetime**~~ — **STALE, probed 2026-08-03: no longer reproduces.** Four routes
-  probed clean on 0.100.2 (box-route `D(D·x², x).evaluate()`, parse-route
-  `\frac{d}{dx}(D x^2)`, numeric-use inference `D + 1`, and an explicit
-  `assign('D', 5)`): `D(x², x)` still evaluates to `2x` and compiles afterward
-  in every case. Closed by the 2026-07-27 bare-assign-over-a-builtin
-  scope-identity fix and/or the binder rounds; struck without a code change.
 - **GPU: a builtin whose scalar slot is MANDATORY is unchecked when no scalar is
   present.** `Refract(V3, W3, X3)` emits `refract(vec3, vec3, vec3)`, which no
   driver accepts — the positional gate only runs when a scalar IS present.
@@ -2521,60 +2354,6 @@ handoff, all verified by probe + full suite, zero snapshot churn):
 
 New residues recorded by that round:
 
-- ~~**`BoxedFunction.isFinite` is type-blind**~~ — **FIXED 2026-08-02,
-  measured.** The getter now consults the static type ONLY on the fallthrough
-  path that returned `undefined` (`this.type` is already generation-cached and
-  forced by the `isNumber` check at the getter's entry, so the consult is one
-  `isSubtype` call, not a new type computation). `Ln(0).isFinite` is `false`.
-  Measured: box-microloop canary 0.0196 → 0.0202 ms/iter (within noise), full
-  suite +0.9% wall, ZERO snapshot churn. Two deliberate non-changes: (a) ~~the
-  three Add/Multiply/Divide site patches are KEPT~~ — **RETIRED 2026-08-03**:
-  `BoxedSymbol` now decides both predicates from its declared type (`isInfinity`
-  type fallback mirroring `BoxedFunction`; `isFinite` gains the symmetric
-  `non_finite_number → false` arm beside its existing `finite_number → true`
-  one), so `x.isFinite === false` subsumes the
-  `type.matches('non_finite_number')` disjuncts at all three sites (Add's lives
-  in `arithmetic-add.ts` `addType`, not `library/arithmetic.ts`). Retirement was
-  evidence-based, not by inspection: all four disjunct evaluations were
-  instrumented to log any operand where the type half fired without the getter
-  half, and a full-suite run produced ZERO divergences (instrument proven live
-  by reverting the getter). Class sweep: BoxedNumber/BoxedSymbol/BoxedFunction
-  all decide; no other class can carry the type. Measured: zero churn, canary
-  4–8% FASTER (three fewer `type.matches()` calls per operand). Residual
-  flagged: `isNaN` stays `undefined` for type-only non-finite expressions on
-  both classes though `non_finite_number` provably excludes NaN — symmetric,
-  pre-existing, possible follow-up. (b) ~~an `isInfinity` companion trialled and
-  DROPPED~~ — **RULED 2026-08-03 and LANDED**: "a provably non-finite REAL
-  factor is implicitly nonzero — proven signs are required only of the finite
-  factors." The Multiply tight branch exempts provably non-finite factors from
-  the sgn obligation (±∞ ≠ 0 is a theorem; `isReal === true` stays required of
-  EVERY factor — structural `isFinite === false` does not imply real, viz.
-  ComplexInfinity, so ∞·i keeps the widen); Divide gets the mirrored branch
-  (non-finite real numerator over a provably FINITE (`isFinite === true`), real,
-  proven-nonzero-sign denominator → `non_finite_number`; ∞/∞, ∞/i, x/∞,
-  unknown-finiteness denominators keep `number`). The `isInfinity` companion
-  landed with it (type consult on the undefined path; the 2026-08-02 `isFinite`
-  fallthrough consult became dead and was removed — `isInfinity` is now the
-  type-consult site). Pin rewritten deliberately (`non-finite-typing.test.ts` §
-  "implicitly nonzero", + negative controls). Measured: zero snapshot churn,
-  canary within noise, compiled emissions for `k·Ln(0)` byte-identical on
-  JS/GLSL. Ripple (correct, pinned): the companion arms two pre-existing
-  canonicalization folds for type-provable infinities — `Ln(0)/π` canonicalizes
-  to `Ln(0)` and `2/Ln(0)` to `0` — so the Divide tight branch is reachable
-  mainly on the structural route (canonical shapes fold first). A review flagged
-  those folds' guards (`x/∞ → 0` with unknown-finiteness `x`; `∞/a` accepting
-  `isFinite === undefined` denominators) as unsound — REFUTED: that is the
-  documented generic-point convention (same family as `x/x → 1`; the `∞/√π`
-  FresnelC comment on the fold records the guard choice deliberately), and
-  `x/PositiveInfinity → 0` already behaved this way for literal infinities; a
-  `finite/±∞ → finite` type claim remains a possible future tightening (noted in
-  the handler). Residue: assumption-derived signs (`assume(q > 0)`) leave
-  `isFinite === undefined`, so such denominators reach the tight branch only via
-  the fold — existing sign-vs-finiteness asymmetry, untouched. Mirror-image
-  residue (deliberately untouched, much wider blast radius): `BoxedFunction` has
-  no `finite_number → true` fallback, so `Sin(x)` types `finite_number` yet
-  reports `isFinite === undefined`, while `BoxedSymbol` DOES have that fallback
-  — the two classes are asymmetric.
 - **`Norm(scalar, 2)` on Python now declines** (was a runtime `ValueError`) —
   intentional side effect, flagged.
 - **Multi-splice templates × impure operands — 7 sites fixed 2026-07-31, audit
@@ -2686,55 +2465,6 @@ Worth a `finally` audit rather than a bug hunt.
 
 **B. Plain missing codegen — no design needed, small.** Good first-session
 material if someone wants a quick win.
-
-- ~~**`Repeat` on javascript** (1/1)~~ — **DONE 2026-08-02.** IIFE-parameter
-  lowering next to `Fill`/`Tabulate`; the value is bound ONCE (an impure value
-  draws once and repeats — interpreter parity, including the non-obvious edge
-  that the interpreter consumes the draw even at count ≤ 0, pinned). Runtime
-  count is rounded, non-finite count → `[]` (the `Chunk`-style finite guard,
-  chosen over `Tabulate`'s unguarded shape so `Repeat(x, ∞)` cannot attempt an
-  unbounded allocation). 1-arg infinite form keeps declining (D6), and a
-  STATICALLY non-finite count declines too (review round: the interpreter stays
-  inert on `Repeat(7, ∞)`, so the runtime guard's `[]` would be a valid-looking
-  value with wrong semantics; the runtime-valued non-finite case keeps the `[]`
-  projection, documented). Tests in `compile.test.ts` +
-  `random-compile.test.ts`.
-- ~~**`Choose` (`nCr`) on glsl** (4 st)~~ — **DONE 2026-08-02** on GLSL AND
-  WGSL: literal k ∈ 0..8 unrolls the falling-factorial form (`Binomial(x+1, 2)`
-  → `(((x + 1.0) * ((x + 1.0) - 1.0)) / 2.0)`), which matches the interpreter's
-  GENERALIZED semantics (0 mismatches vs `.N()` over k 1..8 × 15 sample n incl.
-  5.5, −1, −1.5); `Choose` aliases to the same handler like the JS target.
-  Operand bound via `gpuOperandOnce` when spliced ≥ 2× (impure draws once);
-  `Binomial(Random(), 0)` DECLINES — probed: the interpreter consumes a draw
-  there, and folding to `1.0` would skip it and shift later draws.
-  Non-literal/negative/non-integer k, k > 8, complex operand: D6. A statically
-  non-finite first operand also declines (review round: interpreter gives NaN
-  for `Binomial(∞, k)` — even k = 0 — and stays inert on NaN input, so the `1.0`
-  fold / unrolled `∞` were wrong; a RUNTIME-∞ binding still takes the arithmetic
-  form, the documented static-assert divergence class). Report-only finding: the
-  JS target's `_SYS.binomial` (Pascal table, `expand.ts:36`) THROWS a raw
-  TypeError for the non-integer/negative n the interpreter handles
-  (`Binomial(5.5, 2)` interp 12.375, compiled JS throws) — the GPU
-  falling-factorial form would fix it for literal k; not done, separate item.
-- ~~**Non-finite literals on GPU** (5 st)~~ — **DONE 2026-07-30.** One spelling
-  now serves both a literal and a masked `When`/`Which` branch
-  (`gpuNonFiniteLiteral` in `constant-folding.ts`; `gpuNaN` delegates to it), so
-  they cannot drift apart. GLSL gets `_gpu_inf()` alongside `_gpu_nan()` —
-  `intBitsToFloat(0x7F800000)` behind an overridable preamble helper, emitted
-  only when referenced; WGSL inlines the bitcast. **No `1.0 / 0.0` anywhere**,
-  pinned by a test, because that is the form fast-math folds. Original note kept
-  for the reasoning: **the mechanism already existed.** `gpuNaN()`
-  (`gpu-target.ts` ~356) emits `_gpu_nan()` on GLSL (an overridable preamble
-  helper) and `bitcast<f32>(0x7fc00000u)` on WGSL, and is already used for
-  masked `When`/`Which` branches. The literal path cannot reach it only because
-  `formatGPUNumber(n: number)` takes no target and so cannot know the language —
-  it throws instead (two sites: `gpu-target.ts` ~4715 and `constant-folding.ts`
-  ~29). Make the formatter target-aware and add the infinity counterpart
-  (`uintBitsToFloat(0x7F800000u)` / WGSL bitcast; there is no `gpuInf` today).
-  _Blocked on the in-flight GPU work; then in progress._ Note when doing it: the
-  fast-math caveat is real — ANGLE→Metal fast-math already destroys compensated
-  arithmetic in our high-precision work — so route through the overridable
-  helper rather than inlining `1.0/0.0`, which a driver is licensed to fold.
 
 **C. Correct fail-closed — NOT work.** The consumer's provenance rule is "first
 match wins, everything else is CE", so its catch-all sweeps deliberate refusals
@@ -3337,45 +3067,9 @@ arm for the operators the preservation rule makes mandatory; the entries below
 are the ones deliberately left out, each with the reason it is a judgement call
 rather than a forced consequence.
 
-- ~~**String arms for `RandomShuffle`, `RandomSample` and `DeleteAt`**~~ —
-  CLOSED 2026-08-16 (Phase 2). All three produce a permutation or a subset of
-  the source's own elements, so by the preservation rule ("subset or reordering
-  of the input's own characters ⇒ string in, string out") they belong with
-  `Reverse` and `Take`. Each now carries a `(T) -> T where T: string` arm ahead
-  of its generic one: `Type(RandomShuffle("abc"))` is `"string"` and
-  `DeleteAt("abcdef", 2)` is `"acdef"`. The static-result-type break has its own
-  CHANGELOG note.
-
-- ~~**Inner strings for the chunking family**~~ — CLOSED 2026-08-16, ruled
-  **(b)**: over a string source `Chunk`, `Partition`, `ChunkBy`,
-  `SlidingWindow`, `Permutations` and `Combinations` return `list<string>`, each
-  inner element being a contiguous run (or a reordering, or a subset) of the
-  source's own characters — exactly the condition under which every other
-  operator preserves the string kind. `Chunk("abcdef", 2)` is now
-  `["abc","def"]` rather than `[["a","b","c"],["d","e","f"]]`, and
-  `Permutations("ab")` is `["ab","ba"]`. Five of the six carry a leading
-  `((S, …) -> list<string> where S: string)` overload arm; `Partition` uses a
-  `type` handler instead, because a second arm would make its contextual
-  `callback<S>` slot ambiguous and silently disable the Design D stamp that
-  annotates an inline predicate's parameter. `Tally` was ruled the other way in
-  the same decision and keeps `character` values (below). The static-result-type
-  break has its own CHANGELOG note.
-
-- ~~**`Tally`'s values half**~~ — CLOSED 2026-08-16 as part of the same ruling:
-  `Tally(s)` keeps `tuple<list<character>, list<integer>>`. The distinct values
-  it returns are the collection's _elements_, each paired with a count, not runs
-  of them, so the string-preservation rule does not apply and the element type
-  is the honest answer. `Tally("banana")` is `(["b","a","n"], [1,3,2])`.
-
 - **`RandomChoice`.** It draws _with_ replacement, so its result is a multiset
   over the source's own elements — arguably element-preserving, arguably
   list-out. Needs a ruling before it can be classified.
-
-- ~~`Reshape` on a string / `Differences("abc")`~~ — CLOSED 2026-08-16:
-  `Reshape`'s `type` handler now reports the declared `value` (not `nothing`)
-  when it declines, and `Differences` refuses a source whose element type is
-  provably non-numeric with one `incompatible-type` error at the operand instead
-  of building error elements.
 
 The Phase 2 work items themselves — the `Join`/`StringJoin` role split, the
 generic contiguous-subsequence family (`ContainsSequence`, `RangeOf`,
