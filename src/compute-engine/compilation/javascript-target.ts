@@ -7719,6 +7719,11 @@ function compileBound(
  * those terms is unobservable; a term that splices caller-supplied source
  * keeps the statement form without the exits.
  *
+ * The SCALAR loop arm carries the same exit, under the same gate, once per
+ * iteration rather than once per term. The complex arms of both forms are
+ * excluded on purpose: a complex accumulator with a finite imaginary part does
+ * not absorb, so exiting on `acc !== acc` there could change the answer.
+ *
  * Multi-index forms — `Sum(body, Limits(i,…), Limits(j,…), …)` — are compiled
  * as nested single-index sums (`Σ_i Σ_j body`), so every indexing-set clause is
  * honored.
@@ -9014,7 +9019,31 @@ function emitSumProduct(
     return `(() => { let ${acc} = { re: 1, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guard}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } return ${acc}; })()`;
   }
 
-  return `(() => { let ${acc} = ${identity}; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { ${acc} ${op}= ${bodyCode}; ${index}++; } return ${acc}; })()`;
+  // The scalar loop's NaN exit, the same one the unrolled statement form and
+  // the element-wise fold carry: NaN absorbs both `+` and `*`, so once the
+  // accumulator is NaN no remaining iteration can change the answer and
+  // running them is pure cost — unbounded cost, since this arm is reached
+  // precisely when the trip count is large or symbolic. Gated exactly as the
+  // unroll arm's exit is: an iteration that splices caller-supplied source can
+  // count its own calls or mutate shared state, so it has to run as many times
+  // as the unguarded loop ran it. The trees an iteration emits are the body
+  // plus the bounds of the nested clauses it loops over (evaluated per outer
+  // iteration); this clause's own bounds are computed once, outside the loop.
+  const loopExit = BaseCompiler.isEmissionSkippable(
+    [
+      body,
+      ...rest.flatMap((c) => {
+        const l = extractLimits(c);
+        return [l.lowerExpr, l.upperExpr];
+      }),
+    ],
+    [index, ...rest.map((c) => extractLimits(c).index)],
+    target
+  )
+    ? `if (${acc} !== ${acc}) return NaN; `
+    : '';
+
+  return `(() => { let ${acc} = ${identity}; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { ${acc} ${op}= ${bodyCode}; ${loopExit}${index}++; } return ${acc}; })()`;
 }
 
 /**

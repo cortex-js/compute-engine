@@ -54,7 +54,7 @@ import {
   isFunction,
 } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
-import { symbolAtSite } from './binding-sites.js';
+import { symbolAtSite, scopeForRebuild } from './binding-sites.js';
 import { extractIntervalBounds } from './inequality-bounds.js';
 import { labelFor } from './explain-labels.js';
 
@@ -1006,9 +1006,25 @@ export abstract class _BoxedExpression implements Expression {
     )
       return fn(this);
 
+    // Rebuilt onto the node's OWN scope — the same rule `subs()` follows, and
+    // for the same reason: a scoped node given a fresh scope is parented at
+    // the rewriting site, so a binder nested inside it keeps a `parent`
+    // pointing at the original outer scope while this node advertises a
+    // different one. The chain from the inner body then no longer reaches the
+    // outer binder's index, and an index colliding with a library constant
+    // resolves to the CONSTANT (`docs/SCOPING-MODEL.md`, "Rebuilding a scoped
+    // node"). `scopeForRebuild` withholds the reuse when `fn` renamed the
+    // binding site, which would otherwise declare the new name into the
+    // original expression's live scope.
     return fn(
       this.engine.function(this.operator, ops, {
         form: structuralForm ? 'structural' : canonical ? 'canonical' : 'raw',
+        scope: scopeForRebuild(
+          this.localScope,
+          this.engine,
+          this.operator,
+          ops
+        ),
       })
     );
   }

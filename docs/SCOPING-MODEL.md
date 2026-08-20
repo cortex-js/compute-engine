@@ -30,6 +30,29 @@ Shielding is implemented by a valueless shadow binding with the original type,
 not by renaming or by head-specific substitution. Binding tombstones prevent a
 lookup from falling through to a shadowed outer definition.
 
+## Rebuilding a scoped node
+
+Any pass that rebuilds a node owning a local scope — `.subs()`, the
+`rewriteWithBinders` walk, a canonical handler reshaping its operands — must
+rebuild it onto THAT scope, never onto a fresh one. A fresh scope is parented
+at the rebuilding site's ambient scope, so a binder nested inside the rebuilt
+one keeps a `parent` pointing at the original outer scope while the rebuilt
+node advertises a different one. The chain from the inner body then no longer
+reaches the outer binder's index, and an index whose name collides with a
+library constant resolves to the CONSTANT — `i` to the imaginary unit, `e` to
+Euler's number. The failure is silent: the rebuilt expression reports
+`isCanonical` and serializes identically to a directly-built one, and only the
+OUTER binder's name is affected, so an index named `p` disguises a tree an
+index named `i` gets wrong.
+
+A pass that runs BEFORE any scope exists — the partial `CanonicalForm[]`
+pipeline — cannot preserve a scope, so it owes the bound variables the
+complementary guarantee: it must not resolve them at all. The names come from
+the operator definition's binding sites (`declaredBinderNames`,
+`binding-sites.ts`), the only source available to a tree that has no
+`localScope` yet. Resolving them instead rewrote `Sum`'s `i` to the imaginary
+unit, binding site included.
+
 ## Canonical and runtime scopes
 
 Canonicalization may establish identities and types, but runtime evaluation

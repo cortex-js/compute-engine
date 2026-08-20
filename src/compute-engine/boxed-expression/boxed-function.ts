@@ -68,6 +68,7 @@ import {
   isContinuationOperand,
   isFoldBarrierProduct,
 } from './type-guards.js';
+import { scopeForRebuild } from './binding-sites.js';
 import {
   armHasValueParam,
   instantiateArms,
@@ -1047,9 +1048,9 @@ export class BoxedFunction
   }
 
   /**
-   * Note: the result is bound to the current scope, not the scope of the
-   * original expression.
-   * <!-- This may or may not be desirable -->
+   * Note: the result's FREE symbols are bound in the current scope, not in the
+   * scope of the original expression. A node that owns a local scope keeps
+   * that scope — see the rebuild at the end of this method for why.
    */
   subs(
     sub: Substitution,
@@ -1109,7 +1110,27 @@ export class BoxedFunction
     )
       return this;
 
-    return this.engine.function(this._operator, ops, { form });
+    // A scoped node is rebuilt onto its OWN scope, never a fresh one. Minting
+    // a new scope parents it at the substitution site's ambient scope, so an
+    // inner binder's scope goes on pointing at the ORIGINAL outer scope while
+    // the rebuilt outer node advertises a different one: the chain from the
+    // inner body no longer reaches the outer binder's index, and an index
+    // whose name collides with a library constant (`i`, `e`) then resolves to
+    // the CONSTANT — `Σ_i Σ_j x·i` substituted at `x := 1` answered `4i`, the
+    // imaginary unit, where the same tree built directly answers `6`. Same
+    // rule, and the same reason, as the scoped rebuild in
+    // `rewriteWithBinders` (`binders.ts`). `scopeForRebuild` withholds the
+    // reuse from a substitution that RENAMES the binding site, which would
+    // otherwise declare the new name into the original expression's live scope.
+    return this.engine.function(this._operator, ops, {
+      form,
+      scope: scopeForRebuild(
+        this._localScope,
+        this.engine,
+        this._operator,
+        ops
+      ),
+    });
   }
 
   replace(

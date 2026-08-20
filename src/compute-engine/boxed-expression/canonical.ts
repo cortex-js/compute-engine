@@ -12,6 +12,7 @@ import { canonicalAdd } from './arithmetic-add.js';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div.js';
 import { canonicalPower } from './arithmetic-power.js';
 import { canonicalOrder } from './order.js';
+import { declaredBinders, binderShadowAt } from './binding-sites.js';
 import { asBigint } from './numerics.js';
 import { isOperatorDef, isImaginaryUnit } from './utils.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
@@ -51,6 +52,14 @@ export function canonicalForm(
   return expr.engine._inScope(scope, () =>
     expr.engine._resolveOnly(() => applyForms(expr, formList))
   );
+}
+
+/**
+ * `expr`'s symbol name, or `''` for anything that is not a symbol — a sentinel
+ * no binder can bind, so a shadow-set membership test on it is always false.
+ */
+function symbolNameOf(expr: Expression): string {
+  return isSymbol(expr) ? expr.symbol : '';
 }
 
 function applyForms(
@@ -157,20 +166,34 @@ function flattenForm(expr: Expression): Expression {
   return ce._fn(expr.operator, newOps, { canonical: false });
 }
 
-function invisibleOperatorForm(expr: Expression): Expression {
+function invisibleOperatorForm(
+  expr: Expression,
+  shadowed?: ReadonlySet<string>
+): Expression {
   if (!isFunction(expr)) return expr;
+
+  const binders = declaredBinders(expr);
 
   if (expr.operator === 'InvisibleOperator') {
     return (
-      canonicalInvisibleOperator(expr.ops.map(invisibleOperatorForm), {
-        engine: expr.engine,
-      }) ?? expr
+      // `2i` is the parse shape of an implicit product, and folding it to a
+      // complex number reads the `i`: a bound index named `i` must not take
+      // that path, exactly as in `symbolForm`/`numberForm`. `InvisibleOperator`
+      // binds nothing itself, so the set it passes on is its caller's.
+      canonicalInvisibleOperator(
+        expr.ops.map((op, m) =>
+          invisibleOperatorForm(op, binderShadowAt(binders, m, shadowed))
+        ),
+        { engine: expr.engine, shadowed }
+      ) ?? expr
     );
   }
 
   return expr.engine._fn(
     expr.operator,
-    [...expr.ops].map(invisibleOperatorForm)
+    [...expr.ops].map((op, m) =>
+      invisibleOperatorForm(op, binderShadowAt(binders, m, shadowed))
+    )
   );
 }
 
@@ -203,23 +226,42 @@ function invisibleOperatorForm(expr: Expression): Expression {
  * -->
  *
  */
-function numberForm(expr: Expression): Expression {
+function numberForm(
+  expr: Expression,
+  shadowed?: ReadonlySet<string>
+): Expression {
   //(↓note: this is redundant, since numbers are _always_ boxed as canonical (v27.0), but preserving
   //for explicitness in case things change)
   if (isNumber(expr)) return expr.canonical;
 
   // Ensure that all representations of the imaginary unit are represented
   // with the BoxedNumber variant: this makes further simplifications more
-  // straightforward.
-  if (isImaginaryUnit(expr)) return expr.engine.I;
+  // straightforward. A symbol a binder BINDS is not the imaginary unit,
+  // however it is spelled — `Sum(2i, Limits(i, 1, 3))` sums over an index that
+  // happens to be named `i`, and rewriting it to `Complex(0, 1)` destroys both
+  // the binding site and every use (`symbolForm` below carries the same guard,
+  // and the same reasoning).
+  if (!shadowed?.has(symbolNameOf(expr)) && isImaginaryUnit(expr))
+    return expr.engine.I;
 
   // Only deal with function expressions henceforth
   if (!isFunction(expr)) return expr;
 
   const { engine: ce } = expr;
 
+  const binders = declaredBinders(expr);
+  // The shadow set in force at operand 0 — what the `Negate` arm below asks
+  // about `ops[0]`. A clause-local name can be invisible at one operand and
+  // bound at the next, so the set is per operand, not per node.
+  const firstOpShadow = binderShadowAt(binders, 0, shadowed);
+
   // Recursively visit all sub-expressions
-  const ops = expr.ops.map(numberForm);
+  const ops = expr.ops.map((op, m) =>
+    numberForm(
+      op,
+      m === 0 ? firstOpShadow : binderShadowAt(binders, m, shadowed)
+    )
+  );
   let { operator: name } = expr;
 
   //
@@ -281,8 +323,10 @@ function numberForm(expr: Expression): Expression {
     }
 
     // @consider: getImaginaryFactor/InvisibleOperator: i.e. account for '-2i', & so on.
-    // Capture -ve Imaginary
-    if (isImaginaryUnit(op1)) return ce.number(ce.complex(0, -1));
+    // Capture -ve Imaginary — unless the operand is a bound variable that is
+    // merely NAMED `i` (see the head of this function).
+    if (!firstOpShadow?.has(symbolNameOf(op1)) && isImaginaryUnit(op1))
+      return ce.number(ce.complex(0, -1));
   }
 
   // Re-box only if some transformation has applied
@@ -352,13 +396,32 @@ function powerForm(expr: Expression): Expression {
  * @param expr
  * @returns
  */
-function symbolForm(expr: Expression): Expression {
-  if (isSymbol(expr)) return expr.canonical;
+function symbolForm(
+  expr: Expression,
+  shadowed?: ReadonlySet<string>
+): Expression {
+  // A BOUND variable is not a reference to resolve. Canonicalizing it here
+  // resolves it against the ambient scope — the binder's own scope does not
+  // exist yet on this raw tree — so an index named after a library constant
+  // came back as that constant: `Sum(2i, Limits(i, 1, 3))` with any partial
+  // form requested became `Sum(2·Complex(0,1), Limits(Complex(0,1), 1, 3))`,
+  // at the binding site as well as in the body. The names come from the
+  // operator DEFINITION's binding sites, the only source a tree with no
+  // `localScope` has, and they are applied per operand so a CLAUSE-LOCAL name
+  // shadows only where it is actually in scope (`declaredBinders` /
+  // `binderShadowAt`, `binding-sites.ts`).
+  if (isSymbol(expr)) return shadowed?.has(expr.symbol) ? expr : expr.canonical;
   if (!isFunction(expr)) return expr;
 
-  return expr.engine._fn(expr.operator, expr.ops.map(symbolForm), {
-    canonical: false,
-  });
+  const binders = declaredBinders(expr);
+
+  return expr.engine._fn(
+    expr.operator,
+    expr.ops.map((op, m) =>
+      symbolForm(op, binderShadowAt(binders, m, shadowed))
+    ),
+    { canonical: false }
+  );
 }
 
 /**

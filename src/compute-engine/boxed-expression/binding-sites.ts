@@ -3,10 +3,14 @@ import type {
   BindingSite,
   BindingSiteSelector,
   Expression,
+  Scope,
 } from '../global-types.js';
 
 import { isFunction, isSymbol } from './type-guards.js';
-import { functionLiteralParameterName } from './function-literal.js';
+import {
+  functionLiteralParameterName,
+  functionLiteralParameterNames,
+} from './function-literal.js';
 
 /**
  * The prebuilt binding-site selectors — the vocabulary an operator definition
@@ -208,6 +212,192 @@ export function lambdaParamSites(op: number): BindingSiteSelector {
     return sites.length === 0 ? NO_SITES : sites;
   };
 }
+
+/**
+ * What a node binds, as each name plus the operand range it is visible in.
+ *
+ * `visibleFrom` maps a name to the operand index it becomes visible at (`0`
+ * meaning the whole node), and `firstClause` is the index of the earliest
+ * CLAUSE-LOCAL site. Together they encode the clause ordering `bindBindingSites`
+ * enforces after canonicalization (`box.ts`, step 6): a clause-local name is
+ * bound in its own clause and the ones after it, plus every operand BEFORE the
+ * first clause — the body, which sits inside all of them. An earlier clause may
+ * therefore mention a later clause's name as an ordinary ambient symbol, and
+ * `Comprehension(…, Element(i, [j, j+1]), Element(j, …))` relies on it: that
+ * `j` is the enclosing one, not the comprehension's.
+ */
+export interface DeclaredBinders {
+  readonly visibleFrom: ReadonlyMap<string, number>;
+  readonly firstClause: number;
+}
+
+/**
+ * What `expr` binds, read from its operator DEFINITION rather than from a
+ * `localScope`.
+ *
+ * `boundVariableNames` (`binders.ts`) answers the same question off the
+ * `localScope` a canonicalized binder carries, and is the right source
+ * everywhere a bound tree is walked. A RAW tree has no such scope yet, so a
+ * pass running before (or instead of) canonicalization — the partial
+ * `CanonicalForm[]` pipeline in `canonical.ts` — has only the definition to go
+ * on. Without it, such a pass rewrites a binder's own index: `Sum`'s `i` came
+ * back as the imaginary unit, at the binding site and in the body alike.
+ *
+ * A `Function` literal is definition-less and is handled by its parameter list,
+ * matching `boundVariableNames`; its parameters have no clause ordering, so
+ * they are visible throughout. Returns `undefined` for a node that binds
+ * nothing, which is the overwhelming majority.
+ */
+export function declaredBinders(expr: Expression): DeclaredBinders | undefined {
+  if (!isFunction(expr)) return undefined;
+
+  const visibleFrom = new Map<string, number>();
+
+  if (expr.operator === 'Function') {
+    // The PLURAL helper: a destructuring parameter (`((p, q)) => …`) binds one
+    // name per pattern leaf, and a walk that missed them would treat a body
+    // occurrence of `p` as free.
+    for (let i = 1; i < expr.nops; i++)
+      for (const n of functionLiteralParameterNames(expr.ops[i]))
+        visibleFrom.set(n, 0);
+    return visibleFrom.size === 0
+      ? undefined
+      : { visibleFrom, firstClause: Number.POSITIVE_INFINITY };
+  }
+
+  const sites = bindingSiteSelectorOf(expr);
+  if (sites === undefined) return undefined;
+
+  let firstClause = Number.POSITIVE_INFINITY;
+  // 'pre' — the sites knowable before the canonical handler reshapes the
+  // operands, which is the only phase a raw tree can answer for.
+  for (const site of sites(expr.ops, 'pre')) {
+    const sym = symbolAtSite(expr.ops, site.path);
+    if (sym === undefined) continue;
+    const from = site.clauseLocal ? site.path[0] : 0;
+    if (site.clauseLocal) firstClause = Math.min(firstClause, site.path[0]);
+    visibleFrom.set(
+      sym.symbol,
+      Math.min(visibleFrom.get(sym.symbol) ?? from, from)
+    );
+  }
+  return visibleFrom.size === 0 ? undefined : { visibleFrom, firstClause };
+}
+
+/**
+ * `outer` extended with the names `binders` makes visible at operand
+ * `operandIndex` — the shadow set a walk descending into that operand must
+ * carry.
+ *
+ * Returns `outer` itself when the operand sees no new name, so an untouched
+ * subtree keeps walking with the caller's set rather than a fresh copy.
+ */
+export function binderShadowAt(
+  binders: DeclaredBinders | undefined,
+  operandIndex: number,
+  outer: ReadonlySet<string> | undefined
+): ReadonlySet<string> | undefined {
+  if (binders === undefined) return outer;
+  // An operand before the first clause is the body: it is inside every clause,
+  // so it sees every binding.
+  const limit =
+    operandIndex < binders.firstClause
+      ? Number.POSITIVE_INFINITY
+      : operandIndex;
+  let visible: Set<string> | undefined;
+  for (const [name, from] of binders.visibleFrom) {
+    if (from > limit || outer?.has(name)) continue;
+    visible ??= new Set(outer);
+    visible.add(name);
+  }
+  return visible ?? outer;
+}
+
+/**
+ * The names an operand list would bind under `operator`, ignoring clause
+ * visibility — the flat question "which symbols does rebuilding this node
+ * declare?", asked by a rewrite that must decide whether reusing the receiver's
+ * scope is safe (`scopeForRebuild`, `boxed-function.ts`).
+ */
+export function declaredBinderNamesOf(
+  engine: Expression['engine'],
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): readonly string[] {
+  if (operator === 'Function') {
+    const names: string[] = [];
+    for (let i = 1; i < ops.length; i++)
+      names.push(...functionLiteralParameterNames(ops[i]));
+    return names.length === 0 ? NO_NAMES : names;
+  }
+
+  // Inline operator-def check: importing `isOperatorDef` from `utils.ts` would
+  // break this module's leaf tier (see the header note).
+  const def = engine.lookupDefinition(operator);
+  const sites =
+    def !== undefined && 'operator' in def
+      ? def.operator.bindingSites
+      : undefined;
+  if (sites === undefined) return NO_NAMES;
+
+  const names: string[] = [];
+  for (const site of sites(ops, 'pre')) {
+    const sym = symbolAtSite(ops, site.path);
+    if (sym !== undefined) names.push(sym.symbol);
+  }
+  return names.length === 0 ? NO_NAMES : names;
+}
+
+/**
+ * The scope a rewrite should rebuild `operator(ops)` onto, given the scope the
+ * node being rewritten owned.
+ *
+ * Normally that is the SAME scope object, and it has to be: minting a fresh
+ * one parents it at the rewriting site, so a binder nested inside keeps a
+ * `parent` pointing at the original outer scope while the rebuilt node
+ * advertises a different one — the chain from the inner body then no longer
+ * reaches the outer binder's index (`docs/SCOPING-MODEL.md`, "Rebuilding a
+ * scoped node").
+ *
+ * The exception is a rewrite that RENAMES the binding site itself. Reuse is
+ * safe only because the scope already binds every name the rebuilt node
+ * declares, so canonicalization adds nothing to it; a rename breaks that.
+ * `.subs()`, `.map()` and `.replace()` are general-purpose and rewrite the
+ * binding site like any other operand (`sum.subs({ i: 'k' })` is a rename), and
+ * `canonicalizeBinder` declares an unknown site name INTO the scope it is
+ * handed — which would be the original expression's own scope, still live and
+ * still reachable by its holder. So a rename gets a fresh scope: the rebuilt
+ * node is self-consistent and the original is left untouched.
+ *
+ * This is the one guarantee the `rewriteWithBinders` precedent gets for free —
+ * its visitor contract returns a shadowed occurrence unchanged, so its rebuilt
+ * operands can never rename a site.
+ */
+export function scopeForRebuild(
+  scope: Scope | undefined,
+  engine: Expression['engine'],
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): Scope | undefined {
+  if (scope === undefined) return undefined;
+  for (const name of declaredBinderNamesOf(engine, operator, ops))
+    if (!scope.bindings.has(name)) return undefined;
+  return scope;
+}
+
+/** The binding-site selector `expr`'s operator declares, if any. */
+function bindingSiteSelectorOf(
+  expr: Expression & { operator: string }
+): BindingSiteSelector | undefined {
+  // Inline operator-def check: importing `isOperatorDef` from `utils.ts` would
+  // break this module's leaf tier (see the header note).
+  const def = expr.engine.lookupDefinition(expr.operator);
+  return def !== undefined && 'operator' in def
+    ? def.operator.bindingSites
+    : undefined;
+}
+
+const NO_NAMES: readonly string[] = [];
 
 /**
  * The symbol a {@link BindingSite}'s `path` points at, or `undefined` if the

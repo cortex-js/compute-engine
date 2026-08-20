@@ -1614,7 +1614,11 @@ export interface Expression {
    * using `this.subs()` is more efficient and simpler, but limited
    * to replacing symbols.
    *
-   * The result is bound to the current scope, not to `this.scope`.
+   * The free symbols of the result are bound in the CURRENT scope, not in the
+   * scope the receiver was built in. A node that owns a local scope keeps
+   * that scope, so a binder's bound variables go on denoting the binder's own
+   * bindings — including for a binder nested inside another one, whose scope
+   * chain would otherwise no longer reach the outer binder's index.
    *
    * If `options.canonical` is not set, the result is canonical if `this`
    * is canonical.

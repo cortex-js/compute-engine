@@ -93,6 +93,26 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Cross-term CSE could partition a region by index-dependence (OPEN, design note — deferred from the `Sum` unroll round, 2026-08-19)
+
+A `Sum`/`Product` with compile-time-constant bounds and at most 100 terms
+unrolls into a flat operator chain (`UNROLL_LIMIT`,
+`compilation/javascript-target.ts`). The unroll arm opens a FRESH CSE region
+per term by design: the same body nodes are compiled once per index value, so
+a node-keyed reuse across terms would emit term 1's temporary for every later
+term — silent wrong values. Hoisting an index-independent subexpression out of
+the terms is therefore a separate, deliberately narrow mechanism, and today it
+covers COLLECTION-valued subexpressions only (`hoistLoopInvariants`, gated by
+the CSE admissibility predicate; pinned by
+`test/compute-engine/compile-sum-unroll-guards.test.ts`).
+
+Nothing is known to be wrong with that. This entry records the shape of the
+principled fix should more hoist sites of this kind appear: partition a
+region's candidate set by index-dependence inside `compilation/cse.ts`, rather
+than adding further local hoists next to the collection one. Doing that
+speculatively is not worth it — the narrow mechanism already covers the
+reported case, so this waits for a second witness.
+
 ### A product of two points could name its alternatives (OPEN, diagnostics — consumer feedback 2026-08-19)
 
 `Multiply` of two tuples is correctly rejected (`tuple · tuple` has no
@@ -2183,7 +2203,12 @@ from `boxFunctionInternal` (`boxed-expression/box.ts`). So
 
 Thresholds measured by bisection AFTER the same round's frame-headroom work in
 `box.ts` (the `RAW_OPERAND` shortcut, which skips five frames per operand on the
-recursive boxing path): **385 terms canonical, 749 terms raw**. The raw path is
+recursive boxing path): 385 terms canonical, 749 terms raw. **Re-bisected
+2026-08-19: 507 canonical, 1874 raw** — both improved without anyone targeting
+this entry (the raw path by ~2.5x), so intervening frame-budget work moved
+them. The defect itself is unchanged: the chain still overflows, just later.
+Re-measure before quoting a threshold; these numbers drift with unrelated
+stack-depth changes. The raw path is
 where the headroom landed — it was about 600 before — while the canonical path
 is essentially unmoved, so the shape a consumer actually hits (`ce.parse`
 defaults to canonical) is no better than it was. The headroom work reduced
@@ -6326,25 +6351,24 @@ generic contiguous-subsequence family (`ContainsSequence`, `RangeOf`,
 operations, `StringCompare` and `NumberFrom` — are specified in
 `docs/STRING_ROADMAP.md` and are tracked there, not duplicated here.
 
-### `DigitsFrom` ignores an integer `base` argument (found 2026-08-16)
+### `DigitsFrom` ignored an integer `base` argument (FIXED — entry was stale; re-probed 2026-08-19)
 
-`DigitsFrom(s, base)` is declared `(string, (string|integer)?) -> integer`, but
-its handler resolves the base with
-`(isString(op2) ? op2.string : undefined) ?? sym(op2) ?? 10`
-(`src/compute-engine/library/core.ts`, in the `DigitsFrom` evaluate handler).
-For an integer base neither branch matches — `isString` is false and a number
-has no symbol name — so the fallback `10` is always used:
+`DigitsFrom(s, base)` resolved its base with a chain that matched neither an
+integer nor a string operand, so the fallback 10 was always used. Re-probed
+against current source, all three recorded witnesses now give the right
+answer:
 
-- `DigitsFrom("101", 2)` is `101`, not `5`.
-- `DigitsFrom("2a", 16)` is an `unexpected-digit` error on `a`, not `42`.
-- A _string_ base (`DigitsFrom("101", "2")`) reaches the range check first and
-  reports `unexpected-base NaN`, so that spelling is broken too.
+| call                     | recorded (broken) | measured 2026-08-19 |
+| ------------------------ | ----------------- | ------------------- |
+| `DigitsFrom("101", 2)`   | `101`             | `5`                 |
+| `DigitsFrom("2a", 16)`   | `unexpected-digit`| `42`                |
+| `DigitsFrom("101", "2")` | `unexpected-base` | `5`                 |
 
-Only the base-less form and the `0x`/`0b` prefixes work. This is independent of
-the strings work — it predates it — but it was found while documenting the
-conversion pair `IntegerString`/`DigitsFrom`, and it makes the pair
-non-round-tripping for any base other than 10. `IntegerString(n, base)` is
-correct, so only the parsing direction needs fixing.
+The base-less form still answers `101`, as it should. A `baseFromString`
+helper (`library/core.ts`) now owns the string-base parse with its own guards,
+so the string spelling works too. Kept as a FIXED record rather than deleted
+because the entry was cited as an open pair-consistency gap for
+`IntegerString`/`DigitsFrom`.
 
 ### `StringFrom` with no `format` does not use `unicode-scalars` (found 2026-08-16)
 

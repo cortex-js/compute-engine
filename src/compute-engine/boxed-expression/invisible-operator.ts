@@ -18,12 +18,37 @@ const LIST_TYPE = new BoxedType('list');
 
 export function canonicalInvisibleOperator(
   ops: ReadonlyArray<Expression>,
-  { engine: ce }: { engine: ComputeEngine }
+  {
+    engine: ce,
+    shadowed,
+  }: {
+    engine: ComputeEngine;
+    /**
+     * Names a binder BINDS at this point of the tree, which must not be read
+     * as references. Only the partial `CanonicalForm[]` pipeline
+     * (`canonical.ts`) passes it: it runs before any binder scope exists, so a
+     * `Sum` index named `i` would be resolved against the AMBIENT scope and
+     * come back as the imaginary unit — once by the `2i` arm below, and again
+     * when the product it settles on is canonicalized. The canonical route has
+     * a scope and needs none.
+     */
+    shadowed?: ReadonlySet<string>;
+  }
 ): Expression | null {
   if (ops.length === 0) return null;
 
+  // Does an operand denote a binder's variable? Such an operand must not be
+  // canonicalized here, so the product/tuple this function settles on is built
+  // RAW and left for the caller to finish once the binding exists. Only the
+  // partial-form pipeline ever passes `shadowed`, so the canonical route keeps
+  // its existing emission byte for byte.
+  const bindsOperand =
+    shadowed !== undefined &&
+    ops.some((x) => isSymbol(x) && shadowed.has(x.symbol));
+  const opForm = bindsOperand ? { canonical: false as const } : undefined;
+
   const lhs = ops[0];
-  if (ops.length === 1) return lhs.canonical;
+  if (ops.length === 1) return bindsOperand ? lhs : lhs.canonical;
 
   if (ops.length === 2) {
     //
@@ -58,7 +83,11 @@ export function canonicalInvisibleOperator(
     // Is it a complex (imaginary) number, i.e. "2i"?
     //
     const rhs = ops[1];
-    if (!Number.isNaN(lhsInteger) && isImaginaryUnit(rhs)) {
+    if (
+      !Number.isNaN(lhsInteger) &&
+      !(isSymbol(rhs) && shadowed?.has(rhs.symbol)) &&
+      isImaginaryUnit(rhs)
+    ) {
       return ce.number(ce.complex(0, lhsInteger));
     }
 
@@ -292,7 +321,13 @@ export function canonicalInvisibleOperator(
   }
 
   // Only call flatten here, because it will bind (auto-declare) the arguments
-  ops = flatten(ops);
+  // — which is exactly what an operand denoting a binder's variable must not
+  // undergo here: `flatten` canonicalizes by default, and canonicalizing a
+  // `Sum` index against the AMBIENT scope (the binder's own does not exist
+  // yet on the partial-form route) turned an index named `i` into the
+  // imaginary unit. Flattening itself is still wanted, so only the
+  // canonicalization is suppressed.
+  ops = flatten(ops, undefined, !bindsOperand);
 
   //
   // Is it an invisible multiplication?
@@ -380,14 +415,14 @@ export function canonicalInvisibleOperator(
     // readable and keeps this function free of arithmetic folding; the
     // product IS still fully canonicalized — `1(2+3)` reduces to `5`.
     //
-    return ce._fn('Multiply', ops);
+    return ce._fn('Multiply', ops, opForm);
   }
 
   //
   // If some of the elements are not numeric (or of unknown domain)
   // group them as a Tuple
   //
-  return ce._fn('Tuple', ops);
+  return ce._fn('Tuple', ops, opForm);
 }
 
 function flattenInvisibleOperator(

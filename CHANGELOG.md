@@ -21,6 +21,32 @@
 
 ### Bug Fixes
 
+- **Rewriting a nested `Sum`/`Product` no longer breaks its index binding.**
+  `.subs()`, `.replace()` and `.map()` each rebuilt a scoped node onto a FRESH
+  scope, parented at the rewriting site rather than at the rebuilt outer node.
+  The chain from the inner body then never reached the outer binder's index,
+  so an outer index whose name collides with a library constant resolved to
+  the CONSTANT: `Σ_{i=1}^{2} Σ_{j=1}^{2} x·At(K, i+j)` substituted at `x := 1`
+  answered 60 where the same expression built directly answers 120, and
+  `Σ_{i=1}^{2} Σ_{j=1}^{2} x·i` under `x → 2` answered `8i` — the imaginary
+  unit — instead of 12. Nothing looked wrong: the rewritten expression
+  reported `isCanonical` and printed identically to the direct one. A scoped
+  node is now rebuilt onto its own scope, so the chain is preserved at any
+  nesting depth. Only the OUTER index's name mattered, so sums indexed
+  `p`/`q` were correct all along and sums indexed `i`/`j` — what most people
+  write first — were not.
+
+- **A partial `CanonicalForm[]` request no longer rewrites a binder's own
+  index.** Boxing with `{ form: ['Order'] }` (or any other partial form) runs
+  before a binder's scope exists, and its symbol pass resolved EVERY symbol
+  against the ambient scope — including the bound variable at its binding
+  site. `Sum(2i, Limits(i, 1, 3))` came back as
+  `Sum(2·Complex(0,1), Limits(Complex(0,1), 1, 3))` and then failed to
+  evaluate with `incompatible-type`; the `Number` form rewrote it a second
+  time, through its imaginary-unit normalization. A name the node's operator
+  declares as a binding site is now left alone, at the site and throughout the
+  binder's body. A FREE imaginary unit still folds as before.
+
 - **An unrolled `Sum`/`Product` now stops at the first NaN, and a constant
   collection inside one is built once instead of once per term.** When both
   bounds of a `Sum` or `Product` are constant and the range is small, the
@@ -41,7 +67,19 @@
   are unchanged: NaN absorbs both `+` and `*`, so stopping early returns the
   same answer. From four terms on, the emitted source for such a sum is a
   statement sequence in an IIFE rather than a flat `a + b + c` chain; two- and
-  three-term sums keep the flat chain, and the loop form is untouched.
+  three-term sums keep the flat chain. The SCALAR loop form — a range past the
+  unroll limit, or a bound that is not a compile-time constant — gained the
+  same exit, which it had only on the element-wise fold path: a
+  symbolic-bound or 100,000-term sum no longer runs every remaining iteration
+  after the total has gone NaN. Its shape is otherwise unchanged (one emission
+  of the body, no per-term statements). Complex-valued sums and products keep
+  every term in both forms, deliberately: a complex accumulator with a finite
+  imaginary part does not absorb, so an early exit there could change the
+  answer. In both forms the exit is omitted when a term splices
+  caller-supplied source — a `functions`/`operators` entry, a string-valued
+  `vars` symbol, an operator with a caller `compile` handler — since such code
+  may count its own calls or mutate shared state, so it must run as many times
+  as it did before.
 
 - **A protocol function member read as a field now says so.** `b.span` for a
   `function span(self: Self) -> number` requirement reported

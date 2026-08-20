@@ -41,6 +41,7 @@ import {
   isTensor,
 } from './type-guards.js';
 import { getRuleIndex, candidateRules } from './rule-index.js';
+import { scopeForRebuild } from './binding-sites.js';
 
 /** Condition functions that already triggered the one-time "non-boolean
  * condition result" warning (see `applyRule`). */
@@ -1049,7 +1050,21 @@ export function applyRule(
       if (newOps.every((x) => x.isCanonical)) form = 'canonical';
       else if (newOps.every((x) => x.isStructural)) form = 'structural';
 
-      expr = ce.function(expr.operator, newOps, { form });
+      // Rebuilt onto the node's OWN scope: a scoped node given a fresh one is
+      // parented at the rewriting site instead, so a binder nested inside it
+      // keeps a `parent` pointing at the original outer scope while this node
+      // advertises a different one. The chain from the inner body then no
+      // longer reaches the outer binder's index, and an index colliding with
+      // a library constant resolves to the CONSTANT — `Σ_i Σ_j x·i` under
+      // `x → 2` answered `8i`, the imaginary unit, instead of `12`
+      // (`docs/SCOPING-MODEL.md`, "Rebuilding a scoped node").
+      // `scopeForRebuild` withholds the reuse when the rule renamed the binding
+      // site, which would otherwise declare the new name into the original
+      // expression's live scope.
+      expr = ce.function(expr.operator, newOps, {
+        form,
+        scope: scopeForRebuild(expr.localScope, ce, expr.operator, newOps),
+      });
     }
   }
 
