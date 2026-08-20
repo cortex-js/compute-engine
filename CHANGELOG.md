@@ -21,6 +21,16 @@
 
 ### Bug Fixes
 
+- **A symbol named after a JavaScript object member no longer misbehaves.**
+  Names such as `toString`, `constructor` and `valueOf` collide with members
+  every JavaScript object inherits, and the engine looked symbol names up in
+  tables that carried those members. The consequences were visible three ways:
+  `ce.box("toString")` returned the JavaScript function of that name instead of
+  an expression, `ce.function("toString", [1]).toString()` rendered a
+  JavaScript error message as the expression's text, and `toString` used as a
+  variable was refused by `compile()` as though it were a built-in operator.
+  All three now treat such a name as the ordinary symbol it is.
+
 - **Rewriting a nested `Sum`/`Product` no longer breaks its index binding.**
   `.subs()`, `.replace()` and `.map()` each rebuilt a scoped node onto a FRESH
   scope, parented at the rewriting site rather than at the rebuilt outer node.

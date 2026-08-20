@@ -190,7 +190,15 @@ function serializeAsciiNumber(
   return roundToDecimalPlace(value, digits.fractional);
 }
 
+// Null-prototype: these tables are indexed by a SYMBOL NAME, which is
+// arbitrary user text. A plain object literal inherits `Object.prototype`, so
+// a name such as `toString`, `constructor` or `valueOf` reads the inherited
+// member instead of missing — and since that value is a truthy function, the
+// serializer returned it as the symbol's rendering
+// (`ce.box('toString').toString()` printed `function toString() { [native
+// code] }`).
 const SYMBOLS: Record<string, string> = {
+  __proto__: null as never,
   PositiveInfinity: '+oo',
   NegativeInfinity: '-oo',
   ComplexInfinity: '~oo',
@@ -240,6 +248,13 @@ const SYMBOLS: Record<string, string> = {
   Omega: 'Omega',
 };
 
+// Null-prototype, for the same reason as `SYMBOLS` below: this table is
+// indexed by `expr.operator`, an arbitrary function head. An inherited
+// `Object.prototype` member answered as a truthy entry and was then
+// array-destructured, which throws `function is not iterable` — the
+// caller's try/catch turned that into the RENDERED STRING, so
+// `ce.function('toString', [1]).toString()` printed a JavaScript error
+// message.
 const OPERATORS: Record<
   string,
   [
@@ -247,6 +262,7 @@ const OPERATORS: Record<
     precedence: number,
   ]
 > = {
+  __proto__: null as never,
   Add: [
     (expr_, serialize) => {
       const expr = expr_ as FnExpr;
@@ -382,6 +398,13 @@ const OPERATORS: Record<
   Not: ['!', 14], // Unary operator
 };
 
+// Null-prototype: these tables are indexed by a SYMBOL NAME, which is
+// arbitrary user text. A plain object literal inherits `Object.prototype`, so
+// a name such as `toString`, `constructor` or `valueOf` reads the inherited
+// member instead of missing — and since that value is a truthy function, the
+// serializer returned it as the symbol's rendering
+// (`ce.box('toString').toString()` printed `function toString() { [native
+// code] }`).
 const FUNCTIONS: Record<
   string,
   | string
@@ -391,6 +414,7 @@ const FUNCTIONS: Record<
       options?: Partial<AsciiMathOptions>
     ) => string)
 > = {
+  __proto__: null as never,
   Abs: (expr: Expression, serialize) => `|${serialize((expr as FnExpr).op1)}|`,
   Norm: (expr: Expression, serialize) =>
     `||${serialize((expr as FnExpr).op1)}||`,
@@ -880,7 +904,12 @@ function serializeSymbol(
   options: Partial<AsciiMathOptions> = {}
 ): string {
   // Is there a custom definition for this symbol?
-  if (options.symbols?.[symbol]) return options.symbols[symbol];
+  // `Object.hasOwn` because this table comes from the CALLER: we cannot give
+  // it a null prototype the way the built-in tables below have one, so a
+  // caller's plain object would otherwise answer for every inherited
+  // `Object.prototype` member name.
+  if (options.symbols && Object.hasOwn(options.symbols, symbol))
+    return options.symbols[symbol];
 
   // Is there a default definition for this symbol?
   if (SYMBOLS[symbol]) return SYMBOLS[symbol];
@@ -982,8 +1011,12 @@ export function toAsciiMath(
   // A tensor value is a plain `List` `BoxedFunction` (_kind = 'function').
   //
   const fnExpr = isFunction(expr) ? expr : null;
+  // `Object.assign` onto a null-prototype target, not a spread into a fresh
+  // object literal: a spread would rebuild an ordinary object and hand back
+  // `Object.prototype`'s members for any head named after one, undoing the
+  // guard the built-in table carries.
   const operators = options.operators
-    ? { ...OPERATORS, ...options.operators }
+    ? Object.assign(Object.create(null), OPERATORS, options.operators)
     : OPERATORS;
   const [operator, precedence_] = operators[expr.operator] ?? [];
   if (operator && fnExpr) {
@@ -1002,8 +1035,9 @@ export function toAsciiMath(
     }
     return wrap(result, precedence, precedence_);
   }
+  // Same null-prototype merge as the operator table above.
   const functions = options.functions
-    ? { ...FUNCTIONS, ...options.functions }
+    ? Object.assign(Object.create(null), FUNCTIONS, options.functions)
     : FUNCTIONS;
   const func = functions[expr.operator];
   if (typeof func === 'function') return func(expr, serialize, options);

@@ -36,7 +36,16 @@ function compileWGSLList(
     .join(', ')})`;
 }
 
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
+  __proto__: null as never,
   Inversesqrt: 'inverseSqrt',
 
   Mod: ([a, b], compile, target) => {

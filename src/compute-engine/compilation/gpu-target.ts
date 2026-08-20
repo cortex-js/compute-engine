@@ -55,7 +55,16 @@ import { foldSeed } from '../numerics/random.js';
  * Both languages use identical C-style operators for arithmetic,
  * comparison, and logical operations.
  */
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 export const GPU_OPERATORS: CompiledOperators = {
+  __proto__: null as never,
   Add: ['+', 11],
   Negate: ['-', 14],
   Subtract: ['-', 11], // Subtract canonicalizes to Add+Negate; kept as fallback
@@ -3765,7 +3774,16 @@ function compileGPUSumProduct(
  * operate on complex values check `BaseCompiler.isComplexValued()` and
  * dispatch to `_gpu_c*` helper functions from the complex preamble.
  */
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
+  __proto__: null as never,
   // Variadic arithmetic (for function-call form, e.g., with vectors)
   Add: (args, compile, target) => {
     if (args.length === 0) return '0.0';
@@ -7345,7 +7363,16 @@ interface ComplexFunctionDef {
   deps: string[];
 }
 
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
+  __proto__: null as never,
   _gpu_cmul: {
     deps: [],
     glsl: `vec2 _gpu_cmul(vec2 a, vec2 b) {
@@ -8158,7 +8185,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     if (this._functionsMemo?.languageSpecific !== languageSpecific) {
       this._functionsMemo = {
         languageSpecific,
-        merged: { ...GPU_FUNCTIONS, ...languageSpecific },
+        // `Object.assign` onto a null-prototype target, not a spread: a spread
+        // rebuilds an ordinary object, so the merged table would inherit
+        // `Object.prototype` and answer for a head named `toString` even
+        // though both source tables are null-prototype.
+        merged: Object.assign(
+          Object.create(null),
+          GPU_FUNCTIONS,
+          languageSpecific
+        ),
       };
     }
     return this._functionsMemo.merged;
@@ -8869,7 +8904,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // `supportedModes` (strict only here) by `BaseCompiler.compile`.
       mode: options.mode,
       functions: (id) => {
-        if (userFunctions && id in userFunctions) {
+        // `Object.hasOwn`, not `in`: `in` walks the prototype chain, and this
+        // table comes from the CALLER, so we cannot give it a null prototype.
+        if (userFunctions && Object.hasOwn(userFunctions, id)) {
           const fn = userFunctions[id];
           if (typeof fn === 'string') return fn;
           if (typeof fn === 'function') return fn.name || id;

@@ -226,7 +226,16 @@ const JS_SUPPORTED_MODES: readonly CompileMode[] = [
   'auto',
 ];
 
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 const JAVASCRIPT_OPERATORS: CompiledOperators = {
+  __proto__: null as never,
   Add: ['+', 11],
   Negate: ['-', 14], // Unary operator
   Subtract: ['-', 11],
@@ -681,7 +690,16 @@ function compileJSEquality(
 }
 
 /** JavaScript infix spelling of each ordering relation. */
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 const JS_ORDERING_OPERATORS = {
+  __proto__: null as never,
   Less: '<',
   LessEqual: '<=',
   Greater: '>',
@@ -1505,7 +1523,16 @@ function compileJSCharacters(
 /**
  * JavaScript function implementations
  */
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+  __proto__: null as never,
   // Tolerance-aware equality (see compileJSEquality). Not operators — a raw
   // `===` is exact and disagrees with the interpreter's tolerant compare.
   Equal: (args, compile, target) =>
@@ -7200,7 +7227,13 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       .join('\n');
 
     // Process custom functions
-    const namedFunctions: { [k: string]: string } = {};
+    // Null-prototype: this table collects CALLER-supplied function overrides
+    // and is then indexed by an arbitrary operator name. A plain `{}` would
+    // answer for every inherited `Object.prototype` member, so a head named
+    // `toString` would read as a user override that the caller never wrote.
+    // `Object.values` below is unaffected — it returns own properties only.
+    const namedFunctions: { [k: string]: string } =
+      Object.create(null);
 
     if (functions) {
       for (const [k, v] of Object.entries(functions)) {
@@ -7222,9 +7255,14 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // Create operator lookup function
     const customOperator = (op: MathJsonSymbol) => {
       if (!operators) return undefined;
-      return typeof operators === 'function'
-        ? operators(op)
-        : operators[op as keyof typeof operators];
+      // `Object.hasOwn` on the record form: `operators` is CALLER-supplied, so
+      // it cannot be given a null prototype, and a bare index would answer
+      // with an inherited `Object.prototype` member for a head named after
+      // one.
+      if (typeof operators === 'function') return operators(op);
+      return Object.hasOwn(operators, op)
+        ? operators[op as keyof typeof operators]
+        : undefined;
     };
     const operatorLookup = (op: MathJsonSymbol) => {
       // Check custom operators first

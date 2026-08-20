@@ -765,7 +765,16 @@ function compilePythonLoop(
  * Python uses similar operators to JavaScript, but with ** for exponentiation.
  * NumPy arrays support element-wise operations with these operators.
  */
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 const PYTHON_OPERATORS: CompiledOperators = {
+  __proto__: null as never,
   Add: ['+', 11],
   Negate: ['-', 14], // Unary operator
   Subtract: ['-', 11], // Subtract canonicalizes to Add+Negate; kept as fallback
@@ -1482,7 +1491,16 @@ function pyFnArg(
   );
 }
 
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
+  __proto__: null as never,
   // Basic arithmetic (for when they're called as functions)
   Add: (args, compile) => {
     if (args.length === 0) return '0';

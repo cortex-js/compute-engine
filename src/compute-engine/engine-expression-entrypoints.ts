@@ -231,7 +231,18 @@ export function createSymbolExpression(
     return bareParamSym;
   }
 
-  const result = commonSymbols[name];
+  // `Object.hasOwn`, not a bare index: a symbol name is arbitrary user text, so
+  // a name matching an inherited `Object.prototype` member (`toString`,
+  // `constructor`, `valueOf`) reads that member off the prototype chain of a
+  // plain-object table. The inherited value is a truthy JS function, so it was
+  // returned here AS the boxed expression — `ce.box('toString')` handed the
+  // caller `Object.prototype.toString` itself, and `ce.symbol('constructor')`
+  // handed back `Object`. The guard belongs at the lookup rather than on the
+  // table because this table arrives as a parameter and any caller may supply
+  // a plain object.
+  const result = Object.hasOwn(commonSymbols, name)
+    ? commonSymbols[name]
+    : undefined;
   if (result) return result;
 
   let def = engine.lookupDefinition(name);

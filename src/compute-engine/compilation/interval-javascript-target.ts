@@ -38,7 +38,16 @@ import type { Interval, IntervalResult } from '../interval/types.js';
  *
  * Unlike regular operators, these produce function calls instead of infix notation.
  */
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
+  __proto__: null as never,
   // We use high precedence since these become function calls
   Add: ['_IA.add', 20],
   Negate: ['_IA.negate', 20],
@@ -187,7 +196,16 @@ const INTERVAL_JAVASCRIPT_CONSTANTS: Record<string, string> = {
 /**
  * Interval arithmetic function implementations.
  */
+// Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
+// name is arbitrary user text. A plain object literal inherits
+// `Object.prototype`, so a name such as `toString`, `constructor` or
+// `valueOf` reads the inherited member instead of missing — and because that
+// value is a truthy function, the caller treats the symbol as though the
+// target defined it. That made `Add(toString, 1)` refuse to compile as a
+// bogus "built-in operator with no fixed arity" instead of compiling
+// `toString` as an ordinary free symbol.
 const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
+  __proto__: null as never,
   // Basic arithmetic - using function call syntax
   Add: (args, compile) => {
     if (args.length === 0) return '_IA.point(0)';
@@ -1000,7 +1018,13 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     const unknowns = expr.unknowns;
 
     // Process custom functions
-    const namedFunctions: { [k: string]: string } = {};
+    // Null-prototype: this table collects CALLER-supplied function overrides
+    // and is then indexed by an arbitrary operator name. A plain `{}` would
+    // answer for every inherited `Object.prototype` member, so a head named
+    // `toString` would read as a user override that the caller never wrote.
+    // `Object.values` below is unaffected — it returns own properties only.
+    const namedFunctions: { [k: string]: string } =
+      Object.create(null);
     let preambleImports = '';
 
     if (functions) {
