@@ -6166,6 +6166,27 @@ resolves (with `type.isUnknown` true).
 
 <MemberCard>
 
+##### Parser.isFunctionTriggerName() {#isfunctiontriggername}
+
+```ts
+isFunctionTriggerName(name): boolean
+```
+
+Whether `name` is claimed by a `kind: 'function'` dictionary entry's
+`symbolTrigger` (`log`, `lcm`, `var`, …). Such a name owns its call
+syntax — including any subscript, which its parser may bind as an
+argument (`\operatorname{log}_2(x)` is `Log(x, 2)`) — so subscript
+absorption must not fold `name_sub` into a plain symbol and preempt the
+function reading.
+
+####### name
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### Parser.pushSymbolTable() {#pushsymboltable}
 
 ```ts
@@ -12411,7 +12432,11 @@ Note the same effect can be achieved with `this.replace()`, but
 using `this.subs()` is more efficient and simpler, but limited
 to replacing symbols.
 
-The result is bound to the current scope, not to `this.scope`.
+The free symbols of the result are bound in the CURRENT scope, not in the
+scope the receiver was built in. A node that owns a local scope keeps
+that scope, so a binder's bound variables go on denoting the binder's own
+bindings — including for a binder nested inside another one, whose scope
+chain would otherwise no longer reach the outer binder's index.
 
 If `options.canonical` is not set, the result is canonical if `this`
 is canonical.

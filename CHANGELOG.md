@@ -1,63 +1,63 @@
+## [Unreleased]
+
 ## 0.117.0 _2026-08-20_
 
 ### Breaking Changes
 
-- **`evaluate()` now leaves a product of sums FACTORED.** `(a+b)(c+d)`
-  evaluates to itself rather than to `ac+bc+ad+bd`, and `2(x+1)` stays
-  `2(x+1)`. `evaluate()`'s contract is the most EXACT form, and a factored
-  product is exactly as exact as the polynomial it expands to while being
-  smaller — often dramatically so, since expanding multiplies the term count at
-  every factor. **`Expand` reproduces the previous output verbatim**, so code
-  that needs the expanded form should ask for it. This is what made a `Product`
-  of linear factors superlinear: `∏_{k=1}^{8}(kn-1)` returned a nine-term
-  polynomial with large coefficients instead of its eight compact factors, and
-  a plotting consumer paid that cost on every sample because a plot axis
-  variable can never be bound.
+- **`evaluate()` now leaves a product of sums FACTORED.** `(a+b)(c+d)` evaluates
+  to itself rather than to `ac+bc+ad+bd`, and `2(x+1)` stays `2(x+1)`.
+  `evaluate()`'s contract is the most EXACT form, and a factored product is
+  exactly as exact as the polynomial it expands to while being smaller — often
+  dramatically so, since expanding multiplies the term count at every factor.
+  **`Expand` reproduces the previous output verbatim**, so code that needs the
+  expanded form should ask for it. This is what made a `Product` of linear
+  factors superlinear: `∏_{k=1}^{8}(kn-1)` returned a nine-term polynomial with
+  large coefficients instead of its eight compact factors, and a plotting
+  consumer paid that cost on every sample because a plot axis variable can never
+  be bound.
 
   `simplify()` and `.N()` still expand, as does every internal normalization
   path — the change is confined to the `Multiply` and `Product` evaluate
   handlers (`mulFactored()` and `productAccumulate()` respectively; the
-  `∏(kn-1)` example above is the `Product` half). Several
-  results are now reported factored where they were not: `∫x²/(2(1+x²))dx` is
-  `½(x - arctan x)`, `d/dx LambertW(x)` is `W(x)/(x(W(x)+1))`, and a quadratic
-  with a symbolic coefficient solves to `½(a ± √(a²-4))`. The values are
-  unchanged.
+  `∏(kn-1)` example above is the `Product` half). Several results are now
+  reported factored where they were not: `∫x²/(2(1+x²))dx` is `½(x - arctan x)`,
+  `d/dx LambertW(x)` is `W(x)/(x(W(x)+1))`, and a quadratic with a symbolic
+  coefficient solves to `½(a ± √(a²-4))`. The values are unchanged.
 
 ### Improvements
 
-- **Raw-form subscript folding no longer depends on the base's spelling.**
-  An undeclared subscripted name parsed with `form: 'raw'` folded to a
-  joined symbol for a Latin base (`a_{0}` → `"a_0"`) but stayed structural
-  for a command-spelled Greek base (`\eta_{w}` → `["Subscript","eta","w"]`)
-  and for a prefixed base (`\operatorname{speed}_{0}`), and the prime-first
-  spelling (`\alpha'_1`) diverged from the subscript-first one (`\alpha_1'`)
-  the same way. All spellings now fold to the joined symbol (`"eta_w"`,
-  `"alpha_1"`, `"speed_0"`), matching what canonical form always produced,
-  and the two prime orders agree on every spelling. Unchanged: an indexed-collection base keeps the element-access
-  reading unless the joined name is declared, a `subscriptEvaluate` base
-  (such as `\gamma` for the `EulerGamma` family) keeps its subscripts, and
-  dictionary-claimed constants such as unbraced `\mu_0` are untouched.
-  **If your code reads `form: 'raw'` output and pattern-matches
-  `["Subscript", base, sub]` nodes for undeclared names, re-measure it** —
-  those nodes are now plain symbols; code that folded them itself now
-  receives the already-folded name.
+- **Raw-form subscript folding no longer depends on the base's spelling.** An
+  undeclared subscripted name parsed with `form: 'raw'` folded to a joined
+  symbol for a Latin base (`a_{0}` → `"a_0"`) but stayed structural for a
+  command-spelled Greek base (`\eta_{w}` → `["Subscript","eta","w"]`) and for a
+  prefixed base (`\operatorname{speed}_{0}`), and the prime-first spelling
+  (`\alpha'_1`) diverged from the subscript-first one (`\alpha_1'`) the same
+  way. All spellings now fold to the joined symbol (`"eta_w"`, `"alpha_1"`,
+  `"speed_0"`), matching what canonical form always produced, and the two prime
+  orders agree on every spelling. Unchanged: an indexed-collection base keeps
+  the element-access reading unless the joined name is declared, a
+  `subscriptEvaluate` base (such as `\gamma` for the `EulerGamma` family) keeps
+  its subscripts, and dictionary-claimed constants such as unbraced `\mu_0` are
+  untouched. **If your code reads `form: 'raw'` output and pattern-matches
+  `["Subscript", base, sub]` nodes for undeclared names, re-measure it** — those
+  nodes are now plain symbols; code that folded them itself now receives the
+  already-folded name.
 
 ### Bug Fixes
 
-- **Dividing a list of points by a scalar keeps the points.** A collection
-  whose elements are numeric tuples — `list<tuple<number, number>>`, the shape
-  a set of points carries — typed its quotient `list<number>`, dropping the
-  element tuple-ness, while the equivalent product `p·(1/q)` kept it. The
-  values were always correct; only the type was wrong, and it was wrong in a
-  way that changed downstream readings: `PointX`/`PointY` over a
-  `list<number>` take the element-INDEX reading rather than the elementwise
-  one, so a normalized point list read as its own first coordinate. Every
-  denominator spelling is repaired (a scalar, a `broadcastable<number>`, a
-  sibling collection of scalars that divides elementwise), and a divisor that
-  can present a tuple — a point, a point list, or a `broadcastable<tuple<…>>`
-  — still has no defined quotient. The same repair applies to the product of a
-  point list with a sibling list of scalars, which used to widen to
-  `list<number | tuple<…>>`.
+- **Dividing a list of points by a scalar keeps the points.** A collection whose
+  elements are numeric tuples — `list<tuple<number, number>>`, the shape a set
+  of points carries — typed its quotient `list<number>`, dropping the element
+  tuple-ness, while the equivalent product `p·(1/q)` kept it. The values were
+  always correct; only the type was wrong, and it was wrong in a way that
+  changed downstream readings: `PointX`/`PointY` over a `list<number>` take the
+  element-INDEX reading rather than the elementwise one, so a normalized point
+  list read as its own first coordinate. Every denominator spelling is repaired
+  (a scalar, a `broadcastable<number>`, a sibling collection of scalars that
+  divides elementwise), and a divisor that can present a tuple — a point, a
+  point list, or a `broadcastable<tuple<…>>` — still has no defined quotient.
+  The same repair applies to the product of a point list with a sibling list of
+  scalars, which used to widen to `list<number | tuple<…>>`.
 
 - **Scaling a list of points widens the point's components.** A scalar factor
   folded into a collection's cells but stopped at a tuple cell, so
@@ -74,22 +74,22 @@
   function literal when the declaration itself is uninformative, and `D` of a
   tuple- or list-valued body reports the shape it actually evaluates to
   (`D((cos t, sin 2t, t), t)` is a tuple, not a `number`). A head that is
-  declared `function` and never assigned still reports the long-standing
-  scalar compromise.
+  declared `function` and never assigned still reports the long-standing scalar
+  compromise.
 
 - **A literal `0` operand is no longer dropped when serializing to LaTeX.**
   Several serializers tested an operand for truthiness where they meant to test
-  for absence, and the MathJSON of the literal `0` is the number `0` — so a
-  zero operand read as a missing one and was silently deleted. A domain
-  restriction on a zero lost BOTH operands (`When(0, x=x)` serialized to the
-  empty string), `Return(0)` printed as a bare `return`, a big operator lost
-  its body AND its indexing sets (`Sum(0, i=1..10)` became `\sum`), an integral
-  lost its integrand (`Integrate(0, x)` became `\int`), and `Delimiter(0)`
-  became an empty `()`. Each now serializes its zero, so an expression carrying
-  one round-trips through LaTeX again — which matters wherever serialized
-  LaTeX is a persistence boundary, since parsing was never at fault and the
-  loss was silent. `Log(x, 0)` also now renders its zero base as a base
-  (`\log_{0}(x)`) rather than falling back to the argument-list form.
+  for absence, and the MathJSON of the literal `0` is the number `0` — so a zero
+  operand read as a missing one and was silently deleted. A domain restriction
+  on a zero lost BOTH operands (`When(0, x=x)` serialized to the empty string),
+  `Return(0)` printed as a bare `return`, a big operator lost its body AND its
+  indexing sets (`Sum(0, i=1..10)` became `\sum`), an integral lost its
+  integrand (`Integrate(0, x)` became `\int`), and `Delimiter(0)` became an
+  empty `()`. Each now serializes its zero, so an expression carrying one
+  round-trips through LaTeX again — which matters wherever serialized LaTeX is a
+  persistence boundary, since parsing was never at fault and the loss was
+  silent. `Log(x, 0)` also now renders its zero base as a base (`\log_{0}(x)`)
+  rather than falling back to the argument-list form.
 
 - **A negative subject of a `When` restriction keeps its precedence.**
   `When(-1, cond)` serialized as `-1\left\{cond\right\}`, which reads back as
@@ -102,182 +102,177 @@
   every JavaScript object inherits, and the engine looked symbol names up in
   tables that carried those members. The consequences were visible three ways:
   `ce.box("toString")` returned the JavaScript function of that name instead of
-  an expression, `ce.function("toString", [1]).toString()` rendered a
-  JavaScript error message as the expression's text, and `toString` used as a
-  variable was refused by `compile()` as though it were a built-in operator.
-  All three now treat such a name as the ordinary symbol it is.
+  an expression, `ce.function("toString", [1]).toString()` rendered a JavaScript
+  error message as the expression's text, and `toString` used as a variable was
+  refused by `compile()` as though it were a built-in operator. All three now
+  treat such a name as the ordinary symbol it is.
 
 - **Rewriting a nested `Sum`/`Product` no longer breaks its index binding.**
   `.subs()`, `.replace()` and `.map()` each rebuilt a scoped node onto a FRESH
   scope, parented at the rewriting site rather than at the rebuilt outer node.
-  The chain from the inner body then never reached the outer binder's index,
-  so an outer index whose name collides with a library constant resolved to
-  the CONSTANT: `Σ_{i=1}^{2} Σ_{j=1}^{2} x·At(K, i+j)` substituted at `x := 1`
+  The chain from the inner body then never reached the outer binder's index, so
+  an outer index whose name collides with a library constant resolved to the
+  CONSTANT: `Σ_{i=1}^{2} Σ_{j=1}^{2} x·At(K, i+j)` substituted at `x := 1`
   answered 60 where the same expression built directly answers 120, and
-  `Σ_{i=1}^{2} Σ_{j=1}^{2} x·i` under `x → 2` answered `8i` — the imaginary
-  unit — instead of 12. Nothing looked wrong: the rewritten expression
-  reported `isCanonical` and printed identically to the direct one. A scoped
-  node is now rebuilt onto its own scope, so the chain is preserved at any
-  nesting depth. Only the OUTER index's name mattered, so sums indexed
-  `p`/`q` were correct all along and sums indexed `i`/`j` — what most people
-  write first — were not.
+  `Σ_{i=1}^{2} Σ_{j=1}^{2} x·i` under `x → 2` answered `8i` — the imaginary unit
+  — instead of 12. Nothing looked wrong: the rewritten expression reported
+  `isCanonical` and printed identically to the direct one. A scoped node is now
+  rebuilt onto its own scope, so the chain is preserved at any nesting depth.
+  Only the OUTER index's name mattered, so sums indexed `p`/`q` were correct all
+  along and sums indexed `i`/`j` — what most people write first — were not.
 
 - **A partial `CanonicalForm[]` request no longer rewrites a binder's own
   index.** Boxing with `{ form: ['Order'] }` (or any other partial form) runs
   before a binder's scope exists, and its symbol pass resolved EVERY symbol
-  against the ambient scope — including the bound variable at its binding
-  site. `Sum(2i, Limits(i, 1, 3))` came back as
-  `Sum(2·Complex(0,1), Limits(Complex(0,1), 1, 3))` and then failed to
-  evaluate with `incompatible-type`; the `Number` form rewrote it a second
-  time, through its imaginary-unit normalization. A name the node's operator
-  declares as a binding site is now left alone, at the site and throughout the
-  binder's body. A FREE imaginary unit still folds as before.
+  against the ambient scope — including the bound variable at its binding site.
+  `Sum(2i, Limits(i, 1, 3))` came back as
+  `Sum(2·Complex(0,1), Limits(Complex(0,1), 1, 3))` and then failed to evaluate
+  with `incompatible-type`; the `Number` form rewrote it a second time, through
+  its imaginary-unit normalization. A name the node's operator declares as a
+  binding site is now left alone, at the site and throughout the binder's body.
+  A FREE imaginary unit still folds as before.
 
 - **An unrolled `Sum`/`Product` now stops at the first NaN, and a constant
   collection inside one is built once instead of once per term.** When both
   bounds of a `Sum` or `Product` are constant and the range is small, the
-  JavaScript target unrolls it into explicit terms rather than emitting a
-  loop. That unrolled form evaluated every term even after the running total
-  had gone NaN — where the loop form exits on the first one — and it
-  re-emitted every subexpression per term, including subexpressions whose
-  value cannot depend on the index. A 31-term sum sampling a constant
-  101-element list built that list 31 times, in the source and again on every
-  call: 11 KB of emitted JavaScript with 31 `Array.from` constructions, all
-  evaluated even when the first term already answered NaN. Such a sum now
-  emits 4 KB with a single construction bound ahead of the accumulation, and
-  returns as soon as the total is NaN. This restores the cost a plot or
-  sampling loop over such an expression had before the typing improvement that
-  began steering these bodies into the unrolled form (they previously took the
-  element-wise fold loop, which already had both properties) — a plot that
-  went blank because every sample evaluated all 31 terms paints again. Values
-  are unchanged: NaN absorbs both `+` and `*`, so stopping early returns the
-  same answer. From four terms on, the emitted source for such a sum is a
-  statement sequence in an IIFE rather than a flat `a + b + c` chain; two- and
-  three-term sums keep the flat chain. The SCALAR loop form — a range past the
-  unroll limit, or a bound that is not a compile-time constant — gained the
-  same exit, which it had only on the element-wise fold path: a
-  symbolic-bound or 100,000-term sum no longer runs every remaining iteration
-  after the total has gone NaN. Its shape is otherwise unchanged (one emission
-  of the body, no per-term statements). Complex-valued sums and products keep
-  every term in both forms, deliberately: a complex accumulator with a finite
-  imaginary part does not absorb, so an early exit there could change the
-  answer. In both forms the exit is omitted when a term splices
-  caller-supplied source — a `functions`/`operators` entry, a string-valued
-  `vars` symbol, an operator with a caller `compile` handler — since such code
-  may count its own calls or mutate shared state, so it must run as many times
-  as it did before.
+  JavaScript target unrolls it into explicit terms rather than emitting a loop.
+  That unrolled form evaluated every term even after the running total had gone
+  NaN — where the loop form exits on the first one — and it re-emitted every
+  subexpression per term, including subexpressions whose value cannot depend on
+  the index. A 31-term sum sampling a constant 101-element list built that list
+  31 times, in the source and again on every call: 11 KB of emitted JavaScript
+  with 31 `Array.from` constructions, all evaluated even when the first term
+  already answered NaN. Such a sum now emits 4 KB with a single construction
+  bound ahead of the accumulation, and returns as soon as the total is NaN. This
+  restores the cost a plot or sampling loop over such an expression had before
+  the typing improvement that began steering these bodies into the unrolled form
+  (they previously took the element-wise fold loop, which already had both
+  properties) — a plot that went blank because every sample evaluated all 31
+  terms paints again. Values are unchanged: NaN absorbs both `+` and `*`, so
+  stopping early returns the same answer. From four terms on, the emitted source
+  for such a sum is a statement sequence in an IIFE rather than a flat
+  `a + b + c` chain; two- and three-term sums keep the flat chain. The SCALAR
+  loop form — a range past the unroll limit, or a bound that is not a
+  compile-time constant — gained the same exit, which it had only on the
+  element-wise fold path: a symbolic-bound or 100,000-term sum no longer runs
+  every remaining iteration after the total has gone NaN. Its shape is otherwise
+  unchanged (one emission of the body, no per-term statements). Complex-valued
+  sums and products keep every term in both forms, deliberately: a complex
+  accumulator with a finite imaginary part does not absorb, so an early exit
+  there could change the answer. In both forms the exit is omitted when a term
+  splices caller-supplied source — a `functions`/`operators` entry, a
+  string-valued `vars` symbol, an operator with a caller `compile` handler —
+  since such code may count its own calls or mutate shared state, so it must run
+  as many times as it did before.
 
 - **A protocol function member read as a field now says so.** `b.span` for a
   `function span(self: Self) -> number` requirement reported
-  `unknown-field "span" (w, h)` — true of the object's LAYOUT and useless to
-  the author, since the name they wrote does exist, on a protocol the value
-  conforms to. It now reports `protocol-function-not-a-field`, naming the
-  protocol and the call spelling: a `function` member is called (`span(b)`),
-  only a `readonly`/`readwrite` property is read with a dot (`b.area`). This is
-  the mirror of the `protocol-property-not-callable` warning below. Object,
-  record and named-tuple receivers all report it, and so does an ASSIGNMENT to
-  such a name (`b.span = 5`), whose message says the member cannot be written
-  rather than recommending a call. When several conformances answer the same
-  name, the message names them all and asks for a qualified call, since a bare
-  one would be `protocol-call-ambiguous`. A name no protocol claims still
-  reports the layout, and so does a name whose conformance is not settled — a
-  PENDING edge carries no implementation, so there is no call to recommend yet.
+  `unknown-field "span" (w, h)` — true of the object's LAYOUT and useless to the
+  author, since the name they wrote does exist, on a protocol the value conforms
+  to. It now reports `protocol-function-not-a-field`, naming the protocol and
+  the call spelling: a `function` member is called (`span(b)`), only a
+  `readonly`/`readwrite` property is read with a dot (`b.area`). This is the
+  mirror of the `protocol-property-not-callable` warning below. Object, record
+  and named-tuple receivers all report it, and so does an ASSIGNMENT to such a
+  name (`b.span = 5`), whose message says the member cannot be written rather
+  than recommending a call. When several conformances answer the same name, the
+  message names them all and asks for a qualified call, since a bare one would
+  be `protocol-call-ambiguous`. A name no protocol claims still reports the
+  layout, and so does a name whose conformance is not settled — a PENDING edge
+  carries no implementation, so there is no call to recommend yet.
 
 - **Epsil: a protocol property called as a function is now reported.** A
   protocol's two member kinds are spelled differently — a `function` member is
   invoked in call position (`span(b)`), a `readonly`/`readwrite` property is
   read with a dot (`b.area`) — and using the call form for a property resolved
-  to no operator, so it stayed a silently inert application: a program ending
-  in `print(c, area(c))` printed `area(Circle(…))` with nothing to say why. It
-  now raises a `protocol-property-not-callable` warning naming the property,
-  the protocol that declares it, and the dot spelling. The check runs over the
-  raw statement, so it fires even when the inert call is consumed by another
-  operator and never reaches the statement's value — the shape this was
-  reported on. Function members in call position are correct and untouched, and
-  a name that has a real operator definition (a user function that happens to
-  share a property's name) is never reported.
+  to no operator, so it stayed a silently inert application: a program ending in
+  `print(c, area(c))` printed `area(Circle(…))` with nothing to say why. It now
+  raises a `protocol-property-not-callable` warning naming the property, the
+  protocol that declares it, and the dot spelling. The check runs over the raw
+  statement, so it fires even when the inert call is consumed by another
+  operator and never reaches the statement's value — the shape this was reported
+  on. Function members in call position are correct and untouched, and a name
+  that has a real operator definition (a user function that happens to share a
+  property's name) is never reported.
 
 - **Epsil: the `protocol-implementation-pending` warning no longer covers the
   whole program.** It was emitted with a hardcoded whole-source range, because
-  the check walks the protocol registry — which outlives the batch — rather
-  than the source, so an editor squiggled the entire file. Each pending edge is
-  now anchored to the `type X is P` statement that declared it when that
-  statement is in this batch; one statement naming several protocols anchors
-  every one of its edges. An edge declared in an EARLIER batch (the
-  declare-in-one-cell, implement-in-the-next pattern the warning exists to
-  support) still falls back to the whole program, since this source contains no
-  statement to point at.
+  the check walks the protocol registry — which outlives the batch — rather than
+  the source, so an editor squiggled the entire file. Each pending edge is now
+  anchored to the `type X is P` statement that declared it when that statement
+  is in this batch; one statement naming several protocols anchors every one of
+  its edges. An edge declared in an EARLIER batch (the declare-in-one-cell,
+  implement-in-the-next pattern the warning exists to support) still falls back
+  to the whole program, since this source contains no statement to point at.
 
 - **A declared type now admits a value whose type is `unknown`.** Assigning an
   expression the engine cannot type statically — a call to a function with no
-  signature, say — to a symbol with a declared type was refused:
-  `let xs: list` followed by `xs = f(0)` raised
-  `incompatible-type list unknown`, and so did the `let xs: list = f(0)`
-  spelling, for every declared type (`number`, `string`, `list<number>`, …).
-  A type of `unknown` states nothing about the value ("some value, not stated
-  which"), so there is nothing for the declaration to refute; it is admitted
-  and the verdict is left to run time, which is what the argument-position
-  boundary already did — the identical value passed to a `list` parameter was
-  accepted. Values the engine CAN type are still held to the contract
-  (`xs = 42` against `list` is still an error), and a bare-constructor
-  declaration still refines its element slot from real evidence: an admitted
-  `unknown` value leaves `xs` reporting `list`, and a later `xs = [1, 2, 3]`
-  refines it to `list<finite_integer>`. `any` is unaffected — it is a stated
-  contract, not a placeholder, and is still checked, and so is a declared
-  function SIGNATURE (`(number) pure -> number`), which keeps refusing an
-  `unknown` value rather than installing a definition that would be callable
-  under a contract nothing proved. Note the admission is unchecked: nothing
-  re-examines the value later, exactly as at a typed parameter.
+  signature, say — to a symbol with a declared type was refused: `let xs: list`
+  followed by `xs = f(0)` raised `incompatible-type list unknown`, and so did
+  the `let xs: list = f(0)` spelling, for every declared type (`number`,
+  `string`, `list<number>`, …). A type of `unknown` states nothing about the
+  value ("some value, not stated which"), so there is nothing for the
+  declaration to refute; it is admitted and the verdict is left to run time,
+  which is what the argument-position boundary already did — the identical value
+  passed to a `list` parameter was accepted. Values the engine CAN type are
+  still held to the contract (`xs = 42` against `list` is still an error), and a
+  bare-constructor declaration still refines its element slot from real
+  evidence: an admitted `unknown` value leaves `xs` reporting `list`, and a
+  later `xs = [1, 2, 3]` refines it to `list<finite_integer>`. `any` is
+  unaffected — it is a stated contract, not a placeholder, and is still checked,
+  and so is a declared function SIGNATURE (`(number) pure -> number`), which
+  keeps refusing an `unknown` value rather than installing a definition that
+  would be callable under a contract nothing proved. Note the admission is
+  unchecked: nothing re-examines the value later, exactly as at a typed
+  parameter.
 
 - **A compilation reached through a target now escalates to complex mode like
   the standalone `compile()` does.** Under the default `auto` mode a lane
-  mismatch — a complex-shaped value, typically a promoted unknown-sign
-  radical, reaching a binding the compilation shaped real — is answered by
-  recompiling under `mode: 'complex'`. That retry existed only in the
-  standalone `compile()` export, so a caller using the target route
-  (`ce._getCompilationTarget('javascript').compile(expr, options)`, the route
-  an integration takes once it needs a specific target) got a thrown
+  mismatch — a complex-shaped value, typically a promoted unknown-sign radical,
+  reaching a binding the compilation shaped real — is answered by recompiling
+  under `mode: 'complex'`. That retry existed only in the standalone `compile()`
+  export, so a caller using the target route
+  (`ce._getCompilationTarget('javascript').compile(expr, options)`, the route an
+  integration takes once it needs a specific target) got a thrown
   `LaneMismatchError` instead — or, with `fallback: true`, a `success: false`
   result with the `lane-mismatch` diagnostic and an interpreter-backed `run` —
-  where the standalone route returned working compiled code. The escalation
-  now lives in each target's own `compile()`, so both routes behave
-  identically: such a call returns `success: true` with `mode: 'complex'`,
-  `promoted: true` and the failed strict attempt's diagnostic in
-  `escalation`. Callers of the target route under the default mode are
-  affected; `fallback: true` callers will see `success: true` where they
-  previously saw `success: false` with `lane-mismatch`. `mode: 'strict'` is
-  unchanged on both routes, and the shader and interval targets, which never
-  promote to complex, are unaffected. One consequence for a THIRD-PARTY
-  registered target: escalation is now each target's own responsibility, so a
-  custom target that declares `auto` support no longer inherits the retry
-  from the standalone wrapper — apply the exported
+  where the standalone route returned working compiled code. The escalation now
+  lives in each target's own `compile()`, so both routes behave identically:
+  such a call returns `success: true` with `mode: 'complex'`, `promoted: true`
+  and the failed strict attempt's diagnostic in `escalation`. Callers of the
+  target route under the default mode are affected; `fallback: true` callers
+  will see `success: true` where they previously saw `success: false` with
+  `lane-mismatch`. `mode: 'strict'` is unchanged on both routes, and the shader
+  and interval targets, which never promote to complex, are unaffected. One
+  consequence for a THIRD-PARTY registered target: escalation is now each
+  target's own responsibility, so a custom target that declares `auto` support
+  no longer inherits the retry from the standalone wrapper — apply the exported
   `compileWithAutoEscalation` helper inside its `compile()` to keep the
   behavior.
 
 - **The Python target's interpreter fallback no longer drops the `realOnly`
   projection.** With `fallback: true` on the Python target route, a declined
   compilation handed back an interpreter-backed `run` that ignored
-  `realOnly: true` (the standalone route forwarded it; the target route did
-  not) — a complex result then reached a caller that had asked for the
-  real-only projection. Same route-asymmetry family as the escalation fix
-  above, found while moving it.
+  `realOnly: true` (the standalone route forwarded it; the target route did not)
+  — a complex result then reached a caller that had asked for the real-only
+  projection. Same route-asymmetry family as the escalation fix above, found
+  while moving it.
 
 ## 0.116.1 _2026-08-19_
 
 ### Improvements
 
 - **`Cross` accepts numeric tuples, like `Dot` always did.**
-  `Cross((1,2,3), (4,5,6))` computed nothing — the signature demanded
-  `vector`, so a point spelled as a tuple was rejected with
-  `incompatible-type` while the same point passed `Dot` — and the two
-  classic vector products disagreed about what a vector is. A provable
-  numeric 3-tuple (a point in ℝ³, including a `PointList` row) is now
-  lowered to its component vector exactly as `Dot` lowers it; the result is
-  a `List`, consistent with collection operators not preserving the `tuple`
-  kind. A tuple that is not provably numeric stays a symbolic `Cross`, and
-  a wrong-length tuple gets the `incompatible-dimensions` report, not a
-  type error. Affects code that builds `Cross` over `Tuple`/point operands
-  — previously an error, now a value.
+  `Cross((1,2,3), (4,5,6))` computed nothing — the signature demanded `vector`,
+  so a point spelled as a tuple was rejected with `incompatible-type` while the
+  same point passed `Dot` — and the two classic vector products disagreed about
+  what a vector is. A provable numeric 3-tuple (a point in ℝ³, including a
+  `PointList` row) is now lowered to its component vector exactly as `Dot`
+  lowers it; the result is a `List`, consistent with collection operators not
+  preserving the `tuple` kind. A tuple that is not provably numeric stays a
+  symbolic `Cross`, and a wrong-length tuple gets the `incompatible-dimensions`
+  report, not a type error. Affects code that builds `Cross` over `Tuple`/point
+  operands — previously an error, now a value.
 
 ### Bug Fixes
 
