@@ -19,6 +19,41 @@
   those nodes are now plain symbols; code that folded them itself now
   receives the already-folded name.
 
+### Bug Fixes
+
+- **A compilation reached through a target now escalates to complex mode like
+  the standalone `compile()` does.** Under the default `auto` mode a lane
+  mismatch — a complex-shaped value, typically a promoted unknown-sign
+  radical, reaching a binding the compilation shaped real — is answered by
+  recompiling under `mode: 'complex'`. That retry existed only in the
+  standalone `compile()` export, so a caller using the target route
+  (`ce._getCompilationTarget('javascript').compile(expr, options)`, the route
+  an integration takes once it needs a specific target) got a thrown
+  `LaneMismatchError` instead — or, with `fallback: true`, a `success: false`
+  result with the `lane-mismatch` diagnostic and an interpreter-backed `run` —
+  where the standalone route returned working compiled code. The escalation
+  now lives in each target's own `compile()`, so both routes behave
+  identically: such a call returns `success: true` with `mode: 'complex'`,
+  `promoted: true` and the failed strict attempt's diagnostic in
+  `escalation`. Callers of the target route under the default mode are
+  affected; `fallback: true` callers will see `success: true` where they
+  previously saw `success: false` with `lane-mismatch`. `mode: 'strict'` is
+  unchanged on both routes, and the shader and interval targets, which never
+  promote to complex, are unaffected. One consequence for a THIRD-PARTY
+  registered target: escalation is now each target's own responsibility, so a
+  custom target that declares `auto` support no longer inherits the retry
+  from the standalone wrapper — apply the exported
+  `compileWithAutoEscalation` helper inside its `compile()` to keep the
+  behavior.
+
+- **The Python target's interpreter fallback no longer drops the `realOnly`
+  projection.** With `fallback: true` on the Python target route, a declined
+  compilation handed back an interpreter-backed `run` that ignored
+  `realOnly: true` (the standalone route forwarded it; the target route did
+  not) — a complex result then reached a caller that had asked for the
+  real-only projection. Same route-asymmetry family as the escalation fix
+  above, found while moving it.
+
 ## 0.116.1 _2026-08-19_
 
 ### Improvements

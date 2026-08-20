@@ -1396,9 +1396,10 @@ export class BaseCompiler {
    *
    * In force for `mode: 'strict'` and for `mode: 'auto'`, whose FIRST attempt
    * is the strict discipline (with promotion): the `LaneMismatch` it raises
-   * is what the engine-level `compile()` catches to redo the compilation
-   * under `'complex'` (design §4, one retry site). Under `'complex'` a wide
-   * binding is complex-shaped and nothing mismatches.
+   * is what the escalation catches to redo the compilation under `'complex'`
+   * (design §4, `compileWithAutoEscalation` in `auto-escalation.ts`, which a
+   * registered target applies inside its own `compile()`). Under `'complex'`
+   * a wide binding is complex-shaped and nothing mismatches.
    */
   static get strictLanes(): boolean {
     return BaseCompiler._mode === 'strict' || BaseCompiler._mode === 'auto';

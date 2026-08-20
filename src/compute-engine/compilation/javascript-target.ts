@@ -5,6 +5,7 @@ import type {
 } from '../global-types.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
+import { compileWithAutoEscalation } from './auto-escalation.js';
 import {
   isSymbol,
   isNumber,
@@ -7132,8 +7133,23 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       options,
       JS_SUPPORTED_MODES.includes('complex')
     ).options;
+    const requestedMode = options.mode;
     try {
-      return this.compileOrThrow(expr, options);
+      // Under `auto` — requested, or this target's default — a lane mismatch
+      // in the strict attempt redoes the compilation under the complex
+      // discipline. The escalation sits INSIDE this method, not in the
+      // standalone `compile()` export, so both routes into a compilation get
+      // it (`auto-escalation.ts`). It wraps `compileOrThrow`, which throws on
+      // a decline, so the mismatch reaches the retry rather than being
+      // wrapped into the `success: false` fallback built below. Each attempt
+      // builds its own target in `compileOrThrow`, so the retry starts from
+      // clean per-compilation state.
+      return compileWithAutoEscalation(requestedMode, JS_SUPPORTED_MODES, (m) =>
+        this.compileOrThrow(
+          expr,
+          m === requestedMode ? options : { ...options, mode: m }
+        )
+      );
     } catch (e) {
       // By default a failure throws (the low-level contract). When the caller
       // opts in with `fallback: true`, surface the documented `success: false`

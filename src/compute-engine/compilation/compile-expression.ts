@@ -183,12 +183,17 @@ export function compile<T extends string = 'javascript'>(
       try {
         code = BaseCompiler.compileRoot(rewritten, options.target);
       } catch (e) {
-        // The single retry site (design §4): under `auto`, a `LaneMismatch`
-        // in the strict attempt redoes the compilation under the complex
-        // discipline, on FRESH target state — a direct target offers `auto`
-        // only when it provides `reset()` (`resolveDirectTargetMode`), which
-        // drops whatever the failed attempt wrote (helpers, definitions,
-        // temporaries).
+        // The `auto` escalation (design §4) for a CALLER-OWNED target: a
+        // `LaneMismatch` in the strict attempt redoes the compilation under
+        // the complex discipline, on FRESH target state — a direct target
+        // offers `auto` only when it provides `reset()`
+        // (`resolveDirectTargetMode`), which drops whatever the failed attempt
+        // wrote (helpers, definitions, temporaries). A REGISTERED target
+        // escalates inside its own `compile()` instead
+        // (`compileWithAutoEscalation`, `auto-escalation.ts`), which is what
+        // makes the target-level route behave like this entry; this branch
+        // cannot use that helper, because a caller's target is reused across
+        // calls and its state has to be reset between the two attempts.
         if (!isLaneMismatchError(e) || options.target.mode !== 'auto') throw e;
         options.target.reset?.();
         options.target.mode = 'complex';
@@ -254,60 +259,19 @@ export function compile<T extends string = 'javascript'>(
       cse: options?.cse,
       constantFold: options?.constantFold,
     };
-    // The single retry site (design §4): under `auto` — requested, or the
-    // target's default — a `LaneMismatch` in the strict attempt redoes the
-    // compilation under the complex discipline. A registered target builds a
-    // fresh per-compilation target on every `compile()`, so the retry starts
-    // from clean state. The first attempt is made with `fallback: false` so
-    // the mismatch reaches this site as a THROW — not as a `success: false`
-    // result the target has already wrapped in an interpreter fallback (and
-    // warned about); any other failure rethrows to the catch below, which
-    // builds the fallback exactly as for a target without `auto`.
     // The alias is dropped on a target that does not offer complex mode (see
     // `modeFromAlias` above): the target's default applies.
     if (modeFromAlias && !targetSupportsMode(languageTarget, 'complex'))
       targetOptions.mode = undefined;
-    // `auto` is in play only where the target OFFERS it: a target that does
-    // not (interval-js, the shader targets) takes the ordinary path with the
-    // caller's `fallback`, and reports a requested `'auto'` as its own
-    // `unsupported-mode` decline — with the interpreter-backed runner the
-    // fallback contract promises.
-    const auto =
-      (targetOptions.mode === 'auto' || targetOptions.mode === undefined) &&
-      targetSupportsAuto(languageTarget);
-    if (!auto)
-      return languageTarget.compile(
-        expr,
-        targetOptions
-      ) as CompilationResult<T>;
-    let first: CompilationResult<T>;
-    try {
-      first = languageTarget.compile(expr, {
-        ...targetOptions,
-        fallback: false,
-      }) as CompilationResult<T>;
-    } catch (e) {
-      if (!isLaneMismatchError(e)) throw e;
-      const retried = languageTarget.compile(expr, {
-        ...targetOptions,
-        mode: 'complex',
-      }) as CompilationResult<T>;
-      if (retried.success) retried.escalation = e.diagnostic;
-      return retried;
-    }
-    // A target that REPORTS a decline (`success: false`, no throw) rather
-    // than throwing it: honor the caller's fallback by redoing the compile
-    // with it (a decline is rare; the double compile costs nothing on the
-    // success path). Defensive: the two built-in targets that offer `auto`
-    // (`javascript`, `python`) always THROW under `fallback: false`, so this
-    // branch is reached only by a third-party `auto`-capable target that
-    // reports instead — the existing suite does not exercise it.
-    if (!first.success && (options?.fallback ?? true))
-      return languageTarget.compile(
-        expr,
-        targetOptions
-      ) as CompilationResult<T>;
-    return first;
+    // The `auto` escalation (design §4) is NOT applied here: a registered
+    // target owns it, inside its own `compile()`
+    // (`compileWithAutoEscalation`, `auto-escalation.ts`), so that a caller
+    // reaching the target directly through `ce._getCompilationTarget(name)`
+    // escalates identically to one coming through this entry. A `LaneMismatch`
+    // in the strict attempt therefore never surfaces here: the target has
+    // already redone the compilation under the complex discipline and set
+    // `escalation` on the result.
+    return languageTarget.compile(expr, targetOptions) as CompilationResult<T>;
   } catch (e) {
     if (options?.fallback ?? true) {
       const error = (e as Error).message;
@@ -348,9 +312,9 @@ export function compile<T extends string = 'javascript'>(
 }
 
 /**
- * Whether a registered target offers `mode: 'auto'` — read once per
- * `LanguageTarget` instance from a target it creates (`supportedModes`), so
- * the default-mode decision costs nothing per compilation after the first.
+ * Whether a registered target offers `mode` — read once per `LanguageTarget`
+ * instance from a target it creates (`supportedModes`), so the decision costs
+ * nothing per compilation after the first.
  */
 const modeSupport = new WeakMap<object, readonly CompileMode[]>();
 function targetSupportsMode(
@@ -363,11 +327,6 @@ function targetSupportsMode(
     modeSupport.set(lt, known);
   }
   return known.includes(mode);
-}
-function targetSupportsAuto(lt: {
-  createTarget(): CompileTarget<Expression>;
-}): boolean {
-  return targetSupportsMode(lt, 'auto');
 }
 
 /**

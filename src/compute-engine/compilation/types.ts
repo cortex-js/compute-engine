@@ -1270,7 +1270,12 @@ export interface CompilationOptions<Expr = unknown> {
    * compilation promotes an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` with no
    * opt-in, a complex-shaped value reaching a binding the strict attempt
    * shaped real declines with a lane mismatch, and that decline redoes the
-   * compilation ONCE under `'complex'`. The two older flags are deprecated
+   * compilation ONCE under `'complex'`. That redo is each registered
+   * target's own responsibility — the built-in targets apply the shared
+   * `compileWithAutoEscalation` helper (`compilation/auto-escalation.ts`)
+   * inside their `compile()`, and a CUSTOM registered target that declares
+   * `'auto'` support must do the same, or its callers get the raw
+   * `LaneMismatchError` instead of the retry. The two older flags are deprecated
    * and subordinate to this option: `complexPromotion: true` maps to
    * `mode: 'complex'` only when no `mode` is given, and `realOnly` never
    * selects a lowering — it projects the compiled unit's RESULT after the

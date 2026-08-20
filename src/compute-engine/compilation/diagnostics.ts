@@ -28,8 +28,10 @@ export class CompileDeclineError extends Error {
  * complex-typed source, …). Reported as `code: 'lane-mismatch'`, `kind:
  * 'correctness'` — the value the previous emission computed at that boundary
  * was wrong (`NaN`, or a `{re, im}` consumed as a number), and is withdrawn.
- * Under `mode: 'auto'` the engine-level `compile()` catches this error and
- * redoes the compilation in complex mode.
+ * Under `mode: 'auto'` the escalation catches this error and redoes the
+ * compilation in complex mode (`compileWithAutoEscalation` in
+ * `auto-escalation.ts`, applied by a registered target inside its own
+ * `compile()` so both public compile routes escalate alike).
  *
  * `binding` is USER-LEGIBLE by contract: an authored identifier (the
  * parameter `x` of `b`, the local `k`) or an honest description ("an unnamed

@@ -1,6 +1,7 @@
 import type { Expression } from '../global-types.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
+import { compileWithAutoEscalation } from './auto-escalation.js';
 
 import type {
   CompileMode,
@@ -2869,8 +2870,24 @@ export class PythonTarget implements LanguageTarget<Expression> {
       options,
       PYTHON_SUPPORTED_MODES.includes('complex')
     ).options;
+    const requestedMode = options.mode;
     try {
-      return this.compileOrThrow(expr, options);
+      // Under `auto` — requested, or this target's default — a lane mismatch
+      // in the strict attempt redoes the compilation under the complex
+      // discipline. Shared with the standalone `compile()` route, which
+      // reaches the escalation through this method rather than owning a copy
+      // of it (`auto-escalation.ts`); `compileOrThrow` throws on a decline, so
+      // the mismatch reaches the retry instead of the fallback built below,
+      // and each attempt builds its own target.
+      return compileWithAutoEscalation(
+        requestedMode,
+        PYTHON_SUPPORTED_MODES,
+        (m) =>
+          this.compileOrThrow(
+            expr,
+            m === requestedMode ? options : { ...options, mode: m }
+          )
+      );
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented
       // `success: false` shape with an interpreter-backed `run`.
@@ -2885,7 +2902,14 @@ export class PythonTarget implements LanguageTarget<Expression> {
         'python',
         this.createTarget(),
         options.vars ? new Set(Object.keys(options.vars)) : undefined,
-        compileDiagnosticOf(e, error)
+        compileDiagnosticOf(e, error),
+        // The deprecated `realOnly` projection applies to the interpreter-
+        // backed `run` of a fallback exactly as it does to compiled code, and
+        // the standalone `compile()` export now builds no fallback of its own
+        // for a registered target — so it has to be honored here, or a
+        // `realOnly` caller whose compilation declines would get an
+        // unprojected complex value from `run`.
+        options.realOnly
       );
     }
   }
