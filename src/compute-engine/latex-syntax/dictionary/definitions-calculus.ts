@@ -259,7 +259,9 @@ function parseSubintegrand(
 ): [body: MathJsonExpression | null, indexes: string[]] {
   const h = operator(expr);
   const op1 = operand(expr, 1);
-  if (!op1) return [expr, []];
+  // `null` means there is no first operand. A literal `0` first operand is a
+  // legitimate subintegrand (`\int 0\,dx`) and must not be treated as absent.
+  if (op1 === null) return [expr, []];
 
   if (h === 'Sequence' && nops(expr) === 1) return parseSubintegrand(op1);
 
@@ -278,7 +280,9 @@ function parseSubintegrand(
   } else if (h === 'Delimiter') {
     const [fn2, indexes] = parseSubintegrand(op1);
     if (indexes) {
-      if (!fn2) {
+      // `null`, not falsiness: a literal `0` is a body, and reading it as an
+      // absent one would drop a parenthesized zero integrand.
+      if (fn2 === null) {
         // The indexes were in parens: `\int f (dxdy)`
         return [null, indexes];
       }
@@ -323,7 +327,11 @@ function parseSubintegrand(
 
 function serializeIntegral(command: string) {
   return (serializer: Serializer, expr: MathJsonExpression): string => {
-    if (!operand(expr, 1)) return command;
+    // Test for ABSENCE, not for falsiness: `operand()` answers `null` when the
+    // operand is missing, but the literal `0` is its own falsy MathJSON, so a
+    // truthiness test discards the integrand and `\int 0\,dx` serializes to a
+    // bare `\int`.
+    if (operand(expr, 1) === null) return command;
 
     // The arguments of the Integrate command are:
     // - the integrand (a function to integrate) as a function literal:

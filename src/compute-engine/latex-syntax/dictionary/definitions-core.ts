@@ -1761,11 +1761,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       else if (delims.length === 2) [open, close] = delims;
       else if (delims.length === 1) sep = delims;
 
-      const body = arg1
-        ? items
-          ? serializeOps(sep)(serializer, items)
-          : serializer.serialize(arg1)
-        : '';
+      // Test for ABSENCE, not for falsiness: `Delimiter(0)` has a body, and a
+      // truthiness test on the literal `0` emitted an empty pair of fences.
+      // `items` is only ever `arg1` or a `Sequence` wrapper, both truthy.
+      const body =
+        arg1 === null ? '' : serializeOps(sep)(serializer, items);
 
       // if (!open || !close) return serializer.wrapString(body, style);
       return serializer.wrapString(body, style, open + close);
@@ -1853,24 +1853,31 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           ? stringValue(operand(op1, 1))
           : stringValue(op1);
 
+      // The point-arithmetic rejections carry their own codes, so the tooltip
+      // is selected by code rather than by sniffing an `incompatible-type`
+      // payload for the bare spelling `'tuple'`. `pointProductError`
+      // (`arithmetic-mul-div.ts`) has already decided whether `Cross` applies
+      // — it is declared for 3-vectors and answers `incompatible-dimensions`
+      // for a pair of plane points — and states that decision as the payload's
+      // first element, so it is read here rather than recovered from the prose
+      // of the second (which would break on any rewording).
+      if (code === 'no-product-between-points') {
+        const alternatives =
+          stringValue(operand(op1, 2)) === 'cross-applies'
+            ? `\\text{ — }\\mathrm{Dot}\\text{ is the inner product, }\\mathrm{Cross}\\text{ the cross product}`
+            : `\\text{ — use }\\mathrm{Dot}\\text{ for the inner product}`;
+        return `\\mathtip{\\error{${where}}}{\\text{points have no implicit product}${alternatives}}`;
+      }
+
+      if (code === 'no-division-by-point') {
+        return `\\mathtip{\\error{${where}}}{\\text{a point cannot be a divisor}}`;
+      }
+
       if (code === 'incompatible-type') {
         if (symbol(operand(op1, 3)) === 'Undefined') {
           return `\\mathtip{\\error{${where}}}{\\notin ${serializer.serialize(
             operand(op1, 2)
           )}}`;
-        }
-        // The bare-`'tuple'` actual type is the signature of the
-        // no-implicit-tuple-product rejections (`tuple · tuple`, a tuple
-        // divisor — arithmetic-mul-div.ts; validation-route errors carry the
-        // full type spelling instead). Tell the user the operator that DOES
-        // accept points, rather than only that a tuple is not a number.
-        // `Dot` only: `Cross`/`HadamardProduct` do not accept tuples, so
-        // suggesting them would bounce a point user into a second rejection.
-        if (
-          stringValue(operand(op1, 2)) === 'number' &&
-          stringValue(operand(op1, 3)) === 'tuple'
-        ) {
-          return `\\mathtip{\\error{${where}}}{\\text{points have no implicit product — use }\\mathrm{Dot}\\text{ for the inner product}}`;
         }
         return `\\mathtip{\\error{${where}}}{\\in ${serializer.serialize(
           operand(op1, 3)
@@ -1903,7 +1910,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         code === 'invalid-symbol' ||
         code === 'unknown-environment' ||
         code === 'unexpected-base' ||
-        code === 'incompatible-type'
+        code === 'incompatible-type' ||
+        // The `Error` serializer above renders these as a tooltip on the
+        // offending expression, so the bare code must not also print.
+        code === 'no-product-between-points' ||
+        code === 'no-division-by-point'
       ) {
         return '';
       }
@@ -2005,14 +2016,24 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const e = operand(expr, 1);
       const cond = operand(expr, 2);
-      if (!e || !cond) return '';
+      // Test for ABSENCE, not for falsiness: the MathJSON of the literal `0`
+      // is the number `0`, so a truthiness test discards it and the whole
+      // restriction serializes to the empty string. That silently deleted the
+      // Desmos full-plane gate `1>0\left\{cond\right\}` and the axis-line gate
+      // `y=0\left\{cond\right\}` — `1>0{x=x}` parsed correctly and came back
+      // as `1\gt`, which no longer reparses.
+      if (e === null || cond === null) return '';
       // Unfold And clauses into stacked braces:
       const clauses =
         operator(cond) === 'And' ? (operands(cond) ?? []) : [cond];
       const inner = clauses
         .map((c) => `\\left\\{${serializer.serialize(c)}\\right\\}`)
         .join('');
-      return `${serializer.serialize(e)}${inner}`;
+      // Parenthesize a restricted expression whose own precedence is below
+      // this postfix operator, so the braces bind to all of it. Serialized
+      // bare, `When(-1, c)` read back as `Negate(When(1, c))` — the negation
+      // applied to the restriction instead of to its subject.
+      return `${serializer.wrap(e, 800)}${inner}`;
     },
   },
   // When-restriction: bare `expr\{cond\}` → `When(expr, cond)`
@@ -2494,7 +2515,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'Return',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const arg = operand(expr, 1);
-      if (!arg || symbol(arg) === 'Nothing')
+      // Test for ABSENCE, not for falsiness: `operand()` answers `null` when
+      // there is no returned value, but the literal `0` is its own falsy
+      // MathJSON, so a truthiness test turned `return 0` into a bare `return`.
+      if (arg === null || symbol(arg) === 'Nothing')
         return serializeKeyword(serializer, 'return');
       return joinLatex([
         serializeKeyword(serializer, 'return', { trail: true }),
@@ -3364,7 +3388,9 @@ function errorContextAsLatex(
   // The `ErrorTrace` breadcrumb (design §2a) is the LAST operand and may sit
   // in the context slot when the error has no context. It is provenance data,
   // never rendered.
-  if (!arg || operator(arg) === 'ErrorTrace') return '';
+  // `null` is an error with no context operand at all; the literal `0` is a
+  // context like any other, and a truthiness test dropped it.
+  if (arg === null || operator(arg) === 'ErrorTrace') return '';
 
   if (operator(arg) === 'LatexString')
     return stringValue(operand(arg, 1)) ?? '';

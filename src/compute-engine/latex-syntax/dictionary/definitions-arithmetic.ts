@@ -2182,7 +2182,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     serialize: (serializer, expr) => {
       if (symbol(expr) !== null) return '\\log';
       const [body, base] = operands(expr)!;
-      if (!base) return '\\log' + serializer.wrapArguments(expr);
+      // `undefined` is a one-operand `Log`, which has no base to subscript.
+      // The literal `0` is a base like any other as far as notation goes, and
+      // a truthiness test here sent `Log(x, 0)` down the argument-list path.
+      if (base === undefined) return '\\log' + serializer.wrapArguments(expr);
 
       return joinLatex([
         '\\log_{',
@@ -3274,7 +3277,11 @@ function serializeIndexingSet(
 function serializeBigOp(command: string) {
   return (serializer: Serializer, expr: MathJsonExpression): string => {
     const body = operand(expr, 1);
-    if (!body) return command;
+    // Test for ABSENCE, not for falsiness: `operand()` answers `null` when the
+    // operand is missing, but the literal `0` is its own falsy MathJSON, so a
+    // truthiness test drops the body AND its indexing sets — `\sum_{i=1}^{n}0`
+    // serialized to a bare `\sum`.
+    if (body === null) return command;
 
     const indexingSets = collectIndexingSets(expr);
     let decoratedCommand = command;

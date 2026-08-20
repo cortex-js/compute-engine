@@ -698,7 +698,10 @@ function serializeTabularBody(
   serializer: Serializer,
   body: MathJsonExpression | null | undefined
 ): string {
-  if (!body) return '';
+  // Test for ABSENCE, not for falsiness: the literal `0` is a legitimate
+  // single-cell body (`\begin{cases}0&x>0\end{cases}`), and a truthiness test
+  // erased it.
+  if (body === null || body === undefined) return '';
   if (operator(body) !== 'List') return serializer.serialize(body);
 
   const rows = operands(body);
