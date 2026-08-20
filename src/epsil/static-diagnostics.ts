@@ -1436,6 +1436,34 @@ export function describeError(error: MathJsonExpression): string {
           ? 'invalid symbol'
           : `invalid symbol \`${payload.join(', ')}\``;
       break;
+    case 'protocol-function-not-a-field': {
+      // Payload: [member, comma-separated owning protocols]. The site is the
+      // receiver's TYPE name, so the sentence reads "… not a field, at `Box`".
+      // The fix is the whole point of the message, so it is spelled out.
+      //
+      // With SEVERAL owners the fix changes: a bare `span(b)` is then
+      // `protocol-call-ambiguous` in its own right, so the message must ask
+      // for a qualified name rather than recommend a call that fails. And a
+      // third payload slot of `assign` marks a STORE target (`b.span = 5`),
+      // where no call is being recommended at all — the member simply cannot
+      // be written.
+      const owners = (payload[1] ?? '')
+        .split(', ')
+        .filter((p) => p !== '')
+        .map((p) => `\`${p}\``);
+      const kinds = owners.length === 1 ? 'protocol' : 'protocols';
+      const advice =
+        payload[2] === 'assign'
+          ? ' and cannot be assigned'
+          : owners.length === 1
+            ? `: call it as \`${payload[0]}(x)\``
+            : '; more than one applies here, so call it with a qualified name';
+      detail =
+        payload.length >= 2 && owners.length > 0
+          ? `\`${payload[0]}\` is a function member of the ${owners.join(' and ')} ${kinds}, not a field${advice}`
+          : `a protocol function member is not a field (${payload.join(', ')})`;
+      break;
+    }
     default: {
       // A kebab-case code reads as words; a free-form message (a thrown
       // `Error`'s text captured as the cause) passes through verbatim.

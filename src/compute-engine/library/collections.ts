@@ -126,6 +126,7 @@ import { adjoinType } from './type-handlers.js';
 import {
   evaluateProtocolProperty,
   immutableValueAssignmentError,
+  protocolFunctionMemberOwners,
   protocolMemberSignature,
   protocolMemberValue,
   protocolOfSymbol,
@@ -133,6 +134,35 @@ import {
 } from '../engine-protocols.js';
 
 // From NumPy:
+/**
+ * The error for reading a protocol FUNCTION member as a field (`b.span`), or
+ * `undefined` when `name` is not one — in which case the caller's remaining
+ * rungs own the verdict.
+ *
+ * Separated from the call site so the two-line conditional there stays a chain
+ * of "who answers this name" rungs.
+ */
+function protocolFunctionFieldError(
+  ce: ComputeEngine,
+  receiver: Type,
+  name: string,
+  typeName: string,
+  /** `'assign'` when the name was a STORE target (`b.span = 5`), whose advice
+   * differs: a function member cannot be assigned at all, so the message must
+   * not recommend calling it. */
+  mode: 'read' | 'assign' = 'read'
+): Expression | undefined {
+  const owners = protocolFunctionMemberOwners(ce, receiver, name);
+  if (owners.length === 0) return undefined;
+  // Every owner travels in the payload: with more than one, a bare call is
+  // itself `protocol-call-ambiguous`, so the message has to steer to a
+  // qualified name instead of recommending the plain spelling.
+  return ce.error(
+    ['protocol-function-not-a-field', name, owners.join(', '), mode],
+    typeName
+  );
+}
+
 export const DEFAULT_LINSPACE_COUNT = 50;
 
 /**
@@ -1577,12 +1607,23 @@ export function fieldStoreRefusal(
     return undefined;
   // An OBJECT receiver is mutable — the target is fine, the NAME is not. Saying
   // "not an object type" here would be flatly false and would send the reader
-  // looking for the wrong problem, so this reports the same `unknown-field`
-  // (naming what IS stored) that reading the same name reports.
+  // looking for the wrong problem, so this reports what reading the same name
+  // reports: a protocol FUNCTION member of that name if one answers (`b.span =
+  // 5` names a member that exists and is simply not assignable), otherwise the
+  // `unknown-field` that names what IS stored.
   if (base !== undefined && isObject(base))
-    return ce.error(
-      ['unknown-field', name, [...base._slots.keys()].join(', ')],
-      base.typeName
+    return (
+      protocolFunctionFieldError(
+        ce,
+        base.type.type,
+        name,
+        base.typeName,
+        'assign'
+      ) ??
+      ce.error(
+        ['unknown-field', name, [...base._slots.keys()].join(', ')],
+        base.typeName
+      )
     );
   return immutableValueAssignmentError(ce, name, base?.type.type ?? 'unknown');
 }
@@ -5725,8 +5766,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // on the record and named-tuple arms below — a conforming object may
         // answer a name that is not one of its stored fields — and the error
         // that follows names what IS stored.
+        //
+        // Between the two: a protocol FUNCTION member of the same name. The
+        // two member kinds are spelled differently — a function member is
+        // called (`span(b)`), a property is read with a dot (`b.area`) — so
+        // `b.span` is a spelling mistake, and the layout message ("unknown
+        // field `span`, the object has `w, h`") would send the author looking
+        // for a field that was never the point. The record and named-tuple
+        // arms below run the same three rungs in the same order: a conformer
+        // is a conformer whatever shape its body has, so the three must not
+        // disagree about what `.span` means.
         return (
           property() ??
+          protocolFunctionFieldError(ce, base.type.type, name, base.typeName) ??
           ce.error(
             ['unknown-field', name, [...base._slots.keys()].join(', ')],
             base.typeName
@@ -5775,7 +5827,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             const v = payload.get(name);
             if (v !== undefined) return v.canonical.evaluate();
             return (
-              property() ?? ce.error(['unknown-field', name], base.toString())
+              property() ??
+              protocolFunctionFieldError(
+                ce,
+                base.type.type,
+                name,
+                base.toString()
+              ) ??
+              ce.error(['unknown-field', name], base.toString())
             );
           }
         }
@@ -5785,7 +5844,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const i = rt.elements.findIndex((x) => x.name === name);
         if (i < 0)
           return (
-            property() ?? ce.error(['unknown-field', name], base.toString())
+            property() ??
+            protocolFunctionFieldError(
+              ce,
+              base.type.type,
+              name,
+              base.toString()
+            ) ??
+            ce.error(['unknown-field', name], base.toString())
           );
         // A tagged nominal value spreads its tuple payload inline
         // (`["pt", 1, 2]`); a plain `Tuple` value has the same shape.

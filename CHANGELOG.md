@@ -43,6 +43,22 @@
   statement sequence in an IIFE rather than a flat `a + b + c` chain; two- and
   three-term sums keep the flat chain, and the loop form is untouched.
 
+- **A protocol function member read as a field now says so.** `b.span` for a
+  `function span(self: Self) -> number` requirement reported
+  `unknown-field "span" (w, h)` — true of the object's LAYOUT and useless to
+  the author, since the name they wrote does exist, on a protocol the value
+  conforms to. It now reports `protocol-function-not-a-field`, naming the
+  protocol and the call spelling: a `function` member is called (`span(b)`),
+  only a `readonly`/`readwrite` property is read with a dot (`b.area`). This is
+  the mirror of the `protocol-property-not-callable` warning below. Object,
+  record and named-tuple receivers all report it, and so does an ASSIGNMENT to
+  such a name (`b.span = 5`), whose message says the member cannot be written
+  rather than recommending a call. When several conformances answer the same
+  name, the message names them all and asks for a qualified call, since a bare
+  one would be `protocol-call-ambiguous`. A name no protocol claims still
+  reports the layout, and so does a name whose conformance is not settled — a
+  PENDING edge carries no implementation, so there is no call to recommend yet.
+
 - **Epsil: a protocol property called as a function is now reported.** A
   protocol's two member kinds are spelled differently — a `function` member is
   invoked in call position (`span(b)`), a `readonly`/`readwrite` property is

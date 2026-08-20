@@ -153,6 +153,12 @@ Within one program a redeclaration is a mistake; re-running an edited declaratio
 
 \`protocol\` declarations follow the same rule (see \`epsil doc protocol-declaration-not-top-level\`).`,
 
+  'protocol-function-not-a-field': `A protocol's \`function\` member was read with a dot, as if it were a field or a property.
+
+A protocol declares two kinds of member, and they are used differently. A \`function\` member is CALLED, with the receiver as its first argument: \`span(b)\`. A \`readonly\` or \`readwrite\` member is a PROPERTY, read with a dot: \`b.area\`. So \`b.span\` is a spelling mistake rather than a missing field — the name exists, on a protocol the value conforms to.
+
+The mirror mistake, calling a property (\`area(b)\`), is reported as \`protocol-property-not-callable\`.`,
+
   'protocol-declaration-not-top-level': `A \`protocol\` statement appears inside a block or a function body. Protocols, like types, are engine-global (see \`epsil doc type-declaration-not-top-level\`), so protocol declarations are legal only at the top level of a program.`,
 
   'runtime-error': `Runtime problems in Epsil are VALUES, not exceptions: a failing subexpression evaluates to an Error value, which propagates outward through the enclosing expressions. Nothing is thrown, and the rest of the program keeps running.

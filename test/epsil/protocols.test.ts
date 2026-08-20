@@ -732,6 +732,136 @@ describe('EPSIL PROTOCOL EXECUTION', () => {
   });
 });
 
+describe('a protocol FUNCTION member read as a field', () => {
+  // The mirror of the property-called-as-a-function case below. `b.span` used
+  // to report `unknown-field span (w, h)` — true of the LAYOUT and useless to
+  // the author, since the name they wrote does exist, on a protocol the value
+  // conforms to.
+  const SIZED_IMPL = [
+    'protocol Sized {',
+    '  function span(self: Self) -> number;',
+    '  readonly area: number;',
+    '}',
+    'type Box = object { w: number, h: number }',
+    'type Box is Sized {',
+    '  function span(self: Self) { self.w }',
+    '  get area(self: Self) { self.w * self.h }',
+    '}',
+    'const b = Box(w: 2, h: 3);',
+  ].join('\n');
+
+  /** The final value of `source`, run after `setup`. */
+  const value = (setup: string, source: string) => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, setup);
+    return executeEpsil(ce, source).value.toString();
+  };
+
+  test('names the protocol and the call spelling', () => {
+    expect(value(SIZED_IMPL, 'b.span')).toContain(
+      'ErrorCode("protocol-function-not-a-field", "span", "Sized", "read")'
+    );
+    // The call spelling makes no difference: the field read fails first.
+    expect(value(SIZED_IMPL, 'b.span()')).toContain(
+      'protocol-function-not-a-field'
+    );
+  });
+
+  test('the spelling it recommends is the working one, and properties are unaffected', () => {
+    expect(value(SIZED_IMPL, 'span(b)')).toBe('2');
+    expect(value(SIZED_IMPL, 'b.area')).toBe('6');
+    expect(value(SIZED_IMPL, 'b.w')).toBe('2');
+  });
+
+  test('a genuinely missing field still reports the layout', () => {
+    expect(value(SIZED_IMPL, 'b.zz')).toContain(
+      'ErrorCode("unknown-field", "zz", "w, h")'
+    );
+  });
+
+  test('AMBIGUITY steers to a qualified name, not to a call that fails', () => {
+    // With two owners a bare `span(b)` is `protocol-call-ambiguous` in its own
+    // right, so recommending it would contradict the dispatcher.
+    const setup = [
+      'protocol Sized {',
+      '  function span(self: Self) -> number;',
+      '}',
+      'protocol Ranged {',
+      '  function span(self: Self) -> number;',
+      '}',
+      'type Box = object { w: number, h: number }',
+      'type Box is Sized {',
+      '  function span(self: Self) { self.w }',
+      '}',
+      'type Box is Ranged {',
+      '  function span(self: Self) { self.h }',
+      '}',
+      'const b = Box(w: 2, h: 3);',
+    ].join('\n');
+    // Both owners travel in the payload; the message picks its advice from
+    // how many there are.
+    expect(value(setup, 'b.span')).toContain(
+      'ErrorCode("protocol-function-not-a-field", "span", "Sized, Ranged"'
+    );
+    expect(value(setup, 'span(b)')).toContain('protocol-call-ambiguous');
+  });
+
+  test('a nominal TUPLE conformer reports it too', () => {
+    // The object, record and named-tuple arms of the field handler run the
+    // same rungs: a conformer is a conformer whatever shape its body has.
+    const setup = [
+      'protocol Sized {',
+      '  function span(self: Self) -> number;',
+      '}',
+      'type Pt = tuple<x: number, y: number>',
+      'type Pt is Sized {',
+      '  function span(self: Self) { self.x }',
+      '}',
+      'const p = Pt(1, 2);',
+    ].join('\n');
+    expect(value(setup, 'p.span')).toContain('protocol-function-not-a-field');
+    expect(value(setup, 'span(p)')).toBe('1');
+    expect(value(setup, 'p.x')).toBe('1');
+    expect(value(setup, 'p.zz')).toContain('unknown-field');
+  });
+
+  test('ASSIGNING to one reports it, with advice that fits a write', () => {
+    // The store path reported the same `unknown-field` the read path used to;
+    // it follows the read path here, but a function member cannot be written
+    // at all, so the message must not recommend calling it.
+    expect(value(SIZED_IMPL, 'b.span = 5')).toContain(
+      'ErrorCode("protocol-function-not-a-field", "span", "Sized", "assign")'
+    );
+  });
+
+  test('declines when the type does NOT conform', () => {
+    // Naming a protocol the receiver does not conform to would advertise
+    // `span(b)`, a call that then fails to dispatch.
+    const setup = [
+      'protocol Sized {',
+      '  function span(self: Self) -> number;',
+      '}',
+      'type Box = object { w: number, h: number }',
+      'const b = Box(w: 2, h: 3);',
+    ].join('\n');
+    expect(value(setup, 'b.span')).toContain('unknown-field');
+  });
+
+  test('declines while the conformance is PENDING', () => {
+    // Only a settled edge carries an implementation, so there is no call to
+    // recommend yet; the layout message stands, beside the pending warning.
+    const setup = [
+      'protocol Sized {',
+      '  function span(self: Self) -> number;',
+      '}',
+      'type Box = object { w: number, h: number }',
+      'type Box is Sized;',
+      'const b = Box(w: 2, h: 3);',
+    ].join('\n');
+    expect(value(setup, 'b.span')).toContain('unknown-field');
+  });
+});
+
 describe('a protocol PROPERTY called as a function', () => {
   // A `function` member is invoked in call position (`span(b)`); a
   // `readonly`/`readwrite` property is read with a dot (`b.area`). The call

@@ -4610,6 +4610,47 @@ export function protocolsWithProperty(
 }
 
 /**
+ * The protocol that declares `name` as a FUNCTION requirement and has a
+ * SETTLED conformance covering `receiver` — or `undefined` when none does.
+ *
+ * Exists for one diagnostic. A protocol's two member kinds are spelled
+ * differently — a function member is called (`span(b)`), a property is read
+ * with a dot (`b.area`) — so `b.span` is a spelling mistake, not a missing
+ * field. Without this the field-access path reported `unknown-field span
+ * (w, h)`, which is true of the LAYOUT and useless to the author: the name
+ * they wrote does exist, on a protocol the value conforms to.
+ *
+ * Conformance is required, not merely a declaration of the name somewhere:
+ * naming a protocol the receiver does NOT conform to would advertise
+ * `span(b)`, a call that then fails to dispatch. Only a settled edge carries
+ * an implementation, so a PENDING conformance answers `undefined` here and
+ * keeps the layout message — which is accurate while nothing implements the
+ * member, and is accompanied by its own pending diagnostic.
+ *
+ * ALL the owners are returned, not just one, because the advice differs when
+ * there are several: a bare `span(b)` is what the caller should write when one
+ * protocol answers, but with two it is itself an error — the dispatcher
+ * reports `protocol-call-ambiguous` and asks for a qualified name. A message
+ * naming only the first would recommend the very call that then fails.
+ */
+export function protocolFunctionMemberOwners(
+  ce: IComputeEngine,
+  receiver: Type,
+  name: string
+): string[] {
+  const records = protocolsWithMember(ce, name);
+  if (records.length === 0) return [];
+  if (!isDecidedReceiverType(receiver)) return [];
+  // A function member's implementation is keyed on the bare member name; the
+  // `__get__`/`__set__` prefixes are the PROPERTY mangling.
+  return [
+    ...new Set(
+      bestCandidates(ce, records, name, receiver).map((c) => c.record.name)
+    ),
+  ];
+}
+
+/**
  * Resolve the property `name` on a receiver of type `receiver` (P18).
  *
  * The getter is what makes a candidate: an edge whose implementation carries
