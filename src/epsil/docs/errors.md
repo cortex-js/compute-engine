@@ -31,6 +31,20 @@ The message reads "expected `T`, got `U`": T is what the context requires, U is 
 
 The check runs twice by design: once statically, when the program is canonicalized (reported before anything runs), and again during evaluation, where the mismatch becomes an error value that propagates outward (see `epsil doc runtime-error`).
 
+## `no-product-between-points`
+
+Two points (tuples) were multiplied, and there is no implicit product between points. Multiplication of a point by a SCALAR is defined — it scales each component — and so is adding two points of the same arity, but `(1, 2) * (3, 4)` has no single meaning, so the engine rejects it rather than guessing.
+
+Say which product you mean. `Dot(a, b)` is the inner product (`(1,2)·(3,4)` is 11) and is defined whenever the two points have the same number of components. `Cross(a, b)` is the cross product, defined only for two 3-component points; the message names it only when both operands have three components, because for a pair of plane points it would just produce an `incompatible-dimensions` error instead.
+
+Juxtaposition, `\cdot` and `\times` all parse to the same multiplication, so writing `a \times b` between two points does not select the cross product — spell `Cross(a, b)` for that.
+
+## `no-division-by-point`
+
+A point (tuple) was used as a divisor. Dividing a point BY a scalar is defined — it scales each component, so `(4, 6) / 2` is `(2, 3)` — but there is no reciprocal of a point, so neither `x / (1, 2)` nor `(1, 2) / (3, 4)` has a meaning to give them.
+
+If you meant to scale by the reciprocal of one component, index it: `p / q[1]`. If you meant a component-wise quotient, build it explicitly from the components.
+
 ## `missing`
 
 A function was called with fewer arguments than its signature requires; the error marks the position of the argument that was not provided.
@@ -202,6 +216,14 @@ Within one program a redeclaration is a mistake; re-running an edited declaratio
 A `type` statement appears inside a block or a function body. Types are engine-global — a type's name, constructor and conformances are visible to the whole session, never scoped to a block — so a nested declaration would promise a locality it cannot deliver. Declare the type at the top level of the program.
 
 `protocol` declarations follow the same rule (see `epsil doc protocol-declaration-not-top-level`).
+
+## `protocol-function-not-a-field`
+
+A protocol's `function` member was read with a dot, as if it were a field or a property.
+
+A protocol declares two kinds of member, and they are used differently. A `function` member is CALLED, with the receiver as its first argument: `span(b)`. A `readonly` or `readwrite` member is a PROPERTY, read with a dot: `b.area`. So `b.span` is a spelling mistake rather than a missing field — the name exists, on a protocol the value conforms to.
+
+The mirror mistake, calling a property (`area(b)`), is reported as `protocol-property-not-callable`.
 
 ## `protocol-declaration-not-top-level`
 

@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`evaluate()` now leaves a product of sums FACTORED.** `(a+b)(c+d)`
+  evaluates to itself rather than to `ac+bc+ad+bd`, and `2(x+1)` stays
+  `2(x+1)`. `evaluate()`'s contract is the most EXACT form, and a factored
+  product is exactly as exact as the polynomial it expands to while being
+  smaller — often dramatically so, since expanding multiplies the term count at
+  every factor. **`Expand` reproduces the previous output verbatim**, so code
+  that needs the expanded form should ask for it. This is what made a `Product`
+  of linear factors superlinear: `∏_{k=1}^{8}(kn-1)` returned a nine-term
+  polynomial with large coefficients instead of its eight compact factors, and
+  a plotting consumer paid that cost on every sample because a plot axis
+  variable can never be bound.
+
+  `simplify()` and `.N()` still expand, as does every internal normalization
+  path — the change is confined to the `Multiply` and `Product` evaluate
+  handlers (`mulFactored()` and `productAccumulate()` respectively; the
+  `∏(kn-1)` example above is the `Product` half). Several
+  results are now reported factored where they were not: `∫x²/(2(1+x²))dx` is
+  `½(x - arctan x)`, `d/dx LambertW(x)` is `W(x)/(x(W(x)+1))`, and a quadratic
+  with a symbolic coefficient solves to `½(a ± √(a²-4))`. The values are
+  unchanged.
+
 ### Improvements
 
 - **Raw-form subscript folding no longer depends on the base's spelling.**

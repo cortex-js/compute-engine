@@ -21,7 +21,7 @@ function parse(latex: string): Expression {
  */
 const TUPLE_DIVISOR_ERROR: Expression = [
   'Error',
-  ['ErrorCode', "'incompatible-type'", "'number'", "'tuple'"],
+  ['ErrorCode', "'no-division-by-point'"],
 ];
 
 /**

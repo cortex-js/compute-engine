@@ -1764,8 +1764,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // Test for ABSENCE, not for falsiness: `Delimiter(0)` has a body, and a
       // truthiness test on the literal `0` emitted an empty pair of fences.
       // `items` is only ever `arg1` or a `Sequence` wrapper, both truthy.
-      const body =
-        arg1 === null ? '' : serializeOps(sep)(serializer, items);
+      const body = arg1 === null ? '' : serializeOps(sep)(serializer, items);
 
       // if (!open || !close) return serializer.wrapString(body, style);
       return serializer.wrapString(body, style, open + close);
@@ -1862,10 +1861,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // first element, so it is read here rather than recovered from the prose
       // of the second (which would break on any rewording).
       if (code === 'no-product-between-points') {
+        const marker = stringValue(operand(op1, 2));
+        // Three states, all decided by `pointProductError`: both alternatives
+        // apply, only `Dot` does, or neither does because the points have
+        // different component counts (`Dot` rejects those too).
         const alternatives =
-          stringValue(operand(op1, 2)) === 'cross-applies'
-            ? `\\text{ — }\\mathrm{Dot}\\text{ is the inner product, }\\mathrm{Cross}\\text{ the cross product}`
-            : `\\text{ — use }\\mathrm{Dot}\\text{ for the inner product}`;
+          marker === 'dimension-mismatch'
+            ? `\\text{ — they have different dimensions}`
+            : marker === 'cross-applies'
+              ? `\\text{ — }\\mathrm{Dot}\\text{ is the inner product, }\\mathrm{Cross}\\text{ the cross product}`
+              : `\\text{ — use }\\mathrm{Dot}\\text{ for the inner product}`;
         return `\\mathtip{\\error{${where}}}{\\text{points have no implicit product}${alternatives}}`;
       }
 

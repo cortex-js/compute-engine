@@ -565,18 +565,26 @@ describe('SIMPLIFICATION sqrt', () => {
       evaluateToJson('\\frac{\\sqrt{4+2\\sqrt{3}}-\\sqrt{28+10\\sqrt{3}}}{15}')
     ).toMatchInlineSnapshot(`
       [
-        Add,
+        Multiply,
         [
-          Multiply,
+          Divide,
           [
-            Negate,
+            Sqrt,
+            2,
+          ],
+          15,
+        ],
+        [
+          Subtract,
+          [
+            Sqrt,
             [
-              Divide,
+              Add,
+              2,
               [
                 Sqrt,
-                2,
+                3,
               ],
-              15,
             ],
           ],
           [
@@ -591,28 +599,6 @@ describe('SIMPLIFICATION sqrt', () => {
                   Sqrt,
                   3,
                 ],
-              ],
-            ],
-          ],
-        ],
-        [
-          Multiply,
-          [
-            Divide,
-            [
-              Sqrt,
-              2,
-            ],
-            15,
-          ],
-          [
-            Sqrt,
-            [
-              Add,
-              2,
-              [
-                Sqrt,
-                3,
               ],
             ],
           ],

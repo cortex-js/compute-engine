@@ -93,15 +93,15 @@ describe('SOLVING A QUADRATIC EQUATION', () => {
     const roots = ce.parse('x^2 - a x + 1 = 0').solve('x') ?? [];
     expect(roots.map((r) => r.toLatex())).toMatchInlineSnapshot(`
       [
-        \\frac{a}{2}+\\frac{1}{2}(\\sqrt{a^2-4}),
-        \\frac{a}{2}-\\frac{1}{2}(\\sqrt{a^2-4}),
+        \\frac{1}{2}(a+\\sqrt{a^2-4}),
+        \\frac{1}{2}(a-\\sqrt{a^2-4}),
       ]
     `);
     // Each root must satisfy the original equation
     for (const r of roots)
-      expect(ce.parse('x^2 - a x + 1').subs({ x: r }).simplify().isEqual(0)).toBe(
-        true
-      );
+      expect(
+        ce.parse('x^2 - a x + 1').subs({ x: r }).simplify().isEqual(0)
+      ).toBe(true);
   });
 });
 
@@ -824,45 +824,65 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
   const maxResidual = (mj: any) => {
     const e = ce.expr(mj);
     const rs = e.solve('x') ?? [];
-    return Math.max(
-      0,
-      ...rs.map((r) => Math.abs(e.subs({ x: r }).N().re))
-    );
+    return Math.max(0, ...rs.map((r) => Math.abs(e.subs({ x: r }).N().re)));
   };
 
   test('general cubic with irrational roots: 3x³−18x²+33x−19', () => {
     // Was [] before B9 (no rational root). Three real roots.
-    const mj = ['Add', ['Multiply', 3, ['Power', 'x', 3]],
-      ['Multiply', -18, ['Power', 'x', 2]], ['Multiply', 33, 'x'], -19];
+    const mj = [
+      'Add',
+      ['Multiply', 3, ['Power', 'x', 3]],
+      ['Multiply', -18, ['Power', 'x', 2]],
+      ['Multiply', 33, 'x'],
+      -19,
+    ];
     expect(roots(mj)?.length).toBe(3);
     expect(maxResidual(mj)).toBeLessThan(1e-6);
   });
 
   test('cubic with one real root: x³−2x−5 (Newton’s example)', () => {
-    const mj = ['Subtract', ['Subtract', ['Power', 'x', 3], ['Multiply', 2, 'x']], 5];
+    const mj = [
+      'Subtract',
+      ['Subtract', ['Power', 'x', 3], ['Multiply', 2, 'x']],
+      5,
+    ];
     const r = roots(mj)!;
     expect(r.length).toBe(1);
     expect(r[0]).toBeCloseTo(2.0945514815, 6);
   });
 
   test('casus irreducibilis (three real roots): x³−3x+1', () => {
-    const mj = ['Add', ['Subtract', ['Power', 'x', 3], ['Multiply', 3, 'x']], 1];
+    const mj = [
+      'Add',
+      ['Subtract', ['Power', 'x', 3], ['Multiply', 3, 'x']],
+      1,
+    ];
     expect(roots(mj)?.length).toBe(3);
     expect(maxResidual(mj)).toBeLessThan(1e-6);
   });
 
   test('quartic: x⁴−10x²+1 (four real roots)', () => {
-    const mj = ['Add', ['Subtract', ['Power', 'x', 4], ['Multiply', 10, ['Power', 'x', 2]]], 1];
+    const mj = [
+      'Add',
+      ['Subtract', ['Power', 'x', 4], ['Multiply', 10, ['Power', 'x', 2]]],
+      1,
+    ];
     expect(roots(mj)?.length).toBe(4);
     expect(maxResidual(mj)).toBeLessThan(1e-6);
   });
 
   test('biquadratic stays exact when roots are rational: x⁴−5x²+4', () => {
-    const mj = ['Add', ['Subtract', ['Power', 'x', 4], ['Multiply', 5, ['Power', 'x', 2]]], 4];
+    const mj = [
+      'Add',
+      ['Subtract', ['Power', 'x', 4], ['Multiply', 5, ['Power', 'x', 2]]],
+      4,
+    ];
     const rs = ce.expr(mj).solve('x')!;
     // Exact integers, not floats (the numeric fallback must not shadow them).
     expect(rs.every((r) => Number.isInteger(r.json))).toBe(true);
-    expect(rs.map((r) => r.N().re).sort((a, b) => a - b)).toEqual([-2, -1, 1, 2]);
+    expect(rs.map((r) => r.N().re).sort((a, b) => a - b)).toEqual([
+      -2, -1, 1, 2,
+    ]);
   });
 
   test('biquadratic with irrational roots is exact: x⁴+x²−1', () => {
@@ -873,9 +893,7 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
     expect(rs.length).toBe(2);
     // Exact radical form (contains a √), not a floating-point approximation.
     expect(rs.some((r) => r.toString().includes('sqrt'))).toBe(true);
-    expect(
-      rs.map((r) => r.N().re).sort((a, b) => a - b)
-    ).toEqual([
+    expect(rs.map((r) => r.N().re).sort((a, b) => a - b)).toEqual([
       -0.7861513777574233, 0.7861513777574233,
     ]);
     // Residual ≈ 0.
@@ -902,10 +920,19 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
       ce.expr(['Subtract', ['Power', 'x', 3], 2]).solve('x')?.[0].json
     ).toEqual(['Root', 2, 3]);
     // factorable rational roots → exact integers
-    const c = ['Add', ['Power', 'x', 3], ['Multiply', -6, ['Power', 'x', 2]],
-      ['Multiply', 11, 'x'], -6];
+    const c = [
+      'Add',
+      ['Power', 'x', 3],
+      ['Multiply', -6, ['Power', 'x', 2]],
+      ['Multiply', 11, 'x'],
+      -6,
+    ];
     expect(
-      ce.expr(c).solve('x')?.map((x) => x.N().re).sort((a, b) => a - b)
+      ce
+        .expr(c)
+        .solve('x')
+        ?.map((x) => x.N().re)
+        .sort((a, b) => a - b)
     ).toEqual([1, 2, 3]);
   });
 });
@@ -1547,7 +1574,11 @@ describe('TRANSCENDENTAL AND SUBSTITUTION EQUATIONS (B9)', () => {
   });
 
   test('2^x = 2^3 → x = 3 (general base)', () => {
-    expect(expr('2^x=2^3').solve('x')?.map((x) => x.json)).toMatchInlineSnapshot(`
+    expect(
+      expr('2^x=2^3')
+        .solve('x')
+        ?.map((x) => x.json)
+    ).toMatchInlineSnapshot(`
       [
         3,
       ]
@@ -1735,16 +1766,20 @@ describe('INVERSE-TRIG EQUATIONS (B9)', () => {
 
   // tan: x/√(1−x²) = x → x·(1/√(1−x²) − 1) = 0 → x = 0.
   test('arcsin x = arctan x → {0} (exceeds SymPy)', () => {
-    expect(expr('\\arcsin x = \\arctan x').solve('x')?.map((x) => x.json)).toEqual([
-      0,
-    ]);
+    expect(
+      expr('\\arcsin x = \\arctan x')
+        .solve('x')
+        ?.map((x) => x.json)
+    ).toEqual([0]);
   });
 
   // Symmetric in the two sides.
   test('arctan x = arcsin x → {0}', () => {
-    expect(expr('\\arctan x = \\arcsin x').solve('x')?.map((x) => x.json)).toEqual([
-      0,
-    ]);
+    expect(
+      expr('\\arctan x = \\arcsin x')
+        .solve('x')
+        ?.map((x) => x.json)
+    ).toEqual([0]);
   });
 
   // tan: √(1−x²)/x = x → √(1−x²) = x² → x⁴ + x² − 1 = 0 → x = √((√5−1)/2).
@@ -1753,7 +1788,10 @@ describe('INVERSE-TRIG EQUATIONS (B9)', () => {
   test('arccos x = arctan x → √((√5−1)/2) (exceeds SymPy)', () => {
     const result = expr('\\arccos x = \\arctan x').solve('x');
     expect(result?.length).toBe(1);
-    expect(result![0].N().re).toBeCloseTo(Math.sqrt((Math.sqrt(5) - 1) / 2), 10);
+    expect(result![0].N().re).toBeCloseTo(
+      Math.sqrt((Math.sqrt(5) - 1) / 2),
+      10
+    );
   });
 
   // The downstream √(f) = g(nonlinear) → biquadratic path now solves too (the
@@ -1771,7 +1809,9 @@ describe('INVERSE-TRIG EQUATIONS (B9)', () => {
   // peel, not this strategy.
   test('arcsin x = arcsin(1/2) → {1/2}', () => {
     expect(
-      expr('\\arcsin x = \\arcsin(1/2)').solve('x')?.map((x) => x.json)
+      expr('\\arcsin x = \\arcsin(1/2)')
+        .solve('x')
+        ?.map((x) => x.json)
     ).toEqual([['Rational', 1, 2]]);
   });
 });
@@ -1792,9 +1832,8 @@ describe('SOLVE OPERATOR (B9)', () => {
 
   test('Solve(x² − 1, x) — a bare expression is read as = 0', () => {
     expect(
-      ce
-        .expr(['Solve', ['Subtract', ['Power', 'x', 2], 1], 'x'])
-        .evaluate().json
+      ce.expr(['Solve', ['Subtract', ['Power', 'x', 2], 1], 'x']).evaluate()
+        .json
     ).toEqual(['List', 1, -1]);
   });
 
@@ -1811,9 +1850,7 @@ describe('SOLVE OPERATOR (B9)', () => {
     // solutions"; instead it stays inert so the caller sees the request was
     // not solved (a genuine no-solution equation still returns `[]`).
     for (const op of ['Less', 'LessEqual', 'Greater', 'GreaterEqual']) {
-      const r = ce
-        .expr(['Solve', [op, ['Power', 'x', 2], 4], 'x'])
-        .evaluate();
+      const r = ce.expr(['Solve', [op, ['Power', 'x', 2], 4], 'x']).evaluate();
       expect(r.operator).toBe('Solve');
     }
   });
@@ -1856,7 +1893,10 @@ describe('SOLVE OPERATOR (B9)', () => {
     });
 
     test('several free variables, none named x: no default (missing error)', () => {
-      const r = ce.expr(['Solve', ['Equal', ['Add', ['Power', 'y', 2], 'a'], 1]]);
+      const r = ce.expr([
+        'Solve',
+        ['Equal', ['Add', ['Power', 'y', 2], 'a'], 1],
+      ]);
       expect(r.json).toEqual([
         'Solve',
         ['Equal', ['Add', ['Power', 'y', 2], 'a'], 1],
@@ -1997,42 +2037,62 @@ describe('MULTI-VARIABLE SOLVE (system of equations)', () => {
 describe('inverse trigonometric equations', () => {
   test('arcsin(x) = 1/3 → x = sin(1/3)', () => {
     // Scaled shape (clearDenominators rewrites `arcsin x − 1/3` → `3·arcsin x − 1`)
-    const result = expr('\\arcsin x = 1/3').solve('x')?.map((x) => x.json);
+    const result = expr('\\arcsin x = 1/3')
+      .solve('x')
+      ?.map((x) => x.json);
     expect(result).toEqual([['Sin', ['Rational', 1, 3]]]);
   });
 
   test('arccos(x) = 1/2 → x = cos(1/2)', () => {
-    const result = expr('\\arccos x = 1/2').solve('x')?.map((x) => x.json);
+    const result = expr('\\arccos x = 1/2')
+      .solve('x')
+      ?.map((x) => x.json);
     expect(result).toEqual([['Cos', ['Rational', 1, 2]]]);
   });
 
   test('arctan(x) = 1/2 → x = tan(1/2)', () => {
-    const result = expr('\\arctan x = 1/2').solve('x')?.map((x) => x.json);
+    const result = expr('\\arctan x = 1/2')
+      .solve('x')
+      ?.map((x) => x.json);
     expect(result).toEqual([['Tan', ['Rational', 1, 2]]]);
   });
 });
 
 describe('hyperbolic equations', () => {
   test('sinh(x) = 1 → x = arsinh(1)', () => {
-    const result = expr('\\sinh x = 1').solve('x')?.map((x) => x.json);
+    const result = expr('\\sinh x = 1')
+      .solve('x')
+      ?.map((x) => x.json);
     expect(result).toEqual([['Arsinh', 1]]);
   });
 
   test('cosh(x) = 2 → x = ±arcosh(2) (both branches)', () => {
-    const result = expr('\\cosh x = 2').solve('x')?.map((x) => x.json);
-    expect(result).toEqual([['Arcosh', 2], ['Negate', ['Arcosh', 2]]]);
+    const result = expr('\\cosh x = 2')
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result).toEqual([
+      ['Arcosh', 2],
+      ['Negate', ['Arcosh', 2]],
+    ]);
   });
 
   test('tanh(x) = 1/2 → x = artanh(1/2)', () => {
-    const result = expr('\\tanh x = 1/2').solve('x')?.map((x) => x.json);
+    const result = expr('\\tanh x = 1/2')
+      .solve('x')
+      ?.map((x) => x.json);
     expect(result).toEqual([['Artanh', ['Rational', 1, 2]]]);
   });
 
   // eˣ + e⁻ˣ = 4 harmonizes to 2·cosh(x) = 4, then the cosh template returns
   // both roots ±arcosh(2) = ln(2 ± √3).
   test('eˣ + e⁻ˣ = 4 → x = ±arcosh(2)', () => {
-    const result = expr('e^x + e^{-x} = 4').solve('x')?.map((x) => x.json);
-    expect(result).toEqual([['Arcosh', 2], ['Negate', ['Arcosh', 2]]]);
+    const result = expr('e^x + e^{-x} = 4')
+      .solve('x')
+      ?.map((x) => x.json);
+    expect(result).toEqual([
+      ['Arcosh', 2],
+      ['Negate', ['Arcosh', 2]],
+    ]);
   });
 });
 
@@ -2041,7 +2101,9 @@ describe('rational and absolute-value equations', () => {
   // `2x/(x+2) · (x+2)` cancels to `2x` (rather than expanding into a
   // non-cancelling `2x²+4x`), leaving `x − 2 = 0`.
   test('2x/(x+2) = 1 → x = 2', () => {
-    const result = expr('\\frac{2x}{x+2} = 1').solve('x')?.map((x) => x.json);
+    const result = expr('\\frac{2x}{x+2} = 1')
+      .solve('x')
+      ?.map((x) => x.json);
     expect(result).toEqual([2]);
   });
 
@@ -2051,32 +2113,42 @@ describe('rational and absolute-value equations', () => {
   describe('clearDenominators skips only numeric-literal denominators', () => {
     // Symbolic denominator containing the unknown — must STILL clear (R2 fix).
     test('symbolic denom with x still cleared: 3/(x-1) = 6 → x = 3/2', () => {
-      const result = expr('\\frac{3}{x-1} = 6').solve('x')?.map((x) => x.json);
+      const result = expr('\\frac{3}{x-1} = 6')
+        .solve('x')
+        ?.map((x) => x.json);
       expect(result).toEqual([['Rational', 3, 2]]);
     });
 
     // Symbolic denominator free of the unknown (the docstring example shape,
     // F − 3x/h) — must STILL clear so the linear path solves for x.
     test('symbolic denom free of x still cleared: F = 3x/h → x = Fh/3', () => {
-      const result = expr('F = 3x/h').solve('x')?.map((x) => x.toString());
+      const result = expr('F = 3x/h')
+        .solve('x')
+        ?.map((x) => x.toString());
       expect(result).toEqual(['1/3 * F * h']);
     });
 
     // Pure numeric-literal denominator — no longer cleared, still solved by the
     // native polynomial/rational-coefficient path.
     test('numeric denom still solvable without clearing: x/2 + 3 = 0 → x = -6', () => {
-      const result = expr('x/2 + 3 = 0').solve('x')?.map((x) => x.json);
+      const result = expr('x/2 + 3 = 0')
+        .solve('x')
+        ?.map((x) => x.json);
       expect(result).toEqual([-6]);
     });
   });
 
   test('|x+3| − 2|x−3| = 0 → x = 9, 1', () => {
-    const result = expr('|x+3| - 2|x-3| = 0').solve('x')?.map((x) => x.json);
+    const result = expr('|x+3| - 2|x-3| = 0')
+      .solve('x')
+      ?.map((x) => x.json);
     expect(result).toEqual([9, 1]);
   });
 
   test('2|x| − |x−1| = 0 → x = 1/3, −1', () => {
-    const result = expr('2|x| - |x-1| = 0').solve('x')?.map((x) => x.json);
+    const result = expr('2|x| - |x-1| = 0')
+      .solve('x')
+      ?.map((x) => x.json);
     expect(result).toEqual([['Rational', 1, 3], -1]);
   });
 });
@@ -2105,7 +2177,22 @@ describe('Solve sees through user functions and bound symbols', () => {
   test('a transformer nested inside the equation', () => {
     const ce = new ComputeEngine();
     const r = ce
-      .box(['Solve', ['Equal', ['Simplify', ['Divide', ['Subtract', ['Power', 'x', 2], 1], ['Subtract', 'x', 1]]], 3], 'x'])
+      .box([
+        'Solve',
+        [
+          'Equal',
+          [
+            'Simplify',
+            [
+              'Divide',
+              ['Subtract', ['Power', 'x', 2], 1],
+              ['Subtract', 'x', 1],
+            ],
+          ],
+          3,
+        ],
+        'x',
+      ])
       .evaluate();
     expect(r.toString()).toBe('[2]');
   });
@@ -2117,12 +2204,18 @@ describe('Solve sees through user functions and bound symbols', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 5);
     expect(
-      ce.box(['Solve', ['Equal', ['Subtract', 'x', 2], 0], 'x']).evaluate().toString()
+      ce
+        .box(['Solve', ['Equal', ['Subtract', 'x', 2], 0], 'x'])
+        .evaluate()
+        .toString()
     ).toBe('[2]');
 
     ce.assign('g', ce.parse('t \\mapsto t^2 - 4'));
     expect(
-      ce.box(['Solve', ['Equal', ['g', 'x'], 0], 'x']).evaluate().toString()
+      ce
+        .box(['Solve', ['Equal', ['g', 'x'], 0], 'x'])
+        .evaluate()
+        .toString()
     ).toBe('[2,-2]');
   });
 
@@ -2143,7 +2236,10 @@ describe('Solve sees through user functions and bound symbols', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('t \\mapsto t^2 - 4'));
     expect(
-      ce.box(['Simplify', ['Add', ['g', 'a'], ['g', 'b']]]).evaluate().toString()
+      ce
+        .box(['Simplify', ['Add', ['g', 'a'], ['g', 'b']]])
+        .evaluate()
+        .toString()
     ).toBe('a^2 + b^2 - 8');
   });
 
@@ -2160,7 +2256,12 @@ describe('Solve sees through user functions and bound symbols', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto \\sum_{k=1}^{3} x \\cdot k'));
     // `k` collides with the Sum index: decline rather than corrupt.
-    expect(ce.box(['Expand', ['g', 'k']]).evaluate().toString()).toBe('g(k)');
+    expect(
+      ce
+        .box(['Expand', ['g', 'k']])
+        .evaluate()
+        .toString()
+    ).toBe('g(k)');
     // `a` is free of any binder in the body: inlines correctly (the Sum is left
     // unevaluated by the reduce-not-evaluate transformer).
     expect(ce.box(['Expand', ['g', 'a']]).evaluate().operator).toBe('Sum');
@@ -2174,21 +2275,30 @@ describe('Solve sees through list indexing', () => {
   test('projects At(List(…), k) structurally', () => {
     const ce = new ComputeEngine();
     expect(
-      ce.box(['Solve', ['Equal', ['At', ['List', 'Y', 2], 1], 5], 'Y']).evaluate().toString()
+      ce
+        .box(['Solve', ['Equal', ['At', ['List', 'Y', 2], 1], 5], 'Y'])
+        .evaluate()
+        .toString()
     ).toBe('[5]');
   });
 
   test('a negative index counts from the end', () => {
     const ce = new ComputeEngine();
     expect(
-      ce.box(['Solve', ['Equal', ['At', ['List', 2, 'Y'], -1], 5], 'Y']).evaluate().toString()
+      ce
+        .box(['Solve', ['Equal', ['At', ['List', 2, 'Y'], -1], 5], 'Y'])
+        .evaluate()
+        .toString()
     ).toBe('[5]');
   });
 
   test('an index that selects no unknown still reports none', () => {
     const ce = new ComputeEngine();
     expect(
-      ce.box(['Solve', ['Equal', ['At', ['List', 'Y', 2], 2], 5], 'Y']).evaluate().toString()
+      ce
+        .box(['Solve', ['Equal', ['At', ['List', 'Y', 2], 2], 5], 'Y'])
+        .evaluate()
+        .toString()
     ).toBe('[]');
   });
 
@@ -2198,7 +2308,10 @@ describe('Solve sees through list indexing', () => {
     const ce = new ComputeEngine();
     ce.assign('Y', 99);
     expect(
-      ce.box(['Solve', ['Equal', ['At', ['List', 'Y', 2], 1], 5], 'Y']).evaluate().toString()
+      ce
+        .box(['Solve', ['Equal', ['At', ['List', 'Y', 2], 1], 5], 'Y'])
+        .evaluate()
+        .toString()
     ).toBe('[5]');
   });
 
@@ -2224,7 +2337,10 @@ describe('Solve shields a value-bound unknown from a nested transformer', () => 
     const ce = new ComputeEngine();
     ce.assign('x', 5);
     expect(
-      ce.box(['Solve', ['Equal', ['Simplify', ['Subtract', 'x', 2]], 0], 'x']).evaluate().toString()
+      ce
+        .box(['Solve', ['Equal', ['Simplify', ['Subtract', 'x', 2]], 0], 'x'])
+        .evaluate()
+        .toString()
     ).toBe('[2]');
   });
 
@@ -2234,7 +2350,10 @@ describe('Solve shields a value-bound unknown from a nested transformer', () => 
     const ce = new ComputeEngine();
     ce.assign('s', ce.parse('\\frac{9-w^2}{4}'));
     expect(
-      ce.box(['Solve', ['Equal', ['Simplify', 's'], 2], 'w']).evaluate().toString()
+      ce
+        .box(['Solve', ['Equal', ['Simplify', 's'], 2], 'w'])
+        .evaluate()
+        .toString()
     ).toBe('[1,-1]');
   });
 
@@ -2248,7 +2367,10 @@ describe('Solve shields a value-bound unknown from a nested transformer', () => 
     ce.assign('w', 9);
     ce.assign('s', ce.parse('\\frac{9-w^2}{4}'));
     expect(
-      ce.box(['Solve', ['Equal', ['Simplify', 's'], 2], 'w']).evaluate().toString()
+      ce
+        .box(['Solve', ['Equal', ['Simplify', 's'], 2], 'w'])
+        .evaluate()
+        .toString()
     ).toBe('[1,-1]');
     // The global value is restored after the solve.
     expect(ce.symbol('w').evaluate().toString()).toBe('9');
@@ -2261,7 +2383,10 @@ describe('Solve shields a value-bound unknown from a nested transformer', () => 
     ce.assign('x', 5);
     ce.assign('g', ce.parse('t \\mapsto t^2 - 4'));
     expect(
-      ce.box(['Solve', ['Equal', ['g', 'x'], 0], 'x']).evaluate().toString()
+      ce
+        .box(['Solve', ['Equal', ['g', 'x'], 0], 'x'])
+        .evaluate()
+        .toString()
     ).toBe('[2,-2]');
   });
 });

@@ -933,7 +933,11 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
       ['Function', ['Multiply', 2, 'x'], 'x'],
       'es',
     ]);
-    expect(expr.evaluate().toString()).toBe('[2q + 4,4q + 2]');
+    // Factored, not expanded: `evaluate()` leaves a product of sums as it
+    // finds it (`2(q + 2)`, not `2q + 4`) — `Expand` is what opens it. The
+    // point of this test is that the body stayed SYMBOLIC in `q`, which either
+    // spelling shows.
+    expect(expr.evaluate().toString()).toBe('[2(q + 2),2(2q + 1)]');
   });
 
   test('`value` elements are not evidence either', () => {

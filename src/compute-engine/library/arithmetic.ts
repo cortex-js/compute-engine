@@ -84,6 +84,7 @@ import {
 } from '../boxed-expression/arithmetic-add.js';
 import {
   mul,
+  mulFactored,
   mulN,
   canonicalDivide,
 } from '../boxed-expression/arithmetic-mul-div.js';
@@ -2071,7 +2072,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             r
           );
         }
-        const result = mul(...evaluated);
+        // `mulFactored`, not `mul`: `evaluate()` promises the most EXACT form,
+        // and a product of sums is exactly as exact factored as expanded while
+        // being smaller — expanding multiplies the term count at every factor,
+        // which is what made a `Product` of linear factors superlinear. So
+        // `(a + b)(c + d)` reaches the user as written; `Expand` opens it and
+        // reproduces the expanded form verbatim (user ruling, 2026-08-20).
+        // Internal callers keep `mul()`, whose distribution several
+        // normalization paths need to reach a fixpoint — see `mulFactored`.
+        const result = mulFactored(...evaluated);
         // D2: see the matching comment in `Add` — an inexact (float) operand
         // numericizes the whole product even when mixed with an exact
         // symbolic constant (`Multiply(0.5, Pi)` → 1.57…). Only when the
@@ -3578,7 +3587,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 captureUnsafe = true;
                 return null;
               }
-              return reducerElementError(acc, xe) ?? acc.mul(xe);
+              return productAccumulate(acc, xe, numeric);
             },
             ce.One
           ),
@@ -3642,7 +3651,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 captureUnsafe = true;
                 return null;
               }
-              return reducerElementError(acc, xe) ?? acc.mul(xe);
+              return productAccumulate(acc, xe, numeric);
             },
             ce.One
           ),
@@ -3961,6 +3970,45 @@ function reducerElementError(
   if (isString(term) || isCharacter(term))
     return acc.engine.typeError('number', term.type);
   return undefined;
+}
+
+/**
+ * Accumulate one factor of a `Product` without EXPANDING it.
+ *
+ * The `.mul()` **method** distributes over sums: `k·(a+b)` becomes `ka+kb`.
+ * Folding a product of sums with it therefore multiplies the term count at
+ * every step, so `∏_{k=1..8}(kn-1)` came back as a nine-term polynomial
+ * (`40320n^8 - 109584n^7 + …`) rather than as the eight compact factors, and a
+ * product of such products grows superlinearly in the number of factors.
+ *
+ * Expansion is not what `evaluate()` promises. Its contract is the most EXACT
+ * form, and an unexpanded product of linear factors is exactly as exact as the
+ * polynomial while being dramatically smaller; opening it is `expand()`'s job,
+ * and `Expand` still recovers the polynomial verbatim. So when either side is a
+ * sum, the factors are joined with a canonical `Multiply` — which does not
+ * distribute — instead of with `.mul()`.
+ *
+ * This guard is still needed even though `Multiply`'s evaluate handler no
+ * longer expands (it uses `mulFactored`): the `.mul()` METHOD is a different
+ * path and still distributes, so an unguarded accumulator would expand the
+ * product before the handler ever sees it.
+ *
+ * Everything else keeps `.mul()`, which is what folds the numeric cases to a
+ * single literal (`∏_{k=1..4} k` = 24) and what `.N()` needs: under
+ * `numericApproximation` every factor is a float, distribution cannot arise,
+ * and folding is the desired behavior.
+ */
+function productAccumulate(
+  acc: Expression,
+  term: Expression,
+  numericApproximation: boolean | undefined
+): Expression {
+  const err = reducerElementError(acc, term);
+  if (err) return err;
+  if (numericApproximation) return acc.mul(term);
+  if (isFunction(acc, 'Add') || isFunction(term, 'Add'))
+    return acc.engine.function('Multiply', [acc, term]);
+  return acc.mul(term);
 }
 
 /** Accumulate one term of a `Sum` without the `.add()` float-folding pitfall.

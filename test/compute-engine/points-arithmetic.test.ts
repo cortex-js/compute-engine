@@ -130,25 +130,25 @@ describe('POINT/TUPLE ARITHMETIC — T2 rejected operations', () => {
     expect(errorCode(r)).toBe('incompatible-type');
   });
 
-  test('(1,2) · (3,4) → Error(incompatible-type)', () => {
+  test('(1,2) · (3,4) → Error(no-product-between-points)', () => {
     const ce = new ComputeEngine();
     const r = ce.parse('(1,2)\\cdot(3,4)');
     expect(r.operator).toBe('Error');
-    expect(errorCode(r)).toBe('incompatible-type');
+    expect(errorCode(r)).toBe('no-product-between-points');
   });
 
-  test('1 / (2,3) → Error(incompatible-type)', () => {
+  test('1 / (2,3) → Error(no-division-by-point)', () => {
     const ce = new ComputeEngine();
     const r = ce.parse('1/(2,3)');
     expect(r.operator).toBe('Error');
-    expect(errorCode(r)).toBe('incompatible-type');
+    expect(errorCode(r)).toBe('no-division-by-point');
   });
 
-  test('(1,2) / (3,4) → Error(incompatible-type)', () => {
+  test('(1,2) / (3,4) → Error(no-division-by-point)', () => {
     const ce = new ComputeEngine();
     const r = ce.parse('(1,2)/(3,4)');
     expect(r.operator).toBe('Error');
-    expect(errorCode(r)).toBe('incompatible-type');
+    expect(errorCode(r)).toBe('no-division-by-point');
   });
 
   // Tycho item 158: the rejection must not depend on how precisely the
@@ -167,21 +167,42 @@ describe('POINT/TUPLE ARITHMETIC — T2 rejected operations', () => {
       const right = ce.box(['PointList', 'u', 'v']);
       const product = ce.function('Multiply', [left, right]);
       expect(product.isValid).toBe(false);
-      expect(errorCode(product)).toBe('incompatible-type');
+      expect(errorCode(product)).toBe('no-product-between-points');
       ce.popScope();
     }
   });
 
   // The LaTeX rendering of the no-implicit-product rejection points the user
-  // at the operator that DOES accept points. `Dot` only: `Cross` and
-  // `HadamardProduct` do not accept tuples, so suggesting them would bounce
-  // a point user into a second rejection.
-  test('tuple · tuple and tuple divisor errors suggest Dot in LaTeX', () => {
+  // at the operator that DOES accept points. `Cross` is named alongside `Dot`
+  // unless an operand is provably NOT 3-component: it is declared for
+  // 3-vectors and answers `incompatible-dimensions` for a pair of plane
+  // points, so naming it there would bounce the user into a second rejection.
+  test('a product between points suggests Dot, and Cross only in 3-D', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('(1,2)\\cdot(3,4)').latex).toContain('\\mathrm{Dot}');
-    expect(ce.parse('1/(2,3)').latex).toContain('\\mathrm{Dot}');
-    // The scalar+tuple rejection is a different mistake (points DO add;
-    // there is no operator to suggest) — its rendering is unchanged.
+    const plane = ce.parse('(1,2)\\cdot(3,4)').latex;
+    expect(plane).toContain('\\mathrm{Dot}');
+    expect(plane).not.toContain('\\mathrm{Cross}');
+
+    const space = ce.parse('(1,2,3)\\cdot(4,5,6)').latex;
+    expect(space).toContain('\\mathrm{Dot}');
+    expect(space).toContain('\\mathrm{Cross}');
+  });
+
+  // A point DIVISOR used to render the same "use Dot" tooltip, because both
+  // rejections carried the same `incompatible-type "number" "tuple"` payload
+  // and the serializer could not tell them apart. That conflation recommended
+  // an inner product to someone who wrote a division, which is not a remedy —
+  // a point has no reciprocal, and there is no operator to reach for.
+  test('a point divisor says a point cannot be a divisor, not "use Dot"', () => {
+    const ce = new ComputeEngine();
+    const divided = ce.parse('1/(2,3)').latex;
+    expect(divided).toContain('divisor');
+    expect(divided).not.toContain('\\mathrm{Dot}');
+  });
+
+  test('the scalar+tuple ADD rejection renders unchanged', () => {
+    // A different mistake: points DO add, so there is no operator to suggest.
+    const ce = new ComputeEngine();
     expect(ce.parse('1+(2,3)').latex).not.toContain('\\mathrm{Dot}');
   });
 
@@ -199,7 +220,7 @@ describe('POINT/TUPLE ARITHMETIC — T2 rejected operations', () => {
         ce.box(['PointList', 'u', 'v']),
       ]);
       expect(div.isValid).toBe(false);
-      expect(errorCode(div)).toBe('incompatible-type');
+      expect(errorCode(div)).toBe('no-division-by-point');
       ce.popScope();
     }
   });
@@ -965,7 +986,7 @@ describe('ELEMENTWISE BROADCAST — Tycho corpus regressions', () => {
     ]);
     // tuple · tuple stays an error (no implicit dot/cross product)
     const tt = ce.box(['Multiply', ['Tuple', 1, 2], ['Tuple', 3, 4]]).evaluate();
-    expect(errorCode(tt.op1) ?? errorCode(tt)).toBe('incompatible-type');
+    expect(errorCode(tt.op1) ?? errorCode(tt)).toBe('no-product-between-points');
   });
 });
 

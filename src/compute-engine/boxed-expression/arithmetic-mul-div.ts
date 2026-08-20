@@ -16,6 +16,7 @@ import {
 import {
   isNumericTuple,
   isTuple,
+  numericTupleArity,
   hasAccessibleComponents,
   isFiniteBroadcastParticipant,
   isBroadcastableCollection,
@@ -769,6 +770,74 @@ function termsAsExpression(
   return ce._fn('Multiply', sortProductOperands(result));
 }
 
+/**
+ * The error for a juxtaposition, `\cdot` or `\times` between two POINTS.
+ *
+ * `tuple · tuple` is correctly rejected — there is no implicit product between
+ * points, a ruling the `Dot` definition in `library/linear-algebra.ts` records
+ * — but a generic `incompatible-type "number" "tuple"` report says only that
+ * something wanted a number and got a tuple, and it surfaces wherever the
+ * product was CONSUMED, which can be far from the spelling that caused it.
+ * Since `\times`, `\cdot` and juxtaposition all parse to the same `Multiply`,
+ * someone who meant a cross product gets no pointer at all from such a report.
+ *
+ * A named alternative must be one the engine will actually accept, or the
+ * message just moves the user to a second error. `Dot` needs the two points to
+ * have the SAME number of components and `Cross` needs both to have three, so
+ * each is named only when no operand is provably incompatible with it: known
+ * arities that disagree suppress both and the message reports the mismatch
+ * instead. An arity that is not statically known suppresses nothing — the
+ * suggestion is a prompt, not a promise.
+ *
+ * The payload's first element is that decision as a discrete marker, so a
+ * presentation layer (the LaTeX tooltip in
+ * `latex-syntax/dictionary/definitions-core.ts`) can branch on it instead of
+ * matching the prose, which would break the moment the wording changes.
+ */
+function pointProductError(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  // `tupleArity` rather than `numericTupleArity`: `isTuple` also accepts a
+  // SYMBOL whose bound value is a tuple, and reading only the symbol's own
+  // type would call that arity unknown and wrongly leave `Cross` in.
+  const arities = ops.filter((x) => isTuple(x)).map(tupleArity);
+  const known = arities.filter((n): n is number => n !== undefined);
+  // `Dot` rejects a pair whose component counts differ, so two points of
+  // KNOWN and different arity have no alternative to offer at all.
+  const mismatched = known.length > 1 && known.some((n) => n !== known[0]);
+  const crossApplies =
+    !mismatched && arities.every((n) => n === undefined || n === 3);
+  if (mismatched)
+    return ce.error([
+      'no-product-between-points',
+      'dimension-mismatch',
+      `these points have different dimensions (${known.join(' and ')})`,
+    ]);
+  return ce.error([
+    'no-product-between-points',
+    crossApplies ? 'cross-applies' : 'no-cross',
+    crossApplies
+      ? '`Dot(a, b)` is the inner product, `Cross(a, b)` the cross product'
+      : '`Dot(a, b)` is the inner product',
+  ]);
+}
+
+/**
+ * The component count of a tuple-shaped operand, or `undefined` when it is not
+ * statically known.
+ *
+ * `numericTupleArity` reads only `expr.type`, but `isTuple` recognizes a tuple
+ * two ways: by the expression's own type, OR — for a symbol whose declared type
+ * is not tuple-shaped — through the tuple-typed VALUE bound to it. For that
+ * second kind the arity is available on the value and must be used, or an
+ * operand `isTuple` admitted would report an unknown arity purely because the
+ * two predicates consulted different places.
+ */
+function tupleArity(expr: Expression): number | undefined {
+  return numericTupleArity(expr) ?? numericTupleArity(expr.value ?? expr);
+}
+
 //
 // ── Divide ─────────────────────────────────────────────────────────────
 //
@@ -796,7 +865,11 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     // like the `Multiply` tuple·tuple guard (Tycho item 158), a divisor that
     // is a tuple under ANY element refinement never divides, and the strict
     // `isNumericTuple` merely deferred the identical rejection to evaluation.
-    if (isTuple(op2)) return ce.error(['incompatible-type', 'number', 'tuple']);
+    // Same reporting problem as the product between two points, and the same
+    // remedy: name the situation instead of reporting that something wanted a
+    // number and got a tuple. There is no alternative operator to suggest here
+    // — a point has no reciprocal — so the message says only what is undefined.
+    if (isTuple(op2)) return ce.error(['no-division-by-point']);
     const op1Tuple = isNumericTuple(op1);
     if (op1Tuple) {
       // Strip trivial divisors: the generic a/1 rule below is unreachable
@@ -1224,7 +1297,7 @@ export function canonicalMultiply(
   // for the explicit inner product. `scalar · tuple` is allowed and scales
   // component-wise at evaluation.
   if (ops.filter((x) => isTuple(x)).length >= 2)
-    return ce.error(['incompatible-type', 'number', 'tuple']);
+    return pointProductError(ce, ops);
 
   //
   // Remove negations and negative numbers
@@ -1526,6 +1599,22 @@ function expandProduct(
   return new Product(ce, [lhs, rhs]).asExpression();
 }
 
+/**
+ * Would {@link expandProduct} find a sum to distribute in `x`?
+ *
+ * This MIRRORS that function's recursion and must be changed with it: it peels
+ * a `Negate`, and the NUMERATOR of a `Divide` (the denominator is carried
+ * along by `.div()`, never distributed into), before asking whether what
+ * remains is an `Add`. Testing only the top-level operand missed exactly those
+ * shapes — `((a + b)/c)·d` still came back `(ad + bd)/c`, expanded, which is
+ * the rational-linear-factor form a factored product is most wanted for.
+ */
+function hasDistributableSum(x: Expression): boolean {
+  if (isFunction(x, 'Negate')) return hasDistributableSum(x.op1);
+  if (isFunction(x, 'Divide')) return hasDistributableSum(x.op1);
+  return isFunction(x, 'Add');
+}
+
 export function expandProducts(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
@@ -1555,8 +1644,38 @@ export function expandProducts(
  * canonicalization). Do **not** use it to build a deliberately *factored*
  * result — the distribution will undo the factoring. Use a canonical
  * `Multiply` node instead (see `factor()`'s Add case).
+ *
+ * `mulFactored()` is the same fold WITHOUT the distribution: it is what
+ * `Multiply`'s evaluate handler uses, so a product of sums reaches the user
+ * factored (user ruling, 2026-08-20). Internal callers keep `mul()`, whose
+ * expansion several normalization paths depend on to reach a fixpoint.
  */
 export function mul(...xs: ReadonlyArray<Expression>): Expression {
+  return mulImpl(xs, true);
+}
+
+/**
+ * `mul()` without the distribution over sums — `mulFactored(2, a + b)` is
+ * `2(a + b)`, where `mul()` gives `2a + 2b`.
+ *
+ * `Multiply`'s evaluate handler uses this so that a product of sums reaches
+ * the user FACTORED: `evaluate()` promises the most EXACT form, and a factored
+ * product is exactly as exact as the polynomial it expands to while being
+ * smaller — often dramatically so, since expanding multiplies the term count at
+ * every factor. `Expand` still opens it and reproduces the old output verbatim.
+ *
+ * The distribution is NOT gone: `mul()` keeps it, because several
+ * normalization paths depend on it to reach a fixpoint (sum simplification,
+ * the cyclic integration-by-parts family, series at infinity, and the 3×3
+ * symbolic determinant behind `CharacteristicPolynomial` — see
+ * `tensor/tensor-fields.ts`). Removing it engine-wide left the rule engine
+ * non-terminating.
+ */
+export function mulFactored(...xs: ReadonlyArray<Expression>): Expression {
+  return mulImpl(xs, false);
+}
+
+function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   console.assert(xs.length > 0);
   if (xs.length === 1) return xs[0];
 
@@ -1616,10 +1735,19 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
   // list-of-points reading.
   if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, false);
 
-  const exp = expandProducts(ce, xs);
-  if (exp) {
-    if (exp.operator !== 'Multiply') return exp;
-    if (isFunction(exp)) xs = exp.ops;
+  // `expandProducts` does two things: it distributes over sums, and — as a
+  // side effect of walking the operands pairwise — it folds the product two at
+  // a time. Only the DISTRIBUTION is what `mulFactored` declines, so the fold
+  // is skipped only when a sum is actually reachable. Skipping it
+  // unconditionally changed the folding ORDER of an ordinary numeric product,
+  // and `-2 · 3.1 · ∞ · ∞ · x` then came back `+∞·x` at machine precision
+  // instead of `-∞·x`. With no reachable sum, `mulFactored` is `mul`.
+  if (expand || !xs.some(hasDistributableSum)) {
+    const exp = expandProducts(ce, xs);
+    if (exp) {
+      if (exp.operator !== 'Multiply') return exp;
+      if (isFunction(exp)) xs = exp.ops;
+    }
   }
 
   return new Product(ce, xs).asRationalExpression();
@@ -1703,8 +1831,10 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
  *
  * - **scalar · tuple**: scale every component by the product of the scalar
  *   factors (`2 · (1,2)` → `(2,4)`), staying exact through the scalar `mul`.
- * - **two or more tuples**: no implicit product (dot/cross) — return an
- *   `incompatible-type` error (T2 also rejects this at canonicalization).
+ * - **two or more tuples**: no implicit product (dot/cross) — return a
+ *   `no-product-between-points` error naming `Dot`/`Cross`
+ *   (`pointProductError`; canonicalization rejects the same shape, so this arm
+ *   is reached only when the product was built without it).
  * - A symbolic tuple (no accessible components) stays a symbolic `Multiply`.
  */
 function mulTuples(
@@ -1718,8 +1848,7 @@ function mulTuples(
   const tuples = xs.filter((x) => isTuple(x));
   const scalars = xs.filter((x) => !isTuple(x));
 
-  if (tuples.length >= 2)
-    return ce.error(['incompatible-type', 'number', 'tuple']);
+  if (tuples.length >= 2) return pointProductError(ce, xs);
 
   const tuple = tuples[0];
 

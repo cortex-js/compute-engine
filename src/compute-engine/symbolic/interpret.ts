@@ -747,7 +747,7 @@ function validateAnchor(
   return null;
 }
 
-/** `t(U) ≡ A` — the difference evaluates exactly to zero. */
+/** `t(U) ≡ A` — the difference expands to exactly zero. */
 function verifyTerm(
   ce: Expression['engine'],
   term: Expression,
@@ -756,8 +756,16 @@ function verifyTerm(
   anchor: Expression
 ): boolean {
   const name = isSymbol(index) ? index.symbol : '';
+  // EXPAND, not just evaluate: the reconstructed term is a polynomial in
+  // standard form while the anchor is whatever the user wrote — typically
+  // factored, as in `n(n+1)/2`. `evaluate()` leaves a product of sums factored,
+  // so the two forms never cancel term by term and the difference stays a
+  // symbolic non-zero. Expanding puts both on the same normal form, which is
+  // what the exact `isSame(0)` test needs.
   const value = ce
-    .function('Subtract', [term.subs({ [name]: U }), anchor])
+    .function('Expand', [
+      ce.function('Subtract', [term.subs({ [name]: U }), anchor]),
+    ])
     .evaluate();
   return value.isSame(0);
 }

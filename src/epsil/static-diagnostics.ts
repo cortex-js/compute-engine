@@ -141,6 +141,14 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   // call form rather than a tuple pattern. Minted by `Pipe`'s canonical
   // handler, so it is settled before anything runs too.
   'pipe-stage-arity',
+  // A product between two POINTS (`tuple · tuple`), which has no implicit
+  // dot/cross reading. Minted by `canonicalMultiply` (and by `mulTuples` for a
+  // product built without canonicalization), so it is settled before anything
+  // runs.
+  'no-product-between-points',
+  // A point used as a DIVISOR (`x / (1, 2)`), which has no reciprocal. Minted by
+  // `canonicalDivide`, so it is settled before anything runs.
+  'no-division-by-point',
   'incompatible-type',
   'incompatible-dimensions',
   'invalid-axis',
@@ -1430,6 +1438,21 @@ export function describeError(error: MathJsonExpression): string {
       return payload.length === 0
         ? 'the pipe stage takes the wrong number of parameters'
         : payload.join(' ');
+    case 'no-division-by-point':
+      // No site: the caret is on the division. There is no alternative
+      // operator to name — a point has no reciprocal.
+      return 'a point cannot be a divisor';
+    case 'no-product-between-points': {
+      // No site: the caret is already on the product. The payload is a
+      // machine-readable marker saying whether `Cross` applies, followed by
+      // the remedy clause it corresponds to; only the clause is shown. See
+      // `pointProductError` (`arithmetic-mul-div.ts`) for which alternatives
+      // are named and why.
+      const remedy = payload.slice(1).join(' ');
+      return remedy === ''
+        ? 'no product is defined between points'
+        : `no product is defined between points; ${remedy}`;
+    }
     case 'invalid-symbol':
       detail =
         payload.length === 0

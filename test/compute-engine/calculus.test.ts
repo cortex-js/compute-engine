@@ -622,7 +622,7 @@ describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients'
   test('∫x²/(2(1+x²)) dx is exact (constant factor in Multiply denominator)', () =>
     expect(
       noFloats(evaluate('\\int \\frac{x^2}{2(1+x^2)} dx'))
-    ).toMatchInlineSnapshot(`1/2 * x - 1/2 * arctan(x)`));
+    ).toMatchInlineSnapshot(`1/2 * (x - arctan(x))`));
 
   test('∫1/(2(1+x²)) dx = ½arctan(x) (constant factor pulled out)', () =>
     expect(
@@ -1569,7 +1569,9 @@ describe('LIMIT', () => {
     // ladder's 8^k rungs run an uninterruptible loop that never returns a
     // value to extrapolate from. The jest per-test timeout is the backstop.
     const r = engine
-      .parse('\\lim_{n\\to\\infty} \\left(\\sum_{k=1}^{n} \\frac{1}{k} - \\ln n\\right)')
+      .parse(
+        '\\lim_{n\\to\\infty} \\left(\\sum_{k=1}^{n} \\frac{1}{k} - \\ln n\\right)'
+      )
       .N();
     expect(r.re).toBeCloseTo(0.5772156649015329, 9); // Euler–Mascheroni γ
   }, 30_000);
@@ -1793,9 +1795,7 @@ describe('LIMIT', () => {
 
     test('sin(x)/x as x → 0 evaluates to 1', () => {
       expect(
-        engine
-          .box(['Limit', ['Divide', ['Sin', 'x'], 'x'], 'x', 0])
-          .evaluate()
+        engine.box(['Limit', ['Divide', ['Sin', 'x'], 'x'], 'x', 0]).evaluate()
           .re
       ).toBe(1);
     });
@@ -1824,9 +1824,7 @@ describe('LIMIT', () => {
     test('a symbolic (non-free) point is still read as the direction form', () => {
       // `a` is not free in `1/x`, so this is Limit(function, point=a, dir=1),
       // not the Wolfram (expr, var, point) form.
-      expect(
-        engine.box(['Limit', ['Divide', 1, 'x'], 'a', 1]).json
-      ).toEqual([
+      expect(engine.box(['Limit', ['Divide', 1, 'x'], 'a', 1]).json).toEqual([
         'Limit',
         ['Function', ['Block', ['Divide', 1, 'x']], 'x'],
         'a',
@@ -1877,10 +1875,7 @@ describe('LIMIT', () => {
 
     test('two-sided limit is unchanged', () =>
       expect(
-        engine
-          .parse('\\lim_{x\\to 0} \\frac{\\sin x}{x}')
-          .evaluate()
-          .toString()
+        engine.parse('\\lim_{x\\to 0} \\frac{\\sin x}{x}').evaluate().toString()
       ).toBe('1'));
 
     test('direction serializes as a ^{+}/^{-} marker (round-trip)', () => {
@@ -1944,7 +1939,11 @@ describe('DOUBLY-INFINITE SUMS', () => {
     // well-defined unordered doubly-infinite value, so this stays symbolic
     // (ruled 2026-08-14) rather than answering 0.
     const r = engine
-      .expr(['Sum', 'n', ['Limits', 'n', 'NegativeInfinity', 'PositiveInfinity']])
+      .expr([
+        'Sum',
+        'n',
+        ['Limits', 'n', 'NegativeInfinity', 'PositiveInfinity'],
+      ])
       .N();
     expect(r.operator).toBe('Sum');
   });
@@ -1985,7 +1984,12 @@ describe('binder value-shield: D / Integrate / Limit keep the bound variable sym
     const ce = new ComputeEngine();
     ce.assign('x', 5);
     // Was `10` (differentiated to `2x`, then evaluated at `x := 5`).
-    expect(ce.box(['D', ['Power', 'x', 2], 'x']).evaluate().toString()).toBe('2x');
+    expect(
+      ce
+        .box(['D', ['Power', 'x', 2], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('2x');
     expect(ce.parse('\\frac{d}{dx}x^2').evaluate().toString()).toBe('2x');
     // The global value is intact after the operation.
     expect(ce.box('x').evaluate().toString()).toBe('5');
@@ -1997,7 +2001,10 @@ describe('binder value-shield: D / Integrate / Limit keep the bound variable sym
     ce.assign('x', 5);
     // Was `30`; the free coefficient `a` resolves, the bound `x` stays symbolic.
     expect(
-      ce.box(['D', ['Multiply', 'a', ['Power', 'x', 2]], 'x']).evaluate().toString()
+      ce
+        .box(['D', ['Multiply', 'a', ['Power', 'x', 2]], 'x'])
+        .evaluate()
+        .toString()
     ).toBe('6x');
   });
 
@@ -2010,9 +2017,12 @@ describe('binder value-shield: D / Integrate / Limit keep the bound variable sym
     const ce = new ComputeEngine();
     ce.assign('x', 5);
     // Was `125/3` (antiderivative `x³/3` evaluated at `x := 5`).
-    expect(ce.box(['Integrate', ['Power', 'x', 2], 'x']).evaluate().toString()).toBe(
-      expected
-    );
+    expect(
+      ce
+        .box(['Integrate', ['Power', 'x', 2], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe(expected);
     expect(ce.box('x').evaluate().toString()).toBe('5');
   });
 
@@ -2026,7 +2036,10 @@ describe('binder value-shield: D / Integrate / Limit keep the bound variable sym
     ce.assign('x', 5);
     // Was `25x` (`Simplify(x²)` folded to `25` before integrating).
     expect(
-      ce.box(['Integrate', ['Simplify', ['Power', 'x', 2]], 'x']).evaluate().toString()
+      ce
+        .box(['Integrate', ['Simplify', ['Power', 'x', 2]], 'x'])
+        .evaluate()
+        .toString()
     ).toBe(expected);
   });
 
@@ -2048,7 +2061,10 @@ describe('binder value-shield: D / Integrate / Limit keep the bound variable sym
     ce.assign('x', 5);
     // ∫ a·x dx = (a/2)·x² = (3/2)·x², with the bound `x` symbolic.
     expect(
-      ce.box(['Integrate', ['Multiply', 'a', 'x'], 'x']).evaluate().toString()
+      ce
+        .box(['Integrate', ['Multiply', 'a', 'x'], 'x'])
+        .evaluate()
+        .toString()
     ).toBe('3/2 * x^2');
   });
 
@@ -2058,10 +2074,16 @@ describe('binder value-shield: D / Integrate / Limit keep the bound variable sym
     // Was `25` on BOTH routes; the box route also mis-canonicalized because a
     // value-bound `x` dropped out of `.unknowns`.
     expect(
-      ce.box(['Limit', ['Simplify', ['Power', 'x', 2]], 'x', 0]).evaluate().toString()
+      ce
+        .box(['Limit', ['Simplify', ['Power', 'x', 2]], 'x', 0])
+        .evaluate()
+        .toString()
     ).toBe('0');
     expect(
-      ce.parse('\\lim_{x\\to 0}\\operatorname{Simplify}(x^2)').evaluate().toString()
+      ce
+        .parse('\\lim_{x\\to 0}\\operatorname{Simplify}(x^2)')
+        .evaluate()
+        .toString()
     ).toBe('0');
     expect(ce.box('x').evaluate().toString()).toBe('5');
   });

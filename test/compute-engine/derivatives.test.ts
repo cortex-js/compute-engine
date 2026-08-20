@@ -383,7 +383,7 @@ describe('Special function derivatives', () => {
     const expr = engine.expr(['D', ['LambertW', 'x'], 'x']);
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `LambertW(x) / (x + x * LambertW(x))`
+      `LambertW(x) / (x * (LambertW(x) + 1))`
     );
   });
 
@@ -419,9 +419,7 @@ describe('Special function derivatives', () => {
   it('∂/∂k LambertW(x, k) stays inert (discrete branch index)', () => {
     const expr = engine.expr(['D', ['LambertW', 'x', 'k'], 'k']);
     const result = expr.evaluate();
-    expect(result.toString()).toMatchInlineSnapshot(
-      `D(LambertW(x, k), k)`
-    );
+    expect(result.toString()).toMatchInlineSnapshot(`D(LambertW(x, k), k)`);
   });
 });
 
@@ -519,7 +517,8 @@ describe('Derivatives of container-valued bodies', () => {
   // A Frenet frame built on `f'(t)/|f'(t)|` therefore never closed.
   it('differentiates a Tuple literal componentwise', () => {
     expect(
-      engine.expr(['D', ['Tuple', ['Square', 't'], ['Power', 't', 3]], 't'])
+      engine
+        .expr(['D', ['Tuple', ['Square', 't'], ['Power', 't', 3]], 't'])
         .evaluate()
         .toString()
     ).toEqual('(2t, 3t^2)');
@@ -561,11 +560,17 @@ describe('Derivatives of container-valued bodies', () => {
       expect(d.evaluate().toString()).not.toContain('Derivative');
 
     expect(
-      ce.expr(['Apply', ['Derivative', 'g', 1], 0.25]).evaluate().toString()
+      ce
+        .expr(['Apply', ['Derivative', 'g', 1], 0.25])
+        .evaluate()
+        .toString()
     ).toEqual('(-2pi, 0, 1)');
-    expect(ce.expr(['D', ['g', 't'], 't']).evaluate().toString()).toEqual(
-      '(-2pi * sin(2pi * t), 2pi * cos(2pi * t), 1)'
-    );
+    expect(
+      ce
+        .expr(['D', ['g', 't'], 't'])
+        .evaluate()
+        .toString()
+    ).toEqual('(-2pi * sin(2pi * t), 2pi * cos(2pi * t), 1)');
   });
 
   it('leaves an unregistered container head opaque (item-152 contract)', () => {
@@ -586,7 +591,11 @@ describe('Prime notation applies the derivative function to its argument', () =>
   // spurious chain-rule factor.
   it("parses f'(args) to Apply(Derivative(f, n), args)", () => {
     const ce = new ComputeEngine();
-    expect(ce.parse("f'(2)").json).toEqual(['Apply', ['Derivative', 'f', 1], 2]);
+    expect(ce.parse("f'(2)").json).toEqual([
+      'Apply',
+      ['Derivative', 'f', 1],
+      2,
+    ]);
     expect(ce.parse("f''(x)").json).toEqual([
       'Apply',
       ['Derivative', 'f', 2],
@@ -754,7 +763,7 @@ describe('Bessel function derivatives', () => {
       const expr = engine.expr(['D', ['BesselJ', 2, ['Square', 'x']], 'x']);
       const result = expr.evaluate();
       expect(result.toString()).toMatchInlineSnapshot(
-        `x * BesselJ(1, x^2) - x * BesselJ(3, x^2)`
+        `x * (-BesselJ(3, x^2) + BesselJ(1, x^2))`
       );
     });
   });
