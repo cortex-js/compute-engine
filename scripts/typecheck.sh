@@ -36,7 +36,8 @@ echo "Checking type-level pins in the test suite..."
 ./node_modules/@typescript/native/bin/tsc --target es2022 --module es2022 --moduleResolution bundler --types node,jest \
   --skipLibCheck --allowImportingTsExtensions true --noEmit --ignoreConfig \
   ./test/compute-engine/compile-free-function-typing.test.ts \
-  ./test/compute-engine/compile-mode-plumbing.test.ts
+  ./test/compute-engine/compile-mode-plumbing.test.ts \
+  ./test/compute-engine/user-collection-handlers.test.ts
 
 # Circular dependency check
 MAX_CYCLES=0
