@@ -2,6 +2,34 @@
 
 ### Bug Fixes
 
+- **Malformed dictionary input is reported instead of thrown — or silently
+  accepted.** Building a dictionary from a malformed expression raised a raw
+  JavaScript exception, which `ce.box()` promises never to do for untrusted
+  input, and two shapes were worse than that: a tuple with more than two
+  elements (`["Dictionary", ["Tuple", key, value, extra]]`) and a non-string
+  key both produced an EMPTY dictionary that reported itself as valid. All of
+  these now box to an `incompatible-type` error naming the offending entry, the
+  way the sibling `DictionaryFrom`/`RecordFrom` handlers already did. A
+  malformed dictionary NESTED inside another is reported too, rather than
+  becoming a silently empty entry.
+
+- **The two dictionary construction routes agreed on empty keys.** The
+  `["Dictionary", …]` form accepted an empty-string key while the plain-data
+  `{dict: …}` form rejected it, so a dictionary built the first way serialized
+  to `{dict: {"": …}}` and then failed to box back — a valid expression that
+  did not survive its own round trip. Both routes now reject it.
+
+- **Dictionary keys and record-type fields named after `Object.prototype`
+  members work.** A `__proto__` entry could not be stored at all (the
+  dictionary rendered as `{->}` and listed no keys, while `At` still returned
+  the value by reading the prototype), and reading a MISSING `toString` or
+  `valueOf` key returned the inherited JavaScript function as if it were a
+  math value, where any other missing key yields `NaN`. The same flaw dropped
+  a `__proto__` field when a `record{…}` type was parsed back from its own
+  spelling, so such a dictionary did not round-trip through its type.
+
+### Bug Fixes
+
 - **A symbol whose name matches an `Object.prototype` member no longer reads
   that member.** A MathJSON symbol name is an arbitrary string, but several
   lookups keyed plain JavaScript objects by it, so `toString`, `constructor`,

@@ -417,49 +417,101 @@ describe('Dictionary', () => {
   });
 
   describe('Error handling', () => {
-    test.skip('invalid key type in tuple', () => {
-      expect(() =>
-        evaluate([
-          'Dictionary',
-          ['Tuple', 123, 'value'], // numeric key should fail
-        ])
-      ).toThrow();
-    }); // @fixme
+    // Malformed input is reported as a BOXED ERROR, never a raw JS throw:
+    // `box.ts` states that contract for every other malformed MathJSON shape
+    // ("Return an Error expression rather than throwing so callers boxing
+    // untrusted input never have to special-case a JS exception"), and the
+    // sibling `DictionaryFrom`/`RecordFrom` evaluate handlers already report
+    // this way. Two of these cases previously produced something worse than a
+    // throw — an EMPTY dictionary that reported itself as valid.
+    const malformed = (expr: Expression) => {
+      const boxed = engine.box(expr as never);
+      expect(boxed.isValid).toBe(false);
+      return boxed.toString();
+    };
 
-    test.skip('empty string key', () => {
-      expect(() =>
-        evaluate([
-          'Dictionary',
-          ['Tuple', { str: '' }, 'value'], // empty string key should fail
-        ])
-      ).toThrow();
-    }); // @fixme
-
-    test('malformed tuple', () => {
-      expect(() =>
-        evaluate([
-          'Dictionary',
-          ['Tuple', { str: 'key' }], // missing value
-        ])
-      ).toThrow();
+    test('invalid key type in tuple', () => {
+      // A numeric key silently yielded `{->}` — a valid, empty dictionary.
+      expect(malformed(['Dictionary', ['Tuple', 123, 'value']])).toContain(
+        'incompatible-type'
+      );
     });
 
-    test.skip('too many elements in tuple', () => {
-      expect(() =>
-        evaluate([
-          'Dictionary',
-          ['Tuple', { str: 'key' }, 'value', 'extra'], // too many elements
-        ])
-      ).toThrow();
-    }); // @fixme
+    test('empty string key', () => {
+      // Rejected on BOTH construction routes. They used to disagree — the
+      // operator form accepted an empty key while the plain-data `{dict: …}`
+      // form refused it — and that broke a round trip: the accepted
+      // dictionary serialized to `{dict: {"": …}}`, which then failed to box
+      // back.
+      expect(
+        malformed(['Dictionary', ['Tuple', { str: '' }, 'value']])
+      ).toContain('incompatible-type');
+      expect(malformed({ dict: { '': 1 } } as never)).toContain(
+        'incompatible-type'
+      );
+    });
+
+    test('a malformed NESTED dictionary is reported, not swallowed', () => {
+      // The diagnostic used to be checked only at the two top-level boxing
+      // sites, so a bad inner dictionary became a silently EMPTY one inside an
+      // outer dictionary that reported itself as valid.
+      expect(malformed({ dict: { outer: { dict: { '': 1 } } } } as never)).toContain(
+        'incompatible-type'
+      );
+    });
+
+    test('malformed tuple', () => {
+      // A one-element tuple: a key with no value.
+      expect(malformed(['Dictionary', ['Tuple', { str: 'key' }]])).toContain(
+        'incompatible-type'
+      );
+    });
+
+    test('too many elements in tuple', () => {
+      // A three-element tuple also silently yielded an empty dictionary: the
+      // tail was ignored, and the resulting non-string key took a path that
+      // returned early instead of reporting.
+      expect(
+        malformed(['Dictionary', ['Tuple', { str: 'key' }, 'value', 'extra']])
+      ).toContain('incompatible-type');
+    });
 
     test('invalid tuple element', () => {
-      expect(() =>
-        evaluate([
-          'Dictionary',
-          ['NotATuple', { str: 'key' }, 'value'], // invalid pair type
-        ])
-      ).toThrow();
+      expect(
+        malformed(['Dictionary', ['NotATuple', { str: 'key' }, 'value']])
+      ).toContain('incompatible-type');
+    });
+
+    test('a `Nothing` key is rejected', () => {
+      expect(malformed(['Dictionary', ['Tuple', 'Nothing', 'value']])).toContain(
+        'incompatible-type'
+      );
+    });
+
+    test('a well-formed dictionary is unaffected', () => {
+      const d = engine.box(['Dictionary', ['Tuple', { str: 'a' }, 1]]);
+      expect(d.isValid).toBe(true);
+      expect(d.toString()).toBe('{"a" -> 1}');
+      // …including one whose keys collide with `Object.prototype` members:
+      // the backing map is prototype-free, so the entry is stored and listed
+      // (a `__proto__` key used to vanish while `At` still answered from the
+      // prototype), and a missing key of such a name reads as missing.
+      const proto = engine.box([
+        'Dictionary',
+        ['Tuple', { str: '__proto__' }, 1],
+        ['Tuple', { str: 'toString' }, 2],
+      ]);
+      expect(proto.isValid).toBe(true);
+      expect((proto as unknown as { keys: string[] }).keys).toEqual([
+        '__proto__',
+        'toString',
+      ]);
+      // The synthesized `record{…}` type survives its own spelling: the type
+      // parser's element map is prototype-free too, so `__proto__` is not
+      // dropped on the way back in.
+      const spelled = proto.type.toString();
+      expect(spelled).toContain('__proto__');
+      expect(engine.type(spelled).matches(proto.type)).toBe(true);
     });
   });
 });

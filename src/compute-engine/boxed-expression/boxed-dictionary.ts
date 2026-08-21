@@ -36,8 +36,58 @@ export class BoxedDictionary
   override readonly _kind = 'dictionary';
 
   [Symbol.toStringTag]: string = '[BoxedDictionary]';
-  private readonly _keyValues: Record<string, Expression> = {};
+  /** Keyed by dictionary KEY, which is an arbitrary string — including one
+   * that collides with an `Object.prototype` member. Prototype-free, or three
+   * things go wrong at once: a `__proto__` entry cannot be stored at all (the
+   * assignment invokes the inherited setter, so the entry vanishes while
+   * `get`/`has` still answer from the prototype), and reading a MISSING
+   * `toString`/`valueOf` key hands the caller the inherited JS FUNCTION as if
+   * it were the stored value. Every read below must therefore avoid
+   * prototype-derived methods too — see `has` and `match`. */
+  private readonly _keyValues: Record<string, Expression> =
+    Object.create(null);
   private _type: BoxedType | undefined;
+  /** Set when the input was not a well-formed dictionary. Boxing checks this
+   * and returns the error INSTEAD of the half-built dictionary, so a caller
+   * boxing untrusted input never has to catch a JS exception — the contract
+   * `box.ts` states for every other malformed MathJSON shape. The sibling
+   * `DictionaryFrom`/`RecordFrom` evaluate handlers report the same way. */
+  private _constructionError: Expression | undefined;
+
+  /** The diagnostic for malformed input, or `undefined` when the dictionary
+   * is well-formed. Read by `box.ts` at both construction sites. */
+  get constructionError(): Expression | undefined {
+    return this._constructionError;
+  }
+
+  /** Record the first malformed-input diagnostic. Later problems are not
+   * overwritten: the first one is the one the author needs to see. */
+  private _reportError(expected: string, actual: Expression | string): void {
+    // The operands reaching here are RAW (`box.ts` boxes a `Dictionary`'s
+    // operands with `RAW_OPERAND`), so an unbound symbol or a compound
+    // expression has no resolved type and `actual.type` reads `unknown` —
+    // useless in a message whose whole job is to say what was wrong. Describe
+    // the KIND the author can see in their own source instead, and fall back
+    // to the type only when it is informative.
+    const describe = (x: Expression): string => {
+      if (isSymbol(x)) return `symbol \`${x.symbol}\``;
+      if (isFunction(x)) return `\`${x.operator}\` expression`;
+      const t = x.type.toString();
+      return t === 'unknown' ? x.toString() : t;
+    };
+    const [actualType, subject] =
+      typeof actual === 'string'
+        ? [`"${actual}"`, actual]
+        : [describe(actual), actual.toString()];
+    // The FIRST problem is the one reported. Every call site returns
+    // immediately after reporting, so today this guard never fires; it is kept
+    // so that adding a call site that keeps walking cannot silently replace
+    // the author's first error with a later, less relevant one.
+    this._constructionError ??= this.engine.error(
+      ['incompatible-type', expected, actualType],
+      subject
+    );
+  }
 
   /** The input to the constructor is either a ["Dictionary", ["KeyValuePair", ..., ...], ...] expression or a record of key-value pairs */
   constructor(
@@ -64,20 +114,32 @@ export class BoxedDictionary
     keyValues: Record<string, DictionaryValue>,
     options?: { canonical?: boolean }
   ) {
-    for (const key in keyValues) {
+    // `Object.keys`, not `for...in`: the latter also walks INHERITED
+    // enumerable properties, which is the very class of leak this map is
+    // hardened against.
+    for (const key of Object.keys(keyValues)) {
       if (typeof key !== 'string') {
-        throw new Error(
-          `Dictionary keys must be strings, but got ${typeof key}`
-        );
+        this._reportError('string', String(key));
+        return;
       }
-      if (key.length === 0)
-        throw new Error('Dictionary keys must not be empty strings');
+      if (key.length === 0) {
+        this._reportError('a non-empty string key', '');
+        return;
+      }
       // A `Nothing` VALUE erases the whole entry (§3.G).
       const v = dictionaryValueToBoxedExpression(
         this.engine,
         keyValues[key],
         options
       );
+      // A malformed value — a nested `{dict: …}` that could not be built, or
+      // a list containing one — makes the WHOLE dictionary malformed. Without
+      // this the nested error was dropped and the entry became a silently
+      // empty dictionary inside an outer one reporting itself as valid.
+      if (!v.isValid) {
+        this._constructionError ??= v;
+        return;
+      }
       if (!isSymbol(v, 'Nothing')) this._keyValues[key] = v;
     }
   }
@@ -85,6 +147,14 @@ export class BoxedDictionary
   private _initFromExpression(dictionary: Expression) {
     // Return early if already a BoxedDictionary
     if (dictionary instanceof BoxedDictionary) {
+      // A malformed source stays malformed through a copy: not reachable from
+      // today's four construction sites (none passes a `BoxedDictionary`), but
+      // a copy that silently dropped the diagnostic would be a trap for the
+      // next one.
+      if (dictionary._constructionError !== undefined) {
+        this._constructionError = dictionary._constructionError;
+        return;
+      }
       Object.assign(this._keyValues, dictionary._keyValues);
       return;
     }
@@ -97,18 +167,26 @@ export class BoxedDictionary
     ) {
       if (!isFunction(dictionary)) return;
       if (dictionary.nops !== 2) {
-        throw new Error(
-          `Expected a key/value pair, got ${dictionary.nops} elements`
-        );
+        this._reportError('tuple<string, unknown>', dictionary);
+        return;
       }
       const [key, value] = dictionary.ops;
       // A `Nothing` KEY is an error (§3.G).
-      if (isSymbol(key, 'Nothing'))
-        throw new Error('A dictionary key must not be `Nothing`');
+      if (isSymbol(key, 'Nothing')) {
+        this._reportError('string', key);
+        return;
+      }
       let k: string;
       if (isString(key)) k = key.string;
       else if (isSymbol(key)) k = key.symbol;
-      else throw new Error(`Expected a string key, got ${key.type}`);
+      else {
+        this._reportError('string', key);
+        return;
+      }
+      if (k.length === 0) {
+        this._reportError('a non-empty string key', '');
+        return;
+      }
 
       // A `Nothing` VALUE erases the whole entry (§3.G).
       const v = value.canonical;
@@ -126,19 +204,45 @@ export class BoxedDictionary
           pair.operator === 'Tuple'
         ) {
           if (!isFunction(pair)) continue;
+          // Every pair must be exactly a key and a value. A longer tuple used
+          // to fall through with its tail ignored, and then hit the
+          // non-string-key path below, which RETURNED — silently yielding an
+          // EMPTY dictionary for input the author expected to be stored.
+          if (pair.nops !== 2) {
+            this._reportError('tuple<string, unknown>', pair);
+            return;
+          }
           const [key, value] = pair.ops;
           // A `Nothing` KEY is an error (§3.G).
-          if (isSymbol(key, 'Nothing'))
-            throw new Error('A dictionary key must not be `Nothing`');
+          if (isSymbol(key, 'Nothing')) {
+            this._reportError('string', key);
+            return;
+          }
           let k: string;
           if (isString(key)) k = key.string;
           else if (isSymbol(key)) k = key.symbol;
-          else return; // Empty dictionary
+          else {
+            this._reportError('string', key);
+            return;
+          }
+          // Rejected on BOTH construction routes. The plain-data `{dict: …}`
+          // route has always refused an empty key; this one accepted it, and
+          // the disagreement was not cosmetic — a dictionary built here with
+          // an empty key serialized to `{dict: {"": …}}` and then failed to
+          // box back, so a valid expression did not survive its own round
+          // trip.
+          if (k.length === 0) {
+            this._reportError('a non-empty string key', '');
+            return;
+          }
 
           // A `Nothing` VALUE erases the whole entry (§3.G).
           const v = value.canonical;
           if (!isSymbol(v, 'Nothing')) this._keyValues[k] = v;
-        } else throw new Error(`Expected a key/value pair, got ${pair.type}`);
+        } else {
+          this._reportError('tuple<string, unknown>', pair);
+          return;
+        }
       }
       return;
     }
@@ -193,7 +297,11 @@ export class BoxedDictionary
     // when a key is not a bare identifier: `typeToString` does not backtick-
     // escape record keys, so such a record type would not round-trip.
     if (keys.length > 0 && keys.every(isRecordKey)) {
-      const elements: Record<string, Type> = {};
+      // Prototype-free for the same reason as `_keyValues`: `isRecordKey`
+      // admits `__proto__` and `toString` (both match its identifier
+      // pattern), and an ordinary object would drop the first and inherit a
+      // bogus type for the second.
+      const elements: Record<string, Type> = Object.create(null);
       for (const key of keys) elements[key] = this._keyValues[key].type.type;
       this._type = new BoxedType({ kind: 'record', elements });
       return this._type;
@@ -271,7 +379,9 @@ export class BoxedDictionary
   }
 
   has(key: string): boolean {
-    return this._keyValues.hasOwnProperty(key);
+    // `Object.hasOwn`, not `this._keyValues.hasOwnProperty(…)`: the backing
+    // map has no prototype, so it carries no such method.
+    return Object.hasOwn(this._keyValues, key);
   }
 
   get keys(): string[] {
@@ -313,7 +423,7 @@ export class BoxedDictionary
     let result: BoxedSubstitution | null = null;
     const keys = Object.keys(pattern._keyValues);
     for (const key of keys) {
-      if (!this._keyValues.hasOwnProperty(key)) return null;
+      if (!Object.hasOwn(this._keyValues, key)) return null;
       const value = this._keyValues[key];
       const patternValue = pattern._keyValues[key];
       if (!value.match(patternValue)) return null;
@@ -397,7 +507,12 @@ function dictionaryValueToBoxedExpression(
     if ('str' in value) return ce.string(value.str);
     if ('sym' in value) return ce.symbol(value.sym, options);
     if ('fn' in value) return ce.expr(value, { form });
-    if ('dict' in value) return new BoxedDictionary(ce, value.dict, options);
+    if ('dict' in value) {
+      // Hand back the diagnostic rather than a half-built dictionary, so a
+      // malformed nested `{dict: …}` reaches the caller as an error value.
+      const d = new BoxedDictionary(ce, value.dict, options);
+      return d.constructionError ?? d;
+    }
   }
   return ce.Nothing;
 }

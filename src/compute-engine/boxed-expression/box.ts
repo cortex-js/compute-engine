@@ -925,8 +925,12 @@ function boxInternal(
     if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
     if ('sym' in expr) return ce.symbol(expr.sym, { canonical, metadata });
     if ('num' in expr) return ce.number(expr, { canonical, metadata });
-    if ('dict' in expr)
-      return new BoxedDictionary(ce, expr.dict, { canonical });
+    if ('dict' in expr) {
+      // A malformed entry yields a boxed error, not a raw throw — the same
+      // contract as the `unexpected-mathjson` fallback below.
+      const dict = new BoxedDictionary(ce, expr.dict, { canonical });
+      return dict.constructionError ?? dict;
+    }
 
     // Not a recognized MathJSON object (no 'fn'/'str'/'sym'/'num'/'dict'
     // key). Return an Error expression rather than throwing so callers
@@ -1576,9 +1580,14 @@ function makeCanonicalFunctionCore(
   // construction would bypass.
   if (name === 'Dictionary' && !named && !ops.some(isSpreadOperand)) {
     const boxedOps = boxOperands(ce, ops, RAW_OPERAND);
-    return new BoxedDictionary(ce, ce._fn('Dictionary', boxedOps), {
+    const dict = new BoxedDictionary(ce, ce._fn('Dictionary', boxedOps), {
       canonical: true,
     });
+    // A malformed entry (a non-pair element, a `Nothing` or non-string key, a
+    // tuple that is not exactly key-and-value) is reported as a boxed error
+    // rather than thrown or — worse — silently dropped, which is what the
+    // multi-entry path used to do: it returned an EMPTY dictionary.
+    return dict.constructionError ?? dict;
   }
 
   //

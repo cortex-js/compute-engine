@@ -270,7 +270,13 @@ export class TypeBuilder implements ASTVisitor<Type> {
       return 'record';
     }
 
-    const elements: Record<string, Type> = {};
+    // Prototype-free: a record KEY is an arbitrary identifier, and
+    // `elements['__proto__'] = t` on an ordinary object invokes the inherited
+    // setter instead of creating an own key — so `record{__proto__: integer}`
+    // parsed back to a record with that field MISSING, and a dictionary whose
+    // keys include `__proto__` did not round-trip through its own type
+    // spelling.
+    const elements: Record<string, Type> = Object.create(null);
     for (const entry of node.entries) {
       elements[entry.key] = this.buildType(entry.valueType);
     }
@@ -284,7 +290,8 @@ export class TypeBuilder implements ASTVisitor<Type> {
   visitObjectType(node: ObjectTypeNode): Type {
     if (node.entries.length === 0) return 'object';
 
-    const elements: Record<string, Type> = {};
+    // Prototype-free — see `visitRecordType`.
+    const elements: Record<string, Type> = Object.create(null);
     for (const entry of node.entries)
       elements[entry.key] = this.buildType(entry.valueType);
 
