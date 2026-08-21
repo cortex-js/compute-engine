@@ -28,7 +28,15 @@
   a `__proto__` field when a `record{…}` type was parsed back from its own
   spelling, so such a dictionary did not round-trip through its type.
 
-### Bug Fixes
+- **An argument that violates a type variable's declared bound is now
+  reported.** Calling a generic function with an operand its bound refuses —
+  `f("abc")` where `f: (T) -> list<T> where T: number` — was accepted and left
+  to run time. The check that decides whether an operand REFUTES a parameter
+  reads the declared signature, and for a generic arm it read the parameter
+  with the variable still free, which no type predicate can answer; the arm is
+  now read with each variable standing for its declared bound, so `T: number`
+  refuses a `string` outright. An UNBOUNDED variable is unaffected: it ranges
+  over every value type, so nothing refutes it and such a call still defers.
 
 - **A symbol whose name matches an `Object.prototype` member no longer reads
   that member.** A MathJSON symbol name is an arbitrary string, but several

@@ -158,7 +158,28 @@ describe('permutation matching (commutativeMatch)', () => {
       ce.declare(s, 'boolean');
     const pat = ce.box(['And', '_a', '_b', '_c', '_d', '_e', '_f', '_g']);
     const target = ce.box(['And', 'W0', 'W1', 'W2', 'W3', 'W4', 'W5', 'W6']);
-    const m = target.match(pat);
+    // Driving past the bound is the POINT of this test, and `permutations()`
+    // announces the refusal with a `console.assert`. Left to print, that
+    // deliberate trip put an `ASSERTION FAILURE` banner in every full-suite
+    // run, where it read as a real failure. The failures are captured instead
+    // of silenced, and pinned below: the expected one is asserted by its
+    // message, so a DIFFERENT invariant breaking on this path still fails the
+    // test rather than being swallowed with it.
+    const fired: string[] = [];
+    const savedAssert = console.assert;
+    console.assert = ((condition: unknown, ...rest: unknown[]) => {
+      if (!condition) fired.push(rest.map((x) => String(x)).join(' '));
+    }) as typeof console.assert;
+    const m = (() => {
+      try {
+        return target.match(pat);
+      } finally {
+        console.assert = savedAssert;
+      }
+    })();
+    expect(fired).toEqual([
+      expect.stringContaining('permutations(): input has 7 elements'),
+    ]);
     expect(m).not.toBeNull();
     expect(m?._a?.json).toBe('W0');
     expect(m?._g?.json).toBe('W6');

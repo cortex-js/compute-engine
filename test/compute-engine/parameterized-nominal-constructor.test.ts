@@ -44,23 +44,28 @@ function treeEngine(): ComputeEngine {
   return ce;
 }
 
-/** Run `f`, counting FAILED `console.assert` calls. The ground-type invariant
- * is enforced by exactly those asserts, so a count of 0 is the pin. */
-function countAssertFailures(f: () => void): number {
-  let n = 0;
+/** Run `f` and return the message of every `console.assert` that FAILED inside
+ * it, without letting those failures reach the console. The ground-type
+ * invariant is enforced by exactly those asserts, so an empty array is the pin
+ * — and when one does fire, the message names which helper the open type
+ * reached, where a bare count would only report `1 !== 0`.
+ *
+ * Swallowing the message rather than forwarding it is deliberate: the positive
+ * control below fires an assert ON PURPOSE, so forwarding printed an
+ * `ASSERTION FAILURE` banner on every run of this file — including every full
+ * suite run, where it read as a real defect. */
+function assertFailureMessages(f: () => void): string[] {
+  const messages: string[] = [];
   const saved = console.assert;
   console.assert = ((condition: unknown, ...rest: unknown[]) => {
-    if (!condition) {
-      n += 1;
-      saved(condition, ...rest);
-    }
+    if (!condition) messages.push(rest.map((x) => String(x)).join(' '));
   }) as typeof console.assert;
   try {
     f();
   } finally {
     console.assert = saved;
   }
-  return n;
+  return messages;
 }
 
 describe('§5 — the minted constructor is `where`-quantified', () => {
@@ -233,21 +238,21 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
     );
   }
 
-  // The zero-pins below are only worth anything if the spy CAN count. This is
-  // the positive control: the very tripwire the grounding exists to keep
-  // silent, fired deliberately. The ASSERTION FAILURE banner it prints is the
-  // point — `countAssertFailures` calls the real `console.assert` through.
-  test('the assert spy counts a fired assert (positive control)', () => {
+  // The zero-pins below are only worth anything if the spy CAN see a failure.
+  // This is the positive control: the very tripwire the grounding exists to
+  // keep silent, fired deliberately, so the empty arrays below mean the
+  // invariant held rather than that nothing was watching.
+  test('the assert spy captures a fired assert (positive control)', () => {
     expect(
-      countAssertFailures(() =>
+      assertFailureMessages(() =>
         assertGroundType('probe', { kind: 'variable', name: 'T' } as Type)
       )
-    ).toBe(1);
+    ).toEqual([expect.stringContaining('open type variable `T`')]);
   });
 
   test('installing a position-disjoint user arm violates no ground-type assert', () => {
     const ce = treeEngine();
-    expect(countAssertFailures(() => install(ce))).toBe(0);
+    expect(assertFailureMessages(() => install(ce))).toEqual([]);
     expect(signatureOf(ce, 'tree')).toContain('where T');
   });
 
@@ -259,7 +264,7 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
   test('a 1-ary generic user arm reaches the overlap check without leaking `U`', () => {
     const ce = new ComputeEngine();
     ce.declareType('pack', 'record{v: T}', { typeParams: ['T'] });
-    const n = countAssertFailures(() => {
+    const fired = assertFailureMessages(() => {
       try {
         ce.assign(
           'pack',
@@ -273,7 +278,7 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
         // The overlap verdict itself is pinned below; this counts asserts.
       }
     });
-    expect(n).toBe(0);
+    expect(fired).toEqual([]);
   });
 
   test('…and an open `U` at the raw arm´s own arity is still overlap', () => {
@@ -297,11 +302,11 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
     const ce = treeEngine();
     install(ce);
     expect(
-      countAssertFailures(() => {
+      assertFailureMessages(() => {
         ce.box(['tree', { str: 'ab' }, { str: 'cd' }]).evaluate();
         ce.box(['tree', 3, ['List']]).evaluate();
       })
-    ).toBe(0);
+    ).toEqual([]);
   });
 
   test('the raw arm still wins on its own domain', () => {

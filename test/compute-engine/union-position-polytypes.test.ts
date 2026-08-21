@@ -337,17 +337,22 @@ describe('RULE U — R2: the ground-inputs contract of the overlap check', () =>
   });
 
   test('an open union answers `provablyDisjoint` exactly as an open bare variable does', () => {
-    // The one route that DOES hand `provablyDisjoint` a raw polytype parameter
-    // is `candidateParamsAt` (box.ts), reached when a free-variable operand
-    // fails validation. Rule U must not make that route any leakier — and must
-    // keep its conservative answer (the operand is DEFERRED, not refuted).
+    // The route that reads a polytype parameter for this check is
+    // `candidateParamsAt` (box.ts), reached when a free-variable operand fails
+    // validation. It now grounds the arm first, so the question here is
+    // whether Rule U's union spelling answers the same as a bare variable —
+    // both must reach `provablyDisjoint` GROUND, and both must reach the same
+    // verdict on the same operand.
     const ce = new ComputeEngine();
     ce.declare('f', '(T | missing) -> list<T> where T: number');
     ce.declare('g', '(T) -> list<T> where T: number');
     ce.declare('s', 'string');
-    // Both probes run UNDER the spy: the leak is pre-existing (it is the raw
-    // polytype parameter, not the union, that is open), and letting it print
-    // would be noise in every run.
+    // Both probes run UNDER the spy, and both must now count ZERO:
+    // `candidateParamsAt` (box.ts) grounds the whole arm before the
+    // disjointness probe, so neither the union's `T` nor the bare variable
+    // reaches `provablyDisjoint` open. Before that grounding both routes leaked
+    // two asserts apiece — it was the raw polytype parameter, not the union,
+    // that was open, so the two counts agreed while both were wrong.
     let unionValid = false;
     let bareValid = false;
     const union = countAssertFailures(() => {
@@ -356,7 +361,32 @@ describe('RULE U — R2: the ground-inputs contract of the overlap check', () =>
     const bare = countAssertFailures(() => {
       bareValid = ce.box(['g', 's']).isValid;
     });
-    expect(union).toBe(bare);
+    expect(union).toBe(0);
+    expect(bare).toBe(0);
+    // The verdict is the other half of the pin. Grounding reads the variable
+    // as its declared BOUND, so `T: number` becomes `number`, and a `string`
+    // operand refutes every instantiation the signature admits — a definite
+    // error, not a provisional one. The union spelling must answer the same
+    // way as the bare variable: `T | missing` grounds to `number | missing`,
+    // which a string refutes just as squarely.
     expect(unionValid).toBe(bareValid);
+    expect(unionValid).toBe(false);
+  });
+
+  test('an UNBOUNDED variable still defers the same operand', () => {
+    // The counterpart to the refutation above, and the reason grounding reads
+    // bounds rather than a blanket top: an unbounded `T` ranges over every
+    // value type, so nothing about a `string` operand refutes it and the call
+    // must stay valid — deferred to run time, exactly as before grounding.
+    const ce = new ComputeEngine();
+    ce.declare('u', '(T) -> list<T> where T');
+    ce.declare('s', 'string');
+    let valid = false;
+    expect(
+      countAssertFailures(() => {
+        valid = ce.box(['u', 's']).isValid;
+      })
+    ).toBe(0);
+    expect(valid).toBe(true);
   });
 });

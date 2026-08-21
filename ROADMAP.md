@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-08-20.
+**Last updated:** 2026-08-21.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -1094,16 +1094,6 @@ free either, because `compileDerivative` (`library/calculus.ts`) calls
 from the engine. Hoisting therefore has to make the derivative lowering's unit
 explicit rather than ambient, or degree-mode derivatives silently stop being
 rewritten. Raised by the compilation session, who own the folder.
-
-### Ground-type invariant leak in `parameterized-nominal-constructor.test.ts` (dev-assert noise)
-
-Every full-suite run emits one `console.assert` failure:
-`probe() received an open type variable \`T\` — the ground-type invariant (§4.2)
-leaked` (`assertGroundType`, `common/type/subtype.ts`), fired from `test/compute-engine/parameterized-nominal-constructor.test.ts:243`. The test itself passes — the assert is dev-only — but the §4.2 invariant says an open type variable must never reach the subtype/membership predicates, so either the parameterized-nominal constructor path is leaking an uninstantiated `T`into`probe()`
-(a real gap in the D6 bound-reading) or the probe call in the test bypasses the
-instantiation step the engine routes take. Pre-existing (observed in every full
-run since at least the 2026-08-13 rollback-frames round; noticed and filed
-2026-08-13 during the effects-axis-provenance round).
 
 ### Lazy infinite-collection compilation — v1 limits (JS target)
 
@@ -3733,12 +3723,11 @@ ledger, B13). Each entry's acceptance test already exists:
   (`canonical-form.test.ts` `@fixme`); one `Multiply` inexact case where the
   big-precision path is worse than machine evaluate (`arithmetic.test.ts`
   `@fixme`).
-- **Misc:** dictionary error validation (invalid/empty/extra tuple keys don't
-  throw — 3 `@fixme` skips in `dictionary.test.ts`); SymPy-interop literal
-  parses `0`/`0e0` (`test/math-json/sympy.test.ts`, see the interop stubs
-  below); range/interval membership assumptions not wired (`assumptions.test.ts`
-  `@fixme` setup lines); malformed positional-parameter name `_1_0` in a
-  `Function` snapshot (`functions.test.ts`); the `grudnitski.test.ts`
+- **Misc:** SymPy-interop literal parses `0`/`0e0`
+  (`test/math-json/sympy.test.ts`, see the interop stubs below); range/interval
+  membership assumptions not wired (`assumptions.test.ts` `@fixme` setup lines);
+  malformed positional-parameter name `_1_0` in a `Function` snapshot
+  (`functions.test.ts`); the `grudnitski.test.ts`
   equivalence benchmark keeps 9 `describe.skip` groups (equation-scaling /
   identity-based `isEquivalent` capabilities).
 

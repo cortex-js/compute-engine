@@ -89,7 +89,11 @@ import {
   resolveTypeForCompilation as resolveType,
 } from '../../common/type/utils.js';
 import { typeToString } from '../../common/type/serialize.js';
-import { freeTypeVariables } from '../../common/type/instantiate.js';
+import {
+  freeTypeVariables,
+  groundSkeleton,
+  readTypeVariablesAsBounds,
+} from '../../common/type/instantiate.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
 import { isValueDef } from './utils.js';
@@ -967,6 +971,26 @@ function allParamsNumeric(signature: Type): boolean {
  * value definition's declared signature — one entry per overload arm (a
  * single entry for a plain signature). Empty when the position is beyond
  * every arm's parameters (an arity error, diagnosed elsewhere).
+ *
+ * Each type is returned GROUND, because the only consumer asks
+ * `provablyDisjoint` whether the operand refutes the parameter, and that
+ * predicate requires ground inputs: a quantified signature (`(T) -> list<T>
+ * where T: number`) stores its parameters with the variable still free, so
+ * handing them over raw walked an open `T` into
+ * `provablyDisjoint`/`typeCategory`, which the type-variable design forbids
+ * (the dev-time `console.assert` in `assertGroundType`,
+ * `common/type/subtype.ts`, is the tripwire for it).
+ *
+ * Grounding happens on the WHOLE arm, not on the extracted parameter, because
+ * a variable's bound lives in the arm's `where` clause (`typeParams`) and is
+ * out of reach once the parameter is detached. `readTypeVariablesAsBounds`
+ * reads each variable as its declared bound — so `T: number` becomes `number`
+ * and a `string` operand provably refutes it, which is the whole point of the
+ * check — and an unbounded variable as `unknown`, which nothing refutes.
+ * `groundSkeleton` then covers any variable the arm does not itself quantify
+ * (one bound by a nested arrow, say), reading it as the widest type admissible
+ * at its position so no refutation is ever claimed that the bound does not
+ * support.
  */
 function candidateParamsAt(valueType: Type, idx: number): Type[] {
   const arms: ReadonlyArray<FunctionSignature> =
@@ -975,13 +999,18 @@ function candidateParamsAt(valueType: Type, idx: number): Type[] {
       : (overloadArms(valueType) ?? []);
 
   const result: Type[] = [];
-  for (const arm of arms) {
+  for (const rawArm of arms) {
+    const grounded = readTypeVariablesAsBounds(rawArm);
+    const arm: FunctionSignature =
+      typeof grounded !== 'string' && grounded.kind === 'signature'
+        ? grounded
+        : rawArm;
     const args = arm.args ?? [];
     const optArgs = arm.optArgs ?? [];
-    if (idx < args.length) result.push(args[idx].type);
+    if (idx < args.length) result.push(groundSkeleton(args[idx].type));
     else if (idx < args.length + optArgs.length)
-      result.push(optArgs[idx - args.length].type);
-    else if (arm.variadicArg) result.push(arm.variadicArg.type);
+      result.push(groundSkeleton(optArgs[idx - args.length].type));
+    else if (arm.variadicArg) result.push(groundSkeleton(arm.variadicArg.type));
   }
   return result;
 }
