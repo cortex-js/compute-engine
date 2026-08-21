@@ -569,7 +569,10 @@ describe('Pipe — stage sugar (box route)', () => {
       ['List', 1, 2, 3],
       ['Function', ['Power', 'x', 2], 'x'],
     ]);
-    expect(pipe.type.toString()).toBe('vector<3>');
+    // The element tier is derived from the source's: a bare-parameter
+    // mapping over integers squares integers, so the static type says
+    // `finite_integer`, exactly as the evaluated `[1, 4, 9]` does.
+    expect(pipe.type.toString()).toBe('vector<finite_integer^3>');
     expect(pipe.type.toString()).toBe(pipe.evaluate().type.toString());
 
     // Element type, not just shape: a list of boolean pairs mapped through a
@@ -598,7 +601,7 @@ describe('Pipe — stage sugar (box route)', () => {
       ['Pipe', ['List', 1, 2, 3], ['Function', ['Power', 'x', 2], 'x']],
       ['Function', ['Add', 'y', 1], 'y'],
     ]);
-    expect(chained.type.toString()).toBe('vector<3>');
+    expect(chained.type.toString()).toBe('vector<finite_integer^3>');
     expect(chained.type.toString()).toBe(chained.evaluate().type.toString());
   });
 

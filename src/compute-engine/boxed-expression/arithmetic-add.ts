@@ -632,11 +632,19 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
   // unevaluated `Multiply` that yields a tuple, say) blocks the combine
   // here, but becomes visible to the post-evaluation re-dispatch below,
   // whose tuple branch returns unconditionally (Tycho item 52).
+  // A collection-TYPED co-operand that is not yet a collection by capability
+  // (a pure raw operand, evaluated once by the `.N()` map below) would be
+  // mis-combined here as a point component; the post-evaluation re-dispatch
+  // sees it as the collection it becomes — see the matching guard in `mulN`.
   let tupleInert = false;
   if (xs.some((x) => isTuple(x))) {
-    const r = addTuples(xs[0].engine, xs, true);
-    if (r.operator !== 'Add') return r;
-    tupleInert = true;
+    if (xs.some((x) => !isTuple(x) && isBroadcastCollectionType(x)))
+      tupleInert = true;
+    else {
+      const r = addTuples(xs[0].engine, xs, true);
+      if (r.operator !== 'Add') return r;
+      tupleInert = true;
+    }
   }
 
   // Don't N() the number literals (fractions) to avoid losing precision

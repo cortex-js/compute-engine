@@ -191,6 +191,7 @@ import {
   typeCouldBeNumericTupleCollection,
   isLinearAlgebraCollection,
   isBroadcastCollectionType,
+  broadcastCollectionElementType,
   isDeclaredScalarNumber,
   isPossiblyCollectionTyped,
   broadcastableResultTypeOf,
@@ -486,6 +487,31 @@ function isShapedNumericType(t: Type): boolean {
     t.kind === 'indexed_collection' ||
     t.kind === 'set'
   );
+}
+
+/**
+ * The type of a numeric tuple scaled by scalar factors: each NUMERIC component
+ * widened by the factors' types (`tuple<finite_integer, finite_integer>`
+ * times a `number` is `tuple<number, number>`), arity preserved. A component
+ * that is not provably numeric — an `unknown` component such as
+ * `(S(x,y,0), S(x,y,1))` with `S: (…) -> unknown` — is left as written: the
+ * tuple must stay a tuple (its scalar product is still a point, Tycho item
+ * 30), and widening `unknown` would only dissolve it into `any`.
+ */
+function scaleTupleComponents(
+  t: Readonly<Type>,
+  scalarTypes: ReadonlyArray<Type>
+): Type {
+  if (typeof t === 'string' || t.kind !== 'tuple' || scalarTypes.length === 0)
+    return t as Type;
+  return {
+    kind: 'tuple',
+    elements: t.elements.map((e) =>
+      isSubtype(e.type, 'number')
+        ? { ...e, type: widen(e.type, ...scalarTypes) as Type }
+        : e
+    ),
+  };
 }
 
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
@@ -1904,14 +1930,41 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           !ops.some((x) => isTensorValue(x)) &&
           ops.some((x) => isBroadcastCollectionType(x)) &&
           ops.some((x) => couldBeNumericTuple(x))
-        )
-          return broadcastResultType(
-            widen(
-              ...ops
-                .filter((x) => couldBeNumericTuple(x))
-                .map((x) => x.type.type)
-            )
+        ) {
+          const tupleType = widen(
+            ...ops
+              .filter((x) => couldBeNumericTuple(x))
+              .map((x) => x.type.type)
           );
+          // Each element of the collection scales the point's COMPONENTS, so
+          // the collection's element type widens them exactly as a declared
+          // scalar factor does: `(Range(0,n)/n)·(1, 0)` is a list of points
+          // with `number` components, not the literal's integer ones (the
+          // static half of the component-type lie under Tycho item 212 — the
+          // evaluated view is typed by the single-tuple branch below). A
+          // collection whose element type is indeterminate (a bare
+          // `indexed_collection`) still contributes SOME numeric factor per
+          // element, so its contribution is `number` — echoing the literal's
+          // integer tiers would claim coordinates the elements need not have.
+          // A scalar factor whose number type is not declared leaves the
+          // tuple type as written, as in the single-tuple branch below.
+          const factorTypes = ops
+            .filter((x) => !couldBeNumericTuple(x))
+            .map((x) => {
+              if (isBroadcastCollectionType(x)) {
+                const elt = broadcastCollectionElementType(x);
+                return elt === undefined || elt === 'any' || elt === 'unknown'
+                  ? 'number'
+                  : elt;
+              }
+              return isDeclaredScalarNumber(x) ? x.type.type : undefined;
+            });
+          if (factorTypes.every((t) => t !== undefined && isSubtype(t, 'number')))
+            return broadcastResultType(
+              scaleTupleComponents(tupleType, factorTypes as Type[])
+            );
+          return broadcastResultType(tupleType);
+        }
         // A numeric tuple (point/vector) scaled by scalars keeps the tuple
         // type. Hoisted above the NaN/finiteness early-returns (a tuple's
         // `isFinite` is `false`, which would otherwise collapse to `number`).
@@ -1921,7 +1974,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // for its scalar product would let the enclosing `Add`'s
         // scalar-plus-tuple guard bake `incompatible-type` (Tycho item 30).
         const tupleOps = ops.filter((x) => couldBeNumericTuple(x));
-        if (tupleOps.length === 1) return tupleOps[0].type;
+        if (tupleOps.length === 1) {
+          // The scalar factors scale every COMPONENT, so they widen the
+          // component types: `x · (1, 0)` with `x: number` has `number`
+          // components. Echoing the tuple's own type claimed
+          // `tuple<finite_integer, finite_integer>` for `(k/n) · (1, 0)`,
+          // whose value is the rational point `(1/3, 0)` — the component-type
+          // lie under the zip `Subtract` of Tycho item 212. Same rule as the
+          // tensor branch below: only a factor whose number type is DECLARED
+          // carries a tier to combine; an inferred or `unknown` factor leaves
+          // the tuple type as written.
+          const others = ops.filter((x) => x !== tupleOps[0]);
+          if (others.every((x) => isDeclaredScalarNumber(x)))
+            return scaleTupleComponents(
+              tupleOps[0].type.type,
+              others.map((x) => x.type.type)
+            );
+          return tupleOps[0].type;
+        }
         // Element-wise product of a single tensor (vector/matrix) with scalars
         // keeps the tensor's shape/type. The list-broadcast wrapper is
         // skip-listed for tensor Multiply (mulTensors handles the value), so

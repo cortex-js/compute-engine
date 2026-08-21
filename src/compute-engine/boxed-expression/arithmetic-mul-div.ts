@@ -22,6 +22,7 @@ import {
   isBroadcastableCollection,
   isUnknownLengthBroadcast,
   lazyBroadcastMap,
+  isBroadcastCollectionType,
   broadcastLengthMismatch,
   broadcastOverIndexedCollections,
 } from '../collection-utils.js';
@@ -1789,6 +1790,12 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
 
 export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
+  // A single factor is its own product, floated. `mulTuples` combines the
+  // scalar factors with a recursive call and `mulTensors` buckets a numeric
+  // tuple as a scalar, so `N([0, 1/3] · (1, 0))` reached `mulN((1, 0))`,
+  // whose tuple branch then called `mulN()` with NO factors and crashed on
+  // `xs[0]` — the short-circuit `mul` has always had.
+  if (xs.length === 1) return xs[0].N();
   const ce = xs[0].engine;
   // Ellipsis fold barrier: stay inert for a notational product.
   if (xs.some((x) => isContinuationOperand(x)))
@@ -1818,11 +1825,23 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   }
   // An INERT result (still a `Multiply`) falls through to the post-evaluation
   // re-dispatch, mirroring `addN` (Tycho item 52).
+  // A co-factor whose TYPE is a collection but whose collection-ness is not
+  // yet a capability — a pure raw operand such as `Divide(Range(0, n), n)`,
+  // handed in unevaluated so its evaluation runs exactly once below — becomes
+  // a collection under the `.N()` map. Scaling the tuple by it HERE would
+  // transpose a point view into a tuple of coordinate views (`N((k/n)·(1, 0))`
+  // came back `(Map(…), Map(…))` while `evaluate()` kept the view of points).
+  // Leave it to the post-evaluation re-dispatch, where the collection wins the
+  // dispatch exactly as it does on the exact route (`mulImpl`).
   let tupleInert = false;
   if (xs.some((x) => isTuple(x))) {
-    const r = mulTuples(ce, xs, true);
-    if (r.operator !== 'Multiply') return r;
-    tupleInert = true;
+    if (xs.some((x) => !isTuple(x) && isBroadcastCollectionType(x)))
+      tupleInert = true;
+    else {
+      const r = mulTuples(ce, xs, true);
+      if (r.operator !== 'Multiply') return r;
+      tupleInert = true;
+    }
   }
   xs = xs.map((x) => x.N());
   // Post-evaluation re-dispatch (Tycho item 52): an operand may only have

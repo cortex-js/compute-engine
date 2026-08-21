@@ -157,6 +157,47 @@
 
 ### Bug Fixes
 
+- **A zip of two unknown-length point views keeps its element tuple-ness in
+  the TYPE.** With `n` unassigned, `A = (Range(0,n)/n)·(1,0)` is a lazy view
+  of points, but `A - B` evaluated to `Map((_1, _2) ↦ _1 + _2, A, B)` typed
+  `indexed_collection<number>` — the mapping's parameters are bare, so its
+  body was typed with both `unknown` — and `PointY` over the view folded to a
+  scalar absence marker on the strength of the type alone, while the pulled
+  values were correct tuples. `Map` now derives a bare-parameter mapping's
+  element type from its sources' element types (no annotation is written onto
+  the literal, so no runtime check is added and the lambda's shape is
+  unchanged), and the same view now reads
+  `indexed_collection<tuple<finite_number, finite_number>>`. Two component
+  tier lies on the way were fixed with it: a scalar-scaled point now widens
+  its components by the declared scalar's tier (`x·(1,0)` with `x: number` is
+  `tuple<number, number>`, and `(1/n)·(…, 1)` no longer claims an integer
+  second coordinate), and a collection-times-point product scales the
+  components by the collection's element type. `PointY` over a point view
+  whose length is not yet decidable answers the lazy projection instead of an
+  absence marker. (Tycho item 212.)
+
+- **`PointX`/`PointY`/`PointZ` over a list of SYMBOLIC points stay
+  symbolic.** With `P` declared `tuple<number, number>` and unassigned,
+  `PointY([P])` evaluated to `[NaN]` and `PointY([(1,2), P])` to `[2, NaN]`
+  while `PointY(P)` stayed symbolic: the broadcast arm read a symbolic
+  element's missing components as an absent coordinate. A symbolic element
+  now keeps the accessor applied to it — `[PointY(P)]`, `[2, PointY(P)]`,
+  `[PointY(P), PointY(2P)]` — and substitutes to the numbers once the point
+  is assigned; a coordinate a point provably lacks still takes the absence
+  marker. (Tycho item 213.)
+
+- **`.N()` of a point view is a view of points, not a tuple of coordinate
+  views.** `N((Range(0,n)/n)·(1,0))` came back as `(Map(…), Map(…))` — and,
+  with `n` assigned, as `([0, 1/3, …], [0, 0, …])` — because the numeric
+  routes of `Multiply` and `Add` ran their tuple branch on the raw operand
+  `Range(0,n)/n`, which is collection-typed but not yet a collection, before
+  the `.N()` step could reveal the view. Such a co-factor now defers to the
+  post-evaluation re-dispatch, where the collection wins exactly as on the
+  exact route. The literal-list shape `N([0, 1/3]·(1,0))` used to crash
+  (`mulN` had no single-operand short-circuit, so `mulTensors`' tuple
+  "scalar" recursed into a zero-operand product); it is `[(0, 0),
+  (0.333…, 0)]`.
+
 - **A product of two infinities could come out with the wrong sign at machine
   precision.** With `ce.precision = 'machine'`, `x · (-2) · 3.1 · (-∞) · (-∞) ·
   (y + 1)` evaluated to `+oo · x · (y + 1)` instead of `-oo · x · (y + 1)`. The

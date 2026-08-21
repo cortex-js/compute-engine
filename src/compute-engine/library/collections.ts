@@ -1328,6 +1328,123 @@ function mapResultType(
   return { kind: 'collection', elements: elementType as Type };
 }
 
+// The element type a source contributes to a mapping over it: the
+// collection's own `elttype` handler when it has one, else the element type
+// of its static type. `undefined` when that is indeterminate (`unknown`,
+// `any`, `never`, or not a collection type at all).
+function mappingSourceElementType(x: Expression): Type | undefined {
+  const t =
+    x.operatorDefinition?.collection?.elttype?.(x) ??
+    collectionElementType(x.type.type);
+  if (t === undefined || t === 'unknown' || t === 'any' || t === 'never')
+    return undefined;
+  return t;
+}
+
+/**
+ * The element type of a `Map` whose mapping literal has BARE (unannotated)
+ * parameters, derived from the sources' element types — or `undefined` when
+ * the derivation does not apply and the caller should keep the literal's own
+ * result type.
+ *
+ * The mapping `lazyBroadcastMap` builds for an unknown-length broadcast —
+ * `(_1, _2) ↦ _1 + _2` over two point views, `_ ↦ _ · (1, 0)` over one —
+ * leaves its parameters unannotated on purpose: a parameter annotation is a
+ * RUNTIME contract (an element violating it is rejected loudly at access),
+ * and a source's static element type is not reliable enough to enforce. The
+ * literal's own type is therefore computed with every parameter `unknown`,
+ * which typed the zip of two point views `indexed_collection<number>` while
+ * its values were tuples, and `PointY` over that view folded to a scalar
+ * `NaN` on the strength of the type alone (Tycho item 212).
+ *
+ * The derivation rebuilds the body — ONE operator application whose operands
+ * are parameter references or parameter-free expressions, the only shape
+ * handled — in a scratch scope where each parameter is DECLARED its source's
+ * element type, and reads that application's type. The scratch scope is
+ * popped before returning, no annotation is written onto the literal, and
+ * the lambda's shape (which `projectLazyPointList` and the compile lowering
+ * pattern-match) is untouched. A `Block` of one statement and the `N(…)`
+ * wrap the `.N()` route adds are looked through; `N` types as its operand.
+ */
+function bareMappingElementType(
+  ce: ComputeEngine,
+  fn: Expression,
+  sources: ReadonlyArray<Expression>
+): Type | undefined {
+  if (!isFunction(fn, 'Function')) return undefined;
+  const params = fn.ops.slice(1);
+  if (params.length === 0 || params.length !== sources.length) return undefined;
+  const paramIndex = new Map<string, number>();
+  for (const [k, p] of params.entries()) {
+    if (!isSymbol(p)) return undefined;
+    paramIndex.set(p.symbol, k);
+  }
+  let body = fn.op1;
+  if (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
+  if (isFunction(body, 'N') && body.nops === 1) body = body.op1;
+  if (!isFunction(body)) return undefined;
+  // A binder declares variables when canonicalized; only an operator that
+  // merely computes a value from its operands is rebuilt. (`lazy` is not a
+  // reason to decline — `Add` and `Multiply`, the operators every arithmetic
+  // broadcast maps, are lazy.)
+  const def = body.operatorDefinition;
+  if (!def || def.scoped) return undefined;
+  const elementTypes = sources.map(mappingSourceElementType);
+  // Every operand is a parameter reference or mentions no parameter at all:
+  // a parameter buried inside an operand would keep its `unknown` binding
+  // and the rebuilt application would not be the body's. And every parameter
+  // the body DOES reference must have a source element type: a referenced
+  // parameter left `unknown` would not merely weaken the answer — an
+  // arithmetic operator types an `unknown` co-operand as a scalar, so an
+  // integer source zipped with an unknown-element source would probe as a
+  // number while the unknown source may be supplying tuples.
+  let referenced = false;
+  for (const arg of body.ops) {
+    if (isSymbol(arg) && paramIndex.has(arg.symbol)) {
+      if (elementTypes[paramIndex.get(arg.symbol)!] === undefined)
+        return undefined;
+      referenced = true;
+      continue;
+    }
+    if (arg.symbols.some((name) => paramIndex.has(name))) return undefined;
+  }
+  if (!referenced) return undefined;
+
+  ce.pushScope();
+  try {
+    // The stand-in for a parameter is a FRESH symbol declared in the scratch
+    // scope, never one named after the parameter: `ce.symbol(name)`
+    // short-circuits to the interned constant for `Pi`, `True`, `All`,
+    // `Nothing`, … before it consults any scope, so a user literal whose
+    // parameter carries one of those names would probe against the constant.
+    // The stand-in's name is never read back — it is spliced into the probe
+    // as an expression — so any name that cannot collide will do.
+    const standIns = new Map<string, Expression>();
+    const args = body.ops.map((arg) => {
+      if (!isSymbol(arg)) return arg;
+      const k = paramIndex.get(arg.symbol);
+      if (k === undefined) return arg;
+      let standIn = standIns.get(arg.symbol);
+      if (standIn === undefined) {
+        const name = `__mappingProbe${k}`;
+        ce.declare(name, elementTypes[k]!);
+        standIn = ce.symbol(name);
+        standIns.set(arg.symbol, standIn);
+      }
+      return standIn;
+    });
+    const probe = ce.function(body.operator, args);
+    if (!probe.isValid) return undefined;
+    const t = probe.type.type;
+    if (t === 'unknown' || t === 'any' || t === 'error') return undefined;
+    return t;
+  } catch {
+    return undefined;
+  } finally {
+    ce.popScope();
+  }
+}
+
 /**
  * A `tuple<…>` result type, built STRUCTURALLY from the operand types.
  *
@@ -1871,7 +1988,11 @@ function componentAt(
 // of points they diverge (`First` returns the first point, not the x-list).
 function isPointLike(e: Expression): boolean {
   const t = e.type.type;
-  if ((typeof t !== 'string' && t.kind === 'tuple') || e.operator === 'Tuple')
+  if (
+    t === 'tuple' ||
+    (typeof t !== 'string' && t.kind === 'tuple') ||
+    e.operator === 'Tuple'
+  )
     return true;
   // The list-of-lists spelling of a point list: a row of coordinates. A data
   // import produces `[[0,0],[3,4]]` rather than a list of tuples, and the
@@ -1892,7 +2013,10 @@ function isPointLike(e: Expression): boolean {
 // yields an empty list — matching the JS compiler's `[].map(...)` → `[]`.
 function hasPointElementType(xs: Expression): boolean {
   const elt = collectionElementType(xs.type.type);
-  return elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple';
+  if (elt === undefined) return false;
+  // The bare `tuple` (a callback declared `-> tuple`) is a point of unknown
+  // arity, as much a point element as a structural `tuple<…>`.
+  return elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple');
 }
 
 // The point arity a TYPE proves, or `undefined` when it proves nothing. A
@@ -2129,6 +2253,47 @@ function projectLazyPointList(
   return numericApproximation ? sources[j].N() : sources[j];
 }
 
+// The accessor that reads coordinate `position` of a point, used to keep a
+// SYMBOLIC element of a broadcast point list symbolic (see `pointComponentOf`).
+const POINT_ACCESSOR_BY_POSITION = ['PointX', 'PointY', 'PointZ'] as const;
+
+// The coordinate at `position` of ONE element of a broadcast point list.
+//
+// A point VALUE (a `Tuple` literal, a row of coordinates) answers its
+// component, or the position-preserving absence marker when it has no such
+// coordinate (a `z` asked of a 2-D point) — `Nothing` would erase the slot and
+// misalign the coordinate list against the point list it was derived from.
+//
+// A SYMBOLIC point — a valueless symbol declared `tuple<number, number>`, or
+// an unevaluated product such as `2P` — has no components to read: `at()`
+// answers `undefined` for it exactly as it does for an out-of-range position.
+// Reading that `undefined` as absence folded every symbolic element to `NaN`
+// (`PointY([P])` → `[NaN]`) while the single-point call `PointY(P)` stayed
+// symbolic, and a document whose points depend on sliders had the `NaN`
+// baked into every stored binding downstream (Tycho item 213). Such an
+// element keeps the accessor applied to it (`PointY(P)`), so the coordinate
+// list is exactly as symbolic as its source; only a static arity that PROVES
+// the coordinate absent (`PointZ` over a symbol declared a 2-tuple) takes the
+// marker, matching what the single-point call reports for it.
+function pointComponentOf(
+  e: Expression,
+  position: number,
+  ce: ComputeEngine
+): Expression {
+  const component = e.at(position);
+  if (component !== undefined) return component;
+  if (e.isCollection) return absenceMarker(ce, e);
+  // Only a POINT-shaped symbolic element keeps the accessor. The broadcast
+  // was decided by the first element, so a later element may be anything —
+  // a scalar `5` in `[(1, 2), 5]` has no coordinate to stay symbolic about,
+  // and wrapping it as `PointY(5)` would plant an invalid application in the
+  // coordinate list where the absence marker belongs.
+  if (!isPointLike(e)) return absenceMarker(ce, e);
+  const arity = staticPointArity(e.type.type);
+  if (arity !== undefined && arity < position) return absenceMarker(ce, e);
+  return ce.function(POINT_ACCESSOR_BY_POSITION[position - 1], [e]);
+}
+
 // Evaluate a point-component accessor, broadcasting the coordinate over a list
 // of points. We inspect the actual elements (not the declared element type,
 // which is unreliable for a literal list of points) to decide whether to
@@ -2197,8 +2362,7 @@ function pointComponentAt(
         // `Nothing` would erase the slot and misalign the coordinate list
         // against the point list it was derived from.
         const comps: Expression[] = [];
-        for (const e of xs.each())
-          comps.push(e.at(position) ?? absenceMarker(ce, e));
+        for (const e of xs.each()) comps.push(pointComponentOf(e, position, ce));
         return ce.function('List', comps);
       }
       // Elements are not points → element indexing, like First/Second/Third.
@@ -2210,6 +2374,23 @@ function pointComponentAt(
     if (hasPointElementType(xs)) return ce.function('List', []);
     return componentAt(xs, position, ce);
   }
+
+  // An indexed collection whose finiteness is undecidable (a point view over
+  // `Range(0, n)` with `n` not yet assigned) cannot be peeked, but when its
+  // element TYPE is a point the projection is still defined element-wise:
+  // answer the lazy projection, as the finite arm does for an unknown size.
+  // Asking `componentAt` for element `position` instead reads the
+  // not-yet-computable access as an ABSENT value and folds the whole view to
+  // the absence marker (`Missing`, formerly `NaN` off the mistyped view of
+  // Tycho item 212).
+  if (xs.isIndexedCollection === true && hasPointElementType(xs))
+    return lazyBroadcastMap(
+      ce,
+      'At',
+      [xs, ce.number(position)],
+      (x) => x === xs,
+      numericApproximation
+    );
 
   // Symbolic / non-finite operand: stay symbolic (or error) like componentAt.
   return componentAt(xs, position, ce);
@@ -3771,7 +3952,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // (If the input collection is indexed, the output collection is indexed.)
     // For the multi-collection (zipWith) form the result is always an indexed
     // collection (like `Zip`) of the lambda's result type.
-    type: (ops) => {
+    type: (ops, { engine }) => {
       // Source type for shape propagation. When the source's STATIC type is
       // indeterminate (a declared-`unknown` symbol holding a collection
       // value — the lazy-broadcast `Map(…, L)` shape), fall back to its
@@ -3790,7 +3971,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // A source-less `Map(f)` is never canonical (the handler declines
         // it), but the type can be asked of the raw form.
         if (ops[1] === undefined) return 'indexed_collection';
-        const resultType = functionResult(ops[0].type.type);
+        const resultType =
+          bareMappingElementType(engine, ops[0], [ops[1]]) ??
+          functionResult(ops[0].type.type);
         if (!resultType || resultType === 'unknown' || resultType === 'any') {
           // Unknown element type: still preserve value-aware indexed-ness
           // (the `.N()` route wraps the body in `N`, whose lazy result types
@@ -3815,7 +3998,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         return mapResultType(sourceType(ops[1]), resultType);
       }
-      const resultType = functionResult(ops[0].type.type);
+      const resultType =
+        bareMappingElementType(engine, ops[0], ops.slice(1)) ??
+        functionResult(ops[0].type.type);
       return mapResultType(
         'indexed_collection',
         !resultType || resultType === 'unknown' || resultType === 'any'

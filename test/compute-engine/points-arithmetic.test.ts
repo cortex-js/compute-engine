@@ -1739,7 +1739,10 @@ describe('POINT/TUPLE ARITHMETIC — could-be-numeric elements match the validat
     ce.assign('n', 4);
     const p = ce.parse(String.raw`\frac{1}{n}(2h(x)-1, 1)`);
     expect(p.operator).toBe('Multiply');
-    expect(p.type.toString()).toBe('tuple<broadcastable<number>, finite_integer>');
+    // The scalar `1/n` (with `n := 4`, a rational) scales BOTH components, so
+    // the literal `1` contributes a rational coordinate (`1/4`), not an
+    // integer one — the component tier follows the declared scalar factor.
+    expect(p.type.toString()).toBe('tuple<broadcastable<number>, finite_rational>');
     const sum = ce.parse(
       String.raw`\frac{1}{n}(\lfloor nx\rfloor,\lfloor ny\rfloor)+\frac{1}{n}(2h(x)-1, 1)`
     );
