@@ -221,6 +221,33 @@
   "scalar" recursed into a zero-operand product); it is `[(0, 0),
   (0.333…, 0)]`.
 
+- **A primed name with a subscript that does not fold into the symbol is a
+  primed variable, like the bare name.** `\alpha_1'` parses as the primed
+  variable `Prime(alpha_1)`, but `\alpha_{i+1}'`, `A_{i,j}'` and `x_{n+1}''`
+  parsed as `Derivative(Subscript(…))` — the prime parselet read every
+  compound base as an expression to differentiate — and canonicalization then
+  lifted the subscript into a lambda over its own base (`(alpha) ↦
+  alpha_{i+1}`). Such a base now asks the same variable-or-function question
+  as the bare symbol, decided by its base: `Prime(Subscript(alpha, i+1))`
+  for an unknown base, `Derivative(Subscript(f, n+1))` for `f` declared a
+  function. The prime-first spelling `\alpha'_{i+1}` agrees, the applied
+  `\alpha_{i+1}'(t)` is unchanged, and a parenthesized expression `(x^2)'`
+  is still differentiated.
+
+- **A symbolic derivative order is accepted and stays symbolic.** `f^{(n)}`
+  is documented as `Derivative(f, n)`, but with `n` unassigned it
+  canonicalized to an `incompatible-type` error (the order was checked
+  against `number` without the inference a free symbol gets elsewhere), and
+  had it got through, evaluation read the non-numeric order as 1 and returned
+  the FIRST derivative. The order is now inferred `number` and the expression
+  stays inert until it is assigned (`n := 2` then gives `f''`). Also fixed on
+  the way: `Derivative(g, 0)` with `g` a function symbol evaluated to
+  `(x) ↦ g`, the constant function returning the symbol, instead of `g`
+  (likewise the all-zero multi-index `Derivative(g, 0, 0)`), and a
+  multi-index derivative of a symbol bound to a lambda (`Derivative(g, 1,
+  0)` with `g(x, y) := x^2 y`) stayed inert because that arm only recognized
+  an inline function literal.
+
 - **A compiled `Sum`/`Product` keeps its NaN exit when a caller-supplied
   function is applied beneath another operator or inside a user-defined
   callee.** A function declared by signature only and implemented through

@@ -3547,11 +3547,22 @@ function parsePrime(
 
   // If the lhs is a function, return the derivative
   // i.e. f' -> Derivative(f)
-
-  const sym = symbol(lhs);
-  const isKnownFunction =
-    (sym && parser.resolveSymbol(sym)?.type.matches('function')) ||
-    operator(lhs);
+  //
+  // A subscripted NAME whose subscript could not be folded into the symbol
+  // (`\alpha_{i+1}`, `A_{i,j}`) is still a name, and asks the same
+  // variable-or-function question as the bare symbol — decided by its base.
+  // It is not an expression to differentiate: read as one, `\alpha_{i+1}'`
+  // became `Derivative(Subscript(alpha, i+1))`, which canonicalization lifted
+  // into a lambda over `alpha`, while `\alpha_1'` was the primed variable
+  // `Prime(alpha_1)`. Any other compound base IS such an expression —
+  // `(x^2)'`, and a subscript on one (`(x^2)_n'`), since the generic `_`
+  // parselet attaches a subscript to whatever was parsed before it.
+  const head = operator(lhs);
+  const baseSym = head === 'Subscript' ? symbol(operand(lhs, 1)) : symbol(lhs);
+  const isName = baseSym !== null && (head === '' || head === 'Subscript');
+  const isKnownFunction = isName
+    ? parser.resolveSymbol(baseSym)?.type.matches('function') === true
+    : head !== '';
 
   // Check if followed by arguments - if so, treat as function derivative
   // This handles both known functions like sin'(x) and unknown like g'(t)

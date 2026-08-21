@@ -908,6 +908,29 @@ export function numericDerivativeOfApply(
   return new BoxedNumber(ce, v);
 }
 
+/**
+ * The `Function` literal a user-defined function symbol is bound to, or
+ * `undefined`. A function defined by a lambda (`g(x, y) := x^2 y`, or
+ * `Assign(g, Function(…))`) is installed as an OPERATOR definition that keeps
+ * the literal on its `_lambdaLiteral` slot; the declare-then-assign idiom
+ * (`ce.declare('g', 'function')` then `ce.assign`) keeps it as the symbol's
+ * VALUE. `op.value` answers neither reliably — for the operator route it is
+ * the operator wrapper, not the literal.
+ */
+function functionLiteralOf(
+  ce: ComputeEngine,
+  id: string
+): Expression | undefined {
+  const def = ce.lookupDefinition(id);
+  if (def !== undefined && isOperatorDef(def)) {
+    const literal = (def.operator as { _lambdaLiteral?: Expression })
+      ._lambdaLiteral;
+    return isFunction(literal, 'Function') ? literal : undefined;
+  }
+  const value = ce._getSymbolValue(id);
+  return isFunction(value, 'Function') ? value : undefined;
+}
+
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
   {
     /* @todo
@@ -1058,17 +1081,33 @@ volumes
         // canonicalize to a function application, exactly as an
         // operator-position use (`["y", "x"]`) would have inferred it.
         if (isSymbol(fn)) fn._infer('function');
-        const orders = ops
-          .slice(1)
-          .map((o) => checkType(engine, o.canonical, 'number'));
+        const orders = ops.slice(1).map((o) => {
+          const order = o.canonical;
+          // A symbolic order — `f^{(n)}`, documented as `Derivative(f, n)` —
+          // is a free variable used as a number: infer it, as the function
+          // symbol above is inferred, instead of rejecting its still-`unknown`
+          // type with `incompatible-type`.
+          if (isSymbol(order) && order.type.isUnknown) order._infer('number');
+          return checkType(engine, order, 'number');
+        });
         return engine._fn('Derivative', [fn, ...orders]);
       },
       evaluate: (ops, { engine: ce }) => {
         const op = ops[0].evaluate();
-        const orders = ops.slice(1).map((o) => {
-          const n = Math.floor(o.N().re);
-          return Number.isNaN(n) ? 1 : n;
-        });
+        const orders = ops.slice(1).map((o) => Math.floor(o.N().re));
+        // An order that is not a number yet (`Derivative(f, n)` with `n`
+        // unassigned) has no closed form: stay inert. Reading it as 1 silently
+        // made `f^{(n)}` the FIRST derivative.
+        if (orders.some((n) => !Number.isFinite(n))) return undefined;
+        // Differentiating zero times in every position is the function
+        // itself — univariate `Derivative(g, 0)` and multi-index
+        // `Derivative(g, 0, 0)` alike. Left to the lifting below, a head that
+        // is not already a `Function` literal (a bare symbol, or an
+        // operator-defined name such as `Sin`) came back as the constant
+        // function returning that head (`Derivative(g, 0)` → `(x) ↦ g`): the
+        // order-0 "derivative" is the head itself, which the univariate arm
+        // then re-parameterized over its value's parameters.
+        if (orders.length >= 1 && orders.every((n) => n === 0)) return op;
 
         // Univariate (bare or single order): ordinary n-th derivative.
         //
@@ -1119,12 +1158,18 @@ volumes
         // Multi-index: mixed partial of a multivariate function. For a known
         // function literal, differentiate the body the requested number of
         // times with respect to each parameter; otherwise stay symbolic.
-        if (isFunction(op, 'Function')) {
-          const params = op.ops
+        // A symbol bound to a function literal is differentiated through
+        // that literal, as the univariate arm does inside `derivative()`;
+        // the literal is what carries the named parameters the multi-index
+        // refers to. Without this, `Derivative(g, 1, 0)` stayed inert for an
+        // assigned bivariate `g` while `Derivative(g, 1)` evaluated.
+        const literal = isSymbol(op) ? functionLiteralOf(ce, op.symbol) : op;
+        if (isFunction(literal, 'Function')) {
+          const params = literal.ops
             .slice(1)
             .map((p) => functionLiteralParameterName(p));
           if (params.length === orders.length && params.every((p) => !!p)) {
-            let body: Expression | undefined = op.op1;
+            let body: Expression | undefined = literal.op1;
             for (let i = 0; i < orders.length && body; i++)
               for (let d = 0; d < orders[i] && body; d++)
                 body = differentiate(body, params[i]!);
@@ -1132,7 +1177,7 @@ volumes
             // body in the scoped Block that `makeLambda` requires — a bare
             // `_fn` literal throws on application.
             if (body)
-              return ce.function('Function', [body, ...op.ops.slice(1)]);
+              return ce.function('Function', [body, ...literal.ops.slice(1)]);
           }
         }
 

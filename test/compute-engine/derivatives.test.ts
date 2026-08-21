@@ -1412,3 +1412,76 @@ describe('VECTOR-VALUED DERIVATIVES — the declared type must not contradict th
     expect(ce.box(['D', ['Sin', 'x'], 'x']).type.matches('number')).toBe(true);
   });
 });
+
+describe('Derivative order operand', () => {
+  // `f^{(n)}` is documented as `Derivative(f, n)`. A symbolic order used to
+  // be rejected at canonicalization (`incompatible-type`: the order was
+  // checked against `number` without the inference a free symbol gets
+  // elsewhere), and an order that is not a number was read as 1 at
+  // evaluation, which would have made `f^{(n)}` the first derivative.
+  test('a symbolic order is inferred `number` and stays inert', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(number) -> number');
+    const e = ce.parse('f^{(n)}');
+    expect(e.json).toEqual(['Derivative', 'f', 'n']);
+    expect(e.isValid).toBe(true);
+    expect(ce.symbol('n').type.toString()).toBe('number');
+    expect(e.evaluate().json).toEqual(['Derivative', 'f', 'n']);
+  });
+
+  test('the order resolves once assigned', () => {
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.parse('x \\mapsto x^3'));
+    const e = ce.parse('f^{(n)}(2)');
+    expect(e.evaluate().json).toEqual(['Apply', ['Derivative', 'f', 'n'], 2]);
+    ce.assign('n', 2);
+    expect(ce.parse('f^{(n)}(2)').evaluate().toString()).toBe('12');
+  });
+
+  test('a multi-index over a symbol bound to a lambda differentiates', () => {
+    // The multi-index arm only handled an inline `Function` literal, so a
+    // symbol bound to one stayed inert while the univariate arm resolved it.
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.parse('(x, y) \\mapsto x^2 y'));
+    expect(
+      ce
+        .box(['Apply', ['Derivative', 'g', 1, 0], 2, 3])
+        .evaluate()
+        .toString()
+    ).toBe('12');
+    expect(
+      ce
+        .box(['Apply', ['Derivative', 'g', 0, 1], 2, 3])
+        .evaluate()
+        .toString()
+    ).toBe('4');
+    // Zero in every position is the function itself.
+    expect(ce.box(['Derivative', 'g', 0, 0]).evaluate().json).toEqual('g');
+    expect(
+      ce
+        .box(['Apply', ['Derivative', 'g', 0, 0], 2, 3])
+        .evaluate()
+        .toString()
+    ).toBe('12');
+  });
+
+  test('order 0 of a function symbol is the function itself', () => {
+    // The lifting step re-parameterized the symbol over its value's
+    // parameters: `Derivative(g, 0)` came back as `(x) ↦ g`.
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.parse('x \\mapsto x^3'));
+    expect(ce.box(['Derivative', 'g', 0]).evaluate().json).toEqual('g');
+    expect(
+      ce
+        .box(['Apply', ['Derivative', 'g', 0], 2])
+        .evaluate()
+        .toString()
+    ).toBe('8');
+    expect(
+      ce
+        .box(['Derivative', ['Function', ['Power', 'x', 2], 'x'], 0])
+        .evaluate()
+        .toString()
+    ).toBe('(x) => x^2');
+  });
+});

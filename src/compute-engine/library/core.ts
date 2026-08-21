@@ -5891,9 +5891,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           }
         }
 
-        if (isFunction(op2, 'Sequence'))
-          ce._fn('Subscript', [op1, ce._fn('List', op2.ops)]);
-
         // Unwrap Delimiter (parentheses) from the subscript expression
         // e.g., `A_{(n+1)}` -> `["Subscript", "A", ["Add", "n", 1]]`
         let sub = op2;

@@ -172,6 +172,7 @@ describe('Tycho 192(b) prime written before a subscript', () => {
     // A subscript that is an expression keeps the `Subscript` reading in both
     // spellings.
     ["F'_{n+1}(t)", "F_{n+1}'(t)"],
+    ["\\alpha'_{i+1}", "\\alpha_{i+1}'"],
     // A trigger-spelled base (`\alpha`) does not fold the subscript into the
     // name, in either spelling.
     ["\\alpha'_1(x)", "\\alpha_1'(x)"],
@@ -220,5 +221,73 @@ describe('Tycho 192(b) prime written before a subscript', () => {
     const ce = new ComputeEngine();
     ce.parse('F_0(t) \\coloneq t^2').evaluate();
     expect(ce.parse("F'_{0}(3)").evaluate().re).toBeCloseTo(6, 12);
+  });
+});
+
+describe('a subscripted name that keeps its `Subscript` reading is primed like the bare name', () => {
+  // `\alpha_1'` folds the subscript into the symbol and is the primed
+  // VARIABLE `Prime(alpha_1)`. A subscript that cannot fold (`\alpha_{i+1}`,
+  // `A_{i,j}`) is still a name, not an expression to differentiate, so it
+  // asks the same variable-or-function question as the bare symbol — decided
+  // by its base. Read as an expression it became
+  // `Derivative(Subscript(alpha, i+1))`, which canonicalization then lifted
+  // into a lambda over `alpha`.
+  const raw = (latex: string, setup?: (ce: ComputeEngine) => void) => {
+    const ce = new ComputeEngine();
+    setup?.(ce);
+    return ce.parse(latex, { canonical: false }).toMathJson();
+  };
+
+  test('an unknown base is a primed variable', () => {
+    expect(raw("\\alpha_{i+1}'")).toEqual([
+      'Prime',
+      ['Subscript', 'alpha', ['Add', 'i', 1]],
+    ]);
+    expect(raw("x_{n+1}''")).toEqual([
+      'Prime',
+      ['Subscript', 'x', ['Add', 'n', 1]],
+      2,
+    ]);
+    expect(raw("A_{i,j}'")).toEqual([
+      'Prime',
+      ['Subscript', 'A', ['Delimiter', ['Sequence', 'i', 'j'], ',']],
+    ]);
+  });
+
+  test('the canonical form keeps the name, and is valid', () => {
+    const e = new ComputeEngine().parse("\\alpha_{i+1}'");
+    expect(e.operator).toBe('Prime');
+    expect(e.op1.operator).toBe('Subscript');
+    expect(e.isValid).toBe(true);
+  });
+
+  test('a base declared as a function is still differentiated', () => {
+    const fn = (ce: ComputeEngine) => ce.declare('f', '(number) -> number');
+    expect(raw("f_{n+1}'", fn)).toEqual([
+      'Derivative',
+      ['Subscript', 'f', ['Add', 'n', 1]],
+    ]);
+  });
+
+  test('an applied prime and a parenthesized expression are unchanged', () => {
+    expect(raw("\\alpha_{i+1}'(t)")).toEqual([
+      'Apply',
+      ['Derivative', ['Subscript', 'alpha', ['Add', 'i', 1]], 1],
+      't',
+    ]);
+    expect(raw("(x^2)'")).toEqual([
+      'Derivative',
+      ['Delimiter', ['Square', 'x']],
+    ]);
+  });
+
+  test('a subscript on a parenthesized expression is still differentiated', () => {
+    // The generic `_` parselet attaches a subscript to any expression, so a
+    // `Subscript` head does not by itself mean a name: only one whose base
+    // is a symbol follows the symbol rule.
+    expect(raw("(x^2)_n'")).toEqual([
+      'Derivative',
+      ['Subscript', ['Delimiter', ['Square', 'x']], 'n'],
+    ]);
   });
 });

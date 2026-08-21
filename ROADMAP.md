@@ -523,7 +523,7 @@ bytes). When Stage 4 lands: route both operators through `ce.effects.console`,
 replace the MCP global-patching with a registry override, and add
 denied/overridden-capability coverage.
 
-### Tycho items 192/193/194 — residue after the 2026-08-15 fixes (OPEN)
+### Tycho items 192/193/194 — residue after the 2026-08-15 fixes (CLOSED 2026-08-21 — last bullet fixed)
 
 The three items were fixed the same day (`PointList` takes the elementwise
 derivative branch and `F'_{0}(t)` parses like `F_{0}'(t)`, item 192;
@@ -598,9 +598,52 @@ fixed:
   `test/compute-engine/tycho-item-194-range-broadcast-type.test.ts` (widening on
   the inferred track, and the declared-type contract still throwing).
 - Also open from item 192(b): a compound (`Subscript`) prime base with no
-  application yields `Derivative(Subscript(alpha,1))` while a fused name yields
-  `Prime(F_0)` — pre-existing, whether `Prime` or `Derivative` is the canonical
-  no-argument head is a convention question.
+  application yielded `Derivative(Subscript(alpha, i+1))` while a fused name
+  yielded `Prime(alpha_1)`. **FIXED 2026-08-21.** It was not a convention
+  question: the engine's rule was already fixed by its pins and by
+  `parsePrime` itself — a prime on a FUNCTION (a symbol whose type is a
+  function) is `Derivative`, on anything else the primed variable `Prime`
+  (`x'` in `desmos-gap-fixes.test.ts`, `\sin a'` in
+  `genre-parse-recovery.test.ts`, `A'` in `geometry-notation.test.ts`) — and
+  `doc/81-reference-calculus.md` now states both halves (it used to document
+  only the function case). `parsePrime`
+  (`latex-syntax/dictionary/definitions-core.ts`) simply treated every
+  compound base as an expression to differentiate. A `Subscript` base now
+  follows the symbol rule through its base symbol. Pinned in
+  `tycho-item-192-pointlist-derivative-prime-subscript.test.ts` ("a
+  subscripted name that keeps its `Subscript` reading…"). Two adjacent
+  `Derivative` defects found and fixed in the same round (symbolic order
+  `f^{(n)}` rejected at canonicalization and read as 1 at evaluation; order 0
+  of a symbol head lifted into `(x) ↦ g`), and one inconsistency recorded
+  below rather than fixed.
+
+### A free `i` in a non-fused subscript index is the imaginary unit on one canonicalization path and a symbol on the other (OPEN, needs a ruling — found 2026-08-21)
+
+Measured on a fresh engine: `A_{i,j}` canonicalizes to
+`Subscript(A, Sequence(ImaginaryUnit, j))` — the index `i` becomes the
+imaginary unit — while `A_{i+1}` canonicalizes to `Subscript(A, Add(i, 1))`
+with `i` a plain `unknown`-typed symbol, and `\sum_{i=1}^{3} A_{i,j}` keeps
+`i` as the bound index. The two free-`i` answers come from two code paths in
+the `Subscript` canonical handler (`library/core.ts`): a parenthesized or
+comma subscript arrives as a `Delimiter` and is canonicalized (`sub =
+op2.op1.canonical`), so the engine-wide "unbound `i` is the imaginary unit"
+convention applies; any other subscript expression is passed through
+UNCANONICALIZED (`sub = op2`), which is what keeps `i` symbolic there — by
+accident, and it leaves a non-canonical operand inside a canonical
+expression. (A dead arm the handler also carried — a `Sequence` subscript
+rebuilt as a `List` with the result discarded, no `return` — was removed
+the same day; it changed nothing.)
+
+The question to rule: inside a subscript index that did not fold into a
+name, is a free `i` (and `e`) the index variable or the constant? The fused
+case already answers "the name" (`x_i` is the symbol `x_i`, `i_A` stays
+`i_A`; the handler saves the raw name before canonicalization for exactly
+this reason), which argues for the index reading in the unfused case too —
+but that is a new exception to the unbound-`i` convention and wants the
+user's call. The canonical-operand gap cannot be closed ahead of the ruling:
+canonicalizing the pass-through path today would turn `A_{i+1}` into
+`Subscript(A, 1 + i)` with the imaginary unit — that IS the second option —
+so the ruling and the fix land together.
 
 ### Symbolic-side commutativity for `And`/`Or` (STEPS 1–2 SHIPPED 2026-08-18; design settled 2026-08-16 — "Option B")
 
