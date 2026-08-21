@@ -81,6 +81,16 @@ interface BaseCollectionHandlers {
   count: (collection: Expression) => number | undefined;
   isEmpty?: (collection: Expression) => boolean | undefined;
   isFinite?: (collection: Expression) => boolean | undefined;
+  /** Whether `iterator()` will actually produce this collection's elements —
+   * the cheap way to tell an empty collection from one that merely cannot be
+   * walked. Absent, it defaults to `true`. Mirror of the handler documented in
+   * `types-definitions.ts`. */
+  isEnumerable?: (collection: Expression) => boolean | undefined;
+  /** Whether this instance is a collection at all, for operators whose
+   * collection-ness depends on their operands (e.g. `When`). Absent, it
+   * defaults to `true`. Mirror of the handler documented in
+   * `types-definitions.ts`. */
+  isCollection?: (collection: Expression) => boolean;
   isLazy?: (collection: Expression) => boolean;
   /** Opt-in to per-instance element memoization (mirror of the flag in
    * `types-definitions.ts`, where it is documented). */

@@ -109,45 +109,126 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### The `Sum`/`Product` skip rule is not transitive through a user-function body (OPEN, root cause identified — measured 2026-08-21)
+### Built-in collections as `Iterable`/`Indexable` protocol conformers — audit and sizing (OPEN, design — audited 2026-08-21; ruling P8 / §7 item 6(h) of `docs/TYPE_SYSTEM_ROADMAP.md`)
+
+A read-only audit sized the migration of the collection capability from the
+type lattice onto the protocol system. Findings, so the next round does not
+re-derive them:
+
+- **The engine already has three overlapping answers to "is this a
+  collection".** (1) The lattice: `collection<T>`, `indexed_collection<T>`,
+  `list<T>`, … (~139 predicate sites + 76 operator-signature bounds). (2) The
+  runtime handler layer: `CollectionHandlers` on a definition
+  (`types-definitions.ts`, 14 members, `iterator` + `count` required,
+  `defaultCollectionHandlers` in `collection-utils.ts` derives the rest) with
+  the `isCollection`/`isIndexedCollection`/`isFiniteCollection` accessors —
+  a structural protocol in everything but name, reachable from JS only.
+  (3) The nominal protocol registry (`engine-protocols.ts`), which has no
+  collection protocol at all. The documented CAPABILITY-vs-SHAPE split
+  (`types-expression.ts`, the `isCollection` doc) is why ~24 sites
+  double-gate (`op.isCollection || op.type.matches('collection<any>')`);
+  the sharpest seam is `BoxedFunction.isIndexedCollection`, a capability
+  accessor whose final answer is `this.type.matches('indexed_collection<any>')`.
+- **Site classification** (`src/`, excluding the lattice implementation in
+  `common/type/`): 69 predicate sites are pure capability gates ("can I
+  iterate/index/count this"; 40 of them in `compilation/`), 70 are
+  shape/element/inference/representation reads (28 in
+  `library/collections.ts`) and must stay on the lattice, 10 are mixed
+  (capability gates with tuple/string atomicity carve-outs). Of the 76
+  signature bounds, ~57 are capability bounds (`Count`, `IsEmpty`,
+  `Contains`, `Join`, the statistics folds). Migrating the capability sites
+  alone touches 19 files (24 with the signature bounds).
+- **What the protocol system can already do**: built-in lattice types are
+  legal conformance targets (`conformanceTargetProblem` admits `string`,
+  `list<integer>`, a conditional head `list<T>`); a JS host handler
+  satisfies a member with no Epsil source (`ProtocolHostHandler`); dispatch
+  keys on the receiver's TYPE, so an untagged `["List", 1, 2]` dispatches;
+  and `where T is Iterable` is a working constraint slot today. What it
+  cannot do, by effort: protocol refinement (`Indexable` requires
+  `Iterable`) — no `requires` field; parameterized protocols (`Iterable<T>`
+  — `assertV1MemberShape` bans generic members; conditional conformance
+  gets element MATCHING but not element OUTPUT in a member's result type);
+  a dynamic-tier compiled guard that can see element types (the `array`
+  bucket is rejected); and the membership-granting bridge (conformance ⇒
+  inhabits `collection`), which needs `isSubtype` to consult the conformance
+  oracle and inverts the `common/type` ⊥ engine layering that the P36 oracle
+  seam exists to preserve. Compiled dispatch is JavaScript-only.
+- **Handler members that are not protocol-shaped**: `elementMemo` is a
+  boolean attribute, not a member; `isCollection` is a PER-INSTANCE
+  conformance veto (`When`), which nominal conformance cannot express;
+  `isLazy`/`isFinite`/`isEmpty`/`isEnumerable` are derived facets, not
+  conformance; the `string` arm of `at`'s index is dead (no library `at`
+  handler accepts a string — keyed access lives on `BoxedDictionary`); and
+  `canEnumerate`/`elementCount` on eager producers form a second, mutually
+  exclusive partial conformance that a unification must place.
+
+Recommendation from the audit: do not replace the lattice; make
+`CollectionHandlers` the implementation of two engine-declared protocols
+(`Iterable` over the `collection` tier, `Indexable` over the
+`indexed_collection` tier, as §4 already rules), and retarget the 69
+capability gates at conformance so the double-gating disappears. First
+deliverable is the requirement-table design doc item 6(h) asks for; the
+member table above is its input.
+
+Defects found by the audit (all verified; small, recorded here so they are
+fixed with the unification or sooner):
+
+- **The public `.d.ts` mirror of `CollectionHandlers` has drifted.**
+  `types-expression.ts` re-declares the interface structurally for the
+  published types and omits `isEnumerable` and `isCollection`, both present
+  on the canonical `BaseCollectionHandlers` in `types-definitions.ts`. Either
+  derive one from the other or add the two members.
+- **`isLazy` documents the wrong default.** The handler's doc comment in
+  `types-definitions.ts` says "Default: `true`"; `BoxedFunction.isLazyCollection`
+  answers `?? false`. The code is right (an eager `List` is not lazy); fix the
+  comment.
+- **`Tuple` carries a phantom `keys` handler.** `library/collections.ts`
+  declares `keys` inside `Tuple`'s `collection:` block; `keys` is not a
+  member of `CollectionHandlers` and nothing reads it — it survives only
+  because the definition is cast `as OperatorDefinition`. Remove it, or
+  promote keyed access to a real member (`get`/`has`/`keys`, matching
+  `DictionaryInterface`) if a `Keyed` protocol is wanted.
+- **No test exercises a user-supplied `collection:` handler block**; the only
+  one (`type-constructors.test.ts`) passes `collection: {}` to make
+  construction throw. The JS extension route is public surface
+  (`OperatorDefinition.collection`, `ValueDefinition.collection`) and is
+  unpinned.
+
+### The `Sum`/`Product` skip rule stopped at the head a `functions` entry vouched for (RESOLVED 2026-08-21 — oracle-aware effects predicate)
 
 A compiled `Sum`/`Product` skips terms after its accumulator goes NaN when
-nothing in the body has observable effects, and a caller-supplied piece that
-an oracle vouches for — a pure `functions` entry, a caller `compile` handler
-whose definition declares no effects — counts as effect-free. That holds when
-the piece appears directly in the body. It does NOT hold when the same piece
-is reached through a user-defined function:
+nothing in the body has observable effects, and a caller-supplied piece an
+oracle vouches for — a pure `functions` entry, a caller `compile` handler
+whose definition declares no effects — counts as effect-free. Recorded as
+"not transitive through a user-function body": `sum_{n=1}^{31} sq(n·x)` with
+`functions:{sq:'((t)=>t*t+1)'}` kept 30 exits while `wrap(t) := sq(t) + 1`
+over the same entry kept 0.
 
-```
-sum_{n=1}^{31} sq(n·x)     functions:{sq:'((t)=>t*t+1)'}    30 exits
-wrap(t) := sq(t) + 1
-sum_{n=1}^{31} wrap(n·x)   same functions entry             0 exits
-```
+Measured before fixing, the gap was wider than the record: the vouched head
+lost the exit beneath ANY built-in operator too — `sq(n·x) + 1`,
+`sin(sq(n·x))`, `2·sq(n·x)` all gave 0 exits — because the gate's effects
+half read `node.isPure` of the enclosing node, and a signature-only
+declaration (`ce.declare('sq', '(number) -> number')`, the ordinary spelling
+when the implementation arrives through `functions`) projects unknown
+effects onto every application above it. The "direct" case only worked
+because the vouched head was the body's root, where the provenance branch
+answers before `isPure` is consulted.
 
-**The blocker is not the provenance test, and fixing that test does not
-help.** `isAdmissibleUserFnCallee` (`compilation/cse.ts`) gates on
-`body.isPure && calleeBodyClean(body)`. Making `calleeBodyClean` oracle-aware
-was tried and reverted: the `body.isPure` half refuses first. The body here is
-`sq(t) + 1`, and `sq` is declared with a SIGNATURE ONLY
-(`ce.declare('sq', '(number) -> number')`) because its implementation arrives
-through `functions` — and a signature-only declaration reports
-`isPure === false` for its applications, since there is no body to derive
-purity from. So the outer application is judged impure on account of the very
-symbol the oracle exists to vouch for.
-
-That makes this an instance of a broader question rather than a local fix:
-**what should a declared-but-valueless function's purity be?** Today it is
-`false` (assume the worst). `unknown` would be the honest answer, and would
-let a caller-supplied oracle settle it. Changing it reaches beyond this gate —
-the same `isPure === false` is what makes a signature-only declaration behave
-conservatively everywhere — so it wants a ruling before anyone moves it.
-
-Not unsound, and no live consumer: the failure mode is refusing to skip, never
-skipping when it should not. Recorded because the shape (`wrap(t) := helper(t)`
-over a caller-supplied helper) is an ordinary one, so the optimization silently
-does not reach a consumer who writes it that way. Found by the Codex leg of the
-dual review on the skippability change; the `body.isPure` root cause was found
-by instrumenting after the first fix failed to move the measurement.
+The global question the old record raised — what a declared-but-valueless
+function's purity should be — did not need a ruling. `docs/EFFECTS-MODEL.md`
+already settles it ("optimistic in declared contracts, conservative in
+runtime accounting"), `compile-function-purity.test.ts` pins `isPure ===
+false` for such an application, and nothing outside the compile gate wanted
+it changed. The fix is local to the gate: `Harvester.isEffectFreeUnderOracles`
+(`compilation/cse.ts`) re-asks the effect projection per node with the
+oracles' answers substituted for the heads they vouch for — `functions`
+entry, caller `compile` handler, validated user-callee body — and
+`shallowApplicationEffects` for every other head; the callee-body scan
+(`calleeBodyClean`) gained the same skippability relaxation `computeEligible`
+already had. Pinned in `compile-function-purity.test.ts` ("a vouched head
+keeps the exit wherever it sits"): the four built-in shapes, one and two
+callee levels, `Product`, and the refusals — impure entry, impure built-in
+beside the head, a second head with no oracle, impure operand.
 
 ### A `compile` handler that declines no longer costs the NaN exit (RESOLVED 2026-08-21 by the effects rule)
 

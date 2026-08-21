@@ -1045,7 +1045,10 @@ export interface BaseCollectionHandlers {
    * computed until they are needed, for example when iterating over the
    * collection.
    *
-   * Default: `true`
+   * Default: `false`. A collection is eager unless its definition says
+   * otherwise: the elements of a `List` are already materialized operands,
+   * so nothing is deferred. Lazy collections such as `Range` or `Map` declare
+   * this handler to opt in.
    */
   isLazy?: (collection: Expression) => boolean;
 
@@ -1118,8 +1121,10 @@ export interface IndexedCollectionHandlers {
    *
    * If the index is &lt;0, return the element at index `count() + index + 1`.
    *
-   * The index can also be a string for example for records. The set of valid
-   * keys is returned by the `keys()` handler.
+   * The index can also be a string, for example for records. There is no
+   * handler that enumerates the valid string keys: a handler that accepts
+   * them decides which ones it recognizes, and returns `undefined` for the
+   * rest.
    *
    * If the index is invalid, return `undefined`.
    */

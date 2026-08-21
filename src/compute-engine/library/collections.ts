@@ -2695,13 +2695,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // (zip a tuple-with-collection into a `List` of point-tuples) lives in the
     // explicit `PointList` operator that importers emit; plain tuples stay data.
     eq: defaultCollectionEq,
-    collection: {
-      ...basicIndexedCollectionHandlers(),
-      keys: (_expr: Expression) => {
-        return ['first', 'second', 'last'];
-      },
-    },
-  } as OperatorDefinition,
+    collection: basicIndexedCollectionHandlers(),
+  },
 
   // The Desmos point-list surface form. Explicit: importers emit it, default
   // parsing NEVER produces it from `(a, b)` (that stays an inert `Tuple`). A
