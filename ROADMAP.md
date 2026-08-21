@@ -1095,16 +1095,6 @@ from the engine. Hoisting therefore has to make the derivative lowering's unit
 explicit rather than ambient, or degree-mode derivatives silently stop being
 rewritten. Raised by the compilation session, who own the folder.
 
-### `BoxedDictionary` construction throws raw JS errors
-
-`boxed-dictionary.ts` `_initFromExpression` still has raw construction-time
-`throw new Error` calls (non-string key, `Nothing` key, wrong pair arity), where
-the sibling `DictionaryFrom`/`RecordFrom` evaluate handlers were converted to
-return boxed `incompatible-type` errors on 2026-08-14. These are constructor
-invariants sitting behind canonical-handler validation — a different
-reachability class from the evaluate-handler throws — so converting them needs
-its own analysis of which callers rely on fail-fast construction.
-
 ### Ground-type invariant leak in `parameterized-nominal-constructor.test.ts` (dev-assert noise)
 
 Every full-suite run emits one `console.assert` failure:
