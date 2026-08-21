@@ -21,6 +21,21 @@
   obtain a narrow numeric result; unlike `realOnly` it is purely a type
   assertion and projects nothing at run time.
 
+  The same call's VARIABLES widened too, and that direction only ever accepts
+  more: `run()` now takes `number | ComplexResult` on a JavaScript target, so
+  a complex-mode call such as `run({ z: { re: 2, im: 3 } })` type-checks
+  instead of needing a cast. It was previously typed `number` alone, which
+  refused the one shape complex mode exists to accept — while the
+  `_getCompilationTarget('javascript')` route had always typed it the wider
+  way. `interval-js` widened by the same step, from `number` alone to
+  `number | Interval`; there too the `_getCompilationTarget('interval-js')`
+  route had always used the wider type. Neither widening requires any change
+  from a caller — both only ever accept more than before. A complex value
+  handed to a REAL-mode runner is still rejected at run time, with an error
+  naming the variable, unless the call passes `entryChecks: false`, which
+  disables that guard along with the others and lets the value reach real
+  arithmetic, yielding `NaN`.
+
 - **`~oo` (`ComplexInfinity`) now types `number`, not `complex`.** The
   non-finite typing convention admits an undirected infinity at the top type
   only — which is how every derived pole already typed (`Gamma(-2)`,

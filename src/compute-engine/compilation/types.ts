@@ -1538,6 +1538,28 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  * {@link DefaultRunnerResult}: `interval-js` binds variables to intervals (a
  * plain number is auto-converted to a point interval), while every other
  * executable target accepts a real or a complex domain-coloring input.
+ *
+ * Deliberately keyed on the TARGET and not on the compilation MODE, even
+ * though a complex variable is only meaningful under `mode: 'complex'`. On the
+ * built-in `javascript` target — the one that both compiles a `run` and emits
+ * entry guards — real-mode generated code rejects such a value at run time
+ * under the default `entryChecks`, naming the variable ("x" was compiled as a
+ * real number but received a complex {re, im} value…), so the mistake reports
+ * itself precisely. Narrowing the type by mode would instead need the options
+ * type to be generic over the mode literal, which degrades back to the
+ * permissive reading whenever a caller builds their options object in a
+ * variable, so it would buy a build-time error only for the callers who least
+ * need one. This spelling also matches the concrete
+ * {@link JavaScriptCompilationTarget}, so the two routes into the same
+ * machinery agree.
+ *
+ * Two limits on that runtime backstop, neither of which changes the choice
+ * here but both of which a reader should know. `entryChecks: false` opts out
+ * of the diagnosis along with every other entry guard: the complex object then
+ * flows into real arithmetic and the call returns `NaN` rather than throwing.
+ * And the guard is the `javascript` target's own — the shader targets compile
+ * to source and expose no `run` at all, while a target registered through
+ * `ce._registerCompilationTarget()` gets whatever guard its author writes.
  */
 export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
   ? number | Interval
