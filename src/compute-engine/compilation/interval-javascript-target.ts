@@ -1018,10 +1018,14 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       diagnostic
     );
     // `run` is guaranteed present for an executable target (interval-js).
-    const interpreterRun = base.run as (
+    // Through `unknown`: the fallback's `run` is typed with the interval
+    // target's own result union, which does not overlap the plain
+    // number/array shape the interpreter actually hands back here before
+    // `toIntervalResult` wraps it.
+    const interpreterRun = base.run as unknown as (
       ...args: unknown[]
     ) => number | unknown[];
-    const run: CompiledRunner<IntervalResult | Interval> = (
+    const run: CompiledRunner<IntervalResult | Interval, number | Interval> = (
       ...args: unknown[]
     ): IntervalResult | Interval =>
       toIntervalResult(interpreterRun(...args.map(collapseIntervalInput)));
@@ -1181,6 +1185,9 @@ function compileToIntervalTarget(
     success: true,
     code: js,
     calling: 'expression',
-    run: fn as unknown as CompiledRunner<IntervalResult | Interval>,
+    run: fn as unknown as CompiledRunner<
+      IntervalResult | Interval,
+      number | Interval
+    >,
   };
 }

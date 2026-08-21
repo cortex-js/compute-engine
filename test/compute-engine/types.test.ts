@@ -27,8 +27,10 @@ describe('NUMERIC TYPES', () => {
     expect(expr.type.toString()).toBe('non_finite_number');
   });
   it('should recognize the type of complex infinity', () => {
+    // `number`, not `complex`: the non-finite typing convention admits an
+    // undirected infinity at the top type only, the same placement NaN gets.
     const expr = ce.parse('\\tilde\\infty');
-    expect(expr.type.toString()).toBe('complex');
+    expect(expr.type.toString()).toBe('number');
   });
 });
 
@@ -78,8 +80,10 @@ describe('NUMERIC SUBTYPES', () => {
     expect(expr.type.matches('complex')).toBe(true);
   });
   it('should recognize the type of a complex infinity', () => {
+    // Admitted by `number` only — `complex` refuses it, exactly as it
+    // refuses NaN (see the NaN case below, which matches this one).
     const expr = ce.parse('\\tilde\\infty');
-    expect(expr.type.matches('complex')).toBe(true);
+    expect(expr.type.matches('complex')).toBe(false);
     expect(expr.type.matches('finite_complex')).toBe(false);
     expect(expr.type.matches('real')).toBe(false);
     expect(expr.type.matches('number')).toBe(true);

@@ -48,6 +48,66 @@ describe('root compile() export typing', () => {
     }
   });
 
+  test('the default result type spans everything a runner returns', () => {
+    // The default `R` is `CompiledValue`, which is deliberately wider than
+    // the numeric case: the same `run` returns a boolean for a predicate, a
+    // string for a string-valued expression and an array for a collection.
+    // Arithmetic on it therefore must NOT typecheck without narrowing — the
+    // point of the widening is that a caller who multiplies the result is
+    // told at build time that it might not be a number.
+    const r = compile(ce.parse('x + 1'));
+    // @ts-expect-error — `CompiledValue` is not an arithmetic operand.
+    const doubled = () => r.run({ x: 1 }) * 2;
+    void doubled;
+
+    // …and the values that motivate it really do come back.
+    expect(compile(ce.box(['Greater', 'x', 0])).run({ x: 1 })).toBe(true);
+    expect(compile(ce.box(['List', 1, 2, 3])).run({})).toEqual([1, 2, 3]);
+    expect(compile(ce.box(['List', ['List', 1, 2]])).run({})).toEqual([[1, 2]]);
+    expect(compile(ce.box({ str: 'abc' })).run({})).toBe('abc');
+  });
+
+  test('the R type parameter narrows the result, with no runtime effect', () => {
+    // The replacement for the removed `realOnly` option: a caller who knows
+    // the expression is numeric says so in the TYPE and gets arithmetic back,
+    // without the engine coercing anything at run time (which is what made
+    // `realOnly` worth removing).
+    const r = compile<'javascript', number>(ce.parse('x + 1'));
+    expect(r.run({ x: 1 }) * 2).toEqual(4);
+
+    // The assertion is the caller's responsibility: narrowing a genuinely
+    // non-numeric expression still compiles, and still returns the boolean.
+    const lying = compile<'javascript', number>(ce.box(['Greater', 'x', 0]));
+    expect(lying.run({ x: 1 })).toBe(true as unknown as number);
+  });
+
+  test('the interval target has its own result type, not the ordinary one', () => {
+    // `interval-js` does not produce ordinary values: its runner answers with
+    // an `IntervalResult` tagged union, or with a bare `{lo, hi}` interval for
+    // a constant. The default `R` therefore selects on the TARGET, so an
+    // interval caller is not handed a numeric contract it can never satisfy.
+    const r = compile(ce.parse('x + 1'), { to: 'interval-js' });
+    const v = r.run({ x: 2 });
+    // @ts-expect-error — an interval result is not an arithmetic operand.
+    const doubled = () => v * 2;
+    void doubled;
+    expect(v).toEqual({ kind: 'interval', value: { lo: 3, hi: 3 } });
+    // A constant comes back as the bare interval, which the type admits too.
+    expect(compile(ce.box(5), { to: 'interval-js' }).run({})).toEqual({
+      lo: 5,
+      hi: 5,
+    });
+  });
+
+  test('a function-valued expression runs to a callable', () => {
+    // `Derivative(Sin)` compiles to `(x) => Math.cos(x)`: the runner hands
+    // back a FUNCTION, which is why `CompiledValue` includes a callable.
+    const r = compile(ce.box(['Derivative', 'Sin']));
+    const f = r.run({});
+    expect(typeof f).toBe('function');
+    expect(typeof f === 'function' ? f(0) : undefined).toBeCloseTo(1);
+  });
+
   test('source-only target: run is not callable unguarded', () => {
     const r = compile(ce.parse('x + 1'), { to: 'python' });
     // @ts-expect-error — python is source-only; `run` types optional there,

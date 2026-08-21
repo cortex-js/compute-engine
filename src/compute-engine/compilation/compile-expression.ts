@@ -6,6 +6,7 @@ import type {
   CompileMode,
   CompileTarget,
   CompilationResult,
+  DefaultRunnerResult,
 } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
 import { compileDiagnosticOf, isLaneMismatchError } from './diagnostics.js';
@@ -74,10 +75,13 @@ export type CompileExpressionOptions<T extends string = string> = {
  * targets always fail closed. (`Real`/`Imaginary`/`Argument`/`Conjugate` are
  * exempt: they consume a complex value by design.)
  */
-export function compile<T extends string = 'javascript'>(
+export function compile<
+  T extends string = 'javascript',
+  R = DefaultRunnerResult<T>,
+>(
   expr: Expression,
   options?: CompileExpressionOptions<T>
-): CompilationResult<T> {
+): CompilationResult<T, R> {
   assertCompilationOptionsContract(options);
   // The deprecated `complexPromotion: true` maps to `mode: 'complex'` — but
   // only where the target offers complex mode. The flag is ignored on shader
@@ -206,7 +210,7 @@ export function compile<T extends string = 'javascript'>(
           target: (options.target.language ?? 'custom') as T,
           success: true,
           code,
-        } as CompilationResult<T>,
+        } as CompilationResult<T, R>,
         expr,
         options.target,
         options.vars ? new Set(Object.keys(options.vars)) : undefined
@@ -264,7 +268,7 @@ export function compile<T extends string = 'javascript'>(
     // in the strict attempt therefore never surfaces here: the target has
     // already redone the compilation under the complex discipline and set
     // `escalation` on the result.
-    return languageTarget.compile(expr, targetOptions) as CompilationResult<T>;
+    return languageTarget.compile(expr, targetOptions) as CompilationResult<T, R>;
   } catch (e) {
     if (options?.fallback ?? true) {
       const error = (e as Error).message;
@@ -285,11 +289,14 @@ export function compile<T extends string = 'javascript'>(
           return registered.compile(expr, {
             vars: options?.vars,
             fallback: true,
-          }) as unknown as CompilationResult<T>;
+          }) as unknown as CompilationResult<T, R>;
       }
       const compileTarget =
         options?.target ??
         expr.engine._getCompilationTarget(target as string)?.createTarget();
+      // The fallback builds the ordinary (default-`R`) result; `R` is a
+      // caller-supplied narrowing assertion with no runtime counterpart, so
+      // it is re-applied here rather than threaded through the builder.
       return BaseCompiler.buildInterpreterFallback(
         expr,
         error,
@@ -297,7 +304,7 @@ export function compile<T extends string = 'javascript'>(
         compileTarget,
         options?.vars ? new Set(Object.keys(options.vars)) : undefined,
         compileDiagnosticOf(e, error)
-      );
+      ) as CompilationResult<T, R>;
     }
     throw e;
   }

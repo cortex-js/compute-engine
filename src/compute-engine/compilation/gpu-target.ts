@@ -5972,6 +5972,11 @@ export function compileGPUMatrix(
 export const GPU_GAMMA_PREAMBLE_GLSL = `
 float _gpu_gamma(float z) {
   const float PI = 3.14159265358979;
+  // Gamma has a pole at every non-positive integer, and the reflection
+  // formula below cannot see it: sin(PI * z) is not exactly 0 there in
+  // floating point, so Gamma(-2.0) came back as a large finite number. A pole
+  // has no real value, which this real lane spells NaN.
+  if (z <= 0.0 && z == floor(z)) return _gpu_nan();
   float w = z;
   if (z < 0.5) w = 1.0 - z;
   w -= 1.0;
@@ -6008,6 +6013,12 @@ float _gpu_gammaln(float z) {
 export const GPU_GAMMA_PREAMBLE_WGSL = `
 fn _gpu_gamma(z: f32) -> f32 {
   let PI = 3.14159265358979;
+  // See the GLSL preamble: a non-positive integer is a pole the reflection
+  // formula misses, and a pole has no real value. WGSL has no _gpu_nan
+  // helper, so the NaN bit pattern is spelled inline, as it is everywhere
+  // else in this target. (No backticks in this comment: it lives inside a
+  // TypeScript template literal, which one would terminate.)
+  if (z <= 0.0 && z == floor(z)) { return bitcast<f32>(0x7fc00000u); }
   var w = z;
   if (z < 0.5) { w = 1.0 - z; }
   w = w - 1.0;
@@ -9006,7 +9017,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // WGSL has no `_gpu_nan` at all, so only GLSL is forced.
     const isWGSL = this.languageId === 'wgsl';
     const atWidths = gpuAtHelperWidths(code);
-    if (code.includes('_gpu_nan') || (!isWGSL && atWidths.length > 0))
+    // `_gpu_gamma` calls `_gpu_nan()` from its BODY at a pole, so it forces
+    // the GLSL NaN helper for the same reason `_gpu_at*` does: these scans
+    // read the EMITTED code and never a helper body.
+    if (
+      code.includes('_gpu_nan') ||
+      (!isWGSL && (atWidths.length > 0 || code.includes('_gpu_gamma')))
+    )
       preamble += GPU_NAN_PREAMBLE_GLSL;
     if (code.includes('_gpu_inf')) preamble += GPU_INF_PREAMBLE_GLSL;
     // AFTER the NaN branches, and that ORDER is load-bearing: GLSL requires a

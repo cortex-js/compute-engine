@@ -20,7 +20,10 @@ import {
   compile as compileExpr,
   type CompileExpressionOptions,
 } from './compilation/compile-expression.js';
-import type { CompilationResult } from './compilation/types.js';
+import type {
+  CompilationResult,
+  DefaultRunnerResult,
+} from './compilation/types.js';
 
 let _defaultEngine: IComputeEngine | null = null;
 let _defaultEngineFactory: (() => IComputeEngine) | null = null;
@@ -176,9 +179,12 @@ export function factor(
 // site's target — so the `T extends ExecutableTarget` conditional never sees a
 // concrete target and `run` types optional even for `javascript`. The target
 // name must flow through this wrapper's own type parameter instead.
-export function compile<T extends string = 'javascript'>(
+export function compile<
+  T extends string = 'javascript',
+  R = DefaultRunnerResult<T>,
+>(
   expr: LatexString | ExpressionInput,
   options?: CompileExpressionOptions<T> & FreeFunctionOptions
-): CompilationResult<T> {
-  return compileExpr<T>(toExpression(expr, options), options);
+): CompilationResult<T, R> {
+  return compileExpr<T, R>(toExpression(expr, options), options);
 }

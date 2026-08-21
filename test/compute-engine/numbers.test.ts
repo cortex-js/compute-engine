@@ -93,7 +93,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('ComplexInfinity is a non-finite-number', () => {
     expect(checkProps(ce.expr('ComplexInfinity'))).toMatchInlineSnapshot(`
       number literal: true
-      type: complex
+      type: number
       real: false
       rational: false
       integer: false

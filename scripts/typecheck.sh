@@ -19,6 +19,25 @@ echo "Checking Epsil CLI..."
   --skipLibCheck --allowImportingTsExtensions true --noEmit \
   --ignoreConfig ./src/cli/epsil.ts
 
+# Type-LEVEL pins in the test suite.
+#
+# These files assert things about the public TYPES — that a narrowing generic
+# is accepted, that a removed option is rejected, that a `@ts-expect-error`
+# line still errors. ts-jest does NOT type-check in this repo (a test file
+# containing `const n: number = 'a'` passes), so running the suite proves
+# nothing about them; measured 2026-08-21, when a shipped migration example
+# that did not compile passed its own test. They are checked here instead, so
+# a broken type pin fails `npm run typecheck`.
+#
+# An `@ts-expect-error` in these files is a real assertion under this run: if
+# the line it guards stops erroring, tsc reports the unused directive.
+echo ""
+echo "Checking type-level pins in the test suite..."
+./node_modules/@typescript/native/bin/tsc --target es2022 --module es2022 --moduleResolution bundler --types node,jest \
+  --skipLibCheck --allowImportingTsExtensions true --noEmit --ignoreConfig \
+  ./test/compute-engine/compile-free-function-typing.test.ts \
+  ./test/compute-engine/compile-mode-plumbing.test.ts
+
 # Circular dependency check
 MAX_CYCLES=0
 echo ""

@@ -48,12 +48,25 @@ export class MachineNumericValue extends NumericValue {
 
   get type(): NumericPrimitiveType {
     if (this.isNaN) return 'number';
-    if (this.isComplexInfinity) return 'complex';
+    // `~oo` is infinite with NO direction, and the non-finite typing
+    // convention (ARCHITECTURE.md, "Non-finite typing convention for type
+    // handlers") admits it — like NaN, on the line above — only at the top
+    // type `number`, never at `complex`. Every DERIVED pole already typed
+    // that way (`Gamma(-2)`, `Zeta(1)`, `(-1)!`, `sqrt(-oo)`); this constant
+    // was the lone dissenter, which made two expressions with the same `~oo`
+    // value type differently depending on whether the constant survived
+    // canonicalization (`Divide(~oo, 5)` answered `complex`, `Add(1, ~oo)`
+    // answered `number`).
+    if (this.isComplexInfinity) return 'number';
 
     if (this.im !== 0) {
       // A value with a non-finite component (e.g. ∞ + i) is not a *finite*
-      // complex number. Match the ~oo convention of the isComplexInfinity
-      // early-return above: any non-finite component types as `complex`, and
+      // complex number, and it is not `~oo` either — it has a direction, so
+      // unlike the undirected `~oo` handled above it stays at `complex`. The
+      // reachable case is a non-finite REAL part: an infinite imaginary part
+      // was already answered above (that IS the `~oo` test). The imaginary
+      // disjunct still guards a NaN imaginary part, which `isComplexInfinity`
+      // excludes and no other branch here would catch.
       // `imaginary` is reserved for a finite non-zero imaginary part paired
       // with a zero real part.
       if (!Number.isFinite(this.decimal) || !Number.isFinite(this.im))
@@ -272,6 +285,24 @@ export class MachineNumericValue extends NumericValue {
         return this._makeExact(NaN);
       return this.clone(0);
     }
+
+    // `~oo` absorbs any other factor: it is the single point at infinity, so
+    // multiplying it by a non-zero value — real, imaginary or complex — is
+    // `~oo` again. Without this the general complex product below computes
+    // `∞·0 - ∞·1` for `~oo · i` and answers NaN. A ZERO factor is not reached
+    // here: both zero cases return NaN above, which is the indeterminate form
+    // `0 · ~oo`.
+    //
+    // NaN is excluded explicitly and in BOTH operand positions: it poisons
+    // every product, so `NaN · ~oo` is NaN, not `~oo`. The receiver's own NaN
+    // is re-tested here rather than relied on from an earlier guard, because
+    // only one of the two numeric-value lanes returns early on it.
+    if (
+      !this.isNaN &&
+      !other.isNaN &&
+      (this.isComplexInfinity || other.isComplexInfinity)
+    )
+      return this.clone({ re: Infinity, im: Infinity });
 
     if (this.im === 0 && other.im === 0)
       return this.clone(this.decimal * other.re);

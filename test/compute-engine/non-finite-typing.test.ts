@@ -117,9 +117,10 @@ describe('NON-FINITE TYPING CONVENTION', () => {
           .type.toString()
       ).toBe('number');
       // Divide: a non-real NUMERATOR (~oo/5 = ~oo). Canonically this folds to
-      // the ~oo value (which types `complex`, see the documented residual
-      // below); the structural route exercises the handler's `isReal` guard.
-      expect(typeOf(['Divide', 'ComplexInfinity', 5])).toBe('complex');
+      // the ~oo value, which types `number` like every other ~oo; the
+      // structural route below exercises the handler's `isReal` guard and
+      // must agree.
+      expect(typeOf(['Divide', 'ComplexInfinity', 5])).toBe('number');
       expect(
         ce
           .function('Divide', [ce.ComplexInfinity, ce.box(5)], {
@@ -234,25 +235,80 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       ));
   });
 
-  describe('documented residual: the ~oo VALUE itself types complex', () => {
-    // The lattice cannot represent `~oo` (non_finite_number = ±∞ only); the
-    // ComplexInfinity symbol and numeric values keep their historical
-    // `complex` placement until the deferred lattice refinement. Handlers
-    // must not rely on this: possible-~oo results claim `number` (above).
+  describe('the ~oo VALUE types number, like every derived ~oo', () => {
+    // The lattice cannot represent `~oo` (non_finite_number = ±∞ only), and
+    // the convention resolves that by admitting it at the top type `number`
+    // only — never at `complex`. The VALUE and the symbol obey it too: they
+    // used to type `complex`, which made two expressions with the same `~oo`
+    // value type differently depending on whether the constant survived
+    // canonicalization, and put a `{re, im}` object into compiled output that
+    // a real-emitting parent read as a number.
     test('ComplexInfinity value/symbol', () => {
-      expect(ce.ComplexInfinity.type.toString()).toBe('complex');
+      expect(ce.ComplexInfinity.type.toString()).toBe('number');
       // `1/0` canonicalizes directly to the ~oo value (`x/0 → ~∞` fold),
       // so this reports the value's type, not a Divide handler claim.
-      expect(typeOf(['Divide', 1, 0])).toBe('complex');
+      expect(typeOf(['Divide', 1, 0])).toBe('number');
+    });
+
+    test('~oo takes no sign from a factor', () => {
+      // The VALUE side of the same convention, and the reason it needs its own
+      // pins: every assertion in this file is a TYPE assertion, and `~oo` and
+      // `±oo` both type `number`, so a wrong VALUE here is invisible to them.
+      // `Multiply` used to read `~oo` as if it were `+oo` and hand it the
+      // coefficient's sign, which contradicted `Negate` — `-2·~oo` answered
+      // `-oo` while `-(2·~oo)` answered `~oo`.
+      const v = (expr: any) => ce.box(expr).evaluate().toString();
+      expect(v(['Negate', 'ComplexInfinity'])).toBe('~oo');
+      expect(v(['Multiply', 2, 'ComplexInfinity'])).toBe('~oo');
+      expect(v(['Multiply', -2, 'ComplexInfinity'])).toBe('~oo');
+      expect(v(['Multiply', 'ImaginaryUnit', 'ComplexInfinity'])).toBe('~oo');
+      // A real ±∞ turned in a non-real direction (`∞·i`) is NOT covered here:
+      // the comment on the negative-control test above reads it as `~oo`,
+      // while `imaginary-unit-spelling.test.ts` pins its `evaluate()` to
+      // `NaN` and calls that long-standing and deliberate. The two disagree,
+      // and settling it is a separate question from the undirected-factor
+      // rule pinned here.
+      // The indeterminate form is untouched, and so are the SIGNED infinities:
+      // only an undirected factor skips the sign rule.
+      expect(v(['Multiply', 0, 'ComplexInfinity'])).toBe('NaN');
+      // NaN poisons the product in BOTH operand orders — `~oo` absorbs
+      // factors, but not this one. Both orders are asserted because the two
+      // numeric-value lanes differ in where they test the receiver's own NaN.
+      expect(v(['Multiply', 'NaN', 'ComplexInfinity'])).toBe('NaN');
+      expect(v(['Multiply', 'ComplexInfinity', 'NaN'])).toBe('NaN');
+      expect(v(['Multiply', 2, 'PositiveInfinity'])).toBe('+oo');
+      expect(v(['Multiply', -2, 'PositiveInfinity'])).toBe('-oo');
+      expect(v(['Multiply', -2, 'NegativeInfinity'])).toBe('+oo');
+    });
+
+    test('every spelling of ~oo agrees', () => {
+      // The point of the convention: same value, same type, whichever route
+      // produced it.
+      for (const expr of [
+        'ComplexInfinity',
+        ['Divide', 1, 0],
+        ['Divide', 'ComplexInfinity', 5],
+        ['Add', 1, 'ComplexInfinity'],
+        ['Factorial', -1],
+        ['Gamma', -2],
+        ['Zeta', 1],
+      ] as any[])
+        expect(typeOf(expr)).toBe('number');
     });
   });
 
-  describe('complex values with a non-finite component type as complex', () => {
-    // A finite complex number requires BOTH components finite. A non-finite
-    // component (e.g. ∞ + i) is not `finite_complex`; it types as `complex`,
-    // matching the ~oo convention (`isComplexInfinity` early-return in the
-    // numeric-value type getters). `imaginary` is reserved for a finite
-    // non-zero imaginary part paired with a zero real part.
+  describe('a non-finite component: ~oo if the IMAGINARY part is infinite', () => {
+    // A finite complex number requires BOTH components finite, so a value
+    // with a non-finite component is never `finite_complex`. Which type it
+    // does get follows the engine's own `~oo` test, `isComplexInfinity` in
+    // the numeric-value type getters, which asks whether the IMAGINARY part
+    // is infinite — and that is exactly the set of values the engine prints
+    // as `~oo` (`1 + ∞i` and `0 + ∞i` both render `~oo`, while `∞ + i`
+    // renders `(Infinity + i)`). So an infinite imaginary part types
+    // `number`, with the undirected infinities, and an infinite real part
+    // paired with a FINITE imaginary part stays `complex`. `imaginary` is
+    // reserved for a finite non-zero imaginary part paired with a zero real
+    // part.
     //
     // Both numeric-value lanes are exercised: the default engine (precision
     // 21) uses BigNumericValue; a machine-precision engine uses
@@ -275,8 +331,8 @@ describe('NON-FINITE TYPING CONVENTION', () => {
 
     test('bignum lane (default engine, precision 21)', () => {
       expect(typeOf(['Complex', inf, 1])).toBe('complex'); // ∞ + i
-      expect(typeOf(['Complex', 1, inf])).toBe('complex'); // 1 + ∞i
-      expect(typeOf(['Complex', 0, inf])).toBe('complex'); // 0 + ∞i
+      expect(typeOf(['Complex', 1, inf])).toBe('number'); // 1 + ∞i, prints ~oo
+      expect(typeOf(['Complex', 0, inf])).toBe('number'); // 0 + ∞i, prints ~oo
       // ∞ real part with a high-precision (bignum) imaginary part
       expect(typeOf(['Complex', inf, hiPrec])).toBe('complex');
     });
@@ -284,8 +340,17 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     test('machine lane (precision = machine)', () => {
       const t = (expr: any) => ceMachine.box(expr).type.toString();
       expect(t(['Complex', inf, 1])).toBe('complex'); // ∞ + i
-      expect(t(['Complex', 1, inf])).toBe('complex'); // 1 + ∞i
-      expect(t(['Complex', 0, inf])).toBe('complex'); // 0 + ∞i
+      expect(t(['Complex', 1, inf])).toBe('number'); // 1 + ∞i, prints ~oo
+      expect(t(['Complex', 0, inf])).toBe('number'); // 0 + ∞i, prints ~oo
+    });
+
+    test('the type follows the printed form', () => {
+      // The tell that the split above is principled rather than incidental:
+      // a value types `number` exactly when the engine renders it `~oo`.
+      const render = (expr: any) => ce.box(expr).toString();
+      expect(render(['Complex', 1, inf])).toBe('~oo');
+      expect(render(['Complex', 0, inf])).toBe('~oo');
+      expect(render(['Complex', inf, 1])).not.toBe('~oo');
     });
 
     test('finite complex values keep their finite types', () => {

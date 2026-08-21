@@ -3067,7 +3067,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     ComplexInfinity: {
       description:
         'Complex infinity, a single unsigned infinity in the complex plane.',
-      type: 'complex',
+      // `number`, not `complex`: the non-finite typing convention
+      // (ARCHITECTURE.md, "Non-finite typing convention for type handlers")
+      // admits `~oo` and NaN at the top type only, which is how every derived
+      // pole already types (`Gamma(-2)`, `Zeta(1)`, `(-1)!`, `sqrt(-oo)`).
+      type: 'number',
       isConstant: true,
       holdUntil: 'never',
       value: (engine) => engine.ComplexInfinity,

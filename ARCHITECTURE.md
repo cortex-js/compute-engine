@@ -304,11 +304,21 @@ these rules:
    (A possibly-zero _denominator_ with finite operands keeps `Divide`'s
    documented generic-point behavior — see the handler's comment.)
 
-The **value** `~oo` itself currently reports type `complex` (the
-`ComplexInfinity` symbol declaration and the numeric-value `type` getters);
-this is a historical placement that the lattice cannot express better without
-the deferred `~oo`/NaN lattice refinement. Handlers must not rely on it: an
-expression that can evaluate to `~oo` is typed `number` per rule 2.
+The **value** `~oo` reports type `number` too, so the convention holds without
+exception: the `ComplexInfinity` symbol declaration and the numeric-value
+`type` getters agree with rule 2, and every spelling of the same value —
+the constant, `1/0`, `Divide(~oo, 5)`, `Add(1, ~oo)`, `(-1)!`, `Gamma(-2)`,
+`Zeta(1)` — types identically. (The value used to report `complex`, which made
+the type depend on whether the constant survived canonicalization and put a
+`{re, im}` object into compiled output that a real-emitting parent then read
+as a number.) A value carrying an infinite IMAGINARY part is `~oo` for this
+purpose — that is the engine's own `isComplexInfinity` test, and exactly the
+set it renders as `~oo`; an infinite REAL part paired with a finite imaginary
+part (`∞ + i`) is a different value and stays `complex`.
+
+Compiled output follows the type rather than the value's shape: a `~oo` on a
+real-emitting lane lowers to `NaN` — the real lane's "no real value" — on both
+the constant-folded and structural paths, and on the shader targets.
 
 The shared handler implementations (and per-operator dispatch) live in
 `src/compute-engine/library/type-handlers.ts`; the convention is pinned by

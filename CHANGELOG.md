@@ -1,6 +1,72 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A compiled runner's declared return type now covers everything it can
+  return.** `run()` was typed `number | ComplexResult`, but a compiled
+  predicate returns a `boolean` (`Greater(x, 0)` runs to `true`, never `1`), a
+  string-valued expression returns a `string`, and a collection-valued one
+  returns a (possibly nested) array. TypeScript therefore accepted
+  `result.run({ x }) * 2` on an expression that could never be a number. The
+  default is now the new exported `CompiledValue` union — which also covers a
+  function-valued expression, since `Derivative(Sin)` runs to the callable
+  `(x) => Math.cos(x)` — so such a call is a build-time error. The
+  `interval-js` target keeps its own result type (an `IntervalResult`, or a
+  bare `Interval` for a constant) rather than being folded into that union.
+
+  **Migration:** a caller doing arithmetic on the result declares the narrow
+  type it expects — `compile<'javascript', number>(expr)` — and gets a
+  `number` back. This is the type-level replacement for the `realOnly: true`
+  option removed in the previous release, which was the only remaining way to
+  obtain a narrow numeric result; unlike `realOnly` it is purely a type
+  assertion and projects nothing at run time.
+
+- **`~oo` (`ComplexInfinity`) now types `number`, not `complex`.** The
+  non-finite typing convention admits an undirected infinity at the top type
+  only — which is how every derived pole already typed (`Gamma(-2)`,
+  `Zeta(1)`, `(-1)!`, `sqrt(-oo)`) — but the constant itself was the
+  exception, so two expressions with the same `~oo` value could type
+  differently depending on whether the constant survived canonicalization
+  (`Divide(~oo, 5)` answered `complex`, `Add(1, ~oo)` answered `number`).
+  `expr.type.matches('complex')` is now `false` for `~oo`, exactly as it is
+  for `NaN`. A value carrying an infinite IMAGINARY part is `~oo` for this
+  purpose — the set the engine renders as `~oo` — while an infinite real part
+  with a finite imaginary part (`∞ + i`) is unchanged.
+
+- **A pole compiles to `NaN` on a real-valued lane.** `(-1)!`, `1 + (-1)!` and
+  `1 + \tilde\infty` compiled to the object `{re: Infinity, im: Infinity}`;
+  they now run to `NaN`. A pole has no real value, and `NaN` is how the real
+  lane spells that — the same projection `_SYS.factorial` already applied at a
+  negative integer. Previously the constant fold emitted the value's own
+  complex shape while the surrounding code was lowered from the node's
+  `number` type, so a parent added an object to a number
+  (`1 + {…}` → `"1[object Object]"`) and the folded and structural paths
+  disagreed with each other. A pole and a pole under a parent now answer `NaN`
+  on both paths, and on the shader targets too, where the `vec2` this produced
+  was also a shape mismatch wherever a float was expected. A real-valued
+  FUNCTION of a pole still differs between the two: `Re(~oo)` folds to
+  `Infinity` (the fold evaluates symbolically, and the interpreter answers
+  `+oo`) but lowers structurally to `NaN`, because on the real lane the pole
+  is already `NaN` by the time the function sees it.
+
 ### Bug Fixes
+
+- **`Multiply` gave `~oo` a sign.** `2·~oo` evaluated to `+oo` and `-2·~oo` to
+  `-oo`, which contradicted `Negate(~oo)` — that correctly stays `~oo`, so
+  `-2·~oo` and `-(2·~oo)` disagreed. An undirected infinity takes no sign from
+  its factors: all three are now `~oo`. One neighbouring case went with it:
+  `i·~oo` answered `NaN`, because the general complex product computed
+  `∞·0 − ∞·1`. The indeterminate form `0·~oo` is still `NaN`, and the signed
+  infinities are untouched (`-2·∞ = -oo`). `∞·i` — a real infinity turned in a
+  non-real direction — is deliberately unchanged and still `NaN`.
+
+- **`Gamma` at a non-positive integer returned a large finite number when
+  compiled.** `Gamma(-2)` compiled without constant folding ran to
+  `6413262697001887`: the reflection formula `π / (sin(πz)·Γ(1−z))` cannot see
+  the pole, because `sin(-2π)` computes as ≈2.4e-16 rather than 0. The kernel
+  now answers `NaN` at every pole. The interpreter was unaffected — it returns
+  `~oo` before reaching the kernel — and so are non-integer negative arguments
+  (`Gamma(-0.5)` = -3.5449…).
 
 - **Malformed dictionary input is reported instead of thrown — or silently
   accepted.** Building a dictionary from a malformed expression raised a raw

@@ -322,6 +322,7 @@ import type {
   JavaScriptCompilationTarget,
 } from './compilation/types.js';
 import { compile as _compile } from './compilation/compile-expression.js';
+import type { CompilationResult } from './compilation/types.js';
 import { fu as _fu } from './symbolic/fu.js';
 
 /**
@@ -1393,7 +1394,13 @@ export class ComputeEngine implements IComputeEngine {
   _compile(
     expr: Expression,
     options?: Parameters<typeof _compile>[1]
-  ): ReturnType<typeof _compile> {
+  ): CompilationResult {
+    // Spelled out rather than `ReturnType<typeof _compile>`: that instantiates
+    // the generic at its CONSTRAINT, so the result's `R` collapses to
+    // `unknown` instead of taking the `CompiledValue` default and stops
+    // matching the `IComputeEngine` declaration. The same trap is documented
+    // at the `compile` wrapper in `free-functions.ts`, where it cost the
+    // target parameter instead of the result one.
     return _compile(expr, options);
   }
 

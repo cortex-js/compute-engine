@@ -253,6 +253,21 @@ export class Product {
             return;
           }
           if (isOne(exp)) {
+            // `~oo` first, because it has NO direction and so cannot take a
+            // sign from the coefficient: 2·~oo, -2·~oo and i·~oo are all
+            // `~oo`. The signed rule below would answer `+oo` for the first
+            // and `-oo` for the second, which contradicts `Negate(~oo)` —
+            // that correctly stays `~oo`, so `-2·~oo` and `-(2·~oo)` used to
+            // disagree. An infinity with a non-zero imaginary part is exactly
+            // the undirected one: a real ±∞ has `im === 0`, and a value like
+            // `∞ + i` (finite imaginary part) is not `isInfinity` at all.
+            if (isNumber(term) && term.im !== 0) {
+              this.coefficient = this.engine._numericValue({
+                re: Infinity,
+                im: Infinity,
+              });
+              return;
+            }
             // Multiply the signs: coef * infinity
             // e.g., -2 * +∞ = -∞, 2 * -∞ = -∞, -2 * -∞ = +∞
             const coefSign = this.coefficient.sgn() ?? 1;

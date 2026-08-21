@@ -109,6 +109,46 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A `compile` handler that DECLINES still costs the `Sum`/`Product` NaN exit (OPEN, needs a ruling — measured 2026-08-21)
+
+A compiled `Sum`/`Product` exits as soon as its accumulator becomes NaN. The
+exit is suppressed for a body that splices caller-supplied source, and one of
+the three spellings that triggers it is an operator carrying a caller-supplied
+`compile` handler. `Harvester.hasCallerCompileHandler` (`compilation/cse.ts`)
+answers that question with `typeof ownDef?.compile === 'function'`, memoized
+per operator NAME. It never invokes the handler.
+
+So a handler that DECLINES — returns `undefined`, which is the documented way
+to fall back to the built-in lowering — suppresses the exit anyway. In that
+case the emitted code is entirely ours: no caller source was spliced, so there
+is no call count the suppression could be protecting. Measured on a 31-term
+sum over `At`, with the handler declining for the target at hand, a consumer
+paid ~33x for exactly this.
+
+The gate cannot simply call the handler to find out: invoking it during
+harvest would run caller code at analysis time, and the answer is per-node and
+per-target rather than per-name. The two honest options:
+
+- **Record it during emission.** `BaseCompiler.compileExpr` already knows
+  whether the handler returned source for this node; the skippability query
+  could consult that instead of the handler's existence. More plumbing, and
+  the harvest currently runs before the emission it would need to observe.
+- **Leave it**, and accept that attaching any handler to an operator costs the
+  exit wherever that operator appears in a big-operator body.
+
+No live consumer is affected: the plotting consumer that found this converted
+to the in-place attach route, which is exempt (see below) and closed both its
+arms. This is recorded because the next consumer to re-declare an operator
+will hit the same 30x with no diagnostic.
+
+Related and already fixed by documentation, not code: attaching a handler by
+RE-DECLARING the operator is what makes it caller-supplied, while writing it
+onto the definition `lookupDefinition` returns is exempt, since that
+definition is still the engine's own. Re-declaring also silently replaces the
+stock `evaluate`/`canonical` handlers. Both consequences are now stated on the
+`compile?: OperatorCompileHandler` doc block in `types-definitions.ts`, which
+previously described the in-place route only in the context of `Which`.
+
 ### A caller-supplied `functions` entry can declare purity, restoring the `Sum`/`Product` NaN exit (RULED and SHIPPED 2026-08-20)
 
 **Ruling (user, 2026-08-20): the caller declares purity, and purity is also
@@ -177,103 +217,33 @@ rather than linear in the term count. So this was a latent breadth question
 throughout, never a live consumer regression, and nothing in it is evidence
 against the `Sum` unroll change itself.
 
-### `CompilationResult`'s default `R` excludes values the runner really returns (OPEN, needs a ruling — surfaced 2026-08-20 removing `realOnly`)
+### Two test files disagree on what `∞ · i` should evaluate to (OPEN, needs a ruling — found 2026-08-21)
 
-`CompiledRunner<R>`, `ExpressionRunner<R>`, `LambdaRunner<R>` and
-`CompilationResult<T, R>` all default `R` to `number | ComplexResult`
-(`compilation/types.ts`). A compiled runner also returns **booleans** — a
-boolean-valued expression is not numericized, `Greater(x, 0)` runs to `true` —
-and **nested arrays** for a collection-valued result. Both are pinned
-(`compile.test.ts` "a boolean-valued expression runs to a boolean, not to 0/1";
-`compile-mode-plumbing.test.ts` "a boolean-valued decline runs to a boolean").
-So the default has been narrower than the truth for as long as those paths have
-existed; a TypeScript consumer reading `run()`'s result gets a type that
-excludes values it can actually receive.
+`ce.box(['Multiply', 'PositiveInfinity', 'ImaginaryUnit']).evaluate()` answers
+`NaN` today. Two artifacts in the suite read that differently, and both are
+deliberate:
 
-Removing `realOnly` did not cause this, but it removed the mitigation: the
-`realOnly: true` overload was the one way to obtain a genuinely narrow
-`CompilationResult<T, number>`, so callers who wanted "this really is a number"
-no longer have a spelling for it.
+- `test/compute-engine/imaginary-unit-spelling.test.ts` PINS the `NaN`, in a
+  test whose comment calls it "the indeterminate form, on every route" and
+  "long-standing behavior ... unchanged".
+- `test/compute-engine/non-finite-typing.test.ts` states the opposite in prose
+  — "`∞·i = ~oo`, not a signed infinity" — but only asserts the product's
+  TYPE, which is `number` either way, so the disagreement never fails a test.
 
-The fork:
+The mathematics favors `~oo`: the engine models a single, undirected point at
+infinity, and `∞ · i` is infinite with a non-real direction, not indeterminate.
+Only `0 · ∞` is genuinely indeterminate, and that case answers `NaN`
+separately. Against that, the `NaN` is pinned by a test that says it means to
+be.
 
-- **Widen the default** to include `boolean` and a recursive array type. Honest,
-  but it breaks every consumer doing arithmetic on `run()`'s result without
-  narrowing first — which is the common case, and the reason the numeric-looking
-  default exists.
-- **Leave the default and document it** as "the numeric case; narrow yourself
-  for boolean- or collection-valued expressions", making the imprecision an
-  explicit, documented convenience.
-- **Reintroduce a narrowing spelling** that does not resurrect a runtime
-  projection — e.g. an `as`-style type parameter (`compile<'javascript', number>`)
-  or a `expectNumeric: true` option that only narrows the TYPE and adds no
-  runtime behavior — so a caller can re-declare the contract without the engine
-  silently coercing values.
+The related rule for an UNDIRECTED factor was settled on 2026-08-21 and is not
+in question: `2·~oo`, `-2·~oo` and `i·~oo` are all `~oo`, since `~oo` takes no
+sign or direction from a factor. This entry is only about a factor that is a
+real ±∞.
 
-Nothing is measured here beyond the fact that the four defaults are unchanged
-since before this round; the decision is about the public contract, not about
-blast radius.
-
-### A `~oo` pole compiles to a complex-shaped literal though it types `number` (OPEN, needs a ruling — found 2026-08-20 removing `realOnly`)
-
-The non-finite typing convention (ARCHITECTURE.md § "Non-finite typing
-convention for type handlers", SYM P2-23 resolved as a convention rather than
-a lattice extension) states that **`~oo` and NaN are admitted only by the top
-type `number`** — never `complex`. Every DERIVED pole obeys it, and
-`test/compute-engine/non-finite-typing.test.ts` pins all four:
-
-| expression              | type     |
-| ----------------------- | -------- |
-| `Gamma(-2)`             | `number` |
-| `Zeta(1)`               | `number` |
-| `Factorial(-2)`         | `number` |
-| `Sqrt(NegativeInfinity)`| `number` |
-
-The `ComplexInfinity` CONSTANT is the lone exception: `ce.box('ComplexInfinity').type`
-is `complex`. That is what the convention says it must not be, and the
-disagreement is visible in compiled output, because a parent picks its codegen
-from the child NODE's type (`BaseCompiler.isComplexValued`) while the constant
-folder emits the value's own shape:
-
-| expression         | interpreter | compiled (folding on) | compiled (`constantFold: false`) |
-| ------------------ | ----------- | --------------------- | -------------------------------- |
-| `(-1)!`            | `~oo`       | `{re: ∞, im: ∞}`      | `NaN`                            |
-| `1 + (-1)!`        | `~oo`       | `{re: ∞, im: ∞}`      | `NaN`                            |
-| `1 + \tilde\infty`  | `~oo`       | `{re: ∞, im: ∞}`      | `{re: ∞, im: ∞}`                 |
-
-Folding is ON by default, so the DEFAULT user-facing path already agrees with
-the interpreter for all three rows; only the structural path (reached with
-`constantFold: false`) diverges, and only for the derived-pole spellings. The
-`\tilde\infty` row is the control: it agrees on both paths precisely because
-its node types `complex`, i.e. because of the inconsistency.
-
-This was invisible before: the removed `realOnly` option projected the
-`{re, im}` fold to `NaN` too, so every spelling and both paths answered `NaN`
-and nothing could disagree. All three rows are now pinned in
-`test/compute-engine/compile-e2e.test.ts`.
-
-**The ruling needed is which side moves**, and both directions are defensible:
-
-- **Retype the constant.** `ComplexInfinity` becomes `number`, matching the
-  documented convention and its four derived siblings. The structural path then
-  disagrees with the interpreter uniformly instead of selectively, which argues
-  for pairing it with the next option.
-- **Make the fold honor the node's type.** A node typed `number` that folds to
-  `~oo` emits `NaN` — the real lane's "no real value" — rather than a
-  `{re, im}` object a real-emitting parent will misread. This is the
-  `NO_REAL_VALUE_FOLD` policy applied to `~oo`, and it would make the default
-  path answer `NaN` where it answers `{re: ∞, im: ∞}` today, so the
-  `compile-e2e.test.ts` pins above would need updating.
-- **Widen the convention** so `~oo` is admitted by `complex`, retyping all four
-  derived poles. This contradicts ARCHITECTURE.md as written and would need
-  that section rewritten first.
-
-Measured 2026-08-20: retyping `Factorial`'s negative-integer arm to `complex`
-(the third option, applied to one head) fails exactly ONE test — the
-`non-finite-typing.test.ts` assertion that pins the convention — and changes
-**zero** snapshots across the full suite (30,749 tests). The blast radius is
-therefore small on any of the three routes; what is missing is the decision,
-not the measurement.
+Whichever way it is ruled, the losing artifact should change in the same pass —
+either the pinned `NaN` or the prose that contradicts it — so the two stop
+disagreeing.
 
 ### Cross-term CSE could partition a region by index-dependence (OPEN, design note — deferred from the `Sum` unroll round, 2026-08-19)
 

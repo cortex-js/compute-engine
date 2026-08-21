@@ -86,6 +86,7 @@ export type {
   CompilationResult,
   ExecutableTarget,
   ComplexResult,
+  CompiledValue,
   CompiledRunner,
   ExpressionRunner,
   LambdaRunner,

@@ -2911,6 +2911,26 @@ export class BaseCompiler {
     if (isNumber(value) && value.im === 0 && BaseCompiler.isComplexValued(expr))
       return undefined;
 
+    // `~oo` on a node the surrounding code reads as a REAL number folds to
+    // `NaN`, not to the `{re: ∞, im: ∞}` object the value itself carries.
+    // A pole has no real value, and `NaN` is how the real lane spells that
+    // (the same reasoning as `NO_REAL_VALUE_FOLD` in the JavaScript target);
+    // emitting the complex object instead hands a parent that lowered real
+    // arithmetic an object to add, which stringifies (`1 + {…}` →
+    // `"1[object Object]"`). A node that really is complex-valued keeps the
+    // object, so `~oo` reached through complex-emitting operands is unchanged.
+    // `isInfinity` with a non-zero imaginary part is the `~oo` test: a real
+    // ±∞ has `im === 0`, and an exact value whose imaginary part merely
+    // OVERFLOWS the float projection is not infinite, so it answers `false`
+    // here (see `BoxedNumber.isInfinity`).
+    if (
+      isNumber(value) &&
+      value.isInfinity &&
+      value.im !== 0 &&
+      !BaseCompiler.isComplexValued(expr)
+    )
+      return BaseCompiler.emitFoldedValue(engine.NaN, target, prec);
+
     // Emit through the ordinary number-literal path so the target's own
     // spelling applies (float formatting, complex support, negative-literal
     // parenthesization).
@@ -3558,6 +3578,16 @@ export class BaseCompiler {
 
     // Is it a number?
     if (isNumber(expr)) {
+      // `~oo` first: it carries an infinite imaginary part, but it types
+      // `number` (the non-finite typing convention admits undirected infinity
+      // at the top type only) and it has no real VALUE, which the real lane
+      // spells `NaN`. Emitting the `{re: ∞, im: ∞}` object instead handed a
+      // real-arithmetic parent an object to add, producing the string
+      // `"1[object Object]"` from `1 + ~oo`. This matches what the pole
+      // already compiled to through every other route — `_SYS.factorial`
+      // returns `NaN` at a negative integer, and the constant fold projects a
+      // real-lane `~oo` the same way.
+      if (expr.isInfinity && expr.im !== 0) return target.number(NaN);
       if (expr.im !== 0) {
         if (!target.complex)
           throw new Error('Complex numbers are not supported by this target');
@@ -8706,7 +8736,18 @@ export class BaseCompiler {
    * named `i` must not pick up the imaginary unit's value).
    */
   static isComplexValued(expr: Expression): boolean {
-    if (isNumber(expr)) return expr.im !== 0;
+    if (isNumber(expr)) {
+      // `~oo` is not complex-valued, even though the value carries an
+      // infinite imaginary part: the non-finite typing convention
+      // (ARCHITECTURE.md, "Non-finite typing convention for type handlers")
+      // admits undirected infinity at the top type `number` only, and the
+      // constant types that way. Reporting it complex would put the whole
+      // enclosing expression on the complex lane on the strength of a pole,
+      // so `1 + (-1)!` emitted a `{re, im}` object where the real lane wants
+      // the pole's `NaN`.
+      if (expr.isInfinity && expr.im !== 0) return false;
+      return expr.im !== 0;
+    }
 
     if (isSymbol(expr)) {
       if (expr.symbol === 'ImaginaryUnit') return true;

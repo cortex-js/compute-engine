@@ -1160,7 +1160,8 @@ export interface LanguageTarget<
 /**
  * The `interval-js` target, typed concretely: its compiled `run` accepts
  * `number | Interval` variables (a plain number is auto-converted to a point
- * interval) and returns an `IntervalResult`. Returned by
+ * interval) and returns an `IntervalResult` — or a bare `Interval`, which is
+ * what a constant-valued expression produces. Returned by
  * `_getCompilationTarget("interval-js")` so callers get this without a cast.
  *
  * Defined here (not in a `types-*.ts` file) because the layering rules forbid
@@ -1169,7 +1170,7 @@ export interface LanguageTarget<
 export type IntervalJsCompilationTarget<Expr = unknown> = LanguageTarget<
   Expr,
   'interval-js',
-  IntervalResult,
+  IntervalResult | Interval,
   number | Interval
 >;
 
@@ -1182,7 +1183,7 @@ export type IntervalJsCompilationTarget<Expr = unknown> = LanguageTarget<
 export type JavaScriptCompilationTarget<Expr = unknown> = LanguageTarget<
   Expr,
   'javascript',
-  number | ComplexResult,
+  CompiledValue,
   number | ComplexResult
 >;
 
@@ -1467,13 +1468,89 @@ export type ExecutableTarget = 'javascript' | 'interval-js';
 export type ComplexResult = { re: number; im: number };
 
 /**
+ * Every value a compiled runner can hand back.
+ *
+ * Wider than the numeric case most callers have in mind, because the compiled
+ * form of an expression returns whatever that expression denotes, and the
+ * engine compiles more than arithmetic:
+ *
+ * - `number` — the ordinary case; a pole or an undefined result is `NaN`.
+ * - {@link ComplexResult} — a complex-valued expression, `{ re, im }` with
+ *   `im !== 0` (a value whose imaginary part is exactly zero comes back as a
+ *   plain `number`).
+ * - `boolean` — a predicate is NOT numericized: `Greater(x, 0)` runs to
+ *   `true`, never to `1`.
+ * - `string` — a string-valued expression compiles to a JavaScript string.
+ * - a (possibly nested) array — a collection-valued expression, one element
+ *   per entry, matrices nesting one array per row.
+ * - a callable — a FUNCTION-valued expression compiles to a JavaScript
+ *   function rather than to a value: `Derivative(Sin)` runs to
+ *   `(x) => Math.cos(x)`, which the caller then applies. Its parameters and
+ *   result are compiled values in turn.
+ *
+ * Those descriptions hold when compilation SUCCEEDED. On the interpreter
+ * fallback (`success: false`), the runner reduces whatever the interpreter
+ * returns to the numeric shapes above, so a declining string-valued
+ * expression answers `NaN` rather than its string. The union still covers
+ * what comes back; the mapping from expression to member is what changes.
+ *
+ * The array member is mutable on purpose: the runner builds a fresh array per
+ * call and hands ownership to the caller, so there is nothing for a `readonly`
+ * to protect and it would only block passing the result to code that expects
+ * an ordinary array.
+ *
+ * A caller that knows which of these its own expression produces can say so
+ * with the `R` type parameter — `compile<'javascript', number>(expr)` — and
+ * get a narrow result type back. That is a TYPE-level assertion only: it
+ * changes nothing about the code that is generated or the value that is
+ * returned, so it is the caller's job to be right about it.
+ */
+export type CompiledValue =
+  | number
+  | ComplexResult
+  | boolean
+  | string
+  | CompiledValue[]
+  | ((...args: CompiledValue[]) => CompiledValue);
+
+/**
+ * The result type a runner has when the caller names a target but not an `R`.
+ *
+ * Target-dependent, because `interval-js` does not produce ordinary values at
+ * all: its runner answers with an {@link IntervalResult} — a tagged union
+ * (`{kind: 'interval', value: {lo, hi}}`, `{kind: 'empty'}`, …) — or with a
+ * BARE {@link Interval} (`{lo, hi}`), which is what a constant-valued
+ * expression comes back as, since it is built directly as a point interval.
+ * Neither is a number, a boolean or an array of them. Folding them into
+ * {@link CompiledValue} would force every ordinary caller to narrow past
+ * interval shapes that a `javascript` runner can never return, so the default
+ * selects on the target name instead. This mirrors the concrete typing
+ * `_getCompilationTarget('interval-js')` already provides
+ * ({@link IntervalJsCompilationTarget}).
+ */
+export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
+  ? IntervalResult | Interval
+  : CompiledValue;
+
+/**
+ * The variable/argument value type a runner accepts when the caller names a
+ * target but not a `V`, selected on the same target-dependent basis as
+ * {@link DefaultRunnerResult}: `interval-js` binds variables to intervals (a
+ * plain number is auto-converted to a point interval), while every other
+ * executable target accepts a real or a complex domain-coloring input.
+ */
+export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
+  ? number | Interval
+  : number | ComplexResult;
+
+/**
  * Runner for compiled expressions — called with a variables object.
  *
  * ```typescript
  * result.run({ x: 0.5, y: 1.0 })
  * ```
  */
-export type ExpressionRunner<R = number | ComplexResult, V = number> = (
+export type ExpressionRunner<R = CompiledValue, V = number> = (
   vars: Record<string, V>
 ) => R;
 
@@ -1485,7 +1562,7 @@ export type ExpressionRunner<R = number | ComplexResult, V = number> = (
  * result.run(0.5, 1.0)
  * ```
  */
-export type LambdaRunner<R = number | ComplexResult, V = number> = (
+export type LambdaRunner<R = CompiledValue, V = number> = (
   ...args: V[]
 ) => R;
 
@@ -1505,7 +1582,7 @@ export type LambdaRunner<R = number | ComplexResult, V = number> = (
  * `number | Interval` (a plain number is auto-converted to a point interval),
  * and a complex domain-coloring runner uses `number | ComplexResult`.
  */
-export interface CompiledRunner<R = number | ComplexResult, V = number> {
+export interface CompiledRunner<R = CompiledValue, V = number> {
   /** Call with a variables object (for compiled expressions) */
   (vars: Record<string, V>): R;
   /** Call with positional arguments (for compiled lambda expressions) */
@@ -1518,9 +1595,13 @@ export interface CompiledRunner<R = number | ComplexResult, V = number> {
  * Three type parameters control the shape:
  * - `T` — the target name. For executable targets (`'javascript'` |
  *   `'interval-js'`), `run` and `calling` are guaranteed present.
- * - `R` — the return type of `run`. Defaults to `number | ComplexResult` (a
- *   value whose imaginary part is exactly zero is a plain `number`; a
- *   returned `ComplexResult` always has `im !== 0`).
+ * - `R` — the return type of `run`. Defaults to {@link CompiledValue}, which
+ *   spans every value a runner can produce: a `number` (a complex value whose
+ *   imaginary part is exactly zero comes back this way), a `ComplexResult`
+ *   with `im !== 0`, a `boolean` from a predicate, a `string`, or a
+ *   (possibly nested) array from a collection. Narrow it yourself when you
+ *   know which one your expression yields — `compile<'javascript', number>()`
+ *   — and see the arithmetic example below.
  * - `V` — the type of the variable/argument values `run` accepts. Defaults to
  *   `number`; `interval-js` binds it to `number | Interval`, a complex runner
  *   to `number | ComplexResult`. (Positioned after `R` so existing
@@ -1535,6 +1616,11 @@ export interface CompiledRunner<R = number | ComplexResult, V = number> {
  * // run is guaranteed, may return complex
  * const js = compile(expr);
  * js.run({ x: 0.5 });
+ *
+ * // doing arithmetic on the result needs a narrower R than the default,
+ * // because a runner can also hand back a boolean, a string or an array
+ * const num = compile<'javascript', number>(expr);
+ * num.run({ x: 0.5 }) * 2; // a type-level assertion, no runtime coercion
  *
  * // strict mode: today's real kernel, NaN for √(−1), lane mismatches decline
  * const strict = compile(expr, { mode: 'strict' });
@@ -1552,8 +1638,8 @@ export interface CompiledRunner<R = number | ComplexResult, V = number> {
  */
 export type CompilationResult<
   T extends string = string,
-  R = number | ComplexResult,
-  V = number,
+  R = DefaultRunnerResult<T>,
+  V = DefaultRunnerVars<T>,
 > = {
   /** Target language name */
   target: T;

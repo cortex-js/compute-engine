@@ -317,44 +317,37 @@ describe('E2E: Real-world Expressions', () => {
       expect(v('171!')).toBe(Infinity);
     });
 
-    it('a negative integer (a pole of Γ) is ComplexInfinity', () => {
-      // The interpreter answers ComplexInfinity (`~oo`), and the compiled
-      // runner hands back the same value in the runner's convention —
-      // `{re: Infinity, im: Infinity}`, byte-identical to what a compiled
-      // `\tilde\infty` produces.
+    it('a negative integer (a pole of Γ) compiles to NaN', () => {
+      // The interpreter answers ComplexInfinity (`~oo`); the compiled runner
+      // is real-valued, and a pole has no real value, which the real lane
+      // spells `NaN`. Every spelling agrees — the constant, the derived pole,
+      // and a pole under a parent — because `~oo` types `number` throughout,
+      // so no parent is tricked into complex codegen by a pole.
       expect(ce.parse('(-1)!').N().toString()).toBe('~oo');
-      const cinf = { re: Infinity, im: Infinity };
-      expect(compile(ce.parse('\\tilde\\infty'))?.run?.({})).toEqual(cinf);
-      expect(compile(ce.parse('(-1)!'))?.run?.({})).toEqual(cinf);
-      expect(compile(ce.parse('(-2)!'))?.run?.({})).toEqual(cinf);
+      expect(compile(ce.parse('\\tilde\\infty'))?.run?.({})).toBeNaN();
+      expect(compile(ce.parse('(-1)!'))?.run?.({})).toBeNaN();
+      expect(compile(ce.parse('(-2)!'))?.run?.({})).toBeNaN();
     });
 
-    // The pole's node types `number` (the non-finite typing convention admits
-    // `~oo` only at the top type) while its VALUE is complex-shaped, so a
-    // parent that picks its codegen from the node's type emits real arithmetic
-    // around a `{re, im}` object. Constant folding hides that — it evaluates
-    // the whole variable-free expression through the interpreter — so the
-    // default path agrees with the interpreter and only the structural path
-    // diverges. Both halves are pinned here: the first is the contract, the
-    // second is a KNOWN divergence awaiting the ruling recorded in ROADMAP.md
-    // ("A `~oo` pole compiles to a complex-shaped literal though it types
-    // `number`"), not a behaviour to rely on.
-    it('a pole under a parent: folded agrees with the interpreter, structural does not', () => {
-      const cinf = { re: Infinity, im: Infinity };
+    // A pole under a parent is where the old inconsistency showed: the pole's
+    // node typed `number` while its VALUE was complex-shaped, so the constant
+    // fold emitted a `{re, im}` object into real arithmetic and the two
+    // compile paths disagreed with each other (`1 + (-1)!` folded to the
+    // object but lowered structurally to NaN). With `~oo` typing `number`
+    // everywhere, every spelling and BOTH paths answer NaN.
+    it('a pole under a parent agrees on both compile paths', () => {
       expect(ce.parse('1 + (-1)!').N().toString()).toBe('~oo');
-      expect(compile(ce.parse('1 + (-1)!'))?.run?.({})).toEqual(cinf);
-      // The control: `\tilde\infty` types `complex`, so its parent emits
-      // complex arithmetic and agrees on BOTH paths.
-      expect(
-        compile(ce.parse('1 + \\tilde\\infty'), { constantFold: false })?.run?.({})
-      ).toEqual(cinf);
-      // …while the derived-pole spelling does not.
-      expect(
-        compile(ce.parse('1 + (-1)!'), { constantFold: false })?.run?.({})
-      ).toBeNaN();
-      expect(
-        compile(ce.parse('2(-1)!'), { constantFold: false })?.run?.({})
-      ).toBeNaN();
+      const both = (latex: string) => [
+        compile(ce.parse(latex))?.run?.({}),
+        compile(ce.parse(latex), { constantFold: false })?.run?.({}),
+      ];
+      // A MULTIPLIED pole is included: `2·~oo` is `~oo` (an undirected
+      // infinity takes no sign from its coefficient), so the fold reaches the
+      // same pole the structural lowering does. While `Multiply` still gave
+      // that product a sign, this row answered `Infinity` folded and `NaN`
+      // structurally.
+      for (const latex of ['1 + (-1)!', '1 + \\tilde\\infty', '2(-1)!'])
+        for (const v of both(latex)) expect(v).toBeNaN();
     });
   });
 

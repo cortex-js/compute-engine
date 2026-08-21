@@ -65,6 +65,14 @@ function gammaBalancedProduct(start: number, count: number): number {
 }
 
 export function gamma(z: number): number {
+  // Γ has a pole at every non-positive integer, and the reflection formula
+  // below cannot see it: `Math.sin(Math.PI * z)` is not exactly 0 there
+  // (`sin(-2π)` computes as ≈2.4e-16), so Γ(−2) came back as the finite
+  // 6413262697001887 instead of a pole. A pole has no real value, which the
+  // real lane spells `NaN` — the same projection `_SYS.factorial` already
+  // applies at a negative integer, and the same one the interpreter's `~oo`
+  // takes when it reaches a real-emitting compile target.
+  if (z <= 0 && Number.isInteger(z)) return NaN;
   if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
   if (z > GAMMA_OVERFLOW_THRESHOLD) return Infinity;
   // Positive integer: Γ(z) = (z-1)!, exact as a product of doubles
