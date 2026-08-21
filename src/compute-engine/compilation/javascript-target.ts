@@ -150,6 +150,7 @@ import {
   isProvablyCharacterOperand,
   isProvablyStringComparisonParticipant,
   isProvablyStringOperand,
+  isProvablyNonTupleCollectionParticipant,
   isProvablyTupleParticipant,
   pointHasBroadcastComponent,
   unfaithfulComparisonAggregate,
@@ -596,6 +597,23 @@ function compileJSEquality(
     args.length === 2 &&
     args.every(isProvablyTupleParticipant) &&
     args.every(isNumericTupleParticipant);
+  // A point against a non-tuple collection is a CONSTANT: the interpreter
+  // compares a point atomically and a list never equals one
+  // (`Equal([1,0], Tuple(1,0))` is `False` for literals, and `[1,0] = P` with
+  // `P` declared `tuple<number, number>` is `False` once `P` is bound, whatever
+  // its coordinates). The literal pair already folds before compilation; a
+  // tuple-typed SYMBOL cannot, and declined through the aggregate gate below —
+  // a decline that read as a literal-vs-symbol inconsistency (Tycho item 215).
+  // Emit the interpreter's constant rather than a structural `_SYS.eq`, which
+  // would answer `true` for `[1,0]` against a point at `(1, 0)`.
+  if (
+    args.length === 2 &&
+    ((isProvablyTupleParticipant(args[0]) &&
+      isProvablyNonTupleCollectionParticipant(args[1])) ||
+      (isProvablyNonTupleCollectionParticipant(args[0]) &&
+        isProvablyTupleParticipant(args[1])))
+  )
+    return kind === 'Equal' ? 'false' : 'true';
   if (!tupleEquality) assertComparableAggregate(kind, args);
   // See `isStringScalarEquality` and `isStringCollectionEquality` for the two
   // text-specific admissions. Everything else with string evidence declines.

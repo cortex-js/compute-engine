@@ -689,23 +689,36 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
         ['NotEqual', DICT, DICT],
         '"False"',
       ],
-      // The two WRONG ANSWERS the gate closes. A point binds atomically in the
-      // interpreter, so both are `False`; compiled, `_SYS.eq` mapped over the
-      // tuple's JS array and answered `[true, false]` and `true` respectively.
-      // (Tuple-vs-TUPLE equality is admitted — see the block below. These are
-      // the MIXED shapes: one participant is not provably a tuple.)
+      // A WRONG ANSWER the gate closes. A point binds atomically in the
+      // interpreter, so this is `False`; compiled, `_SYS.eq` mapped over the
+      // tuple's JS array and answered `[true, false]`. (Tuple-vs-TUPLE
+      // equality is admitted — see the block below — and tuple-vs-LIST folds
+      // to the interpreter's constant, next test.)
       [
         'Equal of a tuple against a scalar',
         ['Equal', ['Tuple', 1, 2], 1],
         '"False"',
       ],
-      [
-        'Equal of a tuple against a list',
-        ['Equal', ['Tuple', 1, 2], ['List', 1, 2]],
-        '"False"',
-      ],
     ] as const)('%s declines', (_label, json, expected) => {
       failsClosed(ce.box(json as any), expected);
+    });
+
+    test('Equal of a tuple against a list compiles to the constant the interpreter answers', () => {
+      // A list and a point are never equal (the point binds atomically), so
+      // the pair is a constant whatever the elements — `false` for `Equal`,
+      // `true` for `NotEqual`. This used to decline through the aggregate
+      // gate; a structural `_SYS.eq` would have answered `true` (Tycho item
+      // 215).
+      const eq = ce.box(['Equal', ['Tuple', 1, 2], ['List', 1, 2]] as any);
+      expect(eq.evaluate().toString()).toBe('"False"');
+      const r = compile(eq);
+      expect(r.success).toBe(true);
+      expect(r.code).toBe('false');
+      const ne = compile(
+        ce.box(['NotEqual', ['Tuple', 1, 2], ['List', 1, 2]] as any)
+      );
+      expect(ne.success).toBe(true);
+      expect(ne.code).toBe('true');
     });
 
     test('an ordering over two literal aggregates declines (interpreter inert)', () => {

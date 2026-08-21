@@ -504,6 +504,45 @@ export function unfaithfulComparisonAggregate(
  *  - the ORDERINGS never consult it. `Less(Tuple, Tuple)` was declining before
  *    this gate existed (the interpreter leaves it inert) and stays closed.
  */
+/**
+ * True when a comparison participant is provably a collection that is NOT a
+ * tuple — a `list`, `set` or `range` kind, every union member included. A
+ * bare `tuple`, a structural `tuple<…>`, a `collection`/`indexed_collection`
+ * (which a tuple inhabits), a string (a collection of clusters in the
+ * lattice, but compared as text), a scalar or an unknown all answer `false`.
+ *
+ * The other half of the list-vs-point fold in `compileJSEquality`: a list and
+ * a point are never equal in the interpreter (`Equal([1,0], Tuple(1,0))` is
+ * `False`, and a point binds atomically), so an equality whose one side is
+ * provably a point and whose other side is provably a non-tuple collection is
+ * a constant, whatever the values (Tycho item 215).
+ */
+export function isProvablyNonTupleCollectionParticipant(x: Expression): boolean {
+  const walk = (t: Type, visited?: ReadonlySet<TypeReference>): boolean => {
+    if (
+      typeof t === 'object' &&
+      t.kind === 'reference' &&
+      t.def !== undefined
+    ) {
+      const decl = declarationOf(t);
+      if (visited?.has(decl)) return false;
+      visited = new Set(visited).add(decl);
+    }
+    const r = resolveTypeForCompilation(t);
+    // Only the kinds a tuple can NEVER inhabit. A tuple IS a subtype of
+    // `collection` and `indexed_collection` (`subtype.ts`: every component a
+    // subtype of the element type), so a symbol declared
+    // `indexed_collection<number>` may be bound to a point, and folding it
+    // against a point would answer `false` where the interpreter answers
+    // `True`. Those kinds keep declining through the aggregate gate.
+    if (typeof r === 'string')
+      return r === 'list' || r === 'set' || r === 'range';
+    if (r.kind === 'union') return r.types.every((m) => walk(m, visited));
+    return r.kind === 'list' || r.kind === 'set';
+  };
+  return walk(x.type.type);
+}
+
 export function isProvablyTupleParticipant(x: Expression): boolean {
   // Same cycle guard as `unfaithfulComparisonAggregate` — but note `false` is
   // the DECLINING direction here, so stopping on a repeat is conservative.
@@ -5778,6 +5817,10 @@ export class BaseCompiler {
     // Single-operand cases (scalar·vector, scalar·tuple) are untouched: they
     // broadcast element-wise in both the interpreter and `_SYS.bcast` (see
     // `compile-fallback.test.ts`).
+    // The one operand a nested emission keeps WHOLE while the others broadcast
+    // — a numeric tuple multiplied by a list (set in the `Multiply` carve-out
+    // below, consumed at the emission at the end of this method).
+    let atomicTuple: Expression | undefined;
     if (h === 'Multiply') {
       const isArrayish = (a: Expression): boolean =>
         // A string matches `indexed_collection` but is not array-shaped — see
@@ -5790,6 +5833,52 @@ export class BaseCompiler {
           isBoundPossiblyCollectionTyped(a));
       const collection = args.filter(isArrayish);
       if (collection.length >= 2) {
+        const isMatrix = (a: Expression): boolean =>
+          (isTensorValue(a) && a.shape.length >= 2) || a.type.matches('matrix');
+        if (args.some(isMatrix)) return null;
+        // ONE numeric tuple among list operands is the point-family shape
+        // `[1,2,3]·(cos a, sin a)`: the interpreter broadcasts over the LIST
+        // and scales the point whole at every element, answering a list of
+        // points. A flat `_SYS.bcast` over both arrays would zip the point
+        // against the list instead, and the `_SYS.mul` runtime below would
+        // Hadamard it. The point is kept ATOMIC — see the nested emission at
+        // the end of this method (`atomicTuple`) — provided every other
+        // array operand is a source of SCALARS: the outer broadcast descends
+        // into whatever arrays it is handed, so a list of points
+        // (`[(1,2),(3,4)]·(1,0)`, a `tuple·tuple` error per element in the
+        // interpreter) or a source whose element kind is unprovable must
+        // decline. A `broadcastable<number>` source is admitted: at run time
+        // it is a scalar (the outer broadcast applies the closure once — a
+        // point) or a list of numbers (a list of points), both what the
+        // interpreter answers. Two or more tuples stay declined: `tuple·tuple`
+        // is an interpreter error (no implicit dot/cross).
+        const tuples = collection.filter((a) => isNumericTuple(a));
+        if (tuples.length > 1) return null;
+        if (tuples.length === 1) {
+          const isScalarElementSource = (a: Expression): boolean => {
+            const t = compilationType(a);
+            if (typeof t !== 'string' && t.kind === 'broadcastable')
+              return isSubtype(t.elements, 'number');
+            // A top-typed application (`h(x)` with `h: (…) -> unknown`): its
+            // run-time shape is unknowable.
+            if (isBoundPossiblyCollectionTyped(a)) return false;
+            const elt = collectionElementType(t);
+            if (elt === undefined || !isSubtype(elt, 'number')) return false;
+            // A SYMBOL declared `indexed_collection<number>` may itself be
+            // bound to a point (a tuple inhabits that type); only a list-kind
+            // declaration proves a symbol holds a list of scalars.
+            if (isSymbol(a))
+              return (
+                t === 'list' ||
+                t === 'range' ||
+                (typeof t !== 'string' && t.kind === 'list')
+              );
+            return true;
+          };
+          if (!collection.every((a) => a === tuples[0] || isScalarElementSource(a)))
+            return null;
+          atomicTuple = tuples[0];
+        }
         // A possibly-collection operand (a declared `broadcastable<T>` OR a
         // top-typed application such as `h(x)`) could materialize as a scalar,
         // a vector, OR a MATRIX at run time — the shape is unprovable at compile
@@ -5798,8 +5887,13 @@ export class BaseCompiler {
         // `_SYS.mul`, which dispatches on runtime rank (Hadamard for equal-length
         // rank-1 vectors, matrix product for rank-≥2), so no shape silently
         // diverges. Complex operands can't route through the real-only helper —
-        // defer those to the fail-closed path.
-        if (collection.some(isBoundPossiblyCollectionTyped)) {
+        // defer those to the fail-closed path. (With a point among the
+        // operands this path is never taken: the point plan above either
+        // admitted the shape or declined it.)
+        if (
+          atomicTuple === undefined &&
+          collection.some(isBoundPossiblyCollectionTyped)
+        ) {
           if (
             args.some(
               (a) => BaseCompiler.isComplexValued(a) || hasComplexElement(a)
@@ -5811,10 +5905,6 @@ export class BaseCompiler {
             .join(', ');
           return `_SYS.mul(${compiledArgs})`;
         }
-        const isMatrix = (a: Expression): boolean =>
-          (isTensorValue(a) && a.shape.length >= 2) || a.type.matches('matrix');
-        if (collection.some((a) => isNumericTuple(a)) || args.some(isMatrix))
-          return null;
         // Statically-known mismatched rank-1 lengths: fail closed.
         const lengths = collection
           .filter((a) => isTensorValue(a) && a.shape.length === 1)
@@ -5848,6 +5938,24 @@ export class BaseCompiler {
         a.type.matches('indexed_collection<any>') ||
         isBoundPossiblyCollectionTyped(a));
     if (!args.some(isArrayOperand)) return null;
+
+    // A numeric tuple SUMMED with, or DIVIDED by/into, a list is not a
+    // broadcast in the interpreter: `(1,2) + [3,4]` is a per-element
+    // `incompatible-type` error (a point does not add to a scalar) and
+    // `(1,2) / [1,2]` stays inert. A flat `_SYS.bcast` would zip the two
+    // arrays into the plausible `[4, 6]` / `[1, 1]` behind `success: true`.
+    // Decline, so the D6 guard fails closed and the interpreter answers.
+    // (`Multiply` is the broadcast case, handled above; `Power` over a tuple
+    // and a list is element-wise in the interpreter too and keeps compiling.)
+    // A possibly-collection operand (`broadcastable<T>`, a top-typed call)
+    // counts as a list here even though it may be a scalar at run time — the
+    // shape is unprovable, and declining an unprovable shape is the D6 rule.
+    if (
+      (h === 'Add' || h === 'Divide') &&
+      args.some((a) => isNumericTuple(a)) &&
+      args.some((a) => !isNumericTuple(a) && isArrayOperand(a))
+    )
+      return null;
 
     // What the closure's element parameter for each operand holds at run time:
     // `true` for a `{re, im}` object, `false` for a plain number. A SCALAR
@@ -5967,11 +6075,45 @@ export class BaseCompiler {
         BaseCompiler._broadcastRadicalVerdict.pop();
       BaseCompiler._popLocalComplex();
     }
-    const compiledArgs = args
-      .map((a) => BaseCompiler.compile(a, target))
-      .join(', ');
+    const compiledArgs = args.map((a) => BaseCompiler.compile(a, target));
     const body = BaseCompiler.guardConnectiveAbsence(h, params, scalarBody);
-    return `_SYS.bcast((${params.join(', ')}) => ${body}, ${compiledArgs})`;
+    const closure = `(${params.join(', ')}) => ${body}`;
+    // A point multiplied by a list (`[1,2,3]·(cos a, sin a)`, Tycho item 214):
+    // broadcast over the LIST operands first, and at each of their elements
+    // broadcast the scalar closure over the point's components — so the point
+    // is scaled whole per element and the result is a list of points, as the
+    // interpreter's `mul()` answers. The outer closure's parameters stand in
+    // for the list operands inside the inner call; the point and any scalar
+    // operand are spliced in unchanged.
+    //
+    // Every operand is evaluated exactly ONCE, in operand order, by binding
+    // it as a parameter of an immediately-applied arrow function — the
+    // interpreter's `Multiply` handler evaluates each operand once before
+    // broadcasting. Splicing the point's or a scalar's source text inside the
+    // outer closure instead would re-run it per element: `[1,2]·(Random(), 0)`
+    // must draw once and answer `[(r, 0), (2r, 0)]`, and `cos a` need not be
+    // recomputed for every element. Handing those operands to the outer
+    // `_SYS.bcast` as arguments is not an option either — it would zip the
+    // point's array against the list, the very shape this emission avoids.
+    if (atomicTuple !== undefined) {
+      const bound = args.map(() => BaseCompiler.tempVar(target));
+      const outerParams: string[] = [];
+      const outerSources: string[] = [];
+      const innerArgs = args.map((a, i) => {
+        if (a === atomicTuple || !isArrayOperand(a)) return bound[i];
+        const p = BaseCompiler.tempVar(target);
+        outerParams.push(p);
+        outerSources.push(bound[i]);
+        return p;
+      });
+      return (
+        `((${bound.join(', ')}) => ` +
+        `_SYS.bcast((${outerParams.join(', ')}) => ` +
+        `_SYS.bcast(${closure}, ${innerArgs.join(', ')}), ` +
+        `${outerSources.join(', ')}))(${compiledArgs.join(', ')})`
+      );
+    }
+    return `_SYS.bcast(${closure}, ${compiledArgs.join(', ')})`;
   }
 
   /**

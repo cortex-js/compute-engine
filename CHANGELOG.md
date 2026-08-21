@@ -157,6 +157,29 @@
 
 ### Bug Fixes
 
+- **The `javascript` compile target lowers a point multiplied by a list.**
+  `[1,2,3]·(cos a, sin a)` and `(3((-N)..N)+cos t)·(cos a, sin a)` declined
+  with "no list-arithmetic support" while `x+[1,2,3]` and `2(cos a, sin a)`
+  compiled. The interpreter broadcasts over the LIST and scales the point
+  whole at each element — a list of points — which a flat element-wise
+  broadcast over the two arrays would have zipped instead; the product now
+  emits a nested broadcast (list outside, point components inside) and agrees
+  with `evaluate()` on every shape probed, a list-typed or tuple-typed
+  symbol included. Shapes the interpreter does not broadcast keep failing
+  closed (`tuple·tuple`, a matrix, two lists of provably different lengths).
+  `Add` and `Divide` of a point against a list, which the interpreter answers
+  with a per-element `incompatible-type` error or leaves inert, used to
+  compile to a plausible zip (`(1,2)+[3,4]` → `[4, 6]`); they now fail closed.
+  (Tycho item 214.)
+
+- **`[1,0] = P` with `P` declared `tuple<number, number>` compiles.** It
+  declined as "a tuple participant" while `[1,0]=[x,y]` and `(1,0)=P` compiled.
+  A list and a point are never equal in the interpreter (a point binds
+  atomically), so the pair is a constant whatever the coordinates — the
+  literal `[1,0]=(1,0)` already folded to `False` before compilation. The
+  list-vs-point-symbol pair now compiles to that constant (`true` for
+  `NotEqual`) instead of declining. (Tycho item 215.)
+
 - **A zip of two unknown-length point views keeps its element tuple-ness in
   the TYPE.** With `n` unassigned, `A = (Range(0,n)/n)·(1,0)` is a lazy view
   of points, but `A - B` evaluated to `Map((_1, _2) ↦ _1 + _2, A, B)` typed
