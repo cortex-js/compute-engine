@@ -421,6 +421,38 @@ returns another lazy view, so the draws still happen later, outside the frame.
 Use an operator that actually consumes the collection (`ListFrom`, an index, a
 reducer such as `Sum`).
 
+**Trap**: materialize at the VIEW, not merely at the top of the expression. A
+consuming operator only reaches the view if the view is what it consumes, so a
+lazy view nested inside another structure survives a top-level `ListFrom`
+untouched:
+
+```
+ListFrom(Tuple(Comprehension(Random(), Element(n, Range(1, 5)))))
+  ->  [Comprehension(Random(), Element(n, Range(1, 5)))]   // still lazy
+```
+
+The elements of that list draw when something later walks the inner
+comprehension, under whatever frame is active then. Wrap the view itself.
+
+**This is a CLASS of heads, not a short list.** Any head that pairs a
+per-element (or per-cell) callback with `collection.isLazy: () => true` in
+`library/collections.ts` behaves this way when its callback draws. `Map`,
+`Comprehension`, `Tabulate` (and its `Table` alias) and `Filter` have each
+been measured doing so; the signature matches roughly nine heads in total
+(`Scan`, `FlatMap`, `Iterate` and `Fill` among them), and nothing about the
+mechanism singles out the measured four. Treat the property as belonging to
+lazy-view-ness, not to the particular names written here — a list of names in
+a document goes stale the moment a head is added.
+
+**Not every deferred-looking shape escapes the frame**, and the difference is
+worth checking before assuming: an elementwise operation over a large
+collection evaluates to a `Map` (the hybrid-laziness rule) whose *scalar*
+operands were already drawn and folded in as literals. `Multiply(Random,
+Range(1, 300))` is seeded identically whether the frame encloses the
+materialization or the expression, because there is ONE draw, taken at
+`evaluate()` inside the active frame and then scaled per element — visible in
+the result as elements standing in exact 1:2:3 ratio. Measured 2026-08-21.
+
 **`Comprehension` is a lazy view too** — and it is the shape the LaTeX
 comprehension syntax parses to, so the trap is one keystroke away in a
 document:

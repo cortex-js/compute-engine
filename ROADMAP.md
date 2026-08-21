@@ -109,6 +109,46 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### The `Sum`/`Product` skip rule is not transitive through a user-function body (OPEN, root cause identified — measured 2026-08-21)
+
+A compiled `Sum`/`Product` skips terms after its accumulator goes NaN when
+nothing in the body has observable effects, and a caller-supplied piece that
+an oracle vouches for — a pure `functions` entry, a caller `compile` handler
+whose definition declares no effects — counts as effect-free. That holds when
+the piece appears directly in the body. It does NOT hold when the same piece
+is reached through a user-defined function:
+
+```
+sum_{n=1}^{31} sq(n·x)     functions:{sq:'((t)=>t*t+1)'}    30 exits
+wrap(t) := sq(t) + 1
+sum_{n=1}^{31} wrap(n·x)   same functions entry             0 exits
+```
+
+**The blocker is not the provenance test, and fixing that test does not
+help.** `isAdmissibleUserFnCallee` (`compilation/cse.ts`) gates on
+`body.isPure && calleeBodyClean(body)`. Making `calleeBodyClean` oracle-aware
+was tried and reverted: the `body.isPure` half refuses first. The body here is
+`sq(t) + 1`, and `sq` is declared with a SIGNATURE ONLY
+(`ce.declare('sq', '(number) -> number')`) because its implementation arrives
+through `functions` — and a signature-only declaration reports
+`isPure === false` for its applications, since there is no body to derive
+purity from. So the outer application is judged impure on account of the very
+symbol the oracle exists to vouch for.
+
+That makes this an instance of a broader question rather than a local fix:
+**what should a declared-but-valueless function's purity be?** Today it is
+`false` (assume the worst). `unknown` would be the honest answer, and would
+let a caller-supplied oracle settle it. Changing it reaches beyond this gate —
+the same `isPure === false` is what makes a signature-only declaration behave
+conservatively everywhere — so it wants a ruling before anyone moves it.
+
+Not unsound, and no live consumer: the failure mode is refusing to skip, never
+skipping when it should not. Recorded because the shape (`wrap(t) := helper(t)`
+over a caller-supplied helper) is an ordinary one, so the optimization silently
+does not reach a consumer who writes it that way. Found by the Codex leg of the
+dual review on the skippability change; the `body.isPure` root cause was found
+by instrumenting after the first fix failed to move the measurement.
+
 ### A `compile` handler that DECLINES still costs the `Sum`/`Product` NaN exit (OPEN, needs a ruling — measured 2026-08-21)
 
 A compiled `Sum`/`Product` exits as soon as its accumulator becomes NaN. The

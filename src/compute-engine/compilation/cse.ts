@@ -337,24 +337,30 @@ export interface CseHarvestOptions {
   readonly isPureOverriddenOperator?: (name: string) => boolean;
 
   /**
-   * Treat an application of a PURE caller-mapped head as eligible, rather than
-   * refusing it for its provenance.
+   * Answer the SKIPPABILITY question rather than CSE's own.
    *
-   * Off for CSE's own harvest, and set only by
-   * `BaseCompiler.isEmissionSkippable`, because the two questions differ. CSE
-   * asks whether a pass may rewrite or bind subexpressions inside the
-   * emission; a caller-supplied emitter receives its operands as text and may
-   * drop, repeat or defer them, so the answer stays no whatever the
-   * implementation does. Skipping asks only whether NOT RUNNING the emission
-   * at all is observable, which is exactly what purity answers.
+   * The two differ. CSE asks whether a pass may rewrite or bind
+   * subexpressions INSIDE an emission; for caller-supplied source the answer
+   * is no whatever the implementation does, because the emitter receives its
+   * operands as text and may drop, repeat or defer them. Skipping asks only
+   * whether NOT RUNNING the emission at all is observable — which is a
+   * question about EFFECTS, not about who wrote the code.
    *
-   * Under the flag such a node is eligible when its operands are: the
-   * definition-based gates below are skipped for it, since a name supplied
-   * through `functions` need not have an engine operator definition at all —
-   * a signature-only declaration (`ce.declare('s', '(number) -> number')`) is
-   * the ordinary case, and it is the caller's source that runs.
+   * Under this flag the provenance refusals become oracle lookups. A
+   * caller-mapped head is eligible when {@link isPureOverriddenOperator}
+   * vouches for it, and a head carrying a caller-supplied `compile` handler is
+   * eligible when its operator definition declares no effects. Both then have
+   * to clear the same operand gates the ordinary branch applies, since
+   * skipping the call skips its operands too. A spelling with no purity
+   * oracle at all — an `operators` entry, a string-valued `vars` symbol — is
+   * refused as before, because nothing can vouch for it.
+   *
+   * The definition-based gates are skipped for a caller-mapped head: a name
+   * supplied through `functions` need not have an engine operator definition
+   * at all, and a signature-only declaration
+   * (`ce.declare('s', '(number) -> number')`) is the ordinary case.
    */
-  readonly treatPureOverridesAsEligible?: boolean;
+  readonly skippabilityQuery?: boolean;
 
   /** Is this symbol backed by a *string*-valued `vars` entry? (Non-string
    * `vars` are baked constants and are safe.) */
@@ -550,7 +556,7 @@ class Harvester {
   private readonly engine: ComputeEngine;
   private readonly isOverriddenOperator: (name: string) => boolean;
   private readonly isPureOverriddenOperator: (name: string) => boolean;
-  private readonly treatPureOverridesAsEligible: boolean;
+  private readonly skippabilityQuery: boolean;
   private readonly isStringVar: (name: string) => boolean;
   private readonly isVarsKey: (name: string) => boolean;
   private readonly admitPureUserFunctions: boolean;
@@ -579,6 +585,12 @@ class Harvester {
    * before/after a computation to decide whether its result may memoize. */
   private calleeNeutralEdges = 0;
   private readonly compileHandlerMemo = new Map<string, boolean>();
+  /** The definition each caller handler was found on — see
+   * `callerCompileHandlerDef`. Keyed by operator name like its sibling. */
+  private readonly compileHandlerDefMemo = new Map<
+    string,
+    BoxedOperatorDefinition | undefined
+  >();
   private readonly opaqueOperandMemo = new Map<Expression, boolean>();
   private readonly opaqueSymbolMemo = new Map<string, boolean>();
   private readonly builtinCallbackMemo = new Map<string, boolean>();
@@ -603,8 +615,7 @@ class Harvester {
     this.isOverriddenOperator = options.isOverriddenOperator ?? (() => false);
     this.isPureOverriddenOperator =
       options.isPureOverriddenOperator ?? (() => false);
-    this.treatPureOverridesAsEligible =
-      options.treatPureOverridesAsEligible === true;
+    this.skippabilityQuery = options.skippabilityQuery === true;
     this.isStringVar = options.isStringVar ?? (() => false);
     this.isVarsKey = options.isVarsKey ?? (() => false);
     this.admitPureUserFunctions = options.admitPureUserFunctions === true;
@@ -1197,13 +1208,24 @@ class Harvester {
     // Checked BEFORE the pure-override branch below, not after: a handler wins
     // over a `functions` entry at emission, so a name carrying both would
     // otherwise have the handler's source blessed by the entry's purity.
-    if (this.hasCallerCompileHandler(node)) return false;
+    if (this.hasCallerCompileHandler(node)) {
+      // For the skippability question the handler's PROVENANCE is not the
+      // point — its effects are, and the operator definition is where they are
+      // declared. A definition that declares `pure: false` (or a non-empty
+      // `effects` set) refuses; one that declares nothing is pure by the
+      // engine's standing default, the same default every other consumer of
+      // `isPure` already trusts. Note the handler cannot be analysed the way a
+      // `functions` entry's source can: a handler EMITS source, and at harvest
+      // time nothing has been emitted yet.
+      if (!this.skippabilityQuery) return false;
+      if (this.callerCompileHandlerDef(node)?.pure !== true) return false;
+    }
 
     if (this.isOverriddenOperator(node.operator)) {
-      // See `treatPureOverridesAsEligible`: a pure caller-mapped head is
-      // eligible for the skippability query and for nothing else.
+      // See `skippabilityQuery`: a caller-mapped head an oracle vouches
+      // for is eligible for that question and for nothing else.
       if (
-        !this.treatPureOverridesAsEligible ||
+        !this.skippabilityQuery ||
         !this.isPureOverriddenOperator(node.operator)
       )
         return false;
@@ -1233,6 +1255,19 @@ class Harvester {
     // Not a fixed built-in: `Apply` with a symbolic head, a parameter used as
     // a function, an unbound application.
     else if (node.operatorDefinition === undefined) return false;
+
+    // Effects, for a node no oracle above vouched for. `isPure` is the
+    // effects-model projection, so an impure operator anywhere in the tree is
+    // caught as the walk reaches it: `Sum(Random() + n, …)` refuses, because
+    // skipping terms draws from the generator fewer times and a later draw
+    // observes that, even though the sum's own value is already NaN. The
+    // provenance tests above cannot see it — a built-in impure operator is not
+    // caller-supplied — which is why both questions are asked.
+    //
+    // Applied only under `skippabilityQuery`. CSE's own harvest checks purity
+    // at the occurrence-recording site instead, where a `size`/score decision
+    // accompanies it.
+    if (this.skippabilityQuery && node.isPure !== true) return false;
 
     for (const operand of node.ops)
       if (this.isOpaqueCallableOperand(operand)) return false;
@@ -1271,10 +1306,18 @@ class Harvester {
     const systemDef = systemScopeBinding(this.engine, id);
 
     let result = false;
+    // Purity has to be read from the SAME definition the handler was found
+    // on. Two definitions can be in play: the one the node bound when it was
+    // boxed, and the one the engine's scope chain answers with now. Emission
+    // uses the latter, so a sum boxed before an impure handler was installed
+    // would otherwise be judged against the stale definition's `pure` — which
+    // defaults to true — and have its calls skipped.
+    let sourceDef: BoxedOperatorDefinition | undefined;
     const ownDef = node.operatorDefinition;
     if (typeof ownDef?.compile === 'function') {
       // Exempt only when the handler belongs to the built-in definition.
       result = !(isOperatorDef(systemDef) && systemDef.operator === ownDef);
+      if (result) sourceDef = ownDef;
     }
     if (!result) {
       const def = this.engine.lookupDefinition(id);
@@ -1283,9 +1326,26 @@ class Harvester {
         isOperatorDef(def) &&
         typeof def.operator.compile === 'function' &&
         def !== systemDef;
+      if (result && def !== undefined && isOperatorDef(def))
+        sourceDef = def.operator;
     }
     this.compileHandlerMemo.set(id, result);
+    this.compileHandlerDefMemo.set(id, sourceDef);
     return result;
+  }
+
+  /**
+   * The operator definition that supplied the caller `compile` handler
+   * {@link hasCallerCompileHandler} found, and therefore the one whose
+   * `pure` / `effects` declaration describes what that handler emits.
+   *
+   * Only meaningful after `hasCallerCompileHandler(node)` has answered true
+   * for this operator; it fills this memo as a side effect of resolving.
+   */
+  private callerCompileHandlerDef(
+    node: Expression & FunctionInterface
+  ): BoxedOperatorDefinition | undefined {
+    return this.compileHandlerDefMemo.get(node.operator);
   }
 
   /**

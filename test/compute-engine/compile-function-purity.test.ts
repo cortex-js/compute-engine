@@ -203,3 +203,139 @@ describe('the descriptor form is validated', () => {
     expect(() => compileSum({ impl: PURE_SOURCE })).toThrow(/functions\.sq/);
   });
 });
+
+/**
+ * The skippability rule, stated once: an emission may be skipped when nothing
+ * in it has observable effects. Three oracles answer that — a `functions`
+ * entry through `entryIsPure`, an operator carrying a caller `compile` handler
+ * through the `pure`/`effects` on its definition, everything else through
+ * `node.isPure` — and a spelling with no oracle is refused.
+ */
+describe('the NaN exit is gated on effects, not on provenance', () => {
+  /** `\sum_{n=1}^{31} body`, compiled with `opts`. */
+  function exitsFor(build: (ce: ComputeEngine) => any, opts: any = {}): number {
+    const ce = new ComputeEngine();
+    const r = compile(build(ce), opts) as any;
+    expect(r.success).toBe(true);
+    return exitCount(r.code);
+  }
+
+  test('a pure body keeps every exit', () => {
+    expect(
+      exitsFor((ce) => ce.parse('\\sum_{n=1}^{31}\\sin(nx)'))
+    ).toBe(30);
+  });
+
+  test('a built-in IMPURE operator in the body refuses the exit', () => {
+    // `Random` is declared impure. Skipping terms draws from the generator
+    // fewer times, which a later draw observes — even though the sum's own
+    // value is already NaN by then. Provenance cannot see this: `Random` is
+    // the engine's own operator, not caller-supplied.
+    expect(
+      exitsFor((ce) =>
+        ce.parse('\\sum_{n=1}^{31}(\\operatorname{Random}()+n)')
+      )
+    ).toBe(0);
+  });
+
+  test('a caller `compile` handler whose definition declares no effects keeps the exit', () => {
+    expect(
+      exitsFor((ce) => {
+        ce.declare('R', 'list<number>');
+        const d: any = ce.lookupDefinition('At');
+        ce.declare('At', {
+          ...(d?.operator ?? {}),
+          compile: () => '_SYS.at(_.R, 1)',
+        } as any);
+        return ce.box(['Sum', ['At', 'R', 'k'], ['Limits', 'k', 1, 31]]);
+      })
+    ).toBe(30);
+  });
+
+  test('the same handler on a `pure: false` definition refuses the exit', () => {
+    expect(
+      exitsFor((ce) => {
+        ce.declare('R', 'list<number>');
+        const d: any = ce.lookupDefinition('At');
+        ce.declare('At', {
+          ...(d?.operator ?? {}),
+          compile: () => '_SYS.at(_.R, 1)',
+          pure: false,
+        } as any);
+        return ce.box(['Sum', ['At', 'R', 'k'], ['Limits', 'k', 1, 31]]);
+      })
+    ).toBe(0);
+  });
+
+  test('an `operators` entry has no purity oracle and refuses the exit', () => {
+    // `[op, prec]` carries no body to analyse and no declaration slot, so
+    // nothing can vouch for it. Refusing is the only safe answer.
+    expect(
+      exitsFor((ce) => ce.parse('\\sum_{n=1}^{31}(nx+1)'), {
+        operators: { Add: ['myAdd', 11] },
+      })
+    ).toBe(0);
+  });
+
+  test('a pure-vouched head with an IMPURE operand still refuses', () => {
+    // The oracle vouches for the HEAD; the operands are judged on their own.
+    // Skipping the call skips them too, so an impure one anywhere below
+    // refuses however pure the head is.
+    expect(
+      exitsFor(
+        (ce) => {
+          ce.declare('sq', '(number) -> number');
+          return ce.parse(
+            '\\sum_{n=1}^{31}\\operatorname{sq}(n\\operatorname{Random}())'
+          );
+        },
+        { functions: { sq: PURE_SOURCE } }
+      )
+    ).toBe(0);
+  });
+
+  test('purity is read from the ACTIVE definition, not the one the node bound', () => {
+    // Two definitions can be in play: the one bound when the expression was
+    // boxed, and the one the scope chain answers with at compile time.
+    // Emission uses the latter. Boxing BEFORE an impure handler is installed
+    // must not let the stale definition's default `pure: true` bless it.
+    const build = (boxFirst: boolean, pure: boolean) => {
+      const ce = new ComputeEngine();
+      ce.declare('R', 'list<number>');
+      const mk = () =>
+        ce.box(['Sum', ['At', 'R', 'k'], ['Limits', 'k', 1, 31]]);
+      const early = boxFirst ? mk() : undefined;
+      const d: any = ce.lookupDefinition('At');
+      ce.declare('At', {
+        ...(d?.operator ?? {}),
+        compile: () => '_SYS.at(_.R, 1)',
+        pure,
+      } as any);
+      const r = compile(early ?? mk()) as any;
+      return exitCount(r.code);
+    };
+    expect(build(true, false)).toBe(0); // boxed first, then shadowed impure
+    expect(build(false, false)).toBe(0); // shadowed first
+    expect(build(true, true)).toBe(30); // pure either way
+    expect(build(false, true)).toBe(30);
+  });
+
+  test('a signature-only declaration is not vetoed by its own `isPure`', () => {
+    // `ce.declare('sq', '(number) -> number')` reports `isPure === false` for
+    // its applications — there is no body to derive purity from. When the
+    // implementation arrives through `functions`, that entry's oracle is the
+    // one that governs, not the placeholder declaration's.
+    const ce = new ComputeEngine();
+    ce.declare('sq', '(number) -> number');
+    expect(ce.parse('\\operatorname{sq}(x)').isPure).toBe(false);
+    expect(
+      exitsFor(
+        (e) => {
+          e.declare('sq', '(number) -> number');
+          return e.parse('\\sum_{n=1}^{31}\\operatorname{sq}(nx)');
+        },
+        { functions: { sq: PURE_SOURCE } }
+      )
+    ).toBe(30);
+  });
+});

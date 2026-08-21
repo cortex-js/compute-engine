@@ -13962,11 +13962,18 @@ export class BaseCompiler {
    * several emissions into one, and it is asked here in the same form,
    * including its transitive check of a user-defined callee's body.
    *
-   * The exception is a `functions` entry whose implementation has been
-   * established to have no such effects — declared `pure` by the caller, or
-   * inferred from its source (`function-purity.ts`). Skipping one of those is
-   * unobservable by definition, so it does not block the guard, even though it
-   * remains opaque to every pass that would rewrite what is inside it.
+   * Stated as one rule: an emission may be skipped when nothing in it has
+   * observable effects. Three oracles answer that, one per spelling — a
+   * `functions` entry through `entryIsPure` (declared on the entry, or
+   * inferred from its source: `function-purity.ts`), an operator carrying a
+   * caller `compile` handler through the `pure`/`effects` declared on its
+   * definition, and everything else through `node.isPure`. A spelling with no
+   * oracle — an `operators` entry, a string-valued `vars` symbol — is refused,
+   * because nothing can vouch for it.
+   *
+   * Purity buys SKIPPING and nothing else. A caller-supplied implementation
+   * stays opaque to every pass that would rewrite what is inside it, however
+   * pure it is, because the emitter receives its operands as text.
    *
    * `varyingNames` are the names bound differently across the repetitions
    * being emitted (an unrolled binder's indices); they must not resolve
@@ -13988,10 +13995,7 @@ export class BaseCompiler {
     // is observable, which purity answers. Setting the relaxation HERE, on a
     // copy of the stored options, rather than in the options the compilation
     // records, keeps CSE proper on exactly the behavior it had.
-    const admission: CseHarvestOptions = {
-      ...base,
-      treatPureOverridesAsEligible: true,
-    };
+    const admission: CseHarvestOptions = { ...base, skippabilityQuery: true };
     return nodes.every((node) => isCseAdmissible(node, admission));
   }
 

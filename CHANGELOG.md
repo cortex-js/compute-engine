@@ -23,6 +23,13 @@
     effects keeps the exit, `pure: false` refuses it. A consumer measured ~33x
     on a 31-term sum from a handler that had explicitly declined.
 
+  The rule holds for a piece written directly in the body. It does NOT yet
+  reach one used through a user-defined function: `wrap(t) := s(t) + 1`
+  summed over still refuses, because the user-function admission gate reads
+  the body's own purity and a signature-only declaration — which is what a
+  name implemented through `functions` has — reports impure. That refusal is
+  conservative, never unsound.
+
   The rule is now one sentence — an emission may be skipped when nothing in it
   has observable effects — with one oracle per spelling: a `functions` entry
   through its declared or inferred purity, an operator with a caller `compile`
