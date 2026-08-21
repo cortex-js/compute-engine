@@ -2,6 +2,19 @@
 
 ### Breaking Changes
 
+- **`.N()` now leaves a product of sums FACTORED, like `evaluate()`.** Since
+  0.117.0 `2(x+1)` evaluated to `2(x + 1)` but `.N()` of the same expression
+  still came back `2x + 2`: the numeric route of the `Multiply` handler kept
+  distributing. `.N()` is `evaluate()` with floats, so the two now agree on
+  shape and differ only in the numbers — `√2(x+1).N()` is `1.414… * (x + 1)`,
+  `((a+b)/c)·d` keeps its quotient shape `(d(a + b))/c` on both routes, and a
+  closed constant such as `2.5(√2+1)` still folds to a single float. The same
+  rule now reaches the tuple and tensor arms of the handler on BOTH routes:
+  `(1,2)·(x+1)` is `(x + 1, 2(x + 1))` and `[1,2]·(x+1)` is
+  `[x + 1, 2(x + 1)]` where the components used to be distributed even under
+  `evaluate()`. `Expand` reproduces the previous output; `simplify()` and the
+  internal normalization paths still expand. The values are unchanged.
+
 - **A compiled `Sum`/`Product` now decides its NaN early exit on EFFECTS
   rather than on who supplied the code.** The exit — `if (acc !== acc) return
   NaN;` between terms, valid because NaN absorbs `+` and `*` — used to be
@@ -139,6 +152,16 @@
   is already `NaN` by the time the function sees it.
 
 ### Bug Fixes
+
+- **A product of two infinities could come out with the wrong sign at machine
+  precision.** With `ce.precision = 'machine'`, `x · (-2) · 3.1 · (-∞) · (-∞) ·
+  (y + 1)` evaluated to `+oo · x · (y + 1)` instead of `-oo · x · (y + 1)`. The
+  machine-precision numeric value answered "no sign" for ANY infinity, and the
+  product accumulator read that as positive, so once the running coefficient
+  was `-∞` the next infinity flipped it. The big-number path already returned
+  ±1 for ±∞; the two now agree. The pairwise fold that products without a sum
+  go through masked the bug, which is why it surfaced only alongside a
+  factored sum.
 
 - **`Multiply` gave `~oo` a sign.** `2·~oo` evaluated to `+oo` and `-2·~oo` to
   `-oo`, which contradicted `Negate(~oo)` — that correctly stays `~oo`, so

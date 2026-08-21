@@ -651,6 +651,12 @@ export class Product {
   asNumeratorDenominator(): [Expression, Expression] {
     const ce = this.engine;
     const coef = this.coefficient;
+    // A NaN coefficient absorbs the whole product, as in `asExpression()`.
+    // `mul()` stops accumulating once it sees a NaN operand but leaves the
+    // terms pushed BEFORE it in place, so without this guard a product such
+    // as `(x + 1) · NaN` came back as an inert `NaN * (x + 1)` — which does
+    // not even report `isNaN`, since an unevaluated function node cannot.
+    if (coef.isNaN) return [ce.NaN, ce.One];
     if (coef.isZero) return [ce.Zero, ce.One];
     if (coef.isPositiveInfinity || coef.isNegativeInfinity) {
       const infinity = coef.isPositiveInfinity
@@ -1687,6 +1693,10 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
  * product is exactly as exact as the polynomial it expands to while being
  * smaller — often dramatically so, since expanding multiplies the term count at
  * every factor. `Expand` still opens it and reproduces the old output verbatim.
+ * `mulN`, the handler's `.N()` route, declines the distribution the same way,
+ * so the two routes agree on shape (`2(x+1).N()` is `2(x + 1)`, not
+ * `2x + 2`); and the tuple/tensor arms (`mulTuples`, `mulTensors`) carry the
+ * same rule into the components.
  *
  * The distribution is NOT gone: `mul()` keeps it, because several
  * normalization paths depend on it to reach a fixpoint (sum simplification,
@@ -1733,7 +1743,7 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   // Tensor (matrix/vector) operands follow matrix-product / scalar-scaling
   // semantics rather than the scalar Product machinery.
   if (xs.some((x) => isTensorValue(x))) {
-    const r = mulTensors(ce, xs);
+    const r = mulTensors(ce, xs, false, expand);
     if (r) return r;
   }
 
@@ -1757,7 +1767,7 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   // tuple with a collection component (`2·(1, 0.3n)` → `(2, 0.6n)`); the
   // explicit `PointList` operator — not plain `Tuple` — carries the Desmos
   // list-of-points reading.
-  if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, false);
+  if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, false, expand);
 
   // `expandProducts` does two things: it distributes over sums, and — as a
   // side effect of walking the operands pairwise — it folds the product two at
@@ -1841,6 +1851,26 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
     }
     if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, true);
   }
+  // Same gate as `mulFactored`: `.N()` is `evaluate()` with floats, so a
+  // product of sums must reach the user FACTORED on this route too —
+  // `2(x+1).N()` is `2(x + 1)`, matching `evaluate()`, not `2x + 2`. Only the
+  // DISTRIBUTION is declined; with no reachable sum, `expandProducts` still
+  // runs for its pairwise fold (see `mulImpl` for why skipping it
+  // unconditionally reorders an ordinary numeric fold). A sum that is a
+  // closed constant has already been numericized by the `.N()` map above, so
+  // it is a number literal here and the gate does not see it.
+  //
+  // With a sum kept, the product is assembled as a RATIONAL expression, the
+  // way `mulImpl` does, so a `Divide` factor keeps its quotient shape:
+  // `((a+b)/c)·d` is `(d(a + b))/c`, matching `evaluate()`. The plain
+  // numeric assembly below renders a denominator as a `1/c` FACTOR
+  // (`d · 1/c · (a + b)`), because that is the form `expandProducts` used to
+  // fold away before it was skipped. The two assemblies differ only in how
+  // the coefficient is spelled, and every operand has already been
+  // numericized above, so no exactness is at stake.
+  if (xs.some(hasDistributableSum))
+    return new Product(ce, xs).asRationalExpression();
+
   const exp = expandProducts(ce, xs);
   if (exp) {
     if (exp.operator !== 'Multiply') return exp;
@@ -1864,8 +1894,14 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
 function mulTuples(
   ce: ComputeEngine,
   xs: ReadonlyArray<Expression>,
-  numericApproximation: boolean
+  numericApproximation: boolean,
+  // `false` on the `Multiply` evaluate route (via `mulFactored`), so a
+  // component that is a sum stays factored like a scalar product would:
+  // `(1,2)·(x+1)` evaluates to `(x + 1, 2(x + 1))`. The `.N()` route is
+  // always factored (`mulN`), so the flag only steers the exact route.
+  expand = true
 ): Expression {
+  const multiply = numericApproximation ? mulN : expand ? mul : mulFactored;
   // Any tuple-typed operand counts — including a tuple with a collection
   // component (`(1, 0.3n)` with `n` a list), whose components scale via the
   // ordinary scalar·list broadcast below.
@@ -1882,14 +1918,19 @@ function mulTuples(
 
   // Combine the scalar factors (commutative). `scalars` is non-empty because
   // `mul`/`mulN` short-circuit single-operand calls before reaching here.
-  const scalar = numericApproximation ? mulN(...scalars) : mul(...scalars);
+  const scalar = multiply(...scalars);
 
   // Evaluate each component first (mirrors `mulTensors`): a raw component like
   // `0.3n` with `n` a list must materialize before the scalar product, or the
   // recursive `mul`/`mulN` sees a non-iterable operand and stays inert.
+  // On the exact routes the component product is finished with `.evaluate()`
+  // so the `Multiply` handler's closed-inexact-constant rule applies to each
+  // component as to a scalar product (`0.5 · (π, 1)` is `(1.57…, 0.5)`, like
+  // `0.5 · π`); the `.N()` route has already floated it. See `mulTensors`.
   const components = tuple.ops.map((c) => {
     const cv = numericApproximation ? c.N() : c.evaluate();
-    return numericApproximation ? mulN(scalar, cv) : mul(scalar, cv);
+    const product = multiply(scalar, cv);
+    return numericApproximation ? product : product.evaluate();
   });
   return ce.tuple(...components);
 }
@@ -1921,8 +1962,22 @@ function mulTuples(
 function mulTensors(
   ce: ComputeEngine,
   xs: ReadonlyArray<Expression>,
-  numericApproximation = false
+  numericApproximation = false,
+  // `false` on the `Multiply` evaluate route (via `mulFactored`): a scalar
+  // factor that is a sum is NOT distributed into the cells — `[1,2]·(x+1)`
+  // evaluates to `[x + 1, 2(x + 1)]`, the same rule a scalar product follows.
+  // The `.N()` route is always factored (`mulN`); internal `mul()` callers
+  // keep the expansion.
+  expand = true
 ): Expression | undefined {
+  const multiply = numericApproximation ? mulN : expand ? mul : mulFactored;
+  // A CELL product on the exact routes is finished with `.evaluate()`, so the
+  // `Multiply` handler's closed-inexact-constant rule applies to it exactly as
+  // to a scalar product: `0.5 · [π, 1]` is `[1.57…, 0.5]`, not `[0.5π, 0.5]`.
+  // The `.N()` route has already floated every cell.
+  const multiplyCell = numericApproximation
+    ? multiply
+    : (...xs: ReadonlyArray<Expression>) => multiply(...xs).evaluate();
   // Separate evaluated operands into tensors and scalars, preserving order.
   const tensors: Expression[] = [];
   const scalars: Expression[] = [];
@@ -1962,9 +2017,11 @@ function mulTensors(
   // (broadcast / tuple / Product) path.
   if (tensors.length === 0) return undefined;
 
-  // Combine the scalar factors (these are commutative).
-  let scalar: Expression | null = null;
-  for (const s of scalars) scalar = scalar === null ? s : scalar.mul(s);
+  // Combine the scalar factors (these are commutative). Through `multiply`,
+  // not the `.mul()` method: the method always distributes, which would
+  // open `(x+1)·2` into `2x + 2` before it ever reached a cell.
+  const scalar: Expression | null =
+    scalars.length === 0 ? null : multiply(...scalars);
 
   // Fold the tensors left to right, in order.
   let product: Expression = tensors[0];
@@ -2000,7 +2057,7 @@ function mulTensors(
         const b = ce.expr(nextTensorPacked.at(k) ?? ce.Zero);
         // Use the module-level `mul`/`mulN` helpers (not `.mul()`) so exact
         // elements stay exact under `evaluate()`.
-        elements.push(numericApproximation ? mulN(a, b) : mul(a, b));
+        elements.push(multiply(a, b));
       }
       product = ce.function('List', elements);
       continue;
@@ -2019,17 +2076,23 @@ function mulTensors(
   // Apply the combined scalar factor.
   if (scalar !== null && !isLiteral(scalar, 1)) {
     product = isTensorValue(product)
-      ? scaleTensor(ce, product, scalar)
-      : scalar.mul(product);
+      ? scaleTensor(ce, product, scalar, multiplyCell)
+      : multiply(scalar, product);
   }
   return product;
 }
 
-/** Scale every element of a vector or matrix `tensor` by the scalar `scalar`. */
+/**
+ * Scale every element of a vector or matrix `tensor` by the scalar `scalar`,
+ * multiplying each cell with `multiply` — the route's own product helper
+ * (`mul`, `mulFactored` or `mulN`), so the cells follow the same
+ * factored/expanded and exact/float rule as a scalar product on that route.
+ */
 function scaleTensor(
   ce: ComputeEngine,
   tensor: Expression,
-  scalar: Expression
+  scalar: Expression,
+  multiply: (...xs: ReadonlyArray<Expression>) => Expression
 ): Expression {
   const shape = tensor.shape;
 
@@ -2042,7 +2105,7 @@ function scaleTensor(
     const result: Expression[] = [];
     for (let i = 0; i < shape[0]; i++) {
       const val = ce.expr(packed.at(i + 1) ?? ce.Zero);
-      result.push(scalar.mul(val).evaluate());
+      result.push(multiply(scalar, val));
     }
     return ce.function('List', result);
   }
@@ -2055,7 +2118,7 @@ function scaleTensor(
       const row: Expression[] = [];
       for (let j = 0; j < n; j++) {
         const val = ce.expr(packed.at(i + 1, j + 1) ?? ce.Zero);
-        row.push(scalar.mul(val).evaluate());
+        row.push(multiply(scalar, val));
       }
       rows.push(ce.function('List', row));
     }

@@ -299,19 +299,16 @@ describe('OPERATOR multiply', () => {
       box       = ["Multiply", 2, ["Negate", "x"]]
       canonical = ["Multiply", -2, "x"]
     `));
-  // `evaluate()` leaves a product of sums FACTORED — expanding is `expand()`'s
-  // job, and a factored product is exactly as exact while being smaller. Note
-  // `simplify` still expands (it goes through `mul()`, whose distribution
-  // several normalization paths need), and so does `.N()`.
+  // `evaluate()` and `.N()` leave a product of sums FACTORED — expanding is
+  // `expand()`'s job, and a factored product is exactly as exact while being
+  // smaller. Note `simplify` still expands (it goes through `mul()`, whose
+  // distribution several normalization paths need).
   test('2(x+1)', () =>
     expect(check('2(x+1)')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 2, ["Delimiter", ["Add", "x", 1]]]
       canonical = ["Multiply", 2, ["Add", "x", 1]]
       simplify  = 2x + 2
       eval-auto = 2(x + 1)
-      eval-mach = 2(x + 1)
-      N-auto    = 2x + 2
-      N-mach    = 2x + 2
     `));
   test('2\\pi', () =>
     expect(check('2\\pi')).toMatchInlineSnapshot(`

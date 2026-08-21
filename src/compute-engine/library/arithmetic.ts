@@ -2186,7 +2186,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Impure operands pass their evaluated form so their side effects run
         // once; pure operands keep the raw, substitute-once-guarded path
-        // (Tycho item 46) — see the matching comment in `Add`.
+        // (Tycho item 46) — see the matching comment in `Add`. `mulN` keeps a
+        // product of sums FACTORED exactly as `mulFactored` does below — the
+        // two routes must agree on shape, differing only in floats.
         if (numericApproximation) {
           const r = mulN(
             ...ops.map((op, i) => (op.isPure ? op : evaluated[i]))

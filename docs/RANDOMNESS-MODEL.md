@@ -437,10 +437,13 @@ comprehension, under whatever frame is active then. Wrap the view itself.
 **This is a CLASS of heads, not a short list.** Any head that pairs a
 per-element (or per-cell) callback with `collection.isLazy: () => true` in
 `library/collections.ts` behaves this way when its callback draws. `Map`,
-`Comprehension`, `Tabulate` (and its `Table` alias) and `Filter` have each
-been measured doing so; the signature matches roughly nine heads in total
-(`Scan`, `FlatMap`, `Iterate` and `Fill` among them), and nothing about the
-mechanism singles out the measured four. Treat the property as belonging to
+`Comprehension`, `Tabulate` (and its `Table` alias), `Filter` and `FlatMap`
+have each been measured doing so — `FlatMap` takes its collection FIRST
+(`FlatMap(Range(1, 3), x ↦ [Random()])`), and the swapped spelling does not
+canonicalize, which is why an earlier attempt to measure it read as
+inconclusive. The signature matches roughly nine heads in total (`Scan`,
+`Iterate` and `Fill` among the unmeasured), and nothing about the mechanism
+singles out the measured five. Treat the property as belonging to
 lazy-view-ness, not to the particular names written here — a list of names in
 a document goes stale the moment a head is added.
 

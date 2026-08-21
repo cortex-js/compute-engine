@@ -181,7 +181,12 @@ export class MachineNumericValue extends NumericValue {
   }
 
   sgn(): -1 | 0 | 1 | undefined {
-    if (this.im !== 0 || !Number.isFinite(this.decimal)) return undefined;
+    // Only a non-real or NaN value has no sign. A signed infinity keeps its
+    // sign (`Math.sign(-Infinity)` is `-1`), matching `BigNumericValue.sgn()`.
+    // Answering `undefined` for ±∞ made `Product` read an infinite
+    // coefficient as POSITIVE through its `sgn() ?? 1` fallback, so
+    // `-∞ · +∞` accumulated to `+∞` at machine precision only.
+    if (this.im !== 0 || Number.isNaN(this.decimal)) return undefined;
 
     return Math.sign(this.decimal) as -1 | 0 | 1;
   }
