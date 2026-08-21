@@ -910,6 +910,54 @@ export function couldMatch(a: Type, b: Type): boolean {
   return isSubtype(a, b) || isSubtype(b, a);
 }
 
+/**
+ * The inclusive range of argument counts `sig` accepts; `max` is `Infinity`
+ * for a variadic tail.
+ *
+ * A `+` tail's mandatory occurrences stack on TOP of the optional parameters,
+ * because a call fills the optional slots before the variadic one ever
+ * receives anything: `(a, b?, c+)` needs three arguments before `c` is
+ * satisfied. A `*` tail (`variadicMin` 0) imposes nothing, so the optional
+ * parameters stay optional.
+ *
+ * Mirrors `arityBounds()` in
+ * `compute-engine/boxed-expression/overload.ts`, which is the same reading for
+ * the overload filter; the two cannot share code because this module sits
+ * below the compute-engine layer.
+ */
+/**
+ * The parameter type a signature binds at supplied position `i`, walking
+ * required → optional → variadic; `undefined` past a non-variadic signature's
+ * last parameter.
+ *
+ * Mirrors `paramAt()` in `common/type/instantiate.ts`; kept local so this
+ * module adds no import edge (the package holds a zero-circular-dependency
+ * budget, runtime and type-only alike).
+ */
+function signatureParamAt(
+  sig: FunctionSignature,
+  i: number
+): Type | undefined {
+  const required = sig.args?.length ?? 0;
+  if (i < required) return sig.args![i].type;
+  const optional = sig.optArgs?.length ?? 0;
+  if (i < required + optional) return sig.optArgs![i - required].type;
+  return sig.variadicArg?.type;
+}
+
+function signatureArity(sig: FunctionSignature): { min: number; max: number } {
+  const required = sig.args?.length ?? 0;
+  const optional = sig.optArgs?.length ?? 0;
+  if (sig.variadicArg) {
+    const variadicMin = sig.variadicMin ?? 0;
+    return {
+      min: variadicMin > 0 ? required + optional + variadicMin : required,
+      max: Infinity,
+    };
+  }
+  return { min: required, max: required + optional };
+}
+
 /** True when this signature carries a `where` clause (is a polytype). */
 function isPolytype(t: FunctionSignature): boolean {
   return t.typeParams !== undefined && t.typeParams.length > 0;
@@ -1510,112 +1558,49 @@ export function isSubtype(
     // Check the result match covariantly
     if (!isSubtype(lhs.result, rhs.result)) return false;
 
-    if (lhs.optArgs || lhs.variadicArg) {
-      //
-      // If lhs has optional or variadic arguments, rhs must have them as well
-      //
+    // ARITY: the lhs must accept EVERY call the rhs's type permits, so the
+    // lhs's admissible range must CONTAIN the rhs's. A declared type is a
+    // contract in both directions — it tells callers which calls are legal,
+    // and it constrains what may be stored under that name — so a function
+    // stored where `(integer, string+) -> string` was declared must serve
+    // `f(1, "a", "b")`, a call that declaration permits. Assignment checks
+    // against the contract; it never rewrites it.
+    //
+    // Both bounds matter: too high a minimum fails the rhs's SHORTEST
+    // permitted call, too low a maximum fails its LONGEST. A variadic rhs has
+    // no longest call, so only a variadic lhs can satisfy it — and a `*` lhs
+    // does satisfy a `+` rhs, since `[0, ∞)` covers `[1, ∞)`.
+    const lhsArity = signatureArity(lhs);
+    const rhsArity = signatureArity(rhs);
+    if (lhsArity.min > rhsArity.min || lhsArity.max < rhsArity.max)
+      return false;
 
-      // Check all the required arguments match contravariantly
-      if (rhs.args) {
-        if (!lhs.args) return false;
-        if (lhs.args.length !== rhs.args.length) return false;
-        for (let i = 0; i < rhs.args.length; i++) {
-          if (!isSubtype(rhs.args[i].type, lhs.args[i].type)) return false;
-        }
-      } else if (lhs.args) {
-        return false;
-      }
+    // PARAMETERS, contravariantly, at every position the rhs can supply an
+    // argument. Positions are compared through both signatures' own
+    // required → optional → variadic walk, so the two shapes need not match
+    // structurally: `(number*) -> T` covers `(number, number) -> T` by
+    // answering `number` at positions 0 and 1.
+    const namedPositions = Math.max(
+      (lhs.args?.length ?? 0) + (lhs.optArgs?.length ?? 0),
+      (rhs.args?.length ?? 0) + (rhs.optArgs?.length ?? 0)
+    );
+    for (let i = 0; i < namedPositions; i++) {
+      const rhsParam = signatureParamAt(rhs, i);
+      // Beyond the rhs's last parameter there is no call to satisfy.
+      if (rhsParam === undefined) break;
+      const lhsParam = signatureParamAt(lhs, i);
+      // The arity check above guarantees a parameter here, but a signature
+      // with fewer positions than its own arity range would slip through.
+      if (lhsParam === undefined) return false;
+      if (!isSubtype(rhsParam, lhsParam)) return false;
+    }
 
-      // Check all the optional arguments match contravariantly
-      if (rhs.optArgs) {
-        if (!lhs.optArgs) return false;
-        if (lhs.optArgs.length !== rhs.optArgs.length) return false;
-        for (let i = 0; i < lhs.optArgs.length; i++) {
-          if (!isSubtype(rhs.optArgs[i].type, lhs.optArgs[i].type))
-            return false;
-        }
-      } else if (lhs.optArgs) {
-        return false;
-      }
-
-      // Check the rest argument match contravariantly
-      if (rhs.variadicArg) {
-        if (!lhs.variadicArg) return false;
-        if (lhs.variadicMin != rhs.variadicMin) return false;
-        if (!isSubtype(rhs.variadicArg.type, lhs.variadicArg.type))
-          return false;
-      } else if (lhs.variadicArg) {
-        return false;
-      }
-    } else {
-      //
-      // lhs did not have optional or variadic arguments, so check the arguments that lhs does have against both the required and optional arguments of rhs
-      //
-      if (rhs.args && !lhs.args) {
-        // If rhs has required arguments, lhs must have them as well
-        return false;
-      }
-
-      let i = 0;
-      // A nullary signature has no `args` field at all: treat it as an
-      // empty list rather than crashing on `lhs.args!` (a nullary lhs vs a
-      // variadic rhs used to throw here).
-      const lhsArgs = lhs.args ?? [];
-      // An lhs must not require MORE arguments than a FIXED-ARITY rhs ever
-      // supplies. Such an rhs — no optional parameter, no variadic tail —
-      // promises its callers exactly one arity, and a function needing more
-      // arguments than that cannot stand in for it: `(number, number) ->
-      // number` is not a `(number) -> number`, and `(number) -> number` is
-      // not a `() -> number`. Only the too-FEW direction was refused before,
-      // which made an inline binary callback a strict subtype of a unary
-      // arrow slot and hid it from the arity check there.
-      //
-      // Asked outside the `rhs.args` branch below, because a NULLARY
-      // signature carries no `args` field at all: reading its arity as
-      // "absent" rather than zero is what let a unary lhs pass a `() -> T`
-      // rhs.
-      //
-      // Deliberately limited to a fixed-arity rhs. When rhs carries an
-      // optional or variadic tail, the branches below walk lhs's surplus
-      // arguments against that tail, and whether an lhs must also cover the
-      // tail's WIDEST call — whether `() -> number` satisfies
-      // `(unknown*) -> unknown` — is a separate question this lattice
-      // answers "yes" on purpose (see "Nullary signature vs variadic bound"
-      // in `test/common/types.test.ts`).
-      if (
-        !rhs.optArgs &&
-        !rhs.variadicArg &&
-        lhsArgs.length > (rhs.args?.length ?? 0)
-      )
-        return false;
-      if (rhs.args) {
-        // If lhs doesn't have enough arguments, it is not a subtype
-        if (lhsArgs.length < rhs.args.length) return false;
-        // Check all the required arguments match contravariantly
-        while (i < rhs.args!.length) {
-          if (!isSubtype(rhs.args[i].type, lhsArgs[i].type)) return false;
-          i += 1;
-        }
-      }
-      if (rhs.optArgs) {
-        if (i >= lhsArgs.length) return true;
-        // Check all the optional arguments match contravariantly
-        for (let j = 0; j < rhs.optArgs.length; j++) {
-          if (!isSubtype(rhs.optArgs[j].type, lhsArgs[i].type)) return false;
-          i += 1;
-          if (i >= lhsArgs.length) return true;
-        }
-      }
-      if (rhs.variadicArg) {
-        if (i >= lhsArgs.length && rhs.variadicMin === 0) return true;
-        // Check the remaining arguments match the variadic argument contravariantly
-        if (rhs.variadicMin! > 0 && i + rhs.variadicMin! > lhsArgs.length)
-          return false;
-        while (i < lhsArgs.length) {
-          if (!isSubtype(rhs.variadicArg.type, lhsArgs[i].type)) return false;
-          i += 1;
-        }
-      }
+    // A variadic rhs also supplies arguments PAST its named positions, all of
+    // its tail type; the lhs's own tail is what receives them.
+    if (rhs.variadicArg) {
+      const lhsTail = lhs.variadicArg?.type;
+      if (lhsTail === undefined) return false;
+      if (!isSubtype(rhs.variadicArg.type, lhsTail)) return false;
     }
 
     return true;

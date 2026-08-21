@@ -557,19 +557,28 @@ describe('Signature arity is checked in BOTH directions', () => {
     ).toBe(false);
   });
 
-  it('an optional or variadic tail keeps its leniency', () => {
-    // The tail branches walk an lhs's surplus arguments against the tail, so
-    // the extra parameter is checked against `number?`, not refused outright.
+  it('a tail is not leniency: the lhs must span the whole range', () => {
+    // A declared type is a contract in both directions — it
+    // tells callers which calls are legal AND constrains what may be stored
+    // under that name — so a function stored where `(number, number?)` was
+    // declared must serve `f(1)` as well as `f(1, 2)`.
     expect(
       isSubtype(
         parseType('(number, number) -> number'),
         parseType('(number, number?) -> number')
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isSubtype(
         parseType('(number, number) -> number'),
         parseType('(number*) -> number')
+      )
+    ).toBe(false);
+    // Spanning the range satisfies it.
+    expect(
+      isSubtype(
+        parseType('(number, number?) -> number'),
+        parseType('(number, number?) -> number')
       )
     ).toBe(true);
   });
@@ -584,10 +593,13 @@ describe('Nullary signature vs variadic bound', () => {
       isSubtype(parseType('() -> number'), parseType('(unknown+) -> unknown'))
     ).toBe(false);
   });
-  it('a nullary signature satisfies a `*`-variadic bound (min 0)', () => {
+  it('a nullary signature does NOT satisfy a `*`-variadic bound', () => {
+    // `(unknown*)` permits a call with any number of arguments; a nullary
+    // function serves only the zero-argument one. Only a variadic lhs can
+    // satisfy a variadic rhs.
     expect(
       isSubtype(parseType('() -> number'), parseType('(unknown*) -> unknown'))
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 
@@ -1116,50 +1128,73 @@ describe('isSubtype POSITIVE', () => {
     ).toBe(true);
   });
 
-  it('should match function signature with optional argument', () => {
+  it('a fixed arity does NOT cover an optional tail (must handle the shortest call)', () => {
+    // `(x:integer, z: boolean?)` permits `f(1)`, which a two-parameter
+    // function cannot serve — so it cannot be stored where that type is
+    // declared. A declaration is a contract, and assignment checks against it
+    // rather than rewriting it.
     expect(
       isSubtype(
         parseType('(number, boolean) -> boolean'),
         parseType('(x:integer, z: boolean?) -> boolean')
       )
-    ).toBe(true);
+    ).toBe(false);
+    // Nor does matching the SHORTEST call: `f(1, true)` is permitted too.
     expect(
       isSubtype(
         parseType('(number) -> boolean'),
         parseType('(x:integer, z: boolean?) -> boolean')
       )
+    ).toBe(false);
+    // An lhs that spans the whole range does satisfy it.
+    expect(
+      isSubtype(
+        parseType('(number, boolean?) -> boolean'),
+        parseType('(x:integer, z: boolean?) -> boolean')
+      )
     ).toBe(true);
   });
 
-  it('should match function signature with variadic argument', () => {
+  it('a fixed arity does NOT cover a `*` tail (no longest call to match)', () => {
+    // `(x:integer, z: boolean*)` permits `f(1, true, false)`; a unary function
+    // cannot serve it.
     expect(
       isSubtype(
         parseType('(number) -> boolean'),
         parseType('(x:integer, z: boolean*) -> boolean')
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isSubtype(
         parseType('(number) -> boolean'),
         parseType('(x:integer, z: boolean+) -> boolean')
       )
     ).toBe(false);
+    // Matching the tail's minimum does not help: a `*`/`+` rhs has no longest
+    // call, so no FIXED arity can cover it.
     expect(
       isSubtype(
         parseType('(number, boolean) -> boolean'),
         parseType('(x:integer, z: boolean*) -> boolean')
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isSubtype(
         parseType('(number, boolean) -> boolean'),
         parseType('(x:integer, z: boolean+) -> boolean')
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isSubtype(
         parseType('(number, boolean, boolean) -> boolean'),
         parseType('(x:integer, z: boolean+) -> boolean')
+      )
+    ).toBe(false);
+    // A variadic lhs CAN satisfy a variadic rhs.
+    expect(
+      isSubtype(
+        parseType('(integer, boolean*) -> boolean'),
+        parseType('(x:integer, z: boolean*) -> boolean')
       )
     ).toBe(true);
   });
@@ -1201,34 +1236,36 @@ describe('isSubtype POSITIVE', () => {
     ).toBe(true);
   });
 
-  it('should match a signature with variadic arguments and a single argument', () => {
+  it('a fixed arity does NOT cover a `+` tail, even at its shortest call', () => {
+    // `(integer, string+)` permits `f(1, "a", "b")`. Matching the tail's
+    // MINIMUM is not enough; the lhs must handle every permitted length.
     expect(
       isSubtype(
         parseType('(integer, string) -> string'),
         parseType('(integer, string+) -> string')
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isSubtype(
         parseType('(integer, string) -> string'),
         parseType('(integer, string*) -> string')
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('should match a signature with variadic arguments and two parameters', () => {
+  it('…nor at any other fixed length', () => {
     expect(
       isSubtype(
         parseType('(integer, string, string) -> string'),
         parseType('(integer, string+) -> string')
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isSubtype(
         parseType('(integer, string, string) -> string'),
         parseType('(integer, string*) -> string')
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('should match an union of values', () => {});
@@ -1318,10 +1355,10 @@ describe('isSubtype Tests NEGATIVE', () => {
     );
   });
 
-  it('should match a signature with variadic parameters and no parameters', () => {
+  it('a signature with no tail does not satisfy one with a tail', () => {
     expect(
       isSubtype('(integer) -> string', '(integer, string*) -> string')
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isSubtype('(integer) -> string', '(integer, string+) -> string')
     ).toBe(false);

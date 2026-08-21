@@ -365,38 +365,6 @@ arrow slots could ever be judged, and an unbound operand's type reads `unknown`
 declares lazy operators with arrow slots, not before. (Recorded with reasoning
 in `docs/TYPE-SYSTEM.md`.)
 
-### Does a function have to cover an optional/variadic tail's WIDEST call? (OPEN, type-system design question — opened 2026-08-20)
-
-Signature subtyping now refuses an lhs that requires MORE arguments than a
-FIXED-ARITY rhs supplies, which is the direction that was unsound: an lhs
-needing two arguments cannot stand in for a signature promising callers a
-one-argument call. What is still not asked is the other half of the same rule
-— whether an lhs must also accept the WIDEST call an rhs's optional or
-variadic tail permits. Today it need not: with `lhs = () -> number` and
-`rhs = (unknown*) -> unknown`, `isSubtype` answers `true` even though a caller
-holding the rhs may pass three arguments the lhs cannot take.
-
-This is a genuine fork, not an oversight, which is why it is a question rather
-than a fix:
-
-- **Leave it.** The lattice keeps a permissive reading of a variadic bound: a
-  narrower function satisfies a wider tail. Six assertions in
-  `test/common/types.test.ts` pin this deliberately, one of them named
-  ("Nullary signature vs variadic bound"), and they are the ONLY thing in the
-  suite that depends on it — measured 2026-08-20 by adding
-  `lhs.max >= rhs.max` and running the full suite: 6 failures, all in that one
-  file, nothing else in 29,910 tests.
-- **Tighten it.** `lhs.required <= rhs.required && lhs.max >= rhs.max` becomes
-  the whole rule, matching the standard function-subtyping reading. Those six
-  pins would be rewritten, and a bound spelled `(unknown*) -> unknown` would
-  stop admitting narrower functions — which is what such a bound is usually
-  written to do, so the change is likely to be felt where variadic bounds are
-  used as "any callable".
-
-Nothing is known to be wrong under the current reading; the arity hole that
-motivated the question is closed. If nothing is decided, the permissive
-reading stands and the asymmetry stays documented here.
-
 ### Element-typed comparator arms need multi-variable union arms (OPEN, type-system — opened 2026-08-19)
 
 The ruled `Sort`/`Ordering` slot spelling was

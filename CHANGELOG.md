@@ -2,6 +2,73 @@
 
 ### Breaking Changes
 
+- **A compiled `Sum`/`Product` now decides its NaN early exit on EFFECTS
+  rather than on who supplied the code.** The exit — `if (acc !== acc) return
+  NaN;` between terms, valid because NaN absorbs `+` and `*` — used to be
+  suppressed whenever the body contained caller-supplied source, on the
+  reasoning that such code might count its own calls or mutate shared state.
+  That test asked the wrong question, and got two answers wrong in opposite
+  directions:
+
+  - **An impure operator of the engine's own no longer keeps the exit.** A sum
+    containing `Random()` was skippable, because `Random` is not
+    caller-supplied. Skipping terms draws from the generator fewer times, and a
+    later draw observes that, so `Sum(Random() + n, n=1..31)` now emits no
+    exit. This is the user-visible half of the change: such a sum evaluates
+    every term again, as it did before the exit existed.
+  - **A caller `compile` handler no longer costs the exit by existing.**
+    Whether the handler supplies source or declines for the target at hand,
+    the suppression fired on the handler being present. The operator
+    definition's `pure` / `effects` now governs: a definition declaring no
+    effects keeps the exit, `pure: false` refuses it. A consumer measured ~33x
+    on a 31-term sum from a handler that had explicitly declined.
+
+  The rule is now one sentence — an emission may be skipped when nothing in it
+  has observable effects — with one oracle per spelling: a `functions` entry
+  through its declared or inferred purity, an operator with a caller `compile`
+  handler through its definition, everything else through the effects model.
+  A spelling with no oracle is refused, which is where an `operators` entry
+  (`[op, prec]`, no body and no declaration slot) and a string-valued `vars`
+  symbol land.
+
+  Note the two oracles have deliberately opposite defaults. A `functions`
+  entry must EARN purity — it is inferred from the source, and anything the
+  analysis cannot model is refused — while an operator definition is GRANTED
+  it, since `pure` defaults to true. A declaration is an assertion its author
+  made; a bare source string is not. An operator whose handler emits
+  effectful code while its definition declares none is the one shape this
+  cannot catch, and it is the same mis-declaration that already misleads
+  common-subexpression elimination.
+
+- **A function type must now cover every call its target type permits.**
+  Signature subtyping asked only whether a function had *enough* parameters; it
+  never asked whether it could handle every call the declared type allows. So a
+  name declared `(integer, string+) -> string` accepted a
+  `(integer, string) -> string` function, and the mismatch surfaced later, at a
+  call the declaration explicitly permits:
+
+  ```
+  declare join: (integer, string+) -> string
+  join := narrow          // narrow: (integer, string) -> string — was ACCEPTED
+  join(1, "a", "b")       // permitted by the declaration → unexpected-argument
+  ```
+
+  The error is now raised where the mistake is, at the assignment. A
+  declaration is a contract in both directions — it tells callers which calls
+  are legal, and it constrains what may be stored under that name — and
+  assigning checks against that contract rather than rewriting it. Concretely,
+  a function is a subtype only when it accepts the target's shortest AND
+  longest permitted call, so no fixed-arity function satisfies a `*` or `+`
+  tail (which has no longest call): only a variadic function can.
+
+  This affects storing and substituting a function, not calling one. `+` and
+  `*` still mean one-or-more and zero-or-more at every call site, and **passing**
+  a fixed-arity function to a variadic callback slot is unchanged — that admits
+  when the two arities overlap, which is a different question. The engine
+  already enforced this rule for function LITERALS ("takes 1 parameter(s), but
+  the declared signature accepts 0 or more"); only the named-function path
+  slipped through.
+
 - **A compiled runner's declared return type now covers everything it can
   return.** `run()` was typed `number | ComplexResult`, but a compiled
   predicate returns a `boolean` (`Greater(x, 0)` runs to `true`, never `1`), a
