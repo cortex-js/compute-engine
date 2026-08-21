@@ -657,6 +657,30 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * handler returning `undefined` falls back to the built-in `Which`
      * lowering, coercion and frame-protocol wrapping included.
      *
+     * **Attaching in place is the supported route for EVERY operator the
+     * engine already defines, not only `Which`.** Two things follow from
+     * re-declaring instead, and both are silent:
+     *
+     * - A re-declaration REPLACES the stock `evaluate`/`canonical` handlers.
+     *   Spreading the captured definition (`ce.declare(op, {...orig, compile})`)
+     *   is an attempt to carry them across by hand and is not equivalent —
+     *   attaching to the definition `lookupDefinition` returns keeps them by
+     *   construction, with nothing to carry.
+     * - A re-declared definition is CALLER-SUPPLIED, so every emission
+     *   mentioning that operator becomes unskippable: a compiled `Sum` or
+     *   `Product` over a body containing it loses the NaN early exit it would
+     *   otherwise carry between terms, since the compiler must assume spliced
+     *   source may count its own calls or mutate shared state. The gate keys
+     *   on the handler EXISTING, not on whether it supplies source, so a
+     *   handler that declines for the target at hand costs the exit too. A
+     *   consumer measured ~30x on a 31-term sum from this alone. Attaching in
+     *   place is exempt, because the definition is still the engine's own.
+     *
+     * The evaluate side is NOT symmetric with the decline contract above:
+     * returning `undefined` from an `evaluate` handler leaves the expression
+     * unevaluated rather than falling back, so a handler that means to
+     * delegate must call the captured original explicitly.
+     *
      * Return `undefined` (or an empty string) to fall back to the
      * default compilation (a `null` returned from untyped JavaScript is
      * tolerated and treated the same). See {@link OperatorCompileHandler}.
