@@ -25,6 +25,8 @@ import {
   isString,
 } from '../boxed-expression/type-guards.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
+import { shallowApplicationEffects } from '../boxed-expression/effects-of.js';
+import { isPureComputedEffects } from '../../common/type/effects.js';
 import {
   isPureBuiltinCallback,
   systemScopeBinding,
@@ -355,6 +357,14 @@ export interface CseHarvestOptions {
    * oracle at all — an `operators` entry, a string-valued `vars` symbol — is
    * refused as before, because nothing can vouch for it.
    *
+   * The EFFECTS half of the question is oracle-aware too
+   * (`Harvester.isEffectFreeUnderOracles`): a vouched head's own
+   * contribution counts as pure wherever the head sits — beneath a built-in
+   * operator (`sq(n·x) + 1`) or inside the body of a user-defined callee
+   * (`wrap(t) := sq(t) + 1`). Reading `node.isPure` there would refuse both,
+   * because a signature-only declaration projects unknown effects onto every
+   * application above it.
+   *
    * The definition-based gates are skipped for a caller-mapped head: a name
    * supplied through `functions` need not have an engine operator definition
    * at all, and a signature-only declaration
@@ -580,6 +590,7 @@ class Harvester {
   private readonly userFnMemo = new Map<string, boolean>();
   private readonly calleeVerdictMemo = new Map<string, boolean>();
   private readonly calleeBodyCleanMemo = new Map<Expression, boolean>();
+  private readonly effectFreeMemo = new Map<Expression, boolean>();
   private readonly calleeInProgress = new Set<string>();
   /** Count of neutral (re-entrant) callee edges taken — monotonic, compared
    * before/after a computation to decide whether its result may memoize. */
@@ -1266,8 +1277,13 @@ class Harvester {
     //
     // Applied only under `skippabilityQuery`. CSE's own harvest checks purity
     // at the occurrence-recording site instead, where a `size`/score decision
-    // accompanies it.
-    if (this.skippabilityQuery && node.isPure !== true) return false;
+    // accompanies it. Oracle-aware rather than `node.isPure`: a vouched head
+    // BELOW this node projects unknown effects onto it (`Add(sq(n·x), 1)`
+    // with `sq` declared by signature only), and the oracle's answer for
+    // that head has to reach here for the skip to survive the enclosing
+    // operator.
+    if (this.skippabilityQuery && !this.isEffectFreeUnderOracles(node))
+      return false;
 
     for (const operand of node.ops)
       if (this.isOpaqueCallableOperand(operand)) return false;
@@ -1402,7 +1418,14 @@ class Harvester {
       // provisional-`false` cycle guard would read that in-flight marker and
       // reject the whole body. The dedicated walker applies the same gates
       // with name-level cycle handling instead.
-      result = body.isPure && this.calleeBodyClean(body);
+      //
+      // The effects half is `isEffectFreeUnderOracles`, not `body.isPure`: a
+      // body that applies a signature-only head the caller implements
+      // through `functions` (`wrap(t) := sq(t) + 1`) is impure on the
+      // runtime channel, and only the oracle can say otherwise. Outside the
+      // skippability question the predicate IS `body.isPure`.
+      result =
+        this.isEffectFreeUnderOracles(body) && this.calleeBodyClean(body);
     } finally {
       this.calleeInProgress.delete(id);
     }
@@ -1430,22 +1453,99 @@ class Harvester {
     let result: boolean;
     if (isSymbol(node)) result = !this.isStringVar(node.symbol);
     else if (!isFunction(node)) result = true;
-    else if (this.isOverriddenOperator(node.operator)) result = false;
-    else if (this.hasCallerCompileHandler(node)) result = false;
-    else if (
-      this.isUserFunctionApplication(node)
-        ? !this.isAdmissibleUserFnCallee(node.operator)
-        : node.operatorDefinition === undefined
-    )
-      result = false;
-    else
-      result =
-        !node.ops.some((op) => this.isOpaqueCallableOperand(op)) &&
-        node.ops.every((op) => this.calleeBodyClean(op));
+    else result = this.computeCalleeBodyClean(node);
     // A verdict that leaned on a neutral (re-entrant) callee edge is
     // provisional — same discipline as `calleeVerdictMemo`.
     if (this.calleeNeutralEdges === before)
       this.calleeBodyCleanMemo.set(node, result);
+    return result;
+  }
+
+  /**
+   * The per-application half of {@link calleeBodyClean}: the provenance gates
+   * of `computeEligible`, in its order (a caller `compile` handler wins over a
+   * `functions` entry at emission, so it is judged first), followed by the two
+   * operand gates. Under the skippability question the two provenance
+   * refusals become the same oracle lookups `computeEligible` makes — a
+   * vouched head inside a callee's body is no different from one at the call
+   * site — and outside it they refuse as they always have.
+   */
+  private computeCalleeBodyClean(
+    node: Expression & FunctionInterface
+  ): boolean {
+    if (this.hasCallerCompileHandler(node)) {
+      if (!this.skippabilityQuery) return false;
+      if (this.callerCompileHandlerDef(node)?.pure !== true) return false;
+    }
+    if (this.isOverriddenOperator(node.operator)) {
+      if (!this.skippabilityQuery) return false;
+      if (!this.isPureOverriddenOperator(node.operator)) return false;
+    } else if (this.isUserFunctionApplication(node)) {
+      if (!this.isAdmissibleUserFnCallee(node.operator)) return false;
+    } else if (node.operatorDefinition === undefined) return false;
+    if (node.ops.some((op) => this.isOpaqueCallableOperand(op))) return false;
+    return node.ops.every((op) => this.calleeBodyClean(op));
+  }
+
+  /**
+   * Whether `node` has no observable effect — the effects half of the
+   * skippability question, asked with the caller's purity oracles in hand.
+   *
+   * `node.isPure` is the runtime effect projection, and it is the whole
+   * answer when it says yes. When it says no, the projection may be carrying
+   * `any` up from a head the CALLER implements: a name declared by signature
+   * only (`ce.declare('sq', '(number) -> number')`) and supplied through
+   * `functions` has no body the engine can analyse, so every application of
+   * it — and every operator above one (`Add(sq(n·x), 1)`), and every
+   * user-defined callee whose body applies one (`wrap(t) := sq(t) + 1`) —
+   * projects unknown effects. The oracles exist to answer exactly that
+   * question, so the projection is re-asked per node with their answers
+   * substituted. A head's OWN contribution is what the oracle says for a
+   * caller-mapped operator or a caller `compile` handler, the validated body
+   * for a user-defined callee, and `shallowApplicationEffects` — own effects
+   * plus the latent effects of any operand the operator invokes — for
+   * everything else; the operands are then asked the same question. A
+   * function-valued operand handed to a vouched head is not re-examined
+   * here: that is the opaque-callable-operand gate's job, and every caller
+   * of this predicate applies that gate alongside it.
+   *
+   * Deliberately coarser than the projection where the projection is
+   * precise: a non-invoking position still contributes its operand's
+   * effects, and a forcing position (`ReleaseHold`) is refused outright.
+   * The walk follows the SYNTAX — for `ReleaseHold(h)` with
+   * `h := Hold(Random())` it sees only the pure symbol `h`, while the
+   * projection resolves the binding and strips the quote to find the draw —
+   * so a release node is the one place the two can disagree in the unsound
+   * direction, and the projection's verdict (already "impure" on this
+   * path) stands. Both choices only ever REFUSE more, and only on the path
+   * where `isPure` has already said no.
+   *
+   * Outside the skippability question there are no oracles and the answer is
+   * `node.isPure` itself. Memoized per node object; a verdict that leaned on
+   * a re-entrant callee edge is provisional, same discipline as
+   * `calleeVerdictMemo`.
+   */
+  private isEffectFreeUnderOracles(node: Expression): boolean {
+    if (node.isPure === true) return true;
+    if (!this.skippabilityQuery || !isFunction(node)) return false;
+    if (node.operatorDefinition?.holdClass === 'release') return false;
+    const cached = this.effectFreeMemo.get(node);
+    if (cached !== undefined) return cached;
+    const before = this.calleeNeutralEdges;
+    let ownPure: boolean;
+    if (this.hasCallerCompileHandler(node))
+      ownPure = this.callerCompileHandlerDef(node)?.pure === true;
+    else if (this.isOverriddenOperator(node.operator))
+      ownPure = this.isPureOverriddenOperator(node.operator);
+    else if (this.isUserFunctionApplication(node))
+      ownPure =
+        this.admitPureUserFunctions &&
+        this.isAdmissibleUserFnCallee(node.operator);
+    else ownPure = isPureComputedEffects(shallowApplicationEffects(node));
+    const result =
+      ownPure && node.ops.every((op) => this.isEffectFreeUnderOracles(op));
+    if (this.calleeNeutralEdges === before)
+      this.effectFreeMemo.set(node, result);
     return result;
   }
 

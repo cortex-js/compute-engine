@@ -13967,9 +13967,15 @@ export class BaseCompiler {
    * `functions` entry through `entryIsPure` (declared on the entry, or
    * inferred from its source: `function-purity.ts`), an operator carrying a
    * caller `compile` handler through the `pure`/`effects` declared on its
-   * definition, and everything else through `node.isPure`. A spelling with no
-   * oracle — an `operators` entry, a string-valued `vars` symbol — is refused,
-   * because nothing can vouch for it.
+   * definition, and everything else through `node.isPure`. The three are
+   * read PER NODE, with each oracle's answer standing in for the head it
+   * vouches for (`Harvester.isEffectFreeUnderOracles` in `cse.ts`): a
+   * signature-only declaration implemented through `functions` projects
+   * unknown effects onto every application above it, so `node.isPure` alone
+   * would refuse `sq(n·x) + 1` and `wrap(t) := sq(t) + 1` while admitting the
+   * bare `sq(n·x)`. A spelling with no oracle — an `operators` entry, a
+   * string-valued `vars` symbol — is refused, because nothing can vouch for
+   * it.
    *
    * Purity buys SKIPPING and nothing else. A caller-supplied implementation
    * stays opaque to every pass that would rewrite what is inside it, however

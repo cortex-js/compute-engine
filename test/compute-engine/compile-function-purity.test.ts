@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
 import { inferSourcePurity } from '../../src/compute-engine/compilation/function-purity';
+import { isCseAdmissible } from '../../src/compute-engine/compilation/cse';
 
 /**
  * A caller-supplied `functions` entry normally suppresses the NaN exit a
@@ -292,6 +293,141 @@ describe('the NaN exit is gated on effects, not on provenance', () => {
         { functions: { sq: PURE_SOURCE } }
       )
     ).toBe(0);
+  });
+
+  /**
+   * The oracle's answer has to reach every node above the head it vouches
+   * for. A name declared by signature only and implemented through
+   * `functions` projects UNKNOWN effects onto each of its applications, so
+   * `node.isPure` is `false` for the application, for every built-in
+   * operator above it, and for the body of every user-defined callee that
+   * applies it — and each of those used to refuse the exit while the bare
+   * `sq(n·x)` kept it.
+   */
+  describe('a vouched head keeps the exit wherever it sits', () => {
+    const withSq = { functions: { sq: PURE_SOURCE } };
+    const declareSq = (ce: ComputeEngine) =>
+      ce.declare('sq', '(number) -> number');
+    const define = (ce: ComputeEngine, latex: string) =>
+      ce.parse(latex).evaluate();
+
+    test.each([
+      ['beneath Add', '\\sum_{n=1}^{31}(\\operatorname{sq}(nx)+1)'],
+      ['beneath Sin', '\\sum_{n=1}^{31}\\sin(\\operatorname{sq}(nx))'],
+      ['beneath Multiply', '\\sum_{n=1}^{31}2\\operatorname{sq}(nx)'],
+      [
+        'beneath Add, in a Product',
+        '\\prod_{n=1}^{31}(\\operatorname{sq}(nx)+1)',
+      ],
+    ])('%s', (_label, latex) => {
+      expect(
+        exitsFor((ce) => {
+          declareSq(ce);
+          return ce.parse(latex);
+        }, withSq)
+      ).toBe(30);
+    });
+
+    test('inside the body of a user-defined callee', () => {
+      expect(
+        exitsFor((ce) => {
+          declareSq(ce);
+          define(ce, '\\operatorname{wrap}(t) := \\operatorname{sq}(t) + 1');
+          return ce.parse('\\sum_{n=1}^{31}\\operatorname{wrap}(nx)');
+        }, withSq)
+      ).toBe(30);
+    });
+
+    test('as the whole body of a user-defined callee', () => {
+      expect(
+        exitsFor((ce) => {
+          declareSq(ce);
+          define(ce, '\\operatorname{wrap}(t) := \\operatorname{sq}(t)');
+          return ce.parse('\\sum_{n=1}^{31}\\operatorname{wrap}(nx)');
+        }, withSq)
+      ).toBe(30);
+    });
+
+    test('two callee levels down', () => {
+      expect(
+        exitsFor((ce) => {
+          declareSq(ce);
+          define(ce, '\\operatorname{wrap}(t) := \\operatorname{sq}(t) + 1');
+          define(ce, '\\operatorname{outer}(t) := 2\\operatorname{wrap}(t)');
+          return ce.parse('\\sum_{n=1}^{31}\\operatorname{outer}(nx)');
+        }, withSq)
+      ).toBe(30);
+    });
+
+    // The oracle vouches for the HEAD only; everything else in the body is
+    // still judged on its own, exactly as at a direct call site.
+    test('an IMPURE entry refuses through the callee body', () => {
+      expect(
+        exitsFor(
+          (ce) => {
+            declareSq(ce);
+            define(ce, '\\operatorname{wrap}(t) := \\operatorname{sq}(t) + 1');
+            return ce.parse('\\sum_{n=1}^{31}\\operatorname{wrap}(nx)');
+          },
+          { functions: { sq: '((t) => { count++; return t; })' } }
+        )
+      ).toBe(0);
+    });
+
+    test('an impure built-in beside the vouched head refuses', () => {
+      expect(
+        exitsFor((ce) => {
+          declareSq(ce);
+          define(
+            ce,
+            '\\operatorname{wrap}(t) := \\operatorname{sq}(t) + \\operatorname{Random}()'
+          );
+          return ce.parse('\\sum_{n=1}^{31}\\operatorname{wrap}(nx)');
+        }, withSq)
+      ).toBe(0);
+    });
+
+    test('a second head with no purity oracle refuses', () => {
+      expect(
+        exitsFor(
+          (ce) => {
+            declareSq(ce);
+            ce.declare('other', '(number) -> number');
+            define(
+              ce,
+              '\\operatorname{wrap}(t) := \\operatorname{sq}(t) + \\operatorname{other}(t)'
+            );
+            return ce.parse('\\sum_{n=1}^{31}\\operatorname{wrap}(nx)');
+          },
+          { functions: { sq: PURE_SOURCE, other: OPAQUE_SOURCE } }
+        )
+      ).toBe(0);
+    });
+
+    test('a forcing position over a bound quote is not read as the bare symbol', () => {
+      // `effectsOf` resolves `h` and strips the quote to find the draw; a
+      // walk over the syntax alone would see only the pure symbol `h`. The
+      // gate refuses the release node rather than re-derive that step.
+      // Asked of the gate directly: the JavaScript target has no lowering
+      // for `ReleaseHold`, so a compiled probe would fail closed for the
+      // wrong reason.
+      const ce = new ComputeEngine();
+      ce.assign('h', ce.box(['Hold', ['Random']]));
+      const node = ce.box(['ReleaseHold', 'h']);
+      expect(node.isPure).toBe(false);
+      expect(isCseAdmissible(node, { skippabilityQuery: true })).toBe(false);
+    });
+
+    test('an impure operand beneath a built-in above the vouched head refuses', () => {
+      expect(
+        exitsFor((ce) => {
+          declareSq(ce);
+          return ce.parse(
+            '\\sum_{n=1}^{31}(\\operatorname{sq}(n\\operatorname{Random}())+1)'
+          );
+        }, withSq)
+      ).toBe(0);
+    });
   });
 
   test('purity is read from the ACTIVE definition, not the one the node bound', () => {

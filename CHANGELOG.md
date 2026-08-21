@@ -198,6 +198,21 @@
   "scalar" recursed into a zero-operand product); it is `[(0, 0),
   (0.333…, 0)]`.
 
+- **A compiled `Sum`/`Product` keeps its NaN exit when a caller-supplied
+  function is applied beneath another operator or inside a user-defined
+  callee.** A function declared by signature only and implemented through
+  the `functions` compile option projects unknown effects onto every
+  application of it, so the skippability gate — which lets a `Sum` stop
+  evaluating terms once its accumulator is NaN when nothing in the body has
+  observable effects — kept all 30 exits for `\sum sq(n x)` but none for
+  `\sum (sq(n x) + 1)`, `\sum \sin(sq(n x))`, `\sum 2 sq(n x)`, or
+  `\sum wrap(n x)` with `wrap(t) := sq(t) + 1`: the `functions` entry's
+  purity oracle was consulted only when the vouched head was the whole
+  body. The gate now re-reads the effect projection per node with each
+  oracle's answer standing in for the head it vouches for, so a pure entry
+  keeps the exit wherever the head sits, and an impure entry, an impure
+  built-in beside it, or a second head with no oracle still refuse.
+
 - **A product of two infinities could come out with the wrong sign at machine
   precision.** With `ce.precision = 'machine'`, `x · (-2) · 3.1 · (-∞) · (-∞) ·
   (y + 1)` evaluated to `+oo · x · (y + 1)` instead of `-oo · x · (y + 1)`. The
