@@ -1606,7 +1606,7 @@ describe('runtime signature display is the HONEST declared polytype', () => {
     // string-preserving arm with Strings Phase 1 (a reordering of a string's
     // characters is a string); both arms still display their `where` clause.
     expect(ce.box('Sort').type.toString()).toBe(
-      '((T, order: ((character) any -> unknown) | ((character, character) any -> number)?) -> T where T: string) & ((indexed_collection<T>, order: ((T) any -> unknown) | ((any, any) any -> number)?) -> list<T> where T)'
+      '((T, order: ((character) any -> unknown) | ((character, character) any -> boolean | number)?) -> T where T: string) & ((indexed_collection<T>, order: ((T) any -> unknown) | ((any, any) any -> boolean | number)?) -> list<T> where T)'
     );
   });
 

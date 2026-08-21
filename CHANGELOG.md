@@ -1,5 +1,67 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The deprecated `realOnly` compile option has been REMOVED.** It was an
+  OUTPUT projection applied to a compiled unit's result after the kernel had
+  run — a `{re, im}` collapsed to `re` when the imaginary part was at roundoff
+  scale and to `NaN` otherwise, a top-level boolean became `NaN`, and an array
+  result was projected component-wise. It never selected a lowering, so nothing
+  about which code is emitted changes; only what the runner hands back does.
+
+  The result convention already carries what most callers wanted: a compiled
+  value whose imaginary part is exactly zero comes back as a plain `number`,
+  and a returned `ComplexResult` always has `im !== 0`. Test
+  `typeof v === 'number'` per sample. Where the projection's specific choices
+  mattered, reproduce them at your own value boundary — a `{re, im}` slot, a
+  boolean result, and `~oo` (`{re: Infinity, im: Infinity}`, what a compiled
+  `(-1)!` now returns) all reach the caller unflattened instead of as `NaN`.
+  To forbid promotion and hold the real lane — which `realOnly` never did —
+  pass `mode: 'strict'`.
+
+  `realOnly` is gone from the typed option surface, so a TypeScript caller
+  passing it gets a compile error. An untyped JavaScript caller still gets a
+  one-time console warning naming the removal on both compile routes rather
+  than silently losing the projection.
+
+### Improvements
+
+- **A callback with too MANY parameters is now rejected at a user-declared
+  arrow slot**, the way one with too few already was. With
+  `myOp: ((number) -> number) -> number`, the call
+  `myOp((a, b) |-> a + b)` reported nothing and failed at application; it now
+  carries the same `callback-arity` diagnostic the opposite mismatch gets —
+  "myOp calls its callback with 1 argument (per the declared parameter list);
+  `(a, b) => a + b` declares 2 parameters". This covers a callback written
+  inline and one supplied through a symbol alike, whether the symbol was
+  declared with a signature or inferred from an assigned lambda.
+
+  The check reads the slot arm's admissible range — required, then optional,
+  then a variadic tail's mandatory occurrences — so a slot spelled
+  `((number, number?) -> number)` still accepts both a unary and a binary
+  callback, while a `((number+) -> number)` slot now rejects a nullary one it
+  can never satisfy. At an OVERLOAD set the verdict participates in choosing
+  the arm, so a callback that fits one arm resolves to that arm instead of
+  being reported against a more specific sibling it cannot satisfy. The
+  library's own collection operators are unaffected: their canonical handlers
+  mint the richer per-operator wording before validation runs.
+
+- **Signature subtyping now checks arity in both directions.** A signature
+  requiring MORE arguments than a fixed-arity signature supplies is no longer
+  reported as its subtype: `(number, number) -> number` is not a
+  `(number) -> number`. Only the too-few direction was refused before, which is
+  what let a wrong-arity callback reach an arrow slot unnoticed. A signature
+  whose tail is optional or variadic keeps its existing leniency.
+
+- **`Sort` and `Ordering` declare the comparator result they actually
+  accept.** The comparator arm read `((any, any) any -> number)`, but the
+  evaluator has always also accepted an Elixir-style BOOLEAN comparator (`True`
+  means the first argument sorts first), so the arm is now
+  `((any, any) any -> number | boolean)`. The previous spelling was masked by
+  the arity hole above — a boolean comparator was admitted through the unary
+  sort-KEY arm instead, which also meant `Sort(xs, Less)` type-checked for the
+  wrong reason. Behavior is unchanged; the declared type now matches it.
+
 ## 0.117.0 _2026-08-20_
 
 ### Breaking Changes
@@ -91,11 +153,29 @@
   silent. `Log(x, 0)` also now renders its zero base as a base (`\log_{0}(x)`)
   rather than falling back to the argument-list form.
 
+  The round trip is an equality of CANONICAL expressions, not of bytes or of
+  raw parse trees. Re-serializing is free to choose a different spelling of the
+  same value (`\left[.1,.3\ ...\ 1\right]` comes back as `(0.1..0.3..1)`,
+  `\operatorname{abs}` as `\vert…\vert`, `\sqrt{m}` as `m^{1/2}`), so a
+  byte-stability check reports damage on a bundle where nothing is wrong.
+  Compare with `.isSame()` on the canonical parse. Also beware an assertion
+  that merely looks for a `0` in the output: `Sum(0, i=1..10)` now serializes
+  `\sum_{i=1}^{10}0`, but the upper limit contains a `0` of its own, so
+  "contains a zero" is satisfied by output that dropped the body — the exact
+  defect being tested for. Assert on the reparsed expression, not on the
+  string.
+
 - **A negative subject of a `When` restriction keeps its precedence.**
   `When(-1, cond)` serialized as `-1\left\{cond\right\}`, which reads back as
   `Negate(When(1, cond))` — the negation applied to the restriction instead of
   to its subject. The subject is now parenthesized whenever its own precedence
-  is below that of the restriction.
+  is below that of the restriction. The repaired form is
+  `(-1)\left\{cond\right\}`, which parses back to `When(-1, cond)` at canonical
+  form; a RAW parse of it keeps the parentheses and the unfolded negation
+  (`["When", ["Delimiter", ["Negate", 1]], cond]`), as it does for a
+  parenthesized negative literal anywhere else. The invariant restored here is
+  that the negation sits inside the restriction rather than outside it — check
+  it against the canonical parse, not the raw one.
 
 - **A symbol named after a JavaScript object member no longer misbehaves.**
   Names such as `toString`, `constructor` and `valueOf` collide with members
@@ -163,7 +243,12 @@
   splices caller-supplied source — a `functions`/`operators` entry, a
   string-valued `vars` symbol, an operator with a caller `compile` handler —
   since such code may count its own calls or mutate shared state, so it must run
-  as many times as it did before.
+  as many times as it did before. Note this when checking the change yourself:
+  a `vars` entry whose value is a STRING is spliced as source, which is exactly
+  the carve-out above, so a sum compiled with `vars: { x: 'number' }` emits no
+  early exit at all and looks like the old behavior. Measure with a numeric
+  `vars` value, or with no `vars` map — the free symbol is read from the
+  arguments object either way.
 
 - **A protocol function member read as a field now says so.** `b.span` for a
   `function span(self: Self) -> number` requirement reported

@@ -8002,7 +8002,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'Return the indexes that would sort the collection.',
     complexity: 8200,
     signature:
-      '(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number))?) -> list<integer> where T',
+      '(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<integer> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Ordering', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is
@@ -8045,7 +8045,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // every untyped operand and claim `string` for a call that usually
     // returns a list. A bounded variable with no call-site binding does not.
     signature:
-      '((T, order: (((character) any -> unknown) | ((character, character) any -> number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number))?) -> list<T> where T)',
+      '((T, order: (((character) any -> unknown) | ((character, character) any -> number | boolean))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<T> where T)',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Sort', ops, 1, SORT_SUPPLY),
     // Provable declines only (finite, walkable source required); success is

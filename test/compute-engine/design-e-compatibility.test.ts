@@ -317,6 +317,185 @@ describe('E3 — user-declared slots get the static arity rejection (§12d)', ()
       'CountIf calls its callback with 1 argument (each element of the collection)'
     );
   });
+
+  it('an INLINE literal too wide for a unary user slot rejects the same way', () => {
+    // The mismatch has to be caught in BOTH directions. Subtyping used to
+    // answer only one of them — a signature with MORE required parameters
+    // than the slot's arrow was a strict SUBTYPE of it, so an inline binary
+    // literal sailed past the compatibility gate, which runs only where
+    // subtyping FAILED. Both halves are fixed: `isSubtype` now refuses the
+    // too-many direction at a fixed-arity signature, and the arity verdict is
+    // asked ahead of the subtype question either way
+    // (`arrowSlotArityRejection`, `boxed-expression/validate.ts`), since a
+    // slot arm with an optional or variadic tail still admits a callback
+    // wider than any call it can make.
+    const ce = new ComputeEngine();
+    ce.declare('myOp', {
+      signature: '((number) -> number) -> number',
+      evaluate: (ops) => ops[0],
+    });
+    const e = ce.box(['myOp', ['Function', ['Add', 'a', 'b'], 'a', 'b']]);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain(
+      'myOp calls its callback with 1 argument (per the declared parameter list); `(a, b) => a + b` declares 2 parameters'
+    );
+
+    // The opposite direction, which already worked, is unchanged…
+    ce.declare('myOp2', {
+      signature: '(((number, number) -> number)) -> number',
+      evaluate: (ops) => ops[0],
+    });
+    expect(
+      ce.box(['myOp2', ['Function', 'a', 'a']]).toString()
+    ).toContain('myOp2 calls its callback with 2 arguments');
+    // …and a literal of the arity the slot supplies is still admitted, at
+    // either slot.
+    expect(ce.box(['myOp', ['Function', 'a', 'a']]).isValid).toBe(true);
+    expect(
+      ce.box(['myOp2', ['Function', ['Add', 'a', 'b'], 'a', 'b']]).isValid
+    ).toBe(true);
+  });
+
+  it('a SYMBOL holding a too-wide callback is rejected, like a literal', () => {
+    // The verdict has to be asked ahead of every admission that turns on
+    // `matches(param)`, not just the match-failure branch: a symbol carrying
+    // an INFERRED signature reaches an earlier fast path
+    // (`op.valueDefinition?.inferredType && op.type.matches(param)`), and the
+    // same unsound subtype rule makes its binary type match a unary arrow, so
+    // the callback was admitted there and failed at application instead.
+    const ce = new ComputeEngine();
+    ce.declare('myOp', {
+      signature: '((number) -> number) -> number',
+      evaluate: (ops) => ops[0],
+    });
+    ce.assign('g', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b']));
+    const e = ce.box(['myOp', 'g']);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain(
+      'myOp calls its callback with 1 argument (per the declared parameter list); `g` declares 2 parameters'
+    );
+  });
+
+  it('an OVERLOAD set resolves to the arm that can apply the callback', () => {
+    // The arity verdict has to reach overload FILTERING, not just the final
+    // validation of the arm already chosen. A match at an arrow slot is no
+    // longer a proof that an arm's trial would pass
+    // (`trialGuaranteedToPass`, `overload.ts`): the unsound subtype rule made
+    // the unary-slot arm viable for a binary callback, and being the more
+    // specific arm it WON — so the call reported an arity error even though a
+    // sibling arm accepted the callback.
+    const ce = new ComputeEngine();
+    ce.declare('ov', {
+      signature:
+        '((((number) -> number)) -> number) & ((((number, number) -> number)) -> string)',
+      evaluate: (ops) => ops[0],
+    });
+    const binary = ce.box(['ov', ['Function', ['Add', 'a', 'b'], 'a', 'b']]);
+    expect(binary.isValid).toBe(true);
+    expect(binary.type.toString()).toBe('string');
+    const unary = ce.box(['ov', ['Function', 'a', 'a']]);
+    expect(unary.isValid).toBe(true);
+    expect(unary.type.toString()).toBe('number');
+
+    // The permissive sibling arm wins the same way…
+    ce.declare('ovA', {
+      signature: '((((number) -> number)) -> number) & ((function) -> string)',
+      evaluate: (ops) => ops[0],
+    });
+    expect(
+      ce.box(['ovA', ['Function', ['Add', 'a', 'b'], 'a', 'b']]).type.toString()
+    ).toBe('string');
+
+    // …and when NO arm can apply the callback, the report is still the arity
+    // sentence, not two signatures printed side by side.
+    ce.declare('ov2', {
+      signature: '((((number) -> number)) -> number) & ((string) -> string)',
+      evaluate: (ops) => ops[0],
+    });
+    expect(
+      ce.box(['ov2', ['Function', ['Add', 'a', 'b'], 'a', 'b']]).toString()
+    ).toContain(
+      'ov2 calls its callback with 1 argument (per the declared parameter list); `(a, b) => a + b` declares 2 parameters'
+    );
+  });
+
+  it('a NULLARY literal is a constant callback, never an arity error', () => {
+    // `["Function", 42]` ignores every argument it is applied to (the
+    // historical contract in `function-utils.ts` `invoke`), which is what lets
+    // a constant stand in for a predicate or generator. The user-declared slot
+    // must honor that exemption exactly as the library operators do — and it
+    // does so through the MINT rather than the capability test: the operand's
+    // TYPE reads as zero-arity, so `armArityCapable` finds no overlap, and it
+    // is `callbackArity` (`callback-arity.ts`) that reads a nullary literal as
+    // accepting any supply count and declines to mint. Pinned because that
+    // split is easy to "simplify" into a rejection.
+    const ce = new ComputeEngine();
+    ce.declare('myOp', {
+      signature: '((number) -> number) -> number',
+      evaluate: (ops) => ops[0],
+    });
+    expect(ce.box(['myOp', ['Function', 42]]).isValid).toBe(true);
+    // The library equivalent, unchanged.
+    expect(
+      ce.box(['CountIf', ['Range', 3], ['Function', 'True']]).evaluate().toString()
+    ).toBe('3');
+    // A nullary SYMBOL gets no such exemption: its signature is a contract.
+    ce.declare('nullarySym', '() -> number');
+    expect(ce.box(['myOp', 'nullarySym']).toString()).toContain(
+      'callback-arity'
+    );
+  });
+
+  it('a `+` tail raises the slot arm\'s MINIMUM supply count', () => {
+    // A variadic arm's range is unbounded ABOVE, but its minimum is real: a
+    // `+` tail demands at least one occurrence, and those stack on top of the
+    // optional parameters (`arityBounds`, `overload.ts`). Reading the arm's
+    // required parameters alone reported a minimum of zero, so a callback
+    // that can never be applied was judged capable.
+    const ce = new ComputeEngine();
+    ce.declare('slotPlus', {
+      signature: '(((number+) -> number)) -> number',
+      evaluate: (ops) => ops[0],
+    });
+    ce.declare('nullary', '() -> number');
+    expect(ce.box(['slotPlus', 'nullary']).toString()).toContain(
+      'slotPlus calls its callback with 1 argument (at least, per the declared parameter list); `nullary` declares 0 parameters'
+    );
+    // A callback that CAN take the supplied arguments is untouched.
+    ce.declare('binary', '(number, number) -> number');
+    expect(ce.box(['slotPlus', 'binary']).isValid).toBe(true);
+  });
+
+  it('a literal at an OPTIONAL or VARIADIC slot arm keeps its whole range', () => {
+    // The verdict reads the arm's admissible range (required → optional →
+    // variadic), so widening the slot widens what it accepts: an arity the
+    // slot can supply is never rejected by the new check.
+    const ce = new ComputeEngine();
+    ce.declare('opt', {
+      signature: '(((number, number?) -> number)) -> number',
+      evaluate: (ops) => ops[0],
+    });
+    expect(ce.box(['opt', ['Function', 'a', 'a']]).isValid).toBe(true);
+    expect(
+      ce.box(['opt', ['Function', ['Add', 'a', 'b'], 'a', 'b']]).isValid
+    ).toBe(true);
+    // Past the optional tail: no supply count applies the literal.
+    expect(
+      ce
+        .box(['opt', ['Function', ['Add', 'a', 'b'], 'a', 'b', 'c']])
+        .toString()
+    ).toContain('callback-arity');
+
+    // A VARIADIC arm has no single supply count to word a sentence around,
+    // and its unbounded range never proves incapability: it declines.
+    ce.declare('vari', {
+      signature: '(((number*) -> number)) -> number',
+      evaluate: (ops) => ops[0],
+    });
+    expect(
+      ce.box(['vari', ['Function', ['Add', 'a', 'b'], 'a', 'b']]).isValid
+    ).toBe(true);
+  });
 });
 
 describe('E3 — a MONOMORPHIC overload arm stamps its ground arrow slot', () => {

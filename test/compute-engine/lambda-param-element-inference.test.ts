@@ -1169,6 +1169,14 @@ describe('annotation-as-contract', () => {
  * the wrong arity took a PARTIAL stamp: the first parameter annotated, the
  * rest left bare, a half-written contract on an application that the arity
  * error dominates anyway.
+ *
+ * "Dominates anyway" became true of BOTH mismatch directions only later: a
+ * literal NARROWER than the slot was always rejected outright, but a WIDER
+ * one used to be accepted silently — signature subtyping refuses an lhs with
+ * too few parameters and not one with too many, so a binary literal was a
+ * subtype of a unary slot's arrow. Every case in this block is now rejected
+ * at validation time (`arrowSlotArityRejection`,
+ * `boxed-expression/validate.ts`).
  */
 describe('a wrong-arity literal takes no partial stamp', () => {
   /** The `Typed` wrappers a stamp leaves on the literal at operand 0. */
@@ -1184,11 +1192,16 @@ describe('a wrong-arity literal takes no partial stamp', () => {
     ).toBe('["Function",["Less",2,"a"],["Typed","a","\'integer\'"]]');
   });
 
-  test('a WIDER literal declines the whole stamp', () => {
+  test('a WIDER literal declines the whole stamp, and is rejected', () => {
     const ce = new ComputeEngine();
     ce.declare('g', '(cb: (integer) -> boolean) -> boolean');
+    // `g` applies its callback with one argument, so a binary literal cannot
+    // be applied at all: the arity diagnostic replaces the operand, and no
+    // half-annotated literal survives to carry a partial stamp.
     const e = ce.box(['g', ['Function', ['Greater', 'a', 'b'], 'a', 'b']]);
-    expect(stampedParams(e)).toBe('["Function",["Less","b","a"],"a","b"]');
+    expect(e.isValid).toBe(false);
+    expect(stampedParams(e)).not.toContain('Typed');
+    expect(e.toString()).toContain('callback-arity');
   });
 
   test('an OPTIONAL parameter widens the admissible arity', () => {
@@ -1200,12 +1213,12 @@ describe('a wrong-arity literal takes no partial stamp', () => {
         ce.box(['h', ['Function', ['Greater', 'a', 2], 'a', 'b']])
       )
     ).toBe('["Function",["Less",2,"a"],["Typed","a","\'integer\'"],"b"]');
-    // Three is past the optional one: out of range, no stamp at all.
-    expect(
-      stampedParams(
-        ce.box(['h', ['Function', ['Greater', 'a', 2], 'a', 'b', 'c']])
-      )
-    ).toBe('["Function",["Less",2,"a"],"a","b","c"]');
+    // Three is past the optional one: out of range, no stamp at all — and no
+    // call arity `h` can supply applies the literal, so it is rejected.
+    const wide = ce.box(['h', ['Function', ['Greater', 'a', 2], 'a', 'b', 'c']]);
+    expect(wide.isValid).toBe(false);
+    expect(stampedParams(wide)).not.toContain('Typed');
+    expect(wide.toString()).toContain('callback-arity');
   });
 
   test('a VARIADIC declared tail admits any arity above the required one', () => {

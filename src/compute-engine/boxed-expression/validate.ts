@@ -11,10 +11,7 @@ import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { functionLiteralParameterType } from './function-literal.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import { callbackArityError } from './callback-arity.js';
-import {
-  arityProvablyIncapable,
-  callbackIncompatibility,
-} from '../../common/type/compatibility.js';
+import { callbackIncompatibility } from '../../common/type/compatibility.js';
 import { admissionOf, hasValueComponent } from './value-membership.js';
 import {
   broadcastableBaseMatches,
@@ -27,6 +24,8 @@ import {
 } from '../../common/type/utils.js';
 import {
   diagnoseNoMatch,
+  arityBounds,
+  armArityCapable,
   isRepairableOperatorSymbol,
   joinParamAt,
   overloadArms,
@@ -897,6 +896,76 @@ function paramArrowArms(
 // semantics for no shared code worth the risk.
 
 /**
+ * Rule 2's arity verdict at an arrow-typed slot (Design E §12d): the error to
+ * report when NO arm of the slot supplies an arity the operand can accept,
+ * `undefined` when the slot admits the operand or the reader cannot word a
+ * sentence about it.
+ *
+ * Deliberately independent of subtyping, and asked BEFORE it. Subtyping is
+ * not the relation an arrow slot admits by — Design E admits a callback whose
+ * arity range OVERLAPS the slot's — and it does not decide arity fully in any
+ * case: a slot arm carrying an optional or variadic tail still admits a
+ * callback wider than any call it can make (`(number, number, number) ->
+ * number` is a subtype of `(number, number?) -> number`, since the surplus
+ * parameter is matched against the optional one). A gate consulted only where
+ * matching FAILED therefore never sees those callbacks at all.
+ *
+ * This asymmetry used to be far wider: until signature subtyping gained the
+ * too-MANY-parameters direction for a fixed-arity rhs
+ * (`isSubtype`, `common/type/subtype.ts`), an inline binary callback was a
+ * strict subtype of a plain unary slot and reached application unreported.
+ *
+ * The library's own collection operators never reach this mint — their
+ * canonical handlers produce the richer per-operator wording ("`CountIf` calls
+ * its callback with 1 argument (each element of the collection)…", tuple
+ * hint included) before validation runs. This serves user-declared operators,
+ * whose supply count comes from the slot arms' own arities.
+ *
+ * Declines — returns `undefined`, admitting exactly as before — for an
+ * anonymous operator (no name to word the sentence around), an operand type
+ * carrying free type variables or no readable arity, and any operand that is
+ * provably not function-valued (the ordinary `incompatible-type` report says
+ * the right thing there).
+ */
+function arrowSlotArityRejection(
+  op: Expression,
+  param: Type,
+  operatorName: string | undefined
+): Expression | undefined {
+  if (operatorName === undefined) return undefined;
+  const arms = paramArrowArms(param);
+  if (arms === undefined) return undefined;
+  const opType = widenUnannotatedLiteralParams(op, op.type.type);
+  if (freeTypeVariables(opType).size > 0) return undefined;
+  if (provablyDisjoint(opType, 'function')) return undefined;
+  if (arms.some((arm) => armArityCapable(arm, opType))) return undefined;
+
+  // Word the sentence around the counts the slot actually supplies. A
+  // VARIADIC arm has no single count — its range is unbounded above — so it
+  // contributes its MINIMUM, phrased as such: reaching here means the operand
+  // cannot even accept that minimum (a nullary callback at a `(number+)`
+  // slot), which is the only way an unbounded range proves incapability.
+  const supplies: { count: number; describes: string }[] = [];
+  const seen = new Set<string>();
+  for (const arm of arms) {
+    const { min, max } = arityBounds(arm);
+    const entries: [number, string][] = Number.isFinite(max)
+      ? Array.from({ length: max - min + 1 }, (_, k): [number, string] => [
+          min + k,
+          'per the declared parameter list',
+        ])
+      : [[min, 'at least, per the declared parameter list']];
+    for (const [count, describes] of entries) {
+      const key = `${count}:${describes}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      supplies.push({ count, describes });
+    }
+  }
+  return callbackArityError(op, operatorName, supplies);
+}
+
+/**
  * Compatibility admission at an arrow-typed parameter slot (Design E §3):
  * called from the `!op.type.matches(param)` failure branches — an operand the
  * strict subtype check ADMITS is a fortiori compatible, so this gate only
@@ -949,60 +1018,19 @@ function arrowSlotAdmission(
   // alone under-counted a slot whose own arrow carries an optional or
   // variadic tail (`((number, number?) -> number)`), and the E3 mint then
   // falsely rejected arity-capable callbacks (dual-review finding).
-  const armArityRange = (arm: FunctionSignature): [number, number] => {
-    const req = arm.args?.length ?? 0;
-    const max =
-      arm.variadicArg !== undefined
-        ? Infinity
-        : req + (arm.optArgs?.length ?? 0);
-    return [req, max];
-  };
-  const capableAt = (arm: FunctionSignature): boolean => {
-    const [lo, hi] = armArityRange(arm);
-    // Capable iff SOME call arity satisfies both the slot's range and the
-    // operand's own: the ranges intersect. `arityProvablyIncapable` answers
-    // for a single count; probe the bounds (ranges are contiguous).
-    if (!arityProvablyIncapable(opType, Math.min(lo, hi))) return true;
-    if (hi !== lo && !arityProvablyIncapable(opType, Math.min(hi, lo + 8)))
-      return true;
-    return false;
-  };
   let sawArityCapableArm = false;
   for (const arm of arms) {
-    if (!capableAt(arm)) continue;
+    if (!armArityCapable(arm, opType)) continue;
     sawArityCapableArm = true;
     if (!narrowingPreservesEffects(opType, arm)) continue;
     if (callbackIncompatibility(arm, opType) === undefined) return 'admit';
   }
-  if (!sawArityCapableArm) {
-    // Rule 2's diagnostic for a slot with NO hand-wired arity machinery —
-    // user-declared operators (Design E §12d). The shipped
-    // `callbackArityError` is minted with a supply DERIVED from the slot
-    // arms' own arities; the library's collection operators never reach
-    // this (their canonical handlers minted the richer per-operator wording
-    // BEFORE validation ran). With no operator name to word the sentence,
-    // or an operand arity the expression-level reader cannot confirm,
-    // ADMIT — byte-identical to the pre-E3 behavior.
-    if (operatorName === undefined) return 'admit';
-    // A variadic slot arm has no single supply count to word a sentence
-    // around — and its unbounded range never proves incapability anyway.
-    if (arms.some((arm) => arm.variadicArg !== undefined)) return 'admit';
-    const counts = new Set<number>();
-    for (const arm of arms) {
-      const [lo, hi] = armArityRange(arm);
-      for (let n = lo; n <= hi; n++) counts.add(n);
-    }
-    return (
-      callbackArityError(
-        op,
-        operatorName,
-        [...counts].map((count) => ({
-          count,
-          describes: 'per the declared parameter list',
-        }))
-      ) ?? 'admit'
-    );
-  }
+  // Arity is already settled: every caller asks `arrowSlotArityRejection` the
+  // same question before reaching this gate, so an operand that arrives here
+  // with no arity-capable arm is one the mint declined to word a sentence
+  // about (an anonymous operator, an unreadable operand arity). Admitting it
+  // is what that decline means — byte-identical to the pre-E3 behavior.
+  if (!sawArityCapableArm) return 'admit';
   return ce.typeError(displayParam ?? param, op.type, op);
 }
 
@@ -1220,7 +1248,15 @@ export function validateArguments(
               threadable,
               freshlyInferred,
               stripMissing,
-              { trial: true, armSolution: solution }
+              {
+                trial: true,
+                armSolution: solution,
+                // The arity verdict at an arrow slot is worded around the
+                // operator's name and DECLINES without one, so an unnamed
+                // trial would judge an inapplicable callback admissible and
+                // report the arm viable.
+                operatorName: internals?.operatorName,
+              }
             );
             // `null` = valid, operands unchanged. In trial mode no repair
             // executes, so `substituted` is never set and a non-null result
@@ -1272,9 +1308,17 @@ export function validateArguments(
       }
       const blamed = ops.map((op, idx) => {
         const expected = refuted.get(idx);
-        return expected === undefined
-          ? op
-          : ce.typeError(expected, op.type, op);
+        if (expected === undefined) return op;
+        // When the refuted position is an arrow slot no arm can apply the
+        // callback at, say THAT rather than printing two signatures side by
+        // side: `expected` is the union of the arms' slots, so the arity
+        // verdict reads every arm at once and mints the same sentence a
+        // single-arm call gets ("… calls its callback with 1 argument …;
+        // `(a, b) => a + b` declares 2 parameters").
+        return (
+          arrowSlotArityRejection(op, expected, internals?.operatorName) ??
+          ce.typeError(expected, op.type, op)
+        );
       });
       // Invariant: a call with no selected arm must never come back fully
       // valid. `diagnoseNoMatch` guarantees a non-empty `refuted` whenever an
@@ -1467,6 +1511,24 @@ export function validateArguments(
     if (provisionalIdx.has(idx)) {
       result.push(op);
       deferredIdx.add(result.length - 1);
+      continue;
+    }
+    // Rule 2 (arity) is asked ahead of EVERY admission that turns on
+    // `matches(param)`, because subtyping answers arity in one direction
+    // only: a callback with MORE required parameters than the slot supplies
+    // is a strict subtype of the slot's arrow, so each of those admissions
+    // would otherwise wave it through to fail at application. That is not
+    // hypothetical for the fast paths just below — a symbol holding a binary
+    // lambda reaches them with an INFERRED type that matches a unary arrow
+    // slot. See `arrowSlotArityRejection`.
+    const arityError = arrowSlotArityRejection(
+      op,
+      param,
+      internals?.operatorName
+    );
+    if (arityError !== undefined) {
+      result.push(arityError);
+      isValid = false;
       continue;
     }
     if (op.valueDefinition?.inferredType && op.type.matches(param)) {
@@ -1691,6 +1753,19 @@ export function validateArguments(
       i += 1;
       continue;
     }
+    // Rule 2 (arity) ahead of every `matches(param)` admission — see the
+    // required-param gate.
+    const optArityError = arrowSlotArityRejection(
+      op,
+      param,
+      internals?.operatorName
+    );
+    if (optArityError !== undefined) {
+      result.push(optArityError);
+      isValid = false;
+      i += 1;
+      continue;
+    }
     if (op.valueDefinition?.inferredType && op.type.matches(param)) {
       // There was an inferred type, and it is contravariant with `number`
       // e.g. "any". We'll narrow it down to `number` when we infer later.
@@ -1827,6 +1902,18 @@ export function validateArguments(
       if (provisionalIdx.has(i - 1)) {
         result.push(op);
         deferredIdx.add(result.length - 1);
+        continue;
+      }
+      // Rule 2 (arity) ahead of every `matches(varParam)` admission — see the
+      // required-param gate.
+      const varArityError = arrowSlotArityRejection(
+        op,
+        varParam,
+        internals?.operatorName
+      );
+      if (varArityError !== undefined) {
+        result.push(varArityError);
+        isValid = false;
         continue;
       }
       if (op.valueDefinition?.inferredType && op.type.matches(varParam)) {

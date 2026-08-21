@@ -514,6 +514,67 @@ describe('Collection Type Parser', () => {
   });
 });
 
+describe('Signature arity is checked in BOTH directions', () => {
+  // A function requiring MORE arguments than a FIXED-ARITY signature ever
+  // supplies cannot stand in for it. Only the too-FEW direction used to be
+  // refused, which made an inline binary callback a strict subtype of a unary
+  // arrow slot and hid it from the arity check at that slot.
+  it('too many required parameters refuses a fixed-arity signature', () => {
+    expect(
+      isSubtype(
+        parseType('(number, number) -> number'),
+        parseType('(number) -> number')
+      )
+    ).toBe(false);
+    expect(
+      isSubtype(
+        parseType('(unknown, unknown) -> number'),
+        parseType('(number) -> number')
+      )
+    ).toBe(false);
+  });
+
+  it('a NULLARY signature is a fixed arity of zero', () => {
+    // `() -> T` carries no `args` field at all, so an arity read that treats
+    // "absent" as "unconstrained" let a unary function pass as its subtype.
+    expect(
+      isSubtype(parseType('(number) -> number'), parseType('() -> number'))
+    ).toBe(false);
+    expect(
+      isSubtype(parseType('() -> number'), parseType('() -> number'))
+    ).toBe(true);
+  });
+
+  it('the matching and too-few cases are unchanged', () => {
+    expect(
+      isSubtype(parseType('(number) -> number'), parseType('(number) -> number'))
+    ).toBe(true);
+    expect(
+      isSubtype(
+        parseType('(number) -> number'),
+        parseType('(number, number) -> number')
+      )
+    ).toBe(false);
+  });
+
+  it('an optional or variadic tail keeps its leniency', () => {
+    // The tail branches walk an lhs's surplus arguments against the tail, so
+    // the extra parameter is checked against `number?`, not refused outright.
+    expect(
+      isSubtype(
+        parseType('(number, number) -> number'),
+        parseType('(number, number?) -> number')
+      )
+    ).toBe(true);
+    expect(
+      isSubtype(
+        parseType('(number, number) -> number'),
+        parseType('(number*) -> number')
+      )
+    ).toBe(true);
+  });
+});
+
 describe('Nullary signature vs variadic bound', () => {
   // Regression: a nullary signature has no `args` field, and the
   // signature-subtype rule used to crash on `lhs.args!.length` when the

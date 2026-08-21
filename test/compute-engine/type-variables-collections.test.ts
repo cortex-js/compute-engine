@@ -114,7 +114,7 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // union (the comparator arm grounded to `(any, any)` — at most one union
     // arm may carry a type variable).
     expect(sig(ce, 'Sort')).toBe(
-      '((T, order: ((character) any -> unknown) | ((character, character) any -> number)?) -> T where T: string) & ((indexed_collection<T>, order: ((T) any -> unknown) | ((any, any) any -> number)?) -> list<T> where T)'
+      '((T, order: ((character) any -> unknown) | ((character, character) any -> boolean | number)?) -> T where T: string) & ((indexed_collection<T>, order: ((T) any -> unknown) | ((any, any) any -> boolean | number)?) -> list<T> where T)'
     );
     expect(sig(ce, 'Unique')).toBe(
       '((T) -> T where T: string) & ((collection<T>) -> list<T> where T)'

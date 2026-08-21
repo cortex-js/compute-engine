@@ -242,7 +242,10 @@ function arityAdmits(sig: FunctionSignature, n: number): boolean {
  * and `variadicMin: 1` needs 4 arguments before the variadic slot is
  * satisfied.
  */
-function arityBounds(sig: FunctionSignature): { min: number; max: number } {
+export function arityBounds(sig: FunctionSignature): {
+  min: number;
+  max: number;
+} {
   const required = sig.args?.length ?? 0;
   const optional = sig.optArgs?.length ?? 0;
   if (sig.variadicArg) {
@@ -257,6 +260,27 @@ function arityBounds(sig: FunctionSignature): { min: number; max: number } {
     };
   }
   return { min: required, max: required + optional };
+}
+
+/**
+ * True when a callback of type `opType` could be applied at SOME call arity
+ * the slot arm supplies: the two arity ranges INTERSECT. Both are contiguous,
+ * so this is the ordinary overlap test.
+ *
+ * An operand whose arity cannot be read — a bare `function`, a mixed union —
+ * is conservatively CAPABLE: the check declines rather than guesses.
+ */
+export function armArityCapable(
+  arm: FunctionSignature,
+  opType: Type
+): boolean {
+  const opArms = signatureArms(opType);
+  if (opArms === undefined) return true;
+  const { min: lo, max: hi } = arityBounds(arm);
+  return opArms.some((opArm) => {
+    const { min: opLo, max: opHi } = arityBounds(opArm);
+    return opLo <= hi && lo <= opHi;
+  });
 }
 
 /**
@@ -466,6 +490,23 @@ function trialGuaranteedToPass(
     const param = paramAt(instance, i);
     if (param === undefined) return false;
     if (!op.type.matches(param)) return false;
+    // A match is NOT a proof at an arrow-typed slot NO ARM of which can apply
+    // the callback. Subtyping does not settle arity at such a slot: an arm
+    // with an optional or variadic tail admits a callback wider than any call
+    // it can make (`(number, number, number) -> number` is a subtype of
+    // `(number, number?) -> number`), yet validation rejects that callback as
+    // inapplicable. Proving the trial away on the strength of the match made
+    // the arm viable, and being the more specific one it then WON, so the
+    // call reported an arity error instead of resolving to a sibling arm that
+    // does accept the callback. Only the arity question is asked here: a slot
+    // arm that CAN apply the callback keeps the fast path, so a mismatch
+    // anywhere else in the arrow still proves away exactly as it used to.
+    const slotArms = signatureArms(param);
+    if (
+      slotArms !== undefined &&
+      !slotArms.some((arm) => armArityCapable(arm, op.type.type))
+    )
+      return false;
   }
   return true;
 }

@@ -1561,6 +1561,33 @@ export function isSubtype(
       // empty list rather than crashing on `lhs.args!` (a nullary lhs vs a
       // variadic rhs used to throw here).
       const lhsArgs = lhs.args ?? [];
+      // An lhs must not require MORE arguments than a FIXED-ARITY rhs ever
+      // supplies. Such an rhs — no optional parameter, no variadic tail —
+      // promises its callers exactly one arity, and a function needing more
+      // arguments than that cannot stand in for it: `(number, number) ->
+      // number` is not a `(number) -> number`, and `(number) -> number` is
+      // not a `() -> number`. Only the too-FEW direction was refused before,
+      // which made an inline binary callback a strict subtype of a unary
+      // arrow slot and hid it from the arity check there.
+      //
+      // Asked outside the `rhs.args` branch below, because a NULLARY
+      // signature carries no `args` field at all: reading its arity as
+      // "absent" rather than zero is what let a unary lhs pass a `() -> T`
+      // rhs.
+      //
+      // Deliberately limited to a fixed-arity rhs. When rhs carries an
+      // optional or variadic tail, the branches below walk lhs's surplus
+      // arguments against that tail, and whether an lhs must also cover the
+      // tail's WIDEST call — whether `() -> number` satisfies
+      // `(unknown*) -> unknown` — is a separate question this lattice
+      // answers "yes" on purpose (see "Nullary signature vs variadic bound"
+      // in `test/common/types.test.ts`).
+      if (
+        !rhs.optArgs &&
+        !rhs.variadicArg &&
+        lhsArgs.length > (rhs.args?.length ?? 0)
+      )
+        return false;
       if (rhs.args) {
         // If lhs doesn't have enough arguments, it is not a subtype
         if (lhsArgs.length < rhs.args.length) return false;
