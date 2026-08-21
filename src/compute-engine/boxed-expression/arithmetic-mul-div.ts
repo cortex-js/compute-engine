@@ -2056,8 +2056,10 @@ function mulTensors(
         const a = ce.expr(productTensor.at(k) ?? ce.Zero);
         const b = ce.expr(nextTensorPacked.at(k) ?? ce.Zero);
         // Use the module-level `mul`/`mulN` helpers (not `.mul()`) so exact
-        // elements stay exact under `evaluate()`.
-        elements.push(multiply(a, b));
+        // elements stay exact under `evaluate()`; finished as a cell product
+        // so an inexact element floats an exact-constant one (`[0.5,1]·[π,1]`
+        // is `[1.57…, 1]`), as for a scalar-scaled tensor.
+        elements.push(multiplyCell(a, b));
       }
       product = ce.function('List', elements);
       continue;

@@ -248,6 +248,18 @@ describe('declining the distribution does not change the value', () => {
     expect(
       ce.box(['Multiply', ['Sqrt', 2], ['List', 'Pi', 1]]).evaluate().toString()
     ).toEqual('[sqrt(2) * pi,sqrt(2)]');
+    // The element-wise (Hadamard) vector product follows the same rule.
+    const hadamard = ce.box(['Multiply', ['List', 0.5, 1], ['List', 'Pi', 1]]);
+    expect(hadamard.evaluate().toString()).toMatch(
+      /^\[1\.5707963267948\d*,1\]$/
+    );
+    expect(hadamard.N().toString()).toMatch(/^\[1\.5707963267948\d*,1\]$/);
+    expect(
+      ce
+        .box(['Multiply', ['List', 2, 1], ['List', ['Add', 'x', 1], 1]])
+        .evaluate()
+        .toString()
+    ).toEqual('[2(x + 1),1]');
   });
 });
 

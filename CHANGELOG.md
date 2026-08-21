@@ -12,8 +12,12 @@
   rule now reaches the tuple and tensor arms of the handler on BOTH routes:
   `(1,2)·(x+1)` is `(x + 1, 2(x + 1))` and `[1,2]·(x+1)` is
   `[x + 1, 2(x + 1)]` where the components used to be distributed even under
-  `evaluate()`. `Expand` reproduces the previous output; `simplify()` and the
-  internal normalization paths still expand. The values are unchanged.
+  `evaluate()`. A component product also now honors the closed-inexact-constant
+  rule a scalar product has: `0.5 · [π, 1]`, `0.5 · (π, 1)` and the element-wise
+  `[0.5, 1] · [π, 1]` all evaluate their `π` cell to `1.57…`, as `0.5 · π` does,
+  instead of leaving `0.5π`. `Expand` reproduces the previous output;
+  `simplify()` and the internal normalization paths still expand. The values
+  are unchanged.
 
 - **A compiled `Sum`/`Product` now decides its NaN early exit on EFFECTS
   rather than on who supplied the code.** The exit — `if (acc !== acc) return
