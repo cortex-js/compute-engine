@@ -261,11 +261,28 @@ function assertCompilationOptionsFunctions(value: unknown): void {
   }
 
   for (const [name, fn] of Object.entries(value)) {
-    if (typeof fn !== 'string' && typeof fn !== 'function') {
-      throw new Error(
-        `Invalid compilation option "functions.${name}": expected a string or function`
-      );
+    if (typeof fn === 'string' || typeof fn === 'function') continue;
+    // The descriptor form, which adds a purity declaration to the same
+    // implementation: `{ source, pure? }`. Its `source` carries exactly what
+    // the bare form would, so it is checked with the same test.
+    if (isRecord(fn) && !Array.isArray(fn) && 'source' in fn) {
+      const source = (fn as { source: unknown }).source;
+      if (typeof source !== 'string' && typeof source !== 'function') {
+        throw new Error(
+          `Invalid compilation option "functions.${name}.source": expected a string or function`
+        );
+      }
+      const pure = (fn as { pure?: unknown }).pure;
+      if (pure !== undefined && typeof pure !== 'boolean') {
+        throw new Error(
+          `Invalid compilation option "functions.${name}.pure": expected a boolean`
+        );
+      }
+      continue;
     }
+    throw new Error(
+      `Invalid compilation option "functions.${name}": expected a string, a function, or a { source, pure? } descriptor`
+    );
   }
 }
 

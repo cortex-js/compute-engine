@@ -109,6 +109,74 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A caller-supplied `functions` entry can declare purity, restoring the `Sum`/`Product` NaN exit (RULED and SHIPPED 2026-08-20)
+
+**Ruling (user, 2026-08-20): the caller declares purity, and purity is also
+inferred from the body where it can be.** Both halves shipped the same day;
+this entry records what was decided and the two cases deliberately left
+conservative, so the remainder is not rediscovered as a fresh defect.
+
+The problem it fixed: a compiled `Sum`/`Product` exits as soon as its
+accumulator becomes NaN, and that exit was suppressed for any body splicing
+caller-supplied source, all-or-nothing over the whole body and both arms. One
+`functions` factor anywhere dropped the exit for all 31 terms of
+`\sum_{n=1}^{31} sq(n·x)`, and for the 500-iteration loop form too. Measured
+before the fix, each arm against itself over 20 000 calls: with the exit, a
+NaN input cost 0.208 µs against 0.307 µs for a finite one — the exit paying
+for itself; without it, 0.629 µs against 0.085 µs, a 7.4× penalty on exactly
+the samples that cannot contribute.
+
+Why a declaration rather than a wider default: once the accumulator is NaN the
+sum's VALUE is settled whatever the remaining terms do, so the only thing the
+suppression preserved was the supplied function's SIDE EFFECTS. Flipping the
+default to "assume pure" was rejected — it would silently stop calling a
+helper that draws or counts, and the failure would be invisible.
+
+What shipped (`compilation/function-purity.ts`, plus the plumbing in
+`javascript-target.ts`, `interval-javascript-target.ts`, `cse.ts`,
+`base-compiler.ts`, `types.ts`, `engine-extension-contracts.ts`):
+
+- `functions` accepts a `{ source, pure? }` descriptor beside the bare
+  source-or-function spellings. A declared `pure` is believed, not re-derived.
+- An entry that declares nothing is analysed. The grammar accepted is narrow
+  on purpose — an arrow or function expression whose body uses only its
+  parameters, numeric literals and `Math` reads — and every rejection is
+  conservative, including `Math.random`, a closure over a non-parameter name,
+  and a bare identifier with no body to read.
+- Purity governs SKIPPING only. A caller-supplied implementation stays opaque
+  to CSE and to every pass that rewrites what is inside it, because the
+  emitter receives its operands as text. The relaxation is set on a copy of
+  the harvest options inside `BaseCompiler.isEmissionSkippable`, never on the
+  options the compilation stores, so CSE emission is unchanged.
+
+Two cases stay conservative and are the open remainder:
+
+- **`operators` entries.** The value is an `[op, prec]` tuple with no body to
+  analyse, and carrying a purity declaration there means widening a public
+  tuple type. Not done; a caller wanting the exit should supply the operator
+  through `functions` instead.
+- **String-valued `vars`.** A `vars` string is spliced source that could be a
+  getter, and it names a value rather than a function, so neither the
+  descriptor nor the analysis applies to it as written.
+
+One trap worth keeping: a signature-only declaration
+(`ce.declare('s', '(number) -> number')`) reports `isPure === false` and
+carries no operator definition, so the engine's own admission gates rejected
+it however the caller declared it. That is right for CSE and wrong for
+skipping — when a name is mapped through `functions` it is the caller's source
+that runs — which is why the relaxation skips the definition-based gates for
+exactly that shape. A test that declares the symbol and supplies the body
+through `functions` is the one that catches a regression here
+(`test/compute-engine/compile-function-purity.test.ts`).
+
+Provenance: found while a plotting consumer was attributing a render
+regression. Their path turned out NOT to trigger it — all their compile sites
+pass `{ to: 'javascript' }` with no `functions`/`operators`/`vars`, and on
+their real rows the exit works and 0.117.0 is 4–27× FASTER than 0.115.0, flat
+rather than linear in the term count. So this was a latent breadth question
+throughout, never a live consumer regression, and nothing in it is evidence
+against the `Sum` unroll change itself.
+
 ### `CompilationResult`'s default `R` excludes values the runner really returns (OPEN, needs a ruling — surfaced 2026-08-20 removing `realOnly`)
 
 `CompiledRunner<R>`, `ExpressionRunner<R>`, `LambdaRunner<R>` and
@@ -311,33 +379,6 @@ was still uncommitted in a working tree when measured, so this is "stop
 scoping", not "cause proven landed". The two cautions above about the
 `glsl` `Power`-of-vec hole and the vec-width cap remain accurate and remain
 unmotivated by any consumer.
-
-### A symbol named after an `Object.prototype` member breaks symbol handling (OPEN, correctness — found 2026-08-19 while hardening the compile-target constants tables)
-
-A MathJSON symbol name is an arbitrary string, but several lookups key plain
-JavaScript objects by it, so a name that collides with an inherited
-`Object.prototype` member resolves to the inherited function instead of
-missing. Measured at 0.116.1:
-
-```
-ce.box('toString')                       throws: Cannot read properties of undefined
-ce.symbol('toString')                    boxes as the symbol `Undefined`
-ce.function('Add', [ce.symbol('toString'), ce.number(1)])
-                                         compiles with freeSymbols ["Undefined"]
-```
-
-`constructor` and `valueOf` behave identically. The failure is upstream of
-compilation — `ce.box` throws before any target is consulted — so the fix
-belongs wherever symbol names index a plain object (a null-prototype table, or
-`Object.hasOwn` at the lookup). Note the throw is what currently HIDES the same
-hazard further down: the compile-target constants tables were indexed the same
-way, and were made null-prototype in the same session
-(`JAVASCRIPT_CONSTANTS`, `INTERVAL_JAVASCRIPT_CONSTANTS`, `PYTHON_CONSTANTS`,
-`PYTHON_BOOLEANS`, `GPU_CONSTANTS`), so that hardening cannot be witnessed by a
-test until this entry is fixed.
-
-Low urgency — no consumer has reported it and such a name is unidiomatic in
-mathematical notation — but it is silent wrong behavior, not a decline.
 
 ### LSP navigation: two tracked gaps in the occurrence resolver (OPEN, vscode-epsil — opened 2026-08-19)
 

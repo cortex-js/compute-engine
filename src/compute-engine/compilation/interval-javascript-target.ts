@@ -9,6 +9,7 @@
 
 import type { Expression } from '../global-types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
+import { entrySource } from './function-purity.js';
 import {
   isSymbol,
   isNumber,
@@ -1046,7 +1047,13 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     let preambleImports = '';
 
     if (functions) {
-      for (const [k, v] of Object.entries(functions)) {
+      for (const [k, entry] of Object.entries(functions)) {
+        // `entrySource` unwraps the `{ source, pure? }` descriptor form as well
+        // as the bare spellings. The `pure` half is not read here: purity buys
+        // the NaN early exit in `BaseCompiler.isEmissionSkippable`, and this
+        // target emits no such exit — its `Sum`/`Product` lowering has no
+        // call site for it — so tracking it would be state nothing consults.
+        const v = entrySource(entry);
         if (typeof v === 'function') {
           preambleImports += `const ${k} = ${v.toString()};\n`;
           namedFunctions[k] = k;

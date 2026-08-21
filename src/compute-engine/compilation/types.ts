@@ -8,6 +8,37 @@ import type { Interval, IntervalResult } from '../interval/types.js';
 export type TargetSource = string;
 
 /**
+ * A caller-supplied implementation for one operator, as accepted by the
+ * `functions` compile option.
+ *
+ * The bare spellings — target source text, or a JavaScript function — remain
+ * the common form and behave as they always have: whether the implementation
+ * is pure is INFERRED from its source, never assumed. The descriptor form adds
+ * an explicit declaration for the cases inference cannot reach.
+ *
+ * Purity here means "calling this has no observable effect beyond its return
+ * value". It decides whether a compiled `Sum`/`Product` may stop early once
+ * its accumulator has become NaN: the sum's value is settled at that point, so
+ * the only thing running the remaining terms preserves is this function's side
+ * effects. A declared `pure: true` is believed rather than checked, so
+ * asserting it for a function that draws, logs or counts will drop calls to it.
+ */
+export type CompiledFunctionEntry =
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  | TargetSource
+  | Function
+  | {
+      /** The implementation: target source text, or a JavaScript function. */
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+      source: TargetSource | Function;
+      /**
+       * Whether calling this has no observable effect beyond its return value.
+       * Omitted, it is inferred from the source; asserted, it is believed.
+       */
+      pure?: boolean;
+    };
+
+/**
  * The arithmetic discipline a compilation runs under: how a numeric binding
  * whose static type is wide (`unknown`, `number`, `finite_number`, an
  * unannotated parameter) is shaped, and what happens when a complex-shaped
@@ -1223,9 +1254,25 @@ export interface CompilationOptions<Expr = unknown> {
     | Partial<CompiledOperators>
     | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
 
-  /** Custom function implementations */
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-  functions?: Record<MathJsonSymbol, TargetSource | Function>;
+  /**
+   * Custom function implementations.
+   *
+   * The value is the implementation — target source text or a JavaScript
+   * function — or a descriptor that adds a purity declaration:
+   *
+   * ```typescript
+   * { functions: { s: '((t) => t * t)' } }                       // inferred
+   * { functions: { s: { source: mySpline, pure: true } } }       // asserted
+   * ```
+   *
+   * Purity matters because a compiled `Sum`/`Product` stops as soon as its
+   * accumulator becomes NaN, and that early exit is suppressed for a body
+   * that splices caller-supplied source: such code may count its own calls or
+   * mutate shared state, so running it fewer times would change behavior. An
+   * entry known to have no such effect keeps the exit. See
+   * {@link CompiledFunctionEntry}.
+   */
+  functions?: Record<MathJsonSymbol, CompiledFunctionEntry>;
 
   /**
    * Map a symbol to the target-language source emitted for it (e.g. a GLSL

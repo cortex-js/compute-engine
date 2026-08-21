@@ -1,4 +1,5 @@
 import type { Expression } from '../global-types.js';
+import { entrySource } from './function-purity.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import {
@@ -8907,7 +8908,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // `Object.hasOwn`, not `in`: `in` walks the prototype chain, and this
         // table comes from the CALLER, so we cannot give it a null prototype.
         if (userFunctions && Object.hasOwn(userFunctions, id)) {
-          const fn = userFunctions[id];
+          // `entrySource` unwraps the `{ source, pure? }` descriptor form as
+          // well as the bare spellings. Without it a descriptor matches
+          // neither branch below and falls through to the built-in table,
+          // silently discarding the caller's implementation. The `pure` half
+          // of a descriptor has no meaning here: this target emits no early
+          // exit that could skip a call.
+          const fn = entrySource(userFunctions[id]);
           if (typeof fn === 'string') return fn;
           if (typeof fn === 'function') return fn.name || id;
         }

@@ -1,4 +1,5 @@
 import type { MathJsonSymbol } from '../../math-json/types.js';
+import { entrySource } from './function-purity.js';
 import type { Expression, JSSource } from '../global-types.js';
 import type {
   CompileDiagnostic,
@@ -119,9 +120,15 @@ export function compile<T extends string = 'javascript'>(
         options.target.preamble,
         ...(options.vars ? Object.values(options.vars) : []),
         ...(options.functions
-          ? Object.values(options.functions).map((f) =>
-              typeof f === 'string' ? f : undefined
-            )
+          ? Object.values(options.functions).map((f) => {
+              // Through `entrySource`, so a `{ source, pure? }` descriptor
+              // whose source is a string still has that text scanned for the
+              // `_tv`/`_cse` identifiers this compilation must not reuse. A
+              // bare-object read would map every descriptor to `undefined` and
+              // silently drop the collision check.
+              const source = entrySource(f);
+              return typeof source === 'string' ? source : undefined;
+            })
           : []),
       ];
       options.target.naming = BaseCompiler.newNamingContext(

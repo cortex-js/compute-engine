@@ -5,6 +5,7 @@ import type {
 } from '../global-types.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
+import { entryIsPure, entrySource } from './function-purity.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
 import {
   isSymbol,
@@ -7254,9 +7255,17 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // `toString` would read as a user override that the caller never wrote.
     // `Object.values` below is unaffected — it returns own properties only.
     const namedFunctions: { [k: string]: string } = Object.create(null);
+    // The subset of `namedFunctions` whose implementation has no observable
+    // effect beyond its return value, so an emission that calls it may be
+    // skipped at run time (`BaseCompiler.isEmissionSkippable`). Declared by
+    // the caller or inferred from the source; see `function-purity.ts`. Null
+    // prototype for the same reason `namedFunctions` has one.
+    const pureFunctions = new Set<string>();
 
     if (functions) {
-      for (const [k, v] of Object.entries(functions)) {
+      for (const [k, entry] of Object.entries(functions)) {
+        const v = entrySource(entry);
+        if (entryIsPure(entry)) pureFunctions.add(k);
         if (typeof v === 'function') {
           if (isTrulyNamed(v)) {
             preambleImports += `${v.toString()};\n`;
@@ -7411,6 +7420,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       isOverriddenOperator: (name) =>
         Object.prototype.hasOwnProperty.call(namedFunctions, name) ||
         customOperator(name) !== undefined,
+      // Purity of the ACTIVE lowering, not of the name. An `operators` entry
+      // outranks a `functions` entry at emission, so a name claimed by both
+      // emits the operator mapping — about which nothing is known — and must
+      // not inherit the function entry's purity.
+      isPureOverriddenOperator: (name) =>
+        pureFunctions.has(name) && customOperator(name) === undefined,
       isStringVar: (name) =>
         vars !== undefined && typeof vars[name] === 'string',
       isVarsKey: (name) =>

@@ -13533,12 +13533,14 @@ export class BaseCompiler {
     options: {
       enabled?: boolean;
       isOverriddenOperator?: (name: string) => boolean;
+      isPureOverriddenOperator?: (name: string) => boolean;
       isStringVar?: (name: string) => boolean;
       isVarsKey?: (name: string) => boolean;
     } = {}
   ): void {
     const harvestOptions: CseHarvestOptions = {
       isOverriddenOperator: options.isOverriddenOperator,
+      isPureOverriddenOperator: options.isPureOverriddenOperator,
       isStringVar: options.isStringVar,
       isVarsKey: options.isVarsKey,
       // PURE user-function applications are admitted at the root too (item 120
@@ -13909,15 +13911,21 @@ export class BaseCompiler {
    * — under a guard that short-circuits it — without the skip being
    * observable other than through the value it saves computing.
    *
-   * An emission is skippable when nothing in it is caller-supplied source: a
-   * `functions`/`operators` entry, a symbol backed by a string-valued `vars`
-   * entry, or an operator carrying a caller-supplied `compile` handler splices
-   * code this compiler never sees, which is free to count its own calls, log,
-   * or mutate shared state — so running it fewer times is a change of
-   * behavior, not an optimization. That is the same provenance question
-   * `isCseAdmissible` answers for collapsing several emissions into one, and
-   * it is asked here in the same form, including its transitive check of a
-   * user-defined callee's body.
+   * An emission is skippable when nothing in it is caller-supplied source
+   * whose effects are unknown: a `functions`/`operators` entry, a symbol
+   * backed by a string-valued `vars` entry, or an operator carrying a
+   * caller-supplied `compile` handler splices code this compiler never sees,
+   * which is free to count its own calls, log, or mutate shared state — so
+   * running it fewer times is a change of behavior, not an optimization. That
+   * is the same provenance question `isCseAdmissible` answers for collapsing
+   * several emissions into one, and it is asked here in the same form,
+   * including its transitive check of a user-defined callee's body.
+   *
+   * The exception is a `functions` entry whose implementation has been
+   * established to have no such effects — declared `pure` by the caller, or
+   * inferred from its source (`function-purity.ts`). Skipping one of those is
+   * unobservable by definition, so it does not block the guard, even though it
+   * remains opaque to every pass that would rewrite what is inside it.
    *
    * `varyingNames` are the names bound differently across the repetitions
    * being emitted (an unrolled binder's indices); they must not resolve
@@ -13929,8 +13937,20 @@ export class BaseCompiler {
     varyingNames: ReadonlyArray<string>,
     target: CompileTarget<Expression>
   ): boolean {
-    const admission = BaseCompiler.cseAdmission(target, new Set(varyingNames));
-    if (admission === undefined) return false;
+    const base = BaseCompiler.cseAdmission(target, new Set(varyingNames));
+    if (base === undefined) return false;
+    // A caller-supplied implementation established to be pure is skippable
+    // even though it stays opaque to CSE: the two questions differ. CSE asks
+    // whether a pass may rewrite or bind subexpressions INSIDE the emission,
+    // and the answer is no regardless of purity, because the emitter receives
+    // its operands as text. Skipping asks only whether not running it at all
+    // is observable, which purity answers. Setting the relaxation HERE, on a
+    // copy of the stored options, rather than in the options the compilation
+    // records, keeps CSE proper on exactly the behavior it had.
+    const admission: CseHarvestOptions = {
+      ...base,
+      treatPureOverridesAsEligible: true,
+    };
     return nodes.every((node) => isCseAdmissible(node, admission));
   }
 

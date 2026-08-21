@@ -51,6 +51,51 @@
 
 ### Improvements
 
+- **A `functions` entry can now be declared pure, and a compiled `Sum` over it
+  stops at the first NaN again.** A compiled `Sum`/`Product` exits as soon as
+  its accumulator becomes NaN, since NaN absorbs both `+` and `*` and no
+  remaining term can change the answer. That exit was suppressed for any body
+  splicing caller-supplied source — a `functions`/`operators` entry, a
+  string-valued `vars` symbol, an operator with a caller `compile` handler —
+  because such code may count its own calls, log, or mutate shared state. The
+  suppression was all-or-nothing: ONE caller-supplied factor anywhere in the
+  body dropped the exit for every term, and for the scalar loop arm too.
+
+  Note what the skipped terms could still change. Once the accumulator is NaN
+  the sum's VALUE is settled whatever the remaining terms do, so the only thing
+  running them preserved was the supplied function's SIDE EFFECTS. A caller who
+  knows there are none can now say so:
+
+  ```typescript
+  compile(expr, { functions: { s: { source: mySpline, pure: true } } });
+  ```
+
+  The `functions` option accepts a `{ source, pure? }` descriptor beside the
+  bare source-or-function spellings it always took. A declared `pure` is an
+  assertion and is believed rather than re-derived, so asserting it for a
+  helper that draws or counts will drop calls to it; `pure: false` pins the
+  conservative behavior.
+
+  **An entry that declares nothing is analysed instead**, so the common
+  arithmetic helper needs no annotation: a source that is an arrow or function
+  expression whose body uses only its parameters, numeric literals and an
+  allowlist of `Math` members is taken as pure. It calls nothing else — not a
+  parameter (`(f) => f(x)` is rejected, since `f` is whatever the caller
+  passed at run time), and not a `Math` member outside the allowlist (`Math`
+  is an ordinary mutable object, so `Math.audit` may be anything). Also
+  rejected: `Math.random`, whose two calls disagree; a closure over an outer
+  binding (`(t) => t * scale` mentions a name that is not a parameter); and a
+  bare name with no body to read, which can only be declared. The grammar is
+  small and explicitly enumerated rather than a JavaScript semantics check,
+  which is what keeps the rejections safe; a missed helper costs the early
+  exit and nothing else.
+
+  Purity governs only whether an emission may be SKIPPED. A caller-supplied
+  implementation stays opaque to every pass that would rewrite what is inside
+  it — common-subexpression elimination included — because the emitter
+  receives its operands as text and may drop, repeat or defer them. Values are
+  unchanged in every arm.
+
 - **A callback with too MANY parameters is now rejected at a user-declared
   arrow slot**, the way one with too few already was. With
   `myOp: ((number) -> number) -> number`, the call

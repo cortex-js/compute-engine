@@ -320,6 +320,42 @@ export interface CseHarvestOptions {
   /** Does this operator name resolve through a caller-supplied `functions` or
    * `operators` entry? Such a mapping splices live source. */
   readonly isOverriddenOperator?: (name: string) => boolean;
+  /**
+   * Of the names `isOverriddenOperator` answers for, which have been
+   * established to have no observable effect beyond their return value —
+   * declared `pure` by the caller, or inferred from the supplied source
+   * (`function-purity.ts`)?
+   *
+   * This module never consults it: for CSE's own question the subtree below a
+   * caller-mapped node stays OPAQUE whether or not the implementation is pure,
+   * because the emitter receives its operands as text and may drop, repeat or
+   * defer them, so no pass may rewrite or bind anything inside it. The flag is
+   * carried here for the separate question `BaseCompiler.isEmissionSkippable`
+   * asks — whether a whole emission may be skipped — where purity, not
+   * opacity, is the property that matters.
+   */
+  readonly isPureOverriddenOperator?: (name: string) => boolean;
+
+  /**
+   * Treat an application of a PURE caller-mapped head as eligible, rather than
+   * refusing it for its provenance.
+   *
+   * Off for CSE's own harvest, and set only by
+   * `BaseCompiler.isEmissionSkippable`, because the two questions differ. CSE
+   * asks whether a pass may rewrite or bind subexpressions inside the
+   * emission; a caller-supplied emitter receives its operands as text and may
+   * drop, repeat or defer them, so the answer stays no whatever the
+   * implementation does. Skipping asks only whether NOT RUNNING the emission
+   * at all is observable, which is exactly what purity answers.
+   *
+   * Under the flag such a node is eligible when its operands are: the
+   * definition-based gates below are skipped for it, since a name supplied
+   * through `functions` need not have an engine operator definition at all —
+   * a signature-only declaration (`ce.declare('s', '(number) -> number')`) is
+   * the ordinary case, and it is the caller's source that runs.
+   */
+  readonly treatPureOverridesAsEligible?: boolean;
+
   /** Is this symbol backed by a *string*-valued `vars` entry? (Non-string
    * `vars` are baked constants and are safe.) */
   readonly isStringVar?: (name: string) => boolean;
@@ -513,6 +549,8 @@ export function harvestCse(
 class Harvester {
   private readonly engine: ComputeEngine;
   private readonly isOverriddenOperator: (name: string) => boolean;
+  private readonly isPureOverriddenOperator: (name: string) => boolean;
+  private readonly treatPureOverridesAsEligible: boolean;
   private readonly isStringVar: (name: string) => boolean;
   private readonly isVarsKey: (name: string) => boolean;
   private readonly admitPureUserFunctions: boolean;
@@ -563,6 +601,10 @@ class Harvester {
   ) {
     this.engine = root.engine as ComputeEngine;
     this.isOverriddenOperator = options.isOverriddenOperator ?? (() => false);
+    this.isPureOverriddenOperator =
+      options.isPureOverriddenOperator ?? (() => false);
+    this.treatPureOverridesAsEligible =
+      options.treatPureOverridesAsEligible === true;
     this.isStringVar = options.isStringVar ?? (() => false);
     this.isVarsKey = options.isVarsKey ?? (() => false);
     this.admitPureUserFunctions = options.admitPureUserFunctions === true;
@@ -1146,13 +1188,35 @@ class Harvester {
     // than a set of unemittable candidates.
     if (node.operator === 'Error') return false;
 
-    if (this.isOverriddenOperator(node.operator)) return false;
     // A caller-supplied per-operator `compile` handler is the definition-level
     // twin of a `functions` entry: `BaseCompiler.compileExpr` consults it
     // before any built-in mapping and splices whatever source it returns, while
     // the definition itself defaults to `pure: true`. A built-in definition's
     // handler is exempt (see `hasCallerCompileHandler`).
+    //
+    // Checked BEFORE the pure-override branch below, not after: a handler wins
+    // over a `functions` entry at emission, so a name carrying both would
+    // otherwise have the handler's source blessed by the entry's purity.
     if (this.hasCallerCompileHandler(node)) return false;
+
+    if (this.isOverriddenOperator(node.operator)) {
+      // See `treatPureOverridesAsEligible`: a pure caller-mapped head is
+      // eligible for the skippability query and for nothing else.
+      if (
+        !this.treatPureOverridesAsEligible ||
+        !this.isPureOverriddenOperator(node.operator)
+      )
+        return false;
+      // The same two operand gates the default branch applies. A function-
+      // valued operand is opaque whatever the head is — purity of the callee
+      // says nothing about a callback it is handed — and every operand must be
+      // eligible in its own right, since skipping the call skips them too.
+      for (const operand of node.ops)
+        if (this.isOpaqueCallableOperand(operand)) return false;
+      for (const operand of node.ops)
+        if (!this.isEligible(operand)) return false;
+      return true;
+    }
     // A user-defined function application is admissible only where the
     // harvest opts in (`admitPureUserFunctions` — both compiler harvest
     // routes) and its resolved callee's body validates
