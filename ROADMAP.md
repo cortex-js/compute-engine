@@ -149,45 +149,33 @@ does not reach a consumer who writes it that way. Found by the Codex leg of the
 dual review on the skippability change; the `body.isPure` root cause was found
 by instrumenting after the first fix failed to move the measurement.
 
-### A `compile` handler that DECLINES still costs the `Sum`/`Product` NaN exit (OPEN, needs a ruling — measured 2026-08-21)
+### A `compile` handler that declines no longer costs the NaN exit (RESOLVED 2026-08-21 by the effects rule)
 
-A compiled `Sum`/`Product` exits as soon as its accumulator becomes NaN. The
-exit is suppressed for a body that splices caller-supplied source, and one of
-the three spellings that triggers it is an operator carrying a caller-supplied
-`compile` handler. `Harvester.hasCallerCompileHandler` (`compilation/cse.ts`)
-answers that question with `typeof ownDef?.compile === 'function'`, memoized
-per operator NAME. It never invokes the handler.
+Recorded as open earlier the same day, and resolved by the change that
+replaced the skippability gate's PROVENANCE test with an EFFECTS test rather
+than by a fix aimed at it. Kept as a short entry because the original symptom
+is a natural thing to re-report.
 
-So a handler that DECLINES — returns `undefined`, which is the documented way
-to fall back to the built-in lowering — suppresses the exit anyway. In that
-case the emitted code is entirely ours: no caller source was spliced, so there
-is no call count the suppression could be protecting. Measured on a 31-term
-sum over `At`, with the handler declining for the target at hand, a consumer
-paid ~33x for exactly this.
+The symptom was: `Harvester.hasCallerCompileHandler` answered with
+`typeof ownDef?.compile === 'function'`, so a handler that DECLINES — returns
+`undefined`, the documented way to fall back to the built-in lowering —
+suppressed the exit for the whole sum even though the emitted code was
+entirely the engine's own. A consumer measured ~33x on a 31-term sum from a
+handler that had explicitly declined for the target at hand.
 
-The gate cannot simply call the handler to find out: invoking it during
-harvest would run caller code at analysis time, and the answer is per-node and
-per-target rather than per-name. The two honest options:
+It is now the operator definition's declared effects that decide, so whether
+the handler declines is no longer the question. Measured on
+`Sum(At(R, k), k=1..31)` with a handler installed by re-declaration:
 
-- **Record it during emission.** `BaseCompiler.compileExpr` already knows
-  whether the handler returned source for this node; the skippability query
-  could consult that instead of the handler's existence. More plumbing, and
-  the harvest currently runs before the emission it would need to observe.
-- **Leave it**, and accept that attaching any handler to an operator costs the
-  exit wherever that operator appears in a big-operator body.
+| handler | definition | exits |
+| --- | --- | --- |
+| declines (`undefined`) | pure (default) | 30 |
+| declines (`undefined`) | `pure: false` | 0 |
+| supplies source | pure (default) | 30 |
 
-No live consumer is affected: the plotting consumer that found this converted
-to the in-place attach route, which is exempt (see below) and closed both its
-arms. This is recorded because the next consumer to re-declare an operator
-will hit the same 30x with no diagnostic.
-
-Related and already fixed by documentation, not code: attaching a handler by
-RE-DECLARING the operator is what makes it caller-supplied, while writing it
-onto the definition `lookupDefinition` returns is exempt, since that
-definition is still the engine's own. Re-declaring also silently replaces the
-stock `evaluate`/`canonical` handlers. Both consequences are now stated on the
-`compile?: OperatorCompileHandler` doc block in `types-definitions.ts`, which
-previously described the in-place route only in the context of `Which`.
+The remaining open question in this family is a different one — the rule is
+not transitive through a user-defined function body — and it has its own entry
+above.
 
 ### A caller-supplied `functions` entry can declare purity, restoring the `Sum`/`Product` NaN exit (RULED and SHIPPED 2026-08-20)
 
