@@ -98,7 +98,9 @@ describe('NON-FINITE TYPING CONVENTION', () => {
 
     test('negative controls: the non-finite factor must be REAL, finite factors keep their sign obligation', () => {
       // `∞·i = ~oo`, not a signed infinity — `isFinite === false` does not
-      // imply real.
+      // imply real. The VALUE is pinned separately below ("~oo takes no sign
+      // from a factor"); here the claim is only that the TYPE cannot be
+      // `non_finite_number`, which admits ±∞ alone.
       expect(typeOf(['Multiply', 'ImaginaryUnit', 'PositiveInfinity'])).toBe(
         'number'
       );
@@ -262,12 +264,29 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(v(['Multiply', 2, 'ComplexInfinity'])).toBe('~oo');
       expect(v(['Multiply', -2, 'ComplexInfinity'])).toBe('~oo');
       expect(v(['Multiply', 'ImaginaryUnit', 'ComplexInfinity'])).toBe('~oo');
-      // A real ±∞ turned in a non-real direction (`∞·i`) is NOT covered here:
-      // the comment on the negative-control test above reads it as `~oo`,
-      // while `imaginary-unit-spelling.test.ts` pins its `evaluate()` to
-      // `NaN` and calls that long-standing and deliberate. The two disagree,
-      // and settling it is a separate question from the undirected-factor
-      // rule pinned here.
+      // A real ±∞ turned in a non-real direction lands on the same single
+      // point at infinity: the product is infinite and has no real direction
+      // left, which is what `~oo` represents. Any non-real factor does it,
+      // not just `i`.
+      expect(v(['Multiply', 'PositiveInfinity', 'ImaginaryUnit'])).toBe('~oo');
+      expect(v(['Multiply', 'NegativeInfinity', 'ImaginaryUnit'])).toBe('~oo');
+      expect(v(['Multiply', 'PositiveInfinity', ['Complex', 2, 3]])).toBe(
+        '~oo'
+      );
+      expect(v(['Multiply', 'NegativeInfinity', ['Complex', 2, -3]])).toBe(
+        '~oo'
+      );
+      // The infinity does not have to be a literal, and the non-real factor
+      // does not have to come second: a non-real COEFFICIENT turns an
+      // evaluated real infinity off the real line just as squarely, and the
+      // sign rule cannot express that (`sgn()` of a non-real coefficient is
+      // undefined, which reads as positive).
+      expect(v(['Multiply', 'ImaginaryUnit', ['Ln', 0]])).toBe('~oo');
+      expect(v(['Multiply', ['Ln', 0], 'ImaginaryUnit'])).toBe('~oo');
+      expect(v(['Multiply', ['Complex', 2, 3], ['Ln', 0]])).toBe('~oo');
+      // The control: the same `ln(0)` keeps its sign against a REAL factor.
+      expect(v(['Ln', 0])).toBe('-oo');
+      expect(v(['Multiply', 2, ['Ln', 0]])).toBe('-oo');
       // The indeterminate form is untouched, and so are the SIGNED infinities:
       // only an undirected factor skips the sign rule.
       expect(v(['Multiply', 0, 'ComplexInfinity'])).toBe('NaN');
@@ -279,6 +298,43 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(v(['Multiply', 2, 'PositiveInfinity'])).toBe('+oo');
       expect(v(['Multiply', -2, 'PositiveInfinity'])).toBe('-oo');
       expect(v(['Multiply', -2, 'NegativeInfinity'])).toBe('+oo');
+    });
+
+    test('~oo absorbs a sum, including one holding a real infinity', () => {
+      // `Add` recognizes `~oo` by VALUE. It used to select it by asking
+      // whether the term typed `complex`, which stopped selecting anything
+      // once `~oo` moved to `number` — and the signed-infinity counters that
+      // then took over track only real ±∞, so `∞ + ~oo` dropped the `~oo`
+      // term and answered `+oo`.
+      const v = (expr: any) => ce.box(expr).evaluate().toString();
+      expect(v(['Add', 2, 'ComplexInfinity'])).toBe('~oo');
+      expect(v(['Add', 'PositiveInfinity', 'ComplexInfinity'])).toBe('~oo');
+      expect(v(['Add', 'NegativeInfinity', 'ComplexInfinity'])).toBe('~oo');
+      // The route that made this reachable from ordinary input: the inner
+      // product is `~oo` now, where it used to be NaN.
+      expect(
+        v([
+          'Add',
+          'PositiveInfinity',
+          ['Multiply', 'ImaginaryUnit', 'PositiveInfinity'],
+        ])
+      ).toBe('~oo');
+      // Controls: two REAL infinities keep their own rules.
+      expect(v(['Add', 'PositiveInfinity', 'NegativeInfinity'])).toBe('NaN');
+      expect(v(['Add', 'PositiveInfinity', 2])).toBe('+oo');
+    });
+
+    test('the numeric-value scalar overloads agree with the boxed route', () => {
+      // `i.mul(Infinity)` goes through the SCALAR overload of `mul`, which
+      // does its own component arithmetic and never reaches the general
+      // complex path — so it needs its own rule and its own pin, or it
+      // computes `0 · ∞` for the real part and answers NaN while the boxed
+      // `Multiply` answers `~oo`.
+      const i = ce.I as unknown as { _value: { mul(x: number): unknown } };
+      expect(String(i._value.mul(Infinity))).toBe('~oo');
+      expect(String(i._value.mul(-Infinity))).toBe('~oo');
+      // A finite scalar is untouched.
+      expect(String(i._value.mul(2))).toBe('2i');
     });
 
     test('every spelling of ~oo agrees', () => {
@@ -477,7 +533,11 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       // irrelevant, and a non-literal member does not protect it.
       for (const expr of [
         ['Divide', 1, ['Multiply', 3, ['Abs', ['Tuple', 1, 2]]]],
-        ['Divide', 1, ['Multiply', ['Rational', 1, 2], ['Abs', ['Tuple', 1, 2]]]],
+        [
+          'Divide',
+          1,
+          ['Multiply', ['Rational', 1, 2], ['Abs', ['Tuple', 1, 2]]],
+        ],
         ['Divide', 'x', ['Multiply', 3, ['Abs', ['Tuple', 1, 2]]]],
         ['Divide', 1, ['Multiply', 3, ['Abs', ['Tuple', ['Cos', 't'], 2]]]],
       ])

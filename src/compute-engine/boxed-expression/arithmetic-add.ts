@@ -864,7 +864,18 @@ export class Terms {
     // If we added as we go, we would get 0.25.
     const numericValues: NumericValue[] = [];
     for (const term of terms) {
-      if (term.type.is('complex') && term.isInfinity) {
+      // `~oo` absorbs the whole sum: adding anything to the single undirected
+      // point at infinity leaves it there, and it must be caught HERE, before
+      // the signed-infinity counters below — those track only real ±∞ and
+      // would otherwise return `+oo` for `∞ + ~oo`, silently dropping the
+      // `~oo` term.
+      //
+      // The test is on the VALUE, not the type: `~oo` types `number` (the
+      // non-finite typing convention admits an undirected infinity at the top
+      // type only), so a `complex` type test — which is what this guard used —
+      // no longer selects it. An infinity with a non-zero imaginary part is
+      // exactly the undirected one: a real ±∞ has `im === 0`.
+      if (term.isInfinity && isNumber(term) && term.im !== 0) {
         this.terms = [{ term: ce.ComplexInfinity, coef: [] }];
         return;
       }

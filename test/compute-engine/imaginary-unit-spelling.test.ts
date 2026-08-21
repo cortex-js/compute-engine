@@ -149,8 +149,11 @@ describe('imaginary unit: the interned value is exact', () => {
    * infinite component: `Multiply(+∞, i)` collapsed to `NaN` at
    * canonicalization while `Multiply(i, +∞)` stayed symbolic. Infinities are
    * excluded from folding (see the canonicalization contract), so both
-   * operand orders must keep the product symbolic. `evaluate()` → NaN is the
-   * long-standing behavior on every route and is unchanged.
+   * operand orders must keep the product symbolic.
+   *
+   * `evaluate()` answers `~oo`: the product is infinite with no real direction
+   * left, and the engine's single point at infinity represents exactly that.
+   * It is not the indeterminate form, which is reserved for `0 · ∞`.
    */
   test('a product of an infinity and i stays symbolic in both orders', () => {
     for (const [a, b] of [
@@ -164,8 +167,8 @@ describe('imaginary unit: the interned value is exact', () => {
       const e = ce.box(['Multiply', a, b] as any);
       expect(e.operator).toBe('Multiply');
       expect(e.isNaN).not.toBe(true);
-      // `evaluate()` is the indeterminate form, on every route
-      expect(e.evaluate().json).toBe('NaN');
+      // `evaluate()` reaches the one point at infinity, on every route
+      expect(e.evaluate().json).toBe('ComplexInfinity');
     }
   });
 

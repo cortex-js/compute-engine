@@ -261,7 +261,16 @@ export class Product {
             // disagree. An infinity with a non-zero imaginary part is exactly
             // the undirected one: a real ±∞ has `im === 0`, and a value like
             // `∞ + i` (finite imaginary part) is not `isInfinity` at all.
-            if (isNumber(term) && term.im !== 0) {
+            //
+            // A NON-REAL coefficient reaches the same place from the other
+            // side: it turns a real ±∞ off the real line, and the product
+            // keeps no sign either (`i · ln(0)` is `~oo`, not `-oo`). The
+            // signed rule below cannot express that — `sgn()` of a non-real
+            // coefficient is `undefined`, which it reads as positive.
+            if (
+              (isNumber(term) && term.im !== 0) ||
+              this.coefficient.im !== 0
+            ) {
               this.coefficient = this.engine._numericValue({
                 re: Infinity,
                 im: Infinity,

@@ -217,34 +217,6 @@ rather than linear in the term count. So this was a latent breadth question
 throughout, never a live consumer regression, and nothing in it is evidence
 against the `Sum` unroll change itself.
 
-### Two test files disagree on what `∞ · i` should evaluate to (OPEN, needs a ruling — found 2026-08-21)
-
-`ce.box(['Multiply', 'PositiveInfinity', 'ImaginaryUnit']).evaluate()` answers
-`NaN` today. Two artifacts in the suite read that differently, and both are
-deliberate:
-
-- `test/compute-engine/imaginary-unit-spelling.test.ts` PINS the `NaN`, in a
-  test whose comment calls it "the indeterminate form, on every route" and
-  "long-standing behavior ... unchanged".
-- `test/compute-engine/non-finite-typing.test.ts` states the opposite in prose
-  — "`∞·i = ~oo`, not a signed infinity" — but only asserts the product's
-  TYPE, which is `number` either way, so the disagreement never fails a test.
-
-The mathematics favors `~oo`: the engine models a single, undirected point at
-infinity, and `∞ · i` is infinite with a non-real direction, not indeterminate.
-Only `0 · ∞` is genuinely indeterminate, and that case answers `NaN`
-separately. Against that, the `NaN` is pinned by a test that says it means to
-be.
-
-The related rule for an UNDIRECTED factor was settled on 2026-08-21 and is not
-in question: `2·~oo`, `-2·~oo` and `i·~oo` are all `~oo`, since `~oo` takes no
-sign or direction from a factor. This entry is only about a factor that is a
-real ±∞.
-
-Whichever way it is ruled, the losing artifact should change in the same pass —
-either the pinned `NaN` or the prose that contradicts it — so the two stop
-disagreeing.
-
 ### Cross-term CSE could partition a region by index-dependence (OPEN, design note — deferred from the `Sum` unroll round, 2026-08-19)
 
 A `Sum`/`Product` with compile-time-constant bounds and at most 100 terms

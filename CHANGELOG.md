@@ -57,8 +57,27 @@
   its factors: all three are now `~oo`. One neighbouring case went with it:
   `i·~oo` answered `NaN`, because the general complex product computed
   `∞·0 − ∞·1`. The indeterminate form `0·~oo` is still `NaN`, and the signed
-  infinities are untouched (`-2·∞ = -oo`). `∞·i` — a real infinity turned in a
-  non-real direction — is deliberately unchanged and still `NaN`.
+  infinities are untouched (`-2·∞ = -oo`).
+
+- **A real infinity turned in a non-real direction is `~oo`, not `NaN`.**
+  `∞·i` evaluated to `NaN`, as did `∞·(2+3i)` and every other product of a
+  real ±∞ with a factor that has a non-zero imaginary part: the general
+  complex product computes `∞·0` for the real part and lands on the
+  indeterminate form. Such a product is infinite with no real direction left,
+  which is precisely what the single point at infinity represents, so it is
+  now `~oo`. The rule reads from either side: a non-real COEFFICIENT does the
+  same to an evaluated real infinity, so `i·ln(0)` is `~oo` rather than `-oo`.
+  `0·∞` remains the genuine indeterminate form at `NaN`, and a real factor
+  still keeps the signed rule (`-2·∞ = -oo`, `2·ln(0) = -oo`).
+
+- **A sum holding `~oo` alongside a real infinity kept the wrong one.**
+  `∞ + ~oo` evaluated to `+oo` and `-∞ + ~oo` to `-oo`, discarding the `~oo`
+  term; both are `~oo`, since the undirected point at infinity absorbs the
+  sum. `Add` selected `~oo` by asking whether a term typed `complex`, which
+  stopped selecting anything once `~oo` moved to `number`, leaving the
+  signed-infinity counters — which track only real ±∞ — to decide. It now
+  tests the value. Two real infinities are unaffected (`∞ + -∞` is still
+  `NaN`).
 
 - **`Gamma` at a non-positive integer returned a large finite number when
   compiled.** `Gamma(-2)` compiled without constant folding ran to

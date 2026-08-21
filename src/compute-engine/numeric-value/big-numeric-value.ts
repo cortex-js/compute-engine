@@ -302,6 +302,19 @@ export class BigNumericValue extends NumericValue {
       return this.clone({ re: other.bignumRe ?? other.re, im: other.im });
     }
     if (typeof other === 'number') {
+      // A non-real value scaled by a ±∞ SCALAR is `~oo`, for the same reason the
+      // NumericValue path below gives: the product is infinite with no real
+      // direction left. Without this the component arithmetic computes `0 · ∞`
+      // for the real part of `i · ∞` and the whole value collapses to NaN. The
+      // other overloads have to say it themselves — they never reach that path.
+      if (
+        !this.isNaN &&
+        this.im !== 0 &&
+        !Number.isFinite(other) &&
+        !Number.isNaN(other)
+      )
+        return this.clone({ re: Infinity, im: Infinity });
+
       if (this.im === 0) return this.clone(this.decimal.mul(other));
 
       return this.clone({
@@ -310,6 +323,19 @@ export class BigNumericValue extends NumericValue {
       });
     }
     if (other instanceof BigDecimal) {
+      // A non-real value scaled by a ±∞ SCALAR is `~oo`, for the same reason the
+      // NumericValue path below gives: the product is infinite with no real
+      // direction left. Without this the component arithmetic computes `0 · ∞`
+      // for the real part of `i · ∞` and the whole value collapses to NaN. The
+      // other.toNumber() overloads have to say it themselves — they never reach that path.
+      if (
+        !this.isNaN &&
+        this.im !== 0 &&
+        !Number.isFinite(other.toNumber()) &&
+        !Number.isNaN(other.toNumber())
+      )
+        return this.clone({ re: Infinity, im: Infinity });
+
       if (this.im === 0) return this.clone(this.decimal.mul(other));
 
       return this.clone({
@@ -346,10 +372,22 @@ export class BigNumericValue extends NumericValue {
     // every product, so `NaN · ~oo` is NaN, not `~oo`. The receiver's own NaN
     // is re-tested here rather than relied on from an earlier guard, because
     // only one of the two numeric-value lanes returns early on it.
+    //
+    // The same reasoning reaches a REAL ±∞ turned in a non-real direction:
+    // `∞ · i` is infinite with no real direction left, and the one point at
+    // infinity is exactly what represents that, so it is `~oo` rather than
+    // the indeterminate NaN the general formula below produces from `∞·0`.
+    // A signed real factor keeps the signed rule — `2 · ∞` is `+oo` — because
+    // it does not move the product off the real line.
     if (
       !this.isNaN &&
       !other.isNaN &&
-      (this.isComplexInfinity || other.isComplexInfinity)
+      (this.isComplexInfinity ||
+        other.isComplexInfinity ||
+        ((this.isPositiveInfinity || this.isNegativeInfinity) &&
+          other.im !== 0) ||
+        ((other.isPositiveInfinity || other.isNegativeInfinity) &&
+          this.im !== 0))
     )
       return this.clone({ re: Infinity, im: Infinity });
 
