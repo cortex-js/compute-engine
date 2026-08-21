@@ -8916,7 +8916,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       constant: (id) =>
         id === 'ImaginaryUnit' ? `${v2}(0.0, 1.0)` : constants[id],
       var: (id) => {
-        if (vars && id in vars) return vars[id] as string;
+        // Own-property test — see the `vars` lookup in `javascript-target.ts`:
+        // `in` finds `Object.prototype` members on a caller-supplied map.
+        if (vars && Object.hasOwn(vars, id)) return vars[id] as string;
         if (id === 'ImaginaryUnit') return `${v2}(0.0, 1.0)`;
         if (id in constants) return constants[id];
         // Returning `undefined` lets BaseCompiler fold an assigned value /

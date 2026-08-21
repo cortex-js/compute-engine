@@ -27,6 +27,7 @@ import {
   INVISIBLE_OP_PRECEDENCE,
   MULTIPLICATION_PRECEDENCE,
   SymbolTable,
+  newSymbolIds,
 } from './types.js';
 import type { ParseDiagnostic } from '../types-kernel-serialization.js';
 import { tokenize, tokensToString } from './tokenizer.js';
@@ -474,12 +475,12 @@ export class _Parser implements Parser {
 
   symbolTable: SymbolTable = {
     parent: null,
-    ids: {},
+    ids: newSymbolIds(),
   };
 
   pushSymbolTable(): void {
     this._symbolTableGen += 1;
-    this.symbolTable = { parent: this.symbolTable, ids: {} };
+    this.symbolTable = { parent: this.symbolTable, ids: newSymbolIds() };
   }
 
   popSymbolTable(): void {

@@ -188,6 +188,29 @@ import type {
  * would read as "the target inlines this" and drop a genuine input from
  * `freeSymbols`.
  */
+/**
+ * The source that reads free symbol `id` off the vars object at run time.
+ *
+ * Normally a plain member access (`_.x`). A symbol whose NAME collides with an
+ * `Object.prototype` member needs an own-property guard: the vars object is
+ * supplied by the caller and is an ordinary object, so a missing `toString`
+ * reads the INHERITED function instead of `undefined` — `toString + 1`
+ * evaluated to the string "function toString() { [native code] }1" where every
+ * other missing symbol yields `NaN`. The guard restores that behavior; it is
+ * emitted only for the colliding names, so ordinary symbols keep the bare
+ * access.
+ */
+function varsObjectAccess(id: string): string {
+  if (!Object.hasOwn(Object.prototype, id)) return `_.${id}`;
+  // `Object.prototype.hasOwnProperty.call`, not `Object.hasOwn`: this text
+  // becomes part of the emitted `.code` artifact, which the caller may run on
+  // a host far older than the Node that compiled it (`Object.hasOwn` is
+  // ES2022). The compiler's OWN lookups use `Object.hasOwn` freely.
+  return `(Object.prototype.hasOwnProperty.call(_, ${JSON.stringify(
+    id
+  )}) ? _.${id} : undefined)`;
+}
+
 const JAVASCRIPT_CONSTANTS: Record<string, string> = {
   __proto__: null as never,
   Pi: 'Math.PI',
@@ -7311,7 +7334,13 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         // A string `vars` value is JS source spliced in as-is (the live-path
         // contract: `{ s: '_.s' }` keeps `s` a runtime argument even when it
         // has an assigned value). A non-string value is a constant to bake.
-        if (vars && id in vars) {
+        // Own-property test, not `in`: a caller's `vars` map is an ordinary
+        // object, so `in` also finds `Object.prototype` members. A symbol
+        // named `toString` would then take this branch with the inherited
+        // FUNCTION as its value and splice `undefined` into the emitted
+        // source (`JSON.stringify` of a function), instead of falling
+        // through to the free-symbol lookup below.
+        if (vars && Object.hasOwn(vars, id)) {
           const v = vars[id];
           return typeof v === 'string' ? v : JSON.stringify(v);
         }
@@ -7332,7 +7361,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         if (result !== undefined) return result;
         if (unknowns.includes(id)) {
           varsObjectRefs.add(id);
-          return `_.${id}`;
+          return varsObjectAccess(id);
         }
         // An assigned value / declared constant: returning `undefined` lets
         // BaseCompiler fold it (the way evaluate() does) rather than emitting a
@@ -7343,7 +7372,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         // the surface expression — can miss it. Emit the vars-object lookup
         // anyway, not a bare global. (`freeSymbols` on the result lists it.)
         varsObjectRefs.add(id);
-        return `_.${id}`;
+        return varsObjectAccess(id);
       },
       preamble: (preamble ?? '') + preambleImports,
       iterationBudget,

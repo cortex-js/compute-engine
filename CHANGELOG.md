@@ -1,5 +1,30 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **A symbol whose name matches an `Object.prototype` member no longer reads
+  that member.** A MathJSON symbol name is an arbitrary string, but several
+  lookups keyed plain JavaScript objects by it, so `toString`, `constructor`,
+  `valueOf` or `__proto__` found an inherited value instead of missing. Three
+  consequences, all fixed:
+
+  - `ce.parse('\\mathrm{toString} + 1')` **threw** a `TypeError`. The LaTeX
+    parser's scope chain answered "declared" for a name it had never seen and
+    handed back the inherited function as the symbol's type.
+  - A compiled expression read a MISSING symbol of such a name as the
+    inherited member: `toString + 1` returned the string
+    `"function toString() { [native code] }1"`, where every other missing
+    symbol yields `NaN`. A caller-supplied `vars` map was also consulted with
+    `in` rather than an own-property test, on all four targets.
+  - `\\mathrm{__proto__}` resolved as a known **unit**, because the unit
+    tables answered `Object.prototype` for that key and the lookup tests its
+    result for truthiness. `\\sum_{\\mathrm{__proto__}=1}^{3}
+    \\mathrm{__proto__}` silently lost its index and evaluated to
+    `3·__proto__` instead of `6`.
+
+  Ordinary symbol names are unaffected, and the emitted code is unchanged for
+  them — the own-property guard is emitted only for a colliding name.
+
 ### Breaking Changes
 
 - **The deprecated `realOnly` compile option has been REMOVED.** It was an

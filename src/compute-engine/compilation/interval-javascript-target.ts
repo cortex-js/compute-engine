@@ -173,6 +173,19 @@ function compileIntervalFold(
  * would read as "the target inlines this" and drop a genuine input from
  * `freeSymbols`.
  */
+/** See `varsObjectAccess` in `javascript-target.ts` — the same own-property
+ * guard, for the interval target's own vars-object emission. */
+function intervalVarsAccess(id: string): string {
+  if (!Object.hasOwn(Object.prototype, id)) return `_.${id}`;
+  // `Object.prototype.hasOwnProperty.call`, not `Object.hasOwn`: this text
+  // becomes part of the emitted `.code` artifact, which the caller may run on
+  // a host far older than the Node that compiled it (`Object.hasOwn` is
+  // ES2022). The compiler's OWN lookups use `Object.hasOwn` freely.
+  return `(Object.prototype.hasOwnProperty.call(_, ${JSON.stringify(
+    id
+  )}) ? _.${id} : undefined)`;
+}
+
 const INTERVAL_JAVASCRIPT_CONSTANTS: Record<string, string> = {
   __proto__: null as never,
   Pi: '_IA.point(Math.PI)',
@@ -789,7 +802,10 @@ function collapseIntervalInput(value: unknown): unknown {
   if (hasIntervalBounds(value))
     return (Number(value.lo) + Number(value.hi)) / 2;
   if (isRecord(value)) {
-    const out: Record<string, unknown> = {};
+    // Prototype-free: `out['__proto__'] = v` on an ordinary object invokes the
+    // inherited setter instead of creating an own key, so a variable named
+    // `__proto__` was dropped from the copy entirely and read as unsupplied.
+    const out: Record<string, unknown> = Object.create(null);
     for (const [k, v] of Object.entries(value))
       out[k] = collapseIntervalInput(v);
     return out;
@@ -809,7 +825,10 @@ function processInput(input: unknown): unknown {
 
   // Object with properties - process recursively
   if (isRecord(input)) {
-    const result: Record<string, unknown> = {};
+    // Prototype-free — see `collapseIntervalInput`: an ordinary object cannot
+    // carry an own `__proto__` key, so the caller's value for a variable of
+    // that name would be silently lost in this copy.
+    const result: Record<string, unknown> = Object.create(null);
     for (const [key, value] of Object.entries(input)) {
       result[key] = processInput(value);
     }
@@ -1055,10 +1074,16 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
           ? namedFunctions[id]
           : INTERVAL_JAVASCRIPT_FUNCTIONS[id],
       var: (id) => {
-        if (vars && id in vars) return vars[id] as string;
+        // Own-property test: a caller's `vars` map is a plain object, so
+        // `in` finds `Object.prototype` members and a symbol named
+        // `toString` would read the inherited FUNCTION as its spliced source.
+        if (vars && Object.hasOwn(vars, id)) return vars[id] as string;
         const constant = INTERVAL_JAVASCRIPT_CONSTANTS[id];
         if (constant !== undefined) return constant;
-        if (unknowns.includes(id)) return `_.${id}`;
+        // See `varsObjectAccess` in `javascript-target.ts`: a name that
+        // collides with an `Object.prototype` member needs an own-property
+        // guard, or a missing symbol reads the inherited function.
+        if (unknowns.includes(id)) return intervalVarsAccess(id);
         // An assigned value / declared constant: returning `undefined` lets
         // BaseCompiler fold it (see the JavaScript target) rather than emitting
         // a bare, dangling reference for a symbol that `expr.unknowns` omits.
@@ -1066,7 +1091,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         // No value: a genuinely free symbol, possibly reachable only through a
         // folded value (so absent from `unknowns`). Emit the vars-object lookup
         // rather than a bare, dangling reference.
-        return `_.${id}`;
+        return intervalVarsAccess(id);
       },
       preamble: (preamble ?? '') + preambleImports,
       // Opt in to compiling calls to user-defined function literals (`f(x) :=

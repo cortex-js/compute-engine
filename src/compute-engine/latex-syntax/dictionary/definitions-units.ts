@@ -163,6 +163,10 @@ const UNIT_BLOCKLIST = new Set(['d']);
  * `normalizeUnitText` re-parses the result through the DSL path.
  */
 const UNIT_ALIASES: Record<string, string> = {
+  // Prototype-free: `UNIT_ALIASES[w] ?? w` would otherwise hand back
+  // `Object.prototype` for the word `__proto__` (`??` does not fire on a
+  // non-nullish value) and splice its string coercion into the unit text.
+  __proto__: null as never,
   // Length
   'inch': 'in',
   'inches': 'in',

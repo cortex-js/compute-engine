@@ -53,6 +53,12 @@ interface UnitEntry {
 
 /** Map from prefix symbol to its power-of-10 multiplier. */
 const SI_PREFIXES: Record<string, number> = {
+  // Prototype-free: these tables are keyed by an arbitrary symbol name, and a
+  // plain object literal answers `Object.prototype` for `__proto__` (and an
+  // inherited function for `toString`/`valueOf`). `resolveUnit` tests the
+  // lookup for truthiness, so `\mathrm{__proto__}` resolved as a known unit
+  // and a `Sum` over an index of that name lost its index entirely.
+  __proto__: null as never,
   'Q': 1e30,
   'R': 1e27,
   'Y': 1e24,
@@ -128,6 +134,8 @@ const PREFIXABLE_UNITS: Set<string> = new Set([
 // ($ = currency, non-SI; see DimensionVector doc above)
 
 const UNIT_TABLE: Record<string, UnitEntry> = {
+  // Prototype-free — see `SI_PREFIXES` above.
+  __proto__: null as never,
   // ---- SI base units ----
   'm': { dimension: [1, 0, 0, 0, 0, 0, 0, 0], scale: 1 },
   'kg': { dimension: [0, 1, 0, 0, 0, 0, 0, 0], scale: 1 },

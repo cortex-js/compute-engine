@@ -2861,7 +2861,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
       if (shadowed?.includes(id)) return id;
       // A string `vars` value is source spliced in as-is (the live-path
       // contract); a non-string value is a constant to bake.
-      if (vars && id in vars) {
+      // Own-property test — see the `vars` lookup in `javascript-target.ts`:
+      // `in` finds `Object.prototype` members on a caller-supplied map.
+      if (vars && Object.hasOwn(vars, id)) {
         const v = vars[id];
         return typeof v === 'string' ? v : JSON.stringify(v);
       }

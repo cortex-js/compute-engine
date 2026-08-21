@@ -12,8 +12,19 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 
 export type SymbolTable = {
   parent: SymbolTable | null;
+  /** Keyed by symbol NAME, which is an arbitrary string — including one that
+   * collides with an `Object.prototype` member. Created with
+   * {@link newSymbolIds} so the table has NO prototype: an `id in table.ids`
+   * test would otherwise answer `true` for `toString`, `constructor` or
+   * `valueOf` in a table that declares none of them, and hand the inherited
+   * FUNCTION back as if it were the symbol's type. */
   ids: { [id: MathJsonSymbol]: BoxedType };
 };
+
+/** A prototype-free {@link SymbolTable.ids} map — see the note there. */
+export function newSymbolIds(): { [id: MathJsonSymbol]: BoxedType } {
+  return Object.create(null) as { [id: MathJsonSymbol]: BoxedType };
+}
 
 /**
  * A `LatexToken` is a token as returned by `Parser.peek`.
