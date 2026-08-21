@@ -17,8 +17,8 @@ import { isLaneMismatchError } from './diagnostics.js';
  * Each target's `compile()` wraps its own compilation in this helper, so the
  * standalone entry gets the escalation by delegation rather than owning a
  * second copy of it. (The deprecated-option warnings and the
- * `realOnly`/`complexPromotion` alias mapping are shared between the two
- * routes the same way, in `deprecation-warnings.ts`.) A separate module also
+ * `complexPromotion` alias mapping are shared between the two routes the same
+ * way, in `deprecation-warnings.ts`.) A separate module also
  * avoids a dependency cycle between `compile-expression.ts` and the targets.
  *
  * `attempt` performs one compilation under the mode it is given and THROWS on

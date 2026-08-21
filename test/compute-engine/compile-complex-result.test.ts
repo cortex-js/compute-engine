@@ -367,24 +367,26 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
 });
 
 /**
- * `realOnly: true` over an IN-DOMAIN argument — the path every plotting
- * consumer compiles a function body through.
+ * A bounded inverse-trig head over an IN-DOMAIN argument — the path every
+ * plotting consumer compiles a function body through.
  *
  * REGRESSION (2026-07-30). Typing the eight bounded heads `complex` for an
  * argument of unknown magnitude routed EVERY call through the `_SYS.c…`
  * helper, including the in-domain ones. `Complex(0.5, 0).asin()` returns
- * `im: 5.55e-17` — dust from the complex log/sqrt formulation — and
- * `wrapRealOnly` projected `im !== 0` to `NaN` by an EXACT test. `y =
- * arcsin(x)` therefore compiled to a curve that was `NaN` at every point of
- * its domain.
+ * `im: 5.55e-17` — dust from the complex log/sqrt formulation — and the
+ * consumer's real-lane test saw a non-real value at every point of the
+ * function's domain: `y = arcsin(x)` compiled to a curve that was `NaN`
+ * everywhere.
  *
- * The projection now CHOPS the imaginary part at the kernel-roundoff scale
- * (`ROUNDOFF_TOLERANCE`, matching `apply.ts`'s complex-result chop) — NOT at
- * `ce.tolerance`: whether the dust is noise is a property of the arithmetic,
- * so the projection must not change when the user tunes their comparison
- * tolerance (see ARCHITECTURE.md § "Chopping and the `im === 0` convention").
- * A genuinely complex value is nowhere near the roundoff scale and still
- * fails closed to `NaN` — pinned below.
+ * The fix that holds today is at the KERNEL boundary: the complex kernels chop
+ * their own dust at the roundoff scale (`ROUNDOFF_TOLERANCE`, matching
+ * `apply.ts`'s complex-result chop) before the value leaves them, so an
+ * exactly-real result reaches the runner with `im === 0` and is handed back as
+ * a plain `number`. The scale is deliberately NOT `ce.tolerance`: whether the
+ * dust is noise is a property of the arithmetic, so it must not change when
+ * the user tunes their comparison tolerance (see ARCHITECTURE.md § "Chopping
+ * and the `im === 0` convention"). A genuinely complex value is nowhere near
+ * the roundoff scale and still comes back as `{re, im}` — pinned below.
  *
  * Both shapes are pinned: the BARE head, and the head under a parent that
  * emits `{re, im}` arithmetic around it (`1 + …`) — the compound form is what a
@@ -392,8 +394,18 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
  * could decide on its own, since the parent's codegen is driven by the node's
  * TYPE, and the dust then flows through the parent's complex arithmetic.
  */
-describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', () => {
+describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain number', () => {
   // head, LaTeX command, in-domain probe, out-of-domain probe
+  //
+  // `Arcsec`/`Arccsc` are deliberately absent. Over an argument of unknown
+  // magnitude they type `number`, not `complex`: their pole at 0 numericizes
+  // to NaN (`arcsec(0).N()` is NaN, and NaN is a member only of `number`), so
+  // the sound join over the whole real line is `number` — see `ARCSEC_DOMAIN`
+  // in `library/type-handlers.ts`, which states the precondition for widening
+  // it. The compiler honors that claim and emits the real lowering
+  // (`Math.acos(1 / u)`), so an out-of-domain argument is a real NaN there
+  // rather than the interpreter's complex value. That divergence belongs to
+  // the type claim, not to this describe; it is pinned separately below.
   const HEADS = [
     ['Arcsin', '\\arcsin', 0.5, 2],
     ['Arccos', '\\arccos', 0.5, 2],
@@ -401,8 +413,6 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
     ['Artanh', '\\operatorname{artanh}', 0.5, 2],
     ['Arcoth', '\\operatorname{arcoth}', 2, 0.5],
     ['Arsech', '\\operatorname{arsech}', 0.5, 2],
-    ['Arcsec', '\\operatorname{arcsec}', 2, 0.5],
-    ['Arccsc', '\\operatorname{arccsc}', 2, 0.5],
   ] as const;
 
   for (const [name, cmd, inDomain, outOfDomain] of HEADS) {
@@ -410,11 +420,11 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
       ['bare', `${cmd}(u)`],
       ['under a complex-emitting parent', `1 + ${cmd}(u)`],
     ] as const) {
-      it(`${name} (${shape}): in-domain matches the interpreter, out-of-domain is NaN`, () => {
+      it(`${name} (${shape}): in-domain matches the interpreter, out-of-domain stays complex`, () => {
         const ce = new ComputeEngine();
         ce.declare('u', 'real');
         const expr = ce.parse(latex);
-        const result = compile(expr, { realOnly: true, fallback: false });
+        const result = compile(expr, { fallback: false });
         expect(result.success).toBe(true);
 
         const val = result.run!({ u: inDomain });
@@ -425,18 +435,54 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
           12
         );
 
-        // Out of domain there is no real value: `realOnly` must still fail
-        // closed to `NaN`, not leak a `{re, im}` object.
-        expect(result.run!({ u: outOfDomain })).toBeNaN();
+        // Out of domain there is no real value, so the runner hands back the
+        // complex one rather than a lossy `NaN`. Mapping it to whatever the
+        // consumer's real lane needs is the consumer's job.
+        const out = result.run!({ u: outOfDomain }) as { im: number };
+        expect(typeof out).toBe('object');
+        expect(Math.abs(out.im)).toBeGreaterThan(1e-14);
       });
     }
   }
 
+  // The two heads left out of `HEADS`. This pins a KNOWN COMPILED/INTERPRETER
+  // DIVERGENCE, not a contract to rely on: out of domain the compiled code
+  // answers a real `NaN` where the interpreter answers a complex value. It is
+  // pinned rather than hidden so that a change to `ARCSEC_DOMAIN` or to
+  // `Arcsec`/`Arccsc` evaluation shows up here as a failing test. The ruling
+  // that would close it is recorded in ROADMAP.md under the `Arcsec`/`Arccsc`
+  // note; the divergence predates the removal of the `realOnly` option, which
+  // projected the other six heads' complex results to `NaN` too and so made
+  // all eight look alike.
+  it.each([
+    ['Arcsec', '\\operatorname{arcsec}', 2, 1.0471975511965979],
+    ['Arccsc', '\\operatorname{arccsc}', 2, 0.5235987755982989],
+  ])(
+    '%s: KNOWN DIVERGENCE — types `number`, so out of domain compiled NaN vs interpreter complex',
+    (_name, cmd, inDomain, expected) => {
+      const ce = new ComputeEngine();
+      ce.declare('u', 'real');
+      const expr = ce.parse(`${cmd}(u)`);
+      expect(expr.type.toString()).toBe('number');
+      const result = compile(expr, { fallback: false });
+      expect(result.success).toBe(true);
+      expect(result.run!({ u: inDomain as number })).toBeCloseTo(
+        expected as number,
+        12
+      );
+      // Out of domain the real lowering yields NaN, while the interpreter
+      // answers a complex value — the consequence of the `number` type claim,
+      // not of anything the emitter decides.
+      expect(result.run!({ u: 0.5 })).toBeNaN();
+      expect(ce.parse(`${cmd}(0.5)`).N().im).not.toBe(0);
+    }
+  );
+
   it('chopping has not swallowed a genuinely complex value', () => {
-    // The chop is a ROUNDOFF-DUST test, not a "close enough to real" test: an
-    // imaginary part above the roundoff scale (1e-14) must still fail closed
-    // to `NaN` — including one well below `ce.tolerance` (1e-10), which the
-    // old `ce.tolerance`-based projection silently realized.
+    // The kernel chop is a ROUNDOFF-DUST test, not a "close enough to real"
+    // test: an imaginary part above the roundoff scale (1e-14) keeps the value
+    // complex — including one well below `ce.tolerance` (1e-10), which a
+    // `ce.tolerance`-based chop would silently realize.
     const ce = new ComputeEngine();
     expect(ce.tolerance).toBe(1e-10);
     for (const expr of [
@@ -445,21 +491,12 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
       ['Complex', 1, 1e-9], // above ce.tolerance
       ['Complex', 1, 1e-11], // BELOW ce.tolerance, above roundoff — genuine
     ] as const) {
-      const result = compile(ce.box(expr as any), {
-        realOnly: true,
-        fallback: false,
-      });
-      expect(result.run!()).toBeNaN();
+      const result = compile(ce.box(expr as any), { fallback: false });
+      expect(typeof result.run!()).toBe('object');
     }
-    // …and one below the roundoff scale projects.
-    const below = compile(ce.box(['Complex', 1, 1e-15]), {
-      realOnly: true,
-      fallback: false,
-    });
-    expect(below.run!()).toBe(1);
   });
 
-  it('dust from a head with no real branch projects, independent of ce.tolerance', () => {
+  it('kernel dust is chopped independently of ce.tolerance', () => {
     // `realDomainComplexFn` gives the eight bounded heads an exact real
     // branch; the chop is the systemic net beneath it, for every head that has
     // no such branch. `Exp(Ln(-2))` is exactly `-2` interpreted, but the
@@ -471,71 +508,73 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
     // `exp`/`log` pair. Folding this variable-free expression at compile time
     // computes it through the engine instead and emits the exact real `-2`,
     // leaving nothing for the chop to act on.
-    //
-    // Since 2026-08-16 (design §5) the kernels chop their OWN dust (`toRI`),
-    // so even without `realOnly` the runner's result convention sees an
-    // exactly-zero imaginary part and hands back the plain number `-2`; the
-    // `realOnly` projection then has nothing left to do.
     const r = compile(expr, { fallback: false, constantFold: false });
     expect(r.code).toContain('_SYS.cpow(Math.E, _SYS.cln(');
     expect(r.run!()).toBe(-2);
-    expect(compile(expr, { realOnly: true, fallback: false }).run!()).toBe(-2);
 
-    // A list/tuple result is projected COMPONENTWISE: dust projects, a
-    // genuinely complex component still fails closed.
+    // A list/tuple result follows the convention COMPONENTWISE: a dusty
+    // component comes back as a plain number, a genuinely complex one as
+    // `{re, im}`.
     expect(
       compile(ce.box(['List', ['Exp', ['Ln', -2]], 3]), {
-        realOnly: true,
         fallback: false,
       }).run!()
     ).toEqual([-2, 3]);
-    const tuple = compile(ce.box(['Tuple', ['Exp', ['Ln', -2]], ['Sqrt', -2]]), {
-      realOnly: true,
-      fallback: false,
-    }).run!() as number[];
+    const tuple = compile(
+      ce.box(['Tuple', ['Exp', ['Ln', -2]], ['Sqrt', -2]]),
+      { fallback: false }
+    ).run!() as unknown[];
     expect(tuple[0]).toBe(-2);
-    expect(tuple[1]).toBeNaN();
+    expect(tuple[1]).toEqual({ re: 0, im: Math.SQRT2 });
 
     // The chop scale is the FIXED kernel-roundoff scale, decoupled from
-    // `ce.tolerance`: tightening the user tolerance to 0 must NOT re-break
-    // the projection (under the old `ce.tolerance`-based chop it degenerated
-    // to the exact `im === 0` test and this returned `NaN`), and loosening it
-    // must not swallow a genuinely complex value.
+    // `ce.tolerance`: tightening the user tolerance to 0 must NOT re-break the
+    // dust chop (under a `ce.tolerance`-based chop it degenerates to the exact
+    // `im === 0` test and this returns a `{re, im}`), and loosening it must
+    // not swallow a genuinely complex value.
     const strict = new ComputeEngine();
     strict.tolerance = 0;
-    const strictExpr = strict.box(['Exp', ['Ln', -2]]);
     expect(
-      compile(strictExpr, { realOnly: true, fallback: false }).run!()
+      compile(strict.box(['Exp', ['Ln', -2]]), {
+        fallback: false,
+        constantFold: false,
+      }).run!()
     ).toBe(-2);
     const loose = new ComputeEngine();
     loose.tolerance = 1e-3;
     expect(
-      compile(loose.box(['Complex', 1, 1e-4]), {
-        realOnly: true,
-        fallback: false,
-      }).run!()
-    ).toBeNaN();
+      compile(loose.box(['Complex', 1, 1e-4]), { fallback: false }).run!()
+    ).toEqual({ re: 1, im: 1e-4 });
   });
 
-  it('Sqrt/Ln/Log under realOnly promote and project back to the real values', () => {
+  it('Sqrt/Ln/Log promote an unknown-sign operand to the complex kernel', () => {
     // The default mode `auto` promotes an unknown-sign operand to the complex
-    // kernel (compile-mode step 4, 2026-08-16); `realOnly` then PROJECTS the
-    // result, so the observable numbers are the ones the real lowering used to
-    // produce — in-domain value, `NaN` out of domain.
+    // kernel (compile-mode step 4, 2026-08-16). An in-domain argument still
+    // comes back as a plain number — the kernel chops its own dust — while an
+    // out-of-domain one returns the complex value the interpreter agrees with.
     const ce = new ComputeEngine();
     ce.declare('u', 'real');
-    for (const [latex, code, arg, expected] of [
-      ['\\sqrt{u}', '_SYS.csqrt(({ re: _.u, im: 0 }))', 4, 2],
-      ['\\ln(u)', '_SYS.cln(({ re: _.u, im: 0 }))', 1, 0],
-      ['\\log(u)', '_SYS.cln(({ re: _.u, im: 0 }))', 100, 2],
+    for (const [latex, code, arg, expected, negative] of [
+      ['\\sqrt{u}', '_SYS.csqrt(({ re: _.u, im: 0 }))', 4, 2, { re: 0, im: 1 }],
+      [
+        '\\ln(u)',
+        '_SYS.cln(({ re: _.u, im: 0 }))',
+        1,
+        0,
+        { re: 0, im: Math.PI },
+      ],
+      [
+        '\\log(u)',
+        '_SYS.cln(({ re: _.u, im: 0 }))',
+        100,
+        2,
+        { re: 0, im: Math.PI / Math.LN10 },
+      ],
     ] as const) {
-      const result = compile(ce.parse(latex), {
-        realOnly: true,
-        fallback: false,
-      });
+      const result = compile(ce.parse(latex), { fallback: false });
       expect(result.code).toContain(code);
       expect(result.run!({ u: arg })).toBe(expected);
-      expect(result.run!({ u: -1 })).toBeNaN();
+      expect(result.run!({ u: -1 })).toEqual(negative);
     }
   });
 });

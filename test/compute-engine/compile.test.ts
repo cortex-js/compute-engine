@@ -1010,10 +1010,6 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
       const result = compile(ce.box(src as any), { fallback: false });
       expect(result.success).toBe(true);
       expect(result.run!()).toEqual({ re: 0, im: Math.sqrt(5) });
-      // …and `realOnly` projects that to NaN.
-      expect(
-        compile(ce.box(src as any), { fallback: false, realOnly: true }).run!()
-      ).toBeNaN();
     }
     // SUPERSEDED CONTRACT (2026-07-30 ruling). These two used to assert a
     // `'NaN'` fold, on the then-true grounds that a non-real `Power`/`Root` was
@@ -1034,10 +1030,6 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
       // …matching the interpreter, which is the point of the ruling.
       expect(expr.N().re).toBeCloseTo(exp.re, 12);
       expect(expr.N().im).toBeCloseTo(exp.im, 12);
-      // …and `realOnly` still projects it to NaN.
-      expect(
-        compile(expr, { fallback: false, realOnly: true }).run!()
-      ).toBeNaN();
     }
     // The REAL branch of a negative base is unchanged in kind but was folding
     // wrong: an ODD denominator has a real principal root that `Math.pow`
@@ -1463,15 +1455,14 @@ describe('COMPILE interpreter-alignment (CO-P2-24)', () => {
     expect(ce.box(['Divide', 1, 0]).N().isFinite).toBe(false);
   });
 
-  it('realOnly projects a boolean result to NaN (booleans are not reals)', () => {
-    // CO-P2-25: a boolean-valued expression under realOnly is not a real number;
-    // the interpreter never numericizes a boolean to 0/1, so fail closed to NaN.
-    const r = compile(ce.box(['Greater', 'x', 0]), {
-      fallback: false,
-      realOnly: true,
-    })!;
-    expect(Number.isNaN(r.run!({ x: 5 }) as number)).toBe(true);
-    expect(Number.isNaN(r.run!({ x: -5 }) as number)).toBe(true);
+  it('a boolean-valued expression runs to a boolean, not to 0/1', () => {
+    // CO-P2-25: the interpreter never numericizes a boolean-valued expression
+    // (`True.N()` stays `True`), and the compiled runner matches it rather
+    // than coercing. A caller that needs a number maps it at its own value
+    // boundary.
+    const r = compile(ce.box(['Greater', 'x', 0]), { fallback: false })!;
+    expect(r.run!({ x: 5 })).toBe(true);
+    expect(r.run!({ x: -5 })).toBe(false);
   });
 });
 
@@ -1518,9 +1509,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // element-wise (`[False, False, False]`); the compiled dispatch matches.
     const e = mkEngine();
     const js = new JavaScriptTarget();
-    const r = js.compile(e.parse('d = m', { strict: false }), {
-      realOnly: true,
-    });
+    const r = js.compile(e.parse('d = m', { strict: false }));
     expect(r.success).toBe(true);
     expect(r.run!({})).toEqual([false, false, false]);
   });
@@ -1582,7 +1571,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
     expect(() =>
-      js.compile(e.parse('d = m = m', { strict: false }), { realOnly: true })
+      js.compile(e.parse('d = m = m', { strict: false }))
     ).toThrow(/Fail closed/);
   });
 
@@ -1620,7 +1609,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const cases = e.parse('\\begin{cases}10^{9} & d = m \\\\ d\\end{cases}', {
       strict: false,
     });
-    const r = js.compile(cases, { realOnly: true });
+    const r = js.compile(cases);
     expect(r.success).toBe(true);
     expect(r.run!()).toEqual([10, 20, 30]);
   });
@@ -1632,7 +1621,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // a branch.
     const e = mkEngine();
     const js = new JavaScriptTarget();
-    const r = js.compile(e.box(['If', 'd', 1, 2]), { realOnly: true });
+    const r = js.compile(e.box(['If', 'd', 1, 2]));
     expect(r.success).toBe(true);
     expect(() => r.run!()).toThrow(/Condition must evaluate/);
     expect(() => e.box(['If', 'd', 1, 2]).evaluate()).toThrow(
@@ -1750,7 +1739,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
         e.box(['Reduce', 'd', ['Function', ['Subtract', 'a', 'b'], 'a', 'b']]),
         // The expression has no free variables, so constant folding would
         // evaluate it at compile time and never reach the lowering under test.
-        { realOnly: true, constantFold: false }
+        { constantFold: false }
       )
     ).toThrow(/Fail closed/);
   });
@@ -1760,13 +1749,13 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const js = new JavaScriptTarget();
     // Undeclared symbol
     expect(() =>
-      js.compile(e.box(['Reduce', 'd', 'w', 0]), { realOnly: true })
+      js.compile(e.box(['Reduce', 'd', 'w', 0]))
     ).toThrow(/Fail closed|invalid expression/);
     // A value-bound (non-function) symbol must fail at COMPILE time, not
     // produce `.reduce(<non-function>)` that throws at runtime
     e.assign('v', e.box(['Add', 'x', 1]));
     expect(() =>
-      js.compile(e.box(['Reduce', 'd', 'v', 0]), { realOnly: true })
+      js.compile(e.box(['Reduce', 'd', 'v', 0]))
     ).toThrow(/Fail closed|invalid expression/);
   });
 
@@ -1828,30 +1817,30 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   it('At compiles 1-based access with negative-from-end and NaN out-of-range', () => {
     const e = mkEngine();
     expect(
-      compile(e.box(['At', 'd', 1]), { fallback: false, realOnly: true })!
+      compile(e.box(['At', 'd', 1]), { fallback: false })!
         .run!()
     ).toBe(10);
     expect(
-      compile(e.box(['At', 'd', 3]), { fallback: false, realOnly: true })!
+      compile(e.box(['At', 'd', 3]), { fallback: false })!
         .run!()
     ).toBe(30);
     expect(
-      compile(e.box(['At', 'd', -1]), { fallback: false, realOnly: true })!
+      compile(e.box(['At', 'd', -1]), { fallback: false })!
         .run!()
     ).toBe(30);
     expect(
-      compile(e.box(['At', 'd', -3]), { fallback: false, realOnly: true })!
+      compile(e.box(['At', 'd', -3]), { fallback: false })!
         .run!()
     ).toBe(10);
     expect(
       Number.isNaN(
-        compile(e.box(['At', 'd', 0]), { fallback: false, realOnly: true })!
+        compile(e.box(['At', 'd', 0]), { fallback: false })!
           .run!() as number
       )
     ).toBe(true);
     expect(
       Number.isNaN(
-        compile(e.box(['At', 'd', 4]), { fallback: false, realOnly: true })!
+        compile(e.box(['At', 'd', 4]), { fallback: false })!
           .run!() as number
       )
     ).toBe(true);
@@ -1865,7 +1854,6 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       // The matrix and indexes are all constant, so constant folding would
       // evaluate the access at compile time and never reach the lowering.
       js.compile(e.box(['At', m, 1, 2]), {
-        realOnly: true,
         constantFold: false,
       })
     ).toThrow(/Fail closed/);
@@ -1889,7 +1877,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       // `dictionary | indexed_collection`) but is not an indexed collection at
       // compile time — the handler fails closed (D6).
       expect(() =>
-        js.compile(e.box(['At', 'd', 1]), { realOnly: true })
+        js.compile(e.box(['At', 'd', 1]))
       ).toThrow(/indexed collection.*Fail closed \(D6\)/);
     });
 
@@ -1899,7 +1887,6 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       let r: ReturnType<JavaScriptTarget['compile']> | undefined;
       expect(() => {
         r = js.compile(e.box(['At', 'd', 1]), {
-          realOnly: true,
           fallback: true,
         });
       }).not.toThrow();
@@ -2000,7 +1987,6 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // which would answer from the interpreter at compile time — is disabled.
     const r = compile(e.box(mathjson), {
       fallback: false,
-      realOnly: true,
       constantFold: false,
     })!;
     expect(r.success).toBe(true);
@@ -2203,7 +2189,6 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     e.declare('r', 'range');
     const r = compile(e.box(['Slice', 'd', 'r']), {
       fallback: false,
-      realOnly: true,
       constantFold: false,
     })!;
     expect(r.success).toBe(true);
@@ -2223,8 +2208,8 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
 
   it('IsEmpty / Count / Contains / Unique compile', () => {
     const e = mkEngine();
-    // IsEmpty/Contains are boolean-valued: compile without realOnly (a
-    // realOnly runner projects booleans to NaN, CO-P2-25)
+    // IsEmpty/Contains are boolean-valued, and the runner hands a boolean
+    // back as a boolean (CO-P2-25).
     const runBool = (mathjson: any) =>
       compile(e.box(mathjson), { fallback: false })!.run!();
     expect(runBool(['IsEmpty', 'd'])).toBe(false);
@@ -2326,13 +2311,11 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // compile time and never reach the fail-closed lowering under test.
     expect(() =>
       js.compile(e.box(['Unique', nested]), {
-        realOnly: true,
         constantFold: false,
       })
     ).toThrow(/Fail closed/);
     expect(() =>
       js.compile(e.box(['Contains', nested, ['List', 1]]), {
-        realOnly: true,
         constantFold: false,
       })
     ).toThrow(/Fail closed/);
@@ -2359,11 +2342,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   it('a statically non-positive Chunk/Partition count fails closed', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
+    expect(() => js.compile(e.box(['Chunk', 'd', -2]))).toThrow(/Fail closed/);
     expect(() =>
-      js.compile(e.box(['Chunk', 'd', -2]), { realOnly: true })
-    ).toThrow(/Fail closed/);
-    expect(() =>
-      js.compile(e.box(['Partition', 'd', 0]), { realOnly: true })
+      js.compile(e.box(['Partition', 'd', 0]))
     ).toThrow(/Fail closed/);
   });
 
@@ -2390,13 +2371,13 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(() =>
       js.compile(
         e.box(['Ordering', 'd', ['Function', ['Greater', 'a', 'b'], 'a', 'b']]),
-        { realOnly: true, constantFold: false }
+        { constantFold: false }
       )
     ).toThrow(/Fail closed/);
     // `Interval` and `Range` lower to descriptors and a literal list to the JS
     // array it already is; every other collection domain fails closed (D6).
     expect(() =>
-      js.compile(e.box(['Random', ['Set', 1, 2, 3]]), { realOnly: true })
+      js.compile(e.box(['Random', ['Set', 1, 2, 3]]))
     ).toThrow(/Fail closed/);
   });
 
@@ -2580,7 +2561,6 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const js = new JavaScriptTarget();
     expect(() =>
       js.compile(e.box(['Norm', M, { str: 'Nuclear' }]), {
-        realOnly: true,
         constantFold: false,
       })
     ).toThrow(/Fail closed/);
@@ -2598,8 +2578,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const js = new JavaScriptTarget();
     expect(() =>
       js.compile(
-        e.box(['Transpose', ['List', ['List', 1, 2], ['List', 3, 4]], 1, 2]),
-        { realOnly: true }
+        e.box(['Transpose', ['List', ['List', 1, 2], ['List', 3, 4]], 1, 2])
       )
     ).toThrow(/Fail closed/);
   });
@@ -2641,7 +2620,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
         // whole `Sort` is a constant subtree that compile-time folding would
         // otherwise evaluate and emit as a literal, never reaching the
         // custom-comparator refusal under test.
-        { realOnly: true, constantFold: false }
+        { constantFold: false }
       )
     ).toThrow(/Fail closed/);
   });
@@ -2654,12 +2633,10 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // parameter (like `Take`/`Drop`/`At`), so the set is refused at
     // canonicalization and the operand is an `Error`. Either way, closed.
     expect(() =>
-      js.compile(e.box(['Last', ['Set', 1, 2, 3]]), { realOnly: true })
+      js.compile(e.box(['Last', ['Set', 1, 2, 3]]))
     ).toThrow(/incompatible-type/);
     // A scalar operand is rejected earlier by the type system (still closed).
-    expect(() =>
-      js.compile(e.box(['Reverse', 'm']), { realOnly: true })
-    ).toThrow();
+    expect(() => js.compile(e.box(['Reverse', 'm']))).toThrow();
   });
 });
 
@@ -2692,7 +2669,6 @@ describe('COMPILE user-defined function calls', () => {
     // The call has a constant argument, so constant folding would emit the
     // numeric result instead of the `_fn_f` local this test is pinning.
     const r = js.compile(e.box(['f', 2]), {
-      realOnly: true,
       constantFold: false,
     });
     expect(r.success).toBe(true);
@@ -2707,7 +2683,7 @@ describe('COMPILE user-defined function calls', () => {
     const e = new ComputeEngine();
     e.assign('n', e.parse('x \\mapsto x^2 + 1'));
     const js = new JavaScriptTarget();
-    const r = js.compile(e.box(['n', 3]), { realOnly: true });
+    const r = js.compile(e.box(['n', 3]));
     expect(r.success).toBe(true);
     expect(r.run(3 as unknown as Record<string, number>)).toBeCloseTo(10, 12);
   });
@@ -2718,7 +2694,7 @@ describe('COMPILE user-defined function calls', () => {
     e.parse('g(x) \\coloneq f(x) + 1').evaluate();
     const js = new JavaScriptTarget();
     for (const x of [0, 1, 2, -1.5]) {
-      const r = js.compile(e.box(['g', ['f', x]]), { realOnly: true });
+      const r = js.compile(e.box(['g', ['f', x]]));
       expect(r.success).toBe(true);
       const want = e.box(['g', ['f', x]]).N().re;
       expect(r.run(x as unknown as Record<string, number>)).toBeCloseTo(
@@ -2737,7 +2713,6 @@ describe('COMPILE user-defined function calls', () => {
     // Both call sites have constant arguments, so constant folding would emit a
     // single literal instead of the two `_fn_f` references this test counts.
     const r = js.compile(e.box(['Add', ['f', 1], ['f', 2]]), {
-      realOnly: true,
       constantFold: false,
     });
     expect(r.success).toBe(true);
@@ -2756,7 +2731,7 @@ describe('COMPILE user-defined function calls', () => {
       '\\mathrm{fact}(n) \\coloneq \\mathrm{If}(n \\le 1, 1, n \\cdot \\mathrm{fact}(n-1))'
     ).evaluate();
     const js = new JavaScriptTarget();
-    const r = js.compile(e.box(['fact', 5]), { realOnly: true });
+    const r = js.compile(e.box(['fact', 5]));
     expect(r.success).toBe(true);
     expect(r.run({})).toBe(120);
   });
@@ -2767,7 +2742,7 @@ describe('COMPILE user-defined function calls', () => {
       '\\mathrm{fact}(n) \\coloneq \\mathrm{If}(n \\le 1, 1, n \\cdot \\mathrm{fact}(n-1))'
     ).evaluate();
     const js = new JavaScriptTarget();
-    const r = js.compile(e.box(['fact', 'm']), { realOnly: true });
+    const r = js.compile(e.box(['fact', 'm']));
     expect(r.success).toBe(true);
     expect(r.run({ m: 6 })).toBe(720);
   });
@@ -2778,7 +2753,7 @@ describe('COMPILE user-defined function calls', () => {
       'Q(n, z) \\coloneq \\mathrm{If}(n \\le 0, z, Q(n-1, z)^2 + 0.3)'
     ).evaluate();
     const js = new JavaScriptTarget();
-    const r = js.compile(e.box(['Q', 6, 'w']), { realOnly: true });
+    const r = js.compile(e.box(['Q', 6, 'w']));
     expect(r.success).toBe(true);
     expect(r.run({ w: 0.17 })).toBe(e.box(['Q', 6, 0.17]).N().re);
   });
@@ -2793,10 +2768,10 @@ describe('COMPILE user-defined function calls', () => {
       '\\mathrm{od}(n) \\coloneq \\mathrm{If}(n = 0, 0, \\mathrm{ev}(n-1))'
     ).evaluate();
     const js = new JavaScriptTarget();
-    const r = js.compile(e.box(['ev', 7]), { realOnly: true });
+    const r = js.compile(e.box(['ev', 7]));
     expect(r.success).toBe(true);
     expect(r.run({})).toBe(0);
-    expect(js.compile(e.box(['ev', 8]), { realOnly: true }).run({})).toBe(1);
+    expect(js.compile(e.box(['ev', 8])).run({})).toBe(1);
   });
 
   it('runaway recursion throws a catchable RangeError at run time', () => {
@@ -2805,7 +2780,7 @@ describe('COMPILE user-defined function calls', () => {
     e.parse('g(x) \\coloneq f(x) + 1').evaluate();
     e.parse('f(x) \\coloneq g(x) - 1').evaluate(); // redefine → f↔g mutual, non-terminating
     const js = new JavaScriptTarget();
-    const r = js.compile(e.box(['f', 3]), { realOnly: true });
+    const r = js.compile(e.box(['f', 3]));
     expect(r.success).toBe(true); // compiles — termination is the caller's contract
     expect(() => r.run({})).toThrow(RangeError);
   });
@@ -2813,7 +2788,7 @@ describe('COMPILE user-defined function calls', () => {
   it('keeps throwing Unknown operator for a truly unknown head', () => {
     const e = new ComputeEngine();
     const js = new JavaScriptTarget();
-    expect(() => js.compile(e.box(['zzz', 5]), { realOnly: true })).toThrow(
+    expect(() => js.compile(e.box(['zzz', 5]))).toThrow(
       /Unknown operator `zzz`/
     );
   });
@@ -3284,7 +3259,6 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
         // The list and seed are constant, so constant folding would answer from
         // the interpreter and never reach the combiner check under test.
         js.compile(e.box(['Reduce', L, op, 0]), {
-          realOnly: true,
           constantFold: false,
         })
       ).toThrow(/Fail closed/);
@@ -3297,7 +3271,7 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
       const bad = e.box(['Reduce', L, op, 0]);
       expect(bad.isValid).toBe(false);
       expect(() =>
-        js.compile(bad, { realOnly: true, constantFold: false })
+        js.compile(bad, { constantFold: false })
       ).toThrow(/invalid expression/);
     }
     // A FIXED-arity operator symbol (`Negate`, `Not`) cannot take two
@@ -3309,7 +3283,6 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
       expect(e.box(['Reduce', L, op, 0]).type.toString()).toBe('error');
       expect(() =>
         js.compile(e.box(['Reduce', L, op, 0]), {
-          realOnly: true,
           constantFold: false,
         })
       ).toThrow(/invalid expression/);
@@ -3337,7 +3310,6 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // source statically; booleans keep the compiler's own gate reachable.
     expect(() =>
       js.compile(e.box(['Filter', ['List', 'True', 'False'], 'Or']), {
-        realOnly: true,
         constantFold: false,
       })
     ).toThrow(/Fail closed/);
@@ -3345,7 +3317,6 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // earlier: the static check rejects the call while it is canonicalized.
     expect(() =>
       js.compile(e.box(['Filter', L, 'Less']), {
-        realOnly: true,
         constantFold: false,
       })
     ).toThrow(/invalid expression/);
@@ -3377,7 +3348,6 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     expect(e.box(['Reduce', L, 'cb', 0]).isValid).toBe(true);
     expect(() =>
       js.compile(e.box(['Reduce', L, 'cb', 0]), {
-        realOnly: true,
         constantFold: false,
       })
     ).toThrow(/Fail closed/);
@@ -3387,14 +3357,12 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // gate.
     expect(() =>
       js.compile(e.box(['Reduce', L, ['Function', ['Add', 'x', 1], 'x'], 0]), {
-        realOnly: true,
         constantFold: false,
       })
     ).toThrow(/invalid expression/);
     e.assign('inc', e.box(['Function', ['Add', 'a', 1], 'a']));
     expect(() =>
       js.compile(e.box(['Reduce', L, 'inc', 0]), {
-        realOnly: true,
         constantFold: false,
       })
     ).toThrow(/invalid expression/);
@@ -3411,12 +3379,8 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     const e = new ComputeEngine();
     const js = new JavaScriptTarget();
     const f = ['Function', ['Multiply', 'x', 2], 'x'];
-    expect(() =>
-      js.compile(e.box(['Tabulate', f, 0]), { realOnly: true })
-    ).toThrow(/Fail closed/);
-    expect(() =>
-      js.compile(e.box(['Tabulate', f, -2]), { realOnly: true })
-    ).toThrow(/Fail closed/);
+    expect(() => js.compile(e.box(['Tabulate', f, 0]))).toThrow(/Fail closed/);
+    expect(() => js.compile(e.box(['Tabulate', f, -2]))).toThrow(/Fail closed/);
     // 2-D: a non-positive second dimension also fails closed. The generator
     // takes TWO indexes here — `Tabulate(f, n, m)` computes `f(i, j)`, so the
     // unary `f` used for the 1-D cases is an arity error the static
@@ -3424,7 +3388,7 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // wrong thing.
     const f2 = ['Function', ['Multiply', 'x', 'y'], 'x', 'y'];
     expect(() =>
-      js.compile(e.box(['Tabulate', f2, 3, 0]), { realOnly: true })
+      js.compile(e.box(['Tabulate', f2, 3, 0]))
     ).toThrow(/Fail closed/);
     // A positive dimension still compiles.
     expect(

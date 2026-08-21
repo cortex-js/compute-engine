@@ -125,22 +125,15 @@ describe('COMPILE COMPLEX - _SYS helpers (execution)', () => {
   // case cannot be caught in principle — the caller must handle `NaN` either
   // way.
   it('folds Sqrt of a negative real constant to the complex value', () => {
-    // No `realOnly`: the target supports complex values, and a canonical
-    // `Sqrt(negative)` is typed `complex`, so the fold is the complex
-    // principal value the interpreter returns — the same shape `1 + i` and
-    // `Sqrt(Complex(0, 1))` already compile to.
+    // The target supports complex values, and a canonical `Sqrt(negative)` is
+    // typed `complex`, so the fold is the complex principal value the
+    // interpreter returns — the same shape `1 + i` and `Sqrt(Complex(0, 1))`
+    // already compile to.
     const expr = ce.expr(['Sqrt', -1]);
     const result = compile(expr, { fallback: false });
     expect(result.success).toBe(true);
     expect(result.code).toBe('({ re: 0, im: 1 })');
     expect(result.run!()).toEqual({ re: 0, im: 1 });
-  });
-
-  it('folds Sqrt of a negative real constant to NaN under realOnly', () => {
-    const expr = ce.expr(['Sqrt', -1]);
-    const result = compile(expr, { fallback: false, realOnly: true });
-    expect(result.success).toBe(true);
-    expect(result.run!() as number).toBeNaN();
   });
 
   it('should execute csqrt on complex input', () => {
@@ -733,7 +726,8 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
         'z',
       ])
     );
-    // |M(10, x+iy-2)| - 4, realOnly — the item-60 minimal repro.
+    // |M(10, x+iy-2)| - 4 — the item-60 minimal repro. The `Abs` makes the
+    // result real, so every sample below is a plain number.
     const res = compile(
       e.box([
         'Subtract',
@@ -751,7 +745,7 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
         ],
         4,
       ]),
-      { realOnly: true, fallback: false }
+      { fallback: false }
     );
     expect(res.success).toBe(true);
     // (2,0): seed = 0, M(10, 0) = 0 entirely through the base clause.
@@ -783,7 +777,6 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
     // `Complex(0, 0)` canonicalizes back to the real literal 0: the call-site
     // argument to the complex parameter is coerced to `{ re, im }`.
     const res = compile(e.box(['Abs', ['P', 3, ['Complex', 0, 0]]]), {
-      realOnly: true,
       fallback: false,
     });
     expect(res.run!({})).toBe(1);
@@ -798,7 +791,6 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
       e.box(['Function', ['Which', ['Equal', 'n', 0], 3, 'True', 5], 'n', 'z'])
     );
     const res = compile(e.box(['Abs', ['Q', 0, ['Complex', 1, 1]]]), {
-      realOnly: true,
       fallback: false,
     });
     expect(res.run!({})).toBe(3);
@@ -807,7 +799,7 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
   it('If with mixed real/complex arms produces one convention', () => {
     const res = compile(
       ce.box(['Abs', ['If', ['Less', 'x', 0], 0, ['Complex', 3, 4]]]),
-      { realOnly: true, fallback: false }
+      { fallback: false }
     );
     expect(res.run!({ x: -1 })).toBe(0);
     expect(res.run!({ x: 1 })).toBe(5);
@@ -819,7 +811,7 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
         'Abs',
         ['When', ['Multiply', ['Complex', 0, 1], 'x'], ['Less', 'x', 0]],
       ]),
-      { realOnly: true, fallback: false }
+      { fallback: false }
     );
     expect(res.run!({ x: -2 })).toBe(2);
     expect(res.run!({ x: 2 })).toBeNaN();
@@ -887,7 +879,7 @@ describe('COMPILE COMPLEX - binder index named `i` (Tycho item 65)', () => {
 
   const run = (latex: string): unknown => {
     const expr = ce2.parse(latex, { strict: false });
-    const res = jsTarget.compile(expr, { realOnly: true });
+    const res = jsTarget.compile(expr);
     expect(res.success).toBe(true);
     return res.run({ t: 1 });
   };
@@ -954,48 +946,39 @@ describe('COMPILE COMPLEX - binder index named `i` (Tycho item 65)', () => {
   it('a lambda parameter named `i` shadows the imaginary unit', () => {
     const f = ce2.parse('i \\mapsto i^2', { strict: false });
     expect(BaseCompiler.isComplexValued(f)).toBe(false);
-    const res = jsTarget.compile(ce2.box(['Apply', f, ['Add', 'x', 1]]), {
-      realOnly: true,
-    });
+    const res = jsTarget.compile(ce2.box(['Apply', f, ['Add', 'x', 1]]));
     expect(res.success).toBe(true);
     expect(res.run({ x: 2 })).toBe(9);
   });
 });
 
-// Tycho item 62 counter-ask: `realOnly: true` was silently inert for a complex
-// tuple/list COMPONENT — the top-level coercion inspects only the result
-// itself, so a `{re, im}` in a component slot reached the consumer in a number
-// slot.
+// Tycho item 62 counter-ask: a complex tuple/list COMPONENT must compile.
 //
-// POLICY CHANGE 2026-07-30 — do NOT "restore" the throw. The original fix
-// added a compile-time REFUSAL for a provably complex component on top of the
-// runtime coercion. The refusal is retired: `wrapRealOnly` recurses into array
-// results, so a provably complex component is projected to `NaN` in its slot,
-// exactly like a component that only becomes complex when the compiled
-// function is called (`(t, √t)` at `t = -4` → `[-4, NaN]`, which no static
-// check can catch). Refusing only the provable case bought no safety and made
-// `(1, i)` behave differently from `(1, √x)` at `x = -4`.
-describe('realOnly projects complex tuple components to NaN (Tycho item 62)', () => {
+// POLICY CHANGE 2026-07-30 — do NOT "restore" the throw. The compile-time
+// REFUSAL for a provably complex component is retired: a component that only
+// becomes complex when the compiled function is called (`(t, √t)` at
+// `t = -4`) is identical at the consumer and no static check can catch it, so
+// refusing only the provable case bought no safety and made `(1, i)` behave
+// differently from `(1, √x)` at `x = -4`. Each component now reaches the
+// caller in the runner's ordinary convention — a plain number when its
+// imaginary part is exactly zero, a `{re, im}` otherwise. (The `realOnly`
+// projection that used to turn such a slot into `NaN` is removed; a consumer
+// that needs a real-only slot maps it at its own value boundary.)
+describe('a complex tuple component compiles and keeps its shape (Tycho item 62)', () => {
   const jsTarget = () =>
     (
       ce as unknown as { _getCompilationTarget: (t: string) => any }
     )._getCompilationTarget('javascript');
 
   test.each([
-    ['(t, i t)', [0.5, NaN]],
-    ['(t, 2+3i)', [0.5, NaN]],
-    ['(i t, t)', [NaN, 0.5]],
-  ])('%s compiles under realOnly, complex component → NaN', (src, expected) => {
+    ['(t, i t)', [0.5, { re: 0, im: 0.5 }]],
+    ['(t, 2+3i)', [0.5, { re: 2, im: 3 }]],
+    ['(i t, t)', [{ re: 0, im: 0.5 }, 0.5]],
+  ])('%s compiles, complex component stays {re, im}', (src, expected) => {
     const expr = ce.parse(src as string, { strict: false });
-    const r = jsTarget().compile(expr, { realOnly: true });
+    const r = jsTarget().compile(expr);
     expect(r.success).toBe(true);
     expect(r.run({ t: 0.5 })).toEqual(expected);
-  });
-
-  test('the same expression still compiles WITHOUT realOnly', () => {
-    const r = jsTarget().compile(ce.parse('(t, i t)', { strict: false }));
-    expect(r.success).toBe(true);
-    expect(r.run({ t: 0.5 })).toEqual([0.5, { re: 0, im: 0.5 }]);
   });
 
   test.each([
@@ -1004,10 +987,8 @@ describe('realOnly projects complex tuple components to NaN (Tycho item 62)', ()
     '(t, \\sqrt{t})',
     '(t, \\ln t)',
     '[1,2,3]',
-  ])('real-valued %s still compiles under realOnly', (src) => {
-    const r = jsTarget().compile(ce.parse(src, { strict: false }), {
-      realOnly: true,
-    });
+  ])('real-valued %s comes back as plain numbers', (src) => {
+    const r = jsTarget().compile(ce.parse(src, { strict: false }));
     expect(r.success).toBe(true);
     const v = r.run({ t: 0.5 }) as number[];
     expect(v.every((x) => typeof x === 'number')).toBe(true);
@@ -1018,29 +999,25 @@ describe('realOnly projects complex tuple components to NaN (Tycho item 62)', ()
       ce.parse(
         '\\operatorname{PointList}(\\sum_{i=0}^{2}\\cos(it), \\sum_{i=0}^{2}\\sin(it))',
         { strict: false }
-      ),
-      { realOnly: true }
+      )
     );
     expect(r.success).toBe(true);
     const v = r.run({ t: 0.5 }) as number[];
     expect(v.every((x) => Number.isFinite(x))).toBe(true);
   });
 
-  // The same coercion, for values that only become complex when called.
-  test('realOnly coercion recurses into array results', () => {
-    const r = jsTarget().compile(ce.parse('(t, \\sqrt{t})', { strict: false }), {
-      realOnly: true,
-    });
+  // The same invariant, for a component that only becomes complex when called.
+  test('a call-time complex component keeps its slot', () => {
+    const r = jsTarget().compile(ce.parse('(t, \\sqrt{t})', { strict: false }));
     // sqrt of a negative argument is complex only at call time
-    expect(r.run({ t: -4 })).toEqual([-4, NaN]);
+    expect(r.run({ t: -4 })).toEqual([-4, { re: 0, im: 2 }]);
   });
 });
 
 // A complex operand that never reaches the result must not colour the result:
 // `At([i, 2], 2)` reads the real component and returns a real value. (This
-// used to guard a static component check; since that check was retired
-// 2026-07-30 it pins the same invariant on the runtime projection.)
-describe('realOnly leaves an unused complex operand alone', () => {
+// used to guard a static component check, retired 2026-07-30.)
+describe('an unused complex operand leaves the result real', () => {
   const jsTarget = () =>
     (
       ce as unknown as { _getCompilationTarget: (t: string) => any }
@@ -1049,21 +1026,17 @@ describe('realOnly leaves an unused complex operand alone', () => {
   test.each([
     ['\\mathrm{At}([i, 2], 2)', 2],
     ['\\mathrm{At}((t, i t), 1)', 0.5],
-  ])('%s compiles under realOnly (complex operand never reaches the result)', (src, expected) => {
-    const r = jsTarget().compile(ce.parse(src, { strict: false }), {
-      realOnly: true,
-    });
+  ])('%s: the complex operand never reaches the result', (src, expected) => {
+    const r = jsTarget().compile(ce.parse(src, { strict: false }));
     expect(r.success).toBe(true);
     expect(r.run({ t: 0.5 })).toEqual(expected);
   });
 
   test.each([
-    ['(t, i t)', [0.5, NaN]],
-    ['(t, 2+3i)', [0.5, NaN]],
-  ])('%s → NaN in the complex slot — the complex component IS the result', (src, expected) => {
-    const r = jsTarget().compile(ce.parse(src as string, { strict: false }), {
-      realOnly: true,
-    });
+    ['(t, i t)', [0.5, { re: 0, im: 0.5 }]],
+    ['(t, 2+3i)', [0.5, { re: 2, im: 3 }]],
+  ])('%s: the complex component IS the result and stays complex', (src, expected) => {
+    const r = jsTarget().compile(ce.parse(src as string, { strict: false }));
     expect(r.success).toBe(true);
     expect(r.run({ t: 0.5 })).toEqual(expected);
   });

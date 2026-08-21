@@ -11,7 +11,7 @@ import * as MonteCarloModule from '../../src/compute-engine/numerics/monte-carlo
 
 /** Compile a parsed LaTeX definite integral to a real-valued runner. */
 function compileReal(latex: string, options?: { quadrature?: 'monte-carlo' }) {
-  const r = compile(ce.parse(latex), { realOnly: true, ...options });
+  const r = compile(ce.parse(latex), options);
   expect(r.success).toBe(true);
   return r;
 }
@@ -140,7 +140,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       ['Which', ['Less', 'x', 1], 1, 'True', 2],
       ['Limits', 'x', 0, 2],
     ]);
-    const r = compile(expr, { realOnly: true });
+    const r = compile(expr);
     expect(r.success).toBe(true);
     expect(r.run() as number).toBeCloseTo(3, 6);
   });
@@ -158,7 +158,6 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
 
     test("quadrature: 'monte-carlo' emits integrateMC and runs", () => {
       const r = compile(piecewise(), {
-        realOnly: true,
         quadrature: 'monte-carlo',
       });
       expect(r.code).toContain('integrateMC');
@@ -169,7 +168,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       // The integral has constant bounds and no free variables, so compile-time
       // constant folding would replace the whole quadrature call with its
       // value; this test pins the EMITTED code, so folding is turned off.
-      const r = compile(piecewise(), { realOnly: true, constantFold: false });
+      const r = compile(piecewise(), { constantFold: false });
       expect(r.code).toContain('_SYS.integrate(');
       expect(r.code).not.toContain('integrateMC');
     });
@@ -200,7 +199,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     // expression; it must be parenthesized so surrounding operators bind
     // correctly. `2·∫_0^x t dt + 1 = x² + 1`.
     test('closed form is parenthesized inside a larger expression', () => {
-      const r = compile(ce.parse('2\\int_0^x t\\,dt + 1'), { realOnly: true });
+      const r = compile(ce.parse('2\\int_0^x t\\,dt + 1'));
       expect(r.run({ x: 3 }) as number).toBeCloseTo(10, 10);
     });
 
@@ -218,12 +217,11 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     // form (k²/2), proving the gate is what forces quadrature.
     test('vars-mapped symbol skips antiderivative-first (keeps quadrature)', () => {
       const withVars = compile(ce.parse('\\int_0^k t\\,dt'), {
-        realOnly: true,
         vars: { k: '_.k' },
       });
       expect(withVars.code).toContain('_SYS.integrate(');
 
-      const noVars = compile(ce.parse('\\int_0^k t\\,dt'), { realOnly: true });
+      const noVars = compile(ce.parse('\\int_0^k t\\,dt'));
       expect(noVars.code).not.toContain('_SYS.integrate');
       expect(noVars.run({ k: 4 }) as number).toBeCloseTo(8, 10); // k²/2
     });
@@ -253,8 +251,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
           compile(
             engine.parse(
               '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
-            ),
-            { realOnly: true }
+            )
           )
       );
       expect(r.success).toBe(true);
@@ -289,7 +286,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
         (_label, spanMs) => {
           const engine = new ComputeEngine();
           const expr = engine.parse(CHI2_TAIL, { strict: false });
-          const run = () => compile(expr, { realOnly: true });
+          const run = () => compile(expr);
           const r =
             spanMs === undefined
               ? run()
@@ -365,7 +362,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
         ['Limits', 'x', 0, 1],
         ['Limits', 'y', 0, 1],
       ]);
-      const r = compile(e, { realOnly: true });
+      const r = compile(e);
       expect(r.success).toBe(true);
       expect(r.run({}) as number).toBeCloseTo(1.207021663355318, 10);
     });
@@ -379,7 +376,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
         ['Limits', 'x', 0, 1],
         ['Limits', 'y', 0, 'x'],
       ]);
-      const r = compile(e, { realOnly: true });
+      const r = compile(e);
       expect(r.success).toBe(true);
       expect(r.run({}) as number).toBeCloseTo(0.60351083167765899, 10);
     });
@@ -391,7 +388,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
         ['Limits', 'x', 0, 3],
         ['Limits', 'y', 0, 2],
       ]);
-      const r = compile(e, { realOnly: true });
+      const r = compile(e);
       expect(r.success).toBe(true);
       expect(r.run({}) as number).toBeCloseTo(9, 12);
     });
@@ -690,7 +687,7 @@ describe('COMPILE Integrate — engine hygiene', () => {
           : local.box(local.parse(latex).json);
       expect(Object.keys(local.lookupDefinition('D')!)).toEqual(['operator']);
 
-      const r = compile(expr, { realOnly: true });
+      const r = compile(expr);
       expect(r.success).toBe(true);
 
       // Still the builtin operator definition, not a devolved variable.
@@ -703,7 +700,7 @@ describe('COMPILE Integrate — engine hygiene', () => {
     // The closed form outlives the isolation scope: `D` is a free variable of
     // the emitted code, resolved by name against the target's bindings.
     const local = new ComputeEngine();
-    const r = compile(local.parse('\\int_0^1 D x^2 dx'), { realOnly: true });
+    const r = compile(local.parse('\\int_0^1 D x^2 dx'));
     expect(r.success).toBe(true);
     expect(r.run({ D: 3 })).toBeCloseTo(1, 10);
   });
@@ -718,7 +715,7 @@ describe('COMPILE Integrate — indefinite with no closed form fails closed', ()
   // `adaptiveQuadrature(f, undefined, undefined)` reported CONVERGED and
   // returned 0 — so `∫ e^{x³} sin x dx` "compiled" and answered 0 for every x.
   test('∫ e^{x³} sin(x) dx declines instead of fabricating 0', () => {
-    const r = compile(ce.parse('\\int e^{x^3}\\sin(x) dx'), { realOnly: true });
+    const r = compile(ce.parse('\\int e^{x^3}\\sin(x) dx'));
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/Fail closed \(D6\)/);
     expect(r.error).toMatch(/indefinite integral/);
@@ -733,7 +730,7 @@ describe('COMPILE Integrate — indefinite with no closed form fails closed', ()
   ])(
     'an indefinite integral WITH a closed form still compiles: %s',
     (latex, args, expected) => {
-      const r = compile(ce.parse(latex), { realOnly: true });
+      const r = compile(ce.parse(latex));
       expect(r.success).toBe(true);
       expect(r.run(args as Record<string, number>) as number).toBeCloseTo(
         expected as number,
@@ -746,7 +743,6 @@ describe('COMPILE Integrate — indefinite with no closed form fails closed', ()
     // A free coefficient keeps the antiderivative-first path from folding it,
     // so this is the quadrature emitter, not a baked closed form.
     const r = compile(ce.parse('\\int_0^1 e^{-a x^2} dx'), {
-      realOnly: true,
       vars: { a: '_.a' },
     });
     expect(r.success).toBe(true);
@@ -761,7 +757,7 @@ describe('COMPILE Integrate — indefinite with no closed form fails closed', ()
     ['\\int_{-3}^{3}\\sin(t)dt', {}, 0],
     ['\\int_0^b \\sin(x) dx', { b: 1 }, 0.4596976941318603],
   ])('definite integrals are untouched: %s', (latex, args, expected) => {
-    const r = compile(ce.parse(latex), { realOnly: true });
+    const r = compile(ce.parse(latex));
     expect(r.success).toBe(true);
     expect(r.run(args as Record<string, number>) as number).toBeCloseTo(
       expected as number,
@@ -786,7 +782,6 @@ describe('COMPILE — `Nothing` is never emitted as a variable reference', () =>
     // folding would evaluate them away before the emitter ever sees the
     // `Nothing` operand; the point here is the EMITTER's fail-closed guard.
     const r = compile(ce.box(json as any), {
-      realOnly: true,
       constantFold: false,
     });
     expect(r.success).toBe(false);
@@ -799,7 +794,6 @@ describe('COMPILE — `Nothing` is never emitted as a variable reference', () =>
     const r = compile(
       ce.box(['Sum', 'x', ['Limits', 'i', 1, 'Nothing']] as any),
       {
-        realOnly: true,
         vars: { Nothing: '_.Nothing', x: '_.x' },
       }
     );

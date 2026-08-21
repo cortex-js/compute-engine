@@ -103,7 +103,6 @@ import type {
   TargetSource,
 } from './types.js';
 import { CompileDeclineError, LaneMismatchError } from './diagnostics.js';
-import { chop, ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
 import {
   candidateAt,
   childRegionAt,
@@ -1320,12 +1319,6 @@ export class BaseCompiler {
       // compile emits `{re, im}` and still reports `mode: 'strict'`. Read the
       // returned value's shape (`typeof v === 'number'`), never `mode`, to
       // decide whether a result is complex-shaped.
-      //
-      // Note `realOnly` does not enter into this: it is a RESULT projection
-      // applied after the kernel runs, so a promoted compile under
-      // `realOnly: true` correctly reports `'complex'` even though the value
-      // handed back is a real number (or `NaN`). `mode` describes the
-      // emission.
       //
       // Only a compilation that EMITTED code gets this report: the report
       // describes emitted code, and a decline emitted none. A decline throws
@@ -9330,7 +9323,7 @@ export class BaseCompiler {
    * stays raw, so nothing re-ran that check before the emitters wrote a bare
    * `+`/`*` over it: `Σ_{i=0}^{2} "ab"` compiled to `("ab") + ("ab") + ("ab")`
    * and RAN to `"ababab"` behind `success: true` — including under
-   * `realOnly: true`, whose overload is typed to return a `number`. Declining
+   * a caller reading the result as a number. Declining
    * is what the callers want (they fall back to expansion / the interpreter).
    */
   static assertScalarBigOpBody(kind: string, body: Expression): void {
@@ -13240,10 +13233,6 @@ export class BaseCompiler {
    * emits `{re, im}` and still reports `mode: 'strict'`. Test a returned
    * value's shape with `typeof v === 'number'`, not with `mode`.
    *
-   * `realOnly` does not enter into it either: that is a RESULT projection
-   * applied after the kernel runs, so a promoted compile under
-   * `realOnly: true` reports `'complex'` while handing back a real number.
-   *
    * `mode === 'complex'` is implied by `promoted === true`; the two still
    * differ, since an explicitly requested `'complex'` compile that contained
    * no promotable head reports `('complex', false)`.
@@ -13253,46 +13242,6 @@ export class BaseCompiler {
    */
   static modeReport(): { mode: 'strict' | 'complex'; promoted: boolean } {
     return { ...BaseCompiler._lastReport };
-  }
-
-  /**
-   * The `realOnly` RESULT projection: non-real values become a real number
-   * or, when not representable as one, `NaN` (fail closed):
-   * - a complex `{re, im}` collapses to `re` when the imaginary part chops to
-   *   zero at the roundoff scale (`ROUNDOFF_TOLERANCE`), else `NaN`;
-   * - a top-level boolean is NOT a real number — the interpreter never
-   *   numericizes a boolean-valued expression to 0/1 (`True.N()` stays
-   *   `True`) — so it maps to `NaN` rather than passing through;
-   * - an array (tuple/list result) is projected component-wise, and only its
-   *   COMPLEX components are coerced: a boolean ELEMENT is a legitimate
-   *   result (`Equal` over a collection yields `[false, …]`).
-   *
-   * The imaginary part is CHOPPED, not compared to zero exactly, at the
-   * kernel-roundoff scale — matching `apply.ts`'s complex-result chop, NOT
-   * `ce.tolerance` (kernel dust is a property of the arithmetic; using the
-   * user tolerance both re-broke this under a tightened tolerance and, being
-   * snapshotted at compile time, diverged from the interpreter after a
-   * tolerance change). The JavaScript runner now normalizes an exactly-zero
-   * imaginary part to a number before this projection sees it, so the chop
-   * here matters only for a `{re, im}` that reaches it another way (an
-   * interpreter-backed fallback value, a component of a collection).
-   *
-   * Applied by the JavaScript target to a compiled runner (`wrapRealOnly`)
-   * and by `buildInterpreterFallback` to a decline's interpreter-backed
-   * runner, so `realOnly: true` promises a number on both paths.
-   */
-  static projectRealOnly(r: unknown): unknown {
-    if (typeof r === 'boolean') return NaN;
-    return BaseCompiler.projectRealOnlyComponents(r);
-  }
-
-  private static projectRealOnlyComponents(r: unknown): unknown {
-    if (Array.isArray(r)) return r.map(BaseCompiler.projectRealOnlyComponents);
-    if (typeof r === 'object' && r !== null && 'im' in r)
-      return chop((r as ComplexResult).im, ROUNDOFF_TOLERANCE) === 0
-        ? (r as ComplexResult).re
-        : NaN;
-    return r;
   }
 
   /**
@@ -13331,8 +13280,7 @@ export class BaseCompiler {
     targetName: T,
     compileTarget: CompileTarget<Expression> | undefined,
     varsKeys: Set<string> | undefined,
-    diagnostic?: CompileDiagnostic,
-    realOnly?: boolean
+    diagnostic?: CompileDiagnostic
   ): CompilationResult<T> {
     const ce = expr.engine;
     diagnostic ??= {
@@ -13340,13 +13288,6 @@ export class BaseCompiler {
       kind: 'capability',
       message: error,
     };
-    // The `realOnly` projection (`BaseCompiler.projectRealOnly`) applies to a
-    // decline's runner exactly as it applies to a compiled one: the caller was
-    // promised a number, and the interpreter's `{re, im}` or boolean value
-    // reaches them through this runner.
-    const project = (v: unknown): unknown =>
-      realOnly ? BaseCompiler.projectRealOnly(v) : v;
-
     // Materialize an interpreted result matching the compiled-runner value
     // contract: a scalar yields a `number` (imaginary part exactly zero), a
     // `{re, im}` object (otherwise) or a boolean; a finite indexed collection
@@ -13400,10 +13341,8 @@ export class BaseCompiler {
     // positional arguments are silently dropped.
     if (isFunction(expr, 'Function')) {
       const lambdaRun = ((...args: unknown[]) =>
-        project(
-          interpretedRunValue(
-            ce.function('Apply', [expr, ...args.map(boxArg)]).evaluate()
-          )
+        interpretedRunValue(
+          ce.function('Apply', [expr, ...args.map(boxArg)]).evaluate()
         )) as unknown as CompiledRunner;
       return {
         target: targetName,
@@ -13441,7 +13380,7 @@ export class BaseCompiler {
             }
           }
         }
-        return project(interpretedRunValue(expr.evaluate()));
+        return interpretedRunValue(expr.evaluate());
       } finally {
         ce.popScope();
       }

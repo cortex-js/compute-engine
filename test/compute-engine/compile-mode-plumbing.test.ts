@@ -1,6 +1,7 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
+import { resetDeprecationWarnings } from '../../src/compute-engine/compilation/deprecation-warnings';
 import {
   CompileDeclineError,
   LaneMismatchError,
@@ -30,7 +31,8 @@ import type { Expression } from '../../src/compute-engine/global-types';
  * - the result convention (§5): the transcendental `_SYS` kernels chop their
  *   own roundoff dust, and the runner tests `im !== 0` EXACTLY — a real value
  *   is a plain `number`, a `ComplexResult` always has `im !== 0`;
- * - the internal `realOnly` callers migrated to a local numeric projection.
+ * - the internal callers of the (since removed) `realOnly` option, migrated to
+ *   a local numeric projection.
  *
  * Migration step 4 (2026-08-16) landed the `auto` default on `javascript` and
  * `python`: the pins below that used to read "accepted but compiled as
@@ -392,17 +394,33 @@ describe('result convention (design §5) — exact im !== 0 at the boundary, ker
     });
   });
 
-  it('realOnly is deprecated but still projects the result (complex → NaN)', () => {
+  it('the removed realOnly option no longer projects the result', () => {
     const e = new ComputeEngine();
-    // The default `auto` promotes the unknown-sign radical (compile-mode
-    // step 4, 2026-08-16); `realOnly` projects the promoted value back, so
-    // the observable numbers are unchanged.
-    const r = compile(e.parse('\\sqrt{x}'), { realOnly: true });
-    expect(r.run({ x: 4 })).toBe(2);
-    expect(r.run({ x: -4 })).toBeNaN();
-    expect(
-      compile(e.parse('x < 3'), { realOnly: true }).run({ x: 1 })
-    ).toBeNaN();
+    // The removal warning fires once per PROCESS, so an earlier case (here or
+    // in another file sharing this module registry) would otherwise starve the
+    // assertion below of its message.
+    resetDeprecationWarnings();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // The default `auto` promotes the unknown-sign radical (compile-mode
+      // step 4, 2026-08-16). The projection that used to turn the promoted
+      // `√(−4)` into `NaN` and the boolean `x < 3` into `NaN` is gone: both
+      // now come back in the runner's own convention.
+      // @ts-expect-error — `realOnly` was removed from the compile options.
+      const r = compile(e.parse('\\sqrt{x}'), { realOnly: true });
+      expect(r.run({ x: 4 })).toBe(2);
+      expect(r.run({ x: -4 })).toEqual({ re: 0, im: 2 });
+      // @ts-expect-error — `realOnly` was removed from the compile options.
+      expect(compile(e.parse('x < 3'), { realOnly: true }).run({ x: 1 })).toBe(
+        true
+      );
+      // …and the caller is told, once, rather than silently losing it.
+      expect(
+        warn.mock.calls.filter((c) => String(c[0]).includes('realOnly')).length
+      ).toBeGreaterThan(0);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('complexPromotion still promotes, now as the deprecated spelling of mode: complex', () => {
@@ -443,29 +461,6 @@ describe('D7 — the shared interpreter fallback honors the runner contract in b
     const c = r.run!({ z: { re: 0, im: 1 } }) as { re: number; im: number };
     expect(typeof c).toBe('object');
     expect(c.im).toBeCloseTo(1 + 1.650425758797543, 6);
-  });
-
-  it("realOnly still projects a decline's runner: complex → NaN, boolean → NaN, real → number", () => {
-    const e = new ComputeEngine();
-    e.declare('z', 'complex');
-    // `mode: 'strict'` keeps `Erf(z)` a decline fixture (see above).
-    const r = compile(e.box(['Add', ['Erf', 'z'], 'z']), {
-      fallback: true,
-      realOnly: true,
-      mode: 'strict',
-    });
-    expect(r.success).toBe(false);
-    expect(r.run({ z: { re: 0.5, im: 0 } as never })).toBeCloseTo(
-      1.0204998778130465,
-      12
-    );
-    expect(r.run({ z: { re: 0, im: 1 } as never })).toBeNaN();
-    const b = compile(e.box(['Less', ['Erf', 'z'], 1]), {
-      fallback: true,
-      realOnly: true,
-      mode: 'strict',
-    });
-    expect(b.run({ z: 0.2 })).toBeNaN();
   });
 
   it('a boolean-valued decline runs to a boolean, not NaN', () => {

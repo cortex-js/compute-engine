@@ -53,12 +53,8 @@ describe('PointList compile — scalar parity with Tuple', () => {
   for (const [name, target] of targets) {
     for (const comps of componentSets) {
       it(`${name}: PointList(${comps.join(',')}) emits identically to Tuple`, () => {
-        const tuple = target.compile(ce.box(['Tuple', ...comps]), {
-          realOnly: true,
-        });
-        const pointList = target.compile(ce.box(['PointList', ...comps]), {
-          realOnly: true,
-        });
+        const tuple = target.compile(ce.box(['Tuple', ...comps]));
+        const pointList = target.compile(ce.box(['PointList', ...comps]));
         expect(tuple.success).toBe(true);
         expect(pointList.success).toBe(true);
         expect(pointList.code).toBe(tuple.code);
@@ -67,23 +63,17 @@ describe('PointList compile — scalar parity with Tuple', () => {
   }
 
   it('javascript: PointList(x,y) emits the expected JS array', () => {
-    const r = new JavaScriptTarget().compile(ce.box(['PointList', 'x', 'y']), {
-      realOnly: true,
-    });
+    const r = new JavaScriptTarget().compile(ce.box(['PointList', 'x', 'y']));
     expect(r.code).toBe('[_.x, _.y]');
   });
 
   it('glsl: PointList(x,y) emits vec2(x, y)', () => {
-    const r = new GLSLTarget().compile(ce.box(['PointList', 'x', 'y']), {
-      realOnly: true,
-    });
+    const r = new GLSLTarget().compile(ce.box(['PointList', 'x', 'y']));
     expect(r.code).toBe('vec2(x, y)');
   });
 
   it('wgsl: PointList(x,y) emits vec2f(x, y)', () => {
-    const r = new WGSLTarget().compile(ce.box(['PointList', 'x', 'y']), {
-      realOnly: true,
-    });
+    const r = new WGSLTarget().compile(ce.box(['PointList', 'x', 'y']));
     expect(r.code).toBe('vec2f(x, y)');
   });
 
@@ -122,8 +112,8 @@ describe('PointList compile — render-shaped case s(PointList(x,y))', () => {
   it('javascript: PointList-spelled body compiles identically to the Tuple-spelled body', () => {
     const ce = freshEngine();
     const js = new JavaScriptTarget();
-    const withPointList = js.compile(body(ce, 'PointList'), { realOnly: true });
-    const withTuple = js.compile(body(ce, 'Tuple'), { realOnly: true });
+    const withPointList = js.compile(body(ce, 'PointList'));
+    const withTuple = js.compile(body(ce, 'Tuple'));
     expect(withPointList.success).toBe(true);
     expect(withTuple.success).toBe(true);
     expect(withPointList.code).toBe(withTuple.code);
@@ -131,9 +121,7 @@ describe('PointList compile — render-shaped case s(PointList(x,y))', () => {
 
   it('javascript: the compiled body agrees with the interpreter at sample points', () => {
     const js = new JavaScriptTarget();
-    const compiled = js.compile(body(freshEngine(), 'PointList'), {
-      realOnly: true,
-    });
+    const compiled = js.compile(body(freshEngine(), 'PointList'));
     expect(compiled.success).toBe(true);
     const run = compiled.run as (scope: Record<string, number>) => number;
 
@@ -211,8 +199,8 @@ describe('PointList compile — scalar-slot type coverage', () => {
   it('javascript: an `unknown`-typed component compiles (parity with Tuple)', () => {
     const ce = new ComputeEngine(); // x, y undeclared → unknown
     const js = new JavaScriptTarget();
-    const pl = js.compile(ce.box(['PointList', 'x', 'y']), { realOnly: true });
-    const tp = js.compile(ce.box(['Tuple', 'x', 'y']), { realOnly: true });
+    const pl = js.compile(ce.box(['PointList', 'x', 'y']));
+    const tp = js.compile(ce.box(['Tuple', 'x', 'y']));
     expect(pl.success).toBe(true);
     expect(pl.code).toBe(tp.code);
   });
@@ -222,8 +210,8 @@ describe('PointList compile — scalar-slot type coverage', () => {
     ce.declare('vv', 'value');
     ce.declare('x', 'number');
     const js = new JavaScriptTarget();
-    const pl = js.compile(ce.box(['PointList', 'x', 'vv']), { realOnly: true });
-    const tp = js.compile(ce.box(['Tuple', 'x', 'vv']), { realOnly: true });
+    const pl = js.compile(ce.box(['PointList', 'x', 'vv']));
+    const tp = js.compile(ce.box(['Tuple', 'x', 'vv']));
     expect(pl.success).toBe(true);
     expect(pl.code).toBe(tp.code);
   });
@@ -239,7 +227,7 @@ describe('PointList compile — non-scalar component', () => {
   // — ruling 3: no runtime-length expression values.)
   it('javascript: a list-typed component compiles to the zipped point list', () => {
     const js = new JavaScriptTarget();
-    const r = js.compile(ce.box(['PointList', 'x', 'L']), { realOnly: true });
+    const r = js.compile(ce.box(['PointList', 'x', 'L']));
     expect(r.success).toBe(true);
     const run = r.run as (s: Record<string, unknown>) => unknown;
     expect(run({ x: -6, L: [1, 2, 3] })).toEqual([
@@ -258,9 +246,7 @@ describe('PointList compile — non-scalar component', () => {
 
   it('javascript: a `number | list<number>` union component fails closed', () => {
     const js = new JavaScriptTarget();
-    expect(() =>
-      js.compile(ce.box(['PointList', 'x', 'U']), { realOnly: true })
-    ).toThrow(
+    expect(() => js.compile(ce.box(['PointList', 'x', 'U']))).toThrow(
       /PointList: cannot compile — component 2 \(type `[^`]+`\) is neither a scalar slot nor a list source; its per-point value cannot be determined at compile time\. Fail closed \(D6\)\./
     );
     const r = js.compile(ce.box(['PointList', 'x', 'U']), { fallback: true });
@@ -269,9 +255,7 @@ describe('PointList compile — non-scalar component', () => {
 
   it('glsl: a list-typed component throws by default', () => {
     const glsl = new GLSLTarget();
-    expect(() =>
-      glsl.compile(ce.box(['PointList', 'x', 'L']), { realOnly: true })
-    ).toThrow();
+    expect(() => glsl.compile(ce.box(['PointList', 'x', 'L']))).toThrow();
   });
 });
 
@@ -308,8 +292,7 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
 
   it('glsl: Dot(Tuple, Tuple) emits the native dot() over vecN', () => {
     const r = new GLSLTarget().compile(
-      ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 3, 4]]),
-      { realOnly: true }
+      ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 3, 4]])
     );
     expect(r.success).toBe(true);
     expect(r.code).toBe('dot(vec2(x, y), vec2(3.0, 4.0))');
@@ -318,12 +301,10 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
   it('glsl: PointList operands emit identically to Tuple operands', () => {
     const glsl = new GLSLTarget();
     const viaPointList = glsl.compile(
-      ce.box(['Dot', ['PointList', 'x', 'y'], ['PointList', 3, 4]]),
-      { realOnly: true }
+      ce.box(['Dot', ['PointList', 'x', 'y'], ['PointList', 3, 4]])
     );
     const viaTuple = glsl.compile(
-      ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 3, 4]]),
-      { realOnly: true }
+      ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 3, 4]])
     );
     expect(viaPointList.success).toBe(true);
     expect(viaPointList.code).toBe(viaTuple.code);
@@ -333,9 +314,7 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
     const eng = new ComputeEngine();
     eng.declare('p', 'tuple<number, number>');
     eng.declare('q', 'tuple<number, number>');
-    const r = new GLSLTarget().compile(eng.box(['Dot', 'p', 'q']), {
-      realOnly: true,
-    });
+    const r = new GLSLTarget().compile(eng.box(['Dot', 'p', 'q']));
     expect(r.success).toBe(true);
     expect(r.code).toBe('dot(p, q)');
   });
@@ -343,8 +322,7 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
   it('glsl: mismatched vector widths fail closed', () => {
     expect(() =>
       new GLSLTarget().compile(
-        ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 1, 2, 3]]),
-        { realOnly: true }
+        ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 1, 2, 3]])
       )
     ).toThrow(/different widths/);
   });
@@ -353,15 +331,14 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
     expect(() =>
       new GLSLTarget().compile(
         ce.box(['Dot', ['Tuple', 1, 2, 3, 4, 5], ['Tuple', 1, 2, 3, 4, 5]]),
-        { realOnly: true, constantFold: false }
+        { constantFold: false }
       )
     ).toThrow();
   });
 
   it('wgsl: Dot(Tuple, Tuple) emits dot() over vecNf', () => {
     const r = new WGSLTarget().compile(
-      ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 3, 4]]),
-      { realOnly: true }
+      ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 3, 4]])
     );
     expect(r.success).toBe(true);
     expect(r.code).toBe('dot(vec2f(x, y), vec2f(3.0, 4.0))');
@@ -369,7 +346,7 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
 
   it('javascript: compiled Dot matches the interpreter', () => {
     const expr = ce.box(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
-    const r = new JavaScriptTarget().compile(expr, { realOnly: true });
+    const r = new JavaScriptTarget().compile(expr);
     expect(r.success).toBe(true);
     expect(r.run!({})).toBe(11);
     expect(expr.evaluate().toString()).toBe('11');
@@ -378,7 +355,7 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
   it('python: Dot(Tuple, Tuple) emits np.dot', () => {
     const r = new PythonTarget().compile(
       ce.box(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]]),
-      { realOnly: true, constantFold: false }
+      { constantFold: false }
     );
     expect(r.success).toBe(true);
     expect(r.code).toBe('np.dot((1, 2), (3, 4))');
@@ -400,7 +377,7 @@ describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
   const nested = ['Dot', ['PointList', inner3, 0], ['PointList', 1, 2]];
 
   it('glsl: a nested Dot in a point component compiles to native dot()', () => {
-    const r = new GLSLTarget().compile(ce.box(nested), { realOnly: true });
+    const r = new GLSLTarget().compile(ce.box(nested));
     expect(r.success).toBe(true);
     expect(r.code).toBe(
       'dot(vec2(dot(vec3(x, y, z), vec3(1.0, 2.0, 3.0)), 0.0), vec2(1.0, 2.0))'
@@ -408,7 +385,7 @@ describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
   });
 
   it('wgsl: the same composition compiles', () => {
-    const r = new WGSLTarget().compile(ce.box(nested), { realOnly: true });
+    const r = new WGSLTarget().compile(ce.box(nested));
     expect(r.success).toBe(true);
     expect(r.code).toBe(
       'dot(vec2f(dot(vec3f(x, y, z), vec3f(1.0, 2.0, 3.0)), 0.0), vec2f(1.0, 2.0))'
@@ -417,8 +394,7 @@ describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
 
   it('glsl: the composition nests to any depth', () => {
     const r = new GLSLTarget().compile(
-      ce.box(['Dot', ['PointList', nested, 1], ['PointList', 3, 4]]),
-      { realOnly: true }
+      ce.box(['Dot', ['PointList', nested, 1], ['PointList', 3, 4]])
     );
     expect(r.success).toBe(true);
     expect(r.code).toContain('dot(vec2(dot(vec2(dot(vec3(');
@@ -426,8 +402,7 @@ describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
 
   it('glsl: a reduced component under arithmetic compiles too', () => {
     const r = new GLSLTarget().compile(
-      ce.box(['Dot', ['PointList', ['Add', inner2, 1], 0], ['PointList', 1, 2]]),
-      { realOnly: true }
+      ce.box(['Dot', ['PointList', ['Add', inner2, 1], 0], ['PointList', 1, 2]])
     );
     expect(r.success).toBe(true);
     expect(r.code).toBe(
@@ -446,7 +421,7 @@ describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
     const expr = eng.box(nested);
     // (1·1 + 2·2 + 3·3)·1 + 0·2 = 14
     expect(expr.evaluate().toString()).toBe('14');
-    const r = new JavaScriptTarget().compile(expr, { realOnly: true });
+    const r = new JavaScriptTarget().compile(expr);
     expect(r.success).toBe(true);
     expect(r.run!({})).toBe(14);
   });
@@ -457,8 +432,7 @@ describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
     // room for what stands in its slots.
     expect(() =>
       new GLSLTarget().compile(
-        ce.box(['Hypot', ['PointList', 'x', 'y'], ['PointList', 1, 2]]),
-        { realOnly: true }
+        ce.box(['Hypot', ['PointList', 'x', 'y'], ['PointList', 1, 2]])
       )
     ).toThrow(/no room for the aggregate/);
   });

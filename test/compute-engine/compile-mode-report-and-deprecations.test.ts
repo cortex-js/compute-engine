@@ -28,7 +28,9 @@ import { resetDeprecationWarnings } from '../../src/compute-engine/compilation/d
  * to live only in the standalone `compile()` export, so a caller going
  * through `ce._getCompilationTarget(name).compile(...)` — the route an
  * integration takes once it needs a specific target — got no signal at all
- * while `realOnly`/`complexPromotion` kept working.
+ * while `realOnly`/`complexPromotion` kept working. `realOnly` has since been
+ * REMOVED; both routes still warn about the key so an untyped caller learns
+ * the projection is gone rather than silently losing it.
  *
  * `x = -1` throughout: `\sqrt{x}` promotes there, and `\sqrt{x^2+1}` is the
  * "wide is real" control that must NOT promote.
@@ -51,9 +53,9 @@ function capture(fn: () => void): string[] {
 // The once-per-process warning keys are consumed by the FIRST case that
 // touches them, so a case that asserts on a key an earlier case already
 // consumed sees silence and reads it as a regression — which is how this file
-// first failed. The reset is at FILE scope, not inside the 202 describe,
-// because the 201 `realOnly` case consumes a key too and jest may run
-// describes in any order (`--randomize`).
+// first failed. The reset is at FILE scope, not inside the 202 describe, so a
+// case in any other describe that consumes a key cannot starve one that
+// asserts on it (jest may run describes in any order, `--randomize`).
 beforeEach(() => resetDeprecationWarnings());
 
 describe('201 — mode reports the resolved discipline', () => {
@@ -163,27 +165,22 @@ describe('201 — mode reports the resolved discipline', () => {
     }
   });
 
-  // `realOnly` is a RESULT projection applied after the kernel runs, so a
-  // promoted compile reports 'complex' even though the value handed back is a
-  // real `NaN`. This is the row where the reported mode and the returned value
-  // look least alike, which is exactly why it is pinned.
-  test('realOnly projects the result but does not change the reported mode', () => {
+  // A promoted compile reports 'complex' — the discipline the code was
+  // EMITTED under — even where the value handed back at a given sample point
+  // is a plain real number. This is the row where the reported mode and the
+  // returned value look least alike, which is exactly why it is pinned.
+  test('a promoted compile reports complex whatever shape a sample returns', () => {
     const ce = new ComputeEngine();
-    let r: any;
-    // `realOnly` is deprecated and warns; `capture()` keeps that off the
-    // suite output.
-    capture(() => {
-      r = compile(ce.parse('\\sqrt{x}'), {
-        to: 'javascript',
-        realOnly: true,
-      } as any) as any;
-    });
+    const r = compile(ce.parse('\\sqrt{x}'), { to: 'javascript' }) as any;
     expect(r.success).toBe(true);
     expect(r.promoted).toBe(true);
     expect(r.mode).toBe('complex');
     expect(r.code).toContain('_SYS.csqrt');
-    expect(typeof r.run({ x: -1 })).toBe('number');
-    expect(Number.isNaN(r.run({ x: -1 }))).toBe(true);
+    // `√4 = 2` is exactly real, so the complex-emitted runner returns a plain
+    // number here; at `x = -1` it returns a `{re, im}`. The mode is 'complex'
+    // for both.
+    expect(typeof r.run({ x: 4 })).toBe('number');
+    expect(typeof r.run({ x: -1 })).toBe('object');
   });
 });
 
@@ -199,7 +196,10 @@ describe('202 — deprecation warnings reach the target-level compile entry', ()
     ).toHaveLength(0);
   });
 
-  test('a target-level compile warns about realOnly, once', () => {
+  // `realOnly` is REMOVED, not merely deprecated: it no longer projects
+  // anything. The warning stays because an untyped JavaScript caller can still
+  // pass the key, and silence would let the projection disappear unnoticed.
+  test('a target-level compile warns about the removed realOnly, once', () => {
     const ce = new ComputeEngine();
     const target = (ce as any)._getCompilationTarget('javascript');
     const first = capture(() =>
@@ -232,7 +232,7 @@ describe('202 — deprecation warnings reach the target-level compile entry', ()
   // once-per-key Set is what keeps it to a single message. Nothing else pins
   // that, so a change to the normalization could start double-warning
   // undetected.
-  test('the standalone entry warns exactly once about realOnly, across both routes', () => {
+  test('the standalone entry warns exactly once about the removed realOnly, across both routes', () => {
     const ce = new ComputeEngine();
     const warnings = capture(() =>
       compile(ce.parse('\\sqrt{x}'), {

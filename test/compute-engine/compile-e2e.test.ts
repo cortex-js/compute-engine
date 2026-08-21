@@ -274,12 +274,9 @@ describe('E2E: Real-world Expressions', () => {
     // helper, so `(1/2 - 1)!` returned NaN with `success: true` while the
     // interpreter answered Γ(1/2) = √π. A chi-squared normalizing constant
     // `(k/2 - 1)!` at k = 1 made a whole compiled integrand NaN.
-    it('compiled (1/2-1)! is √π, with and without realOnly', () => {
+    it('compiled (1/2-1)! is √π', () => {
       const expr = ce.parse('(\\frac{1}{2}-1)!');
       expect(expr.N().re).toBeCloseTo(Math.sqrt(Math.PI), 12);
-      expect(compile(expr, { realOnly: true })?.run?.({})).toBe(
-        1.7724538509055159
-      );
       expect(compile(expr)?.run?.({})).toBe(1.7724538509055159);
     });
 
@@ -287,7 +284,7 @@ describe('E2E: Real-world Expressions', () => {
       for (const latex of ['(-0.5)!', '(2.5)!', '(-1.5)!', '(1.5)!']) {
         const expr = ce.parse(latex);
         const expected = expr.N().re;
-        const actual = compile(expr, { realOnly: true })?.run?.({});
+        const actual = compile(expr)?.run?.({});
         expect(typeof actual).toBe('number');
         expect(Math.abs(actual! / expected - 1)).toBeLessThan(1e-12);
       }
@@ -296,7 +293,7 @@ describe('E2E: Real-world Expressions', () => {
     it('a run-time non-integer argument goes through Γ too', () => {
       const e = new ComputeEngine();
       e.declare('x', 'number');
-      const f = compile(e.parse('x!'), { realOnly: true });
+      const f = compile(e.parse('x!'));
       expect(f?.run?.({ x: -0.5 })).toBe(1.7724538509055159);
       expect(f?.run?.({ x: 2.5 })).toBe(3.3233509704478448);
       expect(f?.run?.({ x: 5 })).toBe(120);
@@ -308,9 +305,7 @@ describe('E2E: Real-world Expressions', () => {
       // instead of the EMITTED integer fast path whose saturation behaviour is
       // what this test pins.
       const v = (latex: string) =>
-        compile(ce.parse(latex), { realOnly: true, constantFold: false })?.run?.(
-          {}
-        );
+        compile(ce.parse(latex), { constantFold: false })?.run?.({});
       expect(v('0!')).toBe(1);
       expect(v('1!')).toBe(1);
       expect(v('5!')).toBe(120);
@@ -322,15 +317,43 @@ describe('E2E: Real-world Expressions', () => {
       expect(v('171!')).toBe(Infinity);
     });
 
-    it('a negative integer (a pole of Γ) stays NaN', () => {
-      // The interpreter answers ComplexInfinity (`~oo`); a real compile
-      // target projects `~oo` to NaN, as a compiled `\tilde\infty` does.
+    it('a negative integer (a pole of Γ) is ComplexInfinity', () => {
+      // The interpreter answers ComplexInfinity (`~oo`), and the compiled
+      // runner hands back the same value in the runner's convention —
+      // `{re: Infinity, im: Infinity}`, byte-identical to what a compiled
+      // `\tilde\infty` produces.
       expect(ce.parse('(-1)!').N().toString()).toBe('~oo');
+      const cinf = { re: Infinity, im: Infinity };
+      expect(compile(ce.parse('\\tilde\\infty'))?.run?.({})).toEqual(cinf);
+      expect(compile(ce.parse('(-1)!'))?.run?.({})).toEqual(cinf);
+      expect(compile(ce.parse('(-2)!'))?.run?.({})).toEqual(cinf);
+    });
+
+    // The pole's node types `number` (the non-finite typing convention admits
+    // `~oo` only at the top type) while its VALUE is complex-shaped, so a
+    // parent that picks its codegen from the node's type emits real arithmetic
+    // around a `{re, im}` object. Constant folding hides that — it evaluates
+    // the whole variable-free expression through the interpreter — so the
+    // default path agrees with the interpreter and only the structural path
+    // diverges. Both halves are pinned here: the first is the contract, the
+    // second is a KNOWN divergence awaiting the ruling recorded in ROADMAP.md
+    // ("A `~oo` pole compiles to a complex-shaped literal though it types
+    // `number`"), not a behaviour to rely on.
+    it('a pole under a parent: folded agrees with the interpreter, structural does not', () => {
+      const cinf = { re: Infinity, im: Infinity };
+      expect(ce.parse('1 + (-1)!').N().toString()).toBe('~oo');
+      expect(compile(ce.parse('1 + (-1)!'))?.run?.({})).toEqual(cinf);
+      // The control: `\tilde\infty` types `complex`, so its parent emits
+      // complex arithmetic and agrees on BOTH paths.
       expect(
-        compile(ce.parse('(-1)!'), { realOnly: true })?.run?.({})
+        compile(ce.parse('1 + \\tilde\\infty'), { constantFold: false })?.run?.({})
+      ).toEqual(cinf);
+      // …while the derived-pole spelling does not.
+      expect(
+        compile(ce.parse('1 + (-1)!'), { constantFold: false })?.run?.({})
       ).toBeNaN();
       expect(
-        compile(ce.parse('(-2)!'), { realOnly: true })?.run?.({})
+        compile(ce.parse('2(-1)!'), { constantFold: false })?.run?.({})
       ).toBeNaN();
     });
   });

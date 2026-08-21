@@ -199,24 +199,28 @@ describe('the Python target route behaves like the JavaScript one', () => {
     expect(strict.escalation).toBeUndefined();
   });
 
-  it("forwards `realOnly` to the interpreter fallback on a decline", () => {
-    // The Python target's catch used to build its fallback WITHOUT
-    // forwarding `options.realOnly` (the standalone route forwarded it), so
-    // the interpreter-backed `run` returned an unprojected `{re, im}` where
-    // the caller had asked for the real-only projection. Same decline
-    // fixture as compile-mode-plumbing's JavaScript-route test: `Erf` is
-    // real-only, so `Erf(z)` with `z: complex` declines under strict.
+  it("the decline's interpreter fallback follows the runner's value convention", () => {
+    // The Python target builds its own fallback in its catch, so the runner
+    // contract has to be honored there and not only on the standalone route.
+    // Same decline fixture as compile-mode-plumbing's JavaScript-route test:
+    // `Erf` is real-only, so `Erf(z)` with `z: complex` declines under strict.
     const ce = new ComputeEngine();
     ce.declare('z', 'complex');
-    const r = ce._getCompilationTarget('python')!.compile(
-      ce.box(['Add', ['Erf', 'z'], 'z']),
-      { fallback: true, realOnly: true, mode: 'strict' }
-    );
+    const r = ce
+      ._getCompilationTarget('python')!
+      .compile(ce.box(['Add', ['Erf', 'z'], 'z']), {
+        fallback: true,
+        mode: 'strict',
+      });
     expect(r.success).toBe(false);
+    // An exactly-real value comes back as a plain number…
     expect(r.run!({ z: { re: 0.5, im: 0 } as never })).toBeCloseTo(
       1.0204998778130465,
       12
     );
-    expect(r.run!({ z: { re: 0, im: 1 } as never })).toBeNaN();
+    // …and a genuinely complex one as a `{re, im}`: erf(i) + i.
+    const c = r.run!({ z: { re: 0, im: 1 } as never }) as { im: number };
+    expect(typeof c).toBe('object');
+    expect(c.im).toBeCloseTo(1 + 1.650425758797543, 6);
   });
 });

@@ -4213,7 +4213,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // undefined in GLSL/WGSL and cannot be made to yield NaN (no NaN literal),
     // so it is left to the hardware — the JS target aligns this via `_SYS.pow`.
     // A genuinely fractional exponent (e.g. `x^2.5`) stays `pow`: it is
-    // undefined for a negative base mathematically too under realOnly.
+    // mathematically undefined for a negative base over the reals too.
     return `pow(${compile(base)}, ${compile(exp)})`;
   },
   Radians: 'radians',

@@ -2920,14 +2920,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
         'python',
         this.createTarget(),
         options.vars ? new Set(Object.keys(options.vars)) : undefined,
-        compileDiagnosticOf(e, error),
-        // The deprecated `realOnly` projection applies to the interpreter-
-        // backed `run` of a fallback exactly as it does to compiled code, and
-        // the standalone `compile()` export now builds no fallback of its own
-        // for a registered target — so it has to be honored here, or a
-        // `realOnly` caller whose compilation declines would get an
-        // unprojected complex value from `run`.
-        options.realOnly
+        compileDiagnosticOf(e, error)
       );
     }
   }

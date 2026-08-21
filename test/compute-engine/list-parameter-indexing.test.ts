@@ -481,7 +481,8 @@ describe('(f) a declared NON-SCALAR parameter reaches the compiled body', () => 
 
   test('a broadcast body no longer compiles to STRING CONCATENATION', () => {
     // `_fn_L([3,4])` ran `[3,4] + 1` — JS string coercion — behind
-    // `success: true`, and returned it under `realOnly: true` too.
+    // `success: true`, so a caller reading the result as a number got a
+    // string.
     for (const sig of [
       '(list<real>) -> list<real>',
       '(vector<2>) -> vector<2>',

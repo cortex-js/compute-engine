@@ -1275,11 +1275,10 @@ export interface CompilationOptions<Expr = unknown> {
    * `compileWithAutoEscalation` helper (`compilation/auto-escalation.ts`)
    * inside their `compile()`, and a CUSTOM registered target that declares
    * `'auto'` support must do the same, or its callers get the raw
-   * `LaneMismatchError` instead of the retry. The two older flags are deprecated
-   * and subordinate to this option: `complexPromotion: true` maps to
-   * `mode: 'complex'` only when no `mode` is given, and `realOnly` never
-   * selects a lowering — it projects the compiled unit's RESULT after the
-   * kernel has run. See `CompileMode` for the disciplines.
+   * `LaneMismatchError` instead of the retry. The older `complexPromotion` flag
+   * is deprecated and subordinate to this option: `true` maps to
+   * `mode: 'complex'` only when no `mode` is given. See `CompileMode` for the
+   * disciplines.
    */
   mode?: CompileMode;
 
@@ -1300,20 +1299,6 @@ export interface CompilationOptions<Expr = unknown> {
    * into an evaluation error. `implicitCompile` passes it.
    */
   entryChecks?: boolean;
-
-  /**
-   * Deprecated compatibility option. The result convention makes it
-   * unnecessary: a compiled value
-   * whose imaginary part is exactly zero is returned as a plain `number`, and
-   * a returned `{ re, im }` always has `im !== 0`, so a consumer's per-sample
-   * test is `typeof v === 'number'`. When true, the previous projection is
-   * still applied to the compiled unit's result: a `{ re, im }` collapses to `re`
-   * when the imaginary part is at roundoff scale, `NaN` otherwise; a boolean
-   * → `NaN`. It never influences which lowering an operator picks — see
-   * `mode` for that.
-   * @deprecated
-   */
-  realOnly?: boolean;
 
   /**
    * Deprecated compatibility option superseded by `mode`. Consulted only when
@@ -1488,8 +1473,7 @@ export interface CompiledRunner<R = number | ComplexResult, V = number> {
  *   `'interval-js'`), `run` and `calling` are guaranteed present.
  * - `R` — the return type of `run`. Defaults to `number | ComplexResult` (a
  *   value whose imaginary part is exactly zero is a plain `number`; a
- *   returned `ComplexResult` always has `im !== 0`). `number` under the
- *   deprecated `realOnly: true`.
+ *   returned `ComplexResult` always has `im !== 0`).
  * - `V` — the type of the variable/argument values `run` accepts. Defaults to
  *   `number`; `interval-js` binds it to `number | Interval`, a complex runner
  *   to `number | ComplexResult`. (Positioned after `R` so existing
@@ -1609,12 +1593,10 @@ export type CompilationResult<
    * exclusion is the `!isNonRealNumber(a.type.type)` conjunct guarding the
    * `notePromoted()` call in `BaseCompiler.promotesRadicalToComplex`.)
    *
-   * `mode` describes the EMISSION, not the shape of a returned value. Under
-   * the deprecated `realOnly: true` a promoted compile still reports
-   * `'complex'` while handing back a real number (or `NaN`), because
-   * `realOnly` is a projection applied to the RESULT after the complex kernel
-   * has run. The only sound per-sample test of a returned value's shape is
-   * `typeof v === 'number'`.
+   * `mode` describes the EMISSION, not the shape of a returned value: a
+   * compile that reports `'complex'` can still hand back a plain real number
+   * whenever the imaginary part of the result is exactly zero. The only sound
+   * per-sample test of a returned value's shape is `typeof v === 'number'`.
    */
   mode?: 'strict' | 'complex';
 

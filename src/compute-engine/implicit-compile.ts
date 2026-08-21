@@ -60,8 +60,9 @@ export function implicitCompile(
  * `{re, im}` here is a genuine domain escape.
  *
  * Returns `undefined` when the expression does not compile (same contract as
- * `implicitCompile`). Replaces the former `realOnly: true` option at these
- * call sites (`docs/COMPILATION-MODEL.md`).
+ * `implicitCompile`). It replaced the former `realOnly: true` compile option
+ * at these call sites, which has since been removed
+ * (`docs/COMPILATION-MODEL.md`).
  */
 export function implicitCompileNumeric(
   ce: IComputeEngine,

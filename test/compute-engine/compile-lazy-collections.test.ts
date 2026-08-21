@@ -338,7 +338,7 @@ describe('Tycho item 187 — computed Range bounds keep every element', () => {
       ['Tuple', 'i', 'i'],
       ['Element', 'i', iter],
     ] as never);
-    const r = js.compile(expr, { realOnly: true } as never);
+    const r = js.compile(expr);
     expect(r?.success).toBe(true);
     return r!.run!({ L: [1, 2, 3, 4, 5, 6, 7, 8, 9], n: 3 } as never);
   }

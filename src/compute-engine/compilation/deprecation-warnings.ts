@@ -49,12 +49,17 @@ export function resetDeprecationWarnings(): void {
 }
 
 /**
- * Warn about whichever deprecated options are PRESENT on `options`.
+ * Warn about whichever deprecated or removed options are PRESENT on
+ * `options`.
  *
  * Presence, not truthiness: `complexPromotion: false` and `realOnly: false`
- * are no-ops today, but they are still call sites that must be edited before
- * the options are removed, so they get their own (differently worded) warning
- * rather than silence. An absent key — `undefined` — warns nothing.
+ * are no-ops, but they are still call sites that must be edited, so they get
+ * their own (differently worded) warning rather than silence. An absent key —
+ * `undefined` — warns nothing.
+ *
+ * `realOnly` is no longer a typed option and no longer does anything; the
+ * warning stays because an untyped JavaScript caller can still pass the key
+ * and would otherwise see its result projection disappear in silence.
  */
 function warnDeprecatedCompileOptions(options: {
   complexPromotion?: boolean;
@@ -83,12 +88,12 @@ function warnDeprecatedCompileOptions(options: {
     if (options.realOnly === true) {
       warnDeprecatedOnce(
         'realOnly',
-        "compile(): the `realOnly` option is deprecated — a compiled value whose imaginary part is exactly zero is already returned as a plain number; test `typeof v === 'number'` instead. Note `realOnly` is an OUTPUT projection only: it does not suppress promotion or hold the real lane — pass `mode: 'strict'` for that. The projection is kept for one release."
+        "compile(): the `realOnly` option has been REMOVED and is now ignored — the result is no longer projected to a real number. A compiled value whose imaginary part is exactly zero is already returned as a plain number, so test `typeof v === 'number'` per sample and map a `{re, im}` to whatever your value boundary needs. `realOnly` never suppressed promotion nor held the real lane — pass `mode: 'strict'` for that."
       );
     } else {
       warnDeprecatedOnce(
         'realOnly:false',
-        'compile(): the `realOnly` option is deprecated — `false` applies no projection, which is already the behaviour without the option, so it can simply be dropped.'
+        'compile(): the `realOnly` option has been REMOVED — `false` applied no projection, which is the behaviour without the option, so the key can simply be dropped.'
       );
     }
   }
@@ -102,10 +107,10 @@ function warnDeprecatedCompileOptions(options: {
  *   becomes `mode: 'complex'` and `modeFromAlias` is `true`; with an explicit
  *   `mode` the flag loses. Either way the key is cleared to `undefined`, so
  *   it cannot affect promotion independently of the selected mode.
- * - `realOnly`: not normalized. It is a result projection (`{re, im}` →
- *   `NaN` unless the imaginary part is at roundoff scale, boolean → `NaN`)
- *   rather than an arithmetic discipline, and is kept working for one
- *   release; only the warning applies.
+ * - `realOnly`: removed. It was a result projection rather than an arithmetic
+ *   discipline, so it never selected a lowering and there is nothing to
+ *   normalize; a call site still passing the key gets the warning and no
+ *   projection.
  *
  * `supportsComplexMode` is whether the target this compilation will run on
  * offers `mode: 'complex'` (its `supportedModes`). Shader and interval targets

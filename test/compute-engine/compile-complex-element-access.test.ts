@@ -384,17 +384,18 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
     expect(out[1].im).toBeCloseTo(2 * Math.sqrt(1.7), 12);
   });
 
-  test('ON + realOnly: the out-of-domain value projects, exactly as with the opt-in off', () => {
+  test('the out-of-domain elements come back complex whether the opt-in is on or off', () => {
     const mj = ['Multiply', 2, ['w', 't']];
     for (const complexPromotion of [true, false]) {
       const ce = withFn('w', W);
-      const r = compile(ce.box(mj as any), {
-        realOnly: true,
-        complexPromotion,
-      })!;
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const r = compile(ce.box(mj as any), { complexPromotion })!;
+      warn.mockRestore();
       expect(r.success).toBe(true);
       expect(r.run!(IN as any)).toEqual([2 * Math.SQRT2, 2]);
-      expect(r.run!(OUT as any)).toEqual([NaN, NaN]);
+      const out = r.run!(OUT as any) as unknown as { re: number; im: number }[];
+      expect(out[0].im).toBeCloseTo(2 * Math.sqrt(0.7), 12);
+      expect(out[1].im).toBeCloseTo(2 * Math.sqrt(1.7), 12);
     }
   });
 

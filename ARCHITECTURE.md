@@ -712,14 +712,14 @@ The invariant for complex values:
 
 The roundoff scale is `ROUNDOFF_TOLERANCE` (`1e-14`) in `numerics/numeric.ts`
 — complex kernels run at machine precision regardless of `ce.precision`, so
-their dust is machine-scale. All kernel-boundary chops use it (`apply.ts`,
-`wrapRealOnly` in `compilation/javascript-target.ts`, the angular-unit
-conversion in `boxed-expression/trigonometry.ts`, the `numeric-value/`
-classes). Using `ce.tolerance` there miscoupled the user knob — tightening it
-below dust scale re-introduced the 2026-07-30 regression where
-`realOnly`-compiled `arcsin` returned `NaN` across its whole domain, and
-loosening it silently projected genuinely complex results to real (fixed
-2026-07-31).
+their dust is machine-scale. All kernel-boundary chops use it (`apply.ts`, the
+angular-unit conversion in `boxed-expression/trigonometry.ts`, the
+`numeric-value/` classes). Using `ce.tolerance` there miscoupled the user knob
+— tightening it below dust scale re-introduced the 2026-07-30 regression where
+the compiled `arcsin`, projected to the real lane, returned `NaN` across its
+whole domain, and loosening it silently projected genuinely complex results to
+real (fixed 2026-07-31; the compile-time `realOnly` projection that first
+surfaced this has since been removed).
 
 Two related cases that are neither kernel dust nor comparison:
 

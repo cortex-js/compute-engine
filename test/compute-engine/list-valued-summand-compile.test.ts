@@ -120,13 +120,15 @@ describe('big-op bodies that cannot accumulate numerically (item 121 residue)', 
     }
   });
 
-  test('`realOnly: true` never returns a non-number', () => {
-    // The overload is typed `compile(expr, {realOnly: true}):
-    // CompilationResult<T, number>`; it used to return the string "ababab".
+  test('a string-valued body never runs to a concatenated string', () => {
+    // `Σ_{i=0}^{2} "ab"` used to compile to `("ab") + ("ab") + ("ab")` and run
+    // to "ababab" behind `success: true`, where a caller reading the result as
+    // a number gets nonsense. It declines instead.
     const ce = new ComputeEngine();
-    const r = jsCompile(ce, ce.box(['Sum', { str: 'ab' }, ['Limits', 'i', 0, 2]]), {
-      realOnly: true,
-    });
+    const r = jsCompile(
+      ce,
+      ce.box(['Sum', { str: 'ab' }, ['Limits', 'i', 0, 2]])
+    );
     expect(r?.success ?? false).toBe(false);
   });
 
@@ -178,8 +180,7 @@ describe('big-op bodies that cannot accumulate numerically (item 121 residue)', 
 // scalar → scalar by definition of the lift, but not for a user function whose
 // body returns a `List`. The body took the scalar accumulation arm and JS `+`
 // concatenated the arrays: `run()` answered the STRING
-// "1,00.5403…,0.8414…-0.4161…,0.9092…" behind `success: true`, including under
-// `realOnly: true`.
+// "1,00.5403…,0.8414…-0.4161…,0.9092…" behind `success: true`.
 //
 // The type-`unknown` spellings of the same shape (`Σ_i a(i)`, `Σ_i a(t+i)` —
 // no nested call, so no lift wrapper) went through the gate's unknown arm,
@@ -225,11 +226,9 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
     expect(sumBody.type.toString()).toMatch(/vector<finite_number\^2>/);
 
     const [x, y] = [...ce.parse('A(0.3)').N().each()].map((e) => e.re);
-    // Both option shapes — `realOnly` is irrelevant to the emission.
-    for (const opts of [{ realOnly: true }, undefined] as const) {
+    {
       const r = compile(ce.parse('A(t)', { strict: false }), {
         fallback: true,
-        ...(opts ?? {}),
       });
       expect(r?.success).toBe(true);
       const v = (r as any).run({ t: 0.3 });
@@ -488,7 +487,7 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
     expect((r as any).error).toMatch(/-> list<number>/);
   });
 
-  test('every JS lowering declines: unrolled, looped, Product, realOnly', () => {
+  test('every JS lowering declines: unrolled, looped, Product', () => {
     const ce = lying();
     ce.declare('n', 'number');
     for (const expr of [
@@ -496,15 +495,12 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
       ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 'n']]), // looped
       ce.box(['Product', ['a', 'i'], ['Limits', 'i', 0, 2]]),
     ]) {
-      for (const opts of [{}, { realOnly: true }]) {
-        const r = compile(expr, {
-          fallback: true,
-          constantFold: false,
-          ...opts,
-        } as any);
-        expect(r?.success ?? false).toBe(false);
-        expect((r as any).error).toMatch(CONTRADICTED);
-      }
+      const r = compile(expr, {
+        fallback: true,
+        constantFold: false,
+      } as any);
+      expect(r?.success ?? false).toBe(false);
+      expect((r as any).error).toMatch(CONTRADICTED);
     }
   });
 

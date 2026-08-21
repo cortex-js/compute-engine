@@ -3289,8 +3289,8 @@ export function reconcileFunctionLiteralReturn(
  * CALL SITE then read the DECLARED signature (`userFunctionParamsAreScalar`),
  * saw a collection parameter and passed the list WHOLE, while the emitted BODY
  * had been compiled as scalar code: `_fn_L([3, 4])` evaluated `[3,4] + 1` and
- * returned the string `"3,41"` behind `success: true` — and under
- * `realOnly: true`, which promises a number. `|a|` degraded to `NaN` the same
+ * returned the string `"3,41"` behind `success: true`, where a caller reading
+ * the result as a number gets nonsense. `|a|` degraded to `NaN` the same
  * way. Ascribing the parameters makes the literal self-describing, and both
  * halves then read the same type (Tycho item 116).
  *

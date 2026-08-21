@@ -1,18 +1,17 @@
 /**
  * TYPE-LEVEL pin for the root `compile` export (`free-functions.ts`).
  *
- * The wrapper re-declares `compileExpr`'s overloads so its own type parameter
+ * The wrapper re-declares `compileExpr`'s signature so its own type parameter
  * flows into the result. Spelling the return as `ReturnType<typeof
  * compileExpr>` instead instantiates the generic at its constraint — every
- * call types as `CompilationResult<string>` no matter the `to:` — which (a)
- * makes `run` OPTIONAL even for executable targets, because the
- * `T extends ExecutableTarget` conditional never sees a concrete target, and
- * (b) drops the `realOnly: true` overload that narrows `run`'s values to
- * plain numbers. A consumer migrating from the
- * internal target route (`ce._getCompilationTarget(...).compile(...)`, which
- * had both right) then loses type precision at every executing call site —
- * reported by the Tycho consumer at 0.116.0 adoption, the release that told
- * them to migrate to this export.
+ * call types as `CompilationResult<string>` no matter the `to:` — which makes
+ * `run` OPTIONAL even for executable targets, because the
+ * `T extends ExecutableTarget` conditional never sees a concrete target. A
+ * consumer migrating from the internal target route
+ * (`ce._getCompilationTarget(...).compile(...)`, which had it right) then
+ * loses type precision at every executing call site — reported by the Tycho
+ * consumer at 0.116.0 adoption, the release that told them to migrate to this
+ * export.
  *
  * ts-jest typechecks this file, so the type assertions run with the suite: a
  * regression turns the `@ts-expect-error` lines into transform errors.
@@ -29,20 +28,24 @@ describe('root compile() export typing', () => {
     expect(r.run({ x: 1 })).toEqual(2);
   });
 
-  test('realOnly: true narrows run to plain numbers', () => {
-    const r = compile(ce.parse('x + 1'), { realOnly: true });
-    // Assignment fails to typecheck if the result stays number|ComplexResult.
-    const v: number = r.run({ x: 2 });
-    expect(v).toEqual(3);
+  test('explicit executable target keeps run non-optional', () => {
+    const r = compile(ce.parse('x + 1'), { to: 'javascript' });
+    expect(r.run({ x: 3 })).toEqual(4);
   });
 
-  test('explicit executable target keeps both properties', () => {
-    const r = compile(ce.parse('x + 1'), {
-      to: 'javascript',
-      realOnly: true,
-    });
-    const v: number = r.run({ x: 3 });
-    expect(v).toEqual(4);
+  test('the removed `realOnly` option is rejected by the option type', () => {
+    // The option no longer exists. An untyped JavaScript caller can still
+    // reach the key (and gets a one-time removal warning at run time), but the
+    // typed surface must reject it so a migrating consumer sees the break at
+    // build time rather than silently losing the projection.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // @ts-expect-error — `realOnly` was removed from the compile options.
+      const r = compile(ce.parse('x + 1'), { realOnly: true });
+      expect(r.run({ x: 2 })).toEqual(3);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test('source-only target: run is not callable unguarded', () => {

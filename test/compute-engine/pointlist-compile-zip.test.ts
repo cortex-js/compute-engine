@@ -66,7 +66,7 @@ describe('PointList zip — JS construction (D1)', () => {
 
   it('a single source zips against the scalar slots, and matches the interpreter', () => {
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', -6, 'n']), { realOnly: true });
+    const r = js.compile(ce.box(['PointList', -6, 'n']));
     expect(r.success).toBe(true);
     const run = r.run as (s: Record<string, unknown>) => unknown;
     expect(run({ n: [1, 2, 3] })).toEqual([
@@ -81,7 +81,7 @@ describe('PointList zip — JS construction (D1)', () => {
 
   it('two ragged sources zip to the SHORTEST (the pairing-family contract)', () => {
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', 'n', 'm']), { realOnly: true });
+    const r = js.compile(ce.box(['PointList', 'n', 'm']));
     expect(r.success).toBe(true);
     const run = r.run as (s: Record<string, unknown>) => unknown;
     expect(run({ n: [1, 2, 3], m: [10, 20] })).toEqual([
@@ -95,21 +95,21 @@ describe('PointList zip — JS construction (D1)', () => {
 
   it('an empty source yields an empty point list', () => {
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', -6, 'n']), { realOnly: true });
+    const r = js.compile(ce.box(['PointList', -6, 'n']));
     expect((r.run as (s: any) => unknown)({ n: [] })).toEqual([]);
     expect(interpret(['PointList', -6, 'n'], { n: [] })).toEqual([]);
   });
 
   it('a single-component PointList(L) is a list of 1-tuples', () => {
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', 'n']), { realOnly: true });
+    const r = js.compile(ce.box(['PointList', 'n']));
     expect(r.success).toBe(true);
     expect((r.run as (s: any) => unknown)({ n: [1, 2] })).toEqual([[1], [2]]);
   });
 
   it('all components sources: a plain zip, no slots', () => {
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', 'n', 'm']), { realOnly: true });
+    const r = js.compile(ce.box(['PointList', 'n', 'm']));
     expect((r.run as (s: any) => unknown)({ n: [1, 2], m: [3, 4] })).toEqual([
       [1, 3],
       [2, 4],
@@ -120,7 +120,7 @@ describe('PointList zip — JS construction (D1)', () => {
     const ce = zipEngine();
     ce.declare('LL', 'list<list<number>>');
     const expr = ['PointList', -6, 'LL'];
-    const r = js.compile(ce.box(expr as any), { realOnly: true });
+    const r = js.compile(ce.box(expr as any));
     expect(r.success).toBe(true);
     const arg = {
       LL: [
@@ -145,7 +145,7 @@ describe('PointList zip — JS construction (D1)', () => {
     // representation differs, the materialized elements do not.
     const ce = zipEngine();
     const big = scalarList(150);
-    const r = js.compile(ce.box(['PointList', -6, 'n']), { realOnly: true });
+    const r = js.compile(ce.box(['PointList', -6, 'n']));
     const got = (r.run as (s: any) => unknown[])({ n: big });
     expect(got).toHaveLength(150);
     expect(got[0]).toEqual([-6, 1]);
@@ -188,7 +188,7 @@ describe('PointList zip — the opaque-slot guard (D1)', () => {
 
   it('an `unknown` slot holding a number produces ordinary points', () => {
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', 'u', 'n']), { realOnly: true });
+    const r = js.compile(ce.box(['PointList', 'u', 'n']));
     expect(r.success).toBe(true);
     expect((r.run as (s: any) => unknown)({ u: 5, n: [1, 2] })).toEqual([
       [5, 1],
@@ -201,7 +201,7 @@ describe('PointList zip — the opaque-slot guard (D1)', () => {
     // source; the compiled form cannot know to, and a NaN is a self-describing
     // absence where a spliced array would be silently-wrong output.
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', 'u', 'n']), { realOnly: true });
+    const r = js.compile(ce.box(['PointList', 'u', 'n']));
     const out = (r.run as (s: any) => number[][])({ u: [9, 9], n: [1, 2] });
     expect(out).toHaveLength(2);
     for (const pt of out) {
@@ -217,18 +217,16 @@ describe('PointList zip — retained declines and their diagnostics (D1, D2)', (
 
   it('a union component declines with the revised per-component message', () => {
     const ce = zipEngine();
-    expect(() =>
-      js.compile(ce.box(['PointList', 'k', 'U']), { realOnly: true })
-    ).toThrow(
+    expect(() => js.compile(ce.box(['PointList', 'k', 'U']))).toThrow(
       /PointList: cannot compile — component 2 \(type `[^`]+`\) is neither a scalar slot nor a list source; its per-point value cannot be determined at compile time\. Fail closed \(D6\)\./
     );
   });
 
   it('a tuple component declines too (a point, not a per-point value)', () => {
     const ce = zipEngine();
-    expect(() =>
-      js.compile(ce.box(['PointList', 'p', 'n']), { realOnly: true })
-    ).toThrow(/component 1 .* is neither a scalar slot nor a list source/);
+    expect(() => js.compile(ce.box(['PointList', 'p', 'n']))).toThrow(
+      /component 1 .* is neither a scalar slot nor a list source/
+    );
   });
 
   it('a BARE `tuple` component declines — both tuple spellings are a point', () => {
@@ -236,9 +234,7 @@ describe('PointList zip — retained declines and their diagnostics (D1, D2)', (
     // node-only test read it as an `indexed_collection` SOURCE and would have
     // zipped a single point across the list.
     const ce = zipEngine();
-    expect(() =>
-      js.compile(ce.box(['PointList', 'k', 'bt']), { realOnly: true })
-    ).toThrow(
+    expect(() => js.compile(ce.box(['PointList', 'k', 'bt']))).toThrow(
       /component 2 \(type `tuple`\) is neither a scalar slot nor a list source/
     );
   });
@@ -248,9 +244,7 @@ describe('PointList zip — retained declines and their diagnostics (D1, D2)', (
     // whole, so the whole-type test read it as a source — but its per-point
     // role is statically ambiguous (list ⇒ zip, tuple ⇒ point).
     const ce = zipEngine();
-    expect(() =>
-      js.compile(ce.box(['PointList', 'k', 'lt']), { realOnly: true })
-    ).toThrow(
+    expect(() => js.compile(ce.box(['PointList', 'k', 'lt']))).toThrow(
       /component 2 \(type `list<number> \| tuple<number, number>`\) is neither a scalar slot nor a list source/
     );
   });
@@ -282,7 +276,7 @@ describe('PointList zip — retained declines and their diagnostics (D1, D2)', (
   it('a statically infinite source declines at COMPILE time (D2)', () => {
     const ce = zipEngine();
     const expr = ce.box(['PointList', -6, ['Range', 1, { num: '+Infinity' }]]);
-    expect(() => js.compile(expr, { realOnly: true })).toThrow(
+    expect(() => js.compile(expr)).toThrow(
       /PointList: source component 2 is an infinite collection — an infinite point list has no compiled value\. Fail closed \(D6\)\./
     );
     const r = js.compile(expr, { fallback: true });
@@ -299,7 +293,6 @@ describe('PointList zip — the iteration budget caps the zip length (D2)', () =
   it('an integer budget truncates the point list', () => {
     const ce = zipEngine();
     const r = js.compile(ce.box(['PointList', -6, 'n']), {
-      realOnly: true,
       iterationBudget: 2,
     } as any);
     expect(r.success).toBe(true);
@@ -312,7 +305,6 @@ describe('PointList zip — the iteration budget caps the zip length (D2)', () =
   it('a FRACTIONAL budget is floored (`new Array(2.5)` would throw)', () => {
     const ce = zipEngine();
     const r = js.compile(ce.box(['PointList', -6, 'n']), {
-      realOnly: true,
       iterationBudget: 2.5,
     } as any);
     expect(r.success).toBe(true);
@@ -326,7 +318,6 @@ describe('PointList zip — the iteration budget caps the zip length (D2)', () =
   it('a budget below 1 floors to 0 — an EMPTY point list (truncation, all the way down)', () => {
     const ce = zipEngine();
     const r = js.compile(ce.box(['PointList', -6, 'n']), {
-      realOnly: true,
       iterationBudget: 0.5,
     } as any);
     expect(r.success).toBe(true);
@@ -335,7 +326,7 @@ describe('PointList zip — the iteration budget caps the zip length (D2)', () =
 
   it('no budget: no cap', () => {
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointList', -6, 'n']), { realOnly: true });
+    const r = js.compile(ce.box(['PointList', -6, 'n']));
     expect(
       (r.run as (s: any) => unknown[])({ n: scalarList(50) })
     ).toHaveLength(50);
@@ -352,7 +343,7 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
       ['PointY', [1, 2, 3]],
     ] as const) {
       const expr = [head, ['PointList', -6, 'n']];
-      const r = js.compile(ce.box(expr as any), { realOnly: true });
+      const r = js.compile(ce.box(expr as any));
       expect(r.success).toBe(true);
       expect((r.run as (s: any) => unknown)({ n: [1, 2, 3] })).toEqual(
         expected
@@ -366,7 +357,7 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
   it('a ragged projection projects to the shorter length', () => {
     const ce = zipEngine();
     const expr = ['PointY', ['PointList', 'n', 'm']];
-    const r = js.compile(ce.box(expr as any), { realOnly: true });
+    const r = js.compile(ce.box(expr as any));
     expect(
       (r.run as (s: any) => unknown)({ n: [1, 2, 3], m: [10, 20] })
     ).toEqual([10, 20]);
@@ -391,7 +382,7 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     const ce = zipEngine();
     const expr = ['PointZ', ['PointList', -6, 'n']];
     expect(ce.box(['PointList', -6, 'n']).type.toString()).toBe('list<tuple>');
-    const r = js.compile(ce.box(expr as any), { realOnly: true });
+    const r = js.compile(ce.box(expr as any));
     const out = (r.run as (s: any) => number[])({ n: [1, 2, 3] });
     expect(out).toHaveLength(3);
     expect(out.every((v) => Number.isNaN(v))).toBe(true);
@@ -411,9 +402,7 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     const ce = zipEngine();
     const boxed = ce.box(['PointZ', ['Tuple', 1, 2]]);
     expect(boxed.isValid).toBe(false);
-    expect(() => js.compile(boxed, { realOnly: true })).toThrow(
-      /incompatible-dimensions/
-    );
+    expect(() => js.compile(boxed)).toThrow(/incompatible-dimensions/);
   });
 
   it('the `NaN` absence marker is DOMAIN-conditional: an object-domain coordinate keeps `undefined`', () => {
@@ -423,7 +412,7 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     // `undefined`, i.e. the bare access.
     const ce = zipEngine();
     ce.declare('sp', 'tuple<string, string>');
-    const r = js.compile(ce.box(['PointY', 'sp']), { realOnly: true });
+    const r = js.compile(ce.box(['PointY', 'sp']));
     expect(r.success).toBe(true);
     expect(r.code).not.toContain('?? NaN');
     // A numeric coordinate — and an out-of-range one, whose type is not
@@ -432,12 +421,8 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     // `tuple<number, number>`, which now PROVES the mismatch, so it errors at
     // type-check time instead of reaching the ABI. `bt` preserves this pin's
     // subject: an out-of-range access whose arity is not statically known.)
-    expect(
-      js.compile(ce.box(['PointY', 'p']), { realOnly: true }).code
-    ).toContain('?? NaN');
-    expect(
-      js.compile(ce.box(['PointZ', 'bt']), { realOnly: true }).code
-    ).toContain('?? NaN');
+    expect(js.compile(ce.box(['PointY', 'p'])).code).toContain('?? NaN');
+    expect(js.compile(ce.box(['PointZ', 'bt'])).code).toContain('?? NaN');
   });
 
   it('a symbol DECLARED `list<tuple>` broadcasts the accessor (widened operand test)', () => {
@@ -446,7 +431,7 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     // node-only test element-indexed instead of broadcasting.
     const ce = zipEngine();
     ce.declare('L', 'list<tuple>');
-    const r = js.compile(ce.box(['PointY', 'L']), { realOnly: true });
+    const r = js.compile(ce.box(['PointY', 'L']));
     expect(r.success).toBe(true);
     expect(r.code).toContain('.map(');
     expect(
@@ -469,7 +454,7 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     // `list<tuple>` is a type-handler change.
     const ce = zipEngine();
     const expr = ['PointY', ['PointList', -6, 'n']];
-    const r = js.compile(ce.box(expr as any), { realOnly: true });
+    const r = js.compile(ce.box(expr as any));
     expect((r.run as (s: any) => unknown)({ n: [] })).toEqual([]);
 
     const ce2 = new ComputeEngine();
@@ -481,13 +466,9 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
 
   it('Length and At consume a compiled construction', () => {
     const ce = zipEngine();
-    const len = js.compile(ce.box(['Length', ['PointList', -6, 'n']]), {
-      realOnly: true,
-    });
+    const len = js.compile(ce.box(['Length', ['PointList', -6, 'n']]));
     expect((len.run as (s: any) => unknown)({ n: [1, 2, 3] })).toBe(3);
-    const at = js.compile(ce.box(['At', ['PointList', -6, 'n'], 2]), {
-      realOnly: true,
-    });
+    const at = js.compile(ce.box(['At', ['PointList', -6, 'n'], 2]));
     expect((at.run as (s: any) => unknown)({ n: [1, 2, 3] })).toEqual([-6, 2]);
   });
 });
@@ -508,27 +489,21 @@ describe('PointList — GPU projection (D3)', () => {
 
   it('projects the source component to the vector itself', () => {
     const ce = gpuEngine();
-    const r = glsl.compile(ce.box(['PointY', ['PointList', -6, 'v']]), {
-      realOnly: true,
-    });
+    const r = glsl.compile(ce.box(['PointY', ['PointList', -6, 'v']]));
     expect(r.success).toBe(true);
     expect(r.code).toBe('v');
   });
 
   it('broadcasts a scalar slot to the source width', () => {
     const ce = gpuEngine();
-    const r = glsl.compile(ce.box(['PointX', ['PointList', -6, 'v']]), {
-      realOnly: true,
-    });
+    const r = glsl.compile(ce.box(['PointX', ['PointList', -6, 'v']]));
     expect(r.success).toBe(true);
     expect(r.code).toBe('vec3(-6.0)');
   });
 
   it('wgsl spells the broadcast `vecNf`', () => {
     const ce = gpuEngine();
-    const r = wgsl.compile(ce.box(['PointX', ['PointList', -6, 'v']]), {
-      realOnly: true,
-    });
+    const r = wgsl.compile(ce.box(['PointX', ['PointList', -6, 'v']]));
     expect(r.success).toBe(true);
     expect(r.code).toBe('vec3f(-6.0)');
   });
@@ -536,27 +511,20 @@ describe('PointList — GPU projection (D3)', () => {
   it('mixed vector<2>/vector<3> sources truncate to the shortest (swizzle)', () => {
     const ce = gpuEngine();
     expect(
-      glsl.compile(ce.box(['PointY', ['PointList', 'w2', 'v']]), {
-        realOnly: true,
-      }).code
+      glsl.compile(ce.box(['PointY', ['PointList', 'w2', 'v']])).code
     ).toBe('v.xy');
     expect(
-      glsl.compile(ce.box(['PointX', ['PointList', 'w2', 'v']]), {
-        realOnly: true,
-      }).code
+      glsl.compile(ce.box(['PointX', ['PointList', 'w2', 'v']])).code
     ).toBe('w2');
     expect(
-      wgsl.compile(ce.box(['PointY', ['PointList', 'w2', 'v']]), {
-        realOnly: true,
-      }).code
+      wgsl.compile(ce.box(['PointY', ['PointList', 'w2', 'v']])).code
     ).toBe('v.xy');
   });
 
   it('a literal List source of 2–4 elements projects', () => {
     const ce = gpuEngine();
     const r = glsl.compile(
-      ce.box(['PointY', ['PointList', -6, ['List', 1, 2, 3]]]),
-      { realOnly: true }
+      ce.box(['PointY', ['PointList', -6, ['List', 1, 2, 3]]])
     );
     expect(r.success).toBe(true);
     expect(r.code).toBe('vec3(1.0, 2.0, 3.0)');
@@ -567,9 +535,7 @@ describe('PointList — GPU projection (D3)', () => {
   it('a source of UNKNOWN length declines — and says so', () => {
     const ce = gpuEngine();
     expect(() =>
-      glsl.compile(ce.box(['PointY', ['PointList', -6, 'n']]), {
-        realOnly: true,
-      })
+      glsl.compile(ce.box(['PointY', ['PointList', -6, 'n']]))
     ).toThrow(
       /source component 2 \(type `list<number>`\) has no statically known length, and a shader vector must have one/
     );
@@ -583,7 +549,7 @@ describe('PointList — GPU projection (D3)', () => {
         // Opt out of constant folding: every operand here is a literal, so the
         // whole subtree would be evaluated at compile time and emitted as a
         // `float[5]` literal, short-circuiting the arity check under test.
-        { realOnly: true, constantFold: false }
+        { constantFold: false }
       )
     ).toThrow(
       /source component 2 has 5 elements, and a shader vector holds 2 to 4/
@@ -593,9 +559,7 @@ describe('PointList — GPU projection (D3)', () => {
   it('an `unknown` slot declines (no `vecW(<aggregate>)`) — and says so', () => {
     const ce = gpuEngine();
     expect(() =>
-      glsl.compile(ce.box(['PointY', ['PointList', 'u', 'v']]), {
-        realOnly: true,
-      })
+      glsl.compile(ce.box(['PointY', ['PointList', 'u', 'v']]))
     ).toThrow(
       /component 1 \(type `unknown`\) is neither a list source nor a provably scalar numeric slot/
     );
@@ -604,9 +568,7 @@ describe('PointList — GPU projection (D3)', () => {
   it('an IMPURE non-selected component declines (evaluate-once) — and says so', () => {
     const ce = gpuEngine();
     expect(() =>
-      glsl.compile(ce.box(['PointY', ['PointList', ['Random'], 'v']]), {
-        realOnly: true,
-      })
+      glsl.compile(ce.box(['PointY', ['PointList', ['Random'], 'v']]))
     ).toThrow(
       /component 1 is impure, and the projection would discard it unevaluated/
     );
@@ -615,9 +577,7 @@ describe('PointList — GPU projection (D3)', () => {
   it('PointZ on a 2-arity PointList keeps the fail-closed throw — and says so', () => {
     const ce = gpuEngine();
     expect(() =>
-      glsl.compile(ce.box(['PointZ', ['PointList', -6, 'v']]), {
-        realOnly: true,
-      })
+      glsl.compile(ce.box(['PointZ', ['PointList', -6, 'v']]))
     ).toThrow(/the points have arity 2, so there is no coordinate 3/);
   });
 
@@ -637,16 +597,12 @@ describe('PointList — GPU projection (D3)', () => {
     ce.declare('p3', 'tuple<number, number, number>');
     expect(ce.box(['PointZ', 'p2']).isValid).toBe(false);
     for (const target of [glsl, wgsl])
-      expect(() =>
-        target.compile(ce.box(['PointZ', 'p2']), { realOnly: true })
-      ).toThrow(/incompatible-dimensions/);
+      expect(() => target.compile(ce.box(['PointZ', 'p2']))).toThrow(
+        /incompatible-dimensions/
+      );
     // An in-range coordinate, and a 3-arity point, still swizzle.
-    expect(glsl.compile(ce.box(['PointX', 'p2']), { realOnly: true }).code).toBe(
-      'p2.x'
-    );
-    expect(glsl.compile(ce.box(['PointZ', 'p3']), { realOnly: true }).code).toBe(
-      'p3.z'
-    );
+    expect(glsl.compile(ce.box(['PointX', 'p2'])).code).toBe('p2.x');
+    expect(glsl.compile(ce.box(['PointZ', 'p3'])).code).toBe('p3.z');
   });
 
   it('PointZ on an all-scalar `PointList` (a single point) fails closed as well', () => {
@@ -656,9 +612,7 @@ describe('PointList — GPU projection (D3)', () => {
     // `incompatible-dimensions` error fires first (see the test above).
     const ce = gpuEngine();
     expect(() =>
-      glsl.compile(ce.box(['PointZ', ['PointList', -6, -7]]), {
-        realOnly: true,
-      })
+      glsl.compile(ce.box(['PointZ', ['PointList', -6, -7]]))
     ).toThrow(/incompatible-dimensions/);
   });
 
@@ -668,9 +622,7 @@ describe('PointList — GPU projection (D3)', () => {
     ce.declare('lt', 'list<number> | tuple<number, number>');
     for (const s of ['bt', 'lt'])
       expect(() =>
-        glsl.compile(ce.box(['PointY', ['PointList', -6, s]]), {
-          realOnly: true,
-        })
+        glsl.compile(ce.box(['PointY', ['PointList', -6, s]]))
       ).toThrow(
         /component 2 .* is neither a list source nor a provably scalar numeric slot/
       );
@@ -684,10 +636,7 @@ describe('PointList — GPU projection (D3)', () => {
     // message is the operand-shape one, not a projection decline reason.
     const ce = gpuEngine();
     expect(() =>
-      glsl.compile(
-        ce.box(['Multiply', 2, ['PointX', ['PointList', -6, 'v']]]),
-        { realOnly: true }
-      )
+      glsl.compile(ce.box(['Multiply', 2, ['PointX', ['PointList', -6, 'v']]]))
     ).toThrow(
       /Multiply: an operand lowers to a shader ARRAY .* which has no arithmetic operators/
     );
@@ -699,9 +648,7 @@ describe('PointList — GPU construction and the other targets are unchanged', (
     const ce = new ComputeEngine();
     ce.declare('v', 'vector<3>');
     expect(() =>
-      new GLSLTarget().compile(ce.box(['PointList', -6, 'v']), {
-        realOnly: true,
-      })
+      new GLSLTarget().compile(ce.box(['PointList', -6, 'v']))
     ).toThrow(
       /PointList: cannot compile — component 2 is collection-valued .* target 'glsl'/
     );
@@ -761,9 +708,7 @@ describe('PointList — the source predicate agrees across the two compile route
     ({ type, source }) => {
       const ce = tableEngine(type);
       const build = () =>
-        new JavaScriptTarget().compile(ce.box(['PointList', 'v3', 'c']), {
-          realOnly: true,
-        });
+        new JavaScriptTarget().compile(ce.box(['PointList', 'v3', 'c']));
       // A source zips; a non-source has no per-point value and throws D1.
       if (source) expect(build().success).toBe(true);
       else expect(build).toThrow(/is neither a scalar slot nor a list source/);
@@ -775,9 +720,7 @@ describe('PointList — the source predicate agrees across the two compile route
     ({ type, source }) => {
       const ce = tableEngine(type);
       const build = () =>
-        new GLSLTarget().compile(ce.box(['PointY', ['PointList', 'v3', 'c']]), {
-          realOnly: true,
-        });
+        new GLSLTarget().compile(ce.box(['PointY', ['PointList', 'v3', 'c']]));
       if (!source) {
         // Judged as a SLOT — the same classification the JS route reaches.
         expect(build).toThrow(
@@ -839,9 +782,7 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
     ({ type, scalar, slot }) => {
       const ce = splitEngine(type);
       const build = () =>
-        new JavaScriptTarget().compile(ce.box(['PointList', 'n', 'c']), {
-          realOnly: true,
-        });
+        new JavaScriptTarget().compile(ce.box(['PointList', 'n', 'c']));
       if (!scalar) {
         expect(build).toThrow(/is neither a scalar slot nor a list source/);
         return;
@@ -862,8 +803,7 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
     ({ type, scalar, glslRejects }) => {
       const ce = splitEngine(type);
       const glsl = new GLSLTarget();
-      const build = () =>
-        glsl.compile(ce.box(['PointList', 'x', 'c']), { realOnly: true });
+      const build = () => glsl.compile(ce.box(['PointList', 'x', 'c']));
       if (!scalar) {
         expect(build).toThrow(/is collection-valued/);
         return;
@@ -873,9 +813,7 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
         return;
       }
       // A slot emits byte-identically to the equivalent `Tuple`.
-      const tuple = glsl.compile(ce.box(['Tuple', 'x', 'c']), {
-        realOnly: true,
-      });
+      const tuple = glsl.compile(ce.box(['Tuple', 'x', 'c']));
       expect(tuple.success).toBe(true);
       expect(build().code).toBe(tuple.code);
     }

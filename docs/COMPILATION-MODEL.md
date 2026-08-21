@@ -34,9 +34,13 @@ a lane mismatch. The result records its effective mode, promotion, escalation,
 and diagnostic.
 
 Unknown-sign radical operations are the promotion trigger. Real-only kernels
-guard and project only where the model explicitly permits it. Deprecated
-`complexPromotion` and `realOnly` options are compatibility shims, not separate
-semantics.
+guard and project only where the model explicitly permits it. The deprecated
+`complexPromotion` option is a compatibility shim, not separate semantics. The
+`realOnly` option, which projected a compiled unit's RESULT to a real number
+(or `NaN`) after the kernel had run, is removed: a compiled value whose
+imaginary part is exactly zero is already returned as a plain number, so a
+consumer tests `typeof v === 'number'` per sample and maps a `{re, im}` at its
+own value boundary.
 
 The remaining quiet-machine performance measurement is tracked in
 `plans/2026-08-16-compile-complex-mode.md`.

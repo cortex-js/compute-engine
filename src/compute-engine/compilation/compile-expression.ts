@@ -26,7 +26,6 @@ export type CompileExpressionOptions<T extends string = string> = {
   imports?: unknown[];
   preamble?: string;
   fallback?: boolean;
-  realOnly?: boolean;
   complexPromotion?: boolean;
   mode?: CompileMode;
   entryChecks?: boolean;
@@ -43,10 +42,6 @@ export type CompileExpressionOptions<T extends string = string> = {
  *
  * Returns a `CompilationResult` with the generated source code and,
  * for JS-executable targets, a `run` function.
- *
- * When the deprecated `realOnly` is true, the return type of `run` is
- * narrowed to `number`; the current result convention already
- * returns an exactly-real value as a plain number).
  *
  * `mode` selects the arithmetic discipline (`'strict'` | `'complex'` |
  * `'auto'`, see `CompileMode` in `compilation/types.ts`); the effective mode
@@ -78,14 +73,6 @@ export type CompileExpressionOptions<T extends string = string> = {
  * targets always fail closed. (`Real`/`Imaginary`/`Argument`/`Conjugate` are
  * exempt: they consume a complex value by design.)
  */
-export function compile<T extends string = 'javascript'>(
-  expr: Expression,
-  options: CompileExpressionOptions<T> & { realOnly: true }
-): CompilationResult<T, number>;
-export function compile<T extends string = 'javascript'>(
-  expr: Expression,
-  options?: CompileExpressionOptions<T>
-): CompilationResult<T>;
 export function compile<T extends string = 'javascript'>(
   expr: Expression,
   options?: CompileExpressionOptions<T>
@@ -248,7 +235,6 @@ export function compile<T extends string = 'javascript'>(
       vars: options?.vars,
       imports: options?.imports,
       preamble: options?.preamble,
-      realOnly: options?.realOnly,
       complexPromotion: options?.complexPromotion,
       mode: options?.mode,
       entryChecks: options?.entryChecks,
@@ -303,8 +289,7 @@ export function compile<T extends string = 'javascript'>(
         target,
         compileTarget,
         options?.vars ? new Set(Object.keys(options.vars)) : undefined,
-        compileDiagnosticOf(e, error),
-        options?.realOnly
+        compileDiagnosticOf(e, error)
       );
     }
     throw e;
@@ -330,20 +315,15 @@ function targetSupportsMode(
 }
 
 /**
- * Map the two deprecated pre-mode options at the public entry before anything
- * is compiled:
+ * Map the deprecated pre-mode `complexPromotion` option at the public entry
+ * before anything is compiled. It is consulted only when `mode` is absent:
+ * `true` maps to `mode: 'complex'`; `false` selects nothing. With an explicit
+ * `mode` the flag is ignored (no conflict error). Every present spelling gets
+ * a one-time console warning. It is not passed on to the target: the
+ * discipline now carries the promotion.
  *
- * - `complexPromotion` — consulted only when `mode` is absent: `true` maps to
- *   `mode: 'complex'`; `false` selects nothing. With an explicit `mode` the
- *   flag is ignored (no conflict error). Every present spelling gets a
- *   one-time console warning. It is not passed on to the target: the
- *   discipline now carries the promotion.
- * - `realOnly` — retains the previous result projection
- *   (`{re, im}` → `NaN` unless the imaginary part is at roundoff scale,
- *   boolean → `NaN`), with a one-time warning. Under the current result
- *   convention,
- *   a real value is a plain `number`, a `ComplexResult` always has `im !==
- *   0` — replaces it.
+ * The removed `realOnly` option is warned about here too, on the same route,
+ * so an untyped caller still passing it learns the projection is gone.
  */
 function applyDeprecatedModeOptions<T extends string>(
   options: CompileExpressionOptions<T> | undefined

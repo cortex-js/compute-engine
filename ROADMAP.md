@@ -109,6 +109,104 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### `CompilationResult`'s default `R` excludes values the runner really returns (OPEN, needs a ruling — surfaced 2026-08-20 removing `realOnly`)
+
+`CompiledRunner<R>`, `ExpressionRunner<R>`, `LambdaRunner<R>` and
+`CompilationResult<T, R>` all default `R` to `number | ComplexResult`
+(`compilation/types.ts`). A compiled runner also returns **booleans** — a
+boolean-valued expression is not numericized, `Greater(x, 0)` runs to `true` —
+and **nested arrays** for a collection-valued result. Both are pinned
+(`compile.test.ts` "a boolean-valued expression runs to a boolean, not to 0/1";
+`compile-mode-plumbing.test.ts` "a boolean-valued decline runs to a boolean").
+So the default has been narrower than the truth for as long as those paths have
+existed; a TypeScript consumer reading `run()`'s result gets a type that
+excludes values it can actually receive.
+
+Removing `realOnly` did not cause this, but it removed the mitigation: the
+`realOnly: true` overload was the one way to obtain a genuinely narrow
+`CompilationResult<T, number>`, so callers who wanted "this really is a number"
+no longer have a spelling for it.
+
+The fork:
+
+- **Widen the default** to include `boolean` and a recursive array type. Honest,
+  but it breaks every consumer doing arithmetic on `run()`'s result without
+  narrowing first — which is the common case, and the reason the numeric-looking
+  default exists.
+- **Leave the default and document it** as "the numeric case; narrow yourself
+  for boolean- or collection-valued expressions", making the imprecision an
+  explicit, documented convenience.
+- **Reintroduce a narrowing spelling** that does not resurrect a runtime
+  projection — e.g. an `as`-style type parameter (`compile<'javascript', number>`)
+  or a `expectNumeric: true` option that only narrows the TYPE and adds no
+  runtime behavior — so a caller can re-declare the contract without the engine
+  silently coercing values.
+
+Nothing is measured here beyond the fact that the four defaults are unchanged
+since before this round; the decision is about the public contract, not about
+blast radius.
+
+### A `~oo` pole compiles to a complex-shaped literal though it types `number` (OPEN, needs a ruling — found 2026-08-20 removing `realOnly`)
+
+The non-finite typing convention (ARCHITECTURE.md § "Non-finite typing
+convention for type handlers", SYM P2-23 resolved as a convention rather than
+a lattice extension) states that **`~oo` and NaN are admitted only by the top
+type `number`** — never `complex`. Every DERIVED pole obeys it, and
+`test/compute-engine/non-finite-typing.test.ts` pins all four:
+
+| expression              | type     |
+| ----------------------- | -------- |
+| `Gamma(-2)`             | `number` |
+| `Zeta(1)`               | `number` |
+| `Factorial(-2)`         | `number` |
+| `Sqrt(NegativeInfinity)`| `number` |
+
+The `ComplexInfinity` CONSTANT is the lone exception: `ce.box('ComplexInfinity').type`
+is `complex`. That is what the convention says it must not be, and the
+disagreement is visible in compiled output, because a parent picks its codegen
+from the child NODE's type (`BaseCompiler.isComplexValued`) while the constant
+folder emits the value's own shape:
+
+| expression         | interpreter | compiled (folding on) | compiled (`constantFold: false`) |
+| ------------------ | ----------- | --------------------- | -------------------------------- |
+| `(-1)!`            | `~oo`       | `{re: ∞, im: ∞}`      | `NaN`                            |
+| `1 + (-1)!`        | `~oo`       | `{re: ∞, im: ∞}`      | `NaN`                            |
+| `1 + \tilde\infty`  | `~oo`       | `{re: ∞, im: ∞}`      | `{re: ∞, im: ∞}`                 |
+
+Folding is ON by default, so the DEFAULT user-facing path already agrees with
+the interpreter for all three rows; only the structural path (reached with
+`constantFold: false`) diverges, and only for the derived-pole spellings. The
+`\tilde\infty` row is the control: it agrees on both paths precisely because
+its node types `complex`, i.e. because of the inconsistency.
+
+This was invisible before: the removed `realOnly` option projected the
+`{re, im}` fold to `NaN` too, so every spelling and both paths answered `NaN`
+and nothing could disagree. All three rows are now pinned in
+`test/compute-engine/compile-e2e.test.ts`.
+
+**The ruling needed is which side moves**, and both directions are defensible:
+
+- **Retype the constant.** `ComplexInfinity` becomes `number`, matching the
+  documented convention and its four derived siblings. The structural path then
+  disagrees with the interpreter uniformly instead of selectively, which argues
+  for pairing it with the next option.
+- **Make the fold honor the node's type.** A node typed `number` that folds to
+  `~oo` emits `NaN` — the real lane's "no real value" — rather than a
+  `{re, im}` object a real-emitting parent will misread. This is the
+  `NO_REAL_VALUE_FOLD` policy applied to `~oo`, and it would make the default
+  path answer `NaN` where it answers `{re: ∞, im: ∞}` today, so the
+  `compile-e2e.test.ts` pins above would need updating.
+- **Widen the convention** so `~oo` is admitted by `complex`, retyping all four
+  derived poles. This contradicts ARCHITECTURE.md as written and would need
+  that section rewritten first.
+
+Measured 2026-08-20: retyping `Factorial`'s negative-integer arm to `complex`
+(the third option, applied to one head) fails exactly ONE test — the
+`non-finite-typing.test.ts` assertion that pins the convention — and changes
+**zero** snapshots across the full suite (30,749 tests). The blast radius is
+therefore small on any of the three routes; what is missing is the decision,
+not the measurement.
+
 ### Cross-term CSE could partition a region by index-dependence (OPEN, design note — deferred from the `Sum` unroll round, 2026-08-19)
 
 A `Sum`/`Product` with compile-time-constant bounds and at most 100 terms
@@ -284,43 +382,37 @@ arrow slots could ever be judged, and an unbound operand's type reads `unknown`
 declares lazy operators with arrow slots, not before. (Recorded with reasoning
 in `docs/TYPE-SYSTEM.md`.)
 
-### Static arity for INLINE literals at user-declared arrow slots (RULED 2026-08-20 — close the gap; investigated, NOT yet landed)
+### Does a function have to cover an optional/variadic tail's WIDEST call? (OPEN, type-system design question — opened 2026-08-20)
 
-**Ruled: extend the check so a user-declared arrow slot rejects a callback it
-cannot apply, the way the library's own slots do.**
+Signature subtyping now refuses an lhs that requires MORE arguments than a
+FIXED-ARITY rhs supplies, which is the direction that was unsound: an lhs
+needing two arguments cannot stand in for a signature promising callers a
+one-argument call. What is still not asked is the other half of the same rule
+— whether an lhs must also accept the WIDEST call an rhs's optional or
+variadic tail permits. Today it need not: with `lhs = () -> number` and
+`rhs = (unknown*) -> unknown`, `isSubtype` answers `true` even though a caller
+holding the rhs may pass three arguments the lhs cannot take.
 
-Investigated 2026-08-20 and NOT implemented, because the mechanism is narrower
-than this entry described and the last step needs a trace rather than a guess.
-What was established, so the next attempt does not re-derive it:
+This is a genuine fork, not an oversight, which is why it is a question rather
+than a fix:
 
-- The check **already exists** for user-declared slots — Design E §12d in
-  `boxed-expression/validate.ts`, which mints `callbackArityError` from a
-  supply derived from the slot arms' own arities. This entry's framing (that
-  only the library path checks anything) is wrong.
-- It fires in one direction and not the other. With
-  `myOp: ((number) -> number) -> number` and
-  `myOp2: (((number, number) -> number)) -> number`:
+- **Leave it.** The lattice keeps a permissive reading of a variadic bound: a
+  narrower function satisfies a wider tail. Six assertions in
+  `test/common/types.test.ts` pin this deliberately, one of them named
+  ("Nullary signature vs variadic bound"), and they are the ONLY thing in the
+  suite that depends on it — measured 2026-08-20 by adding
+  `lhs.max >= rhs.max` and running the full suite: 6 failures, all in that one
+  file, nothing else in 29,910 tests.
+- **Tighten it.** `lhs.required <= rhs.required && lhs.max >= rhs.max` becomes
+  the whole rule, matching the standard function-subtyping reading. Those six
+  pins would be rewritten, and a bound spelled `(unknown*) -> unknown` would
+  stop admitting narrower functions — which is what such a bound is usually
+  written to do, so the change is likely to be felt where variadic bounds are
+  used as "any callable".
 
-  | call                              | today                    |
-  | --------------------------------- | ------------------------ |
-  | `myOp2((a) \|-> a)` (unary at binary slot) | `callback-arity` error ✓ |
-  | `myOp((a, b) \|-> a + b)` (binary at unary slot) | ACCEPTED ✗ |
-
-- The capability probe is **not** the culprit: `arityProvablyIncapable`
-  answers `true` for BOTH directions when asked directly
-  (`arityProvablyIncapable((unknown, unknown) -> number, 1)` is `true`).
-  So §12d is never reached for the failing case — something upstream in the
-  admission ladder admits the operand first, and finding which arm does that
-  is the remaining work.
-- A gate added to `checkType` is the WRONG place and was reverted: a
-  user-declared operator's arguments do not flow through `checkType`, so the
-  gate was dead code that never fired.
-
-Trap for the next attempt: a type string like `((number) -> number) -> number`
-parses correctly, but reading its `args` through `typeToString` renders
-`"error"` because the elements are `{type: …}` wrapper records, not bare
-types — that reading cost this session an hour of chasing a parse bug that did
-not exist. Inspect `args` raw.
+Nothing is known to be wrong under the current reading; the arity hole that
+motivated the question is closed. If nothing is decided, the permissive
+reading stands and the asymmetry stays documented here.
 
 ### Element-typed comparator arms need multi-variable union arms (OPEN, type-system — opened 2026-08-19)
 
@@ -2340,7 +2432,16 @@ handoff, all verified by probe + full suite, zero snapshot churn):
 - **`Arcsec`/`Arccsc` aligned with the other six bounded heads**: pole value
   `~oo` is a member of `complex` (D10), so `poleType: 'complex'` and the
   unknown-magnitude join is `complex` (was `number`); the compiled complex
-  dispatch now treats all eight heads uniformly.
+  dispatch now treats all eight heads uniformly. **Since REVERSED** — the two
+  heads type `number` again over an unknown magnitude, because their pole at 0
+  numericizes to NaN (`arcsec(0).N()` is NaN) and NaN is a member only of
+  `number`, so a `complex` claim would exclude a value the operator actually
+  produces. Widening it again requires changing `Arcsec`/`Arccsc` evaluation to
+  produce `~oo` at the pole first; the rationale lives on `ARCSEC_DOMAIN` in
+  `src/compute-engine/library/type-handlers.ts`, and the consequence for
+  compiled code (the real lowering `Math.acos(1 / u)`, so an out-of-domain
+  argument is a real NaN where the interpreter answers a complex value) is
+  pinned in `test/compute-engine/compile-complex-result.test.ts`.
 - **GPU colour constructors decline a 4th (alpha) operand** on GLSL and WGSL
   (`assertNoGPUAlpha`, `gpu-target.ts`) instead of silently dropping it; the
   vec3 colour chain is unchanged for 3-operand forms (byte-identical).

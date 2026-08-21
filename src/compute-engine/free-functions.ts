@@ -170,24 +170,12 @@ export function factor(
   return factorExpr(toExpression(expr, options));
 }
 
-// The overloads mirror `compileExpr`'s: expressing the return as
-// `ReturnType<typeof compileExpr>` would instantiate the generic at its
-// constraint — `CompilationResult<string>`, losing the call site's target —
-// so the `T extends ExecutableTarget` conditional never sees a concrete
-// target and `run` types optional even for `javascript`. It would also lose
-// the `realOnly: true` overload that narrows `run`'s values to plain
-// numbers. The target name must flow through this wrapper's own type
-// parameter instead.
-export function compile<T extends string = 'javascript'>(
-  expr: LatexString | ExpressionInput,
-  options: CompileExpressionOptions<T> & {
-    realOnly: true;
-  } & FreeFunctionOptions
-): CompilationResult<T, number>;
-export function compile<T extends string = 'javascript'>(
-  expr: LatexString | ExpressionInput,
-  options?: CompileExpressionOptions<T> & FreeFunctionOptions
-): CompilationResult<T>;
+// The signature mirrors `compileExpr`'s rather than deriving from it:
+// expressing the return as `ReturnType<typeof compileExpr>` would instantiate
+// the generic at its constraint — `CompilationResult<string>`, losing the call
+// site's target — so the `T extends ExecutableTarget` conditional never sees a
+// concrete target and `run` types optional even for `javascript`. The target
+// name must flow through this wrapper's own type parameter instead.
 export function compile<T extends string = 'javascript'>(
   expr: LatexString | ExpressionInput,
   options?: CompileExpressionOptions<T> & FreeFunctionOptions

@@ -3877,8 +3877,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const r = Math.sqrt(c);
       // A negative constant has no real square root. `Sqrt(negative)` is typed
       // `complex`, so fold to the complex principal value the interpreter
-      // returns (`√-2` → `1.414…i`) rather than decline; under `realOnly` the
-      // runtime wrapper projects it to `NaN`. See `NO_REAL_VALUE_FOLD`.
+      // returns (`√-2` → `1.414…i`) rather than decline. See
+      // `NO_REAL_VALUE_FOLD`.
       if (Number.isNaN(r)) return complexSqrtLiteral(c);
       return String(r);
     }
@@ -7146,11 +7146,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // A caller reaching a target through `ce._getCompilationTarget(name)` and
     // invoking this method never passes through the standalone `compile()`
     // export, which is where the deprecated pre-`mode` options used to be
-    // warned about AND resolved. The options keep WORKING on this route (the
-    // emitter reads `realOnly` directly), so the omission was silent — and
-    // this is the route an integration takes once it needs a specific target,
-    // i.e. the callers with the most sites to migrate. Normalizing here as
-    // well is what makes the warning's wording true on this route: it maps
+    // warned about AND resolved. The options kept WORKING on this route, so
+    // the omission was silent — and this is the route an integration takes
+    // once it needs a specific target, i.e. the callers with the most sites to
+    // migrate. Normalizing here as well is what makes the warning's wording
+    // true on this route: it maps
     // `complexPromotion: true` onto `mode: 'complex'` and clears the alias, so
     // the flag can no longer reach `BaseCompiler`'s legacy promotion latch and
     // promote under an explicit `mode: 'strict'`. Warning is once-per-process
@@ -7192,8 +7192,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         'javascript',
         this.createTarget(),
         options.vars ? new Set(Object.keys(options.vars)) : undefined,
-        compileDiagnosticOf(e, error),
-        options.realOnly
+        compileDiagnosticOf(e, error)
       );
     }
   }
@@ -7212,7 +7211,6 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       vars,
       imports = [],
       preamble,
-      realOnly,
       iterationBudget,
       quadrature,
     } = options;
@@ -7390,12 +7388,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
 
-    const result = compileToTarget(
-      expr,
-      target,
-      realOnly,
-      options.entryChecks !== false
-    );
+    const result = compileToTarget(expr, target, options.entryChecks !== false);
     return BaseCompiler.withReferences(
       result,
       expr,
@@ -7403,29 +7396,6 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       vars ? new Set(Object.keys(vars)) : undefined
     );
   }
-}
-
-/**
- * Wrap a compiled result so non-real values are projected to a real number or,
- * when they are not representable as one, `NaN` (fail closed, D6) — the
- * `realOnly` projection, `BaseCompiler.projectRealOnly` (see its docstring for
- * the rules: complex → `re` when the imaginary part chops to zero at the
- * roundoff scale, top-level boolean → `NaN`, arrays component-wise). The same
- * projection is applied by `buildInterpreterFallback` to a decline's runner.
- */
-function wrapRealOnly(
-  result: CompilationResult<'javascript'>
-): CompilationResult<'javascript', number> {
-  const origRun = result.run;
-  const realRun = ((...args: unknown[]) =>
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-    BaseCompiler.projectRealOnly(
-      (origRun as (...args: unknown[]) => unknown)(...args)
-    )) as unknown as CompiledRunner<number>;
-  return {
-    ...result,
-    run: realRun,
-  } as CompilationResult<'javascript', number>;
 }
 
 /**
@@ -7498,16 +7468,11 @@ function varsEntryPlan(
 function compileToTarget(
   expr: Expression,
   target: CompileTarget<Expression>,
-  realOnly?: boolean,
   entryChecks = true
 ): CompilationResult<'javascript'> {
   // The discipline this compilation runs under, for the D3 entry plans built
   // after the compilation proper (when `BaseCompiler.mode` is restored).
   const mode = BaseCompiler.resolveCompileMode(target);
-  // `wrapRealOnly`'s `coerceComponents` recurses into array results, so a
-  // provably complex tuple/list component such as `(1, i)` runs to `[1, NaN]`,
-  // the same answer `(t, √t)` gives at `t = -4`. A projected `NaN` is valid
-  // output here, not a silent miscompilation.
 
   if (isFunction(expr, 'Function')) {
     const args = expr.ops;
@@ -7562,7 +7527,7 @@ function compileToTarget(
       userDefs,
       entryChecks ? lambdaEntryPlan(args.slice(1), mode) : undefined
     );
-    const result = {
+    return {
       target: 'javascript' as const,
       success: true,
       code: userDefs
@@ -7571,7 +7536,6 @@ function compileToTarget(
       calling: 'lambda' as const,
       run: fn as unknown as CompiledRunner,
     };
-    return realOnly ? wrapRealOnly(result) : result;
   }
 
   if (isSymbol(expr)) {
@@ -7581,14 +7545,13 @@ function compileToTarget(
         'a',
         'b',
       ]);
-      const result = {
+      return {
         target: 'javascript' as const,
         success: true,
         code: `(a, b) => a ${op[0]} b`,
         calling: 'lambda' as const,
         run: fn as unknown as CompiledRunner,
       };
-      return realOnly ? wrapRealOnly(result) : result;
     }
   }
 
@@ -7611,14 +7574,13 @@ function compileToTarget(
       ? varsEntryPlan(expr.engine as ComputeEngine, target.varsObjectRefs, mode)
       : undefined
   );
-  const result = {
+  return {
     target: 'javascript' as const,
     success: true,
     code: js,
     calling: 'expression' as const,
     run: fn as unknown as CompiledRunner,
   };
-  return realOnly ? wrapRealOnly(result) : result;
 }
 
 /**

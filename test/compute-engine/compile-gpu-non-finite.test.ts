@@ -9,8 +9,9 @@
  * preamble helpers on GLSL, an inline `bitcast` on WGSL. The literal path could
  * not reach it only because the formatter did not know the language.
  *
- * Consequently the `realOnly` constant-fold refusal is retired here too, the
- * same ruling the JavaScript target landed (`NO_REAL_VALUE_FOLD` /
+ * Consequently the constant-fold refusal for a provably non-real value is
+ * retired here too, the same ruling the JavaScript target landed
+ * (`NO_REAL_VALUE_FOLD` /
  * `complexSqrtLiteral`): a provably non-real constant FOLDS rather than
  * declining, to the value its own node TYPE calls for. Refusing only the
  * provable-constant case bought no safety — every sibling case
