@@ -83,7 +83,6 @@ import {
   absorbScalarsIntoCells,
 } from '../boxed-expression/arithmetic-add.js';
 import {
-  mul,
   mulFactored,
   mulN,
   canonicalDivide,
@@ -1932,9 +1931,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ops.some((x) => couldBeNumericTuple(x))
         ) {
           const tupleType = widen(
-            ...ops
-              .filter((x) => couldBeNumericTuple(x))
-              .map((x) => x.type.type)
+            ...ops.filter((x) => couldBeNumericTuple(x)).map((x) => x.type.type)
           );
           // Each element of the collection scales the point's COMPONENTS, so
           // the collection's element type widens them exactly as a declared
@@ -1959,7 +1956,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               }
               return isDeclaredScalarNumber(x) ? x.type.type : undefined;
             });
-          if (factorTypes.every((t) => t !== undefined && isSubtype(t, 'number')))
+          if (
+            factorTypes.every((t) => t !== undefined && isSubtype(t, 'number'))
+          )
             return broadcastResultType(
               scaleTupleComponents(tupleType, factorTypes as Type[])
             );

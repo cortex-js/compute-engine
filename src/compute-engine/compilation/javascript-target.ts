@@ -7617,9 +7617,9 @@ function compileToTarget(
         code: `(a, b) => a ${op[0]} b`,
         calling: 'lambda' as const,
         run: fn as unknown as CompiledRunner<
-        CompiledValue,
-        number | ComplexResult
-      >,
+          CompiledValue,
+          number | ComplexResult
+        >,
       };
     }
   }
@@ -7648,10 +7648,7 @@ function compileToTarget(
     success: true,
     code: js,
     calling: 'expression' as const,
-    run: fn as unknown as CompiledRunner<
-        CompiledValue,
-        number | ComplexResult
-      >,
+    run: fn as unknown as CompiledRunner<CompiledValue, number | ComplexResult>,
   };
 }
 

@@ -44,8 +44,7 @@ export class BoxedDictionary
    * `toString`/`valueOf` key hands the caller the inherited JS FUNCTION as if
    * it were the stored value. Every read below must therefore avoid
    * prototype-derived methods too — see `has` and `match`. */
-  private readonly _keyValues: Record<string, Expression> =
-    Object.create(null);
+  private readonly _keyValues: Record<string, Expression> = Object.create(null);
   private _type: BoxedType | undefined;
   /** Set when the input was not a well-formed dictionary. Boxing checks this
    * and returns the error INSTEAD of the half-built dictionary, so a caller

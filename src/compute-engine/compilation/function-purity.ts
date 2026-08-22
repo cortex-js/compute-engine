@@ -175,12 +175,48 @@ function paramNames(list: string): Set<string> | undefined {
  * disagree, so skipping one is observable.
  */
 const PURE_MATH_MEMBERS = new Set([
-  'abs', 'acos', 'acosh', 'asin', 'asinh', 'atan', 'atan2', 'atanh',
-  'cbrt', 'ceil', 'clz32', 'cos', 'cosh', 'exp', 'expm1', 'floor',
-  'fround', 'hypot', 'imul', 'log', 'log10', 'log1p', 'log2', 'max',
-  'min', 'pow', 'round', 'sign', 'sin', 'sinh', 'sqrt', 'tan', 'tanh',
+  'abs',
+  'acos',
+  'acosh',
+  'asin',
+  'asinh',
+  'atan',
+  'atan2',
+  'atanh',
+  'cbrt',
+  'ceil',
+  'clz32',
+  'cos',
+  'cosh',
+  'exp',
+  'expm1',
+  'floor',
+  'fround',
+  'hypot',
+  'imul',
+  'log',
+  'log10',
+  'log1p',
+  'log2',
+  'max',
+  'min',
+  'pow',
+  'round',
+  'sign',
+  'sin',
+  'sinh',
+  'sqrt',
+  'tan',
+  'tanh',
   'trunc',
-  'E', 'LN10', 'LN2', 'LOG10E', 'LOG2E', 'PI', 'SQRT1_2', 'SQRT2',
+  'E',
+  'LN10',
+  'LN2',
+  'LOG10E',
+  'LOG2E',
+  'PI',
+  'SQRT1_2',
+  'SQRT2',
 ]);
 
 /** Identifiers that denote a value rather than a binding, and are therefore
@@ -206,7 +242,11 @@ function isPureArithmetic(body: string, params: Set<string>): boolean {
   // behind a getter. `[` covers both array literals and computed member
   // access; `{` covers object literals and any block that reached here.
   if (/[[\]{}`'";]/.test(body)) return false;
-  if (/\b(new|this|await|yield|delete|void|typeof|in|instanceof|function|var|let|const)\b/.test(body))
+  if (
+    /\b(new|this|await|yield|delete|void|typeof|in|instanceof|function|var|let|const)\b/.test(
+      body
+    )
+  )
     return false;
   if (/\+\+|--/.test(body)) return false;
   if (/=>/.test(body)) return false;

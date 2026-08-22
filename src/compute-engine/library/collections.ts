@@ -2362,7 +2362,8 @@ function pointComponentAt(
         // `Nothing` would erase the slot and misalign the coordinate list
         // against the point list it was derived from.
         const comps: Expression[] = [];
-        for (const e of xs.each()) comps.push(pointComponentOf(e, position, ce));
+        for (const e of xs.each())
+          comps.push(pointComponentOf(e, position, ce));
         return ce.function('List', comps);
       }
       // Elements are not points → element indexing, like First/Second/Third.

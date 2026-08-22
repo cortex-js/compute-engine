@@ -268,7 +268,10 @@ export function compile<
     // in the strict attempt therefore never surfaces here: the target has
     // already redone the compilation under the complex discipline and set
     // `escalation` on the result.
-    return languageTarget.compile(expr, targetOptions) as CompilationResult<T, R>;
+    return languageTarget.compile(expr, targetOptions) as CompilationResult<
+      T,
+      R
+    >;
   } catch (e) {
     if (options?.fallback ?? true) {
       const error = (e as Error).message;

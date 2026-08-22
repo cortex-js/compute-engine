@@ -270,10 +270,7 @@ export function arityBounds(sig: FunctionSignature): {
  * An operand whose arity cannot be read — a bare `function`, a mixed union —
  * is conservatively CAPABLE: the check declines rather than guesses.
  */
-export function armArityCapable(
-  arm: FunctionSignature,
-  opType: Type
-): boolean {
+export function armArityCapable(arm: FunctionSignature, opType: Type): boolean {
   const opArms = signatureArms(opType);
   if (opArms === undefined) return true;
   const { min: lo, max: hi } = arityBounds(arm);

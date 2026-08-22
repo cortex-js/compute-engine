@@ -528,9 +528,6 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
   // (other than a letter, it could be a command, e.g. \alpha)
   //
   const index = parser.index;
-  // True when the symbol is spelled with a single LaTeX command (`\alpha`),
-  // i.e. not a prefixed symbol (`\operatorname{speed}`) nor an emoji run.
-  const isTriggerSpelled = id === null;
   id ??= parseSymbolToken(parser, { toplevel: true });
 
   if (id) {

@@ -934,10 +934,7 @@ export function couldMatch(a: Type, b: Type): boolean {
  * module adds no import edge (the package holds a zero-circular-dependency
  * budget, runtime and type-only alike).
  */
-function signatureParamAt(
-  sig: FunctionSignature,
-  i: number
-): Type | undefined {
+function signatureParamAt(sig: FunctionSignature, i: number): Type | undefined {
   const required = sig.args?.length ?? 0;
   if (i < required) return sig.args![i].type;
   const optional = sig.optArgs?.length ?? 0;

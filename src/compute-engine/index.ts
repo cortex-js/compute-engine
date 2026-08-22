@@ -320,9 +320,9 @@ import type {
   LanguageTarget,
   IntervalJsCompilationTarget,
   JavaScriptCompilationTarget,
+  CompilationResult,
 } from './compilation/types.js';
 import { compile as _compile } from './compilation/compile-expression.js';
-import type { CompilationResult } from './compilation/types.js';
 import { fu as _fu } from './symbolic/fu.js';
 
 /**

@@ -989,8 +989,7 @@ function arrowSlotAdmission(
   ce: ComputeEngine,
   op: Expression,
   param: Type,
-  displayParam: Type | undefined,
-  operatorName?: string
+  displayParam: Type | undefined
 ): Expression | 'admit' | undefined {
   const arms = paramArrowArms(param);
   if (arms === undefined) return undefined;
@@ -1602,13 +1601,7 @@ export function validateArguments(
       // (it is a per-call supply, not the operand's own contract), so they
       // are excluded from the final `_infer(param)` narrowing via
       // `deferredIdx`, exactly like the other provisional admissions.
-      const compat = arrowSlotAdmission(
-        ce,
-        op,
-        param,
-        displayParams[idx],
-        internals?.operatorName
-      );
+      const compat = arrowSlotAdmission(ce, op, param, displayParams[idx]);
       if (compat === 'admit') {
         result.push(op);
         deferredIdx.add(result.length - 1);
@@ -1805,8 +1798,7 @@ export function validateArguments(
         ce,
         op,
         param,
-        displayOptParams[i - params.length],
-        internals?.operatorName
+        displayOptParams[i - params.length]
       );
       if (compat === 'admit') {
         result.push(op);
@@ -1947,13 +1939,7 @@ export function validateArguments(
       }
       if (!op.type.matches(varParam)) {
         // Design E §3 compatibility admission — see the required-param gate.
-        const compat = arrowSlotAdmission(
-          ce,
-          op,
-          varParam,
-          displayVarParam,
-          internals?.operatorName
-        );
+        const compat = arrowSlotAdmission(ce, op, varParam, displayVarParam);
         if (compat === 'admit') {
           result.push(op);
           deferredIdx.add(result.length - 1);

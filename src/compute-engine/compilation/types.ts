@@ -26,11 +26,11 @@ export type TargetSource = string;
 export type CompiledFunctionEntry =
   // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
   | TargetSource
-  | Function
+  | ((args: unknown[]) => unknown)
   | {
       /** The implementation: target source text, or a JavaScript function. */
       // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-      source: TargetSource | Function;
+      source: TargetSource | ((args: unknown[]) => unknown);
       /**
        * Whether calling this has no observable effect beyond its return value.
        * Omitted, it is inferred from the source; asserted, it is believed.
@@ -1592,9 +1592,7 @@ export type ExpressionRunner<R = CompiledValue, V = number> = (
  * result.run(0.5, 1.0)
  * ```
  */
-export type LambdaRunner<R = CompiledValue, V = number> = (
-  ...args: V[]
-) => R;
+export type LambdaRunner<R = CompiledValue, V = number> = (...args: V[]) => R;
 
 /**
  * Overloaded callable that accepts both calling conventions.

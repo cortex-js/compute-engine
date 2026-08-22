@@ -58,7 +58,7 @@ const SI_PREFIXES: Record<string, number> = {
   // inherited function for `toString`/`valueOf`). `resolveUnit` tests the
   // lookup for truthiness, so `\mathrm{__proto__}` resolved as a known unit
   // and a `Sum` over an index of that name lost its index entirely.
-  __proto__: null as never,
+  '__proto__': null as never,
   'Q': 1e30,
   'R': 1e27,
   'Y': 1e24,
@@ -135,7 +135,7 @@ const PREFIXABLE_UNITS: Set<string> = new Set([
 
 const UNIT_TABLE: Record<string, UnitEntry> = {
   // Prototype-free — see `SI_PREFIXES` above.
-  __proto__: null as never,
+  '__proto__': null as never,
   // ---- SI base units ----
   'm': { dimension: [1, 0, 0, 0, 0, 0, 0, 0], scale: 1 },
   'kg': { dimension: [0, 1, 0, 0, 0, 0, 0, 0], scale: 1 },
