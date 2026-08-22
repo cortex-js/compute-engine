@@ -3954,6 +3954,47 @@ standard-library definitions), and the decline contract applies: a
 handler returning `undefined` falls back to the built-in `Which`
 lowering, coercion and frame-protocol wrapping included.
 
+**Attaching in place is the supported route for EVERY operator the
+engine already defines, not only `Which`.** Three things follow from
+re-declaring instead, and all three are silent:
+
+- A re-declaration REPLACES the stock `evaluate`/`canonical` handlers.
+  Spreading the captured definition (`ce.declare(op, {...orig, compile})`)
+  is an attempt to carry them across by hand and is not equivalent —
+  attaching to the definition `lookupDefinition` returns keeps them by
+  construction, with nothing to carry.
+- A re-declaration also replaces the definition's EFFECTS declaration,
+  and that is what decides whether a compiled `Sum`/`Product` over a
+  body mentioning the operator keeps its NaN early exit — the
+  `if (acc !== acc) return NaN;` emitted between terms, valid because
+  NaN absorbs `+` and `*`. An operator definition is GRANTED purity
+  (`pure` defaults to `true`), so a re-declaration that does not
+  mention `pure` keeps the exit; one declaring `pure: false` refuses
+  it for every such sum, since skipping terms would skip the effects
+  too. For this exit, carrying a `compile` handler costs nothing by
+  itself, whether it supplies source or declines for the target at
+  hand: the gate reads the definition's declared effects, not who
+  supplied the code. The one shape it cannot catch is a handler
+  emitting effectful source under a definition that declares no
+  effects — the same mis-declaration that already misleads
+  common-subexpression elimination.
+- Call-sharing is the one cost a handler still pays for being on a
+  re-declared definition, and it is not governed by `pure`. A
+  `compile` handler the engine did not install is a live-source
+  splice the CSE harvest cannot analyse, so every node under that
+  head is refused as a candidate and every callee body mentioning it
+  is refused with it. A self-recursive body loses the binding that
+  made its repeated self-call linear and compiles exponentially —
+  measured ×4 per two levels of `R(i,x,y) = R(i-1,x,y) +
+  0.5·S(x,y,R(i-1,x,y))`. Declaring `pure: true` on the
+  re-declaration does NOT restore sharing. Attaching in place is
+  exempt, because the definition is still the engine's own.
+
+The evaluate side is NOT symmetric with the decline contract above:
+returning `undefined` from an `evaluate` handler leaves the expression
+unevaluated rather than falling back, so a handler that means to
+delegate must call the captured original explicitly.
+
 Return `undefined` (or an empty string) to fall back to the
 default compilation (a `null` returned from untyped JavaScript is
 tolerated and treated the same). See [OperatorCompileHandler](#operatorcompilehandler).
@@ -4340,7 +4381,10 @@ If the collection is lazy, it means that the elements are not
 computed until they are needed, for example when iterating over the
 collection.
 
-Default: `true`
+Default: `false`. A collection is eager unless its definition says
+otherwise: the elements of a `List` are already materialized operands,
+so nothing is deferred. Lazy collections such as `Range` or `Map` declare
+this handler to opt in.
 
 </MemberCard>
 
@@ -4449,8 +4493,10 @@ The first element is `at(1)`, the last element is `at(-1)`.
 
 If the index is &lt;0, return the element at index `count() + index + 1`.
 
-The index can also be a string for example for records. The set of valid
-keys is returned by the `keys()` handler.
+The index can also be a string, for example for records. There is no
+handler that enumerates the valid string keys: a handler that accepts
+them decides which ones it recognizes, and returns `undefined` for the
+rest.
 
 If the index is invalid, return `undefined`.
 
@@ -8510,6 +8556,18 @@ type SymbolTable = {
   ids: {};
 };
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+### newSymbolIds() {#newsymbolids}
+
+```ts
+function newSymbolIds(): {}
+```
+
+A prototype-free [SymbolTable.ids](#ids) map — see the note there.
 
 </MemberCard>
 

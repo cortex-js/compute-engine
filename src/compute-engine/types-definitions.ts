@@ -658,23 +658,40 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * lowering, coercion and frame-protocol wrapping included.
      *
      * **Attaching in place is the supported route for EVERY operator the
-     * engine already defines, not only `Which`.** Two things follow from
-     * re-declaring instead, and both are silent:
+     * engine already defines, not only `Which`.** Three things follow from
+     * re-declaring instead, and all three are silent:
      *
      * - A re-declaration REPLACES the stock `evaluate`/`canonical` handlers.
      *   Spreading the captured definition (`ce.declare(op, {...orig, compile})`)
      *   is an attempt to carry them across by hand and is not equivalent —
      *   attaching to the definition `lookupDefinition` returns keeps them by
      *   construction, with nothing to carry.
-     * - A re-declared definition is CALLER-SUPPLIED, so every emission
-     *   mentioning that operator becomes unskippable: a compiled `Sum` or
-     *   `Product` over a body containing it loses the NaN early exit it would
-     *   otherwise carry between terms, since the compiler must assume spliced
-     *   source may count its own calls or mutate shared state. The gate keys
-     *   on the handler EXISTING, not on whether it supplies source, so a
-     *   handler that declines for the target at hand costs the exit too. A
-     *   consumer measured ~30x on a 31-term sum from this alone. Attaching in
-     *   place is exempt, because the definition is still the engine's own.
+     * - A re-declaration also replaces the definition's EFFECTS declaration,
+     *   and that is what decides whether a compiled `Sum`/`Product` over a
+     *   body mentioning the operator keeps its NaN early exit — the
+     *   `if (acc !== acc) return NaN;` emitted between terms, valid because
+     *   NaN absorbs `+` and `*`. An operator definition is GRANTED purity
+     *   (`pure` defaults to `true`), so a re-declaration that does not
+     *   mention `pure` keeps the exit; one declaring `pure: false` refuses
+     *   it for every such sum, since skipping terms would skip the effects
+     *   too. For this exit, carrying a `compile` handler costs nothing by
+     *   itself, whether it supplies source or declines for the target at
+     *   hand: the gate reads the definition's declared effects, not who
+     *   supplied the code. The one shape it cannot catch is a handler
+     *   emitting effectful source under a definition that declares no
+     *   effects — the same mis-declaration that already misleads
+     *   common-subexpression elimination.
+     * - Call-sharing is the one cost a handler still pays for being on a
+     *   re-declared definition, and it is not governed by `pure`. A
+     *   `compile` handler the engine did not install is a live-source
+     *   splice the CSE harvest cannot analyse, so every node under that
+     *   head is refused as a candidate and every callee body mentioning it
+     *   is refused with it. A self-recursive body loses the binding that
+     *   made its repeated self-call linear and compiles exponentially —
+     *   measured ×4 per two levels of `R(i,x,y) = R(i-1,x,y) +
+     *   0.5·S(x,y,R(i-1,x,y))`. Declaring `pure: true` on the
+     *   re-declaration does NOT restore sharing. Attaching in place is
+     *   exempt, because the definition is still the engine's own.
      *
      * The evaluate side is NOT symmetric with the decline contract above:
      * returning `undefined` from an `evaluate` handler leaves the expression
