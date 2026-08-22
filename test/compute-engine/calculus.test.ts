@@ -2104,9 +2104,9 @@ describe('INTEGRATE: interior pole', () => {
     expect(result.operator).toBe('Integrate');
   });
 
-  test('1/t^2 across zero is inert (was -2)', () => {
+  test('1/t^2 across zero diverges to +∞ (was -2)', () => {
     const result = evaluated('\\int_{-1}^{1} \\frac{1}{t^2} dt');
-    expect(result.operator).toBe('Integrate');
+    expect(result.toString()).toBe('+oo');
   });
 
   test('t^-3 across zero is inert (negative Power exponent)', () => {
@@ -2229,7 +2229,8 @@ describe('INTEGRATE: interior pole', () => {
     // The inert `Integrate` is the EVALUATE answer only; the numeric route is
     // unchanged, and is at least honest about its error bar.
     const n = new ComputeEngine().parse('\\int_{-1}^{1} \\frac{1}{t} dt').N();
-    expect(n.operator).toBe('Measurement');
+    // No value at all: the integrand changes sign across the pole.
+    expect(n.isNaN).toBe(true);
   });
 });
 
@@ -2320,7 +2321,11 @@ describe('INTEGRATE: interior pole — hyperbolic, reciprocal and near-bound fam
   const inert = (latex: string) => ce.parse(latex).evaluate().has('Integrate');
 
   test('a hyperbolic pole of a linear argument is detected', () => {
-    expect(inert('\\int_{-1}^{1} \\csch^2 t\\,dt')).toBe(true);
+    // csch² is positive on both sides of its pole: the integral diverges
+    // to +∞, which is what the handler now answers.
+    expect(
+      ce.parse('\\int_{-1}^{1} \\csch^2 t\\,dt').evaluate().toString()
+    ).toBe('+oo');
     expect(inert('\\int_{-1}^{1} \\coth t\\,dt')).toBe(true);
     expect(inert('\\int_{-1}^{1} \\frac{1}{\\sinh t} dt')).toBe(true);
   });
@@ -2330,16 +2335,141 @@ describe('INTEGRATE: interior pole — hyperbolic, reciprocal and near-bound fam
   });
 
   test('a root 1e-10 inside a bound is an interior pole, not an endpoint', () => {
-    expect(inert('\\int_0^1 (t-10^{-10})^{-2} dt')).toBe(true);
+    expect(
+      ce.parse('\\int_0^1 (t-10^{-10})^{-2} dt').evaluate().toString()
+    ).toBe('+oo');
   });
 
   test('a pole steep enough to overflow both samples is still a pole', () => {
-    expect(inert('\\int_{-1}^{1} t^{-300} dt')).toBe(true);
+    expect(ce.parse('\\int_{-1}^{1} t^{-300} dt').evaluate().toString()).toBe(
+      '+oo'
+    );
   });
 
   test('a double root AT the bound is an endpoint singularity, left as it was', () => {
     expect(
       ce.parse('\\int_0^1 \\frac{1}{(t-1)^2} dt').evaluate().toString()
     ).toBe('~oo');
+  });
+});
+
+describe('INTEGRATE: a divergent integral is reported as such by evaluate() and N()', () => {
+  const ce = new ComputeEngine();
+
+  test('one-signed across the pole: ±∞ on both routes', () => {
+    expect(
+      ce.parse('\\int_{-1}^{1} \\frac{1}{t^2} dt').evaluate().toString()
+    ).toBe('+oo');
+    expect(ce.parse('\\int_{-1}^{1} \\frac{1}{t^2} dt').N().toString()).toBe(
+      '+oo'
+    );
+    expect(ce.parse('\\int_{-1}^{1} \\frac{1}{t^4} dt').N().toString()).toBe(
+      '+oo'
+    );
+    expect(
+      ce.parse('\\int_{-1}^{1} -\\frac{1}{t^2} dt').evaluate().toString()
+    ).toBe('-oo');
+    expect(ce.parse('\\int_{-1}^{1} -\\frac{1}{t^2} dt').N().toString()).toBe(
+      '-oo'
+    );
+  });
+
+  test('sign-changing across the pole: inert under evaluate(), NaN under N()', () => {
+    // The Cauchy principal value of ∫₋₁¹ dt/t is 0, but the integral itself
+    // has no value; the quadrature used to report `−1.4 ± 3.6`.
+    expect(ce.parse('\\int_{-1}^{1} \\frac{1}{t} dt').evaluate().operator).toBe(
+      'Integrate'
+    );
+    expect(ce.parse('\\int_{-1}^{1} \\frac{1}{t} dt').N().isNaN).toBe(true);
+    // sec is positive before π/2 and negative after: +∞ − ∞.
+    expect(ce.parse('\\int_0^2 \\sec t\\,dt').N().isNaN).toBe(true);
+  });
+
+  test('a clean integral still integrates numerically', () => {
+    expect(ce.parse('\\int_1^2 \\frac{1}{t} dt').N().re).toBeCloseTo(
+      Math.LN2,
+      10
+    );
+  });
+});
+
+describe('INTEGRATE: divergence verdict — orientation, sign crossings, truncation, iterated form', () => {
+  const ce = new ComputeEngine();
+
+  test('reversed bounds negate the infinity on both routes', () => {
+    expect(
+      ce.parse('\\int_{1}^{-1} \\frac{1}{t^2} dt').evaluate().toString()
+    ).toBe('-oo');
+    expect(ce.parse('\\int_{1}^{-1} \\frac{1}{t^2} dt').N().toString()).toBe(
+      '-oo'
+    );
+    expect(ce.parse('\\int_{1}^{-1} -\\frac{1}{t^2} dt').N().toString()).toBe(
+      '+oo'
+    );
+  });
+
+  test('a zero between the samples does not hide the pole', () => {
+    // 1/t − 1/(2000t²) is positive at t = 0.01 and negative at t = 0.0001 on
+    // its way to −∞ from both sides; the closed form would answer 1/1000.
+    const e = ce.parse(
+      '\\int_{-1}^{1} \\left(\\frac{1}{t} - \\frac{1}{2000 t^2}\\right) dt'
+    );
+    expect(e.evaluate().toString()).toBe('-oo');
+    expect(e.N().toString()).toBe('-oo');
+  });
+
+  test('a pole lattice cut short yields no direction: inert / NaN', () => {
+    // sec² has 127 poles in [−200, 200], more than the enumeration cap; the
+    // integral diverges, but the unexamined poles could go either way.
+    const e = ce.parse('\\int_{-200}^{200} t \\sec^2(t)\\,dt');
+    expect(e.evaluate().operator).toBe('Integrate');
+    expect(e.N().isNaN).toBe(true);
+  });
+
+  test('the iterated form checks each constant-bound dimension', () => {
+    expect(
+      ce
+        .box([
+          'Integrate',
+          ['Sec', 'x'],
+          ['Limits', 'y', 0, 1],
+          ['Limits', 'x', 0, 2],
+        ])
+        .N().isNaN
+    ).toBe(true);
+    expect(
+      ce
+        .box([
+          'Integrate',
+          ['Power', 'x', -2],
+          ['Limits', 'y', 0, 1],
+          ['Limits', 'x', -1, 1],
+        ])
+        .N()
+        .toString()
+    ).toBe('+oo');
+    // A pole the integrand shows only jointly with the other variable is not
+    // claimed: the quadrature runs as before.
+    const joint = ce
+      .box([
+        'Integrate',
+        ['Divide', 'y', ['Square', 'x']],
+        ['Limits', 'y', 0, 1],
+        ['Limits', 'x', 1, 2],
+      ])
+      .N();
+    expect(joint.operator).toBe('Measurement');
+  });
+
+  test('a spare Function parameter is refused before the pole check runs', () => {
+    ce.assign('q', ce.number(0));
+    const r = ce
+      .box([
+        'Integrate',
+        ['Function', ['Divide', 1, ['Add', ['Square', 'x'], 'q']], 'x', 'q'],
+        ['Limits', 'x', -1, 1],
+      ])
+      .N();
+    expect(r.operator).toBe('Integrate');
   });
 });

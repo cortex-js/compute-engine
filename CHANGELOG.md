@@ -76,9 +76,18 @@
   `∫₋₁¹ dt/t²` to `−2`: the antiderivative was differenced at the bounds
   with no check that the integrand is bounded between them, which the
   fundamental theorem of calculus requires — both integrals diverge. The
-  `Integrate` evaluate handler now keeps such an integral inert (unevaluated,
-  as it already did when no antiderivative was found); `.N()` still reports a
-  quadrature value with its error bar. A pole is reported only when it is
+  `Integrate` evaluate handler now answers what the integral actually is:
+  `+∞` or `−∞` when the integrand keeps one sign across every interior pole
+  (`∫₋₁¹ dt/t² → +∞`, as `∫₀¹ dt/t → +∞` already did), and inert
+  (unevaluated, as it already was when no antiderivative was found) when the
+  integrand changes sign across a pole and the integral has no value at all
+  (`∫₋₁¹ dt/t`, whose principal value is 0 but whose integral is undefined).
+  `.N()` follows suit — `±∞`, or `NaN` for the sign-changing case, on either
+  bound order and in the iterated form for a dimension with constant bounds —
+  where it used to hand back a confident quadrature `Measurement` (`∫₀² sec t dt` →
+  `8.316585 ± 0.000016`, `∫₋₁¹ dt/t` → `−1.4 ± 3.6`): the adaptive
+  Gauss–Kronrod error estimate is blind to a singularity it straddles. A pole
+  is reported only when it is
   PROVEN: located exactly — as a real root of a polynomial denominator
   (`1/t`, `1/(t² − 1)`, `t⁻³`), a pole of `tan`/`cot`/`sec`/`csc` or
   `csch`/`coth` of a linear argument, or a zero of a `sin`/`cos`/`tan`/`cot`/

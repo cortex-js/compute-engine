@@ -63,7 +63,10 @@ import {
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
 import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
-import { integrandHasInteriorPole } from '../symbolic/interior-pole.js';
+import {
+  interiorPoleVerdict,
+  type PoleVerdict,
+} from '../symbolic/interior-pole.js';
 import { dSolve } from '../symbolic/differential-equations.js';
 import { rSolve } from '../symbolic/recurrences.js';
 import {
@@ -309,6 +312,35 @@ function nIntegrateMultiple(
     new Set(slots).size !== slots.length
   )
     return undefined;
+
+  // A pole strictly inside a dimension whose bounds are CONSTANT diverges
+  // the whole iterated integral, whatever the other variables do — and the
+  // nested quadrature below would report a confident finite `Measurement`
+  // for it, exactly as the single-limit path used to. `interiorPoleVerdict`
+  // substitutes only the dimension's own variable, so with any other
+  // integration variable left in the integrand its samples are not numbers
+  // and it answers `undefined` (no claim): only a divergence the integrand
+  // exhibits in that variable alone is reported. Two dimensions that each
+  // diverge in different directions leave the integral without a value.
+  const body = isFunction(fnExpr, 'Function') ? fnExpr.op1 : fnExpr;
+  let verdict: PoleVerdict | undefined;
+  for (let d = 0; d < vars.length; d++) {
+    const l = limits[d];
+    if (!isFunction(l)) continue;
+    const dependsOnVars = (e: Expression) =>
+      e.symbols.some((name) => vars.includes(name));
+    if (dependsOnVars(l.op2) || dependsOnVars(l.op3)) continue;
+    const v = interiorPoleVerdict(body, vars[d], l.op2, l.op3, ce);
+    if (v === undefined) continue;
+    verdict =
+      verdict === undefined || verdict.sign === v.sign ? v : { sign: 'mixed' };
+  }
+  if (verdict !== undefined)
+    return verdict.sign === 'positive'
+      ? ce.PositiveInfinity
+      : verdict.sign === 'negative'
+        ? ce.NegativeInfinity
+        : ce.NaN;
 
   const compiled = implicitCompile(ce, fnExpr);
   let jsf: (...args: number[]) => number;
@@ -1714,6 +1746,32 @@ volumes
             if (params.length !== 1 || params[0] !== variable) return undefined;
           }
 
+          // A pole strictly inside the bounds: the integral diverges, and no
+          // quadrature can say otherwise — the adaptive Gauss–Kronrod below
+          // would report a finite `Measurement` with a confident error bar
+          // (`∫₀² sec t dt` → `8.316585 ± 0.000016`), since its error estimate
+          // is blind to a singularity it happens to straddle. Answer what the
+          // integral actually is: `+∞`/`−∞` when the integrand keeps one sign
+          // across every pole, `NaN` when it changes sign (no value, not even
+          // an infinite one). Placed AFTER the parameter-agreement guard above,
+          // so the body examined binds nothing but the integration variable
+          // (a spare formal parameter could otherwise read a same-named
+          // global). The iterated form runs the same check per dimension in
+          // `nIntegrateMultiple`.
+          const pole = interiorPoleVerdict(
+            isFunction(fnExpr, 'Function') ? fnExpr.op1 : fnExpr,
+            variable,
+            lower,
+            upper,
+            ce
+          );
+          if (pole !== undefined)
+            return pole.sign === 'positive'
+              ? ce.PositiveInfinity
+              : pole.sign === 'negative'
+                ? ce.NegativeInfinity
+                : ce.NaN;
+
           const compiled = implicitCompile(ce, fnExpr);
           const jsf =
             (compiled?.run as (x: number) => number) ?? applicableN1(fnExpr);
@@ -1850,6 +1908,7 @@ volumes
             // case we fall back to the built-in antiderivative. With no provider
             // registered (the default), behavior is unchanged.
             let antideriv: Expression | null = null;
+            let pole: ReturnType<typeof interiorPoleVerdict>;
             // Work on the LIFTED integrand: both paths below unwrap the
             // `Function`/`Block` scaffolding anyway, and lifting it here
             // re-binds its symbols to the caller's, so they agree with the
@@ -1892,22 +1951,40 @@ volumes
                 ce.function('Limits', [ce.symbol(variable), lower, upper]),
               ]);
             } else if (
-              integrandHasInteriorPole(integrand, variable, lower, upper, ce)
+              (pole = interiorPoleVerdict(
+                integrand,
+                variable,
+                lower,
+                upper,
+                ce
+              ))
             ) {
               // The integrand is unbounded at a point STRICTLY INSIDE the
               // bounds, so the fundamental theorem of calculus does not apply
               // and the integral diverges. Differencing the antiderivative
               // anyway would report a finite value for a divergent integral
-              // (∫₋₁¹ dt/t → 0, ∫₋₁¹ dt/t² → −2). Keep the integral inert, as
-              // the "antiderivative not fully found" arm above does; `.N()`
-              // (NIntegrate quadrature) still reports a value with its error
-              // bar. `integrandHasInteriorPole` only answers `true` for a
-              // proven pole, so a correct closed form is never lost this way.
+              // (∫₋₁¹ dt/t → 0, ∫₋₁¹ dt/t² → −2). When the integrand keeps one
+              // sign on both sides of every pole the integral diverges to that
+              // infinity (∫₋₁¹ dt/t² → +∞, as ∫₀¹ dt/t → +∞ already does);
+              // when it changes sign the integral has no value, not even an
+              // infinite one, and stays inert, as the "antiderivative not
+              // fully found" arm above does. `interiorPoleVerdict` only
+              // answers for a proven pole, so a correct closed form is never
+              // lost this way.
               isIndefinite = false;
-              expr = ce.function('Integrate', [
-                expr,
-                ce.function('Limits', [ce.symbol(variable), lower, upper]),
-              ]);
+              expr =
+                pole.sign === 'positive'
+                  ? ce.PositiveInfinity
+                  : pole.sign === 'negative'
+                    ? ce.NegativeInfinity
+                    : ce.function('Integrate', [
+                        expr,
+                        ce.function('Limits', [
+                          ce.symbol(variable),
+                          lower,
+                          upper,
+                        ]),
+                      ]);
             } else {
               // The antiderivative was found in closed form. Apply the bounds
               // via `EvaluateAt`, which also supports symbolic bounds

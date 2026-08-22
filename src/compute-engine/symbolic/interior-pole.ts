@@ -5,8 +5,9 @@
 // be bounded on `[a, b]`. When it is not, differencing an antiderivative
 // produces a finite number for a divergent integral: `∫₋₁¹ dt/t` comes out as
 // `ln|1| − ln|−1| = 0` and `∫₋₁¹ dt/t²` as `−1 − 1 = −2`, when both diverge.
-// `integrandHasInteriorPole` lets the `Integrate` evaluate handler recognize
-// that case and keep the integral inert instead.
+// `interiorPoleVerdict` lets the `Integrate` evaluate handler recognize that
+// case — and tell whether the integral diverges to `+∞`, to `−∞`, or has no
+// value at all (the integrand changes sign across the pole).
 //
 // Three families of pole are located: a real root of a polynomial denominator
 // (`1/t`, `1/(t² − 1)`, `t⁻³`), a pole of a circular function of a linear
@@ -186,7 +187,10 @@ function linearArgument(
  * Add to `sites` every point of `(lo, hi)` where `c₁·t + c₀` lands on the
  * lattice `phase + kπ` — the poles of `tan`/`sec` (phase π/2) or `cot`/`csc`
  * (phase 0), and the ZEROS of `sin`/`tan` (phase 0) or `cos`/`cot` (phase
- * π/2) when one of those is a divisor.
+ * π/2) when one of those is a divisor. Returns whether the enumeration was
+ * cut short at `MAX_PERIODIC_SITES` — the poles past the cap are then
+ * unexamined, which matters to the verdict's SIGN (see
+ * `interiorPoleVerdict`), not to whether the integral diverges.
  */
 function addLatticeSites(
   phase: number,
@@ -195,18 +199,23 @@ function addLatticeSites(
   lo: number,
   hi: number,
   sites: PoleSite[]
-): void {
+): boolean {
   const linear = linearArgument(arg, variable);
-  if (linear === null) return;
+  if (linear === null) return false;
   const [c0, c1] = linear;
   // `k` at each endpoint; which one is the smaller depends on the sign of `c₁`.
   const kAt = (t: number) => (c1 * t + c0 - phase) / Math.PI;
   const kLo = Math.ceil(Math.min(kAt(lo), kAt(hi)));
   let kHi = Math.floor(Math.max(kAt(lo), kAt(hi)));
-  if (!Number.isFinite(kLo) || !Number.isFinite(kHi)) return;
-  if (kHi - kLo >= MAX_PERIODIC_SITES) kHi = kLo + MAX_PERIODIC_SITES - 1;
+  if (!Number.isFinite(kLo) || !Number.isFinite(kHi)) return false;
+  let truncated = false;
+  if (kHi - kLo >= MAX_PERIODIC_SITES) {
+    kHi = kLo + MAX_PERIODIC_SITES - 1;
+    truncated = true;
+  }
   for (let k = kLo; k <= kHi; k++)
     sites.push(exactSite((phase + k * Math.PI - c0) / c1));
+  return truncated;
 }
 
 /**
@@ -261,7 +270,8 @@ const POLE_LATTICE_PHASE: Record<string, number> = {
  *
  * Returns `null` when the walk exceeds {@link SCAN_NODE_BUDGET}, or when a
  * numeric root finder fails to converge, so the caller can tell "nothing to
- * check" from "gave up". The sites are candidates only — each must still be
+ * check" from "gave up"; `truncated` reports a pole lattice cut short at
+ * `MAX_PERIODIC_SITES`. The sites are candidates only — each must still be
  * confirmed against the integrand by {@link divergesOnSide}.
  */
 function poleSites(
@@ -270,10 +280,11 @@ function poleSites(
   lo: number,
   hi: number,
   ce: ComputeEngine
-): PoleSite[] | null {
+): { sites: PoleSite[]; truncated: boolean } | null {
   const sites: PoleSite[] = [];
   let budget = SCAN_NODE_BUDGET;
   let converged = true;
+  let truncated = false;
 
   const addPolynomialRoots = (poly: Expression): void => {
     if (!poly.has(variable)) return;
@@ -293,7 +304,8 @@ function poleSites(
     if (!isFunction(d)) return;
     const phase = ZERO_LATTICE_PHASE[d.operator];
     if (phase !== undefined)
-      addLatticeSites(phase, d.op1, variable, lo, hi, sites);
+      truncated =
+        addLatticeSites(phase, d.op1, variable, lo, hi, sites) || truncated;
     else if (d.operator === 'Sinh' || d.operator === 'Tanh')
       addOriginSite(d.op1, variable, sites);
   };
@@ -311,7 +323,8 @@ function poleSites(
       // not only under a division bar.
       const phase = POLE_LATTICE_PHASE[e.operator];
       if (phase !== undefined)
-        addLatticeSites(phase, e.op1, variable, lo, hi, sites);
+        truncated =
+          addLatticeSites(phase, e.op1, variable, lo, hi, sites) || truncated;
       else if (e.operator === 'Csch' || e.operator === 'Coth')
         addOriginSite(e.op1, variable, sites);
     }
@@ -320,30 +333,43 @@ function poleSites(
   };
 
   if (!walk(expr)) return null;
-  return converged ? sites : null;
+  return converged ? { sites, truncated } : null;
 }
 
 /**
- * `|f(x)|`, or `NaN` when the integrand does not evaluate to a number there.
+ * `f(x)` as a real number, or `NaN` when the integrand does not evaluate to a
+ * real number there (a complex branch, an unevaluated symbol).
  */
-function magnitudeAt(
+function valueAt(
   integrand: Expression,
   variable: string,
   x: number,
   ce: ComputeEngine
 ): number {
   const v = integrand.subs({ [variable]: ce.number(x) }).N();
-  if (!isNumber(v) || !v.isNumberLiteral) return NaN;
-  return Math.hypot(v.re, v.im);
+  if (!isNumber(v) || !v.isNumberLiteral || v.im !== 0) return NaN;
+  return v.re;
 }
+
+/** The sign of a divergence, as the integrand's sign on the way into it. */
+export type DivergenceSign = 'positive' | 'negative';
 
 /**
  * Whether `|f|` grows at least as fast as `1/|t − site|` on the given side of
- * `site` — i.e. whether the singularity there is strong enough to make the
- * integral diverge.
+ * `site` — i.e. whether the singularity is strong enough to make the integral
+ * diverge — and with what sign: `undefined` when it does not diverge there,
+ * `'unknown'` when it does but the sign has not settled by the closest
+ * sample.
  *
  * `side` is `+1` or `−1`; `reach` is how far from the site the sampling may go
- * without leaving the interval or crossing another candidate site.
+ * without leaving the interval or crossing another candidate site. The order
+ * of the pole is read off the MAGNITUDES at `δ` and `δ/100` — never off the
+ * signs, because an integrand can cross zero between those two samples and
+ * still diverge (`1/t − 1/(2000t²)` is positive at `t = 0.01` and negative at
+ * `t = 0.0001`, on its way to `−∞`). The sign is read off the two closest
+ * samples, `δ/100` and `δ/10⁴`: the asymptotic sign is the one that no
+ * longer changes as the site is approached, and two agreeing samples that
+ * close are taken as it; if they still disagree the direction is `'unknown'`.
  */
 function divergesOnSide(
   integrand: Expression,
@@ -352,68 +378,106 @@ function divergesOnSide(
   side: 1 | -1,
   reach: number,
   ce: ComputeEngine
-): boolean {
-  const near = magnitudeAt(integrand, variable, site + side * reach, ce);
-  const nearer = magnitudeAt(
-    integrand,
-    variable,
-    site + (side * reach) / 100,
-    ce
-  );
+): DivergenceSign | 'unknown' | undefined {
+  const near = valueAt(integrand, variable, site + side * reach, ce);
+  const nearer = valueAt(integrand, variable, site + (side * reach) / 100, ce);
 
-  // A sample that is not a number at all (a complex branch, an unevaluated
-  // symbol) is no evidence of a pole.
-  if (Number.isNaN(near) || Number.isNaN(nearer)) return false;
-  // Overflow at the closer point — whether or not the farther one overflowed
-  // too (`t⁻³⁰⁰` overflows at both sampling distances) — is a pole steeper
-  // than the order estimate below could measure.
-  if (!Number.isFinite(nearer)) return true;
-  // Overflow farther out with a FINITE value closer in is not a pole at the
-  // site at all (the blow-up is elsewhere, or the sample hit another site).
-  if (!Number.isFinite(near)) return false;
-  if (near <= 0 || nearer <= near) return false;
+  // A sample that is not a real number at all is no evidence of a pole.
+  if (Number.isNaN(near) || Number.isNaN(nearer)) return undefined;
 
-  const order = Math.log(nearer / near) / Math.log(100);
-  return order >= MIN_POLE_ORDER;
+  let diverges: boolean;
+  if (!Number.isFinite(nearer)) {
+    // Overflow at the closer point — whether or not the farther one
+    // overflowed too (`t⁻³⁰⁰` overflows at both sampling distances) — is a
+    // pole steeper than the order estimate below could measure.
+    diverges = true;
+  } else if (!Number.isFinite(near)) {
+    // Overflow farther out with a FINITE value closer in is not a pole at the
+    // site at all (the blow-up is elsewhere, or the sample hit another site).
+    return undefined;
+  } else {
+    const ratio = Math.abs(nearer) / Math.abs(near);
+    if (!(ratio > 1)) return undefined;
+    diverges = Math.log(ratio) / Math.log(100) >= MIN_POLE_ORDER;
+  }
+  if (!diverges) return undefined;
+
+  const nearest = valueAt(integrand, variable, site + (side * reach) / 1e4, ce);
+  if (Number.isNaN(nearest) || nearer === 0 || nearest === 0) return 'unknown';
+  if (Math.sign(nearer) !== Math.sign(nearest)) return 'unknown';
+  return nearest > 0 ? 'positive' : 'negative';
 }
 
 /**
- * Whether `integrand` has a pole strictly between the bounds `lower` and
- * `upper` of a definite integral in `variable`.
+ * What a definite integral with a proven interior pole diverges TO.
  *
- * `true` means a pole was PROVEN: a point of the open interval was located
- * exactly — as a real root of a polynomial denominator, or as a pole of a
- * circular or hyperbolic function of a linear argument — AND the integrand
- * was confirmed by sampling to grow at least as fast as `1/|t − site|` on
- * both sides of it. The second half is what makes a cancelling denominator
- * such as `(t² − 1)/(t − 1)` — bounded at `t = 1` — and an integrable
- * singularity such as `1/√(t − r)` report `false`.
+ * - `positive`: the integrand is positive on both sides of every proven pole
+ *   (`1/t²` across 0), so the integral diverges to `+∞`;
+ * - `negative`: negative on both sides of every pole (`−1/t²`), so `−∞`;
+ * - `mixed`: the integrand changes sign across a pole (`1/t` across 0 — the
+ *   Cauchy principal value is 0, but the integral itself is undefined) or
+ *   different poles diverge in different directions; the integral has no
+ *   value, not even an infinite one;
+ * - `unknown`: the integral diverges, but its direction could not be
+ *   established — the sign had not settled by the closest sample, or a pole
+ *   lattice was cut short at `MAX_PERIODIC_SITES` and the unexamined poles
+ *   could diverge the other way. Callers treat it as `mixed`: no value.
  *
- * `false` means "not proven", never "no pole": bounds that are not finite real
- * numbers, a denominator that is neither polynomial nor one of the circular/
- * hyperbolic functions above (`ln t`, `eᵗ − 1`), a denominator with another
- * free symbol, or a root finder that did not converge all report `false` so
- * the caller keeps its existing behavior.
+ * The sign is that of the ORIENTED integral: for reversed bounds
+ * (`∫₁⁻¹ dt/t²`, which is `−∫₋₁¹ dt/t²`) `positive` and `negative` are
+ * swapped, as the antiderivative difference and the quadrature both negate
+ * a reversed range.
  */
-export function integrandHasInteriorPole(
+export type PoleVerdict = {
+  sign: DivergenceSign | 'mixed' | 'unknown';
+};
+
+/**
+ * Whether — and toward what — `integrand` diverges at a pole strictly between
+ * the bounds `lower` and `upper` of a definite integral in `variable`:
+ * a {@link PoleVerdict} when a pole was PROVEN, `undefined` otherwise.
+ *
+ * "Proven" means a point of the open interval was located exactly — as a
+ * real root of a polynomial denominator, or as a pole of a circular or
+ * hyperbolic function of a linear argument — AND the integrand was confirmed
+ * by sampling to grow at least as fast as `1/|t − site|` on both sides of it.
+ * The second half is what makes a cancelling denominator such as
+ * `(t² − 1)/(t − 1)` — bounded at `t = 1` — and an integrable singularity such
+ * as `1/√(t − r)` report `undefined`.
+ *
+ * `undefined` means "not proven", never "no pole": bounds that are not finite
+ * real numbers, a denominator that is neither polynomial nor one of the
+ * circular/hyperbolic functions above (`ln t`, `eᵗ − 1`), a denominator with
+ * another free symbol, or a root finder that did not converge all report
+ * `undefined` so the caller keeps its existing behavior. Every candidate is
+ * examined (no early exit) so that the verdict's sign accounts for every
+ * pole in the range.
+ *
+ * The bounds may be expressions or plain numbers; a symbolic or infinite
+ * bound switches the detection off.
+ */
+export function interiorPoleVerdict(
   integrand: Expression,
   variable: string,
-  lower: Expression | undefined,
-  upper: Expression | undefined,
+  lower: Expression | number | undefined,
+  upper: Expression | number | undefined,
   ce: ComputeEngine
-): boolean {
-  const a = finiteRealValue(lower);
-  const b = finiteRealValue(upper);
-  if (a === null || b === null) return false;
+): PoleVerdict | undefined {
+  const a = typeof lower === 'number' ? lower : finiteRealValue(lower);
+  const b = typeof upper === 'number' ? upper : finiteRealValue(upper);
+  if (a === null || b === null || !Number.isFinite(a) || !Number.isFinite(b))
+    return undefined;
 
   // The bounds may be given in either order (`∫₂¹`); the interior is the same.
   const lo = Math.min(a, b);
   const hi = Math.max(a, b);
-  if (!(lo < hi)) return false;
+  if (!(lo < hi)) return undefined;
 
-  const sites = poleSites(integrand, variable, lo, hi, ce);
-  if (sites === null || sites.length === 0) return false;
+  const scan = poleSites(integrand, variable, lo, hi, ce);
+  if (scan === null || scan.sites.length === 0) return undefined;
+  const sites = scan.sites;
 
+  let verdict: PoleVerdict | undefined;
   for (const site of sites) {
     // Outside the range, or AT a bound (an endpoint singularity, not an
     // interior pole — see `PoleSite`).
@@ -428,12 +492,45 @@ export function integrandHasInteriorPole(
         reach = Math.min(reach, Math.abs(other.t - site.t) / 100);
     if (!(reach > 0)) continue;
 
-    if (
-      divergesOnSide(integrand, variable, site.t, -1, reach, ce) &&
-      divergesOnSide(integrand, variable, site.t, 1, reach, ce)
-    )
-      return true;
-  }
+    const left = divergesOnSide(integrand, variable, site.t, -1, reach, ce);
+    const right = divergesOnSide(integrand, variable, site.t, 1, reach, ce);
+    if (left === undefined || right === undefined) continue;
 
-  return false;
+    const sign: PoleVerdict['sign'] =
+      left === 'unknown' || right === 'unknown'
+        ? 'unknown'
+        : left === right
+          ? left
+          : 'mixed';
+    if (verdict === undefined) verdict = { sign };
+    else if (verdict.sign !== sign) verdict = { sign: 'mixed' };
+  }
+  if (verdict === undefined) return undefined;
+
+  // Poles past the enumeration cap were not examined: the integral diverges
+  // (a proven pole suffices for that) but its direction is not established.
+  if (scan.truncated && verdict.sign !== 'mixed') verdict = { sign: 'unknown' };
+
+  // Orientation: a reversed range negates the integral.
+  if (a > b) {
+    if (verdict.sign === 'positive') verdict = { sign: 'negative' };
+    else if (verdict.sign === 'negative') verdict = { sign: 'positive' };
+  }
+  return verdict;
+}
+
+/**
+ * Whether `integrand` has a proven pole strictly between the bounds — see
+ * {@link interiorPoleVerdict}, of which this is the yes/no reading.
+ */
+export function integrandHasInteriorPole(
+  integrand: Expression,
+  variable: string,
+  lower: Expression | number | undefined,
+  upper: Expression | number | undefined,
+  ce: ComputeEngine
+): boolean {
+  return (
+    interiorPoleVerdict(integrand, variable, lower, upper, ce) !== undefined
+  );
 }
