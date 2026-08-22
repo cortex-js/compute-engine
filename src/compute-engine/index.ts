@@ -1029,6 +1029,10 @@ export class ComputeEngine implements IComputeEngine {
     this._configurationLifecycle.ephemeralWriteDepth = value;
   }
 
+  get _scratchDeclarationScopes(): object[] {
+    return this._configurationLifecycle.scratchDeclarationScopes;
+  }
+
   /** See `IComputeEngine._checkpointWindow`.
    * @internal */
   _checkpointWindow: CheckpointWindow | undefined = undefined;

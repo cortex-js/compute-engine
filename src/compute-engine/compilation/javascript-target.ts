@@ -9020,13 +9020,15 @@ function emitSumProduct(
         if (!asStatements) return `(${terms.join(` ${op} `)})`;
 
         // May the accumulation stop at the first NaN? Only if skipping the
-        // remaining terms is unobservable — a term that splices
-        // caller-supplied source (a `functions` entry, a string-valued `vars`
-        // symbol, an operator the caller re-mapped or gave a `compile`
-        // handler) can count its own calls or mutate shared state, so it has
-        // to run as many times as the flat chain ran it. The trees a term
-        // emits are the body plus the bounds of the nested clauses it unrolls
-        // or loops over.
+        // remaining terms is unobservable — a term with an observable effect
+        // can count its own calls or mutate shared state, so it has to run as
+        // many times as the flat chain ran it. The question is EFFECTS, not
+        // who supplied the code: `isEmissionSkippable` asks each spelling's
+        // purity oracle (a `functions` entry's declared or inferred purity,
+        // the definition behind a caller `compile` handler, `isPure` for
+        // everything else) and refuses a spelling no oracle can answer for.
+        // The trees a term emits are the body plus the bounds of the nested
+        // clauses it unrolls or loops over.
         const canExitEarly = BaseCompiler.isEmissionSkippable(
           [
             body,
@@ -9129,12 +9131,42 @@ function emitSumProduct(
     // scalar NaN; without the latch the NEXT iteration would broadcast that
     // NaN back over the new term's shape, so whether the result was a scalar
     // NaN or an array of NaNs depended on which shape came last. The latch
-    // short-circuits to the stable scalar NaN — the same mismatch projection
-    // as `_SYS.select`. (At this ABI an error and a legitimate NaN are
+    // projects to the stable scalar NaN — the same mismatch projection as
+    // `_SYS.select`. (At this ABI an error and a legitimate NaN are
     // indistinguishable, so a genuinely-NaN scalar term followed by array
     // terms also latches — the standing error-vs-NaN seam, tracked in
     // ROADMAP. `${acc} !== ${acc}` is false for an array, true only for NaN.)
-    return `(() => { let ${acc} = null; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = ${acc} === null ? (Array.isArray(${val}) ? ${val}.slice() : ${val}) : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val}); if (${acc} !== ${acc}) return NaN; ${index}++; } return ${acc} === null ? ${identity} : ${acc}; })()`;
+    //
+    // The latch has two separable jobs, and only one of them may skip work.
+    // Projecting the SHAPE is unconditional — it is what makes the result
+    // independent of which term came last. STOPPING the loop is an
+    // optimization, and it is only sound when the terms it skips have no
+    // observable effect, exactly as the two scalar arms above ask through
+    // `isEmissionSkippable`. So an effectful body keeps iterating and
+    // remembers the mismatch in a flag, answering the same scalar NaN at the
+    // end: `Sum(Random()·[1,1], n=1..31)` draws 31 times either way, while a
+    // pure body still exits at the first NaN. The gate is the same call the
+    // loop arm makes below, on the same trees.
+    const elementwiseExit = BaseCompiler.isEmissionSkippable(
+      [
+        body,
+        ...rest.flatMap((c) => {
+          const l = extractLimits(c);
+          return [l.lowerExpr, l.upperExpr];
+        }),
+      ],
+      [index, ...rest.map((c) => extractLimits(c).index)],
+      target
+    );
+    const fold = `${acc} = ${acc} === null ? (Array.isArray(${val}) ? ${val}.slice() : ${val}) : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val});`;
+    if (elementwiseExit)
+      return `(() => { let ${acc} = null; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${fold} if (${acc} !== ${acc}) return NaN; ${index}++; } return ${acc} === null ? ${identity} : ${acc}; })()`;
+    // The flag, not the accumulator, carries the verdict to the end: once the
+    // fold has collapsed to a scalar NaN the following iteration broadcasts it
+    // back over the next term's shape, so `${acc}` is an array again by the
+    // time the loop finishes and cannot be re-tested for it.
+    const latched = BaseCompiler.tempVar(target);
+    return `(() => { let ${acc} = null; let ${latched} = false; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${fold} if (${acc} !== ${acc}) ${latched} = true; ${index}++; } return ${latched} ? NaN : (${acc} === null ? ${identity} : ${acc}); })()`;
   }
 
   if (bodyIsComplex) {
@@ -9151,9 +9183,9 @@ function emitSumProduct(
   // accumulator is NaN no remaining iteration can change the answer and
   // running them is pure cost — unbounded cost, since this arm is reached
   // precisely when the trip count is large or symbolic. Gated exactly as the
-  // unroll arm's exit is: an iteration that splices caller-supplied source can
-  // count its own calls or mutate shared state, so it has to run as many times
-  // as the unguarded loop ran it. The trees an iteration emits are the body
+  // unroll arm's exit is: an iteration with an observable effect can count its
+  // own calls or mutate shared state, so it has to run as many times as the
+  // unguarded loop ran it. The trees an iteration emits are the body
   // plus the bounds of the nested clauses it loops over (evaluated per outer
   // iteration); this clause's own bounds are computed once, outside the loop.
   const loopExit = BaseCompiler.isEmissionSkippable(

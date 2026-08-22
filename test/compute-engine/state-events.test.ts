@@ -15,6 +15,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import {
   axisMaskOf,
+  callableAxisSelects,
   type StateEvent,
   type AxisMask,
 } from '../../src/compute-engine/engine-configuration-lifecycle';
@@ -58,6 +59,22 @@ describe('axisMaskOf: the parity dispatch table, row by row', () => {
       'declare (shadowing a callable)',
       { kind: 'declare', callable: false, shadowsCallable: true },
       mask(true, false, false),
+    ],
+    // declare (scratch): the zero mask. The binding's target scope is one a
+    // computation on the stack pushed and will pop, so nothing outside can
+    // hold a cached answer that depends on it — and advancing the axis would
+    // retire the `_type`/`_sgn` caches the enclosing computation is filling.
+    // Set only on the resolved-scope test in `declareSymbolValue` /
+    // `declareSymbolOperator`, never on "a scratch extent is running".
+    [
+      'declare (scratch)',
+      { kind: 'declare', callable: false, shadowsCallable: false, scratch: true },
+      mask(false, false, false),
+    ],
+    [
+      'declare (scratch, callable)',
+      { kind: 'declare', callable: true, shadowsCallable: false, scratch: true },
+      mask(false, false, false),
     ],
     // binding-repair: G only (§2: updateDef internal, minted-ctor removal).
     ['binding-repair', { kind: 'binding-repair' }, mask(true, false, false)],
@@ -317,6 +334,28 @@ describe('end-to-end advancement (legacy counters, public API)', () => {
     const m = advanced(() => ce.declare('zprobe', 'integer'));
     expect(m.any).toBe(true);
     expect(m.world).toBe(false);
+  });
+
+  test('a scratch declare selects no callable axis, whatever it is shaped like', () => {
+    for (const callable of [false, true])
+      for (const shadowsCallable of [false, true])
+        expect(
+          callableAxisSelects({
+            kind: 'declare',
+            callable,
+            shadowsCallable,
+            scratch: true,
+          })
+        ).toBe(false);
+    // The same payloads without `scratch` DO select it, so the row above is
+    // the flag's doing and not an accident of the other two fields.
+    expect(
+      callableAxisSelects({
+        kind: 'declare',
+        callable: true,
+        shadowsCallable: false,
+      })
+    ).toBe(true);
   });
 });
 

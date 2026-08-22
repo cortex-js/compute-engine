@@ -373,7 +373,7 @@ The remaining open question in this family is a different one — the rule is
 not transitive through a user-defined function body — and it has its own entry
 above.
 
-### The element-wise `Sum`/`Product` NaN latch is ungated by effects (OPEN, found 2026-08-21 while correcting the `compile` handler docs)
+### The element-wise `Sum`/`Product` NaN latch was ungated by effects (FIXED 2026-08-21)
 
 The effects rule that decides the NaN early exit reaches the two SCALAR arms
 of the JavaScript big-operator lowering — the unrolled flat chain and the
@@ -398,11 +398,85 @@ separate the two roles — latch the SHAPE (remember that a mismatch
 happened) without also stopping the loop — rather than gate the existing
 emission on `isEmissionSkippable`.
 
-Demand-gated: no consumer has reported it, and an effectful element-wise
-big-operator body is a rare shape. Recorded because the scalar half of the
-same rule shipped in 0.118.0 and the asymmetry is now documented on
-`OperatorCompileHandler` (`types-definitions.ts`), where a reader will
-reasonably expect the guarantee to be uniform.
+Fixed by splitting the two roles rather than gating the emission. The SHAPE
+projection stays unconditional — that is what makes the answer independent of
+which term came last — while STOPPING the loop is now taken only when
+`BaseCompiler.isEmissionSkippable` vouches for the skipped terms, the same
+call and the same trees the two scalar arms use. An effectful body sets a
+flag instead of returning, keeps iterating, and answers the same scalar NaN
+at the end; the flag rather than the accumulator carries the verdict, because
+once the fold has collapsed to a scalar NaN the next iteration broadcasts it
+back over the following term's shape and the accumulator is an array again by
+the time the loop ends. Pinned in
+`tycho-item-219-nested-map-view-type-cost.test.ts`'s neighbourhood via the
+compile suites; the witness is `Sum(Random()·[1,1], n=1..31)`, which now draws
+31 times, against its scalar twin `Sum(Random()+n, n=1..31)` which already
+did.
+
+### Reading a nested lazy view's type was exponential in depth (Tycho item 219, FIXED 2026-08-21)
+
+Shipped broken in 0.118.0 and caught by the consumer's adoption run, which
+reverted to 0.117.0 rather than ship it. `L := Range(0,n)/n` with `n` a free
+input, then `Y_0 := Y + 0·(2L−1)`, nests one `Map` per arithmetic step;
+asking that expression for its type cost 2^depth type-handler invocations
+(913, 1857, 3745, 7521, 15073 for depth 0–4). `PointList(−√(1−Y_0²), Y_0)`
+never returned; parsing an `rgb(…)` row over a BOUND 301-element list took
+12.9 s. All single-digit ms now.
+
+Two causes, both in `Map`'s `type` handler:
+
+- It read each source's `.type` twice per invocation, which doubles per level
+  when the source is itself a `Map`.
+- `bareMappingElementType` (added in 0.118.0) declares stand-ins in a scratch
+  scope, and a `declare` advanced the `any` axis — the axis
+  `BoxedFunction.type` keys its memo on. Every read therefore retired the
+  `_type`/`_sgn` cache of every expression in the engine, including the
+  sources the same walk was mid-way through reading. One `PointList`
+  evaluation: 998K handler calls, 2.0M axis advances.
+
+This is the THIRD instance of the axis self-invalidation shape — after
+`inference{valueType}` (zero-masked for the same reason) and the `clean`
+scope-pop flag (added for the identical failure under Tycho item 181). The
+remedy is a `scratch` flag on the `declare` event, keyed on the declaration's
+RESOLVED TARGET SCOPE rather than on "a derivation is running": the exemption
+applies only when the target is a scope the computation itself pushed and
+will pop. That distinction is load-bearing, not defensive — canonicalizing
+the probe can declare into scopes that OUTLIVE it (a function literal's
+`block.localScope` in `function-utils.ts`, a protocol member's scope in
+`engine-protocols.ts`), and exempting those would leave stale answers
+engine-wide. The derivation's expensive probe is also memoized, through
+`cachedValue` so it carries the object-dependency duties ruling B3 requires,
+and keyed on the element types actually used rather than on source identity —
+value-type inference and object-store writes both change the answer while
+deliberately advancing no axis.
+
+Pinned structurally, never on wall-clock, in
+`tycho-item-219-nested-map-view-type-cost.test.ts`: zero `_anyVersion` drift
+across repeated reads, a per-level invocation ratio under 1.5, and the
+scratch registration empty after both a normal return and a throw. Four of
+the five fail against the pre-fix tree.
+
+### A pre-canonicalization validation phase (OPEN, design — raised by the user 2026-08-21 at the item-219 ruling)
+
+Item 219 is the second time a computation has needed to VALIDATE an
+expression — decide what it is or what it would produce — without perturbing
+the environment, and has had to buy that with a scratch scope plus an
+exemption from cache invalidation. The `Pipe` implicit-map type handler
+(`PIPE_IMPLICIT_MAP_TYPE`, `library/core.ts`) is the first: it canonicalizes
+held operands to decide whether a stage implicitly maps, and pays for it with
+a memo recording the generation observed AFTER the derivation.
+
+The idea, as raised: give the engine a pre-canonicalization phase whose job
+is validation, which regular canonicalization would call, and which internal
+constructions could SKIP in favour of a cheaper validation-less
+canonicalization. A probe that needs only "what type would this application
+have" would then run the cheap path and never declare at all, which removes
+the need for a scratch-scope exemption rather than making it safe.
+
+Not scoped or scheduled. Recorded because the two existing workarounds are
+individually sound but structurally identical, and a third instance is the
+point at which the general mechanism is worth more than another local
+exemption.
 
 ### A caller-supplied `functions` entry can declare purity, restoring the `Sum`/`Product` NaN exit (RULED and SHIPPED 2026-08-20)
 

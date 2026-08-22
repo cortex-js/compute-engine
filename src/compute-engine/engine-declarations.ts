@@ -546,6 +546,10 @@ export function declareSymbolValue(
     kind: 'declare',
     callable: defIsCallableShaped(boxedDef),
     shadowsCallable,
+    // Keyed on the RESOLVED target scope, never on "is a scratch extent
+    // running": a declaration made during one but aimed at a longer-lived
+    // scope outlives it and must keep its axis advance. See `axisMaskOf`.
+    ...(ce._scratchDeclarationScopes.includes(scope) ? { scratch: true } : {}),
   });
 
   return boxedDef;
@@ -594,7 +598,15 @@ export function declareSymbolOperator(
   if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
   updateDef(ce, name, boxedDef, def);
 
-  ce._noteStateEvent({ kind: 'declare', callable: true, shadowsCallable });
+  ce._noteStateEvent({
+    kind: 'declare',
+    callable: true,
+    shadowsCallable,
+    // Same resolved-scope test as `declareSymbolValue` above: the two routes
+    // must agree, or an operator-shaped stand-in would reintroduce the churn
+    // the exemption removes.
+    ...(ce._scratchDeclarationScopes.includes(scope) ? { scratch: true } : {}),
+  });
 
   return boxedDef;
 }

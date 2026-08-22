@@ -30,6 +30,47 @@
   too, which had the same gap. The constant fold's cost estimate prices a zip
   by its shortest resolvable source instead of its first. (Tycho item 218)
 
+- **Reading the type of a nested lazy collection view is no longer
+  exponential in its nesting depth.** A view built over a collection whose
+  length is not statically known — `L := Range(0,n)/n` with `n` a free
+  input, then `Y_0 := Y + 0·(2L−1)` — nests one `Map` per arithmetic step,
+  and asking such an expression for its type cost 2^depth type-handler
+  invocations. `Sqrt(1 − Y_0²)` took 3.6 s, and `PointList(−√(1 − Y_0²),
+  Y_0)` did not return at all. A bound list was affected too, superlinearly
+  in its length: parsing an `rgb(…)` row over a 301-element list took 12.9 s.
+  All are now single-digit milliseconds.
+
+  Two causes compounded, both in `Map`'s type handler. It read each source's
+  type twice per level, which doubles per level when the source is itself a
+  `Map`. And the element-type derivation added in 0.118.0 declares stand-in
+  symbols in a scratch scope, which advanced the engine's `any` cache
+  generation — the generation `BoxedFunction.type` keys its memo on — so
+  every read retired the type cache of every expression in the engine,
+  including the sources the same walk was mid-way through reading. One
+  `PointList` evaluation made 998K handler calls and 2.0M cache
+  invalidations.
+
+  A declaration whose target scope is one the computation itself pushed and
+  pops now advances no cache generation, since the binding cannot outlive
+  that computation and nothing outside can depend on it. The test is on the
+  declaration's resolved target scope, not on whether a derivation is
+  running, so a declaration aimed at a longer-lived scope — a function
+  literal's block scope, a protocol member's scope — still invalidates as
+  before. (Tycho item 219)
+
+- **A compiled `Sum`/`Product` over a COLLECTION-valued body no longer skips
+  iterations of an effectful body.** 0.118.0 made the NaN early exit depend
+  on effects rather than on who supplied the code, but only for scalar
+  bodies; the element-wise fold kept an unconditional exit, so
+  `Sum(Random()·[1,1], n=1..31)` stopped drawing at the first NaN while its
+  scalar twin `Sum(Random()+n, n=1..31)` ran every term. The exit did two
+  jobs at once, and only one of them may skip work: projecting a length
+  mismatch to a scalar NaN is what makes the result independent of which
+  term came last, and is now unconditional, while STOPPING the loop is an
+  optimization and is now taken only when the skipped terms have no
+  observable effect. An effectful body runs every iteration and answers the
+  same value.
+
 ## 0.118.0 _2026-08-21_
 
 ### Breaking Changes

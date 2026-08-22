@@ -909,6 +909,16 @@ export interface IComputeEngine {
    * @internal */
   _ephemeralWriteDepth: number;
 
+  /** Scopes that a computation currently on the stack pushed as SCRATCH and
+   * will pop. A `declare` whose resolved target scope is one of these advances
+   * no cache axis, because the binding dies with that scope; a declaration
+   * aimed at any other scope keeps its advance, even when made during the
+   * extent. Both declare routes (`declareSymbolValue`,
+   * `declareSymbolOperator`) apply the same test. Mutated in place by the
+   * bracketing computation — push before, pop in a `finally`. See
+   * `axisMaskOf`'s `declare` case. @internal */
+  readonly _scratchDeclarationScopes: object[];
+
   /** The state-event choke point
    * (`docs/EFFECTS-MODEL.md` §3): write
    * sites report what happened; the lifecycle's dispatch table

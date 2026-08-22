@@ -3967,19 +3967,31 @@ re-declaring instead, and all three are silent:
   and that is what decides whether a compiled `Sum`/`Product` over a
   body mentioning the operator keeps its NaN early exit — the
   `if (acc !== acc) return NaN;` emitted between terms, valid because
-  NaN absorbs `+` and `*`. An operator definition is GRANTED purity
-  (`pure` defaults to `true`), so a re-declaration that does not
-  mention `pure` keeps the exit; one declaring `pure: false` refuses
-  it for every such sum, since skipping terms would skip the effects
-  too. For this exit, carrying a `compile` handler costs nothing by
-  itself, whether it supplies source or declines for the target at
-  hand: the gate reads the definition's declared effects, not who
-  supplied the code. The one shape it cannot catch is a handler
-  emitting effectful source under a definition that declares no
-  effects — the same mis-declaration that already misleads
-  common-subexpression elimination.
+  NaN absorbs `+` and `*`, so once the accumulator is NaN no later
+  term can change the answer. An operator definition is GRANTED
+  purity, so a re-declaration that states no effects keeps the exit.
+  One that states any effects refuses it, since skipping terms would
+  skip the effects too — and the lever is the effect SET, not the
+  `pure` keyword: `pure` is a derived reading of `effects`, so
+  `effects: ['random']` or an effect-annotated signature loses the
+  exit exactly as `pure: false` does, while `effects: []` keeps it
+  exactly as an unspecified definition does. For this exit, carrying
+  a `compile` handler costs nothing by itself, whether it supplies
+  source or declines for the target at hand: the gate reads the
+  definition's declared effects, not who supplied the code. The one
+  shape it cannot catch is a handler emitting effectful source under
+  a definition that states no effects.
+
+  The exit this governs is the one the scalar `Sum`/`Product`
+  lowering emits through `BaseCompiler.isEmissionSkippable`. An
+  element-wise (collection-valued) body carries a separate,
+  UNCONDITIONAL latch of the same spelling, emitted so that a
+  length mismatch collapsing the fold to a scalar NaN cannot be
+  broadcast back over the next term's shape. That latch does not
+  consult the declared effects, so declaring effects does not buy
+  back the later iterations of an element-wise body.
 - Call-sharing is the one cost a handler still pays for being on a
-  re-declared definition, and it is not governed by `pure`. A
+  re-declared definition, and the declared effects do not govern it. A
   `compile` handler the engine did not install is a live-source
   splice the CSE harvest cannot analyse, so every node under that
   head is refused as a candidate and every callee body mentioning it

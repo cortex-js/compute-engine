@@ -16,7 +16,15 @@ type ResetHooks = {
  */
 export type StateEvent =
   | { kind: 'value-write'; ephemeral: boolean; callable: boolean }
-  | { kind: 'declare'; callable: boolean; shadowsCallable: boolean }
+  | {
+      kind: 'declare';
+      callable: boolean;
+      shadowsCallable: boolean;
+      /** The declaration's target scope is one a computation currently on the
+       * stack pushed as scratch and will pop, so the binding cannot outlive
+       * that computation. See {@link axisMaskOf}'s `declare` case. */
+      scratch?: boolean;
+    }
   | { kind: 'binding-repair' } // variance settle, callable-swap repair, minted-ctor removal
   | { kind: 'redefine'; callableBefore: boolean; callableAfter: boolean }
   | { kind: 'type-write'; callableBefore: boolean; callableAfter: boolean }
@@ -57,7 +65,10 @@ export function callableAxisSelects(e: StateEvent): boolean {
     case 'value-write':
       return e.callable;
     case 'declare':
-      return e.callable || e.shadowsCallable;
+      // A scratch binding dies with the scope it was declared into (see
+      // `axisMaskOf`), so it cannot change any cached callable's effects
+      // either.
+      return !e.scratch && (e.callable || e.shadowsCallable);
     case 'object-store':
       // A field store changes no declaration, binding, or signature.
       return false;
@@ -90,6 +101,36 @@ export function axisMaskOf(e: StateEvent): AxisMask {
     case 'value-write':
       return { any: true, semantic: !e.ephemeral, world: false };
     case 'declare':
+      // A SCRATCH declaration advances nothing, for the same reason
+      // `inference{valueType}` below does not: it is emitted from INSIDE a
+      // computation whose caches key on the `any` axis. `Map`'s type handler
+      // derives a bare mapping's element type by declaring stand-ins in a
+      // scope it pushes and pops around one probe. The binding dies with that
+      // scope, so no cached answer anywhere can depend on it — but advancing
+      // the axis retires the `_type`/`_sgn` cache of every expression in the
+      // engine, including the sources the enclosing derivation is mid-way
+      // through reading. For a chain of nested lazy `Map` views that turns
+      // each level into a fresh recursive descent: measured 998K handler
+      // invocations and 2.0M axis advances in ONE `PointList` evaluation
+      // (~17 s), against 5 ms before the derivation existed. Same failure and
+      // same remedy as the `clean` scope-pop flag below, which was added for
+      // the identical shape.
+      //
+      // The soundness condition is ONE property, and it is established
+      // mechanically rather than by a caller's promise: the declaration's
+      // resolved target scope is itself a scope some computation on the stack
+      // registered as scratch (`_scratchDeclarationScopes`), so the pop that
+      // ends that computation discards the binding. `declareSymbolValue` and
+      // `declareSymbolOperator` set the flag only on that test, so a
+      // declaration aimed anywhere else keeps its axis advance even when made
+      // during a scratch extent. That matters: canonicalizing the probe can
+      // declare into scopes that OUTLIVE it — a function literal's
+      // `block.localScope` (`function-utils.ts`), a protocol member's
+      // explicit scope (`engine-protocols.ts`) — and exempting those would
+      // leave stale `_type`/`_sgn` answers engine-wide, the exact class of
+      // bug this axis exists to prevent. A colliding name is harmless for the
+      // same structural reason: it shadows inside a scope that is discarded.
+      if (e.scratch) return { any: false, semantic: false, world: false };
       return { any: true, semantic: false, world: false };
     case 'binding-repair':
       return { any: true, semantic: false, world: false };
@@ -141,6 +182,7 @@ export class EngineConfigurationLifecycle {
   private _worldVersion = 0;
   private _callableVersion = 0;
   private _ephemeralWriteDepth = 0;
+  private _scratchDeclarationScopes: object[] = [];
   private _tracker = new ConfigurationChangeTracker();
 
   get anyVersion(): number {
@@ -167,6 +209,10 @@ export class EngineConfigurationLifecycle {
     this._ephemeralWriteDepth = value;
   }
 
+  get scratchDeclarationScopes(): object[] {
+    return this._scratchDeclarationScopes;
+  }
+
   /**
    * The only writer of the invalidation versions. Callers report a semantic
    * event, and the dispatch functions decide which versions advance.
@@ -185,6 +231,11 @@ export class EngineConfigurationLifecycle {
   }
 
   reset(hooks: ResetHooks): void {
+    // A scratch extent brackets its own registration in a `finally`, so a
+    // non-empty list here means a computation was abandoned mid-flight (a
+    // host `throw` past the bracket). Clearing it keeps a leaked entry from
+    // exempting declarations for the rest of the engine's life.
+    this._scratchDeclarationScopes.length = 0;
     this.noteStateEvent({ kind: 'config' });
     hooks.refreshNumericConstants();
     hooks.resetCommonSymbols();

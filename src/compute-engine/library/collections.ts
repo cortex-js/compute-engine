@@ -43,6 +43,11 @@ import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // (collections → compile-expression → base-compiler → library/utils → collections)
 import { kleeneAnd, kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
+import { typeToDedupKey } from '../../common/type/serialize.js';
+import {
+  cachedValue,
+  type CachedValue,
+} from '../boxed-expression/cache.js';
 import { reduceType } from '../../common/type/reduce.js';
 import {
   isObjectType,
@@ -1332,10 +1337,16 @@ function mapResultType(
 // collection's own `elttype` handler when it has one, else the element type
 // of its static type. `undefined` when that is indeterminate (`unknown`,
 // `any`, `never`, or not a collection type at all).
-function mappingSourceElementType(x: Expression): Type | undefined {
+function mappingSourceElementType(
+  x: Expression,
+  /** The source's static type, read only if the `elttype` handler declines —
+   * for a source that is itself a lazy `Map` that read is the expensive path,
+   * and an `elttype` answer makes it unnecessary. */
+  xType: () => BoxedType
+): Type | undefined {
   const t =
     x.operatorDefinition?.collection?.elttype?.(x) ??
-    collectionElementType(x.type.type);
+    collectionElementType(xType().type);
   if (t === undefined || t === 'unknown' || t === 'any' || t === 'never')
     return undefined;
   return t;
@@ -1369,8 +1380,17 @@ function mappingSourceElementType(x: Expression): Type | undefined {
 function bareMappingElementType(
   ce: ComputeEngine,
   fn: Expression,
-  sources: ReadonlyArray<Expression>
+  sources: ReadonlyArray<Expression>,
+  /** The type of `sources[i]`, read at most once per invocation and only on
+   * demand. An accessor rather than an array so the two cannot drift in
+   * length, and so a source whose `elttype` handler answers is never asked
+   * for its static type at all. */
+  sourceType: (i: number) => BoxedType
 ): Type | undefined {
+  // The cheap structural gate runs BEFORE the memo: a `Map` whose first
+  // operand is a symbol or an operator name is not a mapping literal at all,
+  // and admitting those would fill the map with entries whose lookup costs
+  // more than the `isFunction` test that rejects them.
   if (!isFunction(fn, 'Function')) return undefined;
   const params = fn.ops.slice(1);
   if (params.length === 0 || params.length !== sources.length) return undefined;
@@ -1389,7 +1409,9 @@ function bareMappingElementType(
   // broadcast maps, are lazy.)
   const def = body.operatorDefinition;
   if (!def || def.scoped) return undefined;
-  const elementTypes = sources.map(mappingSourceElementType);
+  const elementTypes = sources.map((x, i) =>
+    mappingSourceElementType(x, () => sourceType(i))
+  );
   // Every operand is a parameter reference or mentions no parameter at all:
   // a parameter buried inside an operand would keep its `unknown` binding
   // and the rebuilt application would not be the body's. And every parameter
@@ -1410,7 +1432,82 @@ function bareMappingElementType(
   }
   if (!referenced) return undefined;
 
+  // Everything above is a cheap structural test; the probe below is the
+  // expensive part, and the only part memoized. Its inputs are exactly the
+  // body's operator, which parameter each operand references, and the element
+  // types just computed — so those, not the source expressions, are the key.
+  // Keying on source IDENTITY would be unsound: value-type inference
+  // (`inference{valueType}`) and a mutable-object field store
+  // (`object-store`) both change what a source's element type derives to
+  // while deliberately advancing no cache axis, so an identity-plus-generation
+  // entry would serve a pre-change answer. See `axisMaskOf`.
+  const probeKey = `${body.operator}\u0000${body.ops
+    .map((arg) => (isSymbol(arg) ? (paramIndex.get(arg.symbol) ?? -1) : -1))
+    .join(',')}\u0000${elementTypes.map((t) => typeToDedupKey(t!)).join(',')}`;
+  let entry = BARE_MAPPING_ELEMENT_TYPE.get(fn);
+  if (entry === undefined || entry.engine !== ce || entry.key !== probeKey) {
+    // A different engine or a different set of inputs is a different question:
+    // start a fresh slot rather than letting `cachedValue` serve the old one.
+    // The engine is part of the identity because `_anyVersion` is per-engine
+    // and both counters start at zero, so a generation from one would
+    // spuriously validate against the other.
+    entry = { engine: ce, key: probeKey, slot: { value: null, generation: undefined } };
+    BARE_MAPPING_ELEMENT_TYPE.set(fn, entry);
+  }
+  // `cachedValue` keys on the generation observed on ENTRY and carries the
+  // object-dependency duties this memo would otherwise be missing: a field
+  // store advances no engine axis at all, so a generation-only cache is blind
+  // to mutation by construction (ruling B3, `object-deps.ts`). The probe
+  // reaches `elttype` and operator type handlers, either of which may read a
+  // field, so the entry records what it read, revalidates it on a hit, and
+  // merges it into any enclosing collector.
+  return cachedValue(entry.slot, ce._anyVersion, () =>
+    probeBareMappingElementType(ce, body, paramIndex, elementTypes)
+  , undefined, ce);
+}
+
+/**
+ * Memo for the probe inside {@link bareMappingElementType}, keyed on the
+ * mapping literal and validated by `key` (the probe's actual inputs), by the
+ * owning engine, and — inside `cachedValue` — by the `any` generation and the
+ * mutable objects the derivation read.
+ */
+const BARE_MAPPING_ELEMENT_TYPE = new WeakMap<
+  Expression,
+  {
+    engine: ComputeEngine;
+    key: string;
+    slot: CachedValue<Type | undefined>;
+  }
+>();
+
+/**
+ * Build and type the probe application: the body's operator applied to one
+ * stand-in per referenced parameter, each declared at its source's element
+ * type. Returns `undefined` when the probe does not type to something better
+ * than the literal's own answer.
+ */
+function probeBareMappingElementType(
+  ce: ComputeEngine,
+  body: Expression & FunctionInterface,
+  paramIndex: Map<string, number>,
+  elementTypes: ReadonlyArray<Type | undefined>
+): Type | undefined {
+  // The scratch scope is REGISTERED, not just pushed: `declareSymbolValue`
+  // exempts a declaration from advancing the engine's `any` cache axis only
+  // when its resolved target scope is this one, so a declaration
+  // canonicalization aims at a longer-lived scope keeps its advance. The
+  // exemption is what keeps this derivation from retiring the `_type`/`_sgn`
+  // caches the enclosing walk is filling — which turned a chain of nested
+  // `Map` views into a fresh recursive descent per level. See `axisMaskOf`
+  // (`engine-configuration-lifecycle.ts`).
+  //
+  // The registration is popped BEFORE the scope, and both in a `finally`: a
+  // leaked registration would exempt every later declaration aimed at that
+  // scope object, and a leaked scope would leave the engine one frame deep.
   ce.pushScope();
+  const scratch = ce.context.lexicalScope;
+  ce._scratchDeclarationScopes.push(scratch);
   try {
     // The stand-in for a parameter is a FRESH symbol declared in the scratch
     // scope, never one named after the parameter: `ce.symbol(name)`
@@ -1441,6 +1538,8 @@ function bareMappingElementType(
   } catch {
     return undefined;
   } finally {
+    const top = ce._scratchDeclarationScopes.pop();
+    console.assert(top === scratch, 'scratch scope registration unbalanced');
     ce.popScope();
   }
 }
@@ -3949,16 +4048,31 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // For the multi-collection (zipWith) form the result is always an indexed
     // collection (like `Zip`) of the lambda's result type.
     type: (ops, { engine }) => {
+      // Each source's type is read at most ONCE per invocation, on demand,
+      // and every consumer below goes through this accessor. Reading twice is
+      // not merely wasteful: `bareMappingElementType` declares stand-ins in a
+      // scratch scope, and while those no longer advance the engine's `any`
+      // cache axis (see `axisMaskOf`), anything else the probe's
+      // canonicalization legitimately advances would leave a second read
+      // unable to hit the source's own `_type` memo — and for a source that
+      // is itself a `Map`, that recomputation recurses. Measured before the
+      // two-read path was removed: 913 → 15073 handler invocations for a
+      // four-deep lazy view at depth 0 → 4. Lazy rather than eager so the
+      // `ops[1] === undefined` guard below still runs first, and so a source
+      // whose `elttype` handler answers is never asked for its static type.
+      const sourceTypeCache: (BoxedType | undefined)[] = [];
+      const boxedSourceType = (i: number): BoxedType =>
+        (sourceTypeCache[i] ??= ops[i + 1].type);
       // Source type for shape propagation. When the source's STATIC type is
       // indeterminate (a declared-`unknown` symbol holding a collection
       // value — the lazy-broadcast `Map(…, L)` shape), fall back to its
       // value-aware indexed-ness so the Map types `indexed_collection<T>`
       // rather than shedding indexed-ness to `collection<T>`.
-      const sourceType = (x: Expression): Type => {
-        const t = x.type.type;
+      const sourceType = (i: number): Type => {
+        const t = boxedSourceType(i).type;
         if (
           (t === 'unknown' || t === 'any' || t === 'value') &&
-          x.isIndexedCollection
+          ops[i + 1].isIndexedCollection
         )
           return 'indexed_collection';
         return t;
@@ -3968,14 +4082,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // it), but the type can be asked of the raw form.
         if (ops[1] === undefined) return 'indexed_collection';
         const resultType =
-          bareMappingElementType(engine, ops[0], [ops[1]]) ??
+          bareMappingElementType(engine, ops[0], [ops[1]], boxedSourceType) ??
           functionResult(ops[0].type.type);
         if (!resultType || resultType === 'unknown' || resultType === 'any') {
           // Unknown element type: still preserve value-aware indexed-ness
           // (the `.N()` route wraps the body in `N`, whose lazy result types
           // `unknown` — without this the whole Map would type `unknown` and
           // the arithmetic broadcast would treat it as a scalar).
-          const s = sourceType(ops[1]);
+          const s = sourceType(0);
           // An index span must NOT be echoed: `range` promises a contiguous
           // ascending run of positive integers, and nothing constrains an
           // unknown-typed lambda's output to that shape, so `Map(f, 1..5)`
@@ -3989,13 +4103,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // echoing `string` would promise a value the runtime never produces.
           // The element type is the unknown one this branch is handling.
           if (s === 'string') return 'list';
-          if (s === 'indexed_collection' && ops[1].type.type !== s) return s;
-          return ops[1].type;
+          if (s === 'indexed_collection' && boxedSourceType(0).type !== s)
+            return s;
+          return boxedSourceType(0);
         }
-        return mapResultType(sourceType(ops[1]), resultType);
+        return mapResultType(sourceType(0), resultType);
       }
       const resultType =
-        bareMappingElementType(engine, ops[0], ops.slice(1)) ??
+        bareMappingElementType(engine, ops[0], ops.slice(1), boxedSourceType) ??
         functionResult(ops[0].type.type);
       return mapResultType(
         'indexed_collection',
