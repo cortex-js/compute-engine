@@ -718,6 +718,11 @@ export function trigSign(operator: string, x: Expression): Sign | undefined {
     if ((operator === 'Cos' || operator === 'Cot') && (pos === 1 || pos === 3))
       return 'zero';
   }
+  // `quadrant()` numbers the quadrants 1..4; the tables below are indexed
+  // 0..3. Indexing them with `q` itself shifted every sign one quadrant
+  // along, so `cos 1`, `sec 1` and `tan 1` (first quadrant) reported
+  // `negative` and `sin 2` (second quadrant) did too — and `|sec 1|` then
+  // evaluated to `-sec(1)`.
   return {
     Sin: ['positive', 'positive', 'negative', 'negative'],
     Cos: ['positive', 'negative', 'negative', 'positive'],
@@ -725,7 +730,7 @@ export function trigSign(operator: string, x: Expression): Sign | undefined {
     Csc: ['positive', 'positive', 'negative', 'negative'],
     Tan: ['positive', 'negative', 'positive', 'negative'],
     Cot: ['positive', 'negative', 'positive', 'negative'],
-  }[operator]?.[q] as Sign;
+  }[operator]?.[q - 1] as Sign;
 }
 
 export function isConstructible(x: string | Expression): boolean {

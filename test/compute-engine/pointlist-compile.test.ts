@@ -177,18 +177,26 @@ describe('PointList compile — render-shaped case s(PointList(x,y))', () => {
     }
   });
 
-  it('interval-js: PointList- and Tuple-spelled bodies fall back to the interpreter with equal results', () => {
+  it('interval-js: PointList- and Tuple-spelled bodies compile identically', () => {
     const ce = freshEngine();
     const iv = new IntervalJavaScriptTarget();
     const withPointList = iv.compile(body(ce, 'PointList'), { fallback: true });
     const withTuple = iv.compile(body(ce, 'Tuple'), { fallback: true });
-    // Both fail closed (PointX/PointY have no interval kernel) and fall back.
-    expect(withPointList.success).toBe(false);
-    expect(withTuple.success).toBe(false);
+    // The interval target's point accessors select the coordinate of a literal
+    // single point at compile time, and an ALL-SCALAR `PointList` is one point
+    // whose component k is operand k — the same equivalence the JavaScript
+    // target relies on. So both spellings compile, to the same source.
+    expect(withPointList.success).toBe(true);
+    expect(withTuple.success).toBe(true);
+    expect(withPointList.code).toBe(withTuple.code);
     const plRun = withPointList.run as (s: Record<string, number>) => unknown;
     const tpRun = withTuple.run as (s: Record<string, number>) => unknown;
     expect(plRun({ x: 3, y: 4 })).toEqual(tpRun({ x: 3, y: 4 }));
-    expect(plRun({ x: 3, y: 4 })).toEqual({ lo: 21, hi: 21 });
+    // 3² + 4² - 4 = 21, as a degenerate (point) interval.
+    expect(plRun({ x: 3, y: 4 })).toEqual({
+      kind: 'interval',
+      value: { lo: 21, hi: 21 },
+    });
   });
 });
 

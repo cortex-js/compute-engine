@@ -51,15 +51,21 @@ function countIntegrandEvals(fn: () => void): {
   const originalMonteCarlo = mc.monteCarloEstimate;
   const counts = { quadrature: 0, samples: 0 };
   gk.adaptiveQuadrature = (f, ...rest) =>
-    originalQuadrature((x) => {
-      counts.quadrature += 1;
-      return f(x);
-    }, ...rest);
+    originalQuadrature(
+      (x) => {
+        counts.quadrature += 1;
+        return f(x);
+      },
+      ...rest
+    );
   mc.monteCarloEstimate = (f, ...rest) =>
-    originalMonteCarlo((x) => {
-      counts.samples += 1;
-      return f(x);
-    }, ...rest);
+    originalMonteCarlo(
+      (x) => {
+        counts.samples += 1;
+        return f(x);
+      },
+      ...rest
+    );
   try {
     fn();
   } finally {
@@ -836,9 +842,9 @@ describe('quadratureBeatsMonteCarlo (Tycho item 128)', () => {
   });
 
   test('a non-finite result always falls back', () => {
-    expect(quadratureBeatsMonteCarlo({ estimate: NaN, error: 1e-12 }, 1e7)).toBe(
-      false
-    );
+    expect(
+      quadratureBeatsMonteCarlo({ estimate: NaN, error: 1e-12 }, 1e7)
+    ).toBe(false);
     expect(
       quadratureBeatsMonteCarlo({ estimate: 1, error: Infinity }, 1e7)
     ).toBe(false);
@@ -917,10 +923,20 @@ describe('divergent integrals are not laundered (Tycho item 136)', () => {
       ],
       ['∫₋₁⁰ dx/x (negative, lower half)', (x: number) => 1 / x, -1, 0],
       ['∫₀¹ −dx/x (negatively divergent)', (x: number) => -1 / x, 0, 1],
-      ['∫₀^∞ x dx (via the semi-infinite transform)', (x: number) => x, 0, Infinity],
+      [
+        '∫₀^∞ x dx (via the semi-infinite transform)',
+        (x: number) => x,
+        0,
+        Infinity,
+      ],
       ['∫₁^∞ dx/x', (x: number) => 1 / x, 1, Infinity],
       ['∫₀^{π/2} tan x dx', Math.tan, 0, Math.PI / 2],
-      ['∫₀¹ x^(−1.01) dx (just past the pole)', (x: number) => x ** -1.01, 0, 1],
+      [
+        '∫₀¹ x^(−1.01) dx (just past the pole)',
+        (x: number) => x ** -1.01,
+        0,
+        1,
+      ],
     ])('%s', (_label, f, a, b) => {
       const r = adaptiveQuadrature(f, a, b);
       expect(r.divergent).toBe(true);
@@ -931,8 +947,20 @@ describe('divergent integrals are not laundered (Tycho item 136)', () => {
       ['∫₀¹ dx/√x = 2', (x: number) => 1 / Math.sqrt(x), 0, 1, 2],
       ['∫₀¹ ln x dx = −1', Math.log, 0, 1, -1],
       ['∫₀¹ (ln x)² dx = 2', (x: number) => Math.log(x) ** 2, 0, 1, 2],
-      ['∫₀¹ √x·ln x dx = −4/9', (x: number) => Math.sqrt(x) * Math.log(x), 0, 1, -4 / 9],
-      ['∫₋₁¹ dx/√(1−x²) = π', (x: number) => 1 / Math.sqrt(1 - x * x), -1, 1, Math.PI],
+      [
+        '∫₀¹ √x·ln x dx = −4/9',
+        (x: number) => Math.sqrt(x) * Math.log(x),
+        0,
+        1,
+        -4 / 9,
+      ],
+      [
+        '∫₋₁¹ dx/√(1−x²) = π',
+        (x: number) => 1 / Math.sqrt(1 - x * x),
+        -1,
+        1,
+        Math.PI,
+      ],
       // Convergent but only just: `x^(−p)` sheds blocks in the ratio
       // `2^((1−p)·20)`, so these sit at 0.87 and 0.986 against a 0.99 cutoff.
       ['∫₀¹ x^(−0.9) dx = 10', (x: number) => x ** -0.9, 0, 1, 10],
@@ -943,11 +971,23 @@ describe('divergent integrals are not laundered (Tycho item 136)', () => {
       // Conditionally convergent: the shells do NOT shrink, they CANCEL. The
       // signed block sums (plus the coherence gate) keep this off the
       // divergent list.
-      ['∫₀¹ sin(1/x)/x dx', (x: number) => Math.sin(1 / x) / x, 0, 1, undefined],
+      [
+        '∫₀¹ sin(1/x)/x dx',
+        (x: number) => Math.sin(1 / x) / x,
+        0,
+        1,
+        undefined,
+      ],
       // Proper integrals, for the same reason they always worked.
       ['∫₀¹ x² dx = 1/3', (x: number) => x * x, 0, 1, 1 / 3],
       ['∫₀^∞ e^(−x) dx = 1', (x: number) => Math.exp(-x), 0, Infinity, 1],
-      ['∫₋∞^∞ dx/(1+x²) = π', (x: number) => 1 / (1 + x * x), -Infinity, Infinity, Math.PI],
+      [
+        '∫₋∞^∞ dx/(1+x²) = π',
+        (x: number) => 1 / (1 + x * x),
+        -Infinity,
+        Infinity,
+        Math.PI,
+      ],
     ])('%s is NOT divergent', (_label, f, a, b, exact) => {
       const r = adaptiveQuadrature(f, a, b);
       expect(r.divergent).toBe(false);
@@ -969,10 +1009,14 @@ describe('divergent integrals are not laundered (Tycho item 136)', () => {
       // Before: the loop bisected toward 0 until the corner panel reached the
       // denormal range (~1075 halvings, ~20 ms). Now it stops ~40 shells in.
       let evals = 0;
-      const r = adaptiveQuadrature((x) => {
-        evals++;
-        return 1 / x;
-      }, 0, 1);
+      const r = adaptiveQuadrature(
+        (x) => {
+          evals++;
+          return 1 / x;
+        },
+        0,
+        1
+      );
       expect(r.divergent).toBe(true);
       // Measured ~1700 evaluations; loose bound, the point is the order of
       // magnitude (the pre-fix run used ~16 000). The evaluation count is the
@@ -1060,5 +1104,36 @@ describe('divergent integrals are not laundered (Tycho item 136)', () => {
       expect(r.code).toContain('_SYS.integrate');
       expect(r.run({ y: 1 }) as number).toBeCloseTo(1.6896771895142, 9);
     });
+  });
+});
+
+describe('COMPILE Integrate — a `Function` integrand is paired to the limits by name', () => {
+  test('∫₀¹∫₀² a·x·y² dy dx with the parameters listed as (y, x)', () => {
+    // = a·(1/2)·(8/3) = 4a/3. Positional pairing would bind the lambda named
+    // `y` to x's range and compute ∫∫ a·y·x² = 2a/3 instead.
+    const r = compile(
+      ce.box([
+        'Integrate',
+        ['Function', ['Multiply', 'a', 'x', ['Square', 'y']], 'y', 'x'],
+        ['Limits', 'x', 0, 1],
+        ['Limits', 'y', 0, 2],
+      ]),
+      { vars: { a: '_.a' } }
+    );
+    expect(r.success).toBe(true);
+    expect(r.run!({ a: 1 })).toBeCloseTo(4 / 3, 8);
+  });
+
+  test('a spare parameter the limits do not supply fails closed', () => {
+    const r = compile(
+      ce.box([
+        'Integrate',
+        ['Function', ['Add', 'x', 'q'], 'x', 'q'],
+        ['Limits', 'x', 0, 1],
+      ]),
+      { vars: { q: '_.q' } }
+    );
+    expect(r.success).toBe(false);
+    expect(String(r.error)).toContain('one to one');
   });
 });

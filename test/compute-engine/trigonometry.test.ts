@@ -23,16 +23,16 @@ describe('TRIGONOMETRY constructible values', () => {
           h === 'Cos'
             ? Math.cos(theta)
             : h === 'Sin'
-            ? Math.sin(theta)
-            : h === 'Tan'
-            ? Math.tan(theta)
-            : h === 'Sec'
-            ? 1 / Math.cos(theta)
-            : h === 'Csc'
-            ? 1 / Math.sin(theta)
-            : h === 'Cot'
-            ? 1 / Math.tan(theta)
-            : NaN;
+              ? Math.sin(theta)
+              : h === 'Tan'
+                ? Math.tan(theta)
+                : h === 'Sec'
+                  ? 1 / Math.cos(theta)
+                  : h === 'Csc'
+                    ? 1 / Math.sin(theta)
+                    : h === 'Cot'
+                      ? 1 / Math.tan(theta)
+                      : NaN;
 
         // const arg = engine
         //   .expr([
@@ -228,11 +228,9 @@ describe('Arctan2 three-valued sign discipline (P0-9 / SYMBOLIC P0-6)', () => {
 // of the 1/(a²+x²) family evaluate (∫₀^∞ 1/(1+x²) = arctan(∞) = π/2).
 describe('Arctan at ±∞', () => {
   test('arctan(+∞) = π/2 (exact under evaluate)', () =>
-    expect(engine.expr(['Arctan', engine.PositiveInfinity]).evaluate().json).toEqual([
-      'Multiply',
-      ['Rational', 1, 2],
-      'Pi',
-    ]));
+    expect(
+      engine.expr(['Arctan', engine.PositiveInfinity]).evaluate().json
+    ).toEqual(['Multiply', ['Rational', 1, 2], 'Pi']));
   test('arctan(−∞) = −π/2', () =>
     expect(
       engine.expr(['Arctan', engine.NegativeInfinity]).evaluate().json
@@ -454,39 +452,52 @@ describe('numericization is skipped for arguments that cannot numericize', () =>
     60_000
   );
 
-  it(
-    'Equal / Sort / ApproxEqual / Rationalize over symbolic chains',
-    () => {
-      onDeepChain((body) => (ce) => {
-        ce.parse(`\\mathrm{Equal}(${body},0)`).evaluate();
-      });
-      onDeepChain((body) => (ce) => {
-        ce.parse(`\\mathrm{Sort}([${body},${body},${body}])`).evaluate();
-      });
-      onDeepChain((body) => (ce) => {
-        ce.parse(`\\mathrm{ApproxEqual}(${body},0)`).evaluate();
-      });
-      onDeepChain((body) => (ce) => {
-        ce.parse(`\\mathrm{Rationalize}(${body})`).evaluate();
-      });
-    },
-    60_000
-  );
+  it('Equal / Sort / ApproxEqual / Rationalize over symbolic chains', () => {
+    onDeepChain((body) => (ce) => {
+      ce.parse(`\\mathrm{Equal}(${body},0)`).evaluate();
+    });
+    onDeepChain((body) => (ce) => {
+      ce.parse(`\\mathrm{Sort}([${body},${body},${body}])`).evaluate();
+    });
+    onDeepChain((body) => (ce) => {
+      ce.parse(`\\mathrm{ApproxEqual}(${body},0)`).evaluate();
+    });
+    onDeepChain((body) => (ce) => {
+      ce.parse(`\\mathrm{Rationalize}(${body})`).evaluate();
+    });
+  }, 60_000);
 
   it('the gated paths still answer for arguments that DO numericize', () => {
     const ce = new ComputeEngine();
     // Partial numericization of a symbolic operand still compares equal. A
     // free variable makes these identity questions, so they are asked of the
     // PROVER tier (`.isIdenticallyEqual()`); arithmetic `.isEqual()` is inert.
-    expect(ce.parse('\\sin(2)+x').isIdenticallyEqual(ce.parse('0.9092974268256817+x'))).toBe(true);
-    expect(ce.parse('\\sqrt{2}x').isIdenticallyEqual(ce.parse('1.4142135623730951x'))).toBe(true);
-    expect(ce.parse('(x+1)^2').isIdenticallyEqual(ce.parse('x^2+2x+1'))).toBe(true);
-    expect(ce.parse('\\sin(2)+x').isEqual(ce.parse('0.9092974268256817+x'))).toBe(undefined);
+    expect(
+      ce
+        .parse('\\sin(2)+x')
+        .isIdenticallyEqual(ce.parse('0.9092974268256817+x'))
+    ).toBe(true);
+    expect(
+      ce.parse('\\sqrt{2}x').isIdenticallyEqual(ce.parse('1.4142135623730951x'))
+    ).toBe(true);
+    expect(ce.parse('(x+1)^2').isIdenticallyEqual(ce.parse('x^2+2x+1'))).toBe(
+      true
+    );
+    expect(
+      ce.parse('\\sin(2)+x').isEqual(ce.parse('0.9092974268256817+x'))
+    ).toBe(undefined);
     // Ordering, approximate equality and rationalization of closed forms.
-    expect(ce.parse('\\mathrm{Rationalize}(0.5)').evaluate().toString()).toBe('1/2');
-    expect(ce.parse('\\mathrm{ApproxEqual}(\\pi, 3.14159265358979)').evaluate().symbol).toBe('True');
+    expect(ce.parse('\\mathrm{Rationalize}(0.5)').evaluate().toString()).toBe(
+      '1/2'
+    );
+    expect(
+      ce.parse('\\mathrm{ApproxEqual}(\\pi, 3.14159265358979)').evaluate()
+        .symbol
+    ).toBe('True');
     // The `.N()` trig path is unchanged for numericizable angles.
-    expect(ce.parse('\\sin(\\frac{\\pi}{4})').N().toString()).toBe('0.707106781186547524401');
+    expect(ce.parse('\\sin(\\frac{\\pi}{4})').N().toString()).toBe(
+      '0.707106781186547524401'
+    );
     expect(ce.parse('\\sin(2+x)').N().toString()).toBe('sin(x + 2)');
   });
 });
@@ -518,10 +529,25 @@ describe('non-numeric operands are reported, not absorbed', () => {
   const stringElement = ['At', ['List', "'a'", 2], 1];
 
   for (const operator of [
-    'Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc',
-    'Arcsin', 'Arccos', 'Arctan',
-    'Sinh', 'Cosh', 'Tanh', 'Coth',
-    'Arsinh', 'Arcosh', 'Artanh', 'Arcoth', 'Arsech', 'Arcsch',
+    'Sin',
+    'Cos',
+    'Tan',
+    'Cot',
+    'Sec',
+    'Csc',
+    'Arcsin',
+    'Arccos',
+    'Arctan',
+    'Sinh',
+    'Cosh',
+    'Tanh',
+    'Coth',
+    'Arsinh',
+    'Arcosh',
+    'Artanh',
+    'Arcoth',
+    'Arsech',
+    'Arcsch',
     'Degrees',
   ]) {
     it(`${operator} of a string element is an error`, () => {
@@ -584,12 +610,55 @@ describe('non-numeric operands are reported, not absorbed', () => {
   it('leaves valid operands alone', () => {
     const ce = new ComputeEngine();
     expect(ce.parse('\\sin x').evaluate().toString()).toBe('sin(x)');
-    expect(ce.parse('\\sin(\\frac{\\pi}{6})').evaluate().toString()).toBe('1/2');
-    expect(ce.parse('\\sin(2.5)').evaluate().re).toBeCloseTo(Math.sin(2.5), 12);
-    expect(ce.expr(['Sin', ['List', 0, 1]]).evaluate().toString()).toBe(
-      '[0,sin(1)]'
+    expect(ce.parse('\\sin(\\frac{\\pi}{6})').evaluate().toString()).toBe(
+      '1/2'
     );
+    expect(ce.parse('\\sin(2.5)').evaluate().re).toBeCloseTo(Math.sin(2.5), 12);
+    expect(
+      ce
+        .expr(['Sin', ['List', 0, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('[0,sin(1)]');
     expect(ce.expr(['DMS', 'x', 30]).evaluate().toString()).toBe('DMS(x, 30)');
     expect(ce.expr(['Degrees', 'x']).evaluate().isValid).toBe(true);
+  });
+});
+
+describe('SIGN of a circular function of an exact argument', () => {
+  // `trigSign` reads a 0..3 sign table with the 1..4 quadrant number; the
+  // off-by-one shifted every sign one quadrant along (`cos 1` reported
+  // `negative`, and `|sec 1|` evaluated to `-sec(1)`). Every function is
+  // checked in every quadrant against the sign of its numeric value.
+  //
+  // The file's shared engine, deliberately: constructing a `ComputeEngine`
+  // at describe scope runs at collection time and re-precisions the
+  // module-global `BigDecimal.precision`, which the earlier snapshot tests
+  // of this file (`arccos` at 100 digits) depend on.
+  const ce = engine;
+  const numeric: Record<string, (t: number) => number> = {
+    Sin: Math.sin,
+    Cos: Math.cos,
+    Tan: Math.tan,
+    Sec: (t) => 1 / Math.cos(t),
+    Csc: (t) => 1 / Math.sin(t),
+    Cot: (t) => 1 / Math.tan(t),
+  };
+  // One angle per quadrant, plus negative and wrapped angles.
+  const angles = [0.5, 2, 4, 5.5, -1, -2.5, 7];
+
+  for (const [op, f] of Object.entries(numeric)) {
+    it(`${op} reports the sign of its value in every quadrant`, () => {
+      for (const t of angles) {
+        const expected = f(t) > 0 ? 'positive' : 'negative';
+        expect([op, t, ce.box([op, t]).sgn]).toEqual([op, t, expected]);
+      }
+    });
+  }
+
+  it('|sec 1| is sec(1), not -sec(1)', () => {
+    expect(ce.parse('|\\sec 1|').evaluate().toString()).toBe('sec(1)');
+    expect(ce.parse('|\\cos 1|').evaluate().toString()).toBe('cos(1)');
+    expect(ce.parse('|\\cos 2|').evaluate().toString()).toBe('-cos(2)');
   });
 });

@@ -990,15 +990,15 @@ const INTEGRATION_RULES: Rule[] = [
     ],
     condition: filter,
   },
-  // \cot(ax + b) -> -\ln(\sin(ax + b)) / a
+  // \cot(ax + b) -> \ln|\sin(ax + b)| / a — positive: d/dx ln|sin x| is
+  // cos x / sin x = cot x. (This rule carried a spurious `Negate` — the sign
+  // of the `\tan` rule above, whose antiderivative is −ln|cos| — so
+  // ∫₀² cot t dt evaluated to −∞ instead of +∞.)
   {
     match: ['Cot', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
-      [
-        'Negate',
-        ['Ln', ['Abs', ['Sin', ['Add', ['Multiply', '_a', '_x'], '__b']]]],
-      ],
+      ['Ln', ['Abs', ['Sin', ['Add', ['Multiply', '_a', '_x'], '__b']]]],
       '_a',
     ],
     condition: filter,
@@ -1053,54 +1053,73 @@ const INTEGRATION_RULES: Rule[] = [
     condition: filter,
   },
 
-  // \sinh(ax + b) -> \frac{1}{a} \ln(\cosh(ax + b))
+  // \sinh(ax + b) -> \frac{1}{a} \cosh(ax + b): d/dx cosh x = sinh x. (The
+  // rule used to answer ln|cosh|, the antiderivative of TANH, not of sinh.)
   {
     match: ['Sinh', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
-      ['Ln', ['Abs', ['Cosh', ['Add', ['Multiply', '_a', '_x'], '__b']]]],
+      ['Cosh', ['Add', ['Multiply', '_a', '_x'], '__b']],
       '_a',
     ],
     condition: filter,
   },
-  // \cosh(ax + b) -> \frac{1}{a} \ln(\sinh(ax + b))
+  // \cosh(ax + b) -> \frac{1}{a} \sinh(ax + b): d/dx sinh x = cosh x. (The
+  // rule used to answer ln|sinh|, the antiderivative of COTH, not of cosh.)
   {
     match: ['Cosh', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
-      ['Ln', ['Abs', ['Sinh', ['Add', ['Multiply', '_a', '_x'], '__b']]]],
+      ['Sinh', ['Add', ['Multiply', '_a', '_x'], '__b']],
       '_a',
     ],
     condition: filter,
   },
-  // \tanh(ax + b) -> \frac{1}{a} \ln(\sech(ax + b))
+  // \tanh(ax + b) -> \frac{1}{a} \ln(\cosh(ax + b)): d/dx ln(cosh x) is
+  // sinh x / cosh x = tanh x (cosh is positive, so no absolute value). The
+  // rule used to answer ln|sech| — the NEGATIVE of this — mirroring the
+  // circular `\tan -> ln|sec|`, where the sign comes from cos' derivative
+  // being -sin; cosh's derivative is +sinh.
   {
     match: ['Tanh', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
-      ['Ln', ['Abs', ['Sech', ['Add', ['Multiply', '_a', '_x'], '__b']]]],
+      ['Ln', ['Cosh', ['Add', ['Multiply', '_a', '_x'], '__b']]],
       '_a',
     ],
     condition: filter,
   },
-  // \sech(ax + b) -> \frac{1}{a} \ln(\tanh(ax + b))
+  // \sech(ax + b) -> \frac{1}{a} \arctan(\sinh(ax + b)) (the Gudermannian):
+  // d/dx arctan(sinh x) = cosh x / (1 + sinh² x) = cosh x / cosh² x = sech x.
+  // The rule used to answer ln|tanh|, whose derivative is 2 csch(2x), not
+  // sech — the circular `\sec -> ln|sec + tan|` has no hyperbolic analogue
+  // of that shape.
   {
     match: ['Sech', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
-      ['Ln', ['Abs', ['Tanh', ['Add', ['Multiply', '_a', '_x'], '__b']]]],
+      ['Arctan', ['Sinh', ['Add', ['Multiply', '_a', '_x'], '__b']]],
       '_a',
     ],
     condition: filter,
   },
-  // \csch(ax + b) -> -\frac{1}{a} \ln(\coth(ax + b))
+  // \csch(ax + b) -> -\frac{1}{a} \ln|\coth((ax + b)/2)| (equivalently
+  // ln|tanh((ax + b)/2)|/a): the argument is HALVED, as in the circular
+  // `\csc -> -ln|csc + cot|` = ln|tan(x/2)|. The rule used to keep the full
+  // argument, whose derivative is 2 csch(2x), not csch x.
   {
     match: ['Csch', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
         'Negate',
-        ['Ln', ['Abs', ['Coth', ['Add', ['Multiply', '_a', '_x'], '__b']]]],
+        [
+          'Ln',
+          [
+            'Abs',
+            ['Coth', ['Divide', ['Add', ['Multiply', '_a', '_x'], '__b'], 2]],
+          ],
+        ],
       ],
       '_a',
     ],
@@ -1119,19 +1138,51 @@ const INTEGRATION_RULES: Rule[] = [
     ],
     condition: filter,
   },
-  // \arcsinh(ax + b) -> \frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 + 1})
+  // The inverse hyperbolic functions, by parts: ∫ f(u) du = u·f(u) − ∫ u·f′(u) du
+  // with u = ax + b. (Every rule in this block used to answer the LOGARITHMIC
+  // DEFINITION of the function — `arsinh u = ln(u + √(u² + 1))` — as if it were
+  // its antiderivative, so `∫ arsinh t dt` evaluated to `arsinh t`; the
+  // by-parts forms below are each verified by differentiation in
+  // `calculus.test.ts`.)
+  // \arsinh(ax + b) -> (u·arsinh(u) − √(u² + 1)) / a
   {
     match: ['Arsinh', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
-        'Ln',
+        'Subtract',
         [
-          'Add',
+          'Multiply',
           ['Add', ['Multiply', '_a', '_x'], '__b'],
+          ['Arsinh', ['Add', ['Multiply', '_a', '_x'], '__b']],
+        ],
+        [
+          'Sqrt',
+          ['Add', ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2], 1],
+        ],
+      ],
+      '_a',
+    ],
+    condition: filter,
+  },
+  // \arcosh(ax + b) -> (u·arcosh(u) − √(u² − 1)) / a
+  {
+    match: ['Arcosh', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    replace: [
+      'Divide',
+      [
+        'Subtract',
+        [
+          'Multiply',
+          ['Add', ['Multiply', '_a', '_x'], '__b'],
+          ['Arcosh', ['Add', ['Multiply', '_a', '_x'], '__b']],
+        ],
+        [
+          'Sqrt',
           [
-            'Sqrt',
-            ['Add', ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2], 1],
+            'Subtract',
+            ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
+            1,
           ],
         ],
       ],
@@ -1139,18 +1190,52 @@ const INTEGRATION_RULES: Rule[] = [
     ],
     condition: filter,
   },
-  // \arccosh(ax + b) -> \frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 - 1})
+  // \artanh(ax + b) -> (u·artanh(u) + ½·ln(1 − u²)) / a
   {
-    match: ['Arcosh', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    match: ['Artanh', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
-        'Ln',
+        'Add',
         [
-          'Add',
+          'Multiply',
           ['Add', ['Multiply', '_a', '_x'], '__b'],
+          ['Artanh', ['Add', ['Multiply', '_a', '_x'], '__b']],
+        ],
+        [
+          'Multiply',
+          ['Rational', 1, 2],
           [
-            'Sqrt',
+            'Ln',
+            [
+              'Subtract',
+              1,
+              ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
+            ],
+          ],
+        ],
+      ],
+      '_a',
+    ],
+    condition: filter,
+  },
+  // \arcoth(ax + b) -> (u·arcoth(u) + ½·ln(u² − 1)) / a
+  {
+    match: ['Arcoth', ['Add', ['Multiply', '_a', '_x'], '__b']],
+    replace: [
+      'Divide',
+      [
+        'Add',
+        [
+          'Multiply',
+          ['Add', ['Multiply', '_a', '_x'], '__b'],
+          ['Arcoth', ['Add', ['Multiply', '_a', '_x'], '__b']],
+        ],
+        [
+          'Multiply',
+          ['Rational', 1, 2],
+          [
+            'Ln',
             [
               'Subtract',
               ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
@@ -1163,143 +1248,37 @@ const INTEGRATION_RULES: Rule[] = [
     ],
     condition: filter,
   },
-  // \arctanh(ax + b) -> \frac{1}{2a} \ln(\frac{1 + ax + b}{1 - ax - b})
-  {
-    match: ['Artanh', ['Add', ['Multiply', '_a', '_x'], '__b']],
-    replace: [
-      'Divide',
-      [
-        'Ln',
-        [
-          'Divide',
-          ['Add', 1, ['Add', ['Multiply', '_a', '_x'], '__b']],
-          ['Subtract', 1, ['Add', ['Multiply', '_a', '_x'], '__b']],
-        ],
-      ],
-      ['Multiply', 2, '_a'],
-    ],
-    condition: filter,
-  },
-  // \arcsech(ax + b) -> -\frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 - 1})
+  // \arsech(ax + b) -> (u·arsech(u) + arcsin(u)) / a
   {
     match: ['Arsech', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
-        'Negate',
+        'Add',
         [
-          'Ln',
-          [
-            'Add',
-            ['Add', ['Multiply', '_a', '_x'], '__b'],
-            [
-              'Sqrt',
-              [
-                'Subtract',
-                ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
-                1,
-              ],
-            ],
-          ],
+          'Multiply',
+          ['Add', ['Multiply', '_a', '_x'], '__b'],
+          ['Arsech', ['Add', ['Multiply', '_a', '_x'], '__b']],
         ],
+        ['Arcsin', ['Add', ['Multiply', '_a', '_x'], '__b']],
       ],
       '_a',
     ],
     condition: filter,
   },
-  // \arccsch(ax + b) -> -\frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 + 1})
+  // \arcsch(ax + b) -> (u·arcsch(u) + arsinh|u|) / a — the absolute value keeps the by-parts term's derivative, −sgn(u)/√(1 + u²), cancelled on both sides of 0
   {
     match: ['Arcsch', ['Add', ['Multiply', '_a', '_x'], '__b']],
     replace: [
       'Divide',
       [
-        'Negate',
+        'Add',
         [
-          'Ln',
-          [
-            'Add',
-            ['Add', ['Multiply', '_a', '_x'], '__b'],
-            [
-              'Sqrt',
-              [
-                'Add',
-                ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
-                1,
-              ],
-            ],
-          ],
+          'Multiply',
+          ['Add', ['Multiply', '_a', '_x'], '__b'],
+          ['Arcsch', ['Add', ['Multiply', '_a', '_x'], '__b']],
         ],
-      ],
-      '_a',
-    ],
-    condition: filter,
-  },
-  // \arccoth(ax + b) -> \frac{1}{2a} \ln(\frac{ax + b + 1}{ax + b - 1})
-  {
-    match: ['Arcoth', ['Add', ['Multiply', '_a', '_x'], '__b']],
-    replace: [
-      'Divide',
-      [
-        'Ln',
-        [
-          'Divide',
-          ['Add', ['Add', ['Multiply', '_a', '_x'], '__b'], 1],
-          ['Subtract', ['Add', ['Multiply', '_a', '_x'], '__b'], 1],
-        ],
-      ],
-      ['Multiply', 2, '_a'],
-    ],
-    condition: filter,
-  },
-  // \arccsch(ax + b) -> -\frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 + 1})
-  {
-    match: ['Arcsch', ['Add', ['Multiply', '_a', '_x'], '__b']],
-    replace: [
-      'Divide',
-      [
-        'Negate',
-        [
-          'Ln',
-          [
-            'Add',
-            ['Add', ['Multiply', '_a', '_x'], '__b'],
-            [
-              'Sqrt',
-              [
-                'Add',
-                ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
-                1,
-              ],
-            ],
-          ],
-        ],
-      ],
-      '_a',
-    ],
-    condition: filter,
-  },
-  // \arccoth(ax + b) -> -\frac{1}{a} \ln(ax + b + \sqrt{(ax + b)^2 - 1})
-  {
-    match: ['Arcoth', ['Add', ['Multiply', '_a', '_x'], '__b']],
-    replace: [
-      'Divide',
-      [
-        'Negate',
-        [
-          'Ln',
-          [
-            'Add',
-            ['Add', ['Multiply', '_a', '_x'], '__b'],
-            [
-              'Sqrt',
-              [
-                'Subtract',
-                ['Power', ['Add', ['Multiply', '_a', '_x'], '__b'], 2],
-                1,
-              ],
-            ],
-          ],
-        ],
+        ['Arsinh', ['Abs', ['Add', ['Multiply', '_a', '_x'], '__b']]],
       ],
       '_a',
     ],

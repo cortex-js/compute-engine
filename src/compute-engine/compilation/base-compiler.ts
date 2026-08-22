@@ -9655,6 +9655,173 @@ export class BaseCompiler {
   }
 
   /**
+   * Wall-clock budget for one `Integrate` node's antiderivative-first attempt.
+   *
+   * The attempt is an **optimization** — every integral it declines still
+   * compiles, via the caller's numeric emitter (quadrature on the JavaScript
+   * target, a rigorous enclosure on the interval target) — so it must never be
+   * able to stall a compilation. Compilation establishes no deadline of its
+   * own, and since `ce.timeLimit` was retired (`docs/TIMEOUT-MODEL.md` §5) work
+   * outside a span runs unbounded: relying on "the enclosing span, if any"
+   * meant the default (no span) case could spin forever. So the attempt arms
+   * its own span.
+   *
+   * Per §3.4 nesting is `min()`, so an enclosing consumer span that is tighter
+   * still preempts this budget — this can only shorten, never extend, a
+   * caller's bound.
+   *
+   * Sized against the slowest symbolic resolution in the compile-integrate
+   * suite (~200 ms on a warm engine), with ~10× headroom for slow CI, so no
+   * integral that legitimately closes is pushed onto the numeric path.
+   */
+  private static readonly ANTIDERIVATIVE_ATTEMPT_BUDGET_MS = 2000;
+
+  /**
+   * Whether any operand of the integral references a `vars`-mapped symbol — one
+   * the caller pinned to a runtime input. Such a symbol must not be folded, so
+   * the antiderivative-first path is skipped when the integral touches one.
+   */
+  private static referencesVarsSymbol(
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): boolean {
+    const keys = target.varsKeys;
+    if (!keys || keys.size === 0) return false;
+    for (const k of keys) if (args.some((a) => a.has(k))) return true;
+    return false;
+  }
+
+  /**
+   * The integrand of `Integrate(f, limit₁, …, limitₙ)` as a body in the
+   * limits' index variables, with the lambda variable to bind for each limit
+   * — `{ lambdaVars, bodyExpr }` — or a thrown decline (D6).
+   *
+   * A bare integrand is already a body in the limits' index variables. A
+   * `Function(body, …params)` integrand is unwrapped to its body, and its
+   * parameters are matched to the limits BY NAME, as the interpreter does
+   * (`nIntegrateMultiple` in `library/calculus.ts`): every limit's index
+   * variable must name exactly one parameter and no parameter may be left
+   * over. Pairing them by POSITION instead — the lambda for limit d named
+   * after parameter d — bound `Function(a·x·y², y, x)` under the limits
+   * `(x, 0, 1), (y, 0, 2)` with `y` over x's range, computing ∫∫ a·y·x² in
+   * place of ∫∫ a·x·y²; and a spare parameter (`Function(x + q, x, q)` under
+   * one limit) compiled `q` as an ambient `vars` read the integral never
+   * supplies, where the interpreter declines. A destructuring parameter, and
+   * any parameter with no readable name, decline as well: dropping the
+   * wrapper would compile the body's references to what they bind as reads
+   * of the enclosing scope.
+   *
+   * `lambdaVars[d]` is limit d's index variable — after the check, the
+   * parameter it binds — so the caller nests one lambda per limit in limit
+   * order.
+   */
+  static integrandLambda(
+    integrand: Expression,
+    limitIndices: ReadonlyArray<string>
+  ): { lambdaVars: string[]; bodyExpr: Expression } {
+    const lambdaVars = [...limitIndices];
+    if (!isFunction(integrand, 'Function'))
+      return { lambdaVars, bodyExpr: integrand };
+    const params = integrand.ops.slice(1);
+    BaseCompiler.assertNoDestructuringParams(params);
+    const names = params.map((p) => functionLiteralParameterName(p));
+    // `functionLiteralParameterName` returns `''` — never `undefined` — for a
+    // parameter operand that is not a name.
+    const unreadable = params.find((_p, i) => names[i] === '');
+    if (unreadable !== undefined)
+      throw new Error(
+        `Integrate: cannot compile an integrand whose parameter ` +
+          `"${unreadable.toString()}" has no readable name — the body's ` +
+          `references to what it binds would compile as references to the ` +
+          `enclosing scope. Fail closed (D6). Use a named parameter, or an ` +
+          `integrand expressed directly in the limits' index variables.`
+      );
+    const oneToOne =
+      names.length === limitIndices.length &&
+      new Set(names).size === names.length &&
+      limitIndices.every((v) => names.includes(v));
+    if (!oneToOne)
+      throw new Error(
+        `Integrate: cannot compile — the integrand's parameters ` +
+          `(${names.join(', ') || 'none'}) do not match the integration ` +
+          `variables (${limitIndices.join(', ') || 'none'}) one to one. The ` +
+          `interpreter declines such an integral, and pairing them by ` +
+          `position would bind a parameter to the wrong range. Fail closed (D6).`
+      );
+    return { lambdaVars, bodyExpr: integrand.ops[0] };
+  }
+
+  /**
+   * The closed form of `Integrate(f, (x, a, b))`, or `undefined` when the
+   * integral does not resolve symbolically and the caller must emit its own
+   * numeric integration.
+   *
+   * **Antiderivative-first.** The integral is resolved symbolically via
+   * `evaluate()` (the provider/Rubi + built-in antiderivative + FTC). If it
+   * closes to a form free of any residual `Integrate` — e.g. a plotted
+   * `∫₀ˣ f(t) dt` whose closed form is a function of the free bound `x` — that
+   * straight-line expression is returned, so each sample costs ~µs instead of a
+   * full numeric integration. The symbolic attempt runs under its own
+   * {@link ANTIDERIVATIVE_ATTEMPT_BUDGET_MS} span (tightened further by an
+   * enclosing span, never extended), so a non-elementary integrand degrades to
+   * the caller's numeric emitter rather than hanging. Skipped when the integral
+   * references a `vars`-mapped symbol, which must survive to run time as a live
+   * input (the vars contract) rather than be folded into a baked closed form.
+   *
+   * The returned expression is accepted only when it is valid, free of any
+   * residual `Integrate`, and not NaN — but it can still contain a head the
+   * CALLER's target has no lowering for, so callers must compile it inside a
+   * `try` and fall through to their numeric emitter when that throws.
+   */
+  static closedFormIntegral(
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): Expression | undefined {
+    if (BaseCompiler.referencesVarsSymbol(args, target)) return undefined;
+
+    const engine = args[0].engine;
+    let closed: Expression | undefined;
+    // Isolation scope — a child of the caller's scope, so everything the
+    // caller declared stays visible; only what this attempt declares is
+    // confined, and discarded on the way out. Without it, an integrand with a
+    // free single-uppercase-letter symbol (`∫ D x² dx`) devolves the unapplied
+    // operator into a variable and shadows the builtin in the caller's engine
+    // for good. The node must be BUILT inside the scope, not merely evaluated:
+    // `Integrate` is a binder, and its evaluate handler re-enters the parent of
+    // the scope its integrand literal owns — the scope fixed when that literal
+    // was canonicalized (`rebindEscapingCurrentScope`). Re-boxing the operands
+    // from MathJSON is what re-roots them here; `_fn` of the already-canonical
+    // operands would keep the caller's scope. The closed form outlives the
+    // scope: the caller's `compile()` resolves its free symbols by name against
+    // the target's bindings.
+    engine.pushScope();
+    try {
+      const ops = args.map((x) => x.json);
+      closed = engine.withTimeLimit(
+        {
+          ms: BaseCompiler.ANTIDERIVATIVE_ATTEMPT_BUDGET_MS,
+          label: 'compile:antiderivative',
+        },
+        () => engine.function('Integrate', ops).evaluate()
+      );
+    } catch {
+      // Non-elementary / deadline: the caller falls back to numeric
+      // integration.
+    } finally {
+      engine.popScope();
+    }
+
+    if (
+      closed === undefined ||
+      closed.has('Integrate') ||
+      !closed.isValid ||
+      closed.isNaN === true
+    )
+      return undefined;
+    return closed;
+  }
+
+  /**
    * Whether a function promises a scalar result but provably constructs a
    * collection. This is a contradiction check, not result-type inference:
    * declarations remain authoritative unless the stored body disproves them.

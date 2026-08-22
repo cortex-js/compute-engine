@@ -4,6 +4,18 @@
  * Compiles mathematical expressions to JavaScript code using interval arithmetic
  * for reliable function evaluation with singularity detection.
  *
+ * The target's value model is "one interval per quantity": every kernel here
+ * answers ONE interval (or one `IntervalResult`) and takes scalar operands —
+ * a provably collection-valued operand to a kernel fails closed
+ * (`assertScalarIntervalOperands`). A collection is that many quantities: a
+ * collection-valued ROOT (a comprehension) returns a JavaScript array of
+ * intervals (`IntervalValue`), and a collection may appear as the OPERAND of
+ * an accessor — `At`, `Length`, `PointX`/`PointY`/`PointZ` — where it is the
+ * same array at run time and the accessor projects it back down to a single
+ * interval (see `interval/collections.ts`). The array spelling of a LITERAL
+ * `List`/`Tuple` is emitted only in those operand positions, never as an
+ * ordinary lowering: see `compileIntervalCollectionOperand` for why.
+ *
  * @module compilation/interval-javascript-target
  */
 
@@ -16,7 +28,18 @@ import {
   isFunction,
 } from '../boxed-expression/type-guards.js';
 
-import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
+import {
+  BaseCompiler,
+  compilationType,
+  isProvablyStringOperand,
+  pointHasBroadcastComponent,
+} from './base-compiler.js';
+import {
+  couldBeIndexedCollectionOperand,
+  couldBeStringOperand,
+  isIndexedCollectionOperand,
+  isNumericIndexOperand,
+} from './javascript-target.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import type {
   CompileDiagnostic,
@@ -28,10 +51,18 @@ import type {
   CompilationOptions,
   CompilationResult,
   CompiledRunner,
+  CompiledFunction,
+  IntervalInput,
+  IntervalValue,
   OperandCompiler,
 } from './types.js';
 import { compileDiagnosticOf } from './diagnostics.js';
 import { IntervalArithmetic } from '../interval/index.js';
+import {
+  INTERVAL_QUADRATURE_BUDGET,
+  INTERVAL_QUADRATURE_SUBDIVISIONS,
+} from '../interval/integrate.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import type { Interval, IntervalResult } from '../interval/types.js';
 
 /**
@@ -84,6 +115,154 @@ function compileIntervalPointNorm(
   for (let i = 2; i < comps.length; i++)
     sum = `_IA.add(${sum}, _IA.square(${comps[i]}))`;
   return `_IA.sqrt(${sum})`;
+}
+
+/**
+ * The assigned value of a SYMBOL operand when that value is a literal
+ * `List`/`Tuple`/`PointList` an accessor can read at compile time; `undefined`
+ * for any other operand.
+ *
+ * Everywhere else an assigned symbol folds through
+ * `BaseCompiler.tryFoldKnownSymbol`, which compiles the VALUE — and this target
+ * has no `List`/`Tuple` lowering (see `compileIntervalCollectionOperand`), so
+ * `At(L, 2)` with `L := [1, 2, 3]` declined with "List: no lowering" even
+ * though the element is right there. Looking through the symbol here keeps
+ * the fold local to the accessor's operand position. Three symbols are never
+ * looked through: one BOUND in the current compilation context (a lambda
+ * parameter or a binder index shadows the engine's symbol of the same name),
+ * one the caller pinned as a runtime input (`varsKeys`, which must survive to
+ * run time), and one with no assigned value. A looked-through symbol is
+ * recorded in `symbolDeps`, since the generated code bakes its current value,
+ * exactly as `tryFoldKnownSymbol` records it.
+ */
+function assignedLiteral(
+  e: Expression,
+  target: CompileTarget<Expression>
+): Expression | undefined {
+  if (!isSymbol(e)) return undefined;
+  const id = e.symbol;
+  if (target.boundVars?.has(id) || target.varsKeys?.has(id)) return undefined;
+  const value = e.engine._getSymbolValue(id);
+  if (value === undefined || !isFunction(value)) return undefined;
+  const h = value.operator;
+  if (h !== 'List' && h !== 'Tuple' && h !== 'PointList') return undefined;
+  target.symbolDeps?.add(id);
+  return value;
+}
+
+/** The operands of a literal `List`/`Tuple` node — written inline or held as
+ *  a symbol's assigned value (`assignedLiteral`) — or `undefined` for any
+ *  other operand. A literal collection's length and elements are known at
+ *  compile time, which lets `Length` and `At` fold instead of emitting a
+ *  runtime array. */
+function literalCollectionOps(
+  e: Expression,
+  target: CompileTarget<Expression>
+): ReadonlyArray<Expression> | undefined {
+  const literal = assignedLiteral(e, target) ?? e;
+  if (isFunction(literal, 'List') || isFunction(literal, 'Tuple'))
+    return literal.ops;
+  return undefined;
+}
+
+/**
+ * Compile the COLLECTION operand of `At`: a JavaScript array of intervals.
+ *
+ * A literal `List`/`Tuple` is lowered here rather than through a handler
+ * registered in `INTERVAL_JAVASCRIPT_FUNCTIONS`, so the array spelling exists
+ * ONLY in the operand position of an accessor that immediately projects it
+ * back to a single interval. Registering it as an ordinary lowering would make
+ * a literal list a legal value everywhere — and a contradicted `-> boolean`
+ * declaration whose body is a list (`b(t) := [t < 1, t < 2]`) would then
+ * compile in a scalar `Which` condition, where it is pinned to decline in
+ * every scalar position. The kernels themselves are protected separately:
+ * `assertScalarIntervalOperands` fails closed on any provably
+ * collection-valued operand, since `_IA.add`, `_IA.piecewise`, … read
+ * `.lo`/`.hi` off whatever they are handed and would answer NaN bounds behind
+ * `success: true`.
+ */
+function compileIntervalCollectionOperand(
+  e: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const ops = literalCollectionOps(e, target);
+  if (ops !== undefined) return `[${ops.map((x) => compile(x)).join(', ')}]`;
+  return compile(e);
+}
+
+/**
+ * The coordinates of a literal SINGLE point — written inline or held as a
+ * symbol's assigned value (`assignedLiteral`) — or `undefined` for any other
+ * operand.
+ *
+ * A `Tuple` is always one point. An ALL-SCALAR `PointList` is one too —
+ * component k is operand k — which is the same equivalence the JavaScript
+ * target relies on (see `pointComponentSource` in `base-compiler.ts`, and the
+ * byte-identical `PointList`/`Tuple` lowerings there). Requiring every operand
+ * to be provably numeric is what excludes the other `PointList` shapes: a
+ * component that is (or may be) an indexed collection is a SOURCE zipped
+ * across points, so operand k is then not component k.
+ */
+function literalPointOps(
+  e: Expression,
+  target: CompileTarget<Expression>
+): ReadonlyArray<Expression> | undefined {
+  const literal = assignedLiteral(e, target) ?? e;
+  if (isFunction(literal, 'Tuple')) return literal.ops;
+  if (
+    isFunction(literal, 'PointList') &&
+    literal.ops.length > 0 &&
+    literal.ops.every((op) => op.type.matches('number'))
+  )
+    return literal.ops;
+  return undefined;
+}
+
+/**
+ * The emitted spelling of this target's numeric absence marker: a whole-NaN
+ * bare interval. Kept in step with the `absence` capability declared in
+ * `createTarget`, whose `isAbsent` test reads `.lo` directly — so the marker
+ * must be a bare `Interval`, never an `IntervalResult` wrapper.
+ */
+const INTERVAL_ABSENCE = '{ lo: NaN, hi: NaN }';
+
+/**
+ * Compile a point coordinate accessor (`PointX`/`PointY`/`PointZ`), where `k`
+ * is the 0-based coordinate.
+ *
+ * The operand must be a SINGLE point: a literal `Tuple` (whose coordinate is
+ * selected at compile time) or an operand whose static type is a tuple. A LIST
+ * of points is refused: the interpreter and the JavaScript target broadcast the
+ * coordinate over the list, and a list of coordinates is not a value this
+ * target can hold — its result is one interval.
+ */
+function compileIntervalPointComponent(
+  name: string,
+  arg: Expression | null | undefined,
+  k: number,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  if (arg === null || arg === undefined)
+    throw new Error(`${name}: no argument`);
+  const literal = literalPointOps(arg, target);
+  if (literal !== undefined) {
+    const coordinate = literal[k];
+    // A coordinate past the end of the point selects nothing; the interpreter
+    // yields no value there and this target projects "no value" to absence.
+    if (coordinate === undefined) return INTERVAL_ABSENCE;
+    return compile(coordinate);
+  }
+  const t = compilationType(arg);
+  if (typeof t === 'string' || t.kind !== 'tuple')
+    throw new Error(
+      `${name}: cannot compile — the operand is not a single point (its type ` +
+        `is \`${arg.type.toString()}\`, not a tuple). A list of points would ` +
+        `give one coordinate per element, and the interval target's result is ` +
+        `a single interval, not a collection. Fail closed (D6).`
+    );
+  return `_IA.component(${compile(arg)}, ${k})`;
 }
 
 /**
@@ -187,6 +366,97 @@ function intervalVarsAccess(id: string): string {
   )}) ? _.${id} : undefined)`;
 }
 
+/**
+ * The heads of `INTERVAL_JAVASCRIPT_FUNCTIONS` whose handlers accept a
+ * collection-valued operand, and so are NOT wrapped by the scalar-operand gate
+ * (`guardedIntervalFunction`): the accessors, which project a collection
+ * operand back to one interval; `Norm`, whose operand is a point; and the
+ * binders `Sum`/`Product`/`Integrate`, whose handlers judge their own body and
+ * limits with more specific diagnostics (`assertScalarBigOpBody`,
+ * `compileIntervalIntegrate`).
+ */
+const COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
+  'At',
+  'Length',
+  'PointX',
+  'PointY',
+  'PointZ',
+  'Norm',
+  'Sum',
+  'Product',
+  'Integrate',
+]);
+
+/**
+ * Fail closed (D6) when a scalar interval kernel is handed a provably
+ * collection-valued operand.
+ *
+ * Every kernel in this target reads `.lo`/`.hi` off its operands: a
+ * JavaScript array reaching `_IA.add` answers `{ lo: NaN, hi: NaN }` behind
+ * `success: true`, and one reaching `_IA.less` answers `'maybe'` — a wrong
+ * value where the interpreter broadcasts element-wise. The interval domain
+ * has no element-wise convention (one interval per quantity), so such an
+ * operand declines here with a message saying so; the interpreter evaluates
+ * it. Only PROVABLE collection-ness is tested (`isCollection`, or a type that
+ * matches the `collection<any>` shape top): a wide-declared operand
+ * (`unknown`, a function's unannotated parameter) keeps compiling, since
+ * scalar curve and implicit plotting ride this target on exactly such
+ * operands.
+ */
+function assertScalarIntervalOperands(
+  head: string,
+  args: ReadonlyArray<Expression>
+): void {
+  for (const arg of args) {
+    if (arg.isCollection || arg.type.matches('collection<any>'))
+      throw new Error(
+        `${head}: cannot compile — the operand \`${arg.toString()}\` is a ` +
+          `collection (type \`${arg.type.toString()}\`), and the interval ` +
+          `target's kernels take one interval per operand; the interval domain ` +
+          `has no element-wise convention. Evaluate the expression instead, or ` +
+          `compile a scalar per-element function. Fail closed (D6).`
+      );
+  }
+}
+
+/** Gate-wrapped handlers, built once per head (`guardedIntervalFunction`). */
+const GUARDED_INTERVAL_FUNCTIONS = new Map<
+  string,
+  CompiledFunction<Expression>
+>();
+
+/**
+ * The handler of `INTERVAL_JAVASCRIPT_FUNCTIONS` for `id`, wrapped so that
+ * `assertScalarIntervalOperands` runs on its operands — unless the head is one
+ * of `COLLECTION_AWARE_HEADS`, or there is no function-valued handler to wrap.
+ * Both `functions` resolvers of this target (the bare `createTarget` one and
+ * the `compileOrThrow` one that consults caller overrides first) go through
+ * here, so a kernel is never reachable ungated.
+ *
+ * The gate runs AFTER the handler, not before: a handler that declines on its
+ * own terms (`When`'s `assertScalarCondition` names the collection-valued
+ * BRANCH CONDITION, `Round` its non-constant precision) reports the more
+ * specific reason, and a decline discards the whole compilation anyway, so
+ * the emission the handler produced first costs nothing.
+ */
+function guardedIntervalFunction(
+  id: string
+): CompiledFunction<Expression> | undefined {
+  const handler = INTERVAL_JAVASCRIPT_FUNCTIONS[id];
+  if (typeof handler !== 'function' || COLLECTION_AWARE_HEADS.has(id))
+    return handler;
+  let wrapped = GUARDED_INTERVAL_FUNCTIONS.get(id);
+  if (wrapped === undefined) {
+    wrapped = (args, compile, target) => {
+      const code = handler(args, compile, target);
+      assertScalarIntervalOperands(id, args);
+      return code;
+    };
+    GUARDED_INTERVAL_FUNCTIONS.set(id, wrapped);
+  }
+  return wrapped;
+}
+
 const INTERVAL_JAVASCRIPT_CONSTANTS: Record<string, string> = {
   __proto__: null as never,
   Pi: '_IA.point(Math.PI)',
@@ -282,6 +552,145 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return compileIntervalPointNorm(arg.ops, compile);
   },
+
+  // Collection ACCESSORS — the heads of this table that take a collection
+  // OPERAND (every other kernel fails closed on one, see
+  // `assertScalarIntervalOperands`). The operand is a JavaScript array of
+  // intervals at run time, and `_IA.at` / `_IA.length` / `_IA.component`
+  // project it back down to a single interval (`interval/collections.ts`).
+  // There is deliberately no `List` or `Tuple` lowering in this table — see
+  // `compileIntervalCollectionOperand`.
+
+  // Element count of a collection, as a point interval.
+  Length: (args, compile, target) => {
+    const arg = args[0];
+    if (arg === null || arg === undefined)
+      throw new Error('Length: no argument');
+    // A string's length is its GRAPHEME-CLUSTER count, and this target has no
+    // text model at all — its domain is numeric, one interval per quantity —
+    // so there is nothing to count clusters with here. The union case
+    // (`string | list<number>`) is refused for the same reason: it may hold a
+    // string at run time.
+    if (isProvablyStringOperand(arg) || couldBeStringOperand(arg))
+      throw new Error(
+        `Length: cannot compile — the operand may be text at run time, and ` +
+          `the interval target's domain is numeric (one interval per ` +
+          `quantity) with no text model. Fail closed (D6).`
+      );
+    if (!isIndexedCollectionOperand(arg))
+      throw new Error(
+        `Length: cannot compile — operand is not an indexed collection ` +
+          `(list/vector/range). Fail closed (D6).`
+      );
+    // A literal collection's length is a compile-time constant.
+    const ops = literalCollectionOps(arg, target);
+    if (ops !== undefined) return `_IA.point(${ops.length})`;
+    return `_IA.length(${compile(arg)})`;
+  },
+
+  // Positional access. CE `At` is 1-based and a negative index counts from the
+  // end; an index of 0, an out-of-range index or a non-integer index selects
+  // nothing, which this target reports as the numeric absence marker. The
+  // index is an INTERVAL here, so it stands for a set of indices and `_IA.at`
+  // answers the hull of the elements they select (see
+  // `interval/collections.ts`).
+  At: (args, compile, target) => {
+    const coll = args[0];
+    const index = args[1];
+    if (
+      coll === null ||
+      coll === undefined ||
+      index === null ||
+      index === undefined
+    )
+      throw new Error('At: missing argument');
+    if (args.length !== 2)
+      throw new Error(
+        `At: only the single-index form compiles; multi-index (nested) ` +
+          `access is not supported. Fail closed (D6).`
+      );
+    // A string base is indexed by grapheme cluster, and this target has no
+    // text model — see the `Length` handler above.
+    if (isProvablyStringOperand(coll) || couldBeStringOperand(coll))
+      throw new Error(
+        `At: cannot compile — the base may be text at run time, and the ` +
+          `interval target's domain is numeric (one interval per quantity) ` +
+          `with no text model. Fail closed (D6).`
+      );
+    const provablyIndexed = isIndexedCollectionOperand(coll);
+    if (!provablyIndexed && !couldBeIndexedCollectionOperand(coll))
+      throw new Error(
+        `At: cannot compile — first operand is not an indexed collection ` +
+          `(list/vector/range). Fail closed (D6).`
+      );
+    // A base admitted only by the "could be" path may be a DICTIONARY at run
+    // time, and a keyed lookup has no interval lowering: `_IA.at` answers the
+    // absence marker for every non-array base, where the interpreter returns
+    // the stored value. Require a provably numeric index there rather than
+    // emit a silent absence behind `success: true`.
+    if (!provablyIndexed && !isNumericIndexOperand(index))
+      throw new Error(
+        `At: cannot compile — the first operand is not provably an indexed ` +
+          `collection (type \`${coll.type.toString()}\`) and the index is not ` +
+          `provably numeric, so a keyed (dictionary) access cannot be ruled ` +
+          `out. Fail closed (D6).`
+      );
+    // A TUPLE base with a component that is not a number (a `tuple<number,
+    // string>` pair) matches the indexed-collection shape, but the selected
+    // component has no interval reading: `_IA.at` would answer `entire` for
+    // it at run time behind `success: true`. Decline statically instead.
+    const baseType = compilationType(coll);
+    if (
+      typeof baseType !== 'string' &&
+      baseType.kind === 'tuple' &&
+      baseType.elements.some((el) => !isSubtype(el.type, 'number'))
+    )
+      throw new Error(
+        `At: cannot compile — the tuple base has a component that is not a ` +
+          `number (its type is \`${coll.type.toString()}\`), and the interval ` +
+          `target's value is a numeric interval. Fail closed (D6).`
+      );
+    // A COLLECTION index is a gather or a boolean mask, whose result is itself
+    // a collection — one element per index entry. This target's value is a
+    // single interval, so there is nothing to put that in.
+    if (
+      isIndexedCollectionOperand(index) ||
+      index.type.matches('collection<any>')
+    )
+      throw new Error(
+        `At: cannot compile — a collection-valued index (a gather or a ` +
+          `boolean mask) selects several elements, and the interval target's ` +
+          `value is a single interval, not a collection. Fail closed (D6).`
+      );
+    // A literal collection indexed by a literal integer folds to the selected
+    // element (or to the absence marker when the index selects nothing),
+    // applying the interpreter's 1-based / negative-from-the-end convention at
+    // compile time.
+    const ops = literalCollectionOps(coll, target);
+    if (ops !== undefined && isNumber(index) && index.im === 0) {
+      const i = index.re;
+      if (Number.isInteger(i)) {
+        const k = i > 0 ? i - 1 : ops.length + i;
+        if (i === 0 || k < 0 || k >= ops.length) return INTERVAL_ABSENCE;
+        return compile(ops[k]);
+      }
+    }
+    return `_IA.at(${compileIntervalCollectionOperand(
+      coll,
+      compile,
+      target
+    )}, ${compile(index)})`;
+  },
+
+  // Point coordinates. The operand must be a SINGLE point — see
+  // `compileIntervalPointComponent`.
+  PointX: (args, compile, target) =>
+    compileIntervalPointComponent('PointX', args[0], 0, compile, target),
+  PointY: (args, compile, target) =>
+    compileIntervalPointComponent('PointY', args[0], 1, compile, target),
+  PointZ: (args, compile, target) =>
+    compileIntervalPointComponent('PointZ', args[0], 2, compile, target),
+
   Ceil: (args, compile) => `_IA.ceil(${compile(args[0])})`,
   Exp: (args, compile) => `_IA.exp(${compile(args[0])})`,
   Floor: (args, compile) => `_IA.floor(${compile(args[0])})`,
@@ -310,9 +719,10 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     return result;
   },
-  // Element-wise max/min and clamp. On the interval target every operand is a
-  // scalar/interval (no collections), so `ElementMax`/`ElementMin` reduce to the
-  // interval max/min fold, and `Clamp(x, lo, hi)` to `min(max(x, lo), hi)`.
+  // Element-wise max/min and clamp. These lowerings are SCALAR: they fold the
+  // operands with the interval max/min, and `Clamp(x, lo, hi)` becomes
+  // `min(max(x, lo), hi)`. A collection operand has no element-wise treatment
+  // here — this target's value is one interval.
   // Interval max/min/clamp are monotonic, so they map endpoint-wise — enabling
   // break detection for the common `Clamp(x, 0, 1)` line-series idiom.
   ElementMax: (args, compile) => {
@@ -468,6 +878,10 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     compileIntervalSumProduct('Sum', args, compile, target),
   Product: (args, compile, target) =>
     compileIntervalSumProduct('Product', args, compile, target),
+
+  // Integration
+  Integrate: (args, compile, target) =>
+    compileIntervalIntegrate(args, compile, target),
 
   // Conditionals
   If: (args, compile) => {
@@ -727,6 +1141,154 @@ function compileIntervalSumProduct(
 }
 
 /**
+ * Compile `Integrate(f, (x, a, b))` for the interval arithmetic target.
+ *
+ * **Antiderivative-first, guarded.** The shared
+ * `BaseCompiler.closedFormIntegral` resolves the integral symbolically under
+ * its own wall-clock budget. When it closes, the straight-line expression is
+ * compiled as interval code — an enclosure that is both tight (no partition
+ * error at all) and cheap — but it is NOT returned bare: the symbolic step
+ * differences an antiderivative at the bounds without checking that the
+ * integrand is bounded between them (`∫₋₁¹ dt/t²` closes to `−2` although
+ * the integral diverges at the interior pole), and a wrong closed form on
+ * this target would be a zero-width "enclosure" of a divergent integral. So a
+ * definite integral's closed form is emitted as a thunk handed to
+ * `_IA.integrateClosed`, which scans the integrand over the range at run time
+ * and returns the closed form only when the scan finds no pole, gap or
+ * unbounded stretch — otherwise it falls back to the enclosure below (see
+ * `interval/integrate.ts`). An INDEFINITE integral that closes (`∫ e^{−t²} dt`
+ * → `½√π·erf(t)`) has no range to scan and compiles to the closed form
+ * directly, as a function of its free bound. The closed form can name a head
+ * this target has no lowering for, so it is compiled inside a `try` that
+ * falls through to the enclosure emitter.
+ *
+ * **Enclosure.** Otherwise the integral lowers to
+ * `_IA.integrate(f, lo, hi, n)`, which brackets the integral by a uniform
+ * `n`-piece partition rather than estimating it. `n` is sized from
+ * `INTERVAL_QUADRATURE_BUDGET` by nesting depth — 256 for a single or double
+ * integral, fewer per level beyond that — so a d-fold integral never costs
+ * more than the budget's worth of integrand evaluations. The bound
+ * EXPRESSIONS are compiled, never the `bigOpBoundConstant` numbers
+ * `extractIntervalLimits` also reports: those are floored, which is right for
+ * the discrete `Sum`/`Product` counters that helper primarily serves and wrong
+ * for a continuous integral (it would collapse `∫₀^0.5` to `∫₀^0`).
+ *
+ * The `quadrature: 'monte-carlo'` option is ignored here: it selects between
+ * two STOCHASTIC/adaptive estimators on the scalar target, and this target has
+ * no stochastic estimator — sampling produces no enclosure, which is the only
+ * thing this target returns.
+ */
+function compileIntervalIntegrate(
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const limits = args.slice(1).map(extractIntervalLimits);
+
+  // An INDEFINITE integral (`\int f dx` — the `Limits` clause carries `Nothing`
+  // for its bounds, or there is no clause at all) has no range to partition.
+  // With a closed form it is that closed form — a function of its free bound.
+  // Without one it has no value at a point: it denotes a function, not a
+  // number, and compiling the `Nothing` bounds like any other free symbol
+  // would hand `_IA.integrate` a `vars`-object lookup (`_.Nothing`) —
+  // `undefined`, which the runtime reads as a non-finite endpoint and answers
+  // `entire`, or with no clause at all would emit the bare integrand as if it
+  // were the integral's value. Fail closed (D6) so the caller falls back to
+  // the interpreter, which keeps the integral symbolic.
+  const isUnbounded = (e: Expression | undefined) =>
+    e === undefined || isSymbol(e, 'Nothing');
+  const indefinite =
+    limits.length === 0 ||
+    limits.some((l) => isUnbounded(l.lowerExpr) || isUnbounded(l.upperExpr));
+
+  // The integrand as a body in the limits' index variables: a `Function`
+  // integrand is unwrapped, its parameters matched to the limits by name (a
+  // mismatch fails closed — see `BaseCompiler.integrandLambda`). Judged
+  // BEFORE the closed-form attempt: `Integrate` is exempt from the
+  // scalar-operand gate (`COLLECTION_AWARE_HEADS`) so that its own
+  // diagnostics win, and the closed form of a collection-valued body is the
+  // collection itself (`∫₀¹ L dt` closes to `L`), which would compile as a
+  // bare symbol and route around the gate.
+  const { lambdaVars, bodyExpr } = indefinite
+    ? { lambdaVars: [] as string[], bodyExpr: args[0] }
+    : BaseCompiler.integrandLambda(
+        args[0],
+        limits.map((l) => l.index)
+      );
+  if (!indefinite) {
+    // A collection-valued body would make the integrand lambda answer a JS
+    // array, which `_IA.integrate` would read `.lo`/`.hi` off; a
+    // collection-valued bound would be read as a non-finite endpoint and
+    // answer `entire` — both behind `success: true`.
+    BaseCompiler.assertScalarBigOpBody('Integrate', bodyExpr);
+    for (const l of limits)
+      assertScalarIntervalOperands('Integrate', [l.lowerExpr, l.upperExpr]);
+  }
+
+  // Antiderivative-first: a closed form when the integral resolves to one
+  // (and does not reference a `vars`-mapped symbol, which must not fold).
+  let closedCode: string | undefined;
+  const closed = BaseCompiler.closedFormIntegral(args, target);
+  if (closed !== undefined) {
+    try {
+      // Parenthesize: the closed form can be a low-precedence expression,
+      // whereas it is spliced as an atomic operand.
+      closedCode = `(${compile(closed)})`;
+    } catch {
+      // Unlowerable head: the enclosure emitter below stands alone.
+    }
+  }
+
+  if (indefinite) {
+    if (closedCode !== undefined) return closedCode;
+    throw new Error(
+      'Integrate: an indefinite integral with no closed-form antiderivative is a function, not a number — it has no value to compute at a point, and quadrature needs bounds. Fail closed (D6). Provide bounds for a definite integral, or evaluate symbolically instead.'
+    );
+  }
+
+  // The lambda variable arrives as a bare `Interval` (`{lo, hi}`), which every
+  // `_IA.*` operation accepts, so it compiles to its own name rather than to a
+  // `vars`-object lookup or a `_IA.point(…)` wrapper.
+  const scoped = (names: string[]): CompileTarget<Expression> => ({
+    ...target,
+    var: (id) => (names.includes(id) ? id : target.var(id)),
+    boundVars: BaseCompiler.withBoundNames(target, names),
+  });
+
+  let code = BaseCompiler.compile(bodyExpr, scoped(lambdaVars));
+
+  // Per-level subdivision count from the total budget (see
+  // `INTERVAL_QUADRATURE_BUDGET`): the inner enclosure of a nested integral
+  // runs once per outer piece, so the counts multiply across levels.
+  const n = Math.max(
+    1,
+    Math.min(
+      INTERVAL_QUADRATURE_SUBDIVISIONS,
+      Math.floor(INTERVAL_QUADRATURE_BUDGET ** (1 / limits.length))
+    )
+  );
+
+  // Multiple limits nest, innermost last (Mathematica iterator convention:
+  // the FIRST limit is the OUTERMOST integral). A bound of limit d may
+  // reference the outer lambda variables 0..d−1 — at its nesting depth they
+  // are in scope, so dependent bounds (∫₀¹dx ∫₀ˣdy) compile naturally. The
+  // closed form, when there is one, guards the OUTERMOST call only: its scan
+  // walks the outer range, and each scanned piece runs the inner enclosures.
+  for (let d = limits.length - 1; d >= 0; d--) {
+    const outer = lambdaVars.slice(0, d);
+    const boundTarget = outer.length > 0 ? scoped(outer) : target;
+    const lo = BaseCompiler.compile(limits[d].lowerExpr, boundTarget);
+    const hi = BaseCompiler.compile(limits[d].upperExpr, boundTarget);
+    const f = `(${lambdaVars[d]}) => (${code})`;
+    code =
+      d === 0 && closedCode !== undefined
+        ? `_IA.integrateClosed(() => ${closedCode}, ${f}, ${lo}, ${hi}, ${n})`
+        : `_IA.integrate(${f}, ${lo}, ${hi}, ${n})`;
+  }
+  return code;
+}
+
+/**
  * JavaScript function that wraps compiled interval arithmetic code.
  *
  * Injects the _IA library and provides input conversion from various formats.
@@ -780,16 +1342,17 @@ function hasIntervalBounds(
 }
 
 /**
- * Wrap an interpreter fallback result as an interval-shaped value honoring the
- * interval-js `run` contract. A scalar `v` becomes the degenerate interval
- * `{ lo: v, hi: v }`; a non-scalar (a collection materialized to an array)
- * cannot be bounded as a single interval, so it is reported as `entire` — the
- * same "cannot bound" signal the runtime proxy uses.
+ * Wrap an interpreter fallback result as a value honoring the interval-js
+ * `run` contract (`IntervalValue`). A number becomes the degenerate interval
+ * `{ lo: v, hi: v }`; a collection (materialized to an array, possibly
+ * nested) becomes the array of its elements' wrappings — the same shape a
+ * compiled comprehension returns; any other value (a boolean, text) has no
+ * interval reading and is reported as `entire`, the same "cannot bound"
+ * signal the runtime proxy uses.
  */
-function toIntervalResult(
-  value: number | unknown[]
-): IntervalResult | Interval {
+function toIntervalValue(value: unknown): IntervalValue {
   if (typeof value === 'number') return { lo: value, hi: value };
+  if (Array.isArray(value)) return value.map(toIntervalValue);
   return { kind: 'entire' };
 }
 
@@ -802,6 +1365,10 @@ function toIntervalResult(
 function collapseIntervalInput(value: unknown): unknown {
   if (hasIntervalBounds(value))
     return (Number(value.lo) + Number(value.hi)) / 2;
+  // A collection input stays a collection for the interpreter — only its
+  // ELEMENTS collapse. The record branch below would turn it into an object
+  // keyed "0", "1", …, which the interpreter reads as a dictionary.
+  if (Array.isArray(value)) return value.map(collapseIntervalInput);
   if (isRecord(value)) {
     // Prototype-free: `out['__proto__'] = v` on an ordinary object invokes the
     // inherited setter instead of creating an own key, so a variable named
@@ -823,6 +1390,13 @@ function processInput(input: unknown): unknown {
   if (hasIntervalBounds(input)) {
     return input;
   }
+
+  // A COLLECTION input stays an array: the accessors (`_IA.at`, `_IA.length`,
+  // `_IA.component`) dispatch on `Array.isArray` and read `.length`. The
+  // generic record branch below would copy it into a null-prototype object
+  // keyed "0", "1", … — silently losing both the length and the positional
+  // access, so every collection access would answer absence.
+  if (Array.isArray(input)) return input.map(processInput);
 
   // Object with properties - process recursively
   if (isRecord(input)) {
@@ -902,7 +1476,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         }
         return null;
       },
-      functions: (id) => INTERVAL_JAVASCRIPT_FUNCTIONS[id],
+      functions: (id) => guardedIntervalFunction(id),
       constant: (id) => INTERVAL_JAVASCRIPT_CONSTANTS[id],
       var: (id) => {
         return INTERVAL_JAVASCRIPT_CONSTANTS[id];
@@ -946,7 +1520,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
   compile(
     expr: Expression,
     options: CompilationOptions<Expression> = {}
-  ): CompilationResult<'interval-js', IntervalResult | Interval> {
+  ): CompilationResult<'interval-js', IntervalValue> {
     // See the note in `javascript-target.ts`: the target-level route bypasses
     // the standalone `compile()` export, where these deprecations were warned
     // about and where the `complexPromotion` alias is resolved, so each target
@@ -958,7 +1532,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       options,
       INTERVAL_SUPPORTED_MODES.includes('complex')
     ).options;
-    let result: CompilationResult<'interval-js', IntervalResult | Interval>;
+    let result: CompilationResult<'interval-js', IntervalValue>;
     try {
       result = this.compileOrThrow(expr, options);
     } catch (e) {
@@ -1005,7 +1579,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     error: string,
     options: CompilationOptions<Expression>,
     diagnostic?: CompileDiagnostic
-  ): CompilationResult<'interval-js', IntervalResult | Interval> {
+  ): CompilationResult<'interval-js', IntervalValue> {
     console.warn(
       `Compilation fallback for "${expr.operator}" (target: interval-js): ${error}`
     );
@@ -1021,21 +1595,21 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     // Through `unknown`: the fallback's `run` is typed with the interval
     // target's own result union, which does not overlap the plain
     // number/array shape the interpreter actually hands back here before
-    // `toIntervalResult` wraps it.
+    // `toIntervalValue` wraps it.
     const interpreterRun = base.run as unknown as (
       ...args: unknown[]
-    ) => number | unknown[];
-    const run: CompiledRunner<IntervalResult | Interval, number | Interval> = (
+    ) => unknown;
+    const run: CompiledRunner<IntervalValue, IntervalInput> = (
       ...args: unknown[]
-    ): IntervalResult | Interval =>
-      toIntervalResult(interpreterRun(...args.map(collapseIntervalInput)));
+    ): IntervalValue =>
+      toIntervalValue(interpreterRun(...args.map(collapseIntervalInput)));
     return { ...base, run };
   }
 
   private compileOrThrow(
     expr: Expression,
     options: CompilationOptions<Expression> = {}
-  ): CompilationResult<'interval-js', IntervalResult | Interval> {
+  ): CompilationResult<'interval-js', IntervalValue> {
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
     const { functions, vars, preamble } = options;
@@ -1079,11 +1653,19 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // provide. Number LITERALS in the source are exact by definition and
       // stay point intervals, as before.
       constantFold: false,
+      // The names the caller pinned to runtime inputs. A symbol in this set is
+      // a live input, not a value to bake: `BaseCompiler.closedFormIntegral`
+      // declines to fold an `Integrate` that mentions one, and the
+      // user-function resolution in `BaseCompiler` leaves such a name with the
+      // caller's meaning rather than eta-expanding it. Populated on every other
+      // executable target; its absence here left both behaviors silently
+      // disabled for `interval-js` (`∫₀^k t dt` with `k` mapped still folded to
+      // `k²/2`). The constant-fold consumer of this set is moot here — this
+      // target sets `constantFold: false` unconditionally, just above.
+      varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
       constant: (id) => INTERVAL_JAVASCRIPT_CONSTANTS[id],
       functions: (id) =>
-        namedFunctions?.[id]
-          ? namedFunctions[id]
-          : INTERVAL_JAVASCRIPT_FUNCTIONS[id],
+        namedFunctions?.[id] ? namedFunctions[id] : guardedIntervalFunction(id),
       var: (id) => {
         // Own-property test: a caller's `vars` map is a plain object, so
         // `in` finds `Object.prototype` members and a symbol named
@@ -1152,7 +1734,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
 function compileToIntervalTarget(
   expr: Expression,
   target: CompileTarget<Expression>
-): CompilationResult<'interval-js', IntervalResult | Interval> {
+): CompilationResult<'interval-js', IntervalValue> {
   let js: string;
   try {
     js = BaseCompiler.compileCseRoot(expr, target);
@@ -1168,7 +1750,7 @@ function compileToIntervalTarget(
       error: (e as Error).message,
       diagnostic: compileDiagnosticOf(e),
       ...BaseCompiler.modeReport(),
-    } as CompilationResult<'interval-js', IntervalResult | Interval>;
+    } as CompilationResult<'interval-js', IntervalValue>;
   }
   // Prepend any user-defined function definitions accumulated while compiling
   // `expr` (a symbol with a `Function`-literal definition used as an operator)
@@ -1185,9 +1767,6 @@ function compileToIntervalTarget(
     success: true,
     code: js,
     calling: 'expression',
-    run: fn as unknown as CompiledRunner<
-      IntervalResult | Interval,
-      number | Interval
-    >,
+    run: fn as unknown as CompiledRunner<IntervalValue, IntervalInput>,
   };
 }

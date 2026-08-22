@@ -1166,20 +1166,39 @@ export interface LanguageTarget<
 }
 
 /**
- * The `interval-js` target, typed concretely: its compiled `run` accepts
- * `number | Interval` variables (a plain number is auto-converted to a point
- * interval) and returns an `IntervalResult` — or a bare `Interval`, which is
- * what a constant-valued expression produces. Returned by
- * `_getCompilationTarget("interval-js")` so callers get this without a cast.
+ * What a compiled `interval-js` runner returns: an `IntervalResult` — or a
+ * bare `Interval`, which is what a constant-valued expression produces — for
+ * a scalar expression, and for a collection-valued one (a comprehension, a
+ * list of points) an ARRAY of these, nested as the collection is. The
+ * interval domain is "one interval per quantity"; a collection is that many
+ * quantities, so it is an array of them rather than one interval (user
+ * ruling 2026-08-22, confirming what comprehension roots already produced).
  *
  * Defined here (not in a `types-*.ts` file) because the layering rules forbid
  * the type-definition layer from importing `interval/`; `compilation/` may.
  */
+export type IntervalValue = IntervalResult | Interval | IntervalValue[];
+
+/**
+ * What a compiled `interval-js` runner accepts for each variable: a plain
+ * number (auto-converted to a point interval), an `Interval`, or — for a
+ * collection-valued variable, read by `At`/`Length`/`PointX`… — an array of
+ * these, nested as the collection is; every number in it is converted to a
+ * point interval on the way in.
+ */
+export type IntervalInput = number | Interval | IntervalInput[];
+
+/**
+ * The `interval-js` target, typed concretely: its compiled `run` accepts
+ * {@link IntervalInput} variables and returns an {@link IntervalValue}.
+ * Returned by `_getCompilationTarget("interval-js")` so callers get this
+ * without a cast.
+ */
 export type IntervalJsCompilationTarget<Expr = unknown> = LanguageTarget<
   Expr,
   'interval-js',
-  IntervalResult | Interval,
-  number | Interval
+  IntervalValue,
+  IntervalInput
 >;
 
 /**
@@ -1537,7 +1556,7 @@ export type CompiledValue =
  * ({@link IntervalJsCompilationTarget}).
  */
 export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
-  ? IntervalResult | Interval
+  ? IntervalValue
   : CompiledValue;
 
 /**
@@ -1570,7 +1589,7 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  * `ce._registerCompilationTarget()` gets whatever guard its author writes.
  */
 export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
-  ? number | Interval
+  ? IntervalInput
   : number | ComplexResult;
 
 /**

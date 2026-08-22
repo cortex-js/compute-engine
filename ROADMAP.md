@@ -664,49 +664,6 @@ generic type report. The rejection site is `checkNumericArgs`
 (`boxed-expression/validate.ts`); the message likely wants an
 `ERROR_EXPLANATIONS` entry so the CLI/editor surfaces carry it too.
 
-### A collection operand reaching a SCALAR `interval-js` kernel answers garbage behind `success: true` (OPEN — needs a ruling, found 2026-08-22 while landing Tycho item 220)
-
-The interval target's kernels (`_IA.add`, `_IA.less`, `_IA.piecewise`, …)
-read `.lo`/`.hi` off whatever they are handed. A collection-typed operand in
-such a position compiles — there is no operand-shape gate — and at run time
-the kernel sees a JavaScript array: `Add(L, 1)` with `L: list<number>` runs
-to `{ kind: 'interval', value: { lo: NaN, hi: NaN } }`, and `Less(xs, 3)`
-with `xs: list<real>` compiles to `_IA.less(_.xs, _IA.point(3))` and runs to
-`'maybe'`. Both were measured on the tree BEFORE item 220 landed, so this is
-not a consequence of the new accessors (which project a collection operand
-back to one interval before any kernel sees it); it is why those accessors
-emit the array spelling only in their own operand position and why there is
-deliberately no `List`/`Tuple` lowering in the target's function table.
-
-The fix is a per-kernel operand gate (fail closed on a provably
-collection-valued operand — some twenty handlers), but it needs a ruling
-first, because the target's result contract is already inconsistent: a
-comprehension root compiles and RETURNS an array (pinned in
-`compile-loop.test.ts`), while the documented `run` type is
-`IntervalResult | Interval` and the interpreter-fallback path maps any
-non-scalar to `entire`. Decide which is the contract — arrays admitted (then
-document it and fix the fallback), or one interval (then the comprehension pin
-changes) — and gate the kernels accordingly.
-
-### `Integrate` applies the fundamental theorem across a pole: `∫₋₁¹ dt/t` evaluates to 0 (OPEN, found 2026-08-22)
-
-`ce.parse('\\int_{-1}^{1} \\frac{1}{t} dt').evaluate()` returns `0` — the
-antiderivative `ln|t|` differenced at the bounds, with no check that the
-integrand is bounded on `[-1, 1]`. The integral diverges; `.N()` answers a
-large value with a large error, which is at least honest. Both compile
-targets inherit the wrong value through the shared antiderivative-first step
-(`BaseCompiler.closedFormIntegral`): the `javascript` target emits `(0)`, and
-the `interval-js` target emits `(_IA.point(0))` — a zero-width "rigorous
-enclosure" of a divergent integral, the worse of the two, since that
-target's whole purpose is never to claim a value it cannot bound (its own
-quadrature path, reached when the closed form is suppressed, correctly
-answers `singular`). No test pins the `0`. The guard belongs in the
-`Integrate` evaluate handler (`library/calculus.ts`): before differencing an
-antiderivative over finite bounds, refuse (stay symbolic) when the integrand
-has a pole strictly inside them — at minimum a rational integrand whose
-denominator has a real root in the open range. What "pole detection" should
-cover beyond the rational case is the ruling to make.
-
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 
 The evaluator broadcasts `Which` elementwise over collection-valued operands

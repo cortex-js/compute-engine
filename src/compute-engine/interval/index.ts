@@ -29,6 +29,10 @@ import {
   unwrapOrPropagate as _unwrapOrPropagate,
 } from './util.js';
 import {
+  integrate as _integrate,
+  integrateClosed as _integrateClosed,
+} from './integrate.js';
+import {
   add as _add,
   sub as _sub,
   mul as _mul,
@@ -115,6 +119,11 @@ import {
   restrict as _restrict,
   clamp as _clamp,
 } from './comparison.js';
+import {
+  at as _at,
+  length as _length,
+  component as _component,
+} from './collections.js';
 
 // Types
 export type { Interval, IntervalResult, BoolInterval } from './types.js';
@@ -223,6 +232,18 @@ export {
   clamp,
 } from './comparison.js';
 
+// Quadrature
+export {
+  integrate,
+  integrateClosed,
+  INTERVAL_QUADRATURE_SUBDIVISIONS,
+  INTERVAL_QUADRATURE_BUDGET,
+  INTERVAL_QUADRATURE_GUARD_SUBDIVISIONS,
+} from './integrate.js';
+
+// Collection access (`At`, `Length`, point coordinates)
+export { at, length, component } from './collections.js';
+
 /**
  * The complete interval arithmetic library object.
  *
@@ -291,6 +312,11 @@ export const IntervalArithmetic = {
   exp2: _exp2,
   hypot: _hypot,
 
+  // Collection access
+  at: _at,
+  length: _length,
+  component: _component,
+
   // Trigonometric
   sin: _sin,
   cos: _cos,
@@ -334,4 +360,6 @@ export const IntervalArithmetic = {
   piecewise: _piecewise,
   restrict: _restrict,
   clamp: _clamp,
+  integrate: _integrate,
+  integrateClosed: _integrateClosed,
 };

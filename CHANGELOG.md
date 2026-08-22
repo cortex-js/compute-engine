@@ -1,3 +1,129 @@
+## [Unreleased]
+
+### New Features
+
+- **The `interval-js` target now lowers `Integrate`, `At`, `Length` and
+  `PointX`/`PointY`/`PointZ`.** Each compiled on the `javascript` target and
+  declined on `interval-js` with "the operator is known to the engine but
+  target 'interval-javascript' has no lowering for it", so every plotted band
+  over one of them fell from the interval lane to the scalar fallback. Four of
+  the six had a common cause: the interval target had no collection value
+  model at all — a `List`/`Tuple` literal had no lowering, and an array handed
+  to a compiled function was flattened into an object keyed `"0"`, `"1"`, …,
+  losing its length. A collection is now a JavaScript array of intervals in
+  the OPERAND position of an accessor, and the accessor projects it back to
+  one interval: `Length` answers the count as a point interval; `At` applies
+  the interpreter's 1-based, negative-from-the-end convention, and since the
+  index is itself an interval it stands for a set of indices — the result is
+  the hull of every element the integers in it select, `partial` when some of
+  them fall outside the collection, and the numeric absence marker
+  (`{ lo: NaN, hi: NaN }`) when none selects anything; `PointX`/`PointY`/
+  `PointZ` read one coordinate of a single point. A literal collection — or a
+  symbol assigned one — folds at compile time. The gates mirror the
+  `javascript` target's: a string base, a gather or mask index, a list of
+  points under a coordinate accessor, and a collection-valued RESULT all still
+  decline, each with a message saying why (the target's value is one
+  interval). `Integrate` is a different algorithm rather than a table entry:
+  the antiderivative-first step is now shared with the `javascript` target
+  (`BaseCompiler.closedFormIntegral`), so `∫₀ˣ sin t dt` compiles to the
+  closed form `1 − cos x` on both — except that on the interval target a
+  DEFINITE integral's closed form is guarded at run time
+  (`_IA.integrateClosed`): the symbolic step differences an antiderivative at
+  the bounds without checking that the integrand is bounded between them
+  (`∫₋₁¹ dt/t²` closes to `−2`), and on this target that would be a
+  zero-width "enclosure" of a divergent integral, so a coarse interval scan of
+  the integrand over the range withholds the closed form — the scan cannot
+  miss a pole, since interval arithmetic encloses — and hands such an integral
+  to the enclosure, which answers `singular`. An integral that does not close
+  compiles to `_IA.integrate`, an enclosure — a Riemann bracket over a uniform
+  partition, with interval-valued bounds handled by the mean-value correction
+  `[0, b₂−b₁]·f([b₁, b₂])` on each side, and the accumulation's own
+  round-to-nearest error added back by the standard dot-product bound — rather
+  than the scalar target's Gauss–Kronrod estimate. Its width is first order in
+  the piece size (≈ 2.5·10⁻³ on `∫₀¹ e^{−t²x} dt` at 256 pieces); nested
+  limits share one evaluation budget of 65 536 integrand calls (256 pieces per
+  level for a single or double integral, 40 for a triple, 16 for a quadruple),
+  so a deeper integral gets a coarser enclosure instead of a runaway cost. A
+  pole inside the range answers `singular`, an undefined integrand `empty`,
+  and an infinite bound `entire` (no finite partition exists; the scalar
+  target's variable transform is not interval-tight). An indefinite integral
+  with no closed form still fails closed, as on the `javascript` target.
+  Found and fixed alongside, on BOTH targets: a `Function` integrand's
+  parameters were paired to the limits by position, where the interpreter
+  pairs them by name — `Function(a·x·y², y, x)` under `(x, 0, 1), (y, 0, 2)`
+  compiled to ∫∫ a·y·x² (`2a/3`) instead of ∫∫ a·x·y² (`4a/3`), and a spare
+  parameter (`Function(x + q, x, q)` under one limit) compiled as a read of
+  an input the integral never supplies; both now fail closed unless the
+  parameters match the integration variables one to one. And the interval
+  target never populated `varsKeys`, so a symbol the caller pinned through
+  `vars` was not protected from the closed-form fold (`∫₀ᵏ t dt` with `k`
+  mapped baked `k²/2` instead of reading `k` at run time). Two contract
+  points were settled with it: the interval target's result is one interval
+  per quantity, so a collection-valued expression (a comprehension) returns an
+  ARRAY of interval values (`IntervalValue`) — which comprehension roots
+  already did, now typed and honored by the interpreter fallback too, which
+  used to collapse any list to `entire`; and every scalar kernel now fails
+  closed on a provably collection-valued operand, where `Add(L, 1)` used to
+  answer `{ lo: NaN, hi: NaN }` and `Less(xs, 3)` `'maybe'` behind
+  `success: true`. The runner's variable type is `IntervalInput` — a number,
+  an interval, or an array of these for a collection-valued variable. (Tycho
+  item 220)
+
+### Bug Fixes
+
+- **A definite integral with a pole strictly inside its bounds no longer
+  evaluates to a finite number.** `∫₋₁¹ dt/t` evaluated to `0` and
+  `∫₋₁¹ dt/t²` to `−2`: the antiderivative was differenced at the bounds
+  with no check that the integrand is bounded between them, which the
+  fundamental theorem of calculus requires — both integrals diverge. The
+  `Integrate` evaluate handler now keeps such an integral inert (unevaluated,
+  as it already did when no antiderivative was found); `.N()` still reports a
+  quadrature value with its error bar. A pole is reported only when it is
+  PROVEN: located exactly — as a real root of a polynomial denominator
+  (`1/t`, `1/(t² − 1)`, `t⁻³`), a pole of `tan`/`cot`/`sec`/`csc` or
+  `csch`/`coth` of a linear argument, or a zero of a `sin`/`cos`/`tan`/`cot`/
+  `sinh`/`tanh` divisor (a reciprocal such as `1/tan t` is not canonicalized
+  to `cot t`, so it is read as written) — and then confirmed by sampling the
+  integrand on both sides of it to grow at least as fast as `1/|t − r|`. A
+  root is told apart from a bound by the denominator's residual there, not
+  by a distance, so `∫₀¹ (t − 10⁻¹⁰)⁻² dt` is recognized as divergent while
+  a double root exactly at a bound stays an endpoint case. That confirmation is what keeps a cancelling denominator
+  (`∫ (t² − 1)/(t − 1)`), an integrable singularity (`∫₀¹ dt/√t = 2`), a
+  pole AT a bound (`∫₀¹ dt/t = +∞`), and every integral with a symbolic or
+  infinite bound exactly as they were. The compile targets' antiderivative-
+  first step inherits the fix: `∫₋₁¹ dt/t²` no longer compiles to the
+  constant `−2`.
+
+- **The sign of a circular function of an exact argument was off by one
+  quadrant.** `sgn` of `cos 1`, `sec 1`, `tan 1` (first quadrant) and `sin 2`
+  (second quadrant) answered `negative`: the quadrant helper numbers the
+  quadrants 1..4 and the sign table was indexed 0..3 with that number. Every
+  consumer of the sign was affected — `|sec 1|` evaluated to `-sec(1)`, so
+  `∫₀¹ tan t dt` (= `ln|sec 1|`) came out as `ln(−sec 1)`, a complex number
+  for a real integral. All six functions now report the sign of their value
+  in every quadrant (verified against the numeric value at 90 sample
+  points).
+
+- **`∫ cot(ax + b) dx` had the wrong sign.** The pattern rule answered
+  `−ln|sin(ax + b)|/a`; the antiderivative of `cot` is `+ln|sin x|` (its
+  derivative is `cos x / sin x`). `∫₀² cot t dt`, divergent at the lower
+  bound, evaluated to `−∞` instead of `+∞`. The power-reduction route
+  (`∫cot³x dx`) already used the correct base case and is unchanged.
+
+- **Eight more rules of the built-in antiderivative table were wrong** (the
+  table the `Integrate` evaluate handler uses when no integration provider is
+  loaded; the Rubi provider was unaffected). `∫ sinh` and `∫ cosh` answered
+  `ln|cosh|` and `ln|sinh|` (the antiderivatives of `tanh` and `coth`);
+  `∫ tanh` answered `ln|sech|`, the negative of the correct `ln(cosh)`;
+  `∫ sech` answered `ln|tanh|` where it is `arctan(sinh)`; `∫ csch` kept the
+  full argument in `−ln|coth|` where it must be halved; and all six inverse
+  hyperbolic rules (`arsinh`, `arcosh`, `artanh`, `arcoth`, `arsech`,
+  `arcsch`) answered the function's own logarithmic definition —
+  `∫ arsinh t dt` evaluated to `arsinh t`. Each is now the by-parts form
+  (`∫ arsinh t dt = t·arsinh t − √(t² + 1)`, …), and every rule of the
+  table is pinned by differentiating its answer back to the integrand at
+  several points of its domain.
+
 ## 0.118.1 _2026-08-22_
 
 ### Bug Fixes

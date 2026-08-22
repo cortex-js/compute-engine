@@ -63,6 +63,7 @@ import {
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
 import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
+import { integrandHasInteriorPole } from '../symbolic/interior-pole.js';
 import { dSolve } from '../symbolic/differential-equations.js';
 import { rSolve } from '../symbolic/recurrences.js';
 import {
@@ -1885,6 +1886,23 @@ volumes
               // value (∫₋₁¹ √(1−x²)/(1+x²) dx → 0, the `+5` case → 10, etc.).
               // The `.N()` path (NIntegrate quadrature) still gives the value.
               // See CORRECTNESS_FINDINGS P0-1.
+              isIndefinite = false;
+              expr = ce.function('Integrate', [
+                expr,
+                ce.function('Limits', [ce.symbol(variable), lower, upper]),
+              ]);
+            } else if (
+              integrandHasInteriorPole(integrand, variable, lower, upper, ce)
+            ) {
+              // The integrand is unbounded at a point STRICTLY INSIDE the
+              // bounds, so the fundamental theorem of calculus does not apply
+              // and the integral diverges. Differencing the antiderivative
+              // anyway would report a finite value for a divergent integral
+              // (∫₋₁¹ dt/t → 0, ∫₋₁¹ dt/t² → −2). Keep the integral inert, as
+              // the "antiderivative not fully found" arm above does; `.N()`
+              // (NIntegrate quadrature) still reports a value with its error
+              // bar. `integrandHasInteriorPole` only answers `true` for a
+              // proven pole, so a correct closed form is never lost this way.
               isIndefinite = false;
               expr = ce.function('Integrate', [
                 expr,

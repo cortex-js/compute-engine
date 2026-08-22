@@ -147,9 +147,9 @@ describe('the shapes that must keep failing closed', () => {
     const ce = make();
     ce.declare('p', 'tuple<real,real>');
     expect(compile(ce.parse('p < 3'))?.success).toBe(false);
-    expect(
-      compile(ce.box(['Less', ['Tuple', 1, 2], 3] as any))?.success
-    ).toBe(false);
+    expect(compile(ce.box(['Less', ['Tuple', 1, 2], 3] as any))?.success).toBe(
+      false
+    );
   });
 
   test('a non-INDEXED collection has no positional lowering', () => {
@@ -166,11 +166,17 @@ describe('the shapes that must keep failing closed', () => {
     // is nothing sound to relax to.
     const ce = make();
     expect(
-      ce.box(['Equal', 'L', 3, 3] as any).evaluate().toString()
+      ce
+        .box(['Equal', 'L', 3, 3] as any)
+        .evaluate()
+        .toString()
     ).toBe('["False","False","True"]');
-    expect(ce.box(['Equal', 'L', 'L', 3] as any).evaluate().toString()).toBe(
-      '"False"'
-    );
+    expect(
+      ce
+        .box(['Equal', 'L', 'L', 3] as any)
+        .evaluate()
+        .toString()
+    ).toBe('"False"');
     expect(compile(ce.box(['Equal', 'L', 3, 3] as any))?.success).toBe(false);
   });
 
@@ -196,15 +202,32 @@ describe('other targets are unaffected', () => {
   //
   // `toContain`, not `toBe`: the Python ufunc goes through the `_ce_ord` shape
   // guard, whose definition is prepended to the emitted code.
-  test.each([
-    ['python', '_ce_ord(np.less, xs, 3)'],
-    ['interval-js', '_IA.less(_.xs, _IA.point(3))'],
-  ])('%s keeps its own lowering', (to, expected) => {
+  test.each([['python', '_ce_ord(np.less, xs, 3)']])(
+    '%s keeps its own lowering',
+    (to, expected) => {
+      const ce = new ComputeEngine();
+      ce.declare('xs', 'list<real>');
+      const r = compile(ce.box(['Less', 'xs', 3] as any), { to } as any)!;
+      expect(r.code).toContain(expected);
+      expect(r.code).not.toContain('_SYS');
+    }
+  );
+
+  // The interval-js row used to pin `_IA.less(_.xs, _IA.point(3))` — a
+  // comparison over a JS array at run time, which answered `'maybe'` behind
+  // `success: true` where the interpreter broadcasts. The interval kernels
+  // now fail closed on a provably collection-valued operand (the interval
+  // domain has no element-wise convention); the engine-level compile()
+  // surfaces that as a fallback result. Still no `_SYS`.
+  test('interval-js fails closed on a collection-valued comparison operand', () => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'list<real>');
-    const r = compile(ce.box(['Less', 'xs', 3] as any), { to } as any)!;
-    expect(r.code).toContain(expected);
-    expect(r.code).not.toContain('_SYS');
+    const r = compile(ce.box(['Less', 'xs', 3] as any), {
+      to: 'interval-js',
+    } as any)!;
+    expect(r.success).toBe(false);
+    expect(String(r.error)).toContain('is a collection');
+    expect(r.code ?? '').not.toContain('_SYS');
   });
 
   // The GLSL row used to pin `xs < 3.0` — invalid shader source (`vec` vs

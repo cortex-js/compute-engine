@@ -368,7 +368,7 @@ function hasPossiblyTextElements(e: Expression | undefined): boolean {
  * on PROOF of a string, so the union is passed through unsegmented. The
  * collection funnels therefore fail closed on it.
  */
-function couldBeStringOperand(e: Expression): boolean {
+export function couldBeStringOperand(e: Expression): boolean {
   const t = jsType(e);
   if (typeof t !== 'object' || t.kind !== 'union') return false;
   return t.types.some(
@@ -1019,7 +1019,7 @@ function compileScalarBooleanBody(
  * `collection-utils`: importing that module here reorders module init and
  * breaks a runtime binding in the arithmetic broadcast path.
  */
-function isIndexedCollectionOperand(e: Expression): boolean {
+export function isIndexedCollectionOperand(e: Expression): boolean {
   const t = e.type;
   // A STRING is an indexed collection of its grapheme clusters in the type
   // lattice, so it MATCHES `indexed_collection` — but it does not lower to a
@@ -1053,7 +1053,7 @@ function isIndexedCollectionOperand(e: Expression): boolean {
  * types `unknown` until inference refines it scalar), and it is what
  * `isPossiblyCollectionTypedJS` governs.
  */
-function couldBeIndexedCollectionOperand(e: Expression): boolean {
+export function couldBeIndexedCollectionOperand(e: Expression): boolean {
   const t = jsType(e);
   if (t === 'unknown' || t === 'any' || t === 'value') return false;
   // A string is not an array-shaped operand — see `isIndexedCollectionOperand`.
@@ -1076,7 +1076,7 @@ function couldBeIndexedCollectionOperand(e: Expression): boolean {
  * indexed collection is not subject to this test: no dictionary reaches it, and
  * its index gate stays the interpreter-matching runtime one.
  */
-function isNumericIndexOperand(e: Expression): boolean {
+export function isNumericIndexOperand(e: Expression): boolean {
   return isSubtype(jsType(e), 'number');
 }
 
@@ -9223,41 +9223,6 @@ function emitSumProduct(
  * `∫₀^0`), so we compile the bound expressions directly instead.
  */
 /**
- * Whether any operand of the integral references a `vars`-mapped symbol — one
- * the caller pinned to a runtime input. Such a symbol must not be folded, so
- * the antiderivative-first path is skipped when the integral touches one.
- */
-function referencesVarsSymbol(
-  args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): boolean {
-  const keys = target.varsKeys;
-  if (!keys || keys.size === 0) return false;
-  for (const k of keys) if (args.some((a) => a.has(k))) return true;
-  return false;
-}
-
-/**
- * Wall-clock budget for one `Integrate` node's antiderivative-first attempt.
- *
- * The attempt is an **optimization** — every integral it declines still
- * compiles, via the quadrature emitter below — so it must never be able to
- * stall a compilation. Compilation establishes no deadline of its own, and
- * since `ce.timeLimit` was retired (`docs/TIMEOUT-MODEL.md` §5) work outside a
- * span runs unbounded: relying on "the enclosing span, if any" meant the
- * default (no span) case could spin forever. So the attempt arms its own span.
- *
- * Per §3.4 nesting is `min()`, so an enclosing consumer span that is tighter
- * still preempts this budget — this can only shorten, never extend, a caller's
- * bound.
- *
- * Sized against the slowest symbolic resolution in the compile-integrate
- * suite (~200 ms on a warm engine), with ~10× headroom for slow CI, so no
- * integral that legitimately closes is pushed onto quadrature.
- */
-const ANTIDERIVATIVE_ATTEMPT_BUDGET_MS = 2000;
-
-/**
  * Compile `Integrate(f, (x, a, b))`.
  *
  * **Antiderivative-first.** The integral is first resolved symbolically via
@@ -9265,12 +9230,13 @@ const ANTIDERIVATIVE_ATTEMPT_BUDGET_MS = 2000;
  * closes to a form free of any residual `Integrate` — e.g. a plotted
  * `∫₀ˣ f(t) dt` whose closed form is a function of the free bound `x` — that
  * straight-line expression is compiled directly, so each sample costs ~µs
- * instead of a full quadrature. The symbolic attempt runs under its own
- * `ANTIDERIVATIVE_ATTEMPT_BUDGET_MS` span (tightened further by an enclosing
- * span, never extended), so a non-elementary integrand degrades to quadrature
- * rather than hanging. Skipped when the integral references a `vars`-mapped
- * symbol, which must survive to run time as a live input (the vars contract)
- * rather than be folded into a baked closed form.
+ * instead of a full quadrature. The attempt itself lives in
+ * `BaseCompiler.closedFormIntegral` (shared with the interval target, which
+ * runs the same step ahead of its own enclosure emitter): it is bounded by its
+ * own wall-clock span, so a non-elementary integrand degrades to quadrature
+ * rather than hanging, and it declines outright when the integral references a
+ * `vars`-mapped symbol, which must survive to run time as a live input (the
+ * vars contract) rather than be folded into a baked closed form.
  *
  * **Quadrature fallback.** Otherwise the compiled definite integral defaults to
  * **deterministic adaptive Gauss–Kronrod (GK15)**: near machine precision on
@@ -9288,51 +9254,15 @@ function compileIntegrate(
 ): string {
   // Antiderivative-first: compile a closed form when the integral resolves to
   // one (and does not reference a `vars`-mapped symbol, which must not fold).
-  if (!referencesVarsSymbol(args, target)) {
-    const engine = args[0].engine;
-    let closed: Expression | undefined;
-    // Isolation scope — a child of the caller's scope, so everything the
-    // caller declared stays visible; only what this attempt declares is
-    // confined, and discarded on the way out. Without it, an integrand with a
-    // free single-uppercase-letter symbol (`∫ D x² dx`) devolves the unapplied
-    // operator into a variable and shadows the builtin in the caller's engine
-    // for good. The node must be BUILT inside the scope, not merely evaluated:
-    // `Integrate` is a binder, and its evaluate handler re-enters the parent of
-    // the scope its integrand literal owns — the scope fixed when that literal
-    // was canonicalized (`rebindEscapingCurrentScope`). Re-boxing the operands
-    // from MathJSON is what re-roots them here; `_fn` of the already-canonical
-    // operands would keep the caller's scope. The closed form outlives the
-    // scope: `compile()` below resolves its free symbols by name against the
-    // target's bindings.
-    engine.pushScope();
+  const closed = BaseCompiler.closedFormIntegral(args, target);
+  if (closed !== undefined) {
     try {
-      const ops = args.map((x) => x.json);
-      closed = engine.withTimeLimit(
-        {
-          ms: ANTIDERIVATIVE_ATTEMPT_BUDGET_MS,
-          label: 'compile:antiderivative',
-        },
-        () => engine.function('Integrate', ops).evaluate()
-      );
+      // Parenthesize: the closed form can be a low-precedence expression
+      // (e.g. an `Add`), whereas the caller splices this handler's result as
+      // an atomic operand (like the `_SYS.integrate(…)` call it replaces).
+      return `(${compile(closed)})`;
     } catch {
-      // Non-elementary / deadline: fall through to quadrature below.
-    } finally {
-      engine.popScope();
-    }
-    if (
-      closed !== undefined &&
-      !closed.has('Integrate') &&
-      closed.isValid &&
-      closed.isNaN !== true
-    ) {
-      try {
-        // Parenthesize: the closed form can be a low-precedence expression
-        // (e.g. an `Add`), whereas the caller splices this handler's result as
-        // an atomic operand (like the `_SYS.integrate(…)` call it replaces).
-        return `(${compile(closed)})`;
-      } catch {
-        // Unlowerable head: fall through to quadrature below.
-      }
+      // Unlowerable head: fall through to quadrature below.
     }
   }
 
@@ -9353,51 +9283,13 @@ function compileIntegrate(
       'Integrate: an indefinite integral with no closed-form antiderivative is a function, not a number — it has no value to compute at a point, and quadrature needs bounds. Fail closed (D6). Provide bounds for a definite integral, or evaluate symbolically instead.'
     );
 
-  // Unwrap a `Function(body, …params)` integrand to its body, binding the
-  // lambdas to the function's own parameters (one per limit, in limit order,
-  // as the canonical handler builds them); otherwise the integrand is a bare
-  // expression in the limits' index variables.
-  let lambdaVars = limits.map((l) => l.index);
-  let bodyExpr = args[0];
-  if (isFunction(args[0], 'Function')) {
-    // A destructuring parameter (`((p, q)) => p + q`) binds its leaf names to
-    // the components of one tuple argument; no target lowers that match, and
-    // dropping the wrapper here would compile `p` and `q` as reads of whatever
-    // they mean OUTSIDE the integrand. Refuse (D6) rather than miscompile.
-    BaseCompiler.assertNoDestructuringParams(args[0].ops.slice(1));
-    const names = args[0].ops
-      .slice(1)
-      .map((p) => functionLiteralParameterName(p));
-    // `functionLiteralParameterName` returns `''` — never `undefined` — for a
-    // parameter operand that is not a name, so the emptiness test must screen
-    // one out. Otherwise references to the unreadable binding could resolve in
-    // the enclosing scope.
-    if (names.length === limits.length && names.every((n) => n !== ''))
-      lambdaVars = names;
-    else if (names.some((n) => n === ''))
-      // The literal binds SOMETHING this code cannot name. Falling back to the
-      // limits' index variables would compile the body's references to those
-      // unreadable bindings as ambient reads — the same silent-miscompile the
-      // destructuring refusal above prevents. Fail closed instead.
-      //
-      // A backstop: the only unnameable parameter shape reaching here today is
-      // the `Tuple` pattern the assertion above already rejects (every other
-      // non-symbol parameter is an `expected-a-symbol` error at
-      // canonicalization, so the whole node is invalid before compilation).
-      // It exists so a future parameter shape cannot re-open the hole.
-      throw new Error(
-        `Integrate: cannot compile an integrand whose parameter ` +
-          `"${args[0].ops
-            .slice(1)
-            .find((p) => functionLiteralParameterName(p) === '')
-            ?.toString()}" ` +
-          `has no readable name — the body's references to what it binds would ` +
-          `compile as references to the enclosing scope. Fail closed (D6). ` +
-          `Use a named parameter, or an integrand expressed directly in the ` +
-          `limits' index variables.`
-      );
-    bodyExpr = args[0].ops[0];
-  }
+  // The integrand as a body in the limits' index variables: a `Function`
+  // integrand is unwrapped, its parameters matched to the limits by name (a
+  // mismatch fails closed — see `BaseCompiler.integrandLambda`).
+  const { lambdaVars, bodyExpr } = BaseCompiler.integrandLambda(
+    args[0],
+    limits.map((l) => l.index)
+  );
 
   const scoped = (names: string[]): CompileTarget<Expression> => ({
     ...target,

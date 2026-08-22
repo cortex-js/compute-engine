@@ -1928,13 +1928,16 @@ describe('COMPILE CSE — non-scalar aliasing', () => {
   });
 
   it('is not reachable on the interval-js target (no collection lowering)', () => {
-    // Recorded rather than skipped: the interval target has no `At`/`Sort`/
-    // `Reverse` lowering at all, so a non-scalar candidate cannot be built for
-    // it. The aliasing invariant is pinned above on the JS target, where the
-    // audited `_SYS` helpers actually live.
+    // Recorded rather than skipped: the interval target has no `Sort` or
+    // `Reverse` lowering, so a non-scalar CSE candidate — an array shared
+    // across several consumers — cannot be built for it. (`At` does lower
+    // there, but only by projecting its collection operand down to one
+    // interval, which produces no shareable array.) The aliasing invariant is
+    // pinned above on the JS target, where the audited `_SYS` helpers actually
+    // live.
     const result = compile(aliased(), { to: 'interval-js', fallback: false });
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/At: cannot compile/);
+    expect(result.error).toMatch(/Sort: cannot compile/);
   });
 });
 

@@ -622,11 +622,7 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
 
   test('alternating sign summation: sum of (-1)^k', () => {
     // Sum((-1)^k, k=0..5) = 1-1+1-1+1-1 = 0
-    const expr = ce.expr([
-      'Sum',
-      ['Power', -1, 'k'],
-      ['Limits', 'k', 0, 5],
-    ]);
+    const expr = ce.expr(['Sum', ['Power', -1, 'k'], ['Limits', 'k', 0, 5]]);
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
 
@@ -643,7 +639,11 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
       'Sum',
       [
         'Divide',
-        ['Multiply', ['Power', -1, 'k'], ['Power', 'x', ['Add', ['Multiply', 2, 'k'], 1]]],
+        [
+          'Multiply',
+          ['Power', -1, 'k'],
+          ['Power', 'x', ['Add', ['Multiply', 2, 'k'], 1]],
+        ],
         ['Factorial', ['Add', ['Multiply', 2, 'k'], 1]],
       ],
       ['Limits', 'k', 0, 3],
@@ -707,7 +707,9 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
     // (mirrors the JS/base/python/gpu gate).
     const e = new ComputeEngine();
     e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
-    e.parse('h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)').evaluate();
+    e.parse(
+      'h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)'
+    ).evaluate();
     const expr = e.parse(
       '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
     );
@@ -896,14 +898,20 @@ describe('INTERVAL JS - WP-2.17 INTERPRETER ALIGNMENT', () => {
 
   test('Mod is floored: Mod(-1, 3) = 2, Mod(5, -3) = -1', () => {
     const fn = compile(ce.box(['Mod', 'x', 'y']), { to: 'interval-js' });
-    const r1 = unwrapInterval(fn.run!({ x: { lo: -1, hi: -1 }, y: { lo: 3, hi: 3 } }));
+    const r1 = unwrapInterval(
+      fn.run!({ x: { lo: -1, hi: -1 }, y: { lo: 3, hi: 3 } })
+    );
     expect(r1.lo).toBe(2);
     expect(r1.hi).toBe(2);
-    const r2 = unwrapInterval(fn.run!({ x: { lo: 5, hi: 5 }, y: { lo: -3, hi: -3 } }));
+    const r2 = unwrapInterval(
+      fn.run!({ x: { lo: 5, hi: 5 }, y: { lo: -3, hi: -3 } })
+    );
     expect(r2.lo).toBe(-1);
     expect(r2.hi).toBe(-1);
     // Point on a multiple of a negative divisor is 0 (well-defined), not singular.
-    const r3 = unwrapInterval(fn.run!({ x: { lo: 6, hi: 6 }, y: { lo: -3, hi: -3 } }));
+    const r3 = unwrapInterval(
+      fn.run!({ x: { lo: 6, hi: 6 }, y: { lo: -3, hi: -3 } })
+    );
     expect(r3.lo).toBe(0);
     expect(r3.hi).toBe(0);
   });
@@ -1002,5 +1010,351 @@ describe('INTERVAL JS - element-wise selection declines cleanly', () => {
     });
     expect(fn.success).toBe(true);
     expect(fn.code).toContain('_IA.piecewise');
+  });
+});
+
+// Collection OPERANDS on the interval target (`At`, `Length`,
+// `PointX`/`PointY`/`PointZ`). A collection is never the target's RESULT — its
+// `run` contract is a single interval — but it is a legal operand of these
+// accessors, where it is a JavaScript array of intervals at run time.
+describe('INTERVAL JS - collection access', () => {
+  const ceColl = new ComputeEngine();
+  ceColl.declare('L', 'list<number>');
+  ceColl.declare('P', 'tuple<number, number>');
+
+  /** The interval-js absence marker: a whole-NaN BARE interval (no `kind`). */
+  function expectAbsent(result) {
+    expect('kind' in result).toBe(false);
+    expect(Number.isNaN(result.lo)).toBe(true);
+  }
+
+  test('At with a point index selects the element (1-based)', () => {
+    const fn = compile(ceColl.box(['At', 'L', 2]), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toContain('_IA.at(_.L,');
+    // A plain numeric array input: each element is read as a point interval.
+    expect(fn.run!({ L: [10, 20, 30] })).toEqual({
+      kind: 'interval',
+      value: { lo: 20, hi: 20 },
+    });
+  });
+
+  test('At over an array of intervals', () => {
+    const fn = compile(ceColl.box(['At', 'L', 2]), { to: 'interval-js' });
+    expect(fn.run!({ L: [{ lo: 0, hi: 1 }, { lo: 2, hi: 5 }, 30] })).toEqual({
+      kind: 'interval',
+      value: { lo: 2, hi: 5 },
+    });
+  });
+
+  test('At with a WIDE index hulls the elements it spans', () => {
+    const fn = compile(ceColl.box(['At', 'L', 'k']), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.run!({ L: [10, 20, 30], k: { lo: 1, hi: 2 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 10, hi: 20 },
+    });
+    // Partly out of range: the value exists over only part of the index band.
+    expect(fn.run!({ L: [10, 20, 30], k: { lo: 2, hi: 9 } })).toEqual({
+      kind: 'partial',
+      value: { lo: 20, hi: 30 },
+      domainClipped: 'both',
+    });
+  });
+
+  test('At out of range yields the absence marker', () => {
+    const fn = compile(ceColl.box(['At', 'L', 9]), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expectAbsent(fn.run!({ L: [10, 20, 30] }));
+  });
+
+  test('At with a negative index counts from the end', () => {
+    const fn = compile(ceColl.box(['At', 'L', -1]), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.run!({ L: [10, 20, 30] })).toEqual({
+      kind: 'interval',
+      value: { lo: 30, hi: 30 },
+    });
+  });
+
+  test('At over a literal list with a literal index folds statically', () => {
+    const fn = compile(ceColl.box(['At', ['List', 10, 20, 30], 2]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.point(20)');
+    expect(fn.run!({})).toEqual({ lo: 20, hi: 20 });
+  });
+
+  test('a literal-list index out of range folds to the absence marker', () => {
+    const fn = compile(ceColl.box(['At', ['List', 10, 20, 30], 7]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expectAbsent(fn.run!({}));
+  });
+
+  test('At over a literal list with a symbolic index emits the array', () => {
+    const fn = compile(ceColl.box(['At', ['List', 10, 20, 30], 'k']), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toContain('[_IA.point(10), _IA.point(20), _IA.point(30)]');
+    expect(fn.run!({ k: 3 })).toEqual({
+      kind: 'interval',
+      value: { lo: 30, hi: 30 },
+    });
+  });
+
+  test('Length of a declared list', () => {
+    const fn = compile(ceColl.box(['Length', 'L']), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.length(_.L)');
+    expect(fn.run!({ L: [10, 20, 30] })).toEqual({
+      kind: 'interval',
+      value: { lo: 3, hi: 3 },
+    });
+  });
+
+  test('Length of a literal list folds statically', () => {
+    const fn = compile(ceColl.box(['Length', ['List', 10, 20, 30]]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.point(3)');
+  });
+
+  test('PointX/PointY of a declared tuple', () => {
+    const fx = compile(ceColl.box(['PointX', 'P']), { to: 'interval-js' });
+    const fy = compile(ceColl.box(['PointY', 'P']), { to: 'interval-js' });
+    expect(fx.success).toBe(true);
+    expect(fx.code).toBe('_IA.component(_.P, 0)');
+    expect(fx.run!({ P: [1, 2] })).toEqual({
+      kind: 'interval',
+      value: { lo: 1, hi: 1 },
+    });
+    expect(fy.run!({ P: [1, 2] })).toEqual({
+      kind: 'interval',
+      value: { lo: 2, hi: 2 },
+    });
+    // An interval-valued coordinate keeps its band.
+    expect(fx.run!({ P: [{ lo: 0, hi: 1 }, 2] })).toEqual({
+      kind: 'interval',
+      value: { lo: 0, hi: 1 },
+    });
+  });
+
+  test('PointX of a literal Tuple folds statically', () => {
+    const fn = compile(ceColl.box(['PointX', ['Tuple', 3, 4]]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.point(3)');
+  });
+
+  test('an absence marker composes through interval arithmetic', () => {
+    const fn = compile(ceColl.box(['Add', ['At', 'L', 'k'], 1]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    // In range: ordinary arithmetic.
+    expect(fn.run!({ L: [10, 20, 30], k: 2 })).toEqual({
+      kind: 'interval',
+      value: { lo: 21, hi: 21 },
+    });
+    // Out of range: the absence marker propagates as NaN bounds rather than
+    // inventing a value.
+    const absent = fn.run!({ L: [10, 20, 30], k: 9 }) as {
+      value: { lo: number };
+    };
+    expect(Number.isNaN(absent.value.lo)).toBe(true);
+  });
+});
+
+describe('INTERVAL JS - collections decline where the value model has no room', () => {
+  const ceNo = new ComputeEngine();
+  ceNo.declare('L', 'list<number>');
+  ceNo.declare('PL', 'list<tuple<number, number>>');
+  ceNo.declare('S', 'string');
+
+  test('a bare List/Tuple root declines', () => {
+    // A collection is never this target's RESULT. That is enforced
+    // structurally: there is no `List`/`Tuple` lowering in the function table,
+    // because the array spelling exists only in the operand position of an
+    // accessor that immediately projects it back to one interval (see
+    // `compileIntervalCollectionOperand`). A bare constructor at the root
+    // therefore declines as an unlowered head.
+    for (const root of [
+      ceNo.box(['List', 1, 2, 3]),
+      ceNo.box(['Tuple', 1, 2]),
+    ]) {
+      const fn = compile(root, { to: 'interval-js' });
+      expect(fn.success).toBe(false);
+    }
+  });
+
+  test('PointX over a LIST of points declines', () => {
+    const fn = compile(ceNo.box(['Length', ['PointX', 'PL']]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('not a single point');
+  });
+
+  test('Length of a string declines (no text model)', () => {
+    const fn = compile(ceNo.box(['Length', 'S']), { to: 'interval-js' });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('domain is numeric');
+  });
+
+  test('a collection-valued INDEX (gather) declines', () => {
+    const fn = compile(ceNo.box(['Length', ['At', 'L', ['List', 1, 2]]]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('collection-valued index');
+  });
+});
+
+describe('INTERVAL JS - ACCESSORS OVER AN ASSIGNED LITERAL', () => {
+  // A symbol whose assigned value is a literal collection is looked through
+  // by the accessors (`assignedLiteral` in the target): the element, count or
+  // coordinate folds at compile time, where the generic symbol fold would
+  // compile the `List`/`Tuple` value and decline.
+  const ceA = new ComputeEngine();
+  ceA.assign('La', ceA.box(['List', 10, 20, 30]));
+  ceA.assign('Pa', ceA.box(['Tuple', 1, 2]));
+
+  test('At over an assigned list folds to the element', () => {
+    const fn = compile(ceA.box(['At', 'La', 2]), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.point(20)');
+    expect(fn.run!({})).toEqual({ lo: 20, hi: 20 });
+  });
+
+  test('At over an assigned list with a run-time index emits the array', () => {
+    const fn = compile(ceA.box(['At', 'La', 'n']), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe(
+      '_IA.at([_IA.point(10), _IA.point(20), _IA.point(30)], _.n)'
+    );
+    const r = fn.run!({ n: { lo: 2, hi: 3 } }) as {
+      kind: string;
+      value: { lo: number; hi: number };
+    };
+    expect(r.kind).toBe('interval');
+    expect(r.value).toEqual({ lo: 20, hi: 30 });
+  });
+
+  test('Length of an assigned list folds to the count', () => {
+    const fn = compile(ceA.box(['Length', 'La']), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.point(3)');
+  });
+
+  test('PointY of an assigned point folds to the coordinate', () => {
+    const fn = compile(ceA.box(['PointY', 'Pa']), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.point(2)');
+  });
+
+  test('a symbol pinned by `vars` is a run-time input, never looked through', () => {
+    const fn = compile(ceA.box(['At', 'La', 2]), {
+      to: 'interval-js',
+      vars: { La: '_.La' },
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.at(_.La, _IA.point(2))');
+    expect(fn.run!({ La: [7, 8, 9] })).toEqual({
+      kind: 'interval',
+      value: { lo: 8, hi: 8 },
+    });
+  });
+});
+
+describe('INTERVAL JS - At/Length OVER A TUPLE BASE', () => {
+  const ceT = new ComputeEngine();
+  ceT.declare('Pt', 'tuple<number, number>');
+  ceT.declare('Mixed', 'tuple<number, string>');
+
+  test('At over a declared tuple reads the component', () => {
+    const fn = compile(ceT.box(['At', 'Pt', 2]), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.run!({ Pt: [1, 2] })).toEqual({
+      kind: 'interval',
+      value: { lo: 2, hi: 2 },
+    });
+  });
+
+  test('Length of a declared tuple is its arity', () => {
+    const fn = compile(ceT.box(['Length', 'Pt']), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.run!({ Pt: [1, 2] })).toEqual({
+      kind: 'interval',
+      value: { lo: 2, hi: 2 },
+    });
+  });
+
+  test('At over a tuple with a non-numeric component declines', () => {
+    const fn = compile(ceT.box(['At', 'Mixed', 1]), { to: 'interval-js' });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('not a number');
+  });
+});
+
+describe('INTERVAL JS - COLLECTIONS: kernels fail closed, roots and fallbacks are arrays', () => {
+  // One interval per quantity: a scalar kernel handed a collection operand
+  // declines with a reason (it used to answer NaN bounds or `'maybe'` behind
+  // `success: true`); a collection-valued RESULT is an array of interval
+  // values (`IntervalValue`), on the compiled path and on the interpreter
+  // fallback alike.
+  const ceC = new ComputeEngine();
+  ceC.declare('Lc', 'list<number>');
+
+  test('Add over a list operand declines', () => {
+    const fn = compile(ceC.box(['Add', 'Lc', 1]), { to: 'interval-js' });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('is a collection');
+  });
+
+  test('Sin over a list operand declines', () => {
+    const fn = compile(ceC.box(['Sin', 'Lc']), { to: 'interval-js' });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('is a collection');
+  });
+
+  test('an If with a collection-valued arm declines', () => {
+    const fn = compile(ceC.box(['If', ['Less', 'x', 0], 'Lc', 1]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('is a collection');
+  });
+
+  test('an accessor over the same list still compiles (the gate is per kernel)', () => {
+    const fn = compile(ceC.box(['Add', ['At', 'Lc', 1], 1]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.run!({ Lc: [5, 6] })).toEqual({
+      kind: 'interval',
+      value: { lo: 6, hi: 6 },
+    });
+  });
+
+  test('the interpreter fallback maps a collection result to an array of point intervals', () => {
+    // `Reverse` has no interval lowering; with `fallback: true` the interpreter
+    // evaluates it and its list is handed back element by element, not
+    // collapsed to `entire`.
+    const fn = compile(ceC.box(['Reverse', ['List', 1, 2, 3]]), {
+      to: 'interval-js',
+      fallback: true,
+    });
+    expect(fn.success).toBe(false);
+    expect(fn.run!({})).toEqual([
+      { lo: 3, hi: 3 },
+      { lo: 2, hi: 2 },
+      { lo: 1, hi: 1 },
+    ]);
   });
 });

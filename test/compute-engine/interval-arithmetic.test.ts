@@ -2,6 +2,18 @@
  * Tests for interval arithmetic library
  */
 
+// The collection accessors (`interval/collections.ts`). A collection is never
+// this target's RESULT — these project a run-time array of intervals back down
+// to the single interval the interval-js value model holds.
+import {
+  integrate as integrateEnclosure,
+  integrateClosed,
+} from '../../src/compute-engine/interval/integrate';
+import {
+  at as atCollection,
+  length as lengthOfCollection,
+  component as pointComponent,
+} from '../../src/compute-engine/interval/collections';
 import {
   // Utilities
   ok,
@@ -85,7 +97,13 @@ function expectInterval(result, expectedLo, expectedHi, tolerance = 1e-10) {
   }
 }
 
-function expectPartial(result, expectedLo, expectedHi, expectedClip, tolerance = 1e-10) {
+function expectPartial(
+  result,
+  expectedLo,
+  expectedHi,
+  expectedClip,
+  tolerance = 1e-10
+) {
   expect(result.kind).toBe('partial');
   if (result.kind === 'partial') {
     if (isFinite(expectedLo)) {
@@ -147,7 +165,11 @@ describe('INTERVAL UTILITIES', () => {
 
   test('getValue extracts interval value', () => {
     const interval = { kind: 'interval', value: { lo: 1, hi: 2 } };
-    const partial = { kind: 'partial', value: { lo: 0, hi: 1 }, domainClipped: 'lo' };
+    const partial = {
+      kind: 'partial',
+      value: { lo: 0, hi: 1 },
+      domainClipped: 'lo',
+    };
     const empty = { kind: 'empty' };
 
     expect(getValue(interval)).toEqual({ lo: 1, hi: 2 });
@@ -181,7 +203,12 @@ describe('INTERVAL ARITHMETIC OPERATIONS', () => {
 
   test('division - safe', () => {
     expectInterval(div({ lo: 1, hi: 2 }, { lo: 3, hi: 4 }), 0.25, 2 / 3, 1e-6);
-    expectInterval(div({ lo: -2, hi: -1 }, { lo: 3, hi: 4 }), -2 / 3, -0.25, 1e-6);
+    expectInterval(
+      div({ lo: -2, hi: -1 }, { lo: 3, hi: 4 }),
+      -2 / 3,
+      -0.25,
+      1e-6
+    );
   });
 
   test('division - singular (contains zero)', () => {
@@ -360,11 +387,27 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
   test('mod - negative modulus encloses the floored scalar (E16)', () => {
     const floored = (a: number, b: number) => ((a % b) + b) % b;
     // 5 mod -3 = -1, 7 mod -4 = -1, -1 mod -3 = -1
-    expectInterval(mod({ lo: 5, hi: 5 }, { lo: -3, hi: -3 }), floored(5, -3), floored(5, -3));
-    expectInterval(mod({ lo: 7, hi: 7 }, { lo: -4, hi: -4 }), floored(7, -4), floored(7, -4));
-    expectInterval(mod({ lo: -1, hi: -1 }, { lo: -3, hi: -3 }), floored(-1, -3), floored(-1, -3));
+    expectInterval(
+      mod({ lo: 5, hi: 5 }, { lo: -3, hi: -3 }),
+      floored(5, -3),
+      floored(5, -3)
+    );
+    expectInterval(
+      mod({ lo: 7, hi: 7 }, { lo: -4, hi: -4 }),
+      floored(7, -4),
+      floored(7, -4)
+    );
+    expectInterval(
+      mod({ lo: -1, hi: -1 }, { lo: -3, hi: -3 }),
+      floored(-1, -3),
+      floored(-1, -3)
+    );
     // Positive modulus is unchanged (Euclidean == floored for b > 0).
-    expectInterval(mod({ lo: 5, hi: 5 }, { lo: 3, hi: 3 }), floored(5, 3), floored(5, 3));
+    expectInterval(
+      mod({ lo: 5, hi: 5 }, { lo: 3, hi: 3 }),
+      floored(5, 3),
+      floored(5, 3)
+    );
   });
 
   test('round - no boundary crossing', () => {
@@ -437,7 +480,12 @@ describe('INTERVAL TRIGONOMETRIC FUNCTIONS', () => {
   });
 
   test('asin - within domain', () => {
-    expectInterval(asin({ lo: -0.5, hi: 0.5 }), Math.asin(-0.5), Math.asin(0.5), 1e-6);
+    expectInterval(
+      asin({ lo: -0.5, hi: 0.5 }),
+      Math.asin(-0.5),
+      Math.asin(0.5),
+      1e-6
+    );
   });
 
   test('asin - exceeds domain', () => {
@@ -454,7 +502,12 @@ describe('INTERVAL TRIGONOMETRIC FUNCTIONS', () => {
   });
 
   test('atan - unbounded input', () => {
-    expectInterval(atan({ lo: -100, hi: 100 }), Math.atan(-100), Math.atan(100), 1e-6);
+    expectInterval(
+      atan({ lo: -100, hi: 100 }),
+      Math.atan(-100),
+      Math.atan(100),
+      1e-6
+    );
   });
 
   test('sinh', () => {
@@ -616,12 +669,7 @@ describe('INTERVAL TRIGONOMETRIC FUNCTIONS', () => {
   });
 
   test('acosh - within domain', () => {
-    expectInterval(
-      acosh({ lo: 1, hi: 3 }),
-      Math.acosh(1),
-      Math.acosh(3),
-      1e-6
-    );
+    expectInterval(acosh({ lo: 1, hi: 3 }), Math.acosh(1), Math.acosh(3), 1e-6);
   });
 
   test('acosh - partially outside domain', () => {
@@ -806,10 +854,22 @@ describe('INTERVAL ENCLOSURE REGRESSIONS (REVIEW.md E8–E12)', () => {
 
   // E12: clamp is min(max(x,lo),hi), never empty for out-of-range x.
   test('E12: clamp of an out-of-range interval maps onto the bound', () => {
-    expectInterval(clamp({ lo: 5, hi: 6 }, { lo: 0, hi: 0 }, { lo: 2, hi: 3 }), 2, 3);
-    expectInterval(clamp({ lo: 1, hi: 4 }, { lo: 0, hi: 0 }, { lo: 2, hi: 3 }), 1, 3);
+    expectInterval(
+      clamp({ lo: 5, hi: 6 }, { lo: 0, hi: 0 }, { lo: 2, hi: 3 }),
+      2,
+      3
+    );
+    expectInterval(
+      clamp({ lo: 1, hi: 4 }, { lo: 0, hi: 0 }, { lo: 2, hi: 3 }),
+      1,
+      3
+    );
     // Entirely below the lower bound clamps up.
-    expectInterval(clamp({ lo: -5, hi: -4 }, { lo: 0, hi: 0 }, { lo: 2, hi: 3 }), 0, 0);
+    expectInterval(
+      clamp({ lo: -5, hi: -4 }, { lo: 0, hi: 0 }, { lo: 2, hi: 3 }),
+      0,
+      0
+    );
   });
 
   // E11: binomial/gcd/lcm enumerate the integer grid (corners miss interior
@@ -922,5 +982,186 @@ describe('INTERVAL RUNTIME ALIGNMENT (WP-2.17)', () => {
   test('remainder - IEEE, uses half-away round', () => {
     expectInterval(remainder({ lo: 7, hi: 7 }, { lo: 4, hi: 4 }), -1, -1, 1e-9);
     expectInterval(remainder({ lo: 5, hi: 5 }, { lo: 3, hi: 3 }), -1, -1, 1e-9);
+  });
+});
+
+describe('INTERVAL COLLECTIONS', () => {
+  // The absence marker of the interval-js target: a whole-NaN BARE interval
+  // (the target's `isAbsent` reads `.lo` directly, so it must not be wrapped
+  // in an IntervalResult).
+  function expectAbsent(result) {
+    expect('kind' in result).toBe(false);
+    expect(Number.isNaN(result.lo)).toBe(true);
+    expect(Number.isNaN(result.hi)).toBe(true);
+  }
+
+  const L = [point(10), point(20), point(30)];
+
+  describe('at', () => {
+    test('point index is 1-based', () => {
+      expectInterval(atCollection(L, point(1)), 10, 10);
+      expectInterval(atCollection(L, point(2)), 20, 20);
+      expectInterval(atCollection(L, point(3)), 30, 30);
+    });
+
+    test('negative index counts from the end', () => {
+      expectInterval(atCollection(L, point(-1)), 30, 30);
+      expectInterval(atCollection(L, point(-3)), 10, 10);
+    });
+
+    test('index 0 selects nothing', () => {
+      expectAbsent(atCollection(L, point(0)));
+    });
+
+    test('out-of-range index selects nothing', () => {
+      expectAbsent(atCollection(L, point(4)));
+      expectAbsent(atCollection(L, point(-4)));
+      expectAbsent(atCollection(L, point(1e9)));
+    });
+
+    test('non-integer point index selects nothing', () => {
+      // The index interval [2.5, 2.5] straddles no integer.
+      expectAbsent(atCollection(L, point(2.5)));
+    });
+
+    test('wide index hulls the elements it spans', () => {
+      expectInterval(atCollection(L, { lo: 1, hi: 2 }), 10, 20);
+      expectInterval(atCollection(L, { lo: 1, hi: 3 }), 10, 30);
+      // A fractional span still selects the integers inside it.
+      expectInterval(atCollection(L, { lo: 1.5, hi: 3.5 }), 20, 30);
+    });
+
+    test('wide index partly out of range is partial', () => {
+      expectPartial(atCollection(L, { lo: 2, hi: 9 }), 20, 30, 'both');
+      expectPartial(atCollection(L, { lo: 0, hi: 2 }), 10, 20, 'both');
+    });
+
+    test('a huge index interval stays bounded and returns the whole hull', () => {
+      // The scan is clipped to [-n, n], so an unbounded index costs O(n), not
+      // O(index width): this must return promptly, not hang.
+      const started = Date.now();
+      const result = atCollection(L, { lo: -1e15, hi: 1e15 });
+      expect(Date.now() - started).toBeLessThan(1000);
+      expectPartial(result, 10, 30, 'both');
+      expectPartial(
+        atCollection(L, { lo: -Infinity, hi: Infinity }),
+        10,
+        30,
+        'both'
+      );
+    });
+
+    test('non-array base selects nothing', () => {
+      expectAbsent(atCollection(point(5), point(1)));
+      expectAbsent(atCollection(undefined, point(1)));
+      expectAbsent(atCollection({ x: 1 }, point(1)));
+    });
+
+    test('raw number elements read as point intervals', () => {
+      expectInterval(atCollection([10, 20, 30], point(2)), 20, 20);
+      expectInterval(atCollection([10, 20, 30], { lo: 1, hi: 3 }), 10, 30);
+    });
+
+    test('IntervalResult elements are used as they stand', () => {
+      const coll = [ok({ lo: 0, hi: 1 }), { kind: 'empty' }, ok(point(5))];
+      expectInterval(atCollection(coll, point(1)), 0, 1);
+      expect(atCollection(coll, point(2)).kind).toBe('empty');
+      // `empty` contributes nothing to a hull (`unionResults`).
+      expectInterval(atCollection(coll, { lo: 1, hi: 2 }), 0, 1);
+    });
+
+    test('an empty/entire/singular index propagates', () => {
+      expect(atCollection(L, { kind: 'empty' }).kind).toBe('empty');
+      expect(atCollection(L, { kind: 'entire' }).kind).toBe('entire');
+      expect(atCollection(L, { kind: 'singular' }).kind).toBe('singular');
+    });
+
+    test('a NaN index (the absence marker) selects nothing', () => {
+      expectAbsent(atCollection(L, { lo: NaN, hi: NaN }));
+    });
+
+    test('a nested-array element cannot be hulled', () => {
+      // A list of points: the selected element is itself a collection, which
+      // has no single interval band.
+      const points = [
+        [point(1), point(2)],
+        [point(3), point(4)],
+      ];
+      expect(atCollection(points, point(1)).kind).toBe('entire');
+    });
+
+    test('empty collection selects nothing', () => {
+      expectAbsent(atCollection([], point(1)));
+      expectAbsent(atCollection([], { lo: -5, hi: 5 }));
+    });
+  });
+
+  describe('length', () => {
+    test('element count as a point interval', () => {
+      expectInterval(lengthOfCollection(L), 3, 3);
+      expectInterval(lengthOfCollection([]), 0, 0);
+    });
+
+    test('non-array has no length', () => {
+      expectAbsent(lengthOfCollection(point(5)));
+      expectAbsent(lengthOfCollection('abc'));
+      expectAbsent(lengthOfCollection(undefined));
+    });
+  });
+
+  describe('component', () => {
+    test('0-based coordinate of a point', () => {
+      expectInterval(pointComponent([point(1), point(2)], 0), 1, 1);
+      expectInterval(pointComponent([point(1), point(2)], 1), 2, 2);
+      expectInterval(pointComponent([1, 2, 3], 2), 3, 3);
+    });
+
+    test('coordinate past the end selects nothing', () => {
+      expectAbsent(pointComponent([point(1), point(2)], 2));
+      expectAbsent(pointComponent([point(1), point(2)], -1));
+    });
+
+    test('non-array operand selects nothing', () => {
+      expectAbsent(pointComponent(point(5), 0));
+      expectAbsent(pointComponent(undefined, 0));
+    });
+
+    test('a collection coordinate cannot be bounded', () => {
+      expect(pointComponent([[point(1), point(2)]], 0).kind).toBe('entire');
+    });
+  });
+});
+
+describe('INTERVAL INTEGRATE — closed-form guard', () => {
+  // `1/t²` as an interval extension, via the library's own `div`/`square`.
+  const f = (t: { lo: number; hi: number }) => div(point(1), square(t));
+
+  test('a closed form over an interior pole is withheld: the guard answers `singular`', () => {
+    // The (wrong) closed form −2 for ∫₋₁¹ dt/t² — what differencing `−1/t` at
+    // the bounds gives. The scan over [−1, 1] meets the pole and hands the
+    // integral to the enclosure, which reports it.
+    const r = integrateClosed(() => point(-2), f, point(-1), point(1));
+    expect(r).toEqual({ kind: 'singular' });
+  });
+
+  test('a clean closed form is returned as is', () => {
+    // ∫₁² dt/t² = 1/2: the scan over [1, 2] is clean, so the closed value
+    // passes through untouched (a zero-width point).
+    const r = integrateClosed(() => point(0.5), f, point(1), point(2));
+    expect(r).toEqual({ lo: 0.5, hi: 0.5 });
+    const enclosure = integrateEnclosure(f, point(1), point(2));
+    expect(enclosure.kind).toBe('interval');
+    if (enclosure.kind === 'interval') {
+      expect(enclosure.value.lo).toBeLessThanOrEqual(0.5);
+      expect(enclosure.value.hi).toBeGreaterThanOrEqual(0.5);
+    }
+  });
+
+  test('an infinite bound has no range to scan: the closed form stands', () => {
+    const r = integrateClosed(() => point(1), f, point(1), {
+      lo: Infinity,
+      hi: Infinity,
+    });
+    expect(r).toEqual({ lo: 1, hi: 1 });
   });
 });

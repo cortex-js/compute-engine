@@ -2088,3 +2088,258 @@ describe('binder value-shield: D / Integrate / Limit keep the bound variable sym
     expect(ce.box('x').evaluate().toString()).toBe('5');
   });
 });
+
+describe('INTEGRATE: interior pole', () => {
+  // The fundamental theorem of calculus needs a bounded integrand. When the
+  // integrand blows up at a point STRICTLY INSIDE the bounds, differencing an
+  // antiderivative reports a finite value for a divergent integral, so the
+  // `Integrate` handler keeps the expression inert instead (`.N()` quadrature
+  // still gives a number, with its error bar).
+
+  const evaluated = (latex: string) =>
+    new ComputeEngine().parse(latex).evaluate();
+
+  test('1/t across zero is inert (was 0)', () => {
+    const result = evaluated('\\int_{-1}^{1} \\frac{1}{t} dt');
+    expect(result.operator).toBe('Integrate');
+  });
+
+  test('1/t^2 across zero is inert (was -2)', () => {
+    const result = evaluated('\\int_{-1}^{1} \\frac{1}{t^2} dt');
+    expect(result.operator).toBe('Integrate');
+  });
+
+  test('t^-3 across zero is inert (negative Power exponent)', () => {
+    const result = evaluated('\\int_{-1}^{1} t^{-3} dt');
+    expect(result.operator).toBe('Integrate');
+  });
+
+  test('1/(t-1) across its pole is inert (was -ln(2))', () => {
+    const result = evaluated('\\int_{-1}^{2} \\frac{1}{t-1} dt');
+    expect(result.operator).toBe('Integrate');
+  });
+
+  test('1/(t^2-1) across both poles is inert (was -ln(3))', () => {
+    const result = evaluated('\\int_{-2}^{2} \\frac{1}{t^2-1} dt');
+    expect(result.operator).toBe('Integrate');
+  });
+
+  test('pole outside the bounds keeps its closed form', () => {
+    expect(evaluated('\\int_{1}^{2} \\frac{1}{t} dt').toString()).toBe('ln(2)');
+    expect(evaluated('\\int_{0}^{1} \\frac{1}{t+1} dt').toString()).toBe(
+      'ln(2)'
+    );
+    expect(evaluated('\\int_{2}^{3} \\frac{1}{t-1} dt').toString()).toBe(
+      'ln(2)'
+    );
+  });
+
+  test('denominator with no real root keeps its closed form', () => {
+    expect(evaluated('\\int_{-1}^{1} \\frac{1}{t^2+1} dt').toString()).toBe(
+      '1/2 * pi'
+    );
+  });
+
+  test('a cancelling denominator is not a pole', () => {
+    // (t²−1)/(t−1) = t+1 is bounded at t = 1, so the numeric confirmation
+    // rejects the root of the denominator and the closed form survives.
+    expect(evaluated('\\int_{-1}^{1} \\frac{t^2-1}{t-1} dt').toString()).toBe(
+      '2'
+    );
+  });
+
+  test('a pole AT a bound is not interior', () => {
+    // Improper but the engine already answers these; unchanged by the check.
+    expect(evaluated('\\int_{0}^{1} \\frac{1}{\\sqrt{t}} dt').toString()).toBe(
+      '2'
+    );
+    expect(evaluated('\\int_{0}^{1} \\frac{1}{t} dt').toString()).toBe('+oo');
+    expect(evaluated('\\int_{0}^{1} \\ln t \\, dt').operator).toBe('Integrate');
+  });
+
+  test('a symbolic bound switches the detection off', () => {
+    // No finite numeric interval to test against: whatever the engine did
+    // before, it still does.
+    expect(evaluated('\\int_{0}^{a} \\frac{1}{t} dt').toString()).toBe('+oo');
+  });
+
+  test('a denominator with another free symbol is not analyzed', () => {
+    // The root of `t² + x` is unknowable, so the closed form is kept.
+    expect(evaluated('\\int_{-1}^{1} \\frac{1}{t^2+x} dt').operator).not.toBe(
+      'Integrate'
+    );
+  });
+
+  test('circular functions of a linear argument', () => {
+    // tan/sec blow up at π/2 + kπ, cot/csc and a sin/cos denominator at kπ.
+    expect(evaluated('\\int_{0}^{2} \\tan t \\, dt').operator).toBe(
+      'Integrate'
+    );
+    expect(evaluated('\\int_{0}^{2} \\sec t \\, dt').operator).toBe(
+      'Integrate'
+    );
+    expect(evaluated('\\int_{1}^{4} \\cot t \\, dt').operator).toBe(
+      'Integrate'
+    );
+    expect(evaluated('\\int_{0}^{2} \\frac{1}{\\cos t} dt').operator).toBe(
+      'Integrate'
+    );
+    expect(evaluated('\\int_{1}^{4} \\frac{1}{\\sin t} dt').operator).toBe(
+      'Integrate'
+    );
+    // No pole in range: unchanged.
+    expect(evaluated('\\int_{1}^{2} \\csc t \\, dt').operator).not.toBe(
+      'Integrate'
+    );
+    expect(evaluated('\\int_{0}^{\\pi} \\sin t \\, dt').toString()).toBe('2');
+    // tan(t/4) first blows up at t = 2π, outside (0, 2).
+    expect(evaluated('\\int_{0}^{2} \\tan(t/4) dt').operator).not.toBe(
+      'Integrate'
+    );
+  });
+
+  test('box route and an assigned integration variable', () => {
+    // `Integrate` is `lazy`, so on the box route its held operands arrive
+    // unbound; and the integration variable is value-shielded, so a global
+    // `t := 5` must not substitute into the pole check either.
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Integrate', ['Divide', 1, 'x'], ['Limits', 'x', -1, 1]])
+        .evaluate().operator
+    ).toBe('Integrate');
+    expect(
+      ce
+        .box(['Integrate', ['Divide', 1, 'x'], ['Limits', 'x', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('ln(2)');
+
+    const assigned = new ComputeEngine();
+    assigned.assign('t', 5);
+    expect(
+      assigned.parse('\\int_{-1}^{1} \\frac{1}{t} dt').evaluate().operator
+    ).toBe('Integrate');
+    expect(
+      assigned.parse('\\int_{1}^{2} \\frac{1}{t} dt').evaluate().toString()
+    ).toBe('ln(2)');
+  });
+
+  test('.N() still reports a quadrature estimate for a divergent integral', () => {
+    // The inert `Integrate` is the EVALUATE answer only; the numeric route is
+    // unchanged, and is at least honest about its error bar.
+    const n = new ComputeEngine().parse('\\int_{-1}^{1} \\frac{1}{t} dt').N();
+    expect(n.operator).toBe('Measurement');
+  });
+});
+
+describe('INTEGRATE: sign of the cot antiderivative and of |sec| at the bounds', () => {
+  const ce = new ComputeEngine();
+
+  test('∫ cot(ax + b) dx is +ln|sin(ax + b)|/a', () => {
+    // d/dx ln|sin x| = cos x / sin x = cot x; the pattern rule used to carry
+    // a spurious `Negate`.
+    expect(ce.parse('\\int \\cot(2t+1)\\,dt').evaluate().toString()).toBe(
+      '1/2 * ln(|sin(2t + 1)|)'
+    );
+    expect(ce.parse('\\int \\cot t\\,dt').evaluate().toString()).toBe(
+      'ln(|sin(t)|)'
+    );
+  });
+
+  test('∫₀² cot t dt diverges to +∞ (pole at the lower bound)', () => {
+    expect(ce.parse('\\int_0^2 \\cot t\\,dt').evaluate().toString()).toBe(
+      '+oo'
+    );
+  });
+
+  test('∫₀¹ tan t dt is the real ln(sec 1), not ln(−sec 1)', () => {
+    // `|sec 1|` evaluated to `-sec(1)` while every circular function's sign
+    // was off by one quadrant, which made this real integral complex.
+    const v = ce.parse('\\int_0^1 \\tan t\\,dt').evaluate();
+    expect(v.toString()).toBe('ln(sec(1))');
+    const n = v.N();
+    expect(n.im).toBe(0);
+    expect(n.re).toBeCloseTo(-Math.log(Math.cos(1)), 12);
+  });
+});
+
+describe('INTEGRATE: the elementary rule table, verified by differentiation', () => {
+  // Every built-in `∫ f(ax + b) dx` rule is checked the only way a table can
+  // be trusted: differentiate the answer and compare with the integrand at a
+  // few points of its domain. Eight rules were wrong at once (2026-08-22):
+  // `sinh`/`cosh` answered `ln|cosh|`/`ln|sinh|`, `tanh` had the wrong sign,
+  // `sech` answered `ln|tanh|`, `csch` lacked the half-argument, and the six
+  // inverse hyperbolic rules answered the function's logarithmic DEFINITION
+  // instead of an antiderivative.
+  const ce = new ComputeEngine();
+  const cases: Array<[latex: string, points: number[]]> = [
+    ['\\sinh t', [1.3, -0.7, 2.2]],
+    ['\\cosh t', [1.3, -0.7, 2.2]],
+    ['\\tanh t', [1.3, -0.7, 2.2]],
+    ['\\coth t', [1.3, -0.7, 2.2]],
+    ['\\sech t', [1.3, -0.7, 2.2]],
+    ['\\csch t', [1.3, -0.7, 2.2]],
+    ['\\tan t', [1.3, -0.7, 2.2]],
+    ['\\cot t', [1.3, -0.7, 2.2]],
+    ['\\sec t', [1.3, -0.7, 2.2]],
+    ['\\csc t', [1.3, -0.7, 2.2]],
+    ['\\tanh(2t+1)', [1.3, -0.7, 2.2]],
+    ['\\sech(3t-1)', [1.3, -0.7, 2.2]],
+    ['\\csch(2t+1)', [1.3, -0.7, 2.2]],
+    ['\\arcsinh t', [0.3, -0.4, 2.2]],
+    ['\\arccosh t', [1.3, 2.2, 5]],
+    ['\\arctanh t', [0.3, -0.4, 0.45]],
+    ['\\arccoth t', [1.3, -2.2, 5]],
+    ['\\arcsech t', [0.3, 0.45, 0.9]],
+    ['\\arccsch t', [0.3, -0.4, 2.2]],
+    ['\\arcsinh(2t+1)', [0.3, -0.4, 2.2]],
+    ['\\arctanh(t/2)', [0.3, -0.4, 0.45]],
+  ];
+  for (const [latex, points] of cases) {
+    test(`d/dt ∫ ${latex} dt = ${latex}`, () => {
+      const F = ce.parse(`\\int ${latex}\\,dt`).evaluate();
+      expect(F.has('Integrate')).toBe(false);
+      const dF = ce.box(['D', F, 't']).evaluate();
+      for (const t0 of points) {
+        const lhs = dF.subs({ t: ce.number(t0) }).N();
+        const rhs = ce
+          .parse(latex)
+          .subs({ t: ce.number(t0) })
+          .N();
+        // `toBeCloseTo`, not `toBe(0)`: a derivative can evaluate to `-0`.
+        expect(lhs.im).toBeCloseTo(0, 12);
+        expect(lhs.re).toBeCloseTo(rhs.re, 6);
+      }
+    });
+  }
+});
+
+describe('INTEGRATE: interior pole — hyperbolic, reciprocal and near-bound families', () => {
+  const ce = new ComputeEngine();
+  const inert = (latex: string) => ce.parse(latex).evaluate().has('Integrate');
+
+  test('a hyperbolic pole of a linear argument is detected', () => {
+    expect(inert('\\int_{-1}^{1} \\csch^2 t\\,dt')).toBe(true);
+    expect(inert('\\int_{-1}^{1} \\coth t\\,dt')).toBe(true);
+    expect(inert('\\int_{-1}^{1} \\frac{1}{\\sinh t} dt')).toBe(true);
+  });
+
+  test('the zeros of a circular divisor are poles: 1/tan is not canonicalized to cot', () => {
+    expect(inert('\\int_{-1}^{1} \\frac{1}{\\tan t} dt')).toBe(true);
+  });
+
+  test('a root 1e-10 inside a bound is an interior pole, not an endpoint', () => {
+    expect(inert('\\int_0^1 (t-10^{-10})^{-2} dt')).toBe(true);
+  });
+
+  test('a pole steep enough to overflow both samples is still a pole', () => {
+    expect(inert('\\int_{-1}^{1} t^{-300} dt')).toBe(true);
+  });
+
+  test('a double root AT the bound is an endpoint singularity, left as it was', () => {
+    expect(
+      ce.parse('\\int_0^1 \\frac{1}{(t-1)^2} dt').evaluate().toString()
+    ).toBe('~oo');
+  });
+});
