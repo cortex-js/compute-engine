@@ -816,9 +816,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
       const expr = ce.box(
-        (op === 'Map'
-          ? [op, literal, 'cs']
-          : [op, 'cs', literal]) as any
+        (op === 'Map' ? [op, literal, 'cs'] : [op, 'cs', literal]) as any
       );
       expect(expr.toMathJson()).toEqual(
         op === 'Map'
@@ -1213,13 +1211,14 @@ describe('a wrong-arity literal takes no partial stamp', () => {
     ce.declare('h', '(cb: (integer, string?) -> boolean) -> boolean');
     // Two parameters pair with `integer` then the optional `string`: in range.
     expect(
-      stampedParams(
-        ce.box(['h', ['Function', ['Greater', 'a', 2], 'a', 'b']])
-      )
+      stampedParams(ce.box(['h', ['Function', ['Greater', 'a', 2], 'a', 'b']]))
     ).toBe('["Function",["Less",2,"a"],["Typed","a","\'integer\'"],"b"]');
     // Three is past the optional one: out of range, no stamp at all — and no
     // call arity `h` can supply applies the literal, so it is rejected.
-    const wide = ce.box(['h', ['Function', ['Greater', 'a', 2], 'a', 'b', 'c']]);
+    const wide = ce.box([
+      'h',
+      ['Function', ['Greater', 'a', 2], 'a', 'b', 'c'],
+    ]);
     expect(wide.isValid).toBe(false);
     expect(stampedParams(wide)).not.toContain('Typed');
     expect(wide.toString()).toContain('callback-arity');
