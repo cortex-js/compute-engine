@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-08-21.
+**Last updated:** 2026-08-22.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -456,6 +456,75 @@ across repeated reads, a per-level invocation ratio under 1.5, and the
 scratch registration empty after both a normal return and a throw. Four of
 the five fail against the pre-fix tree.
 
+### Type handlers as functions of TYPES, not expressions — measured 2026-08-22 (OPEN, design input)
+
+The `type` handler of an operator definition takes `ops: Expression[]`, a
+signature that predates the type system. A survey of the 146 handlers in
+`library/*.ts` (regex over what each reads from its operands; counts
+approximate) found 116 read nothing but `ops[i].type`, and the other ~30 read
+a handful of VALUE facts: `isFinite`/`isNaN`/`isReal` (~45 reads), sign and
+integrality (~15), `.ops`/`.op1`/`.operator` (structure, ~5), and literal
+content (`.string`, `isSame`, `isLess`, ~5).
+
+Measured in a worktree by proxying the operands at the ONE call site
+(`BoxedFunction` type derivation, `def.type(expr.ops, …)`) and running the
+full suite; `--ci`, no snapshots written. Each row's model is stated because
+the first two were wrong in instructive ways.
+
+| model | failures | what it showed |
+| --- | --- | --- |
+| every `isX` getter and value read blinded | 345 | over-blinded: `isReal`/`isInteger`/`isFinite` on a SYMBOL answer from its declared type, so the type channel was cut too |
+| type-backed predicates pass through; literal types on input | 244 | literal types LEAK: handler results carrying `tuple<1,2>`, `((z: 0) -> 0)`, `() -> 1` get STORED as contracts |
+| + widen every `{kind:'value'}` in a handler result | 423 | the naive walker rebuilt nominal/reference nodes (identity lost) and recursed a recursive record type |
+| + widen through STRUCTURAL nodes only, cycle-guarded | **75** | the residue, 23 suites, 0 crashes, 0 snapshot diffs |
+
+Of the 75: 51 assert a type STRING and received one equally sound or MORE
+refined (`broadcastable<finite_number>` for `broadcastable<number>`); 9 are
+boolean predicates; 15 are behavior. Decomposed by cause, the residue is
+mostly limits of the experiment's spelling, not of the design:
+
+- **Assumptions** (~10, `inverse-trig-domain-type`, `solve-domain`): sign
+  facts from `ce.assume(x > 0)` reach handlers through the same getters. A
+  third channel, neither value nor declared type. Would need assumptions to
+  refine the TYPE, or a types-only handler to lose them.
+- **Rational literals** (~8, `(1,2)/3`, `(-2)^(p/q)` provenance): `1/3` is
+  not a parseable literal type (lexer rejects `/`), so the experiment spelled
+  it as a float and lost exactness. Rational literal types are a prerequisite.
+- **Closed complex constants** (5 Fungrim rules + 1): `i` is a constant WITH
+  a value, not a literal; `isImaginary`/`isComplex` were not derived from its
+  type in the shim. A shim gap — and the refusal is the STRICT
+  canonicalization gate (`validate.ts:464`, `!op.type.matches(param)`), not
+  the handler.
+- **Symbol with an assigned function value** (2, `derivatives`): `f'(0.25)`'s
+  type reads `f`'s VALUE. The only genuinely dynamic dependence found.
+- Shim artifacts (union member duplicated by widening two literals to one
+  primitive, no `reduceType` after widen).
+
+Three facts the experiment established that any design should start from:
+
+1. Numeric literal types already exist (`ce.type('2')` → `2`, `<:
+   finite_integer`), but a boxed literal does not carry one —
+   `ce.box(2).type` is `finite_integer`. Giving literals their literal type on
+   handler INPUT recovers every literal-derived fact (`n²` integer, `x/2`
+   real, `10²¹` integer, `At` with a literal index) without a value channel;
+   helpers such as `toInteger()` then read the value from the type.
+2. Literal types must be WIDENED at storage boundaries (tuple element types,
+   inferred signature results, collection joins) or they become
+   over-specific contracts. The widening must stop at `reference`/`object`/
+   `record` nodes, which carry identity and may be recursive.
+3. Most of what the value-dependent 20% "earns" is passage through the
+   strict signature gate at canonicalization, not correctness of results —
+   `FactorInteger(3+10²¹)`, `Mod(2^(3^20), 100)` and 25 simplify rules were
+   REFUSED, not miscomputed, when `10²¹` typed `finite_number`. Arithmetic
+   already admits by `couldMatch` and rejects at evaluation
+   (`validate.ts:459`); the declared-signature path refuses by strict
+   `matches` five lines later (`validate.ts:464`). One rule for both is a
+   product decision (an error moves from box time to evaluate time).
+
+Worktree with the shim: the experiment is reproducible from this entry; the
+proxy gates on `CE_TYPE_VALUE_BLIND` / `CE_TYPE_LITERAL` and is not for
+landing.
+
 ### A pre-canonicalization validation phase (OPEN, design — raised by the user 2026-08-21 at the item-219 ruling)
 
 Item 219 is the second time a computation has needed to VALIDATE an
@@ -584,6 +653,49 @@ is the inner product, `Cross(a, b)` the cross product" — instead of the
 generic type report. The rejection site is `checkNumericArgs`
 (`boxed-expression/validate.ts`); the message likely wants an
 `ERROR_EXPLANATIONS` entry so the CLI/editor surfaces carry it too.
+
+### A collection operand reaching a SCALAR `interval-js` kernel answers garbage behind `success: true` (OPEN — needs a ruling, found 2026-08-22 while landing Tycho item 220)
+
+The interval target's kernels (`_IA.add`, `_IA.less`, `_IA.piecewise`, …)
+read `.lo`/`.hi` off whatever they are handed. A collection-typed operand in
+such a position compiles — there is no operand-shape gate — and at run time
+the kernel sees a JavaScript array: `Add(L, 1)` with `L: list<number>` runs
+to `{ kind: 'interval', value: { lo: NaN, hi: NaN } }`, and `Less(xs, 3)`
+with `xs: list<real>` compiles to `_IA.less(_.xs, _IA.point(3))` and runs to
+`'maybe'`. Both were measured on the tree BEFORE item 220 landed, so this is
+not a consequence of the new accessors (which project a collection operand
+back to one interval before any kernel sees it); it is why those accessors
+emit the array spelling only in their own operand position and why there is
+deliberately no `List`/`Tuple` lowering in the target's function table.
+
+The fix is a per-kernel operand gate (fail closed on a provably
+collection-valued operand — some twenty handlers), but it needs a ruling
+first, because the target's result contract is already inconsistent: a
+comprehension root compiles and RETURNS an array (pinned in
+`compile-loop.test.ts`), while the documented `run` type is
+`IntervalResult | Interval` and the interpreter-fallback path maps any
+non-scalar to `entire`. Decide which is the contract — arrays admitted (then
+document it and fix the fallback), or one interval (then the comprehension pin
+changes) — and gate the kernels accordingly.
+
+### `Integrate` applies the fundamental theorem across a pole: `∫₋₁¹ dt/t` evaluates to 0 (OPEN, found 2026-08-22)
+
+`ce.parse('\\int_{-1}^{1} \\frac{1}{t} dt').evaluate()` returns `0` — the
+antiderivative `ln|t|` differenced at the bounds, with no check that the
+integrand is bounded on `[-1, 1]`. The integral diverges; `.N()` answers a
+large value with a large error, which is at least honest. Both compile
+targets inherit the wrong value through the shared antiderivative-first step
+(`BaseCompiler.closedFormIntegral`): the `javascript` target emits `(0)`, and
+the `interval-js` target emits `(_IA.point(0))` — a zero-width "rigorous
+enclosure" of a divergent integral, the worse of the two, since that
+target's whole purpose is never to claim a value it cannot bound (its own
+quadrature path, reached when the closed form is suppressed, correctly
+answers `singular`). No test pins the `0`. The guard belongs in the
+`Integrate` evaluate handler (`library/calculus.ts`): before differencing an
+antiderivative over finite bounds, refuse (stay symbolic) when the integrand
+has a pole strictly inside them — at minimum a rational integrand whose
+denominator has a real root in the open range. What "pole detection" should
+cover beyond the rational case is the ruling to make.
 
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 
