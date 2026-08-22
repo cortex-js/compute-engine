@@ -423,9 +423,10 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
     expect(expr.type.toString()).toBe('error');
   });
 
-  test('the multi-collection form has no compiled lowering (unchanged)', () => {
-    // Neither target lowers `Map(f, xs, ys)`; the annotation does not change
-    // that, and none is added here.
+  test('the multi-collection form compiles with bare parameters (no stamp needed)', () => {
+    // Both targets lower `Map(f, xs, ys)` (Tycho item 218); the bare
+    // parameters are fed one element from each source, and the sources'
+    // element types are checked per position instead of being stamped.
     const ce = new ComputeEngine();
     const expr = ce.box([
       'Map',
@@ -436,12 +437,15 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
     // `constantFold: false`: both sources are literal lists, so the whole
     // `Map` would otherwise be evaluated at compile time and emitted as a
     // literal list, never reaching the multi-collection lowering under test.
-    expect(() => compile(expr, { fallback: false, constantFold: false })).toThrow(
-      /multi-collection form is not compiled/
-    );
-    expect(() =>
-      new PythonTarget().compile(expr, { constantFold: false })
-    ).toThrow(/multi-collection form is not compiled/);
+    const js = compile<'javascript', number[]>(expr, {
+      fallback: false,
+      constantFold: false,
+    });
+    expect(js.success).toBe(true);
+    expect(js.run({})).toEqual([4, 6]);
+    const py = new PythonTarget().compile(expr, { constantFold: false });
+    expect(py.success).toBe(true);
+    expect(py.code).toContain('zip(*_ls)');
   });
 
   test('the sharing pin holds for the multi-collection form too', () => {

@@ -2393,6 +2393,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Zip: (args, compile) => {
     if (args.length === 0) return '[]';
+    BaseCompiler.assertLockstepSourcesPure('Zip', args, 1);
     const colls = args.map((a, i) => pyCollArg('Zip', a, compile, i + 1));
     return `[list(_t) for _t in zip(${colls.join(', ')})]`;
   },
@@ -2407,9 +2408,42 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // --- Higher-order collection operators ------------------------------------
   Map: (args, compile) => {
-    if (args.length > 2)
-      throw new Error('Map: multi-collection form is not compiled');
     if (args[1] == null) throw new Error('Map: missing source collection');
+    // The multi-collection (zipWith) form: one element from each source per
+    // call, as long as the shortest source — which is what Python's `zip`
+    // does. Parameter `i` is checked against source `i`'s element type, as
+    // on the JavaScript target (`zipFnArg` there).
+    if (args.length > 2) {
+      const sources = args.slice(1);
+      // The mapping is operand 1, so the first source is operand 2. The
+      // gates are the JavaScript target's: every source pure (the compiled
+      // code materializes all of them, the interpreter stops at the
+      // shortest), every source's elements provably real scalars (the
+      // lambda's parameters are bare), and a bare binary operator symbol
+      // only over exactly two sources (it lowers to a two-argument lambda,
+      // which Python would reject at run time with a `TypeError`).
+      BaseCompiler.assertLockstepSourcesPure('Map', sources, 2);
+      const colls = sources.map((a, i) => pyCollArg('Map', a, compile, i + 2));
+      if (
+        isSymbol(args[0]) &&
+        BaseCompiler.isBinaryInfixValueOperator(args[0].symbol) &&
+        sources.length !== 2
+      )
+        throw new Error(
+          `Map: the operator symbol '${args[0].symbol}' used as the ` +
+            `mapping compiles to a two-argument function, and ` +
+            `${sources.length} collections supply ${sources.length} ` +
+            `arguments per call. Fail closed (D6) — the interpreter ` +
+            `evaluates it.`
+        );
+      const fn = pyFnArg(
+        'Map',
+        args[0],
+        compile,
+        BaseCompiler.zipCallbackArgTypes('Map', sources, 2)
+      );
+      return `(lambda _f, *_ls: [_f(*_t) for _t in zip(*_ls)])(${fn}, ${colls.join(', ')})`;
+    }
     const coll = pyCollArg('Map', args[1], compile);
     const fn = pyFnArg('Map', args[0], compile, [
       BaseCompiler.collectionElementTypeOf(args[1]),

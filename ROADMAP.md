@@ -190,6 +190,40 @@ the self-calls share, which makes the evaluation linear in the OUTPUT size
 but leaves that size exponential. Repro: the `recursiveSetup()` of the
 regression test above, then `ce.parse('R(5,x,y)').evaluate()`.
 
+### The `javascript`/`python` targets declined the multi-collection form of `Map` over symbolic sources (RESOLVED 2026-08-21 — Tycho item 218)
+
+`Map((_1,_2) ↦ _1+_2, 1..N, 2..N)` with `N` a free input declined with
+"Map: multi-collection form is not compiled" on both targets, while the
+single-collection form compiled and the same shape with literal bounds
+const-folded before reaching the lowering. The witness was a Desmos
+element-wise list difference `c = (1..N) − Join([0], 1..(N−1))`: on the
+compile route `Subtract(Range, Join)` lowers directly through the broadcast
+helper, but the document binds `c` to its EVALUATED value — a zip `Map` —
+and every compiled expression reading `c` inlined that and declined. Both
+targets now lower the form (`javascript-target.ts` `Map` + `zipFnArg`,
+`python-target.ts` `Map`): sources materialized once, one element from
+each per call, length of the shortest source, annotations checked per
+source position. Three fail-closed gates, shared through `BaseCompiler`
+(`zipCallbackArgTypes`, `assertLockstepSourcesPure`): every source's
+elements must be provably real numbers, because the callback's parameters
+are compiled untyped (the zip form stamps none of them) and its body treats
+them as real scalars — complex or nested-list elements emitted a string
+behind `success: true` before the gate; every source must be pure, because
+the compiled code materializes all of them where the interpreter's lockstep
+walk stops at the shortest (this gate now guards `Zip` too, which had the
+same gap on both targets); and a bare binary operator symbol as the mapping
+is admitted only over exactly two sources, since it lowers to a two-argument
+lambda. The constant fold's size estimate for a zip `Map` is now the minimum
+over its resolvable sources (`staticCollectionSize`), and its cost sums
+every source. Tests:
+`test/compute-engine/tycho-item-218-compile-multi-collection-map.test.ts`;
+the former decline pin in `lambda-param-element-inference.test.ts` now
+asserts the lowering. Still not lowered: the `glsl` and `interval-js`
+targets have no `Map` lowering in either form; no consumer has asked. A
+later round could lift the real-scalar gate by stamping the zip callback's
+parameters from the sources at compile time, the way the unary form's
+parameter is stamped at canonicalization.
+
 ### Built-in collections as `Iterable`/`Indexable` protocol conformers — audit and sizing (OPEN, design — audited 2026-08-21; ruling P8 / §7 item 6(h) of `docs/TYPE_SYSTEM_ROADMAP.md`)
 
 A read-only audit sized the migration of the collection capability from the

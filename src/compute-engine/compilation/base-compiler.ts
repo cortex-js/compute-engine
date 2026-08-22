@@ -3094,11 +3094,21 @@ export class BaseCompiler {
     // syntax — and evaluating it forced all 100 000 elements.
     if ((op === 'Map' || op === 'Filter') && ops.length >= 2) {
       // `Map(f, xs)` is callback-first; `Filter(xs, f)` is collection-first.
-      const [callback, source] =
-        op === 'Map' ? [ops[0], ops[1]] : [ops[1], ops[0]];
-      const size = BaseCompiler.staticCollectionSize(source, depth + 1);
+      // The zipWith form `Map(f, xs, ys, …)` walks every source in lockstep
+      // and stops at the shortest, so its size is the minimum over the
+      // sources and each source is materialized once.
+      const [callback, sources] =
+        op === 'Map' ? [ops[0], ops.slice(1)] : [ops[1], [ops[0]]];
+      // `staticCollectionSize` knows the zip rule for `Map`; a `Filter` is
+      // priced by its source, the bound on what it can keep.
+      const size =
+        op === 'Map'
+          ? BaseCompiler.staticCollectionSize(expr, depth)
+          : BaseCompiler.staticCollectionSize(ops[0], depth + 1);
       const perElement = BaseCompiler.foldCostEstimate(callback, depth + 1, c);
-      const sourceCost = BaseCompiler.foldCostEstimate(source, depth + 1, c);
+      let sourceCost = 0;
+      for (const source of sources)
+        sourceCost += BaseCompiler.foldCostEstimate(source, depth + 1, c);
       if (!Number.isFinite(perElement) || !Number.isFinite(sourceCost))
         return Infinity;
       // An UNRESOLVABLE source size is priced as a single element rather than
@@ -3228,9 +3238,19 @@ export class BaseCompiler {
       if (src === undefined || n === undefined) return undefined;
       return Math.max(0, src - Math.max(0, n));
     }
-    // A `Map` preserves its source's length.
-    if (expr.operator === 'Map' && ops.length >= 2)
-      return BaseCompiler.staticCollectionSize(ops[1], depth + 1);
+    // A unary `Map` preserves its source's length; the zipWith form
+    // `Map(f, xs, ys, …)` is as long as its SHORTEST source. A source whose
+    // size is unresolvable can only make the result shorter, so the minimum
+    // over the resolvable sources is still a bound the cost estimate can
+    // price by; with no resolvable source there is no bound at all.
+    if (expr.operator === 'Map' && ops.length >= 2) {
+      let min: number | undefined = undefined;
+      for (const source of ops.slice(1)) {
+        const n = BaseCompiler.staticCollectionSize(source, depth + 1);
+        if (n !== undefined && (min === undefined || n < min)) min = n;
+      }
+      return min;
+    }
     return undefined;
   }
 
@@ -6653,6 +6673,82 @@ export class BaseCompiler {
         BaseCompiler.elementsRealByConstruction(coll.ops[0])
       );
     return false;
+  }
+
+  /**
+   * Fail closed (D6) when a LOCKSTEP walk over several sources — the zip
+   * form of `Map`, and `Zip` itself — would run a source's effects more often
+   * than the interpreter does.
+   *
+   * The interpreter advances every source together and stops as soon as the
+   * shortest one ends, so a longer source is never walked past that point.
+   * The emitted code has no lockstep walk: it materializes every source in
+   * full and only then reads the minimum length. For a pure source the two
+   * are indistinguishable; for a source that draws `Random` or calls a
+   * stateful function, the extra elements are extra draws and calls. A
+   * single source is never refused here (`Map(f, xs)` walks all of `xs` on
+   * both routes). `firstPosition` is the 1-based operand position of
+   * `sources[0]` in the enclosing call, for the diagnostic.
+   */
+  static assertLockstepSourcesPure(
+    kind: string,
+    sources: ReadonlyArray<Expression | undefined>,
+    firstPosition: number
+  ): void {
+    if (sources.length < 2) return;
+    sources.forEach((source, i) => {
+      if (source === undefined || source.isPure) return;
+      throw new Error(
+        `${kind}: operand ${i + firstPosition} has observable effects, and ` +
+          `a walk over several collections stops at the shortest one, so ` +
+          `the compiled code — which materializes every collection in ` +
+          `full — would run those effects more often than the interpreter ` +
+          `does. Fail closed (D6) — the interpreter evaluates it.`
+      );
+    });
+  }
+
+  /**
+   * The element type each source of the zip form of `Map` feeds its
+   * callback at that position, or a fail-closed (D6) throw.
+   *
+   * A callback over several sources is compiled with BARE parameters: the
+   * zip form stamps none of them (its contextual callback slot is unary), so
+   * the emitted body treats every parameter as a real scalar. That is
+   * faithful only when every source provably supplies real scalars. A
+   * `list<complex>` source would reach `+` as an object and a
+   * `list<list<number>>` source as an array — both emit a string where the
+   * interpreter answers a complex number or a broadcast sum. The unary form
+   * has no such gap because its one parameter IS stamped with the source's
+   * element type and the body compiles under it. So an element type that is
+   * unprovable, not numeric, or provably non-real declines here. `number`
+   * itself is admitted: the compiled real lane is what a `number`-typed
+   * parameter gets everywhere else in this compiler. `firstPosition` is as
+   * for `assertLockstepSourcesPure`.
+   */
+  static zipCallbackArgTypes(
+    kind: string,
+    sources: ReadonlyArray<Expression | undefined>,
+    firstPosition: number
+  ): Type[] {
+    return sources.map((source, i) => {
+      const elt = BaseCompiler.collectionElementTypeOf(source);
+      if (
+        elt !== undefined &&
+        isSubtype(elt, 'number') &&
+        !isNonRealNumber(elt)
+      )
+        return elt;
+      throw new Error(
+        `${kind}: operand ${i + firstPosition} ` +
+          (elt === undefined
+            ? `has no provable element type`
+            : `has elements of type '${typeToString(elt)}'`) +
+          `, and the mapping over several collections is compiled with ` +
+          `untyped parameters that the emitted code treats as real numbers. ` +
+          `Fail closed (D6) — the interpreter evaluates it.`
+      );
+    });
   }
 
   static collectionElementTypeOf(

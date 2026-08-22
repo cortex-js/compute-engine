@@ -2724,11 +2724,27 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // interpreter passes exactly `(x)`). A mapping operand that does not
   // compile to a lambda fails closed.
   Map: (args, compile) => {
-    // The multi-collection (zipWith) form is not compiled; fail closed so the
-    // engine reports success:false and falls back to the interpreter.
-    if (args.length > 2)
-      throw new Error('Map: multi-collection form is not compiled');
     if (args[1] == null) throw new Error('Map: missing source collection');
+    // The multi-collection (zipWith) form: `Map(f, xs, ys)` is
+    // `[f(x1, y1), f(x2, y2), …]`, as long as the SHORTEST source — the
+    // interpreter's `count` is the minimum over the sources, and `Zip`
+    // truncates the same way. Each source is materialized once and the
+    // callback is called with one element from each, positionally, so an
+    // annotation on parameter `i` is checked against source `i`'s element
+    // type (`zipFnArg`). The sources' runtime lengths are what the length
+    // reads, so a source over a symbolic bound (`1..N` with `N` a free input)
+    // compiles like the unary form does; with literal bounds the constant
+    // fold has usually already replaced the whole `Map` by its value.
+    if (args.length > 2) {
+      const sources = args.slice(1);
+      // The mapping is operand 1, so the first source is operand 2.
+      BaseCompiler.assertLockstepSourcesPure('Map', sources, 2);
+      const colls = sources.map((a, i) =>
+        elementsArg('Map', a, compile, i + 2)
+      );
+      const fn = zipFnArg('Map', args[0], sources, compile);
+      return `((_f, ..._ls) => Array.from({ length: Math.min(..._ls.map((_l) => _l.length)) }, (_, _i) => _f(..._ls.map((_l) => _l[_i]))))(${fn}, ${colls.join(', ')})`;
+    }
     const coll = elementsArg('Map', args[1], compile);
     return `((_f) => (${coll}).map((_x) => _f(_x)))(${fnArg('Map', args[0], args[1], compile)})`;
   },
@@ -2994,6 +3010,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // the length of the shortest input.
   Zip: (args, compile) => {
     if (args.length === 0) return '[]';
+    BaseCompiler.assertLockstepSourcesPure('Zip', args, 1);
     const colls = args.map((a, i) => collArg('Zip', a, compile, i + 1));
     return `((..._ls) => Array.from({ length: Math.min(..._ls.map((_l) => _l.length)) }, (_, _i) => _ls.map((_l) => _l[_i])))(${colls.join(', ')})`;
   },
@@ -8391,6 +8408,48 @@ function fnArg(
   // accumulator prefix) is planned by `combinerPlan`.
   if (extraArgTypes.length === 0)
     BaseCompiler.assertCallbackLaneMatch(callback, source);
+  return compile(callback!);
+}
+
+/**
+ * `fnArg` for a callback that receives one element from EACH of several
+ * sources (the zipWith form of `Map`): parameter `i` is fed source `i`'s
+ * elements, so an annotation on it is checked against that source's element
+ * type, position by position. Every source must supply real scalars
+ * (`zipCallbackArgTypes`), because the callback's parameters are compiled
+ * bare and its body treats them as real numbers. No lane-match check:
+ * `assertCallbackLaneMatch` covers a bare user-function symbol with a SINGLE
+ * wide parameter over complex elements, and complex elements are refused
+ * here before it could apply.
+ *
+ * A bare `Add`/`Subtract`/`Multiply`/`Divide` symbol as the mapping lowers to
+ * a TWO-parameter lambda (`(a, b) => a + b`), whatever the source count; the
+ * interpreter applies the variadic operator to one element from each source,
+ * so `Map(Add, xs, ys, zs)` sums three. A JavaScript arrow silently ignores
+ * the third argument, so that spelling is refused unless the count is two.
+ */
+function zipFnArg(
+  kind: string,
+  callback: Expression | undefined,
+  sources: ReadonlyArray<Expression | undefined>,
+  compile: (expr: Expression) => string
+): string {
+  if (
+    isSymbol(callback) &&
+    BaseCompiler.isBinaryInfixValueOperator(callback.symbol) &&
+    sources.length !== 2
+  )
+    throw new Error(
+      `${kind}: the operator symbol '${callback.symbol}' used as the ` +
+        `mapping compiles to a two-argument function, and ${sources.length} ` +
+        `collections supply ${sources.length} arguments per call. Fail ` +
+        `closed (D6) — the interpreter evaluates it.`
+    );
+  BaseCompiler.assertCallbackAnnotations(
+    kind,
+    callback,
+    BaseCompiler.zipCallbackArgTypes(kind, sources, 2)
+  );
   return compile(callback!);
 }
 

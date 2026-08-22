@@ -1,3 +1,35 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **The `javascript` and `python` targets now compile the multi-collection
+  (zipWith) form of `Map` over symbolic sources.**
+  `Map((_1,_2) ↦ _1+_2, 1..N, 2..N)` with `N` a free input declined with
+  "Map: multi-collection form is not compiled" — which a plotting document
+  met through Desmos' element-wise list difference
+  `c = (1..N) − Join([0], 1..(N−1))`, whose bound value is exactly that zip
+  `Map`, so every compiled expression reading `c` declined with it. The same
+  shape with literal bounds const-folded away before reaching the lowering,
+  which is why it looked as if every minimal zip compiled. The form now
+  lowers like the single-collection one: each source is materialized once,
+  the callback receives one element from each source per position, and the
+  result is as long as the SHORTEST source — the interpreter's `count` for
+  the form, and what `Zip` does. A parameter annotation on the callback is
+  checked against ITS source, position by position, with the same
+  fail-closed rule the unary form has (an `integer` annotation over a
+  `number`-typed source declines, naming the parameter). Three shapes stay
+  with the interpreter, by a compile-time decline rather than a wrong value:
+  a source whose elements are not provably real numbers (`list<complex>`,
+  `list<list<number>>`, strings, a bare `list`) — the callback's parameters
+  are compiled untyped and its body treats them as real numbers; a source
+  with observable effects (one that draws `Random`) — the compiled code
+  materializes every source in full where the interpreter stops at the
+  shortest; and a bare `Add`/`Subtract`/`Multiply`/`Divide` symbol as the
+  mapping over anything but exactly two sources — it compiles to a
+  two-argument function. The effects decline now guards `Zip` on both targets
+  too, which had the same gap. The constant fold's cost estimate prices a zip
+  by its shortest resolvable source instead of its first. (Tycho item 218)
+
 ## 0.118.0 _2026-08-21_
 
 ### Breaking Changes
