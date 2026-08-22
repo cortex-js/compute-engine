@@ -1,11 +1,10 @@
+import { isValueDef } from './definition-guards.js';
 import type {
   Expression,
   OperatorDefinition,
   ValueDefinition,
   IComputeEngine as ComputeEngine,
   BoxedDefinition,
-  TaggedValueDefinition,
-  TaggedOperatorDefinition,
   BoxedOperatorDefinition,
   BoxedValueDefinition,
   DictionaryInterface,
@@ -863,11 +862,9 @@ export function isValidValueDef(def: unknown): def is Partial<ValueDefinition> {
   return false;
 }
 
-export function isValueDef(
-  def: BoxedDefinition | undefined
-): def is TaggedValueDefinition {
-  return def !== undefined && 'value' in def;
-}
+// `isValueDef` lives in `definition-guards.ts` (a leaf module — see there);
+// re-exported here so every existing import site is unchanged.
+export { isValueDef, isOperatorDef } from './definition-guards.js';
 
 /**
  * Whether `expr` contains a free symbol that carries a USER-ASSIGNED value: a
@@ -1167,12 +1164,6 @@ export function liftIntegrand(literal: Expression): Expression {
   const scope = body.localScope;
   if (!scope) return literal;
   return rebindEscaping(body.op1, scope);
-}
-
-export function isOperatorDef(
-  def: BoxedDefinition | undefined
-): def is TaggedOperatorDefinition {
-  return def !== undefined && 'operator' in def;
 }
 
 /**

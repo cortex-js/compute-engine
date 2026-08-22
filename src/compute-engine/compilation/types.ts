@@ -1036,6 +1036,14 @@ export interface CompileTarget<Expr = unknown> {
      * `lookupDefinition` on every occurrence. Populated lazily. */
     misses?: Set<string>;
     /**
+     * User functions whose call is currently being compiled INLINED — the
+     * body beta-reduced at the call site because the target could not emit
+     * the definition (`BaseCompiler.tryInlineUserFunctionCall`). A call to a
+     * function already on this set is a cycle (mutual recursion through an
+     * inlined body) and declines instead of inlining again. Populated lazily.
+     */
+    inlining?: Set<string>;
+    /**
      * Language hooks for a target whose user-defined functions are NOT JS
      * arrow functions — the GLSL/WGSL shader targets, where a definition is a
      * statically typed function declaration. Absent means the default JS

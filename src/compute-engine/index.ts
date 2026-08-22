@@ -1059,6 +1059,24 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _evaluationDepth = 0;
 
+  /** See `IComputeEngine._objectStoreEpoch`.
+   * @internal */
+  _objectStoreEpoch = 0;
+
+  /** See `IComputeEngine._applicationMemo`.
+   * @internal */
+  _applicationMemo:
+    | WeakMap<
+        Expression,
+        {
+          semanticVersion: number;
+          objectStoreEpoch: number;
+          deps: unknown;
+          results: Map<string, Expression>;
+        }
+      >
+    | undefined = undefined;
+
   /**
    * Take a checkpoint of the engine's state at a quiescent cell boundary, so
    * that a later {@link restore} can rewind to it — the notebook edit gesture

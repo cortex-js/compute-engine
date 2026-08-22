@@ -157,6 +157,36 @@
 
 ### Bug Fixes
 
+- **A call of a user function whose definition a compile target cannot emit
+  is compiled inlined.** On the `glsl` and `interval-js` targets
+  `f((x,y))` with `f(P) := a·P.x² + b·P.y²` declined — a shader function
+  needs a static type for every parameter and a point-typed one has none
+  (`parameter "P" has no static GLSL type`); the interval target has no
+  `PointX`/`PointY` lowering over an opaque parameter — while the same body
+  written out compiled. The call now compiles with the body substituted at
+  the call site (the coordinate accessors of the literal point folded), so
+  `f((x,y))`, `d((x,y))` with `d(P) := √(P.x²+P.y²)`, a two-point
+  `Q((x,y),(1,2))` and a chained `e(P) := d(P) + 1` all compile on both
+  targets; the `javascript` target keeps compiling such calls by reference.
+  The body is substituted, never evaluated — an impure body, a generic or
+  recursive callee, a symbolic point or a list argument keep the
+  definition's own decline. (Tycho item 216.)
+
+- **Applications of a pure user function to number-literal arguments are
+  memoized within an evaluation.** A recursive definition that applies
+  itself twice per level, `R(i,x,y) = R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))`,
+  cost the interpreter 2^i body evaluations at depth `i` — minutes at
+  depth 20 where the compiled artifact, whose CSE pass binds the repeated
+  self-call, took microseconds. The same application — same literal, same
+  number-literal arguments, same exact/numeric route — is now answered from
+  a memo, so depth 20 evaluates in milliseconds. An entry is valid only while
+  the engine's state version — the axis every assignment, declaration,
+  assumption, configuration change, non-clean scope pop and checkpoint
+  restore advances — and a mutable-object store epoch are both unchanged,
+  so a pure body that reads an assigned free symbol or an object field is
+  never answered from a stale result; an impure body or a symbolic argument
+  is never memoized. (Tycho item 217.)
+
 - **The `javascript` compile target lowers a point multiplied by a list.**
   `[1,2,3]·(cos a, sin a)` and `(3((-N)..N)+cos t)·(cos a, sin a)` declined
   with "no list-arithmetic support" while `x+[1,2,3]` and `2(cos a, sin a)`

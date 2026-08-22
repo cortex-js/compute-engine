@@ -564,6 +564,58 @@ export interface IComputeEngine {
    * @internal */
   _evaluationDepth: number;
 
+  /**
+   * Incremented on every mutable-object field store — the one engine write
+   * that advances no engine-wide cache axis (`object-store` in
+   * `axisMaskOf`: field-derived caches carry per-object versions instead).
+   * Together with `_semanticVersion` it stamps the pure-application memo,
+   * whose entries have no object to carry a version for; see
+   * `_applicationMemo`.
+   * @internal */
+  _objectStoreEpoch: number;
+
+  /**
+   * Results of applying a PURE user-function literal to number-literal
+   * arguments WITHIN ONE TOP-LEVEL EVALUATION, keyed by the literal and the
+   * arguments (`function-utils.ts`, `makeLambda`); cleared when a top-level
+   * evaluation begins (`BoxedFunction.evaluate`, at `_evaluationDepth` 0),
+   * so it never outgrows one evaluation's distinct applications. A
+   * recursive definition such as `R(i,x,y) = R(i-1,x,y) + S(x,y,R(i-1,x,y))`
+   * applies itself twice per level, so an evaluation at depth 20 ran the
+   * body 2^20 times where 20 distinct applications exist; the memo answers
+   * the repeats.
+   *
+   * Within the evaluation an entry is valid only while `_semanticVersion`
+   * and `_objectStoreEpoch` are both unchanged AND the literal's dependency
+   * snapshot still validates (`snapshotMemoDeps` / `memoDepsStillValid`,
+   * `collection-element-memo.ts` — one `_writeVersion` per value definition
+   * the body reads, plus the re-resolution of every free name). A pure body
+   * may read an assigned free symbol, an object field, or the INDEX of an
+   * enclosing binder: `Σ_i` applying `n ↦ i·n` writes `i` ephemerally, which
+   * bumps that definition's `_writeVersion` and no engine-wide axis, and
+   * without the snapshot iteration 1's results were served to every later
+   * iteration. The SEMANTIC axis, not the `any` axis: every nested call
+   * binds its parameters through a `declare` event, which advances `any`
+   * (the type caches' guard) but not `semantic`, so an `any` stamp was
+   * defeated by the very recursion the memo exists for. Assignments,
+   * redefinitions, assumptions, configuration changes and assumption-dirty
+   * scope pops all advance `semantic` (`axisMaskOf`,
+   * `engine-configuration-lifecycle.ts`). `deps` is the element memo's
+   * `MemoDeps`, typed opaquely here to keep this interface free of that
+   * module.
+   * @internal */
+  _applicationMemo:
+    | WeakMap<
+        Expression,
+        {
+          semanticVersion: number;
+          objectStoreEpoch: number;
+          deps: unknown;
+          results: Map<string, Expression>;
+        }
+      >
+    | undefined;
+
   /** Thunks that clear per-engine library-load idempotence markers, invoked
    * by a checkpoint restore. Registered BY the loaders rather than imported
    * by the checkpoint path, so taking a checkpoint does not pull the Fungrim

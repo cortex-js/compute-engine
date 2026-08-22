@@ -1904,6 +1904,11 @@ export class BoxedFunction
     // must not strand the count, or the engine would refuse every subsequent
     // checkpoint for the rest of its life.
     const engine = this.engine;
+    // A top-level evaluation starts with an empty pure-application memo:
+    // the memo shares the repeated applications of ONE evaluation (see
+    // `IComputeEngine._applicationMemo`) and must not accumulate every
+    // distinct argument tuple an engine sees in its lifetime.
+    if (engine._evaluationDepth === 0) engine._applicationMemo = undefined;
     engine._evaluationDepth += 1;
     try {
       // A deadline is armed only by an enclosing `withTimeLimit` span; work

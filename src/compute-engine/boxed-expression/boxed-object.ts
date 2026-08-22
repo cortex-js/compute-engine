@@ -472,6 +472,10 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
     );
     this._slots.set(name, value);
     this._version += 1;
+    // A field store advances no engine-wide axis (per-object versions carry
+    // field-derived caches); the pure-application memo has no object to
+    // carry a version for, so it is stamped with this epoch as well.
+    this.engine._objectStoreEpoch += 1;
     this.engine._noteStateEvent({ kind: 'object-store' });
   }
 

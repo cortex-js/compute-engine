@@ -25,6 +25,7 @@ import {
   isSymbol,
   isFunction,
   isString,
+  isNumber,
   sym,
 } from './boxed-expression/type-guards.js';
 import {
@@ -54,6 +55,11 @@ import {
   recordEffectsTransition,
 } from './boxed-expression/effects-provenance.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
+import {
+  memoDepsStillValid,
+  snapshotMemoDeps,
+  type MemoDeps,
+} from './boxed-expression/collection-element-memo.js';
 import { isPureComputedEffects } from '../common/type/effects.js';
 import type { FunctionSignature, Type } from '../common/type/types.js';
 import { parseType } from '../common/type/parse.js';
@@ -2795,6 +2801,35 @@ function makeLambda(
       }
     }
 
+    // A pure literal over number-literal arguments: answer a memoized result
+    // of the same application taken earlier in this evaluation (see
+    // `IComputeEngine._applicationMemo`). Purity is read HERE, per
+    // application, not when this wrapper was built — the wrapper is built
+    // once per definition, and a callee the body applies may have been
+    // redefined impure since (`effectsOf` is memoized, so the read is
+    // cheap). The key carries the numeric-approximation flag — the exact
+    // and the `.N()` answers differ — and spells `-0` apart from `0`, which
+    // `JSON.stringify` would collapse.
+    const memoKey =
+      evaluatedArgs.every((a) => isNumber(a)) &&
+      isPureComputedEffects(effectsOf(body))
+        ? `${options?.numericApproximation ? 'N' : 'E'}|${evaluatedArgs
+            .map((a) => (Object.is(a.re, -0) ? '-0' : JSON.stringify(a.json)))
+            .join('|')}`
+        : undefined;
+    if (memoKey !== undefined) {
+      const memo = ce._applicationMemo?.get(fnExpr);
+      if (
+        memo !== undefined &&
+        memo.semanticVersion === ce._semanticVersion &&
+        memo.objectStoreEpoch === ce._objectStoreEpoch &&
+        memoDepsStillValid(fnExpr, memo.deps as MemoDeps)
+      ) {
+        const hit = memo.results.get(memoKey);
+        if (hit !== undefined) return hit;
+      }
+    }
+
     //
     // 5/ Create a fresh scope per call with parent = the defining scope.
     //    bodyFn.localScope.parent is the scope where the Function was defined.
@@ -2939,6 +2974,30 @@ function makeLambda(
       restoreBodyScopeParams(bodyScope, hiddenBindings);
     }
 
+    if (memoKey !== undefined && result.isValid) {
+      ce._applicationMemo ??= new WeakMap();
+      let memo = ce._applicationMemo.get(fnExpr);
+      if (
+        memo === undefined ||
+        memo.semanticVersion !== ce._semanticVersion ||
+        memo.objectStoreEpoch !== ce._objectStoreEpoch ||
+        !memoDepsStillValid(fnExpr, memo.deps as MemoDeps)
+      ) {
+        // A literal whose dependencies cannot be snapshotted (a free name
+        // with no binding at all, resolved dynamically at walk time) is not
+        // memoizable.
+        const deps = snapshotMemoDeps(fnExpr);
+        if (deps === undefined) return result;
+        memo = {
+          semanticVersion: ce._semanticVersion,
+          objectStoreEpoch: ce._objectStoreEpoch,
+          deps,
+          results: new Map(),
+        };
+        ce._applicationMemo.set(fnExpr, memo);
+      }
+      memo.results.set(memoKey, result);
+    }
     return result.isValid ? result : undefined;
   };
 

@@ -109,6 +109,27 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Symbolic evaluation of a twice-recursive user function overflows the stack at depth 3 (OPEN, evaluation — found 2026-08-21 under Tycho item 217)
+
+`R(i,x,y) := R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` with a literal base case and
+`x`, `y` FREE: `R(2,x,y).evaluate()` answers a 42-node closed form, and
+`R(3,x,y).evaluate()` throws `RangeError: Maximum call stack size exceeded`
+from inside canonicalization (`validateArguments` → `isFiniteCollection` →
+`isCollection` on the body's own applications, repeatedly). Instrumenting
+the `isCollection` getter shows the literal's raw body — `R(i-1,x,y)` with
+the PARAMETER still symbolic — being re-canonicalized in a fixed cycle
+(`Add`, `R`, `S`, `R`, `Multiply`, `R`, …), ~18 000 queries before the
+overflow. With NUMERIC arguments the same definition evaluates at depth 20
+in milliseconds (the pure-application memo shipped with item 217), and the
+compiled artifact shares the self-call, so no consumer route is known to
+hit this; it is the symbolic route only. Repro: the `setup()` of
+`test/compute-engine/tycho-item-217-recursive-application-memo.test.ts`,
+then `ce.parse('R(3,x,y)').evaluate()`. Open question for the ruling: whether
+symbolic expansion of a recursive definition should be bounded (decline to
+an inert application past a budget, as `inlineUserFunctions` in
+`boxed-expression/utils.ts` already does with its beta-reduction budget)
+rather than made to terminate.
+
 ### Built-in collections as `Iterable`/`Indexable` protocol conformers — audit and sizing (OPEN, design — audited 2026-08-21; ruling P8 / §7 item 6(h) of `docs/TYPE_SYSTEM_ROADMAP.md`)
 
 A read-only audit sized the migration of the collection capability from the
@@ -617,33 +638,84 @@ fixed:
   of a symbol head lifted into `(x) ↦ g`), and one inconsistency recorded
   below rather than fixed.
 
-### A free `i` in a non-fused subscript index is the imaginary unit on one canonicalization path and a symbol on the other (OPEN, needs a ruling — found 2026-08-21)
+### A free `i` in a subscript index is the imaginary unit on one canonicalization path and a symbol on the other (OPEN, low priority — consumers have a complete workaround; engine fix explored and reverted 2026-08-21)
 
 Measured on a fresh engine: `A_{i,j}` canonicalizes to
 `Subscript(A, Sequence(ImaginaryUnit, j))` — the index `i` becomes the
-imaginary unit — while `A_{i+1}` canonicalizes to `Subscript(A, Add(i, 1))`
-with `i` a plain `unknown`-typed symbol, and `\sum_{i=1}^{3} A_{i,j}` keeps
-`i` as the bound index. The two free-`i` answers come from two code paths in
-the `Subscript` canonical handler (`library/core.ts`): a parenthesized or
-comma subscript arrives as a `Delimiter` and is canonicalized (`sub =
-op2.op1.canonical`), so the engine-wide "unbound `i` is the imaginary unit"
-convention applies; any other subscript expression is passed through
-UNCANONICALIZED (`sub = op2`), which is what keeps `i` symbolic there — by
-accident, and it leaves a non-canonical operand inside a canonical
-expression. (A dead arm the handler also carried — a `Sequence` subscript
-rebuilt as a `List` with the result discarded, no `return` — was removed
-the same day; it changed nothing.)
+imaginary unit, and the matrix form `M_{i,j}` to `At(M, ImaginaryUnit, j)`,
+both evaluating to `NaN` — while `A_{i+1}` canonicalizes to
+`Subscript(A, Add(i, 1))` with `i` a plain `unknown`-typed symbol, and
+`\sum_{i=1}^{3} A_{i,j}` keeps `i` as the bound index. The two free-`i`
+answers come from two code paths in the `Subscript` canonical handler
+(`library/core.ts`): a parenthesized or comma subscript arrives as a
+`Delimiter` and is canonicalized (`sub = op2.op1.canonical`), so the
+engine-wide "unbound `i` is the imaginary unit" convention applies; any
+other subscript expression is passed through UNCANONICALIZED (`sub = op2`),
+which is what keeps `i` symbolic there — by accident, and it leaves a
+non-canonical operand inside a canonical expression. (A dead arm the handler
+also carried — a `Sequence` subscript rebuilt as a `List` with the result
+discarded, no `return` — was removed 2026-08-21 and is not part of what
+follows; it changed nothing.)
 
-The question to rule: inside a subscript index that did not fold into a
-name, is a free `i` (and `e`) the index variable or the constant? The fused
-case already answers "the name" (`x_i` is the symbol `x_i`, `i_A` stays
-`i_A`; the handler saves the raw name before canonicalization for exactly
-this reason), which argues for the index reading in the unfused case too —
-but that is a new exception to the unbound-`i` convention and wants the
-user's call. The canonical-operand gap cannot be closed ahead of the ruling:
-canonicalizing the pass-through path today would turn `A_{i+1}` into
-`Subscript(A, 1 + i)` with the imaginary unit — that IS the second option —
-so the ruling and the fix land together.
+**What is actually wrong is the INCONSISTENCY**, not the default. The
+engine-wide reading of an unbound `i` as the imaginary unit is right for a
+general mathematical user, and changing it would be wrong for anyone doing
+complex analysis. What no reading justifies is `A_{i+1}` and `A_{i,j}`
+disagreeing, or a canonical expression carrying a non-canonical operand.
+
+**A consumer whose domain has no complex arithmetic should declare the name,
+and that is the recommended answer — it is strictly better than the engine
+change explored here.** `ce.declare('i', 'integer')`, before anything is
+parsed, makes `A_{i,j}`, `A_{i+1}`, `L_i`, `L[i]` and `M_{i,j}` all index by
+the symbol. It reaches the bracket and `subscriptEvaluate` paths that an
+engine-side subscript fix structurally cannot (below), `integer` rejects a
+fractional index at the assignment boundary where `unknown` would pass one
+through, and round-trips stay safe because the serializer emits
+`\imaginaryI`, never a bare `i`. The trade is that bare-`i` complex literals
+in that scope become products (`2i` → `2·i`); `\imaginaryI` remains available
+for documents that need both. `e` is the opposite trade — declaring it breaks
+`e^x` — so it wants per-document scoping plus `\exp(x)`, which canonicalizes
+to `Power(ExponentialE, x)` and is unaffected by the declared variable.
+
+A first engine-side implementation (a `canonicalSubscriptIndex` helper
+shielding via `pushScope`/`declare`/`popScope`, plus removing the parser's
+`At` minting) was reverted the same day after dual review. Its four
+constraints stand as the bar for any future attempt:
+
+- **A temporary shielding scope is not viable.** Canonicalizing the index
+  under a pushed scope that declares the constant-named letters as plain
+  symbols, then popping it, returns operands bound to a DISPOSED scope.
+  Measured: two parses of `A_{i,j}` then answer `isSame === false` (the
+  control `A_{p,q}` answers `true`), which breaks the unconditional
+  equivalence relation `.isSame()` is documented to be and is relied on as a
+  dedup/matching key. Any undeclared sibling name in the same index (`n` in
+  `A_{i+n}`) is also auto-declared into the throwaway scope and is then
+  disconnected from a later top-level declaration of `n`.
+- **The parser's `At` lowering must stay.** Routing collection-base
+  subscripts through the `Subscript` canonical handler (so the handler can
+  see the index before canonicalization) removes the parse-time `At`, and
+  the RAW form is a contract with a consumer: `ce.parse('a_{1}', { form:
+  'raw' })` must be `At(a, 1)`, pinned in `raw-subscript-fold-parity.test.ts`
+  and `subscript-declared-name-precedence.test.ts` (10 tests fail otherwise).
+- **`At` cannot shield in its own canonical handler.** `At` is not lazy, so
+  its operands arrive already canonical — the index has become the constant
+  before the handler runs. Shielding there needs `At` to hold its index
+  position, which is a wider change than this item.
+- **Three paths need the rule, not one.** Besides the two `Subscript` paths,
+  the `subscriptEvaluate` branch (a base that owns its subscripts, the
+  `declareSequence` shape) returns `Subscript(base, op2.canonical)` and folds
+  a free `i` the same way; bracket indexing (`L[i]`) is minted straight to
+  `At` by the parser and folds it too. A fix that covers only the `Subscript`
+  arms leaves the same index meaning different things by notation.
+
+Taken together these point away from a per-call-site shield and toward a
+canonicalization-level mechanism — a way to canonicalize a subtree with
+`holdUntil: 'never'` constant substitution suppressed for named symbols,
+which every one of the four paths could then ask for. Since the declaration
+workaround already covers the consumer case completely, the cheap half of
+this item is the one worth doing on its own: make the two `Subscript` paths
+agree and stop returning a non-canonical operand, without changing what a
+free `i` MEANS.
 
 ### Symbolic-side commutativity for `And`/`Or` (STEPS 1–2 SHIPPED 2026-08-18; design settled 2026-08-16 — "Option B")
 

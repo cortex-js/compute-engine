@@ -8,7 +8,7 @@ import type {
 } from '../global-types';
 
 import { isDictionary, isFunction, isObject, isSymbol } from './type-guards';
-import { isValueDef, isOperatorDef } from './utils';
+import { isValueDef, isOperatorDef } from './definition-guards';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats';
 import {
   accumulateObjectDeps,

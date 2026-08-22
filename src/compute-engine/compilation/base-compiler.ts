@@ -8,7 +8,11 @@ import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
-import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
+import {
+  isOperatorDef,
+  isValueDef,
+  collectBinderNames,
+} from '../boxed-expression/utils.js';
 import {
   broadcastableParamSlots,
   declaresBroadcastableParam,
@@ -517,7 +521,9 @@ export function unfaithfulComparisonAggregate(
  * provably a point and whose other side is provably a non-tuple collection is
  * a constant, whatever the values (Tycho item 215).
  */
-export function isProvablyNonTupleCollectionParticipant(x: Expression): boolean {
+export function isProvablyNonTupleCollectionParticipant(
+  x: Expression
+): boolean {
   const walk = (t: Type, visited?: ReadonlySet<TypeReference>): boolean => {
     if (
       typeof t === 'object' &&
@@ -5875,7 +5881,11 @@ export class BaseCompiler {
               );
             return true;
           };
-          if (!collection.every((a) => a === tuples[0] || isScalarElementSource(a)))
+          if (
+            !collection.every(
+              (a) => a === tuples[0] || isScalarElementSource(a)
+            )
+          )
             return null;
           atomicTuple = tuples[0];
         }
@@ -10945,7 +10955,29 @@ export class BaseCompiler {
           );
       }
     }
-    const name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
+    // A callee the target cannot emit as a definition — a shader target
+    // given a point-typed parameter it has no static type for, the interval
+    // target given a body with a head it has no lowering for — is compiled
+    // INLINED at this call site when that is sound (`tryInlineUserFunctionCall`);
+    // the definition's own decline is rethrown when it is not.
+    let name: string | undefined;
+    try {
+      name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
+    } catch (e) {
+      // A cancellation (deadline, abort, iteration limit) must propagate;
+      // identified by NAME, never `instanceof` — a plugin bundle re-bundles
+      // the engine, so a `CancellationError` crossing a bundle boundary is
+      // not an instance of the host's class (the `box.ts` convention).
+      if (e instanceof Error && e.name === 'CancellationError') throw e;
+      const inlined = BaseCompiler.tryInlineUserFunctionCall(
+        engine,
+        h,
+        args,
+        target
+      );
+      if (inlined !== undefined) return inlined;
+      throw e;
+    }
     if (name === undefined) return undefined;
 
     // A target with its own call-site lowering (the shader targets, which must
@@ -11638,6 +11670,154 @@ export class BaseCompiler {
    * is a recursive reference and compiles to a call by name.
    *
    */
+  /**
+   * Compile a call of the user function `h` by INLINING its body at the call
+   * site — the body with each parameter SUBSTITUTED by its argument — for a
+   * target that could not emit `h` as a definition, or `undefined` when
+   * inlining is not sound for this call and the definition's own decline
+   * should stand.
+   *
+   * A definition is emitted once, with PARAMETER types: a shader target needs
+   * a static type for every parameter, and a point-typed one
+   * (`f(P) := a·P.x² + b·P.y²`, whose `P` is a `tuple`) has none; the
+   * interval target has no lowering for `PointX`/`PointY` over an opaque
+   * parameter. The CALL, however, binds `P` to a concrete point `(x, y)`,
+   * and the body over it — `a·x² + b·y²` once the coordinate accessors of
+   * the literal point are folded — is ordinary scalar code both targets
+   * compile. A chained definition (`F(x) := g(x / 3.6)`) inlines to a call
+   * of its callee, which compiles by reference or inlines in turn
+   * (Tycho item 216).
+   *
+   * The body is SUBSTITUTED, never evaluated (`apply` would run the body:
+   * a `Random()` in it was folded into a compile-time constant, and an
+   * assigned free symbol would be read at compile time where the emitted
+   * definition reads it at run time).
+   *
+   * Sound only when the inlined body is what the by-reference call would
+   * have computed, once:
+   *  - the callee is a single-statement pure literal — an impure body would
+   *    run its effect per inlined occurrence — and not generic (no ground
+   *    types to substitute into);
+   *  - the callee is not recursive: a direct self-call in the body, a callee
+   *    whose definition is on the in-flight compile stack (mutual recursion
+   *    by reference), or one already being inlined higher up (mutual
+   *    recursion through inlining) — an inlining would not terminate;
+   *  - every argument is provably a scalar or a literal point: a collection
+   *    argument is broadcast by the by-reference call (`_SYS.bcastFn`) but
+   *    would be substituted whole into the body;
+   *  - every argument is pure: the by-reference call evaluates an argument
+   *    ONCE, while substitution repeats it at every occurrence of its
+   *    parameter — `(Random(), y)` into a body reading `P.x` twice would
+   *    draw twice;
+   *  - the body binds no variable of its own: `subs` is not binder-aware,
+   *    so a parameter rebound by an inner `Sum`/`Function`/`Block`, or an
+   *    argument symbol such a binder would capture, would be rewritten
+   *    blindly (the guard `betaReduceLambda` in `boxed-expression/utils.ts`
+   *    applies; here any binder declines, which also keeps
+   *    `foldLiteralPointAccess` from rebuilding a scoped node).
+   *
+   * A `Typed` parameter's annotation is not re-validated at the inline call
+   * site: the strict lane-mismatch check above already compared the
+   * arguments against the declared parameter types before either route was
+   * chosen, and the by-reference definition enforces nothing further at run
+   * time either.
+   */
+  private static tryInlineUserFunctionCall(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    const registry = target.userFunctions;
+    if (!registry) return undefined;
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return undefined;
+    if (BaseCompiler.userFunctionIsGeneric(engine, h, literal))
+      return undefined;
+    const params = literal.ops.slice(1);
+    if (params.length !== args.length) return undefined;
+    const body = literal.ops[0];
+    const statement =
+      isFunction(body, 'Block') && body.nops === 1 ? body.op1 : body;
+    if (isFunction(statement, 'Block') || statement.isPure !== true)
+      return undefined;
+    if (registry.compiling.has(BaseCompiler.userFunctionName(h)))
+      return undefined;
+    const inlining = (registry.inlining ??= new Set<string>());
+    if (inlining.has(h)) return undefined;
+    const mentionsHead = (x: Expression): boolean =>
+      isFunction(x) &&
+      (x.operator === h || x.ops.some((op) => mentionsHead(op)));
+    if (mentionsHead(statement)) return undefined;
+    if (
+      !args.every(
+        (a) =>
+          a.isPure === true &&
+          (BaseCompiler.provablyScalarArg(a) || isFunction(a, 'Tuple'))
+      )
+    )
+      return undefined;
+    if (collectBinderNames(statement).size > 0) return undefined;
+    // A declaration the body contradicts — a scalar or boolean promise over
+    // a collection-constructing body — fails closed at the DEFINITION
+    // (`isContradictedScalarFunctionBody`, the wave-3/wave-6 rulings) and in
+    // every scalar position. Inlining would route around that decline with
+    // the body's real shape; the same contradiction, read off the call.
+    if (BaseCompiler.isContradictedScalarDeclaration(engine.function(h, args)))
+      return undefined;
+    const substitution: Record<string, Expression> = {};
+    for (const [i, p] of params.entries()) {
+      const name = isSymbol(p)
+        ? p.symbol
+        : isFunction(p, 'Typed') && isSymbol(p.op1)
+          ? p.op1.symbol
+          : undefined;
+      if (name === undefined) return undefined;
+      substitution[name] = args[i];
+    }
+    const inlined = BaseCompiler.foldLiteralPointAccess(
+      statement.subs(substitution)
+    );
+    if (!inlined.isValid) return undefined;
+    // The generated code bakes this definition, as an emitted one would.
+    target.symbolDeps?.add(h);
+    inlining.add(h);
+    try {
+      return BaseCompiler.compile(inlined, target);
+    } finally {
+      inlining.delete(h);
+    }
+  }
+
+  /**
+   * `expr` with every coordinate accessor of a LITERAL point folded to the
+   * coordinate — `PointX((x, y))` is `x` — at every depth. Nothing else is
+   * rebuilt: a node with no fold beneath it is returned as is, so bound
+   * structure elsewhere in the expression is never re-canonicalized.
+   *
+   * After an inlining substitutes a literal point for a point parameter, the
+   * body's `P.x`/`P.y` read a component of a tuple the compiler can see
+   * into; folding them here is what lets a target with no `PointX` lowering
+   * at all (interval arithmetic) compile the inlined body.
+   */
+  private static foldLiteralPointAccess(expr: Expression): Expression {
+    if (!isFunction(expr)) return expr;
+    const ops = expr.ops.map((op) => BaseCompiler.foldLiteralPointAccess(op));
+    const position = BaseCompiler.POINT_ACCESSOR_POSITION[expr.operator];
+    if (position !== undefined && ops.length === 1) {
+      const point = ops[0];
+      if (isFunction(point, 'Tuple') && point.nops >= position)
+        return point.ops[position - 1];
+    }
+    if (ops.every((op, i) => op === expr.ops[i])) return expr;
+    return expr.engine.function(expr.operator, ops);
+  }
+
+  /** The 1-based coordinate each point accessor reads. */
+  private static readonly POINT_ACCESSOR_POSITION: Readonly<
+    Record<string, number>
+  > = { __proto__: null as never, PointX: 1, PointY: 2, PointZ: 3 };
+
   static ensureUserFunctionEmitted(
     engine: ComputeEngine,
     h: string,
