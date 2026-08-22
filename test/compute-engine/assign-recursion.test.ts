@@ -46,7 +46,11 @@ describe('Assign + Function recursion knot-tying', () => {
 
   test('a second Assign can reference an already-defined function', () => {
     const ce = new ComputeEngine();
-    ce.box(['Assign', 'double', ['Function', ['Multiply', 2, 'x'], 'x']]).evaluate();
+    ce.box([
+      'Assign',
+      'double',
+      ['Function', ['Multiply', 2, 'x'], 'x'],
+    ]).evaluate();
     ce.box([
       'Assign',
       'quad',
@@ -69,8 +73,13 @@ describe('Assign + Function recursion knot-tying', () => {
   //     operands the driver had already evaluated — a ×2-per-level re-walk.
   //     They now trust their pre-evaluated operands (only `lazy` operators'
   //     handlers own operand evaluation).
-  // Unwinding is now linear: depth 40 ≈ 30 ms (was: timeout at depth 8).
-  test('literal-depth recursion over a symbolic argument unwinds in linear time', () => {
+  // Unwinding was then linear: depth 40 ≈ 30 ms (was: timeout at depth 8).
+  //
+  // Since 2026-08-22 a recursive definition is NOT unrolled over an argument
+  // containing a free symbol at all (`SymbolicRecursion`, `function-utils.ts`):
+  // the application stays as written, instantly. (The two fixes above still
+  // govern the numeric route, which `quad(3)` above exercises.)
+  test('literal-depth recursion over a symbolic argument stays as written', () => {
     const ce = new ComputeEngine();
     ce.box([
       'Assign',
@@ -87,7 +96,9 @@ describe('Assign + Function recursion knot-tying', () => {
         'z',
       ],
     ]).evaluate();
+    const t0 = performance.now();
     const r = ce.box(['Q', 40, 'z']).evaluate();
-    expect(r.has('Q')).toBe(false); // fully unrolled, recursion-free closed form
+    expect(r.json).toEqual(['Q', 40, 'z']);
+    expect(performance.now() - t0).toBeLessThan(2000);
   });
 });

@@ -2242,6 +2242,25 @@ function isCancellation(e: unknown): boolean {
   return e instanceof Error && e.name === 'CancellationError';
 }
 
+/**
+ * Must `e` propagate past the `canonical`-handler catches below? A
+ * cancellation must (see `isCancellation`), and so must the control-flow
+ * signal a recursive user function raises when it is re-entered with a
+ * symbolic argument: it is caught by the outermost application of that
+ * function, which then declines (`SymbolicRecursion`, `function-utils.ts`).
+ * Swallowed here, the application would not decline and a spurious
+ * canonicalization error would be logged instead. Not an `Error`, and
+ * identified by `name` for the same bundle-boundary reason as a cancellation.
+ */
+function mustPropagate(e: unknown): boolean {
+  return (
+    isCancellation(e) ||
+    (typeof e === 'object' &&
+      e !== null &&
+      (e as { name?: unknown }).name === 'SymbolicRecursion')
+  );
+}
+
 function canonicalErrorDetail(e: unknown): unknown {
   if (!(e instanceof Error)) return e;
   if (e.name === 'CancellationError') {
@@ -2293,7 +2312,7 @@ function applyOperatorDefinition(
         result = opDef.canonical(xs, { engine: ce, scope });
         if (result) return withSourceOffsets(result, metadata);
       } catch (e) {
-        if (isCancellation(e)) throw e;
+        if (mustPropagate(e)) throw e;
         // Multi-arg form: a non-Error thrown value keeps its structure in the
         // console (and a Symbol or null-prototype object, whose implicit
         // string conversion throws, cannot break the recovery path).
@@ -2434,7 +2453,7 @@ function applyOperatorDefinition(
         return withSourceOffsets(result, metadata);
       }
     } catch (e) {
-      if (isCancellation(e)) throw e;
+      if (mustPropagate(e)) throw e;
       // Multi-arg form — see the lazy-path catch above.
       console.error(
         `ComputeEngine: error canonicalizing \`${name}\`:`,

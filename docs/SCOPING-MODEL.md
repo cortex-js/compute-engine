@@ -22,8 +22,9 @@ binding skipped: a call frame's parameter activation of a binding OTHER than
 the occurrence's own. A same-named parameter of the function being evaluated
 is not the symbol an outer occurrence denotes, so an expression boxed outside
 a call frame evaluates to the same value inside it, however many times a
-handler re-evaluates it. Whether ordinary shadowing declarations should also
-stop re-pointing earlier-bound occurrences is an open ruling (`ROADMAP.md`).
+handler re-evaluates it. Ordinary shadowing declarations deliberately keep
+re-pointing earlier-bound occurrences (ruled 2026-08-22): the re-pushed-scope
+reading and the compile fallback runner rely on it.
 
 ## Binders
 

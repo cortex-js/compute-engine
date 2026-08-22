@@ -5249,8 +5249,19 @@ function applyFunctionLiteral(
 
   // The value is a function literal. Apply the arguments to it, threading
   // the caller's options — `numericApproximation` is honored inside the
-  // function's scope frame (see makeLambda), preserving lexical scoping.
-  return apply(value, ops, options);
+  // function's scope frame (see makeLambda), preserving lexical scoping. A
+  // declined application (a recursive definition re-entered with a symbolic
+  // argument, which is not unrolled) keeps its name over the EVALUATED
+  // operands — `R(3, 0, y)` for `R(3, Sin(0), y)`, the same inert form an
+  // operator-definition-backed literal leaves — rather than becoming an
+  // `Apply` of the literal.
+  return apply(
+    value,
+    ops,
+    options,
+    'bubble',
+    expr.engine.function(expr.operator, ops)
+  );
 }
 
 /**

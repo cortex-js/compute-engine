@@ -1359,14 +1359,24 @@ function selectAndApply(
             ce.function(id, [...ops], { form: 'raw' }),
           ]);
     }
+    // A declined application (a recursive definition re-entered with a
+    // symbolic argument is not unrolled — `SymbolicRecursion`,
+    // `function-utils.ts`) keeps its name over its operands, held ones as
+    // written, rather than becoming an `Apply` of the clause's literal.
     if (armAdmission(ops, clauses[0].signature) !== 'refute')
-      return apply(clauses[0].literal, ops, {
-        numericApproximation: options.numericApproximation,
-        ...(hold ? { holdArguments: true } : {}),
-        ...(hold && attrs.bind !== undefined && attrs.bind.length > 0
-          ? { bindParameters: attrs.bind }
-          : {}),
-      });
+      return apply(
+        clauses[0].literal,
+        ops,
+        {
+          numericApproximation: options.numericApproximation,
+          ...(hold ? { holdArguments: true } : {}),
+          ...(hold && attrs.bind !== undefined && attrs.bind.length > 0
+            ? { bindParameters: attrs.bind }
+            : {}),
+        },
+        'bubble',
+        ce.function(id, [...ops], hold ? { form: 'raw' } : {})
+      );
     return ce._fn('Error', [
       ce.string('no-matching-clause'),
       ce.function(id, [...ops], { form: 'raw' }),
@@ -1381,9 +1391,13 @@ function selectAndApply(
   if (verdict.kind === 'blocked') return undefined; // inert
 
   if (verdict.kind === 'selected')
-    return apply(clauses[verdict.index].literal, ops, {
-      numericApproximation: options.numericApproximation,
-    });
+    return apply(
+      clauses[verdict.index].literal,
+      ops,
+      { numericApproximation: options.numericApproximation },
+      'bubble',
+      ce.function(id, [...ops])
+    );
 
   // Every clause refuted: the function is not defined at this point (D7).
   //

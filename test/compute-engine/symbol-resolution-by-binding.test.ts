@@ -36,8 +36,10 @@ describe('A parameter value mentioning the parameter’s own name', () => {
   test('a nested user-function call receives the argument once', () => {
     // 2 · 3x + 1. By-name resolution answered `18x + 1`.
     expect(
-      evaluate([String.raw`g(x) := 2x`, String.raw`f(x) := g(x)+1`], 'f(3x)')
-        .toString()
+      evaluate(
+        [String.raw`g(x) := 2x`, String.raw`f(x) := g(x)+1`],
+        'f(3x)'
+      ).toString()
     ).toBe('6x + 1');
     // cos(3 · 2x). By-name resolution answered `cos(12x)`.
     expect(
@@ -56,11 +58,13 @@ describe('A parameter value mentioning the parameter’s own name', () => {
   });
 
   test('a handler that re-evaluates its operand still answers the argument', () => {
+    expect(evaluate([String.raw`f(x) := \cos(x)`], 'f(3x)').toString()).toBe(
+      'cos(3x)'
+    );
     expect(
-      evaluate([String.raw`f(x) := \cos(x)`], 'f(3x)').toString()
-    ).toBe('cos(3x)');
-    expect(
-      evaluate([String.raw`f(x) := \cos(x)`], 'f(3x)').N().toString()
+      evaluate([String.raw`f(x) := \cos(x)`], 'f(3x)')
+        .N()
+        .toString()
     ).toBe('cos(3x)');
   });
 
@@ -69,9 +73,9 @@ describe('A parameter value mentioning the parameter’s own name', () => {
     expect(
       evaluate([String.raw`f(x) := \cos(x)`], 'f(\\sin(x))').toString()
     ).toBe('cos(sin(x))');
-    expect(
-      evaluate([String.raw`f(x) := \cos(x)`], 'f(f(x))').toString()
-    ).toBe('cos(cos(x))');
+    expect(evaluate([String.raw`f(x) := \cos(x)`], 'f(f(x))').toString()).toBe(
+      'cos(cos(x))'
+    );
     expect(
       evaluate([String.raw`f(x) := \cos(x)+1`], 'f(f(f(2x)))').toString()
     ).toBe('cos(cos(cos(2x) + 1) + 1) + 1');
@@ -94,9 +98,13 @@ describe('A parameter value mentioning the parameter’s own name', () => {
  * Tycho's twice-recursive document function: `R(i,x,y) = R(i-1,x,y) +
  * 0.5·S(x,y,R(i-1,x,y))` with a literal base case, declared then assigned a
  * clause-dispatch literal, the parameter renamed away from the imaginary
- * unit. With `x`, `y` FREE, depth 3 overflowed the stack: the value bound
- * to `G`'s parameter `x` contained `cos(3x)`, whose re-evaluation inside
- * `G`'s frame substituted the parameter into itself without end.
+ * unit. With `x`, `y` FREE, depth 3 used to overflow the stack (the capture
+ * above); with the capture fixed, the closed form was correct but grew ~10×
+ * per level (depth 4: 12 000 characters; depth 5 never finished), so a
+ * recursive definition is now NOT UNROLLED symbolically (ruled 2026-08-22):
+ * a re-entrant application with an argument containing a free symbol declines
+ * the outermost application, which stays as written (`SymbolicRecursion`,
+ * `function-utils.ts`).
  */
 function recursiveSetup(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -134,19 +142,173 @@ function recursiveSetup(): ComputeEngine {
   return ce;
 }
 
-describe('Symbolic evaluation of a twice-recursive user function', () => {
-  test('R(3,x,y) with free x, y evaluates to a closed form', () => {
+describe('Symbolic evaluation of a recursive user function is not unrolled', () => {
+  test('R(3,x,y) and R(8,x,y) with free x, y stay as written, instantly', () => {
     const ce = recursiveSetup();
-    const closed = ce.parse('R(3,x,y)').evaluate();
-    expect(closed.isValid).toBe(true);
-    expect(closed.operator).toBe('Add');
-    expect(closed.unknowns.sort()).toEqual(['x', 'y']);
-    // The closed form agrees with the numeric route at a sample point.
+    for (const n of [1, 3, 8]) {
+      const t0 = performance.now();
+      const r = ce.parse(`R(${n},x,y)`).evaluate();
+      expect(r.isValid).toBe(true);
+      expect(r.json).toEqual(['R', n, 'x', 'y']);
+      // Depth 8 would be a ~10⁷-character closed form; the decline is
+      // immediate. Generous bound so a loaded machine cannot fail it.
+      expect(performance.now() - t0).toBeLessThan(2000);
+    }
+    // The base case needs no self-call and still answers.
+    expect(ce.parse('R(0,x,y)').evaluate().json).toEqual(0);
+    // A single symbolic argument is enough to decline.
+    expect(ce.parse('R(3,x,0.7)').evaluate().json).toEqual(['R', 3, 'x', 0.7]);
+  });
+
+  test('the numeric route is untouched and the inert form numericizes later', () => {
+    const ce = recursiveSetup();
     const direct = ce.parse('R(3,0.3,0.7)').N().re;
-    expect(closed.subs({ x: 0.3, y: 0.7 }).N().re).toBeCloseTo(direct, 9);
-    // Depth 2 is the 42-node form that always evaluated; depth 3 nests it.
-    expect(ce.parse('R(2,x,y)').evaluate().toString()).toBe(
-      '0.5 * max(|sin(3) * cos(3x) + sin(3y) * cos(3) + sin(3x) * cos(3y)|, max(4.5, |1.5 * x|, |1.5 * y|) - 3) + 1.5'
-    );
+    expect(direct).toBeCloseTo(2.844001147222, 9);
+    const inert = ce.parse('R(3,x,y)').evaluate();
+    ce.assign('x', 0.3);
+    ce.assign('y', 0.7);
+    expect(inert.N().re).toBeCloseTo(direct, 9);
+  });
+
+  test('a conditional that cannot decide stops the recursion by itself', () => {
+    // No re-entry happens: `If` keeps its undecided branch unevaluated, so
+    // the body shows once with the inner self-call inert — the same answer
+    // as before the ruling.
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'fact',
+      [
+        'Function',
+        [
+          'If',
+          ['LessEqual', 'n', 1],
+          1,
+          ['Multiply', 'n', ['fact', ['Subtract', 'n', 1]]],
+        ],
+        'n',
+      ],
+    ]).evaluate();
+    expect(ce.box(['fact', 5]).evaluate().json).toEqual(120);
+    expect(ce.box(['fact', 'k']).evaluate().json).toEqual([
+      'If',
+      ['LessEqual', 'k', 1],
+      1,
+      ['Multiply', 'k', ['fact', ['Add', 'k', -1]]],
+    ]);
+  });
+
+  test('the declined form keeps the evaluated operands', () => {
+    const ce = recursiveSetup();
+    expect(ce.box(['R', 3, ['Sin', 0], 'y']).evaluate().json).toEqual([
+      'R',
+      3,
+      0,
+      'y',
+    ]);
+  });
+
+  test('ground arguments of every kind still recurse; a free symbol anywhere declines', () => {
+    const ce = new ComputeEngine();
+    // A recursive higher-order function: the callback literal is a closed
+    // value (its own parameter is bound inside it), so the numeric call
+    // recurses, while a free `x` in the accumulator declines — through the
+    // guard's structural key, since a literal with a function-typed
+    // parameter is rebuilt at every application.
+    ce.box([
+      'Assign',
+      'iter',
+      [
+        'Function',
+        [
+          'If',
+          ['LessEqual', 'n', 0],
+          'v',
+          ['iter', ['Subtract', 'n', 1], ['Apply', 'f', 'v'], 'f'],
+        ],
+        'n',
+        'v',
+        'f',
+      ],
+    ]).evaluate();
+    const inc = ['Function', ['Add', 'z', 1], 'z'];
+    expect(ce.box(['iter', 3, 1, inc]).evaluate().json).toEqual(4);
+    const declined = ce.box(['iter', 3, 'x', inc]).evaluate();
+    expect(declined.operator).toBe('iter');
+    expect(declined.ops!.slice(0, 2).map((op) => op.json)).toEqual([3, 'x']);
+    expect(declined.ops![2].operator).toBe('Function');
+    // A dictionary argument is walked like a collection.
+    ce.box([
+      'Assign',
+      'dd',
+      [
+        'Function',
+        ['If', ['LessEqual', 'n', 0], 'd', ['dd', ['Subtract', 'n', 1], 'd']],
+        'n',
+        'd',
+      ],
+    ]).evaluate();
+    const dict = (v: unknown) => ['Dictionary', ['KeyValuePair', "'a'", v]];
+    expect(
+      ce
+        .box(['dd', 3, dict(1)])
+        .evaluate()
+        .toString()
+    ).toBe('{"a" -> 1}');
+    expect(ce.box(['dd', 3, dict('x')]).evaluate().operator).toBe('dd');
+  });
+
+  test('a constant without a stored value is a ground argument', () => {
+    // `True` stores no value yet is a constant: a recursion driven by a
+    // boolean flag recurses; the same call with a free flag declines.
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'flip',
+      [
+        'Function',
+        [
+          'If',
+          ['Less', 'k', 0],
+          ['flip', ['Negate', 'k'], 'flag'],
+          ['If', 'flag', 'k', ['Negate', 'k']],
+        ],
+        'k',
+        'flag',
+      ],
+    ]).evaluate();
+    expect(ce.box(['flip', -3, 'True']).evaluate().json).toEqual(3);
+    expect(ce.box(['flip', -3, 'b']).evaluate().operator).toBe('flip');
+  });
+
+  test('an operator-definition-backed recursive function keeps its name on decline', () => {
+    const ce = new ComputeEngine();
+    ce.parse('p(n, x) := x + p(n - 1, x)').evaluate();
+    expect(ce.parse('p(3, x)').evaluate().json).toEqual(['p', 3, 'x']);
+  });
+
+  test('mutual recursion through a deciding dispatch declines the same way', () => {
+    // `Which` DECIDES on the literal depth, so each level re-enters; the
+    // outermost application of each literal is the one that declines.
+    const ce = new ComputeEngine();
+    const dispatch = (callee: string): ReturnType<typeof ce.box> =>
+      ce.box([
+        'Function',
+        [
+          'Which',
+          ['Equal', 'n', 0],
+          0,
+          'True',
+          ['Add', 'x', [callee, ['Subtract', 'n', 1], 'x']],
+        ],
+        'n',
+        'x',
+      ]);
+    ce.declare('g', '(number, number) -> number');
+    ce.declare('h', '(number, number) -> number');
+    ce.assign('g', dispatch('h'));
+    ce.assign('h', dispatch('g'));
+    expect(ce.box(['g', 4, 2]).evaluate().json).toEqual(8);
+    expect(ce.box(['g', 4, 'x']).evaluate().json).toEqual(['g', 4, 'x']);
   });
 });

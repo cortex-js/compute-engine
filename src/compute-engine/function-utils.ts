@@ -10,6 +10,7 @@ import {
   rebindToBindings,
   rewriteWithBinders,
   sameBindingDef,
+  boundVariableNames,
 } from './boxed-expression/binders.js';
 import type {
   BoxedDefinition,
@@ -24,6 +25,7 @@ import type {
 import {
   isSymbol,
   isFunction,
+  isDictionary,
   isString,
   isNumber,
   sym,
@@ -1675,12 +1677,19 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
  * Apply arguments to an expression which is either:
  * - a `["Function"]` expression
  * - the symbol for a function, e.g. `Sin`.
+ *
+ * When the literal DECLINES the application — it is not unrolled because it
+ * re-entered itself with a symbolic argument (`SymbolicRecursion`), or its
+ * body produced an invalid result — the answer is `declined` when the caller
+ * supplies one (the application as the caller wrote it, `R(3, x, y)`, for a
+ * symbol bound to a literal), and otherwise an inert `Apply` of the literal.
  */
 export function apply(
   fn: Expression,
   args: ReadonlyArray<Expression>,
   options?: ApplyOptions,
-  errorPolicy: ErrorArgPolicy = 'bubble'
+  errorPolicy: ErrorArgPolicy = 'bubble',
+  declined?: Expression
 ): Expression {
   // Rung 2: applying something that IS an error bubbles it (`err(x)`), as does
   // applying a function literal to an error argument.
@@ -1702,7 +1711,7 @@ export function apply(
 
   const result = makeLambda(fn, errorPolicy)?.(args, options);
   if (result) return result;
-  return fn.engine.function('Apply', [fn, ...args]);
+  return declined ?? fn.engine.function('Apply', [fn, ...args]);
 }
 
 /**
@@ -2185,6 +2194,132 @@ function bindingKeyedSubs(
  * runaway user-function recursion (`f(x) := … f(x-1) …` with no reachable base
  * case) throws a `CancellationError` (`cause: 'recursion-depth-exceeded'`)
  * instead of overflowing the native JS call stack with a `RangeError`. */
+/**
+ * Thrown by an application of a user-function literal that is re-entered —
+ * an application of the same literal is already on the evaluation stack —
+ * with an argument that contains a free symbol. Caught by the outermost
+ * application of that literal (`guardSymbolicRecursion`), which then
+ * declines, so the whole application stays inert.
+ *
+ * A recursive definition is not unrolled symbolically: `R(i,x,y) :=
+ * R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` with `x`, `y` free answers `R(3, x, y)`,
+ * not a closed form. The closed form's size is inherent in such a definition
+ * (each level embeds the previous one as many times as the body mentions it),
+ * and entering the body once while leaving the inner self-calls inert would
+ * answer neither a closed form nor a clean decline. Ground arguments —
+ * numbers, strings, booleans, constants with a value, collections and
+ * dictionaries of those, closed function literals — never throw here: a
+ * recursive scanner over a literal list, or a string-building recursion,
+ * recurses as before, and the pure-application memo makes the number-literal
+ * route linear. The check is dynamic rather than a scan of the body for its
+ * own name, so mutual recursion (`f` → `g` → `f`) is caught the same way.
+ * The ruling and its measurements: `ROADMAP.md`, "Symbolic evaluation of a
+ * recursive user function: not unrolled".
+ *
+ * Two boundaries. A `hold`/`bind` operator whose bound-variable reduction
+ * substitutes into the body and applies the result
+ * (`invokeWithBoundVariables`) is applied through a literal of a different
+ * structure at each level, which the per-literal count never sees twice, so
+ * such a recursion is not declined here — the recursion limit
+ * (`ce.recursionLimit`) still ends it. And a `catch` between the re-entry
+ * and the outermost application that does not let the signal through
+ * (`rules.ts` treats any exception as "this rule failed") ends the recursion
+ * at that point with a locally degraded answer rather than the clean
+ * decline; the `canonical`-handler catches in `box.ts` let it through.
+ *
+ * Not an `Error`: it is control flow, and it must not be mistaken for a
+ * failed evaluation by a handler that reports exceptions. Recognized by
+ * `name`, never `instanceof`, across plugin-bundle boundaries.
+ */
+class SymbolicRecursion {
+  readonly name = 'SymbolicRecursion';
+  /** The structural hash of the literal whose application is abandoned. */
+  constructor(readonly literal: number) {}
+}
+
+/**
+ * Applications of each literal currently on the evaluation stack, keyed by
+ * the literal's structural hash rather than its identity: a literal with a
+ * function-typed parameter is rebuilt on every application (its inferred
+ * type changes), so the object the outer and the inner application see is
+ * not the same one, while its structure is. Entries are removed when the
+ * outermost application exits, so the map never grows.
+ */
+const activeApplications = new Map<number, number>();
+
+/**
+ * Does an evaluated argument contain a free symbol — a symbol occurrence,
+ * not bound by a binder inside the argument, whose binding has no value? That
+ * is the argument a recursive definition is not unrolled over.
+ *
+ * Deliberately not `expr.unknowns`: that resolves each name in the current
+ * evaluation context, and inside the body of `R(i,x,y)` the caller's `x`
+ * looks bound — to the frame's own parameter `x` — so every argument would
+ * count as ground. A symbol node's `value` instead follows the binding the
+ * node denotes (a foreign parameter activation is skipped;
+ * `valueDefinitionInContext`, `binders.ts`); a constant without a stored
+ * value (`True`) and the absence marker `Nothing` are values, not unknowns.
+ * Names bound inside the argument
+ * (a closed literal's parameters, a `Sum` index) are shadowed as the walk
+ * descends, so a closed callback literal is ground; dictionary values are
+ * walked like operands, since a dictionary is not a function node.
+ */
+function containsFreeSymbol(
+  expr: Expression,
+  shadowed?: ReadonlySet<string>
+): boolean {
+  if (isSymbol(expr)) {
+    if (shadowed?.has(expr.symbol)) return false;
+    // A constant (`True`, `False`, `π`) is a value whether or not it stores
+    // one, and `Nothing` is the absence marker, not an unknown.
+    if (expr.valueDefinition?.isConstant || expr.symbol === 'Nothing')
+      return false;
+    return expr.value === undefined;
+  }
+  if (isDictionary(expr))
+    return expr.values.some((v) => containsFreeSymbol(v, shadowed));
+  if (!isFunction(expr)) return false;
+  const binds = boundVariableNames(expr);
+  const inner =
+    binds.length > 0
+      ? new Set(shadowed ? [...shadowed, ...binds] : binds)
+      : shadowed;
+  return expr.ops.some((op) => containsFreeSymbol(op, inner));
+}
+
+/**
+ * Count the applications of `literal` on the stack around `fn`, and turn a
+ * `SymbolicRecursion` raised for it inside the OUTERMOST application into a
+ * decline (`undefined` — the application stays inert). See
+ * `SymbolicRecursion`.
+ */
+function guardSymbolicRecursion(
+  literal: Expression,
+  fn: (
+    params: ReadonlyArray<Expression>,
+    options?: ApplyOptions
+  ) => Expression | undefined
+): (
+  params: ReadonlyArray<Expression>,
+  options?: ApplyOptions
+) => Expression | undefined {
+  const key = literal.hash;
+  return (params, options) => {
+    const depth = activeApplications.get(key) ?? 0;
+    activeApplications.set(key, depth + 1);
+    try {
+      return fn(params, options);
+    } catch (e) {
+      if (e instanceof SymbolicRecursion && e.literal === key && depth === 0)
+        return undefined;
+      throw e;
+    } finally {
+      if (depth === 0) activeApplications.delete(key);
+      else activeApplications.set(key, depth);
+    }
+  };
+}
+
 function wrapRecursion(
   ce: ComputeEngine,
   fn: (
@@ -2830,6 +2965,16 @@ function makeLambda(
       }
     }
 
+    // A recursive definition is not unrolled symbolically: a re-entrant
+    // application with an argument that contains a free symbol abandons the
+    // outermost application of this literal, which stays inert (see
+    // `SymbolicRecursion`). Ground arguments never abandon anything.
+    if (
+      (activeApplications.get(fnExpr.hash) ?? 0) > 1 &&
+      evaluatedArgs.some((a) => containsFreeSymbol(a))
+    )
+      throw new SymbolicRecursion(fnExpr.hash);
+
     //
     // 5/ Create a fresh scope per call with parent = the defining scope.
     //    bodyFn.localScope.parent is the scope where the Function was defined.
@@ -3001,7 +3146,7 @@ function makeLambda(
     return result.isValid ? result : undefined;
   };
 
-  return wrapRecursion(ce, invoke);
+  return wrapRecursion(ce, guardSymbolicRecursion(fnExpr, invoke));
 }
 
 /**

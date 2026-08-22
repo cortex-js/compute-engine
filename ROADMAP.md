@@ -138,57 +138,50 @@ caller handler that EMITS" — unknowable at harvest time, so it would have to
 be a declaration on the handler (or a `pure` + "lazy operands as the
 built-in" contract). Demand-gated: the only known consumer route is flat.
 
-### Symbolic expansion of a recursive user function: bound it, or let it run? (OPEN, design — ruling pending 2026-08-21)
+### Symbolic evaluation of a recursive user function: not unrolled (RESOLVED 2026-08-22 — ruled "depth 0")
 
-The stack overflow this entry used to record is FIXED (2026-08-21):
-`R(i,x,y) := R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` with a literal base case and
-`x`, `y` FREE now answers a closed form at every depth. The cause was not the
-recursion but symbol VALUE RESOLUTION: `BoxedSymbol.evaluate()` and `_value`
-read a symbol's value by NAME from the innermost frame, so an expression
-bound OUTSIDE a call frame and re-evaluated INSIDE it (the `Cos` handler
-re-evaluates its already-evaluated operand) read the caller's `x` as the
-frame's parameter — `G(3x)` saw `9x`, then `27x` — and a parameter value
-containing `cos(…x…)` re-entered without end. The same capture answered
-WRONG results for ordinary definitions: `f(x) := Σ_{k=1}^{3} x·k` gave
-`f(2x) = 24x` (now `12x`), `g(x) := 2x; f(x) := g(x)+1` gave `f(3x) = 18x+1`
-(now `6x+1`), and `f(x) := cos x` overflowed on `f(f(x))`. The value walk
-now skips a call frame's parameter activation of a binding other than the
-occurrence's own (`valueDefinitionInContext`, `boxed-expression/binders.ts`);
-every other same-named binding — a shield, an ordinary declaration, a
-re-pushed saved scope — still intercepts by name, as before. Regression:
+Two defects under one witness, `R(i,x,y) := R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))`
+with a literal base case and `x`, `y` FREE, which overflowed the stack at depth
+3 (found 2026-08-21 under Tycho item 217).
+
+**Symbol value resolution captured call-frame parameters (fixed 2026-08-21).**
+`BoxedSymbol.evaluate()` and `_value` read a symbol's value by NAME from the
+innermost frame, so an expression bound OUTSIDE a call frame and re-evaluated
+INSIDE it (the `Cos` handler re-evaluates its already-evaluated operand) read
+the caller's `x` as the frame's parameter — `G(3x)` saw `9x`, then `27x` — and
+a parameter value containing `cos(…x…)` re-entered without end. The same
+capture answered WRONG results for ordinary definitions: `f(x) :=
+Σ_{k=1}^{3} x·k` gave `f(2x) = 24x` (now `12x`), `g(x) := 2x; f(x) := g(x)+1`
+gave `f(3x) = 18x+1` (now `6x+1`), and `f(x) := cos x` overflowed on `f(f(x))`.
+The value walk now skips a call frame's parameter activation of a binding
+other than the occurrence's own (`valueDefinitionInContext`,
+`boxed-expression/binders.ts`); every other same-named binding — a shield, an
+ordinary declaration, a re-pushed saved scope — still intercepts by name.
+**Ruled 2026-08-22: that by-name interception for ordinary declarations is
+KEPT** (`const e = ce.parse('x^2'); ce.pushScope(); ce.declare('x','number');
+ce.assign('x', 7); e.evaluate()` answers `49`): three tests pin it as a
+feature ("a memoized view re-resolves inside a re-pushed populated scope",
+`lazy-collection-regimes.test.ts`) and the interpreter fallback runner of a
+declined compilation binds its arguments by that pattern. `.subs()` is not a
+substitute for that pattern — it is not binder-aware.
+
+**A recursive definition is not unrolled symbolically (ruled 2026-08-22).**
+With the capture fixed the closed form was correct but inherent in size —
+`S` mentions `l` nine times, so it grew ~10× per level (depth 4: 12 416
+characters in 14 s; depth 5 did not finish) — and entering the body once while
+leaving the inner self-calls inert would answer neither a closed form nor a
+clean decline. So a re-entrant application of a literal with an argument that
+contains a free symbol abandons the OUTERMOST application of that literal,
+which stays as written: `R(3,x,y)` and `R(8,x,y)` answer `R(3, x, y)` and
+`R(8, x, y)` instantly, numericize once `x`, `y` have values, and ground
+arguments — numbers (the memoized route), strings, literal lists a recursive
+scanner walks, constants such as `π` — recurse exactly as before. The
+check is dynamic (`SymbolicRecursion`, `guardSymbolicRecursion`,
+`function-utils.ts`), so mutual recursion is caught the same way; a
+conditional that cannot decide (`fact(k)` with `k` free) never re-enters and
+keeps showing the body once, as before. A symbol-headed application keeps
+its name on decline (`apply(…, declined)`, `applyFunctionLiteral`). Regression:
 `test/compute-engine/symbol-resolution-by-binding.test.ts`.
-
-A ruling this exposed, left as it was: `docs/SCOPING-MODEL.md` says an
-occurrence denotes a binding and calls by-name resolution a compatibility
-hatch, yet three tests pin the hatch as a feature ("a memoized view
-re-resolves inside a re-pushed populated scope",
-`lazy-collection-regimes.test.ts`): `const e = ce.parse('x^2');
-ce.pushScope(); ce.declare('x','number'); ce.assign('x', 7); e.evaluate()`
-answers `49`, reading a declaration made after `e` was bound. Going to the
-full binding model would answer `x^2` there, which also changes the
-interpreter fallback runner of a declined compilation
-(`buildInterpreterFallback`, `compilation/base-compiler.ts` — it binds its
-`run({x: 2})` arguments by exactly this pattern, and `.subs()` is not a
-substitute: it is not binder-aware) and the memo's ambient-scope axis.
-Tycho's own `pushScope` sites all box inside the scope they push (audited
-2026-08-21), so neither reading affects them. Decide: keep by-name
-interception for ordinary declarations (current), or adopt the binding model
-throughout and rewrite the three tests and the runner.
-
-What remains open is cost, not correctness. The closed form's SIZE is
-inherent — `R(i-1,x,y)` is bound to `S`'s `l`, which the body mentions nine
-times, so the tree grows ~10× per level: depth 3 is 1 232 characters in
-0.3 s, depth 4 is 12 416 in 14 s, depth 5 did not finish in four minutes,
-and depth 8 would be ~10⁷ characters. The pure-application memo (Tycho item
-217) keys on number-literal arguments only, so with free `x`, `y` every
-level re-evaluates both self-calls. Ruling to take: (a) leave symbolic
-expansion unbounded — a user who asks for `R(8,x,y)` gets the answer or
-waits; (b) decline past a budget to an inert application, the way
-`inlineUserFunctions` (`boxed-expression/utils.ts`) already caps
-beta-reduction; or (c) extend the application memo to symbolic arguments so
-the self-calls share, which makes the evaluation linear in the OUTPUT size
-but leaves that size exponential. Repro: the `recursiveSetup()` of the
-regression test above, then `ce.parse('R(5,x,y)').evaluate()`.
 
 ### The `javascript`/`python` targets declined the multi-collection form of `Map` over symbolic sources (RESOLVED 2026-08-21 — Tycho item 218)
 
@@ -223,6 +216,37 @@ targets have no `Map` lowering in either form; no consumer has asked. A
 later round could lift the real-scalar gate by stamping the zip callback's
 parameters from the sources at compile time, the way the unary form's
 parameter is stamped at canonicalization.
+
+### A recursive function with a function-typed parameter is rebuilt at every application — exponential time, and a type that overflows the stack (OPEN, evaluation — found 2026-08-22)
+
+`tw(n, v, f) := If(n ≤ 0, v, tw(n-1, f(v), f) + tw(n-1, f(v), f))` applied to
+NUMBER arguments and a closed callback, `tw(10, 1, z ↦ z+1)`, takes 49 s on
+0.118.0 (`tw(8)` 4 s; `tw(14)` throws `RangeError: Maximum call stack size
+exceeded` from `hasFreeVariables`, `common/type/instantiate.ts`), where the
+same shape without the callback parameter is memoized and instant (Tycho item
+217). The stored literal is stable, but the literal the application runs is a
+DIFFERENT object at every level — its inferred type changes with the
+function-typed parameter — so the pure-application memo, keyed on the literal's
+identity, misses every time, and the type grows with the depth until
+instantiation overflows. The symbolic-recursion guard (`SymbolicRecursion`,
+`function-utils.ts`) keys on the literal's structural hash for this reason.
+Probe: the `tw` definition above, `ce.box(['tw', 10, 1, ['Function',
+['Add', 'z', 1], 'z']]).evaluate()`; compare with `it2(n, v) := If(n ≤ 0, v,
+0 + it2(n-1, v+1))`, whose literal is the same object at every level.
+
+### The recursion limit can lose to the JS stack when each level nests deeply (OPEN, evaluation — found 2026-08-22)
+
+`ce.recursionLimit` (default 256, `engine-runtime-state.ts`) counts user-function
+applications, and a runaway numeric recursion normally ends in a clean
+`CancellationError: Recursion limit exceeded` — `f(n) := n f(n-1)` applied to
+`f(2)` does. But when each level pushes many JS frames before the next
+application, the JS stack runs out first and the caller gets a bare
+`RangeError: Maximum call stack size exceeded` instead: `h(n) := \text{T}(n
+\le 1, 1, n h(n-1))` (a body whose `\text{…}` made a `Text(…, Tuple(…))` node
+— the author meant `If`) throws the `RangeError` on `h(2)`. Options: lower the
+default limit, or make the guard stack-aware (catch the `RangeError` at the
+outermost application and rethrow it as the cancellation). Repro: the two
+parses above, then `ce.box(['h', 2]).evaluate()`.
 
 ### Built-in collections as `Iterable`/`Indexable` protocol conformers — audit and sizing (OPEN, design — audited 2026-08-21; ruling P8 / §7 item 6(h) of `docs/TYPE_SYSTEM_ROADMAP.md`)
 
