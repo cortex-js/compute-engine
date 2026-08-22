@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { expectTypeBetween } from '../utils';
 
 /**
  * Phase B of the tensor-unification design (§D6 of
@@ -23,7 +24,13 @@ describe('D6.1 — rank/shape-aware broadcast lift', () => {
 
   test('fixed-shape source: Sqrt(M) types with the operand dims', () => {
     const s = ce.box(['Sqrt', M]);
-    expect(s.type.toString()).toBe('matrix<2x2>');
+    // At least `matrix<2x2>`: the operand dims are what this guards; the cell
+    // tier may refine (`matrix<finite_number^(2x2)>` is a sound answer), but
+    // not to rational cells — `√2`, `√3`, `√5`, `√7` are irrational.
+    expectTypeBetween(s, {
+      atMost: 'matrix<2x2>',
+      above: 'matrix<finite_rational^(2x2)>',
+    });
     expect(s.type.matches('matrix')).toBe(true);
   });
 
@@ -56,7 +63,13 @@ describe('D6.1 — rank/shape-aware broadcast lift', () => {
 
   test('finite materialized operand: static and evaluated types coincide', () => {
     const expr = ce.box(['Sin', ['List', 0, 1]]);
-    expect(expr.type.toString()).toBe('vector<2>');
+    // At least `vector<2>`: the shape is what this guards; the cell tier may
+    // refine, but not to rational cells (`sin 1` is irrational). The
+    // evaluated-vs-declared check below guards the over-narrow direction too.
+    expectTypeBetween(expr, {
+      atMost: 'vector<2>',
+      above: 'vector<finite_rational^2>',
+    });
     // evaluated ⊆ declared (the broadcast soundness contract)
     expect(expr.evaluate().type.matches(expr.type.type)).toBe(true);
   });

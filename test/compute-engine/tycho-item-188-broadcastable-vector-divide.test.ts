@@ -120,6 +120,9 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     ce.declare('s', 'number');
     const typeOf = (latex: string) =>
       ce.parse(latex, { strict: false }).type.toString();
+    // Exactly this tier: `g` returns `unknown` (admits NaN and ±∞), so
+    // `number` components are the contract, and the result is only POSSIBLY
+    // a vector (`g(t)` may be a collection), never a definite `vector<2>`.
     expect(typeOf('\\frac{H(X(t), Y(t))}{g(t)}')).toBe(
       'broadcastable<vector<2>>'
     );

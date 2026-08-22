@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { expectTypeBetween } from '../utils';
+import type { BoxedType } from '../../src/common/type/boxed-type';
 
 /**
  * A declared `unknown` slot in a function signature is a PLACEHOLDER the
@@ -26,8 +28,16 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
  */
 
 const BODY = 'P \\mapsto \\sqrt{P[1]^2+P[2]^2}';
-const CONCRETE =
-  '(dictionary<any> | indexed_collection<any>) -> broadcastable<number>';
+// The refined PARAMETER list is the contract and is pinned exactly: function
+// parameters are contravariant, so an UNREFINED `(unknown) -> …` signature is
+// a subtype of this one and would pass a bare `.matches(CONCRETE)`. Only the
+// result tier may refine (`broadcastable<finite_number>` still passes).
+const PARAMS = '(dictionary<any> | indexed_collection<any>)';
+const CONCRETE = `${PARAMS} -> broadcastable<number>`;
+function expectRefinedSignature(expr: { readonly type: BoxedType }): void {
+  expect(expr.type.toString().slice(0, PARAMS.length + 4)).toBe(`${PARAMS} -> `);
+  expectTypeBetween(expr, { atMost: CONCRETE });
+}
 
 function freshEngine(): ComputeEngine {
   return new ComputeEngine();
@@ -59,7 +69,7 @@ describe('declared (unknown) -> unknown is refined by the definition', () => {
     const ce = freshEngine();
     ce.declare('g', { signature: '(unknown) -> unknown' });
     ce.assign('g', ce.parse(BODY, { strict: false }));
-    expect(ce.box('g').type.toString()).toEqual(CONCRETE);
+    expectRefinedSignature(ce.box('g'));
     expect(
       ce.parse('g([3,4])', { strict: false }).evaluate().toString()
     ).toEqual('5');
@@ -71,7 +81,7 @@ describe('declared (unknown) -> unknown is refined by the definition', () => {
       type: '(unknown) -> unknown',
       value: ce.parse(BODY, { strict: false }),
     });
-    expect(ce.box('k').type.toString()).toEqual(CONCRETE);
+    expectRefinedSignature(ce.box('k'));
     expect(
       ce.parse('k([3,4])', { strict: false }).evaluate().toString()
     ).toEqual('5');

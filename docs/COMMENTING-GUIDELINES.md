@@ -159,6 +159,40 @@ Prose pages in the cortexjs.io repo should link to a symbol heading they can
 see in the generated `api.md`, and be re-checked after an API rename. `npm run
 build` there reports broken anchors.
 
+## Type assertions in tests
+
+A test that pins a derived type is a comment about what the engine promises,
+and it must say which direction of drift it guards. Three spellings:
+
+- **At least this precise** — the common case:
+  `expectTypeBetween(expr, { atMost: 'real' })` (`test/utils.ts`). A
+  sounder, more refined result still passes; a wider one fails. Prefer the
+  helper to a bare `expect(t.matches('real')).toBe(true)`: the empty type
+  `never` is a subtype of everything, so `.matches()` alone also accepts a
+  derivation that collapsed to `never` or `vector<never^3>`; the helper
+  rejects those and reports the offending type string on failure.
+- **Sound, not over-narrow** — the same helper with both bounds, for a
+  result the engine could over-claim: `above` names a claim that would be
+  unsound, and the type must not match it —
+  `expectTypeBetween(expr, { atMost: 'rational', above: 'finite_integer' })`
+  for a quotient that can be `3/2`; `above: 'vector<finite_rational^2>'`
+  for `Sin` over a literal list.
+- **Exactly this tier** — the exact string,
+  `expect(String(t)).toBe('finite_rational')`, only where the exact tier is
+  the contract, and the comment or test name says why. Two contracts that
+  look like accidental precision but are not: `number` cells for an operand
+  whose type is `unknown` (it admits NaN and ±∞, so any narrower cell tier
+  over-claims), and a function signature's parameter list (parameters are
+  contravariant, so an unrefined `(unknown) -> …` is a *subtype* of the
+  refined signature and passes `.matches()`).
+
+An exact-string pin with no stated direction fails on every sound
+refinement anywhere in the engine while guarding nothing in particular. The
+review question for a new one: which drift would this catch that
+`expectTypeBetween` would not? If the answer is "none", use the helper. (The
+measured cost of the unstated pins, and the conversions that motivated this
+rule, are in `docs/plans/2026-08-22-type-handlers-on-types.md` §2.5 and §3.)
+
 ## Review checklist
 
 Before accepting a comment, ask:
@@ -171,4 +205,7 @@ Before accepting a comment, ask:
 - Will a future behavior change make the comment visibly wrong?
 - Does every link follow the rules above, and did the typedoc run come back
   without `Failed to resolve link` warnings?
+- Does every new exact-string type assertion say which drift direction it
+  guards (see "Type assertions in tests")? If it cannot, use
+  `expectTypeBetween`.
 

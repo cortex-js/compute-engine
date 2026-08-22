@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { expectTypeBetween } from '../utils';
 
 /**
  * Element-wise `ElementMax` / `ElementMin` (the NumPy `maximum`/`minimum`
@@ -60,11 +61,11 @@ describe('ElementMax / ElementMin — evaluate', () => {
 // §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('ElementMax / ElementMin — type', () => {
   test('scalar⊗collection is typed as a list', () => {
-    // Phase C representation unification: broadcast-applied scalar results
-    // report `number` cells (list<finite_…^dims> for literal lists).
-    expect(ce.box(['ElementMax', 0, ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<3>'
-    );
+    // At least `vector<3>`: the shape is the guard; the cell tier may refine
+    // (integer cells would be honest here).
+    expectTypeBetween(ce.box(['ElementMax', 0, ['List', 1, 2, 3]]), {
+      atMost: 'vector<3>',
+    });
   });
   test('scalar⊗scalar is a scalar type', () => {
     expect(ce.box(['ElementMax', 2, 5]).type.toString()).toBe('finite_real');

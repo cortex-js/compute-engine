@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { expectTypeBetween } from '../utils';
 
 // Tycho item 165 (2026-08-10): a CORE corpus state (`neyret/62urmx2dcm`, a
 // Voronoï diagram) drew on CE 0.103.1 and went blank on 0.103.2 — while
@@ -110,13 +111,13 @@ describe('Tycho item 165: Divide preserves the tuple type of a PointList', () =>
     });
 
     test('the corpus shape (x - PointX(list))^2 stays a vector', () => {
-      expect(
-        ce
-          .parse(
-            `(x-\\mathrm{PointX}(\\bigl\\lbrack${element}, ${element}\\bigr\\rbrack))^{2}`
-          )
-          .type.toString()
-      ).toBe('vector<2>');
+      // At least `vector<2>`: the shape is the guard; the cell tier may refine.
+      expectTypeBetween(
+        ce.parse(
+          `(x-\\mathrm{PointX}(\\bigl\\lbrack${element}, ${element}\\bigr\\rbrack))^{2}`
+        ),
+        { atMost: 'vector<2>' }
+      );
     });
   });
 

@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import { expectTypeBetween } from '../utils';
 
 /**
  * Honest result typing for list-broadcast numeric operators.
@@ -124,9 +125,12 @@ describe('LIST-BROADCAST TYPING — wrapper-lifted families (sound list<R>)', ()
     ['Real (complex)', ['Real', ['List', 2, 3]], 'vector<finite_real^2>'],
     ['Conjugate (complex)', ['Conjugate', ['List', 2, 3]], 'vector<finite_integer^2>'],
     ['Round', ['Round', ['List', 1.2, 2.7]], 'vector<2>'],
-  ])('%s → %s', (_label, mathjson, expected) => {
+  ])('%s → at least %s', (_label, mathjson, expected) => {
     const expr = ce.box(mathjson as any);
-    expect(expr.type.toString()).toBe(expected);
+    // At least `expected`: the shape is the guard and the cell tier may
+    // refine; the over-narrow direction is `expectHonestBroadcast` (the
+    // evaluated type must be a subtype of the declared one).
+    expectTypeBetween(expr, { atMost: expected });
     expectHonestBroadcast(expr);
   });
 
@@ -136,7 +140,8 @@ describe('LIST-BROADCAST TYPING — wrapper-lifted families (sound list<R>)', ()
     // declared` holds and is what this test guards.
     const expr = ce.box(['Round', ['List', 1.2, 2.7]]);
     const evaluated = expr.evaluate();
-    expect(expr.type.toString()).toBe('vector<2>');
+    // At least `vector<2>` (the shape); the cell tier may refine.
+    expectTypeBetween(expr, { atMost: 'vector<2>' });
     expect(evaluated.type.toString()).toBe('vector<finite_integer^2>');
     expect(evaluated.type.matches(expr.type.type)).toBe(true);
   });

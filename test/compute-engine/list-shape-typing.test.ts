@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { expectTypeBetween } from '../utils';
 
 /**
  * Phase A of the tensor-unification design: honest, shape-derived typing of
@@ -228,11 +229,21 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
     // `Sin`/`Sqrt` compute a SCALAR per-element result, so the wrapper is what
     // builds their shape and must keep running. These are the reference
     // answers the allowlisted handlers now agree with.
-    expect(ce.box(['Sin', M22]).type.toString()).toBe('matrix<2x2>');
-    expect(ce.box(['Sqrt', M22]).type.toString()).toBe('matrix<2x2>');
-    expect(ce.box(['Sin', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<3>'
-    );
+    // At least these shapes: the dims are the guard; the cell tier may
+    // refine, but not to rational cells (sines and square roots of these
+    // integers are irrational).
+    expectTypeBetween(ce.box(['Sin', M22]), {
+      atMost: 'matrix<2x2>',
+      above: 'matrix<finite_rational^(2x2)>',
+    });
+    expectTypeBetween(ce.box(['Sqrt', M22]), {
+      atMost: 'matrix<2x2>',
+      above: 'matrix<finite_rational^(2x2)>',
+    });
+    expectTypeBetween(ce.box(['Sin', ['List', 1, 2, 3]]), {
+      atMost: 'vector<3>',
+      above: 'vector<finite_rational^3>',
+    });
   });
 
   test('a polytype broadcastable takes the WRAPPER answer on mixed ranks', () => {

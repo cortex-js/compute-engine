@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import { expectTypeBetween } from '../utils';
 
 /**
  * Phase B of the `broadcastable<T>` prototype: `Add`/`Multiply` produce a
@@ -145,6 +146,10 @@ describe('broadcastable<T> typing (phase B)', () => {
     ce.declare('h', '(number) -> unknown');
     const pxh = ce.box(['PointX', ['Tuple', ['h', 1], 'y']]);
     expect(pxh.type.toString()).toBe('unknown');
+    // Exactly this tier: `h` returns `unknown`, which admits NaN and ±∞, so
+    // `number` cells are the contract (a narrower cell tier would over-claim),
+    // and since `number <: broadcastable<number>` a scalar fold would pass a
+    // bare `.matches()`. The exact string guards both directions.
     expect(ce.box(['Power', pxh.json, 2]).type.toString()).toBe(
       'broadcastable<number>'
     );
@@ -230,6 +235,9 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     const ce = mkEngine();
     // arg = 2h(x)-1, which is broadcastable<number> (phase B).
     const arg = ['Subtract', ['Multiply', 2, ['h', 'x']], 1];
+    // Exactly this tier: `h` returns `unknown` (admits NaN and ±∞), so
+    // `number` cells are the contract, and the exact string also rejects a
+    // scalar fold (`number <: broadcastable<number>`).
     expect(ce.box(['Sin', arg]).type.toString()).toBe('broadcastable<number>');
     expect(ce.box(['Sqrt', arg]).type.toString()).toBe('broadcastable<number>');
     expect(ce.box(['Power', arg, 2]).type.toString()).toBe(
@@ -243,15 +251,25 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     const ce = mkEngine();
     // The statically-visible arm keeps priority: a concrete list/Range operand
     // gives the more precise `list<E>`, not `broadcastable<E>`.
-    expect(ce.box(['Sin', ['Range', 1, 5]]).type.toString()).toBe(
-      'list<number>'
-    );
-    expect(ce.box(['Sin', ['List', 0, 1]]).type.toString()).toBe('vector<2>');
+    // At least `list<number>` / `vector<2>` — a definite list, which a
+    // `broadcastable<…>` does not match; the element tier may refine, but a
+    // rational (hence integer) cell claim would be unsound for `Sin`.
+    expectTypeBetween(ce.box(['Sin', ['Range', 1, 5]]), {
+      atMost: 'list<number>',
+      above: 'list<finite_rational>',
+    });
+    expectTypeBetween(ce.box(['Sin', ['List', 0, 1]]), {
+      atMost: 'vector<2>',
+      above: 'vector<finite_rational^2>',
+    });
   });
 
   test('idempotence: never broadcastable<broadcastable<…>>', () => {
     const ce = mkEngine();
     // Nested arithmetic over a broadcastable inner node stays single-layer.
+    // Exactly this tier: one `broadcastable<…>` layer (never nested, never a
+    // scalar fold) over `number` cells, which are the contract for an
+    // `unknown`-returning `h`.
     expect(ce.box(['Add', ['Sin', ['Multiply', 2, ['h', 'x']]], 1]).type
       .toString()).toBe('broadcastable<number>');
     expect(
@@ -533,9 +551,12 @@ describe('fixed-shape vs generic-collection broadcast typing', () => {
     // is typed `vector<1>`. `Sin` broadcasts over it at evaluation, so the
     // honest type is a definite `list<…>` (arm 1, `isFixedShapeCollection`).
     ce.declare('v', 'vector<1>');
-    expect(ce.box(['Sin', ['Multiply', 2, 'v']]).type.toString()).toBe(
-      'vector<1>'
-    );
+    // At least `vector<1>`: the fixed shape is the guard; the cell tier may
+    // refine, but not to a rational cell (unsound for `Sin`).
+    expectTypeBetween(ce.box(['Sin', ['Multiply', 2, 'v']]), {
+      atMost: 'vector<1>',
+      above: 'vector<finite_rational^1>',
+    });
   });
 
   test('concrete singleton broadcast evaluates to a 1-element List', () => {

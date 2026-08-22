@@ -525,6 +525,16 @@ Worktree with the shim: the experiment is reproducible from this entry; the
 proxy gates on `CE_TYPE_VALUE_BLIND` / `CE_TYPE_LITERAL` and is not for
 landing.
 
+Design and implementation draft:
+`docs/plans/2026-08-22-type-handlers-on-types.md`. Status 2026-08-22: Step 0
+(type assertions say which drift they guard — 22 conversions,
+`expectTypeBetween` in `test/utils.ts`, rule in
+`docs/COMMENTING-GUIDELINES.md`) is executed and the re-measured residue is
+recorded there as the baseline (§3.4). The "closed complex constants" group
+above was mis-filed: the lost facts are the SIGN of `π`/`e` (held value, not
+type) and the CLOSEDNESS `poleReciprocalType` reads via `isConstant`; both
+are ruling items (§6.1, §6.5), not idiom swaps.
+
 ### A pre-canonicalization validation phase (OPEN, design — raised by the user 2026-08-21 at the item-219 ruling)
 
 Item 219 is the second time a computation has needed to VALIDATE an

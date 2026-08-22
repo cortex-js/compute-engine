@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { expectTypeBetween } from '../utils';
 
 /**
  * Tycho items 212 and 213 — two ways a list of points lost its point-ness on
@@ -91,9 +92,9 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
     const v = ce
       .box(['Map', ['Function', ['Add', '_1', '_2'], '_1', '_2'], A, B])
       .evaluate();
-    expect(v.type.toString()).toBe(
-      'indexed_collection<tuple<number, number>>'
-    );
+    // At least a collection of 2-tuples: the tuple-ness is the guard; the
+    // component tier may refine.
+    expectTypeBetween(v, { atMost: 'indexed_collection<tuple<number, number>>' });
   });
 
   test('an annotated parameter is the contract and is NOT overridden by the derivation', () => {
@@ -241,7 +242,9 @@ describe('Tycho item 213: coordinate accessors over a list of SYMBOLIC points st
         ['Multiply', ['Divide', ['Range', 0, 'n'], 'n'], ['Tuple', 0, 1]],
       ])
       .evaluate();
-    expect(v.type.toString()).toBe('indexed_collection<tuple<number, number>>');
+    // At least a collection of 2-tuples: the tuple-ness is the guard; the
+    // component tier may refine.
+    expectTypeBetween(v, { atMost: 'indexed_collection<tuple<number, number>>' });
   });
 
   test('a referenced parameter without a source element type declines the derivation', () => {

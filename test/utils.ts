@@ -4,6 +4,7 @@ import { ComputeEngine } from '../src/compute-engine';
 
 import { parseEpsil } from '../src/epsil';
 import { _BoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
+import { BoxedType } from '../src/common/type/boxed-type';
 import type { ExpressionInput } from '../src/compute-engine/global-types';
 
 const MAX_LINE_LENGTH = 72;
@@ -433,3 +434,44 @@ expect.addSnapshotSerializer({
   test: (val): boolean => typeof val === 'string',
   serialize: (val) => val,
 });
+
+/**
+ * Assert that a derived type sits in a bracket, naming which drift
+ * direction the test guards:
+ *
+ * - `atMost`: the type must be a subtype of this — "at least this precise".
+ *   A sounder, more refined derivation still passes; a wider one fails.
+ * - `above` (optional): the type must NOT be a subtype of this — a claim the
+ *   engine could only make by over-narrowing (`finite_integer` for a
+ *   quotient that can be `3/2`; a bare `number` for a result that may be a
+ *   collection, since `number <: broadcastable<number>`). A derivation that
+ *   slips down to it fails.
+ *
+ * Either way the empty type `never` is rejected wherever it appears: it is a
+ * subtype of every type, so a derivation that collapsed to `never` (or to
+ * `vector<never^3>`) would pass any `matches()` bound while describing no
+ * value at all.
+ *
+ * An exact-string pin (`expect(String(t)).toBe('…')`) guards both directions
+ * at once but also fails on every sound refinement; keep it only where the
+ * exact tier is the contract, and say so in the test name. The rationale and
+ * the three spellings are in `docs/COMMENTING-GUIDELINES.md` ("Type
+ * assertions in tests").
+ */
+export function expectTypeBetween(
+  subject: { readonly type: BoxedType } | BoxedType,
+  bounds: { atMost: string; above?: string }
+): void {
+  const t = subject instanceof BoxedType ? subject : subject.type;
+  const s = t.toString();
+  if (/\bnever\b/.test(s))
+    throw new Error(
+      `type \`${s}\` contains the empty type \`never\`, which is a subtype of every type and would pass any bound`
+    );
+  if (!t.matches(bounds.atMost))
+    throw new Error(`type \`${s}\` is not a subtype of \`${bounds.atMost}\``);
+  if (bounds.above !== undefined && t.matches(bounds.above))
+    throw new Error(
+      `type \`${s}\` is over-narrow: it is a subtype of \`${bounds.above}\``
+    );
+}
