@@ -9,6 +9,7 @@ import type {
 
 import { isDictionary, isFunction, isObject, isSymbol } from './type-guards';
 import { isValueDef, isOperatorDef } from './definition-guards';
+import { bindingInContext } from './binders';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats';
 import {
   accumulateObjectDeps,
@@ -82,16 +83,18 @@ interface ElementMemoDep {
   version?: number;
   /** The binding the instance's RESOLUTION scope chain resolved `name` to
    * at fill time (`undefined` when the chain has no such binding).
-   * Non-constant symbol VALUES resolve by name through a scope chain
-   * (`BoxedSymbol._value` → `_getSymbolValue`), not through the occurrence's
-   * pinned binding — so a shadowing declaration changes what a walk computes
-   * while bumping no counter and touching no tracked definition.
-   * Re-resolving at validation catches it. Which chain matters: a SCOPED
-   * instance (`Comprehension`) walks under its own captured `localScope`, so
-   * an ambient shadow is invisible to it and must not invalidate (a
-   * spurious refill re-draws an impure body); an unscoped instance (`Map`)
-   * resolves through the ambient chain at walk time. See
-   * `depResolutionScope`. */
+   * A non-constant symbol's VALUE is read by walking the scope chain for
+   * the innermost binding of its name, skipping only a call frame's
+   * parameter activation of some other binding (`bindingInContext`,
+   * `binders.ts`) — not through the occurrence's pinned binding — so a
+   * shadowing declaration changes what a walk reads while bumping no
+   * counter and touching no tracked definition. Re-resolving the same way
+   * at validation catches it, and a foreign activation — which the walk
+   * skips — does not invalidate. Which chain matters: a SCOPED instance
+   * (`Comprehension`) walks under its own captured `localScope`, so an
+   * ambient shadow is invisible to it and must not invalidate (a spurious
+   * refill re-draws an impure body); an unscoped instance (`Map`) resolves
+   * through the ambient chain at walk time. See `depResolutionScope`. */
   resolved: BoxedDefinition | undefined;
   /** Set on an OPERATOR dependency — a walked user-lambda head, or a
    * FORWARD REFERENCE (the occurrence's pinned binding is a valueless
@@ -242,8 +245,15 @@ function depResolutionScope(expr: Expression): Scope | undefined {
 function resolveDepBinding(
   ce: IComputeEngine,
   scope: Scope | undefined,
-  name: string
+  name: string,
+  own?: BoxedValueDefinition
 ): BoxedDefinition | undefined {
+  // A SYMBOL occurrence's value dependency resolves the way the evaluator
+  // reads that occurrence's value (see `ElementMemoDep.resolved`); an
+  // application head — a walked user-lambda operator, or a value-bound
+  // head — is looked up by name, as applications are.
+  if (own !== undefined)
+    return bindingInContext(ce, name, own, scope ?? ce.context?.lexicalScope);
   let s: Scope | undefined = scope ?? ce.context?.lexicalScope;
   while (s) {
     const def = s.bindings.get(name);
@@ -353,7 +363,12 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
     // auto-compile re-enable test served a stale symbolic drain). Three
     // cases:
     if (valueDef.value === undefined && !valueDef.isConstant) {
-      const resolved = resolveDepBinding(ce, depScope, name);
+      const resolved = resolveDepBinding(
+        ce,
+        depScope,
+        name,
+        isSymbol(occurrence) ? valueDef : undefined
+      );
       // (1) FORWARD-REFERENCE HEAL: the occurrence pinned a valueless
       // auto-declared value binding (the name was used before it was
       // defined — `R := M ↦ R_xz(…)` parsed before `assign('R_xz', …)`),
@@ -457,7 +472,12 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
       name,
       valueDef,
       version: valueDef._writeVersion,
-      resolved: resolveDepBinding(ce, depScope, name),
+      resolved: resolveDepBinding(
+        ce,
+        depScope,
+        name,
+        isSymbol(occurrence) ? valueDef : undefined
+      ),
     });
     // TRANSITIVE dependencies: a symbol bound by reference to a stored
     // value (a helper function literal, a bound list) pulls that value's
@@ -629,7 +649,19 @@ export function memoDepsStillValid(expr: Expression, deps: MemoDeps): boolean {
           return false;
       } else if (d.valueDef._writeVersion !== d.version) return false;
     }
-    const r = resolveDepBinding(ce, depScope, d.name);
+    // A value dependency re-resolves through the occurrence's CURRENT binding
+    // (the inner definition may have been swapped in place since the fill —
+    // see above), exactly as the fill did through the one it had then.
+    const r = resolveDepBinding(
+      ce,
+      depScope,
+      d.name,
+      d.resolvedOperator === undefined &&
+        d.valueDef !== undefined &&
+        isSymbol(d.occurrence)
+        ? (d.occurrence.valueDefinition ?? d.valueDef)
+        : undefined
+    );
     if (d.resolvedOperator !== undefined) {
       // An operator dependency (a walked user lambda, or a healed forward
       // reference) compares the INNER operator-definition identity: the

@@ -108,6 +108,94 @@ export function sameBindingDef(
   return staticBindingOf(a) === staticBindingOf(b);
 }
 
+/**
+ * The value definition a symbol OCCURRENCE reads its value from in the
+ * current runtime context. The scope chain is walked for the innermost
+ * binding of `name`, as a name lookup would — with ONE binding skipped: a
+ * call frame's parameter activation of a binding OTHER than `own`, the
+ * definition the occurrence is bound to (`sameBindingDef` recognizes an
+ * activation of `own` itself). Such an activation is a different function's
+ * parameter that merely shares the name, and reading its value through this
+ * occurrence is a capture.
+ *
+ * Why the parameter case alone, and not every same-named binding: a
+ * declaration made in a scope pushed after the occurrence was bound is ALSO
+ * a different binding, but re-pointing earlier-boxed expressions that way is
+ * relied upon — a document manager re-pushes a saved, populated scope around
+ * evaluations and expects the expressions to read it (the lazy-collection
+ * memo stamps the ambient scope for exactly this; see "a memoized view
+ * re-resolves inside a re-pushed populated scope" in
+ * `test/compute-engine/lazy-collection-regimes.test.ts`). That is the
+ * compatibility reading `docs/SCOPING-MODEL.md` §"Symbol identity" allows,
+ * and it stays. A shield (`markShieldDeclaration`) intercepts for the same
+ * reason every ordinary declaration does.
+ *
+ * Why the parameter case must be skipped: a call frame captures whenever an
+ * expression bound OUTSIDE it is evaluated INSIDE it. With `G(x) := cos(x)`
+ * applied as `G(3x)`, the frame binds its parameter `x` to `3x`, whose `x` is
+ * the caller's. Dereferencing the parameter answers `3x`, correctly, through
+ * `evaluateInOwnBindings`; but the `Cos` handler then evaluates that `3x`
+ * once more inside the frame, and by-name resolution read the caller's `x`
+ * as the parameter again — `9x`, then `27x` on the next re-evaluation.
+ * Every re-evaluation substituted the parameter's value into itself once
+ * more, so it terminated only because handlers re-evaluate a bounded number
+ * of times, answered wrong where a handler used the re-evaluation
+ * (`f(x) := Σ_{k=1}^{3} x·k` gave `f(2x) = 24x`), and did not terminate at
+ * all once the parameter's value contained an application that re-evaluates
+ * its operand: `f(f(x))` for `f(x) := cos x`, and a twice-recursive
+ * `R(i,x,y)` with free `x`, `y` at depth 3, overflowed the stack. Skipping
+ * the foreign activation makes a second evaluation of an evaluated value a
+ * fixed point again.
+ *
+ * When `own` is reachable from nowhere in the chain (an occurrence bound in
+ * a scope that has since been popped, or an unbound one), the innermost
+ * binding by name answers, foreign activation included — what the name
+ * lookup answered before.
+ */
+export function valueDefinitionInContext(
+  ce: ComputeEngine,
+  name: string,
+  own: BoxedBaseDefinition | undefined
+): BoxedValueDefinition | undefined {
+  const found = bindingInContext(ce, name, own);
+  return found !== undefined && 'value' in found ? found.value : undefined;
+}
+
+/**
+ * The binding `valueDefinitionInContext` reads from, as the scope's own
+ * (tagged) entry, and starting from `scope` rather than the current context
+ * when given — so a consumer that validates a dependency against the chain
+ * an instance resolves through (`collection-element-memo.ts`) walks the same
+ * way the evaluator does.
+ */
+export function bindingInContext(
+  ce: ComputeEngine,
+  name: string,
+  own: BoxedBaseDefinition | undefined,
+  scope: Scope | null = ce.context.lexicalScope
+): BoxedDefinition | undefined {
+  let skippedActivation: BoxedDefinition | undefined;
+  while (scope) {
+    const found = scope.bindings.get(name);
+    if (found !== undefined) {
+      if (
+        'value' in found &&
+        isActivation(found.value) &&
+        !sameBindingDef(found.value, own)
+      ) {
+        skippedActivation ??= found;
+      } else return found;
+    }
+    scope = scope.parent;
+  }
+  return skippedActivation;
+}
+
+/** Is `def` a call frame's parameter activation (see `markActivation`)? */
+function isActivation(def: BoxedBaseDefinition): boolean {
+  return (def as Activated)._activationOf !== undefined;
+}
+
 /** @see markShieldDeclaration */
 type Shielded = { _isShield?: true };
 
@@ -435,6 +523,12 @@ export function evaluateInOwnBindings(
           reachable = true;
           break;
         }
+        // A shield between here and the occurrence's own binding intercepts
+        // the name for every occurrence beneath it; borrowing the own binding
+        // past it would read the very value the shield hides. Leave the
+        // occurrence to the ambient resolution, which stops at the shield
+        // (`bindingInContext`).
+        if ('value' in found && isShield(found.value)) return sym;
       }
       scope = scope.parent;
     }

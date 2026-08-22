@@ -138,26 +138,57 @@ caller handler that EMITS" — unknowable at harvest time, so it would have to
 be a declaration on the handler (or a `pure` + "lazy operands as the
 built-in" contract). Demand-gated: the only known consumer route is flat.
 
-### Symbolic evaluation of a twice-recursive user function overflows the stack at depth 3 (OPEN, evaluation — found 2026-08-21 under Tycho item 217)
+### Symbolic expansion of a recursive user function: bound it, or let it run? (OPEN, design — ruling pending 2026-08-21)
 
+The stack overflow this entry used to record is FIXED (2026-08-21):
 `R(i,x,y) := R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` with a literal base case and
-`x`, `y` FREE: `R(2,x,y).evaluate()` answers a 42-node closed form, and
-`R(3,x,y).evaluate()` throws `RangeError: Maximum call stack size exceeded`
-from inside canonicalization (`validateArguments` → `isFiniteCollection` →
-`isCollection` on the body's own applications, repeatedly). Instrumenting
-the `isCollection` getter shows the literal's raw body — `R(i-1,x,y)` with
-the PARAMETER still symbolic — being re-canonicalized in a fixed cycle
-(`Add`, `R`, `S`, `R`, `Multiply`, `R`, …), ~18 000 queries before the
-overflow. With NUMERIC arguments the same definition evaluates at depth 20
-in milliseconds (the pure-application memo shipped with item 217), and the
-compiled artifact shares the self-call, so no consumer route is known to
-hit this; it is the symbolic route only. Repro: the `setup()` of
-`test/compute-engine/tycho-item-217-recursive-application-memo.test.ts`,
-then `ce.parse('R(3,x,y)').evaluate()`. Open question for the ruling: whether
-symbolic expansion of a recursive definition should be bounded (decline to
-an inert application past a budget, as `inlineUserFunctions` in
-`boxed-expression/utils.ts` already does with its beta-reduction budget)
-rather than made to terminate.
+`x`, `y` FREE now answers a closed form at every depth. The cause was not the
+recursion but symbol VALUE RESOLUTION: `BoxedSymbol.evaluate()` and `_value`
+read a symbol's value by NAME from the innermost frame, so an expression
+bound OUTSIDE a call frame and re-evaluated INSIDE it (the `Cos` handler
+re-evaluates its already-evaluated operand) read the caller's `x` as the
+frame's parameter — `G(3x)` saw `9x`, then `27x` — and a parameter value
+containing `cos(…x…)` re-entered without end. The same capture answered
+WRONG results for ordinary definitions: `f(x) := Σ_{k=1}^{3} x·k` gave
+`f(2x) = 24x` (now `12x`), `g(x) := 2x; f(x) := g(x)+1` gave `f(3x) = 18x+1`
+(now `6x+1`), and `f(x) := cos x` overflowed on `f(f(x))`. The value walk
+now skips a call frame's parameter activation of a binding other than the
+occurrence's own (`valueDefinitionInContext`, `boxed-expression/binders.ts`);
+every other same-named binding — a shield, an ordinary declaration, a
+re-pushed saved scope — still intercepts by name, as before. Regression:
+`test/compute-engine/symbol-resolution-by-binding.test.ts`.
+
+A ruling this exposed, left as it was: `docs/SCOPING-MODEL.md` says an
+occurrence denotes a binding and calls by-name resolution a compatibility
+hatch, yet three tests pin the hatch as a feature ("a memoized view
+re-resolves inside a re-pushed populated scope",
+`lazy-collection-regimes.test.ts`): `const e = ce.parse('x^2');
+ce.pushScope(); ce.declare('x','number'); ce.assign('x', 7); e.evaluate()`
+answers `49`, reading a declaration made after `e` was bound. Going to the
+full binding model would answer `x^2` there, which also changes the
+interpreter fallback runner of a declined compilation
+(`buildInterpreterFallback`, `compilation/base-compiler.ts` — it binds its
+`run({x: 2})` arguments by exactly this pattern, and `.subs()` is not a
+substitute: it is not binder-aware) and the memo's ambient-scope axis.
+Tycho's own `pushScope` sites all box inside the scope they push (audited
+2026-08-21), so neither reading affects them. Decide: keep by-name
+interception for ordinary declarations (current), or adopt the binding model
+throughout and rewrite the three tests and the runner.
+
+What remains open is cost, not correctness. The closed form's SIZE is
+inherent — `R(i-1,x,y)` is bound to `S`'s `l`, which the body mentions nine
+times, so the tree grows ~10× per level: depth 3 is 1 232 characters in
+0.3 s, depth 4 is 12 416 in 14 s, depth 5 did not finish in four minutes,
+and depth 8 would be ~10⁷ characters. The pure-application memo (Tycho item
+217) keys on number-literal arguments only, so with free `x`, `y` every
+level re-evaluates both self-calls. Ruling to take: (a) leave symbolic
+expansion unbounded — a user who asks for `R(8,x,y)` gets the answer or
+waits; (b) decline past a budget to an inert application, the way
+`inlineUserFunctions` (`boxed-expression/utils.ts`) already caps
+beta-reduction; or (c) extend the application memo to symbolic arguments so
+the self-calls share, which makes the evaluation linear in the OUTPUT size
+but leaves that size exponential. Repro: the `recursiveSetup()` of the
+regression test above, then `ce.parse('R(5,x,y)').evaluate()`.
 
 ### Built-in collections as `Iterable`/`Indexable` protocol conformers — audit and sizing (OPEN, design — audited 2026-08-21; ruling P8 / §7 item 6(h) of `docs/TYPE_SYSTEM_ROADMAP.md`)
 
@@ -307,6 +338,37 @@ the handler declines is no longer the question. Measured on
 The remaining open question in this family is a different one — the rule is
 not transitive through a user-defined function body — and it has its own entry
 above.
+
+### The element-wise `Sum`/`Product` NaN latch is ungated by effects (OPEN, found 2026-08-21 while correcting the `compile` handler docs)
+
+The effects rule that decides the NaN early exit reaches the two SCALAR arms
+of the JavaScript big-operator lowering — the unrolled flat chain and the
+`while` loop — through `BaseCompiler.isEmissionSkippable`
+(`javascript-target.ts`, the `canExitEarly` and `loopExit` bindings). The
+ELEMENT-WISE arm, taken when the body is collection-valued
+(`isElementwiseBigOpBody`), emits `if (acc !== acc) return NaN;` into its
+fold loop unconditionally and never consults the gate. So an element-wise
+body whose definition states effects still has its later iterations skipped
+once the accumulator goes NaN, which is the behavior the scalar arms now
+refuse: `Sum(Random() · [1, 1], n=1..31)` stops drawing at the first NaN,
+while its scalar twin `Sum(Random() + n, n=1..31)` runs every term.
+
+The latch is not gratuitous, which is why this is a design question rather
+than a one-line gate. Its stated job is shape stability, not cost: a length
+mismatch collapses the `_SYS.bcast` fold to a scalar NaN, and without the
+latch the next iteration broadcasts that scalar back over the new term's
+shape, so whether the result was a scalar NaN or an array of NaNs depended
+on which shape came last. Deleting it under an effectful body restores that
+shape-order dependence; keeping it costs the iterations. A fix has to
+separate the two roles — latch the SHAPE (remember that a mismatch
+happened) without also stopping the loop — rather than gate the existing
+emission on `isEmissionSkippable`.
+
+Demand-gated: no consumer has reported it, and an effectful element-wise
+big-operator body is a rare shape. Recorded because the scalar half of the
+same rule shipped in 0.118.0 and the asymmetry is now documented on
+`OperatorCompileHandler` (`types-definitions.ts`), where a reader will
+reasonably expect the guarantee to be uniform.
 
 ### A caller-supplied `functions` entry can declare purity, restoring the `Sum`/`Product` NaN exit (RULED and SHIPPED 2026-08-20)
 

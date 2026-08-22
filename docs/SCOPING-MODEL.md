@@ -13,6 +13,18 @@ A stored symbol value is evaluated in the environment denoted by its own free
 symbols. Copying that value into the caller's scope and resolving it there can
 silently capture same-named bindings and is forbidden.
 
+Reading a symbol's VALUE during evaluation (`valueDefinitionInContext`,
+`boxed-expression/binders.ts`) walks the scope chain for the innermost binding
+of the name — the compatibility reading: a declaration made in a scope pushed
+after the occurrence was bound, or a re-pushed saved scope, is read, and the
+lazy-collection memo stamps the ambient scope for that reason — with one
+binding skipped: a call frame's parameter activation of a binding OTHER than
+the occurrence's own. A same-named parameter of the function being evaluated
+is not the symbol an outer occurrence denotes, so an expression boxed outside
+a call frame evaluates to the same value inside it, however many times a
+handler re-evaluates it. Whether ordinary shadowing declarations should also
+stop re-pointing earlier-bound occurrences is an open ruling (`ROADMAP.md`).
+
 ## Binders
 
 Binder operators declare their binding sites through the shared binding-site

@@ -83,7 +83,10 @@ import { getFactIndex, hasAssumptions } from './constraint-subject.js';
 import { isNumber, isSymbol } from './type-guards.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { sameBinding } from './compare.js';
-import { evaluateInOwnBindings } from './binders.js';
+import {
+  evaluateInOwnBindings,
+  valueDefinitionInContext,
+} from './binders.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 import {
   CYCLE_DETECTED,
@@ -644,7 +647,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (this._def.value.isSelfReferential) return undefined;
 
     // Lookup the value by walking the scope chain
-    const result = this.engine._getSymbolValue(this._id);
+    const result = this._contextValue();
 
     // Guard (dynamic): the resolved value IS this symbol (degenerate `a := a`,
     // or a function parameter bound in the call scope to an argument of the
@@ -659,6 +662,22 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return undefined;
 
     return result;
+  }
+
+  /**
+   * The value this occurrence reads in the current runtime context: the
+   * innermost binding of its name in the scope chain, except that a call
+   * frame's parameter activation of some OTHER binding is skipped — inside a
+   * function body whose parameter shares this symbol's name, that parameter
+   * is not the symbol this node denotes. See `valueDefinitionInContext`.
+   */
+  private _contextValue(): Expression | undefined {
+    const def = this._def;
+    return valueDefinitionInContext(
+      this.engine,
+      this._id,
+      def !== undefined && 'value' in def ? def.value : undefined
+    )?.value;
   }
 
   get value(): Expression | undefined {
@@ -1215,7 +1234,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         hold === 'evaluate' ||
         (hold === 'N' && options?.numericApproximation)
       ) {
-        const expr = this.engine._getSymbolValue(this._id);
+        const expr = this._contextValue();
         if (expr === undefined) return this;
         if (expr.operator === 'Unevaluated')
           return expr.evaluate(options) ?? this;
@@ -1373,22 +1392,27 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (def && !def.isConstant) {
       const contextValue = this._value;
       if (!contextValue) return this;
-      // Self-referential CONTEXT binding: the scope walk can resolve to a
-      // different def than the statically-bound one `_value` guards — e.g. a
-      // call-frame parameter bound to an argument mentioning the parameter's
-      // own name (`a(t + 1)` for `a(t) := …` with `t` unbound in the
-      // caller). Recursing with `.N()` would re-resolve this symbol through
-      // the same binding forever (Tycho item 46). Substitute the value ONCE,
-      // without numericizing through it — mirroring what plain `evaluate()`
-      // does for symbol values. The number-literal short-circuit keeps the
-      // hot path (loop indices, numeric call arguments) O(1). The scan uses
-      // `symbols`, which over-approximates: an occurrence BOUND inside the
-      // value (a nested big-op index sharing this name) also suppresses the
-      // recursion, degrading to a symbolic result — the same deliberate
-      // trade as `isSelfReferentialValue` (boxed-value-definition.ts).
-      // `freeVariables` cannot be used here: it resolves bindings against
-      // the CURRENT eval context, where this very call-frame binding makes
-      // the name look bound, so the guard would never fire.
+      // Self-referential CONTEXT binding: a call-frame parameter bound to an
+      // argument mentioning the parameter's own name (`a(t + 1)` for
+      // `a(t) := …` with `t` unbound in the caller). When symbol values were
+      // still resolved by NAME in the current frame, recursing with `.N()`
+      // re-resolved the argument's `t` as the parameter forever (Tycho item
+      // 46). The value walk now skips a call frame's parameter activation of
+      // any other binding (`_contextValue`), so the `t` inside the value
+      // reaches the caller's `t` and the recursion ends on its own; this
+      // guard stays as the backstop for the by-name fallback that walk keeps
+      // for an occurrence whose own binding is no longer reachable. It
+      // substitutes the value ONCE, without numericizing
+      // through it — mirroring what plain `evaluate()` does for symbol
+      // values. The number-literal short-circuit keeps the hot path (loop
+      // indices, numeric call arguments) O(1). The scan uses `symbols`, which
+      // over-approximates: an occurrence BOUND inside the value (a nested
+      // big-op index sharing this name) also suppresses the recursion,
+      // degrading to a symbolic result — the same deliberate trade as
+      // `isSelfReferentialValue` (boxed-value-definition.ts). `freeVariables`
+      // cannot be used here: it resolves bindings against the CURRENT eval
+      // context, where this very call-frame binding makes the name look
+      // bound, so the guard would never fire.
       if (isNumber(contextValue)) return contextValue.N();
       if (contextValue.symbols.includes(this._id)) return contextValue;
       return contextValue.N();
