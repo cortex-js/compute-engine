@@ -109,6 +109,35 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A re-declared operator carrying a caller `compile` handler switches off the compiler's call-sharing (OPEN, design — measured 2026-08-21 under Tycho item 217)
+
+`R(i,x,y) = R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` compiles to a linear
+artifact on a stock engine (the CSE harvest binds the repeated self-call:
+0.03 ms/call at depth 18), and stays linear when a `compile` handler is
+attached IN PLACE to the stock `Which` definition, or when `Which` is
+re-declared from a copy of the stock definition WITHOUT a handler. It goes
+exponential — ×4 per two levels, 39 ms/call at depth 18 on `main`, 50 ms
+on 0.117.0 — only when BOTH happen: `engine.declare("Which", {...stock})`
+followed by `operator.compile = …` on the new definition (Tycho's retired
+"OLD route"; their shipped install attaches in place and is flat). The
+switch is `Harvester.hasCallerCompileHandler` (`compilation/cse.ts`): a
+`compile` handler on a definition that is not the system-scope one is a
+live-source splice the harvest cannot analyse, so every node under that head
+is refused as a CSE candidate and every callee body containing it fails
+`calleeBodyClean` — admitted for the NaN-skippability question only, where
+the definition's declared `pure` is trusted (an explicit `pure: true` on the
+re-declaration does NOT restore sharing, measured). The built-in definition's
+own handler is exempt by object identity.
+
+Option, if a consumer needs the re-declaration shape: the lazy-operand region
+table (`LAZY_OPERANDS`) is keyed by operator NAME, so a re-declared `Which`
+still opens the right regions at harvest; a caller handler that DECLINES at
+emission (returns `undefined`, Tycho's case) then emits through the built-in
+lowering, which pushes those regions. The refusal could be narrowed to "a
+caller handler that EMITS" — unknowable at harvest time, so it would have to
+be a declaration on the handler (or a `pure` + "lazy operands as the
+built-in" contract). Demand-gated: the only known consumer route is flat.
+
 ### Symbolic evaluation of a twice-recursive user function overflows the stack at depth 3 (OPEN, evaluation — found 2026-08-21 under Tycho item 217)
 
 `R(i,x,y) := R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` with a literal base case and
