@@ -858,6 +858,105 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
   });
 });
 
+describe('COMPILE COMPLEX - coercion reads the value SHAPE, not the static type', () => {
+  // `√(1 − 0.2²)`: machine floats are not folded at canonicalization, so the
+  // radicand's sign is statically unknown and the node types the
+  // `finite_complex` hedge — while its runtime value is the plain real
+  // 0.9797…. The branch coercion must classify such an arm by what it
+  // actually EMITS, on two fronts:
+  //
+  //  - under the complex discipline the radical is PROMOTED
+  //    (`_SYS.csqrt(…)`, already a `{ re, im }` object): the type-based
+  //    `matches('real')` said "wrap it" and nested the object
+  //    (`{ re: { re, im }, im: 0 }` — every slot read NaN);
+  //  - under the strict discipline it emits a plain real (the folded
+  //    literal, or `Math.sqrt(…)` under `constantFold: false`): the
+  //    `finite_complex` type says "leave it bare", and a complex-reading
+  //    consumer (`Abs` → `.re`/`.im`) would NaN on the bare number. The
+  //    constant FOLD is what proves the arm real
+  //    (`isProvablyRealValued` → `constantFoldValue`).
+  //
+  // Both directions are pinned as runtime values against the interpreter.
+  const armValue = 0.9797958971132712; // √0.96, the interpreter's answer
+
+  it('a promoted radical arm is NOT wrapped (default/complex discipline)', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    const res = compile(
+      e.box([
+        'Abs',
+        [
+          'If',
+          ['Greater', 'x', 0],
+          ['Sqrt', -4],
+          ['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]],
+        ],
+      ]),
+      { fallback: false }
+    );
+    expect(res.run!({ x: -1 })).toBeCloseTo(armValue, 12);
+    expect(res.run!({ x: 1 })).toBe(2);
+  });
+
+  it('a closed float radical arm IS wrapped under strict, via the fold', () => {
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    const expr = e.box([
+      'Abs',
+      [
+        'If',
+        ['Greater', 'x', 0],
+        ['Sqrt', -4],
+        ['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]],
+      ],
+    ]);
+    const res = compile(expr, { mode: 'strict', fallback: false });
+    expect(res.run!({ x: -1 })).toBeCloseTo(armValue, 12);
+    expect(res.run!({ x: 1 })).toBe(2);
+    // The wrap decision must survive the EMISSION opt-out: with
+    // `constantFold: false` the arm compiles structurally
+    // (`Math.sqrt(1 + -0.04)`), and only the fold-informed analysis knows
+    // that value is real.
+    const structural = compile(expr, {
+      mode: 'strict',
+      constantFold: false,
+      fallback: false,
+    });
+    expect(structural.run!({ x: -1 })).toBeCloseTo(armValue, 12);
+    expect(structural.run!({ x: 1 })).toBe(2);
+  });
+
+  it('an INCONCLUSIVE arm (free-variable radicand) takes the runtime cplx test', () => {
+    // `√(1 − 0.04r)`: the radicand has a free variable, so no fold can prove
+    // the arm real, and the static type is the `finite_complex` hedge — yet
+    // under the strict discipline the emitted value is a plain `Math.sqrt`.
+    // Left bare, the branch's slot-reading consumer silently mis-answered
+    // (`_SYS.cabs` read `.re`/`.im` off a number and returned 0); the
+    // idempotent `_SYS.cplx` lifts the number — and would pass an object
+    // through — so the value matches the interpreter.
+    const { ComputeEngine } = require('../../src/compute-engine');
+    const e = new ComputeEngine();
+    e.declare('x', 'real');
+    e.declare('r', 'real');
+    const res = compile(
+      e.box([
+        'Abs',
+        [
+          'If',
+          ['Greater', 'x', 0],
+          ['Complex', 0, 2],
+          ['Sqrt', ['Subtract', 1, ['Multiply', 'r', 0.04]]],
+        ],
+      ]),
+      { mode: 'strict', fallback: false }
+    );
+    expect(res.run!({ x: -1, r: 1 })).toBeCloseTo(armValue, 12);
+    expect(res.run!({ x: 1, r: 1 })).toBe(2);
+  });
+});
+
 describe('COMPILE COMPLEX - binder index named `i` (Tycho item 65)', () => {
   // A `Sum`/`Product` index named `i` used to be walked as a FREE symbol by
   // `isComplexValued` (via the `Limits` operand, which carries the bound name

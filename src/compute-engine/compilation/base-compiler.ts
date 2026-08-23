@@ -1242,7 +1242,12 @@ export class BaseCompiler {
     // the nesting depth rather than a per-target hook. Engine symbol values
     // are stable within one compilation but not across compilations, and a
     // boxed expression can outlive the compile that cached its answer.
-    if (BaseCompiler._compileDepth === 0) BaseCompiler._invalidateComplexMemo();
+    if (BaseCompiler._compileDepth === 0) {
+      BaseCompiler._invalidateComplexMemo();
+      // The fold-value memo has the same staleness boundary: engine symbol
+      // values are stable within one compilation but not across them.
+      BaseCompiler._foldValueMemo = new WeakMap();
+    }
     // The complex-promotion opt-in is latched from the OUTERMOST compilation
     // only (`complexPromotion`). The analysis here and every target emitter
     // must agree on each node's value SHAPE — a parent that read `{re, im}`
@@ -2721,7 +2726,152 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     prec: number
   ): TargetSource | undefined {
+    // The `constantFold` opt-out governs what CODE is emitted, so it gates
+    // only this emission entry — `constantFoldValue` stays available to the
+    // shape analyses (`isProvablyRealValued`), whose answers describe the
+    // runtime value and must not change with the emission style.
     if (target.constantFold === false) return undefined;
+    const folded = BaseCompiler.constantFoldValue(expr, target);
+    if (folded === undefined) return undefined;
+    const { value, elements } = folded;
+    const engine = expr.engine;
+
+    // A constant COLLECTION folds to a literal of its elements, emitted
+    // through the target's own lowering — `[1, 4, 9]` on JavaScript and
+    // Python, `vec3(1.0, 4.0, 9.0)` / `float[5](…)` on the shader targets. So
+    // `At(Map(_ ↦ _², 1..20), k)` with a run-time `k` indexes a baked array
+    // instead of building the range and mapping over it on every call. (On the
+    // shader targets that shape had no lowering at all and failed closed; a
+    // folded literal base is one it can index.)
+    //
+    // The literal is rebuilt with the value's OWN aggregate head: a `Tuple`
+    // must not come back as a `List`, because the two are different types
+    // wherever the target spells them differently — a Python list is mutable
+    // and unhashable, and `(1, 2) == [1, 2]` is `False` there, so folding a
+    // tuple through the list lowering silently changed the value's type.
+    if (elements !== undefined) {
+      // A complex-ish collection does not fold AT ALL. The structural
+      // lowering picks its element convention from a conservative static
+      // analysis, and the evaluated values need not agree with it in either
+      // direction: `Map(_ ↦ √_, [-4, -9, -16])` compiles structurally to the
+      // real kernel `Math.sqrt`, so it yields `[NaN, NaN, NaN]`, while `.N()`
+      // answers `[2i, 3i, 4i]` — and a mixed list like `[-4, 4]` would fold
+      // to one complex element beside one bare number, a shape no consumer
+      // can read uniformly. Whether an expression folds also depends on the
+      // element cap and the evaluation budget, so admitting these would make
+      // the emitted VALUES depend on those thresholds, not just the emitted
+      // code. Decline the whole class and let the structural path define
+      // both value and shape, as it did before folding existed.
+      //
+      // This costs the common case nothing: every real collection reports
+      // `isComplexValued === false` (measured over Map/Range/Filter/list
+      // literals), so only genuinely complex-ish aggregates are turned away.
+      if (BaseCompiler.isComplexValued(expr)) return undefined;
+      return BaseCompiler.emitFoldedValue(
+        engine.function(isTuple(value) ? 'Tuple' : 'List', elements),
+        target,
+        prec
+      );
+    }
+
+    const foldable =
+      isNumber(value) || isSymbol(value, 'True') || isSymbol(value, 'False');
+    if (!foldable) return undefined;
+
+    // A boolean folds only when the target spells the boolean constants (the
+    // JS target's `True`/`False` mappings). A target without a spelling
+    // (Python, the shader targets) keeps its structural lowering.
+    if (isSymbol(value, 'True') || isSymbol(value, 'False'))
+      return target.var?.(value.symbol);
+
+    // A complex-ish expression whose value comes back with NO imaginary part
+    // does not fold at all. The structural lowering may return either shape
+    // here — a bare number (`_SYS.at` over a real list, even when the INDEX
+    // is complex) or the target's `{re, im}` complex convention (a call to a
+    // function declared `-> complex`) — and which one it picks is a property
+    // of the emitted code, not of any type this can read: the result type is
+    // `number` in both directions, and `isComplexValued` answers for the
+    // OPERANDS, so it is true for a real-valued `At` with a complex index.
+    // Emitting the wrong one silently changes the shape a caller reads back
+    // (`.re` working or not, depending only on whether the inputs happened to
+    // be constant), so decline and let the structural path define the shape,
+    // exactly as it did before folding existed. A value with a NONZERO
+    // imaginary part is unambiguous and still folds, through the complex
+    // literal path below.
+    if (isNumber(value) && value.im === 0 && BaseCompiler.isComplexValued(expr))
+      return undefined;
+
+    // `~oo` on a node the surrounding code reads as a REAL number folds to
+    // `NaN`, not to the `{re: ∞, im: ∞}` object the value itself carries.
+    // A pole has no real value, and `NaN` is how the real lane spells that
+    // (the same reasoning as `NO_REAL_VALUE_FOLD` in the JavaScript target);
+    // emitting the complex object instead hands a parent that lowered real
+    // arithmetic an object to add, which stringifies (`1 + {…}` →
+    // `"1[object Object]"`). A node that really is complex-valued keeps the
+    // object, so `~oo` reached through complex-emitting operands is unchanged.
+    // `isInfinity` with a non-zero imaginary part is the `~oo` test: a real
+    // ±∞ has `im === 0`, and an exact value whose imaginary part merely
+    // OVERFLOWS the float projection is not infinite, so it answers `false`
+    // here (see `BoxedNumber.isInfinity`).
+    if (
+      isNumber(value) &&
+      value.isInfinity &&
+      value.im !== 0 &&
+      !BaseCompiler.isComplexValued(expr)
+    )
+      return BaseCompiler.emitFoldedValue(engine.NaN, target, prec);
+
+    // Emit through the ordinary number-literal path so the target's own
+    // spelling applies (float formatting, complex support, negative-literal
+    // parenthesization).
+    return BaseCompiler.emitFoldedValue(value, target, prec);
+  }
+
+  /**
+   * The evaluated VALUE of a constant subtree, behind every fold gate except
+   * the target's `constantFold` opt-out — shared by `tryConstantFold` (the
+   * emission entry, which respects the opt-out) and by the shape analyses
+   * (`isProvablyRealValued`), which need the runtime value's shape whether or
+   * not the caller wants folded output. `elements` is the materialized
+   * element list when the value is a foldable constant COLLECTION (see
+   * `foldableCollectionElements`), computed inside the evaluation budget
+   * since walking a lazy collection is real work.
+   *
+   * Every OTHER gate applies unchanged — in particular `symbolDeps` (an
+   * implicit-compilation caller's capture set cannot record the engine state
+   * an evaluation reads, and an analysis answer bakes into the cached kernel
+   * just as folded code does) and the purity/unknowns/cost gates.
+   */
+  /**
+   * Per-compilation memo of `constantFoldValue`'s post-gate EVALUATION
+   * outcome, keyed per target then per expression. One compilation reaches
+   * the same constant subtree from both the emission fold (`tryConstantFold`)
+   * and the shape analyses (`isProvablyRealValued`), and the two MUST see the
+   * same outcome: two independently budgeted evaluations of a
+   * deadline-degradable operator (adaptive quadrature) could settle on
+   * different estimates, letting the emitted literal and the wrap decision
+   * disagree about the value's shape. The GATES are deliberately NOT
+   * memoized — they read compile context (bound names, a target's
+   * exclusions) that legitimately differs between call sites — and the
+   * per-target keying is for `maxInlineElements`, which shapes the
+   * materialized `elements`. Reset at each outermost compilation entry,
+   * where engine symbol values may have changed (the complexness memo's
+   * policy).
+   */
+  private static _foldValueMemo = new WeakMap<
+    object,
+    Map<
+      Expression,
+      { value: Expression; elements: Expression[] | undefined } | 'declined'
+    >
+  >();
+
+  private static constantFoldValue(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ):
+    | { value: Expression; elements: Expression[] | undefined }
+    | undefined {
     // Re-entry from the emission of a value this fold already computed (see
     // `emitFoldedValue`) — there is nothing left to fold inside it.
     if (BaseCompiler._emittingFoldedValue) return undefined;
@@ -2858,6 +3008,11 @@ export class BaseCompiler {
     // declining it. Only a finite estimate at or under the ceiling folds.
     if (!(BaseCompiler.foldCostEstimate(expr) <= CONSTANT_FOLD_MAX_COST))
       return undefined;
+    // Every gate above re-ran for THIS call site's context; only the
+    // evaluation below is shared (see `_foldValueMemo`).
+    let byExpr = BaseCompiler._foldValueMemo.get(target);
+    const hit = byExpr?.get(expr);
+    if (hit !== undefined) return hit === 'declined' ? undefined : hit;
     BaseCompiler._boundVarsCtx = undefined;
     BaseCompiler._binderShield = [];
     try {
@@ -2889,97 +3044,20 @@ export class BaseCompiler {
       engine.maxCollectionSize = savedMaxCollectionSize;
       engine.angularUnit = savedAngularUnit;
     }
-    if (value === undefined) return undefined;
-
-    // A constant COLLECTION folds to a literal of its elements, emitted
-    // through the target's own lowering — `[1, 4, 9]` on JavaScript and
-    // Python, `vec3(1.0, 4.0, 9.0)` / `float[5](…)` on the shader targets. So
-    // `At(Map(_ ↦ _², 1..20), k)` with a run-time `k` indexes a baked array
-    // instead of building the range and mapping over it on every call. (On the
-    // shader targets that shape had no lowering at all and failed closed; a
-    // folded literal base is one it can index.)
-    //
-    // The literal is rebuilt with the value's OWN aggregate head: a `Tuple`
-    // must not come back as a `List`, because the two are different types
-    // wherever the target spells them differently — a Python list is mutable
-    // and unhashable, and `(1, 2) == [1, 2]` is `False` there, so folding a
-    // tuple through the list lowering silently changed the value's type.
-    if (elements !== undefined) {
-      // A complex-ish collection does not fold AT ALL. The structural
-      // lowering picks its element convention from a conservative static
-      // analysis, and the evaluated values need not agree with it in either
-      // direction: `Map(_ ↦ √_, [-4, -9, -16])` compiles structurally to the
-      // real kernel `Math.sqrt`, so it yields `[NaN, NaN, NaN]`, while `.N()`
-      // answers `[2i, 3i, 4i]` — and a mixed list like `[-4, 4]` would fold
-      // to one complex element beside one bare number, a shape no consumer
-      // can read uniformly. Whether an expression folds also depends on the
-      // element cap and the evaluation budget, so admitting these would make
-      // the emitted VALUES depend on those thresholds, not just the emitted
-      // code. Decline the whole class and let the structural path define
-      // both value and shape, as it did before folding existed.
-      //
-      // This costs the common case nothing: every real collection reports
-      // `isComplexValued === false` (measured over Map/Range/Filter/list
-      // literals), so only genuinely complex-ish aggregates are turned away.
-      if (BaseCompiler.isComplexValued(expr)) return undefined;
-      return BaseCompiler.emitFoldedValue(
-        engine.function(isTuple(value) ? 'Tuple' : 'List', elements),
-        target,
-        prec
-      );
+    if (byExpr === undefined) {
+      byExpr = new Map();
+      BaseCompiler._foldValueMemo.set(target, byExpr);
     }
-
-    const foldable =
-      isNumber(value) || isSymbol(value, 'True') || isSymbol(value, 'False');
-    if (!foldable) return undefined;
-
-    // A boolean folds only when the target spells the boolean constants (the
-    // JS target's `True`/`False` mappings). A target without a spelling
-    // (Python, the shader targets) keeps its structural lowering.
-    if (isSymbol(value, 'True') || isSymbol(value, 'False'))
-      return target.var?.(value.symbol);
-
-    // A complex-ish expression whose value comes back with NO imaginary part
-    // does not fold at all. The structural lowering may return either shape
-    // here — a bare number (`_SYS.at` over a real list, even when the INDEX
-    // is complex) or the target's `{re, im}` complex convention (a call to a
-    // function declared `-> complex`) — and which one it picks is a property
-    // of the emitted code, not of any type this can read: the result type is
-    // `number` in both directions, and `isComplexValued` answers for the
-    // OPERANDS, so it is true for a real-valued `At` with a complex index.
-    // Emitting the wrong one silently changes the shape a caller reads back
-    // (`.re` working or not, depending only on whether the inputs happened to
-    // be constant), so decline and let the structural path define the shape,
-    // exactly as it did before folding existed. A value with a NONZERO
-    // imaginary part is unambiguous and still folds, through the complex
-    // literal path below.
-    if (isNumber(value) && value.im === 0 && BaseCompiler.isComplexValued(expr))
+    if (value === undefined) {
+      // A budget-expired evaluation is memoized too: a retry at the second
+      // call site might land a DIFFERENT degraded estimate, which is exactly
+      // the emit/analyze divergence this memo exists to prevent.
+      byExpr.set(expr, 'declined');
       return undefined;
-
-    // `~oo` on a node the surrounding code reads as a REAL number folds to
-    // `NaN`, not to the `{re: ∞, im: ∞}` object the value itself carries.
-    // A pole has no real value, and `NaN` is how the real lane spells that
-    // (the same reasoning as `NO_REAL_VALUE_FOLD` in the JavaScript target);
-    // emitting the complex object instead hands a parent that lowered real
-    // arithmetic an object to add, which stringifies (`1 + {…}` →
-    // `"1[object Object]"`). A node that really is complex-valued keeps the
-    // object, so `~oo` reached through complex-emitting operands is unchanged.
-    // `isInfinity` with a non-zero imaginary part is the `~oo` test: a real
-    // ±∞ has `im === 0`, and an exact value whose imaginary part merely
-    // OVERFLOWS the float projection is not infinite, so it answers `false`
-    // here (see `BoxedNumber.isInfinity`).
-    if (
-      isNumber(value) &&
-      value.isInfinity &&
-      value.im !== 0 &&
-      !BaseCompiler.isComplexValued(expr)
-    )
-      return BaseCompiler.emitFoldedValue(engine.NaN, target, prec);
-
-    // Emit through the ordinary number-literal path so the target's own
-    // spelling applies (float formatting, complex support, negative-literal
-    // parenthesization).
-    return BaseCompiler.emitFoldedValue(value, target, prec);
+    }
+    const result = { value, elements };
+    byExpr.set(expr, result);
+    return result;
   }
 
   /**
@@ -5056,10 +5134,7 @@ export class BaseCompiler {
     // ascription promises.
     if (h === 'Typed') {
       const code = BaseCompiler.compile(args[0], target);
-      if (
-        target.language === 'javascript' &&
-        BaseCompiler.isProvablyRealValued(args[0])
-      ) {
+      if (target.language === 'javascript') {
         const s = isString(args[1])
           ? args[1].string
           : isSymbol(args[1])
@@ -5070,8 +5145,16 @@ export class BaseCompiler {
           try {
             ascribed = parseType(s, engine._typeResolver);
           } catch {}
-          if (ascribed !== undefined && isNonRealNumber(ascribed))
-            return `({ re: ${code}, im: 0 })`;
+          if (ascribed !== undefined && isNonRealNumber(ascribed)) {
+            if (BaseCompiler.isProvablyRealValued(args[0], target))
+              return `({ re: ${code}, im: 0 })`;
+            // Neither provably real nor complex-shaped: the value emits as a
+            // plain number the ascription's consumers would slot-read
+            // (see `branchComplexCoercion` for the same inconclusive class);
+            // the idempotent `_SYS.cplx` settles the convention at run time.
+            if (!BaseCompiler.isComplexValued(args[0]))
+              return `_SYS.cplx(${code})`;
+          }
         }
       }
       return code;
@@ -9604,27 +9687,72 @@ export class BaseCompiler {
     if (target.language !== 'javascript') return undefined;
     if (!values.some((v) => v !== undefined && BaseCompiler.isComplexValued(v)))
       return undefined;
-    // Coerce ONLY provably-real arms. A wide-typed arm (`number`, `unknown` —
-    // e.g. a pass-through parameter `z` in `Which(n ≤ 0, z, True, K(n-1,z)²+c)`
-    // whose declared slot is `number`) may hold a complex object at run time;
-    // wrapping it would nest the object (`{ re: { re, im }, im: 0 }`). Such
-    // arms are emitted bare, preserving the pass-through convention.
-    return (val, code) =>
-      val === undefined || BaseCompiler.isProvablyRealValued(val)
-        ? `({ re: ${code}, im: 0 })`
-        : code;
+    // Statically wrap ONLY provably-real arms. A wide-typed arm (`number`,
+    // `unknown` — e.g. a pass-through parameter `z` in
+    // `Which(n ≤ 0, z, True, K(n-1,z)²+c)` whose declared slot is `number`)
+    // may hold a complex object at run time; wrapping it would nest the
+    // object (`{ re: { re, im }, im: 0 }`).
+    //
+    // An arm that is neither provably real NOR complex-shaped
+    // (`isComplexValued === false`) emits a plain number by the shape
+    // invariant, but the static PROOF can be out of reach — a radical over a
+    // radicand with free variables (`√(1 − 0.04r)`), or a closed constant the
+    // fold's gates decline (`symbolDeps`, the cost ceiling, the evaluation
+    // budget). Left bare, the branch's slot-reading consumers NaN-poison on
+    // it (`_SYS.cabs(Math.sqrt(…))` read `.re` off a number and answered 0);
+    // the idempotent runtime test `_SYS.cplx` settles it instead — a number
+    // is lifted, an object passes through, so it is also the safe answer for
+    // a wide arm actually holding an object. Only an arm the shape analysis
+    // calls complex-valued stays bare: its emitted value is already in the
+    // complex convention (or the discipline's consumers runtime-test it).
+    return (val, code) => {
+      if (val === undefined || BaseCompiler.isProvablyRealValued(val, target))
+        return `({ re: ${code}, im: 0 })`;
+      if (!BaseCompiler.isComplexValued(val)) return `_SYS.cplx(${code})`;
+      return code;
+    };
   }
 
   /**
    * True when the expression PROVABLY produces a plain real number at run
-   * time on the JavaScript target — a real number literal or an expression
-   * whose type is a subtype of `real`. Wide types (`number`, `unknown`) are
-   * NOT provably real: they may carry a `{ re, im }` object at run time, so
-   * convention coercion must leave them untouched.
+   * time on the JavaScript target — never the `{ re, im }` complex-object
+   * convention. Callers wrap a provably-real value in that convention
+   * statically; anything else must be left untouched (or routed through the
+   * idempotent `_SYS.cplx` runtime test), because wrapping an object nests it
+   * (`{ re: { re, im }, im: 0 }`) and every slot read off the nest is NaN.
+   *
+   * Three sources answer, in order:
+   *
+   * 1. The SHAPE analysis (`isComplexValued`), which overrides the static
+   *    type: under the complex discipline a promoted radical — `√(1−0.2²)`,
+   *    promoted for its unknown-sign radicand — is emitted as `_SYS.csqrt`,
+   *    a `{ re, im }` object, whatever its static type says. Answering from
+   *    the type alone wrapped that object a second time.
+   * 2. The static type: a subtype of `real` is a plain number. Wide types
+   *    (`number`, `unknown`) are NOT provably real — they may carry a
+   *    `{ re, im }` object at run time (a pass-through parameter, a call to
+   *    a function declared `-> complex` returning a real value).
+   * 3. The constant FOLD (`constantFoldValue`, when the caller can supply
+   *    its target): a closed pure constant subtree that evaluates to a real
+   *    number is real-emitted — as the folded literal itself, or, where the
+   *    emission declines (`constantFold: false`), through the real lowering
+   *    that the step-1 `isComplexValued === false` verdict guarantees. This
+   *    is what keeps `√(1 − 0.2²)` — statically the `finite_complex` hedge,
+   *    machine floats being unfolded at canonicalization — recognized as the
+   *    plain number it evaluates to.
    */
-  private static isProvablyRealValued(expr: Expression): boolean {
+  private static isProvablyRealValued(
+    expr: Expression,
+    target?: CompileTarget<Expression>
+  ): boolean {
     if (isNumber(expr)) return expr.im === 0;
-    return expr.type.matches('real');
+    if (BaseCompiler.isComplexValued(expr)) return false;
+    if (expr.type.matches('real')) return true;
+    if (target !== undefined) {
+      const v = BaseCompiler.constantFoldValue(expr, target)?.value;
+      if (v !== undefined && isNumber(v) && v.im === 0) return true;
+    }
+    return false;
   }
 
   /**
@@ -11472,7 +11600,8 @@ export class BaseCompiler {
    */
   private static complexWrapCode(
     code: string,
-    arg: Expression | undefined
+    arg: Expression | undefined,
+    target?: CompileTarget<Expression>
   ): string {
     if (
       arg !== undefined &&
@@ -11481,7 +11610,7 @@ export class BaseCompiler {
       isNonRealNumber(arg.type.type)
     )
       return code;
-    if (arg !== undefined && BaseCompiler.isProvablyRealValued(arg))
+    if (arg !== undefined && BaseCompiler.isProvablyRealValued(arg, target))
       return `({ re: ${code}, im: 0 })`;
     return `_SYS.cplx(${code})`;
   }
@@ -11580,7 +11709,7 @@ export class BaseCompiler {
       // reals — yields only real elements, so the static wrap holds and no
       // runtime test is emitted. Anything else takes `_SYS.cplx`.
       const callParams = params.map((p, i) =>
-        coerceToComplex[i] ? complexWrap(p, args[i]) : p
+        coerceToComplex[i] ? complexWrap(p, args[i], target) : p
       );
       return `_SYS.bcastFn((${params.join(', ')}) => ${name}(${callParams.join(
         ', '
@@ -11589,7 +11718,7 @@ export class BaseCompiler {
 
     return `${name}(${compiledArgs
       .map((code, i) =>
-        coerceToComplex[i] ? complexWrap(code, args[i]) : code
+        coerceToComplex[i] ? complexWrap(code, args[i], target) : code
       )
       .join(', ')})`;
   }
@@ -13323,7 +13452,9 @@ export class BaseCompiler {
 
     const compiledArgs = call.args.map((a, i) => {
       const code = BaseCompiler.compileValueOperand(a, target);
-      return coerceToComplex[i] ? BaseCompiler.complexWrapCode(code, a) : code;
+      return coerceToComplex[i]
+        ? BaseCompiler.complexWrapCode(code, a, target)
+        : code;
     });
 
     if (plan.tier === 'static')

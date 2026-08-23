@@ -461,42 +461,6 @@ export function absFunctionType(x: Expression | undefined): Type {
 }
 
 /**
- * The sign of a **closed** (unknowns-free) real expression, folding machine
- * floats.
- *
- * Machine floats are deliberately not folded at canonicalization, so an
- * expression such as `1 - 0.2^2` has no statically-known sign (`sgn` is
- * `undefined`) even though its value is `0.96`. When the expression has no
- * unknowns, numericizing it is value-safe — there is no free variable whose
- * assignment could change the answer — and the result is cached with the type
- * (which is generation-keyed), so this is only paid once per expression.
- *
- * Returns `undefined` when the sign cannot be established this way (free
- * variables, or a value that is not a *finite* real number — the non-finite
- * case is the callers' business, per the non-finite typing convention).
- *
- * Callers must have established that the operand is real (and, if it matters,
- * finite) first: this is a *refinement* of `sgn`, used when the cheap
- * predicates came back undecided.
- */
-export function closedRealSign(
-  x: Expression
-): 'non-negative' | 'negative' | undefined {
-  // An IMPURE operand must not be numericized here: `√(Random() − 0.5)` would
-  // consume a draw just to answer a type query (and the answer would not even
-  // be stable). Purity is a cheap, cached check, so it comes first.
-  if (!x.isPure) return undefined;
-  if (x.unknowns.length !== 0) return undefined;
-  const n = x.N();
-  if (n.isFinite !== true) return undefined;
-  const s = n.sgn;
-  if (s === 'positive' || s === 'zero' || s === 'non-negative')
-    return 'non-negative';
-  if (s === 'negative') return 'negative';
-  return undefined;
-}
-
-/**
  * `Max`/`Min`/`Supremum`/`Infimum`. These are data-consuming aggregates
  * (§3.C: an absent datum or empty input evaluates to NaN), so the base claim
  * is `number`. When every operand is a *scalar* number, though, no

@@ -1120,7 +1120,7 @@ type?: (
 | `Set.elttype` | The body's structure; the domain's type. | `derive` on the body with the bound variable described as `describeType(collectionElementType(domain))`, as `Map` does. | `unknown`. | Yes — `enumerateSetComprehension` is only called from `evaluate`. | To be measured; the comprehension-element pins are re-read. |
 | `Interval.elttype` | The endpoints' `structureOf()` and types. | `finite_real` when both endpoints are number literals or have a `finite_*` type; otherwise `real`. | `real`. | Yes — `.N()` leaves the type path. | None expected. |
 | `JacobianMatrix` | The operand's type and `structureOf()`. | A matrix when the operand is a list literal, a function literal whose body is a list literal, or has a `list` type or a signature returning a list; a vector when its type is a scalar number or a signature returning one. | `value`, the declared result, when neither can be decided. | Yes — `resolveToList` and beta-reduction leave the type path. | To be measured; `Determinant(JacobianMatrix(F(x, y, z)))` with `F` declared to return a list must still type-check (that case is why the handler canonicalized in the first place). |
-| `Sqrt` | `facts.sgn`, `facts.finite`, the type. | `finite_real` when the operand is real and its sign is positive, zero or non-negative; `finite_complex` for a real operand of unknown sign; the existing branches otherwise. | Today's handler minus the `.N()` branch. | Yes — `closedRealSign` becomes evaluation-only. | Closed float expressions such as `√(1 − 0.2²)` type `finite_complex` instead of `finite_real` (accepted under R2); count them. |
+| `Sqrt` (IMPLEMENTED 2026-08-23 with A5) | `facts.sgn`, `facts.finite`, the type. | `finite_real` when the operand is real and its sign is positive, zero or non-negative; `finite_complex` for a real operand of unknown sign; the existing branches otherwise. | Today's handler minus the `.N()` branch. | No — `closedRealSign` was deleted outright rather than moved to an evaluation path: no evaluation path wanted it (its only consumer was the compile targets, which now fold for themselves). | Closed float expressions such as `√(1 − 0.2²)` type `finite_complex` instead of `finite_real` (accepted under R2); count them. (Measured: 3 pinned assertions moved, all in `type-handler-audit.test.ts` — the audit block's row and the two item-137 type pins; zero compiled bytes changed, zero evaluate/solve values changed.) |
 | `Dot` | — | Already pure (§4.1). | — | — | — |
 
 ### 5.5 Enforcement and measurement
@@ -1538,12 +1538,29 @@ can be folded back in order. Verify: `broadcastable-typing`,
 `tycho-item-188-broadcastable-vector-divide`, `non-finite-typing`.
 
 **A5 — The `Sqrt` fold leaves the type path once the compiler folds
-constants.** §5.7 found the fold's only consumer is the GLSL band of a
-`Which` over a float radicand (Tycho item 137). Sequence: the ROADMAP
-entry "Compile targets should constant-fold before reading a node's type"
-lands first; then `closedRealSign` is deleted and the §5.4 `Sqrt` row
-applies, with item 137 and `compile-complex-result` / `compile-glsl` /
-`random-compile` byte-identical as the acceptance test.
+constants. (IMPLEMENTED 2026-08-23.)** §5.7 found the fold's only consumer
+is the GLSL band of a `Which` over a float radicand (Tycho item 137).
+Sequence: the ROADMAP entry "Compile targets should constant-fold before
+reading a node's type" lands first; then `closedRealSign` is deleted and
+the §5.4 `Sqrt` row applies, with item 137 and `compile-complex-result` /
+`compile-glsl` / `random-compile` byte-identical as the acceptance test.
+How it landed: the compile-side audit found the shader band and the
+complex-lane predicates already answer from the value channel —
+`isComplexValued`'s `Sqrt`/`Ln`/`Log` carve-out and the constant fold at
+emission — so the only type reads that lost precision were the JavaScript
+target's static-wrap sites (`isProvablyRealValued`: the branch coercion,
+the `Typed` ascription lift, the complex-argument delivery). Those now
+consult the fold's VALUE (`constantFoldValue`, split out of
+`tryConstantFold` behind every gate except the `constantFold` emission
+opt-out) after the shape analysis and the type both decline — and the
+shape analysis is consulted FIRST, which also fixed a live defect: a
+promoted radical arm (complex discipline) was `matches('real')` by type
+and got double-wrapped (`{ re: { re, im }, im: 0 }`, NaN at every slot
+read; pinned in `compile-complex.test.ts`, "coercion reads the value
+SHAPE" block). `resultIsComplexValued` / `gpuResultIsComplexValued` were
+left type-based on purpose: their conservatism is mirrored by the
+parent's identical type read in `isComplexValued`, and folding one side
+alone would break the parent/child shape agreement.
 
 **A6 — Evaluate handlers that classify an operand by a type-derived
 predicate.** `Mod(2^(3^20), 100)` stayed inert in the `sgn` run because

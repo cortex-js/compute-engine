@@ -395,15 +395,20 @@ describe('TYPE AUDIT: Mod (floored remainder)', () => {
 describe('TYPE AUDIT: Sqrt over a closed (unknowns-free) radicand', () => {
   // Machine floats are deliberately not folded at canonicalization, so the
   // radicand of `√(1 − 0.2²)` reaches the type handler unevaluated and its
-  // `sgn` is undecided. A radicand with no unknowns is folded by the handler
-  // (value-safe: no free variable can change the answer) so a provably
-  // non-negative one claims `finite_real` rather than the `finite_complex`
-  // hedge (Tycho 0.100.0 adoption item 137).
-  it('an unfolded non-negative float radicand claims finite_real', () => {
+  // `sgn` is undecided — and the handler claims the `finite_complex` hedge
+  // for it, exactly as it does for any other unknown-sign real radicand. A
+  // type derivation never evaluates: the `closedRealSign` fold that used to
+  // numericize a closed radicand here (Tycho 0.100.0 adoption item 137) was
+  // retired once the compile targets learned to fold constants before
+  // reading a node's type (§5.4 `Sqrt` row and §5.8 A5 of
+  // `docs/plans/2026-08-22-type-handlers-on-types.md`) — the compiled bytes
+  // are pinned unchanged in the item-137 block below.
+  it('an unfolded non-negative float radicand claims the finite_complex hedge', () => {
     expect(typeOf(['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]])).toBe(
-      'finite_real'
+      'finite_complex'
     );
-    // …matching the folded form, which already claimed it
+    // …while a literal radicand, whose sign is statically known, still
+    // claims `finite_real` — no evaluation is needed to see `0.96 ≥ 0`
     expect(typeOf(['Sqrt', 0.96])).toBe('finite_real');
     expectSound(['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]]);
   });
@@ -413,12 +418,13 @@ describe('TYPE AUDIT: Sqrt over a closed (unknowns-free) radicand', () => {
       'finite_complex'
     );
     expect(typeOf(['Sqrt', -2])).toBe('finite_complex');
-    // …including one that only folding can decide (`ln 2 − 1 = −0.306…`)
+    // …including one whose sign only evaluation could decide
+    // (`ln 2 − 1 = −0.306…`): the hedge covers it without evaluating
     expect(typeOf(['Sqrt', ['Subtract', ['Ln', 2], 1]])).toBe('finite_complex');
     expectSound(['Sqrt', ['Subtract', ['Power', 0.2, 2], 1]]);
   });
 
-  it('a radicand with unknowns is unchanged (no folding attempted)', () => {
+  it('a radicand with unknowns hedges the same way', () => {
     expect(typeOf(['Sqrt', 'x'])).toBe('finite_number');
     expect(typeOf(['Sqrt', ['Subtract', 1, ['Power', 'r', 2]]])).toBe(
       'finite_complex'
@@ -429,9 +435,10 @@ describe('TYPE AUDIT: Sqrt over a closed (unknowns-free) radicand', () => {
     expect(typeOf(['Sqrt', ['Divide', 1, 0.0]])).toBe('number');
   });
 
-  it('does not fold an IMPURE radicand (a type query draws no random)', () => {
-    // `√(Random() − 0.5)` has no unknowns, but numericizing it to decide the
-    // type would consume a draw (and give an unstable answer).
+  it('an IMPURE radicand draws no random (the type path never evaluates)', () => {
+    // `√(Random() − 0.5)` has no unknowns; a type derivation that evaluated
+    // it would consume a draw (and give an unstable answer). This pin is the
+    // regression guard for the no-evaluation contract itself.
     const engine = new ComputeEngine();
     const claimed: string[] = [];
     const drawn = withRandomSeedFrame(engine, 7, () => {
@@ -441,13 +448,13 @@ describe('TYPE AUDIT: Sqrt over a closed (unknowns-free) radicand', () => {
       return engine._randomFrame!.next;
     });
     expect(drawn).toBe(0);
-    // …and the claim stays the conservative hedge
+    // …and the claim is the conservative hedge
     expect(claimed).toEqual(['finite_complex']);
   });
 });
 
 describe('Tycho item 137: the GLSL band of a Which over a float radicand', () => {
-  it('the raw and the folded radicand agree', () => {
+  it('the raw and the folded radicand compile to the same bytes', () => {
     const engine = new ComputeEngine();
     engine.declare('x', 'real');
     const glsl = engine._getCompilationTarget('glsl')!;
@@ -458,10 +465,18 @@ describe('Tycho item 137: the GLSL band of a Which over a float radicand', () =>
 
     const raw = branch('1-0.2^2');
     const folded = branch('0.96');
-    // The pair used to disagree: the raw radicand typed `finite_complex`
-    expect(raw.type.toString()).toBe(folded.type.toString());
-    expect(raw.type.toString()).toBe('finite_real');
-    expect(glsl.compile(raw).code).toBeTruthy();
-    expect(glsl.compile(folded).code).toBeTruthy();
+    // The TYPES now differ — the raw radicand's sign is statically unknown,
+    // so `√(1−0.2²)` types the `finite_complex` hedge, while `√0.96` (whose
+    // literal radicand is statically non-negative) types `finite_real`; the
+    // `closedRealSign` numericization that used to align them was retired
+    // from the type path. What item 137 actually needs is the COMPILED band:
+    // the compiler folds the constant subtree itself, so both spellings
+    // still emit the identical real scalar — byte for byte.
+    expect(raw.type.toString()).toBe('finite_complex');
+    expect(folded.type.toString()).toBe('finite_real');
+    const rawCode = glsl.compile(raw).code;
+    const foldedCode = glsl.compile(folded).code;
+    expect(rawCode).toBeTruthy();
+    expect(rawCode).toBe(foldedCode);
   });
 });

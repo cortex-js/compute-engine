@@ -135,7 +135,6 @@ import {
   absFunctionType,
   measurementType,
   bigOpResultType,
-  closedRealSign,
 } from './type-handlers.js';
 import {
   foldQuantityOperands,
@@ -2989,13 +2988,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // unknown-sign real must not claim `finite_real` (same ruling as
           // the bounded inverse-trig heads, 2026-07-30). Finite operand
           // (checked above) ⇒ finite result: `finite_complex`, not `complex`.
+          //
+          // An unknown sign INCLUDES a closed float radicand (`1 − 0.2²`):
+          // machine floats are not folded at canonicalization, so its `sgn`
+          // is undecided even though its value is knowable. This handler
+          // deliberately does NOT numericize to find out — a type derivation
+          // must not evaluate (the retired `closedRealSign` fold did, for
+          // the sole benefit of the compile targets). The consumer that
+          // needs the value's shape is the compiler, and it folds constants
+          // itself before deciding lowerings (`constantFoldValue` /
+          // `isComplexValued`'s Sqrt carve-out in
+          // `compilation/base-compiler.ts`), so such a radicand now types
+          // the `finite_complex` hedge while its compiled bytes are
+          // unchanged. See the §5.4 `Sqrt` row of
+          // `docs/plans/2026-08-22-type-handlers-on-types.md`.
           if (x.isNonNegative === true) return 'finite_real';
-          // The radicand may be an unfolded float expression (`1 - 0.2^2`):
-          // machine floats are not folded at canonicalization, so `sgn` is
-          // undecided even though the value is known. Fold it when the
-          // radicand is closed (no unknowns).
-          const sign = closedRealSign(x);
-          if (sign === 'non-negative') return 'finite_real';
           return 'finite_complex';
         }
         return 'finite_number';
