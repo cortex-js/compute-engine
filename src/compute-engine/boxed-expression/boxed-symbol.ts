@@ -83,10 +83,7 @@ import { getFactIndex, hasAssumptions } from './constraint-subject.js';
 import { isNumber, isSymbol } from './type-guards.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { sameBinding } from './compare.js';
-import {
-  evaluateInOwnBindings,
-  valueDefinitionInContext,
-} from './binders.js';
+import { evaluateInOwnBindings, valueDefinitionInContext } from './binders.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 import {
   CYCLE_DETECTED,
