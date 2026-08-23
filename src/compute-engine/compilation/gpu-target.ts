@@ -16,7 +16,6 @@ import {
   isOpaqueComplexOperand,
   formatFloat,
   gpuNonFiniteLiteral,
-  parenthesizeFactor,
   negativeBaseRealPow,
   principalComplexPow,
 } from './constant-folding.js';
@@ -3765,6 +3764,38 @@ function compileGPUSumProduct(
 }
 
 /**
+ * Compile one operand of the `Multiply` lowering so that it binds as a single
+ * factor next to a ` * `.
+ *
+ * The `compile` callback a `CompiledFunction` handler is handed carries no
+ * precedence context — it compiles every sub-expression at precedence 0 — and
+ * `foldTerms` then joins the resulting strings with a bare ` * `. A factor
+ * whose own emission is a looser infix form was therefore spliced raw:
+ * `Multiply(Add(t, 1), Tuple(x, 0))` emitted `t + 1.0 * vec2(x, 0.0)`, which
+ * the shader reads as `t + (1.0 * vec2(x, 0.0))` — the float broadcast into
+ * the vector, the wrong geometry, behind `success: true`.
+ *
+ * Compiling the operand at the binding power of `*` instead makes the shared
+ * compiler add the parentheses itself, by the same `op[1] < prec` rule the
+ * infix path applies to its own operands. Everything else about the call
+ * matches the callback the handler was given: with no operand index, that
+ * callback is exactly `BaseCompiler.compileValueOperand(expr, target)`, and
+ * the `target` a handler receives is the one the callback closes over (an
+ * element-wise broadcast hands the handler the same `innerTarget` its callback
+ * uses), so no CSE or binding bookkeeping is skipped by calling it directly.
+ */
+function gpuMultiplicativeFactor(
+  operand: Expression,
+  target: CompileTarget<Expression>
+): string {
+  return BaseCompiler.compileValueOperand(
+    operand,
+    target,
+    GPU_OPERATORS.Multiply[1]
+  );
+}
+
+/**
  * GPU shader functions shared by GLSL and WGSL.
  *
  * Both languages share identical built-in math functions. Language-specific
@@ -3833,7 +3864,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
     if (!anyComplex) {
       return foldTerms(
-        args.map((x) => compile(x)),
+        args.map((x) => gpuMultiplicativeFactor(x, target)),
         '1.0',
         '*',
         target.language
@@ -3855,7 +3886,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const v2 = gpuVec2(target);
       if (realFactors.length === 0)
         return `${v2}(0.0, ${formatFloat(iScale, target.language)})`;
-      const factors = realFactors.map((f) => parenthesizeFactor(f, compile(f)));
+      const factors = realFactors.map((f) =>
+        gpuMultiplicativeFactor(f, target)
+      );
       if (iScale !== 1) factors.unshift(formatFloat(iScale, target.language));
       const imCode = foldTerms(factors, '1.0', '*', target.language);
       return `${v2}(0.0, ${imCode})`;
@@ -3865,7 +3898,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const complexCodes: string[] = [];
     for (const a of args) {
       if (BaseCompiler.isComplexValued(a)) complexCodes.push(compile(a));
-      else realCodes.push(parenthesizeFactor(a, compile(a)));
+      else realCodes.push(gpuMultiplicativeFactor(a, target));
     }
     const scalarCode = foldTerms(realCodes, '1.0', '*', target.language);
     // Pairwise reduce complex operands

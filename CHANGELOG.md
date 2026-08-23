@@ -71,6 +71,35 @@
 
 ### Bug Fixes
 
+- **A compound factor of a vector `Multiply` keeps its parentheses on the
+  `glsl` and `wgsl` targets.** `Multiply(Add(t, 1), Tuple(x, 0))` compiled to
+  `t + 1.0 * vec2(x, 0.0)`, which the shader reads as
+  `t + (1.0 * vec2(x, 0.0))` — the float broadcast into the vector rather
+  than scaling it, so a Desmos-style lerp `t·P₁ + (1−t)·P₀` rendered as
+  `t·P₁ − t + P₀`. A `Multiply` with a collection operand is lowered by the
+  shader target's function handler, and the `compile` callback such a handler
+  receives carries no precedence context, so the factor arrived
+  unparenthesized and was joined with a bare ` * `. Each factor is now
+  compiled at the binding power of `*`. Two more instances of the same
+  dropped grouping are fixed with it: a function handler's emission spliced
+  into an enclosing infix operator now obeys the same `op[1] < prec` rule the
+  infix path applies to its own operands (`s·(P + Q)` over two points emitted
+  `s * vec2(a, b) + vec2(c, d)`), and a single-statement `Block` used as a
+  sub-expression is compiled at the enclosing precedence on every target
+  (`Multiply(Block(Add(t, 1)), x)` emitted `x * t + 1` on `javascript`,
+  `python`, `glsl` and `wgsl`). The scalar multiply, `Divide`, and the
+  `javascript`/`python` lowerings of the vector shape were already correct
+  and are unchanged. (Tycho item 224)
+- **A bare `Nothing` fails closed on every compile target.** `Nothing` is
+  the erasure marker, not a value; it can still reach a compiler as a bare
+  symbol (a malformed `Which` with a dangling clause canonicalizes to it).
+  Only the `javascript` target refused it — `glsl` and `wgsl` emitted the
+  undefined identifier `Nothing` behind `success: true`, `python` the
+  undefined name, and `interval-js` a `_.Nothing` read that is `undefined`
+  at run time. All five targets now decline with the same diagnostic
+  ("the erasure marker is not a value … Fail closed (D6)"). A `Nothing`
+  arithmetic operand is still erased at canonicalization (`Add(Nothing, x)`
+  compiles to `x`), as before.
 - **An element-wise broadcast no longer captures a collection-typed but
   still valueless operand as a per-element scalar.** With `A` an
   unknown-length view (`Range(0, n)/n`, `n` unassigned) and `s` declared

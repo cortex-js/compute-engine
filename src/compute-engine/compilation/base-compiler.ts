@@ -3535,6 +3535,25 @@ export class BaseCompiler {
         resolved === s ||
         target.boundVars?.has(s) === true ||
         target.varsKeys?.has(s) === true;
+      // `Nothing` is the engine's ERASURE marker, not a value: an arithmetic
+      // operand spelled `Nothing` is dropped at canonicalization, and a
+      // malformed form (an odd-length `Which` clause list) canonicalizes to
+      // the bare symbol. Reaching this point means an emitter is about to
+      // splice it in as an ordinary operand, and every target's free-symbol
+      // plumbing then produces something that looks like success: the shader
+      // targets emitted the undefined identifier `Nothing` (a driver-side
+      // compile error behind `success: true`), the Python target the
+      // undefined name `Nothing`, and the interval target a `_.Nothing`
+      // vars-object read that is `undefined` at run time. Fail closed (D6)
+      // for every target here, on the one route they share. The JavaScript
+      // target's own `var` hook refuses it first with the same message, so
+      // this guard is what the other targets rely on. A BOUND name or a
+      // caller `vars` key spelled `Nothing` is a genuine variable and is
+      // served above.
+      if (s === 'Nothing' && !isBoundOrMapped)
+        throw new Error(
+          'Nothing: the erasure marker is not a value and cannot be compiled as a variable reference. Fail closed (D6).'
+        );
       if (registry && !isBoundOrMapped && !registry.misses?.has(s)) {
         // The VALUE position, so a declared-complex parameter needs the
         // coercing shim: this reference may end up as `Map`'s callback, which
@@ -4855,7 +4874,7 @@ export class BaseCompiler {
     }
 
     if (h === 'Block') {
-      return BaseCompiler.compileBlock(args, target, node);
+      return BaseCompiler.compileBlock(args, target, node, true, prec);
     }
 
     // Absence-discharge primitives (§3.F). `IsMissing`/`Coalesce` lower through
@@ -5248,6 +5267,17 @@ export class BaseCompiler {
       // operand shapes it was given (`CompileTarget.checkOperandShapes`); it
       // throws to fail closed (D6). No hook: unchanged.
       target.checkOperandShapes?.(h, args, code, target);
+      // A head that ALSO has an infix spelling gets the same precedence
+      // treatment its infix emission would have received. A function handler
+      // takes over when the infix path declines — a collection operand, a
+      // complex one — but it lowers the very same operator, so its emission
+      // binds just as loosely: the GPU `Add` handler emits
+      // `vec2(a, b) + vec2(c, d)` for a sum of two points, and splicing that
+      // into an enclosing `s * …` without parentheses yielded
+      // `s * vec2(a, b) + vec2(c, d)`, read as `(s * P) + Q`. Wrapping here on
+      // `op[1] < prec` mirrors the infix path's own rule verbatim.
+      const opPrec = target.operators?.(h)?.[1];
+      if (opPrec !== undefined && opPrec < prec) return `(${code})`;
       return code;
     }
 
@@ -7329,7 +7359,8 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
     node?: Expression,
-    valueUsed = true
+    valueUsed = true,
+    prec = 0
   ): TargetSource {
     // A block-local `Declare` is HELD, so a target's constness / declared type
     // is visible ONLY in this statement list. Harvest it up front: the
@@ -7411,8 +7442,14 @@ export class BaseCompiler {
       // own value region are pushed, or the statement's candidates would find
       // no instance to bind at. (A canonical `Function`-literal body is such a
       // block, so this is the common case, not an edge one.)
+      // The lone statement inherits the ENCLOSING precedence: unwrapping the
+      // block removes the grouping the braces carried, so compiling the
+      // statement at precedence 0 spliced a loose infix body straight into its
+      // parent — `Multiply(Block(Add(t, 1)), x)` emitted `x * t + 1`, read as
+      // `(x * t) + 1`. Handing `prec` down makes the statement's own emission
+      // parenthesize itself exactly as an unbracketed operand would.
       return BaseCompiler.withCseScope(node, -1, target, () =>
-        BaseCompiler.compileOp(args[0], -1, target, 0, args[0])
+        BaseCompiler.compileOp(args[0], -1, target, prec, args[0])
       );
     }
 

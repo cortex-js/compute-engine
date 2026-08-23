@@ -418,6 +418,76 @@ ordinary quotient pays nothing; `tuple.div(0)` on the value route now answers
 exact-rational divisors `[(3,4)]/[5]` → `[(3/5, 4/5)]`, zero/NaN divisors,
 `Multiply` controls in both orders). Full suite: zero snapshot churn.
 
+### The GPU targets dropped the parentheses around a compound factor of a vector `Multiply` (Tycho item 224, FIXED 2026-08-22)
+
+`Multiply(Add(t, 1), Tuple(x, 0))` compiled to `t + 1.0 * vec2(x, 0.0)` on
+`glsl` (and `t + 1.0 * vec2f(x, 0.0)` on `wgsl`), which the shader reads as
+`t + (1.0 * vec2(x, 0.0))` — the float broadcast into the vector instead of
+scaling it. The consumer witness is the Desmos lerp `t·P₁ + (1−t)·P₀`, which
+emitted `t * vec2(x1, y1) + -t + 1.0 * vec2(x0, y0)`, i.e. `t·P₁ − t + P₀`:
+wrong geometry behind `success: true`. The scalar form was always correct
+(`Multiply(Add(t, 1), x)` → `x * (t + 1.0)`), and so were the `javascript`
+target (`_SYS.bcast`) and the `python` one (which fails closed on arithmetic
+over a point).
+
+Mechanism: a `Multiply` with a collection operand never reaches the shared
+infix path — that path is gated on `args.every((x) => !x.isCollection || …)`
+— so it lands in `GPU_FUNCTIONS.Multiply`, whose real-operand branch built
+its factors with the `compile` callback a `CompiledFunction` handler
+receives. That callback carries no precedence context (it compiles every
+sub-expression at precedence 0) and `foldTerms` then joins the resulting
+strings with a bare ` * `, so an additive factor was spliced raw. The
+complex branches of the same handler had a narrower guard for this —
+`parenthesizeFactor`, an `Add`/`Subtract` head test — and its doc comment
+described exactly this hazard.
+
+Probing for the same class turned up two more instances, both fixed with it.
+(1) One level up, an INFIX `*` whose operand is emitted by a FUNCTION
+handler: the dispatcher returned a handler's emission verbatim, ignoring the
+precedence it was called at, so a sum of two POINTS — `vec2(a, b) + vec2(c,
+d)` from the `Add` handler — gave `s * vec2(a, b) + vec2(c, d)` for
+`s·(P+Q)`. (2) Not GPU-specific: unwrapping a single-statement `Block` used
+as a sub-expression compiled its lone statement at precedence 0, dropping
+the grouping the braces carried — `Multiply(Block(Add(t, 1)), x)` emitted
+`x * t + 1` on `javascript`, `python`, `glsl` and `wgsl` alike, and
+`Negate(Block(Add(t, 1)))` emitted `-t + 1`.
+
+Fix, one mechanism in all three places — carry the precedence and honour it.
+`GPU_FUNCTIONS.Multiply` compiles each factor through
+`gpuMultiplicativeFactor`, which calls
+`BaseCompiler.compileValueOperand(operand, target, GPU_OPERATORS.Multiply[1])`
+(identical to the callback it was handed, which with no operand index is
+exactly `compileValueOperand(expr, target)`, so no CSE or binding
+bookkeeping is skipped); `BaseCompiler.compileExpr` applies the infix path's
+own `op[1] < prec` rule to a function handler's emission when the head also
+has an operator-table entry; and `compileBlock` passes the enclosing
+precedence down to the statement it unwraps. A head with no operator entry
+is untouched, so a user function whose body is a sum keeps its atomic call
+emission (`vec2(x, 0.0) * _fn_f(t)`). Pinned in
+`tycho-item-224-gpu-vector-factor-precedence.test.ts` (15 cases: the minimal
+shape, the lerp witness in both authored orders, the three-factor form, the
+point-sum factor, a compound factor on both sides, the user-function form,
+the `Block` shapes on four targets, and controls for the scalar multiply,
+`Divide`, `Negate`, `javascript` and `python` — 9 of the 15 fail at the
+pre-fix tree). Full suite: 598 suites, 4238 snapshots, zero churn.
+
+Found alongside, and fixed in the same change: a bare `Nothing` compiled to
+something that looked like success on four of the five targets. `Nothing` is
+the engine's erasure marker, not a value — an arithmetic operand spelled
+`Nothing` is dropped at canonicalization (`Add(Nothing, x)` is `x`), which is
+by design — but the bare symbol itself can still reach a compiler (a
+malformed `Which` with a dangling clause canonicalizes to `Nothing`). The
+`javascript` target refused it in its own `var` hook ("the erasure marker is
+not a value … Fail closed (D6)"); `glsl` and `wgsl` emitted the undefined
+identifier `Nothing` (a driver-side compile error behind `success: true`),
+`python` the undefined name `Nothing`, and `interval-js` a `_.Nothing`
+vars-object read that is `undefined` at run time. The refusal now lives on
+the symbol route every target shares (`BaseCompiler.compile`, symbol
+branch), guarded the same way as the JavaScript hook — a bound name or a
+caller `vars` key spelled `Nothing` is a genuine variable and still resolves.
+Pinned in `compile-nothing-fails-closed.test.ts` (all five targets, the
+bare symbol and the malformed-`Which` route, plus the erasure control).
+
 ### The `javascript`/`python` targets declined the multi-collection form of `Map` over symbolic sources (RESOLVED 2026-08-21 — Tycho item 218)
 
 `Map((_1,_2) ↦ _1+_2, 1..N, 2..N)` with `N` a free input declined with

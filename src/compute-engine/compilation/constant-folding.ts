@@ -235,11 +235,22 @@ export function foldTerms(
  *
  * `foldTerms(..., '*')` joins operand strings with ` * ` without adding
  * precedence parentheses. That is fine when operands come through the
- * operator path (which already wraps lower-precedence operands), but the
- * complex-multiply function handlers compile their operands with no
- * precedence context, so a top-level additive factor like `x + 1.0` would be
- * joined as `x + 1.0 * z` (mis-grouped). Wrap `Add`/`Subtract` operands so
- * they bind as a single factor.
+ * operator path (which already wraps lower-precedence operands), but a
+ * top-level additive factor like `x + 1.0` would be joined as `x + 1.0 * z`
+ * (mis-grouped). Wrap `Add`/`Subtract` operands so they bind as a single
+ * factor.
+ *
+ * Used by `tryGetComplexParts` below, which is handed a bare
+ * `(e: Expression) => string` compiler and so has no precedence channel to
+ * push the enclosing binding power down. Testing the two additive heads is
+ * exhaustive for its operands: the only other infix heads that bind looser
+ * than `*` on any target are the relational and logical ones, and a
+ * boolean-valued factor of a product is an `incompatible-type` error at box
+ * time, so it never reaches an emitter; a conditional (`If`) emits an
+ * already-parenthesized ternary. A caller that DOES hold the target should
+ * compile the factor at the `*` precedence instead and let the shared
+ * compiler place the parentheses (see `gpuMultiplicativeFactor` in
+ * `gpu-target.ts`).
  *
  * @param expr The source expression for the operand.
  * @param code The already-compiled operand code.
