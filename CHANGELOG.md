@@ -71,6 +71,42 @@
 
 ### Bug Fixes
 
+- **Evaluating a user function over its own previous result no longer takes
+  exponential time.** A document function applied to its own result — Tycho's
+  `detail(smooth(upSample(…)))` heightmap chain, evaluated while its sliders
+  are still valueless — produces an inert value that EMBEDS the previous level
+  once per mention of the parameter: four levels hold about 16 000 distinct
+  nodes that unfold to over a million. Every walk that descended each operand
+  independently paid for the unfolded tree — the `Add` ordering key
+  (`revlex`, a string of every symbol in the term, so the key itself grew to
+  gigabytes), the free-variable scan (`unknowns`, `freeVariables`,
+  `symbols`), the binder rewrite behind parameter substitution, symbol
+  dereference and `Sum`/`Comprehension` canonicalization
+  (`rewriteWithBinders`), closure capture, the element memo's dependency
+  snapshot, `has()` and the ordering tie-breaker's leaf count — and none of
+  them reached a deadline check, so a consumer's per-evaluation time budget
+  never fired: one document ran for more than twenty minutes at 100 % CPU and
+  3 GB (Tycho item 220's sweep stall). 0.118.1 finished the same document in
+  about 12 s only because its `Add` broadcast over the operand; the item-221
+  fix keeps that `Add` inert, which is right, and exposed the walks. Each walk
+  now memoizes per node within a call, so it is linear in the number of
+  distinct nodes, and the ordering key is bounded to the trailing 1 024
+  characters of the symbol sequence. The bounded key is a function of the
+  unbounded one, so every sum whose terms' keys fit orders exactly as before;
+  a sum whose terms carry more than 1 024 characters of symbol names AND share
+  that whole tail now breaks the tie by the structural `order` rather than
+  by the longer key — deterministic, and only reachable from expressions of
+  that size. The heightmap document evaluates in 3.7 s (78–199 s before); the
+  engine-only replica at three levels takes 0.2 s (more than two minutes
+  before). Pinned in `dag-shared-walks.test.ts` on a depth-30 shared tower
+  (31 distinct nodes, 2³⁰ unfolded): the free-variable and symbol scans, the
+  bounded ordering key, the degree walks on a shared polynomial spine, the
+  leaf-count tie-breaker, `has()`, a `Sum` binder over the tower, the
+  application of a literal holding it, and a lazy collection's dependency
+  snapshot over it. Two walks on the way to ASSIGNING such a literal remain
+  exponential and are tracked in `ROADMAP.md` ("Assigning a function
+  literal whose body shares operands").
+
 - **A compound factor of a vector `Multiply` keeps its parentheses on the
   `glsl` and `wgsl` targets.** `Multiply(Add(t, 1), Tuple(x, 0))` compiled to
   `t + 1.0 * vec2(x, 0.0)`, which the shader reads as

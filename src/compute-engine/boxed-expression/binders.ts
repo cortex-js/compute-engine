@@ -300,47 +300,99 @@ export function rewriteWithBinders(
     shadowed: ReadonlySet<string> | undefined
   ) => Expression,
   shadowed?: ReadonlySet<string>,
-  skipRootBinds = false
+  skipRootBinds = false,
+  // Per-call memo: the rewrite of a function node under a given set of
+  // shadowed names. A subtree reached through several operands — a user
+  // function applied to its own previous result embeds that result once per
+  // mention of the parameter — is rewritten once per distinct shadowing, not
+  // once per path, which is what keeps this walk linear in the number of
+  // distinct nodes rather than exponential in the nesting depth. The root is
+  // never memoized under `skipRootBinds`: its entry is keyed like any other
+  // node's, and the two treatments differ.
+  memo: Map<Expression, Map<string, Expression>> = new Map()
 ): Expression {
   if (isSymbol(expr)) return visit(expr, shadowed);
 
-  // A dictionary is not a function node (`nops` 0): descend into its values
-  // explicitly, or symbols inside them escape every rewrite pass.
+  if (!isFunction(expr) && !isDictionary(expr)) return expr;
+
+  // A dictionary binds nothing, so the root treatment does not apply to it:
+  // it is memoized under the plain shadowing key like any inner node.
+  const memoKey =
+    skipRootBinds && isFunction(expr) ? undefined : shadowedKey(shadowed);
+  if (memoKey !== undefined) {
+    const hit = memo.get(expr)?.get(memoKey);
+    if (hit !== undefined) return hit;
+  }
+
+  let result: Expression;
   if (isDictionary(expr)) {
+    // A dictionary is not a function node (`nops` 0): descend into its values
+    // explicitly, or symbols inside them escape every rewrite pass.
     const ce = expr.engine;
     let changed = false;
     const entries = expr.keys.map((key) => {
       const value = expr.get(key)!;
-      const next = rewriteWithBinders(value, visit, shadowed, false);
+      const next = rewriteWithBinders(value, visit, shadowed, false, memo);
       if (next !== value) changed = true;
       return ce.function('KeyValuePair', [ce.string(key), next]);
     });
-    if (!changed) return expr;
-    return ce.function('Dictionary', entries);
+    result = changed ? ce.function('Dictionary', entries) : expr;
+  } else {
+    let inner = shadowed;
+    if (!skipRootBinds) {
+      const binds = boundVariableNames(expr);
+      if (binds.length > 0)
+        inner = new Set(shadowed ? [...shadowed, ...binds] : binds);
+    }
+
+    const ops = expr.ops;
+    const next = ops.map((op) =>
+      rewriteWithBinders(op, visit, inner, false, memo)
+    );
+    if (next.every((op, i) => op === ops[i])) result = expr;
+    else {
+      const ce = expr.engine;
+      if (!next.every((x) => x.isValid))
+        result = ce.function(expr.operator, next, { form: 'raw' });
+      else {
+        const form = expr.isCanonical
+          ? 'canonical'
+          : expr.isStructural
+            ? 'structural'
+            : 'raw';
+        result = ce.function(expr.operator, next, {
+          form,
+          scope: expr.localScope,
+        });
+      }
+    }
   }
-
-  if (!isFunction(expr)) return expr;
-
-  let inner = shadowed;
-  if (!skipRootBinds) {
-    const binds = boundVariableNames(expr);
-    if (binds.length > 0)
-      inner = new Set(shadowed ? [...shadowed, ...binds] : binds);
+  if (memoKey !== undefined) {
+    let byShadowing = memo.get(expr);
+    if (byShadowing === undefined) {
+      byShadowing = new Map();
+      memo.set(expr, byShadowing);
+    }
+    byShadowing.set(memoKey, result);
   }
+  return result;
+}
 
-  const ops = expr.ops;
-  const next = ops.map((op) => rewriteWithBinders(op, visit, inner, false));
-  if (next.every((op, i) => op === ops[i])) return expr;
-
-  const ce = expr.engine;
-  if (!next.every((x) => x.isValid))
-    return ce.function(expr.operator, next, { form: 'raw' });
-  const form = expr.isCanonical
-    ? 'canonical'
-    : expr.isStructural
-      ? 'structural'
-      : 'raw';
-  return ce.function(expr.operator, next, { form, scope: expr.localScope });
+/**
+ * A memo key for a set of shadowed names: the names, sorted and joined. Two
+ * set objects with the same names (built on two paths through the same
+ * binder structure) must key the same, and a set's key is asked once per
+ * node it is carried into, so it is cached on the set.
+ */
+const SHADOWED_KEYS = new WeakMap<ReadonlySet<string>, string>();
+export function shadowedKey(shadowed: ReadonlySet<string> | undefined): string {
+  if (shadowed === undefined || shadowed.size === 0) return '';
+  let key = SHADOWED_KEYS.get(shadowed);
+  if (key === undefined) {
+    key = [...shadowed].sort().join('\0');
+    SHADOWED_KEYS.set(shadowed, key);
+  }
+  return key;
 }
 
 /**

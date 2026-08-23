@@ -11,6 +11,7 @@ import {
   rewriteWithBinders,
   sameBindingDef,
   boundVariableNames,
+  shadowedKey,
 } from './boxed-expression/binders.js';
 import type {
   BoxedDefinition,
@@ -2045,7 +2046,35 @@ export function resolveEscapingLambda(
 function captureClosures(
   ce: ComputeEngine,
   expr: Expression,
-  closureParent: Scope
+  closureParent: Scope,
+  // Per-call memo of the capture of a node under a given parent scope. A
+  // value that shares its operands (a user function applied to its own
+  // previous result embeds that result once per mention of the parameter)
+  // is captured once per node, so the rebuilt value keeps that sharing —
+  // rebuilding each path separately would unfold it into a tree exponential
+  // in the nesting depth. Keyed on the parent scope as well: a scoped node
+  // reached under two different captured chains is two different closures.
+  memo: Map<Scope, Map<Expression, Expression>> = new Map()
+): Expression {
+  if (!isFunction(expr)) return expr;
+  let byNode = memo.get(closureParent);
+  const hit = byNode?.get(expr);
+  if (hit !== undefined) return hit;
+  const captured = captureClosuresUncached(ce, expr, closureParent, memo);
+  if (byNode === undefined) {
+    byNode = new Map();
+    memo.set(closureParent, byNode);
+  }
+  byNode.set(expr, captured);
+  return captured;
+}
+
+/** The body of {@link captureClosures}: one node's capture. */
+function captureClosuresUncached(
+  ce: ComputeEngine,
+  expr: Expression,
+  closureParent: Scope,
+  memo: Map<Scope, Map<Expression, Expression>>
 ): Expression {
   if (expr.operator === 'Function' && isFunction(expr)) {
     const innerBlock = expr.op1;
@@ -2084,7 +2113,7 @@ function captureClosures(
       // body breakpoints for the rebuilt statements.
       const closedBlock = ce._fn(
         'Block',
-        innerBlock.ops.map((op) => captureClosures(ce, op, closureScope)),
+        innerBlock.ops.map((op) => captureClosures(ce, op, closureScope, memo)),
         {
           scope: closureScope,
           metadata: { sourceOffsets: innerBlock.sourceOffsets },
@@ -2129,7 +2158,7 @@ function captureClosures(
     };
     return ce._fn(
       expr.operator!,
-      expr.ops.map((op) => captureClosures(ce, op, scope)),
+      expr.ops.map((op) => captureClosures(ce, op, scope, memo)),
       { scope, metadata: { sourceOffsets: expr.sourceOffsets } }
     );
   }
@@ -2138,7 +2167,7 @@ function captureClosures(
   if (isFunction(expr) && expr.ops.length > 0) {
     let changed = false;
     const newOps = expr.ops.map((op) => {
-      const captured = captureClosures(ce, op, closureParent);
+      const captured = captureClosures(ce, op, closureParent, memo);
       if (captured !== op) changed = true;
       return captured;
     });
@@ -2300,7 +2329,14 @@ const activeApplications = new Map<number, number>();
  */
 function containsFreeSymbol(
   expr: Expression,
-  shadowed?: ReadonlySet<string>
+  shadowed?: ReadonlySet<string>,
+  // Per-call memo of the answer for a function node under a given set of
+  // shadowed names: an argument that shares its operands (the previous
+  // result of the very function being applied, embedded once per mention of
+  // the parameter) is walked once per node, not once per path — the same
+  // hazard `rewriteWithBinders` guards against, and an evaluated argument is
+  // exactly such a value.
+  memo: Map<Expression, Map<string, boolean>> = new Map()
 ): boolean {
   if (isSymbol(expr)) {
     if (shadowed?.has(expr.symbol)) return false;
@@ -2310,15 +2346,30 @@ function containsFreeSymbol(
       return false;
     return expr.value === undefined;
   }
+  if (!isFunction(expr) && !isDictionary(expr)) return false;
+  // A dictionary and a function node are memoized alike: a shared dictionary
+  // reached on several paths is walked once too.
+  const key = shadowedKey(shadowed);
+  const hit = memo.get(expr)?.get(key);
+  if (hit !== undefined) return hit;
+  let result: boolean;
   if (isDictionary(expr))
-    return expr.values.some((v) => containsFreeSymbol(v, shadowed));
-  if (!isFunction(expr)) return false;
-  const binds = boundVariableNames(expr);
-  const inner =
-    binds.length > 0
-      ? new Set(shadowed ? [...shadowed, ...binds] : binds)
-      : shadowed;
-  return expr.ops.some((op) => containsFreeSymbol(op, inner));
+    result = expr.values.some((v) => containsFreeSymbol(v, shadowed, memo));
+  else {
+    const binds = boundVariableNames(expr);
+    const inner =
+      binds.length > 0
+        ? new Set(shadowed ? [...shadowed, ...binds] : binds)
+        : shadowed;
+    result = expr.ops.some((op) => containsFreeSymbol(op, inner, memo));
+  }
+  let byShadowing = memo.get(expr);
+  if (byShadowing === undefined) {
+    byShadowing = new Map();
+    memo.set(expr, byShadowing);
+  }
+  byShadowing.set(key, result);
+  return result;
 }
 
 /**

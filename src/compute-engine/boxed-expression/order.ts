@@ -592,9 +592,20 @@ export function eliminationOrder(
 }
 
 /** Get the number of atomic elements in the expression */
+/** Per-node memo of `getLeafCount`. The count of a node never changes
+ *  (expressions are immutable), and an expression that shares its operands
+ *  would otherwise be unfolded — exponentially in its depth — on every
+ *  comparison that reaches this tie-breaker. */
+const LEAF_COUNT = new WeakMap<Expression, number>();
+
 function getLeafCount(expr: Expression): number {
   if (!isFunction(expr)) return 1;
-  return 1 + [...expr.ops].reduce((acc, x) => acc + getLeafCount(x), 0);
+  const cached = LEAF_COUNT.get(expr);
+  if (cached !== undefined) return cached;
+  let count = 1;
+  for (const op of expr.ops) count += getLeafCount(op);
+  LEAF_COUNT.set(expr, count);
+  return count;
 }
 
 function getComplex(a: Expression): [number, number] {

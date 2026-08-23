@@ -1150,13 +1150,30 @@ export class BoxedFunction
   }
 
   has(v: string | string[]): boolean {
-    // Does the operator name match?
-    if (typeof v === 'string') {
-      if (this._operator === v) return true;
-    } else if (v.includes(this._operator)) return true;
-
-    // Do any of the operands match?
-    return this._ops.some((x) => x.has(v));
+    // An explicit walk with a visited set rather than a recursion through
+    // each operand's `has`: an expression that shares its operands (a user
+    // function applied to its own previous result embeds that result once
+    // per mention of the parameter) unfolds exponentially in the nesting
+    // depth, and every function node must be asked once.
+    const visited = new Set<Expression>();
+    const pending: Expression[] = [this];
+    while (pending.length > 0) {
+      const e = pending.pop()!;
+      if (!isFunction(e)) {
+        if (e.has(v)) return true;
+        continue;
+      }
+      if (visited.has(e)) continue;
+      visited.add(e);
+      // Does the operator name match?
+      const operator = e.operator;
+      if (typeof v === 'string') {
+        if (operator === v) return true;
+      } else if (v.includes(operator)) return true;
+      // Otherwise ask the operands.
+      for (const op of e.ops) pending.push(op);
+    }
+    return false;
   }
 
   /**

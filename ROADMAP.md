@@ -522,6 +522,60 @@ later round could lift the real-scalar gate by stamping the zip callback's
 parameters from the sources at compile time, the way the unary form's
 parameter is stamped at canonicalization.
 
+### Assigning a function literal whose body shares operands is exponential in the sharing depth (OPEN, evaluation — found 2026-08-22 with the shared-operand walk fix)
+
+`ce.assign('f', Function(Hold(e), t))` with `e` a depth-*n* shared tower
+(`Max(e, e)` nested, 31 distinct nodes at depth 30) doubles per level: 1.7 s
+at depth 16, 3.1 s at 18, 10.6 s at 19, and the process runs out of memory at
+30 — while BOXING the same literal takes 1 ms and APPLYING it to an argument
+takes 9 ms at depth 30 (both pinned in `dag-shared-walks.test.ts`). Two walks
+on the assign path descend each operand independently:
+
+- `Walker.visit` in `boxed-expression/effects-inference.ts` — the latent-
+  effects inference of the literal's body (`inferFunctionLiteralEffects`),
+  also reached when a lazy collection reads its callback's effects:
+  `Map(k ↦ e + k, Range(1, 3)).count` does not return at depth 30 either,
+  whereas the same `Map` with the tower in its SOURCE answers in 3 ms. The
+  visit carries order-sensitive state (the confinement frontier of declared
+  names per sequence, the registry-consulted bits, the saturation early
+  return), so a per-node memo needs the same analysis the binder rewrite's
+  got — the answer must depend only on (node, frontier) for the memo to be
+  sound.
+- `jsonWithSourceOffsets` in `engine-declarations.ts` — the literal is
+  re-boxed from its MathJSON (with `sourceOffsets`) to stamp parameter
+  types, and `BoxedFunction.structural` rebuilds each path of a shared
+  operand as a fresh tree on the way; MathJSON cannot express sharing, so the
+  serialization itself is exponential in size. The re-box would have to work
+  from boxed operands (`ce.function('Function', [body, …params])`) instead.
+
+Not fixed with the evaluation-path walks because no consumer shape assigns a
+literal whose body is an evaluated value: parsed bodies are trees, and the
+shared-operand values arise as RESULTS (a document function applied to its
+own previous result), which Tycho's document pass never re-assigns as a
+function body. Probe: the `assign` line above at depths 16/18/19.
+
+### Type-object walks unfold a shared nested tuple type (OPEN, low — found 2026-08-22 with the shared-operand walk fix)
+
+A `Tuple(e, e)` tower of depth *n* — each level a tuple of two references to
+the level below, 31 distinct nodes at depth 30 — has a TYPE that nests once per
+level, `tuple<tuple<…>, tuple<…>>`, and the walks over type objects descend
+each element independently: `hasFreeVariables` (`common/type/instantiate.ts`),
+`hasOptionalWithVariadic` (`common/type/primitive.ts`), `couldBeNumericElement`
+(`collection-utils.ts`) and `typeToString`. Reading such a node's type,
+canonicalizing an `Add` over it, or boxing a `Sum` over it therefore doubles
+per level (depth 14 / 16 / 18: `Add` 14 / 18 / 76 ms, `type` 5 / 14 / 55 ms,
+`Sum` boxing 3 / 7 / 27 ms; the serialized type at depth 12 is 61 431
+characters). The EXPRESSION-level walks over such a value were fixed on
+2026-08-22 (`dag-shared-walks.test.ts`, whose fixture is a `Max` tower for
+exactly this reason — its type stays `number`); the type-level walks were
+left alone because no consumer shape nests tuple TYPES that deep (Tycho's
+heightmap chain has number elements). If one appears, the remedy is the same
+per-node memo — a visited set keyed on the type object, threaded through the
+walk — and the serialized type needs a cap the way the ordering key got one.
+Probe: `let e = ce.box(['Add', 'x', 'y']); for (let i = 0; i < 18; i++) e =
+ce.function('Tuple', [e, e]);` then time `e.type` and
+`ce.function('Add', [e, ce.symbol('z')])` against depth 16.
+
 ### A recursive function with a function-typed parameter is rebuilt at every application — exponential time, and a type that overflows the stack (OPEN, evaluation — found 2026-08-22)
 
 `tw(n, v, f) := If(n ≤ 0, v, tw(n-1, f(v), f) + tw(n-1, f(v), f))` applied to
@@ -869,6 +923,72 @@ closedness) beside the types; `_reviseInferredType` moves to a write site;
 `Pipe`/`Dot` fixed now. The "closed complex constants" group above was
 mis-filed: the lost facts are the SIGN of `π`/`e` and the CLOSEDNESS
 `poleReciprocalType` reads via `isConstant`.
+
+### Ranged types should carry sign (and a literal's value) through type derivation (OPEN, design task — raised by the user 2026-08-22)
+
+Sign is already expressible in the type lattice: `real<0..>`,
+`finite_real<0..>`, `real<-1..1>` and singleton ranges such as
+`finite_integer<2..2>` all parse and subtype correctly, and "positive" is
+`real<0..> & !0` (`real<1..>` and `finite_integer<2..2>` are subtypes of it;
+`finite_integer<0..0>` and bare `real<0..>` are not — verified 2026-08-22).
+What is missing is that nothing connects the sign channel to these types:
+
+- a symbol declared `integer<1..>` answers `sgn: undefined`, so `√q` types
+  `finite_complex` and `q!` types `finite_real` — the declaration's sign is
+  never read;
+- `assume(p > 0)` sets the symbol's `sgn` to `positive` but leaves its type
+  at `real`, so anything that reads the TYPE (the solver's root filter, the
+  GPU complex-lowering gate, an assignment to a `real` symbol) cannot see
+  the assumption;
+- a number literal's handler-visible type is `finite_integer`, not
+  `finite_integer<2..2>`, so a handler that needs the value (`Arcsin(1/2)`,
+  `ErfInv(0.5)`, `Range(1, 5)`, `At((1, "a"), 2)`, `Reshape(v, (2, 3))`)
+  reads it through the value channel instead;
+- there are no open bounds (`real<(0..>` does not parse), so "non-zero"
+  needs the `& !0` intersection rather than a range.
+
+Why it matters (measured 2026-08-22, `docs/plans/2026-08-22-type-handlers-on-types.md`
+§5.6–§5.7): when `Sqrt` was retyped from its operand's TYPE alone, the two
+behavior changes in the suite — the solver dropping the valid roots `±√a` of
+`x² = a` under `assume(a > 0)`, and the GPU targets emitting a real `sqrt`
+for `√s + 1` with `s := −2` — were both the sign channel failing to reach a
+consumer that reads the type. With sign in the type, the `sgn` fact of the
+type-handler design and its "literal value" fact both disappear: `sgn`
+becomes `isSubtype(type, 'real<0..>')`, and the literal rows become
+subtype tests against ranges.
+
+The work: (1) `BoxedSymbol.sgn` and the sign predicates read a range-typed
+declaration; (2) `ce.assume(x > 0)` refines the symbol's type to
+`real<0..> & !0` (and `x ≥ 0`, `x < 0`, bounded intervals likewise);
+(3) number literals carry their singleton range on handler INPUT, widened
+on handler OUTPUT exactly as the `0`/`1` literal types already must be;
+(4) the positive half of the `sgn` handlers moves into the type handlers as
+result ranges (`Abs` → `real<0..>`, `x²` → `real<0..>`, `Exp` →
+`real<0..> & !0`), with interval arithmetic for `Add`/`Multiply`/`Power`
+scoped separately. Historical note from the user: the lattice once had
+`positive_integer` and similar named types, simplified away; ranges are
+the replacement they should have been connected to.
+
+### Compile targets should constant-fold before reading a node's type (OPEN, compile — raised by the user 2026-08-22)
+
+`Sqrt`'s type handler numericizes a closed radicand (`closedRealSign`,
+`library/type-handlers.ts`) so that `√(1 − 0.2²)` types `finite_real`: machine
+floats are not folded at canonicalization, so the sign of `1 − 0.2²` is
+unknown to the sign channel even though its value is `0.96`. The consumer
+that needs that answer is the compiler — the GLSL band of a `Which` over a
+float radicand (Tycho item 137, pinned in `type-handler-audit.test.ts`) —
+and a type computation is the wrong place to evaluate anything (the
+type-handler design retires this fold in its §5.4 `Sqrt` row).
+
+The work: the compile targets fold constant subtrees
+(`compilation/constant-folding.ts`) BEFORE any emitter reads a node's type,
+so the band choice, `gpuResultIsComplexValued` (`gpu-target.ts`) and
+`isProvablyRealValued` (`base-compiler.ts`) see the folded value's type
+rather than the unfolded expression's. Acceptance: the §5.4 `Sqrt` row
+lands (no `.N()` in the type path) with the item-137 GLSL band unchanged
+and `compile-complex-result`, `compile-glsl` (items 144/147) and
+`random-compile` byte-identical. Audit every emitter site that reads a
+node TYPE where a folded VALUE would answer more precisely.
 
 ### Type derivation reaches state mutation at 7 handlers, 2 `elttype` handlers and 1 getter — AUDITED 2026-08-22 (OPEN, defects; fixes scheduled by the type-handler design)
 

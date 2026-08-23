@@ -1306,13 +1306,22 @@ export function getSubexpressions(
  * the symbols used as operator names, e.g. `Add`, `Sin`, etc...
  *
  */
-function getSymbols(expr: Expression, result: Set<string>): void {
+function getSymbols(
+  expr: Expression,
+  result: Set<string>,
+  // A subtree reached through several operands contributes the same names
+  // each time, so it is walked once (see `getReferences` on why that walk
+  // is otherwise exponential on a value that shares its operands).
+  visited: Set<Expression> = new Set()
+): void {
   if (isSymbol(expr)) {
     result.add(expr.symbol);
     return;
   }
 
-  if (isFunction(expr)) for (const op of expr.ops) getSymbols(op, result);
+  if (!isFunction(expr) || visited.has(expr)) return;
+  visited.add(expr);
+  for (const op of expr.ops) getSymbols(op, result, visited);
 }
 
 /**
@@ -1413,11 +1422,47 @@ function bindingSiteNames(
  * rules (`Function` parameters, `Sum`/`Product`/`Integrate` index variables,
  * `Block` locals). Passing the same set for both arguments yields their union
  * (used by the `references` accessor).
+ *
+ * `memo` records, per function node, the two sets the node contributes. What a
+ * node contributes depends only on the node (its own binders filter its
+ * operands' references before they reach the caller), so a subtree reached
+ * through several operands is walked once per call, not once per path: a
+ * user function applied to its own previous result embeds that result as
+ * many times as its body mentions the parameter, and the walk over such a
+ * value is exponential in the nesting depth without the memo — one
+ * `unknowns` read of a four-level heightmap chain ran for minutes. The memo
+ * is per CALL, never module-level: a symbol's freeness is read off the
+ * engine's current definitions, which a later call may see changed.
  */
 function getReferences(
   expr: Expression,
   freeVars: Set<string>,
-  refFns: Set<string>
+  refFns: Set<string>,
+  memo: Map<Expression, readonly [Set<string>, Set<string>]> = new Map()
+): void {
+  if (isFunction(expr)) {
+    const hit = memo.get(expr);
+    if (hit !== undefined) {
+      for (const s of hit[0]) freeVars.add(s);
+      for (const s of hit[1]) refFns.add(s);
+      return;
+    }
+    const own: readonly [Set<string>, Set<string>] = [new Set(), new Set()];
+    collectReferences(expr, own[0], own[1], memo);
+    memo.set(expr, own);
+    for (const s of own[0]) freeVars.add(s);
+    for (const s of own[1]) refFns.add(s);
+    return;
+  }
+  collectReferences(expr, freeVars, refFns, memo);
+}
+
+/** The body of {@link getReferences}: one node's own contribution. */
+function collectReferences(
+  expr: Expression,
+  freeVars: Set<string>,
+  refFns: Set<string>,
+  memo: Map<Expression, readonly [Set<string>, Set<string>]>
 ): void {
   if (isSymbol(expr)) {
     const s = expr.symbol;
@@ -1477,7 +1522,7 @@ function getReferences(
         params.add(name);
     const innerFree = new Set<string>();
     const innerRef = new Set<string>();
-    if (ops.length > 0) getReferences(ops[0], innerFree, innerRef);
+    if (ops.length > 0) getReferences(ops[0], innerFree, innerRef, memo);
     for (const s of innerFree) if (!params.has(s)) freeVars.add(s);
     for (const s of innerRef) if (!params.has(s)) refFns.add(s);
     return;
@@ -1528,8 +1573,8 @@ function getReferences(
       op.operator === 'Function' &&
       op.ops.length > 0
     )
-      getReferences(op.ops[0], innerFree, innerRef);
-    else getReferences(op, innerFree, innerRef);
+      getReferences(op.ops[0], innerFree, innerRef, memo);
+    else getReferences(op, innerFree, innerRef, memo);
   }
 
   if (indexVars.size === 0 && localVars.size === 0) {

@@ -211,9 +211,15 @@ export const ELEMENT_MEMO_CAP = 100_000;
  */
 function collectParameterDefs(
   expr: Expression,
-  out: Set<BoxedValueDefinition>
+  out: Set<BoxedValueDefinition>,
+  // A subtree reached through several operands contributes the same
+  // definitions each time, so it is walked once: a value that shares its
+  // operands (a user function applied to its own previous result) unfolds
+  // exponentially in the nesting depth otherwise.
+  visited: Set<Expression> = new Set()
 ): void {
-  if (!isFunction(expr)) return;
+  if (!isFunction(expr) || visited.has(expr)) return;
+  visited.add(expr);
   if (expr.operator === 'Function') {
     for (let i = 1; i < expr.nops; i++) {
       const op = expr.ops[i];
@@ -222,7 +228,7 @@ function collectParameterDefs(
         out.add(site.valueDefinition);
     }
   }
-  for (const op of expr.ops) collectParameterDefs(op, out);
+  for (const op of expr.ops) collectParameterDefs(op, out, visited);
 }
 
 /**
@@ -508,8 +514,28 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
    * walk position: their occurrences bind to valueless body-scope
    * definitions that the valueless gate must not see. Scoped to the walk —
    * a same-named symbol elsewhere in the instance is still tracked. */
+  /** Function nodes already walked, per skip set: a subtree reached through
+   * several operands (a value that shares its operands — a user function
+   * applied to its own previous result) records the same dependencies each
+   * time, so it is walked once per skip set rather than once per path, which
+   * is what keeps this walk linear in the number of distinct nodes instead of
+   * exponential in the nesting depth. Keyed on the skip set's IDENTITY: one
+   * set is carried through a whole lambda body, and `undefined` is the
+   * instance's own tree. */
+  const visited = new Map<Expression, Set<object>>();
+  const NO_SKIP = {};
   const visit = (e: Expression, skipNames?: ReadonlySet<string>): void => {
     if (!eligible) return;
+    if (isFunction(e)) {
+      const skipKey: object = skipNames ?? NO_SKIP;
+      let under = visited.get(e);
+      if (under?.has(skipKey)) return;
+      if (under === undefined) {
+        under = new Set();
+        visited.set(e, under);
+      }
+      under.add(skipKey);
+    }
     if (isSymbol(e)) {
       if (skipNames?.has(e.symbol)) return;
       const valueDef = e.valueDefinition;
