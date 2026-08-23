@@ -24,6 +24,7 @@ import {
   isLinearAlgebraCollection,
   isFixedShapeCollection,
   isBroadcastCollectionType,
+  broadcastSiblingType,
   couldBeNumericTuple,
   isNumericTuple,
   isTuple,
@@ -33,6 +34,8 @@ import {
   isFiniteBroadcastParticipant,
   isBroadcastableCollection,
   isUnknownLengthBroadcast,
+  hasUnresolvedCollectionOperand,
+  broadcastLengthMismatch,
   lazyBroadcastMap,
   broadcastOverIndexedCollections,
   isPossiblyCollectionTyped,
@@ -312,6 +315,15 @@ export function absorbScalarsIntoCells(
   scalarTypes: ReadonlyArray<Type>
 ): Type {
   if (scalarTypes.length === 0) return collectionType as Type;
+  // A `broadcastable<S>` co-operand is either a scalar `S` or an indexed
+  // collection of `S` that zips with these cells (a length mismatch is an
+  // `incompatible-dimensions` error, not a wider result), so its per-CELL
+  // contribution is `S`. Widening the wrapper itself into the cells nested it
+  // inside the collection (`list<broadcastable<number>^2>`), a type no
+  // evaluated value has.
+  const scalars = scalarTypes.map((t) =>
+    typeof t !== 'string' && t.kind === 'broadcastable' ? t.elements : t
+  );
   // The cell type ONE level down, not the type one index yields. On a `list`
   // kind a multi-dimensional shape lives in `dimensions` rather than in nested
   // `elements`, so read `elements` directly: `collectionElementType` would
@@ -346,7 +358,7 @@ export function absorbScalarsIntoCells(
           kind: 'tuple',
           elements: elt.elements.map((e) => ({
             ...e,
-            type: widen(e.type, ...scalarTypes),
+            type: widen(e.type, ...scalars),
           })),
         },
       } as Type;
@@ -364,9 +376,9 @@ export function absorbScalarsIntoCells(
         elt.kind !== 'set')
     )
       return collectionType as Type;
-    cell = absorbScalarsIntoCells(elt, scalarTypes);
+    cell = absorbScalarsIntoCells(elt, scalars);
   } else {
-    cell = widen(elt, ...scalarTypes);
+    cell = widen(elt, ...scalars);
     // Neither sum nor product is closed over `imaginary`: `i + (-i) = 0` and
     // `i · i = -1` are both real. `finite_complex` covers the closure — the
     // same repair the scalar tail of `addType` applies to its final widen.
@@ -420,7 +432,16 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
     // co-operand (an unevaluated matrix-valued `Multiply`, a declared
     // matrix symbol) is a sibling collection, not a cell contributor —
     // fall through to the collection branch below for those.
-    if (others.every((x) => !isLinearAlgebraCollection(x))) {
+    // `isBroadcastCollectionType` is asked as well because it is the only one
+    // of the two that descends a UNION: an operand typed
+    // `number | list<number>` is a sibling collection too, and folding its raw
+    // union into the cells claimed `list<number | list<number>>` for a sum
+    // whose every branch has plain `number` cells.
+    if (
+      others.every(
+        (x) => !isLinearAlgebraCollection(x) && !isBroadcastCollectionType(x)
+      )
+    ) {
       // The scalar co-operands fold INTO the cells elementwise, so the
       // honest result cell type widens the tensor's cells with the scalar
       // types: `[1,2] + x` has `number` cells, not `finite_integer` — the
@@ -463,7 +484,13 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
         (x) => isBroadcastShaped(x) || isSubtype(x.type.type, 'number')
       )
     ) {
-      const collected = widen(...shaped.map((x) => x.type.type));
+      // `broadcastSiblingType` collapses a `scalar | list<E>` operand to the
+      // one collection type its every branch produces here; without it the
+      // raw union widened into the result and its collection branch ended up
+      // inside the cells.
+      const collected = widen(
+        ...shaped.map((x) => broadcastSiblingType(x.type.type))
+      );
       // The scalar operands fold INTO the cells elementwise (no scalar arm
       // in the result — item 67), so they widen the CELL type, keeping the
       // declared type a sound upper bound: `2·[1,2,3] + a` has `number`
@@ -529,6 +556,25 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
       xs.map((x) => x.canonical)
     );
 
+  // A term that is collection-TYPED but has no collection value yet (a
+  // declared-but-unassigned `list<number>` symbol) is not a broadcast
+  // participant, so each branch below would splice it whole into every cell as
+  // if it were a scalar — freezing an outer sum into the stored form. Decline
+  // the element-wise dispatch and leave the sum inert; once the operand
+  // resolves, re-evaluating that sum zips.
+  const unresolvedTerm = hasUnresolvedCollectionOperand(
+    xs,
+    isBroadcastableCollection
+  );
+  // The one thing that outranks the veto: a length disagreement among the terms
+  // that DO have values. No assignment to the unresolved term can reconcile 2
+  // elements against 3, so the sum is reported as an error instead of held —
+  // the same error `Add([1,2], [3,4,5])` gives without the unresolved term.
+  if (unresolvedTerm) {
+    const mismatch = broadcastLengthMismatch(xs[0].engine, xs);
+    if (mismatch) return mismatch;
+  }
+
   // An unknown/infinite-length indexed collection (a `Cycle`, a `Filter`, a
   // symbolic-length `Range`) can't be materialized or eagerly zipped without
   // truncating — return the lazy `Map` form. Checked BEFORE the tensor and
@@ -539,7 +585,7 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   // A finite tensor never triggers this (its `count` is known-finite), so pure
   // tensor sums fall through unchanged. Tuples stay atomic
   // (`isBroadcastableCollection` excludes them).
-  if (xs.some(isUnknownLengthBroadcast))
+  if (!unresolvedTerm && xs.some(isUnknownLengthBroadcast))
     return lazyBroadcastMap(
       xs[0].engine,
       'Add',
@@ -550,7 +596,7 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
 
   // Check if any operands are tensors
   const hasTensors = xs.some((x) => isTensorValue(x));
-  if (hasTensors) {
+  if (!unresolvedTerm && hasTensors) {
     const r = addTensors(xs[0].engine, xs);
     if (r) return r;
   }
@@ -564,7 +610,7 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   // dispatch and a mixed `List + Tuple` (point-list + point) broadcasts the
   // tuple over the list instead of falling inert in `addTuples`. Tuples
   // themselves are excluded — they add component-wise, never broadcast.
-  if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
+  if (!unresolvedTerm && xs.some((x) => isFiniteBroadcastParticipant(x))) {
     const r = broadcastOverIndexedCollections(
       xs[0].engine,
       'Add',
@@ -593,10 +639,22 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
       xs.map((x) => x.canonical)
     );
 
+  // A collection-TYPED but valueless term vetoes the element-wise dispatch
+  // here exactly as it does on the exact route (see `add`).
+  let unresolvedTerm = hasUnresolvedCollectionOperand(
+    xs,
+    isBroadcastableCollection
+  );
+  // A definite length disagreement outranks the veto here too (see `add`).
+  if (unresolvedTerm) {
+    const mismatch = broadcastLengthMismatch(xs[0].engine, xs);
+    if (mismatch) return mismatch;
+  }
+
   // Unknown/infinite-length indexed collection → lazy `Map` (see `add`, which
   // documents why this precedes the tensor branch); the `N`-wrap threads
   // through so elements float on access.
-  if (xs.some(isUnknownLengthBroadcast))
+  if (!unresolvedTerm && xs.some(isUnknownLengthBroadcast))
     return lazyBroadcastMap(
       xs[0].engine,
       'Add',
@@ -607,7 +665,7 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
 
   // Check if any operands are tensors
   const hasTensors = xs.some((x) => isTensorValue(x));
-  if (hasTensors) {
+  if (!unresolvedTerm && hasTensors) {
     // Evaluate tensors numerically
     xs = xs.map((x) => (isTensorValue(x) ? x.evaluate() : x.N()));
     const r = addTensors(xs[0].engine, xs);
@@ -616,7 +674,7 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
 
   // Broadcast over a non-tensor finite indexed collection (see `add` — checked
   // before the tuple branch so `List + Tuple` broadcasts; tuples excluded).
-  if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
+  if (!unresolvedTerm && xs.some((x) => isFiniteBroadcastParticipant(x))) {
     const r = broadcastOverIndexedCollections(
       xs[0].engine,
       'Add',
@@ -659,7 +717,17 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
   // the hot all-numeric path (every element of a broadcast drain) pays a
   // single cheap `isFunction` sweep, not per-operand type computations.
   if (tupleInert || xs.some((x) => isFunction(x))) {
-    if (xs.some(isUnknownLengthBroadcast))
+    // Recomputed over the numericized operands: `.N()` can turn a raw operand
+    // into a collection, which changes who the participants are.
+    unresolvedTerm = hasUnresolvedCollectionOperand(
+      xs,
+      isBroadcastableCollection
+    );
+    if (unresolvedTerm) {
+      const mismatch = broadcastLengthMismatch(xs[0].engine, xs);
+      if (mismatch) return mismatch;
+    }
+    if (!unresolvedTerm && xs.some(isUnknownLengthBroadcast))
       return lazyBroadcastMap(
         xs[0].engine,
         'Add',
@@ -667,11 +735,11 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
         isBroadcastableCollection,
         true
       );
-    if (xs.some((x) => isTensorValue(x))) {
+    if (!unresolvedTerm && xs.some((x) => isTensorValue(x))) {
       const rt = addTensors(xs[0].engine, xs);
       if (rt) return rt;
     }
-    if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
+    if (!unresolvedTerm && xs.some((x) => isFiniteBroadcastParticipant(x))) {
       const r = broadcastOverIndexedCollections(
         xs[0].engine,
         'Add',

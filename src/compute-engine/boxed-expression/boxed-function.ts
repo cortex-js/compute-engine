@@ -27,6 +27,7 @@ import type {
 
 import {
   broadcastLengthMismatch,
+  hasUnresolvedCollectionOperand,
   isBroadcastableCollection,
   isBroadcastCollectionType,
   isDrawFreeBroadcast,
@@ -3265,7 +3266,7 @@ export class BoxedFunction
       const hasRawOperand =
         (this.operator === 'Add' || this.operator === 'Multiply') &&
         this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
-      if (
+      const operatorBroadcast =
         def.broadcastable &&
         // A user function literal has its OWN broadcast arm (step 2b) and takes
         // it even when the definition is `broadcastable` — an annotated literal
@@ -3277,8 +3278,28 @@ export class BoxedFunction
         !isLambdaDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
-        !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
-      ) {
+        !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!);
+      // An operand that is collection-TYPED but carries no collection value
+      // yet would be spliced whole into every cell as a scalar, freezing an
+      // outer product into the result (`hasUnresolvedCollectionOperand`).
+      // Decline, so the application stays symbolic and zips once the operand
+      // resolves. Read from the RAW operands, which can over-decline for one
+      // that only BECOMES a collection when the lifts are evaluated below
+      // (`Divide(Range(0, n), n)`): that costs nothing, because the
+      // post-evaluation broadcast (step 4b) re-decides the same question on
+      // resolved operands.
+      const unresolvedBroadcastOperand =
+        operatorBroadcast === true &&
+        hasUnresolvedCollectionOperand(this.ops!, isBroadcastableCollection);
+      // A length disagreement among the operands that DO have values outranks
+      // the veto: no assignment to the unresolved operand can reconcile 2
+      // elements against 3, so the application is the same error it would be
+      // without that operand rather than an inert form waiting on a value.
+      if (unresolvedBroadcastOperand) {
+        const mismatch = broadcastLengthMismatch(this.engine, this.ops!);
+        if (mismatch) return mismatch;
+      }
+      if (operatorBroadcast && !unresolvedBroadcastOperand) {
         // Hybrid laziness: past the eager threshold — or for a provably-finite
         // collection of unknown size (`Sin(Filter(…))`, whose count is
         // `undefined`; the eager zip would truncate it to one element) — return
@@ -3331,11 +3352,34 @@ export class BoxedFunction
       // Note: tuples are excluded (`!isTuple`) — a `Tuple` is an atomic value
       // (a point/vector), bound whole to the parameter, never mapped over.
       //
-      if (
+      const lambdaElementwise =
         isUserFunctionDef(def) &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
-        paramsAreScalar(def)
+        paramsAreScalar(def);
+      // Same veto as step 2, for the lambda arm: a collection-TYPED operand
+      // with no value yet must not be bound as a per-element scalar. Unlike
+      // step 2 this arm HOLDS rather than falling through, because falling
+      // through applies the lambda to the whole operands and inlines its body —
+      // the same capture, one rank up. With `g(a, b) = (a, b)` and a valueless
+      // `s: list<number>`, `g([1, 2], s)` was inlined as `([1, 2], s)`, which
+      // re-evaluates to the tuple of lists `([1,2], [10,20])` once
+      // `s := [10, 20]`, where a fresh call zips to the point list
+      // `[(1, 10), (2, 20)]`.
+      if (
+        lambdaElementwise &&
+        hasUnresolvedCollectionOperand(this.ops!, isBroadcastableCollection)
       ) {
+        // A length disagreement among the operands that DO have values is
+        // DEFINITE — no assignment to the unresolved one can reconcile 2
+        // elements against 3 — so it is reported instead of held.
+        const mismatch = broadcastLengthMismatch(this.engine, this.ops!);
+        if (mismatch) return mismatch;
+        return this.engine.function(
+          this.operator,
+          this.ops!.map((x) => x.evaluate(options))
+        );
+      }
+      if (lambdaElementwise) {
         // Hybrid laziness: past the eager threshold — or for a provably-finite
         // collection of unknown size (`Filter`) — map the lambda lazily.
         // Symbolic-length/infinite sources are deferred to the post-evaluation
@@ -3535,14 +3579,29 @@ export class BoxedFunction
       const isPostEvalBroadcastOperand = (x: Expression): boolean =>
         isKnownFinitenessBroadcast(x) ||
         (def.lazy !== true && isUnknownLengthBroadcast(x));
-      if (
+      const postEvalBroadcast =
         (lambdaBroadcast ||
           (def.broadcastable &&
             this.operator !== 'Add' &&
             this.operator !== 'Multiply')) &&
         !skipBroadcastForVectorOps(this.operator, false, tail) &&
-        tail.some(isPostEvalBroadcastOperand)
-      ) {
+        tail.some(isPostEvalBroadcastOperand);
+      // The same veto as the pre-evaluation steps, decided here on the
+      // EVALUATED `tail`: an operand that is collection-typed but still
+      // valueless (a declared-but-unassigned `list<number>` symbol) must not
+      // be spliced into every cell as a scalar
+      // (`hasUnresolvedCollectionOperand`) — except when the operands that DO
+      // have values already disagree in length, which no later assignment can
+      // reconcile, and which is reported as the error it would be without the
+      // unresolved operand.
+      const unresolvedTailOperand =
+        postEvalBroadcast &&
+        hasUnresolvedCollectionOperand(tail, isBroadcastableCollection);
+      if (unresolvedTailOperand) {
+        const mismatch = broadcastLengthMismatch(this.engine, tail);
+        if (mismatch) return mismatch;
+      }
+      if (postEvalBroadcast && !unresolvedTailOperand) {
         // Hybrid laziness: past the eager threshold — and for a materialized
         // infinite (`Cycle`) or uncountable-finite (`Filter`) source, gated by
         // `isKnownFinitenessBroadcast` so a not-yet-resolved operand held raw by
@@ -3759,14 +3818,26 @@ export class BoxedFunction
       const hasRawOperand =
         (this.operator === 'Add' || this.operator === 'Multiply') &&
         this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
-      if (
+      const operatorBroadcast =
         def?.broadcastable &&
         // Mirrors the sync path: a lambda takes its own step-2b arm.
         !isLambdaDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
-        !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
-      ) {
+        !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!);
+      // The veto and the definite-mismatch exception of the sync step 2,
+      // unchanged: an operand that is collection-TYPED but carries no
+      // collection value yet would be spliced whole into every cell as a
+      // scalar, while a length disagreement among the operands that DO have
+      // values is an error no later assignment can reconcile.
+      const unresolvedBroadcastOperand =
+        operatorBroadcast === true &&
+        hasUnresolvedCollectionOperand(this.ops!, isBroadcastableCollection);
+      if (unresolvedBroadcastOperand) {
+        const mismatch = broadcastLengthMismatch(this.engine, this.ops!);
+        if (mismatch) return mismatch;
+      }
+      if (operatorBroadcast && !unresolvedBroadcastOperand) {
         // Hybrid laziness: past the eager threshold — or for a provably-finite
         // collection of unknown size (`Filter`) — return the lazy `Map` form.
         // Symbolic-length/infinite sources are deferred to the post-evaluation
@@ -3811,11 +3882,27 @@ export class BoxedFunction
       // 2b/ Broadcast user-defined function literals over indexed collections.
       // Mirrors the sync path in `_computeValue`.
       //
-      if (
+      const lambdaElementwise =
         isUserFunctionDef(def) &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
-        paramsAreScalar(def)
+        paramsAreScalar(def);
+      // The veto and the hold of the sync step 2b, unchanged — a collection-
+      // TYPED operand with no value yet must not be bound as a per-element
+      // scalar, and declining alone would let the lambda be applied to the
+      // whole operands and its body inlined, which is the same capture one rank
+      // up.
+      if (
+        lambdaElementwise &&
+        hasUnresolvedCollectionOperand(this.ops!, isBroadcastableCollection)
       ) {
+        const mismatch = broadcastLengthMismatch(this.engine, this.ops!);
+        if (mismatch) return mismatch;
+        return this.engine.function(
+          this.operator,
+          await Promise.all(this.ops!.map((x) => x.evaluateAsync(options)))
+        );
+      }
+      if (lambdaElementwise) {
         // Hybrid laziness: past the eager threshold — or for a provably-finite
         // collection of unknown size (`Filter`) — map the lambda lazily.
         // Symbolic-length/infinite sources are deferred to the post-evaluation
@@ -3991,15 +4078,27 @@ export class BoxedFunction
       // inert per-element results and bypass async cancellation, so it falls
       // through to the async materialization/inert behavior below.
       const isSyncApplicable = lambdaBroadcast || def.evaluate !== undefined;
-      if (
+      const postEvalBroadcast =
         (lambdaBroadcast ||
           (def.broadcastable &&
             this.operator !== 'Add' &&
             this.operator !== 'Multiply')) &&
         isSyncApplicable &&
         !skipBroadcastForVectorOps(this.operator, false, tail) &&
-        tail.some(isPostEvalBroadcastOperand)
-      ) {
+        tail.some(isPostEvalBroadcastOperand);
+      // The veto and the definite-mismatch exception of the sync step 4b,
+      // unchanged: a collection-typed but still valueless operand must not be
+      // spliced into every cell as a scalar, while a length disagreement among
+      // the operands that DO have values is an error no later assignment can
+      // reconcile.
+      const unresolvedTailOperand =
+        postEvalBroadcast &&
+        hasUnresolvedCollectionOperand(tail, isBroadcastableCollection);
+      if (unresolvedTailOperand) {
+        const mismatch = broadcastLengthMismatch(this.engine, tail);
+        if (mismatch) return mismatch;
+      }
+      if (postEvalBroadcast && !unresolvedTailOperand) {
         // Hybrid laziness: past the eager threshold — and always for an
         // unknown/infinite-length source — return the lazy `Map` form over the
         // already-evaluated `tail` (mirrors the sync path).
@@ -5165,10 +5264,33 @@ function applyFunctionLiteral(
     typeof declaredType === 'object' && declaredType.kind === 'signature'
       ? declaredType
       : value.type.type;
-  if (
+  const broadcastsElementwise =
     ops.some((x) => isFiniteBroadcastParticipant(x)) &&
-    paramsAreScalar(broadcastGateType)
+    paramsAreScalar(broadcastGateType);
+  // As at the operator-def broadcast steps: a collection-TYPED argument with
+  // no collection value yet must not be bound as a per-element scalar
+  // (`hasUnresolvedCollectionOperand`). Skipping the broadcast is not enough on
+  // its own — execution would continue into the ordinary application at the end
+  // of this function and INLINE the literal, which is the same capture one rank
+  // up: `g([1, 2], s)` for `g(a, b) = (a, b)` and a valueless `s: list<number>`
+  // came back `([1, 2], s)`, which re-evaluates to the tuple of lists
+  // `([1,2], [10,20])` once `s := [10, 20]`, where a fresh call zips to the
+  // point list `[(1, 10), (2, 20)]`. Hold the named application over the
+  // evaluated arguments instead, the way the declined application at the end of
+  // this function does, so re-evaluating it once the argument resolves
+  // broadcasts.
+  if (
+    broadcastsElementwise &&
+    hasUnresolvedCollectionOperand(ops, isBroadcastableCollection)
   ) {
+    // A length disagreement among the arguments that DO have values is
+    // DEFINITE — no assignment to the unresolved one can reconcile 2 elements
+    // against 3 — so it is reported rather than held.
+    const mismatch = broadcastLengthMismatch(expr.engine, ops);
+    if (mismatch) return mismatch;
+    return expr.engine.function(expr.operator, ops);
+  }
+  if (broadcastsElementwise) {
     // Hybrid laziness, as at the operator-def lambda broadcast (step 2b):
     // past the eager threshold — or for a provably-finite collection of
     // unknown size — return the lazy `Map` form instead of materializing.
@@ -5554,7 +5676,8 @@ function someMappableCollection(
  * - `undefined` when NO slot maps — a scalar argument binds directly (rule 4)
  *   and the caller falls through to ordinary application;
  * - `{ value }` for a terminal result: the strict length-mismatch error
- *   (`docs/BROADCAST-MODEL.md`) or the lazy `Map` form;
+ *   (`docs/BROADCAST-MODEL.md`), the lazy `Map` form, or the held application
+ *   for a mappable slot whose operand is collection-typed but valueless;
  * - `{ rows, mapped, mask }` for the eager loop — `rows` yields full argument
  *   rows (mapped slots take the element, every other slot is spliced whole,
  *   i.e. lifted), `mapped` is the participating operands, for error context.
@@ -5582,8 +5705,30 @@ function setupDeclaredBroadcast(
   const mapped = ops.filter((_, i) => mask[i]);
   // Strict length policy, over the MAPPED slots only: a collection bound whole
   // at a non-mapped slot is not a broadcast participant and must not mismatch.
+  // Checked BEFORE the veto below: a disagreement among the mapped slots that
+  // DO have values is definite — no assignment to an unresolved slot can
+  // reconcile 2 elements against 3 — so it is reported rather than held.
   const mismatch = broadcastLengthMismatch(ce, mapped);
   if (mismatch) return { value: mismatch };
+
+  // A MAPPABLE slot holding an operand that is collection-typed but has no
+  // collection value yet is not in the mask, so the rows below would lift it
+  // whole into every cell — the per-element scalar capture
+  // `hasUnresolvedCollectionOperand` describes. Hold the named application
+  // instead of freezing an outer product into the result: merely returning
+  // `undefined` would hand the arguments to the ordinary application in the
+  // caller's tail, which binds them whole and INLINES the literal's body — the
+  // same capture one rank up for a body such as `(a, b) ↦ (a, b)`.
+  // A NON-mappable slot is passed to the veto as if it were a participant, so
+  // that it is ignored: binding its argument whole is what the declaration
+  // asks for, with a value or without.
+  if (
+    hasUnresolvedCollectionOperand(
+      ops,
+      (_x, i) => !plan.at(i).mappable || mask[i]
+    )
+  )
+    return { value: ce.function(operator, ops) };
 
   const lazy = lazyBroadcastMapIfNeeded(
     ce,

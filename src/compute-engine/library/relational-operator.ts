@@ -9,6 +9,9 @@ import { isRelationalOperator } from '../latex-syntax/utils.js';
 import {
   isCollectionShaped,
   isFiniteBroadcastParticipant,
+  isBroadcastableCollection,
+  hasUnresolvedCollectionOperand,
+  broadcastLengthMismatch,
   isTextAtom,
   isPossiblyCollectionTyped,
   isValuelessCollectionTyped,
@@ -1342,6 +1345,22 @@ function broadcastComparison(
   // the exclusion, a tuple-only comparison re-enters evaluate — whose step 2
   // now skips tuples — and ping-pongs back here forever (stack overflow).
   if (!ops.some((op) => isFiniteBroadcastParticipant(op))) return undefined;
+  // A collection-TYPED but valueless operand is excluded for the same reason,
+  // and it is the same ping-pong: step 2 DECLINES such a comparison (it would
+  // splice the valueless operand into every cell as a scalar — see
+  // `hasUnresolvedCollectionOperand`), so re-entering evaluate here would come
+  // straight back and recurse until the stack is exhausted. Declining leaves
+  // the comparison inert, which is what the veto wants; once the operand is
+  // assigned it broadcasts normally.
+  if (hasUnresolvedCollectionOperand(ops, isBroadcastableCollection)) {
+    // A length disagreement among the operands that DO have values outranks the
+    // veto: no assignment to the unresolved operand can reconcile 2 elements
+    // against 3, so the comparison is the same error it would be without that
+    // operand, rather than an inert form waiting on a value.
+    const mismatch = broadcastLengthMismatch(ce, ops);
+    if (mismatch) return mismatch;
+    return undefined;
+  }
   return ce._fn(operator, ops).evaluate({ numericApproximation });
 }
 

@@ -19,6 +19,7 @@ import {
   broadcastLengthMismatch,
   isBroadcastableCollection,
   isFiniteBroadcastParticipant,
+  isUnresolvedCollectionOperand,
   isTuple,
   isTupleShapedType,
 } from '../collection-utils.js';
@@ -453,10 +454,19 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // indexed collection of characters, but it is atomic under
         // element-wise distribution, so `When("ab", c)` must stay a restricted
         // string rather than become a list of restricted characters.
+        // A CONDITION that is collection-typed but carries no value yet is a
+        // MASK that cannot be read yet, not the scalar guard this branch
+        // distributes: splicing it into every cell freezes a nested result.
+        // `When([1,2], B)` for a valueless `B: list<boolean>` gave
+        // `[1 {B}, 2 {B}]`, which re-evaluates to `[[1,Undefined],[2,Undefined]]`
+        // once `B := [True, False]` — where the same expression evaluated
+        // fresh masks to `[1, Undefined]` (Tycho item 221). Stay held; the
+        // list-condition branch above zips the mask once it resolves.
         if (
           expr.type.matches('collection<any>') &&
           !isTupleShapedType(expr.type.type) &&
-          !expr.type.matches('string')
+          !expr.type.matches('string') &&
+          !isUnresolvedCollectionOperand(c)
         ) {
           const ev = expr.evaluate(options);
           if (isFiniteBroadcastParticipant(ev)) {

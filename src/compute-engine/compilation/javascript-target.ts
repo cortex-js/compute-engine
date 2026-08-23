@@ -1329,8 +1329,9 @@ function pointComponentAbsence(coord: Type | undefined): string {
 function isPointListOperand(e: Expression): boolean {
   const elt = collectionElementType(jsType(e));
   // `'tuple'` (the bare, unparameterized type name) is a plain string, not a
-  // `{ kind: 'tuple' }` node — and it is exactly what the `PointList` type
-  // handler answers (`list<tuple>`), so both spellings must read as a point.
+  // `{ kind: 'tuple' }` node — and it is what a `list<tuple>` DECLARATION
+  // reports (the `PointList` type handler itself answers the parameterized
+  // `list<tuple<…>>`), so both spellings must read as a point.
   if (
     elt !== undefined &&
     (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))

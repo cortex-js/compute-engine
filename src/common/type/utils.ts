@@ -548,6 +548,63 @@ export function resolveTypeForCompilation(t: Readonly<Type>): Type {
 }
 
 /**
+ * The type an **admissibility** question should be answered from: a chain of
+ * TRANSPARENT alias references unfolded down to the body it names.
+ *
+ * A transparent alias (`ce.declareType(name, body, { alias: true })`) IS its
+ * definition, so a value typed by the alias is admissible exactly where a
+ * value of the body is — `isSubtype` unfolds such a reference on both sides
+ * for that reason. A structural gate that inspects a type's KIND directly
+ * ("is this a tuple?", "is this a numeric collection?") bypasses `isSubtype`,
+ * so without unfolding first it sees an opaque `reference` node and answers
+ * "no": an alias of `tuple<number, number>` was refused by the arithmetic
+ * operand gate while an alias of `number` — decided through `isSubtype` —
+ * was accepted.
+ *
+ * A NOMINAL reference is returned UNCHANGED: a nominal type is deliberately
+ * not a subtype of its definition, so a gate deciding admissibility must keep
+ * seeing the reference and refuse. That is the difference from
+ * {@link resolveTypeForCompilation}, which unfolds nominal references too
+ * because compilation asks about LAYOUT — a question type erasure has already
+ * settled — rather than about what is allowed.
+ *
+ * A non-reference type is returned unchanged, so this is safe to drop in at
+ * the head of any structural gate. The walk is cycle-guarded on the reference
+ * RECORDS it has unfolded, so a self-referential alias
+ * (`type alias json = list<json> | integer`) stops on the first repeat and
+ * returns that reference unresolved instead of spinning; an acyclic chain
+ * unfolds all the way to its body no matter how long. The guard set is
+ * allocated only once a reference is actually unfolded.
+ */
+export function resolveTypeAlias(t: Readonly<Type>): Type {
+  let seen: Set<TypeReference> | undefined;
+  let result: Type = t as Type;
+  while (
+    typeof result === 'object' &&
+    result.kind === 'reference' &&
+    result.alias === true &&
+    result.def !== undefined
+  ) {
+    seen ??= new Set();
+    const decl = declarationOf(result);
+    if (seen.has(decl)) return result;
+    seen.add(decl);
+    // A generic alias is expanded eagerly when the type is built, so an
+    // applied alias reference is not expected here; substituting anyway keeps
+    // the unfold correct if one is ever constructed directly.
+    const typeParams = decl.typeParams;
+    const args = result.args;
+    if (args !== undefined && typeParams !== undefined) {
+      const bindings: Record<string, Type> = Object.create(null);
+      for (let i = 0; i < typeParams.length; i++)
+        if (args[i] !== undefined) bindings[typeParams[i].name] = args[i];
+      result = substituteTypeVariables(result.def, bindings);
+    } else result = result.def;
+  }
+  return result;
+}
+
+/**
  * True if `t` carries a `missing` arm at any nesting level (a scalar `missing`,
  * a `T | missing` union, or a `missing` cell nested inside a list/collection/
  * tuple/record). Used to gate the missing-value strip (§3.B of

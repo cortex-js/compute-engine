@@ -236,3 +236,202 @@ describe('Tycho item 54 — machine-precision Tuple ± scalar·Tuple', () => {
     expect(n).toBe(401);
   });
 });
+
+describe('Tycho item 222 — PointList over UNKNOWN-length views', () => {
+  // A point list built from views whose LENGTH is not yet known — a `Map` over
+  // `Range(0, n)` with the slider `n` still unassigned — used to evaluate to an
+  // inert `PointList` head: no collection capability, no point count, and an
+  // arity-less `list<tuple>` type. The consumer could not assign it, and every
+  // expression downstream of it went symbolic.
+  //
+  // Such a component cannot be zipped EAGERLY (there is no length to iterate
+  // to), but it can be zipped lazily, exactly as `view · (1, 0)` already was:
+  // the transpose is the variadic `Map` view, which pairs positionally and
+  // resolves to an ordinary finite point list as soon as `n` binds.
+
+  /** An engine with `A` = the unknown-length view `Map(_ ↦ _/n, Range(0, n))`,
+   * `n` declared but unassigned. */
+  function viewEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'number');
+    ce.assign(
+      'A',
+      ce
+        .box(['Map', ['Function', ['Divide', '_', 'n'], '_'], ['Range', 0, 'n']])
+        .evaluate()
+    );
+    return ce;
+  }
+
+  /** The upper semicircle's x-coordinate view: `−√(1 − A²)`. */
+  const X_VIEW = ['Negate', ['Sqrt', ['Subtract', 1, ['Power', 'A', 2]]]];
+
+  const drain = (e: any): string[] => [...e.each()].map((x: any) => x.toString());
+
+  test('two unknown-length views transpose to a lazy point VIEW', () => {
+    const ce = viewEngine();
+    const r = ce.box(['PointList', X_VIEW, 'A']).evaluate();
+    expect(r.operator).toBe('Map');
+    expect(r.isCollection).toBe(true);
+    expect(r.isIndexedCollection).toBe(true);
+    // The length is genuinely unknown until `n` binds — not zero, not one.
+    expect(r.count).toBe(undefined);
+    // The same shape `view · (1, 0)` produces, which is what the consumer
+    // accepts: an indexed collection of points.
+    expect(r.type.matches('indexed_collection<tuple<number, number>>')).toBe(
+      true
+    );
+  });
+
+  test('the STORED lazy view resolves once `n` binds, matching a fresh evaluation', () => {
+    const ce = viewEngine();
+    const stored = ce.box(['PointList', X_VIEW, 'A']).evaluate();
+    ce.assign('n', 4);
+    // `at`/`each`/`count` all see the now-known length.
+    expect(stored.count).toBe(5);
+    expect(stored.at(1)?.toString()).toBe('(-1, 0)');
+    expect(stored.at(2)?.toString()).toBe('(-sqrt(15)/4, 1/4)');
+    const fromStored = drain(stored);
+    expect(fromStored).toHaveLength(5);
+    // Re-evaluating the stored form, and evaluating the expression fresh in an
+    // engine where `n` was bound BEFORE the transpose (the eager route), agree
+    // element for element.
+    expect(drain(stored.evaluate())).toEqual(fromStored);
+    const eager = viewEngine();
+    eager.assign('n', 4);
+    const fresh = eager.box(['PointList', X_VIEW, 'A']).evaluate();
+    expect(fresh.operator).toBe('List'); // eager at this size
+    expect(drain(fresh)).toEqual(fromStored);
+  });
+
+  test('a SCALAR component is spliced whole into every point', () => {
+    const ce = viewEngine();
+    const r = ce.box(['PointList', -6, 'A']).evaluate();
+    expect(r.operator).toBe('Map');
+    expect(r.isCollection).toBe(true);
+    expect(r.count).toBe(undefined);
+    ce.assign('n', 4);
+    expect(drain(r)).toEqual([
+      '(-6, 0)',
+      '(-6, 1/4)',
+      '(-6, 1/2)',
+      '(-6, 3/4)',
+      '(-6, 1)',
+    ]);
+  });
+
+  test('a KNOWN-FINITE component mixed with an unknown one zips to the shortest', () => {
+    // Both collection components become `Map` sources — the variadic `Map`
+    // zips to the shortest source, which is the ratified `PointList` pairing
+    // contract (item 52), so the 5-element view pairs with only 3 points.
+    const ce = viewEngine();
+    const r = ce.box(['PointList', ['List', 1, 2, 3], 'A']).evaluate();
+    expect(r.operator).toBe('Map');
+    expect(r.isCollection).toBe(true);
+    expect(r.count).toBe(undefined);
+    ce.assign('n', 4);
+    expect(r.count).toBe(3);
+    expect(drain(r)).toEqual(['(1, 0)', '(2, 1/4)', '(3, 1/2)']);
+  });
+
+  test('a NON-INDEXED component (a Set) still fails closed', () => {
+    // A Set has no positional order, so there is no i-th element to pair the
+    // other components with: staying inert is better than a silently wrong
+    // pairing or a degraded plain point.
+    const ce = viewEngine();
+    const r = ce.box(['PointList', ['Set', 1, 2, 3], 'A']).evaluate();
+    expect(r.operator).toBe('PointList');
+    expect(r.isCollection).toBe(false);
+  });
+
+  test('a provably INFINITE component still fails closed (compile-route parity)', () => {
+    // An unknown length RESOLVES; an infinite one never does, and the compile
+    // route declines a statically infinite source outright — so both routes
+    // keep refusing to produce a value for this shape.
+    const ce = viewEngine();
+    for (const src of [
+      ['Range', 1, 'PositiveInfinity'],
+      ['Cycle', ['List', 1, 2]],
+    ]) {
+      const r = ce.box(['PointList', 1, src]).evaluate();
+      expect(r.operator).toBe('PointList');
+      expect(r.isCollection).toBe(false);
+    }
+  });
+
+  test('PointX/PointY project the lazy view lazily, and correctly once bound', () => {
+    const ce = viewEngine();
+    const pl = ['PointList', X_VIEW, 'A'];
+    const px = ce.box(['PointX', pl]).evaluate();
+    const py = ce.box(['PointY', pl]).evaluate();
+    for (const p of [px, py]) {
+      expect(p.operator).toBe('Map');
+      expect(p.isCollection).toBe(true);
+      expect(p.count).toBe(undefined);
+    }
+    // The source-projection fast-path (`projectLazyPointList`) deliberately
+    // declines here: it requires every source to have the SAME KNOWN count,
+    // since projecting one source of a ragged zip would yield extra elements.
+    // The generic lazy projection `Map(p ↦ At(p, k), ⟨view⟩)` is the answer.
+    ce.assign('n', 4);
+    expect(drain(py)).toEqual(['0', '1/4', '1/2', '3/4', '1']);
+    expect(px.at(1)?.toString()).toBe('-1');
+    expect(px.at(2)?.toString()).toBe('-sqrt(15)/4');
+  });
+
+  test('the transpose TYPE carries the point arity, unknown lengths and all', () => {
+    const ce = viewEngine();
+    // One coordinate per component, whatever the source lengths are. The
+    // arity-less `list<tuple>` this used to answer could not tell a list of
+    // 2-D points from a list of 3-D ones.
+    expect(ce.box(['PointList', X_VIEW, 'A']).type.toString()).toBe(
+      'list<tuple<number, number>>'
+    );
+    const finite = new ComputeEngine();
+    finite.declare('L', 'list<integer>');
+    expect(finite.box(['PointList', -6, 'L', 'L']).type.toString()).toBe(
+      'list<tuple<finite_integer, integer, integer>>'
+    );
+  });
+
+  test('.N() floats the view elements, and x.N() agrees with x.evaluate().N()', () => {
+    // The exactness contract has to survive the lazification: `lazyBroadcastMap`
+    // wraps the mapping body in `N(…)` only when the transpose is BUILT under
+    // `.N()`, and the `Map` re-wrap is what carries the request into a view
+    // that was evaluated exactly first.
+    const exact = ['(-1, 0)', '(-sqrt(15)/4, 1/4)'];
+    const floated = (e: any): string[] => drain(e).slice(0, 2);
+    const a = viewEngine();
+    const direct = a.box(['PointList', X_VIEW, 'A']).N();
+    a.assign('n', 4);
+    const b = viewEngine();
+    const composed = b.box(['PointList', X_VIEW, 'A']).evaluate().N();
+    b.assign('n', 4);
+    expect(direct.operator).toBe('Map');
+    expect(floated(direct)).toHaveLength(2); // not a vacuous empty drain
+    expect(floated(direct)).toEqual(floated(composed));
+    expect(floated(direct)).not.toEqual(exact);
+    expect((direct.at(2)?.op1 as any).isExact).toBe(false);
+    const c = viewEngine();
+    const exactly = c.box(['PointList', X_VIEW, 'A']).evaluate();
+    c.assign('n', 4);
+    expect(drain(exactly).slice(0, 2)).toEqual(exact);
+  });
+
+  test('route parity: the box route is the product route; `(a, b)` stays a Tuple', () => {
+    // `PointList` is an IMPORTER-emitted head: default parsing never produces
+    // it from `(a, b)` — that stays inert `Tuple` data — so the box route is
+    // the one the consumer actually uses. The explicit `\operatorname` spelling
+    // reaches the same transpose, which is what makes this a route-parity
+    // probe rather than a second implementation.
+    const ce = viewEngine();
+    expect(ce.parse('(A, A)').evaluate().operator).toBe('Tuple');
+    const parsed = ce.parse('\\operatorname{PointList}(A, A)').evaluate();
+    expect(parsed.operator).toBe('Map');
+    expect(parsed.isCollection).toBe(true);
+    ce.assign('n', 4);
+    expect(drain(parsed)).toEqual(
+      drain(ce.box(['PointList', 'A', 'A']).evaluate())
+    );
+  });
+});

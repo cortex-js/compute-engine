@@ -183,6 +183,199 @@ keeps showing the body once, as before. A symbol-headed application keeps
 its name on decline (`apply(…, declined)`, `applyFunctionLiteral`). Regression:
 `test/compute-engine/symbol-resolution-by-binding.test.ts`.
 
+### An element-wise broadcast spliced a collection-TYPED but valueless operand as a scalar (Tycho item 221, FIXED 2026-08-22)
+
+Every broadcast participant predicate reads `isIndexedCollection` — the
+"can I enumerate this NOW" capability, which is `false` for a symbol declared
+`list<number>` with no value, and for an application such as `PointX(P)`
+over a valueless `P: list<tuple<number, number>>`. The broadcast therefore
+treated such an operand as a scalar and spliced it whole into every cell,
+committing an answer the SAME expression contradicts once the symbol is
+assigned. With `A = Map(_ ↦ _/n, Range(0, n))` (`n` free) and a valueless
+`s: list<number>`, `Multiply(A, s)` evaluated to `Map(_ ↦ _·s, A)` typed
+`indexed_collection<list<number>>`; after `s := [10,20,30]`, `n := 2`, the
+STORED form materialized as the outer product
+`[[0,0,0],[5,10,15],[10,20,30]]` while a fresh `Multiply(A, s)` zipped to
+`[0,10,30]`. The known-length form `[1,2,3]·s` → `[s, 2s, 3s]` typed
+`list<list<number>>` was the same splice.
+
+Ruling (the consumer's ask, adopted): a collection-typed operand that is not
+yet a collection VALUE must zip or stay symbolic — never be captured as a
+per-element scalar. Zipping is impossible without a value, so the broadcast
+gates DECLINE and the operator stays inert (`s · [1,2,3]`, typed
+`list<number>` — the zip's element type in a collection shape); re-evaluating
+the inert form after assignment zips. One shared predicate,
+`hasUnresolvedCollectionOperand()` / `isUnresolvedCollectionOperand()` in
+`collection-utils.ts` (tuples and strings exempt — atomic under broadcast;
+requires an actual participant so `2s` keeps folding; one hop through a
+symbol's value, because a lambda parameter bound to a valueless list symbol is
+itself typed `number`), consulted at every funnel: `add`/`addN`/
+`mulImpl`/`mulN`, the `BoxedFunction` broadcast steps 2/2b/4b (sync AND
+async), `applyFunctionLiteral`, `setupDeclaredBroadcast` (mappable slots
+only), plus two same-class sites found by probing — `broadcastComparison`
+(declining there is REQUIRED: once step 2 declines, the relational helper's
+re-entry into `evaluate()` ping-pongs into a stack overflow), `When`'s
+scalar-condition distribution (a valueless boolean-list condition is a mask
+that cannot be read yet), and `PointList`'s components.
+
+The dual review of that landing found five routes the veto did not reach,
+all fixed the same day: (1) the `mulTuples` dispatch in `mulImpl`/`mulN` ran
+with no participant present, so `(1,2)·s` stored `(s, 2s)` — now held when
+any non-tuple cofactor is unresolved; (2) the lambda and declared-broadcast
+gates only skipped the broadcast branch and then fell through to ordinary
+application, inlining `g(a,b) = (a,b)` as `([1,2], s)` — now the named
+application is HELD over evaluated operands (sync, async, and
+`setupDeclaredBroadcast`); (3) a valueless operand typed `number |
+list<number>` or `broadcastable<number>` was missed — `mayHoldAnIndexedCollection`
+admits a union branch or a `broadcastable` wrapper, never a top-typed
+symbol; (4) a symbol declared bare `tuple` (or a transparent alias of a
+tuple) was vetoed — the tuple exemption now reads the RESOLVED static type
+(`isUnresolvedCollectionShape`); (5) the veto ran before the length check,
+hiding a definite `incompatible-dimensions 2 vs 3` behind an unresolved
+third operand — `broadcastLengthMismatch` over the resolved participants now
+runs first at every funnel (`When` and `PointList` excluded: they mask /
+zip-to-shortest by ruling). Pinned in
+`valueless-collection-typed-operand.test.ts` (18 + 19 cases, each a pair:
+symbolic while valueless, the zip once assigned). Full suite before the
+hardening: zero snapshot churn.
+
+### A union-typed operand leaked its whole union into a list broadcast's element type (FIXED 2026-08-22 — found by the item-221 review)
+
+`Add([1,2], u)` with `u: number | list<number>` typed
+`list<list<number> | number^2>` (at HEAD, `list<list<number>>`), where the
+`list<number>` control `Add([1,2], s)` typed `list<number>`; a
+`broadcastable<number>` co-operand gave `list<broadcastable<number>^2>`, a
+wrapper nested inside a collection that no value has. Mechanism: the
+tensor-branch gate in `addType` (`arithmetic-add.ts`) and `Multiply`'s type
+handler (`library/arithmetic.ts`) asked `isLinearAlgebraCollection`, which
+does not descend a union, so `u` was classified a SCALAR and
+`absorbScalarsIntoCells` widened its raw union into the cells. Now the gate
+also asks `isBroadcastCollectionType` (which descends unions), the sibling
+widen maps through a new `broadcastSiblingType()` (`collection-utils.ts` —
+a union with a dimensionless list branch collapses to one collection whose
+element is `broadcastElementType` of the union), and a `broadcastable<S>`
+scalar contribution unwraps to `S`. `Multiply` admits a union operand to its
+collection set only when another factor is DEFINITELY a collection, so a
+lone `2u` is not claimed a list by that handler. Pinned in
+`valueless-collection-typed-operand.test.ts` (4 cases).
+
+### A LONE union-typed operand is typed as a definite list by the generic broadcast wrapper (OPEN, ruling needed — found 2026-08-22)
+
+`u: number | list<number>` valueless: `2u`, `u + 2`, `-u` all type
+`list<finite_number>` / `list<number>` — `type.matches('collection')` is
+`true` — yet `u := 5` evaluates `2u` to `10 :: finite_integer`, contradicting
+the type. The claim comes from the generic broadcast-typing wrapper in
+`boxed-function.ts` (the `broadcastingOps` selection, ~line 4909), which uses
+`isBroadcastCollectionType(x)` — a predicate that descends a union and
+answers "has a collection branch", which the wrapper reads as "IS a
+collection". Pre-existing; unchanged by the fixes above. The honest type is
+either the operand's union carried through (`finite_number |
+list<finite_number>`) or `broadcastable<finite_number>`; the two spellings
+route differently downstream (the `broadcastable<T>` family has its own
+admission and compile lowering; a scalar-or-collection union is what
+`isCollectionShaped` / `matches('collection')` answer `false` on). Which
+spelling the wrapper should produce is the ruling. Until ruled, a consumer
+reading the static type of an arithmetic expression over a valueless
+scalar-or-list symbol gets a confident `list` that a later scalar
+assignment contradicts.
+
+### Arithmetic shape gates were blind to a TRANSPARENT type alias (FIXED 2026-08-22 — found by the item-221 review)
+
+`ce.declareType('pt', 'tuple<number, number>', { alias: true })` then
+`ce.declare('p', 'pt')`: `2·p`, `[1,2,3]·p`, `Divide(p, 2)`, `Negate(p)`
+all errored `incompatible-type "number" vs "pt"`, as did an alias of
+`list<number>` or `vector<2>` under `Multiply`/`Add`, while the direct
+spelling was accepted. (A NOMINAL declaration — `declareType`'s default —
+is correctly refused: a nominal type is deliberately not a subtype of its
+definition, pinned in `alias-unfold.test.ts`; the first repro used one and
+was a non-defect.) Mechanism: `isSubtype` unfolds a transparent alias on
+both sides, so an alias of a SCALAR already worked, but the shape gates in
+`collection-utils.ts` read `type.kind` directly and saw an opaque
+`reference` node. Fixing only the admission (`checkNumericArgs`) was
+measured wrong: the operand is admitted but the type handlers still
+collapse it (`2p : finite_number`) and `Add(2, p)` wrongly succeeds where
+`Add(2, q)` errors. New `resolveTypeAlias()` (`common/type/utils.ts`,
+transparent aliases only, cycle-guarded — distinct from
+`resolveTypeForCompilation`, which unfolds nominals too because layout, not
+admissibility, is its question) now heads eight gates: `isNumericTuple`,
+`isLinearAlgebraCollection`, `typeCouldBeCollection`,
+`typeCouldBeUnkeyedCollection`, `typeCouldBeNumericCollection`,
+`typeIsProvablyNonNumericCollection`, `typeCouldBeNumericTuple`,
+`typeCouldBeNumericTupleCollection`, plus `quotientShapeType` in
+`library/arithmetic.ts`. Pinned in `alias-unfold.test.ts` (7 of the new
+cases fail at the pre-fix tree).
+
+### `PointList(view, view)` over unknown-length lazy views was an inert head (Tycho item 222, FIXED 2026-08-22)
+
+`PointList(−√(1−A²), A)` with `A = Range(0,n)/n` and `n` unbound evaluated
+to an inert `PointList` — `isCollection=false`, `count=undefined`, type
+`list<tuple>` with no component arity — because the evaluate handler failed
+closed on ANY component that was not a known-finite participant, while the
+sibling `A · (1,0)` already produced the lazy point view
+`Map(_ ↦ (_·1, _·0), A)`. The consumer's assignment of such a row threw on the
+arity-less type and every downstream link went symbolic.
+
+Now an unknown-length indexed component (a symbolic-length `Range`, a lazy
+`Map` over one, a `Filter`) takes `lazyBroadcastMap('Tuple', …,
+strictLengths=false)` — the same view the arithmetic route builds, scalars
+spliced whole, mixed known-finite + unknown components all becoming `Map`
+sources (zip-to-shortest preserved). The stored lazy form re-evaluates, after
+`n := 4`, to the same five points the eager transpose gives. Two shapes keep
+failing closed, by existing pins: a non-indexed component (a `Set`) and a
+provably INFINITE one (`points-arithmetic.test.ts` "infinite Range component
+fails closed"; `pointlist-compile-zip.test.ts` "a statically infinite source
+declines at COMPILE time (D2)", whose interpreter half asserts route parity) —
+an unknown length resolves, an infinite one never does, and the compile route
+declines it. A string VALUE component tripped the same guard and left
+`PointList("ab", 3)` inert against its own `tuple<string, finite_integer>`
+type; it now evaluates to the point, as the type and compile handlers already
+said.
+
+The type handler now answers `list<tuple<T1, …, Tk>>` (element type for a
+list component, the component's own type otherwise) instead of the arity-less
+`list<tuple>`; the `list` head is kept because `indexed_collection` would
+have disabled the `matches('list<…>')` shape gates on the compile routes, and
+`list<tuple<n,n>> <: list<tuple>` keeps every declared
+`(tuple | list<tuple>) -> …` signature accepting it. **Consumer-visible
+consequence** (Tycho item 138's intended outcome, previously blocked by the
+missing arity): `PointZ(PointList(-6, n))` on a two-component point list is
+now a typed `incompatible-dimensions` error at box time instead of a JS
+kernel of `NaN` absence markers (JS) or the target's own arity decline
+(GLSL); two pins in `pointlist-compile-zip.test.ts` updated, their own
+comments having documented this as the intended direction. `projectLazyPointList`
+declines on the new view (it needs every source's count to be the same KNOWN
+number), so `PointX`/`PointY` fall through to the generic lazy
+`Map(p ↦ At(p, k), view)` — correct and lazy. Pinned in
+`pointlist-lazy-broadcast.test.ts` (10 cases, 8 fail at the pre-fix tree).
+Full suite: zero snapshot churn.
+
+### A zipped `Divide(list<tuple>, list<number>)` left `number × Tuple` elements unfolded (Tycho item 223, FIXED 2026-08-22)
+
+`[T, U] / √(PointX([T,U])² + PointY([T,U])²)` evaluated to
+`[0.999999999999999835 · (0.943…, −0.331…), (0.6, 0.8)]` — the element whose
+divisor is not exactly 1 stayed an inert `Multiply(number, Tuple)` while the
+single-tuple form `T / √(…)` folded to a tuple. Mechanism (found by
+instrumenting, not inferred): the value-level `div()` in
+`arithmetic-mul-div.ts` had no tuple arm at all, where `mulImpl` dispatches
+to `mulTuples`. The single-tuple form never reaches it — `canonicalDivide`
+rewrites `Divide(Tuple, d)` to a tuple of component quotients at boxing. The
+broadcast zip (`BoxedFunction._computeValue` step 2) builds each element with
+`ce._fn('Divide', …)`, which skips `canonicalDivide` (its `canonical` handler
+is a documented fast-path bypass), so the element reaches the `Divide`
+evaluate handler with a raw tuple numerator and falls through to the
+`Product` machinery, whose answer depended on the DIVISOR'S KIND: an inexact
+divisor gave an inert `Multiply(0.999…, Tuple)`; an exact integer divisor
+(`[T, U] / [2, 5]`, a second failure mode the consumer had not seen) gave a
+tuple of UNEVALUATED `Divide(0.943…, 2)` components; only a divisor of
+exactly `1` short-circuited to the tuple, which is why one element looked
+right. `div()` now scales a numeric tuple numerator component-wise when the
+divisor is a non-NaN provably-numeric value, tested structurally first so an
+ordinary quotient pays nothing; `tuple.div(0)` on the value route now answers
+`(~oo, ~oo)`, as the box route always has. Pinned in
+`points-arithmetic.test.ts` (9 cases: witness, both routes, inexact and
+exact-rational divisors `[(3,4)]/[5]` → `[(3/5, 4/5)]`, zero/NaN divisors,
+`Multiply` controls in both orders). Full suite: zero snapshot churn.
+
 ### The `javascript`/`python` targets declined the multi-collection form of `Map` over symbolic sources (RESOLVED 2026-08-21 — Tycho item 218)
 
 `Map((_1,_2) ↦ _1+_2, 1..N, 2..N)` with `N` a free input declined with

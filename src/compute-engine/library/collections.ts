@@ -18,14 +18,17 @@ import {
   enumerableFromAllSources,
   enumerableFromSource,
   hasAccessibleComponents,
+  isBroadcastableCollection,
   isDeclaredScalarNumber,
   isEnumerableSource,
   isFiniteBroadcastParticipant,
+  isUnresolvedCollectionOperand,
   isPossiblyCollectionTyped,
   isTextAtom,
   isRecordShapedType,
   isTuple,
   isTupleShapedType,
+  isUnknownLengthBroadcast,
   lazyBroadcastMap,
   MAX_SIZE_EAGER_COLLECTION,
   typeCouldBeCollection,
@@ -44,10 +47,7 @@ import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 import { kleeneAnd, kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
 import { typeToDedupKey } from '../../common/type/serialize.js';
-import {
-  cachedValue,
-  type CachedValue,
-} from '../boxed-expression/cache.js';
+import { cachedValue, type CachedValue } from '../boxed-expression/cache.js';
 import { reduceType } from '../../common/type/reduce.js';
 import {
   isObjectType,
@@ -1451,7 +1451,11 @@ function bareMappingElementType(
     // The engine is part of the identity because `_anyVersion` is per-engine
     // and both counters start at zero, so a generation from one would
     // spuriously validate against the other.
-    entry = { engine: ce, key: probeKey, slot: { value: null, generation: undefined } };
+    entry = {
+      engine: ce,
+      key: probeKey,
+      slot: { value: null, generation: undefined },
+    };
     BARE_MAPPING_ELEMENT_TYPE.set(fn, entry);
   }
   // `cachedValue` keys on the generation observed on ENTRY and carries the
@@ -1461,9 +1465,13 @@ function bareMappingElementType(
   // reaches `elttype` and operator type handlers, either of which may read a
   // field, so the entry records what it read, revalidates it on a hit, and
   // merges it into any enclosing collector.
-  return cachedValue(entry.slot, ce._anyVersion, () =>
-    probeBareMappingElementType(ce, body, paramIndex, elementTypes)
-  , undefined, ce);
+  return cachedValue(
+    entry.slot,
+    ce._anyVersion,
+    () => probeBareMappingElementType(ce, body, paramIndex, elementTypes),
+    undefined,
+    ce
+  );
 }
 
 /**
@@ -1554,6 +1562,17 @@ function probeBareMappingElementType(
  */
 function tupleTypeOf(ops: ReadonlyArray<Expression>): Type {
   return { kind: 'tuple', elements: ops.map((op) => ({ type: op.type.type })) };
+}
+
+/**
+ * The ELEMENT type of a collection-typed operand — what one `at()` of it
+ * yields — or `unknown` when the type names no element (a bare `list`, an
+ * unresolvable type reference). A type REFERENCE (a user alias for a list) is
+ * unfolded first, since `collectionElementType` reads the structure only.
+ */
+function elementTypeOf(op: Expression): Type {
+  const t = op.type.type;
+  return collectionElementType(resolveTypeReference(t) ?? t) ?? 'unknown';
 }
 
 /** How many actual elements `absenceMarker()` probes when a collection's
@@ -2810,9 +2829,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // multi-source `Map`, which the JS/Python compile targets reject — compile
   // the canonical `PointList` form (its own compile handler) instead. With
   // no collection component it is just a plain point (`Tuple`). An empty
-  // collection component yields an empty `List`; an infinite/unknown-length
-  // component fails closed (stays inert, no hang) via
-  // `broadcastOverIndexedCollections` returning `undefined`.
+  // collection component yields an empty `List`. A component whose length is
+  // not YET known — a view over `Range(0, n)` with the slider `n` unassigned,
+  // a `Filter` — takes the same lazy `Map` form, which resolves into an
+  // ordinary point list as soon as the length does (Tycho item 222); a
+  // provably INFINITE component (`Cycle`) or a non-indexed one (a Set) fails
+  // closed instead (stays inert, no hang).
   //
   // Compile handler: when no component is provably non-scalar (a subtype of
   // `collection`), a `PointList` is a plain point and compiles
@@ -2835,7 +2857,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // `undefined`.
   //
   // The retained declines are DELIBERATELY NARROWER THAN THE TYPING: the type
-  // handler answers `list<tuple>` whenever ≥1 component is a list source,
+  // handler answers `list<tuple<…>>` whenever ≥1 component is a list source,
   // whatever the other components are — but a non-source, non-scalar slot
   // (tuple/set/map, or a union with a collection member) has no statically
   // known PER-POINT representation, so lowering it would splice a whole
@@ -2860,21 +2882,86 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (t === 'string') return false;
         return !isTupleKind && op.type.matches('indexed_collection<any>');
       };
-      if (ops.some(isListType)) return parseType('list<tuple>');
+      if (ops.some(isListType)) {
+        // Every point has one coordinate per component, so the point ARITY is
+        // known even when the lengths are not: a list component contributes
+        // its ELEMENT type to that coordinate, every other component its own
+        // type (it is repeated whole in each point). Answering the arity-less
+        // `list<tuple>` instead lost that — a consumer could not tell a list
+        // of 2-D points from a list of 3-D ones, and `PointList(x, y) / n`
+        // (Tycho item 165) recovered an arity the constructor already knew.
+        const coordinates = ops.map((op) => ({
+          type: isListType(op) ? elementTypeOf(op) : op.type.type,
+        }));
+        return {
+          kind: 'list',
+          elements: { kind: 'tuple', elements: coordinates },
+        };
+      }
       return tupleTypeOf(ops);
     },
     evaluate: (ops, { engine: ce, numericApproximation }) => {
       const isListComponent = (op: Expression): boolean =>
         isFiniteBroadcastParticipant(op);
-      // Fail closed on a collection component that cannot be safely zipped —
-      // infinite or unknown-length (e.g. `Range(1,∞)`) or non-indexed (a
-      // Set): stay inert rather than silently degrading to a plain point.
+      // A component whose length is NOT YET KNOWN — a view over `Range(0, n)`
+      // with `n` unassigned, a `Filter`, a symbolic-length `Range`. It cannot
+      // be zipped eagerly (there is no length to iterate to), but it can be
+      // zipped LAZILY, and it becomes an ordinary finite point list as soon as
+      // the length resolves.
+      //
+      // A PROVABLY INFINITE component (`Cycle`, `Range(1, ∞)`, whose
+      // `isFiniteCollection` is `false`) is deliberately NOT one of these: it
+      // keeps failing closed below. Its length never resolves, and the compile
+      // route declines a statically infinite source outright, so both routes
+      // refuse to produce a value for the same shape (the parity pinned in
+      // `test/compute-engine/pointlist-compile-zip.test.ts`, "a statically
+      // infinite source declines at COMPILE time").
+      const isLazyComponent = (op: Expression): boolean =>
+        isUnknownLengthBroadcast(op) && op.isFiniteCollection !== false;
+      // Fail closed on a collection component that can be zipped NEITHER
+      // eagerly nor lazily — a non-indexed collection (a Set has no positional
+      // order, so there is no i-th element to pair the other components with)
+      // or a provably infinite one: stay inert rather than silently degrading
+      // to a plain point, and never hang. A STRING is not such a component:
+      // it is broadcast-atomic (see `isTextAtom`) and occupies a scalar slot,
+      // exactly as the type handler and the compile handler classify it.
+      //
+      // A component that is collection-TYPED but has no value yet fails closed
+      // for the same reason: it is not a list component by capability, so the
+      // transpose below would lift it into every point as one coordinate —
+      // `PointList([1,2], s)` for a valueless `s: list<number>` gave
+      // `[(1, s), (2, s)]`, which re-evaluates to `[(1,[10,20]),(2,[10,20])]`
+      // once `s := [10,20]`, where the same expression evaluated fresh zips to
+      // `[(1,10),(2,20)]` (Tycho item 221).
       if (
         ops.some(
-          (op) => !isTuple(op) && op.isCollection && !isListComponent(op)
+          (op) =>
+            (!isTuple(op) &&
+              !isTextAtom(op) &&
+              op.isCollection &&
+              !isListComponent(op) &&
+              !isLazyComponent(op)) ||
+            isUnresolvedCollectionOperand(op)
         )
       )
         return undefined;
+      // An unknown-length component: transpose LAZILY. Every collection
+      // component becomes a source of the variadic `Map`, which pairs
+      // positionally and zips to the shortest source at access time. The
+      // result is a point VIEW — `isCollection`, `at`/`each`/`count`, and
+      // re-evaluable once the length resolves — where the transpose used to
+      // stay an inert `PointList` head with no collection capability at all
+      // (Tycho item 222). `strictLengths: false` for the same reason as the
+      // eager path below.
+      if (ops.some(isLazyComponent))
+        return lazyBroadcastMap(
+          ce,
+          'Tuple',
+          ops,
+          isBroadcastableCollection,
+          numericApproximation ?? false,
+          false
+        );
       // No collection component: a plain point.
       if (!ops.some(isListComponent)) return ce.tuple(...ops);
       // Otherwise transpose into the `List` of point-tuples. Hybrid laziness

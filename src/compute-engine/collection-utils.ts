@@ -3,8 +3,10 @@ import {
   broadcastElementType,
   collectionElementType,
   resolveTypeForCompilation as resolveType,
+  resolveTypeAlias,
 } from '../common/type/utils.js';
-import { isSubtype } from '../common/type/subtype.js';
+import { isSubtype, resolveTypeReference } from '../common/type/subtype.js';
+import { INDEXED_COLLECTION_SHAPE_TYPE } from '../common/type/primitive.js';
 import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
@@ -407,6 +409,141 @@ export function isKnownFinitenessBroadcast(x: Expression): boolean {
 }
 
 /**
+ * Does an element-wise broadcast over `ops` have a NON-participant operand
+ * that is collection-SHAPED but carries no collection value yet — a symbol
+ * declared `list<number>` and not assigned, or an application such as
+ * `PointX(P)` over a valueless `P: list<tuple<number, number>>`?
+ *
+ * Such an operand fails every participant predicate, because they all read
+ * `isIndexedCollection` — the "can I enumerate this NOW" CAPABILITY, which is
+ * `false` when there is nothing to walk (see
+ * {@link isValuelessCollectionTyped}). The broadcast would therefore splice it
+ * whole into every cell, as if it were a scalar, and commit an answer the SAME
+ * expression contradicts once the symbol is assigned. With
+ * `A = Map(_ ↦ _/n, Range(0, n))` and a valueless `s: list<number>`,
+ * `Multiply(A, s)` stored `Map(_ ↦ _·s, A)` and materialized as the outer
+ * product `[[0,0,0],[5,10,15],[10,20,30]]` once `s := [10,20,30]`, where a
+ * fresh evaluation of the same product zips to `[0,10,30]`.
+ *
+ * RULING (Tycho item 221): a collection-typed operand that is not yet a
+ * collection VALUE must zip, or stay symbolic — never be captured as a
+ * per-element scalar. Zipping is impossible without a value, so the broadcast
+ * gates consult this predicate and DECLINE, leaving the operator inert until
+ * the operand resolves; re-evaluating the inert form then zips.
+ *
+ * Tuples and strings are exempt: they are atomic under broadcast in the first
+ * place (the two exclusions {@link isBroadcastableCollection} applies), so
+ * splicing them whole is their correct treatment, with a value or without.
+ *
+ * The veto requires an actual participant — with no collection to broadcast
+ * over there is no splice to prevent, and an ordinary symbolic product such as
+ * `2·s` must keep folding. That test runs first, so a scalar application pays
+ * only the participant sweep it was already paying.
+ */
+export function hasUnresolvedCollectionOperand(
+  ops: ReadonlyArray<Expression>,
+  isParticipant: (x: Expression, i: number) => boolean
+): boolean {
+  if (!ops.some((x, i) => isParticipant(x, i))) return false;
+  return ops.some(
+    (x, i) => !isParticipant(x, i) && isUnresolvedCollectionOperand(x)
+  );
+}
+
+/**
+ * One operand's half of {@link hasUnresolvedCollectionOperand}: collection-
+ * shaped — outright, or through a type that merely ADMITS a collection (see
+ * {@link mayHoldAnIndexedCollection}) — valueless, and not one of the two
+ * atomic-under-broadcast kinds (tuples, including a tuple reached through a
+ * bare `tuple` declaration or an alias, and strings). Call this directly at a
+ * site where the operand that
+ * would be spliced is already singled out — `When`'s condition, say — and the
+ * sweep over a whole operand list has nothing to add.
+ *
+ * The symbol's VALUE is consulted when its own type does not say
+ * "collection" — the same hop {@link isTuple} and {@link isTextAtom} make, and
+ * for the same reason: a lambda PARAMETER bound to a valueless `list<number>`
+ * symbol is itself typed `number`, because the body's use (`a + b`) narrowed
+ * it while there was no value to check against. Reading only the parameter's
+ * type made `g([1,2,3], s)` bind `s` as a per-element scalar and answer
+ * `[s+1, s+2, s+3]`, the very splice this veto exists to prevent.
+ *
+ * The hop is a single step, never a walk: a chain of symbols each holding the
+ * next is not a shape this needs to see through, and one step cannot spin on a
+ * symbol that holds itself.
+ */
+export function isUnresolvedCollectionOperand(x: Expression): boolean {
+  if (isUnresolvedCollectionShape(x)) return true;
+  if (!isSymbol(x)) return false;
+  const v = x.value;
+  if (v === undefined || isSymbol(v, x.symbol)) return false;
+  return isUnresolvedCollectionShape(v);
+}
+
+/**
+ * The shape half of {@link isUnresolvedCollectionOperand}, applied to ONE
+ * expression with no symbol-value hop: collection-shaped, carrying no
+ * collection value, and not one of the two kinds that are atomic under
+ * broadcast.
+ *
+ * The tuple exclusion is asked of the RESOLVED static type as well as of
+ * `isTuple`, which reads the type STRUCTURE and therefore sees neither the
+ * bare `tuple` primitive nor a transparent alias for a tuple (`type pt =
+ * tuple<number, number>`). Without that, a symbol declared `tuple` — which is
+ * a collection, so it satisfies `isValuelessCollectionTyped` — would be
+ * vetoed, and `[1, 2, 3] · r` would stop scaling the list by the tuple
+ * component-wise the way it does for a tuple that has a value.
+ */
+function isUnresolvedCollectionShape(x: Expression): boolean {
+  if (isTuple(x) || isTextAtom(x)) return false;
+  const t = x.type.type;
+  const resolved = resolveTypeReference(t) ?? t;
+  if (isTupleShapedType(resolved)) return false;
+  if (isValuelessCollectionTyped(x)) return true;
+  return !x.isCollection && mayHoldAnIndexedCollection(resolved);
+}
+
+/**
+ * Does this type ADMIT a value an element-wise broadcast would map over,
+ * without saying outright that it is a collection — the `list<number>` inside
+ * `number | list<number>`, or the collection half of `broadcastable<number>`?
+ *
+ * Neither spelling `matches` `collection<any>`, because that match asks
+ * whether the type DEFINITELY is a collection and the scalar alternative
+ * defeats it — so {@link isValuelessCollectionTyped} misses both. But
+ * assigning the collection alternative is exactly the future value that
+ * contradicts a per-element splice: `Add([1, 2], u)` for a valueless
+ * `u: number | list<number>` stored `[u + 1, u + 2]`, which becomes the outer
+ * product `[[11,21],[12,22]]` once `u := [10, 20]`, where evaluating the same
+ * sum fresh zips to `[11, 22]`. Holding is right under either resolution: a
+ * later `u := 5` re-evaluates the held sum to the lift `[6, 7]`.
+ *
+ * Alternatives that are atomic under broadcast are not counted — a tuple and a
+ * string are spliced whole, which is their correct treatment — mirroring the
+ * two exclusions {@link isBroadcastableCollection} applies. Nor is a top-typed
+ * (`unknown`/`any`) operand reached from here: a union with a top branch
+ * reduces to the top, which is neither a union nor an `indexed_collection`
+ * subtype, so the deliberate exclusion of every undeclared symbol documented
+ * on {@link isValuelessCollectionTyped} is preserved. A `broadcastable<T>`
+ * that arises mid-expression rather than from a declaration is likewise
+ * untouched in practice: canonical flattening dissolves it, so
+ * `[1,2] + (2 + h(x))` still broadcasts to `[h(x) + 3, h(x) + 4]`.
+ */
+function mayHoldAnIndexedCollection(t: Type): boolean {
+  if (typeof t === 'string') return false;
+  if (t.kind === 'broadcastable') return true;
+  if (t.kind !== 'union') return false;
+  return t.types.some((branch) => {
+    const b = resolveTypeReference(branch) ?? branch;
+    if (isTupleShapedType(b) || isSubtype(b, 'string')) return false;
+    return (
+      isSubtype(b, INDEXED_COLLECTION_SHAPE_TYPE) ||
+      mayHoldAnIndexedCollection(b)
+    );
+  });
+}
+
+/**
  * Whether evaluating `expr` to read its elements by index is **draw-free** —
  * the evaluation itself cannot consume randomness, so a cached evaluation
  * serves `at()` reads that stay coherent with `each()` across generations.
@@ -450,7 +587,9 @@ const TUPLE_OPERATORS = new Set(['Tuple', 'Pair', 'Triple', 'Single']);
  * tuple type (e.g. `z: tuple<number, number>`).
  */
 export function isNumericTuple(expr: Expression): boolean {
-  const t = expr.type.type;
+  // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
+  // here and a nominal reference is not.
+  const t = resolveTypeAlias(expr.type.type);
   if (typeof t === 'string') return false;
   if (t.kind !== 'tuple') return false;
   return t.elements.every((el) => isSubtype(el.type, 'number'));
@@ -532,6 +671,9 @@ function couldBeNumericElement(el: Type): boolean {
  * `incompatible-type` error rather than admission.
  */
 export function typeCouldBeCollection(type: Type): boolean {
+  // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
+  // here and a nominal reference is not.
+  type = resolveTypeAlias(type);
   if (typeof type === 'string') {
     return (
       type === 'collection' ||
@@ -597,6 +739,9 @@ export function typeCouldBeCollection(type: Type): boolean {
  * accident.)
  */
 export function typeCouldBeUnkeyedCollection(type: Type): boolean {
+  // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
+  // here and a nominal reference is not.
+  type = resolveTypeAlias(type);
   if (typeof type === 'string') {
     return (
       type === 'collection' ||
@@ -673,6 +818,13 @@ export function couldBeUnkeyedCollectionOperand(op: Expression): boolean {
  * (Tycho item 30).
  */
 export function typeCouldBeNumericCollection(type: Type): boolean {
+  // A TRANSPARENT alias IS its definition, so unfold one before asking about
+  // its kind: `isSubtype` unfolds an alias reference on both sides, and a
+  // gate that reads `type.kind` directly must agree with it or an alias of a
+  // collection is admitted at one layer and refused at the other. A NOMINAL
+  // reference is left alone — it is deliberately not a subtype of its
+  // definition, so it must keep failing this gate.
+  type = resolveTypeAlias(type);
   if (typeof type === 'string') {
     return (
       type === 'list' ||
@@ -738,6 +890,9 @@ export function typeCouldBeNumericCollection(type: Type): boolean {
  * already disproves numericity.
  */
 export function typeIsProvablyNonNumericCollection(type: Type): boolean {
+  // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
+  // here and a nominal reference is not.
+  type = resolveTypeAlias(type);
   if (typeof type === 'string') return false; // bare kind: could be numeric
   if (
     type.kind === 'collection' ||
@@ -769,6 +924,9 @@ export function typeIsProvablyNonNumericCollection(type: Type): boolean {
  * two layers must not diverge.
  */
 export function typeCouldBeNumericTuple(type: Type): boolean {
+  // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
+  // here and a nominal reference is not.
+  type = resolveTypeAlias(type);
   if (typeof type === 'string') return type === 'tuple';
   if (type.kind === 'tuple')
     return type.elements.every((el) => couldBeNumericElement(el.type));
@@ -794,6 +952,9 @@ export function typeCouldBeNumericTuple(type: Type): boolean {
  * keep the lift in the result, and blessing it here would strip it.
  */
 export function typeCouldBeNumericTupleCollection(type: Type): boolean {
+  // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
+  // here and a nominal reference is not.
+  type = resolveTypeAlias(type);
   if (typeof type === 'string') return false;
   if (type.kind === 'union')
     return type.types.some((t) => typeCouldBeNumericTupleCollection(t));
@@ -819,7 +980,9 @@ export function typeCouldBeNumericTupleCollection(type: Type): boolean {
  * collections AND symbols declared with a collection type (e.g. `X: matrix`).
  */
 export function isLinearAlgebraCollection(expr: Expression): boolean {
-  const t = expr.type.type;
+  // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
+  // here and a nominal reference is not.
+  const t = resolveTypeAlias(expr.type.type);
   if (
     t === 'list' ||
     t === 'collection' ||
@@ -914,6 +1077,55 @@ function dimensionlessIndexedElement(t: Type): Type | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * The type a broadcast operand contributes when an element-wise `Add`/
+ * `Multiply` widens its collection operands together. For every type but one
+ * this is `t` itself; the exception is a UNION of a scalar branch and a
+ * dimensionless collection branch (a symbol or call result typed
+ * `number | list<number>`), which collapses to a single collection type whose
+ * element widens each branch's per-CELL contribution — a collection branch
+ * contributes its elements, a scalar branch contributes itself. So
+ * `number | list<number>` contributes `list<number>` and
+ * `integer | list<real>` contributes `list<real>`.
+ *
+ * The branches describe what the operand may be at RUNTIME, and every one of
+ * them lands in the same cells: paired with a collection operand, the scalar
+ * branch folds into every cell and the collection branch zips element-wise. So
+ * the sum of `[1, 2]` with a `number | list<number>` operand has `number`
+ * cells whichever branch holds. Widening the raw union into the result instead
+ * pushes the collection branch INTO the cells (`list<number | list<number>>`,
+ * a type no evaluated value has), and a scalar-plus-collection union also
+ * makes `type.matches('collection')` answer a confident `false` on a value
+ * that is always a collection.
+ *
+ * Only a DIMENSIONLESS list/indexed-collection branch collapses, and the
+ * result keeps that branch's own kind: a fixed shape (`vector<n>`, `matrix`)
+ * is typed component-wise by the tensor handlers, and an operand that may be a
+ * non-list `indexed_collection` at runtime must not be claimed a `list`.
+ */
+export function broadcastSiblingType(t: Readonly<Type>): Type {
+  if (typeof t === 'string' || t.kind !== 'union') return t as Type;
+  const branches = t.types.filter(
+    (b) => dimensionlessIndexedElement(b) !== undefined
+  );
+  if (branches.length === 0) return t as Type;
+  const elements = broadcastElementType(t);
+  const branch = branches[0];
+  if (branches.length === 1) {
+    if (branch === 'list') return { kind: 'list', elements };
+    if (
+      typeof branch !== 'string' &&
+      (branch.kind === 'list' || branch.kind === 'indexed_collection')
+    )
+      return { ...branch, elements };
+  }
+  // Several collection branches, or one whose element type is baked into its
+  // NAME (`range`'s members are integers by definition, so it cannot carry a
+  // widened element): `indexed_collection` is the common spelling that admits
+  // them all.
+  return { kind: 'indexed_collection', elements };
 }
 
 /**

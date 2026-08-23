@@ -119,6 +119,7 @@ import {
   broadcastResultType,
   collectionElementType,
   isNonRealNumber,
+  resolveTypeAlias,
   widen,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -190,6 +191,7 @@ import {
   typeCouldBeNumericTupleCollection,
   isLinearAlgebraCollection,
   isBroadcastCollectionType,
+  broadcastSiblingType,
   broadcastCollectionElementType,
   isDeclaredScalarNumber,
   isPossiblyCollectionTyped,
@@ -366,8 +368,17 @@ function quotientComponentType(el: Type, den: Expression): Type {
  * `number` in `tuple | number`) widens as a single component; a bare kind
  * string (`'tuple'`, `'list'`) carries no component types to widen and passes
  * through unchanged.
+ *
+ * A TRANSPARENT alias reference is unfolded first: it IS its definition, so a
+ * numerator declared with an alias of a tuple must widen component-wise like
+ * the tuple it names instead of falling through to the scalar widening. The
+ * alias NAME is not preserved in the result because the components change
+ * (`tuple<integer, integer> / 4` is a tuple of rationals, which the alias no
+ * longer describes). A NOMINAL reference never reaches here: it is refused by
+ * the operand gate upstream.
  */
 function quotientShapeType(t: Type, den: Expression): Type {
+  t = resolveTypeAlias(t);
   if (typeof t === 'string') {
     if (
       t === 'tuple' ||
@@ -2001,8 +2012,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // Only SCALAR factors fold into the cells (see `addType`): a
           // collection-TYPED co-operand is a sibling collection (matrix
           // product / elementwise pair) — fall through to the collection
-          // branch below for those.
-          if (others.every((x) => !isLinearAlgebraCollection(x))) {
+          // branch below for those. `isBroadcastCollectionType` is asked as
+          // well because it is the only one of the two that descends a UNION:
+          // a factor typed `number | list<number>` is a sibling collection
+          // too, and folding its raw union into the cells claimed
+          // `list<number | list<number>>` for a product whose every branch has
+          // plain `number` cells.
+          if (
+            others.every(
+              (x) =>
+                !isLinearAlgebraCollection(x) && !isBroadcastCollectionType(x)
+            )
+          ) {
             // Scalar factors fold INTO the cells elementwise: widen the
             // tensor's honest cell type with the scalar types so the
             // declared type stays a sound upper bound (`x·[0,0,1,1]` has
@@ -2022,7 +2043,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Mirrors `addType`'s widening. Numeric tuples are handled above, and
         // scalars/unknown-typed symbols are not collection types, so the
         // all-scalar numeric paths below are untouched.
-        const collectionOps = ops.filter((x) => isLinearAlgebraCollection(x));
+        // A factor typed `scalar | list<E>` is a sibling collection ONLY when
+        // another factor is definitely a collection: on its own it may still
+        // be a scalar at runtime (`2u` with `u: number | list<number>` is a
+        // number when `u` is), so its honest union has to survive. Paired with
+        // a collection the product is a collection whichever branch holds, and
+        // `broadcastSiblingType` (used in the widen below) collapses the union
+        // to the one collection type they share.
+        const definiteCollections = ops.filter((x) =>
+          isLinearAlgebraCollection(x)
+        );
+        const collectionOps =
+          definiteCollections.length > 0
+            ? ops.filter(
+                (x) =>
+                  isLinearAlgebraCollection(x) || isBroadcastCollectionType(x)
+              )
+            : definiteCollections;
         if (collectionOps.length === 1) {
           // Scalar FACTORS fold into the cells elementwise — `(1..4)/2` (which
           // `canonicalDivide` rewrites to `Multiply(1/2, …)`), `0.5·L` — so
@@ -2092,7 +2129,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               tupleCollections[0].type.type,
               scalarSiblings
             );
-          return widen(...collectionOps.map((x) => x.type.type));
+          return widen(
+            ...collectionOps.map((x) => broadcastSiblingType(x.type.type))
+          );
         }
         // An operand whose collection-ness is not statically visible (a top
         // `unknown`/`any`/`value` leaf such as an undeclared `h(x)`, or an

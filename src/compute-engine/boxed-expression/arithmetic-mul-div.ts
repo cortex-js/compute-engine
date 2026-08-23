@@ -21,6 +21,8 @@ import {
   isFiniteBroadcastParticipant,
   isBroadcastableCollection,
   isUnknownLengthBroadcast,
+  hasUnresolvedCollectionOperand,
+  isUnresolvedCollectionOperand,
   lazyBroadcastMap,
   isBroadcastCollectionType,
   broadcastLengthMismatch,
@@ -1164,6 +1166,30 @@ export function div(num: Expression, denom: number | Expression): Expression {
   // If the numerator is NaN, return NaN
   if (num.isNaN) return ce.NaN;
 
+  // Numeric tuple (point/vector in ℝⁿ) numerator: `tuple / scalar` scales
+  // component-wise — the value-level twin of the numeric-tuple branch in
+  // `canonicalDivide`, and the counterpart of the `mulTuples` dispatch in
+  // `mulImpl`. Without it `div()` has no tuple arm at all, and the `Product`
+  // fall-through at the end of this function returns an inert
+  // `Multiply(1/d, tuple)` (or, through `asRationalExpression` →
+  // `canonicalDivide`, a tuple of unevaluated component quotients).
+  //
+  // A `Divide` built with `ce._fn` skips `canonicalDivide`, so a tuple
+  // numerator arriving that way has no other chance to fold: that is how the
+  // broadcast zip in `BoxedFunction._computeValue` builds each element of
+  // `Divide(list<tuple>, list<number>)`, and the `Divide` evaluate handler
+  // hands back whatever this function returns.
+  //
+  // A NaN or not-provably-numeric divisor falls through to the rules below,
+  // matching `canonicalDivide`. The structural `hasAccessibleComponents` (a
+  // `Tuple`/`Pair`/… head with operands) is tested FIRST so an ordinary
+  // quotient never pays the `type` computations behind the other two tests.
+  if (hasAccessibleComponents(num) && isFunction(num) && isNumericTuple(num)) {
+    const d = typeof denom === 'number' ? ce.number(denom) : denom;
+    if (!d.isNaN && isSubtype(d.type.type, 'number'))
+      return ce.tuple(...num.ops.map((c) => c.div(d)));
+  }
+
   if (typeof denom === 'number') {
     if (isNaN(denom)) return ce.NaN;
     if (isLiteral(num, 0)) {
@@ -1724,6 +1750,26 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
       xs.map((x) => x.canonical)
     );
 
+  // A factor that is collection-TYPED but has no collection value yet (a
+  // declared-but-unassigned `list<number>` symbol) is not a broadcast
+  // participant, so each branch below would splice it whole into every cell as
+  // if it were a scalar — freezing an outer product into the stored form.
+  // Decline the element-wise dispatch and leave the product inert; once the
+  // operand resolves, re-evaluating that product zips.
+  const unresolvedFactor = hasUnresolvedCollectionOperand(
+    xs,
+    isBroadcastableCollection
+  );
+  // The one thing that outranks the veto: a length disagreement among the
+  // factors that DO have values. No assignment to the unresolved factor can
+  // reconcile 2 elements against 3, so the product is reported as an error
+  // instead of held — the same error `Multiply([1,2], [3,4,5])` gives without
+  // the unresolved factor.
+  if (unresolvedFactor) {
+    const mismatch = broadcastLengthMismatch(ce, xs);
+    if (mismatch) return mismatch;
+  }
+
   // An unknown/infinite-length indexed collection (a `Cycle`, a `Filter`, a
   // symbolic-length `Range`) can't be materialized or eagerly zipped without
   // truncating — return the lazy `Map` form. Checked BEFORE the tensor and
@@ -1732,7 +1778,7 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   // sources rather than routing to `mulTensors`. A finite tensor never triggers
   // this (its `count` is known-finite). Tuples stay atomic
   // (`isBroadcastableCollection` excludes them).
-  if (xs.some(isUnknownLengthBroadcast))
+  if (!unresolvedFactor && xs.some(isUnknownLengthBroadcast))
     return lazyBroadcastMap(
       ce,
       'Multiply',
@@ -1743,7 +1789,7 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
 
   // Tensor (matrix/vector) operands follow matrix-product / scalar-scaling
   // semantics rather than the scalar Product machinery.
-  if (xs.some((x) => isTensorValue(x))) {
+  if (!unresolvedFactor && xs.some((x) => isTensorValue(x))) {
     const r = mulTensors(ce, xs, false, expand);
     if (r) return r;
   }
@@ -1759,7 +1805,7 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   // Tuples (points/vectors, incl. Desmos point-lists like `(1, 0.3n)` with a
   // list component) are EXCLUDED — they scale component-wise via `mulTuples`,
   // never broadcast as a list.
-  if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
+  if (!unresolvedFactor && xs.some((x) => isFiniteBroadcastParticipant(x))) {
     const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, false, true);
     if (r) return r;
   }
@@ -1768,7 +1814,8 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   // tuple with a collection component (`2·(1, 0.3n)` → `(2, 0.6n)`); the
   // explicit `PointList` operator — not plain `Tuple` — carries the Desmos
   // list-of-points reading.
-  if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, false, expand);
+  if (xs.some((x) => isTuple(x)) && !hasUnresolvedTupleCofactor(xs))
+    return mulTuples(ce, xs, false, expand);
 
   // `expandProducts` does two things: it distributes over sums, and — as a
   // side effect of walking the operands pairwise — it folds the product two at
@@ -1803,10 +1850,21 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
       'Multiply',
       xs.map((x) => x.canonical)
     );
+  // A collection-TYPED but valueless co-factor vetoes the element-wise
+  // dispatch here exactly as it does on the exact route (see `mulImpl`).
+  let unresolvedFactor = hasUnresolvedCollectionOperand(
+    xs,
+    isBroadcastableCollection
+  );
+  // A definite length disagreement outranks the veto here too (see `mulImpl`).
+  if (unresolvedFactor) {
+    const mismatch = broadcastLengthMismatch(ce, xs);
+    if (mismatch) return mismatch;
+  }
   // Unknown/infinite-length indexed collection → lazy `Map` (see `mul`, which
   // documents why this precedes the tensor branch); the `N`-wrap threads
   // through so elements float on access.
-  if (xs.some(isUnknownLengthBroadcast))
+  if (!unresolvedFactor && xs.some(isUnknownLengthBroadcast))
     return lazyBroadcastMap(
       ce,
       'Multiply',
@@ -1814,12 +1872,12 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
       isBroadcastableCollection,
       true
     );
-  if (xs.some((x) => isTensorValue(x))) {
+  if (!unresolvedFactor && xs.some((x) => isTensorValue(x))) {
     const r = mulTensors(ce, xs, true);
     if (r) return r;
   }
   // Broadcast over a non-tensor finite indexed collection (see `mul`).
-  if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
+  if (!unresolvedFactor && xs.some((x) => isFiniteBroadcastParticipant(x))) {
     const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
     if (r) return r;
   }
@@ -1852,7 +1910,17 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   // re-entry, and gated so the hot all-numeric path pays a single cheap
   // `isFunction` sweep.
   if (tupleInert || xs.some((x) => isFunction(x))) {
-    if (xs.some(isUnknownLengthBroadcast))
+    // Recomputed over the numericized operands: `.N()` can turn a raw operand
+    // into a collection, which changes who the participants are.
+    unresolvedFactor = hasUnresolvedCollectionOperand(
+      xs,
+      isBroadcastableCollection
+    );
+    if (unresolvedFactor) {
+      const mismatch = broadcastLengthMismatch(ce, xs);
+      if (mismatch) return mismatch;
+    }
+    if (!unresolvedFactor && xs.some(isUnknownLengthBroadcast))
       return lazyBroadcastMap(
         ce,
         'Multiply',
@@ -1860,15 +1928,16 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
         isBroadcastableCollection,
         true
       );
-    if (xs.some((x) => isTensorValue(x))) {
+    if (!unresolvedFactor && xs.some((x) => isTensorValue(x))) {
       const rt = mulTensors(ce, xs, true);
       if (rt) return rt;
     }
-    if (xs.some((x) => isFiniteBroadcastParticipant(x))) {
+    if (!unresolvedFactor && xs.some((x) => isFiniteBroadcastParticipant(x))) {
       const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
       if (r) return r;
     }
-    if (xs.some((x) => isTuple(x))) return mulTuples(ce, xs, true);
+    if (xs.some((x) => isTuple(x)) && !hasUnresolvedTupleCofactor(xs))
+      return mulTuples(ce, xs, true);
   }
   // Same gate as `mulFactored`: `.N()` is `evaluate()` with floats, so a
   // product of sums must reach the user FACTORED on this route too —
@@ -1897,6 +1966,28 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   }
 
   return new Product(ce, xs).asExpression({ numericApproximation: true });
+}
+
+/**
+ * Does a product with a tuple factor carry a CO-FACTOR that is
+ * collection-typed but has no collection value yet?
+ *
+ * `mulTuples` splices every non-tuple factor into each COMPONENT of the tuple,
+ * which is the same per-cell capture the broadcast branches above decline —
+ * one rank up. `Multiply(Tuple(1, 2), s)` for a valueless `s: list<number>`
+ * stored the tuple of products `(s, 2s)`, which materializes as the tuple of
+ * lists `([10,20], [20,40])` once `s := [10, 20]`, where evaluating the same
+ * product fresh transposes to the point list `[(10, 20), (20, 40)]`.
+ *
+ * Asked separately from `hasUnresolvedCollectionOperand`, which requires an
+ * actual broadcast PARTICIPANT: a tuple is not one — it is atomic under
+ * broadcast — so a tuple-and-symbol product has no participant at all and that
+ * veto stays silent. Keeping the participant requirement there is what lets an
+ * ordinary symbolic product such as `2·s` or `s^2`, which has no tuple either,
+ * keep folding.
+ */
+function hasUnresolvedTupleCofactor(xs: ReadonlyArray<Expression>): boolean {
+  return xs.some((x) => !isTuple(x) && isUnresolvedCollectionOperand(x));
 }
 
 /**

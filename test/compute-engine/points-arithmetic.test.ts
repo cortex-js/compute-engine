@@ -2057,3 +2057,153 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     );
   });
 });
+
+describe('POINT/TUPLE ARITHMETIC — zipped point-list quotient folds its elements', () => {
+  // A `Divide(list<tuple>, list<number>)` is zipped element-wise, and each
+  // element is built with `ce._fn('Divide', [tuple, scalar])` — which skips
+  // `canonicalDivide`, where the single-tuple form does its component-wise
+  // scaling. So the fold has to happen at the VALUE level, in `div()`; without
+  // its numeric-tuple arm the element came back as an inert
+  // `Multiply(1/d, tuple)` (or a tuple of unevaluated component quotients),
+  // and only a divisor that folded to exactly 1 looked correct.
+
+  /** `Sqrt(PointX(P)^2 + PointY(P)^2)`, over a point or a point list. */
+  const norm = (P: any): any => [
+    'Sqrt',
+    ['Add', ['Power', ['PointX', P], 2], ['Power', ['PointY', P], 2]],
+  ];
+
+  // Two unit vectors: the first has a norm of 1.000000000000000165 (not
+  // exactly 1), the second a norm of exactly 1.
+  const T: any = ['Tuple', 0.9434411087063643, -0.3315401550384305];
+  const U: any = ['Tuple', 0.6, 0.8];
+
+  test('each element of a normalized point list is a folded Tuple', () => {
+    const ce = new ComputeEngine();
+    const points = ['List', T, U];
+    const r = ce.box(['Divide', points, norm(points)]).evaluate();
+
+    expect(r.operator).toBe('List');
+    expect(r.ops!.map((op) => op.operator)).toEqual(['Tuple', 'Tuple']);
+    // The divisor of the first element is 1.000000000000000165, not exactly 1
+    // — the case that used to stay unfolded, while the second element (whose
+    // divisor is exactly 1) folded either way.
+    expect(r.op1.op1.re).toBeCloseTo(0.9434411087063643, 12);
+    expect(r.op1.op2.re).toBeCloseTo(-0.3315401550384305, 12);
+    expect(r.op2.toString()).toBe('(0.6, 0.8)');
+    expect(r.type.matches('list<tuple<number, number>>')).toBe(true);
+  });
+
+  test('the zipped element agrees with the single-tuple quotient', () => {
+    const ce = new ComputeEngine();
+    const single = ce.box(['Divide', T, norm(T)]).evaluate();
+    expect(single.operator).toBe('Tuple');
+
+    const zipped = ce
+      .box(['Divide', ['List', T, U], norm(['List', T, U])])
+      .evaluate().op1;
+    expect(zipped.operator).toBe('Tuple');
+    expect(zipped.op1.re).toBeCloseTo(single.op1.re!, 15);
+    expect(zipped.op2.re).toBeCloseTo(single.op2.re!, 15);
+  });
+
+  // Control: the `.N()` route already folded (the `Divide` handler floats the
+  // quotient, and `mulN` scales a tuple through `mulTuples`), so only the
+  // exact route was showing the inert product.
+  test('.N() of the zipped quotient folds too', () => {
+    const ce = new ComputeEngine();
+    const points = ['List', T, U];
+    const n = ce.box(['Divide', points, norm(points)]).N();
+    expect(n.ops!.map((op) => op.operator)).toEqual(['Tuple', 'Tuple']);
+  });
+
+  test('an inexact divisor list folds each element (box route)', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Divide',
+        ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+        ['List', 1.25, 2.5],
+      ])
+      .evaluate();
+    expect(r.toString()).toBe('[(0.8, 1.6),(1.2, 1.6)]');
+    expect(r.ops!.map((op) => op.operator)).toEqual(['Tuple', 'Tuple']);
+  });
+
+  test('an inexact divisor list folds each element (parse route)', () => {
+    const ce = new ComputeEngine();
+    const r = ce.parse('\\frac{[(1,2),(3,4)]}{[1.25,2.5]}').evaluate();
+    expect(r.toString()).toBe('[(0.8, 1.6),(1.2, 1.6)]');
+    expect(r.ops!.map((op) => op.operator)).toEqual(['Tuple', 'Tuple']);
+  });
+
+  test('an exact divisor list keeps the components exact', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Divide', ['List', ['Tuple', 3, 4]], ['List', 5]])
+      .evaluate();
+    expect(r.toString()).toBe('[(3/5, 4/5)]');
+    expect(r.op1.operator).toBe('Tuple');
+    expect(r.type.matches('list<tuple<rational, rational>>')).toBe(true);
+  });
+
+  test('the single-tuple quotient is unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Divide', ['Tuple', 3, 4], 5])
+        .evaluate()
+        .toString()
+    ).toBe('(3/5, 4/5)');
+    expect(ce.parse('\\frac{(3,4)}{1.25}').evaluate().toString()).toBe(
+      '(2.4, 3.2)'
+    );
+    // A tuple divisor has no reciprocal, on both routes.
+    expect(ce.box(['Divide', 5, ['Tuple', 3, 4]]).operator).toBe('Error');
+  });
+
+  // The degenerate divisors now answer the same on both routes. A zero
+  // divisor divides each COMPONENT (`canonicalDivide` maps the components
+  // before its own `a/0` rule), where the zipped element used to
+  // short-circuit to a bare scalar `~oo`; a NaN divisor stays a scalar NaN on
+  // both.
+  test('a zero or NaN divisor answers as the single-tuple form does', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Divide', ['Tuple', 3, 4], 0]).evaluate().toString()).toBe(
+      '(~oo, ~oo)'
+    );
+    expect(ce.box(['Divide', ['Tuple', 3, 4], NaN]).evaluate().toString()).toBe(
+      'NaN'
+    );
+
+    const points = ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]];
+    expect(
+      ce
+        .box(['Divide', points, ['List', 0, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[(~oo, ~oo),(3, 4)]');
+    expect(
+      ce
+        .box(['Divide', points, ['List', NaN, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[NaN,(3, 4)]');
+  });
+
+  // Control: the product route folds through `mulTuples`, which `mulImpl`
+  // dispatches to before assembling a `Product` — the arm `div()` was missing.
+  test('the zipped PRODUCT folds its elements, in either operand order', () => {
+    const ce = new ComputeEngine();
+    const points = ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]];
+    const scalars = ['List', 5, 0.5];
+
+    const r1 = ce.box(['Multiply', points, scalars]).evaluate();
+    expect(r1.toString()).toBe('[(15, 20),(3, 4)]');
+    expect(r1.ops!.map((op) => op.operator)).toEqual(['Tuple', 'Tuple']);
+
+    const r2 = ce.box(['Multiply', scalars, points]).evaluate();
+    expect(r2.toString()).toBe('[(15, 20),(3, 4)]');
+    expect(r2.ops!.map((op) => op.operator)).toEqual(['Tuple', 'Tuple']);
+  });
+});

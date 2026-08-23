@@ -217,3 +217,124 @@ describe('alias LHS-unfold: recursion is bounded', () => {
     expect(typeof resolved === 'object' && resolved.kind).toBe('reference');
   });
 });
+
+//
+// The LHS unfold above reaches every gate that asks its question through
+// `isSubtype`, which is why an alias of a SCALAR (`m + 1`) works. The
+// arithmetic operand gate (`checkNumericArgs`) and the `Add`/`Multiply`/
+// `Divide` type handlers do not: they read `type.kind` directly through the
+// shape predicates in `collection-utils.ts`, so an alias of a COLLECTION or a
+// TUPLE was still seen as an opaque `reference` node and refused —
+// `Multiply(2, p)` with `p: pt` (an alias of `tuple<number, number>`) errored
+// `incompatible-type("number", "pt")` while the identical symbol declared
+// `tuple<number, number>` directly was accepted and scaled.
+//
+// Each case is stated against the DIRECT spelling as its control: the alias
+// must behave exactly like the type it names. The nominal counterpart must
+// keep refusing, for the same reason it does above.
+//
+
+describe('alias unfold: shaped aliases in arithmetic', () => {
+  const ce = new ComputeEngine();
+  ce.declareType('pt', 'tuple<number, number>', { alias: true });
+  ce.declareType('npt', 'tuple<number, number>'); // nominal counterpart
+  ce.declareType('nums', 'list<number>', { alias: true });
+  ce.declareType('vec2', 'vector<2>', { alias: true });
+  ce.declare('p', 'pt'); // alias of a tuple
+  ce.declare('q', 'tuple<number, number>'); // direct spelling: the control
+  ce.declare('n', 'npt'); // nominal: must keep refusing
+  ce.declare('L', 'nums'); // alias of a list
+  ce.declare('M', 'list<number>'); // direct spelling: the control
+  ce.declare('v', 'vec2'); // alias of a vector
+  ce.declare('w', 'vector<2>'); // direct spelling: the control
+
+  test('Multiply admits an alias of a tuple, like the direct spelling', () => {
+    expect(ce.box(['Multiply', 2, 'p']).errors).toHaveLength(0);
+    expect(ce.box(['Multiply', 2, 'q']).errors).toHaveLength(0);
+    // The result keeps the tuple shape rather than collapsing to `number`;
+    // the alias reports its own name, exactly as `ce.box('m').type` does.
+    expect(ce.box(['Multiply', 2, 'p']).type.toString()).toBe('pt');
+    expect(ce.box(['Multiply', 2, 'q']).type.toString()).toBe(
+      'tuple<number, number>'
+    );
+  });
+
+  test('Multiply still refuses a NOMINAL tuple type', () => {
+    const errors = ce.box(['Multiply', 2, 'n']).errors;
+    expect(errors).toHaveLength(1);
+    expect(errors[0].toString()).toContain('incompatible-type');
+  });
+
+  test('Multiply by a collection admits an alias of a tuple', () => {
+    expect(ce.box(['Multiply', ['List', 1, 2, 3], 'p']).errors).toHaveLength(0);
+    expect(ce.box(['Multiply', ['List', 1, 2, 3], 'q']).errors).toHaveLength(0);
+  });
+
+  test('Negate admits an alias of a tuple, like the direct spelling', () => {
+    expect(ce.box(['Negate', 'p']).errors).toHaveLength(0);
+    expect(ce.box(['Negate', 'p']).type.toString()).toBe('pt');
+    expect(ce.box(['Negate', 'q']).type.toString()).toBe(
+      'tuple<number, number>'
+    );
+  });
+
+  test('Divide admits an alias of a tuple and widens component-wise', () => {
+    expect(ce.box(['Divide', 'p', 2]).errors).toHaveLength(0);
+    // The alias NAME is not kept here: the quotient widens each component, so
+    // the alias no longer describes the result. The shape must match the
+    // control exactly.
+    expect(ce.box(['Divide', 'p', 2]).type.toString()).toBe(
+      ce.box(['Divide', 'q', 2]).type.toString()
+    );
+  });
+
+  test('the `scalar + tuple` rejection sees through an alias', () => {
+    // `Add` must REFUSE here, and refuse identically for both spellings: a
+    // scalar cannot be added to a point. Admitting the alias while refusing
+    // the direct spelling would be the mirror-image defect.
+    const aliasErrors = ce.box(['Add', 2, 'p']).errors;
+    const directErrors = ce.box(['Add', 2, 'q']).errors;
+    expect(aliasErrors).toHaveLength(1);
+    expect(directErrors).toHaveLength(1);
+    expect(aliasErrors[0].toString()).toBe(directErrors[0].toString());
+  });
+
+  test('arithmetic admits an alias of a list', () => {
+    expect(ce.box(['Multiply', 2, 'L']).errors).toHaveLength(0);
+    expect(ce.box(['Multiply', 2, 'L']).type.toString()).toBe('nums');
+    expect(ce.box(['Add', ['List', 1, 2], 'L']).errors).toHaveLength(0);
+    expect(ce.box(['Add', ['List', 1, 2], 'M']).errors).toHaveLength(0);
+  });
+
+  test('arithmetic admits an alias of a vector', () => {
+    expect(ce.box(['Multiply', 2, 'v']).errors).toHaveLength(0);
+    expect(ce.box(['Multiply', 2, 'v']).type.toString()).toBe('vec2');
+    expect(ce.box(['Multiply', 2, 'w']).errors).toHaveLength(0);
+  });
+});
+
+describe('alias unfold: shaped aliases evaluate once assigned', () => {
+  test('an alias-typed point scales component-wise', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('pt', 'tuple<number, number>', { alias: true });
+    ce.declare('p', 'pt');
+    ce.assign('p', ['Tuple', 1, 2]);
+
+    expect(ce.box(['Multiply', 2, 'p']).evaluate().toString()).toBe('(2, 4)');
+    expect(ce.box(['Add', 'p', 'p']).evaluate().toString()).toBe('(2, 4)');
+    expect(ce.box(['Negate', 'p']).evaluate().toString()).toBe('(-1, -2)');
+    expect(ce.box(['Divide', 'p', 2]).evaluate().toString()).toBe('(1/2, 1)');
+  });
+
+  test('an alias-typed list broadcasts', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('nums', 'list<number>', { alias: true });
+    ce.declare('L', 'nums');
+    ce.assign('L', ['List', 1, 2, 3]);
+
+    expect(ce.box(['Multiply', 2, 'L']).evaluate().toString()).toBe('[2,4,6]');
+    expect(
+      ce.box(['Add', ['List', 1, 2, 3], 'L']).evaluate().toString()
+    ).toBe('[2,4,6]');
+  });
+});

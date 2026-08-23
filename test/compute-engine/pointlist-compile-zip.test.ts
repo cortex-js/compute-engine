@@ -366,26 +366,32 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     ).toEqual(interpret(expr, { n: [1, 2, 3], m: [10, 20] }));
   });
 
-  it('PointZ over 2-arity points: the interpreter ERRORS, the compiled kernel keeps the NaN marker', () => {
-    // REVERSED in part (item 138 clarified ask, 2026-08-02): a statically-
-    // absent component is a TYPE-level fact → a typed `incompatible-dimensions`
+  it('PointZ over 2-arity points fails closed on BOTH routes (typed error, not a NaN kernel)', () => {
+    // REVERSED (item 138 clarified ask, 2026-08-02): a statically-absent
+    // component is a TYPE-level fact → a typed `incompatible-dimensions`
     // error. That reverses the 2026-07-22 NaN-over-Nothing ruling, which
     // weighed the position-preserving marker against `Nothing` and never
     // weighed a typed error.
     //
-    // Here the operand type is `list<tuple>` — a BARE element tuple, whose
-    // arity is not statically known — so the static gate stays inert and the
-    // JS kernel is still emitted. Its numeric ABI keeps the `NaN` absence
-    // marker for dynamically-shaped bases (the shader targets cannot throw;
-    // see the DOMAIN-conditional pin below). The INTERPRETER sees the concrete
-    // 2-tuples and errors — once, for the whole application, not per point.
+    // Until the transpose's type carried the point ARITY the operand typed as
+    // the arity-less `list<tuple>`: the static gate could not fire, and the JS
+    // kernel was emitted with the `NaN` absence marker in every point. A
+    // `PointList` states its arity by construction — one coordinate per
+    // component, whatever the source lengths are — so the type is now
+    // `list<tuple<finite_integer, number>>` and the LIST route reaches the
+    // same type-check decline the SINGLE-point route has had since item 138
+    // (the pin directly below). The `NaN` marker keeps its remaining ground:
+    // a base whose arity is genuinely not statically known, e.g. a symbol
+    // declared bare `tuple` (see the DOMAIN-conditional pin further down).
     const ce = zipEngine();
     const expr = ['PointZ', ['PointList', -6, 'n']];
-    expect(ce.box(['PointList', -6, 'n']).type.toString()).toBe('list<tuple>');
-    const r = js.compile(ce.box(expr as any));
-    const out = (r.run as (s: any) => number[])({ n: [1, 2, 3] });
-    expect(out).toHaveLength(3);
-    expect(out.every((v) => Number.isNaN(v))).toBe(true);
+    expect(ce.box(['PointList', -6, 'n']).type.toString()).toBe(
+      'list<tuple<finite_integer, number>>'
+    );
+    expect(ce.box(expr as any).isValid).toBe(false);
+    expect(() => js.compile(ce.box(expr as any))).toThrow(
+      /incompatible-dimensions/
+    );
     // The interpreted route, with `n` bound: one error, not a list of markers.
     const ice = new ComputeEngine();
     ice.assign('n', ice.box(['List', 1, 2, 3]));
@@ -574,11 +580,23 @@ describe('PointList — GPU projection (D3)', () => {
     );
   });
 
-  it('PointZ on a 2-arity PointList keeps the fail-closed throw — and says so', () => {
+  it('PointZ on a 2-arity PointList keeps the fail-closed throw', () => {
+    // Like the single-point case below, the mismatch is caught at type-check
+    // time: a two-component `PointList` types as `list<tuple<…, …>>`, whose
+    // arity states there is no third coordinate, so the expression is invalid
+    // before this target's own projection gate is consulted and the
+    // diagnostic that reaches the caller is the engine's typed
+    // `incompatible-dimensions` error. (Until the transpose's type carried the
+    // arity — an arity-less `list<tuple>` — this route reached the target's
+    // own "the points have arity 2, so there is no coordinate 3" decline,
+    // which is now defensive: it still guards a point-list operand whose
+    // arity is not statically known.) Still fails closed, which is what this
+    // pin is about.
     const ce = gpuEngine();
+    expect(ce.box(['PointZ', ['PointList', -6, 'v']]).isValid).toBe(false);
     expect(() =>
       glsl.compile(ce.box(['PointZ', ['PointList', -6, 'v']]))
-    ).toThrow(/the points have arity 2, so there is no coordinate 3/);
+    ).toThrow(/incompatible-dimensions/);
   });
 
   it('PointZ on a SINGLE 2-arity point fails closed too (arity is symmetric)', () => {
