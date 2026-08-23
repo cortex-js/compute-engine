@@ -127,7 +127,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { typeMembership } from './sets.js';
 import { isRingConstant } from './ring-constructions.js';
-import { adjoinType } from './type-handlers.js';
+import { adjoinType, operandLiteralValue } from './type-handlers.js';
 import {
   evaluateProtocolProperty,
   immutableValueAssignmentError,
@@ -6405,7 +6405,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           const key = ops[1];
           if (ops.length === 2 && key?.isInteger === true) {
             const n = t.elements.length;
-            const raw = key.re;
+            // The literal's handler-visible value first: the channel that
+            // survives when the value reads are unavailable.
+            const raw = operandLiteralValue(key) ?? key.re;
             if (typeof raw === 'number' && Number.isFinite(raw)) {
               const i = raw < 0 ? n + raw + 1 : raw;
               if (i >= 1 && i <= n) return t.elements[i - 1].type;
@@ -6444,7 +6446,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           const n = t.elements.length;
           const slots = widen(...t.elements.map((x) => x.type)) as Type;
           if (key?.isInteger === true) {
-            const raw = key.re;
+            const raw = operandLiteralValue(key) ?? key.re;
             if (typeof raw === 'number' && Number.isFinite(raw)) {
               const i = raw < 0 ? n + raw + 1 : raw;
               if (i >= 1 && i <= n) return t.elements[i - 1].type; // in-range
@@ -12155,9 +12157,16 @@ function isIndexSpan(ops: ReadonlyArray<Expression>): boolean {
   if (ops.length === 0 || ops.length > 3) return false;
 
   // An exact, finite integer LITERAL, or `null`. See the note above on why
-  // `toInteger` is guarded by `isInteger` rather than used bare.
-  const literal = (op: Expression | undefined): number | null =>
-    op?.isInteger === true ? toInteger(op) : null;
+  // `toInteger` is guarded by `isInteger` rather than used bare. The
+  // handler-visible literal type is consulted first: it carries the same
+  // machine value and is the channel that survives when the value reads
+  // are unavailable to a type handler.
+  const literal = (op: Expression | undefined): number | null => {
+    if (op?.isInteger !== true) return null;
+    const v = operandLiteralValue(op);
+    if (v !== undefined) return Number.isInteger(v) ? v : null;
+    return toInteger(op);
+  };
 
   if (ops.length === 3 && literal(ops[2]) !== 1) return false;
 

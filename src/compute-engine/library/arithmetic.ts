@@ -120,10 +120,20 @@ import {
   broadcastResultType,
   collectionElementType,
   isNonRealNumber,
+  negateNumericType,
+  nonNegativeRangeType,
+  positiveRangeType,
   resolveTypeAlias,
+  stripNumericRanges,
   widen,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import {
+  negativeSign,
+  nonNegativeSign,
+  nonPositiveSign,
+  positiveSign,
+} from '../boxed-expression/sgn.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import type { Type } from '../../common/type/types.js';
 import {
@@ -135,6 +145,10 @@ import {
   absFunctionType,
   measurementType,
   bigOpResultType,
+  operandIsEven,
+  operandIsOdd,
+  operandLiteralValue,
+  operandSgn,
 } from './type-handlers.js';
 import {
   foldQuantityOperands,
@@ -311,7 +325,11 @@ function negativeBaseIsComplexBranch(exp: Expression): boolean {
   // float reconstruction — `realPowerBranchTerms` is the single source of the
   // branch decision, shared with the numeric path and the compiled constant
   // fold so type, `.N()` and compiled code cannot tell different stories.
-  const terms = realPowerBranchTerms(asRational(exp), exp.re);
+  // A literal exponent's value also travels in its handler-visible type
+  // (`operandLiteralValue`), which is the channel that survives when the
+  // value reads are unavailable.
+  const re = operandLiteralValue(exp) ?? exp.re;
+  const terms = realPowerBranchTerms(asRational(exp), re);
   // No trustworthy rational is a PROOF of the complex branch, not an absence of
   // information — but only once the exponent has a definite value. A known
   // real non-integer with a finite value that is not an odd-denominator
@@ -320,7 +338,7 @@ function negativeBaseIsComplexBranch(exp: Expression): boolean {
   // the value (`(−2)^0.3333333333` typed `finite_number`, and the compiler
   // lowered it to a real `Math.pow` that yields NaN). An exponent with no
   // finite value — `Ln(2)`, a free symbol — still hedges.
-  if (terms === undefined) return Number.isFinite(exp.re);
+  if (terms === undefined) return Number.isFinite(re);
   return terms[1] % 2 === 0;
 }
 
@@ -514,11 +532,15 @@ function scaleTupleComponents(
 ): Type {
   if (typeof t === 'string' || t.kind !== 'tuple' || scalarTypes.length === 0)
     return t as Type;
+  // Range decorations are stripped on BOTH sides of the join: a scaled
+  // component does not lie in the union of the component's and the
+  // factors' ranges (see `stripNumericRanges`).
+  const factors = scalarTypes.map((x) => stripNumericRanges(x));
   return {
     kind: 'tuple',
     elements: t.elements.map((e) =>
       isSubtype(e.type, 'number')
-        ? { ...e, type: widen(e.type, ...scalarTypes) as Type }
+        ? { ...e, type: widen(stripNumericRanges(e.type), ...factors) as Type }
         : e
     ),
   };
@@ -854,7 +876,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             den.isFinite === true &&
             den.isReal === true
           ) {
-            const s = den.sgn;
+            const s = operandSgn(den);
             if (s === 'positive' || s === 'negative' || s === 'not-zero')
               return 'non_finite_number';
           }
@@ -1033,12 +1055,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `Factorial(i)` (complex) instead of the unsound `finite_integer`.
       signature: '(number) -> number',
       type: ([x]) => {
+        const s = x ? operandSgn(x) : undefined;
         // A non-negative integer factorial is a (finite) positive integer.
-        if (x?.isInteger === true && x.isNonNegative === true)
+        if (x?.isInteger === true && nonNegativeSign(s) === true)
           return 'finite_integer';
         // A *negative* integer is a pole of Γ(x+1): the value is `~oo`,
         // representable only by `number` (non-finite typing convention).
-        if (x?.isInteger === true && x.isNegative === true) return 'number';
+        if (x?.isInteger === true && negativeSign(s) === true) return 'number';
         // Otherwise it is Γ(x+1); type it like `Gamma`.
         return numericTypeHandler([x]);
       },
@@ -1140,9 +1163,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // pattern rather than `(integer) -> integer`.
       signature: '(number) -> number',
       type: ([x]) => {
-        if (x?.isInteger === true && x.isNonNegative === true)
+        const s = x ? operandSgn(x) : undefined;
+        if (x?.isInteger === true && nonNegativeSign(s) === true)
           return 'finite_integer';
-        if (x?.isInteger === true && x.isNegative === true) return 'number';
+        if (x?.isInteger === true && negativeSign(s) === true) return 'number';
         return numericTypeHandler([x]);
       },
       // Positive for x ≥ 0; NaN at negative integers (see evaluate). A
@@ -1377,7 +1401,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(order: integer, number) -> number',
       // ψⁿ(x) has poles (value `~oo`) at the non-positive integers.
       type: ([n, x]) =>
-        x?.isInteger === true && x.isNonPositive === true
+        x?.isInteger === true && nonPositiveSign(operandSgn(x)) === true
           ? 'number'
           : numericTypeHandler([n, x]),
       evaluate: ([n, x], { numericApproximation, engine }) =>
@@ -1444,7 +1468,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `finite_real`. (`B(−2, 2) = 1/2` is finite but `number` still admits it.)
       type: (ops) => {
         const nonposInt = (x: Expression | undefined) =>
-          x?.isInteger === true && x.isNonPositive === true;
+          x?.isInteger === true && nonPositiveSign(operandSgn(x)) === true;
         if (nonposInt(ops[0]) || nonposInt(ops[1])) return 'number';
         return numericTypeHandler(ops);
       },
@@ -1804,9 +1828,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // NaN). Operand tests read the STATIC type — the value predicates
         // (`isFinite`, `isInteger`) are type-blind on compound operands like
         // `Mod(k + 29, 900)`.
+        const bSgn = operandSgn(b);
         const bNonZero = isNumber(b)
           ? !b.isSame(0)
-          : b.isPositive === true || b.isNegative === true;
+          : positiveSign(bSgn) === true ||
+            negativeSign(bSgn) === true ||
+            bSgn === 'not-zero';
         if (!bNonZero) return 'number';
         const ta = a.type;
         const tb = b.type;
@@ -2129,8 +2156,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               tupleCollections[0].type.type,
               scalarSiblings
             );
+          // Strip range decorations before the join: a product of two
+          // `list<real<-1..>>` operands does not stay above −1
+          // (see `stripNumericRanges`).
           return widen(
-            ...collectionOps.map((x) => broadcastSiblingType(x.type.type))
+            ...collectionOps.map((x) =>
+              stripNumericRanges(broadcastSiblingType(x.type.type))
+            )
           );
         }
         // An operand whose collection-ness is not statically visible (a top
@@ -2170,7 +2202,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ops.every((x) => {
               if (x.isReal !== true) return false;
               if (provablyNonFiniteNumber(x)) return true;
-              const s = x.sgn;
+              // Value/assumption channel first, then the TYPE channel (a
+              // literal's value type, an `assume` range, `Abs`'s `<0..>`).
+              const s = operandSgn(x);
               return s === 'positive' || s === 'negative' || s === 'not-zero';
             })
           )
@@ -2203,7 +2237,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         ) {
           if (imaginaryCount % 2 === 0) return 'finite_real';
           const isNonZero = (x: Expression) => {
-            const s = x.sgn;
+            const s = operandSgn(x);
             return s === 'positive' || s === 'negative' || s === 'not-zero';
           };
           if (ops.every((x) => isImaginary(x) || isNonZero(x)))
@@ -2343,7 +2377,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `value`-typed signature defaults to `pass-through`; declare `propagate`
       // (§3.A/§5) so `Negate(Missing)` yields `NaN`.
       missingBehavior: 'propagate',
-      type: ([x]) => x.type,
+      // The echo must REFLECT any range the operand type carries: `−|x|`
+      // echoing `real<0..>` verbatim claimed a sign the value contradicts.
+      // Ranges reflect about zero, tiers are their own negation
+      // (`negateNumericType`).
+      type: ([x]) => negateNumericType(x.type.type),
       sgn: ([x]) => oppositeSgn(x.sgn),
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args);
@@ -2480,11 +2518,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // the top type (the old `non_finite_number` ignored the NaN forms).
         // `=== false` (not `!`): a symbolic operand has `isFinite ===
         // undefined`, which must not be treated as non-finite.
+        // Sign reads combine the value channel with the TYPE channel
+        // (`operandSgn`): a literal's sign travels in its handler-visible
+        // type, and `assume(x > 0)` travels in the symbol's refined type.
+        const baseSgn = operandSgn(base);
+        const expSgn = operandSgn(exp);
         if (provablyNonFiniteNumber(base) || provablyNonFiniteNumber(exp)) {
           if (
-            base.isNonNegative === true &&
+            nonNegativeSign(baseSgn) === true &&
             exp.isFinite === true &&
-            exp.isPositive === true &&
+            positiveSign(expSgn) === true &&
             provablyNonFiniteNumber(base)
           )
             return 'non_finite_number';
@@ -2492,19 +2535,42 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // `0` raised to a non-positive power is a pole: `0^0` is indeterminate
         // and `0^-k = ±∞` (P0-11: `0^(−0.5) = +∞`).
-        if (base.isSame(0) && exp.isPositive !== true) return 'number';
+        if (base.isSame(0) && positiveSign(expSgn) !== true) return 'number';
         // `integer ^ (non-negative integer)` stays an integer; a possibly
         // *negative* integer exponent yields a (non-integer) rational
-        // (P0-11: `2^-2 = 1/4`).
-        if (base.isInteger && exp.isInteger)
-          return exp.isNonNegative === true
-            ? 'finite_integer'
+        // (P0-11: `2^-2 = 1/4`). An EVEN exponent adds the sign: x² ≥ 0
+        // (and x⁻² ≥ 0) for any real x (ROADMAP "Ranged types should carry
+        // sign…", work item 4 — the even-power head).
+        if (base.isInteger && exp.isInteger) {
+          if (nonNegativeSign(expSgn) === true)
+            return operandIsEven(exp) === true
+              ? nonNegativeRangeType('finite_integer')
+              : 'finite_integer';
+          return operandIsEven(exp) === true
+            ? nonNegativeRangeType('finite_rational')
             : 'finite_rational';
-        if (base.isRational && exp.isInteger) return 'finite_rational';
+        }
+        if (base.isRational && exp.isInteger)
+          return operandIsEven(exp) === true
+            ? nonNegativeRangeType('finite_rational')
+            : 'finite_rational';
         // A real result needs a non-negative base or an integer exponent;
         // otherwise the result may be complex (e.g. (−2)^0.5).
         if (base.isReal && exp.isReal) {
-          if (base.isNonNegative || exp.isInteger) return 'finite_real';
+          // A provably positive base keeps a positive result — `b^x =
+          // e^(x·ln b) > 0` for a real exponent (`Exp` canonicalizes to
+          // `Power(e, x)`, so this arm is item 4's `Exp` head); a
+          // non-negative base or an even exponent keeps a non-negative one.
+          // Same generic-point convention as the plain `finite_real` claims
+          // these refine: an operand of unknown finiteness is treated as a
+          // finite point.
+          if (positiveSign(baseSgn) === true)
+            return positiveRangeType('finite_real');
+          if (nonNegativeSign(baseSgn) === true)
+            return nonNegativeRangeType('finite_real');
+          if (operandIsEven(exp) === true)
+            return nonNegativeRangeType('finite_real');
+          if (exp.isInteger) return 'finite_real';
           // A *provably negative* base with an exponent that provably lands on
           // the complex branch (`(−2)^0.3`) is a finite complex value — the
           // `finite_number` default below is true but too coarse for the
@@ -2512,7 +2578,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // an exponent whose branch cannot be proven keeps the wider default.
           // (Nested under the `isReal` guard so a complex-typed base never
           // pays for the extra sign query.)
-          if (base.isNegative === true && negativeBaseIsComplexBranch(exp))
+          if (negativeSign(baseSgn) === true && negativeBaseIsComplexBranch(exp))
             return 'finite_complex';
         }
         // A pure-imaginary base (non-zero by type: `imaginary ∩ real =
@@ -2521,8 +2587,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // (non-zero since b ≠ 0), and an unknown-parity integer is one of the
         // two — both ⊂ `finite_complex`.
         if (base.type.matches('imaginary') && exp.isInteger === true) {
-          if (exp.isEven === true) return 'finite_real';
-          if (exp.isOdd === true) return 'imaginary';
+          if (operandIsEven(exp) === true) return 'finite_real';
+          if (operandIsOdd(exp) === true) return 'imaginary';
           return 'finite_complex';
         }
         // A positive real base raised to a finite complex power is
@@ -2530,7 +2596,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // number (e.g. `e^i`, on the unit circle).
         if (
           base.isReal === true &&
-          base.isPositive === true &&
+          positiveSign(baseSgn) === true &&
           exp.type.matches('finite_complex')
         )
           return 'finite_complex';
@@ -2768,26 +2834,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (exp.isSame(0)) return 'number';
         if (exp.isSame(1)) return base.type;
         // Root(0, n): 0 for n>0, a pole (±∞) for n≤0, NaN for a complex index.
+        const rootExpSgn = operandSgn(exp);
         if (base.isSame(0))
-          return exp.isPositive === true ? 'finite_integer' : 'number';
+          return positiveSign(rootExpSgn) === true ? 'finite_integer' : 'number';
         if (base.isReal && exp.isReal) {
+          const rootBaseSgn = operandSgn(base);
           // A positive base always gives a positive real root.
-          if (base.isPositive === true) return 'finite_real';
+          if (positiveSign(rootBaseSgn) === true) return 'finite_real';
           // A negative real base with a provably *even* degree has no real
           // value: Root(−8, 4) = 1.1892… + 1.1892…i. (An *odd* degree keeps
           // CE's real-root convention — Root(−8, 3) = −2 — and a degree of
           // unknown parity keeps the `finite_number` hedge below.) `=== true`
           // throughout: a symbolic degree has `isEven === undefined`.
           if (
-            base.isNegative === true &&
-            exp.isEven === true &&
-            exp.isPositive === true
+            negativeSign(rootBaseSgn) === true &&
+            operandIsEven(exp) === true &&
+            positiveSign(rootExpSgn) === true
           )
             return 'finite_complex';
           // A negative real base: a positive index yields a finite (real or
           // complex) value; a non-positive index can numericize to NaN in the
           // current evaluate path (e.g. Root(−2,−2)), so widen to `number`.
-          if (exp.isPositive === true) return 'finite_number';
+          if (positiveSign(rootExpSgn) === true) return 'finite_number';
           return 'number';
         }
         return 'finite_number';
@@ -2988,6 +3056,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // unknown-sign real must not claim `finite_real` (same ruling as
           // the bounded inverse-trig heads, 2026-07-30). Finite operand
           // (checked above) ⇒ finite result: `finite_complex`, not `complex`.
+          // The sign combines the value channel with the TYPE channel, so
+          // a ranged operand type — `assume(a > 0)`, a literal's value
+          // type, `x²`'s non-negative range — answers here too.
           //
           // An unknown sign INCLUDES a closed float radicand (`1 − 0.2²`):
           // machine floats are not folded at canonicalization, so its `sgn`
@@ -3002,7 +3073,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // the `finite_complex` hedge while its compiled bytes are
           // unchanged. See the §5.4 `Sqrt` row of
           // `docs/plans/2026-08-22-type-handlers-on-types.md`.
-          if (x.isNonNegative === true) return 'finite_real';
+          if (nonNegativeSign(operandSgn(x)) === true) return 'finite_real';
           return 'finite_complex';
         }
         return 'finite_number';
@@ -3167,7 +3238,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description:
         "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
       keywords: ['euler number'],
-      type: 'finite_real',
+      // The declared type brackets the value (the lower bound is the
+      // machine double of e), so the TYPE channel alone proves e > 0 —
+      // `e^x` claims its positive range and `e^i` stays admissible at a
+      // `(complex)` parameter even where the value channel is not
+      // consulted (ROADMAP "Ranged types should carry sign…").
+      type: 'finite_real<2.718281828459045..2.718281828459046>',
       wikidata: 'Q82435',
       isConstant: true,
       holdUntil: 'N',

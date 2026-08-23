@@ -570,9 +570,10 @@ describe('Pipe — stage sugar (box route)', () => {
       ['Function', ['Power', 'x', 2], 'x'],
     ]);
     // The element tier is derived from the source's: a bare-parameter
-    // mapping over integers squares integers, so the static type says
-    // `finite_integer`, exactly as the evaluated `[1, 4, 9]` does.
-    expect(pipe.type.toString()).toBe('vector<finite_integer^3>');
+    // mapping over integers squares integers, so the cells say
+    // `finite_integer<0..>` (the even-power range, since the
+    // ranged-results round) — on the evaluated view too.
+    expect(pipe.type.toString()).toBe('list<finite_integer<0..>^3>');
     expect(pipe.type.toString()).toBe(pipe.evaluate().type.toString());
 
     // Element type, not just shape: a list of boolean pairs mapped through a
@@ -601,6 +602,8 @@ describe('Pipe — stage sugar (box route)', () => {
       ['Pipe', ['List', 1, 2, 3], ['Function', ['Power', 'x', 2], 'x']],
       ['Function', ['Add', 'y', 1], 'y'],
     ]);
+    // The outer `+1` stage joins bare tiers (a sum does not keep its
+    // terms' ranges), so the inner stage's `<0..>` cells widen back.
     expect(chained.type.toString()).toBe('vector<finite_integer^3>');
     expect(chained.type.toString()).toBe(chained.evaluate().type.toString());
   });

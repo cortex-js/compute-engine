@@ -3,7 +3,11 @@ import { getImaginaryFactor } from './utils.js';
 import { flatten } from './flatten.js';
 import { order, sortAddTerms } from './order.js';
 import { Type } from '../../common/type/types.js';
-import { collectionElementType, widen } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  stripNumericRanges,
+  widen,
+} from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -322,8 +326,13 @@ export function absorbScalarsIntoCells(
   // contribution is `S`. Widening the wrapper itself into the cells nested it
   // inside the collection (`list<broadcastable<number>^2>`), a type no
   // evaluated value has.
+  // Range/sign decorations are stripped before any cell JOIN below: a join
+  // is a set union, and neither a sum nor a product of a cell and a scalar
+  // lies in the union of their ranges (see `stripNumericRanges`).
   const scalars = scalarTypes.map((t) =>
-    typeof t !== 'string' && t.kind === 'broadcastable' ? t.elements : t
+    stripNumericRanges(
+      typeof t !== 'string' && t.kind === 'broadcastable' ? t.elements : t
+    )
   );
   // The cell type ONE level down, not the type one index yields. On a `list`
   // kind a multi-dimensional shape lives in `dimensions` rather than in nested
@@ -359,7 +368,7 @@ export function absorbScalarsIntoCells(
           kind: 'tuple',
           elements: elt.elements.map((e) => ({
             ...e,
-            type: widen(e.type, ...scalars),
+            type: widen(stripNumericRanges(e.type), ...scalars),
           })),
         },
       } as Type;
@@ -379,7 +388,7 @@ export function absorbScalarsIntoCells(
       return collectionType as Type;
     cell = absorbScalarsIntoCells(elt, scalars);
   } else {
-    cell = widen(elt, ...scalars);
+    cell = widen(stripNumericRanges(elt), ...scalars);
     // Neither sum nor product is closed over `imaginary`: `i + (-i) = 0` and
     // `i · i = -1` are both real. `finite_complex` covers the closure — the
     // same repair the scalar tail of `addType` applies to its final widen.
@@ -420,7 +429,7 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // `unknown` (e.g. `(S(x,y,0), S(x,y,1))` with `S: (…) -> unknown`) is still
   // statically a tuple, so its sums keep a tuple type too (Tycho item 30).
   if (args.some((x) => couldBeNumericTuple(x)))
-    return widen(...args.map((x) => x.type.type));
+    return widen(...args.map((x) => stripNumericRanges(x.type.type)));
   // Element-wise sum of a single tensor (vector/matrix) with scalars keeps the
   // tensor's shape/type. The list-broadcast wrapper is skip-listed for tensor
   // Add (addTensors handles the value), so the honest list type must come from
@@ -489,8 +498,12 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
       // one collection type its every branch produces here; without it the
       // raw union widened into the result and its collection branch ended up
       // inside the cells.
+      // Strip range decorations from every contribution: with NO scalar
+      // co-operands the cell absorption below returns immediately, and a
+      // sum of two `list<real<-1..>>` operands must not keep the `-1`
+      // bound its cells can cross (see `stripNumericRanges`).
       const collected = widen(
-        ...shaped.map((x) => broadcastSiblingType(x.type.type))
+        ...shaped.map((x) => stripNumericRanges(broadcastSiblingType(x.type.type)))
       );
       // The scalar operands fold INTO the cells elementwise (no scalar arm
       // in the result — item 67), so they widen the CELL type, keeping the
@@ -503,7 +516,7 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
         scalars.map((x) => x.type.type)
       );
     }
-    return widen(...args.map((x) => x.type.type));
+    return widen(...args.map((x) => stripNumericRanges(x.type.type)));
   }
   // An operand whose collection-ness is not statically visible (a top
   // `unknown`/`any`/`value` leaf such as an undeclared `h(x)`, or an already-
@@ -540,7 +553,13 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
       return 'non_finite_number';
     return 'number';
   }
-  const t = widen(...args.map((x) => x.type.type));
+  // Ranges and sign exclusions are stripped from the join inputs: a sum
+  // does not lie in the union of its terms' ranges (`x, y > −1` does not
+  // put `x + y` above −1; `−|x| + |y|` is not non-negative). The bare tiers
+  // ARE closed under addition, so only the unsound bound is dropped —
+  // carrying bounds through `Add` is interval arithmetic, scoped separately
+  // (ROADMAP "Ranged types should carry sign…").
+  const t = widen(...args.map((x) => stripNumericRanges(x.type.type)));
   // `imaginary + imaginary` is not closed under addition: the imaginary parts
   // can cancel to 0, which is *real* (P0-13). 0 is `finite_integer` and the
   // non-cancelling sums stay `imaginary`, both covered by `finite_complex`.

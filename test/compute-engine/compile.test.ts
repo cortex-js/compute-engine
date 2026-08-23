@@ -2200,10 +2200,19 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // the interpreter's `spanBounds`, which declines such a value.
     for (const bad of [[2, 4], [5, 2], [], [1.5, 2.5], [0, 1], [1, 100, 3], 7])
       expect(() => r.run!({ r: bad })).toThrow(RangeError);
-    // A descending or stepped Range is not a `range`: rejected at
-    // validation, so it never reaches the compiler.
-    expect(e.box(['Slice', 'd', ['Range', 3, 2]]).isValid).toBe(false);
-    expect(e.box(['Slice', 'd', ['Range', 1, 3, 2]]).isValid).toBe(false);
+    // A descending or stepped Range is not a `range` (it types
+    // `indexed_collection<integer>`). Since the R1 overlap admission (§4.4
+    // of `docs/plans/2026-08-22-type-handlers-on-types.md`) it BOXES —
+    // provisional admission, the application stays inert at evaluation —
+    // so the compiler is the gate: its Slice arm fails CLOSED on a
+    // non-`range` span, never a silent mis-slice.
+    for (const span of [['Range', 3, 2], ['Range', 1, 3, 2]] as const) {
+      const inert = e.box(['Slice', 'd', span as any]);
+      expect(inert.isValid).toBe(true);
+      expect(() =>
+        compile(inert, { fallback: false, constantFold: false })
+      ).toThrow(/ascending index span/);
+    }
   });
 
   it('IsEmpty / Count / Contains / Unique compile', () => {

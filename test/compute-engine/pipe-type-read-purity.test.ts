@@ -75,7 +75,9 @@ describe('the derived type is unchanged', () => {
   // Exactly these tiers: measured before the rewrite.
   test('a shorthand stage over a declared list maps element-wise', () => {
     const { pipe } = pipeOverDeclaredList();
-    expect(pipe.type.toString()).toBe('list<finite_integer>');
+    // `_²` cells carry the even-power non-negative range (ranged-results
+    // round).
+    expect(pipe.type.toString()).toBe('list<finite_integer<0..>>');
   });
 
   test('a shorthand stage over a literal list keeps the literal shape', () => {
@@ -85,7 +87,9 @@ describe('the derived type is unchanged', () => {
       ['List', 1, 2, 3],
       ['Function', ['Power', '_', 2]],
     ]);
-    expect(withUnderscore.type.toString()).toBe('vector<finite_integer^3>');
+    // The ranged cell keeps the dimensioned shape; only the `vector<…>`
+    // spelling gives way (that alias prints for plain numeric cells only).
+    expect(withUnderscore.type.toString()).toBe('list<finite_integer<0..>^3>');
 
     const withNumberedPlaceholder = ce.box([
       'Pipe',
@@ -93,7 +97,7 @@ describe('the derived type is unchanged', () => {
       ['Function', ['Power', '_1', 2]],
     ]);
     expect(withNumberedPlaceholder.type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'list<finite_integer<0..>^3>'
     );
   });
 

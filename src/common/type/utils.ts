@@ -1,7 +1,7 @@
 import { isEffectSubset, unionEffectSets } from './effects.js';
 import { substituteTypeVariables } from './instantiate.js';
 import { parseType } from './parse.js';
-import { isValidType } from './primitive.js';
+import { isValidType, NUMERIC_TYPES_SET } from './primitive.js';
 import { declarationOf } from './reference.js';
 import { typeToString } from './serialize.js';
 import { isSubtype, widen } from './subtype.js';
@@ -18,9 +18,176 @@ import type {
   Type,
   ListType,
   FunctionSignature,
+  NumericPrimitiveType,
   TypeReference,
   TypeString,
 } from './types.js';
+
+/** The `!0` member of a sign-carrying numeric type. Types are published as
+ * immutable values, so one shared node is safe. */
+const NOT_ZERO_TYPE: Type = {
+  kind: 'negation',
+  type: { kind: 'value', value: 0 },
+};
+
+/** `tier<0..>` — the non-negative half of a numeric tier. */
+export function nonNegativeRangeType(tier: NumericPrimitiveType): Type {
+  return { kind: 'numeric', type: tier, lower: 0 };
+}
+
+/** `tier<..0>` — the non-positive half of a numeric tier. */
+export function nonPositiveRangeType(tier: NumericPrimitiveType): Type {
+  return { kind: 'numeric', type: tier, upper: 0 };
+}
+
+/** `tier<0..> & !0` — the positive members of a numeric tier (there are no
+ * open range bounds in the grammar, so "positive" is the closed lower bound
+ * with the zero excluded; `signOfType` reads it back as `positive`). */
+export function positiveRangeType(tier: NumericPrimitiveType): Type {
+  return {
+    kind: 'intersection',
+    types: [nonNegativeRangeType(tier), NOT_ZERO_TYPE],
+  };
+}
+
+/** `tier<..0> & !0` — the negative members of a numeric tier. */
+export function negativeRangeType(tier: NumericPrimitiveType): Type {
+  return {
+    kind: 'intersection',
+    types: [nonPositiveRangeType(tier), NOT_ZERO_TYPE],
+  };
+}
+
+/**
+ * Widen every range, sign or value decoration on a numeric type back to its
+ * bare tier: `finite_real<0..>` → `finite_real`, `(finite_real<0..>) & !0` →
+ * `finite_real`, the value type `21` → `finite_integer`. Structural nodes
+ * (unions, collections, tuple components, `broadcastable`) are descended;
+ * everything else — including a non-numeric intersection — is returned as
+ * is, by identity when nothing changed.
+ *
+ * This is what a JOIN-based result computation (`addType`'s widen tail, the
+ * cell absorption of `Add`/`Multiply`, the broadcastable element join) must
+ * apply to its inputs: a join is a set union, and neither a sum nor a
+ * product of two values lies in the union of their ranges (`x, y > −1` does
+ * not put `x + y` above −1). Bare tiers ARE closed under those operations,
+ * so stripping first keeps the old claims and drops only the unsound bound.
+ * Carrying bounds through arithmetic is interval arithmetic, which the
+ * ROADMAP entry "Ranged types should carry sign…" scopes separately.
+ */
+export function stripNumericRanges(t: Type): Type {
+  if (typeof t === 'string') return t;
+  switch (t.kind) {
+    case 'numeric':
+      return t.type;
+    case 'value': {
+      const v = t.value;
+      if (typeof v !== 'number') return t;
+      if (Number.isNaN(v)) return 'number';
+      if (!Number.isFinite(v)) return 'non_finite_number';
+      return Number.isInteger(v) ? 'finite_integer' : 'finite_real';
+    }
+    case 'intersection': {
+      // The intersection is a subset of each member, so any single member's
+      // strip is a sound upper bound; take the first that reaches a numeric
+      // tier (`(finite_real<0..>) & !0` → `finite_real`). A non-numeric
+      // intersection is not this function's business.
+      for (const m of t.types) {
+        const st = stripNumericRanges(m);
+        if (
+          typeof st === 'string' &&
+          NUMERIC_TYPES_SET.has(st as NumericPrimitiveType)
+        )
+          return st;
+      }
+      return t;
+    }
+    case 'union': {
+      const types = t.types.map((x) => stripNumericRanges(x));
+      if (types.every((x, i) => x === t.types[i])) return t;
+      return { ...t, types };
+    }
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable': {
+      const elements = stripNumericRanges(t.elements);
+      return elements === t.elements ? t : { ...t, elements };
+    }
+    case 'tuple': {
+      const elements = t.elements.map((el) => {
+        const type = stripNumericRanges(el.type);
+        return type === el.type ? el : { ...el, type };
+      });
+      if (elements.every((el, i) => el === t.elements[i])) return t;
+      return { ...t, elements };
+    }
+    default:
+      return t;
+  }
+}
+
+/**
+ * The type of `−x` given the type of `x`: ranges and numeric values are
+ * REFLECTED about zero (`real<−1..>` → `real<..1>`, `21` → `−21`, and the
+ * `!0` exclusion is invariant), structural nodes are descended, and every
+ * other type — the numeric tiers themselves included — is its own negation.
+ * This is what keeps `Negate`'s type echo sound now that operand types can
+ * carry bounds: echoing `real<0..>` for `−|x|` claimed a sign the value
+ * contradicts.
+ */
+export function negateNumericType(t: Type): Type {
+  if (typeof t === 'string') return t;
+  switch (t.kind) {
+    case 'numeric': {
+      const lo = t.lower ?? undefined;
+      const hi = t.upper ?? undefined;
+      if (lo === undefined && hi === undefined) return t;
+      // `-0` normalizes to `0` so a reflected closed-at-zero bound stays
+      // the canonical spelling.
+      return {
+        kind: 'numeric',
+        type: t.type,
+        ...(hi !== undefined ? { lower: hi === 0 ? 0 : -hi } : {}),
+        ...(lo !== undefined ? { upper: lo === 0 ? 0 : -lo } : {}),
+      };
+    }
+    case 'value': {
+      const v = t.value;
+      if (typeof v !== 'number' || Number.isNaN(v)) return t;
+      return v === 0 ? t : { kind: 'value', value: -v };
+    }
+    case 'negation': {
+      const inner = negateNumericType(t.type);
+      return inner === t.type ? t : { ...t, type: inner };
+    }
+    case 'union':
+    case 'intersection': {
+      const types = t.types.map((x) => negateNumericType(x));
+      if (types.every((x, i) => x === t.types[i])) return t;
+      return { ...t, types };
+    }
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable': {
+      const elements = negateNumericType(t.elements);
+      return elements === t.elements ? t : { ...t, elements };
+    }
+    case 'tuple': {
+      const elements = t.elements.map((el) => {
+        const type = negateNumericType(el.type);
+        return type === el.type ? el : { ...el, type };
+      });
+      if (elements.every((el, i) => el === t.elements[i])) return t;
+      return { ...t, elements };
+    }
+    default:
+      return t;
+  }
+}
 
 export function isSignatureType(
   type: Readonly<Type> | TypeString

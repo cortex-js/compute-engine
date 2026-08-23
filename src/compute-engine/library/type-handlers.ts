@@ -1,9 +1,21 @@
-import type { Expression } from '../global-types.js';
+import type { Expression, Sign } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
 import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
-import { collectionElementType, widen } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  nonNegativeRangeType,
+  positiveRangeType,
+  signOfType,
+  widen,
+} from '../../common/type/utils.js';
+import {
+  negativeSign,
+  nonNegativeSign,
+  nonPositiveSign,
+  positiveSign,
+} from '../boxed-expression/sgn.js';
 
 /**
  * Type handlers for the standard library follow the **non-finite typing
@@ -19,6 +31,71 @@ import { collectionElementType, widen } from '../../common/type/utils.js';
  *   generic (finite) point; zero-ness, by contrast, must be *proven* absent
  *   (via `sgn`) for claims that depend on it.
  */
+
+/**
+ * The type of an operand as a TYPE HANDLER may read it: a number literal's
+ * `_literalType` — the value-carrying (`21`, `finite_rational<0.5..0.5>`)
+ * or sign-carrying (`finite_real<0..> & !0`) type of ruling O9's first
+ * half — and the public type for everything else. A symbol's public type
+ * already carries what `ce.assume()` refined into it and a declaration's
+ * ranges, so no special-casing is needed there.
+ */
+export function handlerTypeOf(x: Expression): Type {
+  return x._literalType ?? x.type.type;
+}
+
+/**
+ * The sign of an operand as a type handler may read it: the value channel
+ * first (`.sgn` — a literal's value, a symbol's held value or assumption,
+ * an operator's `sgn` handler), then the TYPE channel (`signOfType` over
+ * the handler-visible type — a literal's value type, a ranged declaration
+ * such as `assume(x > 0)` produces, a ranged result such as `Abs`'s).
+ *
+ * Handlers combine this with the `Sign` predicates
+ * (`positiveSign(operandSgn(x)) === true`), which is exactly the
+ * `x.isPositive === true` read they replace whenever `.sgn` answers, plus
+ * the type fallback when it does not.
+ */
+export function operandSgn(x: Expression): Sign | undefined {
+  return x.sgn ?? signOfType(handlerTypeOf(x));
+}
+
+/**
+ * The machine value carried by a number literal's handler-visible type: a
+ * value type's value, or a singleton range's bound. `undefined` for
+ * symbols, compound expressions, and literals whose exact value no machine
+ * number holds (`1/3`, `√2`, a bigint beyond ±2⁵³ — those carry only
+ * their sign).
+ */
+export function operandLiteralValue(x: Expression): number | undefined {
+  const t = x._literalType;
+  if (t === undefined || typeof t === 'string') return undefined;
+  if (t.kind === 'value' && typeof t.value === 'number') return t.value;
+  if (
+    t.kind === 'numeric' &&
+    typeof t.lower === 'number' &&
+    t.lower === t.upper
+  )
+    return t.lower;
+  return undefined;
+}
+
+/**
+ * Is this operand's value a provably even (or odd) integer? Combines the
+ * value channel (`isEven`/`isOdd`) with the literal's handler-visible
+ * value. `undefined` when parity cannot be established.
+ */
+export function operandIsEven(x: Expression): boolean | undefined {
+  if (x.isEven !== undefined) return x.isEven;
+  const v = operandLiteralValue(x);
+  if (v !== undefined && Number.isInteger(v)) return v % 2 === 0;
+  return undefined;
+}
+
+export function operandIsOdd(x: Expression): boolean | undefined {
+  const even = operandIsEven(x);
+  return even === undefined ? undefined : !even;
+}
 
 /**
  * Generic result type for a *total, real-closed* numeric function (sin, cos,
@@ -51,16 +128,17 @@ function logType(ops: ReadonlyArray<Expression>): Type {
   const base = ops[1];
   if (!x || x.isNaN) return 'number';
   if (provablyNonFiniteNumber(x)) return 'number';
+  const xSgn = operandSgn(x);
+  const usableBase = (b: Expression): boolean =>
+    positiveSign(operandSgn(b)) === true &&
+    b.isFinite === true &&
+    !b.isSame(1);
   // A provably-zero argument is the log pole, with a *provably* ±∞ value:
   // `ln(0) = −∞`, and `log_b(0) = ∓∞` for any valid base (positive, finite,
   // ≠ 1). Per the non-finite typing convention this provable case claims
   // `non_finite_number`; an unusable base widens to `number`.
   if (x.isSame(0)) {
-    if (
-      base === undefined ||
-      (base.isPositive === true && base.isFinite === true && !base.isSame(1))
-    )
-      return 'non_finite_number';
+    if (base === undefined || usableBase(base)) return 'non_finite_number';
     return 'number';
   }
   // A provably *negative* (hence non-zero) finite real argument gives a
@@ -68,16 +146,13 @@ function logType(ops: ReadonlyArray<Expression>): Type {
   // the base check below still applies before this claim is usable, so
   // handle it after the base guard.
   // A provably non-positive argument that may be 0 → −∞ pole (`ln(0)`).
-  if (x.isPositive === false && x.isNegative !== true) return 'number';
-  if (
-    base &&
-    !(base.isPositive === true && base.isFinite === true && !base.isSame(1))
-  )
+  if (positiveSign(xSgn) === false && negativeSign(xSgn) !== true)
     return 'number';
+  if (base && !usableBase(base)) return 'number';
   // Provably negative finite argument (see note above): finite complex.
-  if (x.isNegative === true) return 'finite_complex';
+  if (negativeSign(xSgn) === true) return 'finite_complex';
   // Provably positive (hence real, and finite per the check above): real.
-  if (x.isPositive === true) return 'finite_real';
+  if (positiveSign(xSgn) === true) return 'finite_real';
   // Sign unknown: the value may be real (x > 0), −∞ (x = 0) or finite
   // complex (x < 0) — the join is `complex`, which admits ±∞ (D10 lattice).
   // The old claim of `finite_real` for an unknown-sign real operand was
@@ -117,9 +192,19 @@ function poleReciprocalType(
   if (x.isReal !== true) return 'number';
   // Only the pole at 0 is reachable by a number literal (every other pole is
   // an irrational multiple of π, which no literal — rational, float, or
-  // radical — equals).
+  // radical — equals). A literal is recognized by either channel. In
+  // shipping code `isNumber` alone would do (only `BoxedNumber` carries a
+  // `_literalType`); the `_literalType` disjunct exists for the §5.7
+  // fact-withholding harness, whose operand proxies mask `_kind` — so
+  // literal-ness must also be provable from the type channel the proxies
+  // forward (`docs/plans/2026-08-22-type-handlers-on-types.md` §5.7).
   const poleAtZero = operator !== 'Tan' && operator !== 'Sec';
-  if (isNumber(x)) return poleAtZero && x.isSame(0) ? 'number' : 'finite_real';
+  if (isNumber(x) || x._literalType !== undefined) {
+    const v = operandLiteralValue(x);
+    return poleAtZero && (v !== undefined ? v === 0 : x.isSame(0))
+      ? 'number'
+      : 'finite_real';
+  }
   // A non-literal CONSTANT (π/2, 2π/3, …) can sit exactly on a circular pole
   // — `Tan(π/2) = ~oo`, `Csc(π) = ~oo` — so it keeps `number` (pinned by
   // non-finite-typing.test.ts). The hyperbolic poles are only at 0, where the
@@ -129,7 +214,9 @@ function poleReciprocalType(
   // Zero-pole operators on a symbolic real: the pole at 0 — the one provable
   // pole — must be disproven; the rest of the pole set has measure zero
   // (generic-point convention).
-  if (x.isPositive === true || x.isNegative === true) return 'finite_real';
+  const s = operandSgn(x);
+  if (positiveSign(s) === true || negativeSign(s) === true)
+    return 'finite_real';
   return 'number';
 }
 
@@ -239,7 +326,7 @@ export function boundedInverseTrigType(
   // the arithmetic verdict is trusted unless `r` sits exactly on a boundary;
   // there, fall through to the exact predicates (`x.isEqual(1)`
   // distinguishes `1` from `1 + 10⁻²⁰`, where `.re` cannot).
-  const r = x.re;
+  const r = operandLiteralValue(x) ?? x.re;
   if (typeof r === 'number' && Number.isFinite(r)) {
     const onBoundary =
       domain.poles.includes(r) ||
@@ -255,11 +342,16 @@ export function boundedInverseTrigType(
   // Refine with the numeric predicates. Pole membership must be EXACT for a
   // number literal: `isEqual` compares within the engine tolerance, which
   // would put `1 + 10⁻²⁰` "at" the pole 1 (the inequality predicates used
-  // below are exact).
+  // below are exact). A literal's handler-visible value answers the same
+  // question through the type channel (it is `undefined` — never a rounded
+  // double — when no machine number holds the value exactly).
+  const lv = operandLiteralValue(x);
   if (
-    isNumber(x)
-      ? domain.poles.some((p) => x.isSame(p))
-      : domain.poles.some((p) => x.isEqual(p) === true)
+    lv !== undefined
+      ? domain.poles.includes(lv)
+      : isNumber(x)
+        ? domain.poles.some((p) => x.isSame(p))
+        : domain.poles.some((p) => x.isEqual(p) === true)
   )
     return domain.poleType;
   if (provablyIn(x, domain.real)) return 'finite_real';
@@ -382,7 +474,8 @@ function arctanType(ops: ReadonlyArray<Expression>): Type {
  */
 export function gammaPoleType(x: Expression | undefined): Type {
   if (!x || x.isNaN) return 'number';
-  if (x.isInteger === true && x.isNonPositive === true) return 'number';
+  if (x.isInteger === true && nonPositiveSign(operandSgn(x)) === true)
+    return 'number';
   return numericTypeHandler([x]);
 }
 
@@ -447,17 +540,21 @@ export function absFunctionType(x: Expression | undefined): Type {
   // finiteness rungs come first, so a *complex* finite operand — whose
   // magnitude is real but neither rational nor integer — still lands on
   // `finite_real`, and a provably non-finite one keeps `non_finite_number`.
+  // |x| ≥ 0, and the type says so (ROADMAP "Ranged types should carry
+  // sign…", work item 4): each tier claim carries its non-negative range,
+  // so a type-channel consumer (`√|x|`, the GPU real-vs-complex lowering)
+  // sees the sign the sgn handler always knew.
   if (t.matches('finite_number')) {
     for (const tier of ['finite_integer', 'finite_rational'] as const)
-      if (t.matches(tier)) return tier;
-    return 'finite_real';
+      if (t.matches(tier)) return nonNegativeRangeType(tier);
+    return nonNegativeRangeType('finite_real');
   }
   if (t.matches('non_finite_number')) return 'non_finite_number';
   // Unknown finiteness: the tier still carries (`integer`/`rational`/`real`
   // admit ±∞, and |±∞| = +∞ stays inside them).
   for (const tier of ['integer', 'rational', 'real'] as const)
-    if (t.matches(tier)) return tier;
-  return 'real';
+    if (t.matches(tier)) return nonNegativeRangeType(tier);
+  return nonNegativeRangeType('real');
 }
 
 /**

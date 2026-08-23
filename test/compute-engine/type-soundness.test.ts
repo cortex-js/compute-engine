@@ -69,7 +69,15 @@ function soundness(expr: any): string | null {
     return `THROW-EVAL ${String(e)}`;
   }
   if (!v.isValid) return null;
-  if (!isSubtype(v.type.type, staticT.type))
+  // A number literal's PUBLIC type is its bare tier (`1/4` is
+  // `finite_rational`), which cannot witness a ranged static claim such as
+  // `finite_rational<0..>` even when the value plainly satisfies it. The
+  // literal's value-carrying handler type (`_literalType` — `0.25`,
+  // `finite_rational<0.25..0.25>`) is the precise type of the value, so it
+  // is what soundness must be judged against; a symbolic result keeps the
+  // public-type comparison.
+  const evalT = v._literalType ?? v.type.type;
+  if (!isSubtype(evalT, staticT.type))
     return `static=${staticT} evaluated="${v.toString()}" evalType=${v.type}`;
   return null;
 }

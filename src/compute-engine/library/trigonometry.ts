@@ -88,7 +88,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Pi: {
       description:
         "The constant π ≈ 3.14159, the ratio of a circle's circumference to its diameter.",
-      type: 'finite_real',
+      // Bracketed like `ExponentialE` (lower bound = the machine double of
+      // π): the type alone proves π > 0, so `π·i` keeps its `imaginary`
+      // claim off the type channel.
+      type: 'finite_real<3.141592653589793..3.141592653589794>',
       isConstant: true,
       holdUntil: 'N',
       wikidata: 'Q167',

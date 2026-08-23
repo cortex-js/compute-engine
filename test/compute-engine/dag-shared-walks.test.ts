@@ -25,6 +25,7 @@ import {
   revlex,
 } from '../../src/compute-engine/boxed-expression/polynomial-degree';
 import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
+import { effectsComputeCount } from '../../src/compute-engine/boxed-expression/boxed-function';
 
 const ce = new ComputeEngine();
 
@@ -135,6 +136,43 @@ describe('walks over a shared tower are linear in distinct nodes', () => {
     assertShared(r.op1 as ReturnType<typeof sharedTower>);
   });
 
+  test('the runtime effects projection over the tower is memoized, pure answer included', () => {
+    // `effectsOf` memoizes per node on `_effectsOf` — but `undefined` is the
+    // memo's ANSWER for a pure application (the empty effect set), and the
+    // pre-fix `expr._effectsOf?.() ?? applicationEffects(expr)` fell through
+    // on exactly that answer, recomputing every pure node's whole subtree on
+    // every read: the tower unfolded exponentially (24 million recomputes in
+    // one consumer document — Tycho item 225). The projection must finish,
+    // and a repeated read must not recompute at all.
+    const e = sharedTower(30);
+    assertShared(e);
+    expect(e.isPure).toBe(true);
+    const before = effectsComputeCount();
+    expect(e.isPure).toBe(true);
+    expect(effectsComputeCount()).toBe(before);
+  });
+
+  test('the structural form of the tower is memoized and preserves sharing', () => {
+    // `get structural` rebuilds through every operand's `structural`;
+    // without a per-node memo a shared tree is rebuilt once per PATH —
+    // exponential time AND allocation (the 4 GB heap abort of Tycho item
+    // 225). With the memo, both mentions of a shared operand resolve to the
+    // SAME rebuilt node, and a repeated read returns the identical object.
+    const e = sharedTower(30);
+    assertShared(e);
+    const s = e.structural;
+    expect(e.structural).toBe(s);
+    // Sharing survives the rebuild: both operands of each level are one node.
+    let cur = s;
+    let depth = 0;
+    while (isFunction(cur) && cur.operator === 'Max') {
+      expect(cur.ops[0]).toBe(cur.ops[1]);
+      cur = cur.ops[0];
+      depth++;
+    }
+    expect(depth).toBe(30);
+  });
+
   test('a lazy collection over the tower snapshots its dependencies once', () => {
     // `count`/`isFiniteCollection` of a `Map` are dependency-memoized facets:
     // the snapshot (`snapshotDeps`, `collectParameterDefs`) walks the
@@ -192,5 +230,29 @@ describe('the lexicographic ordering key', () => {
     expect(revlex(e).startsWith(names.slice(-100).reverse().join(' '))).toBe(
       true
     );
+  });
+});
+
+describe('shared-tree walks after a mutable object exists', () => {
+  // LAST in this file on purpose: constructing one object flips the
+  // process-wide, one-way `anyObjectExists` flag (`object-deps.ts`), which
+  // arms the cache commit points' payload-containment scan. Everything
+  // above this line exercises the no-object fast path; this block pins the
+  // armed path. (Jest gives each test file its own module registry, so the
+  // flag starts false for every file.)
+  test('the structural memo stays linear once the containment scan is armed', () => {
+    // The commit-time scan (`containsObject`, `object-walk.ts`) must visit
+    // one node per DISTINCT node, not per path: unmemoized, each of the 31
+    // per-node commits of the tower would walk its unfolded subtree —
+    // exponential, the very cost the structural memo removes. This read
+    // completing at all is the pin.
+    ce.declareType('DagProbe', { kind: 'record', elements: {} });
+    const o = ce._object('DagProbe', {});
+    expect(o).toBeDefined();
+
+    const e = sharedTower(30);
+    assertShared(e);
+    const s = e.structural;
+    expect(e.structural).toBe(s);
   });
 });

@@ -12,13 +12,18 @@ import { functionLiteralParameterType } from './function-literal.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import { callbackArityError } from './callback-arity.js';
 import { callbackIncompatibility } from '../../common/type/compatibility.js';
-import { admissionOf, hasValueComponent } from './value-membership.js';
+import {
+  admissionOf,
+  concreteValueOf,
+  hasValueComponent,
+} from './value-membership.js';
 import {
   broadcastableBaseMatches,
   collectionElementType,
   couldBeNonRealNumber,
   narrowingPreservesEffects,
   overlapsForDeferredValidation,
+  resolveTypeAlias,
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
@@ -35,7 +40,7 @@ import {
 } from './overload.js';
 import { parseType } from '../../common/type/parse.js';
 import { typeToString } from '../../common/type/serialize.js';
-import { reduceType } from '../../common/type/reduce.js';
+import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import {
   freeTypeVariables,
   parameterPositions,
@@ -588,6 +593,289 @@ export function nonNumericOperandError(
   return ce.typeError('number', bad.type, bad);
 }
 
+// ————————————————————————————————————————————————————————————————————————
+// Generic runtime conformance (R1/R8 — §4.4 of
+// `docs/plans/2026-08-22-type-handlers-on-types.md`)
+//
+// With overlap admission at boxing, a handler can receive a concrete
+// wrong-kind value through a permissively-typed operand (an `any`-typed
+// symbol, or a symbolic argument admitted because its type merely OVERLAPS
+// the parameter). Handlers were written trusting the strict boxing gate to
+// never hand them such a value — the `toBigint` family silently rounds
+// (`FactorInteger(2.5)` → `[(3, 1)]`). This check runs at non-lazy dispatch,
+// on the EVALUATED arguments, before the handler: a concrete value that does
+// not conform produces the same `incompatible-type` error value the static
+// gate produces for a literal, so the two routes agree; a still-symbolic
+// argument is left alone (the application stays inert or the handler
+// decides).
+// ————————————————————————————————————————————————————————————————————————
+
+/** Parameter positions the generic runtime conformance check does NOT
+ * police:
+ *
+ * - **Function-kind** (bare `function`, a signature, or a union with such an
+ *   arm): admission is Design E compatibility, and the application itself
+ *   checks arity and argument types when the callback is applied.
+ * - **Pure collection-kind** (`list`, `set`, `collection`,
+ *   `indexed_collection`, `dictionary`, `tuple`, `record` — EVERY union arm
+ *   one of these): runtime conformance is the operator's own evaluate-time
+ *   gate (§D6.2 handler precedence — `expected-square-matrix` and friends),
+ *   and several handlers deliberately accept lenient spellings (a `List`
+ *   where a `tuple` shape is declared, a scalar as a 1×1 matrix). A MIXED
+ *   union (`number | list<number>` — the Histogram/BinCounts bin-spec) is
+ *   NOT exempt: its scalar arm is this check's to police (a string bin-spec
+ *   used to be iterated character-by-character into NaN bin edges), and only
+ *   a collection-SHAPED value at it is left to the handler — the per-value
+ *   rule in `runtimeConformanceError`. `range` is not collection-kind here:
+ *   no handler-owned gate polices a range parameter (D6.2 does not defer
+ *   them), so a concrete wrong-kind value at one — a string at `Slice`'s
+ *   span — is this check's to refuse.
+ * - **Open generic parameters**: a free type variable cannot be judged
+ *   without instantiation (the ground-type invariant — `admissionOf` asserts
+ *   on an open type).
+ * - `any`/`unknown` (including via a union arm): they admit every value, so
+ *   exempting them is a pure fast path.
+ *
+ * The same classifier scopes the R1 STATIC overlap admission
+ * (`overlapAdmission` below) and is exported so the conformance fuzz
+ * (`runtime-conformance-fuzz.test.ts`) probes exactly the positions this
+ * check polices — one implementation for all three, so they can never
+ * disagree. */
+const COLLECTION_PARAM_KINDS = new Set([
+  'list',
+  'set',
+  'collection',
+  'indexed_collection',
+  'dictionary',
+  'tuple',
+  'record',
+]);
+function paramArms(t: Type): Type[] {
+  const r = resolveTypeAlias(t);
+  if (typeof r !== 'string' && r.kind === 'union')
+    return (r.types as Type[]).map((a) => resolveTypeAlias(a));
+  return [r];
+}
+function isCollectionKindArm(a: Type): boolean {
+  return typeof a === 'string'
+    ? COLLECTION_PARAM_KINDS.has(a)
+    : COLLECTION_PARAM_KINDS.has(a.kind);
+}
+export function runtimeCheckExemptParam(t: Type): boolean {
+  if (freeTypeVariables(t).size > 0) return true;
+  const arms = paramArms(t);
+  if (
+    arms.some(
+      (a) =>
+        a === 'function' ||
+        a === 'any' ||
+        a === 'unknown' ||
+        (typeof a !== 'string' && a.kind === 'signature')
+    )
+  )
+    return true;
+  return arms.every(isCollectionKindArm);
+}
+
+/** One checkable parameter position: its (instantiated, ground) type, plus
+ * whether the type has a collection-kind arm — a collection-SHAPED value at
+ * such a position belongs to the handler's own gate, not to this check. */
+type RuntimeCheckParam = { t: Type; collectionArm: boolean };
+
+/** One overload arm of a signature, with each exempt parameter position
+ * blanked to `null` so the per-dispatch walk tests nothing there, and the
+ * arm's arity bounds so an arm that cannot take the call's operand count is
+ * never consulted (a shorter arm's prefix must not mask the correctly-sized
+ * arm's remaining positions). */
+type RuntimeConformanceArm = {
+  req: (RuntimeCheckParam | null)[];
+  opt: (RuntimeCheckParam | null)[];
+  varParam: RuntimeCheckParam | null;
+  /** Required operand count. */
+  minArity: number;
+  /** Maximum operand count; `Infinity` for a variadic arm. */
+  maxArity: number;
+};
+
+type RuntimeConformancePlan = {
+  /** Identity guard: a definition whose signature was replaced gets a fresh
+   * plan (the cache key is the definition object, which outlives it). */
+  signature: BoxedType;
+  /** `null` when no position of any arm is checkable — dispatch then skips
+   * the walk entirely (the common case for `(any*)`-style signatures). */
+  arms: RuntimeConformanceArm[] | null;
+};
+
+const runtimeConformancePlans = new WeakMap<object, RuntimeConformancePlan>();
+
+function runtimeConformanceArms(
+  cacheKey: object,
+  signature: BoxedType
+): RuntimeConformanceArm[] | null {
+  const cached = runtimeConformancePlans.get(cacheKey);
+  if (cached !== undefined && cached.signature === signature)
+    return cached.arms;
+
+  const sig = signature.type;
+  let sigArms: readonly FunctionSignature[] | null = null;
+  if (typeof sig !== 'string') {
+    if (sig.kind === 'signature') sigArms = [sig];
+    else sigArms = overloadArms(sig) ?? null;
+  }
+
+  const blank = (t: Type): RuntimeCheckParam | null =>
+    runtimeCheckExemptParam(t)
+      ? null
+      : { t, collectionArm: paramArms(t).some(isCollectionKindArm) };
+  let arms: RuntimeConformanceArm[] | null = null;
+  if (sigArms !== null && sigArms.length > 0) {
+    arms = sigArms.map((a) => {
+      const req = (a.args ?? []).map((x) => blank(x.type));
+      const opt = (a.optArgs ?? []).map((x) => blank(x.type));
+      return {
+        req,
+        opt,
+        varParam:
+          a.variadicArg === undefined ? null : blank(a.variadicArg.type),
+        minArity: a.args?.length ?? 0,
+        maxArity:
+          a.variadicArg !== undefined
+            ? Infinity
+            : (a.args?.length ?? 0) + (a.optArgs?.length ?? 0),
+      };
+    });
+    if (
+      !arms.some(
+        (p) =>
+          p.varParam !== null ||
+          p.req.some((x) => x !== null) ||
+          p.opt.some((x) => x !== null)
+      )
+    )
+      arms = null;
+  }
+  runtimeConformancePlans.set(cacheKey, { signature, arms });
+  return arms;
+}
+
+/** The parameter governing operand position `i` of `arm`, or `null` when
+ * that position is exempt or beyond the declared arity (excess operands are
+ * boxing's business — see `checkArity`). */
+function armParamAt(
+  arm: RuntimeConformanceArm,
+  i: number
+): RuntimeCheckParam | null {
+  if (i < arm.req.length) return arm.req[i];
+  const j = i - arm.req.length;
+  if (j < arm.opt.length) return arm.opt[j];
+  return arm.varParam;
+}
+
+/**
+ * The generic runtime conformance check (§4.4): test each EVALUATED operand
+ * against the declared signature and return the `incompatible-type` error
+ * value for the first refuted position — or `undefined` when the call
+ * conforms (which includes every undecidable case).
+ *
+ * Verdict per operand, mirroring the static gate's admission on a literal:
+ * - an error value is never re-blamed (it is already the diagnosis);
+ * - a collection-shaped value at a broadcastable operator belongs to the
+ *   broadcast machinery, not to this check — and at a MIXED parameter with
+ *   a collection arm (`number | list<number>`), to the handler's own gate;
+ * - a still-symbolic value is left alone. "Still symbolic" means no
+ *   `concreteValueOf` AND not the ground `Nothing` symbol: `Nothing` is a
+ *   fully-evaluated unit value that `admissionOf` refutes by provable
+ *   disjointness, exactly as the static gate refuses the literal
+ *   (`Missing`, by contrast, stays the missing-behavior gate's business —
+ *   step 4a of the dispatch runs before this check);
+ * - a decidable value decides exactly through `admissionOf` (membership for
+ *   value components, synthesized-type subtyping otherwise).
+ *
+ * For an overload set, the first ARITY-ELIGIBLE arm every decidable operand
+ * satisfies wins (a symbolic operand satisfies any arm); an arm whose arity
+ * bounds cannot take the call is never consulted, so a shorter arm's prefix
+ * does not mask the correctly-sized arm's remaining positions. Only when NO
+ * eligible arm accepts is the error minted, against the union of the arms'
+ * parameters at the first universally-refuted position (§4.4:
+ * "incompatible-type against the declared union"). No rollback frame and no
+ * boxing-pass window — nothing here writes.
+ *
+ * Arity is deliberately not re-checked as such: boxing normalizes it, and a
+ * `Spread` call re-boxes after splicing (`_spliceSpreadOps`), which re-runs
+ * the full static validation on the spliced operands. When no arm's bounds
+ * fit the operand count, this check stands down rather than minting an
+ * arity error of its own.
+ */
+export function runtimeConformanceError(
+  ce: ComputeEngine,
+  cacheKey: object,
+  signature: BoxedType,
+  broadcastable: boolean,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (ops.length === 0) return undefined;
+  const allArms = runtimeConformanceArms(cacheKey, signature);
+  if (allArms === null) return undefined;
+  const arms = allArms.filter(
+    (a) => ops.length >= a.minArity && ops.length <= a.maxArity
+  );
+  if (arms.length === 0) return undefined;
+
+  // The verdict for one operand against one (non-null) parameter:
+  // `true` = this operand refutes the parameter.
+  const refutes = (op: Expression, param: RuntimeCheckParam): boolean => {
+    if (!op.isValid) return false;
+    if (broadcastable && couldBeUnkeyedCollectionOperand(op)) return false;
+    const v = concreteValueOf(op);
+    if (v === undefined && !isSymbol(op, 'Nothing')) return false;
+    // A collection-shaped value at a parameter with a collection arm is the
+    // handler's to judge (lenient spellings, element-wise gates).
+    if (
+      param.collectionArm &&
+      v !== undefined &&
+      (isFunction(v, 'List') || isFunction(v, 'Tuple'))
+    )
+      return false;
+    return admissionOf(op, param.t) === 'refute';
+  };
+
+  let anyRefuted = false;
+  for (const arm of arms) {
+    let accepted = true;
+    for (let i = 0; i < ops.length; i++) {
+      const param = armParamAt(arm, i);
+      if (param === null) continue;
+      if (refutes(ops[i], param)) {
+        accepted = false;
+        anyRefuted = true;
+        break;
+      }
+    }
+    if (accepted) return undefined;
+  }
+  if (!anyRefuted) return undefined;
+
+  // No arm accepts. Blame the first position every arm refutes; the
+  // expected type is the union of the arms' parameters there. (With mixed
+  // refutations across arms — no universally-refuted position — fall back
+  // to the first arm's first refuted position.)
+  for (let i = 0; i < ops.length; i++) {
+    const params = arms.map((a) => armParamAt(a, i));
+    if (params.some((p) => p === null || !refutes(ops[i], p))) continue;
+    const expected: Type =
+      params.length === 1
+        ? params[0]!.t
+        : reduceType({ kind: 'union', types: params.map((p) => p!.t) });
+    return ce.typeError(expected, ops[i].type, ops[i]);
+  }
+  for (let i = 0; i < ops.length; i++) {
+    const param = armParamAt(arms[0], i);
+    if (param !== null && refutes(ops[i], param))
+      return ce.typeError(param.t, ops[i].type, ops[i]);
+  }
+  return undefined;
+}
+
 /**
  * Check that an argument is of the expected type.
  *
@@ -665,6 +953,56 @@ function evidenceGuardedNarrow(
   return isSubtype(evidenceType, param) ? 'admitted' : 'fall-through';
 }
 
+/**
+ * R1 overlap admission (§4.4 of
+ * `docs/plans/2026-08-22-type-handlers-on-types.md`) — the verdict for
+ * "every other parameter" once the specialized admissions (arrow slots,
+ * value components, deferred collections, placeholder signatures) have
+ * declined:
+ *
+ * - a CONCRETE argument decides exactly: a held value satisfying the
+ *   parameter admits the operand even though its declared type does not
+ *   (`n: number` holding `2` at an `integer` slot), and a wrong one keeps
+ *   the boxing-time refusal (`FactorInteger("abc")` is still an error at
+ *   boxing);
+ * - a SYMBOLIC argument admits iff its type OVERLAPS the parameter — the
+ *   two share an inhabitant (`finite_number` at a `complex` slot, they
+ *   share `finite_complex`) — deferring the decision to the runtime
+ *   conformance check at dispatch (`runtimeConformanceError`); `string` at
+ *   `integer` shares nothing and still refuses at boxing.
+ *
+ * Admission is provisional either way — callers record the position in
+ * `deferredIdx` so the final `_infer(param)` narrowing does not write on a
+ * guess.
+ *
+ * Two scoping rules, both load-bearing:
+ *
+ * - The admission applies only at parameters the runtime conformance check
+ *   polices (`runtimeCheckExemptParam` is the shared classifier): the
+ *   specialized admissions that already declined are the AUTHORITY for
+ *   their kinds — re-admitting after `overlapsForDeferredValidation`
+ *   refuted a rank mismatch would undo D6.2 (`typesOverlap` reads
+ *   `list<number> ∧ matrix` as the inhabited `list<never>`, since the empty
+ *   list inhabits it), re-admitting after `arrowSlotAdmission` refused
+ *   would undo Design E, and a nested-top operand (`tuple<any>`) must stay
+ *   refused at a tuple parameter (D8 waives TOP-LEVEL tops only —
+ *   `admission-gate-parity` pins both routes).
+ * - Never inside a FIRST-PASS overload-resolution trial: arm viability
+ *   keeps the strict reading, or a narrower arm becomes spuriously viable
+ *   and captures the call — `p: ((integer) -> integer) & ((number) ->
+ *   number)` applied to a declared `number` must keep selecting the number
+ *   arm and type `number` (`overload-trials.test.ts`). When NO arm is
+ *   strictly viable, resolution re-runs with the admission active
+ *   (`overlapTrial`), and the selected arm's real validation admits — see
+ *   the second-pass block in `validateArguments`.
+ */
+function overlapAdmission(op: Expression, param: Type): boolean {
+  if (runtimeCheckExemptParam(param)) return false;
+  if (concreteValueOf(op) !== undefined)
+    return admissionOf(op, param) === 'admit';
+  return typesOverlap(op.type.type, param);
+}
+
 export function checkType(
   ce: ComputeEngine,
   arg: Expression | undefined | null,
@@ -699,6 +1037,9 @@ export function checkType(
 
   // Overlap-deferred validation (§D6.2) — see validateArguments.
   if (overlapsForDeferredValidation(arg.type.type, type)) return arg;
+
+  // R1 overlap admission — see `overlapAdmission`.
+  if (overlapAdmission(arg, type)) return arg;
 
   return ce.typeError(type, arg.type, arg);
 }
@@ -1116,6 +1457,16 @@ export interface ValidateArgumentsInternals {
    * The winning arm's REAL validation — non-trial, no frame — performs any
    * repairs, exactly once. */
   trial?: boolean;
+  /** Second-pass trial: the R1 overlap admission is active inside this
+   * trial. The FIRST resolution pass keeps trials strict, so an arm that
+   * strictly accepts always beats one that merely overlaps — a declared
+   * `number` operand selects the `(number) -> number` arm, never the
+   * provisionally-overlapping `(integer) -> integer` one
+   * (`overload-trials.test.ts`). Only when NO arm is strictly viable does
+   * resolution re-run with this flag, so an operand admissible by overlap
+   * still finds an arm (`Slice`'s span slot, validated against an overload
+   * set). */
+  overlapTrial?: boolean;
   /** The OPERATOR (or function-valued symbol) being applied, for diagnostics
    * that name it — the compatibility gate's generic `callback-arity` mint
    * (Design E §12d). Absent where no name is known; the mint then declines
@@ -1235,42 +1586,46 @@ export function validateArguments(
     // mode and assert they never execute here. This replaced the write-free
     // mirror filter, whose gate conditions had to track this function's
     // admission logic by hand.
-    const trial: ArmTrialFn = (declared, _instance, solution, armOps) =>
-      ce._withBoxingPassWindow(() =>
-        ce._withRolledBackInference(
-          () => {
-            const res = validateArguments(
-              ce,
-              armOps,
-              declared,
-              lazy,
-              threadable,
-              freshlyInferred,
-              stripMissing,
-              {
-                trial: true,
-                armSolution: solution,
-                // The arity verdict at an arrow slot is worded around the
-                // operator's name and DECLINES without one, so an unnamed
-                // trial would judge an inapplicable callback admissible and
-                // report the arm viable.
-                operatorName: internals?.operatorName,
-              }
-            );
-            // `null` = valid, operands unchanged. In trial mode no repair
-            // executes, so `substituted` is never set and a non-null result
-            // always carries at least one invalid operand — the refuted
-            // positions.
-            if (res === null) return null;
-            const refuted: number[] = [];
-            res.forEach((x, k) => {
-              if (!x.isValid) refuted.push(k);
-            });
-            return refuted.length === 0 ? null : refuted;
-          },
-          { forbidsRepairs: true }
-        )
-      );
+    const mkTrial =
+      (overlapTrial: boolean): ArmTrialFn =>
+      (declared, _instance, solution, armOps) =>
+        ce._withBoxingPassWindow(() =>
+          ce._withRolledBackInference(
+            () => {
+              const res = validateArguments(
+                ce,
+                armOps,
+                declared,
+                lazy,
+                threadable,
+                freshlyInferred,
+                stripMissing,
+                {
+                  trial: true,
+                  overlapTrial: overlapTrial || undefined,
+                  armSolution: solution,
+                  // The arity verdict at an arrow slot is worded around the
+                  // operator's name and DECLINES without one, so an unnamed
+                  // trial would judge an inapplicable callback admissible and
+                  // report the arm viable.
+                  operatorName: internals?.operatorName,
+                }
+              );
+              // `null` = valid, operands unchanged. In trial mode no repair
+              // executes, so `substituted` is never set and a non-null result
+              // always carries at least one invalid operand — the refuted
+              // positions.
+              if (res === null) return null;
+              const refuted: number[] = [];
+              res.forEach((x, k) => {
+                if (!x.isValid) refuted.push(k);
+              });
+              return refuted.length === 0 ? null : refuted;
+            },
+            { forbidsRepairs: true }
+          )
+        );
+    const trial = mkTrial(false);
     const resolution = resolveOverload(
       ce,
       ops,
@@ -1281,7 +1636,27 @@ export function validateArguments(
     );
     if (internals?.resolutionOut !== undefined)
       internals.resolutionOut.resolution = resolution;
-    const { selected, viable, selectedSolution } = resolution;
+    let { selected, viable, selectedSolution } = resolution;
+    // R1 second pass (see `ValidateArgumentsInternals.overlapTrial`): no arm
+    // is STRICTLY viable — before blaming, re-resolve with the overlap
+    // admission active inside the trials, so an operand that merely overlaps
+    // an arm's parameter still finds a home and is admitted provisionally by
+    // that arm's real validation below.
+    if (!selected) {
+      const second = resolveOverload(
+        ce,
+        ops,
+        arms,
+        policies,
+        undefined,
+        mkTrial(true)
+      );
+      if (second.selected) {
+        if (internals?.resolutionOut !== undefined)
+          internals.resolutionOut.resolution = second;
+        ({ selected, viable, selectedSolution } = second);
+      }
+    }
     if (!selected) {
       // No arm fits. Blame the operands actually at fault: an operand every
       // near-miss arm accepts at its position stays untouched, so a bad seed
@@ -1702,6 +2077,19 @@ export function validateArguments(
         result.push(op);
         continue;
       }
+      // R1 overlap admission — see `overlapAdmission`. Deferred: an
+      // admission on overlap is a possibility, not a proof. Never in a
+      // first-pass TRIAL (arm viability keeps the strict reading — see the
+      // scoping notes on `overlapAdmission`); active again in the
+      // second-pass `overlapTrial`.
+      if (
+        (!internals?.trial || internals?.overlapTrial) &&
+        overlapAdmission(op, param)
+      ) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        continue;
+      }
       result.push(ce.typeError(displayParams[idx] ?? param, op.type, op));
       isValid = false;
       continue;
@@ -1850,6 +2238,17 @@ export function validateArguments(
         i += 1;
         continue;
       }
+      // R1 overlap admission — never in a first-pass trial (see the
+      // required-param gate).
+      if (
+        (!internals?.trial || internals?.overlapTrial) &&
+        overlapAdmission(op, param)
+      ) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        i += 1;
+        continue;
+      }
       result.push(
         ce.typeError(displayOptParams[i - params.length] ?? param, op.type, op)
       );
@@ -1985,6 +2384,16 @@ export function validateArguments(
         // Placeholder-signature reconciliation — see the required-param gate.
         if (admitsPlaceholderSignature(op, varParam)) {
           result.push(op);
+          continue;
+        }
+        // R1 overlap admission — never in a first-pass trial (see the
+        // required-param gate).
+        if (
+          (!internals?.trial || internals?.overlapTrial) &&
+          overlapAdmission(op, varParam)
+        ) {
+          result.push(op);
+          deferredIdx.add(result.length - 1);
           continue;
         }
         result.push(ce.typeError(displayVarParam ?? varParam, op.type, op));

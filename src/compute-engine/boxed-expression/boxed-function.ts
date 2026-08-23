@@ -90,6 +90,7 @@ import type {
   NumericPrimitiveType,
 } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
+import { widenValueTypes } from '../../common/type/widen-value.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -111,6 +112,7 @@ import {
   stripMissingFromType,
   typeContainsMissing,
   widen,
+  stripNumericRanges,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import type { BigDecimal } from '../../big-decimal/index.js';
@@ -166,6 +168,7 @@ import {
 import { containsObject } from './object-walk.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
+import { runtimeConformanceError } from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
 import { isScalarType } from './function-literal.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
@@ -828,8 +831,33 @@ export class BoxedFunction
     );
   }
 
+  /** Per-node memo for `structural`. The rebuild recurses into every
+   * operand's `structural`, so without it a tree with SHARED operands is
+   * rebuilt once per path — exponential time and allocation. The answer
+   * depends only on this node's own tree and the operator definitions
+   * consulted for flattening/ordering, so the `_anyVersion` guard covers
+   * every way it can change; the rebuild reads no object field, so no
+   * object dependencies apply. A payload that CONTAINS an object is not
+   * stored (the B12/B22 commit rule in `cache.ts`), leaving that case
+   * per-read — see ROADMAP "`structural` of an object-holding shared
+   * tree". (Provenance: Tycho item 225.) */
+  private _structural: CachedValue<Expression> = {
+    value: null,
+    generation: -1,
+  };
+
   get structural(): Expression {
     if (this.isStructural) return this;
+    return cachedValue(
+      this._structural,
+      this.engine._anyVersion,
+      () => this._computeStructural(),
+      undefined,
+      this.engine
+    );
+  }
+
+  private _computeStructural(): Expression {
     const def = this.operatorDefinition;
     // Ellipsis fold barrier: an `Add`/`Multiply` with a direct
     // `ContinuationPlaceholder` operand is a notational object. Do not flatten
@@ -3721,6 +3749,30 @@ export class BoxedFunction
       }
 
       //
+      // 4d/ Generic runtime conformance (R1/R8 — §4.4 of
+      // docs/plans/2026-08-22-type-handlers-on-types.md). With overlap
+      // admission at boxing, a handler can receive a concrete wrong-kind
+      // value through a permissively-typed operand (an `any`-typed symbol,
+      // an overlap-admitted symbol) — and handlers written against the
+      // strict gate then misbehave (`FactorInteger(2.5)` silently rounds
+      // via `toBigint`). Check each EVALUATED concrete operand against the
+      // declared parameter before the handler runs; a refuted value yields
+      // the same `incompatible-type` error the static gate mints for a
+      // literal, a symbolic operand is left alone. Runs after the broadcast
+      // and threading steps so their semantics win, and per cell on the
+      // broadcast route (each cell re-enters evaluation). Excluded: lazy
+      // operators (their operands are raw here — they keep their own
+      // guards, §4.4/P4), user functions (`apply()` runs the runtime mode
+      // itself), inferred signatures (a guess must not refute), and
+      // non-strict engines (O8 — `strict: false` opts out of argument
+      // checking as such).
+      //
+      if (this.engine.strict && def.lazy !== true && def.evaluate !== undefined) {
+        const nonconforming = genericRuntimeConformance(this.engine, def, tail);
+        if (nonconforming !== undefined) return nonconforming;
+      }
+
+      //
       // 5/ Create a scope if needed
       //
       const isScoped = this._localScope !== undefined;
@@ -3743,6 +3795,8 @@ export class BoxedFunction
           // `EvaluateHandlerOptions.expression`.
           expression: this,
         });
+      } catch (e) {
+        evalResult = handlerThrowToErrorValue(this.engine, e, def, this._operator);
       } finally {
         if (isScoped) this.engine._popEvalContext();
       }
@@ -4200,6 +4254,19 @@ export class BoxedFunction
         if (mapped) return mapped;
       }
 
+      //
+      // 3c/ Generic runtime conformance — the async twin of the sync
+      // step 4d (see that comment for the rationale and the exclusions).
+      //
+      if (
+        this.engine.strict &&
+        def.lazy !== true &&
+        (def.evaluateAsync !== undefined || def.evaluate !== undefined)
+      ) {
+        const nonconforming = genericRuntimeConformance(this.engine, def, tail);
+        if (nonconforming !== undefined) return nonconforming;
+      }
+
       // 4/ Create a scope if needed
       //
       const isScoped = this._localScope !== undefined;
@@ -4257,6 +4324,8 @@ export class BoxedFunction
         // match the sync lane's.
         value = await (def.evaluateAsync?.(tail, opts) ??
           def.evaluate?.(tail, opts));
+      } catch (e) {
+        value = handlerThrowToErrorValue(this.engine, e, def, this._operator);
       } finally {
         if (localContext) this.engine._removeEvalContext(localContext);
       }
@@ -4782,6 +4851,13 @@ function type(expr: BoxedFunction): Type {
         else
           sigResult =
             parseType(calculatedType, expr.engine._typeResolver) ?? sigResult;
+        // Literal types are handler-visible only (`_literalType`, ruling O9
+        // first half): a handler that echoes one into its result must not
+        // store an over-specific contract nobody wrote (`tuple<1, 2>`), so
+        // every handler result is widened back to ordinary types here — the
+        // single place a handler result is stored. Ranges (`finite_real<0..>`)
+        // pass through untouched.
+        sigResult = widenValueTypes(sigResult);
       }
     } else if (
       expr.ops.length > 0 &&
@@ -4804,7 +4880,15 @@ function type(expr: BoxedFunction): Type {
       // unknown-finiteness) operand must not narrow the result finiteness
       // (SYMBOLIC P0-15). Gate the narrowing on every operand being provably
       // finite.
-      const argTypes = expr.ops.map((op) => op.type.type);
+      // A ranged operand type (`finite_real<0..>` from `Abs`, an
+      // `assume`-refined declaration, `tier & !0`) narrows exactly like its
+      // base primitive: the range is a subset of the tier, so the join over
+      // the stripped bases is still an upper bound. Without the projection a
+      // ranged operand silently disabled the narrowing (its type is no
+      // longer a primitive string).
+      const argTypes = expr.ops.map((op) =>
+        stripNumericRanges(op.type.type)
+      );
       if (
         expr.ops.every((op) => op.isFinite === true) &&
         argTypes.every(
@@ -6000,6 +6084,104 @@ function isUserFunctionDef(
   return def._isMultiClause && def.lazy !== true && !def.scoped;
 }
 
+/**
+ * Convert a CRASH escaping a BUILT-IN, NON-LAZY `evaluate` handler into an
+ * error value on the expression, and RETHROW everything else (§4.4 of
+ * `docs/plans/2026-08-22-type-handlers-on-types.md`: the `try` around the
+ * handler call had a `finally` but no `catch`, so an exception thrown inside
+ * a handler escaped `evaluate()` and crashed the caller — e.g. the unguarded
+ * `CONDITIONS[name]` lookup, a `TypeError`, before it was guarded).
+ *
+ * A "crash" is a native fault class only — `TypeError`, `RangeError`,
+ * `ReferenceError`: the shapes an engine bug produces, never something a
+ * handler throws on purpose. Everything else is a DELIBERATE throw and must
+ * keep unwinding:
+ * - a `CancellationError` (deadline, iteration limit) aborts the whole
+ *   evaluation;
+ * - plain `Error` diagnostics are contract, pinned as throws by the suite —
+ *   a predicate that returns a non-boolean is a hard error
+ *   (`collections.test.ts`, Count/Filter), a mistyped key function throws
+ *   with a spelling suggestion (GroupBy), an element-wise failure throws
+ *   enriched with broadcast context (`withBroadcastThrowContext`);
+ * - a LAZY operator's throw: `Assign`'s redefinition discipline throws by
+ *   contract (`attrs-bag-encoding.test.ts` pins it), and a lazy handler owns
+ *   its operands' evaluation, errors included;
+ * - a USER function's throw: over-application ("Too many arguments") throws
+ *   by contract (`bare-function-wildcard-contract.test.ts` pins it).
+ *
+ * The native classes are safe to test with `instanceof` across the
+ * host/plugin bundle boundary (they are platform globals, not re-bundled
+ * engine code); engine-defined classes are not, which is why this file
+ * tests `CancellationError` by NAME.
+ */
+function handlerThrowToErrorValue(
+  ce: ComputeEngine,
+  e: unknown,
+  def: BoxedOperatorDefinition,
+  operator: string
+): Expression {
+  if (
+    !(
+      e instanceof TypeError ||
+      e instanceof RangeError ||
+      e instanceof ReferenceError
+    )
+  )
+    throw e;
+  // Defensive only: `CancellationError` extends plain `Error`, so the gate
+  // above already rethrew it. This line exists so that WIDENING the
+  // instanceof set can never start swallowing cancellations.
+  if (e.name === 'CancellationError') throw e;
+  // Explicitly `boolean`: the raw type-predicate result would narrow `def`
+  // to `never` past the negation (the predicate names the whole class).
+  const isUserFn: boolean = isUserFunctionDef(def);
+  if (def.lazy === true || isUserFn) throw e;
+  return ce.error(['evaluation-error', e.message], operator);
+}
+
+/**
+ * The dispatch-site gate for the generic runtime conformance check
+ * (`runtimeConformanceError`, `validate.ts` — R1/R8, §4.4 of
+ * `docs/plans/2026-08-22-type-handlers-on-types.md`), shared by the sync
+ * step 4d and its async twin. Beyond the call sites' cheap gates
+ * (strict engine, non-lazy, handler present), excluded here:
+ *
+ * - a definition that is not a `_BoxedOperatorDefinition` (no signature to
+ *   check against);
+ * - an INFERRED signature: it is a guess subject to revision, and a guess
+ *   must never refute a value;
+ * - a definition with a CUSTOM `canonical` handler: for those, boxing never
+ *   runs the declared-signature validation — the handler plus the lenient
+ *   `checkNumericArgs` re-validation are the admission authority, and (as
+ *   the re-validation comment in `box.ts` puts it) "their declared
+ *   signatures are looser than what their handlers legitimately accept":
+ *   `Apply(3, 5)` is a constant nullary despite the `symbol` parameter,
+ *   `Degrees(i)` flows through the linear conversion despite `(real)`.
+ *   Enforcing the declared signature here would refuse at evaluation what
+ *   boxing deliberately admits on the literal route;
+ * - a user function (lambda or multi-clause): `apply()` runs the runtime
+ *   validation itself, and a multi-clause definition keeps its own dispatch
+ *   and its `no-matching-clause` error (`multi-clause.ts`).
+ */
+function genericRuntimeConformance(
+  ce: ComputeEngine,
+  def: BoxedOperatorDefinition | undefined,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (!(def instanceof _BoxedOperatorDefinition)) return undefined;
+  if (def.lazy === true || def.inferredSignature) return undefined;
+  if (def.canonical !== undefined) return undefined;
+  const isUserFn: boolean = isUserFunctionDef(def);
+  if (isUserFn) return undefined;
+  return runtimeConformanceError(
+    ce,
+    def,
+    def.signature,
+    def.broadcastable === true,
+    ops
+  );
+}
+
 function isOperatorDefinition(
   source: BoxedOperatorDefinition | Type
 ): source is BoxedOperatorDefinition {
@@ -6341,3 +6523,4 @@ function materialize(
 
   return expr.engine.function('Set', [...materialized]);
 }
+

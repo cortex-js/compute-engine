@@ -20,6 +20,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { isSubtype } from '../../src/common/type/subtype';
 import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
 
 const ce = new ComputeEngine();
@@ -32,12 +33,16 @@ function typeOf(expr: any): string {
   return ce.box(expr).type.toString();
 }
 
-/** Assert the `.N()` value's own type is a subtype of the static claim. */
+/** Assert the `.N()` value's own type is a subtype of the static claim.
+ * The value's PUBLIC type is its bare tier (`2` is `finite_integer`), which
+ * cannot witness a ranged static claim such as `finite_integer<0..>` even
+ * when the value plainly satisfies it — so the value is judged by its
+ * value-carrying handler type (`_literalType`) when it has one. */
 function expectSound(expr: any): void {
   const e = ce.box(expr);
   const v = e.N();
   if (v.isNumber && v.numericValue !== undefined)
-    expect(v.type.matches(e.type)).toBe(true);
+    expect(isSubtype(v._literalType ?? v.type.type, e.type.type)).toBe(true);
 }
 
 describe('TYPE AUDIT: pole reciprocals (Tan/Sec/Csc/Cot/Coth/Csch)', () => {
@@ -291,20 +296,24 @@ describe('TYPE AUDIT: Abs (magnitude)', () => {
   ce.declare('afr', 'finite_real');
   ce.declare('az', 'complex');
 
+  // Since the ranged-result round (ROADMAP "Ranged types should carry
+  // sign…", item 4) each tier claim carries `<0..>`: |x| ≥ 0 is now part of
+  // the TYPE, which is what lets `√|x|` type `finite_real` and the GPU
+  // lowering keep the real kernel without consulting the sgn channel.
   it('preserves the integer/rational/real tier of a real operand', () => {
-    expect(typeOf(['Abs', 'afk'])).toBe('finite_integer');
-    expect(typeOf(['Abs', 'k'])).toBe('integer');
-    expect(typeOf(['Abs', 'afq'])).toBe('finite_rational');
-    expect(typeOf(['Abs', 'aq'])).toBe('rational');
-    expect(typeOf(['Abs', 'afr'])).toBe('finite_real');
-    expect(typeOf(['Abs', 'r'])).toBe('real');
+    expect(typeOf(['Abs', 'afk'])).toBe('finite_integer<0..>');
+    expect(typeOf(['Abs', 'k'])).toBe('integer<0..>');
+    expect(typeOf(['Abs', 'afq'])).toBe('finite_rational<0..>');
+    expect(typeOf(['Abs', 'aq'])).toBe('rational<0..>');
+    expect(typeOf(['Abs', 'afr'])).toBe('finite_real<0..>');
+    expect(typeOf(['Abs', 'r'])).toBe('real<0..>');
   });
 
   it('narrows literals to their own tier', () => {
-    expect(typeOf(['Abs', 2])).toBe('finite_integer');
-    expect(typeOf(['Abs', -2])).toBe('finite_integer');
-    expect(typeOf(['Abs', ['Rational', -1, 2]])).toBe('finite_rational');
-    expect(typeOf(['Abs', -2.5])).toBe('finite_real');
+    expect(typeOf(['Abs', 2])).toBe('finite_integer<0..>');
+    expect(typeOf(['Abs', -2])).toBe('finite_integer<0..>');
+    expect(typeOf(['Abs', ['Rational', -1, 2]])).toBe('finite_rational<0..>');
+    expect(typeOf(['Abs', -2.5])).toBe('finite_real<0..>');
     expect(
       ce
         .box(['Abs', ['Rational', -1, 2]])
@@ -317,12 +326,12 @@ describe('TYPE AUDIT: Abs (magnitude)', () => {
 
   it('keeps the finiteness rungs (complex magnitude, ±∞, ~oo, NaN)', () => {
     // A finite COMPLEX magnitude is real but neither rational nor integer.
-    expect(typeOf(['Abs', 'ImaginaryUnit'])).toBe('finite_real');
-    expect(typeOf(['Abs', 'az'])).toBe('real');
+    expect(typeOf(['Abs', 'ImaginaryUnit'])).toBe('finite_real<0..>');
+    expect(typeOf(['Abs', 'az'])).toBe('real<0..>');
     expect(typeOf(['Abs', 'PositiveInfinity'])).toBe('non_finite_number');
-    expect(typeOf(['Abs', 'ComplexInfinity'])).toBe('real');
+    expect(typeOf(['Abs', 'ComplexInfinity'])).toBe('real<0..>');
     expect(typeOf(['Abs', { num: 'NaN' }])).toBe('number');
-    expect(typeOf(['Abs', 'u'])).toBe('real');
+    expect(typeOf(['Abs', 'u'])).toBe('real<0..>');
     expectSound(['Abs', 'ImaginaryUnit']);
     expectSound(['Abs', 'PositiveInfinity']);
   });

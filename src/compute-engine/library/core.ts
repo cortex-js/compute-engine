@@ -45,7 +45,10 @@ import { fromDigits } from '../numerics/strings.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { randomCount } from './random-utils.js';
 import { isRingConstant } from './ring-constructions.js';
-import { quotientRingType } from './type-handlers.js';
+import {
+  operandLiteralValue,
+  quotientRingType,
+} from './type-handlers.js';
 import {
   settleTypeText,
   settledTypeText,
@@ -1137,7 +1140,16 @@ function randomListType(
   // string and reparsing it: the element type may name a user-declared type,
   // which a resolver-less `parseType()` cannot read back.
   const elt: Type = domain ? randomElementType(domain) : 'any';
-  const count = kOp ? asSmallInteger(kOp) : null;
+  // The count is read from the literal's handler-visible type first (the
+  // channel that survives when the value reads are unavailable to a type
+  // handler), then from the value.
+  const litCount = kOp ? operandLiteralValue(kOp) : undefined;
+  const count =
+    litCount !== undefined && Number.isInteger(litCount)
+      ? litCount
+      : kOp
+        ? asSmallInteger(kOp)
+        : null;
   if (count !== null && count > 0 && count <= MAX_RANDOM_ELEMENT_COUNT)
     return { kind: 'list', elements: elt, dimensions: [count] };
   return { kind: 'list', elements: elt };

@@ -160,6 +160,12 @@ function _couldBenefitFromExpand(
 export abstract class _BoxedExpression implements Expression {
   readonly _kind: string = 'expression';
 
+  /** Only a number literal carries a handler-visible literal type
+   * (`BoxedNumber` overrides this); see the `Expression` interface doc. */
+  get _literalType(): Type | undefined {
+    return undefined;
+  }
+
   abstract readonly hash: number;
   abstract readonly json: MathJsonExpression;
   abstract isCanonical: boolean;

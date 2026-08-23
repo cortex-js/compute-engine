@@ -261,7 +261,10 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     expect(ce.box(['Power', arg, 2]).type.toString()).toBe(
       'broadcastable<finite_number>'
     );
-    expect(ce.box(['Abs', arg]).type.toString()).toBe('broadcastable<real>');
+    // `Abs` cells carry their non-negative range (ranged-results round).
+    expect(ce.box(['Abs', arg]).type.toString()).toBe(
+      'broadcastable<real<0..>>'
+    );
   });
 
   // §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.

@@ -30,27 +30,37 @@ describe('use-narrowing evidence guard', () => {
     expect(ce.box('x').type.toString()).toBe('number');
 
     const r = run('k(x)');
-    // The mismatch is a CANONICALIZATION-time error — the Epsil static pass
-    // reports it, and the diagnostic names the SYMBOL, not a substituted
-    // value.
-    expect(JSON.stringify(r.diagnostics)).toContain(
-      'expected `integer`, got `number` at `x`'
-    );
-    expect(r.value?.toString()).toContain(
-      'ErrorCode("incompatible-type", "integer", "number")'
-    );
-    // The stored type keeps the assignment evidence — the use must NOT
-    // rewrite it (pre-guard it became `integer` while the symbol held a
-    // `number`-typed value).
+    // Re-read under R1 overlap admission (§4.4 of
+    // `docs/plans/2026-08-22-type-handlers-on-types.md`; this pin was a
+    // canonicalization-time error before). The evidence (`x` holds `g()`,
+    // typed `number`) merely OVERLAPS `integer` — `g()` could well return
+    // 5 — so the mismatch is not provable and boxing admits the call
+    // provisionally: it stays INERT rather than erroring. A CONCRETE
+    // evidence value still refuses at boxing (see the STATIC initializer
+    // test below).
+    expect(JSON.stringify(r.diagnostics)).toBe('[]');
+    expect(r.value?.toString()).toBe('k(g())');
+    // The heart of the guard is unchanged: the stored type keeps the
+    // assignment evidence — the use must NOT rewrite it (pre-guard it
+    // became `integer` while the symbol held a `number`-typed value; the
+    // overlap admission is deferred, excluded from the inference pass).
     expect(ce.box('x').type.toString()).toBe('number');
   });
 
-  test('ONE-SHOT program: the mismatch is a STATIC diagnostic, before anything runs', () => {
-    // The static pre-pass applies the TYPE EFFECT of top-level declarations
-    // and assignments (`applyAssignmentTypeEffect`, static-diagnostics.ts):
-    // `let f: () -> integer` installs the contract, `x = g()` gives `x` the
-    // static type `number` plus assignment evidence — all without evaluating
-    // anything — so `k(x)` fails in the pass itself.
+  test('ONE-SHOT program: an evidence-type mismatch no longer flags statically (R1)', () => {
+    // Re-read under R1 overlap admission (§4.4 of
+    // `docs/plans/2026-08-22-type-handlers-on-types.md`; before R1 the
+    // pre-pass flagged `k(x)` as a `static-type-error`). The static
+    // pre-pass applies the TYPE EFFECT of assignments
+    // (`applyAssignmentTypeEffect`, static-diagnostics.ts): `x = g()` gives
+    // `x` the static type `number` plus assignment evidence, without
+    // evaluating anything. A `number` evidence TYPE merely OVERLAPS an
+    // `integer` parameter — not a provable mismatch — so boxing now admits
+    // the call and the pre-pass, which reads diagnostics off boxing
+    // errors, stays silent. Restoring a static line for this program needs
+    // evidence that refutes provably — the literal-type evidence of O9 /
+    // §4.3 (ROADMAP: "Epsil static evidence diagnostics lost to overlap
+    // admission").
     const one = (lines: string[]) =>
       executeEpsil(new ComputeEngine(), lines.join('\n')).diagnostics;
     expect(
@@ -65,7 +75,7 @@ describe('use-narrowing evidence guard', () => {
           'k(x)',
         ])
       )
-    ).toContain('static-type-error');
+    ).toBe('[]');
 
     // Assignment is LAST-WRITE-WINS: the reverse order is a correct program
     // and must stay clean (a join-of-assignments model would wrongly flag it).
@@ -172,24 +182,36 @@ describe('use-narrowing evidence guard', () => {
         'x = g()',
       ].join('\n')
     );
+    // Re-read under R1 overlap admission (§4.4): the `number` evidence
+    // OVERLAPS `integer`, so both calls now box and stay inert instead of
+    // erroring. What this test pins is the guard itself — the optional and
+    // variadic slots must not narrow the assigned symbol — and that half
+    // is unchanged.
     const rOpt = run('opt(True, x)');
-    expect(rOpt.value?.toString()).toContain('incompatible-type');
+    expect(rOpt.value?.toString()).toBe('opt("True", g())');
     expect(ce.box('x').type.toString()).toBe('number');
     const rVar = run('varfn(1, x)');
-    expect(rVar.value?.toString()).toContain('incompatible-type');
+    expect(rVar.value?.toString()).toBe('varfn(1, g())');
     expect(ce.box('x').type.toString()).toBe('number');
   });
 
-  test('STATIC: a typed declaration contributes its initializer as evidence', () => {
-    // `let x: number = 1.5` — the contract is `number`, which merely
-    // OVERLAPS an `integer` parameter, so without the initializer evidence
-    // the free-variable un-rejection called the mismatch provisional and
-    // the pre-pass stayed silent.
+  test('a typed declaration with a concrete initializer still refuses at run time', () => {
+    // Re-read under R1 overlap admission (§4.4; before R1 the pre-pass
+    // flagged this statically off the initializer evidence). The pre-pass
+    // runs valueless, records the evidence as a TYPE (`number`), and
+    // `number` overlaps `integer` — so no static line until evidence
+    // carries literal types (O9 / §4.3; ROADMAP: "Epsil static evidence
+    // diagnostics lost to overlap admission"). The RUN is unchanged: by
+    // the time `k(x)` boxes, `x` HOLDS 1.5, and a concrete value decides
+    // exactly — the mismatch is still the same boxing-time error.
     const r = executeEpsil(
       new ComputeEngine(),
       ['let k: (integer) -> integer', 'let x: number = 1.5', 'k(x)'].join('\n')
     );
-    expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
+    expect(JSON.stringify(r.diagnostics)).toBe('[]');
+    expect(r.value?.toString()).toContain(
+      'ErrorCode("incompatible-type", "integer", "number")'
+    );
   });
 
   test('STATIC: a destructuring assignment distributes the effect per leaf', () => {

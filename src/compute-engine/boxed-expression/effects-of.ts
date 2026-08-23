@@ -90,8 +90,15 @@ export function effectsOf(expr: Expression): ComputedEffects {
   // half of the rule below.
   if (!isFunction(expr)) return undefined;
   // The memo lives on `BoxedFunction` (generation-guarded, like `type` and
-  // `sgn`); a raw/unbound function expression may not have it.
-  return expr._effectsOf?.() ?? applicationEffects(expr);
+  // `sgn`); a raw/unbound function expression may not have it. The presence
+  // test is on the METHOD: `undefined` is the memo's valid answer for a
+  // pure application (the empty effect set), so falling back with `??` on
+  // the call's result would recompute every pure node's whole subtree on
+  // every read — exponential over a tree with shared operands. (Provenance:
+  // Tycho item 225.)
+  return typeof expr._effectsOf === 'function'
+    ? expr._effectsOf()
+    : applicationEffects(expr);
 }
 
 /**

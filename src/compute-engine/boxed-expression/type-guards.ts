@@ -177,19 +177,30 @@ export function isForeignEngineObject(
  */
 function containsForeignEngineObject(
   expr: ExpressionInput | Expression | null | undefined,
-  ce: unknown
+  ce: unknown,
+  memo: Map<Expression, boolean>
 ): boolean {
   if (expr === null || typeof expr !== 'object') return false;
   const x = expr as Expression;
   // Raw MathJSON has no `_kind` and cannot contain boxed objects owned by
   // another engine.
   if (x._kind === undefined) return false;
-  if (isObject(x)) return x.engine !== ce;
-  if (isFunction(x))
-    return x.ops.some((op) => containsForeignEngineObject(op, ce));
-  if (isDictionary(x))
-    return x.values.some((v) => containsForeignEngineObject(v, ce));
-  return false;
+  // The memo (one per adoption — see the caller) is what keeps this walk
+  // linear in DISTINCT nodes: an operand referenced more than once (a
+  // function applied to its own previous result shares its subtrees) would
+  // otherwise be re-scanned once per path, and this guard runs on every
+  // function boxing — constructing a depth-n shared tree cost 2^n scans.
+  const cached = memo.get(x);
+  if (cached !== undefined) return cached;
+  let result: boolean;
+  if (isObject(x)) result = x.engine !== ce;
+  else if (isFunction(x))
+    result = x.ops.some((op) => containsForeignEngineObject(op, ce, memo));
+  else if (isDictionary(x))
+    result = x.values.some((v) => containsForeignEngineObject(v, ce, memo));
+  else result = false;
+  memo.set(x, result);
+  return result;
 }
 
 /**
@@ -209,7 +220,8 @@ export function adoptsForeignEngineObject(
   ce: unknown
 ): boolean {
   if (!anyObjectExists()) return false;
-  return ops.some((op) => containsForeignEngineObject(op, ce));
+  const memo = new Map<Expression, boolean>();
+  return ops.some((op) => containsForeignEngineObject(op, ce, memo));
 }
 
 export function isCollection(

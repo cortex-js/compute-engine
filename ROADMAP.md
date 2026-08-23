@@ -924,76 +924,86 @@ closedness) beside the types; `_reviseInferredType` moves to a write site;
 mis-filed: the lost facts are the SIGN of `π`/`e` and the CLOSEDNESS
 `poleReciprocalType` reads via `isConstant`.
 
-### Ranged types should carry sign (and a literal's value) through type derivation (OPEN, design task — raised by the user 2026-08-22)
+### Ranged types: interval arithmetic and open bounds (OPEN, design task — remaining scope of "Ranged types should carry sign", raised 2026-08-22)
 
-Sign is already expressible in the type lattice: `real<0..>`,
-`finite_real<0..>`, `real<-1..1>` and singleton ranges such as
-`finite_integer<2..2>` all parse and subtype correctly, and "positive" is
-`real<0..> & !0` (`real<1..>` and `finite_integer<2..2>` are subtypes of it;
-`finite_integer<0..0>` and bare `real<0..>` are not — verified 2026-08-22).
-What is missing is that nothing connects the sign channel to these types:
+The four work items of the 2026-08-22 entry "Ranged types should carry
+sign (and a literal's value) through type derivation" are DONE
+(1–2 on 2026-08-22/23, 3–4 on 2026-08-23):
 
-- a symbol declared `integer<1..>` answers `sgn: undefined`, so `√q` types
-  `finite_complex` and `q!` types `finite_real` — the declaration's sign is
-  never read;
-- `assume(p > 0)` sets the symbol's `sgn` to `positive` but leaves its type
-  at `real`, so anything that reads the TYPE (the solver's root filter, the
-  GPU complex-lowering gate, an assignment to a `real` symbol) cannot see
-  the assumption;
-- a number literal's handler-visible type is `finite_integer`, not
-  `finite_integer<2..2>`, so a handler that needs the value (`Arcsin(1/2)`,
-  `ErfInv(0.5)`, `Range(1, 5)`, `At((1, "a"), 2)`, `Reshape(v, (2, 3))`)
-  reads it through the value channel instead;
-- there are no open bounds (`real<(0..>` does not parse), so "non-zero"
-  needs the `& !0` intersection rather than a range.
+1. `BoxedSymbol.sgn` and the sign predicates read a range-typed
+   declaration (`signOfType`, `common/type/utils.ts`; pinned in
+   `ranged-declaration-sign.test.ts`).
+2. `ce.assume(x > 0)` refines the symbol's type to `real<0..> & !0` (and
+   the other comparison shapes likewise).
+3. Number literals carry a value- or sign-carrying type on type-handler
+   INPUT (`BoxedNumber._literalType`, read through `handlerTypeOf` /
+   `operandSgn` / `operandLiteralValue` in `library/type-handlers.ts`),
+   widened back to ordinary types on handler OUTPUT (`widenValueTypes`,
+   `common/type/widen-value.ts`). This is ruling O9's first half; the
+   PUBLIC `.type` of a literal is unchanged (O9's second half stays open,
+   below). The constants `ExponentialE` and `Pi` declare value-bracket
+   ranged types (`finite_real<2.718281828459045..2.718281828459046>`), so
+   their positivity is a TYPE fact too. Pinned in
+   `literal-handler-types.test.ts`; the §5.7 withholding experiments
+   re-run with the ranges in place show zero behavior changes for the
+   `sgn` and literal-value fact families, except (a) the
+   `pipe-type-read-purity` proxy artifact the §5.7 method itself
+   documents, and (b) the `power-negative-base-branch` rows whose exact
+   huge-denominator rational exponent (`10000003/10000001`) no type can
+   carry — the loss ruling O4 accepts (rational literal types are not
+   wanted).
+4. The positive half of a few `sgn` handlers is claimed by the type
+   handlers as result ranges — `Abs` → `real<0..>`, even powers →
+   `real<0..>`, `Exp` (`Power`'s provably-positive-base arm) →
+   `real<0..> & !0` — pinned in `ranged-result-types.test.ts`, with
+   consumers (`√(x²)`, `√|x|`, `Ln(2^x)`) typing `finite_real` off the
+   type channel alone.
 
-Why it matters (measured 2026-08-22, `docs/plans/2026-08-22-type-handlers-on-types.md`
-§5.6–§5.7): when `Sqrt` was retyped from its operand's TYPE alone, the two
-behavior changes in the suite — the solver dropping the valid roots `±√a` of
-`x² = a` under `assume(a > 0)`, and the GPU targets emitting a real `sqrt`
-for `√s + 1` with `s := −2` — were both the sign channel failing to reach a
-consumer that reads the type. With sign in the type, the `sgn` fact of the
-type-handler design and its "literal value" fact both disappear: `sgn`
-becomes `isSubtype(type, 'real<0..>')`, and the literal rows become
-subtype tests against ranges.
+What remains, each a separate design task:
 
-The work (written up as adjustments A1, A2 and A3 of
-`docs/plans/2026-08-22-type-handlers-on-types.md` §5.8, with A3 pending the
-ruling recorded there as O9): (1) DONE 2026-08-22 — `BoxedSymbol.sgn` and the sign predicates read a range-typed
-declaration (`signOfType`, `common/type/utils.ts`; pinned in
-`ranged-declaration-sign.test.ts`); (2) `ce.assume(x > 0)` refines the symbol's type to
-`real<0..> & !0` (and `x ≥ 0`, `x < 0`, bounded intervals likewise);
-(3) number literals carry their singleton range on handler INPUT, widened
-on handler OUTPUT exactly as the `0`/`1` literal types already must be;
-(4) the positive half of the `sgn` handlers moves into the type handlers as
-result ranges (`Abs` → `real<0..>`, `x²` → `real<0..>`, `Exp` →
-`real<0..> & !0`), with interval arithmetic for `Add`/`Multiply`/`Power`
-scoped separately. Historical note from the user: the lattice once had
-`positive_integer` and similar named types, simplified away; ranges are
-the replacement they should have been connected to.
+- **Interval arithmetic for `Add`/`Multiply`/`Power` results.** Today the
+  join-based result computations deliberately STRIP range decorations from
+  their inputs (`stripNumericRanges`, applied in `addType`'s widen tail,
+  the `Add`/`Multiply` cell absorption and the broadcastable element
+  join): a join is a set union, and a sum does not lie in the union of its
+  terms' ranges — `assume(x > −1); assume(y > −1)` typed `x + y` as
+  `real<-1..>` until 2026-08-23 (an unsoundness introduced with work
+  item 2 and fixed with item 4; `Negate` now REFLECTS a range instead of
+  echoing it, `negateNumericType`). Carrying bounds soundly means real
+  interval arithmetic on the result side. Until then `|x| + |y|` types
+  bare `real` (pinned as the scope boundary in
+  `ranged-result-types.test.ts`), and the widen over TUPLE component
+  types in `addType`'s numeric-tuple arm still joins raw component ranges
+  (sound for the non-negative components literals produce; an
+  assume-ranged negative bound inside a tuple sum is the same defect
+  class, now stripped there too).
+- **O9's second half — the public `.type` of a literal** (`ce.box(21)`
+  answering `21`): open with its default (unchanged); the blast-radius
+  count over the ~1,429 exact-string type assertions is still to be run.
+  See `docs/plans/2026-08-22-type-handlers-on-types.md` §6.
+- **Open bounds**: `real<(0..>` does not parse, so "positive" stays the
+  `& !0` intersection spelling.
 
-### Compile targets should constant-fold before reading a node's type (OPEN, compile — raised by the user 2026-08-22)
+Historical note from the user: the lattice once had `positive_integer`
+and similar named types, simplified away; ranges are the replacement they
+should have been connected to.
 
-`Sqrt`'s type handler numericizes a closed radicand (`closedRealSign`,
-`library/type-handlers.ts`) so that `√(1 − 0.2²)` types `finite_real`: machine
-floats are not folded at canonicalization, so the sign of `1 − 0.2²` is
-unknown to the sign channel even though its value is `0.96`. The consumer
-that needs that answer is the compiler — the GLSL band of a `Which` over a
-float radicand (Tycho item 137, pinned in `type-handler-audit.test.ts`) —
-and a type computation is the wrong place to evaluate anything (the
-type-handler design retires this fold in its §5.4 `Sqrt` row).
+### The shared antiderivative budget is not reset on the registered-target compile route (OPEN, compile — surfaced by the A5 dual review, 2026-08-23)
 
-The work (adjustment A5 of
-`docs/plans/2026-08-22-type-handlers-on-types.md` §5.8 gives the sequencing):
-the compile targets fold constant subtrees
-(`compilation/constant-folding.ts`) BEFORE any emitter reads a node's type,
-so the band choice, `gpuResultIsComplexValued` (`gpu-target.ts`) and
-`isProvablyRealValued` (`base-compiler.ts`) see the folded value's type
-rather than the unfolded expression's. Acceptance: the §5.4 `Sqrt` row
-lands (no `.N()` in the type path) with the item-137 GLSL band unchanged
-and `compile-complex-result`, `compile-glsl` (items 144/147) and
-`random-compile` byte-identical. Audit every emitter site that reads a
-node TYPE where a folded VALUE would answer more precisely.
+The per-compilation antiderivative pool
+(`ANTIDERIVATIVE_COMPILATION_BUDGET_MS`, added with the item-226 dynamic
+integral-nesting fix) is module-static state reset in `compileRoot` and in
+the public `compile()` entry (`compile-expression.ts`). Registered built-in
+targets invoked directly — `ce._getCompilationTarget('javascript')
+.compile(...)` — compile through `compileCseRoot`, which resets neither: a
+compilation that exhausts the pool leaves every LATER direct-target
+compilation skipping the symbolic antiderivative-first attempt permanently,
+so those emit runtime quadrature where a closed form exists. An auto-mode
+escalation retry can likewise inherit the first attempt's depleted pool.
+Fix shape: reset the pool at every registered-target compilation attempt
+(including each escalation retry), keeping the `compileRoot` reset for raw
+custom targets; regression-test by exhausting one direct-target compilation
+and verifying the next receives a fresh pool.
 
 ### Type derivation reaches state mutation at 7 handlers, 2 `elttype` handlers and 1 getter — AUDITED 2026-08-22 (OPEN, defects; the GETTER half is FIXED 2026-08-22 — `_reviseInferredType` no longer writes on read (R4, plan §4.2); the 7 handlers and 2 `elttype` handlers remain scheduled by the type-handler design)
 
@@ -1068,7 +1078,7 @@ and the once-per-generation cycle property must survive (the latter is
 covered by `cachedValue`'s in-flight stamping but is not pinned). Design:
 `docs/plans/2026-08-22-type-handlers-on-types.md` §4.2.
 
-### Integer-domain operators ROUND a non-integer operand instead of refusing it — reachable today through an `any`-typed symbol — FOUND 2026-08-22 (OPEN, defect; fix = the runtime conformance check of the type-handler design §4.4)
+### Integer-domain operators ROUND a non-integer operand instead of refusing it — reachable today through an `any`-typed symbol — FOUND 2026-08-22 (FIXED 2026-08-23 — the §4.4 generic runtime conformance check at non-lazy dispatch; no handler changes)
 
 `toBigint` (`boxed-expression/numerics.ts`) rounds the real part of its
 operand by documented contract and ignores an imaginary part. The ~45
@@ -1078,16 +1088,55 @@ operators of the number-theory and combinatorics families that call it
 `Is*` predicates, Stirling/Catalan/Bernoulli, …) rely on the strict
 boxing-time gate (`validate.ts`, `!op.type.matches(param)`) to never
 deliver a non-integer. The gate does not cover an `any`-typed symbol, so
-today `u: any`, `u := 2.5`, `FactorInteger(u)` evaluates to `[(3, 1)]`,
+`u: any`, `u := 2.5`, `FactorInteger(u)` evaluated to `[(3, 1)]`,
 `NextPrime(u)` to `5`, `IsTriangular(u)` to `True`, and `Fibonacci(u)` with
 `u := 1 + 2i` to `1` — wrong values, not errors (measured: 95 operators ×
-4 wrong-tier values, 148 value rows, 0 throws; logs in the 2026-08-22
-session's scratchpad). The same rows become reachable through any
-`number`-declared symbol once declared signatures admit by overlap (R1).
-Fix: the generic runtime conformance check at non-lazy evaluate dispatch
-(design doc §4.4) — every affected operator is non-lazy, so no handler
-changes; pinned by `runtime-conformance-fuzz.test.ts` whose expected
-failures start at these 148 rows and must reach zero.
+4 wrong-tier values, 148 value rows, 0 throws). The same rows became
+reachable through any `number`-declared symbol once declared signatures
+admitted by overlap (R1).
+
+FIXED 2026-08-23: `runtimeConformanceError` (`validate.ts`) runs at
+non-lazy evaluate dispatch on a strict engine — a concrete evaluated
+operand that does not conform to the declared parameter yields the same
+`incompatible-type` error value the static gate mints for a literal.
+Pinned by `runtime-conformance-fuzz.test.ts` (every declared-signature,
+non-canonical operator × six wrong-kind probes), whose expected-failure
+list is EMPTY, and by `runtime-conformance.test.ts` (route parity, async,
+strict-off, broadcast, symbolic-stays-inert). See the §4.4 status block in
+`docs/plans/2026-08-22-type-handlers-on-types.md` for the scoping
+(canonical-handler operators and collection/function-kind parameters are
+handler-owned and exempt).
+
+### Epsil static evidence diagnostics lost to overlap admission — FOUND 2026-08-23 (OPEN, design — successor work to the §4.4 R1/R8 round)
+
+The Epsil static pre-pass mints its `static-type-error` diagnostics off the
+error values canonicalization embeds, and it runs VALUELESS: assignment
+evidence reaches it as a TYPE (`applyAssignmentTypeEffect`,
+`static-diagnostics.ts`). Under R1 overlap admission a `number` evidence
+type at an `integer` parameter no longer errors at boxing — `g()` could
+well return 5 — so for `let x; x = g(); k(x)` (with `g: () -> number`,
+`k: (integer) -> integer`) the pre-pass now stays SILENT where it used to
+flag the call. For a valueless callee the diagnostic does not move to run
+time, it disappears. The RUN is fully protected — by the time the call
+boxes during execution the symbol HOLDS its value and a concrete value
+decides exactly (`let x: number = 1.5; k(x)` still errors) — so this is a
+loss of LINT coverage, not of soundness. Re-read pins:
+`use-narrowing-evidence-guard.test.ts` (the guard's no-narrowing half is
+unchanged and still pinned).
+
+Two recovery paths, not mutually exclusive: (1) literal-type evidence
+(O9/§4.3 of `docs/plans/2026-08-22-type-handlers-on-types.md`) makes the
+concrete-initializer case provable again — `1.5`'s literal type refutes
+`integer` — restoring that static line for free; (2) an Epsil-side
+evidence check (the pre-pass tests recorded evidence types against call
+parameters itself, lint-stricter than engine admission, the way TypeScript
+flags code that would run) covers the symbolic case — a product decision
+on whether Epsil's linter should be stricter than the engine's semantics.
+
+RULED 2026-08-23: path (1) — the concrete-initializer static line comes
+back with the O9/§4.3 literal-type evidence work, which is already
+scheduled. Path (2), the Epsil-side check for the symbolic case, is to be
+decided when §4.3 lands, not before.
 
 ### A pre-canonicalization validation phase (OPEN, design — raised by the user 2026-08-21 at the item-219 ruling)
 
@@ -1218,6 +1267,63 @@ generic type report. The rejection site is `checkNumericArgs`
 (`boxed-expression/validate.ts`); the message likely wants an
 `ERROR_EXPLANATIONS` entry so the CLI/editor surfaces carry it too.
 
+### `structural` of an object-HOLDING shared tree is still per-read — OPEN (found 2026-08-23 in the item-225 review; blocked on rulings B12/B22)
+
+The per-node `structural` memo commits through `cachedValue()`, whose commit
+rule refuses to store any payload that transitively contains a mutable
+object (ruling B12: a cache must not keep an object alive; ruling B22/B3:
+version stamps do not validate an object's contents). So a DAG-shared tree
+with an object anywhere in it rebuilds its structural form on every read,
+once per path — the exponential shape the memo otherwise removes. No
+witness reaches this today (the item-225 document holds no objects), and
+the commit-time containment SCAN itself is now DAG-linear
+(`containsObject` allocates a per-question memo). The clean fix respects
+both rulings: a memo scoped to one top-level `structural` read (a transient
+map that dies with the call retains nothing and validates nothing), used as
+the fallback when the persistent commit refuses. Needs a small
+`cachedValue` variant or a hand-rolled per-call path; decide when a witness
+appears or alongside the next cache-rule round.
+
+### Compiling a DAG-shared symbol value is exponential in the emitted source — OPEN (found 2026-08-23 diagnosing Tycho item 225; needs the CSE initiative or a fold-size guard)
+
+With the effects-memo and structural-memo fixes in (see CHANGELOG
+"Unreleased"), the item-225 witness (`art/nxlddeh5zv`, the valueless-slider
+heightmap) no longer OOMs — but its member compile still grinds. The
+remaining engine, profiled 2026-08-23: `BaseCompiler.compile`'s symbol arm
+folds an assigned value into the emission (`tryFoldKnownSymbol`), and a
+value that is a DAG-shared tower (each document-function level embeds the
+previous once per parameter mention) unfolds in the OUTPUT — emitted source
+is text, so without common-subexpression binding every shared node is
+emitted once per path, and no compile-time memo can fix what is exponential
+in the result's length. The scan that feeds it (`get json` over the value,
+`_getSymbolValue`/`lookupDefinition` per reference) unfolds the same way.
+Two honest resolutions, both design decisions: (a) the CSE initiative (each
+shared node bound to one emitted temporary — the general fix, already a
+roadmap item under "compilation: CSE"); (b) a fold-size guard — refuse to
+bake a value above N distinct nodes and emit a runtime binding or decline,
+with N justified. A wall-clock cutoff on the compile path is NOT among the
+options: the 2026-08-22 ruling placed cutoffs in the evaluator, and the
+consumer (Tycho-POC, item 226) confirmed this witness class as the first
+live case that ruling anticipated. For scale: 0.118.1 "completed" this
+state in ~65 s only because two deadline expiries cut the work; the honest
+cost has never been paid to completion.
+
+### Quadrature under dynamic integral composition — remaining scalar-target half (OPEN — opened 2026-08-23 from Tycho item 226; interval half landed)
+
+The interval target now bounds dynamic integral composition twice over —
+compile-time sizing/decline of tree-visible nesting (ruled and landed
+2026-08-23; see CHANGELOG "Unreleased") plus the runtime evaluation budget
+for by-reference composition no tree walk can see. What remains is the
+scalar `javascript` target's half of the same class, pre-existing and
+milder: `_SYS.integrate` (adaptive Gauss–Kronrod) under the same dynamic
+composition grows ~60× per level (measured 2026-08-23: depth 2 = 5 ms,
+depth 3 = 309 ms, so depth 6 ≈ hours of synchronous work). No witness hits
+it — the item-226 witness's scalar leg compiles user functions by
+reference, which hoists each integral — but a macro-expanded scalar
+emission of the same shape would. The open design point is what an
+exhausted scalar integral should return: it is an estimate, not an
+enclosure, so `NaN` (the scalar target's existing "no value" spelling) is
+the natural candidate — a ruling, since it changes a numeric result.
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 
 The evaluator broadcasts `Which` elementwise over collection-valued operands

@@ -1,3 +1,216 @@
+## Unreleased
+
+### Breaking Changes
+
+- **Declared signatures admit by overlap; conformance is checked at
+  evaluation.** An operator with a declared signature now follows the same
+  admission model as arithmetic: an argument is refused at boxing only when
+  it is *provably* incompatible — a concrete value that fails membership
+  (`FactorInteger("abc")` is still an error at boxing), or a symbolic
+  argument whose type shares no inhabitant with the parameter (`string` at
+  an `integer` slot). A symbolic argument whose type merely OVERLAPS the
+  parameter is admitted provisionally: `FactorInteger(n)` with `n: number`
+  now boxes, works when `n` turns out to be 12, and errors at evaluation
+  when it does not. On a strict engine, a generic runtime conformance check
+  at non-lazy dispatch enforces the declared parameter on each evaluated
+  concrete operand, producing the same `incompatible-type` error value the
+  static gate mints for a literal — so the literal and symbol routes now
+  agree. Consequences to note: a wrong-kind concrete value that a handler
+  previously absorbed silently is now an error (see Bug Fixes); a
+  diagnostic for a call like `k(x)` with `x` merely *typed* incompatibly
+  (no value yet) moves from box time to run time, and the Epsil static
+  pre-pass no longer flags it (ROADMAP: "Epsil static evidence diagnostics
+  lost to overlap admission"). Collection-kind and function-kind
+  parameters, and operators with a custom `canonical` handler, keep their
+  existing handler-owned admission unchanged. On a non-strict engine
+  (`strict: false`) nothing changes. (R1/R8 — §4.4 of
+  `docs/plans/2026-08-22-type-handlers-on-types.md`; pinned by
+  `runtime-conformance-fuzz.test.ts` and `runtime-conformance.test.ts`.)
+
+- **`Sqrt` no longer evaluates a closed radicand to decide its type.**
+  `√(1 − 0.2²)` — a machine-float radicand, which canonicalization
+  deliberately does not fold — now types `finite_complex`, the same hedge
+  as any other real radicand of statically unknown sign, instead of
+  `finite_real`: the type handler used to numericize such radicands
+  (`closedRealSign`, now deleted) for the sole benefit of the compile
+  targets, and a type derivation must not evaluate. Values are unchanged
+  (`evaluate()`, `.N()`, `solve()` fold the float as before) and compiled
+  output is byte-identical: the compile targets fold constant subtrees
+  themselves before any lowering decision reads a type (the item-137 GLSL
+  band is pinned byte-for-byte in `type-handler-audit.test.ts`). A literal
+  radicand still types precisely — `√0.96` stays `finite_real`, its sign
+  being statically known. Measured blast radius: 3 pinned type assertions,
+  all in `type-handler-audit.test.ts`; zero snapshot changes in the full
+  suite. (§5.4 `Sqrt` row and §5.8 A5 of
+  `docs/plans/2026-08-22-type-handlers-on-types.md`.)
+
+### New Features
+
+- **Ranged result types: `Abs`, even powers and `Exp` carry their sign in
+  the type.** `|x|` types `real<0..>` (each real tier keeps its
+  non-negative range), `x²` types `finite_real<0..>`, and `e^x` — every
+  `Power` with a provably positive real base — types
+  `(finite_real<0..>) & !0`, so a consumer that reads the TYPE sees the
+  sign the `sgn` handlers always knew: `√(x²)`, `√|x|` and `ln(2^x)` now
+  type `finite_real` instead of hedging complex. `Negate` reflects a range
+  instead of echoing it (`−|x|` is `real<..0>`). The scope stops at these
+  heads: `Add`/`Multiply` deliberately still join bare tiers (see the Bug
+  Fixes note below); general interval arithmetic is tracked separately in
+  `ROADMAP.md`.
+
+- **Number literals carry their value in their handler-visible type.** A
+  type handler now sees `21`, `0.5` (value types), an exact rational as a
+  singleton range (`finite_rational<0.5..0.5>`), and a value no machine
+  number holds exactly as a sign-carrying range (`(finite_real<0..>) & !0`
+  for `√2`) — so the sign and value questions handlers used to answer
+  from the value channel (`Power`'s integer-vs-rational claim for
+  `10^21`, `arcsin(0.5)`'s domain classification, `Range(2, 3)`'s
+  index-span test, an even root of a negative constant) are now answered
+  by the type alone. The PUBLIC `.type` of a literal is unchanged
+  (`ce.box(21).type` is still `finite_integer`), and a handler result is
+  widened back to ordinary types before it is stored, so literal types
+  never leak into an expression's type. The constants `e` and `π` now
+  declare value-bracket ranged types
+  (`finite_real<2.718281828459045..2.718281828459046>`), so their
+  positivity is a type fact as well. (Ruling O9 first half,
+  `docs/plans/2026-08-22-type-handlers-on-types.md` §4.3/§6.)
+
+### New Features
+
+- **The `interval-js` target sizes — or declines — dynamically nested
+  integrals at compile time.** An inner integral runs once per enclosing
+  piece, so `Integrate` nodes nested inside each other's integrands or
+  bounds multiply the enclosure's work by their piece count per level — a
+  class the per-node sizing (which only sees one node's limits) could not
+  bound. The outermost integral of a nest now measures its whole subtree
+  (`integrateStats`: how many integral runs, how deeply they nest — a pure
+  function of the tree, memoized per node, no clock anywhere) and picks one
+  uniform per-level count keeping `runs·count^depth` within the 65 536
+  evaluation budget; inner lowerings inherit that count through the compile
+  target. Below 4 pieces per level the enclosure would be as uninformative
+  as `entire` at full cost, so such an integral fails closed instead and
+  the caller falls back (in a two-lane consumer, to its scalar estimate) —
+  restoring, for the macro-expanded Tycho item-226 witness, exactly the
+  pre-0.118.2 decline behavior at ~zero probe cost: the witness document's
+  member sweep runs in ~25 s against 44 s on 0.118.1 and 90 s with the
+  runtime budget alone. Visible chains that fit are now genuinely cheaper
+  AND honest: a three-deep chain that formerly ran 256³ evaluations into
+  the runtime budget's `entire` now answers a real (coarse) enclosure at
+  ~28 pieces per level in milliseconds. Composition through by-reference
+  function calls shows no `Integrate` node in the tree and is still
+  bounded at run time by `INTERVAL_NESTED_QUADRATURE_BUDGET`. Both
+  mechanisms are pinned in `compile-interval-integrate.test.ts`.
+  (Tycho item 226)
+
+### Bug Fixes
+
+- **Integer-domain operators no longer silently round a non-integer
+  operand delivered through a permissively-typed symbol.** With `u: any`
+  and `u := 2.5`, `FactorInteger(u)` answered `[(3, 1)]`, `NextPrime(u)`
+  `5`, `IsTriangular(u)` `True`, and `Fibonacci(1 + 2i)` `1` — the ~45
+  operators of the number-theory and combinatorics families trusted the
+  boxing gate to never hand them a non-integer, and `toBigint` rounds by
+  contract. All of them now produce an `incompatible-type` error value at
+  evaluation, from the generic runtime conformance check (no handler was
+  changed).
+
+- **An unknown rule-condition name no longer crashes.**
+  `Condition(x, "nonsense")` threw a raw `TypeError` out of `evaluate()`
+  (an unguarded `CONDITIONS[name]` lookup); `checkConditions` now fails
+  closed on an unknown condition name. More generally, a native-fault crash
+  (`TypeError`/`RangeError`/`ReferenceError`) escaping a built-in non-lazy
+  `evaluate` handler is converted into an `evaluation-error` value on the
+  expression instead of crashing the caller; deliberate throws —
+  cancellation, redefinition discipline, predicate contracts, user-function
+  arity — still propagate unchanged.
+
+- **A promoted radical arm in a branch is no longer double-wrapped on the
+  JavaScript target.** Under the complex discipline (the default
+  `mode: 'auto'`), `If(c, √−4, √(1 − 0.2²))` promotes the unknown-sign
+  radical arm to `_SYS.csqrt(…)` — already a `{re, im}` object — while the
+  branch coercion classified that arm by its static type and wrapped it a
+  second time (`{re: {re, im}, im: 0}`), NaN-poisoning every slot read.
+  The JavaScript target's static complex-wrap sites
+  (`BaseCompiler.isProvablyRealValued`: branch-arm coercion, the `Typed`
+  ascription lift, the complex-argument delivery) now consult the shape
+  analysis (`isComplexValued`) before the static type, and — where the
+  type is imprecise — the constant fold's value (`constantFoldValue`,
+  split out of `tryConstantFold` behind every gate except the
+  `constantFold` emission opt-out). A closed constant arm beside a complex
+  arm therefore keeps the complex convention under every mode, including
+  `mode: 'strict'` with `constantFold: false`, where only the
+  fold-informed analysis can prove the structurally-emitted arm real.
+  Pinned in `compile-complex.test.ts` ("coercion reads the value SHAPE"
+  block).
+
+- **The runtime effects projection honors its memo for pure applications,
+  and an expression's structural form is memoized per node.** Two
+  independent defeats of per-node caching made every walk over a DAG-shared
+  tree — a document function applied to its own previous result embeds that
+  result once per parameter mention, so a few levels unfold to millions of
+  paths — exponential, which surfaced as a consumer document evaluating at
+  4 GB and aborting on the heap limit (Tycho item 225). First,
+  `effectsOf`'s memo consultation was spelled
+  `expr._effectsOf?.() ?? applicationEffects(expr)`, and `undefined` is the
+  memo's legitimate answer for a PURE application — so every read of every
+  pure node fell through and recomputed its entire subtree: 24 million
+  recomputes in one document evaluation, 1.5 million once the memo is
+  honored. Second, `BoxedFunction.structural` rebuilt through every
+  operand's `structural` with no per-node memo, so a shared tree was
+  rebuilt once per path — exponential time and fresh allocation for every
+  copy; it now caches per node (generation-guarded, like `type`), and the
+  rebuilt form preserves the sharing. Both pinned on the depth-30 shared
+  tower in `dag-shared-walks.test.ts`. The witness document no longer
+  OOMs; its remaining cost is a separate compile-time issue (baking a
+  DAG-shared symbol value into compiled source is exponential in the
+  OUTPUT without CSE) tracked in `ROADMAP.md`. Found in review and fixed
+  with it: once any mutable object exists, two more walks re-scanned a
+  shared tree once per path — the cache commit points' payload-containment
+  scan (`containsObject`), and the cross-engine ingress guard that runs on
+  EVERY function boxing (`containsForeignEngineObject` — constructing a
+  depth-n shared tree cost 2^n scans). Both now carry a per-question memo
+  and are linear in distinct nodes; pinned by the armed-scan test in
+  `dag-shared-walks.test.ts`. A shared tree that CONTAINS an object still
+  rebuilds its structural form per read (the cache commit rule refuses
+  object-holding payloads by ruling); tracked in `ROADMAP.md`.
+  (Tycho item 225, partial)
+
+- **A dynamically nested interval integral can no longer run away.** The
+  compiler sizes an integral's piece count only for the nesting it can see —
+  the limits of one `Integrate` node (256 pieces for a single or double
+  integral, fewer per level beyond that, so one node never exceeds its 65 536
+  evaluation budget). But integrals also nest DYNAMICALLY: a distinct
+  `Integrate` node inside another's integrand, or a compiled user function
+  that computes an integral, runs once per enclosing piece, multiplying the
+  work by 256 per level with no syntactic trace. The Tycho item-226 witness —
+  a six-level Newton iteration `w − k·E(w)/d_E(w)` whose macro-expansion
+  substituted each level into `E`'s integrand — emitted 728 `_IA.integrate`
+  calls nested inside each other's integrands, ~256⁶ integrand evaluations,
+  and never returned. The interval runtime now enforces its own budget
+  (`INTERVAL_NESTED_QUADRATURE_BUDGET`, 4× the per-node compile-time budget):
+  each outermost integral entry resets it, every integrand evaluation
+  performed by a nested integral consumes it, and a nested integral that
+  finds it exhausted answers `entire` — sound, since the entire line contains
+  the true value — so the enclosure widens instead of spinning and the caller
+  degrades to its non-interval fallback. Integrals the compiler did size are
+  untouched (a double consumes 65 536 of the 262 144 budget, a triple about
+  the same), pinned alongside the regression in
+  `compile-interval-integrate.test.ts`. The consumer's document that hit this
+  completes its member sweep in ~90 s where it previously never returned.
+  With it, the antiderivative-first symbolic attempts of one compilation now
+  share a single 4 s wall-clock pool instead of arming a fresh 2 s span per
+  `Integrate` node, so a many-hundred-node emission degrades to its numeric
+  emitters at bounded compile-time cost. (Tycho item 226)
+
+- **An `assume()` range no longer leaks through `Add` and `Negate`.**
+  After `assume(x > -1); assume(y > -1)`, `x + y` typed `real<-1..>` —
+  but the sum can be as small as −2 — and `-x` echoed `real<-1..>`
+  verbatim. Join-based result computations now strip range decorations
+  from their inputs (a join is a set union, and a sum does not lie in the
+  union of its terms' ranges), and `Negate` reflects a range about zero
+  (`-x` under that assumption is `real<..1>`).
+
+
 ## 0.118.2 _2026-08-22_
 
 ### New Features

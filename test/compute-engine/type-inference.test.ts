@@ -196,8 +196,11 @@ describe('TYPE INFERENCE FOR ARITHMETIC FUNCTIONS', () => {
   it('Power with a symbolic exponent is not non_finite_number', () => {
     const localCe = new ComputeEngine();
     localCe.declare('x', { type: 'real' });
-    // 2^x: a positive base raised to a real exponent is finite real.
-    expect(localCe.expr(['Power', 2, 'x']).type.toString()).toBe('finite_real');
+    // 2^x: a positive base raised to a real exponent is a POSITIVE finite
+    // real, and since the ranged-results round the type says so.
+    expect(localCe.expr(['Power', 2, 'x']).type.toString()).toBe(
+      '(finite_real<0..>) & !0'
+    );
   });
 
   it('Power of integers stays finite_integer', () => {

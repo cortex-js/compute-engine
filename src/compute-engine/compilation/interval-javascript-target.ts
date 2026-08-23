@@ -1178,6 +1178,62 @@ function compileIntervalSumProduct(
  * no stochastic estimator — sampling produces no enclosure, which is the only
  * thing this target returns.
  */
+/**
+ * How much integration work a subtree can demand at run time, measured from
+ * the tree: `paths` is the number of `Integrate` RUNS reachable per
+ * evaluation of the subtree (an operand referenced twice runs twice, so
+ * children's counts are SUMMED — path counting, which a per-distinct-node
+ * memo computes in linear time), and `depth` is the deepest multiplicative
+ * chain — integration levels (one per limit) accumulated through integrals
+ * nested inside other integrals' integrands or bounds.
+ *
+ * `compileIntervalIntegrate` sizes every level's subdivision count from the
+ * pair: an inner integral runs once per enclosing piece, so with a uniform
+ * count n the subtree's total integrand evaluations are bounded by
+ * ~paths·n^depth.
+ *
+ * The memo is sound unconditionally: both numbers are functions of the
+ * expression tree alone (operator names and arity — no bindings, no
+ * definitions), and boxed expressions are immutable. `paths` saturates at
+ * a million — beyond that every sizing decision is already "decline", and
+ * an unsaturated sum over a deeply shared tree would overflow.
+ *
+ * Composition through a FUNCTION CALL (`∫ g(x) dx` where `g`'s body
+ * computes an integral) is invisible here — no `Integrate` node is in the
+ * tree. That class is bounded at run time instead, by
+ * `INTERVAL_NESTED_QUADRATURE_BUDGET` (`interval/integrate.ts`).
+ */
+type IntegrateStats = { paths: number; depth: number };
+
+const INTEGRATE_STATS = new WeakMap<Expression, IntegrateStats>();
+
+const INTEGRATE_PATHS_SATURATION = 1_000_000;
+
+function integrateStats(expr: Expression): IntegrateStats {
+  const cached = INTEGRATE_STATS.get(expr);
+  if (cached !== undefined) return cached;
+  let paths = 0;
+  let depth = 0;
+  if (isFunction(expr)) {
+    for (const op of expr.ops) {
+      const s = integrateStats(op);
+      paths = Math.min(INTEGRATE_PATHS_SATURATION, paths + s.paths);
+      depth = Math.max(depth, s.depth);
+    }
+    if (expr.operator === 'Integrate') {
+      // One integration level per limit clause; a bare `Integrate(f)` (no
+      // clause) is indefinite and never reaches the enclosure emitter, but
+      // count it as one level so the estimate stays conservative.
+      const levels = Math.max(1, expr.nops - 1);
+      paths = Math.min(INTEGRATE_PATHS_SATURATION, paths + 1);
+      depth += levels;
+    }
+  }
+  const stats = { paths, depth };
+  INTEGRATE_STATS.set(expr, stats);
+  return stats;
+}
+
 function compileIntervalIntegrate(
   args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string,
@@ -1246,27 +1302,68 @@ function compileIntervalIntegrate(
     );
   }
 
+  // Per-level subdivision count from the total budget (see
+  // `INTERVAL_QUADRATURE_BUDGET`): the inner enclosure of a nested integral
+  // runs once per outer piece, so the counts multiply across levels — through
+  // this node's own limits AND through every `Integrate` node visible in its
+  // subtree (a distinct node inside the integrand or a bound runs once per
+  // enclosing piece just the same). The OUTERMOST integral of a nest measures
+  // the whole subtree (`integrateStats`) and picks one uniform count n with
+  // paths·n^depth within the budget; every inner lowering inherits that n
+  // through `target.intervalQuadraturePieces` rather than re-measuring its
+  // own smaller subtree, which would pick a larger count and break the
+  // product bound.
+  //
+  // The floor is a DECLINE, not a clamp: below 4 pieces per level the
+  // "enclosure" is as uninformative as `entire` while still costing the whole
+  // budget, so an integral whose subtree is too deep or too branchy to size
+  // honestly fails closed instead (the caller falls back — in a two-lane
+  // consumer, to its scalar estimate). Everything here is a function of the
+  // expression tree alone: no clock, same answer on every run.
+  let n: number;
+  if (target.intervalQuadraturePieces !== undefined) {
+    n = target.intervalQuadraturePieces;
+  } else {
+    let paths = 1;
+    let depth = limits.length;
+    for (const arg of args) {
+      const s = integrateStats(arg);
+      paths = Math.min(INTEGRATE_PATHS_SATURATION, paths + s.paths);
+      depth = Math.max(depth, limits.length + s.depth);
+    }
+    n = Math.min(
+      INTERVAL_QUADRATURE_SUBDIVISIONS,
+      Math.floor((INTERVAL_QUADRATURE_BUDGET / paths) ** (1 / depth))
+    );
+    if (n < 4)
+      throw new Error(
+        `Integrate: cannot compile an honest interval enclosure — this ` +
+          `integral's subtree reaches ${paths} integral runs nested ` +
+          `${depth} levels deep, and the evaluation budget ` +
+          `(${INTERVAL_QUADRATURE_BUDGET} integrand evaluations) admits ` +
+          `fewer than 4 subdivisions per level at that size, which is as ` +
+          `uninformative as no bound at all. Fail closed (D6). Evaluate ` +
+          `numerically on the scalar target, or reduce the nesting.`
+      );
+  }
+
+  // Everything compiled within this integral — the integrand and every
+  // bound — inherits the chosen count.
+  const sized: CompileTarget<Expression> = {
+    ...target,
+    intervalQuadraturePieces: n,
+  };
+
   // The lambda variable arrives as a bare `Interval` (`{lo, hi}`), which every
   // `_IA.*` operation accepts, so it compiles to its own name rather than to a
   // `vars`-object lookup or a `_IA.point(…)` wrapper.
   const scoped = (names: string[]): CompileTarget<Expression> => ({
-    ...target,
+    ...sized,
     var: (id) => (names.includes(id) ? id : target.var(id)),
     boundVars: BaseCompiler.withBoundNames(target, names),
   });
 
   let code = BaseCompiler.compile(bodyExpr, scoped(lambdaVars));
-
-  // Per-level subdivision count from the total budget (see
-  // `INTERVAL_QUADRATURE_BUDGET`): the inner enclosure of a nested integral
-  // runs once per outer piece, so the counts multiply across levels.
-  const n = Math.max(
-    1,
-    Math.min(
-      INTERVAL_QUADRATURE_SUBDIVISIONS,
-      Math.floor(INTERVAL_QUADRATURE_BUDGET ** (1 / limits.length))
-    )
-  );
 
   // Multiple limits nest, innermost last (Mathematica iterator convention:
   // the FIRST limit is the OUTERMOST integral). A bound of limit d may
@@ -1276,7 +1373,7 @@ function compileIntervalIntegrate(
   // walks the outer range, and each scanned piece runs the inner enclosures.
   for (let d = limits.length - 1; d >= 0; d--) {
     const outer = lambdaVars.slice(0, d);
-    const boundTarget = outer.length > 0 ? scoped(outer) : target;
+    const boundTarget = outer.length > 0 ? scoped(outer) : sized;
     const lo = BaseCompiler.compile(limits[d].lowerExpr, boundTarget);
     const hi = BaseCompiler.compile(limits[d].upperExpr, boundTarget);
     const f = `(${lambdaVars[d]}) => (${code})`;

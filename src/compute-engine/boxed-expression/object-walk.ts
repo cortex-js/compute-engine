@@ -90,7 +90,13 @@ import { isDictionary, isFunction, isObject } from './type-guards.js';
  * payload that transitively contains an object is not memoized").
  */
 export function containsObject(expr: Expression | null | undefined): boolean {
-  return containsObjectWith(expr, undefined);
+  // One memo per question: a DAG-shared payload (operands referenced more
+  // than once) must cost one visit per DISTINCT node, not one per path —
+  // the cache commit points ask this about every payload they store, and an
+  // unmemoized walk over a shared tree is exponential in its depth. The
+  // allocation is skipped entirely in a session with no objects.
+  if (!anyObjectExists()) return false;
+  return containsObjectWith(expr, new Map());
 }
 
 /**

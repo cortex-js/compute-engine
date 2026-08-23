@@ -1105,6 +1105,9 @@ export class BaseCompiler {
       if (expr !== undefined)
         for (const n of collectUsedNames(expr)) target.naming.usedNames.add(n);
     } else target.naming = BaseCompiler.newNamingContext(expr);
+    // A fresh compilation gets a fresh shared antiderivative budget — see
+    // ANTIDERIVATIVE_COMPILATION_BUDGET_MS.
+    BaseCompiler.resetSharedCompilationBudgets();
     target.beginCompilation?.(target);
     return BaseCompiler.compile(expr, target, prec);
   }
@@ -9842,6 +9845,43 @@ export class BaseCompiler {
   private static readonly ANTIDERIVATIVE_ATTEMPT_BUDGET_MS = 2000;
 
   /**
+   * Shared wall-clock budget for ALL antiderivative-first attempts in one
+   * compilation (one `compileRoot` call).
+   *
+   * The per-node budget above bounds one attempt, but an emission can carry
+   * hundreds of `Integrate` nodes — a macro-expanded consumer document
+   * produced 728 in one expression (Tycho item 226) — and a fresh 2 s span
+   * per node lets the aggregate reach nodes × 2 s before the numeric
+   * fallback. Since the attempt is purely an optimization, the attempts
+   * share this pool: each consumes the wall-clock it actually spends, and
+   * once the pool is dry every remaining integral in the compilation skips
+   * straight to its numeric emitter. Sized for a handful of hard (≈200 ms)
+   * legitimate resolutions plus dozens of ordinary (≈ms) ones.
+   *
+   * Reset in `compileRoot`. A nested `compileRoot` (a target compiling a
+   * sub-runner mid-compilation) resets it too, which can only GRANT budget —
+   * the aggregate stays bounded per outer call by (nested roots + 1) × pool.
+   */
+  private static readonly ANTIDERIVATIVE_COMPILATION_BUDGET_MS = 4000;
+
+  /** Remaining shared antiderivative budget for the current compilation —
+   *  see {@link ANTIDERIVATIVE_COMPILATION_BUDGET_MS}. Module state is safe:
+   *  compilation is synchronous and single-threaded. */
+  private static antiderivativeBudgetLeftMs =
+    BaseCompiler.ANTIDERIVATIVE_COMPILATION_BUDGET_MS;
+
+  /**
+   * Start a fresh compilation's shared budgets — today just the
+   * antiderivative pool. Called from the public `compile()` entry
+   * (`compile-expression.ts`), which every route passes through, and from
+   * `compileRoot` for callers that drive a target directly.
+   */
+  static resetSharedCompilationBudgets(): void {
+    BaseCompiler.antiderivativeBudgetLeftMs =
+      BaseCompiler.ANTIDERIVATIVE_COMPILATION_BUDGET_MS;
+  }
+
+  /**
    * Whether any operand of the integral references a `vars`-mapped symbol — one
    * the caller pinned to a runtime input. Such a symbol must not be folded, so
    * the antiderivative-first path is skipped when the integral touches one.
@@ -9959,12 +9999,20 @@ export class BaseCompiler {
     // operands would keep the caller's scope. The closed form outlives the
     // scope: the caller's `compile()` resolves its free symbols by name against
     // the target's bindings.
+    // The compilation-wide pool is consumed by wall-clock actually spent, so
+    // hundreds of nodes cannot each arm a fresh full span — once the pool is
+    // dry, remaining integrals go straight to their numeric emitter.
+    if (BaseCompiler.antiderivativeBudgetLeftMs <= 0) return undefined;
+    const attemptStart = performance.now();
     engine.pushScope();
     try {
       const ops = args.map((x) => x.json);
       closed = engine.withTimeLimit(
         {
-          ms: BaseCompiler.ANTIDERIVATIVE_ATTEMPT_BUDGET_MS,
+          ms: Math.min(
+            BaseCompiler.ANTIDERIVATIVE_ATTEMPT_BUDGET_MS,
+            BaseCompiler.antiderivativeBudgetLeftMs
+          ),
           label: 'compile:antiderivative',
         },
         () => engine.function('Integrate', ops).evaluate()
@@ -9974,6 +10022,8 @@ export class BaseCompiler {
       // integration.
     } finally {
       engine.popScope();
+      BaseCompiler.antiderivativeBudgetLeftMs -=
+        performance.now() - attemptStart;
     }
 
     if (

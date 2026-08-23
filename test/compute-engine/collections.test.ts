@@ -911,31 +911,41 @@ describe('SLICE (range)', () => {
     expect(ok.at(1)?.json).toBe(13);
   });
 
-  test('a descending, stepped, or symbolic Range is a STATIC type error', () => {
-    // Each of these types as `indexed_collection<integer|number>`, not
-    // `range`, so the range arm rejects it at validation — the expression is
-    // never evaluated as a (start, end) window.
-    // The expected type in the message reads `nothing | range` since Strings
-    // Phase 2 gave the span slot a `range | nothing` twin so that
-    // `Slice(xs, RangeOf(xs, needle))` composes (an absent span slices to
-    // `Nothing`). A descending or stepped `Range` satisfies neither half, so
-    // the rejection is unchanged — only the type named in the message widened.
+  test('a descending, stepped, or symbolic Range span boxes and stays inert; a List span is a STATIC type error', () => {
+    // Re-read under R1 overlap admission (§4.4 of
+    // `docs/plans/2026-08-22-type-handlers-on-types.md`; this pin was a
+    // static refusal before). Each Range below types as
+    // `indexed_collection<integer|number>` — deliberately NOT `range`, the
+    // Range type derivation refuses descending/stepped spans — and that
+    // type OVERLAPS the span slot's `nothing | range` (an
+    // indexed_collection value could be a range), so boxing admits it
+    // provisionally. The refutation is not expressible in the lattice
+    // ("an indexed_collection that is not a range"), so it cannot stay
+    // static; at evaluation the span arm declines and the application stays
+    // INERT. For `Range(a, b)` inert is the honest undecided answer —
+    // `a = 1, b = 5` would make the span valid, a composition the old
+    // static error refused outright.
     for (const r of [
       ['Range', 3, 2],
       ['Range', 1, 7, 2],
       ['Range', 'a', 'b'],
-      ['List', 2, 3],
     ] as Expression[]) {
       const e = engine.box(['Slice', list, r]);
-      expect(e.type.toString()).toBe('error');
-      expect(e.op2.operator).toBe('Error');
-      expect(e.op2.op1.json).toEqual([
-        'ErrorCode',
-        "'incompatible-type'",
-        "'nothing | range'",
-        expect.any(String),
-      ]);
+      expect(e.isValid).toBe(true);
+      const v = e.evaluate();
+      expect(v.operator).toBe('Slice');
     }
+    // A `List` shares NO inhabitant with `nothing | range` — a provable
+    // refutation stays a static error (§4.4).
+    const e = engine.box(['Slice', list, ['List', 2, 3]]);
+    expect(e.type.toString()).toBe('error');
+    expect(e.op2.operator).toBe('Error');
+    expect(e.op2.op1.json).toEqual([
+      'ErrorCode',
+      "'incompatible-type'",
+      "'nothing | range'",
+      expect.any(String),
+    ]);
     // A span in the wrong slot is a type error too: `end` is a number.
     expect(
       engine.box(['Slice', list, ['Range', 2, 3], 5]).type.toString()

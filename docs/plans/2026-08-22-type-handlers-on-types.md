@@ -582,6 +582,24 @@ refusals in `protocol-type-redefinition.test.ts` into silent acceptances.
 
 ### 4.3 Literal types `0` and `1` on handler input, and widening results
 
+**Status: IMPLEMENTED 2026-08-23, generalized to every representable
+literal per ruling O9's first half (§6).** The implementation differs
+from the seam this section sketches in one deliberate way: the literal's
+handler-visible type travels as a memoized property of the literal itself
+(`BoxedNumber._literalType`), read by handlers through `handlerTypeOf()`
+/ `operandSgn()` / `operandLiteralValue()` (`library/type-handlers.ts`),
+rather than through the `operandTypes` context override — the property is
+a type-channel read that a fact-withholding proxy forwards, which is what
+the §5.7 acceptance experiments measure, and it needs no per-call-site
+array. The representation follows O9: a machine-exact integer or real is
+its value type (`21`, `0.5`); a machine-exact rational keeps its tier
+through a singleton range (`finite_rational<0.5..0.5>` — the lattice
+deliberately does not class a bare numeric value as rational); anything
+else carries its sign (`(finite_real<0..>) & !0` for `√2`), never a
+rounded double. The output widener below is `widenValueTypes`
+(`common/type/widen-value.ts`), applied at the one place a handler result
+is stored (`boxed-function.ts`). Pins: `literal-handler-types.test.ts`.
+
 `ce.type('0')` already exists and sits correctly in the type lattice
 (`0` is a subtype of `finite_integer`). A boxed `0` does not carry it:
 `ce.box(0).type` is `finite_integer`.
@@ -661,7 +679,159 @@ the exhaustiveness fixture.
 
 Default: always widen; no per-site opt-out (O1).
 
-### 4.4 Declared signatures admit by overlap (RULED 2026-08-22, R1)
+### 4.4 Declared signatures admit by overlap (RULED 2026-08-22, R1; IMPLEMENTED 2026-08-23)
+
+**Status: implemented.** All four pieces landed on 2026-08-23, in the order
+the section prescribes, with the deviations recorded below.
+
+1. **The fuzz harness is checked in** as
+   `runtime-conformance-fuzz.test.ts`. It enumerates every operator
+   definition with a declared signature (625; 155 lazy) and applies six
+   wrong-kind probes — a string, a list, `1 + 2i`, `NaN`, `+∞`, and `2.5`
+   (the audit's non-integer float, the sharpest probe for the rounding
+   family) — through `any`-typed symbols. Its first run found 232 non-lazy
+   probes returning a VALUE (the predicted rows: the `toBigint` family, the
+   boolean-parameter family, wrong-kind values at optional positions
+   silently ignored) and 6 lazy THROWS (`Condition` — an unguarded
+   `CONDITIONS[name]` table lookup, fixed at the source in
+   `rules.ts:checkConditions`, which now fails closed on an unknown
+   condition name).
+2. **The generic runtime check** is `runtimeConformanceError`
+   (`validate.ts`), called from non-lazy dispatch in `boxed-function.ts`
+   (sync step 4d and its async twin, after the broadcast and threading
+   steps so their semantics win), gated on `ce.strict` (O8's default). It
+   emptied 226 of the 232 rows without touching a handler. The remaining 6
+   (`Rational(3, x)` → `Divide`, `NotDivides` → `Not(Divides(…))`, unary
+   variadic folds like `Subtract(x)` → `x`) are CANONICAL-REWRITE residue:
+   the operator whose signature was probed no longer exists at dispatch, so
+   no dispatch-time mechanism can enforce its parameters — the fuzz now
+   skips a probe whose canonical operator differs from the operator under
+   test, and both expected-failure lists are EMPTY.
+3. **The catch around `def.evaluate`** landed in both dispatch paths
+   (`handlerThrowToErrorValue`) — **narrower than this section's original
+   wording**, which predates a discovery: the suite pins deliberate plain
+   `Error` diagnostics AS THROWS (a predicate returning a non-boolean is a
+   hard error — `collections.test.ts` Count/Filter; GroupBy's
+   typo-suggestion throw; the broadcast element-wise context of
+   `withBroadcastThrowContext`). The catch therefore converts only the
+   native fault classes `TypeError`/`RangeError`/`ReferenceError` — the
+   shapes an engine bug produces — and rethrows everything else, including
+   every `CancellationError` (by name), every LAZY handler's throw
+   (`Assign`'s redefinition discipline), and every user-function throw
+   ("Too many arguments", broadcast context). Pinned in
+   `runtime-conformance.test.ts` with a crashing custom operator and a
+   deliberate-diagnostic control.
+4. **The static gate is relaxed** (R8, every declared signature at once):
+   `overlapAdmission` in `validate.ts` runs at the same point in the
+   pipeline as the old refusal, in all three parameter loops of
+   `validateArguments` and in `checkType`. A concrete argument decides
+   exactly through `admissionOf` (so `FactorInteger("abc")` and a symbol
+   HOLDING a wrong value still refuse at boxing); a symbolic argument
+   admits provisionally (`deferredIdx`, no inference write) iff
+   `typesOverlap(opType, param)`.
+
+Deviations from the text below, and why:
+
+- **No explicit `mode` parameter was added.** The section asked for the
+  static and runtime verdicts to be distinguished by a `mode` on the entry
+  points; implemented, the two verdicts COINCIDE, carried by
+  `concreteValueOf`: a concrete value decides exactly in both modes, and a
+  symbolic argument admits on overlap — which for the runtime callers
+  (`apply()`'s `_validateArguments`, the in-handler re-validations) is the
+  "left alone" the runtime mode wants, since a symbolic argument whose type
+  does NOT overlap the parameter cannot have been admitted at boxing. The
+  18 `filter-predicate-errors` rows stay green with no flag.
+- **The runtime check's arity step is not re-implemented.** Boxing owns
+  arity, and a `Spread` call re-boxes after splicing
+  (`_spliceSpreadOps` → `ce.function`), which re-runs the full static
+  validation on the spliced operands.
+- **The shared helper returns the error rather than a boolean** — it
+  landed as `runtimeConformanceError(ce, cacheKey, signature,
+  broadcastable, ops): Expression | undefined` with a per-definition
+  WeakMap plan cache; a lazy handler that wants the §4.4 `conformsAtRuntime`
+  behavior calls this. The nine arithmetic guards were NOT rewritten as
+  such calls (follow-up with P4, not a gate on R1).
+- **Exempt parameter kinds are explicit and shared — by the runtime check,
+  the STATIC overlap admission, and the fuzz.** `runtimeCheckExemptParam`
+  (exported) blanks function-kind parameters (Design E — the application
+  checks), collection-kind parameters including `tuple`/`record` (D6.2
+  handler precedence; lenient spellings; and the D8 nested-top refusal —
+  `tuple<any>` at a tuple parameter stays refused on both routes), open
+  generic parameters (the ground-type invariant), and `any`/`unknown`.
+  `range` is deliberately NOT exempt: no handler-owned gate polices a range
+  parameter, so it is the generic machinery's to decide. The static
+  admission consults the same classifier because the specialized admissions
+  are the authority for their kinds: `typesOverlap` reads
+  `list<number> ∧ matrix` as the inhabited `list<never>` (the empty list
+  inhabits it) and would re-admit a rank mismatch D6.2 just refuted.
+- **Definitions with a custom `canonical` handler are exempt from the
+  runtime check and the fuzz.** Boxing never runs declared-signature
+  validation for them — the handler plus the lenient `checkNumericArgs`
+  re-validation are the admission authority, and (per the re-validation
+  comment in `box.ts`) their declared signatures are deliberately looser
+  than what the handlers accept: `Apply(3, 5)` is a constant nullary
+  despite the `symbol` parameter, `Degrees(i)` flows through the linear
+  conversion despite `(real)`, `DMS(NaN)` propagates. Measured on the
+  literal route before the change: of the probed leniencies only
+  `Degrees`, `DMS` and `Rational` admitted literals their signatures
+  refute, and all three do it in a canonical handler.
+- **Overload resolution is strict-first, overlap-second.** The overlap
+  admission never runs inside a first-pass arm trial — a narrower arm must
+  not become spuriously viable and capture a call a wider arm strictly
+  accepts (`p: ((integer) -> integer) & ((number) -> number)` on a declared
+  `number` keeps selecting the number arm; `overload-trials.test.ts`). When
+  NO arm is strictly viable, resolution re-runs with the admission active
+  (`overlapTrial`), so an overlap-admissible operand still finds an arm —
+  `Slice`'s span slot, validated against an overload set inside its
+  canonical handler, is the case that requires this.
+- **Two more pins re-read to runtime errors**: the item-158 `Hypot(Dot(…))`
+  complex-point row (`linear-algebra.test.ts` — `finite_complex` overlaps
+  `real`, so the refusal moves to the runtime check on the concrete inner
+  product) alongside the SLICE and evidence-guard rows described below.
+- **Three hardenings from the dual review (2026-08-23)**: (1) the ground
+  `Nothing` symbol is DECIDABLE at the runtime check — it has no
+  `concreteValueOf`, but it is a fully-evaluated unit value that
+  `admissionOf` refutes by provable disjointness, exactly as the static
+  gate refuses the literal (`IsTriangular(Nothing)` used to answer
+  `False`); at an optional or variadic slot an evaluated `Nothing` is
+  instead DROPPED as the omitted-argument marker before the check runs, so
+  `Xor(Nothing)` is `Xor()` by convention. (2) An overload arm whose arity
+  bounds cannot take the call is never consulted, so a shorter arm's
+  matching prefix does not mask the correctly-sized arm's remaining
+  positions. (3) A union with one collection arm is exempt only for
+  collection-SHAPED values: `number | list<number>` (the
+  Histogram/BinCounts bin-spec) now polices its scalar arm — a string
+  bin-spec used to be iterated character-by-character into NaN bin edges —
+  while a `List`/`Tuple` value there stays the handler's business. A pure
+  collection-kind parameter remains fully exempt.
+- **A `Range` operand is not `concreteValueOf`-concrete**, so a concrete
+  nonconforming span (`Slice(xs, Range(3, 2))`) stays INERT at evaluation
+  rather than erroring — handler precedence. The SLICE pin was re-read
+  accordingly (`collections.test.ts`): the symbolic case `Range(a, b)` now
+  COMPOSES (boxing admits; `a = 1, b = 5` would make it valid — the old
+  static error refused that outright), the `List`-span case stays a static
+  error (provably disjoint from `nothing | range`). Extending value
+  membership to Range literals is possible follow-up if the inert answer
+  proves too quiet.
+- **The Epsil static pre-pass loses the evidence-TYPE mismatch line.** The
+  pre-pass reads its `static-type-error` diagnostics off boxing errors, and
+  runs valueless: assignment evidence reaches it as a TYPE
+  (`applyAssignmentTypeEffect`). `x = g()` with `g: () -> number` records
+  `number`, which overlaps an `integer` parameter, so `k(x)` now boxes
+  clean and the pre-pass stays silent — for a valueless callee the
+  diagnostic does not merely move to run time, it disappears. The RUN is
+  fully protected (by run time the symbol HOLDS its value, and a concrete
+  value decides exactly: `let x: number = 1.5; k(x)` still errors at the
+  run's boxing). The four pins in `use-narrowing-evidence-guard.test.ts`
+  were re-read to this behavior; the guard's protective half — a use never
+  rewrites an assigned symbol's type — is unchanged and still pinned.
+  Recovering the static line needs evidence that refutes provably: the
+  literal-type evidence of O9/§4.3 covers the concrete-initializer case,
+  and an Epsil-side evidence check (lint stricter than engine semantics)
+  is the fork for the symbolic case — ROADMAP: "Epsil static evidence
+  diagnostics lost to overlap admission". RULED 2026-08-23: the O9/§4.3
+  literal-type evidence is the recovery path; the Epsil-side check is to
+  be decided when §4.3 lands.
 
 Operators with a declared signature adopt the arithmetic model: an
 argument is refused at boxing only when it is *provably* incompatible;
@@ -1494,7 +1664,10 @@ assigned symbol is validated against the value instead of narrowing the
 type. Verify: `solve-domain` keeps `±√a`; `About(x)` prints the refined
 type; the `assume` tests.
 
-**A3 — Number literals carry their singleton range on handler input.**
+**A3 — Number literals carry their singleton range on handler input.
+(IMPLEMENTED 2026-08-23 with §4.3 — see the status block there; the §5.7
+`sgn` and literal runs were repeated with the ranges in place, as the
+verification step below asks.)**
 §5.7 measured that the `sgn` fact's cargo is the sign of a *literal* (28
 of 31 behavior changes) and the literal-value fact's cargo is shape and
 lowering (20 of 20); a literal's singleton range type —
@@ -1641,7 +1814,8 @@ Open items — genuine decisions, each with a default:
   `strict: false` means and needs a migration note plus a benchmark on
   the plot and compile paths. This is a product decision.
 - **O9 — Literal types for every representable finite literal (§5.8 A3).
-  RULED 2026-08-22, first half: YES.** The user approved the session's
+  RULED 2026-08-22, first half: YES; IMPLEMENTED 2026-08-23 (§4.3 status
+  block). The second half — the public `.type` — remains open.** The user approved the session's
   recommended next-steps list ("sounds good — proceed autonomously"),
   whose second item was this recommendation; recorded on that assent, to
   be re-confirmed if the wording overstates it. What is ruled: on handler

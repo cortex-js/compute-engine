@@ -379,7 +379,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('Pi is a real number', () => {
     expect(checkProps(ce.symbol('Pi'))).toMatchInlineSnapshot(`
       number literal: false
-      type: finite_real
+      type: finite_real<3.141592653589793..3.141592653589794>
       real: true
       rational: undefined
       integer: undefined

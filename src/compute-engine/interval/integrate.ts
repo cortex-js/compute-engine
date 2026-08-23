@@ -45,6 +45,82 @@ export const INTERVAL_QUADRATURE_BUDGET = 65536;
  */
 export const INTERVAL_QUADRATURE_GUARD_SUBDIVISIONS = 16;
 
+/**
+ * Runtime integrand-evaluation budget for DYNAMICALLY nested integrals —
+ * integrals entered from inside another integral's integrand at run time.
+ *
+ * The compile-time sizing above (`INTERVAL_QUADRATURE_BUDGET`) covers only the
+ * nesting the compiler can see: the limits of one `Integrate` node. An
+ * integral can also reach another integral through expression structure — a
+ * distinct `Integrate` node inside the integrand, or a compiled user function
+ * that computes one (e.g. a macro-expanded Newton iteration
+ * `w − k·E(w)/d_E(w)` whose argument was substituted into `E`'s integrand:
+ * six such levels emit 728 `_IA.integrate` calls nested inside each other's
+ * integrands). Each such level multiplies the work by its own piece count —
+ * 256^d integrand evaluations for d dynamic levels — and no compile-time
+ * sizing can bound it, because the multiplication happens per RUNTIME call.
+ *
+ * So the runtime enforces its own cap: each outermost `integrate`/
+ * `integrateClosed` entry (one with no integral already running) resets this
+ * budget, and every integrand evaluation performed by a NESTED integral
+ * consumes one unit. A nested integral that finds the budget exhausted —
+ * on entry, or mid-accumulation — answers `entire`: sound (the entire line
+ * contains every real value), so the enclosing enclosure widens to `entire`
+ * instead of spinning, and the caller degrades to its non-interval fallback.
+ *
+ * Sized at 4× the compile-time budget so integrals the compiler DID size —
+ * a double integral's inner level consumes 256·256 = 65 536 nested
+ * evaluations, a triple's inner two ≈ 65 600 — complete untouched with
+ * headroom, while a runaway dynamic composition is cut after ~a quarter
+ * million evaluations rather than never. The cap is PER OUTERMOST INTEGRAL:
+ * an expression with many top-level integrals over a runaway shape pays it
+ * once per integral (the Tycho item-226 witness, ~12 top-level integrals
+ * over heavy integrands, ran ~45 s per compiled-function call — bounded, but
+ * far from free; the per-invocation scoping alternative is a ROADMAP item,
+ * "Quadrature under dynamic integral composition").
+ */
+export const INTERVAL_NESTED_QUADRATURE_BUDGET = 4 * INTERVAL_QUADRATURE_BUDGET;
+
+/** Number of `integrate`/`integrateClosed` activations currently on the call
+ *  stack. Zero at every outermost entry — module state is safe here because
+ *  compiled interval code runs synchronously on one thread. */
+let activeIntegrals = 0;
+
+/** Remaining nested-integrand-evaluation budget for the current outermost
+ *  integral — see {@link INTERVAL_NESTED_QUADRATURE_BUDGET}. */
+let nestedEvalsLeft = 0;
+
+/**
+ * `f` wrapped so that each evaluation made on behalf of a NESTED integral
+ * (one running inside another integral's integrand) consumes budget, and
+ * answers `entire` once the budget is exhausted — which `propagatedKind`
+ * then promotes to the whole nested integral's answer, ending its
+ * accumulation early.
+ */
+function budgetedIntegrand(
+  f: (t: Interval) => Interval | IntervalResult
+): (t: Interval) => Interval | IntervalResult {
+  return (t) => {
+    if (activeIntegrals > 1 && --nestedEvalsLeft < 0)
+      return { kind: 'entire' };
+    return f(t);
+  };
+}
+
+/**
+ * Open one integral activation: reset the nested budget at an outermost
+ * entry, or refuse (with `entire`) a nested entry whose budget is already
+ * gone. Returns `undefined` when the caller may proceed (and must then run
+ * its work inside `try { … } finally { activeIntegrals--; }`).
+ */
+function enterIntegral(): IntervalResult | undefined {
+  if (activeIntegrals === 0)
+    nestedEvalsLeft = INTERVAL_NESTED_QUADRATURE_BUDGET;
+  else if (nestedEvalsLeft <= 0) return { kind: 'entire' };
+  activeIntegrals++;
+  return undefined;
+}
+
 /** Whether both endpoints of an interval are finite numbers (no ±∞, no NaN). */
 function isFiniteInterval(x: Interval): boolean {
   return Number.isFinite(x.lo) && Number.isFinite(x.hi);
@@ -273,6 +349,23 @@ export function integrate(
   b: Interval | IntervalResult,
   n: number = INTERVAL_QUADRATURE_SUBDIVISIONS
 ): IntervalResult {
+  const refused = enterIntegral();
+  if (refused !== undefined) return refused;
+  try {
+    return integrateCore(budgetedIntegrand(f), a, b, n);
+  } finally {
+    activeIntegrals--;
+  }
+}
+
+/** The enclosure itself — see {@link integrate}, which wraps it in the
+ *  nested-budget accounting. `f` arrives already budget-wrapped. */
+function integrateCore(
+  f: (t: Interval) => Interval | IntervalResult,
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult,
+  n: number
+): IntervalResult {
   const unwrapped = unwrapOrPropagate(a, b);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [lower, upper] = unwrapped;
@@ -350,15 +443,22 @@ export function integrateClosed(
   b: Interval | IntervalResult,
   n: number = INTERVAL_QUADRATURE_SUBDIVISIONS
 ): Interval | IntervalResult {
-  const unwrapped = unwrapOrPropagate(a, b);
-  if (!Array.isArray(unwrapped)) return unwrapped;
-  const [lower, upper] = unwrapped;
-  if (!isFiniteInterval(lower) || !isFiniteInterval(upper)) return closed();
+  const refused = enterIntegral();
+  if (refused !== undefined) return refused;
+  try {
+    const g = budgetedIntegrand(f);
+    const unwrapped = unwrapOrPropagate(a, b);
+    if (!Array.isArray(unwrapped)) return unwrapped;
+    const [lower, upper] = unwrapped;
+    if (!isFiniteInterval(lower) || !isFiniteInterval(upper)) return closed();
 
-  const lo = Math.min(lower.lo, upper.lo);
-  const hi = Math.max(lower.hi, upper.hi);
-  const scan = bracket(f, lo, hi, INTERVAL_QUADRATURE_GUARD_SUBDIVISIONS);
-  if (!('kind' in scan) && !scan.clipped && isFiniteInterval(scan.value))
-    return closed();
-  return integrate(f, a, b, n);
+    const lo = Math.min(lower.lo, upper.lo);
+    const hi = Math.max(lower.hi, upper.hi);
+    const scan = bracket(g, lo, hi, INTERVAL_QUADRATURE_GUARD_SUBDIVISIONS);
+    if (!('kind' in scan) && !scan.clipped && isFiniteInterval(scan.value))
+      return closed();
+    return integrateCore(g, a, b, n);
+  } finally {
+    activeIntegrals--;
+  }
 }

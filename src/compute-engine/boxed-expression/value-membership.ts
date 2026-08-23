@@ -165,8 +165,13 @@ function valueComponent(
 /** The concrete literal `expr` denotes, or `undefined` when `expr` is not a
  * concrete value. Never evaluates: literals answer directly; a symbol is
  * followed one hop into its existing binding iff that binding holds a
- * literal. */
-function concreteValueOf(expr: Expression): Expression | undefined {
+ * literal.
+ *
+ * Exported for the runtime conformance check (`validate.ts`), which must
+ * make the same concrete-vs-symbolic split this module's admission makes:
+ * a concrete evaluated operand decides exactly, a symbolic one is left
+ * alone. */
+export function concreteValueOf(expr: Expression): Expression | undefined {
   if (!expr.isValid) return undefined;
   if (isNumber(expr) || isString(expr)) return expr;
   if (isSymbol(expr)) {

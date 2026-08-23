@@ -2766,11 +2766,21 @@ describe('Dot / Cross', () => {
       const e = ce.expr(['Hypot', d, d]);
       expect(e.isValid).toBe(true);
       expect(e.evaluate().toString()).toBe('25sqrt(2)');
-      // …and a complex one is still refused, loudly.
-      expect(
-        ce.expr(['Hypot', ['Dot', ['Tuple', 'i', 2], ['Tuple', 3, 4]], 1])
-          .isValid
-      ).toBe(false);
+      // …and a complex one is still refused, loudly — since the R1 overlap
+      // admission (§4.4 of `docs/plans/2026-08-22-type-handlers-on-types.md`)
+      // at EVALUATION rather than boxing: the operand's `finite_complex`
+      // type OVERLAPS `real` (a complex-typed application can evaluate to a
+      // real value), so boxing admits provisionally, and the runtime
+      // conformance check refuses the concrete non-real inner product.
+      const complexCall = ce.expr([
+        'Hypot',
+        ['Dot', ['Tuple', 'i', 2], ['Tuple', 3, 4]],
+        1,
+      ]);
+      expect(complexCall.isValid).toBe(true);
+      const v = complexCall.evaluate();
+      expect(v.isValid).toBe(false);
+      expect(v.toString()).toContain('incompatible-type');
     });
 
     it('an operand with no readable components keeps the wide `number`', () => {

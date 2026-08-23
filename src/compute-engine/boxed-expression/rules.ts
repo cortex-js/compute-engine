@@ -268,9 +268,14 @@ export const CONDITIONS = {
 
 export function checkConditions(x: Expression, conditions: string[]): boolean {
   // Check for !== true, because result could also be undefined
-  for (const cond of conditions)
-    if (CONDITIONS[cond as keyof typeof CONDITIONS](x) !== true) return false;
-
+  for (const cond of conditions) {
+    // An unknown condition name fails closed rather than crashing: the name
+    // can come from user input (the `Condition` operator's second operand),
+    // and an unguarded lookup threw `CONDITIONS[cond] is not a function` out
+    // of `evaluate()` for e.g. `Condition(x, "fuzz")`.
+    const predicate = CONDITIONS[cond as keyof typeof CONDITIONS];
+    if (predicate === undefined || predicate(x) !== true) return false;
+  }
   return true;
 }
 

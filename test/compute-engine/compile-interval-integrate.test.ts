@@ -432,3 +432,150 @@ describe('INTERVAL INTEGRATE runtime — a non-interval integrand value cannot b
     expect(r).toEqual({ kind: 'entire' });
   });
 });
+
+describe('INTERVAL INTEGRATE — dynamic nesting: compile-time sizing and the runtime budget (Tycho item 226)', () => {
+  // An inner integral runs once per enclosing piece, so composition
+  // multiplies work per level — the Tycho item-226 witness macro-expanded a
+  // six-level Newton iteration into 728 integrals nested inside each
+  // other's integrands (~256^6 integrand evaluations; it never returned).
+  // Two mechanisms bound this, split by what each can see:
+  //
+  // - nesting VISIBLE in the tree (`Integrate` nodes inside each other's
+  //   integrands or bounds) is sized at COMPILE time: the outermost node
+  //   measures its subtree (`integrateStats`) and picks one uniform piece
+  //   count within the budget, or DECLINES (fail closed) when fewer than 4
+  //   pieces per level would remain — an enclosure that coarse is as
+  //   uninformative as `entire` at full cost;
+  // - nesting through BY-REFERENCE function calls (`∫ g(x) dx` where `g`'s
+  //   body computes an integral) shows no `Integrate` node in the tree, so
+  //   the runtime budget (`INTERVAL_NESTED_QUADRATURE_BUDGET`,
+  //   `interval/integrate.ts`) cuts nested work off and answers `entire` —
+  //   sound (the entire line contains the true value), and the caller
+  //   degrades to its non-interval fallback instead of spinning.
+
+  /** A dynamically nested chain of `depth` integrals, each inner one inside
+   *  the enclosing integrand: ∫₀¹ sin(x₁ + ∫₀¹ sin(x₂ + …) dx₂) dx₁, with
+   *  `inner` as the innermost integrand term. */
+  function chain(depth: number, inner: string): string {
+    let src = inner;
+    for (let d = 1; d <= depth; d++)
+      src = `\\int_0^1 \\sin\\left(x_{${d}} + ${src}\\right) dx_{${d}}`;
+    return src;
+  }
+
+  test('a four-deep visible chain is SIZED: coarse honest enclosure, milliseconds', () => {
+    // `x_0` is vars-mapped so no level closes symbolically and every level
+    // takes the enclosure emitter. Four visible levels size to a uniform
+    // ⌊(65536/4)^(1/4)⌋ = 11 pieces per level (4 integral runs, 4 levels) —
+    // a genuine enclosure at ~6·10⁴ evaluations, where unsized 256⁴ ≈ 4·10⁹
+    // never returned.
+    const r = compileInterval(chain(4, 'x_{0}'), { x_0: '_.x_0' });
+    expect(r.code.match(/_IA\.integrate(?:Closed)?\(/g)?.length).toBe(4);
+    expect(r.code).toContain(', 11)');
+    expect(r.code).not.toContain(', 256)');
+    const out = r.run({ x_0: 0.5 });
+    expect(kindOf(out)).toBe('interval');
+    expect(contains(out, reference(chain(4, '0.5')))).toBe(true);
+  }, 30000);
+
+  test('a seven-deep visible chain DECLINES: below 4 pieces per level', () => {
+    // 7 integral runs, 7 levels → ⌊(65536/7)^(1/7)⌋ = 3 < 4. An enclosure that
+    // coarse is as uninformative as `entire` while still costing the whole
+    // budget, so the compile fails closed and the caller falls back (a
+    // two-lane consumer uses its scalar estimate).
+    const res = compile(ce.parse(chain(7, 'x_{0}')), {
+      to: 'interval-js',
+      vars: { x_0: '_.x_0' },
+    });
+    expect(res.success).toBe(false);
+  }, 30000);
+
+  test('a two-deep dynamic chain still answers a finite enclosure', () => {
+    // Two visible levels size to ⌊(65536/2)^(1/2)⌋ = 181 pieces per level —
+    // within budget, so this must be a genuine enclosure, not `entire`.
+    const r = compileInterval(chain(2, 'x_{0}'), { x_0: '_.x_0' });
+    const out = r.run({ x_0: 0.5 });
+    expect(kindOf(out)).toBe('interval');
+    const expected = reference(chain(2, '0.5'));
+    expect(Number.isFinite(expected)).toBe(true);
+    expect(contains(out, expected)).toBe(true);
+  });
+
+  /** Three-level composition through NAMED functions: each body shows one
+   *  `Integrate` node, so the compile-time sizing sees no nesting and keeps
+   *  256 pieces at every level — the composition exists only at run time,
+   *  through the `_fn_*` calls. */
+  function declareByReferenceChain(): string {
+    ce.parse(
+      'q_{1}\\left(w\\right)\\coloneq \\int_0^1 \\sin\\left(w+x\\right) dx'
+    ).evaluate();
+    ce.parse(
+      'q_{2}\\left(w\\right)\\coloneq \\int_0^1 \\sin\\left(q_{1}\\left(x\\right)+w\\right) dx'
+    ).evaluate();
+    ce.parse(
+      'q_{3}\\left(w\\right)\\coloneq \\int_0^1 \\sin\\left(q_{2}\\left(x\\right)+w\\right) dx'
+    ).evaluate();
+    return '\\int_0^1 q_{3}\\left(t+s\\right) dt';
+  }
+
+  test('by-reference composition is invisible to the sizing and bounded by the runtime budget', () => {
+    // Four dynamic levels at 256 pieces each want 256⁴ ≈ 4·10⁹ evaluations;
+    // the runtime budget cuts the nested work and the result degrades
+    // soundly — terminating is the pin. (`s` is vars-mapped so no level
+    // closes symbolically.)
+    const r = compileInterval(declareByReferenceChain(), { s: '_.s' });
+    expect(r.code).toContain(', 256)');
+    const out = r.run({ s: 0 });
+    expect(['interval', 'partial', 'entire']).toContain(kindOf(out));
+  }, 30000);
+
+  test('a compiler-sized double integral keeps its finite enclosure after a budget-exhausting run', () => {
+    // First exhaust the runtime budget with the by-reference chain, then
+    // verify the budget RESET at the next outermost entry: a sized double
+    // integral still returns a genuine enclosure, not `entire` left over
+    // from the previous run.
+    compileInterval(declareByReferenceChain(), { s: '_.s' }).run({ s: 0 });
+
+    const r = compileInterval('\\int_0^1\\int_0^1 s\\cdot e^{-x y^2}\\,dy\\,dx', {
+      s: '_.s',
+    });
+    expect(r.code.match(/_IA\.integrate\(/g)?.length).toBe(2);
+    const out = r.run({ s: 1 });
+    expect(kindOf(out)).toBe('interval');
+    const expected = reference('\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx');
+    expect(contains(out, expected)).toBe(true);
+    expect(widthOf(out)).toBeLessThan(0.02);
+  }, 30000);
+
+  test('a throwing nested integrand leaves the activation balanced', () => {
+    // The budget accounting hangs off a module-level activation counter
+    // unwound in `finally`; an unbalanced counter would only show up LATER,
+    // as a wrong `entire` on an unrelated integral (the counter never
+    // returning to zero means no outermost entry ever resets the budget
+    // again). Throw from a NESTED integrand, then verify a fresh sized
+    // double still gets a genuine enclosure.
+    expect(() =>
+      integrate(
+        () =>
+          integrate(
+            () => {
+              throw new Error('integrand failure');
+            },
+            { lo: 0, hi: 0 },
+            { lo: 1, hi: 1 }
+          ),
+        { lo: 0, hi: 0 },
+        { lo: 1, hi: 1 }
+      )
+    ).toThrow('integrand failure');
+
+    const r = compileInterval('\\int_0^1\\int_0^1 s\\cdot e^{-x y^2}\\,dy\\,dx', {
+      s: '_.s',
+    });
+    const out = r.run({ s: 1 });
+    expect(kindOf(out)).toBe('interval');
+    expect(contains(out, reference('\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx'))).toBe(
+      true
+    );
+  }, 30000);
+});

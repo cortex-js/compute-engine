@@ -96,12 +96,13 @@ describe('SGN HANDLER AUDIT', () => {
   it('Abs type follows the operand finiteness', () => {
     ce.declare('ff', 'finite_real');
     ce.declare('rr', 'real');
-    expect(ce.box(['Abs', 'ff']).type.toString()).toBe('finite_real');
+    // Since the ranged-results round, each `Abs` tier claim carries `<0..>`.
+    expect(ce.box(['Abs', 'ff']).type.toString()).toBe('finite_real<0..>');
     expect(ce.box(['Abs', 'ff']).isFinite).toBe(true);
     // `real` admits ±∞, so no finiteness claim.
-    expect(ce.box(['Abs', 'rr']).type.toString()).toBe('real');
+    expect(ce.box(['Abs', 'rr']).type.toString()).toBe('real<0..>');
     expect(ce.box(['Abs', ['Complex', 2, 3]]).type.toString()).toBe(
-      'finite_real'
+      'finite_real<0..>'
     );
     expect(ce.box(['Abs', 'PositiveInfinity']).type.toString()).toBe(
       'non_finite_number'

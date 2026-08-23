@@ -38,6 +38,11 @@ import {
   nonPositiveSign,
 } from './sgn.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
+import type { Type } from '../../common/type/types.js';
+import {
+  positiveRangeType,
+  negativeRangeType,
+} from '../../common/type/utils.js';
 import type {
   BoxedRuleSet,
   BoxedSubstitution,
@@ -60,6 +65,20 @@ import type {
 } from '../global-types.js';
 import { isNumber, isSymbol } from './type-guards.js';
 
+/** Is the exact rational `r` equal to the double `re`? Exact: the double is
+ * decomposed into its dyadic fraction (power-of-two scaling of a double is
+ * lossless, and the scaled numerator is a ≤53-bit integer), then
+ * cross-multiplied in bigints. */
+function ratioEqualsDouble(r: Rational, re: number): boolean {
+  let num = re;
+  let den = 1n;
+  while (!Number.isInteger(num)) {
+    num *= 2;
+    den *= 2n;
+  }
+  return BigInt(r[0]) * den === BigInt(num) * BigInt(r[1]);
+}
+
 /**
  * BoxedNumber
  *
@@ -75,6 +94,10 @@ export class BoxedNumber
   protected readonly _value: SmallInteger | NumericValue;
 
   private _hash: number | undefined;
+
+  /** Memo for `_literalType` (`null` = computed, not eligible). The value
+   * of a literal never changes, so the memo never invalidates. */
+  private _literalTypeMemo: Type | null | undefined = undefined;
 
   /**
    * By the time the constructor is called, the `value` should have been
@@ -537,6 +560,96 @@ export class BoxedNumber
     }
 
     return new BoxedType(this._value.type, this.engine._typeResolver);
+  }
+
+  /** The handler-visible type of this literal (ruling O9 first half,
+   * 2026-08-22 — `docs/plans/2026-08-22-type-handlers-on-types.md` §4.3,
+   * §6): a type that carries the literal's VALUE when a machine number
+   * holds it exactly — a value type (`21`, `0.5`), or a singleton range
+   * (`finite_rational<0.5..0.5>`) when the lattice's value node would lose
+   * the tier (a bare numeric value is not `<: rational`) — and otherwise
+   * at least its SIGN, as a sign-carrying range on the literal's tier
+   * (`finite_real<0..> & !0` for `√2`, `finite_integer<..0> & !0` for a
+   * negative bigint). `undefined` when the public type already says
+   * everything (NaN, `±∞`, a complex literal).
+   *
+   * Read by type handlers through `handlerTypeOf()`
+   * (`library/type-handlers.ts`). The PUBLIC `.type` is deliberately
+   * unchanged, and handler RESULTS are widened back to ordinary types
+   * before they are stored (`widenValueTypes`). */
+  override get _literalType(): Type | undefined {
+    // `undefined` = not yet computed; `null` = computed, not eligible —
+    // the explicit check (not `??=`, which would treat the stored `null`
+    // as missing and recompute on every read) is what makes the negative
+    // result stick.
+    if (this._literalTypeMemo === undefined)
+      this._literalTypeMemo = this._computeLiteralType() ?? null;
+    return this._literalTypeMemo ?? undefined;
+  }
+
+  private _computeLiteralType(): Type | undefined {
+    const v = this._value;
+    if (typeof v === 'number') {
+      // Small integers are stored as machine numbers; the constructor has
+      // already screened out NaN and ±∞, but keep the guard local.
+      if (!Number.isFinite(v)) return undefined;
+      return { kind: 'value', value: v === 0 ? 0 : v };
+    }
+    if (v.im !== 0 || v.isNaN) return undefined;
+    if (v.isPositiveInfinity || v.isNegativeInfinity || v.isComplexInfinity)
+      return undefined;
+    const tier = v.type;
+    if (
+      tier !== 'finite_integer' &&
+      tier !== 'finite_rational' &&
+      tier !== 'finite_real'
+    )
+      return undefined;
+
+    // Does a machine number hold this value EXACTLY? `re` alone cannot
+    // answer: it is a rounding (`(1 - 10⁻³⁰).re === 1`, and a bignum
+    // beyond ±2⁵³ rounds to a nearby double), and claiming a value the
+    // literal does not have would let a handler classify `artanh(1-10⁻³⁰)`
+    // as the pole at 1.
+    const re = v.re;
+    let exact = false;
+    if (Number.isFinite(re)) {
+      const big = v.bignumRe;
+      if (big !== undefined) {
+        // Decimal comparison converts the double through its decimal
+        // string, so beyond ±2⁵³ a rounded double can compare "equal" to a
+        // bignum it does not represent (`1e40` vs `10⁴⁰`); inside that
+        // span integers are exact and floats compare by their printed
+        // digits, which is the value the author wrote.
+        exact = Math.abs(re) < 2 ** 53 && big.eq(re);
+      } else {
+        const ex = v.asExact;
+        if (ex === undefined) {
+          // A machine-backed non-integer float: `re` IS the stored value.
+          exact = true;
+        } else {
+          const ev = ex as ExactNumericValue;
+          exact = ev.radical === 1 && ratioEqualsDouble(ev.rational, re);
+        }
+      }
+    }
+
+    if (exact) {
+      if (tier === 'finite_rational' && !Number.isInteger(re))
+        // The lattice deliberately does not class a bare numeric value as
+        // rational (`0.5 <: finite_rational` is false), so an exact
+        // rational keeps its tier through a singleton range instead.
+        return { kind: 'numeric', type: tier, lower: re, upper: re };
+      return { kind: 'value', value: re === 0 ? 0 : re };
+    }
+
+    // No machine number holds the value: carry the sign (`√2`, `1/3`, a
+    // bigint beyond ±2⁵³). The zero case cannot reach here — an exact
+    // zero is machine-representable.
+    const s = this.sgn;
+    if (s === 'positive') return positiveRangeType(tier);
+    if (s === 'negative') return negativeRangeType(tier);
+    return undefined;
   }
 
   get sgn(): Sign | undefined {

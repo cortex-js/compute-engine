@@ -1,4 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { collectionElementType } from '../../src/common/type/utils';
+import { isSubtype } from '../../src/common/type/subtype';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
 import { expectTypeBetween } from '../utils';
 
@@ -38,8 +40,17 @@ function expectIsList(expr: BoxedExpression): void {
  */
 function expectHonestBroadcast(expr: BoxedExpression): void {
   expectIsList(expr);
-  const evaluated = expr.evaluate().type;
-  expect(evaluated.matches(expr.type.type)).toBe(true);
+  const evaluated = expr.evaluate();
+  if (evaluated.type.matches(expr.type.type)) return;
+  // A literal result list cannot witness a RANGED declared cell type at
+  // the type level — a literal's public type is its bare tier
+  // (`|[-1, 2]|` evaluates to `[1, 2]`, cells `finite_integer`, while the
+  // declared cells are `real<0..>`). Judge each element by its
+  // value-carrying literal type instead.
+  const cell = collectionElementType(expr.type.type);
+  expect(cell).toBeDefined();
+  for (const el of evaluated.each())
+    expect(isSubtype(el._literalType ?? el.type.type, cell!)).toBe(true);
 }
 
 describe('LIST-BROADCAST TYPING — tensor Add/Multiply (exact vector<n>)', () => {

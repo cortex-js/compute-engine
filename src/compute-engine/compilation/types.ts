@@ -645,6 +645,21 @@ export interface CompileTarget<Expr = unknown> {
   varsKeys?: ReadonlySet<string>;
 
   /**
+   * Per-level subdivision count chosen by the OUTERMOST `Integrate` lowering
+   * of the interval target for every integral in its subtree — see the
+   * sizing model in `compileIntervalIntegrate`
+   * (`interval-javascript-target.ts`). The outermost node measures its whole
+   * subtree (how many `Integrate` nodes, how deeply they nest inside each
+   * other's integrands) and picks one uniform count that keeps the total
+   * work inside the evaluation budget; inner lowerings must USE this count
+   * rather than re-measure their own smaller subtree, which would pick a
+   * larger count and break the product bound. Set only on the targets the
+   * outermost lowering hands to its integrand and bound compiles — sibling
+   * integrals outside that subtree size themselves.
+   */
+  intervalQuadraturePieces?: number;
+
+  /**
    * When `false`, disables compile-time constant folding: a pure subtree with
    * no free variables is normally evaluated at compile time and emitted as a
    * number or boolean literal (`Sum(Take(Map(_ ↦ _^2, 1..20), 10))` → `385`).

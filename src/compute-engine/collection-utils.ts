@@ -4,6 +4,7 @@ import {
   collectionElementType,
   resolveTypeForCompilation as resolveType,
   resolveTypeAlias,
+  stripNumericRanges,
 } from '../common/type/utils.js';
 import { isSubtype, resolveTypeReference } from '../common/type/subtype.js';
 import { reduceType } from '../common/type/reduce.js';
@@ -1347,7 +1348,9 @@ export function broadcastableResultTypeOf(
     // (`broadcastable<number | list<number>>`).
     return broadcastElementType(t);
   });
-  let element = widen(...contributions);
+  // Strip range/sign decorations before the join: an arithmetic result
+  // does not lie in the union of its operands' ranges (`stripNumericRanges`).
+  let element = widen(...contributions.map((t) => stripNumericRanges(t)));
   if (element === 'imaginary') element = 'finite_complex';
   return { kind: 'broadcastable', elements: element };
 }
