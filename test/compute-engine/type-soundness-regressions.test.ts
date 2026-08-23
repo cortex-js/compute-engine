@@ -203,6 +203,19 @@ describe('Tycho item 89 — rounding a symbolic finite_number stays integer-valu
     expect(typeOf('\\mathrm{Round}(i)')).toBe('finite_complex');
   });
 
+  it('a precision argument never claims integer, whatever the finiteness', () => {
+    // `Round(x, 2)` with `x: real` (finiteness unknown) used to fall through
+    // to the integer claim while evaluating to `3.14`-like rationals.
+    ce.declare('xr', 'real');
+    ce.declare('xf', 'finite_real');
+    expect(typeOf('\\mathrm{Round}(xr, 2)')).toBe('finite_real');
+    expect(typeOf('\\mathrm{Round}(xf, 2)')).toBe('finite_real');
+    expect(typeOf('\\mathrm{Round}(Q, 2)')).toBe('finite_real');
+    expect(typeOf('\\mathrm{Round}(3.14159, 2)')).toBe('finite_real');
+    expect(typeOf('\\mathrm{Round}(1.2+3.4i, 2)')).toBe('finite_complex');
+    expect(typeOf('\\mathrm{Round}(\\infty, 2)')).toBe('non_finite_number');
+  });
+
   it('the non-finite and NaN claims are unchanged', () => {
     expect(typeOf('\\mathrm{Round}(\\infty)')).toBe('non_finite_number');
     expect(typeOf('\\mathrm{Round}(\\mathrm{NaN})')).toBe('number');

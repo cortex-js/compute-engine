@@ -2874,14 +2874,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Optional precision arg (Desmos/spreadsheet `round(x, n)`): round to `n`
       // decimal places. Without it, rounds to the nearest integer.
       signature: '(number, integer?) -> number',
-      type: ([x, n]) =>
-        n === undefined
-          ? roundingFunctionType(x)
-          : // With a precision arg the result is generally non-integer; keep
-            // the complex/non-finite/NaN classification but never claim integer.
-            x.isFinite === true && x.isReal === true
-            ? 'finite_real'
-            : roundingFunctionType(x),
+      type: ([x, n]) => {
+        const t = roundingFunctionType(x);
+        // With a precision arg the result is generally non-integer
+        // (`Round(3.14159, 2)` is `3.14`): keep the complex/non-finite/NaN
+        // classification, but replace the integer claim by `finite_real`.
+        // The replacement must apply to EVERY operand that rounds to
+        // `finite_integer`, including a bare `real` symbol of unknown
+        // finiteness — an earlier guard on `isFinite === true` let
+        // `Round(x, 2)` with `x: real` fall through to `finite_integer`.
+        return n !== undefined && t === 'finite_integer' ? 'finite_real' : t;
+      },
       sgn: ([x, n]) => {
         // Only reason about the sign in the single-argument (round-to-integer)
         // case; a precision arg rescales the value and the interval reasoning
