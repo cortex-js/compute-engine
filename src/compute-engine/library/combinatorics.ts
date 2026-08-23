@@ -2,6 +2,7 @@ import {
   toBigint,
   toInteger,
   toIntegerOperand,
+  provablyNonFiniteNumber,
 } from '../boxed-expression/numerics.js';
 import type { Expression, SymbolDefinitions } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
@@ -135,7 +136,7 @@ function binomialType(
   k: Expression | undefined
 ): Type {
   if (!n || !k || n.isNaN || k.isNaN) return 'number';
-  if (n.isFinite === false || k.isFinite === false) return 'number';
+  if (provablyNonFiniteNumber(n) || provablyNonFiniteNumber(k)) return 'number';
   if (n.isInteger === true && k.isInteger === true) return 'finite_integer';
   if (n.isReal === true && k.isReal === true) {
     if (n.isInteger === true && n.isNegative === true) return 'number';
@@ -358,7 +359,8 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // values.
       type: ([a, k]) => {
         if (!a || !k || a.isNaN || k.isNaN) return 'number';
-        if (a.isFinite === false || k.isFinite === false) return 'number';
+        if (provablyNonFiniteNumber(a) || provablyNonFiniteNumber(k))
+          return 'number';
         if (k.isInteger === true && k.isNonNegative === true) {
           if (a.isInteger === true) return 'finite_integer';
           if (a.isRational === true) return 'finite_rational';

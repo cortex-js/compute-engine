@@ -31,6 +31,7 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
 import { isTuple } from '../collection-utils.js';
 import { pointNormBroadcasts } from './utils.js';
 import {
@@ -256,15 +257,22 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         )
           return 'list<number>';
         // A point with a non-finite component has a non-finite norm
-        // (`Hypot((∞, 3), 2) = +∞`), so it must widen like a non-finite
-        // scalar rather than be dropped from the computation.
+        // (`Hypot((∞, 3), 2) = +∞`), and a component that is not PROVABLY a
+        // number (an application of an `unknown`-returning function that the
+        // broadcast arm above did not take) leaves the norm undecidable —
+        // both must widen to `number` rather than let the tuple be silently
+        // dropped from the computation, which would decide the type from the
+        // remaining scalar operands alone.
         if (
           [x, y].some(
             (o) =>
               o &&
               isTuple(o) &&
               isFunction(o) &&
-              o.ops.some((el) => el.isFinite === false)
+              o.ops.some(
+                (el) =>
+                  provablyNonFiniteNumber(el) || !el.type.matches('number')
+              )
           )
         )
           return 'number';
@@ -683,7 +691,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (x.isReal === true) return 'finite_real';
         // Unknown realness: a non-finite value (~oo) escapes the finite
         // hedge, so it must be excluded before claiming it.
-        if (x.isFinite === false) return 'number';
+        if (provablyNonFiniteNumber(x)) return 'number';
         return 'finite_number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {

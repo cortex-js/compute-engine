@@ -354,3 +354,33 @@ export function complexValueOf(
   const v = numberLiteralOf(x);
   return v === undefined ? undefined : [v.re, v.im];
 }
+
+/**
+ * True when the operand is a NUMBER that is provably not finite — `±∞`,
+ * `~oo` or NaN — from its value (a literal, or a symbol's held value) or
+ * from a `non_finite_number` static type.
+ *
+ * This is NOT the same as `isFinite === false`: on a function expression
+ * `isFinite` answers `false` for ANY non-number type — a tuple, a list, a
+ * `set | number` union — so a bare `isFinite === false` test in a numeric
+ * type handler conflates "provably non-finite number" with "not a number at
+ * all", and a collection operand awaiting the broadcast lift gets branded
+ * `number`, losing its element type: `Round([1.2, 2.7, 3])` typed
+ * `vector<3>` with `number` cells while `Round(L)` with `L: list<real>`
+ * kept `list<finite_integer>`. The `type.matches('number')` qualifier
+ * restricts the test to operands that are numbers in the first place.
+ *
+ * The value channel is checked FIRST, on its own: `isNaN` and `isInfinity`
+ * answer `true` only from a proven value (a literal, or a symbol's held
+ * value; on a function expression `isInfinity` is type-derived and `isNaN`
+ * is undecided), and they are `false` or undecided for a non-number — so a
+ * non-finite value held behind a BROAD declaration is still caught. Without
+ * that first test, `w: number | list<number>` holding `+∞` would slip
+ * through: its `isFinite` is `false` from the value, but the union type
+ * does not match `number`, and the handler would go on to claim a finite
+ * type for `Sin(w)`.
+ */
+export function provablyNonFiniteNumber(x: Expression): boolean {
+  if (x.isNaN === true || x.isInfinity === true) return true;
+  return x.isFinite === false && x.type.matches('number');
+}

@@ -501,7 +501,18 @@ example of a type-level application.
 `Set`, `JacobianMatrix`, `Set.elttype`, `Interval.elttype` and `Sqrt`'s
 `closedRealSign` are rewritten under §5.3 step 4, with contracts in §5.4.
 
-### 4.2 Reading `.type` becomes side-effect free (R4, RE-RATIFIED 2026-08-22)
+### 4.2 Reading `.type` becomes side-effect free (R4, RE-RATIFIED 2026-08-22; IMPLEMENTED 2026-08-22)
+
+**Status: implemented.** `_reviseInferredType` is the live read described
+below — no `_type` write, no `_writeVersion` bump, no journal entry, no
+`type-write` event, no once-per-generation gate (the `_revisionVersion`
+field is gone). The four prerequisites are met: 1 and 2 are pinned in
+`inferred-type-revision-live.test.ts` (mutual recursion, the eight-deep
+chain, the staleness case — which now passes); 3 is pinned there as
+identity-stability of the returned `BoxedType` within a generation; 4 is
+the repurposed funnel-2 test in `checkpoint-journal.test.ts`, asserting a
+window read writes nothing. The `Function`-literal guard survives
+(`protocol-type-redefinition.test.ts` green).
 
 R4 was first ruled as "move the revision to the place where the value is
 written". Measured on 2026-08-22, that cannot be built and is not needed;
@@ -843,17 +854,40 @@ gets stored. Test: a multi-clause `fib` with a `(0) -> 0` clause.
 
 ### 4.6 Prerequisite tasks (work items, not decisions)
 
-- **P1 — find the `unknown` widening.** Which step of §2.6 makes
-  `Add(u, 1)` type `number` for `u: unknown`, and `Add(h(x), 1)` type
-  `broadcastable<number>`, where the shim produced `finite_number`.
-  Deliverable: the step number and a pin (`unknown-operand-cells.test.ts`)
-  asserting the four rows from §2.2. Blocks §5.3 step 2.
-- **P2 — the two `derivatives` failures.** Assigning `f := t ↦ (t, t²,
-  t³)` already refines `f`'s signature to return a tuple; find out why the
-  failing tests' "declared as function" setup does not see that.
-  Deliverable: a fix, or the cause written down plus a pin. Must close
-  before §5.3 step 4 touches `Derivative`.
-- **P3 — the four §4.2 prerequisites.**
+- **P1 — find the `unknown` widening. (DONE 2026-08-22.)** Traced by
+  instrumenting `addType`'s scalar tail: it is NOT a derivation step. The
+  numeric-argument validation at BOXING infers a valueless `unknown`
+  symbol to `number` (the evidence-inference doctrine), so the handler —
+  step 11 — already sees `number` and widens `number ∨ finite_integer`
+  to `number`; an application operand is not inferrable, keeps `unknown`,
+  and takes step 16's `broadcastable<…>` wrap. The shim's `finite_number`
+  came from rebuilding facts from the DECLARED `unknown`, bypassing that
+  inference. Consequence: `describe(op)` reads the post-inference type,
+  so `deriveApplicationType` reproduces today's answers with no extra
+  step. Pinned in `unknown-operand-cells.test.ts` (four rows). §5.3
+  step 2 is unblocked.
+- **P2 — the two `derivatives` failures. (DONE 2026-08-22 — cause
+  written down and pinned; an adoption fix was attempted and REVERTED.)**
+  Cause: a symbol declared BARE `function` is the WILDCARD-CALLEE
+  contract, and its declared type DELIBERATELY stays bare through every
+  assignment — the wildcard-callee block in `box.ts`
+  (`isWildcardFunctionType`) documents that narrowing it "would turn a
+  permissive forward declaration into an arity/parameter contract that a
+  later re-assignment would have to satisfy". So the result shape of
+  `f'(t)` flows through the HELD VALUE's type by design, and that is the
+  read the §2.2 shim hid. The attempted fix (adopting the assigned
+  literal's signature as an element-style refinement) reproduced the
+  tuple typing but broke, in turn, the protocol conformance
+  re-settlement, the currying and too-many-arguments call semantics, the
+  `Reduce` callback admission, and the wildcard-callee narrowing sink —
+  all pinned — and was reverted the same day. Resolution for §5.3
+  step 4: the operand DESCRIPTOR carries a symbol's value type (the §5.6
+  `Derivative` row already requires this), so the handler's value-read
+  becomes a descriptor fact rather than an expression read. The
+  deliberate contract is now pinned explicitly in
+  `bare-function-wildcard-contract.test.ts`.
+- **P3 — the four §4.2 prerequisites. (DONE 2026-08-22 — see §4.2's
+  status block; R4 is implemented.)**
 - **P4 — the lazy-operator inventory** — follow-up work, not a
   prerequisite (R8): classify each parameter position of each `lazy:
   true` definition as *checked by the handler*, *never evaluated*, or
@@ -1421,7 +1455,9 @@ derivation", and A5 is the entry "Compile targets should constant-fold
 before reading a node's type". A4, A6 and A7 exist only here, as parts of
 this design.
 
-**A1 — A symbol's sign reads its ranged declaration.** Today
+**A1 — A symbol's sign reads its ranged declaration. (IMPLEMENTED 2026-08-22 —
+`signOfType` in `common/type/utils.ts`, wired into `BoxedSymbol.sgn` after the
+value and assumption reads; pinned in `ranged-declaration-sign.test.ts`.)** Today
 `BoxedSymbol.sgn` (`boxed-symbol.ts`, the `sgn` getter) answers from the
 held value, else from the assumptions, and never from the type, so a
 symbol declared `integer<1..>` answers `sgn: undefined`, `√q` types
@@ -1434,7 +1470,17 @@ bound below `0` → negative; `<0..0>` → zero); the four predicates
 ranges through `Sqrt`, `Factorial`, `Gamma`, `Mod`, `Ln`, `Power` — the
 §5.6 `sgn` consumers — each answering as the literal would.
 
-**A2 — `assume(x > 0)` refines the symbol's type.** Today an assumption
+**A2 — `assume(x > 0)` refines the symbol's type. (IMPLEMENTED
+2026-08-22; HARDENED 2026-08-23 by dual review — five fixes: the shadow
+path meets the INHERITED declaration before declaring, so a scoped
+assumption keeps the parent's base and a contradiction with it fires; a
+value-shielded (assigned) symbol's type is never touched; `forget()`
+rewinds assumption-driven type writes via a `previousType` on the
+provenance entry; chained bounds (`0 < x < 10`) intersect through
+`refineSymbolType` instead of clobbering; a non-machine-representable
+bound (`x > 1/3`) declines the range rather than installing a rounded
+double. Pins in `ranged-declaration-sign.test.ts`, "review hardening"
+block.)** Today an assumption
 sets the sign channel and leaves the type at `real`, so any consumer that
 reads the *type* cannot see it — the solver's root filter, the GPU
 complex-lowering gate, an assignment to a `real` symbol (§5.7, the one
@@ -1465,7 +1511,16 @@ is recorded as open item O9 below rather than assumed. Verify: the §5.7
 `sgn` and `literal` runs repeated with the ranges in place should show
 zero behavior changes.
 
-**A4 — The arithmetic shape gates read the type, not `isFinite === false`.**
+**A4 — The arithmetic shape gates read the type, not `isFinite === false`.
+(IMPLEMENTED 2026-08-22 — `provablyNonFiniteNumber` in
+`boxed-expression/numerics.ts`, applied at 28 type-handler sites across
+`type-handlers.ts`, `arithmetic.ts`, `arithmetic-add.ts`, `utils.ts`,
+`combinatorics.ts`, `special-functions.ts`, `statistics.ts`,
+`trigonometry.ts`. Visible improvement: a literal-list operand now keeps its
+element type like a list-typed symbol — `Round([1.2, 2.7, 3])` types
+`vector<finite_integer^3>` where it typed `vector<3>` with `number` cells —
+and six broadcastable-cell pins moved to the finite tier, restoring the
+scalar/cell parity their own comments describe.)**
 `BoxedFunction.isFinite` answers `false` for any operand whose type is not
 a number (`boxed-function.ts`, the `isFinite` getter), and the `Add`,
 `Multiply`, `Divide` and norm handlers use `isFinite === false` both as
@@ -1568,9 +1623,20 @@ Open items — genuine decisions, each with a default:
   The alternative, an unconditional runtime check, narrows what
   `strict: false` means and needs a migration note plus a benchmark on
   the plot and compile paths. This is a product decision.
-- **O9 — Singleton range types for every finite literal (§5.8 A3).**
-  Default: not done until ruled, because it narrows R2 ("literal types
-  for `0` and `1` only"). The case for it is §5.7: the `sgn` fact and the
+- **O9 — Literal types for every representable finite literal (§5.8 A3).
+  RULED 2026-08-22, first half: YES.** The user approved the session's
+  recommended next-steps list ("sounds good — proceed autonomously"),
+  whose second item was this recommendation; recorded on that assent, to
+  be re-confirmed if the wording overstates it. What is ruled: on handler
+  INPUT a literal's type is its VALUE type (`21`, `0.5` — not a singleton
+  range; see the value-type rationale below), widened on handler output by
+  the §4.3 walker; this supersedes R2's "literal types for `0` and `1`
+  only". Implementation is scheduled WITH §4.3 (the widening machinery is
+  the same); it is not a standalone step ahead of §4. The second half —
+  the public `.type` — remains OPEN with its default (unchanged) and its
+  blast-radius count still to be run.
+  Original framing (kept for the record): not done until ruled, because it
+  narrows R2 ("literal types for `0` and `1` only"). The case for it is §5.7: the `sgn` fact and the
   literal-value fact together account for 48 measured behavior changes,
   and a literal's singleton range answers every one of them as a subtype
   test with the widening machinery §4.3 already requires. Saying no keeps

@@ -140,9 +140,7 @@ describe('broadcastable<T> typing (phase B)', () => {
     const ce = new ComputeEngine();
     const px = ce.box(['PointX', ['Tuple', 'x', 'y']]);
     expect(px.type.toString()).toBe('number');
-    expect(ce.box(['Power', px.json, 2]).type.toString()).toBe(
-      'finite_number'
-    );
+    expect(ce.box(['Power', px.json, 2]).type.toString()).toBe('finite_number');
 
     // But a POSSIBLY-collection APPLICATION component keeps its honest type:
     // `PointX((h(1), y))` returns `h(1)`, which may be a list at run time —
@@ -151,12 +149,15 @@ describe('broadcastable<T> typing (phase B)', () => {
     ce.declare('h', '(number) -> unknown');
     const pxh = ce.box(['PointX', ['Tuple', ['h', 1], 'y']]);
     expect(pxh.type.toString()).toBe('unknown');
-    // Exactly this tier: `h` returns `unknown`, which admits NaN and ±∞, so
-    // `number` cells are the contract (a narrower cell tier would over-claim),
-    // and since `number <: broadcastable<number>` a scalar fold would pass a
-    // bare `.matches()`. The exact string guards both directions.
+    // Exactly this tier: the CELL claim follows the scalar generic-point
+    // convention — `Power(px, 2)` on the scalar `number` component above
+    // claims `finite_number`, and a possibly-collection operand's cells get
+    // the same claim (scalar/cell parity; before 2026-08-22 the cells were
+    // branded `number` because `isFinite === false` fired for the non-number
+    // TYPE of `pxh`, not for any value fact). The exact string also rejects
+    // a scalar fold (`finite_number <: broadcastable<finite_number>`).
     expect(ce.box(['Power', pxh.json, 2]).type.toString()).toBe(
-      'broadcastable<number>'
+      'broadcastable<finite_number>'
     );
   });
 
@@ -197,7 +198,11 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     const L = ['List', 1, 2, 3];
     const probe = ce.box([
       'Subtract',
-      ['Multiply', 2, ['Mod', ['Multiply', 10000, ['Sin', ['Multiply', 10000, L]]], 1]],
+      [
+        'Multiply',
+        2,
+        ['Mod', ['Multiply', 10000, ['Sin', ['Multiply', 10000, L]]], 1],
+      ],
       1,
     ]);
     expect(probe.type.toString()).toBe('vector<3>');
@@ -240,13 +245,21 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     const ce = mkEngine();
     // arg = 2h(x)-1, which is broadcastable<number> (phase B).
     const arg = ['Subtract', ['Multiply', 2, ['h', 'x']], 1];
-    // Exactly this tier: `h` returns `unknown` (admits NaN and ±∞), so
-    // `number` cells are the contract, and the exact string also rejects a
-    // scalar fold (`number <: broadcastable<number>`).
-    expect(ce.box(['Sin', arg]).type.toString()).toBe('broadcastable<number>');
-    expect(ce.box(['Sqrt', arg]).type.toString()).toBe('broadcastable<number>');
+    // Exactly this tier: the cells follow each operator's SCALAR claim for
+    // an unknown-finiteness operand (the generic-point convention): `Sin`,
+    // `Sqrt` and `Power` claim `finite_number` for a scalar of type
+    // `number`, so their cells match (scalar/cell parity — before 2026-08-22
+    // the cells were branded `number` by an `isFinite === false` read that
+    // fired for the operand's non-number TYPE). The exact string also
+    // rejects a scalar fold.
+    expect(ce.box(['Sin', arg]).type.toString()).toBe(
+      'broadcastable<finite_number>'
+    );
+    expect(ce.box(['Sqrt', arg]).type.toString()).toBe(
+      'broadcastable<finite_number>'
+    );
     expect(ce.box(['Power', arg, 2]).type.toString()).toBe(
-      'broadcastable<number>'
+      'broadcastable<finite_number>'
     );
     expect(ce.box(['Abs', arg]).type.toString()).toBe('broadcastable<real>');
   });
@@ -273,13 +286,16 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     const ce = mkEngine();
     // Nested arithmetic over a broadcastable inner node stays single-layer.
     // Exactly this tier: one `broadcastable<…>` layer (never nested, never a
-    // scalar fold) over `number` cells, which are the contract for an
-    // `unknown`-returning `h`.
-    expect(ce.box(['Add', ['Sin', ['Multiply', 2, ['h', 'x']]], 1]).type
-      .toString()).toBe('broadcastable<number>');
+    // scalar fold). The cell tier follows each operator's scalar claim:
+    // `Sin`'s cells are `finite_number` (generic-point convention), and the
+    // outer `Add` and `Sqrt` of a `finite_number` cell keep the finite
+    // claim, exactly as their scalar paths do.
+    expect(
+      ce.box(['Add', ['Sin', ['Multiply', 2, ['h', 'x']]], 1]).type.toString()
+    ).toBe('broadcastable<finite_number>');
     expect(
       ce.box(['Sqrt', ['Sin', ['Multiply', 2, ['h', 'x']]]]).type.toString()
-    ).toBe('broadcastable<number>');
+    ).toBe('broadcastable<finite_number>');
   });
 
   test('non-interference: bare-symbol and literal operands stay scalar', () => {
@@ -292,7 +308,11 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
 
   test('At over a phase-C broadcastable base is a valid `number`', () => {
     const ce = mkEngine();
-    const at = ce.box(['At', ['Sin', ['Subtract', ['Multiply', 2, ['h', 'x']], 1]], 1]);
+    const at = ce.box([
+      'At',
+      ['Sin', ['Subtract', ['Multiply', 2, ['h', 'x']], 1]],
+      1,
+    ]);
     expect(at.isValid).toBe(true);
     expect(hasErrorOperand(at)).toBe(false);
     expect(at.type.toString()).toBe('number');
@@ -354,7 +374,12 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     ce.assign('f', ce.parse('v \\mapsto 5'));
     // paramsAreScalar is false (list<number> param) → scalar result preserved.
     expect(ce.box(['f', ['List', 1, 2]]).type.toString()).toBe('number');
-    expect(ce.box(['f', ['List', 1, 2]]).evaluate().toString()).toBe('5');
+    expect(
+      ce
+        .box(['f', ['List', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('5');
   });
 
   test('scalar-to-scalar application typing is unchanged (non-interference)', () => {
@@ -437,7 +462,10 @@ describe('post-evaluation lambda broadcast', () => {
 
   test('1. non-arithmetic body over an evaluated-collection arg maps element-wise', () => {
     const ce = makeEngine();
-    ce.assign('k', ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x']));
+    ce.assign(
+      'k',
+      ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x'])
+    );
     const r = ce.box(['k', ['lst', 3]]).evaluate();
     // Was inert (`If(0 < [3,-3], 1, -1)`); now broadcasts.
     expect(r.operator).toBe('List');
@@ -454,10 +482,16 @@ describe('post-evaluation lambda broadcast', () => {
 
   test('3. direct visible collection still broadcasts (step 2b non-regression)', () => {
     const ce = makeEngine();
-    ce.assign('k', ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x']));
-    expect(ce.box(['k', ['List', 1, -2, 3]]).evaluate().toString()).toBe(
-      '[1,-1,1]'
+    ce.assign(
+      'k',
+      ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x'])
     );
+    expect(
+      ce
+        .box(['k', ['List', 1, -2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,-1,1]');
   });
 
   test('4. tuples are atomic — never mapped', () => {
@@ -476,18 +510,29 @@ describe('post-evaluation lambda broadcast', () => {
     // Sum([3,-3]) = 0 — a scalar, NOT a list of per-element sums.
     expect(r.operator).not.toBe('List');
     expect(r.toString()).toBe('0');
-    expect(ce.box(['total', ['List', 1, 2, 3]]).evaluate().toString()).toBe('6');
+    expect(
+      ce
+        .box(['total', ['List', 1, 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('6');
   });
 
   test('6. scalar arg → scalar result', () => {
     const ce = makeEngine();
-    ce.assign('k', ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x']));
+    ce.assign(
+      'k',
+      ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x'])
+    );
     expect(ce.box(['k', 5]).evaluate().toString()).toBe('1');
   });
 
   test('7. nested broadcast composes', () => {
     const ce = makeEngine();
-    ce.assign('k', ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x']));
+    ce.assign(
+      'k',
+      ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x'])
+    );
     const r = ce.box(['k', ['k', ['lst', 3]]]).evaluate();
     // Inner k(lst(3)) = [1,-1]; outer k([1,-1]) = [sign 1, sign -1] = [1,-1].
     expect(r.operator).toBe('List');
@@ -515,7 +560,10 @@ describe('post-evaluation lambda broadcast', () => {
     // silently change the empty case.
     const ce = makeEngine();
     ce.assign('emptyf', ce.box(['Function', ['List'], 'n']));
-    ce.assign('k', ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x']));
+    ce.assign(
+      'k',
+      ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x'])
+    );
     const r = ce.box(['k', ['emptyf', 1]]).evaluate();
     expect(r.operator).toBe('List');
     expect(r.toString()).toBe('[]');
@@ -527,16 +575,30 @@ describe('post-evaluation lambda broadcast', () => {
     // (`applyFunctionLiteral`), which evaluates its args before the broadcast
     // gate — so an evaluated-collection argument maps element-wise too.
     ce.declare('vf', '(any) -> any');
-    ce.assign('vf', ce.box(['Function', ['If', ['Greater', 'y', 0], 1, -1], 'y']));
-    expect(ce.box(['vf', ['lst', 3]]).evaluate().toString()).toBe('[1,-1]');
-    expect(ce.box(['vf', ['List', 1, -2, 3]]).evaluate().toString()).toBe(
-      '[1,-1,1]'
+    ce.assign(
+      'vf',
+      ce.box(['Function', ['If', ['Greater', 'y', 0], 1, -1], 'y'])
     );
+    expect(
+      ce
+        .box(['vf', ['lst', 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,-1]');
+    expect(
+      ce
+        .box(['vf', ['List', 1, -2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,-1,1]');
   });
 
   test('Map over a list of lists with a scalar lambda is unchanged (no double-map)', () => {
     const ce = makeEngine();
-    ce.assign('k', ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x']));
+    ce.assign(
+      'k',
+      ce.box(['Function', ['If', ['Greater', 'x', 0], 1, -1], 'x'])
+    );
     // Map already maps; the inner element `[1,2]` is a visible collection
     // handled by step 2b, so nested-list behavior is unchanged.
     expect(

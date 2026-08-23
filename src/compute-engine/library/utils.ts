@@ -12,7 +12,10 @@ import {
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
 import { rewriteWithBinders } from '../boxed-expression/binders.js';
-import { numericValueOf } from '../boxed-expression/numerics.js';
+import {
+  numericValueOf,
+  provablyNonFiniteNumber,
+} from '../boxed-expression/numerics.js';
 
 import { checkDeadline } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -78,12 +81,14 @@ export function pointNormBroadcasts(point: Expression): boolean {
  * The two demotions follow the convention `absFunctionType` sets for the same
  * question one operand down:
  *
- * - a **provably NaN** component makes the norm NaN, which is not `real` —
- *   and only a literal can prove NaN, so a merely-unknown component does not
- *   demote (`Abs(x)` with `x: number` is `real` for the same reason);
- * - a **provably non-finite** component (`isFinite === false`) keeps the wide
- *   `number`, matching what `Hypot`'s own handler already answers for that
- *   case.
+ * - a **provably non-finite** component — NaN or `±∞`, proven by a value
+ *   (a literal, or a symbol's held value) or by a `non_finite_number` type —
+ *   keeps the wide `number`: the norm of such a point is NaN or `+∞`,
+ *   neither of which is `real`. A merely-unknown component does not demote
+ *   (`Abs(x)` with `x: number` is `real` for the same reason).
+ *   `provablyNonFiniteNumber` is the whole test: its `isNaN === true`
+ *   disjunct covers the NaN literal (and a symbol holding NaN, which the
+ *   old separate `isNumber(c) && c.isNaN` guard missed).
  *
  * A component that is not provably numeric at all — a matrix ROW, a string, an
  * `unknown`-typed element — keeps `number` too, ahead of both: those have no
@@ -101,8 +106,7 @@ export function euclideanNormType(
   // claim about anything: a `Norm` operand is declared `value`, so a string or
   // an `unknown`-typed element can stand here, and those have no norm to type.
   if (!components.every((c) => c.type.matches('number'))) return 'number';
-  if (components.some((c) => isNumber(c) && c.isNaN)) return 'number';
-  if (components.some((c) => c.isFinite === false)) return 'number';
+  if (components.some((c) => provablyNonFiniteNumber(c))) return 'number';
   return components.every((c) => c.isFinite === true) ? 'finite_real' : 'real';
 }
 

@@ -959,8 +959,9 @@ subtype tests against ranges.
 
 The work (written up as adjustments A1, A2 and A3 of
 `docs/plans/2026-08-22-type-handlers-on-types.md` §5.8, with A3 pending the
-ruling recorded there as O9): (1) `BoxedSymbol.sgn` and the sign predicates read a range-typed
-declaration; (2) `ce.assume(x > 0)` refines the symbol's type to
+ruling recorded there as O9): (1) DONE 2026-08-22 — `BoxedSymbol.sgn` and the sign predicates read a range-typed
+declaration (`signOfType`, `common/type/utils.ts`; pinned in
+`ranged-declaration-sign.test.ts`); (2) `ce.assume(x > 0)` refines the symbol's type to
 `real<0..> & !0` (and `x ≥ 0`, `x < 0`, bounded intervals likewise);
 (3) number literals carry their singleton range on handler INPUT, widened
 on handler OUTPUT exactly as the `0`/`1` literal types already must be;
@@ -994,7 +995,7 @@ and `compile-complex-result`, `compile-glsl` (items 144/147) and
 `random-compile` byte-identical. Audit every emitter site that reads a
 node TYPE where a folded VALUE would answer more precisely.
 
-### Type derivation reaches state mutation at 7 handlers, 2 `elttype` handlers and 1 getter — AUDITED 2026-08-22 (OPEN, defects; fixes scheduled by the type-handler design)
+### Type derivation reaches state mutation at 7 handlers, 2 `elttype` handlers and 1 getter — AUDITED 2026-08-22 (OPEN, defects; the GETTER half is FIXED 2026-08-22 — `_reviseInferredType` no longer writes on read (R4, plan §4.2); the 7 handlers and 2 `elttype` handlers remain scheduled by the type-handler design)
 
 A transitive call-graph audit (depth ≤ 8) of every `type:` handler in
 `library/*.ts` — 220 arrow-form handlers plus ~65 string/named entries — for
@@ -1044,7 +1045,7 @@ every claim) in the audit recorded by
 success criterion — item-219 drift 0 with the `scratch` exemption made a
 no-op — is what closes each row.
 
-### `_reviseInferredType`'s generation gate keys on `semantic` while the value it revises keys on `any` — STALE inferred types — FOUND 2026-08-22 (OPEN, defect; fix scheduled with the type-handler design §4.2)
+### `_reviseInferredType`'s generation gate keys on `semantic` while the value it revises keys on `any` — STALE inferred types — FOUND 2026-08-22 (FIXED 2026-08-22 — R4 implemented: the revision is a pure live read with no write and no gate; pins in `inferred-type-revision-live.test.ts` and the repurposed funnel-2 of `checkpoint-journal.test.ts`)
 
 `BoxedValueDefinition.type` (`boxed-expression/boxed-value-definition.ts`,
 `_reviseInferredType`) re-checks an INFERRED type against the stored value's

@@ -14,6 +14,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isTensorValue, packTensor } from './tensor-view.js';
+import { provablyNonFiniteNumber } from './numerics.js';
 import {
   isNumber,
   isFunction,
@@ -518,11 +519,14 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   if (args.some((x) => x.isNaN)) return 'number';
   // A provably non-finite operand may be visible only in its static TYPE:
   // `Ln(0)`, `Artanh(1)` and a symbol declared `non_finite_number` have no
-  // value to probe before evaluation. `isFinite` itself consults the type on
-  // that path (see `BoxedFunction`/`BoxedSymbol` `isInfinity`), so
-  // `isFinite === false` alone is the complete test here.
+  // value to probe before evaluation; `provablyNonFiniteNumber` reads that
+  // type path (see `BoxedFunction`/`BoxedSymbol` `isInfinity`). Its
+  // `matches('number')` qualifier also keeps a non-number operand the shape
+  // branches above did not take — a `set`-typed operand, a union — out of
+  // the non-finite arm (`isFinite === false` alone would admit it, since
+  // `isFinite` answers `false` for any non-number type).
   // (+∞) + (−∞) = NaN: two or more non-finite operands can cancel to NaN.
-  const nonFinite = args.filter((x) => x.isFinite === false);
+  const nonFinite = args.filter((x) => provablyNonFiniteNumber(x));
   if (nonFinite.length >= 2) return 'number';
   if (nonFinite.length === 1) {
     // Exactly one provably non-finite term (non-finite typing convention):

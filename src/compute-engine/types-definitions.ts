@@ -1247,6 +1247,12 @@ export type TypeProvenanceEntry = {
    *   value currently records no entry; `inferredType === true` with a
    *   value is the marker. */
   kind: 'declared' | 'auto-declared' | 'inferred' | 'assumed' | 'value-derived';
+  /** For an `'assumed'` write: the type the definition carried BEFORE the
+   * assumption wrote it — `undefined` when the assumption itself created
+   * the declaration. `forget()` rewinds a tail run of `'assumed'` entries
+   * to the first one's `previousType`, so removing the assumption also
+   * removes the range it encoded into the type. */
+  previousType?: BoxedType;
   /** Which axis of the declaration contract the write touched. Phase 1
    * records only `'type'` (value types and operator signatures); the
    * effects axis (`effectsDeclared`) is the planned second user. */

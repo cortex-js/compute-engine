@@ -383,9 +383,12 @@ describe('Tycho item 222 — PointList over UNKNOWN-length views', () => {
     const ce = viewEngine();
     // One coordinate per component, whatever the source lengths are. The
     // arity-less `list<tuple>` this used to answer could not tell a list of
-    // 2-D points from a list of 3-D ones.
+    // 2-D points from a list of 3-D ones. (The first slot's tier follows the
+    // view component's own scalar claim — `finite_number` since the
+    // 2026-08-22 shape-gate change that stopped branding possibly-collection
+    // operands `number`.)
     expect(ce.box(['PointList', X_VIEW, 'A']).type.toString()).toBe(
-      'list<tuple<number, number>>'
+      'list<tuple<finite_number, number>>'
     );
     const finite = new ComputeEngine();
     finite.declare('L', 'list<integer>');

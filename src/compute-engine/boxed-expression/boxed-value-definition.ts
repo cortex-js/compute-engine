@@ -552,7 +552,6 @@ export class _BoxedValueDefinition
       cmp: this.cmp,
       collection: this.collection,
       subscriptEvaluate: this.subscriptEvaluate,
-      _revisionVersion: this._revisionVersion,
     };
   }
 
@@ -595,7 +594,6 @@ export class _BoxedValueDefinition
     this.collection = s.collection as CollectionHandlers | undefined;
     this.subscriptEvaluate =
       s.subscriptEvaluate as typeof this.subscriptEvaluate;
-    this._revisionVersion = s._revisionVersion as number;
     this._writeVersion += 1;
   }
 
@@ -605,11 +603,6 @@ export class _BoxedValueDefinition
       return this._value?.type ?? BoxedType.unknown;
     return this._reviseInferredType(t);
   }
-
-  // The semantic generation (`ce._semanticVersion`) at which the inferred
-  // type was last checked against the value's live type — see
-  // `_reviseInferredType`. `-1` = never checked.
-  private _revisionVersion = -1;
 
   /**
    * Revision of an INFERRED type against its own value (user-ruled
@@ -637,30 +630,26 @@ export class _BoxedValueDefinition
    * that path; this revision is for DATA values whose expression depends on
    * other symbols.
    *
-   * The check runs at most once per semantic generation per definition (an
-   * integer compare on the hot path otherwise; the value's own `type` is
-   * memoized per generation), and applies the rule the assign path already
-   * uses when a guess is incompatible with its value (D11,
-   * `engine-declarations.ts`): adopt the value's own current type. A value
-   * whose live type is still ADMITTED by the guess (a subtype) leaves the
-   * likely type in place. Self-referential bindings (`a := a + 1`) are
-   * skipped: reading their value's type reads this type.
-   *
-   * This is a deliberate, bounded exception to this file's "pay for
-   * precision at write sites, never at read sites" principle (`set value`
-   * below): the refuting event is a write to a DIFFERENT definition (the
-   * dependency's), which cannot reach this one at its own write site without
-   * a dependency graph the engine does not keep. The generation gate is what
-   * bounds the exception — after the first read of a generation, the getter
-   * is back to an integer compare.
-   *
-   * When the type actually moves, the same `type-write` state event every
-   * other def-retype site pairs with the write is emitted (its axis mask is
-   * `any` only — R5, `engine-configuration-lifecycle.ts` — so emitting from
-   * a read path cannot advance `semantic` and re-trigger this gate): a
-   * G-keyed `_type`/`_sgn` memo on a compound expression must see the
-   * revision even if the event that made it due had, for some future axis
-   * table, not advanced `any` itself.
+   * The revision is a LIVE READ WITH NO WRITE (R4 of the type-handler
+   * design, `docs/plans/2026-08-22-type-handlers-on-types.md` §4.2,
+   * re-ratified 2026-08-22): compute the value's current type — itself a
+   * memo keyed on `ce._anyVersion`, so this is cheap after the first read
+   * of a generation — and answer with it when it refutes the recorded
+   * guess; answer with the recorded type when the live type is unknown or
+   * still admits it. NOTHING is written: no `_type`, no `_writeVersion`
+   * bump, no journal entry, no `type-write` event. Whatever changed the
+   * value's type already advanced the `any` axis (or invalidated the
+   * memo's object dependencies), so consumers keyed on that axis re-read;
+   * the event this getter used to emit was a second advance for a change
+   * the first had already covered — the item-219 hazard — and its
+   * generation gate was keyed on `_semanticVersion` while the value-type
+   * memo is keyed on `_anyVersion`, which is the staleness defect §2.5
+   * records. A value whose live type is still ADMITTED by the guess (a
+   * subtype) leaves the likely type in place. Self-referential bindings
+   * (`a := a + 1`) are skipped: reading their value's type reads this
+   * type. Mutual recursion terminates through the expression type memo's
+   * in-flight window (`cache.ts`), which answers a re-entrant read with
+   * the previous value.
    */
   private _reviseInferredType(recorded: BoxedType): BoxedType {
     if (!this.inferredType || this._isConstant || this._isSelfReferential)
@@ -668,28 +657,8 @@ export class _BoxedValueDefinition
     const v = this._value;
     if (v === undefined || v === null || !isFunction(v)) return recorded;
     if (v.operator === 'Function') return recorded;
-    const generation = this._engine._semanticVersion;
-    if (generation === this._revisionVersion) return recorded;
-    // Checkpoint journal (funnel 2): a READ-driven type write. The revision
-    // below moves `_type` and `_revisionVersion` on a long-lived record that
-    // may have had no other write in the window, so there is no earlier
-    // snapshot to fall back on — and a restore that missed it would leave the
-    // widened type in place, because once the generation has moved the
-    // revision logic sees the restored narrower type match the widened
-    // recorded one and keeps the widened value. Recorded after the
-    // same-generation early return above, so a read that revises nothing
-    // journals nothing.
-    journalDefinitionRecord(this._engine, this, 'type-write');
-    this._revisionVersion = generation;
     const live = v.type;
     if (live.isUnknown || live.matches(recorded)) return recorded;
-    this._engine._noteStateEvent({
-      kind: 'type-write',
-      callableBefore: containsSignatureArm(recorded.type),
-      callableAfter: containsSignatureArm(live.type),
-    });
-    this._type = live;
-    this._writeVersion += 1;
     return live;
   }
 
@@ -802,6 +771,15 @@ export function isConstructorPlaceholderType(t: Type): boolean {
     t === 'collection' ||
     t === 'indexed_collection'
   );
+  // NOTE deliberately NOT `t === 'function'`: a bare `function` declaration
+  // is the WILDCARD-CALLEE contract, and its type deliberately stays bare
+  // through every assignment — adopting the assigned signature would turn a
+  // permissive forward declaration into an arity/parameter contract (no
+  // currying, box-time `unexpected-argument`, callback-arity refusals) that
+  // a later re-assignment would have to satisfy. See the wildcard-callee
+  // block in `box.ts` (`isWildcardFunctionType`) and task P2 of
+  // `docs/plans/2026-08-22-type-handlers-on-types.md` §4.6, which attempted
+  // the adoption on 2026-08-22 and reverted it against those pins.
 }
 
 /**

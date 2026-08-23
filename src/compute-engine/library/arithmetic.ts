@@ -16,6 +16,7 @@ import {
   asBigint,
   toBigint,
   toInteger,
+  provablyNonFiniteNumber,
 } from '../boxed-expression/numerics.js';
 import { addOrder } from '../boxed-expression/order.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
@@ -346,7 +347,7 @@ function quotientComponentType(el: Type, den: Expression): Type {
   // helper's per-component parity with the scalar path does not depend on
   // call order.
   if (den.isNaN || den.isSame(0)) return 'number';
-  if (den.isFinite === false) {
+  if (provablyNonFiniteNumber(den)) {
     // The scalar path's symmetric claim: a provably finite real component
     // over a provably non-finite REAL denominator is exactly 0.
     if (isSubtype(el, 'finite_real') && den.isReal === true)
@@ -837,7 +838,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // declared `non_finite_number`, have no value to probe: `isFinite`
         // consults the static type on that path (see `BoxedFunction`/
         // `BoxedSymbol` `isInfinity`), so it decides them too.
-        const nonFinite = (x: Expression) => x.isFinite === false;
+        const nonFinite = (x: Expression) => provablyNonFiniteNumber(x);
         if (nonFinite(den) || nonFinite(num)) {
           // Ruling 2026-08-03 (mirrors the Multiply handler): a provably
           // non-finite REAL numerator over a provably finite, real, provably
@@ -2146,12 +2147,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.some((x) => x.isNaN)) return 'number';
         // A provably non-finite factor may be visible only in its static
         // TYPE: `Ln(0)` types `non_finite_number`, as does a symbol declared
-        // `non_finite_number`, and neither has a value to probe. `isFinite`
-        // consults the type on that path (see `BoxedFunction`/`BoxedSymbol`
-        // `isInfinity`), so `isFinite === false` alone catches them; without
+        // `non_finite_number`, and neither has a value to probe.
+        // `provablyNonFiniteNumber`  catches them; without
         // it `2·Ln(0)` fell through to the "every operand is finite" tail and
         // claimed `finite_integer` (unsound; the value is −∞).
-        if (ops.some((x) => x.isFinite === false)) {
+        if (ops.some((x) => provablyNonFiniteNumber(x))) {
           // 0 · ±∞ = NaN (indeterminate).
           if (ops.some((x) => x.isSame(0))) return 'number';
           // real · ±∞ = ±∞ (a non-finite real); a non-real factor (i, complex)
@@ -2170,7 +2170,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (
             ops.every((x) => {
               if (x.isReal !== true) return false;
-              if (x.isFinite === false) return true;
+              if (provablyNonFiniteNumber(x)) return true;
               const s = x.sgn;
               return s === 'positive' || s === 'negative' || s === 'not-zero';
             })
@@ -2229,11 +2229,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.some((x) => x.isSame(0)))
           return ops.every((x) => x.isFinite)
             ? 'zero'
-            : ops.some((x) => x.isFinite === false)
+            : ops.some((x) => provablyNonFiniteNumber(x))
               ? 'unsigned'
               : undefined;
         if (
-          ops.some((x) => x.isFinite === false || x.isFinite === undefined) &&
+          ops.some(
+            (x) => x.isFinite === undefined || provablyNonFiniteNumber(x)
+          ) &&
           ops.some((x) => {
             const s = x.sgn;
             return s !== 'positive' && s !== 'negative' && s !== 'not-zero';
@@ -2479,12 +2481,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // the top type (the old `non_finite_number` ignored the NaN forms).
         // `=== false` (not `!`): a symbolic operand has `isFinite ===
         // undefined`, which must not be treated as non-finite.
-        if (base.isFinite === false || exp.isFinite === false) {
+        if (provablyNonFiniteNumber(base) || provablyNonFiniteNumber(exp)) {
           if (
-            base.isFinite === false &&
             base.isNonNegative === true &&
             exp.isFinite === true &&
-            exp.isPositive === true
+            exp.isPositive === true &&
+            provablyNonFiniteNumber(base)
           )
             return 'non_finite_number';
           return 'number';
@@ -2760,7 +2762,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Root(x, n) = x^(1/n). A non-finite base or index makes the result
         // indeterminate: Root(±∞, n) ∈ {0, ±∞, complex}, Root(x, ±∞) = x^0
         // (often 1 but 0^0/∞^0 are NaN). Widen to the top type.
-        if (base.isFinite === false || exp.isFinite === false) return 'number';
+        if (provablyNonFiniteNumber(base) || provablyNonFiniteNumber(exp))
+          return 'number';
         // Root(x, 0) = x^(1/0): a pole (the old `finite_integer` was wrong —
         // Root(2,0), Root(0,0), Root(−2,0) all evaluate to NaN).
         if (exp.isSame(0)) return 'number';
@@ -2973,7 +2976,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       type: ([x]) => {
         if (x.isNaN) return 'number';
-        if (x.isFinite === false) {
+        if (provablyNonFiniteNumber(x)) {
           // √(−∞) = i·∞ = ~oo (complex infinity), not a real ±∞ — and `~oo`
           // is representable only by `number` (non-finite typing convention).
           if (x.isNegative === true) return 'number';

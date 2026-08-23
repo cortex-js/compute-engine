@@ -71,6 +71,10 @@ function recordAssumedType(
     axis: 'type',
     cause,
     epoch: currentBoxingEpoch(ce),
+    // What the type was BEFORE this assumption wrote it (undefined for a
+    // declaration the assumption itself created). `forget()` rewinds a tail
+    // run of 'assumed' entries to the first one's previous type.
+    previousType: previous,
   });
 }
 
@@ -84,10 +88,11 @@ function recordAssumedType(
 function recordDeclaredByAssumption(
   ce: ComputeEngine,
   symbol: string,
-  cause?: Expression
+  cause?: Expression,
+  previous?: BoxedType
 ): void {
   const def = ce.lookupDefinition(symbol);
-  if (isValueDef(def)) recordAssumedType(ce, def.value, cause);
+  if (isValueDef(def)) recordAssumedType(ce, def.value, cause, previous);
 }
 
 /**
@@ -138,6 +143,17 @@ function inferTypeFromValue(ce: ComputeEngine, value: Expression): BoxedType {
  *
  */
 
+// The names whose assigned values the value-blindness shield has stripped
+// for the CURRENT `assume()` dispatch — consulted by the type-refinement
+// tail of `assumeInequality`, which must treat those symbols as assigned
+// (checked, never retyped) even though their values read as undefined
+// while the shield is up. `undefined` outside a shielded dispatch.
+let _valueBlindNames: ReadonlySet<string> | undefined;
+
+function valueBlindNames(): ReadonlySet<string> | undefined {
+  return _valueBlindNames;
+}
+
 export function assume(proposition: Expression): AssumeResult {
   //
   // ── Value-blindness shield (ARCHITECTURE.md, "Bound variables, free symbols,
@@ -179,9 +195,11 @@ export function assume(proposition: Expression): AssumeResult {
       ce._setSymbolValue(name, undefined);
     }
     if (saved.length === 0) return fn();
+    _valueBlindNames = new Set(saved.map((s) => s.name));
     try {
       return fn();
     } finally {
+      _valueBlindNames = undefined;
       for (const { name, value } of saved) ce._setSymbolValue(name, value);
     }
   }
@@ -526,6 +544,34 @@ function assumeEquality(proposition: Expression): AssumeResult {
   return 'ok';
 }
 
+/**
+ * The type a simple comparison against a finite real literal proves for its
+ * symbol: `x > 0` proves `real<0..> & !0`, `x ≥ k` proves `real<k..>`,
+ * `x < k` proves `real<..k>`. A STRICT bound with a non-zero literal is
+ * approximated by the closed range (`x > 2` → `real<2..>`): ranges have no
+ * open bounds, and the closed range is sound — it admits every value the
+ * assumption admits, plus the endpoint. The exact strict bound is still
+ * held by the assumption facts themselves (`verify(x > 2)` uses those, not
+ * the type); only the type channel carries the approximation. For a strict
+ * zero bound the exact spelling exists (`& !0`) and is used, because
+ * zero-exclusion is what the pole-guarding sign consumers need.
+ */
+function rangeTypeForComparison(
+  op: 'greater' | 'greaterEqual' | 'less' | 'lessEqual',
+  k: number
+): Type {
+  const range: Type =
+    op === 'greater' || op === 'greaterEqual'
+      ? { kind: 'numeric', type: 'real', lower: k }
+      : { kind: 'numeric', type: 'real', upper: k };
+  if ((op === 'greater' || op === 'less') && k === 0)
+    return {
+      kind: 'intersection',
+      types: [range, { kind: 'negation', type: { kind: 'value', value: 0 } }],
+    };
+  return range;
+}
+
 function assumeInequality(proposition: Expression): AssumeResult {
   //
   // 1/ lhs is a single **undefined** free var e.g. "x < 0"
@@ -839,25 +885,100 @@ function assumeInequality(proposition: Expression): AssumeResult {
     (normalizedLhs === undefined || !containsPartTerm(normalizedLhs))
   ) {
     const symbol = unknowns[0];
+
+    // A simple `symbol <op> finite-literal` comparison proves a RANGE type
+    // (`assume(p > 0)` → `real<0..> & !0`), so the assumption reaches every
+    // consumer that reads the TYPE — the solver's root filter, the compile
+    // targets' real/complex lowering, an assignment check — and not only the
+    // sign channel (`getSignFromAssumptions`), which those consumers never
+    // consult. (Plan doc `docs/plans/2026-08-22-type-handlers-on-types.md`
+    // §5.8 A2; the solver-drops-roots measurement is §5.7.)
+    let rangeType: Type | undefined;
+    {
+      const symbolOnLeft = isSymbol(proposition.op1, symbol);
+      const other = symbolOnLeft ? proposition.op2 : proposition.op1;
+      // The bound must be a MACHINE-representable literal: `numericValue`
+      // is a plain JS number exactly then. Reading `.re` instead would
+      // coerce an exact big integer or rational (`x > 1/3`) to a rounded
+      // double, and a rounding toward the inside would install a type that
+      // wrongly EXCLUDES admissible values — unlike the documented
+      // strict-bound-to-closed-range approximation, which only widens.
+      // A non-representable bound leaves `rangeType` undefined (bare
+      // `real`), matching the sibling bounds-consistency guard above.
+      const k =
+        (symbolOnLeft || isSymbol(proposition.op2, symbol)) && isNumber(other)
+          ? other.numericValue
+          : undefined;
+      if (typeof k === 'number' && Number.isFinite(k) && other!.im === 0) {
+        const originalOp = proposition.operator;
+        const effectiveOp =
+          originalOp === 'Greater'
+            ? symbolOnLeft
+              ? 'greater'
+              : 'less'
+            : originalOp === 'GreaterEqual'
+              ? symbolOnLeft
+                ? 'greaterEqual'
+                : 'lessEqual'
+              : originalOp === 'Less'
+                ? symbolOnLeft
+                  ? 'less'
+                  : 'greater'
+                : symbolOnLeft
+                  ? 'lessEqual'
+                  : 'greaterEqual';
+        rangeType = rangeTypeForComparison(effectiveOp, k);
+      }
+    }
+
+    // A symbol whose assigned value is SHIELDED by the value-blindness
+    // wrapper (`w := 5; assume(w > 0)`) looks valueless here, but it has
+    // assignment evidence: assigned symbols are CHECKED against their
+    // value, never rewritten by an assumption (the 2026-08-18
+    // inference-direction ruling) — the pre-shield consistency check is the
+    // check, and the fact store below is the record. Skip the type write
+    // entirely: installing the range would turn the assumption into a
+    // contract on later re-assignments, and even the pre-range widening to
+    // `real` was a value-inferred guess this path has no business
+    // hardening.
+    const shielded = valueBlindNames()?.has(symbol) === true;
+
     const def = ce.lookupDefinition(symbol);
-    if (!def) {
-      // Symbol not defined yet - declare with type 'real'
-      ce.declare(symbol, { type: 'real' });
+    if (shielded) {
+      // fall through to the fact store below with the type untouched
+    } else if (!def) {
+      // Symbol not defined yet — declare with the proven range, or bare
+      // `real` when the comparison is not a simple literal bound.
+      ce.declare(symbol, { type: rangeType ?? 'real' });
       recordDeclaredByAssumption(ce, symbol, result);
     } else if (isValueDef(def) && def.value.inferredType) {
-      // Symbol was auto-declared with inferred type - update to 'real'.
-      // If the definition lives in a parent scope, shadow it in the current
-      // scope first so the refinement is reverted when the scope is popped
-      // (P1-6). Mutating `def.value.type` directly would otherwise leak the
-      // `real` type into the parent scope after `popScope()`.
-      if (!ce.context?.lexicalScope?.bindings.has(symbol)) {
-        ce.declare(symbol, { type: 'real' });
-        recordDeclaredByAssumption(ce, symbol, result);
-      } else {
-        const previous = def.value.type;
-        def.value.type = ce.type('real');
-        recordAssumedType(ce, def.value, result, previous);
-      }
+      // Symbol was auto-declared with an inferred type — the assumption
+      // REPLACES the inferred guess with the proven range (or bare
+      // `real`). `refineSymbolType` owns the write: it shadows a
+      // parent-scope definition in the current scope (P1-6), sets
+      // `inferredType` to false so a SECOND bound on the same symbol
+      // narrows by meet instead of clobbering the first (`0 < x < 10`
+      // decomposes into two calls; before this routing the second replaced
+      // the first — review catch, 2026-08-23), and records provenance.
+      const refined = refineSymbolType(
+        ce,
+        symbol,
+        rangeType ?? 'real',
+        result
+      );
+      if (refined === 'contradiction') return 'contradiction';
+    } else if (
+      rangeType !== undefined &&
+      isValueDef(def) &&
+      !def.value.isConstant &&
+      def.value.value === undefined
+    ) {
+      // An EXPLICITLY declared, valueless symbol is narrowed to the meet of
+      // its declared type and the proven range (`p: real`, `assume(p > 0)`
+      // → `real<0..> & !0`); an empty meet is a contradiction with the
+      // declaration and the fact is NOT stored.
+      const refined = refineSymbolType(ce, symbol, rangeType, result);
+      if (refined === 'contradiction') return 'contradiction';
     }
   }
 
@@ -1074,13 +1195,36 @@ function refineSymbolType(
   }
 
   // Shadow a parent-scope declaration in the current scope so the
-  // assumption is reverted when the scope is popped. The shadow's creation
-  // is recorded here — the write below then only appends when it actually
-  // changes the shadow's type (append-on-change), so the creation entry is
-  // the shadow's one guaranteed provenance record.
+  // assumption is reverted when the scope is popped. The shadow is declared
+  // with the MEET of the inherited type and the assumed one, computed
+  // BEFORE the shadow exists: declaring with the raw assumed type first
+  // (as this path once did) made the meet below a trivial self-meet, so an
+  // inherited contract (`n: integer` in the parent) was silently dropped
+  // and a contradiction with it (`x: real<..-1>` in the parent, then a
+  // scoped `assume(x > 0)`) could never fire (review catch, 2026-08-23).
+  // An empty meet refuses before anything is declared. The shadow's
+  // creation is recorded with the INHERITED type as the previous type, so
+  // `forget()` can rewind the shadow to it.
   if (!ce.context?.lexicalScope?.bindings.has(symbol)) {
-    ce.declare(symbol, type);
-    recordDeclaredByAssumption(ce, symbol, cause);
+    const inherited = ce.lookupDefinition(symbol);
+    let shadowType: Type = type;
+    let inheritedType: BoxedType | undefined;
+    if (
+      isValueDef(inherited) &&
+      inherited.value.type &&
+      !inherited.value.type.isUnknown &&
+      !inherited.value.inferredType
+    ) {
+      inheritedType = inherited.value.type;
+      const meet = reduceType({
+        kind: 'intersection',
+        types: [type, inheritedType.type],
+      });
+      if (isEmptyType(meet)) return 'contradiction';
+      shadowType = meet;
+    }
+    ce.declare(symbol, shadowType);
+    recordDeclaredByAssumption(ce, symbol, cause, inheritedType);
   }
 
   const def = ce.lookupDefinition(symbol);

@@ -12,6 +12,7 @@ import {
   narrow,
   containsSignatureArm,
   typeElementCount,
+  signOfType,
 } from '../../common/type/utils.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { isEmptyType } from '../../common/type/subtype.js';
@@ -959,7 +960,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
 
     // Otherwise, check if there are assumptions about this symbol's sign
-    return getSignFromAssumptions(this.engine, this.symbol);
+    const assumed = getSignFromAssumptions(this.engine, this.symbol);
+    if (assumed !== undefined) return assumed;
+
+    // Finally, a RANGED declaration carries a sign: a symbol declared
+    // `integer<1..>` is positive, `real<0..>` non-negative, `real<..0>`
+    // non-positive, and `real<0..> & !0` (the intersection spelling of
+    // "positive") combines the bound with the zero exclusion. Before this
+    // read existed, a range-typed declaration answered `sgn: undefined`, so
+    // `Sqrt(q)` with `q: integer<1..>` typed `finite_complex` and
+    // `Factorial(q)` typed `finite_real` — the declaration's sign never
+    // reached the sign channel (measured 2026-08-22; see the ROADMAP entry
+    // "Ranged types should carry sign (and a literal's value) through type
+    // derivation").
+    return signOfType(this.type.type);
   }
 
   get isOdd(): boolean | undefined {

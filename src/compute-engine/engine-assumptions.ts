@@ -11,6 +11,8 @@ import { isWildcard, wildcardName } from './boxed-expression/pattern-utils.js';
 import { isSymbol, isFunction } from './boxed-expression/type-guards.js';
 import { subjectOf } from './boxed-expression/constraint-subject.js';
 import { isValueDef } from './boxed-expression/utils.js';
+import type { BoxedType } from '../common/type/boxed-type.js';
+import type { BoxedDefinition } from './types-definitions.js';
 
 import {
   assume as assumeImpl,
@@ -422,6 +424,40 @@ export function assumeFn(
   }
 }
 
+/**
+ * Rewind the ASSUMPTION-driven type writes on a current-scope binding: pop
+ * the tail run of `'assumed'` provenance entries and restore the type the
+ * first of them replaced. Without this, `declare(p, 'real'); assume(p > 0);
+ * forget(p)` left `p` typed `(real<0..>) & !0` — the assumption's range
+ * survived in the TYPE (and so in the sign channel) after the fact itself
+ * was removed. A declaration the assumption CREATED has no previous type;
+ * it rewinds to the historical bare `real` those declarations used before
+ * ranges were installed (2026-08-22). Entries of other kinds, and any
+ * `'assumed'` entry buried under a later non-assumed write, are left alone:
+ * the later write superseded the assumption's.
+ */
+function rewindAssumedTypeWrites(
+  ce: IComputeEngine,
+  binding: BoxedDefinition | undefined
+): void {
+  if (!isValueDef(binding) || binding.value.isConstant) return;
+  const prov = binding.value._typeProvenance;
+  if (!prov || prov.length === 0) return;
+  let sawAssumed = false;
+  let base: BoxedType | undefined;
+  while (
+    prov.length > 0 &&
+    prov[prov.length - 1].kind === 'assumed' &&
+    prov[prov.length - 1].axis === 'type'
+  ) {
+    const entry = prov.pop()!;
+    sawAssumed = true;
+    base = entry.previousType;
+  }
+  if (!sawAssumed) return;
+  binding.value.type = base ?? ce.type('real');
+}
+
 export function forget(
   ce: IComputeEngine,
   symbol: undefined | MathJsonSymbol | MathJsonSymbol[]
@@ -452,6 +488,13 @@ export function forget(
       }
       installed.clear();
     }
+
+    // Rewind assumption-driven TYPE writes on every current-scope binding
+    // (parent-scope bindings were only ever refined through a current-scope
+    // shadow, so the current scope is the complete reach — see
+    // `refineSymbolType`'s P1-6 shadowing).
+    for (const binding of ce.context.lexicalScope.bindings.values())
+      rewindAssumedTypeWrites(ce, binding);
 
     // The removed assumptions could affect existing expressions
     ce._noteStateEvent({ kind: 'assumption' });
@@ -488,6 +531,8 @@ export function forget(
     ) {
       scopeBinding.value.value = undefined;
     }
+    // Rewind assumption-driven TYPE writes for this symbol (see the helper).
+    rewindAssumedTypeWrites(ce, scopeBinding);
     // Keep the provenance set accurate (SYM P2-10).
     ce.context.assumptionBindings?.delete(symbol);
   }

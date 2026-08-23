@@ -4,7 +4,10 @@ import type {
   IComputeEngine,
 } from '../global-types.js';
 import { applyN, shouldNumericize } from '../boxed-expression/apply.js';
-import { asSmallInteger } from '../boxed-expression/numerics.js';
+import {
+  asSmallInteger,
+  provablyNonFiniteNumber,
+} from '../boxed-expression/numerics.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
 import {
   numericTypeHandler,
@@ -127,7 +130,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       type: (ops) =>
         ops.length === 1
           ? boundedInverseTrigType(ops, ELLIPTIC_E_DOMAIN)
-          : ops.some((x) => x.isNaN || x.isFinite === false)
+          : ops.some((x) => provablyNonFiniteNumber(x))
             ? 'number'
             : 'finite_number',
       evaluate: (ops, { numericApproximation, engine }) => {
@@ -172,7 +175,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // both operands (`F(1.5|2) = 1.311… − 1.240…i`) — so real operands only
       // support the finite generic-point hedge, not a real claim.
       type: (ops) =>
-        ops.some((x) => x.isNaN || x.isFinite === false)
+        ops.some((x) => provablyNonFiniteNumber(x))
           ? 'number'
           : 'finite_number',
       evaluate: ([phi, m], { numericApproximation, engine }) => {
@@ -200,7 +203,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // tolerance-based `isEqual` would put `1 + 10⁻²⁰` at the pole.
       type: (ops) => {
         const n = ops[0];
-        if (!n || ops.some((x) => x.isNaN || x.isFinite === false))
+        if (!n || ops.some((x) => provablyNonFiniteNumber(x)))
           return 'number';
         if (isNumber(n) ? n.isSame(1) : n.isEqual(1) === true) return 'number';
         return 'finite_number';
@@ -240,7 +243,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // Real and finite for non-negative real operands; a negative operand
       // takes the complex AGM (`AGM(1, −2) = −0.4229… + 0.6612…i`).
       type: (ops) => {
-        if (ops.some((x) => x.isNaN || x.isFinite === false)) return 'number';
+        if (ops.some((x) => provablyNonFiniteNumber(x)))
+          return 'number';
         if (ops.every((x) => x.isReal === true && x.isNonNegative === true))
           return 'finite_real';
         return 'finite_number';

@@ -63,7 +63,11 @@ import {
   bignumPreferred,
   withDrawRollback,
 } from '../boxed-expression/utils.js';
-import { numberLiteralOf, toInteger } from '../boxed-expression/numerics.js';
+import {
+  numberLiteralOf,
+  toInteger,
+  provablyNonFiniteNumber,
+} from '../boxed-expression/numerics.js';
 import { randomCount } from './random-utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { findFit } from '../nonlinear-fit.js';
@@ -159,7 +163,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           return x.isFinite === true ? 'finite_complex' : 'number';
         if (x.isReal === true) return 'finite_real';
         // Unknown realness: exclude a non-finite value (~oo) before hedging.
-        if (x.isFinite === false) return 'number';
+        if (provablyNonFiniteNumber(x)) return 'number';
         return 'finite_number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -193,7 +197,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           return x.isFinite === true ? 'finite_complex' : 'number';
         if (x.isReal === true) return 'finite_real';
         // Unknown realness: exclude a non-finite value (~oo) before hedging.
-        if (x.isFinite === false) return 'number';
+        if (provablyNonFiniteNumber(x)) return 'number';
         return 'finite_number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -218,7 +222,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // domain (or non-real / ±∞ argument) the evaluate handler yields NaN,
       // so nothing narrower than `number` is sound there.
       type: ([x]) => {
-        if (!x || x.isNaN || x.isFinite === false) return 'number';
+        if (!x || provablyNonFiniteNumber(x)) return 'number';
         if (x.isReal !== true) return 'number';
         if (x.isGreater(-1) === true && x.isLess(1) === true)
           return 'finite_real';

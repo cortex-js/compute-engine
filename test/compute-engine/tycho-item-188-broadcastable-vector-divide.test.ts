@@ -48,9 +48,9 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
 
   test('the numerator really is broadcastable-wrapped (non-vacuity)', () => {
     const ce = setUp(false);
-    expect(
-      ce.parse('H(X(t), Y(t))', { strict: false }).type.toString()
-    ).toBe('broadcastable<vector<finite_number^2>>');
+    expect(ce.parse('H(X(t), Y(t))', { strict: false }).type.toString()).toBe(
+      'broadcastable<vector<finite_number^2>>'
+    );
   });
 
   test('the Divide row is valid with its callees still unassigned', () => {
@@ -96,10 +96,9 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
   const ce_expected = (): string => {
     const ce = new ComputeEngine();
     return ce
-      .parse(
-        '\\frac{\\lbrack\\cos(4.2), \\sin(-4.2)\\rbrack}{1.49}',
-        { strict: false }
-      )
+      .parse('\\frac{\\lbrack\\cos(4.2), \\sin(-4.2)\\rbrack}{1.49}', {
+        strict: false,
+      })
       .N()
       .toString();
   };
@@ -120,11 +119,15 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     ce.declare('s', 'number');
     const typeOf = (latex: string) =>
       ce.parse(latex, { strict: false }).type.toString();
-    // Exactly this tier: `g` returns `unknown` (admits NaN and ±∞), so
-    // `number` components are the contract, and the result is only POSSIBLY
-    // a vector (`g(t)` may be a collection), never a definite `vector<2>`.
+    // Exactly this tier: the result is only POSSIBLY a vector (`g(t)` may
+    // be a collection), never a definite `vector<2>`, and the component tier
+    // matches the declared-scalar denominator row below — the quotient
+    // convention claims a finite component whatever the denominator's
+    // finiteness evidence (before 2026-08-22 this row's components were
+    // branded `number` because `isFinite === false` fired for `g(t)`'s
+    // non-number TYPE, making the two rows disagree).
     expect(typeOf('\\frac{H(X(t), Y(t))}{g(t)}')).toBe(
-      'broadcastable<vector<2>>'
+      'broadcastable<vector<finite_number^2>>'
     );
     expect(typeOf('\\frac{H(X(t), Y(t))}{s}')).toBe(
       'broadcastable<vector<finite_number^2>>'
@@ -135,8 +138,9 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     ce.declare('w', 'number');
     // (`s/g(t)` carries its own broadcast wrap — `g(t)` could itself be a
     // collection dividing `s` elementwise — so the parity reads at the
-    // ELEMENT: `number`, matching the vector's components above.)
-    expect(typeOf('\\frac{s}{g(t)}')).toBe('broadcastable<number>');
+    // ELEMENT: `finite_number`, matching the scalar row `s/w` below and the
+    // vector's components above.)
+    expect(typeOf('\\frac{s}{g(t)}')).toBe('broadcastable<finite_number>');
     expect(typeOf('\\frac{s}{w}')).toBe('finite_number');
     // No denominator, no tier movement: the sibling operators echo the shape.
     for (const latex of ['H(X(t), Y(t)) - g(t)', '-H(X(t), Y(t))'])
@@ -156,9 +160,9 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     ce.declare('intfn', '(number) -> finite_integer');
     ce.declare('tt', 'number');
     // Truth: [6,2]/4 = [3/2,1/2] — the components are rational, not integer.
-    expect(ce.parse('\\frac{\\lbrack6,2\\rbrack}{4}').evaluate().toString()).toBe(
-      '[3/2,1/2]'
-    );
+    expect(
+      ce.parse('\\frac{\\lbrack6,2\\rbrack}{4}').evaluate().toString()
+    ).toBe('[3/2,1/2]');
     expect(ce.box(['Divide', 'bvec', ['intfn', 'tt']]).type.toString()).toBe(
       'broadcastable<vector<finite_rational^2>>'
     );

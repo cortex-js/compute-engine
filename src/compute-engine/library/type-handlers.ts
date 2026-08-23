@@ -2,6 +2,7 @@ import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
+import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
 import { collectionElementType, widen } from '../../common/type/utils.js';
 
 /**
@@ -35,7 +36,7 @@ import { collectionElementType, widen } from '../../common/type/utils.js';
  * through `elementaryFunctionType`.
  */
 export function numericTypeHandler(ops: ReadonlyArray<Expression>): Type {
-  if (ops.some((x) => x.isFinite === false)) return 'number';
+  if (ops.some((x) => provablyNonFiniteNumber(x))) return 'number';
   if (ops.every((x) => x.type.matches('real'))) return 'finite_real';
   return 'finite_number';
 }
@@ -49,7 +50,7 @@ function logType(ops: ReadonlyArray<Expression>): Type {
   const x = ops[0];
   const base = ops[1];
   if (!x || x.isNaN) return 'number';
-  if (x.isFinite === false) return 'number';
+  if (provablyNonFiniteNumber(x)) return 'number';
   // A provably-zero argument is the log pole, with a *provably* ±∞ value:
   // `ln(0) = −∞`, and `log_b(0) = ∓∞` for any valid base (positive, finite,
   // ≠ 1). Per the non-finite typing convention this provable case claims
@@ -111,7 +112,7 @@ function poleReciprocalType(
   const x = ops[0];
   if (!x || x.isNaN) return 'number';
   const hyperbolic = operator === 'Coth' || operator === 'Csch';
-  if (x.isFinite === false)
+  if (provablyNonFiniteNumber(x))
     return hyperbolic && x.isReal === true ? 'finite_real' : 'number';
   if (x.isReal !== true) return 'number';
   // Only the pole at 0 is reachable by a number literal (every other pole is
@@ -226,7 +227,7 @@ export function boundedInverseTrigType(
   domain: RealDomain
 ): Type {
   const x = ops[0];
-  if (!x || x.isNaN || x.isFinite === false) return 'number';
+  if (!x || provablyNonFiniteNumber(x)) return 'number';
   if (x.isReal !== true) return 'number';
 
   // Fast path: a (finite) real value classifies by arithmetic alone, without
@@ -350,15 +351,24 @@ const ARCSCH_DOMAIN: RealDomain = {
 
 /**
  * `Arctan`/`Arccot`: real-closed on the *extended* reals (`arctan(±∞) = ±π/2`),
- * so any real argument → `finite_real`. The only poles are at ±i, so a non-real
- * finite argument can be complex infinity (`arctan(i) = ~oo`) → widen.
+ * so any real argument — provably infinite ones included — → `finite_real`.
+ * The only poles are at ±i, so a non-real or unknown-realness argument can be
+ * complex infinity (`arctan(i) = ~oo`, `arctan(~oo)`) → the final `number`.
+ * No separate non-finite test is needed after the real check: a provably
+ * non-finite REAL is absorbed by the extended-real closure, and every
+ * non-real infinity (`~oo`, a `number`-typed symbol holding `±∞`) answers
+ * `number` below.
+ *
+ * One real check suffices: `isReal === true` and `type.matches('real')`
+ * are extensionally equivalent — on symbols and function expressions
+ * `isReal` IS the type test (a `NotElement(x, ℝ)` assumption only refutes
+ * the type-undecided case, where `matches` is false anyway), and a
+ * literal's type is a `real` subtype exactly when its value is real.
  */
 function arctanType(ops: ReadonlyArray<Expression>): Type {
   const x = ops[0];
   if (!x || x.isNaN) return 'number';
   if (x.isReal === true) return 'finite_real';
-  if (x.isFinite === false) return 'number';
-  if (x.type.matches('real')) return 'finite_real';
   return 'number';
 }
 
@@ -399,7 +409,7 @@ export function gammaPoleType(x: Expression | undefined): Type {
  */
 export function roundingFunctionType(x: Expression | undefined): Type {
   if (!x || x.isNaN) return 'number';
-  if (x.isFinite === false)
+  if (provablyNonFiniteNumber(x))
     return x.isReal === true ? 'non_finite_number' : 'number';
   const provablyNonReal = isNumber(x)
     ? x.isReal === false

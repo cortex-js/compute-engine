@@ -39,8 +39,9 @@ describe('§11.1 Element(n, Range(1, +oo))', () => {
     expect(ce.expr('n').isInteger).toBe(true);
     expect(ce.verify(ce.expr(['GreaterEqual', 'n', 1]))).toBe(true);
     expect(ce.verify(ce.expr(['Greater', 'n', 0]))).toBe(true);
-    // No destructive retype: only the integer refinement
-    expect(ce.expr('n').type.toString()).toBe('integer');
+    // No destructive retype: the integer refinement plus, since §5.8 A2,
+    // the Range membership's own lower bound.
+    expect(ce.expr('n').type.toString()).toBe('integer<1..>');
   });
 
   it('stays undefined without the assumption', () => {

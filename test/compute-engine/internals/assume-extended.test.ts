@@ -35,7 +35,9 @@ describe('Element(n, Range(1, +oo))', () => {
 
   it('refines n to integer', () => {
     expect(ce.expr('n').isInteger).toBe(true);
-    expect(ce.expr('n').type.toString()).toBe('integer');
+    // Since §5.8 A2 the Range membership's bound (`n ≥ 1`) refines the
+    // type to the proven range, not bare `integer`.
+    expect(ce.expr('n').type.toString()).toBe('integer<1..>');
   });
 
   it('stores the lower bound n >= 1', () => {
@@ -325,7 +327,10 @@ describe('Element(x, Interval(...))', () => {
         })
       )
     ).toBe('ok');
-    expect(ce.expr('x').type.toString()).toBe('real');
+    // Since §5.8 A2 the interval membership's bounds refine the type: the
+    // open lower bound at 0 contributes the exact `& !0` exclusion, the
+    // closed upper bound the range. The stored facts below are unchanged.
+    expect(ce.expr('x').type.toString()).toBe('(real<0..10>) & !0');
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(0)).toBe(true);
     expect(bounds.lowerStrict).toBe(true);
@@ -576,7 +581,10 @@ describe('regression: bare-symbol inequalities keep historical behavior', () => 
   it('assume(x > 4) declares x real and stores the bound', () => {
     const ce = freshEngine();
     expect(ce.assume(ce.expr(['Greater', 'x', 4]))).toBe('ok');
-    expect(ce.expr('x').type.toString()).toBe('real');
+    // Since §5.8 A2 the literal bound refines the type to the proven
+    // range (the strict bound is approximated by its closed range); the
+    // stored assumption facts below still carry the exact strict bound.
+    expect(ce.expr('x').type.toString()).toBe('real<4..>');
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(4)).toBe(true);
     expect(bounds.lowerStrict).toBe(true);

@@ -1220,3 +1220,162 @@ function containsArm(
       return true;
   }
 }
+
+/**
+ * The sign every value admitted by a numeric type must have, or `undefined`
+ * when the type does not decide one.
+ *
+ * This is how a *ranged declaration* reaches the sign channel: a symbol
+ * declared `integer<1..>` is positive, `real<0..>` is non-negative,
+ * `real<..0>` is non-positive, and the intersection spelling of "positive"
+ * — `real<0..> & !0` — combines a bound with a `!0` exclusion. A value type
+ * (`21`, `-3`) answers with its exact sign.
+ *
+ * Sound rules only:
+ * - A range claims a sign only when its BASE excludes NaN — every numeric
+ *   primitive except `number` does (NaN is representable only by `number`)
+ *   — and is real-valued (a complex or imaginary base has no sign).
+ *   The infinities are signed reals here (`+∞` is positive), so an
+ *   unbounded side or a `non_finite_number` base does not block a claim.
+ * - An intersection may combine facts from its members (the intersection is
+ *   a subset of each member, so any member's sign constraint holds); members
+ *   that carry no sign information are ignored.
+ * - A union claims only what EVERY member proves; one undecided member makes
+ *   the union undecided.
+ *
+ * The result vocabulary is the subset of the engine's `Sign` type that a
+ * type can express (a type never proves `unsigned`).
+ */
+const REAL_NAN_FREE_PRIMITIVES = new Set([
+  'integer',
+  'rational',
+  'real',
+  'finite_integer',
+  'finite_rational',
+  'finite_real',
+  'non_finite_number',
+]);
+
+export function signOfType(
+  t: Readonly<Type> | undefined,
+  seen?: Set<object>
+):
+  | 'positive'
+  | 'negative'
+  | 'zero'
+  | 'non-negative'
+  | 'non-positive'
+  | 'not-zero'
+  | undefined {
+  if (t === undefined || typeof t === 'string') return undefined;
+  // A TRANSPARENT alias is semantically identical to its definition
+  // (`type alias positive_int = integer<1..>`), so unfold it; a nominal
+  // reference stays opaque. The `seen` set breaks a recursive alias.
+  if (t.kind === 'reference') {
+    if (!t.alias || t.def === undefined) return undefined;
+    seen ??= new Set();
+    if (seen.has(t)) return undefined;
+    seen.add(t);
+    return signOfType(t.def, seen);
+  }
+  switch (t.kind) {
+    case 'value': {
+      const v = t.value;
+      if (typeof v !== 'number' || Number.isNaN(v)) return undefined;
+      return v > 0 ? 'positive' : v < 0 ? 'negative' : 'zero';
+    }
+    case 'numeric': {
+      // Only a real-valued, NaN-free base can claim a sign (see above).
+      if (
+        t.type === 'number' ||
+        t.type === 'complex' ||
+        t.type === 'finite_complex' ||
+        t.type === 'imaginary'
+      )
+        return undefined;
+      const lo = t.lower ?? -Infinity;
+      const hi = t.upper ?? Infinity;
+      if (lo > 0) return 'positive';
+      if (hi < 0) return 'negative';
+      if (lo === 0 && hi === 0) return 'zero';
+      if (lo === 0) return 'non-negative';
+      if (hi === 0) return 'non-positive';
+      return undefined;
+    }
+    case 'negation':
+      // A BARE `!0` proves no sign: it is the complement of the value `0`
+      // over the whole type universe, so it admits strings, collections and
+      // NaN — none of which has a sign. The zero exclusion becomes usable
+      // only inside an intersection whose other members prove a NaN-free
+      // real domain (`real<0..> & !0`), which the intersection arm below
+      // handles by reading the negation member directly.
+      return undefined;
+    case 'intersection': {
+      let ge0 = false; // every admitted value is >= 0
+      let le0 = false; // every admitted value is <= 0
+      let notZero = false; // no admitted value is 0
+      // A sign claim needs at least one member proving a NaN-free real
+      // domain (`real`, a range over one, a numeric value): `!0` alone, or
+      // `!0 & string`, must claim nothing.
+      let realDomain = false;
+      for (const member of t.types) {
+        if (typeof member === 'string') {
+          if (REAL_NAN_FREE_PRIMITIVES.has(member)) realDomain = true;
+          continue;
+        }
+        if (
+          member.kind === 'negation' &&
+          typeof member.type === 'object' &&
+          member.type.kind === 'value' &&
+          member.type.value === 0
+        ) {
+          notZero = true;
+          continue;
+        }
+        if (
+          member.kind === 'numeric' &&
+          REAL_NAN_FREE_PRIMITIVES.has(member.type)
+        )
+          realDomain = true;
+        const s = signOfType(member, seen);
+        if (s === undefined) continue;
+        realDomain = true; // only a numeric member answers a sign
+        if (s === 'positive' || s === 'zero' || s === 'non-negative')
+          ge0 = true;
+        if (s === 'negative' || s === 'zero' || s === 'non-positive')
+          le0 = true;
+        if (s === 'positive' || s === 'negative' || s === 'not-zero')
+          notZero = true;
+      }
+      if (!realDomain) return undefined;
+      // ge0 ∧ le0 ∧ notZero is the empty set; claim nothing for it.
+      if (ge0 && le0) return notZero ? undefined : 'zero';
+      if (ge0) return notZero ? 'positive' : 'non-negative';
+      if (le0) return notZero ? 'negative' : 'non-positive';
+      return notZero ? 'not-zero' : undefined;
+    }
+    case 'union': {
+      let mayNeg = false;
+      let mayZero = false;
+      let mayPos = false;
+      for (const member of t.types) {
+        const s = signOfType(member, seen);
+        if (s === undefined) return undefined;
+        if (s === 'negative' || s === 'non-positive' || s === 'not-zero')
+          mayNeg = true;
+        if (s === 'zero' || s === 'non-negative' || s === 'non-positive')
+          mayZero = true;
+        if (s === 'positive' || s === 'non-negative' || s === 'not-zero')
+          mayPos = true;
+      }
+      if (!mayNeg && !mayZero) return 'positive';
+      if (!mayPos && !mayZero) return 'negative';
+      if (!mayNeg && !mayPos) return 'zero';
+      if (!mayNeg) return 'non-negative';
+      if (!mayPos) return 'non-positive';
+      if (!mayZero) return 'not-zero';
+      return undefined;
+    }
+  }
+  return undefined;
+}

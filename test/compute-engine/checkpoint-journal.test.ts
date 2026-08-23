@@ -239,11 +239,14 @@ describe('funnel 2 — type writes', () => {
 });
 
 describe('funnel 2 — the read-driven type revision', () => {
-  test('a revision performed by the `type` GETTER is rewound', () => {
-    // `_reviseInferredType` re-reads an inferred type against its value's live
-    // type and writes `_type` from the getter. It can be the ONLY write to a
-    // long-lived record in a window, so there is no other snapshot to fall
-    // back on.
+  test('a `.type` read inside a checkpoint window writes NOTHING (R4)', () => {
+    // Since R4 (`docs/plans/2026-08-22-type-handlers-on-types.md` §4.2,
+    // re-ratified 2026-08-22) `_reviseInferredType` is a LIVE READ: it
+    // answers with the value's current type but writes no `_type`, bumps no
+    // `_writeVersion`, and journals nothing — so there is nothing for a
+    // restore to rewind, and the post-restore answer tracks the restored
+    // dependency by itself. The `type-write` journal hook stays for the two
+    // explicit setters (`set type`, `_setElementRefinement`).
     const ce = new ComputeEngine();
     executeEpsil(ce, 'base = 1');
     executeEpsil(ce, 'derived = base + 1');
@@ -252,9 +255,11 @@ describe('funnel 2 — the read-driven type revision', () => {
 
     const w = inWindow(ce, () => {
       executeEpsil(ce, 'base = 1.5');
-      // The read is what performs the revision — nothing else writes to
-      // `derived`'s record in this window.
+      const writesBefore = half._writeVersion;
+      // The read answers the LIVE type…
       half.type;
+      // …and writes nothing on the record.
+      expect(half._writeVersion).toBe(writesBefore);
     });
 
     restore(ce, w);
