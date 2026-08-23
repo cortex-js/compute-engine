@@ -88,10 +88,10 @@ export function compile<
   // targets, which keep the real kernel. A caller passing it globally must not
   // see a shader compilation decline with `unsupported-mode`; on such a
   // target the alias is dropped and the target's default mode applies.
-  // Every compilation route funnels through this entry, so the shared
-  // per-compilation budgets (the antiderivative pool) reset here; compileRoot
-  // resets them as well for callers that drive a raw target directly.
-  BaseCompiler.resetSharedCompilationBudgets();
+  // (The shared per-compilation budgets — the antiderivative pool — are NOT
+  // reset here: this entry is not the only compilation route (a registered
+  // target invoked directly bypasses it), so the reset lives at the depth-0
+  // boundary of `BaseCompiler.compile`, which every route crosses.)
 
   const deprecated = applyDeprecatedModeOptions(options);
   options = deprecated.options;

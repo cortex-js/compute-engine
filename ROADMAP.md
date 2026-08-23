@@ -567,6 +567,43 @@ back with the O9/§4.3 literal-type evidence work, which is already
 scheduled. Path (2), the Epsil-side check for the symbolic case, is to be
 decided when §4.3 lands, not before.
 
+### A canonical rewrite drops the rewritten operator's stricter parameter contract (OPEN, low — residue class identified by the §4.4 fuzz, 2026-08-23)
+
+When canonicalization rewrites a call into a different operator, the
+original operator's declared signature stops governing anything: no
+dispatch-time mechanism can enforce parameters of an operator that no
+longer exists in the tree. `Rational(3, x)` with `x := 2.5` rewrites to
+`Divide(3, x)` and evaluates to `1.2` — the `integer?` second parameter of
+`Rational` is never enforced on the symbol route, while the literal
+`Rational(3, 2.5)` refuses at boxing (concrete values decide exactly), so
+the two routes disagree. Same family: `NotDivides(a, b)` (declared
+`(integer, integer)`) rewrites to `Not(Divides(a, b))` whose `Divides`
+declares `(number, number)`, and unary variadic folds (`Subtract(x)` → `x`)
+consume the operand before any check. The conformance fuzz
+(`runtime-conformance-fuzz.test.ts`) skips probes whose canonical operator
+differs from the operator under test, with this reasoning in its header.
+Fix shapes, if ever scheduled: the rewriting canonical handler validates
+against its OWN declared signature before rewriting (per-operator work,
+only worthwhile where the dropped contract matters), or the rewrite is
+accepted as the semantics and the declared signature narrowed to match
+what the rewrite preserves.
+
+### `Histogram`/`BinCounts` declare their scalar bin-spec `number` but treat it as an integer COUNT (OPEN, low — found by the §4.4 dual review, 2026-08-23)
+
+The bin-spec parameter is declared `number | list<number>`; the scalar arm
+is semantically a bin COUNT, and `computeBinning`
+(`library/statistics.ts`) reads it with `toInteger`, which `Math.round`s —
+`BinCounts(data, 2.5)` silently computes 3 bins, on the literal route and
+the symbol route alike (2.5 conforms to the DECLARED `number`, so the §4.4
+runtime conformance check rightly admits it — the declaration, not the
+check, is what under-specifies). The string-bin-spec half of the review
+finding is already closed (a string there now errors instead of being
+iterated character-by-character into NaN bin edges — the mixed-union
+scoping of `runtimeCheckExemptParam`). Deciding fix: declare the scalar
+arm `integer` — which flips today's working-but-rounding literal calls
+(`BinCounts(data, 2.5)`) from a value to an error, a user-visible change
+that needs a call on whether fractional bin counts were ever intended.
+
 ### A pre-canonicalization validation phase (OPEN, design — raised by the user 2026-08-21 at the item-219 ruling)
 
 Item 219 is the second time a computation has needed to VALIDATE an

@@ -1105,9 +1105,10 @@ export class BaseCompiler {
       if (expr !== undefined)
         for (const n of collectUsedNames(expr)) target.naming.usedNames.add(n);
     } else target.naming = BaseCompiler.newNamingContext(expr);
-    // A fresh compilation gets a fresh shared antiderivative budget — see
-    // ANTIDERIVATIVE_COMPILATION_BUDGET_MS.
-    BaseCompiler.resetSharedCompilationBudgets();
+    // (The shared antiderivative budget is NOT reset here: registered
+    // targets compile through `compileCseRoot` without passing this entry,
+    // so the reset lives at the depth-0 boundary of `compile` below, which
+    // every route crosses.)
     target.beginCompilation?.(target);
     return BaseCompiler.compile(expr, target, prec);
   }
@@ -1250,6 +1251,16 @@ export class BaseCompiler {
       // The fold-value memo has the same staleness boundary: engine symbol
       // values are stable within one compilation but not across them.
       BaseCompiler._foldValueMemo = new WeakMap();
+      // A fresh outermost compilation gets a fresh shared antiderivative
+      // pool. This is the only reset: putting it anywhere shallower missed a
+      // route — registered targets compile through `compileCseRoot`, never
+      // `compileRoot` or the public `compile()` entry, so a compilation that
+      // drained the pool left every later direct-target compilation skipping
+      // symbolic closed forms permanently. Nested compilations (depth > 0)
+      // deliberately consume the OUTER pool, so the aggregate stays bounded
+      // by one pool per outermost entry; an auto-mode escalation retry
+      // re-enters at depth 0 and gets its own pool.
+      BaseCompiler.resetSharedCompilationBudgets();
     }
     // The complex-promotion opt-in is latched from the OUTERMOST compilation
     // only (`complexPromotion`). The analysis here and every target emitter
@@ -9846,7 +9857,7 @@ export class BaseCompiler {
 
   /**
    * Shared wall-clock budget for ALL antiderivative-first attempts in one
-   * compilation (one `compileRoot` call).
+   * outermost compilation.
    *
    * The per-node budget above bounds one attempt, but an emission can carry
    * hundreds of `Integrate` nodes — a macro-expanded consumer document
@@ -9858,9 +9869,17 @@ export class BaseCompiler {
    * straight to its numeric emitter. Sized for a handful of hard (≈200 ms)
    * legitimate resolutions plus dozens of ordinary (≈ms) ones.
    *
-   * Reset in `compileRoot`. A nested `compileRoot` (a target compiling a
-   * sub-runner mid-compilation) resets it too, which can only GRANT budget —
-   * the aggregate stays bounded per outer call by (nested roots + 1) × pool.
+   * Reset at each DEPTH-0 entry of `BaseCompiler.compile` — the boundary
+   * every route crosses: `compileRoot` (raw custom targets),
+   * `compileCseRoot` (registered targets invoked directly), the public
+   * `compile()` entry, and each attempt of an auto-mode escalation. Nested
+   * compilations consume the outer pool rather than getting a fresh one, so
+   * the aggregate is bounded by one pool per depth-0 entry. A caller that
+   * deliberately issues several root compilations against one target — a
+   * multi-statement shader body compiles each statement separately
+   * (`compileShaderBody`) — therefore gets one pool per statement, which
+   * keeps each statement's compile time bounded exactly as one expression's
+   * is.
    */
   private static readonly ANTIDERIVATIVE_COMPILATION_BUDGET_MS = 4000;
 
@@ -9872,9 +9891,10 @@ export class BaseCompiler {
 
   /**
    * Start a fresh compilation's shared budgets — today just the
-   * antiderivative pool. Called from the public `compile()` entry
-   * (`compile-expression.ts`), which every route passes through, and from
-   * `compileRoot` for callers that drive a target directly.
+   * antiderivative pool. Called from ONE place: the depth-0 boundary of
+   * `BaseCompiler.compile`, which every compilation route crosses (see
+   * {@link ANTIDERIVATIVE_COMPILATION_BUDGET_MS} for why no shallower entry
+   * covers them all).
    */
   static resetSharedCompilationBudgets(): void {
     BaseCompiler.antiderivativeBudgetLeftMs =

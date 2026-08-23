@@ -1,5 +1,28 @@
 ## Unreleased
 
+### Bug Fixes
+
+- **A compilation that exhausts the shared antiderivative pool no longer
+  starves later compilations of closed forms.** The per-compilation pool
+  bounding symbolic antiderivative-first attempts (added with the item-226
+  fix) was reset only in `compileRoot` and the public `compile()` entry —
+  but registered targets invoked directly
+  (`ce._getCompilationTarget('javascript').compile(...)`) enter through
+  `compileCseRoot`, which reset nothing. Once any compilation drained the
+  pool, every later direct-target compilation skipped the symbolic attempt
+  permanently and emitted runtime quadrature (`_SYS.integrate(…)`) where a
+  closed form exists (`∫₀ᵗ 2x dx` compiled to a quadrature call instead of
+  `t²`). The reset now lives at the one choke point every route crosses —
+  the depth-0 boundary of `BaseCompiler.compile` — which also gives each
+  auto-mode escalation attempt its own pool. Nested compilations now
+  consume the outer pool instead of re-granting themselves a fresh one, so
+  the aggregate stays bounded by one pool per depth-0 compilation entry (a
+  multi-statement shader body, which compiles each statement as its own
+  root, gets one pool per statement). Pinned in
+  `compile-antiderivative-budget.test.ts`.
+  (Surfaced by the dual review of the constant-fold-before-type-read
+  change.)
+
 ### Breaking Changes
 
 - **Declared signatures admit by overlap; conformance is checked at
@@ -98,11 +121,24 @@
   the runtime budget's `entire` now answers a real (coarse) enclosure at
   ~28 pieces per level in milliseconds. Composition through by-reference
   function calls shows no `Integrate` node in the tree and is still
-  bounded at run time by `INTERVAL_NESTED_QUADRATURE_BUDGET`. Both
+  bounded at run time by `INTERVAL_NESTED_QUADRATURE_BUDGET`. A
+  `Sum`/`Product` with literal bounds multiplies its body's integral runs
+  by its iteration count in the sizing; with symbolic bounds the body is
+  counted once and that shape, too, is runtime-backstopped. Both
   mechanisms are pinned in `compile-interval-integrate.test.ts`.
   (Tycho item 226)
 
 ### Bug Fixes
+
+- **`Histogram`/`BinCounts` no longer round a non-integer scalar bin
+  spec.** The scalar bin spec is a bin COUNT, but it was read with a
+  rounding conversion, so `BinCounts(data, 2.5)` silently answered the
+  3-bin question. A non-integer scalar now stays INERT — the documented
+  contract, which lets Desmos-style bin-WIDTH spellings
+  (`histogram(L, .05)`) parse and remain for the importer to translate.
+  A string bin spec, reachable through a permissively-typed symbol, is now
+  an `incompatible-type` error instead of being iterated
+  character-by-character into `NaN` bin edges.
 
 - **Integer-domain operators no longer silently round a non-integer
   operand delivered through a permissively-typed symbol.** With `u: any`
@@ -200,7 +236,11 @@
   With it, the antiderivative-first symbolic attempts of one compilation now
   share a single 4 s wall-clock pool instead of arming a fresh 2 s span per
   `Integrate` node, so a many-hundred-node emission degrades to its numeric
-  emitters at bounded compile-time cost. (Tycho item 226)
+  emitters at bounded compile-time cost. The pool resets at every
+  compilation entry — the public `compile()`, `compileRoot` (raw custom
+  targets), and `compileCseRoot` (every registered target's root) — so no
+  compilation inherits an earlier one's depleted pool; pinned by draining
+  the pool and compiling on each route. (Tycho item 226)
 
 - **An `assume()` range no longer leaks through `Add` and `Negate`.**
   After `assume(x > -1); assume(y > -1)`, `x + y` typed `real<-1..>` —
