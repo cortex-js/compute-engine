@@ -568,6 +568,17 @@ function pipeStageArityError(stage: Expression): Expression | undefined {
  * canonicalization supplies its parameter — so `pipeImplicitMap` makes the
  * final decision, including its string-topic and whole-collection-annotation
  * escapes.
+ *
+ * The placeholder declarations that canonicalization makes are asked to stay
+ * off the `any` cache axis (`scratchDeclarations`): this runs inside a type
+ * read, and an advance there retires the `_type`/`_sgn` memo of every
+ * expression in the engine — including the memo below, which is validated on
+ * that same generation. What still advances the axis is the declaration of the
+ * literal's own parameter into its `block.localScope`, a scope the canonical
+ * stage captures and that therefore outlives this read; exempting it would
+ * leave stale answers behind, which is the failure the axis exists to prevent.
+ * So a re-derivation costs ONE advance rather than two — measured on
+ * `Pipe(L, (_) ↦ _^2)` re-read after an unrelated declaration.
  */
 function pipeImplicitMapType(
   ce: ComputeEngine,
@@ -588,7 +599,7 @@ function pipeImplicitMapType(
   const mapped = pipeImplicitMap(
     ce,
     topic.canonical,
-    canonicalWithFreshPlaceholders(stage),
+    canonicalWithFreshPlaceholders(stage, { scratchDeclarations: true }),
     stage
   );
   const type = mapped?.type.type;

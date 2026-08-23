@@ -1544,8 +1544,30 @@ export const WILDCARD_SYMBOLS = [
  * scope is `noAutoDeclare`, so a genuine free variable in the operand still
  * auto-declares in the caller's scope exactly as before; only the
  * placeholders are intercepted.
+ *
+ * `scratchDeclarations` exempts the placeholder declarations — and ONLY those
+ * — from advancing the engine's `any` cache axis. Pass it when this runs
+ * inside a computation whose own caches key on that axis, which today means a
+ * TYPE handler (`Pipe`'s, via `pipeImplicitMapType`): every advance retires
+ * the `_type`/`_sgn` memo of every expression in the engine, including the
+ * ones the enclosing type walk is filling, so a type read that advances the
+ * axis invalidates its own footing and can never settle. The exemption is
+ * sound here for a reason that does not depend on the caller, and it is a
+ * different reason from the scratch scopes that are pushed and popped (`Map`'s
+ * element-type probe): the scope is created in THIS call, and every
+ * placeholder binding is installed into it before the scope is ever used to
+ * resolve a name, so no cached answer anywhere can have been computed against
+ * that scope in the absence of those bindings. The registration is unwound
+ * before canonicalization for the same reason it exists — a declaration that
+ * canonicalization aims at a longer-lived scope (a function literal's
+ * `block.localScope`, which the canonical literal captures and outlives this
+ * call by) MUST keep its axis advance. It stays off by default so the
+ * evaluate-time callers keep advancing the axis exactly as they did.
  */
-export function canonicalWithFreshPlaceholders(expr: Expression): Expression {
+export function canonicalWithFreshPlaceholders(
+  expr: Expression,
+  options?: { scratchDeclarations?: boolean }
+): Expression {
   const names = WILDCARD_SYMBOLS.filter((name) => expr.has(name));
   if (names.length === 0) return expr.canonical;
   const ce = expr.engine;
@@ -1554,8 +1576,20 @@ export function canonicalWithFreshPlaceholders(expr: Expression): Expression {
     bindings: new Map(),
     noAutoDeclare: true,
   };
-  for (const name of names)
-    ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
+  const scratch = options?.scratchDeclarations === true;
+  if (scratch) ce._scratchDeclarationScopes.push(scope);
+  try {
+    for (const name of names)
+      ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
+  } finally {
+    if (scratch) {
+      const top = ce._scratchDeclarationScopes.pop();
+      console.assert(
+        top === scope,
+        'placeholder scope registration unbalanced'
+      );
+    }
+  }
   return ce._inScope(scope, () => expr.canonical);
 }
 

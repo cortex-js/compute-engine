@@ -2745,17 +2745,18 @@ describe('Dot / Cross', () => {
           .expr(['Dot', ['Tuple', 'r1', 'r2'], ['Tuple', 1, 2]])
           .type.toString()
       ).toBe('finite_real');
-      // A complex component makes the sum complex — and whatever the
-      // arithmetic handlers answer for the written-out form is what `Dot`
-      // answers, which is the property worth pinning rather than the literal
-      // spelling of any one cell.
+      // A complex component takes the sum off the real chain. This used to be
+      // pinned as equality with the WRITTEN-OUT sum, which reported `complex`:
+      // canonicalizing `Multiply(z, 1)` folded it to `z`, so the sum inherited
+      // the symbol's declared type verbatim. `Dot` no longer builds that sum —
+      // it runs the arithmetic type handlers over the components directly — so
+      // the answer is now the ladder's, which reads a `complex` symbol of
+      // unknown finiteness as a generic finite point (user-ruled 2026-08-22,
+      // the same ruling that moved the `real` and `integer` rows; see
+      // `dot-type-read-purity.test.ts` for the full table).
       expect(
         eng.expr(['Dot', ['Tuple', 'z', 'r2'], ['Tuple', 1, 2]]).type.toString()
-      ).toBe(
-        eng
-          .expr(['Add', ['Multiply', 'z', 1], ['Multiply', 'r2', 2]])
-          .type.toString()
-      );
+      ).toBe('finite_number');
     });
 
     it('a real point inner product composes into a `real` slot', () => {

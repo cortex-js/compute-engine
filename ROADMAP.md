@@ -550,14 +550,93 @@ proxy gates on `CE_TYPE_VALUE_BLIND` / `CE_TYPE_LITERAL` and is not for
 landing.
 
 Design and implementation draft:
-`docs/plans/2026-08-22-type-handlers-on-types.md`. Status 2026-08-22: Step 0
-(type assertions say which drift they guard — 22 conversions,
-`expectTypeBetween` in `test/utils.ts`, rule in
-`docs/COMMENTING-GUIDELINES.md`) is executed and the re-measured residue is
-recorded there as the baseline (§3.4). The "closed complex constants" group
-above was mis-filed: the lost facts are the SIGN of `π`/`e` (held value, not
-type) and the CLOSEDNESS `poleReciprocalType` reads via `isConstant`; both
-are ruling items (§6.1, §6.5), not idiom swaps.
+`docs/plans/2026-08-22-type-handlers-on-types.md` (third draft, 2026-08-22).
+The draft reframes this entry: the GOAL is type derivation that does not
+modify engine state (the item-219 pattern); the value-read survey above
+measured precision, not side effects. Step 0 (type assertions say which
+drift they guard — `expectTypeBetween` in `test/utils.ts`, rule in
+`docs/COMMENTING-GUIDELINES.md`) is executed (d3faf62d); residue baseline
+57. Rulings 2026-08-22 (doc §6): declared signatures admit by OVERLAP and
+check at evaluation (the arithmetic model; `couldMatch` is comparability,
+not overlap — build on D6.2 `overlapsForDeferredValidation`); precision
+loss accepted; literal types for `0`/`1` only; a pure facts channel (sign,
+closedness) beside the types; `_reviseInferredType` moves to a write site;
+`Pipe`/`Dot` fixed now. The "closed complex constants" group above was
+mis-filed: the lost facts are the SIGN of `π`/`e` and the CLOSEDNESS
+`poleReciprocalType` reads via `isConstant`.
+
+### Type derivation reaches state mutation at 7 handlers, 2 `elttype` handlers and 1 getter — AUDITED 2026-08-22 (OPEN, defects; fixes scheduled by the type-handler design)
+
+A transitive call-graph audit (depth ≤ 8) of every `type:` handler in
+`library/*.ts` — 220 arrow-form handlers plus ~65 string/named entries — for
+the side-effect pattern behind item 219 ("Reading a nested lazy view's type
+was exponential in depth": a type derivation that writes engine state
+invalidates the caches it is filling). 213 handlers reach only pure leaves.
+The exceptions, each a live or latent instance of the 219 pattern:
+
+- `Pipe` (`library/core.ts`, `pipeImplicitMapType`): canonicalizes both
+  held operands to decide implicit mapping, and `canonicalWithFreshPlaceholders`
+  (`src/compute-engine/function-utils.ts:1546`) declares the placeholder into a scope that is NOT registered
+  in `_scratchDeclarationScopes` — so every type read of a `Pipe` stage
+  advances `_anyVersion` and retires every `_type`/`_sgn` memo
+  mid-derivation. Memoized on `_anyVersion`, which the read itself moves.
+  FIXED 2026-08-22 for the placeholder declarations (`scratchDeclarations`
+  option, pinned in `pipe-type-read-purity.test.ts`): drift per
+  re-derivation 2 → 1. The residual advance is the literal's own parameter
+  declared into a `block.localScope` the canonical literal keeps — not
+  exemptable under the scope-targeting rule (doc §4.1, open item O5).
+- `Dot` (`linear-algebra.ts`, `innerProductType`): builds and canonicalizes
+  n+1 `Multiply`/`Add` applications per type read, no memo. The audit's
+  "`_infer` reachable" claim did NOT reproduce (measured: drift 0 on 20
+  shapes); the cost is ≈44 µs of allocation per re-derivation, and a
+  canonicalization-free rewrite NARROWS two declared-symbol rows (doc §4.1,
+  open item O6). Today's table is pinned in `dot-type-read-purity.test.ts`.
+- `Set` (`collections.ts`, `parseSetComprehension`, reached from the `type:`
+  handler and from `Set.elttype`): canonicalizes the domain/condition
+  sub-expressions (auto-declare, `_infer` writes reachable), no memo; and
+  `Set.elttype` EVALUATES each domain element (`enumerateSetComprehension`).
+- `Interval.elttype`: `.N()` on both endpoints (`numerics/interval.ts`).
+- `JacobianMatrix` (`calculus.ts`): canonicalizes its operand and
+  beta-reduces via `resolveToList`, no memo.
+- `Sqrt` (`arithmetic.ts`, `closedRealSign` in `library/type-handlers.ts`):
+  `x.N()` during a type query — guarded (`isPure`, no unknowns), recorded
+  for completeness.
+- The getter: `op.type` on a symbol whose recorded type is INFERRED and
+  refutable runs `_reviseInferredType`
+  (`boxed-expression/boxed-value-definition.ts`), which journals a
+  `type-write` and advances `_anyVersion` — a read that moves the cache
+  axis, reachable from any of the 213 pure handlers. The code calls it a
+  deliberate bounded exception; by the 219 standard it is the pattern.
+
+Not traced: dynamic `def.type`/`elttype` dispatch edges beyond the two
+`elttype` handlers above, and call depth > 8. Full table (file:line for
+every claim) in the audit recorded by
+`docs/plans/2026-08-22-type-handlers-on-types.md` §2.5; the design's
+success criterion — item-219 drift 0 with the `scratch` exemption made a
+no-op — is what closes each row.
+
+### `_reviseInferredType`'s generation gate keys on `semantic` while the value it revises keys on `any` — STALE inferred types — FOUND 2026-08-22 (OPEN, defect; fix scheduled with the type-handler design §4.2)
+
+`BoxedValueDefinition.type` (`boxed-expression/boxed-value-definition.ts`,
+`_reviseInferredType`) re-checks an INFERRED type against the stored value's
+live type once per `_semanticVersion`. The live type (`value.type`) is a
+memo keyed on `_anyVersion`. Any refuting change that advances `any` but not
+`semantic` — a fresh `declare`, a `binding-repair`, another `type-write`, a
+non-clean `scope-pop` — or a zero-mask change (`inference{valueType}`,
+`object-store`, scratch `declare`) is invisible to the gate for the rest of
+that semantic generation. Reproduced: `y := x + 1` (inferred `number`),
+read `y.type`, then `x` inferred to `vector<integer^2>` (zero mask) and an
+unrelated `assign('z', 1)` (advances `any` only) — `y.type` still answers
+`number`; the stored value's live type is `vector<integer^2>`. A pure live
+read (return `value.type` when it refutes the recorded guess, with no
+`_type` write, no `type-write` event, no journal entry) answers correctly,
+was A/B'd identical on every pinning scenario
+(`inferred-type-revision.test.ts`, `use-narrowing-evidence-guard`,
+`placeholder-signature-refinement`, `assign-recursion`, item 219), and
+removes the read-driven `_anyVersion` advance. The `Function`-literal guard
+and the once-per-generation cycle property must survive (the latter is
+covered by `cachedValue`'s in-flight stamping but is not pinned). Design:
+`docs/plans/2026-08-22-type-handlers-on-types.md` §4.2.
 
 ### A pre-canonicalization validation phase (OPEN, design — raised by the user 2026-08-21 at the item-219 ruling)
 

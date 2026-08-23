@@ -191,7 +191,7 @@ refinement anywhere in the engine while guarding nothing in particular. The
 review question for a new one: which drift would this catch that
 `expectTypeBetween` would not? If the answer is "none", use the helper. (The
 measured cost of the unstated pins, and the conversions that motivated this
-rule, are in `docs/plans/2026-08-22-type-handlers-on-types.md` §2.5 and §3.)
+rule, are in `docs/plans/2026-08-22-type-handlers-on-types.md` §2.3 and §3.)
 
 ## Review checklist
 

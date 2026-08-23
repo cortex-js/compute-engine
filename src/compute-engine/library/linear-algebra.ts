@@ -1,5 +1,6 @@
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { widen } from '../../common/type/utils.js';
 import { ListType, Type, TypeString } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
@@ -155,9 +156,24 @@ function rank1Components(x: Expression): ReadonlyArray<Expression> | undefined {
  * accepts it, and `Hypot(Dot(p, p), Dot(q, q))` reported `incompatible-type`
  * on an expression that is real by construction.
  *
- * Built with `ce.function` rather than `mul()`/`add()`: those fold exact
- * literal operands to machine floats, which is a value-level shortcut this
- * type-level question has no use for.
+ * Nothing is BUILT to get there. `Multiply`'s ladder is applied to the two
+ * component expressions directly (`componentProductType`) and the products are
+ * joined by {@link innerProductSumType}, so a type read allocates no
+ * expression, canonicalizes nothing and writes no engine state. Constructing
+ * `Multiply(aᵢ, bᵢ)` and one `Add` over them — the earlier shape — canonicalized
+ * n+1 applications on every read that a generation change had un-cached, ~44 µs
+ * for a three-component `Dot` against ~0.05 µs for a cached one.
+ *
+ * Dropping the construction drops the FOLDS canonicalization performed, and
+ * that changes two answers (user-ruled 2026-08-22, accepted): `Multiply(a, 1)`
+ * used to reduce to `a`, so a sum over components declared `real` or `integer`
+ * inherited those declared types — which admit ±∞. The ladder instead reads a
+ * bare `real` symbol as a generic finite point (the non-finite typing
+ * convention in ARCHITECTURE.md, the same reading `Multiply(a, b)` already
+ * reports for two `real` symbols), so `Dot((a, b), (1, 2))` now types
+ * `finite_real` and its integer twin `finite_integer`. The fold also carried a
+ * `finite_rational` product tier the ladder does not claim, so that row widens
+ * to `finite_real`.
  */
 function innerProductType(
   a: Expression,
@@ -170,8 +186,93 @@ function innerProductType(
   if (as === undefined || bs === undefined || as.length !== bs.length)
     return undefined;
   const ce = a.engine;
-  const terms = as.map((x, i) => ce.function('Multiply', [x, bs[i]]));
-  return ce.function('Add', terms).type;
+  // Every component is statically a number here: the only caller is `Dot`'s
+  // type handler, which admits an operand only when `isNumericTuple` holds or
+  // its type is a non-matrix `vector`, and `rank1Components` returns exactly
+  // that operand's components. A non-numeric component (an undeclared symbol,
+  // a boolean, a string, a nested tuple) therefore never reaches this
+  // function — the handler answers `value` before it is called.
+  const products: Type[] = [];
+  for (let i = 0; i < as.length; i++) {
+    const t = componentProductType(ce, as[i], bs[i]);
+    // A ladder that declines to sharpen leaves the whole sum at the operator's
+    // declared `number`; there is no sound narrower join without it.
+    if (t === undefined) return undefined;
+    products.push(t);
+  }
+  return innerProductSumType(products);
+}
+
+/**
+ * The type of one component-wise product `aᵢ·bᵢ`, obtained by running
+ * `Multiply`'s own type handler over the two component expressions.
+ *
+ * The handler is called directly, with an operand array that belongs to no
+ * expression: a type handler is contractually a function of its operands'
+ * TYPES (`types-definitions.ts`: "The arguments themselves should *not* be
+ * evaluated, only their types should be used"), so it needs no `Multiply`
+ * application to run on, and building one is what made this path expensive.
+ *
+ * Calling the handler rather than restating its reasoning is deliberate:
+ * `Multiply`'s numeric ladder — the integer/rational/real chain, the
+ * imaginary-parity closure (`i·i` is real), the non-finite and NaN cases, the
+ * tuple and tensor branches — is a hundred lines, and a copy of it here would
+ * drift from the moment either side moved. A hand-written type-level ladder
+ * was measured against it and lost two rows: it cannot tell a NaN literal from
+ * a symbol declared `number` (both spell their type `number`, only the value
+ * is provably NaN), nor prove the finite factor of `∞·3` non-zero, so it had
+ * to widen both to the top type.
+ *
+ * Returns `undefined` when the definition or its handler is absent, which is
+ * only possible on an engine whose standard library was replaced.
+ */
+function componentProductType(
+  ce: ComputeEngine,
+  x: Expression,
+  y: Expression
+): Type | undefined {
+  const def = ce.lookupDefinition('Multiply');
+  const handler = def && 'operator' in def ? def.operator.type : undefined;
+  if (typeof handler !== 'function') return undefined;
+  const t = handler([x, y], { engine: ce });
+  if (t === undefined) return undefined;
+  // Same normalization as the type-handler call site in `boxed-function.ts`: a
+  // handler may answer with a `BoxedType`, a structural `Type`, or a type
+  // STRING that still has to be parsed against the engine's resolver.
+  if (t instanceof BoxedType) return t.type;
+  return parseType(t, ce._typeResolver);
+}
+
+/**
+ * The type of the sum of the component-wise products, from the product types
+ * alone.
+ *
+ * This is the numeric tail of `addType` (`arithmetic-add.ts`) applied to
+ * types: the products are scalars by construction — every component was
+ * checked to be a number, and `Multiply`'s ladder maps numbers to numbers — so
+ * none of that function's tuple, tensor, collection or broadcast branches can
+ * apply, and what remains is the widening join plus two refinements it makes:
+ *
+ * - a single provably non-finite term among otherwise real terms is provably
+ *   ±∞ (`∞·3 + 2·4`), while two of them can cancel to NaN and a non-real
+ *   companion can produce `~oo`, both of which only the top type admits;
+ * - `imaginary` is not closed under addition — the imaginary parts can cancel
+ *   to 0, which is real — so a purely imaginary join reports `finite_complex`.
+ *
+ * A one-term sum is the term itself, as in `addType`'s single-argument
+ * shortcut: there is nothing to cancel, so an `imaginary` product stays
+ * `imaginary` and a non-finite one keeps its own tier.
+ */
+function innerProductSumType(types: ReadonlyArray<Type>): Type {
+  if (types.length === 1) return types[0];
+  const nonFinite = types.filter((t) => isSubtype(t, 'non_finite_number'));
+  if (nonFinite.length > 0) {
+    if (nonFinite.length === 1 && types.every((t) => isSubtype(t, 'real')))
+      return 'non_finite_number';
+    return 'number';
+  }
+  const t = widen(...types);
+  return t === 'imaginary' ? 'finite_complex' : t;
 }
 
 /**
