@@ -831,6 +831,27 @@ and the once-per-generation cycle property must survive (the latter is
 covered by `cachedValue`'s in-flight stamping but is not pinned). Design:
 `docs/plans/2026-08-22-type-handlers-on-types.md` §4.2.
 
+### Integer-domain operators ROUND a non-integer operand instead of refusing it — reachable today through an `any`-typed symbol — FOUND 2026-08-22 (OPEN, defect; fix = the runtime conformance check of the type-handler design §4.4)
+
+`toBigint` (`boxed-expression/numerics.ts`) rounds the real part of its
+operand by documented contract and ignores an imaginary part. The ~45
+operators of the number-theory and combinatorics families that call it
+(`FactorInteger`, `Divisors`, `PrimeFactors`, `NextPrime`, `NthPrime`,
+`Fibonacci`, `Lucas`, `PowerMod`, `JacobiSymbol`, `MoebiusMu`, the
+`Is*` predicates, Stirling/Catalan/Bernoulli, …) rely on the strict
+boxing-time gate (`validate.ts`, `!op.type.matches(param)`) to never
+deliver a non-integer. The gate does not cover an `any`-typed symbol, so
+today `u: any`, `u := 2.5`, `FactorInteger(u)` evaluates to `[(3, 1)]`,
+`NextPrime(u)` to `5`, `IsTriangular(u)` to `True`, and `Fibonacci(u)` with
+`u := 1 + 2i` to `1` — wrong values, not errors (measured: 95 operators ×
+4 wrong-tier values, 148 value rows, 0 throws; logs in the 2026-08-22
+session's scratchpad). The same rows become reachable through any
+`number`-declared symbol once declared signatures admit by overlap (R1).
+Fix: the generic runtime conformance check at non-lazy evaluate dispatch
+(design doc §4.4) — every affected operator is non-lazy, so no handler
+changes; pinned by `runtime-conformance-fuzz.test.ts` whose expected
+failures start at these 148 rows and must reach zero.
+
 ### A pre-canonicalization validation phase (OPEN, design — raised by the user 2026-08-21 at the item-219 ruling)
 
 Item 219 is the second time a computation has needed to VALIDATE an
