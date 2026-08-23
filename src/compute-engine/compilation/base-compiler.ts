@@ -830,6 +830,47 @@ export class BaseCompiler {
   private static readonly FOLD_OPERAND_PREC = 1000;
 
   /**
+   * Largest EXPANDED node count a symbol's assigned value may have before
+   * `tryFoldKnownSymbol` refuses to bake it into the generated source.
+   *
+   * The generated source is text, so a folded value that mentions the same
+   * sub-value from several places is written out once per PATH, not once per
+   * distinct node. A value that is a small shared graph can therefore emit an
+   * enormous program: the `f(n+1) = f(n) + 2 f(n)` tower grows by three
+   * distinct nodes per level while its emission quadruples. That is why the
+   * measure here is the expanded (per-path) node count computed by
+   * `expandedFoldSize`, and not the number of distinct nodes — no
+   * distinct-node cap can separate the two classes.
+   *
+   * Calibrated from both sides on the JavaScript target, by instrumenting
+   * this guard and reading the size of every fold performed:
+   * - Legitimate side: across sixteen compile test suites (1149 tests,
+   *   including `compile.test.ts`, `compile-assigned-symbol.test.ts`,
+   *   `compile-subtree-folding.test.ts` and `compile-cse.test.ts`) the largest
+   *   fold performed was 4 expanded nodes. A deliberately oversized ordinary
+   *   value — a symbol assigned a 60-term polynomial — expands to 297 nodes
+   *   and emits 1.5 KB, so the limit sits 5000x above what the corpus does
+   *   and about 67x above a value already far larger than anything measured.
+   * - Pathological side: the tower above expands to 4·2^n − 3 nodes and emits
+   *   about three characters per expanded node. Depth 12 (16 381 nodes, 49 KB
+   *   of source, ~8 s) is the deepest level still folded; depth 13 (32 765) is
+   *   refused, and depth 14 (65 533 nodes, 197 KB, ~17 s) is already past the
+   *   point where the compile visibly stalls, quadrupling with every level
+   *   after it.
+   * The limit therefore caps a single fold at roughly 60 KB of generated
+   * source. It bounds the blow-up rather than removing it: the general fix is
+   * common-subexpression binding, which would emit each shared node once.
+   */
+  private static readonly MAX_FOLD_EXPANDED_NODES = 20_000;
+
+  /**
+   * Characters of generated source per expanded node, measured on the
+   * JavaScript target (see `MAX_FOLD_EXPANDED_NODES`). Used only to put a
+   * human-readable size in the refusal message.
+   */
+  private static readonly FOLD_CHARS_PER_NODE = 3;
+
+  /**
    * Operator heads that are word-spelled infix/prefix **keywords** in some
    * targets (Python `and` / `or` / `not`), never function calls. The alphabetic
    * op-string of these heads must NOT be treated as a function-call name — that
@@ -11219,11 +11260,111 @@ export class BaseCompiler {
   ): string | undefined {
     const value = engine._getSymbolValue(id);
     if (value === undefined) return undefined;
+    BaseCompiler.assertFoldableSize(engine, id, value, target);
     // The generated code bakes this symbol's current value: record it in the
     // capture set (see `CompileTarget.symbolDeps`). Nested symbols inside the
     // value are recorded by the recursive compile below.
     target.symbolDeps?.add(id);
     return BaseCompiler.compile(value, target, BaseCompiler.FOLD_OPERAND_PREC);
+  }
+
+  /**
+   * Number of nodes the generated source would contain if `value` were folded
+   * in — the EXPANDED count, which charges a shared sub-value once per path
+   * that reaches it, because that is how many times the emitter writes it out.
+   *
+   * The walk itself stays linear in the number of DISTINCT nodes: each node
+   * object's expanded size is computed once and memoized under its own
+   * identity, so the tower whose emission quadruples per level is sized in a
+   * few dozen steps rather than by enumerating billions of paths. A symbol is
+   * charged the size of the value the emitter would fold in its place, which
+   * is where the per-path multiplication comes from; a name the target has
+   * already bound (a parameter, a loop index) or that the caller supplied
+   * through `vars` is a run-time variable, not a fold, and counts as one node.
+   *
+   * A value that refers to itself (`a := a + 1`, which the emitter cannot
+   * compile either) would make the walk non-terminating, so a node currently
+   * being sized counts as one node when it is re-entered.
+   *
+   * Children not reachable through `ops` (a dictionary's values) are followed
+   * explicitly. An application's operator HEAD is deliberately not charged: a
+   * head is either a target primitive or a user function the emitter declares
+   * ONCE as a shared local, so it does not multiply along paths. Anything else
+   * counts as a leaf, which can only make the count an underestimate — never
+   * an overestimate that would refuse a legitimate fold.
+   */
+  private static expandedFoldSize(
+    engine: ComputeEngine,
+    value: Expression,
+    target: CompileTarget<Expression>
+  ): number {
+    const memo = new Map<Expression, number>();
+    const inProgress = new Set<Expression>();
+
+    const walk = (node: Expression): number => {
+      const cached = memo.get(node);
+      if (cached !== undefined) return cached;
+      if (inProgress.has(node)) return 1;
+      inProgress.add(node);
+      let size = 1;
+      if (isSymbol(node)) {
+        const s = node.symbol;
+        if (
+          target.boundVars?.has(s) !== true &&
+          target.varsKeys?.has(s) !== true
+        ) {
+          const v = engine._getSymbolValue(s);
+          if (v !== undefined) size = walk(v);
+        }
+      } else if (isDictionary(node)) {
+        for (const v of node.values) size += walk(v);
+      } else if (isFunction(node)) {
+        for (const op of node.ops) size += walk(op);
+      }
+      inProgress.delete(node);
+      memo.set(node, size);
+      return size;
+    };
+
+    return walk(value);
+  }
+
+  /**
+   * Refuse to fold `id`'s assigned value when baking it would emit more than
+   * `MAX_FOLD_EXPANDED_NODES` nodes of source.
+   *
+   * This fails CLOSED rather than declining, because a decline is not safe
+   * here: when `tryFoldKnownSymbol` returns `undefined` the caller emits a
+   * bare identifier for a symbol the engine knows, and the JavaScript target
+   * deliberately leaves such a name unresolved — the artifact would carry a
+   * dangling global that throws (or silently reads `undefined`) at run time.
+   * Refusing at compile time is the honest answer: on the public `compile()`
+   * route the default `fallback: true` turns it into interpreter-backed
+   * evaluation, which is correct though slower, and a caller that asked for
+   * `fallback: false` (or drove a registered target directly) sees the error.
+   */
+  private static assertFoldableSize(
+    engine: ComputeEngine,
+    id: string,
+    value: Expression,
+    target: CompileTarget<Expression>
+  ): void {
+    const size = BaseCompiler.expandedFoldSize(engine, value, target);
+    if (size <= BaseCompiler.MAX_FOLD_EXPANDED_NODES) return;
+    const kb = (size * BaseCompiler.FOLD_CHARS_PER_NODE) / 1024;
+    const emitted =
+      kb < 1024 ? `${kb.toFixed(0)} KB` : `${(kb / 1024).toFixed(1)} MB`;
+    throw new Error(
+      `${id}: cannot compile — the value assigned to this symbol expands to ` +
+        `${size} nodes of generated source (an estimated ${emitted}) ` +
+        `once baked in, above the fold-size limit of ` +
+        `${BaseCompiler.MAX_FOLD_EXPANDED_NODES} nodes. Generated source is ` +
+        `text, so a sub-value shared by several references is written out ` +
+        `once per reference path; folding this value is refused rather than ` +
+        `emitting a program that size. A caller using the default ` +
+        `\`fallback: true\` falls back to interpreted evaluation. Fail ` +
+        `closed (D6).`
+    );
   }
 
   /**

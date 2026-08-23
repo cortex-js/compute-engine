@@ -660,6 +660,21 @@ export interface CompileTarget<Expr = unknown> {
   intervalQuadraturePieces?: number;
 
   /**
+   * Per-level starting-panel count chosen by the OUTERMOST `Integrate`
+   * lowering of the scalar `javascript` target for every integral in its
+   * subtree — see the sizing model in `compileIntegrate`
+   * (`javascript-target.ts`). One full inner quadrature runs per outer panel
+   * node, so the starting counts multiply across the levels of an iterated
+   * integral; the outermost node measures how deeply the `Integrate` nodes in
+   * its subtree nest and picks one count that keeps the product in hand, and
+   * inner lowerings must USE it rather than re-measure their own shallower
+   * subtree, which would pick a larger count. Set only on the targets the
+   * outermost lowering hands to its integrand and bound compiles — sibling
+   * integrals outside that subtree size themselves.
+   */
+  quadratureInitialPanels?: number;
+
+  /**
    * When `false`, disables compile-time constant folding: a pure subtree with
    * no free variables is normally evaluated at compile time and emitted as a
    * number or boolean literal (`Sum(Take(Map(_ ↦ _^2, 1..20), 10))` → `385`).

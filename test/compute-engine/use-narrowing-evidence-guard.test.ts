@@ -45,24 +45,33 @@ describe('use-narrowing evidence guard', () => {
     // became `integer` while the symbol held a `number`-typed value; the
     // overlap admission is deferred, excluded from the inference pass).
     expect(ce.box('x').type.toString()).toBe('number');
+    // The Epsil linter's stricter evidence check does not reach this
+    // program: `k(x)` is submitted as its OWN program, which contains no
+    // assignment, so its pre-pass records no assignment evidence for `x`
+    // and the held (non-concrete) value `g()` decides by overlap, as
+    // engine semantics say it must. The stricter verdict applies only to a
+    // call the pre-pass sees in the same program as the assignment — see
+    // the ONE-SHOT test below.
   });
 
-  test('ONE-SHOT program: an evidence-type mismatch no longer flags statically (R1)', () => {
-    // Re-read under R1 overlap admission (§4.4 of
-    // `docs/plans/2026-08-22-type-handlers-on-types.md`; before R1 the
-    // pre-pass flagged `k(x)` as a `static-type-error`). The static
-    // pre-pass applies the TYPE EFFECT of assignments
-    // (`applyAssignmentTypeEffect`, static-diagnostics.ts): `x = g()` gives
-    // `x` the static type `number` plus assignment evidence, without
-    // evaluating anything. A `number` evidence TYPE merely OVERLAPS an
-    // `integer` parameter — not a provable mismatch — so boxing now admits
-    // the call and the pre-pass, which reads diagnostics off boxing
-    // errors, stays silent. Literal-type evidence (path 1 of the ROADMAP
-    // entry, landed 2026-08-23) restores the CONCRETE-initializer case —
-    // see the pins below — but this program's evidence is the symbolic
-    // `number` return type, which genuinely overlaps: flagging it anyway
-    // is the entry's open path (2), a product decision on whether the
-    // Epsil linter should be stricter than engine admission.
+  test('ONE-SHOT program: an evidence-type mismatch flags statically (linter is stricter than the engine)', () => {
+    // RULED 2026-08-23 (path 2 of the ROADMAP entry "Epsil static evidence
+    // diagnostics lost to overlap admission"): the Epsil static pre-pass is
+    // a LINTER and is deliberately stricter than engine admission, the way
+    // TypeScript flags code that would run. The pre-pass applies the TYPE
+    // EFFECT of assignments (`applyAssignmentTypeEffect`,
+    // static-diagnostics.ts): `x = g()` gives `x` the static type `number`
+    // plus assignment evidence, without evaluating anything. A `number`
+    // evidence type does not FIT an `integer` parameter, so the call is
+    // refused at boxing and the pre-pass — which reads its diagnostics off
+    // boxing errors — reports a `static-type-error`, even though `g()`
+    // could well return 5 and the call would then succeed. What the program
+    // as written does is assign a `number` where an `integer` is required.
+    //
+    // This is lint-only: the assignment evidence exists only while a
+    // pre-pass runs, so the EXECUTED program is unaffected — see the
+    // "lint-only" test below, where the same shape flags statically and
+    // still evaluates.
     const one = (lines: string[]) =>
       executeEpsil(new ComputeEngine(), lines.join('\n')).diagnostics;
     expect(
@@ -77,7 +86,24 @@ describe('use-narrowing evidence guard', () => {
           'k(x)',
         ])
       )
-    ).toBe('[]');
+    ).toContain('static-type-error');
+    // The possibly-incompatible refinement (user-ruled 2026-08-23): a
+    // symbolic-evidence overlap mismatch carries a suggestion note to
+    // annotate the declaration; a DEFINITE mismatch (disjoint literal
+    // evidence, pinned elsewhere in this file) does not.
+    expect(
+      JSON.stringify(
+        one([
+          'let x',
+          'let f: () -> integer',
+          'let g: () -> number',
+          'let k: (integer) -> integer',
+          'x = f()',
+          'x = g()',
+          'k(x)',
+        ])
+      )
+    ).toContain('annotate the declaration');
 
     // Assignment is LAST-WRITE-WINS: the reverse order is a correct program
     // and must stay clean (a join-of-assignments model would wrongly flag it).
@@ -103,6 +129,63 @@ describe('use-narrowing evidence guard', () => {
     // A valueless symbol keeps the CAS declaration reading in one-shot
     // programs too.
     expect(one(['let n', 'let k: (integer) -> integer', 'k(n)'])).toEqual([]);
+  });
+
+  test('the stricter evidence verdict is LINT-ONLY: the program still runs', () => {
+    // The stricter check reads `ce._staticAssignmentEvidence`, which is
+    // non-undefined only while the static pre-pass runs, so it cannot
+    // change what the program computes. Here `y` is declared `number` and
+    // `x = y` therefore records `number` as `x`'s assignment evidence,
+    // which does not fit `k`'s `integer` parameter: the pre-pass flags the
+    // call. Executing the same program then evaluates `k(x)` to 6, because
+    // by the time the call boxes during execution `x` HOLDS 5 and a
+    // concrete value decides admission exactly.
+    const r = executeEpsil(
+      new ComputeEngine(),
+      [
+        'k(n: integer) = n + 1',
+        'let y: number',
+        'y = 5',
+        'let x',
+        'x = y',
+        'k(x)',
+      ].join('\n')
+    );
+    expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
+    expect(r.value?.toString()).toBe('6');
+  });
+
+  test('OVERLOADS: evidence fitting ANY arm stays clean', () => {
+    // The evidence check lives in `overlapAdmission`, which each arm's own
+    // validation calls, so the verdict is per-arm: an argument refused
+    // under one arm can still be admitted by another. `number` evidence
+    // fits the `(number) -> number` arm, so the call is clean even though
+    // the `(integer) -> integer` arm refuses it.
+    const one = (lines: string[]) =>
+      executeEpsil(new ComputeEngine(), lines.join('\n')).diagnostics;
+    expect(
+      one([
+        'let p: ((integer) -> integer) & ((number) -> number)',
+        'let g: () -> number',
+        'let x',
+        'x = g()',
+        'p(x)',
+      ])
+    ).toEqual([]);
+
+    // When NO arm fits, the call flags and the error names the union of the
+    // arms' parameter types.
+    expect(
+      JSON.stringify(
+        one([
+          'let p: ((integer) -> integer) & ((string) -> string)',
+          'let g: () -> number',
+          'let x',
+          'x = g()',
+          'p(x)',
+        ])
+      )
+    ).toContain('static-type-error');
   });
 
   test('CAS persona: a use of a VALUELESS symbol still narrows (declaration reading)', () => {
@@ -186,7 +269,10 @@ describe('use-narrowing evidence guard', () => {
     );
     // Re-read under R1 overlap admission (§4.4): the `number` evidence
     // OVERLAPS `integer`, so both calls now box and stay inert instead of
-    // erroring. What this test pins is the guard itself — the optional and
+    // erroring. The Epsil linter's stricter evidence check does not reach
+    // them either — each call is submitted as its own program, containing
+    // no assignment, so its pre-pass records no assignment evidence for
+    // `x`. What this test pins is the guard itself — the optional and
     // variadic slots must not narrow the assigned symbol — and that half
     // is unchanged.
     const rOpt = run('opt(True, x)');
@@ -211,6 +297,13 @@ describe('use-narrowing evidence guard', () => {
       ['let k: (integer) -> integer', 'let x: number = 1.5', 'k(x)'].join('\n')
     );
     expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
+    // A DEFINITE mismatch — the literal evidence `1.5` is provably
+    // disjoint from `integer` — carries NO annotation suggestion: no
+    // annotation rescues it (contrast the possibly-incompatible note
+    // pinned in the ONE-SHOT symbolic test above).
+    expect(JSON.stringify(r.diagnostics)).not.toContain(
+      'annotate the declaration'
+    );
     expect(r.value?.toString()).toContain(
       'ErrorCode("incompatible-type", "integer", "number")'
     );

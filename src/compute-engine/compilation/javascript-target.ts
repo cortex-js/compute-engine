@@ -135,6 +135,7 @@ import {
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import {
   adaptiveQuadrature,
+  initialPanelsForDimensions,
   quadratureBeatsMonteCarlo,
 } from '../numerics/gauss-kronrod.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
@@ -6503,14 +6504,24 @@ const SYS_HELPERS = {
   // (`quadratureBeatsMonteCarlo`): an inner level of an iterated integral pays
   // this fallback once per OUTER node, so 1e7 samples of a stalled-but-accurate
   // result is minutes spent making the answer worse. See `compileIntegrate`.
-  integrate: (fn: (x: number) => number, a: number, b: number) => {
+  integrate: (
+    fn: (x: number) => number,
+    a: number,
+    b: number,
+    // Equal panels the adaptive loop starts from. The emitter passes this for
+    // an integral whose tree shows nesting: one full inner quadrature runs per
+    // outer panel node, so the starting count multiplies across levels and a
+    // per-level default of 16 costs 16^depth before any refinement. Omitted for
+    // a single integral, which keeps the quadrature default.
+    initialPanels?: number
+  ) => {
     // Dynamic nesting is bounded by a shared evaluation budget — see
     // `NESTED_QUADRATURE_BUDGET`. A nested entry that finds it gone has no
     // value to report.
     if (!enterIntegral()) return NaN;
     try {
       const f = budgetedIntegrand(realFn(fn));
-      const r = adaptiveQuadrature(f, a, b);
+      const r = adaptiveQuadrature(f, a, b, { initialPanels });
       // A diagnosed divergence has no finite value, and sampling it would only
       // launder the divergence into a plausible-looking number.
       if (r.divergent) return NaN;
@@ -6529,8 +6540,31 @@ const SYS_HELPERS = {
   // Definite integral via Monte-Carlo (1e7 uniform samples). STOCHASTIC and
   // approximate (~1e-4 typical error, ~200 ms/call). Emitted when
   // `quadrature: 'monte-carlo'` is requested — see `compileIntegrate`.
-  integrateMC: (f: (x: number) => number, a: number, b: number) =>
-    monteCarloEstimate(realFn(f), a, b, 10e6).estimate,
+  integrateMC: (fn: (x: number) => number, a: number, b: number) => {
+    // Monte Carlo joins the same activation accounting as `integrate`, so that
+    // an integral reached from inside THIS one's integrand is nested and pays
+    // budget. Without the activation, every sample looked like an outermost
+    // entry and re-armed the budget, leaving that composition unbounded.
+    // The sample count itself is free at the OUTERMOST level: `budgetedIntegrand`
+    // charges an evaluation only while another integral is already running, so a
+    // plain Monte-Carlo integral spends none of its 2²⁵ budget on its own 1e7
+    // samples — exactly how the deterministic path treats depth. A Monte-Carlo
+    // integral running INSIDE another integral does charge per sample, which
+    // exhausts the budget within a few calls; that is the intent, since one such
+    // level costs 1e7 evaluations of an integrand that is itself a quadrature.
+    if (!enterIntegral()) return NaN;
+    try {
+      const f = budgetedIntegrand(realFn(fn));
+      const estimate = monteCarloEstimate(f, a, b, 10e6).estimate;
+      // The budget ran out below this level, so an unknown share of the samples
+      // were refused rather than evaluated: the mean of what is left is not an
+      // estimate of this integral.
+      if (nestedEvalsLeft < 0) return NaN;
+      return estimate;
+    } finally {
+      activeIntegrals--;
+    }
+  },
   lcm,
   lngamma: gammaln,
   limit: (f: (x: number) => number, x: number, dir?: number): number =>
@@ -9296,6 +9330,38 @@ function emitSumProduct(
 }
 
 /**
+ * Deepest chain of `Integrate` nodes in `expr`'s tree, counted in integration
+ * LEVELS: one per limit clause of each node, accumulated through integrals
+ * nested inside other integrals' integrands or bounds (an inner integral runs
+ * once per enclosing panel node, so those levels multiply).
+ *
+ * `compileIntegrate` sizes each level's starting-panel count from this depth.
+ * Composition through a FUNCTION CALL (`∫ g(x) dx` where `g`'s body computes an
+ * integral) is invisible here — no `Integrate` node is in the tree — and is
+ * bounded at run time instead, by `NESTED_QUADRATURE_BUDGET`.
+ *
+ * The memo is sound unconditionally: the depth is a function of the expression
+ * tree alone (operator names and arity — no bindings, no definitions), and
+ * boxed expressions are immutable.
+ */
+const INTEGRATE_DEPTH = new WeakMap<Expression, number>();
+
+function integrateDepth(expr: Expression): number {
+  const cached = INTEGRATE_DEPTH.get(expr);
+  if (cached !== undefined) return cached;
+  let depth = 0;
+  if (isFunction(expr)) {
+    for (const op of expr.ops) depth = Math.max(depth, integrateDepth(op));
+    // One integration level per limit clause; a bare `Integrate(f)` (no clause)
+    // is indefinite and never reaches the quadrature emitter, but count it as
+    // one level so the estimate stays conservative.
+    if (expr.operator === 'Integrate') depth += Math.max(1, expr.nops - 1);
+  }
+  INTEGRATE_DEPTH.set(expr, depth);
+  return depth;
+}
+
+/**
  * Compile integration to a call to the runtime Monte-Carlo estimator
  * `_SYS.integrate(f, a, b)`.
  *
@@ -9381,8 +9447,38 @@ function compileIntegrate(
     limits.map((l) => l.index)
   );
 
-  const scoped = (names: string[]): CompileTarget<Expression> => ({
+  // Starting-panel count per level, sized by the nesting depth the TREE shows
+  // — this node's own limits plus the deepest chain of `Integrate` nodes
+  // inside its integrand or bounds. One full inner quadrature runs per outer
+  // panel node, so a per-level count of N costs N^depth evaluations before any
+  // refinement: the quadrature default of 16 panels makes a smooth triple
+  // integral cost 1.4·10⁷ integrand evaluations (~1 s) where 3 panels per
+  // level cost ~10⁵ and refine to the same tolerance. This mirrors the
+  // interpreter, which seeds `initialPanelsForDimensions(limits.length)`
+  // (`library/calculus.ts`), and the interval target, which sizes its
+  // subdivision count the same way (`compileIntervalIntegrate`).
+  //
+  // The OUTERMOST integral of a nest measures the whole subtree and every
+  // inner lowering inherits its count through `target.quadratureInitialPanels`
+  // rather than re-measuring its own shallower subtree, which would pick a
+  // larger count and break the product bound. Composition reached BY REFERENCE
+  // (a compiled function whose body integrates) is invisible to this walk and
+  // stays covered by the runtime budget — see `NESTED_QUADRATURE_BUDGET`.
+  const panels =
+    target.quadratureInitialPanels ??
+    initialPanelsForDimensions(
+      limits.length + Math.max(0, ...args.map(integrateDepth))
+    );
+
+  // Everything compiled within this integral — the integrand and every bound —
+  // inherits the chosen count.
+  const sized: CompileTarget<Expression> = {
     ...target,
+    quadratureInitialPanels: panels,
+  };
+
+  const scoped = (names: string[]): CompileTarget<Expression> => ({
+    ...sized,
     var: (id) => (names.includes(id) ? id : target.var(id)),
     boundVars: BaseCompiler.withBoundNames(target, names),
   });
@@ -9393,15 +9489,20 @@ function compileIntegrate(
   // the FIRST limit is the OUTERMOST integral). A bound of limit d may
   // reference the outer lambda variables 0..d−1 — at its nesting depth they
   // are in scope, so dependent bounds (∫₀¹dx ∫₀ˣdy) compile naturally.
-  const fn =
-    target.quadrature === 'monte-carlo' ? '_SYS.integrateMC' : '_SYS.integrate';
+  const isMC = target.quadrature === 'monte-carlo';
+  const fn = isMC ? '_SYS.integrateMC' : '_SYS.integrate';
+  // The Monte-Carlo estimator has no panels to seed, and a single integral
+  // seeds the quadrature default — in both cases the argument would say
+  // nothing, so leave it off and keep the emitted call as it was.
+  const panelArg =
+    isMC || panels === initialPanelsForDimensions(1) ? '' : `, ${panels}`;
   let code = f;
   for (let d = limits.length - 1; d >= 0; d--) {
     const outer = lambdaVars.slice(0, d);
-    const boundTarget = outer.length > 0 ? scoped(outer) : target;
+    const boundTarget = outer.length > 0 ? scoped(outer) : sized;
     const lo = BaseCompiler.compile(limits[d].lowerExpr, boundTarget);
     const hi = BaseCompiler.compile(limits[d].upperExpr, boundTarget);
-    code = `${fn}((${lambdaVars[d]}) => (${code}), ${lo}, ${hi})`;
+    code = `${fn}((${lambdaVars[d]}) => (${code}), ${lo}, ${hi}${panelArg})`;
   }
   return code;
 }

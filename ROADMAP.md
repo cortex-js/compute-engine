@@ -543,7 +543,29 @@ every claim) in the audit recorded by
 success criterion — item-219 drift 0 with the `scratch` exemption made a
 no-op — is what closes each row.
 
-### Epsil static evidence diagnostics lost to overlap admission — FOUND 2026-08-23 (path 1 FIXED 2026-08-23; path 2 = an OPEN product decision, now due)
+### Epsil pre-pass misses argument errors at a LAMBDA callee (OPEN, lint — found 2026-08-23 implementing evidence path 2)
+
+`let k = (n: integer) => n + 1` followed by `k(1.5)` produces NO
+`static-type-error` from the pre-pass, while both named-head spellings —
+`let k: (integer) -> integer` and `k(n: integer) = n + 1` — flag the same
+call. The cause is not the pre-pass's error extraction: for a callee that
+is a VALUE definition holding a function literal, argument refusal is
+DELIBERATELY deferred to evaluation by the R1 runtime-conformance design
+(the `filter-predicate-errors` pins require a lambda applied to a wrong
+concrete value to produce its `incompatible-type` error VALUE at run
+time), so the valueless pre-pass boxes the call clean and has nothing to
+mint. The engine behavior is by design; only the LINT wants more — the
+same "linter stricter than the engine" principle as the evidence path-2
+ruling (2026-08-23). Fix shape: a pre-pass-side check that walks each
+statement's canonical form for applications whose callee resolves to a
+signature-typed value definition and tests the CONCRETE literal arguments
+against the parameters by reusing the §4.4 runtime-conformance helper
+(`runtimeConformanceError`) statically — never re-implementing the
+verdict — minting the same diagnostic the named routes get. Care:
+per-arm overload verdicts, no double-flag when the named route already
+errors, symbolic arguments stay silent (that is evidence path 2's job).
+
+### Epsil static evidence diagnostics lost to overlap admission — FOUND 2026-08-23 (path 1 FIXED and path 2 RULED YES + IMPLEMENTED 2026-08-23 — both halves closed)
 
 The Epsil static pre-pass mints its `static-type-error` diagnostics off the
 error values canonicalization embeds, and it runs VALUELESS: assignment
@@ -580,36 +602,143 @@ initializer's handler-visible literal type as the assignment evidence
 arms), and `overlapAdmission` (`validate.ts`) refuses a parameter the
 evidence provably cannot inhabit — so `let x = 1.5; k(x)` and
 `let x: number = 1.5; k(x)` flag `static-type-error` again while
-`let x = 2; k(x)` stays clean and the symbolic `x = g()` case stays
-silent. Pinned in `use-narrowing-evidence-guard.test.ts`. One
-representation limit: an exact RATIONAL initializer (`let x = 1/2`)
-carries a singleton range, and `typesOverlap` does not decide a
-range-vs-`integer` question, so only machine-int/real literals refute.
-§4.3 has now landed, so path (2) is DUE for a decision: should the Epsil
-linter flag a call whose recorded evidence TYPE (e.g. `number` from
-`x = g()`) merely overlaps the parameter — stricter than engine
-admission, the way TypeScript flags code that would run?
+`let x = 2; k(x)` stays clean. Pinned in
+`use-narrowing-evidence-guard.test.ts`.
 
-### A canonical rewrite drops the rewritten operator's stricter parameter contract (OPEN, low — residue class identified by the §4.4 fuzz, 2026-08-23)
+Path (2) RULED YES and IMPLEMENTED 2026-08-23: the evidence clause in
+`overlapAdmission` now refuses when the evidence does not FIT the
+parameter (`!isSubtype(evidence, param)`), not only when it is provably
+disjoint — so `x = g(); k(x)` with `g: () -> number` at an `integer`
+parameter flags `static-type-error`, the linter deliberately stricter
+than engine admission, the way TypeScript flags code that would run.
+Lint-only by construction: the evidence map exists only while a pre-pass
+runs, so the EXECUTED program is untouched (pinned — the flagged program
+still evaluates correctly when the value fits at run time). Overload
+verdicts stay per-arm (evidence fitting ANY arm stays clean, pinned).
+The path-1 "singleton range" representation limit dissolved as a side
+effect: `let x = 1/2; k(x)` at an `integer` parameter now flags too,
+since a singleton range that is not a SUBTYPE of the parameter refuses
+even where overlap was undecided. The one remaining lint gap in this
+family is the LAMBDA-callee entry above.
+
+### A canonical rewrite drops the rewritten operator's stricter parameter contract (RULED and IMPLEMENTED 2026-08-24; inventoried 2026-08-23 — residue class identified by the §4.4 fuzz)
 
 When canonicalization rewrites a call into a different operator, the
 original operator's declared signature stops governing anything: no
 dispatch-time mechanism can enforce parameters of an operator that no
-longer exists in the tree. `Rational(3, x)` with `x := 2.5` rewrites to
-`Divide(3, x)` and evaluates to `1.2` — the `integer?` second parameter of
-`Rational` is never enforced on the symbol route, while the literal
-`Rational(3, 2.5)` refuses at boxing (concrete values decide exactly), so
-the two routes disagree. Same family: `NotDivides(a, b)` (declared
-`(integer, integer)`) rewrites to `Not(Divides(a, b))` whose `Divides`
-declares `(number, number)`, and unary variadic folds (`Subtract(x)` → `x`)
-consume the operand before any check. The conformance fuzz
+longer exists in the tree. The conformance fuzz
 (`runtime-conformance-fuzz.test.ts`) skips probes whose canonical operator
 differs from the operator under test, with this reasoning in its header.
-Fix shapes, if ever scheduled: the rewriting canonical handler validates
-against its OWN declared signature before rewriting (per-operator work,
-only worthwhile where the dropped contract matters), or the rewrite is
-accepted as the semantics and the declared signature narrowed to match
-what the rewrite preserves.
+
+A full inventory (2026-08-23: every one of the 625 operator definitions
+probed with all-symbolic, all-literal, mixed, and assigned-`any`-symbol
+operand shapes at each arity) found 78 operators whose canonicalization
+can change the head. All but five preserve the declared contract:
+
+- Alias rewrites land on an identically-declared target, so the same
+  check fires after the rewrite (`Lucas`→`LucasL`, `PrimeNumber`→
+  `NthPrime`, `Exp`/`Exp2`/`Square`→`Power`, `Lb`/`Lg`/`Ln`/`Log10`/
+  `Log2`→`Log`, `Arg`→`Argument`, `Fold`→`Reduce`, `Table`→`Tabulate`,
+  `IsComposite`→`Not(IsPrime)`, `IsEven`→`Not(IsOdd)`, `print`→`Print`,
+  `Divide`→`Multiply`). Verified: `Lucas(x)` with `x := 2.5` errors with
+  `incompatible-type` exactly as the literal does.
+- `any`-parameter sources have nothing to drop: the negated/reversed
+  relational family (`NotLess`, `NotTilde`, `Greater`→`Less`, …),
+  `Pair`/`Triple`/`Single`→`Tuple`, `Which`, `Delimiter`,
+  `CanonicalForm`, `Head`, `Subscript` (symbol-name sugar), `Apply`
+  (whose lenient `symbol` parameter is separately documented at the
+  re-validation comment in `box.ts`).
+- Canonical handlers that return an `Error` expression, and
+  concrete-literal folds (`Power(3, 3)` → `27`), enforce rather than
+  drop.
+- `KeyValuePair` is the model for "validate before rewriting": its
+  canonical handler checks an evidence-carrying symbol against the
+  `string` key parameter (and use-site inference narrows a valueless
+  one), so the `Tuple` it returns never smuggled a wrong-kind key.
+- `Sum`/`Product` collapsing a vacuous indexing set onto the body
+  (`Sum(x, n)` → `x`) is the documented identity-wrapper fold in
+  `canonicalBigop` (`library/utils.ts`), same family as `x/x → 1` — not
+  a contract drop.
+
+The five genuine droppers, RULED 2026-08-24 and implemented the same
+day (pinned in `canonical-rewrite-contracts.test.ts`; full suite green
+with no snapshot churn beyond the four deliberately re-pinned rows):
+
+1. `Rational` — the two-argument form is an `(integer, integer)`
+   CONSTRUCTOR. The signature is now the overload
+   `((real) -> rational) | ((integer, integer) -> rational)`, and a
+   PROVEN non-integer argument — a literal, or a symbol holding one —
+   is rejected at canonicalization on every route (the box-time numeric
+   constructor in `box.ts`, the library canonical handler, and the
+   partial number form in `canonical.ts`, which keeps the `Rational`
+   spelling instead of renaming so the full pass can still reject).
+   `Rational(3, 2.5)` and `Rational(3, x)` with `x := 2.5` are now
+   `incompatible-type` errors; a VALUELESS symbol stays admitted and
+   still rewrites to `Divide` — the engine-wide deferred-admission
+   convention: once the operator is gone nothing can enforce it against
+   a later assignment, and that residue is accepted. The `Divide`
+   spelling itself is untouched (`Divide(3, 2.5)` is still `1.2`). The
+   single-argument arm is declared `real`, not the ruling's literal
+   `number` spelling: the handler has always required a real — a complex
+   argument can never construct a rational — so the declaration now
+   matches the contract it enforces.
+2. `NotDivides` — with the `Divides` integrality guard (next entry) the
+   rewrite is harmless: `NotDivides(2.5, 3)` stays symbolic. Its
+   declaration is narrowed to `(number, number)` to match what the
+   rewrite preserves (`Divides`' own contract, the only one that
+   governs after canonicalization).
+3. `Subtract` and 4. `Multiply` unary folds — the fold sites (`Subtract`
+   canonical in `library/arithmetic.ts`; both unary returns of
+   `canonicalMultiply` in `arithmetic-mul-div.ts`) now reject a lone
+   operand HOLDING a concrete non-numeric scalar — string, boolean, or
+   character (`heldNonNumericScalar`, `value-membership.ts`). A lone
+   collection operand still folds (the broadcast identity) and a
+   valueless symbol still folds (deferred admission, as above; `Add`
+   still folds freely — it declares `(value+)`, nothing is dropped).
+   Measured cost: indistinguishable from noise on a parse+simplify
+   corpus; ~3–7% on a pure unary-fold microbench (~25–70 ns per fold).
+5. `Vector` — declaration aligned with the tensor family's content
+   leniency: `(any+) -> vector`, with the type handler claiming the
+   numeric `vector<N>` only when every element is provably a number (a
+   non-numeric structural `Vector` types as `list`).
+
+Still OPEN (low), adjacent, not this class: `Complex`
+(`(number, number)`, no canonical handler) canonicalizes to
+`Add(re, ImaginaryUnit·im)` — the dropped `number` contract is re-caught
+by the arithmetic evaluate guard on the symbol route, but the literal
+route builds a machine complex directly, so `Complex("str", 2)` yields
+`NaN` where the symbol route errors.
+
+### `Divides` reduced through the rounding `toBigint`, answering a wrong boolean (FIXED 2026-08-24 — found 2026-08-23 by the canonical-rewrite inventory)
+
+`Divides(2.5, 3)` answered `True`: the evaluate handler
+(`library/number-theory.ts`) converted both operands with `toBigint`,
+which rounds a non-integer to the nearest integer by its documented
+contract, so the question actually answered was the rounded `3 | 3` —
+contradicting the definition's own "reduces only when both operands are
+concrete integers" comment, and reaching `NotDivides` through its
+rewrite (`NotDivides(2.5, 3)` → `False`; the truth is `True`). Fixed per
+the 2026-08-24 ruling with an exact integrality gate (`.isInteger`):
+non-integer operands stay symbolic, as the comment always promised, and
+`NotDivides(2.5, 3)` now stays symbolic too. The same gate was added to
+`FromContinuedFraction`'s term extraction, which used to reconstruct
+from a rounded non-integer term. The CLASS is worth remembering: the
+conformance fuzz can never catch a handler whose declared signature
+ADMITS the operand it rounds — `Mod`'s modular-reduction gate and these
+two are the pattern to copy when a handler feeds `toBigint` from a
+`number`-declared parameter.
+
+### `Intersection` of a single collection was hard-coded to the empty set (FIXED 2026-08-24 — found 2026-08-23 by the canonical-rewrite inventory)
+
+`Intersection([1, 2])` canonicalized to `EmptySet` — an explicit
+`args.length === 1` branch in the canonical handler (`library/sets.ts`),
+unpinned by any test and asymmetric with `Union`. Ruled and fixed: the
+intersection of one collection is that collection as a set.
+`Intersection([1, 2, 2])` evaluates to `Set(1, 2)`; a set-shaped operand
+returns itself without enumeration (`Intersection(Integers)` →
+`Integers`); an infinite non-set operand stays symbolic; the nullary
+convention `Intersection()` → `EmptySet` is unchanged. Pinned in
+`canonical-rewrite-contracts.test.ts`.
 
 ### A pre-canonicalization validation phase (OPEN, design — raised by the user 2026-08-21 at the item-219 ruling)
 
@@ -702,7 +831,7 @@ transient map is deliberately not generation-keyed — a cache-axis bump
 DURING one synchronous read serves earlier-rebuilt nodes from the map —
 which is what "validates nothing" means here and is confined to one call.
 
-### Compiling a DAG-shared symbol value is exponential in the emitted source — OPEN (found 2026-08-23 diagnosing Tycho item 225; needs the CSE initiative or a fold-size guard)
+### Compiling a DAG-shared symbol value is exponential in the emitted source — BOUNDED 2026-08-23 by the fail-closed fold-size guard (user-ruled); the CSE initiative remains the general fix
 
 With the effects-memo and structural-memo fixes in (see CHANGELOG
 "Unreleased"), the item-225 witness (`art/nxlddeh5zv`, the valueless-slider
@@ -749,6 +878,21 @@ reshape it (measured; the attempt was stopped before any edit):
   it throws), or first build a real runtime binding channel (a `_SYS`
   engine-value lookup).
 
+RULED fail-closed and IMPLEMENTED 2026-08-23:
+`MAX_FOLD_EXPANDED_NODES = 20 000` in `base-compiler.ts`
+(`expandedFoldSize`, a DAG-linear identity-memoized size sum;
+`assertFoldableSize` throws a self-explanatory refusal). Calibration:
+the entire compile-test corpus's largest legitimate fold is 4 expanded
+nodes and a synthetic 60-term polynomial is 297, so the cap has 67–5000×
+headroom while refusing the pathological tower from depth 13 (32 765
+nodes ≈ 96 KB emitted). The public `fallback: true` route degrades to
+interpreted evaluation with verified-correct values; the direct
+registered-target route throws. Pinned in
+`compile-fold-size-guard.test.ts`, with DAG-linearity asserted by a
+deterministic lookup count per the compile-cost doctrine. Depth ≤ 12
+(≈49 KB, ~8 s) is still admitted — the guard bounds the blow-up; the
+CSE initiative removes it.
+
 ### Quadrature under dynamic integral composition — scalar-target half LANDED 2026-08-23 (exhausted result = NaN, a ruling applied by default and awaiting explicit confirmation)
 
 The interval target now bounds dynamic integral composition twice over —
@@ -776,16 +920,23 @@ integral uses 4.7·10⁵ — ~70× headroom — and a smooth genuine triple
 of synchronous work now answers `NaN` in ~3 s), the counter rebalanced in
 `finally` so a throwing integrand cannot disarm re-arming, and an
 exhausted run barred from the Monte-Carlo fallback. Pinned in
-`compile-integrate-nested-budget.test.ts` (4 cases, incl. fresh-budget
-re-arm after exhaustion). Remaining residue, recorded deliberately: (a)
-`_SYS.integrateMC` does not participate in the activation counting, so an
-`integrate` nested inside an outermost `integrateMC` re-arms per sample —
-same shape as today, cheap to close if wanted; (b) the scalar target
-never sizes panel counts by nesting depth (the interpreter and interval
-target do), which is why a compiled triple costs 1.4·10⁷ evaluations
-where the interpreter's costs ~2·10⁴ — compile-time sizing in the
-`Integrate` emitter is the natural companion fix and would let the budget
-drop by orders of magnitude.
+`compile-integrate-nested-budget.test.ts`. Both residues CLOSED
+2026-08-23: (a) `_SYS.integrateMC` participates in the activation
+counting (outermost entry guarded, integrand budgeted, `finally`
+rebalance; only NESTED evaluations decrement, so a plain MC integral
+spends none of its own budget — a runaway by-reference composition under
+MC, previously ~10¹¹ evaluations, now answers `NaN` in seconds; a
+NESTED Monte-Carlo integral, which previously never returned at ~10¹⁴
+samples, now exhausts after a few outer samples and answers `NaN` — a
+hang converted to the ruled exhausted result); (b) the `Integrate`
+emitter sizes starting panels by the statically visible nesting depth
+(the interpreter's own `initialPanelsForDimensions`, imported), so a
+compiled triple dropped from 1.38·10⁷ to 9.1·10⁴ evaluations (906 ms →
+12 ms) with accuracy equal or better on every probed closed form;
+single-integral codegen is byte-identical. Micro-residue, not worth its
+own entry: `monteCarloEstimate` keeps drawing (cheap `NaN` samples)
+after exhaustion — stopping early would halve the ~12 s worst case but
+touches `numerics/monte-carlo.ts` for a wall-clock-only gain.
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 
 The evaluator broadcasts `Which` elementwise over collection-valued operands

@@ -17,6 +17,10 @@ import type {
   TypeString,
 } from '../common/type/types.js';
 import { isWildcardFunctionType } from '../common/type/utils.js';
+import { isSubtype } from '../common/type/subtype.js';
+import { typesOverlap } from '../common/type/reduce.js';
+import { parseType } from '../common/type/parse.js';
+import { typeToString } from '../common/type/serialize.js';
 import { isPolymorphicType } from '../common/type/instantiate.js';
 
 // Type-only import: like `execute-epsil.ts`, this module never statically
@@ -769,6 +773,59 @@ function canonicalizationDiagnostics(
         boxedError: boxedErrorByJson.get(JSON.stringify(error)),
       });
       if (notes.length > 0) diagnostic.notes = notes;
+      // Path-2 refinement (user-ruled 2026-08-23): when the mismatch is
+      // only POSSIBLE — the faulted operand is a symbol whose recorded
+      // assignment evidence merely OVERLAPS the expected type (`number`
+      // from `x = g()` at an `integer` slot; the linter is deliberately
+      // stricter than engine admission there) — say so, and suggest the
+      // annotation that would turn the possibility into a checked
+      // contract. A DEFINITE mismatch (evidence provably disjoint, e.g. a
+      // `1.5` initializer at `integer`) gets no such note: no annotation
+      // rescues it.
+      if (code === 'incompatible-type') {
+        const boxedErr = boxedErrorByJson.get(JSON.stringify(error));
+        // Structural read of the error node's operands, matching the boxed
+        // walk above: `ops` lives on a narrowed interface this module does
+        // not import.
+        const faulted = (
+          boxedErr as
+            | { ops?: readonly ReturnType<ComputeEngine['box']>[] }
+            | undefined
+        )?.ops?.[1];
+        const cause = operand(error, 1);
+        const expectedText =
+          cause !== null && operator(cause) === 'ErrorCode'
+            ? text([...operands(cause)][1])
+            : undefined;
+        if (
+          faulted !== undefined &&
+          isSymbol(faulted) &&
+          expectedText !== undefined &&
+          expectedText !== ''
+        ) {
+          const def = faulted.valueDefinition;
+          const evidence =
+            def === undefined
+              ? undefined
+              : ce._staticAssignmentEvidence?.get(def);
+          const expected = parseType(expectedText, ce._typeResolver);
+          if (
+            evidence !== undefined &&
+            expected !== undefined &&
+            typesOverlap(evidence, expected) &&
+            !isSubtype(evidence, expected)
+          ) {
+            (diagnostic.notes ??= []).push({
+              message:
+                `the assignment gives \`${faulted.symbol}\` the type ` +
+                `\`${typeToString(evidence)}\`, which only POSSIBLY fits ` +
+                `\`${expectedText}\` — annotate the declaration ` +
+                `(\`let ${faulted.symbol}: ${expectedText}\`) to state the ` +
+                `contract and have each assignment checked against it`,
+            });
+          }
+        }
+      }
       diagnostics.push(diagnostic);
     }
   }

@@ -1,6 +1,39 @@
 ## Unreleased
 
 ### Bug Fixes
+- **The Epsil linter is now deliberately stricter than engine admission
+  for assignment evidence.** `let x; x = g(); k(x)` with `g: () -> number`
+  and `k: (integer) -> integer` flags a `static-type-error` again: the
+  pre-pass refuses a call whose recorded evidence type does not FIT the
+  parameter, even when it merely overlaps — the way TypeScript flags code
+  that would run. Lint-only by construction (the evidence exists only
+  while a pre-pass runs); the executed program is unchanged, overload
+  verdicts stay per-arm, and an exact-rational initializer now flags too.
+  One adjacent lint gap is recorded in `ROADMAP.md`: a LAMBDA-valued
+  callee's argument errors are deferred to run time by design, so the
+  pre-pass does not surface them yet.
+
+- **Folding an assigned value that would explode the emitted source now
+  fails closed.** A DAG-shared value tower unfolds once per reference
+  path in generated text, so compiling a member could grind through
+  megabytes of source; `tryFoldKnownSymbol` now refuses above 20,000
+  expanded nodes (a DAG-linear identity-memoized size sum — the compile
+  corpus's largest legitimate fold is 4 nodes) with a message that says
+  why. The default `fallback: true` route degrades to interpreted
+  evaluation with correct values; the direct registered-target route
+  throws. The CSE initiative remains the general fix.
+
+- **Nested quadrature is bounded through Monte-Carlo composition, and
+  compiled multiple integrals cost what the interpreter's do.**
+  `_SYS.integrateMC` joins the nested-evaluation budget (a runaway
+  by-reference composition under Monte-Carlo, previously unbounded, now
+  answers `NaN` in seconds; a nested Monte-Carlo integral that previously
+  never returned now answers `NaN` too), and the `Integrate` emitter
+  seeds starting panels by the statically visible nesting depth using the
+  interpreter's own sizing — a compiled triple integral dropped from
+  1.38·10⁷ integrand evaluations (~0.9 s) to 9.1·10⁴ (~12 ms) with
+  accuracy equal or better on every probed closed form.
+
 - **A runaway dynamically-composed scalar integral now answers `NaN`
   instead of hanging.** The scalar `javascript` target's `_SYS.integrate`
   carries the same per-outermost-integration evaluation budget the

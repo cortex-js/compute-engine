@@ -2,16 +2,20 @@
  * The scalar `javascript` target's nested-quadrature evaluation budget.
  *
  * `_SYS.integrate` runs one full adaptive GK15 quadrature per evaluation of the
- * enclosing integrand, so every level of nesting MULTIPLIES the work: a smooth
- * integrand costs 240 integrand evaluations at one level, ~5.8·10⁴ at two
- * (measured 6 ms), ~1.4·10⁷ at three (measured ~1.2 s) and ~3.3·10⁹ at four —
- * minutes to hours of synchronous work that never yields to the caller.
+ * enclosing integrand, so every level of nesting MULTIPLIES the work: at the
+ * default seeding of 16 starting panels a smooth integrand costs 240 integrand
+ * evaluations at one level, ~5.8·10⁴ at two (measured 6 ms), ~1.4·10⁷ at three
+ * (measured ~1.2 s) and ~3.3·10⁹ at four — minutes to hours of synchronous work
+ * that never yields to the caller.
  *
- * Nesting written into one `Integrate` node's limits is visible in the tree,
- * but nesting reached BY REFERENCE is not: `∫ p(x) dx` where the compiled `p`
- * computes an integral of its own shows no nested `Integrate` node anywhere,
- * and the composition only happens per runtime call. So the runtime carries a
- * shared evaluand budget (`NESTED_QUADRATURE_BUDGET`,
+ * Nesting written into one `Integrate` node's limits is visible in the tree, and
+ * the emitter sizes ITS starting panels down by that depth (4 per level for a
+ * double, 3 for a triple — see the depth-sizing describe below), which is why
+ * the figures above apply in full only to nesting reached BY REFERENCE: `∫ p(x)
+ * dx` where the compiled `p` computes an integral of its own shows no nested
+ * `Integrate` node anywhere, and the composition only happens per runtime call.
+ * No tree walk can size that, so the runtime carries a shared
+ * evaluand budget (`NESTED_QUADRATURE_BUDGET`,
  * `compilation/javascript-target.ts`) armed at the OUTERMOST integration entry
  * and consumed by every evaluation a nested integral performs; once it is gone
  * a nested integral answers `NaN` — the scalar target's "no value" spelling —
@@ -34,6 +38,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import * as GaussKronrodModule from '../../src/compute-engine/numerics/gauss-kronrod';
 
 const ce = new ComputeEngine();
 
@@ -41,14 +46,47 @@ const ce = new ComputeEngine();
  *  for the assertions that pin WHICH lowering is under test. */
 function compileReal(
   latex: string,
-  vars?: Record<string, string>
+  options?: { vars?: Record<string, string>; quadrature?: 'monte-carlo' }
 ): { code: string; run: (args?: Record<string, unknown>) => number } {
-  const r = compile(ce.parse(latex), vars ? { vars } : undefined);
+  const r = compile(ce.parse(latex), options);
   expect(r.success).toBe(true);
   return {
     code: String(r.code),
     run: (args = {}) => r.run!(args) as number,
   };
+}
+
+/**
+ * Run `fn` and return how many integrand evaluations the adaptive quadrature
+ * performed while it ran.
+ *
+ * The compiled runner reaches quadrature through `_SYS.integrate`, a private
+ * module-level helper that cannot be replaced from a test — but it calls
+ * `adaptiveQuadrature` as an ordinary module import, resolved at call time, so
+ * replacing that on its module here is observed by the runner (the same
+ * technique `compile-integrate.test.ts` uses). The original is restored in a
+ * `finally`, so a throwing test cannot leave the instrumentation behind.
+ */
+function countQuadratureEvals(fn: () => void): number {
+  const gk = GaussKronrodModule as {
+    adaptiveQuadrature: typeof GaussKronrodModule.adaptiveQuadrature;
+  };
+  const original = gk.adaptiveQuadrature;
+  let evals = 0;
+  gk.adaptiveQuadrature = (f, ...rest) =>
+    original(
+      (x) => {
+        evals += 1;
+        return f(x);
+      },
+      ...rest
+    );
+  try {
+    fn();
+  } finally {
+    gk.adaptiveQuadrature = original;
+  }
+  return evals;
 }
 
 /**
@@ -74,7 +112,7 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
     // closed form, which is what keeps this on the quadrature emitter — the
     // path the budget wraps. Only the OUTERMOST level runs here, and an
     // outermost level never consumes budget.
-    const r = compileReal('\\int_0^k \\sin t\\,dt', { k: '_.k' });
+    const r = compileReal('\\int_0^k \\sin t\\,dt', { vars: { k: '_.k' } });
     expect(r.code).toContain('_SYS.integrate(');
 
     // ∫₀¹ sin t dt = 1 − cos 1.
@@ -84,11 +122,11 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
   });
 
   test('a two-level nested integral keeps its value', () => {
-    // 240 outer evaluations, each a full inner quadrature: ~5.8·10⁴ nested
-    // evaluations, three orders of magnitude inside the budget. The reference
-    // is the interpreter's own value for the same expression, which reaches
-    // quadrature by a different route (its own panel seeding), not a recalled
-    // constant.
+    // 60 outer evaluations (4 starting panels, sized by the tree-visible depth
+    // of two), each a full inner quadrature: 3600 nested evaluations, four
+    // orders of magnitude inside the budget. The reference is the interpreter's
+    // own value for the same expression, which reaches quadrature by a
+    // different route (its own panel seeding), not a recalled constant.
     const latex = '\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx';
     const r = compileReal(latex);
     expect(r.code.match(/_SYS\.integrate\(/g)?.length).toBe(2);
@@ -110,7 +148,7 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
     // A finite result here would mean the composition stopped nesting (a level
     // gained a closed form, say), not that the budget failed — check the level
     // count before touching the budget.
-    const r = compileReal(byReferenceChain(), { s: '_.s' });
+    const r = compileReal(byReferenceChain(), { vars: { s: '_.s' } });
     expect(r.code).toContain('_SYS.integrate(');
 
     expect(Number.isNaN(r.run({ s: 0 }))).toBe(true);
@@ -120,7 +158,7 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
     // The budget is armed per OUTERMOST entry, so an exhausted run must not
     // leave the counter negative for the integrals that follow it. Exhaust it,
     // then run an ordinary nested integral and require its full value back.
-    const exhausting = compileReal(byReferenceChain(), { s: '_.s' });
+    const exhausting = compileReal(byReferenceChain(), { vars: { s: '_.s' } });
     expect(Number.isNaN(exhausting.run({ s: 0 }))).toBe(true);
 
     const latex = '\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx';
@@ -134,4 +172,144 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
     // what matters is that it took the same path, not a poisoned one).
     expect(Number.isNaN(exhausting.run({ s: 0 }))).toBe(true);
   }, 60000);
+
+  // `quadrature: 'monte-carlo'` emits `_SYS.integrateMC` instead, and it joins
+  // the same activation accounting: without that, every one of its 10⁷ samples
+  // looked like an outermost entry and re-armed the budget, so an integral
+  // reached from inside a Monte-Carlo integrand was bounded by nothing.
+  test('a plain Monte-Carlo integral spends none of its own budget', () => {
+    // The samples of an OUTERMOST integral are free — `budgetedIntegrand`
+    // charges an evaluation only while another integral is already running —
+    // so all 10⁷ are drawn and the estimate stands. (Charging them would
+    // exhaust a 2²⁵ budget a third of the way through and answer `NaN`.)
+    const r = compileReal('\\int_0^1 e^{-k x^2}\\,dx', {
+      quadrature: 'monte-carlo',
+      vars: { k: '_.k' },
+    });
+    expect(r.code).toContain('_SYS.integrateMC(');
+
+    // ∫₀¹ e^{-x²} dx = √π·erf(1)/2 = 0.746824132812427. Monte Carlo is
+    // stochastic (~10⁻⁴ here), so the tolerance is the estimator's, not the
+    // quadrature's.
+    expect(r.run({ k: 1 })).toBeCloseTo(0.746824132812427, 3);
+  }, 60000);
+
+  test('by-reference composition under Monte Carlo is bounded too', () => {
+    // Two levels of deterministic quadrature reached by reference from inside a
+    // Monte-Carlo integrand: 10⁷ samples × a full two-level nest is ~10¹¹
+    // integrand evaluations, hours of synchronous work. With `integrateMC`
+    // counted as an activation, those nested evaluations consume the shared
+    // budget, the nested integrals answer `NaN` once it is gone, and the
+    // estimate — built on refused samples — is `NaN` rather than a number.
+    ce.parse('g_{1}(w) \\coloneq \\int_0^1 \\sin((w+x)^2)\\,dx').evaluate();
+    ce.parse(
+      'g_{2}(w) \\coloneq \\int_0^1 \\sin((g_{1}(x)+w)^2)\\,dx'
+    ).evaluate();
+
+    const r = compileReal('\\int_0^1 g_{2}(t+s)\\,dt', {
+      quadrature: 'monte-carlo',
+      vars: { s: '_.s' },
+    });
+    expect(r.code).toContain('_SYS.integrateMC(');
+
+    // Measured ~5 s: the budget's 3.4·10⁷ nested evaluations, then the
+    // remaining samples answered without integrating. As everywhere in this
+    // file the verdict is the VALUE — that the call returns at all is what the
+    // accounting buys, and the timeout is a label, not a backstop.
+    expect(Number.isNaN(r.run({ s: 0 }))).toBe(true);
+  }, 60000);
+});
+
+/**
+ * Tree-visible nesting is sized at COMPILE time instead: the emitter counts the
+ * `Integrate` nodes nested in the expression and seeds each level with
+ * `initialPanelsForDimensions(depth)` starting panels (16 at one level, 4 at
+ * two, 3 at three), so the starting-panel floor applies to the whole iterated
+ * integral rather than multiplying across its levels. This mirrors the
+ * interpreter (`library/calculus.ts`) and the interval target, which size the
+ * same way; the runtime budget above stays responsible for the by-reference
+ * composition no tree walk can see.
+ *
+ * Adaptive quadrature refines from those starting panels to the same tolerance,
+ * so the accuracy pins below are the point of the sizing test: fewer panels must
+ * buy speed, never a looser answer.
+ */
+describe('COMPILE Integrate — starting panels sized by tree-visible depth', () => {
+  // The `vars` mapping keeps these on the quadrature emitter: without it the
+  // integrand is elementary and the antiderivative-first path folds the whole
+  // integral to a closed form, and there is no quadrature left to size. The
+  // closed forms are exact: ∫₀¹e^x dx = e − 1, so the d-fold integral of
+  // k·e^{x₁+…+x_d} over the unit cube is k(e − 1)^d.
+  const E = Math.E;
+
+  test('a tree-visible double keeps its value and costs an order less', () => {
+    const r = compileReal('\\int_0^1\\int_0^1 k e^{x+y}\\,dy\\,dx', {
+      vars: { k: '_.k' },
+    });
+    expect(r.code.match(/_SYS\.integrate\(/g)?.length).toBe(2);
+    // The panel count is part of the emitted call — pin it, so a regression in
+    // the sizing shows up as a codegen difference and not only as a cost.
+    expect(r.code).toContain(', 0, 1, 4)');
+
+    let value = 0;
+    const evals = countQuadratureEvals(() => {
+      value = r.run({ k: 1 });
+    });
+    expect(value).toBeCloseTo((E - 1) ** 2, 8);
+    expect(r.run({ k: 3 })).toBeCloseTo(3 * (E - 1) ** 2, 8);
+
+    // A count of zero would mean the instrumentation missed the path the runner
+    // took, not that the run was free. Measured: 57 600 evaluations before the
+    // sizing (16 panels per level), 3600 after — the bound is an order of
+    // magnitude below the old cost, with room for panel-seeding tweaks.
+    expect(evals).toBeGreaterThan(0);
+    expect(evals).toBeLessThan(5760);
+  });
+
+  test('a tree-visible triple keeps its value and costs two orders less', () => {
+    const r = compileReal(
+      '\\int_0^1\\int_0^1\\int_0^1 k e^{x+y+z}\\,dz\\,dy\\,dx',
+      { vars: { k: '_.k' } }
+    );
+    expect(r.code.match(/_SYS\.integrate\(/g)?.length).toBe(3);
+    expect(r.code).toContain(', 0, 1, 3)');
+
+    let value = 0;
+    const evals = countQuadratureEvals(() => {
+      value = r.run({ k: 1 });
+    });
+    expect(value).toBeCloseTo((E - 1) ** 3, 8);
+    expect(r.run({ k: 3 })).toBeCloseTo(3 * (E - 1) ** 3, 8);
+
+    // Measured: 1.38·10⁷ evaluations before the sizing (~0.9 s), 91 125 after
+    // (~10 ms) — the interpreter's own cost for the same shape is ~2·10⁴.
+    expect(evals).toBeGreaterThan(0);
+    expect(evals).toBeLessThan(1_400_000);
+  });
+
+  test('a single integral keeps the full starting-panel seeding', () => {
+    // One level has nothing to multiply against, so it stays at the quadrature
+    // default — and the emitted call carries no panel argument at all, which is
+    // what keeps single-integral codegen unchanged.
+    const r = compileReal('\\int_0^k \\sin(t^2)\\,dt', { vars: { k: '_.k' } });
+    expect(r.code).toContain('_SYS.integrate(');
+    expect(r.code).toContain(', 0, _.k)');
+
+    // ∫₀¹ sin(t²) dt = 0.310268301723381 (Fresnel S, verified against the
+    // interpreter's own evaluation of the same integral).
+    expect(r.run({ k: 1 })).toBeCloseTo(0.310268301723381, 10);
+  });
+
+  test('an Integrate node inside another integrand is sized too', () => {
+    // The nesting here is two SEPARATE `Integrate` nodes, not one node with two
+    // limits — the inner one still runs once per outer panel node, so the depth
+    // walk must count it. Value: ∫₀¹(x + ∫₀¹k e^{y} dy) dx = 1/2 + k(e − 1).
+    const r = compileReal(
+      '\\int_0^1 \\left(x + \\int_0^1 k e^{y}\\,dy\\right)\\,dx',
+      { vars: { k: '_.k' } }
+    );
+    expect(r.code.match(/_SYS\.integrate\(/g)?.length).toBe(2);
+    expect(r.code).toContain(', 0, 1, 4)');
+    expect(r.run({ k: 1 })).toBeCloseTo(0.5 + (E - 1), 8);
+  });
 });

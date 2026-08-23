@@ -1000,25 +1000,34 @@ function overlapAdmission(op: Expression, param: Type): boolean {
   if (runtimeCheckExemptParam(param)) return false;
   if (concreteValueOf(op) !== undefined)
     return admissionOf(op, param) === 'admit';
-  // Epsil pre-pass literal evidence (path 1 of the ROADMAP entry "Epsil
-  // static evidence diagnostics lost to overlap admission", ruled
-  // 2026-08-23): during the static pre-pass a symbol whose last assignment
-  // was a concrete LITERAL carries that literal's exact type as evidence
-  // (`1.5`, not the widened `finite_real`). A parameter the evidence
-  // provably cannot inhabit is refused here, at boxing, which is what the
-  // pre-pass mints its diagnostic from — the widened type alone would
-  // overlap and hide the mismatch. Symbolic evidence (a `number` return
-  // type) still overlaps and stays admitted; making the pre-pass stricter
-  // than engine admission for that case is the entry's open path (2).
-  // Evidence exists only while a pre-pass is running, so this clause is
-  // inert everywhere else.
+  // Epsil pre-pass assignment evidence (the ROADMAP entry "Epsil static
+  // evidence diagnostics lost to overlap admission", paths 1 and 2, both
+  // ruled 2026-08-23): during the static pre-pass a symbol carries the type
+  // of its last top-level assignment as evidence — a concrete literal's
+  // exact type (`1.5`, not the widened `finite_real`) or the right-hand
+  // side's static type (`number`, for `x = g()`). The pre-pass is a LINTER
+  // and is deliberately stricter than engine admission: evidence that does
+  // not FIT the parameter is refused here, at boxing, which is what the
+  // pre-pass mints its diagnostic from — the way TypeScript flags code that
+  // would run. So `let x; x = g(); k(x)` with `g: () -> number` and
+  // `k: (integer) -> integer` flags, because the program as written assigns
+  // a `number` where an `integer` is required, even though `g()` could well
+  // return 5. The fit test is `isSubtype`, matching the held-value verdict
+  // in `evidenceGuardedNarrow` so a narrow-eligible slot and this one
+  // cannot disagree.
+  //
+  // This is lint-only: `_staticAssignmentEvidence` is non-undefined only
+  // while a pre-pass runs, so the clause is inert everywhere else, and the
+  // EXECUTED program is unaffected — by the time the call boxes during
+  // execution the symbol HOLDS its value and a concrete value decides
+  // admission exactly.
   if (isSymbol(op)) {
     const def = op.valueDefinition;
     const evidence =
       def === undefined
         ? undefined
         : op.engine._staticAssignmentEvidence?.get(def);
-    if (evidence !== undefined && !typesOverlap(evidence, param)) return false;
+    if (evidence !== undefined && !isSubtype(evidence, param)) return false;
   }
   return typesOverlap(op.type.type, param);
 }
