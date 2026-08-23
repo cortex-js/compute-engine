@@ -957,7 +957,9 @@ type-handler design and its "literal value" fact both disappear: `sgn`
 becomes `isSubtype(type, 'real<0..>')`, and the literal rows become
 subtype tests against ranges.
 
-The work: (1) `BoxedSymbol.sgn` and the sign predicates read a range-typed
+The work (written up as adjustments A1, A2 and A3 of
+`docs/plans/2026-08-22-type-handlers-on-types.md` §5.8, with A3 pending the
+ruling recorded there as O9): (1) `BoxedSymbol.sgn` and the sign predicates read a range-typed
 declaration; (2) `ce.assume(x > 0)` refines the symbol's type to
 `real<0..> & !0` (and `x ≥ 0`, `x < 0`, bounded intervals likewise);
 (3) number literals carry their singleton range on handler INPUT, widened
@@ -980,7 +982,9 @@ float radicand (Tycho item 137, pinned in `type-handler-audit.test.ts`) —
 and a type computation is the wrong place to evaluate anything (the
 type-handler design retires this fold in its §5.4 `Sqrt` row).
 
-The work: the compile targets fold constant subtrees
+The work (adjustment A5 of
+`docs/plans/2026-08-22-type-handlers-on-types.md` §5.8 gives the sequencing):
+the compile targets fold constant subtrees
 (`compilation/constant-folding.ts`) BEFORE any emitter reads a node's type,
 so the band choice, `gpuResultIsComplexValued` (`gpu-target.ts`) and
 `isProvablyRealValued` (`base-compiler.ts`) see the folded value's type

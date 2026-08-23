@@ -10,6 +10,53 @@ implementation plan, revised after three rounds of review
 Throughout, a *ruling* is the user's decision and is dated; a *proposal*
 is marked as one.
 
+## Introduction
+
+In the Compute Engine, typing information is used to make decisions about
+which operations to perform, to help user avoid making mistakes and to
+optimized the compiled code.
+
+Typing is optional: a valid Compute Engine expression can be written without
+the user providing any type information.
+
+Types are inferred based on how identifiers are used and what operations
+are applied to them.
+
+When the user provide a type, it is enforced as a contract: a violation of
+that contract is presented to the user as quickly as possible, during
+parsing/boxing/canonicalization, rather than waiting for evaluation.
+
+Some type errors may only be detected during evaluation, either via
+the interprted or the compiled path.
+
+Operators in the standard library are liberal in what they accept, but
+rigorous in what they produce. 
+
+For example, the index of the `At` operator
+is a number, not an integer: we will round it at evaluation time to convert
+it to its useful type. When compiling, if the type information tells us
+that the argument is an integer, we can omit the rounding operation. At 
+canonicalization time, we will produce an error only if we can tell the type
+of the argument cannot be compatible (i.e. if we know it's a `boolean` for 
+example).
+
+On the other hand, when an operator computes its result type, the type
+will be as narrow as possible, given the information it has available:
+- the type of its arguments
+
+`
+  readonly valid: boolean;             // false for an error operand
+  readonly finite: Tri;                // from the type, or from a literal's value
+  readonly sgn?: Sign;                 // pure sources only (§5.2)
+  readonly closed: Tri;                // has no free variables (`isConstant`)
+  readonly collection: Tri;            // definitely / possibly / definitely not
+  readonly finiteCollection: Tri;      // meaningful when collection !== false
+  readonly indexed: Tri;
+  readonly shape?: readonly number[];  // a statically known fixed shape
+  readonly application: Tri;           // step 16's "is this an application?"
+  readonly inferred: Tri;              // valueDefinition.inferredType (step 8)
+`
+
 ## Glossary
 
 A few engine terms this document leans on, defined once here.
@@ -1097,6 +1144,372 @@ type?: (
   cause; any precision lost is a sound *wider* type, never a narrower one
   (the §3 brackets and the §4.5 ceiling are the guards).
 
+### 5.6 Inventory: which handlers read more than the operand's type (2026-08-22)
+
+This section lists, for each field of `OperandFacts` and for
+`structureOf()`, the handlers that would actually consume it, what the
+read decides, and what is lost if the field is dropped. It is the basis
+for deciding which fields to keep. Every row was produced by reading the
+handler body and every helper it calls, down to the point where only type
+operations remain (`type.matches(…)`, `isSubtype`, `widen`,
+`collectionElementType(type)`), and the example types were measured on
+the tree at the time of writing.
+
+**What was counted.** `library/*.ts` holds 233 function-valued `type:`
+handlers (220 written inline and 13 that name a shared function, such as
+`type: addType`). About 100 of them read nothing but `.type` and the
+number of operands: every constant, all of `number-theory.ts`, the
+statistics aggregates, `sets.ts`, `Max`/`Min`/`Sum`/`Product`,
+`Filter`/`Slice`/`Find`/`Join`/`Append`/`Tabulate`, `If`/`Block`/`When`,
+`D`, `Apply`, `Coalesce`, and others. The rest appear below. A handler
+that only calls a shared helper is listed under that helper.
+
+**How the predicates are computed today** (this decides whether a fact is
+"pure"). On a number literal every predicate reads the value. On a symbol,
+`isReal`/`isInteger`/`isRational` read the declared type; `isFinite` and
+`isNaN` read the held value first and then the type; `sgn` reads the held
+value, else the assumptions recorded by `ce.assume`, never the type. On a
+function expression, `isReal`/`isInteger`/`isRational` are
+`isSubtype(type, …)` (so `false` means "not provably", never "provably
+not"); `isNaN` is always undecided; `isFinite` is `false` for a non-number
+type or `non_finite_number`, `true` only by structural propagation through
+`Abs`, `Sqrt`, `Root`, `Power` and `Divide`, and otherwise undecided; and
+`sgn` runs the operator's `sgn` handler, which is the impure source R3
+excludes. `isSame(0)`/`isSame(1)` are `false` on anything but a literal.
+
+#### `finite` — about 60 handlers; almost entirely derivable from the type
+
+| Consumers | What the read decides |
+| --- | --- |
+| `numericTypeHandler` (about 30 operators: the circular and hyperbolic functions, `Fract`, `LambertW`, the four Bessel and four Airy functions, `ElementMax`/`ElementMin`, `Clamp`, `Degrees`, `DMS`, `Arctan2`, `Haversine`, the hypergeometric family, `AppellF1`, two-argument `Gamma`) | A provably non-finite operand widens the result to `number` (`Sin(+∞)` is NaN); otherwise `finite_real` / `finite_number`. |
+| `logType` (`Ln`, `Log`, `Lb`, `Lg`), `poleReciprocalType` (`Tan`, `Sec`, `Csc`, `Cot`, `Coth`, `Csch`), `boundedInverseTrigType` (`Arcsin`, `Arccos`, `Arcsec`, `Arccsc`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`, `Arcosh`, `EllipticK`, one-argument `EllipticE`, `InverseHaversine`), `arctanType`, `Sinh`/`Cosh`/`Tanh`/`Sech`, `gammaPoleType`, `roundingFunctionType` (`Round`, `Ceil`, `Floor`, `Truncate`), `Abs` | Pole, `±∞` and NaN handling: `Round(+∞)` is `non_finite_number`, `Coth(+∞)` is `finite_real`, `\|NaN\|` is `number` (the only `Abs` read). |
+| `Add`, `Multiply`, `Divide`, `Power`, `Root`, `Sqrt` | `x + ∞` with `x: real` is `non_finite_number`; `∞ + (−∞)` is `number`; `2/∞` is `finite_integer`; `∞^2` is `non_finite_number`. |
+| `Erf`, `Erfc`, `Erfi`, `ErfInv`, `SinIntegral`, `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `ExpIntegralEi`, `EllipticE` (two-argument), `EllipticF`, `EllipticPi`, `AGM`, `Choose`/`Binomial`, `Pochhammer` | Any non-finite operand widens to `number`. |
+| `Hypot`, `Norm`, `Distance`, `Abs` on a tuple — read **per tuple child** | `Norm((∞, 1))` is `number`; `Norm((3, 4))` is `finite_real`. |
+| `Interval.elttype` | `Interval(0, ∞)` has element type `real`, `Interval(0, 1)` has `finite_real`. |
+
+Assessment: three sources feed `isFinite` beyond the type — the literal
+`NaN` (whose type is `number`), a symbol's held value (`w := +∞` types
+`integer`, which is lattice-consistent since `non_finite_number <:
+integer`, so only the value says it is not finite), and the structural
+propagation through `Abs`/`Sqrt`/`Root`/`Power`/`Divide` (`logType` reads
+`base.isFinite === true` for a base such as `√2`). A `finite` fact defined
+as *type, plus the NaN literal, plus the held value* covers everything
+except that last propagation, whose loss is confined to logarithm bases
+and tuple children that are themselves compound.
+
+#### `sgn` — 17 handlers, every one a pole or branch decision
+
+| Consumers | What is lost without it |
+| --- | --- |
+| `logType` (`Ln`, `Log`), `poleReciprocalType` (the zero pole of `Csc`, `Cot`, `Csch`, `Coth`), `gammaPoleType` (`Gamma`, `GammaLn`, `Digamma`, `Trigamma`), `PolyGamma`, `Beta`, `Factorial`, `Factorial2`, `Mod`, `Multiply` (a non-zero factor next to `∞`; the parity of imaginary factors), `Divide` (`x/i` is `imaginary` only for a non-zero real `x`), `Power`, `Root`, `Sqrt`, `AGM`, `Choose`/`Binomial`, `Pochhammer`, `PolyLog` | Unsound claims at poles — `Gamma(−2)`, `Mod(x, 0)`, `Binomial(−3, 0.5)`, `Ln(0)` would all claim a finite type — and widening everywhere a sign was proven: `n!`, `Mod(n, m)`, `Pochhammer(2, 3)` and `AGM(1, p)` with `assume(p > 0)` all become `number`. |
+
+Assessment: keep, with all five values (`zero` alone replaces nine of the
+literal-`0` reads listed next). The pure sources named in R3 must include
+assumptions: `Factorial`, `Pochhammer`, `AGM`, `Gamma` and `Mod` reach
+their precise answer for a valueless symbol only through `ce.assume`.
+
+#### The value of a number literal — the one accepted loss worth reconsidering
+
+`structureOf()` exposes a number literal as `0`, `1` or "some number".
+The handlers that read exactly the literal `0` or `1` are `logType`
+(argument `0`, base `1`), `poleReciprocalType` (`0`), `Zeta` (`1`),
+`Divide` (`0` and `1`), `Multiply` (`0`), `Power` (base `0`), `Root`
+(exponent `0` or `1`, base `0`), `Mod` (`0`), `EllipticPi` (`1`) and
+`PolyLog` (`1`). `sgn === 'zero'` subsumes every `0` read; six `1` reads
+remain, all covered by the literal type of §4.3.
+
+The handlers that read some **other** literal value, each a row the
+design currently accepts as precision loss:
+
+| Operator | What it reads | What is lost without the value |
+| --- | --- | --- |
+| `boundedInverseTrigType` (nine heads) | the literal against the domain intervals | `Arcsin(1/2)`: `finite_real` becomes `number`; `Artanh(1)`: `non_finite_number` becomes `complex` |
+| `Power` | `isEven`/`isOdd` of the exponent, `asRational(exponent)`, `.re` | `(−2)^0.3`: `finite_complex` becomes `finite_number` — this re-opens the compiler defect that branch was written to fix (real `Math.pow` returning NaN); `(2i)^4`: `finite_integer` becomes `finite_complex` |
+| `Root` | `isEven` of the degree | `Root(−8, 4)`: `finite_complex` becomes `finite_number` |
+| `ErfInv` | `−1 < x < 1`, `x = ±1` | `ErfInv(0.5)`: `finite_real` becomes `number` |
+| `PolyLog` | `s.re ≤ 1` | none that matters (today's `number` over-hedges a finite value) |
+| `Range` (`isIndexSpan`) | lower bound ≥ 1, step = 1, upper ≥ lower | `Range(1, 5)`: `range` becomes `indexed_collection<integer>` — a different type, not a wider one |
+| `At` | an integer index into a tuple type | `At((1, "a"), 2)`: `string` becomes `number \| string \| missing` |
+| `Reshape`, `Transpose` with axes | dimensions, axis numbers | `Reshape(v, (2, 3))` loses `matrix<2x3>`; `Transpose(T, 1, 3)` loses its dimensions |
+| `RandomChoice` | the count | `vector<finite_real^3>` becomes `list<finite_real>` |
+| `Subscript` | the base, 2 to 36 | `"ff"_{16}` can no longer be told from an invalid base |
+
+Assessment: a single fact carrying the value of a number literal (a
+machine number, or a rational) is as pure as the `0`/`1` literal type,
+costs nothing to build, and makes all eleven rows exact. Four of them
+(`Range`, `At`, `Reshape`, `RandomChoice`) change the *shape* of the
+result rather than its precision, which is a stronger reason to add the
+fact than R2's "rarely matters" hypothesis allows for.
+
+#### `closed` — two consumers
+
+`poleReciprocalType` uses it so that a closed, non-literal constant may
+sit on a pole: `Tan(π/2)` is `number`, where a type-only reading would
+claim `finite_real`. `Sqrt` uses it in `closedRealSign` as the guard
+before the `.N()` fold that §5.4 already retires. Cheap (`isConstant` is
+structural); keep it for `Tan(π/2)` or drop it and accept that single
+unsound claim.
+
+#### `collection`, `finiteCollection`, `indexed`, `shape`
+
+| Field | Consumers |
+| --- | --- |
+| `collection` | `Equal`/`NotEqual` (`comparisonResultType`), `Pipe` (the topic), `ListFrom`/`SetFrom` |
+| `finiteCollection` | `ListFrom`/`SetFrom` (`ListFrom(Cycle([1, 2]))` is bare `list`); the first-element peeks in `PointX`/`PointY`/`PointZ`, `Norm` and `Hypot`, which only rescue a list literal whose type is wider than its content |
+| `indexed` | `Map` (a source declared `unknown` but holding a list types `indexed_collection<…>` rather than `collection<…>`), `Subscript` (`L_2` is the element type) |
+| `shape` | nobody — `Add` and `Multiply` read dimensions from the type, and `List` builds its shape from structure |
+
+Assessment: `shape` can be dropped. `finiteCollection` has two real
+consumers; everything else in this group is derivable from the type
+(`list` is finite, bare `collection` is undecided).
+
+#### `application` and `inferred` — one consumer each
+
+`application` is read by `isPossiblyCollectionTyped` in `Add`,
+`Multiply`, `Equal` and `PointX`: an operand whose type is `unknown`,
+`any` or `value` counts as possibly a collection only when it is an
+application, so `h(x) + 1` types `broadcastable<number>` while `y + 1`
+stays scalar. That is `structureOf().kind === 'application'`, so no
+separate fact is needed.
+
+`inferred` is read by `Multiply` alone (`isDeclaredScalarNumber`:
+`(k/n)·(1, 0)` with *declared* `k, n` types `tuple<finite_rational, …>`,
+with *inferred* `k` it stays a tuple as written), and by the `List`
+literal fold (`[x, 1]` with `x` inference-pending types
+`list<number^2>`). Both read the flag from a symbol node, so it fits
+better as an attribute of the `symbol` node of `structureOf()`.
+
+#### `valid`
+
+`ProtocolMember`, `ProtocolProperty` and `Field` propagate `error`;
+step 1 of §2.6 needs it regardless. Keep.
+
+#### `structureOf()` — consumers, and three gaps in the vocabulary
+
+Consumers: `Hold`, `ReleaseHold`, `Typed`, `Subscript`, `Declare`,
+`Random`/`RandomChoice` (the head `Interval` or `Range` narrows the
+element to a finite type), `Loop` (a recursive walk for `Return`/`Break`
+in the body), `Which` (a condition that is the symbol `True` truncates the
+clause list), `Match` (the `MatchCase` children's last operands), `List`
+(nested literal shape), `Set` (comprehension recognition), `Reduce`/
+`Scan`/`FlatMap` (a callback that is the symbol `Add`, `Multiply`, `Min`
+or `Max`), `Field` and `At` (a string key; the ring-constant test becomes
+a symbol-name test), `Map` and `Pipe` (parameters and body), `Add` and
+`Multiply` (a `List` head), `Dot`, `Norm`, `Hypot`, `Distance` and `Abs`
+(tuple children), `PointX`/`PointY`/`PointZ` (symbol versus application
+child).
+
+Gaps: (a) `{ kind: 'tuple'; arity }` is not enough — `Dot`, `Norm`,
+`Hypot`, `Distance` and `Abs` read the children's descriptors
+(`Dot((1, 2), (3, 4))` types `finite_integer` by running `Multiply`'s
+handler on the children, which `derive` covers); (b) `Declare` needs a
+dictionary-literal node kind, because a type gate would mistake a
+`dictionary`-typed value operand for the trailing attributes bag; (c)
+`Loop` walks the whole body, which works only if `children` recurse.
+
+#### Handlers that need definitions or evaluation, beyond the §5.4 table
+
+§5.4 covers `Map`, `Pipe`, `Set`, `Set.elttype`, `Interval.elttype`,
+`JacobianMatrix`, `Sqrt` and `Dot`. These handlers also read definitions
+or evaluate today and have no row there yet:
+
+- **`Derivative`** reads the *held value's* type of a symbol declared as
+  bare `function`: after `f := t ↦ (cos t, sin 2t, t)`, `Derivative(f, 1)`
+  types `(unknown) -> tuple<…>`. A type-only reading gives
+  `(any*) -> number`, which is exactly the failure recorded as Tycho
+  item 210. A descriptor for a symbol would need its value's type.
+- **`Reduce`, `Scan`, `FlatMap`** call `lookupDefinition` on a callback
+  symbol that arrives held and unbound (its `.type` is `unknown`) to find
+  its declared signature. This disappears if the framework puts the held
+  symbol's declared type into `descriptor.type`.
+- **`Subscript`** reads the base symbol's definition for
+  `subscriptEvaluate`, and tests quotient-ring identity (`Integers_5`).
+- **`Field` and `At`** consult the protocol registry by symbol name and
+  receiver type, and `Field` guards on "the symbol holds no value".
+- **`Function`** (`functionLiteralSignatureType`) reads the parameter
+  declarations in the literal's own scope and the effects of every head in
+  the body; it is bypassed for canonical literals.
+- **`EllipticPi`, `ErfInv`, `boundedInverseTrigType`** call `isEqual(k)`
+  on a non-literal operand, which evaluates a closed operand (`n := 1;
+  EllipticPi(n, 2)` types `number`, the pole).
+- **`First`/`Second`/`Third`/`Last`, `PointX`/`PointY`/`PointZ`** consult
+  the source's `collection.elttype` handler; it only changes the answer
+  for `Set` comprehensions and `Interval`.
+
+**Defect found by this inventory, fixed the same day:** `Round(x, 2)`
+with `x: real` typed `finite_integer` while evaluating to a rational —
+the precision arm required `isFinite === true`, which a bare `real`
+symbol cannot satisfy, and fell through to the integer claim. The arm now
+replaces `finite_integer` by `finite_real` for every operand (commit
+`57bd3420`, pinned in `type-soundness-regressions.test.ts`).
+
+### 5.7 What each fact buys — measured by withholding it (2026-08-22)
+
+§5.6 says which handlers read a fact. This section says what happens when
+the fact is taken away, measured on the whole library at once rather than
+handler by handler. The method: at the one call site that hands operands
+to a `type` handler (`boxed-function.ts`, `def.type(expr.ops, …)`), wrap
+every operand in a proxy that withholds one family of facts, and run the
+full suite (31,283 tests, 1 pre-existing failure — a load-sensitive
+wall-clock benchmark — excluded). Each new failure is then sorted into two
+bins: a **type pin** (an assertion comparing `.type` to an exact string —
+it records the status quo and says nothing about consequences) and a
+**behavior change** (anything else: a wrong value, a refused expression,
+different compiled code, a dropped solution). Only the second bin
+measures the cost of dropping the fact.
+
+A first, narrower run retyped `Sqrt` alone — once from its operand's type
+only, once as always `number` — and found 8 and 16 failures, of which 2
+and 7 were behavior changes; the rest of this section generalizes that.
+
+| Withheld | New failures | Type pins | Behavior changes | What the behavior changes were |
+| --- | --- | --- | --- | --- |
+| `sgn` from every source (literal, held value, assumption) | 79 | 48 | 31 | 28 trace to the sign of a **number literal**: `Power` claims `finite_rational` instead of `finite_integer` for `10^21` once `21`'s non-negativity is unknown, so `FactorInteger(10^21 + 3)`, `DigitSum(2^1000000)` and 5 Fungrim rules are refused at the strict signature gate, and `Mod(2^(3^20), 100)` stays inert because `Mod`'s evaluate handler reads `isInteger`, which on a function expression is derived from the type. Also: an even root of a negative constant compiles to `_gpu_nan()`; `ln(−1)` is no longer admitted as a complex constant; the solver drops `±√a` for `x² = a` under `assume(a > 0)` (the one **assumption**-channel case); one shim artifact (below). |
+| the value of a finite literal other than `0`/`1` | 87 | 67 | 20 | All shape or lowering: `Range(2, 3)` no longer types `range`, so `Slice(xs, Range(2, 3))` is refused at the gate (8 tests, two of them compile fail-closed); `RandomChoice(…, 3)` loses its dimension (3); `asin(0.5)` gets the complex kernel on the GPU and JavaScript targets while `acos(1/0.5)` loses it (5 — the literal's position in the inverse-trig domain feeds the emitter); the even root of a negative constant folds to `_gpu_nan()`; a `PointList` component read goes complex-NaN. |
+| closedness (`isConstant`, `unknowns`) | 6 | 4 | 2 | One real: the type-soundness grid catches `Csc(π)` and `Cot(π)` claiming `finite_real` while evaluating to `~oo` — a soundness hole at a pole that a closed, non-literal constant can land on. One shim artifact. |
+| finiteness beyond the type (the `NaN` literal, a held value) | 29 | 25 | 4 | Two compile complex-mode tests where `b(√a)` acquires a `_SYS.cplx(…)` lift; a `set \| number` union collapsing to `number` in matrix-operator typing — the `Add`/`Multiply` shape gates use `isFinite === false` as their "this operand is not a number" test, so finiteness is entangled with collection detection; one shim artifact. |
+
+**Shim artifact.** `pipe-type-read-purity` fails under three of the four
+runs because each proxy is a fresh object: `Pipe`'s memo is keyed on
+operand identity, misses, and re-derives into a scratch scope. That is a
+property of the experiment, not of the fact.
+
+**What this says about the facts.**
+
+- The cargo of `sgn` is overwhelmingly the sign of a *literal*, not of an
+  assumption or a held value, and it is consumed through `Power`'s and
+  `Divide`'s integer-versus-rational claims, which then meet the strict
+  signature gate and the `isInteger` reads in evaluate handlers. A
+  literal's singleton range type (`finite_integer<21..21>`) carries
+  exactly this, which is why the ROADMAP entry "Ranged types should carry
+  sign" folds `sgn` into the type. The one assumption case (the solver)
+  is the same entry's "`assume` refines the symbol's type".
+- The literal-value fact's cargo is *shape* — `range`, dimensions, tuple
+  slots — and *lowering* — real versus complex kernels; singleton ranges
+  cover it for the same reason.
+- Closedness buys one soundness property (a pole at `π`) and nothing
+  else. It can stay as a fact (it is structural) or the pole handlers can
+  answer `number` for any non-literal constant.
+- Finiteness beyond the type buys nothing the suite can see except
+  through the shape gates' misuse of `isFinite === false`, which should
+  read the type directly (`matches('number')`).
+
+**Where the consumers are.** Across all four runs the behavior changes
+landed in the same few places: the strict declared-signature gate
+(relaxed by R1), the `isInteger`/`isReal`/`isFinite` predicates that
+evaluate handlers and the solver read on *function expressions* (where
+they are derived from the type), the compiler's real-versus-complex
+lowering (`gpuResultIsComplexValued`, `isProvablyRealValued`, the
+constant folder), and the `range` / dimension / tuple-slot shape of a
+result. Simplification and the JavaScript emitter's operand recursion
+never read a result type. A result type is narrow enough when it answers
+those consumers' questions — *provably real? provably non-real? provably
+finite? integer or rational? what shape?* — the way the precise handler
+would; a pin that fails without any of those answers changing records a
+cost of zero.
+
+### 5.8 Adjustments that follow from the measurements (recorded 2026-08-22, not yet scheduled)
+
+Each item names the evidence in §5.6–§5.7 it rests on, the exact change,
+and how it would be verified. They are independent of the signature
+change in §5.1–§5.3 and can land before it; A1, A2 and A4 are small.
+Two of them are also tracked in `ROADMAP.md`, which is the system of
+record for open work: A1, A2 and A3 are the work items of the entry
+"Ranged types should carry sign (and a literal's value) through type
+derivation", and A5 is the entry "Compile targets should constant-fold
+before reading a node's type". A4, A6 and A7 exist only here, as parts of
+this design.
+
+**A1 — A symbol's sign reads its ranged declaration.** Today
+`BoxedSymbol.sgn` (`boxed-symbol.ts`, the `sgn` getter) answers from the
+held value, else from the assumptions, and never from the type, so a
+symbol declared `integer<1..>` answers `sgn: undefined`, `√q` types
+`finite_complex` and `q!` types `finite_real`. Change: between the value
+and the assumptions, derive the sign from the declared type with one
+helper on `Type` (`real<0..> & !0` or a lower bound above `0` → positive;
+lower bound `0` → non-negative; upper bound `0` → non-positive; upper
+bound below `0` → negative; `<0..0>` → zero); the four predicates
+(`isPositive`, …) follow since they read `sgn`. Verify: declarations with
+ranges through `Sqrt`, `Factorial`, `Gamma`, `Mod`, `Ln`, `Power` — the
+§5.6 `sgn` consumers — each answering as the literal would.
+
+**A2 — `assume(x > 0)` refines the symbol's type.** Today an assumption
+sets the sign channel and leaves the type at `real`, so any consumer that
+reads the *type* cannot see it — the solver's root filter, the GPU
+complex-lowering gate, an assignment to a `real` symbol (§5.7, the one
+assumption-channel behavior change). Change: `assume` narrows the
+declaration's type by intersection with the range the predicate denotes
+(`x > 0` → `real<0..> & !0`; `x ≥ 0` → `real<0..>`; `x < 0`, `x ≤ 0`,
+and two-sided bounds likewise), so after A1 the sign channel and the type
+agree. Constraint: a symbol with assignment evidence is checked, never
+rewritten (the 2026-08-18 inference ruling), so an assumption on an
+assigned symbol is validated against the value instead of narrowing the
+type. Verify: `solve-domain` keeps `±√a`; `About(x)` prints the refined
+type; the `assume` tests.
+
+**A3 — Number literals carry their singleton range on handler input.**
+§5.7 measured that the `sgn` fact's cargo is the sign of a *literal* (28
+of 31 behavior changes) and the literal-value fact's cargo is shape and
+lowering (20 of 20); a literal's singleton range type —
+`finite_integer<21..21>`, `finite_real<0.5..0.5>` — answers both as a
+subtype test, and it subtypes correctly today
+(`finite_integer<2..2> <: real<0..> & !0`). Change: the §4.3 rule that a
+literal `0` or `1` reaches a handler with its literal type extends to
+every finite real literal, with the same widening on handler output. This
+retires `facts.sgn` for literals and the separate literal-value fact; the
+eleven §5.6 rows (`Arcsin(1/2)`, `ErfInv(0.5)`, `Range(1, 5)`,
+`At((1, "a"), 2)`, `Reshape`, `RandomChoice`, …) become range tests.
+**This narrows R2** ("literal types are wanted for `0` and `1` only") and
+is recorded as open item O9 below rather than assumed. Verify: the §5.7
+`sgn` and `literal` runs repeated with the ranges in place should show
+zero behavior changes.
+
+**A4 — The arithmetic shape gates read the type, not `isFinite === false`.**
+`BoxedFunction.isFinite` answers `false` for any operand whose type is not
+a number (`boxed-function.ts`, the `isFinite` getter), and the `Add`,
+`Multiply`, `Divide` and norm handlers use `isFinite === false` both as
+"provably `±∞`" and as "this operand is a tuple or a broadcast-lifted
+collection" (`arithmetic-add.ts` around the `nonFinite` filter;
+`arithmetic.ts` in the `Divide` and `Multiply` handlers; `library/utils.ts`
+`euclideanNormType`) — which is why each of them hoists a shape branch
+ahead of the non-finite branch. §5.7's finiteness run put 25 pins and 3
+behavior changes on exactly this entanglement. Change: the non-finite
+branch tests `type.matches('non_finite_number')` (or the literal's own
+`isInfinity`), and a non-number operand is detected with
+`!type.matches('number')`; the hoisted branches then guard nothing and
+can be folded back in order. Verify: `broadcastable-typing`,
+`points-arithmetic`, `valueless-collection-typed-operand`,
+`tycho-item-188-broadcastable-vector-divide`, `non-finite-typing`.
+
+**A5 — The `Sqrt` fold leaves the type path once the compiler folds
+constants.** §5.7 found the fold's only consumer is the GLSL band of a
+`Which` over a float radicand (Tycho item 137). Sequence: the ROADMAP
+entry "Compile targets should constant-fold before reading a node's type"
+lands first; then `closedRealSign` is deleted and the §5.4 `Sqrt` row
+applies, with item 137 and `compile-complex-result` / `compile-glsl` /
+`random-compile` byte-identical as the acceptance test.
+
+**A6 — Evaluate handlers that classify an operand by a type-derived
+predicate.** `Mod(2^(3^20), 100)` stayed inert in the `sgn` run because
+`Mod`'s evaluate handler reads `isInteger` on the *unevaluated* power,
+and on a function expression that predicate is the type. That handler
+legitimately inspects the held form (it is how the modular-power fast path
+avoids materializing `2^(3^20)`), so the fix is A3, not the handler; but
+the §4.4 runtime conformance check must be specified the same way — it
+classifies an operand *after* evaluating it, never by the static type of
+the held form.
+
+**A7 — The pins.** The 48 + 67 + 25 + 4 assertions that failed in §5.7
+without any behavior change are exact-string type pins in the files
+listed there (`inverse-trig-domain-type`, `points-arithmetic`,
+`broadcastable-typing`, `power-negative-base-branch`,
+`tycho-item-194-range-broadcast-type`, `type-handler-audit`,
+`real-domain-types`, `range-type`, …). Under the Step 0 rule each becomes
+an `expectTypeBetween` bracket naming the question it guards, or is
+widened, as the conversions of §5.3 reach its file; none of them blocks
+an adjustment above on its own.
+
 ## 6. Rulings (2026-08-22) and open items
 
 Rulings made by the user to this session on 2026-08-22:
@@ -1155,12 +1568,51 @@ Open items — genuine decisions, each with a default:
   The alternative, an unconditional runtime check, narrows what
   `strict: false` means and needs a migration note plus a benchmark on
   the plot and compile paths. This is a product decision.
+- **O9 — Singleton range types for every finite literal (§5.8 A3).**
+  Default: not done until ruled, because it narrows R2 ("literal types
+  for `0` and `1` only"). The case for it is §5.7: the `sgn` fact and the
+  literal-value fact together account for 48 measured behavior changes,
+  and a literal's singleton range answers every one of them as a subtype
+  test with the widening machinery §4.3 already requires. Saying no keeps
+  `facts.sgn` (with literals as a source) and accepts the eleven §5.6
+  literal-value rows as lost precision and lost shape. Raised by the user
+  2026-08-22 ("sign in the lattice"); ranged types are the successor of
+  the retired `positive_integer`-style named types.
+
+  The literal's type is the **value type** (`21`, `0.5`, `"abc"`, `true`
+  — `kind: 'value'`), not a singleton range: value types already subtype
+  correctly against tiers, ranges, intersections and negations
+  (`21 <: finite_integer`, `21 <: real<0..> & !0`, `21 <: integer<20..30>`,
+  `0.5 <: real<-1..1>`, `21 <: !0`; measured 2026-08-22), they cover
+  strings and booleans where ranges cannot, and a singleton range is not
+  recognized as the value (`finite_integer<21..21> <: 21` is false). A
+  range is the literal's *widening*: a literal the value node cannot hold
+  exactly — a rational (`1/3` does not even parse as a type), an integer
+  beyond a machine number (`1e21` parses as a float) — widens to a
+  sign-carrying range (`finite_integer<0..> & !0`, `finite_rational<0..>`)
+  rather than to the bare tier, so the sign survives when the value does
+  not.
+
+  **Second half — the public `.type`.** Today `ce.box(21).type` is
+  `finite_integer` and `ce.box(21).type.matches('21')` is `false`, while
+  `ce.type('21')` is `21` and inference already widens at storage
+  (`k := 21` declares `k: integer`). The consistent end state is
+  `type(21) = 21`: the literal type at every *expression* position, widened
+  at every *storage* position — an inferred declaration, a stored tuple or
+  signature type, a handler result — by the §4.3 walker. This is the
+  `const`/`let` discipline of TypeScript's literal types. It is a separate,
+  measured step after the handler-input half: its only real cost is an
+  exact-string check on `.type.toString()` (in-repo, the ~1,429 assertions
+  Step 0 left unconverted — the §5.7 method counts how many actually fail;
+  in Tycho, unknown until asked), and it removes §7's first non-goal. The
+  default until ruled: handler-input literal types only, public type
+  unchanged.
 
 ## 7. Non-goals
 
 - Changing `BoxedNumber.type` for consumers: a literal's public type stays
   `finite_integer`; the `0`/`1` literal types are visible to handlers
-  only.
+  only. (O9's second half would lift this non-goal; it stays until ruled.)
 - Removing the `scratch` exemption: it stays as a guard.
 - Converting the remaining ~1429 exact-string type assertions; the §3
   rule applies to new ones and to any that a later step makes fail.
@@ -1193,6 +1645,22 @@ Open items — genuine decisions, each with a default:
   §4–§5 of this draft: session compute-engine-85, 2026-08-22, with its
   subagents. Run logs and the full audit and map tables are in that
   session's scratchpad and task outputs.
+- The §5.6 inventory (which handlers read more than the operand's type,
+  per `OperandFacts` field): session compute-engine-86, 2026-08-22, with
+  four reading subagents, one per file group; every example type
+  re-measured on the tree before it was written down. The `Round`
+  precision-arm defect and its fix (commit `57bd3420`) came out of that
+  reading.
+- The §5.7 withholding measurements (the `Sqrt` pair and the four
+  per-fact runs, 31,283 tests each, in a worktree under the box lock):
+  session compute-engine-86, 2026-08-22; the operand proxy follows the
+  §2.2 shim's receiver-is-target pattern. Logs and JSON results in that
+  session's scratchpad (`sqrt-*.json`, `withhold-*.json`). The ROADMAP
+  entries "Ranged types should carry sign" and "Compile targets should
+  constant-fold before reading a node's type" were opened from these
+  results at the user's direction.
+- §5.8 (adjustments A1–A7) and O9: session compute-engine-86,
+  2026-08-22, at the user's direction to record rather than implement.
 - Spec reviews, all by Claude and Codex on 2026-08-22, in
   `docs/plans/reviews/2026-08-22-type-handlers-on-types-review-draft{3,4,5}.md`
   (18 findings each). Fifth-draft findings and where they went: 1 → the
