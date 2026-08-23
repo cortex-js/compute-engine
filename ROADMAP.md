@@ -259,7 +259,7 @@ collection set only when another factor is DEFINITELY a collection, so a
 lone `2u` is not claimed a list by that handler. Pinned in
 `valueless-collection-typed-operand.test.ts` (4 cases).
 
-### A LONE union-typed operand is typed as a definite list by the generic broadcast wrapper (OPEN, ruling needed — found 2026-08-22)
+### A LONE union-typed operand was typed as a definite list by the generic broadcast wrapper (RULED and FIXED 2026-08-22)
 
 `u: number | list<number>` valueless: `2u`, `u + 2`, `-u` all type
 `list<finite_number>` / `list<number>` — `type.matches('collection')` is
@@ -274,10 +274,52 @@ list<finite_number>`) or `broadcastable<finite_number>`; the two spellings
 route differently downstream (the `broadcastable<T>` family has its own
 admission and compile lowering; a scalar-or-collection union is what
 `isCollectionShaped` / `matches('collection')` answer `false` on). Which
-spelling the wrapper should produce is the ruling. Until ruled, a consumer
-reading the static type of an arithmetic expression over a valueless
-scalar-or-list symbol gets a confident `list` that a later scalar
-assignment contradicts.
+spelling the wrapper should produce was the ruling.
+
+Ruled by the user the same day: carry the union through — `2u` types
+`finite_number | list<finite_number>`, each branch's result wrapped back in
+that branch's own collection kind (`indexed_collection`, `range` →
+`indexed_collection<…>`); `broadcastable<…>` is NOT recruited for a declared
+union. `loneUnionBroadcastResultType()` (`collection-utils.ts`) intercepts
+the wrapper's definite-list arm when every broadcast trigger is a
+scalar-or-collection union; a definite collection sibling (`[1,2] + u`)
+keeps `list<number>`. `matches('collection')` on `2u` is now `false`, so
+the relational/logic short-circuit gates treat it as undecided and stay
+inert (probed: `u + 2 > 3`, `And(u > 1, True)`). Two consequences the change
+exposed and fixed in the same pass: `reduceBigOp` folded such a body as a
+single term (`Sum(2u)` → `2u`, and the pre-existing `Sum(u)` → `u`), and the
+same fold hit a body that merely MIGHT be a collection — a
+`broadcastable<number>`-typed `2 + h(x)` or an undeclared application —
+where `Sum(2 + h(x))` → `h(x) + 2` re-evaluated to `[5, 8]` once `h` returned
+a list (the sum is `13`); the no-index fold now declines via
+`isPossiblyCollectionTyped` as well (a bare undeclared symbol still folds).
+One pin in `broadcastable-typing.test.ts` updated (`h(1)·g(1)` with `h`
+returning `unknown` is a lone-union case, now `list<number> | number`).
+The dual review of that landing closed four more gaps the same day: a
+`tuple`/`string` branch made `scalarOrCollectionUnionBranches` bail (now an
+atomic, scalar-side branch — `2u` over `number | tuple<…>` still scales the
+tuple); the no-index big-op fold needed its own ENUMERATION-side predicate,
+`unionMayHoldACollection` (any branch collection-shaped, tuple-shaped,
+`string` or `broadcastable<…>`, aliases resolved), because `Sum(v)` over
+`number | vector<2>` / `number | set<number>` / `number | tuple<…>` still
+folded to `v` where the assigned value sums to 3; the two user-LAMBDA
+broadcast paths (`f(u)` for `f := x ↦ 2x`) still returned a definite list;
+and a `broadcastable<T>` branch inside a union is now unwrapped into its
+scalar and `indexed_collection<T>` halves. Pinned in
+`valueless-collection-typed-operand.test.ts` (76 cases in the file).
+
+### A `broadcastable<T>` branch INSIDE a union is invisible to `isPossiblyCollectionTyped` (OPEN, low — found 2026-08-22)
+
+`b: number | broadcastable<number>` valueless: `2b` types `finite_number`,
+though the operand may hold a collection. `isPossiblyCollectionTyped` reads
+only a top-level `broadcastable` kind or a top-typed application; it does
+not look inside a union. Widening it touches ~25 call sites across the
+interpreter, the relational operators and both compile targets, so it was
+not done under a low-severity review finding. The enumeration side is
+already honest (`Sum(b)` stays inert via `unionMayHoldACollection`). A
+declared `scalar | broadcastable<…>` union is an unusual spelling; re-arm
+if a consumer produces one.
+
 
 ### Arithmetic shape gates were blind to a TRANSPARENT type alias (FIXED 2026-08-22 — found by the item-221 review)
 

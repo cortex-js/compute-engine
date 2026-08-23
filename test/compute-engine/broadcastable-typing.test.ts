@@ -115,15 +115,20 @@ describe('broadcastable<T> typing (phase B)', () => {
 
   test('union-typed operand contributes its unwrapped element', () => {
     // A declared `number | list<number>` return mixed with an unknown-return
-    // call: the union operand's contribution is its scalar element, so the
-    // element type stays clean (`number`), not `number | list<number>`. (The
-    // generic wrapper then lifts the statically-visible list branch to
-    // `list<number>`.)
+    // call: the union operand's contribution is its scalar ELEMENT, so the
+    // per-element result stays clean (`number`), never the raw
+    // `number | list<number>` nested inside the lift.
+    //
+    // Neither operand is DEFINITELY a collection here — the unknown-return
+    // call may resolve to either — so the result carries the union through
+    // (`list<number> | number`) rather than claiming the definite
+    // `list<number>` it typed before: `g(1)` may well return a scalar, and
+    // then so does the product.
     const ce = new ComputeEngine();
     ce.declare('h', '(number) -> unknown');
     ce.declare('g', '(number) -> number | list<number>');
     const e = ce.box(['Multiply', ['h', 1], ['g', 1]]);
-    expect(e.type.toString()).toBe('list<number>');
+    expect(e.type.toString()).toBe('list<number> | number');
   });
 
   test('point accessors over an atomic tuple stay scalar-typed', () => {

@@ -37,6 +37,7 @@ import {
   isKnownFinitenessBroadcast,
   isLinearAlgebraCollection,
   isTextAtom,
+  loneUnionBroadcastResultType,
   isNumericTuple,
   couldBeUnkeyedCollectionOperand,
   isPossiblyCollectionTyped,
@@ -4910,6 +4911,22 @@ function type(expr: BoxedFunction): Type {
               (!deferToHandler && isFixedShapeCollection(x)))
         );
         if (broadcastingOps.length > 0) {
+          // Every broadcast trigger is a LONE scalar-or-collection union — a
+          // valueless symbol declared `number | list<number>`, with no operand
+          // that is definitely a collection. Such an operand is not a
+          // collection, so the result carries the union through
+          // (`finite_number | list<finite_number>` for `2u`) instead of
+          // claiming the definite `list<E>` the same expression contradicts
+          // once `u := 5` makes it evaluate to the scalar `10`. See
+          // `loneUnionBroadcastResultType` for the rule and for why a definite
+          // collection sibling (`Add([1, 2], u)`) keeps the `list<E>` typing.
+          const loneUnionResult = loneUnionBroadcastResultType(
+            broadcastingOps.map((x) => x.type.type),
+            broadcastElementType(sigResult)
+          );
+          if (loneUnionResult !== undefined)
+            return maybeAbsorb(loneUnionResult);
+
           // The wrapper below assumes `sigResult` is the SCALAR per-element
           // result, and unwraps one rank off it before re-shaping. ONE case
           // breaks that assumption — `sigResult` is already the WHOLE
@@ -5072,6 +5089,19 @@ function type(expr: BoxedFunction): Type {
           // `T` binds `finite_integer` and the wrap re-adds the operand's
           // rank) and fixes the variable-MENTIONING shapes the short-circuit
           // could not reach.
+          // As at the generic wrapper's arm 1: when every mapped operand is a
+          // LONE scalar-or-collection union (a valueless `u: number |
+          // list<number>`, with no operand that is definitely a collection),
+          // the application is not a collection and the result carries the
+          // union through — `f(u)` for `f := x ↦ 2x` types
+          // `finite_number | list<finite_number>`, the same as `2u`, instead
+          // of the definite `list<E>` that `u := 5` contradicts.
+          const loneUnionResult = loneUnionBroadcastResultType(
+            mapped.map((x) => x.type.type),
+            lambdaResult
+          );
+          if (loneUnionResult !== undefined) return loneUnionResult;
+
           // A collection-valued per-element result keeps the plain nested
           // lift (`f := x ↦ [x,-x]` over `[1,2]` → `list<vector<2>>`):
           // installing the collection result as the element of a dimensioned
@@ -5189,6 +5219,15 @@ function type(expr: BoxedFunction): Type {
           // D10 (§4.4, re-ruled 2026-08-04): as at the operator-def lambda
           // site above, `sigResult` is already the PER-ELEMENT result, so the
           // ordinary wrap below is the whole answer on this route too.
+          // The lone scalar-or-collection union carries through here as well:
+          // an operand that may hold either a scalar or a list is not a
+          // collection, so `f(u)` types `E | list<E>` rather than the definite
+          // `list<E>` the same expression contradicts once `u := 5`.
+          const loneUnionResult = loneUnionBroadcastResultType(
+            mapped.map((x) => x.type.type),
+            sigResult
+          );
+          if (loneUnionResult !== undefined) return loneUnionResult;
           const collectionValued =
             isSubtype(sigResult, COLLECTION_SHAPE_TYPE) ||
             (typeof sigResult !== 'string' &&

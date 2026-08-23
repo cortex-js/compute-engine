@@ -24,7 +24,12 @@ import {
   enumerationDeclinedAfterWalk,
 } from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
-import { isTuple, isValuelessCollectionTyped } from '../collection-utils.js';
+import {
+  isPossiblyCollectionTyped,
+  isTuple,
+  isValuelessCollectionTyped,
+  unionMayHoldACollection,
+} from '../collection-utils.js';
 
 /**
  * Does the norm of this point BROADCAST — i.e. does a component carry a
@@ -2290,7 +2295,36 @@ export function* reduceBigOp<T>(
     // from a correct sum over an empty collection. This is the same
     // resolution the 2026-08-11 ruling gave `ListFrom`/`SetFrom`/`TupleFrom`
     // for the same operand class.
-    if (isValuelessCollectionTyped(value)) return NON_ENUMERABLE_DOMAIN;
+    //
+    // A body whose type is a UNION of a scalar branch and a branch this fold
+    // would ENUMERATE — a valueless `u: number | list<number>`, or the `2u`
+    // that lifts over it — carries exactly the same hazard: it MAY hold a
+    // collection, so folding it as one term answers `Sum(2u)` → `2u` where
+    // `u := [1, 2]` makes the same expression `6`. Such a union does not
+    // `match('collection')` (the scalar branch defeats the match), so
+    // `isValuelessCollectionTyped` alone misses it and the fall-through
+    // accumulated it as a scalar. The test is the ENUMERATION-side
+    // `unionMayHoldACollection`, not the broadcast-side
+    // `scalarOrCollectionUnionBranches`: the branches that never broadcast
+    // still sum (`number | vector<2>`, `number | set<number>`) and so do the
+    // ones a broadcast treats as atomic (`number | tuple<number, number>`,
+    // whose `Sum` is `3` once the tuple arrives; `number | string`).
+    //
+    // A body that MIGHT become a collection is declined for the same reason:
+    // a `broadcastable<T>`-typed body (`2 + h(x)` for a not-yet-defined `h`,
+    // or a symbol declared `broadcastable<number>`) and an application whose
+    // head is undeclared (top-typed) both fold to a scalar term today, yet
+    // `Sum(2 + h(x))` evaluated to `h(x) + 2` re-evaluates to `[5, 8]` once
+    // `h := x ↦ [x, 2x]` and `x := 3`, where the sum is `13`. A bare symbol
+    // with a top type is deliberately NOT declined — `isPossiblyCollectionTyped`
+    // admits only an application there — so `Sum(x)` for an undeclared `x`
+    // keeps folding to `x`.
+    if (
+      isValuelessCollectionTyped(value) ||
+      isPossiblyCollectionTyped(value) ||
+      unionMayHoldACollection(value.type.type)
+    )
+      return NON_ENUMERABLE_DOMAIN;
     return fn(initial, value) ?? undefined;
   }
 

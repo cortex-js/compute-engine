@@ -602,7 +602,12 @@ describe('a collection-TYPED but valueless operand', () => {
         ce.declare('s', 'list<number>');
         ce.declare('a', 'number');
         ce.declare('b', 'number');
-        const product = ['Multiply', ['Tuple', 'a', 'b'], ['List', 1, 2, 3], 's'];
+        const product = [
+          'Multiply',
+          ['Tuple', 'a', 'b'],
+          ['List', 1, 2, 3],
+          's',
+        ];
         const stored = ce.box(product).evaluate();
         // The captured form was `(a·s·[1,2,3], b·s·[1,2,3])`.
         expect(stored.operator).toBe('Multiply');
@@ -865,8 +870,9 @@ describe('a collection-TYPED but valueless operand', () => {
             .toString()
         ).toBe('[(1, 3),(2, 4)]');
         expect(
-          ce.box(['PointList', ['List', 1, 2], ['List', 3, 4, 5], 's']).evaluate()
-            .operator
+          ce
+            .box(['PointList', ['List', 1, 2], ['List', 3, 4, 5], 's'])
+            .evaluate().operator
         ).toBe('PointList');
       });
     });
@@ -937,7 +943,365 @@ describe('the element type of a held broadcast over a union-typed operand', () =
     ce.declare('m', 'integer | list<real>');
     for (const operator of ['Add', 'Multiply'])
       expect(
-        ce.box([operator, ['List', 1, 2], 'm']).evaluate().type.toString()
+        ce
+          .box([operator, ['List', 1, 2], 'm'])
+          .evaluate()
+          .type.toString()
       ).toBe('list<real>');
+  });
+});
+
+/**
+ * A LONE union-typed operand — a valueless symbol declared
+ * `number | list<number>` with no operand beside it that is definitely a
+ * collection — is not a collection. Typing `2u` as the definite
+ * `list<finite_number>` (what the broadcast wrapper did, by reading "the union
+ * HAS a collection branch" as "the operand IS a collection") states something
+ * the very same expression contradicts once the symbol is assigned: `u := 5`
+ * makes `2u` evaluate to the scalar `10`.
+ *
+ * The rule is to carry the declared union through instead. The result is
+ * the scalar per-element result unioned with that result wrapped back in each
+ * of the operand's collection branches, keeping each branch's own collection
+ * KIND. `broadcastable<T>` — the spelling for an operand whose collection-ness
+ * is not statically visible at all — is deliberately NOT recruited for a
+ * declared union.
+ *
+ * Written as PAIRS like the rest of this file: the symbolic type while the
+ * symbol is valueless, and the value the identical expression produces under
+ * each half of the union.
+ */
+describe('a LONE union-typed operand keeps the union in the result type', () => {
+  const engineWithU = () => {
+    const ce = new ComputeEngine();
+    ce.declare('u', 'number | list<number>');
+    return ce;
+  };
+
+  it('carries the union through every lifted operator', () => {
+    const ce = engineWithU();
+    expect(ce.box(['Multiply', 2, 'u']).type.toString()).toBe(
+      'finite_number | list<finite_number>'
+    );
+    expect(ce.box(['Add', 'u', 2]).type.toString()).toBe(
+      'list<number> | number'
+    );
+    expect(ce.box(['Negate', 'u']).type.toString()).toBe(
+      'list<number> | number'
+    );
+    expect(ce.box(['Power', 'u', 2]).type.toString()).toBe(
+      'finite_number | list<finite_number>'
+    );
+    expect(ce.box(['Sin', 'u']).type.toString()).toBe(
+      'finite_number | list<finite_number>'
+    );
+  });
+
+  // The point of the ruling: a scalar-or-collection union must not answer a
+  // confident YES to "is this a collection". Every gate keyed on that match —
+  // `isCollectionShaped` (the `And`/`Or` short circuit, the relational chains)
+  // and `isValuelessCollectionTyped` — reads the union as undecided again.
+  it('does not match collection', () => {
+    const ce = engineWithU();
+    const t = ce.box(['Multiply', 2, 'u']).type;
+    expect(t.matches('collection')).toBe(false);
+    expect(t.matches('collection<any>')).toBe(false);
+  });
+
+  // The collection branch keeps its own kind, so an operand that may be a
+  // non-list `indexed_collection` at runtime is never claimed to be a `list`.
+  // A `range` branch cannot carry a rewritten element type (its members are
+  // integers by definition), so it widens to `indexed_collection`.
+  it('preserves the collection kind of each branch', () => {
+    const ce = new ComputeEngine();
+    ce.declare('v', 'integer | indexed_collection<integer>');
+    ce.declare('r', 'integer | range');
+    expect(ce.box(['Multiply', 2, 'v']).type.toString()).toBe(
+      'finite_number | indexed_collection<finite_number>'
+    );
+    expect(ce.box(['Negate', 'v']).type.toString()).toBe(
+      'indexed_collection<integer> | integer'
+    );
+    expect(ce.box(['Multiply', 2, 'r']).type.toString()).toBe(
+      'finite_number | indexed_collection<finite_number>'
+    );
+  });
+
+  // The other half of the pair: both branch kinds broadcast element-wise once
+  // the symbol holds an indexed collection, and the `range` union stays scalar
+  // under its integer branch.
+  it('broadcasts once the branch-kind symbols hold a value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('v', 'integer | indexed_collection<integer>');
+    ce.declare('r', 'integer | range');
+    ce.assign('v', ce.box(['Range', 1, 3]));
+    ce.assign('r', ce.box(['Range', 1, 3]));
+    expect(ce.box(['Multiply', 2, 'v']).evaluate().toString()).toBe('[2,4,6]');
+    expect(ce.box(['Negate', 'v']).evaluate().toString()).toBe('[-1,-2,-3]');
+    expect(ce.box(['Multiply', 2, 'r']).evaluate().toString()).toBe('[2,4,6]');
+
+    const scalarCe = new ComputeEngine();
+    scalarCe.declare('r', 'integer | range');
+    scalarCe.assign('r', 4);
+    expect(scalarCe.box(['Multiply', 2, 'r']).evaluate().toString()).toBe('8');
+  });
+
+  // Two lone unions: scalar+scalar, list+scalar, scalar+list and list+list all
+  // land on a scalar or on a list of scalars, so the four branch combinations
+  // collapse back to the same two-member union.
+  it('collapses two lone unions to the same shape', () => {
+    const ce = engineWithU();
+    ce.declare('w', 'number | list<number>');
+    expect(ce.box(['Add', 'u', 'w']).type.toString()).toBe(
+      'list<number> | number'
+    );
+    expect(ce.box(['Multiply', 'u', 'w']).type.toString()).toBe(
+      'finite_number | list<finite_number>'
+    );
+  });
+
+  // The other half of the pair: the same two expressions once both symbols
+  // hold values — two lists zip element-wise, and a scalar branch folds into
+  // every cell of the other's list.
+  it('evaluates two assigned unions branch by branch', () => {
+    const ce = engineWithU();
+    ce.declare('w', 'number | list<number>');
+    ce.assign('u', ce.box(['List', 1, 2]));
+    ce.assign('w', ce.box(['List', 10, 20]));
+    expect(ce.box(['Add', 'u', 'w']).evaluate().toString()).toBe('[11,22]');
+    expect(ce.box(['Multiply', 'u', 'w']).evaluate().toString()).toBe('[10,40]');
+
+    const mixedCe = engineWithU();
+    mixedCe.declare('w', 'number | list<number>');
+    mixedCe.assign('u', 3);
+    mixedCe.assign('w', mixedCe.box(['List', 10, 20]));
+    expect(mixedCe.box(['Add', 'u', 'w']).evaluate().toString()).toBe(
+      '[13,23]'
+    );
+  });
+
+  // The control: with a sibling that IS definitely a collection, every branch
+  // of the union lands in that sibling's cells — the scalar branch folds into
+  // each cell, the list branch zips element-wise — so the definite `list<E>`
+  // stays the honest answer. This is the behavior the block above
+  // (`the element type of a held broadcast over a union-typed operand`) pins.
+  it('still types a definite collection sibling as a definite list', () => {
+    const ce = engineWithU();
+    for (const operator of ['Add', 'Multiply'])
+      expect(ce.box([operator, ['List', 1, 2], 'u']).type.toString()).toBe(
+        'list<number>'
+      );
+  });
+
+  // A body that MAY hold a list must not be folded as a single term: `Sum(2u)`
+  // answering `2u` is the same wrong answer `Sum(L)` used to give for a
+  // valueless `L: list<number>`, and `u := [1, 2]` contradicts it.
+  it('leaves a big op over a lone union inert until the value arrives', () => {
+    const ce = engineWithU();
+    expect(
+      ce
+        .box(['Sum', ['Multiply', 2, 'u']])
+        .evaluate()
+        .toString()
+    ).toBe('sum(2u)');
+    expect(ce.box(['Sum', 'u']).evaluate().toString()).toBe('sum(u)');
+    expect(
+      ce
+        .box(['Product', ['Multiply', 2, 'u']])
+        .evaluate()
+        .toString()
+    ).toBe('prod(2u)');
+  });
+
+  it('gives the scalar answers once the symbol holds a scalar', () => {
+    const ce = engineWithU();
+    ce.assign('u', 5);
+    expect(ce.box(['Multiply', 2, 'u']).evaluate().toString()).toBe('10');
+    expect(ce.box(['Add', 'u', 2]).evaluate().toString()).toBe('7');
+    expect(ce.box(['Negate', 'u']).evaluate().toString()).toBe('-5');
+    expect(ce.box(['Power', 'u', 2]).evaluate().toString()).toBe('25');
+    expect(
+      ce
+        .box(['Sum', ['Multiply', 2, 'u']])
+        .evaluate()
+        .toString()
+    ).toBe('10');
+  });
+
+  it('gives the broadcast answers once the symbol holds a list', () => {
+    const ce = engineWithU();
+    ce.assign('u', ce.box(['List', 1, 2]));
+    expect(ce.box(['Multiply', 2, 'u']).evaluate().toString()).toBe('[2,4]');
+    expect(ce.box(['Add', 'u', 2]).evaluate().toString()).toBe('[3,4]');
+    expect(ce.box(['Negate', 'u']).evaluate().toString()).toBe('[-1,-2]');
+    expect(ce.box(['Power', 'u', 2]).evaluate().toString()).toBe('[1,4]');
+    expect(ce.box(['Sin', 'u']).evaluate().toString()).toBe('[sin(1),sin(2)]');
+    expect(
+      ce
+        .box(['Sum', ['Multiply', 2, 'u']])
+        .evaluate()
+        .toString()
+    ).toBe('6');
+  });
+});
+
+describe('a big op over a body that MIGHT be a collection stays inert', () => {
+  // `Sum(body)` with no index sums the body's elements when the body is a
+  // collection and is the body itself when it is a scalar. A body whose type
+  // only ADMITS a collection — `broadcastable<number>` from lifting over a
+  // not-yet-defined function, or the application of an undeclared head —
+  // cannot be folded either way until the value arrives: the fold
+  // `Sum(2 + h(x)) → h(x) + 2` re-evaluated to `[5, 8]` once `h` returned a
+  // list, where the sum is `13`.
+  it('declines a broadcastable-typed body and an undeclared application', () => {
+    const ce = new ComputeEngine();
+    const lifted = ce.box(['Sum', ['Add', 2, ['h', 'x']]]);
+    expect(lifted.ops![0].type.toString()).toBe('broadcastable<number>');
+    expect(lifted.evaluate().operator).toBe('Sum');
+    expect(ce.box(['Sum', ['h', 'x']]).evaluate().operator).toBe('Sum');
+    ce.declare('b', 'broadcastable<number>');
+    expect(ce.box(['Sum', 'b']).evaluate().operator).toBe('Sum');
+    // Once the head is defined, the SAME stored form sums the list.
+    ce.assign('h', ce.parse('x \\mapsto [x, 2x]'));
+    ce.assign('x', 3);
+    expect(ce.box(lifted.json).evaluate().toString()).toBe('13');
+    expect(
+      ce
+        .box(['Sum', ['h', 'x']])
+        .evaluate()
+        .toString()
+    ).toBe('9');
+  });
+
+  it('still folds a scalar body, including a bare undeclared symbol', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Sum', 5]).evaluate().toString()).toBe('5');
+    expect(ce.box(['Sum', 'y']).evaluate().toString()).toBe('y');
+    ce.declare('k', 'number');
+    expect(
+      ce
+        .box(['Sum', ['Add', 'k', 1]])
+        .evaluate()
+        .toString()
+    ).toBe('k + 1');
+  });
+});
+
+/**
+ * A union branch that a BROADCAST treats as atomic can still be ENUMERATED by
+ * a big op, and a branch that never broadcasts can still be summed. The two
+ * questions therefore have two predicates, and a big op must ask the
+ * enumeration-side one:
+ *
+ * - a `tuple` branch and a `string` branch are atomic under broadcast — `2u`
+ *   scales a tuple as one value and never lifts over a string — yet `Sum` of a
+ *   tuple adds its components and `Sum` of a string walks its characters;
+ * - a fixed-shape `vector<n>` branch and a non-indexed `set` branch are left to
+ *   the tensor handlers / never broadcast, yet both sum;
+ * - a `broadcastable<T>` branch may itself be an indexed collection at runtime.
+ *
+ * Folding such a body as a single scalar term answers `Sum(u)` → `u`, which the
+ * identical expression contradicts as soon as the symbol holds the collection
+ * branch. Pairs below: inert while the symbol is valueless, the enumerated
+ * answer once it is assigned.
+ */
+describe('a big op over a union with a non-broadcast enumerable branch', () => {
+  it('declines a tuple branch and sums the tuple once assigned', () => {
+    const ce = new ComputeEngine();
+    ce.declare('u', 'number | tuple<number, number>');
+    expect(ce.box(['Sum', 'u']).evaluate().operator).toBe('Sum');
+    // The BROADCAST reading of the same union is unchanged: a tuple operand is
+    // atomic, scaled component-wise by the body's own arithmetic.
+    expect(ce.box(['Multiply', 2, 'u']).type.toString()).toBe(
+      'number | tuple<number, number>'
+    );
+    ce.assign('u', ce.box(['Tuple', 1, 2]));
+    expect(ce.box(['Sum', 'u']).evaluate().toString()).toBe('3');
+    expect(ce.box(['Multiply', 2, 'u']).evaluate().toString()).toBe('(2, 4)');
+  });
+
+  it('declines a string branch, which enumerates as characters', () => {
+    const ce = new ComputeEngine();
+    ce.declare('t', 'number | string');
+    expect(ce.box(['Sum', 't']).evaluate().operator).toBe('Sum');
+    ce.assign('t', ce.string('abc'));
+    // Summing characters is a type error — but it is the error the assigned
+    // value earns, not the silent `t` the fold used to hand back.
+    expect(ce.box(['Sum', 't']).evaluate().operator).toBe('Error');
+  });
+
+  it('declines a fixed-shape branch and a set branch', () => {
+    const ce = new ComputeEngine();
+    ce.declare('v', 'number | vector<2>');
+    expect(ce.box(['Sum', 'v']).evaluate().operator).toBe('Sum');
+    ce.assign('v', ce.box(['List', 1, 2]));
+    expect(ce.box(['Sum', 'v']).evaluate().toString()).toBe('3');
+
+    const setCe = new ComputeEngine();
+    setCe.declare('q', 'number | set<number>');
+    expect(setCe.box(['Sum', 'q']).evaluate().operator).toBe('Sum');
+    setCe.assign('q', setCe.box(['Set', 1, 2]));
+    expect(setCe.box(['Sum', 'q']).evaluate().toString()).toBe('3');
+  });
+
+  it('declines a broadcastable branch', () => {
+    const ce = new ComputeEngine();
+    ce.declare('b', 'number | broadcastable<number>');
+    expect(ce.box(['Sum', 'b']).evaluate().operator).toBe('Sum');
+    ce.assign('b', ce.box(['List', 1, 2]));
+    expect(ce.box(['Sum', 'b']).evaluate().toString()).toBe('3');
+  });
+});
+
+/**
+ * The lone scalar-or-collection union carries through a LAMBDA application the
+ * same way it does through `2u`: the argument may hold a scalar or a list, so
+ * `f(u)` is not a collection and must not be typed the definite `list<E>` that
+ * `u := 5` contradicts. Both lambda routes are pinned — a bare-assigned lambda
+ * (an operator definition) and a declare-then-assign lambda (a value
+ * definition with the declared signature).
+ */
+describe('a lambda applied to a LONE union-typed argument', () => {
+  it('carries the union through a bare-assigned lambda', () => {
+    const ce = new ComputeEngine();
+    ce.declare('u', 'number | list<number>');
+    ce.assign('f', ce.parse('x \\mapsto 2x'));
+    expect(ce.box(['f', 'u']).type.toString()).toBe(
+      'finite_number | list<finite_number>'
+    );
+    // The control: a DEFINITE collection argument still types a definite,
+    // shape-aware list.
+    expect(ce.box(['f', ['List', 1, 2]]).type.toString()).toBe(
+      'vector<finite_number^2>'
+    );
+  });
+
+  it('carries the union through a declared-signature lambda', () => {
+    const ce = new ComputeEngine();
+    ce.declare('u', 'number | list<number>');
+    ce.declare('g', '(number) -> number');
+    ce.assign('g', ce.parse('x \\mapsto 3x'));
+    expect(ce.box(['g', 'u']).type.toString()).toBe('list<number> | number');
+  });
+
+  it('applies each branch once the argument holds a value', () => {
+    const scalarCe = new ComputeEngine();
+    scalarCe.declare('u', 'number | list<number>');
+    scalarCe.assign('f', scalarCe.parse('x \\mapsto 2x'));
+    scalarCe.assign('u', 5);
+    expect(scalarCe.box(['f', 'u']).evaluate().toString()).toBe('10');
+
+    const listCe = new ComputeEngine();
+    listCe.declare('u', 'number | list<number>');
+    listCe.assign('f', listCe.parse('x \\mapsto 2x'));
+    listCe.assign('u', listCe.box(['List', 1, 2]));
+    expect(listCe.box(['f', 'u']).evaluate().toString()).toBe('[2,4]');
+
+    const declaredCe = new ComputeEngine();
+    declaredCe.declare('u', 'number | list<number>');
+    declaredCe.declare('g', '(number) -> number');
+    declaredCe.assign('g', declaredCe.parse('x \\mapsto 3x'));
+    declaredCe.assign('u', declaredCe.box(['List', 1, 2]));
+    expect(declaredCe.box(['g', 'u']).evaluate().toString()).toBe('[3,6]');
   });
 });

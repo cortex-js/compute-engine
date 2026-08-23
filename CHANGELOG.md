@@ -71,6 +71,88 @@
 
 ### Bug Fixes
 
+- **An element-wise broadcast no longer captures a collection-typed but
+  still valueless operand as a per-element scalar.** With `A` an
+  unknown-length view (`Range(0, n)/n`, `n` unassigned) and `s` declared
+  `list<number>` but not yet assigned, `Multiply(A, s)` evaluated to
+  `Map(_ ↦ _·s, A)`; once `s := [10,20,30]` and `n := 2` bound, that stored
+  form materialized as the outer product `[[0,0,0],[5,10,15],[10,20,30]]`
+  while a fresh `Multiply(A, s)` zipped to `[0,10,30]`. The known-length form
+  `[1,2,3]·s` → `[s, 2s, 3s]` was the same splice. A collection-typed operand
+  that is not yet a collection value now leaves the operator inert — `s·[1,2,3]`,
+  typed `list<number>`, the zip's element type — and re-evaluating it after
+  the assignment zips. The decline reaches every route: `Add`/`Multiply`/
+  `Divide`/`Mod`, user lambdas and declared `broadcastable<…>` parameters
+  (the application is held rather than inlined — `g(a,b) = (a,b)` no longer
+  stores `([1,2], s)`), the relational operators (`[1,2,3] < s`), `When`'s
+  mask, `PointList` components, tuple scaling (`(1,2)·s` no longer stores
+  `(s, 2s)`), and operands typed `number | list<number>` or
+  `broadcastable<number>`. A definite length mismatch among the resolved
+  operands still errors (`[1,2] + [3,4,5] + s` → `incompatible-dimensions
+  2 vs 3`), and a symbol declared bare `tuple` keeps scaling a list
+  (`[1,2,3]·r` → `[r, 2r, 3r]`). (Tycho item 221)
+- **`PointList` over unknown-length lazy views is a point VIEW, with a type
+  that carries the point arity.** `PointList(−√(1−A²), A)` with
+  `A = Range(0,n)/n` and `n` unassigned evaluated to an inert `PointList`
+  head — `isCollection` false, no `count`, typed `list<tuple>` with no
+  component arity — while the sibling `A·(1,0)` already produced a lazy point
+  view. An unknown-length indexed component (a symbolic-length `Range`, a
+  lazy `Map` over one, a `Filter`) now transposes lazily, exactly as the
+  arithmetic route does: the result is a collection, resolves to the eager
+  list of points as soon as the length does, and the stored lazy form
+  re-evaluates to the same points a fresh evaluation gives. A provably
+  infinite component or a non-indexed one (a `Set`) still fails closed; a
+  string component is an atomic coordinate rather than a fail-closed
+  trigger, so `PointList("ab", 3)` now evaluates to the point `("ab", 3)` its
+  type already promised. The static type is `list<tuple<T₁, …, Tₖ>>` (each
+  list component contributes its element type, any other component its own
+  type) instead of the arity-less `list<tuple>`. **Consumer-visible
+  consequence:** because a two-component point list now statically has no
+  third coordinate, `PointZ(PointList(-6, n))` is a typed
+  `incompatible-dimensions` error at box time on every route, where the
+  `javascript` target used to emit a kernel of `NaN` absence markers and the
+  GLSL target its own arity decline. (Tycho item 222)
+- **A zipped `Divide(list<tuple>, list<number>)` folds each element.**
+  `[T, U] / √(PointX([T,U])² + PointY([T,U])²)` evaluated to
+  `[0.999999999999999835·(0.943…, −0.331…), (0.6, 0.8)]`: the value-level
+  `div()` had no tuple arm, and the broadcast zip builds each element with
+  `ce._fn('Divide', …)`, which bypasses the `canonicalDivide` fold the
+  single-tuple form `T / √(…)` takes. An inexact divisor left an inert
+  `number × Tuple`; an exact integer divisor (`[T, U] / [2, 5]`) left a tuple
+  of unevaluated `Divide` components. A numeric tuple divided by a numeric
+  scalar now scales component-wise on the value route too, and
+  `tuple.div(0)` on that route answers `(~oo, ~oo)`, as the box route always
+  has. (Tycho item 223)
+- **Arithmetic admits a symbol declared through a transparent type alias of
+  a tuple, list or vector.** `ce.declareType('pt', 'tuple<number, number>',
+  { alias: true })` then `ce.declare('p', 'pt')`: `2·p`, `[1,2,3]·p`,
+  `Divide(p, 2)` and `Negate(p)` all errored `incompatible-type "number" vs
+  "pt"`, as did an alias of `list<number>` or `vector<2>`, while the direct
+  spelling was accepted — the shape gates read the type's kind directly and
+  saw an opaque reference, where `isSubtype` already unfolded it (so an
+  alias of a scalar worked). Transparent aliases are now unfolded at every
+  shape gate and in the quotient's type. A NOMINAL declaration
+  (`declareType`'s default) stays opaque by design and is still refused.
+- **A lone `scalar | list<…>`-typed operand keeps its union in the result
+  type, and a big operator over a body that may be a collection stays
+  inert.** With `u` declared `number | list<number>` and not yet assigned,
+  `2u`, `u + 2`, `−u`, `sin(u)` and a user lambda `f(u)` all typed a definite
+  `list<…>` — `type.matches('collection')` answered `true` — yet `u := 5`
+  evaluated `2u` to the scalar `10`. The result now carries the union
+  through, `finite_number | list<finite_number>`, each branch wrapped back in
+  its own collection kind (`number | range` → `finite_number |
+  indexed_collection<finite_number>`), and a definite collection sibling
+  (`[1,2] + u`) still gives `list<number>` — the union's list branch zips and
+  its scalar branch lifts. Two folds that committed such a body to a scalar
+  are closed by the same rule: `Sum(2u)` evaluated to `2u` (and `Sum(u)` to
+  `u`) where `u := [1,2]` makes the sum `6`; and `Sum(2 + h(x))` with `h` not
+  yet defined evaluated to `h(x) + 2`, which re-evaluated to `[5, 8]` once
+  `h := x ↦ [x, 2x]`, where the sum is `13`. `Sum`/`Product` with no index
+  now stay inert over a body typed as a scalar-or-collection union (any
+  branch a list, vector, set, tuple, string or `broadcastable<…>`), a
+  `broadcastable<…>` body, or the application of an undeclared head; a bare
+  undeclared symbol still folds (`Sum(y)` → `y`).
+
 - **A definite integral with a pole strictly inside its bounds no longer
   evaluates to a finite number.** `∫₋₁¹ dt/t` evaluated to `0` and
   `∫₋₁¹ dt/t²` to `−2`: the antiderivative was differenced at the bounds

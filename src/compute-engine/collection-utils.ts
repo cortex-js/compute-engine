@@ -6,7 +6,11 @@ import {
   resolveTypeAlias,
 } from '../common/type/utils.js';
 import { isSubtype, resolveTypeReference } from '../common/type/subtype.js';
-import { INDEXED_COLLECTION_SHAPE_TYPE } from '../common/type/primitive.js';
+import { reduceType } from '../common/type/reduce.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../common/type/primitive.js';
 import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
@@ -1112,20 +1116,143 @@ export function broadcastSiblingType(t: Readonly<Type>): Type {
   );
   if (branches.length === 0) return t as Type;
   const elements = broadcastElementType(t);
-  const branch = branches[0];
-  if (branches.length === 1) {
-    if (branch === 'list') return { kind: 'list', elements };
-    if (
-      typeof branch !== 'string' &&
-      (branch.kind === 'list' || branch.kind === 'indexed_collection')
-    )
-      return { ...branch, elements };
-  }
-  // Several collection branches, or one whose element type is baked into its
-  // NAME (`range`'s members are integers by definition, so it cannot carry a
-  // widened element): `indexed_collection` is the common spelling that admits
-  // them all.
+  if (branches.length === 1)
+    return rewrapCollectionBranch(branches[0], elements);
+  // Several collection branches: `indexed_collection` is the common spelling
+  // that admits them all.
   return { kind: 'indexed_collection', elements };
+}
+
+/**
+ * Re-wrap a dimensionless collection branch around a new element type,
+ * preserving the branch's own collection KIND: a `list` branch stays a `list`,
+ * an `indexed_collection` branch stays an `indexed_collection`. A branch whose
+ * element type is baked into its NAME (`range`, whose members are integers by
+ * definition) cannot carry a rewritten element, so it — like the bare
+ * `indexed_collection` — becomes an `indexed_collection<elements>`.
+ */
+function rewrapCollectionBranch(branch: Type, elements: Type): Type {
+  if (branch === 'list') return { kind: 'list', elements };
+  if (
+    typeof branch !== 'string' &&
+    (branch.kind === 'list' || branch.kind === 'indexed_collection')
+  )
+    return { ...branch, elements };
+  return { kind: 'indexed_collection', elements };
+}
+
+/**
+ * The dimensionless list / indexed-collection branches of a type that is a
+ * union of at least one branch a broadcast treats as a SCALAR and at least one
+ * such collection branch — the type of a symbol declared `number | list<number>`
+ * and left valueless. `undefined` for every other type, including a union whose
+ * non-collection branches are themselves collection-shaped (a fixed-shape
+ * `vector<n>`, typed component-wise by the tensor handlers).
+ *
+ * This is the BROADCAST-side classification, so "scalar" here means "not lifted
+ * element-wise", not "not a collection": a `tuple` branch and a `string` branch
+ * are ATOMIC under broadcast — `2u` scales a tuple component-wise as one value
+ * and never lifts over a string — and count on the scalar side rather than
+ * disqualifying the union. Both nonetheless ENUMERATE, so an enumeration gate
+ * (a big op folding its body) must ask `unionMayHoldACollection` instead.
+ *
+ * A `broadcastable<T>` branch is both halves at once — the operand may be the
+ * scalar `T` or an indexed collection of `T` — so it contributes an
+ * `indexed_collection<T>` collection branch AND the scalar side. Keeping only
+ * the scalar reading would let `list<T> | broadcastable<T>` type as a definite
+ * list although it may hold a bare `T`.
+ *
+ * A value of such a type is not known to be a collection and not known to be a
+ * scalar, so a gate that must decide "IS this a collection" cannot read the
+ * presence of a collection branch as a yes.
+ */
+export function scalarOrCollectionUnionBranches(
+  t: Readonly<Type>
+): Type[] | undefined {
+  if (typeof t === 'string' || t.kind !== 'union') return undefined;
+  const collections: Type[] = [];
+  let hasScalarBranch = false;
+  for (const b of t.types) {
+    if (dimensionlessIndexedElement(b) !== undefined) collections.push(b);
+    else if (typeof b !== 'string' && b.kind === 'broadcastable') {
+      collections.push({ kind: 'indexed_collection', elements: b.elements });
+      hasScalarBranch = true;
+    } else if (isTupleShapedType(b) || b === 'string') hasScalarBranch = true;
+    else if (isSubtype(b, COLLECTION_SHAPE_TYPE)) return undefined;
+    else hasScalarBranch = true;
+  }
+  if (collections.length === 0 || !hasScalarBranch) return undefined;
+  return collections;
+}
+
+/**
+ * True when `t` is a UNION with at least one branch that a big op would
+ * ENUMERATE rather than fold as a single term: a collection-shaped branch
+ * (including the fixed shapes and the non-indexed `set`, which never
+ * broadcast but do sum), a `tuple` branch, a `string` branch (a string
+ * enumerates as its characters), or a `broadcastable<T>` branch, whose
+ * collection half is an indexed collection of `T`.
+ *
+ * Such a union answers a confident `false` to `matches('collection<any>')` —
+ * the scalar branch defeats the match — so a gate that reads only that match
+ * takes its scalar path for an operand that may well hold a collection, and
+ * commits an answer the same expression contradicts once the symbol is
+ * assigned: `Sum(u)` folded to `u` for a valueless
+ * `u: number | tuple<number, number>`, while `u := (1, 2)` makes the identical
+ * expression `3`.
+ *
+ * This is deliberately WIDER than `scalarOrCollectionUnionBranches`, which
+ * answers the BROADCAST-side question — where a tuple and a string are atomic
+ * and a fixed shape is left to the tensor handlers.
+ */
+export function unionMayHoldACollection(t: Readonly<Type>): boolean {
+  const resolved = resolveTypeAlias(t);
+  if (typeof resolved === 'string' || resolved.kind !== 'union') return false;
+  return resolved.types.some((branch) => {
+    const b = resolveTypeAlias(branch);
+    return (
+      isTupleShapedType(b) ||
+      b === 'string' ||
+      (typeof b !== 'string' && b.kind === 'broadcastable') ||
+      isSubtype(b, COLLECTION_SHAPE_TYPE)
+    );
+  });
+}
+
+/**
+ * The result type of a broadcastable operator whose ONLY broadcast triggers
+ * are scalar-or-collection unions — `2u` with `u` declared
+ * `number | list<number>` and left valueless.
+ *
+ * Such an operand is not a collection: it is a symbol that may hold either a
+ * scalar or a list, so typing the application as the definite `list<E>` states
+ * something the very same expression contradicts once the symbol is assigned
+ * (`u := 5` makes `2u` evaluate to the scalar `10`). The honest answer carries
+ * the union through: the per-element result `E` unioned with `E` wrapped back
+ * in each operand's collection branches, so `2u` types
+ * `finite_number | list<finite_number>`. The declared union is carried through
+ * rather than recruited into the `broadcastable<T>` family, which is reserved
+ * for operands whose collection-ness is not statically visible at all.
+ *
+ * Returns `undefined` — leaving the definite `list<E>` typing in place — as
+ * soon as any broadcasting operand is a DEFINITE collection. Paired with a
+ * definite collection sibling (`Add([1, 2], u)`) every branch of the union
+ * lands in that sibling's cells: the scalar branch folds into each cell and
+ * the collection branch zips element-wise, so the result is a collection
+ * whichever branch holds.
+ */
+export function loneUnionBroadcastResultType(
+  operandTypes: ReadonlyArray<Type>,
+  element: Type
+): Type | undefined {
+  const wrapped: Type[] = [];
+  for (const t of operandTypes) {
+    const branches = scalarOrCollectionUnionBranches(t);
+    if (branches === undefined) return undefined;
+    for (const b of branches) wrapped.push(rewrapCollectionBranch(b, element));
+  }
+  if (wrapped.length === 0) return undefined;
+  return reduceType({ kind: 'union', types: [element, ...wrapped] });
 }
 
 /**

@@ -2489,6 +2489,18 @@ export interface Expression {
    * (`collection-utils.ts`) is for an operand that MIGHT become a collection
    * at runtime — a top-typed application, or a `broadcastable<T>` — where the
    * honest answer is that the shape is not statically visible at all.
+   *
+   * One more operand class answers a confident `false` to BOTH `isCollection`
+   * and `type.matches('collection<any>')` while still being able to hold a
+   * collection: a union of a scalar branch and a collection branch — a
+   * valueless `u: number | list<number>`, and the `2u` lifted over it, since a
+   * broadcast over such an operand carries the union through rather than
+   * claiming a definite list. The scalar branch defeats the match, so a gate
+   * that must decline for a MAYBE-collection has to ask one of the two
+   * union predicates in `collection-utils.ts` as well:
+   * `unionMayHoldACollection()` for an ENUMERATION gate (a big op folding its
+   * body — tuple, string and fixed-shape branches enumerate too), or
+   * `scalarOrCollectionUnionBranches()` for a BROADCAST gate.
    */
   isCollection: boolean;
 
