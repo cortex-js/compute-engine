@@ -1,3 +1,4 @@
+import { operandLiteralValue } from './type-handlers.js';
 import {
   bigErf,
   bigErfc,
@@ -109,6 +110,17 @@ function computeBinning(
   if (binsArg.isCollection) {
     binEdges = [...binsArg.each()].map((op) => op.re);
   } else {
+    // The scalar spec is a bin COUNT, and a NON-INTEGER scalar declines
+    // rather than rounding: the declared `number` deliberately admits
+    // Desmos-style bin-WIDTH spellings (`histogram(L, .05)`) so they
+    // parse, and the contract (see the `Histogram` signature note) is that
+    // they stay INERT for the importer to translate — `toInteger` alone
+    // Math.rounds, so `BinCounts(L, 2.5)` silently answered the 3-bin
+    // question instead. Integrality is tested with the EXACT `isInteger`
+    // predicate, not by comparing against `.re`: `.re` is a rounded double
+    // for bignum operands, so a high-precision near-integer would slip
+    // through a `.re` comparison.
+    if (!isNumber(binsArg) || binsArg.isInteger !== true) return undefined;
     const binCount = toInteger(binsArg);
     if (binCount === null || binCount <= 0) return undefined;
     const binWidth = (max - min) / binCount;
@@ -224,6 +236,16 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       type: ([x]) => {
         if (!x || provablyNonFiniteNumber(x)) return 'number';
         if (x.isReal !== true) return 'number';
+        // A literal's handler-visible value classifies exactly — and it is
+        // never a rounded double, so it cannot put `1 − 10⁻³⁰` at a pole
+        // (`operandLiteralValue` is the channel that survives when the
+        // value reads are unavailable to a type handler).
+        const v = operandLiteralValue(x);
+        if (v !== undefined) {
+          if (v > -1 && v < 1) return 'finite_real';
+          if (v === 1 || v === -1) return 'non_finite_number';
+          return 'number';
+        }
         if (x.isGreater(-1) === true && x.isLess(1) === true)
           return 'finite_real';
         // Exact pole check for literals: `isEqual` is tolerance-based and

@@ -22,7 +22,7 @@ import { defaultCollectionHandlers } from '../collection-utils.js';
 import type { LatexString } from '../latex-syntax/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
-import { isFunction } from './type-guards.js';
+import { isFunction, isNumber } from './type-guards.js';
 import { matchesDeclaredTypeAxes } from './effects-inference.js';
 import { declaredTypeError } from './type-compatibility-error.js';
 import { isLatexString } from '../latex-syntax/utils.js';
@@ -93,6 +93,30 @@ export const CHECKPOINT_DEF_KEY = 'definition-fields';
  *   of `True` for example), the value is discarded.
  *
  */
+
+/**
+ * Does a trusted (standard-library) definition's value inhabit its declared
+ * type? Decided EMPIRICALLY: the value is numericized and the concrete
+ * result decides membership exactly (a literal's value always decides — the
+ * 2026-08-12 admission ruling). Answers `true` — cannot refute — when the
+ * value does not numericize to a number literal or evaluation fails (a
+ * library-load ordering issue must not turn into a false alarm). Reached
+ * only from inside a `console.assert`, so the production build never runs
+ * it.
+ */
+function trustedValueInhabitsDeclaredType(
+  ce: ComputeEngine,
+  value: Expression,
+  type: BoxedType
+): boolean {
+  try {
+    const n = value.N();
+    if (!isNumber(n)) return true;
+    return matchesDeclaredTypeAxes(ce, n.type, type, false, n, '');
+  } catch {
+    return true;
+  }
+}
 
 export class _BoxedValueDefinition
   implements BoxedValueDefinition, ConfigurationChangeListener
@@ -218,7 +242,22 @@ export class _BoxedValueDefinition
     options: { engine: ComputeEngine; numericApproximation?: boolean }
   ) => Expression | undefined;
 
-  constructor(ce: ComputeEngine, name: string, def: Partial<ValueDefinition>) {
+  constructor(
+    ce: ComputeEngine,
+    name: string,
+    def: Partial<ValueDefinition>,
+    options?: {
+      /** Set by the standard-library install route only
+       * (`setSymbolDefinitions`): the library's declared types are
+       * TRUSTED, so a value whose STATIC type cannot witness the
+       * declaration (an unevaluated constant such as `GoldenRatio`'s
+       * `(1+√5)/2` against a value-bracket range) is not refused — it is
+       * validated EMPIRICALLY instead, under `console.assert`, which the
+       * production build strips. User `ce.declare` never sets this and
+       * keeps the throwing check. (User-ruled 2026-08-23.) */
+      trustedLibraryDefinition?: boolean;
+    }
+  ) {
     this._engine = ce;
     this.name = name;
 
@@ -298,7 +337,22 @@ export class _BoxedValueDefinition
             this.name
           )
         ) {
-          throw declaredTypeError(this.name, this._value, this._type);
+          if (options?.trustedLibraryDefinition) {
+            // A trusted (standard-library) declaration is the author's
+            // knowledge, which may exceed what the value's static type can
+            // witness — the whole point of a value-bracket type on an
+            // expression-valued constant. Validate it empirically instead:
+            // numericize the value and let the concrete result decide
+            // membership exactly. Development builds get a loud assert on a
+            // wrong bracket; the production build strips the call (and the
+            // evaluation inside it) entirely.
+            console.assert(
+              trustedValueInhabitsDeclaredType(ce, this._value, this._type),
+              `Symbol "${this.name}": the standard-library value "${this._value.toString()}" does not inhabit the declared type "${this._type.toString()}"`
+            );
+          } else {
+            throw declaredTypeError(this.name, this._value, this._type);
+          }
         }
         // A declared placeholder skeleton refines from the initializer,
         // exactly as it refines from an assignment (Phase 1 rulings, ruled

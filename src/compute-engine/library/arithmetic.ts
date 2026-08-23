@@ -3257,7 +3257,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     e: {
       description:
         "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
-      type: 'finite_real',
+      // Same value bracket as `ExponentialE`: the alias's value is that
+      // SYMBOL, whose static type carries the bracket, so the declaration
+      // check accepts it — unlike `GoldenRatio`, whose value is an
+      // unevaluated arithmetic expression with a bare static type.
+      type: 'finite_real<2.718281828459045..2.718281828459046>',
       isConstant: true,
       holdUntil: 'never',
       value: 'ExponentialE',
@@ -3325,6 +3329,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
     Half: {
       description: 'The rational number one half (1/2).',
+      // NOT value-bracketed like `EulerGamma`: `holdUntil: 'never'` means
+      // every use substitutes the literal `1/2` at canonicalization, whose
+      // own handler-visible type already carries the exact value — a
+      // ranged declaration here would never be read.
       type: 'finite_rational',
       isConstant: true,
       holdUntil: 'never',
@@ -3332,7 +3340,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
     GoldenRatio: {
       description: 'The golden ratio φ = (1+√5)/2 ≈ 1.618.',
-      type: 'finite_real', // Golden ratio is an algebraic number
+      // Value-bracket ranged type. The value is the EXPRESSION `(1+√5)/2`,
+      // whose static type cannot witness the bracket — the declaration is
+      // accepted because standard-library definitions are TRUSTED
+      // (user-ruled 2026-08-23) and validated empirically under
+      // `console.assert` instead (`trustedValueInhabitsDeclaredType`).
+      // The decimal bounds strictly bracket φ = 1.61803398874989484….
+      type: 'finite_real<1.618033988749894..1.618033988749895>',
       wikidata: 'Q41690',
       isConstant: true,
       holdUntil: 'N',
@@ -3340,7 +3354,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
     CatalanConstant: {
       description: "Catalan's constant G ≈ 0.9160.",
-      type: 'finite_real',
+      // Value-bracket ranged type (G = 0.91596559417721901…); see
+      // `GoldenRatio`.
+      type: 'finite_real<0.915965594177219..0.9159655941772191>',
       wikidata: 'Q855282',
       isConstant: true,
       holdUntil: 'N',
@@ -3372,7 +3388,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     EulerGamma: {
       description: 'The Euler–Mascheroni constant γ ≈ 0.5772.',
       keywords: ['euler-mascheroni', 'euler gamma'],
-      type: 'finite_real',
+      // Value-bracket ranged type (γ = 0.57721566490153286…); see
+      // `GoldenRatio`.
+      type: 'finite_real<0.5772156649015328..0.5772156649015329>',
       wikidata: 'Q273023',
       holdUntil: 'N',
       isConstant: true,

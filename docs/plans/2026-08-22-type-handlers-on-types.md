@@ -191,9 +191,13 @@ The method: at the one place the engine calls a type handler
 proxy that hides value-derived facts on anything that is not a literal,
 gives every literal a literal type, and widens the handler's result back
 to ordinary types before it is stored. Then run the whole test suite and
-count what breaks. The proxy is kept as `scratchpad/shim.patch` of the
-Step-0 session (it applies to `boxed-function.ts` at commit d3faf62d) and
-is to be checked in as a test harness under §5.5. **It measured value
+count what breaks. The proxy — in its later per-family withholding form — is checked in
+under `scripts/withhold-experiment/` (2026-08-23): `withhold-patch.py`
+applies it to a worktree's `boxed-function.ts`, `compare.py` splits a
+run's new failures into type pins and behavior changes, and the README
+records the method, the known proxy artifacts and the accepted residue.
+The §5.5 parity harness (corpus collection, per-conversion parity runs)
+remains future work; this is its measuring half. **It measured value
 reads only; it never measured side effects.**
 
 The experiment was refined four times. Each row below corrected a mistake
@@ -1858,11 +1862,20 @@ Open items — genuine decisions, each with a default:
   at every *storage* position — an inferred declaration, a stored tuple or
   signature type, a handler result — by the §4.3 walker. This is the
   `const`/`let` discipline of TypeScript's literal types. It is a separate,
-  measured step after the handler-input half: its only real cost is an
-  exact-string check on `.type.toString()` (in-repo, the ~1,429 assertions
-  Step 0 left unconverted — the §5.7 method counts how many actually fail;
-  in Tycho, unknown until asked), and it removes §7's first non-goal. The
-  default until ruled: handler-input literal types only, public type
+  measured step after the handler-input half, and its blast radius is now
+  MEASURED (2026-08-23, two full suites in a worktree: baseline vs a shim
+  that flips `BoxedNumber.type` to the literal handler type): **197
+  failing tests across 61 suites**, ~108 of them exact-string type pins.
+  The non-pin failures concentrate in generic instantiation and signature
+  machinery — `identity(5)` solves `T = 5` and STORES `5` as the
+  application's result type (`generic-function-literals`,
+  `parameterized-nominal-constructor`, `collection-callback-signatures`,
+  `typed-function-literals` are the top suites) — so the second half is
+  not a getter flip: it needs the §4.3 widening applied at the
+  type-variable instantiation and signature-derivation positions
+  (`instantiatedResultType` and friends) before the pin conversion even
+  starts. In Tycho, unknown until asked. It removes §7's first non-goal.
+  The default until ruled: handler-input literal types only, public type
   unchanged.
 
 ## 7. Non-goals

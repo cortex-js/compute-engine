@@ -5777,7 +5777,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `Baseform(…, Error("invalid-base"))` node — an error, not a
         // character.
         if (isString(op1)) {
-          const base = asSmallInteger(op2);
+          // The base's value is read through the literal's handler-visible
+          // type first (`operandLiteralValue` — the channel that survives
+          // when the value reads are unavailable to a type handler).
+          const lit = operandLiteralValue(op2);
+          const base =
+            lit !== undefined && Number.isInteger(lit)
+              ? lit
+              : asSmallInteger(op2);
           return base !== null && base > 1 && base <= 36 ? 'integer' : 'error';
         }
 

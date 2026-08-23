@@ -242,6 +242,54 @@ export function facetComputeCount(): number {
   return _facetComputeCount;
 }
 
+/** Count of `_computeStructural()` rebuilds, engine-wide. A test observable
+ * (the house instance-instrumentation pattern): a memo hit — persistent or
+ * transient — leaves it unchanged, a rebuild advances it. Monotonic; only
+ * ever compared before/after an operation. @internal */
+let _structuralComputeCount = 0;
+
+/** Read {@link _structuralComputeCount} — for tests. @internal */
+export function structuralComputeCount(): number {
+  return _structuralComputeCount;
+}
+
+/**
+ * Is a top-level `structural` read in progress on the current call stack? Set
+ * by the outermost `get structural()` and cleared before that read returns —
+ * it is what makes an inner read recognize that it is nested, and it is the
+ * only writer of {@link _transientStructural}'s lifetime.
+ */
+let _inStructuralRead = false;
+
+/**
+ * Answers for the nodes whose structural form the CURRENT top-level read had
+ * to rebuild because the persistent memo refused to keep it, or `undefined`
+ * when no such node has been met (the overwhelmingly common case, which
+ * allocates nothing).
+ *
+ * The persistent per-node memo (`_structural`, committed through
+ * `cachedValue`) cannot serve a node whose structural form transitively holds
+ * a mutable object: the commit rule in `cache.ts` refuses such a payload,
+ * because a cache entry holding an object reference would keep that object
+ * alive for as long as the entry lives (ruling B12) and could hand back
+ * contents that the entry's version stamps never validated (rulings B22/B3).
+ * Every such node therefore rebuilds on every read — and because the rebuild
+ * recurses into each operand's `structural`, a tree whose operands are SHARED
+ * rebuilds once per PATH, which is exponential in its depth.
+ *
+ * This map removes that cost while keeping both rulings intact: it lives for
+ * the duration of one top-level `structural` read and is dropped before that
+ * read returns, on the throwing path as well, so it retains no object past
+ * the call that built it (ruling B12); and it validates nothing, because a
+ * field store cannot run inside one synchronous rebuild, so there is nothing
+ * for it to go stale against (rulings B22/B3).
+ *
+ * A module-level slot rather than a parameter threaded through the recursion:
+ * the recursion re-enters through each operand's public `get structural()`
+ * (`_computeStructural` calls `x.structural`), which takes no arguments.
+ */
+let _transientStructural: Map<Expression, Expression> | undefined = undefined;
+
 /** `CE_EFFECTS_PARANOID`: the effects-cache canary of the state-event
  * design's §6 (step 3) — on every served hit, `_effectsOf` recomputes the
  * projection and THROWS on divergence (a hard failure, per the A5
@@ -838,9 +886,9 @@ export class BoxedFunction
    * consulted for flattening/ordering, so the `_anyVersion` guard covers
    * every way it can change; the rebuild reads no object field, so no
    * object dependencies apply. A payload that CONTAINS an object is not
-   * stored (the B12/B22 commit rule in `cache.ts`), leaving that case
-   * per-read — see ROADMAP "`structural` of an object-holding shared
-   * tree". (Provenance: Tycho item 225.) */
+   * stored (the B12/B22 commit rule in `cache.ts`); that case is served for
+   * the duration of one top-level read by {@link _transientStructural}
+   * instead. (Provenance: Tycho item 225.) */
   private _structural: CachedValue<Expression> = {
     value: null,
     generation: -1,
@@ -848,16 +896,44 @@ export class BoxedFunction
 
   get structural(): Expression {
     if (this.isStructural) return this;
-    return cachedValue(
+    if (_inStructuralRead) return this._memoizedStructural();
+    // The outermost read owns the transient map's lifetime and must drop it
+    // before returning — including when the rebuild throws — since a map of
+    // object-holding payloads that outlived the call would keep those objects
+    // alive, which is what ruling B12 forbids of any cache.
+    _inStructuralRead = true;
+    try {
+      return this._memoizedStructural();
+    } finally {
+      _inStructuralRead = false;
+      _transientStructural = undefined;
+    }
+  }
+
+  /** `structural` with the persistent per-node memo primary and the
+   * transient per-read map (see {@link _transientStructural}) as the
+   * fallback. The transient map is consulted and filled ONLY for a node whose
+   * persistent entry is EMPTY, which is the state the `cachedValue` commit
+   * rule leaves a payload it refused to store in. */
+  private _memoizedStructural(): Expression {
+    if (this._structural.value === null) {
+      const hit = _transientStructural?.get(this);
+      if (hit !== undefined) return hit;
+    }
+    const result = cachedValue(
       this._structural,
       this.engine._anyVersion,
       () => this._computeStructural(),
       undefined,
       this.engine
     );
+    if (this._structural.value === null)
+      (_transientStructural ??= new Map()).set(this, result);
+    return result;
   }
 
   private _computeStructural(): Expression {
+    _structuralComputeCount += 1;
     const def = this.operatorDefinition;
     // Ellipsis fold barrier: an `Add`/`Multiply` with a direct
     // `ContinuationPlaceholder` operand is a notational object. Do not flatten

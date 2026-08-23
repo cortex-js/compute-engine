@@ -423,7 +423,9 @@ export function setSymbolDefinitions(
             throw new Error(`The symbol "${name}" is already defined`);
 
           bindings.set(name, {
-            value: new _BoxedValueDefinition(engine, name, entry),
+            value: new _BoxedValueDefinition(engine, name, entry, {
+              trustedLibraryDefinition: true,
+            }),
           });
         } catch (e) {
           console.error(
@@ -437,9 +439,12 @@ export function setSymbolDefinitions(
           );
         }
       } else {
-        const def = new _BoxedValueDefinition(engine, name, {
-          value: engine.expr(entry as unknown as ExpressionInput),
-        });
+        const def = new _BoxedValueDefinition(
+          engine,
+          name,
+          { value: engine.expr(entry as unknown as ExpressionInput) },
+          { trustedLibraryDefinition: true }
+        );
         bindings.set(name, { value: def });
       }
     } catch (e) {

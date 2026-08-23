@@ -57,10 +57,12 @@ describe('use-narrowing evidence guard', () => {
     // evaluating anything. A `number` evidence TYPE merely OVERLAPS an
     // `integer` parameter — not a provable mismatch — so boxing now admits
     // the call and the pre-pass, which reads diagnostics off boxing
-    // errors, stays silent. Restoring a static line for this program needs
-    // evidence that refutes provably — the literal-type evidence of O9 /
-    // §4.3 (ROADMAP: "Epsil static evidence diagnostics lost to overlap
-    // admission").
+    // errors, stays silent. Literal-type evidence (path 1 of the ROADMAP
+    // entry, landed 2026-08-23) restores the CONCRETE-initializer case —
+    // see the pins below — but this program's evidence is the symbolic
+    // `number` return type, which genuinely overlaps: flagging it anyway
+    // is the entry's open path (2), a product decision on whether the
+    // Epsil linter should be stricter than engine admission.
     const one = (lines: string[]) =>
       executeEpsil(new ComputeEngine(), lines.join('\n')).diagnostics;
     expect(
@@ -195,23 +197,45 @@ describe('use-narrowing evidence guard', () => {
     expect(ce.box('x').type.toString()).toBe('number');
   });
 
-  test('a typed declaration with a concrete initializer still refuses at run time', () => {
-    // Re-read under R1 overlap admission (§4.4; before R1 the pre-pass
-    // flagged this statically off the initializer evidence). The pre-pass
-    // runs valueless, records the evidence as a TYPE (`number`), and
-    // `number` overlaps `integer` — so no static line until evidence
-    // carries literal types (O9 / §4.3; ROADMAP: "Epsil static evidence
-    // diagnostics lost to overlap admission"). The RUN is unchanged: by
-    // the time `k(x)` boxes, `x` HOLDS 1.5, and a concrete value decides
-    // exactly — the mismatch is still the same boxing-time error.
+  test('a typed declaration with a concrete initializer flags statically again', () => {
+    // Restored 2026-08-23 by literal-type evidence (path 1 of the ROADMAP
+    // entry "Epsil static evidence diagnostics lost to overlap
+    // admission"): the pre-pass records the concrete initializer's
+    // handler-visible literal type (`1.5`, not the widened `number`), and
+    // `1.5` provably cannot inhabit `integer`, so overlap admission
+    // refuses at boxing and the pre-pass mints the static line R1 had
+    // silenced. The RUN is unchanged: by the time `k(x)` boxes during
+    // execution, `x` HOLDS 1.5, and a concrete value decides exactly.
     const r = executeEpsil(
       new ComputeEngine(),
       ['let k: (integer) -> integer', 'let x: number = 1.5', 'k(x)'].join('\n')
     );
-    expect(JSON.stringify(r.diagnostics)).toBe('[]');
+    expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
     expect(r.value?.toString()).toContain(
       'ErrorCode("incompatible-type", "integer", "number")'
     );
+  });
+
+  test('an UNTYPED concrete literal initializer flags statically too', () => {
+    // The same restoration through the untyped arm: `let x = 1.5` records
+    // the literal evidence even though `x`'s inferred type stays the
+    // widened `real` ("more likely, not broadest").
+    const r = executeEpsil(
+      new ComputeEngine(),
+      ['let k: (integer) -> integer', 'let x = 1.5', 'k(x)'].join('\n')
+    );
+    expect(JSON.stringify(r.diagnostics)).toContain('static-type-error');
+  });
+
+  test('an integer-valued literal initializer stays admitted', () => {
+    // The exact evidence cuts both ways: `2` inhabits `integer`, so the
+    // program is clean and runs.
+    const r = executeEpsil(
+      new ComputeEngine(),
+      ['let k: (integer) -> integer', 'let x = 2', 'k(x)'].join('\n')
+    );
+    expect(JSON.stringify(r.diagnostics)).toBe('[]');
+    expect(r.value?.toString()).toBe('k(2)');
   });
 
   test('STATIC: a destructuring assignment distributes the effect per leaf', () => {

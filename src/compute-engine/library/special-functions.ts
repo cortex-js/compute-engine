@@ -14,6 +14,7 @@ import {
   boundedInverseTrigType,
   iv,
   type RealDomain,
+  operandLiteralValue,
 } from './type-handlers.js';
 import {
   ellipticK,
@@ -310,12 +311,19 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // Liₛ(1) = ζ(s) is finite for s > 1 but a pole (value `~oo`, only
       // representable by `number`) for s ≤ 1; likewise Li₀/Li₋₁ at z = 1.
       type: ([s, z]) => {
+        // The order's value is read through the literal's handler-visible
+        // type first (`operandLiteralValue` — the channel that survives
+        // when the value reads are unavailable to a type handler), then
+        // the value channel.
+        const sRe =
+          s === undefined ? undefined : (operandLiteralValue(s) ?? s.re);
         if (
           z?.isSame(1) === true &&
           s !== undefined &&
           isNumber(s) &&
           s.im === 0 &&
-          s.re <= 1
+          typeof sRe === 'number' &&
+          sRe <= 1
         )
           return 'number';
         return numericTypeHandler([s, z]);

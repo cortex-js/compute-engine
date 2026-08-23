@@ -1,6 +1,45 @@
 ## Unreleased
 
 ### Bug Fixes
+- **A runaway dynamically-composed scalar integral now answers `NaN`
+  instead of hanging.** The scalar `javascript` target's `_SYS.integrate`
+  carries the same per-outermost-integration evaluation budget the
+  interval target already had (2²⁵ nested integrand evaluations — ~70×
+  headroom over the hardest measured double integral, 2.4× over a smooth
+  genuine triple): by-reference composition no tree walk can see is cut
+  after a few seconds, an exhausted run cannot fall through to the
+  Monte-Carlo fallback, and a fresh outermost integral re-arms. Choosing
+  `NaN` as the exhausted result follows the ROADMAP entry's own analysis
+  (the scalar result is an estimate, not an enclosure).
+
+- **`structural` of an object-holding shared tree is no longer
+  exponential.** The per-node memo cannot persist a payload containing a
+  mutable object (cache rulings B12/B22), so such trees rebuilt once per
+  path; a transient map scoped to the outermost read — retaining nothing,
+  validating nothing — now preserves sharing within one read (depth 18
+  cost 8.5 s before; depth 30 is now `depth + 1` rebuilds).
+
+- **The Epsil pre-pass flags a concrete literal initializer that cannot
+  inhabit a call's parameter again.** Overlap admission had silenced
+  `let x = 1.5; k(x)` for `k: (integer) -> integer` (the widened `number`
+  overlaps `integer`); the pre-pass now records the initializer's exact
+  literal type as its assignment evidence, which provably refutes the
+  parameter, restoring the `static-type-error` — while `let x = 2` stays
+  clean and a symbolic `x = g()` stays admitted (that half is an open
+  product decision recorded in `ROADMAP.md`).
+
+- **Every irrational standard-library constant declares a value-bracket
+  ranged type** (`e`/`ExponentialE`, `π`, `γ`, Catalan's G, and φ), so
+  sign and magnitude are type facts — `√φ` and `ln π` type `finite_real`
+  off the declarations alone. `GoldenRatio`'s value is an unevaluated
+  expression whose static type cannot witness a bracket; such
+  standard-library declarations are now TRUSTED (the throwing
+  value-vs-type check is user-`declare`-only) and validated empirically
+  under a development-build `console.assert` plus the suite pin
+  `constant-declared-brackets.test.ts`. The remaining literal-value type
+  handlers (`ErfInv`, `PolyLog`, `Subscript`'s numeral base) read the
+  literal's handler-visible type first.
+
 
 - **A compilation that exhausts the shared antiderivative pool no longer
   starves later compilations of closed forms.** The per-compilation pool

@@ -459,32 +459,39 @@ What remains, each a separate design task:
   assume-ranged negative bound inside a tuple sum is the same defect
   class, now stripped there too).
 - **O9's second half — the public `.type` of a literal** (`ce.box(21)`
-  answering `21`): open with its default (unchanged); the blast-radius
-  count over the ~1,429 exact-string type assertions is still to be run.
-  See `docs/plans/2026-08-22-type-handlers-on-types.md` §6.
+  answering `21`): open with its default (unchanged). Blast radius
+  MEASURED 2026-08-23 (baseline vs a public-type shim, two full suites):
+  197 failing tests across 61 suites, ~108 exact-string pins; the rest
+  concentrate in generic instantiation — `identity(5)` solves `T = 5`
+  and STORES it — so the flip additionally needs the §4.3 widening at
+  the type-variable instantiation and signature-derivation positions
+  first. Details in `docs/plans/2026-08-22-type-handlers-on-types.md` §6
+  (O9); the measuring harness is checked in under
+  `scripts/withhold-experiment/`.
 - **Open bounds**: `real<(0..>` does not parse, so "positive" stays the
   `& !0` intersection spelling.
+
+Follow-ups landed 2026-08-23: every irrational standard-library constant
+(`ExponentialE`, its `e` alias, `Pi`, `EulerGamma`, `CatalanConstant`,
+`GoldenRatio`) declares a value-bracket ranged type. `GoldenRatio`'s
+value is the EXPRESSION `(1+√5)/2`, whose static type cannot witness a
+bracket — that case is admitted by the TRUSTED-dictionary rule
+(user-ruled 2026-08-23): standard-library definitions installed by
+`setSymbolDefinitions` skip the throwing value-vs-type refusal and are
+validated EMPIRICALLY under `console.assert`
+(`trustedValueInhabitsDeclaredType`, `boxed-value-definition.ts` —
+numericize, let the concrete value decide; stripped from the production
+build), with the suite-level counterpart in
+`constant-declared-brackets.test.ts`; user `ce.declare` keeps the full
+throwing check. `Half` stays bare (`holdUntil: 'never'` substitutes the
+literal before any type read). The remaining §5.6 literal-value readers
+(`ErfInv`, `PolyLog`, `Subscript`'s numeral base, `At`'s index) now read
+`operandLiteralValue` first; and the §5.7 withholding harness is checked
+in under `scripts/withhold-experiment/`.
 
 Historical note from the user: the lattice once had `positive_integer`
 and similar named types, simplified away; ranges are the replacement they
 should have been connected to.
-
-### The shared antiderivative budget is not reset on the registered-target compile route (OPEN, compile — surfaced by the A5 dual review, 2026-08-23)
-
-The per-compilation antiderivative pool
-(`ANTIDERIVATIVE_COMPILATION_BUDGET_MS`, added with the item-226 dynamic
-integral-nesting fix) is module-static state reset in `compileRoot` and in
-the public `compile()` entry (`compile-expression.ts`). Registered built-in
-targets invoked directly — `ce._getCompilationTarget('javascript')
-.compile(...)` — compile through `compileCseRoot`, which resets neither: a
-compilation that exhausts the pool leaves every LATER direct-target
-compilation skipping the symbolic antiderivative-first attempt permanently,
-so those emit runtime quadrature where a closed form exists. An auto-mode
-escalation retry can likewise inherit the first attempt's depleted pool.
-Fix shape: reset the pool at every registered-target compilation attempt
-(including each escalation retry), keeping the `compileRoot` reset for raw
-custom targets; regression-test by exhausting one direct-target compilation
-and verifying the next receives a fresh pool.
 
 ### Type derivation reaches state mutation at 7 handlers, 2 `elttype` handlers and 1 getter — AUDITED 2026-08-22 (OPEN, defects; the GETTER half is FIXED 2026-08-22 — `_reviseInferredType` no longer writes on read (R4, plan §4.2); the 7 handlers and 2 `elttype` handlers remain scheduled by the type-handler design)
 
@@ -536,7 +543,7 @@ every claim) in the audit recorded by
 success criterion — item-219 drift 0 with the `scratch` exemption made a
 no-op — is what closes each row.
 
-### Epsil static evidence diagnostics lost to overlap admission — FOUND 2026-08-23 (OPEN, design — successor work to the §4.4 R1/R8 round)
+### Epsil static evidence diagnostics lost to overlap admission — FOUND 2026-08-23 (path 1 FIXED 2026-08-23; path 2 = an OPEN product decision, now due)
 
 The Epsil static pre-pass mints its `static-type-error` diagnostics off the
 error values canonicalization embeds, and it runs VALUELESS: assignment
@@ -563,9 +570,25 @@ flags code that would run) covers the symbolic case — a product decision
 on whether Epsil's linter should be stricter than the engine's semantics.
 
 RULED 2026-08-23: path (1) — the concrete-initializer static line comes
-back with the O9/§4.3 literal-type evidence work, which is already
-scheduled. Path (2), the Epsil-side check for the symbolic case, is to be
-decided when §4.3 lands, not before.
+back with the O9/§4.3 literal-type evidence work. Path (2), the
+Epsil-side check for the symbolic case, is to be decided when §4.3 lands,
+not before.
+
+IMPLEMENTED 2026-08-23 (path 1): the pre-pass records a concrete literal
+initializer's handler-visible literal type as the assignment evidence
+(`applyAssignmentTypeEffect`, both the typed-declare and plain-assign
+arms), and `overlapAdmission` (`validate.ts`) refuses a parameter the
+evidence provably cannot inhabit — so `let x = 1.5; k(x)` and
+`let x: number = 1.5; k(x)` flag `static-type-error` again while
+`let x = 2; k(x)` stays clean and the symbolic `x = g()` case stays
+silent. Pinned in `use-narrowing-evidence-guard.test.ts`. One
+representation limit: an exact RATIONAL initializer (`let x = 1/2`)
+carries a singleton range, and `typesOverlap` does not decide a
+range-vs-`integer` question, so only machine-int/real literals refute.
+§4.3 has now landed, so path (2) is DUE for a decision: should the Epsil
+linter flag a call whose recorded evidence TYPE (e.g. `number` from
+`x = g()`) merely overlaps the parameter — stricter than engine
+admission, the way TypeScript flags code that would run?
 
 ### A canonical rewrite drops the rewritten operator's stricter parameter contract (OPEN, low — residue class identified by the §4.4 fuzz, 2026-08-23)
 
@@ -587,22 +610,6 @@ against its OWN declared signature before rewriting (per-operator work,
 only worthwhile where the dropped contract matters), or the rewrite is
 accepted as the semantics and the declared signature narrowed to match
 what the rewrite preserves.
-
-### `Histogram`/`BinCounts` declare their scalar bin-spec `number` but treat it as an integer COUNT (OPEN, low — found by the §4.4 dual review, 2026-08-23)
-
-The bin-spec parameter is declared `number | list<number>`; the scalar arm
-is semantically a bin COUNT, and `computeBinning`
-(`library/statistics.ts`) reads it with `toInteger`, which `Math.round`s —
-`BinCounts(data, 2.5)` silently computes 3 bins, on the literal route and
-the symbol route alike (2.5 conforms to the DECLARED `number`, so the §4.4
-runtime conformance check rightly admits it — the declaration, not the
-check, is what under-specifies). The string-bin-spec half of the review
-finding is already closed (a string there now errors instead of being
-iterated character-by-character into NaN bin edges — the mixed-union
-scoping of `runtimeCheckExemptParam`). Deciding fix: declare the scalar
-arm `integer` — which flips today's working-but-rounding literal calls
-(`BinCounts(data, 2.5)`) from a value to an error, a user-visible change
-that needs a call on whether fractional bin counts were ever intended.
 
 ### A pre-canonicalization validation phase (OPEN, design — raised by the user 2026-08-21 at the item-219 ruling)
 
@@ -665,7 +672,7 @@ generic type report. The rejection site is `checkNumericArgs`
 (`boxed-expression/validate.ts`); the message likely wants an
 `ERROR_EXPLANATIONS` entry so the CLI/editor surfaces carry it too.
 
-### `structural` of an object-HOLDING shared tree is still per-read — OPEN (found 2026-08-23 in the item-225 review; blocked on rulings B12/B22)
+### `structural` of an object-HOLDING shared tree is still per-read — FIXED 2026-08-23 (the transient per-read memo the entry specified)
 
 The per-node `structural` memo commits through `cachedValue()`, whose commit
 rule refuses to store any payload that transitively contains a mutable
@@ -681,6 +688,19 @@ map that dies with the call retains nothing and validates nothing), used as
 the fallback when the persistent commit refuses. Needs a small
 `cachedValue` variant or a hand-rolled per-call path; decide when a witness
 appears or alongside the next cache-rule round.
+
+LANDED 2026-08-23 as the hand-rolled per-call path: the OUTERMOST
+`structural` read owns a lazily allocated module-level transient map
+(cleared in `finally`, throw path included), consulted only where the
+persistent `cachedValue` commit refused; object-free nodes never touch it.
+Measured: an object-holding shared tower went from 8.5 s at depth 18
+(exponential, sharing lost) to exactly `depth + 1` rebuilds at depth 30.
+Pinned in `structural-object-dag.test.ts` (linearity by rebuild count, the
+no-retention witness via an object mutation showing through a re-read, and
+the object-free persistent path unchanged). Known, accepted residue: the
+transient map is deliberately not generation-keyed — a cache-axis bump
+DURING one synchronous read serves earlier-rebuilt nodes from the map —
+which is what "validates nothing" means here and is confined to one call.
 
 ### Compiling a DAG-shared symbol value is exponential in the emitted source — OPEN (found 2026-08-23 diagnosing Tycho item 225; needs the CSE initiative or a fold-size guard)
 
@@ -706,7 +726,30 @@ live case that ruling anticipated. For scale: 0.118.1 "completed" this
 state in ~65 s only because two deadline expiries cut the work; the honest
 cost has never been paid to completion.
 
-### Quadrature under dynamic integral composition — remaining scalar-target half (OPEN — opened 2026-08-23 from Tycho item 226; interval half landed)
+Two findings from a 2026-08-23 implementation attempt at option (b)
+reshape it (measured; the attempt was stopped before any edit):
+
+- **A DISTINCT-node threshold cannot bound the emitted source.** The
+  `f_{n+1} = g(f_n, f_n)` tower gains 3 distinct nodes per level while the
+  emission quadruples — 49 distinct nodes already emit 1.7 MB — so any
+  threshold high enough to admit legitimate values never fires on this
+  class. The measure that tracks emitted length is the EXPANDED (per-path)
+  node count, computable in one DAG-linear walk with an identity-keyed
+  memo accumulating a sum instead of a count (measured ≈6.5 emitted chars
+  per expanded node); it subsumes a flat cap since expanded ≥ distinct.
+- **Declining the fold is not currently safe.** When `tryFoldKnownSymbol`
+  returns `undefined`, the caller emits a BARE identifier
+  (`liftWideReference`), and the JavaScript target's `var()` resolver
+  deliberately answers `undefined` for a symbol with an assigned value —
+  so the "runtime binding" the guard would fall back to is a dangling
+  global (`ReferenceError`, or a silent `NaN` through the vars object).
+  Refusing above the threshold therefore needs a RULING: fail closed with
+  a D6 message (on the default `fallback: true` route that degrades to
+  the interpreter — correct, slow; on the direct registered-target route
+  it throws), or first build a real runtime binding channel (a `_SYS`
+  engine-value lookup).
+
+### Quadrature under dynamic integral composition — scalar-target half LANDED 2026-08-23 (exhausted result = NaN, a ruling applied by default and awaiting explicit confirmation)
 
 The interval target now bounds dynamic integral composition twice over —
 compile-time sizing/decline of tree-visible nesting (ruled and landed
@@ -718,10 +761,31 @@ composition grows ~60× per level (measured 2026-08-23: depth 2 = 5 ms,
 depth 3 = 309 ms, so depth 6 ≈ hours of synchronous work). No witness hits
 it — the item-226 witness's scalar leg compiles user functions by
 reference, which hoists each integral — but a macro-expanded scalar
-emission of the same shape would. The open design point is what an
+emission of the same shape would. The open design point was what an
 exhausted scalar integral should return: it is an estimate, not an
 enclosure, so `NaN` (the scalar target's existing "no value" spelling) is
 the natural candidate — a ruling, since it changes a numeric result.
+
+LANDED 2026-08-23 with `NaN` as the exhausted result (the entry's own
+candidate; swapping it is a one-line change at three named sites in
+`javascript-target.ts`). Mechanism mirrors the interval half one-for-one:
+a shared budget of 2²⁵ nested integrand evaluations armed at each
+OUTERMOST `_SYS.integrate` entry (calibrated: the hardest measured double
+integral uses 4.7·10⁵ — ~70× headroom — and a smooth genuine triple
+1.4·10⁷ — 2.4×; a 4-level by-reference chain that extrapolated to ~8 min
+of synchronous work now answers `NaN` in ~3 s), the counter rebalanced in
+`finally` so a throwing integrand cannot disarm re-arming, and an
+exhausted run barred from the Monte-Carlo fallback. Pinned in
+`compile-integrate-nested-budget.test.ts` (4 cases, incl. fresh-budget
+re-arm after exhaustion). Remaining residue, recorded deliberately: (a)
+`_SYS.integrateMC` does not participate in the activation counting, so an
+`integrate` nested inside an outermost `integrateMC` re-arms per sample —
+same shape as today, cheap to close if wanted; (b) the scalar target
+never sizes panel counts by nesting depth (the interpreter and interval
+target do), which is why a compiled triple costs 1.4·10⁷ evaluations
+where the interpreter's costs ~2·10⁴ — compile-time sizing in the
+`Integrate` emitter is the natural companion fix and would let the budget
+drop by orders of magnitude.
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 
 The evaluator broadcasts `Which` elementwise over collection-valued operands

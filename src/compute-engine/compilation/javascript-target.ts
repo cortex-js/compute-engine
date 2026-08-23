@@ -5861,6 +5861,81 @@ function realFn(f: (x: number) => unknown): (x: number) => number {
 }
 
 /**
+ * Runtime integrand-evaluation budget for DYNAMICALLY nested quadrature —
+ * integrals entered from inside another integral's integrand at run time.
+ *
+ * An inner integral runs one full quadrature per evaluation of the enclosing
+ * integrand, so every level of nesting MULTIPLIES the work: the adaptive GK15
+ * emitter starts from 16 panels of 15 points, so a smooth integrand costs 240
+ * evaluations at one level, 5.76·10⁴ at two (measured 6 ms), 1.39·10⁷ at three
+ * (measured ~1 s), and ~3.3·10⁹ at four — minutes to hours of synchronous work
+ * that never yields to the caller's thread. The quadrature's own deadline check
+ * does not bound this: it stops subdividing only when a deadline is armed, and
+ * a compiled artifact called outside an engine span (`ce.withTimeLimit`) has
+ * none — and a synchronous call cannot be interrupted from outside either.
+ *
+ * Nesting written into one `Integrate` node's limits is visible to the
+ * compiler, but nesting reached BY REFERENCE is not: `∫ g(x) dx` where the
+ * compiled `g` computes an integral of its own shows no nested `Integrate` node
+ * anywhere in the tree, and a macro-expanded iteration can stack six such
+ * levels. No tree walk can see that composition, because it happens per RUNTIME
+ * call.
+ *
+ * So the runtime enforces its own cap: each OUTERMOST `_SYS.integrate` entry
+ * (one with no integral already running) re-arms this budget, and every
+ * integrand evaluation performed by a NESTED integral consumes one unit. Once
+ * it is gone, a nested integral answers `NaN` — the scalar target's "no value"
+ * spelling — on entry or mid-accumulation, which propagates outward through the
+ * enclosing quadratures instead of spinning, and the caller falls back to the
+ * interpreter. The cap is PER OUTERMOST INTEGRAL, so integrals started after
+ * the exhausted one completes get a full budget again.
+ *
+ * Sized so the nesting the compiler DOES emit stays untouched: a triple
+ * integral's inner two levels consume ~1.4·10⁷ evaluations for a smooth
+ * integrand, and hard-but-legitimate double integrals measured up to 4.7·10⁵
+ * (`∫₀¹∫₀¹ √(xy)`, 20 ms), so 2²⁵ ≈ 3.4·10⁷ leaves a double integral two
+ * orders of magnitude of headroom and a smooth triple a factor of two, while a
+ * runaway dynamic composition is cut after a few seconds rather than never.
+ */
+const NESTED_QUADRATURE_BUDGET = 1 << 25;
+
+/** Number of `_SYS.integrate` activations currently on the call stack. Zero at
+ *  every outermost entry — module state is safe here because compiled code runs
+ *  synchronously on one thread. */
+let activeIntegrals = 0;
+
+/** Remaining nested-integrand-evaluation budget for the current outermost
+ *  integral — see {@link NESTED_QUADRATURE_BUDGET}. Negative once exhausted,
+ *  which is what tells an enclosing quadrature its estimate is incomplete. */
+let nestedEvalsLeft = 0;
+
+/**
+ * `f` wrapped so that each evaluation made on behalf of a NESTED integral (one
+ * running inside another integral's integrand) consumes budget, and answers
+ * `NaN` once the budget is exhausted — which the quadrature carries into its
+ * estimate, ending the nested integral with no value.
+ */
+function budgetedIntegrand(f: (x: number) => number): (x: number) => number {
+  return (x: number): number => {
+    if (activeIntegrals > 1 && --nestedEvalsLeft < 0) return NaN;
+    return f(x);
+  };
+}
+
+/**
+ * Open one integral activation: re-arm the nested budget at an outermost entry,
+ * or refuse a nested entry whose budget is already gone. Returns `false` when
+ * the caller must answer `NaN` without integrating; `true` when it may proceed,
+ * and must then run its work inside `try { … } finally { activeIntegrals--; }`.
+ */
+function enterIntegral(): boolean {
+  if (activeIntegrals === 0) nestedEvalsLeft = NESTED_QUADRATURE_BUDGET;
+  else if (nestedEvalsLeft <= 0) return false;
+  activeIntegrals++;
+  return true;
+}
+
+/**
  * Runtime helpers injected as `_SYS` into compiled JavaScript functions.
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
  */
@@ -6429,13 +6504,27 @@ const SYS_HELPERS = {
   // this fallback once per OUTER node, so 1e7 samples of a stalled-but-accurate
   // result is minutes spent making the answer worse. See `compileIntegrate`.
   integrate: (fn: (x: number) => number, a: number, b: number) => {
-    const f = realFn(fn);
-    const r = adaptiveQuadrature(f, a, b);
-    // A diagnosed divergence has no finite value, and sampling it would only
-    // launder the divergence into a plausible-looking number.
-    if (r.divergent) return NaN;
-    if (r.converged || quadratureBeatsMonteCarlo(r, 10e6)) return r.estimate;
-    return monteCarloEstimate(f, a, b, 10e6).estimate;
+    // Dynamic nesting is bounded by a shared evaluation budget — see
+    // `NESTED_QUADRATURE_BUDGET`. A nested entry that finds it gone has no
+    // value to report.
+    if (!enterIntegral()) return NaN;
+    try {
+      const f = budgetedIntegrand(realFn(fn));
+      const r = adaptiveQuadrature(f, a, b);
+      // A diagnosed divergence has no finite value, and sampling it would only
+      // launder the divergence into a plausible-looking number.
+      if (r.divergent) return NaN;
+      // The budget ran out somewhere below this level, so the panels this
+      // quadrature accumulated rest on refused evaluations: the estimate is not
+      // an estimate of anything. Answer `NaN` directly rather than falling
+      // through — the Monte-Carlo fallback would spend 1e7 samples on the same
+      // exhausted integrand.
+      if (nestedEvalsLeft < 0) return NaN;
+      if (r.converged || quadratureBeatsMonteCarlo(r, 10e6)) return r.estimate;
+      return monteCarloEstimate(f, a, b, 10e6).estimate;
+    } finally {
+      activeIntegrals--;
+    }
   },
   // Definite integral via Monte-Carlo (1e7 uniform samples). STOCHASTIC and
   // approximate (~1e-4 typical error, ~200 ms/call). Emitted when

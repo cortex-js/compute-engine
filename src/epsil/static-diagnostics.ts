@@ -397,7 +397,15 @@ function applyAssignmentTypeEffect(
           if (init.isValid && !init.type.isUnknown) {
             const def = ce.box(target.symbol).valueDefinition;
             if (def !== undefined) {
-              evidence.set(def, init.type.type);
+              // A concrete literal initializer records its handler-visible
+              // literal type (`1.5`, not `finite_real`): exact evidence a
+              // parameter can provably refute, which is what restores the
+              // static line for `let x: number = 1.5; k(x)` under overlap
+              // admission (path 1 of the ROADMAP entry "Epsil static
+              // evidence diagnostics lost to overlap admission", ruled
+              // 2026-08-23). A non-literal initializer keeps its public
+              // type.
+              evidence.set(def, init._literalType ?? init.type.type);
               // A pass-declared PLACEHOLDER skeleton (`let a: list = ["x"]`)
               // refines from its initializer here too, so element uses in
               // later statements (`k(a[1])`) are checkable — mirroring the
@@ -481,7 +489,13 @@ function applyAssignmentTypeEffect(
   } else {
     sym._infer(inferTypeFromValue(ce, rhs).type, 'replace');
   }
-  evidence.set(def, raw.type);
+  // The INFERRED type above stays deliberately widened ("more likely, not
+  // broadest"); only the EVIDENCE carries a literal right-hand side's exact
+  // type (`1.5`), so a later use at a parameter the literal provably cannot
+  // inhabit is refused at boxing and the pre-pass flags it (path 1 of the
+  // ROADMAP entry "Epsil static evidence diagnostics lost to overlap
+  // admission", ruled 2026-08-23).
+  evidence.set(def, rhs._literalType ?? raw.type);
 }
 
 function canonicalizationDiagnostics(

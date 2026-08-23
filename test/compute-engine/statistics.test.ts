@@ -381,3 +381,41 @@ describe('compilation', () => {
     ).toBe('np.corrcoef(a, b)[0][1]');
   });
 });
+
+describe('Histogram/BinCounts bin spec', () => {
+  test('an integer bin count bins; a non-integer scalar stays INERT, never rounded', () => {
+    // The declared `number | list<number>` bin spec deliberately admits
+    // Desmos-style bin-WIDTH spellings (`histogram(L, .05)`) so they parse;
+    // the contract (Histogram's signature note in `library/statistics.ts`)
+    // is that a non-integer scalar stays inert for the importer to
+    // translate. `computeBinning` used to read it with `toInteger`, which
+    // Math.rounds — `BinCounts(L, 2.5)` silently answered the 3-bin
+    // question. The high-precision near-integer probes the EXACT
+    // integrality test: its rounded machine projection (`.re`) IS 2, so a
+    // `.re`-based comparison would wrongly bin it.
+    const eng = new ComputeEngine();
+    expect(
+      eng.box(['BinCounts', L([1, 2, 2, 3]), 3]).evaluate().toString()
+    ).toBe('[1,2,1]');
+    for (const bad of [
+      2.5,
+      0.05,
+      0,
+      -1,
+      { num: '2.00000000000000000000000001' },
+      ['Complex', 3, 1],
+    ]) {
+      const b = eng.box(['BinCounts', L([1, 2, 2, 3]), bad as any]).evaluate();
+      expect(b.operator).toBe('BinCounts');
+      const h = eng.box(['Histogram', L([1, 2, 2, 3]), bad as any]).evaluate();
+      expect(h.operator).toBe('Histogram');
+    }
+    // An exact non-machine spelling of an integer count still bins.
+    expect(
+      eng
+        .box(['BinCounts', L([1, 2, 2, 3]), ['Divide', 6, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,1]');
+  });
+});
