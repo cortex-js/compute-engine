@@ -1,5 +1,6 @@
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { CustomConsole, LogType, LogMessage } from '@jest/console';
+import { installLegacyTypeHandlerShadow } from './compute-engine/type-handler-shadow-legacy';
 
 const RESET = '\u001b[0;0m';
 const GREY = '\u001b[30;1m';
@@ -163,3 +164,14 @@ global.console = new EpsilConsole(
   process.stderr,
   simpleFormatter
 ) as Console;
+
+// Type-handler migration, differential shadow (see
+// `boxed-expression/operand-descriptor.ts`, `_legacyTypeHandlerShadow`):
+// with CE_TYPE_PARITY_SHADOW set, install the converted operators' legacy
+// handlers into EVERY test file's module registry, so a full-suite run
+// compares both handler shapes on every type derivation it performs —
+// jest isolates module registries per file, so installing from one suite
+// reaches that suite alone. Without the variable this is inert and the
+// suite runs exactly as before.
+if ((process.env.CE_TYPE_PARITY_SHADOW ?? '') !== '')
+  installLegacyTypeHandlerShadow();

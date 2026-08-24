@@ -4,10 +4,15 @@ import type {
   OperandDescriptor,
   OperandFacts,
   OperandStructure,
+  OperatorTypeHandlerOnExpressions,
   Sign,
   Tri,
 } from '../global-types.js';
-import type { Type } from '../../common/type/types.js';
+import type { Type, TypeString } from '../../common/type/types.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
+import { parseType } from '../../common/type/parse.js';
+import { typeToString } from '../../common/type/serialize.js';
+import { widenValueTypes } from '../../common/type/widen-value.js';
 
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
@@ -110,7 +115,14 @@ function listLiteralShape(op: Expression): number[] {
  * the operand as written (raw operands of a lazy operator included) and
  * never binds or canonicalizes anything. */
 function structureOfExpression(op: Expression): OperandStructure | undefined {
-  if (isSymbol(op)) return { kind: 'symbol', name: op.symbol };
+  if (isSymbol(op)) {
+    // The inferred-type flag rides the symbol node (a property of THIS
+    // symbol, not of a type): present only when true, so a declared or
+    // unbound symbol's node stays `{ kind, name }`.
+    return op.valueDefinition?.inferredType === true
+      ? { kind: 'symbol', name: op.symbol, inferred: true }
+      : { kind: 'symbol', name: op.symbol };
+  }
   if (isString(op)) return { kind: 'string', text: op.string };
   if (isNumber(op)) {
     // `isSame` is strictly syntactic, so this reads the literal's own value
@@ -199,8 +211,13 @@ export function describe(
   }
   sgn ??= signOfType(type);
 
+  // No `valid`, `application`, or `inferred` field: an error operand's TYPE
+  // is `'error'` (validity is a type read); whether the operand is an
+  // application is a structural question (`structureOf()`); and the
+  // inferred-type flag is an input to the engine's own derivation steps,
+  // not a handler fact — when `deriveApplicationType` lands it travels the
+  // primitive's private channel, like admission data.
   const facts: OperandFacts = {
-    valid: op.isValid,
     finite,
     sgn,
     closed: op.isConstant,
@@ -208,10 +225,6 @@ export function describe(
     finiteCollection,
     indexed,
     shape: tf.shape,
-    application: isFunction(op),
-    inferred: isSymbol(op)
-      ? (op.valueDefinition?.inferredType ?? false)
-      : false,
   };
 
   let structureMemo: OperandStructure | undefined;
@@ -241,7 +254,6 @@ export function describeType(t: Type): OperandDescriptor {
   return {
     type: t,
     facts: {
-      valid: t !== 'error',
       finite: tf.finite,
       sgn: signOfType(t),
       closed: undefined,
@@ -249,8 +261,6 @@ export function describeType(t: Type): OperandDescriptor {
       finiteCollection: tf.finiteCollection,
       indexed: tf.indexed,
       shape: tf.shape,
-      application: undefined,
-      inferred: undefined,
     },
   };
 }
@@ -314,4 +324,121 @@ export function guardedTypeHandlerCall<T>(
           `canonicalize, or evaluate anything.`
       );
   }
+}
+
+/**
+ * Test-only differential-parity registry for the handler-shape migration.
+ *
+ * When an operator's `type` handler converts from the expressions shape to
+ * the `'types'` shape, the conversion batch moves the LEGACY handler —
+ * verbatim — into the test fixture that populates this map
+ * (`test/compute-engine/type-handler-shadow-legacy.ts`). While an entry is
+ * installed, the type-handler call site runs BOTH shapes on every
+ * derivation for that operator and throws on divergence, so every type
+ * read in every test executed with the shadow installed is a parity check
+ * — the whole test suite becomes the parity corpus, covering the real
+ * operand mix (raw held operands, missing-stripped positions, literals,
+ * valueless symbols) that a synthetic replay would have to reconstruct.
+ *
+ * The map is empty outside those tests: production and ordinary test runs
+ * pay one `Map.size` read per `'types'`-shape derivation and nothing else.
+ * To make a FULL-SUITE run the corpus, set `CE_TYPE_PARITY_SHADOW=1` —
+ * the jest per-file setup installs the fixture into every test
+ * environment (each file has its own module registry, so installing from
+ * one suite reaches that suite alone).
+ *
+ * Known limitation, accepted for the migration: descriptors built lazily
+ * while a handler runs (a `structureOf()` call describing children) read
+ * child types inside the ancestor handler's purity-guard window, so a
+ * nested legacy shadow call executes there too. The purity guard would
+ * attribute any state write from that nested legacy call to the ancestor.
+ * The handlers eligible for the shadow are the 213 the side-effect audit
+ * found pure (`docs/plans/2026-08-22-type-handlers-on-types.md` §2.5) —
+ * the seven impure ones are REWRITTEN under new contracts, never
+ * shadow-checked — so no state-writing legacy handler should ever enter
+ * this registry; installing one would produce misattributed guard errors.
+ */
+export const _legacyTypeHandlerShadow = new Map<
+  string,
+  OperatorTypeHandlerOnExpressions
+>();
+
+/** Shadow-parity counters. A parity suite asserts `checks` moved — and that
+ * every installed operator's own count moved — so an empty corpus, a broken
+ * install, or a corpus that misses an operator fails loudly instead of
+ * passing vacuously. */
+export const _shadowParityStats = {
+  checks: 0,
+  checksByOperator: new Map<string, number>(),
+};
+
+/** Both handler shapes may answer with a `BoxedType`, a structural `Type`,
+ * or a type string; results are compared after the same normalization the
+ * call site applies when storing them (parse against the engine's resolver,
+ * then widen literal cargo to tiers). */
+function normalizeHandlerResult(
+  engine: ComputeEngine,
+  raw: Type | TypeString | BoxedType | undefined
+): Type | undefined {
+  if (raw === undefined) return undefined;
+  const t =
+    raw instanceof BoxedType ? raw.type : parseType(raw, engine._typeResolver);
+  return t === undefined ? undefined : widenValueTypes(t);
+}
+
+/**
+ * Differential check between a converted `'types'`-shape handler's answer
+ * and the legacy expressions-shape handler held in the shadow registry.
+ * Equivalence is mutual subtyping after normalization — spelling
+ * differences are fine, a widening or narrowing is a divergence. Throws
+ * with both spellings so the failing operand mix is reproducible from the
+ * test that tripped it.
+ */
+export function checkShadowTypeParity(
+  engine: ComputeEngine,
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  operandTypes: ReadonlyArray<Type | undefined> | undefined,
+  newRaw: Type | TypeString | BoxedType | undefined
+): void {
+  if (_legacyTypeHandlerShadow.size === 0) return;
+  const legacy = _legacyTypeHandlerShadow.get(operator);
+  if (legacy === undefined) return;
+  _shadowParityStats.checks += 1;
+  _shadowParityStats.checksByOperator.set(
+    operator,
+    (_shadowParityStats.checksByOperator.get(operator) ?? 0) + 1
+  );
+  // The diagnostic is computed BEFORE the comparison: reading an operand's
+  // type inside the throw expression could itself re-enter a nested shadow
+  // check (or fail for an unrelated reason) and replace the divergence
+  // report with a different exception.
+  let operandSpelling: string;
+  try {
+    operandSpelling = ops
+      .map((x) =>
+        x._literalType !== undefined
+          ? typeToString(x._literalType)
+          : typeToString(x.type.type)
+      )
+      .join(', ');
+  } catch {
+    operandSpelling = '<unavailable>';
+  }
+  const oldNorm = normalizeHandlerResult(
+    engine,
+    legacy(ops, { engine, operandTypes })
+  );
+  const newNorm = normalizeHandlerResult(engine, newRaw);
+  const agree =
+    oldNorm === undefined || newNorm === undefined
+      ? oldNorm === newNorm
+      : isSubtype(oldNorm, newNorm) && isSubtype(newNorm, oldNorm);
+  if (!agree)
+    throw new Error(
+      `type-handler shadow parity: "${operator}" diverged — legacy shape ` +
+        `answered ${oldNorm === undefined ? 'undefined' : typeToString(oldNorm)}, ` +
+        `'types' shape answered ${newNorm === undefined ? 'undefined' : typeToString(newNorm)} ` +
+        `(operand types: ${operandSpelling})`
+    );
 }

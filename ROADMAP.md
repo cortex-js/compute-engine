@@ -398,9 +398,36 @@ operand expressions; the single call site in `boxed-function.ts` dispatches
 on the flag, and a runtime purity guard (on under test) throws if a
 `'types'` handler moves any invalidation axis. First migrated handlers:
 `Coalesce`, `Hold`, `ReleaseHold` — byte-identical types, pinned in
-`type-handler-parity.test.ts` / `type-handler-descriptors.test.ts`. What
-remains here: the mass conversion of the ~210 remaining pure handlers
-(§5.3 step 3, with the §5.5 corpus-driven parity harness), the seven
+`type-handler-parity.test.ts` / `type-handler-descriptors.test.ts`.
+
+Two follow-ups landed 2026-08-23, before the mass conversion bakes the
+contract in: (1) `OperandFacts` was REDUCED (user-directed) to the facts
+the type cannot carry — `valid` deleted (an error operand's type IS
+`'error'`, and the error type propagates, so validity is a type read);
+`application` deleted as a fact (its consumers — `isPossiblyCollectionTyped`
+in `Add`/`Multiply`/`Equal`/`PointX` — are answered by
+`structureOf().kind === 'application'`, §5.6's own conclusion); `inferred`
+moved to where §5.6 said it fits, an attribute of the `structureOf()`
+symbol node (its consumers, `Multiply`'s `isDeclaredScalarNumber` and the
+`List` fold, read a symbol-node flag); `finite` kept for the NaN-literal
+soundness bit, `sgn` kept for the held-value and
+declined-range-assumption residues — the full per-field rationale is the
+2026-08-23 amendment in the plan doc's §5.1. (2) The §5.5 parity harness
+shipped as a DIFFERENTIAL shadow: a converted operator's legacy handler
+moves verbatim to `test/compute-engine/type-handler-shadow-legacy.ts`, and
+while installed both shapes run on every derivation and any divergence
+throws (`checkShadowTypeParity`), so the executing tests are the corpus —
+`type-handler-shadow-parity.test.ts` for the dedicated mix, and
+`CE_TYPE_PARITY_SHADOW=1` installs the fixture into EVERY suite's module
+registry (via `test/jest-config.ts`) so a full-suite run is the full
+corpus. The shadow already earned its keep: its dual review caught the
+call site pre-stripping a `handle` operator's LAST operand type, which
+made `Coalesce(1, m)` with `m: integer | missing` falsely promise
+presence — the strip fold is now gated to `propagate` operators and the
+contract is pinned.
+
+What remains here: the mass conversion of the ~210 remaining pure handlers
+(§5.3 step 3, each batch proven under the shadow), the seven
 impure-handler rewrites (§5.4), `context.derive` for the handlers that
 type an application they do not hold, and the old shape's deprecation
 (release N+1) and removal (N+2).
@@ -931,12 +958,15 @@ bind document functions as by-reference lambdas rather than folding
 evaluated values into member expressions). One caveat from their
 ledger (2026-08-23): that rework's landed boundary converts
 thread-style macros but NOT collection-valued ones — and the item-225
-heightmap macros are collection-valued — so the fold source may only
-PARTIALLY disappear for the witness; their re-measure decides, and a
-surviving remainder is the live demand case for the CSE extension
-below (or for a runtime-binding channel — a `_SYS` engine-value
-lookup — which their ledger notes would be better still for them,
-since the compiled member survives instead of falling back). Measured on the guard as
+heightmap macros are collection-valued. VERIFIED at the 0.119.0
+adoption (2026-08-23): the fold source SURVIVES the rework for this
+document — the witness renders no OOM and refuses the giant folds with
+the guard's diagnostic, but its interpreted members still exceed
+300 s. The CSE extension is therefore the remaining lever (or a
+runtime-binding channel — a `_SYS` engine-value lookup — which their
+ledger notes would be better still, since the compiled member survives
+instead of falling back); the consumer states NO URGENCY, so this
+waits for the CSE initiative's own schedule. Measured on the guard as
 landed: the `art/nxlddeh5zv` witness's `t_errainPointA` is refused at
 an expanded size of 5.9·10¹⁰ nodes (an estimated ~169 GB of would-be
 source) and the compile falls back to interpreted evaluation — no OOM,

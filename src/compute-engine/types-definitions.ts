@@ -405,44 +405,61 @@ export type Tri = boolean | undefined;
  * recorded assumptions, structural reads — never by canonicalizing,
  * declaring, or evaluating anything.
  *
+ * The set is deliberately minimal: a fact earns a field only when the
+ * operand's TYPE cannot carry it. Anything the type proves is read off
+ * `OperandDescriptor.type` directly — an error operand's type IS `'error'`
+ * (so there is no `valid` field), and a literal's value, sign, and
+ * finiteness normally travel in its value-carrying type. Each field below
+ * merges the type channel with the pure value channel, so a handler reads
+ * ONE place and never re-derives the combination; the doc of each field
+ * names the residue that justifies it.
+ *
  * @category Definitions
  */
 export type OperandFacts = {
-  /** `false` when the operand is an error expression. */
-  readonly valid: boolean;
   /** `true` for a `finite_*`-typed operand or a finite number literal;
    * `false` for a `non_finite_number`-typed operand or a `±∞`/`NaN`
-   * literal; `undefined` otherwise (including every non-number operand). */
+   * literal; `undefined` otherwise (including every non-number operand).
+   * Beyond the type: a `NaN` literal — its type is `number` (there is no
+   * NaN tier), and treating it as an unknown-finiteness generic point
+   * would let a total-real-function handler unsoundly claim a finite
+   * result for `f(NaN)`. */
   readonly finite: Tri;
   /** The operand's sign, from pure sources only: a number literal's value,
    * a symbol's held numeric value or recorded assumption, or the sign a
    * ranged TYPE proves (`real<0..> & !0` is positive). For a compound
    * expression whose type carries no sign, `undefined` — the operator
-   * `sgn` handlers are never consulted on the type path. */
+   * `sgn` handlers are never consulted on the type path.
+   * Beyond the type: a held numeric value (`a := 5` keeps the declared
+   * type `integer` — assigned symbols are checked, never narrowed), and an
+   * assumption whose bound no machine number represents (`assume(x > 1/3)`
+   * records the sign but declines the range, leaving the type bare
+   * `real`). */
   readonly sgn?: Sign;
-  /** The operand has no free variables (the `isConstant` structural fact). */
+  /** The operand has no free variables (the `isConstant` structural fact —
+   * never derivable from a type). */
   readonly closed: Tri;
   /** Is the operand a collection? `true` when its type proves it (a
    * collection-shaped type, `string` included) or the operand value is
    * enumerable; `false` when the type is provably disjoint from
-   * `collection<any>`; `undefined` for top types and `broadcastable<T>`. */
+   * `collection<any>`; `undefined` for top types and `broadcastable<T>`.
+   * Beyond the type: per-instance collection capability (an operator whose
+   * collection-ness is decided from its operands, or an enumerable value
+   * whose type alone does not prove the shape). */
   readonly collection: Tri;
-  /** Meaningful only when `collection` is not `false`. */
+  /** Meaningful only when `collection` is not `false`. Beyond the type: a
+   * value's enumerable-cardinality facet where the type carries no
+   * dimensions. */
   readonly finiteCollection: Tri;
   /** Supports index-based access (`indexed_collection<any>` by type, or the
    * operand's indexed-collection capability). */
   readonly indexed: Tri;
-  /** A statically known fixed shape (a dimensioned list type, or a literal
-   * `List`'s dimensions). Absent when no static shape is known. */
+  /** A statically known fixed shape (a dimensioned list type's dimensions).
+   * Absent when no static shape is known. A computed convenience — today
+   * derived from the type alone, kept as a field because the matrix-family
+   * handlers read it constantly and a literal-`List` channel can join it
+   * later. */
   readonly shape?: readonly number[];
-  /** Is the operand a function application (not a symbol or literal)?
-   * Decidable for a real operand; `undefined` for a synthetic descriptor
-   * built from a type alone. */
-  readonly application: Tri;
-  /** Was the operand's type INFERRED (subject to revision) rather than
-   * declared or derived? Read from a symbol operand's value definition;
-   * `undefined` for synthetic descriptors. */
-  readonly inferred: Tri;
 };
 
 /**
@@ -455,7 +472,16 @@ export type OperandFacts = {
  * @category Definitions
  */
 export type OperandStructure =
-  | { kind: 'symbol'; name: string }
+  | {
+      kind: 'symbol';
+      name: string;
+      /** Present (`true`) when the symbol's recorded type was INFERRED
+       * (subject to revision) rather than declared — the fact the
+       * `Multiply` and `List`-fold handlers consult when deciding how much
+       * to trust an operand's type. Lives on the structure node, not in
+       * `OperandFacts`: it is a property of this symbol, not of a type. */
+      inferred?: boolean;
+    }
   | { kind: 'string'; text: string }
   | { kind: 'number'; literal?: 0 | 1 }
   | {

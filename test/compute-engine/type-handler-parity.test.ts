@@ -49,7 +49,11 @@ describe('parity: migrated handlers answer what the expressions shape answered',
       ['Hold', ['Function', ['Add', 'n', 1], 'n']],
       'unknown',
     ],
-    ['ReleaseHold of a held literal', ['ReleaseHold', ['Hold', 2]], 'finite_integer'],
+    [
+      'ReleaseHold of a held literal',
+      ['ReleaseHold', ['Hold', 2]],
+      'finite_integer',
+    ],
     ['ReleaseHold of a symbol', ['ReleaseHold', 'q'], 'unknown'],
     [
       'ReleaseHold of a held application',
@@ -63,13 +67,33 @@ describe('parity: migrated handlers answer what the expressions shape answered',
       expect(ce.box(json as any).type.toString()).toBe(expected);
     });
 
+  test("Coalesce's LAST operand keeps its full type, `missing` arm included", () => {
+    // The §3.D contract: every arm but the last contributes its stripped
+    // type, the last its FULL type — a Coalesce result never promises
+    // presence its last operand does not. The call site's missing-strip
+    // fold is gated to `propagate` operators for exactly this reason: a
+    // `handle` operator's handler owns the absence semantics.
+    ce.declare('m', 'integer | missing');
+    expect(ce.box(['Coalesce', 1, 'm'] as any).type.toString()).toBe(
+      'integer | missing'
+    );
+    // At a NON-last position the arm is stripped by the handler itself.
+    expect(ce.box(['Coalesce', 'm', 1] as any).type.toString()).toBe('integer');
+  });
+
   test('evaluation through the migrated definitions is untouched', () => {
     expect(
-      ce.box(['ReleaseHold', ['Hold', ['Add', 1, 2]]] as any)
+      ce
+        .box(['ReleaseHold', ['Hold', ['Add', 1, 2]]] as any)
         .evaluate()
         .toString()
     ).toBe('3');
-    expect(ce.box(['Coalesce', 5, 7] as any).evaluate().toString()).toBe('5');
+    expect(
+      ce
+        .box(['Coalesce', 5, 7] as any)
+        .evaluate()
+        .toString()
+    ).toBe('5');
   });
 });
 
@@ -82,7 +106,7 @@ describe('purity: type reads through the migrated handlers move no cache axis', 
       ce.box(['Hold', ['Add', 'x', 1]] as any),
       ce.box(['ReleaseHold', ['Hold', 2]] as any),
     ];
-    for (const e of exprs) e.type; // Warm: the first read may bind.
+    for (const e of exprs) expect(e.type).toBeDefined(); // Warm: the first read may bind.
 
     let drift = 0;
     for (let i = 0; i < 5; i++) {
@@ -90,7 +114,7 @@ describe('purity: type reads through the migrated handlers move no cache axis', 
       // re-derives through the handler rather than answering from cache.
       ce.declare(`z${i}`, 'number');
       const before = ce._anyVersion;
-      for (const e of exprs) e.type;
+      for (const e of exprs) expect(e.type).toBeDefined();
       drift += ce._anyVersion - before;
     }
     expect(drift).toBe(0);
@@ -129,7 +153,10 @@ describe("user-declared 'types'-shape handlers", () => {
         // Deliberate violation: the compile-time PureEngineView hides the
         // mutating surface, so the leak needs a cast — exactly the misuse
         // the runtime guard exists to catch.
-        (engine as unknown as IComputeEngine).declare(`leak${counter++}`, 'number');
+        (engine as unknown as IComputeEngine).declare(
+          `leak${counter++}`,
+          'number'
+        );
         return 'unknown';
       },
     });

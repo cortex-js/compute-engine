@@ -25,14 +25,18 @@ beforeEach(() => {
 describe('describe() on literals', () => {
   test('a finite real literal', () => {
     const d = describeOperand(ce.box(2.5));
-    expect(d.facts.valid).toBe(true);
     expect(d.facts.finite).toBe(true);
     expect(d.facts.sgn).toBe('positive');
     expect(d.facts.closed).toBe(true);
     expect(d.facts.collection).toBe(false);
     expect(d.facts.indexed).toBe(false);
-    expect(d.facts.application).toBe(false);
     expect(d.structureOf?.()).toEqual({ kind: 'number' });
+  });
+
+  test("an error operand's validity is a TYPE read — its type is 'error'", () => {
+    // There is deliberately no `valid` fact: the type channel carries it.
+    const d = describeOperand(ce.box(['Error', { str: 'missing' }]));
+    expect(d.type).toBe('error');
   });
 
   test('the literals 0 and 1 carry their structural tag', () => {
@@ -80,7 +84,19 @@ describe('describe() on symbols', () => {
     expect(d.facts.indexed).toBe(true);
     // No value, no dimensions in the type: cardinality unknown.
     expect(d.facts.finiteCollection).toBeUndefined();
-    expect(d.facts.application).toBe(false);
+  });
+
+  test('an evidence-inferred symbol carries `inferred` on its structure node', () => {
+    // A numeric use of a valueless symbol infers its type (evidence
+    // inference); the structure node records that the recorded type is
+    // subject to revision. A DECLARED symbol's node carries no such mark
+    // (see the ranged-declaration test above, whose node is bare).
+    expect(ce.box(['Add', 'zz', 1]).type).toBeDefined();
+    expect(describeOperand(ce.box('zz')).structureOf?.()).toEqual({
+      kind: 'symbol',
+      name: 'zz',
+      inferred: true,
+    });
   });
 
   test('an undeclared (unknown-typed) symbol decides nothing', () => {
@@ -95,7 +111,8 @@ describe('describe() on compound operands', () => {
   test('an application', () => {
     ce.declare('x', 'integer');
     const d = describeOperand(ce.box(['Add', 'x', 1]));
-    expect(d.facts.application).toBe(true);
+    // "Is this an application?" is a structural question, answered by the
+    // structure view's kind — there is no separate fact for it.
     const s = d.structureOf?.();
     expect(s?.kind).toBe('application');
     if (s?.kind === 'application') {
@@ -155,8 +172,6 @@ describe('describeType()', () => {
     expect(d.facts.collection).toBe(false);
     // Facts a type alone cannot decide stay undefined.
     expect(d.facts.closed).toBeUndefined();
-    expect(d.facts.application).toBeUndefined();
-    expect(d.facts.inferred).toBeUndefined();
   });
 
   test('a dimensioned list type carries its shape', () => {

@@ -28,6 +28,7 @@ import type {
 } from '../global-types.js';
 
 import {
+  checkShadowTypeParity,
   describe as describeOperand,
   guardedTypeHandlerCall,
 } from './operand-descriptor.js';
@@ -94,6 +95,7 @@ import type {
   EffectLabel,
   FunctionSignature,
   NumericPrimitiveType,
+  TypeString,
 } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
 import { widenValueTypes } from '../../common/type/widen-value.js';
@@ -4936,22 +4938,55 @@ function type(expr: BoxedFunction): Type {
       // `docs/plans/2026-08-22-type-handlers-on-types.md` §5.3 step 2): the
       // definition's `typeHandlerKind` flag — never the handler's parameter
       // count — selects the shape. A `'types'` handler receives one
-      // descriptor per operand (the missing-strip override folded into the
-      // descriptor's type) and no expressions, so it cannot touch engine
-      // state; the guard turns any state write into an immediate error in
-      // tests.
-      const calculatedType =
-        def.typeHandlerKind === 'types'
-          ? guardedTypeHandlerCall(expr.engine, expr.operator, () =>
-              (def.type as OperatorTypeHandlerOnTypes)(
-                expr.ops.map((x, i) => describeOperand(x, operandTypes?.[i])),
-                { engine: expr.engine }
-              )
-            )
-          : (def.type as OperatorTypeHandlerOnExpressions)(expr.ops, {
+      // descriptor per operand and no expressions, so it cannot touch
+      // engine state; the guard turns any state write into an immediate
+      // error in tests.
+      //
+      // The missing-strip override folds into the descriptor's type ONLY
+      // for a `propagate` operator, where the handler must not see
+      // `missing` arms. A `handle` operator's handler OWNS the absence
+      // semantics — `Coalesce` strips every arm but the last itself, and
+      // pre-stripping the last operand made its result falsely promise
+      // presence (`Coalesce(1, m)` with `m: integer | missing` must type
+      // `integer | missing`).
+      //
+      // Descriptors are built OUTSIDE the guarded window: they are the
+      // handler's input, and a child operand's own type derivation during
+      // `describe` must not be attributed to this handler.
+      let calculatedType: Type | TypeString | BoxedType | undefined;
+      if (def.typeHandlerKind === 'types') {
+        const strippedFor = (i: number) =>
+          def.resolvedMissingBehavior === 'propagate'
+            ? operandTypes?.[i]
+            : undefined;
+        const descriptors = expr.ops.map((x, i) =>
+          describeOperand(x, strippedFor(i))
+        );
+        calculatedType = guardedTypeHandlerCall(
+          expr.engine,
+          expr.operator,
+          () =>
+            (def.type as OperatorTypeHandlerOnTypes)(descriptors, {
               engine: expr.engine,
-              operandTypes,
-            });
+            })
+        );
+      } else
+        calculatedType = (def.type as OperatorTypeHandlerOnExpressions)(
+          expr.ops,
+          { engine: expr.engine, operandTypes }
+        );
+      // Differential parity for the migration: while a converted operator's
+      // legacy handler is installed in the test-only shadow registry, both
+      // shapes run and a divergence throws. No-op (one Map.size read) when
+      // the registry is empty — every run outside a parity suite.
+      if (def.typeHandlerKind === 'types')
+        checkShadowTypeParity(
+          expr.engine,
+          expr.operator,
+          expr.ops,
+          operandTypes,
+          calculatedType
+        );
       if (calculatedType) {
         if (calculatedType instanceof BoxedType)
           sigResult = calculatedType.type;

@@ -1125,6 +1125,50 @@ type OperandFacts = {
 };
 ```
 
+**AMENDED 2026-08-23 (user-directed): the facts were reduced to what the
+type cannot carry.** The shipped `OperandFacts` (`types-definitions.ts`)
+has seven fields — `finite`, `sgn?`, `closed`, `collection`,
+`finiteCollection`, `indexed`, `shape?` — three fewer than the spelling
+above. The rule that decided each cut, with the probes that settled it:
+
+- `valid` is GONE: an error operand's handler-visible type IS `'error'`,
+  and the error type propagates to an operand that merely contains an
+  error, so validity is a plain type read (`d.type === 'error'`). Probed
+  on the error node and on an `Add(Multiply(Error, 2), 3)` operand — both
+  answer type `error`, `isValid` false; there is no case where the two
+  channels disagree. (§5.6's `valid` row says "keep" because step 1 of
+  the derivation needs the bit — it still gets it, from the type.)
+- `application` is GONE as a FACT: its consumers are real
+  (`isPossiblyCollectionTyped` in `Add`, `Multiply`, `Equal`, `PointX` —
+  the §5.6 row), but §5.6's own conclusion already was that
+  `structureOf().kind === 'application'` answers the question and no
+  separate fact is needed; those handlers convert against the structure
+  view. The engine-internal step-16 bit, when `deriveApplicationType`
+  lands, travels the primitive's private channel like admission data.
+- `inferred` is GONE as a FACT and landed where §5.6 said it fits: as an
+  `inferred` attribute of `structureOf()`'s `symbol` node (present when
+  the symbol's recorded type is evidence-inferred). Its consumers —
+  `Multiply`'s `isDeclaredScalarNumber` and the `List` literal fold, per
+  the §5.6 row — read it from a symbol node today and will read the
+  structure attribute when they convert.
+- `finite` STAYS, and the reason is soundness, not precision: a `NaN`
+  literal types `number` (there is no NaN tier), so a type-only channel
+  would treat it as an unknown-finiteness generic point and the
+  total-real-function convention would claim `finite_real` for `f(NaN)`.
+  The literal's value is the only pure source of that `false`.
+- `sgn` STAYS with two measured residues the type cannot carry: a held
+  numeric value (`a := 5` keeps declared type `integer` — assigned
+  symbols are checked, never narrowed, by the 2026-08-18 inference
+  ruling) and an assumption whose bound no machine number represents
+  (`assume(x > 1/3)` records the sign but declines the range, leaving
+  type `real` — the A2 hardening). Everything else the sign channel once
+  carried now lives in the type (O9 literal types, A1/A2 ranges).
+- `closed` and the collection trio STAY: `isConstant` is structural, and
+  the collection capability facets answer per-instance questions
+  (enumerable values, operator-decided collection-ness) no static type
+  proves. `shape` stays as a computed convenience the matrix-family
+  handlers read constantly; it may later gain a literal-`List` channel.
+
 **How descriptors are built.** There are two constructors and no other
 way to make one: `describe(op)` for a real operand and `describeType(t)`
 for a synthetic one. Both start by deriving every fact the *type* proves
@@ -1352,6 +1396,31 @@ type?: (
 
 ### 5.5 Enforcement and measurement
 
+**Status note, 2026-08-23 — the parity harness shipped as a DIFFERENTIAL
+shadow, not the corpus-file replay described below.** When an operator
+converts, its legacy expressions-shape handler moves verbatim into
+`test/compute-engine/type-handler-shadow-legacy.ts`; while a parity suite
+(or a full-suite run) has those entries installed in
+`_legacyTypeHandlerShadow` (`boxed-expression/operand-descriptor.ts`), the
+type-handler call site runs BOTH shapes on every derivation of a converted
+operator and throws on any divergence (equivalence = mutual subtyping
+after the store-site normalization). The corpus is therefore every type
+derivation the executing tests perform — including raw held operands,
+missing-stripped positions and both box and parse routes, which a
+serialized-corpus replay would have to reconstruct declaration by
+declaration. `type-handler-shadow-parity.test.ts` drives a broad operand
+mix and asserts the check counters moved — globally and PER OPERATOR, so
+a corpus that misses one converted operator fails rather than passing
+vacuously. Because jest gives every test file its own module registry, a
+suite-wide install needs the per-file setup: `CE_TYPE_PARITY_SHADOW=1`
+makes `test/jest-config.ts` install the fixture in every test
+environment, and THAT full-suite run is a conversion batch's full proof. The
+`CE_TYPE_PARITY_CORPUS` collection design below is superseded unless a
+need arises that the shadow cannot cover (e.g. replaying a Tycho-side
+corpus); the synthetic `describeType`-with-facts-withheld half (run (b))
+remains future work alongside the withholding harness in
+`scripts/withhold-experiment/`.
+
 - **The purity guard** (always on in tests; in development under
   `CE_TYPE_PURITY_GUARD`). Around every handler call and every
   `deriveApplicationType` call, take a snapshot of the four version
@@ -1539,7 +1608,10 @@ separate fact is needed.
 with *inferred* `k` it stays a tuple as written), and by the `List`
 literal fold (`[x, 1]` with `x` inference-pending types
 `list<number^2>`). Both read the flag from a symbol node, so it fits
-better as an attribute of the `symbol` node of `structureOf()`.
+better as an attribute of the `symbol` node of `structureOf()`. (Done —
+the 2026-08-23 §5.1 amendment implemented exactly this: the `symbol`
+structure node carries `inferred?: boolean`, and the facts record has no
+`inferred` field.)
 
 #### `valid`
 

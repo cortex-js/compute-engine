@@ -256,7 +256,6 @@ type LambdaDefinition = {
  * this file and so cannot be named from here). Keep the two spellings in
  * sync member for member — the interfaces must stay mutually assignable. */
 type OperandFactsMirror = {
-  readonly valid: boolean;
   readonly finite: boolean | undefined;
   readonly sgn?: Sign;
   readonly closed: boolean | undefined;
@@ -264,12 +263,10 @@ type OperandFactsMirror = {
   readonly finiteCollection: boolean | undefined;
   readonly indexed: boolean | undefined;
   readonly shape?: readonly number[];
-  readonly application: boolean | undefined;
-  readonly inferred: boolean | undefined;
 };
 
 type OperandStructureMirror =
-  | { kind: 'symbol'; name: string }
+  | { kind: 'symbol'; name: string; inferred?: boolean }
   | { kind: 'string'; text: string }
   | { kind: 'number'; literal?: 0 | 1 }
   | {
