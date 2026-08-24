@@ -1122,10 +1122,11 @@ N-mach    = 13.228756555322953
 
 exports[`SQRT √(1000000/49) 1`] = `
 box       = ["Sqrt", ["Rational", 1000000, 49]]
-eval-auto = sqrt(1000000/49)
-eval-mach = sqrt(1000000/49)
+canonical = ["Rational", 1000, 7]
+eval-auto = 1000/7
+eval-mach = 1000/7
 N-auto    = 142.857142857142857143
-N-mach    = 142.85714285714278
+N-mach    = 142.857142857143
 `;
 
 exports[`SQRT √(1000001/7) 1`] = `

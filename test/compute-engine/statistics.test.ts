@@ -145,6 +145,231 @@ describe('Correlation', () => {
   });
 });
 
+// The bivariate kernels project every datum onto its real part (`machineVals`
+// reads `.re`, `bigVals` reads `.bignumRe`), so complex data would answer the
+// question for different data with no diagnostic: under that projection
+// `Covariance([1, 1+2i], [2, 3])` is the covariance of `[1, 1]`, namely `0`.
+// Complex data must therefore produce a clear error, and data that has no real
+// value at all — `NaN`, `±∞`, `~oo` — must propagate `NaN` rather than be
+// reported as a variance of zero.
+describe('Bivariate statistics reject non-real data', () => {
+  const I = ['Complex', 1, 2] as any; // 1 + 2i
+  // The error carries the `incompatible-type` code with the `real` constraint
+  // and the offending datum, so it is distinguishable from the shape, length
+  // and zero-variance rejections that share this file.
+  const NON_REAL = /incompatible-type.*real.*complex/;
+
+  test('complex datum errors — two-collection form', () => {
+    for (const op of ['Covariance', 'PopulationCovariance', 'Correlation']) {
+      const r = ce.box([op, L([1, I]), L([2, 3])]).evaluate();
+      expect(r.isValid).toBe(false);
+      expect(r.toString()).toMatch(NON_REAL);
+    }
+  });
+
+  test('complex datum errors — collection-of-pairs form', () => {
+    for (const op of ['Covariance', 'PopulationCovariance', 'Correlation']) {
+      const r = ce
+        .box([op, ['List', ['Tuple', 1, 2], ['Tuple', I, 3]]] as any)
+        .evaluate();
+      expect(r.isValid).toBe(false);
+      expect(r.toString()).toMatch(NON_REAL);
+    }
+  });
+
+  test('complex datum errors under .N() too, not just evaluate()', () => {
+    const r = ce.box(['Covariance', L([1, I]), L([2, 3])]).N();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toMatch(NON_REAL);
+  });
+
+  test('a complex literal with zero imaginary part is real data', () => {
+    // `Complex(2, 0)` canonicalizes to the real `2`, so it must not trip the
+    // gate — and must stay on the EXACT path.
+    expect(
+      ce
+        .box(['Covariance', L([1, ['Complex', 2, 0], 5]), L([2, 3, 9])])
+        .evaluate()
+        .toString()
+    ).toBe('47/6');
+  });
+
+  test('the regression siblings share the kernels and reject complex data too', () => {
+    const lr = ce
+      .box(['LinearRegression', L([1, I, 5]), L([2, 3, 9])])
+      .evaluate();
+    expect(lr.isValid).toBe(false);
+    expect(lr.toString()).toMatch(NON_REAL);
+    const pf = ce
+      .box(['PolynomialFit', L([1, I, 5, 7]), L([2, 3, 9, 11]), 2])
+      .evaluate();
+    expect(pf.isValid).toBe(false);
+    expect(pf.toString()).toMatch(NON_REAL);
+  });
+
+  test('Correlation propagates NaN data, like Covariance', () => {
+    expect(
+      ce.box(['Correlation', L([1, 'NaN', 3]), L([2, 3, 7])]).evaluate().isNaN
+    ).toBe(true);
+    expect(
+      ce.box(['Correlation', L([1, 'NaN', 3]), L([2, 3, 7])]).N().isNaN
+    ).toBe(true);
+    // The behavior it now matches.
+    expect(
+      ce.box(['Covariance', L([1, 'NaN']), L([2, 3])]).evaluate().isNaN
+    ).toBe(true);
+  });
+
+  test('±∞ data propagates NaN, and is not diagnosed as a zero variance', () => {
+    const inf = { num: '+Infinity' } as any;
+    expect(
+      ce.box(['Covariance', L([1, inf]), L([2, 3])]).evaluate().isNaN
+    ).toBe(true);
+    expect(
+      ce.box(['Correlation', L([1, inf, 3]), L([2, 3, 7])]).evaluate().isNaN
+    ).toBe(true);
+  });
+
+  test('the complex infinity ~oo propagates NaN, like ±∞', () => {
+    // `~oo` is not a complex datum to reject: it has no real part to misuse.
+    // Its `.re` is an artifact of how it was written — `ComplexInfinity`
+    // reports `Infinity`, `Complex(1, Infinity)` reports `1` — so both spellings
+    // must reach the same `NaN`, not a fit of the data `[1, 1]`.
+    for (const oo of [
+      'ComplexInfinity',
+      ['Complex', 1, { num: '+Infinity' }],
+    ]) {
+      expect(
+        ce.box(['Covariance', L([1, oo]), L([2, 3])]).evaluate().isNaN
+      ).toBe(true);
+      expect(
+        ce.box(['Correlation', L([1, oo, 3]), L([2, 3, 7])]).evaluate().isNaN
+      ).toBe(true);
+      // The fits read the same real part, so they must not answer with the
+      // fit of the projected data `[1, 1, 5]` either.
+      const fit = ce
+        .box(['LinearRegression', L([1, oo, 5]), L([2, 3, 9])])
+        .evaluate();
+      expect(fit.toString()).not.toBe(
+        ce
+          .box(['LinearRegression', L([1, 1, 5]), L([2, 3, 9])])
+          .evaluate()
+          .toString()
+      );
+    }
+  });
+
+  test('a non-real datum that is not a number literal names the real constraint', () => {
+    // `Sqrt(-2)` is a function expression, so it is rejected before the data
+    // is read. Blaming the shape of the collections would be a false
+    // diagnosis: the collections are shaped correctly.
+    const r = ce
+      .box(['Covariance', L([1, ['Sqrt', -2]]), L([2, 3])])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toMatch(NON_REAL);
+    const lr = ce
+      .box(['LinearRegression', L([1, ['Sqrt', -2], 5]), L([2, 3, 9])])
+      .evaluate();
+    expect(lr.isValid).toBe(false);
+    expect(lr.toString()).toMatch(NON_REAL);
+  });
+
+  test('an element that is not data at all still reports the shape', () => {
+    const r = ce
+      .box(['Covariance', L([1, { str: 'a' }]), L([2, 3])] as any)
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toMatch(/expects two equal-length collections/);
+  });
+
+  test('genuinely constant real data still reports zero variance', () => {
+    for (const r of [
+      ce.box(['Correlation', L([2, 2, 2]), L([1, 5, 9])]).evaluate(),
+      ce.box(['Correlation', L([2.0, 2.0, 2.0]), L([1.0, 5.0, 9.0])]).N(),
+    ]) {
+      expect(r.isValid).toBe(false);
+      expect(r.toString()).toMatch(/zero variance/);
+    }
+  });
+
+  test('a kernel NaN from overflow is not reported as a zero variance', () => {
+    // The machine kernel sums squares, which overflow to `Infinity` for data
+    // around `1e200`; `Infinity - Infinity` then makes the variance `NaN` even
+    // though the data is perfectly correlated and not constant at all. Only a
+    // column that is actually constant earns the zero-variance diagnosis.
+    const precision = ce.precision;
+    try {
+      ce.precision = 'machine';
+      expect(
+        ce
+          .box([
+            'Correlation',
+            L([1.5e200, 2.5e200, 3.5e200]),
+            L([1.0, 2.0, 3.0]),
+          ])
+          .N().isNaN
+      ).toBe(true);
+      const constant = ce
+        .box(['Correlation', L([2.0, 2.0, 2.0]), L([1.0, 5.0, 9.0])])
+        .N();
+      expect(constant.isValid).toBe(false);
+      expect(constant.toString()).toMatch(/zero variance/);
+    } finally {
+      // `BigDecimal.precision` is module-global, so a shared engine must be
+      // put back before the next test reads it.
+      ce.precision = precision;
+    }
+  });
+
+  // A constant column whose value is outside the double range: `1e400` is
+  // `Infinity` as a JS number, so it is written as a MathJSON literal.
+  const BIG = { num: '1e400' } as any;
+
+  test('an out-of-machine-range constant column still reports zero variance', () => {
+    // At the default (bignum) precision the correlation kernel sums
+    // `BigDecimal`s, where `1e400` is an ordinary finite value; the
+    // zero-variance diagnosis must run in the SAME channel. Reading the
+    // machine projection instead saw `Infinity`, refused to call the column
+    // constant, and answered a bare `NaN`.
+    for (const r of [
+      ce.box(['Correlation', L([BIG, BIG, BIG]), L([1, 2, 3])]).evaluate(),
+      ce.box(['Correlation', L([BIG, BIG, BIG]), L([1.0, 2.0, 3.0])]).N(),
+    ]) {
+      expect(r.isValid).toBe(false);
+      expect(r.toString()).toMatch(/zero variance/);
+    }
+  });
+
+  test('a complex non-data ARGUMENT is diagnosed as an argument, not as data', () => {
+    // A `PolynomialFit` degree is not a datum. `toInteger` reads a number's
+    // real part, so `Complex(1, 2)` silently fitted a degree-1 polynomial;
+    // scanning it as data would be the opposite mistake, reporting perfectly
+    // real data as `incompatible-type real`.
+    const r = ce
+      .box(['PolynomialFit', L([1, 2]), L([3, 4]), ['Complex', 1, 2]])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toMatch(/degree must be an integer/);
+    expect(r.toString()).not.toMatch(NON_REAL);
+    // A complex DATUM in the same head is still bad data.
+    const d = ce
+      .box(['PolynomialFit', L([1, ['Sqrt', -2], 3]), L([3, 4, 5]), 1])
+      .evaluate();
+    expect(d.isValid).toBe(false);
+    expect(d.toString()).toMatch(NON_REAL);
+  });
+
+  test('exact real data still returns an exact result', () => {
+    expect(
+      ce
+        .box(['Covariance', L([1, 1, 5]), L([2, 3, 9])])
+        .evaluate()
+        .toString()
+    ).toBe('26/3');
+  });
+});
+
 describe('LinearRegression', () => {
   test('recovers exact coefficients from exactly-linear data', () => {
     // points on 1/3 + 2x
@@ -417,5 +642,348 @@ describe('Histogram/BinCounts bin spec', () => {
         .evaluate()
         .toString()
     ).toBe('[1,2,1]');
+  });
+});
+
+describe('One-sample statistics on complex data', () => {
+  const I = ['Complex', 1, 2] as any; // 1 + 2i
+  const NON_REAL = /incompatible-type.*real.*complex/;
+
+  test('Mean returns the COMPLEX mean, exactly, on exact data', () => {
+    // The mean is linear over the complex numbers, so there is no convention
+    // to choose. Σx/n by hand: (1 + i)/2, and (1 + (1+2i) + 5)/3 = (7 + 2i)/3.
+    expect(ce.box(['Mean', L([1, 'ImaginaryUnit'])]).evaluate().toString()).toBe(
+      '(1/2 + 1/2i)'
+    );
+    expect(ce.box(['Mean', L([1, I, 5])]).evaluate().toString()).toBe(
+      '(7/3 + 2/3i)'
+    );
+    // A two-datum mean with an exact integer answer stays an integer.
+    expect(
+      ce
+        .box(['Mean', L([['Complex', 1, 1], ['Complex', 1, -1]])])
+        .evaluate()
+        .toString()
+    ).toBe('1');
+    // Scalar operands (not a collection) take the same path.
+    expect(ce.box(['Mean', 1, I]).evaluate().toString()).toBe('(1 + i)');
+  });
+
+  test('Mean of float complex data matches the component-wise average', () => {
+    // (1.5 + (2.5+0.5i) + (−3.25−1.75i))/3 = 0.25 − (5/12)i
+    const r = ce
+      .box([
+        'Mean',
+        L([1.5, ['Complex', 2.5, 0.5], ['Complex', -3.25, -1.75]]),
+      ])
+      .N();
+    expect(r.re).toBeCloseTo(0.25, 12);
+    expect(r.im).toBeCloseTo(-5 / 12, 12);
+  });
+
+  test('the variance family computes E[|X − μ|²], a real result', () => {
+    // Data [1+i, 1−i]: n = 2, μ = 1, deviations ±i, |±i|² = 1, Σ = 2.
+    // Sample divisor n−1 = 1 ⇒ 2; population divisor n = 2 ⇒ 1.
+    const D = L([
+      ['Complex', 1, 1],
+      ['Complex', 1, -1],
+    ]);
+    expect(ce.box(['Variance', D]).evaluate().toString()).toBe('2');
+    expect(ce.box(['PopulationVariance', D]).evaluate().toString()).toBe('1');
+    expect(ce.box(['StandardDeviation', D]).evaluate().toString()).toBe(
+      'sqrt(2)'
+    );
+    expect(
+      ce.box(['PopulationStandardDeviation', D]).evaluate().toString()
+    ).toBe('1');
+    // Not (X − μ)², which would be i² + (−i)² = −2 for this data.
+    expect(ce.box(['Variance', D]).N().im).toBe(0);
+    expect(ce.box(['Variance', D]).N().re).toBe(2);
+  });
+
+  test('variance of [1, 1+2i, 5] matches the hand-computed magnitudes', () => {
+    // μ = 7/3 + (2/3)i. |1 − μ|² = 16/9 + 4/9 = 20/9;
+    // |(1+2i) − μ|² = 16/9 + 16/9 = 32/9; |5 − μ|² = 64/9 + 4/9 = 68/9.
+    // Σ = 120/9 = 40/3 ⇒ sample 40/3 / 2 = 20/3, population 40/3 / 3 = 40/9.
+    const D = L([1, I, 5]);
+    expect(ce.box(['Variance', D]).evaluate().toString()).toBe('20/3');
+    expect(ce.box(['PopulationVariance', D]).evaluate().toString()).toBe('40/9');
+    expect(ce.box(['StandardDeviation', D]).N().re).toBeCloseTo(
+      Math.sqrt(20 / 3),
+      12
+    );
+    expect(ce.box(['PopulationStandardDeviation', D]).N().re).toBeCloseTo(
+      Math.sqrt(40 / 9),
+      12
+    );
+  });
+
+  test('exact Gaussian-rational data keeps an exact variance', () => {
+    // [1/3 + (2/5)i, 1/3 − (2/5)i]: μ = 1/3, |±(2/5)i|² = 4/25,
+    // Σ = 8/25, sample divisor 1.
+    const r = ce
+      .box([
+        'Variance',
+        L([ce.parse('\\frac13+\\frac25i'), ce.parse('\\frac13-\\frac25i')]),
+      ])
+      .evaluate();
+    expect(r.toString()).toBe('8/25');
+    expect(r.isExact).toBe(true);
+  });
+
+  test('an INEXACT complex deviation loses no ulp to a square-root round trip', () => {
+    // μ = 1.25 + i; |1.5 − μ|² = 0.0625 + 1 = 1.0625, |(1+2i) − μ|² = the same,
+    // Σ = 2.125, sample divisor 1. Taking `Abs` first rounds the square root
+    // and squaring it back read `2.1250…02` at the default precision.
+    const D = L([1.5, I]);
+    for (const precision of ['machine', ce.precision] as const) {
+      const saved = ce.precision;
+      try {
+        ce.precision = precision;
+        expect(ce.box(['Variance', D]).evaluate().re).toBe(2.125);
+        expect(ce.box(['Variance', D]).N().re).toBe(2.125);
+      } finally {
+        // `BigDecimal.precision` is module-global — put the shared engine back.
+        ce.precision = saved;
+      }
+    }
+  });
+
+  test('the order-based and higher-moment heads reject complex data', () => {
+    // No canonical order on the complex plane, and no convention-free complex
+    // extension of the standardized moments — so these error rather than
+    // answer for the projected sample. Same error shape as the bivariate heads.
+    for (const op of [
+      'Median',
+      'Mode',
+      'Quartiles',
+      'InterquartileRange',
+      'Skewness',
+      'Kurtosis',
+    ]) {
+      for (const r of [
+        ce.box([op, L([1, I])]).evaluate(),
+        ce.box([op, L([1, I])]).N(),
+      ]) {
+        expect(r.isValid).toBe(false);
+        expect(r.toString()).toMatch(NON_REAL);
+      }
+    }
+  });
+
+  test('the empirical Quantile form rejects complex data too', () => {
+    // A quantile is an order statistic like Median; its empirical branch
+    // lives in `library/distributions.ts` and shares the validators via
+    // `library/statistics-data.ts` (a direct import from statistics.ts
+    // would be a dependency cycle — statistics already imports
+    // distributions for the distribution branches of Mean/Variance).
+    const half = ['Rational', 1, 2] as any;
+    for (const r of [
+      ce.box(['Quantile', L([1, I, 5]), half]).evaluate(),
+      ce.box(['Quantile', L([1, I, 5]), half]).N(),
+    ]) {
+      expect(r.isValid).toBe(false);
+      expect(r.toString()).toMatch(NON_REAL);
+    }
+    // Real data and the distribution form are untouched.
+    expect(ce.box(['Quantile', L([1, 3, 5]), half]).evaluate().toString()).toBe(
+      '3'
+    );
+    expect(
+      ce
+        .box(['Quantile', ['NormalDistribution', 0, 1], half])
+        .evaluate()
+        .toString()
+    ).toBe('0');
+  });
+
+  test('the binning heads reject complex data and complex bin edges', () => {
+    for (const op of ['Histogram', 'BinCounts']) {
+      const data = ce.box([op, L([1, I, 5]), 2] as any).evaluate();
+      expect(data.isValid).toBe(false);
+      expect(data.toString()).toMatch(NON_REAL);
+      // An explicit bin edge is read through `.re` too.
+      const edges = ce.box([op, L([1, 2, 3]), L([0, I, 4])] as any).evaluate();
+      expect(edges.isValid).toBe(false);
+      expect(edges.toString()).toMatch(NON_REAL);
+    }
+  });
+
+  test('a non-literal element leaves the binning heads INERT, never silently dropped', () => {
+    // `Sqrt(-2)` is a function expression during ordinary evaluation, so the
+    // complex gate cannot see it; its `.re` is `NaN`, and the datum used to be
+    // silently FILTERED out — `BinCounts([1, Sqrt(-2), 5], 2)` reported the
+    // counts of the two-point dataset `[1, 5]`. Declining is the same doctrine
+    // `empiricalQuantile` follows, and `.N()` then numericizes the element to
+    // a complex literal the gate does reject.
+    for (const op of ['Histogram', 'BinCounts']) {
+      expect(
+        ce.box([op, L([1, ['Sqrt', -2], 5]), 2] as any).evaluate().operator
+      ).toBe(op);
+      const n = ce.box([op, L([1, ['Sqrt', -2], 5]), 2] as any).N();
+      expect(n.isValid).toBe(false);
+      // `√-2` numericizes to a pure imaginary, so the reported type is
+      // `imaginary` rather than the `finite_complex` of `1 + 2i`.
+      expect(n.toString()).toMatch(/incompatible-type.*real/);
+      // A non-literal bin EDGE declines the same way.
+      expect(
+        ce
+          .box([op, L([1, 2, 3]), L([0, ['Sqrt', -2], 4])] as any)
+          .evaluate().operator
+      ).toBe(op);
+    }
+    // A real `Sqrt(2)` is an exact number literal, so it bins on both routes.
+    expect(
+      ce.box(['BinCounts', L([1, ['Sqrt', 2], 5]), 2] as any).evaluate().toString()
+    ).toBe('[2,1]');
+    expect(
+      ce.box(['BinCounts', L([1, ['Sqrt', 2], 5]), 2] as any).N().toString()
+    ).toBe('[2,1]');
+  });
+
+  test('real data is untouched: exact results and the median still stand', () => {
+    expect(ce.box(['Mean', L([1, 1, 5])]).evaluate().toString()).toBe('7/3');
+    expect(ce.box(['Mean', L([1, 2, 3, 4])]).evaluate().toString()).toBe('5/2');
+    expect(ce.box(['Median', L([1, 1, 5])]).evaluate().toString()).toBe('1');
+    expect(ce.box(['Median', L([1, 2, 3, 4])]).evaluate().toString()).toBe(
+      '5/2'
+    );
+    expect(ce.box(['Variance', L([1, 1, 5])]).evaluate().toString()).toBe(
+      '16/3'
+    );
+    expect(ce.box(['Quartiles', L([1, 2, 3, 4, 5])]).evaluate().toString()).toBe(
+      '(3/2, 3, 9/2)'
+    );
+    expect(ce.box(['Mode', L([1, 2, 2, 3])]).evaluate().toString()).toBe('2');
+    expect(
+      ce.box(['BinCounts', L([1, 2, 2, 3]), 3]).evaluate().toString()
+    ).toBe('[1,2,1]');
+    // `Complex(2, 0)` canonicalizes to the real `2`, so it is real data and
+    // must not trip the gate on either side of the split.
+    expect(
+      ce.box(['Mean', L([1, ['Complex', 2, 0], 5])]).evaluate().toString()
+    ).toBe('8/3');
+    expect(
+      ce.box(['Median', L([1, ['Complex', 2, 0], 5])]).evaluate().toString()
+    ).toBe('2');
+  });
+
+  test('absent-datum and REAL ±∞ behavior is unchanged', () => {
+    // A `NaN` datum absorbs to `NaN` for every head (the §3.C aggregate rule),
+    // and a REAL `±∞` keeps the reading it has always had — this round changed
+    // neither. (`~oo` did change: see the next test.)
+    const inf = { num: '+Infinity' } as any;
+    for (const op of [
+      'Mean',
+      'Median',
+      'Variance',
+      'PopulationVariance',
+      'StandardDeviation',
+      'PopulationStandardDeviation',
+      'Skewness',
+      'Kurtosis',
+      'Mode',
+      'InterquartileRange',
+    ])
+      expect(ce.box([op, L([1, 'NaN', 5])]).evaluate().isNaN).toBe(true);
+    expect(ce.box(['Quartiles', L([1, 'NaN', 5])]).evaluate().toString()).toBe(
+      '(NaN, NaN, NaN)'
+    );
+    // A real `±∞` has a real value: `Mean` carries it, `Median`/`Mode` order
+    // around it, and the variance family cancels it to `NaN`.
+    expect(ce.box(['Mean', L([1, inf, 5])]).evaluate().toString()).toBe('+oo');
+    expect(ce.box(['Median', L([1, inf, 5])]).evaluate().toString()).toBe('5');
+    expect(ce.box(['Mode', L([1, inf, 5])]).evaluate().toString()).toBe('1');
+    expect(ce.box(['Variance', L([1, inf, 5])]).evaluate().isNaN).toBe(true);
+    expect(
+      ce.box(['Quartiles', L([1, inf, 5])]).evaluate().toString()
+    ).toBe('(1, 5, +oo)');
+    expect(
+      ce.box(['InterquartileRange', L([1, inf, 5])]).evaluate().toString()
+    ).toBe('+oo');
+    expect(
+      ce.box(['Quantile', L([1, inf, 5]), ['Rational', 1, 2]]).evaluate().isNaN
+    ).toBe(true);
+  });
+
+  test('`~oo` reads as NaN in every univariate head, under BOTH spellings', () => {
+    // The complex infinity has no real value, and the real part it reports is
+    // an artifact of how it was written: `ComplexInfinity` reports `Infinity`,
+    // `Complex(1, Infinity)` reports `1`. Reading either made the same value
+    // answer `Mean([1, ~oo, 5])` as `+oo` under one spelling and as `2.33…`
+    // under the other, and `Median` as `5` and `1`. Every head now projects it
+    // to `NaN` (`realProjection`) — the treatment the bivariate heads already
+    // gave it — so the two spellings agree and neither reports a statistic of
+    // data nobody supplied.
+    const spellings = ['ComplexInfinity', ['Complex', 1, { num: '+Infinity' }]];
+    for (const oo of spellings) {
+      for (const op of [
+        'Mean',
+        'Median',
+        'Mode',
+        'Variance',
+        'PopulationVariance',
+        'StandardDeviation',
+        'PopulationStandardDeviation',
+        'Skewness',
+        'Kurtosis',
+        'InterquartileRange',
+      ])
+        expect(ce.box([op, L([1, oo as any, 5])]).evaluate().isNaN).toBe(true);
+      expect(
+        ce.box(['Quartiles', L([1, oo as any, 5])]).evaluate().toString()
+      ).toBe('(NaN, NaN, NaN)');
+      expect(
+        ce
+          .box(['Quantile', L([1, oo as any, 5]), ['Rational', 1, 2]])
+          .evaluate().isNaN
+      ).toBe(true);
+      // The bivariate heads already answered `NaN`; they still do.
+      expect(
+        ce.box(['Covariance', L([1, oo as any, 5]), L([2, 3, 4])]).evaluate()
+          .isNaN
+      ).toBe(true);
+    }
+  });
+
+  test('a non-finite datum makes the COMPLEX branches NaN too', () => {
+    // The complex branches of `Mean` and the variance family are reached only
+    // when some datum is genuinely complex. A complex sample point plus a
+    // point at infinity has no reading — `+∞` is a limit along the real axis —
+    // yet boxed arithmetic folded both to `+oo`, which for the variance also
+    // contradicted the real-only path (`Variance([1, +∞])` is `NaN`).
+    const inf = { num: '+Infinity' } as any;
+    const z = ['Complex', 1, 2];
+    for (const op of [
+      'Mean',
+      'Variance',
+      'PopulationVariance',
+      'StandardDeviation',
+      'PopulationStandardDeviation',
+    ]) {
+      expect(ce.box([op, L([z as any, inf])]).evaluate().isNaN).toBe(true);
+      expect(
+        ce.box([op, L([z as any, 'ComplexInfinity'])]).evaluate().isNaN
+      ).toBe(true);
+    }
+    // The real-only path is untouched: the mean of `[1, +∞]` is still `+oo`.
+    expect(ce.box(['Mean', L([1, inf])]).evaluate().toString()).toBe('+oo');
+    expect(ce.box(['Variance', L([1, inf])]).evaluate().isNaN).toBe(true);
+  });
+
+  test('a complex-valued EXPRESSION datum leaves the head inert, as before', () => {
+    // `Sqrt(-2)` is not a number literal, so `collectData` declines and the
+    // aggregate stays symbolic rather than folding — the same rule that keeps
+    // `Mean(L)` inert for an unassigned `L`. Under `.N()` the datum becomes a
+    // complex literal and the split applies.
+    expect(ce.box(['Mean', L([1, ['Sqrt', -2]])]).evaluate().operator).toBe(
+      'Mean'
+    );
+    const n = ce.box(['Mean', L([1, ['Sqrt', -2]])]).N();
+    expect(n.re).toBeCloseTo(0.5, 12);
+    expect(n.im).toBeCloseTo(Math.SQRT2 / 2, 12);
+    const m = ce.box(['Median', L([1, ['Sqrt', -2]])]).N();
+    expect(m.isValid).toBe(false);
+    expect(m.toString()).toMatch(/incompatible-type.*real/);
   });
 });

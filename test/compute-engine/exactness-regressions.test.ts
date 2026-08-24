@@ -386,6 +386,73 @@ describe('P0-16b — Sqrt of exact arguments stays exact/symbolic', () => {
     expect(evalStr(['Sqrt', 999999])).toEqual('3sqrt(111111)');
     expect(evalStr(['Sqrt', ['Rational', 1, 4]])).toEqual('1/2');
   });
+
+  describe('a large exact radicand reduces exactly, at any precision', () => {
+    // The root of an exact radicand too large for the `radical` field used to
+    // be computed by converting the radicand to the engine's numeric format
+    // first: `√(10^402)` became `√(+∞) = +∞` at machine precision instead of
+    // `10^201`, which made `Correlation` of exact data around `1e200` answer
+    // `0` (its exact path divides the covariance by `√(vx·vy)`). A perfect
+    // square is now detected with bigint arithmetic, so the reduction does
+    // not depend on `ce.precision`.
+    const runLargeRadicandGrid = () => {
+      test('Sqrt(10^402) → 10^201 exactly', () => {
+        const r = num(['Sqrt', ['Power', 10, 402]]);
+        expect(r.isSame(ce.box(10n ** 201n))).toBe(true);
+        expect(r.isInteger).toBe(true);
+      });
+      test('Sqrt(10^402/9) → 10^201/3 exactly', () => {
+        const r = num(['Sqrt', ['Divide', ['Power', 10, 402], 9]]);
+        // Was the rounded float `3.33…e+200` (the exact rational is not
+        // even representable as one).
+        expect(r.toString()).toEqual('1e+201/3');
+        expect(r.isSame(ce.box(10n ** 201n).div(3))).toBe(true);
+      });
+      test('Sqrt(10^12/9) → 10^6/3 exactly (past the 10^6 radical cliff)', () => {
+        expect(evalStr(['Sqrt', ['Rational', 1000000000000, 9]])).toEqual(
+          '1000000/3'
+        );
+      });
+      test('Sqrt(-10^12/9) → (10^6/3)i exactly', () => {
+        expect(evalStr(['Sqrt', ['Rational', -1000000000000, 9]])).toEqual(
+          '1000000/3i'
+        );
+      });
+      test('Sqrt(10^401) (not a perfect square) numericizes to 3.162…e+200', () => {
+        // No exact form is representable (the square-free part is far past
+        // the `radical` field), but the float must be the root of the
+        // radicand — not the root of an overflowed +∞.
+        const r = num(['Sqrt', ['Power', 10, 401]]);
+        expect(r.isFinite).toBe(true);
+        expect(r.N().re / 1e200).toBeCloseTo(Math.sqrt(10), 10);
+      });
+      test('moderate radicands are unaffected (controls)', () => {
+        expect(evalStr(['Sqrt', 12])).toEqual('2sqrt(3)');
+        expect(evalStr(['Sqrt', ['Rational', 50, 9]])).toEqual('5/3sqrt(2)');
+        expect(evalStr(['Sqrt', 999999])).toEqual('3sqrt(111111)');
+        expect(evalStr(['Sqrt', 1000000000000])).toEqual('1000000');
+        expect(evalStr(['Sqrt', -4])).toEqual('2i');
+      });
+    };
+
+    describe('at default (bignum) precision', () => {
+      runLargeRadicandGrid();
+    });
+
+    describe('at machine precision', () => {
+      // `ce.precision` mutates the process-global `BigDecimal.precision`:
+      // save and restore it around the block.
+      let saved: number;
+      beforeAll(() => {
+        saved = ce.precision;
+        ce.precision = 'machine';
+      });
+      afterAll(() => {
+        ce.precision = saved;
+      });
+      runLargeRadicandGrid();
+    });
+  });
 });
 
 describe('P0-16c — Fract of exact arguments is exact', () => {
@@ -429,6 +496,52 @@ describe('P0-16g — Real/Imaginary/Conjugate keep exact real parts', () => {
   test('Real(3+4i) → 3, Imaginary(3+4i) → 4 (control)', () => {
     expect(evalStr(['Real', ['Complex', 3, 4]])).toEqual('3');
     expect(evalStr(['Imaginary', ['Complex', 3, 4]])).toEqual('4');
+  });
+
+  describe('the parts of an EXACT complex operand stay exact', () => {
+    // The three handlers used to read the numeric projection of the operand
+    // (`op.re`/`op.im`, and `ce.complex(re, -im)` for the conjugate), which
+    // rounds an exact component to a float. They now read the exact
+    // components (a rational multiple of a square root) of an exact value.
+    const z = [
+      'Add',
+      ['Rational', 1, 3],
+      ['Multiply', ['Rational', 2, 5], 'ImaginaryUnit'],
+    ];
+
+    test('Conjugate(1/3 + 2i/5) → 1/3 − 2i/5, exactly', () => {
+      const r = num(['Conjugate', z]);
+      expect(r.toString()).toEqual('(1/3 - 2/5i)');
+      expect(r.isExact).toBe(true);
+    });
+    test('z · Conjugate(z) → 61/225 (the exact |z|²)', () => {
+      expect(evalStr(['Multiply', z, ['Conjugate', z]])).toEqual('61/225');
+    });
+    test('Real(1/3 + 2i/5) → 1/3; Imaginary(1/3 + 2i/5) → 2/5', () => {
+      expect(evalStr(['Real', z])).toEqual('1/3');
+      expect(evalStr(['Imaginary', z])).toEqual('2/5');
+    });
+    test('the parts of a pure-imaginary radical keep the radical', () => {
+      const w = ['Multiply', ['Sqrt', 2], 'ImaginaryUnit'];
+      expect(evalStr(['Real', w])).toEqual('0');
+      expect(evalStr(['Imaginary', w])).toEqual('sqrt(2)');
+      expect(evalStr(['Conjugate', w])).toEqual('-sqrt(2)i');
+    });
+    test('Conjugate(3+4i) → 3 − 4i, exactly (Gaussian integer)', () => {
+      const r = num(['Conjugate', ['Complex', 3, 4]]);
+      expect(r.json).toEqual(['Complex', 3, -4]);
+      expect(r.isExact).toBe(true);
+    });
+    test('inexact and symbolic operands are unchanged (controls)', () => {
+      expect(evalStr(['Conjugate', ['Complex', 1.5, 2.5]])).toEqual(
+        '(1.5 - 2.5i)'
+      );
+      expect(evalStr(['Real', ['Complex', 1.5, 2.5]])).toEqual('1.5');
+      expect(evalStr(['Imaginary', ['Complex', 1.5, 2.5]])).toEqual('2.5');
+      expect(num(['Conjugate', 'x']).operator).toEqual('Conjugate');
+      expect(num(['Real', 'x']).operator).toEqual('Real');
+      expect(num(['Imaginary', 'x']).operator).toEqual('Imaginary');
+    });
   });
 });
 

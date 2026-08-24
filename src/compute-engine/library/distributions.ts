@@ -6,6 +6,11 @@ import {
 } from '../numerics/special-functions.js';
 import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import {
+  hasNonFiniteImaginaryPart,
+  nonRealDataError,
+  nonRealDatum,
+} from './statistics-data.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { nonNegativeSign, positiveSign } from '../boxed-expression/sgn.js';
 import { parseType } from '../../common/type/parse.js';
@@ -572,6 +577,23 @@ function empiricalQuantile(
   // indexed collection of characters) that meant returning a CHARACTER from a
   // handler whose signature says `-> number`. Stay inert instead.
   if (data.some((x) => !isNumber(x))) return undefined;
+
+  // A quantile is an order statistic and the complex numbers have no
+  // canonical order — the sort below reads `.re`, which for complex data
+  // would silently answer the quantile of the real parts. Reject it with
+  // the same error shape the statistics operators use.
+  const nonReal = nonRealDatum(data);
+  if (nonReal) return nonRealDataError(ce, 'Quantile', nonReal);
+
+  // The complex infinity `~oo` is not complex DATA — it is the single point at
+  // infinity — but it has no real value either, and the real part it reports
+  // is an artifact of its spelling (`ComplexInfinity` reports `Infinity`,
+  // `Complex(1, Infinity)` reports `1`). The statistics kernels project it to
+  // `NaN` (`realProjection`, `library/statistics-data.ts`); a sort key cannot,
+  // because a `NaN` comparator silently leaves the data unsorted and hands
+  // back whatever element the ranks land on. So the whole quantile is `NaN`,
+  // which is what the other order statistics answer for the same sample.
+  if (data.some(hasNonFiniteImaginaryPart)) return ce.NaN;
 
   const sorted = [...data].sort((a, b) => a.re - b.re);
   if (pv <= 0) return sorted[0];

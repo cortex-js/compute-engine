@@ -44,7 +44,16 @@ import {
   iv,
   type RealDomain,
 } from './type-handlers.js';
-import { broadcastOperandType } from './type-handlers-types.js';
+// The `'types'`-shape twins of the helpers above, wired to the definitions
+// that declare `typeHandlerKind: 'types'`. Both modules export the same
+// names on purpose (a converted call site otherwise changes only its import
+// path), so the twins carry an `OnTypes` suffix here to keep the two shapes
+// readable side by side while the migration runs.
+import {
+  broadcastOperandType,
+  numericTypeHandler as numericTypeHandlerOnTypes,
+  elementaryFunctionType as elementaryFunctionTypeOnTypes,
+} from './type-handlers-types.js';
 import { isMeasurement, measurementTrig } from './measurement-arithmetic.js';
 import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite.js';
 import { getUnitScale } from './unit-data.js';
@@ -145,7 +154,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(real) -> real',
       // A non-real or non-finite argument flows through the linear conversion
       // (`Degrees(i) = iπ/180`), so the claim must follow the operand.
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       canonical: (ops, { engine }) => {
         const ce = engine;
         if (ce.angularUnit === 'deg') return ops[0];
@@ -214,7 +224,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     DMS: {
       description: 'Construct an angle from degrees, minutes, and seconds.',
       signature: '(real, real?, real?) -> real',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       canonical: (ops, { engine: ce }) => {
         const deg = ops[0]?.re ?? NaN;
         const min = ops[1]?.re ?? 0;
@@ -344,7 +355,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // The definition of other trig functions may rely on Sin, so it is defined
     // first in this preliminary section
     Sin: {
-      ...trigFunction('Sin', 5000, 'Sine of an angle.'),
+      ...trigFunction('Sin', 5000, 'Sine of an angle.', 'types'),
       keywords: ['sine'],
     },
   },
@@ -360,7 +371,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       complexity: 5200,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => elementaryFunctionType('Arctan', ops),
+      typeHandlerKind: 'types',
+      type: (ops) => elementaryFunctionTypeOnTypes('Arctan', ops),
       // arctan is odd and strictly increasing with arctan(0) = 0, so it
       // preserves the sign of its (real) argument; a non-real argument gives
       // `x.sgn` = 'unsigned'/undefined, which is also correct. (The generic
@@ -392,7 +404,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       complexity: 5200,
       broadcastable: true,
       signature: '(y:number, x: number) -> real',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([y, x], { engine: ce, numericApproximation }) => {
         // NaN in → NaN out, in BOTH the evaluate and the N() paths. A NaN
         // operand is not finite, so without this early return it would slip
@@ -463,12 +476,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
 
     Cos: {
-      ...trigFunction('Cos', 5050, 'Cosine of an angle.'),
+      ...trigFunction('Cos', 5050, 'Cosine of an angle.', 'types'),
       keywords: ['cosine'],
     },
 
     Tan: {
-      ...trigFunction('Tan', 5100, 'Tangent of an angle.'),
+      ...trigFunction('Tan', 5100, 'Tangent of an angle.', 'types'),
       keywords: ['tangent'],
     },
 
@@ -501,7 +514,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Arsinh: trigFunction(
       'Arsinh',
       6100,
-      'Inverse hyperbolic sine (area hyperbolic sine).'
+      'Inverse hyperbolic sine (area hyperbolic sine).',
+      'types'
     ),
 
     Artanh: trigFunction(
@@ -511,7 +525,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     ),
 
     Cosh: {
-      ...trigFunction('Cosh', 6050, 'Hyperbolic cosine.'),
+      ...trigFunction('Cosh', 6050, 'Hyperbolic cosine.', 'types'),
       keywords: ['hyperbolic cosine'],
     },
 
@@ -519,10 +533,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     Csc: trigFunction('Csc', 5600, 'Cosecant, the reciprocal of sine.'),
 
-    Sec: trigFunction('Sec', 5600, 'Secant, the reciprocal of cosine.'),
+    Sec: trigFunction(
+      'Sec',
+      5600,
+      'Secant, the reciprocal of cosine.',
+      'types'
+    ),
 
     Sinh: {
-      ...trigFunction('Sinh', 6000, 'Hyperbolic sine.'),
+      ...trigFunction('Sinh', 6000, 'Hyperbolic sine.', 'types'),
       keywords: ['hyperbolic sine'],
     },
 
@@ -534,7 +553,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(real) -> number',
       // hav is entire (½(1−cos z)): finite real → [0,1] ⊂ finite real, but
       // `hav(±∞)` is NaN and a complex argument gives a complex value.
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       // Evaluate the constructed ½(1−cos z) so `.N()` returns a number, not the
       // unevaluated expression; exact arguments still stay symbolic under
       // `evaluate()` (e.g. `Haversine(2) → ½(1−cos 2)`).
@@ -575,11 +595,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Sech: trigFunction(
       'Sech',
       6200,
-      'Hyperbolic secant, the reciprocal of hyperbolic cosine.'
+      'Hyperbolic secant, the reciprocal of hyperbolic cosine.',
+      'types'
     ),
 
     Tanh: {
-      ...trigFunction('Tanh', 6200, 'Hyperbolic tangent.'),
+      ...trigFunction('Tanh', 6200, 'Hyperbolic tangent.', 'types'),
       keywords: ['hyperbolic tangent'],
     },
   },
@@ -596,7 +617,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Arccot: trigFunction(
       'Arccot',
       5650,
-      'Arccotangent, the inverse cotangent function.'
+      'Arccotangent, the inverse cotangent function.',
+      'types'
     ),
 
     Arcoth: trigFunction(
@@ -1023,17 +1045,52 @@ function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
   return ops.every((op) => op === undefined || (isNumber(op) && op.im === 0));
 }
 
+/**
+ * The shared definition of the 23 one-argument trigonometric, hyperbolic and
+ * inverse heads. Everything but the `type` handler is identical across them;
+ * `typeHandlerKind` selects which SHAPE of `type` handler this head gets, and
+ * that is a per-head decision because the two shapes do not yet agree
+ * everywhere:
+ *
+ * - `Sin`, `Cos`, `Tan`, `Sec`, `Sinh`, `Cosh`, `Tanh`, `Sech`, `Arsinh` and
+ *   `Arccot` derive the same type in both shapes, so they pass `'types'`.
+ *   `Tan` and `Sec` are the two pole-reciprocal heads whose poles are all
+ *   irrational (the odd multiples of π/2), so their handler returns before it
+ *   ever reads a sign — which is what keeps them equal.
+ * - `Cot`, `Csc`, `Coth` and `Csch` stay on the expressions shape. Their poles
+ *   include 0, so the handler must disprove zero-ness through the operand's
+ *   SIGN, and for a compound operand (`2p` with `p` assumed positive, `p + 1`,
+ *   `Sign(p)`, `π/2`) that sign is an operator `sgn` handler's to prove —
+ *   a channel the operand descriptors deliberately do not carry, their sign
+ *   being type-derived only. The descriptor shape answers `number` where the
+ *   expression shape answers `finite_real`: wider, hence sound, but still a
+ *   divergence from the baseline, which the conversion may not ship silently.
+ *   They convert when the audited sign channel for function expressions lands
+ *   (open item O7 of `docs/plans/2026-08-22-type-handlers-on-types.md`).
+ * - The nine heads routed to `boundedInverseTrigType` (`Arcsin`, `Arccos`,
+ *   `Arcsec`, `Arccsc`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`, `Arcosh`) stay
+ *   on the expressions shape for a different reason. Their in-domain proof
+ *   differs: the expression shape asks the numeric predicates, which answer
+ *   from the assumptions system, while the descriptor shape reads the
+ *   operand's ranged TYPE. A range that came from a DECLARATION
+ *   (`ce.declare('BIG', 'real<2..>')`) records no assumption, so the
+ *   descriptor shape proves containment where the expression shape answers
+ *   `undefined` — a NARROWER claim than the baseline, which is never
+ *   acceptable. Those rows are recorded in
+ *   `test/compute-engine/type-handler-twins.test.ts`; the heads convert once
+ *   that divergence is decided.
+ */
 function trigFunction(
   operator: string,
   complexity: number,
-  description?: string
+  description?: string,
+  typeHandlerKind: 'expressions' | 'types' = 'expressions'
 ): OperatorDefinition {
-  return {
+  const common: OperatorDefinition = {
     complexity,
     description,
     broadcastable: true,
     signature: '(number) -> number',
-    type: (ops) => elementaryFunctionType(operator, ops),
     sgn: ([x]) => trigSign(operator, x),
     canonical: (ops, { engine: ce }) => {
       if (ops.length === 1) {
@@ -1080,4 +1137,12 @@ function trigFunction(
       return engine._fn(operator, [x]);
     },
   };
+
+  if (typeHandlerKind === 'types')
+    return {
+      ...common,
+      typeHandlerKind: 'types',
+      type: (ops) => elementaryFunctionTypeOnTypes(operator, ops),
+    };
+  return { ...common, type: (ops) => elementaryFunctionType(operator, ops) };
 }

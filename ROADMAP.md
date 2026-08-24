@@ -522,23 +522,20 @@ Left open by the type-handler retirement sweep and the helper-twins audit
 that followed it (2026-08-24), all found by probing operators at NaN, ±∞,
 complex, and out-of-machine-range arguments:
 
-1. `Covariance` and `PopulationCovariance` silently use only the REAL
-   PART of complex data. `Covariance([1, 1+2i], [2, 3])` evaluates to `0`
-   — the answer for the data `[1, 1]` — instead of erroring or computing
-   a complex covariance. This is the same class of bug as the one already
-   fixed in the trigonometric kernels, where "the real part was used
-   silently, which was incorrect" (see the note in
-   `library/trigonometry.ts`). Decide whether complex data should error
-   or produce a complex result, then fix `evaluateCovariance`
-   (`library/statistics.ts`).
-2. `Correlation` reports "zero variance" for data it cannot handle for a
-   different reason. `Correlation([1, NaN, 3], [2, 3, 7])` and
-   `Correlation([1, 1+2i], [2, 3])` both come back as
-   `Error("unexpected-argument", "Correlation: zero variance")`, which is
-   a misleading diagnostic: the first has NaN data (its sibling
-   `Covariance` answers `NaN` there) and the second is the complex-data
-   case of item 1.
-3. Several signatures still declare `-> real` for functions whose value
+0. Two small statistics questions await a ruling. (a) `Histogram` and
+   `BinCounts` silently DROP a non-finite datum (`data.filter(
+   Number.isFinite)`): `BinCounts([1, +oo, 5], 2)` reports the counts
+   for `[1, 5]`. Defensible (no finite bin contains ±∞) but silent —
+   decide between keeping the drop, erroring, and staying inert. The
+   EDGE path has the sharper version of the same hole: an explicit bin
+   edge that is `NaN` or `~oo` projects to `NaN`, every interval
+   comparison against it is false, and the head fabricates zero counts
+   instead of rejecting the edge — whatever the data ruling is, a
+   non-finite explicit edge should be an error.
+   (b) `Re` and `Im` are not defined — `['Re', z]` stays inert as an
+   unknown operator while `Real`/`Imaginary` are the real heads; decide
+   whether to add them (and the `\Re`/`\Im` LaTeX commands) as aliases.
+1. Several signatures still declare `-> real` for functions whose value
    is NaN at a NaN argument, and `real` does not admit NaN.
    `LogIntegral` was the instance the sweep caught, and it is fixed: it
    now carries a domain-gated `'types'` handler and a `-> number`
@@ -546,7 +543,7 @@ complex, and out-of-machine-range arguments:
    other `-> real` heads share it. Auditing that family — deciding per
    operator between a domain-gated handler and a widened declared result
    — is its own pass.
-4. `Divide` of two bignum operands returns NaN when both machine
+2. `Divide` of two bignum operands returns NaN when both machine
    projections underflow to `-0`. With `ce.precision = 500`, dividing two
    bignum values around `-3.18…e-401` — each carrying its full decimal
    expansion, but with `.re === -0` — evaluates to NaN: the division takes
@@ -559,7 +556,7 @@ complex, and out-of-machine-range arguments:
    high-precision Fresnel regression tests, which work around it by
    comparing decimal expansions instead of dividing.
 
-5. Define ONE semantics for operator signatures and invalid arguments,
+3. Define ONE semantics for operator signatures and invalid arguments,
    and apply it across the library (user-directed 2026-08-24, accepting
    the current state as interim). Today the library is deliberately
    permissive but inconsistent off an operator's mathematical domain, in
@@ -577,17 +574,101 @@ complex, and out-of-machine-range arguments:
    signature's result means (codomain sort vs value promise), what its
    parameters mean (admission filter vs mathematical domain), and one
    per-class convention for off-domain arguments (propagate NaN, stay
-   inert, or error) — then sweep the library to it. Item 3 (the `-> real`
+   inert, or error) — then sweep the library to it. Item 1 (the `-> real`
    family's NaN holes) is a special case that folds into this pass.
 
-(A sixth item — `BoxedNumber.isOdd` reading the parity of a bigint's
+4. `Covariance`, `PopulationCovariance` and `Correlation` declare a
+   `finite_real` result whenever the operand types prove every data value is
+   a finite real (`pairedStatisticType`, `library/statistics.ts`), but data
+   large enough to overflow the machine sums of squares makes all three
+   answer a non-finite value, which `finite_real` does not admit: at machine
+   precision
+   `Covariance([1.5e200, 2.5e200, 3.5e200], [1.5e200, 2.5e200, 3.5e200])`
+   is typed `finite_real` and evaluates to `+oo`. This is NOT a soundness
+   hole in the declaration: the engine-wide convention is that a declared
+   type describes the MATHEMATICAL value, and an artifact of the
+   machine-precision approximation does not falsify it. `Exp(1000)` settles
+   the convention — it is typed `finite_real<0..> & !0` while its `.N()` at
+   `ce.precision = 'machine'` is `+oo`, and nobody proposes widening `Exp`'s
+   declared result to `number` because of it. What is left here is therefore
+   a question about the numeric path, not the type: whether the bivariate
+   statistics should compute their sums of squares in a way that survives
+   machine-range data (scaling the data, or routing through the bignum lane
+   the way the default precision already does), so that finite data gets a
+   finite answer at machine precision too.
+
+(A further item — `BoxedNumber.isOdd` reading the parity of a bigint's
 ROUNDED double past 2⁵³ — was fixed in the same round: parity now comes
 from the exact integer channel, and the regression battery lives in
 `test/compute-engine/numbers.test.ts` under "PARITY OF INTEGERS BEYOND
 THE SAFE RANGE". A `FresnelS`/`FresnelC` stack overflow at huge
 arguments — `bigFresnel` escalating `BigDecimal.precision` to
 `Infinity` — was fixed then too, pinned in
-`test/compute-engine/fresnel.test.ts`.)
+`test/compute-engine/fresnel.test.ts`. Two more were fixed on 2026-08-24
+after the user ruled on them: the bivariate statistics used to project
+complex data onto its real part and answer as if the imaginary parts had
+never been given — `Covariance([1, 1+2i], [2, 3])` returned `0`, the
+covariance of `[1, 1]` — and now return an `incompatible-type` error
+naming the real constraint and the offending datum, in both accepted
+input forms and in the `LinearRegression`/`PolynomialFit` siblings that
+share the same extraction path; and `Correlation` now propagates NaN for
+any data it has no real value for — NaN, ±∞ and `~oo` — the way
+`Covariance` always did, instead of reporting a variance of zero that the
+data does not have. Its "zero variance" error is now raised only when a
+column is genuinely constant, which also removes it from finite data
+whose sums of squares overflow. Both are pinned in
+`test/compute-engine/statistics.test.ts` under "Bivariate statistics
+reject non-real data". The one-sample statistics had the same real-part
+projection and were resolved the same day, by a ruling that splits them
+rather than rejecting uniformly: `Mean` now returns the COMPLEX mean
+(`Mean([1, 1+2i])` is `1 + i`, exactly, because the mean is linear and
+needs no convention); `Variance`, `PopulationVariance`,
+`StandardDeviation` and `PopulationStandardDeviation` compute
+`E[|X − μ|²]`, a real non-negative answer, with the divisors they already
+used; and every order-based or higher-moment head — `Median`, `Mode`,
+`Quartiles`, `InterquartileRange`, `Skewness`, `Kurtosis`, `Histogram`
+and `BinCounts` — raises the same `incompatible-type` error, because
+there is no canonical order on the complex plane and no convention-free
+complex extension of the standardized moments. Pinned in the same file
+under "One-sample statistics on complex data".)
+
+Two exactness holes from the same sweep were fixed on 2026-08-24 as well.
+`Sqrt` of an exact radicand too large for the `radical` field used to be
+computed by converting the radicand to the engine's numeric format first,
+so at `ce.precision = 'machine'` `Sqrt(10^402)` was `Sqrt(+oo) = +oo`
+instead of `10^201` — which made `Correlation` of exact, perfectly
+correlated data around `1e200` answer `0`, since its exact path divides
+the covariance by `Sqrt(vx · vy)`. A perfect square is now detected with
+bigint arithmetic before any narrowing, so the reduction no longer depends
+on the precision setting, and the same detection reaches exact rationals
+past the `10^6` radical cliff (`Sqrt(10^12/9)` is `10^6/3`, not the
+unevaluated `Sqrt` it used to be) and their negatives
+(`Sqrt(-10^12/9) = (10^6/3)i`). When no exact root exists the float lane
+still takes it, but from the bignum value whenever the narrowed one has
+overflowed to `±oo` or underflowed to zero, so `Sqrt(1/10^402)` is
+`1/10^201` at machine precision rather than `0`. The fix is in
+`ExactNumericValue.sqrt` (`numeric-value/exact-numeric-value.ts`) and the
+regressions are in `test/compute-engine/exactness-regressions.test.ts`
+under "a large exact radicand reduces exactly, at any precision", run at
+both precisions. One snapshot moved with it and has NOT been updated:
+`SQRT √(1000000/49)` in `test/compute-engine/__snapshots__/arithmetic.test.ts.snap`
+records the old symbolic `sqrt(1000000/49)`, where the fix now gives the
+exact `1000/7`.
+
+`Conjugate`, `Real` and `Imaginary` (`library/complex.ts`) lost exactness
+on an exact complex operand: `Conjugate(1/3 + 2/5i)` returned the machine
+float `0.3333… − 0.4i`, so `z · Conjugate(z)` — the natural spelling of
+`|z|²` — answered `0.2711…` where the exact `61/225` was available, and
+`Real`/`Imaginary` returned the numeric projection of the component
+(`ce.number(op.bignumRe ?? op.re)`, a bignum, and `ce.number(op.im)`, a
+machine float) rather than the component itself. An `ExactNumericValue`
+carries each part as a rational multiple of a square root, and the three
+handlers now read and reassemble those parts — negating the imaginary one
+for the conjugate — so `Real(1/3 + 2/5i)` is `1/3`, `Imaginary(√2·i)` is
+`√2`, and `Conjugate(3 + 4i)` is an exact Gaussian integer. Inexact and
+symbolic operands are untouched. Pinned in
+`test/compute-engine/exactness-regressions.test.ts` under "the parts of an
+EXACT complex operand stay exact".
 
 Design and implementation draft:
 `docs/plans/2026-08-22-type-handlers-on-types.md` (third draft, 2026-08-22).

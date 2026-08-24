@@ -1,5 +1,12 @@
 import { operandLiteralValue } from './type-handlers.js';
 import {
+  hasNonFiniteImaginaryPart,
+  isComplexDatum,
+  nonRealDataError,
+  nonRealDatum,
+  realProjection,
+} from './statistics-data.js';
+import {
   bigErf,
   bigErfc,
   bigErfi,
@@ -88,23 +95,44 @@ import {
 
 /**
  * Shared binning for `Histogram`/`BinCounts`. Returns the bin edges and the
- * count in each bin, or `undefined` if the input is not a usable finite
- * numeric collection.
+ * count in each bin, `{ nonReal }` naming a complex datum or bin edge, or
+ * `undefined` if the input is not a usable finite numeric collection.
  *
  * The final bin is *closed* on both ends (`[edge, lastEdge]`) so the dataset
  * maximum is counted — every interior bin is half-open `[edge, next)`.
  * (Previously every bin was half-open, so the max value, which equals the
  * last edge, was never counted.)
+ *
+ * Binning is an order statistic: a bin is an interval of the real line, and
+ * the complex plane has no canonical ordering to cut into intervals. Both the
+ * sample and the explicit bin edges are read through `realProjection` below,
+ * so a complex value there would bin data nobody supplied; the caller turns
+ * `nonReal` into the same `incompatible-type` error the other order-based
+ * statistics answer. The scan shares the single enumeration of the source:
+ * walking it twice would re-run a lazy element callback per datum.
+ *
+ * An element that is not a NUMBER LITERAL declines instead, the same way
+ * `empiricalQuantile` (`library/distributions.ts`) does: `Sqrt(-2)` is a
+ * function expression during ordinary evaluation, so the complex scan cannot
+ * see it, and it used to project to `NaN` and be silently DROPPED from the
+ * sample — `BinCounts([1, Sqrt(-2), 5], 2)` reported counts for the two-point
+ * dataset `[1, 5]`. Staying inert leaves the answer to `.N()`, where the
+ * element numericizes to a literal and the complex scan rejects it.
  */
 function computeBinning(
   xs: Expression,
   binsArg: Expression
-): { binEdges: number[]; counts: number[] } | undefined {
+):
+  | { binEdges: number[]; counts: number[]; nonReal?: undefined }
+  | { nonReal: Expression }
+  | undefined {
   if (!xs.isFiniteCollection) return undefined;
 
-  const data = (Array.from(xs.each()) as Expression[])
-    .map((x) => x.re)
-    .filter(Number.isFinite);
+  const elements = Array.from(xs.each()) as Expression[];
+  if (!elements.every(isNumber)) return undefined;
+  const nonRealElement = nonRealDatum(elements);
+  if (nonRealElement) return { nonReal: nonRealElement };
+  const data = elements.map(realProjection).filter(Number.isFinite);
   if (data.length === 0) return undefined;
 
   const min = Math.min(...data);
@@ -112,7 +140,11 @@ function computeBinning(
 
   let binEdges: number[];
   if (binsArg.isCollection) {
-    binEdges = [...binsArg.each()].map((op) => op.re);
+    const edges = [...binsArg.each()];
+    if (!edges.every(isNumber)) return undefined;
+    const nonRealEdge = nonRealDatum(edges);
+    if (nonRealEdge) return { nonReal: nonRealEdge };
+    binEdges = edges.map(realProjection);
   } else {
     // The scalar spec is a bin COUNT, and a NON-INTEGER scalar declines
     // rather than rounding: the declared `number` deliberately admits
@@ -174,12 +206,18 @@ const FINITE_REAL_PAIRS = parseType(
  * finite real, in whichever of the two input forms was used, and keeps the
  * wide `number` otherwise.
  *
- * That claim describes the numeric answer only. A degenerate input the
- * operator rejects — fewer than two data points, two collections of
- * different lengths, or (for `Correlation`) zero variance — satisfies the
+ * That claim describes the numeric answer only. An input the operator rejects
+ * — fewer than two data points, two collections of different lengths, a
+ * complex data value, or (for `Correlation`) zero variance — satisfies the
  * type gate but evaluates to an `Error(...)`, whose own type is outside the
  * numeric lattice, so it neither confirms nor contradicts a `finite_real`
  * result type.
+ *
+ * The narrowing has one hole the operand types cannot close: finite real data
+ * large enough to overflow the sums of squares (values around `1e200` at
+ * machine precision) makes all three answer `NaN`, which `finite_real` does
+ * not admit. Closing it needs a decision recorded in `ROADMAP.md`, under the
+ * items left open by the type-handler retirement sweep.
  */
 function pairedStatisticType(ops: ReadonlyArray<OperandDescriptor>): Type {
   const [xs, ys] = ops;
@@ -367,7 +405,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '((collection<any>|number|distribution)+) -> number',
       // A data-consuming aggregate (§3.C): result type is the numeric base
       // with NO `| missing` arm (I6 absorption) — `number`, NOT `finite_real`,
-      // because an absent datum or empty input evaluates to `NaN`.
+      // for two reasons: an absent datum or empty input evaluates to `NaN`,
+      // and complex data has a complex mean (`Mean([1, 1+2i])` is `1 + i`),
+      // which only the wide `number` admits.
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'number',
       missingBehavior: 'handle',
       description: 'Arithmetic mean (average) of a collection of numbers.',
@@ -383,9 +428,19 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `NaN` — see `collectData`. One walk feeds both paths below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        // Complex data: the arithmetic mean is linear over the complex
+        // numbers, so no convention has to be chosen and the answer is the
+        // complex mean — `Mean([1, 1+2i])` is `1 + i`. The boxed accumulation
+        // serves both paths: it is exact on exact data, and `.N()`
+        // numericizes what it returns.
+        if (nonRealDatum(xs)) {
+          if (hasNonFiniteDatum(xs)) return engine.NaN;
+          const m = boxedMean(engine, xs);
+          return numericApproximation ? m.N() : m;
+        }
         if (!numericApproximation) {
           const vals = exactData(xs);
-          if (vals) return exactMean(engine, vals);
+          if (vals) return boxedMean(engine, vals);
         }
         return engine.number(
           bignumPreferred(engine)
@@ -399,6 +454,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> number',
+      // Complex data is REJECTED here (`nonRealUnivariateError`), and the
+      // resulting `Error(...)` has a type outside the numeric lattice, so it
+      // neither confirms nor contradicts this `number` claim.
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'number',
       missingBehavior: 'handle',
       description: 'Median of a collection of numbers.',
@@ -410,6 +473,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `NaN` — see `collectData`. One walk feeds both paths below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        const nonReal = nonRealUnivariateError(engine, 'Median', xs);
+        if (nonReal) return nonReal;
+        // A datum with no real value leaves the sort with nothing to order by
+        // — see `hasValuelessDatum`.
+        if (hasValuelessDatum(xs)) return engine.NaN;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactMedianOf(engine, sortExact(vals));
@@ -427,6 +495,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number|distribution)+) -> number',
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -440,6 +513,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `NaN` — see `collectData`. One walk feeds both paths below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        // Complex data: the variance is E[|X − μ|²] — a real, non-negative
+        // number (see `complexVariance`).
+        if (nonRealDatum(xs)) {
+          if (hasNonFiniteDatum(xs)) return engine.NaN;
+          const v = complexVariance(engine, xs, false);
+          return numericApproximation ? v.N() : v;
+        }
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, false);
@@ -457,6 +537,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> number',
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -466,6 +551,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `NaN` — see `collectData`. One walk feeds both paths below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        // Complex data: the variance is E[|X − μ|²] — a real, non-negative
+        // number (see `complexVariance`).
+        if (nonRealDatum(xs)) {
+          if (hasNonFiniteDatum(xs)) return engine.NaN;
+          const v = complexVariance(engine, xs, true);
+          return numericApproximation ? v.N() : v;
+        }
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, true);
@@ -484,6 +576,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Sample Standard Deviation of a collection of numbers.',
       keywords: ['stdev', 'std'],
       signature: '((collection<any>|number|distribution)+) -> number',
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -497,6 +594,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `NaN` — see `collectData`. One walk feeds both paths below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        // Complex data: the standard deviation is the square root of
+        // E[|X − μ|²], which is real and non-negative (see `complexVariance`).
+        if (nonRealDatum(xs)) {
+          if (hasNonFiniteDatum(xs)) return engine.NaN;
+          const s = engine
+            .function('Sqrt', [complexVariance(engine, xs, false)])
+            .evaluate();
+          return numericApproximation ? s.N() : s;
+        }
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals)
@@ -517,6 +623,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       description: 'Population Standard Deviation of a collection of numbers.',
       signature: '((collection<any>|number)+) -> number',
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -526,6 +637,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `NaN` — see `collectData`. One walk feeds both paths below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        // Complex data: the standard deviation is the square root of
+        // E[|X − μ|²], which is real and non-negative (see `complexVariance`).
+        if (nonRealDatum(xs)) {
+          if (hasNonFiniteDatum(xs)) return engine.NaN;
+          const s = engine
+            .function('Sqrt', [complexVariance(engine, xs, true)])
+            .evaluate();
+          return numericApproximation ? s.N() : s;
+        }
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals)
@@ -546,6 +666,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> number',
+      // Complex data is REJECTED here (`nonRealUnivariateError`), and the
+      // resulting `Error(...)` has a type outside the numeric lattice, so it
+      // neither confirms nor contradicts this `number` claim.
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -555,6 +683,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `NaN` — see `collectData`. One walk feeds both paths below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        const nonReal = nonRealUnivariateError(engine, 'Kurtosis', xs);
+        if (nonReal) return nonReal;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactKurtosis(engine, vals);
@@ -572,6 +702,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> number',
+      // Complex data is REJECTED here (`nonRealUnivariateError`), and the
+      // resulting `Error(...)` has a type outside the numeric lattice, so it
+      // neither confirms nor contradicts this `number` claim.
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -581,6 +719,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `NaN` — see `collectData`. One walk feeds both paths below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        const nonReal = nonRealUnivariateError(engine, 'Skewness', xs);
+        if (nonReal) return nonReal;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactSkewness(engine, vals);
@@ -598,6 +738,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> number',
+      // Complex data is REJECTED here (`nonRealUnivariateError`), and the
+      // resulting `Error(...)` has a type outside the numeric lattice, so it
+      // neither confirms nor contradicts this `number` claim.
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'number',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -607,6 +755,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `NaN` — see `collectData`. One walk feeds both paths below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        const nonReal = nonRealUnivariateError(engine, 'Mode', xs);
+        if (nonReal) return nonReal;
+        // A datum with no real value leaves the counting key undefined — see
+        // `hasValuelessDatum`.
+        if (hasValuelessDatum(xs)) return engine.NaN;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactMode(engine, vals);
@@ -655,6 +808,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // the exact and the float path below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        const nonReal = nonRealUnivariateError(engine, 'Quartiles', xs);
+        if (nonReal) return nonReal;
+        // A datum with no real value leaves the sort with nothing to order by
+        // (`hasValuelessDatum`), so all three quartiles are unknown — the same
+        // triple an absent datum produces.
+        if (hasValuelessDatum(xs))
+          return engine.tuple(engine.NaN, engine.NaN, engine.NaN);
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) {
@@ -676,6 +836,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection<any>|number)+) -> number',
+      // Complex data is REJECTED here (`nonRealUnivariateError`), and the
+      // resulting `Error(...)` has a type outside the numeric lattice, so it
+      // neither confirms nor contradicts this `number` claim.
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'number',
       missingBehavior: 'handle',
 
@@ -686,6 +854,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // `NaN` — see `collectData`. One walk feeds both paths below.
         const xs = collectData(ops);
         if (xs === null) return undefined;
+        const nonReal = nonRealUnivariateError(
+          engine,
+          'InterquartileRange',
+          xs
+        );
+        if (nonReal) return nonReal;
+        // A datum with no real value leaves the sort with nothing to order by
+        // — see `hasValuelessDatum`.
+        if (hasValuelessDatum(xs)) return engine.NaN;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) {
@@ -722,6 +899,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([xs, binsArg], { engine: ce }) => {
         const binning = computeBinning(xs, binsArg);
         if (!binning) return undefined;
+        if (binning.nonReal !== undefined)
+          return nonRealDataError(ce, 'Histogram', binning.nonReal);
         const { binEdges, counts } = binning;
 
         return ce.function(
@@ -744,6 +923,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([xs, binsArg], { engine: ce }) => {
         const binning = computeBinning(xs, binsArg);
         if (!binning) return undefined;
+        if (binning.nonReal !== undefined)
+          return nonRealDataError(ce, 'BinCounts', binning.nonReal);
 
         return ce.function(
           'List',
@@ -1068,12 +1249,24 @@ function collectData(ops: ReadonlyArray<Expression>): Expression[] | null {
   return data;
 }
 
+// The float and bignum kernels read each datum's REAL PART, so these two
+// projections are sound only for real data. Every head that feeds them first
+// disposes of complex data: `Mean` and the variance family compute the complex
+// answer themselves (`boxedMean`, `complexVariance`), and the order-based and
+// higher-moment heads reject it (`nonRealUnivariateError`).
+//
+// What is left is the complex infinity `~oo`, which is not complex DATA — it
+// is the single point at infinity — and still flows through here. It goes
+// through `realProjection` (`statistics-data.ts`) like every other real-valued
+// path, which reads it as `NaN` rather than as the real part its spelling
+// happens to report. A real `±∞` is unaffected and keeps the behavior it has
+// always had.
 function* scalarsOf(data: ReadonlyArray<Expression>) {
-  for (const op of data) yield op.re;
+  for (const op of data) yield realProjection(op);
 }
 
 function* bigScalarsOf(data: ReadonlyArray<Expression>) {
-  for (const op of data) yield op.bignumRe ?? op.engine.bignum(op.re);
+  for (const op of data) yield bigProjection(op);
 }
 
 //
@@ -1083,6 +1276,12 @@ function* bigScalarsOf(data: ReadonlyArray<Expression>) {
 // formula mirrors its float/bignum counterpart in `numerics/statistics.ts`, so
 // `evaluate().N()` agrees with `.N()`. Under `.N()` the existing float path is
 // used unchanged.
+//
+// The same boxed arithmetic carries the two statistics that are defined for
+// COMPLEX data — the mean and the variance family — on both paths, exact and
+// numeric: complex values in this engine are machine-precision, so there is no
+// bignum kernel to prefer, and `boxedMean`/`complexVariance` numericize their
+// result under `.N()` instead.
 //
 
 /**
@@ -1111,8 +1310,123 @@ const subtract = (
 const multiply = (ce: ComputeEngine, xs: Expression[]): Expression =>
   ce.function('Multiply', xs).evaluate();
 
-function exactMean(ce: ComputeEngine, vals: Expression[]): Expression {
+/**
+ * The arithmetic mean Σx / n, accumulated with boxed arithmetic so exact
+ * operands yield an exact result (`Mean([1,2,3,4])` is `5/2`, not `2.5`).
+ *
+ * This is also the mean of COMPLEX data, with no separate formula: `Add` and
+ * `Divide` are linear over the complex numbers, so the same accumulation gives
+ * `Mean([1, i]) = (1 + i)/2` exactly. `.add()`/`.mul()` are deliberately not
+ * used here — the methods fold exact literals to machine floats.
+ */
+function boxedMean(ce: ComputeEngine, vals: Expression[]): Expression {
   return divide(ce, add(ce, vals), ce.number(vals.length));
+}
+
+/**
+ * True when some datum is not a finite number — `±∞`, `~oo`, or `NaN`.
+ *
+ * The complex branches of `Mean` and the variance family use this to answer
+ * `NaN` before doing any arithmetic. They are only reached when some datum is
+ * genuinely complex, and a complex sample point together with a point at
+ * infinity has no reading: `+∞` is a limit along the real axis, and no
+ * direction in the plane makes it a value a complex number can be averaged
+ * with or subtracted from. Boxed arithmetic nevertheless folded
+ * `Mean([1 + 2i, +∞])` and `Variance([1 + 2i, +∞])` to `+∞` — a definite real
+ * answer for data that has none, and, for the variance, a contradiction of the
+ * real-only path, which answers `NaN` for `Variance([1, +∞])`.
+ *
+ * The real-only paths do NOT go through this: `Mean([1, +∞])` is `+∞` there,
+ * which is the limit of the sample mean and a reading the data supports.
+ */
+function hasNonFiniteDatum(vals: ReadonlyArray<Expression>): boolean {
+  return vals.some((v) => v.isFinite !== true);
+}
+
+/**
+ * The variance of complex data: `E[|X − μ|²]`, with the sample (`n − 1`) or
+ * population (`n`) divisor — the same divisors the real formulas use.
+ *
+ * The squared MAGNITUDE of each deviation is what makes this real and
+ * non-negative; `(x − μ)²` would be complex and is not the variance.
+ * `Conjugate` is deliberately avoided: it returns a machine-float complex for
+ * an exact operand with rational parts, which would lose that exactness.
+ */
+function complexVariance(
+  ce: ComputeEngine,
+  vals: Expression[],
+  population: boolean
+): Expression {
+  const n = vals.length;
+  const mean = boxedMean(ce, vals);
+  const terms = vals.map((v) => squaredMagnitude(ce, subtract(ce, v, mean)));
+  return divide(ce, add(ce, terms), ce.number(population ? n : n - 1));
+}
+
+/**
+ * `|d|²` for a deviation from the mean, in whichever channel loses the least.
+ *
+ * A REAL deviation squares directly, which keeps the numeric channel it
+ * carries — a bignum stays a bignum, an exact rational stays exact.
+ *
+ * A complex deviation would otherwise go through `Abs`. That is right when the
+ * deviation is EXACT, because `Abs` is exact on an exact complex operand
+ * (`Abs(1/3 + 2/5i)` is `√61/15`) and squaring recovers the exact squared
+ * magnitude. On an INEXACT operand the square root is rounded before it is
+ * squared again, and the round trip costs an ulp: `Variance([1.5, 1 + 2i])`
+ * read `2.1250…02` instead of `2.125`. There the two parts are combined
+ * directly instead. Complex values in this engine are machine-precision, so
+ * `.re`/`.im` give up nothing on that branch.
+ */
+function squaredMagnitude(ce: ComputeEngine, d: Expression): Expression {
+  if (d.im === 0) return multiply(ce, [d, d]);
+  if (isNumber(d) && d.isExact)
+    return powi(ce, ce.function('Abs', [d]).evaluate(), 2);
+  return ce.number(d.re * d.re + d.im * d.im);
+}
+
+/**
+ * The rejection an order-based or higher-moment univariate statistic answers
+ * for complex data, or `null` when the data is real-valued throughout.
+ *
+ * Every one of those heads reads a datum through its real part — the sorts
+ * behind the median and the quartiles, the counting key of the mode, the
+ * powers of the standardized moments — so complex data would answer the
+ * question for the projected sample with no hint that it had been projected.
+ * Unlike the mean and the variance family, there is no answer to give
+ * instead: an order statistic needs a total order, and the complex plane has
+ * no canonical one, while skewness and kurtosis have only convention-laden,
+ * branch-dependent complex extensions. That is the same reason a complex
+ * covariance is not implemented.
+ */
+function nonRealUnivariateError(
+  ce: ComputeEngine,
+  name: string,
+  data: ReadonlyArray<Expression>
+): Expression | null {
+  const nonReal = nonRealDatum(data);
+  return nonReal ? nonRealDataError(ce, name, nonReal) : null;
+}
+
+/**
+ * True when some datum is the complex infinity `~oo` and therefore has no real
+ * value at all (see `realProjection`, `library/statistics-data.ts`).
+ *
+ * The heads that SUM their data need no such test: `realProjection` hands them
+ * a `NaN` and the arithmetic carries it to the answer. The ORDER-based heads
+ * do, because a `NaN` does not propagate through a comparison: a sort
+ * comparator that returns `NaN` leaves the sample in its original order, and
+ * `Median`, `Mode`, `Quartiles` and `InterquartileRange` then read whatever
+ * element the ranks happen to land on — `Mode([1, ~oo, 5])` reported `1`, and
+ * `InterquartileRange([1, ~oo, 5])` reported `4`, neither of which is a
+ * statistic of the sample that was supplied. `NaN` is, and it is the same
+ * answer `Covariance`/`Correlation` give for such a datum.
+ *
+ * A real `±∞` has a real value and is NOT caught here: `Median([1, +∞, 5])`
+ * remains `5`.
+ */
+function hasValuelessDatum(data: ReadonlyArray<Expression>): boolean {
+  return data.some(hasNonFiniteImaginaryPart);
 }
 
 /** Sample (`population=false`) or population variance, exact. Mirrors
@@ -1178,7 +1492,7 @@ function exactCentralMoment(
 }
 
 function exactKurtosis(ce: ComputeEngine, vals: Expression[]): Expression {
-  const mean = exactMean(ce, vals);
+  const mean = boxedMean(ce, vals);
   const m2 = exactCentralMoment(ce, vals, mean, 2);
   const m4 = exactCentralMoment(ce, vals, mean, 4);
   // β₂ = m4 / m2²
@@ -1186,7 +1500,7 @@ function exactKurtosis(ce: ComputeEngine, vals: Expression[]): Expression {
 }
 
 function exactSkewness(ce: ComputeEngine, vals: Expression[]): Expression {
-  const mean = exactMean(ce, vals);
+  const mean = boxedMean(ce, vals);
   const m2 = exactCentralMoment(ce, vals, mean, 2);
   const m3 = exactCentralMoment(ce, vals, mean, 3);
   // g₁ = m3 / m2^(3/2) = m3 / (m2 · √m2)
@@ -1239,9 +1553,17 @@ function allExact(vals: ReadonlyArray<Expression>): boolean {
  * a string is an indexed collection of its characters, so
  * `Covariance("abc", "abc")` walked three characters per side and answered
  * `NaN`.
+ *
+ * `walked` collects every element this walk materializes, INCLUDING the ones
+ * that made it fail. The error path needs to know whether some datum was
+ * complex before it blames the shape, and re-enumerating the operands to find
+ * out would run a lazy element callback a second time (ruling B8, pinned in
+ * `test/compute-engine/lazy-callback-count.test.ts`). Handing the already
+ * materialized elements to `shapeError` keeps the enumeration single.
  */
 function extractPairs(
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  walked?: Expression[]
 ): { xs: Expression[]; ys: Expression[] } | null {
   if (ops.length === 1) {
     const arg = ops[0];
@@ -1249,8 +1571,12 @@ function extractPairs(
     const xs: Expression[] = [];
     const ys: Expression[] = [];
     for (const el of arg.each()) {
-      if (!el.isFiniteCollection) return null;
+      if (!el.isFiniteCollection) {
+        walked?.push(el);
+        return null;
+      }
       const pair = [...el.each()];
+      walked?.push(...pair);
       if (pair.length !== 2) return null;
       if (!isNumber(pair[0]) || !isNumber(pair[1])) return null;
       xs.push(pair[0]);
@@ -1263,30 +1589,132 @@ function extractPairs(
     if (!a.isFiniteCollection || !b.isFiniteCollection) return null;
     const xs = [...a.each()];
     const ys = [...b.each()];
+    walked?.push(...xs, ...ys);
     if (!xs.every(isNumber) || !ys.every(isNumber)) return null;
     return { xs, ys };
   }
   return null;
 }
 
-// `numberLiteralOf` rather than a bare `.N()`: a datum carrying a free
-// variable has no numeric value, so numericizing it is pure waste (and
-// exponential over nested applications). Non-finite parts still pass through
-// — the float kernels propagate them — so the literal is read, not
-// `numericValueOf`.
+// Both kernels read a datum through `realProjection` (`statistics-data.ts`),
+// which answers `NaN` for a datum with no real value — the complex infinity
+// `~oo` under either spelling — and passes a real `±∞` through.
 const machineVals = (vals: ReadonlyArray<Expression>): number[] =>
-  vals.map((v) => numberLiteralOf(v)?.re ?? NaN);
+  vals.map(realProjection);
 const bigVals = (vals: ReadonlyArray<Expression>) =>
-  vals.map((v) => {
-    const n = numberLiteralOf(v);
-    return n?.bignumRe ?? v.engine.bignum(n?.re ?? NaN);
-  });
+  vals.map((v) => bigProjection(v));
 
-function shapeError(ce: ComputeEngine, name: string): Expression {
-  return ce.error(
-    'unexpected-argument',
-    `${name} expects two equal-length collections or one collection of (x, y) pairs`
-  );
+/**
+ * `realProjection` in the bignum channel: the datum's real part as a
+ * `BigDecimal`, keeping the full precision when the literal carries a bignum,
+ * and `NaN` for a datum with no real value — so a `NaN` projection poisons the
+ * bignum kernels exactly as it poisons the machine ones.
+ */
+function bigProjection(v: Expression) {
+  const n = numberLiteralOf(v);
+  if (!n || !Number.isFinite(n.im)) return v.engine.bignum(NaN);
+  return n.bignumRe ?? v.engine.bignum(n.re);
+}
+
+/**
+ * The error a bivariate statistic answers when it cannot read its DATA
+ * operands as two equal-length columns of numbers.
+ *
+ * A non-real datum reaches this path too — `extractPairs` only accepts number
+ * literals, and `Sqrt(-2)` is a function expression — so the data is scanned
+ * for one before the shape is blamed. Otherwise
+ * `Covariance([1, Sqrt(-2)], [2, 3])` would be told its collections are
+ * mis-shaped, which is not true of the input.
+ *
+ * `dataOps` are the operands that carry data, and ONLY those: a
+ * `PolynomialFit` degree or a trailing variable symbol is not a datum, and
+ * scanning it would report a complex degree as bad data instead of letting the
+ * caller answer its own diagnostic. `walked` are the elements `extractPairs`
+ * already materialized out of those operands; the scan consults them instead
+ * of enumerating the collections a second time, and numericizes only the
+ * scalar operands (which no lazy callback stands behind). The whole scan runs
+ * on the error path only, never on the accepted one.
+ */
+function shapeError(
+  ce: ComputeEngine,
+  name: string,
+  dataOps: ReadonlyArray<Expression>,
+  walked: ReadonlyArray<Expression>,
+  message = `${name} expects two equal-length collections or one collection of (x, y) pairs`
+): Expression {
+  const nonReal = nonRealOperand(dataOps, walked);
+  if (nonReal) return nonRealDataError(ce, name, nonReal);
+  return ce.error('unexpected-argument', message);
+}
+
+/**
+ * The first datum that numericizes to a complex number — or `null` when none
+ * does.
+ *
+ * `walked` are the elements a previous `extractPairs` walk materialized;
+ * `dataOps` supplies the operands that are not collections and so contributed
+ * no elements to that walk (a scalar datum). Collections are NOT enumerated
+ * here: their elements are already in `walked`.
+ *
+ * Unlike `nonRealDatum` this accepts values that are not number literals, by
+ * numericizing them, so it catches `Sqrt(-2)`. That costs an evaluation per
+ * element, so it belongs on error paths only.
+ */
+function nonRealOperand(
+  dataOps: ReadonlyArray<Expression>,
+  walked: ReadonlyArray<Expression>
+): Expression | null {
+  for (const item of walked) if (isComplexDatum(item.N())) return item;
+  for (const op of dataOps)
+    if (op.isFiniteCollection !== true && isComplexDatum(op.N())) return op;
+  return null;
+}
+
+/**
+ * True if some datum makes the statistic `NaN`: the datum is `NaN` itself, or
+ * it is the complex infinity `~oo`, whose imaginary part is infinite and whose
+ * real part carries no information (see `realProjection` in
+ * `library/statistics-data.ts`).
+ */
+function hasNaNDatum(
+  ...data: ReadonlyArray<ReadonlyArray<Expression>>
+): boolean {
+  for (const vals of data)
+    for (const v of vals)
+      if (isNumber(v) && (v.isNaN === true || !Number.isFinite(v.im)))
+        return true;
+  return false;
+}
+
+/**
+ * True if every datum projects to the same finite real number — the only
+ * dataset for which Pearson's r is undefined because a standard deviation is
+ * genuinely zero.
+ *
+ * The comparison runs in the SAME numeric channel the correlation kernel just
+ * summed, because that is the channel whose `NaN` is being diagnosed. Reading
+ * the machine projection unconditionally got the default (bignum) route wrong:
+ * a constant column of values outside the double range projects to `±∞` in a
+ * machine float, `Number.isFinite` rejected it, and
+ * `Correlation([10^400, 10^400, 10^400], [1, 2, 3])` lost its zero-variance
+ * error and answered `NaN` instead.
+ *
+ * The projections, not the boxed values, are what is compared: `[2, 2.0]` is a
+ * constant column even though the exact `2` and the float `2.0` are not the
+ * same expression.
+ */
+function isConstantColumn(
+  ce: ComputeEngine,
+  vals: ReadonlyArray<Expression>
+): boolean {
+  if (bignumPreferred(ce)) {
+    const projected = bigVals(vals);
+    const first = projected[0];
+    return first.isFinite() && projected.every((x) => x.eq(first));
+  }
+  const projected = machineVals(vals);
+  const first = projected[0];
+  return Number.isFinite(first) && projected.every((x) => x === first);
 }
 
 function evaluateCovariance(
@@ -1296,8 +1724,11 @@ function evaluateCovariance(
   population: boolean
 ): Expression {
   const name = population ? 'PopulationCovariance' : 'Covariance';
-  const pairs = extractPairs(ops);
-  if (!pairs) return shapeError(ce, name);
+  // Every operand of a covariance is data, so the whole list is scanned when
+  // the shape is rejected.
+  const walked: Expression[] = [];
+  const pairs = extractPairs(ops, walked);
+  if (!pairs) return shapeError(ce, name, ops, walked);
   const { xs, ys } = pairs;
   // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`):
   // a pairwise reducer over two collections is strict on length agreement.
@@ -1308,6 +1739,12 @@ function evaluateCovariance(
       'unexpected-argument',
       `${name}: at least 2 data points required`
     );
+  const nonReal = nonRealDatum(xs, ys);
+  if (nonReal) return nonRealDataError(ce, name, nonReal);
+  // A datum with no real value makes the covariance unknown on every path,
+  // including the exact one, which would otherwise carry `~oo` into a
+  // symbolic sum.
+  if (hasNaNDatum(xs, ys)) return ce.NaN;
 
   if (!numericApproximation && allExact(xs) && allExact(ys))
     return exactCovariance(ce, xs, ys, population);
@@ -1330,8 +1767,11 @@ function evaluateCorrelation(
   ops: ReadonlyArray<Expression>,
   numericApproximation: boolean
 ): Expression {
-  const pairs = extractPairs(ops);
-  if (!pairs) return shapeError(ce, 'Correlation');
+  // Every operand of a correlation is data, so the whole list is scanned when
+  // the shape is rejected.
+  const walked: Expression[] = [];
+  const pairs = extractPairs(ops, walked);
+  if (!pairs) return shapeError(ce, 'Correlation', ops, walked);
   const { xs, ys } = pairs;
   // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`).
   if (xs.length !== ys.length)
@@ -1341,19 +1781,35 @@ function evaluateCorrelation(
       'unexpected-argument',
       'Correlation: at least 2 data points required'
     );
+  const nonReal = nonRealDatum(xs, ys);
+  if (nonReal) return nonRealDataError(ce, 'Correlation', nonReal);
+  // An unknown datum makes the whole coefficient unknown, exactly as it does
+  // for `Covariance`.
+  if (hasNaNDatum(xs, ys)) return ce.NaN;
 
   if (!numericApproximation && allExact(xs) && allExact(ys)) {
     const r = exactCorrelation(ce, xs, ys);
-    return r ?? ce.error('unexpected-argument', 'Correlation: zero variance');
+    return r ?? zeroVarianceError(ce);
   }
 
   const r = bignumPreferred(ce)
     ? bigCorrelation(bigVals(xs), bigVals(ys))
     : correlation(machineVals(xs), machineVals(ys));
   const num = ce.number(r);
-  return num.isNaN
-    ? ce.error('unexpected-argument', 'Correlation: zero variance')
-    : num;
+  if (!num.isNaN) return num;
+  // A `NaN` from the kernel is not by itself evidence of a zero variance: the
+  // machine kernel also answers `NaN` when the sums of squares overflow, which
+  // they do for perfectly correlated data around `1e200`. So the degenerate
+  // case is diagnosed directly, from a column that is actually constant.
+  // Everything else — non-finite data included — propagates `NaN`, which is
+  // what `Covariance` answers for the same input.
+  return isConstantColumn(ce, xs) || isConstantColumn(ce, ys)
+    ? zeroVarianceError(ce)
+    : ce.NaN;
+}
+
+function zeroVarianceError(ce: ComputeEngine): Expression {
+  return ce.error('unexpected-argument', 'Correlation: zero variance');
 }
 
 /** Exact sample/population covariance: (Σxy − ΣxΣy/n)/(n−1 or n). */
@@ -1421,17 +1877,28 @@ const MAX_FIT_DEGREE = 12;
  * Parse the regression argument list: an optional trailing variable symbol,
  * an optional trailing integer degree (for `PolynomialFit`), and the data as
  * either two collections or one collection of pairs.
+ *
+ * A failure reports which operands were the DATA (`dataOps`) and which of
+ * their elements the walk already materialized (`walked`), so the caller's
+ * error path can tell a complex datum from a mis-shaped argument list without
+ * re-enumerating anything — see `shapeError`.
  */
+type FitArgs =
+  | {
+      ok: true;
+      xs: Expression[];
+      ys: Expression[];
+      degree: number;
+      variable?: string;
+    }
+  | { ok: false; dataOps: Expression[]; walked: Expression[] };
+
 function parseFitArgs(
   ops: ReadonlyArray<Expression>,
   wantDegree: boolean
-): {
-  xs: Expression[];
-  ys: Expression[];
-  degree: number;
-  variable?: string;
-} | null {
+): FitArgs {
   let rest = [...ops];
+  const walked: Expression[] = [];
 
   // Optional trailing variable symbol.
   let variable: string | undefined;
@@ -1444,16 +1911,22 @@ function parseFitArgs(
   // Optional/required trailing integer degree.
   let degree = 1;
   if (wantDegree) {
-    if (rest.length === 0) return null;
-    const d = toInteger(rest[rest.length - 1]);
-    if (d === null) return null;
+    if (rest.length === 0) return { ok: false, dataOps: rest, walked };
+    const degreeArg = rest[rest.length - 1];
+    // A COMPLEX degree is not a degree: `toInteger` reads a number's real
+    // part, so `PolynomialFit(xs, ys, Complex(1, 2))` silently fitted a
+    // degree-1 polynomial. `NaN` carries the rejection to the caller's own
+    // degree diagnostic, which names the range a degree must lie in — a
+    // better answer than blaming the data.
+    const d = isComplexDatum(degreeArg) ? NaN : toInteger(degreeArg);
+    if (d === null) return { ok: false, dataOps: rest.slice(0, -1), walked };
     degree = d;
     rest = rest.slice(0, -1);
   }
 
-  const pairs = extractPairs(rest);
-  if (!pairs) return null;
-  return { xs: pairs.xs, ys: pairs.ys, degree, variable };
+  const pairs = extractPairs(rest, walked);
+  if (!pairs) return { ok: false, dataOps: rest, walked };
+  return { ok: true, xs: pairs.xs, ys: pairs.ys, degree, variable };
 }
 
 function evaluateLinearRegression(
@@ -1462,23 +1935,25 @@ function evaluateLinearRegression(
   numericApproximation: boolean
 ): Expression {
   const parsed = parseFitArgs(ops, false);
-  if (!parsed)
-    return ce.error(
-      'unexpected-argument',
+  if (!parsed.ok)
+    return shapeError(
+      ce,
+      'LinearRegression',
+      parsed.dataOps,
+      parsed.walked,
       'LinearRegression: invalid arguments'
     );
-  const coeffs = fitCoefficients(
-    ce,
-    parsed.xs,
-    parsed.ys,
-    1,
-    numericApproximation
-  );
+  const { xs, ys, variable } = parsed;
+  // The fit reads each datum's real part, so complex data would silently
+  // return the fit of different points: `[1, 1+2i, 5]` would be fitted as
+  // `[1, 1, 5]`.
+  const nonReal = nonRealDatum(xs, ys);
+  if (nonReal) return nonRealDataError(ce, 'LinearRegression', nonReal);
+  const coeffs = fitCoefficients(ce, xs, ys, 1, numericApproximation);
   if (!coeffs)
     return ce.error('unexpected-argument', 'LinearRegression: degenerate data');
   const [b0, b1] = coeffs;
-  if (parsed.variable !== undefined)
-    return buildPolynomial(ce, coeffs, parsed.variable);
+  if (variable !== undefined) return buildPolynomial(ce, coeffs, variable);
   return ce.tuple(b0, b1);
 }
 
@@ -1488,9 +1963,15 @@ function evaluatePolynomialFit(
   numericApproximation: boolean
 ): Expression {
   const parsed = parseFitArgs(ops, true);
-  if (!parsed)
-    return ce.error('unexpected-argument', 'PolynomialFit: invalid arguments');
-  const { xs, degree, variable } = parsed;
+  if (!parsed.ok)
+    return shapeError(
+      ce,
+      'PolynomialFit',
+      parsed.dataOps,
+      parsed.walked,
+      'PolynomialFit: invalid arguments'
+    );
+  const { xs, ys, degree, variable } = parsed;
   if (!Number.isInteger(degree) || degree < 0 || degree > MAX_FIT_DEGREE)
     return ce.error(
       'unexpected-argument',
@@ -1501,13 +1982,11 @@ function evaluatePolynomialFit(
       'unexpected-argument',
       'PolynomialFit: not enough data points for the requested degree'
     );
-  const coeffs = fitCoefficients(
-    ce,
-    parsed.xs,
-    parsed.ys,
-    degree,
-    numericApproximation
-  );
+  // The fit reads each datum's real part, so complex data would silently
+  // return the fit of different points.
+  const nonReal = nonRealDatum(xs, ys);
+  if (nonReal) return nonRealDataError(ce, 'PolynomialFit', nonReal);
+  const coeffs = fitCoefficients(ce, xs, ys, degree, numericApproximation);
   if (!coeffs)
     return ce.error('unexpected-argument', 'PolynomialFit: degenerate data');
   if (variable !== undefined) return buildPolynomial(ce, coeffs, variable);
@@ -1533,12 +2012,8 @@ function fitCoefficients(
   const exact = !numericApproximation && allExact(xs) && allExact(ys);
   // Under `.N()` or with inexact data, work with floats so the result is a
   // float; otherwise keep the boxed (exact) values.
-  const X = exact
-    ? xs
-    : xs.map((x) => ce.number(numberLiteralOf(x)?.re ?? NaN));
-  const Y = exact
-    ? ys
-    : ys.map((y) => ce.number(numberLiteralOf(y)?.re ?? NaN));
+  const X = exact ? xs : xs.map((x) => ce.number(realProjection(x)));
+  const Y = exact ? ys : ys.map((y) => ce.number(realProjection(y)));
 
   // Powers x_i^j for j = 0 … 2·degree.
   const maxPow = 2 * degree;

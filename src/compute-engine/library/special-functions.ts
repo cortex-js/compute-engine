@@ -16,7 +16,16 @@ import {
   type RealDomain,
   operandLiteralValue,
 } from './type-handlers.js';
-import { broadcastOperandType } from './type-handlers-types.js';
+// The `'types'`-shape twins of the helpers above, wired to the definitions
+// that declare `typeHandlerKind: 'types'`. Both modules export the same
+// names on purpose (a converted call site otherwise changes only its import
+// path), so the twins carry an `OnTypes` suffix here to keep the two shapes
+// readable side by side while the migration runs.
+import {
+  broadcastOperandType,
+  numericTypeHandler as numericTypeHandlerOnTypes,
+  operandNonFiniteNumber,
+} from './type-handlers-types.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { signOfType } from '../../common/type/utils.js';
 import { nonNegativeSign } from '../boxed-expression/sgn.js';
@@ -179,10 +188,9 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // Incomplete F(φ|m) is complex whenever m·sin²φ > 1 — a condition on
       // both operands (`F(1.5|2) = 1.311… − 1.240…i`) — so real operands only
       // support the finite generic-point hedge, not a real claim.
+      typeHandlerKind: 'types',
       type: (ops) =>
-        ops.some((x) => provablyNonFiniteNumber(x))
-          ? 'number'
-          : 'finite_number',
+        ops.some((d) => operandNonFiniteNumber(d)) ? 'number' : 'finite_number',
       evaluate: ([phi, m], { numericApproximation, engine }) => {
         // F(0|m) = 0 exactly
         if (isNumber(phi) && phi.im === 0 && phi.isSame(0)) return engine.Zero;
@@ -264,7 +272,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q672619',
       complexity: 8700,
       signature: '(number, number, number, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: (ops, { numericApproximation, engine }) => {
         // ₂F₁(a, b; c; 0) = 1 exactly
         const z = ops[3];
@@ -286,7 +295,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q2701540',
       complexity: 8800,
       signature: '(number, number, number, number, number, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: (ops, { numericApproximation, engine }) => {
         // F₁(a; b₁, b₂; c; 0, 0) = 1 exactly
         const [, , , , x, y] = ops;
@@ -354,7 +364,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q1331447',
       complexity: 8700,
       signature: '(number, number, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: (ops, { numericApproximation, engine }) => {
         // ₁F₁(a; b; 0) = 1 exactly
         const z = ops[2];
@@ -378,6 +389,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `j` is validated in the evaluate handler ('number' rather than
       // 'integer' so that rule-pattern wildcards — typed 'complex' — box)
       signature: '(number, number, number, number?) -> number',
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'finite_number',
       evaluate: (ops, { numericApproximation }) => {
         if (!shouldNumericize(numericApproximation, ops[1], ops[2]))
@@ -405,6 +421,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q1187208',
       complexity: 8800,
       signature: '(number) -> number',
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'finite_number',
       evaluate: ([tau], { numericApproximation, engine }) =>
         shouldNumericize(numericApproximation, tau)
@@ -425,6 +446,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // 'integer' so that rule-pattern wildcards — typed 'complex' — box; see
       // JacobiTheta).
       signature: '(number, number) -> number',
+      // The handler itself stays: deleting it would activate the
+      // no-handler fallback, which derives a NARROWER type than this
+      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
+      // no operand, so the flip changes nothing it derives.
+      typeHandlerKind: 'types',
       type: () => 'finite_number',
       evaluate: (ops, { numericApproximation, engine }) => {
         if (!shouldNumericize(numericApproximation, ops[1])) return undefined;

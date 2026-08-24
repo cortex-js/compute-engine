@@ -1,5 +1,109 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Square roots of large exact perfect squares are exact at every
+  precision.** `Sqrt(10^402)` returned `+oo` at machine precision (the
+  radicand was narrowed to the numeric format before rooting) and
+  `Sqrt(10^12/9)` stayed unevaluated where `10^6/3` exists. Exact
+  integer and rational radicands now reduce exactly — perfect squares
+  fold, negative radicands give exact imaginary results — regardless of
+  the precision setting. `Sqrt(1000000/49)` now evaluates to `1000/7`.
+
+- **`Conjugate`, `Real` and `Imaginary` preserve exactness.**
+  `Conjugate(1/3 + 2/5i)` returned machine floats (so `z·Conjugate(z)`
+  answered `0.2711…` where `61/225` is available); `Real(1/3 + 2/5i)`
+  returned a 21-digit approximation. All three now read the exact
+  components: `Real(1/3 + 2/5i)` is `1/3`, `Imaginary(√2 i)` is `√2`,
+  and `z·Conjugate(z)` is `61/225`.
+
+### Breaking Changes
+
+- **The bivariate statistics reject complex data instead of silently
+  using its real part.** `Covariance`, `PopulationCovariance`,
+  `Correlation`, `LinearRegression` and `PolynomialFit` previously
+  projected every data point through its real part, so
+  `Covariance([1, 1+2i], [2, 3])` returned `0` — the answer for the data
+  `[1, 1]`. A non-real data point now returns a structured
+  `incompatible-type` error naming the operator and the offending datum.
+  A complex literal with a zero imaginary part (`Complex(2, 0)`) still
+  canonicalizes to a real and participates normally, and the complex
+  infinity `~oo` is not complex data in this sense: it is the single
+  point at infinity rather than a sample point off the real line, so it
+  propagates `NaN`. Additionally, `Correlation` now propagates `NaN` for
+  any data it has no real value for — `NaN`, `±∞` and `~oo` — matching
+  `Covariance`, instead of misreporting it as `"zero variance"`. That
+  error is now raised only when a column is genuinely constant, so at
+  `ce.precision = 'machine'` it also no longer appears for finite data
+  whose sums of squares overflow the double range (values around
+  `1e200`), which now yields `NaN`. (At the default precision the bignum
+  kernel handles such data without overflowing.) (Complex covariance —
+  `E[(X−μX)·conj(Y−μY)]` — is not implemented; if you need it, compute it
+  from `Mean` directly.)
+
+- **The one-sample statistics no longer silently use the real part of
+  complex data: they either compute the complex answer or reject it.**
+  Every one of them used to project each datum through its real part, so
+  `Mean([1, 1+2i, 5])` answered `2.333…`, the mean of `[1, 1, 5]`. Now:
+  - `Mean` returns the COMPLEX mean — `Mean([1, 1+2i])` is `1 + i` — with
+    no convention involved, since the mean is linear. Exact data still
+    gives an exact answer: `Mean([1, i])` is `(1 + i)/2`, not
+    `0.5 + 0.5i`.
+  - `Variance`, `PopulationVariance`, `StandardDeviation` and
+    `PopulationStandardDeviation` compute `E[|X − μ|²]` — the mean squared
+    MAGNITUDE of the deviations, with the same sample (`n − 1`) or
+    population (`n`) divisor as before. The result is a real,
+    non-negative number: `Variance([1+i, 1−i])` is `2` and
+    `PopulationVariance([1+i, 1−i])` is `1`.
+  - `Median`, `Mode`, `Quartiles`, `InterquartileRange`, `Skewness`,
+    `Kurtosis`, `Histogram`, `BinCounts` and the empirical data form of
+    `Quantile` return the same `incompatible-type` error the bivariate
+    statistics use. Order statistics need a total order, and the complex
+    plane has no canonical one; the standardized moments have only
+    convention-laden, branch-dependent complex extensions.
+    `Histogram`/`BinCounts` reject a complex bin EDGE for the same
+    reason. (`Quantile` of a DISTRIBUTION is unaffected.)
+
+  Real data is unaffected, including the exact results
+  (`Mean([1, 1, 5])` is still `7/3`), and `NaN` and a real `±∞` keep the
+  readings they have always had in these heads (`Mean([1, +∞, 5])` is
+  `+∞`, `Median([1, +∞, 5])` is `5`).
+
+- **The complex infinity `~oo` now reads as `NaN` in the one-sample
+  statistics, under both of its spellings.** The real part `~oo` reports
+  is an artifact of how it was written — `ComplexInfinity` reports
+  `Infinity`, `Complex(1, Infinity)` reports `1` — so the same value
+  produced different statistics depending on the spelling:
+  `Mean([1, ~oo, 5])` answered `+∞` one way and `2.333…` the other, and
+  `Median` answered `5` one way and `1` the other. Every one-sample head
+  now projects it to `NaN`, which is what the bivariate heads already
+  did, so both spellings agree: `Mean`, `Median`, `Mode`, the variance
+  family, `Skewness`, `Kurtosis` and `InterquartileRange` return `NaN`,
+  `Quartiles` returns `(NaN, NaN, NaN)`, and the empirical `Quantile`
+  returns `NaN`. A real `±∞` is unaffected.
+
+- **`Mean` and the variance family return `NaN` for complex data mixed
+  with a non-finite value.** `Variance([1+2i, +∞])` returned `+∞`, an
+  accident of boxed arithmetic that contradicted the real-only path
+  (`Variance([1, +∞])` is `NaN`). A complex sample point together with a
+  point at infinity has no reading — `+∞` is a limit along the real axis,
+  and no direction in the plane makes it a value a complex number can be
+  averaged with — so `NaN` is what these now answer. The real-only paths
+  are unchanged.
+
+- **`Histogram` and `BinCounts` stay inert on data (or bin edges) that is
+  not a number literal, instead of silently dropping it.** A `Sqrt(-2)`
+  datum has no real value, and it used to be filtered out of the sample:
+  `BinCounts([1, Sqrt(-2), 5], 2)` reported the counts of `[1, 5]`. It
+  now leaves the expression unevaluated, the same way the empirical
+  `Quantile` does; under `.N()` the datum numericizes to a complex
+  literal and is rejected with the `incompatible-type` error.
+
+- **A complex `PolynomialFit` degree is reported as a bad degree.**
+  `PolynomialFit(xs, ys, Complex(1, 2))` read the degree's real part and
+  silently fitted a degree-1 polynomial; it now returns the
+  `degree must be an integer in [0, 12]` error.
+
 ### New Features
 
 - **A `type` handler can now be declared as a function of operand

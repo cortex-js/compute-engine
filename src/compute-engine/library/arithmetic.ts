@@ -143,18 +143,29 @@ import type { Type } from '../../common/type/types.js';
 import {
   numericTypeHandler,
   elementaryFunctionType,
-  extremumType,
   gammaPoleType,
-  roundingFunctionType,
   absFunctionType,
-  measurementType,
-  bigOpResultType,
   operandIsEven,
   operandIsOdd,
   operandLiteralValue,
   operandSgn,
 } from './type-handlers.js';
-import { realOnlyStepType } from './type-handlers-types.js';
+// The `'types'`-shape twins of the helpers above: they take one
+// `OperandDescriptor` per operand instead of the operand expression, and are
+// wired to the definitions that declare `typeHandlerKind: 'types'`. The two
+// modules export the same names on purpose (a converted call site otherwise
+// changes only its import path), so the twins are aliased with an `OnTypes`
+// suffix here to keep both shapes readable side by side while the migration
+// runs.
+import {
+  realOnlyStepType,
+  numericTypeHandler as numericTypeHandlerOnTypes,
+  extremumType as extremumTypeOnTypes,
+  roundingFunctionType as roundingFunctionTypeOnTypes,
+  measurementType as measurementTypeOnTypes,
+  bigOpResultType as bigOpResultTypeOnTypes,
+  operandLiteralValue as operandLiteralValueOnTypes,
+} from './type-handlers-types.js';
 import { parseType } from '../../common/type/parse.js';
 
 // The proven-real result claims of the two step functions, parsed once at
@@ -715,7 +726,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> integer',
-      type: ([x]) => roundingFunctionType(x),
+      typeHandlerKind: 'types',
+      type: ([x]) => roundingFunctionTypeOnTypes(x),
       sgn: ([x]) => {
         if (x.isLessEqual(-1)) return 'negative';
         if (x.isPositive) return 'positive';
@@ -1069,6 +1081,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // invalid while honestly typing `Factorial(1/2)` (= Γ(3/2), a real) and
       // `Factorial(i)` (complex) instead of the unsound `finite_integer`.
       signature: '(number) -> number',
+      // NOT yet converted to the `'types'` handler shape, deliberately: the
+      // negative-integer branch below widens the claim to `number` on the
+      // Γ(x+1) pole, and on a COMPOUND operand that negative sign can come
+      // from an operator `sgn` handler (`Negate(Floor(Abs(r)))`, whose result
+      // type is a bare `finite_integer`) — a channel the operand descriptors
+      // deliberately do not carry, their sign being type-derived only.
+      // Converting today would claim `finite_real` where this handler proves
+      // the pole and answers `number` — a type claim NARROWER than before,
+      // which is never acceptable (a narrower claim can be an unsound
+      // over-claim, where a wider one only loses precision). Same hold as
+      // `binomialType` (`library/combinatorics.ts`) and `gammaPoleType`
+      // (`library/type-handlers-types.ts`, where the hold note lives on the
+      // twin); it
+      // lifts when the audited sign channel for function expressions lands
+      // (open item O7 of
+      // `docs/plans/2026-08-22-type-handlers-on-types.md`).
       type: ([x]) => {
         const s = x ? operandSgn(x) : undefined;
         // A non-negative integer factorial is a (finite) positive integer.
@@ -1177,6 +1205,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // symbolic rather than erroring — mirror `Factorial`'s signature
       // pattern rather than `(integer) -> integer`.
       signature: '(number) -> number',
+      // NOT yet converted to the `'types'` handler shape, for the same reason
+      // as `Factorial` above: the negative-integer branch widens the claim to
+      // `number`, and on a COMPOUND operand that negative sign is only an
+      // operator `sgn` handler's to prove — a channel the operand descriptors
+      // do not carry. Converting today would answer `finite_real` where this
+      // handler answers `number`, i.e. a NARROWER claim, which is never
+      // acceptable. Lifts with open item O7 of
+      // `docs/plans/2026-08-22-type-handlers-on-types.md`.
       type: ([x]) => {
         const s = x ? operandSgn(x) : undefined;
         if (x?.isInteger === true && nonNegativeSign(s) === true)
@@ -1225,7 +1261,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number) -> integer',
-      type: ([x]) => roundingFunctionType(x),
+      typeHandlerKind: 'types',
+      type: ([x]) => roundingFunctionTypeOnTypes(x),
       sgn: ([x]) => {
         if (x.isNegative) return 'negative';
         if (x.isGreaterEqual(1)) return 'positive';
@@ -1254,7 +1291,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> number',
-      type: ([x]) => numericTypeHandler([x]),
+      typeHandlerKind: 'types',
+      type: ([x]) => numericTypeHandlerOnTypes([x]),
       sgn: ([x]) => {
         if (x.isNonNegative) return 'non-negative';
         return undefined;
@@ -1438,8 +1476,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(number) -> number',
-      // ζ(1) is the pole (value `~oo`, representable only by `number`).
-      type: ([x]) => (x?.isSame(1) ? 'number' : numericTypeHandler([x])),
+      // ζ(1) is the pole (value `~oo`, representable only by `number`). The
+      // pole test is the literal-value channel: `isSame` is strictly
+      // syntactic, so only a literal 1 ever answered `true` here, and
+      // `operandLiteralValue` selects exactly that population.
+      typeHandlerKind: 'types',
+      type: ([x]) =>
+        x !== undefined && operandLiteralValueOnTypes(x) === 1
+          ? 'number'
+          : numericTypeHandlerOnTypes([x]),
       evaluate: ([x], { numericApproximation, engine }) => {
         if (shouldNumericize(numericApproximation, x))
           return apply(x, zeta, (x) => bigZeta(engine, x));
@@ -1529,7 +1574,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `integer`-typed parameter has broken rule boxing in this repo — and
       // validated in `evaluate` instead.
       signature: '(number, number?) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: (ops, { numericApproximation, engine }) => {
         const x = ops[0];
         // Branch index: default 0 (principal W₀). Only the real branches 0
@@ -1559,7 +1605,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: number, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([n, x], { numericApproximation }) =>
         shouldNumericize(numericApproximation, n, x)
           ? apply2(n, x, besselJ)
@@ -1574,7 +1621,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: number, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([n, x], { numericApproximation }) =>
         shouldNumericize(numericApproximation, n, x)
           ? apply2(n, x, besselY)
@@ -1588,7 +1636,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: number, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([n, x], { numericApproximation }) =>
         shouldNumericize(numericApproximation, n, x)
           ? apply2(n, x, besselI)
@@ -1604,7 +1653,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(order: number, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([n, x], { numericApproximation }) =>
         shouldNumericize(numericApproximation, n, x)
           ? apply2(n, x, besselK)
@@ -1619,7 +1669,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8400,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([x], { numericApproximation }) =>
         shouldNumericize(numericApproximation, x)
           ? apply(x, airyAi)
@@ -1633,7 +1684,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8400,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([x], { numericApproximation }) =>
         shouldNumericize(numericApproximation, x)
           ? apply(x, airyBi)
@@ -1647,7 +1699,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8400,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([x], { numericApproximation }) =>
         shouldNumericize(numericApproximation, x)
           ? apply(x, airyAiPrime)
@@ -1661,7 +1714,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8400,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([x], { numericApproximation }) =>
         shouldNumericize(numericApproximation, x)
           ? apply(x, airyBiPrime)
@@ -2396,7 +2450,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // echoing `real<0..>` verbatim claimed a sign the value contradicts.
       // Ranges reflect about zero, tiers are their own negation
       // (`negateNumericType`).
-      type: ([x]) => negateNumericType(x.type.type),
+      typeHandlerKind: 'types',
+      type: ([x]) => negateNumericType(x.type),
       sgn: ([x]) => oppositeSgn(x.sgn),
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args);
@@ -2449,7 +2504,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       lazy: true,
       signature: '(value, value) -> value',
-      type: measurementType,
+      typeHandlerKind: 'types',
+      type: measurementTypeOnTypes,
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return ce.error('incompatible-type');
         const value = args[0].canonical;
@@ -2983,8 +3039,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Optional precision arg (Desmos/spreadsheet `round(x, n)`): round to `n`
       // decimal places. Without it, rounds to the nearest integer.
       signature: '(number, integer?) -> number',
+      typeHandlerKind: 'types',
       type: ([x, n]) => {
-        const t = roundingFunctionType(x);
+        const t = roundingFunctionTypeOnTypes(x);
         // With a precision arg the result is generally non-integer
         // (`Round(3.14159, 2)` is `3.14`): keep the complex/non-finite/NaN
         // classification, but replace the integer claim by `finite_real`.
@@ -3251,7 +3308,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1250,
       broadcastable: true,
       signature: '(number) -> integer',
-      type: ([x]) => roundingFunctionType(x),
+      typeHandlerKind: 'types',
+      type: ([x]) => roundingFunctionTypeOnTypes(x),
       // trunc(x) = 0 for |x| < 1, so the sign of x alone is not enough
       // (trunc(1/2) = 0, not positive). Mirror the Floor/Ceil interval logic.
       sgn: ([x]) => {
@@ -3733,7 +3791,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // input evaluates to `NaN` (I6 absorption). `missingStrip: 'all'` (the
       // default) lets a `Missing` operand validate against `(value*)`.
       missingBehavior: 'handle',
-      type: (ops) => extremumType(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => extremumTypeOnTypes(ops),
       sgn: (ops) => {
         if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
         if (ops.some((x) => x.isReal == false || x.isNaN !== false))
@@ -3765,7 +3824,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // including collections
       signature: '(value+) -> number',
       missingBehavior: 'handle',
-      type: (ops) => extremumType(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => extremumTypeOnTypes(ops),
       sgn: (ops) => {
         if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
         if (ops.some((x) => x.isReal == false || x.isNaN !== false))
@@ -3791,7 +3851,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: true,
       signature: '(number, number+) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: (ops, { numericApproximation }) =>
         foldExtremum(ops, true, numericApproximation === true),
     },
@@ -3802,7 +3863,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: true,
       signature: '(number, number+) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: (ops, { numericApproximation }) =>
         foldExtremum(ops, false, numericApproximation === true),
     },
@@ -3813,7 +3875,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: true,
       signature: '(number, number, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([x, lo, hi], { numericApproximation }) => {
         // max(x, lo) then min(·, hi). Keep the intermediate exact; numericize
         // only the final result. Stays symbolic if any comparison is undecided.
@@ -3831,7 +3894,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(value*) -> number',
       missingBehavior: 'handle',
-      type: (ops) => extremumType(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => extremumTypeOnTypes(ops),
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Supremum'),
     },
 
@@ -3843,7 +3907,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(value*) -> number',
       missingBehavior: 'handle',
-      type: (ops) => extremumType(ops),
+      typeHandlerKind: 'types',
+      type: (ops) => extremumTypeOnTypes(ops),
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Infimum'),
     },
 
@@ -3940,7 +4005,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       scoped: indexingSetSites(1, 'integer'),
       lazy: true,
       signature: '(any, tuple*) -> number',
-      type: bigOpResultType,
+      typeHandlerKind: 'types',
+      type: bigOpResultTypeOnTypes,
 
       canonical: ([body, ...bounds], { scope }) =>
         canonicalBigop('Product', body, bounds, scope),
@@ -4098,7 +4164,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       scoped: indexingSetSites(1, 'integer'),
       lazy: true,
       signature: '(any, tuple*) -> number',
-      type: bigOpResultType,
+      typeHandlerKind: 'types',
+      type: bigOpResultTypeOnTypes,
 
       canonical: ([body, ...bounds], { scope, engine: ce }) => {
         // Arity-1 collection-reducer form: bypass canonicalBigop, which would

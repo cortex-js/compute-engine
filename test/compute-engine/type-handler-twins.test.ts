@@ -30,6 +30,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { BoxedType } from '../../src/common/type/boxed-type';
 import { typeToString } from '../../src/common/type/serialize';
 import { describe as describeOperand } from '../../src/compute-engine/boxed-expression/operand-descriptor';
+import { provablyNonFiniteNumber } from '../../src/compute-engine/boxed-expression/numerics';
 import * as legacy from '../../src/compute-engine/library/type-handlers';
 import * as twin from '../../src/compute-engine/library/type-handlers-types';
 
@@ -99,6 +100,12 @@ beforeAll(() => {
     ['L:list<real>', ce.symbol('L')],
     ['nf', ce.symbol('nf')],
     ['Abs(r)', ce.box(['Abs', 'r'])],
+    // An APPLICATION whose non-finiteness lives only in a held value: `w`
+    // holds `+∞` behind a `number` declaration, `hnan` holds NaN, and
+    // `Abs`'s result type stays wide in both cases. These are the rows that
+    // witness the descriptor's application-level finiteness read.
+    ['Abs(w)', ce.box(['Abs', 'w'])],
+    ['Abs(hnan)', ce.box(['Abs', 'hnan'])],
     ['Negate(Abs(r))', ce.box(['Negate', ['Abs', 'r']])],
     ['Sign(r)', ce.box(['Sign', 'r'])],
     ['Sqrt(Abs(r))', ce.box(['Sqrt', ['Abs', 'r']])],
@@ -166,14 +173,35 @@ describe('operand-level helpers', () => {
     // application whose result type carries no range answers `undefined`
     // where the expression channel answers a sign. `Abs(r)` and
     // `Negate(Abs(r))` agree because their result types DO carry the range.
+    // `Abs(hnan)` is the same loss reached through a held value rather than
+    // a result-type range: `hnan` holds NaN, so `Abs`'s `sgn` handler reads
+    // that value and answers `unsigned`, while `Abs(hnan)` types `number`,
+    // whose spelling carries no sign. The FINITENESS of that same operand
+    // does reach the descriptor (the application-level `isFinite` read in
+    // `describe()`); the sign deliberately does not, because it would mean
+    // invoking the unaudited operator `sgn` handlers on the type path.
     abUnary(legacy.operandSgn, twin.operandSgn, {
       'Sqrt(Abs(r))': ['non-negative', 'undefined'],
       'Neg(Floor(Abs(r)))': ['non-positive', 'undefined'],
+      'Abs(hnan)': ['unsigned', 'undefined'],
     });
   });
 
   test('operandLiteralValue — equal everywhere', () => {
     abUnary(legacy.operandLiteralValue, twin.operandLiteralValue, {});
+  });
+
+  test('provablyNonFiniteNumber / operandNonFiniteNumber — equal everywhere', () => {
+    // The non-finiteness predicate is the gate several converted handlers
+    // rest on, and one of them rests on it ALONE: `EllipticF`'s legacy
+    // handler is exactly `ops.some(provablyNonFiniteNumber) ? 'number' :
+    // 'finite_number'`, so the whole translation of that operator is this
+    // one pin. The expressions shape asks the value channel first
+    // (`isNaN`/`isInfinity`) and falls back on `isFinite === false` plus a
+    // `number` type test; the twin must reproduce both halves, including the
+    // rows where only one of them fires — `~oo` and a symbol HOLDING NaN or
+    // ±∞ behind a `number` declaration.
+    abUnary(provablyNonFiniteNumber, twin.operandNonFiniteNumber, {});
   });
 
   test('operandIsEven / operandIsOdd — the held-value channel is absent', () => {
@@ -212,6 +240,40 @@ describe('numericTypeHandler', () => {
       (a, b) => twin.numericTypeHandler([a, b]),
       {}
     );
+  });
+
+  test('ternary — equal on every ordered pair plus a third operand', () => {
+    // Converted operators reach this helper at arity 3 and above (`Clamp`,
+    // `Hypergeometric1F1`), which the pairs above do not cover. A full
+    // ordered-triple sweep of the battery would be redundant: the handler
+    // folds `some(non-finite)` and `every(real)` over its operands, so the
+    // answer depends on which operand CLASSES are present and not on their
+    // order or count. Every ordered pair is therefore extended by a third
+    // operand drawn from the four classes the two folds distinguish — a
+    // finite real, a NaN, a provably real ±∞, and a finite complex — which
+    // is enough to reach every combination of fold outcomes at this arity.
+    const thirds: [string, () => Expression][] = [
+      ['c=2', () => ce.number(2)],
+      ['c=NaN', () => ce.NaN],
+      ['c=Inf', () => ce.PositiveInfinity],
+      ['c=i', () => ce.I],
+    ];
+    const seen: Divergences = {};
+    for (const [rowC, third] of thirds)
+      for (const [rowA, x] of battery)
+        for (const [rowB, y] of battery) {
+          const z = third();
+          const l = spell(legacy.numericTypeHandler([x, y, z]));
+          const t = spell(
+            twin.numericTypeHandler([
+              describeOperand(x),
+              describeOperand(y),
+              describeOperand(z),
+            ])
+          );
+          if (l !== t) seen[`${rowA}|${rowB}|${rowC}`] = [l, t];
+        }
+    expect(seen).toEqual({});
   });
 });
 

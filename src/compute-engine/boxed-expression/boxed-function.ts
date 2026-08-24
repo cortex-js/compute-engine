@@ -4955,10 +4955,21 @@ function type(expr: BoxedFunction): Type {
       // `describe` must not be attributed to this handler.
       let calculatedType: Type | TypeString | BoxedType | undefined;
       if (def.typeHandlerKind === 'types') {
-        const strippedFor = (i: number) =>
-          def.resolvedMissingBehavior === 'propagate'
-            ? operandTypes?.[i]
-            : undefined;
+        const strippedFor = (i: number) => {
+          if (def.resolvedMissingBehavior !== 'propagate') return undefined;
+          const stripped = operandTypes?.[i];
+          // A BARE `missing` operand strips to `never`, and a `never`-typed
+          // descriptor proves numeric claims vacuously (`never` is the
+          // bottom type, so it matches `real`): `Sin(Missing)` would claim
+          // `finite_real` where the expressions shape — reading the
+          // unstripped `missing` — claims `finite_number`. There is no
+          // present-value component to type for a bare marker, so the
+          // descriptor keeps the operand's own type and the absorption
+          // machinery downstream owns the absent case; the strip applies
+          // only to genuine unions (`integer | missing` → `integer`).
+          if (stripped === 'never') return undefined;
+          return stripped;
+        };
         const descriptors = expr.ops.map((x, i) =>
           describeOperand(x, strippedFor(i))
         );

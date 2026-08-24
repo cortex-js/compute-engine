@@ -1360,8 +1360,9 @@ type?: (
    exact-comparison audit of §4.3. A conversion is proven by the parity
    harness (§5.5).
 
-   **Status: IN PROGRESS — batch 1 landed 2026-08-24; the constant-handler
-   retirement sweep followed it the same day.** Batch 1 covered all of
+   **Status: IN PROGRESS — batch 1 landed 2026-08-24, the constant-handler
+   retirement sweep followed it, and batch 2 (the numeric families) landed
+   the same day.** Batch 1 covered all of
    `library/number-theory.ts`, `library/distributions.ts` and
    `library/combinatorics.ts`'s constant handlers, plus `DigitCount` and
    the two structure-free `library/control-structures.ts` handlers
@@ -1516,7 +1517,7 @@ type?: (
    restriction to a NaN-free real base), and three-valued `>`, `≥`, `<`,
    `≤`, `=` and `≠` against a machine constant. A direct A/B suite
    (`test/compute-engine/type-handler-twins.test.ts`) drives both shapes
-   over a 44-row operand battery and asserts the mismatch set against an
+   over a 50-row operand battery and asserts the mismatch set against an
    explicit divergence table, so a NEW divergence and a VANISHED one both
    fail. Identical on every battery row: `operandLiteralValue`,
    `numericTypeHandler`, `roundingFunctionType`, `extremumType`,
@@ -1564,22 +1565,126 @@ type?: (
    That is a deliberate soundness correction, not a parity fix: the
    expressions shape was wrong.
 
-   Still to convert: the helper-bound numeric families (`arithmetic`,
-   `trigonometry`, `special-functions`, `statistics` — their conversion
-   now has the descriptor twins it was waiting on), the structure-bound
-   control-structure/core handlers, the collection files,
-   and the O7-blocked trio above; the seven impure handlers stay with
-   §5.4. After the retirement sweep the only nullary constant `type`
-   handlers left in `library/*.ts` are the thirteen the class boundary
-   above forbids retiring, all of them returning bare `number` or bare
-   `finite_number`: ten `type: () => 'number'` in
-   `library/statistics.ts` (`Mean`, `Median`, `Variance` and their
-   neighbours) and three `type: () => 'finite_number'` in
-   `library/special-functions.ts` (`JacobiTheta`, `DedekindEta`,
-   `EisensteinE`). Deleting any of those would activate the no-handler
-   fallback narrowing and change derived types, which is exactly what the
-   boundary exists to prevent. Every other handler still on the
-   expressions shape reads its operands.
+   **Batch 2: the helper-bound numeric families, 60 operators (landed
+   2026-08-24).** The families the twins were built for are now on the
+   `'types'` shape, every one of them with a verbatim legacy copy in the
+   shadow fixture, so the count below is exactly the length of
+   `LEGACY_TYPE_HANDLERS` minus batch 1's six:
+
+   - **`library/arithmetic.ts` — 26.** The rounding family (`Ceil`,
+     `Floor`, `Truncate`, `Round`), `Fract`, `LambertW`, the four Bessel
+     and four Airy functions, `ElementMax`/`ElementMin`, `Clamp`, the
+     extremum family (`Max`, `Min`, `Supremum`, `Infimum`), `Sum`,
+     `Product`, `Measurement`, and three that needed their own
+     translation rather than a shared helper: `Zeta` (a literal-1 gate
+     for the harmonic pole in front of the generic numeric claim),
+     `Round` (its optional second operand), and `Negate` (which echoes
+     the operand type with every range REFLECTED about zero, descending
+     into structural types).
+   - **`library/trigonometry.ts` — 15.** `Degrees`, `DMS`, `Arctan2`,
+     `Haversine`, `Arctan`, plus ten of the heads built by the
+     `trigFunction` factory. The factory grew a per-head shape parameter
+     for this: the shape is a per-head decision, not a per-file one, so
+     `trigFunction('Sin', …, 'types')` converts that head while its
+     neighbours stay on the expressions shape. Ten heads convert because
+     both shapes derive the same type for them; `Cot`, `Csc`, `Coth` and
+     `Csch` are held back because the disproof of their pole at zero
+     rides the operand's SIGN, which the descriptor does not carry for a
+     compound operand — the O7 channel. The witness is `Coth(π/2)`: the
+     expressions shape answers `finite_real`, the descriptor shape
+     `number`. Wider, so sound, but a divergence, and §5.5's baseline
+     rule wants a conversion to be type-identical.
+   - **`library/special-functions.ts` — 7.** `EllipticF`,
+     `Hypergeometric2F1`, `Hypergeometric1F1`, `AppellF1`, and the three
+     nullary constants `JacobiTheta`, `DedekindEta`, `EisensteinE`.
+   - **`library/sets.ts` — 2.** `Adjoin` and `QuotientRing` (this file
+     was missing from the earlier "still to convert" list).
+   - **`library/statistics.ts` — 10.** The ten nullary `number`
+     constants: `Mean`, `Median`, `Variance`, `PopulationVariance`,
+     `StandardDeviation`, `PopulationStandardDeviation`, `Kurtosis`,
+     `Skewness`, `Mode`, `InterquartileRange`.
+
+   The last two bullets settle a question the retirement sweep left open.
+   Thirteen nullary constant handlers — the ten statistics `number` ones
+   and the three special-functions `finite_number` ones — cannot be
+   RETIRED, because deleting a constant `number`/`finite_number` handler
+   activates the no-handler fallback narrowing at the call site and
+   changes derived types. That boundary forbids DELETION, not shape
+   conversion: each of the thirteen was converted in place instead, so
+   `library/*.ts` no longer holds any nullary constant handler on the
+   expressions shape.
+
+   One call-site fix rode along, found by the conversion. At a stripped
+   parameter position the call site hands the descriptor the operand's
+   `missing`-stripped type; a BARE `missing` operand strips to `never`,
+   and `never` is the bottom type, so it is a subtype of everything and
+   proves every numeric claim vacuously — `Sin(Missing)` claimed
+   `finite_real` where the expressions shape, reading the unstripped
+   `missing`, claims `finite_number`. The strip now applies only to
+   genuine unions (`integer | missing` → `integer`) and keeps the
+   operand's own type for a bare marker
+   (`strippedFor`, `boxed-expression/boxed-function.ts`).
+
+   **The descriptor's `finite` fact now reads an APPLICATION's value
+   channel (user-ruled 2026-08-24, "option 1").** The generic-point
+   convention is deliberately optimistic about finiteness: an operator
+   that is finite at a generic point claims a finite result type, and a
+   wide `number` result type means "not decided", never "non-finite is
+   impossible". The value channel is that convention's refutation
+   backstop. `describe()` already read it for a literal and for a
+   symbol's held value; it did not for a compound operand, so with
+   `w: number := +∞` the operand `Abs(w)` — whose result type stays wide
+   — looked finite and `Ceil(Abs(w))` derived `finite_integer` for an
+   expression whose `.N()` is `+oo`. It now falls back on
+   `Expression.isFinite` for a function application whose type matches
+   `number`, which is the exact read the expressions-shape gate
+   (`provablyNonFiniteNumber`, `boxed-expression/numerics.ts`) performed
+   on every derivation, so it adds no impurity relative to the shape
+   being replaced. The `number` test is load-bearing: `isFinite === false`
+   also means "not a number at all", so a `List`, a `Tuple` or an
+   application of unknown result type answers `false` there without being
+   an infinity. The SIGN channel is deliberately NOT extended the same
+   way — reading an application's `.sgn` dispatches to the unaudited
+   operator `sgn` handlers, which is the O7 hold, and the remaining
+   divergence is pinned as such (`Abs(hnan)` in the `operandSgn` table of
+   `type-handler-twins.test.ts`). Cost measured, not assumed: the
+   `arithmetic` + `trigonometry` suites run in the same time with and
+   without the read (5.0–6.3 s against 5.7–5.8 s over three interleaved
+   pairs), because it runs once per operand per CACHED derivation rather
+   than in a per-call loop.
+
+   The measurement behind that ruling also mapped who consults a derived
+   type closely enough to be hurt by an unsound narrowing. `simplify()`
+   substitutes an assigned symbol's DECLARED type for its held value
+   before the rules run, so the rule engine never sees the held `+∞` at
+   all; Rubi's conditions are gated on literal kinds, so they never reach
+   a compound operand's finiteness. Fungrim's guard closures
+   (`buildGuardClosures`, `fungrim/loader.ts`) are the one channel that
+   consults it and was untested: the ZZ/QQ/RR/CC guards read `isFinite`,
+   `isInteger`, `isReal`, `isRational` and `type.matches('complex')` off
+   whatever subtree the wildcard bound, and the 1435-identity corpus
+   never binds a converted head over a wide-declared non-finite symbol.
+   Before the fix all three guards ACCEPTED `Ceil(Abs(w))` (= +∞) and
+   `Ceil(Abs(hnan))` (= NaN) through the `replace()` route; they now
+   reject both, pinned in `fungrim-loader.test.ts`.
+
+   The alternative was measured and REJECTED. "Contract-only" descriptor
+   semantics — a descriptor reports only what the declared type and
+   recorded assumptions prove, never what a symbol currently holds —
+   would make the descriptor channel a clean contract, but it cuts the
+   wrong way: because the generic-point convention is optimistic by
+   design, removing the value channel produces NARROWING (claiming
+   `finite_integer` for `+∞`), not the widening a lost channel usually
+   costs. The temporary `CE_DESCRIBE_CONTRACT_ONLY` gate that measured it
+   is deleted.
+
+   Still to convert: the structure-bound control-structure/core
+   handlers, the collection files, the O7-blocked heads (`Cot`, `Csc`,
+   `Coth`, `Csch`, the `Binomial`/`Choose`/`Pochhammer` trio, the Γ
+   family, `Factorial`, and the log heads), and the bounded inverse trig
+   heads whose declared-range divergences are listed with the twins
+   above; the seven impure handlers stay with §5.4. Every handler still
+   on the expressions shape reads its operands.
 
    | What the handler reads today | What it reads instead | Meaning |
    | --- | --- | --- |
@@ -1732,7 +1837,7 @@ excludes. `isSame(0)`/`isSame(1)` are `false` on anything but a literal.
 
 | Consumers | What the read decides |
 | --- | --- |
-| `numericTypeHandler` (about 30 operators: the circular and hyperbolic functions, `Fract`, `LambertW`, the four Bessel and four Airy functions, `ElementMax`/`ElementMin`, `Clamp`, `Degrees`, `DMS`, `Arctan2`, `Haversine`, the hypergeometric family, `AppellF1`, two-argument `Gamma`) | A provably non-finite operand widens the result to `number` (`Sin(+∞)` is NaN); otherwise `finite_real` / `finite_number`. |
+| `numericTypeHandler` (about 30 operators: the circular and hyperbolic functions, `Fract`, `LambertW`, the four Bessel and four Airy functions, `ElementMax`/`ElementMin`, `Clamp`, `Degrees`, `DMS`, `Arctan2`, `Haversine`, the hypergeometric family, `AppellF1`, two-argument `Gamma` — but see below) | A provably non-finite operand widens the result to `number` (`Sin(+∞)` is NaN); otherwise `finite_real` / `finite_number`. `Gamma` is listed for its two-argument arm only, and that arm cannot be converted on its own: the same handler dispatches arity 1 to `gammaPoleType`, whose sign gate is O7-blocked, so the whole `Gamma` definition holds. |
 | `logType` (`Ln`, `Log`, `Lb`, `Lg`), `poleReciprocalType` (`Tan`, `Sec`, `Csc`, `Cot`, `Coth`, `Csch`), `boundedInverseTrigType` (`Arcsin`, `Arccos`, `Arcsec`, `Arccsc`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`, `Arcosh`, `EllipticK`, one-argument `EllipticE`, `InverseHaversine`), `arctanType`, `Sinh`/`Cosh`/`Tanh`/`Sech`, `gammaPoleType`, `roundingFunctionType` (`Round`, `Ceil`, `Floor`, `Truncate`), `Abs` | Pole, `±∞` and NaN handling: `Round(+∞)` is `non_finite_number`, `Coth(+∞)` is `finite_real`, `\|NaN\|` is `number` (the only `Abs` read). |
 | `Add`, `Multiply`, `Divide`, `Power`, `Root`, `Sqrt` | `x + ∞` with `x: real` is `non_finite_number`; `∞ + (−∞)` is `number`; `2/∞` is `finite_integer`; `∞^2` is `non_finite_number`. |
 | `Erf`, `Erfc`, `Erfi`, `ErfInv`, `SinIntegral`, `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `ExpIntegralEi`, `EllipticE` (two-argument), `EllipticF`, `EllipticPi`, `AGM`, `Choose`/`Binomial`, `Pochhammer` | Any non-finite operand widens to `number`. |
@@ -1748,6 +1853,15 @@ propagation through `Abs`/`Sqrt`/`Root`/`Power`/`Divide` (`logType` reads
 as *type, plus the NaN literal, plus the held value* covers everything
 except that last propagation, whose loss is confined to logarithm bases
 and tuple children that are themselves compound.
+
+Superseded by the 2026-08-24 ruling recorded in §5.3 step 3: that last
+propagation is no longer lost either. `describe()`'s `finite` fact falls
+back on `Expression.isFinite` for a function APPLICATION whose type
+matches `number`, so the definition is now *type, plus the NaN literal,
+plus a symbol's held value, plus an application's own finiteness*. The
+motivation was soundness rather than precision — without the application
+read the descriptor claimed `finite_integer` for `Ceil(Abs(w))` with
+`w := +∞`.
 
 #### `sgn` — 17 handlers, every one a pole or branch decision
 

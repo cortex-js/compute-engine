@@ -1787,3 +1787,114 @@ describe('M5 negative controls: guards fail closed without assumptions', () => {
     staysPut(['Totient', 'j']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Guard closures over a COMPOUND subject whose non-finiteness is held-value
+// derived
+// ---------------------------------------------------------------------------
+
+describe('type guards over a compound subject with a held non-finite value', () => {
+  // The ZZ/QQ/RR/CC guards read the derived TYPE of whatever subtree the
+  // wildcard bound (`isFinite`, `isInteger`, `isReal`, `isRational`,
+  // `type.matches('complex')`), so a subject whose result type is wrong is a
+  // wrong-answer channel, not just a missed rewrite. The subjects below are
+  // the case the 1435-identity corpus never produces: a CONVERTED head
+  // (`Ceil`) applied over a symbol that holds a non-finite value behind a
+  // wide declaration, so the non-finiteness exists only in the value channel
+  // and the head's own result type is the optimistic generic-point claim.
+  //
+  // Before `describe()` (`boxed-expression/operand-descriptor.ts`) read an
+  // APPLICATION's finiteness from the value channel, `Ceil(Abs(w))` with
+  // `w := +∞` derived `finite_integer` and every guard here accepted it —
+  // `Ceil(Abs(w)).N()` is `+oo`. `Ceil(Abs(hnan))` with `hnan := NaN`
+  // derived `finite_integer` too, so the integer guard accepted NaN.
+  //
+  // The rules are driven with `replace()` rather than `simplify()`: simplify
+  // substitutes an assigned symbol's DECLARED type for its held value before
+  // the rules run, so the held `+∞` never reaches a guard on that route and
+  // the exposure is invisible there.
+  const syntheticData: FungrimRuleData = {
+    manifest: {
+      schemaVersion: 1,
+      generator: 'test',
+      upstream: { name: 'test', snapshotSha256: null, translator: null },
+      slice: {
+        classes: ['identity'],
+        guardLevels: ['complex-domain'],
+        entries: 3,
+      },
+      counts: {
+        rules: 3,
+        byPurpose: { simplify: 3 },
+        byClass: { identity: 3 },
+        byTarget: { simplify: 3 },
+      },
+      ledger: {},
+    },
+    declarations: {
+      IntGuardF: { signature: '(complex) -> complex' },
+      RealGuardF: { signature: '(complex) -> complex' },
+      CxGuardF: { signature: '(complex) -> complex' },
+    },
+    rules: (
+      [
+        ['IntGuardF', 'integer'],
+        ['RealGuardF', 'real'],
+        ['CxGuardF', 'complex'],
+      ] as const
+    ).map(([head, t]) => ({
+      id: `fungrim:test-${t}-guard`,
+      match: [head, '_z'],
+      replace: 0,
+      guards: [{ k: 'type' as const, wc: '_z', t }],
+      purpose: 'simplify' as const,
+      target: 'simplify' as const,
+      class: 'identity' as const,
+      heads: [head],
+      topics: ['test'],
+    })),
+  };
+
+  /** Whether the guarded rule for `head` fires on `subject`. */
+  function fires(head: string, subject: unknown): boolean {
+    const ce = new ComputeEngine();
+    loadIdentities(ce, { data: syntheticData });
+    ce.declare('w', 'number');
+    ce.assign('w', ce.number(Infinity));
+    ce.declare('hnan', 'number');
+    ce.assign('hnan', ce.NaN);
+    const out = ce
+      .expr([head, subject] as never)
+      .replace(ce.rules(ce.simplificationRules));
+    return out !== null && out.isSame(0);
+  }
+
+  it('a finite literal subject still discharges all three guards', () => {
+    // The positive control: the guards are not simply blocked for everything.
+    expect(fires('IntGuardF', 3)).toBe(true);
+    expect(fires('RealGuardF', 3)).toBe(true);
+    expect(fires('CxGuardF', 3)).toBe(true);
+  });
+
+  it('Ceil(Abs(w)) with w := +∞ discharges no guard', () => {
+    expect(fires('IntGuardF', ['Ceil', ['Abs', 'w']])).toBe(false);
+    expect(fires('RealGuardF', ['Ceil', ['Abs', 'w']])).toBe(false);
+    expect(fires('CxGuardF', ['Ceil', ['Abs', 'w']])).toBe(false);
+  });
+
+  it('Ceil(Abs(hnan)) with hnan := NaN discharges no guard', () => {
+    expect(fires('IntGuardF', ['Ceil', ['Abs', 'hnan']])).toBe(false);
+    expect(fires('RealGuardF', ['Ceil', ['Abs', 'hnan']])).toBe(false);
+    expect(fires('CxGuardF', ['Ceil', ['Abs', 'hnan']])).toBe(false);
+  });
+
+  it('the one-level subject Abs(w) was already blocked by the symbol-level read', () => {
+    // `describe()` has always read a SYMBOL's held value, so `Abs(w)` typed
+    // `real<0..>` with `isFinite === false` even before the application-level
+    // read landed. These rows separate the two backstops: this one was never
+    // exposed, the `Ceil(...)` ones above were.
+    expect(fires('IntGuardF', ['Abs', 'w'])).toBe(false);
+    expect(fires('RealGuardF', ['Abs', 'w'])).toBe(false);
+    expect(fires('CxGuardF', ['Abs', 'w'])).toBe(false);
+  });
+});

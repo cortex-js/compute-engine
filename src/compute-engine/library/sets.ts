@@ -23,7 +23,11 @@ import {
   subjectOf,
 } from '../boxed-expression/constraint-subject.js';
 import { domainToType } from '../boxed-expression/utils.js';
-import { adjoinType, quotientRingType } from './type-handlers.js';
+// The `'types'`-shape twins of the shared type-handler helpers: they take
+// one `OperandDescriptor` per operand instead of the operand expression,
+// which is what the `typeHandlerKind: 'types'` flag on the two definitions
+// below selects.
+import { adjoinType, quotientRingType } from './type-handlers-types.js';
 import {
   declareTypeSaturatedSet,
   enumerableFromAllSources,
@@ -812,6 +816,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // undeclared free variable, and a narrower parameter type would INFER a
     // declaration for it (`\Z[x]` retyping `x` for the engine's lifetime).
     signature: '(set<any>, any+) -> set',
+    typeHandlerKind: 'types',
     type: adjoinType,
   },
 
@@ -836,6 +841,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // `any` for the modulus: see the note on `Adjoin` — a narrower parameter
     // type would infer a declaration for a free `n`/`p`.
     signature: '(set<any>, any) -> set',
+    typeHandlerKind: 'types',
     type: quotientRingType,
   },
 

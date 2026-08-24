@@ -174,7 +174,8 @@ function structureOfExpression(op: Expression): OperandStructure | undefined {
  * particular the sign of a function APPLICATION comes only from its type
  * (a ranged result such as `Abs`'s `real<0..>`) — the operator `sgn`
  * handlers are never invoked here, so a compound operand of signless type
- * answers `undefined`.
+ * answers `undefined`. Its FINITENESS does fall back on the value channel
+ * (`Expression.isFinite`), for the reason given at that branch below.
  */
 export function describe(
   op: Expression,
@@ -201,6 +202,31 @@ export function describe(
       // value decides nothing.
       const held = op.valueDefinition?.value;
       if (held !== undefined && isNumber(held)) finite = held.isFinite;
+    } else if (isFunction(op) && isSubtype(type, 'number')) {
+      // The value channel is the REFUTATION backstop for the generic-point
+      // convention. A result type is deliberately optimistic about
+      // finiteness: an operator that is finite at a generic point claims a
+      // finite result type, and a wide `number` result type means "not
+      // decided", never "non-finite is impossible". So a compound operand
+      // can be provably non-finite through the values it holds — `Abs(w)`
+      // with `w: number := +∞`, `Abs(hnan)` with `hnan := NaN` — while its
+      // result type stays wide. The type channel alone cannot carry that
+      // refutation, and without this read a consumer such as `Ceil(Abs(w))`
+      // narrows to `finite_integer` for an expression whose `.N()` is
+      // `+oo`. `Expression.isFinite` on an application is the exact read
+      // the expressions-shape gate performed on every derivation
+      // (`provablyNonFiniteNumber`, `boxed-expression/numerics.ts`), so it
+      // adds no impurity relative to the shape being replaced.
+      //
+      // The `number` type test is part of that gate and is load-bearing:
+      // `isFinite === false` also means "not a number at all", so a
+      // `List`, a `Tuple` or an application of unknown result type answers
+      // `false` there without being an infinity.
+      //
+      // The SIGN channel below is deliberately NOT extended the same way:
+      // reading an application's `.sgn` dispatches to the operator `sgn`
+      // handlers, which have not been audited for purity.
+      finite = op.isFinite;
     }
   }
 

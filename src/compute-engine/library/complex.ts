@@ -20,6 +20,8 @@ import {
   signFromBounds,
 } from '../boxed-expression/constraint-subject.js';
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import { neg } from '../numerics/rationals.js';
 
 /**
  * Assumption-based sign fallback for the part extractors
@@ -81,8 +83,16 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         const op = ops[0].numericValue;
         // A real value is its own real part: return the operand unchanged so an
         // exact real (`1/2`, `√2`) stays exact instead of being rounded to a
-        // float. Only a genuinely complex value extracts a (machine) real part.
+        // float. Only a genuinely complex value extracts a real part.
         if (typeof op === 'number' || op.im === 0) return ops[0];
+        // An exact complex value carries its real part as an exact component
+        // (a rational multiple of a square root): read that component rather
+        // than the numeric projection, so `Re(1/3 + 2i/5)` is `1/3` and not a
+        // 21-digit approximation of it.
+        if (op instanceof ExactNumericValue)
+          return ce.number(
+            ce._numericValue({ rational: op.rational, radical: op.radical })
+          );
         return ce.number(op.bignumRe ?? op.re);
       },
     },
@@ -116,6 +126,13 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
         if (typeof op === 'number' || op.im === 0) return ce.Zero;
+        // Exact operand: the imaginary part is an exact component too
+        // (`Im(1/3 + 2i/5)` is `2/5`, `Im(√2·i)` is `√2`). `op.im` is the
+        // machine projection of that component, so it must not be the source.
+        if (op instanceof ExactNumericValue)
+          return ce.number(
+            ce._numericValue({ rational: op.imRational, radical: op.imRadical })
+          );
         return ce.number(op.im);
       },
     },
@@ -206,6 +223,20 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
         if (typeof op === 'number' || op.im === 0) return ops[0];
+        // Negating the exact imaginary component keeps an exact operand exact
+        // (`Conjugate(1/3 + 2i/5)` is `1/3 - 2i/5`), which is what makes
+        // `z · Conjugate(z)` — the natural spelling of `|z|²` — answer with
+        // the exact `61/225`. Going through `ce.complex(op.re, -op.im)` would
+        // round both components to machine floats first.
+        if (op instanceof ExactNumericValue)
+          return ce.number(
+            ce._numericValue({
+              rational: op.rational,
+              radical: op.radical,
+              imRational: neg(op.imRational),
+              imRadical: op.imRadical,
+            })
+          );
         return ce.number(ce.complex(op.re, -op.im));
       },
     },

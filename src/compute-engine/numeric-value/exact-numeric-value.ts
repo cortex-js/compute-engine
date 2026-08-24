@@ -1116,8 +1116,13 @@ export class ExactNumericValue extends NumericValue {
       // will get normalized to the rational numerator)
       if (isMachineRational(this.rational)) {
         const [n, d] = this.rational;
-        if (Math.abs(n * d) > SMALL_INTEGER)
+        if (Math.abs(n * d) > SMALL_INTEGER) {
+          // Too large for the `radical` field, but the root is still exact
+          // when it is rational (√(10^12/9) = 10^6/3).
+          const exact = exactRationalSqrt(BigInt(Math.abs(n)), BigInt(d));
+          if (exact) return this._fromExactSqrt(exact, n < 0);
           return this.factory(this.bignumRe).sqrt();
+        }
         if (n > 0) return this.clone({ radical: n * d, rational: [1, d] });
 
         //
@@ -1130,9 +1135,27 @@ export class ExactNumericValue extends NumericValue {
           imRadical: -n * d,
         });
       } else {
-        // If we have a big rational, we convert to float
-        // (we can't keep the radical part)
-        return this.factory(this.bignumRe).sqrt();
+        // Big rational: the radical part can't hold a value this large, but a
+        // rational root is still exact (√(10^402) = 10^201). Deciding this
+        // with bigint arithmetic keeps the reduction independent of the
+        // engine's precision setting.
+        const [n, d] = this.rational as [bigint, bigint];
+        const exact = exactRationalSqrt(n < 0n ? -n : n, d);
+        if (exact) return this._fromExactSqrt(exact, n < 0n);
+
+        // Irrational root: the float lane. Narrowing the radicand to the
+        // engine's numeric format comes first, because that lane's own square
+        // root is the more accurate one (`Math.sqrt` on a double beats a
+        // BigDecimal root taken at machine precision). But the narrowing can
+        // destroy a radicand a machine-precision engine cannot hold — 10^402
+        // overflows to +∞, 10^-402 underflows to 0 — and the root of that is
+        // no approximation of anything. Fall back to the bignum lane, where
+        // the radicand is still finite and non-zero, only in those cases.
+        // (`n > 0n` here, so the value itself is neither zero nor negative.)
+        const approx = this.factory(this.bignumRe);
+        if (n > 0n && (approx.isPositiveInfinity || approx.isZero))
+          return this.factory(this.bignumRe.sqrt());
+        return approx.sqrt();
       }
     }
 
@@ -1141,6 +1164,16 @@ export class ExactNumericValue extends NumericValue {
       if (Number.isInteger(re)) return this.clone(re);
     }
     return this.factory(this.bignumRe).sqrt();
+  }
+
+  /**
+   * Assemble a `sqrt()` result from the exact rational square root of the
+   * magnitude: `√(n/d)` when the value was non-negative, `(√(n/d))·i` when it
+   * was negative (`√(−10^12/9) = (10^6/3)·i`).
+   */
+  private _fromExactSqrt(root: Rational, negative: boolean): NumericValue {
+    if (!negative) return this.clone({ rational: root });
+    return this.clone({ rational: [0, 1], imRational: root, imRadical: 1 });
   }
 
   gcd(other: NumericValue): NumericValue {
@@ -1578,6 +1611,43 @@ function componentToExpression(
     ];
 
   return ['Multiply', rationalExpr(rational), ['Sqrt', radical]];
+}
+
+/**
+ * The exact square root of the rational `n/d` (`n ≥ 0`, `d > 0`, in lowest
+ * terms), or `null` when that root is irrational. Because the fraction is
+ * reduced, `√(n/d)` is rational exactly when `n` and `d` are both perfect
+ * squares.
+ *
+ * Everything is done in bigint arithmetic: the answer is then exact for
+ * radicands far beyond a double's range, and does not depend on the engine's
+ * precision setting (converting the radicand to a machine float first made
+ * `√(10^402)` overflow to +∞ instead of reducing to 10^201).
+ */
+function exactRationalSqrt(n: bigint, d: bigint): Rational | null {
+  const rn = perfectSquareRoot(n);
+  if (rn === null) return null;
+  const rd = perfectSquareRoot(d);
+  if (rd === null) return null;
+  return [rn, rd];
+}
+
+/**
+ * `√n` when the non-negative bigint `n` is a perfect square, `null` otherwise.
+ * Newton's method from an upper bound (half the bit length, rounded up)
+ * converges to `⌊√n⌋`; a float `Math.sqrt` seed would be unusable here, since
+ * it loses the low digits of any value past 2^53.
+ */
+function perfectSquareRoot(n: bigint): bigint | null {
+  if (n < 0n) return null;
+  if (n < 2n) return n;
+  let x = 1n << ((BigInt(n.toString(2).length) + 1n) / 2n);
+  for (;;) {
+    const y = (x + n / x) >> 1n;
+    if (y >= x) break;
+    x = y;
+  }
+  return x * x === n ? x : null;
 }
 
 /**
