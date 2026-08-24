@@ -4595,6 +4595,7 @@ references to the definition in bound expressions.
 type TypeProvenanceEntry = {
   type: BoxedType;
   kind: "declared" | "auto-declared" | "inferred" | "assumed" | "value-derived";
+  previousType: BoxedType;
   axis: "type" | "effects";
   cause: Expression;
   epoch: number;
