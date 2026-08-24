@@ -283,7 +283,7 @@ type string is Comparable {
     const ce = engineFor(STRING_ONLY);
     const expr = ce.box(['compare', { str: 'a' }, 3] as any);
     expect(expr.toString()).toBe(
-      'compare("a", Error(ErrorCode("incompatible-type", "string", "finite_integer"), 3))'
+      'compare("a", Error(ErrorCode("incompatible-type", "string", "3"), 3))'
     );
     expect(expr.type.toString()).toBe('error');
   });
@@ -369,7 +369,7 @@ type integer is Beta {
   function pair(self: Self, other: integer) -> string { "b" }
 }`);
     expect(ce.box(['pair', { str: 'a' }, 3] as any).toString()).toBe(
-      'pair("a", Error(ErrorCode("incompatible-type", "string", "finite_integer"), 3))'
+      'pair("a", Error(ErrorCode("incompatible-type", "string", "3"), 3))'
     );
   });
 
@@ -721,7 +721,7 @@ const r = Map(Negatable.negated, [1, 2])`
     // qualified spelling of Appendix A's `compare("a", 3)`.
     const mismatch = member({ str: 'a' }, 3);
     expect(mismatch.toString()).toBe(
-      'ProtocolMember("Comparable", "compare", "a", Error(ErrorCode("incompatible-type", "string", "finite_integer"), 3))'
+      'ProtocolMember("Comparable", "compare", "a", Error(ErrorCode("incompatible-type", "string", "3"), 3))'
     );
     expect(mismatch.type.toString()).toBe('error');
 

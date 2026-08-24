@@ -8,6 +8,7 @@ import {
   TensorField,
 } from '../global-types.js';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards.js';
+import { stripNumericRanges } from '../../common/type/utils.js';
 
 // Lazy reference to the n-ary `add()` from arithmetic-add.ts, registered by
 // `init-lazy-refs.ts` — a static import here would close a dependency cycle
@@ -543,8 +544,16 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
     if (expr.symbol === 'ImaginaryUnit') return 'complex128';
   }
 
-  if (isNumber(expr))
-    switch (expr.type.type) {
+  if (isNumber(expr)) {
+    // A literal's public type carries its value or sign since ruling O9
+    // (`5`, `finite_rational<0.5..0.5>`, `(finite_real<0..>) & !0`) — an
+    // OBJECT node, which a string switch would send to the `expression`
+    // dtype, silently demoting every numeric tensor to the exact field
+    // (`.N()` then kept rationals, `MatrixRank` stayed inert). Project the
+    // decoration back to its bare tier first; a type that is not a
+    // decorated numeric tier passes through unchanged.
+    const tier = stripNumericRanges(expr.type.type);
+    switch (typeof tier === 'string' ? tier : 'expression') {
       case 'real':
       case 'rational':
       case 'finite_real':
@@ -574,6 +583,7 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
       default:
         return 'expression';
     }
+  }
 
   return 'expression';
 }

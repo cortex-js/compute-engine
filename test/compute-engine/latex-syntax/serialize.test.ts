@@ -269,7 +269,7 @@ describe('LATEX', () => {
           ErrorCode,
           'incompatible-type',
           'string',
-          'finite_integer',
+          '22',
         ],
         22,
         [

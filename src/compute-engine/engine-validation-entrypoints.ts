@@ -102,9 +102,19 @@ export function createTypeErrorExpression(
   where?: string | Expression
 ): Expression {
   if (actual) {
+    // `actual` may be a raw `Type`, which since ruling O9 (a literal's
+    // public type is its literal type) is often an OBJECT node (`{kind:
+    // 'value', value: 5}`) rather than a primitive string — `.toString()`
+    // on one prints "[object Object]". A `BoxedType` has no `kind`
+    // property, so its presence tells the two apart without an
+    // `instanceof` (which fails across plugin-bundle boundaries).
+    const actualText =
+      typeof actual === 'object' && 'kind' in actual
+        ? typeToString(actual as Type)
+        : actual.toString();
     return createErrorExpression(
       engine,
-      ['incompatible-type', displayedExpectedType(expected), actual.toString()],
+      ['incompatible-type', displayedExpectedType(expected), actualText],
       where
     );
   }

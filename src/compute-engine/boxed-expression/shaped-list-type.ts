@@ -1,8 +1,12 @@
 import type { Type, ListType } from '../../common/type/types.js';
-import { isAtomicValueType, widen } from '../../common/type/utils.js';
+import {
+  isAtomicValueType,
+  stripNumericRanges,
+  widen,
+} from '../../common/type/utils.js';
 
 import type { Expression } from '../global-types.js';
-import { isFunction, isSymbol } from './type-guards.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
 
 /**
  * The result of analyzing one level of a (possibly nested) literal-`List`
@@ -118,7 +122,17 @@ function analyzeLevel(ops: ReadonlyArray<Expression>): ShapeAnalysis | null {
  * claim.
  */
 function classifyCell(op: Expression): Type | null {
-  const t = op.type.type;
+  // A number literal's public type carries its value or sign (ruling O9:
+  // `finite_rational<0.5..0.5>`, `(finite_real<0..>) & !0`) — decorated
+  // OBJECT nodes that `isAtomicValueType` blocks, which silently withdrew
+  // the shape claim from every exact-rational or radical matrix
+  // (`MatrixRank` of `[[1/2, 1/3], …]` went inert). The claim is about the
+  // cell's TIER, so project a literal's decoration back to it. Non-literal
+  // ranged cells (an unevaluated `Abs(x)`) keep blocking, as they did
+  // before literals carried these types.
+  const t = isNumber(op)
+    ? stripNumericRanges(op.type.type)
+    : op.type.type;
 
   // `unknown`/`any` govern cell classification only via the fold: an
   // inference-pending BARE SYMBOL folds to `number`; anything else typed

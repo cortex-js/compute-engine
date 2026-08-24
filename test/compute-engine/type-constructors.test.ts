@@ -221,9 +221,7 @@ describe('ALIAS identity constructor (D10)', () => {
     const ce = new ComputeEngine();
     ce.declareType('secs', 'number', { alias: true });
     expect(ce.box(['secs', 5]).evaluate().toString()).toBe('5');
-    expect(ce.box(['secs', 5]).evaluate().type.toString()).toBe(
-      'finite_integer'
-    );
+    expect(ce.box(['secs', 5]).evaluate().type.toString()).toBe('5');
   });
 
   test('the cast is CHECKED — arity and types', () => {

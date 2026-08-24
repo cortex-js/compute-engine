@@ -234,7 +234,7 @@ describe('Apply', () => {
     expect(evaluate(['f', 42])).toMatchInlineSnapshot(`
       [
         "Error",
-        ["ErrorCode", "incompatible-type", "'function'", "'finite_integer'"],
+        ["ErrorCode", "incompatible-type", "'function'", "'36'"],
         "'36'"
       ]
     `);
@@ -314,7 +314,7 @@ describe('Apply', () => {
     expect(
       ce.box(['Map', 3, ['List', 1, 2]]).errors[0]?.toString()
     ).toBe(
-      'Error(ErrorCode("incompatible-type", "function", "finite_integer"), 3)'
+      'Error(ErrorCode("incompatible-type", "function", "3"), 3)'
     );
   });
 });
@@ -423,12 +423,7 @@ describe('Pipe', () => {
         5,
         [
           "Error",
-          [
-            "ErrorCode",
-            "incompatible-type",
-            "'function'",
-            "'finite_integer'"
-          ],
+          ["ErrorCode", "incompatible-type", "'function'", "'3'"],
           "'3'"
         ]
       ]
@@ -442,7 +437,7 @@ describe('Pipe', () => {
     expect(evaluate(['Pipe', 5, 3])).toMatchInlineSnapshot(`
       [
         "Error",
-        ["ErrorCode", "incompatible-type", "'function'", "'finite_integer'"],
+        ["ErrorCode", "incompatible-type", "'function'", "'3'"],
         "'3'"
       ]
     `));

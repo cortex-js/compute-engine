@@ -214,7 +214,7 @@ describe('Inverse — (T) -> T where T: matrix', () => {
     const e = ce.function('Inverse', [ce.number(4)]);
     expect(e.type.toString()).toBe('error');
     expect(JSON.stringify(e.json)).toBe(
-      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'finite_integer\'"],4]]'
+      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'4\'"],4]]'
     );
   });
 

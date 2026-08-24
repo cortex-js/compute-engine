@@ -645,7 +645,7 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
       const e = ce.box([op, 5, 2] as any);
       expect(e.isValid).toBe(false);
       expect(e.toString()).toContain(
-        'incompatible-type", "indexed_collection", "finite_integer"'
+        'incompatible-type", "indexed_collection", "5"'
       );
       expect(e.toString()).not.toContain('indexed_collection<unknown>');
     }

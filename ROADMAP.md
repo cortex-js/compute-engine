@@ -420,9 +420,10 @@ sign (and a literal's value) through type derivation" are DONE
    INPUT (`BoxedNumber._literalType`, read through `handlerTypeOf` /
    `operandSgn` / `operandLiteralValue` in `library/type-handlers.ts`),
    widened back to ordinary types on handler OUTPUT (`widenValueTypes`,
-   `common/type/widen-value.ts`). This is ruling O9's first half; the
-   PUBLIC `.type` of a literal is unchanged (O9's second half stays open,
-   below). The constants `ExponentialE` and `Pi` declare value-bracket
+   `common/type/widen-value.ts`). This is ruling O9's first half; since
+   2026-08-23 the PUBLIC `.type` of a number literal is the same literal
+   type (O9's second half, ruled and shipped — see below). The constants
+   `ExponentialE` and `Pi` declare value-bracket
    ranged types (`finite_real<2.718281828459045..2.718281828459046>`), so
    their positivity is a TYPE fact too. Pinned in
    `literal-handler-types.test.ts`; the §5.7 withholding experiments
@@ -459,15 +460,28 @@ What remains, each a separate design task:
   assume-ranged negative bound inside a tuple sum is the same defect
   class, now stripped there too).
 - **O9's second half — the public `.type` of a literal** (`ce.box(21)`
-  answering `21`): open with its default (unchanged). Blast radius
-  MEASURED 2026-08-23 (baseline vs a public-type shim, two full suites):
-  197 failing tests across 61 suites, ~108 exact-string pins; the rest
-  concentrate in generic instantiation — `identity(5)` solves `T = 5`
-  and STORES it — so the flip additionally needs the §4.3 widening at
-  the type-variable instantiation and signature-derivation positions
-  first. Details in `docs/plans/2026-08-22-type-handlers-on-types.md` §6
-  (O9); the measuring harness is checked in under
-  `scripts/withhold-experiment/`.
+  answering `21`): RULED YES and SHIPPED 2026-08-23. The flip landed
+  widening-first, as the measured blast radius (197/61) demanded: type
+  variables widen at the solver boundary (`identity(5)` types
+  `finite_integer`, never stores `T = 5`), derived function-literal
+  signatures, protocol `Self`, and synthesized dictionary/record and
+  shaped-list types all widen literal cargo to tiers, and the tensor
+  dtype classifier and error serialization handle object-node types.
+  Full inventory in `docs/plans/2026-08-22-type-handlers-on-types.md`
+  §6 (O9). What remains from this line: literal types for STRING and
+  BOOLEAN literals (`ce.string('a').type` is still `string`) — neither
+  measured nor ruled — and the impact on Tycho, unknown until measured
+  from Tycho's side.
+- **A value-bounded type variable rejects its own literal.** A declared
+  `(x: T) -> T where T: 5` applied to the literal `5` errors with
+  `incompatible-type` — the solver binds tiers, never value types, so `T`
+  binds `finite_integer`, which fails the declared bound `5`. Pre-existing
+  (verified at commit 5720d468, before the O9 public-type flip: the
+  operand's public type was already the tier there); found by the O9 dual
+  review, 2026-08-23. Only the Epsil lexer test exercises the spelling
+  (`type-variables-epsil.test.ts`, a token-boundary pin), so nothing
+  observable depends on it today. A fix would keep the unwidened actual
+  for a variable whose declared bound has a value component.
 - **Open bounds**: `real<(0..>` does not parse, so "positive" stays the
   `& !0` intersection spelling.
 

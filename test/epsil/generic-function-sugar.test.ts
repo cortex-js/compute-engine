@@ -228,7 +228,7 @@ describe('M2 SUGARED GENERICS — end to end', () => {
     expect(run(`${def}\nf(5)`)).toMatchObject({
       diagnostics: [],
       value: '5',
-      type: 'finite_integer',
+      type: '5',
     });
     expect(run(`${def}\nf("a")`)).toMatchObject({
       diagnostics: [],
@@ -255,7 +255,7 @@ describe('M2 SUGARED GENERICS — end to end', () => {
     expect(run(`${def}\ng(3)`)).toMatchObject({
       diagnostics: [],
       value: '6',
-      type: 'finite_integer',
+      type: '6',
     });
     expect(run(`${def}\ng("a")`).value).toBe(
       'Error(ErrorCode("incompatible-type", "number", "string"), "a")'
@@ -274,7 +274,7 @@ describe('M2 SUGARED GENERICS — end to end', () => {
   test('the effects slot works with the clause', () => {
     expect(
       run('function tick<T>(x: T) random -> T { x }\ntick(4)')
-    ).toMatchObject({ diagnostics: [], value: '4', type: 'finite_integer' });
+    ).toMatchObject({ diagnostics: [], value: '4', type: '4' });
   });
 
   test('a SIGNATURE bound admits a matching function and refuses others', () => {
@@ -569,7 +569,7 @@ describe('WHERE-CLAUSE BINDER — the five declaration spellings', () => {
     expect(run('function f(x: T) -> T where T { x }\nf(5)')).toMatchObject({
       diagnostics: [],
       value: '5',
-      type: 'finite_integer',
+      type: '5',
     });
   });
 
@@ -640,7 +640,7 @@ describe('WHERE-CLAUSE BINDER — the five declaration spellings', () => {
     expect(run('let f: (T) -> T where T = x => x\nf(5)')).toMatchObject({
       diagnostics: [],
       value: '5',
-      type: 'finite_integer',
+      type: '5',
     });
   });
 });
@@ -651,7 +651,7 @@ describe('WHERE-CLAUSE BINDER — binding, bounds and generic behavior', () => {
     // is reached, so `T` has to be seeded from a lexical scan.
     expect(run('function id(x: T) -> T where T { x }\nid(5)')).toMatchObject({
       value: '5',
-      type: 'finite_integer',
+      type: '5',
     });
     expect(run('function id(x: T) -> T where T { x }\nid("a")')).toMatchObject({
       value: '"a"',

@@ -27,7 +27,7 @@ describe('EPSIL STATIC DECLARED-TYPE CHECK — provable mismatches', () => {
     const errors = staticErrors('let s: string = 42');
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain(
-      'The value "42" of type "finite_integer" is not compatible with the declared type "string"'
+      'The value "42" of type "42" is not compatible with the declared type "string"'
     );
   });
 

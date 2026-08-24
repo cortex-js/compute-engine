@@ -247,7 +247,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('1 is an integer', () => {
     expect(checkProps(ce.number(1))).toMatchInlineSnapshot(`
       number literal: true
-      type: finite_integer
+      type: 1
       real: true
       rational: true
       integer: true
@@ -269,7 +269,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('Half is a rational', () => {
     expect(checkProps(ce.expr('Half'))).toMatchInlineSnapshot(`
       number literal: true
-      type: finite_rational
+      type: finite_rational<0.5..0.5>
       real: true
       rational: true
       integer: false
@@ -291,7 +291,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('1/2 is a rational', () => {
     expect(checkProps(ce.expr(['Rational', 1, 2]))).toMatchInlineSnapshot(`
       number literal: true
-      type: finite_rational
+      type: finite_rational<0.5..0.5>
       real: true
       rational: true
       integer: false
@@ -313,7 +313,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('1.5 is a real number', () => {
     expect(checkProps(ce.number(1.5))).toMatchInlineSnapshot(`
       number literal: true
-      type: finite_real
+      type: 1.5
       real: true
       rational: false
       integer: false
@@ -335,7 +335,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('3 is a positive integer', () => {
     expect(checkProps(ce.number(3))).toMatchInlineSnapshot(`
       number literal: true
-      type: finite_integer
+      type: 3
       real: true
       rational: true
       integer: true
@@ -357,7 +357,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('-5 is a negative integer', () => {
     expect(checkProps(ce.number(-5))).toMatchInlineSnapshot(`
       number literal: true
-      type: finite_integer
+      type: -5
       real: true
       rational: true
       integer: true

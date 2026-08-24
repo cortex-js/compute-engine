@@ -133,22 +133,22 @@ describe('a parameterless operand is rejected at every callback slot', () => {
   // not a function at all" needs no arrow detail.
   const EAGER_EXPECTED: Record<string, string> = {
     IndexWhere:
-      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "finite_integer"), 5)',
-    Find: 'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "finite_integer"), 5)',
+      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "5"), 5)',
+    Find: 'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "5"), 5)',
     CountIf:
-      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "finite_integer"), 5)',
+      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "5"), 5)',
     Position:
-      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "finite_integer"), 5)',
+      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> boolean", "5"), 5)',
     ChunkBy:
-      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> unknown", "finite_integer"), 5)',
+      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> unknown", "5"), 5)',
     GroupBy:
-      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> unknown", "finite_integer"), 5)',
+      'Error(ErrorCode("incompatible-type", "(finite_integer) any -> unknown", "5"), 5)',
   };
   it.each([...eager, ...lazy])('%s reports incompatible-type', (op) => {
     const ce = new ComputeEngine();
     expect(ce.box([op, XS, 5]).errors[0]?.toString()).toBe(
       EAGER_EXPECTED[op] ??
-        'Error(ErrorCode("incompatible-type", "function", "finite_integer"), 5)'
+        'Error(ErrorCode("incompatible-type", "function", "5"), 5)'
     );
   });
 });

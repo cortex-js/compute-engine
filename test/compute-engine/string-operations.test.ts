@@ -409,9 +409,11 @@ describe('StringCompare', () => {
     expect(evalBox(['StringCompare', str('a'), str('b')]).re).toBe(-1);
     expect(evalBox(['StringCompare', str('b'), str('a')]).re).toBe(1);
     expect(evalBox(['StringCompare', str('a'), str('a')]).re).toBe(0);
-    expect(evalBox(['StringCompare', str('a'), str('b')]).type.toString()).toBe(
-      'finite_integer'
-    );
+    expect(
+      evalBox(['StringCompare', str('a'), str('b')]).type.matches(
+        'finite_integer'
+      )
+    ).toBe(true);
   });
 
   test('a prefix sorts before the longer string', () => {
@@ -557,9 +559,9 @@ describe('NumberFrom — exactness', () => {
     expect(evalBox(['NumberFrom', str('-.5')]).isSame(ce.parse('-0.5'))).toBe(
       true
     );
-    expect(evalBox(['NumberFrom', str('.5e2')]).type.toString()).toBe(
-      'finite_integer'
-    );
+    expect(
+      evalBox(['NumberFrom', str('.5e2')]).type.matches('finite_integer')
+    ).toBe(true);
   });
 
   test('a decimal keeps its digits, and `.N()` does not change it', () => {
@@ -575,9 +577,9 @@ describe('NumberFrom — exactness', () => {
   });
 
   test('an exponent numeral that denotes an integer IS an integer', () => {
-    expect(evalBox(['NumberFrom', str('1.5e3')]).type.toString()).toBe(
-      'finite_integer'
-    );
+    expect(
+      evalBox(['NumberFrom', str('1.5e3')]).type.matches('finite_integer')
+    ).toBe(true);
   });
 });
 

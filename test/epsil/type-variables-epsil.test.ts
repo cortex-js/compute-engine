@@ -113,7 +113,7 @@ describe('EPSIL `where` ANNOTATIONS (D13: full-literal positions)', () => {
     expect(run('let f: (T) -> T where T = x => x\nf(5)')).toMatchObject({
       diagnostics: [],
       value: '5',
-      type: 'finite_integer',
+      type: '5',
     });
     expect(run('let f: (T) -> T where T = x => x\nf("a")')).toMatchObject({
       diagnostics: [],
@@ -153,7 +153,7 @@ describe('EPSIL `where` ANNOTATIONS (D13: full-literal positions)', () => {
     expect(run(source)).toMatchObject({
       diagnostics: [],
       value: '6',
-      type: 'finite_integer',
+      type: '6',
     });
   });
 
@@ -362,7 +362,7 @@ describe('EPSIL `where` × the `type` statement (D13: shadowing)', () => {
       'type point = tuple<number, number>\nlet g: (point) -> point\ng(5)'
     );
     expect(r.value).toBe(
-      'g(Error(ErrorCode("incompatible-type", "point", "finite_integer"), 5))'
+      'g(Error(ErrorCode("incompatible-type", "point", "5"), 5))'
     );
   });
 

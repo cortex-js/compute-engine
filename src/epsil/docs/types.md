@@ -32,12 +32,21 @@ annotation. This page is about using them.
 ## Every value already has a type
 
 You never have to introduce types into a program: they are there from the
-start. `Type` reports the one a value has:
+start. `Type` reports the one a value has. For a number literal that is the
+most precise claim there is — the value itself:
 
 ```epsil-live
-(Type(42), Type(1/3), Type(2.5), Type("hi"), Type(True))
-// ➔ (TypeFrom("finite_integer"), TypeFrom("finite_rational"), TypeFrom("finite_real"), TypeFrom("string"), TypeFrom("boolean"))
+(Type(42), Type(2.5), Type("hi"), Type(True))
+// ➔ (TypeFrom("42"), TypeFrom("2.5"), TypeFrom("string"), TypeFrom("boolean"))
 ```
+
+A literal type sits inside its numeric tier — `42` is an `integer`, `2.5` a
+`real` — so a literal is accepted anywhere its tier is. An exact value no
+machine number holds — `1/3`, `√2`, an astronomically large integer — is
+typed by the narrowest safe claim instead: its tier plus its sign (for
+example `Type(1/3)` reports a positive-rational type). And anything
+*stored* carries the tier: `let n = 42` declares `n: integer`, and the
+`radius` example below infers `real`.
 
 Collections carry the type of what is in them, and how many:
 

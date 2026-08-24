@@ -21,6 +21,7 @@ import {
   widen,
 } from '../common/type/subtype.js';
 import { reduceType, typesOverlap } from '../common/type/reduce.js';
+import { widenValueTypes } from '../common/type/widen-value.js';
 import {
   conditionalTargetInstance,
   widestConditionalTarget,
@@ -29,6 +30,7 @@ import {
   isGroupedTypeText,
   isValidTypeName,
   signatureEffects,
+  stripNumericRanges,
 } from '../common/type/utils.js';
 import {
   effectSetToString,
@@ -3937,7 +3939,19 @@ function sharedParameterName(
 function receiverType(ops: ReadonlyArray<Expression>): Type | undefined {
   const self = ops[0];
   if (self === undefined || !self.isValid) return undefined;
-  return self.type.type;
+  // `Self` is a type-variable binding, so a literal receiver binds its TIER,
+  // not its value type (the solver-boundary rule of `solveArm`): with
+  // `Self = 3`, `compare(3, 4)` would check argument 2 against the declared
+  // `Self` — the value type `3` — and refute `4` as provably disjoint, where
+  // the pre-O9 receiver type `finite_integer` admitted it. A literal
+  // projects ALL the way to its tier (`stripNumericRanges`) — `√2`'s sign
+  // range `(finite_real<0..>) & !0` is an intersection, which
+  // `isDecidedReceiverType` treats as undecided, so leaving it would turn a
+  // decided pre-O9 receiver into an undispatched one. Conformance lookups
+  // widen the same way: conformances are declared against tiers.
+  return self._literalType !== undefined
+    ? stripNumericRanges(self.type.type)
+    : widenValueTypes(self.type.type);
 }
 
 /**
@@ -4119,7 +4133,14 @@ function dispatcherResultType(
   if (records === null || records.length === 0) return undefined;
 
   const self = ops[0];
-  const selfType: Type = self === undefined ? 'unknown' : self.type.type;
+  // Same tier-binding rule as `receiverType`: `Self` never binds a literal's
+  // value type, and a literal projects to its bare tier.
+  const selfType: Type =
+    self === undefined
+      ? 'unknown'
+      : self._literalType !== undefined
+        ? stripNumericRanges(self.type.type)
+        : widenValueTypes(self.type.type);
 
   const results: Type[] = [];
   for (const record of records) {
@@ -4204,7 +4225,14 @@ function dispatchMember(
   // An operand that is already an error, or one whose type is still open, is
   // not a receiver dispatch can key on: stay symbolic (the engine's "not yet").
   if (!self.isValid) return undefined;
-  const runtime = self.type.type;
+  // Tier-binding rule again (`receiverType`): conformance edges are declared
+  // against tiers, so a literal receiver dispatches on its tier, not on its
+  // value type — and a literal's sign range must not read as an undecided
+  // intersection here.
+  const runtime =
+    self._literalType !== undefined
+      ? stripNumericRanges(self.type.type)
+      : widenValueTypes(self.type.type);
   if (!isDecidedReceiverType(runtime)) return undefined;
 
   const best = bestCandidates(ce, records, member, runtime);

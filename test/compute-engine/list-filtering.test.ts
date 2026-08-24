@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { expectTypeBetween } from '../utils';
 
 /**
  * Desmos list filtering `L[condition]` — see
@@ -170,7 +171,7 @@ describe('T2 — exactness contract', () => {
     const expr = ce.parse('R[R>0]');
     const v = expr.evaluate();
     expect(v.toString()).toBe('[1/2,5/2]');
-    expect(v.ops![0].type.toString()).toBe('finite_rational');
+    expectTypeBetween(v.ops![0], { atMost: 'finite_rational' });
   });
 
   test('a filtered exact element numericizes under .N()', () => {

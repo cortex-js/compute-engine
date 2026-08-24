@@ -138,11 +138,9 @@ describe('TYPE VARIABLES / Negate — conversion DECLINED (blocking behavior)', 
 
   test('the echo handler still preserves the operand type on every route', () => {
     const ce = engine();
-    expect(ce.function('Negate', [ce.number(2)]).type.toString()).toBe(
-      'finite_integer'
-    );
-    expect(ce.box(['Negate', 2.5]).type.toString()).toBe('finite_real');
-    expect(ce.parse('-2').type.toString()).toBe('finite_integer');
+    expect(ce.function('Negate', [ce.number(2)]).type.toString()).toBe('-2');
+    expect(ce.box(['Negate', 2.5]).type.toString()).toBe('-2.5');
+    expect(ce.parse('-2').type.toString()).toBe('-2');
     expect(ce.box(['Negate', ['List', 1, 2, 3]]).type.toString()).toBe(
       'vector<finite_integer^3>'
     );

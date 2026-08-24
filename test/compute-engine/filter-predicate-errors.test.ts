@@ -54,8 +54,8 @@ describe('Filter with an Error-valued predicate result', () => {
       .evaluate();
     expect(filtered.toString()).toBe(mapped.toString());
     expect(filtered.toString()).toBe(
-      '[Error(ErrorCode("incompatible-type", "finite_integer", "finite_real"), 1.5),' +
-        'Error(ErrorCode("incompatible-type", "finite_integer", "finite_real"), 2.5)]'
+      '[Error(ErrorCode("incompatible-type", "finite_integer", "1.5"), 1.5),' +
+        'Error(ErrorCode("incompatible-type", "finite_integer", "2.5"), 2.5)]'
     );
   });
 
@@ -254,10 +254,12 @@ describe('Any/All with an Error-valued predicate result', () => {
  *    predicate is never applied past the first non-True element).
  */
 /** The failing element's value is now appended to the error, right after
- * `ErrorCode`, so the four call sites below each pass their own site value. */
+ * `ErrorCode`, so the four call sites below each pass their own site value.
+ * The site value appears twice: a number literal's type is its literal type,
+ * so the actual-type slot of the message spells the same number. */
 const ERR = (site: string) =>
   'Error(ErrorCode("incompatible-type", "finite_integer", ' +
-  `"finite_real"), ${site})`;
+  `"${site}"), ${site})`;
 
 describe('While family with an Error-valued predicate result', () => {
   test('TakeWhile emits the error, then stops', () => {

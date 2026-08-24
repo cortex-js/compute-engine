@@ -342,7 +342,7 @@ describe('Field at an instantiated parameterized nominal body (§6)', () => {
     const r = executeEpsil(ce, `let t = tree(7, [])\nt.value`);
     expect(r.diagnostics ?? []).toEqual([]);
     expect(r.value!.toString()).toBe('7');
-    expect(r.value!.type.toString()).toBe('finite_integer');
+    expect(r.value!.type.toString()).toBe('7');
   });
 
   test('a CONTRAVARIANT occurrence instantiates too: (integer) -> boolean', () => {

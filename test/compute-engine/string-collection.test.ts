@@ -15,6 +15,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { expectTypeBetween } from '../utils';
 
 let ce: ComputeEngine;
 beforeEach(() => {
@@ -753,9 +754,9 @@ describe('strings are atomic where the lattice would otherwise shred them', () =
     // the `type` handler now says the same thing, instead of reporting
     // `character` for a subscript that is not a usable base.
     expect(ce.box(['Subscript', str('101'), 2]).evaluate().re).toBe(5);
-    expect(ce.box(['Subscript', str('101'), 2]).type.toString()).toBe(
-      'finite_integer'
-    );
+    expectTypeBetween(ce.box(['Subscript', str('101'), 2]), {
+      atMost: 'finite_integer',
+    });
     const bad = ce.box(['Subscript', str('101'), str('x')]);
     expect(bad.type.toString()).toBe('error');
   });

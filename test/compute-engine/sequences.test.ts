@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { expectTypeBetween } from '../utils';
 
 // Note: Use single-letter symbols because LaTeX parses multi-letter
 // sequences as products of individual letters (e.g., "abc" becomes a*b*c)
@@ -954,7 +955,7 @@ describe('SEQUENCE TYPE INFERENCE', () => {
 
   test('Single-argument Sequence inherits argument type', () => {
     const seq = ce.expr(['Sequence', 1]);
-    expect(seq.type.toString()).toMatch(/integer/);
+    expectTypeBetween(seq, { atMost: 'integer' });
   });
 
   test('Multi-argument homogeneous Sequence returns tuple type', () => {

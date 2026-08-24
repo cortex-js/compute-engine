@@ -13,7 +13,8 @@ import { hashCode } from './utils.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { DictionaryValue, MathJsonExpression } from '../../math-json/types.js';
-import { widen } from '../../common/type/utils.js';
+import { stripNumericRanges, widen } from '../../common/type/utils.js';
+import { widenValueTypes } from '../../common/type/widen-value.js';
 import type { Type } from '../../common/type/types.js';
 import { isFunction, isString, isSymbol, isNumber } from './type-guards.js';
 
@@ -22,6 +23,17 @@ import { isFunction, isString, isSymbol, isNumber } from './type-guards.js';
 const TYPE_KEYWORD_KEYS = new Set(['true', 'false', 'nan', 'infinity', 'oo']);
 function isRecordKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key) && !TYPE_KEYWORD_KEYS.has(key);
+}
+
+/** The type a dictionary CELL contributes to the synthesized (stored)
+ * record/dictionary type. A number literal projects all the way to its tier
+ * (`stripNumericRanges` — its value type, singleton range, or sign range is
+ * literal cargo; ruling O9); any other cell keeps its stored type through
+ * `widenValueTypes`, which preserves a handler's deliberate range claim. */
+function storedCellType(op: Expression): Type {
+  return op._literalType !== undefined
+    ? stripNumericRanges(op.type.type)
+    : widenValueTypes(op.type.type);
 }
 
 /**
@@ -301,12 +313,23 @@ export class BoxedDictionary
       // pattern), and an ordinary object would drop the first and inherit a
       // bogus type for the second.
       const elements: Record<string, Type> = Object.create(null);
-      for (const key of keys) elements[key] = this._keyValues[key].type.type;
+      // The synthesized record is a STORED type (memoized on `_type`), so a
+      // literal cell projects to its tier — `{x: 1}` types
+      // `record{x: finite_integer}`, not `record{x: 1}`, and `{x: √2}` types
+      // `record{x: finite_real}`, not the sign-range intersection.
+      // (`widenValueTypes` treats a `record` NODE as a leaf, so the widening
+      // must happen here, where the fields are assembled from the cells; a
+      // non-literal cell keeps its stored type, handler range claims
+      // included.)
+      for (const key of keys)
+        elements[key] = storedCellType(this._keyValues[key]);
       this._type = new BoxedType({ kind: 'record', elements });
       return this._type;
     }
     const eltType = widen(
-      ...Object.values(this._keyValues).map((op) => op.type.type)
+      // Same storage rule as the record arm: `widen` is a JOIN and a join of
+      // one literal type is that literal type, so project the cells first.
+      ...Object.values(this._keyValues).map(storedCellType)
     );
     this._type = new BoxedType({ kind: 'dictionary', values: eltType });
     return this._type;

@@ -223,7 +223,7 @@ describe('Epsil CLI check: canonicalization-time type errors', () => {
     const { io, stderr } = makeIo();
     expect(await main(['check', '-e', '1 |> 2'], io)).toBe(1);
     expect(stderr()).toContain(
-      'Type error: expected `function`, got `finite_integer` for argument 2'
+      'Type error: expected `function`, got `2` for argument 2'
     );
   });
 

@@ -789,7 +789,7 @@ describe('Map fusion: annotated parameters', () => {
     // Exactly what the unfused route has always produced for a violating
     // element: an error value at the mismatching element, not a silent result.
     expect(m.evaluate().toString()).toBe(
-      '[2,Error(ErrorCode("incompatible-type", "integer", "finite_real"), 2.5),4]'
+      '[2,Error(ErrorCode("incompatible-type", "integer", "2.5"), 2.5),4]'
     );
   });
 

@@ -136,7 +136,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     test('a provably finite real numerator over a real ±∞ is exactly 0', () => {
       // The canonical route folds `2/Ln(0)` to the literal `0`; the structural
       // route keeps the Divide head and exercises the type handler.
-      expect(typeOf(['Divide', 2, ['Ln', 0]])).toBe('finite_integer');
+      expect(typeOf(['Divide', 2, ['Ln', 0]])).toBe('0');
       const structural = ce.function('Divide', [ce.box(2), ce.box(['Ln', 0])], {
         structural: true,
       });
@@ -475,7 +475,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Multiply', 2, 'nf_sym'])).toBe('non_finite_number');
       expect(typeOf(['Add', 1, 'nf_sym'])).toBe('non_finite_number');
       expect(typeOf(['Divide', 'nf_sym', 2])).toBe('non_finite_number');
-      expect(typeOf(['Divide', 1, 'nf_sym'])).toBe('finite_integer');
+      expect(typeOf(['Divide', 1, 'nf_sym'])).toBe('0');
       // ∞/∞ is indeterminate.
       expect(typeOf(['Divide', 'nf_sym', 'nf_sym'])).toBe('number');
     });
@@ -484,7 +484,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Multiply', 2, ['Ln', 0]])).toBe('non_finite_number');
       expect(typeOf(['Add', 1, ['Ln', 0]])).toBe('non_finite_number');
       expect(typeOf(['Divide', ['Ln', 0], 2])).toBe('non_finite_number');
-      expect(typeOf(['Divide', 1, ['Ln', 0]])).toBe('finite_integer');
+      expect(typeOf(['Divide', 1, ['Ln', 0]])).toBe('0');
     });
   });
 

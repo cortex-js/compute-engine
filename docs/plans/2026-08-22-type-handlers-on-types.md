@@ -1819,7 +1819,31 @@ Open items — genuine decisions, each with a default:
   the plot and compile paths. This is a product decision.
 - **O9 — Literal types for every representable finite literal (§5.8 A3).
   RULED 2026-08-22, first half: YES; IMPLEMENTED 2026-08-23 (§4.3 status
-  block). The second half — the public `.type` — remains open.** The user approved the session's
+  block). The second half — the public `.type` — RULED YES 2026-08-23
+  (option A of the blast-radius report) and IMPLEMENTED the same day.**
+  What landed for the second half, in the widening-first order the
+  measurement demanded: `BoxedNumber.type` returns the literal handler type
+  (memoized per literal, so the `BoxedType` object's identity is stable for
+  the display projection); type variables widen at the solver boundary
+  (`solveArm` and `instantiateCallbackSlots` in `generic-instantiation.ts`),
+  so `identity(5)` types `finite_integer` and never stores `T = 5`; a
+  derived (non-ascribed) function-literal body type widens
+  (`functionLiteralSignatureType`); protocol `Self` binds a literal
+  receiver's tier (`receiverType`, `dispatcherResultType`, `dispatchMember`
+  in `engine-protocols.ts`); a synthesized dictionary/record type widens its
+  cells (`boxed-dictionary.ts` — the §4.3 walker treats `record` as a leaf,
+  so the widening happens at assembly); the §4.3 walker widens SINGLETON
+  numeric ranges (a literal's exact-rational representation) like value
+  nodes, while open ranges still pass through; the shaped-list cell
+  classifier and the tensor dtype classifier project a literal's decoration
+  back to its tier (`shaped-list-type.ts`, `tensor-fields.ts` — without
+  this, exact-rational matrices silently lost their shape claim and every
+  numeric tensor fell to the `expression` dtype); and `typeError` serializes
+  an object-node actual through `typeToString` (it printed
+  "[object Object]"). Error messages now name a literal operand's literal
+  type ("got `2.5`", not "got `finite_real`"). The remaining churn was
+  test pins, converted under the Step-0 rule.
+  The original second-half framing (kept for the record): The user approved the session's
   recommended next-steps list ("sounds good — proceed autonomously"),
   whose second item was this recommendation; recorded on that assent, to
   be re-confirmed if the wording overstates it. What is ruled: on handler
@@ -1827,9 +1851,9 @@ Open items — genuine decisions, each with a default:
   range; see the value-type rationale below), widened on handler output by
   the §4.3 walker; this supersedes R2's "literal types for `0` and `1`
   only". Implementation is scheduled WITH §4.3 (the widening machinery is
-  the same); it is not a standalone step ahead of §4. The second half —
-  the public `.type` — remains OPEN with its default (unchanged) and its
-  blast-radius count still to be run.
+  the same); it is not a standalone step ahead of §4. (The "remains OPEN"
+  status this paragraph originally carried is superseded by the ruling and
+  implementation recorded at the top of this item.)
   Original framing (kept for the record): not done until ruled, because it
   narrows R2 ("literal types for `0` and `1` only"). The case for it is §5.7: the `sgn` fact and the
   literal-value fact together account for 48 measured behavior changes,
@@ -1875,14 +1899,16 @@ Open items — genuine decisions, each with a default:
   type-variable instantiation and signature-derivation positions
   (`instantiatedResultType` and friends) before the pin conversion even
   starts. In Tycho, unknown until asked. It removes §7's first non-goal.
-  The default until ruled: handler-input literal types only, public type
-  unchanged.
+  RULED and implemented as recorded at the top of this item; the impact on
+  Tycho remains to be measured from Tycho's side.
 
 ## 7. Non-goals
 
-- Changing `BoxedNumber.type` for consumers: a literal's public type stays
-  `finite_integer`; the `0`/`1` literal types are visible to handlers
-  only. (O9's second half would lift this non-goal; it stays until ruled.)
+- ~~Changing `BoxedNumber.type` for consumers~~ — LIFTED 2026-08-23 by O9's
+  second half: a number literal's public type IS its literal type. String
+  and boolean literals still keep their tier types (`ce.string('a').type`
+  is `string`) — extending value types to them was neither measured nor
+  ruled.
 - Removing the `scratch` exemption: it stays as a guard.
 - Converting the remaining ~1429 exact-string type assertions; the §3
   rule applies to new ones and to any that a later step makes fail.
@@ -1931,6 +1957,13 @@ Open items — genuine decisions, each with a default:
   results at the user's direction.
 - §5.8 (adjustments A1–A7) and O9: session compute-engine-86,
   2026-08-22, at the user's direction to record rather than implement.
+- O9's second half (the public `.type` flip), ruled option A by the user
+  2026-08-23 and implemented the same day, with the widening at the solver
+  boundary, signature derivation, protocol `Self`, dictionary synthesis,
+  the shaped-list and tensor-dtype classifiers, and the singleton-range
+  rule in the §4.3 walker: session compute-engine-91, with four
+  pin-conversion subagents. The blast-radius measurement it consumed
+  (197/61): session compute-engine-13, 2026-08-23.
 - Spec reviews, all by Claude and Codex on 2026-08-22, in
   `docs/plans/reviews/2026-08-22-type-handlers-on-types-review-draft{3,4,5}.md`
   (18 findings each). Fifth-draft findings and where they went: 1 → the

@@ -8,8 +8,10 @@ import {
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
 import { provablyDisjoint } from '../../common/type/subtype.js';
+import { widenValueTypes } from '../../common/type/widen-value.js';
 import {
   functionResult,
+  stripNumericRanges,
   typeContainsMissing,
 } from '../../common/type/utils.js';
 import type {
@@ -196,7 +198,28 @@ export function solveArm(
 
   const solved = solveTypeArguments(
     arm,
-    ops.map((op) => op?.type.type),
+    // A type variable must never capture a literal's type: with the public
+    // `.type` of a literal being the literal type (ruling O9, 2026-08-23),
+    // `identity(5)` would otherwise bind `T = 5` and STORE it as the
+    // application's result type — an over-specific contract nobody wrote.
+    // A NUMBER LITERAL projects all the way to its tier
+    // (`stripNumericRanges`): its type may be a value node (`5`), a
+    // singleton range (`finite_rational<0.5..0.5>`) or a sign range
+    // (`(finite_real<0..>) & !0` for `√2`), and all three are literal
+    // cargo. Any other operand goes through `widenValueTypes`, which
+    // widens embedded value nodes and rational singletons but PRESERVES a
+    // handler's deliberate range claim (`identity(|x|)` still binds
+    // `T = finite_real<0..>`, as it did before literals carried these
+    // types). Ground parameters with a declared value component
+    // (`(0) -> 0`) never reach the solver, so exact value admission is
+    // unaffected.
+    ops.map((op) =>
+      op
+        ? op._literalType !== undefined
+          ? stripNumericRanges(op.type.type)
+          : widenValueTypes(op.type.type)
+        : undefined
+    ),
     {
       // The `where T is P` oracle (protocols design P19), supplied by the
       // CALLER's engine — see `ArmInferenceContext.resolver`.
@@ -468,9 +491,17 @@ export function instantiateCallbackSlots(
   actuals: ReadonlyArray<Type | undefined>
 ): Map<number, FunctionSignature> {
   const sources = new Set(plan.sources);
-  const solved = solveTypeArguments(arm, actuals, {
-    skip: (i) => !sources.has(i) || actuals[i] === undefined,
-  });
+  // Same solver-boundary widening as `solveArm`: a callback slot stamped
+  // from a literal source (`Fold(f, 5, xs)`) must read `(finite_integer,
+  // …)`, never `(5, …)`. This entry point receives TYPES, not operands, so
+  // it cannot apply `solveArm`'s literal-aware tier projection — a sign
+  // range from an irrational literal source keeps its range here, which is
+  // sound (the stamp stays a supertype-compatible parameter).
+  const solved = solveTypeArguments(
+    arm,
+    actuals.map((t) => (t === undefined ? undefined : widenValueTypes(t))),
+    { skip: (i) => !sources.has(i) || actuals[i] === undefined }
+  );
 
   // Clause 2: only the DOMAIN variables are substituted. A result-side
   // variable stays open in the instantiated slot (see `domainVars`).

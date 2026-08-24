@@ -4,7 +4,7 @@ import { engine as ce } from '../utils';
 describe('NUMERIC TYPES', () => {
   it('should recognize the type of a number', () => {
     const expr = ce.parse('3');
-    expect(expr.type.toString()).toBe('finite_integer');
+    expect(expr.type.toString()).toBe('3');
   });
   it('should recognize the type of a complex number', () => {
     const expr = ce.parse('3 + 4i');
@@ -12,11 +12,11 @@ describe('NUMERIC TYPES', () => {
   });
   it('should recognize the type of a rational number', () => {
     const expr = ce.parse('3/4');
-    expect(expr.type.toString()).toBe('finite_rational');
+    expect(expr.type.toString()).toBe('finite_rational<0.75..0.75>');
   });
   it('should recognize the type of a real number', () => {
     const expr = ce.parse('3.4');
-    expect(expr.type.toString()).toBe('finite_real');
+    expect(expr.type.toString()).toBe('3.4');
   });
   it('should recognize the type of an imaginary number', () => {
     const expr = ce.parse('4i');

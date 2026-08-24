@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import { expectTypeBetween } from '../utils';
 
 /**
  * Vector-space semantics for numeric tuples (points/vectors in ℝⁿ).
@@ -83,7 +84,7 @@ describe('POINT/TUPLE ARITHMETIC — T1 literal component-wise', () => {
     const r = ce.parse('(1,2)/3').evaluate();
     expect(r.operator).toBe('Tuple');
     expect(r.toString()).toBe('(1/3, 2/3)');
-    expect(r.type.toString()).toBe('tuple<finite_rational, finite_rational>');
+    expectTypeBetween(r, { atMost: 'tuple<finite_rational, finite_rational>' });
 
     const n = ce.parse('(1,2)/3').N();
     expect(n.operator).toBe('Tuple');
@@ -1835,7 +1836,7 @@ describe('POINT/TUPLE ARITHMETIC — point-valued `\\mapsto` body', () => {
     const ce = new ComputeEngine();
     const f = ce.parse('t \\mapsto (\\cos t, \\sin t)', { strict: false });
     const v = ce.box(['Apply', f, 0.5]).N();
-    expect(v.type.toString()).toBe('tuple<finite_real, finite_real>');
+    expectTypeBetween(v, { atMost: 'tuple<finite_real, finite_real>' });
     expect(v.op1.re).toBeCloseTo(Math.cos(0.5), 12);
     expect(v.op2.re).toBeCloseTo(Math.sin(0.5), 12);
   });

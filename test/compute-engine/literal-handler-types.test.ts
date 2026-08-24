@@ -21,9 +21,11 @@ import type { Type } from '../../src/common/type/types';
  *   (`finite_real<0..> & !0` for `√2`), never a rounded double — a rounded
  *   bound could put `1 − 10⁻³⁰` "at" a pole or unsoundly tighten a range.
  *
- * The public `.type` is deliberately UNCHANGED (O9's second half is open):
- * literal types are visible through `_literalType` / `handlerTypeOf()`
- * only.
+ * O9's second half was ruled and implemented on 2026-08-23: the public
+ * `.type` of a number literal IS that literal type, so `ce.box(21).type` is
+ * `21`. The `_literalType` / `handlerTypeOf()` channel pinned below is still
+ * the route a type HANDLER reads, and every handler RESULT is still widened
+ * back to an ordinary tier before it is stored.
  */
 
 const ce = new ComputeEngine();
@@ -83,11 +85,13 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     expect(e.parse('x+1')._literalType).toBeUndefined();
   });
 
-  it('the PUBLIC type of a literal is unchanged (O9 second half is open)', () => {
-    expect(ce.box(21).type.toString()).toBe('finite_integer');
-    expect(ce.box(21).type.matches('21')).toBe(false);
-    expect(ce.box(0.5).type.toString()).toBe('finite_real');
-    expect(ce.parse('\\frac12').type.toString()).toBe('finite_rational');
+  it('the PUBLIC type of a literal IS its literal type (O9 second half, ruled and implemented 2026-08-23)', () => {
+    expect(ce.box(21).type.toString()).toBe('21');
+    expect(ce.box(21).type.matches('21')).toBe(true);
+    expect(ce.box(0.5).type.toString()).toBe('0.5');
+    expect(ce.parse('\\frac12').type.toString()).toBe(
+      'finite_rational<0.5..0.5>'
+    );
   });
 
   it('the handler-visible type is a SUBTYPE of the public type', () => {
@@ -172,11 +176,23 @@ describe('widenValueTypes — the §4.3 walker', () => {
     );
   });
 
-  it('ranges are not literals: they pass through', () => {
+  it('open ranges are handler claims: they pass through', () => {
     expect(widenStr('integer<0..10>')).toBe('integer<0..10>');
-    expect(widenStr('finite_rational<0.5..0.5>')).toBe(
-      'finite_rational<0.5..0.5>'
+    expect(widenStr('real<0..>')).toBe('real<0..>');
+  });
+
+  it('a RATIONAL singleton range widens to its tier: it is literal cargo', () => {
+    // A singleton range on the rational tier is the exact-rational literal
+    // representation (ruling O9 — the lattice has no value node that keeps
+    // the rational tier), so at a covariant storage position it widens
+    // exactly like a value node. Contravariant positions keep it, same
+    // polarity rule as `value` nodes — and a singleton range on any OTHER
+    // tier is an author's narrowing, not literal cargo, and passes through.
+    expect(widenStr('finite_rational<0.5..0.5>')).toBe('finite_rational');
+    expect(widenStr('(finite_rational<0.5..0.5>) -> integer')).toBe(
+      '(finite_rational<0.5..0.5>) -> integer'
     );
+    expect(widenStr('finite_integer<5..5>')).toBe('finite_integer<5..5>');
   });
 
   it('string and boolean value types are leaves', () => {

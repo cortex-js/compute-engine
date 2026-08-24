@@ -10,6 +10,7 @@ import {
   hasFunctionSignature,
   signatureArms,
   signatureEffects,
+  stripNumericRanges,
 } from '../../common/type/utils.js';
 import { isSubtype, objectLayoutOfType } from '../../common/type/subtype.js';
 import {
@@ -690,6 +691,27 @@ export function functionLiteralSignatureType(expr: Expression): Type {
     )
   )
     bodyType = 'number';
+
+  // A DERIVED result type is a storage position: a NUMBER-LITERAL body's
+  // type is literal cargo and projects to its tier (`() -> 21` types
+  // `() -> finite_integer`, not `() -> 21`; `() -> √2` types
+  // `() -> finite_real`, not the sign range — ruling O9's second half,
+  // 2026-08-23). Any OTHER body keeps its type verbatim: a non-literal
+  // body's type is already a stored/derived type (handler results are
+  // widened where they are stored), and walking it here could rewrite a
+  // NESTED authored contract (an inner ascribed `-> 0` in a returned
+  // function literal). An ASCRIBED return is the author's contract and is
+  // kept verbatim, literal or not (the same rule that keeps a declared
+  // `(0) -> 0` signature).
+  const derivedBodyExpr =
+    declaredSignature === undefined
+      ? body
+      : functionLiteralReturnMarker(expr)!.op1;
+  if (
+    ascribedReturn === undefined &&
+    derivedBodyExpr._literalType !== undefined
+  )
+    bodyType = stripNumericRanges(bodyType);
 
   // Parameter slots: an annotated param carries its declared type, named
   // (`x: integer`); a bare param stays `unknown` as today. The Type OBJECT is

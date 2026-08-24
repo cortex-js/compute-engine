@@ -17,6 +17,7 @@ import {
 } from '../../src/compute-engine/boxed-expression/generic-instantiation';
 import { resolveContextualArm } from '../../src/compute-engine/boxed-expression/overload';
 import type { FunctionSignature, Type } from '../../src/common/type/types';
+import { expectTypeBetween } from '../utils';
 
 /**
  * # The converted-callback family — behavioral contract under Design E
@@ -381,7 +382,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
     const e = ce.box(['Filter', XS, 5]);
     expect(e.isValid).toBe(false);
     expect(e.errors[0]?.toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "function", "finite_integer"), 5)'
+      'Error(ErrorCode("incompatible-type", "function", "5"), 5)'
     );
   });
 });
@@ -887,7 +888,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
     // from the initial value would have stamped it.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-    expect(ce.box(1).type.toString()).toBe('finite_integer');
+    expectTypeBetween(ce.box(1), { atMost: 'finite_integer' });
 
     const stamped = ce.box([
       'Reduce',

@@ -299,7 +299,7 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
 
     it('(-2)^2 is the plain integer power', () => {
       const e = ce.box(['Power', -2, 2]);
-      expect(e.type.toString()).toBe('finite_integer');
+      expect(e.type.toString()).toBe('4');
       expect(e.N().re).toBe(4);
       expect(folded(e)).toBe(4);
     });

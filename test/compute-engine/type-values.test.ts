@@ -619,16 +619,14 @@ describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
     expect(none).not.toContain('TypeFrom');
 
     // One effective argument is a well-formed call.
-    expect(ev(['Type', ['Sequence', 3]]).toString()).toBe(
-      'TypeFrom("finite_integer")'
-    );
+    expect(ev(['Type', ['Sequence', 3]]).toString()).toBe('TypeFrom("3")');
   });
 
   test('Type is typed `-> type` and settles like any construction', () => {
     const t = ev(['Type', 3]);
-    expect(t.toString()).toBe('TypeFrom("finite_integer")');
+    expect(t.toString()).toBe('TypeFrom("3")');
     expect(t.type.toString()).toBe('type');
-    expect(t.isSame(ev(['TypeFrom', { str: 'finite_integer' }]))).toBe(true);
+    expect(t.isSame(ev(['TypeFrom', { str: '3' }]))).toBe(true);
   });
 
   test('StringFrom(type) is the inverse of TypeFrom', () => {

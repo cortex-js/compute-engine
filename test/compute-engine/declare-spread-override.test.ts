@@ -49,7 +49,7 @@ describe('declare() spread-override of a boxed operator definition', () => {
     );
     expect(
       ce.box(['At', ['List', 10, 20, 30], 2]).evaluate().type.toString()
-    ).toEqual('finite_integer');
+    ).toEqual('20');
 
     // The spread carried the signature: a non-conforming operand produces the
     // same `incompatible-type` error as stock.

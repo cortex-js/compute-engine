@@ -497,7 +497,7 @@ describe('ERROR PROPAGATION — a non-callable value def reports the CALLEE', ()
     const ce = new ComputeEngine();
     ce.box(['Assign', 'a', 5]).evaluate();
     const calleeError =
-      'Error(ErrorCode("incompatible-type", "function", "finite_integer"), "5")';
+      'Error(ErrorCode("incompatible-type", "function", "5"), "5")';
     expect(ce.box(['a', BAD]).evaluate().toString()).toBe(calleeError);
     // …and it is the SAME diagnostic a valid argument gets.
     expect(ce.box(['a', 5]).evaluate().toString()).toBe(calleeError);

@@ -201,7 +201,7 @@ describe('Phase 2 — apply-time enforcement (§6.4, §6.5)', () => {
       ['Function', ['Block', ['Add', 'x', 1]], ['Typed', 'x', "'integer'"]],
       [
         'Error',
-        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'2.5'"],
         2.5,
       ],
     ]);
@@ -216,7 +216,7 @@ describe('Phase 2 — apply-time enforcement (§6.4, §6.5)', () => {
       'g',
       [
         'Error',
-        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'2.5'"],
         2.5,
       ],
     ]);
@@ -378,7 +378,7 @@ describe('Phase 3 — signature derivation for annotated literals (§9.2)', () =
       'f',
       [
         'Error',
-        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'2.5'"],
         2.5,
       ],
     ]);
@@ -427,7 +427,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
       'f',
       [
         'Error',
-        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'2.5'"],
         2.5,
       ],
     ]);
@@ -448,7 +448,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
       'f',
       [
         'Error',
-        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'2.5'"],
         2.5,
       ],
     ]);
@@ -468,7 +468,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
       'f',
       [
         'Error',
-        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'2.5'"],
         2.5,
       ],
     ]);
@@ -551,7 +551,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
           'ErrorCode',
           "'incompatible-type'",
           "'tuple<number, number>'",
-          "'finite_integer'",
+          "'3'",
         ],
         3,
       ],
@@ -662,7 +662,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
           'ErrorCode',
           "'incompatible-type'",
           "'tuple<number, number>'",
-          "'finite_integer'",
+          "'3'",
         ],
         3,
       ],
@@ -687,7 +687,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
           'ErrorCode',
           "'incompatible-type'",
           "'tuple<number, number>'",
-          "'finite_integer'",
+          "'3'",
         ],
         3,
       ],
@@ -739,7 +739,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
       'f',
       [
         'Error',
-        ['ErrorCode', "'incompatible-type'", "'integer'", "'finite_real'"],
+        ['ErrorCode', "'incompatible-type'", "'integer'", "'2.5'"],
         2.5,
       ],
     ]);

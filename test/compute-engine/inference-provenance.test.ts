@@ -180,14 +180,15 @@ describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type 
 
   test('the promoted type is never installed when it escapes a recorded use', () => {
     // `gfin(wfin)` infers `wfin: finite_real`. Assigning 5 refines it, but
-    // the promotion `finite_integer` → `integer` would leave the incumbent's
-    // `finite_real` constraint, so the value's raw type is adopted instead.
+    // the promotion to `integer` would leave the incumbent's `finite_real`
+    // constraint, so the value's raw type — the literal type `5` — is
+    // adopted instead.
     const ce = new ComputeEngine();
     ce.declare('gfin', '(finite_real) -> real');
     ce.box(['gfin', 'wfin']);
     expect(ce.box('wfin').type.toString()).toBe('finite_real');
     ce.assign('wfin', 5);
-    expect(ce.box('wfin').type.toString()).toBe('finite_integer');
+    expect(ce.box('wfin').type.toString()).toBe('5');
     expect(ce.type('finite_integer').matches('finite_real')).toBe(true);
   });
 

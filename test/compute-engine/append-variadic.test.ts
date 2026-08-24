@@ -375,7 +375,7 @@ describe('Append: invalid operands decline the flatten', () => {
         'Append',
         [
           'Error',
-          ['ErrorCode', "'incompatible-type'", "'collection'", "'finite_integer'"],
+          ['ErrorCode', "'incompatible-type'", "'collection'", "'3'"],
           3,
         ],
         4,

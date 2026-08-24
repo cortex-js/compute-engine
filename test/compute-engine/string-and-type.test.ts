@@ -346,7 +346,7 @@ describe('Type operator reports the canonical type without evaluating', () => {
     const ce = new ComputeEngine();
     expect(
       ce.box(['StringFrom', ['Type', 2047]]).evaluate().string
-    ).toBe('finite_integer');
+    ).toBe('2047');
   });
 
   test('string literal', () => {

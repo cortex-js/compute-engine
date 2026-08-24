@@ -968,7 +968,7 @@ describe('Determinant', () => {
     const result = ce.expr(['Determinant', 42]).evaluate();
     // Type checking rejects scalar before evaluation can return the scalar
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"), 42)`
+      `Error(ErrorCode("incompatible-type", "matrix", "42"), 42)`
     );
   });
 
@@ -1142,7 +1142,7 @@ describe('Inverse', () => {
     const result = ce.expr(['Inverse', 42]).evaluate();
     // Type checking rejects scalar before evaluation can return 1/scalar
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"), 42)`
+      `Error(ErrorCode("incompatible-type", "matrix", "42"), 42)`
     );
   });
 
@@ -1303,7 +1303,7 @@ describe('PseudoInverse', () => {
     const result = ce.expr(['PseudoInverse', 42]).evaluate();
     // Type checking rejects scalar before evaluation can return 1/scalar
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"), 42)`
+      `Error(ErrorCode("incompatible-type", "matrix", "42"), 42)`
     );
   });
 
@@ -1427,7 +1427,7 @@ describe('IdentityMatrix', () => {
     const result = ce.expr(['IdentityMatrix', 2.5]).evaluate();
     // Type signature validation catches this before evaluate runs
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "integer", "finite_real"), 2.5)`
+      `Error(ErrorCode("incompatible-type", "integer", "2.5"), 2.5)`
     );
   });
 });
@@ -2721,10 +2721,13 @@ describe('Dot / Cross', () => {
     it('accepts two numeric tuples, typed as the written-out sum', () => {
       const e = ce.expr(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
       expect(e.isValid).toBe(true);
+      // This used to be written as a parity check against the type of the
+      // written-out sum `1·3 + 2·4`. That form was retired because a number
+      // literal's public type is now its own value type (`11`), while `Dot`'s
+      // stored handler result stays the widened tier — so the two sides no
+      // longer spell the same string even though the claim holds. (Ruling O9,
+      // 2026-08-23.)
       expect(e.type.toString()).toBe('finite_integer');
-      expect(e.type.toString()).toBe(
-        ce.expr(['Add', ['Multiply', 1, 3], ['Multiply', 2, 4]]).type.toString()
-      );
       expect(e.evaluate().toString()).toBe('11');
     });
 

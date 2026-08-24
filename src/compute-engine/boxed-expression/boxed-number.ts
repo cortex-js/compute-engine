@@ -99,6 +99,13 @@ export class BoxedNumber
    * of a literal never changes, so the memo never invalidates. */
   private _literalTypeMemo: Type | null | undefined = undefined;
 
+  /** Memo for the public `.type` when it is the literal type: one
+   * `BoxedType` per literal, so repeated reads return the SAME object —
+   * the display projection (`typeToDisplayString`) keys on `BoxedType`
+   * identity. Never invalidates, for the same reason `_literalTypeMemo`
+   * never does. */
+  private _publicTypeMemo: BoxedType | undefined = undefined;
+
   /**
    * By the time the constructor is called, the `value` should have been
    * screened for cases where it's a well-known value (0, NaN, +Infinity,
@@ -551,6 +558,26 @@ export class BoxedNumber
   }
 
   get type(): BoxedType {
+    // A number literal's public type IS its literal type (ruling O9,
+    // second half, 2026-08-23): `ce.box(21).type` is `21`, `ce.box(0.5)
+    // .type` is `0.5`, an exact rational keeps its tier through a
+    // singleton range (`finite_rational<0.5..0.5>`), and a value no
+    // machine number holds exactly carries its sign on its tier
+    // (`(finite_real<0..>) & !0` for `√2`). The literal type lives at
+    // EXPRESSION positions only — every storage position widens it back
+    // to its tier: an inferred declaration (`inferTypeFromValue`), a
+    // solved type variable (`solveArm`), a derived function-literal
+    // signature (`functionLiteralSignatureType`) and a stored handler
+    // result (`widenValueTypes` in `boxed-function.ts`).
+    // NaN, ±∞ and complex literals have no literal type (`_literalType`
+    // is undefined there — the tier already says everything) and keep
+    // the tier answer below.
+    const lit = this._literalType;
+    if (lit !== undefined) {
+      this._publicTypeMemo ??= new BoxedType(lit, this.engine._typeResolver);
+      return this._publicTypeMemo;
+    }
+
     if (typeof this._value === 'number') {
       if (Number.isNaN(this._value)) return BoxedType.number;
       if (!Number.isFinite(this._value)) return BoxedType.non_finite_number;
@@ -574,8 +601,9 @@ export class BoxedNumber
    * everything (NaN, `±∞`, a complex literal).
    *
    * Read by type handlers through `handlerTypeOf()`
-   * (`library/type-handlers.ts`). The PUBLIC `.type` is deliberately
-   * unchanged, and handler RESULTS are widened back to ordinary types
+   * (`library/type-handlers.ts`), and since ruling O9's second half
+   * (2026-08-23) also the PUBLIC `.type` of the literal — see the `type`
+   * getter. Handler RESULTS are still widened back to ordinary types
    * before they are stored (`widenValueTypes`). */
   override get _literalType(): Type | undefined {
     // `undefined` = not yet computed; `null` = computed, not eligible —

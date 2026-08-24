@@ -978,12 +978,12 @@ invalid   =[
   "Rational",
   [
     "Error",
-    ["ErrorCode", "incompatible-type", "'integer'", "'finite_real'"],
+    ["ErrorCode", "incompatible-type", "'integer'", "'2.5'"],
     2.5
   ],
   [
     "Error",
-    ["ErrorCode", "incompatible-type", "'integer'", "'finite_real'"],
+    ["ErrorCode", "incompatible-type", "'integer'", "'-1.1'"],
     -1.1
   ],
   ["Error", "unexpected-argument", "'18.4'"]
@@ -1010,12 +1010,20 @@ box       = ["Rational", "Pi"]
 eval-auto = 80143857/25510582
 `;
 
-exports[`RATIONAL Rational as Divide 1`] = `
-box       = ["Rational", 3.1, 2.8]
-canonical = ["Divide", 3.1, 2.8]
-simplify  = 1.10714285714285714286
-eval-auto = 1.10714285714285714286
-eval-mach = 1.1071428571428572
+exports[`RATIONAL Rational with non-integer arguments is rejected 1`] = `
+invalid   =[
+  "Rational",
+  [
+    "Error",
+    ["ErrorCode", "incompatible-type", "'integer'", "'3.1'"],
+    3.1
+  ],
+  [
+    "Error",
+    ["ErrorCode", "incompatible-type", "'integer'", "'2.8'"],
+    2.8
+  ]
+]
 `;
 
 exports[`RELATIONAL OPERATOR Equal 1`] = `True`;

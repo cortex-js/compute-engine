@@ -464,7 +464,7 @@ describe('Assign with a Tuple pattern', () => {
     // The BLAMED name is the offending leaf, not the first one — the same
     // diagnostic the sequential write produced.
     expect(r.toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "integer", "finite_real"), "y")'
+      'Error(ErrorCode("incompatible-type", "integer", "4.5"), "y")'
     );
     expect(ce.symbol('x').evaluate().isSame(1)).toBe(true);
     expect(ce.symbol('y').evaluate().isSame(2)).toBe(true);

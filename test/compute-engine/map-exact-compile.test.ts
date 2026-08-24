@@ -9,6 +9,7 @@ import {
   MIN_EXACT_COMPILE_COUNT,
   exactTierShape,
 } from '../../src/compute-engine/library/map-exact-proof';
+import { expectTypeBetween } from '../utils';
 
 /**
  * The EXACT-mode auto-compilation tier for lazy-`Map` `evaluate()` drains
@@ -105,7 +106,7 @@ describe('exact Map compile — the item-103 witness', () => {
     expect(compiled.map((x) => x.re)).toEqual(expected);
 
     // R3: EXACT integer literals, not floats that print alike.
-    expect(compiled[0].type.toString()).toBe('finite_integer');
+    expectTypeBetween(compiled[0], { atMost: 'finite_integer' });
     expect(compiled[0].isExact).toBe(true);
     expect(compiled[0].json).toBe(30);
   });
@@ -540,7 +541,7 @@ describe('exact Map compile — symbol-valued sources (amendment R6)', () => {
     expect(stats.compiledHits).toBe(600);
     for (let i = 0; i < compiled.length; i++)
       expect([i, compiled[i].isSame(interpreted[i])]).toEqual([i, true]);
-    expect(compiled[0].type.toString()).toBe('finite_integer');
+    expectTypeBetween(compiled[0], { atMost: 'finite_integer' });
     expect(compiled[0].isExact).toBe(true);
   });
 });
@@ -825,7 +826,7 @@ describe('exact Map compile — coexistence with the float tier', () => {
     expect(stats.compiledHits).toBe(2700);
     // Same values, but the exact drain yields EXACT integer literals.
     expect(exact[0].isSame(30)).toBe(true);
-    expect(exact[0].type.toString()).toBe('finite_integer');
+    expectTypeBetween(exact[0], { atMost: 'finite_integer' });
   });
 
   test("ce.jit = 'off' disables the exact tier too", () => {
@@ -865,7 +866,7 @@ describe('exact Map compile — annotated parameters', () => {
     expect(snapshot.compiledHits).toBe(MIN_EXACT_COMPILE_COUNT);
     expect(snapshot.elementFallbacks).toBe(0);
     expect(compiled[0].isSame(2)).toBe(true);
-    expect(compiled[0].type.toString()).toBe('finite_integer');
+    expectTypeBetween(compiled[0], { atMost: 'finite_integer' });
   });
 
   test('the annotated and bare spellings compile to the same values', () => {

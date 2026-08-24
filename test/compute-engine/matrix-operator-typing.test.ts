@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { expectTypeBetween } from '../utils';
 
 /**
  * Collection-aware result typing for `Multiply` (and the `Add` widening it
@@ -151,7 +152,7 @@ describe('Multiply numeric typing (regression — must be unchanged)', () => {
   test('(2)(3) types finite_integer and evaluates to 6', () => {
     const ce = new ComputeEngine();
     const e = ce.parse('(2)(3)');
-    expect(e.type.toString()).toBe('finite_integer');
+    expectTypeBetween(e, { atMost: 'finite_integer' });
     expect(e.evaluate().toString()).toBe('6');
   });
 

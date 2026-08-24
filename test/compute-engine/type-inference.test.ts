@@ -1,13 +1,13 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { engine as ce } from '../utils';
+import { engine as ce, expectTypeBetween } from '../utils';
 
 describe('TYPE INFERENCE THROUGH EXPRESSIONS', () => {
   it('should infer type of integer arithmetic', () => {
-    expect(ce.parse('3 + 4').type.toString()).toBe('finite_integer');
+    expect(ce.parse('3 + 4').type.toString()).toBe('7');
   });
 
   it('should infer type of rational arithmetic', () => {
-    expect(ce.parse('3/4').type.toString()).toBe('finite_rational');
+    expect(ce.parse('3/4').type.toString()).toBe('finite_rational<0.75..0.75>');
   });
 
   it('should infer type of real arithmetic', () => {
@@ -15,18 +15,21 @@ describe('TYPE INFERENCE THROUGH EXPRESSIONS', () => {
   });
 
   it('should infer type of Sqrt', () => {
-    // sqrt(2) should be finite_real (real input, not negative)
-    expect(ce.parse('\\sqrt{2}').type.toString()).toBe('finite_real');
+    // sqrt(2) is an exact real literal, so its type is the literal's own
+    // positive-and-non-zero range rather than the `finite_real` tier.
+    expect(ce.parse('\\sqrt{2}').type.toString()).toBe(
+      '(finite_real<0..>) & !0'
+    );
   });
 
   it('should infer type of integer product', () => {
-    expect(ce.parse('3 \\times 4').type.toString()).toBe('finite_integer');
+    expect(ce.parse('3 \\times 4').type.toString()).toBe('12');
   });
 });
 
 describe('TYPE WIDENING THROUGH COMPOSITION', () => {
   it('Add(integer, integer) → finite_integer', () => {
-    expect(ce.parse('3 + 4').type.toString()).toBe('finite_integer');
+    expectTypeBetween(ce.parse('3 + 4'), { atMost: 'finite_integer' });
   });
 
   it('Add(integer, rational) widens', () => {
@@ -40,7 +43,7 @@ describe('TYPE WIDENING THROUGH COMPOSITION', () => {
   });
 
   it('Multiply(integer, integer) → finite_integer', () => {
-    expect(ce.parse('3 \\times 5').type.toString()).toBe('finite_integer');
+    expectTypeBetween(ce.parse('3 \\times 5'), { atMost: 'finite_integer' });
   });
 
   it('Multiply(integer, real) → finite_real', () => {
@@ -204,7 +207,7 @@ describe('TYPE INFERENCE FOR ARITHMETIC FUNCTIONS', () => {
   });
 
   it('Power of integers stays finite_integer', () => {
-    expect(ce.expr(['Power', 2, 3]).type.toString()).toBe('finite_integer');
+    expectTypeBetween(ce.expr(['Power', 2, 3]), { atMost: 'finite_integer' });
   });
 
   it('Power of a possibly-negative base with non-integer exponent is finite_number', () => {
@@ -320,7 +323,7 @@ describe('TYPE INFERENCE FOR REAL × IMAGINARY ARITHMETIC (D10 shim retirement)'
     const e = ce.box(['Multiply', 'ImaginaryUnit', 'ImaginaryUnit']);
     // `ImaginaryUnit` canonicalizes to the complex literal, so the product of
     // two literals folds to -1: a narrower type, still ⊂ real.
-    expect(e.type.toString()).toBe('finite_integer');
+    expect(e.type.toString()).toBe('-1');
     expect(e.type.matches('real')).toBe(true);
   });
 
@@ -375,7 +378,7 @@ describe('TYPE INFERENCE FOR REAL × IMAGINARY ARITHMETIC (D10 shim retirement)'
     // `i` is an exact literal, so `i^2` folds to -1 at canonicalization: a
     // narrower type than the symbolic `finite_real`, still ⊂ real.
     const square = ce.box(['Power', 'ImaginaryUnit', 2]);
-    expect(square.type.toString()).toBe('finite_integer');
+    expect(square.type.toString()).toBe('-1');
     expect(square.type.matches('real')).toBe(true);
     expect(ce.box(['Power', 'ImaginaryUnit', 3]).type.toString()).toBe(
       'imaginary'

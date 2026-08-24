@@ -212,7 +212,7 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
     expect(ce.box(['Negate', ['List', 1, 2, 3]]).type.toString()).toBe(
       'vector<finite_integer^3>'
     );
-    expect(ce.box(['Negate', 5]).type.toString()).toBe('finite_integer');
+    expectTypeBetween(ce.box(['Negate', 5]), { atMost: 'finite_integer' });
   });
 
   test('a SHAPELESS handler result still goes through the wrapper', () => {

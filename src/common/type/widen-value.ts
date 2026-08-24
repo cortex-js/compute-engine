@@ -29,9 +29,20 @@ import { subtypingVarianceOf } from './variance.js';
  * String and boolean value nodes are leaves: they have no numeric tier to
  * widen to, and no handler manufactures them from an operand literal.
  *
- * Ranges (`kind: 'numeric'`, e.g. `finite_real<0..>`) are NOT literals and
- * pass through unchanged — a ranged handler result such as `Abs`'s
- * `finite_real<0..>` is exactly what this walker must preserve.
+ * OPEN ranges (`kind: 'numeric'`, e.g. `finite_real<0..>`) are handler
+ * claims, not literals, and pass through unchanged — a ranged handler
+ * result such as `Abs`'s `finite_real<0..>` is exactly what this walker
+ * must preserve. A SINGLETON range on the rational tier
+ * (`finite_rational<0.5..0.5>`) is the exact-rational literal
+ * representation (ruling O9) and widens to its tier like a value node;
+ * singleton ranges on other tiers are author/derivation narrowings and
+ * pass through. A literal's SIGN range (`(finite_real<0..>) & !0` for √2)
+ * is shape-identical to a deliberate handler claim (`Exp`'s result), so
+ * this walker cannot tell them apart and keeps both — call sites that
+ * store an OPERAND's type distinguish by the operand (`_literalType`
+ * defined) and project literal cargo through `stripNumericRanges` instead
+ * (see `solveArm`, `receiverType`, `storedCellType`,
+ * `functionLiteralSignatureType`).
  *
  * The walk descends STRUCTURAL nodes only: `list`, `set`, `tuple`,
  * `collection`/`indexed_collection`, `dictionary`, `broadcastable`,
@@ -200,12 +211,33 @@ function widenNode(
       return { ...t, args };
     }
 
-    // Leaves. `numeric` ranges are not literals; `object` and `record` are
+    case 'numeric': {
+      // An OPEN range (`finite_real<0..>` from `Abs`) is a handler's claim
+      // and passes through. A SINGLETON range on the RATIONAL tier
+      // (`finite_rational<0.5..0.5>`) is a literal's exact-rational
+      // representation — the lattice has no value node that keeps the
+      // rational tier, and no other tier spells a literal as a singleton
+      // range — so at a storage position it is literal cargo exactly like a
+      // value node, and widens to its tier (covariant positions only, same
+      // polarity rule as `value`). A singleton range on any OTHER tier
+      // (`finite_integer<5..5>`) is an author's or a derivation's narrowing
+      // and passes through like an open range.
+      if (
+        covariant &&
+        t.type === 'finite_rational' &&
+        typeof t.lower === 'number' &&
+        t.lower === t.upper &&
+        Number.isFinite(t.lower)
+      )
+        return t.type;
+      return t;
+    }
+
+    // Leaves. `object` and `record` are
     // identity-bearing declarations (rebuilding them broke protocol
     // property lookups and recursed on recursive records in the §2.2
     // experiment); the rest carry no nested type a handler could have
     // built from a literal.
-    case 'numeric':
     case 'object':
     case 'record':
     case 'variable':
