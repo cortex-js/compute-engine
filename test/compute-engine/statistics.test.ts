@@ -987,3 +987,268 @@ describe('One-sample statistics on complex data', () => {
     expect(m.toString()).toMatch(/incompatible-type.*real/);
   });
 });
+
+// Both halves of the binning path used to answer a question
+// nobody asked when a value had no finite real reading: the DATA path filtered
+// the value out of the sample, and the EDGE path let every interval comparison
+// against it be false and reported a row of zeros. There is no NaN-absorbing
+// result form to fall back on here — a histogram's answer is a vector of
+// COUNTS — so both now raise the structured `incompatible-type` error, naming
+// the `finite_real` constraint. A value the binning's machine-float
+// arithmetic cannot represent is refused too, but as `out-of-range`: that is a
+// limit of the kernel, not a claim about the value.
+describe('Histogram/BinCounts reject values they cannot bin', () => {
+  const NON_FINITE = /incompatible-type.*finite_real/;
+  const inf = { num: '+Infinity' } as any;
+  const nan = { num: 'NaN' } as any;
+  // Both spellings of the complex infinity: `ComplexInfinity` reports a real
+  // part of `Infinity`, `Complex(1, Infinity)` reports `1`, and neither is a
+  // reading of the value.
+  const spellings = ['ComplexInfinity', ['Complex', 1, inf]] as any[];
+
+  test('a non-finite DATUM errors instead of being dropped from the sample', () => {
+    for (const op of ['Histogram', 'BinCounts']) {
+      for (const bad of [inf, { num: '-Infinity' }, nan, ...spellings]) {
+        const r = ce.box([op, L([1, bad, 5]), 2] as any).evaluate();
+        expect(r.isValid).toBe(false);
+        expect(r.toString()).toMatch(NON_FINITE);
+        expect(r.toString()).toContain(op);
+      }
+    }
+    // The behavior this replaces: the value was filtered out and the head
+    // reported the counts of the two-point dataset `[1, 5]`.
+    expect(ce.box(['BinCounts', L([1, 5]), 2]).evaluate().toString()).toBe(
+      '[1,1]'
+    );
+  });
+
+  test('a non-finite explicit bin EDGE errors instead of fabricating zeros', () => {
+    for (const op of ['Histogram', 'BinCounts']) {
+      for (const bad of [inf, nan, ...spellings]) {
+        const r = ce
+          .box([op, L([1, 2, 3]), L([0, bad, 10])] as any)
+          .evaluate();
+        expect(r.isValid).toBe(false);
+        expect(r.toString()).toMatch(NON_FINITE);
+      }
+    }
+  });
+
+  test('the complex rejection still names the `real` constraint, not `finite_real`', () => {
+    // A genuine complex datum is a different failure: it has a perfectly
+    // finite real part, it just has no place on the ordered line the bins cut.
+    const r = ce.box(['BinCounts', L([1, ['Complex', 1, 2], 5]), 2]).evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toMatch(/incompatible-type.*real.*complex/);
+    expect(r.toString()).not.toMatch(/finite_real/);
+  });
+
+  test('a finite real beyond the MACHINE range is out-of-range, not mistyped', () => {
+    // `10^400` is an exact `finite_integer`: the value is a perfectly good
+    // finite real, and it is the binning's own double arithmetic — the sample
+    // min/max, the bin width, every interval comparison — that cannot place
+    // it. So the error names the kernel's range instead of claiming the datum
+    // is not a finite real, which would contradict its own type evidence.
+    const big = ['Power', 10, 400] as any;
+    for (const op of ['Histogram', 'BinCounts']) {
+      const r = ce.box([op, L([1, big, 5]), 2] as any).evaluate();
+      expect(r.isValid).toBe(false);
+      expect(r.toString()).toMatch(/out-of-range.*machine floating-point range/);
+      expect(r.toString()).not.toMatch(/incompatible-type/);
+      expect(r.toString()).toContain(op);
+    }
+    // The same value as an explicit bin EDGE.
+    const edge = ce
+      .box(['BinCounts', L([1, 2, 3]), L([0, big, 10])] as any)
+      .evaluate();
+    expect(edge.isValid).toBe(false);
+    expect(edge.toString()).toMatch(/out-of-range/);
+    // The limit belongs to the binning kernel alone: the statistics that sum
+    // their data exactly accept the same sample.
+    expect(
+      ce.box(['Mean', L([1, big, 5])] as any).evaluate().isValid
+    ).toBe(true);
+  });
+
+  test('finite real data and finite explicit edges are untouched', () => {
+    expect(ce.box(['BinCounts', L([1, 2, 2, 3]), 3]).evaluate().toString()).toBe(
+      '[1,2,1]'
+    );
+    expect(
+      ce.box(['Histogram', L([1, 2, 2, 3]), 3]).evaluate().ops!.length
+    ).toBe(3);
+    expect(
+      ce.box(['BinCounts', L([1, 2, 3, 9]), L([0, 2, 10])]).evaluate().toString()
+    ).toBe('[1,3]');
+  });
+});
+
+// A value with no finite real reading in the X column used
+// to be diagnosed by the Gaussian elimination rather than by the data: the
+// pivot search found no non-zero pivot and the head reported `degenerate
+// data`, a claim about the geometry of the sample the data does not support,
+// or — when it happened to pivot on a later row — returned the half-`NaN`
+// tuple `(NaN, 0)`, whose `0` slope is not a fit of anything.
+describe('LinearRegression/PolynomialFit propagate NaN for non-finite data', () => {
+  const inf = { num: '+Infinity' } as any;
+  const nan = { num: 'NaN' } as any;
+  // Both spellings of the complex infinity are included: `ComplexInfinity`
+  // reports a real part of `Infinity`, `Complex(1, Infinity)` reports `1`.
+  const bad = [
+    nan,
+    inf,
+    { num: '-Infinity' },
+    'ComplexInfinity',
+    ['Complex', 1, inf],
+  ] as any[];
+
+  test('LinearRegression answers the all-NaN PAIR its signature declares', () => {
+    for (const b of bad) {
+      // In the X column (this is the case that used to error) …
+      const x = ce.box(['LinearRegression', L([1, b, 5]), L([2, 3, 9])]).evaluate();
+      expect(x.toString()).toBe('(NaN, NaN)');
+      // … and in the Y column, which already answered this way.
+      const y = ce.box(['LinearRegression', L([1, 2, 5]), L([2, b, 9])]).evaluate();
+      expect(y.toString()).toBe('(NaN, NaN)');
+    }
+    // `.N()` agrees — the old `(NaN, 0)` artifact survived numericization.
+    expect(
+      ce.box(['LinearRegression', L([1, inf, 5]), L([2, 3, 9])]).N().toString()
+    ).toBe('(NaN, NaN)');
+    // The pairs form takes the same route.
+    expect(
+      ce
+        .box(['LinearRegression', L([L([1, 2]), L([nan, 3]), L([3, 6])])])
+        .evaluate()
+        .toString()
+    ).toBe('(NaN, NaN)');
+  });
+
+  test('a datum outside the MACHINE range still gets the exact fit', () => {
+    // The non-finite test is on the VALUE, not on its double projection:
+    // `10^400` is an exact finite integer that projects to `Infinity`, and
+    // reading the projection made these heads answer `(NaN, NaN)` for data
+    // they fit exactly. The fits sum their data exactly, so they have no
+    // machine-range limit (unlike the binning heads above).
+    const r = ce
+      .box(['LinearRegression', L([1, ['Power', 10, 400], 5]), L([2, 3, 9])])
+      .evaluate();
+    expect(r.isValid).toBe(true);
+    expect(r.operator).toBe('Tuple');
+    expect(r.toString()).not.toMatch(/NaN/);
+    // Exact throughout: an inexact fit would serialize as machine floats, with
+    // a decimal point or an exponent. These coefficients are big rationals.
+    for (const c of r.ops!) expect(c.toString()).toMatch(/^-?\d+(\/\d+)?$/);
+  });
+
+  test('PolynomialFit answers a NaN coefficient per declared degree', () => {
+    // The degree is validated before the fit runs, so the list length is
+    // always well defined — one coefficient per power, all NaN.
+    for (const b of bad) {
+      for (const [degree, want] of [
+        [0, '[NaN]'],
+        [1, '[NaN,NaN]'],
+        [2, '[NaN,NaN,NaN]'],
+      ] as [number, string][])
+        expect(
+          ce
+            .box(['PolynomialFit', L([1, b, 5, 7]), L([2, 3, 9, 11]), degree])
+            .evaluate()
+            .toString()
+        ).toBe(want);
+    }
+  });
+
+  test('the trailing-variable form returns the expression with NaN coefficients', () => {
+    expect(
+      ce
+        .box(['LinearRegression', L([1, nan, 5]), L([2, 3, 9]), 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('NaN * x + NaN');
+    expect(
+      ce
+        .box(['PolynomialFit', L([1, nan, 5, 7]), L([2, 3, 9, 11]), 2, 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('NaN * x^2 + NaN * x + NaN');
+  });
+
+  test('`degenerate data` survives for rank-deficient FINITE real data', () => {
+    for (const r of [
+      ce.box(['LinearRegression', L([2, 2, 2]), L([1, 2, 3])]).evaluate(),
+      ce.box(['PolynomialFit', L([2, 2, 2]), L([1, 2, 3]), 1]).evaluate(),
+    ]) {
+      expect(r.isValid).toBe(false);
+      expect(r.toString()).toMatch(/degenerate data/);
+    }
+  });
+
+  test('finite real data is untouched', () => {
+    expect(
+      ce.box(['LinearRegression', L([1, 2, 3]), L([2, 4, 6])]).evaluate().toString()
+    ).toBe('(0, 2)');
+    expect(
+      ce.box(['PolynomialFit', L([1, 2, 3]), L([2, 4, 6]), 1]).evaluate().toString()
+    ).toBe('[0,2]');
+  });
+
+  test('mismatched lengths report incompatible-dimensions, like the bivariate heads', () => {
+    // A length mismatch is a dimension error, not "degenerate data" — the
+    // same strict pairwise-length convention `Covariance` pins above. It
+    // previously fell through to the kernel's rank guard and was
+    // misdiagnosed.
+    for (const r of [
+      ce.box(['LinearRegression', L([1, 2]), L([1, 2, 3])]).evaluate(),
+      ce.box(['PolynomialFit', L([1, 2]), L([1, 2, 3]), 1]).evaluate(),
+      // The length disagreement is the dominant fact: it wins over a NaN
+      // datum, which would otherwise propagate, and over a complex one,
+      // which would otherwise be rejected as non-real data.
+      ce.box(['LinearRegression', L([1, nan]), L([1, 2, 3])]).evaluate(),
+      ce.box(['PolynomialFit', L([1, nan]), L([1, 2, 3]), 1]).evaluate(),
+      ce
+        .box(['LinearRegression', L([1, ['Complex', 1, 2]]), L([1, 2, 3])])
+        .evaluate(),
+      ce
+        .box(['PolynomialFit', L([1, ['Complex', 1, 2]]), L([1, 2, 3]), 1])
+        .evaluate(),
+    ]) {
+      expect(r.isValid).toBe(false);
+      expect(r.toString()).toMatch(/incompatible-dimensions.*2 vs 3/);
+    }
+  });
+
+  test('fewer than two points is a sample-geometry error, not a NaN answer', () => {
+    // One point determines no line whatever its value is, so the geometry is
+    // reported ahead of the NaN propagation — `LinearRegression([NaN], [2])`
+    // used to answer `(NaN, NaN)` while `PolynomialFit([NaN], [2], 1)` said
+    // there were not enough points. The finite one-point sample, which used
+    // to be blamed on the data as `degenerate data`, now says the same thing.
+    for (const r of [
+      ce.box(['LinearRegression', L([nan]), L([2])]).evaluate(),
+      ce.box(['LinearRegression', L([1]), L([2])]).evaluate(),
+      ce.box(['LinearRegression', L([]), L([])]).evaluate(),
+    ]) {
+      expect(r.isValid).toBe(false);
+      expect(r.toString()).toMatch(/not enough data points/);
+      expect(r.toString()).not.toMatch(/degenerate/);
+    }
+    expect(
+      ce.box(['PolynomialFit', L([nan]), L([2]), 1]).evaluate().toString()
+    ).toMatch(/not enough data points/);
+  });
+
+  test('a NaN or infinite DEGREE is reported as a degree, not as a bad call', () => {
+    // A number in the degree position is a degree, however badly spelled:
+    // `NaN`/`±∞` used to make the parse fail and blame the whole argument
+    // list, and a non-integer was silently rounded (`2.5` fitted degree 3),
+    // which the error message's own "must be an integer" contradicts.
+    for (const degree of [nan, inf, { num: '-Infinity' }, 2.5]) {
+      const r = ce
+        .box(['PolynomialFit', L([1, 2, 3, 4]), L([2, 4, 6, 8]), degree] as any)
+        .evaluate();
+      expect(r.isValid).toBe(false);
+      expect(r.toString()).toMatch(/degree must be an integer in \[0, 12\]/);
+    }
+  });
+});

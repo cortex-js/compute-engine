@@ -37,8 +37,64 @@ export function nonRealDataError(
   name: string,
   datum: Expression
 ): Expression {
+  return dataConstraintError(ce, name, datum, 'real');
+}
+
+/**
+ * The constraint a datum (or an explicit bin edge) failed:
+ *
+ * - `real` — the value is a complex number, and the statistic has no
+ *   convention-free complex extension.
+ * - `finite_real` — the value has no finite real reading at all: `NaN`, a real
+ *   `±∞`, or the complex infinity `~oo` under either spelling.
+ * - `machine_range` — the value IS a finite real, but its magnitude lies
+ *   outside the double range the asking kernel computes in.
+ */
+export type DataConstraint = 'real' | 'finite_real' | 'machine_range';
+
+/** The expectation a `machine_range` rejection names. */
+const MACHINE_RANGE_EXPECTATION =
+  'a value within the machine floating-point range';
+
+/**
+ * The error a statistic raises for a datum (or an explicit bin edge) that
+ * fails one of the constraints above, naming the operator and the (truncated)
+ * datum alongside it.
+ *
+ * The `real` and `finite_real` rejections are `incompatible-type` errors
+ * carrying the failed constraint and the datum's own type: each is a statement
+ * about what the value IS. The binning heads `Histogram`/`BinCounts`
+ * (`library/statistics.ts`) raise `finite_real` where the heads that ABSORB a
+ * non-finite datum (`Mean([1, NaN, 5])` is `NaN`) cannot, because a
+ * histogram's result is a vector of COUNTS and no count means "the data had no
+ * reading". The alternative those heads used to take — dropping the non-finite
+ * values from the sample — answers a different question than the one asked,
+ * silently: `BinCounts([1, +oo, 5], 2)` reported the counts of the two-point
+ * dataset `[1, 5]`. A non-finite explicit bin EDGE is worse still: every
+ * interval comparison against it is false, so the head fabricated a row of
+ * zero counts.
+ *
+ * A `machine_range` rejection is deliberately NOT an `incompatible-type`
+ * error, because nothing is wrong with the value's type: `10^400` is an exact
+ * `finite_integer`, so reporting `incompatible-type finite_real /
+ * finite_integer<0..>` would contradict its own evidence. What such a value
+ * exceeds is the range of the kernel doing the asking, so it takes the
+ * `out-of-range` shape used elsewhere for a value outside what an operation
+ * accepts (a `RandomSample` count, a distribution parameter).
+ */
+export function dataConstraintError(
+  ce: ComputeEngine,
+  name: string,
+  datum: Expression,
+  expected: DataConstraint
+): Expression {
+  if (expected === 'machine_range')
+    return ce.error(
+      ['out-of-range', MACHINE_RANGE_EXPECTATION, renderDatum(datum)],
+      name
+    );
   return ce.error(
-    ['incompatible-type', 'real', datum.type.toString()],
+    ['incompatible-type', expected, datum.type.toString()],
     `${name}: ${renderDatum(datum)}`
   );
 }
@@ -94,6 +150,32 @@ export function nonRealDatum(
 ): Expression | null {
   for (const vals of data)
     for (const v of vals) if (isComplexDatum(v)) return v;
+  return null;
+}
+
+/**
+ * The first datum that has no FINITE real value — `NaN`, a real `±∞`, or the
+ * complex infinity `~oo` under either spelling — or `null` when every datum is
+ * a finite real.
+ *
+ * The question is asked of the VALUE (`isFinite`), never of the machine
+ * projection `realProjection` below: an exact literal outside the double range
+ * is a perfectly finite real whose projection is `Infinity`, so a projection
+ * test misclassified it and made the fits answer `(NaN, NaN)` for
+ * `LinearRegression([1, 10^400, 5], [2, 3, 9])` — data they fit exactly. A
+ * datum that is not a number literal has no finite real value either and is
+ * reported here too, though callers gate on `isNumber` first, so that case
+ * does not arise in practice.
+ *
+ * Whether a datum is representable in MACHINE floats is a different question,
+ * asked only by the kernels that compute in doubles — it is the
+ * `machine_range` constraint of `dataConstraintError` above.
+ */
+export function nonFiniteDatum(
+  ...data: ReadonlyArray<ReadonlyArray<Expression>>
+): Expression | null {
+  for (const vals of data)
+    for (const v of vals) if (!(isNumber(v) && v.isFinite === true)) return v;
   return null;
 }
 

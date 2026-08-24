@@ -1,7 +1,10 @@
 import { operandLiteralValue } from './type-handlers.js';
 import {
+  type DataConstraint,
+  dataConstraintError,
   hasNonFiniteImaginaryPart,
   isComplexDatum,
+  nonFiniteDatum,
   nonRealDataError,
   nonRealDatum,
   realProjection,
@@ -95,8 +98,9 @@ import {
 
 /**
  * Shared binning for `Histogram`/`BinCounts`. Returns the bin edges and the
- * count in each bin, `{ nonReal }` naming a complex datum or bin edge, or
- * `undefined` if the input is not a usable finite numeric collection.
+ * count in each bin, `{ rejected }` naming a datum or bin edge the binning
+ * refuses and the constraint it failed, or `undefined` if the input is not a
+ * usable finite numeric collection.
  *
  * The final bin is *closed* on both ends (`[edge, lastEdge]`) so the dataset
  * maximum is counted — every interior bin is half-open `[edge, next)`.
@@ -107,9 +111,28 @@ import {
  * the complex plane has no canonical ordering to cut into intervals. Both the
  * sample and the explicit bin edges are read through `realProjection` below,
  * so a complex value there would bin data nobody supplied; the caller turns
- * `nonReal` into the same `incompatible-type` error the other order-based
- * statistics answer. The scan shares the single enumeration of the source:
- * walking it twice would re-run a lazy element callback per datum.
+ * the `real` rejection into the same `incompatible-type` error the other
+ * order-based statistics answer. The scan shares the single enumeration of the
+ * source: walking it twice would re-run a lazy element callback per datum.
+ *
+ * A datum with no FINITE real reading — `NaN`, a real `±∞`, or the complex
+ * infinity `~oo` — is rejected the same way, as `finite_real`. It used to be
+ * dropped from the sample (`data.filter(Number.isFinite)`), so
+ * `BinCounts([1, +oo, 5], 2)` reported the counts of the two-point dataset
+ * `[1, 5]` with no hint that a value had been discarded, and a non-finite
+ * explicit EDGE made every interval comparison false and fabricated a row of
+ * zero counts. Unlike `Mean`/`Variance`, these heads cannot absorb the value
+ * into their answer: a histogram's result is a vector of COUNTS, and no count
+ * means "unreadable" — see `dataConstraintError` in `statistics-data.ts`.
+ *
+ * The third rejection, `machine_range`, is this kernel's own limit rather than
+ * a statement about the value: everything below — the sample min and max, the
+ * bin width, and every interval comparison — is machine-float arithmetic, so a
+ * datum whose magnitude exceeds the double range (`10^400`, an exact finite
+ * integer) projects to `Infinity` and would produce infinite bin edges and
+ * counts describing no dataset. The statistics that sum their data exactly
+ * (`Mean`, `Covariance`, the least-squares fits) have no such limit and accept
+ * such a value.
  *
  * An element that is not a NUMBER LITERAL declines instead, the same way
  * `empiricalQuantile` (`library/distributions.ts`) does: `Sqrt(-2)` is a
@@ -123,16 +146,28 @@ function computeBinning(
   xs: Expression,
   binsArg: Expression
 ):
-  | { binEdges: number[]; counts: number[]; nonReal?: undefined }
-  | { nonReal: Expression }
+  | { binEdges: number[]; counts: number[]; rejected?: undefined }
+  | { rejected: { value: Expression; constraint: DataConstraint } }
   | undefined {
   if (!xs.isFiniteCollection) return undefined;
 
   const elements = Array.from(xs.each()) as Expression[];
   if (!elements.every(isNumber)) return undefined;
   const nonRealElement = nonRealDatum(elements);
-  if (nonRealElement) return { nonReal: nonRealElement };
-  const data = elements.map(realProjection).filter(Number.isFinite);
+  if (nonRealElement)
+    return { rejected: { value: nonRealElement, constraint: 'real' } };
+  const nonFiniteElement = nonFiniteDatum(elements);
+  if (nonFiniteElement)
+    return { rejected: { value: nonFiniteElement, constraint: 'finite_real' } };
+  const data = elements.map(realProjection);
+  // Every value that survived the two scans above is a finite real, so a
+  // projection that is not finite means only one thing: the magnitude is
+  // outside the double range this kernel bins in.
+  const unreadable = data.findIndex((x) => !Number.isFinite(x));
+  if (unreadable >= 0)
+    return {
+      rejected: { value: elements[unreadable], constraint: 'machine_range' },
+    };
   if (data.length === 0) return undefined;
 
   const min = Math.min(...data);
@@ -143,8 +178,19 @@ function computeBinning(
     const edges = [...binsArg.each()];
     if (!edges.every(isNumber)) return undefined;
     const nonRealEdge = nonRealDatum(edges);
-    if (nonRealEdge) return { nonReal: nonRealEdge };
+    if (nonRealEdge)
+      return { rejected: { value: nonRealEdge, constraint: 'real' } };
+    const nonFiniteEdge = nonFiniteDatum(edges);
+    if (nonFiniteEdge)
+      return { rejected: { value: nonFiniteEdge, constraint: 'finite_real' } };
     binEdges = edges.map(realProjection);
+    // As for the data above: a finite real edge whose projection is not finite
+    // is one this kernel's machine-float comparisons cannot place.
+    const unreadableEdge = binEdges.findIndex((x) => !Number.isFinite(x));
+    if (unreadableEdge >= 0)
+      return {
+        rejected: { value: edges[unreadableEdge], constraint: 'machine_range' },
+      };
   } else {
     // The scalar spec is a bin COUNT, and a NON-INTEGER scalar declines
     // rather than rounding: the declared `number` deliberately admits
@@ -899,8 +945,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([xs, binsArg], { engine: ce }) => {
         const binning = computeBinning(xs, binsArg);
         if (!binning) return undefined;
-        if (binning.nonReal !== undefined)
-          return nonRealDataError(ce, 'Histogram', binning.nonReal);
+        if (binning.rejected)
+          return dataConstraintError(
+            ce,
+            'Histogram',
+            binning.rejected.value,
+            binning.rejected.constraint
+          );
         const { binEdges, counts } = binning;
 
         return ce.function(
@@ -923,8 +974,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([xs, binsArg], { engine: ce }) => {
         const binning = computeBinning(xs, binsArg);
         if (!binning) return undefined;
-        if (binning.nonReal !== undefined)
-          return nonRealDataError(ce, 'BinCounts', binning.nonReal);
+        if (binning.rejected)
+          return dataConstraintError(
+            ce,
+            'BinCounts',
+            binning.rejected.value,
+            binning.rejected.constraint
+          );
 
         return ce.function(
           'List',
@@ -1913,14 +1969,24 @@ function parseFitArgs(
   if (wantDegree) {
     if (rest.length === 0) return { ok: false, dataOps: rest, walked };
     const degreeArg = rest[rest.length - 1];
-    // A COMPLEX degree is not a degree: `toInteger` reads a number's real
-    // part, so `PolynomialFit(xs, ys, Complex(1, 2))` silently fitted a
-    // degree-1 polynomial. `NaN` carries the rejection to the caller's own
-    // degree diagnostic, which names the range a degree must lie in — a
-    // better answer than blaming the data.
-    const d = isComplexDatum(degreeArg) ? NaN : toInteger(degreeArg);
-    if (d === null) return { ok: false, dataOps: rest.slice(0, -1), walked };
-    degree = d;
+    // A NUMBER in the degree position is a degree, however badly spelled, and
+    // every bad spelling is answered by the caller's own degree diagnostic,
+    // which names the range a degree must lie in — a better answer than
+    // blaming the data or the argument shape. `NaN` is how this parse says
+    // "not a degree". Integrality is tested with the EXACT `isInteger`
+    // predicate for the same reason the bin-count spec of `computeBinning`
+    // above tests it that way: `toInteger` reads a number's real part and
+    // ROUNDS it, so `PolynomialFit(xs, ys, Complex(1, 2))` silently fitted a
+    // degree-1 polynomial and `PolynomialFit(xs, ys, 2.5)` a degree-3 one,
+    // while `NaN` and `±∞` made `toInteger` answer null and the whole call was
+    // reported as a mis-shaped argument list. `toInteger` still has the last
+    // word on the safe-integer range, which no degree in [0, 12] approaches.
+    // A NON-number trailing operand keeps the shape-error route, because it
+    // may be the second data collection of a two-collection call.
+    if (!isNumber(degreeArg))
+      return { ok: false, dataOps: rest.slice(0, -1), walked };
+    degree =
+      (degreeArg.isInteger === true ? toInteger(degreeArg) : null) ?? NaN;
     rest = rest.slice(0, -1);
   }
 
@@ -1944,12 +2010,32 @@ function evaluateLinearRegression(
       'LinearRegression: invalid arguments'
     );
   const { xs, ys, variable } = parsed;
+  // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`)
+  // and as the bivariate statistics: a pairwise fit over two collections is
+  // strict on length agreement. Without this check the mismatch fell through
+  // to the kernel's rank guard and was misreported as "degenerate data".
+  if (xs.length !== ys.length)
+    return ce.error('incompatible-dimensions', `${xs.length} vs ${ys.length}`);
+  // Fewer than two points determine no line, whatever the values are, so the
+  // sample geometry is reported ahead of everything the data could say about
+  // itself — the same order `PolynomialFit` below uses for its own
+  // degree-versus-points check. Without it a one-point sample answered
+  // `(NaN, NaN)` when the point was `NaN` (propagation winning over a fact
+  // that does not depend on the value) and `degenerate data` when it was
+  // finite (naming a rank deficiency instead of the missing point).
+  if (xs.length < 2)
+    return ce.error(
+      'unexpected-argument',
+      'LinearRegression: not enough data points'
+    );
   // The fit reads each datum's real part, so complex data would silently
   // return the fit of different points: `[1, 1+2i, 5]` would be fitted as
   // `[1, 1, 5]`.
   const nonReal = nonRealDatum(xs, ys);
   if (nonReal) return nonRealDataError(ce, 'LinearRegression', nonReal);
-  const coeffs = fitCoefficients(ce, xs, ys, 1, numericApproximation);
+  const coeffs =
+    nanCoefficients(ce, xs, ys, 1) ??
+    fitCoefficients(ce, xs, ys, 1, numericApproximation);
   if (!coeffs)
     return ce.error('unexpected-argument', 'LinearRegression: degenerate data');
   const [b0, b1] = coeffs;
@@ -1972,6 +2058,10 @@ function evaluatePolynomialFit(
       'PolynomialFit: invalid arguments'
     );
   const { xs, ys, degree, variable } = parsed;
+  // Same strict length agreement as `LinearRegression` and the bivariate
+  // statistics — a mismatch is a dimension error, not "degenerate data".
+  if (xs.length !== ys.length)
+    return ce.error('incompatible-dimensions', `${xs.length} vs ${ys.length}`);
   if (!Number.isInteger(degree) || degree < 0 || degree > MAX_FIT_DEGREE)
     return ce.error(
       'unexpected-argument',
@@ -1986,11 +2076,43 @@ function evaluatePolynomialFit(
   // return the fit of different points.
   const nonReal = nonRealDatum(xs, ys);
   if (nonReal) return nonRealDataError(ce, 'PolynomialFit', nonReal);
-  const coeffs = fitCoefficients(ce, xs, ys, degree, numericApproximation);
+  const coeffs =
+    nanCoefficients(ce, xs, ys, degree) ??
+    fitCoefficients(ce, xs, ys, degree, numericApproximation);
   if (!coeffs)
     return ce.error('unexpected-argument', 'PolynomialFit: degenerate data');
   if (variable !== undefined) return buildPolynomial(ce, coeffs, variable);
   return ce.function('List', coeffs);
+}
+
+/**
+ * The all-`NaN` coefficient vector `[NaN, …, NaN]` (length `degree + 1`) when
+ * the data contains a value with no finite real reading — `NaN`, a real `±∞`,
+ * or the complex infinity `~oo` under either spelling — and `null` when every
+ * data value is a finite real, in which case the caller runs the real fit.
+ *
+ * A least-squares fit is a ratio of sums of products of the data, so a single
+ * unreadable value poisons every coefficient, exactly as it poisons
+ * `Covariance`/`Correlation`. Deciding that here, rather than leaving it to
+ * the Gaussian elimination to stumble into, keeps the answer in the shape the
+ * head declares: a pair for `LinearRegression`, a `degree + 1` coefficient
+ * list for `PolynomialFit` (the degree is validated by the caller before this
+ * runs, so the length is always well defined), or the fitted expression with
+ * `NaN` coefficients when a trailing variable was given. It also makes the two
+ * data columns agree — the Y column already answered this way.
+ *
+ * `degenerate data` survives for its real case: rank-deficient FINITE real
+ * data, such as `LinearRegression([2, 2, 2], [1, 2, 3])`, where no line is
+ * determined because every sample shares one x.
+ */
+function nanCoefficients(
+  ce: ComputeEngine,
+  xs: Expression[],
+  ys: Expression[],
+  degree: number
+): Expression[] | null {
+  if (!nonFiniteDatum(xs, ys)) return null;
+  return Array.from({ length: degree + 1 }, () => ce.NaN);
 }
 
 /**

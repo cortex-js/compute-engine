@@ -99,12 +99,89 @@
   `Quantile` does; under `.N()` the datum numericizes to a complex
   literal and is rejected with the `incompatible-type` error.
 
-- **A complex `PolynomialFit` degree is reported as a bad degree.**
-  `PolynomialFit(xs, ys, Complex(1, 2))` read the degree's real part and
-  silently fitted a degree-1 polynomial; it now returns the
-  `degree must be an integer in [0, 12]` error.
+- **A `PolynomialFit` degree that is not an integer is reported as a bad
+  degree.** The degree was read with a helper that takes a number's real
+  part and rounds it, so `PolynomialFit(xs, ys, Complex(1, 2))` silently
+  fitted a degree-1 polynomial and `PolynomialFit(xs, ys, 2.5)` a degree-3
+  one, while a `NaN` or `±∞` degree was blamed on the argument list as
+  `invalid arguments`. Every number in the degree position is now answered
+  by the `degree must be an integer in [0, 12]` error unless it is exactly
+  an integer.
+
+- **`Histogram` and `BinCounts` reject non-finite data and non-finite bin
+  edges instead of silently dropping them.** A data point with no finite
+  real reading — `NaN`, a real `±∞`, or the complex infinity `~oo` under
+  either spelling — used to be filtered out of the sample, so
+  `BinCounts([1, +∞, 5], 2)` reported the counts of the two-point dataset
+  `[1, 5]` with no hint that a value had been discarded. A non-finite
+  explicit bin EDGE was worse: every interval comparison against it is
+  false, so the head fabricated a row of zero counts
+  (`BinCounts([1, 2, 3], [0, NaN, 10])` returned `[0, 0]`). Both now
+  return the same structured `incompatible-type` error the complex
+  rejection uses, naming the `finite_real` constraint, the operator, and
+  the offending value. These two heads cannot absorb a non-finite value
+  the way `Mean([1, NaN, 5])` returns `NaN` does: their result is a vector
+  of COUNTS, and no count means "there was no reading". Finite real data
+  and explicit finite edge lists are unaffected.
+
+  A finite real too large for a machine float — `10^400`, an exact integer
+  — is refused too, but as an `out-of-range` error naming the machine
+  floating-point range, because the limit belongs to the binning
+  arithmetic and not to the value: the bin width and every interval
+  comparison are computed in doubles, where such a datum reads as
+  infinity. The statistics that sum their data exactly (`Mean`,
+  `Covariance`, the least-squares fits) have no such limit and accept it.
+
+- **`LinearRegression` and `PolynomialFit` propagate `NaN` for non-finite
+  data instead of misdiagnosing it.** A `NaN`, `±∞` or `~oo` value in the
+  X column made the least-squares pivot search fail, and the heads
+  reported `unexpected-argument: "degenerate data"` — a claim about the
+  geometry of the sample that the data does not support — or, when the
+  elimination happened to pivot on a later row, returned the half-`NaN`
+  tuple `(NaN, 0)` whose `0` slope is not a fit of anything. Both now
+  answer with every coefficient `NaN`, in the shape each head declares:
+  `(NaN, NaN)` for `LinearRegression`, a `NaN`-filled list of
+  `degree + 1` coefficients for `PolynomialFit`, and the fitted expression
+  with `NaN` coefficients when a trailing variable symbol is given. This
+  is what both already answered when the non-finite value sat in the Y
+  column, and it matches `Covariance`/`Correlation`. The
+  `"degenerate data"` error remains for rank-deficient finite real data —
+  `LinearRegression([2, 2, 2], [1, 2, 3])` still reports it.
+
+- **Two collections of different lengths are a dimension error in the
+  fits.** `LinearRegression([1, 2], [1, 2, 3])` and the corresponding
+  `PolynomialFit` call fell through to the least-squares rank guard and
+  were misdiagnosed as `"degenerate data"`; they now report
+  `incompatible-dimensions 2 vs 3`, the error `Covariance` and every other
+  pairwise head already used for a length disagreement.
+
+- **`LinearRegression` reports a sample with fewer than two points as
+  such.** One point determines no line whatever its value is, but the head
+  answered `(NaN, NaN)` for `LinearRegression([NaN], [2])` and
+  `"degenerate data"` for `LinearRegression([1], [2])`, while
+  `PolynomialFit([NaN], [2], 1)` said there were not enough data points.
+  `LinearRegression` now reports `not enough data points` for any sample
+  shorter than two, ahead of anything the values could say.
+
+- **`Re`, `Im` and `Arg` reject the argument lists their targets reject.**
+  These aliases rewrote to `Real`/`Imaginary`/`Argument` through a
+  construction path that skips signature validation, so `Arg(1, 2)`
+  silently dropped the second operand and answered `0` where
+  `Argument(1, 2)` reported the unexpected argument. They also declared a
+  narrower type than their targets, so `Re(NaN)` claimed the type `real`,
+  which does not admit NaN, wherever the expression was left
+  uncanonicalized. Each alias now validates and types exactly as the name
+  it stands for.
 
 ### New Features
+
+- **`Re` and `Im` are now defined, as aliases of `Real` and
+  `Imaginary`.** `["Re", z]` and `["Im", z]` used to stay inert as unknown
+  operators; they now canonicalize to `Real`/`Imaginary` (the preferred
+  names) and evaluate, exactness included: `Re(1/3 + 2/5i)` is `1/3`. The
+  `\Re` and `\Im` LaTeX commands already parsed to `Real`/`Imaginary` and
+  are what the serializer emits, and `\operatorname{Re}(z)` now resolves
+  too.
 
 - **A `type` handler can now be declared as a function of operand
   DESCRIPTORS instead of operand expressions.** An operator definition that

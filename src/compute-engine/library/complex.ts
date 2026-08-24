@@ -3,6 +3,7 @@
 
 import type {
   Expression,
+  OperatorTypeHandlerOnExpressions,
   Sign,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
@@ -46,6 +47,65 @@ export function signFromAssumedPart(
   );
 }
 
+/**
+ * The `type` handlers of the part extractors `Real`, `Imaginary` and
+ * `Argument`, extracted so that their aliases `Re`, `Im` and `Arg` can share
+ * them.
+ *
+ * An alias canonicalizes to its target, so on the canonical route the type of
+ * `Re(z)` is whatever `Real(z)` claims. On the STRUCTURAL route the alias is
+ * bound but NOT rewritten, and it answers for itself: with only the declared
+ * `(number) -> real` signature to go on, `Re(NaN)` claimed `real`, which does
+ * not admit NaN, while `Real(NaN)` correctly claimed `number`. Sharing the
+ * handler keeps the two spellings of one function from making different
+ * claims about the same value.
+ */
+
+// Re follows the operand's finiteness: a finite number has a finite
+// real part, `Re(±∞) = ±∞`, and `~oo`/NaN (typed `number`) stay
+// unrepresentable by a finite claim.
+const realPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
+  if (!z) return 'number';
+  const t = z.type;
+  if (t.matches('finite_number')) return 'finite_real';
+  if (t.matches('non_finite_number')) return 'non_finite_number';
+  if (isNumber(z)) return 'number'; // NaN or ~oo literal
+  // Collection operand: scalar claim for the broadcast lift — elements
+  // keep the generic finite-point convention (list-broadcast-typing).
+  if (t.matches('indexed_collection<any>')) return 'finite_real';
+  // A real-typed operand is its own real part (`real` excludes NaN);
+  // a `number`-typed one may be NaN/~oo, which `real` cannot admit.
+  return t.matches('real') ? 'real' : 'number';
+};
+
+// Im of a finite number is a finite real, and a real ±∞ has a zero
+// imaginary part; `~oo`/NaN (typed `number`) do not admit a finite claim.
+const imaginaryPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
+  if (!z) return 'number';
+  const t = z.type;
+  if (t.matches('finite_number') || t.matches('non_finite_number'))
+    return 'finite_real';
+  if (isNumber(z)) return 'number'; // NaN or ~oo literal
+  if (t.matches('indexed_collection<any>')) return 'finite_real';
+  // A real-typed operand has Im = 0; a `number`-typed one may be
+  // NaN/~oo, whose imaginary part is not a (finite) real.
+  return t.matches('real') ? 'finite_real' : 'number';
+};
+
+// Arg of a finite number — or of a real ±∞ (0 or π) — is a finite
+// real; `Arg(~oo)`/`Arg(NaN)` (typed `number`) are NaN.
+const argumentType: OperatorTypeHandlerOnExpressions = ([z]) => {
+  if (!z) return 'number';
+  const t = z.type;
+  if (t.matches('finite_number') || t.matches('non_finite_number'))
+    return 'finite_real';
+  if (isNumber(z)) return 'number'; // NaN or ~oo literal
+  if (t.matches('indexed_collection<any>')) return 'finite_real';
+  // A real-typed operand has Arg ∈ {0, π}; a `number`-typed one may be
+  // NaN/~oo, where Arg is NaN.
+  return t.matches('real') ? 'finite_real' : 'number';
+};
+
 export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
   {
     Real: {
@@ -54,22 +114,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
-      // Re follows the operand's finiteness: a finite number has a finite
-      // real part, `Re(±∞) = ±∞`, and `~oo`/NaN (typed `number`) stay
-      // unrepresentable by a finite claim.
-      type: ([z]) => {
-        if (!z) return 'number';
-        const t = z.type;
-        if (t.matches('finite_number')) return 'finite_real';
-        if (t.matches('non_finite_number')) return 'non_finite_number';
-        if (isNumber(z)) return 'number'; // NaN or ~oo literal
-        // Collection operand: scalar claim for the broadcast lift — elements
-        // keep the generic finite-point convention (list-broadcast-typing).
-        if (t.matches('indexed_collection<any>')) return 'finite_real';
-        // A real-typed operand is its own real part (`real` excludes NaN);
-        // a `number`-typed one may be NaN/~oo, which `real` cannot admit.
-        return t.matches('real') ? 'real' : 'number';
-      },
+      type: realPartType,
       sgn: ([op], { engine: ce }) => {
         const re = op.re;
         // Symbol with no value: fall back to assumed bounds on `re:op`
@@ -101,19 +146,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
-      // Im of a finite number is a finite real, and a real ±∞ has a zero
-      // imaginary part; `~oo`/NaN (typed `number`) do not admit a finite claim.
-      type: ([z]) => {
-        if (!z) return 'number';
-        const t = z.type;
-        if (t.matches('finite_number') || t.matches('non_finite_number'))
-          return 'finite_real';
-        if (isNumber(z)) return 'number'; // NaN or ~oo literal
-        if (t.matches('indexed_collection<any>')) return 'finite_real';
-        // A real-typed operand has Im = 0; a `number`-typed one may be
-        // NaN/~oo, whose imaginary part is not a (finite) real.
-        return t.matches('real') ? 'finite_real' : 'number';
-      },
+      type: imaginaryPartType,
       sgn: ([op], { engine: ce }) => {
         const im = op.im;
         // Symbol with no value: fall back to assumed bounds on `im:op`
@@ -136,24 +169,40 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         return ce.number(op.im);
       },
     },
+    // The three aliases below (`Re`, `Im` and `Arg`) are canonical REWRITES to
+    // their preferred spellings. Each builds its target with `ce.function()`,
+    // not `ce._fn()`: `_fn()` skips signature validation, so `Re(1, 2)`
+    // silently dropped the extra operand and answered `1` while `Real(1, 2)`
+    // reported the unexpected argument. An alias must fail exactly where the
+    // name it stands for fails. Each also shares its target's `type` handler,
+    // so the narrow declared signature cannot leak on the structural route —
+    // see the handlers above.
+    Re: {
+      description:
+        '`Re` is an alias for `Real`, which is the preferred name. Returns the real part of a complex number.',
+      broadcastable: true,
+      complexity: 1200,
+      signature: '(number) -> real',
+      type: realPartType,
+      canonical: (ops, { engine: ce }) => ce.function('Real', ops),
+    },
+
+    Im: {
+      description:
+        '`Im` is an alias for `Imaginary`, which is the preferred name. Returns the imaginary part of a complex number.',
+      broadcastable: true,
+      complexity: 1200,
+      signature: '(number) -> real',
+      type: imaginaryPartType,
+      canonical: (ops, { engine: ce }) => ce.function('Imaginary', ops),
+    },
+
     Argument: {
       description: 'Complex argument (phase angle) of a number.',
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
-      // Arg of a finite number — or of a real ±∞ (0 or π) — is a finite
-      // real; `Arg(~oo)`/`Arg(NaN)` (typed `number`) are NaN.
-      type: ([z]) => {
-        if (!z) return 'number';
-        const t = z.type;
-        if (t.matches('finite_number') || t.matches('non_finite_number'))
-          return 'finite_real';
-        if (isNumber(z)) return 'number'; // NaN or ~oo literal
-        if (t.matches('indexed_collection<any>')) return 'finite_real';
-        // A real-typed operand has Arg ∈ {0, π}; a `number`-typed one may be
-        // NaN/~oo, where Arg is NaN.
-        return t.matches('real') ? 'finite_real' : 'number';
-      },
+      type: argumentType,
       // Sign from assumed bounds on `arg:op` (design §5.1b); values are
       // handled by `evaluate`
       sgn: ([op], { engine: ce }) => signFromAssumedPart(ce, op, 'arg'),
@@ -181,7 +230,8 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
-      canonical: (ops, { engine: ce }) => ce._fn('Argument', ops),
+      type: argumentType,
+      canonical: (ops, { engine: ce }) => ce.function('Argument', ops),
     },
 
     // For Abs (magnitude) see src/compute-engine/library/processAbs
