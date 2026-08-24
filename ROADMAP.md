@@ -907,7 +907,28 @@ deterministic lookup count per the compile-cost doctrine. Depth ≤ 12
 (≈49 KB, ~8 s) is still admitted — the guard bounds the blow-up; the
 CSE initiative removes it.
 
-### Quadrature under dynamic integral composition — scalar-target half LANDED 2026-08-23 (exhausted result = NaN, a ruling applied by default and awaiting explicit confirmation)
+User-ruled 2026-08-23, option (c): the guard now, the CSE extension as
+the follow-up that turns refusals into working compiles — with one
+demand note that reorders the priorities: Tycho intends to stop
+GENERATING this class (their macro/fold pipeline is being reworked to
+bind document functions as by-reference lambdas rather than folding
+evaluated values into member expressions). One caveat from their
+ledger (2026-08-23): that rework's landed boundary converts
+thread-style macros but NOT collection-valued ones — and the item-225
+heightmap macros are collection-valued — so the fold source may only
+PARTIALLY disappear for the witness; their re-measure decides, and a
+surviving remainder is the live demand case for the CSE extension
+below (or for a runtime-binding channel — a `_SYS` engine-value
+lookup — which their ledger notes would be better still for them,
+since the compiled member survives instead of falling back). Measured on the guard as
+landed: the `art/nxlddeh5zv` witness's `t_errainPointA` is refused at
+an expanded size of 5.9·10¹⁰ nodes (an estimated ~169 GB of would-be
+source) and the compile falls back to interpreted evaluation — no OOM,
+no runaway emission; the member sweep still exceeds 300 s on the
+interpreted fallback, which is the cost Tycho's lambda rework removes
+and the CSE extension would otherwise.
+
+### Quadrature under dynamic integral composition — scalar-target half LANDED 2026-08-23 (exhausted result = NaN, user-ruled 2026-08-23)
 
 The interval target now bounds dynamic integral composition twice over —
 compile-time sizing/decline of tree-visible nesting (ruled and landed

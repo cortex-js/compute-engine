@@ -605,15 +605,22 @@ rounded double. The output widener below is `widenValueTypes`
 is stored (`boxed-function.ts`). Pins: `literal-handler-types.test.ts`.
 
 `ce.type('0')` already exists and sits correctly in the type lattice
-(`0` is a subtype of `finite_integer`). A boxed `0` does not carry it:
-`ce.box(0).type` is `finite_integer`.
+(`0` is a subtype of `finite_integer`). (Superseded 2026-08-23 by O9's
+second half, the public-type flip — see the O9 ruling in §6: a boxed
+number literal now DOES carry its literal type publicly, `ce.box(0).type`
+is `0` and `ce.box(2.5).type` is `2.5`. When this section was written
+the public type was still the tier, `finite_integer`.)
 
-**Which operands get a literal type.** Exactly those for which
-`isNumber(op) && op.isExact && op.im === 0 && (op.re === 0 || op.re ===
-1)`. An exact zero has one representation, so `-0` is `0`. A float
-`0.0` or `1.0` is not exact and is not eligible. A symbol whose value is
-`0` or `1` is not eligible: its type is its declared or inferred type,
-and its value is not a type fact.
+**Which operands get a literal type.** As originally scoped here:
+exactly those for which `isNumber(op) && op.isExact && op.im === 0 &&
+(op.re === 0 || op.re === 1)`. An exact zero has one representation, so
+`-0` is `0`. A float `0.0` or `1.0` is not exact and is not eligible.
+(Superseded by ruling O9, implemented 2026-08-23: EVERY representable
+finite number literal carries a literal type — the status block at the
+top of this section and the O9 ruling in §6 describe the landed
+representation.) Still true: a symbol whose value is `0` or `1` is not
+eligible — its type is its declared or inferred type, and its value is
+not a type fact.
 
 **On the input side**, `operands[i].type` is `0` or `1` for those
 operands, so a handler learns from the type what it learned from the
@@ -710,7 +717,19 @@ the section prescribes, with the deviations recorded below.
    the operator whose signature was probed no longer exists at dispatch, so
    no dispatch-time mechanism can enforce its parameters — the fuzz now
    skips a probe whose canonical operator differs from the operator under
-   test, and both expected-failure lists are EMPTY.
+   test, and both expected-failure lists are EMPTY. (The residue class
+   was subsequently inventoried, ruled and fixed, 2026-08-24: the
+   enforcement moved to CANONICALIZATION time, where the rewrite
+   happens. `Rational`'s two-argument form rejects a proven non-integer
+   argument before rewriting to `Divide`; the unary `Subtract`/`Multiply`
+   folds reject a lone operand holding a concrete non-numeric scalar;
+   `Divides` gained an exact-integrality gate, making the `NotDivides`
+   rewrite harmless; `NotDivides` and `Vector` were redeclared to what
+   their rewrites preserve. See the ROADMAP entry "A canonical rewrite
+   drops the rewritten operator's stricter parameter contract" and
+   `canonical-rewrite-contracts.test.ts`. The fuzz's skip rule is
+   unchanged — a VALUELESS symbol still admits by overlap and rewrites,
+   the engine-wide deferred-admission convention.)
 3. **The catch around `def.evaluate`** landed in both dispatch paths
    (`handlerThrowToErrorValue`) — **narrower than this section's original
    wording**, which predates a discovery: the suite pins deliberate plain
@@ -835,7 +854,14 @@ Deviations from the text below, and why:
   is the fork for the symbolic case — ROADMAP: "Epsil static evidence
   diagnostics lost to overlap admission". RULED 2026-08-23: the O9/§4.3
   literal-type evidence is the recovery path; the Epsil-side check is to
-  be decided when §4.3 lands.
+  be decided when §4.3 lands. (Decided once §4.3 landed — RULED YES and
+  IMPLEMENTED 2026-08-23: the evidence clause in `overlapAdmission`
+  refuses when the recorded evidence does not FIT the parameter, not
+  only when it is provably disjoint — the lint deliberately stricter
+  than engine admission, the way TypeScript flags code that would run,
+  and lint-only by construction since the evidence map exists only
+  during a pre-pass. Pinned in `use-narrowing-evidence-guard.test.ts`;
+  the ROADMAP entry records the ruling.)
 
 Operators with a declared signature adopt the arithmetic model: an
 argument is refused at boxing only when it is *provably* incompatible;
