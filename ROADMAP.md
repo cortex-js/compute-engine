@@ -559,7 +559,28 @@ complex, and out-of-machine-range arguments:
    high-precision Fresnel regression tests, which work around it by
    comparing decimal expansions instead of dividing.
 
-(A fifth item — `BoxedNumber.isOdd` reading the parity of a bigint's
+5. Define ONE semantics for operator signatures and invalid arguments,
+   and apply it across the library (user-directed 2026-08-24, accepting
+   the current state as interim). Today the library is deliberately
+   permissive but inconsistent off an operator's mathematical domain, in
+   three ways. (a) NaN handling: `Sin(NaN).N()` and `Sinc(NaN).N()`
+   propagate to NaN, while `Heaviside(NaN)` and `Sign(NaN)` stay inert
+   symbolic forms — an artifact of predicate-based evaluate handlers with
+   no numeric kernel, not a ruling. (b) The meaning of a declared result:
+   it is sometimes read as an unconditional promise over everything the
+   parameter type admits (the reading that forced the corrected operators
+   onto wide `-> number` declarations with proof-gated `'types'` handlers)
+   and sometimes as a happy-path claim. (c) Parameter types deliberately
+   admit values the operator has no value for (`Heaviside(1+2i)` boxes and
+   stays symbolic rather than erroring), so the mathematical domain is not
+   expressed in the signature at all. The pass should choose: what a
+   signature's result means (codomain sort vs value promise), what its
+   parameters mean (admission filter vs mathematical domain), and one
+   per-class convention for off-domain arguments (propagate NaN, stay
+   inert, or error) — then sweep the library to it. Item 3 (the `-> real`
+   family's NaN holes) is a special case that folds into this pass.
+
+(A sixth item — `BoxedNumber.isOdd` reading the parity of a bigint's
 ROUNDED double past 2⁵³ — was fixed in the same round: parity now comes
 from the exact integer channel, and the regression battery lives in
 `test/compute-engine/numbers.test.ts` under "PARITY OF INTEGERS BEYOND
