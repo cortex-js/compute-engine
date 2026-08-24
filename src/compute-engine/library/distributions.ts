@@ -6,6 +6,9 @@ import {
 } from '../numerics/special-functions.js';
 import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { nonNegativeSign, positiveSign } from '../boxed-expression/sgn.js';
+import { parseType } from '../../common/type/parse.js';
 import {
   binomialQuantile,
   poissonQuantile,
@@ -60,6 +63,11 @@ function rangeError(ce: ComputeEngine, expected: string, x: Expression) {
   return ce.error(['out-of-range', expected, x.toString()]);
 }
 
+/** The closed unit interval, the proven-domain claim for
+ * `BetaRegularized`'s first operand (a literal `0.5` subtypes it; a bare
+ * `real` symbol does not, and stays on the wide claim). */
+const UNIT_INTERVAL = parseType('finite_real<0..1>')!;
+
 export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
   {
     //
@@ -74,7 +82,27 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
         'Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a)',
       complexity: 7500,
       signature: '(number, number) -> number',
-      type: () => 'finite_real',
+      // A finite real ONLY on the proven domain a > 0, z ≥ 0 (there
+      // Q(a, z) ∈ [0, 1]); outside it the kernel answers NaN
+      // (`Q(-1, 2)` is NaN), so the unconditional `finite_real` this
+      // definition used to claim was unsound. Both gates NARROW on
+      // `true`, so the descriptor sign channel errs on the wide side: an
+      // unproven sign claims `number`.
+      typeHandlerKind: 'types',
+      type: ([a, z]) => {
+        if (
+          a !== undefined &&
+          z !== undefined &&
+          a.facts.finite === true &&
+          z.facts.finite === true &&
+          typeFact(a.type, 'real') === true &&
+          typeFact(z.type, 'real') === true &&
+          positiveSign(a.facts.sgn) === true &&
+          nonNegativeSign(z.facts.sgn) === true
+        )
+          return 'finite_real';
+        return 'number';
+      },
       evaluate: ([a, z], { numericApproximation, engine: ce }) => {
         if (!a || !z) return undefined;
         // Q(a, 0) = 1 (for any a); Q(1, z) = e^{−z} (for any z) — fold even
@@ -100,7 +128,28 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       description: 'Regularized incomplete beta function I_x(a, b)',
       complexity: 7500,
       signature: '(number, number, number) -> number',
-      type: () => 'finite_real',
+      // A finite real ONLY on the proven domain x ∈ [0, 1], a > 0, b > 0
+      // (there I_x(a, b) ∈ [0, 1]); the unconditional `finite_real` this
+      // definition used to claim was unsound outside it. As for
+      // `GammaRegularized` above, every gate narrows on `true`, so an
+      // unproven fact claims the wide `number`.
+      typeHandlerKind: 'types',
+      type: ([x, a, b]) => {
+        if (
+          x !== undefined &&
+          a !== undefined &&
+          b !== undefined &&
+          typeFact(x.type, UNIT_INTERVAL) === true &&
+          a.facts.finite === true &&
+          b.facts.finite === true &&
+          typeFact(a.type, 'real') === true &&
+          typeFact(b.type, 'real') === true &&
+          positiveSign(a.facts.sgn) === true &&
+          positiveSign(b.facts.sgn) === true
+        )
+          return 'finite_real';
+        return 'number';
+      },
       evaluate: ([x, a, b], { numericApproximation, engine: ce }) => {
         if (!x || !a || !b) return undefined;
         // I_0(a, b) = 0, I_1(a, b) = 1 — fold even when a, b are symbolic.

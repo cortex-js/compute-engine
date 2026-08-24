@@ -55,6 +55,17 @@ describe('describe() on literals', () => {
     expect(describeOperand(ce.box(NaN)).facts.finite).toBe(false);
   });
 
+  test('a symbol holding a non-finite value answers finite from the value', () => {
+    // `number` admits `±∞`, so the type alone cannot decide; the held
+    // value — a pure source — can.
+    ce.declare('w', 'number');
+    ce.assign('w', ce.box(Infinity));
+    expect(describeOperand(ce.box('w')).facts.finite).toBe(false);
+    ce.declare('w2', 'number');
+    ce.assign('w2', ce.box(7));
+    expect(describeOperand(ce.box('w2')).facts.finite).toBe(true);
+  });
+
   test('a string literal', () => {
     const d = describeOperand(ce.string('abc'));
     // In the type lattice `string <: collection<any>` (a string enumerates

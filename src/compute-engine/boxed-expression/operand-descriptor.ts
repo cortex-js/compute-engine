@@ -192,7 +192,17 @@ export function describe(
     finiteCollection = op.isFiniteCollection;
 
   let finite = tf.finite;
-  if (finite === undefined && isNumber(op)) finite = op.isFinite;
+  if (finite === undefined) {
+    if (isNumber(op)) finite = op.isFinite;
+    else if (isSymbol(op)) {
+      // Symmetric with the sign read below: a held NUMBER value is a pure
+      // source, and a wide-typed symbol (`w: number`) can legitimately hold
+      // `±∞` or `NaN` that its type does not reveal. A held non-number
+      // value decides nothing.
+      const held = op.valueDefinition?.value;
+      if (held !== undefined && isNumber(held)) finite = held.isFinite;
+    }
+  }
 
   // Value channel first for atoms (a literal's value, a symbol's held value
   // or assumption), then the sign the type itself proves (a ranged
@@ -263,6 +273,24 @@ export function describeType(t: Type): OperandDescriptor {
       shape: tf.shape,
     },
   };
+}
+
+/**
+ * The three-valued type-channel replacement for the mixed-channel
+ * predicates (`isInteger`, `isReal`, `isRational`, …) of the expressions
+ * shape: `true` when the operand's handler-visible type proves the claim,
+ * `false` when it provably refutes it, `undefined` when the type cannot
+ * decide. On a number literal the handler-visible type carries the value,
+ * so this answers exactly what the value-backed predicate answered; on a
+ * symbol it answers from the declared or inferred type, which is what the
+ * predicates already read there. Converted handlers must branch on the
+ * explicit `=== true` / `=== false`, never on truthiness — `undefined` is
+ * the conservative middle.
+ */
+export function typeFact(t: Type, claim: Type): Tri {
+  if (isSubtype(t, claim)) return true;
+  if (provablyDisjoint(t, claim)) return false;
+  return undefined;
 }
 
 /**

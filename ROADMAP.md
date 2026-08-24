@@ -426,11 +426,48 @@ made `Coalesce(1, m)` with `m: integer | missing` falsely promise
 presence — the strip fold is now gated to `propagate` operators and the
 contract is pinned.
 
-What remains here: the mass conversion of the ~210 remaining pure handlers
-(§5.3 step 3, each batch proven under the shadow), the seven
-impure-handler rewrites (§5.4), `context.derive` for the handlers that
-type an application they do not hold, and the old shape's deprecation
-(release N+1) and removal (N+2).
+Step 3 (mass conversion) is IN PROGRESS — batch 1 landed 2026-08-24: 39
+handlers across `number-theory` (whole file), `distributions`, the
+nullary `combinatorics` handlers, and `DigitCount`/`Block`/`When`.
+Nullary constant handlers are RETIRED outright (user-suggested): the
+constant result moves into the declared signature
+(`(integer) -> finite_integer`) and the handler is deleted — ledgered
+with the declared results in `RETIRED_CONSTANT_TYPE_HANDLERS` and pinned.
+Operand-reading handlers convert with verbatim legacy copies in the
+shadow fixture and per-operator corpus coverage. ⚠️ The retirement class
+has a hard boundary: a constant handler answering bare `number` or
+`finite_number` must NOT be retired into the signature — those two
+result spellings are exactly what activates the no-handler fallback
+narrowing at the type-derivation call site, so deleting such a handler
+CHANGES derived types. Nullary handlers remaining outside the batch
+files, with their exclusions counted: `statistics` 13 — 10 of them bare
+`number` (`Mean`/`Median`/`Variance`/…, deliberate: absence absorbs to
+NaN), EXCLUDED, 3 retirable — `collections` 7 (all retirable),
+`special-functions` 4 — three `finite_number`, EXCLUDED, 1 retirable —
+`trigonometry` 3, `arithmetic` 2, plus `core`/`linear-algebra`/`regexp`
+singletons: about 17 retirable in all. Sweep them with the same
+probe-then-ledger recipe next, re-checking each declared result against
+the boundary. A retiree whose constant claim is itself UNSOUND off the
+operator's domain gets a domain-gated `'types'` handler instead, never a
+promoted signature (`GammaRegularized`/`BetaRegularized` were caught
+claiming `finite_real` while `GammaRegularized(-1, 2)` is NaN — they now
+gate on proven positivity/range, and an unproven fact claims `number`). `Binomial`/`Choose`/`Pochhammer` were converted and REVERTED by
+the batch's dual review: their pole-widening sign gates can be proven by
+operator `sgn` handlers on compound operands — a channel descriptors do
+not carry — so converting narrowed the claim, which the parity rules
+forbid; they wait for the O7 sign-channel audit (see the plan doc's §5.3
+step-3 status for the full account). The `typeFact` helper (three-valued
+`isInteger`/`isReal` replacement) shipped with the batch, and
+`describe()`'s `finite` fact now reads a held number value, so a
+wide-typed symbol holding `±∞`/`NaN` answers `finite: false`.
+
+What remains here: the rest of the ~210 pure handlers (§5.3 step 3 — next
+up: descriptor twins of the `library/type-handlers.ts` helpers so the
+numeric families can convert; then the structure-bound control-structure /
+core handlers and the collection files), the seven impure-handler rewrites
+(§5.4), `context.derive` for the handlers that type an application they
+do not hold, and the old shape's deprecation (release N+1) and removal
+(N+2).
 
 Design and implementation draft:
 `docs/plans/2026-08-22-type-handlers-on-types.md` (third draft, 2026-08-22).

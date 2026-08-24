@@ -92,6 +92,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // precedent (`List`, `If`, `Which`, `Assign`, `Declare`), and releases a
       // seed frame that a surviving build-and-return block owes no draws to.
       invokes: false,
+      typeHandlerKind: 'types',
       type: (args) => {
         if (args.length === 0) return 'nothing';
         return args[args.length - 1].type;
@@ -337,6 +338,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.',
       lazy: true,
       signature: '(expression, boolean) -> any',
+      typeHandlerKind: 'types',
       type: ([expr, cond]) => {
         // A list/vector-of-booleans condition broadcasts: the result is a
         // list whose element type is `expr`'s type (see the broadcast branch
@@ -344,8 +346,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // typing wrapper, so lift the type here explicitly — but only when the
         // condition's *declared* type is a list/vector of booleans. A scalar
         // or unknown boolean condition keeps `expr`'s type.
-        if (cond?.type.matches(parseType('list<boolean>')))
-          return `list<${typeToString(expr.type.type)}>`;
+        //
+        // A type read must never crash, whatever the application looks
+        // like, so a malformed arity-0 `When` answers `unknown` here. (An
+        // earlier version of this handler dereferenced `expr.type`
+        // unconditionally and threw on that input.)
+        if (expr === undefined) return 'unknown';
+        if (
+          cond !== undefined &&
+          isSubtype(cond.type, parseType('list<boolean>')!)
+        )
+          return `list<${typeToString(expr.type)}>`;
         return expr.type;
       },
       canonical: (args, { engine: ce }) => {

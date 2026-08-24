@@ -2290,9 +2290,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // its full type. An arm-free final operand yields an arm-free result
       // type — but that never promises presence (`NaN ∈ number`, I6).
       //
-      // `'types'`-shape handler (first migrated batch): reads operand
-      // descriptors, never operand expressions, so the derivation cannot
-      // touch engine state.
+      // `'types'`-shape handler: reads operand descriptors, never operand
+      // expressions, so the derivation cannot touch engine state.
       typeHandlerKind: 'types',
       type: (operands) => {
         if (operands.length === 0) return 'nothing';

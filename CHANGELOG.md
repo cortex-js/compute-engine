@@ -17,8 +17,22 @@
   handler's parameter count — selects the shape. Under test (and with `CE_TYPE_PURITY_GUARD` elsewhere) a
   runtime guard turns any engine-state write from a `'types'` handler into
   an immediate error. The built-in `Coalesce`, `Hold` and `ReleaseHold`
-  definitions are the first to use the new shape, with byte-identical
-  derived types.
+  definitions were the first to use the new shape, with byte-identical
+  derived types; `DigitCount`, `Block` and `When` have since converted
+  the same way, each proven equivalent by a differential shadow that runs
+  both shapes side by side across the test suite. 34 further operators
+  (the number-theory and combinatorics constants) went one better: their
+  constant `type` handler was retired outright and its result moved into
+  the declared signature — `NthPrime` now declares
+  `(integer) -> finite_integer` instead of pairing a wide signature with
+  a narrowing handler, with byte-identical derived types.
+
+- **`GammaRegularized` and `BetaRegularized` no longer claim a finite
+  real result unconditionally.** Their old constant claim was unsound off
+  the proven domain (`GammaRegularized(-1, 2)` evaluates to NaN). They
+  now claim `finite_real` only when the domain is proven — `a > 0` and
+  `z ≥ 0` for the gamma; `x ∈ [0, 1]`, `a > 0`, `b > 0` for the beta —
+  and answer `number` otherwise, per the non-finite typing convention.
 
 ## 0.119.0 _2026_08_23_
 

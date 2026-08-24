@@ -131,6 +131,18 @@ function binomialBigint(
  * arguments, nothing narrower than `number` is sound (`Binomial(∞, 2)` is
  * NaN).
  */
+// NOT yet converted to the `'types'` handler shape, deliberately: the
+// `n.isNegative` read below widens the claim to `number` on the Γ pole
+// (negative integer `n`, non-integer `k`), and on a COMPOUND operand that
+// proof can come from an operator `sgn` handler (`Sign(p)`, a `Divide`
+// whose sign recurses through its operands) — a channel the operand
+// descriptors deliberately do not carry (their sign is type-derived only).
+// Converting today would claim `finite_real` where this handler proves the
+// pole and answers `number` — a type claim NARROWER than before, which is
+// never acceptable (a narrower claim can be an unsound over-claim, where a
+// wider one only loses precision). These handlers convert when the audited
+// sign channel for function expressions lands (open item O7 of
+// `docs/plans/2026-08-22-type-handlers-on-types.md`).
 function binomialType(
   n: Expression | undefined,
   k: Expression | undefined
@@ -296,8 +308,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Fibonacci: {
       description: 'Compute the nth Fibonacci number.',
       wikidata: 'Q47577',
-      signature: '(integer) -> integer',
-      type: () => 'finite_integer',
+      signature: '(integer) -> finite_integer',
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -357,6 +368,9 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // k terms: integer for integer a, real for real a. Any other k reaches
       // the Γ-ratio continuation, which can hit poles (→ `~oo`) or complex
       // values.
+      // Kept on the expressions shape for the same reason as `binomialType`
+      // above: the `isNonNegative` gate can be proven by an operator `sgn`
+      // handler on a compound operand, a channel descriptors do not carry.
       type: ([a, k]) => {
         if (!a || !k || a.isNaN || k.isNaN) return 'number';
         if (provablyNonFiniteNumber(a) || provablyNonFiniteNumber(k))
@@ -523,8 +537,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Multinomial: {
       description: 'Compute the multinomial coefficient for multiple integers.',
       wikidata: 'Q20820114',
-      signature: '(integer+) -> integer',
-      type: () => 'finite_integer',
+      signature: '(integer+) -> finite_integer',
       evaluate: (ops, { engine: ce }) => {
         const ks = ops.map(toInteger);
         if (ks.some((k) => k === null || k < 0)) return undefined;
@@ -559,8 +572,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Compute the number of derangements (subfactorial) of n items.',
       wikidata: 'Q2361661',
-      signature: '(integer) -> integer',
-      type: () => 'finite_integer',
+      signature: '(integer) -> finite_integer',
       evaluate: ([n], { engine: ce }) => {
         // Derangements are defined only for non-negative integers; stay
         // symbolic for anything else rather than rounding the argument.
@@ -591,8 +603,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Compute the Bell number B(n), the number of partitions of a set of n elements.',
       wikidata: 'Q816063',
-      signature: '(integer) -> integer',
-      type: () => 'finite_integer',
+      signature: '(integer) -> finite_integer',
       evaluate: ([n], { engine: ce }) => {
         // Bell numbers count set partitions, defined only for non-negative
         // integers; stay symbolic rather than rounding the argument.

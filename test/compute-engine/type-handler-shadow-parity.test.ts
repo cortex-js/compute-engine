@@ -19,6 +19,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { _shadowParityStats } from '../../src/compute-engine/boxed-expression/operand-descriptor';
 import {
   LEGACY_TYPE_HANDLERS,
+  RETIRED_CONSTANT_TYPE_HANDLERS,
   installLegacyTypeHandlerShadow,
   uninstallLegacyTypeHandlerShadow,
 } from './type-handler-shadow-legacy';
@@ -75,6 +76,14 @@ describe('shadow parity over the converted handlers', () => {
       ['ReleaseHold', ['Hold', 'q']],
       ['ReleaseHold', 'q'],
       ['ReleaseHold', ['List', 1, 2]],
+      // DigitCount (batch 1): the 2-operand and 3-operand forms
+      ['DigitCount', 122, 10],
+      ['DigitCount', 122, 10, 2],
+      // Block/When (batch 1)
+      ['Block', 1, 2.5],
+      ['Block', 'x'],
+      ['When', 'x', ['List', 'True', 'False']],
+      ['When', 'x', 'True'],
     ];
 
     // A divergence throws from the `.type` read; reaching the end with the
@@ -89,6 +98,44 @@ describe('shadow parity over the converted handlers', () => {
       expect(
         _shadowParityStats.checksByOperator.get(operator) ?? 0
       ).toBeGreaterThan(0);
+  });
+
+  test('a malformed arity-0 `When` types `unknown` instead of crashing', () => {
+    // The converted handler guards `expr === undefined` — a hardening the
+    // expressions shape lacked. The `unknown` answer is the guard's own
+    // return, so this pins that the branch is genuinely reachable through
+    // the box route, and the direct handler invocation covers it without
+    // any call-site machinery in between.
+    const ce = new ComputeEngine();
+    expect(ce.box(['When'] as any).type.toString()).toBe('unknown');
+    const def = ce.lookupDefinition('When');
+    const opDef = def && 'operator' in def ? def.operator : undefined;
+    expect(
+      typeof opDef?.type === 'function'
+        ? (opDef.type as (ops: [], ctx: { engine: ComputeEngine }) => unknown)(
+            [],
+            { engine: ce }
+          )
+        : undefined
+    ).toBe('unknown');
+  });
+
+  test('every retired constant handler is gone and its signature claims the result', () => {
+    // The nullary `type: () => '…'` handlers were retired outright: the
+    // constant result lives in the declared signature and no handler
+    // remains. This pins both halves — a reintroduced handler or a widened
+    // signature result fails here. (The regex is `$`-anchored rather than
+    // an exact match so an effect label still passes:
+    // `(integer, integer?) random -> finite_integer`.)
+    const ce = new ComputeEngine();
+    for (const [operator, declaredResult] of RETIRED_CONSTANT_TYPE_HANDLERS) {
+      const def = ce.lookupDefinition(operator);
+      const opDef = def && 'operator' in def ? def.operator : undefined;
+      expect(`${operator}:${typeof opDef?.type}`).toBe(`${operator}:undefined`);
+      expect(`${operator}:${opDef?.signature.toString()}`).toMatch(
+        new RegExp(`-> ${declaredResult}$`)
+      );
+    }
   });
 
   test('the parse route derives identically too', () => {

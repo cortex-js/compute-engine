@@ -1,20 +1,34 @@
 /**
- * Parity and purity pins for the dual `type`-handler shapes
- * (`typeHandlerKind: 'types'` — the staged signature change of
- * `docs/plans/2026-08-22-type-handlers-on-types.md` §5.3 step 2).
+ * Behavior and contract pins for operator `type` handlers that take
+ * operand DESCRIPTORS (`typeHandlerKind: 'types'`) and for the engine
+ * invariant behind that shape: deriving an application's type never
+ * modifies engine state. Everything in this file is durable regression
+ * coverage. What each block guards:
  *
- * The first migrated handlers are `Coalesce`, `Hold` and `ReleaseHold`
- * (`library/core.ts`). The corpus below pins their derived types to the
- * values the EXPRESSIONS-shape handlers answered on the unconverted tree
- * (captured at commit bca1105e before the conversion), so any behavior
- * change from the shape flip fails here byte-for-byte.
+ * - `Coalesce`/`Hold`/`ReleaseHold` derive these exact types, byte for
+ *   byte. `Hold`/`ReleaseHold` are lazy with no `canonical` handler, so
+ *   through `ce.box` their operands arrive RAW and unbound — these rows
+ *   pin that raw-operand typing route.
+ * - A `Coalesce` result never promises presence its last operand does not
+ *   (§3.D of the missing-value typing design): the last operand's
+ *   `missing` arm survives into the result type. Guards against a
+ *   once-shipped bug where the type-derivation call site pre-stripped it.
+ * - `GammaRegularized`/`BetaRegularized` claim `finite_real` only on
+ *   their proven domain and `number` otherwise (the non-finite typing
+ *   convention: claim wide whenever NaN is possible).
+ * - Deriving a type is state-pure: repeated and forced re-derivations
+ *   move no cache axis, a `'types'`-shape handler receives descriptors
+ *   (never expressions), and the runtime guard — always on under test —
+ *   throws on a handler that writes state, including one declared through
+ *   the public `ce.declare` route.
  *
- * The purity half pins the shape's contract: a `'types'` handler receives
- * descriptors, never expressions, and the runtime guard (always on under
- * test) throws if a handler call moves any invalidation axis. `Hold` and
- * `ReleaseHold` are lazy operators with no `canonical` handler, so through
- * `ce.box` their operands arrive RAW and unbound — the corpus exercises
- * exactly that route.
+ * Provenance: the descriptor handler shape and these pins were introduced
+ * by the staged handler-signature change recorded in
+ * `docs/plans/2026-08-22-type-handlers-on-types.md`; the operator type
+ * pins were first captured from the pre-descriptor handlers at commit
+ * bca1105e and are unchanged since. The migration's own disposable
+ * apparatus — the differential shadow — lives separately in
+ * `type-handler-shadow-parity.test.ts` and its fixture.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -23,7 +37,7 @@ import type {
   OperandDescriptor,
 } from '../../src/compute-engine/global-types';
 
-describe('parity: migrated handlers answer what the expressions shape answered', () => {
+describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', () => {
   let ce: ComputeEngine;
   beforeEach(() => {
     ce = new ComputeEngine();
@@ -68,11 +82,12 @@ describe('parity: migrated handlers answer what the expressions shape answered',
     });
 
   test("Coalesce's LAST operand keeps its full type, `missing` arm included", () => {
-    // The §3.D contract: every arm but the last contributes its stripped
-    // type, the last its FULL type — a Coalesce result never promises
-    // presence its last operand does not. The call site's missing-strip
-    // fold is gated to `propagate` operators for exactly this reason: a
-    // `handle` operator's handler owns the absence semantics.
+    // Every arm but the last contributes its stripped type, the last its
+    // FULL type — a Coalesce result never promises presence its last
+    // operand does not (§3.D of the missing-value typing design). The
+    // type-derivation call site folds the missing-strip override into
+    // descriptors only for `propagate` operators for exactly this reason:
+    // a `handle` operator's handler owns the absence semantics.
     ce.declare('m', 'integer | missing');
     expect(ce.box(['Coalesce', 1, 'm'] as any).type.toString()).toBe(
       'integer | missing'
@@ -81,7 +96,31 @@ describe('parity: migrated handlers answer what the expressions shape answered',
     expect(ce.box(['Coalesce', 'm', 1] as any).type.toString()).toBe('integer');
   });
 
-  test('evaluation through the migrated definitions is untouched', () => {
+  test('the regularized gamma/beta claim finite_real only on their proven domain', () => {
+    // `GammaRegularized(-1, 2)` evaluates to NaN, so an unconditional
+    // `finite_real` claim would be unsound (and once was shipped): these
+    // handlers narrow the claim only when positivity/range is proven, and
+    // an unproven fact answers the wide `number` — the non-finite typing
+    // convention.
+    ce.declare('s', 'real');
+    expect(ce.box(['GammaRegularized', 2, 3] as any).type.toString()).toBe(
+      'finite_real'
+    );
+    expect(ce.box(['GammaRegularized', -1, 2] as any).type.toString()).toBe(
+      'number'
+    );
+    expect(ce.box(['GammaRegularized', 's', 3] as any).type.toString()).toBe(
+      'number'
+    );
+    expect(ce.box(['BetaRegularized', 0.5, 2, 3] as any).type.toString()).toBe(
+      'finite_real'
+    );
+    expect(ce.box(['BetaRegularized', 2, 2, 3] as any).type.toString()).toBe(
+      'number'
+    );
+  });
+
+  test('ReleaseHold and Coalesce evaluate their operands correctly', () => {
     expect(
       ce
         .box(['ReleaseHold', ['Hold', ['Add', 1, 2]]] as any)
@@ -97,7 +136,7 @@ describe('parity: migrated handlers answer what the expressions shape answered',
   });
 });
 
-describe('purity: type reads through the migrated handlers move no cache axis', () => {
+describe("purity: deriving an application's type moves no cache axis", () => {
   test('repeated reads and forced re-derivations both drift zero', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'integer');

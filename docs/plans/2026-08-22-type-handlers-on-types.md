@@ -1360,6 +1360,74 @@ type?: (
    exact-comparison audit of §4.3. A conversion is proven by the parity
    harness (§5.5).
 
+   **Status: IN PROGRESS — batch 1 landed 2026-08-24.** All of
+   `library/number-theory.ts`, `library/distributions.ts` and
+   `library/combinatorics.ts`'s constant handlers, plus `DigitCount` and
+   the two structure-free `library/control-structures.ts` handlers
+   (`Block`, `When` — When's conversion adds a deliberate hardening: an
+   arity-0 application answers `unknown` where the legacy handler threw).
+   The `typeFact` helper of this section's table now exists
+   (`operand-descriptor.ts`).
+
+   Conversion classes and their proofs, strongest first:
+
+   - **RETIRED (user-suggested 2026-08-24, the preferred class): a
+     NULLARY constant handler is deleted and its result moves into the
+     declared signature** (`(integer) -> integer` + `type: () =>
+     'finite_integer'` becomes `(integer) -> finite_integer`, no
+     handler). No handler at all cannot touch engine state, and the two
+     spellings are equivalent BECAUSE the no-handler fallback narrowing
+     at the call site activates only for a declared result of bare
+     `number`/`finite_number` — which is also the boundary of the class:
+     a constant `finite_number` (or `number`) handler must NOT be retired
+     this way, or deleting it activates that fallback and changes derived
+     types. 36 handlers retired, ledgered with their declared results in
+     `RETIRED_CONSTANT_TYPE_HANDLERS`
+     (`test/compute-engine/type-handler-shadow-legacy.ts`), pinned by a
+     suite test asserting no handler remains and the signature still
+     claims the recorded result. Verified equivalent by probe (literal,
+     symbolic, list, bad-arg routes byte-identical) before the sweep.
+     One route sits outside that probe and changes on purpose:
+     `assume()` on the BARE operator symbol reads the declared
+     signature's result directly (`refineSymbolType`, `assume.ts`), so it
+     now sees the narrow result where it saw the wide one — the more
+     accurate answer. Two would-be retirees were pulled out of the class
+     entirely: `GammaRegularized`/`BetaRegularized`'s constant
+     `finite_real` was unsound off the proven domain
+     (`GammaRegularized(-1, 2)` is NaN), so they carry domain-gated
+     `'types'` handlers instead — the gates narrow on `true`, the safe
+     direction for the descriptor sign channel — with direct pins in
+     `type-handler-parity.test.ts` and deliberately no shadow entry (the
+     difference from the old claim is the correction).
+   - **CONVERTED: an operand-READING handler** gets
+     `typeHandlerKind: 'types'`, a verbatim legacy copy in the shadow
+     fixture, per-operator corpus coverage in
+     `type-handler-shadow-parity.test.ts`, and the
+     `CE_TYPE_PARITY_SHADOW=1` full-suite differential
+     (`DigitCount`, `Block`, `When` in this batch).
+
+   **`Binomial`/`Choose`/`Pochhammer` were converted in this batch and
+   REVERTED by its dual review**: their negative/non-negative gates widen
+   the claim on a Γ pole, and on a compound operand that proof can come
+   from an operator `sgn` handler (`Sign(p)`, a sign-recursing `Divide`) —
+   a channel descriptors deliberately do not carry (§5.2). The converted
+   handlers would have claimed `finite_real` where the legacy ones prove
+   the pole and answer `number` — a NARROWING, which §5.5's baseline rule
+   ("any precision lost is a sound wider type, never a narrower one")
+   forbids. They convert when the O7 audit extends `facts.sgn` to
+   function expressions (or when their ranged result types carry the
+   sign). The same review also made `describe()`'s `finite` fact read a
+   held NUMBER value (symmetric with its sign read): a wide-typed symbol
+   holding `±∞`/`NaN` now answers `finite: false` from the pure value
+   channel.
+
+   Still to convert: the helper-bound numeric families (`arithmetic`,
+   `trigonometry`, `special-functions`, `statistics` — they need
+   descriptor twins of the `library/type-handlers.ts` helpers), the
+   structure-bound control-structure/core handlers, the collection files,
+   and the O7-blocked trio above; the seven impure handlers stay with
+   §5.4.
+
    | What the handler reads today | What it reads instead | Meaning |
    | --- | --- | --- |
    | `ops[i].type.type`, `.type.matches(T)` | `operands[i].type`, `isSubtype(type, T)` | Unchanged. |
