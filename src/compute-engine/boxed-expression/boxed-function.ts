@@ -4979,6 +4979,10 @@ function type(expr: BoxedFunction): Type {
       // legacy handler is installed in the test-only shadow registry, both
       // shapes run and a divergence throws. No-op (one Map.size read) when
       // the registry is empty — every run outside a parity suite.
+      // @fixme Temporary migration apparatus — MUST be removed when the
+      // expressions handler shape is retired; the shadow registry's doc
+      // comment (`_legacyTypeHandlerShadow`, operand-descriptor.ts) lists
+      // every piece to delete with it.
       if (def.typeHandlerKind === 'types')
         checkShadowTypeParity(
           expr.engine,

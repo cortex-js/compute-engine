@@ -467,7 +467,10 @@ numeric families can convert; then the structure-bound control-structure /
 core handlers and the collection files), the seven impure-handler rewrites
 (§5.4), `context.derive` for the handlers that type an application they
 do not hold, and the old shape's deprecation (release N+1) and removal
-(N+2).
+(N+2) — the removal includes deleting the `@fixme`-tagged shadow-parity
+apparatus wholesale (the registry's doc comment,
+`_legacyTypeHandlerShadow` in `boxed-expression/operand-descriptor.ts`,
+lists every piece).
 
 Design and implementation draft:
 `docs/plans/2026-08-22-type-handlers-on-types.md` (third draft, 2026-08-22).

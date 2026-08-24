@@ -1,4 +1,11 @@
 /**
+ * @fixme TEMPORARY MIGRATION SUITE — this whole file MUST be deleted when
+ * the expressions-shape `type` handler is retired; the shadow registry's
+ * doc comment (`_legacyTypeHandlerShadow`,
+ * `boxed-expression/operand-descriptor.ts`) lists every piece that goes
+ * with it. (The durable behavior pins live in
+ * `type-handler-parity.test.ts`, which stays.)
+ *
  * Differential parity for converted `type` handlers: with the legacy
  * expressions-shape handlers installed in the shadow registry, every type
  * derivation for a converted operator runs BOTH shapes and throws on

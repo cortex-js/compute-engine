@@ -165,6 +165,11 @@ global.console = new EpsilConsole(
   simpleFormatter
 ) as Console;
 
+// @fixme Temporary migration apparatus — MUST be removed when the
+// expressions-shape `type` handler is retired; the shadow registry's doc
+// comment (`_legacyTypeHandlerShadow`, operand-descriptor.ts) lists every
+// piece to delete with it.
+//
 // Type-handler migration, differential shadow (see
 // `boxed-expression/operand-descriptor.ts`, `_legacyTypeHandlerShadow`):
 // with CE_TYPE_PARITY_SHADOW set, install the converted operators' legacy

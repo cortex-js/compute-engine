@@ -1,4 +1,11 @@
 /**
+ * @fixme TEMPORARY MIGRATION FIXTURE — this whole file MUST be deleted
+ * when the expressions-shape `type` handler is retired; the shadow
+ * registry's doc comment (`_legacyTypeHandlerShadow`,
+ * `boxed-expression/operand-descriptor.ts`) lists every piece that goes
+ * with it. Individual `LEGACY_TYPE_HANDLERS` entries retire earlier, once
+ * their batch has shipped in a release.
+ *
  * The LEGACY expressions-shape `type` handlers of operators that have been
  * converted to the `'types'` shape — moved here verbatim when each operator
  * converts, so the shadow-parity mechanism

@@ -355,6 +355,18 @@ export function guardedTypeHandlerCall<T>(
 }
 
 /**
+ * @fixme TEMPORARY MIGRATION APPARATUS — this MUST be removed, together
+ * with every piece listed here, when the expressions-shape `type` handler
+ * is retired (release N+2 of the migration plan,
+ * `docs/plans/2026-08-22-type-handlers-on-types.md` §5.3 step 6): with a
+ * single handler shape left there is nothing to differ against. The full
+ * inventory to delete: this registry, `_shadowParityStats`,
+ * `normalizeHandlerResult` and `checkShadowTypeParity` below; the
+ * `checkShadowTypeParity` call in `boxed-function.ts`; the
+ * `CE_TYPE_PARITY_SHADOW` install hook in `test/jest-config.ts`; and the
+ * files `test/compute-engine/type-handler-shadow-legacy.ts` and
+ * `test/compute-engine/type-handler-shadow-parity.test.ts`.
+ *
  * Test-only differential-parity registry for the handler-shape migration.
  *
  * When an operator's `type` handler converts from the expressions shape to
