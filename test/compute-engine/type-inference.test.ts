@@ -174,8 +174,12 @@ describe('TYPE INFERENCE FOR ARITHMETIC FUNCTIONS', () => {
     expect(ce.expr(['Factorial2', 5]).type.toString()).toBe('finite_integer');
   });
 
-  it('Sign returns finite_integer', () => {
-    expect(ce.expr(['Sign', 3.14]).type.toString()).toBe('finite_integer');
+  it('Sign returns its exact ranged tier', () => {
+    // Sign(x) ∈ {−1, 0, 1} on the reals, and the claim carries the range so
+    // the type channel alone proves the bounds and the sign.
+    expect(ce.expr(['Sign', 3.14]).type.toString()).toBe(
+      'finite_integer<-1..1>'
+    );
   });
 
   it('Ceil of finite returns finite_integer', () => {

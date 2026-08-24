@@ -803,13 +803,45 @@ export class BoxedNumber
 
     if (typeof this._value === 'number') return this._value % 2 !== 0;
 
-    const [n, d] = [this._value.numerator, this._value.denominator];
-    if (d.isOne) {
-      const re = n.re;
-      return re % 2 !== 0;
+    // Parity must come from an exact integer channel. The machine-float
+    // projection `.re` rounds any magnitude past 2^53 — the double nearest
+    // 9007199254740993 is the even 9007199254740992 — so reading it reported
+    // the parity of the rounded double, not of the value. The `isInteger`
+    // guard above means the denominator is 1 and the radical is 1, so the
+    // whole value lives in the rational's numerator.
+    const v = this._value;
+    if (v instanceof ExactNumericValue) {
+      const p = v.rational[0];
+      return typeof p === 'bigint' ? p % 2n !== 0n : p % 2 !== 0;
     }
-    // a/b is odd if a is odd and b is even
-    return n.re % 2 !== 0 && d.re % 2 === 0;
+
+    // A bignum integer: `bignumRe` is the stored `BigDecimal` itself (unlike
+    // `ExactNumericValue.bignumRe`, which re-divides at the working
+    // precision), so its exact integer reading is faithful.
+    const b = v.bignumRe;
+    if (b !== undefined) {
+      // A BigDecimal is `significand · 10^exponent` with the significand
+      // normalized (no trailing zeros), so parity is read off that pair
+      // without ever materializing the integer:
+      //  - exponent > 0 → the value is a multiple of 10, hence even;
+      //  - exponent = 0 → the value IS the significand.
+      // Materializing instead (`BigInt(b.toFixed(0))`) costs a decimal string
+      // as long as the value: ~20 ms and ~1 MB for a million digits, and past
+      // ~5e8 digits `toFixed(0)` throws a RangeError ("Invalid string length")
+      // out of this getter, which no caller expects to throw — while
+      // `ce.bignum('1e600000000')` is perfectly constructible and reports
+      // `isInteger`.
+      if (b.exponent > 0) return false;
+      if (b.exponent === 0) return b.significand % 2n !== 0n;
+      // A negative exponent is not an integer in normalized form; fall back for
+      // any un-normalized value that still happens to be one (`bigint` returns
+      // null when it is not).
+      const i = bigint(b);
+      if (i !== null) return i % 2n !== 0n;
+    }
+
+    // A machine numeric value: the double IS the value, so `% 2` is exact.
+    return v.re % 2 !== 0;
   }
 
   get isEven(): boolean | undefined {

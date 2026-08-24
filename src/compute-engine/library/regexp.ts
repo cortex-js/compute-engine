@@ -523,7 +523,6 @@ export const REGEXP_LIBRARY: SymbolDefinitions = {
         );
       return ce._fn('RegExp', ops);
     },
-    type: () => 'regexp',
   },
 
   IsMatch: {

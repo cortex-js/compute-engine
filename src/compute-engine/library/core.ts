@@ -4778,7 +4778,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return ce.error(['invalid-value', settled.error], text.toString());
         return ce._fn('TypeFrom', [ce.string(settled.canonicalText)]);
       },
-      type: () => 'type',
       // The `Equal` tier of type values: MUTUAL SUBTYPING, against the
       // CURRENT registry — it equates what reduction cannot see (an alias
       // name and its body), while `isSame` stays the immutable canonical-text

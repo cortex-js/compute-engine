@@ -379,11 +379,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description:
         'The length of the shape of the expression. Note this is not the matrix rank (the number of linearly independent rows or columns in the matrix)',
       complexity: 8200,
-      signature: '(value) -> number',
-      // Always a small non-negative machine integer. Without the explicit
-      // handler, signature inference passed the OPERAND's type through
-      // (`Rank(i)` claimed `imaginary` while evaluating to 0).
-      type: () => 'finite_integer',
+      // The result is always a small non-negative machine integer — the
+      // number of dimensions of the operand's shape — no matter what the
+      // operand is, so the declared result claims it. It must be spelled out
+      // here: with a bare `number` result, signature inference passed the
+      // OPERAND's type through instead (`Rank(i)` claimed `imaginary` while
+      // evaluating to 0).
+      signature: '(value) -> finite_integer',
       // The rank (number of dimensions) of a scalar is 0.
       sgn: (): Sign => 'non-negative',
       evaluate: ([xs], { engine: ce }) => ce.number(xs.rank),

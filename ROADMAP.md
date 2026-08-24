@@ -439,19 +439,52 @@ has a hard boundary: a constant handler answering bare `number` or
 `finite_number` must NOT be retired into the signature — those two
 result spellings are exactly what activates the no-handler fallback
 narrowing at the type-derivation call site, so deleting such a handler
-CHANGES derived types. Nullary handlers remaining outside the batch
-files, with their exclusions counted: `statistics` 13 — 10 of them bare
-`number` (`Mean`/`Median`/`Variance`/…, deliberate: absence absorbs to
-NaN), EXCLUDED, 3 retirable — `collections` 7 (all retirable),
-`special-functions` 4 — three `finite_number`, EXCLUDED, 1 retirable —
-`trigonometry` 3, `arithmetic` 2, plus `core`/`linear-algebra`/`regexp`
-singletons: about 17 retirable in all. Sweep them with the same
-probe-then-ledger recipe next, re-checking each declared result against
-the boundary. A retiree whose constant claim is itself UNSOUND off the
+CHANGES derived types. A retiree whose constant claim is itself UNSOUND off the
 operator's domain gets a domain-gated `'types'` handler instead, never a
 promoted signature (`GammaRegularized`/`BetaRegularized` were caught
 claiming `finite_real` while `GammaRegularized(-1, 2)` is NaN — they now
-gate on proven positivity/range, and an unproven fact claims `number`). `Binomial`/`Choose`/`Pochhammer` were converted and REVERTED by
+gate on proven positivity/range, and an unproven fact claims `number`).
+
+The RETIREMENT SWEEP of the nullary handlers outside batch 1's files
+followed on 2026-08-24 and is DONE: nineteen candidates in `arithmetic`,
+`collections`, `core`, `linear-algebra`, `regexp`, `special-functions`,
+`statistics` and `trigonometry`, of which ten retired and nine were
+corrected instead. (The bare-`number` statistics handlers —
+`Mean`/`Median`/`Variance`/… — were never candidates: their result
+spelling is the fallback trigger above, and their absence-absorbs-to-NaN
+behavior depends on it.) The nine pure deletes, whose declared signature
+already claimed exactly what the handler returned, were `Length`,
+`Keys`, `Any`, `All`, `Position`, `ArgMax`, `ArgMin`,
+`TypeFrom` and `RegExp`; `Rank` was promoted from a bare `number` result
+to `(value) -> finite_integer`, which is what its handler had been
+supplying. That leaves 44 entries in the retirement ledger
+(`RETIRED_CONSTANT_TYPE_HANDLERS`,
+`test/compute-engine/type-handler-shadow-legacy.ts`): 34 from batch 1
+plus these 10. The other nine candidates were caught by the soundness
+gate — each claimed a type that its own values contradict at NaN, at
+infinity, or off the real line — and now carry domain-gated `'types'`
+handlers, pinned in `type-handler-parity.test.ts` with no shadow entry
+(the change from the old claim IS the point): `Sinc`/`FresnelS`/`FresnelC` (all three
+numericize to NaN at NaN and are complex-valued off the real line),
+`Covariance`/`PopulationCovariance`/`Correlation` (one NaN or ±∞ data
+value makes the whole statistic NaN), `Heaviside`/`Sign` (defined on
+the reals only — no value at NaN, at `~oo`, or off the real line) and
+`LogIntegral`, which was first taken as a pure delete and pulled back out
+of the ledger when review showed its declared `real` result unsound:
+`LogIntegral(NaN).N()` is NaN, which `real` does not admit, and
+li(x) = Ei(ln x) is complex for a negative argument. Six of the nine are
+declared broadcastable — `Sinc`, `FresnelS`, `FresnelC`, `Heaviside`,
+`Sign` and `LogIntegral` — and for those the result-typing code re-adds
+the operand's lifted shape around the scalar type the handler returns, so
+each gate reads a collection operand through its fully unwrapped element
+type (`broadcastOperandType`, `library/type-handlers-types.ts`), which is
+what keeps `Sinc([1, 2])` at `vector<finite_real^2>`. The three paired
+statistics are the opposite case: `Covariance`, `PopulationCovariance`
+and `Correlation` are declared `broadcastable: false` because the dataset
+IS the operand, so their gate reads the collection type whole. The
+defects the sweep's probes surfaced are recorded as open items below,
+under "Left open by the type-handler retirement sweep".
+`Binomial`/`Choose`/`Pochhammer` were converted and REVERTED by
 the batch's dual review: their pole-widening sign gates can be proven by
 operator `sgn` handlers on compound operands — a channel descriptors do
 not carry — so converting narrowed the claim, which the parity rules
@@ -461,9 +494,22 @@ step-3 status for the full account). The `typeFact` helper (three-valued
 `describe()`'s `finite` fact now reads a held number value, so a
 wide-typed symbol holding `±∞`/`NaN` answers `finite: false`.
 
+The descriptor twins of the shared helpers in `library/type-handlers.ts`
+landed next, in `library/type-handlers-types.ts`, with a direct A/B suite
+(`test/compute-engine/type-handler-twins.test.ts`) that runs both shapes
+over a 44-row operand battery and asserts the mismatch set against an
+explicit divergence table — a new divergence and a vanished one both
+fail. That unblocks the numeric families. Two twins stay blocked on the
+same sign-channel gap as `Binomial`/`Choose`/`Pochhammer`
+(`gammaPoleType` and the log heads), and the audit surfaced one unsound
+expressions-shape arm, fixed in the same round: `Sinh`/`Cosh`/`Tanh`/
+`Sech` took their real-infinity branch on `isReal === true`, which a NaN
+literal answers `true`, so they claimed a finite or non-finite type for a
+value that is NaN.
+
 What remains here: the rest of the ~210 pure handlers (§5.3 step 3 — next
-up: descriptor twins of the `library/type-handlers.ts` helpers so the
-numeric families can convert; then the structure-bound control-structure /
+up: the numeric families now that the twins exist, then the
+structure-bound control-structure /
 core handlers and the collection files), the seven impure-handler rewrites
 (§5.4), `context.derive` for the handlers that type an application they
 do not hold, and the old shape's deprecation (release N+1) and removal
@@ -471,6 +517,56 @@ do not hold, and the old shape's deprecation (release N+1) and removal
 apparatus wholesale (the registry's doc comment,
 `_legacyTypeHandlerShadow` in `boxed-expression/operand-descriptor.ts`,
 lists every piece).
+
+Left open by the type-handler retirement sweep and the helper-twins audit
+that followed it (2026-08-24), all found by probing operators at NaN, ±∞,
+complex, and out-of-machine-range arguments:
+
+1. `Covariance` and `PopulationCovariance` silently use only the REAL
+   PART of complex data. `Covariance([1, 1+2i], [2, 3])` evaluates to `0`
+   — the answer for the data `[1, 1]` — instead of erroring or computing
+   a complex covariance. This is the same class of bug as the one already
+   fixed in the trigonometric kernels, where "the real part was used
+   silently, which was incorrect" (see the note in
+   `library/trigonometry.ts`). Decide whether complex data should error
+   or produce a complex result, then fix `evaluateCovariance`
+   (`library/statistics.ts`).
+2. `Correlation` reports "zero variance" for data it cannot handle for a
+   different reason. `Correlation([1, NaN, 3], [2, 3, 7])` and
+   `Correlation([1, 1+2i], [2, 3])` both come back as
+   `Error("unexpected-argument", "Correlation: zero variance")`, which is
+   a misleading diagnostic: the first has NaN data (its sibling
+   `Covariance` answers `NaN` there) and the second is the complex-data
+   case of item 1.
+3. Several signatures still declare `-> real` for functions whose value
+   is NaN at a NaN argument, and `real` does not admit NaN.
+   `LogIntegral` was the instance the sweep caught, and it is fixed: it
+   now carries a domain-gated `'types'` handler and a `-> number`
+   declared result. The hole is a property of the SIGNATURE, though, and
+   other `-> real` heads share it. Auditing that family — deciding per
+   operator between a domain-gated handler and a widened declared result
+   — is its own pass.
+4. `Divide` of two bignum operands returns NaN when both machine
+   projections underflow to `-0`. With `ce.precision = 500`, dividing two
+   bignum values around `-3.18…e-401` — each carrying its full decimal
+   expansion, but with `.re === -0` — evaluates to NaN: the division takes
+   the machine fast path off the `.re` projection instead of the bignum
+   channel the operands actually hold. This makes relative-error
+   computations on sub-`1e-324` bignums unusable. The fix belongs in the
+   division fast-path gate (the `arithmetic-mul-div` machine-path
+   selection): a machine projection that has underflowed must not be
+   allowed to stand in for a bignum operand. Found while writing the
+   high-precision Fresnel regression tests, which work around it by
+   comparing decimal expansions instead of dividing.
+
+(A fifth item — `BoxedNumber.isOdd` reading the parity of a bigint's
+ROUNDED double past 2⁵³ — was fixed in the same round: parity now comes
+from the exact integer channel, and the regression battery lives in
+`test/compute-engine/numbers.test.ts` under "PARITY OF INTEGERS BEYOND
+THE SAFE RANGE". A `FresnelS`/`FresnelC` stack overflow at huge
+arguments — `bigFresnel` escalating `BigDecimal.precision` to
+`Infinity` — was fixed then too, pinned in
+`test/compute-engine/fresnel.test.ts`.)
 
 Design and implementation draft:
 `docs/plans/2026-08-22-type-handlers-on-types.md` (third draft, 2026-08-22).

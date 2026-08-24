@@ -96,6 +96,28 @@ export const LEGACY_TYPE_HANDLERS: Record<
  * spellings. Each entry records the declared result the signature must
  * keep claiming; a suite pin asserts the definition has NO `type` handler
  * and its signature result matches.
+ *
+ * Deliberately NOT in this ledger — every operator below claimed an
+ * unconditional type that its own values contradict off its real domain, so
+ * instead of retiring the claim into the signature each got a domain-gated
+ * `'types'` handler. That is a deliberate behavior CORRECTION rather than a
+ * behavior-preserving move, so none of them has a differential shadow; they
+ * are pinned directly in `type-handler-parity.test.ts`:
+ *
+ * - `GammaRegularized`/`BetaRegularized` (library/special-functions.ts):
+ *   the old constant `finite_real` claim was unsound off the proven domain
+ *   (`GammaRegularized(-1, 2)` is NaN).
+ * - `LogIntegral` (library/special-functions.ts): it never had a `type`
+ *   handler — its declared result was a flat `real` — but that claim was
+ *   wrong off the non-negative real axis: li(x) = Ei(ln x) is complex for
+ *   x < 0, and `LogIntegral(NaN)` numericizes to NaN. Its declared result
+ *   was widened to `number` and the handler now re-narrows to `real` (not
+ *   `finite_real`: li(1) = −∞) on a proven non-negative real.
+ * - `Sinc`/`FresnelS`/`FresnelC` (library/trigonometry.ts),
+ *   `Covariance`/`PopulationCovariance`/`Correlation` (library/statistics.ts)
+ *   and `Heaviside`/`Sign` (library/arithmetic.ts): `Sinc(NaN)` and
+ *   `Covariance([1, NaN], [2, 3])` both numericize to `NaN`, and
+ *   `sinc`/`FresnelS`/`FresnelC` of a non-real argument are complex.
  */
 export const RETIRED_CONSTANT_TYPE_HANDLERS: ReadonlyArray<
   [operator: string, declaredResult: string]
@@ -131,17 +153,25 @@ export const RETIRED_CONSTANT_TYPE_HANDLERS: ReadonlyArray<
   ['Stirling', 'finite_integer'],
   ['StirlingS1', 'finite_integer'],
   ['NPartition', 'finite_integer'],
-  // `GammaRegularized`/`BetaRegularized` are deliberately NOT here: their
-  // old constant `finite_real` claim was unsound off the proven domain
-  // (`GammaRegularized(-1, 2)` is NaN), so instead of retiring the claim
-  // into the signature they got domain-gated `'types'` handlers — a
-  // deliberate behavior CORRECTION, so no differential shadow either;
-  // pinned directly in `type-handler-parity.test.ts`.
   // library/combinatorics.ts
   ['Fibonacci', 'finite_integer'],
   ['Multinomial', 'finite_integer'],
   ['Subfactorial', 'finite_integer'],
   ['BellNumber', 'finite_integer'],
+  // library/collections.ts
+  ['Length', 'integer'],
+  ['Keys', 'list<string>'],
+  ['Any', 'boolean'],
+  ['All', 'boolean'],
+  ['Position', 'list<integer>'],
+  ['ArgMax', 'integer'],
+  ['ArgMin', 'integer'],
+  // library/core.ts
+  ['TypeFrom', 'type'],
+  // library/regexp.ts
+  ['RegExp', 'regexp'],
+  // library/linear-algebra.ts
+  ['Rank', 'finite_integer'],
 ];
 
 export function installLegacyTypeHandlerShadow(): void {

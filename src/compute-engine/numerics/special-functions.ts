@@ -3522,6 +3522,25 @@ function bigFresnelAsymptotic(
   return BigDecimal.HALF.add(f.mul(sinU)).sub(g.mul(cosU));
 }
 
+/**
+ * log10|x| for any non-zero finite BigDecimal, read off its own representation
+ * (`|x| = |significand|·10^exponent`, so log10|x| = exponent + log10|significand|).
+ * Going through `toNumber()` instead saturates to +Infinity for every finite
+ * value past the double range (|x| ≳ 1.8e308), which would make magnitude tests
+ * on such arguments answer "infinitely large" regardless of the actual value.
+ * Must be called with a finite, non-zero x.
+ */
+function bigLog10Abs(x: BigNum): number {
+  const sig = x.significand < 0n ? -x.significand : x.significand;
+  const digits = sig.toString().length;
+  // Keep the leading 15 digits (a double carries ~15.95 of them): the bigint
+  // division by 10^(digits−15) is exact and its quotient converts without
+  // overflowing, so log10|significand| = shift + log10(leading digits).
+  const shift = Math.max(0, digits - 15);
+  const lead = Number(shift > 0 ? sig / 10n ** BigInt(shift) : sig);
+  return x.exponent + shift + Math.log10(lead);
+}
+
 function bigFresnel(x: BigNum, kind: 's' | 'c'): BigNum {
   if (x.isNaN()) return BigDecimal.NAN;
   if (!x.isFinite())
@@ -3535,6 +3554,14 @@ function bigFresnel(x: BigNum, kind: 's' | 'c'): BigNum {
   const xN = x.toNumber();
   const uN = (Math.PI / 2) * xN * xN; // phase πx²/2
   const cancellation = uN * LOG10E; // digits lost in the Taylor series
+  // Magnitude of x on a log10 scale. Derived from the BigDecimal's own
+  // (significand, exponent) pair rather than `toNumber()`, which saturates at
+  // +Infinity for a finite x past the double range: that made the 1/2 shortcut
+  // below fire at every working precision for such an argument (discarding a
+  // correction that IS representable at high precision — at 500 digits
+  // S(10^400) − 1/2 ≈ −1/(π·10^400)) and left the `log10U` derivation that
+  // follows unreachable for them.
+  const log10X = bigLog10Abs(x);
 
   if (cancellation <= p + 2 * guard) {
     return withExtraPrecision(cancellation + guard, () =>
@@ -3542,9 +3569,26 @@ function bigFresnel(x: BigNum, kind: 's' | 'c'): BigNum {
     ).toPrecision(p);
   }
 
+  // Both S(x) and C(x) approach 1/2 with an oscillating correction that is
+  // O(1/(πx)). Once that correction sits below the working tolerance
+  // 10^−(p+guard) the answer IS 1/2 in every digit we carry, so return it
+  // without running the series. (x is positive here: the negative branch
+  // above recursed on |x| and negated the result.)
+  if (log10X > p + guard) return BigDecimal.HALF;
+
   // Asymptotic regime: truncation error ~e^{−u} < 10^{−(p+20)} here.
   // Extra digits also cover the absolute phase accuracy of sin/cos(πx²/2).
-  const extra = guard + Math.ceil(Math.max(0, Math.log10(uN)));
+  // log10(πx²/2) is derived from log10(x) when the phase itself overflows
+  // the double: `Math.log10(Infinity)` made `extra` — and hence the
+  // process-global `BigDecimal.precision` set by `withExtraPrecision` —
+  // Infinity, which sent the Chudnovsky π binary splitting into unbounded
+  // recursion ("Maximum call stack size exceeded"). The 1/2 shortcut above
+  // does not cover this on its own: at a working precision above ~150 digits
+  // an x whose phase overflows still needs the series.
+  const log10U = Number.isFinite(uN)
+    ? Math.log10(uN)
+    : 2 * log10X + Math.log10(Math.PI / 2);
+  const extra = guard + Math.ceil(Math.max(0, log10U));
   return withExtraPrecision(extra, () =>
     bigFresnelAsymptotic(x, kind, p + guard)
   ).toPrecision(p);

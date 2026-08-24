@@ -2736,7 +2736,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     keywords: ['size'],
     complexity: 4000,
     signature: '(any) -> integer',
-    type: () => 'integer' as Type,
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a length (see `peekCountPreserving`).
     canonical: (ops, { engine: ce }) => {
@@ -3167,7 +3166,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'Return a list of the keys of a dictionary.',
     complexity: 8200,
     signature: '(dictionary<any>) -> list<string>',
-    type: () => parseType('list<string>'),
     // Complete precondition: the evaluate guard (`isDictionary`) is the
     // handler's only decline — see `canEnumerate` (types-definitions.ts).
     canEnumerate: (expr) =>
@@ -4069,7 +4067,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!fn) return null;
       return engine._fn('Any', [collection, fn]);
     },
-    type: () => 'boolean',
     evaluate: ([collection, fn], { engine: ce }) =>
       evaluateQuantifier('Any', collection, fn, ce),
   },
@@ -4098,7 +4095,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!fn) return null;
       return engine._fn('All', [collection, fn]);
     },
-    type: () => 'boolean',
     evaluate: ([collection, fn], { engine: ce }) =>
       evaluateQuantifier('All', collection, fn, ce),
   },
@@ -8351,7 +8347,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '(collection<T>, predicate: (T) any -> boolean) -> list<integer> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Position', ops, 1, PER_ELEMENT_SUPPLY),
-    type: () => 'list<integer>',
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.function('List', []);
@@ -8555,7 +8550,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!fn) return null;
       return engine._fn('ArgMax', [collection, fn]);
     },
-    type: () => 'integer',
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = fn ? applicable(fn) : undefined;
@@ -8596,7 +8590,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!fn) return null;
       return engine._fn('ArgMin', [collection, fn]);
     },
-    type: () => 'integer',
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = fn ? applicable(fn) : undefined;

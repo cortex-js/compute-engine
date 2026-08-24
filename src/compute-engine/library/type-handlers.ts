@@ -1,7 +1,7 @@
 import type { Expression, Sign } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
-import { isNumber } from '../boxed-expression/type-guards.js';
+import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
 import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
 import {
   collectionElementType,
@@ -527,9 +527,17 @@ export function roundingFunctionType(x: Expression | undefined): Type {
  */
 export function absFunctionType(x: Expression | undefined): Type {
   if (!x) return 'number';
-  // NaN's static type is just `number`; only a literal can prove it (and
-  // only a literal's `isNaN` is a cheap field read).
+  // NaN's static type is just `number`, so the tier walk below cannot see
+  // it — only the value channel can. Two pure value sources exist: a
+  // literal's own `isNaN` (a cheap field read), and a symbol's held NUMBER
+  // value, which a wide declaration can hide (`w: number := NaN` evaluates
+  // |w| to NaN, which every tier claim below would wrongly exclude). A
+  // held non-number value proves nothing and is left to the type walk.
   if (isNumber(x) && x.isNaN) return 'number';
+  if (isSymbol(x)) {
+    const held = x.valueDefinition?.value;
+    if (held !== undefined && isNumber(held) && held.isNaN) return 'number';
+  }
   const t = x.type;
   // |x| also preserves the numeric TIER of a real operand: the magnitude of
   // an integer is an integer, of a rational a rational (`|−1/2| = 1/2`). The
@@ -649,14 +657,22 @@ export function elementaryFunctionType(
     // a PROVABLE ±∞/+∞ (`non_finite_number`), while `tanh(±∞) = ±1` and
     // `sech(±∞) = 0` are finite reals. (The circular Sin/Cos give NaN at ±∞
     // and correctly keep `number` via `numericTypeHandler`.)
+    //
+    // Realness is read from the TYPE, not from `isReal`: a NaN literal
+    // answers `isReal === true` and is not finite, so an `isReal` gate
+    // sent `Sinh(NaN)` to `non_finite_number` and `Tanh(NaN)` to
+    // `finite_real`, neither of which admits the NaN those calls actually
+    // produce. NaN's type is the top `number`, which does not match `real`,
+    // while a real ±∞ types `non_finite_number` and does — so the type
+    // channel separates the two cases the value channel conflates.
     case 'Sinh':
     case 'Cosh':
-      if (ops[0]?.isFinite === false && ops[0].isReal === true)
+      if (ops[0]?.isFinite === false && ops[0].type.matches('real'))
         return 'non_finite_number';
       return numericTypeHandler(ops);
     case 'Tanh':
     case 'Sech':
-      if (ops[0]?.isFinite === false && ops[0].isReal === true)
+      if (ops[0]?.isFinite === false && ops[0].type.matches('real'))
         return 'finite_real';
       return numericTypeHandler(ops);
 

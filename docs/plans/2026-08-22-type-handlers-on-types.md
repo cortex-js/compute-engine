@@ -1360,7 +1360,8 @@ type?: (
    exact-comparison audit of §4.3. A conversion is proven by the parity
    harness (§5.5).
 
-   **Status: IN PROGRESS — batch 1 landed 2026-08-24.** All of
+   **Status: IN PROGRESS — batch 1 landed 2026-08-24; the constant-handler
+   retirement sweep followed it the same day.** Batch 1 covered all of
    `library/number-theory.ts`, `library/distributions.ts` and
    `library/combinatorics.ts`'s constant handlers, plus `DigitCount` and
    the two structure-free `library/control-structures.ts` handlers
@@ -1368,6 +1369,14 @@ type?: (
    arity-0 application answers `unknown` where the legacy handler threw).
    The `typeFact` helper of this section's table now exists
    (`operand-descriptor.ts`).
+
+   The sweep that followed took the constant handlers batch 1 had not
+   reached — nineteen of them, across `arithmetic`, `collections`, `core`,
+   `linear-algebra`, `regexp`, `special-functions`, `statistics` and
+   `trigonometry`. Ten retired; the other nine turned out to be claiming
+   a type their own values contradict — at NaN, at infinity, or off the
+   real line — and were corrected instead. Both outcomes are itemized in
+   the two class descriptions below.
 
    Conversion classes and their proofs, strongest first:
 
@@ -1381,24 +1390,99 @@ type?: (
      `number`/`finite_number` — which is also the boundary of the class:
      a constant `finite_number` (or `number`) handler must NOT be retired
      this way, or deleting it activates that fallback and changes derived
-     types. 36 handlers retired, ledgered with their declared results in
+     types. 44 handlers are retired (34 from batch 1, 10 from the sweep
+     that followed it — the count is the length of the ledger array; the
+     "36" this paragraph used to give never matched it), ledgered with
+     their declared results in
      `RETIRED_CONSTANT_TYPE_HANDLERS`
      (`test/compute-engine/type-handler-shadow-legacy.ts`), pinned by a
      suite test asserting no handler remains and the signature still
      claims the recorded result. Verified equivalent by probe (literal,
      symbolic, list, bad-arg routes byte-identical) before the sweep.
+
+     Of the sweep's ten, nine were pure deletes: the declared signature
+     already claimed exactly what the handler returned, so removing the
+     handler cannot move a derived type at all. Those are `Length`
+     (`integer`), `Keys` (`list<string>`), `Any` and
+     `All` (`boolean`), `Position` (`list<integer>`), `ArgMax` and
+     `ArgMin` (`integer`), `TypeFrom` (`type`) and `RegExp` (`regexp`).
+     The tenth, `Rank`, is a genuine promotion: its declared result was
+     the bare `number` that activates the no-handler fallback, and it now
+     reads `(value) -> finite_integer`. The rank of a shape is a small
+     count no matter what the operand is, which probes confirm — `Rank` of
+     the imaginary unit, of a matrix containing NaN, of a string and of a
+     bare real symbol all evaluate to a small non-negative integer, and
+     each derives `finite_integer` both before and after the change. One
+     mechanical detail surfaced with this group: the retirement pin
+     matches the END of the signature, and a signature that binds a type
+     variable ends in a `where` clause (`(collection<T>, …) -> boolean
+     where T`), so the pin now allows that tail after the recorded
+     result.
      One route sits outside that probe and changes on purpose:
      `assume()` on the BARE operator symbol reads the declared
      signature's result directly (`refineSymbolType`, `assume.ts`), so it
      now sees the narrow result where it saw the wide one — the more
-     accurate answer. Two would-be retirees were pulled out of the class
-     entirely: `GammaRegularized`/`BetaRegularized`'s constant
-     `finite_real` was unsound off the proven domain
-     (`GammaRegularized(-1, 2)` is NaN), so they carry domain-gated
-     `'types'` handlers instead — the gates narrow on `true`, the safe
-     direction for the descriptor sign channel — with direct pins in
+     accurate answer. Eleven would-be retirees were pulled out of the
+     class entirely, because the constant claim was itself unsound off the
+     operator's real domain. They carry domain-gated `'types'` handlers
+     instead — every gate narrows on `true`, the safe direction for the
+     descriptor channels — with direct pins in
      `type-handler-parity.test.ts` and deliberately no shadow entry (the
-     difference from the old claim is the correction).
+     difference from the old claim IS the correction, so there is nothing
+     to prove identical). The first two were
+     `GammaRegularized`/`BetaRegularized` in batch 1, whose constant
+     `finite_real` is contradicted by `GammaRegularized(-1, 2)` being NaN.
+     The sweep found nine more, in four groups:
+
+     - `Sinc`, `FresnelS` and `FresnelC` (`library/trigonometry.ts`). All
+       three are entire and bounded on the real line with a finite limit
+       at each end, so a real argument really does give a finite real —
+       but `Sinc(NaN).N()` and `FresnelS(NaN).N()` are both `NaN`, which
+       no finite type admits, and off the real line all three are
+       complex-valued. They now claim `finite_real` for a proven real
+       argument, `finite_number` for a proven finite one (an entire
+       function maps a finite point to a finite value) and `number`
+       otherwise, with the declared result widened from `real` to
+       `number` to match — the same shape as their neighbour
+       `SinIntegral`, which already typed this way.
+     - `Covariance`, `PopulationCovariance` and `Correlation`
+       (`library/statistics.ts`). Each is a sum of products of deviations
+       divided by a count, so one bad data value poisons the whole
+       result: `Covariance([1, NaN], [2, 3])` evaluates to `NaN` while the
+       old handler claimed `finite_real`. They now claim `finite_real`
+       only when the operand types prove every data value is a finite
+       real, in either accepted input form — two equal-length collections,
+       or one collection of (x, y) pairs.
+     - `Heaviside` and `Sign` (`library/arithmetic.ts`). Both are defined
+       on the real line only, where their values (0, 1/2, 1 and −1, 0, 1)
+       are finite, at ±∞ included; at NaN, at `~oo` and off the real line
+       they have no value at all, and the old unconditional finite claim
+       asserted one. They now narrow only for a proven real operand, with
+       declared results widened to `number`.
+     - `LogIntegral` (`library/special-functions.ts`). It was retired as a
+       pure delete first, on the reading that its declared `real` result
+       already said what the handler said; the review that followed showed
+       the claim itself is unsound, because `LogIntegral(NaN).N()` is
+       `NaN` and the type `real` does not admit NaN (li is also
+       complex-valued for a negative argument, since li(x) = Ei(ln x)).
+       It came back out of the ledger and now carries a domain-gated
+       `'types'` handler that narrows only on a proven domain fact and
+       answers `number` otherwise, with the declared result widened from
+       `real` to `number` to match.
+
+     Six of the nine are declared `broadcastable` — `Sinc`, `FresnelS`,
+     `FresnelC`, `Heaviside`, `Sign` and `LogIntegral`. For those, the
+     result-typing code re-adds a collection operand's lifted shape around
+     whatever scalar type the handler returns, so each gate must read a
+     collection operand through its fully unwrapped ELEMENT type
+     (`broadcastOperandType`, `library/type-handlers-types.ts`, which
+     unwraps nested ranks and the `broadcastable<T>` spelling) — without
+     that, `Sinc([1, 2])` would have dropped from `vector<finite_real^2>`
+     to `vector<2>`. The three paired statistics are the opposite case:
+     `Covariance`, `PopulationCovariance` and `Correlation` are declared
+     `broadcastable: false` because the dataset IS the operand, so
+     `pairedStatisticType` reads the whole collection type rather than an
+     element type.
    - **CONVERTED: an operand-READING handler** gets
      `typeHandlerKind: 'types'`, a verbatim legacy copy in the shadow
      fixture, per-operator corpus coverage in
@@ -1421,12 +1505,81 @@ type?: (
    holding `±∞`/`NaN` now answers `finite: false` from the pure value
    channel.
 
+   **Descriptor twins of the shared numeric helpers landed next**, ahead
+   of the numeric-family conversion batch that needs them. A new file,
+   `library/type-handlers-types.ts`, carries a `'types'`-shape counterpart
+   of every helper the `arithmetic`, `trigonometry`, `special-functions`
+   and `statistics` handlers share, plus the descriptor-side comparison
+   primitives those counterparts need: reading closed real bounds out of a
+   ranged type (through `value`, `numeric`, `intersection` and `union`
+   type constructors and transparent aliases, with `signOfType`'s
+   restriction to a NaN-free real base), and three-valued `>`, `≥`, `<`,
+   `≤`, `=` and `≠` against a machine constant. A direct A/B suite
+   (`test/compute-engine/type-handler-twins.test.ts`) drives both shapes
+   over a 44-row operand battery and asserts the mismatch set against an
+   explicit divergence table, so a NEW divergence and a VANISHED one both
+   fail. Identical on every battery row: `operandLiteralValue`,
+   `numericTypeHandler`, `roundingFunctionType`, `extremumType`,
+   `measurementType`, `bigOpResultType`, `adjoinType`, `quotientRingType`,
+   and the `elementaryFunctionType` arms for the pole-reciprocal heads
+   (`Tan`, `Sec`, `Csc`, `Cot`, `Coth`, `Csch`) and for
+   `Arctan`/`Arccot`.
+
+   Two of the twins are blocked on the same sign-channel gap that reverted
+   `Binomial`/`Choose`/`Pochhammer`: `gammaPoleType`'s
+   non-positive-integer pole gate and the log heads' proven-non-positive
+   gate both WIDEN the claim on a proven sign, so an operand whose sign
+   only an operator `sgn` handler knows misses the gate and the twin
+   claims narrower. With `r` declared `real`, `Gamma(Negate(Floor(Abs(r))))`
+   derives `number` in the expressions shape against `finite_real` in the
+   twin, and `Ln(Negate(Floor(Abs(r))))` derives `number` against
+   `complex`; both gates are marked in the twins' doc comments. The audit
+   also narrowed how much that gap costs in practice: `Abs`,
+   `Negate(Abs(…))`, `Multiply(-1, Abs(…))`, `Exp` and `Square` agree
+   between the channels, because ruling O9's ranged result types already
+   carry those signs.
+
+   The audit turned up one divergence class the design did not anticipate:
+   the descriptor channel is sometimes STRONGER than the expression
+   channel. `describe()` derives its `finite` and `sgn` facts from a
+   function application's result type, while `Expression.isFinite` (a
+   per-head structural propagation in
+   `boxed-expression/boxed-function.ts`) and `.isEqual` do not consult it
+   — so a `Log` whose explicit base is `Exp(r)` fails the
+   provably-finite-base gate and answers the top type `number` in the
+   expressions shape, while the twin accepts the base and narrows. That is
+   sound and tighter, but it is still a shadow divergence, and the cheap
+   alignment is on the LEGACY
+   side: `logType`'s `usableBase` accepting `b.isFinite === true ||
+   b.type.matches('finite_number')`, which is what `roundingFunctionType`
+   already does. It is deferred to the batch that converts the log heads.
+
+   One prerequisite the twins audit surfaced is fixed in the same round.
+   The `Sinh`/`Cosh`/`Tanh`/`Sech` arms of `elementaryFunctionType` took
+   their real-infinity branch on `isReal === true`, which a NaN literal
+   answers `true`, so they claimed `non_finite_number` (respectively
+   `finite_real`) for a value that is NaN — a member of `number` alone,
+   and the only heads in that dispatcher with no explicit NaN guard. The
+   arms now test realness through the type channel, matching the twin.
+   That is a deliberate soundness correction, not a parity fix: the
+   expressions shape was wrong.
+
    Still to convert: the helper-bound numeric families (`arithmetic`,
-   `trigonometry`, `special-functions`, `statistics` — they need
-   descriptor twins of the `library/type-handlers.ts` helpers), the
-   structure-bound control-structure/core handlers, the collection files,
+   `trigonometry`, `special-functions`, `statistics` — their conversion
+   now has the descriptor twins it was waiting on), the structure-bound
+   control-structure/core handlers, the collection files,
    and the O7-blocked trio above; the seven impure handlers stay with
-   §5.4.
+   §5.4. After the retirement sweep the only nullary constant `type`
+   handlers left in `library/*.ts` are the thirteen the class boundary
+   above forbids retiring, all of them returning bare `number` or bare
+   `finite_number`: ten `type: () => 'number'` in
+   `library/statistics.ts` (`Mean`, `Median`, `Variance` and their
+   neighbours) and three `type: () => 'finite_number'` in
+   `library/special-functions.ts` (`JacobiTheta`, `DedekindEta`,
+   `EisensteinE`). Deleting any of those would activate the no-handler
+   fallback narrowing and change derived types, which is exactly what the
+   boundary exists to prevent. Every other handler still on the
+   expressions shape reads its operands.
 
    | What the handler reads today | What it reads instead | Meaning |
    | --- | --- | --- |

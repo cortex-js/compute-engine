@@ -6,6 +6,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import type { BoxedExpression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
   fresnelS,
@@ -144,6 +145,62 @@ describe('FRESNEL - Engine evaluation', () => {
   });
 });
 
+describe('FRESNEL - huge arguments reach the 1/2 limit', () => {
+  // Both integrals tend to ±1/2, with a correction of order 1/(πx) that is
+  // far below the working tolerance here. The bignum kernel used to size its
+  // guard digits from the phase πx²/2, which overflows the machine float for
+  // |x| ≳ 1.6e154: `log10(Infinity)` made the requested extra precision
+  // Infinity, and computing π at infinite precision recursed until the stack
+  // overflowed ("Maximum call stack size exceeded").
+  test.each([
+    ['1e300', 0.5],
+    ['-1e300', -0.5],
+    ['1e400', 0.5],
+    ['-1e400', -0.5],
+  ])('FresnelS(%s) = %f', (x, expected) => {
+    expect(ce.box(['FresnelS', ce.parse(x)]).N().re).toBe(expected);
+  });
+
+  test.each([
+    ['1e300', 0.5],
+    ['-1e300', -0.5],
+    ['1e400', 0.5],
+    ['-1e400', -0.5],
+  ])('FresnelC(%s) = %f', (x, expected) => {
+    expect(ce.box(['FresnelC', ce.parse(x)]).N().re).toBe(expected);
+  });
+
+  // These sit on either side of the phase overflow (πx²/2 leaves the double
+  // range at |x| ≳ 1.6e154), but at the default 21-digit precision all three
+  // take the same 1/2 shortcut as the rows above — log10(x) already exceeds
+  // the working tolerance. They pin that the shortcut answers 1/2 across the
+  // overflow boundary; the branch below the shortcut is covered separately,
+  // at a precision high enough to reach it.
+  test.each(['1e100', '1e150', '1e153'])(
+    'FresnelS and FresnelC at %s are unchanged at 1/2',
+    (x) => {
+      expect(ce.box(['FresnelS', ce.parse(x)]).N().re).toBe(0.5);
+      expect(ce.box(['FresnelC', ce.parse(x)]).N().re).toBe(0.5);
+    }
+  );
+
+  // Moderate arguments still go through the Taylor/asymptotic kernels.
+  test('moderate arguments are untouched', () => {
+    expect(ce.box(['FresnelS', ce.parse('2.5')]).N().re).toBeCloseTo(
+      0.6191817558195929,
+      12
+    );
+    expect(ce.box(['FresnelC', ce.parse('-3')]).N().re).toBeCloseTo(
+      -0.6057207892976856,
+      12
+    );
+    expect(ce.box(['FresnelS', ce.parse('1000')]).N().re).toBeCloseTo(
+      0.4996816901138163,
+      12
+    );
+  });
+});
+
 describe('FRESNEL - LaTeX parsing', () => {
   test('parses \\operatorname{FresnelS}(x)', () => {
     const expr = ce.parse('\\operatorname{FresnelS}(x)');
@@ -250,5 +307,87 @@ describe('FRESNEL - Interval JS compilation', () => {
       expect(interval.value.lo).toBeCloseTo(fresnelC(1), 14);
       expect(interval.value.hi).toBeCloseTo(fresnelC(1), 14);
     }
+  });
+});
+
+describe('FRESNEL - huge arguments at raised precision', () => {
+  // The 1/2 shortcut in the bignum kernel only applies while the 1/(πx)
+  // correction sits below the working tolerance, i.e. while log10(x) exceeds
+  // the working precision. Raising the precision past log10(x) puts the same
+  // arguments back on the asymptotic branch, which is where the phase πx²/2
+  // overflows the double and the log10(πx²/2) fallback (derived from log10(x)
+  // instead of from the overflowed phase) is exercised.
+  //
+  // `BigDecimal.precision` is process-global and setting `ce.precision` writes
+  // it, so every case restores the engine's precision afterwards: the other
+  // blocks in this file share this engine. (Nothing can leak to a sibling test
+  // FILE — jest gives each file its own module registry — but the blocks here
+  // would see the raised precision.)
+  // Captured while the describe body runs, i.e. before any test in this file
+  // has had a chance to touch the shared engine.
+  const DEFAULT_PRECISION = ce.precision;
+
+  function atPrecision<T>(digits: number, f: () => T): T {
+    const saved = ce.precision;
+    try {
+      ce.precision = digits;
+      return f();
+    } finally {
+      ce.precision = saved;
+    }
+  }
+
+  // The leading significant digits of a value's decimal expansion, sign and
+  // all. Two values are compared this way rather than through a ratio because
+  // the corrections here are around 1e-161 and 1e-401: `Divide` on operands
+  // whose machine projection has underflowed to -0 answers NaN, so a relative
+  // error computed that way is unusable.
+  const leadingDigits = (v: BoxedExpression, n = 40) => v.toString().slice(0, n);
+
+  test('S(1e160) at 200 digits is 1/2 - 1/(pi x)', () => {
+    atPrecision(200, () => {
+      const x = ce.parse('1e160');
+      const s = ce.box(['FresnelS', x]).N();
+      // The phase of x = 10^k is an exact multiple of 2π (π·10^320/2 = 2π·
+      // 25·10^318), so cos(πx²/2) = 1 and sin(πx²/2) = 0: the whole asymptotic
+      // correction collapses to the leading −1/(πx) term, and the next term is
+      // smaller by a factor u² ≈ 2.5e640.
+      const diff = ce.box(['Subtract', s, ce.parse('0.5')]).N();
+      const expected = ce.box(['Negate', ['Divide', 1, ['Multiply', 'Pi', x]]]).N();
+      expect(diff.isNegative).toBe(true);
+      // Subtracting 1/2 from a 200-digit S leaves ~40 significant digits, all
+      // of which must be digits of -1/(pi x).
+      expect(leadingDigits(diff)).toBe('-3.1830988618379067153776752674502872406');
+      expect(leadingDigits(diff)).toBe(leadingDigits(expected));
+    });
+  });
+
+  test('C(1e160) at 200 digits is exactly 1/2', () => {
+    atPrecision(200, () => {
+      // C's correction is g(x)·cos(πx²/2) with g ~ 1/(2πxu) ≈ 2e-481, below the
+      // 200-digit tolerance, so every digit carried is a digit of 1/2.
+      // (`.re` would round 0.4999…9 to 0.5 too, hence the exact string check.)
+      expect(ce.box(['FresnelC', ce.parse('1e160')]).N().toString()).toBe('0.5');
+    });
+  });
+
+  test('S(1e400) at 500 digits is 1/2 - 1/(pi x), not exactly 1/2', () => {
+    atPrecision(500, () => {
+      const x = ce.parse('1e400');
+      const s = ce.box(['FresnelS', x]).N();
+      expect(s.toString()).not.toBe('0.5');
+      const diff = ce.box(['Subtract', s, ce.parse('0.5')]).N();
+      const expected = ce.box(['Negate', ['Divide', 1, ['Multiply', 'Pi', x]]]).N();
+      expect(leadingDigits(diff)).toBe('-3.1830988618379067153776752674502872406');
+      expect(leadingDigits(diff)).toBe(leadingDigits(expected));
+    });
+  });
+
+  test('S(1e300) at the default precision is still exactly 1/2', () => {
+    expect(ce.box(['FresnelS', ce.parse('1e300')]).N().toString()).toBe('0.5');
+  });
+
+  test('the raised-precision cases restored the engine precision', () => {
+    expect(ce.precision).toBe(DEFAULT_PRECISION);
   });
 });

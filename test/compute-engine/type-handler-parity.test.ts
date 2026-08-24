@@ -16,6 +16,23 @@
  * - `GammaRegularized`/`BetaRegularized` claim `finite_real` only on
  *   their proven domain and `number` otherwise (the non-finite typing
  *   convention: claim wide whenever NaN is possible).
+ * - `Sinc`/`FresnelS`/`FresnelC`, `Heaviside`/`Sign`, `LogIntegral` and the
+ *   paired statistics `Covariance`/`PopulationCovariance`/`Correlation`
+ *   follow the same rule: each once claimed an unconditional type that its
+ *   own values contradict off the operator's real domain (`Sinc(NaN).N()`,
+ *   `LogIntegral(NaN).N()` and `Covariance([1, NaN], [2, 3]).N()` are all
+ *   `NaN`), and each now narrows only on a proven-real operand.
+ * - `Heaviside`'s SIGN claim is gated on that same proven realness: its
+ *   values 0, 1/2 and 1 are non-negative only where it has a value, so the
+ *   once-unconditional `non-negative` (which answered for `Heaviside(NaN)`
+ *   too) is withheld off the real line.
+ * - A broadcastable operator's gate reads the operand type unwrapped to its
+ *   SCALAR element — every collection rank, `broadcastable<T>` included —
+ *   because the call site re-adds the whole lifted shape around what the
+ *   handler returns.
+ * - `Sinh`/`Cosh`/`Tanh`/`Sech` do not mistake a NaN operand for a real
+ *   infinity: a deliberate soundness correction, since NaN answers
+ *   `isReal === true` while being non-finite.
  * - Deriving a type is state-pure: repeated and forced re-derivations
  *   move no cache axis, a `'types'`-shape handler receives descriptors
  *   (never expressions), and the runtime guard — always on under test —
@@ -118,6 +135,299 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     expect(ce.box(['BetaRegularized', 2, 2, 3] as any).type.toString()).toBe(
       'number'
     );
+  });
+
+  test('Sinc/FresnelS/FresnelC claim finite_real only on the real line', () => {
+    // All three are entire, bounded on the reals and have finite limits at
+    // ±∞, so a real argument gives a finite real. Off the real line they are
+    // complex-valued, and `Sinc(NaN).N()` is `NaN` — which no finite type
+    // admits — so the unconditional `finite_real` these three used to claim
+    // was unsound. A finite (possibly complex) argument still claims
+    // `finite_number`; anything the type cannot decide keeps `number`.
+    const NAN = { num: 'NaN' };
+    ce.declare('s', 'real');
+    ce.declare('u', 'number');
+    for (const op of ['Sinc', 'FresnelS', 'FresnelC']) {
+      expect(`${op}(2)=${ce.box([op, 2] as any).type.toString()}`).toBe(
+        `${op}(2)=finite_real`
+      );
+      // ±∞ is real, and all three have a finite value there.
+      expect(
+        `${op}(oo)=${ce.box([op, { num: '+Infinity' }] as any).type.toString()}`
+      ).toBe(`${op}(oo)=finite_real`);
+      expect(`${op}(s)=${ce.box([op, 's'] as any).type.toString()}`).toBe(
+        `${op}(s)=finite_real`
+      );
+      expect(`${op}(NaN)=${ce.box([op, NAN] as any).type.toString()}`).toBe(
+        `${op}(NaN)=number`
+      );
+      expect(
+        `${op}(i)=${ce.box([op, ['Complex', 1, 2]] as any).type.toString()}`
+      ).toBe(`${op}(i)=finite_number`);
+      expect(`${op}(u)=${ce.box([op, 'u'] as any).type.toString()}`).toBe(
+        `${op}(u)=number`
+      );
+      // Broadcast: the per-element claim is wrapped in the operand's shape.
+      expect(
+        `${op}(list)=${ce.box([op, ['List', 1, 2]] as any).type.toString()}`
+      ).toBe(`${op}(list)=vector<finite_real^2>`);
+    }
+    // A finite argument of undecided realness reaches the second gate: an
+    // entire function maps a finite point to a finite value, real or complex.
+    ce.declare('fn', 'finite_number');
+    expect(ce.box(['Sinc', 'fn'] as any).type.toString()).toBe('finite_number');
+    // `~oo` types `number` — the same descriptor a NaN produces — so neither
+    // gate fires and the wide claim stands.
+    expect(ce.box(['Sinc', 'ComplexInfinity'] as any).type.toString()).toBe(
+      'number'
+    );
+  });
+
+  test('a broadcastable gate reads through EVERY collection rank', () => {
+    // The handler describes one SCALAR element and the call site re-adds the
+    // operand's whole lifted shape, so the gate has to unwrap the operand
+    // type all the way down. Unwrapping a single rank left every rank-2
+    // operand undecided — one unwrap of `matrix<real^(2x2)>` is the ROW type
+    // `list<real^2>`, which proves nothing about a scalar — and a
+    // `broadcastable<T>` operand was not unwrapped at all, because its
+    // `collection` fact is `undefined` rather than `true`.
+    ce.declare('M', 'matrix<real^(2x2)>');
+    ce.declare('br', 'broadcastable<real>');
+    expect(
+      ce
+        .box(['Sinc', ['List', ['List', 1, 2], ['List', 3, 4]]] as any)
+        .type.toString()
+    ).toBe('matrix<finite_real^(2x2)>');
+    expect(ce.box(['Sinc', 'M'] as any).type.toString()).toBe(
+      'matrix<finite_real^(2x2)>'
+    );
+    expect(ce.box(['Sinc', 'br'] as any).type.toString()).toBe(
+      'broadcastable<finite_real>'
+    );
+  });
+
+  test('Heaviside and Sign claim their exact ranged tier for a proven real', () => {
+    // Both are defined on the REAL line only, where their values are a
+    // finite set: H(x) ∈ {0, 1/2, 1} (H(0) = 1/2 is this engine's
+    // convention) and Sign(x) ∈ {−1, 0, 1}, at ±∞ included. The claims
+    // carry the RANGE, so the type channel alone proves the bounds and the
+    // sign (`Sqrt(Heaviside(s))` stays `finite_real` with no sgn-handler
+    // consultation). At NaN, at `~oo` and off the real line they have no
+    // value, so an undecided operand keeps the wide `number`.
+    const NAN = { num: 'NaN' };
+    ce.declare('s', 'real');
+    ce.declare('u', 'number');
+    expect(ce.box(['Heaviside', 2] as any).type.toString()).toBe(
+      'finite_rational<0..1>'
+    );
+    expect(ce.box(['Heaviside', 's'] as any).type.toString()).toBe(
+      'finite_rational<0..1>'
+    );
+    expect(
+      ce.box(['Heaviside', { num: '-Infinity' }] as any).type.toString()
+    ).toBe('finite_rational<0..1>');
+    expect(ce.box(['Heaviside', NAN] as any).type.toString()).toBe('number');
+    expect(
+      ce.box(['Heaviside', ['Complex', 1, 2]] as any).type.toString()
+    ).toBe('number');
+    expect(ce.box(['Heaviside', 'u'] as any).type.toString()).toBe('number');
+    expect(ce.box(['Sign', -2] as any).type.toString()).toBe(
+      'finite_integer<-1..1>'
+    );
+    expect(ce.box(['Sign', 's'] as any).type.toString()).toBe(
+      'finite_integer<-1..1>'
+    );
+    expect(ce.box(['Sign', NAN] as any).type.toString()).toBe('number');
+    expect(ce.box(['Sign', 'ComplexInfinity'] as any).type.toString()).toBe(
+      'number'
+    );
+    expect(ce.box(['Sign', ['Complex', 1, 2]] as any).type.toString()).toBe(
+      'number'
+    );
+    // Broadcast: the per-element claim is wrapped in the operand's shape.
+    expect(ce.box(['Sign', ['List', 1, -2]] as any).type.toString()).toBe(
+      'list<finite_integer<-1..1>^2>'
+    );
+    // The ranged claim reaches type-channel consumers: non-negativity is in
+    // the type, so a square root of it stays real.
+    expect(
+      ce.box(['Sqrt', ['Heaviside', 's']] as any).type.toString()
+    ).toBe('finite_real');
+    // A collection whose ELEMENT type cannot decide realness keeps the wide
+    // claim per element, exactly as the scalar operand `u: number` does.
+    ce.declare('L', 'list<number>');
+    expect(ce.box(['Sign', 'L'] as any).type.toString()).toBe('list<number>');
+  });
+
+  test("Heaviside's SIGN is claimed only where it has a value", () => {
+    // Correction paired with the type gate above: H's values 0, 1/2 and 1 are
+    // non-negative, but only on the real line, where H has a value at all.
+    // The `sgn` handler claimed `non-negative` unconditionally, so
+    // `Heaviside(NaN).isNonNegative` answered `true` — a sign asserted for an
+    // input the operator has no value for. Sign is a live channel
+    // (comparisons, simplification), so the claim is now gated on the same
+    // proven realness the type is.
+    const NAN = { num: 'NaN' };
+    ce.declare('s', 'real');
+    ce.declare('u', 'number');
+    for (const [label, operand] of [
+      ['NaN', NAN],
+      ['1+2i', ['Complex', 1, 2]],
+      ['~oo', 'ComplexInfinity'],
+      ['u', 'u'],
+    ] as const) {
+      const x = ce.box(['Heaviside', operand] as any);
+      expect(`H(${label}).sgn=${x.sgn}`).toBe(`H(${label}).sgn=undefined`);
+      expect(`H(${label}).isNonNegative=${x.isNonNegative}`).toBe(
+        `H(${label}).isNonNegative=undefined`
+      );
+    }
+    // A proven real operand — ±∞ included, where H(−∞) = 0 and H(+∞) = 1 —
+    // keeps the non-negative claim.
+    for (const [label, operand] of [
+      ['2', 2],
+      ['s', 's'],
+      ['-oo', { num: '-Infinity' }],
+    ] as const) {
+      const x = ce.box(['Heaviside', operand] as any);
+      expect(`H(${label}).sgn=${x.sgn}`).toBe(`H(${label}).sgn=non-negative`);
+      expect(x.isNonNegative).toBe(true);
+    }
+    // `Sign`'s own sgn handler forwards its operand's sign and is unchanged.
+    expect(ce.box(['Sign', 2] as any).sgn).toBe('positive');
+    expect(ce.box(['Sign', NAN] as any).sgn).toBe('unsigned');
+  });
+
+  test('LogIntegral claims real only on the non-negative real axis', () => {
+    // li(x) = Ei(ln x) is real-valued only for x ≥ 0, and infinite there at
+    // both ends of its domain (li(1) = −∞, li(+∞) = +∞) — so `real`, which
+    // admits ±∞, is the narrowest sound claim and `finite_real` is not
+    // claimable. For x < 0, ln x is complex and so is the value; and
+    // `LogIntegral(NaN).N()` is `NaN`. The flat `real` result this definition
+    // used to declare admitted neither, so the result was widened to `number`
+    // and a domain-gated handler re-narrows on a proven non-negative real.
+    const NAN = { num: 'NaN' };
+    ce.declare('nn', 'real<0..>');
+    ce.declare('s', 'real');
+    expect(ce.box(['LogIntegral', 2] as any).type.toString()).toBe('real');
+    expect(ce.box(['LogIntegral', 0] as any).type.toString()).toBe('real');
+    expect(ce.box(['LogIntegral', 1] as any).type.toString()).toBe('real');
+    expect(
+      ce.box(['LogIntegral', { num: '+Infinity' }] as any).type.toString()
+    ).toBe('real');
+    expect(ce.box(['LogIntegral', 'nn'] as any).type.toString()).toBe('real');
+    expect(ce.box(['LogIntegral', -2] as any).type.toString()).toBe('number');
+    expect(
+      ce.box(['LogIntegral', { num: '-Infinity' }] as any).type.toString()
+    ).toBe('number');
+    expect(ce.box(['LogIntegral', NAN] as any).type.toString()).toBe('number');
+    expect(
+      ce.box(['LogIntegral', 'ComplexInfinity'] as any).type.toString()
+    ).toBe('number');
+    expect(
+      ce.box(['LogIntegral', ['Complex', 1, 2]] as any).type.toString()
+    ).toBe('number');
+    // A real of unproven sign stays wide: the negative half is complex.
+    expect(ce.box(['LogIntegral', 's'] as any).type.toString()).toBe('number');
+    expect(
+      ce
+        .box(['LogIntegral', NAN] as any)
+        .N()
+        .toString()
+    ).toBe('NaN');
+    // Broadcast: the sign fact describes the operand, so for a collection the
+    // sign has to come from the ELEMENT type. A list of literals widens its
+    // elements to a bare tier, which carries no sign — hence `number` per
+    // element there, and `real` for a list declared with a signed element
+    // type.
+    ce.declare('LR', 'list<real<0..>>');
+    expect(ce.box(['LogIntegral', ['List', 2, 3]] as any).type.toString()).toBe(
+      'vector<2>'
+    );
+    expect(ce.box(['LogIntegral', 'LR'] as any).type.toString()).toBe(
+      'list<real>'
+    );
+    // A `broadcastable<T>` operand takes the element-type arm too: its
+    // `collection` fact is `undefined` — whether it is a collection is
+    // exactly what is unknown — so reading the operand's own sign there
+    // answered `undefined` and widened the claim to `broadcastable<number>`.
+    ce.declare('BR', 'broadcastable<real<0..>>');
+    ce.declare('BN', 'broadcastable<real>');
+    expect(ce.box(['LogIntegral', 'BR'] as any).type.toString()).toBe(
+      'broadcastable<real>'
+    );
+    // An element type of unproven sign still keeps the wide claim.
+    expect(ce.box(['LogIntegral', 'BN'] as any).type.toString()).toBe(
+      'broadcastable<number>'
+    );
+  });
+
+  test('the pole-free hyperbolics do not mistake NaN for a real infinity', () => {
+    // Deliberate soundness CORRECTION, not a migration side effect: the
+    // Sinh/Cosh/Tanh/Sech arms tested `isReal === true`, which a NaN literal
+    // answers `true` while also being non-finite — so they claimed
+    // `non_finite_number` (resp. `finite_real`) for calls that produce NaN,
+    // and neither type admits it. Realness is now read from the TYPE, which
+    // NaN (typed `number`) does not satisfy and a real ±∞ (typed
+    // `non_finite_number`) does.
+    const NAN = { num: 'NaN' };
+    const INF = { num: '+Infinity' };
+    for (const op of ['Sinh', 'Cosh', 'Tanh', 'Sech'])
+      expect(`${op}(NaN)=${ce.box([op, NAN] as any).type.toString()}`).toBe(
+        `${op}(NaN)=number`
+      );
+    expect(
+      ce
+        .box(['Sinh', NAN] as any)
+        .N()
+        .toString()
+    ).toBe('NaN');
+    // The real-±∞ claims the arms exist for are unchanged.
+    for (const op of ['Sinh', 'Cosh'])
+      expect(`${op}(oo)=${ce.box([op, INF] as any).type.toString()}`).toBe(
+        `${op}(oo)=non_finite_number`
+      );
+    for (const op of ['Tanh', 'Sech'])
+      expect(`${op}(oo)=${ce.box([op, INF] as any).type.toString()}`).toBe(
+        `${op}(oo)=finite_real`
+      );
+  });
+
+  test('the paired statistics claim finite_real only for finite real data', () => {
+    // `Covariance`, `PopulationCovariance` and `Correlation` are sums of
+    // products of deviations divided by a count, so one non-finite data value
+    // poisons the result: `Covariance([1, NaN], [2, 3])` evaluates to `NaN`,
+    // which the unconditional `finite_real` these three used to claim does
+    // not admit. Both accepted input forms — two equal-length collections, or
+    // one collection of (x, y) pairs — narrow when the data types prove
+    // finite reals.
+    const NAN = { num: 'NaN' };
+    for (const op of ['Covariance', 'PopulationCovariance', 'Correlation']) {
+      expect(
+        `${op}=${ce
+          .box([op, ['List', 1, 2, 3], ['List', 2, 4, 7]] as any)
+          .type.toString()}`
+      ).toBe(`${op}=finite_real`);
+      expect(
+        `${op}(pairs)=${ce
+          .box([
+            op,
+            ['List', ['Tuple', 1, 2], ['Tuple', 3, 4], ['Tuple', 5, 7]],
+          ] as any)
+          .type.toString()}`
+      ).toBe(`${op}(pairs)=finite_real`);
+      expect(
+        `${op}(NaN)=${ce
+          .box([op, ['List', 1, NAN], ['List', 2, 3]] as any)
+          .type.toString()}`
+      ).toBe(`${op}(NaN)=number`);
+    }
+    expect(
+      ce
+        .box(['Covariance', ['List', 1, NAN], ['List', 2, 3]] as any)
+        .N()
+        .toString()
+    ).toBe('NaN');
   });
 
   test('ReleaseHold and Coalesce evaluate their operands correctly', () => {

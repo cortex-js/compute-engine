@@ -57,9 +57,13 @@ import {
 } from '../numerics/statistics.js';
 import type {
   Expression,
+  OperandDescriptor,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
+import { parseType } from '../../common/type/parse.js';
+import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import {
   bignumPreferred,
   withDrawRollback,
@@ -145,6 +149,49 @@ function computeBinning(
     }
   }
   return { binEdges, counts };
+}
+
+/** Data whose every element is a proven finite real. */
+const FINITE_REAL_DATA = parseType('collection<finite_real>')!;
+
+/** The pair form of the same data: one collection of (x, y) points. */
+const FINITE_REAL_PAIRS = parseType(
+  'collection<tuple<finite_real, finite_real>>'
+)!;
+
+/**
+ * Result type of `Covariance`, `PopulationCovariance` and `Correlation`,
+ * which all accept their paired data either as two equal-length collections
+ * or as one collection of (x, y) pairs.
+ *
+ * Each is a sum of products of deviations from a mean, divided by a count, so
+ * a single non-finite data value poisons the whole result: with `NaN` or `±∞`
+ * anywhere in the data the answer is `NaN`
+ * (`Covariance([1, NaN], [2, 3])` evaluates to `NaN`), and only the top type
+ * `number` admits that — the unconditional `finite_real` these three
+ * definitions used to claim was unsound. The gate therefore narrows to
+ * `finite_real` only when the operand types PROVE every data value is a
+ * finite real, in whichever of the two input forms was used, and keeps the
+ * wide `number` otherwise.
+ *
+ * That claim describes the numeric answer only. A degenerate input the
+ * operator rejects — fewer than two data points, two collections of
+ * different lengths, or (for `Correlation`) zero variance — satisfies the
+ * type gate but evaluates to an `Error(...)`, whose own type is outside the
+ * numeric lattice, so it neither confirms nor contradicts a `finite_real`
+ * result type.
+ */
+function pairedStatisticType(ops: ReadonlyArray<OperandDescriptor>): Type {
+  const [xs, ys] = ops;
+  if (xs === undefined) return 'number';
+  if (ys === undefined)
+    return typeFact(xs.type, FINITE_REAL_PAIRS) === true
+      ? 'finite_real'
+      : 'number';
+  return typeFact(xs.type, FINITE_REAL_DATA) === true &&
+    typeFact(ys.type, FINITE_REAL_DATA) === true
+    ? 'finite_real'
+    : 'number';
 }
 
 export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
@@ -784,7 +831,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '(collection<any>, collection<any>?) -> number',
-      type: () => 'finite_real',
+      typeHandlerKind: 'types',
+      type: (ops) => pairedStatisticType(ops),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCovariance(ce, ops, !!numericApproximation, false),
     },
@@ -796,7 +844,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '(collection<any>, collection<any>?) -> number',
-      type: () => 'finite_real',
+      typeHandlerKind: 'types',
+      type: (ops) => pairedStatisticType(ops),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCovariance(ce, ops, !!numericApproximation, true),
     },
@@ -808,7 +857,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '(collection<any>, collection<any>?) -> number',
-      type: () => 'finite_real',
+      typeHandlerKind: 'types',
+      type: (ops) => pairedStatisticType(ops),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCorrelation(ce, ops, !!numericApproximation),
     },

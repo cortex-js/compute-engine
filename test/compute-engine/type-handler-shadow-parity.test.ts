@@ -131,16 +131,28 @@ describe('shadow parity over the converted handlers', () => {
     // The nullary `type: () => '…'` handlers were retired outright: the
     // constant result lives in the declared signature and no handler
     // remains. This pins both halves — a reintroduced handler or a widened
-    // signature result fails here. (The regex is `$`-anchored rather than
-    // an exact match so an effect label still passes:
-    // `(integer, integer?) random -> finite_integer`.)
+    // signature result fails here. (The regex is anchored at the END of the
+    // signature rather than matched exactly, so an effect label still
+    // passes: `(integer, integer?) random -> finite_integer`. A trailing
+    // `where` clause — the type-variable binder of a signature such as
+    // `(collection<T>, …) -> boolean where T` — is allowed after the result
+    // for the same reason, restricted to a comma-separated list of type
+    // variable names so the tail cannot absorb arbitrary text. The ledger
+    // value is escaped before it goes into the pattern: a result spelling
+    // containing regex metacharacters, such as `integer | nothing` or
+    // `list<T>`, must match literally rather than as alternation or a
+    // repetition.)
     const ce = new ComputeEngine();
     for (const [operator, declaredResult] of RETIRED_CONSTANT_TYPE_HANDLERS) {
       const def = ce.lookupDefinition(operator);
       const opDef = def && 'operator' in def ? def.operator : undefined;
       expect(`${operator}:${typeof opDef?.type}`).toBe(`${operator}:undefined`);
+      const literalResult = declaredResult.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        '\\$&'
+      );
       expect(`${operator}:${opDef?.signature.toString()}`).toMatch(
-        new RegExp(`-> ${declaredResult}$`)
+        new RegExp(`-> ${literalResult}( where [A-Za-z0-9_, ]+)?$`)
       );
     }
   });

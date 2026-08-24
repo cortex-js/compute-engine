@@ -154,6 +154,17 @@ import {
   operandLiteralValue,
   operandSgn,
 } from './type-handlers.js';
+import { realOnlyStepType } from './type-handlers-types.js';
+import { parseType } from '../../common/type/parse.js';
+
+// The proven-real result claims of the two step functions, parsed once at
+// module load. `Heaviside` takes exactly the values 0, 1/2 and 1 on the
+// real line (H(0) = 1/2 is this engine's convention) and `Sign` exactly
+// −1, 0 and 1, so each claim is the finitely-valued tier WITH its range —
+// the range is what lets a type-channel consumer (`signOfType`, compile
+// lowerings) read the sign and bounds without consulting the sgn handler.
+const HEAVISIDE_REAL_TYPE = parseType('finite_rational<0..1>');
+const SIGN_REAL_TYPE = parseType('finite_integer<-1..1>');
 import {
   foldQuantityOperands,
   isQuantity,
@@ -3025,9 +3036,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Heaviside step function.',
       complexity: 1200,
       broadcastable: true,
-      signature: '(number) -> real',
-      type: () => 'finite_real',
-      sgn: () => 'non-negative',
+      signature: '(number) -> number',
+      // H's values on the real line are exactly 0, 1/2 and 1, so the tight
+      // per-element claim is a finite rational in [0, 1] — the range carries
+      // the non-negativity through the type channel (`signOfType`), matching
+      // the gated `sgn` handler below. The claim holds at the ends of the
+      // line too (H(±∞) is 0 or 1). Everywhere else H has no value, so the
+      // gate answers the wide `number`; see `realOnlyStepType`.
+      typeHandlerKind: 'types',
+      type: ([x]) => realOnlyStepType(x, HEAVISIDE_REAL_TYPE),
+      // H(x) ∈ {0, 1/2, 1} — non-negative — but only where H has a value at
+      // all, i.e. on the real line. At NaN, at `~oo` and off the real axis
+      // there is no value, and the unconditional `non-negative` this
+      // definition used to claim asserted a sign for those inputs anyway
+      // (`Heaviside(NaN).isNonNegative` was `true`). Realness is read from
+      // the TYPE, which is the same gate the `type` handler above uses: a
+      // NaN literal answers `isReal === true` while typing `number`.
+      sgn: ([x]) => (x.type.matches('real') ? 'non-negative' : undefined),
       evaluate: ([x], { engine }) => {
         if (x.isSame(0)) return engine.Half;
         if (x.isPositive) return engine.One;
@@ -3040,8 +3065,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Sign of a number: -1, 0, or 1.',
       complexity: 1200,
       broadcastable: true,
-      signature: '(number) -> integer',
-      type: () => 'finite_integer',
+      signature: '(number) -> number',
+      // The sign of a real — ±∞ included — is exactly −1, 0 or 1, so the
+      // tight per-element claim is a finite integer in [−1, 1]. Off the real
+      // line the usual convention `z/|z|` is complex and this operator
+      // declines, so an unproven-real argument keeps the wide `number`; see
+      // `realOnlyStepType`.
+      typeHandlerKind: 'types',
+      type: ([x]) => realOnlyStepType(x, SIGN_REAL_TYPE),
       sgn: ([x]) => x.sgn,
       evaluate: ([x], { engine }) => {
         if (x.isSame(0)) return engine.Zero;

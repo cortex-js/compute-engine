@@ -399,6 +399,74 @@ describe('PROPERTIES OF NUMBERS', () => {
   });
 });
 
+describe('PARITY OF INTEGERS BEYOND THE SAFE RANGE', () => {
+  // `isOdd` used to read the numerator's machine-float projection, which
+  // rounds past 2^53: the double nearest 9007199254740993 is the even
+  // 9007199254740992, so odd values were reported even. Parity now comes
+  // from the exact integer (a bigint or the stored BigDecimal).
+  test.each([
+    [9007199254740993n, true],
+    [9007199254740992n, false],
+    [-9007199254740993n, true],
+    [-9007199254740992n, false],
+    [10n ** 80n + 3n, true],
+    [10n ** 80n, false],
+  ])('parity of %s', (value, odd) => {
+    const x = ce.number(value);
+    expect(x.isOdd).toBe(odd);
+    expect(x.isEven).toBe(!odd);
+  });
+
+  test('small integers and non-integers are unchanged', () => {
+    expect(ce.number(7).isOdd).toBe(true);
+    expect(ce.number(-8).isOdd).toBe(false);
+    expect(ce.number(0).isEven).toBe(true);
+    expect(ce.expr(['Rational', 1, 2]).isOdd).toBe(undefined);
+    expect(ce.expr(['Rational', 1, 2]).isEven).toBe(undefined);
+    // 4/2 reduces to the integer 2
+    expect(ce.expr(['Rational', 4, 2]).isEven).toBe(true);
+    expect(ce.expr(['Sqrt', 2]).isOdd).toBe(undefined);
+  });
+
+  // A BigDecimal is `significand · 10^exponent`, so the exponent alone settles
+  // the parity of anything ending in a zero digit. Reading these through the
+  // integer instead (`BigInt(b.toFixed(0))`) builds a decimal string as long as
+  // the value: ~20 ms at a million digits, and a RangeError ("Invalid string
+  // length") past ~5e8 digits — thrown out of a property getter, for a value
+  // the engine constructs and types as an integer without complaint.
+  test('parity of a million-digit power of ten', () => {
+    const x = ce.number(ce.bignum('1e1000000'));
+    expect(x.isInteger).toBe(true);
+    expect(x.isOdd).toBe(false);
+    expect(x.isEven).toBe(true);
+  });
+
+  test('parity of a power of ten too large to write out does not throw', () => {
+    const x = ce.number(ce.bignum('1e600000000'));
+    expect(x.isInteger).toBe(true);
+    expect(x.isOdd).toBe(false);
+    expect(x.isEven).toBe(true);
+  });
+
+  test('an odd bignum with a long significand is still odd', () => {
+    // 10^51 + 1: exponent 0 with a 52-digit significand, so the parity comes
+    // from the significand itself. The precision is raised only so the value
+    // round-trips through `toString()` for a reader of this test; `isOdd`
+    // reads the stored significand and is unaffected by it.
+    const saved = ce.precision;
+    try {
+      ce.precision = 60;
+      const digits = '1' + '0'.repeat(50) + '1';
+      const x = ce.number(ce.bignum(digits));
+      expect(x.toString()).toBe(digits);
+      expect(x.isOdd).toBe(true);
+      expect(x.isEven).toBe(false);
+    } finally {
+      ce.precision = saved;
+    }
+  });
+});
+
 // Issue #283: parseNumbers: 'rational' loses precision for large integers
 describe('PARSING LARGE INTEGERS WITH parseNumbers: rational', () => {
   test('Integers at MAX_SAFE_INTEGER boundary', () => {

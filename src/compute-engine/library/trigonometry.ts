@@ -26,12 +26,15 @@ import type {
   IComputeEngine,
 } from '../global-types.js';
 import type { Expression } from '../types-expression.js';
+import type { OperandDescriptor } from '../types-definitions.js';
+import type { Type } from '../../common/type/types.js';
 import {
   isFunction,
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
+import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isTuple } from '../collection-utils.js';
 import { pointNormBroadcasts } from './utils.js';
 import {
@@ -41,6 +44,7 @@ import {
   iv,
   type RealDomain,
 } from './type-handlers.js';
+import { broadcastOperandType } from './type-handlers-types.js';
 import { isMeasurement, measurementTrig } from './measurement-arithmetic.js';
 import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite.js';
 import { getUnitScale } from './unit-data.js';
@@ -79,6 +83,41 @@ import {
 // - Arcsin z = (-1)^k arcsin (z + k\pi) is the general multivalued inverse
 //   sine function
 // We only have definitions for the principal branches here.
+
+/**
+ * Result type of `Sinc`, `FresnelS` and `FresnelC` — a claim about ONE
+ * element, since all three are broadcastable and the result-typing code
+ * re-adds a collection operand's list shape around what this returns.
+ *
+ * All three are entire functions that are bounded on the whole real line and
+ * have a finite limit at each end of it (`sinc(±∞) = 0`,
+ * `S(±∞) = C(±∞) = ±1/2`), so on a proven real argument — finite or not —
+ * the value is a finite real.
+ *
+ * The wide fallback is what makes that claim sound. `Sinc(NaN)` and
+ * `FresnelS(NaN)` numericize to `NaN`, a value only the top type `number`
+ * admits, and off the real line all three are complex-valued: an unconditional
+ * `finite_real`, which these three definitions used to claim, was wrong in
+ * both places. A proven FINITE argument still claims `finite_number` — an
+ * entire function maps a finite point to a finite value, real or complex.
+ * Every gate narrows on a proven fact, so an argument whose type decides
+ * neither realness nor finiteness stays on the wide `number`.
+ *
+ * Every gate reads the ELEMENT type, because the claim is about one element.
+ * The one value-channel read — `facts.finite` — describes the OPERAND, not
+ * its elements (a finite collection of infinities is not what it is asking
+ * about), so it is consulted only for a non-collection operand, where operand
+ * and element are the same thing.
+ */
+function boundedEntireRealType(x: OperandDescriptor | undefined): Type {
+  if (x === undefined) return 'number';
+  const t = broadcastOperandType(x);
+  if (typeFact(t, 'real') === true) return 'finite_real';
+  const scalar = x.facts.collection === true ? undefined : x;
+  if (scalar?.facts.finite === true || typeFact(t, 'finite_number') === true)
+    return 'finite_number';
+  return 'number';
+}
 
 export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
   {
@@ -613,8 +652,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Unnormalized sinc function: sin(x)/x with sinc(0)=1.',
       complexity: 5100,
       broadcastable: true,
-      signature: '(number) -> real',
-      type: () => 'finite_real',
+      signature: '(number) -> number',
+      typeHandlerKind: 'types',
+      type: ([x]) => boundedEntireRealType(x),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation
@@ -634,8 +674,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Fresnel sine integral.',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> real',
-      type: () => 'finite_real',
+      signature: '(number) -> number',
+      typeHandlerKind: 'types',
+      type: ([x]) => boundedEntireRealType(x),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation
@@ -655,8 +696,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Fresnel cosine integral.',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> real',
-      type: () => 'finite_real',
+      signature: '(number) -> number',
+      typeHandlerKind: 'types',
+      type: ([x]) => boundedEntireRealType(x),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation

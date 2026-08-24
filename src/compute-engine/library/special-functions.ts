@@ -16,6 +16,10 @@ import {
   type RealDomain,
   operandLiteralValue,
 } from './type-handlers.js';
+import { broadcastOperandType } from './type-handlers-types.js';
+import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { signOfType } from '../../common/type/utils.js';
+import { nonNegativeSign } from '../boxed-expression/sgn.js';
 import {
   ellipticK,
   ellipticE,
@@ -468,9 +472,37 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q853513',
       complexity: 7500,
       broadcastable: true,
-      signature: '(number) -> real',
-      // Not finite_real: li(1) = −∞.
-      type: () => 'real',
+      signature: '(number) -> number',
+      // li is real-valued only on the NON-NEGATIVE real axis, and there it
+      // can be infinite: li(0) = 0, li(1) = −∞ (the pole), li(+∞) = +∞. So
+      // `real` — which admits ±∞ — is the narrowest claim available on that
+      // half-line, and `finite_real` is not claimable at all without also
+      // proving x ≠ 1. Everywhere else the old unconditional `real` result
+      // was wrong: for a negative real x, li(x) = Ei(ln x) with ln x complex,
+      // so the value is complex, and `LogIntegral(NaN)` numericizes to NaN,
+      // which `real` does not admit either. The gate narrows only on a proven
+      // non-negative real, so an operand whose type decides neither realness
+      // nor sign keeps the wide `number` — the non-finite typing convention.
+      //
+      // The claim is per-element: `LogIntegral` is broadcastable. The sign
+      // fact describes the OPERAND as a whole, so it answers for the result
+      // only when the operand is itself the single value being mapped — a
+      // scalar. Every other operand takes its per-element sign from the
+      // unwrapped element type: a collection (`list<real<0..>>`), and also a
+      // `broadcastable<T>` operand, whose `collection` fact is `undefined`
+      // because whether it is a collection is exactly what is not known.
+      // Reading the operand's own sign there answers `undefined` for the
+      // whole collection and needlessly widens `broadcastable<real<0..>>` to
+      // `broadcastable<number>`.
+      typeHandlerKind: 'types',
+      type: ([x]) => {
+        if (x === undefined) return 'number';
+        const t = broadcastOperandType(x);
+        if (typeFact(t, 'real') !== true) return 'number';
+        const scalar = x.facts.collection === false && t === x.type;
+        const sgn = scalar ? x.facts.sgn : signOfType(t);
+        return nonNegativeSign(sgn) === true ? 'real' : 'number';
+      },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         // li is real only for x ≥ 0; stay symbolic for complex/negative.
         if (!isNumber(x) || x.im !== 0 || x.isNegative) return undefined;
