@@ -50,6 +50,7 @@ import { sortProductOperands } from './order.js';
 import { asRadical } from './arithmetic-power.js';
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { asRational, asSmallInteger } from './numerics.js';
+import { heldNonNumericScalar } from './value-membership.js';
 import { negateProduct } from './negate.js';
 import { add } from './arithmetic-add.js';
 
@@ -1581,12 +1582,28 @@ export function canonicalMultiply(
   // Account for the sign (if negative)
   if (sign < 0) {
     if (ys.length === 0) return ce.number(-1);
-    if (ys.length === 1) return ys[0].neg();
+    if (ys.length === 1) {
+      // Same wrong-kind rejection as the unsigned unary return below.
+      if (heldNonNumericScalar(ys[0]))
+        return ce.typeError('number', ys[0].type, ys[0]);
+      return ys[0].neg();
+    }
     return negateProduct(ce, ys);
   }
 
   if (ys.length === 0) return ce.number(1);
-  if (ys.length === 1) return ys[0];
+  if (ys.length === 1) {
+    // The unary fold erases the `Multiply` operator, so the arithmetic
+    // evaluate guard never sees this operand — a symbol holding a string
+    // or boolean would flow through as-is (`Multiply(s)` with `s := "str"`
+    // evaluated to `"str"` while the literal `Multiply("str")` refused at
+    // boxing). Reject concrete non-numeric scalar evidence here; a lone
+    // collection operand still folds (broadcast identity), and a valueless
+    // symbol stays admitted.
+    if (heldNonNumericScalar(ys[0]))
+      return ce.typeError('number', ys[0].type, ys[0]);
+    return ys[0];
+  }
 
   return ce._fn('Multiply', sortProductOperands(ys));
 }

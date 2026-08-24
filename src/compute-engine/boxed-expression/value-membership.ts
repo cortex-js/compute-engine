@@ -3,7 +3,13 @@ import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 
 import type { Expression } from '../global-types.js';
 
-import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
+import {
+  isCharacter,
+  isFunction,
+  isNumber,
+  isString,
+  isSymbol,
+} from './type-guards.js';
 
 /**
  * Value membership — does a *concrete value* inhabit a type containing
@@ -198,6 +204,49 @@ export function concreteValueOf(expr: Expression): Expression | undefined {
 
 function isBooleanLiteral(expr: Expression): boolean {
   return isSymbol(expr, 'True') || isSymbol(expr, 'False');
+}
+
+/** `admissionOf`, but an operand HOLDING a concrete value is judged by that
+ * value even when the operand's own type is `any`/`unknown` (where
+ * `admissionOf` bails to `undecidable` before looking at the value — a rule
+ * about TYPE-based refutation: an unknown STATIC type never refutes). The
+ * runtime conformance check makes the same concrete-vs-symbolic split; use
+ * this wherever held-value evidence should decide — e.g. the `Rational`
+ * constructor refusing `Rational(3, x)` with `x := 2.5`. */
+export function evidenceAdmissionOf(op: Expression, param: Type): Admission {
+  const v = concreteValueOf(op);
+  if (v !== undefined && v !== op) return admissionOf(v, param);
+  return admissionOf(op, param);
+}
+
+/** Does this operand hold a concrete non-numeric SCALAR (a string or a
+ * boolean)?
+ *
+ * The unary `Multiply`/`Subtract` canonicalization folds a lone operand to
+ * itself, which erases the operator before the arithmetic evaluate guard can
+ * examine it — the one arithmetic route where a wrong-kind operand flowed
+ * through unexamined (`Multiply(s)` with `s := "str"` evaluated to `"str"`
+ * while the literal `Multiply("str")` refused). Those fold sites consult this
+ * predicate and reject when it answers `true`.
+ *
+ * Only scalar evidence counts: a lone list/tensor operand is the legitimate
+ * broadcast identity (`Multiply([1, 2])` is `[1, 2]`), and a symbol with no
+ * held value stays admitted — the same concrete-vs-symbolic split the
+ * admission machinery above makes. A `character` counts as such a scalar too,
+ * and has to be recognized separately: `concreteValueOf` does not report
+ * character literals, so both a bare character operand and a symbol whose
+ * binding holds one are checked here directly. */
+export function heldNonNumericScalar(op: Expression): boolean {
+  const v = concreteValueOf(op);
+  if (v !== undefined) return isString(v) || isBooleanLiteral(v);
+  // `concreteValueOf` deliberately excludes `character` literals; a held
+  // character is equally a non-numeric scalar.
+  if (isCharacter(op)) return true;
+  if (isSymbol(op)) {
+    const bound = op.valueDefinition?.value;
+    return bound !== undefined && bound !== op && isCharacter(bound);
+  }
+  return false;
 }
 
 /** Recursive membership of the concrete literal `v` in `t`. Components with

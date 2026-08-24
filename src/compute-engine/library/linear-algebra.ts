@@ -313,12 +313,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Construct a column vector.',
       complexity: 9000,
       lazy: true,
-      signature: '(number+) -> vector',
+      // Element parameters are `any`, not `number`: the constructor rewrites
+      // to `Matrix`, whose payload is handler-owned and content-lenient (the
+      // whole tensor family accepts symbolic or non-numeric entries), so a
+      // `number` contract here was enforced on no route (ruled 2026-08-24:
+      // align the declaration with the family rather than validate).
+      signature: '(any+) -> vector',
+      // The declared `(any+)` admits non-numeric entries, and claiming a
+      // numeric `vector<N>` for those would be an unsound type on the
+      // structural tier, where the `Matrix` rewrite has not happened yet —
+      // so non-numeric content falls back to the honest `list`.
       type: (elements) =>
-        parseType(
-          `vector<${elements.length}>`,
-          elements[0].engine._typeResolver
-        ),
+        elements.every((op) => op.type.matches('number'))
+          ? parseType(
+              `vector<${elements.length}>`,
+              elements[0].engine._typeResolver
+            )
+          : 'list',
       canonical: (ops, { engine: ce }) => {
         return ce._fn('Matrix', [
           ce.function(

@@ -218,10 +218,15 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // Params are `number` (not `integer`) — like `IsPrime`/`IsOdd` — so a
       // symbolic operand (statically typed `number`/`finite_number`) is accepted
       // and the relation stays symbolic; the `evaluate` handler reduces only
-      // when both operands are concrete integers (`toBigint`).
+      // when both operands are concrete integers.
       signature: '(number, number) -> boolean',
       examples: ['Divides(3, 12)  // "True"'],
       evaluate: ([aOp, bOp], { engine: ce }) => {
+        // Exact-integrality gate: `toBigint` ROUNDS a non-integer (2.5 → 3),
+        // and the declared `number` parameters admit one, so without this
+        // gate `Divides(2.5, 3)` answered the rounded question `3 | 3` →
+        // `True` (same guard family as the `Mod` modular reduction).
+        if (aOp.isInteger !== true || bOp.isInteger !== true) return undefined;
         const a = toBigint(aOp);
         const b = toBigint(bOp);
         if (a === null || b === null) return undefined;
@@ -235,7 +240,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         '`NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`.',
       complexity: 1200,
-      signature: '(integer, integer) -> boolean',
+      // Params match `Divides` (`number`, not `integer`): the canonical
+      // rewrite to `Not(Divides(…))` means `Divides`' declared signature is
+      // what governs after canonicalization — a stricter spelling here
+      // would never be enforced. Non-integer operands stay symbolic,
+      // exactly as `Divides` does.
+      signature: '(number, number) -> boolean',
       canonical: (ops, { engine }) => engine.expr(['Not', ['Divides', ...ops]]),
     },
 
@@ -685,7 +695,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       signature: '(collection<any>) -> number',
       examples: ['FromContinuedFraction([2, 3, 1, 4])  // 43/19'],
       evaluate: ([listOp], { engine: ce }) => {
-        const terms = Array.from(listOp?.each() ?? []).map(toBigint);
+        // `toBigint` ROUNDS a non-integer (2.5 → 3), so gate each term on
+        // exact integrality: a non-integer term declines instead of silently
+        // reconstructing from the rounded value.
+        const terms = Array.from(listOp?.each() ?? []).map((t) =>
+          t.isInteger === true ? toBigint(t) : null
+        );
         if (terms.length === 0 || terms.includes(null)) return undefined;
         let p = 1n;
         let q = 0n;

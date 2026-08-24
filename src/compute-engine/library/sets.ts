@@ -877,10 +877,13 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // `Intersection([1,2,3], [2,3,4])` works without building sets by hand.
     wikidata: 'Q185837',
     signature: '(collection<any>+) -> set',
-    description: 'Return the intersection of two or more collections as a set.',
+    description: 'Return the intersection of one or more collections as a set.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
-      if (args.length === 1) return ce.symbol('EmptySet');
+      // A single operand is NOT the empty set: the intersection of one
+      // collection is that collection (as a set — `Intersection([1, 2])`
+      // evaluates to `Set(1, 2)`), symmetric with single-operand `Union`.
+      // Keep the operator so the `intersection` evaluate handler dedups it.
       const validatedArgs = validateSetArguments(
         ce,
         flatten(
@@ -1111,6 +1114,13 @@ function intersection(
   // symbols or tolerated label operands (`H \cap K`, `AC \cap BD`) to
   // literal elements produced a spurious `EmptySet`, as did an infinite
   // first operand (`Intersection(Integers, Set(1,2))`).
+  // A single operand is that collection as a set. A set-shaped operand
+  // needs no enumeration or dedup — return it directly (what lets
+  // `Intersection(Integers)` evaluate to `Integers`). A finite non-set
+  // collection falls through to the dedup path below; an infinite non-set
+  // collection stays symbolic.
+  if (ops.length === 1 && ops[0].type.matches('set<any>')) return ops[0];
+
   if (!ops.every((op) => op.isCollection)) return undefined;
   const first = ops[0];
   if (first.isFiniteCollection !== true) return undefined;

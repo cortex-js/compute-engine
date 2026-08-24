@@ -813,23 +813,63 @@ describe('CANONICAL FORMS', () => {
       `);
     });
 
-    test(`'Rational' (expr.) -> Divide (when non-rational)`, () => {
+    // The two-argument `Rational` is an `(integer, integer)` constructor
+    // (ruled 2026-08-24): a PROVEN non-integer argument is rejected at full
+    // canonicalization instead of silently renaming to `Divide`, and the
+    // partial number form keeps the `Rational` spelling so the full pass
+    // can still reject. (The `Divide` spelling itself is unaffected — see
+    // the Control case above.)
+    test(`'Rational' (expr.) with a non-integer argument is rejected`, () => {
       expect(checkNumber(['Rational', 1, 'Pi'])).toMatchInlineSnapshot(`
         box        = ["Rational", 1, "Pi"]
-        canonForms = ["Divide", 1, "Pi"]
-        canonical  = ["Divide", 1, "Pi"]
+        canonForms = ["Rational", 1, "Pi"]
+        canonical  = [
+          "Rational",
+          1,
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "incompatible-type",
+              "'integer'",
+              "finite_real<3.141592653589793..3.141592653589794>"
+            ],
+            "Pi"
+          ]
+        ]
       `);
       expect(checkNumber(['Rational', 7.01, 3])).toMatchInlineSnapshot(`
         box        = ["Rational", 7.01, 3]
-        canonForms = ["Divide", 7.01, 3]
-        canonical  = ["Divide", 7.01, 3]
+        canonForms = ["Rational", 7.01, 3]
+        canonical  = [
+          "Rational",
+          [
+            "Error",
+            ["ErrorCode", "incompatible-type", "'integer'", "'7.01'"],
+            7.01
+          ],
+          3
+        ]
       `);
       //(↓For full-canonical, additional simplifications applied (hence 'Multiply'))
       expect(checkNumber(['Rational', 'ExponentialE', 2]))
         .toMatchInlineSnapshot(`
         box        = ["Rational", "ExponentialE", 2]
-        canonForms = ["Divide", "ExponentialE", 2]
-        canonical  = ["Multiply", ["Rational", 1, 2], "ExponentialE"]
+        canonForms = ["Rational", "ExponentialE", 2]
+        canonical  = [
+          "Rational",
+          [
+            "Error",
+            [
+              "ErrorCode",
+              "incompatible-type",
+              "'integer'",
+              "finite_real<2.718281828459045..2.718281828459046>"
+            ],
+            "ExponentialE"
+          ],
+          2
+        ]
       `);
     });
 
@@ -1385,7 +1425,10 @@ describe('structural-aware subs', () => {
     expect(structural.isCanonical).toBe(false);
     expect((structural as any).isStructural).toBe(true);
 
-    const raw = rewriteWithBinders(ce.parse(LATEX, { form: 'raw' }), toZ as any);
+    const raw = rewriteWithBinders(
+      ce.parse(LATEX, { form: 'raw' }),
+      toZ as any
+    );
     expect(raw.isCanonical).toBe(false);
     expect((raw as any).isStructural).toBe(false);
 

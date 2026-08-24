@@ -842,7 +842,9 @@ describe('RATIONAL', () => {
     expect(checkJson(['Rational', 2.5, -1.1, 18.4])).toMatchSnapshot();
     expect(checkJson(['Rational', 2, 3, 5])).toMatchSnapshot();
   });
-  test(`Rational as Divide`, () =>
+  // Ruled 2026-08-24: the two-argument `Rational` is an `(integer, integer)`
+  // constructor — non-integer arguments are rejected, not renamed to Divide.
+  test(`Rational with non-integer arguments is rejected`, () =>
     expect(checkJson(['Rational', 3.1, 2.8])).toMatchSnapshot());
   test(`Rational approximation`, () =>
     expect(checkJson(['Rational', 2.5])).toMatchSnapshot());

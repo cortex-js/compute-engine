@@ -57,6 +57,7 @@ import { qualifiedMemberRequirementShape } from '../engine-protocols.js';
 import { multiClauseState } from '../multi-clause.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { evidenceAdmissionOf } from './value-membership.js';
 import {
   BoxedFunction,
   broadcastableParamSlots,
@@ -436,6 +437,34 @@ function boxFunctionInternal(
           if (d === 0n) return n === 0n ? ce.NaN : ce.ComplexInfinity;
           return ce.number([n, d], options);
         }
+      }
+      // The `Rational` spelling is an `(integer, integer)` constructor
+      // (ruled 2026-08-24). Renaming to `Divide` erases that contract, so a
+      // proven non-integer argument — a literal, or a symbol holding one —
+      // used to become plain division (`Rational(3, 2.5)` evaluated to
+      // `1.2`), which almost always indicates a caller error. Reject it
+      // here; a valueless symbol may still turn out integral, so it stays
+      // admitted and proceeds as division. (The `Divide` spelling carries
+      // no integer contract and is renamed unconditionally.)
+      if (name === 'Rational') {
+        const pair = ops.map((op) =>
+          op instanceof _BoxedExpression ? op.canonical : box(ce, op, options)
+        );
+        if (pair.some((op) => evidenceAdmissionOf(op, 'integer') === 'refute'))
+          return new BoxedFunction(
+            ce,
+            'Rational',
+            pair.map((op) =>
+              evidenceAdmissionOf(op, 'integer') === 'refute'
+                ? ce.typeError('integer', op.type, op)
+                : op
+            ),
+            { canonical: true }
+          );
+        // Not refuted: flow the canonicalized operands forward — the
+        // Divide path below would otherwise re-canonicalize the raw
+        // operands from scratch.
+        ops = pair;
       }
       name = 'Divide';
     }

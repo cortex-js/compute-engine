@@ -14,6 +14,7 @@ import { canonicalPower } from './arithmetic-power.js';
 import { canonicalOrder } from './order.js';
 import { declaredBinders, binderShadowAt } from './binding-sites.js';
 import { asBigint } from './numerics.js';
+import { evidenceAdmissionOf } from './value-membership.js';
 import { isOperatorDef, isImaginaryUnit } from './utils.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 
@@ -273,7 +274,17 @@ function numberForm(
       const d = asBigint(ops[1]);
       if (d !== null) return ce.number([n, d]);
     }
-    name = 'Divide';
+    // The `Rational` spelling is an `(integer, integer)` constructor (ruled
+    // 2026-08-24): full canonicalization REJECTS a proven non-integer
+    // argument (see the box-time numeric constructor in `box.ts`). This
+    // partial pass introduces no error values, but it must not erase the
+    // spelling either — renaming to `Divide` here would turn the caller
+    // error into silent division once the result is fully canonicalized.
+    if (
+      name === 'Rational' &&
+      ops.some((op) => evidenceAdmissionOf(op, 'integer') === 'refute')
+    )
+      return ce._fn('Rational', ops, { canonical: false });
 
     return ce._fn('Divide', ops, { canonical: false });
   }

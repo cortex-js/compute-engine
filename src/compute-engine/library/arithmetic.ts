@@ -7,6 +7,10 @@ import {
   checkNumericArgs,
   nonNumericOperandError,
 } from '../boxed-expression/validate.js';
+import {
+  evidenceAdmissionOf,
+  heldNonNumericScalar,
+} from '../boxed-expression/value-membership.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
 import { polynomialGCDMulti } from '../boxed-expression/polynomials.js';
 import {
@@ -2743,7 +2747,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         'Construct a rational number from a numerator and denominator.',
       complexity: 2400,
 
-      signature: '(number, integer?) -> rational',
+      // Two distinct forms (ruled 2026-08-24): `Rational(x)` approximates a
+      // real by a rational; `Rational(n, d)` CONSTRUCTS the rational `n/d`
+      // from two integers. There is no `(number, number)` form — the
+      // two-argument constructor rewrites to `Divide`, so a non-integer
+      // argument would silently become plain division (`Rational(3, 2.5)`
+      // evaluated to `1.2`), which almost always indicates a caller error.
+      signature: '((real) -> rational) | ((integer, integer) -> rational)',
       sgn: ([n]) => n.sgn,
       canonical: (args, { engine }) => {
         const ce = engine;
@@ -2754,7 +2764,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (args.length === 1)
           return ce._fn('Rational', [checkType(ce, args[0], 'real')]);
 
-        args = checkTypes(ce, args, ['integer', 'integer']);
+        // `checkType` admits a merely-OVERLAPPING operand (deferred
+        // validation: a `number`-typed symbol may turn out integral), so a
+        // concrete non-integer — a literal or a symbol holding one — slipped
+        // through to the `Divide` rewrite. Decide exactly on the evidence:
+        // proven non-integers are rejected here, while a valueless symbol
+        // stays admitted and rewrites to `Divide` as before. (The box-time
+        // numeric constructor in `box.ts` makes the same check; this branch
+        // covers the structural/partial-canonicalization routes that reach
+        // the handler instead.)
+        args = checkTypes(ce, args, ['integer', 'integer']).map((arg) =>
+          arg.isValid && evidenceAdmissionOf(arg, 'integer') === 'refute'
+            ? ce.typeError('integer', arg.type, arg)
+            : arg
+        );
 
         if (args.length !== 2 || !args[0].isValid || !args[1].isValid)
           return ce._fn('Rational', args);
@@ -3172,6 +3195,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args);
         if (args.length === 0) return engine.error('missing');
+        // Unary `Subtract(x)` folds to `x` through `canonicalAdd`, erasing
+        // the operator before the arithmetic evaluate guard can examine the
+        // operand — `checkNumericArgs` flags concrete literals but passes
+        // symbols, so a symbol holding a string flowed through as-is. Reject
+        // concrete non-numeric scalar evidence; a lone collection operand
+        // still folds (broadcast identity), and a valueless symbol stays
+        // admitted.
+        if (args.length === 1 && heldNonNumericScalar(args[0]))
+          return engine.typeError('number', args[0].type, args[0]);
         const first = args[0];
         const rest = args.slice(1);
         return canonicalAdd(engine, [first, ...rest.map((x) => x.neg())]);
