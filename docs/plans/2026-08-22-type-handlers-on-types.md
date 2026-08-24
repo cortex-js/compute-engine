@@ -1272,7 +1272,7 @@ type?: (
 
 ### 5.3 Migration, in the order that keeps the suite green
 
-1. **Land §4**, including P1 to P3.
+1. **Land §4**, including P1 to P3. (DONE — see the §4 status blocks.)
 2. **Add the new handler shape beside the old one**, selected by a
    definition flag (`typeHandlerKind: 'types'`) — never by counting a
    function's parameters. The call site builds descriptors once and
@@ -1285,6 +1285,33 @@ type?: (
    an old-shape user handler runs outside the invariant: it is a trusted
    callback, and the §5.5 guard reports (in tests) or warns (in
    development) instead of throwing for it.
+
+   **Status: IMPLEMENTED 2026-08-23.** The descriptor types are public
+   (`OperandDescriptor`, `OperandFacts`, `OperandStructure`,
+   `TypeHandlerContext`, `PureEngineView` in `types-definitions.ts`, with
+   the structural mirror `types-expression.ts` requires); the constructors
+   are `describe()` / `describeType()` in
+   `boxed-expression/operand-descriptor.ts`; the one call site
+   (`boxed-function.ts`) dispatches on `def.typeHandlerKind`, folding the
+   missing-strip override into the descriptor's type; and the Dot rewrite's
+   `componentProductType` (`library/linear-algebra.ts`) dispatches the same
+   way. Three details differ from the paragraphs above, deliberately:
+   (a) `context.derive` is NOT yet in the handler context — no pure handler
+   needs it, and it lands with the step-4 rewrites (the context type
+   documents this); (b) the descriptor's type carries EVERY representable
+   literal, not only `0`/`1` — §4.3 and ruling O9 superseded R2 after §5.1
+   was written; (c) the §5.5 guard shipped as its version-counter core
+   (four axes plus the scratch-scope count, throwing under test and under
+   `CE_TYPE_PURITY_GUARD`), with the definition-write and construction
+   counters still to come with the mass migration. First migrated
+   handlers: `Coalesce`, `Hold`, `ReleaseHold` (`library/core.ts`), with
+   byte-identical types pinned against the pre-conversion tree in
+   `type-handler-parity.test.ts` and the descriptor facts pinned in
+   `type-handler-descriptors.test.ts`. One consequence for consumers of
+   the TypeScript types: `SymbolDefinitions` now maps ids to a
+   distribution-safe partial (`PartialSymbolDefinition`) because a plain
+   `Partial` would erase the `typeHandlerKind: 'types'` discriminant and
+   with it the contextual typing of every legacy handler literal.
 3. **Convert the 213 pure handlers** using the table below, after the
    exact-comparison audit of §4.3. A conversion is proven by the parity
    harness (§5.5).

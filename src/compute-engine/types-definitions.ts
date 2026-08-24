@@ -3,6 +3,7 @@ import type {
   EffectLabel,
   EffectSet,
   Type,
+  TypeResolver,
   TypeString,
 } from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
@@ -389,8 +390,247 @@ export interface InterpretResult {
  * @category Definitions
  *
  */
+/**
+ * A three-valued fact about an operand: `true` (provably yes), `false`
+ * (provably no), `undefined` (not decidable from what the descriptor knows).
+ *
+ * @category Definitions
+ */
+export type Tri = boolean | undefined;
+
+/**
+ * The facts a `type` handler in the `'types'` shape may read about one
+ * operand, beside the operand's type. Every fact is derived from pure
+ * sources — the operand's type, a literal's value, a symbol's held value or
+ * recorded assumptions, structural reads — never by canonicalizing,
+ * declaring, or evaluating anything.
+ *
+ * @category Definitions
+ */
+export type OperandFacts = {
+  /** `false` when the operand is an error expression. */
+  readonly valid: boolean;
+  /** `true` for a `finite_*`-typed operand or a finite number literal;
+   * `false` for a `non_finite_number`-typed operand or a `±∞`/`NaN`
+   * literal; `undefined` otherwise (including every non-number operand). */
+  readonly finite: Tri;
+  /** The operand's sign, from pure sources only: a number literal's value,
+   * a symbol's held numeric value or recorded assumption, or the sign a
+   * ranged TYPE proves (`real<0..> & !0` is positive). For a compound
+   * expression whose type carries no sign, `undefined` — the operator
+   * `sgn` handlers are never consulted on the type path. */
+  readonly sgn?: Sign;
+  /** The operand has no free variables (the `isConstant` structural fact). */
+  readonly closed: Tri;
+  /** Is the operand a collection? `true` when its type proves it (a
+   * collection-shaped type, `string` included) or the operand value is
+   * enumerable; `false` when the type is provably disjoint from
+   * `collection<any>`; `undefined` for top types and `broadcastable<T>`. */
+  readonly collection: Tri;
+  /** Meaningful only when `collection` is not `false`. */
+  readonly finiteCollection: Tri;
+  /** Supports index-based access (`indexed_collection<any>` by type, or the
+   * operand's indexed-collection capability). */
+  readonly indexed: Tri;
+  /** A statically known fixed shape (a dimensioned list type, or a literal
+   * `List`'s dimensions). Absent when no static shape is known. */
+  readonly shape?: readonly number[];
+  /** Is the operand a function application (not a symbol or literal)?
+   * Decidable for a real operand; `undefined` for a synthetic descriptor
+   * built from a type alone. */
+  readonly application: Tri;
+  /** Was the operand's type INFERRED (subject to revision) rather than
+   * declared or derived? Read from a symbol operand's value definition;
+   * `undefined` for synthetic descriptors. */
+  readonly inferred: Tri;
+};
+
+/**
+ * An inert, expression-free structural view of an operand, for `type`
+ * handlers in the `'types'` shape that need more than the operand's type
+ * (is it a symbol? a string literal? an application of which operator?).
+ * Children appear as descriptors, so a handler can recurse without ever
+ * holding an expression.
+ *
+ * @category Definitions
+ */
+export type OperandStructure =
+  | { kind: 'symbol'; name: string }
+  | { kind: 'string'; text: string }
+  | { kind: 'number'; literal?: 0 | 1 }
+  | {
+      kind: 'application';
+      head: string;
+      children: ReadonlyArray<OperandDescriptor>;
+    }
+  | {
+      kind: 'function-literal';
+      parameters: ReadonlyArray<{ name: string; annotated?: Type }>;
+      body: OperandStructure;
+    }
+  | { kind: 'tuple'; arity: number }
+  | { kind: 'list-literal'; shape: readonly number[] };
+
+/**
+ * What a `type` handler in the `'types'` shape receives in place of an
+ * operand expression: the operand's handler-visible type (a number
+ * literal's value-carrying type included), a set of three-valued facts,
+ * and an optional on-demand structural view. Descriptors carry no
+ * expression, so a handler cannot canonicalize, declare, or evaluate its
+ * operands while deriving a type — which is the point of the shape: type
+ * derivation must not modify engine state.
+ *
+ * Built by `describe()` (from a real operand) and `describeType()` (from a
+ * type alone) in `boxed-expression/operand-descriptor.ts`; the design is
+ * `docs/plans/2026-08-22-type-handlers-on-types.md` §5.1.
+ *
+ * @category Definitions
+ */
+export type OperandDescriptor = {
+  /** The operand's handler-visible type. For a number literal this is its
+   * value-carrying type (`21`, `finite_real<0.5..0.5>`); for an absent
+   * operand at a missing-stripped parameter position, the operand's
+   * `missing`-stripped type. */
+  readonly type: Type;
+  readonly facts: OperandFacts;
+  /** A structural view of the operand, or `undefined` when no structural
+   * facts are available (synthetic descriptors; structure kinds not yet in
+   * the vocabulary). Pure and memoized; safe to call repeatedly. */
+  readonly structureOf?: () => OperandStructure | undefined;
+};
+
+/**
+ * The definition view a `'types'`-shape `type` handler gets from
+ * `PureEngineView.lookupDefinition`: the tagged value/operator halves with
+ * every own property readonly. The shallow `Readonly` is compile-time
+ * protection against the direct field writes a type handler must never
+ * perform (`def.operator.signature = …`); the runtime purity guard remains
+ * the dynamic enforcement for anything the type system cannot see.
+ *
+ * @category Definitions
+ */
+export type ReadonlyDefinitionView = {
+  readonly value?: Readonly<BoxedValueDefinition>;
+  readonly operator?: Readonly<BoxedOperatorDefinition>;
+};
+
+/**
+ * The read-only slice of the engine available to a `type` handler in the
+ * `'types'` shape: enough to parse and resolve types, and to look up a
+ * definition — none of the mutating surface (`declare`, `assign`, `box`,
+ * `parse`, `evaluate`), and the definition lookup answers a read-only view
+ * ({@link ReadonlyDefinitionView}). The full `ComputeEngine` satisfies this
+ * interface structurally, so the restriction is compile-time only; the
+ * runtime purity guard (`CE_TYPE_PURITY_GUARD`, always on under test) is
+ * what enforces it dynamically.
+ *
+ * @category Definitions
+ */
+export interface PureEngineView {
+  type(type: Type | TypeString | BoxedType): BoxedType;
+  readonly _typeResolver: TypeResolver;
+  lookupDefinition(id: string): ReadonlyDefinitionView | undefined;
+}
+
+/**
+ * The context argument of a `type` handler in the `'types'` shape.
+ *
+ * A `derive(operator, operands)` member — the recursive entry point a
+ * handler such as `Map` needs to type an application it does not have in
+ * hand — is part of the design
+ * (`docs/plans/2026-08-22-type-handlers-on-types.md` §5.2) and will be
+ * added when those handlers migrate; it is absent until then.
+ *
+ * @category Definitions
+ */
+export type TypeHandlerContext = {
+  engine: PureEngineView;
+};
+
+/**
+ * The legacy `type` handler shape: a function of the operand EXPRESSIONS.
+ *
+ * @category Definitions
+ */
+export type OperatorTypeHandlerOnExpressions = (
+  ops: ReadonlyArray<Expression>,
+  options: {
+    engine: ComputeEngine;
+    /** Strip-before-validate override (§3.B of the missing-value typing
+     * design): for a stripped parameter position with an absent operand,
+     * the operand's `missing`-stripped type; `undefined` where no override
+     * applies. A handler consults `operandTypes[i]` before `ops[i].type`. */
+    operandTypes?: ReadonlyArray<Type | undefined>;
+  }
+) => Type | TypeString | BoxedType | undefined;
+
+/**
+ * The `type` handler shape selected by `typeHandlerKind: 'types'`: a
+ * function of operand DESCRIPTORS. Such a handler never sees an operand
+ * expression, so deriving a type cannot declare, canonicalize, or evaluate
+ * anything — the state-purity contract of
+ * `docs/plans/2026-08-22-type-handlers-on-types.md`.
+ *
+ * @category Definitions
+ */
+export type OperatorTypeHandlerOnTypes = (
+  operands: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext
+) => Type | TypeString | BoxedType | undefined;
+
+/**
+ * The two `type`-handler shapes, discriminated by the `typeHandlerKind`
+ * flag — the flag selects the shape; the shape is never guessed from the
+ * handler's parameter count. Omitting the flag (every pre-existing
+ * definition) keeps the legacy expressions shape.
+ *
+ * The flag travels WITH the handler: a definition update that supplies a
+ * new `type` handler and omits `typeHandlerKind` resets the stored shape
+ * to `'expressions'`, even when the previous handler was declared
+ * `'types'`. When re-declaring a `'types'`-shape operator, always restate
+ * the flag next to the handler — a descriptor-consuming handler filed
+ * under the expressions shape is silently called with expressions and
+ * derives wrong types.
+ *
+ * @category Definitions
+ */
+export type OperatorTypeHandlerVariant =
+  | {
+      typeHandlerKind?: 'expressions';
+
+      /**
+       * The type of the result (return type) based on the type of
+       * the arguments.
+       *
+       * Should be a subtype of the type indicated by the signature.
+       *
+       * For example, if the signature is `(number) -> real`, the type of the
+       * result could be `real` or `integer`, but not `complex`.
+       *
+       * :::info[Note]
+       * Do not evaluate the arguments.
+       *
+       * However, the type of the arguments can be used to determine the type of
+       * the result.
+       * :::
+       *
+       */
+      type?: OperatorTypeHandlerOnExpressions;
+    }
+  | {
+      typeHandlerKind: 'types';
+
+      /**
+       * The type of the result (return type) as a function of the operand
+       * DESCRIPTORS — their types and facts, never the operand expressions.
+       * See {@link OperatorTypeHandlerOnTypes}.
+       */
+      type?: OperatorTypeHandlerOnTypes;
+    };
+
 export type OperatorDefinition = Partial<BaseDefinition> &
-  Partial<OperatorDefinitionFlags> & {
+  Partial<OperatorDefinitionFlags> &
+  OperatorTypeHandlerVariant & {
     /**
      * The function signature, describing the type of the arguments and the
      * return type.
@@ -439,35 +679,6 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * @internal
      */
     _derivedSignature?: boolean;
-
-    /**
-     * The type of the result (return type) based on the type of
-     * the arguments.
-     *
-     * Should be a subtype of the type indicated by the signature.
-     *
-     * For example, if the signature is `(number) -> real`, the type of the
-     * result could be `real` or `integer`, but not `complex`.
-     *
-     * :::info[Note]
-     * Do not evaluate the arguments.
-     *
-     * However, the type of the arguments can be used to determine the type of
-     * the result.
-     * :::
-     *
-     */
-    type?: (
-      ops: ReadonlyArray<Expression>,
-      options: {
-        engine: ComputeEngine;
-        /** Strip-before-validate override (§3.B): for a stripped parameter
-         * position with an absent operand, the operand's `missing`-stripped
-         * type; `undefined` where no override applies. A handler consults
-         * `operandTypes[i]` before `ops[i].type`. */
-        operandTypes?: ReadonlyArray<Type | undefined>;
-      }
-    ) => Type | TypeString | BoxedType | undefined;
 
     /** Return the sign of the function expression.
      *
@@ -925,8 +1136,23 @@ export type SymbolDefinition = OneOf<[ValueDefinition, OperatorDefinition]>;
  * @category Definitions
  *
  */
+/**
+ * `Partial` distributed over the {@link SymbolDefinition} union, except that
+ * the `typeHandlerKind: 'types'` discriminant stays REQUIRED on its arm.
+ * A plain `Partial` would make the discriminant optional, at which point an
+ * object literal with an unannotated `type: (ops) => …` handler matches both
+ * handler shapes and TypeScript can no longer contextually type the
+ * handler's parameters — every legacy definition in the library would stop
+ * type-checking.
+ */
+type PartialSymbolDefinition<T = SymbolDefinition> = T extends {
+  typeHandlerKind: 'types';
+}
+  ? Partial<T> & { typeHandlerKind: 'types' }
+  : Partial<T>;
+
 export type SymbolDefinitions = Readonly<{
-  [id: string]: Partial<SymbolDefinition>;
+  [id: string]: PartialSymbolDefinition;
 }>;
 
 /**
@@ -1984,19 +2210,21 @@ export interface BoxedOperatorDefinition
    * @internal */
   _lambdaLiteral?: Expression;
 
+  /** Which shape the `type` handler takes: `'expressions'` (the legacy
+   * shape — a function of the operand expressions) or `'types'` (a function
+   * of operand descriptors, which cannot touch engine state). The flag is
+   * what the dispatch reads; the handler's parameter count is never
+   * inspected. */
+  readonly typeHandlerKind: 'expressions' | 'types';
+
   /** If present, this handler can be used to more precisely determine the
    * return type based on the type of the arguments. The arguments themselves
    * should *not* be evaluated, only their types should be used.
+   *
+   * The shape of the stored handler is recorded by {@link typeHandlerKind};
+   * a caller must dispatch on that flag before invoking it.
    */
-  type?: (
-    ops: ReadonlyArray<Expression>,
-    options: {
-      engine: ComputeEngine;
-      /** Stripped operand types conveyed by the missing-value strip (§3.B).
-       * A handler consults `operandTypes[i]` before `ops[i].type`. */
-      operandTypes?: ReadonlyArray<Type | undefined>;
-    }
-  ) => Type | TypeString | BoxedType | undefined;
+  type?: OperatorTypeHandlerOnExpressions | OperatorTypeHandlerOnTypes;
 
   /** If present, this handler can be used to determine the sign of the
    *  return value of the function, based on the sign and type of its

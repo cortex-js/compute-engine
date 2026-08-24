@@ -251,6 +251,60 @@ type LambdaDefinition = {
   body: Expression;
 };
 
+/** Structural mirrors of the operand-descriptor types
+ * (`OperandDescriptor` and friends in `types-definitions.ts`, which imports
+ * this file and so cannot be named from here). Keep the two spellings in
+ * sync member for member — the interfaces must stay mutually assignable. */
+type OperandFactsMirror = {
+  readonly valid: boolean;
+  readonly finite: boolean | undefined;
+  readonly sgn?: Sign;
+  readonly closed: boolean | undefined;
+  readonly collection: boolean | undefined;
+  readonly finiteCollection: boolean | undefined;
+  readonly indexed: boolean | undefined;
+  readonly shape?: readonly number[];
+  readonly application: boolean | undefined;
+  readonly inferred: boolean | undefined;
+};
+
+type OperandStructureMirror =
+  | { kind: 'symbol'; name: string }
+  | { kind: 'string'; text: string }
+  | { kind: 'number'; literal?: 0 | 1 }
+  | {
+      kind: 'application';
+      head: string;
+      children: ReadonlyArray<OperandDescriptorMirror>;
+    }
+  | {
+      kind: 'function-literal';
+      parameters: ReadonlyArray<{ name: string; annotated?: Type }>;
+      body: OperandStructureMirror;
+    }
+  | { kind: 'tuple'; arity: number }
+  | { kind: 'list-literal'; shape: readonly number[] };
+
+type OperandDescriptorMirror = {
+  readonly type: Type;
+  readonly facts: OperandFactsMirror;
+  readonly structureOf?: () => OperandStructureMirror | undefined;
+};
+
+/** Mirror of `PureEngineView` (types-definitions.ts). The definition view
+ * returned by `lookupDefinition` is shallow-readonly, mirroring
+ * `ReadonlyDefinitionView`. */
+interface PureEngineViewMirror {
+  type(type: Type | TypeString | BoxedType): BoxedType;
+  readonly _typeResolver: import('../common/type/types.js').TypeResolver;
+  lookupDefinition(id: string):
+    | {
+        readonly value?: Readonly<BoxedValueDefinition>;
+        readonly operator?: Readonly<BoxedOperatorDefinition>;
+      }
+    | undefined;
+}
+
 interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
   complexity: number;
@@ -290,13 +344,22 @@ interface BoxedOperatorDefinition
    * See `types-definitions.ts`. */
   readonly invokesNone: boolean;
   readonly lambda: LambdaDefinition | undefined;
-  type?: (
-    ops: ReadonlyArray<Expression>,
-    options: {
-      engine: ExpressionComputeEngine;
-      operandTypes?: ReadonlyArray<Type | undefined>;
-    }
-  ) => Type | TypeString | BoxedType | undefined;
+  /** Which shape the stored `type` handler takes — see
+   * `BoxedOperatorDefinition.typeHandlerKind` in `types-definitions.ts`.
+   * Dispatch on this flag, never on the handler's parameter count. */
+  readonly typeHandlerKind: 'expressions' | 'types';
+  type?:
+    | ((
+        ops: ReadonlyArray<Expression>,
+        options: {
+          engine: ExpressionComputeEngine;
+          operandTypes?: ReadonlyArray<Type | undefined>;
+        }
+      ) => Type | TypeString | BoxedType | undefined)
+    | ((
+        operands: ReadonlyArray<OperandDescriptorMirror>,
+        context: { engine: PureEngineViewMirror }
+      ) => Type | TypeString | BoxedType | undefined);
   sgn?: (
     ops: ReadonlyArray<Expression>,
     options: { engine: ExpressionComputeEngine }

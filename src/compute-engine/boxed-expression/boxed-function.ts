@@ -23,8 +23,14 @@ import type {
   BoxedValueDefinition,
   ExpressionInput,
   FunctionInterface,
+  OperatorTypeHandlerOnExpressions,
+  OperatorTypeHandlerOnTypes,
 } from '../global-types.js';
 
+import {
+  describe as describeOperand,
+  guardedTypeHandlerCall,
+} from './operand-descriptor.js';
 import {
   broadcastLengthMismatch,
   hasUnresolvedCollectionOperand,
@@ -4926,10 +4932,26 @@ function type(expr: BoxedFunction): Type {
               : undefined
           )
         : undefined;
-      const calculatedType = def.type(expr.ops, {
-        engine: expr.engine,
-        operandTypes,
-      });
+      // Dual handler shapes (the staged signature change of
+      // `docs/plans/2026-08-22-type-handlers-on-types.md` §5.3 step 2): the
+      // definition's `typeHandlerKind` flag — never the handler's parameter
+      // count — selects the shape. A `'types'` handler receives one
+      // descriptor per operand (the missing-strip override folded into the
+      // descriptor's type) and no expressions, so it cannot touch engine
+      // state; the guard turns any state write into an immediate error in
+      // tests.
+      const calculatedType =
+        def.typeHandlerKind === 'types'
+          ? guardedTypeHandlerCall(expr.engine, expr.operator, () =>
+              (def.type as OperatorTypeHandlerOnTypes)(
+                expr.ops.map((x, i) => describeOperand(x, operandTypes?.[i])),
+                { engine: expr.engine }
+              )
+            )
+          : (def.type as OperatorTypeHandlerOnExpressions)(expr.ops, {
+              engine: expr.engine,
+              operandTypes,
+            });
       if (calculatedType) {
         if (calculatedType instanceof BoxedType)
           sigResult = calculatedType.type;

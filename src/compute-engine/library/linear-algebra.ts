@@ -22,9 +22,15 @@ import {
   Expression,
   ExpressionInput,
   IComputeEngine as ComputeEngine,
+  OperatorTypeHandlerOnExpressions,
+  OperatorTypeHandlerOnTypes,
   SymbolDefinitions,
   Sign,
 } from '../global-types.js';
+import {
+  describe as describeOperand,
+  guardedTypeHandlerCall,
+} from '../boxed-expression/operand-descriptor.js';
 import {
   isFunction,
   isNumber,
@@ -232,9 +238,24 @@ function componentProductType(
   y: Expression
 ): Type | undefined {
   const def = ce.lookupDefinition('Multiply');
-  const handler = def && 'operator' in def ? def.operator.type : undefined;
+  const operatorDef = def && 'operator' in def ? def.operator : undefined;
+  const handler = operatorDef?.type;
   if (typeof handler !== 'function') return undefined;
-  const t = handler([x, y], { engine: ce });
+  // Dispatch on the definition's declared handler shape, exactly as the
+  // type-handler call site in `boxed-function.ts` does: an expressions-shape
+  // handler gets the operand pair, a types-shape handler gets one descriptor
+  // per operand — and the same purity guard, so a state-writing handler
+  // reached through this secondary call site is caught like one reached
+  // through the primary.
+  const t =
+    operatorDef!.typeHandlerKind === 'types'
+      ? guardedTypeHandlerCall(ce, 'Multiply', () =>
+          (handler as OperatorTypeHandlerOnTypes)(
+            [describeOperand(x), describeOperand(y)],
+            { engine: ce }
+          )
+        )
+      : (handler as OperatorTypeHandlerOnExpressions)([x, y], { engine: ce });
   if (t === undefined) return undefined;
   // Same normalization as the type-handler call site in `boxed-function.ts`: a
   // handler may answer with a `BoxedType`, a structural `Type`, or a type

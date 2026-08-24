@@ -3891,7 +3891,13 @@ function dispatcherDefinition(
     lazy: false,
     signature,
     canonical: (ops, { engine }) => dispatcherCanonical(engine, member, ops),
-    type: (ops, { engine }) => dispatcherResultType(engine, member, null, ops),
+    // Annotated because the literal's leading conditional spread keeps
+    // TypeScript from contextually typing the handler against the
+    // definition's handler-shape union.
+    type: (
+      ops: ReadonlyArray<Expression>,
+      { engine }: { engine: IComputeEngine }
+    ) => dispatcherResultType(engine, member, null, ops),
     evaluate: (ops, options) =>
       dispatchMember(options.engine, member, null, ops, options),
   };

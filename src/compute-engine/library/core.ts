@@ -2289,10 +2289,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // contributes its stripped type (its `| missing` arm removed), the last
       // its full type. An arm-free final operand yields an arm-free result
       // type — but that never promises presence (`NaN ∈ number`, I6).
-      type: (ops) => {
-        if (ops.length === 0) return 'nothing';
-        const arms = ops.map((op, i) =>
-          i < ops.length - 1 ? stripMissingFromType(op.type.type) : op.type.type
+      //
+      // `'types'`-shape handler (first migrated batch): reads operand
+      // descriptors, never operand expressions, so the derivation cannot
+      // touch engine state.
+      typeHandlerKind: 'types',
+      type: (operands) => {
+        if (operands.length === 0) return 'nothing';
+        const arms = operands.map((op, i) =>
+          i < operands.length - 1 ? stripMissingFromType(op.type) : op.type
         );
         return widen(...arms) as Type;
       },
@@ -2351,13 +2356,26 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       inspectsErrors: true,
       signature: '(any) -> unknown',
       // Note: the operator is lazy and doesn't have a canonical handler:
-      // the argument is not canonicalized.
+      // the argument is not canonicalized. The `'types'`-shape handler reads
+      // the operand's raw structure through its descriptor — the same
+      // as-written view the expressions shape read with the `isSymbol`/
+      // `isString`/`isNumber`/`isFunction` guards. Every application kind
+      // (compound, tuple, list literal, function literal) lands in the
+      // default arm, mirroring the old `isFunction` branch.
+      typeHandlerKind: 'types',
       type: ([x]) => {
-        if (isSymbol(x)) return 'symbol';
-        if (isString(x)) return 'string';
-        if (isNumber(x)) return x.type;
-        if (isFunction(x)) return functionResult(x.type.type) ?? 'unknown';
-        return 'unknown';
+        const s = x?.structureOf?.();
+        if (s === undefined) return 'unknown';
+        switch (s.kind) {
+          case 'symbol':
+            return 'symbol';
+          case 'string':
+            return 'string';
+          case 'number':
+            return x.type;
+          default:
+            return functionResult(x.type) ?? 'unknown';
+        }
       },
       // When comparing hold expressions, consider them equal if their
       // arguments are structurally equal.
@@ -2379,7 +2397,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `effectsOf(Hold(Random()))` is empty.
       holdClass: 'release',
       signature: '(any) -> unknown',
-      type: ([x]) => (isFunction(x, 'Hold') ? x.op1.type : x.type),
+      // The result type of releasing a literal `Hold` is its content's type
+      // (the descriptor of the held operand's first child); anything else
+      // keeps its own type. `'nothing'` for the degenerate argument-less
+      // `Hold()`, matching what the expressions shape read off `op1`.
+      typeHandlerKind: 'types',
+      type: ([x]) => {
+        const s = x?.structureOf?.();
+        if (s?.kind === 'application' && s.head === 'Hold')
+          return s.children[0]?.type ?? 'nothing';
+        return x?.type ?? 'unknown';
+      },
       // Note: the operator is lazy and doesn't have a canonical handler:
       // the argument is not canonicalized.
       evaluate: ([x], options) => {

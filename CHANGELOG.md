@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+### New Features
+
+- **A `type` handler can now be declared as a function of operand
+  DESCRIPTORS instead of operand expressions.** An operator definition that
+  sets `typeHandlerKind: 'types'` receives, in place of each operand, an
+  `OperandDescriptor`: the operand's handler-visible type, a set of
+  three-valued facts (finiteness, sign from pure sources, collection-ness,
+  static shape, …) and an on-demand structural view — never the operand
+  expression itself, so deriving a type cannot declare, canonicalize, or
+  evaluate anything. The legacy expressions shape remains the default and
+  is unchanged; the flag — never the handler's parameter count — selects
+  the shape. Under test (and with `CE_TYPE_PURITY_GUARD` elsewhere) a
+  runtime guard turns any engine-state write from a `'types'` handler into
+  an immediate error. The built-in `Coalesce`, `Hold` and `ReleaseHold`
+  definitions are the first to use the new shape, with byte-identical
+  derived types.
+
 ## 0.119.0 _2026_08_23_
 
 ### Breaking Changes

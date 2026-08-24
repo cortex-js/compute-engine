@@ -389,6 +389,22 @@ Worktree with the shim: the experiment is reproducible from this entry; the
 proxy gates on `CE_TYPE_VALUE_BLIND` / `CE_TYPE_LITERAL` and is not for
 landing.
 
+Step 2 of the design's migration plan (§5.3) LANDED 2026-08-23: the dual
+handler shape. An operator definition may declare `typeHandlerKind: 'types'`
+and receive operand DESCRIPTORS (`OperandDescriptor` — handler-visible type,
+three-valued facts, on-demand structure; built by `describe()` /
+`describeType()` in `boxed-expression/operand-descriptor.ts`) instead of
+operand expressions; the single call site in `boxed-function.ts` dispatches
+on the flag, and a runtime purity guard (on under test) throws if a
+`'types'` handler moves any invalidation axis. First migrated handlers:
+`Coalesce`, `Hold`, `ReleaseHold` — byte-identical types, pinned in
+`type-handler-parity.test.ts` / `type-handler-descriptors.test.ts`. What
+remains here: the mass conversion of the ~210 remaining pure handlers
+(§5.3 step 3, with the §5.5 corpus-driven parity harness), the seven
+impure-handler rewrites (§5.4), `context.derive` for the handlers that
+type an application they do not hold, and the old shape's deprecation
+(release N+1) and removal (N+2).
+
 Design and implementation draft:
 `docs/plans/2026-08-22-type-handlers-on-types.md` (third draft, 2026-08-22).
 The draft reframes this entry: the GOAL is type derivation that does not
