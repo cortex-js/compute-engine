@@ -263,7 +263,7 @@ function numberForm(
       m === 0 ? firstOpShadow : binderShadowAt(binders, m, shadowed)
     )
   );
-  let { operator: name } = expr;
+  const { operator: name } = expr;
 
   //
   // Rational (as Divide)

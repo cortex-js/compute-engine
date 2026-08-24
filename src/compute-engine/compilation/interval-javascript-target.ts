@@ -63,7 +63,6 @@ import {
   INTERVAL_QUADRATURE_SUBDIVISIONS,
 } from '../interval/integrate.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import type { Interval, IntervalResult } from '../interval/types.js';
 
 /**
  * Interval arithmetic operators mapped to _IA library calls.

@@ -503,7 +503,9 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
       // sum of two `list<real<-1..>>` operands must not keep the `-1`
       // bound its cells can cross (see `stripNumericRanges`).
       const collected = widen(
-        ...shaped.map((x) => stripNumericRanges(broadcastSiblingType(x.type.type)))
+        ...shaped.map((x) =>
+          stripNumericRanges(broadcastSiblingType(x.type.type))
+        )
       );
       // The scalar operands fold INTO the cells elementwise (no scalar arm
       // in the result — item 67), so they widen the CELL type, keeping the

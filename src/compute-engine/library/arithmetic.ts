@@ -2582,7 +2582,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // an exponent whose branch cannot be proven keeps the wider default.
           // (Nested under the `isReal` guard so a complex-typed base never
           // pays for the extra sign query.)
-          if (negativeSign(baseSgn) === true && negativeBaseIsComplexBranch(exp))
+          if (
+            negativeSign(baseSgn) === true &&
+            negativeBaseIsComplexBranch(exp)
+          )
             return 'finite_complex';
         }
         // A pure-imaginary base (non-zero by type: `imaginary ∩ real =
@@ -2859,7 +2862,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Root(0, n): 0 for n>0, a pole (±∞) for n≤0, NaN for a complex index.
         const rootExpSgn = operandSgn(exp);
         if (base.isSame(0))
-          return positiveSign(rootExpSgn) === true ? 'finite_integer' : 'number';
+          return positiveSign(rootExpSgn) === true
+            ? 'finite_integer'
+            : 'number';
         if (base.isReal && exp.isReal) {
           const rootBaseSgn = operandSgn(base);
           // A positive base always gives a positive real root.

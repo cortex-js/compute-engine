@@ -130,9 +130,7 @@ function classifyCell(op: Expression): Type | null {
   // cell's TIER, so project a literal's decoration back to it. Non-literal
   // ranged cells (an unevaluated `Abs(x)`) keep blocking, as they did
   // before literals carried these types.
-  const t = isNumber(op)
-    ? stripNumericRanges(op.type.type)
-    : op.type.type;
+  const t = isNumber(op) ? stripNumericRanges(op.type.type) : op.type.type;
 
   // `unknown`/`any` govern cell classification only via the fold: an
   // inference-pending BARE SYMBOL folds to `number`; anything else typed

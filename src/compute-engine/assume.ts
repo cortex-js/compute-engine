@@ -960,12 +960,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
       // narrows by meet instead of clobbering the first (`0 < x < 10`
       // decomposes into two calls; before this routing the second replaced
       // the first — review catch, 2026-08-23), and records provenance.
-      const refined = refineSymbolType(
-        ce,
-        symbol,
-        rangeType ?? 'real',
-        result
-      );
+      const refined = refineSymbolType(ce, symbol, rangeType ?? 'real', result);
       if (refined === 'contradiction') return 'contradiction';
     } else if (
       rangeType !== undefined &&

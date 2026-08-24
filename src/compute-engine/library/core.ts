@@ -45,10 +45,7 @@ import { fromDigits } from '../numerics/strings.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { randomCount } from './random-utils.js';
 import { isRingConstant } from './ring-constructions.js';
-import {
-  operandLiteralValue,
-  quotientRingType,
-} from './type-handlers.js';
+import { operandLiteralValue, quotientRingType } from './type-handlers.js';
 import {
   settleTypeText,
   settledTypeText,

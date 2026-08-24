@@ -2924,9 +2924,7 @@ export class BaseCompiler {
   private static constantFoldValue(
     expr: Expression,
     target: CompileTarget<Expression>
-  ):
-    | { value: Expression; elements: Expression[] | undefined }
-    | undefined {
+  ): { value: Expression; elements: Expression[] | undefined } | undefined {
     // Re-entry from the emission of a value this fold already computed (see
     // `emitFoldedValue`) — there is nothing left to fold inside it.
     if (BaseCompiler._emittingFoldedValue) return undefined;
@@ -10064,6 +10062,8 @@ export class BaseCompiler {
     // hundreds of nodes cannot each arm a fresh full span — once the pool is
     // dry, remaining integrals go straight to their numeric emitter.
     if (BaseCompiler.antiderivativeBudgetLeftMs <= 0) return undefined;
+    //
+    // eslint-disable-next-line no-restricted-globals
     const attemptStart = performance.now();
     engine.pushScope();
     try {
@@ -10084,6 +10084,7 @@ export class BaseCompiler {
     } finally {
       engine.popScope();
       BaseCompiler.antiderivativeBudgetLeftMs -=
+        // eslint-disable-next-line no-restricted-globals
         performance.now() - attemptStart;
     }
 

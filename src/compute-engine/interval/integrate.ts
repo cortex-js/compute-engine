@@ -4,7 +4,7 @@
  * @module interval/integrate
  */
 
-import { add, mul, negate, sub } from './arithmetic.js';
+import { add, mul, sub } from './arithmetic.js';
 import type { Interval, IntervalResult } from './types.js';
 import { ok, point, unwrapOrPropagate } from './util.js';
 
@@ -101,8 +101,7 @@ function budgetedIntegrand(
   f: (t: Interval) => Interval | IntervalResult
 ): (t: Interval) => Interval | IntervalResult {
   return (t) => {
-    if (activeIntegrals > 1 && --nestedEvalsLeft < 0)
-      return { kind: 'entire' };
+    if (activeIntegrals > 1 && --nestedEvalsLeft < 0) return { kind: 'entire' };
     return f(t);
   };
 }
@@ -293,21 +292,6 @@ function bracket(
     if (ended !== undefined) return ended;
   }
   return acc;
-}
-
-/**
- * Negate an integral's enclosure, preserving the `partial` marker that
- * `negate()` — like every `_IA` arithmetic operation — collapses to a plain
- * `interval`.
- */
-function flipSign(r: IntervalResult): IntervalResult {
-  if (r.kind === 'partial')
-    return {
-      kind: 'partial',
-      value: { lo: -r.value.hi, hi: -r.value.lo },
-      domainClipped: r.domainClipped,
-    };
-  return negate(r);
 }
 
 /**

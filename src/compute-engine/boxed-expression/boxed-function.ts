@@ -3843,7 +3843,11 @@ export class BoxedFunction
       // non-strict engines (O8 — `strict: false` opts out of argument
       // checking as such).
       //
-      if (this.engine.strict && def.lazy !== true && def.evaluate !== undefined) {
+      if (
+        this.engine.strict &&
+        def.lazy !== true &&
+        def.evaluate !== undefined
+      ) {
         const nonconforming = genericRuntimeConformance(this.engine, def, tail);
         if (nonconforming !== undefined) return nonconforming;
       }
@@ -3872,7 +3876,12 @@ export class BoxedFunction
           expression: this,
         });
       } catch (e) {
-        evalResult = handlerThrowToErrorValue(this.engine, e, def, this._operator);
+        evalResult = handlerThrowToErrorValue(
+          this.engine,
+          e,
+          def,
+          this._operator
+        );
       } finally {
         if (isScoped) this.engine._popEvalContext();
       }
@@ -4962,9 +4971,7 @@ function type(expr: BoxedFunction): Type {
       // the stripped bases is still an upper bound. Without the projection a
       // ranged operand silently disabled the narrowing (its type is no
       // longer a primitive string).
-      const argTypes = expr.ops.map((op) =>
-        stripNumericRanges(op.type.type)
-      );
+      const argTypes = expr.ops.map((op) => stripNumericRanges(op.type.type));
       if (
         expr.ops.every((op) => op.isFinite === true) &&
         argTypes.every(
@@ -6599,4 +6606,3 @@ function materialize(
 
   return expr.engine.function('Set', [...materialized]);
 }
-

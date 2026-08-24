@@ -6,13 +6,11 @@ import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
 import {
   collectionElementType,
   nonNegativeRangeType,
-  positiveRangeType,
   signOfType,
   widen,
 } from '../../common/type/utils.js';
 import {
   negativeSign,
-  nonNegativeSign,
   nonPositiveSign,
   positiveSign,
 } from '../boxed-expression/sgn.js';
@@ -130,9 +128,7 @@ function logType(ops: ReadonlyArray<Expression>): Type {
   if (provablyNonFiniteNumber(x)) return 'number';
   const xSgn = operandSgn(x);
   const usableBase = (b: Expression): boolean =>
-    positiveSign(operandSgn(b)) === true &&
-    b.isFinite === true &&
-    !b.isSame(1);
+    positiveSign(operandSgn(b)) === true && b.isFinite === true && !b.isSame(1);
   // A provably-zero argument is the log pole, with a *provably* ±∞ value:
   // `ln(0) = −∞`, and `log_b(0) = ∓∞` for any valid base (positive, finite,
   // ≠ 1). Per the non-finite typing convention this provable case claims
