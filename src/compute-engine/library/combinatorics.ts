@@ -2,11 +2,23 @@ import {
   toBigint,
   toInteger,
   toIntegerOperand,
-  provablyNonFiniteNumber,
 } from '../boxed-expression/numerics.js';
-import type { Expression, SymbolDefinitions } from '../global-types.js';
+import type {
+  Expression,
+  OperandDescriptor,
+  SymbolDefinitions,
+} from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import {
+  negativeSign,
+  nonNegativeSign,
+} from '../boxed-expression/sgn.js';
+import {
+  operandNonFiniteNumber,
+  operandSgn,
+} from './type-handlers-types.js';
 import { apply2 } from '../boxed-expression/apply.js';
 import { gamma, bigGamma, gammaln } from '../numerics/special-functions.js';
 import { checkDeadline } from '../../common/interruptible.js';
@@ -131,24 +143,31 @@ function binomialBigint(
  * arguments, nothing narrower than `number` is sound (`Binomial(∞, 2)` is
  * NaN).
  */
-// Not yet converted to the `'types'` handler shape: the `n.isNegative`
-// read below widens the claim to `number` on the Γ pole (negative integer
-// `n`, non-integer `k`), and on a compound operand that proof can come
-// from an operator `sgn` handler (`Sign(p)`, a `Divide` whose sign
-// recurses through its operands). Descriptors carry an application's
-// handler-proven sign (open item O7 of
-// `docs/plans/2026-08-22-type-handlers-on-types.md`), so nothing blocks
-// the conversion beyond it not being done yet; it needs its own twin
-// battery, and the plan doc's §5.3 status tracks it.
+// The `negativeSign` read below widens the claim to `number` on the Γ pole
+// (negative integer `n`, non-integer `k`). On a compound operand that
+// negative sign is an operator `sgn` handler's to prove (`Sign(p)`, a
+// `Divide` whose sign recurses through its operands), and the descriptor's
+// sign fact carries it (open item O7 of
+// `docs/plans/2026-08-22-type-handlers-on-types.md`).
 function binomialType(
-  n: Expression | undefined,
-  k: Expression | undefined
+  n: OperandDescriptor | undefined,
+  k: OperandDescriptor | undefined
 ): Type {
-  if (!n || !k || n.isNaN || k.isNaN) return 'number';
-  if (provablyNonFiniteNumber(n) || provablyNonFiniteNumber(k)) return 'number';
-  if (n.isInteger === true && k.isInteger === true) return 'finite_integer';
-  if (n.isReal === true && k.isReal === true) {
-    if (n.isInteger === true && n.isNegative === true) return 'number';
+  // A NaN operand is caught by the non-finiteness fact (`finite === false`),
+  // and answers the same `number` the dedicated NaN test gave.
+  if (!n || !k) return 'number';
+  if (operandNonFiniteNumber(n) || operandNonFiniteNumber(k)) return 'number';
+  if (
+    typeFact(n.type, 'integer') === true &&
+    typeFact(k.type, 'integer') === true
+  )
+    return 'finite_integer';
+  if (typeFact(n.type, 'real') === true && typeFact(k.type, 'real') === true) {
+    if (
+      typeFact(n.type, 'integer') === true &&
+      negativeSign(operandSgn(n)) === true
+    )
+      return 'number';
     return 'finite_real';
   }
   return 'number';
@@ -294,6 +313,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Binomial coefficient: number of ways to choose k items from n. Agrees with Binomial for all defined values.',
       complexity: 1200,
       signature: '(n:number, m:number) -> number',
+      typeHandlerKind: 'types',
       type: ([n, k]) => binomialType(n, k),
 
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
@@ -352,6 +372,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // into an Error() at canonicalization time, before `evaluate` ever
       // ran. Binomial is well-defined (via Gamma) for real n, k.
       signature: '(number, number) -> number',
+      typeHandlerKind: 'types',
       type: ([n, k]) => binomialType(n, k),
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
         evaluateBinomial(n, k, numericApproximation, ce),
@@ -364,18 +385,24 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // (a)_k with a provably non-negative integer k is a finite product of
       // k terms: integer for integer a, real for real a. Any other k reaches
       // the Γ-ratio continuation, which can hit poles (→ `~oo`) or complex
-      // values.
-      // Kept on the expressions shape for the same reason as `binomialType`
-      // above: the `isNonNegative` gate can be proven by an operator `sgn`
-      // handler on a compound operand, a channel descriptors do not carry.
+      // values. The `nonNegativeSign` gate can be proven by an operator
+      // `sgn` handler on a compound operand — a proof the descriptor's sign
+      // fact carries (open item O7 of
+      // `docs/plans/2026-08-22-type-handlers-on-types.md`). A NaN operand is
+      // caught by the non-finiteness fact (`finite === false`), answering
+      // the same `number` the dedicated NaN test gave.
+      typeHandlerKind: 'types',
       type: ([a, k]) => {
-        if (!a || !k || a.isNaN || k.isNaN) return 'number';
-        if (provablyNonFiniteNumber(a) || provablyNonFiniteNumber(k))
+        if (!a || !k) return 'number';
+        if (operandNonFiniteNumber(a) || operandNonFiniteNumber(k))
           return 'number';
-        if (k.isInteger === true && k.isNonNegative === true) {
-          if (a.isInteger === true) return 'finite_integer';
-          if (a.isRational === true) return 'finite_rational';
-          if (a.isReal === true) return 'finite_real';
+        if (
+          typeFact(k.type, 'integer') === true &&
+          nonNegativeSign(operandSgn(k)) === true
+        ) {
+          if (typeFact(a.type, 'integer') === true) return 'finite_integer';
+          if (typeFact(a.type, 'rational') === true) return 'finite_rational';
+          if (typeFact(a.type, 'real') === true) return 'finite_real';
         }
         return 'number';
       },

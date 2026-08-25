@@ -4954,6 +4954,13 @@ function type(expr: BoxedFunction): Type {
       // handler's input, and a child operand's own type derivation during
       // `describe` must not be attributed to this handler.
       let calculatedType: Type | TypeString | BoxedType | undefined;
+      // Set when a missing-strip actually replaced an operand's type in the
+      // descriptors: the shadow parity check below must then be skipped —
+      // the two shapes are fed DIFFERENT inputs by design (`'types'` gets
+      // the stripped `integer`, the legacy expressions shape reads the raw
+      // `integer | missing` operand), so a divergence there reports the
+      // §3.A strip contract, not a translation defect.
+      let missingStripApplied = false;
       if (def.typeHandlerKind === 'types') {
         const strippedFor = (i: number) => {
           if (def.resolvedMissingBehavior !== 'propagate') return undefined;
@@ -4968,6 +4975,7 @@ function type(expr: BoxedFunction): Type {
           // machinery downstream owns the absent case; the strip applies
           // only to genuine unions (`integer | missing` → `integer`).
           if (stripped === 'never') return undefined;
+          if (stripped !== undefined) missingStripApplied = true;
           return stripped;
         };
         const descriptors = expr.ops.map((x, i) =>
@@ -4989,12 +4997,16 @@ function type(expr: BoxedFunction): Type {
       // Differential parity for the migration: while a converted operator's
       // legacy handler is installed in the test-only shadow registry, both
       // shapes run and a divergence throws. No-op (one Map.size read) when
-      // the registry is empty — every run outside a parity suite.
+      // the registry is empty — every run outside a parity suite. Skipped
+      // when a missing-strip replaced an operand's descriptor type (see
+      // `missingStripApplied` above): the shapes then read different inputs
+      // by design and their answers legitimately differ before the
+      // downstream absence absorption reconciles them.
       // @fixme Temporary migration apparatus — MUST be removed when the
       // expressions handler shape is retired; the shadow registry's doc
       // comment (`_legacyTypeHandlerShadow`, operand-descriptor.ts) lists
       // every piece to delete with it.
-      if (def.typeHandlerKind === 'types')
+      if (def.typeHandlerKind === 'types' && !missingStripApplied)
         checkShadowTypeParity(
           expr.engine,
           expr.operator,

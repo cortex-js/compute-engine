@@ -470,7 +470,8 @@ function logType(ops: ReadonlyArray<OperandDescriptor>): Type {
   // applications (open item O7 of
   // `docs/plans/2026-08-22-type-handlers-on-types.md`); the divergence
   // table in `test/compute-engine/type-handler-twins.test.ts` is empty, so
-  // `Ln`/`Log`/`Lb`/`Lg`/`Log2`/`Log10` can be wired when they convert.
+  // `Ln` and `Log` are wired to this handler (`Lb`/`Lg`/`Log2`/`Log10`
+  // canonicalize to `Log` and have no type handler of their own).
   if (positiveSign(xSgn) === false && negativeSign(xSgn) !== true)
     return 'number';
   if (base && !usableBase(base)) return 'number';
@@ -813,7 +814,9 @@ function arctanType(ops: ReadonlyArray<OperandDescriptor>): Type {
  * `docs/plans/2026-08-22-type-handlers-on-types.md`); the divergence
  * table in `test/compute-engine/type-handler-twins.test.ts` is empty, so
  * the Γ-family operators (`Gamma`, `GammaLn`, `Digamma`, `Trigamma`,
- * `PolyGamma`) can be wired when they convert.
+ * `PolyGamma`) are wired to it (`PolyGamma` gates inline on its second
+ * operand and falls back to `numericTypeHandler`, mirroring its legacy
+ * shape).
  */
 export function gammaPoleType(x: OperandDescriptor | undefined): Type {
   if (!x) return 'number';

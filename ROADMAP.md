@@ -493,9 +493,12 @@ at the plan doc's O7 open item): the `sgn` handler family is certified
 pure (the two evaluating handlers, `Random` and `Count`, were rewritten
 against literal-only readers), `describe()` now consults the handlers for
 applications, and every recorded sign-channel divergence in
-`type-handler-twins.test.ts` closed — the trio, the Γ family,
-`Factorial`/`Factorial2`, the log heads and `Cot`/`Csc`/`Coth`/`Csch`
-are unblocked and convert in later batches. The `typeFact` helper (three-valued
+`type-handler-twins.test.ts` closed. The once-held heads have since
+converted (2026-08-25, sixteen operators: the trio, the Γ family,
+`PolyGamma`, `Factorial`/`Factorial2`, `Ln`/`Log` and
+`Cot`/`Csc`/`Coth`/`Csch`), with their legacy handlers frozen in the
+shadow fixture and sign-channel witnesses in the parity corpus; the plan
+doc's §5.3 status has the batch record. The `typeFact` helper (three-valued
 `isInteger`/`isReal` replacement) shipped with the batch, and
 `describe()`'s `finite` fact now reads a held number value, so a
 wide-typed symbol holding `±∞`/`NaN` answers `finite: false`.

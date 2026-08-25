@@ -1685,11 +1685,21 @@ type?: (
    costs. The temporary `CE_DESCRIBE_CONTRACT_ONLY` gate that measured it
    is deleted.
 
+   **The once-O7-blocked heads converted 2026-08-25** — sixteen
+   operators, the first batch enabled by the O7 audit: `Cot`, `Csc`,
+   `Coth`, `Csch` (the `trigFunction` factory's `'types'` parameter),
+   `Ln`, `Log` (the twin `elementaryFunctionType`), `Gamma` (both
+   arities), `GammaLn`, `Digamma`, `Trigamma` (the twin `gammaPoleType`),
+   `PolyGamma`, `Factorial`, `Factorial2` (inline descriptor handlers
+   mirroring their legacy branches through `typeFact` and the twin
+   `operandSgn`), and `Binomial`, `Choose`, `Pochhammer`
+   (`binomialType` rewritten over descriptors). Their legacy handlers
+   are frozen verbatim in the shadow fixture, with a corpus block whose
+   compound witnesses (`-⌊|r|⌋` non-positive, `-(⌊|r|⌋+1)` strictly
+   negative) drive the sign-channel gates on both shapes.
+
    Still to convert: the structure-bound control-structure/core
-   handlers, the collection files, the once-O7-blocked heads (`Cot`,
-   `Csc`, `Coth`, `Csch`, the `Binomial`/`Choose`/`Pochhammer` trio, the
-   Γ family, `Factorial`, and the log heads — unblocked by the O7 audit,
-   2026-08-24, see the O7 open item), and the bounded inverse trig heads
+   handlers, the collection files, and the bounded inverse trig heads
    whose declared-range divergences are listed with the twins above (a
    different stronger channel, NOT lifted by O7); the seven impure
    handlers stay with §5.4. Every handler still on the expressions shape
@@ -1846,7 +1856,7 @@ excludes. `isSame(0)`/`isSame(1)` are `false` on anything but a literal.
 
 | Consumers | What the read decides |
 | --- | --- |
-| `numericTypeHandler` (about 30 operators: the circular and hyperbolic functions, `Fract`, `LambertW`, the four Bessel and four Airy functions, `ElementMax`/`ElementMin`, `Clamp`, `Degrees`, `DMS`, `Arctan2`, `Haversine`, the hypergeometric family, `AppellF1`, two-argument `Gamma` — but see below) | A provably non-finite operand widens the result to `number` (`Sin(+∞)` is NaN); otherwise `finite_real` / `finite_number`. `Gamma` is listed for its two-argument arm only, and that arm cannot be converted on its own: the same handler dispatches arity 1 to `gammaPoleType`, whose sign gate was O7-blocked (unblocked by the O7 audit, 2026-08-24), so the whole `Gamma` definition converts together in a later batch. |
+| `numericTypeHandler` (about 30 operators: the circular and hyperbolic functions, `Fract`, `LambertW`, the four Bessel and four Airy functions, `ElementMax`/`ElementMin`, `Clamp`, `Degrees`, `DMS`, `Arctan2`, `Haversine`, the hypergeometric family, `AppellF1`, two-argument `Gamma` — but see below) | A provably non-finite operand widens the result to `number` (`Sin(+∞)` is NaN); otherwise `finite_real` / `finite_number`. `Gamma` is listed for its two-argument arm only; the whole `Gamma` definition (both arities) converted together once the O7 audit unblocked `gammaPoleType`'s sign gate. |
 | `logType` (`Ln`, `Log`, `Lb`, `Lg`), `poleReciprocalType` (`Tan`, `Sec`, `Csc`, `Cot`, `Coth`, `Csch`), `boundedInverseTrigType` (`Arcsin`, `Arccos`, `Arcsec`, `Arccsc`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`, `Arcosh`, `EllipticK`, one-argument `EllipticE`, `InverseHaversine`), `arctanType`, `Sinh`/`Cosh`/`Tanh`/`Sech`, `gammaPoleType`, `roundingFunctionType` (`Round`, `Ceil`, `Floor`, `Truncate`), `Abs` | Pole, `±∞` and NaN handling: `Round(+∞)` is `non_finite_number`, `Coth(+∞)` is `finite_real`, `\|NaN\|` is `number` (the only `Abs` read). |
 | `Add`, `Multiply`, `Divide`, `Power`, `Root`, `Sqrt` | `x + ∞` with `x: real` is `non_finite_number`; `∞ + (−∞)` is `number`; `2/∞` is `finite_integer`; `∞^2` is `non_finite_number`. |
 | `Erf`, `Erfc`, `Erfi`, `ErfInv`, `SinIntegral`, `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `ExpIntegralEi`, `EllipticE` (two-argument), `EllipticF`, `EllipticPi`, `AGM`, `Choose`/`Binomial`, `Pochhammer` | Any non-finite operand widens to `number`. |

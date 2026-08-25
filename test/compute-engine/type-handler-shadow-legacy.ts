@@ -39,6 +39,8 @@ import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 import {
   negativeSign,
+  nonNegativeSign,
+  nonPositiveSign,
   positiveSign,
 } from '../../src/compute-engine/boxed-expression/sgn';
 import {
@@ -168,6 +170,53 @@ function frozenNumericTypeHandler(ops: ReadonlyArray<Expression>): Type {
   return 'finite_number';
 }
 
+/** Frozen copy of `binomialType` (library/combinatorics.ts). */
+function frozenBinomialType(
+  n: Expression | undefined,
+  k: Expression | undefined
+): Type {
+  if (!n || !k || n.isNaN || k.isNaN) return 'number';
+  if (frozenProvablyNonFiniteNumber(n) || frozenProvablyNonFiniteNumber(k))
+    return 'number';
+  if (n.isInteger === true && k.isInteger === true) return 'finite_integer';
+  if (n.isReal === true && k.isReal === true) {
+    if (n.isInteger === true && n.isNegative === true) return 'number';
+    return 'finite_real';
+  }
+  return 'number';
+}
+
+/** Frozen copy of `logType` (library/type-handlers.ts). */
+function frozenLogType(ops: ReadonlyArray<Expression>): Type {
+  const x = ops[0];
+  const base = ops[1];
+  if (!x || x.isNaN) return 'number';
+  if (frozenProvablyNonFiniteNumber(x)) return 'number';
+  const xSgn = frozenOperandSgn(x);
+  const usableBase = (b: Expression): boolean =>
+    positiveSign(frozenOperandSgn(b)) === true &&
+    b.isFinite === true &&
+    !b.isSame(1);
+  if (x.isSame(0)) {
+    if (base === undefined || usableBase(base)) return 'non_finite_number';
+    return 'number';
+  }
+  if (positiveSign(xSgn) === false && negativeSign(xSgn) !== true)
+    return 'number';
+  if (base && !usableBase(base)) return 'number';
+  if (negativeSign(xSgn) === true) return 'finite_complex';
+  if (positiveSign(xSgn) === true) return 'finite_real';
+  return x.type.matches('complex') ? 'complex' : 'number';
+}
+
+/** Frozen copy of `gammaPoleType` (library/type-handlers.ts). */
+function frozenGammaPoleType(x: Expression | undefined): Type {
+  if (!x || x.isNaN) return 'number';
+  if (x.isInteger === true && nonPositiveSign(frozenOperandSgn(x)) === true)
+    return 'number';
+  return frozenNumericTypeHandler([x]);
+}
+
 /** Frozen copy of `poleReciprocalType` (library/type-handlers.ts). */
 function frozenPoleReciprocalType(
   operator: string,
@@ -281,21 +330,19 @@ function frozenQuotientRingType(ops: ReadonlyArray<Expression>): Type {
  * Frozen copy of `elementaryFunctionType` (library/type-handlers.ts),
  * restricted to the arms the converted heads can reach.
  *
- * The heads registered in this fixture are `Arctan` plus the ten converted
- * `trigFunction` factory heads Sin, Cos, Tan, Arsinh, Cosh, Sec, Sinh, Sech,
- * Tanh and Arccot. (`Cot`, `Csc`, `Coth` and `Csch` are `trigFunction` heads
- * too, but they are deliberately held back from conversion and so have no
- * entry here — see the registry comment on the factory heads below.) Between
- * them the registered heads reach four arms: the pole-reciprocal arm (Tan
- * and Sec, the only registered heads that reach it), the arctan arm
- * (Arctan, Arccot), the inline hyperbolic arms (Sinh, Cosh, Tanh, Sech), and
- * the `numericTypeHandler` default (Sin, Cos, Arsinh). The logarithm and
- * bounded-inverse-trig arms are therefore unreachable from this fixture, and
- * they throw rather than being copied: those heads have documented channel
- * divergences that block their conversion (see the `elementaryFunctionType`
- * blocks of `type-handler-twins.test.ts`), so a call reaching one of these
- * stubs means an entry was added for a head that must not have converted,
- * and failing loudly is the right answer.
+ * The heads registered in this fixture are `Arctan`, `Ln`, `Log`, and the
+ * fourteen converted `trigFunction` factory heads (Sin, Cos, Tan, Arsinh,
+ * Cosh, Sec, Sinh, Sech, Tanh, Arccot, Cot, Csc, Coth, Csch). Between them
+ * they reach five arms: the pole-reciprocal arm (Tan, Sec, Csc, Cot, Coth,
+ * Csch), the logarithm arm (Ln, Log → `frozenLogType`), the arctan arm
+ * (Arctan, Arccot), the inline hyperbolic arms (Sinh, Cosh, Tanh, Sech),
+ * and the `numericTypeHandler` default (Sin, Cos, Arsinh). Only the
+ * bounded-inverse-trig arm is unreachable, and it throws rather than being
+ * copied: those nine heads have a documented declared-range divergence that
+ * blocks their conversion (see the `elementaryFunctionType` blocks of
+ * `type-handler-twins.test.ts`), so a call reaching the stub means an entry
+ * was added for a head that must not have converted, and failing loudly is
+ * the right answer.
  */
 function frozenElementaryFunctionType(
   operator: string,
@@ -308,9 +355,7 @@ function frozenElementaryFunctionType(
     case 'Lg':
     case 'Log2':
     case 'Log10':
-      throw new Error(
-        `unreachable in shadow: the log head '${operator}' has not converted`
-      );
+      return frozenLogType(ops);
 
     case 'Tan':
     case 'Sec':
@@ -380,13 +425,60 @@ export const LEGACY_TYPE_HANDLERS: Record<
   DigitCount: ([, , digit]) =>
     digit !== undefined ? 'finite_integer' : 'list',
 
-  // `Binomial`/`Choose`/`Pochhammer` are deliberately NOT here: they stay
-  // on the expressions shape until the audited sign channel for function
-  // expressions lands (open item O7 of the plan doc) — their negative/
-  // non-negative gates can be proven by operator `sgn` handlers on compound
-  // operands, a channel descriptors do not carry, and converting would
-  // narrow their pole claims. See the note on `binomialType` in
-  // `library/combinatorics.ts`.
+  // From library/combinatorics.ts, pre-conversion (commit 68238141) — the
+  // once-O7-held trio, converted after the sign channel reached function
+  // applications (open item O7 of the plan doc). `frozenBinomialType` below
+  // is the verbatim legacy `binomialType`.
+  Binomial: ([n, k]) => frozenBinomialType(n, k),
+  Choose: ([n, k]) => frozenBinomialType(n, k),
+  Pochhammer: ([a, k]) => {
+    if (!a || !k || a.isNaN || k.isNaN) return 'number';
+    if (frozenProvablyNonFiniteNumber(a) || frozenProvablyNonFiniteNumber(k))
+      return 'number';
+    if (k.isInteger === true && k.isNonNegative === true) {
+      if (a.isInteger === true) return 'finite_integer';
+      if (a.isRational === true) return 'finite_rational';
+      if (a.isReal === true) return 'finite_real';
+    }
+    return 'number';
+  },
+
+  // From library/arithmetic.ts, pre-conversion (commit 68238141) — the
+  // once-O7-held Γ family, factorials and log heads.
+  Gamma: (ops) =>
+    ops.length === 1
+      ? frozenGammaPoleType(ops[0])
+      : frozenNumericTypeHandler(ops),
+  GammaLn: (ops) => frozenGammaPoleType(ops[0]),
+  Digamma: (ops) => frozenGammaPoleType(ops[0]),
+  Trigamma: (ops) => frozenGammaPoleType(ops[0]),
+  PolyGamma: ([n, x]) =>
+    x?.isInteger === true && nonPositiveSign(frozenOperandSgn(x)) === true
+      ? 'number'
+      : frozenNumericTypeHandler([n, x]),
+  Factorial: ([x]) => {
+    const s = x ? frozenOperandSgn(x) : undefined;
+    if (x?.isInteger === true && nonNegativeSign(s) === true)
+      return 'finite_integer';
+    if (x?.isInteger === true && negativeSign(s) === true) return 'number';
+    return frozenNumericTypeHandler([x]);
+  },
+  Factorial2: ([x]) => {
+    const s = x ? frozenOperandSgn(x) : undefined;
+    if (x?.isInteger === true && nonNegativeSign(s) === true)
+      return 'finite_integer';
+    if (x?.isInteger === true && negativeSign(s) === true) return 'number';
+    return frozenNumericTypeHandler([x]);
+  },
+  Ln: (ops) => frozenElementaryFunctionType('Ln', ops),
+  Log: (ops) => frozenElementaryFunctionType('Log', ops),
+
+  // From library/trigonometry.ts, pre-conversion (commit 68238141) — the
+  // four zero-pole reciprocal heads, whose pole disproof rides the sign.
+  Cot: (ops) => frozenElementaryFunctionType('Cot', ops),
+  Csc: (ops) => frozenElementaryFunctionType('Csc', ops),
+  Coth: (ops) => frozenElementaryFunctionType('Coth', ops),
+  Csch: (ops) => frozenElementaryFunctionType('Csch', ops),
 
   // From library/control-structures.ts, pre-conversion (commit a1587fbe).
   Block: (args) => {
@@ -442,19 +534,14 @@ export const LEGACY_TYPE_HANDLERS: Record<
   Arctan2: (ops) => frozenNumericTypeHandler(ops),
   Haversine: (ops) => frozenNumericTypeHandler(ops),
   Arctan: (ops) => frozenElementaryFunctionType('Arctan', ops),
-  // The ten converted heads built by the `trigFunction` factory, whose shared
-  // handler is `elementaryFunctionType(operator, ops)` with the factory's own
-  // operator name closed over. The remaining factory heads have NOT
-  // converted and are deliberately absent here: the nine bounded inverse
-  // heads (declared-range divergences — see the stub arms above), and
-  // `Cot`/`Csc`/`Coth`/`Csch`, whose `poleReciprocalType` arm disproves the
-  // pole at 0 through the operand's SIGN — for a compound operand that sign
-  // is an operator `sgn` handler's to prove, the channel descriptors do not
-  // carry (open item O7 of the plan doc). An A/B probe measured the
-  // divergence (`Coth(π/2)`: legacy `finite_real`, twin `number` — pinned in
-  // `type-handler-audit.test.ts`), so they hold with the Γ-family and
-  // `Factorial` pair. `Tan`/`Sec` ARE equal: their poles are all irrational,
-  // so the arm returns before it ever reads a sign.
+  // The converted heads built by the `trigFunction` factory, whose shared
+  // handler is `elementaryFunctionType(operator, ops)` with the factory's
+  // own operator name closed over. `Cot`/`Csc`/`Coth`/`Csch` converted with
+  // the once-O7-held batch, after the descriptor's sign fact began carrying
+  // an application's operator-`sgn` proof (open item O7 of the plan doc) —
+  // their `poleReciprocalType` arm disproves the pole at 0 through that
+  // sign. The only factory heads still absent are the nine bounded inverse
+  // heads (declared-range divergences — see the stub arm above).
   Sin: (ops) => frozenElementaryFunctionType('Sin', ops),
   Cos: (ops) => frozenElementaryFunctionType('Cos', ops),
   Tan: (ops) => frozenElementaryFunctionType('Tan', ops),

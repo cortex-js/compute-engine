@@ -529,9 +529,19 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       keywords: ['hyperbolic cosine'],
     },
 
-    Cot: trigFunction('Cot', 5600, 'Cotangent, the reciprocal of tangent.'),
+    Cot: trigFunction(
+      'Cot',
+      5600,
+      'Cotangent, the reciprocal of tangent.',
+      'types'
+    ),
 
-    Csc: trigFunction('Csc', 5600, 'Cosecant, the reciprocal of sine.'),
+    Csc: trigFunction(
+      'Csc',
+      5600,
+      'Cosecant, the reciprocal of sine.',
+      'types'
+    ),
 
     Sec: trigFunction(
       'Sec',
@@ -589,7 +599,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Csch: trigFunction(
       'Csch',
       6200,
-      'Hyperbolic cosecant, the reciprocal of hyperbolic sine.'
+      'Hyperbolic cosecant, the reciprocal of hyperbolic sine.',
+      'types'
     ),
 
     Sech: trigFunction(
@@ -654,7 +665,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Coth: trigFunction(
       'Coth',
       6300,
-      'Hyperbolic cotangent, the reciprocal of hyperbolic tangent.'
+      'Hyperbolic cotangent, the reciprocal of hyperbolic tangent.',
+      'types'
     ),
 
     //
@@ -1057,15 +1069,13 @@ function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
  *   `Tan` and `Sec` are the two pole-reciprocal heads whose poles are all
  *   irrational (the odd multiples of π/2), so their handler returns before it
  *   ever reads a sign — which is what keeps them equal.
- * - `Cot`, `Csc`, `Coth` and `Csch` stay on the expressions shape. Their poles
- *   include 0, so the handler must disprove zero-ness through the operand's
- *   SIGN, and for a compound operand (`2p` with `p` assumed positive, `p + 1`,
- *   `Sign(p)`, `π/2`) that sign is an operator `sgn` handler's to prove.
- *   Descriptors carry that sign — `describe()` consults the (pure) operator
- *   `sgn` handlers for applications (open item O7 of
- *   `docs/plans/2026-08-22-type-handlers-on-types.md`) — so nothing blocks
- *   the conversion of these four heads beyond it not being done yet; each
- *   needs its own twin battery, and the plan doc's §5.3 status tracks it.
+ * - `Cot`, `Csc`, `Coth` and `Csch` also pass `'types'`. Their poles include
+ *   0, so the handler must disprove zero-ness through the operand's SIGN —
+ *   for a compound operand (`2p` with `p` assumed positive, `p + 1`,
+ *   `Sign(p)`, `π/2`) a proof only an operator `sgn` handler can give. The
+ *   descriptor's sign fact carries it: `describe()` consults the (pure)
+ *   operator `sgn` handlers for applications (open item O7 of
+ *   `docs/plans/2026-08-22-type-handlers-on-types.md`).
  * - The nine heads routed to `boundedInverseTrigType` (`Arcsin`, `Arccos`,
  *   `Arcsec`, `Arccsc`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`, `Arcosh`) stay
  *   on the expressions shape for a different reason. Their in-domain proof

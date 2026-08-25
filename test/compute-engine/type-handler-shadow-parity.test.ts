@@ -387,6 +387,101 @@ describe('shadow parity over the converted handlers', () => {
       ['EllipticF', ['Abs', 'w'], 1],
     ];
 
+    // --- the once-O7-held heads: sign-channel pole and domain gates ---
+    // Their gates read an operand's SIGN, which for a compound operand only
+    // an operator `sgn` handler proves — the channel the O7 audit opened to
+    // descriptors. Two compound witnesses drive that channel: a provably
+    // NON-POSITIVE integer application (`-⌊|r|⌋` — fires the Γ-pole and
+    // log-non-positive gates) and a provably NEGATIVE one (`-(⌊|r|⌋+1)` —
+    // fires the factorial/binomial pole gates, which need strict
+    // negativity). The scalar classes mirror the twins battery: literals on
+    // and off the poles, assumed and range-declared symbols, held ±∞/NaN,
+    // `~oo`-adjacent operands, and a non-real literal.
+    const NONPOS_INT = ['Negate', ['Floor', ['Abs', 'r']]];
+    const NEG_INT = ['Negate', ['Add', ['Floor', ['Abs', 'r']], 1]];
+    corpus.push(
+      ['Factorial', 5],
+      ['Factorial', -3],
+      ['Factorial', ['Rational', -1, 2]],
+      ['Factorial', 'x'],
+      ['Factorial', 's'],
+      ['Factorial', NEG_INT],
+      ['Factorial', NONPOS_INT],
+      ['Factorial', 'hnan'],
+      ['Factorial', 'w'],
+      ['Factorial', 'ImaginaryUnit'],
+      ['Factorial2', 5],
+      ['Factorial2', -3],
+      ['Factorial2', NEG_INT],
+      ['Factorial2', 'r'],
+      ['Gamma', 2.5],
+      ['Gamma', -3],
+      ['Gamma', 'x'],
+      ['Gamma', 's'],
+      ['Gamma', NONPOS_INT],
+      ['Gamma', 'nf'],
+      ['Gamma', 2, 3],
+      ['Gamma', 's', 'r'],
+      ['GammaLn', 2],
+      ['GammaLn', -2],
+      ['GammaLn', NONPOS_INT],
+      ['GammaLn', 'r'],
+      ['Digamma', 'x'],
+      ['Digamma', NONPOS_INT],
+      ['Digamma', 2.5],
+      ['Trigamma', 'x'],
+      ['Trigamma', NONPOS_INT],
+      ['Trigamma', NaN],
+      ['PolyGamma', 1, 'x'],
+      ['PolyGamma', 1, NONPOS_INT],
+      ['PolyGamma', 2, 0.5],
+      ['Ln', 2],
+      ['Ln', 0],
+      ['Ln', -2],
+      ['Ln', 's'],
+      ['Ln', 'r'],
+      ['Ln', NONPOS_INT],
+      ['Ln', 'hnan'],
+      ['Ln', 'nf'],
+      ['Ln', 'ImaginaryUnit'],
+      ['Log', 8, 2],
+      ['Log', 's', 2],
+      ['Log', 8, 1],
+      ['Log', 8, 0.5],
+      ['Log', 8, -2],
+      ['Log', NONPOS_INT, 2],
+      ['Log', 8, 'r'],
+      ['Log', 0, 2],
+      ['Binomial', 5, 2],
+      ['Binomial', -3, 2],
+      ['Binomial', -3, 0.5],
+      ['Binomial', NEG_INT, 0.5],
+      ['Binomial', NONPOS_INT, 0.5],
+      ['Binomial', 'x', 'x'],
+      ['Binomial', 'r', 'r'],
+      ['Binomial', { num: '+Infinity' }, 2],
+      ['Binomial', 'hnan', 2],
+      ['Choose', 5, 2],
+      ['Choose', NEG_INT, 0.5],
+      ['Pochhammer', 2, 3],
+      ['Pochhammer', 'r', 'x'],
+      ['Pochhammer', 'r', ['Abs', 'x']],
+      ['Pochhammer', ['Rational', 1, 2], 3],
+      ['Pochhammer', 'r', -2],
+      ['Pochhammer', 'w', 2],
+      // A `missing`-union operand at a `propagate` operator: the strip
+      // replaces the descriptor's type (`integer | missing` → `integer`)
+      // while the legacy expressions shape reads the raw operand, so the
+      // two shapes legitimately differ BEFORE the absence absorption and
+      // the parity check skips the derivation (`missingStripApplied` at
+      // the call site). These rows prove the skip: with the shadow
+      // installed, a valid missing-union call must not throw.
+      ['Factorial', 'm'],
+      ['Binomial', 'm', 'm'],
+      ['Ln', 'm'],
+      ['Coth', 'm']
+    );
+
     // The `elementaryFunctionType` heads. They share one dispatcher and
     // differ only in which arm it takes, so the same operand classes are
     // driven through every head rather than being spelled out per head: a
@@ -395,12 +490,10 @@ describe('shadow parity over the converted handlers', () => {
     // sit exactly on a circular pole, and a symbol whose non-finiteness is
     // carried by the type alone.
     //
-    // Eleven of the fifteen have converted. The other four — `Cot`, `Csc`,
-    // `Coth`, `Csch` — are held back (their pole-at-zero disproof rides the
-    // operand's sign, which the descriptor does not carry for a compound
-    // operand), so they have no shadow entry and their rows run no parity
-    // check at all. The rows stay in the list anyway: the day those heads
-    // convert, the proof is already armed and the corpus needs no edit.
+    // All fifteen heads have converted — `Cot`, `Csc`, `Coth` and `Csch`
+    // last, once the descriptor's sign fact began carrying an application's
+    // operator-`sgn` proof (open item O7 of the plan doc) — so every row
+    // below runs a parity check.
     const ELEMENTARY_HEADS = [
       'Arctan',
       'Sin',

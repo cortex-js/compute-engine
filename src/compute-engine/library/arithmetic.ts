@@ -142,8 +142,6 @@ import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import type { Type } from '../../common/type/types.js';
 import {
   numericTypeHandler,
-  elementaryFunctionType,
-  gammaPoleType,
   absFunctionType,
   operandIsEven,
   operandIsOdd,
@@ -160,12 +158,16 @@ import {
 import {
   realOnlyStepType,
   numericTypeHandler as numericTypeHandlerOnTypes,
+  elementaryFunctionType as elementaryFunctionTypeOnTypes,
+  gammaPoleType as gammaPoleTypeOnTypes,
   extremumType as extremumTypeOnTypes,
   roundingFunctionType as roundingFunctionTypeOnTypes,
   measurementType as measurementTypeOnTypes,
   bigOpResultType as bigOpResultTypeOnTypes,
   operandLiteralValue as operandLiteralValueOnTypes,
+  operandSgn as operandSgnOnTypes,
 } from './type-handlers-types.js';
+import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { parseType } from '../../common/type/parse.js';
 
 // The proven-real result claims of the two step functions, parsed once at
@@ -1081,32 +1083,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // invalid while honestly typing `Factorial(1/2)` (= Γ(3/2), a real) and
       // `Factorial(i)` (complex) instead of the unsound `finite_integer`.
       signature: '(number) -> number',
-      // NOT yet converted to the `'types'` handler shape, deliberately: the
-      // negative-integer branch below widens the claim to `number` on the
-      // Γ(x+1) pole, and on a COMPOUND operand that negative sign can come
-      // from an operator `sgn` handler (`Negate(Floor(Abs(r)))`, whose result
-      // type is a bare `finite_integer`) — a channel the operand descriptors
-      // deliberately do not carry, their sign being type-derived only.
-      // The conversion once risked claiming `finite_real` where this
-      // handler proves the pole and answers `number` — a narrower claim,
-      // which is never acceptable (a narrower claim can be an unsound
-      // over-claim, where a wider one only loses precision). Descriptors
-      // now carry an application's handler-proven sign (open item O7 of
-      // `docs/plans/2026-08-22-type-handlers-on-types.md`), so nothing
-      // blocks the conversion of this head — or of `binomialType`
-      // (`library/combinatorics.ts`) and `gammaPoleType`
-      // (`library/type-handlers-types.ts`) — beyond it not being done yet;
-      // the plan doc's §5.3 status tracks it.
+      // The negative-integer branch widens the claim to `number` on the
+      // Γ(x+1) pole. On a compound operand (`Negate(Floor(Abs(r)))`) that
+      // negative sign is an operator `sgn` handler's to prove, and the
+      // descriptor's sign fact carries it (open item O7 of
+      // `docs/plans/2026-08-22-type-handlers-on-types.md`).
+      typeHandlerKind: 'types',
       type: ([x]) => {
-        const s = x ? operandSgn(x) : undefined;
+        const s = x ? operandSgnOnTypes(x) : undefined;
         // A non-negative integer factorial is a (finite) positive integer.
-        if (x?.isInteger === true && nonNegativeSign(s) === true)
+        if (
+          x !== undefined &&
+          typeFact(x.type, 'integer') === true &&
+          nonNegativeSign(s) === true
+        )
           return 'finite_integer';
         // A *negative* integer is a pole of Γ(x+1): the value is `~oo`,
         // representable only by `number` (non-finite typing convention).
-        if (x?.isInteger === true && negativeSign(s) === true) return 'number';
+        if (
+          x !== undefined &&
+          typeFact(x.type, 'integer') === true &&
+          negativeSign(s) === true
+        )
+          return 'number';
         // Otherwise it is Γ(x+1); type it like `Gamma`.
-        return numericTypeHandler([x]);
+        return numericTypeHandlerOnTypes([x]);
       },
 
       // x! = Γ(x+1): positive for x ≥ 0; a pole (~oo) at negative integers.
@@ -1205,18 +1206,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // symbolic rather than erroring — mirror `Factorial`'s signature
       // pattern rather than `(integer) -> integer`.
       signature: '(number) -> number',
-      // Not yet converted to the `'types'` handler shape, for the same reason
-      // as `Factorial` above: the negative-integer branch widens the claim to
-      // `number`, and on a compound operand that negative sign is only an
-      // operator `sgn` handler's to prove. Descriptors carry that sign now
-      // (open item O7 of `docs/plans/2026-08-22-type-handlers-on-types.md`),
-      // so nothing blocks the conversion; it converts alongside `Factorial`.
+      // Same shape as `Factorial` above: the negative-integer branch widens
+      // the claim to `number`, and on a compound operand that negative sign
+      // is an operator `sgn` handler's to prove — carried by the
+      // descriptor's sign fact (open item O7 of
+      // `docs/plans/2026-08-22-type-handlers-on-types.md`).
+      typeHandlerKind: 'types',
       type: ([x]) => {
-        const s = x ? operandSgn(x) : undefined;
-        if (x?.isInteger === true && nonNegativeSign(s) === true)
+        const s = x ? operandSgnOnTypes(x) : undefined;
+        if (
+          x !== undefined &&
+          typeFact(x.type, 'integer') === true &&
+          nonNegativeSign(s) === true
+        )
           return 'finite_integer';
-        if (x?.isInteger === true && negativeSign(s) === true) return 'number';
-        return numericTypeHandler([x]);
+        if (
+          x !== undefined &&
+          typeFact(x.type, 'integer') === true &&
+          negativeSign(s) === true
+        )
+          return 'number';
+        return numericTypeHandlerOnTypes([x]);
       },
       // Positive for x ≥ 0; NaN at negative integers (see evaluate). A
       // negative non-integer stays symbolic (its continuation value can be a
@@ -1322,8 +1332,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number?) -> number',
       // Γ(z) has poles (value `~oo`) at the non-positive integers; the
       // incomplete Γ(s, z) keeps the generic handler.
+      typeHandlerKind: 'types',
       type: (ops) =>
-        ops.length === 1 ? gammaPoleType(ops[0]) : numericTypeHandler(ops),
+        ops.length === 1
+          ? gammaPoleTypeOnTypes(ops[0])
+          : numericTypeHandlerOnTypes(ops),
 
       // Γ is positive on the positive reals; 0 and the negative integers are
       // poles (value ~oo, hence 'unsigned' — NOT 'zero': Γ never vanishes).
@@ -1389,7 +1402,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8000,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => gammaPoleType(ops[0]),
+      typeHandlerKind: 'types',
+      type: (ops) => gammaPoleTypeOnTypes(ops[0]),
 
       evaluate: (ops, { numericApproximation, engine }) => {
         const x = ops[0];
@@ -1418,7 +1432,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => gammaPoleType(ops[0]),
+      typeHandlerKind: 'types',
+      type: (ops) => gammaPoleTypeOnTypes(ops[0]),
       evaluate: ([x], { numericApproximation, engine }) =>
         shouldNumericize(numericApproximation, x)
           ? apply(x, digamma, (x) => bigDigamma(engine, x))
@@ -1433,7 +1448,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8400,
       broadcastable: true,
       signature: '(number) -> number',
-      type: (ops) => gammaPoleType(ops[0]),
+      typeHandlerKind: 'types',
+      type: (ops) => gammaPoleTypeOnTypes(ops[0]),
       evaluate: ([x], { numericApproximation, engine }) =>
         shouldNumericize(numericApproximation, x)
           ? apply(x, trigamma, (x) => bigTrigamma(engine, x))
@@ -1451,10 +1467,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(order: integer, number) -> number',
       // ψⁿ(x) has poles (value `~oo`) at the non-positive integers.
+      typeHandlerKind: 'types',
       type: ([n, x]) =>
-        x?.isInteger === true && nonPositiveSign(operandSgn(x)) === true
+        x !== undefined &&
+        typeFact(x.type, 'integer') === true &&
+        nonPositiveSign(operandSgnOnTypes(x)) === true
           ? 'number'
-          : numericTypeHandler([n, x]),
+          : numericTypeHandlerOnTypes([n, x]),
       evaluate: ([n, x], { numericApproximation, engine }) =>
         shouldNumericize(numericApproximation, n, x)
           ? apply2(
@@ -1727,7 +1746,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number, base: number?) -> number',
-      type: (ops) => elementaryFunctionType('Ln', ops),
+      typeHandlerKind: 'types',
+      type: (ops) => elementaryFunctionTypeOnTypes('Ln', ops),
       sgn: ([x]) => lnSign(x),
       // @fastpath: this doesn't get called. See makeNumericFunction()
       evaluate: ([z], { numericApproximation, engine }) => {
@@ -1768,7 +1788,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number, base: number?) -> number',
-      type: (ops) => elementaryFunctionType('Log', ops),
+      typeHandlerKind: 'types',
+      type: (ops) => elementaryFunctionTypeOnTypes('Log', ops),
 
       sgn: ([x, base]) => {
         if (!base) return lnSign(x);
