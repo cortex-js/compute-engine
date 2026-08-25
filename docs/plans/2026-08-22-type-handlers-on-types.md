@@ -1312,6 +1312,13 @@ type?: (
   `facts.finite` is `true` for a `finite_*` type or a finite literal,
   `false` for a `non_finite_number` type or a `±∞`/`NaN` literal, and
   `undefined` otherwise.
+- `facts.bounds` (added 2026-08-25 with the bounded-inverse conversion)
+  carries a valueless symbol's assumption MAGNITUDE bounds as machine
+  numbers, with their strictness — the one shape of assumption knowledge
+  a ranged type cannot hold, since numeric range types have closed ends
+  only (`assume(0 < v < 1)` refines the type to `real<0..1>`; the strict
+  `< 1` lives only here). Read from the memoized assumption fact index —
+  the same pure source the sign fact consults.
 - For a collection-typed, absent or `unknown`-typed operand the scalar
   facts are `undefined`, and the collection facts are whatever the type
   proves (§5.1).
@@ -1698,12 +1705,43 @@ type?: (
    compound witnesses (`-⌊|r|⌋` non-positive, `-(⌊|r|⌋+1)` strictly
    negative) drive the sign-channel gates on both shapes.
 
+   **The bounded inverse trig heads converted 2026-08-25, BY RULING —
+   the one batch whose conversion changed derived types.** The user
+   ruled (option 1 of the session's plain-language ask) to adopt the
+   descriptor shape's stronger ranged-type channel rather than align
+   the expressions shape first or keep holding: a range from a
+   DECLARATION (`ce.declare('BIG', 'real<2..>')`) or a ranged RESULT
+   type (`Sign(r)`, `Exp(r)`) now proves domain membership the
+   assumptions-reading predicates could not (`Arcosh(BIG)` types
+   `finite_real`, not `number`), and the exact-literal rows with no
+   machine value (`1/3`, `√2`, bigints) widen per the O4
+   rational-literal residue. All nine heads (`Arcsin`, `Arccos`,
+   `Arcsec`, `Arccsc`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`,
+   `Arcosh`) pass `'types'` through the factory; they run NO shadow
+   parity (the shapes differ by design — a parity entry would report
+   the ruling as a defect, and the fixture's bounded-inverse stub arm
+   still throws to keep one from being added); the changed-row record
+   is the `elementaryFunctionType` divergence tables in
+   `type-handler-twins.test.ts`, and the adopted behavior is pinned in
+   `type-handler-parity.test.ts` ("bounded inverse trig heads read
+   ranged types"). Snapshot blast radius on the full suite: ZERO of
+   4,238 snapshots changed. The measurement run did surface two
+   behavior-pin failures (`inverse-trig-domain-type.test.ts`): a
+   two-sided STRICT assumption (`assume(0 < v < 1)`) refines the type
+   only to the closed `real<0..1>` — numeric range types have closed
+   ends — so the twin could not prove membership in `Artanh`'s open
+   domain where the assumption-reading predicates could. Rather than
+   regress that designed behavior (outside what the ruling authorized),
+   descriptors gained a `facts.bounds` fact: the symbol's assumption
+   magnitude bounds as machine numbers WITH their strictness, read from
+   the memoized fact index (a pure source), consulted by the comparison
+   helpers. The two pins pass again; the twins battery's assumed rows
+   agree as before.
+
    Still to convert: the structure-bound control-structure/core
-   handlers, the collection files, and the bounded inverse trig heads
-   whose declared-range divergences are listed with the twins above (a
-   different stronger channel, NOT lifted by O7); the seven impure
-   handlers stay with §5.4. Every handler still on the expressions shape
-   reads its operands.
+   handlers and the collection files; the seven impure handlers stay
+   with §5.4. Every handler still on the expressions shape reads its
+   operands.
 
    | What the handler reads today | What it reads instead | Meaning |
    | --- | --- | --- |

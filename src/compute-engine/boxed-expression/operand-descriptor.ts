@@ -21,6 +21,8 @@ import {
 } from '../../common/type/primitive.js';
 import { signOfType } from '../../common/type/utils.js';
 import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
+import { hasAssumptions } from './constraint-subject.js';
+import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
 import {
   functionLiteralBody,
   functionLiteralParameters,
@@ -242,6 +244,50 @@ export function describe(
   if (isNumber(op) || isSymbol(op) || isFunction(op)) sgn = op.sgn;
   sgn ??= signOfType(type);
 
+  // Assumption MAGNITUDE bounds, with their strictness, for a valueless
+  // symbol — the one shape of assumption knowledge the type cannot carry
+  // (numeric range types have closed ends only, so `assume(0 < v < 1)`
+  // refines the type to `real<0..1>` and the strict `< 1` survives nowhere
+  // but the fact index). Read from the memoized index — a pure source, the
+  // same one the sign read above consults through `BoxedSymbol.sgn`. Only
+  // finite machine-number bounds travel: an exact bound no machine number
+  // represents (`1/3`) reads as no bound here, the same accepted loss as
+  // its absent range.
+  let bounds: OperandFacts['bounds'];
+  if (isSymbol(op) && op.valueDefinition?.value === undefined) {
+    const engine = op.engine;
+    if (hasAssumptions(engine)) {
+      const b = getInequalityBoundsFromAssumptions(engine, op.symbol);
+      // Only an EXACTLY machine-representable bound travels. A rounded
+      // projection can round TOWARD a comparison constant and over-prove:
+      // `assume(v > 1 − 10⁻³⁰)` stores a bignum bound whose `.re` is
+      // exactly 1, and a strict lower bound of 1 would then "prove"
+      // `v > 1` — which the assumption does not give. An inexact bound
+      // reads as no bound, the same accepted loss as `assume(x > 1/3)`.
+      const machine = (x: Expression | undefined): number | undefined => {
+        if (x === undefined || !isNumber(x) || x.im !== 0) return undefined;
+        const re = x.re;
+        if (!Number.isFinite(re)) return undefined;
+        // Exactness via `isSame`, whose number-literal comparison is by
+        // exact value (`1/2` IS the same value as `0.5`): a bound whose
+        // machine projection rounds (an exact `1/3`, a bignum
+        // `1 − 10⁻³⁰`) fails the test and reads as no bound.
+        if (typeof x.numericValue !== 'number' && !x.isSame(engine.number(re)))
+          return undefined;
+        return re;
+      };
+      const lower = machine(b.lower);
+      const upper = machine(b.upper);
+      if (lower !== undefined || upper !== undefined)
+        bounds = {
+          lower,
+          lowerStrict: b.lowerStrict,
+          upper,
+          upperStrict: b.upperStrict,
+        };
+    }
+  }
+
   // No `valid`, `application`, or `inferred` field: an error operand's TYPE
   // is `'error'` (validity is a type read); whether the operand is an
   // application is a structural question (`structureOf()`); and the
@@ -251,6 +297,7 @@ export function describe(
   const facts: OperandFacts = {
     finite,
     sgn,
+    bounds,
     closed: op.isConstant,
     collection,
     finiteCollection,

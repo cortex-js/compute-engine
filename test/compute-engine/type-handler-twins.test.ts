@@ -453,18 +453,24 @@ describe('elementaryFunctionType', () => {
   //      `undefined`. Here the twin proves MORE and its claim is narrower —
   //      sound, but a divergence all the same.
   //  (c) the DECLARED-range rows (`bigd`, `smd`, `twod`) are the second
-  //      mirror case, and the one that matters most for conversion. A range
-  //      that came from a declaration (`ce.declare('bigd', 'real<2..>')`)
-  //      puts a bound in the type and records NOTHING in the assumptions
-  //      system, and the expressions shape's `provablyIn` asks
-  //      `Expression.isGreaterEqual`, which reads the assumptions — so it
-  //      answers `undefined` and widens, while the twin reads the bound off
-  //      the type and decides. The `ce.assume`-ranged rows (`p`, `q`, `t`)
-  //      do NOT diverge, because `ce.assume` refines the type and records
-  //      the assumption, feeding both channels at once. The twin's claims
-  //      here are sound and tighter, but tighter-than-baseline is still a
-  //      shadow divergence: the bounded inverse heads cannot convert until
-  //      the conversion decides what to do with these rows.
+  //      mirror case. A range that came from a declaration
+  //      (`ce.declare('bigd', 'real<2..>')`) puts a bound in the type and
+  //      records NOTHING in the assumptions system, and the expressions
+  //      shape's `provablyIn` asks `Expression.isGreaterEqual`, which reads
+  //      the assumptions — so it answers `undefined` and widens, while the
+  //      twin reads the bound off the type and decides. The
+  //      `ce.assume`-ranged rows (`p`, `q`, `t`) do NOT diverge, because
+  //      `ce.assume` refines the type and records the assumption, feeding
+  //      both channels at once.
+  //
+  // The nine heads converted to the twin WITH these divergences, by ruling
+  // (2026-08-25): the (b)/(c) rows' tighter claims are correct and adopted,
+  // and the (a) rows' wider claims are the accepted rational-literal
+  // residue (ruling O4 of the plan doc). These tables are therefore the
+  // permanent record of what the conversion changed — the live engine
+  // answers the SECOND column of each row — and the heads run no shadow
+  // parity, since the shapes differ by design. The adopted behavior is
+  // pinned directly in `type-handler-parity.test.ts`.
   const ARCSIN_D: Divergences = {
     '1/3': ['finite_real', 'finite_complex'],
     'smd:real<-0.5..0.5>': ['finite_complex', 'finite_real'],

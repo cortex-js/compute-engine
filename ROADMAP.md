@@ -498,7 +498,15 @@ converted (2026-08-25, sixteen operators: the trio, the Γ family,
 `PolyGamma`, `Factorial`/`Factorial2`, `Ln`/`Log` and
 `Cot`/`Csc`/`Coth`/`Csch`), with their legacy handlers frozen in the
 shadow fixture and sign-channel witnesses in the parity corpus; the plan
-doc's §5.3 status has the batch record. The `typeFact` helper (three-valued
+doc's §5.3 status has the batch record. The nine bounded inverse trig
+heads followed (2026-08-25, by ruling): their conversion ADOPTS the
+descriptor shape's stronger ranged-type channel — a declared range or a
+ranged result type now proves domain membership (`Arcosh(BIG)` with
+`BIG: real<2..>` types `finite_real`), while exact literals with no
+machine value widen per the accepted rational-literal residue — so they
+run no shadow parity, and the changed rows are recorded in the twins
+divergence tables and pinned in `type-handler-parity.test.ts`. The
+`typeFact` helper (three-valued
 `isInteger`/`isReal` replacement) shipped with the batch, and
 `describe()`'s `finite` fact now reads a held number value, so a
 wide-typed symbol holding `±∞`/`NaN` answers `finite: false`.
@@ -614,6 +622,24 @@ complex, and out-of-machine-range arguments:
    refresh, so this wants its own pass: regenerate, review the whole
    diff against the library deliberately, and land it as one commit.
 
+6. Assumption bounds are recorded with direction-blind machine rounding.
+   `boundsFromNormalizedInequality` (`constraint-subject.ts`)
+   accumulates an inequality's constant terms in a JavaScript number, so
+   an exact bound the machine cannot represent is rounded to nearest in
+   EITHER direction before it is stored — and every consumer (the `cmp`
+   comparison predicates, `signFromBounds`, the descriptor `bounds`
+   fact) then treats the stored value as exact. A lower bound rounded
+   UP over-proves: canonicalization already folds
+   `assume(v > 1 − 10⁻³⁰)` to a stored strict bound of exactly 1, from
+   which every channel "proves" `v > 1` — refuted by
+   `v = 1 − 10⁻³¹`. Sound recording rounds a lower bound DOWN and an
+   upper bound UP (weakening only), or stores the exact bound
+   expression and lets each consumer project it with its own direction
+   awareness. The descriptor fact already refuses a STORED bound whose
+   machine projection is inexact (`describe()`'s `machine` gate), but it
+   cannot see rounding that happened before storage. Both handler
+   shapes read the same store, so this predates the descriptor channel
+   and is not a conversion regression.
 (A further item — `BoxedNumber.isOdd` reading the parity of a bigint's
 ROUNDED double past 2⁵³ — was fixed in the same round: parity now comes
 from the exact integer channel, and the regression battery lives in

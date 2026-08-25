@@ -164,3 +164,56 @@ describe('WP-2.4 P0-31: .is() is symmetric for expression-valued bindings', () =
       for (const b of exprs) expect(a.is(b)).toBe(b.is(a));
   });
 });
+
+// An inequality that relates the subject to an UNKNOWN quantity entails no
+// numeric bound: `assume(b > y + 1)` says nothing about `b` vs 1 (take
+// y = -2). The bound extraction once dropped the foreign term `y` and
+// recorded `b > 1`, which the comparison predicates, the sign channel, and
+// the descriptor bounds fact all then treated as proof.
+describe('multi-symbol inequalities entail no numeric bound', () => {
+  test('assume(b > y + 1) does not bound b', () => {
+    const ce = new ComputeEngine();
+    ce.declare('b', 'finite_real');
+    ce.declare('y', 'real');
+    ce.assume(ce.box(['Greater', 'b', ['Add', 'y', 1]]));
+    expect(ce.box('b').isGreater(1)).toBeUndefined();
+    expect(ce.box('b').isPositive).toBeUndefined();
+    // The Log base gate must not accept `b` as provably ≠ 1.
+    expect(ce.box(['Log', 4, 'b']).type.toString()).toBe('number');
+  });
+
+  test('sign queries over mutually-referencing assumptions terminate', () => {
+    // The legacy sign scan reads the sign of an assumption's sibling terms,
+    // which is mutually recursive for a multi-symbol assumption: the sign
+    // of `y` asks the sign of `-b`, which asks the sign of `y`. The
+    // in-flight guard answers `undefined` for a re-entrant subject.
+    const ce = new ComputeEngine();
+    ce.declare('b', 'finite_real');
+    ce.declare('y', 'real');
+    ce.assume(ce.box(['Greater', 'b', ['Add', 'y', 1]]));
+    expect(ce.box('y').isPositive).toBeUndefined();
+    expect(ce.box('b').isPositive).toBeUndefined();
+  });
+
+  test('a single-symbol numeric bound still records', () => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'real');
+    ce.assume(ce.box(['Greater', 'c', 2]));
+    expect(ce.box('c').isGreater(1)).toBe(true);
+    expect(ce.box('c').isPositive).toBe(true);
+  });
+
+  test('an exact machine-representable rational bound reaches the descriptor channel', () => {
+    // `1/2` is exactly 0.5 in machine arithmetic, so the assumption bound
+    // travels to the descriptor bounds fact; `1/3` has no machine value
+    // and reads as no bound (the claim stays at the sound join).
+    const ce = new ComputeEngine();
+    ce.declare('h', 'real');
+    ce.assume(ce.box(['Less', 0, 'h', ['Rational', 1, 2]]));
+    expect(ce.box(['Artanh', 'h']).type.toString()).toBe('finite_real');
+    const ce2 = new ComputeEngine();
+    ce2.declare('t', 'real');
+    ce2.assume(ce2.box(['Less', 0, 't', ['Rational', 1, 3]]));
+    expect(ce2.box(['Artanh', 't']).type.toString()).toBe('finite_real');
+  });
+});

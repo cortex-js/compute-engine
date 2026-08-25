@@ -338,11 +338,12 @@ function frozenQuotientRingType(ops: ReadonlyArray<Expression>): Type {
  * (Arctan, Arccot), the inline hyperbolic arms (Sinh, Cosh, Tanh, Sech),
  * and the `numericTypeHandler` default (Sin, Cos, Arsinh). Only the
  * bounded-inverse-trig arm is unreachable, and it throws rather than being
- * copied: those nine heads have a documented declared-range divergence that
- * blocks their conversion (see the `elementaryFunctionType` blocks of
- * `type-handler-twins.test.ts`), so a call reaching the stub means an entry
- * was added for a head that must not have converted, and failing loudly is
- * the right answer.
+ * copied: those nine heads converted under a RULED divergence (their
+ * declared-range claims deliberately differ from the legacy shape — see the
+ * `elementaryFunctionType` blocks of `type-handler-twins.test.ts`), so they
+ * must never be registered for parity. A call reaching the stub means an
+ * entry was added for a head whose two shapes differ by design, and failing
+ * loudly is the right answer.
  */
 function frozenElementaryFunctionType(
   operator: string,
@@ -540,8 +541,10 @@ export const LEGACY_TYPE_HANDLERS: Record<
   // the once-O7-held batch, after the descriptor's sign fact began carrying
   // an application's operator-`sgn` proof (open item O7 of the plan doc) —
   // their `poleReciprocalType` arm disproves the pole at 0 through that
-  // sign. The only factory heads still absent are the nine bounded inverse
-  // heads (declared-range divergences — see the stub arm above).
+  // sign. The nine bounded inverse heads are absent DELIBERATELY and
+  // permanently: they converted under a ruled divergence (declared-range
+  // claims differ from the legacy shape by design — see the stub arm
+  // above), so a parity entry for them would report the ruling as a defect.
   Sin: (ops) => frozenElementaryFunctionType('Sin', ops),
   Cos: (ops) => frozenElementaryFunctionType('Cos', ops),
   Tan: (ops) => frozenElementaryFunctionType('Tan', ops),

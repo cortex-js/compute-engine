@@ -503,11 +503,17 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Arcosh: trigFunction(
       'Arcosh',
       6200,
-      'Inverse hyperbolic cosine (area hyperbolic cosine).'
+      'Inverse hyperbolic cosine (area hyperbolic cosine).',
+      'types'
     ),
 
     Arcsin: {
-      ...trigFunction('Arcsin', 5500, 'Arcsine, the inverse sine function.'),
+      ...trigFunction(
+        'Arcsin',
+        5500,
+        'Arcsine, the inverse sine function.',
+        'types'
+      ),
       keywords: ['asin', 'inverse sine'],
     },
 
@@ -521,7 +527,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Artanh: trigFunction(
       'Artanh',
       6300,
-      'Inverse hyperbolic tangent (area hyperbolic tangent).'
+      'Inverse hyperbolic tangent (area hyperbolic tangent).',
+      'types'
     ),
 
     Cosh: {
@@ -620,7 +627,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       ...trigFunction(
         'Arccos',
         5550,
-        'Arccosine, the inverse cosine function.'
+        'Arccosine, the inverse cosine function.',
+        'types'
       ),
       keywords: ['acos', 'inverse cosine'],
     },
@@ -635,31 +643,36 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Arcoth: trigFunction(
       'Arcoth',
       6350,
-      'Inverse hyperbolic cotangent (area hyperbolic cotangent).'
+      'Inverse hyperbolic cotangent (area hyperbolic cotangent).',
+      'types'
     ),
 
     Arcsch: trigFunction(
       'Arcsch',
       6250,
-      'Inverse hyperbolic cosecant (area hyperbolic cosecant).'
+      'Inverse hyperbolic cosecant (area hyperbolic cosecant).',
+      'types'
     ),
 
     Arcsec: trigFunction(
       'Arcsec',
       5650,
-      'Arcsecant, the inverse secant function.'
+      'Arcsecant, the inverse secant function.',
+      'types'
     ),
 
     Arsech: trigFunction(
       'Arsech',
       6250,
-      'Inverse hyperbolic secant (area hyperbolic secant).'
+      'Inverse hyperbolic secant (area hyperbolic secant).',
+      'types'
     ),
 
     Arccsc: trigFunction(
       'Arccsc',
       5650,
-      'Arccosecant, the inverse cosecant function.'
+      'Arccosecant, the inverse cosecant function.',
+      'types'
     ),
 
     Coth: trigFunction(
@@ -1077,17 +1090,22 @@ function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
  *   operator `sgn` handlers for applications (open item O7 of
  *   `docs/plans/2026-08-22-type-handlers-on-types.md`).
  * - The nine heads routed to `boundedInverseTrigType` (`Arcsin`, `Arccos`,
- *   `Arcsec`, `Arccsc`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`, `Arcosh`) stay
- *   on the expressions shape for a different reason. Their in-domain proof
- *   differs: the expression shape asks the numeric predicates, which answer
- *   from the assumptions system, while the descriptor shape reads the
- *   operand's ranged TYPE. A range that came from a DECLARATION
- *   (`ce.declare('BIG', 'real<2..>')`) records no assumption, so the
- *   descriptor shape proves containment where the expression shape answers
- *   `undefined` — a NARROWER claim than the baseline, which is never
- *   acceptable. Those rows are recorded in
- *   `test/compute-engine/type-handler-twins.test.ts`; the heads convert once
- *   that divergence is decided.
+ *   `Arcsec`, `Arccsc`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`, `Arcosh`)
+ *   also pass `'types'`, and are the one family whose conversion CHANGED
+ *   derived types, by ruling (2026-08-25). Their in-domain proof differs
+ *   between the shapes: the expression shape asks the numeric predicates,
+ *   which answer from the assumptions system, while the descriptor shape
+ *   reads the operand's ranged TYPE — so a range that came from a
+ *   DECLARATION (`ce.declare('BIG', 'real<2..>')`, which records no
+ *   assumption) or from a ranged RESULT type (`Sign(r)`, `Exp(r)`) now
+ *   proves containment the old shape could not, narrowing those claims
+ *   (`Arcosh(BIG)` types `finite_real`, not `number`), while an exact
+ *   literal with no machine value (`1/3`, `√2`, a bigint) loses the old
+ *   `.re` float-projection proof and widens (accepted rational-literal
+ *   residue, ruling O4 of the plan doc). Every changed row is recorded in
+ *   `test/compute-engine/type-handler-twins.test.ts`, and these heads run
+ *   NO shadow parity — the two shapes differ by design, so the differential
+ *   would report the ruling, not a defect.
  */
 function trigFunction(
   operator: string,

@@ -514,3 +514,81 @@ describe("user-declared 'types'-shape handlers", () => {
     );
   });
 });
+
+// The bounded inverse trig heads (`Arcsin`, `Arccos`, `Arcsec`, `Arccsc`,
+// `Artanh`, `Arcoth`, `Arsech`, `Arcsch`, `Arcosh`) derive their in-domain
+// proof from the operand's RANGED TYPE — a declaration's range, or a ranged
+// result type — where the retired expressions shape asked the assumptions
+// system. The tighter claims this proves were adopted by ruling
+// (2026-08-25; the full changed-row record is the `elementaryFunctionType`
+// divergence tables in `type-handler-twins.test.ts`). These rows pin the
+// adopted behavior on the live derivation route.
+describe('bounded inverse trig heads read ranged types', () => {
+  const ce = new ComputeEngine();
+  ce.declare('bigd', 'real<2..>');
+  ce.declare('smd', 'real<-0.5..0.5>');
+  ce.declare('r', 'real');
+  ce.declare('s', 'real');
+  ce.assume(ce.parse('s \\geq 2'));
+
+  it('a DECLARED range proves domain membership', () => {
+    // real<2..> is inside Arcosh's real domain [1, ∞) and outside
+    // Artanh's (−1, 1) and Arcsin's [−1, 1].
+    expect(ce.box(['Arcosh', 'bigd']).type.toString()).toBe('finite_real');
+    expect(ce.box(['Artanh', 'bigd']).type.toString()).toBe('finite_complex');
+    expect(ce.box(['Arcsin', 'bigd']).type.toString()).toBe('finite_complex');
+    expect(ce.box(['Arcsec', 'bigd']).type.toString()).toBe('finite_real');
+    // real<-0.5..0.5> is inside Artanh's open (−1, 1) and Arcsin's [−1, 1].
+    expect(ce.box(['Artanh', 'smd']).type.toString()).toBe('finite_real');
+    expect(ce.box(['Arcsin', 'smd']).type.toString()).toBe('finite_real');
+  });
+
+  it('a ranged RESULT type proves domain membership', () => {
+    // Sign(r) types finite_integer<-1..1>, inside Arcsin/Arccos's closed
+    // real domain [−1, 1].
+    expect(ce.box(['Arcsin', ['Sign', 'r']]).type.toString()).toBe(
+      'finite_real'
+    );
+    expect(ce.box(['Arccos', ['Sign', 'r']]).type.toString()).toBe(
+      'finite_real'
+    );
+  });
+
+  it('an assumed range still proves membership (both channels agree)', () => {
+    expect(ce.box(['Arcosh', 's']).type.toString()).toBe('finite_real');
+  });
+
+  it('a STRICT assumed bound proves membership in an OPEN domain', () => {
+    // Numeric range types have closed ends only, so `0 < v < 1` refines
+    // the type to `real<0..1>` and cannot by itself prove `v < 1` strictly;
+    // the strictness travels on the descriptor's assumption-bounds fact
+    // (`facts.bounds`), which is what proves membership in Artanh's open
+    // (−1, 1) and non-membership at Arcoth's ±1 poles.
+    // The assumption is built as MathJSON: a multi-character name in a
+    // LaTeX string (`0 < v01 < 1`) parses as a PRODUCT of one-letter
+    // symbols, and the assumption then never mentions the declared symbol.
+    ce.declare('v01', 'real');
+    ce.assume(ce.box(['Less', 0, 'v01', 1]));
+    expect(ce.box(['Artanh', 'v01']).type.toString()).toBe('finite_real');
+    expect(ce.box(['Arcoth', 'v01']).type.toString()).toBe('finite_complex');
+  });
+
+  it('an exact literal with no machine value keeps the wide claim', () => {
+    // 1/3 ∈ [−1, 1], but the descriptor's literal channel carries machine
+    // singletons only (accepted rational-literal residue, ruling O4): the
+    // claim widens to the sound join rather than reading a float
+    // projection. The VALUE is still exact — only the static type widened.
+    expect(ce.box(['Arcsin', ['Rational', 1, 3]]).type.toString()).toBe(
+      'finite_complex'
+    );
+    // A machine-representable literal still classifies exactly.
+    expect(ce.box(['Arcsin', 0.5]).type.toString()).toBe('finite_real');
+    expect(ce.box(['Arcsin', 2]).type.toString()).toBe('finite_complex');
+    expect(ce.box(['Artanh', 1]).type.toString()).toBe('non_finite_number');
+  });
+
+  it('an unknown-magnitude real keeps the sound join', () => {
+    expect(ce.box(['Arcsin', 'r']).type.toString()).toBe('finite_complex');
+    expect(ce.box(['Artanh', 'r']).type.toString()).toBe('complex');
+  });
+});

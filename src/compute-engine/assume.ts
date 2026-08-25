@@ -1503,6 +1503,32 @@ export function getSignFromAssumptions(
 
   const subj = toSubject(subject);
 
+  // Cycle guard. The legacy scan below reads the SIGN of an assumption's
+  // sibling terms (`t.isNonNegative` in its Add arm), and with a
+  // multi-symbol assumption those reads are mutually recursive: from
+  // `assume(b > y + 1)`, the sign of `y` asks the sign of `-b`, which asks
+  // the sign of `y`. A subject whose sign query is already in flight on
+  // this engine answers `undefined` — the conservative "no assumption
+  // decides it".
+  const inFlight = signQueryInFlight.get(ce) ?? new Set<string>();
+  if (inFlight.size === 0) signQueryInFlight.set(ce, inFlight);
+  const flightKey = subjectKey(subj);
+  if (inFlight.has(flightKey)) return undefined;
+  inFlight.add(flightKey);
+  try {
+    return getSignFromAssumptionsGuarded(ce, subj);
+  } finally {
+    inFlight.delete(flightKey);
+  }
+}
+
+const signQueryInFlight = new WeakMap<ComputeEngine, Set<string>>();
+
+function getSignFromAssumptionsGuarded(
+  ce: ComputeEngine,
+  subj: Subject
+): Sign | undefined {
+
   // Primary path (Perf P2-3 / SYM P2-7): answer from the cached FactIndex
   // bounds, the same source of truth `verify()` uses. This is O(1) after the
   // index is built (vs. the O(#assumptions) scan below), and it is strictly

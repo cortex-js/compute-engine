@@ -39,12 +39,15 @@ import {
  *   `Sqrt(Abs(x))`, `Negate(Floor(Abs(x)))` — answers `undefined` where the
  *   expression channel answered `non-negative` / `non-positive`.
  * - An assumption whose bound no machine number represents
- *   (`assume(x > 1/3)`) records a sign but declines to put a range in the
- *   type, so a magnitude comparison that the assumptions system could
- *   decide is undecidable from the type alone.
+ *   (`assume(x > 1/3)`) records a sign but neither a range in the type nor
+ *   a machine bound in `facts.bounds`, so a magnitude comparison that the
+ *   assumptions system could decide stays undecided. (A MACHINE-number
+ *   assumption bound does reach the descriptor — `facts.bounds`, with its
+ *   strictness — which is how a strict-assumed symbol still proves
+ *   membership in an open domain.)
  * - Equality and ordering against an arbitrary constant are decided here
- *   from the operand's ranged type and, for a number literal, its value
- *   type. There is no evaluation and no assumptions lookup, so a compound
+ *   from the operand's ranged type, its assumption bounds, and, for a
+ *   number literal, its value type. There is no evaluation, so a compound
  *   whose value only evaluation would reveal stays undecided.
  *
  * In every branch below, a proof that the descriptor cannot reach must
@@ -346,15 +349,23 @@ function typeBounds(
 
 /**
  * Three-valued magnitude comparisons against a machine constant `k`, from
- * the operand's ranged type, its literal value, and — for `k = 0` only, the
- * one comparison a sign decides — its sign. `false` here means "not
- * proven", never "proven otherwise": every caller treats anything but
- * `true` as undecided.
+ * the operand's ranged type, its literal value, its assumption bounds
+ * (`facts.bounds` — the only carrier of a STRICT bound, since numeric
+ * range types have closed ends only), and — for `k = 0` only, the one
+ * comparison a sign decides — its sign. `false` here means "not proven",
+ * never "proven otherwise": every caller treats anything but `true` as
+ * undecided.
  */
 function provablyGreater(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v > k;
   if (k === 0 && positiveSign(d.facts.sgn) === true) return true;
+  const b = d.facts.bounds;
+  if (
+    b?.lower !== undefined &&
+    (b.lower > k || (b.lower === k && b.lowerStrict === true))
+  )
+    return true;
   return typeBounds(d.type).lo > k;
 }
 
@@ -362,6 +373,7 @@ function provablyGreaterEqual(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v >= k;
   if (k === 0 && nonNegativeSign(d.facts.sgn) === true) return true;
+  if ((d.facts.bounds?.lower ?? -Infinity) >= k) return true;
   return typeBounds(d.type).lo >= k;
 }
 
@@ -369,6 +381,12 @@ function provablyLess(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v < k;
   if (k === 0 && negativeSign(d.facts.sgn) === true) return true;
+  const b = d.facts.bounds;
+  if (
+    b?.upper !== undefined &&
+    (b.upper < k || (b.upper === k && b.upperStrict === true))
+  )
+    return true;
   return typeBounds(d.type).hi < k;
 }
 
@@ -376,6 +394,7 @@ function provablyLessEqual(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v <= k;
   if (k === 0 && nonPositiveSign(d.facts.sgn) === true) return true;
+  if ((d.facts.bounds?.upper ?? Infinity) <= k) return true;
   return typeBounds(d.type).hi <= k;
 }
 
@@ -389,11 +408,26 @@ function provablyEquals(d: OperandDescriptor, k: number): boolean {
 }
 
 /** Is the operand provably DIFFERENT from the machine constant `k`? A
- * literal's value decides it; otherwise `k` outside the type's bounds, or a
- * sign that excludes `k`'s half-line, proves it. */
+ * literal's value decides it; otherwise `k` outside the type's bounds or
+ * the assumption bounds (a strict bound AT `k` counts — that is the case
+ * only the assumption channel can carry), or a sign that excludes `k`'s
+ * half-line, proves it. */
 function provablyDiffers(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v !== k;
+  const ab = d.facts.bounds;
+  if (ab !== undefined) {
+    if (
+      ab.lower !== undefined &&
+      (k < ab.lower || (k === ab.lower && ab.lowerStrict === true))
+    )
+      return true;
+    if (
+      ab.upper !== undefined &&
+      (k > ab.upper || (k === ab.upper && ab.upperStrict === true))
+    )
+      return true;
+  }
   const b = typeBounds(d.type);
   if (k < b.lo || k > b.hi) return true;
   const s = d.facts.sgn;
@@ -628,17 +662,17 @@ function containsNumber(
  * because an assigned symbol is checked, never narrowed). Both losses make
  * the containment fail, which widens the claim.
  *
- * The traffic runs the other way too, and that direction is the one that
- * blocks conversion. A range that came from a DECLARATION —
- * `ce.declare('BIG', 'real<2..>')` — records no assumption, and
- * `Expression.isGreaterEqual` answers from the assumptions system, so the
- * expression shape says `undefined` where the bounds read here prove
+ * The traffic runs the other way too. A range that came from a
+ * DECLARATION — `ce.declare('BIG', 'real<2..>')` — records no assumption,
+ * and `Expression.isGreaterEqual` answers from the assumptions system, so
+ * the expression shape says `undefined` where the bounds read here prove
  * containment outright. The twin's claim is then NARROWER: sound and
- * tighter, but narrower than the baseline, so the bounded inverse heads
- * cannot convert until the conversion decides what to do with it. (A
- * symbol ranged by `ce.assume` carries both channels, which is why those
- * rows agree.) The declared-range rows in
- * `test/compute-engine/type-handler-twins.test.ts` record what it costs.
+ * tighter. Adopting those tighter claims was ruled (2026-08-25) when the
+ * bounded inverse heads converted — they are the one family whose
+ * conversion changed derived types, and they run no shadow parity for
+ * that reason. (A symbol ranged by `ce.assume` carries both channels,
+ * which is why those rows agree.) Every changed row is recorded in
+ * `test/compute-engine/type-handler-twins.test.ts`.
  */
 function provablyIn(
   d: OperandDescriptor,

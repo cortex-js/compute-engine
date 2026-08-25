@@ -152,6 +152,14 @@ export function boundsFromNormalizedInequality(
     let hasSubject = false;
     let hasNegatedSubject = false;
     let constantSum = 0;
+    // A term that is neither the subject nor a finite numeric constant —
+    // another symbol, an application — makes the inequality relate the
+    // subject to an UNKNOWN quantity, so no numeric bound is entailed.
+    // Dropping such a term used to record a bound anyway: `b > y + 1`
+    // normalizes to `Add(Negate(b), y, 1) < 0`, and skipping `y` recorded
+    // `b > 1`, which `y = -2, b = 0` refutes. No bound may come from an
+    // inequality with a foreign term.
+    let hasForeignTerm = false;
 
     for (const term of lhs.ops) {
       if (isFunction(term, 'Negate') && matchesSubject(term.op1, subject)) {
@@ -161,17 +169,18 @@ export function boundsFromNormalizedInequality(
       } else {
         const val = finiteNumericValue(term);
         if (val !== undefined) constantSum += val;
+        else hasForeignTerm = true;
       }
     }
 
     // Case 3: Add(Negate(subject), k) < 0 => k - subject < 0 => subject > k
-    if (hasNegatedSubject && constantSum !== 0) {
+    if (!hasForeignTerm && hasNegatedSubject && constantSum !== 0) {
       result.lower = ce.expr(constantSum);
       result.lowerStrict = isStrict;
     }
 
     // Case 4: Add(subject, k) < 0 => subject < -k
-    if (hasSubject && constantSum !== 0) {
+    if (!hasForeignTerm && hasSubject && constantSum !== 0) {
       result.upper = ce.expr(-constantSum);
       result.upperStrict = isStrict;
     }
