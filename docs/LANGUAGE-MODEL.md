@@ -43,6 +43,11 @@ Control-flow heads and explicit pattern matching may consume them. Host throws
 are reserved for API misuse, cancellation, or compiled runtime failures where
 the target cannot represent the boxed error value.
 
+The full error model — the `Error`/`NaN`/`Missing`/inert channel taxonomy,
+the decision procedure for wrong input, propagation rules, and what a
+signature's result type does and does not promise — is in
+`docs/ERROR-MODEL.md`.
+
 ## Ellipsis and interpretation
 
 Surface ellipsis that denotes a mathematical continuation lowers to the

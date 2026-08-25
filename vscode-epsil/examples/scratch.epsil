@@ -1,37 +1,41 @@
+let x ;
+print(Type(x))
+Heaviside(x)
 
+
+// const f: (integer) -> list
 // let xs: list;
 // xs = f(0)
 // // expected `list`, got `unknown` at `xs`
-// Type(xs)  // -> "list" should be list<number>
+// print(Type(xs))  // -> "list" should be list<number>
 
-protocol Shape {
-  readonly area: number;
-}
 
-type Circle = object {
-    center: tuple<number, number>,
-    /* private */ _area: number
-}
-// type Circle is Shape;
-type Circle is Shape {
-    get area(self: Self) { self._area }
-}
+// protocol Shape {
+//   readonly area: number;
+// }
 
-const c = Circle(center: (1, 1), _area: 1);
-c._area = 5;
+// type Circle = object {
+//     center: tuple<number, number>,
+//     /* private */ _area: number
+// }
+// // type Circle is Shape;
+// type Circle is Shape {
+//     get area(self: Self) { self._area }
+// }
 
-print(c, area(c));
+// const c = Circle(center: (1, 1), _area: 1);
+// c._area = 5;
 
-// let i : real;
-// i = 5
-// Type(i)
-// About(i)
+// print(c, area(c));
 
-// let n: unknown
-// n = 1
-// // Type(n) -> integer
-// n = 1.1
-// // Type(n) -> real
+
+let n: unknown
+n = 1.1
+print(Type(n))
+// Type(n) -> integer
+n = 2
+print(Type(n))
+// Type(n) -> real
 
 
 // let a: list
