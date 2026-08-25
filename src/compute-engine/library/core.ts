@@ -53,12 +53,13 @@ import {
   isValueForm,
   dynamicTypeTest,
 } from './type-value-utils.js';
-import { interval } from '../numerics/interval.js';
+import { interval, literalIntervalEndpoints } from '../numerics/interval.js';
 import {
   fieldAssignmentVerdict,
   fieldStoreRefusal,
   objectLayoutOwnsField,
   objectFieldStore,
+  literalRange,
   range,
   rangeLast,
 } from './collections.js';
@@ -5636,24 +5637,53 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Derived from the DOMAIN's endpoints. (The old handler read
       // `ops.every(x => x.isNonNegative)` against numeric bounds that no
       // longer exist — `Range(1, 10).isNonNegative` is `undefined`.)
+      //
+      // Endpoints are read through the pure literal readers only
+      // (`literalIntervalEndpoints`/`literalRange`: number literals and
+      // symbols with held numeric values), never evaluated: `sgn` handlers
+      // are dispatched from the type path, which must not change engine
+      // state — evaluating a compound bound (`Range(1, Sum(...))`) pushes
+      // scopes and advances the invalidation axes (open item O7 of
+      // `docs/plans/2026-08-22-type-handlers-on-types.md`). A compound
+      // endpoint therefore answers `undefined` where an evaluating reader
+      // could decide. A domain that `analyzeRandomDomain` provably rejects
+      // (a non-positive-width or unbounded Interval, an empty Range)
+      // evaluates to an error, not a draw, so no sign is claimed for it.
       sgn: ([domain]) => {
         // No-arg `Random()` ∈ [0, 1).
         if (domain === undefined) return 'non-negative';
         if (isFunction(domain, 'Interval')) {
-          const int = interval(domain);
-          if (!int) return undefined;
           // Draws lie in [start, end): non-negative when the low endpoint is,
           // negative when the (excluded) high endpoint is at or below zero.
-          if (int.start >= 0) return 'non-negative';
-          if (int.end <= 0) return 'negative';
+          // Each endpoint reads independently (a NaN comparison is false),
+          // so `Interval(0, 50π)` still answers from its literal start.
+          const [start, end] = literalIntervalEndpoints(domain);
+          // A literally infinite endpoint, or a provably non-positive
+          // width, is a rejected domain.
+          if (!Number.isNaN(start) && !Number.isFinite(start))
+            return undefined;
+          if (!Number.isNaN(end) && !Number.isFinite(end)) return undefined;
+          if (!Number.isNaN(start) && !Number.isNaN(end) && !(start < end))
+            return undefined;
+          if (start >= 0) return 'non-negative';
+          if (end <= 0) return 'negative';
           return undefined;
         }
         if (isFunction(domain, 'Range')) {
-          if (domain.count === undefined) return undefined;
-          const [first, upper, step] = range(domain);
-          const last = rangeLast([first, upper, step]);
-          if (!Number.isFinite(first) || !Number.isFinite(last))
+          const [first, upper, step] = literalRange(domain);
+          // A NaN bound (symbolic or compound) is indeterminate.
+          if (Number.isNaN(first) || Number.isNaN(upper) || Number.isNaN(step))
             return undefined;
+          // Mirror the `Range` count arithmetic (its collection `count`
+          // handler in `collections.ts`): an empty range — zero step or
+          // sign-mismatched bounds — and a non-finite (hence rejected)
+          // range yield an error, not a draw.
+          if (step === 0) return undefined;
+          if (!Number.isFinite(first) || !Number.isFinite(upper))
+            return undefined;
+          if (Math.max(0, Math.floor((upper - first) / step) + 1) === 0)
+            return undefined;
+          const last = rangeLast([first, upper, step]);
           if (first >= 0 && last >= 0) return 'non-negative';
           if (first <= 0 && last <= 0) return 'non-positive';
         }

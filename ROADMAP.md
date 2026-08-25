@@ -486,10 +486,16 @@ defects the sweep's probes surfaced are recorded as open items below,
 under "Left open by the type-handler retirement sweep".
 `Binomial`/`Choose`/`Pochhammer` were converted and REVERTED by
 the batch's dual review: their pole-widening sign gates can be proven by
-operator `sgn` handlers on compound operands — a channel descriptors do
-not carry — so converting narrowed the claim, which the parity rules
-forbid; they wait for the O7 sign-channel audit (see the plan doc's §5.3
-step-3 status for the full account). The `typeFact` helper (three-valued
+operator `sgn` handlers on compound operands — a channel descriptors did
+not then carry — so converting narrowed the claim, which the parity rules
+forbid. The O7 sign-channel audit has since executed (2026-08-24, record
+at the plan doc's O7 open item): the `sgn` handler family is certified
+pure (the two evaluating handlers, `Random` and `Count`, were rewritten
+against literal-only readers), `describe()` now consults the handlers for
+applications, and every recorded sign-channel divergence in
+`type-handler-twins.test.ts` closed — the trio, the Γ family,
+`Factorial`/`Factorial2`, the log heads and `Cot`/`Csc`/`Coth`/`Csch`
+are unblocked and convert in later batches. The `typeFact` helper (three-valued
 `isInteger`/`isReal` replacement) shipped with the batch, and
 `describe()`'s `finite` fact now reads a held number value, so a
 wide-typed symbol holding `±∞`/`NaN` answers `finite: false`.

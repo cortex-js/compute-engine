@@ -122,3 +122,95 @@ describe('SGN HANDLER AUDIT', () => {
     expect(np.sgn).toBe('non-positive');
   });
 });
+
+// The operator `sgn` handlers are a PURE family: the type path dispatches
+// them while deriving an application's type (the `sgn` operand fact in
+// `describe()`), so a handler that evaluates, canonicalizes or declares
+// invalidates the very caches the derivation is filling. Contract on
+// `OperatorDefinition.sgn`; audit record at open item O7 of
+// `docs/plans/2026-08-22-type-handlers-on-types.md`.
+describe('SGN HANDLERS ARE PURE (state-drift regression)', () => {
+  it('a sgn read advances no engine invalidation axis', () => {
+    const ce = new ComputeEngine();
+    // The two former violators, on their once-drifting witnesses: a bound
+    // that only evaluation can numericize (the `Sum`), and a lazy view
+    // whose emptiness probe would run its predicate (the `Filter`).
+    const sum = ['Sum', ['Square', 'j'], ['Tuple', 'j', 1, 3]];
+    const witnesses = [
+      ce.box(['Random', ['Range', 1, sum]]),
+      ce.box(['Count', ['Range', 1, sum]]),
+      ce.box(['Count', ['Filter', ['List', 1, 2, 3], ['Greater', '_', 1]]]),
+      // A compound-operand recursion through several handlers.
+      ce.box(['Sqrt', ['Abs', ['Negate', ['Floor', 'Pi']]]]),
+    ];
+    for (const expr of witnesses) {
+      const before = [ce._anyVersion, ce._semanticVersion, ce._worldVersion];
+      void expr.sgn;
+      expect([ce._anyVersion, ce._semanticVersion, ce._worldVersion]).toEqual(
+        before
+      );
+    }
+  });
+
+  it('Random/Count answer from literal bounds and structure, not evaluation', () => {
+    const ce = new ComputeEngine();
+    // Literal bounds still decide (pure reads)...
+    expect(ce.box(['Random', ['Range', 2, 5]]).sgn).toBe('non-negative');
+    expect(ce.box(['Count', ['Range', 1, 10]]).sgn).toBe('positive');
+    expect(ce.box(['Count', ['List', 1, 2, 3]]).sgn).toBe('positive');
+    expect(ce.box(['Count', ['List']]).sgn).toBe('zero');
+    // A dictionary keeps its entries in a plain record (not operands): its
+    // count is a direct field read.
+    expect(
+      ce.box(['Count', ['Dictionary', ['Tuple', { str: 'a' }, 1]]]).sgn
+    ).toBe('positive');
+    expect(ce.box(['Count', ['Dictionary']]).sgn).toBe('zero');
+    // A symbol answers for its held value.
+    ce.assign('heldList', ce.box(['List', 1, 2, 3]));
+    expect(ce.box(['Count', 'heldList']).sgn).toBe('positive');
+    // Range emptiness follows the count arithmetic of the Range collection
+    // handler, not a bounds-direction test: `Range(1, 5, -∞)` holds exactly
+    // one element (1), and a zero step or sign-mismatched bounds hold none.
+    expect(ce.box(['Count', ['Range', 1, 5, { num: '-Infinity' }]]).sgn).toBe(
+      'positive'
+    );
+    expect(ce.box(['Count', ['Range', 1, 5, 0]]).sgn).toBe('zero');
+    expect(ce.box(['Count', ['Range', 5, 1, 1]]).sgn).toBe('zero');
+    // A domain the Random draw provably rejects (empty or unbounded) gets
+    // no sign claim: it evaluates to an error, not a draw.
+    expect(ce.box(['Random', ['Interval', 1, 0]]).sgn).toBeUndefined();
+    expect(ce.box(['Random', ['Interval', 1, 1]]).sgn).toBeUndefined();
+    expect(
+      ce.box(['Random', ['Interval', 0, { num: '+Infinity' }]]).sgn
+    ).toBeUndefined();
+    expect(ce.box(['Random', ['Range', 5, 1, 1]]).sgn).toBeUndefined();
+    expect(ce.box(['Random', ['Range', 1, 5, 0]]).sgn).toBeUndefined();
+    // ...and one literal Interval endpoint suffices for its one-sided claim,
+    // even when the other endpoint is compound.
+    expect(
+      ce.box(['Random', ['Interval', 0, ['Multiply', 50, 'Pi']]]).sgn
+    ).toBe('non-negative');
+    // A bound or emptiness that only evaluation could decide is declined.
+    const sum = ['Sum', ['Square', 'j'], ['Tuple', 'j', 1, 3]];
+    expect(ce.box(['Random', ['Range', 1, sum]]).sgn).toBeUndefined();
+    expect(ce.box(['Count', ['Range', 1, sum]]).sgn).toBeUndefined();
+    expect(
+      ce.box(['Count', ['Filter', ['List', 1, 2, 3], ['Greater', '_', 1]]]).sgn
+    ).toBeUndefined();
+  });
+
+  it("an application operand's sign reaches the descriptor channel", () => {
+    const ce = new ComputeEngine();
+    ce.declare('r', 'real');
+    // `Neg(Floor(Abs(r)))` is provably non-positive only through the
+    // operator `sgn` handlers; the Γ pole gate widening to `number` proves
+    // the descriptor consulted them.
+    expect(
+      ce.box(['Gamma', ['Negate', ['Floor', ['Abs', 'r']]]]).type.toString()
+    ).toBe('number');
+    // And `Ln` of the same operand takes its proven-non-positive gate.
+    expect(
+      ce.box(['Ln', ['Negate', ['Floor', ['Abs', 'r']]]]).type.toString()
+    ).toBe('number');
+  });
+});

@@ -1,7 +1,11 @@
 import type { Expression, Sign } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
-import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
 import {
   collectionElementType,
@@ -538,6 +542,13 @@ export function absFunctionType(x: Expression | undefined): Type {
     const held = x.valueDefinition?.value;
     if (held !== undefined && isNumber(held) && held.isNaN) return 'number';
   }
+  // An APPLICATION can be provably NaN through the values it holds
+  // (`Abs(hnan)` with `hnan: number := NaN`): proven non-finite with an
+  // `unsigned` sign — a signed infinity would carry its sign — is the same
+  // exclusion the descriptor twin performs, and without it the tier walk
+  // below claims `real<0..>` for a value that is NaN.
+  if (isFunction(x) && provablyNonFiniteNumber(x) && x.sgn === 'unsigned')
+    return 'number';
   const t = x.type;
   // |x| also preserves the numeric TIER of a real operand: the magnitude of
   // an integer is an integer, of a rational a rational (`|−1/2| = 1/2`). The

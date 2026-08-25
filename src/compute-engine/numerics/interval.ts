@@ -35,6 +35,31 @@ function isFunction(
   );
 }
 
+/**
+ * Pure endpoint read for an `Interval` function expression: each endpoint
+ * is unwrapped from its `Open`/`Closed` marker and read through the `.re`
+ * getter — a number literal's value, or a symbol's held numeric value —
+ * never evaluated. A compound endpoint (`50π`, a `Sum`) reads as NaN, and
+ * each endpoint reads independently, so one literal endpoint still informs
+ * a caller when the other is compound.
+ *
+ * Use this from derivation channels that must not change engine state (the
+ * operator `sgn` handlers, which the type path dispatches — open item O7 of
+ * `docs/plans/2026-08-22-type-handlers-on-types.md`): `interval()` itself
+ * numerically evaluates the endpoints, and evaluating an arbitrary endpoint
+ * expression can push scopes and advance the engine's invalidation axes.
+ */
+export function literalIntervalEndpoints(
+  expr: Expression
+): [start: number, end: number] {
+  if (!isFunction(expr, 'Interval')) return [NaN, NaN];
+  let op1: Expression = expr.op1;
+  let op2: Expression = expr.op2;
+  if (isFunction(op1, 'Open') || isFunction(op1, 'Closed')) op1 = op1.op1;
+  if (isFunction(op2, 'Open') || isFunction(op2, 'Closed')) op2 = op2.op1;
+  return [op1.re, op2.re];
+}
+
 export function interval(expr: Expression): Interval | undefined {
   if (isFunction(expr, 'Interval')) {
     let op1: Expression = expr.op1;

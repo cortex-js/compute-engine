@@ -168,23 +168,15 @@ function abBinary(
 }
 
 describe('operand-level helpers', () => {
-  test('operandSgn — equal except where the sign is only a `sgn` handler’s', () => {
-    // The descriptor never invokes an operator `sgn` handler, so an
-    // application whose result type carries no range answers `undefined`
-    // where the expression channel answers a sign. `Abs(r)` and
-    // `Negate(Abs(r))` agree because their result types DO carry the range.
-    // `Abs(hnan)` is the same loss reached through a held value rather than
-    // a result-type range: `hnan` holds NaN, so `Abs`'s `sgn` handler reads
-    // that value and answers `unsigned`, while `Abs(hnan)` types `number`,
-    // whose spelling carries no sign. The FINITENESS of that same operand
-    // does reach the descriptor (the application-level `isFinite` read in
-    // `describe()`); the sign deliberately does not, because it would mean
-    // invoking the unaudited operator `sgn` handlers on the type path.
-    abUnary(legacy.operandSgn, twin.operandSgn, {
-      'Sqrt(Abs(r))': ['non-negative', 'undefined'],
-      'Neg(Floor(Abs(r)))': ['non-positive', 'undefined'],
-      'Abs(hnan)': ['unsigned', 'undefined'],
-    });
+  test('operandSgn — equal everywhere, applications included', () => {
+    // The descriptor reads an application's sign from its operator `sgn`
+    // handler — the same dispatch the expression channel uses — since the
+    // O7 audit certified that family pure (open item O7 of
+    // `docs/plans/2026-08-22-type-handlers-on-types.md`). Compound proofs
+    // (`Sqrt(Abs(r))`, `Neg(Floor(Abs(r)))`) and held-value proofs
+    // (`Abs(hnan)`, whose handler reads the held NaN and answers
+    // `unsigned`) therefore reach both channels identically.
+    abUnary(legacy.operandSgn, twin.operandSgn, {});
   });
 
   test('operandLiteralValue — equal everywhere', () => {
@@ -278,15 +270,14 @@ describe('numericTypeHandler', () => {
 });
 
 describe('gammaPoleType', () => {
-  test('the non-positive-integer pole gate needs a sign the descriptor lacks', () => {
-    // The gate WIDENS the claim to `number` on a proven non-positive sign,
-    // so an integer-typed application whose non-positivity only an operator
-    // `sgn` handler knows misses it and the twin claims `finite_real`. That
-    // is NARROWER than the expressions shape, which is why the Γ-family
-    // handlers cannot convert until the sign channel reaches applications.
-    abUnary(legacy.gammaPoleType, twin.gammaPoleType, {
-      'Neg(Floor(Abs(r)))': ['number', 'finite_real'],
-    });
+  test('the non-positive-integer pole gate reads the application sign channel', () => {
+    // The gate WIDENS the claim to `number` on a proven non-positive sign.
+    // The descriptor's sign channel reaches applications (the operator
+    // `sgn` handlers are dispatched on the type path since the O7 audit),
+    // so a compound operand whose non-positivity is a handler's proof —
+    // `Neg(Floor(Abs(r)))` — fires the gate in both shapes and the
+    // Γ-family handlers are convertible.
+    abUnary(legacy.gammaPoleType, twin.gammaPoleType, {});
   });
 });
 
@@ -320,6 +311,16 @@ describe('absFunctionType', () => {
     // closed on the expressions side when this battery surfaced it, so the
     // row now pins that both value channels (literal and held number) are
     // read by both shapes.
+    //
+    // The `Abs(hnan)` row — an APPLICATION operand that evaluates to NaN —
+    // is likewise an AGREEMENT with a history: when the O7 audit let the
+    // descriptor's sign channel reach applications, the twin began proving
+    // that NaN (`Abs`'s `sgn` handler answers `unsigned` from the held
+    // value, the finiteness read answers `false`) while the expressions
+    // shape still guarded only literals and symbol-held NaN, claiming
+    // `real<0..>` for a NaN value. That hole was closed on the expressions
+    // side (the application arm of `absFunctionType`), so the row now pins
+    // that BOTH shapes read the application value channel.
     abUnary(legacy.absFunctionType, twin.absFunctionType, {
       '~oo': ['real<0..>', 'number'],
     });
@@ -409,16 +410,13 @@ describe('elementaryFunctionType', () => {
   }
 
   // The log heads: the proven-non-positive gate widens the claim to
-  // `number`, so an argument whose non-positivity only an operator `sgn`
-  // handler knows falls through to the unknown-sign join and the twin
-  // claims `complex`. NARROWER — the log heads convert once the sign
-  // channel reaches applications.
-  const LOG_DIVERGENCE: Divergences = {
-    'Neg(Floor(Abs(r)))': ['number', 'complex'],
-  };
+  // `number`. The descriptor's sign channel reaches applications (O7), so
+  // a compound argument whose non-positivity is an operator `sgn`
+  // handler's proof — `Neg(Floor(Abs(r)))` — fires the gate in both
+  // shapes: the log heads are convertible.
   for (const head of ['Ln', 'Log', 'Lb', 'Lg', 'Log2', 'Log10'])
-    test(`${head} — the proven-non-positive gate`, () =>
-      abHead(head, LOG_DIVERGENCE));
+    test(`${head} — the proven-non-positive gate, equal everywhere`, () =>
+      abHead(head, {}));
 
   for (const head of ['Tan', 'Sec', 'Csc', 'Cot', 'Coth', 'Csch'])
     test(`${head} — equal everywhere`, () => abHead(head, {}));
@@ -577,7 +575,7 @@ describe('elementaryFunctionType', () => {
     ['b=Exp(r)', () => ce.box(['Exp', 'r'])],
   ];
 
-  test('Log with an explicit base — only the operator-`sgn` argument row differs', () => {
+  test('Log with an explicit base — equal on every argument/base pair', () => {
     const seen: Divergences = {};
     for (const [rowB, base] of BASES)
       for (const [row, x] of battery) {
@@ -590,16 +588,11 @@ describe('elementaryFunctionType', () => {
         );
         if (l !== t) seen[`${row}|${rowB}`] = [l, t];
       }
-    // One row survives in the whole sweep, and it is not about the base at
-    // all: it is the same proven-non-positive ARGUMENT gate the unary log
-    // heads diverge on (`Neg(Floor(Abs(r)))`, whose non-positivity only an
-    // operator `sgn` handler knows). It shows up on `b=2` alone because
-    // `b=2` is the only base in the list both shapes accept — with any
-    // unusable base the twin reaches the base gate and answers `number`,
-    // which is what the expressions shape already answered at the sign
-    // gate, so the two agree by coincidence of route.
-    expect(seen).toEqual({
-      'Neg(Floor(Abs(r)))|b=2': ['number', 'complex'],
-    });
+    // No divergence survives the sweep: the proven-non-positive ARGUMENT
+    // gate that once separated the shapes on `Neg(Floor(Abs(r)))|b=2` now
+    // fires in both — the descriptor's sign channel reaches applications
+    // (O7), so a compound argument's handler-proven sign is visible to the
+    // twin exactly as to the expressions shape.
+    expect(seen).toEqual({});
   });
 });

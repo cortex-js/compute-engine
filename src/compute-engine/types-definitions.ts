@@ -426,15 +426,18 @@ export type OperandFacts = {
    * result for `f(NaN)`. */
   readonly finite: Tri;
   /** The operand's sign, from pure sources only: a number literal's value,
-   * a symbol's held numeric value or recorded assumption, or the sign a
-   * ranged TYPE proves (`real<0..> & !0` is positive). For a compound
-   * expression whose type carries no sign, `undefined` — the operator
-   * `sgn` handlers are never consulted on the type path.
+   * a symbol's held numeric value or recorded assumption, the sign a
+   * ranged TYPE proves (`real<0..> & !0` is positive), or — for a function
+   * application — its operator's `sgn` handler, a pure family by contract
+   * (see `OperatorDefinition.sgn`; the audit behind the contract is
+   * recorded at open item O7 of
+   * `docs/plans/2026-08-22-type-handlers-on-types.md`).
    * Beyond the type: a held numeric value (`a := 5` keeps the declared
-   * type `integer` — assigned symbols are checked, never narrowed), and an
+   * type `integer` — assigned symbols are checked, never narrowed), an
    * assumption whose bound no machine number represents (`assume(x > 1/3)`
    * records the sign but declines the range, leaving the type bare
-   * `real`). */
+   * `real`), and a compound proof through operand signs (`Divide`'s
+   * handler recurses; `Sign(p)` with `assume(p > 0)` is positive). */
   readonly sgn?: Sign;
   /** The operand has no free variables (the `isConstant` structural fact —
    * never derivable from a type). */
@@ -718,6 +721,9 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * However, the type and sign of the arguments can be used to determine the
      * sign.
      *
+     * The handler must be a pure function of the operands — the type path
+     * dispatches it while deriving an application's type. See the purity
+     * contract on `OperatorDefinition.sgn`.
      */
     sgn?: (
       ops: ReadonlyArray<Expression>,
@@ -2261,6 +2267,15 @@ export interface BoxedOperatorDefinition
    *
    * This can be used in some case for example to determine when certain
    * simplifications are valid.
+   *
+   * The handler MUST be a pure function of the operands: no evaluation
+   * (`.evaluate()`, `.N()` — including indirectly, through helpers that
+   * numericize a bound or probe a collection element), no canonicalization
+   * of new expressions, no declarations. The type path dispatches `sgn`
+   * handlers while deriving an application's type (the `sgn` operand fact),
+   * so a handler that changes engine state invalidates the very caches the
+   * derivation is filling. Audit record: open item O7 of
+   * `docs/plans/2026-08-22-type-handlers-on-types.md`.
    */
   sgn?: (
     ops: ReadonlyArray<Expression>,

@@ -1298,12 +1298,16 @@ type?: (
 
 - `facts.sgn` comes from **pure sources only**: the sign of a number
   literal; the sign of a symbol's held numeric value; the sign recorded
-  by `ce.assume`. For a function expression it is `undefined` — the
-  `sgn` handlers are not called from the type path until they have had
-  the same audit as §2.5 (O7). The precision this costs is on compound
-  operands only (`Multiply((2 + π), i)` types `finite_complex` rather than
-  `imaginary`), accepted under R2; `π·i`, `e^i` and the assumption cases
-  keep today's answers.
+  by `ce.assume`; and — since the O7 audit (2026-08-24, recorded at the
+  O7 open item) — the operator `sgn` handlers, for a function expression.
+  The audit made that family pure: every handler traced to pure reads by
+  the §2.5 method, the two that evaluated (`Random`, whose
+  interval/range readers numericized compound bounds, and `Count`, whose
+  emptiness probe dispatched collection handlers that can enumerate)
+  rewritten against literal-only readers, and a drift probe measured
+  zero invalidation-axis advancement across the family. The purity is
+  now a documented contract on `OperatorDefinition.sgn` and pinned by a
+  drift-regression test (`sgn-audit.test.ts`).
 - `facts.closed` is `isConstant` (a structural fact, safe to read).
   `facts.finite` is `true` for a `finite_*` type or a finite literal,
   `false` for a `non_finite_number` type or a `±∞`/`NaN` literal, and
@@ -1588,12 +1592,14 @@ type?: (
      `trigFunction('Sin', …, 'types')` converts that head while its
      neighbours stay on the expressions shape. Ten heads convert because
      both shapes derive the same type for them; `Cot`, `Csc`, `Coth` and
-     `Csch` are held back because the disproof of their pole at zero
-     rides the operand's SIGN, which the descriptor does not carry for a
-     compound operand — the O7 channel. The witness is `Coth(π/2)`: the
-     expressions shape answers `finite_real`, the descriptor shape
-     `number`. Wider, so sound, but a divergence, and §5.5's baseline
-     rule wants a conversion to be type-identical.
+     `Csch` were held back because the disproof of their pole at zero
+     rides the operand's SIGN, which the descriptor then did not carry
+     for a compound operand — the O7 channel. The witness was
+     `Coth(π/2)`: the expressions shape answered `finite_real`, the
+     descriptor shape `number` — wider, so sound, but a divergence, and
+     §5.5's baseline rule wants a conversion to be type-identical. The
+     O7 audit (2026-08-24, the O7 open item) closed that channel gap, so
+     the four heads are unblocked and convert in a later batch.
    - **`library/special-functions.ts` — 7.** `EllipticF`,
      `Hypergeometric2F1`, `Hypergeometric1F1`, `AppellF1`, and the three
      nullary constants `JacobiTheta`, `DedekindEta`, `EisensteinE`.
@@ -1643,11 +1649,12 @@ type?: (
    being replaced. The `number` test is load-bearing: `isFinite === false`
    also means "not a number at all", so a `List`, a `Tuple` or an
    application of unknown result type answers `false` there without being
-   an infinity. The SIGN channel is deliberately NOT extended the same
-   way — reading an application's `.sgn` dispatches to the unaudited
-   operator `sgn` handlers, which is the O7 hold, and the remaining
-   divergence is pinned as such (`Abs(hnan)` in the `operandSgn` table of
-   `type-handler-twins.test.ts`). Cost measured, not assumed: the
+   an infinity. The SIGN channel was at first deliberately NOT extended
+   the same way — reading an application's `.sgn` dispatches the operator
+   `sgn` handlers, then unaudited — and the divergence was pinned as the
+   O7 hold; the hold has since lifted (the O7 audit, 2026-08-24, recorded
+   at the open item) and the `operandSgn` table in
+   `type-handler-twins.test.ts` is now empty. Cost measured, not assumed: the
    `arithmetic` + `trigonometry` suites run in the same time with and
    without the read (5.0–6.3 s against 5.7–5.8 s over three interleaved
    pairs), because it runs once per operand per CACHED derivation rather
@@ -1679,12 +1686,14 @@ type?: (
    is deleted.
 
    Still to convert: the structure-bound control-structure/core
-   handlers, the collection files, the O7-blocked heads (`Cot`, `Csc`,
-   `Coth`, `Csch`, the `Binomial`/`Choose`/`Pochhammer` trio, the Γ
-   family, `Factorial`, and the log heads), and the bounded inverse trig
-   heads whose declared-range divergences are listed with the twins
-   above; the seven impure handlers stay with §5.4. Every handler still
-   on the expressions shape reads its operands.
+   handlers, the collection files, the once-O7-blocked heads (`Cot`,
+   `Csc`, `Coth`, `Csch`, the `Binomial`/`Choose`/`Pochhammer` trio, the
+   Γ family, `Factorial`, and the log heads — unblocked by the O7 audit,
+   2026-08-24, see the O7 open item), and the bounded inverse trig heads
+   whose declared-range divergences are listed with the twins above (a
+   different stronger channel, NOT lifted by O7); the seven impure
+   handlers stay with §5.4. Every handler still on the expressions shape
+   reads its operands.
 
    | What the handler reads today | What it reads instead | Meaning |
    | --- | --- | --- |
@@ -1837,7 +1846,7 @@ excludes. `isSame(0)`/`isSame(1)` are `false` on anything but a literal.
 
 | Consumers | What the read decides |
 | --- | --- |
-| `numericTypeHandler` (about 30 operators: the circular and hyperbolic functions, `Fract`, `LambertW`, the four Bessel and four Airy functions, `ElementMax`/`ElementMin`, `Clamp`, `Degrees`, `DMS`, `Arctan2`, `Haversine`, the hypergeometric family, `AppellF1`, two-argument `Gamma` — but see below) | A provably non-finite operand widens the result to `number` (`Sin(+∞)` is NaN); otherwise `finite_real` / `finite_number`. `Gamma` is listed for its two-argument arm only, and that arm cannot be converted on its own: the same handler dispatches arity 1 to `gammaPoleType`, whose sign gate is O7-blocked, so the whole `Gamma` definition holds. |
+| `numericTypeHandler` (about 30 operators: the circular and hyperbolic functions, `Fract`, `LambertW`, the four Bessel and four Airy functions, `ElementMax`/`ElementMin`, `Clamp`, `Degrees`, `DMS`, `Arctan2`, `Haversine`, the hypergeometric family, `AppellF1`, two-argument `Gamma` — but see below) | A provably non-finite operand widens the result to `number` (`Sin(+∞)` is NaN); otherwise `finite_real` / `finite_number`. `Gamma` is listed for its two-argument arm only, and that arm cannot be converted on its own: the same handler dispatches arity 1 to `gammaPoleType`, whose sign gate was O7-blocked (unblocked by the O7 audit, 2026-08-24), so the whole `Gamma` definition converts together in a later batch. |
 | `logType` (`Ln`, `Log`, `Lb`, `Lg`), `poleReciprocalType` (`Tan`, `Sec`, `Csc`, `Cot`, `Coth`, `Csch`), `boundedInverseTrigType` (`Arcsin`, `Arccos`, `Arcsec`, `Arccsc`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`, `Arcosh`, `EllipticK`, one-argument `EllipticE`, `InverseHaversine`), `arctanType`, `Sinh`/`Cosh`/`Tanh`/`Sech`, `gammaPoleType`, `roundingFunctionType` (`Round`, `Ceil`, `Floor`, `Truncate`), `Abs` | Pole, `±∞` and NaN handling: `Round(+∞)` is `non_finite_number`, `Coth(+∞)` is `finite_real`, `\|NaN\|` is `number` (the only `Abs` read). |
 | `Add`, `Multiply`, `Divide`, `Power`, `Root`, `Sqrt` | `x + ∞` with `x: real` is `non_finite_number`; `∞ + (−∞)` is `number`; `2/∞` is `finite_integer`; `∞^2` is `non_finite_number`. |
 | `Erf`, `Erfc`, `Erfi`, `ErfInv`, `SinIntegral`, `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `ExpIntegralEi`, `EllipticE` (two-argument), `EllipticF`, `EllipticPi`, `AGM`, `Choose`/`Binomial`, `Pochhammer` | Any non-finite operand widens to `number`. |
@@ -2267,9 +2276,56 @@ Open items — genuine decisions, each with a default:
   *declared* literal result is the author's and is kept (§4.5).
 - **O4 — Rational literal types.** Not wanted under R2; the 11 residue
   rows are accepted precision loss, not a gap.
-- **O7 — The `sgn` handlers.** Default: not called from the type path
-  (§5.2). A later audit of that family, by the §2.5 method, may extend
-  `facts.sgn` to function expressions.
+- **O7 — The `sgn` handlers. EXECUTED 2026-08-24: the audit ran, the
+  family is pure, and `facts.sgn` now reaches function expressions.**
+  The audit followed every `sgn:` entry in `library/*.ts` (47 operator
+  handlers across arithmetic, trigonometry, complex, collections,
+  linear-algebra and core, plus the `trigFunction` factory's shared
+  handler) through its helpers by the §2.5 method. Findings:
+  - **45 of 47 were already pure.** The handler vocabulary — the sign
+    predicates (which recurse through operand `sgn` reads), `isSame`,
+    comparisons against machine-number constants, `.type` reads (pure
+    since R4), the assumption fact index (`getFactIndex`, a module-level
+    memo), `trigSign`'s quadrant lookup (gated on a number literal; its
+    `.N()` was already commented out), `apply2` on literal-guarded
+    operands (allocation only) — reaches no state change. The impure
+    `cmp()` branch that subtracts and numericizes exists only for
+    expression-vs-expression comparisons, which no handler performs
+    (they compare against machine numbers).
+  - **Two handlers evaluated, and were rewritten.** `Random.sgn` read
+    its domain's endpoints through `interval()`/`range()`, whose
+    fallback numericizes a compound bound — `Random(Range(1, Sum(...)))`
+    advanced the `any` axis 12 times per read. `Count.sgn` read
+    `isEmptyCollection`, which dispatches per-operator collection
+    handlers — `Filter`'s probes an element by running its predicate
+    (measured: 2 advances), `Interval`'s numericizes endpoints. Both now
+    read pure literal sources (`literalIntervalEndpoints`,
+    `literalRange`, `literalCollectionEmptiness`) and decline what only
+    evaluation could decide. Exclusion-at-the-wiring was rejected
+    instead of this: handlers recurse through operand signs, so an
+    impure member is reachable from inside any compound operand and the
+    family must be pure as a whole.
+  - **Measured, not just traced** (the Dot precedent): a drift probe ran
+    the raw dispatcher over a per-handler corpus (assumptions, held
+    values, compound operands, the recorded witnesses) asserting zero
+    advancement of all four invalidation axes; it failed on exactly the
+    two rewritten handlers before the fix and is now a regression test
+    (`sgn-audit.test.ts`, "SGN HANDLERS ARE PURE").
+  - **What changed observably:** `describe()` now answers `facts.sgn`
+    for applications (the operator handler, memoized per node) and for
+    symbols holding non-number expressions; the twins' recorded
+    sign-channel divergences closed (`operandSgn`, `gammaPoleType`, the
+    log heads, `Log`-with-base — tables now empty), which unblocks the
+    O7-held conversions (`Cot`/`Csc`/`Coth`/`Csch`, the
+    `Binomial`/`Choose`/`Pochhammer` trio, the Γ family, `Factorial`/
+    `Factorial2`, the log heads). `Random`/`Count` lose only
+    evaluation-dependent sign claims (`Random(Range(1, Sum(...)))` now
+    declines; one literal `Interval` endpoint still answers one-sided
+    claims). The `sgn` purity contract is documented on
+    `OperatorDefinition.sgn`. The `eltsgn` channel (`Range`/`Interval`
+    element signs) still reads the evaluating helpers — it is not
+    dispatched from the sign channel and rides §5.3 step 4 with
+    `elttype`.
 - **O8 — Non-strict engines.** Default chosen by this draft (§4.4): the
   runtime check runs only when `ce.strict` is true, so `strict: false`
   keeps its documented meaning — an opt-out from argument checking, at the
@@ -2375,8 +2431,10 @@ Open items — genuine decisions, each with a default:
 - The pre-canonicalization validation phase (ROADMAP): this design removes
   its motivating instances, and the R6 residual is its next one; it is not
   a substitute for it.
-- Calling the `sgn` handlers from the type path (O7) — deferred with its
-  default stated, not dropped.
+- ~~Calling the `sgn` handlers from the type path (O7) — deferred with
+  its default stated, not dropped.~~ No longer a non-goal: the O7 audit
+  executed 2026-08-24 and the type path now dispatches the (pure) `sgn`
+  handlers — see the O7 open item for the record.
 
 ## 8. Provenance and attribution
 

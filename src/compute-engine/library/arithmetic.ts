@@ -1087,16 +1087,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // from an operator `sgn` handler (`Negate(Floor(Abs(r)))`, whose result
       // type is a bare `finite_integer`) — a channel the operand descriptors
       // deliberately do not carry, their sign being type-derived only.
-      // Converting today would claim `finite_real` where this handler proves
-      // the pole and answers `number` — a type claim NARROWER than before,
+      // The conversion once risked claiming `finite_real` where this
+      // handler proves the pole and answers `number` — a narrower claim,
       // which is never acceptable (a narrower claim can be an unsound
-      // over-claim, where a wider one only loses precision). Same hold as
-      // `binomialType` (`library/combinatorics.ts`) and `gammaPoleType`
-      // (`library/type-handlers-types.ts`, where the hold note lives on the
-      // twin); it
-      // lifts when the audited sign channel for function expressions lands
-      // (open item O7 of
-      // `docs/plans/2026-08-22-type-handlers-on-types.md`).
+      // over-claim, where a wider one only loses precision). Descriptors
+      // now carry an application's handler-proven sign (open item O7 of
+      // `docs/plans/2026-08-22-type-handlers-on-types.md`), so nothing
+      // blocks the conversion of this head — or of `binomialType`
+      // (`library/combinatorics.ts`) and `gammaPoleType`
+      // (`library/type-handlers-types.ts`) — beyond it not being done yet;
+      // the plan doc's §5.3 status tracks it.
       type: ([x]) => {
         const s = x ? operandSgn(x) : undefined;
         // A non-negative integer factorial is a (finite) positive integer.
@@ -1205,14 +1205,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // symbolic rather than erroring — mirror `Factorial`'s signature
       // pattern rather than `(integer) -> integer`.
       signature: '(number) -> number',
-      // NOT yet converted to the `'types'` handler shape, for the same reason
+      // Not yet converted to the `'types'` handler shape, for the same reason
       // as `Factorial` above: the negative-integer branch widens the claim to
-      // `number`, and on a COMPOUND operand that negative sign is only an
-      // operator `sgn` handler's to prove — a channel the operand descriptors
-      // do not carry. Converting today would answer `finite_real` where this
-      // handler answers `number`, i.e. a NARROWER claim, which is never
-      // acceptable. Lifts with open item O7 of
-      // `docs/plans/2026-08-22-type-handlers-on-types.md`.
+      // `number`, and on a compound operand that negative sign is only an
+      // operator `sgn` handler's to prove. Descriptors carry that sign now
+      // (open item O7 of `docs/plans/2026-08-22-type-handlers-on-types.md`),
+      // so nothing blocks the conversion; it converts alongside `Factorial`.
       type: ([x]) => {
         const s = x ? operandSgn(x) : undefined;
         if (x?.isInteger === true && nonNegativeSign(s) === true)

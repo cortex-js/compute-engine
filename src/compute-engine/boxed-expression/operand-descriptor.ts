@@ -170,12 +170,16 @@ function structureOfExpression(op: Expression): OperandStructure | undefined {
  * type and it replaces the operand's own.
  *
  * Every fact is read from a pure source: the type, a literal's value, a
- * symbol's held value or recorded assumptions, structural facets. In
- * particular the sign of a function APPLICATION comes only from its type
- * (a ranged result such as `Abs`'s `real<0..>`) — the operator `sgn`
- * handlers are never invoked here, so a compound operand of signless type
- * answers `undefined`. Its FINITENESS does fall back on the value channel
- * (`Expression.isFinite`), for the reason given at that branch below.
+ * symbol's held value or recorded assumptions, structural facets. The sign
+ * of a function application reads `.sgn`, which dispatches the operator
+ * `sgn` handlers — a pure family: every handler must derive its answer
+ * without evaluation, canonicalization, or declarations (the contract on
+ * `OperatorDefinition.sgn`; the audit that established it and rewrote the
+ * two evaluating handlers is recorded at open item O7 of
+ * `docs/plans/2026-08-22-type-handlers-on-types.md`, and a drift-regression
+ * test in `sgn-audit.test.ts` pins it). Finiteness likewise falls back on
+ * the value channel (`Expression.isFinite`), for the reason given at that
+ * branch below.
  */
 export function describe(
   op: Expression,
@@ -222,29 +226,20 @@ export function describe(
       // `isFinite === false` also means "not a number at all", so a
       // `List`, a `Tuple` or an application of unknown result type answers
       // `false` there without being an infinity.
-      //
-      // The SIGN channel below is deliberately NOT extended the same way:
-      // reading an application's `.sgn` dispatches to the operator `sgn`
-      // handlers, which have not been audited for purity.
       finite = op.isFinite;
     }
   }
 
-  // Value channel first for atoms (a literal's value, a symbol's held value
-  // or assumption), then the sign the type itself proves (a ranged
-  // declaration, a literal's value type, a ranged result type). A symbol
-  // holding a NON-NUMBER expression is excluded from the value channel: its
-  // `.sgn` would delegate to the held expression, whose operator `sgn`
-  // handler is not a pure source (those handlers are unaudited and never
-  // consulted on the type path); a valueless symbol's own `.sgn` reads only
-  // assumptions and the declared type, which are pure.
+  // Value channel first (a literal's value, a symbol's held value or
+  // assumptions, an application's operator `sgn` handler), then the sign
+  // the type itself proves (a ranged declaration, a literal's value type,
+  // a ranged result type). The `.sgn` getter is a pure read for every
+  // operand kind (the constructor comment above states the contract): a
+  // symbol delegates to its held value — a held expression's operator
+  // handler included, behind a cycle guard — and an application dispatches
+  // its operator's `sgn` handler, memoized per node.
   let sgn: Sign | undefined;
-  if (isNumber(op)) sgn = op.sgn;
-  else if (isSymbol(op)) {
-    const held = op.valueDefinition?.value;
-    if (held === undefined) sgn = op.sgn;
-    else if (isNumber(held)) sgn = held.sgn;
-  }
+  if (isNumber(op) || isSymbol(op) || isFunction(op)) sgn = op.sgn;
   sgn ??= signOfType(type);
 
   // No `valid`, `application`, or `inferred` field: an error operand's TYPE

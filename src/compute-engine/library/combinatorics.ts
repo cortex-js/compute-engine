@@ -131,18 +131,15 @@ function binomialBigint(
  * arguments, nothing narrower than `number` is sound (`Binomial(∞, 2)` is
  * NaN).
  */
-// NOT yet converted to the `'types'` handler shape, deliberately: the
-// `n.isNegative` read below widens the claim to `number` on the Γ pole
-// (negative integer `n`, non-integer `k`), and on a COMPOUND operand that
-// proof can come from an operator `sgn` handler (`Sign(p)`, a `Divide`
-// whose sign recurses through its operands) — a channel the operand
-// descriptors deliberately do not carry (their sign is type-derived only).
-// Converting today would claim `finite_real` where this handler proves the
-// pole and answers `number` — a type claim NARROWER than before, which is
-// never acceptable (a narrower claim can be an unsound over-claim, where a
-// wider one only loses precision). These handlers convert when the audited
-// sign channel for function expressions lands (open item O7 of
-// `docs/plans/2026-08-22-type-handlers-on-types.md`).
+// Not yet converted to the `'types'` handler shape: the `n.isNegative`
+// read below widens the claim to `number` on the Γ pole (negative integer
+// `n`, non-integer `k`), and on a compound operand that proof can come
+// from an operator `sgn` handler (`Sign(p)`, a `Divide` whose sign
+// recurses through its operands). Descriptors carry an application's
+// handler-proven sign (open item O7 of
+// `docs/plans/2026-08-22-type-handlers-on-types.md`), so nothing blocks
+// the conversion beyond it not being done yet; it needs its own twin
+// battery, and the plan doc's §5.3 status tracks it.
 function binomialType(
   n: Expression | undefined,
   k: Expression | undefined

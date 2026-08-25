@@ -462,22 +462,15 @@ function logType(ops: ReadonlyArray<OperandDescriptor>): Type {
   }
   // A provably non-positive argument that may be 0 → −∞ pole (`ln(0)`).
   //
-  // NARROWER THAN THE EXPRESSION SHAPE WHEN THE SIGN IS ONLY A `sgn`
-  // HANDLER'S: this gate widens the claim to `number` on a PROVEN
-  // non-positive sign, so an operand whose non-positivity only an operator
-  // `sgn` handler knows — `Negate(Floor(Abs(x)))`, whose result type is a
-  // bare `finite_integer` — falls through here and reaches the join below,
-  // claiming `complex` where the expression shape claims `number`. THIS
-  // HELPER MUST NOT BE WIRED TO `Ln`/`Log`/`Lb`/`Lg`/`Log2`/`Log10` until
-  // the sign channel reaches function applications — either because those
-  // applications' result types carry a range, or because the audit of the
-  // operator `sgn` handlers lets the type path call them and so closes the
-  // compound-operand sign gap (open item O7 of
-  // `docs/plans/2026-08-22-type-handlers-on-types.md`). Wiring it before
-  // then ships exactly the narrower claim the divergence table in
-  // `test/compute-engine/type-handler-twins.test.ts` records, and a
-  // narrower claim can be an unsound over-claim where a wider one only
-  // loses precision.
+  // This gate widens the claim to `number` on a proven non-positive sign.
+  // The descriptor's sign fact covers the case that once made wiring this
+  // to the log heads unsound — a sign only an operator `sgn` handler knows
+  // (`Negate(Floor(Abs(x)))`, whose result type is a bare
+  // `finite_integer`) — because `describe()` consults those handlers for
+  // applications (open item O7 of
+  // `docs/plans/2026-08-22-type-handlers-on-types.md`); the divergence
+  // table in `test/compute-engine/type-handler-twins.test.ts` is empty, so
+  // `Ln`/`Log`/`Lb`/`Lg`/`Log2`/`Log10` can be wired when they convert.
   if (positiveSign(xSgn) === false && negativeSign(xSgn) !== true)
     return 'number';
   if (base && !usableBase(base)) return 'number';
@@ -812,20 +805,15 @@ function arctanType(ops: ReadonlyArray<OperandDescriptor>): Type {
  *
  * NARROWER THAN THE EXPRESSION SHAPE WHEN THE SIGN IS ONLY A `sgn`
  * HANDLER'S: the pole gate widens the claim to `number` on a PROVEN
- * non-positive sign, so an integer-typed compound whose non-positivity only
- * an operator `sgn` handler knows — `Negate(Floor(Abs(x)))`, whose result
- * type is a bare `finite_integer` — misses the gate here and claims
- * `finite_real` where the expression shape claims `number`. THIS HELPER
- * MUST NOT BE WIRED TO the Γ-family operators (`Gamma`, `GammaLn`,
- * `Digamma`, `Trigamma`, `PolyGamma`) until the sign channel reaches
- * function applications — either because those applications' result types
- * carry a range, or because the audit of the operator `sgn` handlers lets
- * the type path call them and so closes the compound-operand sign gap
- * (open item O7 of `docs/plans/2026-08-22-type-handlers-on-types.md`).
- * Wiring it before then ships exactly the narrower claim the divergence
- * table in `test/compute-engine/type-handler-twins.test.ts` records, and a
- * narrower claim can be an unsound over-claim where a wider one only loses
- * precision.
+ * non-positive sign. The descriptor's sign fact covers the case that once
+ * made wiring this to the Γ family unsound — a sign only an operator
+ * `sgn` handler knows (`Negate(Floor(Abs(x)))`, whose result type is a
+ * bare `finite_integer`) — because `describe()` consults those handlers
+ * for applications (open item O7 of
+ * `docs/plans/2026-08-22-type-handlers-on-types.md`); the divergence
+ * table in `test/compute-engine/type-handler-twins.test.ts` is empty, so
+ * the Γ-family operators (`Gamma`, `GammaLn`, `Digamma`, `Trigamma`,
+ * `PolyGamma`) can be wired when they convert.
  */
 export function gammaPoleType(x: OperandDescriptor | undefined): Type {
   if (!x) return 'number';

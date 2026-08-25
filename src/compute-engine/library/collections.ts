@@ -3999,8 +3999,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       for (const x of xs.each()) if (x.isSame(what)) n += 1;
       return engine.number(n);
     },
+    // Emptiness is read from pure sources only — never `isEmptyCollection`:
+    // that facet dispatches per-operator collection handlers which may
+    // evaluate (`Filter`'s probes an element by running its predicate, and
+    // `Interval`'s numericizes its endpoints), and `sgn` handlers are
+    // dispatched from the type path, which must not change engine state
+    // (open item O7 of `docs/plans/2026-08-22-type-handlers-on-types.md`).
+    // `literalCollectionEmptiness` documents which sources decide; lazy
+    // views and comprehensions answer `undefined` where the handler
+    // dispatch once decided.
     sgn: ([xs, what]) => {
-      const empty = xs.isEmptyCollection;
+      const empty = literalCollectionEmptiness(xs);
       if (empty === true) return 'zero';
       // A non-empty collection has a POSITIVE cardinality, but a matching
       // count over one may still be zero (nothing matches).
@@ -10295,6 +10304,107 @@ function evaluateQuantifier(
  * trusted as-given when provided explicitly; iteration produces an empty
  * collection when the step's sign disagrees with the direction (lower→upper).
  */
+/**
+ * Pure variant of `range()`: bounds are read through the `.re` getter — a
+ * number literal's value, or a symbol's held numeric value — never
+ * evaluated. A compound bound (`50π`, a `Sum`) reads as NaN and propagates,
+ * exactly like `range()`'s symbolic-bound NaN; callers bail on NaN.
+ *
+ * Use this from derivation channels that must not change engine state (the
+ * operator `sgn` handlers, which the type path dispatches — open item O7 of
+ * `docs/plans/2026-08-22-type-handlers-on-types.md`): `range()` itself
+ * falls back to `.N()` for an exact-but-compound bound, and evaluating an
+ * arbitrary bound expression can push scopes and advance the engine's
+ * invalidation axes.
+ */
+export function literalRange(
+  expr: Expression
+): [lower: number, upper: number, step: number] {
+  if (!isFunction(expr)) return [1, 0, 0];
+  if (expr.nops === 0) return [1, 0, 0];
+
+  const op1 = expr.op1.re;
+  if (expr.nops === 1) return [1, op1, 1];
+
+  const op2 = expr.op2.re;
+  if (expr.nops === 2) return [op1, op2, op2 >= op1 ? 1 : -1];
+
+  return [op1, op2, expr.op3.re];
+}
+
+/**
+ * Emptiness of a collection from PURE sources only — no collection-handler
+ * dispatch. An eager element-carrying literal (`List`, `Tuple`, and a `Set`
+ * that is not comprehension-shaped) holds its elements as operands, so
+ * `nops` decides; a dictionary and a string hold their content in plain
+ * fields; a `Range` with literal bounds decides by the same count
+ * arithmetic as its collection `count` handler; a symbol answers for its
+ * held value. Everything else — lazy views, comprehensions, intervals,
+ * valueless symbols — answers `undefined`.
+ *
+ * The `isEmptyCollection` facet is deliberately NOT consulted: it
+ * dispatches per-operator collection handlers that may evaluate (`Filter`
+ * probes an element by running its predicate; `Interval` numericizes its
+ * endpoints), and this helper serves the operator `sgn` channel, which the
+ * type path dispatches and which therefore must not change engine state
+ * (open item O7 of `docs/plans/2026-08-22-type-handlers-on-types.md`).
+ */
+export function literalCollectionEmptiness(
+  xs: Expression
+): boolean | undefined {
+  if (isString(xs)) return xs.string.length === 0;
+  // A dictionary is its own expression kind (not a function expression) and
+  // keeps its entries in a plain record: `count` is a direct field read.
+  if (isDictionary(xs)) return xs.count === 0;
+  // A symbol answers for its held value (a pure read). Follow a chain of
+  // symbol-valued symbols with a seen-guard so a definition cycle cannot
+  // loop.
+  if (isSymbol(xs)) {
+    const seen = new Set<string>();
+    let current: Expression = xs;
+    while (isSymbol(current)) {
+      if (seen.has(current.symbol)) return undefined;
+      seen.add(current.symbol);
+      const held = current.valueDefinition?.value;
+      if (held === undefined) return undefined;
+      current = held;
+    }
+    return literalCollectionEmptiness(current);
+  }
+  if (!isFunction(xs)) return undefined;
+  const op = xs.operator;
+  if (op === 'List' || op === 'Tuple') return xs.nops === 0;
+  if (op === 'Set') {
+    // A comprehension-shaped Set (`{body, Element(...)|Condition(...)}` —
+    // the shapes `parseSetComprehension` recognizes) computes its elements
+    // on demand; only a plain element list decides structurally. The shape
+    // test is structural on purpose — parsing the comprehension itself
+    // canonicalizes its domain and condition — and deliberately broader
+    // than the parser (a two-element literal set whose second element
+    // happens to be an `Element` predicate is declined, not misread).
+    if (
+      xs.nops === 2 &&
+      (isFunction(xs.op2, 'Element') || isFunction(xs.op2, 'Condition'))
+    )
+      return undefined;
+    return xs.nops === 0;
+  }
+  if (op === 'Range') {
+    // Mirror the `Range` collection `count` handler exactly (same file,
+    // `Range` definition): a zero step counts 0, a non-finite bound counts
+    // Infinity (non-empty — a directional bounds test alone gets
+    // `Range(1, 5, -∞)` wrong: it has one element), and otherwise the
+    // grid-point count decides.
+    const [lower, upper, step] = literalRange(xs);
+    if (Number.isNaN(lower) || Number.isNaN(upper) || Number.isNaN(step))
+      return undefined;
+    if (step === 0) return true;
+    if (!Number.isFinite(lower) || !Number.isFinite(upper)) return false;
+    return Math.max(0, Math.floor((upper - lower) / step) + 1) === 0;
+  }
+  return undefined;
+}
+
 export function range(
   expr: Expression
 ): [lower: number, upper: number, step: number] {
