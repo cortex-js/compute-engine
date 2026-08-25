@@ -245,14 +245,17 @@ export function describe(
   sgn ??= signOfType(type);
 
   // Assumption MAGNITUDE bounds, with their strictness, for a valueless
-  // symbol — the one shape of assumption knowledge the type cannot carry
-  // (numeric range types have closed ends only, so `assume(0 < v < 1)`
-  // refines the type to `real<0..1>` and the strict `< 1` survives nowhere
-  // but the fact index). Read from the memoized index — a pure source, the
-  // same one the sign read above consults through `BoxedSymbol.sgn`. Only
-  // finite machine-number bounds travel: an exact bound no machine number
-  // represents (`1/3`) reads as no bound here, the same accepted loss as
-  // its absent range.
+  // symbol. The range construct has closed ends, and the assumption
+  // refinement emits the algebra's open-endpoint spelling — an
+  // intersection with a negated value type, `(real<0..>) & !0` — for the
+  // zero case only, so `assume(0 < v < 1)` refines the type to
+  // `(real<0..1>) & !0` and the strict `< 1` survives, today, only in the
+  // fact index read here. (A DECLARED exclusion at any endpoint is read
+  // separately, by `typeExcludesValue` in the comparison helpers.) Read
+  // from the memoized index — a pure source, the same one the sign read
+  // above consults through `BoxedSymbol.sgn`. Only finite machine-number
+  // bounds travel: an exact bound no machine number represents (`1/3`)
+  // reads as no bound here, the same accepted loss as its absent range.
   let bounds: OperandFacts['bounds'];
   if (isSymbol(op) && op.valueDefinition?.value === undefined) {
     const engine = op.engine;

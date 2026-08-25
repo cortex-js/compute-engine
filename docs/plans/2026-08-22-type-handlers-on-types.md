@@ -1314,11 +1314,18 @@ type?: (
   `undefined` otherwise.
 - `facts.bounds` (added 2026-08-25 with the bounded-inverse conversion)
   carries a valueless symbol's assumption MAGNITUDE bounds as machine
-  numbers, with their strictness — the one shape of assumption knowledge
-  a ranged type cannot hold, since numeric range types have closed ends
-  only (`assume(0 < v < 1)` refines the type to `real<0..1>`; the strict
-  `< 1` lives only here). Read from the memoized assumption fact index —
-  the same pure source the sign fact consults.
+  numbers, with their strictness. The type ALGEBRA can spell an open
+  endpoint — an intersection with a negated value type,
+  `(real<0..1>) & !1` — and the comparison helpers read a DECLARED
+  exclusion of that shape (`typeExcludesValue`); but the assumption
+  refinement emits it only for zero (`!0`, the "positive" spelling), so
+  `assume(0 < v < 1)` refines the type to `(real<0..1>) & !0` and the
+  strict `< 1` reaches handlers, today, only through this fact.
+  Generalizing the refinement to emit `!k` for every strict machine
+  bound would make the type the single channel and retire the fact; that
+  rides the ROADMAP pass on assumption-bound recording. Read from the
+  memoized assumption fact index — the same pure source the sign fact
+  consults.
 - For a collection-typed, absent or `unknown`-typed operand the scalar
   facts are `undefined`, and the collection facts are whatever the type
   proves (§5.1).

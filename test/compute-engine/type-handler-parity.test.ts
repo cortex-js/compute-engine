@@ -559,11 +559,13 @@ describe('bounded inverse trig heads read ranged types', () => {
   });
 
   it('a STRICT assumed bound proves membership in an OPEN domain', () => {
-    // Numeric range types have closed ends only, so `0 < v < 1` refines
-    // the type to `real<0..1>` and cannot by itself prove `v < 1` strictly;
-    // the strictness travels on the descriptor's assumption-bounds fact
-    // (`facts.bounds`), which is what proves membership in Artanh's open
-    // (−1, 1) and non-membership at Arcoth's ±1 poles.
+    // The assumption refinement emits the open-endpoint spelling
+    // (`& !k`) only for zero, so `0 < v < 1` refines the type to
+    // `(real<0..1>) & !0` and the range alone cannot prove `v < 1`
+    // strictly; the strictness travels on the descriptor's
+    // assumption-bounds fact (`facts.bounds`), which is what proves
+    // membership in Artanh's open (−1, 1) and non-membership at Arcoth's
+    // ±1 poles.
     // The assumption is built as MathJSON: a multi-character name in a
     // LaTeX string (`0 < v01 < 1`) parses as a PRODUCT of one-letter
     // symbols, and the assumption then never mentions the declared symbol.
@@ -571,6 +573,26 @@ describe('bounded inverse trig heads read ranged types', () => {
     ce.assume(ce.box(['Less', 0, 'v01', 1]));
     expect(ce.box(['Artanh', 'v01']).type.toString()).toBe('finite_real');
     expect(ce.box(['Arcoth', 'v01']).type.toString()).toBe('finite_complex');
+  });
+
+  it('a DECLARED open-endpoint spelling proves the strict comparison', () => {
+    // The lattice's open endpoint is a closed bound plus an exclusion of
+    // it (`& !1` — the same convention as `& !0` for "positive"). The
+    // comparison helpers combine the two (`typeExcludesValue`), so a
+    // direct declaration of the open unit interval proves membership in
+    // Artanh's open (−1, 1) exactly as the assumed spelling does.
+    ce.declare('w01', '(real<0..1>) & !0 & !1');
+    expect(ce.box(['Artanh', 'w01']).type.toString()).toBe('finite_real');
+    expect(ce.box(['Arcoth', 'w01']).type.toString()).toBe('finite_complex');
+    // The exclusion is read by MEMBERSHIP in the negated type, not by node
+    // shape: the reducer folds sibling exclusions by De Morgan, and the
+    // folded spelling proves the same strict bounds.
+    ce.declare('w01b', '(real<0..1>) & !(0 | 1)');
+    expect(ce.box(['Artanh', 'w01b']).type.toString()).toBe('finite_real');
+    // And an exclusion at a log base's forbidden point: `(real<1..2>) & !1`
+    // is a usable base (positive, finite, provably ≠ 1).
+    ce.declare('base1', '(finite_real<1..2>) & !1');
+    expect(ce.box(['Log', 4, 'base1']).type.toString()).toBe('finite_real');
   });
 
   it('an exact literal with no machine value keeps the wide claim', () => {

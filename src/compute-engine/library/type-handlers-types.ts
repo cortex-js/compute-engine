@@ -1,5 +1,6 @@
 import type { OperandDescriptor, Sign } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
@@ -285,8 +286,12 @@ function mayBeNaN(d: OperandDescriptor): boolean {
  * must add `finite_number` to the exclusion list first.
  *
  * Range endpoints in the type lattice are inclusive; a strict bound is
- * carried separately, as an intersection with `!0` for the zero case, and
- * is read here through the sign rather than the range.
+ * carried separately, as an intersection with a negated value type —
+ * `(real<0..>) & !0` is "positive", `(real<0..1>) & !0 & !1` the open unit
+ * interval. The zero exclusion reaches the comparisons through the sign;
+ * an exclusion at any other endpoint is read by `typeExcludesValue`, which
+ * the `provably*` helpers combine with a closed bound AT that endpoint to
+ * prove the strict comparison.
  */
 function typeBounds(
   t: Type,
@@ -349,13 +354,47 @@ function typeBounds(
 
 /**
  * Three-valued magnitude comparisons against a machine constant `k`, from
- * the operand's ranged type, its literal value, its assumption bounds
- * (`facts.bounds` — the only carrier of a STRICT bound, since numeric
- * range types have closed ends only), and — for `k = 0` only, the one
- * comparison a sign decides — its sign. `false` here means "not proven",
- * never "proven otherwise": every caller treats anything but `true` as
- * undecided.
+ * the operand's ranged type (a closed bound AT `k` combined with a type
+ * exclusion of `k` — `(real<0..1>) & !1` — proves the strict comparison),
+ * its literal value, its assumption bounds (`facts.bounds`, which carry a
+ * strict bound the assumption refinement did not spell into the type), and
+ * — for `k = 0` only, the one comparison a sign decides — its sign.
+ * `false` here means "not proven", never "proven otherwise": every caller
+ * treats anything but `true` as undecided.
  */
+/**
+ * Does the type PROVE the value is not `k`? A negated value type in an
+ * intersection does (`(real<0..1>) & !1` excludes 1 — the lattice's
+ * spelling of an open endpoint); a transparent alias answers for its
+ * definition; a union excludes `k` only when every member does.
+ * Deliberately conservative: `false` means "not proven", never "admits
+ * `k`".
+ */
+function typeExcludesValue(t: Type, k: number, seen?: Set<object>): boolean {
+  if (typeof t === 'string') return false;
+  switch (t.kind) {
+    case 'negation':
+      // Membership of `k` in the NEGATED type proves the exclusion — not
+      // just the exact `!k` node: the type reducer folds sibling
+      // exclusions by De Morgan (`!0 & !1` → `!(0 | 1)`), and a negated
+      // range (`!(real<1..2>)`) excludes every value it covers.
+      return isSubtype({ kind: 'value', value: k }, t.type);
+    case 'intersection':
+      return t.types.some((m) => typeExcludesValue(m, k, seen));
+    case 'union':
+      return t.types.every((m) => typeExcludesValue(m, k, seen));
+    case 'reference': {
+      if (!t.alias || t.def === undefined) return false;
+      seen ??= new Set();
+      if (seen.has(t)) return false;
+      seen.add(t);
+      return typeExcludesValue(t.def, k, seen);
+    }
+    default:
+      return false;
+  }
+}
+
 function provablyGreater(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v > k;
@@ -366,7 +405,11 @@ function provablyGreater(d: OperandDescriptor, k: number): boolean {
     (b.lower > k || (b.lower === k && b.lowerStrict === true))
   )
     return true;
-  return typeBounds(d.type).lo > k;
+  const tb = typeBounds(d.type);
+  if (tb.lo > k) return true;
+  // A closed bound AT `k` plus an exclusion OF `k` is the lattice's strict
+  // bound: `(real<1..>) & !1` proves > 1.
+  return tb.lo === k && typeExcludesValue(d.type, k);
 }
 
 function provablyGreaterEqual(d: OperandDescriptor, k: number): boolean {
@@ -387,7 +430,10 @@ function provablyLess(d: OperandDescriptor, k: number): boolean {
     (b.upper < k || (b.upper === k && b.upperStrict === true))
   )
     return true;
-  return typeBounds(d.type).hi < k;
+  const tb = typeBounds(d.type);
+  if (tb.hi < k) return true;
+  // Closed-at-`k` bound plus exclusion of `k`: the lattice's strict bound.
+  return tb.hi === k && typeExcludesValue(d.type, k);
 }
 
 function provablyLessEqual(d: OperandDescriptor, k: number): boolean {
@@ -409,12 +455,12 @@ function provablyEquals(d: OperandDescriptor, k: number): boolean {
 
 /** Is the operand provably DIFFERENT from the machine constant `k`? A
  * literal's value decides it; otherwise `k` outside the type's bounds or
- * the assumption bounds (a strict bound AT `k` counts — that is the case
- * only the assumption channel can carry), or a sign that excludes `k`'s
- * half-line, proves it. */
+ * the assumption bounds (a strict bound AT `k` counts), a type exclusion
+ * of `k` (`… & !k`), or a sign that excludes `k`'s half-line, proves it. */
 function provablyDiffers(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v !== k;
+  if (typeExcludesValue(d.type, k)) return true;
   const ab = d.facts.bounds;
   if (ab !== undefined) {
     if (
