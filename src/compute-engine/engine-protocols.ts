@@ -3950,10 +3950,11 @@ function receiverType(ops: ReadonlyArray<Expression>): Type | undefined {
   // `Self = 3`, `compare(3, 4)` would check argument 2 against the declared
   // `Self` — the value type `3` — and refute `4` as provably disjoint, where
   // the pre-O9 receiver type `finite_integer` admitted it. A literal
-  // projects ALL the way to its tier (`stripNumericRanges`) — `√2`'s sign
-  // range `(finite_real<0..>) & !0` is an intersection, which
-  // `isDecidedReceiverType` treats as undecided, so leaving it would turn a
-  // decided pre-O9 receiver into an undispatched one. Conformance lookups
+  // projects ALL the way to its tier (`stripNumericRanges`) — an
+  // over-double-range literal's sign range (`(finite_integer<0..>) & !0`
+  // for `10⁴⁰⁰`) is an intersection, which `isDecidedReceiverType` treats
+  // as undecided, so leaving it would turn a decided pre-O9 receiver into
+  // an undispatched one. Conformance lookups
   // widen the same way: conformances are declared against tiers.
   return self._literalType !== undefined
     ? stripNumericRanges(self.type.type)
@@ -4233,8 +4234,8 @@ function dispatchMember(
   if (!self.isValid) return undefined;
   // Tier-binding rule again (`receiverType`): conformance edges are declared
   // against tiers, so a literal receiver dispatches on its tier, not on its
-  // value type — and a literal's sign range must not read as an undecided
-  // intersection here.
+  // value type — and a literal's range (or its over-double-range sign
+  // intersection) must not read as an undecided receiver here.
   const runtime =
     self._literalType !== undefined
       ? stripNumericRanges(self.type.type)

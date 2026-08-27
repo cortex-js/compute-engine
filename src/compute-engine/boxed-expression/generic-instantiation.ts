@@ -204,8 +204,9 @@ export function solveArm(
     // application's result type — an over-specific contract nobody wrote.
     // A NUMBER LITERAL projects all the way to its tier
     // (`stripNumericRanges`): its type may be a value node (`5`), a
-    // singleton range (`finite_rational<0.5..0.5>`) or a sign range
-    // (`(finite_real<0..>) & !0` for `√2`), and all three are literal
+    // singleton range (`finite_rational<0.5..0.5>`), an enclosure range
+    // (`finite_real<1.4..1.5>` for `√2`) or an over-double-range sign
+    // range (`(finite_integer<0..>) & !0` for `10⁴⁰⁰`) — all literal
     // cargo. Any other operand goes through `widenValueTypes`, which
     // widens embedded value nodes and rational singletons but PRESERVES a
     // handler's deliberate range claim (`identity(|x|)` still binds

@@ -1279,6 +1279,35 @@ export class BigDecimal {
   }
 
   /**
+   * Round to `n` significant digits with DIRECTED rounding: `'floor'` rounds
+   * toward −∞, `'ceiling'` toward +∞. The result therefore bounds the value
+   * from the requested side (`x.toPrecisionToward(n, 'floor') <= x`), which
+   * is what the construction of an enclosing interval needs — `toPrecision`
+   * rounds half-to-even and can land on either side.
+   * If the value already has `n` or fewer significant digits, returns this.
+   */
+  toPrecisionToward(n: number, direction: RoundDir): BigDecimal {
+    if (this.significand === 0n || !Number.isFinite(this.exponent)) return this;
+
+    const digits = this._digitCount();
+    if (digits <= n) return this;
+
+    // `roundMagnitudeToward` rounds a magnitude away from zero when `up` is
+    // set: ceiling of a positive value and floor of a negative one both
+    // point away from zero, hence the sign-conditional `up`.
+    const negative = this.significand < 0n;
+    const [mant, exp] = roundMagnitudeToward(
+      negative ? -this.significand : this.significand,
+      false,
+      this.exponent,
+      n,
+      (direction === 'ceiling') !== negative,
+      digits
+    );
+    return fromRaw(negative ? -mant : mant, exp);
+  }
+
+  /**
    * Truncate fractional part and return a bigint.
    * Throws if the value is NaN or Infinity.
    */

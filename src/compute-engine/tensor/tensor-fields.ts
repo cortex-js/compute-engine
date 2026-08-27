@@ -545,8 +545,9 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
   }
 
   if (isNumber(expr)) {
-    // A literal's public type carries its value or sign since ruling O9
-    // (`5`, `finite_rational<0.5..0.5>`, `(finite_real<0..>) & !0`) — an
+    // A literal's public type carries its value or an enclosing range since
+    // ruling O9 (`5`, `finite_rational<0.5..0.5>`, `finite_real<1.4..1.5>`)
+    // — an
     // OBJECT node, which a string switch would send to the `expression`
     // dtype, silently demoting every numeric tensor to the exact field
     // (`.N()` then kept rationals, `MatrixRank` stayed inert). Project the

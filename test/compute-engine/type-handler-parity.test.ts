@@ -595,13 +595,15 @@ describe('bounded inverse trig heads read ranged types', () => {
     expect(ce.box(['Log', 4, 'base1']).type.toString()).toBe('finite_real');
   });
 
-  it('an exact literal with no machine value keeps the wide claim', () => {
-    // 1/3 ∈ [−1, 1], but the descriptor's literal channel carries machine
-    // singletons only (accepted rational-literal residue, ruling O4): the
-    // claim widens to the sound join rather than reading a float
-    // projection. The VALUE is still exact — only the static type widened.
+  it('an exact literal with no machine value proves its domain through its enclosure', () => {
+    // The literal channel still carries machine singletons only (accepted
+    // rational-literal residue, ruling O4) — no handler reads `1/3` as a
+    // value. But the literal's TYPE now encloses it
+    // (`finite_rational<0.33..0.34>`), and `[0.33, 0.34] ⊆ [−1, 1]` is a
+    // bounds fact, so the domain claim no longer widens to the complex
+    // join.
     expect(ce.box(['Arcsin', ['Rational', 1, 3]]).type.toString()).toBe(
-      'finite_complex'
+      'finite_real'
     );
     // A machine-representable literal still classifies exactly.
     expect(ce.box(['Arcsin', 0.5]).type.toString()).toBe('finite_real');

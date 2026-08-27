@@ -124,3 +124,56 @@ describe('interval arithmetic foundation', () => {
     expect(lo.lte(exact) && exact.lte(hi)).toBe(true);
   });
 });
+
+describe('toPrecisionToward', () => {
+  test('floor/ceiling bracket the value at 2 significant digits', () => {
+    const x = new BigDecimal('1.41421356237');
+    expect(x.toPrecisionToward(2, 'floor').toString()).toBe('1.4');
+    expect(x.toPrecisionToward(2, 'ceiling').toString()).toBe('1.5');
+  });
+
+  test('floor rounds toward −∞ for negatives (magnitude UP)', () => {
+    const x = new BigDecimal('-1.41421356237');
+    expect(x.toPrecisionToward(2, 'floor').toString()).toBe('-1.5');
+    expect(x.toPrecisionToward(2, 'ceiling').toString()).toBe('-1.4');
+  });
+
+  test('a value already within the digit budget is returned as is', () => {
+    const x = new BigDecimal('1.4');
+    expect(x.toPrecisionToward(2, 'floor')).toBe(x);
+    expect(x.toPrecisionToward(2, 'ceiling')).toBe(x);
+    expect(new BigDecimal('0').toPrecisionToward(2, 'ceiling').isZero()).toBe(
+      true
+    );
+  });
+
+  test('ceiling can carry into a new leading digit', () => {
+    expect(new BigDecimal('0.997').toPrecisionToward(2, 'ceiling').toString()).toBe(
+      '1'
+    );
+    expect(new BigDecimal('-0.997').toPrecisionToward(2, 'floor').toString()).toBe(
+      '-1'
+    );
+  });
+
+  test('exactly-dropped zeros do not step outward', () => {
+    // The dropped digits are all zero, so both directions return the same
+    // value — no spurious outward step.
+    const x = new BigDecimal('1.4000000');
+    expect(x.toPrecisionToward(2, 'floor').toString()).toBe('1.4');
+    expect(x.toPrecisionToward(2, 'ceiling').toString()).toBe('1.4');
+  });
+
+  test('brackets across magnitudes, floor <= half-even <= ceiling', () => {
+    for (const s of ['123456', '0.00123456', '9.99e40', '7.77e-40']) {
+      for (const sign of ['', '-']) {
+        const x = new BigDecimal(sign + s);
+        const lo = x.toPrecisionToward(3, 'floor');
+        const hi = x.toPrecisionToward(3, 'ceiling');
+        const mid = x.toPrecision(3);
+        expect(lo.lte(mid) && mid.lte(hi)).toBe(true);
+        expect(lo.lte(x) && x.lte(hi)).toBe(true);
+      }
+    }
+  });
+});

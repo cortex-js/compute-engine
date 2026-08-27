@@ -441,11 +441,13 @@ describe('elementaryFunctionType', () => {
   // row — one where the descriptor knows less, two where it knows more:
   //
   //  (a) the expressions shape falls back on `x.re` — the machine-float
-  //      projection — when a literal carries no exact machine value (`1/3`,
-  //      `√2`, a bigint past 2⁵³) or when a symbol holds a value its
-  //      declared type does not narrow to (`a := 5`). The descriptor has
-  //      only the ranged type, so the magnitude stays undecided and the
-  //      claim widens.
+  //      projection — when a symbol holds a value its declared type does
+  //      not narrow to (`a := 5`). The descriptor has only the ranged
+  //      type, so the magnitude stays undecided and the claim widens.
+  //      (LITERALS with no exact machine value — `1/3`, `√2`, a bigint
+  //      past 2⁵³ — used to diverge the same way; since their types carry
+  //      an enclosing range, `typeBounds` decides the magnitude and the
+  //      channels agree, so those rows are gone from the tables below.)
   //  (b) `Exp(r)` is the mirror case: the descriptor's SIGN comes from the
   //      result type (`(finite_real<0..>) & !0` proves positive, hence
   //      non-zero), while the expressions shape asks `isEqual(0)`, which
@@ -472,7 +474,6 @@ describe('elementaryFunctionType', () => {
   // parity, since the shapes differ by design. The adopted behavior is
   // pinned directly in `type-handler-parity.test.ts`.
   const ARCSIN_D: Divergences = {
-    '1/3': ['finite_real', 'finite_complex'],
     'smd:real<-0.5..0.5>': ['finite_complex', 'finite_real'],
     // A ranged RESULT type is the third witness of loss class (c): `Sign(r)`
     // types `finite_integer<-1..1>`, so `typeBounds` proves the operand lies
@@ -489,8 +490,6 @@ describe('elementaryFunctionType', () => {
     test(`${head} — the exact-value fast path`, () => abHead(head, ARCSIN_D));
 
   const ARCSEC_D: Divergences = {
-    sqrt2: ['finite_real', 'finite_complex'],
-    bigint: ['finite_real', 'finite_complex'],
     'a=5': ['finite_real', 'finite_complex'],
     'Exp(r)': ['number', 'finite_complex'],
     'bigd:real<2..>': ['number', 'finite_real'],
@@ -502,9 +501,6 @@ describe('elementaryFunctionType', () => {
 
   test('Artanh — the exact-value fast path and the declared ranges', () =>
     abHead('Artanh', {
-      '1/3': ['finite_real', 'complex'],
-      sqrt2: ['finite_complex', 'complex'],
-      bigint: ['finite_complex', 'complex'],
       'a=5': ['finite_complex', 'complex'],
       'bigd:real<2..>': ['complex', 'finite_complex'],
       'smd:real<-0.5..0.5>': ['complex', 'finite_real'],
@@ -513,9 +509,6 @@ describe('elementaryFunctionType', () => {
 
   test('Arcoth — the exact-value fast path and the declared ranges', () =>
     abHead('Arcoth', {
-      '1/3': ['finite_complex', 'complex'],
-      sqrt2: ['finite_real', 'complex'],
-      bigint: ['finite_real', 'complex'],
       'a=5': ['finite_real', 'complex'],
       'bigd:real<2..>': ['complex', 'finite_real'],
       'smd:real<-0.5..0.5>': ['complex', 'finite_complex'],
@@ -524,7 +517,6 @@ describe('elementaryFunctionType', () => {
 
   test('Arsech — the exact-value fast path, the type-proved sign and the declared ranges', () =>
     abHead('Arsech', {
-      '1/3': ['finite_real', 'finite_complex'],
       'Exp(r)': ['complex', 'finite_complex'],
       'bigd:real<2..>': ['complex', 'finite_complex'],
       'twod:real<2..2>': ['complex', 'finite_complex'],
@@ -538,8 +530,6 @@ describe('elementaryFunctionType', () => {
 
   test('Arcosh — the exact-value fast path and the declared ranges', () =>
     abHead('Arcosh', {
-      sqrt2: ['finite_real', 'finite_complex'],
-      bigint: ['finite_real', 'finite_complex'],
       'a=5': ['finite_real', 'finite_complex'],
       'bigd:real<2..>': ['finite_complex', 'finite_real'],
       'twod:real<2..2>': ['finite_complex', 'finite_real'],

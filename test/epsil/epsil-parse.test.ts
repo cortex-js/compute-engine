@@ -54,13 +54,20 @@ describe('EPSIL PARSING DIRECTIVES', () => {
   test('Navigator directive (host pragmas enabled)', () => {
     // `#navigator` reads host state, so it is gated behind `allowHostPragmas`
     // (default off — see the gating tests in `execute.test.ts`).
-    // `navigator` is not available when running in a node environment
-    // node v22 added support for the navigator object
+    // A global `navigator` object only exists in browsers and in Node 21+;
+    // on an older Node the pragma answers the symbol `Nothing` (the
+    // parser's shared no-host-state answer — see `parsePragma` in
+    // `src/epsil/parser.ts`).
     const [ua, diags] = parseEpsil('#navigator("userAgent")', undefined, {
       allowHostPragmas: true,
     });
     expect(diags).toHaveLength(0);
-    const validUa = ua === 'Undefined' || stringValue(ua)?.startsWith('Node');
+    const symbol =
+      typeof ua === 'string' ? ua : ((ua as { sym?: string }).sym ?? '');
+    const validUa =
+      symbol === 'Nothing' ||
+      symbol === 'Undefined' ||
+      stringValue(ua)?.startsWith('Node') === true;
     expect(validUa).toBe(true);
   });
   test('Environment variable directive (host pragmas enabled)', () => {

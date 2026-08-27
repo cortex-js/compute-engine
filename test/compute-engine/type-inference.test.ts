@@ -16,10 +16,8 @@ describe('TYPE INFERENCE THROUGH EXPRESSIONS', () => {
 
   it('should infer type of Sqrt', () => {
     // sqrt(2) is an exact real literal, so its type is the literal's own
-    // positive-and-non-zero range rather than the `finite_real` tier.
-    expect(ce.parse('\\sqrt{2}').type.toString()).toBe(
-      '(finite_real<0..>) & !0'
-    );
+    // enclosing range rather than the `finite_real` tier.
+    expect(ce.parse('\\sqrt{2}').type.toString()).toBe('finite_real<1.4..1.5>');
   });
 
   it('should infer type of integer product', () => {

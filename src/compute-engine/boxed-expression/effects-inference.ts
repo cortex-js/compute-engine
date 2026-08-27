@@ -695,7 +695,7 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   // A DERIVED result type is a storage position: a NUMBER-LITERAL body's
   // type is literal cargo and projects to its tier (`() -> 21` types
   // `() -> finite_integer`, not `() -> 21`; `() -> √2` types
-  // `() -> finite_real`, not the sign range — ruling O9's second half,
+  // `() -> finite_real`, not the enclosure range — ruling O9's second half,
   // 2026-08-23). Any OTHER body keeps its type verbatim: a non-literal
   // body's type is already a stored/derived type (handler results are
   // widened where they are stored), and walking it here could rewrite a

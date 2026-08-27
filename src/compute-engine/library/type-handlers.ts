@@ -37,10 +37,10 @@ import {
 /**
  * The type of an operand as a TYPE HANDLER may read it: a number literal's
  * `_literalType` — the value-carrying (`21`, `finite_rational<0.5..0.5>`)
- * or sign-carrying (`finite_real<0..> & !0`) type of ruling O9's first
- * half — and the public type for everything else. A symbol's public type
- * already carries what `ce.assume()` refined into it and a declaration's
- * ranges, so no special-casing is needed there.
+ * or range-enclosing (`finite_real<1.4..1.5>` for `√2`) type of ruling
+ * O9's first half — and the public type for everything else. A symbol's
+ * public type already carries what `ce.assume()` refined into it and a
+ * declaration's ranges, so no special-casing is needed there.
  */
 export function handlerTypeOf(x: Expression): Type {
   return x._literalType ?? x.type.type;

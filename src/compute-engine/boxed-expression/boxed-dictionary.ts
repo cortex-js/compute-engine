@@ -35,9 +35,10 @@ function isRecordKey(key: string): boolean {
 
 /** The type a dictionary CELL contributes to the synthesized (stored)
  * record/dictionary type. A number literal projects all the way to its tier
- * (`stripNumericRanges` — its value type, singleton range, or sign range is
- * literal cargo; ruling O9); any other cell keeps its stored type through
- * `widenValueTypes`, which preserves a handler's deliberate range claim. */
+ * (`stripNumericRanges` — its value type, singleton range, enclosure range,
+ * or sign range is literal cargo; ruling O9); any other cell keeps its
+ * stored type through `widenValueTypes`, which preserves a handler's
+ * deliberate range claim. */
 function storedCellType(op: Expression): Type {
   return op._literalType !== undefined
     ? stripNumericRanges(op.type.type)
@@ -324,7 +325,7 @@ export class BoxedDictionary
       // The synthesized record is a STORED type (memoized on `_type`), so a
       // literal cell projects to its tier — `{x: 1}` types
       // `record{x: finite_integer}`, not `record{x: 1}`, and `{x: √2}` types
-      // `record{x: finite_real}`, not the sign-range intersection.
+      // `record{x: finite_real}`, not the enclosure range.
       // (`widenValueTypes` treats a `record` NODE as a leaf, so the widening
       // must happen here, where the fields are assembled from the cells; a
       // non-literal cell keeps its stored type, handler range claims

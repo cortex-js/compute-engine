@@ -886,13 +886,14 @@ export interface Expression {
    * `handlerTypeOf()` in `library/type-handlers.ts`): for a literal it
    * carries the value itself (`21`, `0.5` as value types, an exact
    * machine-representable rational as a singleton range such as
-   * `finite_rational<0.5..0.5>`), or at least the sign as a range
-   * (`finite_real<0..> & !0` for `√2`) when no machine number holds the
-   * value exactly. The PUBLIC `.type` of a literal is deliberately
-   * unchanged (`ce.box(21).type` stays `finite_integer`): literal types
-   * are visible to type handlers only, and every handler result is
-   * widened back to ordinary types before it is stored
-   * (`widenValueTypes`, `common/type/widen-value.ts`).
+   * `finite_rational<0.5..0.5>`); when no machine number holds the value
+   * exactly it carries a compact outward enclosure on the literal's tier
+   * (`finite_real<1.4..1.5>` for `√2`), falling back to a sign range
+   * (`finite_integer<0..> & !0` for `10⁴⁰⁰`) when the magnitude is
+   * outside the double range. Since ruling O9's second half (2026-08-23)
+   * the PUBLIC `.type` of a number literal is this literal type too;
+   * every handler result is still widened back to ordinary types before
+   * it is stored (`widenValueTypes`, `common/type/widen-value.ts`).
    *
    * Ruling O9 (first half), 2026-08-22:
    * `docs/plans/2026-08-22-type-handlers-on-types.md` §4.3 and §6.

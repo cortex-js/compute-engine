@@ -80,6 +80,101 @@ function ratioEqualsDouble(r: Rational, re: number): boolean {
   return BigInt(r[0]) * den === BigInt(num) * BigInt(r[1]);
 }
 
+/** How many significant digits an enclosing literal range keeps. Two is the
+ * compactness/precision trade the literal types use: `1/3` encloses as
+ * `finite_rational<0.33..0.34>`, `√2` as `finite_real<1.4..1.5>`. */
+const ENCLOSURE_DIGITS = 2;
+
+/** Relative padding applied around the decimal approximation before the
+ * bounds are rounded outward. It must dominate BOTH error sources at once:
+ * the approximation error of `bignumRe` for an exact value (a few ulps at
+ * the working precision — never below ~15 significant digits, so relative
+ * error ≤ ~10⁻¹³), and the ~10⁻¹⁶ relative rounding of the final
+ * nearest-double projection of each bound (see the comment at the
+ * projection — this is what lets the projection skip any outward
+ * correction step). Do NOT shrink the padding with higher working
+ * precision: a pad below 10⁻¹⁶ reopens the projection hole, and a
+ * BigDecimal-vs-double comparison cannot detect the crossing (doubles
+ * compare through their shortest decimal string). The cost of the fixed
+ * pad is that a value within 10⁻⁶ (relative) of a two-digit grid point
+ * takes the next notch out — a one-notch-looser enclosure, still sound. */
+const ENCLOSURE_PADDING = 1e-6;
+
+/** The smallest NORMAL double, `2⁻¹⁰²²`. Below it the doubles are
+ * subnormal: their spacing is the ABSOLUTE constant `5·10⁻³²⁴`, so the
+ * "nearest-double projection errs by at most ~10⁻¹⁶ RELATIVE" argument the
+ * enclosure relies on stops holding — near the very bottom both padded
+ * bounds of `7·10⁻³²⁴` project to the same double `5·10⁻³²⁴`, an unsound
+ * SINGLETON below the value. A bound that lands in the subnormal range
+ * therefore forfeits the enclosure (sign-range fallback). */
+const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
+
+/**
+ * A compact CLOSED interval, on the literal's tier, that provably contains
+ * the value: `finite_rational<0.33..0.34>` for `1/3`,
+ * `finite_real<1.4..1.5>` for `√2`. Both bounds are rounded OUTWARD
+ * (padding, then directed rounding to `ENCLOSURE_DIGITS` significant
+ * digits), so the interval never claims a value the literal does not have
+ * — in
+ * particular `1 - 10⁻³⁰` encloses as `<0.99..1>`, which admits but does not
+ * assert the artanh pole at 1.
+ *
+ * `undefined` when no sound compact enclosure exists as doubles — the
+ * magnitude is outside the NORMAL double range (an overflow like `10⁴⁰⁰`,
+ * or a subnormal underflow — see `MIN_NORMAL_DOUBLE`), or a bound lands on
+ * the wrong side of zero and would lose the literal's sign fact. Callers
+ * fall back to the sign-only range there.
+ */
+function literalEnclosureType(
+  v: NumericValue,
+  tier: 'finite_integer' | 'finite_rational' | 'finite_real',
+  sign: 'positive' | 'negative'
+): Type | undefined {
+  let d = v.bignumRe;
+  if (d === undefined) {
+    // Defensive, currently unreachable: every NumericValue kind that can
+    // reach the non-machine-exact fallback defines `bignumRe` (Exact and
+    // Big values always do; a Machine value without one is always
+    // machine-exact and takes the exact branch instead). If a future value
+    // kind lands here, its `re` projection is still enclosed soundly — the
+    // fixed padding is applied unconditionally and covers a half-ulp
+    // double error.
+    const re = v.re;
+    if (!Number.isFinite(re) || re === 0) return undefined;
+    d = new BigDecimal(re);
+  }
+  if (!d.isFinite() || d.isZero()) return undefined;
+
+  const pad = d.abs().mul(ENCLOSURE_PADDING);
+  const loDec = d.sub(pad).toPrecisionToward(ENCLOSURE_DIGITS, 'floor');
+  const hiDec = d.add(pad).toPrecisionToward(ENCLOSURE_DIGITS, 'ceiling');
+
+  // Project each decimal bound onto a double. `toNumber()` rounds to
+  // nearest, which can land INSIDE the interval — but for a NORMAL double
+  // at most ~10⁻¹⁶ relative away, while the padding keeps each decimal
+  // bound at least ~10⁻⁶ (relative) clear of the value (and the directed
+  // two-digit rounding only ever moves a bound further out), so the
+  // projected double can never cross the value. Skipping an outward
+  // ulp-step here is what keeps the bound's shortest decimal
+  // representation compact: the double nearest to `9.9e29` prints as
+  // `9.9e+29`, its ulp-neighbor as `9.899999999999999e+29`.
+  const lower = loDec.toNumber();
+  const upper = hiDec.toNumber();
+
+  // Both bounds must be NORMAL doubles: an overflow to ±∞ has no finite
+  // bound, and a subnormal projection has ABSOLUTE (not relative) rounding
+  // error, which breaks the no-crossing argument above — see
+  // `MIN_NORMAL_DOUBLE`.
+  if (!Number.isFinite(lower) || Math.abs(lower) < MIN_NORMAL_DOUBLE)
+    return undefined;
+  if (!Number.isFinite(upper) || Math.abs(upper) < MIN_NORMAL_DOUBLE)
+    return undefined;
+  // The range replaces a `& !0` sign range, so it must keep the sign fact.
+  if (sign === 'positive' ? lower <= 0 : upper >= 0) return undefined;
+
+  return { kind: 'numeric', type: tier, lower, upper };
+}
+
 /**
  * BoxedNumber
  *
@@ -563,8 +658,8 @@ export class BoxedNumber
     // second half, 2026-08-23): `ce.box(21).type` is `21`, `ce.box(0.5)
     // .type` is `0.5`, an exact rational keeps its tier through a
     // singleton range (`finite_rational<0.5..0.5>`), and a value no
-    // machine number holds exactly carries its sign on its tier
-    // (`(finite_real<0..>) & !0` for `√2`). The literal type lives at
+    // machine number holds exactly is enclosed in a compact outward range
+    // on its tier (`finite_real<1.4..1.5>` for `√2`). The literal type lives at
     // EXPRESSION positions only — every storage position widens it back
     // to its tier: an inferred declaration (`inferTypeFromValue`), a
     // solved type variable (`solveArm`), a derived function-literal
@@ -604,10 +699,13 @@ export class BoxedNumber
    * §6): a type that carries the literal's VALUE when a machine number
    * holds it exactly — a value type (`21`, `0.5`), or a singleton range
    * (`finite_rational<0.5..0.5>`) when the lattice's value node would lose
-   * the tier (a bare numeric value is not `<: rational`) — and otherwise
-   * at least its SIGN, as a sign-carrying range on the literal's tier
-   * (`finite_real<0..> & !0` for `√2`, `finite_integer<..0> & !0` for a
-   * negative bigint). `undefined` when the public type already says
+   * the tier (a bare numeric value is not `<: rational`) — and otherwise a
+   * compact ENCLOSURE: a closed range on the literal's tier whose bounds
+   * are rounded outward to two significant digits
+   * (`finite_real<1.4..1.5>` for `√2`, `finite_rational<0.33..0.34>` for
+   * `1/3`), or, when the magnitude is outside the double range, at least
+   * the sign as a sign-carrying range (`finite_integer<0..> & !0` for
+   * `10⁴⁰⁰`). `undefined` when the public type already says
    * everything (NaN, `±∞`, a complex literal).
    *
    * Read by type handlers through `handlerTypeOf()`
@@ -681,13 +779,19 @@ export class BoxedNumber
       return { kind: 'value', value: re === 0 ? 0 : re };
     }
 
-    // No machine number holds the value: carry the sign (`√2`, `1/3`, a
-    // bigint beyond ±2⁵³). The zero case cannot reach here — an exact
-    // zero is machine-representable.
+    // No machine number holds the value (`√2`, `1/3`, a bigint beyond
+    // ±2⁵³): enclose it in a compact closed range on its tier
+    // (`finite_rational<0.33..0.34>`, `finite_real<1.4..1.5>`) — strictly
+    // narrower than the sign range it replaces, and its bounds exclude
+    // zero, so `signOfType` still reads the sign off it. When no sound
+    // enclosure exists as doubles (magnitude outside the double range),
+    // fall back to carrying the sign alone. The zero case cannot reach
+    // here — an exact zero is machine-representable.
     const s = this.sgn;
-    if (s === 'positive') return positiveRangeType(tier);
-    if (s === 'negative') return negativeRangeType(tier);
-    return undefined;
+    if (s !== 'positive' && s !== 'negative') return undefined;
+    const enclosure = literalEnclosureType(v, tier, s);
+    if (enclosure !== undefined) return enclosure;
+    return s === 'positive' ? positiveRangeType(tier) : negativeRangeType(tier);
   }
 
   get sgn(): Sign | undefined {

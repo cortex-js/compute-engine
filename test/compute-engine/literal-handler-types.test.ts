@@ -17,9 +17,16 @@ import type { Type } from '../../src/common/type/types';
  * - a machine-exact rational keeps its tier through a SINGLETON RANGE
  *   (`finite_rational<0.5..0.5>` — the lattice deliberately does not class
  *   a bare numeric value as rational);
- * - a value no machine number holds exactly carries its SIGN
- *   (`finite_real<0..> & !0` for `√2`), never a rounded double — a rounded
- *   bound could put `1 − 10⁻³⁰` "at" a pole or unsoundly tighten a range.
+ * - a value no machine number holds exactly is ENCLOSED in a compact
+ *   closed range on its tier, both bounds rounded OUTWARD to two
+ *   significant digits (`finite_real<1.4..1.5>` for `√2`,
+ *   `finite_rational<0.33..0.34>` for `1/3`). The enclosure never claims
+ *   a value the literal does not have: it is not a singleton, so
+ *   `operandLiteralValue` ignores it, and a value near a pole encloses as
+ *   a range that ADMITS but does not assert the pole (`1 − 10⁻³⁰` →
+ *   `<0.99..1.1>`). When no sound enclosure exists as doubles (magnitude
+ *   outside the double range), the literal falls back to carrying its
+ *   SIGN alone (`(finite_integer<0..>) & !0` for `10⁴⁰⁰`).
  *
  * O9's second half was ruled and implemented on 2026-08-23: the public
  * `.type` of a number literal IS that literal type, so `ce.box(21).type` is
@@ -44,13 +51,15 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     expect(lit(0.5)).toBe('0.5');
   });
 
-  it('an integer beyond ±2⁵³ carries only its sign', () => {
+  it('an integer beyond ±2⁵³ is enclosed, not claimed as a value', () => {
     // `1e21` happens to be an exactly representable double, but the bignum
     // store compares doubles through their decimal STRING, which beyond
     // ±2⁵³ can call a rounded double "equal" to a value it does not
     // represent (`1e23` vs `10²³`) — so the exactness test refuses the
-    // whole span and the literal carries its sign instead.
-    expect(lit(1e21)).toBe('(finite_integer<0..>) & !0');
+    // whole span and the literal carries a two-digit outward enclosure
+    // instead of a value type. (The mixed bound spellings are plain
+    // JavaScript number formatting: it switches to exponent form at 10²¹.)
+    expect(lit(1e21)).toBe('finite_integer<990000000000000000000..1.1e+21>');
   });
 
   it('a machine-exact rational keeps its tier through a singleton range', () => {
@@ -60,13 +69,36 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     );
   });
 
-  it('a non-machine-representable value carries its sign, never a rounded double', () => {
-    expect(lit(ce.parse('\\frac13'))).toBe('(finite_rational<0..>) & !0');
-    expect(lit(ce.parse('-\\frac13'))).toBe('(finite_rational<..0>) & !0');
-    expect(lit(ce.parse('\\sqrt2').evaluate())).toBe('(finite_real<0..>) & !0');
-    // An integer beyond the double range still proves its sign.
+  it('a non-machine-representable value is enclosed outward, never claimed as a rounded double', () => {
+    expect(lit(ce.parse('\\frac13'))).toBe('finite_rational<0.33..0.34>');
+    expect(lit(ce.parse('-\\frac13'))).toBe('finite_rational<-0.34..-0.33>');
+    expect(lit(ce.parse('\\sqrt2').evaluate())).toBe('finite_real<1.4..1.5>');
+    // An integer beyond the DOUBLE range has no finite double bounds, so it
+    // falls back to proving its sign alone.
     expect(lit(ce.parse('10^{400}').evaluate())).toBe(
       '(finite_integer<0..>) & !0'
+    );
+    expect(lit(ce.parse('-10^{400}').evaluate())).toBe(
+      '(finite_integer<..0>) & !0'
+    );
+    // A magnitude in the SUBNORMAL double range falls back too: subnormal
+    // spacing is absolute (5·10⁻³²⁴), so the nearest-double projection of a
+    // bound can cross the value — near the bottom, `7·10⁻³²⁴` would
+    // project both bounds onto the same double `5·10⁻³²⁴`, an unsound
+    // singleton BELOW the value. See `MIN_NORMAL_DOUBLE` in
+    // `boxed-expression/boxed-number.ts`.
+    expect(lit(ce.parse('\\frac{7}{10^{324}}').evaluate())).toBe(
+      '(finite_rational<0..>) & !0'
+    );
+    expect(lit(ce.parse('\\frac{-7}{10^{324}}').evaluate())).toBe(
+      '(finite_rational<..0>) & !0'
+    );
+    // Just above the smallest NORMAL double the enclosure still holds. (The
+    // specimen must have a non-terminating decimal expansion: a short one
+    // like `7·10⁻³⁰⁸` compares string-equal to its double and takes the
+    // machine-exact singleton branch instead.)
+    expect(lit(ce.parse('\\frac{1}{3\\cdot 10^{307}}').evaluate())).toBe(
+      'finite_rational<3.3e-308..3.4e-308>'
     );
   });
 
@@ -220,6 +252,78 @@ describe('widenValueTypes — the §4.3 walker', () => {
   });
 });
 
+describe('LITERAL HANDLER TYPES — enclosure soundness', () => {
+  // The bounds of a literal's enclosing range are DOUBLES; the value they
+  // enclose is exact. Verify `lower <= value <= upper` exactly, by
+  // decomposing each double bound into its dyadic fraction (power-of-two
+  // scaling is lossless) and cross-multiplying in bigints.
+  const dyadic = (n: number): [bigint, bigint] => {
+    let num = n;
+    let den = 1n;
+    while (!Number.isInteger(num)) {
+      num *= 2;
+      den *= 2n;
+    }
+    return [BigInt(num), den];
+  };
+  const bounds = (expr: any): [number, number] => {
+    const t = (
+      typeof expr === 'object' && 'engine' in expr ? expr : ce.box(expr)
+    )._literalType;
+    expect(t).toBeDefined();
+    expect(typeof t).toBe('object');
+    if (typeof t !== 'object' || t.kind !== 'numeric')
+      throw new Error('not a range');
+    expect(t.lower).toBeDefined();
+    expect(t.upper).toBeDefined();
+    return [t.lower!, t.upper!];
+  };
+
+  it('rational enclosures contain the exact rational, strictly excluding 0', () => {
+    for (const [p, q] of [
+      [1n, 3n],
+      [-1n, 3n],
+      [2n, 7n],
+      [22n, 7n],
+      [1n, 999999937n],
+      [123456789123456789n, 1000000000000000003n],
+      [-987654321n, 11n],
+    ] as const) {
+      const [lower, upper] = bounds(ce.parse(`\\frac{${p}}{${q}}`));
+      const [ln, ld] = dyadic(lower);
+      const [un, ud] = dyadic(upper);
+      // lower ≤ p/q ≤ upper (q > 0): ln·q·ud ≤ p·ld·ud and p·ld·ud ≤ un·q·ld
+      expect(ln * q <= p * ld).toBe(true);
+      expect(p * ud <= un * q).toBe(true);
+      // The enclosure keeps the sign fact the `& !0` range used to carry.
+      expect(lower > 0 === p > 0n).toBe(true);
+      expect(upper < 0 === p < 0n).toBe(true);
+    }
+  });
+
+  it('radical enclosures contain the exact root', () => {
+    for (const k of [2n, 3n, 5n, 7n, 999983n]) {
+      const [lower, upper] = bounds(ce.parse(`\\sqrt{${k}}`).evaluate());
+      const [ln, ld] = dyadic(lower);
+      const [un, ud] = dyadic(upper);
+      // lower ≤ √k ≤ upper with lower > 0: lower² ≤ k and k ≤ upper²
+      expect(lower).toBeGreaterThan(0);
+      expect(ln * ln <= k * ld * ld).toBe(true);
+      expect(k * ud * ud <= un * un).toBe(true);
+    }
+  });
+
+  it('an enclosure is never a singleton, so no handler reads a value off it', () => {
+    // `operandLiteralValue` treats a SINGLETON range as the literal's value
+    // (that is the machine-exact-rational spelling). An outward enclosure of
+    // a non-machine value must therefore never collapse to one.
+    for (const s of ['\\frac13', '\\sqrt2', '10^{30}+1']) {
+      const [lower, upper] = bounds(ce.parse(s).evaluate());
+      expect(lower).toBeLessThan(upper);
+    }
+  });
+});
+
 describe('LITERAL HANDLER TYPES — precision edge (kept last: constructing a high-precision engine reprecisions the module-global BigDecimal)', () => {
   it('a bignum a half-ulp from a pole does NOT claim the pole value', () => {
     const hp = new ComputeEngine({ precision: 40 });
@@ -227,10 +331,14 @@ describe('LITERAL HANDLER TYPES — precision edge (kept last: constructing a hi
     // `re` rounds to exactly 1; claiming the value type `1` would let
     // `Artanh(1 − 10⁻³⁰)` classify as the pole at 1. (The exact evaluation
     // produces the rational `(10³⁰−1)/10³⁰`, hence the rational tier.)
+    // The enclosure ADMITS 1 — the value sits within the outward padding of
+    // the grid point, so both neighboring notches appear — but it is not a
+    // singleton, so no handler reads a value off it
+    // (`operandLiteralValue` returns undefined for it).
     expect(nearOne.re).toBe(1);
     const t = nearOne._literalType;
     expect(t === undefined ? undefined : typeToString(t)).toBe(
-      '(finite_rational<0..>) & !0'
+      'finite_rational<0.99..1.1>'
     );
   });
 });

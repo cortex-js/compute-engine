@@ -38,8 +38,11 @@ import { subtypingVarianceOf } from './variance.js';
  * (`finite_rational<0.5..0.5>`) is the exact-rational literal
  * representation (ruling O9) and widens to its tier like a value node;
  * singleton ranges on other tiers are author/derivation narrowings and
- * pass through. A literal's SIGN range (`(finite_real<0..>) & !0` for √2)
- * is shape-identical to a deliberate handler claim (`Exp`'s result), so
+ * pass through. A literal's ENCLOSURE range (`finite_real<1.4..1.5>` for
+ * √2 — or the sign range `(finite_integer<0..>) & !0` it falls back to
+ * beyond the double range) is shape-identical to a deliberate handler
+ * claim (`Heaviside`'s `finite_rational<0..1>`, `Exp`'s
+ * `(finite_real<0..>) & !0`), so
  * this walker cannot tell them apart and keeps both — call sites that
  * store an OPERAND's type distinguish by the operand (`_literalType`
  * defined) and project literal cargo through `stripNumericRanges` instead

@@ -123,8 +123,9 @@ function analyzeLevel(ops: ReadonlyArray<Expression>): ShapeAnalysis | null {
  * claim.
  */
 function classifyCell(op: Expression): Type | null {
-  // A number literal's public type carries its value or sign (ruling O9:
-  // `finite_rational<0.5..0.5>`, `(finite_real<0..>) & !0`) — decorated
+  // A number literal's public type carries its value or an enclosing range
+  // (ruling O9: `finite_rational<0.5..0.5>`, `finite_real<1.4..1.5>`) —
+  // decorated
   // OBJECT nodes that `isAtomicValueType` blocks, which silently withdrew
   // the shape claim from every exact-rational or radical matrix
   // (`MatrixRank` of `[[1/2, 1/3], …]` went inert). The claim is about the
