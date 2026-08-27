@@ -614,6 +614,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       commutative: true,
       commutativeOrder: addOrder,
       broadcastable: true,
+      // The Add handlers own these shapes: tensors and matrices (the matrix
+      // sum, `addTensors`), numeric tuples (component-wise), collection-shaped
+      // result types (`matrix + scalar` types `matrix`, computed by
+      // `addType`), and operands that only become collections at evaluation.
+      // The generic broadcast machinery must not re-map any of them.
+      broadcastExemptions: [
+        'tensors',
+        'tuples',
+        'collection-result',
+        'evaluated-operands',
+      ],
       idempotent: true,
       complexity: 1300,
 
@@ -801,6 +812,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q1226939',
       complexity: 2500,
       broadcastable: true,
+      // Numeric tuples divide component-wise in `canonicalDivide`, never
+      // fanned into a List by the generic broadcast machinery.
+      broadcastExemptions: ['tuples'],
 
       // - if numer product of numbers, or denom product of numbers,
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
@@ -2038,6 +2052,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       idempotent: true,
       complexity: 2100,
       broadcastable: true,
+      // The Multiply handlers own these shapes: tensors and matrices (the
+      // matrix PRODUCT, `mulTensors` — element-wise broadcasting would
+      // Hadamard instead), numeric tuples (component-wise), collection-shaped
+      // result types, and operands that only become collections at
+      // evaluation. The generic broadcast machinery must not re-map any of
+      // them.
+      broadcastExemptions: [
+        'tensors',
+        'tuples',
+        'collection-result',
+        'evaluated-operands',
+      ],
 
       lazy: true,
       signature: '(number*) -> number',
@@ -2462,6 +2488,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q715358',
       complexity: 2000,
       broadcastable: true,
+      // Numeric tuples negate component-wise (`negate`), and the type handler
+      // passes a collection operand's own type through — the generic
+      // broadcast machinery must not fan the tuple out or re-wrap the type.
+      broadcastExemptions: ['tuples', 'collection-result'],
       signature: '(value) -> value',
       // `value`-typed signature defaults to `pass-through`; declare `propagate`
       // (§3.A/§5) so `Negate(Missing)` yields `NaN`.
@@ -3302,6 +3332,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q40754',
       complexity: 1350,
       broadcastable: true,
+      // Numeric tuples subtract component-wise, never fanned into a List by
+      // the generic broadcast machinery.
+      broadcastExemptions: ['tuples'],
       // We accept from 1 to n arguments (see https://github.com/cortex-js/compute-engine/issues/171)
       // left-associative: a - b - c -> (a - b) - c
       signature: '(number+) -> number',

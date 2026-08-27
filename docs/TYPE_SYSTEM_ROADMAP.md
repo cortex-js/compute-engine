@@ -1092,6 +1092,30 @@ de facto specification of what the declaration language must
 eventually be able to mention — the migration is therefore a
 prerequisite for the retirement, not a competing effort.
 
+### 9.4 Shipped: the broadcast-exemption inversion (2026-08-26)
+
+The generic broadcast machinery in `boxed-expression/boxed-function.ts`
+carried seven hardcoded operator-name tests — the same disease as the
+closure-assumption narrowing (§9.2 item 6), one level up. All seven are
+now inverted into a declared definition flag,
+`broadcastExemptions: ReadonlyArray<BroadcastExemption>`, with six
+labels (`tensors`, `tuples`, `collection-result`, `evaluated-operands`,
+`whole-collection-compare`, `single-collection-join`), declared on
+`Add`, `Multiply`, `Negate`, `Subtract`, `Divide`, `Equal`, `NotEqual`,
+and `String`. The engine keeps only the shape tests
+(`skipBroadcastForVectorOps` and the `type()` wrapper); the
+per-operator facts live in the definitions. The two ~110-line duplicate
+lambda broadcast-typing routes in `type()` were also merged into one
+`lambdaBroadcastType` helper. Because the flag is a public contract,
+the compiler's broadcast lowering now fails closed for any definition
+that declares exemptions its carve-outs do not reproduce (a
+user-defined operator with exemptions falls back to the interpreted
+path instead of silently diverging). Verified behavior-preserving by
+the full suite (619 suites, 4238 snapshots, zero churn). This is the
+near-term step toward the §1 north star for the broadcast wrapper; the
+wrapper itself retires only when dependent element/shape types (§9.2
+item 3) land.
+
 ## Appendix A: Protocol Syntax
 
 > Revised 2026-08-12 after a dual-reviewer spec review. Decisions the

@@ -206,6 +206,17 @@ type OperatorDefinitionFlags = {
   lazy: boolean;
   scoped: boolean;
   broadcastable: boolean;
+  /** Operand/result shapes whose broadcast handling the operator's own
+   * handlers provide, exempting them from the generic broadcast machinery.
+   * See `types-definitions.ts` for the meaning of each label. */
+  broadcastExemptions: ReadonlyArray<
+    | 'tensors'
+    | 'tuples'
+    | 'collection-result'
+    | 'evaluated-operands'
+    | 'whole-collection-compare'
+    | 'single-collection-join'
+  >;
   inspectsErrors: boolean;
   /** True when every argument must be written with its parameter's name (an
    * object-type constructor). See `types-definitions.ts`. */

@@ -5775,6 +5775,29 @@ export class BaseCompiler {
     const def = engine.lookupDefinition(h);
     if (!isOperatorDef(def) || def.operator.broadcastable !== true) return null;
 
+    // A definition may EXEMPT operand shapes from generic broadcasting
+    // (`broadcastExemptions`): the interpreter then gives those shapes
+    // dedicated semantics instead of mapping element-wise. This method
+    // reproduces the exemption semantics of a fixed set of built-in heads —
+    // the `Equal`/`NotEqual` decline and the `Multiply` tensor/tuple analysis
+    // below, plus the heads (`Add`, `Negate`, `Subtract`, `Divide`) whose
+    // exempted shapes are value-equivalent under an element-wise lowering
+    // (tensor addition and tuple arithmetic ARE element-wise). Any OTHER
+    // definition that declares exemptions — a user-defined operator, or a
+    // redefined head this method does not analyze — must fail closed to the
+    // interpreted path: emitting a generic `_SYS.bcast` for it would produce
+    // an element-wise value where the interpreter, honoring the declaration,
+    // does not broadcast. (`String` is deliberately absent from the set: its
+    // single-collection call JOINS the collection's elements, which no
+    // element-wise lowering reproduces.) Extend the set only together with a
+    // matching carve-out or a value-equivalence argument like `Multiply`'s.
+    if (
+      def.operator.broadcastExemptions.length > 0 &&
+      !['Add', 'Multiply', 'Negate', 'Subtract', 'Divide', 'Equal', 'NotEqual']
+        .includes(h)
+    )
+      return null;
+
     // The ordering relations and the logical connectives broadcast too (they
     // return booleans rather than numbers, which is immaterial to the closure
     // below — `_SYS.bcast` maps whatever the scalar codegen returns). Two

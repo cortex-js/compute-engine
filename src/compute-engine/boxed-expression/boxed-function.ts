@@ -9,6 +9,7 @@ import type {
   Expression,
   BoxedBaseDefinition,
   BoxedOperatorDefinition,
+  BroadcastExemption,
   BoxedRuleSet,
   BoxedSubstitution,
   CanonicalOptions,
@@ -3388,8 +3389,10 @@ export class BoxedFunction
       // Kernel entries (addTensors/mulTensors) fully qualify + pack, and
       // DECLINE non-qualified candidates back to the generic broadcast path.
       const hasTensors = this.ops!.some((x) => candidateShape(x) !== null);
+      // An operator whose handlers own evaluated-operand broadcasting defers
+      // an unevaluated function operand to them (the veto described above).
       const hasRawOperand =
-        (this.operator === 'Add' || this.operator === 'Multiply') &&
+        def.broadcastExemptions.includes('evaluated-operands') &&
         this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
       const operatorBroadcast =
         def.broadcastable &&
@@ -3403,7 +3406,7 @@ export class BoxedFunction
         !isLambdaDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
-        !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!);
+        !skipBroadcastForVectorOps(def, hasTensors, this.ops!);
       // An operand that is collection-TYPED but carries no collection value
       // yet would be spliced whole into every cell as a scalar, freezing an
       // outer product into the result (`hasUnresolvedCollectionOperand`).
@@ -3706,10 +3709,12 @@ export class BoxedFunction
         (def.lazy !== true && isUnknownLengthBroadcast(x));
       const postEvalBroadcast =
         (lambdaBroadcast ||
+          // An `'evaluated-operands'` exemption means the operator's own
+          // evaluate handler maps operands that only became collections at
+          // evaluation; this generic post-evaluation arm must not re-map them.
           (def.broadcastable &&
-            this.operator !== 'Add' &&
-            this.operator !== 'Multiply')) &&
-        !skipBroadcastForVectorOps(this.operator, false, tail) &&
+            !def.broadcastExemptions.includes('evaluated-operands'))) &&
+        !skipBroadcastForVectorOps(def, false, tail) &&
         tail.some(isPostEvalBroadcastOperand);
       // The same veto as the pre-evaluation steps, decided here on the
       // EVALUATED `tail`: an operand that is collection-typed but still
@@ -3975,8 +3980,10 @@ export class BoxedFunction
       // Kernel entries (addTensors/mulTensors) fully qualify + pack, and
       // DECLINE non-qualified candidates back to the generic broadcast path.
       const hasTensors = this.ops!.some((x) => candidateShape(x) !== null);
+      // As on the sync path: an operator whose handlers own evaluated-operand
+      // broadcasting defers an unevaluated function operand to them.
       const hasRawOperand =
-        (this.operator === 'Add' || this.operator === 'Multiply') &&
+        (def?.broadcastExemptions.includes('evaluated-operands') ?? false) &&
         this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
       const operatorBroadcast =
         def?.broadcastable &&
@@ -3984,7 +3991,7 @@ export class BoxedFunction
         !isLambdaDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
-        !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!);
+        !skipBroadcastForVectorOps(def, hasTensors, this.ops!);
       // The veto and the definite-mismatch exception of the sync step 2,
       // unchanged: an operand that is collection-TYPED but carries no
       // collection value yet would be spliced whole into every cell as a
@@ -4240,11 +4247,12 @@ export class BoxedFunction
       const isSyncApplicable = lambdaBroadcast || def.evaluate !== undefined;
       const postEvalBroadcast =
         (lambdaBroadcast ||
+          // As on the sync path: an `'evaluated-operands'` exemption means
+          // the operator's own evaluate handler owns this case.
           (def.broadcastable &&
-            this.operator !== 'Add' &&
-            this.operator !== 'Multiply')) &&
+            !def.broadcastExemptions.includes('evaluated-operands'))) &&
         isSyncApplicable &&
-        !skipBroadcastForVectorOps(this.operator, false, tail) &&
+        !skipBroadcastForVectorOps(def, false, tail) &&
         tail.some(isPostEvalBroadcastOperand);
       // The veto and the definite-mismatch exception of the sync step 4b,
       // unchanged: a collection-typed but still valueless operand must not be
@@ -4587,48 +4595,49 @@ function normalizeLiftedAbsence(
 }
 
 /**
- * Vector-space operators over numeric tuples (points/vectors in ℝⁿ) must not
- * be broadcast into a List: they have dedicated component-wise handling in
- * `add`/`mul`/`negate`/`canonicalDivide`. This mirrors the tensor carve-out
- * (which stays limited to Add/Multiply). See
- * `docs/plans/2026-07-07-tuple-point-semantics.md`.
+ * True when the generic element-wise broadcast (fan-out and result-type
+ * lift) must NOT apply to this application, because the operator's own
+ * handlers give the present operand shapes their dedicated semantics. The
+ * operator declares which shapes it owns with the `broadcastExemptions`
+ * definition flag; this predicate supplies the SHAPE TESTS — which operand
+ * configurations trigger each declared exemption — so the per-operator fact
+ * lives in the definition and only the generic mechanism lives here.
  */
 function skipBroadcastForVectorOps(
-  operator: string,
+  def: BoxedOperatorDefinition | undefined,
   hasTensors: boolean,
   ops: ReadonlyArray<Expression>
 ): boolean {
-  if (hasTensors && (operator === 'Add' || operator === 'Multiply'))
-    return true;
-  // A matrix-valued operand that is NOT a raw tensor node — most often a SYMBOL
-  // whose value is a matrix (`isTensor` keys on the node kind, so `hasTensors`
-  // misses it), or any expression statically typed `matrix` — must also route to
-  // the dedicated tensor handling (`addTensors`/`mulTensors`). Otherwise
-  // element-wise broadcasting Hadamards two matrices where `Multiply` must
-  // contract (the matrix product), diverging from the matrix-literal and
-  // matrix-returning-application paths (which already reach `mulTensors`). Keyed
-  // on the static type, so no value is resolved on the scalar hot path; a
-  // `vector<n>` operand does not match `matrix`, so vector Hadamard is unchanged.
-  if (
-    (operator === 'Add' || operator === 'Multiply') &&
-    ops.some((x) => x.type.matches('matrix'))
-  )
-    return true;
-  if (
-    (operator === 'Add' ||
-      operator === 'Multiply' ||
-      operator === 'Negate' ||
-      operator === 'Subtract' ||
-      operator === 'Divide') &&
-    ops.some((x) => isTuple(x))
-  )
-    return true;
-  // `Equal`/`NotEqual` broadcast only in the list-vs-scalar case (Desmos
-  // `L[d=4]`). When two or more operands are collections, keep the whole-list
-  // (structural/mathematical) equality semantics — `Equal(L, M)` stays a scalar
-  // boolean rather than a list of element-wise comparisons. Any collection
-  // counts, not just finite indexed ones: `Equal(Set(…), List(…))` must not
-  // broadcast over the list either. See
+  const exemptions = def?.broadcastExemptions;
+  if (exemptions === undefined || exemptions.length === 0) return false;
+  const exempt = (label: BroadcastExemption) => exemptions.includes(label);
+
+  // `'tensors'`: tensor and matrix operands route to the operator's own
+  // tensor arms (e.g. `addTensors`/`mulTensors`, which CONTRACT a matrix
+  // product where element-wise broadcasting would Hadamard). The second
+  // disjunct catches a matrix-valued operand that is NOT a raw tensor node —
+  // most often a SYMBOL whose value is a matrix (`isTensor` keys on the node
+  // kind, so `hasTensors` misses it), or any expression statically typed
+  // `matrix`. Keyed on the static type, so no value is resolved on the
+  // scalar hot path; a `vector<n>` operand does not match `matrix`, so
+  // vector Hadamard is unchanged.
+  if (exempt('tensors')) {
+    if (hasTensors) return true;
+    if (ops.some((x) => x.type.matches('matrix'))) return true;
+  }
+
+  // `'tuples'`: numeric tuples (points/vectors in ℝⁿ) are combined
+  // component-wise by the operator's own handlers (`add`/`mul`/`negate`/
+  // `canonicalDivide`) and must not be fanned into a `List`. See
+  // `docs/plans/2026-07-07-tuple-point-semantics.md`.
+  if (exempt('tuples') && ops.some((x) => isTuple(x))) return true;
+
+  // `'whole-collection-compare'`: the operator broadcasts only in the
+  // collection-vs-scalar case (Desmos `L[d=4]`). When two or more operands
+  // are collections, the operator's own evaluate handler applies whole-value
+  // semantics — `Equal(L, M)` is a scalar boolean, not a list of element-wise
+  // comparisons. Any collection counts, not just finite indexed ones:
+  // `Equal(Set(…), List(…))` must not broadcast over the list either. See
   // docs/COLLECTIONS-MODEL.md (highest-risk item).
   //
   // An operand that may only BECOME a collection at evaluation — a top-typed
@@ -4637,9 +4646,9 @@ function skipBroadcastForVectorOps(
   // out pre-evaluation while the opaque operand later evaluates to a
   // collection compounded two broadcasts into a cartesian nest
   // (`L(1) = [1,2]` → 2×2 lists of booleans) instead of the documented
-  // whole-collection boolean. Skipping defers to the `Equal`/`NotEqual`
-  // evaluate handler, which sees EVALUATED operands and re-applies the same
-  // rule with full information (element-wise for list-vs-scalar via
+  // whole-collection boolean. Skipping defers to the operator's evaluate
+  // handler, which sees EVALUATED operands and re-applies the same rule with
+  // full information (element-wise for list-vs-scalar via
   // `broadcastComparison`, whole-collection equality for two collections) —
   // so a possibly-collection operand that turns out scalar still broadcasts
   // element-wise, unchanged.
@@ -4653,7 +4662,7 @@ function skipBroadcastForVectorOps(
   // placeholder-signature refinement (2026-08-15) started giving such
   // applications their concrete collection types.
   if (
-    (operator === 'Equal' || operator === 'NotEqual') &&
+    exempt('whole-collection-compare') &&
     ops.filter(
       (x) =>
         // A STRING is a collection of its characters in the lattice, but it is
@@ -4668,14 +4677,16 @@ function skipBroadcastForVectorOps(
     ).length >= 2
   )
     return true;
-  // `String` called with EXACTLY ONE collection argument JOINS that
-  // collection's elements instead of mapping over them — that carve-out lives
-  // in its `evaluate` handler and is what makes the conversion law
-  // `String(Characters(s)) == s` hold. Broadcasting first would fan the call
-  // out element-wise and produce a `list<string>`, so the handler would never
-  // see the collection. Multi-argument calls (`String("x=", [1,2])`) keep the
-  // coercing-join-with-broadcast semantics and are deliberately not skipped.
-  // See `docs/STRING_ROADMAP.md` design constraint 3.
+
+  // `'single-collection-join'`: called with EXACTLY ONE collection argument,
+  // the operator's evaluate handler consumes that collection WHOLE instead
+  // of mapping over it — `String` JOINS the elements, which is what makes
+  // the conversion law `String(Characters(s)) == s` hold. Broadcasting first
+  // would fan the call out element-wise (a `list<string>`), so the handler
+  // would never see the collection. Multi-argument calls
+  // (`String("x=", [1,2])`) keep the coercing-join-with-broadcast semantics
+  // and are deliberately not skipped. See `docs/STRING_ROADMAP.md` design
+  // constraint 3.
   //
   // The collection-typed disjunct is what makes the TYPE path agree with the
   // value path. An EAGER collection operator — `Characters(s)`,
@@ -4684,10 +4695,10 @@ function skipBroadcastForVectorOps(
   // and `String(Characters(s))` reported `list<character>` for a value that is
   // a plain `string`. Its declared result type still proves it will be a
   // collection. `unknown`/`any` are deliberately excluded: they match
-  // `collection` without proving anything, and `String(x)` on an untyped
-  // operand must keep the broadcast lift.
+  // `collection` without proving anything, and a call on an untyped operand
+  // must keep the broadcast lift.
   if (
-    operator === 'String' &&
+    exempt('single-collection-join') &&
     ops.length === 1 &&
     !isTextAtom(ops[0]) &&
     (ops[0].isCollection ||
@@ -4840,6 +4851,107 @@ function threadConditional(
 
 /** Return the type of the value of the expression, without actually
  * evaluating it */
+/**
+ * Application-site broadcast typing for a USER FUNCTION LITERAL — a lambda
+ * (`ce.assign('g', x ↦ …)`), whether it resolves through an operator
+ * definition or a value definition. Both routes in `type()` call this ONE
+ * helper so the two spellings of the same assignment cannot drift apart.
+ *
+ * `perElementResult` is the already-instantiated signature result. For a
+ * lambda application the per-element result IS the signature result
+ * (`f := x ↦ [x, -x]` maps EACH element to `[x, -x]`, so the element type is
+ * `list<number>`, not its unwrapped `number`) — callers pass it verbatim,
+ * never `broadcastElementType` of it, which would unwrap a collection-valued
+ * return and mis-type `f([1, 2])` as `list<number>` instead of
+ * `list<list<number>>`.
+ *
+ * `slots` is the declared `broadcastable<T>` slot plan when the signature
+ * declares one (Option A): a collection-typed slot binds its argument whole
+ * and never lifts. `inferredResult` is true when the signature result was
+ * inferred from the body rather than declared by the user.
+ *
+ * Returns the broadcast-typed result, or `undefined` when no broadcast
+ * typing applies and the caller's scalar result stands.
+ */
+function lambdaBroadcastType(
+  ops: ReadonlyArray<Expression>,
+  perElementResult: Type,
+  slots: ReturnType<typeof broadcastableParamSlots>,
+  inferredResult: boolean
+): Type | undefined {
+  // A numeric-tuple argument binds WHOLE to a scalar parameter (atomic,
+  // never mapped), then the body's own arithmetic broadcasts it element-wise
+  // (`g := x ↦ 2x`; `g((1,2))` evaluates `2·(1,2) = (2,4)`). An INFERRED
+  // scalar signature result therefore disagrees with the value, and the
+  // body's shape is not statically knowable — return `any`. A DECLARED
+  // signature is authoritative (the user promised the result type) and is
+  // left untouched.
+  if (inferredResult && ops.some((x) => isNumericTuple(x))) return 'any';
+
+  const mappable = (i: number) => slots === undefined || slots.at(i).mappable;
+  const mapped = ops.filter(
+    (x, i) =>
+      mappable(i) &&
+      (isFiniteBroadcastParticipant(x) ||
+        // Collection-TYPED operands too (Tycho item 73): `h(L+1)` / `h(2L)`
+        // — an unevaluated expression statically typed as a list/vector
+        // broadcasts through the lambda at runtime (the post-eval
+        // lambda-broadcast arm maps it element-wise), so the static type
+        // must be the lifted list as well, exactly as at the generic
+        // wrapper's arm 1.
+        isBroadcastCollectionType(x) ||
+        isFixedShapeCollection(x))
+  );
+  if (mapped.length > 0) {
+    // D10 (§4.4, re-ruled 2026-08-04): `perElementResult` is the
+    // PER-ELEMENT result — the solver bound each lift-admitted operand's
+    // element type — so the ordinary wrap below is the whole answer. It
+    // reproduces the retired echo short-circuit on the bare-echo shape
+    // (`f([1,2,3])` under `(T) -> T where T` is `vector<…^3>`, since `T`
+    // binds `finite_integer` and the wrap re-adds the operand's rank) and
+    // fixes the variable-MENTIONING shapes the short-circuit could not
+    // reach.
+    // As at the generic wrapper's arm 1: when every mapped operand is a
+    // LONE scalar-or-collection union (a valueless `u: number |
+    // list<number>`, with no operand that is definitely a collection), the
+    // application is not a collection and the result carries the union
+    // through — `f(u)` for `f := x ↦ 2x` types
+    // `finite_number | list<finite_number>`, the same as `2u`, instead of
+    // the definite `list<E>` that `u := 5` contradicts.
+    const loneUnionResult = loneUnionBroadcastResultType(
+      mapped.map((x) => x.type.type),
+      perElementResult
+    );
+    if (loneUnionResult !== undefined) return loneUnionResult;
+
+    // A collection-valued per-element result keeps the plain nested lift
+    // (`f := x ↦ [x,-x]` over `[1,2]` → `list<vector<2>>`): installing the
+    // collection result as the element of a dimensioned list mixes
+    // encodings and breaks `evaluated ⊆ declared` (the value is a rank-2
+    // tensor with scalar leaves).
+    const collectionValued =
+      isSubtype(perElementResult, COLLECTION_SHAPE_TYPE) ||
+      (typeof perElementResult !== 'string' &&
+        perElementResult.kind === 'union' &&
+        perElementResult.types.some((m) =>
+          isSubtype(m, COLLECTION_SHAPE_TYPE)
+        ));
+    if (collectionValued) return broadcastResultType(perElementResult);
+    // Shape-aware (§D6.1): the map preserves the source's structure.
+    return broadcastShapedResultType(
+      mapped.map((x) => x.type.type),
+      perElementResult
+    );
+  }
+  // No operand is a statically-visible collection, but an operand's
+  // collection-ness may not be statically knowable — it might broadcast at
+  // runtime or stay scalar, so the honest result is `broadcastable<E>`, not
+  // a definite `list<E>`.
+  if (ops.some((x, i) => mappable(i) && isPossiblyCollectionTyped(x)))
+    return { kind: 'broadcastable', elements: perElementResult };
+  return undefined;
+}
+
 function type(expr: BoxedFunction): Type {
   if (!expr.isValid) return 'error';
 
@@ -5063,25 +5175,25 @@ function type(expr: BoxedFunction): Type {
     if ((def.broadcastable || declaredSlots) && !isLambdaDef(def)) {
       // O(rank) candidate check — see the §D4.2 note at the sibling sites.
       const hasTensors = expr.ops.some((x) => candidateShape(x) !== null);
-      // `Equal`/`NotEqual` over TWO OR MORE definite collections is
-      // whole-value equality — a scalar `boolean`, never a broadcast (see
-      // `skipBroadcastForVectorOps`). That skip tests value-level
-      // `isCollection`, which an unevaluated `Multiply`/`Add` intermediate
-      // (typed `vector<n>` but with no collection handler) does not satisfy —
-      // so mirror the same ≥2 rule at the TYPE level here, or
-      // `Equal(10⁴·[1,2,3], 10⁴·[4,5,6])` would type `list<boolean>` while
-      // evaluating to the scalar `False`. A SINGLE collection operand keeps
-      // the lift (a collection-vs-scalar comparison genuinely broadcasts to
-      // a boolean mask), and possibly-collection operands keep arm 2's
-      // `broadcastable<boolean>` (sound for every outcome, including the
-      // whole-value one).
-      const typeLevelEqualitySkip =
-        (expr.operator === 'Equal' || expr.operator === 'NotEqual') &&
+      // An operator with the `'whole-collection-compare'` exemption over TWO
+      // OR MORE definite collections applies whole-value semantics — a scalar
+      // `boolean`, never a broadcast (see `skipBroadcastForVectorOps`). That
+      // skip tests value-level `isCollection`, which an unevaluated
+      // `Multiply`/`Add` intermediate (typed `vector<n>` but with no
+      // collection handler) does not satisfy — so mirror the same ≥2 rule at
+      // the TYPE level here, or `Equal(10⁴·[1,2,3], 10⁴·[4,5,6])` would type
+      // `list<boolean>` while evaluating to the scalar `False`. A SINGLE
+      // collection operand keeps the lift (a collection-vs-scalar comparison
+      // genuinely broadcasts to a boolean mask), and possibly-collection
+      // operands keep arm 2's `broadcastable<boolean>` (sound for every
+      // outcome, including the whole-value one).
+      const typeLevelWholeCompareSkip =
+        def.broadcastExemptions.includes('whole-collection-compare') &&
         expr.ops.filter((x) => x.isCollection || isLinearAlgebraCollection(x))
           .length >= 2;
       if (
-        !typeLevelEqualitySkip &&
-        !skipBroadcastForVectorOps(expr.operator, hasTensors, expr.ops)
+        !typeLevelWholeCompareSkip &&
+        !skipBroadcastForVectorOps(def, hasTensors, expr.ops)
       ) {
         // Arm 1 (statically-visible collection) — PRIORITY. A materialized
         // finite indexed collection, an operand whose declared type is an
@@ -5100,18 +5212,19 @@ function type(expr: BoxedFunction): Type {
         // concrete `list<E>`.
         //
         // The fixed-shape trigger DEFERS to a handler that GENUINELY computes
-        // collection results — an ALLOWLIST, not a shape test: only
-        // `Add`/`Multiply` (their own matrix/vector branches, which type
-        // `matrix + scalar` as `matrix` and keep the honest widen only for
-        // possibly-non-indexed `collection`/`set` operands — see `addType`)
-        // and `Negate` (passes `x.type` through). Re-wrapping those would
-        // collapse an honest `matrix` to an unbounded `list<…>` (it broke
-        // `-M → matrix` and `det(M+N)`). Every OTHER handler that produces a
+        // collection results — declared with the `'collection-result'`
+        // exemption, never inferred from the result's shape: such a handler's
+        // own matrix/vector branches type `matrix + scalar` as `matrix` and
+        // keep the honest widen only for possibly-non-indexed
+        // `collection`/`set` operands (see `addType`), or pass `x.type`
+        // through (`Negate`). Re-wrapping those would collapse an honest
+        // `matrix` to an unbounded `list<…>` (it broke `-M → matrix` and
+        // `det(M+N)`). A handler WITHOUT the exemption that produces a
         // collection-bearing type over a collection operand did so by naive
         // `widen(…)` — e.g. `Remainder(10⁴·[1,2,3], 7)` widening to
         // `finite_integer | vector<3>` while the value ALWAYS broadcasts to a
         // list — and must be repaired to the definite `list<E>`, so the
-        // allowlist is the ONLY thing that defers (a shape test on
+        // declared exemption is the ONLY thing that defers (a shape test on
         // `sigResult` cannot tell a deliberate union from a widen artifact).
         //
         // For the two pre-existing triggers the handler computed the scalar
@@ -5120,9 +5233,7 @@ function type(expr: BoxedFunction): Type {
         // operand); `broadcastElementType` unwraps both so the wrapper does
         // not nest a list or a union inside the broadcast result.
         const handlerOwnsCollectionTyping =
-          expr.operator === 'Add' ||
-          expr.operator === 'Multiply' ||
-          expr.operator === 'Negate';
+          def.broadcastExemptions.includes('collection-result');
         const deferToHandler =
           handlerOwnsCollectionTyping &&
           (isSubtype(sigResult, COLLECTION_SHAPE_TYPE) ||
@@ -5266,20 +5377,12 @@ function type(expr: BoxedFunction): Type {
       def._isLambda &&
       (paramsAreScalar(def) || declaredSlots)
     ) {
-      // A numeric-tuple argument binds WHOLE to a scalar parameter (atomic,
-      // never mapped), then the body's own arithmetic broadcasts it
-      // element-wise (`g := x ↦ 2x`; `g((1,2))` evaluates `2·(1,2) = (2,4)`).
-      // The INFERRED scalar signature result therefore disagrees with the
-      // value, and we can't statically know the body's shape — return `any`.
-      // A DECLARED signature is authoritative (the user promised the result
-      // type), so it is left untouched below.
-      if (def.inferredSignature && expr.ops.some((x) => isNumericTuple(x)))
-        return 'any';
-      // The TWIN of the value-definition arm below (generic-function-literals
-      // design §2.5). A lambda operator definition can now carry a DECLARED
-      // POLYTYPE (a generic function literal), so this arm instantiates the
-      // arm at the LAMBDA's own `threadable` reading.
-      // `def.broadcastable` is now DERIVED from `paramsAreScalar` for a
+      // The TWIN of the value-definition route below (generic-function-literals
+      // design §2.5); the shared broadcast typing lives in
+      // `lambdaBroadcastType`. A lambda operator definition can carry a
+      // DECLARED POLYTYPE (a generic function literal), so the arm is
+      // instantiated at the LAMBDA's own `threadable` reading.
+      // `def.broadcastable` is DERIVED from `paramsAreScalar` for a
       // bare-assigned lambda (and stays false on other lambda routes), but
       // this arm is only reached under the `paramsAreScalar(def)` guard above
       // — which is precisely the statement that the runtime broadcasts here —
@@ -5289,81 +5392,13 @@ function type(expr: BoxedFunction): Type {
       const lambdaResult =
         instantiatedResultType(resolved, expr.ops, { threadable: true }) ??
         sigResult;
-      // For a lambda application the per-element result IS the signature result
-      // (`f := x ↦ [x, -x]` maps EACH element to `[x, -x]`, so the element type
-      // is `list<number>`, not its unwrapped `number`). Use `sigResult`
-      // verbatim — NOT `broadcastElementType(sigResult)`, which would unwrap a
-      // collection-valued return and mis-type `f([1, 2])` as `list<number>`
-      // instead of `list<list<number>>`.
-      {
-        const mapped = expr.ops.filter(
-          (x, i) =>
-            // Per-slot under a DECLARED `broadcastable<T>` signature: a
-            // collection-typed slot binds its argument whole and never lifts.
-            (declaredSlots === undefined || declaredSlots.at(i).mappable) &&
-            (isFiniteBroadcastParticipant(x) ||
-              // Collection-TYPED operands too (Tycho item 73): `h(L+1)` /
-              // `h(2L)` — an unevaluated expression statically typed as a
-              // list/vector broadcasts through the lambda at runtime (the
-              // post-eval lambda-broadcast arm maps it element-wise), so the
-              // static type must be the lifted list as well, exactly as at
-              // the generic wrapper's arm 1.
-              isBroadcastCollectionType(x) ||
-              isFixedShapeCollection(x))
-        );
-        if (mapped.length > 0) {
-          // D10 (§4.4, re-ruled 2026-08-04): `lambdaResult` is the PER-ELEMENT
-          // result — the solver bound each lift-admitted operand's element
-          // type — so the ordinary wrap below is the whole answer. It
-          // reproduces the retired echo short-circuit on the bare-echo shape
-          // (`f([1,2,3])` under `(T) -> T where T` is `vector<…^3>`, since
-          // `T` binds `finite_integer` and the wrap re-adds the operand's
-          // rank) and fixes the variable-MENTIONING shapes the short-circuit
-          // could not reach.
-          // As at the generic wrapper's arm 1: when every mapped operand is a
-          // LONE scalar-or-collection union (a valueless `u: number |
-          // list<number>`, with no operand that is definitely a collection),
-          // the application is not a collection and the result carries the
-          // union through — `f(u)` for `f := x ↦ 2x` types
-          // `finite_number | list<finite_number>`, the same as `2u`, instead
-          // of the definite `list<E>` that `u := 5` contradicts.
-          const loneUnionResult = loneUnionBroadcastResultType(
-            mapped.map((x) => x.type.type),
-            lambdaResult
-          );
-          if (loneUnionResult !== undefined) return loneUnionResult;
-
-          // A collection-valued per-element result keeps the plain nested
-          // lift (`f := x ↦ [x,-x]` over `[1,2]` → `list<vector<2>>`):
-          // installing the collection result as the element of a dimensioned
-          // list mixes encodings and breaks `evaluated ⊆ declared` (the
-          // value is a rank-2 tensor with scalar leaves).
-          const collectionValued =
-            isSubtype(lambdaResult, COLLECTION_SHAPE_TYPE) ||
-            (typeof lambdaResult !== 'string' &&
-              lambdaResult.kind === 'union' &&
-              lambdaResult.types.some((m) =>
-                isSubtype(m, COLLECTION_SHAPE_TYPE)
-              ));
-          if (collectionValued) return broadcastResultType(lambdaResult);
-          // Shape-aware (§D6.1): the map preserves the source's structure.
-          return broadcastShapedResultType(
-            mapped.map((x) => x.type.type),
-            lambdaResult
-          );
-        }
-      }
-      if (
-        expr.ops.some(
-          (x, i) =>
-            (declaredSlots === undefined || declaredSlots.at(i).mappable) &&
-            isPossiblyCollectionTyped(x)
-        )
-      )
-        return {
-          kind: 'broadcastable',
-          elements: lambdaResult,
-        };
+      const lifted = lambdaBroadcastType(
+        expr.ops,
+        lambdaResult,
+        declaredSlots,
+        def.inferredSignature
+      );
+      if (lifted !== undefined) return lifted;
     }
 
     return maybeAbsorb(sigResult);
@@ -5415,73 +5450,16 @@ function type(expr: BoxedFunction): Type {
       functionResult(sig) ??
       'unknown';
     if (threadable) {
-      // As at the operator-def lambda site above: a numeric-tuple argument
-      // binds whole to a scalar parameter and the body broadcasts it, so an
-      // INFERRED signature result disagrees with the value — return `any`. A
-      // DECLARED signature (`inferredType` false) is authoritative and kept.
-      if (
-        expr.valueDefinition.inferredType &&
-        expr.ops.some((x) => isNumericTuple(x))
-      )
-        return 'any';
-      // The per-element result IS the signature result for a lambda application
-      // (see the operator-def lambda site above): use `sigResult` verbatim so a
-      // collection-valued return types as `list<list<…>>` rather than being
-      // flattened by `broadcastElementType`.
-      {
-        const mapped = expr.ops.filter(
-          (x, i) =>
-            // Per-slot under a DECLARED `broadcastable<T>` signature, as at the
-            // operator-def lambda site above.
-            (valueSlots === undefined || valueSlots.at(i).mappable) &&
-            (isFiniteBroadcastParticipant(x) ||
-              // Collection-TYPED operands too (Tycho item 73): `h(L+1)` /
-              // `h(2L)` — an unevaluated expression statically typed as a
-              // list/vector broadcasts through the lambda at runtime (the
-              // post-eval lambda-broadcast arm maps it element-wise), so the
-              // static type must be the lifted list as well, exactly as at
-              // the generic wrapper's arm 1.
-              isBroadcastCollectionType(x) ||
-              isFixedShapeCollection(x))
-        );
-        // Shape-aware (§D6.1), as at the operator-def lambda site above —
-        // including the collection-valued-result exception.
-        if (mapped.length > 0) {
-          // D10 (§4.4, re-ruled 2026-08-04): as at the operator-def lambda
-          // site above, `sigResult` is already the PER-ELEMENT result, so the
-          // ordinary wrap below is the whole answer on this route too.
-          // The lone scalar-or-collection union carries through here as well:
-          // an operand that may hold either a scalar or a list is not a
-          // collection, so `f(u)` types `E | list<E>` rather than the definite
-          // `list<E>` the same expression contradicts once `u := 5`.
-          const loneUnionResult = loneUnionBroadcastResultType(
-            mapped.map((x) => x.type.type),
-            sigResult
-          );
-          if (loneUnionResult !== undefined) return loneUnionResult;
-          const collectionValued =
-            isSubtype(sigResult, COLLECTION_SHAPE_TYPE) ||
-            (typeof sigResult !== 'string' &&
-              sigResult.kind === 'union' &&
-              sigResult.types.some((m) => isSubtype(m, COLLECTION_SHAPE_TYPE)));
-          if (collectionValued) return broadcastResultType(sigResult);
-          return broadcastShapedResultType(
-            mapped.map((x) => x.type.type),
-            sigResult
-          );
-        }
-      }
-      if (
-        expr.ops.some(
-          (x, i) =>
-            (valueSlots === undefined || valueSlots.at(i).mappable) &&
-            isPossiblyCollectionTyped(x)
-        )
-      )
-        return {
-          kind: 'broadcastable',
-          elements: sigResult,
-        };
+      // The shared broadcast typing (`lambdaBroadcastType`) is the same one
+      // the operator-def lambda route above applies; `sigResult` is already
+      // the instantiated per-element result on this route.
+      const lifted = lambdaBroadcastType(
+        expr.ops,
+        sigResult,
+        valueSlots,
+        expr.valueDefinition.inferredType
+      );
+      if (lifted !== undefined) return lifted;
     }
     return sigResult;
   }

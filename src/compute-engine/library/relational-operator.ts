@@ -328,11 +328,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     type: (ops) => comparisonResultType(ops),
 
     // Broadcast element-wise over a list operand (Desmos `L[d=4]` filtering).
-    // Restricted to the list-vs-scalar case: `skipBroadcastForVectorOps` skips
-    // broadcasting when two-or-more operands are collections, so whole-list
-    // equality `Equal(L, M)` stays a scalar boolean. See
+    // Restricted to the list-vs-scalar case by the exemption below: with two
+    // or more collection operands the evaluate handler applies whole-list
+    // (structural/mathematical) equality, a scalar boolean. See
     // docs/COLLECTIONS-MODEL.md.
     broadcastable: true,
+    broadcastExemptions: ['whole-collection-compare'],
 
     canonical: (args, { engine: ce }) => canonicalRelational(ce, 'Equal', args),
 
@@ -643,9 +644,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     type: comparisonResultType,
 
-    // Broadcast element-wise over a list operand (list-vs-scalar only; see
-    // `Equal` above and `skipBroadcastForVectorOps`).
+    // Broadcast element-wise over a list operand (list-vs-scalar only; two or
+    // more collection operands compare whole, as at `Equal` above).
     broadcastable: true,
+    broadcastExemptions: ['whole-collection-compare'],
 
     // `lazy` so the `canonical` handler receives raw, direction-intact operands
     // for chain decomposition (see `canonicalComparisonChain`); a chained

@@ -6178,6 +6178,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'A string created by joining its arguments. The arguments are converted to their default string representation.',
       broadcastable: true,
+      // A LONE collection argument is consumed whole by the evaluate handler
+      // (its elements are JOINED — what makes `String(Characters(s)) == s`
+      // hold), never mapped over. Multi-argument calls keep the
+      // coercing-join-with-broadcast semantics.
+      broadcastExemptions: ['single-collection-join'],
       signature: '(any*) -> string',
       evaluate: (ops, { engine }) => {
         if (ops.length === 0) return engine.string('');

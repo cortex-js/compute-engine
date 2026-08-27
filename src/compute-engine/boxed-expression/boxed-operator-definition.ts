@@ -38,6 +38,7 @@ import type {
   Scope,
   Sign,
   BindingSiteSelector,
+  BroadcastExemption,
   TypeProvenanceEntry,
 } from '../global-types.js';
 
@@ -78,6 +79,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'scoped',
   'bindingSites',
   'broadcastable',
+  'broadcastExemptions',
   'inspectsErrors',
   'namedArgumentsRequired',
   'missingBehavior',
@@ -178,6 +180,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   wikidata?: string;
 
   broadcastable = false;
+  broadcastExemptions: ReadonlyArray<BroadcastExemption> = [];
 
   inspectsErrors = false;
   namedArgumentsRequired = false;
@@ -573,6 +576,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     if (this.keywords) result.keywords = this.keywords;
     if (this.url) result.url = this.url;
     result.broadcastable = this.broadcastable;
+    result.broadcastExemptions = this.broadcastExemptions;
     result.associative = this.associative;
     result.commutative = this.commutative;
     // Only an EXPLICIT commutativeMatch is cloned; a derived one keeps
@@ -843,6 +847,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       url: this.url,
       wikidata: this.wikidata,
       broadcastable: this.broadcastable,
+      broadcastExemptions: this.broadcastExemptions,
       inspectsErrors: this.inspectsErrors,
       namedArgumentsRequired: this.namedArgumentsRequired,
       missingBehavior: this.missingBehavior,
@@ -904,6 +909,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.url = s.url;
     this.wikidata = s.wikidata;
     this.broadcastable = s.broadcastable;
+    this.broadcastExemptions = s.broadcastExemptions ?? [];
     this.inspectsErrors = s.inspectsErrors;
     this.namedArgumentsRequired = s.namedArgumentsRequired;
     this.missingBehavior = s.missingBehavior;
@@ -1019,6 +1025,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.wikidata = def.wikidata ?? this.wikidata;
 
     this.broadcastable = def.broadcastable ?? this.broadcastable;
+    this.broadcastExemptions =
+      def.broadcastExemptions ?? this.broadcastExemptions;
     this.inspectsErrors = def.inspectsErrors ?? this.inspectsErrors;
     this.namedArgumentsRequired =
       def.namedArgumentsRequired ?? this.namedArgumentsRequired;

@@ -48,6 +48,7 @@ export type {
   BoxedBaseDefinition,
   BoxedValueDefinition,
   OperatorDefinitionFlags,
+  BroadcastExemption,
   BindingSite,
   BindingSiteSelector,
   BoxedOperatorDefinition,

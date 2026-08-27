@@ -1785,6 +1785,21 @@ export type BindingSiteSelector = (
 ) => readonly BindingSite[];
 
 /**
+ * A shape of operand (or result) whose broadcast handling an operator's own
+ * handlers provide, exempting it from the generic broadcast machinery. See
+ * {@link OperatorDefinitionFlags.broadcastExemptions} for the meaning of
+ * each label.
+ * @category Definitions
+ */
+export type BroadcastExemption =
+  | 'tensors'
+  | 'tuples'
+  | 'collection-result'
+  | 'evaluated-operands'
+  | 'whole-collection-compare'
+  | 'single-collection-join';
+
+/**
  * An operator definition can have some flags to indicate specific
  * properties of the operator.
  * @category Definitions
@@ -1832,6 +1847,35 @@ export type OperatorDefinitionFlags = {
    * **Default**: `false`
    */
   broadcastable: boolean;
+
+  /**
+   * Operand and result shapes whose broadcast handling this operator's OWN
+   * handlers provide. The generic broadcast machinery — the pre- and
+   * post-evaluation element-wise fan-out and the result-type lift — must not
+   * apply to a shape listed here; the operator's `evaluate` and `type`
+   * handlers give those operands their dedicated semantics instead.
+   *
+   * - `'tensors'`: tensor and matrix operands route to the operator's own
+   *   tensor arms (e.g. the matrix PRODUCT for `Multiply`, not an
+   *   element-wise Hadamard map).
+   * - `'tuples'`: numeric tuples (points/vectors in ℝⁿ) are combined
+   *   component-wise by the handler, never fanned into a `List`.
+   * - `'collection-result'`: the type handler computes its own
+   *   collection-shaped result types (e.g. `matrix + scalar` is a `matrix`);
+   *   the generic result-type lift must not re-wrap them.
+   * - `'evaluated-operands'`: the `evaluate` handler owns the element-wise
+   *   treatment of operands that only become collections at evaluation; the
+   *   generic post-evaluation broadcast arm must not re-map them.
+   * - `'whole-collection-compare'`: two or more collection operands are
+   *   compared as WHOLE values (a scalar boolean); only the
+   *   collection-vs-scalar case broadcasts element-wise.
+   * - `'single-collection-join'`: a lone collection operand is consumed
+   *   whole by the `evaluate` handler (e.g. joined), never mapped over.
+   *
+   * **Default**: `[]` — the generic broadcast machinery applies uniformly
+   * whenever `broadcastable` is `true`.
+   */
+  broadcastExemptions: ReadonlyArray<BroadcastExemption>;
 
   /**
    * If `true`, this operator's `evaluate` handler runs even when the
