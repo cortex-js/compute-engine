@@ -25,6 +25,7 @@ import { simplify } from './simplify.js';
 import { explainExpression } from './explain.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { inBroadcastCell } from './broadcast-cell-widening.js';
 import { hashCode } from './utils.js';
 import { match } from './match.js';
 import { same } from './compare.js';
@@ -572,10 +573,19 @@ export class BoxedNumber
     // NaN, ±∞ and complex literals have no literal type (`_literalType`
     // is undefined there — the tier already says everything) and keep
     // the tier answer below.
-    const lit = this._literalType;
-    if (lit !== undefined) {
-      this._publicTypeMemo ??= new BoxedType(lit, this.engine._typeResolver);
-      return this._publicTypeMemo;
+    // Inside a broadcast cell the literal type is withheld and the bare tier
+    // answers instead (user ruling 2026-08-27 — see
+    // `broadcast-cell-widening.ts`). Returned WITHOUT touching
+    // `_publicTypeMemo`: the memo must keep holding the precise O9 answer, so
+    // that a read of this same literal after the drain — the caller's own
+    // classification of a resolved element — is unaffected by whether the
+    // interpreter happened to ask first.
+    if (!inBroadcastCell(this.engine)) {
+      const lit = this._literalType;
+      if (lit !== undefined) {
+        this._publicTypeMemo ??= new BoxedType(lit, this.engine._typeResolver);
+        return this._publicTypeMemo;
+      }
     }
 
     if (typeof this._value === 'number') {

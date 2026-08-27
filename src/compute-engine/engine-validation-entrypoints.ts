@@ -1,4 +1,8 @@
 import type { Type } from '../common/type/types.js';
+import {
+  inBroadcastCell,
+  withoutBroadcastCellWidening,
+} from './boxed-expression/broadcast-cell-widening.js';
 import { typeToString } from '../common/type/serialize.js';
 import { reduceType } from '../common/type/reduce.js';
 import { BoxedType } from '../common/type/boxed-type.js';
@@ -102,6 +106,40 @@ export function createTypeErrorExpression(
   where?: string | Expression
 ): Expression {
   if (actual) {
+    // A diagnostic must name the offending VALUE, not the tier it belongs
+    // to. When the check ran inside a broadcast cell, the type it read was
+    // deliberately widened (`broadcast-cell-widening.ts`), which would print
+    // "expected integer, got finite_real" for the element `2.5`. Re-read the
+    // operand's type outside the window to recover the precise text.
+    //
+    // Only when the widened reading is exactly what the caller passed: that
+    // identifies `actual` as having come from this same operand, and leaves a
+    // caller that deliberately reports some OTHER type alone.
+    //
+    // Provenance is identified by the type TEXT matching, which is a
+    // heuristic, not a proof: it holds because every call site that reports a
+    // widened type passes that operand's own `.type` verbatim as `actual`. A
+    // caller that deliberately reports some OTHER type whose text happens to
+    // coincide would be re-read too — harmless, since the re-read answers for
+    // the same operand the caller named as `where`.
+    //
+    if (
+      typeof where === 'object' &&
+      where !== null &&
+      'type' in where &&
+      'engine' in where
+    ) {
+      const operand = where as Expression;
+      if (
+        inBroadcastCell(operand.engine) &&
+        actual.toString() === operand.type.toString()
+      )
+        actual = withoutBroadcastCellWidening(
+          operand.engine,
+          () => operand.type
+        );
+    }
+
     // `actual` may be a raw `Type`, which since ruling O9 (a literal's
     // public type is its literal type) is often an OBJECT node (`{kind:
     // 'value', value: 5}`) rather than a primitive string — `.toString()`

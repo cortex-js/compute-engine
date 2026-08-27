@@ -258,6 +258,26 @@
   item 229; 80 of the witness document's 201 line members were declined this
   way, all value-correct.)
 
+- **Interpreted broadcast evaluation no longer pays the literal-type cost per
+  element.** Since a number literal's public `.type` became its literal value
+  (`ce.box(21).type` is `21`), every intermediate result of an interpreted
+  broadcast carried a structured type, and each per-element type query walked
+  that structure instead of comparing interned tier strings — about 2,000
+  subtype queries per element on the witness workload, roughly doubling the
+  cost of evaluating and draining a large computed collection (a 7,225-element
+  Desmos color chain went from ~5.5 s to ~12.7 s and blew through the
+  consumer's materialization budget). Ruled: a broadcast CELL is a
+  storage-like position and may widen. A re-entrant widening window now makes
+  a literal report its bare tier for the duration of the interpreter's own
+  per-cell computation — opened around each element step of a broadcast map
+  and in the shape classifier that provably discards the precision anyway.
+  Everything user-visible keeps the literal type: the public `.type` of any
+  expression, tuple components read at classification time, and the types
+  named in per-element error messages (a diagnostic minted inside a cell
+  re-reads the precise type outside the window). The widening recovers the
+  drain cost to within ~5% of the pre-literal-types baseline and costs
+  nothing on ordinary small expressions. (Tycho item 228.)
+
 - **The shader targets lower `Power` over a vector base, so the
   min-distance-field family compiles on the GPU lane.** `min` over squared
   distances to a literal point list — `(x−P.x)² + (y−P.y)²` after

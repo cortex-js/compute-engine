@@ -6147,7 +6147,12 @@ function declaredBroadcastElement(
     if (t === undefined) continue;
     const el = row[i];
     if (el.type.isUnknown || el.type.matches(t)) continue;
-    return ce.typeError(t, el.type, el.toString());
+    // The boxed element, not its rendering: a diagnostic raised while a
+    // broadcast cell is being computed reads a deliberately widened type,
+    // and `typeError` recovers the precise one by re-reading the operand it
+    // is given here (`createTypeErrorExpression`). A string `where` carries
+    // no type to re-read.
+    return ce.typeError(t, el.type, el);
   }
   return ce._fn('Apply', [literal, ...row]);
 }

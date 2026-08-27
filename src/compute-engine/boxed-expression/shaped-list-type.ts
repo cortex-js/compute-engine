@@ -7,6 +7,7 @@ import {
 
 import type { Expression } from '../global-types.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import { computeBroadcastCell } from './broadcast-cell-widening.js';
 
 /**
  * The result of analyzing one level of a (possibly nested) literal-`List`
@@ -130,7 +131,23 @@ function classifyCell(op: Expression): Type | null {
   // cell's TIER, so project a literal's decoration back to it. Non-literal
   // ranged cells (an unevaluated `Abs(x)`) keep blocking, as they did
   // before literals carried these types.
-  const t = isNumber(op) ? stripNumericRanges(op.type.type) : op.type.type;
+  // The numeric branch discards the literal decoration on the very next
+  // step, so deriving it is wasted work — and this runs once per element of
+  // a materialized list. Read that leaf's type with the literal type
+  // withheld (`broadcast-cell-widening.ts`): the getter then answers with
+  // the tier `stripNumericRanges` was going to reduce it to anyway, so the
+  // claim is unchanged.
+  //
+  // Scoped to the NUMBER-LITERAL branch on purpose. A composite cell (a
+  // tuple, a nested list) computes and CACHES its type, and that memo is not
+  // covered by the no-memo-write rule the window relies on, so a widened
+  // component type would outlive the window and be seen by a later reader.
+  // Those cells are read outside it.
+  const t = isNumber(op)
+    ? stripNumericRanges(
+        computeBroadcastCell(op.engine, () => op.type.type)
+      )
+    : op.type.type;
 
   // `unknown`/`any` govern cell classification only via the fold: an
   // inference-pending BARE SYMBOL folds to `number`; anything else typed
