@@ -90,7 +90,10 @@ export function computeBroadcastCell<T>(engine: object, fn: () => T): T {
  * value, not the tier it belongs to, even when the check that produced it ran
  * inside a cell.
  */
-export function withoutBroadcastCellWidening<T>(engine: object, fn: () => T): T {
+export function withoutBroadcastCellWidening<T>(
+  engine: object,
+  fn: () => T
+): T {
   const saved = depths.get(engine);
   depths.delete(engine);
   try {

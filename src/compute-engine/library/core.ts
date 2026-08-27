@@ -5660,8 +5660,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const [start, end] = literalIntervalEndpoints(domain);
           // A literally infinite endpoint, or a provably non-positive
           // width, is a rejected domain.
-          if (!Number.isNaN(start) && !Number.isFinite(start))
-            return undefined;
+          if (!Number.isNaN(start) && !Number.isFinite(start)) return undefined;
           if (!Number.isNaN(end) && !Number.isFinite(end)) return undefined;
           if (!Number.isNaN(start) && !Number.isNaN(end) && !(start < end))
             return undefined;

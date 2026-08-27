@@ -5905,8 +5905,15 @@ export class BaseCompiler {
     // matching carve-out or a value-equivalence argument like `Multiply`'s.
     if (
       def.operator.broadcastExemptions.length > 0 &&
-      !['Add', 'Multiply', 'Negate', 'Subtract', 'Divide', 'Equal', 'NotEqual']
-        .includes(h)
+      ![
+        'Add',
+        'Multiply',
+        'Negate',
+        'Subtract',
+        'Divide',
+        'Equal',
+        'NotEqual',
+      ].includes(h)
     )
       return null;
 

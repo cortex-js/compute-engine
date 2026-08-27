@@ -1528,7 +1528,6 @@ function getSignFromAssumptionsGuarded(
   ce: ComputeEngine,
   subj: Subject
 ): Sign | undefined {
-
   // Primary path (Perf P2-3 / SYM P2-7): answer from the cached FactIndex
   // bounds, the same source of truth `verify()` uses. This is O(1) after the
   // index is built (vs. the O(#assumptions) scan below), and it is strictly

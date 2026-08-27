@@ -144,9 +144,7 @@ function classifyCell(op: Expression): Type | null {
   // component type would outlive the window and be seen by a later reader.
   // Those cells are read outside it.
   const t = isNumber(op)
-    ? stripNumericRanges(
-        computeBroadcastCell(op.engine, () => op.type.type)
-      )
+    ? stripNumericRanges(computeBroadcastCell(op.engine, () => op.type.type))
     : op.type.type;
 
   // `unknown`/`any` govern cell classification only via the fold: an

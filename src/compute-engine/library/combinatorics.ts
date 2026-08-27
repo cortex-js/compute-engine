@@ -11,14 +11,8 @@ import type {
 import type { Type } from '../../common/type/types.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
-import {
-  negativeSign,
-  nonNegativeSign,
-} from '../boxed-expression/sgn.js';
-import {
-  operandNonFiniteNumber,
-  operandSgn,
-} from './type-handlers-types.js';
+import { negativeSign, nonNegativeSign } from '../boxed-expression/sgn.js';
+import { operandNonFiniteNumber, operandSgn } from './type-handlers-types.js';
 import { apply2 } from '../boxed-expression/apply.js';
 import { gamma, bigGamma, gammaln } from '../numerics/special-functions.js';
 import { checkDeadline } from '../../common/interruptible.js';

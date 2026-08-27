@@ -197,7 +197,11 @@ function isNumberLiteral(d: OperandDescriptor): boolean {
 function valueOfType(t: Type): number | undefined {
   if (typeof t === 'string') return undefined;
   if (t.kind === 'value' && typeof t.value === 'number') return t.value;
-  if (t.kind === 'numeric' && typeof t.lower === 'number' && t.lower === t.upper)
+  if (
+    t.kind === 'numeric' &&
+    typeof t.lower === 'number' &&
+    t.lower === t.upper
+  )
     return t.lower;
   return undefined;
 }
@@ -217,9 +221,7 @@ function valueOfType(t: Type): number | undefined {
  * answering the same thing. Code that wants the symbol's bound too should
  * use the bounds helpers below, which are explicit about reading the type.
  */
-export function operandLiteralValue(
-  d: OperandDescriptor
-): number | undefined {
+export function operandLiteralValue(d: OperandDescriptor): number | undefined {
   if (!isNumberLiteral(d)) return undefined;
   return valueOfType(d.type);
 }
@@ -297,10 +299,7 @@ function mayBeNaN(d: OperandDescriptor): boolean {
  * the `provably*` helpers combine with a closed bound AT that endpoint to
  * prove the strict comparison.
  */
-function typeBounds(
-  t: Type,
-  seen?: Set<object>
-): { lo: number; hi: number } {
+function typeBounds(t: Type, seen?: Set<object>): { lo: number; hi: number } {
   const ALL = { lo: -Infinity, hi: Infinity };
   if (typeof t === 'string') return ALL;
   switch (t.kind) {
@@ -483,7 +482,9 @@ function provablyDiffers(d: OperandDescriptor, k: number): boolean {
   const s = d.facts.sgn;
   if (k > 0) return nonPositiveSign(s) === true;
   if (k < 0) return nonNegativeSign(s) === true;
-  return s === 'not-zero' || positiveSign(s) === true || negativeSign(s) === true;
+  return (
+    s === 'not-zero' || positiveSign(s) === true || negativeSign(s) === true
+  );
 }
 
 /**
@@ -534,9 +535,7 @@ export function numericTypeHandler(
  * This handler has no expressions-shape twin in `type-handlers.ts`: all of
  * its consumers declare `typeHandlerKind: 'types'`.
  */
-export function kindClosureType(
-  ops: ReadonlyArray<OperandDescriptor>
-): Type {
+export function kindClosureType(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.length === 0) return 'number';
   const kinds: NumericPrimitiveType[] = [];
   for (const d of ops) {
@@ -547,7 +546,9 @@ export function kindClosureType(
       !NUMERIC_TYPES_SET.has(t as NumericPrimitiveType)
     )
       return 'number';
-    kinds.push(t === 'imaginary' ? 'finite_complex' : (t as NumericPrimitiveType));
+    kinds.push(
+      t === 'imaginary' ? 'finite_complex' : (t as NumericPrimitiveType)
+    );
   }
   return widen(...kinds);
 }
@@ -654,7 +655,9 @@ function poleReciprocalType(
   if (isNumberLiteral(x)) {
     // A literal whose exact value no machine number holds (`1/3`, `√2`) has
     // no value here — and is not 0 either, so it is off every pole.
-    return poleAtZero && operandLiteralValue(x) === 0 ? 'number' : 'finite_real';
+    return poleAtZero && operandLiteralValue(x) === 0
+      ? 'number'
+      : 'finite_real';
   }
   // A non-literal CONSTANT (π/2, 2π/3, …) can sit exactly on a circular pole
   // — `Tan(π/2) = ~oo`, `Csc(π) = ~oo` — so it keeps `number`. The
@@ -980,9 +983,7 @@ export function gammaPoleType(x: OperandDescriptor | undefined): Type {
  * which is not disjoint from `real` — so the sign is the channel that
  * carries a literal's non-realness here.
  */
-export function roundingFunctionType(
-  x: OperandDescriptor | undefined
-): Type {
+export function roundingFunctionType(x: OperandDescriptor | undefined): Type {
   if (!x) return 'number';
   if (operandNonFiniteNumber(x))
     return typeFact(x.type, 'real') === true ? 'non_finite_number' : 'number';
@@ -1090,9 +1091,7 @@ export function measurementType(ops: ReadonlyArray<OperandDescriptor>): Type {
  * collection capability, which would carry a body type through where the
  * expression shape claims `number` — a narrowing.
  */
-export function bigOpResultType(
-  ops: ReadonlyArray<OperandDescriptor>
-): Type {
+export function bigOpResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
   const body = ops[0];
   if (
     ops.length > 1 &&

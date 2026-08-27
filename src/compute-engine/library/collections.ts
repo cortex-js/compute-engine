@@ -10990,96 +10990,91 @@ function isAtomicJoinOperand(op: Expression): boolean {
  * separated so the handler can run it inside a broadcast-cell window
  * (`broadcast-cell-widening.ts`) without re-indenting the logic.
  */
-function mapAtCell(
-  expr: Expression,
-  index: number
-): Expression | undefined {
+function mapAtCell(expr: Expression, index: number): Expression | undefined {
   if (!isFunction(expr)) return undefined;
 
-      // A set-kind result is indexed through the DEDUPLICATED enumeration,
-      // so that `at`, `each` and `count` agree; the positional paths below
-      // index the source, which counts elements the callback collapsed.
-      if (producesSet(expr))
-        return distinctAt(expr, index, () => {
-          const n =
-            expr.nops > 2
-              ? minCount(expr.ops.slice(1).map((c) => mapSource(c).count))
-              : mapSource(expr.op2).count;
-          return n !== undefined && Number.isFinite(n) ? n : undefined;
-        });
+  // A set-kind result is indexed through the DEDUPLICATED enumeration,
+  // so that `at`, `each` and `count` agree; the positional paths below
+  // index the source, which counts elements the callback collapsed.
+  if (producesSet(expr))
+    return distinctAt(expr, index, () => {
+      const n =
+        expr.nops > 2
+          ? minCount(expr.ops.slice(1).map((c) => mapSource(c).count))
+          : mapSource(expr.op2).count;
+      return n !== undefined && Number.isFinite(n) ? n : undefined;
+    });
 
-      // Random access re-derives the element through the memoized lowered
-      // chain (R5). Each `at()` remains its own auto-compile micro-drain.
-      const spine = lowerMapSpine(expr);
-      if (spine) {
-        const ce = expr.engine;
-        const levels = spine.levels;
-        // The general path recurses through each level's own `at` handler,
-        // so the composite gate is the CONJUNCTION of every level's gate.
-        // Apply them outermost-in, exactly as the recursion would (only the
-        // innermost level can be variadic).
-        for (let i = levels.length - 1; i >= 1; i--) {
-          if (mapSource(levels[i].sources[0]).isIndexedCollection === false)
-            return undefined;
-          if (!Number.isFinite(index) || index === 0) return undefined;
-        }
-        let items: Expression[];
-        if (levels[0].arity > 1) {
-          if (index < 1) return undefined;
-          const xs = spine.bases.map((c) => mapSource(c).at(index));
-          if (xs.some((x) => x === undefined)) return undefined;
-          items = xs as Expression[];
-        } else {
-          const source = mapSource(spine.bases[0]);
-          if (source.isIndexedCollection === false) return undefined;
-          if (!Number.isFinite(index) || index === 0) return undefined;
-          const item = source.at(index);
-          if (!item) return undefined;
-          items = [item];
-        }
-        // A failed level short-circuits the whole access to `undefined` —
-        // the general `at` path returns `undefined` (never a marker) as
-        // soon as one level's application declines.
-        return makeSpineRunner(ce, spine, () => undefined)(items);
-      }
-
-      if (expr.nops > 2) {
-        // Multi-collection (zipWith): f of each source's element at `index`;
-        // undefined if any source has no element there — no up-front count
-        // needed (a source with an unknown count still answers `at`).
-        const collections = expr.ops.slice(1);
-        if (index < 1) return undefined;
-        const items = collections.map((c) => mapSource(c).at(index));
-        if (items.some((x) => x === undefined)) return undefined;
-        // Each at() access is its own micro-drain (resets the
-        // once-per-drain attempt bound, so a cleared `{symbol}` mark can
-        // re-attempt on an at()-only access pattern).
-        const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.(
-          items as Expression[]
-        );
-        if (compiled !== undefined) return compiled;
-        return applicable(expr.op1)?.(items as Expression[]);
-      }
-
-      // Gate on the SOURCE's indexed-ness (value-aware for a symbol
-      // holding a collection), not the Map's own static type: a lazy
-      // broadcast over a declared-`unknown` symbol types `unknown`, but its
-      // source still answers `at`. A genuinely non-indexed source returns
-      // `undefined` from `source.at` below anyway. `mapSource` resolves an
-      // eager/broadcast source that only becomes a collection on evaluation
-      // (else `at` reports `undefined` and a result longer than the
-      // materialization head renders head-only).
-      const source = mapSource(expr.op2);
+  // Random access re-derives the element through the memoized lowered
+  // chain (R5). Each `at()` remains its own auto-compile micro-drain.
+  const spine = lowerMapSpine(expr);
+  if (spine) {
+    const ce = expr.engine;
+    const levels = spine.levels;
+    // The general path recurses through each level's own `at` handler,
+    // so the composite gate is the CONJUNCTION of every level's gate.
+    // Apply them outermost-in, exactly as the recursion would (only the
+    // innermost level can be variadic).
+    for (let i = levels.length - 1; i >= 1; i--) {
+      if (mapSource(levels[i].sources[0]).isIndexedCollection === false)
+        return undefined;
+      if (!Number.isFinite(index) || index === 0) return undefined;
+    }
+    let items: Expression[];
+    if (levels[0].arity > 1) {
+      if (index < 1) return undefined;
+      const xs = spine.bases.map((c) => mapSource(c).at(index));
+      if (xs.some((x) => x === undefined)) return undefined;
+      items = xs as Expression[];
+    } else {
+      const source = mapSource(spine.bases[0]);
       if (source.isIndexedCollection === false) return undefined;
       if (!Number.isFinite(index) || index === 0) return undefined;
       const item = source.at(index);
       if (!item) return undefined;
-      // Each at() access is its own micro-drain (see the zip form above).
-      const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.([
-        item,
-      ]);
-      if (compiled !== undefined) return compiled;
-      return applicable(expr.op1)?.([item]);
+      items = [item];
+    }
+    // A failed level short-circuits the whole access to `undefined` —
+    // the general `at` path returns `undefined` (never a marker) as
+    // soon as one level's application declines.
+    return makeSpineRunner(ce, spine, () => undefined)(items);
+  }
+
+  if (expr.nops > 2) {
+    // Multi-collection (zipWith): f of each source's element at `index`;
+    // undefined if any source has no element there — no up-front count
+    // needed (a source with an unknown count still answers `at`).
+    const collections = expr.ops.slice(1);
+    if (index < 1) return undefined;
+    const items = collections.map((c) => mapSource(c).at(index));
+    if (items.some((x) => x === undefined)) return undefined;
+    // Each at() access is its own micro-drain (resets the
+    // once-per-drain attempt bound, so a cleared `{symbol}` mark can
+    // re-attempt on an at()-only access pattern).
+    const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.(
+      items as Expression[]
+    );
+    if (compiled !== undefined) return compiled;
+    return applicable(expr.op1)?.(items as Expression[]);
+  }
+
+  // Gate on the SOURCE's indexed-ness (value-aware for a symbol
+  // holding a collection), not the Map's own static type: a lazy
+  // broadcast over a declared-`unknown` symbol types `unknown`, but its
+  // source still answers `at`. A genuinely non-indexed source returns
+  // `undefined` from `source.at` below anyway. `mapSource` resolves an
+  // eager/broadcast source that only becomes a collection on evaluation
+  // (else `at` reports `undefined` and a result longer than the
+  // materialization head renders head-only).
+  const source = mapSource(expr.op2);
+  if (source.isIndexedCollection === false) return undefined;
+  if (!Number.isFinite(index) || index === 0) return undefined;
+  const item = source.at(index);
+  if (!item) return undefined;
+  // Each at() access is its own micro-drain (see the zip form above).
+  const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.([item]);
+  if (compiled !== undefined) return compiled;
+  return applicable(expr.op1)?.([item]);
 }
 
 /**
