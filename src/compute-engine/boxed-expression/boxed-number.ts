@@ -429,7 +429,14 @@ export class BoxedNumber
     // @fastpath
     if (typeof rhs === 'number') {
       if (rhs === 1) return this;
-      if (rhs === 0 || this.isSame(0)) return this.engine.Zero;
+      // A zero factor annihilates only a FINITE cofactor: 0·±∞, 0·~oo and
+      // 0·NaN are indeterminate (`isFinite === false` covers all four
+      // non-finite values), matching the canonical `Multiply` fold and
+      // `Product.mul`.
+      if (rhs === 0)
+        return this.isFinite === false ? this.engine.NaN : this.engine.Zero;
+      if (this.isSame(0))
+        return Number.isFinite(rhs) ? this.engine.Zero : this.engine.NaN;
       if (rhs === -1) return this.neg();
       return ce.number(
         typeof this._value === 'number'
@@ -444,11 +451,29 @@ export class BoxedNumber
     if (rhs instanceof NumericValue) {
       if (this.isSame(1)) return ce.number(rhs);
       if (this.isSame(-1)) return ce.number(rhs.neg());
+      // Same indeterminate-form guard as the JS-number fastpath above:
+      // `NumericValue.mul` answers 0 for a zero times a non-finite value.
+      if (this.isSame(0) && !rhs.isZero) {
+        if (
+          rhs.isNaN ||
+          rhs.isPositiveInfinity ||
+          rhs.isNegativeInfinity ||
+          rhs.isComplexInfinity
+        )
+          return this.engine.NaN;
+      } else if (rhs.isZero && this.isFinite === false) return this.engine.NaN;
       return ce.number(rhs.mul(this._value));
     }
 
-    if (isNumber(rhs))
+    if (isNumber(rhs)) {
+      // Same indeterminate-form guard as the fastpaths above.
+      if (
+        (this.isSame(0) && rhs.isFinite === false) ||
+        (rhs.isSame(0) && this.isFinite === false)
+      )
+        return this.engine.NaN;
       return ce.number(ce._numericValue(this._value).mul(rhs.numericValue));
+    }
 
     return mul(this, rhs);
   }

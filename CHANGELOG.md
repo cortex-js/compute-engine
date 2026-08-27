@@ -70,6 +70,16 @@
 
 ### Bug Fixes
 
+- **A zero element times a non-finite factor is `NaN` on every route.**
+  `0 · ~oo`, `0 · ±∞` and `0 · NaN` are indeterminate forms. The scalar
+  canonical product already answered `NaN`, but three sibling routes answered
+  `0`: the broadcast element (`[0,1] · ~oo` evaluated to `[0, ~oo]` — canonical
+  sorting puts `~oo` first and the product fold's zero rule did not recognize
+  the unsigned complex infinity it had already accumulated), and two `.mul()`
+  method fast paths that annihilated a non-finite cofactor with a zero. All
+  routes now agree: `[0,1] · ~oo` is `[NaN, ~oo]`, matching the signed
+  `[0,1] · ∞` → `[NaN, +oo]` and the quotient twin `[0,1]/0` → `[NaN, ~oo]`.
+
 - **Serializing a huge integer no longer materializes a multi-megabyte
   string it then discards.** `decimalToString` decided between fixed and
   scientific notation by building the full fixed-notation string and

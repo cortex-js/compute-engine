@@ -2630,3 +2630,67 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
     ).toBe('0');
   });
 });
+
+describe('A zero element times a non-finite factor is NaN on every route', () => {
+  /**
+   * The product twin of the degenerate-divisor suite above. `0 · ±∞`,
+   * `0 · ~oo` and `0 · NaN` are indeterminate forms: the scalar canonical
+   * fold answered NaN, but three sibling routes answered `0` — the
+   * `Product.mul` zero arm did not recognize the unsigned `~oo` in its
+   * accumulated coefficient (the operand order canonical sorting produces,
+   * so every broadcast element `[0,1]·~oo` hit it), and two `BoxedNumber.mul`
+   * fastpaths annihilated a non-finite cofactor with zero.
+   */
+
+  test('the broadcast element answers NaN, like the scalar product', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Multiply', ['List', 0, 1], 'ComplexInfinity'])
+        .evaluate()
+        .toString()
+    ).toBe('[NaN,~oo]');
+    expect(
+      ce
+        .box(['Multiply', ['List', 0, 1], 'PositiveInfinity'])
+        .evaluate()
+        .toString()
+    ).toBe('[NaN,+oo]');
+    expect(
+      ce.box(['Multiply', ['List', 0, 1], 'ComplexInfinity']).N().toString()
+    ).toBe('[NaN,~oo]');
+    // A zero-free list is unaffected.
+    expect(
+      ce
+        .box(['Multiply', ['List', 1, 2], 'ComplexInfinity'])
+        .evaluate()
+        .toString()
+    ).toBe('[~oo,~oo]');
+  });
+
+  test('both operand orders of the scalar product agree', () => {
+    const ce = new ComputeEngine();
+    const zero = ce.number(0);
+    const coo = ce.ComplexInfinity;
+    expect(ce._fn('Multiply', [coo, zero]).evaluate().toString()).toBe('NaN');
+    expect(ce._fn('Multiply', [zero, coo]).evaluate().toString()).toBe('NaN');
+  });
+
+  test('the .mul() method routes answer NaN for every non-finite cofactor', () => {
+    const ce = new ComputeEngine();
+    const zero = ce.number(0);
+    // Boxed-expression right-hand sides.
+    expect(zero.mul(ce.box('PositiveInfinity')).toString()).toBe('NaN');
+    expect(zero.mul(ce.ComplexInfinity).toString()).toBe('NaN');
+    expect(zero.mul(ce.NaN).toString()).toBe('NaN');
+    // JS-number right-hand sides.
+    expect(ce.box('PositiveInfinity').mul(0).toString()).toBe('NaN');
+    expect(ce.ComplexInfinity.mul(0).toString()).toBe('NaN');
+    expect(ce.NaN.mul(0).toString()).toBe('NaN');
+    expect(zero.mul(Infinity).toString()).toBe('NaN');
+    // Finite cofactors still annihilate.
+    expect(zero.mul(5).toString()).toBe('0');
+    expect(ce.number(5).mul(0).toString()).toBe('0');
+    expect(ce.box('PositiveInfinity').mul(2).toString()).toBe('+oo');
+  });
+});

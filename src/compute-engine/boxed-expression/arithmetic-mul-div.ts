@@ -229,10 +229,18 @@ export class Product {
         if (term.isSame(1)) return;
 
         if (term.isSame(0)) {
-          // infinity * 0 -> NaN (indeterminate form)
+          // infinity * 0 -> NaN (indeterminate form). The unsigned complex
+          // infinity counts too. Canonical sorting places `~oo` before the
+          // zero, so `Multiply(~oo, 0)` — and with it every broadcast
+          // element such as `[0,1]·~oo` — reaches this arm with `~oo`
+          // already in the coefficient; without the `isComplexInfinity`
+          // disjunct it collapsed to 0. The reverse order, `Multiply(0,
+          // ~oo)`, already answered NaN through the zero-coefficient check
+          // in the isInfinity arm below.
           if (
             this.coefficient.isPositiveInfinity ||
-            this.coefficient.isNegativeInfinity
+            this.coefficient.isNegativeInfinity ||
+            this.coefficient.isComplexInfinity
           ) {
             this.coefficient = this.engine._numericValue(NaN);
             return;

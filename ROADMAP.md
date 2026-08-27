@@ -109,21 +109,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### The Multiply broadcast drops `NaN` for a zero element times `~oo` (OPEN, defect — found 2026-08-27 while fixing the collection-numerator division shape)
-
-`[0,1] · ~oo` evaluates to `[0, ~oo]`, but the scalar product `0 · ~oo`
-evaluates to `NaN`, and the signed-infinity broadcast `[0,1] · (+oo)`
-correctly answers `[NaN, +oo]`. Only the unsigned complex infinity as a
-broadcast cofactor loses the indeterminate case: the per-element fold's
-zero shortcut fires without recognizing `~oo` as infinite (the signed pair
-is recognized). Likely a guard on the signed-infinity spellings or a
-finiteness test that answers differently for `~oo` — compare how the same
-fold admits `+oo`. The quotient twin already behaves: `[0,1] / 0` answers
-`[NaN, ~oo]` per element (see the collection-numerator suite in
-`test/compute-engine/points-arithmetic.test.ts`). Same answer expected on
-`.mul()`, `.N()`, and the box route — all three currently agree on the
-wrong `[0, ~oo]`.
-
 ### Compiled `Heaviside(NaN)` returns `1` — a fail-closed violation, confirmed (OPEN, defect — confirmed 2026-08-26 by the error-model conformance suite)
 
 The JavaScript kernel `heaviside: (x) => (x < 0 ? 0 : x === 0 ? 0.5 : 1)`
