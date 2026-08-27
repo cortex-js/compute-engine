@@ -33,6 +33,7 @@ import {
   TypeVariableNode,
 } from './ast-nodes.js';
 import {
+  COMPLEX_INFINITY_VALUE,
   EffectLabel,
   EffectSet,
   TypeParameter,
@@ -216,11 +217,15 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
    surrounding (Epsil) grammar. *)
 <type_reference> ::= ( "type" )? <identifier> ( "<" <type> ( "," <type> )* ">" | "<" ">" )?
 
+(* The lowercase words `infinity` and `nan` are NOT here: they name the two
+   numeric primitive types below. The value spellings are the capitalized
+   words and the symbols. *)
 <value> ::= <string_literal>
           | <number_literal>
           | "true" | "false"
-          | "nan" | "infinity" | "+infinity" | "oo" | "∞" | "+oo" | "+∞"
-          | "-infinity" | "-oo" | "-∞"
+          | "NaN" | "Infinity" | "+infinity" | "+Infinity" | "oo" | "∞" | "+oo" | "+∞"
+          | "-infinity" | "-Infinity" | "-oo" | "-∞"
+          | "~oo" | "~∞"
 
 <primitive_type> ::= <numeric_primitive>
                    | "any" | "unknown" | "nothing" | "missing" | "never" | "error"
@@ -232,7 +237,7 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 <numeric_primitive> ::= "number" | "finite_number" | "complex" | "finite_complex"
                       | "imaginary" | "real" | "finite_real" | "rational"
                       | "finite_rational" | "integer" | "finite_integer"
-                      | "non_finite_number"
+                      | "non_finite_number" | "infinity" | "nan"
 
 
 (* --- Terminals (Lexical Tokens) --- *)
@@ -2057,6 +2062,24 @@ export class Parser {
               'Invalid numeric type',
               'Lower and upper bounds must be valid numbers'
             );
+          // A bound must denote a point on the real line: a number, or a
+          // signed infinity. Anything else the value grammar accepts —
+          // unsigned infinity `~oo` (which carries an object sentinel, not a
+          // JavaScript number), a boolean, a string — has no numeric value.
+          // Such a bound compares as neither less nor greater than any number,
+          // so the range check below would pass it, and the type builder would
+          // store it in the `number`-typed `lower`/`upper` fields, where it
+          // drops silently on serialization.
+          for (const bound of [lowerBound, upperBound])
+            if (
+              bound !== undefined &&
+              bound.valueType !== 'number' &&
+              bound.valueType !== 'infinity'
+            )
+              this.error(
+                'Invalid numeric type',
+                'Lower and upper bounds must be valid numbers'
+              );
           if (lower > upper)
             this.error(
               `Invalid range: ${lower}..${upper}`,
@@ -2108,7 +2131,7 @@ export class Parser {
 
   private parseValue(): ValueNode | undefined {
     let value: any;
-    let valueType: 'string' | 'number' | 'boolean' | 'infinity' | 'nan';
+    let valueType: ValueNode['valueType'];
 
     switch (this.current.type) {
       case 'STRING_LITERAL':
@@ -2144,6 +2167,14 @@ export class Parser {
         this.advance();
         value = -Infinity;
         valueType = 'infinity';
+        break;
+      case 'COMPLEX_INFINITY':
+        // The unsigned `~oo` has no JavaScript number to stand for it, so it
+        // carries the `COMPLEX_INFINITY_VALUE` sentinel instead. Every consumer
+        // recognizes it with `isComplexInfinityValue()`.
+        this.advance();
+        value = COMPLEX_INFINITY_VALUE;
+        valueType = 'complex_infinity';
         break;
       default:
         return undefined;

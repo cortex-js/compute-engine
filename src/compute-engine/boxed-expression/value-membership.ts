@@ -1,4 +1,5 @@
 import type { Type, TypeReference } from '../../common/type/types.js';
+import { isComplexInfinityValue } from '../../common/type/types.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 
 import type { Expression } from '../global-types.js';
@@ -29,9 +30,17 @@ import {
  *   one symbol → literal-value hop through the symbol's existing binding.
  * - **Exactness (D1)**: number comparison is `isSame` — the engine's exact
  *   value identity (`0.0` boxes to the exact integer `0`; `3.5 ≡ 7/2`).
- *   `NaN` is a member of exactly the value type `nan` (amended 2026-08-02;
+ *   `NaN` is a member of exactly the `NaN` value type (amended 2026-08-02;
  *   see `acceptsValueLiteral`) and of no other value type or range. Range
- *   endpoints are inclusive.
+ *   endpoints are inclusive. The same "match only themselves" rule covers the
+ *   unsigned complex infinity `~oo`, whose value type carries a tagged
+ *   sentinel instead of a JavaScript number (see `acceptsValueLiteral`).
+ * - **Primitives that no value synthesizes**: membership in a primitive name
+ *   normally coincides with subtyping the value's synthesized type, but the
+ *   `nan` and `infinity` primitives name values whose synthesized type is
+ *   still the wide `number`, so subtyping alone would make each of them
+ *   reject its own members. Those two are decided on the value (see
+ *   `accepts`).
  * - Error values are members of nothing.
  * - `false` means "not provably a member" — a symbolic or partially-known
  *   expression yields `false` and the caller keeps its ordinary behavior
@@ -43,7 +52,10 @@ export function typeAcceptsValue(
 ): boolean {
   if (type === undefined) return false;
   // Fast bail: without a value-kind/bounded-numeric component, membership
-  // coincides with subtyping and the caller has already checked that.
+  // coincides with subtyping and the caller has already checked that. The
+  // `nan` and `infinity` primitives are the exception — they are decided on
+  // the value by `accepts` — so this entry point does not answer for them;
+  // `admissionOf` reaches `accepts` directly and does.
   if (!hasValueComponent(type)) return false;
 
   const v = concreteValueOf(expr);
@@ -262,7 +274,19 @@ function accepts(
   t: Type,
   seen?: Map<TypeReference, Set<Expression>>
 ): boolean {
-  if (typeof t === 'string') return isSubtype(v.type.type, t);
+  if (typeof t === 'string') {
+    // Two primitive names have members whose SYNTHESIZED type is the wide
+    // `number`, so subtyping alone would make each of them reject its own
+    // members: a boxed NaN types `number`, and so does the unsigned complex
+    // infinity `~oo`. Decide those on the value.
+    //
+    // The signed infinities need no arm here: they synthesize
+    // `non_finite_number`, which IS a primitive subtype of `infinity`, so the
+    // subtype fallback below already admits them.
+    if (t === 'nan') return isNumber(v) && v.isNaN === true;
+    if (t === 'infinity' && isComplexInfinityLiteral(v)) return true;
+    return isSubtype(v.type.type, t);
+  }
 
   switch (t.kind) {
     case 'value':
@@ -378,13 +402,20 @@ function accepts(
 }
 
 /** Membership in a literal value type (`0`, `"red"`, `true`): the engine's
- * exact value identity (`isSame`). `NaN` is a member of exactly the value
- * type `nan` — "match only themselves", like the infinities (amended
- * 2026-08-02; v1 ruled NaN a member of NO value type, which made a `nan`
+ * exact value identity (`isSame`). `NaN` is a member of exactly the `NaN`
+ * value type — "match only themselves", like the infinities (amended
+ * 2026-08-02; v1 ruled NaN a member of NO value type, which made a `NaN`
  * literal parameter unreachable). NaN never inhabits any OTHER value type
  * even though `isSame(NaN, NaN)` is `true`, so both directions stay
- * explicit. */
+ * explicit.
+ *
+ * The unsigned complex infinity `~oo` matches only itself too, and needs its
+ * own arm: it has no JavaScript number to stand for it, so its value type
+ * carries the frozen `COMPLEX_INFINITY_VALUE` sentinel object instead, which
+ * the `typeof` chain below would answer `false` for — including against the
+ * very value the type names. */
 function acceptsValueLiteral(v: Expression, value: unknown): boolean {
+  if (isComplexInfinityValue(value)) return isComplexInfinityLiteral(v);
   if (typeof value === 'number') {
     if (Number.isNaN(value)) return isNumber(v) && v.isNaN === true;
     if (!isNumber(v) || v.isNaN === true) return false;
@@ -394,4 +425,17 @@ function acceptsValueLiteral(v: Expression, value: unknown): boolean {
   if (typeof value === 'boolean')
     return isSymbol(v) && v.symbol === (value ? 'True' : 'False');
   return false;
+}
+
+/** Is `v` the boxed unsigned complex infinity `~oo`?
+ *
+ * It cannot be recognized the way the signed infinities are: its synthesized
+ * type is the wide `number`, and no JavaScript number denotes it. The flag
+ * lives on the numeric value instead (`isComplexInfinity`,
+ * `numeric-value/types.ts`), and only a NumericValue object carries it — a
+ * number literal held as a plain JavaScript `number` is never `~oo`. */
+function isComplexInfinityLiteral(v: Expression): boolean {
+  if (!isNumber(v)) return false;
+  const nv = v.numericValue;
+  return typeof nv === 'object' && nv !== null && nv.isComplexInfinity;
 }

@@ -1,5 +1,49 @@
 ## [Unreleased]
 
+### New Features
+
+- **Two new numeric primitive types, `infinity` and `nan`.** They are the first,
+  ADDITIVE step of the finite-by-default migration of the numeric type lattice.
+  Nothing existing changes meaning in this release: the bare numeric names
+  `real`, `rational` and `integer` still admit `±∞`, every value keeps the
+  principal type it had, and every `matches()` answer is the one it was.
+
+  - `infinity` is a number of infinite magnitude, of any direction: the signed
+    `+oo` and `-oo` plus the unsigned complex infinity `~oo`. It sits between
+    `number` and the existing `non_finite_number` (`number ⊃ infinity ⊃
+    non_finite_number`), so `+oo` and `-oo` now match `infinity` in addition to
+    everything they already matched.
+  - `nan` names exactly the not-a-number marker. Its only supertype is `number`,
+    so it is disjoint from `complex`, `real` and everything below them.
+
+  Both names are usable everywhere a primitive name is: in a type string
+  (`parseType('infinity')`), in a declaration (`ce.declare('x', 'nan')`), in a
+  signature, and in `matches()` / `isSubtype()`.
+
+  **If your code classifies types by NAME, add these two.** A primitive type is
+  a BARE STRING in the type AST, not an object with a `kind` field, so a
+  classifier that switches on `kind` falls through on it, and a classifier that
+  lists numeric names by hand will not recognize these two. The shape-agnostic
+  test is `type.matches('infinity')` / `type.matches('nan')`.
+
+- **The unsigned complex infinity has a type spelling: `~oo`** (also written
+  `~∞`). It is a value-literal type, like `+oo` and `-oo`, and it is a subtype
+  of `infinity` — but NOT of `non_finite_number` (which names the SIGNED pair),
+  and NOT of `complex` or `real`. It serializes as `~oo` and reads back
+  unchanged. Any other use of `~` in a type string is still an error.
+
+- **In a TYPE string, the lowercase words `infinity` and `nan` now name the two
+  new primitives** rather than the value literals `+∞` and `NaN`. The value
+  spellings are unchanged and unaffected: `oo`, `+oo`, `-oo`, `∞`, `+∞`, `-∞`,
+  `NaN`, `Infinity`, `+infinity` and `-infinity` all mean exactly what they
+  meant. Only the two exact-lowercase words moved.
+
+- **Coming in the next major release** (a preview, so name-matching consumers
+  have lead time): bare numeric names will mean FINITE — `real` will stop
+  admitting `±∞` — values will retype onto `infinity` and `nan`, and the
+  `finite_number`, `finite_complex`, `finite_real`, `finite_rational`,
+  `finite_integer` and `non_finite_number` names will retire.
+
 ## 0.120.0 _2026-08-27_
 
 ### Breaking Changes

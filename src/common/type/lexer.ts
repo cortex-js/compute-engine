@@ -11,6 +11,7 @@ export type TokenType =
   | 'INFINITY'
   | 'PLUS_INFINITY'
   | 'MINUS_INFINITY'
+  | 'COMPLEX_INFINITY'
   // Operators
   | '|'
   | '&'
@@ -347,6 +348,15 @@ export class Lexer {
         this.input.slice(start, this.pos)
       );
     }
+    // The unsigned complex infinity. `~` starts no other token, so any other
+    // use of it stays the error (or, in tolerant mode, the end of the type)
+    // that it is today.
+    if (this.match('~∞') || this.match('~oo')) {
+      return this.createToken(
+        'COMPLEX_INFINITY',
+        this.input.slice(start, this.pos)
+      );
+    }
     if (this.match('+infinity') || this.match('+Infinity')) {
       return this.createToken(
         'PLUS_INFINITY',
@@ -370,12 +380,15 @@ export class Lexer {
           return this.createToken('TRUE', value);
         case 'false':
           return this.createToken('FALSE', value);
-        case 'nan':
+        // The exact-lowercase `nan` and `infinity` are the names of the two
+        // numeric PRIMITIVE types, so they fall through as identifiers and the
+        // parser reads them with every other primitive name. The capitalized
+        // spellings and the `oo`/`∞` symbols stay VALUE literals: they are how
+        // a signature writes the singleton `oo`, and nothing names a primitive
+        // `NaN` or `Infinity`.
         case 'NaN':
           return this.createToken('NAN', value);
-        case 'infinity':
         case 'Infinity':
-          return this.createToken('INFINITY', value);
         case 'oo':
           return this.createToken('INFINITY', value);
         default:

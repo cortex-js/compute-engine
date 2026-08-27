@@ -131,6 +131,24 @@ export type PrimitiveType =
  * - `integer`: a whole number, admits ±∞ = `finite_integer` + `non_finite_number`
  * - `rational`: a rational number (includes the integers), admits ±∞ = `finite_rational` + `non_finite_number`
  *
+ * Two more numeric names name a value of infinite magnitude and the
+ * not-a-number marker:
+ *
+ * - `infinity`: a number of infinite magnitude, of any direction — the signed
+ *   `+∞` and `−∞` plus the unsigned complex infinity `~∞`. It sits between
+ *   `number` and `non_finite_number` (`number ⊃ infinity ⊃ non_finite_number`),
+ *   so the pre-existing overlap of `real` and the infinities stays exactly the
+ *   signed pair that `non_finite_number` already names.
+ * - `nan`: the not-a-number marker. It has no other numeric supertype than
+ *   `number`, so it is disjoint from `complex`, `real` and every type below
+ *   them.
+ *
+ * Both names are TRANSITIONAL. In this release they are additive: no existing
+ * value changes its principal type, and `real`, `rational` and `integer` still
+ * admit ±∞. The finite-by-default flip — bare numeric names mean finite, the
+ * `finite_*` tower and `non_finite_number` retire, and values retype onto
+ * `infinity`/`nan` — is Phase 1 of
+ * `docs/plans/2026-08-27-lattice-flip-implementation.md`.
  */
 export type NumericPrimitiveType =
   | 'number'
@@ -144,7 +162,39 @@ export type NumericPrimitiveType =
   | 'finite_rational'
   | 'integer'
   | 'finite_integer'
-  | 'non_finite_number';
+  | 'non_finite_number'
+  // A number of infinite magnitude, of any direction: `+∞`, `−∞` and the
+  // unsigned `~∞`. Supertype of `non_finite_number` (the signed pair).
+  | 'infinity'
+  // The not-a-number marker. Disjoint from every numeric type but `number`.
+  | 'nan';
+
+/**
+ * The value carried by the type of the unsigned complex infinity `~oo`, which
+ * has no JavaScript number to stand for it: `Infinity` and `-Infinity` are the
+ * signed pair, and `NaN` is a different value altogether.
+ *
+ * A value-literal type holds an arbitrary runtime value (see {@linkcode
+ * ValueType}), so this frozen tagged object is that value. Test for it with
+ * {@linkcode isComplexInfinityValue}, which reads the TAG: a `Type` node can be
+ * rebuilt or re-frozen on its way through the parser and the reducers, so
+ * object identity is not a reliable test.
+ */
+export const COMPLEX_INFINITY_VALUE = Object.freeze({
+  complexInfinity: true as const,
+});
+
+/** True if `v` is the {@linkcode COMPLEX_INFINITY_VALUE} sentinel, i.e. the
+ * value of the `~oo` value-literal type. Reads the tag, never the identity. */
+export function isComplexInfinityValue(
+  v: unknown
+): v is typeof COMPLEX_INFINITY_VALUE {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    (v as { complexInfinity?: unknown }).complexInfinity === true
+  );
+}
 
 export type NamedElement = {
   name?: string;

@@ -1367,23 +1367,37 @@ export function serializeEpsil(
   // polymorphism design §4.5).
   // The spelling of a value type — what a literal parameter's type text
   // looks like: a (signed) number, a quoted string, a boolean, or the
-  // infinity/NaN spellings (`oo`/`-oo`/`+oo`/`nan`). Guards the name
+  // infinity/NaN spellings (`oo`/`-oo`/`+oo`/`NaN`). Guards the name
   // suppression below so a non-value-typed parameter that merely wears the
   // reserved prefix (box route) keeps its name.
   // The Epsil spelling of an infinity/NaN value-type text. Both the type
-  // grammar's compact spellings (`oo`/`nan`, what the Epsil parser lowers
-  // to) and the CANONICAL spellings its serializer emits
-  // (`typeToString` writes `Infinity`/`-Infinity`/`NaN`, which box-route
-  // markers carry) map to the Epsil literal.
+  // grammar's compact spellings (`oo`, what the Epsil parser lowers to) and
+  // the CANONICAL spellings its serializer emits (`typeToString` writes
+  // `Infinity`/`-Infinity`/`NaN`, which box-route markers carry) map to the
+  // Epsil literal. The lowercase `nan` is a LEGACY read-compatibility row: the
+  // parser now lowers a NaN literal parameter to the capitalized `NaN`, and
+  // the lowercase spelling names the not-a-number PRIMITIVE type. The row
+  // exists only so MathJSON lowered before that spelling change — when the
+  // type grammar still read `nan` as the value literal — keeps suppressing the
+  // generated name. It cannot affect an ordinary parameter declared `x: nan`,
+  // because the name suppression below also requires the reserved
+  // `literalParam_` prefix (`isLiteralParamName`), which a user-written name
+  // never has.
+  // The unsigned complex infinity (`~oo`, what `typeToString` emits for that
+  // value type) is deliberately absent: Epsil has no literal spelling for it —
+  // `⧝` lexes to the ORDINARY symbol `ComplexInfinity`, which the parameter
+  // grammar reads as a parameter NAME, not as a literal — so such a parameter
+  // keeps its name rather than serializing to something that would not read
+  // back as a literal.
   const EPSIL_VALUE_SPELLING: Record<string, string> = {
     'oo': 'Infinity',
     '+oo': 'Infinity',
     '-oo': '-Infinity',
-    'nan': 'NaN',
     'Infinity': 'Infinity',
     '+Infinity': 'Infinity',
     '-Infinity': '-Infinity',
     'NaN': 'NaN',
+    'nan': 'NaN',
   };
 
   const isValueTypeText = (t: string): boolean =>

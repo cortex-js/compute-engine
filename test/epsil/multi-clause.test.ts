@@ -102,10 +102,14 @@ describe('EPSIL MULTI-CLAUSE — literal parameter lowering (§4.5)', () => {
     );
   });
 
-  test('Infinity and NaN are literal parameters (lowered to oo/nan)', () => {
+  test('Infinity and NaN are literal parameters (lowered to oo/NaN)', () => {
     // Both are numeric LITERALS in expression position, so the literal
     // reading is the consistent one — unlike `Pi`, a symbol everywhere,
     // which stays a parameter name.
+    // NaN lowers to the CAPITALIZED `NaN`, the type grammar's value-literal
+    // spelling. The lowercase `nan` names the not-a-number PRIMITIVE type, so
+    // it would declare an ordinary typed parameter instead of a clause the
+    // dispatcher matches against the NaN value.
     expect(lowered('f(Infinity) = 1')).toEqual([
       'DefineFunction',
       'f',
@@ -119,7 +123,7 @@ describe('EPSIL MULTI-CLAUSE — literal parameter lowering (§4.5)', () => {
     expect(lowered('f(NaN) = 3')).toEqual([
       'DefineFunction',
       'f',
-      ['Function', 3, ['Typed', 'literalParam_1', { str: 'nan' }]],
+      ['Function', 3, ['Typed', 'literalParam_1', { str: 'NaN' }]],
     ]);
   });
 

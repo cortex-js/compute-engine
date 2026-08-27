@@ -1,5 +1,6 @@
 import { NUMERIC_TYPES_SET } from './primitive.js';
 import { effectSetToString } from './effects.js';
+import { isComplexInfinityValue } from './types.js';
 import type { NamedElement, NumericPrimitiveType, Type } from './types.js';
 
 // Binding tightness, ascending. A node is parenthesized when the context it is
@@ -69,6 +70,10 @@ export function typeToString(type: Type, precedence = 0): string {
         result = `"${type.value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
       else if (typeof type.value === 'boolean')
         result = type.value ? 'true' : 'false';
+      // The unsigned complex infinity carries a sentinel object, not a number,
+      // so `toString()` on it would print `[object Object]` instead of a
+      // spelling the parser can read back.
+      else if (isComplexInfinityValue(type.value)) result = '~oo';
       else result = type.value.toString();
       break;
 

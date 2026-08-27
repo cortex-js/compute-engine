@@ -1015,6 +1015,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (!t.isUnknown) {
       if (t.matches('finite_number')) return true;
       if (t.matches('non_finite_number')) return false;
+      // `infinity` is any value of infinite magnitude (`+oo`, `-oo`, `~oo`)
+      // and `nan` is the NaN singleton. Neither is a finite number, which is
+      // what `isFinite` asks: a NaN VALUE answers `false` here too.
+      if (t.matches('infinity')) return false;
+      if (t.matches('nan')) return false;
     }
     return undefined;
   }
@@ -1042,7 +1047,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // (PositiveInfinity, NegativeInfinity — no NaN member, and no
     // ComplexInfinity, which is typed `complex`), so it entails "is infinite".
     const t = this.type;
-    if (!t.isUnknown && t.matches('non_finite_number')) return true;
+    if (!t.isUnknown) {
+      if (t.matches('non_finite_number')) return true;
+      // `infinity` also admits ComplexInfinity, which `isInfinity` counts as
+      // infinite. `nan` is the NaN singleton: a NaN VALUE answers `false`
+      // here (NaN is not an infinity), so a `nan`-typed symbol does too.
+      if (t.matches('infinity')) return true;
+      if (t.matches('nan')) return false;
+    }
     return undefined;
   }
 
@@ -1061,6 +1073,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isNaN(): boolean | undefined {
+    const fromValue = this._valueIsNaN();
+    if (fromValue !== undefined) return fromValue;
+    // Type fallback, as for `isFinite` and `isInfinity`: `nan` is the type of
+    // the NaN singleton, and `infinity` (the infinite-magnitude values) is
+    // disjoint from it, so both answers are decided by the declaration alone.
+    const t = this.type;
+    if (!t.isUnknown) {
+      if (t.matches('nan')) return true;
+      if (t.matches('infinity')) return false;
+    }
+    return undefined;
+  }
+
+  private _valueIsNaN(): boolean | undefined {
     const value = this.value;
     if (value === undefined) return undefined;
     if (isNumber(value)) return value.isNaN;

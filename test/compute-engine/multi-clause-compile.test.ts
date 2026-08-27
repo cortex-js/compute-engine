@@ -104,7 +104,7 @@ describe('MULTI-CLAUSE COMPILE — guard chain (spec §8)', () => {
   it('Infinity and NaN clauses compile with interpreter parity', () => {
     clause('g', ['Function', 1, p('a', 'oo')]);
     clause('g', ['Function', 2, p('b', '-oo')]);
-    clause('g', ['Function', 3, p('c', 'nan')]);
+    clause('g', ['Function', 3, p('c', 'NaN')]);
     clause('g', ['Function', 0, p('x', 'number')]);
     const r = compile(ce.box(['g', 'w']));
     expect(r?.run?.({ w: Infinity })).toBe(1);

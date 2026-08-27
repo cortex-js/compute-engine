@@ -183,7 +183,16 @@ export interface TypeReferenceNode extends ASTNode {
 export interface ValueNode extends ASTNode {
   kind: 'value';
   value: any;
-  valueType: 'string' | 'number' | 'boolean' | 'infinity' | 'nan';
+  // `complex_infinity` is the unsigned `~oo`. It is kept apart from `infinity`
+  // (the signed `+oo`/`-oo`) because its `value` is the
+  // `COMPLEX_INFINITY_VALUE` sentinel rather than a JavaScript number.
+  valueType:
+    | 'string'
+    | 'number'
+    | 'boolean'
+    | 'infinity'
+    | 'complex_infinity'
+    | 'nan';
 }
 
 export interface DimensionNode extends ASTNode {

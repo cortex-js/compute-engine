@@ -19,8 +19,16 @@ import type { Type } from '../../common/type/types.js';
 import { isFunction, isString, isSymbol, isNumber } from './type-guards.js';
 
 /** Keys a `record{…}` type can carry unescaped: what the type lexer reads back
- * as an `IDENTIFIER` (`lexer.ts`), minus the words it lexes as keywords. */
-const TYPE_KEYWORD_KEYS = new Set(['true', 'false', 'nan', 'infinity', 'oo']);
+ * as an `IDENTIFIER` (`lexer.ts`), minus the words it lexes as keywords.
+ *
+ * The list must track the keyword table in `lexer.ts` exactly. It is the
+ * CAPITALIZED `NaN` and `Infinity` that are keywords, together with `oo`; the
+ * lowercase `nan` and `infinity` name the two numeric primitive types and lex
+ * as ordinary identifiers, so they are legal keys like `real` and `number`. A
+ * key wrongly listed here only costs precision (the type falls back to
+ * `dictionary<T>`, a supertype), but a keyword wrongly MISSING produces a
+ * record type that cannot be read back. */
+const TYPE_KEYWORD_KEYS = new Set(['true', 'false', 'NaN', 'Infinity', 'oo']);
 function isRecordKey(key: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key) && !TYPE_KEYWORD_KEYS.has(key);
 }

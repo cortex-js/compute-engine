@@ -18,6 +18,7 @@ import {
   STRING_STRUCTURAL_TYPE,
   VALUE_TYPES,
 } from './primitive.js';
+import { isComplexInfinityValue } from './types.js';
 import type {
   BroadcastableType,
   CollectionType,
@@ -49,6 +50,20 @@ import { subtypingVarianceOf } from './variance.js';
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   number: NUMERIC_TYPES,
   non_finite_number: [], //  PositiveInfinity, NegativeInfinity
+  // A number of infinite magnitude, of any direction. Its only primitive
+  // subtype is the SIGNED pair `non_finite_number` (`+∞`, `−∞`); the unsigned
+  // `~∞` is a value literal, placed under `infinity` by the value-literal rules
+  // in `isSubtype`. `infinity` is deliberately absent from the child list of
+  // every other entry: an unsigned infinity is not a `real`, not a `complex`
+  // and not an `integer`, so the overlap of `real` and `infinity` stays exactly
+  // the signed pair, which the closure derives on its own
+  // (`meetPrimitiveTypes('real', 'infinity')` = `['non_finite_number']`).
+  // `number` lists it through `NUMERIC_TYPES`, which it shares by reference.
+  infinity: ['non_finite_number'],
+  // The not-a-number marker: an atom with no subtypes, and — being listed by
+  // no entry but `number` (through `NUMERIC_TYPES`) — disjoint from every other
+  // numeric type.
+  nan: [],
   finite_number: [
     'finite_complex',
     'finite_real',
@@ -292,7 +307,16 @@ function hasFiniteBounds(t: { lower?: number; upper?: number }): boolean {
 }
 
 /** The *finite* counterpart of a numeric primitive type (the ±∞-admitting
- *  types map to their finite subtype; already-finite types map to themselves). */
+ *  types map to their finite subtype; already-finite types map to themselves).
+ *
+ *
+ *  `infinity` and `nan` have no finite counterpart — no value of either type is
+ *  finite — but the `default` arm returns them unchanged, which reads as "these
+ *  are already finite". This is accepted for now: the sole caller applies the
+ *  helper to the base of a range that HAS finite bounds, the type parser
+ *  refuses bounds on those two names, and only a hand-built `Type` object can
+ *  therefore reach here with such a range. The helper is removed when the
+ *  numeric lattice migration completes. */
 function finiteBaseType(t: NumericPrimitiveType): NumericPrimitiveType {
   switch (t) {
     case 'number':
@@ -321,6 +345,12 @@ function finiteBaseType(t: NumericPrimitiveType): NumericPrimitiveType {
  * collapse to — and be seen as equal to — the single covering type `X`. (Under
  * D10 `real ⊂ complex`, so `real ∧ complex = real`; the covering-union map is
  * unchanged and still governs the finite/non-finite collapse.)
+ *
+ * The covering claim now OVER-approximates: since `number` also holds `nan`,
+ * `infinity` and the unsigned `~oo`, injecting `number` as a phantom member of
+ * `finite_number | non_finite_number` makes those three subtypes of that union
+ * even though they belong to neither actual member. The map is removed when the
+ * numeric lattice migration completes.
  */
 export const COVERING_UNION_MAP: Record<string, NumericPrimitiveType> = {
   finite_number: 'number',
@@ -1157,6 +1187,12 @@ export function isSubtype(
 
     if (lhs.kind === 'value') {
       if (typeof lhs.value === 'boolean') return rhs === 'boolean';
+      // The unsigned complex infinity `~oo` claims `infinity`, not
+      // `non_finite_number`: that type names the SIGNED pair `+∞`/`−∞`, and
+      // `~∞` has no sign, so it is neither real nor complex. Tested before the
+      // numeric branches because the sentinel is an object, not a number.
+      if (isComplexInfinityValue(lhs.value))
+        return isPrimitiveSubtype('infinity', rhs as PrimitiveType);
       if (typeof lhs.value === 'number') {
         // Each numeric literal claims its PRINCIPAL type: NaN inhabits the
         // wide `number` and nothing narrower (`nan ⊄ real` — a boxed NaN
@@ -1164,8 +1200,14 @@ export function isSubtype(
         // the lattice); a *finite* literal claims the finite base type
         // (`value 0 <: finite_integer`, not merely `integer`). Matches the
         // value-vs-bounded-numeric path.
+        // The one addition is `nan`: the marker type names exactly the NaN
+        // singleton, so a NaN literal inhabits it. That relation cannot come
+        // from the principal-type claim, because the principal type `number`
+        // is WIDER than `nan`.
         if (Number.isNaN(lhs.value))
-          return isPrimitiveSubtype('number', rhs as PrimitiveType);
+          return (
+            rhs === 'nan' || isPrimitiveSubtype('number', rhs as PrimitiveType)
+          );
         if (!Number.isFinite(lhs.value))
           return isPrimitiveSubtype('non_finite_number', rhs as PrimitiveType);
         if (Number.isInteger(lhs.value))
@@ -1825,6 +1867,9 @@ export function isSubtype(
   // `value 7 <: integer<5..10>` fell through to the value fallback below,
   // which tested `integer <: integer<5..10>` — always `false`.)
   if (rhs.kind === 'numeric' && lhs.kind === 'value') {
+    // The unsigned `~oo` is refused for the same reason NaN is below: it is
+    // unordered against any bound, so no bounded range admits it.
+    if (isComplexInfinityValue(lhs.value)) return false;
     if (typeof lhs.value !== 'number') return false;
     // NaN is unordered: it inhabits no bounded range. (Without the explicit
     // check, `NaN < lower` and `NaN > upper` are both false and the range
@@ -1861,26 +1906,36 @@ export function isSubtype(
   // case) is handled earlier, before the primitive fall-through.
 
   // Value types (strings, boolean, number). `===` plus an explicit NaN
-  // case: the value type `nan` must be a subtype of ITSELF (`NaN === NaN`
+  // case: the `NaN` value type must be a subtype of ITSELF (`NaN === NaN`
   // is false, which made every signature containing `nan` fail its own
   // validation). Not `Object.is` — that would also distinguish ±0, and
   // `-0`/`0` value types denote the same singleton (the engine normalizes
   // both zeros to the exact integer `0` at boxing).
+  // The `~oo` sentinel needs the same treatment as NaN: two occurrences of the
+  // complex-infinity value type denote the same singleton, but they can be
+  // distinct objects (a `Type` node is rebuilt by the parser and the reducers),
+  // so `===` alone would make `~oo` fail its own validation.
   if (rhs.kind === 'value' && lhs.kind === 'value')
     return (
       rhs.value === lhs.value ||
       (typeof rhs.value === 'number' &&
         Number.isNaN(rhs.value) &&
         typeof lhs.value === 'number' &&
-        Number.isNaN(lhs.value))
+        Number.isNaN(lhs.value)) ||
+      (isComplexInfinityValue(rhs.value) && isComplexInfinityValue(lhs.value))
     );
 
   if (lhs.kind === 'value') {
     if (typeof lhs.value === 'boolean') return isSubtype('boolean', rhs);
+    // `~oo` claims `infinity` — see the value-vs-primitive path above.
+    if (isComplexInfinityValue(lhs.value)) return isSubtype('infinity', rhs);
     if (typeof lhs.value === 'number') {
       // Principal-type claims, matching the value-vs-primitive path above:
       // NaN → `number`, ±∞ → `non_finite_number`, finite literals → the
-      // finite base type (`value 0 <: finite_integer`).
+      // finite base type (`value 0 <: finite_integer`). The extra `nan` claim
+      // the value-vs-primitive path makes is not repeated here: this branch is
+      // only reached with a COMPOSITE right-hand side, and `nan` is a
+      // primitive, so a bare `nan` on the right never arrives here.
       if (Number.isNaN(lhs.value)) return isSubtype('number', rhs);
       if (!Number.isFinite(lhs.value))
         return isSubtype('non_finite_number', rhs);
@@ -1911,7 +1966,10 @@ export function isCompatible(
 function isNumeric(type: Type): boolean {
   if (typeof type === 'string')
     return NUMERIC_TYPES_SET.has(type as NumericPrimitiveType);
-  if (type.kind === 'value') return typeof type.value === 'number';
+  // The unsigned `~oo` sentinel is a numeric value literal, but it is not a
+  // JavaScript number, so it needs its own test to agree with the subtype path.
+  if (type.kind === 'value')
+    return typeof type.value === 'number' || isComplexInfinityValue(type.value);
   if (type.kind === 'numeric') return true;
   return false;
 }
@@ -2368,9 +2426,16 @@ export function widen(...types: Readonly<Type>[]): Readonly<Type> {
 /**
  * The candidate common supertypes probed by `superType`, ordered from most
  * specific to most general.
+ *
+ * `infinity` sits immediately after `non_finite_number` and `nan` immediately
+ * before `number`: every numeric type that is below `infinity` is also below
+ * `non_finite_number`, which is probed first, so no pair that already had a
+ * join gets a different one — the two names only give a tighter answer to
+ * joins that involve the unsigned `~oo` or `nan` themselves.
  */
 const SUPERTYPE_PROBE_ORDER: PrimitiveType[] = [
   'non_finite_number',
+  'infinity',
   'finite_integer',
   'integer',
   'finite_rational',
@@ -2381,6 +2446,7 @@ const SUPERTYPE_PROBE_ORDER: PrimitiveType[] = [
   'finite_complex',
   'complex',
   'finite_number',
+  'nan',
   'number',
   'list',
   'record',

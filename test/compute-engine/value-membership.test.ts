@@ -55,13 +55,17 @@ describe('VALUE MEMBERSHIP — typeAcceptsValue', () => {
     expect(typeAcceptsValue(ce.box(-0.0), t('0'))).toBe(true);
   });
 
-  it('NaN is a member of exactly the value type `nan` (amended 2026-08-02)', () => {
-    expect(typeAcceptsValue(ce.box(NaN), t('nan'))).toBe(true);
+  it('NaN is a member of exactly the `NaN` value type (amended 2026-08-02)', () => {
+    // The value type is spelled with the CAPITALIZED `NaN`. The lowercase
+    // `nan` names the not-a-number PRIMITIVE type, which this predicate does
+    // not decide: a primitive has no value component, so membership in it
+    // coincides with subtyping and the caller has already checked that.
+    expect(typeAcceptsValue(ce.box(NaN), t('NaN'))).toBe(true);
     expect(typeAcceptsValue(ce.box(NaN), t('0'))).toBe(false);
     expect(typeAcceptsValue(ce.box(NaN), t('integer<0..10>'))).toBe(false);
-    // …and nothing else inhabits `nan`.
-    expect(typeAcceptsValue(ce.box(0), t('nan'))).toBe(false);
-    expect(typeAcceptsValue(ce.box(Infinity), t('nan'))).toBe(false);
+    // …and nothing else inhabits the `NaN` value type.
+    expect(typeAcceptsValue(ce.box(0), t('NaN'))).toBe(false);
+    expect(typeAcceptsValue(ce.box(Infinity), t('NaN'))).toBe(false);
   });
 
   it('infinities match only themselves', () => {

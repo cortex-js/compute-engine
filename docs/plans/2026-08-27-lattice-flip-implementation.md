@@ -1,7 +1,9 @@
 # Implementation plan: the finite-by-default numeric-lattice flip
 
-Status: **plan written 2026-08-27; execution ON HOLD** (user directive:
-write the plan and hold). Nothing below has started.
+Status: **Phase 0 implemented 2026-08-27** (hold lifted by the user the
+same day). The Phase 0 diff is in the working tree pending the full-suite
+exit gate, dual review passed (13 findings applied). Phases 1–3 not
+started.
 
 Authority: the ratified decision record
 (`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`, rulings
@@ -47,33 +49,33 @@ retires it.
 
 Checklist (the sites follow the adding-a-primitive-type pattern):
 
-- [ ] `common/type/types.ts`: add `'infinity'` and `'nan'` to
+- [x] `common/type/types.ts`: add `'infinity'` and `'nan'` to
       `PrimitiveType`/`NumericPrimitiveType`; document the tower
       change in the header comment as "transitional — see Phase 1".
-- [ ] `common/type/primitive.ts`: the ordered primitive-name list and
+- [x] `common/type/primitive.ts`: the ordered primitive-name list and
       `NUMERIC_TYPES`/`NUMERIC_TYPES_SET`.
-- [ ] `common/type/subtype.ts`: `PRIMITIVE_SUBTYPES` entries —
+- [x] `common/type/subtype.ts`: `PRIMITIVE_SUBTYPES` entries —
       `number ⊃ infinity ⊃ non_finite_number`; `number ⊃ nan`;
       `nan` disjoint from everything else. The `~oo` singleton is a
       value-literal type whose base is `infinity` (the value-literal
       subtype placement code, currently at the NaN/±∞ literal cases).
       `+oo`/`-oo` literals additionally stay `<: non_finite_number`
       (unchanged pre-flip behavior).
-- [ ] Parser (`common/type/parser.ts`): accept the new names; decide
+- [x] Parser (`common/type/parser.ts`): accept the new names; decide
       and pin the singleton spellings (`+oo`, `-oo`, `~oo` as value
       types — confirm the tokenizer handles them; if not, the interim
       spelling is the value-literal syntax that already parses).
-- [ ] Serializer round-trip pins (serialize → reparse → `isSame`).
-- [ ] `widen-value.ts`: widening TARGETS only — a NaN literal's widen
+- [x] Serializer round-trip pins (serialize → reparse → `isSame`).
+- [x] `widen-value.ts`: widening TARGETS only — a NaN literal's widen
       target becomes `nan` ONLY IF no stored contract changes;
       otherwise defer to Phase 1 (measure: if any snapshot or
       `.type` string changes, defer).
-- [ ] Meet/disjointness spot pins: `meet(real, infinity)` =
+- [x] Meet/disjointness spot pins: `meet(real, infinity)` =
       `non_finite_number`; `nan` disjoint from `complex`, `real`,
       `error`; `~oo <: infinity`, `~oo ⊄ complex`.
-- [ ] New pins in a dedicated test file (`lattice-phase0.test.ts`),
+- [x] New pins in a dedicated test file (`lattice-phase0.test.ts`),
       plus box/parse-route probes.
-- [ ] CHANGELOG entry naming the NEW PRIMITIVES explicitly (downstream
+- [x] CHANGELOG entry naming the NEW PRIMITIVES explicitly (downstream
       consumers match primitive names as literal strings; every new
       name must be called out).
 - [ ] **Tycho heads-up (exit item):** send the exact list of new type

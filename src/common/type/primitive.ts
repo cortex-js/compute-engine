@@ -14,6 +14,11 @@ export const NUMERIC_TYPES: NumericPrimitiveType[] = [
   'integer',
   'finite_integer',
   'non_finite_number',
+  // A number of infinite magnitude, of any direction (`+∞`, `−∞`, `~∞`), and
+  // the not-a-number marker. Both are transitional additions: see the numeric
+  // tower comment on `NumericPrimitiveType` in `types.ts`.
+  'infinity',
+  'nan',
 ] as const as NumericPrimitiveType[];
 
 export const INDEXED_COLLECTION_TYPES: PrimitiveType[] = [

@@ -46,9 +46,14 @@ function factsFromType(t: Type): {
   finiteCollection: Tri;
   shape: readonly number[] | undefined;
 } {
+  // `infinity` (any value of infinite magnitude, including ComplexInfinity)
+  // and `nan` (the NaN singleton) are not finite numbers either, and neither
+  // is a subtype of `non_finite_number`, so each needs its own arm.
   const finite: Tri = isSubtype(t, 'finite_number')
     ? true
-    : isSubtype(t, 'non_finite_number')
+    : isSubtype(t, 'non_finite_number') ||
+        isSubtype(t, 'infinity') ||
+        isSubtype(t, 'nan')
       ? false
       : undefined;
 

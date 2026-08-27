@@ -5502,9 +5502,12 @@ export class Parser {
       // The type grammar spells the infinity value types `oo` / `-oo`.
       typeText = negative ? '-oo' : 'oo';
     } else if (tok.type === 'SYMBOL' && tok.text === 'NaN') {
-      // The value type `nan` admits exactly NaN (amended D1 — "match only
-      // themselves", like the infinities).
-      typeText = 'nan';
+      // The NaN value type admits exactly NaN (amended D1 — "match only
+      // themselves", like the infinities). The spelling must be the
+      // CAPITALIZED `NaN`: the type grammar reads the lowercase `nan` as the
+      // name of the not-a-number PRIMITIVE type, which admits NaN as a member
+      // of a tier rather than as the literal a clause dispatches on.
+      typeText = 'NaN';
     } else if (tok.type === 'STRING') {
       // Only a plain string is a literal — an interpolation hole is an
       // expression, and expressions are not parameters.
