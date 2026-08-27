@@ -636,7 +636,16 @@ with three rulings needed in order (see §7).
     "declared result taken verbatim" and the 13 suppressor constants
     delete with no new flag.
 
-## 8. Numeric lattice: finite-by-default, `infinity`, and `nan` — Proposed (2026-08-26)
+## 8. Numeric lattice: finite-by-default, `infinity`, and `nan` — RATIFIED 2026-08-27
+
+**Ratified 2026-08-27 with all recommendations accepted**, plus two
+amendments and one clarification recorded in the decision document
+(`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`): L4 renames
+the ±∞-admitting predicates (`isReal` → `isExtendedReal`, family-wide, old
+names removed during migration rather than silently re-pointed); `isFinite`
+means finite MAGNITUDE (`∞ + i` answers `false`); L6 = option (a), to be
+documented. Implementation has not started; the section below is the
+ratified design.
 
 Proposed from a design conversation on 2026-08-25/26; the behavior
 probes cited below were run those days against `main`. Nothing in this

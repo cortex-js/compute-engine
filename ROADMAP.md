@@ -109,6 +109,47 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Compiled `Heaviside(NaN)` returns `1` — a fail-closed violation, confirmed (OPEN, defect — confirmed 2026-08-26 by the error-model conformance suite)
+
+The JavaScript kernel `heaviside: (x) => (x < 0 ? 0 : x === 0 ? 0.5 : 1)`
+(`compilation/javascript-target.ts:6069`) sends `NaN` to `1`: both
+comparisons are false for `NaN`, so it falls through to the final arm. The
+interpreter's `Heaviside(NaN)` stays inert under both `evaluate()` and
+`.N()`. A compiled function must preserve the interpreter's value or
+decline (`docs/COMPILATION-MODEL.md`); `1` is neither. The interval-JS and
+GPU targets carry their own `heaviside` lowerings
+(`interval-javascript-target.ts:805`, `gpu-target.ts:6136`) with the same
+shape, unprobed — sweep them with the fix. The fix is gated on the NaN
+policy ruling (R-A in
+`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`): under
+per-slot `propagate` the right compiled answer is `NaN`; under a decline
+policy the lowering refuses. The current behavior is pinned in
+`test/compute-engine/error-model.test.ts` (gaps block) — update that pin
+with the fix.
+
+### Compiled `1/x` at `x = 0` returns IEEE `Infinity` where the interpreter answers `~oo` (OPEN, defect — measured 2026-08-26 by the error-model conformance suite)
+
+The interpreter's `1/0` is the projective (undirected) complex infinity
+`~oo`; the compiled JavaScript answers the IEEE affine `Infinity` — a
+different mathematical point. This is a value divergence in the same
+fail-closed class as the `Heaviside` entry above, and it feeds the "where
+does `~oo` belong" ruling (`docs/ERROR-MODEL.md` §7): whichever lattice
+placement is ratified must also say what a float-only compile target is
+allowed to answer at a pole. Pinned as current behavior in
+`test/compute-engine/error-model.test.ts` (gaps block).
+
+### `If` with no selected branch answers `Nothing`; `Which` answers `Undefined` — and `Nothing` is the one value the error model forbids there (OPEN, defect + ruling — measured 2026-08-26)
+
+`Which()` with no true clause evaluates to the symbol `Undefined`, but
+`If(False, 5)` (no else branch) evaluates to `Nothing` — the positional
+erasure marker, which `docs/ERROR-MODEL.md` §1 says must never answer a
+failed selection because writing `Nothing` into a positional slot splices
+the slot out and misaligns data. The ERROR-MODEL §7 open question
+("`Undefined` should probably fold into the marker rule") assumed both
+control operators answered `Undefined`; the ruling must now also repair the
+`If` half. Pinned as current behavior in
+`test/compute-engine/error-model.test.ts` (gaps block).
+
 ### A re-declared operator carrying a caller `compile` handler switches off the compiler's call-sharing (OPEN, design — measured 2026-08-21 under Tycho item 217)
 
 `R(i,x,y) = R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` compiles to a linear

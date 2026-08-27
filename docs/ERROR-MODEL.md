@@ -311,7 +311,15 @@ future recovery operator (an `IfError(expr, fallback)` in the style of
 Mathematica's `Check`) would be built on the same `inspectsErrors` flag
 plus a hold on its first operand; the mechanism already exists.
 
-## 4. What a signature promises — Open (two candidate contracts)
+## 4. What a signature promises — RATIFIED 2026-08-27: Contract B adopted
+
+(Contract B below was adopted 2026-08-27 as part of the numeric-lattice
+ratification package — decision record:
+`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`, ruling R-A.
+Contract A remains documented as the status quo being migrated away from.
+The per-operator signature style — precision versus readability, leniency,
+boxing-time versus evaluation-time surfacing — is governed by
+`docs/SIGNATURE-GUIDELINES.md`.)
 
 The shared core, in either contract:
 
@@ -602,7 +610,14 @@ documented domains.
 | `Heaviside(x)`, `x` proven real | `.type` = `finite_rational<0..1>` (type handler) | `.type` = `finite_rational<0..1>` exactly (total + `real` excludes `NaN`), derived |
 | Where the sharp claim lives | bespoke type handler | the declaration itself |
 
-## 5. The exceptional numeric points and the lattice — Settled placement; the singletons are Proposed
+## 5. The exceptional numeric points and the lattice — RATIFIED 2026-08-27 (singletons adopted; placement superseded by the lattice flip)
+
+(The singleton refinements below were adopted 2026-08-27 — ruling R-B of
+`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md` — together
+with the finite-by-default lattice flip, which supersedes this section's
+placement premise as the amendment paragraph at the end of the section
+describes: the `~oo` singleton is spelled `~oo` and is a member of the new
+`infinity` type.)
 
 Settled placement (ruled 2026-08-21, pinned in
 `test/compute-engine/non-finite-typing.test.ts`): `NaN` **and** `~oo`
@@ -742,9 +757,21 @@ because current behavior might be a deliberate decline):
   they should carry a distinct `internal-error` code with the stack.
 - **`markerType()` answers `number` where the concept says `nan`**
   (`collections.ts`) — sharpens only after the §5 singleton lands.
-- **Reported, not yet reproduced: `compile(Heaviside)(NaN) → 1`** — if
-  confirmed, a fail-closed violation (§6); add compiled-lane rows to the
-  conformance sweep.
+- **CONFIRMED 2026-08-26: `compile(Heaviside)(NaN) → 1`** — a fail-closed
+  violation (§6). Root cause: the JavaScript kernel
+  `heaviside: (x) => (x < 0 ? 0 : x === 0 ? 0.5 : 1)`
+  (`compilation/javascript-target.ts:6069`) falls through to `1` for `NaN`,
+  while the interpreter stays inert. The interval-JS and GPU targets carry
+  sibling lowerings, unprobed. Fix gated on the NaN-policy ruling; tracked
+  in `ROADMAP.md`, pinned in `test/compute-engine/error-model.test.ts`.
+- **A second compiled-lane divergence, found by the suite: `compile(1/x)`
+  at `x = 0` answers IEEE `Infinity` where the interpreter answers `~oo`**
+  — different mathematical points; feeds the "where does `~oo` belong"
+  question below. Tracked in `ROADMAP.md`, pinned in the suite.
+- **The table above conflates two boxing behaviors**: `1/0` folds to `~oo`
+  AT BOXING, but `Factorial(-2)` boxes as an unevaluated application and
+  reaches `~oo` only at `evaluate()`. Both conform to rule 3; the shared
+  "Boxed: `~oo`" cell is wrong for `Factorial`.
 
 Open questions (each phrased so it can be answered without this
 document's history):
@@ -799,26 +826,32 @@ document's history):
   rule. CE picks one definition, writes it in the operator's definition
   with the precedent cited, and the conformance suite pins it. External
   practice is evidence for the choice, never the decider.
-- **`Undefined` should probably fold into the marker rule.** The control
-  structures return the symbol `Undefined` for a selection with no
-  selected value (`Which` with no true clause, `If` with no else branch
-  taken — `src/compute-engine/library/control-structures.ts`). That is a
+- **`Undefined` should probably fold into the marker rule — and the two
+  control operators disagree today** (measured 2026-08-26 by the
+  conformance suite). `Which()` with no true clause returns the symbol
+  `Undefined`; but `If(False, 5)` (no else branch) returns **`Nothing`** —
+  the positional erasure marker §1 forbids as a failed-selection answer,
+  because it splices out of positional data
+  (`src/compute-engine/library/control-structures.ts`). `Undefined` is a
   fifth "no answer" citizen alongside `NaN`, `Missing`, `Nothing`, and
   `Error`, invented locally before the absence ruling existed. Under §2
   rule 4 the situation is a well-formed question with no answer, which
-  would yield the marker of the arms' type instead. Folding it in changes
-  documented `Which`/`If` output, so it needs a ruling.
+  would yield the marker of the arms' type instead. The ruling must both
+  fold `Undefined` in AND repair `If`'s `Nothing`. Tracked in
+  `ROADMAP.md`.
 - **Container vs. cell validity (§3)** — should a collection whose cells
   include errors eventually be a *valid* container of partially-invalid
   cells, with a type that says so? Favored eventually by the 2026-08-25
   review; not current behavior; needs a design.
-- **Adoption needs an executable conformance suite.** The table above is
-  a manual snapshot of one construction route. A
-  `test/compute-engine/error-model.test.ts` deriving expected behavior
-  from each declaration and probing the canonical kit across the three
-  routes (`ce.box`, `ce.parse`, `ce.function` with pre-boxed arguments —
-  the routes diverge for lazy operators) plus the compiled lanes would
-  make "conforms" checkable instead of asserted.
+- **The executable conformance suite EXISTS** (built 2026-08-26):
+  `test/compute-engine/error-model.test.ts`, 117 tests — every row of the
+  table above across the three construction routes (`ce.box`, `ce.parse`,
+  `ce.function` with pre-boxed arguments), the §3 propagation rules, the
+  §5 `~oo` arithmetic, and six compiled-lane rows. Documented gaps are
+  pinned as CURRENT behavior in a labeled block: changing them requires
+  ratification, and the pin is what measures the change. One negative
+  finding worth keeping: the three routes AGREED on every probe in the
+  canonical kit — no route divergence exists there today.
 
 ## Related documents
 
