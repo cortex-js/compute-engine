@@ -241,6 +241,7 @@ import {
   broadcastableResultTypeOf,
   isTextAtom,
   isTuple,
+  isShapedNumericType,
 } from '../collection-utils.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { signFromAssumedPart } from './complex.js';
@@ -512,38 +513,6 @@ function divisorKeepsNumeratorShape(den: Expression): boolean {
   )
     return false;
   return !den.type.matches('matrix');
-}
-
-/**
- * True when a type statically carries a SHAPE a quotient must preserve: a
- * tuple, a list/collection kind, or a broadcast lift of one.
- * `broadcastable<number>` is NOT shaped — its runtime value may be a plain
- * scalar, which is precisely why the lift exists.
- *
- * Used by the `Divide` type handler on both sides: a shaped (or
- * broadcast-lifted shaped) NUMERATOR keeps its structure with widened
- * components, while a shaped or possibly-shaped DENOMINATOR disqualifies that
- * claim (`tuple / tuple` has no defined quotient — `canonicalDivide` rejects
- * it — so the handler falls through to the scalar widening instead).
- */
-function isShapedNumericType(t: Type): boolean {
-  if (typeof t === 'string')
-    return (
-      t === 'tuple' ||
-      t === 'list' ||
-      t === 'collection' ||
-      t === 'indexed_collection' ||
-      t === 'set'
-    );
-  if (t.kind === 'union') return t.types.some((a) => isShapedNumericType(a));
-  if (t.kind === 'broadcastable') return isShapedNumericType(t.elements);
-  return (
-    t.kind === 'tuple' ||
-    t.kind === 'list' ||
-    t.kind === 'collection' ||
-    t.kind === 'indexed_collection' ||
-    t.kind === 'set'
-  );
 }
 
 /**

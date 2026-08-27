@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
 import { expectTypeBetween } from '../utils';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * Vector-space semantics for numeric tuples (points/vectors in ℝⁿ).
@@ -2341,15 +2342,16 @@ describe('POINT/TUPLE ARITHMETIC — a zipped point-list divides component-wise'
     const ce = new ComputeEngine();
     // Each COMPONENT is divided before the scalar `a/0` rule applies to it, so
     // the point shape survives at the tuple level exactly as it does for a
-    // tuple of numbers. (A list component divided by zero is itself `~oo`
-    // rather than a list of `~oo` — that is the engine-wide `a/0` shortcut for
-    // a collection numerator, not a tuple-specific answer.)
+    // tuple of numbers. A list component divided by zero broadcasts to a list
+    // of `~oo` — the scalar `a/0` shortcut exempts shape-carrying numerators
+    // (see the collection-numerator suite in this file), so the coordinate
+    // lists keep their shape too.
     expect(
       ce
         .box(['Divide', zippedPointList(ce), 0])
         .evaluate()
         .toString()
-    ).toBe('(~oo, ~oo)');
+    ).toBe('([~oo,~oo], [~oo,~oo])');
     expect(ce.box(['Divide', ['Tuple', 1, 2], 0]).evaluate().toString()).toBe(
       '(~oo, ~oo)'
     );
@@ -2454,5 +2456,177 @@ describe('POINT/TUPLE ARITHMETIC — a zipped point-list divides component-wise'
     const t = ce.tuple(ce.string('a'), ce.string('b'));
     expect(t.neg().operator).toBe('Negate');
     expect(t.div(-1).operator).toBe('Negate');
+  });
+});
+
+describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () => {
+  /**
+   * The scalar rules `a/0 = ~oo` and `a/∞ = 0` in `canonicalDivide` and in
+   * the value-route `div()` exempt a shape-carrying numerator (a list,
+   * vector or matrix — `isShapedNumericType`): the quotient stays an inert
+   * `Divide`, and the evaluation broadcast divides each ELEMENT. This keeps
+   * `[1,2]/0` consistent with the algebraically identical `[1,2]·(1/0)`,
+   * with the component-wise tuple answer `(1,2)/0 → (~oo, ~oo)`, and with
+   * the shape the `Divide` type handler claims for the quotient.
+   */
+
+  test('a list over zero broadcasts, on the canonical, N and value routes', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Divide', ['List', 1, 2], 0]).evaluate().toString()).toBe(
+      '[~oo,~oo]'
+    );
+    expect(ce.box(['Divide', ['List', 1, 2], 0]).N().toString()).toBe(
+      '[~oo,~oo]'
+    );
+    // The value route (`.div()`) reaches the same broadcast, for a JS-number
+    // and for a boxed zero.
+    expect(ce.box(['List', 1, 2]).div(0).evaluate().toString()).toBe(
+      '[~oo,~oo]'
+    );
+    expect(
+      ce
+        .box(['List', 1, 2])
+        .div(ce.number(0))
+        .evaluate()
+        .toString()
+    ).toBe('[~oo,~oo]');
+    // It agrees with the product spelling of the same quotient.
+    expect(
+      ce
+        .box(['Multiply', ['List', 1, 2], ['Divide', 1, 0]])
+        .evaluate()
+        .toString()
+    ).toBe('[~oo,~oo]');
+  });
+
+  test('each element takes its own degenerate answer: 0/0 = NaN per slot', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Divide', ['List', 0, 1], 0]).evaluate().toString()).toBe(
+      '[NaN,~oo]'
+    );
+  });
+
+  test('a vector and a matrix numerator broadcast recursively', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.parse('\\frac{\\begin{pmatrix}1\\\\2\\end{pmatrix}}{0}').evaluate()
+        .toString()
+    ).toBe('[[~oo],[~oo]]');
+    expect(
+      ce
+        .box(['Divide', ['List', ['List', 1, 2], ['List', 3, 4]], 0])
+        .evaluate()
+        .toString()
+    ).toBe('[[~oo,~oo],[~oo,~oo]]');
+  });
+
+  test('an infinite divisor broadcasts to zeros, matching the tuple answer', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Divide', ['Tuple', 1, 2], 'PositiveInfinity'])
+        .evaluate()
+        .toString()
+    ).toBe('(0, 0)');
+    expect(
+      ce
+        .box(['Divide', ['List', 1, 2], 'PositiveInfinity'])
+        .evaluate()
+        .toString()
+    ).toBe('[0,0]');
+    expect(ce.box(['List', 1, 2]).div(Infinity).evaluate().toString()).toBe(
+      '[0,0]'
+    );
+    expect(
+      ce
+        .box(['List', 1, 2])
+        .div(ce.box('NegativeInfinity'))
+        .evaluate()
+        .toString()
+    ).toBe('[0,0]');
+  });
+
+  test('a NaN divisor stays a scalar NaN, as it does for tuples', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Divide', ['List', 1, 2], NaN]).evaluate().toString()).toBe(
+      'NaN'
+    );
+  });
+
+  test('an alias-of-list numerator broadcasts like the list it names', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('mylist', 'list<number>', { alias: true });
+    ce.declare('L', 'mylist');
+    ce.assign('L', ce.box(['List', 1, 2]));
+    // The transparent alias IS its definition, so the degenerate divisor
+    // must broadcast exactly as it does for `list<number>` (and as the
+    // nonzero divisor already did).
+    expect(ce.box(['Divide', 'L', 0]).evaluate().toString()).toBe('[~oo,~oo]');
+    expect(ce.box(['Divide', 'L', 2]).evaluate().toString()).toBe('[1/2,1]');
+  });
+
+  test('a broadcastable<number> numerator defers until its value is known', () => {
+    // `broadcastable<number>` admits a scalar OR an indexed collection of
+    // numbers, so the scalar `a/0` collapse at canonicalization would destroy
+    // the collection alternative before the value is seen. The quotient stays
+    // inert; evaluation answers by the value each engine ends up holding.
+    const asList = new ComputeEngine();
+    asList.declare('b', 'broadcastable<number>');
+    expect(asList.box(['Divide', 'b', 0]).operator).toBe('Divide');
+    asList.assign('b', asList.box(['List', 1, 2]));
+    expect(asList.box(['Divide', 'b', 0]).evaluate().toString()).toBe(
+      '[~oo,~oo]'
+    );
+
+    const asScalar = new ComputeEngine();
+    asScalar.declare('b', 'broadcastable<number>');
+    asScalar.assign('b', asScalar.number(5));
+    expect(asScalar.box(['Divide', 'b', 0]).evaluate().toString()).toBe('~oo');
+  });
+
+  test('a valueless list-typed symbol numerator stays inert, typed as a list', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<number>');
+    const q = ce.box(['Divide', 'L', 0]);
+    expect(q.operator).toBe('Divide');
+    expect(q.type.toString()).toBe('list<number>');
+  });
+
+  test('the compiled JavaScript target answers the same shape', () => {
+    const ce = new ComputeEngine();
+    // What this pins is the SHAPE parity: a literal-zero divisor used to
+    // collapse at canonicalization before the compiler ever saw the list,
+    // compiling to one scalar. The ELEMENT encoding is the compiled lane's
+    // pre-existing nonfinite answer and varies by lowering path — `NaN`
+    // through the constant-folding path (the scalar control below), IEEE
+    // `Infinity` through the runtime division the matrix takes — where the
+    // interpreter answers `~oo` everywhere. That divergence predates the
+    // shape fix and is awaiting the NaN-policy ruling (R-A in
+    // docs/plans/2026-08-26-numeric-lattice-ratification-brief.md); these
+    // assertions pin it as-is rather than endorse it.
+    const list = compile(ce.box(['Divide', ['List', 1, 2], 0]));
+    expect(list.success).toBe(true);
+    expect(list.run!({})).toEqual([NaN, NaN]);
+    const matrix = compile(
+      ce.box(['Divide', ['List', ['List', 1, 2], ['List', 3, 4]], 0])
+    );
+    expect(matrix.success).toBe(true);
+    expect(matrix.run!({})).toEqual([
+      [Infinity, Infinity],
+      [Infinity, Infinity],
+    ]);
+    const scalar = compile(ce.box(['Divide', 1, 0]));
+    expect(scalar.success).toBe(true);
+    expect(scalar.run!({})).toEqual(NaN);
+  });
+
+  test('the scalar degenerate answers are unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Divide', 1, 0]).evaluate().toString()).toBe('~oo');
+    expect(ce.box(['Divide', 0, 0]).evaluate().toString()).toBe('NaN');
+    expect(ce.box(['Divide', 'x', 0]).evaluate().toString()).toBe('~oo');
+    expect(
+      ce.box(['Divide', 5, 'PositiveInfinity']).evaluate().toString()
+    ).toBe('0');
   });
 });

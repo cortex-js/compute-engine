@@ -27,6 +27,7 @@ import {
   isBroadcastCollectionType,
   broadcastLengthMismatch,
   broadcastOverIndexedCollections,
+  typeMayCarryQuotientShape,
 } from '../collection-utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -956,7 +957,23 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // .N() either, because .N() can be expensive (e.g., Monte Carlo
   // integration) and canonicalization must be fast. Expressions like (1-1)/0
   // won't be detected as 0/0 here, but will be handled during simplification.
-  if (isLiteral(op2, 0)) return isLiteral(op1, 0) ? ce.NaN : ce.ComplexInfinity;
+  //
+  // A numerator that carries — or may carry — a collection shape (a list,
+  // vector, matrix, a `broadcastable<number>` lift, an alias of one; tuples
+  // were dispatched above) is exempt from this scalar rule and from the a/∞
+  // rule below: the quotient stays an inert `Divide`, and evaluation settles
+  // it once the value is known — a collection value broadcasts the division
+  // over its elements ([1,2]/0 → [~oo, ~oo], [0,1]/0 → [NaN, ~oo]), a scalar
+  // value takes the scalar answer through `div()` then. This matches the
+  // algebraically identical [1,2]·(1/0), the component-wise tuple answer
+  // (1,2)/0 → (~oo, ~oo), and the shape the `Divide` TYPE handler claims for
+  // the quotient. The type read is confined to these two degenerate-divisor
+  // branches — an ordinary quotient never pays for it.
+  if (isLiteral(op2, 0)) {
+    if (typeMayCarryQuotientShape(op1.type.type))
+      return ce._fn('Divide', [op1, op2]);
+    return isLiteral(op1, 0) ? ce.NaN : ce.ComplexInfinity;
+  }
 
   // 0/a = 0 (a≠0, a is finite)
   if (isLiteral(op1, 0) && op2.isFinite !== false) {
@@ -971,7 +988,14 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   }
 
   // a/∞ = 0, ∞/∞ = NaN (check before a/a = 1 rule)
-  if (op2.isInfinity) return op1.isInfinity ? ce.NaN : ce.Zero;
+  if (op2.isInfinity) {
+    if (op1.isInfinity) return ce.NaN;
+    // Same shape exemption as the a/0 rule above: [1,2]/∞ broadcasts to
+    // [0, 0] at evaluation rather than collapsing to the scalar 0.
+    if (typeMayCarryQuotientShape(op1.type.type))
+      return ce._fn('Divide', [op1, op2]);
+    return ce.Zero;
+  }
 
   // ∞/a = ±∞ for a finite and definitely nonzero (with a known sign). Mirrors
   // the a/∞ = 0 rule above and the Multiply path, which already reduces
@@ -1238,7 +1262,20 @@ export function div(num: Expression, denom: number | Expression): Expression {
     // a/(-1) = -a
     if (denom === -1) return num.neg();
     // a/0 = ~∞ (a≠0) - ComplexInfinity as "better NaN"
-    if (denom === 0) return ce.ComplexInfinity;
+    // A shape-carrying numerator is exempt, exactly as in `canonicalDivide`:
+    // the quotient stays an inert `Divide` so evaluation broadcasts the
+    // division over the elements ([1,2]/0 → [~oo, ~oo]) instead of
+    // collapsing the shape to one scalar.
+    if (denom === 0) {
+      if (typeMayCarryQuotientShape(num.type.type))
+        return ce._fn('Divide', [num, ce.number(0)]);
+      return ce.ComplexInfinity;
+    }
+    // An infinite divisor reaches a/∞ = 0 through the Product tail below,
+    // which would collapse a shaped numerator the same way — keep it inert
+    // instead ([1,2]/∞ → [0, 0] at evaluation). NaN was handled above.
+    if (!Number.isFinite(denom) && typeMayCarryQuotientShape(num.type.type))
+      return ce._fn('Divide', [num, ce.number(denom)]);
 
     if (isNumber(num)) {
       const n = num.numericValue;
@@ -1264,8 +1301,21 @@ export function div(num: Expression, denom: number | Expression): Expression {
     if (isLiteral(denom, -1)) return num.neg();
 
     // a/0 = ~∞ (a≠0) — ComplexInfinity, consistent with the JS-number path
-    // above (the boxed-zero case previously returned NaN).
-    if (isLiteral(denom, 0)) return ce.ComplexInfinity;
+    // above (the boxed-zero case previously returned NaN). A shape-carrying
+    // numerator stays an inert `Divide` that broadcasts at evaluation, as in
+    // the JS-number path and `canonicalDivide`.
+    if (isLiteral(denom, 0)) {
+      if (typeMayCarryQuotientShape(num.type.type))
+        return ce._fn('Divide', [num, denom]);
+      return ce.ComplexInfinity;
+    }
+
+    // An infinite divisor reaches a/∞ = 0 through the Product tail below,
+    // which would collapse a shaped numerator the same way — keep it inert
+    // instead ([1,2]/∞ → [0, 0] at evaluation). A NaN divisor was handled
+    // above.
+    if (denom.isInfinity && typeMayCarryQuotientShape(num.type.type))
+      return ce._fn('Divide', [num, denom]);
 
     // ∞/a = ±∞ for a finite and definitely nonzero (a known sign). The Product
     // path below returns NaN for an infinite numerator over a symbolic finite

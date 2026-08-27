@@ -1460,6 +1460,63 @@ export function isRecordShapedType(t: Type): boolean {
 }
 
 /**
+ * True when a type statically carries a SHAPE an arithmetic result must
+ * preserve: a tuple, a list/collection kind, or a broadcast lift of one.
+ * `broadcastable<number>` is NOT shaped — its runtime value may be a plain
+ * scalar, which is precisely why the lift exists. A transparent alias is
+ * unfolded first: it IS its definition, so an alias of a list is shaped. A
+ * nominal reference stays opaque and is not shaped.
+ *
+ * Used by the `Divide` type handler on both sides — a shaped (or
+ * broadcast-lifted shaped) NUMERATOR keeps its structure with widened
+ * components, while a shaped or possibly-shaped DENOMINATOR disqualifies that
+ * claim — and by {@link typeMayCarryQuotientShape}, the gate of the
+ * degenerate-divisor rules in `arithmetic-mul-div.ts`.
+ */
+export function isShapedNumericType(t: Type): boolean {
+  t = resolveTypeAlias(t);
+  if (typeof t === 'string')
+    return (
+      t === 'tuple' ||
+      t === 'list' ||
+      t === 'collection' ||
+      t === 'indexed_collection' ||
+      t === 'set'
+    );
+  if (t.kind === 'union') return t.types.some((a) => isShapedNumericType(a));
+  if (t.kind === 'broadcastable') return isShapedNumericType(t.elements);
+  return (
+    t.kind === 'tuple' ||
+    t.kind === 'list' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection' ||
+    t.kind === 'set'
+  );
+}
+
+/**
+ * True when a numerator of this type must be EXEMPT from the scalar
+ * degenerate-divisor rules (`a/0 = ~oo`, `a/∞ = 0`) in `canonicalDivide` and
+ * `div()` (`arithmetic-mul-div.ts`): the type either IS a shape
+ * ({@link isShapedNumericType}) or MAY present an indexed collection at
+ * runtime without promising one — the collection half of
+ * `broadcastable<number>`, or the `list<number>` branch of
+ * `number | list<number>`.
+ *
+ * In either case the quotient stays an inert `Divide` instead of collapsing
+ * to one scalar at canonicalization. Once a value is present, evaluation
+ * settles it: a collection value broadcasts the division over its elements
+ * (`[1,2]/0` answers `[~oo, ~oo]`, like `[1,2]·(1/0)`), while a scalar value
+ * reaches `div()` again and takes the scalar degenerate answer there.
+ * Collapsing earlier would destroy the collection alternative before the
+ * value is seen.
+ */
+export function typeMayCarryQuotientShape(t: Type): boolean {
+  const resolved = resolveTypeAlias(t);
+  return isShapedNumericType(resolved) || mayHoldAnIndexedCollection(resolved);
+}
+
+/**
  * True when `expr` is a `tuple` — a point/vector in ℝⁿ *or* a Desmos-style
  * point-list (a tuple with a finite-collection component, e.g. `(-6, n)` with
  * `n` a list). Broader than `isNumericTuple`, which requires every element to
