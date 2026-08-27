@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.120.0 _2026-08-27_
 
 ### Breaking Changes
@@ -199,104 +201,99 @@
   approximation. All three now read the exact components: `Real(1/3 + 2/5i)` is
   `1/3`, `Imaginary(√2 i)` is `√2`, and `z·Conjugate(z)` is `61/225`.
 
-- **A fence-less `Delimiter` around a bracketed or braced collection
-  serializes to valid, round-trippable LaTeX.** `Delimiter(List(x, y))` — the
-  parse of `([x,y])`, and the operand shape a call `f([x,y])` carries —
-  serialized as `\lbrackx,y\rbrack`: the `[` fence maps to the `\lbrack`
-  command, plain concatenation glued it onto the first operand (an unknown
-  command, so the output did not re-parse), and the Delimiter's recorded
-  parentheses were dropped. Fences are now joined with `joinLatex`, which
-  separates a command from a following letter (this also fixes the same glue
-  for `\lbrace` and custom bracket delimiters), and a fence-less `Delimiter`
-  keeps its parentheses around an operand that carries its own fences:
-  `Delimiter(List(x, y))` emits `(\bigl\lbrack x, y\bigr\rbrack)`, which
-  re-parses to the same structure, and `f([x,y])` round-trips to the call.
-  The same rule covers the tuple family — `Delimiter(Tuple(x, y))` used to
-  emit `f(x,y)` under a call, which re-parsed as TWO scalar arguments where
-  the source had one tuple argument; it now emits `f((x,y))`. A `Sequence`
-  operand still fuses with the parentheses, since a sequence IS a bare
-  argument list. (Tycho item 230; the Desmos importer's persisted rows were
-  corrupted by the glued form.)
+- **A fence-less `Delimiter` around a bracketed or braced collection serializes
+  to valid, round-trippable LaTeX.** `Delimiter(List(x, y))` — the parse of
+  `([x,y])`, and the operand shape a call `f([x,y])` carries — serialized as
+  `\lbrackx,y\rbrack`: the `[` fence maps to the `\lbrack` command, plain
+  concatenation glued it onto the first operand (an unknown command, so the
+  output did not re-parse), and the Delimiter's recorded parentheses were
+  dropped. Fences are now joined with `joinLatex`, which separates a command
+  from a following letter (this also fixes the same glue for `\lbrace` and
+  custom bracket delimiters), and a fence-less `Delimiter` keeps its parentheses
+  around an operand that carries its own fences: `Delimiter(List(x, y))` emits
+  `(\bigl\lbrack x, y\bigr\rbrack)`, which re-parses to the same structure, and
+  `f([x,y])` round-trips to the call. The same rule covers the tuple family —
+  `Delimiter(Tuple(x, y))` used to emit `f(x,y)` under a call, which re-parsed
+  as TWO scalar arguments where the source had one tuple argument; it now emits
+  `f((x,y))`. A `Sequence` operand still fuses with the parentheses, since a
+  sequence IS a bare argument list. (Tycho item 230; the Desmos importer's
+  persisted rows were corrupted by the glued form.)
 
 - **`Negate` distributes over a tuple whose components are collections, and a
-  tuple divides by a scalar under the same rule that multiplies it.** A
-  "zipped" point list — a `Tuple` of coordinate lists, `([1,2], [3,4])` —
-  negated component-wise only when every component TYPE was a scalar number,
-  so `-P` stayed an inert `Negate`, and `P − P` or the interpolation
-  `(1−t)·P − t·P` (with `t` substituted later) never reduced, while `2·P` and
-  `P + P` folded fine. The negate arm now uses the same structural tuple test
-  as the `Add`/`Multiply` dispatch. The `tuple / scalar` arm had the sibling
-  gap plus one more: it now admits the same tuples as the `Divide` type
-  handler (transparent type aliases included), and each component quotient is
-  evaluated the way the multiply and add arms already evaluate theirs — so
-  `P / s` folds once `s` has a value, and `P / 0` answers `(~oo, ~oo)` with
-  the point shape kept. Dividing BY a tuple still errors
-  (`no-division-by-point`), and a non-numeric tuple still rejects with the
-  same error the multiply path gives. (Tycho item 229 — the interpreted
-  fallback of the declined rows painted nothing because the difference of two
-  evaluated tuples stayed symbolic.)
+  tuple divides by a scalar under the same rule that multiplies it.** A "zipped"
+  point list — a `Tuple` of coordinate lists, `([1,2], [3,4])` — negated
+  component-wise only when every component TYPE was a scalar number, so `-P`
+  stayed an inert `Negate`, and `P − P` or the interpolation `(1−t)·P − t·P`
+  (with `t` substituted later) never reduced, while `2·P` and `P + P` folded
+  fine. The negate arm now uses the same structural tuple test as the
+  `Add`/`Multiply` dispatch. The `tuple / scalar` arm had the sibling gap plus
+  one more: it now admits the same tuples as the `Divide` type handler
+  (transparent type aliases included), and each component quotient is evaluated
+  the way the multiply and add arms already evaluate theirs — so `P / s` folds
+  once `s` has a value, and `P / 0` answers `(~oo, ~oo)` with the point shape
+  kept. Dividing BY a tuple still errors (`no-division-by-point`), and a
+  non-numeric tuple still rejects with the same error the multiply path gives.
+  (Tycho item 229 — the interpreted fallback of the declined rows painted
+  nothing because the difference of two evaluated tuples stayed symbolic.)
 
 - **The JavaScript compile target no longer withdraws a value-correct kernel
   because a tuple holds an exact constant with a complex-hedged type.**
   `√(5−√5)` — an exact value of `cos`/`sin`(π·rational), ordinary in Desmos
   documents — types the `finite_complex` hedge (the engine does not prove
   `5−√5 ≥ 0` at type time) though its value is the plain real `1.6625…`. The
-  broadcast lowering's per-element shape analysis read that element complex,
-  the element verdicts of `(√(5−√5), 0)` disagreed, and every `Add`/`Multiply`
-  over such tuples failed closed with a misleading "list-valued operand"
-  diagnostic. The complexness oracle (`isComplexValued`) now answers
-  fold-first inside a JavaScript compilation: a closed pure scalar whose
-  memoized constant fold is a real number reports real, and the constant
-  folder's complex-shape gate — reading the same oracle — then inlines that
-  folded literal, so every analysis and the emitted code describe the same
-  plain number (an indexed read of such a broadcast result computes
-  correctly rather than reading `.re` off a plain number). The fold-first
-  verdict stands down where the emission cannot fold: under
-  `constantFold: false`, in a `symbolDeps` capture, on the shader targets,
+  broadcast lowering's per-element shape analysis read that element complex, the
+  element verdicts of `(√(5−√5), 0)` disagreed, and every `Add`/`Multiply` over
+  such tuples failed closed with a misleading "list-valued operand" diagnostic.
+  The complexness oracle (`isComplexValued`) now answers fold-first inside a
+  JavaScript compilation: a closed pure scalar whose memoized constant fold is a
+  real number reports real, and the constant folder's complex-shape gate —
+  reading the same oracle — then inlines that folded literal, so every analysis
+  and the emitted code describe the same plain number (an indexed read of such a
+  broadcast result computes correctly rather than reading `.re` off a plain
+  number). The fold-first verdict stands down where the emission cannot fold:
+  under `constantFold: false`, in a `symbolDeps` capture, on the shader targets,
   and outside a compilation — there the previous fail-closed decline is
-  unchanged, as it is for genuinely complex or symbolic elements. (Tycho
-  item 229; 80 of the witness document's 201 line members were declined this
-  way, all value-correct.)
+  unchanged, as it is for genuinely complex or symbolic elements. (Tycho item
+  229; 80 of the witness document's 201 line members were declined this way, all
+  value-correct.)
 
 - **Interpreted broadcast evaluation no longer pays the literal-type cost per
   element.** Since a number literal's public `.type` became its literal value
   (`ce.box(21).type` is `21`), every intermediate result of an interpreted
   broadcast carried a structured type, and each per-element type query walked
   that structure instead of comparing interned tier strings — about 2,000
-  subtype queries per element on the witness workload, roughly doubling the
-  cost of evaluating and draining a large computed collection (a 7,225-element
-  Desmos color chain went from ~5.5 s to ~12.7 s and blew through the
-  consumer's materialization budget). Ruled: a broadcast CELL is a
-  storage-like position and may widen. A re-entrant widening window now makes
-  a literal report its bare tier for the duration of the interpreter's own
-  per-cell computation — opened around each element step of a broadcast map
-  and in the shape classifier that provably discards the precision anyway.
-  Everything user-visible keeps the literal type: the public `.type` of any
-  expression, tuple components read at classification time, and the types
-  named in per-element error messages (a diagnostic minted inside a cell
-  re-reads the precise type outside the window). The widening recovers the
-  drain cost to within ~5% of the pre-literal-types baseline and costs
-  nothing on ordinary small expressions. (Tycho item 228.)
+  subtype queries per element on the witness workload, roughly doubling the cost
+  of evaluating and draining a large computed collection (a 7,225-element Desmos
+  color chain went from ~5.5 s to ~12.7 s and blew through the consumer's
+  materialization budget). Ruled: a broadcast CELL is a storage-like position
+  and may widen. A re-entrant widening window now makes a literal report its
+  bare tier for the duration of the interpreter's own per-cell computation —
+  opened around each element step of a broadcast map and in the shape classifier
+  that provably discards the precision anyway. Everything user-visible keeps the
+  literal type: the public `.type` of any expression, tuple components read at
+  classification time, and the types named in per-element error messages (a
+  diagnostic minted inside a cell re-reads the precise type outside the window).
+  The widening recovers the drain cost to within ~5% of the pre-literal-types
+  baseline and costs nothing on ordinary small expressions. (Tycho item 228.)
 
 - **The shader targets lower `Power` over a vector base, so the
   min-distance-field family compiles on the GPU lane.** `min` over squared
-  distances to a literal point list — `(x−P.x)² + (y−P.y)²` after
-  vectorization — stopped at `Power`: the sign-preserving integer-power
-  helper `_gpu_powi` is declared over scalar floats, and `pow(vecN, scalar)`
-  is invalid in both shader languages (no scalar promotion). The targets now
-  emit a per-width helper family `_gpu_powi2/3/4` (WGSL has no overloading,
-  so the width is in the name; the sign is restored per component), select it
-  from the operands' vector width, widen the scalar side of `pow` explicitly,
-  and answer `vecN(1.0)` for a vector base raised to the zero power — which
-  previously emitted a shape-wrong scalar `1.0`. Found and fixed alongside,
-  on WGSL only: the emitted-call argument counter treated the comma inside a
-  type template (`array<f32, 1>`) as an argument separator, so every
-  one-for-one operand-shape check stepped aside and an invalid emission
-  passed as `success: true`. Component reduction for `Min`/`Max` over a
-  vector already existed and is unchanged. (Tycho item 231, face (a); the
-  symbolic-length face (b) still fails closed by design — a host-side
-  per-values substitution makes the count static, which is the supported
-  route.)
+  distances to a literal point list — `(x−P.x)² + (y−P.y)²` after vectorization
+  — stopped at `Power`: the sign-preserving integer-power helper `_gpu_powi` is
+  declared over scalar floats, and `pow(vecN, scalar)` is invalid in both shader
+  languages (no scalar promotion). The targets now emit a per-width helper
+  family `_gpu_powi2/3/4` (WGSL has no overloading, so the width is in the name;
+  the sign is restored per component), select it from the operands' vector
+  width, widen the scalar side of `pow` explicitly, and answer `vecN(1.0)` for a
+  vector base raised to the zero power — which previously emitted a shape-wrong
+  scalar `1.0`. Found and fixed alongside, on WGSL only: the emitted-call
+  argument counter treated the comma inside a type template (`array<f32, 1>`) as
+  an argument separator, so every one-for-one operand-shape check stepped aside
+  and an invalid emission passed as `success: true`. Component reduction for
+  `Min`/`Max` over a vector already existed and is unchanged. (Tycho item 231,
+  face (a); the symbolic-length face (b) still fails closed by design — a
+  host-side per-values substitution makes the count static, which is the
+  supported route.)
 
 ## 0.119.0 _2026_08_23_
 
