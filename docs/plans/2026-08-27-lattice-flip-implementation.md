@@ -1,0 +1,224 @@
+# Implementation plan: the finite-by-default numeric-lattice flip
+
+Status: **plan written 2026-08-27; execution ON HOLD** (user directive:
+write the plan and hold). Nothing below has started.
+
+Authority: the ratified decision record
+(`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`, rulings
+R-A, R-B, L1–L10 with the L4/L6 amendments), the ratified design
+(`docs/TYPE_SYSTEM_ROADMAP.md` §8), and the migration data measured by
+the 2026-08-26 audits (roadmap §8.5). Signature style during the
+migration follows `docs/SIGNATURE-GUIDELINES.md`.
+
+How to use this document: phases execute in order, each delivered as a
+worktree diff onto the shared tree and committed by the user before the
+next phase starts. A session resuming this work reads this plan, then
+the checklists below; update the checkboxes and the per-phase status
+lines as items land. The executable conformance suite
+(`test/compute-engine/error-model.test.ts`) and the full test suite are
+the tripwires: every phase ends with both green and its snapshot delta
+COUNTED AND REPORTED, never silently absorbed.
+
+Ground rules for every phase:
+
+- Multi-file work happens in a private worktree; the deliverable is a
+  `git apply`-ed diff (`docs/SHARED-BOX-PROTOCOL.md` §1). Full-suite
+  runs take the box lock.
+- Never update a snapshot marked `@fixme`.
+- Dual review (`/review-files`) before any phase's source diff counts
+  as done; test and markdown files are exempt.
+- The type-handler twin files (`library/type-handlers.ts` and
+  `library/type-handlers-types.ts`) change only in lockstep.
+
+---
+
+## Phase 0 — Additive: the new types exist (NON-BREAKING)
+
+Goal: `infinity`, `nan`, and the singleton spellings `+oo`, `-oo`,
+`~oo` become declarable, parseable, matchable types — while every
+EXISTING value keeps its current principal type and every existing
+`matches()` answer is unchanged. Retyping values is Phase 1.
+
+Why this is coherent before the flip: in the current lattice the
+overlap `real ∩ infinity = {+∞, −∞}` needs an atom, and the atom
+already exists — `non_finite_number`. Phase 0 exploits it
+(`infinity ⊃ non_finite_number`, plus the `~oo` singleton); Phase 1
+retires it.
+
+Checklist (the sites follow the adding-a-primitive-type pattern):
+
+- [ ] `common/type/types.ts`: add `'infinity'` and `'nan'` to
+      `PrimitiveType`/`NumericPrimitiveType`; document the tower
+      change in the header comment as "transitional — see Phase 1".
+- [ ] `common/type/primitive.ts`: the ordered primitive-name list and
+      `NUMERIC_TYPES`/`NUMERIC_TYPES_SET`.
+- [ ] `common/type/subtype.ts`: `PRIMITIVE_SUBTYPES` entries —
+      `number ⊃ infinity ⊃ non_finite_number`; `number ⊃ nan`;
+      `nan` disjoint from everything else. The `~oo` singleton is a
+      value-literal type whose base is `infinity` (the value-literal
+      subtype placement code, currently at the NaN/±∞ literal cases).
+      `+oo`/`-oo` literals additionally stay `<: non_finite_number`
+      (unchanged pre-flip behavior).
+- [ ] Parser (`common/type/parser.ts`): accept the new names; decide
+      and pin the singleton spellings (`+oo`, `-oo`, `~oo` as value
+      types — confirm the tokenizer handles them; if not, the interim
+      spelling is the value-literal syntax that already parses).
+- [ ] Serializer round-trip pins (serialize → reparse → `isSame`).
+- [ ] `widen-value.ts`: widening TARGETS only — a NaN literal's widen
+      target becomes `nan` ONLY IF no stored contract changes;
+      otherwise defer to Phase 1 (measure: if any snapshot or
+      `.type` string changes, defer).
+- [ ] Meet/disjointness spot pins: `meet(real, infinity)` =
+      `non_finite_number`; `nan` disjoint from `complex`, `real`,
+      `error`; `~oo <: infinity`, `~oo ⊄ complex`.
+- [ ] New pins in a dedicated test file (`lattice-phase0.test.ts`),
+      plus box/parse-route probes.
+- [ ] CHANGELOG entry naming the NEW PRIMITIVES explicitly (downstream
+      consumers match primitive names as literal strings; every new
+      name must be called out).
+- [ ] **Tycho heads-up (exit item):** send the exact list of new type
+      names and singleton spellings, and the Phase 1/2 retirement list
+      (`finite_number`, `finite_complex`, `finite_real`,
+      `finite_rational`, `finite_integer`, `non_finite_number`), so
+      their name-switch classifiers get lead time before the breaking
+      release.
+
+Exit gate: `npm run typecheck` + full-src native tsc clean; full suite
+green under the box lock; snapshot delta ~0 (report the exact count);
+conformance suite untouched and green.
+
+## Phase 1 — The flip (BREAKING; one worktree, may land as several diffs)
+
+Goal: bare numeric names mean finite; values retype; the doubled tower's
+machinery comes out. Sub-steps in dependency order; 1.1–1.2 are one
+diff (they cannot be split soundly), the rest may land separately.
+
+- [ ] **1.1 Lattice semantics.** Rewrite `PRIMITIVE_SUBTYPES` to the
+      disjoint tree (`number = complex ⊔ infinity ⊔ nan`;
+      `integer ⊂ rational ⊂ real ⊂ complex`, all finite;
+      `imaginary ⊂ complex`). Delete the machinery that exists only for
+      the doubled tower: `COVERING_UNION_MAP`/`unionCoveringMembers`,
+      `finiteBaseType` (and its two consumers), the covering-union
+      collapse in `reduce.ts`, the interleaved rungs of
+      `SUPERTYPE_PROBE_ORDER`. `infinity` is defined by infinite
+      magnitude (L2(a)); `non_finite_number` leaves the union (its
+      consumers migrate in 1.6).
+- [ ] **1.2 Value retyping (lockstep cluster).** `oo`/`-oo` literals
+      → the `+oo`/`-oo` singletons (widen target `infinity`); `NaN` →
+      `nan`; `~oo` → the `~oo` singleton. The three
+      `NumericValue.type` getters (`numeric-value/exact-…`,
+      `machine-…`, `big-numeric-value.ts` — the last two also produce
+      the mixed-infinite `complex` returns that become `infinity` per
+      L2(a)) change in the SAME diff as the eleven string-equality
+      gates that compare against them (`cost-function.ts`,
+      `boxed-expression/numerics.ts`, `arithmetic-mul-div.ts`,
+      `boxed-number.ts`, `order.ts`) — a gate comparing against a
+      string the getter no longer returns fails silently.
+- [ ] **1.3 Predicate renames (L4 as amended).** `isReal` →
+      `isExtendedReal` (family-wide: every ±∞-admitting predicate).
+      The old names are REMOVED so typecheck drives the caller sweep;
+      each caller chooses extended vs finite explicitly. `isFinite`
+      keeps its name and means finite MAGNITUDE (`∞ + i` → `false`).
+      Sweep the sign-fold and `1/±∞` guards during the rename (the
+      type-keyed-guard failure class).
+- [ ] **1.4 Assignment promotion.** The declared-type ladder for
+      `x := oo` (`boxed-value-definition.ts:913`,
+      `engine-declarations.ts` promotion) gets an explicit infinite
+      branch (promote to `infinity`, or `number` — decide at
+      implementation with a pin either way; the ladder's
+      widen-interaction comment inverts).
+- [ ] **1.5 Span constructors (L10).** Infinite endpoints are extent
+      markers in BOTH constructors: `Contains(Interval(0,oo), oo)`
+      flips to `False` (pin the flip); `Range(1,oo)` element type stops
+      leaking the endpoint (`indexed_collection<integer>`); delete the
+      `FINITE_NUMERIC_TYPE` narrowing map (`library/core.ts:1098`);
+      `Length(Range(1,oo))` evaluates to `+oo`, declared
+      `integer | +oo`.
+- [ ] **1.6 The 43 `non_finite_number` sites.** Migrate per the
+      audit's site-by-site classification (roadmap §8.5 records where
+      the classification lives): signed-guarantee sites → `+oo | -oo`,
+      any-non-finite sites → `infinity` (usually `| nan`). NO blanket
+      rename anywhere.
+- [ ] **1.7 The fourteen silent-flip classes.** Each by hand, each
+      with a pin: the `Sinh`/`Cosh` realness gates, `extremumType` and
+      `absFunctionType` bare-tier rungs, `Sinc`/Fresnel finite-limit
+      gate, `logType`/pole-join `complex` claims (`→ complex | ±oo`
+      unions), `LogIntegral`'s `real` claim, `innerProductSumType`'s
+      all-real test, the tensor dtype dispatch (`tensor-fields.ts:566`
+      — `infinity`/`nan` need their own arm or cells silently change
+      storage class), `effects-inference.ts:688` (condition REVERSES —
+      an `integer` parameter now proves finiteness),
+      `boxed-function.ts`'s closure-narrowing successor sites,
+      `assume.ts` meet-based contradiction outcomes, and the compiled
+      clause guards (`base-compiler.ts` `jsClauseParamGuard`: `real` →
+      `Number.isFinite`; new guards for `infinity`/`nan`).
+- [ ] **1.8 L9 lands by doing nothing** — the number-theory heads'
+      parameters tighten with the rename in Phase 2; add
+      signature-rejection pins for `GCD(oo, 2)`-class calls.
+
+Exit gate: typecheck + native tsc; targeted suites for every touched
+area; full suite under the box lock with the snapshot delta counted,
+triaged, and reported; conformance-suite pins updated DELIBERATELY
+(each changed pin re-examined against the ratified rulings, gap rows
+re-labeled where a gap closes).
+
+## Phase 2 — The mechanical sweep
+
+- [ ] **Codemod** over `src/` (NOT `common/type/`, already rewritten):
+      `finite_integer → integer`, `finite_rational → rational`,
+      `finite_real → real`, `finite_complex → complex`,
+      `finite_number → complex` (the one non-obvious mapping: "any
+      finite number" IS the new finite `complex`), inside quoted type
+      strings in `signature:` values, handler `return`s,
+      `parseType(...)`/range-constructor arguments, and
+      `.matches(...)`/`isSubtype(...)` calls; collapse dual-listed
+      `'X' || 'finite_X'` pairs. EXCLUDED: every `non_finite_number`
+      occurrence (done in 1.6), the 1.7 files (done by hand),
+      comments (rewritten for meaning in the same pass, by hand).
+- [ ] The type-handler twins in one diff.
+- [ ] **L7 aliases:** the five `finite_*` names parse as deprecated
+      aliases normalizing to the bare names for one release cycle
+      (`common/type/parser.ts`), never emitted by serialization;
+      `non_finite_number` gets NO alias. Pin alias-in → bare-out.
+- [ ] Test-file sweep (158 files; mechanical, same mapping).
+- [ ] Docs: ARCHITECTURE.md's non-finite typing convention section,
+      `doc/08-guide-types.md`, ERROR-MODEL §6's erasure-direction
+      wording, CHANGELOG.
+
+Exit gate: same as Phase 1, plus
+`npx madge --circular --extensions ts src/compute-engine` (imports
+moved) and a grep proving no `finite_*` spelling survives outside the
+parser's alias table and historical docs.
+
+## Phase 3 — Measurement, conformance, release
+
+- [ ] Full suite + nightly type-soundness grid; snapshot blast radius
+      surfaced as a number in the phase report.
+- [ ] Conformance suite: re-examine every remaining gap row (several
+      close under the ratified rulings — the `Sin(NaN)` evaluate gap,
+      `markerType()`'s `number`, `IsPrime` per
+      `docs/SIGNATURE-GUIDELINES.md` §3.3).
+- [ ] **Now-unblocked defect:** the confirmed
+      `compile(Heaviside)(NaN) → 1` (ROADMAP entry) — R-A's
+      ratification settles the answer (per-slot `propagate` for a real
+      slot ⇒ compiled `NaN`): fix the JavaScript kernel and sweep the
+      interval-JS and GPU siblings, update the suite's pin. The
+      `compile(1/x)(0) → Infinity` vs `~oo` divergence stays OPEN (a
+      float target cannot represent `~oo`; needs its own small ruling
+      — saturation escape or decline).
+- [ ] Release notes: every new primitive (`infinity`, `nan`, the
+      singleton spellings) and every retirement named explicitly;
+      `matches('real')`-flip called out as the silent-break;
+      major-version bump; Tycho coordination confirmed (their grep
+      list from the Phase 0 heads-up).
+
+---
+
+## Explicitly out of scope for this migration
+
+- Contract B's `nanBehavior`/`definedWhen` machinery (ratified R-A) —
+  its implementation is a separate initiative that BUILDS ON the flip;
+  only the vocabulary it needs (the types) lands here.
+- The type-handler retirement features (roadmap §9.2 ranks 2–4).
+- The `If`/`Which` `Nothing`-vs-`Undefined` repair (ROADMAP entry;
+  needs its own small ruling on the marker fold).

@@ -1,219 +1,203 @@
 ## [Unreleased]
 
-### Bug Fixes
-
-- **Square roots of large exact perfect squares are exact at every
-  precision.** `Sqrt(10^402)` returned `+oo` at machine precision (the
-  radicand was narrowed to the numeric format before rooting) and
-  `Sqrt(10^12/9)` stayed unevaluated where `10^6/3` exists. Exact
-  integer and rational radicands now reduce exactly — perfect squares
-  fold, negative radicands give exact imaginary results — regardless of
-  the precision setting. `Sqrt(1000000/49)` now evaluates to `1000/7`.
-
-- **`Conjugate`, `Real` and `Imaginary` preserve exactness.**
-  `Conjugate(1/3 + 2/5i)` returned machine floats (so `z·Conjugate(z)`
-  answered `0.2711…` where `61/225` is available); `Real(1/3 + 2/5i)`
-  returned a 21-digit approximation. All three now read the exact
-  components: `Real(1/3 + 2/5i)` is `1/3`, `Imaginary(√2 i)` is `√2`,
-  and `z·Conjugate(z)` is `61/225`.
-
 ### Breaking Changes
 
-- **The bivariate statistics reject complex data instead of silently
-  using its real part.** `Covariance`, `PopulationCovariance`,
-  `Correlation`, `LinearRegression` and `PolynomialFit` previously
-  projected every data point through its real part, so
-  `Covariance([1, 1+2i], [2, 3])` returned `0` — the answer for the data
-  `[1, 1]`. A non-real data point now returns a structured
-  `incompatible-type` error naming the operator and the offending datum.
-  A complex literal with a zero imaginary part (`Complex(2, 0)`) still
-  canonicalizes to a real and participates normally, and the complex
-  infinity `~oo` is not complex data in this sense: it is the single
-  point at infinity rather than a sample point off the real line, so it
-  propagates `NaN`. Additionally, `Correlation` now propagates `NaN` for
-  any data it has no real value for — `NaN`, `±∞` and `~oo` — matching
-  `Covariance`, instead of misreporting it as `"zero variance"`. That
-  error is now raised only when a column is genuinely constant, so at
-  `ce.precision = 'machine'` it also no longer appears for finite data
-  whose sums of squares overflow the double range (values around
-  `1e200`), which now yields `NaN`. (At the default precision the bignum
-  kernel handles such data without overflowing.) (Complex covariance —
-  `E[(X−μX)·conj(Y−μY)]` — is not implemented; if you need it, compute it
-  from `Mean` directly.)
+- **The bivariate statistics reject complex data instead of silently using its
+  real part.** `Covariance`, `PopulationCovariance`, `Correlation`,
+  `LinearRegression` and `PolynomialFit` previously projected every data point
+  through its real part, so `Covariance([1, 1+2i], [2, 3])` returned `0` — the
+  answer for the data `[1, 1]`. A non-real data point now returns a structured
+  `incompatible-type` error naming the operator and the offending datum. A
+  complex literal with a zero imaginary part (`Complex(2, 0)`) still
+  canonicalizes to a real and participates normally, and the complex infinity
+  `~oo` is not complex data in this sense: it is the single point at infinity
+  rather than a sample point off the real line, so it propagates `NaN`.
+  Additionally, `Correlation` now propagates `NaN` for any data it has no real
+  value for — `NaN`, `±∞` and `~oo` — matching `Covariance`, instead of
+  misreporting it as `"zero variance"`. That error is now raised only when a
+  column is genuinely constant, so at `ce.precision = 'machine'` it also no
+  longer appears for finite data whose sums of squares overflow the double range
+  (values around `1e200`), which now yields `NaN`. (At the default precision the
+  bignum kernel handles such data without overflowing.) (Complex covariance —
+  `E[(X−μX)·conj(Y−μY)]` — is not implemented; if you need it, compute it from
+  `Mean` directly.)
 
-- **The one-sample statistics no longer silently use the real part of
-  complex data: they either compute the complex answer or reject it.**
-  Every one of them used to project each datum through its real part, so
-  `Mean([1, 1+2i, 5])` answered `2.333…`, the mean of `[1, 1, 5]`. Now:
-  - `Mean` returns the COMPLEX mean — `Mean([1, 1+2i])` is `1 + i` — with
-    no convention involved, since the mean is linear. Exact data still
-    gives an exact answer: `Mean([1, i])` is `(1 + i)/2`, not
-    `0.5 + 0.5i`.
+- **The one-sample statistics no longer silently use the real part of complex
+  data: they either compute the complex answer or reject it.** Every one of them
+  used to project each datum through its real part, so `Mean([1, 1+2i, 5])`
+  answered `2.333…`, the mean of `[1, 1, 5]`. Now:
+  - `Mean` returns the COMPLEX mean — `Mean([1, 1+2i])` is `1 + i` — with no
+    convention involved, since the mean is linear. Exact data still gives an
+    exact answer: `Mean([1, i])` is `(1 + i)/2`, not `0.5 + 0.5i`.
   - `Variance`, `PopulationVariance`, `StandardDeviation` and
     `PopulationStandardDeviation` compute `E[|X − μ|²]` — the mean squared
-    MAGNITUDE of the deviations, with the same sample (`n − 1`) or
-    population (`n`) divisor as before. The result is a real,
-    non-negative number: `Variance([1+i, 1−i])` is `2` and
-    `PopulationVariance([1+i, 1−i])` is `1`.
-  - `Median`, `Mode`, `Quartiles`, `InterquartileRange`, `Skewness`,
-    `Kurtosis`, `Histogram`, `BinCounts` and the empirical data form of
-    `Quantile` return the same `incompatible-type` error the bivariate
-    statistics use. Order statistics need a total order, and the complex
-    plane has no canonical one; the standardized moments have only
-    convention-laden, branch-dependent complex extensions.
-    `Histogram`/`BinCounts` reject a complex bin EDGE for the same
-    reason. (`Quantile` of a DISTRIBUTION is unaffected.)
+    MAGNITUDE of the deviations, with the same sample (`n − 1`) or population
+    (`n`) divisor as before. The result is a real, non-negative number:
+    `Variance([1+i, 1−i])` is `2` and `PopulationVariance([1+i, 1−i])` is `1`.
+  - `Median`, `Mode`, `Quartiles`, `InterquartileRange`, `Skewness`, `Kurtosis`,
+    `Histogram`, `BinCounts` and the empirical data form of `Quantile` return
+    the same `incompatible-type` error the bivariate statistics use. Order
+    statistics need a total order, and the complex plane has no canonical one;
+    the standardized moments have only convention-laden, branch-dependent
+    complex extensions. `Histogram`/`BinCounts` reject a complex bin EDGE for
+    the same reason. (`Quantile` of a DISTRIBUTION is unaffected.)
 
-  Real data is unaffected, including the exact results
-  (`Mean([1, 1, 5])` is still `7/3`), and `NaN` and a real `±∞` keep the
-  readings they have always had in these heads (`Mean([1, +∞, 5])` is
-  `+∞`, `Median([1, +∞, 5])` is `5`).
+  Real data is unaffected, including the exact results (`Mean([1, 1, 5])` is
+  still `7/3`), and `NaN` and a real `±∞` keep the readings they have always had
+  in these heads (`Mean([1, +∞, 5])` is `+∞`, `Median([1, +∞, 5])` is `5`).
 
-- **The complex infinity `~oo` now reads as `NaN` in the one-sample
-  statistics, under both of its spellings.** The real part `~oo` reports
-  is an artifact of how it was written — `ComplexInfinity` reports
-  `Infinity`, `Complex(1, Infinity)` reports `1` — so the same value
-  produced different statistics depending on the spelling:
-  `Mean([1, ~oo, 5])` answered `+∞` one way and `2.333…` the other, and
-  `Median` answered `5` one way and `1` the other. Every one-sample head
-  now projects it to `NaN`, which is what the bivariate heads already
-  did, so both spellings agree: `Mean`, `Median`, `Mode`, the variance
-  family, `Skewness`, `Kurtosis` and `InterquartileRange` return `NaN`,
-  `Quartiles` returns `(NaN, NaN, NaN)`, and the empirical `Quantile`
-  returns `NaN`. A real `±∞` is unaffected.
+- **The complex infinity `~oo` now reads as `NaN` in the one-sample statistics,
+  under both of its spellings.** The real part `~oo` reports is an artifact of
+  how it was written — `ComplexInfinity` reports `Infinity`,
+  `Complex(1, Infinity)` reports `1` — so the same value produced different
+  statistics depending on the spelling: `Mean([1, ~oo, 5])` answered `+∞` one
+  way and `2.333…` the other, and `Median` answered `5` one way and `1` the
+  other. Every one-sample head now projects it to `NaN`, which is what the
+  bivariate heads already did, so both spellings agree: `Mean`, `Median`,
+  `Mode`, the variance family, `Skewness`, `Kurtosis` and `InterquartileRange`
+  return `NaN`, `Quartiles` returns `(NaN, NaN, NaN)`, and the empirical
+  `Quantile` returns `NaN`. A real `±∞` is unaffected.
 
-- **`Mean` and the variance family return `NaN` for complex data mixed
-  with a non-finite value.** `Variance([1+2i, +∞])` returned `+∞`, an
-  accident of boxed arithmetic that contradicted the real-only path
-  (`Variance([1, +∞])` is `NaN`). A complex sample point together with a
-  point at infinity has no reading — `+∞` is a limit along the real axis,
-  and no direction in the plane makes it a value a complex number can be
-  averaged with — so `NaN` is what these now answer. The real-only paths
-  are unchanged.
+- **`Mean` and the variance family return `NaN` for complex data mixed with a
+  non-finite value.** `Variance([1+2i, +∞])` returned `+∞`, an accident of boxed
+  arithmetic that contradicted the real-only path (`Variance([1, +∞])` is
+  `NaN`). A complex sample point together with a point at infinity has no
+  reading — `+∞` is a limit along the real axis, and no direction in the plane
+  makes it a value a complex number can be averaged with — so `NaN` is what
+  these now answer. The real-only paths are unchanged.
 
-- **`Histogram` and `BinCounts` stay inert on data (or bin edges) that is
-  not a number literal, instead of silently dropping it.** A `Sqrt(-2)`
-  datum has no real value, and it used to be filtered out of the sample:
-  `BinCounts([1, Sqrt(-2), 5], 2)` reported the counts of `[1, 5]`. It
-  now leaves the expression unevaluated, the same way the empirical
-  `Quantile` does; under `.N()` the datum numericizes to a complex
-  literal and is rejected with the `incompatible-type` error.
+- **`Histogram` and `BinCounts` stay inert on data (or bin edges) that is not a
+  number literal, instead of silently dropping it.** A `Sqrt(-2)` datum has no
+  real value, and it used to be filtered out of the sample:
+  `BinCounts([1, Sqrt(-2), 5], 2)` reported the counts of `[1, 5]`. It now
+  leaves the expression unevaluated, the same way the empirical `Quantile` does;
+  under `.N()` the datum numericizes to a complex literal and is rejected with
+  the `incompatible-type` error.
 
 - **A `PolynomialFit` degree that is not an integer is reported as a bad
-  degree.** The degree was read with a helper that takes a number's real
-  part and rounds it, so `PolynomialFit(xs, ys, Complex(1, 2))` silently
-  fitted a degree-1 polynomial and `PolynomialFit(xs, ys, 2.5)` a degree-3
-  one, while a `NaN` or `±∞` degree was blamed on the argument list as
-  `invalid arguments`. Every number in the degree position is now answered
-  by the `degree must be an integer in [0, 12]` error unless it is exactly
-  an integer.
+  degree.** The degree was read with a helper that takes a number's real part
+  and rounds it, so `PolynomialFit(xs, ys, Complex(1, 2))` silently fitted a
+  degree-1 polynomial and `PolynomialFit(xs, ys, 2.5)` a degree-3 one, while a
+  `NaN` or `±∞` degree was blamed on the argument list as `invalid arguments`.
+  Every number in the degree position is now answered by the
+  `degree must be an integer in [0, 12]` error unless it is exactly an integer.
 
-- **`Histogram` and `BinCounts` reject non-finite data and non-finite bin
-  edges instead of silently dropping them.** A data point with no finite
-  real reading — `NaN`, a real `±∞`, or the complex infinity `~oo` under
-  either spelling — used to be filtered out of the sample, so
-  `BinCounts([1, +∞, 5], 2)` reported the counts of the two-point dataset
-  `[1, 5]` with no hint that a value had been discarded. A non-finite
-  explicit bin EDGE was worse: every interval comparison against it is
-  false, so the head fabricated a row of zero counts
-  (`BinCounts([1, 2, 3], [0, NaN, 10])` returned `[0, 0]`). Both now
-  return the same structured `incompatible-type` error the complex
-  rejection uses, naming the `finite_real` constraint, the operator, and
-  the offending value. These two heads cannot absorb a non-finite value
-  the way `Mean([1, NaN, 5])` returns `NaN` does: their result is a vector
-  of COUNTS, and no count means "there was no reading". Finite real data
-  and explicit finite edge lists are unaffected.
+- **`Histogram` and `BinCounts` reject non-finite data and non-finite bin edges
+  instead of silently dropping them.** A data point with no finite real reading
+  — `NaN`, a real `±∞`, or the complex infinity `~oo` under either spelling —
+  used to be filtered out of the sample, so `BinCounts([1, +∞, 5], 2)` reported
+  the counts of the two-point dataset `[1, 5]` with no hint that a value had
+  been discarded. A non-finite explicit bin EDGE was worse: every interval
+  comparison against it is false, so the head fabricated a row of zero counts
+  (`BinCounts([1, 2, 3], [0, NaN, 10])` returned `[0, 0]`). Both now return the
+  same structured `incompatible-type` error the complex rejection uses, naming
+  the `finite_real` constraint, the operator, and the offending value. These two
+  heads cannot absorb a non-finite value the way `Mean([1, NaN, 5])` returns
+  `NaN` does: their result is a vector of COUNTS, and no count means "there was
+  no reading". Finite real data and explicit finite edge lists are unaffected.
 
-  A finite real too large for a machine float — `10^400`, an exact integer
-  — is refused too, but as an `out-of-range` error naming the machine
-  floating-point range, because the limit belongs to the binning
-  arithmetic and not to the value: the bin width and every interval
-  comparison are computed in doubles, where such a datum reads as
-  infinity. The statistics that sum their data exactly (`Mean`,
-  `Covariance`, the least-squares fits) have no such limit and accept it.
+  A finite real too large for a machine float — `10^400`, an exact integer — is
+  refused too, but as an `out-of-range` error naming the machine floating-point
+  range, because the limit belongs to the binning arithmetic and not to the
+  value: the bin width and every interval comparison are computed in doubles,
+  where such a datum reads as infinity. The statistics that sum their data
+  exactly (`Mean`, `Covariance`, the least-squares fits) have no such limit and
+  accept it.
 
-- **`LinearRegression` and `PolynomialFit` propagate `NaN` for non-finite
-  data instead of misdiagnosing it.** A `NaN`, `±∞` or `~oo` value in the
-  X column made the least-squares pivot search fail, and the heads
-  reported `unexpected-argument: "degenerate data"` — a claim about the
-  geometry of the sample that the data does not support — or, when the
-  elimination happened to pivot on a later row, returned the half-`NaN`
-  tuple `(NaN, 0)` whose `0` slope is not a fit of anything. Both now
-  answer with every coefficient `NaN`, in the shape each head declares:
-  `(NaN, NaN)` for `LinearRegression`, a `NaN`-filled list of
-  `degree + 1` coefficients for `PolynomialFit`, and the fitted expression
-  with `NaN` coefficients when a trailing variable symbol is given. This
-  is what both already answered when the non-finite value sat in the Y
-  column, and it matches `Covariance`/`Correlation`. The
-  `"degenerate data"` error remains for rank-deficient finite real data —
+- **`LinearRegression` and `PolynomialFit` propagate `NaN` for non-finite data
+  instead of misdiagnosing it.** A `NaN`, `±∞` or `~oo` value in the X column
+  made the least-squares pivot search fail, and the heads reported
+  `unexpected-argument: "degenerate data"` — a claim about the geometry of the
+  sample that the data does not support — or, when the elimination happened to
+  pivot on a later row, returned the half-`NaN` tuple `(NaN, 0)` whose `0` slope
+  is not a fit of anything. Both now answer with every coefficient `NaN`, in the
+  shape each head declares: `(NaN, NaN)` for `LinearRegression`, a `NaN`-filled
+  list of `degree + 1` coefficients for `PolynomialFit`, and the fitted
+  expression with `NaN` coefficients when a trailing variable symbol is given.
+  This is what both already answered when the non-finite value sat in the Y
+  column, and it matches `Covariance`/`Correlation`. The `"degenerate data"`
+  error remains for rank-deficient finite real data —
   `LinearRegression([2, 2, 2], [1, 2, 3])` still reports it.
 
-- **Two collections of different lengths are a dimension error in the
-  fits.** `LinearRegression([1, 2], [1, 2, 3])` and the corresponding
-  `PolynomialFit` call fell through to the least-squares rank guard and
-  were misdiagnosed as `"degenerate data"`; they now report
-  `incompatible-dimensions 2 vs 3`, the error `Covariance` and every other
-  pairwise head already used for a length disagreement.
+- **Two collections of different lengths are a dimension error in the fits.**
+  `LinearRegression([1, 2], [1, 2, 3])` and the corresponding `PolynomialFit`
+  call fell through to the least-squares rank guard and were misdiagnosed as
+  `"degenerate data"`; they now report `incompatible-dimensions 2 vs 3`, the
+  error `Covariance` and every other pairwise head already used for a length
+  disagreement.
 
-- **`LinearRegression` reports a sample with fewer than two points as
-  such.** One point determines no line whatever its value is, but the head
-  answered `(NaN, NaN)` for `LinearRegression([NaN], [2])` and
-  `"degenerate data"` for `LinearRegression([1], [2])`, while
-  `PolynomialFit([NaN], [2], 1)` said there were not enough data points.
-  `LinearRegression` now reports `not enough data points` for any sample
-  shorter than two, ahead of anything the values could say.
+- **`LinearRegression` reports a sample with fewer than two points as such.**
+  One point determines no line whatever its value is, but the head answered
+  `(NaN, NaN)` for `LinearRegression([NaN], [2])` and `"degenerate data"` for
+  `LinearRegression([1], [2])`, while `PolynomialFit([NaN], [2], 1)` said there
+  were not enough data points. `LinearRegression` now reports
+  `not enough data points` for any sample shorter than two, ahead of anything
+  the values could say.
 
-- **`Re`, `Im` and `Arg` reject the argument lists their targets reject.**
-  These aliases rewrote to `Real`/`Imaginary`/`Argument` through a
-  construction path that skips signature validation, so `Arg(1, 2)`
-  silently dropped the second operand and answered `0` where
-  `Argument(1, 2)` reported the unexpected argument. They also declared a
-  narrower type than their targets, so `Re(NaN)` claimed the type `real`,
-  which does not admit NaN, wherever the expression was left
-  uncanonicalized. Each alias now validates and types exactly as the name
+- **`Re`, `Im` and `Arg` reject the argument lists their targets reject.** These
+  aliases rewrote to `Real`/`Imaginary`/`Argument` through a construction path
+  that skips signature validation, so `Arg(1, 2)` silently dropped the second
+  operand and answered `0` where `Argument(1, 2)` reported the unexpected
+  argument. They also declared a narrower type than their targets, so `Re(NaN)`
+  claimed the type `real`, which does not admit NaN, wherever the expression was
+  left uncanonicalized. Each alias now validates and types exactly as the name
   it stands for.
 
 ### New Features
 
-- **`Re` and `Im` are now defined, as aliases of `Real` and
-  `Imaginary`.** `["Re", z]` and `["Im", z]` used to stay inert as unknown
-  operators; they now canonicalize to `Real`/`Imaginary` (the preferred
-  names) and evaluate, exactness included: `Re(1/3 + 2/5i)` is `1/3`. The
-  `\Re` and `\Im` LaTeX commands already parsed to `Real`/`Imaginary` and
-  are what the serializer emits, and `\operatorname{Re}(z)` now resolves
-  too.
+- **`Re` and `Im` are now defined, as aliases of `Real` and `Imaginary`.**
+  `["Re", z]` and `["Im", z]` used to stay inert as unknown operators; they now
+  canonicalize to `Real`/`Imaginary` (the preferred names) and evaluate,
+  exactness included: `Re(1/3 + 2/5i)` is `1/3`. The `\Re` and `\Im` LaTeX
+  commands already parsed to `Real`/`Imaginary` and are what the serializer
+  emits, and `\operatorname{Re}(z)` now resolves too.
 
-- **A `type` handler can now be declared as a function of operand
-  DESCRIPTORS instead of operand expressions.** An operator definition that
-  sets `typeHandlerKind: 'types'` receives, in place of each operand, an
+- **A `type` handler can now be declared as a function of operand DESCRIPTORS
+  instead of operand expressions.** An operator definition that sets
+  `typeHandlerKind: 'types'` receives, in place of each operand, an
   `OperandDescriptor`: the operand's handler-visible type, a deliberately
   minimal set of three-valued facts carrying only what the type cannot
-  (finiteness — for the `NaN` literal, whose type is `number`; sign from
-  pure value sources such as a held numeric value; closedness; the
-  collection capability facets; a static shape) and an on-demand
-  structural view — never the operand expression itself, so deriving a
-  type cannot declare, canonicalize, or evaluate anything. Validity has
-  no fact: an error operand's type is `'error'`. The legacy expressions
-  shape remains the default and is unchanged; the flag — never the
-  handler's parameter count — selects the shape. Under test (and with `CE_TYPE_PURITY_GUARD` elsewhere) a
-  runtime guard turns any engine-state write from a `'types'` handler into
-  an immediate error. The built-in `Coalesce`, `Hold` and `ReleaseHold`
-  definitions were the first to use the new shape, with byte-identical
-  derived types; `DigitCount`, `Block` and `When` have since converted
-  the same way, each proven equivalent by a differential shadow that runs
-  both shapes side by side across the test suite. 34 further operators
-  (the number-theory and combinatorics constants) went one better: their
-  constant `type` handler was retired outright and its result moved into
-  the declared signature — `NthPrime` now declares
-  `(integer) -> finite_integer` instead of pairing a wide signature with
-  a narrowing handler, with byte-identical derived types.
+  (finiteness — for the `NaN` literal, whose type is `number`; sign from pure
+  value sources such as a held numeric value; closedness; the collection
+  capability facets; a static shape) and an on-demand structural view — never
+  the operand expression itself, so deriving a type cannot declare,
+  canonicalize, or evaluate anything. Validity has no fact: an error operand's
+  type is `'error'`. The legacy expressions shape remains the default and is
+  unchanged; the flag — never the handler's parameter count — selects the shape.
+  Under test (and with `CE_TYPE_PURITY_GUARD` elsewhere) a runtime guard turns
+  any engine-state write from a `'types'` handler into an immediate error. The
+  built-in `Coalesce`, `Hold` and `ReleaseHold` definitions were the first to
+  use the new shape, with byte-identical derived types; `DigitCount`, `Block`
+  and `When` have since converted the same way, each proven equivalent by a
+  differential shadow that runs both shapes side by side across the test suite.
+  34 further operators (the number-theory and combinatorics constants) went one
+  better: their constant `type` handler was retired outright and its result
+  moved into the declared signature — `NthPrime` now declares
+  `(integer) -> finite_integer` instead of pairing a wide signature with a
+  narrowing handler, with byte-identical derived types.
 
-- **`GammaRegularized` and `BetaRegularized` no longer claim a finite
-  real result unconditionally.** Their old constant claim was unsound off
-  the proven domain (`GammaRegularized(-1, 2)` evaluates to NaN). They
-  now claim `finite_real` only when the domain is proven — `a > 0` and
-  `z ≥ 0` for the gamma; `x ∈ [0, 1]`, `a > 0`, `b > 0` for the beta —
-  and answer `number` otherwise, per the non-finite typing convention.
+- **`GammaRegularized` and `BetaRegularized` no longer claim a finite real
+  result unconditionally.** Their old constant claim was unsound off the proven
+  domain (`GammaRegularized(-1, 2)` evaluates to NaN). They now claim
+  `finite_real` only when the domain is proven — `a > 0` and `z ≥ 0` for the
+  gamma; `x ∈ [0, 1]`, `a > 0`, `b > 0` for the beta — and answer `number`
+  otherwise, per the non-finite typing convention.
+
+### Resolved Issues
+
+- **Square roots of large exact perfect squares are exact at every precision.**
+  `Sqrt(10^402)` returned `+oo` at machine precision (the radicand was narrowed
+  to the numeric format before rooting) and `Sqrt(10^12/9)` stayed unevaluated
+  where `10^6/3` exists. Exact integer and rational radicands now reduce exactly
+  — perfect squares fold, negative radicands give exact imaginary results —
+  regardless of the precision setting. `Sqrt(1000000/49)` now evaluates to
+  `1000/7`.
+
+- **`Conjugate`, `Real` and `Imaginary` preserve exactness.**
+  `Conjugate(1/3 + 2/5i)` returned machine floats (so `z·Conjugate(z)` answered
+  `0.2711…` where `61/225` is available); `Real(1/3 + 2/5i)` returned a 21-digit
+  approximation. All three now read the exact components: `Real(1/3 + 2/5i)` is
+  `1/3`, `Imaginary(√2 i)` is `√2`, and `z·Conjugate(z)` is `61/225`.
 
 ## 0.119.0 _2026_08_23_
 
