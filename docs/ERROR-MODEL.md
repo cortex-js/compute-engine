@@ -648,6 +648,19 @@ the value lattice. `~oo` is likewise *not* an error and not a `nan`: it
 is a definite point with defined arithmetic (`1/~oo = 0`, `2·~oo = ~oo`),
 unlike `NaN`, which absorbs.
 
+Amendment proposed 2026-08-26 — the finite-by-default lattice flip
+(`docs/TYPE_SYSTEM_ROADMAP.md` §8). Under that proposal the bare
+numeric types `integer`/`rational`/`real`/`complex` become finite-only,
+and a new `infinity` type (whose members include the singletons `+oo`,
+`-oo`, `~oo`) joins the `nan` singleton so the top decomposes as
+`number = complex ⊔ infinity ⊔ nan`; the `complex_infinity` singleton
+proposed above is absorbed as the `~oo` member of `infinity`. That
+changes this section's settled placement premise — the directed
+infinities would no longer inhabit `real`/`complex`, and the 2026-08-21
+pins on `matches('real')` for `±oo` would flip — so the flip and this
+document's §4/§5 proposals must be ratified together (or the flip
+declined); see the open question in §7.
+
 ## 6. Interpreter vs. compiled code — Settled: compilation is fail-closed
 
 Compilation policy is owned by `docs/COMPILATION-MODEL.md`, which is
@@ -761,7 +774,22 @@ document's history):
   has no direction); (b) bare `number` with gates recognizing the
   concrete value — the status quo, workable, imprecise; (c) the
   `complex_infinity` singleton of §5 — recommended: names the region
-  without moving it. Deciding nothing keeps (b).
+  without moving it; (d) the `~oo` singleton member of the `infinity`
+  type, if the lattice flip (next item) is adopted — it subsumes (c).
+  Deciding nothing keeps (b).
+- **The finite-by-default lattice flip**
+  (`docs/TYPE_SYSTEM_ROADMAP.md` §8, proposed 2026-08-26). Bare
+  numeric types become finite-only; `±oo` move out of `real`/`complex`
+  into a new `infinity` type that sits beside the `nan` singleton
+  under `number`; the extended real line is spelled `real | infinity`;
+  the `finite_*` twins and `non_finite_number` retire. It amends §5's
+  settled placement (the singletons stay; the directed infinities
+  move) and strengthens Contract B's carrier discipline (§4) by giving
+  the precise carriers the short names. Ratify together with Contract
+  B as one package or decline both parts of the coupling: adopting the
+  flip while keeping Contract A would change what `oo.matches('real')`
+  answers with no compensating signature story. Deciding nothing keeps
+  today's tower.
 - **Choose and document per-operator conventions where references
   diverge** — the authority is this engine's own documented definition,
   not external agreement. `IsPrime(-7)` is the type case: Mathematica's

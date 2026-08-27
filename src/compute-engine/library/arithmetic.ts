@@ -157,6 +157,7 @@ import {
 // runs.
 import {
   realOnlyStepType,
+  kindClosureType,
   numericTypeHandler as numericTypeHandlerOnTypes,
   elementaryFunctionType as elementaryFunctionTypeOnTypes,
   gammaPoleType as gammaPoleTypeOnTypes,
@@ -3556,10 +3557,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     PreIncrement: {
       description: 'Increment a number by one.',
       signature: '(number) -> number',
+      // n + 1 stays in the operand's numeric kind (except `imaginary`, which
+      // the handler widens to complex), so the result claims that kind.
+      typeHandlerKind: 'types',
+      type: kindClosureType,
     },
     PreDecrement: {
       description: 'Decrement a number by one.',
       signature: '(number) -> number',
+      // n - 1 stays in the operand's numeric kind (except `imaginary`, which
+      // the handler widens to complex), so the result claims that kind.
+      typeHandlerKind: 'types',
+      type: kindClosureType,
     },
   },
 

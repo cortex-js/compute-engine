@@ -2594,7 +2594,13 @@ volumes
         'Strip Big-O remainder terms from a series, yielding the truncated ' +
         'polynomial. Example: Normal(Series(\\sin x, x)) → x - x^3/6 + x^5/120',
       broadcastable: false,
-      signature: '(value) -> number',
+      signature: '(value) -> value',
+      // `Normal` is a passthrough that strips `BigO` remainder terms, so the
+      // result's honest type is the operand's own type: a truncated series
+      // stays numeric, and a non-numeric value (which `normalStrip` returns
+      // unchanged) keeps its own type instead of a false `number` claim.
+      typeHandlerKind: 'types',
+      type: ([x]) => x?.type ?? 'value',
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;
         // Not lazy: the operand (typically a `Series`) is already evaluated.

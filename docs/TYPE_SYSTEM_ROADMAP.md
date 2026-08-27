@@ -14,6 +14,13 @@ Updated 2026-08-13: Appendix C (named arguments) is **shipped** — the
 prose rewritten as the spec (decisions folded in where they apply,
 with a compact decision record at the end) and the diagnostics table
 brought in line with the implementation; behaviors re-probed that day.
+Updated 2026-08-26: added §8 — the finite-by-default numeric-lattice
+flip (new `infinity` and `nan` types, `finite_*` tower retired),
+proposed; one ratification package with `docs/ERROR-MODEL.md` §4/§5.
+The behavior probes cited in §8 were run 2026-08-25/26. Also added
+the §1 north star (retire the type handlers by enriching the declared
+type language) and §9, the demand census that sizes its feature list;
+the two audits cited in §8.5 and §9 were run the same day.
 
 Implemented invariants are consolidated in `docs/TYPE-SYSTEM.md`. Effect rows
 are normative in `docs/EFFECTS-MODEL.md`, language lowering in
@@ -89,6 +96,29 @@ rather than a once-and-final principal type. Principal types and whole-program i
 subtyping, unions, refinements, overloads, and open-world incremental
 sessions — the right trade for a CAS. User-facing background lives in
 `src/epsil/docs/types.md` ("How the type system works").
+
+**North star (stated 2026-08-26): retire the per-operator type
+handlers by making the declared type language expressive enough to
+replace them.** A type handler today is a TypeScript function from the
+argument types to a result type — that is, a dependent signature, kept
+outside the type language, and therefore invisible to the API surface,
+the generated documentation, and Epsil programs. The handlers exist to
+compensate for what declarations cannot yet say; they are a workaround,
+not a feature. The goal is to enrich declarations — refinement types
+over the channels the engine already computes (bounds, sign, literal
+values), and eventually value-indexed (lightweight dependent)
+signatures — until the built-in library's declarations state what its
+type handlers compute today, and a user-defined Epsil operator can be
+declared with the same precision as a built-in. This is a selection
+principle for the rest of this roadmap: a feature that moves
+information out of handlers into declarations advances the goal; a new
+engine-private channel deepens the hole. Steps already on this path:
+the bounded range types and literal singletons; ERROR-MODEL Contract
+B's `definedWhen`/`requires` predicates (refinements at the
+declaration); and §8's honest result unions, which make the types that
+handlers infer spellable in a declaration at all. A demand census of
+the handler population (§9, run 2026-08-26) ranks the candidate
+features by how many handlers each one retires.
 
 ## 2. Sum types (near term)
 
@@ -592,7 +622,475 @@ with three rulings needed in order (see §7).
    deliberate v1 limits are tracked in `ROADMAP.md` ("Named-argument
    calls — v1 residuals"). Appendix B's constructors can now build on
    it.
+9. Numeric-lattice flip (§8, proposed 2026-08-26): bare numeric types
+   become finite-only; new `infinity` and `nan` types; the `finite_*`
+   tower and `non_finite_number` retire. Rulings L1–L10 in §8.4. One
+   ratification package with `docs/ERROR-MODEL.md` §4 (Contract B) and
+   §5 (the singleton refinements).
+10. Type-handler retirement (§1 north star, §9 census): which of the
+    ranked declaration-language features to design first, and the
+    default inversion of the closure-assumption narrowing (§9,
+    category i): delete the universal no-handler narrowing from
+    `BoxedFunction`, make it an opt-in shared type handler for the
+    heads whose kind-closure premise holds — so "no handler" means
+    "declared result taken verbatim" and the 13 suppressor constants
+    delete with no new flag.
 
+## 8. Numeric lattice: finite-by-default, `infinity`, and `nan` — Proposed (2026-08-26)
+
+Proposed from a design conversation on 2026-08-25/26; the behavior
+probes cited below were run those days against `main`. Nothing in this
+section is implemented. This section and `docs/ERROR-MODEL.md` §4
+(Contract B, domain signatures) and §5 (singleton refinements) are one
+ratification package: each strengthens the others, and §8.6 lists what
+this section changes in that document.
+
+### 8.1 The problem
+
+The numeric tower today (`src/common/type/types.ts`) is two parallel
+towers plus one atom. The main tower `integer ⊂ rational ⊂ real ⊂
+complex ⊂ number` admits the two signed infinities at every level below
+`number`; a `finite_*` twin of each level (`finite_integer`, …,
+`finite_number`) excludes them; and `non_finite_number` = {`+oo`,
+`-oo`} is the atom both towers share. The two remaining exceptional
+points, `~oo` and `NaN`, are admitted only by the top type `number`
+(ruled 2026-08-21, pinned in
+`test/compute-engine/non-finite-typing.test.ts`).
+
+Two costs, both measured:
+
+- **The most common contract has the long name.** Most operator
+  signatures want finite semantics: `finite_*` appears ~835 times in
+  `src/` (455 in `library/` alone; `library/arithmetic.ts` has 111)
+  and in 158 test files. The doubled tower exists only to give those
+  sites a spelling.
+- **The top has an unnameable residue.** Because `~oo` and `NaN`
+  inhabit only `number`, any result that might be either collapses to
+  `number` — `Divide` is declared `(number, number+) -> number` — and
+  no signature can say "may be an infinity" or "is NaN". (ERROR-MODEL
+  §5 proposes singleton names for the residue; this section goes
+  further and reorganizes the tower around them.)
+
+### 8.2 The proposal
+
+Flip the default: **bare numeric type names mean finite**, and two new
+types name the residue.
+
+- `integer`, `rational`, `real`, `complex` (and `imaginary`, which is
+  already finite-only) contain only finite values. `number` stays the
+  top type.
+- New type **`infinity`** ⊂ `number`: the numeric values of infinite
+  magnitude. Its notable members are three singleton (value-literal)
+  types: `+oo`, `-oo`, and `~oo`. Disjoint from `complex` (see L2 for
+  the exact membership rule).
+- New type **`nan`** ⊂ `number`: the single value `NaN`. Disjoint from
+  everything else. This is ERROR-MODEL §5's `nan` singleton, unchanged.
+- The top then decomposes exactly: `number = complex ⊔ infinity ⊔ nan`
+  — a disjoint tree, with no partial overlap anywhere in the numeric
+  lattice. Meets and disjointness stay simple containment-table
+  lookups.
+- The extended real line is spelled `real | infinity` when admitting
+  `~oo` too is acceptable slop (the safe direction for a result type:
+  it over-admits rather than under-claims), or exactly as
+  `real | +oo | -oo` with the singletons.
+- `finite_number`, `finite_complex`, `finite_real`, `finite_rational`,
+  `finite_integer`, and `non_finite_number` are retired from the
+  `PrimitiveType` union (migration: L5, L7).
+
+Value-level consequences: `oo.type` becomes the singleton `+oo`
+(principal, and it carries its sign, which the sign channel can read
+off the type), widening to `infinity`; likewise `-oo`. `~oo.type`
+becomes `~oo`, widening to `infinity`. `oo.matches('real')` and
+`oo.matches('integer')` become **false** — probed 2026-08-25: both are
+`true` today, with `oo.type` printing `non_finite_number`. Bounded
+range types are unaffected: they are closed-ended over finite bounds
+and already exclude the infinities.
+
+Arithmetic admission is deliberately unchanged: `Add`, `Multiply`,
+`Divide` keep `number` parameters, because arithmetic is the
+propagation medium for `NaN` and the infinities (`oo + 1`, absorption
+through `NaN`). The flip tightens what results *promise*, not what
+operators *admit*. The payoff is on the result side: an application's
+inferred type can now be an honest `real | infinity | nan` instead of
+a collapse to `number`, and the sign/bounds channels can discharge
+arms per call site (a proven-nonzero denominator deletes
+`infinity | nan` from a quotient's type). Today that sharpness lives
+in the type handlers; under the §1 north star it should eventually be
+declarable, and the flip is the prerequisite — it makes the target
+types spellable in a declaration at all.
+
+Why this matches user intuition rather than fighting it: in
+mathematics ℝ excludes ∞ (the *extended* reals ℝ̄ add ±∞), and IEEE 754
+itself (§3.2) partitions its datums into finite numbers, two
+infinities, and NaNs — "Not a Number" is the standard's own name. The
+intuition "a real-ish type includes ∞ and NaN" comes from the `double`
+storage type, whose Compute Engine analog is `number`, not `real`: a
+user who wants the `double` contract writes `number` and gets exactly
+the IEEE datum set.
+
+### 8.3 The rejected alternative: keep the wide tower, spell finite by negation
+
+The variant considered first: keep `real` ⊇ {±∞}, add `infinity` and
+`nan`, and express the finite contract as `real & !infinity`. Rejected
+for three reasons, each verified against the current implementation:
+
+1. **Partial overlap breaks the lattice's shape.** With `~oo` inside
+   `infinity` but outside `real`, `infinity` and `real` would overlap
+   without either containing the other — the first such primitive pair.
+   `meet(real, infinity)` then needs the set {`+oo`, `-oo`} as an
+   answer, which is exactly the `non_finite_number` atom, so the atom
+   the change meant to delete survives as internal structure.
+2. **Negation subtyping is deliberately conservative.** `A <: !B` is
+   proven via `provablyDisjoint` (`src/common/type/subtype.ts`), which
+   answers "may overlap" whenever it cannot prove disjointness, and
+   partial overlaps are explicitly not refuted. Today that conservatism
+   only costs precision on exotic user-written types; if
+   `real & !infinity` became the everyday spelling of the most common
+   numeric contract, failures-to-prove would become spurious signature
+   rejections. The only sound implementation is to normalize the
+   blessed pattern to internal finite atoms — at which point the
+   finite tower survives in hiding and the public surface has merely
+   changed spelling.
+3. **The verbose spelling lands on the majority case** (the usage
+   counts in §8.1).
+
+Under the flip, none of this arises: the tree is disjoint, unions —
+which the machinery already handles exactly — replace negation
+entirely, and the common case has the short name.
+
+### 8.4 Rulings needed (L1–L10)
+
+- **L1 — adopt the flip** (§8.2). Saying no keeps the doubled tower
+  and the unnameable residue; ERROR-MODEL §5's singletons can still
+  land alone (they are compatible with either answer).
+- **L2 — membership rule for `infinity`.** Mixed directed infinite
+  values exist today (`∞ + i`: infinite real part, finite imaginary
+  part — kept distinct from `~oo` by the 2026-08-21 round, currently
+  typed `complex`). After the flip `complex` is finite, so they need a
+  home. Options: (a) define `infinity` by infinite magnitude — the
+  three singletons are its notable members, mixed directed values are
+  anonymous further inhabitants (**recommended**; also fixes the
+  under-count ERROR-MODEL §5 notes in the old decomposition — and the
+  2026-08-26 audit found the concrete sites: the `NumericValue.type`
+  getters return bare `complex` for a mixed infinite value at
+  `src/compute-engine/numeric-value/machine-numeric-value.ts:72` and
+  `big-numeric-value.ts:66`, which under this option return
+  `infinity`); (b)
+  canonicalize every mixed directed infinite value to `~oo`
+  (Mathematica's choice — a value-level change, not just a type
+  change); (c) leave them typing bare `number` — rejected, it
+  recreates the unnameable residue this section exists to remove.
+- **L3 — `~oo` belongs to `infinity`.** Recommended yes: the everyday
+  result contract "may blow up" is `real | infinity`, and division —
+  the most common source — produces `~oo`; if `~oo` sat outside, every
+  such signature would need to remember `| ~oo`, and forgetting is a
+  silent under-claim (the dangerous direction). With `~oo` inside, the
+  slop direction is safe, and exactness is recoverable as
+  `real | +oo | -oo`. This absorbs ERROR-MODEL §5's proposed
+  `complex_infinity` singleton as the `~oo` member of `infinity`; one
+  naming choice follows — the singleton spelling `~oo` (recommended,
+  matches the value's rendering) or the name `complex_infinity`.
+- **L4 — value predicates get an explicit companion ruling.** The
+  boxed-value predicates (`isReal`, `isInteger`, `isFinite`, …) are
+  consumed by folds and sign logic and must not flip silently with the
+  type names (precedent: a retyping of `~oo` once silently disabled an
+  `Add` guard — the guard-sweep discipline from the literal-types
+  rollout applies). Proposal: predicates keep their current meanings
+  (`oo.isReal` stays `true` — "on the extended real line"; `isFinite`
+  keeps its three-valued contract), and `type.matches('real')` becomes
+  the one-word finiteness test. Whatever is ruled, it is ruled
+  explicitly and the guards are swept.
+- **L5 — `non_finite_number` is retired, not renamed.** It guarantees
+  "a *signed, real* infinity" — the guarantee the `1/±∞ = 0` folds and
+  the sign-aware gates consume — while `infinity` admits the unsigned
+  `~oo`. A blanket rename would silently weaken those guards.
+  Migration is site by site: to `infinity` where the site means "any
+  infinite value", to `+oo | -oo` where it consumes the signed
+  guarantee.
+- **L6 — the overflow escape.** A bare `real` result is a finiteness
+  promise, and machine evaluation can break it: two finite operands
+  can overflow (`MAX_VALUE + MAX_VALUE` → `Infinity`), and a
+  mathematically finite exact value can fail to numericize
+  (`Sin(10000i)` overflows to `NaN` on `.N()` — ERROR-MODEL §4). The
+  `NaN` half is already covered by ERROR-MODEL's `may-marker`
+  partiality (non-representability on the numeric route). The
+  ∞-overflow half needs a ruling: (a) document that the declared type
+  describes the mathematical value and the float image may saturate to
+  an infinity (**lean**: pragmatic, matches IEEE expectations); (b)
+  mechanically widen numeric-route result types with `| infinity`
+  (noisy, penalizes every result for a rare escape); (c) normalize
+  float overflow to the marker like other non-representability (a
+  value-level change: `MAX_VALUE + MAX_VALUE` would stop being
+  `Infinity`).
+- **L7 — deprecation path for the retired names.** Recommended: the
+  `finite_*` spellings remain parse-accepted deprecated aliases for
+  one release cycle, normalizing to the bare names (their meanings
+  coincide after the flip), and are never emitted by serialization;
+  `non_finite_number` gets no alias (its meaning has no successor —
+  L5). The alternative hard cut breaks every stored type string at
+  once.
+- **L8 — ratify as one package with ERROR-MODEL §4/§5.** The flip
+  changes §5's settled placement premise, and Contract B's carrier
+  discipline is what makes the flip's short names pay off (see §8.6).
+  Adopting the flip while keeping Contract A (admission-wide
+  signatures) would flip `oo.matches('real')` with no compensating
+  signature story.
+- **L9 — admission tightening at wide-parameter, finite-result
+  heads.** The library already writes parameters wide and results
+  finite (`(integer) -> finite_integer` at ~30 sites in
+  `library/number-theory.ts`, plus `combinatorics.ts`). After the
+  flip the same spelling `(integer) -> integer` tightens the
+  *parameter* from "integer or ±∞" to finite-only, so a call like
+  `GCD(oo, 2)` moves from handler-visible to signature-rejected at
+  boxing. Options: (a) accept the tightening (**recommended** — an
+  infinity is outside these operators' mathematical domain, and
+  rejection at the signature is Contract B's carrier discipline
+  working as intended); (b) widen those parameters to
+  `integer | infinity` to preserve today's admission exactly. Either
+  way the behavior change is deliberate, not incidental.
+- **L10 — the span constructors: infinite endpoints are extent
+  markers, not members.** An unbounded span involves three separate
+  facts that the ∞-admitting spellings currently conflate: the
+  element type (every member of `Range(1, oo)` is a finite integer —
+  iteration never reaches ∞), the extent (the collection is
+  unbounded — a property of the collection, not of any member), and
+  the endpoint syntax (the `oo` marks unboundedness, it does not
+  designate a last element). Probed 2026-08-26, the engine is halfway
+  to this reading and inconsistent about the rest:
+  `Contains(Range(1,oo), oo)` is already `False` (Range exempts an
+  infinite endpoint from its inclusive-endpoint convention) and
+  `Last(Range(1,oo))` is already `NaN` — but `Range(1,oo).type` is
+  `indexed_collection<number>` (the endpoint leaks into and widens
+  the element type; the finite `Range(1,10)` gets the narrow `range`
+  primitive), and `Contains(Interval(0,oo), oo)` is **`True`** — the
+  two constructors answer the same question oppositely. Ruling
+  recommended: in BOTH constructors an infinite endpoint marks
+  unbounded extent and is never a member (Interval's answer becomes
+  `False` — a fix, since ∞ is not a real number and the set claims
+  `set<real>`); elements type bare `integer`/`real`;
+  `library/core.ts:1098-1123`'s finite-narrowing map becomes the
+  identity and is deleted; and ∞ surfaces only through
+  extent-reading operators — `Length(Range(1,oo))`, inert today, can
+  then honestly evaluate to `+oo` with declared type
+  `integer | +oo`.
+
+### 8.5 Migration notes
+
+- **This is the silent-break class for consumers.** The flip changes
+  the *meaning* of bare names rather than deleting them: a value
+  assigned to a narrowed declaration fails loudly, but a
+  `.matches('real')` in downstream code changes its answer with no
+  error anywhere. Downstream consumers are known to match primitive
+  type names as literal strings, so the release note must name both
+  the new primitives (`infinity`, `nan`) and every retirement, and the
+  change is a major-version, coordinated release.
+- **Measured 2026-08-26 (full audit of `src/`, tests excluded): 902
+  name-occurrences on 835 lines across 72 files, and "large but
+  shallow" holds.** About 85% is mechanical or wholesale: 364
+  occurrences are comments and doc strings; 189 are the lattice
+  machinery in `src/common/type/` (rewritten as a unit — the
+  `PRIMITIVE_SUBTYPES` table, the finite/covering-union maps, the
+  widening ladders — much of which simply deletes, since it exists
+  only to service the doubled tower); and 216 are signature or
+  handler-result strings where `finite_X → X` is a pure rename
+  (a non-finite operand never matched `finite_X` and will not match
+  the bare name either). The judgment residue is exactly the
+  predicted classes: the 43 `non_finite_number` code sites (each was
+  classified individually; none admits a uniform successor —
+  confirming L5), roughly a dozen semantic gates, and **fourteen
+  classes of silent-flip sites** — code relying today on ±∞
+  inhabiting bare `real`/`integer` — among them the assignment
+  promotion that gives `x := oo` its declared type
+  (`boxed-expression/boxed-value-definition.ts:913`), the
+  `Sinh`/`Cosh` realness gate and `extremumType`'s bare-tier rungs
+  (`library/type-handlers.ts`), `Sinc`/Fresnel's finite-limit gate
+  (`library/trigonometry.ts:124`), the tensor dtype dispatch
+  (`tensor/tensor-fields.ts:566`), and the compiled clause guard that
+  emits `!Number.isNaN` — which accepts `Infinity` — for a bare
+  `real` parameter (`compilation/base-compiler.ts:13277`).
+- **Codemod scope.** Safe to automate: `finite_X → X` inside quoted
+  type strings in `signature:` values, handler `return` statements,
+  `parseType`/range-constructor arguments, and
+  `.matches(…)`/`isSubtype(…)` calls — with the one non-obvious
+  mapping `finite_number → complex` (after the flip, "any finite
+  number" *is* the new finite `complex`, since
+  `number = complex ⊔ infinity ⊔ nan`) — plus collapsing dual-listed
+  `'X' || 'finite_X'` string-equality pairs. Excluded from the
+  codemod, by construction: everything in `src/common/type/`
+  (hand-rewrite), every `non_finite_number` occurrence (site by
+  site, L5), the fourteen silent-flip classes above, and comments
+  (rewritten for meaning, not spelling).
+- **Lockstep clusters — split one and guards go silently dead.**
+  `library/type-handlers.ts` and `library/type-handlers-types.ts`
+  are deliberate twins (expression-shape and types-shape forms of
+  the same handlers) and migrate as one change. The three
+  `NumericValue.type` getters (`numeric-value/exact-…`,
+  `machine-…`, `big-numeric-value.ts`) and the eleven
+  string-equality gates that compare against them (`cost-function.ts`,
+  `boxed-expression/boxed-number.ts`, `order.ts`,
+  `arithmetic-mul-div.ts`, `numerics.ts`) are one commit: a gate
+  comparing against a string the getter no longer returns fails
+  silently, never loudly.
+- The pins in `test/compute-engine/non-finite-typing.test.ts` assert
+  the 2026-08-21 placement and flip with it; they should be rewritten
+  against this section, not deleted.
+- The executable conformance suite ERROR-MODEL §7 calls for should
+  land with (or before) the flip, so "conforms" is checkable across
+  the change.
+
+### 8.6 Amendments this makes to ERROR-MODEL.md
+
+- §5's settled placement premise changes: `±oo` no longer inhabit
+  `real`/`complex`, and "`NaN` and `~oo` admitted only by `number`"
+  becomes "only by `number` and by their own types (`nan`,
+  `infinity`)". The singletons §5 proposes are kept; the
+  `complex_infinity` singleton becomes the `~oo` member of `infinity`
+  (L3).
+- §6's erasure direction "a `finite_*` argument type proves no `NaN`
+  enters through that slot" reads, after the flip, "any parameter type
+  below `number` that excludes `nan`" — which is now every bare
+  numeric carrier.
+- Contract B's carrier discipline (§4) gains the short names: the
+  precise carriers it prefers are now spelled `real`, `integer`, … —
+  and "bare `number` in a signature is a smell" stands, with `number`
+  now exactly the IEEE datum set.
+
+## 9. Retiring the type handlers: the demand census (2026-08-26)
+
+A census of the per-operator type-handler population, run 2026-08-26
+to size the §1 north star: for each kind of computation the handlers
+perform, what declaration-language feature would express it, and how
+many handlers each feature retires. File:line citations are from that
+day's `main`.
+
+### 9.1 Inventory and structure
+
+~194 handler sites covering ~216 operator definitions (a trig factory
+at `library/trigonometry.ts:1110-1177` instantiates 24 operators from
+2 sites). 84 sites are already in the pure descriptor shape
+(`typeHandlerKind: 'types'`). Parallel channels: 47 `sgn:` handler
+sites (~70 operators), 25 `elttype:` and 21 `eltsgn:` sites (mostly
+the number-set constants in `library/sets.ts`). There is no per-head
+bounds channel; bounds travel in the operand-facts record
+(`facts.bounds`), fed by `ce.assume` and consumed inside handlers.
+
+The population is head-heavy: ~15 shared functions cover roughly half
+the operators (`numericTypeHandler` ~55 heads counting inline copies;
+`elementaryFunctionType` 27; `boundedInverseTrigType` and its
+`RealDomain` tables 13+; the Gamma, rounding, and extremum families
+4-5 each). A declaration feature that expresses one shared function
+retires a whole family. The `RealDomain` table
+(`library/type-handlers.ts:260-274`) is the clearest case: real
+intervals with open/closed ends, pole points, and pole types — an
+overload set with refined parameters, already written as declarative
+data, just in TypeScript instead of the type language. The long tail
+is collections, not numerics: the 32 handlers in
+`library/collections.ts` share little code, each encoding a bespoke
+shape rule.
+
+### 9.2 Ranked: feature → handlers retired
+
+1. **The §8 lattice flip.** ~55 handlers whose entire job is the
+   non-finite typing convention (claim `finite_*` at a generic point,
+   widen to `number` when NaN or `~oo` is possible) become plain
+   declared signatures — `(real) -> real` finally says it. It is also
+   the precondition for every row below. Two-thirds of handler text
+   is this convention restated, not computation.
+2. **Guarded overload clauses over refinement parameters** — arms
+   like `(real<0..> & !0) -> real<0..> & !0` with first-match-or-join
+   semantics. Retires ~40 sign-cased handlers (the
+   `elementaryFunctionType` family, Gamma family, factorials,
+   `Power`/`Root`/`Sqrt`) plus ~15 literal-pole handlers (`Zeta` at
+   1, `PolyLog`, `EllipticPi`). The ranged spellings and overload
+   sets both exist today; what is missing is arm selection by operand
+   refinement.
+3. **Dependent element/shape types** — echo of an argument's type,
+   element-type application, shape/axis algebra over literal
+   dimensions, a type-level broadcast lift. Retires the most code
+   lines: ~70-80 collection/tensor handlers. The where-clause
+   generics already carry the clean half (`FlatMap`'s declared
+   signature at `library/collections.ts:5447` is literally
+   `(collection<T>, (T) -> U) -> list<U>`); the handlers exist for
+   the dirty half (string atomicity, indexedness preservation,
+   broadcast hedges).
+4. **Value-indexed signatures with type-level bound arithmetic** —
+   `(real<a..b>) -> real<-b..-a>`. ~15 handlers today (`Abs`,
+   `Negate`, even powers, `Heaviside`/`Sign`, extremum joins) plus
+   the explicitly deferred `Add`/`Multiply` interval propagation
+   (`boxed-expression/arithmetic-add.ts:560-564` names the
+   deferral). `negateNumericType` (`src/common/type/utils.ts:140`)
+   is this feature hand-implemented on the existing `Type`
+   representation — proof it fits.
+5. **The assumption context as a proof oracle for declared
+   refinements.** Strengthens ~40 handlers rather than retiring any
+   alone; half-delivered already, since `ce.assume(x > 0)` writes
+   `real<0..> & !0` into the symbol's type.
+6. **Already expressible, blocked by a misplaced framework default**:
+   ~25 sites (12%) are constants or verbatim echoes — but the 13
+   constant handlers exist to *suppress* a narrower no-handler
+   fallback (`library/statistics.ts:457-461` says so). The fallback
+   is the closure-assumption narrowing
+   (`boxed-expression/boxed-function.ts:5031-5071`): with no handler
+   and a declared result of exactly `number` or `finite_number`, the
+   engine narrows the result to the join of the argument types, on
+   the premise that the operator maps argument kinds to themselves.
+   The premise fails for aggregates twice over — `Mean(1, 2)` is
+   `3/2` (kind-changing on integer inputs), and the
+   `NaN`-on-absent-data outcome is visible in no operand's type —
+   which is why the constants exist. **Recommended fix (proposed
+   2026-08-26): invert the default.** The narrowing is an anonymous,
+   engine-wide type handler with a growing exception list (a
+   provably-finite-operands gate, a user-function exemption, and the
+   would-be verbatim flag) — the classic signature of a wrong
+   default. Delete it from the `BoxedFunction` default path and make
+   it a *named shared type handler* that the heads whose closure
+   premise actually holds opt into, exactly like
+   `numericTypeHandler`'s family. Then "no handler" means "declared
+   result taken verbatim" with no new flag, the 13 suppressor
+   constants simply delete, and the string-fragile
+   `'number' || 'finite_number'` trigger (a §8 flip touchpoint)
+   disappears. Probed 2026-08-26: opaque user-declared functions
+   (`ce.declare('f', '(number) -> number')`, no body) are NOT
+   narrowed today, so the inversion is a library-internal migration
+   with no public-API exposure; its cost is the inventory of heads
+   currently served by the fallback. The verbatim flag remains the
+   smaller fallback option if that inventory turns out unexpectedly
+   large. The broadcast lift (the honest list-typing block that
+   follows the narrowing) is a different mechanism, describes the
+   value's actual shape, and stays active in either design.
+
+Coverage arithmetic: the two cheapest steps — the §8 flip plus the
+verbatim flag — retire roughly 40% of handler sites; the remaining
+60% needs features 2-4, in roughly the order listed.
+
+### 9.3 Parity blockers
+
+Things handlers consume that no Epsil declaration can access today —
+each is a violation of the §1 parity clause and must either become
+declarable or be deliberately kept engine-side:
+
+- **The `sgn` channel itself**: users cannot declare a `sgn` handler,
+  so a built-in's type handler can prove signs over user expressions
+  that a user operator never could (47 sites).
+- **`facts.bounds` strictness**: strict endpoints away from zero
+  exist only in this engine-private record — the type algebra spells
+  `& !k` but assumption refinement emits it only at zero
+  (`library/types-definitions.ts:442-456`).
+- **`facts.closed`** (is the operand a closed constant expression,
+  e.g. π/2) — gates pole widening; no type-language counterpart.
+- **Literal-vs-symbol discrimination, held values behind wider
+  declarations, and parity (even/odd)** — `x.isEven` reaches
+  assumptions and held values; `Power`'s even-exponent range claims
+  depend on it.
+- **Engine registries and callback probing**: the protocol registry,
+  `ce._typeResolver`, and `Map`'s scratch-scope probing of a
+  callback body (`library/collections.ts:4142-4154`).
+
+The descriptor migration's `OperandFacts` record (`type`, `finite`,
+`sgn`, `bounds`, `closed`, collection facts, structural view) is the
+de facto specification of what the declaration language must
+eventually be able to mention — the migration is therefore a
+prerequisite for the retirement, not a competing effort.
 
 ## Appendix A: Protocol Syntax
 

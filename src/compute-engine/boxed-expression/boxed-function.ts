@@ -94,7 +94,6 @@ import {
 import type {
   EffectLabel,
   FunctionSignature,
-  NumericPrimitiveType,
   TypeString,
 } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
@@ -102,10 +101,7 @@ import { widenValueTypes } from '../../common/type/widen-value.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import {
-  COLLECTION_SHAPE_TYPE,
-  NUMERIC_TYPES,
-} from '../../common/type/primitive.js';
+import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
   absorbNumericAbsence,
   broadcastElementType,
@@ -120,7 +116,6 @@ import {
   stripMissingFromType,
   typeContainsMissing,
   widen,
-  stripNumericRanges,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import type { BigDecimal } from '../../big-decimal/index.js';
@@ -5028,47 +5023,15 @@ function type(expr: BoxedFunction): Type {
         // pass through untouched.
         sigResult = widenValueTypes(sigResult);
       }
-    } else if (
-      expr.ops.length > 0 &&
-      (sigResult === 'number' || sigResult === 'finite_number') &&
-      // USER code is exempt: a function literal or multi-clause definition
-      // gets its result type from its BODY (`k(n) = n / 3` infers `-> number`
-      // because the body divides), and the closure assumption below would
-      // re-narrow `k(4)` to `finite_integer` while its value is `4/3`.
-      !isUserFunctionDef(def)
-    ) {
-      // No explicit type handler and signature result is a broad numeric
-      // type: try to narrow based on argument types.
-      // E.g., if signature says "number" but all args are "integer",
-      // narrow result to "finite_integer".
-      //
-      // This is a closure assumption (the operator maps its argument kinds to
-      // the same kind) — sound only when the operands are provably finite. For
-      // an operator with no type handler we cannot assume finite-in → finite-out
-      // (e.g. an unknown `f` may send ∞ to a finite value), so a non-finite (or
-      // unknown-finiteness) operand must not narrow the result finiteness
-      // (SYMBOLIC P0-15). Gate the narrowing on every operand being provably
-      // finite.
-      // A ranged operand type (`finite_real<0..>` from `Abs`, an
-      // `assume`-refined declaration, `tier & !0`) narrows exactly like its
-      // base primitive: the range is a subset of the tier, so the join over
-      // the stripped bases is still an upper bound. Without the projection a
-      // ranged operand silently disabled the narrowing (its type is no
-      // longer a primitive string).
-      const argTypes = expr.ops.map((op) => stripNumericRanges(op.type.type));
-      if (
-        expr.ops.every((op) => op.isFinite === true) &&
-        argTypes.every(
-          (t) =>
-            typeof t === 'string' &&
-            NUMERIC_TYPES.includes(t as NumericPrimitiveType)
-        )
-      ) {
-        const widened = widen(...argTypes);
-        if (typeof widened === 'string' && isSubtype(widened, sigResult))
-          sigResult = widened;
-      }
     }
+    // With no per-operator type handler, the declared result type is taken
+    // verbatim. Do not add a generic argument-based narrowing here (e.g.
+    // narrowing a handler-less `-> number` result to the join of the operand
+    // types): "the operator maps its argument kinds to the same kind" is a
+    // per-operator fact, never an engine-wide default — the mean of two
+    // integers is not an integer, and `BigO(3)` is never a number at all. An
+    // operator for which the premise holds opts in with the shared
+    // `kindClosureType` handler (`library/type-handlers-types.ts`).
 
     // Honest typing for list broadcast: when this operator will broadcast
     // element-wise over a finite indexed collection operand, its value is a

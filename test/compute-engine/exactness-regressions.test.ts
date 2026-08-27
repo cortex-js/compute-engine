@@ -723,13 +723,19 @@ describe('P0-18 — negative-argument logarithms are lane-consistent', () => {
   });
 });
 
-describe('SYM P0-15 residual — generic numeric fallback gates finiteness on operands', () => {
-  // `PreIncrement`/`PreDecrement` have a `(number) -> number` signature and no
-  // type handler, so they exercise the generic narrowing fallback.
+describe('SYM P0-15 residual — kind-closure typing gates finiteness on operands', () => {
+  // `PreIncrement`/`PreDecrement` declare the shared `kindClosureType`
+  // handler (their result stays in the operand's numeric kind). Until
+  // 2026-08-26 the same narrowing came from a generic fallback inside
+  // `BoxedFunction` that applied to EVERY handler-less `-> number` operator;
+  // that fallback is deleted (an operator with no handler now keeps its
+  // declared result type verbatim), and these pins now exercise the opt-in
+  // handler. The observable types are unchanged.
   test('non-finite operand is NOT narrowed to non_finite_number', () => {
-    // finite-in → finite-out is an unsound closure assumption for an unknown
-    // operator; with a non-finite operand the result finiteness must stay
-    // `number` (was `non_finite_number`).
+    // finite-in → finite-out is an unsound closure assumption at ±∞ even for
+    // an operator whose kind closure holds on finite values; with a
+    // non-finite operand the result finiteness must stay `number` (was
+    // `non_finite_number`).
     expect(ce.box(['PreIncrement', 'PositiveInfinity']).type.toString()).toEqual(
       'number'
     );

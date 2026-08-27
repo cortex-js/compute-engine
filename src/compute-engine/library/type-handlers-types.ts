@@ -1,11 +1,15 @@
 import type { OperandDescriptor, Sign } from '../global-types.js';
-import type { Type } from '../../common/type/types.js';
+import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
-import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import {
+  INDEXED_COLLECTION_SHAPE_TYPE,
+  NUMERIC_TYPES_SET,
+} from '../../common/type/primitive.js';
 import {
   collectionElementType,
   nonNegativeRangeType,
+  stripNumericRanges,
   widen,
 } from '../../common/type/utils.js';
 import {
@@ -503,6 +507,49 @@ export function numericTypeHandler(
   if (ops.some((d) => operandNonFiniteNumber(d))) return 'number';
   if (ops.every((d) => typeFact(d.type, 'real') === true)) return 'finite_real';
   return 'finite_number';
+}
+
+/**
+ * Result type for an additive-shift operator — one whose result stays in
+ * its operands' numeric kind under a shift by a real constant: the claim is
+ * the JOIN of the operand kinds (`PreIncrement(2)` is a `finite_integer`
+ * because n + 1 is closed on the integers). The claim is made only when
+ * every operand is provably finite and provably numeric; a non-finite,
+ * unknown-finiteness, or non-numeric operand widens the claim to the top
+ * type `number`, because kind closure says nothing about what the operator
+ * does at ±∞ or NaN. One kind is special-cased: `imaginary` is NOT closed
+ * under a real shift (i + 1 is complex, with a nonzero real part), so it
+ * widens to `finite_complex` — the same widening `Add`'s own typing applies
+ * (`boxed-expression/arithmetic-add.ts`).
+ *
+ * This behavior is strictly OPT-IN. An operator with no type handler keeps
+ * its declared result type verbatim: the kind-closure premise is a
+ * per-operator fact, never an engine-wide default — the mean of two
+ * integers is not an integer, and `BigO(3)` is never a number at all.
+ * Attach this handler only to operators whose declared result is exactly
+ * `number`: the bail-out paths return the literal `'number'`, and a handler
+ * result REPLACES the declared result, so on an operator declaring a
+ * narrower result this handler would silently widen it.
+ *
+ * This handler has no expressions-shape twin in `type-handlers.ts`: all of
+ * its consumers declare `typeHandlerKind: 'types'`.
+ */
+export function kindClosureType(
+  ops: ReadonlyArray<OperandDescriptor>
+): Type {
+  if (ops.length === 0) return 'number';
+  const kinds: NumericPrimitiveType[] = [];
+  for (const d of ops) {
+    if (d.facts.finite !== true) return 'number';
+    const t = stripNumericRanges(d.type);
+    if (
+      typeof t !== 'string' ||
+      !NUMERIC_TYPES_SET.has(t as NumericPrimitiveType)
+    )
+      return 'number';
+    kinds.push(t === 'imaginary' ? 'finite_complex' : (t as NumericPrimitiveType));
+  }
+  return widen(...kinds);
 }
 
 /**
