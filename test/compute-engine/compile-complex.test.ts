@@ -2024,3 +2024,110 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
     expect((v as number[]).every((c) => Number.isNaN(c))).toBe(true);
   });
 });
+
+describe('COMPILE COMPLEX - a tuple element that folds to a real number broadcasts (Tycho item 229)', () => {
+  // `√(5−√5)` types the `finite_complex` hedge — the engine does not prove
+  // `5 − √5 ≥ 0` at type time — while its value is the plain real 1.6625….
+  // The broadcast closure's per-element shape analysis read that element
+  // complex-by-shape, the verdicts of `(√(5−√5), 0)` disagreed, and the
+  // whole `Add`/`Multiply` over tuples of exact constants failed closed with
+  // the list-arithmetic diagnostic — withdrawing a value-correct kernel.
+  // Such constants are ordinary: they are the exact values of
+  // `cos`/`sin`(π·rational). The element analysis now reads the memoized
+  // constant fold for literal `List`/`Tuple` elements, and the operand
+  // emission (`foldRealCollectionElements`) inlines the same folded literal.
+  const C = 1.6625077511098136; // √(5−√5), the interpreter's machine value
+  const sqrt5m = ['Sqrt', ['Add', 5, ['Negate', ['Sqrt', 5]]]] as const;
+
+  it('Add over tuples with a complex-typed but real-valued constant compiles', () => {
+    const r = compile(
+      ce.box(['Add', ['Tuple', 1, 0], ['Tuple', sqrt5m, 0]] as never),
+      { fallback: false }
+    );
+    const v = r.run!({}) as number[];
+    expect(v[0]).toBeCloseTo(1 + C, 12);
+    expect(v[1]).toBe(0);
+  });
+
+  it('the Desmos lerp member shape (1−t)·P − t·P compiles and matches 0.5·P', () => {
+    const r = compile(
+      ce.box([
+        'Add',
+        ['Multiply', ['Add', ['Negate', 't'], 1], ['Tuple', sqrt5m, 0]],
+        ['Negate', ['Multiply', 't', ['Tuple', sqrt5m, 0]]],
+      ] as never),
+      { fallback: false }
+    );
+    const v = r.run!({ t: 0.25 }) as number[];
+    expect(v[0]).toBeCloseTo(0.5 * C, 12);
+    expect(v[1]).toBe(0);
+  });
+
+  it('a nested tuple element folds too', () => {
+    const r = compile(
+      ce.box(
+        ['Multiply', 2, ['List', ['Tuple', sqrt5m, 0], ['Tuple', 1, 1]]] as never,
+        { canonical: false }
+      ).canonical,
+      { fallback: false }
+    );
+    const v = r.run!({}) as number[][];
+    expect(v[0][0]).toBeCloseTo(2 * C, 12);
+    expect(v[0][1]).toBe(0);
+    expect(v[1]).toEqual([2, 2]);
+  });
+
+  it('a genuinely complex tuple element still fails closed', () => {
+    expect(() =>
+      compile(
+        ce.box(['Add', ['Tuple', ['Complex', 1, 1], 0], ['Tuple', 1, 0]] as never),
+        { fallback: false }
+      )
+    ).toThrow(/list-valued operand|list-arithmetic/);
+  });
+
+  it('an indexed read of the folded broadcast agrees with the emission', () => {
+    // The dual-review critical: with the fold applied only inside the
+    // broadcast lowering, `isComplexValued`'s indexed-read arm still called
+    // the element complex, and the enclosing scalar Add wrapped a plain
+    // number in the complex convention — `.re` of a number, silent NaN.
+    // The fold-first verdict now lives in the `isComplexValued` oracle
+    // itself (`_withFoldedRealOverride`), so every analysis and the
+    // emission answer from the same memoized fold.
+    const r = compile(
+      ce.box([
+        'Add',
+        ['At', ['Add', ['Tuple', sqrt5m, 0], ['Tuple', 1, 0]], 1],
+        1,
+      ] as never),
+      { fallback: false }
+    );
+    expect(r.run!({})).toBeCloseTo(1 + 1 + C, 12);
+  });
+
+  it('under constantFold: false the fold-aware path stands down and declines', () => {
+    // The emission opt-out means the folded literal may not be inlined, and
+    // the element's structural lowering emits the complex convention — so
+    // the analysis must not report the element real either. Both sides key
+    // off the same `foldTarget`, restoring the pre-fold decline.
+    expect(() =>
+      compile(
+        ce.box(['Add', ['Tuple', 1, 0], ['Tuple', sqrt5m, 0]] as never),
+        { fallback: false, constantFold: false }
+      )
+    ).toThrow(/list-valued operand|list-arithmetic/);
+  });
+
+  it('a symbolic possibly-complex tuple element still fails closed', () => {
+    // `√(t−9)` does not fold (free variable), so the element keeps its
+    // complex shape verdict and the closure declines, as before the fix.
+    expect(() =>
+      compile(
+        ce.box(
+          ['Multiply', 't', ['Tuple', ['Sqrt', ['Subtract', 't', 9]], 0]] as never
+        ),
+        { fallback: false }
+      )
+    ).toThrow(/list-valued operand|list-arithmetic/);
+  });
+});

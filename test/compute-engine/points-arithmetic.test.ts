@@ -2208,3 +2208,251 @@ describe('POINT/TUPLE ARITHMETIC — zipped point-list quotient folds its elemen
     expect(r2.ops!.map((op) => op.operator)).toEqual(['Tuple', 'Tuple']);
   });
 });
+
+describe('POINT/TUPLE ARITHMETIC — a zipped point-list negates component-wise', () => {
+  /**
+   * A "zipped" point list is a tuple whose components are lists of
+   * coordinates — `([1,2], [3,4])` holds the points (1,3) and (2,4). Scaling
+   * such a tuple by a scalar has always distributed over its components, but
+   * negation used to gate on every element TYPE being a subtype of `number`,
+   * which a list component fails. `-P` therefore stayed an inert `Negate`, and
+   * because the `Add` fold cancels terms only after the negation distributes,
+   * `P - P` never reduced either. Both now count tuple-ness structurally.
+   *
+   * Reported as Tycho integration item 229 (the interpreted half); the
+   * production symptom was the linear interpolation `(1-t)P - tP`.
+   */
+  const zippedPointList = (ce: ComputeEngine) =>
+    ce.box(['Tuple', ['List', 1, 2], ['List', 3, 4]]);
+
+  test('−P distributes over the list components', () => {
+    const ce = new ComputeEngine();
+    ce.assign('P', zippedPointList(ce));
+    const r = ce.parse('-P').evaluate();
+    expect(r.operator).toBe('Tuple');
+    expect(r.toString()).toBe('([-1,-2], [-3,-4])');
+
+    // Same answer from the explicit `Negate`, and from the scalar product it
+    // canonicalizes from (`Multiply(-1, P)`), which already worked.
+    expect(ce.box(['Negate', 'P']).evaluate().toString()).toBe(
+      '([-1,-2], [-3,-4])'
+    );
+    expect(ce.box(['Multiply', -1, 'P']).evaluate().toString()).toBe(
+      '([-1,-2], [-3,-4])'
+    );
+  });
+
+  test('P − P and P + (−P) cancel to zero components', () => {
+    const ce = new ComputeEngine();
+    ce.assign('P', zippedPointList(ce));
+    expect(ce.parse('P - P').evaluate().toString()).toBe('([0,0], [0,0])');
+    expect(ce.parse('P + (-P)').evaluate().toString()).toBe('([0,0], [0,0])');
+    expect(ce.parse('-(-P)').evaluate().toString()).toBe('([1,2], [3,4])');
+  });
+
+  test('the interpolation (1−t)P − tP vanishes at t = 0.5', () => {
+    const ce = new ComputeEngine();
+    ce.assign('P', zippedPointList(ce));
+    // (1 − 0.5)·P − 0.5·P = 0 for every component, on both routes.
+    const expr = ce.parse('(1-t)P - tP').subs({ t: 0.5 });
+    expect(expr.evaluate().toString()).toBe('([0,0], [0,0])');
+    expect(expr.N().toString()).toBe('([0,0], [0,0])');
+  });
+
+  test('a nested point negates component-wise, as the product does', () => {
+    const ce = new ComputeEngine();
+    const nested = ['Tuple', 1, ['Tuple', 2, 3]];
+    expect(ce.box(['Negate', nested]).evaluate().toString()).toBe(
+      '(-1, (-2, -3))'
+    );
+    expect(ce.box(['Multiply', 2, nested]).evaluate().toString()).toBe(
+      '(2, (4, 6))'
+    );
+  });
+
+  test('a component that cannot distribute stays inert instead of recursing', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    // `Range(1, n)` has a symbolic bound, so its negation cannot be computed
+    // now. The component-wise negation must leave that component as the engine
+    // renders an undistributed negation (a lazy `Map`) rather than re-entering
+    // the `Negate` handler with the same operand.
+    const r = ce.box(['Negate', ['Tuple', 1, ['Range', 1, 'n']]]).evaluate();
+    expect(r.operator).toBe('Tuple');
+    expect(r.op1.toString()).toBe('-1');
+    expect(r.toString()).toBe(
+      ce
+        .box(['Multiply', -1, ['Tuple', 1, ['Range', 1, 'n']]])
+        .evaluate()
+        .toString()
+    );
+  });
+
+  test('a tuple-typed SYMBOL with no accessible components stays symbolic', () => {
+    const ce = new ComputeEngine();
+    ce.declare('z', ce.type('tuple<number, number>'));
+    const r = ce.box(['Negate', 'z']);
+    expect(r.isValid).toBe(true);
+    expect(r.operator).toBe('Negate');
+    expect(r.type.toString()).toBe('tuple<number, number>');
+  });
+});
+
+describe('POINT/TUPLE ARITHMETIC — a zipped point-list divides component-wise', () => {
+  /**
+   * The quotient twin of the negation block above. `Divide` gated its
+   * `tuple / scalar` scaling arm on every element TYPE being a subtype of
+   * `number`, so a "zipped" point list — a tuple whose components are lists of
+   * coordinates, such as `([1,2], [3,4])` — fell through to the generic
+   * rational rules. Two things went wrong there: `P / 0` collapsed to a bare
+   * scalar `~oo` instead of dividing each component, and `P / s` with a
+   * declared scalar symbol stayed an inert `Divide` that never folded, while
+   * the algebraically identical `s^{-1}·P` scaled component-wise.
+   *
+   * Reported as Tycho integration item 229; the same predicate asymmetry the
+   * negation block fixes, one operator over.
+   */
+  const zippedPointList = (ce: ComputeEngine) =>
+    ce.box(['Tuple', ['List', 1, 2], ['List', 3, 4]]);
+
+  test('P/2 folds, and agrees with the scalar product 0.5·P', () => {
+    const ce = new ComputeEngine();
+    ce.assign('P', zippedPointList(ce));
+    const q = ce.parse('\\frac{P}{2}').evaluate();
+    expect(q.operator).toBe('Tuple');
+    expect(q.toString()).toBe('([1/2,1], [3/2,2])');
+
+    // The quotient and the product reach the same value on the float route.
+    expect(ce.parse('\\frac{P}{2}').N().toString()).toBe('([0.5,1], [1.5,2])');
+    expect(ce.box(['Multiply', 0.5, 'P']).evaluate().toString()).toBe(
+      '([0.5,1], [1.5,2])'
+    );
+  });
+
+  test('a symbolic scalar divisor folds into the components', () => {
+    const ce = new ComputeEngine();
+    ce.declare('s', 'number');
+    const q = ce.box(['Divide', zippedPointList(ce), 's']).evaluate();
+    expect(q.operator).toBe('Tuple');
+    expect(q.toString()).toBe('([1 / s,2 / s], [3 / s,4 / s])');
+  });
+
+  test('a zero divisor answers as the numeric-tuple form does', () => {
+    const ce = new ComputeEngine();
+    // Each COMPONENT is divided before the scalar `a/0` rule applies to it, so
+    // the point shape survives at the tuple level exactly as it does for a
+    // tuple of numbers. (A list component divided by zero is itself `~oo`
+    // rather than a list of `~oo` — that is the engine-wide `a/0` shortcut for
+    // a collection numerator, not a tuple-specific answer.)
+    expect(
+      ce
+        .box(['Divide', zippedPointList(ce), 0])
+        .evaluate()
+        .toString()
+    ).toBe('(~oo, ~oo)');
+    expect(ce.box(['Divide', ['Tuple', 1, 2], 0]).evaluate().toString()).toBe(
+      '(~oo, ~oo)'
+    );
+    // A NaN divisor stays a scalar NaN, as it does for a tuple of numbers.
+    expect(
+      ce
+        .box(['Divide', zippedPointList(ce), NaN])
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
+  });
+
+  test('the trivial divisors ±1 keep their existing answers', () => {
+    const ce = new ComputeEngine();
+    // `Divide(tuple, 1)` must collapse to the tuple: an inert quotient here
+    // sends the pretty-JSON serializer into infinite recursion.
+    expect(
+      ce
+        .box(['Divide', zippedPointList(ce), 1])
+        .evaluate()
+        .toString()
+    ).toBe('([1,2], [3,4])');
+    expect(
+      ce
+        .box(['Divide', zippedPointList(ce), -1])
+        .evaluate()
+        .toString()
+    ).toBe('([-1,-2], [-3,-4])');
+  });
+
+  test('dividing BY a zipped point list is still refused', () => {
+    const ce = new ComputeEngine();
+    const P = zippedPointList(ce);
+    // A point has no reciprocal, whichever side it is on.
+    const byPoint = ce.box(['Divide', 5, P]);
+    expect(byPoint.operator).toBe('Error');
+    expect(errorCode(byPoint)).toBe('no-division-by-point');
+
+    const pointOverPoint = ce.box(['Divide', P, P]);
+    expect(pointOverPoint.operator).toBe('Error');
+    expect(errorCode(pointOverPoint)).toBe('no-division-by-point');
+  });
+
+  test('a non-numeric tuple is refused exactly as the product refuses it', () => {
+    const ce = new ComputeEngine();
+    const strings = ['Tuple', { str: 'a' }, { str: 'b' }];
+    const quotient = ce.box(['Divide', strings, 2]).evaluate();
+    const product = ce.box(['Multiply', 2, strings]).evaluate();
+    expect(quotient.operator).toBe('Error');
+    expect(errorCode(quotient)).toBe('incompatible-type');
+    expect(quotient.toString()).toBe(product.toString());
+  });
+
+  test('a nested point divides component-wise, as the product scales it', () => {
+    const ce = new ComputeEngine();
+    const nested = ['Tuple', 1, ['Tuple', 2, 3]];
+    expect(ce.box(['Divide', nested, 2]).evaluate().toString()).toBe(
+      '(1/2, (1, 3/2))'
+    );
+    expect(ce.box(['Multiply', 0.5, nested]).evaluate().toString()).toBe(
+      '(0.5, (1, 1.5))'
+    );
+  });
+
+  test('a component that cannot fold stays inert instead of recursing', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    // `Range(1, n)` has a symbolic bound, so the component quotient cannot be
+    // computed now. The tuple arm must leave it in whatever form the engine
+    // gives an undistributed scale (a lazy `Map`) rather than looping.
+    const component = ['Tuple', 1, ['Range', 1, 'n']];
+    const q = ce.box(['Divide', component, 2]).evaluate();
+    expect(q.operator).toBe('Tuple');
+    expect(q.op1.toString()).toBe('1/2');
+    expect(q.toString()).toBe(
+      ce
+        .box(['Multiply', ['Rational', 1, 2], component])
+        .evaluate()
+        .toString()
+    );
+  });
+
+  test('a tuple-typed SYMBOL with no accessible components stays symbolic', () => {
+    const ce = new ComputeEngine();
+    ce.declare('z', ce.type('tuple<number, number>'));
+    const q = ce.box(['Divide', 'z', 2]).evaluate();
+    expect(q.operator).toBe('Divide');
+    // The quotient keeps the tuple SHAPE. The components are widened by the
+    // `Divide` type handler rather than echoed, so match instead of pinning
+    // the tier.
+    expect(q.type.matches('tuple<number, number>')).toBe(true);
+  });
+
+  test('a provably NON-numeric tuple stays symbolic under raw .neg() and .div(-1)', () => {
+    // The direct METHOD routes bypass the operator-level `checkNumericArgs`
+    // validation, and a string component's inherited `.neg()` answers `NaN`
+    // with no diagnostic — so the component-wise arms must not admit a
+    // tuple that cannot be numeric (dual-review finding, both legs). The
+    // gate is `couldBeNumericTuple`, the same admission the `Divide` type
+    // handler uses.
+    const ce = new ComputeEngine();
+    const t = ce.tuple(ce.string('a'), ce.string('b'));
+    expect(t.neg().operator).toBe('Negate');
+    expect(t.div(-1).operator).toBe('Negate');
+  });
+});

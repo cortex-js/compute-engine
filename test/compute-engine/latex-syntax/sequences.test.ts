@@ -90,7 +90,7 @@ describe('DELIMITERS SERIALIZING', () => {
     expect(check(['Delimiter', ['List', 1, 2, 3]])).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["List", 1, 2, 3]]
       canonical = ["List", 1, 2, 3]
-      box-latex = \\lbrack1,2,3\\rbrack
+      box-latex = (\\bigl\\lbrack1, 2, 3\\bigr\\rbrack)
       latex     = \\bigl\\lbrack1, 2, 3\\bigr\\rbrack
     `));
 

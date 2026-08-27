@@ -109,6 +109,20 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A collection numerator over zero loses its shape: `[1,2] / 0` evaluates to the scalar `~oo` (OPEN, defect — found 2026-08-27 during the Tycho item-229 tuple-arithmetic work)
+
+The scalar `a/0` shortcut in `canonicalDivide` and in the value-route
+`div()` fires before collection broadcast, so a collection numerator over
+an exact zero collapses to one scalar `~oo` while the algebraically
+identical `[1,2] · (1/0)` broadcasts to `[~oo, ~oo]`. The inconsistency
+affects every list, vector and matrix numerator, not just tuples (a tuple
+numerator now answers `(~oo, ~oo)` through its component-wise arm). The
+fix is to let a collection-shaped numerator reach the broadcast path
+before the scalar shortcut; it changes an engine-wide degenerate-division
+rule, so measure the snapshot blast radius before landing it. The current
+answer is pinned with a comment naming this entry in
+`test/compute-engine/points-arithmetic.test.ts`.
+
 ### Compiled `Heaviside(NaN)` returns `1` — a fail-closed violation, confirmed (OPEN, defect — confirmed 2026-08-26 by the error-model conformance suite)
 
 The JavaScript kernel `heaviside: (x) => (x < 0 ? 0 : x === 0 ? 0.5 : 1)`

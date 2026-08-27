@@ -1292,6 +1292,9 @@ export class BaseCompiler {
       // The fold-value memo has the same staleness boundary: engine symbol
       // values are stable within one compilation but not across them.
       BaseCompiler._foldValueMemo = new WeakMap();
+      // (The fold-aware oracle latch `_oracleFoldTarget` is synced below,
+      // OUTSIDE this depth-0 block — a re-entrant nested compile must be
+      // able to switch it off.)
       // A fresh outermost compilation gets a fresh shared antiderivative
       // pool. This is the only reset: putting it anywhere shallower missed a
       // route — registered targets compile through `compileCseRoot`, never
@@ -1336,6 +1339,44 @@ export class BaseCompiler {
     const prevPromotion = BaseCompiler._complexPromotion;
     const prevMode = BaseCompiler._mode;
     const prevHelperLookup = BaseCompiler._realOnlyHelperLookup;
+    // Fold-before-shape for the complexness oracle (Tycho item 229): with
+    // this latch set, `isComplexValued` answers `false` for a closed pure
+    // scalar whose constant fold is a real number — an exact constant such
+    // as `√(5−√5)` types (and would promote as) the complex hedge while its
+    // value is the plain real 1.6625…. The latch makes the ORACLE the
+    // single source of truth: every analysis (broadcast element verdicts,
+    // the indexed-read arm, the fail-closed guards) and the emission
+    // (`tryConstantFold`'s complex-shape gate reads the same oracle, so the
+    // fold is admitted and the literal is inlined) flip together.
+    // JavaScript target only, and never under the `constantFold: false`
+    // emission opt-out or a `symbolDeps` capture — there the emission stays
+    // structural/unfolded, so the oracle must keep the shape-first verdict
+    // or analysis and emission would disagree.
+    //
+    // Synced at EVERY compile entry, not only at depth 0: constant folding
+    // evaluates, evaluation can re-enter compilation with a DIFFERENT
+    // target (a large `Map` body auto-compiles through `implicitCompile`,
+    // whose target carries `symbolDeps`), and that nested compilation's own
+    // emission cannot fold — inheriting the outer fold-aware oracle there
+    // would let its analyses claim shapes its emission does not produce.
+    // Same-compilation nested targets are spreads of the outer one, so
+    // their eligibility matches and the latch object is left alone; the
+    // complexness memo is invalidated on an actual flip (rare — only the
+    // re-entrant routes), since verdicts cached under one latch state are
+    // wrong under the other.
+    const prevOracleFold = BaseCompiler._oracleFoldTarget;
+    const oracleFoldEligible =
+      target.language === 'javascript' &&
+      target.constantFold !== false &&
+      target.symbolDeps === undefined;
+    const nextOracleFold =
+      BaseCompiler._compileDepth === 0
+        ? oracleFoldEligible
+          ? target
+          : undefined
+        : oracleFoldEligible
+          ? prevOracleFold
+          : undefined;
     // A declined compilation must not report the previous compilation's mode.
     // Reset first so a fallback built for the decline
     // reports `strict`/not promoted. This is the only report a decline gets —
@@ -1348,6 +1389,13 @@ export class BaseCompiler {
       BaseCompiler._compileDepth === 0
         ? BaseCompiler.resolveCompileMode(target)
         : prevMode;
+    // Written only after `resolveCompileMode` above — its throw escapes the
+    // `try`/`finally` below, and a latch mutated ahead of it would never be
+    // restored (the same ordering rule the mode latches follow).
+    if (nextOracleFold !== prevOracleFold) {
+      BaseCompiler._oracleFoldTarget = nextOracleFold;
+      BaseCompiler._invalidateComplexMemo();
+    }
     if (BaseCompiler._compileDepth === 0) {
       BaseCompiler._complexPromotion =
         target.complexPromotion === true &&
@@ -1448,11 +1496,71 @@ export class BaseCompiler {
       BaseCompiler._complexPromotion = prevPromotion;
       BaseCompiler._mode = prevMode;
       BaseCompiler._realOnlyHelperLookup = prevHelperLookup;
+      // Restore the caller's oracle-fold latch (undefined at depth 0:
+      // outside a compilation the conservative shape-first verdict is the
+      // safe one — engine symbol values may change between compilations,
+      // and an out-of-compile analysis caller has no emission to agree
+      // with). A flip invalidates the memo for the same reason the entry
+      // flip does: cached verdicts embed the latch state.
+      if (nextOracleFold !== prevOracleFold) {
+        BaseCompiler._oracleFoldTarget =
+          BaseCompiler._compileDepth === 0 ? undefined : prevOracleFold;
+        BaseCompiler._invalidateComplexMemo();
+      }
       if (nextBoundCtx !== prevBoundCtx) {
         BaseCompiler._boundVarsCtx = prevBoundCtx;
         BaseCompiler._invalidateComplexMemo();
       }
     }
+  }
+
+  /**
+   * The outermost JavaScript compilation's target, latched at the depth-0
+   * entry when constant folding is allowed (no `constantFold: false`, no
+   * `symbolDeps` capture) — undefined otherwise, and outside compilations.
+   * With it set, `isComplexValued` consults the memoized constant fold
+   * before reporting a closed pure scalar complex: a real folded value
+   * overrides the shape verdict, and `tryConstantFold`'s complex-shape gate
+   * — which reads the same oracle — then admits the fold, so the emitted
+   * literal and every analysis answer describe the same plain number.
+   */
+  private static _oracleFoldTarget: CompileTarget<Expression> | undefined;
+
+  /**
+   * Fold-before-shape (Tycho item 229): downgrade a `true` complexness
+   * verdict to `false` when the node is a closed pure scalar whose memoized
+   * constant fold is a real number. `√(5−√5)` — an exact value of
+   * `cos`/`sin`(π·rational) — types the `finite_complex` hedge and would
+   * promote through `_SYS.csqrt`, yet its value is the plain real 1.6625…;
+   * with the override, `tryConstantFold` inlines that literal (its
+   * complex-shape gate reads this same oracle) and every analysis reports
+   * the plain number the emission produces. A node whose fold declines
+   * (free variables, impure, over budget, `'declined'`-memoized) keeps the
+   * shape-first verdict, and so does every node when the latch is unset
+   * (non-JavaScript targets, `constantFold: false`, `symbolDeps` capture,
+   * outside a compilation). The fold outcome is memoized per
+   * (target, expression), so the verdict cannot drift between analysis and
+   * emission within one compilation.
+   */
+  private static _withFoldedRealOverride(
+    expr: Expression,
+    verdict: boolean
+  ): boolean {
+    if (!verdict) return verdict;
+    const target = BaseCompiler._oracleFoldTarget;
+    if (target === undefined) return verdict;
+    // An indexed READ is excluded: its complex verdict describes the
+    // element convention of the emitted array, and `_SYS.at`'s run-time
+    // handling of an exotic index (a complex index selects by its own
+    // contract) is deliberately left to the runtime — the fold gate's
+    // "may return either shape" class. Folding the read would replace that
+    // contract with the interpreter's answer; the pinned behavior is the
+    // structural emission (see `compile-complex-element-access.test.ts`,
+    // "a COMPLEX index is left to its own handling").
+    if (isFunction(expr, 'At')) return verdict;
+    const v = BaseCompiler.constantFoldValue(expr, target)?.value;
+    if (v !== undefined && isNumber(v) && v.im === 0) return false;
+    return verdict;
   }
 
   /** The innermost compile target's `boundVars`, synced by `compile()`. */
@@ -2497,6 +2605,10 @@ export class BaseCompiler {
     // `elementComplexness`'s own operand test and `tryCompileBroadcast`'s
     // `isArrayOperand` — the three decide the same question (does this node
     // reach the closure as an array?) and must not drift apart.
+    // (`isComplexValued` itself answers fold-first for a closed real-valued
+    // constant — see `_withFoldedRealOverride` — so an exact
+    // `√(5−√5)`-class element reads as the plain number its emission
+    // inlines.)
     if (
       !(
         element.isCollection ||
@@ -9241,11 +9353,17 @@ export class BaseCompiler {
       // not assign — but not between compilations, and a boxed expression can
       // outlive the compile that first cached it.
       if (BaseCompiler._compileDepth === 0)
-        return BaseCompiler._isComplexValuedFunction(expr);
+        return BaseCompiler._withFoldedRealOverride(
+          expr,
+          BaseCompiler._isComplexValuedFunction(expr)
+        );
       const stack = BaseCompiler._complexMemoStack;
       const hit = stack[stack.length - 1].get(expr);
       if (hit !== undefined) return hit;
-      const result = BaseCompiler._isComplexValuedFunction(expr);
+      const result = BaseCompiler._withFoldedRealOverride(
+        expr,
+        BaseCompiler._isComplexValuedFunction(expr)
+      );
       // Store into the layer that is live NOW, not the one captured on entry:
       // a binder operand pushes a mask layer and pops it before returning, so
       // by here the context — and the top layer — are the ones this call

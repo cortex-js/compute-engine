@@ -1354,9 +1354,11 @@ function compileGPUBroadcastUnary(
  *    element lowering is declared with scalar `float`/`f32` parameters, so
  *    `_gpu_sinc` of a `vec3` is source no driver accepts. The `_gpu_` prefix
  *    IS the property being tested. (A few helpers ARE aggregate-aware — the
- *    complex arithmetic and the colour converters take `vec2`/`vec3` — which
- *    is why the generic gate `gpuCheckOperandShapes` consults the emitted
- *    DECLARATION, `gpuHelperIsScalarOnly`, before reusing this verdict.)
+ *    complex arithmetic and the colour converters take `vec2`/`vec3`, and the
+ *    integer power has a per-width overload family, `_gpu_powi2`–`_gpu_powi4`
+ *    — which is why the generic gate `gpuCheckOperandShapes` consults the
+ *    emitted DECLARATION, `gpuHelperIsScalarOnly`, before reusing this
+ *    verdict.)
  *  - a COMPARISON or a TERNARY (`Argument(x)` → `((x >= 0.0) ? 0.0 : π)`):
  *    GLSL has no `vecN >= float`, and both languages require a scalar `bool`
  *    condition, so there is no componentwise reading of either.
@@ -1431,6 +1433,62 @@ function gpuShapeName(shape: ReturnType<typeof gpuOperandShape>): string {
 }
 
 /**
+ * The `vecN` width a two-operand lowering must emit, or `undefined` when it
+ * stays scalar.
+ *
+ * Answers a width only for the shapes the shader arithmetic really does
+ * broadcast: one `vecN` beside a scalar, or two `vecN` of the SAME width.
+ * Different widths, a `matN` and an array all answer `undefined`, so the
+ * lowering emits its plain form and `gpuCheckOperandShapes` reports the fault
+ * with the diagnostic it owns — a lowering that guessed a width here would
+ * turn a clean decline into invalid source.
+ *
+ * A missing operand (an under-applied head) also answers `undefined`.
+ */
+function gpuBinaryVectorWidth(
+  a: Expression | null | undefined,
+  b: Expression | null | undefined
+): 2 | 3 | 4 | undefined {
+  if (a === null || a === undefined || b === null || b === undefined)
+    return undefined;
+  const sa = gpuOperandShape(a);
+  const sb = gpuOperandShape(b);
+  if (typeof sa === 'number')
+    return sb === 'scalar' || sb === sa ? sa : undefined;
+  if (typeof sb === 'number') return sa === 'scalar' ? sb : undefined;
+  return undefined;
+}
+
+/**
+ * An operand's source, widened to a `vecN` constructor when the slot it stands
+ * in is a vector one and the operand itself lowers to a scalar.
+ *
+ * The genType builtins (`pow`, `atan`, `mod`, …) are declared over ONE type
+ * for all their arguments; neither GLSL nor WGSL promotes a scalar argument to
+ * the vector of its neighbours, so the promotion has to be written out.
+ * `vec3(y)` is the broadcast constructor of both languages — every component
+ * takes the same value.
+ *
+ * `width` of `undefined` (a scalar lowering) and an operand that is already
+ * that `vecN` both compile unchanged, so the emission is byte-identical to the
+ * scalar-only one wherever no widening is due.
+ *
+ * `compile` runs exactly once on either branch: an operand may hoist a
+ * temporary or advance the random-draw counter, so compiling it twice would
+ * change the shader, not merely lengthen it.
+ */
+function gpuWidenToVector(
+  expr: Expression,
+  width: 2 | 3 | 4 | undefined,
+  compile: (expr: Expression) => string,
+  target?: CompileTarget<Expression>
+): string {
+  if (width === undefined || gpuOperandShape(expr) !== 'scalar')
+    return compile(expr);
+  return `${gpuFVec(width, target)}(${compile(expr)})`;
+}
+
+/**
  * The `[rows, cols]` of a matrix-shaped operand, or `undefined` when they are
  * not statically known. The kind alone is not enough for the operator gate:
  * `mat2 + mat3` and `mat2 * vec3` are as invalid as `vec2 + vec3`, so the
@@ -1460,6 +1518,17 @@ function gpuMatrixDims(
 }
 
 /**
+ * A WGSL type TEMPLATE — the type keyword and its opening angle bracket
+ * (`array<`, `vec3<`, `mat2x2<`, `atomic<`, `ptr<`). GLSL has no such
+ * spelling, so one pattern serves both languages.
+ *
+ * Sticky, and used only with `lastIndex` set immediately before each test, so
+ * it carries no state between calls.
+ */
+const GPU_TYPE_TEMPLATE =
+  /(?:array|[iub]?vec[234]|mat[234]x[234]|atomic|ptr)\s*</y;
+
+/**
  * The callee and top-level argument count of `code` when the WHOLE emission is
  * a single call. `undefined` for an infix/compound emission (`a + b`,
  * `(c ? a : b)`, `log(a) / log(10.0)`), which is what tells the gate below
@@ -1486,6 +1555,27 @@ function gpuTopLevelCall(
   let start = m[0].length;
   const operands: string[] = [];
   for (let i = m[0].length - 1; i < s.length; i++) {
+    // A WGSL type template carries a COMMA of its own: an `array<f32, 5>(…)`
+    // argument used to split into `array<f32` and `5>(…)`, so the argument
+    // count came out one too high and every check keyed to it (the one-for-one
+    // tests in `gpuCheckOperandShapes`) silently stepped aside — which let an
+    // array operand of a scalar-only helper through as invalid source. Skip
+    // past the matching `>`. Anchored on the type KEYWORD at a token start, so
+    // a `<` that is a less-than inside a comparison operand is untouched.
+    if (i === 0 || !/[\w$]/.test(s[i - 1])) {
+      GPU_TYPE_TEMPLATE.lastIndex = i;
+      if (GPU_TYPE_TEMPLATE.test(s)) {
+        let angle = 1;
+        let j = GPU_TYPE_TEMPLATE.lastIndex;
+        for (; j < s.length && angle > 0; j++) {
+          if (s[j] === '<') angle++;
+          else if (s[j] === '>') angle--;
+        }
+        if (angle > 0) return undefined;
+        i = j - 1;
+        continue;
+      }
+    }
     if (s[i] === '(') {
       if (++depth === 1) start = i + 1;
     } else if (s[i] === ',' && depth === 1) {
@@ -1861,6 +1951,30 @@ function gpuSourceIsVector(
 }
 
 /**
+ * The width of the float vector an emitted argument source CONSTRUCTS, or
+ * `undefined` when it constructs none.
+ *
+ * A lowering may widen a scalar operand ITSELF, writing out the broadcast
+ * constructor neither shader language supplies for a genType builtin: `Power`
+ * over a `vecN` base and a scalar exponent emits `pow(v, vec3(y))`. The CE
+ * operand is still a scalar there, so `gpuCheckOperandShapes` reads the
+ * emitted argument to see the shape that actually reaches the call.
+ *
+ * Deliberately narrow — only a top-level `vecN` / `vecNf` constructor is read.
+ * Everything else answers `undefined`, and the gate then keeps the shape the
+ * CE operand gives it, so a source this cannot read never weakens a check.
+ */
+function gpuConstructedVectorWidth(
+  code: string | undefined
+): 2 | 3 | 4 | undefined {
+  if (code === undefined) return undefined;
+  const call = gpuTopLevelCall(code);
+  if (call === undefined) return undefined;
+  const m = /^vec([234])f?$/.exec(call.callee);
+  return m === null ? undefined : (Number(m[1]) as 2 | 3 | 4);
+}
+
+/**
  * A scalar argument standing where the emitted builtin's overload requires the
  * `vecN` genType, anywhere in the emitted call TREE — or `undefined` when there
  * is none.
@@ -2163,7 +2277,14 @@ function gpuCheckOperandShapes(
   // `_gpu_median_5(…)`), which the argument count reveals.
   if (callee.startsWith('_gpu_')) {
     if (argCount !== args.length) return;
-    if (!gpuHelperIsScalarOnly(callee, preambleFor(callee))) return;
+    // `${callee}(` — a synthetic CALL SITE, not the bare name. Every
+    // `preambleFor` scan that generates a helper on demand (the `_gpu_atN`
+    // positional accessors, the `_gpu_powiN` integer powers) is anchored on a
+    // call parenthesis, so that a user symbol which merely SPELLS a helper
+    // name cannot make the target declare one. A bare name reaches none of
+    // those scans, and the gate would then judge a generated helper against
+    // an empty preamble.
+    if (!gpuHelperIsScalarOnly(callee, preambleFor(`${callee}(`))) return;
     const why = gpuIsComponentwise(code);
     if (why !== undefined)
       decline(
@@ -2187,7 +2308,20 @@ function gpuCheckOperandShapes(
       `the shader lowering \`${code}\` cannot take the non-scalar operand ` +
         `shapes (${shapes.map(gpuShapeName).join(', ')}) — ${reshapes}`
     );
-  if (widths.size === 1 && shapes.includes('scalar')) {
+  // The shapes as they REACH the emitted call. A lowering is allowed to widen
+  // a scalar operand itself, by writing out the broadcast constructor neither
+  // language supplies (`Power` over a `vecN` base and a scalar exponent emits
+  // `pow(v, vec3(y))`); the CE operand stays a scalar, but the argument that
+  // stands in the call is a vector, so the mixed-genType checks below would
+  // otherwise decline valid source. Only an UPGRADE is taken from the emitted
+  // argument, and only where the lowering passes its operands through one for
+  // one — a source that constructs no vector keeps its CE shape, so nothing
+  // here can weaken a check.
+  const emitted = shapes.map((s, i) => {
+    if (s !== 'scalar' || argCount !== args.length) return s;
+    return gpuConstructedVectorWidth(call.operands[i]) ?? s;
+  });
+  if (widths.size === 1 && emitted.includes('scalar')) {
     const slots = rules.scalarGenTypeSlots.get(callee);
     if (slots === undefined)
       decline(
@@ -2202,7 +2336,7 @@ function gpuCheckOperandShapes(
     // positions exactly — including for an operand with no constructor in its
     // source (a symbol declared `vector<3>`).
     if (argCount === args.length) {
-      const bad = shapes.findIndex((s, i) => s === 'scalar' && !slots.has(i));
+      const bad = emitted.findIndex((s, i) => s === 'scalar' && !slots.has(i));
       if (bad >= 0)
         decline(
           `the shader builtin \`${callee}\` takes a scalar only ` +
@@ -4211,7 +4345,32 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // into a silent `vec2(NaN, NaN)`. See `gpuResultIsComplexValued`.
     if (gpuResultIsComplexValued('Power', args))
       return `_gpu_cpow(${gpuComplexOperand(base, compile, target)}, ${gpuComplexOperand(exp, compile, target)})`;
-    if (eConst === 0) return '1.0';
+    // The width of the `vecN` this power lowers to, when one of the two
+    // operands is a shader vector. Every piece of the lowering below is
+    // componentwise in both languages (`pow`, `sqrt`, `*`, `/` all take the
+    // genType), so the vector case needs only two adjustments: a piece that
+    // would emit a bare scalar has to be widened to the same `vecN`, and the
+    // scalar-declared `_gpu_powi` helper has to be swapped for its `vecN`
+    // overload. A width MISMATCH between the two operands is left to the
+    // operand-shape gate, which declines it with a width diagnostic.
+    const powWidth = gpuBinaryVectorWidth(base, exp);
+    if (eConst === 0) {
+      // `x⁰` is ONE for every component, so the emission must have the shape
+      // of the base. The bare literal is correct only for a scalar base; a
+      // `vecN` takes the broadcast constructor.
+      const zeroShape = gpuOperandShape(base);
+      if (zeroShape === 'scalar') return '1.0';
+      if (typeof zeroShape === 'number')
+        return `${gpuFVec(zeroShape, target)}(1.0)`;
+      // A `matN` or an ARRAY base has no constructor this lowering can use,
+      // and a bare `1.0` there is a silent scalar where the caller is owed an
+      // aggregate — which the operand-shape gate cannot catch, because it
+      // reads a lone literal as an emission that combines nothing
+      // (`gpuIsAtomicEmission`) and steps aside. Route through the scalar
+      // helper, whose declaration makes the gate decline with the shape
+      // diagnostic it owns.
+      return `_gpu_powi(${compile(base)}, 0.0)`;
+    }
     if (eConst === 1) return compile(base);
     if (eConst === 0.5) return `sqrt(${compile(base)})`;
     // Literal integer exponent: emit sign-preserving code. GLSL/WGSL `pow(x, y)`
@@ -4232,13 +4391,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       ) {
         // Simple base (no side effects, cheap to repeat) with a small exponent:
         // unroll to repeated multiplication — exact and free of any `pow` call.
+        // A `vecN` base needs no widening here: `*` is componentwise.
         const code = compile(base);
         pos = `(${Array(absN).fill(code).join(' * ')})`;
       } else {
         // Compound or large: route through the helper so the base subexpression
-        // is evaluated once (not duplicated) and the sign stays correct.
-        pos = `_gpu_powi(${compile(base)}, ${formatGPUNumber(absN)})`;
+        // is evaluated once (not duplicated) and the sign stays correct. The
+        // exponent stays a scalar in the `vecN` overloads too.
+        pos = `_gpu_powi${powWidth ?? ''}(${compile(base)}, ${formatGPUNumber(absN)})`;
       }
+      // `float / vecN` is a componentwise division in both languages, so the
+      // reciprocal of a vector power needs no widening either.
       return n < 0 ? `(1.0 / ${pos})` : pos;
     }
     // DIVERGENCE (documented, CO-P2-24): a literal `0^0` folds to NaN at
@@ -4248,7 +4411,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // so it is left to the hardware — the JS target aligns this via `_SYS.pow`.
     // A genuinely fractional exponent (e.g. `x^2.5`) stays `pow`: it is
     // mathematically undefined for a negative base over the reals too.
-    return `pow(${compile(base)}, ${compile(exp)})`;
+    //
+    // `pow` is declared over ONE genType, so a scalar standing beside a `vecN`
+    // is written as an explicit constructor: neither language promotes it.
+    return `pow(${gpuWidenToVector(base, powWidth, compile, target)}, ${gpuWidenToVector(exp, powWidth, compile, target)})`;
   },
   Radians: 'radians',
   Round: (args, compile, target) => {
@@ -4740,8 +4906,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     // Compound base: `pow(x, 2.0)` is NaN for x < 0 on a real GPU (log2 of a
     // negative). Route through the sign-preserving helper, which also evaluates
-    // the base subexpression once instead of duplicating it.
-    return `_gpu_powi(${compile(x)}, 2.0)`;
+    // the base subexpression once instead of duplicating it. A `vecN` base
+    // takes the componentwise overload of that helper (`_gpu_powi3`); the
+    // scalar one is declared with `float`/`f32` parameters and has no vector
+    // reading.
+    const width = gpuOperandShape(x);
+    return `_gpu_powi${typeof width === 'number' ? width : ''}(${compile(x)}, 2.0)`;
   },
   Root: ([x, n], compile, target) => {
     if (x === null) throw new Error('Root: no argument');
@@ -7714,6 +7884,76 @@ fn _gpu_powi(x: f32, n: f32) -> f32 {
 `;
 
 /**
+ * The sign-preserving integer power over a `vecN` base, componentwise: the
+ * `_gpu_powiN` overload family (`_gpu_powi2`, `_gpu_powi3`, `_gpu_powi4`).
+ *
+ * The scalar `_gpu_powi` is declared with `float`/`f32` parameters, so a
+ * vector base has no lowering through it and the operand-shape gate declines
+ * the call. The widened bodies are the same computation over the genType:
+ * `pow` and `abs` are componentwise in both languages, and the exponent stays
+ * a SCALAR (it is a compile-time integer literal at every call site), so both
+ * `if` conditions remain the scalar `bool` a shader requires.
+ *
+ * The per-component sign is restored with `sign(x) * r` rather than the scalar
+ * body's `-r`, because a vector has no single sign to branch on. The two
+ * agree: for an odd exponent `sign(x)·|x|ⁿ` is `+r` where `x > 0`, `-r` where
+ * `x < 0`, and `0` where `x == 0` — which is `pow(0, n)` for every `n > 0`.
+ *
+ * The name carries the width because WGSL has no function overloading; GLSL
+ * would accept one name for all four declarations, but one spelling serves
+ * both languages.
+ */
+function gpuPowiVecPreamble(n: number, isWGSL: boolean): string {
+  const v = gpuVecType(n, isWGSL);
+  if (isWGSL)
+    return `
+fn _gpu_powi${n}(x: ${v}, n: f32) -> ${v} {
+  if (n == 0.0) { return ${v}(1.0); }
+  let r = pow(abs(x), ${v}(n));
+  if ((n % 2.0) == 1.0) { return sign(x) * r; }
+  return r;
+}
+`;
+  return `
+${v} _gpu_powi${n}(${v} x, float n) {
+  if (n == 0.0) return ${v}(1.0);
+  ${v} r = pow(abs(x), ${v}(n));
+  if (mod(n, 2.0) == 1.0) return sign(x) * r;
+  return r;
+}
+`;
+}
+
+/**
+ * The `_gpu_powi` overloads `code` calls: `'scalar'` for the `float`/`f32`
+ * form, and the widths of the `_gpu_powiN` vector forms — deduplicated, so a
+ * helper used many times is declared once. Read off the EMITTED source rather
+ * than kept in a per-compilation table, like every other `preambleFor` scan.
+ *
+ * Anchored on a CALL SITE with a name boundary on both ends, the way
+ * `gpuAtHelperWidths` is and for the same reason: a user symbol that merely
+ * SPELLS a helper name (`_gpu_powi3` as a free variable) must not make the
+ * target emit a declaration that then collides with it. The trailing boundary
+ * is load-bearing too — without it a plain `/_gpu_powi\s*\(/` test also
+ * matches `_gpu_powi3(`, and a compilation that uses only the vector form
+ * would get the scalar declaration it never calls.
+ *
+ * A caller holding only a helper NAME (the operand-shape gate, asking what
+ * declaration the helper has) spells a synthetic call site, `${name}(`.
+ */
+function gpuPowiHelperForms(code: string): Array<'scalar' | number> {
+  const scalar = /(?<![\w$])_gpu_powi\s*\(/.test(code);
+  const widths = new Set<number>();
+  const re = /(?<![\w$])_gpu_powi([234])\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) widths.add(Number(m[1]));
+  return [
+    ...(scalar ? (['scalar'] as const) : []),
+    ...[...widths].sort((a, b) => a - b),
+  ];
+}
+
+/**
  * Constants shared by both GLSL and WGSL.
  *
  * Null-prototype so a lookup answers only for a key the table actually
@@ -9063,11 +9303,16 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // declaration before its use, and these bodies call `_gpu_nan()`. The
     // order test in `at-gpu-compile.test.ts` is the tripwire.
     for (const w of atWidths) preamble += gpuAtPreamble(w, isWGSL);
-    if (code.includes('_gpu_powi'))
+    // The scalar `_gpu_powi` and its per-width `vecN` overloads
+    // (`_gpu_powi2`–`_gpu_powi4`) are declared independently: a compilation
+    // that only powers a vector needs the vector form alone.
+    for (const form of gpuPowiHelperForms(code))
       preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_POWI_PREAMBLE_WGSL
-          : GPU_POWI_PREAMBLE_GLSL;
+        form === 'scalar'
+          ? isWGSL
+            ? GPU_POWI_PREAMBLE_WGSL
+            : GPU_POWI_PREAMBLE_GLSL
+          : gpuPowiVecPreamble(form, isWGSL);
     if (code.includes('_gpu_gamma'))
       preamble +=
         this.languageId === 'wgsl'

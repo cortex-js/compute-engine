@@ -1735,6 +1735,33 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const style = serializer.options.groupStyle(expr, serializer.level + 1);
 
       const arg1 = operand(expr, 1);
+
+      // A fence-less `Delimiter` records real parentheses from the source:
+      // `([x,y])` parses to `Delimiter(List(x, y))`. When the operand is a
+      // collection that carries its own fences — a `List` or `Set` (brackets,
+      // braces) or a `Tuple`/`Pair`/`Triple`/`Single` (parentheses) — fusing
+      // the two into ONE pair of fences drops the delimiter, so the output
+      // re-parses without it: `f([x,y])` came back as invalid glued LaTeX,
+      // and `f((x,y))` — one TUPLE argument — came back as `f(x,y)`, a call
+      // with two scalar arguments. Serialize the operand whole and keep the
+      // parentheses around it: `(\lbrack x, y\rbrack)` re-parses to
+      // `Delimiter(List(x, y))`, and `((x,y))` to a delimited tuple.
+      // A `Sequence` operand is deliberately NOT in this set: a sequence IS
+      // a bare argument/statement list, so fusing it with the parentheses
+      // (`(x, y)`) is its meaning, not a loss.
+      if (nops(expr) === 1) {
+        const argOp = operator(arg1);
+        if (
+          argOp === 'List' ||
+          argOp === 'Set' ||
+          argOp === 'Tuple' ||
+          argOp === 'Pair' ||
+          argOp === 'Triple' ||
+          argOp === 'Single'
+        )
+          return serializer.wrapString(serializer.serialize(arg1), style, '()');
+      }
+
       let delims = {
         Set: '{,}',
         List: '[,]',

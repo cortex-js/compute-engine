@@ -299,3 +299,94 @@ describe('Delimiter scale styles (REVIEW.md C1)', () => {
       ce.expr(['f', 'x', 'y']).toLatex({ applyFunctionStyle: () => 'big' })
     ).toEqual('f\\Bigl(x, y\\Bigr)'));
 });
+
+describe('Fence-less Delimiter around a fenced collection (Tycho item 230)', () => {
+  // The serializer fused the Delimiter's parentheses with the collection's
+  // own brackets and glued the `\lbrack` command onto the first operand:
+  // `Delimiter(List(x, y))` emitted `\lbrackx,y\rbrack`, which the parser
+  // rejects as the unknown command `\lbrackx`. The Delimiter now keeps its
+  // parentheses around the serialized collection, and every fence spelled
+  // as a LaTeX command is joined with a separating space.
+
+  const roundTrip = (json: any) => {
+    const latex = ce.box(json, { canonical: false }).latex;
+    const reparsed = ce.parse(latex, { canonical: false });
+    return { latex, json: JSON.stringify(reparsed.json), valid: reparsed.isValid };
+  };
+
+  test('Delimiter(List) keeps its parentheses and re-parses', () => {
+    const { latex, json, valid } = roundTrip(['Delimiter', ['List', 'x', 'y']]);
+    expect(latex).toEqual('(\\bigl\\lbrack x, y\\bigr\\rbrack)');
+    expect(valid).toBe(true);
+    expect(json).toEqual('["Delimiter",["List","x","y"]]');
+  });
+
+  test('Delimiter(Set) keeps its parentheses and re-parses', () => {
+    const { latex, json, valid } = roundTrip(['Delimiter', ['Set', 'x', 'y']]);
+    expect(latex).toEqual('(\\lbrace x, y\\rbrace)');
+    expect(valid).toBe(true);
+    expect(json).toEqual('["Delimiter",["Set","x","y"]]');
+  });
+
+  test('a juxtaposed call over a bracketed list round-trips', () => {
+    // Production shape from the Desmos importer: `f\left(\left[x,y\right]\right)`
+    // is `InvisibleOperator(f, Delimiter(List(x, y)))`; its serialization must
+    // re-parse to the same call, not to invalid LaTeX.
+    const { json, valid } = roundTrip([
+      'InvisibleOperator',
+      'f',
+      ['Delimiter', ['List', 'x', 'y']],
+    ]);
+    expect(valid).toBe(true);
+    // The shared test engine declares `f` as a function, so the re-parse
+    // resolves the juxtaposition directly to the application — the list
+    // survives as the call's single argument. (On an engine with `f`
+    // undeclared the same LaTeX re-parses to
+    // `InvisibleOperator(f, Delimiter(List(x, y)))`, the same structure
+    // one binding step earlier.)
+    expect(json).toEqual('["f",["List","x","y"]]');
+  });
+
+  test('explicit custom bracket delimiters no longer glue onto the operand', () => {
+    // Validity only: `;` inside brackets is matrix-row notation to the
+    // parser, so `\lbrack x;y\rbrack` re-parses as a list of rows
+    // (`List(List(x), List(y))`), not as the original custom-separator
+    // Delimiter. That ambiguity is a parser property independent of the
+    // serializer spacing this test pins.
+    const latex = ce
+      .box(['Delimiter', ['List', 'x', 'y'], { str: '[;]' }], {
+        canonical: false,
+      })
+      .latex;
+    expect(latex).toEqual('\\lbrack x;y\\rbrack');
+    expect(ce.parse(latex, { canonical: false }).isValid).toBe(true);
+  });
+
+  test('a plain parenthesized operand is unchanged', () => {
+    expect(
+      ce.box(['Delimiter', 'x'], { canonical: false }).latex
+    ).toEqual('(x)');
+  });
+
+  test('Delimiter(Tuple) keeps its parentheses so a call keeps its arity', () => {
+    // `f((x,y))` is a call with ONE tuple argument. Fusing the Delimiter's
+    // parentheses with the tuple's own emitted `f(x,y)` — a call with TWO
+    // scalar arguments after re-parse.
+    expect(
+      ce.box(['Delimiter', ['Tuple', 'x', 'y']], { canonical: false }).latex
+    ).toEqual('((x,y))');
+    const call = ce.box(
+      ['InvisibleOperator', 'q', ['Delimiter', ['Tuple', 'x', 'y']]],
+      { canonical: false }
+    );
+    expect(call.latex).toEqual('q((x,y))');
+    const reparsed = ce.parse(call.latex, { canonical: false });
+    expect(reparsed.isValid).toBe(true);
+    // The inner parenthesized pair re-parses as a delimited sequence with an
+    // explicit '(,)' fence — the parser's spelling of the same delimited
+    // tuple — still ONE operand under the call.
+    expect(JSON.stringify(reparsed.json)).toEqual(
+      '["InvisibleOperator","q",["Delimiter",["Delimiter",["Sequence","x","y"],"\'(,)\'"]]]'
+    );
+  });
+});

@@ -14,8 +14,8 @@ import {
   containsContinuationOperand,
 } from './type-guards.js';
 import {
-  isNumericTuple,
   isTuple,
+  couldBeNumericTuple,
   numericTupleArity,
   hasAccessibleComponents,
   isFiniteBroadcastParticipant,
@@ -891,8 +891,8 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
   if (op1.isNaN || op2.isNaN) return ce.NaN;
 
-  // Numeric tuples (points/vectors in ℝⁿ): `tuple / scalar` scales
-  // component-wise; `scalar / tuple` and `tuple / tuple` are undefined.
+  // Tuples (points/vectors in ℝⁿ): `tuple / scalar` scales component-wise;
+  // `scalar / tuple` and `tuple / tuple` are undefined.
   {
     // A tuple divisor has no defined reciprocal (no implicit dot/cross).
     // Counted by tuple-ness (`isTuple`), not provable element numericity:
@@ -904,7 +904,26 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     // number and got a tuple. There is no alternative operator to suggest here
     // — a point has no reciprocal — so the message says only what is undefined.
     if (isTuple(op2)) return ce.error(['no-division-by-point']);
-    const op1Tuple = isNumericTuple(op1);
+    // The numerator is admitted with COULD-semantics, the same
+    // `couldBeNumericTuple` the `Divide` TYPE handler uses to decide that a
+    // quotient keeps its tuple shape, so the value route and the type route
+    // cannot disagree about what a point quotient is.
+    //
+    // It replaces the stricter `isNumericTuple`, which requires every element
+    // TYPE to be a subtype of `number` and so excluded a "zipped" point list —
+    // a tuple whose components are lists of coordinates, such as
+    // `([1,2], [3,4])`. Such a numerator fell through to the generic rational
+    // rules, where `tuple / 0` collapsed to a bare scalar `~oo` instead of
+    // dividing each component, and `tuple / s` with a declared scalar symbol
+    // stayed an inert `Divide` that never folded.
+    //
+    // The purely structural `isTuple` used for the DIVISOR above is not the
+    // right test here: it does not unfold a transparent type alias, so an
+    // alias of a numeric tuple (`p: pt` with `type pt = tuple<number,
+    // number>`) would miss this branch, canonicalize to a `Multiply`, and
+    // report the alias name as the quotient type — claiming a shape the
+    // component-widened quotient no longer has.
+    const op1Tuple = couldBeNumericTuple(op1);
     if (op1Tuple) {
       // Strip trivial divisors: the generic a/1 rule below is unreachable
       // from this branch, and an inert Divide(tuple-typed, 1) sends the
@@ -1167,8 +1186,8 @@ export function div(num: Expression, denom: number | Expression): Expression {
   // If the numerator is NaN, return NaN
   if (num.isNaN) return ce.NaN;
 
-  // Numeric tuple (point/vector in ℝⁿ) numerator: `tuple / scalar` scales
-  // component-wise — the value-level twin of the numeric-tuple branch in
+  // Tuple (point/vector in ℝⁿ) numerator: `tuple / scalar` scales
+  // component-wise — the value-level twin of the tuple branch in
   // `canonicalDivide`, and the counterpart of the `mulTuples` dispatch in
   // `mulImpl`. Without it `div()` has no tuple arm at all, and the `Product`
   // fall-through at the end of this function returns an inert
@@ -1185,10 +1204,26 @@ export function div(num: Expression, denom: number | Expression): Expression {
   // matching `canonicalDivide`. The structural `hasAccessibleComponents` (a
   // `Tuple`/`Pair`/… head with operands) is tested FIRST so an ordinary
   // quotient never pays the `type` computations behind the other two tests.
-  if (hasAccessibleComponents(num) && isFunction(num) && isNumericTuple(num)) {
+  //
+  // Tuple-ness is counted with the same COULD-semantics `canonicalDivide`
+  // uses, so a "zipped" point list — a tuple whose components are lists of
+  // coordinates, such as `([1,2], [3,4])` — folds here instead of falling
+  // through to an inert `Multiply(1/d, tuple)`.
+  if (
+    hasAccessibleComponents(num) &&
+    isFunction(num) &&
+    couldBeNumericTuple(num)
+  ) {
     const d = typeof denom === 'number' ? ce.number(denom) : denom;
     if (!d.isNaN && isSubtype(d.type.type, 'number'))
-      return ce.tuple(...num.ops.map((c) => c.div(d)));
+      // Evaluate each component quotient, mirroring `mulTuples`: a component
+      // that is itself a collection (`[1,2]` in a zipped point list) divides
+      // to an inert `Multiply(1/d, [1,2])`, because `div()` builds a
+      // `Product` rather than broadcasting. Only evaluation distributes the
+      // scale over the elements, and the `Divide` evaluate handler returns
+      // this result as-is on the exact route, so an unevaluated component
+      // would reach the user.
+      return ce.tuple(...num.ops.map((c) => c.div(d).evaluate()));
   }
 
   if (typeof denom === 'number') {

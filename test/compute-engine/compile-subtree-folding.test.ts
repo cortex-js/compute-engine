@@ -197,12 +197,15 @@ describe('COMPILE constant folding - constant collections', () => {
     }
   });
 
-  it('a complex-ish expression with a real value does not fold', () => {
-    // The structural lowering may return either shape for these — a bare
-    // number, or the target's `{re, im}` convention — and nothing statically
-    // readable says which. Folding either one risks silently changing the
-    // shape a caller reads back, so the fold declines and the structural
-    // path keeps defining it.
+  it('a complex-typed call with a real folded value folds; an indexed read stays structural', () => {
+    // A call declared `-> complex` whose closed constant value is real used
+    // to stay structural: the shape a caller reads back was decided by the
+    // emission alone, and "nothing statically readable says which". The
+    // complexness oracle now answers fold-first inside a JavaScript
+    // compilation (`_withFoldedRealOverride`, Tycho item 229): the fold
+    // DEFINES the shape (a bare number), every consumer reads the same
+    // oracle, and the emitted literal matches the interpreter's `.N()` —
+    // so the call folds.
     const e = new ComputeEngine();
     e.declare('Qc', { signature: '(complex) -> complex' });
     e.assign(
@@ -211,7 +214,14 @@ describe('COMPILE constant folding - constant collections', () => {
     );
     const expr = e.box(['Qc', ['Complex', 1, -1]]);
     expect(expr.N().toString()).toBe('1'); // real-valued despite the type
-    expect(compile(expr).code).toBe('_fn_Qc(({ re: 1, im: -1 }))');
+    expect(compile(expr).code).toBe('1');
+    expect(compile(expr).run!({})).toBe(1);
+    // Under the `constantFold: false` opt-out the oracle stands down and
+    // the pre-fold structural emission — and its `{re, im}` result shape —
+    // is unchanged.
+    expect(compile(expr, { constantFold: false }).code).toBe(
+      '_fn_Qc(({ re: 1, im: -1 }))'
+    );
 
     // The same rule keeps a real-valued `At` with a COMPLEX INDEX structural:
     // `isComplexValued` answers for the operands, so the index alone makes

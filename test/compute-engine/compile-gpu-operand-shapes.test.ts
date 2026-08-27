@@ -10,13 +10,18 @@
  * behind `success: true`:
  *
  *   atan(vec3(1.0, 2.0, 3.0), 1.0)            mixed genTypes
- *   pow(2.71828182846, vec3(1.0, 2.0, 3.0))   mixed genTypes
+ *   _gpu_powi(array<f32, 1>(1.0), 2.0)        array to a scalar-only helper
  *   length(vec2(float[1](3.0), 4.0))          array constructor in a vector one
  *   sin(mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))) no matrix overload
  *
  * They now fail closed (D6) through `CompileTarget.checkOperandShapes`, which
  * derives its verdict from the operand shapes and from the emitted source —
  * never from a list of head names.
+ *
+ * A lowering may also REPAIR a mixed-genType call itself, by writing the
+ * broadcast constructor the language does not supply (`Power` emits
+ * `pow(v, vec3(y))`); the gate reads the emitted argument, so such a call
+ * compiles instead of declining.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -72,21 +77,20 @@ describe('GPU OPERAND SHAPE GATE — invalid shader source fails closed', () => 
     expect(() => w(['Hypot', V3, W3])).toThrow(/packs its operands/);
   });
 
-  it('a scalar FIRST operand of a genType builtin declines (Exp → Power)', () => {
-    // `Exp([1,2,3])` canonicalizes to `Power(e, […])` → `pow(float, vec3)`.
-    expect(() => g(['Exp', V3])).toThrow(/MATCHING genType/);
-    expect(() => w(['Exp', V3])).toThrow(/MATCHING genType/);
-  });
-
   it('a matrix operand of a scalar/genType builtin declines (Sin)', () => {
     expect(() => g(['Sin', M2])).toThrow(/no `matN` overload/);
     expect(() => w(['Sin', M2])).toThrow(/no `matN` overload/);
   });
 
-  it('a vector operand of a scalar-only preamble helper declines (Power)', () => {
-    // `_gpu_powi` is declared `float _gpu_powi(float x, float n)`.
-    expect(() => g(['Power', V3, 2])).toThrow(/_gpu_powi/);
-    expect(() => w(['Power', V3, 2])).toThrow(/_gpu_powi/);
+  it('an ARRAY operand of a scalar-only preamble helper declines (Power)', () => {
+    // `_gpu_powi` is declared `float _gpu_powi(float x, float n)`, and a
+    // 1-element list has no `vecN` reading at all — it lowers to a shader
+    // array, which the `_gpu_powiN` overloads do not cover either.
+    expect(() => g(['Power', ['List', 1], 2])).toThrow(/_gpu_powi/);
+    // The WGSL array constructor carries a comma of its own
+    // (`array<f32, 1>(1.0)`); it must not be read as a second argument, or
+    // the gate stops recognizing the call as one-for-one and steps aside.
+    expect(() => w(['Power', ['List', 1], 2])).toThrow(/_gpu_powi/);
   });
 
   it('operands of different vector widths decline', () => {
@@ -104,7 +108,7 @@ describe('GPU OPERAND SHAPE GATE — invalid shader source fails closed', () => 
       for (const expr of [
         ['Arctan2', V3, 1],
         ['Hypot', ['List', 3], 4],
-        ['Exp', V3],
+        ['Power', ['List', 1], 2],
         ['Sin', M2],
       ]) {
         // `...NO_FOLD`: these probes are all-literal, so constant folding would
@@ -195,6 +199,19 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
     // vector reaching a scalar lowering.
     expect(g(M2)).toBe('mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))');
     expect(w(M2)).toBe('mat2x2f(vec2f(1.0, 3.0), vec2f(2.0, 4.0))');
+  });
+
+  it('a lowering that WIDENS a scalar operand itself is left alone', () => {
+    // `pow` is declared over ONE genType, so `Power` writes the broadcast
+    // constructor neither language supplies. The CE operand is still a scalar
+    // there; the gate has to read the emitted argument to see the vector.
+    // (`Exp([1,2,3])` canonicalizes to `Power(e, […])`.)
+    expect(g(['Exp', V3])).toBe(
+      'pow(vec3(2.71828182846), vec3(1.0, 2.0, 3.0))'
+    );
+    expect(w(['Exp', V3])).toBe(
+      'pow(vec3f(2.71828182846), vec3f(1.0, 2.0, 3.0))'
+    );
   });
 });
 
@@ -294,7 +311,9 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
       /takes a scalar only in argument 2, but here the scalar stands in argument 1/
     );
     expect(gv(['Mod', 'v', 1])).toBe('mod(v, 1.0)');
-    expect(() => gv(['Mod', 1, 'v'])).toThrow(/takes a scalar only in argument 2/);
+    expect(() => gv(['Mod', 1, 'v'])).toThrow(
+      /takes a scalar only in argument 2/
+    );
   });
 
   it('a VARIADIC fold is judged on the emitted call tree', () => {
@@ -433,9 +452,7 @@ describe('GPU OPERAND SHAPE GATE — the infix operator route', () => {
   });
 
   it('WGSL has no unary matrix negation; GLSL negates componentwise', () => {
-    expect(gi(['Negate', M2])).toBe(
-      '-mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))'
-    );
+    expect(gi(['Negate', M2])).toBe('-mat2(vec2(1.0, 3.0), vec2(2.0, 4.0))');
     expect(() => wi(['Negate', M2])).toThrow(
       /unary `-` is declared over scalars and `vecN` only/
     );

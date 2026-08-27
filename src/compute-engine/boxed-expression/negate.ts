@@ -5,9 +5,42 @@ import type {
 import { isNumber, isFunction } from './type-guards.js';
 import { sortAddTerms, sortProductOperands } from './order.js';
 import {
-  isNumericTuple,
+  couldBeNumericTuple,
   hasAccessibleComponents,
 } from '../collection-utils.js';
+
+/**
+ * Negate a literal tuple (a point/vector in ℝⁿ, or a Desmos-style point-list
+ * such as `([1,2], [3,4])` whose components are lists) component-wise.
+ * Returns `undefined` when `expr` is not a tuple, or is a tuple whose
+ * components are not directly accessible (a tuple-typed symbol), so the
+ * caller keeps it symbolic.
+ *
+ * The gate is `couldBeNumericTuple` — every component type could be numeric,
+ * numeric collections and nested tuples included, with transparent type
+ * aliases unfolded — the same admission the `Divide` scaling arm and its
+ * type handler use. The stricter `isNumericTuple` (every component a scalar
+ * number) excluded a tuple of lists, so `(-1)·P` scaled such a point-list
+ * component-wise while `-P` stayed an inert `Negate`, and the `Add` fold
+ * could then not cancel `P - P`. The bare structural `isTuple` is too WIDE
+ * here: this function calls the raw `.neg()` method on each component, and
+ * on a provably non-numeric component (a string) that method answers `NaN`
+ * with no diagnostic — a tuple that fails the could-be-numeric test must
+ * stay symbolic instead.
+ *
+ * The recursion terminates: a component's own `.neg()` returns an inert
+ * `Negate` when it cannot distribute (for example a `Range` with symbolic
+ * bounds), instead of calling back into this function.
+ */
+function negateTupleComponents(expr: Expression): Expression | undefined {
+  if (
+    !couldBeNumericTuple(expr) ||
+    !hasAccessibleComponents(expr) ||
+    !isFunction(expr)
+  )
+    return undefined;
+  return expr.engine.tuple(...expr.ops.map((op) => op.neg()));
+}
 
 export function canonicalNegate(expr: Expression): Expression {
   // Negate(Negate(x)) -> x
@@ -20,9 +53,9 @@ export function canonicalNegate(expr: Expression): Expression {
 
   if (isNumber(expr)) return expr.neg();
 
-  // A numeric tuple (point/vector) negates component-wise.
-  if (isNumericTuple(expr) && hasAccessibleComponents(expr) && isFunction(expr))
-    return expr.engine.tuple(...expr.ops.map((op) => op.neg()));
+  // A tuple (point/vector) negates component-wise.
+  const negatedTuple = negateTupleComponents(expr);
+  if (negatedTuple !== undefined) return negatedTuple;
 
   return expr.engine._fn('Negate', [expr]);
 }
@@ -47,9 +80,9 @@ export function negate(expr: Expression): Expression {
 
   const ce = expr.engine;
 
-  // A numeric tuple (point/vector) negates component-wise.
-  if (isNumericTuple(expr) && hasAccessibleComponents(expr) && isFunction(expr))
-    return ce.tuple(...expr.ops.map((op) => op.neg()));
+  // A tuple (point/vector) negates component-wise.
+  const negatedTuple = negateTupleComponents(expr);
+  if (negatedTuple !== undefined) return negatedTuple;
 
   if (isFunction(expr)) {
     // Negate(Subtract(a, b)) -> Subtract(b, a)

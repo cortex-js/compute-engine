@@ -26,7 +26,7 @@ import type {
   IndexedLatexDictionaryEntry,
 } from './dictionary/definitions.js';
 
-import { countTokens, supsub } from './tokenizer.js';
+import { countTokens, joinLatex, supsub } from './tokenizer.js';
 import { serializeNumber } from './serialize-number.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
 import {
@@ -307,11 +307,18 @@ export class Serializer {
     if ((openFence === '.' || closeFence === '.') && style === 'normal')
       style = 'scaled';
 
-    if (style === 'scaled') return `\\left${openFence}${s}\\right${closeFence}`;
+    // A fence that maps to a LaTeX command (`[` → `\lbrack`, `{` → `\lbrace`,
+    // `|` → `\lvert`) must not touch a following letter: plain concatenation
+    // produced `\lbrackx,y\rbrack`, which the parser rejects as the unknown
+    // command `\lbrackx`. `joinLatex` inserts the separating space only where
+    // a command would otherwise fuse with the next token.
+    if (style === 'scaled')
+      return joinLatex([`\\left${openFence}`, s, `\\right${closeFence}`]);
 
-    if (style === 'big') return `\\Bigl${openFence}${s}\\Bigr${closeFence}`;
+    if (style === 'big')
+      return joinLatex([`\\Bigl${openFence}`, s, `\\Bigr${closeFence}`]);
 
-    return openFence + s + closeFence;
+    return joinLatex([openFence, s, closeFence]);
   }
 
   wrapArguments(expr: MathJsonExpression): string {
