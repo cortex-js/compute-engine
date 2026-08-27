@@ -109,19 +109,20 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### A collection numerator over zero loses its shape: `[1,2] / 0` evaluates to the scalar `~oo` (OPEN, defect — found 2026-08-27 during the Tycho item-229 tuple-arithmetic work)
+### The Multiply broadcast drops `NaN` for a zero element times `~oo` (OPEN, defect — found 2026-08-27 while fixing the collection-numerator division shape)
 
-The scalar `a/0` shortcut in `canonicalDivide` and in the value-route
-`div()` fires before collection broadcast, so a collection numerator over
-an exact zero collapses to one scalar `~oo` while the algebraically
-identical `[1,2] · (1/0)` broadcasts to `[~oo, ~oo]`. The inconsistency
-affects every list, vector and matrix numerator, not just tuples (a tuple
-numerator now answers `(~oo, ~oo)` through its component-wise arm). The
-fix is to let a collection-shaped numerator reach the broadcast path
-before the scalar shortcut; it changes an engine-wide degenerate-division
-rule, so measure the snapshot blast radius before landing it. The current
-answer is pinned with a comment naming this entry in
-`test/compute-engine/points-arithmetic.test.ts`.
+`[0,1] · ~oo` evaluates to `[0, ~oo]`, but the scalar product `0 · ~oo`
+evaluates to `NaN`, and the signed-infinity broadcast `[0,1] · (+oo)`
+correctly answers `[NaN, +oo]`. Only the unsigned complex infinity as a
+broadcast cofactor loses the indeterminate case: the per-element fold's
+zero shortcut fires without recognizing `~oo` as infinite (the signed pair
+is recognized). Likely a guard on the signed-infinity spellings or a
+finiteness test that answers differently for `~oo` — compare how the same
+fold admits `+oo`. The quotient twin already behaves: `[0,1] / 0` answers
+`[NaN, ~oo]` per element (see the collection-numerator suite in
+`test/compute-engine/points-arithmetic.test.ts`). Same answer expected on
+`.mul()`, `.N()`, and the box route — all three currently agree on the
+wrong `[0, ~oo]`.
 
 ### Compiled `Heaviside(NaN)` returns `1` — a fail-closed violation, confirmed (OPEN, defect — confirmed 2026-08-26 by the error-model conformance suite)
 
@@ -843,13 +844,24 @@ sign (and a literal's value) through type derivation" are DONE
    `ranged-declaration-sign.test.ts`).
 2. `ce.assume(x > 0)` refines the symbol's type to `real<0..> & !0` (and
    the other comparison shapes likewise).
-3. Number literals carry a value- or sign-carrying type on type-handler
+3. Number literals carry a value-carrying type on type-handler
    INPUT (`BoxedNumber._literalType`, read through `handlerTypeOf` /
    `operandSgn` / `operandLiteralValue` in `library/type-handlers.ts`),
    widened back to ordinary types on handler OUTPUT (`widenValueTypes`,
    `common/type/widen-value.ts`). This is ruling O9's first half; since
    2026-08-23 the PUBLIC `.type` of a number literal is the same literal
-   type (O9's second half, ruled and shipped — see below). The constants
+   type (O9's second half, ruled and shipped — see below). Since
+   2026-08-27 a literal with no exact machine value carries a compact
+   two-significant-digit outward ENCLOSURE instead of a sign-only range
+   (`1/3` types `finite_rational<0.33..0.34>`, `√2` types
+   `finite_real<1.4..1.5>`; `literalEnclosureType` in
+   `boxed-expression/boxed-number.ts`, directed rounding via
+   `BigDecimal.toPrecisionToward`); the sign-only range remains as the
+   fallback for magnitudes outside the NORMAL double range (`10⁴⁰⁰`, or a
+   subnormal like `7·10⁻³²⁴` — subnormal projection error is absolute, so
+   an enclosure there could exclude its own value). The bounds
+   feed the same type channel the bounded-inverse heads read, so
+   `Arcsin(1/3)` now types `finite_real`. The constants
    `ExponentialE` and `Pi` declare value-bracket
    ranged types (`finite_real<2.718281828459045..2.718281828459046>`), so
    their positivity is a TYPE fact too. Pinned in

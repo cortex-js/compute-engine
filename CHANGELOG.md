@@ -2,6 +2,30 @@
 
 ### New Features
 
+- **A number literal's type now encloses its value in a compact range.** A
+  literal no machine number holds exactly used to type as a sign-only claim:
+  `1/3` was `(finite_rational<0..>) & !0`, `√2` was `(finite_real<0..>) & !0`.
+  It now types as a closed range on its tier whose bounds are rounded OUTWARD
+  to two significant digits: `1/3` is `finite_rational<0.33..0.34>`, `√2` is
+  `finite_real<1.4..1.5>`, `10³⁰+1` is `finite_integer<9.9e+29..1.1e+30>`.
+  The enclosure is both more compact to read and strictly more precise than
+  the sign range (its bounds exclude zero, so the sign is still a type fact).
+  It is also sound: the bounds provably contain the exact value — an outward
+  grid step plus padding covers both the decimal approximation error and the
+  final double rounding — and the range is never a singleton, so no operation
+  mistakes a bound for the literal's value (`1 − 10⁻³⁰` encloses as
+  `finite_rational<0.99..1.1>`, which admits but does not assert the value 1).
+  A literal whose magnitude is outside the range of normal doubles (`10⁴⁰⁰`,
+  or a subnormal like `7·10⁻³²⁴`) still falls back to the sign-only claim. Domain checks read the new bounds off the
+  type: `Arcsin(1/3)` now types `finite_real` (previously `finite_complex`,
+  because the sign range could not prove `|1/3| ≤ 1`).
+
+- **`BigDecimal.toPrecisionToward(n, direction)`** — round to `n` significant
+  digits with directed rounding (`'floor'` toward −∞, `'ceiling'` toward +∞),
+  complementing the half-even `toPrecision`. The result always bounds the
+  value from the requested side, which is what enclosing-interval
+  constructions need.
+
 - **Two new numeric primitive types, `infinity` and `nan`.** They are the first,
   ADDITIVE step of the finite-by-default migration of the numeric type lattice.
   Nothing existing changes meaning in this release: the bare numeric names
@@ -43,6 +67,30 @@
   admitting `±∞` — values will retype onto `infinity` and `nan`, and the
   `finite_number`, `finite_complex`, `finite_real`, `finite_rational`,
   `finite_integer` and `non_finite_number` names will retire.
+
+### Bug Fixes
+
+- **Serializing a huge integer no longer materializes a multi-megabyte
+  string it then discards.** `decimalToString` decided between fixed and
+  scientific notation by building the full fixed-notation string and
+  counting its trailing zeros with a regular expression — ~65 MB of
+  transient string for `Gamma(10^7).N()` at precision 500, and the regex
+  could throw a `RangeError` under memory pressure from inside `.json` or
+  `.toString()`. The trailing-zero count of a normalized `BigDecimal`
+  integer is just its exponent, an O(1) field read; the fixed string is now
+  built only when it is actually returned. Output is unchanged.
+
+- **A collection numerator over a degenerate divisor keeps its shape.**
+  `[1,2] / 0` used to collapse to the single scalar `~oo` while the
+  algebraically identical `[1,2] · (1/0)` broadcast to `[~oo, ~oo]`; the same
+  collapse sent `[1,2] / ∞` to the scalar `0`. The scalar shortcuts `a/0 = ~oo`
+  and `a/∞ = 0` now exempt a shape-carrying numerator — a list, vector or
+  matrix — so the division broadcasts over the elements instead, each element
+  taking its own degenerate answer: `[1,2]/0` is `[~oo, ~oo]`, `[0,1]/0` is
+  `[NaN, ~oo]`, `[[1,2],[3,4]]/0` is `[[~oo, ~oo], [~oo, ~oo]]`, and
+  `[1,2]/∞` is `[0, 0]`. This matches the component-wise answer tuples already
+  gave (`(1,2)/0` is `(~oo, ~oo)`) and the shape the quotient's type reports.
+  A `NaN` divisor still answers the scalar `NaN`, as it does for tuples.
 
 ## 0.120.0 _2026-08-27_
 

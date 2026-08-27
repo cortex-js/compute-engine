@@ -788,22 +788,18 @@ function decimalToString(num: BigDecimal): string {
   // Convert the number to a string
   const numStr = num.toString();
 
-  // Check if the number is in scientific notation
-  if (num.isInteger() && numStr.includes('e')) {
-    // Convert the number to a fixed notation string with no decimal places
-    const fixedStr = num.toFixed(0);
+  // An integer that `toString()` rendered in scientific notation is worth
+  // re-rendering in fixed notation only when the fixed form would not end
+  // in a long run of zeros (more than 5). A normalized `BigDecimal` has no
+  // trailing zeros in its significand, so the fixed form's trailing-zero
+  // count IS the exponent — an O(1) field read. (Deciding by building the
+  // fixed string first and counting its zeros with a regex materialized a
+  // string as large as the exponent — ~65 MB for `Gamma(1e7).N()` at
+  // precision 500 — and the regex could throw a RangeError under memory
+  // pressure, only for both to be discarded.)
+  if (num.isInteger() && numStr.includes('e') && num.exponent <= 5)
+    return num.toFixed(0);
 
-    // Check the number of trailing zeros
-    const trailingZeros = fixedStr.match(/0+$/);
-    const trailingZerosCount = trailingZeros ? trailingZeros[0].length : 0;
-
-    // If there are 5 or fewer trailing zeros, return the fixed notation string
-    if (trailingZerosCount <= 5) {
-      return fixedStr;
-    }
-  }
-
-  // If the number is not in scientific notation or doesn't meet the criteria, return the original string
   return numStr;
 }
 
