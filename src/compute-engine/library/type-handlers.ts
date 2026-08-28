@@ -7,6 +7,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
+import { absRange } from '../numerics/interval-arithmetic.js';
 import {
   collectionElementType,
   nonNegativeRangeType,
@@ -559,16 +560,21 @@ export function absFunctionType(x: Expression | undefined): Type {
   // sign…", work item 4): each tier claim carries its non-negative range,
   // so a type-channel consumer (`√|x|`, the GPU real-vs-complex lowering)
   // sees the sign the sgn handler always knew.
+  // `absRange` tightens each tier claim with the operand's interval when
+  // one exists (`|x|` for `x: real<-3..2>` is `real<0..3>`), and answers
+  // the plain non-negative range `tier<0..>` otherwise — the
+  // interval-arithmetic plan,
+  // `docs/plans/2026-08-27-interval-arithmetic-result-types.md`.
   if (t.matches('finite_number')) {
     for (const tier of ['finite_integer', 'finite_rational'] as const)
-      if (t.matches(tier)) return nonNegativeRangeType(tier);
-    return nonNegativeRangeType('finite_real');
+      if (t.matches(tier)) return absRange(tier, t.type);
+    return absRange('finite_real', t.type);
   }
   if (t.matches('non_finite_number')) return 'non_finite_number';
   // Unknown finiteness: the tier still carries (`integer`/`rational`/`real`
   // admit ±∞, and |±∞| = +∞ stays inside them).
   for (const tier of ['integer', 'rational', 'real'] as const)
-    if (t.matches(tier)) return nonNegativeRangeType(tier);
+    if (t.matches(tier)) return absRange(tier, t.type);
   return nonNegativeRangeType('real');
 }
 

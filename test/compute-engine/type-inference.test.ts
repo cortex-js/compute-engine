@@ -11,7 +11,13 @@ describe('TYPE INFERENCE THROUGH EXPRESSIONS', () => {
   });
 
   it('should infer type of real arithmetic', () => {
-    expect(ce.parse('3 + \\pi').type.toString()).toBe('finite_real');
+    // The interval-arithmetic round (2026-08-27): `Pi` declares the
+    // value-bracket ranged type `finite_real<3.141..3.142>`-class, and the
+    // `Add` type handler folds it with the literal's point — the sum
+    // carries the computed enclosure instead of the bare tier.
+    expect(ce.parse('3 + \\pi').type.toString()).toBe(
+      'finite_real<6.141..6.142>'
+    );
   });
 
   it('should infer type of Sqrt', () => {

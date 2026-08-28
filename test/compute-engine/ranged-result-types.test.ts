@@ -69,11 +69,19 @@ describe('RANGED RESULTS — type-channel consumers', () => {
     );
   });
 
-  it('scope guard: Add does not do interval arithmetic', () => {
-    // `|x| + |y|` is ≥ 0, but proving it needs interval arithmetic in
-    // `Add`, which the ROADMAP entry scopes SEPARATELY. Pin the boundary
-    // so a later widening or narrowing is a conscious choice.
+  it('Add DOES interval arithmetic now; Divide stays the scope boundary', () => {
+    // `|x| + |y|` typed bare `real` until the interval-arithmetic round
+    // landed (2026-08-27,
+    // `docs/plans/2026-08-27-interval-arithmetic-result-types.md`): the
+    // sum of two non-negative ranges is non-negative, and the `Add` type
+    // handler now computes it. The scope boundary moved to `Divide` (and
+    // `Power` with exponent ≤ 0), which wait for the lattice flip's pole
+    // story.
     ce.declare('y', 'real');
-    expect(ce.parse('|x| + |y|').type.toString()).toBe('real');
+    expect(ce.parse('|x| + |y|').type.toString()).toBe('real<0..>');
+    ce.declare('dd', 'real<1..2>');
+    expect(ce.box(['Divide', 'dd', 'dd']).type.toString()).not.toContain(
+      '..'
+    );
   });
 });

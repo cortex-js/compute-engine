@@ -799,7 +799,24 @@ closedness) beside the types; `_reviseInferredType` moves to a write site;
 mis-filed: the lost facts are the SIGN of `π`/`e` and the CLOSEDNESS
 `poleReciprocalType` reads via `isConstant`.
 
-### Ranged types: interval arithmetic and open bounds (OPEN, design task — remaining scope of "Ranged types should carry sign", raised 2026-08-22)
+### Ranged types: interval arithmetic and open bounds (interval half SHIPPED 2026-08-27; open-bounds half OPEN — remaining scope of "Ranged types should carry sign", raised 2026-08-22)
+
+**The interval-arithmetic half shipped 2026-08-27** (ruled, designed and
+implemented per `docs/plans/2026-08-27-interval-arithmetic-result-types.md`):
+the `Add`, `Multiply`, `Abs` and positive-integer-exponent `Power` type
+handlers compute a result range from the operands' ranged types with the
+kernel in `src/compute-engine/numerics/interval-arithmetic.ts` — `x + y`
+under `assume(x > 2); assume(y > 3)` types `real<5..>`, `|x|` for
+`x: real<-3..2>` types `real<0..3>`, and `Sqrt(1 − 0.2²)` proves its
+radicand non-negative through the computed interval. `typeBounds`
+delegates to the kernel's reader, so domain proofs and result ranges
+cannot disagree. Joins still strip (`stripNumericRanges`) — the bounds
+come from the separate interval fold. Deferred WITH REASON: `Divide` and
+`Power` with exponent ≤ 0 (the pole story, reshaped by the lattice
+flip), and bounds through collection/tuple/broadcast cells. Pinned in
+`test/compute-engine/interval-result-types.test.ts`.
+
+**What remains OPEN of this entry — open bounds:**
 
 The four work items of the 2026-08-22 entry "Ranged types should carry
 sign (and a literal's value) through type derivation" are DONE

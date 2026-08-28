@@ -148,6 +148,14 @@ import {
   operandLiteralValue,
   operandSgn,
 } from './type-handlers.js';
+import {
+  attachInterval,
+  finalizeInterval,
+  foldIntervalsOfTypes,
+  intervalOfType,
+  mulIntervals,
+  powInterval,
+} from '../numerics/interval-arithmetic.js';
 // The `'types'`-shape twins of the helpers above: they take one
 // `OperandDescriptor` per operand instead of the operand expression, and are
 // wired to the definitions that declare `typeHandlerKind: 'types'`. The two
@@ -2296,9 +2304,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return 'number';
         }
         // From here every operand is finite (no `isFinite === false`).
-        if (ops.every((x) => x.isInteger)) return 'finite_integer';
-        if (ops.every((x) => x.isReal)) return 'finite_real';
-        if (ops.every((x) => x.isRational)) return 'finite_rational';
+        // The all-real tiers get an interval refinement (interval
+        // MULTIPLICATION over the operands' ranged types — the
+        // interval-arithmetic half of ROADMAP "Ranged types…", plan doc
+        // `docs/plans/2026-08-27-interval-arithmetic-result-types.md`):
+        // `x · y` under `assume(x > 2); assume(y > 3)` types
+        // `finite_real<6..>`. The claim aborts if any operand carries no
+        // interval, and attaches only to the NaN-free tier chosen here.
+        const refineMul = (tier: Type): Type =>
+          attachInterval(
+            tier,
+            foldIntervalsOfTypes(
+              ops.map((x) => x.type.type),
+              mulIntervals
+            )
+          );
+        if (ops.every((x) => x.isInteger)) return refineMul('finite_integer');
+        if (ops.every((x) => x.isReal)) return refineMul('finite_real');
+        if (ops.every((x) => x.isRational))
+          return refineMul('finite_rational');
 
         // Real × pure-imaginary products: at least one factor is typed
         // `imaginary` and every other factor is provably real. Since
@@ -2626,24 +2650,65 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `0` raised to a non-positive power is a pole: `0^0` is indeterminate
         // and `0^-k = ±∞` (P0-11: `0^(−0.5) = +∞`).
         if (base.isSame(0) && positiveSign(expSgn) !== true) return 'number';
+        // Interval refinement for a LITERAL positive integer exponent (the
+        // ruled first-round scope of the interval-arithmetic plan,
+        // `docs/plans/2026-08-27-interval-arithmetic-result-types.md`;
+        // exponent ≤ 0 is deferred with `Divide` — the pole story): the
+        // base's interval raised per the `powInterval` case table. `even`
+        // clamps the lower bound at 0 — sound independently of the
+        // interval (an even power is never negative), so a dropped lower
+        // bound cannot lose the sign fact the arms below claim.
+        const powN = (() => {
+          const nv = operandLiteralValue(exp);
+          // SAFE integers only: every double at or beyond 2⁵³ is even, so
+          // the parity-based sign logic in `powInterval` would lie about
+          // an exact odd exponent that large. (The literal channel never
+          // carries such values today — the exactness gate in
+          // `boxed-number.ts` refuses the whole span — but the guard
+          // keeps the invariant local.)
+          return nv !== undefined && Number.isSafeInteger(nv) && nv >= 1
+            ? nv
+            : undefined;
+        })();
+        const refinePow = (
+          tier: Type,
+          opts?: { clampNonNegative?: boolean; requirePositive?: boolean }
+        ): Type | undefined => {
+          if (powN === undefined) return undefined;
+          const bIv = intervalOfType(base.type.type);
+          if (bIv === undefined) return undefined;
+          const p = powInterval(bIv, powN);
+          if (p === undefined) return undefined;
+          const iv = finalizeInterval(p);
+          if (opts?.clampNonNegative) iv.lo = Math.max(iv.lo, 0);
+          if (opts?.requirePositive && !(iv.lo > 0)) return undefined;
+          const r = attachInterval(tier, iv);
+          return typeof r === 'string' ? undefined : r;
+        };
         // `integer ^ (non-negative integer)` stays an integer; a possibly
         // *negative* integer exponent yields a (non-integer) rational
         // (P0-11: `2^-2 = 1/4`). An EVEN exponent adds the sign: x² ≥ 0
         // (and x⁻² ≥ 0) for any real x (ROADMAP "Ranged types should carry
         // sign…", work item 4 — the even-power head).
         if (base.isInteger && exp.isInteger) {
-          if (nonNegativeSign(expSgn) === true)
-            return operandIsEven(exp) === true
-              ? nonNegativeRangeType('finite_integer')
-              : 'finite_integer';
+          if (nonNegativeSign(expSgn) === true) {
+            const even = operandIsEven(exp) === true;
+            return (
+              refinePow('finite_integer', { clampNonNegative: even }) ??
+              (even ? nonNegativeRangeType('finite_integer') : 'finite_integer')
+            );
+          }
           return operandIsEven(exp) === true
             ? nonNegativeRangeType('finite_rational')
             : 'finite_rational';
         }
-        if (base.isRational && exp.isInteger)
-          return operandIsEven(exp) === true
-            ? nonNegativeRangeType('finite_rational')
-            : 'finite_rational';
+        if (base.isRational && exp.isInteger) {
+          const even = operandIsEven(exp) === true;
+          return (
+            refinePow('finite_rational', { clampNonNegative: even }) ??
+            (even ? nonNegativeRangeType('finite_rational') : 'finite_rational')
+          );
+        }
         // A real result needs a non-negative base or an integer exponent;
         // otherwise the result may be complex (e.g. (−2)^0.5).
         if (base.isReal && exp.isReal) {
@@ -2655,12 +2720,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // these refine: an operand of unknown finiteness is treated as a
           // finite point.
           if (positiveSign(baseSgn) === true)
-            return positiveRangeType('finite_real');
+            // The refinement must keep the positivity this arm proves, so
+            // it only replaces the `& !0` claim when its own lower bound
+            // is strictly positive.
+            return (
+              refinePow('finite_real', { requirePositive: true }) ??
+              positiveRangeType('finite_real')
+            );
           if (nonNegativeSign(baseSgn) === true)
-            return nonNegativeRangeType('finite_real');
+            return (
+              refinePow('finite_real', { clampNonNegative: true }) ??
+              nonNegativeRangeType('finite_real')
+            );
           if (operandIsEven(exp) === true)
-            return nonNegativeRangeType('finite_real');
-          if (exp.isInteger) return 'finite_real';
+            return (
+              refinePow('finite_real', { clampNonNegative: true }) ??
+              nonNegativeRangeType('finite_real')
+            );
+          if (exp.isInteger)
+            return refinePow('finite_real') ?? 'finite_real';
           // A *provably negative* base with an exponent that provably lands on
           // the complex branch (`(−2)^0.3`) is a finite complex value — the
           // `finite_number` default below is true but too coarse for the

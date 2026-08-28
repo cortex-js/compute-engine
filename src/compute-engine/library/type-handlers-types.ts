@@ -3,6 +3,10 @@ import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import {
+  absRange,
+  intervalOfType,
+} from '../numerics/interval-arithmetic.js';
+import {
   INDEXED_COLLECTION_SHAPE_TYPE,
   NUMERIC_TYPES_SET,
 } from '../../common/type/primitive.js';
@@ -299,60 +303,19 @@ function mayBeNaN(d: OperandDescriptor): boolean {
  * the `provably*` helpers combine with a closed bound AT that endpoint to
  * prove the strict comparison.
  */
-function typeBounds(t: Type, seen?: Set<object>): { lo: number; hi: number } {
-  const ALL = { lo: -Infinity, hi: Infinity };
-  if (typeof t === 'string') return ALL;
-  switch (t.kind) {
-    case 'value':
-      return typeof t.value === 'number' && !Number.isNaN(t.value)
-        ? { lo: t.value, hi: t.value }
-        : ALL;
-    case 'numeric':
-      if (
-        t.type === 'number' ||
-        t.type === 'complex' ||
-        t.type === 'finite_complex' ||
-        t.type === 'imaginary'
-      )
-        return ALL;
-      return { lo: t.lower ?? -Infinity, hi: t.upper ?? Infinity };
-    case 'reference': {
-      // A TRANSPARENT alias is semantically its definition; a nominal
-      // reference stays opaque. The `seen` set breaks a recursive alias.
-      if (!t.alias || t.def === undefined) return ALL;
-      seen ??= new Set();
-      if (seen.has(t)) return ALL;
-      seen.add(t);
-      return typeBounds(t.def, seen);
-    }
-    case 'intersection': {
-      // Every member must admit the value, so the bounds are the tightest
-      // of the members'.
-      let lo = -Infinity;
-      let hi = Infinity;
-      for (const m of t.types) {
-        const b = typeBounds(m, seen);
-        if (b.lo > lo) lo = b.lo;
-        if (b.hi < hi) hi = b.hi;
-      }
-      return { lo, hi };
-    }
-    case 'union': {
-      // Any member may admit the value, so the bounds are the loosest of
-      // the members'. A member with no bound at all makes the union
-      // unbounded, which the loosest-of rule already produces.
-      let lo = Infinity;
-      let hi = -Infinity;
-      for (const m of t.types) {
-        const b = typeBounds(m, seen);
-        if (b.lo < lo) lo = b.lo;
-        if (b.hi > hi) hi = b.hi;
-      }
-      return lo > hi ? ALL : { lo, hi };
-    }
-    default:
-      return ALL;
-  }
+function typeBounds(t: Type): { lo: number; hi: number } {
+  // Delegates to THE bounds reader (`intervalOfType`,
+  // `numerics/interval-arithmetic.ts`), so a domain proof here and a
+  // computed arithmetic result range can never disagree about the same
+  // type. `undefined` — a type with no real-line claim (a NaN-admitting
+  // or complex base, a non-numeric type, a contradictory intersection) —
+  // maps to the unbounded pair, which is what every comparison below
+  // treats as "no proof". (Two deliberate tightenings over the inlined
+  // predecessor: a contradictory intersection used to return an inverted
+  // `lo > hi` pair that could over-prove, and a range on the new
+  // `infinity`/`nan` primitives — which admit the unordered `~oo` or NaN
+  // — used to be read as ordinary bounds.)
+  return intervalOfType(t) ?? { lo: -Infinity, hi: Infinity };
 }
 
 /**
@@ -1033,16 +996,20 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
   // |x| ≥ 0, and the type says so: each tier claim carries its non-negative
   // range, so a type-channel consumer (`√|x|`, the GPU real-vs-complex
   // lowering) sees the sign the sgn handler always knew.
+  // `absRange` tightens each tier claim with the operand's interval when
+  // one exists (`|x|` for `x: real<-3..2>` is `real<0..3>`), and answers
+  // the plain non-negative range `tier<0..>` otherwise — shared with the
+  // Expression shape in `type-handlers.ts`, so the twins cannot diverge.
   if (typeFact(t, 'finite_number') === true) {
     for (const tier of ['finite_integer', 'finite_rational'] as const)
-      if (typeFact(t, tier) === true) return nonNegativeRangeType(tier);
-    return nonNegativeRangeType('finite_real');
+      if (typeFact(t, tier) === true) return absRange(tier, t);
+    return absRange('finite_real', t);
   }
   if (typeFact(t, 'non_finite_number') === true) return 'non_finite_number';
   // Unknown finiteness: the tier still carries (`integer`/`rational`/`real`
   // admit ±∞, and |±∞| = +∞ stays inside them).
   for (const tier of ['integer', 'rational', 'real'] as const)
-    if (typeFact(t, tier) === true) return nonNegativeRangeType(tier);
+    if (typeFact(t, tier) === true) return absRange(tier, t);
   return nonNegativeRangeType('real');
 }
 

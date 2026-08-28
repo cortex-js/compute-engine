@@ -20,6 +20,11 @@ import type {
 import { isTensorValue, packTensor } from './tensor-view.js';
 import { provablyNonFiniteNumber } from './numerics.js';
 import {
+  addIntervals,
+  attachInterval,
+  foldIntervalsOfTypes,
+} from '../numerics/interval-arithmetic.js';
+import {
   isNumber,
   isFunction,
   isSymbol,
@@ -558,15 +563,24 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // Ranges and sign exclusions are stripped from the join inputs: a sum
   // does not lie in the union of its terms' ranges (`x, y > −1` does not
   // put `x + y` above −1; `−|x| + |y|` is not non-negative). The bare tiers
-  // ARE closed under addition, so only the unsound bound is dropped —
-  // carrying bounds through `Add` is interval arithmetic, scoped separately
-  // (ROADMAP "Ranged types should carry sign…").
+  // ARE closed under addition, so the join drops the unsound bound — and
+  // the SOUND bound is then recomputed separately, below, by interval
+  // arithmetic over the operands.
   const t = widen(...args.map((x) => stripNumericRanges(x.type.type)));
   // `imaginary + imaginary` is not closed under addition: the imaginary parts
   // can cancel to 0, which is *real* (P0-13). 0 is `finite_integer` and the
   // non-cancelling sums stay `imaginary`, both covered by `finite_complex`.
   if (t === 'imaginary') return 'finite_complex';
-  return t;
+  // Interval refinement (the interval-arithmetic half of ROADMAP "Ranged
+  // types…", plan doc `docs/plans/2026-08-27-interval-arithmetic-result-
+  // types.md`): fold the operands' intervals with interval ADDITION — a
+  // different computation from the join above, and sound where the join
+  // is not (`x, y > 2` puts `x + y` above 4). The claim attaches only to
+  // a NaN-free real tier, and aborts if any operand carries no interval.
+  return attachInterval(t, foldIntervalsOfTypes(
+    args.map((x) => x.type.type),
+    addIntervals
+  ));
 }
 
 export function add(...xs: ReadonlyArray<Expression>): Expression {

@@ -2,6 +2,25 @@
 
 ### New Features
 
+- **Arithmetic result types carry computed bounds (interval arithmetic).**
+  The `Add`, `Multiply`, `Abs` and positive-integer-exponent `Power` type
+  handlers now derive a result range from their operands' ranged types:
+  with `assume(x > 2)` and `assume(y > 3)`, the type of `x + y` is
+  `real<5..>` and of `x · y` is `finite_real<6..>`; `|x|` for
+  `x: real<-3..2>` is `real<0..3>`; `x^2` for the same `x` is
+  `finite_real<0..9>` (and `x^2` for `x: real<-3..-2>` is the tightened
+  `finite_real<4..9>`). The bounds flow: domain checks read them, so
+  `Arcsin(x + y)` with suitably bounded operands types `finite_real`, and
+  `Sqrt(1 − 0.2²)` proves its radicand non-negative without evaluation.
+  Every computed bound is rounded outward (error-free transformations
+  detect exact endpoint arithmetic, so `x + y` above claims exactly `5`,
+  not `4.999…`), derived bounds keep 4 significant digits for
+  readability, and the claim is dropped rather than guessed wherever an
+  indeterminate form (`∞ + (−∞)`, `0 · ∞`), an overflow, a subnormal
+  projection, or a NaN-admitting operand (`number`) appears. Division and
+  non-positive exponents are deferred until the numeric-lattice
+  finite-by-default migration settles the pole story.
+
 - **A number literal's type now encloses its value in a compact range.** A
   literal no machine number holds exactly used to type as a sign-only claim:
   `1/3` was `(finite_rational<0..>) & !0`, `√2` was `(finite_real<0..>) & !0`.

@@ -1,11 +1,14 @@
 # Interval arithmetic for arithmetic result types
 
-Status: DRAFT, revision 2 — design for the interval-arithmetic HALF of the
-open ROADMAP entry "Ranged types: interval arithmetic and open bounds".
-The open-bounds half (a grammar for open endpoints, strictness
-propagation, retiring `facts.bounds`) is NOT covered here and stays open
-under that entry. Nothing here is implemented. The two questions in §5
-need a ruling before implementation starts.
+Status: RULED and IMPLEMENTED 2026-08-27 (kernel: `src/compute-engine/numerics/interval-arithmetic.ts`; pins: `test/compute-engine/interval-result-types.test.ts`; full-suite blast radius: 2 test pins + 1 snapshot, all precision improvements) — design for the
+interval-arithmetic HALF of the open ROADMAP entry "Ranged types:
+interval arithmetic and open bounds". The open-bounds half (a grammar
+for open endpoints, strictness propagation, retiring `facts.bounds`) is
+NOT covered here and stays open under that entry. The two questions in
+§5 were RULED by the user 2026-08-27: question 1 —
+`DERIVED_BOUND_DIGITS = 4`; question 2 — scope as proposed (`Add`,
+`Multiply`, `Abs`, positive-integer-exponent `Power`; `Divide` and
+exponent ≤ 0 deferred with the lattice flip's pole story).
 
 Revision 2 incorporates the dual spec review of 2026-08-27 (Claude +
 Codex): the NaN/tier attachment rule (§3.2), reuse of `typeBounds`
@@ -76,10 +79,15 @@ excluded. Introducing a second reader would let the two drift and let a
 domain proof and a result range disagree about the same type — the dual
 review flagged this as the plan's main architecture risk.
 
-So: the kernel module (proposed `common/type/interval-arithmetic.ts` —
-`common/type` so the arithmetic handlers and `typeBounds` can both reach
-it without a layering violation) HOUSES the reader, and `typeBounds` is
-refactored to delegate to it. One implementation, two consumers.
+So: the kernel module HOUSES the reader, and `typeBounds` is refactored
+to delegate to it. One implementation, two consumers. Placement
+(corrected at implementation time): `src/compute-engine/numerics/
+interval-arithmetic.ts` — every consumer (the arithmetic handlers,
+`typeBounds`) lives in the compute-engine layer, and so do the helpers
+the rounding pipeline needs (`nextUp`/`nextDown` in
+`numerics/numeric.ts`, `BigDecimal`); placing the kernel in
+`common/type` would make the LOWER layer import them upward, the actual
+layering violation.
 
 ```ts
 type Interval = { lo: number; hi: number };
@@ -211,6 +219,15 @@ only ever moves a bound FURTHER out, so the pipeline is sound for any
 soundness knob.
 
 ### 3.5 `powInterval` — the case table (positive integer exponents)
+
+Implementation note (found the hard way): endpoint powers use
+exponentiation by SQUARING, O(log n) directed products. A literal
+exponent can be huge (`x^10000003` appears in the
+`power-negative-base-branch` corpus), and the first implementation's
+linear multiplication chain spun a full-suite jest worker at 100% CPU
+for ~45 minutes. Bit operations are avoided (`%`/`floor`): a literal
+exponent can exceed 2³², where JavaScript `&` silently truncates.
+
 
 For `x^n` with `x ∈ [lo, hi]` and a literal integer `n ≥ 1`, all powers
 computed by repeated directed multiplication (never `Math.pow`):

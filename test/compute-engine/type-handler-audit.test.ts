@@ -309,11 +309,20 @@ describe('TYPE AUDIT: Abs (magnitude)', () => {
     expect(typeOf(['Abs', 'r'])).toBe('real<0..>');
   });
 
-  it('narrows literals to their own tier', () => {
-    expect(typeOf(['Abs', 2])).toBe('finite_integer<0..>');
-    expect(typeOf(['Abs', -2])).toBe('finite_integer<0..>');
-    expect(typeOf(['Abs', ['Rational', -1, 2]])).toBe('finite_rational<0..>');
-    expect(typeOf(['Abs', -2.5])).toBe('finite_real<0..>');
+  it('narrows literals to their own tier — and, since the interval round, to their own point', () => {
+    // A literal operand carries a point interval, and `Abs` reflects it:
+    // the claim is the SINGLETON range at the magnitude (true — `|−2|` is
+    // 2 — and a handler-result singleton is the same shape as an author
+    // narrowing, which the storage walker deliberately passes through).
+    expect(typeOf(['Abs', 2])).toBe('finite_integer<2..2>');
+    expect(typeOf(['Abs', -2])).toBe('finite_integer<2..2>');
+    // The RATIONAL tier is the one exception: a singleton range on
+    // `finite_rational` is the exact-rational LITERAL spelling (ruling
+    // O9), so `widenValueTypes` widens it to its tier at the storage
+    // boundary — a handler-computed rational point cannot survive there,
+    // by the same rule that keeps literal cargo out of stored contracts.
+    expect(typeOf(['Abs', ['Rational', -1, 2]])).toBe('finite_rational');
+    expect(typeOf(['Abs', -2.5])).toBe('finite_real<2.5..2.5>');
     expect(
       ce
         .box(['Abs', ['Rational', -1, 2]])
@@ -412,9 +421,13 @@ describe('TYPE AUDIT: Sqrt over a closed (unknowns-free) radicand', () => {
   // reading a node's type (§5.4 `Sqrt` row and §5.8 A5 of
   // `docs/plans/2026-08-22-type-handlers-on-types.md`) — the compiled bytes
   // are pinned unchanged in the item-137 block below.
-  it('an unfolded non-negative float radicand claims the finite_complex hedge', () => {
+  it('an unfolded non-negative float radicand proves its sign through interval arithmetic', () => {
+    // This claimed the `finite_complex` hedge until the interval round
+    // (2026-08-27): the radicand `1 − 0.2²` now carries a computed range
+    // (`0.2` is a point interval, `Power`/`Add` fold it to ~[0.96, 0.96]),
+    // so `Sqrt` proves the radicand non-negative without evaluation.
     expect(typeOf(['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]])).toBe(
-      'finite_complex'
+      'finite_real'
     );
     // …while a literal radicand, whose sign is statically known, still
     // claims `finite_real` — no evaluation is needed to see `0.96 ≥ 0`
@@ -475,13 +488,12 @@ describe('Tycho item 137: the GLSL band of a Which over a float radicand', () =>
     const raw = branch('1-0.2^2');
     const folded = branch('0.96');
     // The TYPES now differ — the raw radicand's sign is statically unknown,
-    // so `√(1−0.2²)` types the `finite_complex` hedge, while `√0.96` (whose
-    // literal radicand is statically non-negative) types `finite_real`; the
-    // `closedRealSign` numericization that used to align them was retired
-    // from the type path. What item 137 actually needs is the COMPILED band:
-    // the compiler folds the constant subtree itself, so both spellings
-    // still emit the identical real scalar — byte for byte.
-    expect(raw.type.toString()).toBe('finite_complex');
+    // Both spellings now type `finite_real` — the raw one through the
+    // computed radicand interval (2026-08-27 interval round; it typed the
+    // `finite_complex` hedge before). What item 137 actually needs is the
+    // COMPILED band: the compiler folds the constant subtree itself, so
+    // both spellings emit the identical real scalar — byte for byte.
+    expect(raw.type.toString()).toBe('finite_real');
     expect(folded.type.toString()).toBe('finite_real');
     const rawCode = glsl.compile(raw).code;
     const foldedCode = glsl.compile(folded).code;

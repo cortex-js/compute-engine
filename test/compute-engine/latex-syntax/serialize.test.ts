@@ -337,7 +337,7 @@ describe('LATEX', () => {
           ErrorCode,
           'incompatible-type',
           'string',
-          'finite_real',
+          'finite_real<5.141..5.142>',
         ],
         [
           Add,
