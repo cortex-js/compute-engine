@@ -80,6 +80,30 @@ function ratioEqualsDouble(r: Rational, re: number): boolean {
   return BigInt(r[0]) * den === BigInt(num) * BigInt(r[1]);
 }
 
+/** Is the exact rational `r` equal to the double `re` under the engine's
+ * DECIMAL reading of doubles? A double stands for the decimal number its
+ * shortest representation spells (`0.2` means 2/10, not the nearby dyadic
+ * value — the same convention `isSame` uses to equate `1/5` with `0.2`),
+ * so the comparison parses that representation into an exact decimal
+ * fraction and cross-multiplies in bigints. Precision-independent: unlike
+ * a comparison through the working-precision `bignumRe` projection, it
+ * cannot equate a value with a merely NEARBY double — `(10³⁰−1)/10³⁰` is
+ * not `1` at any precision. */
+function rationalEqualsDecimal(r: Rational, re: number): boolean {
+  if (!Number.isFinite(re)) return false;
+  // Shortest decimal representation: [-]ddd[.ddd][e±k]
+  const m = re.toString().match(/^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/);
+  if (m === null) return false;
+  const digits = BigInt(m[2] + (m[3] ?? ''));
+  const num = m[1] === '-' ? -digits : digits;
+  const exp = (m[4] !== undefined ? parseInt(m[4], 10) : 0) - (m[3]?.length ?? 0);
+  // num·10^exp == r[0]/r[1]  (denominators are positive by convention)
+  const rn = BigInt(r[0]);
+  const rd = BigInt(r[1]);
+  if (exp >= 0) return num * 10n ** BigInt(exp) * rd === rn;
+  return num * rd === rn * 10n ** BigInt(-exp);
+}
+
 /** How many significant digits an enclosing literal range keeps. Two is the
  * compactness/precision trade the literal types use: `1/3` encloses as
  * `finite_rational<0.33..0.34>`, `√2` as `finite_real<1.4..1.5>`. */
@@ -115,9 +139,9 @@ const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
  * `finite_real<1.4..1.5>` for `√2`. Both bounds are rounded OUTWARD
  * (padding, then directed rounding to `ENCLOSURE_DIGITS` significant
  * digits), so the interval never claims a value the literal does not have
- * — in
- * particular `1 - 10⁻³⁰` encloses as `<0.99..1>`, which admits but does not
- * assert the artanh pole at 1.
+ * — in particular `1 - 10⁻³⁰` encloses as `<0.99..1.1>` (the value sits
+ * within the padding of the grid point 1, so both neighboring notches
+ * appear), which admits but does not assert the artanh pole at 1.
  *
  * `undefined` when no sound compact enclosure exists as doubles — the
  * magnitude is outside the NORMAL double range (an overflow like `10⁴⁰⁰`,
@@ -777,12 +801,29 @@ export class BoxedNumber
     if (Number.isFinite(re)) {
       const big = v.bignumRe;
       if (big !== undefined) {
-        // Decimal comparison converts the double through its decimal
-        // string, so beyond ±2⁵³ a rounded double can compare "equal" to a
-        // bignum it does not represent (`1e40` vs `10⁴⁰`); inside that
-        // span integers are exact and floats compare by their printed
-        // digits, which is the value the author wrote.
-        exact = Math.abs(re) < 2 ** 53 && big.eq(re);
+        const ex = v.asExact;
+        if (ex !== undefined) {
+          // An EXACT value (a rational, possibly with a radical): decide
+          // exactness with the precision-independent rational comparison.
+          // Comparing through `bignumRe` here was a soundness hole: it is
+          // a WORKING-PRECISION projection, so a value within 10⁻ᴾ of a
+          // double compared "equal" to it — at default precision
+          // `(10³⁰−1)/10³⁰` projected to 1.0 and the literal claimed the
+          // VALUE type `1` for a value provably ≠ 1 (the artanh-pole
+          // class this test exists to prevent).
+          const ev = ex as ExactNumericValue;
+          exact =
+            Math.abs(re) < 2 ** 53 &&
+            ev.radical === 1 &&
+            rationalEqualsDecimal(ev.rational, re);
+        } else {
+          // An INEXACT bignum: the stored decimal IS the value, and `eq`
+          // compares it exactly against the double read by its printed
+          // digits — the value the author wrote. Beyond ±2⁵³ a rounded
+          // double can still compare "equal" to a decimal it does not
+          // represent (`1e40` vs `10⁴⁰`), so the whole span is refused.
+          exact = Math.abs(re) < 2 ** 53 && big.eq(re);
+        }
       } else {
         const ex = v.asExact;
         if (ex === undefined) {

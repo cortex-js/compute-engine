@@ -2331,6 +2331,24 @@ Open items — genuine decisions, each with a default:
   *declared* literal result is the author's and is kept (§4.5).
 - **O4 — Rational literal types.** Not wanted under R2; the 11 residue
   rows are accepted precision loss, not a gap.
+- **O10 — String and boolean literal types. RULED 2026-08-27 (user):
+  string literals keep the type `string`; boolean value types are wanted.**
+  The criterion is the same one behind O4: a literal value type must earn
+  its keep in machine tasks (compilation, simplification, dead-code
+  elimination). A string literal's value is always in hand wherever the
+  literal appears — key access and comparison read the value, not the
+  type — so a `"…"` value type has no machine consumer and would put
+  arbitrary-length strings into stored contracts and error messages.
+  Boolean value types DO have a consumer: not the `True`/`False` constants
+  themselves (symbol identity already tells the compiler everything), but
+  DERIVED results — a predicate whose type handler proves `true`
+  (`Equal(a, a)`, a bounds-settled domain test) lets `If`/`And`/`Or`
+  eliminate dead branches where the value never folds. Implementation is
+  NOT scheduled yet and needs its own measured round: `widenValueTypes`
+  treats boolean value nodes as leaves today (no handler manufactures
+  them), so adopting them means extending the §4.3 widening rules to
+  boolean values at storage boundaries, plus the type-keyed-guard sweep
+  (`=== 'boolean'` switches) that the O9 flip needed.
 - **O7 — The `sgn` handlers. EXECUTED 2026-08-24: the audit ran, the
   family is pure, and `facts.sgn` now reaches function expressions.**
   The audit followed every `sgn:` entry in `library/*.ts` (47 operator

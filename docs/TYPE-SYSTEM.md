@@ -21,6 +21,44 @@ work belongs in `TYPE_SYSTEM_ROADMAP.md` or an active file under `plans/`.
 - Absence in a numeric result normalizes to `NaN`. `Missing` remains a
   non-numeric absence value and comparisons over it use three-valued logic.
 
+## Number literal types
+
+The public `.type` of a number literal is its literal type: the most precise
+claim available at that expression. `ce.box(21).type` is `21` and
+`ce.box(0.5).type` is `0.5`. The form of the claim depends on the value:
+
+- When a machine double holds the value exactly, the type is that value. An
+  exact rational is the exception: it keeps its tier through a singleton
+  range, so `1/2` types `finite_rational<0.5..0.5>`. The lattice
+  deliberately does not class a bare numeric value as rational — `0.5 <:
+  finite_rational` is false — so a bare value type would lose the tier.
+- When no machine double holds the value exactly, the type is a compact
+  closed range on the tier of the value. Both bounds are rounded outward to
+  two significant digits: `1/3` types `finite_rational<0.33..0.34>`, `√2` types
+  `finite_real<1.4..1.5>`, and `10³⁰ + 1` types
+  `finite_integer<9.9e+29..1.1e+30>`. The bounds provably contain the exact
+  value and exclude zero, so the sign of the literal stays a type fact, and
+  the range is never a singleton. A magnitude outside the range of normal
+  doubles has no sound compact enclosure and falls back to a sign-only
+  claim: `10⁴⁰⁰` types `(finite_integer<0..>) & !0`.
+- `NaN`, `±∞` and complex literals have no literal type, because
+  their tier already carries all the information. String and boolean
+  literals are not affected: they report `string` and `boolean`.
+
+Consumers may read the bounds of an enclosing range as a type fact. A domain
+check does exactly that, which is why `Arcsin(1/3)` types `finite_real`.
+
+A literal type lives at an EXPRESSION position only. Every storage position
+widens it back to its tier: an inferred declaration, a solved type variable
+(`identity(5)` binds `T = finite_integer`, never `5`), a derived
+function-literal signature (`() -> 21` is stored as `() -> finite_integer`)
+and a stored handler result. A literal type is therefore never a stored
+contract, and code that classifies a numeric type must use subtyping, never
+the name of the type.
+
+The implementation is `_computeLiteralType` and `literalEnclosureType` in
+`src/compute-engine/boxed-expression/boxed-number.ts`.
+
 ## Polymorphism
 
 Universal variables are written in a trailing `where` clause:

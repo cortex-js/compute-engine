@@ -341,4 +341,27 @@ describe('LITERAL HANDLER TYPES — precision edge (kept last: constructing a hi
       'finite_rational<0.99..1.1>'
     );
   });
+
+  it('exactness is decided by exact rational comparison, not through the working-precision projection', () => {
+    // At DEFAULT precision, `bignumRe` of `(10³⁰−1)/10³⁰` ROUNDS to
+    // exactly 1.0, and a comparison through that projection called the
+    // value "equal" to the double 1 — the literal claimed the VALUE type
+    // `1` for a value provably ≠ 1 (the artanh-pole class; regression
+    // fixed 2026-08-27 with `rationalEqualsDecimal`). The exact-rational
+    // comparison is precision-independent, so the sound enclosure appears
+    // at every precision.
+    const dp = new ComputeEngine(); // default precision
+    const nearOne = dp.parse('1 - 10^{-30}').evaluate();
+    expect(nearOne.isSame(1)).toBe(false); // the value IS the exact rational
+    expect(nearOne.type.toString()).toBe('finite_rational<0.99..1.1>');
+    // The engine's decimal reading of doubles is preserved: an exact
+    // rational whose decimal expansion terminates within double range is
+    // still "machine-exact" (`1/5` ≡ `0.2` — the isSame convention).
+    expect(dp.parse('\\frac15').type.toString()).toBe(
+      'finite_rational<0.2..0.2>'
+    );
+    expect(dp.parse('\\frac{7}{5}').type.toString()).toBe(
+      'finite_rational<1.4..1.4>'
+    );
+  });
 });

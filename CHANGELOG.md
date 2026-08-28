@@ -70,6 +70,19 @@
 
 ### Bug Fixes
 
+- **A literal's "machine-exact" test is now precision-independent.** The test
+  that decides whether a number literal's type carries its exact value
+  compared the value's working-precision decimal projection against the
+  double. Any exact value within 10⁻ᴾ of a representable double therefore
+  wrongly tested exact: at the default precision, `1 − 10⁻³⁰` — stored as the
+  exact rational `(10³⁰−1)/10³⁰` — typed as the value `1`, a value it
+  provably does not have (the class of error that would let a handler place
+  `artanh(1 − 10⁻³⁰)` at the pole). The test now compares the exact rational
+  against the double's shortest decimal representation with exact integer
+  arithmetic, at every precision. The engine's decimal reading of doubles is
+  unchanged: `1/5` and `0.2` are still the same value, and short terminating
+  rationals keep their singleton types (`finite_rational<0.2..0.2>`).
+
 - **A zero element times a non-finite factor is `NaN` on every route.**
   `0 · ~oo`, `0 · ±∞` and `0 · NaN` are indeterminate forms. The scalar
   canonical product already answered `NaN`, but three sibling routes answered
