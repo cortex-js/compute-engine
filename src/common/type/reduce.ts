@@ -1,3 +1,4 @@
+import { makeNumericRangeType } from './numeric-range.js';
 import { typeToDedupKey, typeToString } from './serialize.js';
 import {
   assertGroundType,
@@ -374,6 +375,52 @@ function meet2(a: Type, b: Type): Type | undefined {
     const excluded = (negA ?? negB!).type;
     const other = negA !== undefined ? b : a;
     if (isSubtype(other, excluded)) return 'never';
+    // The open-bound normal form (`docs/plans/2026-08-28-open-bounds-in-
+    // ranged-types.md` §3.2): a negated numeric VALUE meeting a range whose
+    // closed endpoint is that value opens the endpoint — `real<0..> & !0`
+    // IS `real<0<..>`. At an already-open endpoint, or outside the range,
+    // the exclusion is vacuous and drops. Strictly inside the range it stays
+    // an intersection member (no range spelling for an interior hole). The
+    // pairwise fold re-offers a merged result to the remaining members, so
+    // `(real<0..1>) & !0 & !1` reaches `real<0<..<1>` in either order.
+    // The exclusion may name SEVERAL values at once: two adjacent `!k`
+    // members merge by De Morgan into `!(k₁ | k₂)` BEFORE the range is
+    // offered to them (the fold keeps written order), so reading only a
+    // single negated value made the rewrite order-dependent — `!0 & !1 &
+    // real<0..1>` stopped at `!(0 | 1) & real<0..1>` while the range-first
+    // order reached `real<0<..<1>` (dual-review catch). Every excluded
+    // value is applied; the ones that are neither endpoint stay excluded.
+    const exs = excludedNumbers(excluded);
+    const rng = asNumericRange(other);
+    if (exs !== undefined && rng !== null && typeof other === 'object') {
+      let lo = rng.lower ?? -Infinity;
+      let hi = rng.upper ?? Infinity;
+      let lowerOpen = rng.lowerOpen === true;
+      let upperOpen = rng.upperOpen === true;
+      const interior: number[] = [];
+      for (const ex of exs) {
+        if (ex < lo || ex > hi) continue; // vacuous
+        if (ex === lo && ex === hi) return 'never';
+        if (ex === lo) lowerOpen = true;
+        else if (ex === hi) upperOpen = true;
+        else interior.push(ex);
+      }
+      const range = makeNumericRangeType(rng.type, lo, hi, lowerOpen, upperOpen);
+      if (interior.length === 0) return range;
+      // Interior holes keep the intersection spelling (no range syntax
+      // for them), with the endpoint exclusions already absorbed.
+      const hole: Type =
+        interior.length === 1
+          ? { kind: 'negation', type: { kind: 'value', value: interior[0] } }
+          : {
+              kind: 'negation',
+              type: {
+                kind: 'union',
+                types: interior.map((v) => ({ kind: 'value', value: v })),
+              },
+            };
+      return { kind: 'intersection', types: [range, hole] };
+    }
     return undefined;
   }
 
@@ -644,9 +691,22 @@ function meetNumericRanges(a: NumericType, b: NumericType): Type {
   const bases = meetPrimitiveTypes(a.type, b.type);
   if (bases.length === 0) return 'never';
 
-  const lower = Math.max(a.lower ?? -Infinity, b.lower ?? -Infinity);
-  const upper = Math.min(a.upper ?? Infinity, b.upper ?? Infinity);
+  // The tighter endpoint wins; at EQUAL endpoints, OPEN wins (the meet of
+  // "x ≥ 0" and "x > 0" is "x > 0").
+  const aLo = a.lower ?? -Infinity;
+  const bLo = b.lower ?? -Infinity;
+  const aHi = a.upper ?? Infinity;
+  const bHi = b.upper ?? Infinity;
+  const lower = Math.max(aLo, bLo);
+  const upper = Math.min(aHi, bHi);
+  const lowerOpen =
+    (aLo === lower && a.lowerOpen === true) ||
+    (bLo === lower && b.lowerOpen === true);
+  const upperOpen =
+    (aHi === upper && a.upperOpen === true) ||
+    (bHi === upper && b.upperOpen === true);
   if (lower > upper) return 'never';
+  if (lower === upper && (lowerOpen || upperOpen)) return 'never';
 
   const finite = lower !== -Infinity || upper !== Infinity;
   const ranges: Type[] = [];
@@ -661,7 +721,15 @@ function meetNumericRanges(a: NumericType, b: NumericType): Type {
     )
       continue;
     // `bases` are the meet of two numeric primitives, hence numeric.
-    ranges.push(makeNumericRange(base as NumericPrimitiveType, lower, upper));
+    ranges.push(
+      makeNumericRangeType(
+        base as NumericPrimitiveType,
+        lower,
+        upper,
+        lowerOpen,
+        upperOpen
+      )
+    );
   }
 
   if (ranges.length === 0) return 'never';
@@ -669,14 +737,25 @@ function meetNumericRanges(a: NumericType, b: NumericType): Type {
   return reduceUnionType({ kind: 'union', types: ranges });
 }
 
-/** Build a numeric range, collapsing an unbounded range to its base type. */
-function makeNumericRange(
-  type: NumericPrimitiveType,
-  lower: number,
-  upper: number
-): Type {
-  if (lower === -Infinity && upper === Infinity) return type;
-  return { kind: 'numeric', type, lower, upper };
+/** The machine numbers a `!…` exclusion names: one for `!k`, several for
+ * the De Morgan merge `!(k₁ | k₂)`; `undefined` when the excluded type is
+ * anything but numeric value types (a whole union must be values). */
+function excludedNumbers(t: Type): number[] | undefined {
+  if (typeof t !== 'object') return undefined;
+  if (t.kind === 'value')
+    return typeof t.value === 'number' && !Number.isNaN(t.value)
+      ? [t.value]
+      : undefined;
+  if (t.kind === 'union') {
+    const out: number[] = [];
+    for (const m of t.types) {
+      const v = excludedNumbers(m);
+      if (v === undefined) return undefined;
+      out.push(...v);
+    }
+    return out;
+  }
+  return undefined;
 }
 
 function meetUnion(types: Readonly<Type[]>, b: Type): Type {

@@ -132,17 +132,19 @@ export function typeToString(type: Type, precedence = 0): string {
       result = `symbol<${symbolName(type.name)}>`;
       break;
 
-    case 'numeric':
-      if (Number.isFinite(type.lower) && Number.isFinite(type.upper)) {
-        result = `${type.type}<${type.lower}..${type.upper}>`;
-      } else if (Number.isFinite(type.lower)) {
-        result = `${type.type}<${type.lower}..>`;
-      } else if (Number.isFinite(type.upper)) {
-        result = `${type.type}<..${type.upper}>`;
-      } else {
-        result = `${type.type}`;
-      }
+    case 'numeric': {
+      // Open endpoints carry their marker: `0<..` for an excluded lower
+      // bound, `..<3` for an excluded upper one (the chained-inequality
+      // reading, user-ruled 2026-08-28).
+      const lo = Number.isFinite(type.lower)
+        ? `${type.lower}${type.lowerOpen ? '<' : ''}`
+        : '';
+      const hi = Number.isFinite(type.upper)
+        ? `${type.upperOpen ? '<' : ''}${type.upper}`
+        : '';
+      result = lo === '' && hi === '' ? `${type.type}` : `${type.type}<${lo}..${hi}>`;
       break;
+    }
 
     case 'list':
       if (

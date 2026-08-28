@@ -105,20 +105,20 @@ describe('TYPE INFERENCE FROM ASSUMPTIONS', () => {
   // Since 2026-08-22 a simple literal bound refines to the proven RANGE
   // type, not bare `real` (`docs/plans/2026-08-22-type-handlers-on-types.md`
   // §5.8 A2), so the assumption is visible to consumers that read the type.
-  test(`x should have type real<4..> (x > 4 assumed)`, () => {
+  test(`x should have type real<4<..> (x > 4 assumed)`, () => {
     // A strict non-zero bound is approximated by its closed range: types
     // have no open bounds, and the closed range admits every assumed value.
-    expect(ce.expr('x').type.toString()).toBe('real<4..>');
+    expect(ce.expr('x').type.toString()).toBe('real<4<..>');
     expect(ce.expr('x').type.matches('real')).toBe(true);
   });
 
-  test(`s should have type real<5..> (s > 5 assumed)`, () => {
-    expect(ce.expr('s').type.toString()).toBe('real<5..>');
+  test(`s should have type real<5<..> (s > 5 assumed)`, () => {
+    expect(ce.expr('s').type.toString()).toBe('real<5<..>');
   });
 
-  test(`t should have type (real<0..>) & !0 (t > 0 assumed)`, () => {
+  test(`t should have type real<0<..> (t > 0 assumed)`, () => {
     // The zero bound is exact: the range plus the zero exclusion.
-    expect(ce.expr('t').type.toString()).toBe('(real<0..>) & !0');
+    expect(ce.expr('t').type.toString()).toBe('real<0<..>');
   });
 
   test(`one should have type integer (one = 1 assumed)`, () => {
@@ -303,7 +303,7 @@ describe('SCOPED INEQUALITY TYPE REFINEMENT DOES NOT LEAK (P1-6)', () => {
     ce.assume(ce.parse('x > 0'));
     // In-scope, the refinement is visible (the proven range, since the
     // §5.8 A2 change — previously bare `real`)…
-    expect(ce.expr('x').type.toString()).toBe('(real<0..>) & !0');
+    expect(ce.expr('x').type.toString()).toBe('real<0<..>');
     ce.popScope();
 
     // After popping, the outer-scope type refinement must be gone.

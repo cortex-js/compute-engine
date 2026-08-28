@@ -76,10 +76,10 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     // An integer beyond the DOUBLE range has no finite double bounds, so it
     // falls back to proving its sign alone.
     expect(lit(ce.parse('10^{400}').evaluate())).toBe(
-      '(finite_integer<0..>) & !0'
+      'finite_integer<1..>'
     );
     expect(lit(ce.parse('-10^{400}').evaluate())).toBe(
-      '(finite_integer<..0>) & !0'
+      'finite_integer<..-1>'
     );
     // A magnitude in the SUBNORMAL double range falls back too: subnormal
     // spacing is absolute (5·10⁻³²⁴), so the nearest-double projection of a
@@ -88,10 +88,10 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     // singleton BELOW the value. See `MIN_NORMAL_DOUBLE` in
     // `boxed-expression/boxed-number.ts`.
     expect(lit(ce.parse('\\frac{7}{10^{324}}').evaluate())).toBe(
-      '(finite_rational<0..>) & !0'
+      'finite_rational<0<..>'
     );
     expect(lit(ce.parse('\\frac{-7}{10^{324}}').evaluate())).toBe(
-      '(finite_rational<..0>) & !0'
+      'finite_rational<..<0>'
     );
     // Just above the smallest NORMAL double the enclosure still holds. (The
     // specimen must have a non-terminating decimal expansion: a short one
@@ -209,6 +209,10 @@ describe('widenValueTypes — the §4.3 walker', () => {
   });
 
   it('a negation flips polarity: `!0` is preserved', () => {
+    // The walker passes the intersection through unchanged (it is the
+    // REDUCER, not the walker, that rewrites `range & !endpoint` to the
+    // open range `finite_real<0<..>` since open-bound ranged types —
+    // `parseType` alone builds the unreduced spelling).
     expect(widenStr('(finite_real<0..>) & !0')).toBe(
       '(finite_real<0..>) & !0'
     );

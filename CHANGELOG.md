@@ -1,5 +1,37 @@
 ## [Unreleased]
 
+### New Features
+
+- **Ranged types can exclude an endpoint.** A range type spells an open
+  endpoint with an inequality marker: `real<0<..>` is x > 0, `real<..<3>`
+  is x < 3, `real<0<..<3>` is 0 < x < 3 (read the markers as the chained
+  inequality `0 < x < 3`); `real<0..3>` stays the closed range. The open
+  range is now the canonical spelling of a positive or negative type — the
+  old intersection form `(real<0..>) & !0` still parses and reduces to
+  `real<0<..>`, so existing type strings keep working, but types now PRINT
+  in the new form. On the discrete integer tiers an open bound normalizes
+  to the next closed one (`integer<0<..>` is `integer<1..>`). An empty
+  range (`real<0<..0>`) is the bottom type `never`.
+
+- **`ce.assume` records strict bounds in the type.** `assume(x > 2)` now
+  refines `x` to `real<2<..>` (previously the closed `real<2..>`, with the
+  strictness kept only in a side channel), for every machine-number bound;
+  `assume(0 < v && v < 1)` gives `real<0<..<1>`, and `Artanh(v)` then types
+  `finite_real` from the type alone. A bound no machine number holds
+  exactly (`x > 1/3`, `x > 1 − 10⁻³⁰`) is rounded OUTWARD — a lower bound
+  down, an upper bound up — so the range admits every value the assumption
+  admits; previously such a bound could round toward the inside and
+  over-prove.
+
+- **Computed result bounds keep their strictness.** The interval arithmetic
+  behind `Add`, `Multiply`, `Abs` and integer `Power` result types now
+  tracks whether each bound is attained: with `x > 2` and `y > 3`, `x + y`
+  types `real<5<..>` and `x · y` types `finite_real<6<..>`. The rules are
+  attainability rules, not a blanket "open if any input is open": a
+  product whose factor is exactly a closed 0 attains 0 whatever the other
+  factor's bound, and the 0 at the bottom of `|x|` or `x²` over a
+  zero-crossing range is always attained.
+
 ### Breaking Changes
 
 - **Bare numeric type names now mean FINITE (the numeric-lattice flip).**

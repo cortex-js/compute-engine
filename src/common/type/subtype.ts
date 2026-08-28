@@ -1908,17 +1908,33 @@ export function isSubtype(
         ? 'finite_integer'
         : 'finite_real';
     if (!isPrimitiveSubtype(baseKind, rhs.type)) return false;
-    if (lhs.value < (rhs.lower ?? -Infinity)) return false;
-    if (lhs.value > (rhs.upper ?? Infinity)) return false;
+    // An OPEN endpoint excludes its own value: `0` is not a member of
+    // `real<0<..>` (x > 0).
+    const lo = rhs.lower ?? -Infinity;
+    const hi = rhs.upper ?? Infinity;
+    if (lhs.value < lo || (lhs.value === lo && rhs.lowerOpen === true))
+      return false;
+    if (lhs.value > hi || (lhs.value === hi && rhs.upperOpen === true))
+      return false;
     return true;
   }
 
   if (lhs.kind === 'numeric' && rhs.kind === 'numeric') {
     // Check that the types match
     if (!isSubtype(lhs.type, rhs.type)) return false;
-    // Check that the bounds match
-    if ((lhs.lower ?? -Infinity) < (rhs.lower ?? -Infinity)) return false;
-    if ((lhs.upper ?? Infinity) > (rhs.upper ?? Infinity)) return false;
+    // Interval inclusion with strictness: at a SHARED endpoint a closed
+    // side is not inside an open one (`real<0..>` ⊄ `real<0<..>`: it has
+    // the 0), while open ⊂ closed.
+    const lLo = lhs.lower ?? -Infinity;
+    const rLo = rhs.lower ?? -Infinity;
+    const lHi = lhs.upper ?? Infinity;
+    const rHi = rhs.upper ?? Infinity;
+    if (lLo < rLo) return false;
+    if (lLo === rLo && rhs.lowerOpen === true && lhs.lowerOpen !== true)
+      return false;
+    if (lHi > rHi) return false;
+    if (lHi === rHi && rhs.upperOpen === true && lhs.upperOpen !== true)
+      return false;
     return true;
   }
 

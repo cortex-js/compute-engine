@@ -470,6 +470,13 @@ export type NumericType = {
   type: NumericPrimitiveType;
   lower?: number;
   upper?: number;
+  /** The lower bound is EXCLUDED: `real<0<..>` is x > 0 (open-bound
+   * ranged types, `docs/plans/2026-08-28-open-bounds-in-ranged-types.md`).
+   * Meaningful only when `lower` is a finite number; never set on the
+   * discrete integer tiers, whose open bounds normalize to closed ones. */
+  lowerOpen?: boolean;
+  /** The upper bound is EXCLUDED: `real<..<3>` is x < 3. */
+  upperOpen?: boolean;
 };
 
 /** Each element of a set is unique (is not present in the set more than once).

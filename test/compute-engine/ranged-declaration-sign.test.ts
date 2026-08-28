@@ -88,12 +88,12 @@ describe('an assumption refines the symbol type to a range (§5.8 A2)', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'real');
     ce.assume(ce.parse('p > 0'));
-    expect(ce.symbol('p').type.toString()).toBe('(real<0..>) & !0');
+    expect(ce.symbol('p').type.toString()).toBe('real<0<..>');
     expect(ce.symbol('p').sgn).toBe('positive');
     // The meet pushes the range into a narrower declared base.
     ce.declare('n', 'integer');
     ce.assume(ce.parse('n > 0'));
-    expect(ce.symbol('n').type.toString()).toBe('(integer<0..>) & !0');
+    expect(ce.symbol('n').type.toString()).toBe('integer<1..>');
     expect(ce.box(['Factorial', 'n']).type.toString()).toBe('finite_integer');
   });
 
@@ -131,7 +131,7 @@ describe('assumption type-refinement — review hardening (2026-08-23)', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'real');
     ce.assume(ce.parse('p > 0'));
-    expect(ce.symbol('p').type.toString()).toBe('(real<0..>) & !0');
+    expect(ce.symbol('p').type.toString()).toBe('real<0<..>');
     ce.forget('p');
     expect(ce.symbol('p').type.toString()).toBe('real');
     expect(ce.symbol('p').sgn).toBe(undefined);
@@ -140,7 +140,7 @@ describe('assumption type-refinement — review hardening (2026-08-23)', () => {
   test('no-argument forget() rewinds to the pre-assumption state', () => {
     const ce = new ComputeEngine();
     ce.assume(ce.parse('q > 4'));
-    expect(ce.symbol('q').type.toString()).toBe('real<4..>');
+    expect(ce.symbol('q').type.toString()).toBe('real<4<..>');
     ce.forget(undefined);
     // `q` was auto-declared `unknown` when the proposition was boxed; the
     // rewind restores that pre-assumption state, not a blanket `real`.
@@ -164,7 +164,7 @@ describe('assumption type-refinement — review hardening (2026-08-23)', () => {
     const ce = new ComputeEngine();
     ce.parse('x + 1'); // x is inference-pending before the assumption
     expect(ce.assume(ce.parse('0 < x < 10'))).toBe('ok');
-    expect(ce.symbol('x').type.toString()).toBe('(real<0..10>) & !0');
+    expect(ce.symbol('x').type.toString()).toBe('real<0<..<10>');
     expect(ce.symbol('x').sgn).toBe('positive');
   });
 
@@ -179,19 +179,28 @@ describe('assumption type-refinement — review hardening (2026-08-23)', () => {
     expect(ce.symbol('r').type.toString()).toBe('real<..-1>');
     // …and a consistent one keeps the inherited base in the meet.
     expect(ce.assume(ce.parse('n > 0'))).toBe('ok');
-    expect(ce.symbol('n').type.toString()).toBe('(integer<0..>) & !0');
+    expect(ce.symbol('n').type.toString()).toBe('integer<1..>');
     ce.popScope();
     expect(ce.symbol('n').type.toString()).toBe('integer');
   });
 
-  test('a non-machine-representable bound declines the range, keeps the sign', () => {
-    // `x > 1/3` must not install a rounded double bound (a rounding toward
-    // the inside would wrongly exclude admissible values); the type stays
-    // bare and the sign channel still answers from the stored facts.
+  test('a non-machine-representable bound rounds OUTWARD into the range, keeps the sign', () => {
+    // `x > 1/3` installs the bound's machine projection rounded AWAY from
+    // the admitted set — a lower bound DOWN — and closed, so the range
+    // admits every value the assumption admits (open-bound ranged types,
+    // 2026-08-28; before that the range was declined altogether, because a
+    // rounding toward the inside would have excluded admissible values).
+    // The sign channel still answers from the stored facts.
     const ce = new ComputeEngine();
     ce.declare('u', 'real');
     ce.assume(ce.box(['Greater', 'u', ['Rational', 1, 3]]));
-    expect(ce.symbol('u').type.toString()).toBe('real');
+    const t = ce.symbol('u').type.type;
+    expect(typeof t === 'object' && t.kind === 'numeric').toBe(true);
+    if (typeof t === 'object' && t.kind === 'numeric') {
+      expect(t.lower).toBeLessThan(1 / 3);
+      expect(t.lower).toBeGreaterThan(0.333);
+      expect(t.lowerOpen).toBeUndefined();
+    }
     expect(ce.symbol('u').sgn).toBe('positive');
   });
 });

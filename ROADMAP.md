@@ -812,7 +812,7 @@ closedness) beside the types; `_reviseInferredType` moves to a write site;
 mis-filed: the lost facts are the SIGN of `π`/`e` and the CLOSEDNESS
 `poleReciprocalType` reads via `isConstant`.
 
-### Ranged types: interval arithmetic and open bounds (interval half SHIPPED 2026-08-27; open-bounds half OPEN — remaining scope of "Ranged types should carry sign", raised 2026-08-22)
+### Ranged types: interval arithmetic and open bounds (BOTH HALVES SHIPPED — interval 2026-08-27, open bounds 2026-08-28; remaining scope of "Ranged types should carry sign", raised 2026-08-22)
 
 **The interval-arithmetic half shipped 2026-08-27** (ruled, designed and
 implemented per `docs/plans/2026-08-27-interval-arithmetic-result-types.md`):
@@ -829,7 +829,23 @@ come from the separate interval fold. Deferred WITH REASON: `Divide` and
 flip), and bounds through collection/tuple/broadcast cells. Pinned in
 `test/compute-engine/interval-result-types.test.ts`.
 
-**What remains OPEN of this entry — open bounds:**
+**The open-bounds half shipped 2026-08-28** (ruled, designed and
+implemented per `docs/plans/2026-08-28-open-bounds-in-ranged-types.md`):
+range types spell open endpoints with the chained-inequality markers
+`real<0<..<3>` (0 < x < 3); the open range is the canonical form
+(`(real<0..>) & !0` reduces to `real<0<..>`; integer tiers normalize open
+bounds away, `integer<0<..>` is `integer<1..>`); `ce.assume(x > 2)`
+refines the type to `real<2<..>` for every machine bound and rounds a
+non-machine bound OUTWARD (the direction-blind over-proof is fixed); the
+interval kernel carries openness by ATTAINABILITY (`x>2, y>3` gives
+`x + y: real<5<..>`; a closed-zero multiplication corner stays closed);
+and the descriptor `facts.bounds` side channel is retired — the type is
+the single channel for a symbol's own strict bound, while the assumption
+fact index keeps serving part-subject bounds (`Re(s) > 1`) and
+expression-level orderings, which a type cannot express. Pinned in
+`test/compute-engine/open-bounds.test.ts`.
+
+**Historical record of what the open-bounds half replaced:**
 
 The four work items of the 2026-08-22 entry "Ranged types should carry
 sign (and a literal's value) through type derivation" are DONE

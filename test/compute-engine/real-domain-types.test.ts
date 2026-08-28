@@ -155,7 +155,7 @@ describe('TYPE: Power/Root of a negative base', () => {
     // "Ranged types should carry sign…" item 4) — still no widening, the
     // claim narrowed. (`Power(-2, 2)` below folds to the literal `4` at
     // canonicalization, so its type is that literal's own type.)
-    [['Power', 2, 0.3], '(finite_real<0..>) & !0'],
+    [['Power', 2, 0.3], 'finite_real<0<..>'],
     [['Power', -2, 2], '4'],
     [['Power', 'r', 'n'], 'finite_number'],
     [['Power', -2, 'n'], 'finite_number'], // unprovable exponent

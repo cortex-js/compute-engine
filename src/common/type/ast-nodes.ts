@@ -162,6 +162,11 @@ export interface NumericTypeNode extends ASTNode {
   baseType: string;
   lowerBound?: ValueNode;
   upperBound?: ValueNode;
+  /** The lower bound is EXCLUDED (`real<0<..>` is x > 0). Meaningful only
+   * when `lowerBound` is present. */
+  lowerOpen?: boolean;
+  /** The upper bound is EXCLUDED (`real<..<3>` is x < 3). */
+  upperOpen?: boolean;
 }
 
 export interface PrimitiveTypeNode extends ASTNode {

@@ -269,12 +269,6 @@ type LambdaDefinition = {
 type OperandFactsMirror = {
   readonly finite: boolean | undefined;
   readonly sgn?: Sign;
-  readonly bounds?: {
-    readonly lower?: number;
-    readonly lowerStrict?: boolean;
-    readonly upper?: number;
-    readonly upperStrict?: boolean;
-  };
   readonly closed: boolean | undefined;
   readonly collection: boolean | undefined;
   readonly finiteCollection: boolean | undefined;

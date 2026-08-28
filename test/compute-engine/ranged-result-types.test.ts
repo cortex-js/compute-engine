@@ -42,12 +42,12 @@ describe('RANGED RESULTS — the enumerated heads', () => {
   });
 
   it('Exp (a positive base): e^x is positive, in the type', () => {
-    expect(ce.parse('e^x').type.toString()).toBe('(finite_real<0..>) & !0');
+    expect(ce.parse('e^x').type.toString()).toBe('finite_real<0<..>');
     expect(ce.box(['Exp', 'x']).type.toString()).toBe(
-      '(finite_real<0..>) & !0'
+      'finite_real<0<..>'
     );
     // Any provably positive base carries the same claim.
-    expect(ce.parse('2^x').type.toString()).toBe('(finite_real<0..>) & !0');
+    expect(ce.parse('2^x').type.toString()).toBe('finite_real<0<..>');
   });
 });
 

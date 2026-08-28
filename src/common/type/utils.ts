@@ -1,3 +1,4 @@
+import { makeNumericRangeType } from './numeric-range.js';
 import { isEffectSubset, unionEffectSets } from './effects.js';
 import { substituteTypeVariables } from './instantiate.js';
 import { parseType } from './parse.js';
@@ -23,13 +24,6 @@ import type {
   TypeString,
 } from './types.js';
 
-/** The `!0` member of a sign-carrying numeric type. Types are published as
- * immutable values, so one shared node is safe. */
-const NOT_ZERO_TYPE: Type = {
-  kind: 'negation',
-  type: { kind: 'value', value: 0 },
-};
-
 /** `tier<0..>` — the non-negative half of a numeric tier. */
 export function nonNegativeRangeType(tier: NumericPrimitiveType): Type {
   return { kind: 'numeric', type: tier, lower: 0 };
@@ -40,22 +34,18 @@ export function nonPositiveRangeType(tier: NumericPrimitiveType): Type {
   return { kind: 'numeric', type: tier, upper: 0 };
 }
 
-/** `tier<0..> & !0` — the positive members of a numeric tier (there are no
- * open range bounds in the grammar, so "positive" is the closed lower bound
- * with the zero excluded; `signOfType` reads it back as `positive`). */
+/** `tier<0<..>` — the positive members of a numeric tier, as an open range
+ * (`signOfType` reads it back as `positive`). */
 export function positiveRangeType(tier: NumericPrimitiveType): Type {
-  return {
-    kind: 'intersection',
-    types: [nonNegativeRangeType(tier), NOT_ZERO_TYPE],
-  };
+  // The open range IS the canonical spelling of "positive" (open-bound
+  // ranged types, ruled 2026-08-28): `real<0<..>`, and on an integer tier
+  // the normalized closed `integer<1..>`.
+  return makeNumericRangeType(tier, 0, Infinity, true, false);
 }
 
-/** `tier<..0> & !0` — the negative members of a numeric tier. */
+/** `tier<..<0>` — the negative members of a numeric tier. */
 export function negativeRangeType(tier: NumericPrimitiveType): Type {
-  return {
-    kind: 'intersection',
-    types: [nonPositiveRangeType(tier), NOT_ZERO_TYPE],
-  };
+  return makeNumericRangeType(tier, -Infinity, 0, false, true);
 }
 
 /**
@@ -149,14 +139,15 @@ export function negateNumericType(t: Type): Type {
       const lo = t.lower ?? undefined;
       const hi = t.upper ?? undefined;
       if (lo === undefined && hi === undefined) return t;
-      // `-0` normalizes to `0` so a reflected closed-at-zero bound stays
-      // the canonical spelling.
-      return {
-        kind: 'numeric',
-        type: t.type,
-        ...(hi !== undefined ? { lower: hi === 0 ? 0 : -hi } : {}),
-        ...(lo !== undefined ? { upper: lo === 0 ? 0 : -lo } : {}),
-      };
+      // Reflect bounds AND their open flags (`-0` normalizes to `0` in the
+      // constructor so a reflected zero bound stays canonical).
+      return makeNumericRangeType(
+        t.type,
+        hi === undefined ? -Infinity : -hi,
+        lo === undefined ? Infinity : -lo,
+        t.upperOpen === true,
+        t.lowerOpen === true
+      );
     }
     case 'value': {
       const v = t.value;
@@ -1507,8 +1498,10 @@ export function signOfType(
       if (!REAL_NAN_FREE_PRIMITIVES.has(t.type)) return undefined;
       const lo = t.lower ?? -Infinity;
       const hi = t.upper ?? Infinity;
-      if (lo > 0) return 'positive';
-      if (hi < 0) return 'negative';
+      // An OPEN endpoint at 0 proves the strict sign directly (`real<0<..>`
+      // is "x > 0"); a closed one proves the weak sign.
+      if (lo > 0 || (lo === 0 && t.lowerOpen === true)) return 'positive';
+      if (hi < 0 || (hi === 0 && t.upperOpen === true)) return 'negative';
       if (lo === 0 && hi === 0) return 'zero';
       if (lo === 0) return 'non-negative';
       if (hi === 0) return 'non-positive';

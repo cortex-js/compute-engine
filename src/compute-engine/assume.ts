@@ -1,3 +1,5 @@
+import { makeNumericRangeType } from '../common/type/numeric-range.js';
+import { nextDown, nextUp } from './numerics/numeric.js';
 import { isEmptyType, isSubtype } from '../common/type/subtype.js';
 import { reduceType } from '../common/type/reduce.js';
 import { functionResult } from '../common/type/utils.js';
@@ -559,31 +561,52 @@ function assumeEquality(proposition: Expression): AssumeResult {
 }
 
 /**
+ * The comparison a proposition states ABOUT ITS SYMBOL, once the symbol's
+ * side is accounted for: `Less(a, sym)` says the symbol is GREATER than
+ * `a`. Shared by every range-refinement branch so the flip logic lives in
+ * one place.
+ */
+function effectiveComparisonOp(
+  originalOp: string,
+  symbolOnLeft: boolean
+): 'greater' | 'greaterEqual' | 'less' | 'lessEqual' {
+  if (originalOp === 'Greater') return symbolOnLeft ? 'greater' : 'less';
+  if (originalOp === 'GreaterEqual')
+    return symbolOnLeft ? 'greaterEqual' : 'lessEqual';
+  if (originalOp === 'Less') return symbolOnLeft ? 'less' : 'greater';
+  return symbolOnLeft ? 'lessEqual' : 'greaterEqual';
+}
+
+/**
  * The type a simple comparison against a finite real literal proves for its
- * symbol: `x > 0` proves `real<0..> & !0`, `x ≥ k` proves `real<k..>`,
- * `x < k` proves `real<..k>`. A STRICT bound with a non-zero literal is
- * approximated by the closed range (`x > 2` → `real<2..>`): ranges have no
- * open bounds, and the closed range is sound — it admits every value the
- * assumption admits, plus the endpoint. The exact strict bound is still
- * held by the assumption facts themselves (`verify(x > 2)` uses those, not
- * the type); only the type channel carries the approximation. For a strict
- * zero bound the exact spelling exists (`& !0`) and is used, because
- * zero-exclusion is what the pole-guarding sign consumers need.
+ * symbol: `x > k` proves the OPEN range `real<k<..>`, `x ≥ k` the closed
+ * `real<k..>`, `x < k` `real<..<k>`, `x ≤ k` `real<..k>` (open-bound
+ * ranged types, `docs/plans/2026-08-28-open-bounds-in-ranged-types.md`
+ * §3.4) — the type is the single channel for a symbol's own strict
+ * magnitude bound; the assumption fact index keeps serving what a type
+ * cannot say (a bound on `Re(s)`, expression-level orderings).
+ *
+ * `exact` says whether the machine number `k` IS the assumed bound or a
+ * ROUNDING of it (`assume(x > 1 − 10⁻³⁰)` has `k === 1`). A rounded
+ * bound is moved OUTWARD by one ulp (a lower bound down, an upper bound
+ * up) so the range admits every value the assumption admits — the old
+ * behavior rounded a lower bound UP to 1 and over-proved `x > 1` in
+ * every consumer — and its open flag is demoted to closed: the strict
+ * fact was about the original endpoint, and the moved bound is no longer
+ * that endpoint.
  */
 function rangeTypeForComparison(
   op: 'greater' | 'greaterEqual' | 'less' | 'lessEqual',
-  k: number
+  k: number,
+  exact: boolean
 ): Type {
-  const range: Type =
-    op === 'greater' || op === 'greaterEqual'
-      ? { kind: 'numeric', type: 'real', lower: k }
-      : { kind: 'numeric', type: 'real', upper: k };
-  if ((op === 'greater' || op === 'less') && k === 0)
-    return {
-      kind: 'intersection',
-      types: [range, { kind: 'negation', type: { kind: 'value', value: 0 } }],
-    };
-  return range;
+  const strict = op === 'greater' || op === 'less';
+  const isLower = op === 'greater' || op === 'greaterEqual';
+  const bound = exact ? k : isLower ? nextDown(k) : nextUp(k);
+  const open = strict && exact;
+  return isLower
+    ? makeNumericRangeType('real', bound, Infinity, open, false)
+    : makeNumericRangeType('real', -Infinity, bound, false, open);
 }
 
 function assumeInequality(proposition: Expression): AssumeResult {
@@ -924,24 +947,34 @@ function assumeInequality(proposition: Expression): AssumeResult {
           ? other.numericValue
           : undefined;
       if (typeof k === 'number' && Number.isFinite(k) && other!.im === 0) {
-        const originalOp = proposition.operator;
-        const effectiveOp =
-          originalOp === 'Greater'
-            ? symbolOnLeft
-              ? 'greater'
-              : 'less'
-            : originalOp === 'GreaterEqual'
-              ? symbolOnLeft
-                ? 'greaterEqual'
-                : 'lessEqual'
-              : originalOp === 'Less'
-                ? symbolOnLeft
-                  ? 'less'
-                  : 'greater'
-                : symbolOnLeft
-                  ? 'lessEqual'
-                  : 'greaterEqual';
-        rangeType = rangeTypeForComparison(effectiveOp, k);
+        // `numericValue` is a plain number only for a machine literal, so
+        // this branch is exact by construction; a non-machine bound (the
+        // bignum `1 − 10⁻³⁰`, the exact `1/3`) takes the branch below.
+        const exact = true;
+        const effectiveOp = effectiveComparisonOp(
+          proposition.operator,
+          symbolOnLeft
+        );
+        rangeType = rangeTypeForComparison(effectiveOp, k, exact);
+      } else if (
+        (symbolOnLeft || isSymbol(proposition.op2, symbol)) &&
+        isNumber(other) &&
+        other.im === 0 &&
+        Number.isFinite(other.re)
+      ) {
+        // A NON-machine bound (bignum, exact rational, radical): the type
+        // used to stay bare `real` here. Its machine projection `re` is a
+        // ROUNDING, so the range takes it rounded OUTWARD (the
+        // direction-blind over-proof this fixes), closed.
+        const effectiveOp = effectiveComparisonOp(
+          proposition.operator,
+          symbolOnLeft
+        );
+        const re = other.re;
+        // Machine-exact after all (`1/2` IS 0.5 — the isSame convention)?
+        // Then the bound is exact and keeps its open flag.
+        const exact = other.isSame(ce.number(re));
+        rangeType = rangeTypeForComparison(effectiveOp, re, exact);
       }
     }
 

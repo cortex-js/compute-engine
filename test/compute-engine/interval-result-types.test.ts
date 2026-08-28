@@ -9,6 +9,7 @@ import {
   type Interval,
 } from '../../src/compute-engine/numerics/interval-arithmetic';
 import { parseType } from '../../src/common/type/parse';
+import { reduceType } from '../../src/common/type/reduce';
 
 /**
  * Interval arithmetic for arithmetic RESULT types — the interval-
@@ -28,9 +29,9 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
     const e = new ComputeEngine();
     e.assume(e.box(['Greater', 'x', 2]));
     e.assume(e.box(['Greater', 'y', 3]));
-    expect(e.box(['Add', 'x', 'y']).type.toString()).toBe('real<5..>');
+    expect(e.box(['Add', 'x', 'y']).type.toString()).toBe('real<5<..>');
     expect(e.box(['Multiply', 'x', 'y']).type.toString()).toBe(
-      'finite_real<6..>'
+      'finite_real<6<..>'
     );
   });
 
@@ -41,7 +42,7 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
     const e = new ComputeEngine();
     e.assume(e.box(['Greater', 'x', -1]));
     e.assume(e.box(['Greater', 'y', -1]));
-    expect(e.box(['Add', 'x', 'y']).type.toString()).toBe('real<-2..>');
+    expect(e.box(['Add', 'x', 'y']).type.toString()).toBe('real<-2<..>');
   });
 
   it('|x| tightens with the operand interval; the old scope boundary moves', () => {
@@ -80,7 +81,7 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
     // sign arm answers, not a computed range.
     e.declare('c', 'real<2..3>');
     expect(e.box(['Power', 'c', -2]).type.toString()).toBe(
-      '(finite_real<0..>) & !0'
+      'finite_real<0<..>'
     );
   });
 
@@ -223,7 +224,7 @@ describe('INTERVAL RESULT TYPES — kernel adversarial matrix', () => {
     // pre-existing positive-base sign claim is kept, not lost.
     e.declare('y', 'real<0.25..0.5>');
     expect(e.box(['Power', 'y', 10000003]).type.toString()).toBe(
-      '(finite_real<0..>) & !0'
+      'finite_real<0<..>'
     );
   });
 
@@ -249,9 +250,18 @@ describe('INTERVAL RESULT TYPES — kernel adversarial matrix', () => {
 
   it('reader: intersections, unions, and NaN-admitting bases', () => {
     expect(intervalOfType(parseType('real<0..1>'))).toEqual(iv(0, 1));
-    expect(intervalOfType(parseType('(real<0..>) & !0'))).toEqual(
-      iv(0, Infinity)
-    );
+    // The reader ignores `!0` in an UNREDUCED intersection (a negation
+    // proves no interval); the reducer turns the spelling into the open
+    // range, whose flag the reader then carries.
+    expect(intervalOfType(parseType('(real<0..>) & !0'))).toEqual({
+      lo: 0,
+      hi: Infinity,
+    });
+    expect(intervalOfType(reduceType(parseType('(real<0..>) & !0')))).toEqual({
+      lo: 0,
+      hi: Infinity,
+      loOpen: true,
+    });
     expect(intervalOfType(parseType('real<0..1> | real<3..4>'))).toEqual(
       iv(0, 4)
     );

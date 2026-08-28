@@ -30,11 +30,20 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import { nextDown, nextUp } from './numeric.js';
 import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
 import { nonNegativeRangeType } from '../../common/type/utils.js';
+import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 
 /** A closed interval over the extended reals. `lo ≤ hi`; `±Infinity`
  * means unbounded on that side. Never represents an empty set — a reader
  * that derives `lo > hi` answers `undefined` instead. */
-export type Interval = { lo: number; hi: number };
+export type Interval = {
+  lo: number;
+  hi: number;
+  /** The lower endpoint is NOT attained (x > lo). Meaningful only for a
+   * finite `lo`. Openness is an ATTAINABILITY fact per the rules in
+   * `docs/plans/2026-08-28-open-bounds-in-ranged-types.md` §3.5. */
+  loOpen?: boolean;
+  hiOpen?: boolean;
+};
 
 const FULL: Interval = { lo: -Infinity, hi: Infinity };
 
@@ -108,9 +117,13 @@ export function intervalOfType(
       return typeof t.value === 'number' && !Number.isNaN(t.value)
         ? { lo: t.value, hi: t.value }
         : undefined;
-    case 'numeric':
+    case 'numeric': {
       if (!NAN_FREE_REAL_TIERS.has(t.type)) return undefined;
-      return { lo: t.lower ?? -Infinity, hi: t.upper ?? Infinity };
+      const iv: Interval = { lo: t.lower ?? -Infinity, hi: t.upper ?? Infinity };
+      if (t.lowerOpen) iv.loOpen = true;
+      if (t.upperOpen) iv.hiOpen = true;
+      return iv;
+    }
     case 'reference': {
       if (!t.alias || t.def === undefined) return undefined;
       seen ??= new Set();
@@ -122,26 +135,45 @@ export function intervalOfType(
       let lo = -Infinity;
       let hi = Infinity;
       let answered = false;
+      // Meet: at an equal endpoint OPEN wins.
+      let loOpen = false;
+      let hiOpen = false;
       for (const m of t.types) {
         const b = intervalOfType(m, seen);
         if (b === undefined) continue;
         answered = true;
-        if (b.lo > lo) lo = b.lo;
-        if (b.hi < hi) hi = b.hi;
+        if (b.lo > lo) {
+          lo = b.lo;
+          loOpen = b.loOpen === true;
+        } else if (b.lo === lo && b.loOpen) loOpen = true;
+        if (b.hi < hi) {
+          hi = b.hi;
+          hiOpen = b.hiOpen === true;
+        } else if (b.hi === hi && b.hiOpen) hiOpen = true;
       }
       if (!answered || lo > hi) return undefined;
-      return { lo, hi };
+      if (lo === hi && (loOpen || hiOpen)) return undefined;
+      return withFlags({ lo, hi }, loOpen, hiOpen);
     }
     case 'union': {
+      // Hull: an endpoint is open only if EVERY member reaching it is open.
       let lo = Infinity;
       let hi = -Infinity;
+      let loOpen = true;
+      let hiOpen = true;
       for (const m of t.types) {
         const b = intervalOfType(m, seen);
         if (b === undefined) return undefined;
-        if (b.lo < lo) lo = b.lo;
-        if (b.hi > hi) hi = b.hi;
+        if (b.lo < lo) {
+          lo = b.lo;
+          loOpen = b.loOpen === true;
+        } else if (b.lo === lo && !b.loOpen) loOpen = false;
+        if (b.hi > hi) {
+          hi = b.hi;
+          hiOpen = b.hiOpen === true;
+        } else if (b.hi === hi && !b.hiOpen) hiOpen = false;
       }
-      return lo > hi ? undefined : { lo, hi };
+      return lo > hi ? undefined : withFlags({ lo, hi }, loOpen, hiOpen);
     }
     default:
       return undefined;
@@ -223,15 +255,7 @@ function dirProd(a: number, b: number, dir: -1 | 1): number {
     if (dir < 0) return positive ? 0 : -Number.MIN_VALUE;
     return positive ? Number.MIN_VALUE : 0;
   }
-  const absP = Math.abs(p);
-  if (
-    absP < MIN_NORMAL_DOUBLE ||
-    absP > 1e300 ||
-    Math.abs(a) > 1e150 ||
-    Math.abs(b) > 1e150 ||
-    Math.abs(a) < MIN_NORMAL_DOUBLE ||
-    Math.abs(b) < MIN_NORMAL_DOUBLE
-  ) {
+  if (!inDekkerWindow(a, b, p)) {
     // Outside Dekker's validity window: unconditional outward step. The
     // window excludes subnormal OPERANDS too, not just a subnormal
     // product — a subnormal times a large factor can land back in the
@@ -244,6 +268,51 @@ function dirProd(a: number, b: number, dir: -1 | 1): number {
   return err > 0 ? nextUp(p) : p;
 }
 
+function withFlags(iv: Interval, loOpen: boolean, hiOpen: boolean): Interval {
+  if (loOpen && Number.isFinite(iv.lo)) iv.loOpen = true;
+  if (hiOpen && Number.isFinite(iv.hi)) iv.hiOpen = true;
+  return iv;
+}
+
+/** Was the directed result EXACT — the true value itself, not a stepped or
+ * saturated neighbor? Only an exact endpoint may carry openness: a stepped
+ * bound has moved strictly outward, is no longer the true extreme, and is
+ * always closed (§3.5 demotion rule). Exactness is read back from the
+ * plain double op: the directed op returns exactly `a op b` iff the double
+ * op was exact, and every inexact case stepped away from it. */
+function sumExact(a: number, b: number, r: number): boolean {
+  return Number.isFinite(r) && r === a + b && exactSum(a, b);
+}
+function exactSum(a: number, b: number): boolean {
+  const s = a + b;
+  if (!Number.isFinite(s)) return false;
+  const bb = s - a;
+  return a - (s - bb) + (b - bb) === 0;
+}
+function prodExact(a: number, b: number, r: number): boolean {
+  if (!Number.isFinite(r) || r !== a * b) return false;
+  if (r === 0) return a === 0 || b === 0;
+  if (!inDekkerWindow(a, b, r)) return false;
+  return productError(a, b, r) === 0;
+}
+
+/** Where Dekker's two-product split is proven exact: NORMAL operands and
+ * product, away from overflow of the `2²⁷+1` scaling. ONE predicate for
+ * both the directed product (which steps unconditionally outside it) and
+ * the exactness test (which answers "not exact" outside it), so the two
+ * can never disagree about the same operands. */
+function inDekkerWindow(a: number, b: number, p: number): boolean {
+  const absP = Math.abs(p);
+  return (
+    absP >= MIN_NORMAL_DOUBLE &&
+    absP <= 1e300 &&
+    Math.abs(a) <= 1e150 &&
+    Math.abs(b) <= 1e150 &&
+    Math.abs(a) >= MIN_NORMAL_DOUBLE &&
+    Math.abs(b) >= MIN_NORMAL_DOUBLE
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Interval operations.
 // ---------------------------------------------------------------------------
@@ -251,15 +320,23 @@ function dirProd(a: number, b: number, dir: -1 | 1): number {
 export function addIntervals(a: Interval, b: Interval): Interval {
   const lo = dirSum(a.lo, b.lo, -1);
   const hi = dirSum(a.hi, b.hi, 1);
-  // A NaN endpoint (∞ + (−∞)) drops the claim on that side.
-  return {
+  // A NaN endpoint (∞ + (−∞)) drops the claim on that side. ADD has one
+  // candidate per side, attained iff both contributing endpoints are: the
+  // bound is open iff either input endpoint is — and only when the sum was
+  // computed exactly (§3.5).
+  const r: Interval = {
     lo: Number.isNaN(lo) ? -Infinity : lo,
     hi: Number.isNaN(hi) ? Infinity : hi,
   };
+  return withFlags(
+    r,
+    (a.loOpen || b.loOpen) === true && sumExact(a.lo, b.lo, lo),
+    (a.hiOpen || b.hiOpen) === true && sumExact(a.hi, b.hi, hi)
+  );
 }
 
 export function negInterval(a: Interval): Interval {
-  return { lo: -a.hi, hi: -a.lo }; // exact
+  return withFlags({ lo: -a.hi, hi: -a.lo }, a.hiOpen === true, a.loOpen === true); // exact
 }
 
 export function mulIntervals(a: Interval, b: Interval): Interval {
@@ -273,33 +350,72 @@ export function mulIntervals(a: Interval, b: Interval): Interval {
   let hi = -Infinity;
   let loSeen = false;
   let hiSeen = false;
-  for (const [x, y] of [
-    [a.lo, b.lo],
-    [a.lo, b.hi],
-    [a.hi, b.lo],
-    [a.hi, b.hi],
+  // Openness by ATTAINABILITY (§3.5): a corner is attained iff both its
+  // endpoints are — EXCEPT a corner through a CLOSED zero, which attains 0
+  // for every point of the other operand and is therefore attained
+  // whatever the other flag says; a corner through an OPEN zero never
+  // attains 0. On a TIE between corners reaching the same extreme, a
+  // closed (attained) corner wins. A corner whose product was not exact
+  // cannot carry openness.
+  let loOpen = true;
+  let hiOpen = true;
+  const cornerOpen = (x: number, xo: boolean, y: number, yo: boolean) => {
+    // A zero endpoint attains 0 for EVERY point of the other operand; so
+    // when both endpoints are 0 the product 0 is attained if EITHER is
+    // closed (dual-review catch: `(0, ∞) × {0}` must be the closed {0},
+    // not an empty open singleton).
+    if (x === 0 && y === 0) return xo && yo;
+    if (x === 0) return xo;
+    if (y === 0) return yo;
+    return xo || yo;
+  };
+  for (const [x, xo, y, yo] of [
+    [a.lo, a.loOpen === true, b.lo, b.loOpen === true],
+    [a.lo, a.loOpen === true, b.hi, b.hiOpen === true],
+    [a.hi, a.hiOpen === true, b.lo, b.loOpen === true],
+    [a.hi, a.hiOpen === true, b.hi, b.hiOpen === true],
   ] as const) {
+    const open = cornerOpen(x, xo, y, yo);
     const cLo = dirProd(x, y, -1);
     if (!Number.isNaN(cLo)) {
       loSeen = true;
-      if (cLo < lo) lo = cLo;
+      const o = open && prodExact(x, y, cLo);
+      if (cLo < lo) {
+        lo = cLo;
+        loOpen = o;
+      } else if (cLo === lo && !o) loOpen = false;
     }
     const cHi = dirProd(x, y, 1);
     if (!Number.isNaN(cHi)) {
       hiSeen = true;
-      if (cHi > hi) hi = cHi;
+      const o = open && prodExact(x, y, cHi);
+      if (cHi > hi) {
+        hi = cHi;
+        hiOpen = o;
+      } else if (cHi === hi && !o) hiOpen = false;
     }
   }
-  return {
-    lo: loSeen ? lo : -Infinity,
-    hi: hiSeen ? hi : Infinity,
-  };
+  return withFlags(
+    { lo: loSeen ? lo : -Infinity, hi: hiSeen ? hi : Infinity },
+    loSeen && loOpen,
+    hiSeen && hiOpen
+  );
 }
 
 export function absInterval(a: Interval): Interval {
   if (a.lo >= 0) return a;
   if (a.hi <= 0) return negInterval(a);
-  return { lo: 0, hi: Math.max(-a.lo, a.hi) }; // exact operations only
+  // Crosses zero: the lower bound 0 is an INTERIOR point of the operand —
+  // always attained, so always closed. The upper bound is attained iff
+  // the winning endpoint is; a tie between |lo| and hi is closed if
+  // either is.
+  const l = -a.lo;
+  const h = a.hi;
+  let hiOpen: boolean;
+  if (l > h) hiOpen = a.loOpen === true;
+  else if (h > l) hiOpen = a.hiOpen === true;
+  else hiOpen = a.loOpen === true && a.hiOpen === true;
+  return withFlags({ lo: 0, hi: Math.max(l, h) }, false, hiOpen); // exact operations only
 }
 
 /** `x^n` over an interval, for a LITERAL integer exponent `n ≥ 1` (the
@@ -309,18 +425,64 @@ export function absInterval(a: Interval): Interval {
 export function powInterval(a: Interval, n: number): Interval | undefined {
   if (!Number.isInteger(n) || n < 1) return undefined;
   if (n === 1) return a;
+  // Monotone arms: one candidate per side; openness carries iff the
+  // contributing endpoint is open AND its power was computed exactly
+  // (§3.5). `mono(x, xo, dir)` computes the directed power and its flag.
+  const mono = (x: number, xo: boolean, dir: -1 | 1): [number, boolean] => {
+    const v = dirPow(x, n, dir);
+    return [v, xo && powExact(x, n, v)];
+  };
   if (n % 2 === 1) {
     // Odd: monotone increasing on all of ℝ.
-    return { lo: dirPow(a.lo, n, -1), hi: dirPow(a.hi, n, 1) };
+    const [lo, lof] = mono(a.lo, a.loOpen === true, -1);
+    const [hi, hif] = mono(a.hi, a.hiOpen === true, 1);
+    return withFlags({ lo, hi }, lof, hif);
   }
   // Even.
-  if (a.lo >= 0) return { lo: dirPow(a.lo, n, -1), hi: dirPow(a.hi, n, 1) };
-  if (a.hi <= 0)
+  if (a.lo >= 0) {
+    const [lo, lof] = mono(a.lo, a.loOpen === true, -1);
+    const [hi, hif] = mono(a.hi, a.hiOpen === true, 1);
+    return withFlags({ lo, hi }, lof, hif);
+  }
+  if (a.hi <= 0) {
     // Monotone DECREASING on the non-positive half: `real<-3..-2>` squares
     // to `[4, 9]`, not `[0, 9]`.
-    return { lo: dirPow(a.hi, n, -1), hi: dirPow(a.lo, n, 1) };
-  // Crosses zero.
-  return { lo: 0, hi: Math.max(dirPow(a.lo, n, 1), dirPow(a.hi, n, 1)) };
+    const [lo, lof] = mono(a.hi, a.hiOpen === true, -1);
+    const [hi, hif] = mono(a.lo, a.loOpen === true, 1);
+    return withFlags({ lo, hi }, lof, hif);
+  }
+  // Crosses zero: the lower bound 0 is an INTERIOR point — always attained,
+  // always closed. The upper bound follows the winning (or tied) endpoint.
+  const [pl, plf] = mono(a.lo, a.loOpen === true, 1);
+  const [ph, phf] = mono(a.hi, a.hiOpen === true, 1);
+  let hiOpen: boolean;
+  if (pl > ph) hiOpen = plf;
+  else if (ph > pl) hiOpen = phf;
+  else hiOpen = plf && phf;
+  return withFlags({ lo: 0, hi: Math.max(pl, ph) }, false, hiOpen);
+}
+
+/** Was `x^n` (as computed by `dirPow`) exact? Re-multiplies by squaring
+ * with exactness tracking: every partial product must be exact. */
+function powExact(x: number, n: number, v: number): boolean {
+  if (!Number.isFinite(v)) return false;
+  let result = 1;
+  let b = Math.abs(x);
+  let e = n;
+  while (e > 0) {
+    if (e % 2 === 1) {
+      const r = result * b;
+      if (!prodExact(result, b, r) && !(result === 1 || b === 1)) return false;
+      result = r;
+    }
+    e = Math.floor(e / 2);
+    if (e > 0) {
+      const sq = b * b;
+      if (!prodExact(b, b, sq) && b !== 1) return false;
+      b = sq;
+    }
+  }
+  return Math.abs(v) === result;
 }
 
 /** `x^n` for one endpoint, `n ≥ 1` integer, directed. Negative bases are
@@ -373,21 +535,34 @@ function dirPowAbs(x: number, n: number, dir: -1 | 1): number {
  */
 export function finalizeInterval(iv: Interval): Interval {
   let { lo, hi } = iv;
+  // A bound the coarsening MOVES is no longer the true extreme, so its
+  // openness (an attainability fact about that extreme) is demoted to
+  // closed; an untouched bound keeps its flag (§3.5 demotion rule).
+  let loOpen = iv.loOpen === true;
+  let hiOpen = iv.hiOpen === true;
   if (Number.isFinite(lo) && lo !== 0) {
-    lo = new BigDecimal(lo)
+    const c = new BigDecimal(lo)
       .toPrecisionToward(DERIVED_BOUND_DIGITS, 'floor')
       .toNumber();
-    if (!Number.isFinite(lo) || Math.abs(lo) < MIN_NORMAL_DOUBLE)
+    if (c !== lo) loOpen = false;
+    lo = c;
+    if (!Number.isFinite(lo) || Math.abs(lo) < MIN_NORMAL_DOUBLE) {
       lo = -Infinity;
+      loOpen = false;
+    }
   } else if (lo === 0) lo = 0; // normalize -0
   if (Number.isFinite(hi) && hi !== 0) {
-    hi = new BigDecimal(hi)
+    const c = new BigDecimal(hi)
       .toPrecisionToward(DERIVED_BOUND_DIGITS, 'ceiling')
       .toNumber();
-    if (!Number.isFinite(hi) || Math.abs(hi) < MIN_NORMAL_DOUBLE)
+    if (c !== hi) hiOpen = false;
+    hi = c;
+    if (!Number.isFinite(hi) || Math.abs(hi) < MIN_NORMAL_DOUBLE) {
       hi = Infinity;
+      hiOpen = false;
+    }
   } else if (hi === 0) hi = 0;
-  return { lo, hi };
+  return withFlags({ lo, hi }, loOpen, hiOpen);
 }
 
 /**
@@ -449,11 +624,11 @@ export function attachInterval(
   const hasHi = Number.isFinite(iv.hi);
   if (!hasLo && !hasHi) return tier;
   if (hasLo && hasHi && iv.lo > iv.hi) return tier;
-  const node: Extract<Type, { kind: 'numeric' }> = {
-    kind: 'numeric',
-    type: tier as NumericPrimitiveType,
-  };
-  if (hasLo) node.lower = iv.lo;
-  if (hasHi) node.upper = iv.hi;
-  return node;
+  return makeNumericRangeType(
+    tier as NumericPrimitiveType,
+    iv.lo,
+    iv.hi,
+    iv.loOpen === true,
+    iv.hiOpen === true
+  );
 }

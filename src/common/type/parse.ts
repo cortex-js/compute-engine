@@ -581,7 +581,26 @@ function scanToClauseComma(text: string, pos: number): number {
   while (pos < text.length) {
     const ch = text[pos];
     if (ch === ',' && depth === 0) return pos;
-    if (ch === '(' || ch === '<' || ch === '[' || ch === '{') depth += 1;
+    // The open-bound range markers `<..` and `..<` contain a `<` that is
+    // NOT a bracket (a range bound is a numeric literal, never a bracketed
+    // type): skip them without a depth change, exactly as `->` is skipped.
+    // Under the ruled marker spelling `>` is always a genuine bracket.
+    // `<..` is the lower marker ONLY after a bound character — the same
+    // rule the lexer applies — so the opening bracket of an unbounded-lower
+    // range (`real<..3>`) still counts as a bracket (dual-review catch: the
+    // unconditional skip left that bracket's `>` to drive the depth
+    // negative and hide the next clause comma).
+    if (
+      ch === '<' &&
+      text[pos + 1] === '.' &&
+      text[pos + 2] === '.' &&
+      pos > 0 &&
+      /[0-9.∞o+\-]/.test(text[pos - 1])
+    )
+      pos += 2;
+    else if (ch === '.' && text[pos + 1] === '.' && text[pos + 2] === '<')
+      pos += 2;
+    else if (ch === '(' || ch === '<' || ch === '[' || ch === '{') depth += 1;
     else if (ch === ')' || ch === '>' || ch === ']' || ch === '}') depth -= 1;
     else if (ch === '-' && text[pos + 1] === '>') pos += 1;
     else if (ch === '"' || ch === "'" || ch === '`') {

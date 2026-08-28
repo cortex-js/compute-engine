@@ -34,6 +34,8 @@ export type TokenType =
   | '+'
   | '.'
   | '..'
+  | '<..'
+  | '..<'
   | 'x'
   // Special
   | 'EOF'
@@ -332,6 +334,36 @@ export class Lexer {
     // Two-character operators
     if (this.match('->')) {
       return this.createToken('->', '->');
+    }
+    // Open-endpoint range markers (ranged types, 2026-08-28): `<..` after
+    // a lower bound spells "bound < x", `..<` before an upper bound spells
+    // "x < bound". Both are compound tokens — marker adjacency is
+    // lexically mandatory, so `0 < ..` never forms a marker — and are
+    // tried before the plain `..` and `<` tokens they would otherwise
+    // split into.
+    // Adjacency is enforced HERE: `<..` forms only when the `<` touches the
+    // character before it (the bound), and `..<` only when the `<` touches
+    // the character after it — so `0 <..` and `..< 3` lex as the plain
+    // tokens they would be read as, and the parser rejects them.
+    if (
+      this.peek() === '<' &&
+      this.input.startsWith('<..', this.pos) &&
+      this.pos > 0 &&
+      // The character before must be part of a BOUND (a digit, `∞`/`oo`, a
+      // sign, a decimal point): after the opening bracket `real<..<3>` the
+      // `<` is that bracket, not a marker, and `real <..` is not adjacent.
+      /[0-9.∞o+\-]/.test(this.input[this.pos - 1])
+    ) {
+      this.match('<..');
+      return this.createToken('<..', '<..');
+    }
+    if (
+      this.input.startsWith('..<', this.pos) &&
+      this.pos + 3 < this.input.length &&
+      !/\s/.test(this.input[this.pos + 3])
+    ) {
+      this.match('..<');
+      return this.createToken('..<', '..<');
     }
     if (this.match('..')) {
       return this.createToken('..', '..');

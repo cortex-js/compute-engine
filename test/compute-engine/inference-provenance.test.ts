@@ -100,7 +100,7 @@ describe('INFERENCE PROVENANCE — assumption writes', () => {
     expect(assumed).toHaveLength(1);
     // Since the §5.8 A2 change an inequality refines to the proven RANGE
     // type, and that is what the provenance row records.
-    expect(assumed[0][1]).toBe('(real<0..>) & !0');
+    expect(assumed[0][1]).toBe('real<0<..>');
     // The cause is the (normalized) proposition the assumption installed.
     expect(assumed[0][2]).toBeDefined();
   });

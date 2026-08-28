@@ -328,9 +328,10 @@ describe('Element(x, Interval(...))', () => {
       )
     ).toBe('ok');
     // Since §5.8 A2 the interval membership's bounds refine the type: the
-    // open lower bound at 0 contributes the exact `& !0` exclusion, the
-    // closed upper bound the range. The stored facts below are unchanged.
-    expect(ce.expr('x').type.toString()).toBe('(real<0..10>) & !0');
+    // open lower bound at 0 is an OPEN endpoint of the range (open-bound
+    // ranged types, 2026-08-28), the closed upper bound the closed one.
+    // The stored facts below are unchanged.
+    expect(ce.expr('x').type.toString()).toBe('real<0<..10>');
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(0)).toBe(true);
     expect(bounds.lowerStrict).toBe(true);
@@ -584,7 +585,9 @@ describe('regression: bare-symbol inequalities keep historical behavior', () => 
     // Since §5.8 A2 the literal bound refines the type to the proven
     // range (the strict bound is approximated by its closed range); the
     // stored assumption facts below still carry the exact strict bound.
-    expect(ce.expr('x').type.toString()).toBe('real<4..>');
+    // Open-bound ranged types (2026-08-28): the strict bound is kept in
+    // the type as an open endpoint.
+    expect(ce.expr('x').type.toString()).toBe('real<4<..>');
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(4)).toBe(true);
     expect(bounds.lowerStrict).toBe(true);

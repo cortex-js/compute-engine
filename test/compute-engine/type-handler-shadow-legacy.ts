@@ -109,6 +109,11 @@ function frozenNegateNumericType(t: Type): Type {
         type: t.type,
         ...(hi !== undefined ? { lower: hi === 0 ? 0 : -hi } : {}),
         ...(lo !== undefined ? { upper: lo === 0 ? 0 : -lo } : {}),
+        // Open-bound ranged types (2026-08-28): the endpoint flags reflect
+        // with the bounds, so the frozen copy keeps answering what the live
+        // `negateNumericType` answers.
+        ...(t.upperOpen ? { lowerOpen: true } : {}),
+        ...(t.lowerOpen ? { upperOpen: true } : {}),
       };
     }
     case 'value': {

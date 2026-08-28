@@ -5,6 +5,7 @@ import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import {
   absRange,
   intervalOfType,
+  type Interval,
 } from '../numerics/interval-arithmetic.js';
 import {
   EXTENDED_REAL_TYPE,
@@ -49,13 +50,11 @@ import {
  *   is derived, so a compound whose sign only a `sgn` handler knows —
  *   `Sqrt(Abs(x))`, `Negate(Floor(Abs(x)))` — answers `undefined` where the
  *   expression channel answered `non-negative` / `non-positive`.
- * - An assumption whose bound no machine number represents
- *   (`assume(x > 1/3)`) records a sign but neither a range in the type nor
- *   a machine bound in `facts.bounds`, so a magnitude comparison that the
- *   assumptions system could decide stays undecided. (A MACHINE-number
- *   assumption bound does reach the descriptor — `facts.bounds`, with its
- *   strictness — which is how a strict-assumed symbol still proves
- *   membership in an open domain.)
+ * - An assumption's magnitude bound reaches the descriptor through the
+ *   symbol's refined TYPE, strictness included (`assume(x > 2)` refines
+ *   to `real<2<..>`; a bound no machine number represents, like `1/3`,
+ *   is rounded outward and closed). A bound on a PART of a symbol
+ *   (`Re(s) > 1`) has no type slot and stays undecided here.
  * - Equality and ordering against an arbitrary constant are decided here
  *   from the operand's ranged type, its assumption bounds, and, for a
  *   number literal, its value type. There is no evaluation, so a compound
@@ -342,7 +341,7 @@ function mayBeNaN(d: OperandDescriptor): boolean {
  * the `provably*` helpers combine with a closed bound AT that endpoint to
  * prove the strict comparison.
  */
-function typeBounds(t: Type): { lo: number; hi: number } {
+function typeBounds(t: Type): Interval {
   // Delegates to THE bounds reader (`intervalOfType`,
   // `numerics/interval-arithmetic.ts`), so a domain proof here and a
   // computed arithmetic result range can never disagree about the same
@@ -354,16 +353,19 @@ function typeBounds(t: Type): { lo: number; hi: number } {
   // `lo > hi` pair that could over-prove, and a range on the new
   // `infinity`/`nan` primitives — which admit the unordered `~oo` or NaN
   // — used to be read as ordinary bounds.)
+  // The interval carries the endpoints' OPENNESS (`loOpen`/`hiOpen`) since
+  // open-bound ranged types landed — the strict facts `facts.bounds` used
+  // to carry now live in the type itself.
   return intervalOfType(t) ?? { lo: -Infinity, hi: Infinity };
 }
 
 /**
  * Three-valued magnitude comparisons against a machine constant `k`, from
  * the operand's ranged type (a closed bound AT `k` combined with a type
- * exclusion of `k` — `(real<0..1>) & !1` — proves the strict comparison),
- * its literal value, its assumption bounds (`facts.bounds`, which carry a
- * strict bound the assumption refinement did not spell into the type), and
- * — for `k = 0` only, the one comparison a sign decides — its sign.
+ * exclusion of `k` — `(real<0..1>) & !1` — proves the strict comparison,
+ * and so does an OPEN endpoint at `k`, the canonical spelling since
+ * open-bound ranged types: `real<1<..>`), its literal value, and — for
+ * `k = 0` only, the one comparison a sign decides — its sign.
  * `false` here means "not proven", never "proven otherwise": every caller
  * treats anything but `true` as undecided.
  */
@@ -400,20 +402,20 @@ function typeExcludesValue(t: Type, k: number, seen?: Set<object>): boolean {
   }
 }
 
+// The strict-comparison truth tables over the flagged `typeBounds` (open-
+// bound ranged types, `docs/plans/2026-08-28-open-bounds-in-ranged-types.md`
+// §3.3). An OPEN endpoint at `k` proves the strict comparison directly —
+// `real<1<..>` proves > 1 — which is what the retired descriptor
+// `facts.bounds` used to carry for assumption-derived bounds; a DECLARED
+// interior exclusion at `k` (`(real<0..1>) & !0.5`, no range spelling)
+// is still read by `typeExcludesValue`.
 function provablyGreater(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v > k;
   if (k === 0 && positiveSign(d.facts.sgn) === true) return true;
-  const b = d.facts.bounds;
-  if (
-    b?.lower !== undefined &&
-    (b.lower > k || (b.lower === k && b.lowerStrict === true))
-  )
-    return true;
   const tb = typeBounds(d.type);
   if (tb.lo > k) return true;
-  // A closed bound AT `k` plus an exclusion OF `k` is the lattice's strict
-  // bound: `(real<1..>) & !1` proves > 1.
+  if (tb.lo === k && tb.loOpen === true) return true;
   return tb.lo === k && typeExcludesValue(d.type, k);
 }
 
@@ -421,7 +423,6 @@ function provablyGreaterEqual(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v >= k;
   if (k === 0 && nonNegativeSign(d.facts.sgn) === true) return true;
-  if ((d.facts.bounds?.lower ?? -Infinity) >= k) return true;
   return typeBounds(d.type).lo >= k;
 }
 
@@ -429,15 +430,9 @@ function provablyLess(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v < k;
   if (k === 0 && negativeSign(d.facts.sgn) === true) return true;
-  const b = d.facts.bounds;
-  if (
-    b?.upper !== undefined &&
-    (b.upper < k || (b.upper === k && b.upperStrict === true))
-  )
-    return true;
   const tb = typeBounds(d.type);
   if (tb.hi < k) return true;
-  // Closed-at-`k` bound plus exclusion of `k`: the lattice's strict bound.
+  if (tb.hi === k && tb.hiOpen === true) return true;
   return tb.hi === k && typeExcludesValue(d.type, k);
 }
 
@@ -445,7 +440,6 @@ function provablyLessEqual(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v <= k;
   if (k === 0 && nonPositiveSign(d.facts.sgn) === true) return true;
-  if ((d.facts.bounds?.upper ?? Infinity) <= k) return true;
   return typeBounds(d.type).hi <= k;
 }
 
@@ -459,28 +453,18 @@ function provablyEquals(d: OperandDescriptor, k: number): boolean {
 }
 
 /** Is the operand provably DIFFERENT from the machine constant `k`? A
- * literal's value decides it; otherwise `k` outside the type's bounds or
- * the assumption bounds (a strict bound AT `k` counts), a type exclusion
- * of `k` (`… & !k`), or a sign that excludes `k`'s half-line, proves it. */
+ * literal's value decides it; otherwise `k` outside the type's bounds, `k`
+ * at an OPEN endpoint of them, a type exclusion of `k` (`… & !k`), or a
+ * sign that excludes `k`'s half-line, proves it. */
 function provablyDiffers(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);
   if (v !== undefined) return v !== k;
   if (typeExcludesValue(d.type, k)) return true;
-  const ab = d.facts.bounds;
-  if (ab !== undefined) {
-    if (
-      ab.lower !== undefined &&
-      (k < ab.lower || (k === ab.lower && ab.lowerStrict === true))
-    )
-      return true;
-    if (
-      ab.upper !== undefined &&
-      (k > ab.upper || (k === ab.upper && ab.upperStrict === true))
-    )
-      return true;
-  }
   const b = typeBounds(d.type);
   if (k < b.lo || k > b.hi) return true;
+  // `k` AT an open endpoint is excluded by the range itself.
+  if ((k === b.lo && b.loOpen === true) || (k === b.hi && b.hiOpen === true))
+    return true;
   const s = d.facts.sgn;
   if (k > 0) return nonPositiveSign(s) === true;
   if (k < 0) return nonNegativeSign(s) === true;

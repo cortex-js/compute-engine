@@ -439,27 +439,6 @@ export type OperandFacts = {
    * `real`), and a compound proof through operand signs (`Divide`'s
    * handler recurses; `Sign(p)` with `assume(p > 0)` is positive). */
   readonly sgn?: Sign;
-  /** Machine-number magnitude bounds recorded by `ce.assume` for a
-   * valueless symbol operand, WITH their strictness. The range construct
-   * has closed ends only, and the type ALGEBRA's spelling of an open
-   * endpoint — an intersection with a negated value type, as in
-   * `(real<0..1>) & !1` — is emitted by the assumption refinement only
-   * for the zero case (`!0`), so `assume(0 < v < 1)` refines the type to
-   * `(real<0..1>) & !0` and the strict `< 1` survives, today, only here.
-   * The comparison helpers (`provablyLess` and friends,
-   * `library/type-handlers-types.ts`) consult these bounds so a
-   * strict-assumed symbol still proves membership in an OPEN domain
-   * (`Artanh(v)` with `0 < v < 1` is `finite_real`); they also read a
-   * DECLARED exclusion spelling directly (`typeExcludesValue`). Read from
-   * the memoized assumption fact index — a pure source. Absent when the
-   * engine has no assumption bounds for the symbol, and for every
-   * non-symbol operand. */
-  readonly bounds?: {
-    readonly lower?: number;
-    readonly lowerStrict?: boolean;
-    readonly upper?: number;
-    readonly upperStrict?: boolean;
-  };
   /** The operand has no free variables (the `isConstant` structural fact —
    * never derivable from a type). */
   readonly closed: Tri;

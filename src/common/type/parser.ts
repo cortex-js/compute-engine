@@ -2049,9 +2049,50 @@ export class Parser {
 
         if (this.match('<')) {
           const lowerBound = this.parseValue();
-          this.expect('..');
+          // `0<..` — the lower bound is excluded ("0 < x"); `..<3` — the
+          // upper bound is excluded ("x < 3"). Both markers are compound
+          // lexer tokens, so adjacency is mandatory. A marker without a
+          // bound (`<<..`, `..<>`) is an error: openness needs an endpoint.
+          // Token shapes: `0..3` → `..`; `0<..3` → `<..`; `0..<3` → `..<`;
+          // `0<..<3` → `<..` then a bare `<` (the lexer's `<..` took the
+          // shared `..`, leaving the upper marker as its own `<` token —
+          // adjacency is already guaranteed by the lexer, see `<..` there).
+          let lowerOpen = false;
+          let upperOpen = false;
+          if (this.match('<..')) {
+            lowerOpen = true;
+            // The doubly-open form lexes the upper marker as a bare `<`;
+            // enforce the adjacency the compound `..<` token enforces
+            // (`0<..< 3` is rejected like `0..< 3`).
+            const marker: Token = this.current;
+            if (marker.type === '<') {
+              this.advance();
+              // The bound token must start exactly where the `<` ended,
+              // with no whitespace between.
+              if (this.current.position !== marker.position + 1)
+                this.error(
+                  'Invalid numeric type',
+                  'The `<` marker must touch its bound'
+                );
+              upperOpen = true;
+            }
+          } else if (this.match('..<')) {
+            upperOpen = true;
+          } else {
+            this.expect('..');
+          }
           const upperBound = this.parseValue();
           this.expect('>');
+          if (lowerOpen && lowerBound === undefined)
+            this.error(
+              'Invalid numeric type',
+              'An open lower bound needs a bound value'
+            );
+          if (upperOpen && upperBound === undefined)
+            this.error(
+              'Invalid numeric type',
+              'An open upper bound needs a bound value'
+            );
 
           // Validate the bounds (the old parser did; the new one silently
           // accepted `integer<10..0>` and `integer<nan..10>`).
@@ -2085,11 +2126,24 @@ export class Parser {
               `Invalid range: ${lower}..${upper}`,
               'The lower bound must be less than the upper bound'
             );
+          // An open bound at an infinity is meaningless (the infinity is
+          // already excluded from a finite-only tier and "unbounded" carries
+          // no endpoint to exclude).
+          if (
+            (lowerOpen && !Number.isFinite(lower)) ||
+            (upperOpen && !Number.isFinite(upper))
+          )
+            this.error(
+              'Invalid numeric type',
+              'An open bound must be a finite number'
+            );
 
           return this.createNode<NumericTypeNode>('numeric', {
             baseType,
             lowerBound,
             upperBound,
+            ...(lowerOpen ? { lowerOpen: true } : {}),
+            ...(upperOpen ? { upperOpen: true } : {}),
           });
         }
 

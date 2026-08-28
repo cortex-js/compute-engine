@@ -1,3 +1,5 @@
+import { makeNumericRangeType } from './numeric-range.js';
+import type { NumericPrimitiveType } from './types.js';
 import {
   TypeNode,
   FunctionSignatureNode,
@@ -370,12 +372,13 @@ export class TypeBuilder implements ASTVisitor<Type> {
       return node.baseType as Type;
     }
 
-    return {
-      kind: 'numeric',
-      type: node.baseType as any,
+    return makeNumericRangeType(
+      node.baseType as NumericPrimitiveType,
       lower,
       upper,
-    };
+      node.lowerOpen === true,
+      node.upperOpen === true
+    );
   }
 
   visitPrimitiveType(node: PrimitiveTypeNode): Type {

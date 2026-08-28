@@ -212,7 +212,7 @@ describe('TYPE INFERENCE FOR ARITHMETIC FUNCTIONS', () => {
     // 2^x: a positive base raised to a real exponent is a POSITIVE finite
     // real, and since the ranged-results round the type says so.
     expect(localCe.expr(['Power', 2, 'x']).type.toString()).toBe(
-      '(finite_real<0..>) & !0'
+      'finite_real<0<..>'
     );
   });
 
