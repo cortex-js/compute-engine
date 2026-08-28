@@ -2594,19 +2594,16 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
 
   test('the compiled JavaScript target answers the same shape', () => {
     const ce = new ComputeEngine();
-    // What this pins is the SHAPE parity: a literal-zero divisor used to
+    // This pins both the SHAPE parity (a literal-zero divisor used to
     // collapse at canonicalization before the compiler ever saw the list,
-    // compiling to one scalar. The ELEMENT encoding is the compiled lane's
-    // pre-existing nonfinite answer and varies by lowering path — `NaN`
-    // through the constant-folding path (the scalar control below), IEEE
-    // `Infinity` through the runtime division the matrix takes — where the
-    // interpreter answers `~oo` everywhere. That divergence predates the
-    // shape fix and is awaiting the NaN-policy ruling (R-A in
-    // docs/plans/2026-08-26-numeric-lattice-ratification-brief.md); these
-    // assertions pin it as-is rather than endorse it.
+    // compiling to one scalar) and the ELEMENT encoding: under the
+    // pole-encoding ruling (2026-08-28) every route spells the pole as the
+    // IEEE `Infinity` — the float projection of the interpreter's `~oo` —
+    // whether the division folds at compile time or runs at runtime. (The
+    // fold used to answer `NaN` while runtime division answered `Infinity`.)
     const list = compile(ce.box(['Divide', ['List', 1, 2], 0]));
     expect(list.success).toBe(true);
-    expect(list.run!({})).toEqual([NaN, NaN]);
+    expect(list.run!({})).toEqual([Infinity, Infinity]);
     const matrix = compile(
       ce.box(['Divide', ['List', ['List', 1, 2], ['List', 3, 4]], 0])
     );
@@ -2617,7 +2614,7 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
     ]);
     const scalar = compile(ce.box(['Divide', 1, 0]));
     expect(scalar.success).toBe(true);
-    expect(scalar.run!({})).toEqual(NaN);
+    expect(scalar.run!({})).toEqual(Infinity);
   });
 
   test('the scalar degenerate answers are unchanged', () => {

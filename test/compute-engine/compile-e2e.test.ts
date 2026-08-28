@@ -317,16 +317,19 @@ describe('E2E: Real-world Expressions', () => {
       expect(v('171!')).toBe(Infinity);
     });
 
-    it('a negative integer (a pole of Γ) compiles to NaN', () => {
+    it('a negative integer (a pole of Γ) compiles to Infinity', () => {
       // The interpreter answers ComplexInfinity (`~oo`); the compiled runner
-      // is real-valued, and a pole has no real value, which the real lane
-      // spells `NaN`. Every spelling agrees — the constant, the derived pole,
-      // and a pole under a parent — because `~oo` types `number` throughout,
-      // so no parent is tricked into complex codegen by a pole.
+      // is real-valued, and the float projection of `~oo` is `Infinity`
+      // (pole-encoding ruling 2026-08-28 — the magnitude survives, the
+      // missing direction does not, matching what the bare division
+      // instruction answers at a runtime pole). Every spelling agrees — the
+      // constant, the derived pole, and a pole under a parent — because
+      // `~oo` types `number` throughout, so no parent is tricked into
+      // complex codegen by a pole.
       expect(ce.parse('(-1)!').N().toString()).toBe('~oo');
-      expect(compile(ce.parse('\\tilde\\infty'))?.run?.({})).toBeNaN();
-      expect(compile(ce.parse('(-1)!'))?.run?.({})).toBeNaN();
-      expect(compile(ce.parse('(-2)!'))?.run?.({})).toBeNaN();
+      expect(compile(ce.parse('\\tilde\\infty'))?.run?.({})).toBe(Infinity);
+      expect(compile(ce.parse('(-1)!'))?.run?.({})).toBe(Infinity);
+      expect(compile(ce.parse('(-2)!'))?.run?.({})).toBe(Infinity);
     });
 
     // A pole under a parent is where the old inconsistency showed: the pole's
@@ -334,7 +337,9 @@ describe('E2E: Real-world Expressions', () => {
     // fold emitted a `{re, im}` object into real arithmetic and the two
     // compile paths disagreed with each other (`1 + (-1)!` folded to the
     // object but lowered structurally to NaN). With `~oo` typing `number`
-    // everywhere, every spelling and BOTH paths answer NaN.
+    // everywhere, every spelling and BOTH paths answer the same `Infinity`
+    // projection (`1 + Infinity` and `2·Infinity` are `Infinity`, matching
+    // the interpreter's `1 + ~oo = ~oo` and `2·~oo = ~oo`).
     it('a pole under a parent agrees on both compile paths', () => {
       expect(ce.parse('1 + (-1)!').N().toString()).toBe('~oo');
       const both = (latex: string) => [
@@ -343,11 +348,41 @@ describe('E2E: Real-world Expressions', () => {
       ];
       // A MULTIPLIED pole is included: `2·~oo` is `~oo` (an undirected
       // infinity takes no sign from its coefficient), so the fold reaches the
-      // same pole the structural lowering does. While `Multiply` still gave
-      // that product a sign, this row answered `Infinity` folded and `NaN`
-      // structurally.
+      // same pole the structural lowering does.
       for (const latex of ['1 + (-1)!', '1 + \\tilde\\infty', '2(-1)!'])
-        for (const v of both(latex)) expect(v).toBeNaN();
+        for (const v of both(latex)) expect(v).toBe(Infinity);
+    });
+
+    it('a runtime Gamma pole spells Infinity like the folded one; -Infinity is not a pole', () => {
+      // The JavaScript `_SYS.gamma` wrapper answers the pole projection for a
+      // non-positive integer at RUNTIME, so a variable argument agrees with
+      // the folded literal; the shared numeric helper alone answered NaN
+      // there. `-Infinity` satisfies "integer-valued and ≤ 0" only in the
+      // loose sense and is not a pole: it stays NaN.
+      ce.declare('g_x', 'real');
+      const run = compile(ce.box(['Gamma', 'g_x']))?.run;
+      expect(run?.({ g_x: -2 })).toBe(Infinity);
+      expect(run?.({ g_x: 0 })).toBe(Infinity);
+      expect(run?.({ g_x: -Infinity })).toBeNaN();
+      expect(run?.({ g_x: 5 })).toBe(24);
+      expect(compile(ce.box(['Gamma', -2]))?.run?.({})).toBe(Infinity);
+    });
+
+    it('a SIGNED cofactor may flip the projected sign between the two compile paths', () => {
+      // Documented limitation of the pole-encoding ruling
+      // (docs/COMPILATION-MODEL.md, "Fail closed"): the projection is applied
+      // where the pole is spelled, so `-2·(-1)!` folded as a whole reaches
+      // the interpreter's `~oo` and embeds `+Infinity`, while the structural
+      // lowering computes `-2 · Infinity`. The promise is the infinite
+      // MAGNITUDE; the sign is the direction `~oo` never had.
+      const folded = compile(ce.parse('-2(-1)!'))?.run?.({});
+      const structural = compile(ce.parse('-2(-1)!'), {
+        constantFold: false,
+      })?.run?.({});
+      expect(folded).toBe(Infinity);
+      expect(structural).toBe(-Infinity);
+      expect(Number.isFinite(folded)).toBe(false);
+      expect(Number.isFinite(structural)).toBe(false);
     });
   });
 

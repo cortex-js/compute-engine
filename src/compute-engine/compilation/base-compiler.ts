@@ -2989,13 +2989,13 @@ export class BaseCompiler {
       return undefined;
 
     // `~oo` on a node the surrounding code reads as a REAL number folds to
-    // `NaN`, not to the `{re: ∞, im: ∞}` object the value itself carries.
-    // A pole has no real value, and `NaN` is how the real lane spells that
-    // (the same reasoning as `NO_REAL_VALUE_FOLD` in the JavaScript target);
-    // emitting the complex object instead hands a parent that lowered real
-    // arithmetic an object to add, which stringifies (`1 + {…}` →
-    // `"1[object Object]"`). A node that really is complex-valued keeps the
-    // object, so `~oo` reached through complex-emitting operands is unchanged.
+    // `Infinity` — the float projection of the projective infinity (its
+    // magnitude, without the direction it never had) — not to the
+    // `{re: ∞, im: ∞}` object the value itself carries. Emitting the complex
+    // object instead hands a parent that lowered real arithmetic an object
+    // to add, which stringifies (`1 + {…}` → `"1[object Object]"`). A node
+    // that really is complex-valued keeps the object, so `~oo` reached
+    // through complex-emitting operands is unchanged.
     // `isInfinity` with a non-zero imaginary part is the `~oo` test: a real
     // ±∞ has `im === 0`, and an exact value whose imaginary part merely
     // OVERFLOWS the float projection is not infinite, so it answers `false`
@@ -3006,7 +3006,11 @@ export class BaseCompiler {
       value.im !== 0 &&
       !BaseCompiler.isComplexValued(expr)
     )
-      return BaseCompiler.emitFoldedValue(engine.NaN, target, prec);
+      // The float projection of `~oo` is `Infinity` (pole-encoding ruling
+      // 2026-08-28), the same spelling the literal-emission path and the
+      // runtime division produce — see the `~oo` arm of the number-literal
+      // emission below.
+      return BaseCompiler.emitFoldedValue(engine.PositiveInfinity, target, prec);
 
     // Emit through the ordinary number-literal path so the target's own
     // spelling applies (float formatting, complex support, negative-literal
@@ -3927,14 +3931,18 @@ export class BaseCompiler {
     if (isNumber(expr)) {
       // `~oo` first: it carries an infinite imaginary part, but it types
       // `number` (the non-finite typing convention admits undirected infinity
-      // at the top type only) and it has no real VALUE, which the real lane
-      // spells `NaN`. Emitting the `{re: ∞, im: ∞}` object instead handed a
-      // real-arithmetic parent an object to add, producing the string
-      // `"1[object Object]"` from `1 + ~oo`. This matches what the pole
-      // already compiled to through every other route — `_SYS.factorial`
-      // returns `NaN` at a negative integer, and the constant fold projects a
-      // real-lane `~oo` the same way.
-      if (expr.isInfinity && expr.im !== 0) return target.number(NaN);
+      // at the top type only), and a real target cannot spell an undirected
+      // infinity. Its float projection is `Infinity` (pole-encoding ruling,
+      // 2026-08-28): the runtime division `1/x` at `x = 0` already answers
+      // the IEEE `Infinity` through the bare `/` instruction, so the folded
+      // spelling of the same pole must agree — a literal `1/0` folds to the
+      // interpreter's `~oo` and now embeds as `Infinity`, not `NaN`. The
+      // projection keeps the MAGNITUDE and drops the missing direction; it is
+      // documented as the float-target carve-out in
+      // `docs/COMPILATION-MODEL.md`. (Emitting the `{re: ∞, im: ∞}` object
+      // instead handed a real-arithmetic parent an object to add, producing
+      // the string `"1[object Object]"` from `1 + ~oo`.)
+      if (expr.isInfinity && expr.im !== 0) return target.number(Infinity);
       if (expr.im !== 0) {
         if (!target.complex)
           throw new Error('Complex numbers are not supported by this target');
@@ -9327,7 +9335,7 @@ export class BaseCompiler {
       // constant types that way. Reporting it complex would put the whole
       // enclosing expression on the complex lane on the strength of a pole,
       // so `1 + (-1)!` emitted a `{re, im}` object where the real lane wants
-      // the pole's `NaN`.
+      // the pole's float projection, `Infinity`.
       if (expr.isInfinity && expr.im !== 0) return false;
       return expr.im !== 0;
     }

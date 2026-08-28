@@ -6194,9 +6194,13 @@ float _gpu_gamma(float z) {
   const float PI = 3.14159265358979;
   // Gamma has a pole at every non-positive integer, and the reflection
   // formula below cannot see it: sin(PI * z) is not exactly 0 there in
-  // floating point, so Gamma(-2.0) came back as a large finite number. A pole
-  // has no real value, which this real lane spells NaN.
-  if (z <= 0.0 && z == floor(z)) return _gpu_nan();
+  // floating point, so Gamma(-2.0) came back as a large finite number. The
+  // interpreter answers the undirected infinity at a pole; its float
+  // projection is Infinity (pole-encoding ruling 2026-08-28 — the magnitude
+  // survives, the missing direction does not). The lower bound keeps
+  // -Infinity out of the guard: it satisfies z == floor(z) but is not a
+  // pole, and Gamma(-Infinity) is NaN in the interpreter's numeric lane.
+  if (z <= 0.0 && z == floor(z) && z > -3.0e38) return _gpu_inf();
   float w = z;
   if (z < 0.5) w = 1.0 - z;
   w -= 1.0;
@@ -6234,11 +6238,14 @@ export const GPU_GAMMA_PREAMBLE_WGSL = `
 fn _gpu_gamma(z: f32) -> f32 {
   let PI = 3.14159265358979;
   // See the GLSL preamble: a non-positive integer is a pole the reflection
-  // formula misses, and a pole has no real value. WGSL has no _gpu_nan
-  // helper, so the NaN bit pattern is spelled inline, as it is everywhere
-  // else in this target. (No backticks in this comment: it lives inside a
-  // TypeScript template literal, which one would terminate.)
-  if (z <= 0.0 && z == floor(z)) { return bitcast<f32>(0x7fc00000u); }
+  // formula misses; the pole answers the float projection of the undirected
+  // infinity, which is +Infinity (pole-encoding ruling 2026-08-28). WGSL has
+  // no helper for it, so the +Infinity bit pattern is spelled inline, as
+  // non-finite constants are everywhere else in this target. The lower
+  // bound keeps -Infinity out of the guard (it is not a pole). (No
+  // backticks in this comment: it lives inside a TypeScript template
+  // literal, which one would terminate.)
+  if (z <= 0.0 && z == floor(z) && z > -3.0e38) { return bitcast<f32>(0x7f800000u); }
   var w = z;
   if (z < 0.5) { w = 1.0 - z; }
   w = w - 1.0;
@@ -6318,23 +6325,35 @@ fn _gpu_erfinv(x: f32) -> f32 {
 /**
  * GPU Heaviside step function preamble (GLSL syntax).
  * Returns 0 for x<0, 0.5 at x=0, 1 for x>0.
+ *
+ * A NaN argument falls through both comparisons (they are false for NaN), so
+ * the final arm adds `0.0 * x`: for the values that reach it — `0`, `-0.0`
+ * and NaN — the product is `0` or NaN, so the arm answers `0.5` exactly for
+ * a zero and propagates NaN for NaN (Contract B `propagate`, ratified
+ * 2026-08-27). The infinities never reach the arm (the comparisons catch
+ * them), so the `0·∞` indeterminate case cannot arise here. `isnan` is
+ * deliberately not used — it is unreliable under fast-math (see the absence
+ * capability note on the target) — and the same fast-math caveat applies to
+ * this arithmetic carrier: a driver that folds `0.0 * x` to `0.0` degrades
+ * NaN back to `0.5`, which is best-effort by design on shader targets.
  */
 export const GPU_HEAVISIDE_PREAMBLE_GLSL = `
 float _gpu_heaviside(float x) {
   if (x < 0.0) return 0.0;
   if (x > 0.0) return 1.0;
-  return 0.5;
+  return 0.5 + 0.0 * x;
 }
 `;
 
 /**
  * GPU Heaviside step function preamble (WGSL syntax).
+ * Same NaN-propagating final arm as the GLSL preamble above.
  */
 export const GPU_HEAVISIDE_PREAMBLE_WGSL = `
 fn _gpu_heaviside(x: f32) -> f32 {
   if (x < 0.0) { return 0.0; }
   if (x > 0.0) { return 1.0; }
-  return 0.5;
+  return 0.5 + 0.0 * x;
 }
 `;
 
@@ -9307,15 +9326,18 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // WGSL has no `_gpu_nan` at all, so only GLSL is forced.
     const isWGSL = this.languageId === 'wgsl';
     const atWidths = gpuAtHelperWidths(code);
-    // `_gpu_gamma` calls `_gpu_nan()` from its BODY at a pole, so it forces
-    // the GLSL NaN helper for the same reason `_gpu_at*` does: these scans
-    // read the EMITTED code and never a helper body.
-    if (
-      code.includes('_gpu_nan') ||
-      (!isWGSL && (atWidths.length > 0 || code.includes('_gpu_gamma')))
-    )
+    if (code.includes('_gpu_nan') || (!isWGSL && atWidths.length > 0))
       preamble += GPU_NAN_PREAMBLE_GLSL;
-    if (code.includes('_gpu_inf')) preamble += GPU_INF_PREAMBLE_GLSL;
+    // `_gpu_gamma` calls `_gpu_inf()` from its BODY at a pole (the float
+    // projection of the interpreter's undirected infinity — pole-encoding
+    // ruling 2026-08-28), so it forces the GLSL Infinity helper for the same
+    // reason `_gpu_at*` forces the NaN helper: these scans read the EMITTED
+    // code and never a helper body.
+    if (
+      code.includes('_gpu_inf') ||
+      (!isWGSL && code.includes('_gpu_gamma'))
+    )
+      preamble += GPU_INF_PREAMBLE_GLSL;
     // AFTER the NaN branches, and that ORDER is load-bearing: GLSL requires a
     // declaration before its use, and these bodies call `_gpu_nan()`. The
     // order test in `at-gpu-compile.test.ts` is the tripwire.

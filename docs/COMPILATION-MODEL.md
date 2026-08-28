@@ -13,6 +13,25 @@ With fallback enabled, a decline returns an interpreted runner. With fallback
 disabled, the decline is visible to the caller. Runtime exceptions from
 successfully compiled user code are not silently reinterpreted.
 
+One value carve-out is ruled (pole-encoding ruling, 2026-08-28): where the
+interpreter answers the projective infinity `~oo` — a division pole, a Gamma
+or Factorial pole, an embedded `~oo` constant — a float-only target answers
+the IEEE `Infinity` instead of declining. The projection keeps the infinite
+magnitude and drops the direction `~oo` never had; it is what the bare
+division instruction already answers at a runtime pole, so folded and
+runtime spellings of the same pole agree. `NaN` remains reserved for the
+genuinely indeterminate (`0/0`, `0 · ∞`) and for NaN propagation under
+Contract B's `propagate` policy.
+
+The projection is applied where the pole is spelled, not at the result
+boundary, so a SIGNED cofactor can give the two routes different signs:
+`-2 · (-1)!` folds as a whole to the interpreter's `~oo` and embeds
+`+Infinity`, while the structural lowering computes `-2 · Infinity` and
+answers `-Infinity`. Both agree on the infinite magnitude, which is the
+promise; the sign is the direction `~oo` does not have, and a float lane
+may report either. Code that must not see a signed answer at a pole should
+test `Number.isFinite`, never the sign.
+
 ## Target boundaries
 
 The JavaScript target supports the broadest dynamic representation. Python,

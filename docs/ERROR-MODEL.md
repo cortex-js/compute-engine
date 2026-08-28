@@ -757,17 +757,26 @@ because current behavior might be a deliberate decline):
   they should carry a distinct `internal-error` code with the stack.
 - **`markerType()` answers `number` where the concept says `nan`**
   (`collections.ts`) — sharpens only after the §5 singleton lands.
-- **CONFIRMED 2026-08-26: `compile(Heaviside)(NaN) → 1`** — a fail-closed
-  violation (§6). Root cause: the JavaScript kernel
-  `heaviside: (x) => (x < 0 ? 0 : x === 0 ? 0.5 : 1)`
-  (`compilation/javascript-target.ts:6069`) falls through to `1` for `NaN`,
-  while the interpreter stays inert. The interval-JS and GPU targets carry
-  sibling lowerings, unprobed. Fix gated on the NaN-policy ruling; tracked
-  in `ROADMAP.md`, pinned in `test/compute-engine/error-model.test.ts`.
-- **A second compiled-lane divergence, found by the suite: `compile(1/x)`
-  at `x = 0` answers IEEE `Infinity` where the interpreter answers `~oo`**
-  — different mathematical points; feeds the "where does `~oo` belong"
-  question below. Tracked in `ROADMAP.md`, pinned in the suite.
+- **FIXED 2026-08-28: `compile(Heaviside)(NaN)` answers `NaN`** under
+  ratified Contract B's derived `propagate` default (it answered `1` — a
+  fail-closed violation, confirmed 2026-08-26: both comparisons in the
+  kernel are false for NaN, so the final arm caught it). All three
+  lowerings were swept: the JavaScript kernel gained a leading
+  `Number.isNaN` arm; the interval kernel propagates a NaN interval
+  (it answered `singular at 0`); the GPU preambles propagate through an
+  arithmetic carrier (`0.5 + 0.0 * x` on the fall-through arm — `isnan`
+  is unreliable under fast-math, so shader NaN answers stay best-effort
+  by design). Conformed pin in `test/compute-engine/error-model.test.ts`.
+- **RULED 2026-08-28 (pole encoding): a float-only compile target answers
+  the IEEE `Infinity` where the interpreter answers `~oo`** — the float
+  projection keeps the magnitude and drops the direction `~oo` never had,
+  and it is what the bare division instruction already answers at a
+  runtime pole. The constant fold, the embedded `~oo` literal, the
+  `Factorial` negative-integer pole and the GPU `Gamma` pole guard were
+  aligned (they answered `NaN`, so the same pole spelled differently by
+  fold and by runtime). `NaN` stays reserved for the indeterminate
+  (`0/0`, `0·∞`) and for `propagate`. Documented as the float-target
+  carve-out in `docs/COMPILATION-MODEL.md`; conformed pins in the suite.
 - **The table above conflates two boxing behaviors**: `1/0` folds to `~oo`
   AT BOXING, but `Factorial(-2)` boxes as an unevaluated application and
   reaches `~oo` only at `evaluate()`. Both conform to rule 3; the shared

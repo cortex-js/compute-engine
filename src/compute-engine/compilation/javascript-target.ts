@@ -6059,12 +6059,20 @@ const SYS_HELPERS = {
   // integer fast path is unchanged (`n > 170 → Infinity`; `170!` itself is
   // the largest double-representable factorial and stays finite).
   // A negative *integer* is a pole of Γ(x+1): the interpreter returns
-  // ComplexInfinity, which a real target projects to NaN (the same value
-  // compiled `~oo` yields), so poles stay NaN.
+  // ComplexInfinity, whose float projection is `Infinity` (pole-encoding
+  // ruling 2026-08-28 — the magnitude survives, the missing direction does
+  // not), the same value an embedded `~oo` literal compiles to.
   factorial: (x: number): number =>
-    Number.isInteger(x) ? (x < 0 ? NaN : factorial(x)) : gamma(x + 1),
+    Number.isInteger(x) ? (x < 0 ? Infinity : factorial(x)) : gamma(x + 1),
   factorial2,
-  gamma,
+  // Γ has a pole at every non-positive integer; the shared numeric helper
+  // answers `NaN` there, but the compiled lane spells a pole as `Infinity`
+  // (the float projection of the interpreter's `~oo`), the same value a
+  // folded `Gamma(-2)` embeds — so the runtime and folded routes agree. A
+  // non-integer or non-finite argument (`-Infinity` is not a pole) still
+  // goes to the helper unchanged.
+  gamma: (z: number): number =>
+    Number.isInteger(z) && z <= 0 ? Infinity : gamma(z),
   gcd,
   // Numeric-differentiation fallback (item 177): `_SYS.nd(f, k)` returns the
   // function x ↦ (numeric k-th derivative of f at x). Emitted by
@@ -6096,7 +6104,11 @@ const SYS_HELPERS = {
   // Element-wise `Which`/`If` selection over a condition that may be a
   // collection at run time — see `select` and `compileJSSelection`.
   select,
-  heaviside: (x: number) => (x < 0 ? 0 : x === 0 ? 0.5 : 1),
+  // NaN propagates (Contract B `propagate` default, ratified 2026-08-27):
+  // without the leading arm both comparisons are false for NaN and the
+  // kernel answered the final arm's `1` — a fail-closed violation.
+  heaviside: (x: number) =>
+    Number.isNaN(x) ? NaN : x < 0 ? 0 : x === 0 ? 0.5 : 1,
   // `Characters`/`GraphemeClusters`: the interpreter's own decomposition —
   // UAX #29 grapheme clusters via `Intl.Segmenter` (`splitGraphemeClusters` in
   // `library/core.ts`), with the NFC normalization `engine.string()` applies to

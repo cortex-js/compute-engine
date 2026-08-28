@@ -674,6 +674,13 @@ export function heaviside(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  // A NaN bound propagates as a NaN interval (Contract B `propagate`,
+  // ratified 2026-08-27) — the same value the plain arithmetic kernels
+  // produce for a NaN input. Without this arm every comparison below is
+  // false for NaN and the answer was `{ kind: 'singular', at: 0 }`, which
+  // claims a discontinuity the input never touched.
+  if (Number.isNaN(xVal.lo) || Number.isNaN(xVal.hi))
+    return ok({ lo: NaN, hi: NaN });
   if (xVal.lo > 0) return ok({ lo: 1, hi: 1 });
   if (xVal.hi < 0) return ok({ lo: 0, hi: 0 });
   if (xVal.lo === 0 && xVal.hi === 0) return ok({ lo: 0.5, hi: 0.5 });
@@ -691,6 +698,11 @@ export function sign(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  // A NaN bound propagates, exactly as in `heaviside` above: every
+  // comparison below is false for NaN, and the fall-through answered a
+  // discontinuity at 0 that the input never touched.
+  if (Number.isNaN(xVal.lo) || Number.isNaN(xVal.hi))
+    return ok({ lo: NaN, hi: NaN });
   if (xVal.lo > 0) return ok({ lo: 1, hi: 1 });
   if (xVal.hi < 0) return ok({ lo: -1, hi: -1 });
   if (xVal.lo === 0 && xVal.hi === 0) return ok({ lo: 0, hi: 0 });

@@ -156,40 +156,6 @@ fixed in that change. Every one is small; several need a ruling first.
   decline it too would make the value tier consistent with the primitives.
 
 
-### Compiled `Heaviside(NaN)` returns `1` — a fail-closed violation, confirmed (OPEN, defect — confirmed 2026-08-26 by the error-model conformance suite)
-
-The JavaScript kernel `heaviside: (x) => (x < 0 ? 0 : x === 0 ? 0.5 : 1)`
-(`compilation/javascript-target.ts:6069`) sends `NaN` to `1`: both
-comparisons are false for `NaN`, so it falls through to the final arm. The
-interpreter's `Heaviside(NaN)` stays inert under both `evaluate()` and
-`.N()`. A compiled function must preserve the interpreter's value or
-decline (`docs/COMPILATION-MODEL.md`); `1` is neither. The interval-JS and
-GPU targets carry their own `heaviside` lowerings
-(`interval-javascript-target.ts:805`, `gpu-target.ts:6136`) with the same
-shape, unprobed — sweep them with the fix. UNBLOCKED 2026-08-27: ruling
-R-A (Contract B,
-`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`) is
-adopted, so under the derived per-slot `propagate` default the right
-compiled answer is `NaN` — the kernels need a leading
-`Number.isNaN(x) ? NaN : …` arm (an operator declared `reject` would
-instead refuse to compile, but `Heaviside` has no reason to). The current
-behavior is pinned in
-`test/compute-engine/error-model.test.ts` (gaps block) — update that pin
-with the fix.
-
-### Compiled `1/x` at `x = 0` returns IEEE `Infinity` where the interpreter answers `~oo` (OPEN, defect — measured 2026-08-26 by the error-model conformance suite)
-
-The interpreter's `1/0` is the projective (undirected) complex infinity
-`~oo`; the compiled JavaScript answers the IEEE affine `Infinity` — a
-different mathematical point. This is a value divergence in the same
-fail-closed class as the `Heaviside` entry above. The lattice placement
-is now ratified (2026-08-27: `~oo` is the unsigned member of the new
-`infinity` type), but the ruling package does not yet SAY what a
-float-only compile target may answer at a pole — that residual question
-(IEEE `Infinity`, `NaN`, or a decline) still needs a one-line ruling
-before this pin moves. Pinned as current behavior in
-`test/compute-engine/error-model.test.ts` (gaps block).
-
 ### A re-declared operator carrying a caller `compile` handler switches off the compiler's call-sharing (OPEN, design — measured 2026-08-21 under Tycho item 217)
 
 `R(i,x,y) = R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` compiles to a linear

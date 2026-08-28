@@ -68,35 +68,40 @@ describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () =
     expect(w(['Add', 1, 'PositiveInfinity'])).toBe(`1.0 + ${INF.wgsl}`);
   });
 
-  it('ComplexInfinity lowers to the shader NaN, not a vec2', () => {
+  it('ComplexInfinity lowers to the shader Infinity, not a vec2', () => {
     // `~oo` types `number` (the non-finite typing convention admits an
     // undirected infinity at the top type only), and a shader lane is real:
-    // a pole has no real value, which is spelled NaN. A `vec2` here was also
-    // a shape mismatch wherever the surrounding expression expects a float.
-    expect(g(['Divide', 1, 0])).toBe(NAN.glsl);
-    expect(w(['Divide', 1, 0])).toBe(NAN.wgsl);
+    // its float projection is `Infinity` (pole-encoding ruling 2026-08-28 —
+    // the magnitude survives, the missing direction does not), matching what
+    // the bare `/` instruction answers at a runtime pole. A `vec2` here was
+    // also a shape mismatch wherever the surrounding expression expects a
+    // float.
+    expect(g(['Divide', 1, 0])).toBe(INF.glsl);
+    expect(w(['Divide', 1, 0])).toBe(INF.wgsl);
   });
 
-  it('the gamma helper guards its poles, and GLSL declares NaN before it', () => {
+  it('the gamma helper guards its poles, and GLSL declares Infinity before it', () => {
     // Gamma has a pole at every non-positive integer, and the helper's
     // reflection formula cannot see it — sin(PI * z) is not exactly 0 there —
     // so without a guard a shader returned a large finite number for
-    // Gamma(-2). The guard's body calls the NaN helper, which the preamble
-    // scan cannot see (it reads the EMITTED code, never a helper body), so
-    // GLSL must be forced to declare `_gpu_nan()` FIRST: GLSL requires a
-    // declaration before its use.
+    // Gamma(-2). The pole answers the float projection of the interpreter's
+    // undirected infinity, `Infinity` (pole-encoding ruling 2026-08-28). The
+    // guard's body calls the Infinity helper, which the preamble scan cannot
+    // see (it reads the EMITTED code, never a helper body), so GLSL must be
+    // forced to declare `_gpu_inf()` FIRST: GLSL requires a declaration
+    // before its use.
     const gGamma = glsl.compile(ce.box(['Gamma', -2]), NO_FOLD);
     const gPre = gGamma.preamble ?? '';
     expect(gPre).toContain('z <= 0.0 && z == floor(z)');
-    expect(gPre.indexOf('float _gpu_nan')).toBeGreaterThanOrEqual(0);
-    expect(gPre.indexOf('float _gpu_nan')).toBeLessThan(
+    expect(gPre.indexOf('float _gpu_inf')).toBeGreaterThanOrEqual(0);
+    expect(gPre.indexOf('float _gpu_inf')).toBeLessThan(
       gPre.indexOf('float _gpu_gamma')
     );
 
     const wPre = wgsl.compile(ce.box(['Gamma', -2]), NO_FOLD).preamble ?? '';
     expect(wPre).toContain('z <= 0.0 && z == floor(z)');
-    // WGSL has no NaN helper — the bit pattern is spelled inline there.
-    expect(wPre).toContain(NAN.wgsl);
+    // WGSL has no Infinity helper — the bit pattern is spelled inline there.
+    expect(wPre).toContain(INF.wgsl);
   });
 
   it('GLSL declares `_gpu_inf()` beside `_gpu_nan()`, both overridable', () => {

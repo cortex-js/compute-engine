@@ -142,6 +142,34 @@
 
 ### Bug Fixes
 
+- **Compiled `Heaviside(NaN)` answers `NaN`** (Contract B `propagate`,
+  ratified 2026-08-27). The JavaScript kernel answered `1` (both of its
+  comparisons are false for NaN, so the final arm caught it), the interval
+  kernel claimed a discontinuity at 0, and the GPU kernels answered `0.5`.
+  All three now propagate: JavaScript through an explicit `Number.isNaN`
+  arm, the interval lane as a NaN interval, and the shaders through an
+  arithmetic carrier on the fall-through arm (`isnan` is unreliable under
+  fast-math, so shader NaN answers remain best-effort). The interval
+  `Sign` kernel had the same misclassification and propagates too. Finite
+  and infinite arguments are unchanged.
+
+- **A float-only compile target spells the interpreter's `~oo` as the IEEE
+  `Infinity`** (pole-encoding ruling, 2026-08-28). The compiled lane used
+  to disagree with itself: a literal `1/0` constant-folded to `NaN` while
+  the runtime `1/x` at `x = 0` answered `Infinity` through the bare
+  division instruction. The float projection of the projective infinity is
+  now `Infinity` everywhere — the embedded `~oo` constant, the folded
+  division (`[1,2]/0` compiles to `[Infinity, Infinity]`), the
+  `Factorial` and `Gamma` non-positive-integer poles on the JavaScript
+  target, and the GPU `Gamma` pole guard — so folded and runtime spellings
+  of the same pole agree. `NaN` stays reserved for the indeterminate forms
+  (`0/0`, `0·∞`) and for NaN propagation; `Gamma(-Infinity)` is not a pole
+  and stays `NaN`. One documented limitation: the projection is applied
+  where the pole is spelled, so a signed cofactor can give the two compile
+  routes different signs (`-2·(-1)!` is `+Infinity` folded, `-Infinity`
+  structurally) — the infinite magnitude is the promise, not the sign.
+  Documented as the float-target carve-out in `docs/COMPILATION-MODEL.md`.
+
 - **A selection with no selected branch answers `Missing`** (ruled
   2026-08-27). `Which()` — and a `Which` whose guards are all `False` or
   `Undefined` — used to answer the symbol `Undefined`, while the else-less

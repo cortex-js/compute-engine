@@ -828,34 +828,42 @@ describe('documented conformance gaps (ERROR-MODEL §7) — pinned as CURRENT be
     }
   });
 
-  test('compile(Heaviside)(NaN) answers 1 while the interpreter stays inert — a fail-closed violation', () => {
-    // CONFIRMED here, having been only "reported, not yet reproduced" in
-    // ERROR-MODEL §7. The JavaScript target lowers `Heaviside` to
-    // `(x) => (x < 0 ? 0 : x === 0 ? 0.5 : 1)` (`javascript-target.ts`), whose
-    // final branch catches NaN because both comparisons are false for it. The
-    // compiled lane therefore produces a plausible but different value —
-    // exactly the class ERROR-MODEL §6 and `docs/COMPILATION-MODEL.md`
-    // prohibit. Pinned, not fixed: the fix belongs with the ratification of
-    // the NaN-policy package, since it must decide whether the answer is `NaN`
-    // (per-slot propagate) or a decline.
+  test('compile(Heaviside)(NaN) answers NaN (Contract B propagate), interpreter stays inert', () => {
+    // Fixed under ratified Contract B (R-A, ratified 2026-08-27): the
+    // per-parameter NaN policy for `Heaviside` is the derived `propagate`
+    // default, so the compiled answer to a NaN argument is `NaN`. Before the
+    // ruling the JavaScript kernel's final branch caught NaN (both
+    // comparisons are false for it) and answered `1` — a fail-closed
+    // violation. The interpreter's exact route stays inert as before; the
+    // compiled lane's NaN is the float-lane spelling of the same
+    // "no answer at this point" fact.
     const result = compiled(ce.box(['Heaviside', 'x']));
     expect(result.success).toBe(true);
-    expect(result.run({ x: NaN })).toBe(1);
+    expect(result.run({ x: NaN })).toBeNaN();
+    // The finite and infinite arms are unchanged.
+    expect(result.run({ x: -1 })).toBe(0);
+    expect(result.run({ x: 0 })).toBe(0.5);
+    expect(result.run({ x: Infinity })).toBe(1);
 
     const interpreted = ce.box(['Heaviside', 'NaN']).N();
     expect(isUnreduced(interpreted, 'Heaviside')).toBe(true);
     expect(isNaNValue(ce, interpreted)).toBe(false);
   });
 
-  test('compile(1/x)(0) answers Infinity while the interpreter answers ~oo', () => {
-    // A second compiled-lane divergence, not listed in ERROR-MODEL §7. The
-    // interpreter's `1/0` is projective infinity (§2 rule 3); the JavaScript
-    // target has only IEEE's signed `Infinity`, which is a different point.
-    // Pinned so the eventual ruling on `~oo` (§7 open question "Where does ~oo
-    // belong?") sees it.
+  test('compile(1/x)(0) answers Infinity — the ruled float projection of ~oo', () => {
+    // Pole-encoding ruling (2026-08-28): a float-only compile target answers
+    // the IEEE `Infinity` at a pole — the float projection of the
+    // interpreter's projective `~oo` keeps the magnitude and drops the
+    // missing direction. The constant fold agrees: a literal `1/0` folds to
+    // the interpreter's `~oo` and embeds as `Infinity`, so both routes spell
+    // the pole the same way (they used to disagree: fold `NaN`, runtime
+    // `Infinity`). Documented as the float-target carve-out in
+    // `docs/COMPILATION-MODEL.md`.
     const result = compiled(ce.box(['Divide', 1, 'x']));
     expect(result.success).toBe(true);
     expect(result.run({ x: 0 })).toBe(Infinity);
+    const folded = compiled(ce.box(['Divide', 1, 0]));
+    expect(folded.run({})).toBe(Infinity);
     expect(ce.box(['Divide', 1, 0]).N().isSame(ce.ComplexInfinity)).toBe(true);
   });
 
