@@ -472,7 +472,7 @@ describe('Measurement — numeric projection (Tycho item 95)', () => {
     expect(m.operator).toBe('Measurement');
     expect(m.type.toString()).toBe('finite_real');
     expect(m.isNumber).toBe(true);
-    expect(m.isReal).toBe(true);
+    expect(m.isExtendedReal).toBe(true);
   });
 
   test('.re / .im project the nominal', () => {

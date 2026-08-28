@@ -1,5 +1,58 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Bare numeric type names now mean FINITE (the numeric-lattice flip).**
+  `integer`, `rational`, `real` and `complex` contain only finite values, and
+  the top type partitions exactly: `number` = the finite complex numbers
+  (`complex`), the infinite values (`infinity`), and the not-a-number marker
+  (`nan`) — three groups with no shared member. Consequences:
+
+  - `oo.matches('real')`, `oo.matches('integer')` and
+    `oo.matches('complex')` are now **`false`** (all were `true`). This is
+    the silent-break class: a `.matches('real')` on a possibly-infinite
+    value changes its answer with no error anywhere — audit type strings
+    that meant "extended real" and spell them `real | non_finite_number`.
+  - Values retype onto the new names: `oo.type` is the singleton `+oo`
+    (widening to `infinity`), `(-oo).type` is `-oo`, `NaN` types `nan`,
+    `~oo` types its own singleton, and a mixed infinite value (`∞ + i`)
+    types `infinity` (previously `complex`).
+  - **`isReal` is renamed `isExtendedReal`** ("on the extended real line":
+    finite reals and `±∞`). The old name is removed. NaN now answers
+    `false` (it wrongly answered `true` on machine-number literals).
+    `isFinite` keeps its name and means finite magnitude. `isInteger` and
+    `isRational` keep their names and are now uniformly finite — an
+    expression *typed* `non_finite_number` no longer answers `true` to
+    them.
+  - Assignment promotion: `x := oo` declares `x: infinity` (previously
+    `real`); `x := NaN` declares `nan`. `assume(x ∈ ℝ)` on a symbol
+    holding an infinity is now a **contradiction** (∞ is not a real
+    number).
+  - Span constructors treat an infinite endpoint as EXTENT, never as a
+    member: `Contains(Interval(0, oo), oo)` is now `False` (was `True`),
+    `Range(1, oo)` types `indexed_collection<integer>` (the endpoint no
+    longer widens the element type), and `Length(Range(1, oo))` evaluates
+    to `+oo`. The `ExtendedRealNumbers`/`ExtendedIntegers`/
+    `ExtendedRationalNumbers` sets still contain the infinities; the
+    non-extended sets never did and still do not.
+  - About 30 finite-result heads (`NthPrime`, `IntegerSqrt`, `Fibonacci`,
+    `Repeat`, `Haversine`, `Hypot`, …) now reject an infinite argument at
+    the signature instead of evaluating through it: their `integer`/`real`
+    parameters are finiteness contracts.
+  - Pole-capable results are spelled honestly: the unknown-sign `Ln` and
+    the bounded inverse functions claim `complex | non_finite_number`
+    instead of bare `complex` (which is now a finiteness promise).
+  - A compiled clause guard for a bare `real` parameter now emits
+    `Number.isFinite` (it accepted `Infinity` before); clause sets with
+    `infinity`- or `nan`-typed parameters decline to compile (compiled
+    `~oo` and NaN share one runtime value, so no faithful guard exists).
+
+  The five `finite_*` names and `non_finite_number` remain valid this
+  release as deprecated strict-subtype synonyms; they retire (with parse
+  aliases for one cycle) in the next release. The decision record is
+  `docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`.
+
+
 ### New Features
 
 - **Arithmetic result types carry computed bounds (interval arithmetic).**

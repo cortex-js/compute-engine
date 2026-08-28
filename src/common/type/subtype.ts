@@ -48,43 +48,84 @@ import { subtypingVarianceOf } from './variance.js';
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
+  // `number` is the top of a DISJOINT decomposition: every numeric value is a
+  // finite number (`complex`), a value of infinite magnitude (`infinity`) or
+  // the not-a-number marker (`nan`), and no value is two of those. It shares
+  // `NUMERIC_TYPES` by reference, so it lists every numeric name including the
+  // deprecated `finite_*` synonyms.
   number: NUMERIC_TYPES,
   non_finite_number: [], //  PositiveInfinity, NegativeInfinity
   // A number of infinite magnitude, of any direction. Its only primitive
   // subtype is the SIGNED pair `non_finite_number` (`+∞`, `−∞`); the unsigned
   // `~∞` is a value literal, placed under `infinity` by the value-literal rules
-  // in `isSubtype`. `infinity` is deliberately absent from the child list of
-  // every other entry: an unsigned infinity is not a `real`, not a `complex`
-  // and not an `integer`, so the overlap of `real` and `infinity` stays exactly
-  // the signed pair, which the closure derives on its own
-  // (`meetPrimitiveTypes('real', 'infinity')` = `['non_finite_number']`).
-  // `number` lists it through `NUMERIC_TYPES`, which it shares by reference.
+  // in `isSubtype`, and a mixed directed value such as `∞ + i` is an anonymous
+  // further inhabitant with no name of its own. `infinity` is deliberately
+  // absent from the child list of every other entry, and `non_finite_number`
+  // now appears under `infinity` ALONE: the bare numeric names are finite, so
+  // `real ∩ infinity` is empty (`meetPrimitiveTypes('real', 'infinity')` =
+  // `[]`).
   infinity: ['non_finite_number'],
   // The not-a-number marker: an atom with no subtypes, and — being listed by
   // no entry but `number` (through `NUMERIC_TYPES`) — disjoint from every other
   // numeric type.
   nan: [],
+  // `finite_number` denotes the same values as `complex` after the flip ("any
+  // finite number" IS the finite complex type), but it is deliberately left
+  // INCOMPARABLE to `complex`, exactly where it sat before: listing it under
+  // `complex` would make `isNonRealNumber` (`utils.ts`) answer `true` for it,
+  // because that predicate reads "below `complex`, not below `real`". Nearly
+  // every generic numeric expression types `finite_number` (`sin(6u)` with `u`
+  // undeclared does), and a `true` there switches the compiler's real-vs-
+  // complex lowering to complex arithmetic for all of them. The identification
+  // with `complex` is made by the Phase 2 codemod, which rewrites the name
+  // away rather than relating it.
+  //
+  // The BARE names are listed as children, in ONE direction only. After the
+  // flip they denote finite values, and `matches('finite_number')` is the
+  // engine's canonical finiteness test (`BoxedSymbol.isFinite`,
+  // `factsFromType`, the `Re`/`Im`/`Arg`/`Abs` type handlers all ask it), so
+  // `real ⊑ finite_number` must hold or a symbol declared `real` reports an
+  // unknown finiteness. The reverse edge is NOT added: `finite_number` stays
+  // outside `complex`, which is what keeps `isNonRealNumber('finite_number')`
+  // false.
+  //
+  // The per-tier twins (`finite_real` vs `real`, and the three others) do NOT
+  // get the same treatment, even though each pair now denotes the same values.
+  // Adding the bare name under its `finite_*` twin makes the two MUTUAL
+  // subtypes, and the primitive order stops being antisymmetric. Two things
+  // then break. `meetPrimitiveTypes` returns whichever spelling its early
+  // `if (sa.has(b)) return [b]` reaches first, so `meet(real, finite_real)` is
+  // `finite_real` while `meet(finite_real, real)` is `real` — the meet result
+  // depends on operand order, and `MEET_CACHE` keys pairs in a normalized
+  // order that assumes the opposite. And the maximal-element filter below
+  // discards an element whenever another common element is above it, so a pair
+  // of mutual subtypes discards each other. Measured: with the twin edges
+  // added, the closure stays transitive (no holes) but 4 mutual pairs appear
+  // and the four `meet` answers above flip with argument order. The twins are
+  // therefore identified by the Phase 2 rename, not by an edge here.
   finite_number: [
     'finite_complex',
     'finite_real',
     'finite_integer',
     'finite_rational',
+    'complex',
+    'imaginary',
+    'real',
+    'rational',
+    'integer',
   ],
+  // `complex` is the FINITE complex numbers. `real ⊂ complex` properly, and
+  // the infinities are gone from this subtree: `non_finite_number` is listed
+  // under `infinity` only, which is what makes `number` decompose disjointly.
   complex: [
     'finite_complex',
     'imaginary',
-    // D10 (2026-07-02): `real ⊂ complex`, properly. `complex` admits ±∞ (it
-    // already listed `non_finite_number`), so the infinity-admitting
-    // `real`/`rational`/`integer` are genuine subtypes — the numeric tower is
-    // `integer ⊂ rational ⊂ real ⊂ complex ⊂ number`. (`isReal` still admits
-    // ±∞; D10 is about the LATTICE relation, not that predicate.)
     'real',
     'rational',
     'integer',
     'finite_real',
     'finite_rational',
     'finite_integer',
-    'non_finite_number',
   ],
   finite_complex: [
     'imaginary',
@@ -99,17 +140,11 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
     'finite_real',
     'finite_rational',
     'finite_integer',
-    'non_finite_number',
   ],
   finite_real: ['finite_rational', 'finite_integer'],
-  rational: [
-    'finite_rational',
-    'finite_integer',
-    'integer',
-    'non_finite_number',
-  ],
+  rational: ['finite_rational', 'finite_integer', 'integer'],
   finite_rational: ['finite_integer'],
-  integer: ['finite_integer', 'non_finite_number'],
+  integer: ['finite_integer'],
   finite_integer: [],
   any: PRIMITIVE_TYPES,
   unknown: [],
@@ -257,11 +292,14 @@ export function isPrimitiveSubtype(
  * - If `a ⊑ b` (or `b ⊑ a`), the result is `[a]` (resp. `[b]`).
  * - For incomparable but overlapping types, the result is the set of maximal
  *   common subtypes, e.g. `meet(integer, finite_real)` = `[finite_integer]`
- *   (`integer` admits ±∞, so the overlap is the *finite* integers). Under D10
- *   the numeric tower is a chain (`integer ⊂ rational ⊂ real ⊂ complex ⊂
- *   number`), so `meet(real, complex)` = `[real]` (real is now below complex);
- *   the union-of-maximals case only arises for genuinely incomparable pairs
- *   such as `meet(imaginary, finite_real)` = `[]`.
+ *   (`finite_real` is the deprecated synonym of `real` and sits formally
+ *   below it, so the overlap is named by the `finite_*` twin). The numeric
+ *   tower is a chain (`integer ⊂ rational ⊂ real ⊂ complex ⊂ number`), so
+ *   `meet(real, complex)` = `[real]`; the union-of-maximals case only arises
+ *   for genuinely incomparable pairs such as `meet(imaginary, finite_real)` =
+ *   `[]`.
+ * - The three children of `number` are disjoint, so `meet(real, infinity)`,
+ *   `meet(complex, nan)` and `meet(infinity, nan)` are all `[]`.
  * - For disjoint types (e.g. `meet(string, integer)`), the result is `[]`.
  *
  * The special types `any`, `unknown`, `never`, `nothing` and `error` must be
@@ -306,17 +344,46 @@ function hasFiniteBounds(t: { lower?: number; upper?: number }): boolean {
   );
 }
 
-/** The *finite* counterpart of a numeric primitive type (the ±∞-admitting
- *  types map to their finite subtype; already-finite types map to themselves).
+/** True if a numeric range over this base type is finite whatever its bounds
+ *  are, because the base admits only finite values. After the lattice flip
+ *  every bare name below `number` is finite, so `integer<1..>` and `real<0..>`
+ *  are as finite as `integer<0..10>`.
  *
+ *  `number` is excluded on purpose: it still admits `infinity` and `nan`, so a
+ *  hand-built `number<0..>` must stay outside `finite_number`. `infinity`,
+ *  `nan` and `non_finite_number` are excluded for the same reason. The
+ *  `finite_*` names are absent because they are already their own finite
+ *  spelling — `finiteBaseType` maps each of them to itself. */
+function hasFiniteBase(t: NumericPrimitiveType): boolean {
+  return (
+    t === 'complex' ||
+    t === 'imaginary' ||
+    t === 'real' ||
+    t === 'rational' ||
+    t === 'integer'
+  );
+}
+
+/** The deprecated `finite_*` synonym of a numeric primitive type (types that
+ *  have no such synonym map to themselves).
  *
- *  `infinity` and `nan` have no finite counterpart — no value of either type is
- *  finite — but the `default` arm returns them unchanged, which reads as "these
- *  are already finite". This is accepted for now: the sole caller applies the
- *  helper to the base of a range that HAS finite bounds, the type parser
- *  refuses bounds on those two names, and only a hand-built `Type` object can
- *  therefore reach here with such a range. The helper is removed when the
- *  numeric lattice migration completes. */
+ *  The bare names are already finite, so this is no longer a narrowing in the
+ *  set-of-values sense. It is still needed because the `finite_*` synonyms are
+ *  kept formally BELOW their bare counterparts (see the deprecated-synonym
+ *  note on `NumericPrimitiveType` in `types.ts`): a finitely-bounded range such
+ *  as `integer<0..10>` must relate to a signature written `finite_integer` —
+ *  which is what `Element(x: integer<0..10>, Integers)` asks, ℤ being declared
+ *  `finite_integer` — and `isSubtype('integer', 'finite_integer')` is false.
+ *  The helper is deleted with the `finite_*` names themselves, in Phase 2 of
+ *  `docs/plans/2026-08-27-lattice-flip-implementation.md`.
+ *
+ *  `infinity` and `nan` have no `finite_*` synonym — no value of either type is
+ *  finite — but the `default` arm returns them unchanged. This is accepted: the
+ *  sole caller applies the helper to the base of a range that is finite, either
+ *  because its bounds are both finite or because `hasFiniteBase` says the base
+ *  is. The type parser refuses bounds on those two names, so only a hand-built
+ *  `Type` object can reach here with such a range, and only with finite bounds,
+ *  which do make it finite. */
 function finiteBaseType(t: NumericPrimitiveType): NumericPrimitiveType {
   switch (t) {
     case 'number':
@@ -332,53 +399,6 @@ function finiteBaseType(t: NumericPrimitiveType): NumericPrimitiveType {
     default:
       return t;
   }
-}
-
-/**
- * The infinity-admitting numeric types, keyed by their *finite* counterpart.
- *
- * A union `finite_X | non_finite_number` covers exactly the same values as the
- * single type `X` (see the numeric tower in `types.ts`: `real = finite_real +
- * non_finite_number`, `integer = finite_integer + non_finite_number`, etc.).
- * Such unions still arise (e.g. from `finite_number ∧ real = finite_real`, or
- * directly-constructed unions), so recognizing the equivalence lets them
- * collapse to — and be seen as equal to — the single covering type `X`. (Under
- * D10 `real ⊂ complex`, so `real ∧ complex = real`; the covering-union map is
- * unchanged and still governs the finite/non-finite collapse.)
- *
- * The covering claim now OVER-approximates: since `number` also holds `nan`,
- * `infinity` and the unsigned `~oo`, injecting `number` as a phantom member of
- * `finite_number | non_finite_number` makes those three subtypes of that union
- * even though they belong to neither actual member. The map is removed when the
- * numeric lattice migration completes.
- */
-export const COVERING_UNION_MAP: Record<string, NumericPrimitiveType> = {
-  finite_number: 'number',
-  finite_complex: 'complex',
-  finite_real: 'real',
-  finite_rational: 'rational',
-  finite_integer: 'integer',
-};
-
-/**
- * If a union contains `non_finite_number` together with a finite numeric type
- * `finite_X`, it also covers the infinity-admitting `X`
- * (`finite_X | non_finite_number ≡ X`). Return the union's members augmented
- * with any such covered supertypes, so a member-wise subtype check can see
- * unions that *cover* a single type (e.g. `real <: finite_real |
- * non_finite_number`). Returns the input unchanged when there is nothing to
- * add.
- */
-function unionCoveringMembers(types: Readonly<Type[]>): Readonly<Type[]> {
-  if (!types.some((t) => t === 'non_finite_number')) return types;
-  let extra: Type[] | undefined;
-  for (const t of types) {
-    if (typeof t !== 'string') continue;
-    const covered = COVERING_UNION_MAP[t];
-    if (covered) (extra ??= []).push(covered);
-  }
-  if (!extra) return types;
-  return [...types, ...extra];
 }
 
 /**
@@ -1194,20 +1214,14 @@ export function isSubtype(
       if (isComplexInfinityValue(lhs.value))
         return isPrimitiveSubtype('infinity', rhs as PrimitiveType);
       if (typeof lhs.value === 'number') {
-        // Each numeric literal claims its PRINCIPAL type: NaN inhabits the
-        // wide `number` and nothing narrower (`nan ⊄ real` — a boxed NaN
-        // types as `number`); ±∞ inhabit `non_finite_number` (⊂ real, per
-        // the lattice); a *finite* literal claims the finite base type
-        // (`value 0 <: finite_integer`, not merely `integer`). Matches the
-        // value-vs-bounded-numeric path.
-        // The one addition is `nan`: the marker type names exactly the NaN
-        // singleton, so a NaN literal inhabits it. That relation cannot come
-        // from the principal-type claim, because the principal type `number`
-        // is WIDER than `nan`.
+        // Each numeric literal claims its PRINCIPAL type: NaN inhabits `nan`,
+        // the marker type that names exactly that singleton; ±∞ inhabit
+        // `non_finite_number`, the SIGNED pair, which now sits under
+        // `infinity` alone and no longer under `real`; a *finite* literal
+        // claims the finite base type (`value 0 <: finite_integer`, not merely
+        // `integer`). Matches the value-vs-bounded-numeric path.
         if (Number.isNaN(lhs.value))
-          return (
-            rhs === 'nan' || isPrimitiveSubtype('number', rhs as PrimitiveType)
-          );
+          return isPrimitiveSubtype('nan', rhs as PrimitiveType);
         if (!Number.isFinite(lhs.value))
           return isPrimitiveSubtype('non_finite_number', rhs as PrimitiveType);
         if (Number.isInteger(lhs.value))
@@ -1241,12 +1255,21 @@ export function isSubtype(
     }
 
     if (lhs.kind === 'numeric') {
-      // A range with finite numeric bounds cannot be ±∞, so it is a subtype of
-      // the *finite* counterpart of its base type even though the base type
-      // itself admits ±∞ (e.g. `integer<0..10> ⊑ finite_integer ⊑
-      // finite_real`). Without this, `Element(x:integer<0..10>, Integers)`
-      // (ℤ = `finite_integer`) was refuted.
-      const base = hasFiniteBounds(lhs) ? finiteBaseType(lhs.type) : lhs.type;
+      // A range is finite when its bounds are both finite, and — after the
+      // lattice flip — also when its BASE type is one of the bare names that
+      // admit only finite values. Either way it relates to the deprecated
+      // `finite_*` synonym of its base as well as to the base itself (e.g.
+      // `integer<0..10> ⊑ finite_integer ⊑ finite_real`, and equally
+      // `integer<1..> ⊑ finite_integer`). The bare names are finite too, but
+      // the synonyms are kept formally BELOW them, so this mapping is what
+      // lets a range reach a signature still written with a synonym: without
+      // it, `Element(x:integer<0..10>, Integers)` (ℤ = `finite_integer`) is
+      // refuted, and so is the half-bounded `integer<1..>` that
+      // `nonNegativeRangeType` and the assumption channel produce.
+      const base =
+        hasFiniteBounds(lhs) || hasFiniteBase(lhs.type)
+          ? finiteBaseType(lhs.type)
+          : lhs.type;
       if (!isSubtype(base, rhs)) return false;
       // The bounds always match, since the bounds of the rhs are -∞ and +∞
       return true;
@@ -1328,12 +1351,13 @@ export function isSubtype(
   }
 
   // A type is a subtype of a union if it is a subtype of any of the types in
-  // the union. The member-wise check is incomplete for *covering* unions
-  // (e.g. `real <: finite_real | non_finite_number`, where `real` is a subtype
-  // of neither member individually), so augment the rhs members with any
-  // single type they jointly cover before probing.
+  // the union. The probe is member-wise: the numeric tree is disjoint, so a
+  // union of numeric names never covers a single name that none of its members
+  // covers on its own. (Before the finite-by-default flip it could — the
+  // doubled tower made `finite_X | non_finite_number` cover `X` — and the
+  // members had to be augmented first.)
   if (rhs.kind === 'union') {
-    const rhsMembers = unionCoveringMembers(rhs.types);
+    const rhsMembers = rhs.types;
     // A broadcastable lhs is the union `T | indexed_collection<T>`, so it fits
     // a union rhs iff BOTH branches are covered — possibly by *different*
     // members (`broadcastable<number> <: number | indexed_collection<number>`).
@@ -1873,8 +1897,10 @@ export function isSubtype(
     if (typeof lhs.value !== 'number') return false;
     // NaN is unordered: it inhabits no bounded range. (Without the explicit
     // check, `NaN < lower` and `NaN > upper` are both false and the range
-    // would ADMIT it.) ±∞ claim their principal `non_finite_number`; the
-    // ordinary bound checks then reject them from any finite-bounded range.
+    // would ADMIT it.) ±∞ claim their principal `non_finite_number`, which is
+    // below `infinity` alone, so the base-kind test below already refuses them
+    // for every range over a bare (finite) numeric name; the ordinary bound
+    // checks then reject them from any finite-bounded range as well.
     if (Number.isNaN(lhs.value)) return false;
     const baseKind: NumericPrimitiveType = !Number.isFinite(lhs.value)
       ? 'non_finite_number'
@@ -1931,12 +1957,9 @@ export function isSubtype(
     if (isComplexInfinityValue(lhs.value)) return isSubtype('infinity', rhs);
     if (typeof lhs.value === 'number') {
       // Principal-type claims, matching the value-vs-primitive path above:
-      // NaN → `number`, ±∞ → `non_finite_number`, finite literals → the
-      // finite base type (`value 0 <: finite_integer`). The extra `nan` claim
-      // the value-vs-primitive path makes is not repeated here: this branch is
-      // only reached with a COMPOSITE right-hand side, and `nan` is a
-      // primitive, so a bare `nan` on the right never arrives here.
-      if (Number.isNaN(lhs.value)) return isSubtype('number', rhs);
+      // NaN → `nan`, ±∞ → `non_finite_number`, finite literals → the finite
+      // base type (`value 0 <: finite_integer`).
+      if (Number.isNaN(lhs.value)) return isSubtype('nan', rhs);
       if (!Number.isFinite(lhs.value))
         return isSubtype('non_finite_number', rhs);
       if (Number.isInteger(lhs.value)) return isSubtype('finite_integer', rhs);
@@ -2427,11 +2450,19 @@ export function widen(...types: Readonly<Type>[]): Readonly<Type> {
  * The candidate common supertypes probed by `superType`, ordered from most
  * specific to most general.
  *
- * `infinity` sits immediately after `non_finite_number` and `nan` immediately
- * before `number`: every numeric type that is below `infinity` is also below
- * `non_finite_number`, which is probed first, so no pair that already had a
- * join gets a different one — the two names only give a tighter answer to
- * joins that involve the unsigned `~oo` or `nan` themselves.
+ * The numeric rungs still interleave each `finite_*` synonym with its bare
+ * counterpart, and the synonym comes first. That is deliberate for as long as
+ * the synonyms exist: number literals and type handlers still claim
+ * `finite_integer`/`finite_real`, so `widen(finite_integer, finite_real)` must
+ * answer `finite_real` rather than the coextensive but differently-spelled
+ * `real`, which would rewrite stored types across the library for no gain. The
+ * rungs go with the names, in Phase 2 of
+ * `docs/plans/2026-08-27-lattice-flip-implementation.md`.
+ *
+ * `non_finite_number` and `infinity` lead, and `nan` sits immediately before
+ * `number`. Their exact position no longer interacts with the finite rungs:
+ * the three children of `number` are disjoint, so a pair drawn from two of
+ * them joins at `number` whatever the order in between.
  */
 const SUPERTYPE_PROBE_ORDER: PrimitiveType[] = [
   'non_finite_number',

@@ -426,15 +426,24 @@ describe('fail-open rule-condition guards', () => {
       expect(e1.parse('q^2').replace(['x^2 -> 42; x:notone'])).toBeNull();
     });
 
-    it(':notreal does not fire for an unknown symbol, fires for i', () => {
+    it(':notreal does not fire for an unknown symbol, fires for an imaginary one', () => {
       const engine = new ComputeEngine();
       expect(engine.parse('q^2').replace(['x^2 -> 42; x:notreal'])).toBeNull();
-      const ei = new ComputeEngine();
       // `i^2` itself canonicalizes to `-1` (nothing left to match), so the
-      // non-real base is carried by `i·a`.
-      expect(
-        ei.parse('(i a)^2').replace(['x^2 -> 42; x:notreal'])?.toString()
-      ).toBe('42');
+      // non-real base is carried by a symbol declared `imaginary`.
+      const ei = new ComputeEngine();
+      ei.declare('z', 'imaginary');
+      expect(ei.parse('z^2').replace(['x^2 -> 42; x:notreal'])?.toString()).toBe(
+        '42'
+      );
+      // A PRODUCT of `i` with an unconstrained symbol is NOT a witness: the
+      // guard asks `isExtendedReal === false`, which requires a proof of
+      // non-realness, and `i·a` types `finite_number` because `a` may itself
+      // be imaginary (`a = i` makes the product the real `−1`). The predicate
+      // is three-valued for function expressions, so it answers `undefined`
+      // here and the rule correctly declines.
+      const ep = new ComputeEngine();
+      expect(ep.parse('(i a)^2').replace(['x^2 -> 42; x:notreal'])).toBeNull();
     });
 
     it(':composite does not classify 0 or 1 as composite', () => {

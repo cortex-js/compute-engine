@@ -2134,21 +2134,27 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(r.code).toMatch(/^\(\(_v, _n\) =>/);
   });
 
-  // `Repeat(7, +∞)` stays INERT in the interpreter (`toInteger` answers null,
-  // the expression is returned unevaluated), so the compiled form must not
-  // report success with a `[]` the interpreter never produces. A count that
-  // is non-finite only at RUN time keeps the `[]` projection above.
-  it('Repeat: a statically non-finite count fails closed', () => {
+  // `Repeat`'s `count` parameter is declared `integer`, which since the
+  // finite-by-default flip means a FINITE integer, so `Repeat(7, +∞)` is now
+  // rejected at the signature: the count operand is replaced by an
+  // `incompatible-type` error and the whole expression types `error`. The
+  // interpreter therefore never produces a list here, and `compile()` must
+  // still refuse — it does, because an expression carrying an error is not
+  // compilable at all. A count that is non-finite only at RUN time keeps the
+  // `[]` projection above.
+  it('Repeat: a statically non-finite count is rejected, and compile refuses', () => {
     const e = mkEngine();
-    expect(e.box(['Repeat', 7, 'PositiveInfinity']).evaluate().toString()).toBe(
-      'Repeat(7, +oo)'
+    const inf = e.box(['Repeat', 7, 'PositiveInfinity']);
+    expect(inf.type.toString()).toBe('error');
+    expect(inf.evaluate().toString()).toBe(
+      'Repeat(7, Error(ErrorCode("incompatible-type", "integer", "Infinity"), +oo))'
+    );
+    expect(() => compile(inf, { fallback: false })).toThrow(
+      /Cannot compile invalid expression/
     );
     expect(() =>
-      compile(e.box(['Repeat', 7, 'PositiveInfinity']), { fallback: false })
-    ).toThrow(/Fail closed/);
-    expect(() =>
       compile(e.box(['Repeat', 7, 'NegativeInfinity']), { fallback: false })
-    ).toThrow(/Fail closed/);
+    ).toThrow(/Cannot compile invalid expression/);
   });
 
   it('Repeat: the 1-argument (infinite) form fails closed', () => {

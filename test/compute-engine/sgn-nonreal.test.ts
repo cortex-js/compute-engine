@@ -29,9 +29,11 @@ describe('SGN OF POWERS OF NON-REAL BASES', () => {
     expect(ce.box(['Power', 'z', 5]).sgn).toBe('unsigned');
   });
 
-  it('imaginary base, symbolic integer exponent: indeterminate', () => {
-    // `integer` admits ±∞ and the half-parity is unknown.
-    expect(ce.box(['Power', 'z', 'n']).sgn).toBeUndefined();
+  it('imaginary base, symbolic integer exponent: only not-zero', () => {
+    // Since the finite-by-default flip `integer` excludes ±∞, so the power of
+    // a non-zero base is non-zero. The half-parity of `n` is still unknown, so
+    // nothing sharper than `not-zero` can be claimed.
+    expect(ce.box(['Power', 'z', 'n']).sgn).toBe('not-zero');
   });
 
   it('finite non-real base: integer powers are only not-zero', () => {
@@ -41,9 +43,12 @@ describe('SGN OF POWERS OF NON-REAL BASES', () => {
     expect(ce.box(['Power', 'w', 3]).sgn).toBe('not-zero');
   });
 
-  it('possibly-infinite non-real base: indeterminate', () => {
-    // `complex` admits ComplexInfinity; ∞^-2 = 0, so not even `not-zero`.
-    expect(ce.box(['Power', 'c', 2]).sgn).toBeUndefined();
+  it('bare `complex` base behaves like `finite_complex`: only not-zero', () => {
+    // Since the finite-by-default flip the bare name `complex` excludes
+    // ComplexInfinity, so this base answers exactly as the `finite_complex`
+    // one above: non-zero, with no sound sign claim. A base that admitted an
+    // infinity would be indeterminate instead, because ∞^-2 = 0.
+    expect(ce.box(['Power', 'c', 2]).sgn).toBe('not-zero');
   });
 
   it('matches numeric ground truth for literal bases', () => {

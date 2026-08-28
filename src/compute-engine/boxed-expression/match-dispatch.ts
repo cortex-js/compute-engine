@@ -575,7 +575,9 @@ export function rangePatternBounds(
 /** A usable range-pattern bound: a real, non-`NaN` number literal (`Infinity`
  * and `-Infinity` qualify — `0..Infinity` is "any nonnegative number"). */
 function isRangeBound(e: Expression | undefined): boolean {
-  return e !== undefined && isNumber(e) && e.isReal === true && !e.isNaN;
+  return (
+    e !== undefined && isNumber(e) && e.isExtendedReal === true && !e.isNaN
+  );
 }
 
 /**
@@ -593,7 +595,7 @@ function rangeContains(
   lo: Expression,
   hi: Expression
 ): boolean {
-  if (!isNumber(subject) || subject.isReal !== true || subject.isNaN)
+  if (!isNumber(subject) || subject.isExtendedReal !== true || subject.isNaN)
     return false;
   if (leafEquals(subject, lo) || leafEquals(subject, hi)) return true;
   return (

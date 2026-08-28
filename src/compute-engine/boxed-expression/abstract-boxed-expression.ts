@@ -237,7 +237,7 @@ export abstract class _BoxedExpression implements Expression {
         if (this.isNonPositive === true) return -Infinity;
         // `~oo` only when the value is provably non-real. Otherwise fall
         // through: a direction-unproven real infinity is not complex infinity.
-        if (this.isReal === false) return '~oo'; // ComplexInfinity
+        if (this.isExtendedReal === false) return '~oo'; // ComplexInfinity
       }
       if (typeof this.string === 'string') return this.string;
       if (typeof this.symbol === 'string')
@@ -1130,7 +1130,7 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
-  get isReal(): boolean | undefined {
+  get isExtendedReal(): boolean | undefined {
     return undefined;
   }
 

@@ -1,17 +1,32 @@
 /**
- * Non-finite typing convention (SYM P2-23, option b — convention, not
- * lattice extension). See ARCHITECTURE.md § "Non-finite typing convention
- * for type handlers".
+ * Non-finite typing under the finite-by-default numeric lattice.
  *
- * - `non_finite_number` is claimed ONLY when the value is provably ±∞.
- * - When ±∞/`~oo`/NaN is merely possible — or the value is provably `~oo` —
- *   the claim is `number` (never a finite type, never `complex`, and never a
- *   speculative `non_finite_number`).
+ * The bare numeric names contain only finite values, and the values of
+ * infinite magnitude have their own names: the singletons `+oo`, `-oo` and
+ * `~oo`, the signed-pair atom `non_finite_number` above the first two, and the
+ * tier `infinity` above all three. `nan` names the NaN marker. The rules the
+ * type handlers follow:
+ *
+ * - `non_finite_number` is claimed ONLY when the value is provably a SIGNED
+ *   real infinity — it is the guarantee the sign-aware folds (`1/±∞ = 0`)
+ *   consume.
+ * - When ±∞/`~oo`/NaN is merely POSSIBLE, the claim is the top type `number`
+ *   — never a finite type, and never a speculative `non_finite_number`.
+ * - A VALUE that is provably infinite carries its own singleton type: `~oo`
+ *   for the unsigned infinity, `Infinity`/`-Infinity` for the signed pair.
+ *   A mixed directed value such as `∞ + i` has no singleton spelling and
+ *   carries the tier `infinity` (ruling L2(a)).
  * - Unknown finiteness is a generic point (finite); zero-ness must be proven.
+ *
+ * The last block pins the ADMISSION side of the same change: a parameter
+ * declared with a bare numeric name now rejects an infinite argument at the
+ * signature, before the operator's handler runs.
  */
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
+import { getExpressionDatatype } from '../../src/compute-engine/tensor/tensor-fields';
+import { packTensor } from '../../src/compute-engine/boxed-expression/tensor-view';
 
 function typeOf(expr: any): string {
   return ce.box(expr).type.toString();
@@ -20,7 +35,12 @@ function typeOf(expr: any): string {
 describe('NON-FINITE TYPING CONVENTION', () => {
   beforeAll(() => {
     ce.pushScope();
-    ce.declare('x_r', 'real'); // generic real: finiteness unknown, sign unknown
+    ce.declare('x_r', 'real'); // real: FINITE by the bare name, sign unknown
+    // Generic point of the EXTENDED real line: real-ness proven, finiteness
+    // unknown. The bare name `real` no longer spells this — it denotes the
+    // finite reals — so a control for "unknown finiteness" must name the
+    // union.
+    ce.declare('xr_u', 'real | non_finite_number');
     ce.declare('z_f', 'finite_real'); // provably finite, sign unknown
     ce.declare('nf_sym', 'non_finite_number'); // provably ±∞, no value
     ce.declare('f_sym', 'finite_number'); // provably finite, no value
@@ -43,6 +63,11 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['EllipticK', 1])).toBe('non_finite_number'));
 
     test('Round/Floor of a real ±∞', () => {
+      // Rounding a signed infinity gives that same infinity back. The
+      // rounding type handler proves realness against the EXTENDED real line
+      // (`roundingFunctionType`, `library/type-handlers-types.ts`), which is
+      // what makes this arm reachable: a signed infinity does not match the
+      // bare name `real`, which denotes the finite reals.
       expect(typeOf(['Round', 'PositiveInfinity'])).toBe('non_finite_number');
       expect(typeOf(['Floor', 'NegativeInfinity'])).toBe('non_finite_number');
     });
@@ -119,10 +144,10 @@ describe('NON-FINITE TYPING CONVENTION', () => {
           .type.toString()
       ).toBe('number');
       // Divide: a non-real NUMERATOR (~oo/5 = ~oo). Canonically this folds to
-      // the ~oo value, which types `number` like every other ~oo; the
-      // structural route below exercises the handler's `isReal` guard and
-      // must agree.
-      expect(typeOf(['Divide', 'ComplexInfinity', 5])).toBe('number');
+      // the ~oo VALUE, which carries the `~oo` singleton type; the structural
+      // route below keeps the Divide head, so it reports the handler's claim
+      // (`number`) instead.
+      expect(typeOf(['Divide', 'ComplexInfinity', 5])).toBe('~oo');
       expect(
         ce
           .function('Divide', [ce.ComplexInfinity, ce.box(5)], {
@@ -157,8 +182,12 @@ describe('NON-FINITE TYPING CONVENTION', () => {
         ce
           .function('Divide', [ce.box(num), ce.box(den)], { structural: true })
           .type.toString();
-      // Unknown-finiteness numerator admits `∞/∞` = NaN.
-      expect(divide('x_r', ['Ln', 0])).toBe('number');
+      // Unknown-finiteness numerator admits `∞/∞` = NaN. The numerator must
+      // be an extended real whose finiteness is genuinely open: a `real`
+      // numerator is FINITE by the bare name, so it takes the `finite/±∞ = 0`
+      // arm above instead (asserted below).
+      expect(divide('xr_u', ['Ln', 0])).toBe('number');
+      expect(divide('x_r', ['Ln', 0])).toBe('finite_integer');
       // Non-real numerator: `i/∞` is not claimed.
       expect(divide('ImaginaryUnit', ['Ln', 0])).toBe('number');
       // Non-real denominator: `2/~oo` is not claimed.
@@ -193,7 +222,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       // of guessing complex infinity (it used to return `'~oo'`).
       const e = ce.box(['Add', 'nf_u', 1]);
       expect(e.isInfinity).toBe(true);
-      expect(e.isReal).toBe(true);
+      expect(e.isExtendedReal).toBe(true);
       expect(e.valueOf()).not.toBe('~oo');
       // A proven direction still projects: `|nf_u|` is non-negative, hence +∞.
       expect(ce.box(['Abs', 'nf_u']).valueOf()).toBe(Infinity);
@@ -231,25 +260,32 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     test('Round of ~oo claims number, not non_finite_number', () =>
       expect(typeOf(['Round', 'ComplexInfinity'])).toBe('number'));
 
-    test('∞/∞ (= NaN) stays number', () =>
-      expect(typeOf(['Divide', 'PositiveInfinity', 'PositiveInfinity'])).toBe(
-        'number'
-      ));
+    test('∞/∞ folds to the NaN value, which carries the NaN singleton', () => {
+      // The canonical route folds this to the NaN VALUE, so the type read is
+      // the literal's, not a handler claim: a NaN literal types as the `NaN`
+      // singleton and widens to the `nan` tier.
+      const e = ce.box(['Divide', 'PositiveInfinity', 'PositiveInfinity']);
+      expect(e.type.toString()).toBe('NaN');
+      expect(e.type.matches('nan')).toBe(true);
+      expect(e.type.matches('real')).toBe(false);
+    });
   });
 
-  describe('the ~oo VALUE types number, like every derived ~oo', () => {
-    // The lattice cannot represent `~oo` (non_finite_number = ±∞ only), and
-    // the convention resolves that by admitting it at the top type `number`
-    // only — never at `complex`. The VALUE and the symbol obey it too: they
-    // used to type `complex`, which made two expressions with the same `~oo`
-    // value type differently depending on whether the constant survived
-    // canonicalization, and put a `{re, im}` object into compiled output that
-    // a real-emitting parent read as a number.
+  describe('the ~oo VALUE carries the ~oo singleton', () => {
+    // The lattice names `~oo` directly now: it is a value-literal type under
+    // the `infinity` tier, disjoint from the signed pair (it has no sign) and
+    // from `complex` (it is not finite). Every route that produces the value
+    // reports the same type, which is what the convention was always after —
+    // two expressions holding the same `~oo` used to type differently
+    // depending on whether the constant survived canonicalization.
     test('ComplexInfinity value/symbol', () => {
-      expect(ce.ComplexInfinity.type.toString()).toBe('number');
+      expect(ce.ComplexInfinity.type.toString()).toBe('~oo');
+      expect(ce.ComplexInfinity.type.matches('infinity')).toBe(true);
+      expect(ce.ComplexInfinity.type.matches('non_finite_number')).toBe(false);
+      expect(ce.ComplexInfinity.type.matches('complex')).toBe(false);
       // `1/0` canonicalizes directly to the ~oo value (`x/0 → ~∞` fold),
       // so this reports the value's type, not a Divide handler claim.
-      expect(typeOf(['Divide', 1, 0])).toBe('number');
+      expect(typeOf(['Divide', 1, 0])).toBe('~oo');
     });
 
     test('~oo takes no sign from a factor', () => {
@@ -339,32 +375,44 @@ describe('NON-FINITE TYPING CONVENTION', () => {
 
     test('every spelling of ~oo agrees', () => {
       // The point of the convention: same value, same type, whichever route
-      // produced it.
+      // produced it. These four routes all fold to the `~oo` VALUE at
+      // canonicalization, so they report the singleton.
       for (const expr of [
         'ComplexInfinity',
         ['Divide', 1, 0],
         ['Divide', 'ComplexInfinity', 5],
+      ] as any[])
+        expect(typeOf(expr)).toBe('~oo');
+      // The poles below do NOT fold at canonicalization: they are unevaluated
+      // applications, so what is read is the type HANDLER's claim, and a
+      // handler that cannot prove which infinity it will produce claims the
+      // top type. Evaluating them reaches the same `~oo` value as the routes
+      // above.
+      for (const expr of [
         ['Add', 1, 'ComplexInfinity'],
         ['Factorial', -1],
         ['Gamma', -2],
         ['Zeta', 1],
-      ] as any[])
+      ] as any[]) {
         expect(typeOf(expr)).toBe('number');
+        expect(ce.box(expr).evaluate().type.toString()).toBe('~oo');
+      }
     });
   });
 
   describe('a non-finite component: ~oo if the IMAGINARY part is infinite', () => {
     // A finite complex number requires BOTH components finite, so a value
-    // with a non-finite component is never `finite_complex`. Which type it
-    // does get follows the engine's own `~oo` test, `isComplexInfinity` in
-    // the numeric-value type getters, which asks whether the IMAGINARY part
-    // is infinite — and that is exactly the set of values the engine prints
-    // as `~oo` (`1 + ∞i` and `0 + ∞i` both render `~oo`, while `∞ + i`
-    // renders `(Infinity + i)`). So an infinite imaginary part types
-    // `number`, with the undirected infinities, and an infinite real part
-    // paired with a FINITE imaginary part stays `complex`. `imaginary` is
-    // reserved for a finite non-zero imaginary part paired with a zero real
-    // part.
+    // with a non-finite component is never `complex` at all — `complex` is
+    // finite now. Which type it does get follows the engine's own `~oo` test,
+    // `isComplexInfinity` in the numeric-value type getters, which asks
+    // whether the IMAGINARY part is infinite — and that is exactly the set of
+    // values the engine prints as `~oo` (`1 + ∞i` and `0 + ∞i` both render
+    // `~oo`, while `∞ + i` renders `(Infinity + i)`). So an infinite imaginary
+    // part carries the `~oo` singleton, and an infinite REAL part paired with
+    // a finite imaginary part carries the tier `infinity`: it has a direction,
+    // so it is not `~oo`, and it has no singleton spelling of its own (ruling
+    // L2(a)). `imaginary` is reserved for a finite non-zero imaginary part
+    // paired with a zero real part.
     //
     // Both numeric-value lanes are exercised: the default engine (precision
     // 21) uses BigNumericValue; a machine-precision engine uses
@@ -386,23 +434,36 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     const hiPrec = { num: '1.00000000000000000000000001' };
 
     test('bignum lane (default engine, precision 21)', () => {
-      expect(typeOf(['Complex', inf, 1])).toBe('complex'); // ∞ + i
-      expect(typeOf(['Complex', 1, inf])).toBe('number'); // 1 + ∞i, prints ~oo
-      expect(typeOf(['Complex', 0, inf])).toBe('number'); // 0 + ∞i, prints ~oo
+      expect(typeOf(['Complex', inf, 1])).toBe('infinity'); // ∞ + i
+      expect(typeOf(['Complex', 1, inf])).toBe('~oo'); // 1 + ∞i, prints ~oo
+      expect(typeOf(['Complex', 0, inf])).toBe('~oo'); // 0 + ∞i, prints ~oo
       // ∞ real part with a high-precision (bignum) imaginary part
-      expect(typeOf(['Complex', inf, hiPrec])).toBe('complex');
+      expect(typeOf(['Complex', inf, hiPrec])).toBe('infinity');
     });
 
     test('machine lane (precision = machine)', () => {
       const t = (expr: any) => ceMachine.box(expr).type.toString();
-      expect(t(['Complex', inf, 1])).toBe('complex'); // ∞ + i
-      expect(t(['Complex', 1, inf])).toBe('number'); // 1 + ∞i, prints ~oo
-      expect(t(['Complex', 0, inf])).toBe('number'); // 0 + ∞i, prints ~oo
+      expect(t(['Complex', inf, 1])).toBe('infinity'); // ∞ + i
+      expect(t(['Complex', 1, inf])).toBe('~oo'); // 1 + ∞i, prints ~oo
+      expect(t(['Complex', 0, inf])).toBe('~oo'); // 0 + ∞i, prints ~oo
+    });
+
+    test('every non-finite component lands under `infinity`', () => {
+      // Whatever the direction, the value has infinite magnitude and is
+      // outside the finite `complex` subtree.
+      for (const expr of [
+        ['Complex', inf, 1],
+        ['Complex', 1, inf],
+        ['Complex', 0, inf],
+      ] as any[]) {
+        expect(ce.box(expr).type.matches('infinity')).toBe(true);
+        expect(ce.box(expr).type.matches('complex')).toBe(false);
+      }
     });
 
     test('the type follows the printed form', () => {
       // The tell that the split above is principled rather than incidental:
-      // a value types `number` exactly when the engine renders it `~oo`.
+      // a value types `~oo` exactly when the engine renders it `~oo`.
       const render = (expr: any) => ce.box(expr).toString();
       expect(render(['Complex', 1, inf])).toBe('~oo');
       expect(render(['Complex', 0, inf])).toBe('~oo');
@@ -446,16 +507,41 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(s.isFinite).toBe(false);
     });
 
-    test('a `finite_number` symbol stays finite (unchanged fallback)', () => {
+    test('a `finite_number` symbol is decided by its type too', () => {
+      // Both predicates are decided: a finite number is finite, and it has no
+      // value in common with `infinity`, so it is provably not an infinity.
       const s = ce.box('f_sym');
       expect(s.isFinite).toBe(true);
-      expect(s.isInfinity).toBe(undefined);
+      expect(s.isInfinity).toBe(false);
     });
 
-    test('a generic `real` symbol decides neither (control)', () => {
+    test('a `real` symbol is decided by its type: the bare name is finite', () => {
       const s = ce.box('x_r');
+      expect(s.isFinite).toBe(true);
+      expect(s.isInfinity).toBe(false);
+    });
+
+    test('an extended-real symbol decides neither (control)', () => {
+      // `real | non_finite_number` is the generic point of the extended real
+      // line: it is below neither `finite_number` nor `infinity`, so nothing
+      // is proven either way.
+      const s = ce.box('xr_u');
       expect(s.isFinite).toBe(undefined);
       expect(s.isInfinity).toBe(undefined);
+      // …but real-ness IS proven, and the union must be recognized as a
+      // whole: a member-wise `<: real` / `<: non_finite_number` test would
+      // leave it undecided.
+      expect(s.isExtendedReal).toBe(true);
+    });
+
+    test('a NaN-valued symbol is not on the extended real line', () => {
+      // NaN is neither a finite real nor a signed infinity, so the predicate
+      // is refuted, not left open. The type (`nan`) is what proves it: it
+      // shares no value with either disjunct.
+      const eng = new ComputeEngine();
+      eng.assign('nan_val', eng.box(NaN));
+      expect(eng.box('nan_val').isExtendedReal).toBe(false);
+      expect(eng.box('nan_val').isInfinity).toBe(false);
     });
 
     test('an assigned value still decides, ahead of the type', () => {
@@ -477,7 +563,9 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Divide', 'nf_sym', 2])).toBe('non_finite_number');
       expect(typeOf(['Divide', 1, 'nf_sym'])).toBe('0');
       // ∞/∞ is indeterminate.
-      expect(typeOf(['Divide', 'nf_sym', 'nf_sym'])).toBe('number');
+      // ∞/∞ is indeterminate: `canonicalDivide` folds it to the NaN VALUE,
+      // whose type is the `NaN` singleton (widening to the `nan` tier).
+      expect(typeOf(['Divide', 'nf_sym', 'nf_sym'])).toBe('NaN');
     });
 
     test('arithmetic over a type-only-provable ±∞ function types soundly', () => {
@@ -586,6 +674,122 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       // Numeric operands are untouched.
       expect(engine.box(['Sqrt', 5]).isFinite).toBe(true);
       expect(engine.box(['Abs', -5]).isFinite).toBe(true);
+    });
+  });
+
+  describe('a bare-name parameter rejects an infinite argument', () => {
+    // The admission half of the finite-by-default flip. A parameter written
+    // `integer` used to admit `±∞`, so a call such as `NthPrime(∞)` reached
+    // the operator and stayed symbolic. The bare name now means a FINITE
+    // integer, so the same call is rejected at the signature with
+    // `incompatible-type` — an infinity is outside these operators'
+    // mathematical domain, and signature-level rejection is the declared
+    // contract doing its job.
+    //
+    // The rejection is pinned on BOTH routes (box and parse) because the
+    // check runs during canonicalization, which both routes perform.
+    const REJECTED: [name: string, expr: any, latex: string][] = [
+      // library/number-theory.ts — `(integer) -> finite_integer`
+      ['NthPrime', ['NthPrime', { num: '+Infinity' }], '\\operatorname{NthPrime}(\\infty)'],
+      ['IntegerSqrt', ['IntegerSqrt', { num: '+Infinity' }], '\\operatorname{IntegerSqrt}(\\infty)'],
+      // library/combinatorics.ts — same shape
+      ['Fibonacci', ['Fibonacci', { num: '+Infinity' }], '\\operatorname{Fibonacci}(\\infty)'],
+      // library/collections.ts — the `count` parameter of `Repeat`
+      ['Repeat', ['Repeat', 7, { num: '+Infinity' }], '\\operatorname{Repeat}(7, \\infty)'],
+    ];
+
+    test.each(REJECTED)('%s rejects an infinite argument (box route)', (
+      _name,
+      expr
+    ) => {
+      const engine = new ComputeEngine();
+      const x = engine.box(expr);
+      expect(x.type.toString()).toBe('error');
+      expect(x.toString()).toContain('incompatible-type');
+      // Evaluation does not rescue it: the error operand is carried through.
+      expect(x.evaluate().toString()).toContain('incompatible-type');
+    });
+
+    test.each(REJECTED)('%s rejects an infinite argument (parse route)', (
+      _name,
+      _expr,
+      latex
+    ) => {
+      const engine = new ComputeEngine();
+      expect(engine.parse(latex).toString()).toContain('incompatible-type');
+    });
+
+    test('a FINITE argument of the same head is untouched', () => {
+      const engine = new ComputeEngine();
+      expect(engine.box(['NthPrime', 5]).evaluate().toString()).toBe('11');
+      expect(engine.box(['Fibonacci', 10]).evaluate().toString()).toBe('55');
+      expect(engine.box(['Repeat', 7, 3]).evaluate().toString()).toBe(
+        '[7,7,7]'
+      );
+    });
+
+    test('a WIDE-parameter head still admits the infinity', () => {
+      // Not every number-theory head tightened: `GCD`/`LCM` declare `any*`
+      // and `Binomial` declares `number`, so nothing about their admission
+      // changed. They stay symbolic, exactly as before.
+      const engine = new ComputeEngine();
+      for (const head of ['GCD', 'LCM'])
+        expect(
+          engine.box([head, { num: '+Infinity' }, 2] as any).type.toString()
+        ).not.toBe('error');
+      expect(
+        engine.box(['Binomial', { num: '+Infinity' }, 2] as any).type.toString()
+      ).not.toBe('error');
+    });
+  });
+
+  describe('the extended real line is recognized as a whole', () => {
+    // `real | non_finite_number` is the honest result claim of a head whose
+    // value can be infinite at an interior point (`li(1) = −∞`). It is below
+    // NEITHER disjunct, so a predicate that tested `<: real` and
+    // `<: non_finite_number` separately answered "not an extended real" for a
+    // value that always is one.
+    test('a union-typed function result IS an extended real', () => {
+      const e = ce.parse('\\operatorname{li}(1)');
+      expect(e.type.toString()).toBe('non_finite_number | real');
+      expect(e.isExtendedReal).toBe(true);
+    });
+
+    test('a type that overlaps the reals leaves the predicate open', () => {
+      // `finite_number` admits both a real and a genuinely complex value:
+      // neither entailed nor refuted.
+      expect(ce.parse('\\sin(x_u)').isExtendedReal).toBe(undefined);
+    });
+  });
+
+  describe('tensor storage class of the non-finite literals', () => {
+    // `getExpressionDatatype` reads the literal's type, projected to its tier.
+    // The projection sends BOTH signed infinities to the `infinity` tier,
+    // which also admits the unsigned `~oo` — classifying that tier as complex
+    // promoted a real tensor such as `[1, +oo]` to the complex field. The
+    // signed pair and NaN are held exactly by a float64; only `~oo`, whose
+    // type keeps its own value node, needs the boxed `expression` field.
+    test('a signed ±∞ and NaN are float64; `~oo` is an expression', () => {
+      const eng = new ComputeEngine();
+      expect(getExpressionDatatype(eng.box(Infinity))).toBe('float64');
+      expect(getExpressionDatatype(eng.box(-Infinity))).toBe('float64');
+      expect(getExpressionDatatype(eng.box(NaN))).toBe('float64');
+      expect(getExpressionDatatype(eng.parse('\\tilde\\infty'))).toBe(
+        'expression'
+      );
+    });
+
+    test('a vector with a ±∞ cell stays in the real field', () => {
+      const eng = new ComputeEngine();
+      const vec = eng.function('List', [eng.box(1), eng.box(Infinity)]);
+      expect(packTensor(eng, vec)?.dtype).toBe('float64');
+      // The unsigned infinity has no numeric storage class, so its vector
+      // falls back to the boxed field.
+      const cvec = eng.function('List', [
+        eng.box(1),
+        eng.parse('\\tilde\\infty'),
+      ]);
+      expect(packTensor(eng, cvec)?.dtype).toBe('expression');
     });
   });
 });

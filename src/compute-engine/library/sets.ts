@@ -7,6 +7,7 @@ import { parseType } from '../../common/type/parse.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import { isEmptyType } from '../../common/type/subtype.js';
 import { collectionElementType } from '../../common/type/utils.js';
+import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import type { Type } from '../../common/type/types.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
@@ -53,6 +54,31 @@ import {
 function typeIntersection(a: Type, b: Type): Type {
   return reduceType({ kind: 'intersection', types: [a, b] });
 }
+
+// The element types of the `Extended*` number sets.
+//
+// Every bare numeric name is FINITE, so a set that contains the infinities has
+// to name them. This is the one place in the engine where an infinity is a
+// MEMBER rather than a marker of unbounded extent: "extended" is exactly the
+// claim that the two points at infinity have been added to the line. (A span
+// constructor such as `Interval(0, +oo)` reads its infinite endpoint as extent
+// and excludes it.)
+//
+// The two SIGNED infinities only: the extended real line is the two-point
+// compactification, so the unsigned `~oo` of the Riemann sphere is not a
+// member of any of these three. The extended COMPLEX plane is the one that
+// takes it, and it takes every infinite magnitude with it.
+//
+// The infinities are named by the TYPE `non_finite_number` — the signed pair
+// {+∞, −∞} — and not by the two value types `+oo | -oo`. A value type only
+// admits that one value, so an operand whose type is `non_finite_number`
+// itself (`Ln(0)`, or a symbol declared `non_finite_number`) is not a subtype
+// of `real | +oo | -oo` and its membership would stay undecided.
+// `non_finite_number` excludes both `~oo` and NaN, so the two-point claim
+// above is unaffected.
+const EXTENDED_RATIONAL_TYPE = parseType('rational | non_finite_number');
+const EXTENDED_INTEGER_TYPE = parseType('integer | non_finite_number');
+const EXTENDED_COMPLEX_TYPE = parseType('complex | infinity');
 
 /**
  * Build the `subsetOf` handler of a number set that contains EVERY value of
@@ -218,7 +244,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedComplexNumbers: {
-    type: 'set<complex>',
+    type: 'set<complex | infinity>',
     isConstant: true,
     description: 'The set of all complex numbers, including infinities.',
     collection: {
@@ -226,11 +252,14 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      contains: (_, x) => typeMembership(x, 'complex'),
-      subsetOf: numberSetSubsetOf('ExtendedComplexNumbers', 'complex'),
+      contains: (_, x) => typeMembership(x, EXTENDED_COMPLEX_TYPE),
+      subsetOf: numberSetSubsetOf(
+        'ExtendedComplexNumbers',
+        EXTENDED_COMPLEX_TYPE
+      ),
       // real ⊂ complex: elements include the reals, so no sign claim.
       eltsgn: () => undefined,
-      elttype: () => 'complex',
+      elttype: () => EXTENDED_COMPLEX_TYPE,
     },
   },
 
@@ -267,18 +296,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedRealNumbers: {
-    type: 'set<real>',
+    type: 'set<real | non_finite_number>',
     isConstant: true,
     description: 'The set of all real numbers, including infinities.',
     collection: {
       iterator: (self) => rationalIterator(self),
-      contains: (_, x) => typeMembership(x, 'real'),
+      contains: (_, x) => typeMembership(x, EXTENDED_REAL_TYPE),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: numberSetSubsetOf('ExtendedRealNumbers', 'real'),
+      subsetOf: numberSetSubsetOf('ExtendedRealNumbers', EXTENDED_REAL_TYPE),
       eltsgn: () => undefined,
-      elttype: () => 'real',
+      elttype: () => EXTENDED_REAL_TYPE,
     },
   },
 
@@ -299,18 +328,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedIntegers: {
-    type: 'set<integer>',
+    type: 'set<integer | non_finite_number>',
     isConstant: true,
     description: 'The set of all integers, including infinities.',
     collection: {
       iterator: integerIterator,
-      contains: (_, x) => typeMembership(x, 'integer'),
+      contains: (_, x) => typeMembership(x, EXTENDED_INTEGER_TYPE),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: numberSetSubsetOf('ExtendedIntegers', 'integer'),
+      subsetOf: numberSetSubsetOf('ExtendedIntegers', EXTENDED_INTEGER_TYPE),
       eltsgn: () => undefined,
-      elttype: () => 'integer',
+      elttype: () => EXTENDED_INTEGER_TYPE,
     },
   },
 
@@ -331,18 +360,21 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedRationalNumbers: {
-    type: 'set<rational>',
+    type: 'set<rational | non_finite_number>',
     isConstant: true,
     description: 'The set of all rational numbers, including infinities.',
     collection: {
       iterator: (self) => rationalIterator(self),
-      contains: (_, x) => typeMembership(x, 'rational'),
+      contains: (_, x) => typeMembership(x, EXTENDED_RATIONAL_TYPE),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: numberSetSubsetOf('ExtendedRationalNumbers', 'rational'),
+      subsetOf: numberSetSubsetOf(
+        'ExtendedRationalNumbers',
+        EXTENDED_RATIONAL_TYPE
+      ),
       eltsgn: () => undefined,
-      elttype: () => 'rational',
+      elttype: () => EXTENDED_RATIONAL_TYPE,
     },
   },
 

@@ -315,7 +315,26 @@ export function filterSolutionByTypes(
     if (varTypeObj.matches('integer') && val.isInteger === false) return false;
     if (varTypeObj.matches('rational') && val.isRational === false)
       return false;
-    if (varTypeObj.matches('real') && val.isReal === false) return false;
+    // `isExtendedReal` is membership of the extended real line — a finite
+    // real OR one of the signed infinities — but the type name `real` denotes
+    // the FINITE reals, so that test alone admitted `±oo` for a variable that
+    // cannot hold it. `isInfinity === true` is the second decisive rejection;
+    // an undecided value still passes, per the convention above.
+    if (
+      varTypeObj.matches('real') &&
+      (val.isExtendedReal === false || val.isInfinity === true)
+    )
+      return false;
+    // A variable declared `complex` (or `imaginary`) had no arm at all, so
+    // `±oo`, `~oo` and `NaN` all passed into it unchecked. Those names, too,
+    // denote FINITE values. `real` is a subtype of `complex`, so this test
+    // also runs for a real-typed variable, where it rejects nothing the arm
+    // above has not already rejected.
+    if (
+      varTypeObj.matches('complex') &&
+      (val.isInfinity === true || val.isNaN === true)
+    )
+      return false;
   }
   return true;
 }

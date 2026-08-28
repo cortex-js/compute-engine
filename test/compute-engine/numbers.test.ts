@@ -70,7 +70,7 @@ function checkProps(x: Expression): string {
   const result: string[] = [];
   result.push('number literal: ' + x.isNumberLiteral);
   result.push('type: ' + x.type.toString());
-  result.push('real: ' + x.isReal);
+  result.push('real: ' + x.isExtendedReal);
   result.push('rational: ' + x.isRational);
   result.push('integer: ' + x.isInteger);
   result.push('positive (>0): ' + x.isPositive);
@@ -90,10 +90,17 @@ function checkProps(x: Expression): string {
 }
 
 describe('PROPERTIES OF NUMBERS', () => {
+  // The `type:` line of each snapshot below is the value's PUBLIC type, which
+  // for a literal is the singleton naming exactly that value (ruling O9). The
+  // finite-by-default numeric flip gave the non-finite values singletons of
+  // their own — `Infinity`, `-Infinity`, `~oo` and `NaN`, where all four used
+  // to report a bare tier — so those four lines moved with it. The `real:`
+  // line reports `isExtendedReal` — "on the extended real line" — which is
+  // `true` at `±∞` and `false` at `~oo` and at NaN.
   test('ComplexInfinity is a non-finite-number', () => {
     expect(checkProps(ce.expr('ComplexInfinity'))).toMatchInlineSnapshot(`
       number literal: true
-      type: number
+      type: ~oo
       real: false
       rational: false
       integer: false
@@ -115,7 +122,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('PositiveInfinity is a non-finite-number', () => {
     expect(checkProps(ce.expr('PositiveInfinity'))).toMatchInlineSnapshot(`
       number literal: true
-      type: non_finite_number
+      type: Infinity
       real: true
       rational: false
       integer: false
@@ -137,7 +144,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('NegativeInfinity is a non-finite-number', () => {
     expect(checkProps(ce.expr('NegativeInfinity'))).toMatchInlineSnapshot(`
       number literal: true
-      type: non_finite_number
+      type: -Infinity
       real: true
       rational: false
       integer: false
@@ -159,8 +166,8 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('NaN is a non-finite-number', () => {
     expect(checkProps(ce.expr('NaN'))).toMatchInlineSnapshot(`
       number literal: true
-      type: number
-      real: true
+      type: NaN
+      real: false
       rational: false
       integer: false
       positive (>0): false

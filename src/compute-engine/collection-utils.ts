@@ -2367,11 +2367,14 @@ export function collectionSubset(
   const bShape = typeSaturatedShape(b);
   if (bShape) {
     const handlers = a.baseDefinition?.collection;
-    // The `elttype` handler is preferred over the type: it is the narrower of
-    // the two (a `Range` types `indexed_collection<integer>`, admitting the
-    // infinities, but its handler reports `finite_integer`). The type is the
-    // fallback for a collection with no such handler, and is an upper bound on
-    // the elements either way.
+    // The `elttype` handler is preferred over the type: it is never wider
+    // than the type, and it can be narrower where the head knows more than
+    // its declared element type says. The type is the fallback for a
+    // collection with no such handler, and is an upper bound on the elements
+    // either way. (A `Range` types `indexed_collection<integer>` and its
+    // handler reports `finite_integer`; the two now denote the same set,
+    // since the bare name `integer` is itself finite and an infinite
+    // endpoint marks extent rather than naming a member.)
     const elementType =
       handlers?.elttype?.(a) ?? collectionElementType(a.type.type);
     if (

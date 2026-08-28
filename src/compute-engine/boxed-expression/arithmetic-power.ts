@@ -449,7 +449,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       if (a.isNaN) return ce.NaN;
 
       //↓numeric-expr. bases included: e.g. '{2+3}^oo'
-      if (a.isReal) {
+      if (a.isExtendedReal) {
         if (a.isGreater(1)) return ce.PositiveInfinity;
         if (a.isLess(-1)) return ce.ComplexInfinity;
         // Must be '-1 < a < 1', excluding zero
@@ -470,7 +470,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
 
       if (a.isNaN) return ce.NaN;
 
-      if (a.isReal) {
+      if (a.isExtendedReal) {
         if (a.isGreater(0)) return a.isLess(1) ? ce.PositiveInfinity : ce.Zero;
         // Must be < 0
         return a.isGreater(-1) ? ce.ComplexInfinity : ce.Zero;

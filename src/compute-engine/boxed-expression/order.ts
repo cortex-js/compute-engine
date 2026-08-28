@@ -253,7 +253,15 @@ function rank(expr: Expression): Rank {
     if (type === 'complex' || type === 'finite_complex') return 'complex';
     if (type === 'imaginary') return 'complex';
     if (type === 'finite_number') return 'complex';
-    if (type === 'non_finite_number') return 'constant';
+    // Every infinite value sorts as a constant, whatever its direction: the
+    // signed pair, the unsigned `~oo` and a mixed value such as `∞ + i` all
+    // report `infinity` or its `non_finite_number` subtype now, where `~oo`
+    // and the mixed values used to report `number` and bare `complex`.
+    if (type === 'non_finite_number' || type === 'infinity') return 'constant';
+    // A value whose type is `nan` sorts with NaN. Reached only for a complex
+    // value with a NaN component: a plain NaN was answered by the `isNaN`
+    // test above.
+    if (type === 'nan') return 'nan';
     if (type === 'number') return 'real';
     return 'other';
   }

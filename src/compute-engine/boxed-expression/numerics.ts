@@ -358,7 +358,8 @@ export function complexValueOf(
 /**
  * True when the operand is a NUMBER that is provably not finite — `±∞`,
  * `~oo` or NaN — from its value (a literal, or a symbol's held value) or
- * from a `non_finite_number` static type.
+ * from a static type below `infinity` (which covers the signed pair
+ * `non_finite_number` and the unsigned `~oo`) or below `nan`.
  *
  * This is NOT the same as `isFinite === false`: on a function expression
  * `isFinite` answers `false` for ANY non-number type — a tuple, a list, a

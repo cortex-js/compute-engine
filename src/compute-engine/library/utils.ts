@@ -82,10 +82,12 @@ export function pointNormBroadcasts(point: Expression): boolean {
  * question one operand down:
  *
  * - a **provably non-finite** component — NaN or `±∞`, proven by a value
- *   (a literal, or a symbol's held value) or by a `non_finite_number` type —
+ *   (a literal, or a symbol's held value) or by an `infinity`/`nan` type —
  *   keeps the wide `number`: the norm of such a point is NaN or `+∞`,
- *   neither of which is `real`. A merely-unknown component does not demote
- *   (`Abs(x)` with `x: number` is `real` for the same reason).
+ *   neither of which is `real`. A merely-unknown component does not demote:
+ *   it only costs the `finite_*` spelling, exactly as `absFunctionType` does
+ *   one operand down, where `Abs(x)` with `x: number` claims
+ *   `(real<0..>) | non_finite_number` rather than the wide `number`.
  *   `provablyNonFiniteNumber` is the whole test: its `isNaN === true`
  *   disjunct covers the NaN literal (and a symbol holding NaN, which the
  *   old separate `isNumber(c) && c.isNaN` guard missed).

@@ -35,6 +35,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { isTuple } from '../collection-utils.js';
 import { pointNormBroadcasts } from './utils.js';
 import {
@@ -117,11 +118,16 @@ import {
  * its elements (a finite collection of infinities is not what it is asking
  * about), so it is consulted only for a non-collection operand, where operand
  * and element are the same thing.
+ *
+ * The realness gate is the EXTENDED one. The bare name `real` denotes the
+ * finite reals, so gating on it would drop the ends of the line — exactly
+ * the arguments the finite-limit argument above is about — and send
+ * `Sinc(∞)` (whose value is 0) to the top type.
  */
 function boundedEntireRealType(x: OperandDescriptor | undefined): Type {
   if (x === undefined) return 'number';
   const t = broadcastOperandType(x);
-  if (typeFact(t, 'real') === true) return 'finite_real';
+  if (typeFact(t, EXTENDED_REAL_TYPE) === true) return 'finite_real';
   const scalar = x.facts.collection === true ? undefined : x;
   if (scalar?.facts.finite === true || typeFact(t, 'finite_number') === true)
     return 'finite_number';
@@ -567,6 +573,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Haversine function.',
       wikidata: 'Q2528380',
       broadcastable: true,
+      // The parameter is the bare (finite) `real`, so an infinite argument
+      // is rejected at the signature — `hav(±∞)` is NaN, outside this head's
+      // domain (ruling L9(a) of the numeric-lattice ratification). Widening
+      // it to the extended real line would also retype every undeclared
+      // symbol used as an argument, which changes what the handler and the
+      // compiler's real-versus-complex lowering see.
       signature: '(real) -> number',
       // hav is entire (½(1−cos z)): finite real → [0,1] ⊂ finite real, but
       // `hav(±∞)` is NaN and a complex argument gives a complex value.
@@ -778,9 +790,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
-        if (x.isReal === false)
+        if (x.isExtendedReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        if (x.isReal === true) return 'finite_real';
+        if (x.isExtendedReal === true) return 'finite_real';
         // Unknown realness: a non-finite value (~oo) escapes the finite
         // hedge, so it must be excluded before claiming it.
         if (provablyNonFiniteNumber(x)) return 'number';
@@ -812,15 +824,19 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       complexity: 5200,
       broadcastable: true,
       signature: '(number) -> number',
-      // Real argument → real (not finite_real: Ci(0) = −∞); a finite complex
-      // argument → finite complex value. Unproven realness → `number` (the
-      // value may be complex, and −∞ rules out the finite hedge).
+      // An argument on the EXTENDED real line maps to a value on the extended
+      // real line: `Ci(0) = −∞` is the one infinite value, so the claim has to
+      // spell the signed infinities out — the bare name `real` denotes the
+      // finite reals and would exclude the pole. Proving the argument finite
+      // does not narrow the claim, because the pole is AT a finite argument. A
+      // finite complex argument → finite complex value. Unproven realness →
+      // `number` (the value may be complex, and −∞ rules out the finite hedge).
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
-        if (x.isReal === false)
+        if (x.isExtendedReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        return x.isReal === true ? 'real' : 'number';
+        return x.isExtendedReal === true ? EXTENDED_REAL_TYPE : 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -846,15 +862,18 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       // Shi is entire and odd: a finite real → finite real, a finite complex
-      // argument → finite complex value, Shi(±∞) = ±∞. Unproven realness →
-      // `number` (Shi is unbounded, so no finite hedge is available).
+      // argument → finite complex value, Shi(±∞) = ±∞. An argument only known
+      // to be on the EXTENDED real line therefore needs the extended real line
+      // as its claim — the bare name `real` denotes the finite reals and would
+      // exclude ±∞. Unproven realness → `number` (Shi is unbounded, so no
+      // finite hedge is available).
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
-        if (x.isReal === false)
+        if (x.isExtendedReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        if (x.isReal === true)
-          return x.isFinite === true ? 'finite_real' : 'real';
+        if (x.isExtendedReal === true)
+          return x.isFinite === true ? 'finite_real' : EXTENDED_REAL_TYPE;
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -882,14 +901,19 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       complexity: 5200,
       broadcastable: true,
       signature: '(number) -> number',
-      // Real argument → real (not finite_real: Chi(0) = −∞); a finite complex
-      // argument → finite complex value. Unproven realness → `number`.
+      // An argument on the EXTENDED real line maps to a value on the extended
+      // real line: `Chi(0) = −∞` and `Chi(±∞) = +∞` are both infinite, so the
+      // claim has to spell the signed infinities out — the bare name `real`
+      // denotes the finite reals and would exclude them. Proving the argument
+      // finite does not narrow the claim, because the pole is AT a finite
+      // argument. A finite complex argument → finite complex value. Unproven
+      // realness → `number`.
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
-        if (x.isReal === false)
+        if (x.isExtendedReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        return x.isReal === true ? 'real' : 'number';
+        return x.isExtendedReal === true ? EXTENDED_REAL_TYPE : 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;

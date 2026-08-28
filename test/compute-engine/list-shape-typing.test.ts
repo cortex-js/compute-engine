@@ -85,7 +85,9 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
     // claim (`isTensor` is exactly `dimensions !== undefined`) — the
     // dimensionless type here is normative, not an omission.
     const boxed = ce.box(['List', { str: 'hot' }, NaN]);
-    expect(boxed.type.toString()).toBe('list<number | string>');
+    // The NaN cell contributes the `nan` tier, not the top type `number`:
+    // the finite-by-default numeric flip gave the marker its own name.
+    expect(boxed.type.toString()).toBe('list<nan | string>');
     expect(boxed.type.matches('vector<2>')).toBe(false);
     expect(boxed.type.matches('list<number | string^2>')).toBe(false);
   });

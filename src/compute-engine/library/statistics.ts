@@ -73,6 +73,7 @@ import type {
 } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
+import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import {
   bignumPreferred,
@@ -302,9 +303,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
-        if (x.isReal === false)
+        if (x.isExtendedReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        if (x.isReal === true) return 'finite_real';
+        if (x.isExtendedReal === true) return 'finite_real';
         // Unknown realness: exclude a non-finite value (~oo) before hedging.
         if (provablyNonFiniteNumber(x)) return 'number';
         return 'finite_number';
@@ -336,9 +337,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
-        if (x.isReal === false)
+        if (x.isExtendedReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        if (x.isReal === true) return 'finite_real';
+        if (x.isExtendedReal === true) return 'finite_real';
         // Unknown realness: exclude a non-finite value (~oo) before hedging.
         if (provablyNonFiniteNumber(x)) return 'number';
         return 'finite_number';
@@ -366,7 +367,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // so nothing narrower than `number` is sound there.
       type: ([x]) => {
         if (!x || provablyNonFiniteNumber(x)) return 'number';
-        if (x.isReal !== true) return 'number';
+        if (x.isExtendedReal !== true) return 'number';
         // A literal's handler-visible value classifies exactly — and it is
         // never a rounded double, so it cannot put `1 − 10⁻³⁰` at a pole
         // (`operandLiteralValue` is the channel that survives when the
@@ -409,16 +410,19 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Imaginary error function: -i·Erf(i·x)',
       complexity: 7500,
       signature: '(number) -> number',
-      // Not finite_real on the reals: Erfi(±∞) = ±∞. A finite complex
-      // argument gives a finite complex value. Unproven realness → `number`
-      // (Erfi is unbounded, so no finite hedge is available).
+      // Erfi is entire and odd: a finite real → finite real, but Erfi(±∞) =
+      // ±∞, so an argument only known to be on the EXTENDED real line needs
+      // the extended real line as its claim — the bare name `real` denotes the
+      // finite reals and would exclude ±∞. A finite complex argument gives a
+      // finite complex value. Unproven realness → `number` (Erfi is unbounded,
+      // so no finite hedge is available).
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
-        if (x.isReal === false)
+        if (x.isExtendedReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        if (x.isReal === true)
-          return x.isFinite === true ? 'finite_real' : 'real';
+        if (x.isExtendedReal === true)
+          return x.isFinite === true ? 'finite_real' : EXTENDED_REAL_TYPE;
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {

@@ -101,14 +101,18 @@ import { Type } from '../../common/type/types.js';
 import { widenValueTypes } from '../../common/type/widen-value.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
-import { isSubtype } from '../../common/type/subtype.js';
-import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  EXTENDED_REAL_TYPE,
+} from '../../common/type/primitive.js';
 import {
   absorbNumericAbsence,
   broadcastElementType,
   broadcastResultType,
   broadcastShapedResultType,
   functionResult,
+  isNonRealNumber,
   isSignatureType,
   isWildcardFunctionType,
   narrow,
@@ -1367,13 +1371,19 @@ export class BoxedFunction
   get isInfinity(): boolean | undefined {
     if (!this.isNumber) return false;
     // Type fallback: the static type can prove non-finiteness where no
-    // structural analysis can — e.g. `Ln(0)` types `non_finite_number`. That
-    // type is exactly the signed infinities (PositiveInfinity,
-    // NegativeInfinity — no NaN member, and no ComplexInfinity, which is
-    // typed `complex`), so it entails "is infinite". The type is already
-    // computed and cached at this point (consulted by `isNumber` on entry).
+    // structural analysis can — e.g. `Ln(0)` types `non_finite_number`.
+    // `infinity` is any value of infinite magnitude, which is exactly what
+    // `isInfinity` asks, and it covers the signed pair `non_finite_number`
+    // (`+oo`, `-oo`) as well as the unsigned `~oo`. A type that has no value
+    // in common with `infinity` answers `false`: that is `nan` (NaN is not an
+    // infinity), and, now that the bare name `real` denotes the FINITE reals,
+    // every finite numeric tier as well. The type is already computed and
+    // cached at this point (consulted by `isNumber` on entry).
     const t = this.type;
-    if (!t.isUnknown && isSubtype(t.type, 'non_finite_number')) return true;
+    if (!t.isUnknown) {
+      if (isSubtype(t.type, 'infinity')) return true;
+      if (provablyDisjoint(t.type, 'infinity')) return false;
+    }
     return undefined; // We don't know until we evaluate
   }
 
@@ -1463,12 +1473,14 @@ export class BoxedFunction
   // `this` within BoxedFunction. Not part of the public expression surface —
   // hence the `_` prefix. Use `.is(1)` / `.is(-1)` for a real equality check.
   get _isOne(): boolean | undefined {
-    if (this.isNonPositive === true || this.isReal === false) return false;
+    if (this.isNonPositive === true || this.isExtendedReal === false)
+      return false;
     return undefined;
   }
 
   get _isNegativeOne(): boolean | undefined {
-    if (this.isNonNegative === true || this.isReal === false) return false;
+    if (this.isNonNegative === true || this.isExtendedReal === false)
+      return false;
     return undefined;
   }
 
@@ -1908,10 +1920,37 @@ export class BoxedFunction
     return isSubtype(this.type.type, 'rational');
   }
 
-  get isReal(): boolean | undefined {
-    if (this.type.isUnknown) return undefined;
-    // rationals and integers are real
-    return isSubtype(this.type.type, 'real');
+  get isExtendedReal(): boolean | undefined {
+    const t = this.type;
+    if (t.isUnknown) return undefined;
+    // Rationals and integers are real. `non_finite_number` is admitted
+    // explicitly: the bare name `real` denotes the FINITE reals, and this
+    // predicate means "on the EXTENDED real line", so a signed infinity
+    // answers `true` — the meaning the sign-aware folds (`1/±∞ = 0`, the
+    // `real · ±∞ = ±∞` product rule) consume.
+    //
+    // The entailment test is against the WHOLE extended real line, not
+    // against each disjunct in turn: a head whose honest result claim is the
+    // union `real | non_finite_number` (`li`, `Ei`, which reach `-∞` at an
+    // interior point) is below neither `real` nor `non_finite_number` alone,
+    // so a member-wise test answered `false` for a value that is always an
+    // extended real.
+    if (isSubtype(t.type, EXTENDED_REAL_TYPE)) return true;
+    // Definitely-not requires a PROOF: the type must share no value with
+    // either disjunct. `nan` qualifies (NaN is neither a finite real nor a
+    // signed infinity). A type that merely fails to entail real-ness —
+    // `finite_number`, `number`, `complex` — overlaps the reals and is
+    // indeterminate.
+    if (
+      provablyDisjoint(t.type, 'real') &&
+      provablyDisjoint(t.type, 'non_finite_number')
+    )
+      return false;
+    // `complex`/`imaginary` types keep the historical definitive `false`,
+    // matching `BoxedSymbol.isExtendedReal`: an explicit complex type signals
+    // a general complex value even though `real` is below `complex`.
+    if (isNonRealNumber(t.type)) return false;
+    return undefined;
   }
 
   get isFunctionExpression(): true {

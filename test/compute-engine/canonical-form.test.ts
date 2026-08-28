@@ -908,8 +908,11 @@ describe('CANONICAL FORMS', () => {
         expr = ['Complex', '22975850700614579948873711', 4]; // bigIntRe
         expComplexNum(expr, 'finite_complex');
 
+        // A complex value with an infinite component has infinite magnitude,
+        // so the finite-by-default numeric flip moved it out of `complex` and
+        // into `infinity` (ruling L2(a)).
         expr = ['Complex', Infinity, 4]; // bigIntRe
-        expComplexNum(expr, 'complex');
+        expComplexNum(expr, 'infinity');
       });
 
       test(`Convert to 'Add', when imaginary arg. is non-numeric`, () => {

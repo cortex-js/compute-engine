@@ -585,8 +585,19 @@ export function buildGuardClosures(
         return (sub: Sub) => {
           const v = sub[g.wc];
           if (v === undefined) return false;
+          // Fungrim's declared domains (ZZ/QQ/RR) are FINITE, matching the
+          // 'complex' guard above. A value PROVABLY non-finite (a ±∞ or ~∞
+          // literal has `isFinite === false`) is blocked; note that
+          // `(+∞).isExtendedReal === true`, so without this gate a real guard
+          // would fail open at infinity. Unknown finiteness
+          // (`isFinite === undefined`, e.g. a plain declared-real symbol)
+          // still passes, so ordinary symbols discharge as before. This
+          // mirrors the runtime twin in
+          // `src/compute-engine/fungrim/loader.ts`; the two must stay in step
+          // or a rule admitted at build time is refused at run time.
+          if (v.isFinite === false) return false;
           if (g.t === 'integer') return v.isInteger === true;
-          if (g.t === 'real') return v.isReal === true;
+          if (g.t === 'real') return v.isExtendedReal === true;
           return v.isRational === true;
         };
       }

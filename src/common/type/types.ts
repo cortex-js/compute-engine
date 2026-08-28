@@ -114,41 +114,61 @@ export type PrimitiveType =
   | 'any';
 
 /**
- * The numeric tower (D10, 2026-07-02): `integer ⊂ rational ⊂ real ⊂ complex ⊂
- * number`, with a parallel `finite_*` tower and a shared `non_finite_number`
- * (±∞). `real` is a proper subtype of `complex`; both admit ±∞.
+ * The numeric tree is FINITE BY DEFAULT and DISJOINT: every numeric VALUE is a
+ * finite number, a number of infinite magnitude, or the not-a-number marker,
+ * and no value is two of those — `number = complex ⊔ infinity ⊔ nan` as a
+ * partition of the values. Every bare name below `complex` contains only
+ * finite values. A bare `real` result type is therefore a promise of
+ * finiteness, and the extended real line is written out as
+ * `real | non_finite_number` — `non_finite_number` being the SIGNED pair
+ * `+∞`/`−∞`, so the union excludes the unsigned `~∞` that `infinity` would
+ * bring in. That spelling is shared as the frozen `EXTENDED_REAL_TYPE`
+ * constant in `common/type/primitive.ts`; use it rather than rebuilding the
+ * union.
  *
- * - `number`: any numeric value = `complex` plus `NaN`
- * - `complex`: a complex number (`real ⊂ complex`) = `finite_complex` + `non_finite_number`
- * - `finite_complex`: a finite complex number = `imaginary` + `finite_real`
- * - `imaginary`: a complex number with a real part of 0 (pure imaginary)
- * - `finite_number`: a finite numeric value = `finite_complex`
- * - `finite_real`: a finite real number = `finite_rational` + `finite_integer`
- * - `finite_rational`: a finite rational number (includes the finite integers)
- * - `finite_integer`: a finite whole number
- * - `real`: a real number (imaginary part 0), admits ±∞ = `finite_real` + `non_finite_number`
- * - `non_finite_number`: `PositiveInfinity`, `NegativeInfinity`
- * - `integer`: a whole number, admits ±∞ = `finite_integer` + `non_finite_number`
- * - `rational`: a rational number (includes the integers), admits ±∞ = `finite_rational` + `non_finite_number`
+ * The partition is a statement about values, NOT one the SUBTYPE RELATION
+ * closes over. `isSubtype('complex | infinity | nan', 'number')` is true, but
+ * the converse `isSubtype('number', 'complex | infinity | nan')` is FALSE: a
+ * union is a supertype only of types below one of its members, and `number` is
+ * above all three rather than inside any one of them. Deciding the converse
+ * needs covering-union machinery that the type checker does not have. So do
+ * not use a three-way union as a stand-in for `number` in a signature, and do
+ * not read the `⊔` above as a subtyping identity.
  *
- * Two more numeric names name a value of infinite magnitude and the
- * not-a-number marker:
- *
+ * - `number`: any numeric value — a finite number, a number of infinite
+ *   magnitude, or the not-a-number marker.
+ * - `complex`: a FINITE complex number = `imaginary` + `real`.
+ * - `imaginary`: a finite complex number with a real part of 0 (pure
+ *   imaginary).
+ * - `real`: a finite real number (imaginary part 0) = `rational` plus the
+ *   finite irrationals.
+ * - `rational`: a finite rational number (includes the integers).
+ * - `integer`: a finite whole number.
  * - `infinity`: a number of infinite magnitude, of any direction — the signed
- *   `+∞` and `−∞` plus the unsigned complex infinity `~∞`. It sits between
- *   `number` and `non_finite_number` (`number ⊃ infinity ⊃ non_finite_number`),
- *   so the pre-existing overlap of `real` and the infinities stays exactly the
- *   signed pair that `non_finite_number` already names.
- * - `nan`: the not-a-number marker. It has no other numeric supertype than
- *   `number`, so it is disjoint from `complex`, `real` and every type below
- *   them.
+ *   `+∞` and `−∞`, the unsigned complex infinity `~∞`, and mixed directed
+ *   values such as `∞ + i`. Disjoint from `complex`: an infinity is not a
+ *   finite number.
+ * - `non_finite_number`: exactly the SIGNED pair `+∞`, `−∞`. It sits under
+ *   `infinity` alone and is the atom the sign-aware folds (`1/±∞ = 0`)
+ *   consume; `infinity` itself admits the unsigned `~∞`, which has no sign.
+ * - `nan`: the not-a-number marker. Its only supertype is `number`, so it is
+ *   disjoint from `complex`, `infinity` and every type below them.
  *
- * Both names are TRANSITIONAL. In this release they are additive: no existing
- * value changes its principal type, and `real`, `rational` and `integer` still
- * admit ±∞. The finite-by-default flip — bare numeric names mean finite, the
- * `finite_*` tower and `non_finite_number` retire, and values retype onto
- * `infinity`/`nan` — is Phase 1 of
- * `docs/plans/2026-08-27-lattice-flip-implementation.md`.
+ * DEPRECATED SYNONYMS. The five `finite_*` names — `finite_number`,
+ * `finite_complex`, `finite_real`, `finite_rational`, `finite_integer` —
+ * survive only so that the several hundred signature strings that still spell
+ * them keep parsing. Each now denotes exactly the same set of values as its
+ * bare counterpart (`finite_real` = `real`, and `finite_number` = `complex`,
+ * because "any finite number" IS the finite complex type). Four of them are
+ * kept formally BELOW that counterpart rather than equal to it, which is the
+ * conservative direction: a value that claimed `finite_real` still matches
+ * `real`, and no signature written with a bare name silently starts admitting
+ * more. `finite_number` is the exception — it is left incomparable to
+ * `complex`, exactly where it sat before the flip, for the reason given at its
+ * entry in `PRIMITIVE_SUBTYPES` (`subtype.ts`). All five are removed by the
+ * mechanical rename in Phase 2 of
+ * `docs/plans/2026-08-27-lattice-flip-implementation.md`; `non_finite_number`
+ * is removed by the site-by-site migration in the same plan (step 1.6).
  */
 export type NumericPrimitiveType =
   | 'number'
@@ -163,8 +183,9 @@ export type NumericPrimitiveType =
   | 'integer'
   | 'finite_integer'
   | 'non_finite_number'
-  // A number of infinite magnitude, of any direction: `+∞`, `−∞` and the
-  // unsigned `~∞`. Supertype of `non_finite_number` (the signed pair).
+  // A number of infinite magnitude, of any direction: `+∞`, `−∞`, the
+  // unsigned `~∞` and mixed values such as `∞ + i`. Supertype of
+  // `non_finite_number` (the signed pair), and disjoint from `complex`.
   | 'infinity'
   // The not-a-number marker. Disjoint from every numeric type but `number`.
   | 'nan';

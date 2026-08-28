@@ -295,14 +295,17 @@ describe('absFunctionType', () => {
   test('the NaN exclusion is the descriptor test, so it covers ~oo and a held NaN', () => {
     // The twin excludes NaN with the descriptor test `finite === false &&
     // sgn === 'unsigned'`, where the expressions shape asks the literal-only
-    // `isNumber(x) && x.isNaN` plus a symbol-held-NaN check. One divergence
-    // remains, and it widens in the sound direction:
+    // `isNumber(x) && x.isNaN` plus a symbol-held-NaN check. Both shapes
+    // agree on every row, `~oo` included.
     //
-    //  `~oo`      — NaN and complex infinity produce IDENTICAL descriptors
-    //               (type `number`, not finite, sign `unsigned`), so the
-    //               exclusion cannot separate them and `Abs(~oo)` widens to
-    //               `number`. Here the widening only drops a bound that
-    //               happens to hold (|~oo| = +∞).
+    // `~oo` was the one divergence this battery used to record: NaN and
+    // complex infinity produce IDENTICAL descriptors (type `number`, not
+    // finite, sign `unsigned`), so the descriptor test alone cannot
+    // separate them and the twin widened to `number` where the expressions
+    // shape claimed `real<0..>`. The TYPE channel does separate them —
+    // `~oo` is a subtype of `infinity` and NaN is not — so both shapes now
+    // take an infinite arm ahead of the NaN exclusion and answer
+    // `non_finite_number`, which is what `|~oo| = +∞` deserves.
     //
     // The `hnan=NaN` row (a symbol declared `number` and assigned NaN) is
     // deliberately an AGREEMENT: both shapes answer `number`. The expression
@@ -321,9 +324,7 @@ describe('absFunctionType', () => {
     // `real<0..>` for a NaN value. That hole was closed on the expressions
     // side (the application arm of `absFunctionType`), so the row now pins
     // that BOTH shapes read the application value channel.
-    abUnary(legacy.absFunctionType, twin.absFunctionType, {
-      '~oo': ['real<0..>', 'number'],
-    });
+    abUnary(legacy.absFunctionType, twin.absFunctionType, {});
   });
 });
 
@@ -423,9 +424,9 @@ describe('elementaryFunctionType', () => {
 
   // `Sinh`/`Cosh`/`Tanh`/`Sech` take the non-finite arm on a REAL ±∞. Both
   // shapes now read realness from the TYPE. The expressions shape used to
-  // test `isReal === true`, which a NaN literal answers `true` — so it
-  // claimed `non_finite_number` (resp. `finite_real`) for a value that is
-  // NaN, a member of `number` alone. That was corrected on the expressions
+  // test the value predicate (then spelled `isReal`), which a NaN literal
+  // answered `true` — so it claimed `non_finite_number` (resp. `finite_real`)
+  // for a value that is NaN. That was corrected on the expressions
   // side rather than recorded as a divergence, because the twin's answer was
   // the sound one; the corrected NaN behavior is pinned in
   // `type-handler-parity.test.ts`.
@@ -499,27 +500,32 @@ describe('elementaryFunctionType', () => {
     test(`${head} — the exact-value fast path and the type-proved sign`, () =>
       abHead(head, ARCSEC_D));
 
+  // The unknown-magnitude join of a head whose pole value is `±∞` is spelled
+  // `complex | non_finite_number`: `complex` denotes the FINITE complex
+  // numbers, so it cannot absorb the pole on its own.
+  const POLE_JOIN = 'complex | non_finite_number';
+
   test('Artanh — the exact-value fast path and the declared ranges', () =>
     abHead('Artanh', {
-      'a=5': ['finite_complex', 'complex'],
-      'bigd:real<2..>': ['complex', 'finite_complex'],
-      'smd:real<-0.5..0.5>': ['complex', 'finite_real'],
-      'twod:real<2..2>': ['complex', 'finite_complex'],
+      'a=5': ['finite_complex', POLE_JOIN],
+      'bigd:real<2..>': [POLE_JOIN, 'finite_complex'],
+      'smd:real<-0.5..0.5>': [POLE_JOIN, 'finite_real'],
+      'twod:real<2..2>': [POLE_JOIN, 'finite_complex'],
     }));
 
   test('Arcoth — the exact-value fast path and the declared ranges', () =>
     abHead('Arcoth', {
-      'a=5': ['finite_real', 'complex'],
-      'bigd:real<2..>': ['complex', 'finite_real'],
-      'smd:real<-0.5..0.5>': ['complex', 'finite_complex'],
-      'twod:real<2..2>': ['complex', 'finite_real'],
+      'a=5': ['finite_real', POLE_JOIN],
+      'bigd:real<2..>': [POLE_JOIN, 'finite_real'],
+      'smd:real<-0.5..0.5>': [POLE_JOIN, 'finite_complex'],
+      'twod:real<2..2>': [POLE_JOIN, 'finite_real'],
     }));
 
   test('Arsech — the exact-value fast path, the type-proved sign and the declared ranges', () =>
     abHead('Arsech', {
-      'Exp(r)': ['complex', 'finite_complex'],
-      'bigd:real<2..>': ['complex', 'finite_complex'],
-      'twod:real<2..2>': ['complex', 'finite_complex'],
+      'Exp(r)': [POLE_JOIN, 'finite_complex'],
+      'bigd:real<2..>': [POLE_JOIN, 'finite_complex'],
+      'twod:real<2..2>': [POLE_JOIN, 'finite_complex'],
     }));
 
   // `Arcsch`'s real interval is the whole line, so a bound proves nothing

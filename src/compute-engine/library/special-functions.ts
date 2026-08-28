@@ -28,6 +28,7 @@ import {
 } from './type-handlers-types.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { signOfType } from '../../common/type/utils.js';
+import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { nonNegativeSign } from '../boxed-expression/sgn.js';
 import {
   ellipticK,
@@ -256,7 +257,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // takes the complex AGM (`AGM(1, −2) = −0.4229… + 0.6612…i`).
       type: (ops) => {
         if (ops.some((x) => provablyNonFiniteNumber(x))) return 'number';
-        if (ops.every((x) => x.isReal === true && x.isNonNegative === true))
+        if (
+          ops.every(
+            (x) => x.isExtendedReal === true && x.isNonNegative === true
+          )
+        )
           return 'finite_real';
         return 'finite_number';
       },
@@ -471,14 +476,17 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       complexity: 7500,
       broadcastable: true,
       signature: '(number) -> number',
-      // Real argument → real (not finite_real: Ei(0) = −∞, Ei(±∞) = ±∞/0);
-      // a finite complex argument → finite complex value.
+      // An argument on the EXTENDED real line maps to a value on the
+      // extended real line: `Ei(0) = −∞` and `Ei(+∞) = +∞` are infinite, so
+      // the claim has to spell the signed infinities out — the bare name
+      // `real` denotes the finite reals and would exclude both. A finite
+      // complex argument → finite complex value.
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
-        if (x.isReal === false)
+        if (x.isExtendedReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        return 'real';
+        return EXTENDED_REAL_TYPE;
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -501,9 +509,10 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       // li is real-valued only on the NON-NEGATIVE real axis, and there it
       // can be infinite: li(0) = 0, li(1) = −∞ (the pole), li(+∞) = +∞. So
-      // `real` — which admits ±∞ — is the narrowest claim available on that
-      // half-line, and `finite_real` is not claimable at all without also
-      // proving x ≠ 1. Everywhere else the old unconditional `real` result
+      // the EXTENDED real line is the narrowest claim available on that
+      // half-line — the bare name `real` denotes the finite reals and would
+      // exclude the pole — and `real` alone is not claimable at all without
+      // also proving x ≠ 1. Everywhere else the old unconditional `real` result
       // was wrong: for a negative real x, li(x) = Ei(ln x) with ln x complex,
       // so the value is complex, and `LogIntegral(NaN)` numericizes to NaN,
       // which `real` does not admit either. The gate narrows only on a proven
@@ -524,10 +533,13 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       type: ([x]) => {
         if (x === undefined) return 'number';
         const t = broadcastOperandType(x);
-        if (typeFact(t, 'real') !== true) return 'number';
+        // EXTENDED realness: `li(+∞) = +∞` is on the half-line the claim
+        // covers, and a `+oo` argument does not match the bare (finite)
+        // name `real`.
+        if (typeFact(t, EXTENDED_REAL_TYPE) !== true) return 'number';
         const scalar = x.facts.collection === false && t === x.type;
         const sgn = scalar ? x.facts.sgn : signOfType(t);
-        return nonNegativeSign(sgn) === true ? 'real' : 'number';
+        return nonNegativeSign(sgn) === true ? EXTENDED_REAL_TYPE : 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         // li is real only for x ≥ 0; stay symbolic for complex/negative.

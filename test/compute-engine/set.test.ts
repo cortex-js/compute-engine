@@ -336,26 +336,69 @@ describe('SUBSET', () => {
     ).toMatchInlineSnapshot(`True`);
   });
 
-  // The signed INTEGER sets are declared over `integer`, which admits the
-  // infinities, while `Integers` is declared over `finite_integer`, which does
-  // not — and their `contains` handlers agree: `NegativeIntegers` contains
-  // -oo, `Integers` does not contain +oo. So the negative integers are NOT a
-  // subset of `Integers`; `ExtendedIntegers` is the one that contains them.
-  // The answer looks wrong at a glance, which is why it is pinned here.
-  test('the signed integer sets admit the infinities', () => {
+  // Every bare numeric name is FINITE, so no plain number set holds an
+  // infinity — the signed integer sets included. The `Extended*` sets are the
+  // ones that add the points at infinity, and that is the only place in the
+  // engine where an infinity is a MEMBER rather than a marker of unbounded
+  // extent (ruling L10 covers the span constructors, which exclude it).
+  test('only the Extended sets admit the infinities', () => {
+    const OO = ce.box({ num: '+Infinity' });
+    const NOO = ce.box({ num: '-Infinity' });
+
+    expect(ce.box('NegativeIntegers').contains(NOO)).toBe(false);
+    expect(ce.box('Integers').contains(OO)).toBe(false);
+    expect(ce.box('RealNumbers').contains(OO)).toBe(false);
+
+    expect(ce.box('ExtendedIntegers').contains(NOO)).toBe(true);
+    expect(ce.box('ExtendedIntegers').contains(OO)).toBe(true);
+    expect(ce.box('ExtendedRealNumbers').contains(OO)).toBe(true);
+    expect(ce.box('ExtendedRationalNumbers').contains(OO)).toBe(true);
+    // Only the two SIGNED points: the extended real line is the two-point
+    // compactification, so the unsigned `~oo` of the Riemann sphere belongs
+    // to the extended COMPLEX plane alone. NaN belongs to none of them.
+    expect(ce.box('ExtendedRealNumbers').contains(ce.box('ComplexInfinity'))).toBe(
+      false
+    );
+    expect(ce.box('ExtendedRealNumbers').contains(ce.box(NaN))).toBe(false);
     expect(
-      ce.expr(['Subset', 'NegativeIntegers', 'Integers']).evaluate()
-    ).toMatchInlineSnapshot(`False`);
+      ce.box('ExtendedComplexNumbers').contains(ce.box('ComplexInfinity'))
+    ).toBe(true);
+
+    // An operand whose type is the SIGNED PAIR itself — not one of the two
+    // points — is a member too. The sets name the infinities by the type
+    // `non_finite_number`; spelling them as the two value types `+oo | -oo`
+    // instead left `nf` outside the union, and the membership test answered
+    // `undefined` (the expression stayed unevaluated) rather than True.
+    const nfEngine = new ComputeEngine();
+    nfEngine.declare('nf', 'non_finite_number');
+    expect(
+      nfEngine.box(['Element', 'nf', 'ExtendedRealNumbers']).evaluate().json
+    ).toBe('True');
+    expect(
+      nfEngine.box(['Element', ['Ln', 0], 'ExtendedRealNumbers']).evaluate()
+        .json
+    ).toBe('True');
+    expect(
+      nfEngine.box(['Element', 'nf', 'ExtendedIntegers']).evaluate().json
+    ).toBe('True');
+    expect(
+      nfEngine.box(['Element', 'nf', 'RealNumbers']).evaluate().json
+    ).toBe('False');
+    // The element types stay honest about their own membership.
+    expect(ce.box('ExtendedIntegers').contains(ce.box(2.5))).toBe(false);
+
     expect(
       ce.expr(['Subset', 'NegativeIntegers', 'ExtendedIntegers']).evaluate()
     ).toMatchInlineSnapshot(`True`);
-    // The `contains` handlers this rests on:
+    // Still False, but no longer because of the infinities. ℤ is declared over
+    // the deprecated synonym `finite_integer`, which is kept formally BELOW
+    // the bare `integer` while the synonyms survive (see the
+    // deprecated-synonym note on `NumericPrimitiveType` in
+    // `common/type/types.ts`), so `isSubtype('integer', 'finite_integer')` is
+    // false. Removing the synonyms turns this into True.
     expect(
-      ce.box('NegativeIntegers').contains(ce.box({ num: '-Infinity' }))
-    ).toBe(true);
-    expect(ce.box('Integers').contains(ce.box({ num: '+Infinity' }))).toBe(
-      false
-    );
+      ce.expr(['Subset', 'NegativeIntegers', 'Integers']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
   });
 
   // An empty interval is a subset of every collection, including one that is

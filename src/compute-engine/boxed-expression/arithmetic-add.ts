@@ -556,7 +556,10 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
     //   companion term, can produce `~oo`/NaN/non-finite complex values that
     //   only the top type `number` admits.
     const nf = nonFinite[0];
-    if (nf.isReal === true && args.every((x) => x === nf || x.isReal === true))
+    if (
+      nf.isExtendedReal === true &&
+      args.every((x) => x === nf || x.isExtendedReal === true)
+    )
       return 'non_finite_number';
     return 'number';
   }

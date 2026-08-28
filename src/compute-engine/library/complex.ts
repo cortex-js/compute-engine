@@ -61,48 +61,56 @@ export function signFromAssumedPart(
  * claims about the same value.
  */
 
-// Re follows the operand's finiteness: a finite number has a finite
-// real part, `Re(±∞) = ±∞`, and `~oo`/NaN (typed `number`) stay
-// unrepresentable by a finite claim.
+// Re follows the operand's finiteness: a finite number has a finite real
+// part, and `Re(±∞) = ±∞`. The two remaining `number` values answer
+// differently from each other — `Re(~oo)` is `+∞` and `Re(NaN)` is NaN — so
+// no claim below the top type `number` covers both.
 const realPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
   if (!z) return 'number';
   const t = z.type;
   if (t.matches('finite_number')) return 'finite_real';
   if (t.matches('non_finite_number')) return 'non_finite_number';
-  if (isNumber(z)) return 'number'; // NaN or ~oo literal
+  if (isNumber(z)) return 'number'; // a `nan` or `~oo` literal
   // Collection operand: scalar claim for the broadcast lift — elements
   // keep the generic finite-point convention (list-broadcast-typing).
   if (t.matches('indexed_collection<any>')) return 'finite_real';
-  // A real-typed operand is its own real part (`real` excludes NaN);
-  // a `number`-typed one may be NaN/~oo, which `real` cannot admit.
+  // A real-typed operand is its own real part. The bare name `real` is
+  // finite and excludes `~oo` and NaN, so this claim is exact; a
+  // `number`-typed operand may be either of those and keeps the top type.
   return t.matches('real') ? 'real' : 'number';
 };
 
 // Im of a finite number is a finite real, and a real ±∞ has a zero
-// imaginary part; `~oo`/NaN (typed `number`) do not admit a finite claim.
+// imaginary part. `Im(~oo)` is `+∞`, which no finite claim admits, so a `~oo`
+// operand takes the top type `number`; `Im(NaN)` is 0, and shares that same
+// widest claim only because the two literals are not told apart here.
 const imaginaryPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
   if (!z) return 'number';
   const t = z.type;
   if (t.matches('finite_number') || t.matches('non_finite_number'))
     return 'finite_real';
-  if (isNumber(z)) return 'number'; // NaN or ~oo literal
+  if (isNumber(z)) return 'number'; // a `nan` or `~oo` literal
   if (t.matches('indexed_collection<any>')) return 'finite_real';
-  // A real-typed operand has Im = 0; a `number`-typed one may be
-  // NaN/~oo, whose imaginary part is not a (finite) real.
+  // A real-typed operand has Im = 0. The bare name `real` is finite and
+  // excludes `~oo` and NaN; a `number`-typed operand may be either, and
+  // their imaginary part is not a finite real.
   return t.matches('real') ? 'finite_real' : 'number';
 };
 
-// Arg of a finite number — or of a real ±∞ (0 or π) — is a finite
-// real; `Arg(~oo)`/`Arg(NaN)` (typed `number`) are NaN.
+// Arg of a finite number — or of a real ±∞ (0 or π) — is a finite real.
+// `Arg(~oo)` is NaN, which only the top type `number` admits, so a `~oo`
+// operand takes it; `Arg(NaN)` returns π today, and shares that same widest
+// claim only because the two literals are not told apart here.
 const argumentType: OperatorTypeHandlerOnExpressions = ([z]) => {
   if (!z) return 'number';
   const t = z.type;
   if (t.matches('finite_number') || t.matches('non_finite_number'))
     return 'finite_real';
-  if (isNumber(z)) return 'number'; // NaN or ~oo literal
+  if (isNumber(z)) return 'number'; // a `nan` or `~oo` literal
   if (t.matches('indexed_collection<any>')) return 'finite_real';
-  // A real-typed operand has Arg ∈ {0, π}; a `number`-typed one may be
-  // NaN/~oo, where Arg is NaN.
+  // A real-typed operand has Arg ∈ {0, π}. The bare name `real` is finite
+  // and excludes `~oo` and NaN; a `number`-typed operand may be either,
+  // where Arg is NaN.
   return t.matches('real') ? 'finite_real' : 'number';
 };
 
@@ -208,6 +216,11 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       sgn: ([op], { engine: ce }) => signFromAssumedPart(ce, op, 'arg'),
       evaluate: (ops, { engine: ce, numericApproximation }) => {
         if (!isNumber(ops[0])) return undefined;
+        // NaN has no phase angle. Without this guard the zero-imaginary-part
+        // branch below asks `op >= 0`, which is false for NaN, and the
+        // operand would be reported as if it were on the negative real axis
+        // (`Argument(NaN)` → `π`).
+        if (ops[0].isNaN) return ce.NaN;
         const op = ops[0].numericValue;
         if (typeof op === 'number' || op.im === 0) {
           const isNonNegative = typeof op === 'number' ? op >= 0 : op.re >= 0;

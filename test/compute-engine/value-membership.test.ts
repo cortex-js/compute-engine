@@ -134,7 +134,7 @@ describe('VALUE MEMBERSHIP — typeAcceptsValue', () => {
   it('a non-real value never inhabits a bounded range', () => {
     // Bounds are only meaningful over an ordered (real) domain. (The range
     // grammar only admits real base kinds — `complex<0..10>` does not parse
-    // — so the base-kind check rejects and the `isReal` guard in the
+    // — so the base-kind check rejects and the `isExtendedReal` guard in the
     // numeric branch is defense-in-depth.)
     const z = ce.box(['Complex', 5, 1000]).evaluate();
     expect(typeAcceptsValue(z, t('real<0..10>'))).toBe(false);

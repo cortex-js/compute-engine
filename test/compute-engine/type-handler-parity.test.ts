@@ -31,8 +31,8 @@
  *   because the call site re-adds the whole lifted shape around what the
  *   handler returns.
  * - `Sinh`/`Cosh`/`Tanh`/`Sech` do not mistake a NaN operand for a real
- *   infinity: a deliberate soundness correction, since NaN answers
- *   `isReal === true` while being non-finite.
+ *   infinity: a deliberate soundness correction, made when the value
+ *   predicate (then spelled `isReal`) still answered `true` for NaN.
  * - Deriving a type is state-pure: repeated and forced re-derivations
  *   move no cache axis, a `'types'`-shape handler receives descriptors
  *   (never expressions), and the runtime guard — always on under test —
@@ -298,24 +298,26 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     expect(ce.box(['Sign', NAN] as any).sgn).toBe('unsigned');
   });
 
-  test('LogIntegral claims real only on the non-negative real axis', () => {
+  test('LogIntegral claims the extended reals only on the non-negative axis', () => {
     // li(x) = Ei(ln x) is real-valued only for x ≥ 0, and infinite there at
-    // both ends of its domain (li(1) = −∞, li(+∞) = +∞) — so `real`, which
-    // admits ±∞, is the narrowest sound claim and `finite_real` is not
-    // claimable. For x < 0, ln x is complex and so is the value; and
+    // both ends of its domain (li(1) = −∞, li(+∞) = +∞) — so the EXTENDED
+    // real line, `non_finite_number | real`, is the narrowest sound claim.
+    // The bare name `real` denotes the finite reals and would exclude both
+    // ends. For x < 0, ln x is complex and so is the value; and
     // `LogIntegral(NaN).N()` is `NaN`. The flat `real` result this definition
     // used to declare admitted neither, so the result was widened to `number`
     // and a domain-gated handler re-narrows on a proven non-negative real.
+    const XR = 'non_finite_number | real';
     const NAN = { num: 'NaN' };
     ce.declare('nn', 'real<0..>');
     ce.declare('s', 'real');
-    expect(ce.box(['LogIntegral', 2] as any).type.toString()).toBe('real');
-    expect(ce.box(['LogIntegral', 0] as any).type.toString()).toBe('real');
-    expect(ce.box(['LogIntegral', 1] as any).type.toString()).toBe('real');
+    expect(ce.box(['LogIntegral', 2] as any).type.toString()).toBe(XR);
+    expect(ce.box(['LogIntegral', 0] as any).type.toString()).toBe(XR);
+    expect(ce.box(['LogIntegral', 1] as any).type.toString()).toBe(XR);
     expect(
       ce.box(['LogIntegral', { num: '+Infinity' }] as any).type.toString()
-    ).toBe('real');
-    expect(ce.box(['LogIntegral', 'nn'] as any).type.toString()).toBe('real');
+    ).toBe(XR);
+    expect(ce.box(['LogIntegral', 'nn'] as any).type.toString()).toBe(XR);
     expect(ce.box(['LogIntegral', -2] as any).type.toString()).toBe('number');
     expect(
       ce.box(['LogIntegral', { num: '-Infinity' }] as any).type.toString()
@@ -345,7 +347,7 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
       'vector<2>'
     );
     expect(ce.box(['LogIntegral', 'LR'] as any).type.toString()).toBe(
-      'list<real>'
+      `list<${XR}>`
     );
     // A `broadcastable<T>` operand takes the element-type arm too: its
     // `collection` fact is `undefined` — whether it is a collection is
@@ -354,7 +356,7 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     ce.declare('BR', 'broadcastable<real<0..>>');
     ce.declare('BN', 'broadcastable<real>');
     expect(ce.box(['LogIntegral', 'BR'] as any).type.toString()).toBe(
-      'broadcastable<real>'
+      `broadcastable<${XR}>`
     );
     // An element type of unproven sign still keeps the wide claim.
     expect(ce.box(['LogIntegral', 'BN'] as any).type.toString()).toBe(
@@ -364,12 +366,13 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
 
   test('the pole-free hyperbolics do not mistake NaN for a real infinity', () => {
     // Deliberate soundness CORRECTION, not a migration side effect: the
-    // Sinh/Cosh/Tanh/Sech arms tested `isReal === true`, which a NaN literal
-    // answers `true` while also being non-finite — so they claimed
-    // `non_finite_number` (resp. `finite_real`) for calls that produce NaN,
-    // and neither type admits it. Realness is now read from the TYPE, which
-    // NaN (typed `number`) does not satisfy and a real ±∞ (typed
-    // `non_finite_number`) does.
+    // Sinh/Cosh/Tanh/Sech arms tested the value predicate (then spelled
+    // `isReal`), which a NaN literal answered `true` while also being
+    // non-finite — so they claimed `non_finite_number` (resp. `finite_real`)
+    // for calls that produce NaN, and neither type admits it. Realness is now
+    // read from the TYPE, which NaN does not satisfy and a real ±∞ (typed
+    // `non_finite_number`) does. The predicate itself was later renamed to
+    // `isExtendedReal` and now excludes NaN as well, so both channels agree.
     const NAN = { num: 'NaN' };
     const INF = { num: '+Infinity' };
     for (const op of ['Sinh', 'Cosh', 'Tanh', 'Sech'])
@@ -613,6 +616,10 @@ describe('bounded inverse trig heads read ranged types', () => {
 
   it('an unknown-magnitude real keeps the sound join', () => {
     expect(ce.box(['Arcsin', 'r']).type.toString()).toBe('finite_complex');
-    expect(ce.box(['Artanh', 'r']).type.toString()).toBe('complex');
+    // `Artanh`'s poles at ±1 are `±∞`, which the bare (finite) name `complex`
+    // does not admit, so the join names the signed pair explicitly.
+    expect(ce.box(['Artanh', 'r']).type.toString()).toBe(
+      'complex | non_finite_number'
+    );
   });
 });

@@ -1517,8 +1517,14 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
     expect(ce.box(['At', result, 5, 5]).evaluate().re).toBe(1);
     expect(ce.box(['At', result, 5, 6]).evaluate().re).toBe(0);
     // Lazy result is an indexed collection (serializes as a list, not a set).
+    // The element type is `number`, not `integer`: the lazy form is a nested
+    // `Tabulate` whose inner generator is an UNANNOTATED lambda, so its
+    // parameter slot reads `unknown` and could bind a non-finite value. The
+    // lambda-body widening therefore replaces the cell's finite `integer`
+    // claim with the top numeric type. The eager form (`IdentityMatrix(3)`)
+    // has no lambda and keeps the exact element type.
     expect(result.type.toString()).toBe(
-      'indexed_collection<indexed_collection<integer>>'
+      'indexed_collection<indexed_collection<number>>'
     );
   });
 
@@ -1593,9 +1599,12 @@ describe('Norm — result type is real', () => {
   it('a COMPLEX component still norms to a real', () => {
     const eng = new ComputeEngine();
     eng.declare('z', 'complex');
-    // Finiteness is not provable for a bare `complex`, so `real`, not
-    // `finite_real` — but real either way, which is the point.
-    expect(eng.expr(['Norm', ['Tuple', 'z', 1]]).type.toString()).toBe('real');
+    // Since the finite-by-default flip a bare `complex` component IS finite,
+    // so the norm of one is `finite_real` — real either way, which is the
+    // point. A component that admitted an infinity would norm to `real`.
+    expect(eng.expr(['Norm', ['Tuple', 'z', 1]]).type.toString()).toBe(
+      'finite_real'
+    );
     expect(
       eng
         .expr(['Norm', ['Tuple', 'z', 1]])

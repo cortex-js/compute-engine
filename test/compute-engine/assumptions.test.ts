@@ -308,7 +308,7 @@ describe('SCOPED INEQUALITY TYPE REFINEMENT DOES NOT LEAK (P1-6)', () => {
 
     // After popping, the outer-scope type refinement must be gone.
     expect(ce.expr('x').type.toString()).toBe('unknown');
-    expect(ce.expr('x').isReal).toBe(undefined);
+    expect(ce.expr('x').isExtendedReal).toBe(undefined);
   });
 
   test('membership refinement in a pushed scope does not leak either', () => {

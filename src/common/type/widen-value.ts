@@ -18,9 +18,8 @@ import { subtypingVarianceOf } from './variance.js';
  *
  * - a numeric value node to its tier: an integer value to `finite_integer`,
  *   any other finite value to `finite_real` (the lattice deliberately does
- *   not class a bare numeric value as rational), `±∞` to
- *   `non_finite_number`, `NaN` to `number`, and the unsigned complex infinity
- *   `~oo` to `infinity` (the only type that names it);
+ *   not class a bare numeric value as rational), `±∞` and the unsigned
+ *   complex infinity `~oo` to `infinity`, and `NaN` to `nan`;
  * - only in COVARIANT positions. Widening is "the new type is a supertype
  *   of the old", which reverses under contravariance: in a function
  *   PARAMETER a literal is left as written, since widening it would make
@@ -111,17 +110,16 @@ function widenNode(
       // rather than a JavaScript number.
       if (isComplexInfinityValue(v)) return 'infinity';
       if (typeof v !== 'number') return t; // string/boolean values: leaves
-      // A NaN literal still widens to the wide `number`, and ±∞ to
-      // `non_finite_number`, even though the narrower `nan` and `infinity`
-      // types now exist. Retargeting them would NARROW stored contracts, which
-      // is a value-retyping change: it belongs with the rest of the
-      // finite-by-default flip, not with the additive step that only made the
-      // new names spellable. Measured: retargeting NaN to `nan` changes the
-      // pin in `test/compute-engine/literal-handler-types.test.ts` ("rewrites
-      // NaN and ±∞ value nodes"). See
-      // `docs/plans/2026-08-27-lattice-flip-implementation.md`, Phase 1.
-      if (Number.isNaN(v)) return 'number';
-      if (!Number.isFinite(v)) return 'non_finite_number';
+      // A NaN literal widens to `nan` and a signed infinity to `infinity`:
+      // under the finite-by-default numeric tree these are the tiers those
+      // values live on, and the wide `number` the two used to widen to says
+      // nothing at all. `infinity` rather than the narrower
+      // `non_finite_number` because the tier is what a stored contract should
+      // read as "this may blow up"; the signed pair is a guarantee only the
+      // sign-aware folds consume, and they read the value, not the stored
+      // type.
+      if (Number.isNaN(v)) return 'nan';
+      if (!Number.isFinite(v)) return 'infinity';
       return Number.isInteger(v) ? 'finite_integer' : 'finite_real';
     }
 

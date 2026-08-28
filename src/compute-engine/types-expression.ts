@@ -2431,15 +2431,21 @@ export interface Expression {
   readonly isRational: boolean | undefined;
 
   /**
-   * The value of this expression is a real number.
+   * The value of this expression is on the **extended real line**: a finite
+   * real number, or one of the two signed infinities `+∞` and `-∞`.
    *
-   * This is equivalent to `this.type === "rational" || this.type === "integer" || this.type === "real"`
+   * The unsigned complex infinity `~∞` is **not** on the extended real line,
+   * and neither is `NaN`; both answer `false`. A number with a non-zero
+   * imaginary part answers `false`.
    *
-   * Note that ±∞ and NaN are not real numbers.
+   * Use this predicate for a gate that must also hold at `±∞` — sign
+   * reasoning, the `1/±∞ = 0` fold, a claim that a result is a signed
+   * infinity. For a **finite** real, test `this.type.matches("real")`
+   * instead: the bare type name `real` denotes the finite reals.
    *
    * @category Type Properties
    */
-  readonly isReal: boolean | undefined;
+  readonly isExtendedReal: boolean | undefined;
 
   /**
    * The value of this expression is a function.

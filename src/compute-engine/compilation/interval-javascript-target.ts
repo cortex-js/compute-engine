@@ -1000,7 +1000,7 @@ function extractIntervalLimits(limitsExpr: Expression): {
 
 /**
  * Fail closed (D6) on a Sum/Product bound that is statically non-finite (a
- * `±∞`/`NaN` literal, or an expression typed `non_finite_number`), so
+ * `±∞`/`NaN` literal, or an expression typed `infinity` or `nan`), so
  * `compile()` reports failure and the caller falls back to the interpreter.
  * `for (i = 1; i <= Infinity; i++)` never terminates and `-Infinity + 1` never
  * advances, so such a bound would lock the caller's thread. Mirrors
@@ -1013,7 +1013,8 @@ function assertFiniteIntervalBound(
 ): void {
   const nonFinite =
     (isNumber(expr) && !Number.isFinite(expr.re)) ||
-    expr.type.matches('non_finite_number');
+    expr.type.matches('infinity') ||
+    expr.type.matches('nan');
   if (!nonFinite) return;
   throw new Error(
     `${kind}: the ${which} bound \`${expr.toString()}\` is not a finite ` +

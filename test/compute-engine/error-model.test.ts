@@ -691,16 +691,27 @@ describe('ERROR-MODEL §5 — ~oo is a definite point with defined arithmetic, n
     ).toBe(true);
   });
 
-  test('both ~oo and NaN are admitted only by the top type `number`', () => {
-    // Ruled 2026-08-21 and pinned in `non-finite-typing.test.ts`; repeated here
-    // because the whole channel taxonomy of ERROR-MODEL §1 rests on it.
+  test('~oo, NaN and the directed infinities all sit outside `complex`', () => {
+    // The finite-by-default numeric flip (roadmap §8.2, ruling L1) replaced the
+    // 2026-08-21 placement this used to pin: the bare numeric names hold only
+    // finite values, so every non-finite value is outside `complex` and its
+    // subtree, and each has a name of its own. The channel taxonomy of
+    // ERROR-MODEL §1 rests on the separation, which is now sharper rather than
+    // weaker.
     for (const value of [ce.ComplexInfinity, ce.NaN]) {
       expect(value.type.matches('number')).toBe(true);
       expect(value.type.matches('complex')).toBe(false);
       expect(value.type.matches('real')).toBe(false);
     }
-    // The directed infinities, by contrast, are ordinary values of `real`.
-    expect(ce.PositiveInfinity.type.matches('real')).toBe(true);
+    expect(ce.ComplexInfinity.type.matches('infinity')).toBe(true);
+    expect(ce.NaN.type.matches('nan')).toBe(true);
+    // The directed infinities are no longer ordinary values of `real`: they
+    // inhabit `infinity`, through the signed-pair atom `non_finite_number`.
+    expect(ce.PositiveInfinity.type.matches('real')).toBe(false);
+    expect(ce.PositiveInfinity.type.matches('non_finite_number')).toBe(true);
+    expect(ce.PositiveInfinity.type.matches('infinity')).toBe(true);
+    // The extended real line is spelled out as a union.
+    expect(ce.PositiveInfinity.type.matches('real | infinity')).toBe(true);
   });
 });
 

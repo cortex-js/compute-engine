@@ -12,7 +12,11 @@ import {
   signatureEffects,
   stripNumericRanges,
 } from '../../common/type/utils.js';
-import { isSubtype, objectLayoutOfType } from '../../common/type/subtype.js';
+import {
+  isSubtype,
+  objectLayoutOfType,
+  provablyDisjoint,
+} from '../../common/type/subtype.js';
 import {
   effectSetToString,
   isCoFiniteEffects,
@@ -673,45 +677,6 @@ export function functionLiteralSignatureType(expr: Expression): Type {
     declaredSignature !== undefined && ascribedReturn !== undefined
       ? ascribedReturn
       : bodyTypeSource.type;
-  // The parameters of a bare function literal have unknown type, so a
-  // finite-numeric body claim is unsound: the lambda may later be applied to
-  // a non-finite argument — `(x ↦ x²)(∞) = +∞` — so widen a finite-numeric
-  // result to the top numeric type `number`. (A nullary function has no such
-  // parameter, so its exact body type is kept.) Suppress the widening only
-  // when EVERY parameter type is provably finite (`finite_number`); in this
-  // type system `integer`/`rational`/`real` all admit non-finite values, so
-  // a param annotated `integer` still widens. A bare param (type undefined)
-  // never suppresses widening.
-  if (
-    ascribedReturn === undefined &&
-    params.length > 0 &&
-    bodyTypeSource.matches('finite_number') &&
-    !params.every(
-      (p) => p.type !== undefined && isSubtype(p.type, 'finite_number')
-    )
-  )
-    bodyType = 'number';
-
-  // A DERIVED result type is a storage position: a NUMBER-LITERAL body's
-  // type is literal cargo and projects to its tier (`() -> 21` types
-  // `() -> finite_integer`, not `() -> 21`; `() -> √2` types
-  // `() -> finite_real`, not the enclosure range — ruling O9's second half,
-  // 2026-08-23). Any OTHER body keeps its type verbatim: a non-literal
-  // body's type is already a stored/derived type (handler results are
-  // widened where they are stored), and walking it here could rewrite a
-  // NESTED authored contract (an inner ascribed `-> 0` in a returned
-  // function literal). An ASCRIBED return is the author's contract and is
-  // kept verbatim, literal or not (the same rule that keeps a declared
-  // `(0) -> 0` signature).
-  const derivedBodyExpr =
-    declaredSignature === undefined
-      ? body
-      : functionLiteralReturnMarker(expr)!.op1;
-  if (
-    ascribedReturn === undefined &&
-    derivedBodyExpr._literalType !== undefined
-  )
-    bodyType = stripNumericRanges(bodyType);
 
   // Parameter slots: an annotated param carries its declared type, named
   // (`x: integer`); a bare param stays `unknown` as today. The Type OBJECT is
@@ -739,6 +704,56 @@ export function functionLiteralSignatureType(expr: Expression): Type {
           return { type: 'unknown' as Type };
         })
       : undefined;
+
+  // The parameters of a bare function literal have unknown type, so a
+  // finite-numeric body claim is unsound: the lambda may later be applied to
+  // a non-finite argument — `(x ↦ x²)(∞) = +∞` — so widen a finite-numeric
+  // result to the top numeric type `number`. (A nullary function has no such
+  // parameter, so its exact body type is kept.)
+  //
+  // The widening fires only when at least ONE parameter slot could actually
+  // inject a non-finite value into the body: a slot that stayed `unknown` (it
+  // may bind anything), or one whose type overlaps `infinity` or `nan` (a
+  // `number` slot, an `infinity` slot). Every other slot is provably unable to
+  // bind a non-finite value and so gives the body no way to become non-finite:
+  // since the finite-by-default flip the bare numeric names exclude the
+  // infinities, so an `integer` parameter cannot bind `∞`; and a NON-numeric
+  // slot — `collection`, `string`, `boolean` — is disjoint from the two
+  // non-finite tiers as well, so a body such as `Length(r)` over
+  // `r: collection` keeps its exact `integer` claim. The test reads the
+  // ARROW's slots, computed above, so an inferred slot counts the same as an
+  // annotated one.
+  if (
+    ascribedReturn === undefined &&
+    args !== undefined &&
+    bodyTypeSource.matches('finite_number') &&
+    args.some(
+      (a) =>
+        !provablyDisjoint(a.type, 'infinity') || !provablyDisjoint(a.type, 'nan')
+    )
+  )
+    bodyType = 'number';
+
+  // A DERIVED result type is a storage position: a NUMBER-LITERAL body's
+  // type is literal cargo and projects to its tier (`() -> 21` types
+  // `() -> finite_integer`, not `() -> 21`; `() -> √2` types
+  // `() -> finite_real`, not the enclosure range — ruling O9's second half,
+  // 2026-08-23). Any OTHER body keeps its type verbatim: a non-literal
+  // body's type is already a stored/derived type (handler results are
+  // widened where they are stored), and walking it here could rewrite a
+  // NESTED authored contract (an inner ascribed `-> 0` in a returned
+  // function literal). An ASCRIBED return is the author's contract and is
+  // kept verbatim, literal or not (the same rule that keeps a declared
+  // `(0) -> 0` signature).
+  const derivedBodyExpr =
+    declaredSignature === undefined
+      ? body
+      : functionLiteralReturnMarker(expr)!.op1;
+  if (
+    ascribedReturn === undefined &&
+    derivedBodyExpr._literalType !== undefined
+  )
+    bodyType = stripNumericRanges(bodyType);
 
   // The effect specifier slot. An INFERRED empty set is written as an empty
   // slot, i.e. nothing at all — the author's `pure` spelling is a statement,

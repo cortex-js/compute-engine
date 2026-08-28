@@ -274,51 +274,56 @@ declared-`complex` one) are **simplify-level**, documented in
 
 ### Non-finite typing convention for type handlers
 
-The numeric lattice (D10) can name only some of the non-finite values:
-`non_finite_number` is **exactly `{+∞, −∞}`**; `real`/`rational`/`integer` and
-`complex` admit ±∞ on top of their finite tower; **`~oo` (`ComplexInfinity`)
-and NaN are admitted only by the top type `number`**. Since the lattice cannot
-distinguish "±∞" from "maybe `~oo`" from "maybe NaN" (SYM P2-23, resolved as a
-convention, not a lattice extension), every operator `type` handler follows
-these rules:
+The numeric lattice is finite-by-default (ratified 2026-08-27; the decision
+record is `docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`). The
+top type partitions into three groups of values that share no member:
+`number` holds exactly the finite complex numbers (`complex` and everything
+below it — `real`, `rational`, `integer`, `imaginary`), the infinite values
+(`infinity`: the signed `+∞`/`-∞`, the unsigned `~oo`, and mixed values such
+as `∞ + i`), and the not-a-number marker (`nan`). Bare `real`, `rational`,
+`integer` and `complex` contain only finite values. `non_finite_number` is
+**exactly `{+∞, −∞}`** — the signed pair, now a subtype of `infinity` and no
+longer below `real` or `complex`; it retires when the deprecated `finite_*`
+names do. Every operator `type` handler follows these rules:
 
 1. **Claim `non_finite_number` only when the value is _provably_ `±∞`.**
    Examples: `Ln(0) = −∞`; `Round/Ceil/Floor/Truncate` of a provably real ±∞;
    `±∞ · (finite reals all provably non-zero)`; `EllipticK(1) = +∞`;
    `(+∞)^p` for finite real `p > 0`; `±∞ + (real terms)`.
-2. **When a non-finite value or NaN is merely _possible_ — or the value is
-   provably `~oo` — claim `number`.** Do not claim `non_finite_number`
-   speculatively, do not claim a finite type, and do not claim `complex`
-   (which does not admit `~oo`/NaN). Examples: `x · ∞` with a possibly-zero
-   `x` (0·∞ = NaN); `∞/∞`, `k/0`; pole-capable operators at arguments that can
-   land on a pole (`Tan(π/2)`, `Csc(0)`, `Gamma(0)`, `Zeta(1)`,
-   `Factorial(−2)` — all `~oo`); `√(−∞) = i·∞ = ~oo`.
-3. **Unknown finiteness follows the generic-point convention; zero-ness must
-   be proven when a non-finite operand is present.** An operand whose
-   finiteness is _unknown_ (a bare `real` symbol; `isFinite === undefined`)
-   is treated as a generic (finite) point — `Sin(x)` claims `finite_real`,
-   and only a _provably_ non-finite operand (`isFinite === false`) triggers
-   the non-finite analysis. But once an operand is provably non-finite, a
-   claim that depends on another operand being non-zero (e.g. `x · ∞ = ±∞`,
-   where `x = 0` gives NaN) must _prove_ it (via `sgn`), never assume it.
-   (A possibly-zero _denominator_ with finite operands keeps `Divide`'s
-   documented generic-point behavior — see the handler's comment.)
+2. **A result that may blow up is claimed as a union with the non-finite
+   branch spelled out.** A pole-capable operator whose argument may land on a
+   pole claims `complex | non_finite_number` (the unknown-sign `Ln`, the
+   bounded inverse functions at their poles); a result that may be `~oo` or
+   NaN — `x · ∞` with a possibly-zero `x`, `∞/∞`, `k/0` — claims `number`,
+   the only type that admits every numeric value. A claim of bare `complex`
+   is a finiteness promise and must not cover a path that reaches a pole.
+3. **Unknown finiteness no longer exists for the bare tiers.** An operand
+   declared `real` (or `integer`, `rational`, `complex`) is finite by its
+   type; `Sin(x)` with `x: real` claims `finite_real` because the input
+   provably is one. Only an operand whose type admits an infinity (`number`,
+   `infinity`, `non_finite_number`, an extended union) triggers the
+   non-finite analysis — and once an operand is provably non-finite, a claim
+   that depends on another operand being non-zero (e.g. `x · ∞ = ±∞`, where
+   `x = 0` gives NaN) must _prove_ it (via `sgn`), never assume it.
 
-The **value** `~oo` reports type `number` too, so the convention holds without
-exception: the `ComplexInfinity` symbol declaration and the numeric-value
-`type` getters agree with rule 2, and every spelling of the same value —
-the constant, `1/0`, `Divide(~oo, 5)`, `Add(1, ~oo)`, `(-1)!`, `Gamma(-2)`,
-`Zeta(1)` — types identically. (The value used to report `complex`, which made
-the type depend on whether the constant survived canonicalization and put a
-`{re, im}` object into compiled output that a real-emitting parent then read
-as a number.) A value carrying an infinite IMAGINARY part is `~oo` for this
-purpose — that is the engine's own `isComplexInfinity` test, and exactly the
-set it renders as `~oo`; an infinite REAL part paired with a finite imaginary
-part (`∞ + i`) is a different value and stays `complex`.
+The **values** type onto the new names: `oo` and `-oo` carry the singleton
+value-literal types `+oo`/`-oo` (widening to `infinity`); the value `~oo`
+carries the `~oo` singleton (also below `infinity`); NaN types `nan`; a value
+with an infinite real or imaginary part and a finite other part (`∞ + i`)
+types `infinity`. Every spelling of the same value — the `ComplexInfinity`
+constant, `1/0`, `Divide(~oo, 5)`, `Add(1, ~oo)`, `(-1)!`, `Gamma(-2)`,
+`Zeta(1)` — types identically. The extended real line is spelled
+`real | non_finite_number` (the `EXTENDED_REAL_TYPE` constant in
+`src/common/type/primitive.ts`), and the value predicate for it is
+`isExtendedReal` — the former `isReal`, renamed when bare `real` became a
+finiteness promise; NaN answers `false` to it.
 
 Compiled output follows the type rather than the value's shape: a `~oo` on a
 real-emitting lane lowers to `NaN` — the real lane's "no real value" — on both
-the constant-folded and structural paths, and on the shader targets.
+the constant-folded and structural paths, and on the shader targets. Because
+compiled `~oo` and NaN are the same runtime value, a compiled clause guard for
+the `infinity` or `nan` type cannot be faithful and the clause set declines to
+compile; the `non_finite_number` guard (`±∞` only) remains expressible.
 
 The shared handler implementations (and per-operator dispatch) live in
 `src/compute-engine/library/type-handlers.ts`; the convention is pinned by

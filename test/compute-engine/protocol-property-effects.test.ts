@@ -532,11 +532,20 @@ type Outer = object{child: Inner}
 function f(o: Outer) { o.child.age = 9 }
 Type(f)`).value
     ).toBe('TypeFrom("(o: Outer) state -> number")');
+    // The `state` effect is what this test is about; the two RESULT types
+    // differ only because of the lambda-body widening
+    // (`boxed-expression/effects-inference.ts`), which replaces a finite
+    // numeric body claim with `number` when some parameter slot could bind a
+    // non-finite value. A `list<Inner>` slot provably cannot, so the literal
+    // body `9` keeps its exact type. The `Outer` slot above is a nominal
+    // REFERENCE type, which `provablyDisjoint` does not resolve to its object
+    // definition, so it is not proven disjoint from the infinities and the
+    // widening still fires there.
     expect(
       run(`type Inner = object{age: integer}
 function f(xs: list<Inner>) { xs[1].age = 9 }
 Type(f)`).value
-    ).toBe('TypeFrom("(xs: list<Inner>) state -> number")');
+    ).toBe('TypeFrom("(xs: list<Inner>) state -> finite_integer")');
   });
 
   test('an UNANNOTATED parameter is a store too — `pure` is refused', () => {

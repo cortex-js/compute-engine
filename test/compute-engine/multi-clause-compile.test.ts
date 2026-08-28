@@ -313,4 +313,67 @@ describe('MULTI-CLAUSE COMPILE — whole-function decline (spec §8)', () => {
     const glsl = new GLSLTarget();
     expect(() => glsl.compile(ce.box(['f', 'u']))).toThrow(/fail closed/i);
   });
+
+  // Compiled JavaScript has no distinct value for complex infinity: `~oo`
+  // lowers to the JS value NaN. The interpreter, though, types `~oo` as
+  // `infinity` and NOT as `nan` — the two tiers are disjoint there. So neither
+  // tier has a faithful JS guard: `Number.isNaN(a)` would accept a compiled
+  // `~oo` from a `nan` parameter that the interpreter refuses, and any
+  // `infinity` test over JS numbers refuses a compiled `~oo` the interpreter
+  // accepts. Both decline instead, and the interpreted fallback dispatches.
+
+  it('a `nan` parameter declines the whole function, and the fallback agrees', () => {
+    clause('gnan', ['Function', 1, p('a', 'nan')]);
+    clause('gnan', ['Function', 0, p('x', 'number')]);
+    const r = compile(ce.box(['gnan', 'w']));
+    expect(r?.success).toBe(false);
+    expect(r?.code ?? '').toBe('');
+    // Interpreter-backed, so the compiled `~oo` collision cannot arise.
+    expect(r?.run?.({ w: NaN })).toBe(1);
+    expect(r?.run?.({ w: Infinity })).toBe(0);
+    expect(r?.run?.({ w: 7 })).toBe(0);
+    // Route parity: the interpreter dispatches the same clause set, and
+    // `~oo` reaches the `number` clause, not the `nan` one.
+    expect(ce.box(['gnan', 'NaN']).evaluate().re).toBe(1);
+    expect(ce.box(['gnan', 'ComplexInfinity']).evaluate().re).toBe(0);
+    // The compiled call site over `~oo` now answers 0 as well (before the
+    // decline it emitted a `Number.isNaN` guard and answered 1).
+    expect(compile(ce.box(['gnan', 'ComplexInfinity']))?.run?.({})).toBe(0);
+  });
+
+  it('an `infinity` parameter declines the whole function, and the fallback agrees', () => {
+    clause('ginf', ['Function', 1, p('a', 'infinity')]);
+    clause('ginf', ['Function', 0, p('x', 'number')]);
+    const r = compile(ce.box(['ginf', 'w']));
+    expect(r?.success).toBe(false);
+    expect(r?.code ?? '').toBe('');
+    expect(r?.run?.({ w: Infinity })).toBe(1);
+    expect(r?.run?.({ w: -Infinity })).toBe(1);
+    expect(r?.run?.({ w: NaN })).toBe(0);
+    // `~oo` IS an `infinity` in the interpreter, and the fallback says so too
+    // (an emitted guard answered 0, because the lowering of `~oo` is NaN).
+    expect(ce.box(['ginf', 'ComplexInfinity']).evaluate().re).toBe(1);
+    expect(compile(ce.box(['ginf', 'ComplexInfinity']))?.run?.({})).toBe(1);
+  });
+
+  it('a `non_finite_number` parameter still COMPILES and dispatches ±∞', () => {
+    // The signed pair `+∞ | −∞` excludes both complex infinity and NaN, so
+    // "a number that is neither finite nor NaN" is an exact test: compiled
+    // ±∞ are the JS values `Infinity`/`-Infinity` and pass it, and compiled
+    // `~oo` — a NaN — correctly fails it.
+    clause('gnfn', ['Function', 1, p('a', 'non_finite_number')]);
+    clause('gnfn', ['Function', 0, p('x', 'number')]);
+    const r = compile(ce.box(['gnfn', 'w']));
+    expect(r?.success).toBe(true);
+    expect(r?.code ?? '').toContain('_fn_gnfn(');
+    expect(r?.run?.({ w: Infinity })).toBe(1);
+    expect(r?.run?.({ w: -Infinity })).toBe(1);
+    expect(r?.run?.({ w: NaN })).toBe(0);
+    expect(r?.run?.({ w: 7 })).toBe(0);
+    expect(ce.box(['gnfn', 'PositiveInfinity']).evaluate().re).toBe(1);
+    expect(ce.box(['gnfn', 'NegativeInfinity']).evaluate().re).toBe(1);
+    expect(ce.box(['gnfn', 'NaN']).evaluate().re).toBe(0);
+    expect(ce.box(['gnfn', 'ComplexInfinity']).evaluate().re).toBe(0);
+    expect(compile(ce.box(['gnfn', 'ComplexInfinity']))?.run?.({})).toBe(0);
+  });
 });

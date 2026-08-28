@@ -102,6 +102,14 @@ function recordDeclaredByAssumption(
  * - rational -> real
  * - finite_real_number -> real
  * - complex/imaginary -> number
+ * - +oo, -oo, ~oo -> infinity
+ * - NaN -> nan
+ *
+ * This table must stay identical to the two other copies of it,
+ * `widenAssignedType`/`inferTypeFromValue` in
+ * `boxed-expression/boxed-value-definition.ts` and `promotedValueType` in
+ * `engine-declarations.ts`: a symbol must get the same type whether an
+ * assumption, a fresh declaration or an assignment supplied its value.
  */
 function inferTypeFromValue(ce: ComputeEngine, value: Expression): BoxedType {
   // finite_integer, integer, etc. -> integer
@@ -115,6 +123,12 @@ function inferTypeFromValue(ce: ComputeEngine, value: Expression): BoxedType {
 
   // complex, imaginary -> number
   if (value.type.matches('complex')) return ce.type('number');
+
+  // An infinite value and NaN are disjoint from `real` and from `complex`, so
+  // they reach none of the rungs above. Each promotes to its own tier, which
+  // keeps `x = oo` reassignable to `-oo` and keeps the NaN marker visible.
+  if (value.type.matches('infinity')) return ce.type('infinity');
+  if (value.type.matches('nan')) return ce.type('nan');
   return value.type;
 }
 

@@ -5354,3 +5354,150 @@ describe('the iteration cap counts UNPRODUCTIVE pulls, not total pulls', () => {
     expect([...taken.each()].length).toBe(0);
   });
 });
+
+// Ruling L10 of the numeric-lattice ratification: in a span constructor an
+// infinite endpoint marks unbounded EXTENT — it does not name a last element.
+// The three facts it separates are pinned here: membership excludes the
+// endpoint, the element type does not widen with it, and the infinity
+// surfaces only through the extent-reading operator `Length`.
+describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () => {
+  const ce2 = new ComputeEngine();
+  const OO: Expression = { num: '+Infinity' };
+  const NOO: Expression = { num: '-Infinity' };
+
+  test('Interval excludes its infinite endpoint, and Range agrees', () => {
+    // Was True before the flip: ±∞ is not a real number, so the set of reals
+    // an `Interval` denotes cannot hold it.
+    expect(
+      ce2.expr(['Contains', ['Interval', 0, OO], OO]).evaluate().symbol
+    ).toBe('False');
+    expect(
+      ce2.expr(['Contains', ['Interval', NOO, OO], NOO]).evaluate().symbol
+    ).toBe('False');
+    // `Range` already answered this way; the two constructors now agree.
+    expect(
+      ce2.expr(['Contains', ['Range', 1, OO], OO]).evaluate().symbol
+    ).toBe('False');
+  });
+
+  test('finite membership is unchanged, endpoints included', () => {
+    expect(
+      ce2.expr(['Contains', ['Interval', 0, OO], 5]).evaluate().symbol
+    ).toBe('True');
+    // A closed endpoint is still a member — only the INFINITE one is extent.
+    expect(
+      ce2.expr(['Contains', ['Interval', 0, OO], 0]).evaluate().symbol
+    ).toBe('True');
+    expect(
+      ce2.expr(['Contains', ['Interval', 0, 10], 10]).evaluate().symbol
+    ).toBe('True');
+    expect(
+      ce2.expr(['Contains', ['Interval', ['Open', 0], 10], 0]).evaluate().symbol
+    ).toBe('False');
+    expect(
+      ce2.expr(['Contains', ['Interval', 0, 10], -1]).evaluate().symbol
+    ).toBe('False');
+  });
+
+  test('the element type does not leak the endpoint', () => {
+    // Every member of `Range(1, +oo)` is a finite integer.
+    expect(String(ce2.expr(['Range', 1, OO]).type)).toBe(
+      'indexed_collection<integer>'
+    );
+    // An `Interval` reports the same elements however far it reaches.
+    expect(String(ce2.expr(['Interval', 0, OO]).type)).toBe('set<real>');
+  });
+
+  test('Length reads the extent of an unbounded Range', () => {
+    // Inert before the flip. Only `Range` gets this arm: no convention has
+    // been settled for the length of the other infinite collections.
+    const len = ce2.expr(['Length', ['Range', 1, OO]]).evaluate();
+    expect(len.toString()).toBe('+oo');
+    expect(len.isSame(ce2.PositiveInfinity)).toBe(true);
+    expect(ce2.expr(['Length', ['Range', NOO, -1]]).evaluate().toString()).toBe(
+      '+oo'
+    );
+    // A bounded Range still counts, and still types exactly `integer`.
+    expect(ce2.expr(['Length', ['Range', 1, 10]]).evaluate().toString()).toBe(
+      '10'
+    );
+    expect(String(ce2.expr(['Length', ['Range', 1, 10]]).type)).toBe('integer');
+    // An `Interval` keeps the inert form.
+    expect(ce2.expr(['Length', ['Interval', 0, 1]]).evaluate().operator).toBe(
+      'Length'
+    );
+  });
+
+  test('the type Length reports satisfies the type Length declares', () => {
+    // The `type` handler returns the `+oo` singleton, but a handler result is
+    // widened by `widenValueTypes()`, which replaces every value-literal type
+    // by its ordinary counterpart: `infinity`. The declaration is spelled
+    // with `infinity` for that reason. Declared as `+oo` it named a type no
+    // stored result could have, so this subtype test failed.
+    const declared = (ce2.lookupDefinition('Length')!.operator as any).signature
+      .type.result;
+    const reported = ce2.expr(['Length', ['Range', 1, OO]]).type;
+    expect(reported.toString()).toBe('infinity | integer');
+    expect(reported.matches(declared)).toBe(true);
+    // A finite collection keeps the tighter report, still within the
+    // declaration.
+    const finite = ce2.expr(['Length', ['Range', 1, 10]]).type;
+    expect(finite.toString()).toBe('integer');
+    expect(finite.matches(declared)).toBe(true);
+  });
+
+  test('a Range with an infinite LOWER bound produces no elements', () => {
+    // The elements of a `Range` are `lower + k·step`, so an infinite lower
+    // bound is the enumeration origin — and it is an extent marker, never a
+    // member. Computing from it handed out `-oo` at every position, which
+    // both contradicts the declared finite element type and loops a consumer
+    // forever on the same value. Every element-producing route declines.
+    const r = ce2.expr(['Range', NOO, -1]);
+    expect(String(r.type)).toBe('indexed_collection<integer>');
+    expect(r.isEnumerableCollection).toBe(false);
+    expect([...r.each()]).toEqual([]);
+    expect(r.at(1)).toBeUndefined();
+    // `At`/`First` report the numeric absence marker for a position that
+    // holds no element; what matters is that `-oo` is not handed out as one.
+    expect(ce2.expr(['At', ['Range', NOO, -1], 1]).evaluate().toString()).toBe(
+      'NaN'
+    );
+    expect(ce2.expr(['First', ['Range', NOO, -1]]).evaluate().toString()).toBe(
+      'NaN'
+    );
+    // `Take` has nothing to take, so it stays in its lazy form.
+    expect(ce2.expr(['Take', ['Range', NOO, -1], 3]).evaluate().operator).toBe(
+      'Take'
+    );
+    // Membership inside the span is indeterminate, not refuted: the step grid
+    // has no anchor to count from. Outside the span it is still refuted.
+    expect(
+      ce2.expr(['Contains', ['Range', NOO, -1], -5]).evaluate().operator
+    ).toBe('Contains');
+    expect(
+      ce2.expr(['Contains', ['Range', NOO, -1], 3]).evaluate().symbol
+    ).toBe('False');
+  });
+
+  test('a Range with an infinite UPPER bound still enumerates', () => {
+    // Only the ORIGIN is unusable. `Range(1, oo)` starts at 1 and steps
+    // normally; it simply never ends.
+    const r = ce2.expr(['Range', 1, OO]);
+    expect(r.isEnumerableCollection).toBe(true);
+    expect(r.at(3)?.toString()).toBe('3');
+    expect(ce2.expr(['First', ['Range', 1, OO]]).evaluate().toString()).toBe(
+      '1'
+    );
+    expect(
+      ce2
+        .expr(['ListFrom', ['Take', ['Range', 1, OO], 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,3]');
+    // An endless range has no last element: asking for one is declined, and
+    // reports the numeric absence marker rather than the extent marker.
+    expect(ce2.expr(['Last', ['Range', 1, OO]]).evaluate().toString()).toBe(
+      'NaN'
+    );
+  });
+});

@@ -1503,6 +1503,92 @@ describe('DOMAIN-CONSTRAINED SOLVE', () => {
   });
 });
 
+// The bare type names `real` and `complex` denote the FINITE reals and the
+// FINITE complex numbers, so a variable declared with one of them cannot hold
+// `±oo`, `~oo` or `NaN`. `1/x = 0` is the reachable witness: the solver
+// produces `+oo` and `~oo` as roots, and the declared type of the unknown is
+// what has to reject them.
+describe('DOMAIN-CONSTRAINED SOLVE: infinities are not values of a declared unknown', () => {
+  const { ComputeEngine } = require('../../src/compute-engine');
+
+  test('no declared type keeps the infinite roots', () => {
+    const ce = new ComputeEngine();
+    const result = ce.parse('1/x = 0').solve('x');
+    expect((result as any[]).map((r: any) => r.toString())).toEqual([
+      '+oo',
+      '~oo',
+    ]);
+  });
+
+  test('a real unknown rejects both infinite roots', () => {
+    // `+oo` used to survive this filter: the test was `isExtendedReal`, which
+    // is membership of the extended real LINE and holds at both signed
+    // infinities.
+    const ce = new ComputeEngine();
+    ce.declare('x', { type: 'real' });
+    expect(ce.parse('1/x = 0').solve('x')).toEqual([]);
+  });
+
+  test('a complex unknown rejects both infinite roots', () => {
+    // A `complex` declaration had no filter arm at all, so every root reached
+    // it unchecked.
+    const ce = new ComputeEngine();
+    ce.declare('z', { type: 'complex' });
+    expect(ce.parse('1/z = 0').solve('z')).toEqual([]);
+  });
+
+  test('a complex unknown still keeps its finite complex roots', () => {
+    const ce = new ComputeEngine();
+    ce.declare('z', { type: 'complex' });
+    const result = ce.parse('z^2 + 1 = 0').solve('z');
+    const values = (result as any[]).map((r: any) => r.toString()).sort();
+    expect(values).toEqual(['-i', 'i']);
+  });
+});
+
+describe('MULTIVARIATE TYPE FILTER: finiteness of a declared unknown', () => {
+  const {
+    filterSolutionByTypes,
+  } = require('../../src/compute-engine/boxed-expression/solve-system');
+  const { ComputeEngine } = require('../../src/compute-engine');
+
+  // The multivariate filter rejects only what it can DECIDE — an undecidable
+  // predicate lets a parametric solution through — so it is pinned directly
+  // rather than through a system, which would have to produce an infinite
+  // component to exercise it.
+  test('a real unknown rejects an infinite value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', { type: 'real' });
+    expect(
+      filterSolutionByTypes(ce, ['x'], { x: ce.box('PositiveInfinity') })
+    ).toBe(false);
+    expect(
+      filterSolutionByTypes(ce, ['x'], { x: ce.box('ComplexInfinity') })
+    ).toBe(false);
+    expect(filterSolutionByTypes(ce, ['x'], { x: ce.box(3) })).toBe(true);
+  });
+
+  test('a complex unknown rejects an infinite or NaN value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('z', { type: 'complex' });
+    expect(
+      filterSolutionByTypes(ce, ['z'], { z: ce.box('PositiveInfinity') })
+    ).toBe(false);
+    expect(filterSolutionByTypes(ce, ['z'], { z: ce.box(NaN) })).toBe(false);
+    expect(
+      filterSolutionByTypes(ce, ['z'], { z: ce.box(['Complex', 0, 2]) })
+    ).toBe(true);
+  });
+
+  test('an undecided value still passes', () => {
+    // A parametric component has no decidable finiteness, and the filter must
+    // not read that as a rejection.
+    const ce = new ComputeEngine();
+    ce.declare('x', { type: 'real' });
+    expect(filterSolutionByTypes(ce, ['x'], { x: ce.symbol('a') })).toBe(true);
+  });
+});
+
 describe('SOLVING SYSTEMS VIA And OPERATOR', () => {
   test('should solve And(x+y=70, 2x-4y=80)', () => {
     const ce = engine;

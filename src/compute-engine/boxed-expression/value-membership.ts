@@ -296,7 +296,8 @@ function accepts(
       // Bounds are only meaningful over an ordered (real) domain — a
       // non-real value (e.g. `5+1000i` against `complex<0..10>`) is never a
       // member. Mirrors `rangeContains` (match-dispatch.ts).
-      if (!isNumber(v) || v.isNaN === true || v.isReal !== true) return false;
+      if (!isNumber(v) || v.isNaN === true || v.isExtendedReal !== true)
+        return false;
       // The base kind is judged on the synthesized type (an integer literal
       // inhabits `integer<…>`; a non-integer float does not).
       if (!isSubtype(v.type.type, t.type)) return false;

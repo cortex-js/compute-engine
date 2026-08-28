@@ -192,11 +192,12 @@ export const CONDITIONS = {
   // An irrational number is a *real* number that is not rational. Requiring
   // provable realness keeps this fail-closed for unknowns and prevents a
   // provably-complex value (`isRational === false`) from being misclassified.
-  irrational: (x: Expression) => x.isReal === true && x.isRational === false,
-  real: (x: Expression) => x.isReal,
-  // Fail-closed: only when provably *not* real (an unknown `isReal` of
+  irrational: (x: Expression) =>
+    x.isExtendedReal === true && x.isRational === false,
+  real: (x: Expression) => x.isExtendedReal,
+  // Fail-closed: only when provably *not* real (an unknown `isExtendedReal` of
   // `undefined` must NOT satisfy `:notreal`).
-  notreal: (x: Expression) => x.isReal === false,
+  notreal: (x: Expression) => x.isExtendedReal === false,
 
   // number with a non-zero imaginary part:
   complex: (x: Expression) => x.type.matches('complex'),

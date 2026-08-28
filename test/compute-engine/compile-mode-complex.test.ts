@@ -92,11 +92,19 @@ describe('complex mode — one emission per user function, lift at use (design �
     expect(ba.code).toContain('_SYS.cplx(_.a)');
     expect(ba.code).not.toContain('$z');
     expect(ba.run!({ a: -2 })).toBe(-4);
+    // The call's RESULT is wrapped in the idempotent `_SYS.cplx` by the
+    // lift-at-use rule (`liftWideResult`): `b`'s declared result is
+    // `finite_number`, and since the finite-by-default flip `complex` sits
+    // below that name, so `wideNumericType` reports it wide — a node that may
+    // hold a complex value and whose lowering hands back whatever it holds.
+    // The wrap is redundant here (the single `_fn_b` is emitted in the complex
+    // lane and already returns `{re, im}`), and idempotent, so the value is
+    // unchanged.
     const bz = compile(ce.parse('b(z)'), CX);
-    expect(bz.code).toBe('_fn_b(_.z)');
+    expect(bz.code).toBe('_SYS.cplx(_fn_b(_.z))');
     expect(bz.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
     const bs = compile(ce.parse('b(\\sqrt{a})'), CX);
-    expect(bs.code).toBe('_fn_b(_SYS.csqrt(_SYS.cplx(_.a)))');
+    expect(bs.code).toBe('_SYS.cplx(_fn_b(_SYS.csqrt(_SYS.cplx(_.a))))');
     expect(bs.run!({ a: -2 })).toEqual({ re: 0, im: 2 * Math.SQRT2 });
   });
 

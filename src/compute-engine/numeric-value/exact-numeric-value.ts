@@ -204,10 +204,14 @@ export class ExactNumericValue extends NumericValue {
   }
 
   get type(): NumericPrimitiveType {
-    if (this.isNaN) return 'number';
-    // a/b√c -> real number (c can't be a perfect square)
+    if (this.isNaN) return 'nan';
+    // A signed real infinity keeps the narrow `non_finite_number` rather than
+    // the wider `infinity`: that name carries the guarantee "infinite AND real
+    // AND signed" which the sign-aware folds (`1/±∞ = 0`) consume, while
+    // `infinity` also admits the unsigned `~oo`.
     if (this.isPositiveInfinity || this.isNegativeInfinity)
       return 'non_finite_number';
+    // a/b√c -> real number (c can't be a perfect square)
     if (this.im !== 0)
       return isZero(this.rational) ? 'imaginary' : 'finite_complex';
     if (this.radical !== 1) {

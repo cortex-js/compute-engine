@@ -80,7 +80,11 @@ describe('loadIdentities (full artifact)', () => {
       (r) => r.target === 'simplify'
     ).length;
     expect(report.loaded).toBe(simplifyCount);
-    expect(report.loaded).toBe(1435);
+    // One fewer since the finite-by-default numeric flip: the artifact no
+    // longer carries 310f36 (`z^0 -> 1` guarded `_z: complex`), whose match
+    // side a `complex`-typed — hence finite — base now folds to `1` at
+    // canonicalization.
+    expect(report.loaded).toBe(1434);
     // The only default-load skips are the solve templates (solve-disabled).
     expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
       true
@@ -98,7 +102,7 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1435,
+      simplify: 1434,
       solve: 0,
       harmonization: 0,
     });
@@ -107,7 +111,8 @@ describe('loadIdentities (full artifact)', () => {
       // exempt) so they fire in simplify() — SYM P2-25. Counts moved
       // 1311/116 → 1304/123 in the 2026-08-14 regen (7 net
       // simplify→expand re-labels among the 98 reoriented rules).
-      simplify: 1304,
+      // Finite-by-default flip: −1 (310f36).
+      simplify: 1303,
       transform: 8,
       expand: 123,
     });
@@ -358,7 +363,7 @@ describe('guard controls', () => {
   // SYM P3-7: every type guard (integer/rational/real/complex) requires
   // `isFinite !== false`. Fungrim's declared domains ZZ/QQ/RR/CC are FINITE,
   // so an identity guarded by them must not discharge at a ±∞ / ~∞ instance.
-  // The subtlety: `(+∞).isReal === true`, so a `real` type guard would
+  // The subtlety: `(+∞).isExtendedReal === true`, so a `real` type guard would
   // fail-OPEN at infinity without the finiteness gate.
   it('negative P3-7: real-guarded rule does NOT fire at +∞  [fungrim:299209]', () => {
     // Im(e^{i·x}) → sin(x) is guarded `x : real`. A finite real fires (see
@@ -1795,7 +1800,7 @@ describe('M5 negative controls: guards fail closed without assumptions', () => {
 
 describe('type guards over a compound subject with a held non-finite value', () => {
   // The ZZ/QQ/RR/CC guards read the derived TYPE of whatever subtree the
-  // wildcard bound (`isFinite`, `isInteger`, `isReal`, `isRational`,
+  // wildcard bound (`isFinite`, `isInteger`, `isExtendedReal`, `isRational`,
   // `type.matches('complex')`), so a subject whose result type is wrong is a
   // wrong-answer channel, not just a missed rewrite. The subjects below are
   // the case the 1435-identity corpus never produces: a CONVERTED head

@@ -46,14 +46,13 @@ function factsFromType(t: Type): {
   finiteCollection: Tri;
   shape: readonly number[] | undefined;
 } {
-  // `infinity` (any value of infinite magnitude, including ComplexInfinity)
-  // and `nan` (the NaN singleton) are not finite numbers either, and neither
-  // is a subtype of `non_finite_number`, so each needs its own arm.
+  // `infinity` is any value of infinite magnitude — the signed pair
+  // `non_finite_number` is one of its subtypes, so testing it covers `±∞`
+  // as well as `~oo` — and `nan` is the NaN singleton, which is disjoint
+  // from `infinity` and needs its own arm.
   const finite: Tri = isSubtype(t, 'finite_number')
     ? true
-    : isSubtype(t, 'non_finite_number') ||
-        isSubtype(t, 'infinity') ||
-        isSubtype(t, 'nan')
+    : isSubtype(t, 'infinity') || isSubtype(t, 'nan')
       ? false
       : undefined;
 
@@ -353,8 +352,9 @@ export function describeType(t: Type): OperandDescriptor {
 
 /**
  * The three-valued type-channel replacement for the mixed-channel
- * predicates (`isInteger`, `isReal`, `isRational`, …) of the expressions
- * shape: `true` when the operand's handler-visible type proves the claim,
+ * predicates (`isInteger`, `isExtendedReal`, `isRational`, …) of the
+ * expressions shape: `true` when the operand's handler-visible type proves
+ * the claim,
  * `false` when it provably refutes it, `undefined` when the type cannot
  * decide. On a number literal the handler-visible type carries the value,
  * so this answers exactly what the value-backed predicate answered; on a

@@ -39,6 +39,7 @@ import {
   statementBodyHead,
 } from './base-compiler.js';
 import {
+  finitePartOfType,
   isNonRealNumber,
   resolveTypeForCompilation,
 } from '../../common/type/utils.js';
@@ -604,6 +605,14 @@ function assertNoGPUAlpha(head: string, args: ReadonlyArray<Expression>): void {
  * operands are the ones being lowered, and its type is therefore the type the
  * parent read. A wide result type (`number`, as `Power`/`Root`/`Arcsin` have)
  * is NOT complex — those project to NaN, matching their real lowering.
+ *
+ * THREE SITES MUST STAY IN AGREEMENT, because they answer the same question
+ * for the same node and a disagreement is a silent value-shape mismatch (a
+ * `vec2`/`{re, im}` consumer reading a scalar, or the reverse):
+ * `BaseCompiler.isComplexValued` (base-compiler.ts) is what a PARENT consults,
+ * `resultIsComplexValued` (javascript-target.ts) is the JavaScript emitters'
+ * copy, and this function is the GPU emitters' copy. Change one, change all
+ * three.
  */
 function gpuResultIsComplexValued(
   head: string,
@@ -613,7 +622,13 @@ function gpuResultIsComplexValued(
   if (engine === undefined) return false;
   try {
     const t = engine.function(head, [...args], { form: 'structural' }).type;
-    return isNonRealNumber(t.type);
+    // The infinite and NaN branches are dropped first, exactly as the two
+    // sites named above do: a head whose value can blow up at a pole claims a
+    // union such as `complex | non_finite_number` (`Artanh`, `Arcoth`,
+    // `Arsech`, `Ln`, `Log`), and only its FINITE part decides the lane.
+    // Asking `isNonRealNumber` of the whole union answers false and takes the
+    // scalar lane while the parent takes the complex one.
+    return isNonRealNumber(finitePartOfType(t.type));
   } catch {
     return false;
   }
@@ -3566,7 +3581,7 @@ const GPU_UNROLL_LIMIT = 100;
 
 /**
  * Fail closed (D6) on a Sum/Product bound that is statically non-finite (a
- * `±∞`/`NaN` literal, or an expression typed `non_finite_number`), so
+ * `±∞`/`NaN` literal, or an expression typed `infinity` or `nan`), so
  * `compile()` reports failure and the caller falls back to the interpreter.
  * `for (int i = 1; i <= _gpu_inf(); i++)` has no terminating condition (and is
  * a shader type error besides), so such a bound must never be emitted. Mirrors
@@ -3579,7 +3594,8 @@ function assertFiniteGPUBound(
 ): void {
   const nonFinite =
     (isNumber(expr) && !Number.isFinite(expr.re)) ||
-    expr.type.matches('non_finite_number');
+    expr.type.matches('infinity') ||
+    expr.type.matches('nan');
   if (!nonFinite) return;
   throw new Error(
     `${kind}: the ${which} bound \`${expr.toString()}\` is not a finite ` +
@@ -3650,7 +3666,8 @@ const gpuBinomial: CompiledFunction<Expression> = ([n, k], compile, target) => {
   // is emitted — that would change every pure emission.
   if (
     (isNumber(n) && !Number.isFinite(n.re)) ||
-    n.type.matches('non_finite_number')
+    n.type.matches('infinity') ||
+    n.type.matches('nan')
   )
     throw new Error(
       `Binomial: a statically non-finite first operand evaluates to NaN in ` +

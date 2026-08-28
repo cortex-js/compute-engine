@@ -2624,7 +2624,10 @@ export function assignFn(
       // (`inferTypeFromValue`, boxed-value-definition.ts): a value's narrow
       // literal type promotes to the natural variable type. Shared by the
       // unknown-incumbent branch just below and the narrowing branch further
-      // down.
+      // down. The last two arms carry an infinite value and NaN to their own
+      // tiers: both are disjoint from `real` and from `complex`, so they reach
+      // none of the finite arms, and `v := oo` must stay reassignable to `-oo`
+      // without a retype.
       const promotedValueType = () =>
         value.type.matches('integer')
           ? 'integer'
@@ -2632,7 +2635,11 @@ export function assignFn(
             ? 'real'
             : value.type.matches('complex')
               ? 'number'
-              : vt;
+              : value.type.matches('infinity')
+                ? 'infinity'
+                : value.type.matches('nan')
+                  ? 'nan'
+                  : vt;
       // An `unknown` incumbent is an auto-declare that recorded no type
       // evidence (the symbol's uses were all type-vacuous — a bare `List`
       // sibling, a binder-body occurrence). Treat the assignment as the
@@ -2672,7 +2679,10 @@ export function assignFn(
       //     sound, having just passed the strict-subtype test). Promotion
       //     can widen — `finite_integer` promotes to `integer`, which is NOT
       //     below a `finite_real` incumbent — and installing it would break
-      //     a use that the incumbent recorded.
+      //     a use that the incumbent recorded. The non-finite arms widen the
+      //     same way: the `+oo` singleton promotes to `infinity`, which an
+      //     incumbent of `integer | +oo` does not contain, so that assignment
+      //     installs the singleton instead.
       const prov = def.value._typeProvenance;
       let incumbentFromUse = false;
       if (prov !== undefined) {

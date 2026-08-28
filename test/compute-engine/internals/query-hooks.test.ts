@@ -56,14 +56,14 @@ describe('§11.1 Element(n, Range(1, +oo))', () => {
 //
 
 describe('§11.2 Greater(Imaginary(tau), 0)', () => {
-  it('verifies the guard, refutes isReal, discharges tau != 0', () => {
+  it('verifies the guard, refutes isExtendedReal, discharges tau != 0', () => {
     const ce = freshEngine();
     expect(
       ce.assume(ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false }))
     ).toBe('ok');
 
     expect(ce.verify(ce.expr(['Greater', ['Imaginary', 'tau'], 0]))).toBe(true);
-    expect(ce.expr('tau').isReal).toBe(false);
+    expect(ce.expr('tau').isExtendedReal).toBe(false);
     expect(ce.verify(ce.expr(['NotEqual', 'tau', 0]))).toBe(true);
 
     // The sgn fallback flows through BoxedFunction.sgn into isPositive
@@ -103,7 +103,7 @@ describe('§11.3 Greater(Real(s), 1)', () => {
   });
 
   it('does not declare s real (no destructive retype)', () => {
-    expect(ce.expr('s').isReal).not.toBe(true);
+    expect(ce.expr('s').isExtendedReal).not.toBe(true);
     expect(ce.expr('s').type.toString()).toBe('number');
   });
 
@@ -381,11 +381,11 @@ describe('closure-guarded rule on an Imaginary subject', () => {
 //
 
 describe('§11.10 regression: bare-symbol behavior unchanged', () => {
-  it('assume(x > 0) still yields x.isPositive and x.isReal', () => {
+  it('assume(x > 0) still yields x.isPositive and x.isExtendedReal', () => {
     const ce = freshEngine();
     expect(ce.assume(ce.parse('x > 0'))).toBe('ok');
     expect(ce.expr('x').isPositive).toBe(true);
-    expect(ce.expr('x').isReal).toBe(true);
+    expect(ce.expr('x').isExtendedReal).toBe(true);
     expect(ce.verify(ce.expr(['Greater', 'x', 0]))).toBe(true);
     expect(ce.verify(ce.expr(['Less', 'x', 0]))).toBe(false);
   });
@@ -443,7 +443,7 @@ describe('§5.2 three-valued invariant', () => {
     const ce = freshEngine();
     const u = ce.expr('u');
     expect(u.isPositive).toBeUndefined();
-    expect(u.isReal).toBeUndefined();
+    expect(u.isExtendedReal).toBeUndefined();
     expect(u.isFinite).toBeUndefined();
     expect(ce.expr(['Real', 'u']).isPositive).toBeUndefined();
     expect(ce.expr(['Imaginary', 'u']).isPositive).toBeUndefined();

@@ -13,7 +13,8 @@ export interface Assumption<Expr = unknown, CE = unknown> {
   isNumber: boolean | undefined;
   isInteger: boolean | undefined;
   isRational: boolean | undefined;
-  isReal: boolean | undefined;
+  /** On the extended real line: a finite real, `+∞` or `-∞`. Not `~∞`, not NaN. */
+  isExtendedReal: boolean | undefined;
   isComplex: boolean | undefined;
   isImaginary: boolean | undefined;
 

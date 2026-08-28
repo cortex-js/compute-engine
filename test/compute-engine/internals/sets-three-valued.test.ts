@@ -65,13 +65,22 @@ describe('Interval with an infinite endpoint', () => {
     expect(ray.contains(ce.number(1))).toBe(false);
   });
 
-  it('excludes the open infinite endpoint, includes a closed one', () => {
+  it('excludes an infinite endpoint however it is written', () => {
+    // An infinite endpoint marks the EXTENT of the span; it does not name a
+    // last element, so it is never a member — whether the endpoint is
+    // written open or closed. (Ruling L10 of the numeric-lattice
+    // ratification; before it a closed infinite endpoint was reported as a
+    // member, which also disagreed with `Range`, where
+    // `Contains(Range(1, oo), oo)` was already `False`.)
     const ce = freshEngine();
     const openRay = ce.expr(NEGATIVE_RAY); // (-∞, 0]
     expect(openRay.contains(ce.expr('NegativeInfinity'))).toBe(false);
 
     const closedRay = ce.expr(['Interval', 'NegativeInfinity', 0]); // [-∞, 0]
-    expect(closedRay.contains(ce.expr('NegativeInfinity'))).toBe(true);
+    expect(closedRay.contains(ce.expr('NegativeInfinity'))).toBe(false);
+    // The FINITE endpoint of the same span is still decided by its
+    // closedness, so this is a rule about infinite endpoints only.
+    expect(closedRay.contains(ce.number(0))).toBe(true);
   });
 
   it('distinguishes open vs closed finite endpoints', () => {

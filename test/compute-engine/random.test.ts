@@ -104,14 +104,15 @@ describe('Random — Range domains', () => {
   // A DRAW is finite by construction (an infinite `Range` is an evaluation
   // error, never an infinite result), so the element type is narrowed to its
   // finite counterpart — `Range`'s own `integer`/`number` admit ±∞.
-  it('a Range domain types as its element type, narrowed to FINITE', () => {
-    expect(ce.box(['Random', ['Range', 1, 6]]).type.toString()).toBe(
-      'finite_integer'
-    );
-    // Range(0.5, 2.5) iterates 0.5, 1.5, 2.5 — `number`, not `integer`.
-    expect(ce.box(['Random', ['Range', 0.5, 2.5]]).type.toString()).toBe(
-      'finite_number'
-    );
+  // Ruling L10: an infinite endpoint marks unbounded extent and is never an
+  // element, so a `Range` reports an element type that is already finite —
+  // there is nothing left for `Random` to narrow. (Before the
+  // finite-by-default flip a bare numeric name admitted ±∞, and the draw was
+  // narrowed to a `finite_*` counterpart here.)
+  it('a Range domain types as its element type, which is already FINITE', () => {
+    expect(ce.box(['Random', ['Range', 1, 6]]).type.toString()).toBe('integer');
+    // Range(0.5, 2.5) iterates 0.5, 1.5, 2.5 — `real`, not `integer`.
+    expect(ce.box(['Random', ['Range', 0.5, 2.5]]).type.toString()).toBe('real');
   });
 
   it('Range(0.5, 2.5) draws a NON-integer', () => {
@@ -132,12 +133,10 @@ describe('Random — Range domains', () => {
 });
 
 describe('Random — Interval domains', () => {
-  // `finite_real`, not `Interval`'s own `real`: a set of reals may contain
-  // ±∞, but a draw from a BOUNDED interval cannot (an unbounded one errors).
-  it('draws in [lo, hi), typed finite_real', () => {
-    expect(ce.box(['Random', ['Interval', 0, 1]]).type.toString()).toBe(
-      'finite_real'
-    );
+  // `real` — `Interval`'s own element type, and already finite: ±∞ is not a
+  // real number, and an infinite endpoint is extent, not a member (L10).
+  it('draws in [lo, hi), typed real', () => {
+    expect(ce.box(['Random', ['Interval', 0, 1]]).type.toString()).toBe('real');
     for (let i = 0; i < 200; i++) {
       const v = ce.box(['Random', ['Interval', -5, -1]]).evaluate().re!;
       expect(v).toBeGreaterThanOrEqual(-5);
@@ -334,33 +333,24 @@ describe('RandomChoice / RandomSample — the §4 k table', () => {
   });
 
   it('a RandomChoice cell has the same type as the Random draw it is', () => {
-    // The closed-form domains narrow to their finite counterpart: a DRAW from
-    // a bounded `Interval`/finite `Range` cannot be ±∞ even though the SET
-    // element type admits them. `RandomChoice` cells are `Random` draws, so
-    // they carry the same narrowing (was the wider `list<real^k>`).
-    expect(ce.box(['Random', ['Interval', 0, 1]]).type.toString()).toBe(
-      'finite_real'
-    );
+    // A cell carries the domain's element type, which the span constructors
+    // report finite: an infinite endpoint is unbounded extent, never a member
+    // (L10), so neither an `Interval` nor a `Range` element can be ±∞.
+    expect(ce.box(['Random', ['Interval', 0, 1]]).type.toString()).toBe('real');
     expect(
-      ce
-        .box(['RandomChoice', ['Interval', 0, 1], 3])
-        .type.matches('list<finite_real^3>')
+      ce.box(['RandomChoice', ['Interval', 0, 1], 3]).type.matches('list<real^3>')
     ).toBe(true);
 
-    expect(ce.box(['Random', ['Range', 1, 6]]).type.toString()).toBe(
-      'finite_integer'
-    );
+    expect(ce.box(['Random', ['Range', 1, 6]]).type.toString()).toBe('integer');
     expect(
       ce
         .box(['RandomChoice', ['Range', 1, 6], 3])
-        .type.matches('list<finite_integer^3>')
+        .type.matches('list<integer^3>')
     ).toBe(true);
 
-    // An unshaped (symbolic-`k`) result narrows too.
+    // An unshaped (symbolic-`k`) result carries the same element type.
     expect(
-      ce
-        .box(['RandomChoice', ['Interval', 0, 1], 'm'])
-        .type.matches('list<finite_real>')
+      ce.box(['RandomChoice', ['Interval', 0, 1], 'm']).type.matches('list<real>')
     ).toBe(true);
 
     // A non-closed-form domain keeps its collection element type unchanged.

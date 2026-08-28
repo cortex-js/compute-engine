@@ -9,6 +9,7 @@ import {
 } from '../global-types.js';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards.js';
 import { stripNumericRanges } from '../../common/type/utils.js';
+import { isComplexInfinityValue } from '../../common/type/types.js';
 
 // Lazy reference to the n-ary `add()` from arithmetic-add.ts, registered by
 // `init-lazy-refs.ts` — a static import here would close a dependency cycle
@@ -554,6 +555,23 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
     // decoration back to its bare tier first; a type that is not a
     // decorated numeric tier passes through unchanged.
     const tier = stripNumericRanges(expr.type.type);
+
+    // The unsigned complex infinity `~oo` is the one numeric literal whose
+    // type is a value node that `stripNumericRanges` does NOT project to a
+    // tier: it has no JavaScript number to stand for it, so it keeps the
+    // `COMPLEX_INFINITY_VALUE` sentinel. Handled here, ahead of the switch,
+    // because the `infinity` tier below is now the SIGNED pair alone: without
+    // this test `~oo` would reach the `expression` default silently, and a
+    // later reader would have no way to tell that storage class was chosen on
+    // purpose. `expression` is the right field for it — no numeric buffer
+    // holds an unsigned infinity.
+    if (
+      typeof tier === 'object' &&
+      tier.kind === 'value' &&
+      isComplexInfinityValue(tier.value)
+    )
+      return 'expression';
+
     switch (typeof tier === 'string' ? tier : 'expression') {
       case 'real':
       case 'rational':
@@ -564,7 +582,25 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
         // inexact (machine/decimal) value uses float64.
         return expr.isExact ? 'expression' : 'float64';
 
-      case 'integer': // For NaN, Infinity, etc
+      case 'integer':
+        // A bare `integer` cell carries no value, so it cannot be checked
+        // against the safe-integer range the `finite_integer` arm below
+        // enforces; float64 is the storage class that holds any of them.
+        return 'float64';
+
+      // The non-finite tiers, all of them a signed `±oo` or a NaN by the time
+      // they arrive here — `~oo` was returned above. Two spellings reach this
+      // point for the same values: `stripNumericRanges` projects the `+oo` and
+      // `-oo` VALUE nodes to `infinity`, while a read inside a broadcast cell,
+      // where the literal type is withheld, sees the bare tiers `nan` and
+      // `non_finite_number` instead. All three are held exactly by a float64,
+      // which is how the `NaN` / `PositiveInfinity` / `NegativeInfinity`
+      // named constants at the top of this function are classified too.
+      // Sending `infinity` to `complex128` promoted a real tensor such as
+      // `[1, +oo]` to the complex field for no gain.
+      case 'nan':
+      case 'non_finite_number':
+      case 'infinity':
         return 'float64';
 
       case 'complex':

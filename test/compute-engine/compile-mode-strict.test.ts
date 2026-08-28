@@ -182,7 +182,12 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     // the complex discipline (compile-mode step 4, 2026-08-16), so there is a
     // single `_fn_b` and the mismatch is reported as the escalation cause.
     expect(auto.success).toBe(true);
-    expect(auto.code).toBe('_fn_b(_.z)');
+    // The call's result carries the idempotent `_SYS.cplx` of the
+    // lift-at-use rule: `b`'s declared result `finite_number` counts as a
+    // WIDE numeric type since the finite-by-default flip put `complex` below
+    // that name. The wrap does not change the value, and `_fn_b` is still
+    // emitted once.
+    expect(auto.code).toBe('_SYS.cplx(_fn_b(_.z))');
     expect(auto.mode).toBe('complex');
     expect(auto.escalation?.boundary).toBe('user-function parameter');
     expect(auto.escalation?.binding).toBe('the parameter `x` of `b`');
@@ -195,7 +200,7 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
       mode: 'complex',
       fallback: false,
     });
-    expect(cx.code).toBe('_fn_b(_.z)');
+    expect(cx.code).toBe('_SYS.cplx(_fn_b(_.z))');
     expect(cx.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
   });
 

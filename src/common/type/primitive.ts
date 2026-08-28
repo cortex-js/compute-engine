@@ -14,9 +14,10 @@ export const NUMERIC_TYPES: NumericPrimitiveType[] = [
   'integer',
   'finite_integer',
   'non_finite_number',
-  // A number of infinite magnitude, of any direction (`+∞`, `−∞`, `~∞`), and
-  // the not-a-number marker. Both are transitional additions: see the numeric
-  // tower comment on `NumericPrimitiveType` in `types.ts`.
+  // A number of infinite magnitude, of any direction (`+∞`, `−∞`, `~∞`,
+  // `∞ + i`), and the not-a-number marker. Together with `complex` they
+  // partition `number`: see the numeric tree comment on
+  // `NumericPrimitiveType` in `types.ts`.
   'infinity',
   'nan',
 ] as const as NumericPrimitiveType[];
@@ -143,6 +144,29 @@ export const INDEXED_COLLECTION_SHAPE_TYPE: Type = Object.freeze({
 export const DICTIONARY_SHAPE_TYPE: Type = Object.freeze({
   kind: 'dictionary',
   values: 'any',
+}) as Type;
+
+/**
+ * The extended real line: a finite real, or one of the two SIGNED
+ * infinities `+∞`/`−∞`.
+ *
+ * The bare name `real` denotes the FINITE reals, so a gate that asks "is
+ * this operand somewhere on the extended real line?" — the realness gates
+ * of the hyperbolic, sinc, Fresnel, step and exponential-integral heads,
+ * and the parameter of an operator that accepts an infinite argument —
+ * cannot be spelled `real`: a `±∞` operand does not match it. Spell the
+ * question with this union instead. Complex infinity (`~oo`) and NaN are
+ * excluded: neither is a signed real, and both are members of `number`
+ * only.
+ *
+ * The same union is also the honest RESULT claim of a head whose value on
+ * the extended real line can be infinite (`li(1) = −∞`, `Ei(0) = −∞`).
+ *
+ * Frozen for the same sharing reason as the shape constants above.
+ */
+export const EXTENDED_REAL_TYPE: Type = Object.freeze({
+  kind: 'union',
+  types: ['real', 'non_finite_number'],
 }) as Type;
 
 export const COLLECTION_TYPES: PrimitiveType[] = [

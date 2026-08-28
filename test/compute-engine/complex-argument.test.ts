@@ -48,6 +48,17 @@ describe('Argument', () => {
       engine.expr(['Argument', ['Complex', -1, -1]]).N().re
     ).toBeCloseTo((-3 * Math.PI) / 4, 10);
   });
+
+  it('evaluates Argument(NaN) to NaN, not to pi', () => {
+    // The zero-imaginary-part branch splits on `op >= 0`, which is false for
+    // NaN, so before the guard a NaN operand was reported as if it were on
+    // the negative real axis and answered `π`. NaN has no phase angle.
+    expect(engine.expr(['Argument', NaN]).evaluate().isNaN).toBe(true);
+    expect(engine.expr(['Argument', NaN]).N().isNaN).toBe(true);
+    expect(
+      engine.expr(['Argument', ['Complex', NaN, 0]]).evaluate().isNaN
+    ).toBe(true);
+  });
 });
 
 describe('Arg (alias for Argument)', () => {

@@ -107,15 +107,32 @@ describe('Annotated function literal — typing (§6.1, §6.2)', () => {
     expect(f.type.toString()).toBe('(unknown) -> number');
   });
 
-  test('annotated param whose body is finite-numeric still widens (integer admits ∞)', () => {
+  test('an annotated param that proves finiteness suppresses the widening', () => {
     const ce = new ComputeEngine();
     const f = ce.box([
       'Function',
       ['Divide', 'x', 2],
       ['Typed', 'x', "'integer'"],
     ]);
-    // `integer` is not `finite_number`, so `x/2` (finite_real) widens to number
-    expect(f.type.toString()).toBe('(x: integer) -> number');
+    // The widening exists because an UNKNOWN parameter may bind `∞`, making
+    // a finite-numeric body claim unsound. Since the finite-by-default flip
+    // the bare name `integer` excludes the infinities, so this parameter
+    // cannot bind one and `x/2` keeps its finite claim.
+    expect(f.type.toString()).toBe('(x: integer) -> finite_real');
+  });
+
+  test('a param that does NOT prove finiteness still widens', () => {
+    const ce = new ComputeEngine();
+    // `number` admits `±∞`, `~oo` and NaN, so `x/2` may be non-finite.
+    expect(
+      ce
+        .box(['Function', ['Divide', 'x', 2], ['Typed', 'x', "'number'"]])
+        .type.toString()
+    ).toBe('(x: number) -> number');
+    // A bare (unannotated) parameter proves nothing and widens as before.
+    expect(
+      ce.box(['Function', ['Divide', 'x', 2], 'x']).type.toString()
+    ).toBe('(unknown) -> number');
   });
 });
 

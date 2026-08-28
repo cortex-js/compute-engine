@@ -597,8 +597,13 @@ describe('overloads (§4) — per-arm permutation', () => {
       T('y', 'string'),
     ]);
     clause(ce, 'sel', ['Function', 99, T('y', 'boolean'), T('x', 'string')]);
+    // The second arm's body is the literal `99` and neither of its parameters
+    // (`boolean`, `string`) can bind a non-finite value, so the lambda-body
+    // widening does not fire and the result stays the exact `finite_integer`.
+    // The first arm's `x + 1` over `x: integer` is `integer` — a `finite_*`
+    // claim is not spelled there because `Add` reports the bare tier.
     expect(ce.box('sel').type.toString()).toBe(
-      '((x: integer, y: string) -> integer) & ((y: boolean, x: string) -> number)'
+      '((x: integer, y: string) -> integer) & ((y: boolean, x: string) -> finite_integer)'
     );
 
     // `x: 7` must land in the FIRST parameter (the first clause's `x`), not in

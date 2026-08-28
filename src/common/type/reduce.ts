@@ -1,7 +1,6 @@
 import { typeToDedupKey, typeToString } from './serialize.js';
 import {
   assertGroundType,
-  COVERING_UNION_MAP,
   isEmptyType,
   isSubtype,
   meetPrimitiveTypes,
@@ -272,27 +271,6 @@ function reduceUnionType(type: AlgebraicType): Type {
     acc.push(current);
   }
 
-  // Covering-union collapse: `finite_X | non_finite_number ≡ X` for the
-  // infinity-admitting numeric tower (real, rational, integer, complex,
-  // number). The meet of two incomparable numeric types produces exactly such
-  // unions (e.g. `real ∧ complex = finite_real | non_finite_number`); collapse
-  // them so the union simplifies to the single covering type at construction.
-  // The `acc` members are now mutually incomparable, and the covering finite
-  // types form a chain, so at most one is present — a single collapse is
-  // deterministic and cannot leave a newly-subsumed sibling behind.
-  if (acc.indexOf('non_finite_number' as Type) !== -1) {
-    for (let i = 0; i < acc.length; i++) {
-      const m = acc[i];
-      if (typeof m !== 'string') continue;
-      const covered = COVERING_UNION_MAP[m];
-      if (covered) {
-        acc[i] = covered;
-        acc.splice(acc.indexOf('non_finite_number' as Type), 1);
-        break;
-      }
-    }
-  }
-
   if (acc.length === 1) return decorate(acc[0]);
   return decorate({ kind: 'union', types: sortUnionMembers(acc) });
 }
@@ -303,10 +281,11 @@ function reduceUnionType(type: AlgebraicType): Type {
  * - For subtype-related pairs, the narrower type.
  * - For incomparable but overlapping *primitive* pairs, the meet in the
  *   primitive lattice (see `meetPrimitiveTypes`), e.g.
- *   `integer ∧ finite_real` = `finite_integer` (`integer` admits ±∞, so the
- *   overlap is the finite integers), `finite_number ∧ real` = `finite_real`.
+ *   `integer ∧ finite_real` = `finite_integer` (`finite_real` is the
+ *   deprecated synonym of `real` and sits formally below it, so the overlap
+ *   is named by the `finite_*` twin), `finite_number ∧ real` = `finite_real`.
  *   When the maximal common subtypes are incomparable, the meet is their
- *   union. Under D10 the numeric tower is a chain (`real ⊂ complex`), so
+ *   union. The numeric tower is a chain (`real ⊂ complex`), so
  *   `real ∧ complex` = `real`; a union-meet arises only for genuinely
  *   incomparable pairs (e.g. `finite_number ∧ real` = `finite_real`).
  * - Unions (which can arise from previous meets) distribute:

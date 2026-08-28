@@ -124,10 +124,11 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
   });
 
   it('admitted infinities keep sound sides only', () => {
-    // `real<0..>` admits +∞ and `real<..0>` admits −∞ (pre-flip lattice):
-    // the sum's endpoints are the indeterminate ∞ + (−∞) on BOTH sides, so
-    // no bound survives — and the sum may be NaN, which the (pre-existing)
-    // tier machinery must account for, not the interval fold.
+    // Under the finite-by-default lattice `real<0..>` is a half-line of
+    // FINITE reals — no infinity inhabits it. The assertion still holds,
+    // for a different reason than when it was written: the sum of two
+    // opposite unbounded half-lines covers every real, so no finite bound
+    // survives on either side, and the fold correctly attaches nothing.
     const e = new ComputeEngine();
     e.declare('p', 'real<0..>');
     e.declare('q', 'real<..0>');

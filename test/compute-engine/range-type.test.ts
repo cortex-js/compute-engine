@@ -21,30 +21,51 @@ describe('Range dynamic type narrowing', () => {
     expect(String(r.type)).toContain('integer');
   });
 
-  test('Range with float step types as indexed_collection<number>', () => {
+  // Every element of a `Range` with real operands is a finite real, so the
+  // element type is `real`, not the ∞-and-NaN-admitting `number`. Bare
+  // numeric names are finite since the lattice flip; before it, `number` was
+  // the natural "not integer" answer here.
+  test('Range with float step types as indexed_collection<real>', () => {
     const r = ce.expr(['Range', 0, 1, 0.1]);
-    expect(String(r.type)).toContain('number');
+    expect(String(r.type)).toContain('real');
     expect(String(r.type)).not.toMatch(/integer/);
   });
 
+  // An operand that could still be complex keeps the wide `number`: a symbol
+  // declared `number` is not proof that the elements are real.
   test('Range with symbolic step types as indexed_collection<number>', () => {
     ce.declare('s', 'number');
     const r = ce.expr(['Range', 0, 1, ce.symbol('s')]);
     expect(String(r.type)).toContain('number');
   });
 
-  test('Range with fractional lower bound types as number, not integer', () => {
+  test('Range with fractional lower bound types as real, not integer', () => {
     // Reviewer P2: Range(0.5, 2.5) iterates 0.5, 1.5, 2.5 — element type
-    // must be number, not integer.
+    // must not be integer.
     const t = String(ce.expr(['Range', 0.5, 2.5]).type);
-    expect(t).toContain('number');
+    expect(t).toContain('real');
     expect(t).not.toMatch(/integer/);
   });
 
-  test('Range with fractional upper bound types as number, not integer', () => {
+  test('Range with fractional upper bound types as real, not integer', () => {
     const t = String(ce.expr(['Range', 1, 4.5]).type);
-    expect(t).toContain('number');
+    expect(t).toContain('real');
     expect(t).not.toMatch(/integer/);
+  });
+
+  // Ruling L10: an infinite endpoint marks unbounded EXTENT, it does not name
+  // a last element — so it must not widen the element type. Every member of
+  // `Range(1, +oo)` is a finite integer.
+  test('an infinite endpoint does not leak into the element type', () => {
+    expect(String(ce.expr(['Range', 1, 'PositiveInfinity']).type)).toBe(
+      'indexed_collection<integer>'
+    );
+    expect(String(ce.expr(['Range', 'NegativeInfinity', 1]).type)).toBe(
+      'indexed_collection<integer>'
+    );
+    expect(String(ce.expr(['Range', 0.5, 'PositiveInfinity']).type)).toBe(
+      'indexed_collection<real>'
+    );
   });
 });
 
@@ -266,9 +287,9 @@ describe('Range collection handlers', () => {
     expect(String(ce.expr(['Range', 1, 9, 2]).type)).toContain('integer');
   });
 
-  test('elttype: fractional-step range claims number element type', () => {
+  test('elttype: fractional-step range claims real element type', () => {
     const t = String(ce.expr(['Range', 0, 1, 0.25]).type);
-    expect(t).toContain('number');
+    expect(t).toContain('real');
     expect(t).not.toMatch(/integer/);
   });
 });

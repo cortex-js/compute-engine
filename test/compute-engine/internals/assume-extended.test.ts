@@ -80,7 +80,7 @@ describe('Greater(Imaginary(tau), 0)', () => {
   it('returns ok', () => expect(result).toBe('ok'));
 
   it('does NOT retype tau as real', () => {
-    expect(ce.expr('tau').isReal).not.toBe(true);
+    expect(ce.expr('tau').isExtendedReal).not.toBe(true);
     // The only refinement allowed for a part-predicate is `number`
     expect(ce.expr('tau').type.toString()).toBe('number');
   });
@@ -139,7 +139,7 @@ describe('Greater(Real(s), 1)', () => {
   it('returns ok', () => expect(result).toBe('ok'));
 
   it('does NOT retype s as real (the destructive-retype bug)', () => {
-    expect(ce.expr('s').isReal).not.toBe(true);
+    expect(ce.expr('s').isExtendedReal).not.toBe(true);
     expect(ce.expr('s').type.toString()).toBe('number');
   });
 
@@ -198,7 +198,7 @@ describe('Less(Abs(q), 1)', () => {
 
   it('refines q to finite_number (|q| bounded => finite)', () => {
     expect(ce.expr('q').type.toString()).toBe('finite_number');
-    expect(ce.expr('q').isReal).not.toBe(true);
+    expect(ce.expr('q').isExtendedReal).not.toBe(true);
   });
 
   // enabled in P3 (isFinite type fallback + relational query hooks)
@@ -571,11 +571,11 @@ describe('scope behavior', () => {
 //
 
 describe('regression: bare-symbol inequalities keep historical behavior', () => {
-  it('assume(x > 0) still implies x.isPositive and x.isReal', () => {
+  it('assume(x > 0) still implies x.isPositive and x.isExtendedReal', () => {
     const ce = freshEngine();
     expect(ce.assume(ce.parse('x > 0'))).toBe('ok');
     expect(ce.expr('x').isPositive).toBe(true);
-    expect(ce.expr('x').isReal).toBe(true);
+    expect(ce.expr('x').isExtendedReal).toBe(true);
   });
 
   it('assume(x > 4) declares x real and stores the bound', () => {

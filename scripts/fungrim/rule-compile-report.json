@@ -1,7 +1,7 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
   "sliceEntries": 1648,
-  "emitted": 1435,
+  "emitted": 1434,
   "ledger": {
     "box-error": 1,
     "compat-signature": 3,
@@ -10,23 +10,24 @@
     "guard-uncompilable": 69,
     "lhs-not-value-form": 85,
     "no-fire": 28,
-    "not-equation": 8
+    "not-equation": 8,
+    "wildcard-loss": 1
   },
   "byPurpose": {
     "expand": 123,
-    "simplify": 1304,
+    "simplify": 1303,
     "transform": 8
   },
   "byClass": {
-    "identity": 1090,
+    "identity": 1089,
     "specific-value": 345
   },
   "byTarget": {
-    "simplify": 1435
+    "simplify": 1434
   },
   "sampleKinds": {
-    "numeric": 105,
-    "symbolic": 1330
+    "numeric": 108,
+    "symbolic": 1326
   },
   "headBuckets": {
     "Multiply": 293,
@@ -43,10 +44,10 @@
     "CarlsonRD": 19,
     "Sin": 19,
     "Arctan": 18,
-    "Power": 17,
     "AGM": 16,
     "IncompleteEllipticE": 16,
     "IncompleteEllipticF": 16,
+    "Power": 16,
     "Digamma": 14,
     "LCM": 14,
     "ModularJ": 14,
@@ -355,6 +356,10 @@
       "id": "30b67b",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "310f36",
+      "reason": "wildcard-loss"
     },
     {
       "id": "31adf6",

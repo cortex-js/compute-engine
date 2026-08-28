@@ -173,11 +173,12 @@ function rank1Components(x: Expression): ReadonlyArray<Expression> | undefined {
  * Dropping the construction drops the FOLDS canonicalization performed, and
  * that changes two answers (user-ruled 2026-08-22, accepted): `Multiply(a, 1)`
  * used to reduce to `a`, so a sum over components declared `real` or `integer`
- * inherited those declared types — which admit ±∞. The ladder instead reads a
- * bare `real` symbol as a generic finite point (the non-finite typing
- * convention in ARCHITECTURE.md, the same reading `Multiply(a, b)` already
- * reports for two `real` symbols), so `Dot((a, b), (1, 2))` now types
- * `finite_real` and its integer twin `finite_integer`. The fold also carried a
+ * inherited those declared types verbatim. The ladder instead reports the
+ * `finite_*` spelling directly — the same reading `Multiply(a, b)` already
+ * gives for two `real` symbols — so `Dot((a, b), (1, 2))` now types
+ * `finite_real` and its integer twin `finite_integer`. (The two spellings
+ * denote the same values since the bare names became finite; the ladder's
+ * answer is the one the rest of the numeric handlers give.) The fold also carried a
  * `finite_rational` product tier the ladder does not claim, so that row widens
  * to `finite_real`.
  */
@@ -288,7 +289,18 @@ function innerProductSumType(types: ReadonlyArray<Type>): Type {
   if (types.length === 1) return types[0];
   const nonFinite = types.filter((t) => isSubtype(t, 'non_finite_number'));
   if (nonFinite.length > 0) {
-    if (nonFinite.length === 1 && types.every((t) => isSubtype(t, 'real')))
+    // Exactly one signed infinity among terms that are otherwise FINITE
+    // reals sums to that infinity. Only the OTHER terms are tested against
+    // the bare (finite) name `real`: the infinite term is not a finite
+    // real, so requiring every term to be one would make this refinement
+    // unreachable.
+    const finiteTerms = types.filter(
+      (t) => !isSubtype(t, 'non_finite_number')
+    );
+    if (
+      nonFinite.length === 1 &&
+      finiteTerms.every((t) => isSubtype(t, 'real'))
+    )
       return 'non_finite_number';
     return 'number';
   }

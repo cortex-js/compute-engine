@@ -1,9 +1,12 @@
 # Implementation plan: the finite-by-default numeric-lattice flip
 
-Status: **Phase 0 implemented 2026-08-27** (hold lifted by the user the
-same day). The Phase 0 diff is in the working tree pending the full-suite
-exit gate, dual review passed (13 findings applied). Phases 1–3 not
-started.
+Status: **Phase 0 committed 2026-08-27; Phase 1 delivered 2026-08-28**
+(steps 1.1–1.8 complete; dual review passed with 17 merged findings
+applied; full suite green on the delivered base — 624 suites, 31,407
+tests, snapshot delta zero beyond the enumerated deliberate pin changes;
+staged, awaiting the user's commit). Phases 2–3 not started. Deviations
+from the checklist as written are recorded in the per-step notes below
+the checklist; open defects from the phase are filed in `ROADMAP.md`.
 
 Authority: the ratified decision record
 (`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`, rulings
@@ -95,7 +98,7 @@ Goal: bare numeric names mean finite; values retype; the doubled tower's
 machinery comes out. Sub-steps in dependency order; 1.1–1.2 are one
 diff (they cannot be split soundly), the rest may land separately.
 
-- [ ] **1.1 Lattice semantics.** Rewrite `PRIMITIVE_SUBTYPES` to the
+- [x] **1.1 Lattice semantics.** Rewrite `PRIMITIVE_SUBTYPES` to the
       disjoint tree (`number = complex ⊔ infinity ⊔ nan`;
       `integer ⊂ rational ⊂ real ⊂ complex`, all finite;
       `imaginary ⊂ complex`). Delete the machinery that exists only for
@@ -105,7 +108,7 @@ diff (they cannot be split soundly), the rest may land separately.
       `SUPERTYPE_PROBE_ORDER`. `infinity` is defined by infinite
       magnitude (L2(a)); `non_finite_number` leaves the union (its
       consumers migrate in 1.6).
-- [ ] **1.2 Value retyping (lockstep cluster).** `oo`/`-oo` literals
+- [x] **1.2 Value retyping (lockstep cluster).** `oo`/`-oo` literals
       → the `+oo`/`-oo` singletons (widen target `infinity`); `NaN` →
       `nan`; `~oo` → the `~oo` singleton. The three
       `NumericValue.type` getters (`numeric-value/exact-…`,
@@ -116,32 +119,32 @@ diff (they cannot be split soundly), the rest may land separately.
       `boxed-expression/numerics.ts`, `arithmetic-mul-div.ts`,
       `boxed-number.ts`, `order.ts`) — a gate comparing against a
       string the getter no longer returns fails silently.
-- [ ] **1.3 Predicate renames (L4 as amended).** `isReal` →
+- [x] **1.3 Predicate renames (L4 as amended).** `isReal` →
       `isExtendedReal` (family-wide: every ±∞-admitting predicate).
       The old names are REMOVED so typecheck drives the caller sweep;
       each caller chooses extended vs finite explicitly. `isFinite`
       keeps its name and means finite MAGNITUDE (`∞ + i` → `false`).
       Sweep the sign-fold and `1/±∞` guards during the rename (the
       type-keyed-guard failure class).
-- [ ] **1.4 Assignment promotion.** The declared-type ladder for
+- [x] **1.4 Assignment promotion.** The declared-type ladder for
       `x := oo` (`boxed-value-definition.ts:913`,
       `engine-declarations.ts` promotion) gets an explicit infinite
       branch (promote to `infinity`, or `number` — decide at
       implementation with a pin either way; the ladder's
       widen-interaction comment inverts).
-- [ ] **1.5 Span constructors (L10).** Infinite endpoints are extent
+- [x] **1.5 Span constructors (L10).** Infinite endpoints are extent
       markers in BOTH constructors: `Contains(Interval(0,oo), oo)`
       flips to `False` (pin the flip); `Range(1,oo)` element type stops
       leaking the endpoint (`indexed_collection<integer>`); delete the
       `FINITE_NUMERIC_TYPE` narrowing map (`library/core.ts:1098`);
       `Length(Range(1,oo))` evaluates to `+oo`, declared
       `integer | +oo`.
-- [ ] **1.6 The 43 `non_finite_number` sites.** Migrate per the
+- [x] **1.6 The 43 `non_finite_number` sites.** Migrate per the
       audit's site-by-site classification (roadmap §8.5 records where
       the classification lives): signed-guarantee sites → `+oo | -oo`,
       any-non-finite sites → `infinity` (usually `| nan`). NO blanket
       rename anywhere.
-- [ ] **1.7 The fourteen silent-flip classes.** Each by hand, each
+- [x] **1.7 The fourteen silent-flip classes.** Each by hand, each
       with a pin: the `Sinh`/`Cosh` realness gates, `extremumType` and
       `absFunctionType` bare-tier rungs, `Sinc`/Fresnel finite-limit
       gate, `logType`/pole-join `complex` claims (`→ complex | ±oo`
@@ -154,7 +157,7 @@ diff (they cannot be split soundly), the rest may land separately.
       `assume.ts` meet-based contradiction outcomes, and the compiled
       clause guards (`base-compiler.ts` `jsClauseParamGuard`: `real` →
       `Number.isFinite`; new guards for `infinity`/`nan`).
-- [ ] **1.8 L9 lands by doing nothing** — the number-theory heads'
+- [x] **1.8 L9 lands by doing nothing** — the number-theory heads'
       parameters tighten with the rename in Phase 2; add
       signature-rejection pins for `GCD(oo, 2)`-class calls.
 
@@ -163,6 +166,51 @@ area; full suite under the box lock with the snapshot delta counted,
 triaged, and reported; conformance-suite pins updated DELIBERATELY
 (each changed pin re-examined against the ratified rulings, gap rows
 re-labeled where a gap closes).
+
+Phase 1 implementation notes (2026-08-27, recorded at completion):
+
+- The `PrimitiveType` union did not shrink: the five `finite_*` names and
+  `non_finite_number` remain as formally-strict subtypes of the bare
+  names until the Phase 2 codemod. `finite_number` is deliberately
+  INCOMPARABLE to `complex`: making it a subtype flips
+  `isNonRealNumber('finite_number')` and switches the compiler to
+  complex lowering for every generic numeric expression (measured, 26
+  suites).
+- Signed-guarantee result claims KEEP the `non_finite_number` spelling
+  this phase (it still means exactly the signed pair, and the primitive
+  is not match-equivalent to the `+oo | -oo` union). The spelling flip
+  happens with the Phase 2 retirement. The `PositiveInfinity` /
+  `NegativeInfinity` constant declarations did move to the `+oo`/`-oo`
+  singletons.
+- 1.3 renamed only `isReal` → `isExtendedReal` (all 80 callers chose
+  extended semantics; NaN now answers `false` — a bug fix with measured
+  zero fallout). `isInteger`/`isRational` keep their names: post-flip
+  they are uniformly finite on both routes, so there is no ambiguity to
+  resolve. Sign predicates keep their names.
+- 1.4 promotes `x := oo` to `infinity` and `x := NaN` to `nan`; the
+  `complex → number` rung was kept (now the ladder's one non-tier
+  widening — open polish question).
+- 1.5: `Length(Range(1,oo))` evaluates to `+oo` but its stored type
+  surfaces as `infinity | integer`, not `integer | +oo` — every handler
+  result passes through `widenValueTypes()` (ruling O9), which widens
+  the singleton. Making a singleton survive needs an O9 exemption
+  ruling. `Subset(NegativeIntegers, Integers)` stays `False` until
+  Phase 2 removes the synonyms (pinned with explanation).
+- 1.7: `extremumType` is knowingly loose (`Max(∞,3)` → `number`) —
+  tightening is blocked by the frozen shadow-parity harness and belongs
+  with that harness's retirement. The tensor-dtype silent flip predicted
+  by the audit does not exist (measured: ∞/NaN literals fell to
+  `expression` both before and after); string-tier arms were added for
+  the broadcast-cell window.
+- 1.8: `GCD`/`LCM`/`Binomial` declare `any*`/`number` parameters and do
+  NOT reject an infinity; the rejection pins use `NthPrime`,
+  `IntegerSqrt`, `Fibonacci` and `Repeat`. `Hypot(2, ∞)` now rejects at
+  the signature — a genuine capability loss under L9(a) (open question:
+  widen those parameters, at the cost of a symbol-inference side
+  effect).
+- Open rulings routed to the user: NaN-component complex values type
+  `nan` (no ratified ruling covers them); the `Hypot` widening; the
+  `complex → number` rung; the O9 singleton widening.
 
 ## Phase 2 — The mechanical sweep
 

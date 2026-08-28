@@ -29,6 +29,7 @@ import {
 } from '../collection-utils.js';
 import {
   collectionElementType,
+  finitePartOfType,
   isNonRealNumber,
   resolveTypeForCompilation,
   stripMissingFromType,
@@ -9527,9 +9528,20 @@ export class BaseCompiler {
       );
       if (viaBody !== undefined) return viaBody;
     }
-    // Check the function's return type from its operator definition
+    // Check the function's return type from its operator definition.
+    //
+    // The infinite and NaN branches are dropped first: a head whose value can
+    // blow up at a pole claims a union such as `complex | non_finite_number`
+    // (`Artanh`, `Arcoth`, `Arsech`, `Ln`, `Log`), and only its FINITE part
+    // decides the lane. THREE SITES MUST STAY IN AGREEMENT, because they
+    // answer the same question for the same node and a disagreement is a
+    // silent value-shape mismatch (a `{re, im}`/`vec2` consumer reading a
+    // scalar, or the reverse): this predicate, which a PARENT expression
+    // consults; `resultIsComplexValued` in `javascript-target.ts`, the
+    // JavaScript emitters' copy; and `gpuResultIsComplexValued` in
+    // `gpu-target.ts`, the GPU emitters' copy. Change one, change all three.
     const t = expr.type;
-    if (isNonRealNumber(t.type)) {
+    if (isNonRealNumber(finitePartOfType(t.type))) {
       // Sqrt/Ln/Log carve-out (2026-07-31): their type handlers now widen
       // to `finite_complex`/`complex` for a real operand of UNKNOWN sign
       // (type soundness: `√−2 = 1.414…i`), but the pinned compile contract
@@ -9573,7 +9585,17 @@ export class BaseCompiler {
         return expr.ops.some((a) => BaseCompiler.isComplexValued(a));
       return true;
     }
-    if (t.matches('real')) return false;
+    // The REAL verdict reads the same finite part the non-real verdict above
+    // does. Asking `t.matches('real')` of the whole union answers false for a
+    // head that can blow up — `Abs` of a complex operand of unproven
+    // finiteness claims `real<0..> | non_finite_number` — and such a node then
+    // fell through to the conservative operand recursion below, which reported
+    // it complex from its complex operand. The parent then read `.re`/`.im`
+    // off the plain number `_SYS.cabs` returns, so `|z| − 4` compiled to
+    // `NaN`. A `±∞` is real-SHAPED at run time, so dropping the non-finite
+    // part before the test is right for the value shape this predicate
+    // decides.
+    if (isSubtype(finitePartOfType(t.type), 'real')) return false;
     // A boolean or string value is never complex-valued, whatever its
     // operands are. Without this, a predicate over a complex-typed operand
     // (`Less(Sin(1e5·√u), 0)`) fell through to the conservative operand
@@ -13423,7 +13445,12 @@ export class BaseCompiler {
    * booleans compiled code traffics in; the `NaN` value type admits exactly
    * NaN, so it tests `Number.isNaN`); numeric ranges → base guard
    * plus inclusive bound checks (a NaN argument fails `>=`, as it should);
-   * primitives → `typeof`/`Number.isInteger` where JS can express them.
+   * primitives → `typeof`/`Number.isInteger`/`Number.isFinite` where JS can
+   * express them. Every bare numeric name denotes a FINITE value, so its
+   * guard rejects `Infinity` and `NaN` at run time exactly as the
+   * interpreter's signature check does. The `infinity` and `nan` tiers cannot
+   * be told apart in compiled JavaScript (complex infinity lowers to NaN
+   * there) and therefore decline; see the comment on those cases below.
    * The JS calling convention represents a complex value as a `{re, im}`
    * object and a real one as a plain number, and BOTH inhabit `complex` (and
    * `number`): those two guards accept either shape, so a complex-valued
@@ -13441,12 +13468,44 @@ export class BaseCompiler {
         case 'integer':
         case 'finite_integer':
           return `Number.isInteger(${a})`;
+        // `real` and `finite_real` both denote the FINITE reals since the
+        // finite-by-default flip, so they share one guard. `Number.isFinite`
+        // already implies `typeof … === "number"`.
         case 'real':
-          return `(typeof ${a} === "number" && !Number.isNaN(${a}))`;
         case 'finite_real':
           return `Number.isFinite(${a})`;
+        // `complex` is finite too, so an infinite or NaN argument — a plain
+        // `Infinity`, or a `{re, im}` object with a non-finite component —
+        // must not satisfy it. Every complex value the JS target emits
+        // carries both parts, so both are tested.
         case 'complex':
-          return `(typeof ${a} === "number" || ${jsComplexObjectTest(a)})`;
+          return `(Number.isFinite(${a}) || (${jsComplexObjectTest(a)} && Number.isFinite(${a}.re) && Number.isFinite(${a}.im)))`;
+        // `non_finite_number` is the SIGNED pair `+∞ | −∞`. It excludes
+        // complex infinity and it excludes NaN, so "a number that is neither
+        // finite nor NaN" is an exact test: compiled `+∞`/`−∞` are the JS
+        // values `Infinity`/`-Infinity` and pass it, while compiled complex
+        // infinity (see below) is NaN and correctly fails it.
+        case 'non_finite_number':
+          return `(typeof ${a} === "number" && !Number.isFinite(${a}) && !Number.isNaN(${a}))`;
+        // `infinity` and `nan` have NO faithful JS test, so a clause set that
+        // uses either declines as a whole and runs interpreted.
+        //
+        // The reason is a representation collision. Compiled JavaScript has no
+        // distinct value for complex infinity: `~oo` lowers to the JS value
+        // NaN. But the interpreter types `~oo` as `infinity` and NOT as `nan`
+        // — the two are disjoint there. So `Number.isNaN(a)` would accept a
+        // compiled `~oo` that the interpreter refuses from a `nan` parameter,
+        // and any `infinity` test expressible over JS numbers would refuse a
+        // compiled `~oo` that the interpreter accepts. Both directions were
+        // measured on the clause set `g(a: T) = 1; g(x: number) = 0`.
+        //
+        // Declining rather than diverging is the compilation model's posture
+        // for a construct the target cannot represent (D6 fail-closed, and the
+        // §8 whole-function decline this return value expresses): the
+        // interpreted fallback still dispatches such a clause set correctly.
+        case 'infinity':
+        case 'nan':
+          return undefined;
         case 'number':
           return `(typeof ${a} === "number" || ${jsComplexObjectTest(a)})`;
         case 'string':
@@ -13476,7 +13535,10 @@ export class BaseCompiler {
         if (t.type === 'integer' || t.type === 'finite_integer')
           base = `Number.isInteger(${a})`;
         else if (t.type === 'real' || t.type === 'finite_real')
-          base = `typeof ${a} === "number"`;
+          // Finite, on both spellings: an inclusive bound on one side only
+          // (`real<0..>`) would otherwise admit `Infinity`, which is not a
+          // member of either.
+          base = `Number.isFinite(${a})`;
         else return undefined; // rational &c.: no faithful JS test
         const parts = [base];
         if (typeof t.lower === 'number' && t.lower !== -Infinity)

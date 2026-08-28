@@ -21,6 +21,8 @@ export class BoxedType {
   static unknown = new BoxedType('unknown');
   static number = new BoxedType('number');
   static non_finite_number = new BoxedType('non_finite_number');
+  static infinity = new BoxedType('infinity');
+  static nan = new BoxedType('nan');
   static finite_number = new BoxedType('finite_number');
   static finite_integer = new BoxedType('finite_integer');
   static finite_real = new BoxedType('finite_real');

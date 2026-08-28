@@ -113,10 +113,15 @@ describe('TYPE AUDIT: pole-free hyperbolics at ±∞', () => {
 });
 
 describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
-  it('Haversine widens on a non-finite argument (hav(±∞) is NaN)', () => {
-    expect(typeOf(['Haversine', 'PositiveInfinity'])).toBe('number');
+  // All three heads declare a bare `real` parameter, which since the
+  // finite-by-default flip means a FINITE real, so an infinite argument is
+  // rejected at the signature instead of reaching the handler (ruling L9(a)
+  // of the numeric-lattice ratification: signature-level rejection is the
+  // declared contract doing its job). The finite-argument claims below are
+  // unchanged, and they are what these heads exist to describe.
+  it('Haversine rejects a non-finite argument at the signature', () => {
+    expect(typeOf(['Haversine', 'PositiveInfinity'])).toBe('error');
     expect(typeOf(['Haversine', 2])).toBe('finite_real');
-    expect(ce.box(['Haversine', 'PositiveInfinity']).N().isNaN).toBe(true);
   });
 
   it('InverseHaversine is real only on [0, 1]', () => {
@@ -124,7 +129,7 @@ describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
     expect(typeOf(['InverseHaversine', 1])).toBe('finite_real');
     expect(typeOf(['InverseHaversine', -1])).toBe('finite_complex');
     expect(typeOf(['InverseHaversine', 2.5])).toBe('finite_complex');
-    expect(typeOf(['InverseHaversine', 'PositiveInfinity'])).toBe('number');
+    expect(typeOf(['InverseHaversine', 'PositiveInfinity'])).toBe('error');
     // Honest domain join for a symbolic real (user ruling 2026-07-30 (b)):
     // same convention as the Arcsin family, and the compiled JS path emits
     // complex code for it (see compile-angular-unit.test.ts).
@@ -134,12 +139,14 @@ describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
     expectSound(['InverseHaversine', 2.5]);
   });
 
-  it('Hypot follows operand finiteness (Hypot(∞, 2) = +∞)', () => {
-    expect(typeOf(['Hypot', 2, 'PositiveInfinity'])).toBe('number');
+  it('Hypot rejects a non-finite operand at the signature', () => {
+    // `Hypot(2, ∞) = +∞` is a well-defined value, so this rejection is a
+    // real capability loss rather than a domain correction — it follows from
+    // the declared `(real, real)` parameters alone. Widening them to the
+    // extended real line would also retype every undeclared symbol used as
+    // an argument, which is why it is not done here.
+    expect(typeOf(['Hypot', 2, 'PositiveInfinity'])).toBe('error');
     expect(typeOf(['Hypot', 2, 3])).toBe('finite_real');
-    const hypotInf = ce.box(['Hypot', 2, 'PositiveInfinity']).N();
-    expect(hypotInf.isInfinity).toBe(true);
-    expect(hypotInf.isPositive).toBe(true);
   });
 
   it('Degrees of a non-real argument does not claim real', () => {
@@ -279,9 +286,32 @@ describe('TYPE AUDIT: integral special functions with unproven-real operands', (
   it('SinIntegral/CosIntegral do not claim real for a number-typed symbol', () => {
     expect(ce.box(['SinIntegral', 'u']).type.matches('real')).toBe(false);
     expect(ce.box(['CosIntegral', 'u']).type.toString()).toBe('number');
-    // Real operands keep their claims.
+    // Real operands keep their claims. Si is bounded, so it claims the finite
+    // reals; Ci has a pole at 0 (`Ci(0) = −∞`), so it has to claim the
+    // EXTENDED real line — the bare name `real` denotes the finite reals and
+    // would exclude the pole.
     expect(typeOf(['SinIntegral', 'r'])).toBe('finite_real');
-    expect(typeOf(['CosIntegral', 'r'])).toBe('real');
+    expect(typeOf(['CosIntegral', 'r'])).toBe('non_finite_number | real');
+    const ciPole = ce.box(['CosIntegral', 0]);
+    expect(ciPole.evaluate().isInfinity).toBe(true);
+    expect(ciPole.evaluate().type.matches(ciPole.type)).toBe(true);
+  });
+
+  it('SinhIntegral/CoshIntegral/Erfi admit their infinities', () => {
+    // Shi and Erfi are entire: finite on a FINITE real, ±∞ only at ±∞.
+    expect(typeOf(['SinhIntegral', 'r'])).toBe('finite_real');
+    expect(typeOf(['Erfi', 'r'])).toBe('finite_real');
+    for (const f of ['SinhIntegral', 'Erfi']) {
+      const at = ce.box([f, 'PositiveInfinity']);
+      expect(at.evaluate().isInfinity).toBe(true);
+      expect(at.evaluate().type.matches(at.type)).toBe(true);
+    }
+    // Chi has a pole at 0 as well as Chi(±∞) = +∞, so proving the argument
+    // finite does not buy a finite claim.
+    expect(typeOf(['CoshIntegral', 'r'])).toBe('non_finite_number | real');
+    const chiPole = ce.box(['CoshIntegral', 0]);
+    expect(chiPole.evaluate().isInfinity).toBe(true);
+    expect(chiPole.evaluate().type.matches(chiPole.type)).toBe(true);
   });
 });
 
@@ -336,11 +366,30 @@ describe('TYPE AUDIT: Abs (magnitude)', () => {
   it('keeps the finiteness rungs (complex magnitude, ±∞, ~oo, NaN)', () => {
     // A finite COMPLEX magnitude is real but neither rational nor integer.
     expect(typeOf(['Abs', 'ImaginaryUnit'])).toBe('finite_real<0..>');
-    expect(typeOf(['Abs', 'az'])).toBe('real<0..>');
+    expect(typeOf(['Abs', 'az'])).toBe('finite_real<0..>');
     expect(typeOf(['Abs', 'PositiveInfinity'])).toBe('non_finite_number');
-    expect(typeOf(['Abs', 'ComplexInfinity'])).toBe('real<0..>');
+    // `|~oo| = +∞`, and the claim has to admit that value: a bare tier
+    // denotes the FINITE values alone, so `real<0..>` would exclude the
+    // very value this expression evaluates to.
+    expect(typeOf(['Abs', 'ComplexInfinity'])).toBe('non_finite_number');
+    expect(ce.box(['Abs', 'ComplexInfinity']).evaluate().toString()).toBe(
+      '+oo'
+    );
+    expectSound(['Abs', 'ComplexInfinity']);
     expect(typeOf(['Abs', { num: 'NaN' }])).toBe('number');
-    expect(typeOf(['Abs', 'u'])).toBe('real<0..>');
+    // An operand typed the top `number` may hold `±∞` or `~oo`, so its
+    // magnitude may be `+∞`; the claim is the union of the finite and the
+    // infinite outcome. (`number` also admits NaN, which this claim does
+    // NOT cover — a hole the pre-flip `real<0..>` had as well, since NaN
+    // was never a member of `real`.)
+    expect(typeOf(['Abs', 'u'])).toBe('(real<0..>) | non_finite_number');
+    // The claim admits `+∞`, the value `Abs` of such an operand can reach.
+    expect(
+      isSubtype(
+        ce.box('PositiveInfinity').type.type,
+        ce.box(['Abs', 'u']).type.type
+      )
+    ).toBe(true);
     expectSound(['Abs', 'ImaginaryUnit']);
     expectSound(['Abs', 'PositiveInfinity']);
   });

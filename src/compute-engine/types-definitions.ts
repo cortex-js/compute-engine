@@ -418,12 +418,12 @@ export type Tri = boolean | undefined;
  */
 export type OperandFacts = {
   /** `true` for a `finite_*`-typed operand or a finite number literal;
-   * `false` for a `non_finite_number`-typed operand or a `±∞`/`NaN`
-   * literal; `undefined` otherwise (including every non-number operand).
-   * Beyond the type: a `NaN` literal — its type is `number` (there is no
-   * NaN tier), and treating it as an unknown-finiteness generic point
-   * would let a total-real-function handler unsoundly claim a finite
-   * result for `f(NaN)`. */
+   * `false` for an operand whose type is below `infinity` or `nan` — which
+   * covers the signed pair `non_finite_number`, the unsigned `~oo` and the
+   * NaN marker — and for a `±∞`/`NaN` literal; `undefined` otherwise
+   * (including every non-number operand). Treating a NaN operand as an
+   * unknown-finiteness generic point would let a total-real-function
+   * handler unsoundly claim a finite result for `f(NaN)`. */
   readonly finite: Tri;
   /** The operand's sign, from pure sources only: a number literal's value,
    * a symbol's held numeric value or recorded assumption, the sign a

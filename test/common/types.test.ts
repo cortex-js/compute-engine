@@ -2303,6 +2303,12 @@ describe('NON-REAL NUMBER PREDICATES', () => {
   });
 
   it('wide numeric types could be non-real but are not provably so', () => {
+    // `finite_number` stays here after the finite-by-default flip even though
+    // it now denotes the same values as `complex`: it is deliberately left
+    // incomparable to `complex` in the lattice, because this predicate reads
+    // "below `complex`, not below `real`" and a `true` for the type of every
+    // generic numeric expression would switch the compiler to complex
+    // lowering. See the `finite_number` entry in `PRIMITIVE_SUBTYPES`.
     for (const t of ['number', 'finite_number', 'any', 'unknown'] as const) {
       expect(isNonRealNumber(t)).toBe(false);
       expect(couldBeNonRealNumber(t)).toBe(true);

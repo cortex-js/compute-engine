@@ -15,7 +15,12 @@ import {
   signOfType,
 } from '../../common/type/utils.js';
 import { reduceType } from '../../common/type/reduce.js';
-import { isEmptyType } from '../../common/type/subtype.js';
+import {
+  isEmptyType,
+  isSubtype,
+  provablyDisjoint,
+} from '../../common/type/subtype.js';
+import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import type { OneOf } from '../../common/one-of.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
@@ -123,7 +128,7 @@ let _dereferenceDepth = 0;
  *
  * If a symbol is not canonical (and thus not bound to a definition),
  * some properties and methods will return `undefined`, for example
- * `isInteger`, `isRational`, `isReal`, etc...
+ * `isInteger`, `isRational`, `isExtendedReal`, etc...
  *
  * There is a single value definition for each symbol in each scope.
  * During recursion, fresh scopes are created per call so each
@@ -1009,15 +1014,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (fromValue !== undefined) return fromValue;
     // Type fallback (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1e): a
     // `finite_number` refinement — e.g. from `assume(|q| < 1)` — entails
-    // finiteness even without a value. Symmetrically, a `non_finite_number`
+    // finiteness even without a value. Symmetrically, an infinite or NaN
     // type entails non-finiteness (see `get isInfinity`).
     const t = this.type;
     if (!t.isUnknown) {
       if (t.matches('finite_number')) return true;
-      if (t.matches('non_finite_number')) return false;
-      // `infinity` is any value of infinite magnitude (`+oo`, `-oo`, `~oo`)
-      // and `nan` is the NaN singleton. Neither is a finite number, which is
-      // what `isFinite` asks: a NaN VALUE answers `false` here too.
+      // `infinity` is any value of infinite magnitude (`+oo`, `-oo`, `~oo`),
+      // so it also covers the signed pair `non_finite_number`; `nan` is the
+      // NaN singleton, disjoint from `infinity`. Neither is a finite number,
+      // which is what `isFinite` asks: a NaN VALUE answers `false` here too.
       if (t.matches('infinity')) return false;
       if (t.matches('nan')) return false;
     }
@@ -1043,17 +1048,19 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (fromValue !== undefined) return fromValue;
     // Type fallback, mirroring `BoxedFunction.isInfinity`: the static type can
     // prove non-finiteness where no value is available — e.g. a symbol
-    // declared `non_finite_number`. That type is exactly the signed infinities
-    // (PositiveInfinity, NegativeInfinity — no NaN member, and no
-    // ComplexInfinity, which is typed `complex`), so it entails "is infinite".
+    // declared `infinity` or `non_finite_number`.
     const t = this.type;
     if (!t.isUnknown) {
-      if (t.matches('non_finite_number')) return true;
-      // `infinity` also admits ComplexInfinity, which `isInfinity` counts as
-      // infinite. `nan` is the NaN singleton: a NaN VALUE answers `false`
-      // here (NaN is not an infinity), so a `nan`-typed symbol does too.
+      // `infinity` is any value of infinite magnitude, which is exactly what
+      // `isInfinity` asks; it covers the signed pair `non_finite_number`
+      // (`+oo`, `-oo`) and the unsigned `~oo` alike. A declared type that has
+      // no value in common with `infinity` answers `false`: that is `nan` (a
+      // NaN VALUE answers `false` here, so a `nan`-typed symbol does too),
+      // and, now that the bare name `real` denotes the FINITE reals, every
+      // finite numeric tier as well — a `real`-declared symbol is not an
+      // infinity.
       if (t.matches('infinity')) return true;
-      if (t.matches('nan')) return false;
+      if (provablyDisjoint(t.type, 'infinity')) return false;
     }
     return undefined;
   }
@@ -1126,7 +1133,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   get isInteger(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
-    // Three-valued discipline (D3), mirroring the repaired `isReal`:
+    // Three-valued discipline (D3), mirroring the repaired `isExtendedReal`:
     //   entailed (`matches`) → true; overlap → undefined; disjoint → false.
     if (t.matches('integer')) return true;
     // A real-overlapping numeric type (`real`, `rational`, `finite_real`,
@@ -1135,7 +1142,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (t.matches('real')) return undefined;
     // `number`/`finite_number` overlap the reals unless they are genuinely
     // complex (`complex`/`imaginary`/`finite_complex`, which are non-integer
-    // by the same convention `isReal` uses).
+    // by the same convention `isExtendedReal` uses).
     if (t.matches('number')) return isNonRealNumber(t.type) ? false : undefined;
     // Non-numeric / composite types (e.g. `!string`): definitely-not only when
     // provably disjoint from the integers.
@@ -1163,10 +1170,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return undefined;
   }
 
-  get isReal(): boolean | undefined {
+  get isExtendedReal(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
-    if (t.matches('real')) return true;
+    // `non_finite_number` is admitted explicitly: the bare name `real` denotes
+    // the FINITE reals, and this predicate means "on the EXTENDED real line",
+    // so a symbol declared to be a signed infinity answers `true` — the
+    // meaning the sign-aware folds (`1/±∞ = 0`) consume. `non_finite_number`
+    // is the signed pair `+∞ | -∞`, so the unsigned `~∞` is excluded: its own
+    // singleton type shares no value with either disjunct and is refuted
+    // further down. A symbol declared the TIER `infinity` stays undecided —
+    // that tier admits `+∞` (an extended real) and `~∞` (not one) alike.
+    //
+    // The test is against the WHOLE extended real line, not against each
+    // disjunct in turn: a symbol declared the union `real | non_finite_number`
+    // is below neither `real` nor `non_finite_number` alone, so a member-wise
+    // test left a value that is always an extended real undecided.
+    if (isSubtype(t.type, EXTENDED_REAL_TYPE)) return true;
 
     // The type cannot prove real-ness. A stored `NotElement(x, RealNumbers)`
     // fact — e.g. derived from `assume(Im(x) > 0)` — refutes it
@@ -1175,6 +1195,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       const facts = getFactIndex(this.engine).membership.get(this._id);
       if (facts?.notIn.some((s) => isSymbol(s, 'RealNumbers'))) return false;
     }
+
+    // A type that shares no value with either disjunct of the extended real
+    // line refutes the predicate outright — `nan` is the case that matters
+    // here, since NaN is neither a finite real nor a signed infinity, and it
+    // reaches this point through the `number` arm below otherwise.
+    if (
+      provablyDisjoint(t.type, 'real') &&
+      provablyDisjoint(t.type, 'non_finite_number')
+    )
+      return false;
 
     // `complex`/`imaginary`-typed symbols keep the historical definitive
     // `false`. Other number types (`number`, `finite_number`, ...) overlap

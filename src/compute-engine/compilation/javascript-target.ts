@@ -22,6 +22,7 @@ import {
 } from './constant-folding.js';
 import {
   collectionElementType,
+  finitePartOfType,
   isNonRealNumber,
   resolveTypeAlias,
   resolveTypeForCompilation,
@@ -2870,9 +2871,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // non-positive one yields [] (unlike `Tabulate`, `Repeat(x, 0)` is NOT
   // inert in the interpreter: it evaluates to []).
   // A *statically* non-finite count (a `±∞` literal, or an operand typed
-  // `non_finite_number`) is inert in the interpreter (`toInteger` answers
-  // null), so it fails closed (D6) rather than compiling to `[]` behind
-  // `success: true`. A *dynamic* count that is non-finite only at run time
+  // `infinity` or `nan`) never produces a list in the interpreter — the
+  // declared `integer` parameter means a FINITE integer, so such a count is
+  // rejected at the signature — so it fails closed (D6) rather than
+  // compiling to `[]` behind `success: true`. A count that the signature
+  // cannot decide statically and that is non-finite only at run time
   // still projects to [] — the Chunk/RotateLeft precedent, and the
   // documented divergence: the interpreter stays inert there while the
   // compiled form yields [] rather than attempting an unbounded allocation.
@@ -4536,6 +4539,14 @@ function complexPowLiteral(base: number, exp: number): string {
  * parent read. Mirrors the function branch of `isComplexValued`: a wide result
  * type (`number`, as `Power`/`Root`/`Arcsin` have) is NOT complex — those fold
  * to `NaN`, which is what their real lowering yields anyway.
+ *
+ * THREE SITES MUST STAY IN AGREEMENT, because they answer the same question
+ * for the same node and a disagreement is a silent value-shape mismatch (a
+ * `{re, im}`/`vec2` consumer reading a scalar, or the reverse):
+ * `BaseCompiler.isComplexValued` (base-compiler.ts) is what a PARENT consults,
+ * this function is the JavaScript emitters' copy, and
+ * `gpuResultIsComplexValued` (gpu-target.ts) is the GPU emitters' copy. Change
+ * one, change all three.
  */
 function resultIsComplexValued(
   head: MathJsonSymbol,
@@ -4545,7 +4556,11 @@ function resultIsComplexValued(
   if (engine === undefined) return false;
   try {
     const t = engine.function(head, [...args], { form: 'structural' }).type;
-    return isNonRealNumber(t.type);
+    // The infinite branches are dropped first, exactly as the mirrored
+    // branch of `isComplexValued` does: a head whose value can blow up
+    // claims a union such as `complex | non_finite_number`, and only its
+    // finite part decides the lane.
+    return isNonRealNumber(finitePartOfType(t.type));
   } catch {
     return false;
   }
@@ -7872,7 +7887,7 @@ function extractLimits(limitsExpr: Expression): {
 /**
  * Whether an operand (a Sum/Product bound, a `Repeat` count) is KNOWN at
  * compile time not to be a finite number: a `±∞`/`NaN` literal, or an
- * expression typed `non_finite_number`.
+ * expression typed `infinity` or `nan`.
  *
  * Such a bound cannot be lowered to a counted loop — `i <= Infinity` never
  * fails, and `-Infinity + 1 === -Infinity` never advances the counter — so the
@@ -7882,7 +7897,10 @@ function extractLimits(limitsExpr: Expression): {
  */
 export function isNonFiniteBound(expr: Expression): boolean {
   if (isNumber(expr) && !Number.isFinite(expr.re)) return true;
-  return expr.type.matches('non_finite_number');
+  // Both non-finite tiers, not just the signed pair: `infinity` also holds
+  // the unsigned `~oo`, and NaN types `nan`. A bound of either kind has no
+  // terminating loop, and neither is a subtype of `non_finite_number`.
+  return expr.type.matches('infinity') || expr.type.matches('nan');
 }
 
 /**

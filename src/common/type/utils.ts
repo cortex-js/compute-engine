@@ -83,8 +83,13 @@ export function stripNumericRanges(t: Type): Type {
     case 'value': {
       const v = t.value;
       if (typeof v !== 'number') return t;
-      if (Number.isNaN(v)) return 'number';
-      if (!Number.isFinite(v)) return 'non_finite_number';
+      // The tiers a non-finite literal strips to, matching `widenValueTypes`
+      // (`widen-value.ts`) exactly: the three infinities share `infinity`, and
+      // NaN has `nan`. Both used to strip to the top type `number`, which said
+      // nothing; the named tiers exist since the numeric tree became
+      // finite-by-default.
+      if (Number.isNaN(v)) return 'nan';
+      if (!Number.isFinite(v)) return 'infinity';
       return Number.isInteger(v) ? 'finite_integer' : 'finite_real';
     }
     case 'intersection': {
@@ -1239,10 +1244,20 @@ export function overlapsForDeferredValidation(
  * contributes a whole `string` per cell, never a `character`. Without the
  * exception `String("x=", [1, 2])`, whose value is `["x=1", "x=2"]`, typed
  * `list<character^2>`.
+ *
+ * A union with NO collection branch is already a scalar per-element type and
+ * is returned verbatim. Widening it would only lose information — the union
+ * IS the tightest name for the set — and the lattice often has no tighter
+ * supertype than `number`: `LogIntegral`'s honest claim
+ * `non_finite_number | real` would otherwise reach the broadcast wrapper as
+ * `list<number>`.
  */
 export function broadcastElementType(type: Readonly<Type>): Type {
-  if (typeof type !== 'string' && type.kind === 'union')
-    return widen(...type.types.map((t) => broadcastElementType(t)));
+  if (typeof type !== 'string' && type.kind === 'union') {
+    const branches = type.types.map((t) => broadcastElementType(t));
+    if (branches.every((t, i) => t === type.types[i])) return type as Type;
+    return widen(...branches);
+  }
   if (type === 'string') return 'string';
   return collectionElementType(type) ?? (type as Type);
 }
@@ -1285,6 +1300,32 @@ export function broadcastableBaseMatches(
  */
 export function isNonRealNumber(t: Readonly<Type>): boolean {
   return isSubtype(t as Type, 'complex') && !isSubtype(t as Type, 'real');
+}
+
+/**
+ * `t` with its infinite and NaN branches dropped.
+ *
+ * Written for the compiler's real-versus-complex LANE question, which asks
+ * about the SHAPE of an emitted value — a plain number, or a `{re, im}`
+ * object. An infinity or a NaN is representable in both shapes, so it
+ * decides nothing there; the finite part of the claim does. This matters
+ * because a head whose value can blow up must spell its result as a union
+ * now that the bare numeric names are finite — `Artanh(r)` claims
+ * `complex | non_finite_number` — and `isNonRealNumber` of that whole union
+ * is `false`, which would report a real lane for a head whose emitter
+ * produces `{re, im}`.
+ *
+ * Returns `t` unchanged when it is not a union, and when dropping the
+ * branches would leave nothing (a claim of `non_finite_number` alone has no
+ * finite part to read).
+ */
+export function finitePartOfType(t: Readonly<Type>): Type {
+  if (typeof t === 'string' || t.kind !== 'union') return t as Type;
+  const finite = t.types.filter(
+    (b) => !isSubtype(b, 'infinity') && !isSubtype(b, 'nan')
+  );
+  if (finite.length === 0 || finite.length === t.types.length) return t as Type;
+  return finite.length === 1 ? finite[0] : { kind: 'union', types: finite };
 }
 
 /**
@@ -1399,11 +1440,15 @@ function containsArm(
  * (`21`, `-3`) answers with its exact sign.
  *
  * Sound rules only:
- * - A range claims a sign only when its BASE excludes NaN — every numeric
- *   primitive except `number` does (NaN is representable only by `number`)
- *   — and is real-valued (a complex or imaginary base has no sign).
- *   The infinities are signed reals here (`+∞` is positive), so an
- *   unbounded side or a `non_finite_number` base does not block a claim.
+ * - A range claims a sign only when its BASE excludes NaN and is
+ *   real-valued (a complex or imaginary base has no sign). The bases that
+ *   qualify are listed in `REAL_NAN_FREE_PRIMITIVES` below; `number` and
+ *   `nan` are absent because a NaN value has no sign, `infinity` is absent
+ *   because it admits the unsigned `~oo`, and `complex`, `finite_complex`,
+ *   `imaginary` and `finite_number` are absent because a value off the real
+ *   axis has no sign either. The SIGNED infinities are
+ *   signed reals here (`+∞` is positive), so an unbounded side or a
+ *   `non_finite_number` base does not block a claim.
  * - An intersection may combine facts from its members (the intersection is
  *   a subset of each member, so any member's sign constraint holds); members
  *   that carry no sign information are ignored.
@@ -1452,14 +1497,14 @@ export function signOfType(
       return v > 0 ? 'positive' : v < 0 ? 'negative' : 'zero';
     }
     case 'numeric': {
-      // Only a real-valued, NaN-free base can claim a sign (see above).
-      if (
-        t.type === 'number' ||
-        t.type === 'complex' ||
-        t.type === 'finite_complex' ||
-        t.type === 'imaginary'
-      )
-        return undefined;
+      // Only a real-valued, NaN-free base can claim a sign (see above). The
+      // test is the INCLUSION list, not a list of bases to reject: an
+      // exclusion list silently admits every base nobody thought to name —
+      // `infinity` (which contains the unsigned `~oo`), `nan`, and
+      // `finite_number` (which contains the finite complex numbers) all have
+      // no sign, and none is reachable through the range parser today, so a
+      // hand-built type was the only witness.
+      if (!REAL_NAN_FREE_PRIMITIVES.has(t.type)) return undefined;
       const lo = t.lower ?? -Infinity;
       const hi = t.upper ?? Infinity;
       if (lo > 0) return 'positive';

@@ -18,6 +18,13 @@
  * operator name, and let the parity suite (and any full run with the shadow
  * installed) prove the equivalence. Once a batch has been proven and
  * shipped for a release, its entries can be deleted.
+ *
+ * One class of edit to this fixture IS allowed after the copy: a change to
+ * the LATTICE that makes the frozen answer unsound edits both shapes at
+ * once, so the copy has to move with the live handler or the fixture pins a
+ * claim nothing should make any more. The finite-by-default numeric flip
+ * did that twice below — the log join and the pole-free hyperbolic gates —
+ * and each site says so at the code. Everything else stays verbatim.
  */
 
 import type { Type } from '../../src/common/type/types';
@@ -36,6 +43,7 @@ import {
   widen,
 } from '../../src/common/type/utils';
 import { parseType } from '../../src/common/type/parse';
+import { EXTENDED_REAL_TYPE } from '../../src/common/type/primitive';
 import { typeToString } from '../../src/common/type/serialize';
 import {
   negativeSign,
@@ -179,7 +187,7 @@ function frozenBinomialType(
   if (frozenProvablyNonFiniteNumber(n) || frozenProvablyNonFiniteNumber(k))
     return 'number';
   if (n.isInteger === true && k.isInteger === true) return 'finite_integer';
-  if (n.isReal === true && k.isReal === true) {
+  if (n.isExtendedReal === true && k.isExtendedReal === true) {
     if (n.isInteger === true && n.isNegative === true) return 'number';
     return 'finite_real';
   }
@@ -206,7 +214,12 @@ function frozenLogType(ops: ReadonlyArray<Expression>): Type {
   if (base && !usableBase(base)) return 'number';
   if (negativeSign(xSgn) === true) return 'finite_complex';
   if (positiveSign(xSgn) === true) return 'finite_real';
-  return x.type.matches('complex') ? 'complex' : 'number';
+  // LATTICE EDIT (finite-by-default flip): the join used to be spelled
+  // `complex`, which admitted `±∞`. The bare name now denotes the FINITE
+  // complex numbers, so the `x = 0` pole (`ln(0) = −∞`) has to be named.
+  return x.type.matches('complex')
+    ? parseType('complex | non_finite_number')
+    : 'number';
 }
 
 /** Frozen copy of `gammaPoleType` (library/type-handlers.ts). */
@@ -226,8 +239,8 @@ function frozenPoleReciprocalType(
   if (!x || x.isNaN) return 'number';
   const hyperbolic = operator === 'Coth' || operator === 'Csch';
   if (frozenProvablyNonFiniteNumber(x))
-    return hyperbolic && x.isReal === true ? 'finite_real' : 'number';
-  if (x.isReal !== true) return 'number';
+    return hyperbolic && x.isExtendedReal === true ? 'finite_real' : 'number';
+  if (x.isExtendedReal !== true) return 'number';
   const poleAtZero = operator !== 'Tan' && operator !== 'Sec';
   if (isNumber(x) || x._literalType !== undefined) {
     const v = frozenOperandLiteralValue(x);
@@ -247,7 +260,7 @@ function frozenPoleReciprocalType(
 function frozenArctanType(ops: ReadonlyArray<Expression>): Type {
   const x = ops[0];
   if (!x || x.isNaN) return 'number';
-  if (x.isReal === true) return 'finite_real';
+  if (x.isExtendedReal === true) return 'finite_real';
   return 'number';
 }
 
@@ -255,9 +268,9 @@ function frozenArctanType(ops: ReadonlyArray<Expression>): Type {
 function frozenRoundingFunctionType(x: Expression | undefined): Type {
   if (!x || x.isNaN) return 'number';
   if (frozenProvablyNonFiniteNumber(x))
-    return x.isReal === true ? 'non_finite_number' : 'number';
+    return x.isExtendedReal === true ? 'non_finite_number' : 'number';
   const provablyNonReal = isNumber(x)
-    ? x.isReal === false
+    ? x.isExtendedReal === false
     : x.type.matches('imaginary');
   if (provablyNonReal)
     return x.isFinite === true || x.type.matches('finite_number')
@@ -366,14 +379,24 @@ function frozenElementaryFunctionType(
     case 'Csch':
       return frozenPoleReciprocalType(operator, ops);
 
+    // LATTICE EDIT (finite-by-default flip): the realness test used to be
+    // the bare `real`, which admitted `±∞`. It now denotes the finite reals,
+    // so a `±∞` operand — the only operand these two arms exist for — no
+    // longer matches it, and the test moved to the EXTENDED real line.
     case 'Sinh':
     case 'Cosh':
-      if (ops[0]?.isFinite === false && ops[0].type.matches('real'))
+      if (
+        ops[0]?.isFinite === false &&
+        ops[0].type.matches(EXTENDED_REAL_TYPE)
+      )
         return 'non_finite_number';
       return frozenNumericTypeHandler(ops);
     case 'Tanh':
     case 'Sech':
-      if (ops[0]?.isFinite === false && ops[0].type.matches('real'))
+      if (
+        ops[0]?.isFinite === false &&
+        ops[0].type.matches(EXTENDED_REAL_TYPE)
+      )
         return 'finite_real';
       return frozenNumericTypeHandler(ops);
 
@@ -439,7 +462,7 @@ export const LEGACY_TYPE_HANDLERS: Record<
     if (k.isInteger === true && k.isNonNegative === true) {
       if (a.isInteger === true) return 'finite_integer';
       if (a.isRational === true) return 'finite_rational';
-      if (a.isReal === true) return 'finite_real';
+      if (a.isExtendedReal === true) return 'finite_real';
     }
     return 'number';
   },
@@ -664,7 +687,12 @@ export const RETIRED_CONSTANT_TYPE_HANDLERS: ReadonlyArray<
   ['Subfactorial', 'finite_integer'],
   ['BellNumber', 'finite_integer'],
   // library/collections.ts
-  ['Length', 'integer'],
+  // `Length` is NOT here any more. Its constant handler was retired into the
+  // signature, but the span-constructor ruling (infinite endpoints are
+  // extent, not members) gave it a new, CONDITIONAL handler: an unbounded
+  // `Range` has length `+oo`, every other collection an `integer`. Both
+  // halves of this pin — "no handler" and "the declared result is a bare
+  // `integer`" — are therefore false for it by design.
   ['Keys', 'list<string>'],
   ['Any', 'boolean'],
   ['All', 'boolean'],

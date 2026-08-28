@@ -23,14 +23,20 @@ describe('NUMERIC TYPES', () => {
     expect(expr.type.toString()).toBe('imaginary');
   });
   it('should recognize the type of a non-finite number', () => {
+    // A literal's public type is the singleton that names it (ruling O9), and
+    // `+∞` is a literal like any other. The serializer spells a numeric
+    // value type with the JavaScript number it carries.
     const expr = ce.parse('\\infty');
-    expect(expr.type.toString()).toBe('non_finite_number');
+    expect(expr.type.toString()).toBe('Infinity');
+    expect(expr.type.matches('infinity')).toBe(true);
   });
   it('should recognize the type of complex infinity', () => {
-    // `number`, not `complex`: the non-finite typing convention admits an
-    // undirected infinity at the top type only, the same placement NaN gets.
+    // The unsigned infinity has its own singleton spelling, `~oo`, and widens
+    // to `infinity` — never to `complex`, which is finite.
     const expr = ce.parse('\\tilde\\infty');
-    expect(expr.type.toString()).toBe('number');
+    expect(expr.type.toString()).toBe('~oo');
+    expect(expr.type.matches('infinity')).toBe(true);
+    expect(expr.type.matches('complex')).toBe(false);
   });
 });
 
@@ -69,30 +75,41 @@ describe('NUMERIC SUBTYPES', () => {
     expect(expr.type.matches('integer')).toBe(false);
   });
   it('should recognize the type of a non-finite number', () => {
+    // The finite-by-default flip: the bare numeric names contain only finite
+    // values, so an infinity matches `infinity` (and the signed-pair atom
+    // `non_finite_number`) and nothing in the `complex` subtree.
     const expr = ce.parse('\\infty');
     expect(expr.type.matches('non_finite_number')).toBe(true);
+    expect(expr.type.matches('infinity')).toBe(true);
     expect(expr.type.matches('number')).toBe(true);
-    expect(expr.type.matches('real')).toBe(true);
-    expect(expr.type.matches('integer')).toBe(true);
-    expect(expr.type.matches('rational')).toBe(true);
+    expect(expr.type.matches('real')).toBe(false);
+    expect(expr.type.matches('integer')).toBe(false);
+    expect(expr.type.matches('rational')).toBe(false);
     expect(expr.type.matches('finite_integer')).toBe(false);
     expect(expr.type.matches('finite_real')).toBe(false);
-    expect(expr.type.matches('complex')).toBe(true);
+    expect(expr.type.matches('complex')).toBe(false);
+    // The extended real line is spelled out as a union.
+    expect(expr.type.matches('real | infinity')).toBe(true);
   });
   it('should recognize the type of a complex infinity', () => {
-    // Admitted by `number` only — `complex` refuses it, exactly as it
-    // refuses NaN (see the NaN case below, which matches this one).
+    // Admitted by `infinity` (and thence `number`) — `complex` refuses it,
+    // exactly as it refuses NaN (see the NaN case below). It is unsigned, so
+    // the signed-pair atom refuses it too.
     const expr = ce.parse('\\tilde\\infty');
     expect(expr.type.matches('complex')).toBe(false);
     expect(expr.type.matches('finite_complex')).toBe(false);
     expect(expr.type.matches('real')).toBe(false);
+    expect(expr.type.matches('infinity')).toBe(true);
+    expect(expr.type.matches('non_finite_number')).toBe(false);
     expect(expr.type.matches('number')).toBe(true);
   });
   it('should recognize the type of NaN', () => {
     const expr = ce.parse('\\mathrm{NaN}');
     expect(expr.type.matches('number')).toBe(true);
+    expect(expr.type.matches('nan')).toBe(true);
     expect(expr.type.matches('real')).toBe(false);
     expect(expr.type.matches('complex')).toBe(false);
+    expect(expr.type.matches('infinity')).toBe(false);
     expect(expr.type.matches('finite_number')).toBe(false);
     expect(expr.type.matches('non_finite_number')).toBe(false);
   });

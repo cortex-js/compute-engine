@@ -42,29 +42,26 @@ export class BigNumericValue extends NumericValue {
   }
 
   get type(): NumericPrimitiveType {
-    if (this.isNaN) return 'number';
-    // `~oo` is infinite with NO direction, and the non-finite typing
-    // convention (ARCHITECTURE.md, "Non-finite typing convention for type
-    // handlers") admits it — like NaN, on the line above — only at the top
-    // type `number`, never at `complex`. Every DERIVED pole already typed
-    // that way (`Gamma(-2)`, `Zeta(1)`, `(-1)!`, `sqrt(-oo)`); this constant
-    // was the lone dissenter, which made two expressions with the same `~oo`
-    // value type differently depending on whether the constant survived
-    // canonicalization (`Divide(~oo, 5)` answered `complex`, `Add(1, ~oo)`
-    // answered `number`).
-    if (this.isComplexInfinity) return 'number';
+    if (this.isNaN) return 'nan';
+    // `~oo` is infinite with NO direction, so it is not a real infinity and
+    // not a finite complex number: its type is `infinity`, the tier that names
+    // every value of infinite magnitude whatever its direction.
+    if (this.isComplexInfinity) return 'infinity';
     if (this.im !== 0) {
-      // A value with a non-finite component (e.g. ∞ + i) is not a *finite*
-      // complex number, and it is not `~oo` either — it has a direction, so
-      // unlike the undirected `~oo` handled above it stays at `complex`. The
-      // reachable case is a non-finite REAL part: an infinite imaginary part
-      // was already answered above (that IS the `~oo` test). The imaginary
-      // disjunct still guards a NaN imaginary part, which `isComplexInfinity`
-      // excludes and no other branch here would catch.
+      // A value with a non-finite component is not a *finite* complex number,
+      // so it is not below `complex` at all. Two cases reach here, because an
+      // infinite IMAGINARY part was already answered above (that IS the `~oo`
+      // test) and a NaN real part was answered by `isNaN`:
+      // - a NaN imaginary part. NaN absorbs in IEEE arithmetic, so the value
+      //   is the not-a-number marker, tested first.
+      // - an infinite real part paired with a finite imaginary part (`∞ + i`).
+      //   Its magnitude is infinite, so it inhabits `infinity` as an anonymous
+      //   member — it is not one of the three named singletons, and it is
+      //   deliberately NOT canonicalized to `~oo`.
       // `imaginary` is reserved for a finite non-zero imaginary part paired
       // with a zero real part.
-      if (!this.decimal.isFinite() || !Number.isFinite(this.im))
-        return 'complex';
+      if (Number.isNaN(this.im)) return 'nan';
+      if (!this.decimal.isFinite()) return 'infinity';
       if (this.decimal.isZero()) return 'imaginary';
       return 'finite_complex';
     }

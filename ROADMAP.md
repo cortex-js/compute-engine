@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-08-23.
+**Last updated:** 2026-08-27.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -108,6 +108,53 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ---
 
 ## Remaining work
+
+### Open items from the finite-by-default flip (Phase 1, 2026-08-27)
+
+Each item below was discovered during Phase 1 of the numeric-lattice flip
+(`docs/plans/2026-08-27-lattice-flip-implementation.md`) and deliberately not
+fixed in that change. Every one is small; several need a ruling first.
+
+- **An annotated parameter named `i` loses the imaginary-unit shield.**
+  `Tabulate(['Typed','i',"'integer'"] ↦ …)` canonicalizes the body's `i` to
+  the imaginary unit, so `IdentityMatrix` built that way evaluates to an
+  all-zero matrix. Renaming the parameter (`k`) avoids it, so the defect is
+  specific to the `Typed`-wrapped spelling of `i`. Related to the open
+  subscript-index shielding item. Repro and context: the `lazyConstantMatrix`
+  doc comment in `src/compute-engine/library/linear-algebra.ts`.
+- **`IdentityMatrix(1e6)`'s lazy element type is `number`, not `integer`.**
+  The inner generator's parameter slot is genuinely un-inferred, so the
+  lambda-body finiteness widening fires. Fixing it wants either slot
+  inference for nested `Tabulate` callbacks or the `i`-shield fix above (so
+  the parameter can be annotated). Pinned as current behavior in
+  `test/compute-engine/linear-algebra.test.ts`.
+- **`euclideanNormType` claims bare `real` when finiteness is unproven** —
+  post-flip a false finiteness promise (`‖(∞, 1)‖ = +∞`). The honest claim
+  `real | non_finite_number` no longer satisfies `Hypot`'s declared
+  `(real, real) -> real`, so the two must change together. Needs one ruling
+  covering both (and it interacts with the L9 question of whether `Hypot`
+  should admit infinite arguments at all — `Hypot(2, oo)` currently rejects
+  at the signature although its value is well-defined `+oo`).
+- **`liftWideResult` wraps every `finite_number`-typed user-function call in
+  `_SYS.cplx(...)` in complex compile mode.** `complex ⊑ finite_number` is a
+  new edge from the flip, so `finite_number` now counts as WIDE. The wrap is
+  idempotent and values are unchanged — pure code bloat. A redundancy skip
+  ("operand already emitted in the complex lane") is a compiler design
+  change awaiting a decision. Sites: `liftWideResult`/`wideNumericType` in
+  `src/compute-engine/compilation/base-compiler.ts`.
+- **`provablyDisjoint` does not resolve nominal `reference` types**, so a
+  parameter typed by an object alias (`Outer`) is never proven disjoint
+  from `infinity`/`nan` while the equivalent structural spelling is — the
+  lambda-body widening treats the two spellings differently. Sound but
+  asymmetric; the resolution hook belongs in `src/common/type/subtype.ts`.
+- **The compiled `NaN` VALUE-type clause guard admits a compiled `~oo`.**
+  `jsClauseParamGuard` declines the `nan`/`infinity` PRIMITIVE guards
+  because compiled `~oo` lowers to JS `NaN`, but the value-literal `NaN`
+  guard still emits `Number.isNaN`, which a compiled `~oo` satisfies while
+  the interpreter refutes it. Pinned intent (`multi-clause-compile.test.ts`
+  "Infinity and NaN clauses compile") keeps it emitting today; deciding to
+  decline it too would make the value tier consistent with the primitives.
+
 
 ### Compiled `Heaviside(NaN)` returns `1` — a fail-closed violation, confirmed (OPEN, defect — confirmed 2026-08-26 by the error-model conformance suite)
 

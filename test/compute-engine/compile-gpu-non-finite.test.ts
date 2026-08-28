@@ -217,3 +217,44 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     expect(w(['Root', -8, 3])).toBe('-2.0');
   });
 });
+
+describe('a POLE JOIN drives the GPU complex lane by its FINITE part', () => {
+  // A head that is complex off its real domain AND blows up at a pole types as
+  // a union of the two: `Artanh(x)` for a real `x` is
+  // `complex | non_finite_number` (complex for |x| > 1, ±∞ at x = ±1).
+  //
+  // The lane test must therefore ask about the FINITE part of that union.
+  // Asking about the whole union answers "not complex" — `non_finite_number`
+  // is a real tier — and the emitter would take the SCALAR lane while the
+  // parent, which consults `BaseCompiler.isComplexValued` (already reading the
+  // finite part), takes the complex one. On a shader that is not a type error:
+  // scalar-broadcast turns `atanh(x) + vec2(0.0, 1.0)` into
+  // `vec2(atanh(x), atanh(x) + 1.0)`, a silently wrong value everywhere.
+  ce.declare('xr', 'real');
+
+  it('types the pole heads as a union of a complex and a non-finite branch', () => {
+    for (const head of ['Artanh', 'Arcoth', 'Arsech'])
+      expect(ce.box([head, 'xr']).type.toString()).toBe(
+        'complex | non_finite_number'
+      );
+  });
+
+  it('lowers them through the COMPLEX helpers on both shader targets', () => {
+    expect(g(['Artanh', 'xr'])).toBe('_gpu_catanh(vec2(xr, 0.0))');
+    expect(w(['Artanh', 'xr'])).toBe('_gpu_catanh(vec2f(xr, 0.0))');
+    expect(g(['Arcoth', 'xr'])).toBe(
+      '_gpu_catanh(_gpu_cdiv(vec2(1.0, 0.0), vec2(xr, 0.0)))'
+    );
+    expect(g(['Arsech', 'xr'])).toBe(
+      '_gpu_cacosh(_gpu_cdiv(vec2(1.0, 0.0), vec2(xr, 0.0)))'
+    );
+  });
+
+  it('agrees with the vec2 convention its own PARENT emits', () => {
+    // The regression witness: the parent adds a `vec2` literal, so a scalar
+    // `atanh(xr)` on the left would broadcast instead of failing to compile.
+    const sum = ['Add', ['Artanh', 'xr'], ['Complex', 0, 1]];
+    expect(g(sum)).toBe('_gpu_catanh(vec2(xr, 0.0)) + vec2(0.0, 1.0)');
+    expect(w(sum)).toBe('_gpu_catanh(vec2f(xr, 0.0)) + vec2f(0.0, 1.0)');
+  });
+});

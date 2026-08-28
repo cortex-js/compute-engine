@@ -762,7 +762,11 @@ describe('type handler', () => {
 
     const v = e.evaluate();
     expect(cells(v)).toEqual(['"hot"', 'NaN']);
-    expect(v.type.toString()).toBe('list<number | string>');
+    // The evaluated cell is narrower than the declared claim: the
+    // finite-by-default numeric flip gave the NaN marker its own tier, so the
+    // NaN CELL contributes `nan` where the `Which` handler's default arm still
+    // claims the top type `number`.
+    expect(v.type.toString()).toBe('list<nan | string>');
     // The invariant this case used to break.
     expect(v.type.matches(e.type)).toBe(true);
   });

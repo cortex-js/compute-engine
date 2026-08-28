@@ -104,19 +104,24 @@ const LITERAL_CASES: [string, number, string][] = [
  * `[head, bare real symbol, `w ≥ 2`, `0 < v < 1`]`.
  *
  * The bare-symbol column is the JOIN: `finite_complex` for a head with no real
- * pole, `complex` for one whose pole value is `±∞` (a member of `complex` —
- * D10 lattice), `number` when the pole value may be NaN.
+ * pole, `complex | non_finite_number` for one whose pole value is `±∞`, and
+ * `number` when the pole value may be NaN. The signed pair is spelled out in
+ * that union because the bare name `complex` denotes the FINITE complex
+ * numbers and cannot absorb the pole on its own.
  * (Arcsec/Arccsc join to `number`: their pole value is mathematically `~oo`,
- * but the evaluator produces NaN at 0, so `complex` would exclude a value the
- * head actually produces.)
+ * but the evaluator produces NaN at 0, so any narrower claim would exclude a
+ * value the head actually produces.)
+ *
+ * The claim is printed with its disjuncts in the lattice's own order, which
+ * is why the expected string reads `complex | non_finite_number`.
  */
 const SYMBOLIC_CASES: [string, string, string, string][] = [
   ['Arcsin', 'finite_complex', 'finite_complex', 'finite_real'],
   ['Arccos', 'finite_complex', 'finite_complex', 'finite_real'],
   ['Arcosh', 'finite_complex', 'finite_real', 'finite_complex'],
-  ['Artanh', 'complex', 'finite_complex', 'finite_real'],
-  ['Arcoth', 'complex', 'finite_real', 'finite_complex'],
-  ['Arsech', 'complex', 'finite_complex', 'finite_real'],
+  ['Artanh', 'complex | non_finite_number', 'finite_complex', 'finite_real'],
+  ['Arcoth', 'complex | non_finite_number', 'finite_real', 'finite_complex'],
+  ['Arsech', 'complex | non_finite_number', 'finite_complex', 'finite_real'],
   ['Arcsec', 'number', 'finite_real', 'finite_complex'],
   ['Arccsc', 'number', 'finite_real', 'finite_complex'],
 ];
@@ -139,7 +144,16 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
     // …and the join direction that makes `finite_complex` the tightest sound
     // type for an argument of unknown magnitude.
     expect(ce.type('finite_real').matches('finite_complex')).toBe(true);
-    expect(ce.type('non_finite_number').matches('complex')).toBe(true);
+    // …and why a pole-carrying head cannot claim `complex` alone: the bare
+    // name denotes the FINITE complex numbers, so the signed infinities are
+    // NOT below it and have to be named in the union.
+    expect(ce.type('non_finite_number').matches('complex')).toBe(false);
+    expect(
+      ce.type('non_finite_number').matches('complex | non_finite_number')
+    ).toBe(true);
+    expect(ce.type('finite_complex').matches('complex | non_finite_number')).toBe(
+      true
+    );
   });
 
   describe('literal arguments', () => {

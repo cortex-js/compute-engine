@@ -208,13 +208,15 @@ export function onBranchCut(
  * (`x·y`, `x+1`, which the engine types `number`/`finite_number`) — keep the
  * documented generic-real convention and remain eligible.
  *
- * Detection is by **type**, not by `isReal`: for composite expressions the
- * engine currently reports `isReal === false` for merely-*unknown* realness
- * (the three-valued discipline is repaired for symbols but not yet for
- * functions — SYM P0-12/P0-14), which would wrongly bail the generic-real
- * convention on `ln(x)+ln(y) → ln(xy)` and friends. A type that matches
- * `complex` but not `real` reliably identifies declared/inferred complex
- * operands, which is what D4 targets.
+ * Detection is by **type**, not by `isExtendedReal`. That predicate is
+ * three-valued for functions as well as symbols, so a composite expression of
+ * unconstrained symbols answers `undefined` rather than `true`: `x·y` types
+ * `finite_number` and `ln(x)` types `number`, and neither is below the
+ * extended real line. Gating on it would therefore need a decision about the
+ * `undefined` case, and treating `undefined` as "bail" would drop the
+ * generic-real convention on `ln(x)+ln(y) → ln(xy)` and friends. A type that
+ * matches `complex` but not `real` is a two-valued test that reliably
+ * identifies declared/inferred complex operands, which is what D4 targets.
  *
  * @returns `false` (bail) when `x`'s type admits genuinely non-real complex
  *   values (`complex`/`imaginary`/`finite_complex`); `true` otherwise.

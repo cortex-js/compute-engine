@@ -180,14 +180,14 @@ function buildGuardClosures(
           // Fungrim's declared domains (ZZ/QQ/RR) are FINITE, matching the
           // 'complex' guard's finiteness gate above (SYM P3-7). A value
           // PROVABLY non-finite (a ±∞ or ~∞ literal has `isFinite === false`;
-          // note `(+∞).isReal === true`, so without this gate a real guard
-          // would fail-open at infinity) is blocked. Unknown finiteness
+          // note `(+∞).isExtendedReal === true`, so without this gate a real
+          // guard would fail-open at infinity) is blocked. Unknown finiteness
           // (`isFinite === undefined`, e.g. a plain declared-real symbol)
           // still passes — `!== false` — so ordinary symbols discharge as
           // before; only a known-infinite instance is rejected.
           if (v.isFinite === false) return false;
           if (g.t === 'integer') return v.isInteger;
-          if (g.t === 'real') return v.isReal;
+          if (g.t === 'real') return v.isExtendedReal;
           return v.isRational;
         };
       }

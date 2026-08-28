@@ -49,10 +49,13 @@ describe('SYM P0-16 — assume(x ∈ ℤ) narrows via the meet, not `!isSubtype`
     return [r, ce.symbol('q').type.toString()];
   };
 
-  it('finite_number ∈ ℤ → ok, narrowed to finite_integer', () => {
+  it('finite_number ∈ ℤ → ok, narrowed to integer', () => {
+    // Since the finite-by-default flip `integer` sits below `finite_number`,
+    // so the meet is `integer` itself and the reduced form names the bare
+    // spelling rather than the `finite_integer` synonym.
     const [r, t] = assumeInteger('finite_number');
     expect(r).toBe('ok');
-    expect(t).toBe('finite_integer');
+    expect(t).toBe('integer');
   });
 
   it('complex ∈ ℤ → ok (meet non-empty)', () => {
@@ -87,8 +90,8 @@ describe('SYM P0-11 — Power/Root do not claim closure over negative exponents'
 describe('SYM P0-12 — finite_real is not over-claimed for poles / out-of-domain', () => {
   it('Ln(-2) is not typed real', () => {
     const ce = new ComputeEngine();
-    // A negative-real logarithm is complex; isReal must not be a definitive true.
-    expect(ce.expr(['Ln', -2]).isReal).not.toBe(true);
+    // A negative-real logarithm is complex; isExtendedReal must not be a definitive true.
+    expect(ce.expr(['Ln', -2]).isExtendedReal).not.toBe(true);
   });
 
   it('Csc(0) type admits complex infinity (~oo)', () => {
@@ -169,10 +172,10 @@ describe('SYM P0-14 — three-valued isInteger / isRational', () => {
     expect(forType('integer').isRational).toBe(true);
   });
 
-  it('number is consistent: isInteger and isReal are both undefined', () => {
+  it('number is consistent: isInteger and isExtendedReal are both undefined', () => {
     const x = forType('number');
     expect(x.isInteger).toBe(undefined);
-    expect(x.isReal).toBe(undefined);
+    expect(x.isExtendedReal).toBe(undefined);
   });
 
   it('finite_real overlaps the integers → undefined', () => {
@@ -185,7 +188,7 @@ describe('Tycho item 89 — rounding a symbolic finite_number stays integer-valu
   const typeOf = (s: string) => ce.parse(s).type.toString();
 
   it('Round of a literal, a bare symbol and an arithmetic term all agree', () => {
-    // `4Q` types `finite_number`, whose `isReal` is `false` only in the sense
+    // `4Q` types `finite_number`, whose `isExtendedReal` is `false` only in the sense
     // of "not PROVABLY real" — reading that as "complex" made the more
     // informative operand produce the weaker type.
     expect(typeOf('\\mathrm{Round}(4.7)')).toBe('finite_integer');

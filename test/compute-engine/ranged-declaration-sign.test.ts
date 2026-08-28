@@ -114,7 +114,7 @@ describe('an assumption refines the symbol type to a range (§5.8 A2)', () => {
   });
 
   test('the refined type reaches type-channel consumers', () => {
-    // The measured §5.7 case: the solver's root filter reads `isReal`,
+    // The measured §5.7 case: the solver's root filter reads `isExtendedReal`,
     // which on `sqrt(a)` derives from the TYPE — an assumption that only
     // set the sign channel was invisible to it.
     const ce = new ComputeEngine();

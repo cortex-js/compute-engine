@@ -673,7 +673,12 @@ describe('phase 1: `FlatMap` — R-D2′ result inference', () => {
       'cs',
       ['Function', ['Multiply', 2, 'n'], 'n'],
     ]);
-    expect(e.type.toString()).toBe('list<number>');
+    // The element type is the callback's own result. `n` is inferred
+    // `integer` from `cs: list<integer>`, and since the finite-by-default
+    // flip that annotation PROVES the argument finite, so the body keeps its
+    // exact `finite_integer` claim instead of being widened to `number`
+    // against a parameter that might have bound `∞`.
+    expect(e.type.toString()).toBe('list<finite_integer>');
     expect(e.evaluate().toString()).toBe('[2,4,6]');
   });
 

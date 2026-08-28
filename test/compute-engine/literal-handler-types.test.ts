@@ -102,10 +102,16 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     );
   });
 
-  it('NaN, ±∞ and complex literals carry nothing beyond their public type', () => {
-    expect(lit(NaN)).toBeUndefined();
-    expect(lit(Infinity)).toBeUndefined();
-    expect(lit(-Infinity)).toBeUndefined();
+  it('NaN and the infinities carry their own singleton; other complex literals carry nothing', () => {
+    // The finite-by-default numeric flip gave each non-finite value a
+    // singleton spelling, so these are literals like any other and the channel
+    // carries them. A complex literal with two components has no singleton
+    // spelling (a value node holds one JavaScript number), so it still carries
+    // nothing beyond its public type.
+    expect(lit(NaN)).toBe('NaN');
+    expect(lit(Infinity)).toBe('Infinity');
+    expect(lit(-Infinity)).toBe('-Infinity');
+    expect(lit(ce.ComplexInfinity)).toBe('~oo');
     expect(lit(ce.parse('2+3i').evaluate())).toBeUndefined();
   });
 
@@ -232,10 +238,13 @@ describe('widenValueTypes — the §4.3 walker', () => {
   });
 
   it('rewrites NaN and ±∞ value nodes', () => {
+    // The tiers the non-finite singletons widen to since the numeric tree
+    // became finite-by-default: all three infinities share `infinity`, and NaN
+    // has `nan`. Both used to widen to the top type `number`.
     const nan: Type = { kind: 'value', value: NaN };
     const inf: Type = { kind: 'value', value: Infinity };
-    expect(widenValueTypes(nan)).toBe('number');
-    expect(widenValueTypes(inf)).toBe('non_finite_number');
+    expect(widenValueTypes(nan)).toBe('nan');
+    expect(widenValueTypes(inf)).toBe('infinity');
   });
 
   it('returns an unchanged type by identity (no rebuild, no cycle risk)', () => {

@@ -1318,8 +1318,8 @@ describe('|v| over a TUPLE is a NORM, not a scalar absolute value', () => {
     // The numerator is `Real(Conjugate(vᵢ)·vᵢ′)`, not the bare product: the
     // real Euclidean form answers `0.667 + 0.333i` for `|(t+i, 2)|` at t = 2
     // where the derivative is the real `0.667` — right real part, spurious
-    // imaginary one. `isReal` cannot gate this (a symbolic `cos(t)` over a
-    // free `t` reports `isReal === false`, meaning "not provably real"), so
+    // imaginary one. `isExtendedReal` cannot gate this (a symbolic `cos(t)` over a
+    // free `t` reports `isExtendedReal === false`, meaning "not provably real"), so
     // the Hermitian form is emitted unconditionally.
     const ce = new ComputeEngine();
     const d = ce

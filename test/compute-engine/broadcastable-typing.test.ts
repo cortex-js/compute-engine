@@ -261,9 +261,12 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     expect(ce.box(['Power', arg, 2]).type.toString()).toBe(
       'broadcastable<finite_number>'
     );
-    // `Abs` cells carry their non-negative range (ranged-results round).
+    // `Abs` cells carry their non-negative range (ranged-results round), plus
+    // the signed pair: unlike the heads above, `absFunctionType` does not
+    // apply the generic-point convention to an operand of unproven
+    // finiteness — `|±∞| = +∞` — so the cell names that outcome.
     expect(ce.box(['Abs', arg]).type.toString()).toBe(
-      'broadcastable<real<0..>>'
+      'broadcastable<(real<0..>) | non_finite_number>'
     );
   });
 

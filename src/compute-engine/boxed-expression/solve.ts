@@ -3137,8 +3137,21 @@ function filterRootsByType(
       return val.isInteger === true;
     if (varTypeObj.matches('rational') || varTypeObj.matches('finite_rational'))
       return val.isRational === true;
+    // `isExtendedReal` is membership of the extended real line — a finite
+    // real OR one of the signed infinities — but the type name `real` denotes
+    // the FINITE reals, so that test alone kept `±oo` as a root of a variable
+    // that cannot hold it. Reject a root that is provably infinite; a root
+    // whose finiteness is undecided is treated as before.
     if (varTypeObj.matches('real') || varTypeObj.matches('finite_real'))
-      return val.isReal === true;
+      return val.isExtendedReal === true && val.isInfinity !== true;
+    // A variable declared `complex` (or `imaginary`) had no arm at all, so
+    // `±oo`, `~oo` and `NaN` all passed into it unchecked. Those names, too,
+    // denote FINITE values. Every finite number is a complex one, so the only
+    // thing this arm can decide is non-finiteness: reject a root that is
+    // provably infinite or NaN, and keep every undecided root, as this filter
+    // did before the arm existed.
+    if (varTypeObj.matches('complex'))
+      return val.isInfinity !== true && val.isNaN !== true;
     return true;
   });
 

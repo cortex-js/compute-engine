@@ -51,7 +51,12 @@ interface Continuation {
 
 /** Exact real integer/rational literal (samples are admitted only as these). */
 function isExactRationalLiteral(x: Expression): boolean {
-  return isNumber(x) && x.isExact && x.isReal === true && x.isRational === true;
+  return (
+    isNumber(x) &&
+    x.isExact &&
+    x.isExtendedReal === true &&
+    x.isRational === true
+  );
 }
 
 /**

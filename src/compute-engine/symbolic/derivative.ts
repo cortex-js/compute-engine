@@ -1192,8 +1192,8 @@ function differentiateNode(
     // expansion loop — it spends budget rather than failing, so the loss is
     // silent.
     //
-    // `isReal === true` means PROVABLY real, so the bare product is taken
-    // only where realness is established and the Hermitian form is the
+    // `isExtendedReal === true` means PROVABLY real, so the bare product is
+    // taken only where realness is established and the Hermitian form is the
     // conservative default. Note what this does NOT buy, because the obvious
     // reading is wrong: `D` BINDS its variable, so inside the differentiation
     // the variable is a bound symbol typed `unknown` no matter what the
@@ -1205,7 +1205,7 @@ function differentiateNode(
     // would matter most. Recovering those needs the bound variable to carry
     // the declared type — separate work, not a tweak to this guard.
     const numeratorTerm = (c: Expression, cPrime: Expression): Expression =>
-      c.isReal === true && cPrime.isReal === true
+      c.isExtendedReal === true && cPrime.isExtendedReal === true
         ? ce.function('Multiply', [c, cPrime])
         : ce.function('Real', [
             ce.function('Multiply', [ce.function('Conjugate', [c]), cPrime]),

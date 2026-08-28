@@ -891,13 +891,23 @@ export function refineConstructorPlaceholder(
  * inferred type takes when a value of type `t` is assigned to it. The same
  * table `inferTypeFromValue` applies to a value — factored out so the Epsil
  * static pre-pass can widen a DESTRUCTURED leaf, where only the component
- * TYPE (not a value expression) is in hand. */
+ * TYPE (not a value expression) is in hand.
+ *
+ * Each rung widens the narrow type of a value to the TIER that names the kind
+ * of value it is, so that a second assignment of the same kind does not have
+ * to retype the symbol. `infinity` and `nan` need rungs of their own because
+ * they are disjoint from `real` and from `complex`: an infinite value or a NaN
+ * reaches none of the finite rungs. `x := oo` therefore takes `infinity`,
+ * which keeps a later `x := -oo` legal, and `x := NaN` takes `nan` rather than
+ * the wider `number`, which would hide the marker. */
 export function widenAssignedType(ce: ComputeEngine, t: Type): Type {
   const bt = ce.type(t);
   if (bt.matches('integer')) return 'integer';
   if (bt.matches('rational')) return 'real';
   if (bt.matches('real')) return 'real';
   if (bt.matches('complex')) return 'number';
+  if (bt.matches('infinity')) return 'infinity';
+  if (bt.matches('nan')) return 'nan';
   return t;
 }
 
@@ -925,7 +935,6 @@ export function inferTypeFromValue(
   if (value.type.matches('real')) {
     // If the value matches a real number (or `finite_real_number`), we promote the type to `real`
     // x = 3.14 => real
-    // x = oo => real
     return ce.type('real');
   }
 
@@ -933,6 +942,22 @@ export function inferTypeFromValue(
     // If the value is complex (3+2i) or imaginary (-4i), we promote the type to `number`
     // x = 3+2i => number
     return ce.type('number');
+  }
+
+  if (value.type.matches('infinity')) {
+    // An infinite value is not a real number and not a complex number, so it
+    // reaches none of the rungs above. It promotes to its own tier, which
+    // keeps every infinity assignable to the same symbol.
+    // x = oo => infinity, x = -oo => infinity, x = ~oo => infinity
+    return ce.type('infinity');
+  }
+
+  if (value.type.matches('nan')) {
+    // NaN promotes to its own tier as well. The wider `number` would admit
+    // every finite value too, and so would hide the fact that the symbol
+    // holds the not-a-number marker.
+    // x = NaN => nan
+    return ce.type('nan');
   }
   // No promotion for other types.
   // @todo: could consider promoting `list<T>` to `list` or...?

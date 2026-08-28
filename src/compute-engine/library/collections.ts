@@ -544,7 +544,7 @@ const peekMembershipPreserving = (
 // Parsed signatures (kept in sync with the `signature:` strings on the
 // respective definitions) for the count/membership canonical handlers to
 // delegate operand validation to `validateArguments`.
-const LENGTH_SIGNATURE = parseType('(any) -> integer');
+const LENGTH_SIGNATURE = parseType('(any) -> integer | infinity');
 const COUNT_SIGNATURE = parseType('(collection<any>, any?) -> integer');
 const ISEMPTY_SIGNATURE = parseType('(collection<any>) -> boolean');
 const CONTAINS_SIGNATURE = parseType(
@@ -2733,10 +2733,36 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Length: {
     description:
-      'Number of elements in a collection. Returns undefined for non-collections and for infinite collections.',
+      'Number of elements in a collection. Returns +oo for an unbounded Range, and undefined for non-collections and for other infinite collections.',
     keywords: ['size'],
     complexity: 4000,
-    signature: '(any) -> integer',
+    signature: '(any) -> integer | infinity',
+    // Only an unbounded `Range` can produce the infinite length the signature
+    // admits; every other collection either has a finite length or leaves
+    // `Length` unevaluated. Report the exact `integer` for those, so a length
+    // used as an index or a loop bound is not widened by a case that cannot
+    // arise there. The endpoints are read through the TYPE channel only (a
+    // type handler must not evaluate: evaluating a compound bound pushes
+    // scopes and advances the invalidation axes), which decides the literal
+    // `Range(1, oo)` and leaves a computed infinite bound to the signature.
+    //
+    // The handler's `+oo` singleton does not survive as written: a handler
+    // result is passed through `widenValueTypes()`
+    // (`boxed-expression/boxed-function.ts`), which turns every value-literal
+    // type into its ordinary counterpart, so the call reports
+    // `integer | infinity`. The DECLARATION is spelled `infinity` for that
+    // reason: a declared `+oo` names a type no stored result can ever have,
+    // so the reported type would not be a subtype of the declared one. The
+    // handler keeps the tighter `+oo` because a length is never negatively
+    // infinite, and nothing is lost by it — the two spellings report the same
+    // type once the widening has run, so there is no open question here about
+    // exempting this result from that widening.
+    type: ([xs]) =>
+      xs !== undefined &&
+      isFunction(xs, 'Range') &&
+      xs.ops.some((op) => op.type.matches('infinity'))
+        ? parseType('integer | +oo')
+        : 'integer',
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a length (see `peekCountPreserving`).
     canonical: (ops, { engine: ce }) => {
@@ -2779,6 +2805,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // empty collection; emptiness is consulted only for a collection that
       // knows it is empty without knowing its size.
       const n = xs.count;
+      // An unbounded `Range` has an infinite EXTENT, and reading that extent
+      // is what `Length` is for here: an infinite endpoint does not name a
+      // last element (ruling L10), so the honest length of `Range(1, +oo)` is
+      // `+oo`, not an unevaluated form. This arm is deliberately confined to
+      // `Range`: no convention has been settled for the length of the other
+      // infinite collections — an `Interval` is a continuum, so a COUNT of
+      // elements is not what its extent means — and they keep the inert form
+      // below.
+      if (n === Infinity && isFunction(xs, 'Range'))
+        return engine.PositiveInfinity;
       // Guard infinite collections (e.g. Length(Repeat(5))).
       if (n === undefined || !isFinite(n))
         return xs.isEmptyCollection ? engine.Zero : undefined;
@@ -3262,12 +3298,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // This is a NARROWING of the two results below, never a widening:
       // `range <: indexed_collection<integer>`.
       if (isIndexSpan(ops)) return 'range';
-      // The element type is integer iff every present operand is integer-
-      // valued. Range(0.5, 2.5) iterates 0.5, 1.5, 2.5 — number, not integer.
-      const allInt = ops.every((op) => op.isInteger);
-      return allInt
-        ? parseType('indexed_collection<integer>')
-        : parseType('indexed_collection<number>');
+      // An infinite endpoint marks unbounded EXTENT; it does not name a last
+      // element, so it says nothing about the elements and is dropped before
+      // the tests below. Every element of `Range(1, +oo)` is a finite
+      // integer, and the type must not leak the endpoint.
+      const elementOps = ops.filter((op) => {
+        const r = op.re;
+        return r !== Infinity && r !== -Infinity;
+      });
+      // The remaining operands decide the element type: an element is
+      // `lower + k·step`, so it is an integer iff every one of them is
+      // integer-valued (Range(0.5, 2.5) iterates 0.5, 1.5, 2.5 — real, not
+      // integer), and a finite real iff every one of them is real. An operand
+      // that could be complex or is not yet known — a symbolic step declared
+      // `number` — keeps the wide `number`.
+      if (elementOps.every((op) => op.isInteger))
+        return parseType('indexed_collection<integer>');
+      if (elementOps.every((op) => op.type.matches('real')))
+        return parseType('indexed_collection<real>');
+      return parseType('indexed_collection<number>');
     },
 
     canonical: (ops, { engine: ce }) => {
@@ -3324,7 +3373,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
 
     collection: {
-      isEnumerable: (expr) => !hasSymbolicRangeBounds(expr),
+      isEnumerable: (expr) =>
+        !hasSymbolicRangeBounds(expr) && !hasInfiniteRangeOrigin(expr),
       isLazy: (_expr) => true,
       count: (expr) => {
         // Symbolic bounds (e.g. Range(1, n)): the count is indeterminate —
@@ -3363,6 +3413,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         } else {
           if (t > lower || t < upper) return false;
         }
+        // An infinite lower bound leaves the step grid with no anchor to
+        // count from (see `hasInfiniteRangeOrigin`), so `k` below is infinite
+        // for every target and the grid test decides nothing: it compared
+        // `Infinity` with `Infinity` and reported every target as absent
+        // (`-5` was said not to be in `Range(-oo, -1)`). The SPAN test above
+        // has already refuted the targets it can; inside the span, membership
+        // is indeterminate.
+        if (hasInfiniteRangeOrigin(expr)) return undefined;
         // Step-grid check: t must be reachable as `lower + k*step` for some
         // non-negative integer k, within engine tolerance.
         const k = (t - lower) / step;
@@ -3377,6 +3435,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // the collapsed [1]. Consumers keep the lazy form (materialize) or
         // stay inert (Reduce guards on isFiniteCollection).
         if (hasSymbolicRangeBounds(expr)) return undefined;
+        // An infinite LOWER bound is the enumeration origin, and it is a
+        // marker of unbounded extent, not a first element: `lower + k·step`
+        // would hand out `-oo` at every position. Decline, like a symbolic
+        // bound (see `hasInfiniteRangeOrigin`).
+        if (hasInfiniteRangeOrigin(expr)) return undefined;
         const [lower, upper, step] = range(expr);
 
         // Number of elements in the range. Math.max guards against a
@@ -3406,8 +3469,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
+        // An infinite index names no position. It reaches here from `Last`,
+        // which asks for element `count` of a collection whose count is
+        // `Infinity`: an endless range has no last element, so decline
+        // instead of returning `lower + step·(oo - 1)`.
+        if (!Number.isFinite(index)) return undefined;
         // Symbolic bounds: whether the index is within range is indeterminate
         if (hasSymbolicRangeBounds(expr)) return undefined;
+        // An infinite LOWER bound is the enumeration origin, and it is a
+        // marker of unbounded extent, not a first element (see
+        // `hasInfiniteRangeOrigin`): no index names an element.
+        if (hasInfiniteRangeOrigin(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return undefined;
         const maxCount = Math.max(0, Math.floor((upper - lower) / step) + 1);
@@ -3514,10 +3586,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       elttype: (expr) => {
         // Mirror the dynamic Range type: every present operand must be
-        // integer-valued for the element type to be finite_integer.
+        // integer-valued for the element type to be finite_integer. An
+        // infinite endpoint is skipped — it marks unbounded extent and is
+        // never itself an element, so it must not widen the element type.
         if (!isFunction(expr)) return 'finite_integer';
         for (let i = 1; i <= expr.nops; i++) {
-          if (!(expr as any)[`op${i}`].isInteger) return 'finite_real';
+          const op = (expr as any)[`op${i}`] as Expression;
+          const r = op.re;
+          if (r === Infinity || r === -Infinity) continue;
+          if (!op.isInteger) return 'finite_real';
         }
         return 'finite_integer';
       },
@@ -3703,6 +3780,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const t = target.re;
         if (!Number.isNaN(t)) {
           if (target.im !== 0) return false;
+          // An infinite endpoint marks unbounded EXTENT; it does not name a
+          // last element. An `Interval` is a set of real numbers and ±∞ is
+          // not a real number, so `Interval(0, +oo)` excludes `+oo` itself —
+          // the same answer `Range(1, +oo)` already gives for its own
+          // endpoint. Without this test the endpoint comparison below admits
+          // `+oo <= +oo`.
+          if (!Number.isFinite(t)) return false;
           return intervalContains(int, t);
         }
 
@@ -3742,8 +3826,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       elttype: (expr) => {
         const i = interval(expr);
         if (!i) return 'never';
-        if (isFinite(i.start) && isFinite(i.end)) return 'finite_real';
-        return 'real';
+        // Every member of an interval is a finite real, whatever the
+        // endpoints are: an infinite endpoint marks unbounded extent and is
+        // never itself a member. The element type therefore does NOT widen
+        // with the endpoints — `Interval(0, +oo)` reports the same elements
+        // as `Interval(0, 1)`.
+        return 'finite_real';
       },
     },
   } as OperatorDefinition,
@@ -10132,6 +10220,30 @@ function operandNumericValue(op: Expression): number {
 export function hasSymbolicRangeBounds(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
   return expr.ops.some((op) => Number.isNaN(operandNumericValue(op)));
+}
+
+/**
+ * Does this `Range` start at an infinite bound (e.g. `Range(-oo, -1)`)?
+ *
+ * A range enumerates as `lower + k·step`, so the LOWER bound is the origin
+ * every element is measured from. An infinite endpoint marks unbounded
+ * EXTENT and is never itself an element, so an infinite lower bound names no
+ * first element: the arithmetic hands out the endpoint itself at every
+ * position, which contradicts the finite element type the range declares
+ * (`Range(-oo, -1)` is `indexed_collection<integer>`) and makes a consumer
+ * loop forever on the same value. Every element-producing handler must
+ * therefore decline for such a range, as it does for a symbolic bound.
+ *
+ * An infinite UPPER bound is a different case and stays fully enumerable:
+ * `Range(1, oo)` starts at 1 and steps normally, it just never ends.
+ *
+ * A bound with no numerically-known value reads as NaN, which is neither
+ * finite nor infinite; it is `hasSymbolicRangeBounds()`'s case and is not
+ * reported here.
+ */
+function hasInfiniteRangeOrigin(expr: Expression): boolean {
+  const lower = range(expr)[0];
+  return lower === Infinity || lower === -Infinity;
 }
 
 /**

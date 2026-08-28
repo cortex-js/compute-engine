@@ -138,7 +138,10 @@ import {
   nonPositiveSign,
   positiveSign,
 } from '../boxed-expression/sgn.js';
-import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import {
+  EXTENDED_REAL_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
 import type { Type } from '../../common/type/types.js';
 import {
   numericTypeHandler,
@@ -334,7 +337,7 @@ function lnSign(x: Expression): Sign | undefined {
   if (x.isLessEqual(1) && x.isGreaterEqual(0)) return 'non-positive';
   if (x.isLess(1) && x.isGreaterEqual(0)) return 'negative';
   if (x.isSame(1)) return 'zero';
-  if (x.isNegative || x.isReal === false) return 'unsigned';
+  if (x.isNegative || x.isExtendedReal === false) return 'unsigned';
   return undefined;
 }
 
@@ -355,9 +358,10 @@ function lnSign(x: Expression): Sign | undefined {
  * hedge rather than over-claiming complex.
  */
 function negativeBaseIsComplexBranch(exp: Expression): boolean {
-  // `=== true` / `=== false`: a symbolic operand has `isReal`/`isInteger ===
-  // undefined, which must not be read as a proof either way.
-  if (exp.isReal !== true || exp.isInteger !== false) return false;
+  // `=== true` / `=== false`: a symbolic operand has
+  // `isExtendedReal`/`isInteger === undefined`, which must not be read as a
+  // proof either way.
+  if (exp.isExtendedReal !== true || exp.isInteger !== false) return false;
 
   // The exponent's exact (reduced) denominator when it has one, otherwise the
   // float reconstruction — `realPowerBranchTerms` is the single source of the
@@ -405,12 +409,12 @@ function quotientComponentType(el: Type, den: Expression): Type {
   if (provablyNonFiniteNumber(den)) {
     // The scalar path's symmetric claim: a provably finite real component
     // over a provably non-finite REAL denominator is exactly 0.
-    if (isSubtype(el, 'finite_real') && den.isReal === true)
+    if (isSubtype(el, 'finite_real') && den.isExtendedReal === true)
       return 'finite_integer';
     return 'number';
   }
   if (den.isInteger && isSubtype(el, 'integer')) return 'finite_rational';
-  if (den.isReal && isSubtype(el, 'real')) return 'finite_real';
+  if (den.isExtendedReal && isSubtype(el, 'real')) return 'finite_real';
   if (den.type.matches('finite_complex') && isSubtype(el, 'finite_complex'))
     return 'finite_complex';
   return 'finite_number';
@@ -564,7 +568,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       idempotent: true,
       complexity: 1200,
-      signature: '(number) -> real',
+      // The DECLARED result must admit every answer the type handler can
+      // give, and `absFunctionType` legitimately claims `non_finite_number`
+      // for `±∞`/`~oo` and the top `number` where finiteness is not proven
+      // (a NaN operand, in particular). Neither is below `real`, so the
+      // declaration is the top numeric type and the handler tightens it
+      // per call.
+      signature: '(number) -> number',
       // `isTuple` (type-based, follows symbol value bindings), not an
       // `operator === 'Tuple'` check: a tuple-TYPED symbol or lambda
       // parameter is a point too, even without a literal `Tuple` node.
@@ -728,7 +738,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Component-wise ceiling of a complex: real result iff ⌈im⌉ = 0
         // (im ∈ (-1, 0]), and then the sign is that of ⌈re⌉ — not of re
         // itself (⌈-0.5 - 0.5i⌉ = 0, not negative).
-        if (x.isReal == false && isNumber(x))
+        if (x.isExtendedReal == false && isNumber(x))
           return x.im! > 0 || x.im! <= -1
             ? 'unsigned'
             : numberSgn(Math.ceil(x.re)); //.re and .im should be more general.
@@ -886,30 +896,32 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // non-finite REAL numerator over a provably finite, real, provably
           // non-zero denominator is `real ±∞ / finite non-zero real = ±∞`. The
           // non-finite numerator needs no proven sign of its own (`±∞ ≠ 0` is
-          // a theorem); the denominator keeps the full obligation. `isReal` is
-          // required on both — `∞/i = ~oo` is not `non_finite_number`. The
+          // a theorem); the denominator keeps the full obligation.
+          // `isExtendedReal` is required on both — `∞/i = ~oo` is not
+          // `non_finite_number`. The
           // denominator must be provably finite (`isFinite === true`), not
           // merely "not provably infinite": unknown finiteness admits `∞/∞`,
           // which is NaN.
           if (
             nonFinite(num) &&
-            num.isReal === true &&
+            num.isExtendedReal === true &&
             den.isFinite === true &&
-            den.isReal === true
+            den.isExtendedReal === true
           ) {
             const s = operandSgn(den);
             if (s === 'positive' || s === 'negative' || s === 'not-zero')
               return 'non_finite_number';
           }
           // The symmetric claim: a provably finite, real numerator over a
-          // provably non-finite REAL denominator is exactly `0`. Both `isReal`
-          // obligations are load-bearing: `i/∞` and `x/~oo` are not `0`, and
+          // provably non-finite REAL denominator is exactly `0`. Both
+          // `isExtendedReal` obligations are load-bearing: `i/∞` and `x/~oo`
+          // are not `0`, and
           // an unknown-finiteness numerator admits `∞/∞` = NaN.
           if (
             num.isFinite === true &&
-            num.isReal === true &&
+            num.isExtendedReal === true &&
             nonFinite(den) &&
-            den.isReal === true
+            den.isExtendedReal === true
           )
             return 'finite_integer';
           // Every other non-finite configuration (`∞/∞`, `∞/i`, `i/∞`, an
@@ -918,7 +930,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return 'number';
         }
         if (den.isInteger && num.isInteger) return 'finite_rational';
-        if (den.isReal && num.isReal) return 'finite_real';
+        if (den.isExtendedReal && num.isExtendedReal) return 'finite_real';
         // Real/pure-imaginary quotients (mirrors the Multiply type handler;
         // `imaginary`-typed operands are non-zero and non-real by type —
         // `imaginary ∩ real = nothing` in the lattice, and 0 is real):
@@ -930,8 +942,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         {
           const isImag = (x: Expression) => x.type.matches('imaginary');
           if (isImag(num) && isImag(den)) return 'finite_real';
-          if (isImag(num) && den.isReal === true) return 'imaginary';
-          if (num.isReal === true && isImag(den)) {
+          if (isImag(num) && den.isExtendedReal === true) return 'imaginary';
+          if (num.isExtendedReal === true && isImag(den)) {
             const s = num.sgn;
             return s === 'positive' || s === 'negative' || s === 'not-zero'
               ? 'imaginary'
@@ -1023,7 +1035,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //     (x.isNegative && x.isInfinity)
       //   )
       //     return 'zero';
-      //   if (x.isReal == false && x.isNumberLiteral) {
+      //   if (x.isExtendedReal == false && x.isNumberLiteral) {
       //     let n = chop(1 - x.im! / Math.PI) + 1;
       //     return n % 1 !== 0
       //       ? 'unsigned'
@@ -1031,7 +1043,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //         ? 'positive'
       //         : 'negative';
       //   }
-      //   if (x.isReal || (x.isInfinity && x.isPositive)) return 'positive';
+      //   if (x.isExtendedReal || (x.isInfinity && x.isPositive))
+      //     return 'positive';
       //   return undefined;
       // },
       // Exp(x) -> e^x
@@ -1091,7 +1104,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         )
           return 'finite_integer';
         // A *negative* integer is a pole of Γ(x+1): the value is `~oo`,
-        // representable only by `number` (non-finite typing convention).
+        // which no finite type admits and which `non_finite_number` — the
+        // SIGNED pair — excludes, so the claim is the top type `number`
+        // (non-finite typing convention).
         if (
           x !== undefined &&
           typeFact(x.type, 'integer') === true &&
@@ -1109,7 +1124,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       sgn: ([x]) =>
         x.isNonNegative
           ? 'positive'
-          : (x.isNegative && x.isInteger) || x.isReal === false
+          : (x.isNegative && x.isInteger) || x.isExtendedReal === false
             ? 'unsigned'
             : undefined,
       canonical: (args, { engine }) => engine._fn('Factorial', [args[0]]),
@@ -1226,7 +1241,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       sgn: ([x]) =>
         x.isNonNegative
           ? 'positive'
-          : (x.isNegative && x.isInteger) || x.isReal === false
+          : (x.isNegative && x.isInteger) || x.isExtendedReal === false
             ? 'unsigned'
             : undefined,
       evaluate: (ops) => {
@@ -1271,7 +1286,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Component-wise floor of a complex: real result iff ⌊im⌋ = 0
         // (im ∈ [0, 1)), and then the sign is that of ⌊re⌋ — not of re
         // itself (⌊0.5 + 0.5i⌋ = 0, not positive).
-        if (x.isReal == false && isNumber(x))
+        if (x.isExtendedReal == false && isNumber(x))
           return x.im! < 0 || x.im! >= 1
             ? 'unsigned'
             : numberSgn(Math.floor(x.re)); //.re and .im should be more general.
@@ -1340,7 +1355,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? 'positive'
             : ops[0].isSame(0) ||
                 (ops[0].isNegative && ops[0].isInteger) ||
-                ops[0].isReal === false
+                ops[0].isExtendedReal === false
               ? 'unsigned'
               : undefined
           : undefined,
@@ -1485,7 +1500,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(number) -> number',
-      // ζ(1) is the pole (value `~oo`, representable only by `number`). The
+      // ζ(1) is the pole; its value `~oo` is neither finite nor a member of
+      // the signed pair `non_finite_number`, so only `number` admits it. The
       // pole test is the literal-value channel: `isSame` is strictly
       // syntactic, so only a literal 1 ever answered `true` here, and
       // `operandLiteralValue` selects exactly that population.
@@ -1785,7 +1801,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       sgn: ([x, base]) => {
         if (!base) return lnSign(x);
-        if (base.isSame(1) || base.isReal == false) return 'unsigned';
+        if (base.isSame(1) || base.isExtendedReal == false) return 'unsigned';
         if (base.isGreater(1)) return lnSign(x);
         // The sign only flips for a base in (0, 1) — a NEGATIVE base makes
         // ln(base) complex, so the quotient is not real.
@@ -1927,7 +1943,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       sgn: (ops) => {
         const n = ops[1]; //base of Mod
-        if (n === undefined || n.isReal == false) return undefined;
+        if (n === undefined || n.isExtendedReal == false) return undefined;
         if (n.isSame(0)) return 'unsigned';
         if (isNumber(ops[0]) && isNumber(n)) {
           const v = apply2(
@@ -2286,13 +2302,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // non-zero — `±∞ ≠ 0` is a theorem, so requiring a proven sign of it
           // is redundant (`Ln(0)` has sgn `non-positive`, yet `2·Ln(0) = −∞`).
           // Proven signs are required only of the finite factors. The
-          // `isReal === true` requirement stays for EVERY factor, including the
-          // non-finite one: structural `isFinite === false` does not imply real
+          // `isExtendedReal === true` requirement stays for EVERY factor,
+          // including the non-finite one: structural `isFinite === false` does
+          // not imply real
           // (`ComplexInfinity` has `isFinite === false` with type `complex`),
           // and `∞·i = ~oo` must not be claimed `non_finite_number`.
           if (
             ops.every((x) => {
-              if (x.isReal !== true) return false;
+              if (x.isExtendedReal !== true) return false;
               if (provablyNonFiniteNumber(x)) return true;
               // Value/assumption channel first, then the TYPE channel (a
               // literal's value type, an `assume` range, `Abs`'s `<0..>`).
@@ -2320,7 +2337,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             )
           );
         if (ops.every((x) => x.isInteger)) return refineMul('finite_integer');
-        if (ops.every((x) => x.isReal)) return refineMul('finite_real');
+        if (ops.every((x) => x.isExtendedReal)) return refineMul('finite_real');
         if (ops.every((x) => x.isRational))
           return refineMul('finite_rational');
 
@@ -2341,7 +2358,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const imaginaryCount = ops.filter(isImaginary).length;
         if (
           imaginaryCount > 0 &&
-          ops.every((x) => isImaginary(x) || x.isReal === true)
+          ops.every((x) => isImaginary(x) || x.isExtendedReal === true)
         ) {
           if (imaginaryCount % 2 === 0) return 'finite_real';
           const isNonZero = (x: Expression) => {
@@ -2365,7 +2382,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // makeNumericFunction().
       //
       sgn: (ops) => {
-        if (ops.some((x) => x.sgn === undefined || x.isReal === false))
+        if (ops.some((x) => x.sgn === undefined || x.isExtendedReal === false))
           return undefined;
         if (ops.some((x) => x.isSame(0)))
           return ops.every((x) => x.isFinite)
@@ -2711,7 +2728,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // A real result needs a non-negative base or an integer exponent;
         // otherwise the result may be complex (e.g. (−2)^0.5).
-        if (base.isReal && exp.isReal) {
+        if (base.isExtendedReal && exp.isExtendedReal) {
           // A provably positive base keeps a positive result — `b^x =
           // e^(x·ln b) > 0` for a real exponent (`Exp` canonicalizes to
           // `Power(e, x)`, so this arm is item 4's `Exp` head); a
@@ -2744,8 +2761,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // `finite_number` default below is true but too coarse for the
           // compiler, which then guesses real and emits NaN. `=== true`, and
           // an exponent whose branch cannot be proven keeps the wider default.
-          // (Nested under the `isReal` guard so a complex-typed base never
-          // pays for the extra sign query.)
+          // (Nested under the `isExtendedReal` guard so a complex-typed base
+          // never pays for the extra sign query.)
           if (
             negativeSign(baseSgn) === true &&
             negativeBaseIsComplexBranch(exp)
@@ -2766,7 +2783,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // e^(exp·ln base): finite and non-zero, hence a finite complex
         // number (e.g. `e^i`, on the unit circle).
         if (
-          base.isReal === true &&
+          base.isExtendedReal === true &&
           positiveSign(baseSgn) === true &&
           exp.type.matches('finite_complex')
         )
@@ -2786,8 +2803,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // real), so its finite integer powers are nonzero. A *pure-imaginary*
         // base cycles with period 4: (βi)^p is real with sign (-1)^(p/2) for
         // even integer p, and pure imaginary — hence unsigned — for odd p.
-        // (Both exactness guards matter: `integer` admits ±∞, and β^∞ can be
-        // 0 for |β| < 1.)
+        // (The two `isFinite` reads are implied by the tier tests beside
+        // them — every bare numeric name denotes a finite value — and are
+        // kept as an explicit statement of what the rule needs: `β^∞` is 0
+        // for |β| < 1, so neither operand may be infinite.)
         if (
           isNonRealNumber(a.type.type) &&
           a.isFinite === true &&
@@ -2808,8 +2827,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const aSgn = a.sgn;
         const bSgn = b.sgn;
         if (
-          a.isReal === false ||
-          b.isReal === false ||
+          a.isExtendedReal === false ||
+          b.isExtendedReal === false ||
           a.isNaN ||
           b.isNaN ||
           aSgn === undefined ||
@@ -2830,14 +2849,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return a.sgn;
 
         if (b.numerator.isEven && b.denominator.isOdd) {
-          if (a.isReal) {
+          if (a.isExtendedReal) {
             const s = a.sgn;
             return s === 'positive' || s === 'not-zero' || s === 'negative'
               ? 'positive'
               : 'non-negative';
           }
-          // Non-real bases were handled before the `isReal === false` bail
-          // above; here `a.isReal` is undefined.
+          // Non-real bases were handled before the `isExtendedReal === false`
+          // bail above; here `a.isExtendedReal` is undefined.
           return !a.isSame(0) ? 'not-zero' : undefined; //already accounted for a.is(0)
         }
 
@@ -3029,7 +3048,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return positiveSign(rootExpSgn) === true
             ? 'finite_integer'
             : 'number';
-        if (base.isReal && exp.isReal) {
+        if (base.isExtendedReal && exp.isExtendedReal) {
           const rootBaseSgn = operandSgn(base);
           // A positive base always gives a positive real root.
           if (positiveSign(rootBaseSgn) === true) return 'finite_real';
@@ -3054,7 +3073,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       sgn: ([x, n]) => {
         // Note: we can't simplify this to a power, then get the sgn of that because this may cause an infinite loop
-        if (x.isReal === false || n.isReal === false) return 'unsigned';
+        if (x.isExtendedReal === false || n.isExtendedReal === false)
+          return 'unsigned';
         if (x.isSame(0)) {
           if (n.isNonPositive) {
             return 'unsigned';
@@ -3204,9 +3224,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // there is no value, and the unconditional `non-negative` this
       // definition used to claim asserted a sign for those inputs anyway
       // (`Heaviside(NaN).isNonNegative` was `true`). Realness is read from
-      // the TYPE, which is the same gate the `type` handler above uses: a
-      // NaN literal answers `isReal === true` while typing `number`.
-      sgn: ([x]) => (x.type.matches('real') ? 'non-negative' : undefined),
+      // the TYPE, which is the same gate the `type` handler above uses, and
+      // which also decides an operand that has no value to probe. It is
+      // EXTENDED realness, again like the `type` handler: `H(±∞)` is 0 or 1
+      // and so does carry a sign, but the bare (finite) name `real` does not
+      // match a `±∞` operand.
+      sgn: ([x]) =>
+        x.type.matches(EXTENDED_REAL_TYPE) ? 'non-negative' : undefined,
       evaluate: ([x], { engine }) => {
         if (x.isSame(0)) return engine.Half;
         if (x.isPositive) return engine.One;
@@ -3257,18 +3281,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: ([x]) => {
         if (x.isNaN) return 'number';
         if (provablyNonFiniteNumber(x)) {
-          // √(−∞) = i·∞ = ~oo (complex infinity), not a real ±∞ — and `~oo`
-          // is representable only by `number` (non-finite typing convention).
+          // √(−∞) = i·∞ = ~oo (complex infinity), not a real ±∞ — and the
+          // signed pair `non_finite_number` excludes `~oo`, so only the top
+          // type admits it (non-finite typing convention).
           if (x.isNegative === true) return 'number';
           if (x.isNonNegative === true) return 'non_finite_number';
           return 'number';
         }
-        if (x.isReal) {
+        // Whether the operand's TYPE proves it finite.
+        // `matches('finite_number')` is the engine's canonical finiteness
+        // test. It separates an operand whose type NAMES a non-finite
+        // disjunct — the `(real<0..>) | non_finite_number` that `Abs` claims
+        // for a `number` operand — from one that is finite outright, and the
+        // extended-real arm below needs that distinction: `√(+∞) = +∞`, so a
+        // `finite_*` claim over a type that spells out `non_finite_number`
+        // would be a lie.
+        const finiteOperand = x.type.matches('finite_number');
+        if (x.isExtendedReal) {
           // √x of a provably non-negative real is real; otherwise the value
           // may be a finite pure-imaginary (`√−2 = 1.414…i`), so an
           // unknown-sign real must not claim `finite_real` (same ruling as
-          // the bounded inverse-trig heads, 2026-07-30). Finite operand
-          // (checked above) ⇒ finite result: `finite_complex`, not `complex`.
+          // the bounded inverse-trig heads, 2026-07-30). A finite operand
+          // gives a finite result: `finite_complex`, not `complex`. Where
+          // finiteness is not proven the non-negative arm adds the signed
+          // pair (`√(+∞) = +∞`) and the unknown-sign arm reaches the top
+          // numeric type, because `√(−∞) = ~oo`, which only `number` admits.
           // The sign combines the value channel with the TYPE channel, so
           // a ranged operand type — `assume(a > 0)`, a literal's value
           // type, `x²`'s non-negative range — answers here too.
@@ -3286,9 +3323,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // the `finite_complex` hedge while its compiled bytes are
           // unchanged. See the §5.4 `Sqrt` row of
           // `docs/plans/2026-08-22-type-handlers-on-types.md`.
-          if (nonNegativeSign(operandSgn(x)) === true) return 'finite_real';
-          return 'finite_complex';
+          if (nonNegativeSign(operandSgn(x)) === true)
+            return finiteOperand
+              ? 'finite_real'
+              : 'finite_real | non_finite_number';
+          return finiteOperand ? 'finite_complex' : 'number';
         }
+        // An operand that is not on the extended real line keeps the generic-
+        // point convention the other numeric handlers use (`numericTypeHandler`,
+        // `library/type-handlers.ts`): merely-possible non-finiteness does not
+        // demote the claim, only a PROVABLE one does, and that was answered
+        // above.
         return 'finite_number';
       },
       // @fastpath: canonicalization is done in the function
@@ -3349,7 +3394,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       sgn: ([x]) => {
         if (x.isSame(0)) return 'zero';
-        if (x.isReal) {
+        if (x.isExtendedReal) {
           const s = x.sgn;
           return s === 'not-zero' || s === 'positive' || s === 'negative'
             ? 'positive'
@@ -3420,7 +3465,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         // Component-wise truncation of a complex: real result iff |im| < 1,
         // and then the sign is that of trunc(re).
-        if (x.isReal === false && isNumber(x))
+        if (x.isExtendedReal === false && isNumber(x))
           return x.im! >= 1 || x.im! <= -1
             ? 'unsigned'
             : numberSgn(Math.trunc(x.re));
@@ -3508,7 +3553,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     PositiveInfinity: {
       description: 'Positive infinity (+∞).',
-      type: 'non_finite_number',
+      // The exact singleton, not the signed pair `non_finite_number`: this
+      // constant has one value, and its value's own type is that singleton,
+      // so declaring the pair would make the declaration weaker than the
+      // thing it declares.
+      type: '+oo',
       isConstant: true,
       holdUntil: 'never',
       value: +Infinity,
@@ -3516,7 +3565,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     NegativeInfinity: {
       description: 'Negative infinity (−∞).',
-      type: 'non_finite_number',
+      // The exact singleton, for the same reason as `PositiveInfinity`.
+      type: '-oo',
       isConstant: true,
       holdUntil: 'never',
       value: -Infinity,
@@ -3902,8 +3952,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       typeHandlerKind: 'types',
       type: (ops) => extremumTypeOnTypes(ops),
       sgn: (ops) => {
-        if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
-        if (ops.some((x) => x.isReal == false || x.isNaN !== false))
+        if (ops.some((x) => x.isExtendedReal == false || x.isNaN))
+          return 'unsigned';
+        if (ops.some((x) => x.isExtendedReal == false || x.isNaN !== false))
           return undefined;
         if (ops.some((x) => x.isPositive)) return 'positive';
         if (ops.every((x) => x.isNonPositive))
@@ -3935,8 +3986,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       typeHandlerKind: 'types',
       type: (ops) => extremumTypeOnTypes(ops),
       sgn: (ops) => {
-        if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
-        if (ops.some((x) => x.isReal == false || x.isNaN !== false))
+        if (ops.some((x) => x.isExtendedReal == false || x.isNaN))
+          return 'unsigned';
+        if (ops.some((x) => x.isExtendedReal == false || x.isNaN !== false))
           return undefined;
         if (ops.some((x) => x.isNegative)) return 'negative';
         if (ops.every((x) => x.isNonNegative))
@@ -4858,7 +4910,7 @@ function evaluateAbs(
  * Split a complex expression `z` into `[a, b]` such that `z = a + b·i`, with
  * `a` and `b` real expressions, or `undefined` if `z` cannot be put in that
  * form structurally. The realness of `a` and `b` is not fully trusted here (a
- * `Sqrt` of an unresolved-sign radicand reports `isReal === true`
+ * `Sqrt` of an unresolved-sign radicand reports `isExtendedReal === true`
  * optimistically); callers confirm the split numerically before relying on it.
  */
 function splitComplexParts(

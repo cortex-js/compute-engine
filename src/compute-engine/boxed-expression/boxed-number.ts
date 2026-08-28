@@ -40,6 +40,7 @@ import {
 } from './sgn.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type { Type } from '../../common/type/types.js';
+import { COMPLEX_INFINITY_VALUE } from '../../common/type/types.js';
 import {
   positiveRangeType,
   negativeRangeType,
@@ -325,7 +326,13 @@ export class BoxedNumber
       type === 'complex'
     )
       return 'Real';
-    if (type === 'non_finite_number') return 'Infinity';
+    // Both spellings of "infinite": the signed pair and the tier that also
+    // holds the unsigned `~oo`. Neither is reachable here (a signed infinity
+    // was answered above and `~oo` has an infinite imaginary part), but the
+    // arm must recognize every string the type getters return for an infinite
+    // value, or a future route reaching it would silently fall through to
+    // `Number`.
+    if (type === 'non_finite_number' || type === 'infinity') return 'Infinity';
 
     // Fallback for any other numeric type
     return 'Number';
@@ -714,9 +721,12 @@ export class BoxedNumber
     // solved type variable (`solveArm`), a derived function-literal
     // signature (`functionLiteralSignatureType`) and a stored handler
     // result (`widenValueTypes` in `boxed-function.ts`).
-    // NaN, ±∞ and complex literals have no literal type (`_literalType`
-    // is undefined there — the tier already says everything) and keep
-    // the tier answer below.
+    // NaN, ±∞ and `~oo` are literals like any other: their literal type is
+    // the singleton that names exactly that value, so `ce.box(Infinity).type`
+    // is the `+oo` singleton and `ce.box(NaN).type` is the `NaN` singleton.
+    // Other complex literals have no literal type (`_literalType` is
+    // undefined there — the tier already says everything) and keep the tier
+    // answer below.
     // Inside a broadcast cell the literal type is withheld and the bare tier
     // answers instead (user ruling 2026-08-27 — see
     // `broadcast-cell-widening.ts`). Returned WITHOUT touching
@@ -733,7 +743,19 @@ export class BoxedNumber
     }
 
     if (typeof this._value === 'number') {
-      if (Number.isNaN(this._value)) return BoxedType.number;
+      // The TIER answers, not the singleton: this fallback is what a read
+      // inside a broadcast cell gets, where the literal type is withheld.
+      //
+      // A signed `±∞` reports `non_finite_number` here, which is NARROWER
+      // than what the two value-node projections give for the same literal:
+      // `widenValueTypes` and `stripNumericRanges` both send a `±∞` value
+      // node to `infinity`, the tier that also admits the unsigned `~oo`.
+      // The difference is deliberate — this window knows the value is one of
+      // the signed pair, so it reports the more informative tier, matching
+      // `NumericValue.type`. A consumer that classifies both spellings (for
+      // example the tensor dtype switch in `tensor/tensor-fields.ts`) must
+      // therefore accept `infinity` and `non_finite_number` alike.
+      if (Number.isNaN(this._value)) return BoxedType.nan;
       if (!Number.isFinite(this._value)) return BoxedType.non_finite_number;
       return Number.isInteger(this._value)
         ? BoxedType.finite_integer
@@ -775,14 +797,25 @@ export class BoxedNumber
   private _computeLiteralType(): Type | undefined {
     const v = this._value;
     if (typeof v === 'number') {
-      // Small integers are stored as machine numbers; the constructor has
-      // already screened out NaN and ±∞, but keep the guard local.
-      if (!Number.isFinite(v)) return undefined;
+      // A machine number holds NaN and ±∞ exactly, so each is its own
+      // singleton value type — the same treatment every other exactly-held
+      // literal gets. The `v === 0` test normalizes `-0` to `0`; NaN and the
+      // infinities fail it and pass through unchanged.
       return { kind: 'value', value: v === 0 ? 0 : v };
     }
-    if (v.im !== 0 || v.isNaN) return undefined;
-    if (v.isPositiveInfinity || v.isNegativeInfinity || v.isComplexInfinity)
-      return undefined;
+    // The three named infinite/undefined singletons. Each names exactly one
+    // value, so the value type says everything the tier would and more:
+    // `nan`, `+oo`, `-oo` and `~oo` widen back to `nan`/`infinity` at every
+    // storage position (`widenValueTypes`).
+    if (v.isNaN) return { kind: 'value', value: NaN };
+    if (v.isPositiveInfinity) return { kind: 'value', value: Infinity };
+    if (v.isNegativeInfinity) return { kind: 'value', value: -Infinity };
+    if (v.isComplexInfinity)
+      return { kind: 'value', value: COMPLEX_INFINITY_VALUE };
+    // Any OTHER complex literal has no singleton spelling — a value node
+    // carries one JavaScript number, and `∞ + i` needs two — so its tier
+    // answers on its own.
+    if (v.im !== 0) return undefined;
     const tier = v.type;
     if (
       tier !== 'finite_integer' &&
@@ -1069,11 +1102,25 @@ export class BoxedNumber
     return isSubtype(this._value.type, 'rational');
   }
 
-  get isReal(): boolean {
-    if (typeof this._value === 'number') return true;
+  get isExtendedReal(): boolean {
+    // A machine float is on the extended real line unless it is NaN: the two
+    // machine infinities ARE `±∞`. NaN is excluded here so that this route
+    // agrees with the NumericValue route below, where a NaN value carries the
+    // type `nan`, which is below neither `real` nor `non_finite_number`.
+    if (typeof this._value === 'number') return !Number.isNaN(this._value);
+
     // If it's 'complex', it has an imaginary part, otherwise it's real
     //    complex :> real :> rational :> integer
-    return isSubtype(this._value.type, 'real');
+    // `non_finite_number` is admitted explicitly: the bare name `real` denotes
+    // the FINITE reals, and this predicate means "on the EXTENDED real line",
+    // so a signed infinity must answer `true`. The two type getters that
+    // matter say `non_finite_number` for a signed `±∞` and `infinity` only for
+    // `~∞` or a mixed infinite complex value, so this disjunct admits exactly
+    // the signed pair and nothing else.
+    return (
+      isSubtype(this._value.type, 'real') ||
+      isSubtype(this._value.type, 'non_finite_number')
+    );
   }
 
   get isExact(): boolean {

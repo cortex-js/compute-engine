@@ -1094,42 +1094,30 @@ function pickPositions(
   return out;
 }
 
-/** The finite counterpart of a numeric primitive, for `randomElementType`. */
-const FINITE_NUMERIC_TYPE: Record<string, Type> = {
-  number: 'finite_number',
-  complex: 'finite_complex',
-  real: 'finite_real',
-  rational: 'finite_rational',
-  integer: 'finite_integer',
-};
-
 /**
- * The element type of a `Random` DOMAIN, narrowed to its finite counterpart
- * for the closed-form domains (`Interval`, `Range`).
+ * The element type of a `Random` DOMAIN, which is the type of one draw from
+ * it.
  *
- * `Interval`'s element type is `real` and `Range`'s is `integer`, and both of
- * those admit ±∞ — correctly, since a SET of reals may contain them. A DRAW
- * cannot: `Random` only ever draws from a bounded `Interval` or a finite
- * `Range` (an unbounded one is an evaluation error, never an infinite result),
- * so the drawn value is finite by construction. The narrower type is not just
- * tidiness — an imprecise `real` pushes comparisons over a framed draw off the
- * compile path.
+ * The domain's own element type answers directly. It used to be narrowed to a
+ * `finite_*` counterpart for `Interval` and `Range`, because those two
+ * reported an element type that admitted ±∞: a bare numeric name was then the
+ * ∞-ADMITTING tier. Since the finite-by-default flip a bare name is finite,
+ * and both constructors report elements only — an infinite endpoint marks
+ * unbounded extent and is never an element — so the element type is already
+ * as narrow as the draw. Precision here is not just tidiness: an imprecise
+ * element type pushes comparisons over a framed draw off the compile path.
  */
 function randomElementType(domain: Expression): Type {
-  const elt = collectionElementType(domain.type.type) ?? 'any';
-  if (!isFunction(domain, 'Interval') && !isFunction(domain, 'Range'))
-    return elt;
-  return typeof elt === 'string' ? (FINITE_NUMERIC_TYPE[elt] ?? elt) : elt;
+  return collectionElementType(domain.type.type) ?? 'any';
 }
 
 /** `list<T^k>` from a domain's element type, or the unshaped `list<T>`.
  * A zero count stays unshaped: a `^0` dimension reduces to the unit type,
  * which would misdispatch the (valid) empty-list result.
  *
- * The element type is the SAME narrowing `Random` applies to a single draw
+ * The element type is the SAME as `Random` gives a single draw
  * (`randomElementType`) — a `RandomChoice` cell is a `Random` draw, so
- * `RandomChoice(Interval(0,1), 3)` is `list<finite_real^3>`, not the wider
- * `list<real^3>` the raw collection element type would give. */
+ * `RandomChoice(Interval(0,1), 3)` is `list<real^3>`. */
 function randomListType(
   domain: Expression | undefined,
   kOp: Expression | undefined
