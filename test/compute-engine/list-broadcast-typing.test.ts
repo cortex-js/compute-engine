@@ -248,3 +248,48 @@ describe('`isValid` is DEEP through a tensor (Tycho item 67)', () => {
     expect(ce.box(['List', 'x', 'y']).isValid).toBe(true);
   });
 });
+
+describe('a union with a collection alternative is possibly-a-collection', () => {
+  // A valueless `b: number | broadcastable<number>` may hold a list at
+  // runtime, so element-wise arithmetic over it must produce a
+  // `broadcastable<…>` result — the same answer the bare
+  // `broadcastable<number>` declaration produces. Before
+  // `isPossiblyCollectionTyped` looked inside unions, `2b` claimed the
+  // scalar `finite_number` while its value could be a list.
+  test('2b types broadcastable<number> for the union spelling', () => {
+    const ce = new ComputeEngine();
+    ce.declare('b', 'number | broadcastable<number>');
+    expect(ce.box(['Multiply', 2, 'b']).type.toString()).toBe(
+      'broadcastable<number>'
+    );
+  });
+
+  test('the type is honest for either runtime resolution', () => {
+    const asList = new ComputeEngine();
+    asList.declare('b', 'number | broadcastable<number>');
+    asList.assign('b', asList.box(['List', 1, 2]));
+    expect(asList.box(['Multiply', 2, 'b']).evaluate().toString()).toBe(
+      '[2,4]'
+    );
+
+    const asScalar = new ComputeEngine();
+    asScalar.declare('b', 'number | broadcastable<number>');
+    asScalar.assign('b', asScalar.number(5));
+    expect(asScalar.box(['Multiply', 2, 'b']).evaluate().toString()).toBe('10');
+  });
+
+  test('a scalar-only union and atomic branches do not trigger the lift', () => {
+    const ce = new ComputeEngine();
+    ce.declare('s', 'integer | rational');
+    const st = ce.box(['Multiply', 2, 's']).type;
+    expect(st.toString()).toBe('finite_real');
+    expect(st.matches('number')).toBe(true);
+    // A tuple branch is atomic under broadcast and does not count as the
+    // collection alternative.
+    const ce2 = new ComputeEngine();
+    ce2.declare('t', 'number | tuple<number, number>');
+    expect(
+      ce2.box(['Multiply', 2, 't']).type.matches('broadcastable<number>')
+    ).toBe(false);
+  });
+});

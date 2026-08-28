@@ -132,8 +132,11 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // positions, so their own (production) effects still contribute
       // unchanged — `If(c, Random(), 0)` is still `{random}`.
       invokes: false,
-      // The else branch is optional: `If(cond, expr)` evaluates to `Nothing`
-      // when the condition is false.
+      // The else branch is optional: `If(cond, expr)` evaluates to `Missing`
+      // when the condition is false — the position-preserving absent datum,
+      // never `Nothing`, whose splicing erasure must not answer a failed
+      // selection (ERROR-MODEL §1; no-selection ruling 2026-08-27, shared
+      // with `Which`).
       type: ([cond, ifTrue, ifFalse]) => {
         // A condition that is provably a boolean indexed collection selects
         // element-wise (see `evaluateElementwiseSelection`): the result is a
@@ -152,7 +155,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // element-wise for some of its runtime values and picks a single arm
         // for the others, so the honest result is `broadcastable` of the
         // element-wise cell type. Without an else branch the scalar outcome is
-        // `Nothing`, which `broadcastable` does not cover, so keep that arm.
+        // `Missing`, which `broadcastable` does not cover, so keep that arm.
         if (possiblyElementwiseCondition([cond])) {
           const broadcast: Type = {
             kind: 'broadcastable',
@@ -160,15 +163,16 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           };
           return ifFalse !== undefined
             ? broadcast
-            : reduceType({ kind: 'union', types: [broadcast, 'nothing'] });
+            : reduceType({ kind: 'union', types: [broadcast, 'missing'] });
         }
-        // Without an else branch a false condition yields `Nothing`, and the
-        // `Nothing` arm must survive in the type: `widen` treats `nothing` as
-        // a join identity and would swallow it, so build the union explicitly.
+        // Without an else branch a false condition yields `Missing`, and that
+        // arm must survive in the type, so build the union explicitly rather
+        // than through `widen` (which joins toward a common supertype and
+        // would dissolve the absence marker into a top type).
         if (ifFalse === undefined)
           return reduceType({
             kind: 'union',
-            types: [ifTrue.type.type, 'nothing'],
+            types: [ifTrue.type.type, 'missing'],
           });
         return widen(ifTrue.type.type, ifFalse.type.type);
       },
@@ -188,9 +192,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const evaluated = cond.canonical.evaluate();
         const evaluatedCond = sym(evaluated);
         if (evaluatedCond === 'True')
-          return ifTrue?.evaluate() ?? engine.Nothing;
+          return ifTrue?.evaluate() ?? engine.Missing;
         if (evaluatedCond === 'False')
-          return ifFalse?.evaluate() ?? engine.Nothing;
+          return ifFalse?.evaluate() ?? engine.Missing;
         // An ABSENT condition (the `Missing` symbol) is a legitimate runtime
         // data state, not a program defect: it is Kleene-undecidable, so
         // branching is an error — but a catchable error EXPRESSION (R's
@@ -539,12 +543,26 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // element-wise for some of its runtime values and picks a single arm
         // for the others: `broadcastable` of the element-wise cell type is the
         // type that covers both.
-        if (possiblyElementwiseCondition(conds))
-          return {
+        // Without a literal-`True` default clause no arm may be selected and
+        // the value is `Missing` — keep that arm in the type, as the
+        // else-less `If` does, and outside `widen` (which joins toward a
+        // common supertype and would dissolve the absence marker). The
+        // possibly-element-wise branch carries the arm too: such a condition
+        // may resolve to a scalar `False` at runtime, and the `Which` then
+        // answers the scalar `Missing`.
+        if (possiblyElementwiseCondition(conds)) {
+          const broadcast: Type = {
             kind: 'broadcastable',
             elements: elementwiseCellType(arms, dflt >= 0),
           };
-        return widen(...arms.map((x) => x.type.type));
+          return dflt >= 0
+            ? broadcast
+            : reduceType({ kind: 'union', types: [broadcast, 'missing'] });
+        }
+        if (arms.length === 0) return 'missing';
+        const armType = widen(...arms.map((x) => x.type.type));
+        if (dflt >= 0) return armType;
+        return reduceType({ kind: 'union', types: [armType, 'missing'] });
       },
       canonical: (args, options) => {
         if (args.length % 2 !== 0) return options.engine.Nothing;
@@ -1170,7 +1188,9 @@ function evaluateWhich(
     const evaluated = args[i].canonical.evaluate();
     const cond = sym(evaluated);
     if (cond === 'True') {
-      if (!args[i + 1]) return options.engine.symbol('Undefined');
+      // A selected clause with no arm has no value to answer: `Missing`, the
+      // position-preserving absent datum (no-selection ruling 2026-08-27).
+      if (!args[i + 1]) return options.engine.Missing;
       return args[i + 1].evaluate(options);
     } else if (cond !== 'False' && cond !== 'Undefined') {
       // An ABSENT guard (the `Missing` symbol) is Kleene-undecidable: this
@@ -1228,7 +1248,11 @@ function evaluateWhich(
     i += 2;
   }
 
-  return options.engine.symbol('Undefined');
+  // No clause selected: `Missing`, the position-preserving absent datum
+  // (no-selection ruling 2026-08-27, shared with the else-less `If`). The
+  // masking `Undefined` of the `When` operator is a different, deliberate
+  // contract — plot consumers skip masked points — and is unchanged.
+  return options.engine.Missing;
 }
 
 /** Evaluate a Block expression. */

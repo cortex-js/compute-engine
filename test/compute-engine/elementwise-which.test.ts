@@ -589,13 +589,16 @@ describe('scalar behavior is unchanged', () => {
   test('scalar no-match is the Undefined symbol, not NaN', () => {
     const ce = engine();
     const r = ce.box(['Which', 'False', 1]).evaluate();
-    expect(r.symbol).toBe('Undefined');
+    expect(r.symbol).toBe('Missing');
   });
 
-  test('scalar If without an else branch is Nothing', () => {
+  test('scalar If without an else branch is Missing', () => {
+    // No-selection ruling 2026-08-27: a selection with no selected branch
+    // answers `Missing`, the position-preserving absent datum, on `If` and
+    // `Which` alike.
     const ce = engine();
     const r = ce.box(['If', 'False', 1]).evaluate();
-    expect(r.symbol).toBe('Nothing');
+    expect(r.symbol).toBe('Missing');
   });
 
   test('scalar Missing condition is the catchable error', () => {

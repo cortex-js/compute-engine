@@ -23,6 +23,7 @@ import {
 import {
   collectionElementType,
   isNonRealNumber,
+  resolveTypeAlias,
   resolveTypeForCompilation,
   stripMissingFromType,
 } from '../../common/type/utils.js';
@@ -1115,7 +1116,21 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
         !a.type.matches('collection<any>') && !isPossiblyCollectionTypedJS(a)
     );
   }
-  if (typeof t !== 'string' && t.kind === 'broadcastable') {
+  // A `broadcastable<…>` branch INSIDE a union counts exactly like a bare
+  // `broadcastable<…>` type: the operand may hold the collection half of the
+  // lift at runtime (`b: number | broadcastable<number>`), so the scalar
+  // codegen paths must not claim it. This mirrors the same union arm in
+  // `isPossiblyCollectionTyped` (`collection-utils.ts`) — the two predicates
+  // are deliberate twins and must gain disjuncts together.
+  const broadcastableKind =
+    typeof t !== 'string' &&
+    (t.kind === 'broadcastable' ||
+      (t.kind === 'union' &&
+        t.types.some((branch) => {
+          const b = resolveTypeAlias(branch);
+          return typeof b !== 'string' && b.kind === 'broadcastable';
+        })));
+  if (broadcastableKind) {
     // A `broadcastable<T>`-typed APPLICATION means "T, or a list-nesting of
     // T, depending on the operand shapes." When every operand is provably
     // NOT collection-ish (recursively, so the item-86 look-through applies

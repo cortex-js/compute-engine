@@ -154,12 +154,13 @@ describe('CONTROL STRUCTURES', () => {
       expect(result.latex).toMatchInlineSnapshot(`99`);
     });
 
-    // Without an else branch a false condition evaluates to Nothing; the
-    // static type must keep the `nothing` arm (widen would swallow it).
-    it('types a missing else branch as `| nothing`', () => {
+    // Without an else branch a false condition evaluates to Missing (the
+    // no-selection ruling of 2026-08-27); the static type must keep the
+    // `missing` arm.
+    it('types a missing else branch as `| missing`', () => {
       ce.declare('ifCond57', 'boolean');
       const expr = ce.expr(['If', 'ifCond57', 42]);
-      expect(expr.type.matches('finite_integer | nothing')).toBe(true);
+      expect(expr.type.matches('finite_integer | missing')).toBe(true);
       expect(expr.type.matches('finite_integer')).toBe(false);
       const both = ce.expr(['If', 'ifCond57', 42, 99]);
       expect(both.type.matches('finite_integer')).toBe(true);

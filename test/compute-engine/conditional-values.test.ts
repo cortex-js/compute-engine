@@ -173,11 +173,15 @@ describe('CONDITIONAL VALUES — Undefined conditions (decision 9)', () => {
     expect(r.isSame(2)).toBe(true);
   });
 
-  it('Which with only Undefined/False conditions yields Undefined', () => {
+  it('Which with only Undefined/False conditions yields Missing', () => {
+    // Decision 9 is unchanged: an `Undefined` guard is treated as not-True
+    // and falls through. What changed is the END value when no clause is
+    // selected — `Missing`, the position-preserving absent datum
+    // (no-selection ruling 2026-08-27), where it used to be `Undefined`.
     const r = ce
       .box(['Which', 'Undefined', 1, ['Less', 3, 0], 2])
       .evaluate();
-    expect(r.symbol).toBe('Undefined');
+    expect(r.symbol).toBe('Missing');
   });
 
   it('When with an Undefined condition masks to Undefined', () => {

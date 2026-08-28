@@ -119,11 +119,14 @@ interpreter's `Heaviside(NaN)` stays inert under both `evaluate()` and
 decline (`docs/COMPILATION-MODEL.md`); `1` is neither. The interval-JS and
 GPU targets carry their own `heaviside` lowerings
 (`interval-javascript-target.ts:805`, `gpu-target.ts:6136`) with the same
-shape, unprobed — sweep them with the fix. The fix is gated on the NaN
-policy ruling (R-A in
-`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`): under
-per-slot `propagate` the right compiled answer is `NaN`; under a decline
-policy the lowering refuses. The current behavior is pinned in
+shape, unprobed — sweep them with the fix. UNBLOCKED 2026-08-27: ruling
+R-A (Contract B,
+`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`) is
+adopted, so under the derived per-slot `propagate` default the right
+compiled answer is `NaN` — the kernels need a leading
+`Number.isNaN(x) ? NaN : …` arm (an operator declared `reject` would
+instead refuse to compile, but `Heaviside` has no reason to). The current
+behavior is pinned in
 `test/compute-engine/error-model.test.ts` (gaps block) — update that pin
 with the fix.
 
@@ -132,22 +135,12 @@ with the fix.
 The interpreter's `1/0` is the projective (undirected) complex infinity
 `~oo`; the compiled JavaScript answers the IEEE affine `Infinity` — a
 different mathematical point. This is a value divergence in the same
-fail-closed class as the `Heaviside` entry above, and it feeds the "where
-does `~oo` belong" ruling (`docs/ERROR-MODEL.md` §7): whichever lattice
-placement is ratified must also say what a float-only compile target is
-allowed to answer at a pole. Pinned as current behavior in
-`test/compute-engine/error-model.test.ts` (gaps block).
-
-### `If` with no selected branch answers `Nothing`; `Which` answers `Undefined` — and `Nothing` is the one value the error model forbids there (OPEN, defect + ruling — measured 2026-08-26)
-
-`Which()` with no true clause evaluates to the symbol `Undefined`, but
-`If(False, 5)` (no else branch) evaluates to `Nothing` — the positional
-erasure marker, which `docs/ERROR-MODEL.md` §1 says must never answer a
-failed selection because writing `Nothing` into a positional slot splices
-the slot out and misaligns data. The ERROR-MODEL §7 open question
-("`Undefined` should probably fold into the marker rule") assumed both
-control operators answered `Undefined`; the ruling must now also repair the
-`If` half. Pinned as current behavior in
+fail-closed class as the `Heaviside` entry above. The lattice placement
+is now ratified (2026-08-27: `~oo` is the unsigned member of the new
+`infinity` type), but the ruling package does not yet SAY what a
+float-only compile target may answer at a pole — that residual question
+(IEEE `Infinity`, `NaN`, or a decline) still needs a one-line ruling
+before this pin moves. Pinned as current behavior in
 `test/compute-engine/error-model.test.ts` (gaps block).
 
 ### A re-declared operator carrying a caller `compile` handler switches off the compiler's call-sharing (OPEN, design — measured 2026-08-21 under Tycho item 217)
@@ -178,18 +171,6 @@ lowering, which pushes those regions. The refusal could be narrowed to "a
 caller handler that EMITS" — unknowable at harvest time, so it would have to
 be a declaration on the handler (or a `pure` + "lazy operands as the
 built-in" contract). Demand-gated: the only known consumer route is flat.
-
-### A `broadcastable<T>` branch INSIDE a union is invisible to `isPossiblyCollectionTyped` (OPEN, low — found 2026-08-22)
-
-`b: number | broadcastable<number>` valueless: `2b` types `finite_number`,
-though the operand may hold a collection. `isPossiblyCollectionTyped` reads
-only a top-level `broadcastable` kind or a top-typed application; it does
-not look inside a union. Widening it touches ~25 call sites across the
-interpreter, the relational operators and both compile targets, so it was
-not done under a low-severity review finding. The enumeration side is
-already honest (`Sum(b)` stays inert via `unionMayHoldACollection`). A
-declared `scalar | broadcastable<…>` union is an unusual spelling; re-arm
-if a consumer produces one.
 
 ### Assigning a function literal whose body shares operands is exponential in the sharing depth (OPEN, evaluation — found 2026-08-22 with the shared-operand walk fix)
 

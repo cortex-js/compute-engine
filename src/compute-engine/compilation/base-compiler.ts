@@ -1238,11 +1238,30 @@ export class BaseCompiler {
       const t = compilationType(expr);
       if (typeContainsMissing(t)) {
         const stripped = resolveTypeForCompilation(stripMissingFromType(t));
+        // A NUMERIC-SHAPED type — a tuple of 2 to 4 numeric components — is
+        // exempt like a scalar number is: absence fills every lane with NaN
+        // (`vec2(_gpu_nan())`), which is exactly what the `When`/`Which`
+        // no-match lowering emits for a shaped branch value (Tycho item 49).
+        // This is the arm a default-less `Which` over a numeric tuple carries
+        // since the no-selection ruling of 2026-08-27 (its value is `Missing`
+        // and its type says so). The width bound is the GPU `vecN` family:
+        // the no-match lowering has no NaN fill for a wider tuple — it falls
+        // back to a SCALAR `_gpu_nan()` against an array-typed value arm,
+        // which is an invalid shader — so a width outside 2–4 fails closed
+        // below, as does a tuple with a non-numeric component (there is no
+        // NaN for a string lane).
+        const numericShaped =
+          typeof stripped !== 'string' &&
+          stripped.kind === 'tuple' &&
+          stripped.elements.length >= 2 &&
+          stripped.elements.length <= 4 &&
+          stripped.elements.every((el) => isSubtype(el.type, 'number'));
         if (
           stripped !== 'never' &&
           stripped !== 'unknown' &&
           stripped !== 'any' &&
-          !isSubtype(stripped, 'number')
+          !isSubtype(stripped, 'number') &&
+          !numericShaped
         )
           throw new Error(
             `Cannot compile an object-domain absent ('missing') position ` +

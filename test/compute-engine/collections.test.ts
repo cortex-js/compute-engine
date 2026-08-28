@@ -86,14 +86,29 @@ describe('LIST TENSOR ELIGIBILITY', () => {
       // Phase C representation unification: a shape-regular list of tuple cells
       // IS shape-regular (isTensor may be true), but tuple cells are NOT
       // kernel-admissible — the value stays a plain List and never enters a
-      // numeric kernel (no `list<number>` / `vector` typing).
+      // numeric kernel (no `list<number>` / `vector` typing). The SHAPE claim
+      // uses `list<any>`: the `Which` rows have no default clause, so their
+      // elements type `tuple<…> | missing` (no-selection ruling 2026-08-27)
+      // and the values-only bare `list` synonym excludes an absence-admitting
+      // element type by design.
       expect(expr.operator).toBe('List');
-      expect(expr.type.matches('list')).toBe(true);
+      expect(expr.type.matches('list<any>')).toBe(true);
       expect(expr.type.matches('list<number>')).toBe(false);
       expect(expr.type.matches('vector')).toBe(false);
     }
-    for (const expr of expressions.filter((x) => x.ops[0].operator !== 'Hold'))
+    const whichRows = expressions.filter((x) => x.ops[0].operator === 'Which');
+    for (const expr of expressions.filter(
+      (x) => x.ops[0].operator !== 'Hold' && x.ops[0].operator !== 'Which'
+    )) {
+      expect(expr.type.matches('list')).toBe(true);
       expect(expr.type.matches('list<tuple<number, number>>')).toBe(true);
+    }
+    // A default-less `Which` element may answer `Missing`, and the list type
+    // says so.
+    for (const expr of whichRows)
+      expect(expr.type.matches('list<tuple<number, number> | missing>')).toBe(
+        true
+      );
   });
 
   test('wrapped container elements (Set/Dictionary) remain a list', () => {

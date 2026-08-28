@@ -70,6 +70,32 @@
 
 ### Bug Fixes
 
+- **A selection with no selected branch answers `Missing`** (ruled
+  2026-08-27). `Which()` — and a `Which` whose guards are all `False` or
+  `Undefined` — used to answer the symbol `Undefined`, while the else-less
+  `If(False, x)` answered `Nothing`, the splicing erasure marker the error
+  model forbids for a failed selection. Both now answer `Missing`, the
+  position-preserving absent datum, and their result types carry a
+  `missing` arm exactly when no default clause exists (`If(c, 5)` types
+  `finite_integer | missing`; `If(c, 5, 6)` stays `finite_integer`).
+  Unchanged: the masking `Undefined` of the `When` restriction operator
+  (plot consumers skip masked points), and the element-wise no-match cell
+  (`NaN` for numeric cells). On the GPU targets a default-less `Which`
+  over a numeric tuple still compiles: absence over a numeric-shaped value
+  fills every lane with NaN (`vec2(_gpu_nan())`), so the object-domain
+  fail-closed gate now exempts numeric-shaped tuples the way it exempts
+  scalars.
+
+- **A union with a `broadcastable` alternative broadcasts like one.** A
+  valueless symbol declared `number | broadcastable<number>` may hold a
+  collection at runtime, but element-wise arithmetic over it typed as a
+  plain scalar: `2b` claimed `finite_number`. The possibly-a-collection
+  test now sees a `broadcastable<…>` branch inside a union (and unfolds
+  transparent aliases), so `2b` types `broadcastable<number>` — the same
+  answer the bare `broadcastable<number>` declaration already produced. A
+  union whose collection branch is statically visible
+  (`number | list<number>`) keeps its sharper per-branch typing.
+
 - **A literal's "machine-exact" test is now precision-independent.** The test
   that decides whether a number literal's type carries its exact value
   compared the value's working-precision decimal projection against the

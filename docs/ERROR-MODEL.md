@@ -367,7 +367,7 @@ domain, its exact success values — are invisible in the API surface, the
 generated documentation, and any tool that reads signatures; they exist
 only as an implementation detail of the typing layer.
 
-### Contract B — domain signatures — Proposed, recommended (as amended by both review rounds)
+### Contract B — domain signatures — Ratified 2026-08-27 (as amended by both review rounds)
 
 A definition declares **three separable facts**, of which only the first
 is mandatory:
@@ -776,18 +776,20 @@ because current behavior might be a deliberate decline):
 Open questions (each phrased so it can be answered without this
 document's history):
 
-- **Ratify Contract B as amended (§4) — the headline ruling.** The
-  package: carrier signatures with precise domains and success types;
-  `error` as implicit effect; the `nan` and `complex_infinity` singletons
-  (§5); per-parameter `nanBehavior` with derived defaults and the
-  composition rule; the `definedWhen`/`requires` split with `may-marker`
-  as the omitted default; evidence-based admission; demanded-operands
-  error propagation (§3); fail-closed compilation (§6). The third-round
-  external review (2026-08-25) recommends ratifying this taxonomy and
-  skeleton, leaving the callable-metadata representation (next item) as
-  an implementation design item. Saying no keeps Contract A:
-  admission-wide signatures, with the informative claims staying in
-  per-operator type handlers, invisible to the API surface.
+- **RULED 2026-08-27: Contract B as amended (§4) is ratified** — the
+  headline ruling, adopted as ruling R-A of the numeric-lattice
+  ratification package
+  (`docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`). The
+  adopted package: carrier signatures with precise domains and success
+  types; `error` as implicit effect; the `nan` and `complex_infinity`
+  singletons (§5); per-parameter `nanBehavior` with derived defaults and
+  the composition rule; the `definedWhen`/`requires` split with
+  `may-marker` as the omitted default; evidence-based admission;
+  demanded-operands error propagation (§3); fail-closed compilation
+  (§6). Implementation has not started; the callable-metadata
+  representation (next item) remains an open implementation design item,
+  and the ROADMAP defects gated on the NaN policy (compiled
+  `Heaviside(NaN)`, the compiled-lane pole encodings) are now unblocked.
 - **How do callables carry their policies?** (Implementation design,
   §4.) Options: policies as effects/refinements in the function type;
   definition metadata attached to callable values; or only the
@@ -826,19 +828,22 @@ document's history):
   rule. CE picks one definition, writes it in the operator's definition
   with the precedent cited, and the conformance suite pins it. External
   practice is evidence for the choice, never the decider.
-- **`Undefined` should probably fold into the marker rule — and the two
-  control operators disagree today** (measured 2026-08-26 by the
-  conformance suite). `Which()` with no true clause returns the symbol
-  `Undefined`; but `If(False, 5)` (no else branch) returns **`Nothing`** —
-  the positional erasure marker §1 forbids as a failed-selection answer,
-  because it splices out of positional data
-  (`src/compute-engine/library/control-structures.ts`). `Undefined` is a
-  fifth "no answer" citizen alongside `NaN`, `Missing`, `Nothing`, and
-  `Error`, invented locally before the absence ruling existed. Under §2
-  rule 4 the situation is a well-formed question with no answer, which
-  would yield the marker of the arms' type instead. The ruling must both
-  fold `Undefined` in AND repair `If`'s `Nothing`. Tracked in
-  `ROADMAP.md`.
+- **RULED 2026-08-27: a selection with no selected branch answers
+  `Missing`** — unconditionally, not the type-directed marker of the
+  arms. `Which()` (and `Which` where every guard is `False` or
+  `Undefined`) and the else-less `If(False, x)` now both answer
+  `Missing`, the position-preserving absent datum; both operators' scalar
+  result types carry a `missing` arm exactly when no default clause
+  exists. Before the ruling the two control operators disagreed (measured
+  2026-08-26): `Which` answered `Undefined` — a fifth "no answer" citizen
+  invented locally before the absence ruling — and `If` answered
+  `Nothing`, the positional erasure marker §1 forbids as a
+  failed-selection answer. Unchanged, deliberately: the masking
+  `Undefined` of the `When` restriction operator (plot consumers skip
+  masked points), decision 9's fall-through for an `Undefined` guard, and
+  the element-wise no-match cell (`NaN` for numeric cells — `Missing`
+  absorbed into a numeric domain, per the absence ruling). Pinned in the
+  conformance suite (`test/compute-engine/error-model.test.ts`).
 - **Container vs. cell validity (§3)** — should a collection whose cells
   include errors eventually be a *valid* container of partially-invalid
   cells, with a type that says so? Favored eventually by the 2026-08-25

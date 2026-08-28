@@ -957,15 +957,23 @@ describe('documented conformance gaps (ERROR-MODEL §7) — pinned as CURRENT be
     ).toBe(true);
   });
 
-  test('a selection with no selected value answers Undefined or Nothing, not the arms-type marker', () => {
-    // ERROR-MODEL §7 flags `Undefined` as a fifth "no answer" citizen invented
-    // before the absence ruling; under §2 rule 4 the situation is a well-formed
-    // question with no answer and would yield the marker of the arms' type.
-    // Note the two control structures disagree with each other today, and with
-    // §7's description: `Which` with no true clause gives `Undefined`, while
-    // `If` with no else branch taken gives `Nothing` (which SPLICES, and is
-    // exactly the erasure marker §1 says must not answer a failed selection).
-    expect(symbolName(ce.box(['Which']).evaluate())).toBe('Undefined');
-    expect(symbolName(ce.box(['If', 'False', 5]).evaluate())).toBe('Nothing');
+  test('a selection with no selected value answers Missing, on both operators', () => {
+    // Ruled 2026-08-27: a selection with no selected branch answers `Missing`,
+    // the position-preserving absent datum — unconditionally, not the
+    // type-directed marker of the arms. Before the ruling the two control
+    // structures disagreed: `Which` answered `Undefined` (a "no answer"
+    // citizen invented before the absence ruling) and the else-less `If`
+    // answered `Nothing`, the splicing erasure marker §1 forbids for a failed
+    // selection. The masking `Undefined` of the `When` operator is a separate,
+    // deliberate contract (plot consumers skip masked points) and is
+    // unchanged.
+    expect(symbolName(ce.box(['Which']).evaluate())).toBe('Missing');
+    expect(symbolName(ce.box(['If', 'False', 5]).evaluate())).toBe('Missing');
+    expect(symbolName(ce.box(['Which', 'False', 1]).evaluate())).toBe(
+      'Missing'
+    );
+    expect(symbolName(ce.box(['When', 5, 'False']).evaluate())).toBe(
+      'Undefined'
+    );
   });
 });

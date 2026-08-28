@@ -1260,14 +1260,21 @@ export function loneUnionBroadcastResultType(
  * True when `expr`'s collection-ness is **not statically visible**, so an
  * element-wise numeric operator (`Add`/`Multiply`) over it must produce a
  * `broadcastable<T>` result — the operand might broadcast at runtime (a
- * list-returning call) or stay scalar. The two triggering shapes are:
+ * list-returning call) or stay scalar. The three triggering shapes are:
  *
  * - an **application** (function expression) with a top type
  *   (`unknown`/`any`/`value`) — a call whose collection-ness is entirely
- *   unknown (e.g. an undeclared function call `h(x)`); or
+ *   unknown (e.g. an undeclared function call `h(x)`);
  * - an already-`broadcastable<…>` type — propagation through nested arithmetic
  *   (`Add(Multiply(2, h(x)), -1)`), including a symbol *declared*
- *   `broadcastable<…>`.
+ *   `broadcastable<…>`; or
+ * - a **union with a `broadcastable<…>` branch** (`number |
+ *   broadcastable<number>`) — the operand may hold the collection half of
+ *   the lift at runtime, so the scalar reading is not safe. A union whose
+ *   collection branch is statically visible (`number | list<number>`) is
+ *   NOT this predicate's case: the dedicated union lift
+ *   (`scalarOrCollectionUnionBranches`) already types it per branch, more
+ *   precisely than a `broadcastable` wrapper could.
  *
  * Deliberately EXCLUDES a bare **symbol** with a top type: an undeclared
  * symbol types `unknown` only until the surrounding arithmetic's
@@ -1284,9 +1291,25 @@ export function loneUnionBroadcastResultType(
  * fire before this predicate is consulted.
  */
 export function isPossiblyCollectionTyped(expr: Expression): boolean {
-  const t = expr.type.type;
+  // Resolve a transparent alias BEFORE the top-type test, so an alias whose
+  // body is a top type takes the application check like the bare spelling.
+  const t = resolveTypeAlias(expr.type.type);
   if (t === 'unknown' || t === 'any' || t === 'value') return isFunction(expr);
-  return typeof t !== 'string' && t.kind === 'broadcastable';
+  if (typeof t === 'string') return false;
+  if (t.kind === 'broadcastable') return true;
+  // A `broadcastable<…>` branch inside a union hides its collection-ness the
+  // same way a bare `broadcastable<…>` does: a valueless `b: number |
+  // broadcastable<number>` may hold a list at runtime, so `2b` typed as a
+  // plain scalar was a lie (the enumeration side was already honest —
+  // `Sum(b)` stays inert through `unionMayHoldACollection`). Only the
+  // `broadcastable` branches count here: a statically-visible collection
+  // branch (`number | list<number>`) is typed per branch by the dedicated
+  // union lift instead, which is the sharper answer.
+  if (t.kind !== 'union') return false;
+  return t.types.some((branch) => {
+    const b = resolveTypeAlias(branch);
+    return typeof b !== 'string' && b.kind === 'broadcastable';
+  });
 }
 
 /**
