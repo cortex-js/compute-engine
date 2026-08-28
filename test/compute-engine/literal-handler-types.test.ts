@@ -15,18 +15,18 @@ import type { Type } from '../../src/common/type/types';
  * The three-way representation, pinned below:
  * - a machine-exact integer or real is its VALUE type (`21`, `0.5`);
  * - a machine-exact rational keeps its tier through a SINGLETON RANGE
- *   (`finite_rational<0.5..0.5>` — the lattice deliberately does not class
+ *   (`rational<0.5..0.5>` — the lattice deliberately does not class
  *   a bare numeric value as rational);
  * - a value no machine number holds exactly is ENCLOSED in a compact
  *   closed range on its tier, both bounds rounded OUTWARD to two
- *   significant digits (`finite_real<1.4..1.5>` for `√2`,
- *   `finite_rational<0.33..0.34>` for `1/3`). The enclosure never claims
+ *   significant digits (`real<1.4..1.5>` for `√2`,
+ *   `rational<0.33..0.34>` for `1/3`). The enclosure never claims
  *   a value the literal does not have: it is not a singleton, so
  *   `operandLiteralValue` ignores it, and a value near a pole encloses as
  *   a range that ADMITS but does not assert the pole (`1 − 10⁻³⁰` →
  *   `<0.99..1.1>`). When no sound enclosure exists as doubles (magnitude
  *   outside the double range), the literal falls back to carrying its
- *   SIGN alone (`(finite_integer<0..>) & !0` for `10⁴⁰⁰`).
+ *   SIGN alone (`(integer<0..>) & !0` for `10⁴⁰⁰`).
  *
  * O9's second half was ruled and implemented on 2026-08-23: the public
  * `.type` of a number literal IS that literal type, so `ce.box(21).type` is
@@ -59,27 +59,27 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     // whole span and the literal carries a two-digit outward enclosure
     // instead of a value type. (The mixed bound spellings are plain
     // JavaScript number formatting: it switches to exponent form at 10²¹.)
-    expect(lit(1e21)).toBe('finite_integer<990000000000000000000..1.1e+21>');
+    expect(lit(1e21)).toBe('integer<990000000000000000000..1.1e+21>');
   });
 
   it('a machine-exact rational keeps its tier through a singleton range', () => {
-    expect(lit(ce.parse('\\frac12'))).toBe('finite_rational<0.5..0.5>');
+    expect(lit(ce.parse('\\frac12'))).toBe('rational<0.5..0.5>');
     expect(lit(ce.parse('-\\frac{3}{4}'))).toBe(
-      'finite_rational<-0.75..-0.75>'
+      'rational<-0.75..-0.75>'
     );
   });
 
   it('a non-machine-representable value is enclosed outward, never claimed as a rounded double', () => {
-    expect(lit(ce.parse('\\frac13'))).toBe('finite_rational<0.33..0.34>');
-    expect(lit(ce.parse('-\\frac13'))).toBe('finite_rational<-0.34..-0.33>');
-    expect(lit(ce.parse('\\sqrt2').evaluate())).toBe('finite_real<1.4..1.5>');
+    expect(lit(ce.parse('\\frac13'))).toBe('rational<0.33..0.34>');
+    expect(lit(ce.parse('-\\frac13'))).toBe('rational<-0.34..-0.33>');
+    expect(lit(ce.parse('\\sqrt2').evaluate())).toBe('real<1.4..1.5>');
     // An integer beyond the DOUBLE range has no finite double bounds, so it
     // falls back to proving its sign alone.
     expect(lit(ce.parse('10^{400}').evaluate())).toBe(
-      'finite_integer<1..>'
+      'integer<1..>'
     );
     expect(lit(ce.parse('-10^{400}').evaluate())).toBe(
-      'finite_integer<..-1>'
+      'integer<..-1>'
     );
     // A magnitude in the SUBNORMAL double range falls back too: subnormal
     // spacing is absolute (5·10⁻³²⁴), so the nearest-double projection of a
@@ -88,17 +88,17 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     // singleton BELOW the value. See `MIN_NORMAL_DOUBLE` in
     // `boxed-expression/boxed-number.ts`.
     expect(lit(ce.parse('\\frac{7}{10^{324}}').evaluate())).toBe(
-      'finite_rational<0<..>'
+      'rational<0<..>'
     );
     expect(lit(ce.parse('\\frac{-7}{10^{324}}').evaluate())).toBe(
-      'finite_rational<..<0>'
+      'rational<..<0>'
     );
     // Just above the smallest NORMAL double the enclosure still holds. (The
     // specimen must have a non-terminating decimal expansion: a short one
     // like `7·10⁻³⁰⁸` compares string-equal to its double and takes the
     // machine-exact singleton branch instead.)
     expect(lit(ce.parse('\\frac{1}{3\\cdot 10^{307}}').evaluate())).toBe(
-      'finite_rational<3.3e-308..3.4e-308>'
+      'rational<3.3e-308..3.4e-308>'
     );
   });
 
@@ -128,7 +128,7 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     expect(ce.box(21).type.matches('21')).toBe(true);
     expect(ce.box(0.5).type.toString()).toBe('0.5');
     expect(ce.parse('\\frac12').type.toString()).toBe(
-      'finite_rational<0.5..0.5>'
+      'rational<0.5..0.5>'
     );
   });
 
@@ -159,19 +159,19 @@ describe('LITERAL HANDLER TYPES — results are widened before storage', () => {
     });
     e.declare('x', 'real');
     // `tuple<1, 2>`-style over-specific contracts must never be stored.
-    expect(e.box(['EchoLit', 'x']).type.toString()).toBe('finite_integer');
+    expect(e.box(['EchoLit', 'x']).type.toString()).toBe('integer');
   });
 
   it('a ranged handler result passes through the widener untouched', () => {
     const e = new ComputeEngine();
     e.declare('RangedResult', {
       signature: '(number) -> number',
-      type: () => 'finite_real<0..>',
+      type: () => 'real<0..>',
       evaluate: ([x]) => x,
     });
     e.declare('x', 'real');
     expect(e.box(['RangedResult', 'x']).type.toString()).toBe(
-      'finite_real<0..>'
+      'real<0..>'
     );
   });
 });
@@ -181,9 +181,9 @@ describe('widenValueTypes — the §4.3 walker', () => {
     typeToString(widenValueTypes(parseType(s)));
 
   it('rewrites numeric value nodes to their tier', () => {
-    expect(widenStr('21')).toBe('finite_integer');
-    expect(widenStr('0.5')).toBe('finite_real');
-    expect(widenStr('0')).toBe('finite_integer');
+    expect(widenStr('21')).toBe('integer');
+    expect(widenStr('0.5')).toBe('real');
+    expect(widenStr('0')).toBe('integer');
   });
 
   it('descends structural nodes', () => {
@@ -194,27 +194,27 @@ describe('widenValueTypes — the §4.3 walker', () => {
       elements: { kind: 'value', value: 21 },
     };
     expect(typeToString(widenValueTypes(listOf21))).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
     expect(widenStr('tuple<1, 2>')).toBe(
-      'tuple<finite_integer, finite_integer>'
+      'tuple<integer, integer>'
     );
-    expect(widenStr('21 | string')).toBe('finite_integer | string');
-    expect(widenStr('set<0.5>')).toBe('set<finite_real>');
+    expect(widenStr('21 | string')).toBe('integer | string');
+    expect(widenStr('set<0.5>')).toBe('set<real>');
   });
 
   it('keeps a contravariant literal: a `(0) -> …` parameter survives', () => {
     // Widening a parameter would make the SIGNATURE narrower, not wider.
-    expect(widenStr('(0) -> 21')).toBe('(0) -> finite_integer');
+    expect(widenStr('(0) -> 21')).toBe('(0) -> integer');
   });
 
   it('a negation flips polarity: `!0` is preserved', () => {
     // The walker passes the intersection through unchanged (it is the
     // REDUCER, not the walker, that rewrites `range & !endpoint` to the
-    // open range `finite_real<0<..>` since open-bound ranged types —
+    // open range `real<0<..>` since open-bound ranged types —
     // `parseType` alone builds the unreduced spelling).
-    expect(widenStr('(finite_real<0..>) & !0')).toBe(
-      '(finite_real<0..>) & !0'
+    expect(widenStr('(real<0..>) & !0')).toBe(
+      '(real<0..>) & !0'
     );
   });
 
@@ -230,11 +230,11 @@ describe('widenValueTypes — the §4.3 walker', () => {
     // exactly like a value node. Contravariant positions keep it, same
     // polarity rule as `value` nodes — and a singleton range on any OTHER
     // tier is an author's narrowing, not literal cargo, and passes through.
-    expect(widenStr('finite_rational<0.5..0.5>')).toBe('finite_rational');
-    expect(widenStr('(finite_rational<0.5..0.5>) -> integer')).toBe(
-      '(finite_rational<0.5..0.5>) -> integer'
+    expect(widenStr('rational<0.5..0.5>')).toBe('rational');
+    expect(widenStr('(rational<0.5..0.5>) -> integer')).toBe(
+      '(rational<0.5..0.5>) -> integer'
     );
-    expect(widenStr('finite_integer<5..5>')).toBe('finite_integer<5..5>');
+    expect(widenStr('integer<5..5>')).toBe('integer<5..5>');
   });
 
   it('string and boolean value types are leaves', () => {
@@ -252,7 +252,7 @@ describe('widenValueTypes — the §4.3 walker', () => {
   });
 
   it('returns an unchanged type by identity (no rebuild, no cycle risk)', () => {
-    const t = parseType('list<tuple<finite_integer, string>>');
+    const t = parseType('list<tuple<integer, string>>');
     expect(widenValueTypes(t)).toBe(t);
     // A recursive type reaches its own body only through a `reference`
     // node, which is a leaf here — identity again.
@@ -351,7 +351,7 @@ describe('LITERAL HANDLER TYPES — precision edge (kept last: constructing a hi
     expect(nearOne.re).toBe(1);
     const t = nearOne._literalType;
     expect(t === undefined ? undefined : typeToString(t)).toBe(
-      'finite_rational<0.99..1.1>'
+      'rational<0.99..1.1>'
     );
   });
 
@@ -366,15 +366,15 @@ describe('LITERAL HANDLER TYPES — precision edge (kept last: constructing a hi
     const dp = new ComputeEngine(); // default precision
     const nearOne = dp.parse('1 - 10^{-30}').evaluate();
     expect(nearOne.isSame(1)).toBe(false); // the value IS the exact rational
-    expect(nearOne.type.toString()).toBe('finite_rational<0.99..1.1>');
+    expect(nearOne.type.toString()).toBe('rational<0.99..1.1>');
     // The engine's decimal reading of doubles is preserved: an exact
     // rational whose decimal expansion terminates within double range is
     // still "machine-exact" (`1/5` ≡ `0.2` — the isSame convention).
     expect(dp.parse('\\frac15').type.toString()).toBe(
-      'finite_rational<0.2..0.2>'
+      'rational<0.2..0.2>'
     );
     expect(dp.parse('\\frac{7}{5}').type.toString()).toBe(
-      'finite_rational<1.4..1.4>'
+      'rational<1.4..1.4>'
     );
   });
 });

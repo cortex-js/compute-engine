@@ -107,11 +107,14 @@ import {
  * The wide fallback is what makes that claim sound. `Sinc(NaN)` and
  * `FresnelS(NaN)` numericize to `NaN`, a value only the top type `number`
  * admits, and off the real line all three are complex-valued: an unconditional
- * `finite_real`, which these three definitions used to claim, was wrong in
- * both places. A proven FINITE argument still claims `finite_number` — an
- * entire function maps a finite point to a finite value, real or complex.
- * Every gate narrows on a proven fact, so an argument whose type decides
- * neither realness nor finiteness stays on the wide `number`.
+ * `real`, which these three definitions used to claim, was wrong in
+ * both places. A proven FINITE argument claims the top numeric type
+ * `number` too: an entire function does map a finite point to a finite
+ * value, but the only remaining spelling for "finite, real or complex" is
+ * `complex`, and claiming it would tell the compiler the value is NON-REAL
+ * and switch the emitted lowering to complex arithmetic. Every gate narrows
+ * on a proven fact, so an argument whose type decides neither realness nor
+ * finiteness stays on the wide `number` as well.
  *
  * Every gate reads the ELEMENT type, because the claim is about one element.
  * The one value-channel read — `facts.finite` — describes the OPERAND, not
@@ -127,10 +130,10 @@ import {
 function boundedEntireRealType(x: OperandDescriptor | undefined): Type {
   if (x === undefined) return 'number';
   const t = broadcastOperandType(x);
-  if (typeFact(t, EXTENDED_REAL_TYPE) === true) return 'finite_real';
+  if (typeFact(t, EXTENDED_REAL_TYPE) === true) return 'real';
   const scalar = x.facts.collection === true ? undefined : x;
-  if (scalar?.facts.finite === true || typeFact(t, 'finite_number') === true)
-    return 'finite_number';
+  if (scalar?.facts.finite === true || typeFact(t, 'complex') === true)
+    return 'number';
   return 'number';
 }
 
@@ -145,7 +148,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // Bracketed like `ExponentialE` (lower bound = the machine double of
       // π): the type alone proves π > 0, so `π·i` keeps its `imaginary`
       // claim off the type channel.
-      type: 'finite_real<3.141592653589793..3.141592653589794>',
+      type: 'real<3.141592653589793..3.141592653589794>',
       isConstant: true,
       holdUntil: 'N',
       wikidata: 'Q167',
@@ -602,7 +605,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // Real only on [0, 1] (`hav⁻¹(z) = 2·arcsin(√z)`): outside, the value
       // is finite complex (`hav⁻¹(−1) = 1.7627…i`); no real pole. Same
       // honest-join treatment as the Arcsin family (user ruling 2026-07-30):
-      // a symbolic real of unknown magnitude claims `finite_complex`, and
+      // a symbolic real of unknown magnitude claims `complex`, and
       // the compiled path emits complex code accordingly.
       type: (ops) => boundedInverseTrigType(ops, INVERSE_HAVERSINE_DOMAIN),
       // Evaluate the constructed 2·arcsin(√z): under `.N()` it numericizes,
@@ -791,12 +794,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'finite_complex' : 'number';
-        if (x.isExtendedReal === true) return 'finite_real';
+          return x.isFinite === true ? 'complex' : 'number';
+        if (x.isExtendedReal === true) return 'real';
         // Unknown realness: a non-finite value (~oo) escapes the finite
         // hedge, so it must be excluded before claiming it.
         if (provablyNonFiniteNumber(x)) return 'number';
-        return 'finite_number';
+        return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -835,7 +838,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'finite_complex' : 'number';
+          return x.isFinite === true ? 'complex' : 'number';
         return x.isExtendedReal === true ? EXTENDED_REAL_TYPE : 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -871,9 +874,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'finite_complex' : 'number';
+          return x.isFinite === true ? 'complex' : 'number';
         if (x.isExtendedReal === true)
-          return x.isFinite === true ? 'finite_real' : EXTENDED_REAL_TYPE;
+          return x.isFinite === true ? 'real' : EXTENDED_REAL_TYPE;
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -912,7 +915,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'finite_complex' : 'number';
+          return x.isFinite === true ? 'complex' : 'number';
         return x.isExtendedReal === true ? EXTENDED_REAL_TYPE : 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -1123,7 +1126,7 @@ function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
  *   DECLARATION (`ce.declare('BIG', 'real<2..>')`, which records no
  *   assumption) or from a ranged RESULT type (`Sign(r)`, `Exp(r)`) now
  *   proves containment the old shape could not, narrowing those claims
- *   (`Arcosh(BIG)` types `finite_real`, not `number`), while an exact
+ *   (`Arcosh(BIG)` types `real`, not `number`), while an exact
  *   literal with no machine value (`1/3`, `√2`, a bigint) loses the old
  *   `.re` float-projection proof and widens (accepted rational-literal
  *   residue, ruling O4 of the plan doc). Every changed row is recorded in

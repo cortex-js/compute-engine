@@ -27,7 +27,7 @@ describe('a collection literal splices `Sequence` and erases `Nothing`', () => {
   test('`List` splices a `Sequence` operand', () => {
     const xs = ce.box(['List', 1, ['Sequence', 2, 3], 4]);
     expect(elementsOf(xs)).toEqual(['1', '2', '3', '4']);
-    expect(xs.evaluate().type.toString()).toBe('vector<finite_integer^4>');
+    expect(xs.evaluate().type.toString()).toBe('vector<integer^4>');
   });
 
   test('`Set` splices a `Sequence` operand, then deduplicates', () => {
@@ -48,9 +48,7 @@ describe('a collection literal splices `Sequence` and erases `Nothing`', () => {
   test('`Tuple` splices a `Sequence` operand, changing its arity and type', () => {
     const t = ce.box(['Tuple', 1, ['Sequence', 2, 3], 4]).evaluate();
     expect(t.toString()).toBe('(1, 2, 3, 4)');
-    expect(t.type.toString()).toBe(
-      'tuple<finite_integer, finite_integer, finite_integer, finite_integer>'
-    );
+    expect(t.type.toString()).toBe('tuple<integer, integer, integer, integer>');
   });
 
   test('a nested `Sequence` has already collapsed, and an empty one vanishes', () => {

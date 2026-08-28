@@ -29,7 +29,7 @@ describe('POINT/TUPLE ARITHMETIC — T1 literal component-wise', () => {
     const r = ce.parse('(1,2)+(3,4)').evaluate();
     expect(r.operator).toBe('Tuple');
     expect(r.toString()).toBe('(4, 6)');
-    expect(r.type.toString()).toBe('tuple<finite_integer, finite_integer>');
+    expect(r.type.toString()).toBe('tuple<integer, integer>');
 
     const n = ce.parse('(1,2)+(3,4)').N();
     expect(n.operator).toBe('Tuple');
@@ -41,7 +41,7 @@ describe('POINT/TUPLE ARITHMETIC — T1 literal component-wise', () => {
     const r = ce.parse('(1,2)-(3,4)').evaluate();
     expect(r.operator).toBe('Tuple');
     expect(r.toString()).toBe('(-2, -2)');
-    expect(r.type.toString()).toBe('tuple<finite_integer, finite_integer>');
+    expect(r.type.toString()).toBe('tuple<integer, integer>');
 
     const n = ce.parse('(1,2)-(3,4)').N();
     expect(n.operator).toBe('Tuple');
@@ -53,7 +53,7 @@ describe('POINT/TUPLE ARITHMETIC — T1 literal component-wise', () => {
     const r = ce.parse('-(3,4)').evaluate();
     expect(r.operator).toBe('Tuple');
     expect(r.toString()).toBe('(-3, -4)');
-    expect(r.type.toString()).toBe('tuple<finite_integer, finite_integer>');
+    expect(r.type.toString()).toBe('tuple<integer, integer>');
 
     const n = ce.parse('-(3,4)').N();
     expect(n.operator).toBe('Tuple');
@@ -65,7 +65,7 @@ describe('POINT/TUPLE ARITHMETIC — T1 literal component-wise', () => {
     const r = ce.parse('2(1,2)').evaluate();
     expect(r.operator).toBe('Tuple');
     expect(r.toString()).toBe('(2, 4)');
-    expect(r.type.toString()).toBe('tuple<finite_integer, finite_integer>');
+    expect(r.type.toString()).toBe('tuple<integer, integer>');
 
     const n = ce.parse('2(1,2)').N();
     expect(n.operator).toBe('Tuple');
@@ -77,7 +77,7 @@ describe('POINT/TUPLE ARITHMETIC — T1 literal component-wise', () => {
     const r = ce.parse('(1,2)/2').evaluate();
     expect(r.operator).toBe('Tuple');
     expect(r.toString()).toBe('(1/2, 1)');
-    expect(r.type.toString()).toBe('tuple<finite_rational, finite_integer>');
+    expect(r.type.toString()).toBe('tuple<rational, integer>');
   });
 
   test('(1,2) / 3 stays exact under evaluate, numericizes under N()', () => {
@@ -85,7 +85,7 @@ describe('POINT/TUPLE ARITHMETIC — T1 literal component-wise', () => {
     const r = ce.parse('(1,2)/3').evaluate();
     expect(r.operator).toBe('Tuple');
     expect(r.toString()).toBe('(1/3, 2/3)');
-    expectTypeBetween(r, { atMost: 'tuple<finite_rational, finite_rational>' });
+    expectTypeBetween(r, { atMost: 'tuple<rational, rational>' });
 
     const n = ce.parse('(1,2)/3').N();
     expect(n.operator).toBe('Tuple');
@@ -160,7 +160,7 @@ describe('POINT/TUPLE ARITHMETIC — T2 rejected operations', () => {
   // refinement and rejected after it — with the identical error merely
   // deferred to evaluation. Counted by tuple-ness now, like `mulTuples`.
   test('tuple · tuple rejects identically across element-type refinement', () => {
-    for (const type of ['broadcastable<number>', 'number', 'finite_number']) {
+    for (const type of ['broadcastable<number>', 'number', 'number']) {
       const ce = new ComputeEngine();
       ce.pushScope();
       ce.declare('u', { type });
@@ -212,7 +212,7 @@ describe('POINT/TUPLE ARITHMETIC — T2 rejected operations', () => {
   // its elements refine to, so the rejection must not wait for provable
   // element numericity.
   test('scalar / tuple rejects identically across element-type refinement', () => {
-    for (const type of ['broadcastable<number>', 'number', 'finite_number']) {
+    for (const type of ['broadcastable<number>', 'number', 'number']) {
       const ce = new ComputeEngine();
       ce.pushScope();
       ce.declare('u', { type });
@@ -1744,7 +1744,7 @@ describe('POINT/TUPLE ARITHMETIC — could-be-numeric elements match the validat
     // The scalar `1/n` (with `n := 4`, a rational) scales BOTH components, so
     // the literal `1` contributes a rational coordinate (`1/4`), not an
     // integer one — the component tier follows the declared scalar factor.
-    expect(p.type.toString()).toBe('tuple<broadcastable<number>, finite_rational>');
+    expect(p.type.toString()).toBe('tuple<broadcastable<number>, rational>');
     const sum = ce.parse(
       String.raw`\frac{1}{n}(\lfloor nx\rfloor,\lfloor ny\rfloor)+\frac{1}{n}(2h(x)-1, 1)`
     );
@@ -1769,8 +1769,8 @@ describe('POINT/TUPLE ARITHMETIC — could-be-numeric elements match the validat
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>). The float factor folds INTO the cells, so the
     // component is a vector of REALS — the value is `[0.6, 1.2, 1.8]`, which
-    // the previous `finite_integer` cell claim did not admit (Tycho item 194).
-    expect(p.type.toString()).toBe('tuple<finite_integer, vector<finite_real^3>>');
+    // the previous `integer` cell claim did not admit (Tycho item 194).
+    expect(p.type.toString()).toBe('tuple<integer, vector<real^3>>');
   });
 
   test('provably non-numeric component: tuple<number, list<string>> symbol still groups as Tuple', () => {
@@ -1837,7 +1837,7 @@ describe('POINT/TUPLE ARITHMETIC — point-valued `\\mapsto` body', () => {
     const ce = new ComputeEngine();
     const f = ce.parse('t \\mapsto (\\cos t, \\sin t)', { strict: false });
     const v = ce.box(['Apply', f, 0.5]).N();
-    expectTypeBetween(v, { atMost: 'tuple<finite_real, finite_real>' });
+    expectTypeBetween(v, { atMost: 'tuple<real, real>' });
     expect(v.op1.re).toBeCloseTo(Math.cos(0.5), 12);
     expect(v.op2.re).toBeCloseTo(Math.sin(0.5), 12);
   });
@@ -1924,7 +1924,7 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
 
   test.each([
     'number',
-    'finite_number',
+    'number',
     'list<number>',
     'indexed_collection<number>',
     'broadcastable<number>',
@@ -1933,7 +1933,7 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
   ])('list<tuple<number, number>> / %s keeps tuple elements', (den) => {
     const ce = pointListEngine(den);
     expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe(
-      'list<tuple<finite_number, finite_number>>'
+      'list<tuple<number, number>>'
     );
   });
 
@@ -1942,7 +1942,7 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     ce.declare('p', 'list<tuple<number, number, number>>');
     ce.declare('q', 'number');
     expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe(
-      'list<tuple<finite_number, finite_number, finite_number>>'
+      'list<tuple<number, number, number>>'
     );
   });
 
@@ -1988,7 +1988,7 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
 
   test('a `vector<n>` of scalars is a scalar divisor, not a shape', () => {
     // The type a LITERAL list of numbers carries (`[5, 10]` is
-    // `vector<finite_integer^2>`), so excluding it would defeat the repair.
+    // `vector<integer^2>`), so excluding it would defeat the repair.
     const ce = pointListEngine('vector<3>');
     expect(
       ce.box(['Divide', 'p', 'q']).type.matches('list<tuple<number, number>>')
@@ -2029,7 +2029,7 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     ce.declare('p', 'list<number>');
     ce.declare('q', 'number');
     expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe(
-      'list<finite_number>'
+      'list<number>'
     );
     expect(ce.box(['Multiply', 'p', 'q']).type.toString()).toBe('list<number>');
   });
@@ -2040,10 +2040,10 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     ce.declare('m', 'matrix<2x2>');
     ce.declare('q', 'number');
     expect(ce.box(['Divide', 'v', 'q']).type.toString()).toBe(
-      'vector<finite_number^3>'
+      'vector<3>'
     );
     expect(ce.box(['Divide', 'm', 'q']).type.toString()).toBe(
-      'matrix<finite_number^(2x2)>'
+      'matrix<2x2>'
     );
   });
 

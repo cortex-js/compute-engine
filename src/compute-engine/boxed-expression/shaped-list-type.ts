@@ -42,11 +42,11 @@ type ShapeAnalysis = { dims: number[]; cells: Type[] };
  * union-free.
  *
  * The element type `C` is the widened type, reported honestly
- * (`finite_integer`, `finite_real`, `color`, `boolean`, `tuple<…>`, …).
+ * (`integer`, `real`, `color`, `boolean`, `tuple<…>`, …).
  * No numeric lift to `number`: the broadcast typing contract requires an
  * evaluated value's type to be a SUBTYPE of the statically declared
  * `list<R>` (`evaluated.matches(declared)`, `list-broadcast-typing.test.ts`),
- * and lifting `finite_real` cells to `number` widens past `R`, breaking it.
+ * and lifting `real` cells to `number` widens past `R`, breaking it.
  * The honest widening satisfies the contract by construction.
  */
 export function shapedListType(ops: ReadonlyArray<Expression>): Type | null {
@@ -124,7 +124,7 @@ function analyzeLevel(ops: ReadonlyArray<Expression>): ShapeAnalysis | null {
  */
 function classifyCell(op: Expression): Type | null {
   // A number literal's public type carries its value or an enclosing range
-  // (ruling O9: `finite_rational<0.5..0.5>`, `finite_real<1.4..1.5>`) —
+  // (ruling O9: `rational<0.5..0.5>`, `real<1.4..1.5>`) —
   // decorated
   // OBJECT nodes that `isAtomicValueType` blocks, which silently withdrew
   // the shape claim from every exact-rational or radical matrix

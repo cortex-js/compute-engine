@@ -260,7 +260,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     keywords: ['congruence'],
     complexity: 11000,
     // `modulo` is `number` (not `integer`) so a symbolic modulus expression
-    // such as `p^{k+1}` (statically typed `finite_number`, not `integer`) is
+    // such as `p^{k+1}` (statically typed `number`, not `integer`) is
     // accepted and the congruence stays symbolic instead of erroring. The
     // `evaluate` handler only reduces when all three operands are concrete
     // integers (`toBigint`), so a non-integer modulus simply stays unevaluated.

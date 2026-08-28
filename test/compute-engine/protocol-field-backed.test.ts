@@ -125,12 +125,12 @@ p.(Nameable.name)`)
   });
 
   test('a NARROWER field does NOT satisfy `readwrite` — the exact-type rule', () => {
-    // `finite_integer` is a strict subtype of `integer`. The getter direction
+    // `integer<0..10>` is a strict subtype of `integer`. The getter direction
     // would be happy with it; the setter direction would not, since the
     // property promises that any `integer` may be written. The edge therefore
     // stays PENDING, and dispatch reports the missing implementation.
     const source = `protocol Aged { readwrite age: integer }
-type Q = object{age: finite_integer} is Aged
+type Q = object{age: integer<0..10>} is Aged
 let q = Q(age: 5)
 q.(Aged.age)`;
     expect(diagnosticCodes(source)).toEqual([

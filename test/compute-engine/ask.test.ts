@@ -51,7 +51,7 @@ describe('ASK', () => {
 
   test('can answer Element queries from declarations', () => {
     const ce = new ComputeEngine();
-    ce.declare('x', 'finite_real');
+    ce.declare('x', 'real');
 
     // Closed predicate fallback (B3)
     expect(ce.ask(['Element', 'x', 'any'])).toEqual([{}]);
@@ -59,7 +59,7 @@ describe('ASK', () => {
     // Type extraction from declaration (B1)
     const r = ce.ask(['Element', 'x', '_T']);
     expect(r.length).toBe(1);
-    expect(r[0]!._T.json).toBe('finite_real');
+    expect(r[0]!._T.json).toBe('real');
   });
 
   // P1-5: bound queries must also work when the pattern is pre-boxed

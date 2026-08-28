@@ -154,34 +154,23 @@ export type PrimitiveType =
  * - `nan`: the not-a-number marker. Its only supertype is `number`, so it is
  *   disjoint from `complex`, `infinity` and every type below them.
  *
- * DEPRECATED SYNONYMS. The five `finite_*` names — `finite_number`,
- * `finite_complex`, `finite_real`, `finite_rational`, `finite_integer` —
- * survive only so that the several hundred signature strings that still spell
- * them keep parsing. Each now denotes exactly the same set of values as its
- * bare counterpart (`finite_real` = `real`, and `finite_number` = `complex`,
- * because "any finite number" IS the finite complex type). Four of them are
- * kept formally BELOW that counterpart rather than equal to it, which is the
- * conservative direction: a value that claimed `finite_real` still matches
- * `real`, and no signature written with a bare name silently starts admitting
- * more. `finite_number` is the exception — it is left incomparable to
- * `complex`, exactly where it sat before the flip, for the reason given at its
- * entry in `PRIMITIVE_SUBTYPES` (`subtype.ts`). All five are removed by the
- * mechanical rename in Phase 2 of
- * `docs/plans/2026-08-27-lattice-flip-implementation.md`; `non_finite_number`
- * is removed by the site-by-site migration in the same plan (step 1.6).
+ * RETIRED SPELLINGS. The five names that prefixed a tier with `finite_` are
+ * no longer members of this union. Each denoted exactly the same set of values
+ * as one of the bare names above, because every bare name under `number` is
+ * finite: the four per-tier spellings each meant their own tier, and the
+ * widest of them meant `complex` ("any finite number" IS the finite complex
+ * type). The type PARSER still accepts all five as input aliases for one
+ * release cycle and normalizes each to the name it denotes
+ * (`RETIRED_NUMERIC_ALIASES` in `parser.ts`), but an alias never reaches a
+ * `Type` node and is never serialized back out.
  */
 export type NumericPrimitiveType =
   | 'number'
-  | 'finite_number'
   | 'complex'
-  | 'finite_complex'
   | 'imaginary'
   | 'real'
-  | 'finite_real'
   | 'rational'
-  | 'finite_rational'
   | 'integer'
-  | 'finite_integer'
   | 'non_finite_number'
   // A number of infinite magnitude, of any direction: `+∞`, `−∞`, the
   // unsigned `~∞` and mixed values such as `∞ + i`. Supertype of

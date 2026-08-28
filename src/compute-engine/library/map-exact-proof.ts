@@ -31,11 +31,11 @@ import type { LoweredLevel, Slot } from './map-broadcast-shape.js';
  * Two independent obligations, both required:
  *
  * 1. **Integer-closedness (R2: derived, never listed).** The body is probed
- *    with `finite_integer`-typed stand-in symbols substituted for the level's
- *    parameters, and the result must claim `finite_integer` *through the
+ *    with `integer`-typed stand-in symbols substituted for the level's
+ *    parameters, and the result must claim `integer` *through the
  *    operators' own type handlers*. There is no operator allowlist for this
  *    question: `Divide` declines because `Multiply(1/2, k)` types
- *    `finite_real`, and `Mod(k, m)` over a possibly-zero modulus declines
+ *    `real`, and `Mod(k, m)` over a possibly-zero modulus declines
  *    because the `Mod` handler keeps `number`.
  * 2. **Boundedness.** Source element bounds are read structurally (literal
  *    `Range`s, literal `List`s, a nested broadcast `Map`'s own proven output
@@ -381,15 +381,15 @@ const PROBE_SYMBOL_PREFIX = '_mapExactCompileProbe_';
 
 /**
  * R2's integer-closedness question, asked of the operators' own type
- * handlers: substitute `finite_integer`-typed stand-ins for the level's
+ * handlers: substitute `integer`-typed stand-ins for the level's
  * parameters (and the resolved literal value for each closed operand, which
  * is what the compiler bakes) and require the application to claim
- * `finite_integer`.
+ * `integer`.
  *
  * The stand-ins are declared in a throwaway scope so nothing leaks into the
  * ambient one. Literal stand-ins would NOT do: the handlers would fold the
  * application to a value and e.g. `Divide(4, 2)` would claim
- * `finite_integer`.
+ * `integer`.
  */
 function probesIntegerClosed(
   ce: ComputeEngine,
@@ -402,7 +402,7 @@ function probesIntegerClosed(
     const standIns: Expression[] = [];
     for (let i = 0; i < arity; i++) {
       const name = `${PROBE_SYMBOL_PREFIX}${i}`;
-      ce.declare(name, 'finite_integer');
+      ce.declare(name, 'integer');
       standIns.push(ce.symbol(name));
     }
     const args = slots.map((s) =>
@@ -411,7 +411,7 @@ function probesIntegerClosed(
     if (args.some((a) => a === undefined)) return false;
     const applied = ce.function(op, args);
     if (!applied.isValid) return false;
-    return applied.type.matches('finite_integer');
+    return applied.type.matches('integer');
   } catch {
     return false;
   } finally {

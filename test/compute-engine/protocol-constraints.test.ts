@@ -109,7 +109,7 @@ function sortOf(xs: list<T>) -> list<T> where T is Comparable { xs }`
     expect(errorCode(result)).toBe('protocol-constraint-unsatisfied');
     // The message names both the protocol and the type the variable solved to.
     expect(result).toContain('Comparable');
-    expect(result).toContain('finite_integer');
+    expect(result).toContain('integer');
   });
 
   test('conformance registered for a SUPERTYPE answers for its subtypes', () => {

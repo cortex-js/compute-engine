@@ -22,7 +22,7 @@ describe('the KEEP table — admission the compatibility relation preserves (§2
   it('a named callback narrower than the instantiated slot counts', () => {
     const ce = new ComputeEngine();
     // `IsPrime: (number) -> boolean` vs the instantiated
-    // `(finite_integer) any -> boolean`: NOT a contravariant subtype, but the
+    // `(integer) any -> boolean`: NOT a contravariant subtype, but the
     // types overlap — compatibility admits.
     const e = ce.box(['CountIf', XS, 'IsPrime']);
     expect(e.isValid).toBe(true);

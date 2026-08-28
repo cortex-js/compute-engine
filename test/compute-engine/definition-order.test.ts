@@ -199,7 +199,7 @@ describe('definition order does not change semantics', () => {
       ce.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
       const def: any = ce.lookupDefinition('g');
       expect(def.operator.signature.toString()).toEqual(
-        '(unknown) -> vector<finite_number^2>'
+        '(unknown) -> vector<2>'
       );
     });
 

@@ -210,7 +210,7 @@ ImaginaryUnit
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~NaN~~ {#nan-1}
+##### ExpressionComputeEngine.~~NaN~~ {#nan-2}
 
 ```ts
 readonly NaN: Expression;
@@ -310,7 +310,7 @@ bignum: (a) => BigDecimal;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~complex~~ {#complex-1}
+##### ExpressionComputeEngine.~~complex~~ {#complex-2}
 
 ```ts
 complex: (a, b?) => Complex;
@@ -8514,7 +8514,7 @@ body assigned later:
 ```js
 ce.declare('q', { signature: '(unknown) -> unknown', inferredSignature: true });
 ce.assign('q', ce.parse('t \\mapsto 2t+1'));
-// signature is now `(unknown) -> finite_number`, so `q(x) < y` types
+// signature is now `(unknown) -> number`, so `q(x) < y` types
 // `boolean` and compiles, while `q(L) < y` over a list `L` still types
 // `list<boolean>` and fails closed.
 ```
@@ -9375,7 +9375,7 @@ ImaginaryUnit
 
 <MemberCard>
 
-##### IComputeEngine.NaN {#nan}
+##### IComputeEngine.NaN {#nan-1}
 
 ```ts
 readonly NaN: Expression;
@@ -9475,7 +9475,7 @@ bignum: (a) => BigDecimal;
 
 <MemberCard>
 
-##### IComputeEngine.complex {#complex}
+##### IComputeEngine.complex {#complex-1}
 
 ```ts
 complex: (a, b?) => Complex;
@@ -13220,8 +13220,8 @@ The result is in canonical form.
 
 Note on typing (SYMBOLIC P2-24, by design): `N()` produces a float
 literal, so its `type` can widen relative to the exact input's — e.g.
-`1/3` has type `finite_rational` while `(1/3).N()` has type
-`finite_real`. The result type reflects the representation produced,
+`1/3` has type `rational` while `(1/3).N()` has type
+`real`. The result type reflects the representation produced,
 not the mathematical value's tightest type.
 
 </MemberCard>
@@ -14171,17 +14171,23 @@ Note that ±∞ and NaN are not rationals.
 
 <MemberCard>
 
-##### Expression.isReal {#isreal}
+##### Expression.isExtendedReal {#isextendedreal}
 
 ```ts
-readonly isReal: boolean | undefined;
+readonly isExtendedReal: boolean | undefined;
 ```
 
-The value of this expression is a real number.
+The value of this expression is on the **extended real line**: a finite
+real number, or one of the two signed infinities `+∞` and `-∞`.
 
-This is equivalent to `this.type === "rational" || this.type === "integer" || this.type === "real"`
+The unsigned complex infinity `~∞` is **not** on the extended real line,
+and neither is `NaN`; both answer `false`. A number with a non-zero
+imaginary part answers `false`.
 
-Note that ±∞ and NaN are not real numbers.
+Use this predicate for a gate that must also hold at `±∞` — sign
+reasoning, the `1/±∞ = 0` fold, a claim that a result is a signed
+infinity. For a **finite** real, test `this.type.matches("real")`
+instead: the bare type name `real` denotes the finite reals.
 
 </MemberCard>
 
@@ -14537,7 +14543,7 @@ readonly zero: T;
 
 <MemberCard>
 
-##### TensorField.nan {#nan-2}
+##### TensorField.nan {#nan-3}
 
 ```ts
 readonly nan: T;
@@ -15562,30 +15568,50 @@ static non_finite_number: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.finite\_number {#finite_number}
+##### BoxedType.infinity {#infinity}
 
 ```ts
-static finite_number: BoxedType;
+static infinity: BoxedType;
 ```
 
 </MemberCard>
 
 <MemberCard>
 
-##### BoxedType.finite\_integer {#finite_integer}
+##### BoxedType.nan {#nan}
 
 ```ts
-static finite_integer: BoxedType;
+static nan: BoxedType;
 ```
 
 </MemberCard>
 
 <MemberCard>
 
-##### BoxedType.finite\_real {#finite_real}
+##### BoxedType.complex {#complex}
 
 ```ts
-static finite_real: BoxedType;
+static complex: BoxedType;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedType.real {#real}
+
+```ts
+static real: BoxedType;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedType.integer {#integer}
+
+```ts
+static integer: BoxedType;
 ```
 
 </MemberCard>
@@ -15666,16 +15692,6 @@ static setReal: BoxedType;
 
 ```ts
 static setRational: BoxedType;
-```
-
-</MemberCard>
-
-<MemberCard>
-
-##### BoxedType.setFiniteInteger {#setfiniteinteger}
-
-```ts
-static setFiniteInteger: BoxedType;
 ```
 
 </MemberCard>
@@ -16291,35 +16307,65 @@ A primitive type is a simple type that represents a concrete value.
 ```ts
 type NumericPrimitiveType = 
   | "number"
-  | "finite_number"
   | "complex"
-  | "finite_complex"
   | "imaginary"
   | "real"
-  | "finite_real"
   | "rational"
-  | "finite_rational"
   | "integer"
-  | "finite_integer"
-  | "non_finite_number";
+  | "non_finite_number"
+  | "infinity"
+  | "nan";
 ```
 
-The numeric tower (D10, 2026-07-02): `integer ⊂ rational ⊂ real ⊂ complex ⊂
-number`, with a parallel `finite_*` tower and a shared `non_finite_number`
-(±∞). `real` is a proper subtype of `complex`; both admit ±∞.
+The numeric tree is FINITE BY DEFAULT and DISJOINT: every numeric VALUE is a
+finite number, a number of infinite magnitude, or the not-a-number marker,
+and no value is two of those — `number = complex ⊔ infinity ⊔ nan` as a
+partition of the values. Every bare name below `complex` contains only
+finite values. A bare `real` result type is therefore a promise of
+finiteness, and the extended real line is written out as
+`real | non_finite_number` — `non_finite_number` being the SIGNED pair
+`+∞`/`−∞`, so the union excludes the unsigned `~∞` that `infinity` would
+bring in. That spelling is shared as the frozen `EXTENDED_REAL_TYPE`
+constant in `common/type/primitive.ts`; use it rather than rebuilding the
+union.
 
-- `number`: any numeric value = `complex` plus `NaN`
-- `complex`: a complex number (`real ⊂ complex`) = `finite_complex` + `non_finite_number`
-- `finite_complex`: a finite complex number = `imaginary` + `finite_real`
-- `imaginary`: a complex number with a real part of 0 (pure imaginary)
-- `finite_number`: a finite numeric value = `finite_complex`
-- `finite_real`: a finite real number = `finite_rational` + `finite_integer`
-- `finite_rational`: a finite rational number (includes the finite integers)
-- `finite_integer`: a finite whole number
-- `real`: a real number (imaginary part 0), admits ±∞ = `finite_real` + `non_finite_number`
-- `non_finite_number`: `PositiveInfinity`, `NegativeInfinity`
-- `integer`: a whole number, admits ±∞ = `finite_integer` + `non_finite_number`
-- `rational`: a rational number (includes the integers), admits ±∞ = `finite_rational` + `non_finite_number`
+The partition is a statement about values, NOT one the SUBTYPE RELATION
+closes over. `isSubtype('complex | infinity | nan', 'number')` is true, but
+the converse `isSubtype('number', 'complex | infinity | nan')` is FALSE: a
+union is a supertype only of types below one of its members, and `number` is
+above all three rather than inside any one of them. Deciding the converse
+needs covering-union machinery that the type checker does not have. So do
+not use a three-way union as a stand-in for `number` in a signature, and do
+not read the `⊔` above as a subtyping identity.
+
+- `number`: any numeric value — a finite number, a number of infinite
+  magnitude, or the not-a-number marker.
+- `complex`: a FINITE complex number = `imaginary` + `real`.
+- `imaginary`: a finite complex number with a real part of 0 (pure
+  imaginary).
+- `real`: a finite real number (imaginary part 0) = `rational` plus the
+  finite irrationals.
+- `rational`: a finite rational number (includes the integers).
+- `integer`: a finite whole number.
+- `infinity`: a number of infinite magnitude, of any direction — the signed
+  `+∞` and `−∞`, the unsigned complex infinity `~∞`, and mixed directed
+  values such as `∞ + i`. Disjoint from `complex`: an infinity is not a
+  finite number.
+- `non_finite_number`: exactly the SIGNED pair `+∞`, `−∞`. It sits under
+  `infinity` alone and is the atom the sign-aware folds (`1/±∞ = 0`)
+  consume; `infinity` itself admits the unsigned `~∞`, which has no sign.
+- `nan`: the not-a-number marker. Its only supertype is `number`, so it is
+  disjoint from `complex`, `infinity` and every type below them.
+
+RETIRED SPELLINGS. The five names that prefixed a tier with `finite_` are
+no longer members of this union. Each denoted exactly the same set of values
+as one of the bare names above, because every bare name under `number` is
+finite: the four per-tier spellings each meant their own tier, and the
+widest of them meant `complex` ("any finite number" IS the finite complex
+type). The type PARSER still accepts all five as input aliases for one
+release cycle and normalizes each to the name it denotes
+(`RETIRED_NUMERIC_ALIASES` in `parser.ts`), but an alias never reaches a
+`Type` node and is never serialized back out.
 
 </MemberCard>
 
@@ -17017,5 +17063,47 @@ type TypeResolver = {
 ```
 
 A type resolver should return a definition for a given type name.
+
+</MemberCard>
+
+----
+
+<MemberCard>
+
+### COMPLEX\_INFINITY\_VALUE {#complex_infinity_value}
+
+```ts
+const COMPLEX_INFINITY_VALUE: Readonly<{
+  complexInfinity: true;
+}>;
+```
+
+The value carried by the type of the unsigned complex infinity `~oo`, which
+has no JavaScript number to stand for it: `Infinity` and `-Infinity` are the
+signed pair, and `NaN` is a different value altogether.
+
+A value-literal type holds an arbitrary runtime value (see [`ValueType`](#valuetype)), so this frozen tagged object is that value. Test for it with
+[`isComplexInfinityValue`](#iscomplexinfinityvalue), which reads the TAG: a `Type` node can be
+rebuilt or re-frozen on its way through the parser and the reducers, so
+object identity is not a reliable test.
+
+</MemberCard>
+
+----
+
+<MemberCard>
+
+### isComplexInfinityValue() {#iscomplexinfinityvalue}
+
+```ts
+function isComplexInfinityValue(v): v is Readonly<{ complexInfinity: true }>
+```
+
+True if `v` is the [`COMPLEX_INFINITY_VALUE`](#complex_infinity_value) sentinel, i.e. the
+value of the `~oo` value-literal type. Reads the tag, never the identity.
+
+##### v
+
+`unknown`
 
 </MemberCard>

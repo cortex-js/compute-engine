@@ -94,7 +94,7 @@ describe('complex mode â€” one emission per user function, lift at use (design Â
     expect(ba.run!({ a: -2 })).toBe(-4);
     // The call's RESULT is wrapped in the idempotent `_SYS.cplx` by the
     // lift-at-use rule (`liftWideResult`): `b`'s declared result is
-    // `finite_number`, and since the finite-by-default flip `complex` sits
+    // `number`, and since the finite-by-default flip `complex` sits
     // below that name, so `wideNumericType` reports it wide â€” a node that may
     // hold a complex value and whose lowering hands back whatever it holds.
     // The wrap is redundant here (the single `_fn_b` is emitted in the complex
@@ -197,7 +197,7 @@ describe('complex mode â€” one emission per user function, lift at use (design Â
 
   it('a selection over a wide arm is complex-shaped for its parent (arms decide, not the joined type)', () => {
     // Review round (2026-08-16): `Which(d < 0, a, True, 5)` over a wide `a`
-    // types `finite_integer`; its arms are lifted to `{re, im}` but a parent
+    // types `integer`; its arms are lifted to `{re, im}` but a parent
     // reading the TYPE consumed the object as a number.
     const ce = new ComputeEngine();
     ce.declare('z', 'complex');

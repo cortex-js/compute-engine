@@ -2296,27 +2296,25 @@ describe('NON-REAL NUMBER PREDICATES', () => {
   // tests that `t` is a SUPERTYPE of complex, so `real` (⊂ complex under
   // D10) does NOT satisfy it.
   it('real types are neither non-real nor possibly non-real', () => {
-    for (const t of ['real', 'finite_real', 'integer', 'rational'] as const) {
+    for (const t of ['real', 'integer', 'rational'] as const) {
       expect(isNonRealNumber(t)).toBe(false);
       expect(couldBeNonRealNumber(t)).toBe(false);
     }
   });
 
   it('wide numeric types could be non-real but are not provably so', () => {
-    // `finite_number` stays here after the finite-by-default flip even though
-    // it now denotes the same values as `complex`: it is deliberately left
-    // incomparable to `complex` in the lattice, because this predicate reads
-    // "below `complex`, not below `real`" and a `true` for the type of every
-    // generic numeric expression would switch the compiler to complex
-    // lowering. See the `finite_number` entry in `PRIMITIVE_SUBTYPES`.
-    for (const t of ['number', 'finite_number', 'any', 'unknown'] as const) {
+    // `number` is the type nearly every generic numeric expression carries.
+    // `isNonRealNumber` reads "below `complex`, not below `real`", and
+    // `number` sits ABOVE `complex`, so it answers `false` — which is what
+    // keeps the compiler on its real lowering lane for generic expressions.
+    for (const t of ['number', 'any', 'unknown'] as const) {
       expect(isNonRealNumber(t)).toBe(false);
       expect(couldBeNonRealNumber(t)).toBe(true);
     }
   });
 
   it('complex types are provably non-real', () => {
-    for (const t of ['complex', 'finite_complex', 'imaginary'] as const) {
+    for (const t of ['complex', 'imaginary'] as const) {
       expect(isNonRealNumber(t)).toBe(true);
       expect(couldBeNonRealNumber(t)).toBe(true);
     }
@@ -2430,7 +2428,7 @@ describe('Signature serialization round-trip', () => {
 
   it('round-trips a three-arm overload set', () => {
     const sig =
-      '((number?) -> finite_real) & ((set<real>, number?) -> real) & ((collection, number?) -> any)';
+      '((number?) -> real) & ((set<real>, number?) -> real) & ((collection, number?) -> any)';
     expect(roundTrips(sig)).toBe(sig);
     // The arms survive as arms, rather than collapsing into one signature
     // whose result swallowed the rest.
@@ -2485,7 +2483,7 @@ describe('isSubtype with an intersection on the left', () => {
     expect(
       isSubtype(
         parseType(
-          '((number) -> finite_real) & ((set<real>, number?) -> real) & ((collection, number?) -> any)'
+          '((number) -> real) & ((set<real>, number?) -> real) & ((collection, number?) -> any)'
         ),
         'function'
       )

@@ -94,15 +94,15 @@ describe('SGN HANDLER AUDIT', () => {
   });
 
   it('Abs type follows the operand finiteness', () => {
-    ce.declare('ff', 'finite_real');
+    ce.declare('ff', 'real');
     ce.declare('rr', 'real');
     // Since the ranged-results round, each `Abs` tier claim carries `<0..>`.
-    expect(ce.box(['Abs', 'ff']).type.toString()).toBe('finite_real<0..>');
+    expect(ce.box(['Abs', 'ff']).type.toString()).toBe('real<0..>');
     expect(ce.box(['Abs', 'ff']).isFinite).toBe(true);
     // `real` admits ±∞, so no finiteness claim.
     expect(ce.box(['Abs', 'rr']).type.toString()).toBe('real<0..>');
     expect(ce.box(['Abs', ['Complex', 2, 3]]).type.toString()).toBe(
-      'finite_real<0..>'
+      'real<0..>'
     );
     expect(ce.box(['Abs', 'PositiveInfinity']).type.toString()).toBe(
       'non_finite_number'
@@ -113,8 +113,8 @@ describe('SGN HANDLER AUDIT', () => {
     // The parity result was inverted (a product of non-negatives claimed
     // 'non-positive'); it was latent while |x| dropped finiteness and the
     // ∞·0 guard preempted the branch.
-    ce.declare('m1', 'finite_real');
-    ce.declare('m2', 'finite_real');
+    ce.declare('m1', 'real');
+    ce.declare('m2', 'real');
     const nn = ce.box(['Multiply', ['Abs', 'm1'], ['Abs', 'm2']]);
     expect(nn.sgn).toBe('non-negative');
     expect(nn.isNonNegative).toBe(true);

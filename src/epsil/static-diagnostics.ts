@@ -198,8 +198,8 @@ function isCanonicalizationError(code: string): boolean {
  * popped (in a `finally`) on the way out; that contains the **declarations**
  * canonicalization creates: boxing an expression auto-declares the symbols it
  * mentions, and leaving those behind would change how the program then
- * evaluates (a pre-declared `x` makes `let x = 2047` narrow to
- * `finite_integer` instead of declaring `integer`). The pass additionally
+ * evaluates (a pre-declared `x` makes `let x = 2047` NARROW that existing
+ * declaration instead of creating one). The pass additionally
  * runs under an inference ROLLBACK FRAME (see `staticDiagnostics` below),
  * which undoes what the scope never shielded: type inference written through
  * to definitions that already exist in an outer scope. Checking `u + 1`
@@ -402,7 +402,7 @@ function applyAssignmentTypeEffect(
             const def = ce.box(target.symbol).valueDefinition;
             if (def !== undefined) {
               // A concrete literal initializer records its handler-visible
-              // literal type (`1.5`, not `finite_real`): exact evidence a
+              // literal type (`1.5`, not `real`): exact evidence a
               // parameter can provably refute, which is what restores the
               // static line for `let x: number = 1.5; k(x)` under overlap
               // admission (path 1 of the ROADMAP entry "Epsil static
@@ -1467,7 +1467,7 @@ export function describeError(error: MathJsonExpression): string {
     case 'expected-function':
       // Payload: [name, type]. With a site, the site quote names the symbol,
       // so the detail carries only the TYPE -- "expected a function, got
-      // `finite_real` at `Pi`". WITHOUT a site -- `dedupKey()` deliberately
+      // `real` at `Pi`". WITHOUT a site -- `dedupKey()` deliberately
       // strips it, and authored errors may omit it -- the payload's name is
       // the only identity, so keep it: two different heads with the same
       // declared type must not collapse to one dedup key.

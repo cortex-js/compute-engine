@@ -27,7 +27,7 @@ To use a tuple's elements as list elements, convert explicitly: `ListFrom(t)` is
 
 A value's type does not match what its context requires — a typed declaration (`let x: string = …`) whose initializer has a different type, an argument outside a function's signature, or a value that fails a type ascription.
 
-The message reads "expected `T`, got `U`": T is what the context requires, U is what the value actually has. A site may follow — "for argument 2" points at a position in a call, "at `x`" quotes the offending subexpression. A type like `list<string^5>` is a list of exactly 5 strings; `finite_integer` is an integer that is not infinite.
+The message reads "expected `T`, got `U`": T is what the context requires, U is what the value actually has. A site may follow — "for argument 2" points at a position in a call, "at `x`" quotes the offending subexpression. A type like `list<string^5>` is a list of exactly 5 strings; `integer` is a whole number, finite like every bare numeric type name.
 
 The check runs twice by design: once statically, when the program is canonicalized (reported before anything runs), and again during evaluation, where the mismatch becomes an error value that propagates outward (see `epsil doc runtime-error`).
 

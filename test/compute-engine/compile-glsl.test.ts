@@ -1485,14 +1485,14 @@ describe('GLSL zero-width aggregates fail closed', () => {
 // Two independent leaks, both above the `Sqrt`/`Ln`/`Log` carve-out that keeps
 // the real kernel for an unknown-sign radicand:
 //   1. the arithmetic wrapped around such a head (`1e5·√u`) is itself typed
-//      `finite_complex` and answered from its TYPE, defeating the carve-out;
+//      `complex` and answered from its TYPE, defeating the carve-out;
 //   2. a `boolean`-typed node (a comparison, e.g. a `Which` condition — not
 //      even a value position) fell through to the conservative operand
 //      recursion and inherited the report.
 describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
   const e = new ComputeEngine();
   // √(⌈x⌉² + ⌈y⌉²): a real radicand of unknown sign, so `Sqrt` types
-  // `finite_complex` while the compile contract keeps the real `sqrt` kernel.
+  // `complex` while the compile contract keeps the real `sqrt` kernel.
   const radical = [
     'Sqrt',
     ['Add', ['Power', ['Ceil', 'x'], 2], ['Power', ['Ceil', 'y'], 2]],

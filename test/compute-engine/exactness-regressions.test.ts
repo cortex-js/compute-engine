@@ -592,7 +592,7 @@ describe('P0-16h — statistics of exact data stay exact under evaluate()', () =
 });
 
 describe('numeric list literals preserve oversized integers exactly', () => {
-  // A `finite_integer` beyond the safely-representable range (|n| > 2^53) must
+  // A `integer` beyond the safely-representable range (|n| > 2^53) must
   // not be stored in a float64-backed tensor buffer, which would truncate it.
   const big = '2880067194370816120';
   test(`['List', ${big}] round-trips exactly`, () => {
@@ -607,7 +607,7 @@ describe('numeric list literals preserve oversized integers exactly', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(ce.box(['List', 1, 2, 3]).evaluate().type.toString()).toEqual(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
   });
 });
@@ -745,7 +745,7 @@ describe('SYM P0-15 residual — kind-closure typing gates finiteness on operand
   });
   test('finite operand still narrows (kind + finiteness justified)', () => {
     expect(ce.box(['PreIncrement', 2]).type.toString()).toEqual(
-      'finite_integer'
+      'integer'
     );
   });
 });

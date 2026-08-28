@@ -46,6 +46,36 @@ import {
 import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 
 /**
+ * The five `finite_*` numeric spellings retired from `NumericPrimitiveType`
+ * (`types.ts`), mapped to the name each one now denotes.
+ *
+ * They are accepted as INPUT ALIASES for one release cycle so that a type
+ * string a caller wrote earlier keeps parsing. Normalization happens before
+ * the name is tested against `PRIMITIVE_TYPES_SET` and before a ranged
+ * spelling such as `finite_real<0..1>` builds its base, so an alias never
+ * reaches a `Type` node and is therefore never serialized back out:
+ * `parseType('finite_real<0..1>')` round-trips as `real<0..1>`.
+ *
+ * Four of them map to the bare name of the same tier. `finite_number` maps to
+ * `complex`, because "any finite number" IS the finite complex type — every
+ * bare name under `number` denotes finite values alone, and `complex` is the
+ * widest of them.
+ *
+ * The table has a NULL prototype. It is indexed by an arbitrary identifier
+ * taken from the input, so a plain object literal would answer a lookup of
+ * `constructor`, `toString` or any other `Object.prototype` member with the
+ * inherited value instead of "not an alias".
+ */
+const RETIRED_NUMERIC_ALIASES: Readonly<Record<string, string>> =
+  Object.assign(Object.create(null), {
+    finite_number: 'complex',
+    finite_complex: 'complex',
+    finite_real: 'real',
+    finite_rational: 'rational',
+    finite_integer: 'integer',
+  });
+
+/**
  * BNF grammar for the type parser:
  *
 <type> ::= <constrained_type>
@@ -234,10 +264,14 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
                    | "collection" | "indexed_collection" | "list" | "tuple"
                    | "set" | "record" | "dictionary"
 
-<numeric_primitive> ::= "number" | "finite_number" | "complex" | "finite_complex"
-                      | "imaginary" | "real" | "finite_real" | "rational"
-                      | "finite_rational" | "integer" | "finite_integer"
-                      | "non_finite_number" | "infinity" | "nan"
+<numeric_primitive> ::= "number" | "complex" | "imaginary" | "real"
+                      | "rational" | "integer" | "non_finite_number"
+                      | "infinity" | "nan"
+
+(* The retired `finite_*` spellings are still ACCEPTED as input aliases for
+   one release cycle and normalized to the names above (see
+   `RETIRED_NUMERIC_ALIASES`); they never appear in a parsed node and are
+   never serialized. *)
 
 
 (* --- Terminals (Lexical Tokens) --- *)
@@ -2035,17 +2069,13 @@ export class Parser {
 
   private parseNumericType(): NumericTypeNode | undefined {
     if (this.current.type === 'IDENTIFIER') {
-      const numericTypes = [
-        'real',
-        'finite_real',
-        'rational',
-        'finite_rational',
-        'integer',
-        'finite_integer',
-      ];
+      const numericTypes = ['real', 'rational', 'integer'];
 
-      if (numericTypes.includes(this.current.value)) {
-        const baseType = this.advance().value;
+      const spelling =
+        RETIRED_NUMERIC_ALIASES[this.current.value] ?? this.current.value;
+      if (numericTypes.includes(spelling)) {
+        this.advance();
+        const baseType = spelling;
 
         if (this.match('<')) {
           const lowerBound = this.parseValue();
@@ -2156,7 +2186,8 @@ export class Parser {
 
   private parsePrimitiveType(): PrimitiveTypeNode | undefined {
     if (this.current.type === 'IDENTIFIER') {
-      const name = this.current.value;
+      const name =
+        RETIRED_NUMERIC_ALIASES[this.current.value] ?? this.current.value;
       if (PRIMITIVE_TYPES_SET.has(name as any)) {
         // `type` is both a primitive (the type of a reified type value) and,
         // before an identifier, the forward-reference marker of the reference

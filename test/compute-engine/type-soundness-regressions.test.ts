@@ -49,11 +49,11 @@ describe('SYM P0-16 — assume(x ∈ ℤ) narrows via the meet, not `!isSubtype`
     return [r, ce.symbol('q').type.toString()];
   };
 
-  it('finite_number ∈ ℤ → ok, narrowed to integer', () => {
-    // Since the finite-by-default flip `integer` sits below `finite_number`,
-    // so the meet is `integer` itself and the reduced form names the bare
-    // spelling rather than the `finite_integer` synonym.
-    const [r, t] = assumeInteger('finite_number');
+  it('number ∈ ℤ → ok, narrowed to integer', () => {
+    // `integer` sits below `number`, so the meet is `integer` itself. The old
+    // check asked for `isSubtype(assumed, declared)` in the wrong direction
+    // and reported a contradiction here.
+    const [r, t] = assumeInteger('number');
     expect(r).toBe('ok');
     expect(t).toBe('integer');
   });
@@ -87,7 +87,7 @@ describe('SYM P0-11 — Power/Root do not claim closure over negative exponents'
   });
 });
 
-describe('SYM P0-12 — finite_real is not over-claimed for poles / out-of-domain', () => {
+describe('SYM P0-12 — real is not over-claimed for poles / out-of-domain', () => {
   it('Ln(-2) is not typed real', () => {
     const ce = new ComputeEngine();
     // A negative-real logarithm is complex; isExtendedReal must not be a definitive true.
@@ -98,19 +98,19 @@ describe('SYM P0-12 — finite_real is not over-claimed for poles / out-of-domai
     const ce = new ComputeEngine();
     // Csc(0) = ~oo (typed complex); the static type must cover it.
     const t = ce.expr(['Csc', 0]).type;
-    expect(t.matches('finite_real')).toBe(false);
+    expect(t.matches('real')).toBe(false);
     expect(isSubtype('complex', t.type)).toBe(true);
   });
 
-  it('Arcsin(2) (out of domain) is not typed finite_real', () => {
+  it('Arcsin(2) (out of domain) is not typed real', () => {
     const ce = new ComputeEngine();
-    expect(ce.expr(['Arcsin', 2]).type.matches('finite_real')).toBe(false);
+    expect(ce.expr(['Arcsin', 2]).type.matches('real')).toBe(false);
   });
 
-  it('Sin of a real symbol is still finite_real (generic-real convention)', () => {
+  it('Sin of a real symbol is still real (generic-real convention)', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
-    expect(ce.expr(['Sin', 'x']).type.toString()).toBe('finite_real');
+    expect(ce.expr(['Sin', 'x']).type.toString()).toBe('real');
   });
 });
 
@@ -137,10 +137,10 @@ describe('SYM P0-15 — Multiply/Divide/Mod finiteness/NaN claims are sound', ()
     expect(t.matches('non_finite_number')).toBe(false);
   });
 
-  it('Mod(2, 0) is not typed finite_integer', () => {
+  it('Mod(2, 0) is not typed integer', () => {
     const ce = new ComputeEngine();
     // Mod(2,0) = NaN.
-    expect(ce.expr(['Mod', 2, 0]).type.matches('finite_integer')).toBe(false);
+    expect(ce.expr(['Mod', 2, 0]).type.matches('integer')).toBe(false);
   });
 
   it('Divide(∞, i) is not typed non_finite_number', () => {
@@ -178,44 +178,44 @@ describe('SYM P0-14 — three-valued isInteger / isRational', () => {
     expect(x.isExtendedReal).toBe(undefined);
   });
 
-  it('finite_real overlaps the integers → undefined', () => {
-    expect(forType('finite_real').isInteger).toBe(undefined);
+  it('real overlaps the integers → undefined', () => {
+    expect(forType('real').isInteger).toBe(undefined);
   });
 });
 
-describe('Tycho item 89 — rounding a symbolic finite_number stays integer-valued', () => {
+describe('Tycho item 89 — rounding a symbolic number stays integer-valued', () => {
   const ce = new ComputeEngine();
   const typeOf = (s: string) => ce.parse(s).type.toString();
 
   it('Round of a literal, a bare symbol and an arithmetic term all agree', () => {
-    // `4Q` types `finite_number`, whose `isExtendedReal` is `false` only in the sense
+    // `4Q` types `number`, whose `isExtendedReal` is `false` only in the sense
     // of "not PROVABLY real" — reading that as "complex" made the more
     // informative operand produce the weaker type.
-    expect(typeOf('\\mathrm{Round}(4.7)')).toBe('finite_integer');
-    expect(typeOf('\\mathrm{Round}(Q)')).toBe('finite_integer');
-    expect(typeOf('\\mathrm{Round}(4Q)')).toBe('finite_integer');
+    expect(typeOf('\\mathrm{Round}(4.7)')).toBe('integer');
+    expect(typeOf('\\mathrm{Round}(Q)')).toBe('integer');
+    expect(typeOf('\\mathrm{Round}(4Q)')).toBe('integer');
   });
 
   it('Floor/Ceil follow', () => {
-    expect(typeOf('\\lfloor 4Q \\rfloor')).toBe('finite_integer');
-    expect(typeOf('\\lceil 4Q \\rceil')).toBe('finite_integer');
+    expect(typeOf('\\lfloor 4Q \\rfloor')).toBe('integer');
+    expect(typeOf('\\lceil 4Q \\rceil')).toBe('integer');
   });
 
   it('a PROVABLY non-real argument still rounds component-wise', () => {
-    expect(typeOf('\\mathrm{Round}(1.2+3.4i)')).toBe('finite_complex');
-    expect(typeOf('\\mathrm{Round}(i)')).toBe('finite_complex');
+    expect(typeOf('\\mathrm{Round}(1.2+3.4i)')).toBe('complex');
+    expect(typeOf('\\mathrm{Round}(i)')).toBe('complex');
   });
 
   it('a precision argument never claims integer, whatever the finiteness', () => {
     // `Round(x, 2)` with `x: real` (finiteness unknown) used to fall through
     // to the integer claim while evaluating to `3.14`-like rationals.
     ce.declare('xr', 'real');
-    ce.declare('xf', 'finite_real');
-    expect(typeOf('\\mathrm{Round}(xr, 2)')).toBe('finite_real');
-    expect(typeOf('\\mathrm{Round}(xf, 2)')).toBe('finite_real');
-    expect(typeOf('\\mathrm{Round}(Q, 2)')).toBe('finite_real');
-    expect(typeOf('\\mathrm{Round}(3.14159, 2)')).toBe('finite_real');
-    expect(typeOf('\\mathrm{Round}(1.2+3.4i, 2)')).toBe('finite_complex');
+    ce.declare('xf', 'real');
+    expect(typeOf('\\mathrm{Round}(xr, 2)')).toBe('real');
+    expect(typeOf('\\mathrm{Round}(xf, 2)')).toBe('real');
+    expect(typeOf('\\mathrm{Round}(Q, 2)')).toBe('real');
+    expect(typeOf('\\mathrm{Round}(3.14159, 2)')).toBe('real');
+    expect(typeOf('\\mathrm{Round}(1.2+3.4i, 2)')).toBe('complex');
     expect(typeOf('\\mathrm{Round}(\\infty, 2)')).toBe('non_finite_number');
   });
 
@@ -225,7 +225,7 @@ describe('Tycho item 89 — rounding a symbolic finite_number stays integer-valu
   });
 
   it('a precision argument still gives a real, not an integer', () => {
-    expect(typeOf('\\mathrm{Round}(4.7, 2)')).toBe('finite_real');
+    expect(typeOf('\\mathrm{Round}(4.7, 2)')).toBe('real');
   });
 });
 

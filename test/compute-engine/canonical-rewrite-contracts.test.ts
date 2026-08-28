@@ -160,7 +160,7 @@ describe('Vector: content-lenient like the rest of the tensor family', () => {
   test('numeric vectors are unchanged', () => {
     // The canonical form is the Matrix rewrite, typed by its payload.
     const v = ce.box(['Vector', 1, 2]);
-    expect(v.type.toString()).toBe('matrix<finite_integer^(2x1)>');
+    expect(v.type.toString()).toBe('matrix<integer^(2x1)>');
     expect(v.evaluate().json).toEqual(['List', ['List', 1], ['List', 2]]);
   });
 

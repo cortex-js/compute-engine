@@ -34,18 +34,19 @@ describe('VERIFY', () => {
 
   test('supports Element/NotElement with type-style RHS', () => {
     const ce = new ComputeEngine();
-    ce.declare('x', 'finite_real');
-    expect(ce.verify(ce.expr(['Element', 'x', 'finite_real']))).toBe(true);
+    ce.declare('x', 'real');
+    expect(ce.verify(ce.expr(['Element', 'x', 'real']))).toBe(true);
 
     ce.declare('s', 'string');
     expect(ce.verify(ce.expr(['Element', 's', 'number']))).toBe(false);
     expect(ce.verify(ce.expr(['NotElement', 's', 'number']))).toBe(true);
 
-    ce.declare('r', 'real');
-    expect(ce.verify(ce.expr(['Element', 'r', 'finite_real']))).toBe(undefined);
-    expect(ce.verify(ce.expr(['NotElement', 'r', 'finite_real']))).toBe(
-      undefined
-    );
+    // A type that OVERLAPS the queried one without entailing it is undecided
+    // in both directions: `number` admits a real value and admits `±oo`,
+    // `~oo` and NaN too.
+    ce.declare('r', 'number');
+    expect(ce.verify(ce.expr(['Element', 'r', 'real']))).toBe(undefined);
+    expect(ce.verify(ce.expr(['NotElement', 'r', 'real']))).toBe(undefined);
   });
 
   // Regression tests for recursion bug (issue from 2026-02-01)

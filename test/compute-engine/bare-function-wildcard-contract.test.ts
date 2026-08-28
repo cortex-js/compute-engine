@@ -25,7 +25,7 @@ describe('bare `function` is a wildcard contract, not a signature adopter', () =
     expect(ce.symbol('f').type.toString()).toBe('function');
     // …while the held value carries the full signature…
     expect(ce.symbol('f').value?.type.toString()).toBe(
-      '(unknown) -> tuple<finite_number, finite_number, number>'
+      '(unknown) -> tuple<number, number, number>'
     );
     // …and the application's result shape flows through the value channel.
     expect(

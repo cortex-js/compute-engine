@@ -50,7 +50,7 @@ function factsFromType(t: Type): {
   // `non_finite_number` is one of its subtypes, so testing it covers `±∞`
   // as well as `~oo` — and `nan` is the NaN singleton, which is disjoint
   // from `infinity` and needs its own arm.
-  const finite: Tri = isSubtype(t, 'finite_number')
+  const finite: Tri = isSubtype(t, 'complex')
     ? true
     : isSubtype(t, 'infinity') || isSubtype(t, 'nan')
       ? false
@@ -222,7 +222,7 @@ export function describe(
       // with `w: number := +∞`, `Abs(hnan)` with `hnan := NaN` — while its
       // result type stays wide. The type channel alone cannot carry that
       // refutation, and without this read a consumer such as `Ceil(Abs(w))`
-      // narrows to `finite_integer` for an expression whose `.N()` is
+      // narrows to `integer` for an expression whose `.N()` is
       // `+oo`. `Expression.isFinite` on an application is the exact read
       // the expressions-shape gate performed on every derivation
       // (`provablyNonFiniteNumber`, `boxed-expression/numerics.ts`), so it

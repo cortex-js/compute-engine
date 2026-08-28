@@ -3949,9 +3949,9 @@ function receiverType(ops: ReadonlyArray<Expression>): Type | undefined {
   // not its value type (the solver-boundary rule of `solveArm`): with
   // `Self = 3`, `compare(3, 4)` would check argument 2 against the declared
   // `Self` — the value type `3` — and refute `4` as provably disjoint, where
-  // the pre-O9 receiver type `finite_integer` admitted it. A literal
+  // the pre-O9 receiver type `integer` admitted it. A literal
   // projects ALL the way to its tier (`stripNumericRanges`) — an
-  // over-double-range literal's sign range (`(finite_integer<0..>) & !0`
+  // over-double-range literal's sign range (`(integer<0..>) & !0`
   // for `10⁴⁰⁰`) is an intersection, which `isDecidedReceiverType` treats
   // as undecided, so leaving it would turn a decided pre-O9 receiver into
   // an undispatched one. Conformance lookups

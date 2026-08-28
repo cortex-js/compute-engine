@@ -109,7 +109,7 @@ export function createTypeErrorExpression(
     // A diagnostic must name the offending VALUE, not the tier it belongs
     // to. When the check ran inside a broadcast cell, the type it read was
     // deliberately widened (`broadcast-cell-widening.ts`), which would print
-    // "expected integer, got finite_real" for the element `2.5`. Re-read the
+    // "expected integer, got real" for the element `2.5`. Re-read the
     // operand's type outside the window to recover the precise text.
     //
     // Only when the widened reading is exactly what the caller passed: that

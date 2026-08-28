@@ -69,11 +69,11 @@ export class MachineNumericValue extends NumericValue {
       if (Number.isNaN(this.im)) return 'nan';
       if (!Number.isFinite(this.decimal)) return 'infinity';
       if (this.decimal === 0) return 'imaginary';
-      return 'finite_complex';
+      return 'complex';
     }
     if (!Number.isFinite(this.decimal)) return 'non_finite_number';
-    if (Number.isInteger(this.decimal)) return 'finite_integer';
-    return 'finite_real';
+    if (Number.isInteger(this.decimal)) return 'integer';
+    return 'real';
   }
 
   get isExact(): boolean {

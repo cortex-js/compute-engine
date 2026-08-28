@@ -29,7 +29,7 @@ describe('R4 — the inferred-type revision is a pure live read', () => {
     // Refute the whole chain's guess with one write to the base…
     ce.assign('base', ce.box(['List', 10, 30]));
     // …and every link revises on read, through seven inferred links.
-    expect(ce.symbol('c8').type.toString()).toBe('vector<finite_integer^2>');
+    expect(ce.symbol('c8').type.toString()).toBe('vector<integer^2>');
     expect(ce.box('c8').evaluate().toString()).toBe('[18,38]');
   });
 
@@ -43,9 +43,9 @@ describe('R4 — the inferred-type revision is a pure live read', () => {
     ce.assign('y', ce.box(['Add', 'x', 1]));
     expect(ce.symbol('y').type.toString()).toBe('number');
     ce.assign('x', ce.box(['List', 10, 30]));
-    expect(ce.symbol('y').type.toString()).toBe('vector<finite_integer^2>');
+    expect(ce.symbol('y').type.toString()).toBe('vector<integer^2>');
     ce.assign('z', 1); // unrelated
-    expect(ce.symbol('y').type.toString()).toBe('vector<finite_integer^2>');
+    expect(ce.symbol('y').type.toString()).toBe('vector<integer^2>');
   });
 
   test('the read writes nothing, and the returned type is identity-stable', () => {

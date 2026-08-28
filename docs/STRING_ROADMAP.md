@@ -295,10 +295,10 @@ Checking each kind against each operation:
 
 - **`tuple` breaks every one of them.** A tuple's type carries its arity
   and per-position element types, so `Reverse((1, "a"))` must be
-  `tuple<string, finite_integer>`, and `Rest`/`Most`/`Take`/`Drop`/
+  `tuple<string, integer>`, and `Rest`/`Most`/`Take`/`Drop`/
   `Slice` change arity. This is not hypothetical: shipped `Reverse` is
   `(T) -> T where T: indexed_collection` and `tuple` matches that bound,
-  so `Reverse((1, "a"))` STATICALLY claims `tuple<finite_integer,
+  so `Reverse((1, "a"))` STATICALLY claims `tuple<integer,
   string>` for the value `("a", 1)` — a live defect, filed in
   `ROADMAP.md`, that this phase fixes.
 - **`range` breaks them too, in two ways** (both verified): the type has
@@ -346,7 +346,7 @@ The live `Reverse`-on-tuple defect is fixed here, not deferred.
 
 The costs, accepted: two breaking rounds instead of one (Phase 0 changes
 static result types — `Reverse((1, "a"))` newly types as
-`list<finite_integer | string>` (the per-kind rule's `list<T>` for a
+`list<integer | string>` (the per-kind rule's `list<T>` for a
 tuple operand; the value is a materialized `List`, not a tuple), and
 operators that silently promised
 `(T) -> T` for exotic kinds now say `list<T>` — plus runtime value kinds
@@ -979,7 +979,7 @@ count is bounded by the subject length).
       `RotateLeft`/`RotateRight`, `Filter`: `string -> string` (Phase 1),
       `list -> list`, every other indexed kind → `list<T>`. This FIXES
       the live `Reverse`-on-tuple defect (filed in `ROADMAP.md`), where
-      the current `(T) -> T` signature claims `tuple<finite_integer,
+      the current `(T) -> T` signature claims `tuple<integer,
       string>` for the value `("a", 1)`. Separately, keep/extend runtime
       laziness so `Take(1..10^6, 3)` still returns a `Range` VALUE — a
       perf property, independent of the static type (see the decoupling
@@ -1038,7 +1038,7 @@ count is bounded by the subject length).
       `compile.test.ts`.
 
    Breaking: static result types change (`Reverse((1, "a"))` newly types
-   as `list<finite_integer | string>`; operators that silently promised
+   as `list<integer | string>`; operators that silently promised
    `(T) -> T` for exotic kinds now say `list<T>`; qualifying `Range`
    calls newly type as `range`) — CHANGELOG migration note. Ships
    before, and independently of, everything below. **Phase 0 shipped in

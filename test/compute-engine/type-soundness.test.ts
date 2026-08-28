@@ -8,7 +8,7 @@ import { isSubtype } from '../../src/common/type/subtype';
  * Contract: the type of the *exact* `evaluate()` result must be a subtype of
  * the statically-inferred `.type`. We check the `evaluate()` path (which stays
  * exact/symbolic) rather than `.N()`: `.N()` numericizes an exact rational to a
- * float (typed `finite_real`, never `finite_rational`) and can overflow a large
+ * float (typed `real`, never `rational`) and can overflow a large
  * finite value to ±∞, both of which are float-*representation* artifacts, not
  * type-handler unsoundness (documented as P2-24).
  *
@@ -70,10 +70,10 @@ function soundness(expr: any): string | null {
   }
   if (!v.isValid) return null;
   // A number literal's PUBLIC type is its bare tier (`1/4` is
-  // `finite_rational`), which cannot witness a ranged static claim such as
-  // `finite_rational<0..>` even when the value plainly satisfies it. The
+  // `rational`), which cannot witness a ranged static claim such as
+  // `rational<0..>` even when the value plainly satisfies it. The
   // literal's value-carrying handler type (`_literalType` — `0.25`,
-  // `finite_rational<0.25..0.25>`) is the precise type of the value, so it
+  // `rational<0.25..0.25>`) is the precise type of the value, so it
   // is what soundness must be judged against; a symbolic result keeps the
   // public-type comparison.
   const evalT = v._literalType ?? v.type.type;

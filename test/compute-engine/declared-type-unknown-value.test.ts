@@ -60,7 +60,7 @@ describe('a declared type admits a value of unknown type', () => {
     expect(ce.box('xs').type.toString()).toBe('list');
     // A later assignment still refines the element slot from real evidence.
     executeEpsil(ce, 'xs = [1, 2, 3]');
-    expect(ce.box('xs').type.toString()).toBe('list<finite_integer>');
+    expect(ce.box('xs').type.toString()).toBe('list<integer>');
   });
 
   test('a call with a known return type refines as usual', () => {

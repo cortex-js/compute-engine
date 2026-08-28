@@ -98,14 +98,18 @@ function recordDeclaredByAssumption(
 }
 
 /**
- * Infer a promoted type from a value expression.
- * This promotes specific types to more general ones suitable for symbols:
- * - finite_integer -> integer
- * - rational -> real
- * - finite_real_number -> real
- * - complex/imaginary -> number
- * - +oo, -oo, ~oo -> infinity
- * - NaN -> nan
+ * Infer a promoted type from a value expression. The promotion drops the
+ * detail a single value carries — a range, or a literal type — and keeps only
+ * the tier a symbol can be re-assigned within:
+ *
+ * - an integer value, bounded or not, promotes to bare `integer`.
+ * - a rational value promotes to `real`, one rung up: a symbol that held a
+ *   rational is expected to accept any real.
+ * - a real value promotes to bare `real`.
+ * - a complex or imaginary value promotes to `number`, the numeric top.
+ * - `+oo`, `-oo` and `~oo` promote to `infinity`, so that a symbol holding
+ *   one infinity accepts another.
+ * - NaN promotes to `nan`, which keeps the marker visible.
  *
  * This table must stay identical to the two other copies of it,
  * `widenAssignedType`/`inferTypeFromValue` in
@@ -114,16 +118,16 @@ function recordDeclaredByAssumption(
  * assumption, a fresh declaration or an assignment supplied its value.
  */
 function inferTypeFromValue(ce: ComputeEngine, value: Expression): BoxedType {
-  // finite_integer, integer, etc. -> integer
+  // An integer value, ranged or not, keeps its tier and drops the range.
   if (value.type.matches('integer')) return ce.type('integer');
 
-  // rational -> real
+  // A rational value moves one rung up, to the reals.
   if (value.type.matches('rational')) return ce.type('real');
 
-  // finite_real_number, real -> real
+  // A real value keeps its tier and drops the range or the literal.
   if (value.type.matches('real')) return ce.type('real');
 
-  // complex, imaginary -> number
+  // A complex or imaginary value promotes to the numeric top.
   if (value.type.matches('complex')) return ce.type('number');
 
   // An infinite value and NaN are disjoint from `real` and from `complex`, so
@@ -744,12 +748,25 @@ function assumeInequality(proposition: Expression): AssumeResult {
     // Real/Imaginary/Abs/Argument(x) implies at most `x: number` — never
     // `x: real` — and only when the type is currently unknown/inferred.
     // Exception: a finite upper bound on `Abs(x)` implies `x` is finite
-    // (design §3.2), so refine to `finite_number` in that case.
+    // (design §3.2), so refine to `complex` — the widest FINITE numeric
+    // type — in that case.
+    //
+    // `complex` is the honest claim and it is deliberately not narrowed to a
+    // real type. A bound on the modulus says nothing about the imaginary
+    // part, so a symbol that only carries `|x| < c` may still be a
+    // non-real complex number. The cost is that simplifications gated on a
+    // real symbol decline for it: `sqrt(q^2)` stays `sqrt(q^2)` instead of
+    // becoming `|q|`, which is correct, because that rewrite is false at
+    // `q = i` (`sqrt(i^2) = sqrt(-1) = i`, while `|i| = 1`). The benefit we
+    // keep is the finiteness entailment: the symbol is known finite, so
+    // every consumer that needs finiteness alone is served. A caller that
+    // wants the real-only rewrites must state the realness separately, for
+    // example with an additional `assume(q in RealNumbers)`.
     const impliedType: Type =
       partSubject.part === 'abs' &&
       newBounds !== undefined &&
       numericBoundValue(newBounds.upper) !== undefined
-        ? 'finite_number'
+        ? 'complex'
         : 'number';
     refineTypeIfUnknown(ce, partSubject.symbol, impliedType, result);
 
@@ -1276,8 +1293,8 @@ function refineSymbolType(
     // that meet is empty. The old check (`!isSubtype(assumed, declared)`)
     // misfired whenever the assumed type was not a *subtype* of the declared
     // one even though they overlapped, e.g. `assume(q ∈ ℤ)` on a
-    // `finite_number`-declared `q` (`integer ⊄ finite_number` only because
-    // `integer` admits ±∞ — the meet is the satisfiable `finite_integer`).
+    // `number`-declared `q` (`integer ⊄ number` in the subtype direction
+    // the old check asked for — the meet is the satisfiable `integer`).
     if (
       def.value.type &&
       !def.value.type.isUnknown &&

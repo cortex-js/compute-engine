@@ -49,17 +49,17 @@ describe('TYPE VARIABLES / Chop — `(T) -> T where T: number`', () => {
   test('result type echoes the operand (exact and inexact)', () => {
     const ce = engine();
     expect(ce.function('Chop', [ce.number(2)]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
     expect(ce.function('Chop', [ce.number(2.5)]).type.toString()).toBe(
-      'finite_real'
+      'real'
     );
-    expect(ce.box(['Chop', 2]).type.toString()).toBe('finite_integer');
+    expect(ce.box(['Chop', 2]).type.toString()).toBe('integer');
     expect(ce.parse('\\operatorname{chop}(2)').type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
     expect(ce.parse('\\operatorname{chop}(2.5)').type.toString()).toBe(
-      'finite_real'
+      'real'
     );
   });
 
@@ -82,14 +82,14 @@ describe('TYPE VARIABLES / Chop — `(T) -> T where T: number`', () => {
     // Admission is checked at the scalar base (`integer <: number`), but `T`
     // binds the whole collection, so the result type is the COLLECTION.
     expect(ce.box(['Chop', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(
       ce.function('Chop', [ce.box(['List', 1, 2, 3])]).type.toString()
-    ).toBe('vector<finite_integer^3>');
+    ).toBe('vector<integer^3>');
     expect(
       ce.parse('\\operatorname{chop}(\\lbrack1,2,3\\rbrack)').type.toString()
-    ).toBe('vector<finite_integer^3>');
+    ).toBe('vector<integer^3>');
 
     ce.declare('chopL', 'list<integer>');
     expect(ce.box(['Chop', 'chopL']).type.toString()).toBe('list<integer>');
@@ -142,7 +142,7 @@ describe('TYPE VARIABLES / Negate — conversion DECLINED (blocking behavior)', 
     expect(ce.box(['Negate', 2.5]).type.toString()).toBe('-2.5');
     expect(ce.parse('-2').type.toString()).toBe('-2');
     expect(ce.box(['Negate', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(ce.box(['Negate', ['List', 1, 2, 3]]).evaluate().json).toEqual([
       'List',
@@ -158,18 +158,18 @@ describe('TYPE VARIABLES / PlusMinus — `(T, U) -> tuple<T, U> where T: value, 
     const ce = engine();
     expect(
       ce.function('PlusMinus', [ce.number(2), ce.number(3)]).type.toString()
-    ).toBe('tuple<finite_integer, finite_integer>');
+    ).toBe('tuple<integer, integer>');
     expect(ce.box(['PlusMinus', 2, 3]).type.toString()).toBe(
-      'tuple<finite_integer, finite_integer>'
+      'tuple<integer, integer>'
     );
     // Mixed exact/inexact: each position keeps its own type — the reason the
     // signature needs TWO variables.
     expect(ce.box(['PlusMinus', 2.5, 3]).type.toString()).toBe(
-      'tuple<finite_real, finite_integer>'
+      'tuple<real, integer>'
     );
     expect(
       ce.parse('\\operatorname{PlusMinus}(2,3)').type.toString()
-    ).toBe('tuple<finite_integer, finite_integer>');
+    ).toBe('tuple<integer, integer>');
   });
 
   test('evaluation is unchanged', () => {
@@ -198,12 +198,12 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
     const ce = engine();
     expect(
       ce.function('Remainder', [ce.number(5), ce.number(3)]).type.toString()
-    ).toBe('finite_integer');
-    expect(ce.box(['Remainder', 5, 3]).type.toString()).toBe('finite_integer');
-    expect(ce.box(['Remainder', 5.5, 3]).type.toString()).toBe('finite_real');
+    ).toBe('integer');
+    expect(ce.box(['Remainder', 5, 3]).type.toString()).toBe('integer');
+    expect(ce.box(['Remainder', 5.5, 3]).type.toString()).toBe('real');
     expect(
       ce.parse('\\operatorname{Remainder}(5,3)').type.toString()
-    ).toBe('finite_integer');
+    ).toBe('integer');
 
     ce.declare('remN', 'integer');
     ce.declare('remR', 'real');
@@ -214,7 +214,7 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
     const ce = engine();
     expect(
       ce.box(['Remainder', ['List', 10, 11, 12], 7]).type.toString()
-    ).toBe('vector<finite_integer^3>');
+    ).toBe('vector<integer^3>');
     ce.declare('remL', 'list<integer>');
     expect(ce.box(['Remainder', 'remL', 3]).type.toString()).toBe(
       'list<integer>'
@@ -258,9 +258,9 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
     // from the literal, and the symbol narrows to the instantiated parameter.
     const ce = engine();
     expect(ce.box(['Remainder', 'remX', 3]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
-    expect(ce.box('remX').type.toString()).toBe('finite_integer');
+    expect(ce.box('remX').type.toString()).toBe('integer');
   });
 
   test('the declared bound still rejects a non-number', () => {

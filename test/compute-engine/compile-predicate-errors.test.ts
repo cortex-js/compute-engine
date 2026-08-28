@@ -12,7 +12,7 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * compiled callback is a plain arrow / Python lambda — the annotation is not
  * emitted at all — so before this gate landed
  *
- *     Filter(ds, (n: finite_integer) ↦ n > 0)   over   [1.5, 2.5]
+ *     Filter(ds, (n: integer) ↦ n > 0)   over   [1.5, 2.5]
  *
  * compiled to `((_f) => (_.ds).filter((_x) => _f(_x)))(((n) => 0 < n))` and RAN
  * to `[1.5, 2.5]` where the interpreter answers two `Error`s. Same for `Map`,
@@ -67,39 +67,39 @@ describe('Compiled callbacks with an unenforceable parameter annotation', () => 
   for (const op of [...PREDICATE_OPS, 'Map', 'FlatMap'] as const) {
     describe(op, () => {
       /** `ds: list<number>` — a float element does not satisfy the
-       * `finite_integer` annotation, and nothing proves it does. */
+       * `integer` annotation, and nothing proves it does. */
       const violating = () => {
         const ce = new ComputeEngine();
         ce.declare('ds', 'list<number>');
         return ce.box(
-          opCall(op, 'ds', annotated('n', 'finite_integer', opBody(op, 'n')))
+          opCall(op, 'ds', annotated('n', 'integer', opBody(op, 'n')))
         );
       };
 
       it('fails closed on the JavaScript target', () => {
         expect(() => js(violating())).toThrow(
-          /callback parameter 'n' is annotated 'finite_integer'/
+          /callback parameter 'n' is annotated 'integer'/
         );
         expect(() => js(violating())).toThrow(/Fail closed \(D6\)/);
       });
 
       it('fails closed on the Python target', () => {
         expect(() => python.compile(violating())).toThrow(
-          /callback parameter 'n' is annotated 'finite_integer'/
+          /callback parameter 'n' is annotated 'integer'/
         );
       });
 
       it('reports success: false (not a silent value) with fallback on', () => {
         const r = compile(violating(), { fallback: true });
         expect(r.success).toBe(false);
-        expect(String(r.error)).toContain('finite_integer');
+        expect(String(r.error)).toContain('integer');
       });
 
       it('compiles when the element type provably satisfies the annotation', () => {
         const ce = new ComputeEngine();
-        ce.declare('ds', 'list<finite_integer>');
+        ce.declare('ds', 'list<integer>');
         const expr = ce.box(
-          opCall(op, 'ds', annotated('n', 'finite_integer', opBody(op, 'n')))
+          opCall(op, 'ds', annotated('n', 'integer', opBody(op, 'n')))
         );
         const r = js(expr);
         expect(r.success).toBe(true);
@@ -193,7 +193,7 @@ describe('the retraction repro', () => {
     expect(expr.toMathJson()).toEqual([
       'Filter',
       'ds',
-      ['Function', ['Less', 0, 'n'], ['Typed', 'n', "'finite_integer'"]],
+      ['Function', ['Less', 0, 'n'], ['Typed', 'n', "'integer'"]],
     ]);
     // ...and compiles while the source still satisfies it.
     expect(js(expr).run!({})).toEqual([1, 2, 3]);
@@ -206,7 +206,7 @@ describe('the retraction repro', () => {
   });
 
   it('declines on the Python target once the source retracts', () => {
-    expect(() => python.compile(retracted())).toThrow(/finite_integer/);
+    expect(() => python.compile(retracted())).toThrow(/integer/);
   });
 
   it('the interpreter answers with per-element errors', () => {
@@ -226,7 +226,7 @@ describe('a symbol-valued annotated callback', () => {
       ce.box([
         'Function',
         ['Greater', 'n', 0],
-        ['Typed', 'n', "'finite_integer'"],
+        ['Typed', 'n', "'integer'"],
       ])
     );
     ce.declare('ds', `list<${elementType}>`);
@@ -235,11 +235,11 @@ describe('a symbol-valued annotated callback', () => {
 
   it('fails closed when the element type does not satisfy the annotation', () => {
     expect(() => js(withNamed('number'))).toThrow(/Fail closed \(D6\)/);
-    expect(() => python.compile(withNamed('number'))).toThrow(/finite_integer/);
+    expect(() => python.compile(withNamed('number'))).toThrow(/integer/);
   });
 
   it('compiles when it does', () => {
-    expect(js(withNamed('finite_integer')).success).toBe(true);
+    expect(js(withNamed('integer')).success).toBe(true);
   });
 });
 
@@ -254,7 +254,7 @@ describe('combiner and index callbacks', () => {
   const reduceExpr = (
     accType: string | null,
     elType: string,
-    sourceElType = 'finite_integer'
+    sourceElType = 'integer'
   ) => {
     const ce = new ComputeEngine();
     ce.declare('ds', `list<${sourceElType}>`);
@@ -268,17 +268,17 @@ describe('combiner and index callbacks', () => {
   };
 
   it('Reduce declines an annotated accumulator (its type is not provable)', () => {
-    expect(() => js(reduceExpr('integer', 'finite_integer'))).toThrow(
+    expect(() => js(reduceExpr('integer', 'integer'))).toThrow(
       /callback parameter 'a'/
     );
   });
 
   it('Reduce admits an element annotation the source satisfies', () => {
-    expect(js(reduceExpr(null, 'finite_integer')).success).toBe(true);
+    expect(js(reduceExpr(null, 'integer')).success).toBe(true);
   });
 
   it('Reduce declines an element annotation the source does not satisfy', () => {
-    expect(() => js(reduceExpr(null, 'finite_integer', 'number'))).toThrow(
+    expect(() => js(reduceExpr(null, 'integer', 'number'))).toThrow(
       /callback parameter 'n'/
     );
   });
@@ -366,22 +366,22 @@ describe('a HAND-annotated union callback over a satisfying source', () => {
   const UNION_CB = [
     'Function',
     ['Equal', 'x', 1],
-    ['Typed', 'x', "'finite_integer | string'"],
+    ['Typed', 'x', "'integer | string'"],
   ];
 
   it('is admitted by the annotation gate, then declines on the BODY', () => {
     const ce = new ComputeEngine();
-    // `list<finite_integer | string>` — the annotation is provably satisfied.
+    // `list<integer | string>` — the annotation is provably satisfied.
     const src = ['List', 1, { str: 'a' }, 2];
     expect(ce.box(src as any).type.toString()).toBe(
-      'list<finite_integer | string>'
+      'list<integer | string>'
     );
 
     const expr = ce.box(['Filter', src, UNION_CB] as any);
     // The annotation survives onto the callback (hand-written unions are not
     // the excluded case — auto-STAMPING them is).
     expect(expr.ops[1].type.toString()).toBe(
-      '(x: finite_integer | string) -> boolean'
+      '(x: integer | string) -> boolean'
     );
 
     // Fail-closed on both targets: the decline comes from the body's `Equal`

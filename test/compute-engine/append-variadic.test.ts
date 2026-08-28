@@ -453,12 +453,12 @@ describe('Append: the result type folds the appended values in', () => {
   // `joinResultType([ops[0]])`, which ignored the appended value's type.
   test('a string appended to an integer list widens the element type', () =>
     expect(ce.box(['Append', ['List', 1, 2], { str: 'x' }]).type.toString()).toBe(
-      'list<finite_integer | string>'
+      'list<integer | string>'
     ));
 
   test('a homogeneous append does not widen', () =>
     expect(ce.box(['Append', ['List', 1, 2], 3]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     ));
 
   test('the flattened form agrees with the nested form', () => {
@@ -502,17 +502,17 @@ describe('Append: the result type folds the appended values in', () => {
 describe('Append: a tuple SOURCE contributes its ELEMENT type', () => {
   // `joinResultType` holds a tuple operand ATOMIC, but `Append` ENUMERATES its
   // source, so delegating the source contribution to it typed
-  // `Append((1,2), 3)` as `list<finite_integer | tuple<…>>` — a tuple in the
+  // `Append((1,2), 3)` as `list<integer | tuple<…>>` — a tuple in the
   // element type that no element ever has.
   test('Append((1,2), 3) has no tuple in its element type', () => {
     const t = ce.box(['Append', ['Tuple', 1, 2], 3]).type.toString();
     expect(t).not.toMatch(/tuple/);
-    expect(t).toBe('list<finite_integer>');
+    expect(t).toBe('list<integer>');
   });
 
   test('a 3-ary tuple source too', () =>
     expect(ce.box(['Append', ['Tuple', 1, 2], 3, 4]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     ));
 
   test('the flattened form agrees with the nested form', () =>
@@ -523,14 +523,14 @@ describe('Append: a tuple SOURCE contributes its ELEMENT type', () => {
   test('a TRAILING tuple is still an atomic element', () => {
     const e = ce.box(['Append', ['List', ['Tuple', 1, 2]], ['Tuple', 3, 4]]);
     expect(e.type.toString()).toBe(
-      'list<tuple<finite_integer, finite_integer>>'
+      'list<tuple<integer, integer>>'
     );
   });
 
   test('a heterogeneous tuple source widens to the union of its members', () =>
     expect(
       ce.box(['Append', ['Tuple', 1, { str: 'x' }], 2]).type.toString()
-    ).toBe('list<finite_integer | string>'));
+    ).toBe('list<integer | string>'));
 });
 
 describe('Append: the 1-ary identity form (non-strict)', () => {

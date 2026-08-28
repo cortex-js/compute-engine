@@ -71,10 +71,10 @@ describe('Annotated function literal — typing (§6.1, §6.2)', () => {
       ['Add', ['Multiply', 'x', 2], 1],
       ['Typed', 'x', "'integer'"],
     ]);
-    // The inner `x * 2` is typed from the integer annotation (finite_integer),
-    // not the broad `finite_number` it would be for an unknown parameter.
+    // The inner `x * 2` is typed from the integer annotation (integer),
+    // not the broad `number` it would be for an unknown parameter.
     const mul = f.ops[0].ops[0].ops[0];
-    expect(mul.type.toString()).toBe('finite_integer');
+    expect(mul.type.toString()).toBe('integer');
 
     const untyped = ce.box([
       'Function',
@@ -82,7 +82,7 @@ describe('Annotated function literal — typing (§6.1, §6.2)', () => {
       'x',
     ]);
     const mulUntyped = untyped.ops[0].ops[0].ops[0];
-    expect(mulUntyped.type.toString()).toBe('finite_number');
+    expect(mulUntyped.type.toString()).toBe('number');
   });
 
   test('return ascription is used verbatim (bypasses widening)', () => {
@@ -118,7 +118,7 @@ describe('Annotated function literal — typing (§6.1, §6.2)', () => {
     // a finite-numeric body claim unsound. Since the finite-by-default flip
     // the bare name `integer` excludes the infinities, so this parameter
     // cannot bind one and `x/2` keeps its finite claim.
-    expect(f.type.toString()).toBe('(x: integer) -> finite_real');
+    expect(f.type.toString()).toBe('(x: integer) -> real');
   });
 
   test('a param that does NOT prove finiteness still widens', () => {

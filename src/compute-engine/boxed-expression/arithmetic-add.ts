@@ -343,7 +343,7 @@ export function absorbScalarsIntoCells(
   // kind a multi-dimensional shape lives in `dimensions` rather than in nested
   // `elements`, so read `elements` directly: `collectionElementType` would
   // answer a `matrix`'s ROW type (`vector`), and widening a scalar into that
-  // produced the nonsense `list<list<finite_integer | vector>>` for `2Y`.
+  // produced the nonsense `list<list<integer | vector>>` for `2Y`.
   const elt =
     typeof collectionType !== 'string' && collectionType.kind === 'list'
       ? collectionType.elements
@@ -353,7 +353,7 @@ export function absorbScalarsIntoCells(
   // collection (`list<list<number>>`, the type of `List(L, L)` for
   // `L: list<number>`) carries its inner shape in `elements` instead, so the
   // scalar folds into the INNER cells: recurse. Widening a scalar against a
-  // collection cell would produce `list<finite_integer | list<number>>` — a
+  // collection cell would produce `list<integer | list<number>>` — a
   // union of a scalar and a collection, which is never inhabited by the
   // evaluated value (every element stays a list) and makes
   // `type.matches('collection')` answer a confident `false`.
@@ -395,9 +395,9 @@ export function absorbScalarsIntoCells(
   } else {
     cell = widen(stripNumericRanges(elt), ...scalars);
     // Neither sum nor product is closed over `imaginary`: `i + (-i) = 0` and
-    // `i · i = -1` are both real. `finite_complex` covers the closure — the
+    // `i · i = -1` are both real. `complex` covers the closure — the
     // same repair the scalar tail of `addType` applies to its final widen.
-    if (cell === 'imaginary') cell = 'finite_complex';
+    if (cell === 'imaginary') cell = 'complex';
   }
   // Nothing was sharpened (the new cell type is equivalent to the element
   // type, either because the widen added nothing or because the nested recursion
@@ -422,7 +422,7 @@ export function absorbScalarsIntoCells(
 }
 
 export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
-  if (args.length === 0) return 'finite_integer'; // = 0
+  if (args.length === 0) return 'integer'; // = 0
   if (args.length === 1) return args[0].type;
   // Numeric tuples (points/vectors) add component-wise, preserving the tuple
   // type. Handle ANY tuple presence before the NaN/finiteness early-returns: a
@@ -459,7 +459,7 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
     ) {
       // The scalar co-operands fold INTO the cells elementwise, so the
       // honest result cell type widens the tensor's cells with the scalar
-      // types: `[1,2] + x` has `number` cells, not `finite_integer` — the
+      // types: `[1,2] + x` has `number` cells, not `integer` — the
       // declared type must remain a sound UPPER bound of the evaluated
       // value (the honest literal cell type made verbatim propagation
       // over-narrow).
@@ -476,14 +476,14 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // (like a tuple's), which would otherwise collapse the sum to `number`
   // (this is why `X-Y`/`3X+2Y` used to mis-type once their scaled terms
   // became collection-typed). The final `widen` still produces the honest
-  // `finite_integer | matrix` union for a scalar-plus-matrix mix like `X+1`.
+  // `integer | matrix` union for a scalar-plus-matrix mix like `X+1`.
   if (args.some((x) => isLinearAlgebraCollection(x))) {
     // A BROADCAST-shaped collection operand (list-kind: `vector<n>`, `matrix`,
     // `list<E>`) absorbs scalar operands elementwise — `V+1`, `matrix+1`,
     // `2·[1,2,3]+a` all evaluate to the collection, never to a scalar. Widen
     // over the collection operands ONLY, so no unreachable scalar arm enters
     // the result. This matters beyond tidiness: union matching is all-members,
-    // so a `finite_integer | vector<3>` makes `type.matches('collection')`
+    // so a `integer | vector<3>` makes `type.matches('collection')`
     // answer a confident `false` on a value that is always a collection
     // (Tycho item 67 — consumers route on exactly that query; it also made
     // `MatrixMultiply(row, aM₁+M₂)` reject a valid matrix operand).
@@ -515,7 +515,7 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
       // The scalar operands fold INTO the cells elementwise (no scalar arm
       // in the result — item 67), so they widen the CELL type, keeping the
       // declared type a sound upper bound: `2·[1,2,3] + a` has `number`
-      // cells (`vector<3>`), not `finite_integer` — the evaluated value's
+      // cells (`vector<3>`), not `integer` — the evaluated value's
       // elements include `a`.
       const scalars = args.filter((x) => !isBroadcastShaped(x));
       return absorbScalarsIntoCells(
@@ -533,7 +533,7 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // broadcastable inner node has no meaningful `isFinite`, and an
   // `unknown`-typed leaf's `isNaN`/`isFinite` are `undefined`, so it would
   // otherwise fall through to the scalar `widen` tail and mis-type. The
-  // `imaginary` → `finite_complex` closure is applied inside the helper.
+  // `imaginary` → `complex` closure is applied inside the helper.
   if (args.some((x) => isPossiblyCollectionTyped(x)))
     return broadcastableResultTypeOf(args);
   if (args.some((x) => x.isNaN)) return 'number';
@@ -571,9 +571,9 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // arithmetic over the operands.
   const t = widen(...args.map((x) => stripNumericRanges(x.type.type)));
   // `imaginary + imaginary` is not closed under addition: the imaginary parts
-  // can cancel to 0, which is *real* (P0-13). 0 is `finite_integer` and the
-  // non-cancelling sums stay `imaginary`, both covered by `finite_complex`.
-  if (t === 'imaginary') return 'finite_complex';
+  // can cancel to 0, which is *real* (P0-13). 0 is `integer` and the
+  // non-cancelling sums stay `imaginary`, both covered by `complex`.
+  if (t === 'imaginary') return 'complex';
   // Interval refinement (the interval-arithmetic half of ROADMAP "Ranged
   // types…", plan doc `docs/plans/2026-08-27-interval-arithmetic-result-
   // types.md`): fold the operands' intervals with interval ADDITION — a

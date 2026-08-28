@@ -424,7 +424,7 @@ describe('MatchesType: the R9 decision regime (phase 2)', () => {
   });
 
   test('an unresolved exact application stays symbolic', () => {
-    // `Ln(2)` is exact and stays symbolic; its type (`finite_real`) overlaps
+    // `Ln(2)` is exact and stays symbolic; its type (`real`) overlaps
     // `integer` without deciding it, and the node is NOT a value form — the
     // type route cannot prove irrationality, so the test must not guess.
     expect(ev(['MatchesType', ['Ln', 2], { str: 'integer' }]).toString())

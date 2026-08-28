@@ -690,7 +690,7 @@ describe('Matrix theory', () => {
 
   test(`row-vector . (a M1 + M2) in fused form`, () => {
     // The natural single-expression form used to error: the matrix-valued Add
-    // operand was assigned the union type `finite_number | matrix<2x3>` during
+    // operand was assigned the union type `number | matrix<2x3>` during
     // canonicalization and rejected by MatrixMultiply's signature. FIXED —
     // `addType` no longer widens an unreachable scalar arm into a broadcast
     // collection, so the operand types `matrix<2x3>` and the product evaluates

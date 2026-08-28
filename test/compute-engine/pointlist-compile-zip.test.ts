@@ -378,7 +378,7 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     // kernel was emitted with the `NaN` absence marker in every point. A
     // `PointList` states its arity by construction — one coordinate per
     // component, whatever the source lengths are — so the type is now
-    // `list<tuple<finite_integer, number>>` and the LIST route reaches the
+    // `list<tuple<integer, number>>` and the LIST route reaches the
     // same type-check decline the SINGLE-point route has had since item 138
     // (the pin directly below). The `NaN` marker keeps its remaining ground:
     // a base whose arity is genuinely not statically known, e.g. a symbol
@@ -386,7 +386,7 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     const ce = zipEngine();
     const expr = ['PointZ', ['PointList', -6, 'n']];
     expect(ce.box(['PointList', -6, 'n']).type.toString()).toBe(
-      'list<tuple<finite_integer, number>>'
+      'list<tuple<integer, number>>'
     );
     expect(ce.box(expr as any).isValid).toBe(false);
     expect(() => js.compile(ce.box(expr as any))).toThrow(

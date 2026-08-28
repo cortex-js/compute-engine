@@ -131,7 +131,7 @@ describe('DISTANCE broadcasts over a point list (Tycho item 130)', () => {
     // Point-to-point is the SCALAR — reported as the real it is (a distance
     // is the norm of a difference), not the wide `number`.
     const d = ce.box(['Distance', P, P]);
-    expect(d.type.toString()).toBe('finite_real');
+    expect(d.type.toString()).toBe('real');
     expect(d.type.matches('collection')).toBe(false);
   });
 
@@ -411,7 +411,7 @@ describe('POINTZ on a 2-D point is a dimension error (item 138 part 3)', () => {
     e.declare('u', 'unknown');
     e.assign('u', e.box(['Tuple', 1, 2]));
     expect(e.box('u').type.toString()).toBe(
-      'tuple<finite_integer, finite_integer>'
+      'tuple<integer, integer>'
     );
     const boxed = e.box(['PointZ', 'u']);
     expect(boxed.isValid).toBe(false);

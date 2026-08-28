@@ -1550,7 +1550,7 @@ export class BaseCompiler {
    * Fold-before-shape (Tycho item 229): downgrade a `true` complexness
    * verdict to `false` when the node is a closed pure scalar whose memoized
    * constant fold is a real number. `√(5−√5)` — an exact value of
-   * `cos`/`sin`(π·rational) — types the `finite_complex` hedge and would
+   * `cos`/`sin`(π·rational) — types the `complex` hedge and would
    * promote through `_SYS.csqrt`, yet its value is the plain real 1.6625…;
    * with the override, `tryConstantFold` inlines that literal (its
    * complex-shape gate reads this same oracle) and every analysis reports
@@ -1753,8 +1753,8 @@ export class BaseCompiler {
 
   /**
    * Whether the compilation in progress uses complex-value promotion. A numeric
-   * binding whose static type is wide (`unknown`, `number`, `finite_number`,
-   * an unannotated parameter, a block local not declared real) is
+   * binding whose static type is wide (`unknown`, `number`, an
+   * unannotated parameter, a block local not declared real) is
    * complex-shaped, and every wide value is lifted at its use through the
    * target's idempotent `complexLift` (`_SYS.cplx`) — a number becomes `{re,
    * im: 0}`, an object passes through, and a non-number (a string, a
@@ -1774,9 +1774,9 @@ export class BaseCompiler {
   /**
    * The complex discipline's answer for a numeric binding of static type `t`
    * that the strict analysis shapes REAL by default: complex when the type
-   * is WIDE — it admits a complex value (`unknown`, `any`, `number`,
-   * `finite_number`, a union containing them) — real when it is a real-only
-   * type or not a number type at all. `false` outside complex mode, which is
+   * is WIDE — it admits a complex value (`unknown`, `any`, `number`, a
+   * union containing them) — real when it is a real-only type or not a
+   * number type at all. `false` outside complex mode, which is
    * the strict default this replaces.
    */
   static wideIsComplex(t: Type | undefined): boolean {
@@ -1786,8 +1786,8 @@ export class BaseCompiler {
 
   /**
    * Is `t` a WIDE numeric type — one that admits a complex value without
-   * being a real-only type: `unknown`, `any`, `number`, `finite_number`, a
-   * non-real number type, a union containing one? (Mode-independent; the
+   * being a real-only type: `unknown`, `any`, `number`, a non-real number
+   * type, a union containing one? (Mode-independent; the
    * complex discipline's binding rule is `wideIsComplex`.)
    */
   static wideNumericType(t: Type | undefined): boolean {
@@ -2185,7 +2185,7 @@ export class BaseCompiler {
    *
    * The rule is deliberately NOT "the node's type admits complex". That test
    * is too weak in both directions and misses the case the option exists for:
-   * `√(t−1)` types the wide `finite_number` — not a non-real type — whenever
+   * `√(t−1)` types the wide `number` — not a non-real type — whenever
    * `t` is an undeclared symbol or an `unknown` parameter, which is exactly
    * the shape a user function's body has. Keying off the type there would
    * leave the option inert on its own witness.
@@ -2287,7 +2287,7 @@ export class BaseCompiler {
    * What happens inside the emitted `_fn_…` that the call site's type does
    * not describe: under a PROMOTING discipline the body itself promotes —
    * with `z(t) := √(t−1)`, `_fn_z` returns `{re, im}` while the call `z(t)`
-   * types the wide `finite_number` and would otherwise be read as a plain
+   * types the wide `number` and would otherwise be read as a plain
    * number (`Math.abs(0.5 * {re,im} + -1)`, `NaN` everywhere: item 190's
    * exact witness).
    *
@@ -2326,7 +2326,7 @@ export class BaseCompiler {
     //
     // Both predicates are needed and neither subsumes the other:
     // `type.matches('collection')` catches a body whose type is DEFINITELY a
-    // collection (`[√(t−1), 1]` types `vector<finite_number^2>`), while
+    // collection (`[√(t−1), 1]` types `vector<number^2>`), while
     // `isPossiblyCollectionTyped` catches the merely POSSIBLE ones — a
     // `broadcastable<T>` or top-typed body, for which the former is false.
     if (body.type.matches('collection<any>') || isPossiblyCollectionTyped(body))
@@ -6121,7 +6121,7 @@ export class BaseCompiler {
       // The ELEMENTS the emitter will actually lower, when they can be seen.
       // The type test below cannot stand alone: a list mixing a complex and a
       // real element unifies to a WIDE element type (`[i·t, 1]` is
-      // `vector<finite_number^2>`, which is neither complex nor real), so it
+      // `vector<number^2>`, which is neither complex nor real), so it
       // answered `false` and the real-only element closure below was emitted
       // over an array whose first element is a `{re, im}` object. Measured on
       // the DEFAULT path with `h(t) := [i·t, 1]`: `2·h(t)` ran to `[NaN, 2]`
@@ -6336,7 +6336,7 @@ export class BaseCompiler {
       // the answer. For an ARRAY operand it is not: `isComplexValued` reports
       // for the whole collection, and a list is emitted element by element, so
       // that verdict describes no single element — `[1+i, 2]` types
-      // `vector<finite_complex^2>` and reads complex while its second element
+      // `vector<complex^2>` and reads complex while its second element
       // is the plain number `2`. Only the element analysis may answer here.
       if (!isArrayOperand(a)) return BaseCompiler.isComplexValued(a);
       // Elements that DISAGREE (`[√(t−1), 1]`) have no single closure: one
@@ -9456,7 +9456,7 @@ export class BaseCompiler {
     // complex-valued (`branchComplexCoercion`, Tycho item 60), so the value
     // the parent receives is complex-shaped whenever an arm is — even when
     // the type system joined the arms to a real type (`Which(c, a, True, 5)`
-    // over a wide `a` types `finite_integer`; under the complex discipline
+    // over a wide `a` types `integer`; under the complex discipline
     // `a` is complex-shaped and both arms are lifted, and a parent reading
     // the node's type would consume the object as a number).
     if (expr.operator === 'If')
@@ -9495,7 +9495,7 @@ export class BaseCompiler {
     }
     // The `complexPromotion` opt-in is answered BEFORE the type branches
     // below, because the types it has to override are the WIDE ones: an
-    // unknown-sign `√(t−1)` types `finite_number`, which is neither non-real
+    // unknown-sign `√(t−1)` types `number`, which is neither non-real
     // (so the `isNonRealNumber` arm never fires) nor `real`. See
     // `promotesRadicalToComplex`.
     // A fold's value is its ACCUMULATOR lane (`combinerPlan`): the parent
@@ -9551,7 +9551,7 @@ export class BaseCompiler {
     const t = expr.type;
     if (isNonRealNumber(finitePartOfType(t.type))) {
       // Sqrt/Ln/Log carve-out (2026-07-31): their type handlers now widen
-      // to `finite_complex`/`complex` for a real operand of UNKNOWN sign
+      // to `complex` for a real operand of UNKNOWN sign
       // (type soundness: `√−2 = 1.414…i`), but the pinned compile contract
       // keeps the real kernel for that case — these are the hottest plotted
       // heads, and `Math.sqrt(-2)`/`sqrt(r)` yield a real-shaped `NaN` at
@@ -9579,7 +9579,7 @@ export class BaseCompiler {
       }
       // …and the carve-out has to survive the arithmetic ABOVE those heads
       // (Tycho item 144): `Multiply(1e5, Sqrt(u))` is itself typed
-      // `finite_complex`, so answering from the type here would report
+      // `complex`, so answering from the type here would report
       // complex for a subtree the Sqrt carve-out just declared real, and the
       // real-only-helper gate would fail closed on an operand that is real by
       // construction. These heads only PROPAGATE complexness from their
@@ -9987,7 +9987,7 @@ export class BaseCompiler {
    *    number is real-emitted — as the folded literal itself, or, where the
    *    emission declines (`constantFold: false`), through the real lowering
    *    that the step-1 `isComplexValued === false` verdict guarantees. This
-   *    is what keeps `√(1 − 0.2²)` — statically the `finite_complex` hedge,
+   *    is what keeps `√(1 − 0.2²)` — statically the `complex` hedge,
    *    machine floats being unfolded at canonicalization — recognized as the
    *    plain number it evaluates to.
    */
@@ -10590,7 +10590,7 @@ export class BaseCompiler {
    * collection-valued condition can never be one — the interpreter throws
    * ("Condition must evaluate to True or False") rather than silently taking a
    * branch — so fail closed (D6) at compile time. Uses the declared type (not
-   * `.isCollection`, which is false for a `list<finite_number>`).
+   * `.isCollection`, which is false for a `list<number>`).
    *
    * A CONTRADICTED scalar declaration is the same hazard with the declared type
    * lying about it (2026-08-12 ruling): `b` declared `(number) -> boolean` over
@@ -13474,13 +13474,11 @@ export class BaseCompiler {
         case 'any':
           return null;
         case 'integer':
-        case 'finite_integer':
           return `Number.isInteger(${a})`;
-        // `real` and `finite_real` both denote the FINITE reals since the
-        // finite-by-default flip, so they share one guard. `Number.isFinite`
-        // already implies `typeof … === "number"`.
+        // `real` denotes the FINITE reals since the finite-by-default flip,
+        // so `Number.isFinite` is the exact guard for it. It already implies
+        // `typeof … === "number"`.
         case 'real':
-        case 'finite_real':
           return `Number.isFinite(${a})`;
         // `complex` is finite too, so an infinite or NaN argument — a plain
         // `Infinity`, or a `{re, im}` object with a non-finite component —
@@ -13540,12 +13538,10 @@ export class BaseCompiler {
       }
       case 'numeric': {
         let base: string;
-        if (t.type === 'integer' || t.type === 'finite_integer')
-          base = `Number.isInteger(${a})`;
-        else if (t.type === 'real' || t.type === 'finite_real')
-          // Finite, on both spellings: an inclusive bound on one side only
-          // (`real<0..>`) would otherwise admit `Infinity`, which is not a
-          // member of either.
+        if (t.type === 'integer') base = `Number.isInteger(${a})`;
+        else if (t.type === 'real')
+          // Finite: an inclusive bound on one side only (`real<0..>`) would
+          // otherwise admit `Infinity`, which the type does not contain.
           base = `Number.isFinite(${a})`;
         else return undefined; // rational &c.: no faithful JS test
         const parts = [base];

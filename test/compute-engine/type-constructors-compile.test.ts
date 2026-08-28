@@ -485,7 +485,7 @@ describe('PARAMETERIZED NOMINAL — erasure at the INSTANTIATED body', () => {
       typeParams: ['T'],
     });
     expect(ce.box(['tree', 1, ['List']]).type.toString()).toBe(
-      'tree<finite_integer>'
+      'tree<integer>'
     );
     expect(jsCode(ce, ['tree', 1, ['List']])).toBe(
       jsCode(ce, ['Tuple', 1, ['List']])

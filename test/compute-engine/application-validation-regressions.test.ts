@@ -51,14 +51,14 @@ describe('SYM P1-14 — numeric operators validate their arguments', () => {
     const ce = strictEngine();
     const f = ce.box(['Factorial', ['Rational', 1, 2]]);
     expect(f.isValid).toBe(true);
-    expect(f.type.toString()).toBe('finite_real');
+    expect(f.type.toString()).toBe('real');
     expect(f.N().re).toBeCloseTo(0.8862269254527586, 10);
   });
 
   it('Factorial(5) stays a finite integer and evaluates to 120', () => {
     const ce = strictEngine();
     const f = ce.box(['Factorial', 5]);
-    expect(f.type.toString()).toBe('finite_integer');
+    expect(f.type.toString()).toBe('integer');
     expect(f.evaluate().re).toBe(120);
   });
 
@@ -138,7 +138,7 @@ describe('SYM P1-15 — user-declared function signatures are enforced', () => {
 describe('complex-family parameters are enforced (D10 shim retired)', () => {
   // Before, `signatureHasComplexParam` (box.ts) skipped declared-signature
   // enforcement entirely for complex-family parameters, because Multiply
-  // widened a pure-imaginary product such as `√2·i` to `finite_number`,
+  // widened a pure-imaginary product such as `√2·i` to `number`,
   // which is ⊄ `complex`. Now the arithmetic type handlers are
   // complex-aware (`√2·i` types as `imaginary` ⊂ `complex`), so the skip is
   // gone and `(complex) -> complex` signatures are enforced like any other.
@@ -187,7 +187,7 @@ describe('SYM P1-19 — higher-order result types are sound', () => {
     const ce = strictEngine();
     const lam = ce.box(['Function', ['Square', 'x'], 'x']);
     expect(lam.type.toString()).toBe('(unknown) -> number');
-    expect(lam.type.matches('(any) -> finite_number')).toBe(false);
+    expect(lam.type.matches('(any) -> number')).toBe(false);
   });
 
   it('(b) Sum does not lift a function-literal integrand into a mistyped lambda', () => {
@@ -200,7 +200,7 @@ describe('SYM P1-19 — higher-order result types are sound', () => {
 
   it('(c) an unevaluated Derivative is function-typed', () => {
     // NOTE: the *evaluated* closed form (`cos(_)`) still under-reports as
-    // `finite_number` — see the residual documented in `Derivative.evaluate`.
+    // `number` — see the residual documented in `Derivative.evaluate`.
     // The Derivative type handler preserves the derived function's signature
     // (a derivative of Sin is itself `(number) -> number`), so the type is a
     // concrete signature, not the bare `function` it reported before.

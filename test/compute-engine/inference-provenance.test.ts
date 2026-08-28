@@ -144,9 +144,9 @@ describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type 
     // a bare `List` sibling, a binder-body occurrence — record no type
     // evidence). The assignment must then land exactly where it lands on a
     // fresh symbol: promoted `integer`, not the value's raw
-    // `finite_integer`. Observed by the Tycho team's order-matrix probe at
+    // `integer`. Observed by the Tycho team's order-matrix probe at
     // their 0.106.0 adoption: box-first orderings settled on
-    // `finite_integer` while assign-first settled on `integer`.
+    // `integer` while assign-first settled on `integer`.
     const J = [
       'List',
       [
@@ -179,17 +179,24 @@ describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type 
   });
 
   test('the promoted type is never installed when it escapes a recorded use', () => {
-    // `gfin(wfin)` infers `wfin: finite_real`. Assigning 5 refines it, but
-    // the promotion to `integer` would leave the incumbent's `finite_real`
-    // constraint, so the value's raw type — the literal type `5` — is
-    // adopted instead.
+    // `gfin(wfin)` infers `wfin: real<0..10>`. Assigning 5 refines it, but
+    // the promotion to the whole tier `integer` would leave the incumbent's
+    // bounded constraint, so the value's raw type — the literal type `5` —
+    // is adopted instead.
     const ce = new ComputeEngine();
-    ce.declare('gfin', '(finite_real) -> real');
+    ce.declare('gfin', '(real<0..10>) -> real');
     ce.box(['gfin', 'wfin']);
-    expect(ce.box('wfin').type.toString()).toBe('finite_real');
+    expect(ce.box('wfin').type.toString()).toBe('real<0..10>');
     ce.assign('wfin', 5);
     expect(ce.box('wfin').type.toString()).toBe('5');
-    expect(ce.type('finite_integer').matches('finite_real')).toBe(true);
+    // The control: an UNBOUNDED incumbent does contain the promoted tier, so
+    // there the promotion is installed.
+    const ce2 = new ComputeEngine();
+    ce2.declare('g2', '(real) -> real');
+    ce2.box(['g2', 'w2']);
+    ce2.assign('w2', 5);
+    expect(ce2.box('w2').type.toString()).toBe('integer');
+    expect(ce.type('integer').matches('real')).toBe(true);
   });
 
   test('the narrow records a value-derived provenance entry with the value as cause', () => {
@@ -268,7 +275,7 @@ describe('ASSIGNMENT TO A DECLARED `unknown` — the placeholder takes the value
     declared.assign('u', 5);
     const bare = new ComputeEngine();
     bare.assign('u', 5);
-    // `integer`, not the value's raw `finite_integer`: the same literal
+    // `integer`, not the value's raw `integer`: the same literal
     // promotion a fresh `u := 5` declaration applies.
     expect(declared.box('u').type.toString()).toBe('integer');
     expect(declared.box('u').type.toString()).toBe(

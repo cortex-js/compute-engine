@@ -103,7 +103,7 @@ describe('CONTROL STRUCTURES', () => {
 
     it('a loop index over an integer Range is integer-typed', () => {
       // The binder hook declares the index `unknown` and arithmetic use then
-      // widened it to `number` — so `10 * i` typed `finite_number`, wide
+      // widened it to `number` — so `10 * i` typed `number`, wide
       // enough to falsely refuse an `integer`-declared protocol-property
       // write. The Element clause now gives the fresh binding the
       // collection's element type.
@@ -160,10 +160,10 @@ describe('CONTROL STRUCTURES', () => {
     it('types a missing else branch as `| missing`', () => {
       ce.declare('ifCond57', 'boolean');
       const expr = ce.expr(['If', 'ifCond57', 42]);
-      expect(expr.type.matches('finite_integer | missing')).toBe(true);
-      expect(expr.type.matches('finite_integer')).toBe(false);
+      expect(expr.type.matches('integer | missing')).toBe(true);
+      expect(expr.type.matches('integer')).toBe(false);
       const both = ce.expr(['If', 'ifCond57', 42, 99]);
-      expect(both.type.matches('finite_integer')).toBe(true);
+      expect(both.type.matches('integer')).toBe(true);
     });
   });
 });

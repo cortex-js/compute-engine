@@ -4,15 +4,15 @@
  * Two distinct defects, pinned separately:
  *
  * 1. `Arcosh` fell through to the generic `numericTypeHandler`, which claims
- *    `finite_real` for any real argument. `arcosh` is real only on `[1, +∞)`;
+ *    `real` for any real argument. `arcosh` is real only on `[1, +∞)`;
  *    below 1 the value is complex (`arcosh(−2) = 1.3169… + iπ`), so
- *    `finite_real` — which EXCLUDES complex — was a FALSE claim. The rest of
+ *    `real` — which EXCLUDES complex — was a FALSE claim. The rest of
  *    the inverse trig / inverse hyperbolic family already routes through
  *    `boundedInverseTrigType` and is audited here as a regression guard.
  *
- * 2. `Power`/`Root` claimed the true-but-coarse `finite_number` for a
+ * 2. `Power`/`Root` claimed the true-but-coarse `number` for a
  *    provably-negative base on the complex branch. The claim is narrowed to
- *    `finite_complex` ONLY when the complex branch is provable — the
+ *    `complex` ONLY when the complex branch is provable — the
  *    over-widening cases below must keep their current types.
  *
  * The `Power`/`Root` branch convention is NOT "non-integer exponent ⇒
@@ -47,30 +47,30 @@ describe('TYPE: inverse hyperbolic / inverse trig real domains', () => {
     // inverse heads: an argument provably OUT of the real domain is typed by
     // the value it actually takes, and `arcosh(−2) = 1.3169… + iπ` is a FINITE
     // complex. See `inverse-trig-domain-type.test.ts`.
-    expect(expr.type.toString()).toBe('finite_complex');
+    expect(expr.type.toString()).toBe('complex');
   });
 
   it.each([-2, 0, 0.5])(
-    'Arcosh(%p) is complex-valued and typed `finite_complex`',
+    'Arcosh(%p) is complex-valued and typed `complex`',
     (v) => {
       const expr = ce.box(['Arcosh', v]);
       expect(isComplexValued(expr)).toBe(true);
       expect(expr.type.matches('real')).toBe(false);
-      expect(expr.type.toString()).toBe('finite_complex');
+      expect(expr.type.toString()).toBe('complex');
     }
   );
 
-  it.each([1, 2])('Arcosh(%p) stays `finite_real` (in domain)', (v) => {
+  it.each([1, 2])('Arcosh(%p) stays `real` (in domain)', (v) => {
     const expr = ce.box(['Arcosh', v]);
     expect(isComplexValued(expr)).toBe(false);
-    expect(expr.type.toString()).toBe('finite_real');
+    expect(expr.type.toString()).toBe('real');
   });
 
-  it('Arsinh is real-closed and keeps `finite_real`', () => {
+  it('Arsinh is real-closed and keeps `real`', () => {
     for (const v of [-2, 0, 0.5, 2]) {
       const expr = ce.box(['Arsinh', v]);
       expect(isComplexValued(expr)).toBe(false);
-      expect(expr.type.toString()).toBe('finite_real');
+      expect(expr.type.toString()).toBe('real');
     }
   });
 
@@ -108,22 +108,22 @@ describe('TYPE: inverse hyperbolic / inverse trig real domains', () => {
 });
 
 describe('TYPE: Power/Root of a negative base', () => {
-  it('Power(-2, 0.3) is `finite_complex` (was the coarse `finite_number`)', () => {
+  it('Power(-2, 0.3) is `complex` (was the coarse `number`)', () => {
     const expr = ce.box(['Power', -2, 0.3]);
     expect(isComplexValued(expr)).toBe(true);
-    expect(expr.type.toString()).toBe('finite_complex');
+    expect(expr.type.toString()).toBe('complex');
   });
 
-  it('Root(-8, 4) is `finite_complex` (even degree, negative radicand)', () => {
+  it('Root(-8, 4) is `complex` (even degree, negative radicand)', () => {
     const expr = ce.box(['Root', -8, 4]);
     expect(isComplexValued(expr)).toBe(true);
-    expect(expr.type.toString()).toBe('finite_complex');
+    expect(expr.type.toString()).toBe('complex');
   });
 
-  it('Power(-2, -0.5) is `finite_complex`', () => {
+  it('Power(-2, -0.5) is `complex`', () => {
     const expr = ce.box(['Power', -2, -0.5]);
     expect(isComplexValued(expr)).toBe(true);
-    expect(expr.type.toString()).toBe('finite_complex');
+    expect(expr.type.toString()).toBe('complex');
   });
 
   //
@@ -142,7 +142,7 @@ describe('TYPE: Power/Root of a negative base', () => {
       expect(expr.N().re).toBeCloseTo(expected, 10);
       expect(isComplexValued(expr)).toBe(false);
       expect(expr.type.matches('complex')).toBe(false);
-      expect(expr.type.toString()).toBe('finite_number');
+      expect(expr.type.toString()).toBe('number');
     }
   );
 
@@ -150,21 +150,21 @@ describe('TYPE: Power/Root of a negative base', () => {
   // Must NOT widen: the honest hedges and the already-precise claims.
   //
   it.each([
-    [['Power', 'r', 0.3], 'finite_number'], // unknown-sign base: the hedge
+    [['Power', 'r', 0.3], 'number'], // unknown-sign base: the hedge
     // A positive base carries positivity in the result type (ROADMAP
     // "Ranged types should carry sign…" item 4) — still no widening, the
     // claim narrowed. (`Power(-2, 2)` below folds to the literal `4` at
     // canonicalization, so its type is that literal's own type.)
-    [['Power', 2, 0.3], 'finite_real<0<..>'],
+    [['Power', 2, 0.3], 'real<0<..>'],
     [['Power', -2, 2], '4'],
-    [['Power', 'r', 'n'], 'finite_number'],
-    [['Power', -2, 'n'], 'finite_number'], // unprovable exponent
-    [['Power', -2, 'k'], 'finite_rational'], // integer exponent: real
-    // Tightened 2026-07-31: √−2 = i√2 is FINITE, so `finite_complex` (was
+    [['Power', 'r', 'n'], 'number'],
+    [['Power', -2, 'n'], 'number'], // unprovable exponent
+    [['Power', -2, 'k'], 'rational'], // integer exponent: real
+    // Tightened 2026-07-31: √−2 = i√2 is FINITE, so `complex` (was
     // the looser `complex`) — part of the Sqrt unknown-sign ruling.
-    [['Sqrt', -2], 'finite_complex'],
-    [['Root', 8, 4], 'finite_real'],
-    [['Root', 'r', 4], 'finite_number'],
+    [['Sqrt', -2], 'complex'],
+    [['Root', 8, 4], 'real'],
+    [['Root', 'r', 4], 'number'],
     [['Root', -8, 'n'], 'number'],
     [['Root', -8, 'k'], 'number'], // unknown parity: no narrowing
   ] as [any, string][])('%j keeps its type %s', (mathjson, type) => {

@@ -181,9 +181,7 @@ describe('negations and intersections in disjointness', () => {
     // The intersection's inhabitants live inside every member, so one
     // disjoint member leaves them nowhere to overlap the other side.
     expect(ce.type('!integer & number').isDisjointFrom('integer')).toBe(true);
-    expect(ce.type('integer & finite_real').isDisjointFrom('string')).toBe(
-      true
-    );
+    expect(ce.type('integer & real').isDisjointFrom('string')).toBe(true);
     // ...but a shared inhabitant keeps the conservative answer.
     expect(ce.type('!integer & number').isDisjointFrom('number')).toBe(false);
   });

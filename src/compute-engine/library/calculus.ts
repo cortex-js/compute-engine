@@ -1145,7 +1145,7 @@ volumes
         // Univariate (bare or single order): ordinary n-th derivative.
         //
         // The closed-form result is lifted into a *named-parameter* `Function`
-        // literal (P1-19c): a bare hole-form (`cos(_)`) typed `finite_number`,
+        // literal (P1-19c): a bare hole-form (`cos(_)`) typed `number`,
         // so a stored `let g = Derivative(f)` was not callable. The historical
         // blockers are addressed by construction:
         // - a result still carrying a `Derivative` stays bare — wrapping it
@@ -1249,7 +1249,7 @@ volumes
         if (!body) return undefined;
         const t = body.type;
         // The derivative of a numeric expression is numeric — preserve the
-        // concrete numeric type (e.g. `finite_number` for `D(Sin(x),x)`).
+        // concrete numeric type (e.g. `number` for `D(Sin(x),x)`).
         if (t.matches('number')) return t;
         // A numeric TUPLE or COLLECTION body differentiates component-wise and
         // the result keeps that shape: `D((cos t, sin 2t, t), t)` evaluates to

@@ -545,7 +545,7 @@ Type(f)`).value
       run(`type Inner = object{age: integer}
 function f(xs: list<Inner>) { xs[1].age = 9 }
 Type(f)`).value
-    ).toBe('TypeFrom("(xs: list<Inner>) state -> finite_integer")');
+    ).toBe('TypeFrom("(xs: list<Inner>) state -> integer")');
   });
 
   test('an UNANNOTATED parameter is a store too — `pure` is refused', () => {

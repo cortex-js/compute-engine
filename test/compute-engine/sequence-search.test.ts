@@ -551,7 +551,7 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
     ).toBe('bcd');
     expect(
       ce.box(['Slice', ['List', 1, 2, 3, 4], ['Range', 2, 3]]).type.toString()
-    ).toBe('list<finite_integer>');
+    ).toBe('list<integer>');
     expect(ce.box(['Slice', str('abcdef'), 2, 4]).type.toString()).toBe(
       'string'
     );
@@ -583,7 +583,7 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
           ['RangeOf', ['List', 9, 7, 5, 3], ['List', 1, 2]],
         ])
         .type.toString()
-    ).toBe('list<finite_integer> | nothing');
+    ).toBe('list<integer> | nothing');
   });
 
   test('the span is resolved ONCE per node, not once per element read', () => {

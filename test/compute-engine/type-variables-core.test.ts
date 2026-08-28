@@ -54,21 +54,21 @@ describe('TYPE VARIABLES / Identity — `(T) -> T where T`', () => {
     const sig = ce.box('Identity').operatorDefinition!.signature;
     expect(sig.toString()).not.toContain('unknown');
     expect(ce.function('Identity', [ce.number(5)]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
   });
 
   test('result type echoes the operand on every route', () => {
     const ce = engine();
     expect(ce.function('Identity', [ce.number(5)]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
-    expect(ce.box(['Identity', 5]).type.toString()).toBe('finite_integer');
+    expect(ce.box(['Identity', 5]).type.toString()).toBe('integer');
     expect(ce.parse('\\operatorname{Identity}(5)').type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
 
-    expect(ce.box(['Identity', 2.5]).type.toString()).toBe('finite_real');
+    expect(ce.box(['Identity', 2.5]).type.toString()).toBe('real');
     expect(ce.function('Identity', [ce.string('hi')]).type.toString()).toBe(
       'string'
     );
@@ -95,7 +95,7 @@ describe('TYPE VARIABLES / Identity — `(T) -> T where T`', () => {
     expect(ce.box(['Identity', 'idL']).type.toString()).toBe('list<integer>');
     // A literal list keeps its inferred shape too.
     expect(ce.box(['Identity', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
   });
 
@@ -145,7 +145,7 @@ describe('TYPE VARIABLES / Identity — `(T) -> T where T`', () => {
     );
     // Nested: the echo composes.
     expect(ce.box(['Identity', ['Identity', 5]]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
     expect(ce.box(['Identity', ['Identity', 5]]).evaluate().toString()).toBe(
       '5'
@@ -166,7 +166,7 @@ describe('TYPE VARIABLES / Prime — `(T, integer?) -> T where T`', () => {
     expect(ce.box(['Prime', 'g', 2]).type.toString()).toBe('integer');
     expect(ce.parse("g''").type.toString()).toBe('integer');
 
-    expect(ce.box(['Prime', 5]).type.toString()).toBe('finite_integer');
+    expect(ce.box(['Prime', 5]).type.toString()).toBe('integer');
     ce.declare('primeM', 'matrix<real^(2x3)>');
     expect(ce.box(['Prime', 'primeM']).type.toString()).toBe(
       'matrix<real^(2x3)>'
@@ -215,17 +215,17 @@ describe('TYPE VARIABLES / BaseForm — `(T, (string|number)?) -> T where T: num
     const ce = engine();
     expect(
       ce.function('BaseForm', [ce.number(255), ce.number(16)]).type.toString()
-    ).toBe('finite_integer');
+    ).toBe('integer');
     expect(ce.box(['BaseForm', 255, 16]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
     // Parse route: `1010_{2}` folds the digits into the value slot.
-    expect(ce.parse('1010_{2}').type.toString()).toBe('finite_integer');
+    expect(ce.parse('1010_{2}').type.toString()).toBe('integer');
     expect(ce.parse('1010_{2}').json).toEqual(['BaseForm', 10, 2]);
 
-    expect(ce.box(['BaseForm', 2.5, 16]).type.toString()).toBe('finite_real');
+    expect(ce.box(['BaseForm', 2.5, 16]).type.toString()).toBe('real');
     // The base operand is optional.
-    expect(ce.box(['BaseForm', 255]).type.toString()).toBe('finite_integer');
+    expect(ce.box(['BaseForm', 255]).type.toString()).toBe('integer');
 
     ce.declare('bfN', 'integer');
     expect(ce.box(['BaseForm', 'bfN', 16]).type.toString()).toBe('integer');
@@ -235,7 +235,7 @@ describe('TYPE VARIABLES / BaseForm — `(T, (string|number)?) -> T where T: num
     const ce = engine();
     expect(
       ce.function('BaseForm', [ce.number(255), ce.string('hex')]).type.toString()
-    ).toBe('finite_integer');
+    ).toBe('integer');
     expect(ce.box(['BaseForm', 255, { str: 'hex' }]).isValid).toBe(true);
   });
 

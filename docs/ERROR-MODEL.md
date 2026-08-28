@@ -46,15 +46,16 @@ mathematics was performed and has no answer in the numeric codomain*:
 `Mod(1, 0)`, `0 * oo`. It carries no provenance and follows IEEE 754
 semantics: quiet, absorbing through numeric operations, `NaN == NaN` is
 `False`. Its lattice position: `NaN` is admitted **only by the top type
-`number`** — every numeric type below `number` excludes it (`complex`,
-`real`, `rational`, `integer`, `non_finite_number` — which is `±oo`
-exactly — and all the `finite_*` types). It shares that only-`number`
-placement with `~oo` (`ComplexInfinity`), so `number − complex` contains
-at least the two exceptional points `NaN` and `~oo`; the singleton types
-of §5 give each a name. (The non-finite typing convention is in
-`ARCHITECTURE.md`, "Non-finite typing convention for type handlers",
-ruled 2026-08-21; `src/common/type/types.ts` documents the numeric
-tower.) By the missing-value ruling of 2026-07-24 (next paragraph) `NaN`
+`number` and by its own type `nan`** — every other numeric type excludes
+it (`complex`, `real`, `rational`, `integer`, all of which are
+finite-only; `infinity`; and `non_finite_number`, which is `±oo`
+exactly). `~oo` (`ComplexInfinity`) is likewise outside `complex`, but
+it now has a home of its own: it is a member of `infinity`. The top
+therefore decomposes with nothing left over —
+`number = complex ⊔ infinity ⊔ nan` — and the exceptional points that
+§5 set out to name are named. (The non-finite typing convention is in
+`ARCHITECTURE.md`, "Non-finite typing convention for type handlers";
+`src/common/type/types.ts` documents the numeric tower.) By the missing-value ruling of 2026-07-24 (next paragraph) `NaN`
 also serves as the *absence* marker inside numeric domains.
 
 **`Missing` — the position-preserving absent datum.** For non-numeric
@@ -358,8 +359,7 @@ current checker (verified 2026-08-24: with `f` declared
 declared result type must likewise stay wide enough to admit failure
 values. So `Heaviside` declares `(number) -> number`, and the sharp truth
 lives only in the per-operator type handler (`realOnlyStepType` answers
-`finite_rational<0..1>` for a proven-real argument, wide `number`
-otherwise).
+`rational<0..1>` for a proven-real argument, wide `number` otherwise).
 
 The cost, and it is real: **the public signature is nearly
 information-free.** The most valuable facts about the operator — its
@@ -434,10 +434,10 @@ is mandatory:
 The three worked declarations:
 
 ```
-Heaviside: (real) -> finite_rational<0..1>          // partiality: total
-Sin:       (complex) -> finite_complex              // may-marker: sin(±oo) has no
-                                                    //   limit; float overflow
-Mod:       (real, real) -> real                     // definedWhen: b ≠ 0
+Heaviside: (real) -> rational<0..1>          // partiality: total
+Sin:       (complex) -> complex              // may-marker: sin(±oo) has no
+                                             //   limit; float overflow
+Mod:       (real, real) -> real              // definedWhen: b ≠ 0
 ```
 
 with every `nanBehavior` above left to its derived default (`propagate`).
@@ -454,8 +454,8 @@ S
 narrowing to exactly `S` only when *both* are discharged: the partiality
 is `total` (or its predicate is proven for these arguments) *and* every
 propagating slot's argument type excludes `NaN`. This needs the `nan`
-singleton of §5 to be expressible — `finite_rational<0..1> | nan` says
-vastly more than a collapse to bare `number`. `realOnlyStepType` is a
+singleton of §5 to be expressible — `rational<0..1> | nan` says vastly
+more than a collapse to bare `number`. `realOnlyStepType` is a
 hand-written special case of this derivation; under B it and its class
 become the framework default read off the declaration.
 
@@ -599,15 +599,15 @@ documented domains.
 
 | | Contract A (status quo) | Contract B (as amended) |
 | --- | --- | --- |
-| Declared | `(number) -> number` | `(real) -> finite_rational<0..1>` · partiality `total` · `nanBehavior` derived (`propagate`) |
+| Declared | `(number) -> number` | `(real) -> rational<0..1>` · partiality `total` · `nanBehavior` derived (`propagate`) |
 | What a user/doc/hover learns | nothing beyond "numeric" | domain, exact success values, NaN policy, totality |
 | `Heaviside("banana")` | `Error` at boxing | `Error` at boxing |
 | `Heaviside(i)` | admitted; inert forever today | `Error` at boxing |
 | `Heaviside(~oo)` | admitted; inert forever today | `Error` — at boxing with the §5 singleton, at evaluation without it |
 | `Heaviside(NaN)` | admitted; inert today | `NaN` at evaluation |
-| `Heaviside(±oo)` | `1` / `0` | `1` / `0` (in-domain: `real` includes `±oo`) |
-| `Heaviside(x)`, `x` unproven | `.type` = `number` (type handler) | `.type` = `finite_rational<0..1> | nan`, derived |
-| `Heaviside(x)`, `x` proven real | `.type` = `finite_rational<0..1>` (type handler) | `.type` = `finite_rational<0..1>` exactly (total + `real` excludes `NaN`), derived |
+| `Heaviside(±oo)` | `1` / `0` | `Error` at boxing — `real` is finite-only, so `±oo` is out of the declared domain; `(real \| +oo \| -oo) -> …` is the spelling that keeps admitting it |
+| `Heaviside(x)`, `x` unproven | `.type` = `number` (type handler) | `.type` = `rational<0..1> \| nan`, derived |
+| `Heaviside(x)`, `x` proven real | `.type` = `rational<0..1>` (type handler) | `.type` = `rational<0..1>` exactly (total + `real` excludes `NaN`), derived |
 | Where the sharp claim lives | bespoke type handler | the declaration itself |
 
 ## 5. The exceptional numeric points and the lattice — RATIFIED 2026-08-27 (singletons adopted; placement superseded by the lattice flip)
@@ -627,9 +627,11 @@ when its imaginary part is infinite; a directed infinite value (`∞ + i`,
 `±oo`) is a different thing and lives inside `complex`/`real`. Do not
 "fix" `~oo` back into `complex`: that state existed, produced three
 sign-consistency bugs, and was deliberately removed. (Note in passing:
-the numeric-tower comment's decomposition `complex = finite_complex +
-non_finite_number` under-counts — mixed directed infinities like `∞ + i`
-are `complex` but in neither named part.)
+the pre-flip numeric-tower comment decomposed `complex` into its finite
+twin plus the signed pair `non_finite_number`, which under-counted —
+mixed directed infinities like `∞ + i` were `complex` but in neither
+named part. The flip closes that hole: such values are members of
+`infinity`, which is defined by infinite magnitude.)
 
 Proposed — **introduce two singleton refinements now** (upgraded from
 "demand-driven" by the 2026-08-25 reviews):
@@ -643,7 +645,7 @@ Proposed — **introduce two singleton refinements now** (upgraded from
 These are *new names for existing regions*, not moves: `~oo` and `NaN`
 keep matching `number` and keep not matching `complex`, so the 2026-08-21
 ruling and its pins stand. What the names buy: Contract B's derived types
-stay sharp (`finite_rational<0..1> | nan` instead of a collapse to
+stay sharp (`rational<0..1> | nan` instead of a collapse to
 `number`); and provable-disjoint early rejection works by ordinary
 subtype tests (`Heaviside(~oo)` → `Error` at boxing) instead of
 concrete-value recognition wired into the gate. With both singletons the
@@ -656,25 +658,23 @@ guard-sweep discipline the literal-types rollout used.
 Rejected: making `nan` a subtype of `error`. The two channels answer
 different questions (§1): `0/0` is a perfectly well-formed question whose
 answer is indeterminate, not a violated contract. Merging them would make
-every numeric signature reject its own outputs (`Sin: complex ->
-finite_complex` no longer accepts `Sin(0/0)` as input to a further
+every numeric signature reject its own outputs (`Sin: (complex) ->
+complex` would no longer accept `Sin(0/0)` as input to a further
 `Sin`), and would pull `error` — deliberately outside `unknown` — into
 the value lattice. `~oo` is likewise *not* an error and not a `nan`: it
 is a definite point with defined arithmetic (`1/~oo = 0`, `2·~oo = ~oo`),
 unlike `NaN`, which absorbs.
 
-Amendment proposed 2026-08-26 — the finite-by-default lattice flip
-(`docs/TYPE_SYSTEM_ROADMAP.md` §8). Under that proposal the bare
-numeric types `integer`/`rational`/`real`/`complex` become finite-only,
-and a new `infinity` type (whose members include the singletons `+oo`,
-`-oo`, `~oo`) joins the `nan` singleton so the top decomposes as
-`number = complex ⊔ infinity ⊔ nan`; the `complex_infinity` singleton
-proposed above is absorbed as the `~oo` member of `infinity`. That
-changes this section's settled placement premise — the directed
-infinities would no longer inhabit `real`/`complex`, and the 2026-08-21
-pins on `matches('real')` for `±oo` would flip — so the flip and this
-document's §4/§5 proposals must be ratified together (or the flip
-declined); see the open question in §7.
+Amendment — the finite-by-default lattice flip
+(`docs/TYPE_SYSTEM_ROADMAP.md` §8), ratified 2026-08-27 and shipped.
+The bare numeric types `integer`/`rational`/`real`/`complex` are
+finite-only, and an `infinity` type (whose members include the
+singletons `+oo`, `-oo`, `~oo`) joins the `nan` singleton, so the top
+decomposes as `number = complex ⊔ infinity ⊔ nan`; the
+`complex_infinity` singleton proposed above is absorbed as the `~oo`
+member of `infinity`. This replaces the settled placement premise
+above: the directed infinities no longer inhabit `real`/`complex`, and
+the pins on `matches('real')` for `±oo` flipped with it.
 
 ## 6. Interpreter vs. compiled code — Settled: compilation is fail-closed
 
@@ -686,8 +686,9 @@ different code.** This error model adds nothing to that rule; it only
 maps its channels onto it:
 
 - A compiled expression may *erase* a check when static evidence proves
-  it unnecessary. Note the direction of proof: a `finite_*` argument type
-  proves no `NaN` *enters* through that slot; only a discharged
+  it unnecessary. Note the direction of proof: any parameter type below
+  `number` that excludes `nan` — which is now every bare numeric carrier
+  — proves no `NaN` *enters* through that slot; only a discharged
   partiality condition (§4) proves the operation cannot *produce* a
   marker — `Mod(1, 0)` makes `NaN` from `NaN`-free inputs. Proof, not
   hope, and the two proofs are different.
@@ -806,28 +807,32 @@ document's history):
   `may-marker` with unknown NaN behavior). The floor is mandatory under
   any representation; the question is how much precision higher-order
   code — `Map`, callback validation, compilation — can recover.
-- **Where does `~oo` belong?** Options: (a) inside `complex` — rejected
-  above: it reverses the 2026-08-21 ruling and breaks `complex`'s
-  structural promise (every complex value has real/imaginary parts; `~oo`
-  has no direction); (b) bare `number` with gates recognizing the
-  concrete value — the status quo, workable, imprecise; (c) the
-  `complex_infinity` singleton of §5 — recommended: names the region
-  without moving it; (d) the `~oo` singleton member of the `infinity`
-  type, if the lattice flip (next item) is adopted — it subsumes (c).
-  Deciding nothing keeps (b).
-- **The finite-by-default lattice flip**
-  (`docs/TYPE_SYSTEM_ROADMAP.md` §8, proposed 2026-08-26). Bare
-  numeric types become finite-only; `±oo` move out of `real`/`complex`
-  into a new `infinity` type that sits beside the `nan` singleton
-  under `number`; the extended real line is spelled `real | infinity`;
-  the `finite_*` twins and `non_finite_number` retire. It amends §5's
-  settled placement (the singletons stay; the directed infinities
-  move) and strengthens Contract B's carrier discipline (§4) by giving
-  the precise carriers the short names. Ratify together with Contract
-  B as one package or decline both parts of the coupling: adopting the
-  flip while keeping Contract A would change what `oo.matches('real')`
-  answers with no compensating signature story. Deciding nothing keeps
-  today's tower.
+- **RULED 2026-08-27: `~oo` is a singleton member of the `infinity`
+  type.** The options weighed were: (a) inside `complex` — rejected: it
+  breaks `complex`'s structural promise (every complex value has
+  real/imaginary parts; `~oo` has no direction); (b) bare `number` with
+  gates recognizing the concrete value — the former status quo,
+  workable, imprecise; (c) a `complex_infinity` singleton that names the
+  region without moving it; (d) the `~oo` member of `infinity`, which
+  the lattice flip made available and which subsumes (c). (d) was
+  adopted with the flip.
+- **RULED 2026-08-27, shipped 2026-08-28: the finite-by-default lattice
+  flip** (`docs/TYPE_SYSTEM_ROADMAP.md` §8). Bare numeric types are
+  finite-only; `±oo` moved out of `real`/`complex` into the `infinity`
+  type, which sits beside the `nan` singleton under `number`; the
+  extended real line is spelled `real | non_finite_number` (the
+  `EXTENDED_REAL_TYPE` constant — `real | infinity` would also admit the
+  unsigned `~oo`). The five `finite_*`
+  twins have retired: `finite_integer`, `finite_rational`,
+  `finite_real`, `finite_complex` and `finite_number` remain
+  parse-accepted deprecated aliases for one release cycle — normalizing
+  to `integer`, `rational`, `real`, `complex` and `complex`
+  respectively — and are never emitted. `non_finite_number` did NOT
+  retire in this release: it keeps its meaning, the signed pair
+  {`+oo`, `-oo`}, and now sits below `infinity`. The flip amends §5's
+  placement (the singletons stay; the directed infinities moved) and
+  strengthens Contract B's carrier discipline (§4) by giving the
+  precise carriers the short names.
 - **Choose and document per-operator conventions where references
   diverge** — the authority is this engine's own documented definition,
   not external agreement. `IsPrime(-7)` is the type case: Mathematica's

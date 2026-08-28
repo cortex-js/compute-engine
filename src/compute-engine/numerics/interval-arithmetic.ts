@@ -49,7 +49,7 @@ const FULL: Interval = { lo: -Infinity, hi: Infinity };
 
 /** How many significant digits a DERIVED bound keeps (user-ruled
  * 2026-08-27, plan §5 question 1). Coarser than full precision so
- * computed types stay readable (`finite_real<0.33..1.341>`, not
+ * computed types stay readable (`real<0.33..1.341>`, not
  * seventeen-digit doubles); fine enough that the per-operation loss
  * (0.01–0.1% of the magnitude) is invisible at realistic expression
  * depth. Coarsening only ever moves a bound OUTWARD, so this is a
@@ -76,9 +76,6 @@ const NAN_FREE_REAL_TIERS = new Set<string>([
   'integer',
   'rational',
   'real',
-  'finite_integer',
-  'finite_rational',
-  'finite_real',
   'non_finite_number',
 ]);
 

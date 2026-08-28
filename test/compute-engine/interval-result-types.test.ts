@@ -31,7 +31,7 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
     e.assume(e.box(['Greater', 'y', 3]));
     expect(e.box(['Add', 'x', 'y']).type.toString()).toBe('real<5<..>');
     expect(e.box(['Multiply', 'x', 'y']).type.toString()).toBe(
-      'finite_real<6<..>'
+      'real<6<..>'
     );
   });
 
@@ -48,7 +48,7 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
   it('|x| tightens with the operand interval; the old scope boundary moves', () => {
     const e = new ComputeEngine();
     e.declare('a', 'real<-3..2>');
-    expect(e.box(['Abs', 'a']).type.toString()).toBe('finite_real<0..3>');
+    expect(e.box(['Abs', 'a']).type.toString()).toBe('real<0..3>');
     // `|x| + |y|` used to be pinned BARE `real` as the interval-arithmetic
     // scope boundary; the boundary moved — the sum of two non-negative
     // ranges is non-negative.
@@ -63,25 +63,25 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
     const e = new ComputeEngine();
     e.declare('a', 'real<-3..2>');
     // even, crossing zero
-    expect(e.box(['Power', 'a', 2]).type.toString()).toBe('finite_real<0..9>');
+    expect(e.box(['Power', 'a', 2]).type.toString()).toBe('real<0..9>');
     // odd: monotone on all of ℝ, no sign proof needed
     expect(e.box(['Power', 'a', 3]).type.toString()).toBe(
-      'finite_real<-27..8>'
+      'real<-27..8>'
     );
     // even, same-sign negative base: the tightened nonzero lower bound
     e.declare('b', 'real<-3..-2>');
-    expect(e.box(['Power', 'b', 2]).type.toString()).toBe('finite_real<4..9>');
+    expect(e.box(['Power', 'b', 2]).type.toString()).toBe('real<4..9>');
     // integer base tier is preserved
     e.declare('k', 'integer<2..5>');
     expect(e.box(['Power', 'k', 2]).type.toString()).toBe(
-      'finite_integer<4..25>'
+      'integer<4..25>'
     );
     // n = 0 and negative exponents are deferred (the pole story rides the
     // lattice flip): no interval claim — the pre-existing positive-base
     // sign arm answers, not a computed range.
     e.declare('c', 'real<2..3>');
     expect(e.box(['Power', 'c', -2]).type.toString()).toBe(
-      'finite_real<0<..>'
+      'real<0<..>'
     );
   });
 
@@ -98,18 +98,18 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
     // upper bound 1e-300 is normal and survives.
     e.declare('t', 'real<-1e-150..-1e-160>');
     expect(e.box(['Power', 't', 2]).type.toString()).toBe(
-      'finite_real<0..1e-300>'
+      'real<0..1e-300>'
     );
     // Both bounds subnormal: the claim degrades to non-negative alone,
     // never to unbounded-below.
     e.declare('u', 'real<-1e-160..1e-155>');
-    expect(e.box(['Power', 'u', 2]).type.toString()).toBe('finite_real<0..>');
+    expect(e.box(['Power', 'u', 2]).type.toString()).toBe('real<0..>');
   });
 
   it('a literal enclosure feeds the fold', () => {
     const e = new ComputeEngine();
     e.declare('u', 'real<0..1>');
-    // `1/3` carries `finite_rational<0.33..0.34>`; the sum interval is
+    // `1/3` carries `rational<0.33..0.34>`; the sum interval is
     // [0.33, 1.34] (the plan's worked example).
     expect(e.box(['Add', 'u', ['Rational', 1, 3]]).type.toString()).toBe(
       'real<0.33..1.34>'
@@ -217,14 +217,14 @@ describe('INTERVAL RESULT TYPES — kernel adversarial matrix', () => {
     // 2^10000003 overflows outward to +∞ (side dropped); the lower bound
     // saturates soundly at MAX_VALUE and survives coarsening.
     expect(e.box(['Power', 'x', 10000003]).type.toString()).toBe(
-      'finite_real<1.797e+308..>'
+      'real<1.797e+308..>'
     );
     expect(Date.now() - t1).toBeLessThan(500);
     // The mirror case underflows both bounds into the subnormal veto; the
     // pre-existing positive-base sign claim is kept, not lost.
     e.declare('y', 'real<0.25..0.5>');
     expect(e.box(['Power', 'y', 10000003]).type.toString()).toBe(
-      'finite_real<0<..>'
+      'real<0<..>'
     );
   });
 
@@ -331,7 +331,7 @@ describe('INTERVAL RESULT TYPES — downstream consumers see through arithmetic'
     e.declare('x', 'real<0..0.125>');
     e.declare('y', 'real<0..0.125>');
     expect(e.box(['Arcsin', ['Add', 'x', 'y']]).type.toString()).toBe(
-      'finite_real'
+      'real'
     );
   });
 

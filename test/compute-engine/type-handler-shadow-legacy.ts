@@ -24,7 +24,15 @@
  * once, so the copy has to move with the live handler or the fixture pins a
  * claim nothing should make any more. The finite-by-default numeric flip
  * did that twice below — the log join and the pole-free hyperbolic gates —
- * and each site says so at the code. Everything else stays verbatim.
+ * and each site says so at the code. The retirement of the five `finite_*`
+ * type names did it a third time, everywhere at once: those names no longer
+ * exist, so the fixture would not COMPILE with them. Each per-tier name
+ * became its bare counterpart; the generic-point claim `finite_number`
+ * became the top numeric type `number` (the live handlers moved the same
+ * way, because the only remaining name for "finite, real or complex" is
+ * `complex` and claiming it would read as PROVABLY non-real), and a
+ * FINITENESS GATE spelled `matches('finite_number')` became
+ * `matches('complex')`. Everything else stays verbatim.
  */
 
 import type { Type } from '../../src/common/type/types';
@@ -179,8 +187,8 @@ function frozenOperandLiteralValue(x: Expression): number | undefined {
 /** Frozen copy of `numericTypeHandler` (library/type-handlers.ts). */
 function frozenNumericTypeHandler(ops: ReadonlyArray<Expression>): Type {
   if (ops.some((x) => frozenProvablyNonFiniteNumber(x))) return 'number';
-  if (ops.every((x) => x.type.matches('real'))) return 'finite_real';
-  return 'finite_number';
+  if (ops.every((x) => x.type.matches('real'))) return 'real';
+  return 'number';
 }
 
 /** Frozen copy of `binomialType` (library/combinatorics.ts). */
@@ -191,10 +199,10 @@ function frozenBinomialType(
   if (!n || !k || n.isNaN || k.isNaN) return 'number';
   if (frozenProvablyNonFiniteNumber(n) || frozenProvablyNonFiniteNumber(k))
     return 'number';
-  if (n.isInteger === true && k.isInteger === true) return 'finite_integer';
+  if (n.isInteger === true && k.isInteger === true) return 'integer';
   if (n.isExtendedReal === true && k.isExtendedReal === true) {
     if (n.isInteger === true && n.isNegative === true) return 'number';
-    return 'finite_real';
+    return 'real';
   }
   return 'number';
 }
@@ -217,8 +225,8 @@ function frozenLogType(ops: ReadonlyArray<Expression>): Type {
   if (positiveSign(xSgn) === false && negativeSign(xSgn) !== true)
     return 'number';
   if (base && !usableBase(base)) return 'number';
-  if (negativeSign(xSgn) === true) return 'finite_complex';
-  if (positiveSign(xSgn) === true) return 'finite_real';
+  if (negativeSign(xSgn) === true) return 'complex';
+  if (positiveSign(xSgn) === true) return 'real';
   // LATTICE EDIT (finite-by-default flip): the join used to be spelled
   // `complex`, which admitted `±∞`. The bare name now denotes the FINITE
   // complex numbers, so the `x = 0` pole (`ln(0) = −∞`) has to be named.
@@ -244,20 +252,20 @@ function frozenPoleReciprocalType(
   if (!x || x.isNaN) return 'number';
   const hyperbolic = operator === 'Coth' || operator === 'Csch';
   if (frozenProvablyNonFiniteNumber(x))
-    return hyperbolic && x.isExtendedReal === true ? 'finite_real' : 'number';
+    return hyperbolic && x.isExtendedReal === true ? 'real' : 'number';
   if (x.isExtendedReal !== true) return 'number';
   const poleAtZero = operator !== 'Tan' && operator !== 'Sec';
   if (isNumber(x) || x._literalType !== undefined) {
     const v = frozenOperandLiteralValue(x);
     return poleAtZero && (v !== undefined ? v === 0 : x.isSame(0))
       ? 'number'
-      : 'finite_real';
+      : 'real';
   }
   if (!hyperbolic && x.isConstant) return 'number';
-  if (!poleAtZero) return 'finite_real';
+  if (!poleAtZero) return 'real';
   const s = frozenOperandSgn(x);
   if (positiveSign(s) === true || negativeSign(s) === true)
-    return 'finite_real';
+    return 'real';
   return 'number';
 }
 
@@ -265,7 +273,7 @@ function frozenPoleReciprocalType(
 function frozenArctanType(ops: ReadonlyArray<Expression>): Type {
   const x = ops[0];
   if (!x || x.isNaN) return 'number';
-  if (x.isExtendedReal === true) return 'finite_real';
+  if (x.isExtendedReal === true) return 'real';
   return 'number';
 }
 
@@ -278,10 +286,10 @@ function frozenRoundingFunctionType(x: Expression | undefined): Type {
     ? x.isExtendedReal === false
     : x.type.matches('imaginary');
   if (provablyNonReal)
-    return x.isFinite === true || x.type.matches('finite_number')
-      ? 'finite_complex'
+    return x.isFinite === true || x.type.matches('complex')
+      ? 'complex'
       : 'number';
-  return 'finite_integer';
+  return 'integer';
 }
 
 /** Frozen copy of `extremumType` (library/type-handlers.ts). */
@@ -289,9 +297,9 @@ function frozenExtremumType(ops: ReadonlyArray<Expression>): Type {
   if (ops.length === 0) return 'number';
   if (!ops.every((x) => x.type.matches('number'))) return 'number';
   for (const t of [
-    'finite_integer',
-    'finite_rational',
-    'finite_real',
+    'integer',
+    'rational',
+    'real',
     'integer',
     'rational',
     'real',
@@ -402,7 +410,7 @@ function frozenElementaryFunctionType(
         ops[0]?.isFinite === false &&
         ops[0].type.matches(EXTENDED_REAL_TYPE)
       )
-        return 'finite_real';
+        return 'real';
       return frozenNumericTypeHandler(ops);
 
     case 'Arctan':
@@ -452,7 +460,7 @@ export const LEGACY_TYPE_HANDLERS: Record<
 
   // From library/number-theory.ts, pre-conversion (commit a1587fbe).
   DigitCount: ([, , digit]) =>
-    digit !== undefined ? 'finite_integer' : 'list',
+    digit !== undefined ? 'integer' : 'list',
 
   // From library/combinatorics.ts, pre-conversion (commit 68238141) — the
   // once-O7-held trio, converted after the sign channel reached function
@@ -465,9 +473,9 @@ export const LEGACY_TYPE_HANDLERS: Record<
     if (frozenProvablyNonFiniteNumber(a) || frozenProvablyNonFiniteNumber(k))
       return 'number';
     if (k.isInteger === true && k.isNonNegative === true) {
-      if (a.isInteger === true) return 'finite_integer';
-      if (a.isRational === true) return 'finite_rational';
-      if (a.isExtendedReal === true) return 'finite_real';
+      if (a.isInteger === true) return 'integer';
+      if (a.isRational === true) return 'rational';
+      if (a.isExtendedReal === true) return 'real';
     }
     return 'number';
   },
@@ -488,14 +496,14 @@ export const LEGACY_TYPE_HANDLERS: Record<
   Factorial: ([x]) => {
     const s = x ? frozenOperandSgn(x) : undefined;
     if (x?.isInteger === true && nonNegativeSign(s) === true)
-      return 'finite_integer';
+      return 'integer';
     if (x?.isInteger === true && negativeSign(s) === true) return 'number';
     return frozenNumericTypeHandler([x]);
   },
   Factorial2: ([x]) => {
     const s = x ? frozenOperandSgn(x) : undefined;
     if (x?.isInteger === true && nonNegativeSign(s) === true)
-      return 'finite_integer';
+      return 'integer';
     if (x?.isInteger === true && negativeSign(s) === true) return 'number';
     return frozenNumericTypeHandler([x]);
   },
@@ -527,10 +535,10 @@ export const LEGACY_TYPE_HANDLERS: Record<
   // `Round` is the only member of the rounding family that reads a second
   // operand: with a precision argument the result is generally not an
   // integer (`Round(3.14159, 2)` is `3.14`), so the integer claim — and only
-  // that claim — is replaced by `finite_real`.
+  // that claim — is replaced by `real`.
   Round: ([x, n]) => {
     const t = frozenRoundingFunctionType(x);
-    return n !== undefined && t === 'finite_integer' ? 'finite_real' : t;
+    return n !== undefined && t === 'integer' ? 'real' : t;
   },
   Fract: ([x]) => frozenNumericTypeHandler([x]),
   LambertW: (ops) => frozenNumericTypeHandler(ops),
@@ -587,18 +595,18 @@ export const LEGACY_TYPE_HANDLERS: Record<
   // From library/special-functions.ts, pre-conversion (commit 045c2655).
   // `EllipticF` is NOT `numericTypeHandler`: the incomplete integral
   // F(φ|m) is complex whenever m·sin²φ > 1, a condition on both operands, so
-  // it never makes the `finite_real` claim that `numericTypeHandler` makes
+  // it never makes the `real` claim that `numericTypeHandler` makes
   // for real operands — only the finite generic-point hedge.
   EllipticF: (ops) =>
     ops.some((x) => frozenProvablyNonFiniteNumber(x))
       ? 'number'
-      : 'finite_number',
+      : 'number',
   Hypergeometric2F1: (ops) => frozenNumericTypeHandler(ops),
   AppellF1: (ops) => frozenNumericTypeHandler(ops),
   Hypergeometric1F1: (ops) => frozenNumericTypeHandler(ops),
-  JacobiTheta: () => 'finite_number',
-  DedekindEta: () => 'finite_number',
-  EisensteinE: () => 'finite_number',
+  JacobiTheta: () => 'number',
+  DedekindEta: () => 'number',
+  EisensteinE: () => 'number',
 
   // From library/sets.ts, pre-conversion (commit 045c2655).
   Adjoin: frozenAdjoinType,
@@ -618,14 +626,14 @@ export const LEGACY_TYPE_HANDLERS: Record<
 };
 
 /**
- * Operators whose constant `type` handler (`type: () => 'finite_integer'`-
+ * Operators whose constant `type` handler (`type: () => 'integer'`-
  * style, reading nothing from its operands) was RETIRED outright: the
  * constant result moved into the declared signature
- * (`(integer) -> finite_integer`) and the handler was deleted. This is
+ * (`(integer) -> integer`) and the handler was deleted. This is
  * the strongest form of the migration — no handler at all cannot touch
  * engine state — and it is behavior-preserving because the no-handler
  * fallback narrowing at the type-derivation call site activates only for
- * a declared result of bare `number` or `finite_number`, never for these
+ * a declared result of bare `number`, never for these
  * spellings. Each entry records the declared result the signature must
  * keep claiming; a suite pin asserts the definition has NO `type` handler
  * and its signature result matches.
@@ -638,14 +646,14 @@ export const LEGACY_TYPE_HANDLERS: Record<
  * are pinned directly in `type-handler-parity.test.ts`:
  *
  * - `GammaRegularized`/`BetaRegularized` (library/special-functions.ts):
- *   the old constant `finite_real` claim was unsound off the proven domain
+ *   the old constant `real` claim was unsound off the proven domain
  *   (`GammaRegularized(-1, 2)` is NaN).
  * - `LogIntegral` (library/special-functions.ts): it never had a `type`
  *   handler — its declared result was a flat `real` — but that claim was
  *   wrong off the non-negative real axis: li(x) = Ei(ln x) is complex for
  *   x < 0, and `LogIntegral(NaN)` numericizes to NaN. Its declared result
  *   was widened to `number` and the handler now re-narrows to `real` (not
- *   `finite_real`: li(1) = −∞) on a proven non-negative real.
+ *   `real`: li(1) = −∞) on a proven non-negative real.
  * - `Sinc`/`FresnelS`/`FresnelC` (library/trigonometry.ts),
  *   `Covariance`/`PopulationCovariance`/`Correlation` (library/statistics.ts)
  *   and `Heaviside`/`Sign` (library/arithmetic.ts): `Sinc(NaN)` and
@@ -656,41 +664,41 @@ export const RETIRED_CONSTANT_TYPE_HANDLERS: ReadonlyArray<
   [operator: string, declaredResult: string]
 > = [
   // library/number-theory.ts
-  ['NthPrime', 'finite_integer'],
-  ['NextPrime', 'finite_integer'],
-  ['PrimeNu', 'finite_integer'],
-  ['PrimeOmega', 'finite_integer'],
-  ['MoebiusMu', 'finite_integer'],
-  ['Radical', 'finite_integer'],
-  ['PowerMod', 'finite_integer'],
-  ['ModularInverse', 'finite_integer'],
-  ['IntegerSqrt', 'finite_integer'],
-  ['CarmichaelLambda', 'finite_integer'],
-  ['LucasL', 'finite_integer'],
-  ['CatalanNumber', 'finite_integer'],
-  ['RandomPrime', 'finite_integer'],
-  ['PrimePi', 'finite_integer'],
-  ['BernoulliB', 'finite_rational'],
-  ['FromDigits', 'finite_integer'],
-  ['DigitSum', 'finite_integer'],
-  ['DivisorSigma', 'finite_integer'],
-  ['JacobiSymbol', 'finite_integer'],
-  ['LegendreSymbol', 'finite_integer'],
-  ['MultiplicativeOrder', 'finite_integer'],
-  ['PrimitiveRoot', 'finite_integer'],
-  ['Totient', 'finite_integer'],
-  ['Sigma0', 'finite_integer'],
-  ['Sigma1', 'finite_integer'],
-  ['SigmaMinus1', 'finite_rational'],
-  ['Eulerian', 'finite_integer'],
-  ['Stirling', 'finite_integer'],
-  ['StirlingS1', 'finite_integer'],
-  ['NPartition', 'finite_integer'],
+  ['NthPrime', 'integer'],
+  ['NextPrime', 'integer'],
+  ['PrimeNu', 'integer'],
+  ['PrimeOmega', 'integer'],
+  ['MoebiusMu', 'integer'],
+  ['Radical', 'integer'],
+  ['PowerMod', 'integer'],
+  ['ModularInverse', 'integer'],
+  ['IntegerSqrt', 'integer'],
+  ['CarmichaelLambda', 'integer'],
+  ['LucasL', 'integer'],
+  ['CatalanNumber', 'integer'],
+  ['RandomPrime', 'integer'],
+  ['PrimePi', 'integer'],
+  ['BernoulliB', 'rational'],
+  ['FromDigits', 'integer'],
+  ['DigitSum', 'integer'],
+  ['DivisorSigma', 'integer'],
+  ['JacobiSymbol', 'integer'],
+  ['LegendreSymbol', 'integer'],
+  ['MultiplicativeOrder', 'integer'],
+  ['PrimitiveRoot', 'integer'],
+  ['Totient', 'integer'],
+  ['Sigma0', 'integer'],
+  ['Sigma1', 'integer'],
+  ['SigmaMinus1', 'rational'],
+  ['Eulerian', 'integer'],
+  ['Stirling', 'integer'],
+  ['StirlingS1', 'integer'],
+  ['NPartition', 'integer'],
   // library/combinatorics.ts
-  ['Fibonacci', 'finite_integer'],
-  ['Multinomial', 'finite_integer'],
-  ['Subfactorial', 'finite_integer'],
-  ['BellNumber', 'finite_integer'],
+  ['Fibonacci', 'integer'],
+  ['Multinomial', 'integer'],
+  ['Subfactorial', 'integer'],
+  ['BellNumber', 'integer'],
   // library/collections.ts
   // `Length` is NOT here any more. Its constant handler was retired into the
   // signature, but the span-constructor ruling (infinite endpoints are
@@ -709,7 +717,7 @@ export const RETIRED_CONSTANT_TYPE_HANDLERS: ReadonlyArray<
   // library/regexp.ts
   ['RegExp', 'regexp'],
   // library/linear-algebra.ts
-  ['Rank', 'finite_integer'],
+  ['Rank', 'integer'],
 ];
 
 export function installLegacyTypeHandlerShadow(): void {

@@ -25,11 +25,11 @@ describe('D6.1 — rank/shape-aware broadcast lift', () => {
   test('fixed-shape source: Sqrt(M) types with the operand dims', () => {
     const s = ce.box(['Sqrt', M]);
     // At least `matrix<2x2>`: the operand dims are what this guards; the cell
-    // tier may refine (`matrix<finite_number^(2x2)>` is a sound answer), but
+    // tier may refine (`matrix<2x2>` is a sound answer), but
     // not to rational cells — `√2`, `√3`, `√5`, `√7` are irrational.
     expectTypeBetween(s, {
       atMost: 'matrix<2x2>',
-      above: 'matrix<finite_rational^(2x2)>',
+      above: 'matrix<rational^(2x2)>',
     });
     expect(s.type.matches('matrix')).toBe(true);
   });
@@ -48,7 +48,7 @@ describe('D6.1 — rank/shape-aware broadcast lift', () => {
   test('unknown-length source is unchanged (no invented lengths)', () => {
     ce.declare('xs', 'list<number>');
     expect(ce.function('Sqrt', [ce.symbol('xs')]).type.toString()).toBe(
-      'list<finite_number>'
+      'list<number>'
     );
   });
 
@@ -68,7 +68,7 @@ describe('D6.1 — rank/shape-aware broadcast lift', () => {
     // evaluated-vs-declared check below guards the over-narrow direction too.
     expectTypeBetween(expr, {
       atMost: 'vector<2>',
-      above: 'vector<finite_rational^2>',
+      above: 'vector<rational^2>',
     });
     // evaluated ⊆ declared (the broadcast soundness contract)
     expect(expr.evaluate().type.matches(expr.type.type)).toBe(true);

@@ -18,7 +18,7 @@ import { expectTypeBetween } from '../utils';
 //   PointList(x,y)/n            -> number        (want tuple<number, number>)
 //   [ p/n + p/n, ... ] (9x)     -> vector<9>     (a list of NUMBERS)
 //   PointX(that list)           -> element INDEX read, not elementwise
-//   (x - PointX(...))^2 + ...   -> finite_number (want vector<9>)
+//   (x - PointX(...))^2 + ...   -> number (want vector<9>)
 //
 // and the consumer's type-first "is this collection-valued" proof then failed
 // closed, so two document rows never registered and the state drew nothing.

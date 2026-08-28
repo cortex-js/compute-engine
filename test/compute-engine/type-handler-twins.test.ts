@@ -187,7 +187,7 @@ describe('operand-level helpers', () => {
     // The non-finiteness predicate is the gate several converted handlers
     // rest on, and one of them rests on it ALONE: `EllipticF`'s legacy
     // handler is exactly `ops.some(provablyNonFiniteNumber) ? 'number' :
-    // 'finite_number'`, so the whole translation of that operator is this
+    // 'number'`, so the whole translation of that operator is this
     // one pin. The expressions shape asks the value channel first
     // (`isNaN`/`isInfinity`) and falls back on `isFinite === false` plus a
     // `number` type test; the twin must reproduce both halves, including the
@@ -284,7 +284,7 @@ describe('gammaPoleType', () => {
 describe('roundingFunctionType', () => {
   test('equal everywhere, including the complex and non-finite literals', () => {
     // A complex literal's non-realness travels on the SIGN here: `1 + 2i`
-    // types `finite_complex`, which is not disjoint from `real`, so only
+    // types `complex`, which is not disjoint from `real`, so only
     // `sgn === 'unsigned'` (an imaginary part, NaN having been excluded by
     // the non-finite arm) proves it.
     abUnary(legacy.roundingFunctionType, twin.roundingFunctionType, {});
@@ -425,7 +425,7 @@ describe('elementaryFunctionType', () => {
   // `Sinh`/`Cosh`/`Tanh`/`Sech` take the non-finite arm on a REAL ±∞. Both
   // shapes now read realness from the TYPE. The expressions shape used to
   // test the value predicate (then spelled `isReal`), which a NaN literal
-  // answered `true` — so it claimed `non_finite_number` (resp. `finite_real`)
+  // answered `true` — so it claimed `non_finite_number` (resp. `real`)
   // for a value that is NaN. That was corrected on the expressions
   // side rather than recorded as a divergence, because the twin's answer was
   // the sound one; the corrected NaN behavior is pinned in
@@ -450,7 +450,7 @@ describe('elementaryFunctionType', () => {
   //      an enclosing range, `typeBounds` decides the magnitude and the
   //      channels agree, so those rows are gone from the tables below.)
   //  (b) `Exp(r)` is the mirror case: the descriptor's SIGN comes from the
-  //      result type (`(finite_real<0..>) & !0` proves positive, hence
+  //      result type (`(real<0..>) & !0` proves positive, hence
   //      non-zero), while the expressions shape asks `isEqual(0)`, which
   //      does not consult a function expression's result type and answers
   //      `undefined`. Here the twin proves MORE and its claim is narrower —
@@ -475,26 +475,26 @@ describe('elementaryFunctionType', () => {
   // parity, since the shapes differ by design. The adopted behavior is
   // pinned directly in `type-handler-parity.test.ts`.
   const ARCSIN_D: Divergences = {
-    'smd:real<-0.5..0.5>': ['finite_complex', 'finite_real'],
+    'smd:real<-0.5..0.5>': ['complex', 'real'],
     // A ranged RESULT type is the third witness of loss class (c): `Sign(r)`
-    // types `finite_integer<-1..1>`, so `typeBounds` proves the operand lies
+    // types `integer<-1..1>`, so `typeBounds` proves the operand lies
     // in Arcsin/Arccos's closed real domain [−1, 1] and the twin claims
-    // `finite_real` (correct: arcsin of {−1, 0, 1} is {−π/2, 0, π/2}), while
+    // `real` (correct: arcsin of {−1, 0, 1} is {−π/2, 0, π/2}), while
     // the expression shape's `provablyIn` asks the assumptions system, which
     // never reads a result-type range, and falls to the vacuous no-pole
-    // `finite_complex`. Only these two heads gain the row — every other
+    // `complex`. Only these two heads gain the row — every other
     // bounded head's real domain is open at ±1 or excludes it, so the
     // closed range [−1, 1] proves nothing there.
-    'Sign(r)': ['finite_complex', 'finite_real'],
+    'Sign(r)': ['complex', 'real'],
   };
   for (const head of ['Arcsin', 'Arccos'])
     test(`${head} — the exact-value fast path`, () => abHead(head, ARCSIN_D));
 
   const ARCSEC_D: Divergences = {
-    'a=5': ['finite_real', 'finite_complex'],
-    'Exp(r)': ['number', 'finite_complex'],
-    'bigd:real<2..>': ['number', 'finite_real'],
-    'twod:real<2..2>': ['number', 'finite_real'],
+    'a=5': ['real', 'complex'],
+    'Exp(r)': ['number', 'complex'],
+    'bigd:real<2..>': ['number', 'real'],
+    'twod:real<2..2>': ['number', 'real'],
   };
   for (const head of ['Arcsec', 'Arccsc'])
     test(`${head} — the exact-value fast path and the type-proved sign`, () =>
@@ -507,25 +507,25 @@ describe('elementaryFunctionType', () => {
 
   test('Artanh — the exact-value fast path and the declared ranges', () =>
     abHead('Artanh', {
-      'a=5': ['finite_complex', POLE_JOIN],
-      'bigd:real<2..>': [POLE_JOIN, 'finite_complex'],
-      'smd:real<-0.5..0.5>': [POLE_JOIN, 'finite_real'],
-      'twod:real<2..2>': [POLE_JOIN, 'finite_complex'],
+      'a=5': ['complex', POLE_JOIN],
+      'bigd:real<2..>': [POLE_JOIN, 'complex'],
+      'smd:real<-0.5..0.5>': [POLE_JOIN, 'real'],
+      'twod:real<2..2>': [POLE_JOIN, 'complex'],
     }));
 
   test('Arcoth — the exact-value fast path and the declared ranges', () =>
     abHead('Arcoth', {
-      'a=5': ['finite_real', POLE_JOIN],
-      'bigd:real<2..>': [POLE_JOIN, 'finite_real'],
-      'smd:real<-0.5..0.5>': [POLE_JOIN, 'finite_complex'],
-      'twod:real<2..2>': [POLE_JOIN, 'finite_real'],
+      'a=5': ['real', POLE_JOIN],
+      'bigd:real<2..>': [POLE_JOIN, 'real'],
+      'smd:real<-0.5..0.5>': [POLE_JOIN, 'complex'],
+      'twod:real<2..2>': [POLE_JOIN, 'real'],
     }));
 
   test('Arsech — the exact-value fast path, the type-proved sign and the declared ranges', () =>
     abHead('Arsech', {
-      'Exp(r)': [POLE_JOIN, 'finite_complex'],
-      'bigd:real<2..>': [POLE_JOIN, 'finite_complex'],
-      'twod:real<2..2>': [POLE_JOIN, 'finite_complex'],
+      'Exp(r)': [POLE_JOIN, 'complex'],
+      'bigd:real<2..>': [POLE_JOIN, 'complex'],
+      'twod:real<2..2>': [POLE_JOIN, 'complex'],
     }));
 
   // `Arcsch`'s real interval is the whole line, so a bound proves nothing
@@ -536,9 +536,9 @@ describe('elementaryFunctionType', () => {
 
   test('Arcosh — the exact-value fast path and the declared ranges', () =>
     abHead('Arcosh', {
-      'a=5': ['finite_real', 'finite_complex'],
-      'bigd:real<2..>': ['finite_complex', 'finite_real'],
-      'twod:real<2..2>': ['finite_complex', 'finite_real'],
+      'a=5': ['real', 'complex'],
+      'bigd:real<2..>': ['complex', 'real'],
+      'twod:real<2..2>': ['complex', 'real'],
     }));
 
   test('an unlisted head falls through both dispatchers alike', () => {
@@ -555,16 +555,16 @@ describe('elementaryFunctionType', () => {
   // exclude 1.
   //
   // `Exp(r)` used to be the interesting base here: its type
-  // `(finite_real<0..>) & !0` is type-derived-finite, where
+  // `(real<0..>) & !0` is type-derived-finite, where
   // `Expression.isFinite` on a function application is a structural
   // per-head propagation that never consults the result type and answers
   // `undefined` — so the twin accepted a base the expressions shape
   // rejected, and narrowed. That was NOT a benign stronger-channel
   // narrowing: `Exp(0) = 1`, so the accepted base could be exactly the one
-  // value that has no logarithm, and the resulting `finite_real` claim was
+  // value that has no logarithm, and the resulting `real` claim was
   // unsound (`Log(4, Exp(0)).N()` is `+oo`). With the non-1 test made a
   // proof rather than a literal `!== 1` check, `Exp(r)` fails it — nothing
-  // in `(finite_real<0..>) & !0` excludes 1 — and the whole `b=Exp(r)`
+  // in `(real<0..>) & !0` excludes 1 — and the whole `b=Exp(r)`
   // column now agrees with the expressions shape.
   const BASES: [string, () => Expression][] = [
     ['b=2', () => ce.number(2)],

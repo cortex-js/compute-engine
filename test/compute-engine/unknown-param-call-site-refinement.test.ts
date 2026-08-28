@@ -23,7 +23,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  *   intended D6 posture (nothing exists to refine from) and is pinned as such.
  *
  * - Half 2 is NOT a call-site-refinement defect at all, and the fix direction
- *   recorded for it is refuted below. Restoring `finite_complex` on the chain
+ *   recorded for it is refuted below. Restoring `complex` on the chain
  *   changes NOTHING, because no target picks its real-vs-complex lowering from
  *   the result type: `Sqrt`/`Ln`/`Log` pick it from the OPERAND, and
  *   `BaseCompiler.isComplexValued` carries an explicit carve-out (added
@@ -168,21 +168,21 @@ describe('half 2 — Tycho item 190: the real-kernel carve-out, not refinement',
 
   describe('sqrtOfRealOfUnknownSign — refutes the recorded fix direction', () => {
     // The recorded diagnosis was that `z`'s `unknown` parameter widens
-    // `sqrt(unknown)` to `finite_number`, dropping complex admission, and that
-    // refining the parameter from the call site would restore `finite_complex`
+    // `sqrt(unknown)` to `number`, dropping complex admission, and that
+    // refining the parameter from the call site would restore `complex`
     // "and with it a correct emission". The second half does not follow: with
     // `u` declared `real` — no placeholder anywhere, and the node ALREADY
-    // typed `finite_complex` — `mode: 'strict'` still emits the real kernel
+    // typed `complex` — `mode: 'strict'` still emits the real kernel
     // and still returns NaN. Complex admission in the type is not what selects
     // the lane; the MODE is (compile-mode step 4, 2026-08-16), which is why
     // the same source promotes under the default `auto` with the type
     // unchanged.
-    test('the node is typed finite_complex with a fully concrete parameter', () => {
+    test('the node is typed complex with a fully concrete parameter', () => {
       const ce = new ComputeEngine();
       ce.declare('u', 'real');
       expect(
         ce.parse('\\sqrt{u-1}', { strict: false }).type.toString()
-      ).toEqual('finite_complex');
+      ).toEqual('complex');
     });
 
     test('...and in strict mode it STILL compiles to Math.sqrt and returns NaN', () => {
@@ -235,7 +235,7 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
   test('ON: the item-190 witness matches the interpreter', () => {
     // The radical sits inside the user function `z`, so this only works if the
     // CALL SITE follows the body's lane — `z(t)` types the wide
-    // `finite_number`, which says nothing about complexness on its own. See
+    // `number`, which says nothing about complexness on its own. See
     // `isComplexValuedUserCall`.
     const ce = new ComputeEngine();
     ce.parse(Z_DEF, { strict: false }).evaluate();

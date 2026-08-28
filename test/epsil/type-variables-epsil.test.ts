@@ -352,7 +352,7 @@ describe('EPSIL `where` × the `type` statement (D13: shadowing)', () => {
     // the result is typed from it. If the nominal `point` had won, this would
     // be an `incompatible-type` error instead.
     expect(r.value).toBe('f(5)');
-    expect(r.type).toBe('finite_integer');
+    expect(r.type).toBe('integer');
   });
 
   test('WITHOUT the clause the same name IS the nominal type (the capture)', () => {
@@ -371,7 +371,7 @@ describe('EPSIL `where` × the `type` statement (D13: shadowing)', () => {
       'type point = tuple<number, number>\nlet f: (point) -> point where point\nf((1, 2))'
     );
     expect(r.diagnostics).toEqual([]);
-    expect(r.type).toBe('tuple<finite_integer, finite_integer>');
+    expect(r.type).toBe('tuple<integer, integer>');
   });
 });
 

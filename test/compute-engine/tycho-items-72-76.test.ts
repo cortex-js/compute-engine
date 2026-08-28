@@ -149,7 +149,7 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     // pick up the `list<number>` a broadcasting component earns. The scalar is
     // reported as the real it is (a norm is `√(Σ|xᵢ|²)`, real whatever the
     // components are) rather than the wide `number`.
-    expect(norm.type.toString()).toEqual('finite_real');
+    expect(norm.type.toString()).toEqual('real');
     expect(norm.type.matches('collection')).toBe(false);
     expect(norm.evaluate().re).toEqual(5);
   });
@@ -170,7 +170,7 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     expect(h.evaluate().operator).toEqual('List');
     // A plain point keeps the scalar type
     expect(ce.box(['Hypot', ['Tuple', 3, 4], 1]).type.toString()).toEqual(
-      'finite_real'
+      'real'
     );
   });
 

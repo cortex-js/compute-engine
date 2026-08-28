@@ -3,7 +3,7 @@
  * broadcast cell.
  *
  * A number literal's public type carries its value (`0.5`,
- * `finite_rational<0.5..0.5>`) rather than its tier (`finite_real`). That
+ * `rational<0.5..0.5>`) rather than its tier (`real`). That
  * precision is what a reader of an expression wants. An element-wise
  * broadcast, however, asks type questions once per cell, and the answers are
  * used only to decide how to evaluate that cell — no caller ever inspects

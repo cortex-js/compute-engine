@@ -120,8 +120,8 @@ export function _setNextObjectSerial(ce: ComputeEngine, serial: number): void {
  * are `isSame`, as are the one-cluster string `"a"` and the character `'a'` —
  * so value equality alone would suppress a store that changes `isExact`, the
  * MathJSON, or the operand's type, all of which a reader can observe.
- * Requiring the types to agree as well rules those out: `finite_rational` is
- * not `finite_real`, and `string` is not `character`, while the case this
+ * Requiring the types to agree as well rules those out: `rational` is
+ * not `real`, and `string` is not `character`, while the case this
  * exists for (`1` over a stored `1`) agrees on both and still elides.
  *
  * Confined to these two kinds because their comparison never walks the

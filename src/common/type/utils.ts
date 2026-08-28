@@ -50,11 +50,11 @@ export function negativeRangeType(tier: NumericPrimitiveType): Type {
 
 /**
  * Widen every range, sign or value decoration on a numeric type back to its
- * bare tier: `finite_real<0..>` → `finite_real`, `(finite_real<0..>) & !0` →
- * `finite_real`, the value type `21` → `finite_integer`. Structural nodes
- * (unions, collections, tuple components, `broadcastable`) are descended;
- * everything else — including a non-numeric intersection — is returned as
- * is, by identity when nothing changed.
+ * bare tier: `real<0..>` → `real`, `(real<0..>) & !0` → `real`, the value
+ * type `21` → `integer`. Structural nodes (unions, collections, tuple
+ * components, `broadcastable`) are descended; everything else — including a
+ * non-numeric intersection — is returned as is, by identity when nothing
+ * changed.
  *
  * This is what a JOIN-based result computation (`addType`'s widen tail, the
  * cell absorption of `Add`/`Multiply`, the broadcastable element join) must
@@ -80,13 +80,13 @@ export function stripNumericRanges(t: Type): Type {
       // finite-by-default.
       if (Number.isNaN(v)) return 'nan';
       if (!Number.isFinite(v)) return 'infinity';
-      return Number.isInteger(v) ? 'finite_integer' : 'finite_real';
+      return Number.isInteger(v) ? 'integer' : 'real';
     }
     case 'intersection': {
       // The intersection is a subset of each member, so any single member's
       // strip is a sound upper bound; take the first that reaches a numeric
-      // tier (`(finite_real<0..>) & !0` → `finite_real`). A non-numeric
-      // intersection is not this function's business.
+      // tier (`(real<0..>) & !0` → `real`). A non-numeric intersection is not
+      // this function's business.
       for (const m of t.types) {
         const st = stripNumericRanges(m);
         if (
@@ -1098,7 +1098,7 @@ function collectionLeafType(t: Readonly<Type>): Type | null {
     if (el === 'unknown' || el === 'any') return null;
     // Recurse through a collection-kind element to the LEAF, exactly as the
     // `list` branch above does. Without this, a refined
-    // `indexed_collection<vector<finite_integer^2>>` (the shape a
+    // `indexed_collection<vector<integer^2>>` (the shape a
     // placeholder-declared symbol takes from an assigned list of points —
     // Phase 1, 2026-08-18) reported its ROW as the leaf, and the
     // leaf-disjointness refutation compared `vector<…>` against `number`
@@ -1283,7 +1283,10 @@ export function broadcastableBaseMatches(
 
 /**
  * True if `t` provably denotes a non-real number: a subtype of `complex` that
- * is not a subtype of `real` (`complex`, `imaginary`, `finite_complex`, …).
+ * is not a subtype of `real` (`complex`, `imaginary`, …). The top numeric
+ * name `number` answers `false` — it is a SUPERTYPE of `complex`, not a
+ * subtype — and so does every real tier, so a generic numeric result typed
+ * `number` reads as the compiler's REAL lane.
  *
  * Note that under the `real ⊂ complex` convention a bare
  * `isSubtype(t, 'complex')` is also true for every real type, so it cannot be
@@ -1322,7 +1325,7 @@ export function finitePartOfType(t: Readonly<Type>): Type {
 /**
  * True if an operand of type `t` could be a non-real number: either the type
  * is a supertype of `complex` (`number`, `any`), or it is a numeric type
- * outside `real` (a complex literal types as `finite_complex`, `i` as
+ * outside `real` (a complex literal types as `complex`, `i` as
  * `imaginary` — neither is a *supertype* of `complex`, so the first check
  * alone misses actual complex-valued operands).
  *
@@ -1333,9 +1336,9 @@ export function finitePartOfType(t: Readonly<Type>): Type {
  * whether `t` is a *supertype* of `complex` — it is NOT true for `real` and
  * its subtypes:
  *
- * - `real`, `finite_real`, `integer`, `rational` → `false`
- * - `number`, `finite_number`, `any`, `unknown` → `true` (could be non-real)
- * - `complex`, `finite_complex`, `imaginary` → `true` (is non-real)
+ * - `real`, `integer`, `rational` → `false`
+ * - `number`, `any`, `unknown` → `true` (could be non-real)
+ * - `complex`, `imaginary` → `true` (is non-real)
  */
 export function couldBeNonRealNumber(t: Readonly<Type>): boolean {
   return (
@@ -1435,11 +1438,10 @@ function containsArm(
  *   real-valued (a complex or imaginary base has no sign). The bases that
  *   qualify are listed in `REAL_NAN_FREE_PRIMITIVES` below; `number` and
  *   `nan` are absent because a NaN value has no sign, `infinity` is absent
- *   because it admits the unsigned `~oo`, and `complex`, `finite_complex`,
- *   `imaginary` and `finite_number` are absent because a value off the real
- *   axis has no sign either. The SIGNED infinities are
- *   signed reals here (`+∞` is positive), so an unbounded side or a
- *   `non_finite_number` base does not block a claim.
+ *   because it admits the unsigned `~oo`, and `complex` and `imaginary` are
+ *   absent because a value off the real axis has no sign either. The SIGNED
+ *   infinities are signed reals here (`+∞` is positive), so an unbounded side
+ *   or a `non_finite_number` base does not block a claim.
  * - An intersection may combine facts from its members (the intersection is
  *   a subset of each member, so any member's sign constraint holds); members
  *   that carry no sign information are ignored.
@@ -1453,9 +1455,6 @@ const REAL_NAN_FREE_PRIMITIVES = new Set([
   'integer',
   'rational',
   'real',
-  'finite_integer',
-  'finite_rational',
-  'finite_real',
   'non_finite_number',
 ]);
 
@@ -1491,10 +1490,10 @@ export function signOfType(
       // Only a real-valued, NaN-free base can claim a sign (see above). The
       // test is the INCLUSION list, not a list of bases to reject: an
       // exclusion list silently admits every base nobody thought to name —
-      // `infinity` (which contains the unsigned `~oo`), `nan`, and
-      // `finite_number` (which contains the finite complex numbers) all have
-      // no sign, and none is reachable through the range parser today, so a
-      // hand-built type was the only witness.
+      // `infinity` (which contains the unsigned `~oo`), `nan`, and `complex`
+      // (which contains the finite off-axis values) all have no sign, and
+      // none is reachable through the range parser today, so a hand-built
+      // type was the only witness.
       if (!REAL_NAN_FREE_PRIMITIVES.has(t.type)) return undefined;
       const lo = t.lower ?? -Infinity;
       const hi = t.upper ?? Infinity;

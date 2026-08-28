@@ -79,10 +79,51 @@
     `infinity`- or `nan`-typed parameters decline to compile (compiled
     `~oo` and NaN share one runtime value, so no faithful guard exists).
 
-  The five `finite_*` names and `non_finite_number` remain valid this
-  release as deprecated strict-subtype synonyms; they retire (with parse
-  aliases for one cycle) in the next release. The decision record is
+  The decision record is
   `docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`.
+
+- **The five `finite_*` type names are retired.** `finite_number`,
+  `finite_complex`, `finite_real`, `finite_rational` and `finite_integer` are
+  no longer members of the numeric type union: with the bare names finite,
+  each one denoted exactly the same values as a bare name, and the duplicate
+  spelling is gone. Consequences:
+
+  - The type PARSER still accepts all five as **input aliases for one release
+    cycle** and normalizes each to the name it denotes — `finite_integer` →
+    `integer`, `finite_rational` → `rational`, `finite_real` → `real`,
+    `finite_complex` → `complex`, and `finite_number` → **`complex`** (the
+    user-facing meaning of "any finite number" IS the finite complex type).
+    An alias never reaches a type node and is never emitted, so
+    `parseType('finite_real<0..1>')` serializes back as `real<0..1>`. The
+    aliases are removed in a later release; migrate type strings now.
+  - **A generic numeric result now reports `number`** where it reported
+    `finite_number` — the type of `x·y`, `sin(x y)`, `2u` and every other
+    expression the engine cannot prove real. There is no remaining spelling
+    for "finite, real or complex": `complex` would additionally claim the
+    value is PROVABLY non-real, which is what the compiler reads to select
+    its complex lowering lane. Result claims that CAN prove finiteness still
+    name the finite tier they prove (`integer`, `real`, `complex`).
+  - **The public `BoxedType.finite_number`, `BoxedType.finite_integer`,
+    `BoxedType.finite_real` and `BoxedType.setFiniteInteger` statics are
+    removed.** Use `BoxedType.complex`, `BoxedType.integer`,
+    `BoxedType.real` and `BoxedType.setInteger`.
+  - A finiteness GATE is now written `matches('complex')`; it was
+    `matches('finite_number')`.
+  - A hand-built numeric range over the top type is no longer narrowed by
+    its bounds: `{kind:'numeric', type:'number', lower:0, upper:10}` used to
+    be a subtype of `finite_number` and is now not a subtype of `complex`. The
+    type parser refuses bounds on `number`, so only a hand-built type object
+    has this shape.
+
+  - `assume(|x| < c)` for a finite `c` now declares the symbol `complex`
+    (that is, finite), where it declared `finite_number` before. A bound on
+    the modulus proves finiteness but says nothing about the imaginary part,
+    so real-only simplifications and the compiler's real lane no longer apply
+    to the symbol unless it is separately known to be real: with
+    `assume(|q| < 1)` alone, `sqrt(q^2)` stays `sqrt(q^2)` instead of
+    reducing to `|q|`. Add `assume(q ∈ ℝ)` to get the real-only behavior.
+
+  `non_finite_number` is unchanged this release.
 
 
 ### New Features
@@ -91,11 +132,11 @@
   The `Add`, `Multiply`, `Abs` and positive-integer-exponent `Power` type
   handlers now derive a result range from their operands' ranged types:
   with `assume(x > 2)` and `assume(y > 3)`, the type of `x + y` is
-  `real<5..>` and of `x · y` is `finite_real<6..>`; `|x|` for
+  `real<5..>` and of `x · y` is `real<6..>`; `|x|` for
   `x: real<-3..2>` is `real<0..3>`; `x^2` for the same `x` is
-  `finite_real<0..9>` (and `x^2` for `x: real<-3..-2>` is the tightened
-  `finite_real<4..9>`). The bounds flow: domain checks read them, so
-  `Arcsin(x + y)` with suitably bounded operands types `finite_real`, and
+  `real<0..9>` (and `x^2` for `x: real<-3..-2>` is the tightened
+  `real<4..9>`). The bounds flow: domain checks read them, so
+  `Arcsin(x + y)` with suitably bounded operands types `real`, and
   `Sqrt(1 − 0.2²)` proves its radicand non-negative without evaluation.
   Every computed bound is rounded outward (error-free transformations
   detect exact endpoint arithmetic, so `x + y` above claims exactly `5`,
@@ -108,20 +149,20 @@
 
 - **A number literal's type now encloses its value in a compact range.** A
   literal no machine number holds exactly used to type as a sign-only claim:
-  `1/3` was `(finite_rational<0..>) & !0`, `√2` was `(finite_real<0..>) & !0`.
+  `1/3` was `(rational<0..>) & !0`, `√2` was `(real<0..>) & !0`.
   It now types as a closed range on its tier whose bounds are rounded OUTWARD
-  to two significant digits: `1/3` is `finite_rational<0.33..0.34>`, `√2` is
-  `finite_real<1.4..1.5>`, `10³⁰+1` is `finite_integer<9.9e+29..1.1e+30>`.
+  to two significant digits: `1/3` is `rational<0.33..0.34>`, `√2` is
+  `real<1.4..1.5>`, `10³⁰+1` is `integer<9.9e+29..1.1e+30>`.
   The enclosure is both more compact to read and strictly more precise than
   the sign range (its bounds exclude zero, so the sign is still a type fact).
   It is also sound: the bounds provably contain the exact value — an outward
   grid step plus padding covers both the decimal approximation error and the
   final double rounding — and the range is never a singleton, so no operation
   mistakes a bound for the literal's value (`1 − 10⁻³⁰` encloses as
-  `finite_rational<0.99..1.1>`, which admits but does not assert the value 1).
+  `rational<0.99..1.1>`, which admits but does not assert the value 1).
   A literal whose magnitude is outside the range of normal doubles (`10⁴⁰⁰`,
   or a subnormal like `7·10⁻³²⁴`) still falls back to the sign-only claim. Domain checks read the new bounds off the
-  type: `Arcsin(1/3)` now types `finite_real` (previously `finite_complex`,
+  type: `Arcsin(1/3)` now types `real` (previously `complex`,
   because the sign range could not prove `|1/3| ≤ 1`).
 
 - **`BigDecimal.toPrecisionToward(n, direction)`** — round to `n` significant
@@ -166,11 +207,11 @@
   `NaN`, `Infinity`, `+infinity` and `-infinity` all mean exactly what they
   meant. Only the two exact-lowercase words moved.
 
-- **Coming in the next major release** (a preview, so name-matching consumers
-  have lead time): bare numeric names will mean FINITE — `real` will stop
-  admitting `±∞` — values will retype onto `infinity` and `nan`, and the
-  `finite_number`, `finite_complex`, `finite_real`, `finite_rational`,
-  `finite_integer` and `non_finite_number` names will retire.
+- **Coming in a later release** (a preview, so name-matching consumers have
+  lead time): `non_finite_number` will retire as well, replaced at each site
+  by the spelling that says what is meant there — `infinity` where the
+  unsigned `~oo` belongs too, and `real | non_finite_number` for the extended
+  real line.
 
 ### Bug Fixes
 
@@ -209,7 +250,7 @@
   model forbids for a failed selection. Both now answer `Missing`, the
   position-preserving absent datum, and their result types carry a
   `missing` arm exactly when no default clause exists (`If(c, 5)` types
-  `finite_integer | missing`; `If(c, 5, 6)` stays `finite_integer`).
+  `integer | missing`; `If(c, 5, 6)` stays `integer`).
   Unchanged: the masking `Undefined` of the `When` restriction operator
   (plot consumers skip masked points), and the element-wise no-match cell
   (`NaN` for numeric cells). On the GPU targets a default-less `Which`
@@ -221,7 +262,7 @@
 - **A union with a `broadcastable` alternative broadcasts like one.** A
   valueless symbol declared `number | broadcastable<number>` may hold a
   collection at runtime, but element-wise arithmetic over it typed as a
-  plain scalar: `2b` claimed `finite_number`. The possibly-a-collection
+  plain scalar: `2b` claimed the scalar `number`. The possibly-a-collection
   test now sees a `broadcastable<…>` branch inside a union (and unfolds
   transparent aliases), so `2b` types `broadcastable<number>` — the same
   answer the bare `broadcastable<number>` declaration already produced. A
@@ -239,7 +280,7 @@
   against the double's shortest decimal representation with exact integer
   arithmetic, at every precision. The engine's decimal reading of doubles is
   unchanged: `1/5` and `0.2` are still the same value, and short terminating
-  rationals keep their singleton types (`finite_rational<0.2..0.2>`).
+  rationals keep their singleton types (`rational<0.2..0.2>`).
 
 - **A zero element times a non-finite factor is `NaN` on every route.**
   `0 · ~oo`, `0 · ±∞` and `0 · NaN` are indeterminate forms. The scalar
@@ -8974,6 +9015,13 @@ against an independent `mpmath` reference, never another tool. Reproduce with
 
 ### Resolved Issues
 
+- **Exact integer tensors stay exact.** A shadowed branch in the tensor
+  dtype classifier routed every integer literal into a float64 buffer,
+  which silently disabled the exact-arithmetic path for integer matrices.
+  With the repair, `Inverse([[1,2],[3,4]])` evaluates to exact rationals
+  (`[[-2,1],[3/2,-1/2]]`) and `.N()` still produces the float form; an
+  integer outside the float-safe range stays expression-backed instead of
+  rounding.
 - **`assume()` after `assign()` now records the assumption.** The predicate was
   evaluated through the symbol's assigned value before the assumption system saw
   it, so with `w := 5`, `assume(w > 0)` folded to `True`, returned

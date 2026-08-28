@@ -461,7 +461,7 @@ describe('DeclareType statement replacement is IN PLACE', () => {
     });
     const record = recordOf(ce, 'bx');
     const built = ce.box(['bx', 1]).evaluate();
-    expect(built.type.toString()).toBe('bx<finite_integer>');
+    expect(built.type.toString()).toBe('bx<integer>');
 
     // A body that contradicts the (still declared) `out`.
     expect(() =>
@@ -476,17 +476,13 @@ describe('DeclareType statement replacement is IN PLACE', () => {
     expect(record._varianceState).toBe('verified');
     // The definition, the variance and the constructor all still work.
     expect(ce.type('bx<integer>').matches('bx<number>')).toBe(true);
-    expect(ce.box(['bx', 1]).evaluate().type.toString()).toBe(
-      'bx<finite_integer>'
-    );
+    expect(ce.box(['bx', 1]).evaluate().type.toString()).toBe('bx<integer>');
     // A well-formed replacement still lands afterwards.
     ce.declareType('bx', 'tuple<v: T, w: T>', {
       typeParams: ['out T'],
       fromStatement: true,
     });
-    expect(ce.box(['bx', 1, 2]).evaluate().type.toString()).toBe(
-      'bx<finite_integer>'
-    );
+    expect(ce.box(['bx', 1, 2]).evaluate().type.toString()).toBe('bx<integer>');
   });
 
   test('a replacement that fails to parse restores the previous definition', () => {

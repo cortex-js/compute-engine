@@ -165,7 +165,7 @@ describe('Anonymous function with anonymous parameters', () => {
     // ...but a body with NO wildcard stays a nullary thunk (`["Function", 42]`
     // and `["Function", ["Add", "x", 1]]` are not unary functions).
     expect(ce.box(['Function', 42]).type.toString()).toBe(
-      '() -> finite_integer'
+      '() -> integer'
     );
     expect(ce.box(['Apply', ['Function', ['Add', 'x', 1]]]).evaluate().toString()).toBe(
       'x + 1'
@@ -566,9 +566,9 @@ describe('Pipe — stage sugar (box route)', () => {
     ]);
     // The element tier is derived from the source's: a bare-parameter
     // mapping over integers squares integers, so the cells say
-    // `finite_integer<0..>` (the even-power range, since the
+    // `integer<0..>` (the even-power range, since the
     // ranged-results round) — on the evaluated view too.
-    expect(pipe.type.toString()).toBe('list<finite_integer<0..>^3>');
+    expect(pipe.type.toString()).toBe('list<integer<0..>^3>');
     expect(pipe.type.toString()).toBe(pipe.evaluate().type.toString());
 
     // Element type, not just shape: a list of boolean pairs mapped through a
@@ -599,7 +599,7 @@ describe('Pipe — stage sugar (box route)', () => {
     ]);
     // The outer `+1` stage joins bare tiers (a sum does not keep its
     // terms' ranges), so the inner stage's `<0..>` cells widen back.
-    expect(chained.type.toString()).toBe('vector<finite_integer^3>');
+    expect(chained.type.toString()).toBe('vector<integer^3>');
     expect(chained.type.toString()).toBe(chained.evaluate().type.toString());
   });
 

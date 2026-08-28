@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 // Tycho item 167 (2026-08-11): `.count` was `undefined` on an un-evaluated
 // arithmetic broadcast, even when the length was recoverable without
-// evaluating — from the TYPE (`[1,2,3]+1` types `vector<finite_integer^3>`) or
+// evaluating — from the TYPE (`[1,2,3]+1` types `vector<integer^3>`) or
 // from the operand (`(1..99)+1`'s `Range` reports 99).
 //
 // The broadcasting arithmetic operators carry no collection handlers —
@@ -86,7 +86,7 @@ describe('Tycho item 167: count of an un-evaluated broadcast', () => {
   describe('facets deliberately left alone', () => {
     test('isCollection stays false for a broadcast result', () => {
       // Consumers rely on this: `.isCollection` is deliberately false for a
-      // `list<finite_number>`. Item 167 asked for the LENGTH, not for these
+      // `list<number>`. Item 167 asked for the LENGTH, not for these
       // expressions to become collections.
       expect(ce.parse('\\left[1,2,3\\right]+1').isCollection).toBe(false);
     });

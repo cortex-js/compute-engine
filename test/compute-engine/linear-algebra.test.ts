@@ -904,14 +904,14 @@ describe('Transpose', () => {
   it('reports the transposed static type (element type kept, axes swapped)', () => {
     const m23 = ce.expr(['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
     expect(ce.expr(['Transpose', m23]).type.toString()).toBe(
-      'matrix<finite_integer^(3x2)>'
+      'matrix<integer^(3x2)>'
     );
     expect(ce.expr(['ConjugateTranspose', m23]).type.toString()).toBe(
-      'matrix<finite_integer^(3x2)>'
+      'matrix<integer^(3x2)>'
     );
     // Vector: transpose is the identity, type included.
     expect(ce.expr(['Transpose', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
   });
 });
@@ -978,7 +978,7 @@ describe('Determinant', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"), [7,-2,11,-5,13,-7,17])`
+      `Error(ErrorCode("incompatible-type", "matrix", "vector<integer^7>"), [7,-2,11,-5,13,-7,17])`
     );
   });
 
@@ -996,7 +996,7 @@ describe('Determinant', () => {
     const result = ce.expr(['Determinant', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   });
 
@@ -1152,7 +1152,7 @@ describe('Inverse', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"), [7,-2,11,-5,13,-7,17])`
+      `Error(ErrorCode("incompatible-type", "matrix", "vector<integer^7>"), [7,-2,11,-5,13,-7,17])`
     );
   });
 
@@ -1172,7 +1172,7 @@ describe('Inverse', () => {
     const result = ce.expr(['Inverse', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   });
 
@@ -1191,7 +1191,7 @@ describe('Inverse', () => {
     expect(result.toString()).toEqual('[[3/5,-1/5],[-1/5,2/5]]');
     // The result carries a matrix type (not `list<list<…>>`). Since honest
     // List typing (tensor-unification Phase A) the element type is precise
-    // (e.g. `matrix<finite_rational^(2x2)>`) — assert matrix-ness via matches.
+    // (e.g. `matrix<rational^(2x2)>`) — assert matrix-ness via matches.
     expect(result.type.matches('matrix<2x2>')).toBe(true);
   });
 
@@ -1313,7 +1313,7 @@ describe('PseudoInverse', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"), [7,-2,11,-5,13,-7,17])`
+      `Error(ErrorCode("incompatible-type", "matrix", "vector<integer^7>"), [7,-2,11,-5,13,-7,17])`
     );
   });
 
@@ -1337,7 +1337,7 @@ describe('PseudoInverse', () => {
     const result = ce.expr(['PseudoInverse', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<integer^(2x3x4)>"), [[[1,2,3,4],[5,6,7,8],[9,10,11,12]],[[13,14,15,16],[17,18,19,20],[21,22,23,24]]])`
     );
   });
 
@@ -1586,13 +1586,13 @@ describe('Norm — result type is real', () => {
   it('a fixed numeric point norms to a finite real', () => {
     const eng = new ComputeEngine();
     expect(eng.expr(['Norm', ['Tuple', 3, 4]]).type.toString()).toBe(
-      'finite_real'
+      'real'
     );
     expect(eng.expr(['Abs', ['Tuple', 3, 4]]).type.toString()).toBe(
-      'finite_real'
+      'real'
     );
     expect(eng.expr(['Norm', ['List', 3, 4]]).type.toString()).toBe(
-      'finite_real'
+      'real'
     );
   });
 
@@ -1600,10 +1600,11 @@ describe('Norm — result type is real', () => {
     const eng = new ComputeEngine();
     eng.declare('z', 'complex');
     // Since the finite-by-default flip a bare `complex` component IS finite,
-    // so the norm of one is `finite_real` — real either way, which is the
-    // point. A component that admitted an infinity would norm to `real`.
+    // so the norm of one is `real` — real either way, which is the
+    // point. A component that admitted an infinity would norm to `number`
+    // (see the finiteness test below).
     expect(eng.expr(['Norm', ['Tuple', 'z', 1]]).type.toString()).toBe(
-      'finite_real'
+      'real'
     );
     expect(
       eng
@@ -1611,6 +1612,22 @@ describe('Norm — result type is real', () => {
         .evaluate()
         .toString()
     ).toBe('sqrt(|z|^2 + 1)');
+  });
+
+  it('an unproven-finite component demotes the claim to `number`', () => {
+    // `real` is a finiteness promise, so every component must be PROVEN
+    // finite for it. A `number`-declared symbol admits `±∞`, and the norm
+    // of such a point is `+∞`, which is not `real`.
+    const eng = new ComputeEngine();
+    eng.declare('u', 'number');
+    eng.declare('r', 'real');
+    expect(eng.expr(['Norm', ['Tuple', 'u', 1]]).type.toString()).toBe(
+      'number'
+    );
+    expect(eng.expr(['Norm', ['Tuple', 'r', 1]]).type.toString()).toBe('real');
+    expect(
+      eng.expr(['Norm', ['Tuple', 'PositiveInfinity', 1]]).type.toString()
+    ).toBe('number');
   });
 
   it('composes into a `real`-declared slot', () => {
@@ -2723,7 +2740,7 @@ describe('Dot / Cross', () => {
   // accept fixed numeric `Tuple`/`PointList` operands, typed numerically.
   //
   // The claim is the type of the inner product WRITTEN OUT — `Dot((1,2),(3,4))`
-  // is `finite_integer` exactly as `1·3 + 2·4` is. It was a flat `number`
+  // is `integer` exactly as `1·3 + 2·4` is. It was a flat `number`
   // until the follow-up: `number` includes complex, so no `real`-declared
   // operator (`Hypot`, `Haversine`, `Degrees`) accepted a point inner product.
   describe('numeric tuple / PointList operands (Tycho item 158)', () => {
@@ -2736,39 +2753,38 @@ describe('Dot / Cross', () => {
       // stored handler result stays the widened tier — so the two sides no
       // longer spell the same string even though the claim holds. (Ruling O9,
       // 2026-08-23.)
-      expect(e.type.toString()).toBe('finite_integer');
+      expect(e.type.toString()).toBe('integer');
       expect(e.evaluate().toString()).toBe('11');
     });
 
     it('accepts two PointLists with scalar components', () => {
       const e = ce.expr(['Dot', ['PointList', 1, 2], ['PointList', 3, 4]]);
       expect(e.isValid).toBe(true);
-      expect(e.type.toString()).toBe('finite_integer');
+      expect(e.type.toString()).toBe('integer');
       expect(e.evaluate().toString()).toBe('11');
     });
 
     it('the element types carry through to the result type', () => {
       const eng = new ComputeEngine();
-      eng.declare('r1', 'finite_real');
-      eng.declare('r2', 'finite_real');
+      eng.declare('r1', 'real');
+      eng.declare('r2', 'real');
       eng.declare('z', 'complex');
       expect(
         eng
           .expr(['Dot', ['Tuple', 'r1', 'r2'], ['Tuple', 1, 2]])
           .type.toString()
-      ).toBe('finite_real');
-      // A complex component takes the sum off the real chain. This used to be
-      // pinned as equality with the WRITTEN-OUT sum, which reported `complex`:
-      // canonicalizing `Multiply(z, 1)` folded it to `z`, so the sum inherited
-      // the symbol's declared type verbatim. `Dot` no longer builds that sum —
-      // it runs the arithmetic type handlers over the components directly — so
-      // the answer is now the ladder's, which reads a `complex` symbol of
-      // unknown finiteness as a generic finite point (user-ruled 2026-08-22,
-      // the same ruling that moved the `real` and `integer` rows; see
-      // `dot-type-read-purity.test.ts` for the full table).
+      ).toBe('real');
+      // A complex component takes the sum off the real chain, and the answer
+      // is `complex`: every component is finite — `complex` denotes the FINITE
+      // complex numbers — so `Multiply`'s finite-complex branch fires and the
+      // sum of finite complex products is itself one. It reported the coarser
+      // `number` while the retired `finite_complex` spelling existed: that
+      // branch's gate named the twin, and a `complex`-declared symbol was not
+      // a subtype of it. See `dot-type-read-purity.test.ts` for the full
+      // component-type table (user-ruled 2026-08-22).
       expect(
         eng.expr(['Dot', ['Tuple', 'z', 'r2'], ['Tuple', 1, 2]]).type.toString()
-      ).toBe('finite_number');
+      ).toBe('complex');
     });
 
     it('a real point inner product composes into a `real` slot', () => {
@@ -2780,7 +2796,7 @@ describe('Dot / Cross', () => {
       expect(e.evaluate().toString()).toBe('25sqrt(2)');
       // …and a complex one is still refused, loudly — since the R1 overlap
       // admission (§4.4 of `docs/plans/2026-08-22-type-handlers-on-types.md`)
-      // at EVALUATION rather than boxing: the operand's `finite_complex`
+      // at EVALUATION rather than boxing: the operand's `complex`
       // type OVERLAPS `real` (a complex-typed application can evaluate to a
       // real value), so boxing admits provisionally, and the runtime
       // conformance check refuses the concrete non-real inner product.

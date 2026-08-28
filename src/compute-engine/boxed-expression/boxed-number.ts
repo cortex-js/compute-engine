@@ -107,7 +107,7 @@ function rationalEqualsDecimal(r: Rational, re: number): boolean {
 
 /** How many significant digits an enclosing literal range keeps. Two is the
  * compactness/precision trade the literal types use: `1/3` encloses as
- * `finite_rational<0.33..0.34>`, `√2` as `finite_real<1.4..1.5>`. */
+ * `rational<0.33..0.34>`, `√2` as `real<1.4..1.5>`. */
 const ENCLOSURE_DIGITS = 2;
 
 /** Relative padding applied around the decimal approximation before the
@@ -136,11 +136,10 @@ const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
 
 /**
  * A compact CLOSED interval, on the literal's tier, that provably contains
- * the value: `finite_rational<0.33..0.34>` for `1/3`,
- * `finite_real<1.4..1.5>` for `√2`. Both bounds are rounded OUTWARD
- * (padding, then directed rounding to `ENCLOSURE_DIGITS` significant
- * digits), so the interval never claims a value the literal does not have
- * — in particular `1 - 10⁻³⁰` encloses as `<0.99..1.1>` (the value sits
+ * the value: `rational<0.33..0.34>` for `1/3`, `real<1.4..1.5>` for `√2`.
+ * Both bounds are rounded OUTWARD (padding, then directed rounding to
+ * `ENCLOSURE_DIGITS` significant digits), so the interval never claims a
+ * value the literal does not have — in particular `1 - 10⁻³⁰` encloses as `<0.99..1.1>` (the value sits
  * within the padding of the grid point 1, so both neighboring notches
  * appear), which admits but does not assert the artanh pole at 1.
  *
@@ -152,7 +151,7 @@ const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
  */
 function literalEnclosureType(
   v: NumericValue,
-  tier: 'finite_integer' | 'finite_rational' | 'finite_real',
+  tier: 'integer' | 'rational' | 'real',
   sign: 'positive' | 'negative'
 ): Type | undefined {
   let d = v.bignumRe;
@@ -316,15 +315,9 @@ export class BoxedNumber
 
     // Map the type property to operator string
     const type = this._value.type;
-    if (type === 'integer' || type === 'finite_integer') return 'Integer';
-    if (type === 'rational' || type === 'finite_rational') return 'Rational';
-    if (
-      type === 'real' ||
-      type === 'finite_real' ||
-      type === 'imaginary' ||
-      type === 'finite_complex' ||
-      type === 'complex'
-    )
+    if (type === 'integer') return 'Integer';
+    if (type === 'rational') return 'Rational';
+    if (type === 'real' || type === 'imaginary' || type === 'complex')
       return 'Real';
     // Both spellings of "infinite": the signed pair and the tier that also
     // holds the unsigned `~oo`. Neither is reachable here (a signed infinity
@@ -576,7 +569,7 @@ export class BoxedNumber
           if (v >= 0) return r;
           // Negative argument = i·√n. Fold a perfect square to an exact
           // Gaussian integer (`√-4 → 2i`); otherwise stay symbolic (`√-2`).
-          // (A symbolic `i·√2` would carry a too-wide `finite_number` type and
+          // (A symbolic `i·√2` would carry a too-wide `number` type and
           // break the static-type soundness contract; `.N()` still gives the
           // complex float.)
           return r.isInteger === true
@@ -713,11 +706,11 @@ export class BoxedNumber
     // A number literal's public type IS its literal type (ruling O9,
     // second half, 2026-08-23): `ce.box(21).type` is `21`, `ce.box(0.5)
     // .type` is `0.5`, an exact rational keeps its tier through a
-    // singleton range (`finite_rational<0.5..0.5>`), and a value no
-    // machine number holds exactly is enclosed in a compact outward range
-    // on its tier (`finite_real<1.4..1.5>` for `√2`). The literal type lives at
-    // EXPRESSION positions only — every storage position widens it back
-    // to its tier: an inferred declaration (`inferTypeFromValue`), a
+    // singleton range (`rational<0.5..0.5>`), and a value no machine number
+    // holds exactly is enclosed in a compact outward range on its tier
+    // (`real<1.4..1.5>` for `√2`). The literal type lives at EXPRESSION
+    // positions only — every storage position widens it back to its tier:
+    // an inferred declaration (`inferTypeFromValue`), a
     // solved type variable (`solveArm`), a derived function-literal
     // signature (`functionLiteralSignatureType`) and a stored handler
     // result (`widenValueTypes` in `boxed-function.ts`).
@@ -758,8 +751,8 @@ export class BoxedNumber
       if (Number.isNaN(this._value)) return BoxedType.nan;
       if (!Number.isFinite(this._value)) return BoxedType.non_finite_number;
       return Number.isInteger(this._value)
-        ? BoxedType.finite_integer
-        : BoxedType.finite_real;
+        ? BoxedType.integer
+        : BoxedType.real;
     }
 
     return new BoxedType(this._value.type, this.engine._typeResolver);
@@ -769,14 +762,13 @@ export class BoxedNumber
    * 2026-08-22 — `docs/plans/2026-08-22-type-handlers-on-types.md` §4.3,
    * §6): a type that carries the literal's VALUE when a machine number
    * holds it exactly — a value type (`21`, `0.5`), or a singleton range
-   * (`finite_rational<0.5..0.5>`) when the lattice's value node would lose
-   * the tier (a bare numeric value is not `<: rational`) — and otherwise a
-   * compact ENCLOSURE: a closed range on the literal's tier whose bounds
-   * are rounded outward to two significant digits
-   * (`finite_real<1.4..1.5>` for `√2`, `finite_rational<0.33..0.34>` for
-   * `1/3`), or, when the magnitude is outside the double range, at least
-   * the sign as a sign-carrying range (`finite_integer<0..> & !0` for
-   * `10⁴⁰⁰`). `undefined` when the public type already says
+   * (`rational<0.5..0.5>`) when the lattice's value node would lose the tier
+   * (a bare numeric value is not `<: rational`) — and otherwise a compact
+   * ENCLOSURE: a closed range on the literal's tier whose bounds are rounded
+   * outward to two significant digits (`real<1.4..1.5>` for `√2`,
+   * `rational<0.33..0.34>` for `1/3`), or, when the magnitude is outside the
+   * double range, at least the sign as a sign-carrying range
+   * (`integer<0..> & !0` for `10⁴⁰⁰`). `undefined` when the public type says
    * everything (NaN, `±∞`, a complex literal).
    *
    * Read by type handlers through `handlerTypeOf()`
@@ -817,11 +809,7 @@ export class BoxedNumber
     // answers on its own.
     if (v.im !== 0) return undefined;
     const tier = v.type;
-    if (
-      tier !== 'finite_integer' &&
-      tier !== 'finite_rational' &&
-      tier !== 'finite_real'
-    )
+    if (tier !== 'integer' && tier !== 'rational' && tier !== 'real')
       return undefined;
 
     // Does a machine number hold this value EXACTLY? `re` alone cannot
@@ -870,19 +858,19 @@ export class BoxedNumber
     }
 
     if (exact) {
-      if (tier === 'finite_rational' && !Number.isInteger(re))
+      if (tier === 'rational' && !Number.isInteger(re))
         // The lattice deliberately does not class a bare numeric value as
-        // rational (`0.5 <: finite_rational` is false), so an exact
-        // rational keeps its tier through a singleton range instead.
+        // rational (`0.5 <: rational` is false), so an exact rational keeps
+        // its tier through a singleton range instead.
         return { kind: 'numeric', type: tier, lower: re, upper: re };
       return { kind: 'value', value: re === 0 ? 0 : re };
     }
 
     // No machine number holds the value (`√2`, `1/3`, a bigint beyond
     // ±2⁵³): enclose it in a compact closed range on its tier
-    // (`finite_rational<0.33..0.34>`, `finite_real<1.4..1.5>`) — strictly
-    // narrower than the sign range it replaces, and its bounds exclude
-    // zero, so `signOfType` still reads the sign off it. When no sound
+    // (`rational<0.33..0.34>`, `real<1.4..1.5>`) — strictly narrower than
+    // the sign range it replaces, and its bounds exclude zero, so
+    // `signOfType` still reads the sign off it. When no sound
     // enclosure exists as doubles (magnitude outside the double range),
     // fall back to carrying the sign alone. The zero case cannot reach
     // here — an exact zero is machine-representable.
@@ -1195,7 +1183,7 @@ export class BoxedNumber
       // `isSame(0.5)`-driven BigDecimal builds per `d/dx xⁿ` iteration
       // (integer exponents repeatedly probed against `0.5` in `canonicalPower`).
       // (#15 / perf review)
-      if (v instanceof ExactNumericValue && v.type !== 'finite_integer')
+      if (v instanceof ExactNumericValue && v.type !== 'integer')
         return v.eq(this.engine._numericValue(other));
       return false;
     }

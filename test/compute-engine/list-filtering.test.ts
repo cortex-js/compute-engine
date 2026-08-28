@@ -171,7 +171,7 @@ describe('T2 — exactness contract', () => {
     const expr = ce.parse('R[R>0]');
     const v = expr.evaluate();
     expect(v.toString()).toBe('[1/2,5/2]');
-    expectTypeBetween(v.ops![0], { atMost: 'finite_rational' });
+    expectTypeBetween(v.ops![0], { atMost: 'rational' });
   });
 
   test('a filtered exact element numericizes under .N()', () => {

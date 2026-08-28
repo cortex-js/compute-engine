@@ -24,7 +24,7 @@ describe('BoxedType.couldMatch', () => {
   it('distributes over a union nested inside a parameter', () => {
     // A heterogeneous list literal produces exactly this type.
     const t = ce.type(
-      'list<finite_integer | tuple<finite_integer, finite_integer>>'
+      'list<integer | tuple<integer, integer>>'
     );
     expect(t.couldMatch(POINT_LIST)).toBe(true);
 
@@ -37,7 +37,7 @@ describe('BoxedType.couldMatch', () => {
   it('is decisive for shapes that cannot coincide', () => {
     // A bare point is not a list of points, either way round.
     expect(
-      ce.type('tuple<finite_integer, finite_integer>').couldMatch(POINT_LIST)
+      ce.type('tuple<integer, integer>').couldMatch(POINT_LIST)
     ).toBe(false);
     // Element types that cannot coincide.
     expect(ce.type('list<integer>').couldMatch('list<string>')).toBe(false);
@@ -49,7 +49,7 @@ describe('BoxedType.couldMatch', () => {
     // Narrower: forward assignability carries it.
     expect(
       ce
-        .type('list<tuple<finite_integer, finite_integer>>')
+        .type('list<tuple<integer, integer>>')
         .couldMatch(POINT_LIST)
     ).toBe(true);
     // Wider: the evaluated type widens the element to a bare `tuple`.
@@ -145,7 +145,7 @@ describe('BoxedType.couldMatch', () => {
       'list<vector<2>>',
       'list<integer^2>',
       POINT,
-      'tuple<finite_integer, finite_integer>',
+      'tuple<integer, integer>',
       'tuple<x: number, y: number>',
       'tuple<number, number, number>',
       'list<tuple>',

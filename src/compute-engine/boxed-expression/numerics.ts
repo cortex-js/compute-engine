@@ -32,7 +32,7 @@ export function asRational(expr: Expression): Rational | undefined {
   }
 
   const type = num.type;
-  if (type !== 'finite_integer' && type !== 'finite_rational') return undefined;
+  if (type !== 'integer' && type !== 'rational') return undefined;
 
   if (num.im !== 0) return undefined;
 
@@ -368,7 +368,7 @@ export function complexValueOf(
  * all", and a collection operand awaiting the broadcast lift gets branded
  * `number`, losing its element type: `Round([1.2, 2.7, 3])` typed
  * `vector<3>` with `number` cells while `Round(L)` with `L: list<real>`
- * kept `list<finite_integer>`. The `type.matches('number')` qualifier
+ * kept `list<integer>`. The `type.matches('number')` qualifier
  * restricts the test to operands that are numbers in the first place.
  *
  * The value channel is checked FIRST, on its own: `isNaN` and `isInfinity`

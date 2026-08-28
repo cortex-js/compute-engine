@@ -247,12 +247,10 @@ function rank(expr: Expression): Rank {
     }
     if (expr.numericValue.isNaN) return 'nan';
     const type = expr.numericValue.type;
-    if (type === 'integer' || type === 'finite_integer') return 'integer';
-    if (type === 'rational' || type === 'finite_rational') return 'rational';
-    if (type === 'real' || type === 'finite_real') return 'real';
-    if (type === 'complex' || type === 'finite_complex') return 'complex';
-    if (type === 'imaginary') return 'complex';
-    if (type === 'finite_number') return 'complex';
+    if (type === 'integer') return 'integer';
+    if (type === 'rational') return 'rational';
+    if (type === 'real') return 'real';
+    if (type === 'complex' || type === 'imaginary') return 'complex';
     // Every infinite value sorts as a constant, whatever its direction: the
     // signed pair, the unsigned `~oo` and a mixed value such as `∞ + i` all
     // report `infinity` or its `non_finite_number` subtype now, where `~oo`

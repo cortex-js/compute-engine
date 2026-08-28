@@ -725,7 +725,7 @@ describe('MATCH — a parameterized nominal subject (§6)', () => {
     return e;
   }
 
-  /** A 3-deep `tree<finite_integer>`. */
+  /** A 3-deep `tree<integer>`. */
   const tree3: MathJsonExpression = [
     'tree',
     1,

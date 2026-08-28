@@ -9,7 +9,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  * Regression: `checkNumericArgs` walked the elements of a finite indexed
  * collection operand and ran `y._infer('real')` on each, with none of the
  * exclusion the top-level operand already had. With `L := [1, 2]` that
- * narrowed `L`'s value definition from `vector<finite_integer^2>` to `real`
+ * narrowed `L`'s value definition from `vector<integer^2>` to `real`
  * — at BOXING time, before any evaluation — while `2 * [L, L]` still
  * evaluated to the matrix `[[2, 4], [2, 4]]`. In a shared engine the next
  * broadcast over `L` then declared `vector<real^2>` for a result that is a
@@ -21,7 +21,7 @@ describe('nested broadcast does not re-infer a value-bearing symbol', () => {
     const ce = new ComputeEngine();
     ce.assign('L', ce.box(['List', 1, 2]));
     const before = ce.symbol('L').type.toString();
-    expect(before).toBe('vector<finite_integer^2>');
+    expect(before).toBe('vector<integer^2>');
 
     const result = ce.box(['Multiply', 2, ['List', 'L', 'L']]).evaluate();
     expect(result.toString()).toBe('[[2,4],[2,4]]');
@@ -33,7 +33,7 @@ describe('nested broadcast does not re-infer a value-bearing symbol', () => {
     const ce = new ComputeEngine();
     ce.assign('K', ce.box(['List', 1, 2]));
     const before = ce.symbol('K').type.toString();
-    expect(before).toBe('vector<finite_integer^2>');
+    expect(before).toBe('vector<integer^2>');
 
     const result = ce.box(['Add', 1, ['List', 'K', 'K']]).evaluate();
     expect(result.toString()).toBe('[[2,3],[2,3]]');
@@ -47,7 +47,7 @@ describe('nested broadcast does not re-infer a value-bearing symbol', () => {
     const ce = new ComputeEngine();
     ce.assign('L', ce.box(['List', 1, 2]));
     ce.box(['Multiply', 2, ['List', 'L', 'L']]);
-    expect(ce.symbol('L').type.toString()).toBe('vector<finite_integer^2>');
+    expect(ce.symbol('L').type.toString()).toBe('vector<integer^2>');
   });
 
   test('a second broadcast over the same symbol stays sound', () => {
@@ -59,7 +59,7 @@ describe('nested broadcast does not re-infer a value-bearing symbol', () => {
     // the type its own evaluation produces.
     const expr = ce.box(['Multiply', 2, ['List', 'L', 'L']]);
     const evaluated = expr.evaluate();
-    expect(evaluated.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(evaluated.type.toString()).toBe('matrix<integer^(2x2)>');
     expect(evaluated.type.matches(expr.type)).toBe(true);
   });
 
@@ -78,8 +78,8 @@ describe('nested broadcast does not re-infer a value-bearing symbol', () => {
     const ce = new ComputeEngine();
     ce.assign('L', ce.box(['List', 1, 2]));
     expect(ce.box(['Multiply', 2, 'L']).evaluate().toString()).toBe('[2,4]');
-    expect(ce.symbol('L').type.toString()).toBe('vector<finite_integer^2>');
+    expect(ce.symbol('L').type.toString()).toBe('vector<integer^2>');
     expect(ce.box(['Add', 2, 'L']).evaluate().toString()).toBe('[3,4]');
-    expect(ce.symbol('L').type.toString()).toBe('vector<finite_integer^2>');
+    expect(ce.symbol('L').type.toString()).toBe('vector<integer^2>');
   });
 });

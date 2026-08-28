@@ -214,7 +214,7 @@ describe('ALIAS identity constructor (D10)', () => {
     ce.declareType('pt', 'tuple<number, number>', { alias: true });
     const v = ce.box(['pt', 1, 2]).evaluate();
     expect(v.toString()).toBe('(1, 2)');
-    expect(v.type.toString()).toBe('tuple<finite_integer, finite_integer>');
+    expect(v.type.toString()).toBe('tuple<integer, integer>');
   });
 
   test('a scalar alias returns the checked operand', () => {

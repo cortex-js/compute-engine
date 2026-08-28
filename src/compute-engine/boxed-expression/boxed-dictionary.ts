@@ -324,8 +324,8 @@ export class BoxedDictionary
       const elements: Record<string, Type> = Object.create(null);
       // The synthesized record is a STORED type (memoized on `_type`), so a
       // literal cell projects to its tier — `{x: 1}` types
-      // `record{x: finite_integer}`, not `record{x: 1}`, and `{x: √2}` types
-      // `record{x: finite_real}`, not the enclosure range.
+      // `record{x: integer}`, not `record{x: 1}`, and `{x: √2}` types
+      // `record{x: real}`, not the enclosure range.
       // (`widenValueTypes` treats a `record` NODE as a leaf, so the widening
       // must happen here, where the fields are assembled from the cells; a
       // non-literal cell keeps its stored type, handler range claims

@@ -68,7 +68,7 @@ describe('ElementMax / ElementMin — type', () => {
     });
   });
   test('scalar⊗scalar is a scalar type', () => {
-    expect(ce.box(['ElementMax', 2, 5]).type.toString()).toBe('finite_real');
+    expect(ce.box(['ElementMax', 2, 5]).type.toString()).toBe('real');
   });
   test('a non-finite operand widens to number (non-finite convention)', () => {
     expect(

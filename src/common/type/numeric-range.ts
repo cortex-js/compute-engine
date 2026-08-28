@@ -67,5 +67,5 @@ export function makeNumericRangeType(
 }
 
 export function isIntegerTier(tier: NumericPrimitiveType): boolean {
-  return tier === 'integer' || tier === 'finite_integer';
+  return tier === 'integer';
 }

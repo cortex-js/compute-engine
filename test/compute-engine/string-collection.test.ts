@@ -441,7 +441,7 @@ describe('string-preserving operators', () => {
 
   test('the promotions leave their LIST arms alone', () => {
     expect(ce.box(['DeleteAt', ['List', 1, 2, 3], 1]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
     expect(
       ce
@@ -450,7 +450,7 @@ describe('string-preserving operators', () => {
         .toString()
     ).toBe('[2,3]');
     expect(ce.box(['RandomShuffle', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
     expect(ce.box(['RandomSample', ['List', 1, 2, 3], 2]).type.toString()).toBe(
       'list'
@@ -461,7 +461,7 @@ describe('string-preserving operators', () => {
     // The string arm must not swallow the general arm: most-specific-wins
     // picks it only for a `string` operand.
     expect(ce.box(['Take', ['List', 1, 2, 3, 4], 2]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
     expect(
       ce
@@ -470,13 +470,13 @@ describe('string-preserving operators', () => {
         .toString()
     ).toBe('[1,2]');
     expect(ce.box(['Reverse', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(ce.box(['Sort', ['List', 3, 1, 2]]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
     expect(ce.box(['Unique', ['List', 1, 1, 2]]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
   });
 
@@ -745,7 +745,7 @@ describe('strings are atomic where the lattice would otherwise shred them', () =
     expect(ce.box(['Differences', 'xs']).isValid).toBe(true);
     // A numeric source still gets the precise element type.
     expect(ce.box(['Differences', ['List', 1, 3, 6]]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
   });
 
@@ -755,7 +755,7 @@ describe('strings are atomic where the lattice would otherwise shred them', () =
     // `character` for a subscript that is not a usable base.
     expect(ce.box(['Subscript', str('101'), 2]).evaluate().re).toBe(5);
     expectTypeBetween(ce.box(['Subscript', str('101'), 2]), {
-      atMost: 'finite_integer',
+      atMost: 'integer',
     });
     const bad = ce.box(['Subscript', str('101'), str('x')]);
     expect(bad.type.toString()).toBe('error');
@@ -873,7 +873,7 @@ describe('chunking and combinatorics over a string yield INNER STRINGS', () => {
     // A list source keeps its element type through the generic arm.
     expect(
       ce.box(['Partition', ['List', 1, 2, 3, 4], 2]).type.toString()
-    ).toBe('list<list<finite_integer>>');
+    ).toBe('list<list<integer>>');
     // The family emoji is one character: it fills a chunk on its own.
     expect(
       ce
@@ -892,7 +892,7 @@ describe('chunking and combinatorics over a string yield INNER STRINGS', () => {
       ce
         .box(['ChunkBy', ['List', 1, 1, 2], ['Function', 'x', 'x']])
         .type.toString()
-    ).toBe('list<list<finite_integer>>');
+    ).toBe('list<list<integer>>');
     // Two consecutive family emoji are ONE run of two equal characters, and
     // the run rejoins to exactly those two clusters.
     expect(

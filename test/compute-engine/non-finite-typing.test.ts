@@ -41,9 +41,9 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     // finite reals — so a control for "unknown finiteness" must name the
     // union.
     ce.declare('xr_u', 'real | non_finite_number');
-    ce.declare('z_f', 'finite_real'); // provably finite, sign unknown
+    ce.declare('z_f', 'real'); // provably finite, sign unknown
     ce.declare('nf_sym', 'non_finite_number'); // provably ±∞, no value
-    ce.declare('f_sym', 'finite_number'); // provably finite, no value
+    ce.declare('f_sym', 'complex'); // provably finite, no value
     ce.declare('inf_val', 'number');
     ce.assign('inf_val', ce.PositiveInfinity); // decided by its VALUE
     ce.declare('three_val', 'number');
@@ -86,7 +86,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     // `Ln(0)` types `non_finite_number` while its structural `isFinite` stays
     // `undefined`. The Add/Multiply/Divide handlers must consult the type —
     // without it, `1 + Ln(0)` widened to `integer` and `2·Ln(0)` claimed
-    // `finite_integer` (unsound; the value is −∞). Fixed 2026-07-31.
+    // `integer` (unsound; the value is −∞). Fixed 2026-07-31.
     test('a type-only-provable −∞ term: 1 + Ln(0)', () => {
       expect(typeOf(['Add', 1, ['Ln', 0]])).toBe('non_finite_number');
       expect(typeOf(['Add', 1, ['Artanh', 1]])).toBe('non_finite_number');
@@ -166,7 +166,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
         structural: true,
       });
       expect(structural.operator).toBe('Divide');
-      expect(structural.type.toString()).toBe('finite_integer');
+      expect(structural.type.toString()).toBe('integer');
       // A provably finite (possibly zero) real numerator is still exactly 0.
       expect(
         ce
@@ -174,7 +174,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
             structural: true,
           })
           .type.toString()
-      ).toBe('finite_integer');
+      ).toBe('integer');
     });
 
     test('negative controls for `finite/±∞`: numerator finiteness and realness are obligations', () => {
@@ -187,7 +187,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       // numerator is FINITE by the bare name, so it takes the `finite/±∞ = 0`
       // arm above instead (asserted below).
       expect(divide('xr_u', ['Ln', 0])).toBe('number');
-      expect(divide('x_r', ['Ln', 0])).toBe('finite_integer');
+      expect(divide('x_r', ['Ln', 0])).toBe('integer');
       // Non-real numerator: `i/∞` is not claimed.
       expect(divide('ImaginaryUnit', ['Ln', 0])).toBe('number');
       // Non-real denominator: `2/~oo` is not claimed.
@@ -246,12 +246,12 @@ describe('NON-FINITE TYPING CONVENTION', () => {
 
     test('poles that evaluate to ~oo claim number, not complex/finite', () => {
       expect(typeOf(['Csc', 0])).toBe('number'); // was `complex`
-      expect(typeOf(['Tan', ['Divide', 'Pi', 2]])).toBe('number'); // was `finite_real`
-      expect(typeOf(['Sec', ['Divide', 'Pi', 2]])).toBe('number'); // was `finite_real`
-      expect(typeOf(['Gamma', 0])).toBe('number'); // was `finite_real`
+      expect(typeOf(['Tan', ['Divide', 'Pi', 2]])).toBe('number'); // was `real`
+      expect(typeOf(['Sec', ['Divide', 'Pi', 2]])).toBe('number'); // was `real`
+      expect(typeOf(['Gamma', 0])).toBe('number'); // was `real`
       expect(typeOf(['Gamma', -2])).toBe('number');
-      expect(typeOf(['Zeta', 1])).toBe('number'); // was `finite_real`
-      expect(typeOf(['Factorial', -2])).toBe('number'); // was `finite_real`
+      expect(typeOf(['Zeta', 1])).toBe('number'); // was `real`
+      expect(typeOf(['Factorial', -2])).toBe('number'); // was `real`
     });
 
     test('√(−∞) = i·∞ = ~oo claims number, not complex', () =>
@@ -471,27 +471,27 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     });
 
     test('finite complex values keep their finite types', () => {
-      expect(typeOf(['Complex', 2, 3])).toBe('finite_complex');
+      expect(typeOf(['Complex', 2, 3])).toBe('complex');
       expect(typeOf(['Complex', 0, 3])).toBe('imaginary');
     });
   });
 
   describe('generic-point convention and finite claims are preserved', () => {
     test('generic real symbol stays a generic (finite) point', () => {
-      expect(typeOf(['Sin', 'x_r'])).toBe('finite_real');
-      expect(typeOf(['Ceil', 'x_r'])).toBe('finite_integer');
-      expect(typeOf(['Gamma', 'x_r'])).toBe('finite_real');
+      expect(typeOf(['Sin', 'x_r'])).toBe('real');
+      expect(typeOf(['Ceil', 'x_r'])).toBe('integer');
+      expect(typeOf(['Gamma', 'x_r'])).toBe('real');
     });
 
-    test('rounding a finite complex is finite_complex (was mistyped non_finite_number)', () => {
-      expect(typeOf(['Round', 'ImaginaryUnit'])).toBe('finite_complex');
-      expect(typeOf(['Truncate', ['Complex', 2.5, 1]])).toBe('finite_complex');
+    test('rounding a finite complex is complex (was mistyped non_finite_number)', () => {
+      expect(typeOf(['Round', 'ImaginaryUnit'])).toBe('complex');
+      expect(typeOf(['Truncate', ['Complex', 2.5, 1]])).toBe('complex');
     });
 
     test('non-pole exact special values keep their finite types', () => {
-      expect(typeOf(['Zeta', 2])).toBe('finite_real');
-      expect(typeOf(['Gamma', ['Rational', 1, 2]])).toBe('finite_real');
-      expect(typeOf(['EllipticK', ['Rational', 1, 2]])).toBe('finite_real');
+      expect(typeOf(['Zeta', 2])).toBe('real');
+      expect(typeOf(['Gamma', ['Rational', 1, 2]])).toBe('real');
+      expect(typeOf(['EllipticK', ['Rational', 1, 2]])).toBe('real');
     });
   });
 
@@ -507,7 +507,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(s.isFinite).toBe(false);
     });
 
-    test('a `finite_number` symbol is decided by its type too', () => {
+    test('a `complex` symbol is decided by its type too', () => {
       // Both predicates are decided: a finite number is finite, and it has no
       // value in common with `infinity`, so it is provably not an infinity.
       const s = ce.box('f_sym');
@@ -523,7 +523,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
 
     test('an extended-real symbol decides neither (control)', () => {
       // `real | non_finite_number` is the generic point of the extended real
-      // line: it is below neither `finite_number` nor `infinity`, so nothing
+      // line: it is below neither `complex` nor `infinity`, so nothing
       // is proven either way.
       const s = ce.box('xr_u');
       expect(s.isFinite).toBe(undefined);
@@ -557,7 +557,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     // disjunct purely because symbol operands were type-blind.
     test('arithmetic over a `non_finite_number` symbol types soundly', () => {
       // Without a decided `isFinite`, this fell through to the "every operand
-      // is finite" tail and claimed `finite_integer` — unsound.
+      // is finite" tail and claimed `integer` — unsound.
       expect(typeOf(['Multiply', 2, 'nf_sym'])).toBe('non_finite_number');
       expect(typeOf(['Add', 1, 'nf_sym'])).toBe('non_finite_number');
       expect(typeOf(['Divide', 'nf_sym', 2])).toBe('non_finite_number');
@@ -601,7 +601,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     test('the norm of a tuple is not claimed non-finite', () => {
       const engine = new ComputeEngine();
       const norm = engine.box(['Abs', ['Tuple', 1, 2]]);
-      expect(norm.type.toString()).toBe('finite_real');
+      expect(norm.type.toString()).toBe('real');
       // Undecided, not `false`. Deciding it `true` would mean walking the
       // components; `Norm(Tuple(1, 2))`, the sibling that never had the bug,
       // reports `undefined` here as well.
@@ -611,7 +611,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
 
     test('a scaled tuple norm keeps a finite type', () => {
       expect(freshType(['Multiply', 3, ['Abs', ['Tuple', 1, 2]]])).toBe(
-        'finite_real'
+        'real'
       );
     });
 
@@ -689,7 +689,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     // The rejection is pinned on BOTH routes (box and parse) because the
     // check runs during canonicalization, which both routes perform.
     const REJECTED: [name: string, expr: any, latex: string][] = [
-      // library/number-theory.ts — `(integer) -> finite_integer`
+      // library/number-theory.ts — `(integer) -> integer`
       ['NthPrime', ['NthPrime', { num: '+Infinity' }], '\\operatorname{NthPrime}(\\infty)'],
       ['IntegerSqrt', ['IntegerSqrt', { num: '+Infinity' }], '\\operatorname{IntegerSqrt}(\\infty)'],
       // library/combinatorics.ts — same shape
@@ -756,8 +756,8 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     });
 
     test('a type that overlaps the reals leaves the predicate open', () => {
-      // `finite_number` admits both a real and a genuinely complex value:
-      // neither entailed nor refuted.
+      // `number` admits a real value, a genuinely complex one and a
+      // non-finite one alike: neither entailed nor refuted.
       expect(ce.parse('\\sin(x_u)').isExtendedReal).toBe(undefined);
     });
   });
@@ -790,6 +790,36 @@ describe('NON-FINITE TYPING CONVENTION', () => {
         eng.parse('\\tilde\\infty'),
       ]);
       expect(packTensor(eng, cvec)?.dtype).toBe('expression');
+    });
+
+    // The FINITE integers are classified by value, alongside the non-finite
+    // literals above. Two `case 'integer'` labels used to sit in the same
+    // switch, so the first one won and every integer, of every magnitude,
+    // was classified `float64`.
+    test('a finite integer is classified by its magnitude', () => {
+      const eng = new ComputeEngine();
+      // The unsigned-byte window is `0..255` inclusive.
+      expect(getExpressionDatatype(eng.box(5))).toBe('uint8');
+      expect(getExpressionDatatype(eng.box(255))).toBe('uint8');
+      expect(getExpressionDatatype(eng.box(300))).toBe('int32');
+      expect(getExpressionDatatype(eng.box(-1))).toBe('int32');
+      // An integer past 2^53 would be truncated in a float64-backed buffer,
+      // so it takes the exact boxed field instead.
+      expect(getExpressionDatatype(eng.number(10n ** 20n))).toBe('expression');
+    });
+
+    test('a small-integer tensor packs EXACT, and floats under `.N()`', () => {
+      // `packTensor` remaps an integer-classified cell: the exact route takes
+      // the boxed field (the int kernels do JS-number arithmetic, whose
+      // intermediates can exceed 2^53), and the numeric route takes float64.
+      const eng = new ComputeEngine();
+      const m = eng.box(['List', ['List', 1, 2], ['List', 3, 4]]);
+      expect(packTensor(eng, m)?.dtype).toBe('expression');
+      expect(packTensor(eng, m, { numeric: true })?.dtype).toBe('float64');
+      // The exact route is what keeps the inverse rational.
+      expect(eng.box(['Inverse', m]).evaluate().toString()).toBe(
+        '[[-2,1],[3/2,-1/2]]'
+      );
     });
   });
 });

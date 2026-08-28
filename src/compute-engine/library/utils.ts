@@ -12,10 +12,7 @@ import {
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
 import { rewriteWithBinders } from '../boxed-expression/binders.js';
-import {
-  numericValueOf,
-  provablyNonFiniteNumber,
-} from '../boxed-expression/numerics.js';
+import { numericValueOf } from '../boxed-expression/numerics.js';
 
 import { checkDeadline } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -78,27 +75,26 @@ export function pointNormBroadcasts(point: Expression): boolean {
  * `real`-declared slot in the library, so `Hypot(‖p‖, ‖q‖)` reported
  * `incompatible-type('real', 'number')` on a value real by construction.
  *
- * The two demotions follow the convention `absFunctionType` sets for the same
- * question one operand down:
+ * The claim demands PROVEN finiteness of every component, because `real`
+ * itself now means finite. Two component sets therefore keep the wide
+ * `number`:
  *
- * - a **provably non-finite** component — NaN or `±∞`, proven by a value
- *   (a literal, or a symbol's held value) or by an `infinity`/`nan` type —
- *   keeps the wide `number`: the norm of such a point is NaN or `+∞`,
- *   neither of which is `real`. A merely-unknown component does not demote:
- *   it only costs the `finite_*` spelling, exactly as `absFunctionType` does
- *   one operand down, where `Abs(x)` with `x: number` claims
- *   `(real<0..>) | non_finite_number` rather than the wide `number`.
- *   `provablyNonFiniteNumber` is the whole test: its `isNaN === true`
- *   disjunct covers the NaN literal (and a symbol holding NaN, which the
- *   old separate `isNumber(c) && c.isNaN` guard missed).
+ * - a component known to be non-finite — NaN or `±∞`, proven by a value
+ *   (a literal, or a symbol's held value) or by an `infinity`/`nan` type.
+ *   The norm of such a point is NaN or `+∞`, and neither is `real`.
+ * - a component whose finiteness is merely UNKNOWN, such as a symbol
+ *   declared `number`. `‖(x, 1)‖` with `x: number` cannot claim `real`,
+ *   because `x` may be `±∞` and the norm is then `+∞`. The `number` claim
+ *   covers both readings.
  *
  * A component that is not provably numeric at all — a matrix ROW, a string, an
  * `unknown`-typed element — keeps `number` too, ahead of both: those have no
  * norm for this claim to be about.
  *
- * `finite_real` is claimed only when EVERY component is provably finite. No
- * narrower tier is: unlike `|·|` of a scalar, a norm does not preserve the
- * integer or rational tier — `‖(1, 1)‖ = √2`.
+ * `real` is the claim for every other component set, complex components
+ * included: `|z|²` is real and finite for a finite complex `z`. No narrower
+ * tier is: unlike `|·|` of a scalar, a norm does not preserve the integer or
+ * rational tier — `‖(1, 1)‖ = √2`.
  */
 export function euclideanNormType(
   components: ReadonlyArray<Expression>
@@ -108,8 +104,9 @@ export function euclideanNormType(
   // claim about anything: a `Norm` operand is declared `value`, so a string or
   // an `unknown`-typed element can stand here, and those have no norm to type.
   if (!components.every((c) => c.type.matches('number'))) return 'number';
-  if (components.some((c) => provablyNonFiniteNumber(c))) return 'number';
-  return components.every((c) => c.isFinite === true) ? 'finite_real' : 'real';
+  // `real` is a finiteness promise, so it needs every component PROVEN
+  // finite. An unproven one (`x: number`, which admits `±∞`) demotes.
+  return components.every((c) => c.isFinite === true) ? 'real' : 'number';
 }
 
 /**

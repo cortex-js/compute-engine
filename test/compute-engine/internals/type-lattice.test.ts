@@ -3,7 +3,7 @@
  * lattice.
  *
  * The lattice used to reduce incomparable-but-overlapping numeric primitives
- * to `nothing` (e.g. `integer ∩ finite_real` → `nothing`), making type-based
+ * to `nothing` (e.g. `integer ∩ real` → `nothing`), making type-based
  * membership refutation unsound. The intersection reduction now computes the
  * principled pairwise meet derived from the PRIMITIVE_SUBTYPES table.
  */
@@ -32,32 +32,32 @@ function intersectStr(a: Type, b: Type): string {
 }
 
 describe('Numeric primitive meets (G15)', () => {
-  test('integer ∩ finite_real = finite_integer (the `finite_*` twin names the overlap)', () =>
-    expect(intersectStr('integer', 'finite_real')).toBe('finite_integer'));
+  test('integer ∩ real = integer', () =>
+    expect(intersectStr('integer', 'real')).toBe('integer'));
 
-  // Since the finite-by-default flip the bare tiers sit BELOW `finite_number`,
-  // so a meet of `finite_number` with a bare tier is that tier itself and the
-  // reduced form names the bare spelling, not the `finite_*` synonym.
-  test('finite_number ∩ real = real', () =>
-    expect(intersectStr('finite_number', 'real')).toBe('real'));
+  // The bare numeric names form a chain, so every meet inside the tower is
+  // simply the narrower operand. `number` is the top of the whole numeric
+  // tree, so a meet against it is the other operand.
+  test('number ∩ real = real', () =>
+    expect(intersectStr('number', 'real')).toBe('real'));
 
-  test('rational ∩ finite_real = finite_rational', () =>
-    expect(intersectStr('rational', 'finite_real')).toBe('finite_rational'));
+  test('rational ∩ real = rational', () =>
+    expect(intersectStr('rational', 'real')).toBe('rational'));
 
-  test('finite_complex ∩ real = finite_real', () =>
-    expect(intersectStr('finite_complex', 'real')).toBe('finite_real'));
+  test('complex ∩ real = real', () =>
+    expect(intersectStr('complex', 'real')).toBe('real'));
 
-  test('integer ∩ finite_rational = finite_integer', () =>
-    expect(intersectStr('integer', 'finite_rational')).toBe('finite_integer'));
+  test('integer ∩ rational = integer', () =>
+    expect(intersectStr('integer', 'rational')).toBe('integer'));
 
-  test('finite_number ∩ rational = rational', () =>
-    expect(intersectStr('finite_number', 'rational')).toBe('rational'));
+  test('number ∩ rational = rational', () =>
+    expect(intersectStr('number', 'rational')).toBe('rational'));
 
-  test('finite_number ∩ integer = integer', () =>
-    expect(intersectStr('finite_number', 'integer')).toBe('integer'));
+  test('number ∩ integer = integer', () =>
+    expect(intersectStr('number', 'integer')).toBe('integer'));
 
-  test('imaginary ∩ finite_number = imaginary (transitivity repair)', () =>
-    expect(intersectStr('imaginary', 'finite_number')).toBe('imaginary'));
+  test('imaginary ∩ complex = imaginary (transitivity repair)', () =>
+    expect(intersectStr('imaginary', 'complex')).toBe('imaginary'));
 
   test('real ∩ complex = real (D10: real ⊂ complex)', () => {
     // D10 (2026-07-02): `real ⊂ complex`, properly. Since `real` is below
@@ -72,7 +72,7 @@ describe('Numeric primitive meets (G15)', () => {
 
   test('subtype-related pairs reduce to the narrower type', () => {
     expect(intersectStr('integer', 'rational')).toBe('integer');
-    expect(intersectStr('finite_integer', 'number')).toBe('finite_integer');
+    expect(intersectStr('integer', 'number')).toBe('integer');
     expect(intersectStr('non_finite_number', 'infinity')).toBe(
       'non_finite_number'
     );
@@ -191,10 +191,10 @@ describe('isPrimitiveSubtype and isSubtype agree (SYM P2-22)', () => {
 });
 
 describe('Subtype closure repair', () => {
-  test('imaginary ⊑ finite_complex ⊑ finite_number implies imaginary ⊑ finite_number', () => {
-    expect(isPrimitiveSubtype('imaginary', 'finite_complex')).toBe(true);
-    expect(isPrimitiveSubtype('finite_complex', 'finite_number')).toBe(true);
-    expect(isPrimitiveSubtype('imaginary', 'finite_number')).toBe(true);
+  test('imaginary ⊑ complex ⊑ number implies imaginary ⊑ number', () => {
+    expect(isPrimitiveSubtype('imaginary', 'complex')).toBe(true);
+    expect(isPrimitiveSubtype('complex', 'number')).toBe(true);
+    expect(isPrimitiveSubtype('imaginary', 'number')).toBe(true);
   });
 
   test('subtype relation is transitive over all numeric primitives', () => {
@@ -220,13 +220,13 @@ describe('Union reduction is unchanged (F10)', () => {
 describe('Type-based membership refutation is sound (G15 ↔ G3)', () => {
   // typeMembership refutes membership when the intersection of the value's
   // static type with the target type is `nothing`. With the lattice fix,
-  // a symbol of type `finite_real` is no longer "refuted" as an integer.
+  // a symbol of type `real` is no longer "refuted" as an integer.
   const { ComputeEngine } = require('../../../src/compute-engine');
   const ce = new ComputeEngine();
 
-  test('Element(x: finite_real, Integers) stays unevaluated', () => {
+  test('Element(x: real, Integers) stays unevaluated', () => {
     ce.pushScope();
-    ce.declare('x', 'finite_real');
+    ce.declare('x', 'real');
     const result = ce.expr(['Element', 'x', 'Integers']).evaluate();
     // Indeterminate: a finite real may or may not be an integer
     expect(result.symbol).not.toBe('True');
@@ -242,9 +242,9 @@ describe('Type-based membership refutation is sound (G15 ↔ G3)', () => {
     ce.popScope();
   });
 
-  test('Element(n: finite_integer, RealNumbers) is definitively True', () => {
+  test('Element(n: integer, RealNumbers) is definitively True', () => {
     ce.pushScope();
-    ce.declare('n', 'finite_integer');
+    ce.declare('n', 'integer');
     const result = ce.expr(['Element', 'n', 'RealNumbers']).evaluate();
     expect(result.symbol).toBe('True');
     ce.popScope();
@@ -257,61 +257,57 @@ const reduceStr = (s: string): string => {
 };
 
 describe('The doubled tower is gone (finite-by-default flip)', () => {
-  // Before the flip the numeric names were doubled: `real` admitted ±∞ and
-  // `finite_real` did not, so the union `finite_X | non_finite_number` covered
-  // exactly the same values as `X` and had to collapse to it. The bare names
-  // are finite now, so that equivalence is FALSE in both directions: the union
-  // is strictly wider than `X` (it adds the infinities) and `X` is not one of
-  // its members. The machinery that recognized the equivalence
-  // (`COVERING_UNION_MAP`, `unionCoveringMembers`, the collapse in
-  // `reduce.ts`) is deleted, and these pins record its absence.
+  // Before the flip the numeric names were doubled: `real` admitted ±∞ while
+  // its `finite_real` twin did not, so the union `finite_X | non_finite_number`
+  // covered exactly the same values as `X` and had to collapse to it. The bare
+  // names are finite now, so the union is STRICTLY WIDER than `X` — it adds
+  // the infinities — and nothing collapses it. The machinery that recognized
+  // the old equivalence (`COVERING_UNION_MAP`, `unionCoveringMembers`, the
+  // collapse in `reduce.ts`) is deleted, and these pins record its absence.
+  //
+  // The reduced spelling lists the members in dedup-key order, which puts
+  // `non_finite_number` first.
   const PAIRS: [string, string][] = [
-    ['finite_real | non_finite_number', 'real'],
-    ['finite_rational | non_finite_number', 'rational'],
-    ['finite_integer | non_finite_number', 'integer'],
-    ['finite_complex | non_finite_number', 'complex'],
+    ['non_finite_number | real', 'real'],
+    ['non_finite_number | rational', 'rational'],
+    ['integer | non_finite_number', 'integer'],
+    ['complex | non_finite_number', 'complex'],
   ];
 
   for (const [union, single] of PAIRS) {
     test(`"${union}" no longer collapses to "${single}"`, () =>
       expect(reduceStr(union)).toBe(union));
 
-    test(`${single} ⊄ ${union} (the union does not cover it)`, () =>
-      expect(isSubtype(single, union)).toBe(false));
-
     test(`${union} ⊄ ${single} (the infinities are outside it)`, () =>
       expect(isSubtype(union, single)).toBe(false));
+
+    test(`${single} ⊑ ${union} (it IS one of the members)`, () =>
+      expect(isSubtype(single, union)).toBe(true));
   }
 
-  test('the finite member alone is still a subtype of the bare name', () => {
-    // Four of the `finite_*` names are deprecated synonyms kept formally BELOW
-    // their bare counterparts, so this direction is unchanged.
-    expect(isSubtype('finite_real', 'real')).toBe(true);
-    expect(isSubtype('finite_integer', 'integer')).toBe(true);
-    // `finite_number` and `complex` are related in ONE direction only. Since
-    // the flip a bare `complex` value is finite, so `complex` is listed under
-    // `finite_number`. The reverse edge is deliberately withheld even though
-    // the two names now denote the same values: `isNonRealNumber` reads
-    // "below `complex`, not below `real`", so adding it would make nearly
-    // every generic numeric expression read as non-real and switch the
-    // compiler to complex lowering. See `finite_number`'s entry in
-    // `PRIMITIVE_SUBTYPES`.
-    expect(isSubtype('finite_number', 'complex')).toBe(false);
-    expect(isSubtype('complex', 'finite_number')).toBe(true);
+  test('the finite tower sits under `complex`, and `number` sits above it', () => {
+    // Every bare name under `number` denotes finite values alone, so `complex`
+    // is the widest FINITE numeric type and the tower's top. `number` is
+    // ABOVE `complex`, not inside it — which is what keeps
+    // `isNonRealNumber('number')` false and the compiler on its real
+    // lowering lane for the generic numeric expressions that carry it.
+    expect(isSubtype('real', 'complex')).toBe(true);
+    expect(isSubtype('integer', 'complex')).toBe(true);
+    expect(isSubtype('imaginary', 'complex')).toBe(true);
+    expect(isSubtype('complex', 'number')).toBe(true);
+    expect(isSubtype('number', 'complex')).toBe(false);
   });
 
-  test('"finite_number | non_finite_number" is not the top numeric type', () => {
+  test('"complex | non_finite_number" is not the top numeric type', () => {
     // It misses `nan` and the unsigned `~oo`, so it cannot cover `number`.
-    expect(isSubtype('number', 'finite_number | non_finite_number')).toBe(
-      false
-    );
+    expect(isSubtype('number', 'complex | non_finite_number')).toBe(false);
   });
 
   test('a redundant subtype member is still folded', () => {
     // Union reduction keeps dropping members subsumed by another member; only
     // the covering-union step is gone.
-    expect(reduceStr('finite_integer | finite_real | non_finite_number')).toBe(
-      'finite_real | non_finite_number'
+    expect(reduceStr('integer | real | non_finite_number')).toBe(
+      'non_finite_number | real'
     );
   });
 
@@ -325,7 +321,7 @@ describe('The doubled tower is gone (finite-by-default flip)', () => {
   });
 
   test('a non-covering union is left intact (no spurious collapse)', () => {
-    const t = reduceType(parseType('finite_real | imaginary'));
+    const t = reduceType(parseType('real | imaginary'));
     expect(typeof t).toBe('object');
     expect((t as any).kind).toBe('union');
   });
@@ -448,8 +444,8 @@ describe('Lattice property sanity: meet ⊑ operands, operand ⊑ union', () => 
     'rational',
     'complex',
     'number',
-    'finite_integer',
-    'finite_real',
+    'integer',
+    'real',
     'non_finite_number',
     'boolean',
     'string',

@@ -3,16 +3,11 @@ import type { NumericPrimitiveType, PrimitiveType, Type } from './types.js';
 /** All the types representing numeric values */
 export const NUMERIC_TYPES: NumericPrimitiveType[] = [
   'number',
-  'finite_number',
   'complex',
-  'finite_complex',
   'imaginary',
   'real',
-  'finite_real',
   'rational',
-  'finite_rational',
   'integer',
-  'finite_integer',
   'non_finite_number',
   // A number of infinite magnitude, of any direction (`+∞`, `−∞`, `~∞`,
   // `∞ + i`), and the not-a-number marker. Together with `complex` they

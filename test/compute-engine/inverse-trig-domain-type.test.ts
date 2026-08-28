@@ -5,13 +5,13 @@
  *
  * User ruling 2026-07-30. Every one of these heads takes a COMPLEX value
  * outside its real domain (`arcsin(−2) = −π/2 + 1.3169…i`,
- * `arcosh(−2) = 1.3169… + iπ`, `arcsec(0.5) = 1.3169…i`), and `finite_real`
- * EXCLUDES complex — `ce.type('finite_complex').matches('finite_real')` is
- * `false`. The `finite_real` these heads claimed for any symbolic real
+ * `arcosh(−2) = 1.3169… + iπ`, `arcsec(0.5) = 1.3169…i`), and `real`
+ * EXCLUDES complex — `ce.type('complex').matches('real')` is
+ * `false`. The `real` these heads claimed for any symbolic real
  * argument was therefore unsound, not merely imprecise. The claim is now
  * three-way:
  *
- * - argument provably IN domain  → `finite_real` (tight, unchanged)
+ * - argument provably IN domain  → `real` (tight, unchanged)
  * - argument provably OUT        → a complex type
  * - magnitude unknown            → the join (the tightest SOUND type)
  *
@@ -20,7 +20,7 @@
  * `w ≥ 2` proves `Arcosh(w)` real AND `Arcsin(w)` complex.
  *
  * The real-closed heads (`Arsinh`, `Arctan`, `Arccot`) are real-valued on all
- * of ℝ: `finite_real` is correct and tight for them, and is guarded below.
+ * of ℝ: `real` is correct and tight for them, and is guarded below.
  * `Arcsch` is real-valued on every non-zero real and keeps the documented
  * generic-point convention.
  */
@@ -50,60 +50,60 @@ function typeOf(ce: ComputeEngine, head: string, arg: number | string): string {
  */
 const LITERAL_CASES: [string, number, string][] = [
   // |x| ≤ 1
-  ['Arcsin', -1, 'finite_real'],
-  ['Arcsin', 0.5, 'finite_real'],
-  ['Arcsin', 1, 'finite_real'],
-  ['Arcsin', 2, 'finite_complex'],
-  ['Arcsin', -2, 'finite_complex'],
-  ['Arccos', 0.5, 'finite_real'],
-  ['Arccos', 2, 'finite_complex'],
-  ['Arccos', -2, 'finite_complex'],
+  ['Arcsin', -1, 'real'],
+  ['Arcsin', 0.5, 'real'],
+  ['Arcsin', 1, 'real'],
+  ['Arcsin', 2, 'complex'],
+  ['Arcsin', -2, 'complex'],
+  ['Arccos', 0.5, 'real'],
+  ['Arccos', 2, 'complex'],
+  ['Arccos', -2, 'complex'],
   // x ≥ 1
-  ['Arcosh', 1, 'finite_real'],
-  ['Arcosh', 2, 'finite_real'],
-  ['Arcosh', 0, 'finite_complex'],
-  ['Arcosh', 0.5, 'finite_complex'],
-  ['Arcosh', -2, 'finite_complex'],
+  ['Arcosh', 1, 'real'],
+  ['Arcosh', 2, 'real'],
+  ['Arcosh', 0, 'complex'],
+  ['Arcosh', 0.5, 'complex'],
+  ['Arcosh', -2, 'complex'],
   // |x| < 1, ±∞ at ±1
-  ['Artanh', 0, 'finite_real'],
-  ['Artanh', -0.5, 'finite_real'],
+  ['Artanh', 0, 'real'],
+  ['Artanh', -0.5, 'real'],
   ['Artanh', 1, 'non_finite_number'],
   ['Artanh', -1, 'non_finite_number'],
-  ['Artanh', 2, 'finite_complex'],
-  ['Artanh', -2, 'finite_complex'],
+  ['Artanh', 2, 'complex'],
+  ['Artanh', -2, 'complex'],
   // |x| > 1, ±∞ at ±1
-  ['Arcoth', 2, 'finite_real'],
-  ['Arcoth', -2, 'finite_real'],
+  ['Arcoth', 2, 'real'],
+  ['Arcoth', -2, 'real'],
   ['Arcoth', 1, 'non_finite_number'],
   ['Arcoth', -1, 'non_finite_number'],
-  ['Arcoth', 0, 'finite_complex'],
-  ['Arcoth', 0.5, 'finite_complex'],
+  ['Arcoth', 0, 'complex'],
+  ['Arcoth', 0.5, 'complex'],
   // 0 < x ≤ 1, +∞ at 0
-  ['Arsech', 0.5, 'finite_real'],
-  ['Arsech', 1, 'finite_real'],
+  ['Arsech', 0.5, 'real'],
+  ['Arsech', 1, 'real'],
   ['Arsech', 0, 'non_finite_number'],
-  ['Arsech', 2, 'finite_complex'],
-  ['Arsech', -2, 'finite_complex'],
+  ['Arsech', 2, 'complex'],
+  ['Arsech', -2, 'complex'],
   // |x| ≥ 1, NaN at 0
-  ['Arcsec', 1, 'finite_real'],
-  ['Arcsec', -2, 'finite_real'],
-  ['Arcsec', 0.5, 'finite_complex'],
-  ['Arcsec', -0.5, 'finite_complex'],
+  ['Arcsec', 1, 'real'],
+  ['Arcsec', -2, 'real'],
+  ['Arcsec', 0.5, 'complex'],
+  ['Arcsec', -0.5, 'complex'],
   // Mathematically `arcsec(0) = ~oo`, which IS a member of `complex`, but the
   // evaluator currently yields NaN at 0 (`arcsec(0).N() → NaN`) and NaN is a
   // member only of `number`. The claim must not exclude the produced value.
   ['Arcsec', 0, 'number'],
-  ['Arccsc', 1, 'finite_real'],
-  ['Arccsc', -2, 'finite_real'],
-  ['Arccsc', 0.5, 'finite_complex'],
-  ['Arccsc', -0.5, 'finite_complex'],
+  ['Arccsc', 1, 'real'],
+  ['Arccsc', -2, 'real'],
+  ['Arccsc', 0.5, 'complex'],
+  ['Arccsc', -0.5, 'complex'],
   ['Arccsc', 0, 'number'],
 ];
 
 /**
  * `[head, bare real symbol, `w ≥ 2`, `0 < v < 1`]`.
  *
- * The bare-symbol column is the JOIN: `finite_complex` for a head with no real
+ * The bare-symbol column is the JOIN: `complex` for a head with no real
  * pole, `complex | non_finite_number` for one whose pole value is `±∞`, and
  * `number` when the pole value may be NaN. The signed pair is spelled out in
  * that union because the bare name `complex` denotes the FINITE complex
@@ -116,14 +116,14 @@ const LITERAL_CASES: [string, number, string][] = [
  * is why the expected string reads `complex | non_finite_number`.
  */
 const SYMBOLIC_CASES: [string, string, string, string][] = [
-  ['Arcsin', 'finite_complex', 'finite_complex', 'finite_real'],
-  ['Arccos', 'finite_complex', 'finite_complex', 'finite_real'],
-  ['Arcosh', 'finite_complex', 'finite_real', 'finite_complex'],
-  ['Artanh', 'complex | non_finite_number', 'finite_complex', 'finite_real'],
-  ['Arcoth', 'complex | non_finite_number', 'finite_real', 'finite_complex'],
-  ['Arsech', 'complex | non_finite_number', 'finite_complex', 'finite_real'],
-  ['Arcsec', 'number', 'finite_real', 'finite_complex'],
-  ['Arccsc', 'number', 'finite_real', 'finite_complex'],
+  ['Arcsin', 'complex', 'complex', 'real'],
+  ['Arccos', 'complex', 'complex', 'real'],
+  ['Arcosh', 'complex', 'real', 'complex'],
+  ['Artanh', 'complex | non_finite_number', 'complex', 'real'],
+  ['Arcoth', 'complex | non_finite_number', 'real', 'complex'],
+  ['Arsech', 'complex | non_finite_number', 'complex', 'real'],
+  ['Arcsec', 'number', 'real', 'complex'],
+  ['Arccsc', 'number', 'real', 'complex'],
 ];
 
 /** A fresh engine with `u` a bare real, `w ≥ 2` and `0 < v < 1`. */
@@ -138,12 +138,12 @@ function engineWithAssumptions(): ComputeEngine {
 }
 
 describe('INVERSE TRIG: bounded real domain — result type', () => {
-  it('`finite_real` excludes complex (why the old claim was unsound)', () => {
+  it('`real` excludes complex (why the old claim was unsound)', () => {
     const ce = new ComputeEngine();
-    expect(ce.type('finite_complex').matches('finite_real')).toBe(false);
-    // …and the join direction that makes `finite_complex` the tightest sound
+    expect(ce.type('complex').matches('real')).toBe(false);
+    // …and the join direction that makes `complex` the tightest sound
     // type for an argument of unknown magnitude.
-    expect(ce.type('finite_real').matches('finite_complex')).toBe(true);
+    expect(ce.type('real').matches('complex')).toBe(true);
     // …and why a pole-carrying head cannot claim `complex` alone: the bare
     // name denotes the FINITE complex numbers, so the signed infinities are
     // NOT below it and have to be named in the union.
@@ -151,7 +151,7 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
     expect(
       ce.type('non_finite_number').matches('complex | non_finite_number')
     ).toBe(true);
-    expect(ce.type('finite_complex').matches('complex | non_finite_number')).toBe(
+    expect(ce.type('complex').matches('complex | non_finite_number')).toBe(
       true
     );
   });
@@ -171,9 +171,9 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
         const finite = Number.isFinite(v.re) && Number.isFinite(v.im ?? 0);
         const real = (v.im ?? 0) === 0;
         const witness = `${head}(${arg}) = ${v.toString()}`;
-        if (expected === 'finite_real')
+        if (expected === 'real')
           expect([witness, finite && real]).toEqual([witness, true]);
-        else if (expected === 'finite_complex')
+        else if (expected === 'complex')
           expect([witness, finite]).toEqual([witness, true]);
         else if (expected === 'non_finite_number')
           expect([witness, real && !finite && !Number.isNaN(v.re)]).toEqual([
@@ -194,21 +194,21 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
       });
     }
 
-    it('no bounded head claims `finite_real` for a bare real symbol', () => {
+    it('no bounded head claims `real` for a bare real symbol', () => {
       const ce = engineWithAssumptions();
       for (const head of BOUNDED_HEADS)
         expect([head, typeOf(ce, head, 'u')]).not.toEqual([
           head,
-          'finite_real',
+          'real',
         ]);
     });
 
     it('`w ≥ 2` proves Arcosh in-domain and Arcsin out-of-domain', () => {
       const ce = engineWithAssumptions();
       expect(ce.box('w').isGreaterEqual(1)).toBe(true);
-      expect(typeOf(ce, 'Arcosh', 'w')).toBe('finite_real');
-      expect(typeOf(ce, 'Arcsin', 'w')).toBe('finite_complex');
-      expect(ce.type(typeOf(ce, 'Arcsin', 'w')).matches('finite_real')).toBe(
+      expect(typeOf(ce, 'Arcosh', 'w')).toBe('real');
+      expect(typeOf(ce, 'Arcsin', 'w')).toBe('complex');
+      expect(ce.type(typeOf(ce, 'Arcsin', 'w')).matches('real')).toBe(
         false
       );
     });
@@ -219,19 +219,19 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
       ce.assume(ce.parse('p \\gt 0'));
       // Not provably in `|x| ≥ 1` nor in `(0, 1)`, but provably not 0, so the
       // NaN arm is gone: the value is finite, real or complex.
-      expect(typeOf(ce, 'Arcsec', 'p')).toBe('finite_complex');
-      expect(typeOf(ce, 'Arccsc', 'p')).toBe('finite_complex');
+      expect(typeOf(ce, 'Arcsec', 'p')).toBe('complex');
+      expect(typeOf(ce, 'Arccsc', 'p')).toBe('complex');
     });
   });
 
   describe('real-closed heads are UNCHANGED', () => {
     for (const head of ['Arsinh', 'Arctan', 'Arccot'] as const) {
-      it(`${head} stays finite_real everywhere`, () => {
+      it(`${head} stays real everywhere`, () => {
         const ce = engineWithAssumptions();
         for (const arg of [-2, -1, -0.5, 0, 0.5, 1, 2])
-          expect(typeOf(ce, head, arg)).toBe('finite_real');
+          expect(typeOf(ce, head, arg)).toBe('real');
         for (const sym of ['u', 'w', 'v'])
-          expect(typeOf(ce, head, sym)).toBe('finite_real');
+          expect(typeOf(ce, head, sym)).toBe('real');
       });
     }
 
@@ -239,10 +239,10 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
       // Real-valued on every non-zero real; only a PROVABLE 0 widens.
       const ce = engineWithAssumptions();
       for (const arg of [-2, -1, -0.5, 0.5, 1, 2])
-        expect(typeOf(ce, 'Arcsch', arg)).toBe('finite_real');
+        expect(typeOf(ce, 'Arcsch', arg)).toBe('real');
       expect(typeOf(ce, 'Arcsch', 0)).toBe('number');
       for (const sym of ['u', 'w', 'v'])
-        expect(typeOf(ce, 'Arcsch', sym)).toBe('finite_real');
+        expect(typeOf(ce, 'Arcsch', sym)).toBe('real');
     });
   });
 });

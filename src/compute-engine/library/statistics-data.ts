@@ -43,14 +43,14 @@ export function nonRealDataError(
 /**
  * The constraint a datum (or an explicit bin edge) failed:
  *
- * - `real` — the value is a complex number, and the statistic has no
- *   convention-free complex extension.
- * - `finite_real` — the value has no finite real reading at all: `NaN`, a real
- *   `±∞`, or the complex infinity `~oo` under either spelling.
+ * - `real` — the value has no finite real reading. It covers both failure
+ *   modes, because `real` now names the FINITE reals: the value is a complex
+ *   number and the statistic has no convention-free complex extension, or the
+ *   value is `NaN`, a real `±∞`, or the complex infinity `~oo`.
  * - `machine_range` — the value IS a finite real, but its magnitude lies
  *   outside the double range the asking kernel computes in.
  */
-export type DataConstraint = 'real' | 'finite_real' | 'machine_range';
+export type DataConstraint = 'real' | 'machine_range';
 
 /** The expectation a `machine_range` rejection names. */
 const MACHINE_RANGE_EXPECTATION =
@@ -61,10 +61,10 @@ const MACHINE_RANGE_EXPECTATION =
  * fails one of the constraints above, naming the operator and the (truncated)
  * datum alongside it.
  *
- * The `real` and `finite_real` rejections are `incompatible-type` errors
- * carrying the failed constraint and the datum's own type: each is a statement
- * about what the value IS. The binning heads `Histogram`/`BinCounts`
- * (`library/statistics.ts`) raise `finite_real` where the heads that ABSORB a
+ * A `real` rejection is an `incompatible-type` error carrying the failed
+ * constraint and the datum's own type: it is a statement about what the value
+ * IS. The binning heads `Histogram`/`BinCounts`
+ * (`library/statistics.ts`) raise `real` where the heads that ABSORB a
  * non-finite datum (`Mean([1, NaN, 5])` is `NaN`) cannot, because a
  * histogram's result is a vector of COUNTS and no count means "the data had no
  * reading". The alternative those heads used to take — dropping the non-finite
@@ -76,8 +76,8 @@ const MACHINE_RANGE_EXPECTATION =
  *
  * A `machine_range` rejection is deliberately NOT an `incompatible-type`
  * error, because nothing is wrong with the value's type: `10^400` is an exact
- * `finite_integer`, so reporting `incompatible-type finite_real /
- * finite_integer<0..>` would contradict its own evidence. What such a value
+ * `integer`, so reporting `incompatible-type real /
+ * integer<0..>` would contradict its own evidence. What such a value
  * exceeds is the range of the kernel doing the asking, so it takes the
  * `out-of-range` shape used elsewhere for a value outside what an operation
  * accepts (a `RandomSample` count, a distribution parameter).

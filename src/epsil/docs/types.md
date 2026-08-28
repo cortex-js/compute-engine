@@ -52,7 +52,7 @@ Collections carry the type of what is in them, and how many:
 
 ```epsil-live
 (Type([1, 2, 3]), Type({1, 2}), Type((1, "a")), Type({x -> 1}))
-// ➔ (TypeFrom("vector<finite_integer^3>"), TypeFrom("set<finite_integer>"), TypeFrom("tuple<finite_integer, string>"), TypeFrom("record{x: finite_integer}"))
+// ➔ (TypeFrom("vector<integer^3>"), TypeFrom("set<integer>"), TypeFrom("tuple<integer, string>"), TypeFrom("record{x: integer}"))
 ```
 
 Numeric types form a tower — `integer ⊂ rational ⊂ real ⊂ complex ⊂ number` —
@@ -609,7 +609,7 @@ never expanded — which is exactly what lets its body mention itself:
 type tree<T> = tuple<value: T, children: list<tree<T>>>
 let t = tree(1, [tree(2, [])])
 Type(t)
-// ➔ TypeFrom("tree<finite_integer>")
+// ➔ TypeFrom("tree<integer>")
 ```
 
 The constructor is **quantified** — `tree: (T, list<tree<T>>) -> tree<T>
@@ -675,7 +675,7 @@ always sound, just less permissive.
 
 One limitation follows from that. A construction solves its parameters from
 its arguments alone, and an annotation does not widen them: `let t:
-tree<number> = tree(1, [])` works only because the `tree<finite_integer>` it
+tree<number> = tree(1, [])` works only because the `tree<integer>` it
 builds *is* a `tree<number>` under `out`. For an explicitly `inout` or `in`
 parameter that step is not available, so such a type can only be constructed
 at exactly its argument type.
@@ -689,7 +689,7 @@ optional payload expressible:
 type opt<T> = T | missing
 let a = opt(1)
 Type(a)
-// ➔ TypeFrom("opt<finite_integer>")
+// ➔ TypeFrom("opt<integer>")
 ```
 
 Each construction takes exactly one arm. Taking the **ground** arm says
@@ -837,7 +837,7 @@ signature.
 Subtyping also quietly absorbs a classic use of polymorphism: the empty
 list needs no "for all" type — it is simply `list<never>`, and since
 `never` is the bottom of the lattice (joining it with anything gives the
-other type back), `Join([], [1, 2])` comes out as `list<finite_integer>`
+other type back), `Join([], [1, 2])` comes out as `list<integer>`
 with no quantifier anywhere.
 
 For the representation a type declaration lowers to, see

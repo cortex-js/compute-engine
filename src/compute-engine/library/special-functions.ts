@@ -24,7 +24,6 @@ import {
 import {
   broadcastOperandType,
   numericTypeHandler as numericTypeHandlerOnTypes,
-  operandNonFiniteNumber,
 } from './type-handlers-types.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { signOfType } from '../../common/type/utils.js';
@@ -139,15 +138,14 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number?) -> number',
       // Complete E(m): real on m ≤ 1 (E(1) = 1), finite complex for m > 1.
       // Incomplete E(φ|m): the value is complex whenever m·sin²φ > 1, a
-      // condition on both operands — hedge with the finite generic point
-      // (`finite_number` admits both real and complex) and widen on a
-      // non-finite operand.
+      // condition on both operands, so the claim is the top numeric type
+      // `number`, which admits real and complex alike. It is constant: the
+      // non-finite operand case reaches the same `number`, so testing for
+      // one changes nothing.
       type: (ops) =>
         ops.length === 1
           ? boundedInverseTrigType(ops, ELLIPTIC_E_DOMAIN)
-          : ops.some((x) => provablyNonFiniteNumber(x))
-            ? 'number'
-            : 'finite_number',
+          : 'number',
       evaluate: (ops, { numericApproximation, engine }) => {
         if (ops.length === 2) {
           // Incomplete E(φ|m): E(0|m) = 0 exactly
@@ -186,12 +184,16 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       broadcastable: true,
       signature: '(number, number) -> number',
-      // Incomplete F(φ|m) is complex whenever m·sin²φ > 1 — a condition on
-      // both operands (`F(1.5|2) = 1.311… − 1.240…i`) — so real operands only
-      // support the finite generic-point hedge, not a real claim.
+      // `number` is the honest top for every operand pair, so the claim is
+      // constant. Two things defeat a narrower one. Incomplete F(φ|m) is
+      // complex whenever m·sin²φ > 1 — a condition on both operands
+      // (`F(1.5|2) = 1.311… − 1.240…i`) — so a real claim is unsound. And
+      // F diverges at FINITE operands: the integrand of
+      // `F(φ|m) = ∫₀^φ dθ/√(1 − m·sin²θ)` has a pole at m = 1, θ = π/2, so
+      // `F(π/2|1)` is infinite. A finiteness claim is therefore unsound too,
+      // even for operands that are themselves finite.
       typeHandlerKind: 'types',
-      type: (ops) =>
-        ops.some((d) => operandNonFiniteNumber(d)) ? 'number' : 'finite_number',
+      type: () => 'number',
       evaluate: ([phi, m], { numericApproximation, engine }) => {
         // F(0|m) = 0 exactly
         if (isNumber(phi) && phi.im === 0 && phi.isSame(0)) return engine.Zero;
@@ -210,17 +212,12 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       broadcastable: true,
       signature: '(number, number, number?) -> number',
-      // Π has a +∞ pole at the characteristic n = 1 (`Π(1|m)`), and the
+      // `number` is the honest top for every operand triple, so the claim is
+      // constant. Π has a +∞ pole at the characteristic n = 1 (`Π(1|m)`), so
+      // no finiteness claim is sound even for finite operands, and the
       // incomplete form is complex outside the real domain (a condition on
-      // several operands), so the claim is the finite generic-point hedge
-      // away from the provable pole. Exact `isSame` for a literal n — the
-      // tolerance-based `isEqual` would put `1 + 10⁻²⁰` at the pole.
-      type: (ops) => {
-        const n = ops[0];
-        if (!n || ops.some((x) => provablyNonFiniteNumber(x))) return 'number';
-        if (isNumber(n) ? n.isSame(1) : n.isEqual(1) === true) return 'number';
-        return 'finite_number';
-      },
+      // several operands), so no real claim is sound either.
+      type: () => 'number',
       evaluate: (ops, { numericApproximation, engine }) => {
         if (ops.length === 3) {
           const [n, phi, m] = ops;
@@ -262,8 +259,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
             (x) => x.isExtendedReal === true && x.isNonNegative === true
           )
         )
-          return 'finite_real';
-        return 'finite_number';
+          return 'real';
+        return 'number';
       },
       evaluate: (ops, { numericApproximation, engine }) => {
         if (!shouldNumericize(numericApproximation, ...ops)) return undefined;
@@ -399,7 +396,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // constant claim. Only its SHAPE moved to `'types'` — the claim reads
       // no operand, so the flip changes nothing it derives.
       typeHandlerKind: 'types',
-      type: () => 'finite_number',
+      type: () => 'number',
       evaluate: (ops, { numericApproximation }) => {
         if (!shouldNumericize(numericApproximation, ops[1], ops[2]))
           return undefined;
@@ -431,7 +428,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // constant claim. Only its SHAPE moved to `'types'` — the claim reads
       // no operand, so the flip changes nothing it derives.
       typeHandlerKind: 'types',
-      type: () => 'finite_number',
+      type: () => 'number',
       evaluate: ([tau], { numericApproximation, engine }) =>
         shouldNumericize(numericApproximation, tau)
           ? applyN(
@@ -456,7 +453,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // constant claim. Only its SHAPE moved to `'types'` — the claim reads
       // no operand, so the flip changes nothing it derives.
       typeHandlerKind: 'types',
-      type: () => 'finite_number',
+      type: () => 'number',
       evaluate: (ops, { numericApproximation, engine }) => {
         if (!shouldNumericize(numericApproximation, ops[1])) return undefined;
         const s = asSmallInteger(ops[0]);
@@ -485,7 +482,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'finite_complex' : 'number';
+          return x.isFinite === true ? 'complex' : 'number';
         return EXTENDED_REAL_TYPE;
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {

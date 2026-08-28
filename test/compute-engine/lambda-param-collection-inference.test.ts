@@ -453,7 +453,7 @@ describe('callee defined after caller', () => {
       const ce = new ComputeEngine();
       assignCaller(ce);
       ce.assign('clean', ce.box(['Function', ['Multiply', 2, 'v'], 'v']));
-      expect(signatureIn(ce, 'process')).toBe('(unknown) -> finite_number');
+      expect(signatureIn(ce, 'process')).toBe('(unknown) -> number');
       assignCallee(ce);
       expect(signatureIn(ce, 'process')).toBe('(list<number>) -> number');
     });

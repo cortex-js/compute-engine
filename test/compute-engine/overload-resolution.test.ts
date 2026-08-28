@@ -9,7 +9,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  * correction: a REQUIRED first parameter in every arm made `Rnd()` match
  * none). */
 const OVERLOAD =
-  '((number?) -> finite_real) & ((set<real>, number?) -> real) & ((collection, number?) -> any)';
+  '((number?) -> real) & ((set<real>, number?) -> real) & ((collection, number?) -> any)';
 
 function engine(signature = OVERLOAD): ComputeEngine {
   const ce = new ComputeEngine();
@@ -21,13 +21,13 @@ describe('overload resolution: arm selection', () => {
   it('selects by arity', () => {
     const ce = engine();
     // Only arm 1 accepts zero arguments.
-    expect(ce.box(['Rnd']).type.toString()).toBe('finite_real');
+    expect(ce.box(['Rnd']).type.toString()).toBe('real');
   });
 
   it('selects a disjoint arm by operand type', () => {
     const ce = engine();
     // `number` is disjoint from `set<real>` and `collection`.
-    expect(ce.box(['Rnd', 5]).type.toString()).toBe('finite_real');
+    expect(ce.box(['Rnd', 5]).type.toString()).toBe('real');
   });
 
   it('prefers the MORE SPECIFIC of two overlapping arms', () => {
@@ -302,7 +302,7 @@ describe('overload resolution: route parity', () => {
       () => ce.function('Rnd', [ce.box(['Interval', 0, 1])]),
       'real'
     );
-    expectRoutes(ce, () => ce.parse('\\mathrm{Rnd}(5)'), 'finite_real');
+    expectRoutes(ce, () => ce.parse('\\mathrm{Rnd}(5)'), 'real');
   });
 });
 

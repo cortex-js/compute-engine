@@ -4119,7 +4119,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_cacos(${compile(args[0])})`;
     // Real operand, complex RESULT (`Arccos(2)`, or a real symbol of unknown
     // magnitude): outside `[−1, 1]` the value is complex, so the node is typed
-    // `finite_complex` and the parent emits the `vec2` convention — a scalar
+    // `complex` and the parent emits the `vec2` convention — a scalar
     // `acos` there is broadcast against a `vec2` and yields garbage. See
     // `gpuResultIsComplexValued`.
     if (gpuResultIsComplexValued('Arccos', args))
@@ -4193,7 +4193,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_cln(${compile(args[0])})`;
     // PROVABLY negative real operand, complex result (`a := -2` → `Ln(a)` is
-    // `finite_complex`): the parent emits the `vec2` convention. An operand of
+    // `complex`): the parent emits the `vec2` convention. An operand of
     // merely UNKNOWN sign keeps the scalar `log` (pinned; the
     // `isComplexValued` Sqrt/Ln/Log carve-out makes the parent agree). See
     // `gpuResultIsComplexValued`.
@@ -4338,12 +4338,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       // a non-integer exponent, which is narrower than CE's branch convention.
       // The node's type selects which value to fold:
       // - An EVEN reduced-rational denominator is the complex branch and the
-      //   node is typed `finite_complex`, so the enclosing emission is the
+      //   node is typed `complex`, so the enclosing emission is the
       //   `vec2(re, im)` convention. Fold the principal complex value; a
       //   scalar NaN there would be silently scalar-broadcast into a
       //   `vec2(NaN, NaN)` (valid shader source, wrong value).
       // - An ODD denominator has a real root (`(−8)^(2/3) = 4`) that `pow`
-      //   misses; the node stays `finite_number` and folds to that real value.
+      //   misses; the node stays `number` and folds to that real value.
       // - An unprovable branch keeps the shader NaN fold: it is exactly what
       //   this head's OWN `pow` lowering yields once the base is a runtime
       //   variable (`pow(x, 0.3)` at `x = -2`), so refusing only the
@@ -4888,7 +4888,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 0) throw new Error('Log: no argument');
     // Complex either because an operand is, or because the RESULT is complex
     // from a PROVABLY negative argument (`a := -2` makes `Log(a)`
-    // `finite_complex`). Either way the enclosing emission is the `vec2`
+    // `complex`). Either way the enclosing emission is the `vec2`
     // convention. An operand of merely UNKNOWN sign keeps the scalar kernel
     // (pinned; the `isComplexValued` Sqrt/Ln/Log carve-out makes the parent
     // agree). See `gpuResultIsComplexValued`.
@@ -4940,9 +4940,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const r = Math.pow(xConst, 1 / nConst);
       // For a negative base, the node's type selects which value to fold. An odd
       // integer degree has a real root (interpreter convention, e.g.
-      // Root(-8, 3) = -2) and stays `finite_number`. An EVEN degree is the
-      // complex branch: the node is typed
-      // `finite_complex`, so the enclosing emission is `vec2(re, im)` and the
+      // Root(-8, 3) = -2) and stays `number`. An EVEN degree is the complex
+      // branch: the node is typed `complex`, so the enclosing emission is
+      // `vec2(re, im)` and the
       // fold must be the principal complex value — a scalar NaN there would be
       // silently scalar-broadcast into `vec2(NaN, NaN)`. (A canonical even root
       // of a negative already folds to an exact complex literal before

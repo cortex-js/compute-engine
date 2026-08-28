@@ -23,9 +23,9 @@ export class BoxedType {
   static non_finite_number = new BoxedType('non_finite_number');
   static infinity = new BoxedType('infinity');
   static nan = new BoxedType('nan');
-  static finite_number = new BoxedType('finite_number');
-  static finite_integer = new BoxedType('finite_integer');
-  static finite_real = new BoxedType('finite_real');
+  static complex = new BoxedType('complex');
+  static real = new BoxedType('real');
+  static integer = new BoxedType('integer');
   static string = new BoxedType('string');
   static character = new BoxedType('character');
   static dictionary = new BoxedType('dictionary');
@@ -35,7 +35,6 @@ export class BoxedType {
   static setImaginary = new BoxedType('set<imaginary>');
   static setReal = new BoxedType('set<real>');
   static setRational = new BoxedType('set<rational>');
-  static setFiniteInteger = new BoxedType('set<finite_integer>');
   static setInteger = new BoxedType('set<integer>');
 
   type: Type;

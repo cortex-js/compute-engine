@@ -251,13 +251,13 @@ describe('lossless JSON round-trip (matcher contract)', () => {
 });
 
 describe('exactness plumbing', () => {
-  it('exact Gaussian type is finite_complex / imaginary', () => {
+  it('exact Gaussian type is complex / imaginary', () => {
     expect(
       ce
         .expr(['Add', 2, ['Multiply', 3, i]])
         .evaluate()
         .type.toString()
-    ).toBe('finite_complex');
+    ).toBe('complex');
     expect(ce.expr(['Multiply', 3, i]).evaluate().type.toString()).toBe(
       'imaginary'
     );

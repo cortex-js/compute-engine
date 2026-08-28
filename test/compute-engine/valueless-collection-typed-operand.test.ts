@@ -955,7 +955,7 @@ describe('the element type of a held broadcast over a union-typed operand', () =
  * A LONE union-typed operand — a valueless symbol declared
  * `number | list<number>` with no operand beside it that is definitely a
  * collection — is not a collection. Typing `2u` as the definite
- * `list<finite_number>` (what the broadcast wrapper did, by reading "the union
+ * `list<number>` (what the broadcast wrapper did, by reading "the union
  * HAS a collection branch" as "the operand IS a collection") states something
  * the very same expression contradicts once the symbol is assigned: `u := 5`
  * makes `2u` evaluate to the scalar `10`.
@@ -981,7 +981,7 @@ describe('a LONE union-typed operand keeps the union in the result type', () => 
   it('carries the union through every lifted operator', () => {
     const ce = engineWithU();
     expect(ce.box(['Multiply', 2, 'u']).type.toString()).toBe(
-      'finite_number | list<finite_number>'
+      'list<number> | number'
     );
     expect(ce.box(['Add', 'u', 2]).type.toString()).toBe(
       'list<number> | number'
@@ -990,10 +990,10 @@ describe('a LONE union-typed operand keeps the union in the result type', () => 
       'list<number> | number'
     );
     expect(ce.box(['Power', 'u', 2]).type.toString()).toBe(
-      'finite_number | list<finite_number>'
+      'list<number> | number'
     );
     expect(ce.box(['Sin', 'u']).type.toString()).toBe(
-      'finite_number | list<finite_number>'
+      'list<number> | number'
     );
   });
 
@@ -1017,13 +1017,13 @@ describe('a LONE union-typed operand keeps the union in the result type', () => 
     ce.declare('v', 'integer | indexed_collection<integer>');
     ce.declare('r', 'integer | range');
     expect(ce.box(['Multiply', 2, 'v']).type.toString()).toBe(
-      'finite_number | indexed_collection<finite_number>'
+      'indexed_collection<number> | number'
     );
     expect(ce.box(['Negate', 'v']).type.toString()).toBe(
       'indexed_collection<integer> | integer'
     );
     expect(ce.box(['Multiply', 2, 'r']).type.toString()).toBe(
-      'finite_number | indexed_collection<finite_number>'
+      'indexed_collection<number> | number'
     );
   });
 
@@ -1056,7 +1056,7 @@ describe('a LONE union-typed operand keeps the union in the result type', () => 
       'list<number> | number'
     );
     expect(ce.box(['Multiply', 'u', 'w']).type.toString()).toBe(
-      'finite_number | list<finite_number>'
+      'list<number> | number'
     );
   });
 
@@ -1267,12 +1267,12 @@ describe('a lambda applied to a LONE union-typed argument', () => {
     ce.declare('u', 'number | list<number>');
     ce.assign('f', ce.parse('x \\mapsto 2x'));
     expect(ce.box(['f', 'u']).type.toString()).toBe(
-      'finite_number | list<finite_number>'
+      'list<number> | number'
     );
     // The control: a DEFINITE collection argument still types a definite,
     // shape-aware list.
     expect(ce.box(['f', ['List', 1, 2]]).type.toString()).toBe(
-      'vector<finite_number^2>'
+      'vector<2>'
     );
   });
 

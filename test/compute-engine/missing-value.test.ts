@@ -548,7 +548,7 @@ describe('P3 — aggregate absent-datum / empty-input gate (§3.C)', () => {
     expect(ce.box(['Mode', ['List']]).evaluate().isNaN).toBe(true);
   });
 
-  test('the 11 numeric aggregates type as `number`, not `finite_real`', () => {
+  test('the 11 numeric aggregates type as `number`, not `real`', () => {
     for (const op of AGGREGATES)
       expect(ce.box([op, ['List', 1, 2, 3]]).type.toString()).toBe('number');
   });

@@ -177,7 +177,7 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
     expect(
       js.compile(ce.box(['Haversine', ce.symbol('x')])).run!({ x: 30 })
     ).toBeCloseTo(ce.box(['Haversine', 30]).N().re, 10);
-    // InverseHaversine types `finite_complex` for a symbolic real (honest
+    // InverseHaversine types `complex` for a symbolic real (honest
     // domain join, like the Arcsin family — it is complex outside [0, 1]),
     // so the compiled arithmetic is complex; the angle scaling applies
     // linearly to the complex value, matching `radiansToAngle`. In domain the

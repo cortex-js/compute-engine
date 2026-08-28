@@ -486,7 +486,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
         .evaluate()
         .toString()
     ).toBe('5');
-    expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
+    expect(ce.box(['f', 5] as any).type.toString()).toBe('integer');
     expect(
       ce
         .box(['f', { str: 'a' }] as any)
@@ -495,7 +495,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
     ).toBe('"a"');
     expect(ce.box(['f', { str: 'a' }] as any).type.toString()).toBe('string');
     // …and back, on the SAME engine: the declaration is unchanged.
-    expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
+    expect(ce.box(['f', 5] as any).type.toString()).toBe('integer');
     expect(ce.box('f').type.toString()).toBe('(x: T) -> T where T');
   });
 
@@ -503,7 +503,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
     const ce = fresh();
     ce.declare('f', { signature: '(x: T) -> T where T' } as any);
     ce.assign('f', ce.box(['Function', 'x', 'x'] as any));
-    expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
+    expect(ce.box(['f', 5] as any).type.toString()).toBe('integer');
     expect(
       ce
         .box(['f', { str: 'a' }] as any)
@@ -523,7 +523,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
         .evaluate()
         .toString()
     ).toBe('5');
-    expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
+    expect(ce.box(['f', 5] as any).type.toString()).toBe('integer');
   });
 
   test('the `Assign` OPERATOR route — an E1 literal, no declaration at all', () => {
@@ -536,7 +536,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
       ['Function', 'x', { str: '(x: T) -> T where T' }],
     ] as any).evaluate();
     expect(ce.box('f').type.toString()).toBe('(x: T) -> T where T');
-    expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
+    expect(ce.box(['f', 5] as any).type.toString()).toBe('integer');
     expect(
       ce
         .box(['f', { str: 'a' }] as any)
@@ -556,7 +556,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
       const ce = fresh();
       ce.assign('f', ce.box(literal.json));
       expect(ce.box('f').type.toString()).toBe('(x: T) -> T where T');
-      expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
+      expect(ce.box(['f', 5] as any).type.toString()).toBe('integer');
       expect(ce.box(['f', { str: 'a' }] as any).type.toString()).toBe('string');
     }
   });
@@ -575,7 +575,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
         .toString()
     ).toBe('("a", 1)');
     expect(ce.box(['f', 1, { str: 'a' }] as any).type.toString()).toBe(
-      'tuple<string, finite_integer>'
+      'tuple<string, integer>'
     );
   });
 
@@ -588,7 +588,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
     const ce = fresh();
     const f = e1(ce, 'x', '(x: T) -> T where T');
     expect(ce.box(['Apply', f.json, 5] as any).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
     expect(
       ce
@@ -606,7 +606,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
     const f = e1(ce, 'x', '(x: T) -> T where T');
     const head = ce.box([f.json, 5] as any);
     expect(head.operator).toBe('Apply');
-    expect(head.type.toString()).toBe('finite_integer');
+    expect(head.type.toString()).toBe('integer');
     expect(head.evaluate().toString()).toBe('5');
     expect(ce.box([f.json, { str: 'a' }] as any).type.toString()).toBe(
       'string'
@@ -619,7 +619,7 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
     const ce = fresh();
     const f = e1(ce, 'x', '(x: T) -> T where T');
     const call = ce.box(['Apply', f.json, ['List', 1, 2]] as any);
-    expect(call.type.toString()).toBe('vector<finite_integer^2>');
+    expect(call.type.toString()).toBe('vector<integer^2>');
     expect(call.evaluate().toString()).toBe('[1,2]');
   });
 
@@ -645,7 +645,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
         .toString()
     ).toBe('[2,4,6]');
     expect(ce.box(['f', ['List', 1, 2, 3]] as any).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     // The bound is enforced at the scalar base.
     expect(
@@ -664,7 +664,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
     const ce = fresh();
     ce.assign('f', e1(ce, 'x', '(x: T) -> T where T'));
     expect(ce.box(['f', ['List', 1, 2, 3]] as any).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(
       ce
@@ -675,14 +675,14 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
     // Rank 2 — where the mixed encoding always showed.
     const m = ['List', ['List', 1, 2], ['List', 3, 4]];
     expect(ce.box(['f', m] as any).type.toString()).toBe(
-      'matrix<finite_integer^(2x2)>'
+      'matrix<integer^(2x2)>'
     );
   });
 
   test('…and the VALUE-DEF arm agrees (the pre-existing half)', () => {
     const ce = declareAssign('(x: T) -> T where T', ['Function', 'x', 'x']);
     expect(ce.box(['f', ['List', 1, 2, 3]] as any).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
   });
 
@@ -695,7 +695,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
     const ce = fresh();
     ce.assign('f', e1(ce, 'x', '(x: T, n: number) -> T where T'));
     const call = ce.box(['f', ['List', 1, 2], 5] as any);
-    expect(call.type.toString()).toBe('vector<finite_integer^2>');
+    expect(call.type.toString()).toBe('vector<integer^2>');
     expect(call.evaluate().toString()).toBe('[1,2]');
   });
 
@@ -707,7 +707,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
     ce.assign('f', e1(ce, ['Add', 'x', 'n'], '(x: T, n: U) -> T where T, U'));
     const m = ['List', ['List', 1, 2], ['List', 3, 4]];
     const call = ce.box(['f', ['List', 1, 2], m] as any);
-    expect(call.type.toString()).not.toBe('vector<finite_integer^2>');
+    expect(call.type.toString()).not.toBe('vector<integer^2>');
     const evaluated = call.evaluate();
     expect(evaluated.toString()).toBe('[[2,3],[5,6]]');
     expect(evaluated.type.matches(call.type)).toBe(true);
@@ -722,7 +722,7 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
     ]);
     const m = ['List', ['List', 1, 2], ['List', 3, 4]];
     const call = ce.box(['f', ['List', 1, 2], m] as any);
-    expect(call.type.toString()).not.toBe('vector<finite_integer^2>');
+    expect(call.type.toString()).not.toBe('vector<integer^2>');
     const evaluated = call.evaluate();
     expect(evaluated.toString()).toBe('[[2,3],[5,6]]');
     expect(evaluated.type.matches(call.type)).toBe(true);
@@ -753,19 +753,19 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
       e1(ce, ['Tuple', 'x', 'x'], '(x: T) -> tuple<T, T> where T')
     );
     // The scalar call is the per-element answer the wrap is built from.
-    pin(ce, 5, 'tuple<finite_integer, finite_integer>', '(5, 5)');
+    pin(ce, 5, 'tuple<integer, integer>', '(5, 5)');
     pin(
       ce,
       ['List', 1, 2],
-      'list<tuple<finite_integer, finite_integer>>',
+      'list<tuple<integer, integer>>',
       '[(1, 1),(2, 2)]'
     );
     // Rank 2 — the depth the peel has to reach (the broadcast maps to the
-    // scalar LEAVES, so `T` is `finite_integer`, not a matrix row).
+    // scalar LEAVES, so `T` is `integer`, not a matrix row).
     pin(
       ce,
       ['List', ['List', 1, 2], ['List', 3, 4]],
-      'list<tuple<finite_integer, finite_integer>>',
+      'list<tuple<integer, integer>>',
       '[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]'
     );
   });
@@ -776,11 +776,11 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
       ['Tuple', 'x', 'x'],
       'x',
     ]);
-    pin(ce, 5, 'tuple<finite_integer, finite_integer>', '(5, 5)');
+    pin(ce, 5, 'tuple<integer, integer>', '(5, 5)');
     pin(
       ce,
       ['List', 1, 2],
-      'list<tuple<finite_integer, finite_integer>>',
+      'list<tuple<integer, integer>>',
       '[(1, 1),(2, 2)]'
     );
     // The value route maps to the scalar LEAVES too: its zip re-dispatches
@@ -791,7 +791,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     pin(
       ce,
       ['List', ['List', 1, 2], ['List', 3, 4]],
-      'list<tuple<finite_integer, finite_integer>>',
+      'list<tuple<integer, integer>>',
       '[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]'
     );
   });
@@ -804,11 +804,11 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
       'f',
       e1(ce, ['Tuple', 'x', 'x'], '(x: T) -> tuple<T, T> where T: number')
     );
-    pin(ce, 5, 'tuple<finite_integer, finite_integer>', '(5, 5)');
+    pin(ce, 5, 'tuple<integer, integer>', '(5, 5)');
     pin(
       ce,
       ['List', 1, 2],
-      'list<tuple<finite_integer, finite_integer>>',
+      'list<tuple<integer, integer>>',
       '[(1, 1),(2, 2)]'
     );
   });
@@ -820,13 +820,13 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     const ce = fresh();
     ce.declare('vecho', '(T) -> T where T: indexed_collection');
     expect(ce.box(['vecho', ['List', 1, 2]] as any).type.toString()).toBe(
-      'vector<finite_integer^2>'
+      'vector<integer^2>'
     );
     expect(
       ce
         .box(['vecho', ['List', ['List', 1, 2], ['List', 3, 4]]] as any)
         .type.toString()
-    ).toBe('matrix<finite_integer^(2x2)>');
+    ).toBe('matrix<integer^(2x2)>');
     expect(ce.box(['vecho', 5] as any).isValid).toBe(false);
   });
 
@@ -837,10 +837,10 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     const ce = fresh();
     ce.assign('f', e1(ce, 'x', '(x: T) -> T where T'));
     expect(ce.box(['f', ['Tuple', 1, 2]] as any).type.toString()).toBe(
-      'tuple<finite_integer, finite_integer>'
+      'tuple<integer, integer>'
     );
     expect(ce.box(['Conjugate', ['Set', 1, 2]] as any).type.toString()).toBe(
-      'set<finite_integer>'
+      'set<integer>'
     );
   });
 
@@ -893,7 +893,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     const f = e1(ce, ['Tuple', 'x', 'x'], '(x: T) -> tuple<T, T> where T');
     const call = ce.box(['Apply', f.json, ['List', 1, 2]] as any);
     expect(call.type.toString()).toBe(
-      'tuple<vector<finite_integer^2>, vector<finite_integer^2>>'
+      'tuple<vector<integer^2>, vector<integer^2>>'
     );
     const evaluated = call.evaluate();
     expect(evaluated.toString()).toBe('([1,2], [1,2])');
@@ -921,7 +921,7 @@ describe('§5.4 — generic recursion (declare-then-assign)', () => {
         .toString()
     ).toBe('5');
     expect(ce.box(['nest', 5, 3] as any).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
     expect(
       ce
@@ -984,7 +984,7 @@ describe('§5.6 — the boundary acceptance rule (§2.4)', () => {
     expect(() =>
       ce.assign('f', e1(ce, 'q', '(u: U) -> U where U'))
     ).not.toThrow();
-    expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
+    expect(ce.box(['f', 5] as any).type.toString()).toBe('integer');
   });
 
   test('G9 — argument NAMES are cosmetic, so an unnamed declaration matches', () => {
@@ -1280,7 +1280,7 @@ describe('§2.6 — G2, generic × multi-clause is rejected in BOTH directions',
       ] as any)
       .evaluate();
     expect(v.toString()).not.toMatch(G2);
-    expect(ce.box(['h', 5] as any).type.toString()).toBe('finite_integer');
+    expect(ce.box(['h', 5] as any).type.toString()).toBe('integer');
     expect(ce.box(['h', { str: 'a' }] as any).type.toString()).toBe('string');
   });
 
@@ -1294,7 +1294,7 @@ describe('§2.6 — G2, generic × multi-clause is rejected in BOTH directions',
       .box(['DefineFunction', 'k', ['Function', 'x', 'x']] as any)
       .evaluate();
     expect(v.toString()).not.toMatch(G2);
-    expect(ce.box(['k', 5] as any).type.toString()).toBe('finite_integer');
+    expect(ce.box(['k', 5] as any).type.toString()).toBe('integer');
     expect(ce.box(['k', { str: 'a' }] as any).type.toString()).toBe('string');
   });
 });
@@ -1401,7 +1401,7 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     const call = ce.box(['f', ['List', 1, 2, 3]] as any);
     expect(call.evaluate().toString()).toBe('[2,4,6]');
     // No double-lift (the §2.5 twin arm): the map's type, not a list of vectors.
-    expect(call.type.toString()).toBe('vector<finite_integer^3>');
+    expect(call.type.toString()).toBe('vector<integer^3>');
     // …and the VALUE route answers the same thing, literally.
     const value = declareAssign('(x: T) -> T where T: number', [
       'Function',
@@ -1430,7 +1430,7 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     ce.assign('f', e1(ce, 'x', '(x: T) -> T where T'));
     const call = ce.box(['f', ['List', 1, 2, 3]] as any);
     expect(call.evaluate().toString()).toBe('[1,2,3]');
-    expect(call.type.toString()).toBe('vector<finite_integer^3>');
+    expect(call.type.toString()).toBe('vector<integer^3>');
   });
 
   test('a GROUND annotated bare-assign broadcasts, and compiles to the same', () => {
@@ -1718,7 +1718,7 @@ describe('R1 — a declared polytype is ascribed onto the stored literal', () =>
     expect(value.type.toString()).toBe('(x: T) -> T where T');
     // The definition's own type is unchanged, and so is every call.
     expect(ce.box('f').type.toString()).toBe('(x: T) -> T where T');
-    expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
+    expect(ce.box(['f', 5] as any).type.toString()).toBe('integer');
   });
 
   test('declare-WITH-value: the same', () => {
@@ -1787,7 +1787,7 @@ describe('R4 — untyped re-assign replaces a derived signature', () => {
     expect(ce.box('g').type.toString()).toBe('(unknown) -> integer');
     ce.assign('g', untyped(ce));
     // Re-inferred from the NEW body — the old return annotation is gone.
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> finite_number');
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> number');
     expect(ce.box(['g', 1.5] as any).evaluate().toString()).toBe('3');
     // …and the representation stays an operator definition with a lambda.
     const def = ce.lookupDefinition('g');
@@ -1804,7 +1804,7 @@ describe('R4 — untyped re-assign replaces a derived signature', () => {
     expect(ce.box(['g', 1.5] as any).isValid).toBe(false);
     ce.assign('g', untyped(ce));
     expect(ce.box(['g', 1.5] as any).isValid).toBe(true);
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> finite_number');
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> number');
   });
 
   test('a GENERIC annotation is derived the same way', () => {
@@ -1813,7 +1813,7 @@ describe('R4 — untyped re-assign replaces a derived signature', () => {
     expect(ce.box('g').type.toString()).toBe('(x: T) -> T where T');
     ce.assign('g', untyped(ce));
     expect(ce.box('g').type.isPolymorphic).toBe(false);
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> finite_number');
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> number');
   });
 
   test('a DECLARED signature stays sticky (string form)', () => {

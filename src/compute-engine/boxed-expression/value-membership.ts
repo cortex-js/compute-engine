@@ -19,7 +19,7 @@ import {
  * See `docs/TYPE-SYSTEM.md`.
  *
  * Subtyping compares a value's *synthesized* type (`ce.box(0).type` is
- * `finite_integer`), which can never witness membership in a value type such
+ * `integer`), which can never witness membership in a value type such
  * as `0` — the type would reject its own witness. This predicate tests the
  * value itself. It is consulted as an ADMISSION fallback wherever a concrete
  * value is at hand (argument validation, assign compatibility, overload arm

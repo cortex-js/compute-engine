@@ -57,7 +57,7 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
       const { rows, assign } = witness('indexed_collection');
 
       expect(rows.relation.type.toString()).toBe('broadcastable<boolean>');
-      expect(rows.which.type.toString()).toBe('broadcastable<finite_integer>');
+      expect(rows.which.type.toString()).toBe('broadcastable<integer>');
       expect(rows.sum.type.toString()).toBe('broadcastable<integer>');
 
       assign();
@@ -73,7 +73,7 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
         rows.relation.evaluate().type.matches('broadcastable<boolean>')
       ).toBe(true);
       expect(
-        rows.which.evaluate().type.matches('broadcastable<finite_integer>')
+        rows.which.evaluate().type.matches('broadcastable<integer>')
       ).toBe(true);
       expect(rows.sum.evaluate().type.matches('broadcastable<integer>')).toBe(
         true
@@ -86,7 +86,7 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
       // (2026-08-18, `docs/INFERENCE_ROADMAP.md`), that invariant is
       // deliberately GONE for a symbol declared with a BARE constructor:
       // the assignment refines the element slot (`C: indexed_collection`
-      // becomes `indexed_collection<finite_integer>`), so a re-parse lands
+      // becomes `indexed_collection<integer>`), so a re-parse lands
       // exactly where the concrete `list<number>` declaration leg has
       // always landed — the sharper, provable `list<…>` types. The
       // PRE-assignment types (the previous test) are unchanged: a valueless
@@ -96,7 +96,7 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
       assign();
       expect(ce.parse('C=U_1').type.toString()).toBe('list<boolean>');
       expect(ce.parse('\\{C=U_1: 1, 0\\}').type.toString()).toBe(
-        'list<finite_integer>'
+        'list<integer>'
       );
       expect(ce.parse('\\sum_{i=1}^{2}\\{C=U_i: i, 0\\}').type.toString()).toBe(
         'list<integer>'
@@ -112,7 +112,7 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
       const { rows, assign } = witness('list<number>');
 
       expect(rows.relation.type.toString()).toBe('list<boolean>');
-      expect(rows.which.type.toString()).toBe('list<finite_integer>');
+      expect(rows.which.type.toString()).toBe('list<integer>');
       expect(rows.sum.type.toString()).toBe('list<integer>');
 
       assign();
@@ -209,12 +209,12 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
       ce.declare('C', 'indexed_collection');
       ce.declare('U', 'indexed_collection');
       const e = ce.box(['If', ['Equal', 'C', ['At', 'U', 1]], 1, 0]);
-      expect(e.type.toString()).toBe('broadcastable<finite_integer>');
+      expect(e.type.toString()).toBe('broadcastable<integer>');
       ce.assign('C', ce.box(['List', 2, 3, 2]));
       ce.assign('U', ce.box(['List', 2, 3]));
       const value = e.evaluate();
       expect(value.toString()).toBe('[1,0,1]');
-      expect(value.type.matches('broadcastable<finite_integer>')).toBe(true);
+      expect(value.type.matches('broadcastable<integer>')).toBe(true);
     });
   });
 });

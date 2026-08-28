@@ -12,7 +12,7 @@ import { isFunction } from '../../src/compute-engine/boxed-expression/type-guard
  * and the compiled constant fold both recovered `p/q` from the exponent's
  * DOUBLE by continued fractions. `100/3` reconstructs to the dyadic
  * `4691249611844267/140737488355328`, whose denominator is EVEN, so
- * `(−2)^(100/3)` was `finite_number` to the type, complex to `.N()`, and `NaN`
+ * `(−2)^(100/3)` was `number` to the type, complex to `.N()`, and `NaN`
  * to the compiler. They now share one decision (`realPowerBranchTerms`).
  */
 
@@ -241,8 +241,8 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
     const expr = ce.box(['Power', -2, ['Rational', 100, 3]]);
     const expected = Math.pow(2, 100 / 3); // ≈ 1.0822639e10, REAL
 
-    it('is typed finite_number', () => {
-      expect(expr.type.toString()).toBe('finite_number');
+    it('is typed number', () => {
+      expect(expr.type.toString()).toBe('number');
     });
 
     it('.N() is the REAL +2^(100/3)', () => {
@@ -259,7 +259,7 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       // `.N()` only ever sees the double, so the float route must land on the
       // same branch as the exact one.
       const f = ce.box(['Power', -2, 100 / 3]);
-      expect(f.type.toString()).toBe('finite_number');
+      expect(f.type.toString()).toBe('number');
       expect(parts(f).im).toBe(0);
       expect(folded(f)).toBe(expected);
     });
@@ -289,7 +289,7 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
           expect(folded(e)).toBeCloseTo(re, 6);
         } else {
           expect(im).not.toBe(0);
-          expect(e.type.toString()).toBe('finite_complex');
+          expect(e.type.toString()).toBe('complex');
           const f = folded(e) as { re: number; im: number };
           expect(f.re).toBeCloseTo(re, 6);
           expect(f.im).toBeCloseTo(im, 6);
@@ -304,11 +304,11 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       expect(folded(e)).toBe(4);
     });
 
-    it('a symbolic real base still TYPES finite_number, and its lowering follows the mode', () => {
+    it('a symbolic real base still TYPES number, and its lowering follows the mode', () => {
       const ce2 = new ComputeEngine();
       ce2.declare('r', 'real');
       const e = ce2.box(['Power', 'r', 0.3]);
-      expect(e.type.toString()).toBe('finite_number');
+      expect(e.type.toString()).toBe('number');
       // The branch decision above is a TYPE decision and does not move. The
       // LOWERING does: a non-integer number exponent over a base of unknown
       // sign is promoted by the default mode `auto` (compile-mode step 4,
@@ -906,7 +906,7 @@ describe('NEGATIVE BASE: exact terms beyond the safe-integer range', () => {
         expect((f as number) / want).toBeCloseTo(1, 12);
       } else {
         expect(Math.abs(im)).not.toBe(0);
-        expect(e.type.toString()).toBe('finite_complex');
+        expect(e.type.toString()).toBe('complex');
         const c = f as { re: number; im: number };
         expect(c.re / re).toBeCloseTo(1, 9);
         expect(c.im / im).toBeCloseTo(1, 9);
@@ -947,7 +947,7 @@ describe('NEGATIVE BASE: an exponent that ROUNDS to an integer', () => {
     expect(e.op2.isInteger).toBe(false);
     expect(e.op2.N().re).toBe(3);
 
-    expect(e.type.toString()).toBe('finite_complex');
+    expect(e.type.toString()).toBe('complex');
     const c = folded(e) as { re: number; im: number };
     expect(c.im).not.toBe(0);
     expect(c.re).toBeCloseTo(-8, 5);

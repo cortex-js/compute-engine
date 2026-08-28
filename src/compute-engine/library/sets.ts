@@ -83,7 +83,7 @@ const EXTENDED_COMPLEX_TYPE = parseType('complex | infinity');
 /**
  * Build the `subsetOf` handler of a number set that contains EVERY value of
  * `elementType` whose sign satisfies `sign` — `Integers` is every value of
- * type `finite_integer` with no sign constraint, `PositiveNumbers` every
+ * type `integer` with no sign constraint, `PositiveNumbers` every
  * `real` whose sign is `positive`, and so on.
  *
  * Two such sets are compared by their descriptions alone, with no
@@ -126,14 +126,14 @@ function numberSetSubsetOf(
  *
  * The `false` refutation relies on the type lattice computing a correct
  * *meet* for intersections: overlapping numeric primitives intersect to
- * their greatest lower bound (e.g. `integer ∩ finite_real` =
- * `finite_integer`), so an EMPTY meet genuinely means "disjoint types"
+ * their greatest lower bound (e.g. `integer ∩ real` =
+ * `integer`), so an EMPTY meet genuinely means "disjoint types"
  * (`isEmptyType`, `common/type/subtype.ts`) — the empty type is `never`, not
  * `nothing`, which is the unit type inhabited by the symbol `Nothing`
  * (REVIEW.md G15; see `meetPrimitiveTypes` in `common/type/subtype.ts`).
  * This is what makes the precise per-set types used by the `contains`
- * handlers below (e.g. `finite_complex`, `imaginary`) sound: a symbol
- * declared `finite_real` is *not* refuted as an integer.
+ * handlers below (e.g. `complex`, `imaginary`) sound: a symbol
+ * declared `real` is *not* refuted as an integer.
  */
 export function typeMembership(x: Expression, t: Type): boolean | undefined {
   const vt = x.type;
@@ -227,7 +227,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ComplexNumbers: {
-    type: 'set<finite_complex>',
+    type: 'set<complex>',
     isConstant: true,
     description: 'The set of all finite complex numbers.',
     collection: {
@@ -235,11 +235,11 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      contains: (_, x) => typeMembership(x, 'finite_complex'),
-      subsetOf: numberSetSubsetOf('ComplexNumbers', 'finite_complex'),
+      contains: (_, x) => typeMembership(x, 'complex'),
+      subsetOf: numberSetSubsetOf('ComplexNumbers', 'complex'),
       // real ⊂ complex: elements include the reals, so no sign claim.
       eltsgn: () => undefined,
-      elttype: () => 'finite_complex',
+      elttype: () => 'complex',
     },
   },
 
@@ -280,18 +280,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   RealNumbers: {
-    type: 'set<finite_real>',
+    type: 'set<real>',
     isConstant: true,
     description: 'The set of all finite real numbers.',
     collection: {
       iterator: (self) => rationalIterator(self),
-      contains: (_, x) => typeMembership(x, 'finite_real'),
+      contains: (_, x) => typeMembership(x, 'real'),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: numberSetSubsetOf('RealNumbers', 'finite_real'),
+      subsetOf: numberSetSubsetOf('RealNumbers', 'real'),
       eltsgn: () => undefined,
-      elttype: () => 'finite_real',
+      elttype: () => 'real',
     },
   },
 
@@ -312,18 +312,18 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   Integers: {
-    type: 'set<finite_integer>',
+    type: 'set<integer>',
     isConstant: true,
     description: 'The set of all finite integers.',
     collection: {
       iterator: integerIterator,
-      contains: (_, x) => typeMembership(x, 'finite_integer'),
+      contains: (_, x) => typeMembership(x, 'integer'),
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      subsetOf: numberSetSubsetOf('Integers', 'finite_integer'),
+      subsetOf: numberSetSubsetOf('Integers', 'integer'),
       eltsgn: () => undefined,
-      elttype: () => 'finite_integer',
+      elttype: () => 'integer',
     },
   },
 
@@ -344,7 +344,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   RationalNumbers: {
-    type: 'set<finite_rational>',
+    type: 'set<rational>',
     isConstant: true,
     description: 'The set of all finite rational numbers.',
     collection: {
@@ -352,10 +352,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       count: () => Infinity,
       isEmpty: () => false,
       isFinite: () => false,
-      contains: (_, x) => typeMembership(x, 'finite_rational'),
-      subsetOf: numberSetSubsetOf('RationalNumbers', 'finite_rational'),
+      contains: (_, x) => typeMembership(x, 'rational'),
+      subsetOf: numberSetSubsetOf('RationalNumbers', 'rational'),
       eltsgn: () => undefined,
-      elttype: () => 'finite_rational',
+      elttype: () => 'rational',
     },
   },
 
@@ -540,7 +540,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       '2. Type-style membership: Element(x, integer) checks if x has type integer\n\n' +
       'Type-style membership works with:\n' +
       '- Mathematical sets: Integers, RealNumbers, ComplexNumbers, etc.\n' +
-      '- Type names: integer, real, number, finite_real, positive_integer, etc.\n' +
+      '- Type names: integer, rational, real, number, positive_integer, etc.\n' +
       '- Invalid type names remain unevaluated (e.g., Element(2, "Booleans"))',
     canonical: (args, { engine: ce }) => {
       // Let default signature validation handle missing required arguments
@@ -1006,7 +1006,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     canonical: (args, { engine: ce }) => {
       // Label tolerance (`G \setminus H`, `G \setminus \{e\}`): without
       // this handler, generic signature validation rejects a label first
-      // operand (e.g. `G`, the gravitational constant, types finite_real).
+      // operand (e.g. `G`, the gravitational constant, types real).
       return ce._fn(
         'SetMinus',
         validateSetArguments(ce, args, '(set<any>, value*) -> set')
@@ -1371,7 +1371,7 @@ function boundKleene(
  *    of using the generic `contains` handler, which collapses an unknown
  *    base membership to a definitive `false` for symbolic elements.
  * 2. The collection's `contains` handler (concrete membership, unchanged).
- * 3. Type-style membership for type names (e.g. `Element(x, finite_real)`).
+ * 3. Type-style membership for type names (e.g. `Element(x, real)`).
  * 4. Primitive number-set symbols mapped to types via `domainToType` — the
  *    query-side mirror of the assume-side type refinement, so
  *    `Element(z, ComplexNumbers)` verifies after the same assumption.
@@ -1474,14 +1474,14 @@ function membershipKleene(
 
   const typeName = sym(collection);
   if (typeName) {
-    // 3. Type-style membership, e.g. Element(x, finite_real)
+    // 3. Type-style membership, e.g. Element(x, real)
     try {
       const type = ce.type(typeName);
       if (!type.isUnknown) {
         // Three-valued: in particular, a concrete number literal whose type
         // overlaps but does not match is definitively excluded (e.g.
         // `Element(2.5, integer)` → False, even though
-        // `finite_rational ∩ integer` is non-empty), while a symbol of
+        // `rational ∩ integer` is non-empty), while a symbol of
         // overlapping type stays indeterminate (falls through).
         const r = typeMembership(x, type.type);
         if (r !== undefined) return r;

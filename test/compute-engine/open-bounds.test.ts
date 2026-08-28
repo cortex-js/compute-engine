@@ -42,7 +42,7 @@ describe('OPEN BOUNDS — grammar', () => {
       'real<0..3>',
       'real<-1.5<..<-1.4>',
       'real<0..<1e-10>',
-      'finite_rational<0<..<1>',
+      'rational<0<..<1>',
       'list<real<0<..<3>>',
     ])
       expect(T(s)).toBe(s);
@@ -132,7 +132,7 @@ describe('OPEN BOUNDS — the normal form', () => {
     expect(T('integer<0<..>')).toBe('integer<1..>');
     expect(T('integer<0<..<2>')).toBe('integer<1..1>');
     expect(T('integer<0<..<1>')).toBe('never');
-    expect(T('finite_integer<-0.5<..>')).toBe('finite_integer<0..>');
+    expect(T('integer<-0.5<..>')).toBe('integer<0..>');
     expect(R('(integer<0..>) & !0')).toBe('integer<1..>');
   });
 
@@ -141,8 +141,8 @@ describe('OPEN BOUNDS — the normal form', () => {
   });
 
   it('positive/negative constructors build open ranges', () => {
-    expect(typeToString(positiveRangeType('finite_real'))).toBe(
-      'finite_real<0<..>'
+    expect(typeToString(positiveRangeType('real'))).toBe(
+      'real<0<..>'
     );
     expect(typeToString(negativeRangeType('real'))).toBe('real<..<0>');
     expect(typeToString(positiveRangeType('integer'))).toBe('integer<1..>');
@@ -221,10 +221,10 @@ describe('OPEN BOUNDS — the assume refinement is the single channel', () => {
     // says it.
     const e = new ComputeEngine();
     e.assume(e.box(['Less', 0, 'v', 1]));
-    expect(e.box(['Artanh', 'v']).type.toString()).toBe('finite_real');
+    expect(e.box(['Artanh', 'v']).type.toString()).toBe('real');
     // A closed bound at the pole is NOT enough.
     e.declare('c', 'real<0..1>');
-    expect(e.box(['Artanh', 'c']).type.toString()).not.toBe('finite_real');
+    expect(e.box(['Artanh', 'c']).type.toString()).not.toBe('real');
   });
 
   it('a non-machine bound rounds OUTWARD and closes (the direction-blind fix)', () => {
@@ -258,7 +258,7 @@ describe('OPEN BOUNDS — kernel attainability', () => {
     e.assume(e.box(['Greater', 'y', 3]));
     expect(e.box(['Add', 'x', 'y']).type.toString()).toBe('real<5<..>');
     expect(e.box(['Multiply', 'x', 'y']).type.toString()).toBe(
-      'finite_real<6<..>'
+      'real<6<..>'
     );
     const r = addIntervals({ lo: 2, hi: 5, loOpen: true }, { lo: 3, hi: 7 });
     expect(r).toEqual({ lo: 5, hi: 12, loOpen: true });
@@ -280,12 +280,12 @@ describe('OPEN BOUNDS — kernel attainability', () => {
     e.declare('b', 'real<0..5>');
     e.declare('c', 'real<2<..<3>');
     expect(e.box(['Multiply', 'b', 'c']).type.toString()).toBe(
-      'finite_real<0..<15>'
+      'real<0..<15>'
     );
     // An OPEN zero never attains 0.
     e.declare('d', 'real<0<..5>');
     expect(e.box(['Multiply', 'd', 'c']).type.toString()).toBe(
-      'finite_real<0<..<15>'
+      'real<0<..<15>'
     );
   });
 
@@ -317,10 +317,10 @@ describe('OPEN BOUNDS — kernel attainability', () => {
   it('abs and even power: the interior zero is always closed', () => {
     const e = new ComputeEngine();
     e.declare('a', 'real<-3<..<2>');
-    expect(e.box(['Abs', 'a']).type.toString()).toBe('finite_real<0..<3>');
-    expect(e.box(['Power', 'a', 2]).type.toString()).toBe('finite_real<0..<9>');
+    expect(e.box(['Abs', 'a']).type.toString()).toBe('real<0..<3>');
+    expect(e.box(['Power', 'a', 2]).type.toString()).toBe('real<0..<9>');
     expect(e.box(['Power', 'a', 3]).type.toString()).toBe(
-      'finite_real<-27<..<8>'
+      'real<-27<..<8>'
     );
     expect(absInterval({ lo: -3, hi: 2, loOpen: true, hiOpen: true })).toEqual({
       lo: 0,

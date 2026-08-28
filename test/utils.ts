@@ -442,7 +442,7 @@ expect.addSnapshotSerializer({
  * - `atMost`: the type must be a subtype of this — "at least this precise".
  *   A sounder, more refined derivation still passes; a wider one fails.
  * - `above` (optional): the type must NOT be a subtype of this — a claim the
- *   engine could only make by over-narrowing (`finite_integer` for a
+ *   engine could only make by over-narrowing (`integer` for a
  *   quotient that can be `3/2`; a bare `number` for a result that may be a
  *   collection, since `number <: broadcastable<number>`). A derivation that
  *   slips down to it fails.

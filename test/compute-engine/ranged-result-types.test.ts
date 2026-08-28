@@ -29,35 +29,35 @@ describe('RANGED RESULTS — the enumerated heads', () => {
   });
 
   it('even powers: x² (and x⁻² on the rational tier) are non-negative', () => {
-    expect(ce.parse('x^2').type.toString()).toBe('finite_real<0..>');
-    expect(ce.parse('x^4').type.toString()).toBe('finite_real<0..>');
+    expect(ce.parse('x^2').type.toString()).toBe('real<0..>');
+    expect(ce.parse('x^4').type.toString()).toBe('real<0..>');
     expect(ce.box(['Power', 'k', 2]).type.toString()).toBe(
-      'finite_integer<0..>'
+      'integer<0..>'
     );
     expect(ce.box(['Power', 'k', -2]).type.toString()).toBe(
-      'finite_rational<0..>'
+      'rational<0..>'
     );
     // An ODD power claims no sign.
-    expect(ce.parse('x^3').type.toString()).toBe('finite_real');
+    expect(ce.parse('x^3').type.toString()).toBe('real');
   });
 
   it('Exp (a positive base): e^x is positive, in the type', () => {
-    expect(ce.parse('e^x').type.toString()).toBe('finite_real<0<..>');
+    expect(ce.parse('e^x').type.toString()).toBe('real<0<..>');
     expect(ce.box(['Exp', 'x']).type.toString()).toBe(
-      'finite_real<0<..>'
+      'real<0<..>'
     );
     // Any provably positive base carries the same claim.
-    expect(ce.parse('2^x').type.toString()).toBe('finite_real<0<..>');
+    expect(ce.parse('2^x').type.toString()).toBe('real<0<..>');
   });
 });
 
 describe('RANGED RESULTS — type-channel consumers', () => {
   it('√(x²) and √|x| are real: the branch choice reads the range', () => {
-    // Before item 4 both typed `finite_complex`: `x²`'s sgn handler cannot
+    // Before item 4 both typed `complex`: `x²`'s sgn handler cannot
     // answer for a valueless `x`, and nothing else carried the sign.
-    expect(ce.parse('\\sqrt{x^2}').type.toString()).toBe('finite_real');
-    expect(ce.parse('\\sqrt{|x|}').type.toString()).toBe('finite_real');
-    expect(ce.parse('\\sqrt{e^x}').type.toString()).toBe('finite_real');
+    expect(ce.parse('\\sqrt{x^2}').type.toString()).toBe('real');
+    expect(ce.parse('\\sqrt{|x|}').type.toString()).toBe('real');
+    expect(ce.parse('\\sqrt{e^x}').type.toString()).toBe('real');
   });
 
   it('ln(2^x) is real: the log domain reads the positivity', () => {
@@ -65,7 +65,7 @@ describe('RANGED RESULTS — type-channel consumers', () => {
     // this is a TYPE-channel-only proof: the `& !0` range is the only
     // source of `2^x > 0`.
     expect(ce.box(['Ln', ['Power', 2, 'x']]).type.toString()).toBe(
-      'finite_real'
+      'real'
     );
   });
 

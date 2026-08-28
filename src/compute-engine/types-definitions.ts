@@ -517,7 +517,7 @@ export type OperandStructure =
  */
 export type OperandDescriptor = {
   /** The operand's handler-visible type. For a number literal this is its
-   * value-carrying type (`21`, `finite_real<0.5..0.5>`); for an absent
+   * value-carrying type (`21`, `real<0.5..0.5>`); for an absent
    * operand at a missing-stripped parameter position, the operand's
    * `missing`-stripped type. */
   readonly type: Type;
@@ -685,7 +685,7 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * ```js
      * ce.declare('q', { signature: '(unknown) -> unknown', inferredSignature: true });
      * ce.assign('q', ce.parse('t \\mapsto 2t+1'));
-     * // signature is now `(unknown) -> finite_number`, so `q(x) < y` types
+     * // signature is now `(unknown) -> number`, so `q(x) < y` types
      * // `boolean` and compiles, while `q(L) < y` over a list `L` still types
      * // `list<boolean>` and fails closed.
      * ```

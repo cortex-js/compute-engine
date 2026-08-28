@@ -26,7 +26,7 @@ describe('VALUE RESOLUTION FROM EQUALITY ASSUMPTIONS', () => {
   });
 
   test(`one.domain should be integer`, () => {
-    // The type might be 'finite_integer' (subtype of integer)
+    // The type might be 'integer' (subtype of integer)
     expect(ce.expr('one').type.matches('integer')).toBe(true);
   });
 
@@ -594,5 +594,30 @@ describe('ASSUME VALUE-BLINDNESS (SHIELD + RECORD)', () => {
     expect(ce.assume(ce.parse('x > 0'))).toBe('ok');
     // Re-asserting is tautological relative to the recorded assumption.
     expect(ce.assume(ce.parse('x > 0'))).toBe('tautology');
+  });
+});
+
+describe('A MODULUS BOUND IMPLIES FINITE, NOT REAL', () => {
+  // A finite upper bound on `|x|` proves that `x` is finite, but it says
+  // nothing about the imaginary part of `x`, so the symbol is declared
+  // `complex` — the widest finite numeric type — and not a real type. The
+  // consequence is that real-only rewrites correctly decline for such a
+  // symbol.
+  test('assume(|q| < 1) declares q complex and finite', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.parse('|q| < 1'))).toBe('ok');
+    expect(ce.symbol('q').type.toString()).toBe('complex');
+    expect(ce.symbol('q').isFinite).toBe(true);
+  });
+
+  test('sqrt(q^2) does not reduce to |q| under a modulus bound', () => {
+    // The rewrite `sqrt(q^2) -> |q|` is false for a non-real q: at `q = i`,
+    // `sqrt(i^2)` is `i` while `|i|` is `1`.
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('|q| < 1'));
+    expect(ce.parse('\\sqrt{q^2}').simplify().json).toEqual([
+      'Sqrt',
+      ['Power', 'q', 2],
+    ]);
   });
 });

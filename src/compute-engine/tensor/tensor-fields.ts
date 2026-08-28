@@ -547,13 +547,12 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
 
   if (isNumber(expr)) {
     // A literal's public type carries its value or an enclosing range since
-    // ruling O9 (`5`, `finite_rational<0.5..0.5>`, `finite_real<1.4..1.5>`)
-    // — an
-    // OBJECT node, which a string switch would send to the `expression`
-    // dtype, silently demoting every numeric tensor to the exact field
-    // (`.N()` then kept rationals, `MatrixRank` stayed inert). Project the
-    // decoration back to its bare tier first; a type that is not a
-    // decorated numeric tier passes through unchanged.
+    // ruling O9 (`5`, `rational<0.5..0.5>`, `real<1.4..1.5>`) — an OBJECT
+    // node, which a string switch would send to the `expression` dtype,
+    // silently demoting every numeric tensor to the exact field (`.N()` then
+    // kept rationals, `MatrixRank` stayed inert). Project the decoration back
+    // to its bare tier first; a type that is not a decorated numeric tier
+    // passes through unchanged.
     const tier = stripNumericRanges(expr.type.type);
 
     // The unsigned complex infinity `~oo` is the one numeric literal whose
@@ -575,18 +574,25 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
     switch (typeof tier === 'string' ? tier : 'expression') {
       case 'real':
       case 'rational':
-      case 'finite_real':
-      case 'finite_rational':
         // Preserve exactness: an exact rational (½) or radical (√2) stored as
         // float64 would lose precision, so it uses the `expression` dtype. An
         // inexact (machine/decimal) value uses float64.
         return expr.isExact ? 'expression' : 'float64';
 
-      case 'integer':
-        // A bare `integer` cell carries no value, so it cannot be checked
-        // against the safe-integer range the `finite_integer` arm below
-        // enforces; float64 is the storage class that holds any of them.
-        return 'float64';
+      case 'integer': {
+        // The narrowest integer storage class that holds this value. A cell
+        // read inside a broadcast window carries the bare `integer` tier with
+        // no value behind it, so `expr.re` is not a finite number there:
+        // float64 is the storage class that holds any integer, and it is the
+        // fallback for that valueless case. An integer outside the safely
+        // representable range (|n| > 2^53) would be truncated in a
+        // float64-backed buffer, so it is preserved exactly via the
+        // `expression` dtype (mirrors the exact rational/real case above).
+        const val = expr.re;
+        if (!Number.isFinite(val)) return 'float64';
+        if (!Number.isSafeInteger(val)) return 'expression';
+        return val >= 0 && val <= 255 ? 'uint8' : 'int32';
+      }
 
       // The non-finite tiers, all of them a signed `±oo` or a NaN by the time
       // they arrive here — `~oo` was returned above. Two spellings reach this
@@ -604,19 +610,9 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
         return 'float64';
 
       case 'complex':
-      case 'finite_complex':
       case 'imaginary':
         return 'complex128';
 
-      case 'finite_integer': {
-        const val = expr.re;
-        // An integer outside the safely-representable range (|n| > 2^53) would
-        // be truncated in a float64-backed buffer, so preserve it exactly via
-        // the `expression` dtype (mirrors the exact rational/real case above).
-        if (!Number.isSafeInteger(val)) return 'expression';
-        if (val >= 0 && val <= 255) return 'uint8';
-        return 'int32';
-      }
       default:
         return 'expression';
     }

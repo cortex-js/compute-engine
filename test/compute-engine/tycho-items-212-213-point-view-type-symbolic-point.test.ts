@@ -40,7 +40,7 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
     // `(k/n)·(1, 0)` has rational components: the literal's integer
     // components are scaled by a `number`, so the tuple type must say so.
     expect(a.type.toString()).toBe(
-      'indexed_collection<tuple<finite_number, finite_number>>'
+      'indexed_collection<tuple<number, number>>'
     );
   });
 
@@ -54,7 +54,7 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
     const v = ce.box(expr).evaluate();
     expect(v.operator).toBe('Map');
     expect(v.type.toString()).toBe(
-      'indexed_collection<tuple<finite_number, finite_number>>'
+      'indexed_collection<tuple<number, number>>'
     );
   });
 
@@ -79,7 +79,7 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
     const v = ce.box(['PointY', ['Subtract', A, B]]).evaluate();
     expect(v.operator).toBe('Map');
     expect(v.isCollection).toBe(true);
-    expect(v.type.toString()).toBe('indexed_collection<finite_number>');
+    expect(v.type.toString()).toBe('indexed_collection<number>');
   });
 
   test('a bare-parameter user zip derives its element type the same way', () => {
@@ -127,14 +127,14 @@ describe('Tycho item 212: zip of two unknown-length point views keeps element tu
   test('a scalar scaled tuple widens its components by the declared scalar tier', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'number');
-    ce.declare('k', 'finite_integer');
+    ce.declare('k', 'integer');
     expect(
       ce.box(['Multiply', 'x', ['Tuple', 1, 0]]).type.toString()
     ).toBe('tuple<number, number>');
     // An integer scalar leaves integer components alone.
     expect(
       ce.box(['Multiply', 'k', ['Tuple', 1, 0]]).type.toString()
-    ).toBe('tuple<finite_integer, finite_integer>');
+    ).toBe('tuple<integer, integer>');
   });
 });
 
@@ -165,7 +165,7 @@ describe('the `.N()` route keeps a point view a view of points (found under item
       const v = ce.box(expr).N();
       expect(v.operator).toBe('Map');
       expect(v.type.toString()).toBe(
-        'indexed_collection<tuple<finite_number, finite_number>>'
+        'indexed_collection<tuple<number, number>>'
       );
     }
   });
@@ -254,7 +254,7 @@ describe('Tycho item 213: coordinate accessors over a list of SYMBOLIC points st
     const v = ce
       .box(['Map', ['Function', ['Multiply', '_1', '_2'], '_1', '_2'], ['Range', 1, 'n'], 'u'])
       .evaluate();
-    // Not `finite_number`: the unknown-element source may be supplying tuples.
+    // Not `number`: the unknown-element source may be supplying tuples.
     expect(v.type.toString()).toBe('indexed_collection<number>');
   });
 

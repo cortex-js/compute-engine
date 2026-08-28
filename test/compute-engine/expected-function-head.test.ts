@@ -102,7 +102,7 @@ describe('expected-function for non-callable declared heads', () => {
   test('two heads with the same declared type keep separate diagnostics', () => {
     // The dedup key is the SITE-LESS error description, so it must carry the
     // head name from the payload: `Pi` and `ExponentialE` are both
-    // `finite_real`, and a type-only description would collapse the two
+    // `real`, and a type-only description would collapse the two
     // mistakes into one diagnostic.
     const r = executeEpsil(new ComputeEngine(), 'Pi(2)\nExponentialE(3)');
     const statics = (r.diagnostics ?? []).filter(

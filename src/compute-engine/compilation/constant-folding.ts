@@ -85,11 +85,11 @@ export function tryGetConstant(expr: Expression): number | undefined {
  * that is a rational `p/q` in lowest terms with an **odd** denominator has a
  * real principal root, so `(−8)^(2/3) = 4` — the same convention that makes
  * `Root(−8, 3) = −2`. Only an **even** denominator has no real value, and such
- * a node is typed `finite_complex` and lowers to the complex helper instead.
+ * a node is typed `complex` and lowers to the complex helper instead.
  *
  * Without this correction `Power(−8, 2/3)` compiled to `NaN` while the
  * interpreter returned `4` — a compiled/interpreted disagreement independent of
- * the type-driven complex lowering (the node stays `finite_number`).
+ * the type-driven complex lowering (the node stays `number`).
  *
  * The real `q`-th root of a negative is negative, so the result is
  * `(−1)^p · |base|^(p/q)`.
@@ -149,7 +149,7 @@ export function negativeBaseRealPow(
 
 /**
  * The PRINCIPAL complex power of two real constants — the value a
- * `Power`/`Root` node typed `finite_complex` folds to, shared by every target
+ * `Power`/`Root` node typed `complex` folds to, shared by every target
  * so they all fold the same constant.
  *
  * A HALF-INTEGER exponent over a negative base has an exactly pure-imaginary or

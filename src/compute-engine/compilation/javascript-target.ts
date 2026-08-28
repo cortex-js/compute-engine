@@ -653,7 +653,7 @@ function compileJSEquality(
   // operands compare tolerantly, an array-vs-scalar pair is element-wise, an
   // array-vs-array pair is whole-collection equality — see `eqTensor`. The
   // gate uses the declared type (not `.isCollection`, which is false for a
-  // `list<finite_number>` such as `Power(L, 2)`), plus
+  // `list<number>` such as `Power(L, 2)`), plus
   // `isPossiblyCollectionTypedJS` (a `broadcastable<T>` node or a top-typed
   // application such as `h(x)` — `broadcastable<T>` is NOT a subtype of
   // `collection`, so it needs its own test). A bare unknown SYMBOL is
@@ -1014,7 +1014,7 @@ function compileScalarBooleanBody(
 /**
  * True when `e` compiles to a JavaScript array that supports index access and
  * `.length` — an indexed collection (list / vector / range) or a `list`-typed
- * expression (e.g. `Power(L, 2)`, which types as `list<finite_number>` but is
+ * expression (e.g. `Power(L, 2)`, which types as `list<number>` but is
  * not reported by `.isCollection`). Dictionaries and strings are excluded: they
  * are collections but do not lower to a JS array with count/positional access.
  *
@@ -1676,7 +1676,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.cacos(${compile(args[0])})`;
     // Real operand, complex result (`Arccos(2)`, or `Arccos(x)` for a real
-    // symbol of unknown magnitude): the node is typed `finite_complex`, so the
+    // symbol of unknown magnitude): the node is typed `complex`, so the
     // parent emits `{re, im}` arithmetic and `Math.acos` — a `NaN` number —
     // must not be the lowering. See `resultIsComplexValued`.
     if (resultIsComplexValued('Arccos', args))
@@ -1849,7 +1849,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.cln(${compile(args[0])})`;
     }
     // Real-emitted operand with a complex result — a PROVABLY negative operand
-    // (`Ln(-2)`, or `a := -2` → `Ln(a)` is `finite_complex`), or an
+    // (`Ln(-2)`, or `a := -2` → `Ln(a)` is `complex`), or an
     // unknown-sign one under the caller's `complexPromotion` opt-in. The
     // parent emits `{re, im}` arithmetic, so `Math.log` — a `NaN` number —
     // must not be the lowering. Without the opt-in an unknown-sign operand
@@ -3433,7 +3433,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Log: (args, compile, target) => {
     // Complex either because an operand is, or because the RESULT is complex —
     // from a PROVABLY negative argument (`Log(-2)`, or `a := -2` making
-    // `Log(a)` `finite_complex`), or from an unknown-sign argument under the
+    // `Log(a)` `complex`), or from an unknown-sign argument under the
     // caller's `complexPromotion` opt-in. Either way the enclosing expression
     // reads `{re, im}`, so `Math.log10` — a `NaN` number — must not be the
     // lowering. Without the opt-in an unknown-sign operand keeps the real
@@ -3629,7 +3629,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // narrower than CE's branch convention. WHICH value is folded is decided
       // by the node's TYPE (see `NO_REAL_VALUE_FOLD`): an even
       // reduced-rational denominator is the complex branch and the node is
-      // typed `finite_complex`, so it folds to the principal complex value; an
+      // typed `complex`, so it folds to the principal complex value; an
       // ODD denominator has a real root (`(−8)^(2/3) = 4`) that `Math.pow`
       // misses; anything unprovable keeps the `NaN` fold.
       if (Number.isNaN(r)) {
@@ -3765,8 +3765,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         // Negative base. WHICH value is folded is decided by the node's TYPE
         // — see `NO_REAL_VALUE_FOLD`. An ODD integer degree has a real root
         // (the interpreter's convention, e.g. Root(-8, 3) = -2) and stays
-        // `finite_number`. An EVEN degree is the complex branch: as of the
-        // 2026-07-30 ruling the node is typed `finite_complex`, so it folds to
+        // `number`. An EVEN degree is the complex branch: as of the
+        // 2026-07-30 ruling the node is typed `complex`, so it folds to
         // the principal complex value the interpreter returns
         // (`Root(-8, 4)` → `1.1892… + 1.1892…i`) rather than to `NaN` — the
         // enclosing expression reads `{re, im}` off it. (A canonical even root
@@ -3963,7 +3963,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return String(r);
     }
     // The operand is real-emitted but the result is complex — because the
-    // operand is PROVABLY negative (`a := -2` → `Sqrt(a)` is `finite_complex`),
+    // operand is PROVABLY negative (`a := -2` → `Sqrt(a)` is `complex`),
     // or because the caller opted in to promoting an unknown-sign operand
     // (`complexPromotion`). The enclosing expression reads `{re, im}` off this
     // node, so `Math.sqrt` — which yields a `NaN` *number* there — would
@@ -4481,12 +4481,12 @@ function toRI(c: Complex): { re: number; im: number } {
  *   `complexSqrtLiteral` below.
  * - A `Power`/`Root` on the complex branch of a negative base — the exponent's
  *   reduced-rational denominator is even (`(−2)^0.3`), or the root degree is
- *   even (`Root(−8, 4)`) — is typed `finite_complex`, so it folds to the
+ *   even (`Root(−8, 4)`) — is typed `complex`, so it folds to the
  *   principal complex value (`complexPowLiteral`). Returning a numeric `NaN`
  *   would violate the parent expression's `{re, im}` representation.
  * - A `Power`/`Root` on the real branch of a negative base — an odd
  *   reduced-rational denominator or root degree, where a real principal root
- *   exists (`(−8)^(2/3) = 4`, `Root(−8, 3) = −2`) — stays `finite_number` and
+ *   exists (`(−8)^(2/3) = 4`, `Root(−8, 3) = −2`) — stays `number` and
  *   folds to that real value, which `Math.pow` alone misses. See
  *   `negativeBaseRealPow`.
  * - Only when the branch is unprovable (a float exponent with no faithful
@@ -4584,7 +4584,7 @@ function promotesToComplexLane(
   args: ReadonlyArray<Expression>
 ): boolean {
   // The caller's opt-in, decided by the same predicate `isComplexValued` uses
-  // — never by the node's type, which is the wide `finite_number` for exactly
+  // — never by the node's type, which is the wide `number` for exactly
   // the unknown-sign operands the option targets.
   if (BaseCompiler.promotesRadicalToComplex(head, args)) return true;
   // The default: only a PROVABLY negative operand promotes, and only when the

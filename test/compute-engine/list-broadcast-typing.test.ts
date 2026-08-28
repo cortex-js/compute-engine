@@ -44,7 +44,7 @@ function expectHonestBroadcast(expr: BoxedExpression): void {
   if (evaluated.type.matches(expr.type.type)) return;
   // A literal result list cannot witness a RANGED declared cell type at
   // the type level — a literal's public type is its bare tier
-  // (`|[-1, 2]|` evaluates to `[1, 2]`, cells `finite_integer`, while the
+  // (`|[-1, 2]|` evaluates to `[1, 2]`, cells `integer`, while the
   // declared cells are `real<0..>`). Judge each element by its
   // value-carrying literal type instead.
   const cell = collectionElementType(expr.type.type);
@@ -60,8 +60,8 @@ describe('LIST-BROADCAST TYPING — tensor Add/Multiply (exact vector<n>)', () =
   // for tensor Add/Multiply, so the honest list type comes from the operator's
   // own type handler and equals the evaluated type exactly.
   test.each([
-    ['[1,2]·2 (parsed)', '[1,2]\\cdot 2', 'vector<finite_integer^2>'],
-    ['2·[1,2] (parsed)', '2\\cdot [1,2]', 'vector<finite_integer^2>'],
+    ['[1,2]·2 (parsed)', '[1,2]\\cdot 2', 'vector<integer^2>'],
+    ['2·[1,2] (parsed)', '2\\cdot [1,2]', 'vector<integer^2>'],
   ])('%s → %s', (_label, latex, expected) => {
     const expr = ce.parse(latex);
     expect(expr.type.toString()).toBe(expected);
@@ -71,12 +71,12 @@ describe('LIST-BROADCAST TYPING — tensor Add/Multiply (exact vector<n>)', () =
   test.each([
     // Scalar symbol folds into the cells: number cells, sound upper bound.
     ['Multiply(List, x)', ['Multiply', ['List', 0, 0, 1, 1], 'x'], 'vector<4>'],
-    ['Multiply(2, List)', ['Multiply', 2, ['List', 1, 2]], 'vector<finite_integer^2>'],
+    ['Multiply(2, List)', ['Multiply', 2, ['List', 1, 2]], 'vector<integer^2>'],
     ['Add(List, x)', ['Add', ['List', 1, 2], 'x'], 'vector<2>'],
     [
       'Add(List, List)',
       ['Add', ['List', 1, 2], ['List', 3, 4]],
-      'vector<finite_integer^2>',
+      'vector<integer^2>',
     ],
   ])('%s → %s', (_label, mathjson, expected) => {
     const expr = ce.box(mathjson as any);
@@ -84,7 +84,7 @@ describe('LIST-BROADCAST TYPING — tensor Add/Multiply (exact vector<n>)', () =
     // Declared type does not disagree with the evaluated type: it is a subtype
     // of it. (Post Phase C, a symbol operand's declared element type can be
     // narrower than the evaluated one — e.g. Add([1,2], x) declares
-    // vector<finite_integer^2> and evaluates to vector<2> — so this is a
+    // vector<integer^2> and evaluates to vector<2> — so this is a
     // subtype relation, not string equality.)
     expect(expr.type.matches(expr.evaluate().type.type)).toBe(true);
   });
@@ -107,7 +107,7 @@ describe('LIST-BROADCAST TYPING — tensor Add/Multiply (exact vector<n>)', () =
   // symbol widens to `number` (displayed `vector<3>`).
   test.each([
     ['2·[1,2,3] + a', ['Add', ['Multiply', 2, ['List', 1, 2, 3]], 'a'], 'vector<3>'],
-    ['1/10·[1,2,3] + 1', ['Add', ['Divide', ['List', 1, 2, 3], 10], 1], 'vector<finite_rational^3>'],
+    ['1/10·[1,2,3] + 1', ['Add', ['Divide', ['List', 1, 2, 3], 10], 1], 'vector<rational^3>'],
     ['[1,2,3]/10 + a', ['Add', ['Divide', ['List', 1, 2, 3], 10], 'a'], 'vector<3>'],
   ])('%s → shaped vector, no scalar arm', (_label, mathjson, expected) => {
     const expr = ce.box(mathjson as any);
@@ -137,8 +137,8 @@ describe('LIST-BROADCAST TYPING — wrapper-lifted families (sound list<R>)', ()
     // reach. The bound is therefore the non-negative range plus that pair.
     ['Abs', ['Abs', ['List', -1, 2]], 'vector<(real<0..>) | non_finite_number^2>'],
     ['Negate', ['Negate', ['List', 'a', 'b']], 'vector<2>'],
-    ['Real (complex)', ['Real', ['List', 2, 3]], 'vector<finite_real^2>'],
-    ['Conjugate (complex)', ['Conjugate', ['List', 2, 3]], 'vector<finite_integer^2>'],
+    ['Real (complex)', ['Real', ['List', 2, 3]], 'vector<real^2>'],
+    ['Conjugate (complex)', ['Conjugate', ['List', 2, 3]], 'vector<integer^2>'],
     ['Round', ['Round', ['List', 1.2, 2.7]], 'vector<2>'],
   ])('%s → at least %s', (_label, mathjson, expected) => {
     const expr = ce.box(mathjson as any);
@@ -157,7 +157,7 @@ describe('LIST-BROADCAST TYPING — wrapper-lifted families (sound list<R>)', ()
     const evaluated = expr.evaluate();
     // At least `vector<2>` (the shape); the cell tier may refine.
     expectTypeBetween(expr, { atMost: 'vector<2>' });
-    expect(evaluated.type.toString()).toBe('vector<finite_integer^2>');
+    expect(evaluated.type.toString()).toBe('vector<integer^2>');
     expect(evaluated.type.matches(expr.type.type)).toBe(true);
   });
 
@@ -197,8 +197,8 @@ describe('LIST-BROADCAST TYPING — exactness / N stability', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     const mul = ce.box(['Multiply', ['List', 1, 2], 2]);
-    expect(mul.type.toString()).toBe('vector<finite_integer^2>');
-    expect(mul.N().type.toString()).toBe('vector<finite_integer^2>');
+    expect(mul.type.toString()).toBe('vector<integer^2>');
+    expect(mul.N().type.toString()).toBe('vector<integer^2>');
   });
 
   test('the type path does not evaluate (value is unchanged)', () => {
@@ -212,9 +212,9 @@ describe('LIST-BROADCAST TYPING — exactness / N stability', () => {
 
 describe('LIST-BROADCAST TYPING — non-interference with scalars', () => {
   test.each([
-    ['Sin(x)', ['Sin', 'x'], 'finite_number'],
+    ['Sin(x)', ['Sin', 'x'], 'number'],
     ['Add(2, x)', ['Add', 2, 'x'], 'number'],
-    ['Multiply(2, x)', ['Multiply', 2, 'x'], 'finite_number'],
+    ['Multiply(2, x)', ['Multiply', 2, 'x'], 'number'],
   ])('%s stays scalar %s', (_label, mathjson, expected) => {
     const expr = ce.box(mathjson as any);
     expect(expr.type.toString()).toBe(expected);
@@ -259,7 +259,7 @@ describe('a union with a collection alternative is possibly-a-collection', () =>
   // `broadcastable<…>` result — the same answer the bare
   // `broadcastable<number>` declaration produces. Before
   // `isPossiblyCollectionTyped` looked inside unions, `2b` claimed the
-  // scalar `finite_number` while its value could be a list.
+  // scalar `number` while its value could be a list.
   test('2b types broadcastable<number> for the union spelling', () => {
     const ce = new ComputeEngine();
     ce.declare('b', 'number | broadcastable<number>');
@@ -286,7 +286,7 @@ describe('a union with a collection alternative is possibly-a-collection', () =>
     const ce = new ComputeEngine();
     ce.declare('s', 'integer | rational');
     const st = ce.box(['Multiply', 2, 's']).type;
-    expect(st.toString()).toBe('finite_real');
+    expect(st.toString()).toBe('real');
     expect(st.matches('number')).toBe(true);
     // A tuple branch is atomic under broadcast and does not count as the
     // collection alternative.

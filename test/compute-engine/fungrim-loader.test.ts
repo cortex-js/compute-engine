@@ -1538,9 +1538,9 @@ describe('Phase 3: guard-closure semantics (synthetic artifact)', () => {
       'real',
       'integer',
       'rational',
-      'finite_real',
-      'finite_integer',
-      'finite_rational',
+      'real',
+      'integer',
+      'rational',
     ]) {
       const ce = load();
       ce.declare('z', t as Parameters<ComputeEngine['declare']>[1]);
@@ -1810,9 +1810,9 @@ describe('type guards over a compound subject with a held non-finite value', () 
   //
   // Before `describe()` (`boxed-expression/operand-descriptor.ts`) read an
   // APPLICATION's finiteness from the value channel, `Ceil(Abs(w))` with
-  // `w := +∞` derived `finite_integer` and every guard here accepted it —
+  // `w := +∞` derived `integer` and every guard here accepted it —
   // `Ceil(Abs(w)).N()` is `+oo`. `Ceil(Abs(hnan))` with `hnan := NaN`
-  // derived `finite_integer` too, so the integer guard accepted NaN.
+  // derived `integer` too, so the integer guard accepted NaN.
   //
   // The rules are driven with `replace()` rather than `simplify()`: simplify
   // substitutes an assigned symbol's DECLARED type for its held value before

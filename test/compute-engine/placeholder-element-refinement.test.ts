@@ -19,15 +19,15 @@ describe('Phase 1: placeholder element refinement', () => {
     expect(ce.box('a').type.toString()).toBe('list');
     run('a = [1, 2, 3]');
     // Element only — rank and length stay open (the value's own type is
-    // `vector<finite_integer^3>`), and `typeof` SHOWS the refinement.
-    expect(ce.box('a').type.toString()).toBe('list<finite_integer>');
+    // `vector<integer^3>`), and `typeof` SHOWS the refinement.
+    expect(ce.box('a').type.toString()).toBe('list<integer>');
   });
 
   test('R1: re-assignment re-refines — the refinement never hardens', () => {
     const ce = new ComputeEngine();
     const run = (s: string) => executeEpsil(ce, s);
     run('let a: list\na = [1, 2, 3]');
-    expect(ce.box('a').type.toString()).toBe('list<finite_integer>');
+    expect(ce.box('a').type.toString()).toBe('list<integer>');
     run('a = ["x", "y"]');
     expect(ce.box('a').type.toString()).toBe('list<string>');
   });
@@ -48,7 +48,7 @@ describe('Phase 1: placeholder element refinement', () => {
   test('declare-with-initializer refines identically to the split spelling', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let a: list = [1, 2, 3]');
-    expect(ce.box('a').type.toString()).toBe('list<finite_integer>');
+    expect(ce.box('a').type.toString()).toBe('list<integer>');
   });
 
   test('only placeholder spellings refine: explicit contracts never move', () => {
@@ -91,10 +91,10 @@ describe('Phase 1: placeholder element refinement', () => {
     const ce = new ComputeEngine();
     ce.declare('s', 'set');
     ce.assign('s', ce.box(['Set', 1, 2]).evaluate());
-    expect(ce.box('s').type.toString()).toBe('set<finite_integer>');
+    expect(ce.box('s').type.toString()).toBe('set<integer>');
     ce.declare('m', 'dictionary');
     ce.assign('m', ce.box(['Dictionary', ['KeyValuePair', { str: 'a' }, 1]]).evaluate());
-    expect(ce.box('m').type.toString()).toBe('dictionary<finite_integer>');
+    expect(ce.box('m').type.toString()).toBe('dictionary<integer>');
     // A RECORD-typed value (heterogeneous fields) refines the dictionary
     // skeleton to the WIDENED field type.
     const ce2 = new ComputeEngine();
@@ -110,7 +110,7 @@ describe('Phase 1: placeholder element refinement', () => {
         .evaluate()
     );
     expect(ce2.box('r').type.toString()).toBe(
-      'dictionary<finite_integer | string>'
+      'dictionary<integer | string>'
     );
   });
 });

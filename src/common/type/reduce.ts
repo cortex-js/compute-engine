@@ -281,14 +281,11 @@ function reduceUnionType(type: AlgebraicType): Type {
  *
  * - For subtype-related pairs, the narrower type.
  * - For incomparable but overlapping *primitive* pairs, the meet in the
- *   primitive lattice (see `meetPrimitiveTypes`), e.g.
- *   `integer ∧ finite_real` = `finite_integer` (`finite_real` is the
- *   deprecated synonym of `real` and sits formally below it, so the overlap
- *   is named by the `finite_*` twin), `finite_number ∧ real` = `finite_real`.
- *   When the maximal common subtypes are incomparable, the meet is their
- *   union. The numeric tower is a chain (`real ⊂ complex`), so
- *   `real ∧ complex` = `real`; a union-meet arises only for genuinely
- *   incomparable pairs (e.g. `finite_number ∧ real` = `finite_real`).
+ *   primitive lattice (see `meetPrimitiveTypes`). When the maximal common
+ *   subtypes are incomparable, the meet is their union. The numeric tower is
+ *   a chain (`integer ⊂ rational ⊂ real ⊂ complex`), so `real ∧ complex` =
+ *   `real`; a union-meet arises only for genuinely incomparable pairs, such
+ *   as a collection type met with a scalar one.
  * - Unions (which can arise from previous meets) distribute:
  *   `(a | b) ∧ c` = `(a ∧ c) | (b ∧ c)`.
  * - Two applications of the same collection constructor meet ELEMENTWISE
@@ -785,8 +782,8 @@ function reduceIntersectionType(type: AlgebraicType): Type {
   if (reducedTypes.some((type) => type === 'error')) return 'error';
 
   // Fold the members pairwise through the meet. Overlapping numeric
-  // primitives intersect to their lattice meet (e.g. `integer & finite_real`
-  // = `finite_integer`) instead of collapsing; genuinely disjoint types (e.g.
+  // primitives intersect to their lattice meet (e.g. `integer & real` =
+  // `integer`) instead of collapsing; genuinely disjoint types (e.g.
   // `number & boolean`) annihilate to `never`, the EMPTY type.
   //
   // A pair `meet2` can neither merge nor prove disjoint stays as it was

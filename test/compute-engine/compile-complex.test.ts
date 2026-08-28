@@ -861,7 +861,7 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
 describe('COMPILE COMPLEX - coercion reads the value SHAPE, not the static type', () => {
   // `√(1 − 0.2²)`: machine floats are not folded at canonicalization, so the
   // radicand's sign is statically unknown and the node types the
-  // `finite_complex` hedge — while its runtime value is the plain real
+  // `complex` hedge — while its runtime value is the plain real
   // 0.9797…. The branch coercion must classify such an arm by what it
   // actually EMITS, on two fronts:
   //
@@ -871,7 +871,7 @@ describe('COMPILE COMPLEX - coercion reads the value SHAPE, not the static type'
   //    (`{ re: { re, im }, im: 0 }` — every slot read NaN);
   //  - under the strict discipline it emits a plain real (the folded
   //    literal, or `Math.sqrt(…)` under `constantFold: false`): the
-  //    `finite_complex` type says "leave it bare", and a complex-reading
+  //    `complex` type says "leave it bare", and a complex-reading
   //    consumer (`Abs` → `.re`/`.im`) would NaN on the bare number. The
   //    constant FOLD is what proves the arm real
   //    (`isProvablyRealValued` → `constantFoldValue`).
@@ -930,7 +930,7 @@ describe('COMPILE COMPLEX - coercion reads the value SHAPE, not the static type'
 
   it('an INCONCLUSIVE arm (free-variable radicand) takes the runtime cplx test', () => {
     // `√(1 − 0.04r)`: the radicand has a free variable, so no fold can prove
-    // the arm real, and the static type is the `finite_complex` hedge — yet
+    // the arm real, and the static type is the `complex` hedge — yet
     // under the strict discipline the emitted value is a plain `Math.sqrt`.
     // Left bare, the branch's slot-reading consumer silently mis-answered
     // (`_SYS.cabs` read `.re`/`.im` off a number and returned 0); the
@@ -1730,8 +1730,8 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
     expect(compile(engine.box(['Reduce', 'R', 'Add', ['Complex', 0, 1]]), opts).run!({ R: [1, 2] })).toEqual(cx(3, 1));
     // Typed from the source (was `unknown`, which declined the parent as
     // "possibly a collection"): the parent now compiles and agrees.
-    expect(engine.box(['Reduce', 'L', 'Add', 0]).type.toString()).toBe('finite_complex');
-    expect(engine.box(['Reduce', ['List', 1, 2], 'Add', 0]).type.toString()).toBe('finite_integer');
+    expect(engine.box(['Reduce', 'L', 'Add', 0]).type.toString()).toBe('complex');
+    expect(engine.box(['Reduce', ['List', 1, 2], 'Add', 0]).type.toString()).toBe('integer');
     expect(compile(engine.box(['Add', ['Reduce', 'L', 'Add', 0], 1]), opts).run!({})).toEqual(cx(2, 3));
     // No ordering on complex values: Min/Max fold over complex fails closed.
     expect(compile(engine.box(['Reduce', 'L', 'Max', 0]), { ...opts, fallback: true }).success).toBe(false);
@@ -2026,7 +2026,7 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
 });
 
 describe('COMPILE COMPLEX - a tuple element that folds to a real number broadcasts (Tycho item 229)', () => {
-  // `√(5−√5)` types the `finite_complex` hedge — the engine does not prove
+  // `√(5−√5)` types the `complex` hedge — the engine does not prove
   // `5 − √5 ≥ 0` at type time — while its value is the plain real 1.6625….
   // The broadcast closure's per-element shape analysis read that element
   // complex-by-shape, the verdicts of `(√(5−√5), 0)` disagreed, and the

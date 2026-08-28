@@ -63,11 +63,11 @@ export class BigNumericValue extends NumericValue {
       if (Number.isNaN(this.im)) return 'nan';
       if (!this.decimal.isFinite()) return 'infinity';
       if (this.decimal.isZero()) return 'imaginary';
-      return 'finite_complex';
+      return 'complex';
     }
     if (!this.decimal.isFinite()) return 'non_finite_number';
-    if (this.decimal.isInteger()) return 'finite_integer';
-    return 'finite_real';
+    if (this.decimal.isInteger()) return 'integer';
+    return 'real';
   }
 
   get isExact(): boolean {

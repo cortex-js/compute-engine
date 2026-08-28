@@ -12,7 +12,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 describe('SGN OF POWERS OF NON-REAL BASES', () => {
   const ce = new ComputeEngine();
   ce.declare('z', 'imaginary');
-  ce.declare('w', 'finite_complex');
+  ce.declare('w', 'complex');
   ce.declare('c', 'complex');
   ce.declare('n', 'integer');
 
@@ -43,9 +43,9 @@ describe('SGN OF POWERS OF NON-REAL BASES', () => {
     expect(ce.box(['Power', 'w', 3]).sgn).toBe('not-zero');
   });
 
-  it('bare `complex` base behaves like `finite_complex`: only not-zero', () => {
+  it('bare `complex` base behaves like `complex`: only not-zero', () => {
     // Since the finite-by-default flip the bare name `complex` excludes
-    // ComplexInfinity, so this base answers exactly as the `finite_complex`
+    // ComplexInfinity, so this base answers exactly as the `complex`
     // one above: non-zero, with no sound sign claim. A base that admitted an
     // infinity would be indeterminate instead, because ∞^-2 = 0.
     expect(ce.box(['Power', 'c', 2]).sgn).toBe('not-zero');

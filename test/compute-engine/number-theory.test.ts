@@ -749,7 +749,7 @@ describe('GCD/LCM on non-integer reals (tolerant float Euclid)', () => {
 
   it('LCM of a non-integer real is typed number, not integer', () => {
     expect(ce.box(['LCM', 2.5, 1.5]).type.toString()).toEqual('number');
-    expect(ce.box(['LCM', 4, 6]).type.toString()).toEqual('finite_integer');
+    expect(ce.box(['LCM', 4, 6]).type.toString()).toEqual('integer');
   });
 
   it('reduces a finite collection operand (gcd/lcm of a list)', () => {

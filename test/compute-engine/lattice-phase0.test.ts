@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, compile } from '../../src/compute-engine';
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 import {
@@ -99,7 +99,6 @@ describe('LATTICE PHASE 0: where the new primitives sit', () => {
       'integer',
       'infinity',
       'non_finite_number',
-      'finite_number',
     ] as const)
       expect(isPrimitiveSubtype('nan', above)).toBe(false);
   });
@@ -407,13 +406,13 @@ describe('LATTICE PHASE 0: review-round fixes', () => {
     );
     // The finite rungs of the probe order still answer with the `finite_*`
     // spelling, so joins inside the finite subtree do not move.
-    expect(typeToString(widen('finite_integer', 'finite_real'))).toBe(
-      'finite_real'
+    expect(typeToString(widen('integer', 'real'))).toBe(
+      'real'
     );
     // A finite type joined with an infinity reaches only the top: the three
     // children of `number` are disjoint. (Before the flip this answered
     // `integer`, which admitted both.)
-    expect(typeToString(widen('non_finite_number', 'finite_integer'))).toBe(
+    expect(typeToString(widen('non_finite_number', 'integer'))).toBe(
       'number'
     );
   });
@@ -559,116 +558,100 @@ describe('STEP 1.3: isExtendedReal', () => {
   });
 });
 
-describe('REVIEW ROUND: finiteness bridge', () => {
-  // After the flip the bare numeric names denote exactly the finite values,
-  // and `matches('finite_number')` is the engine's canonical finiteness
-  // type-test. The bare names are therefore listed as children of
-  // `finite_number`, in ONE direction only. These pins hold that bridge in
-  // place and hold the reverse edges out.
+describe('REVIEW ROUND: finiteness gate', () => {
+  // The bare numeric names denote exactly the finite values, so `complex` —
+  // the widest of them — IS the engine's canonical finiteness type-test
+  // (`BoxedSymbol.isFinite`, `factsFromType`, the `Re`/`Im`/`Arg`/`Abs` type
+  // handlers all ask `matches('complex')`). Phase 1 spelled the same gate
+  // `finite_number` and bridged it to the bare names with one-directional
+  // edges; Phase 2 retired that spelling and the bridge with it, leaving the
+  // disjoint tree below to answer on its own.
 
-  it('places every bare finite name below `finite_number`', () => {
-    for (const name of ['complex', 'imaginary', 'real', 'rational', 'integer'])
-      expect(isPrimitiveSubtype(name as any, 'finite_number')).toBe(true);
+  it('places every bare finite name below `complex`', () => {
+    for (const name of ['imaginary', 'real', 'rational', 'integer'])
+      expect(isPrimitiveSubtype(name as any, 'complex')).toBe(true);
   });
 
-  it('keeps the non-finite names out of `finite_number`', () => {
+  it('keeps the non-finite names out of `complex`', () => {
     // `number` is the top of the numeric tree and admits `infinity` and `nan`,
     // so it is NOT finite; the three below are not finite either.
     for (const name of ['number', 'infinity', 'nan', 'non_finite_number'])
-      expect(isPrimitiveSubtype(name as any, 'finite_number')).toBe(false);
+      expect(isPrimitiveSubtype(name as any, 'complex')).toBe(false);
   });
 
-  it('leaves `finite_number` outside `complex`', () => {
-    // The one-directional edge is what keeps `isNonRealNumber('finite_number')`
-    // false. `isNonRealNumber` reads "below `complex`, not below `real`", and
-    // nearly every generic numeric expression types `finite_number`, so a
-    // `true` here would switch the compiler to complex lowering for all of
-    // them.
-    expect(isPrimitiveSubtype('finite_number', 'complex')).toBe(false);
-    expect(isPrimitiveSubtype('complex', 'finite_number')).toBe(true);
-    expect(isNonRealNumber('finite_number')).toBe(false);
+  it('answers `isNonRealNumber` false for the generic numeric type', () => {
+    // `isNonRealNumber` reads "below `complex`, not below `real`". `number`
+    // sits ABOVE `complex`, so it answers `false` — which is what keeps the
+    // compiler on its real lowering lane for the generic numeric expressions
+    // (`sin(6u)` with `u` undeclared) that carry it.
+    expect(isNonRealNumber('number')).toBe(false);
     expect(isNonRealNumber('complex')).toBe(true);
     expect(isNonRealNumber('real')).toBe(false);
   });
 
-  it('does NOT make the per-tier twins mutual subtypes', () => {
-    // `finite_real` and `real` denote the same values, but adding the bare
-    // name under its `finite_*` twin would make the two mutual subtypes and
-    // the primitive order would stop being antisymmetric. `meetPrimitiveTypes`
-    // returns whichever spelling its early comparability test reaches first,
-    // so the meet of a mutual pair would depend on operand order. The twins
-    // are identified by the Phase 2 rename instead.
-    expect(isPrimitiveSubtype('real', 'finite_real')).toBe(false);
-    expect(isPrimitiveSubtype('rational', 'finite_rational')).toBe(false);
-    expect(isPrimitiveSubtype('integer', 'finite_integer')).toBe(false);
-    expect(isPrimitiveSubtype('complex', 'finite_complex')).toBe(false);
-    // ... and the meet of a twin pair is the same whichever way round it is
-    // asked, because neither direction of the pair is an edge.
-    expect(meetPrimitiveTypes('real', 'finite_real')).toEqual(
-      meetPrimitiveTypes('finite_real', 'real')
-    );
-    expect(meetPrimitiveTypes('integer', 'finite_integer')).toEqual(
-      meetPrimitiveTypes('finite_integer', 'integer')
-    );
+  it('accepts the retired `finite_*` spellings as parse-time aliases', () => {
+    // They are input aliases for one release cycle: normalized before a node
+    // is built, so they never reach a `Type` and are never serialized back.
+    expect(typeToString(t('finite_number'))).toBe('complex');
+    expect(typeToString(t('finite_complex'))).toBe('complex');
+    expect(typeToString(t('finite_real'))).toBe('real');
+    expect(typeToString(t('finite_rational'))).toBe('rational');
+    expect(typeToString(t('finite_integer'))).toBe('integer');
+    // …including in a RANGED spelling, whose base normalizes too.
+    expect(typeToString(t('finite_real<0..1>'))).toBe('real<0..1>');
   });
 
-  it('names the meet of `finite_number` with a bare name with the BARE spelling', () => {
-    // Moved by the new edges: these three used to answer with the `finite_*`
-    // spelling (`[finite_real]`, `[finite_complex]`, `[finite_integer]`).
-    // `finite_number` is now above each bare name, so the meet is the bare
-    // name itself.
-    expect(meetPrimitiveTypes('finite_number', 'real')).toEqual(['real']);
-    expect(meetPrimitiveTypes('finite_number', 'complex')).toEqual(['complex']);
-    expect(meetPrimitiveTypes('finite_number', 'integer')).toEqual(['integer']);
-    expect(meetPrimitiveTypes('finite_number', 'imaginary')).toEqual([
-      'imaginary',
-    ]);
-    // Unchanged: `finite_number` is disjoint from the two non-finite children
-    // of `number`, and the per-tier meets keep their `finite_*` answers.
-    expect(meetPrimitiveTypes('finite_number', 'infinity')).toEqual([]);
-    expect(meetPrimitiveTypes('finite_number', 'nan')).toEqual([]);
-    expect(meetPrimitiveTypes('finite_real', 'integer')).toEqual([
-      'finite_integer',
-    ]);
-    expect(meetPrimitiveTypes('real', 'finite_complex')).toEqual([
-      'finite_real',
-    ]);
+  it('does not resolve an `Object.prototype` member as an alias', () => {
+    // The alias table is indexed by an identifier taken from the input, so it
+    // has a null prototype: a name inherited from `Object.prototype` must be
+    // an unknown type, not a lookup hit.
+    expect(() => t('constructor')).toThrow();
+    expect(() => t('toString')).toThrow();
+    expect(() => t('valueOf')).toThrow();
+    expect(() => t('hasOwnProperty')).toThrow();
   });
 
-  it('treats a half-bounded range over a finite base as finite', () => {
-    // A range is finite when its bounds are both finite AND, after the flip,
-    // whenever its base is one of the bare finite names. `integer<1..>` and
-    // `real<0..>` are the shapes `nonNegativeRangeType` and the assumption
-    // channel produce, and `Integers`/`RealNumbers` still declare `finite_*`
-    // element types, so the half-bounded case has to reach them.
-    expect(isSubtype(t('integer<1..>'), 'finite_integer')).toBe(true);
-    expect(isSubtype(t('real<0..>'), 'finite_real')).toBe(true);
-    expect(isSubtype(t('real<..0>'), 'finite_real')).toBe(true);
-    expect(isSubtype(t('integer<1..>'), 'finite_number')).toBe(true);
-    // Unchanged: a doubly-bounded range was already finite, and the range is
-    // still below its own bare base.
-    expect(isSubtype(t('real<0..10>'), 'finite_real')).toBe(true);
-    expect(isSubtype(t('integer<0..10>'), 'finite_integer')).toBe(true);
+  it('names every meet inside the numeric tower with the narrower operand', () => {
+    // The tower is a chain, so a meet against `complex` is the other operand.
+    expect(meetPrimitiveTypes('complex', 'real')).toEqual(['real']);
+    expect(meetPrimitiveTypes('complex', 'integer')).toEqual(['integer']);
+    expect(meetPrimitiveTypes('complex', 'imaginary')).toEqual(['imaginary']);
+    expect(meetPrimitiveTypes('real', 'integer')).toEqual(['integer']);
+    expect(meetPrimitiveTypes('real', 'complex')).toEqual(['real']);
+    // `complex` is disjoint from the two non-finite children of `number`.
+    expect(meetPrimitiveTypes('complex', 'infinity')).toEqual([]);
+    expect(meetPrimitiveTypes('complex', 'nan')).toEqual([]);
+  });
+
+  it('treats a range over a finite base as finite whatever its bounds', () => {
+    // A range relates to a supertype exactly as its BASE does — bounds only
+    // narrow — and every bare base is finite. `integer<1..>` and `real<0..>`
+    // are the shapes `nonNegativeRangeType` and the assumption channel
+    // produce, so the half-bounded case has to reach the finiteness gate.
     expect(isSubtype(t('integer<1..>'), 'integer')).toBe(true);
+    expect(isSubtype(t('real<0..>'), 'real')).toBe(true);
+    expect(isSubtype(t('real<..0>'), 'real')).toBe(true);
+    expect(isSubtype(t('integer<1..>'), 'complex')).toBe(true);
+    expect(isSubtype(t('real<0..10>'), 'real')).toBe(true);
+    expect(isSubtype(t('integer<0..10>'), 'integer')).toBe(true);
   });
 
-  it('keeps a half-bounded range over a NON-finite base non-finite', () => {
+  it('keeps a range over a NON-finite base non-finite', () => {
     // The type parser refuses bounds on `number`, `infinity` and `nan`, so
-    // only a hand-built `Type` object has these shapes. `number<0..>` still
-    // admits `+∞`, so it must stay outside `finite_number`; a doubly-bounded
-    // `number<0..10>` is finite through its bounds, as before.
+    // only a hand-built `Type` object has these shapes. A range answers as its
+    // BASE does, so `number<0..10>` stays outside `complex` even though its
+    // bounds are finite: Phase 2 dropped the bounds-driven narrowing that
+    // used to map such a range onto the retired `finite_number`, and no bare
+    // name is a sound replacement (the bounds do not prove the value real).
     const range = (type: string, lower?: number, upper?: number): Type =>
       ({ kind: 'numeric', type, lower, upper }) as Type;
-    expect(isSubtype(range('number', 0, undefined), 'finite_number')).toBe(
-      false
-    );
+    expect(isSubtype(range('number', 0, undefined), 'complex')).toBe(false);
     expect(isSubtype(range('number', 0, undefined), 'number')).toBe(true);
-    expect(isSubtype(range('number', 0, 10), 'finite_number')).toBe(true);
-    expect(isSubtype(range('infinity', 0, undefined), 'finite_number')).toBe(
-      false
-    );
+    expect(isSubtype(range('number', 0, 10), 'complex')).toBe(false);
+    expect(isSubtype(range('number', 0, 10), 'number')).toBe(true);
+    expect(isSubtype(range('infinity', 0, undefined), 'complex')).toBe(false);
     expect(isSubtype(range('infinity', 0, undefined), 'infinity')).toBe(true);
-    expect(isSubtype(range('nan', 0, undefined), 'finite_number')).toBe(false);
+    expect(isSubtype(range('nan', 0, undefined), 'complex')).toBe(false);
   });
 
   it('does not close the subtype relation over the `number` partition', () => {
@@ -680,23 +663,79 @@ describe('REVIEW ROUND: finiteness bridge', () => {
     expect(isSubtype(t('complex | infinity | nan'), 'number')).toBe(true);
   });
 
+  it('widens a number literal to a BARE tier', () => {
+    // A literal's public type is the literal itself (ruling O9); every
+    // STORAGE position widens it back to its tier, and the tier is now the
+    // bare name — the retired `finite_integer`/`finite_real` spellings were
+    // what `widenValueTypes` used to produce.
+    expect(ce.box(0).type.toString()).toBe('0');
+    expect(typeToString(widenValueTypes(ce.box(0).type.type))).toBe('integer');
+    expect(typeToString(widenValueTypes(ce.box(0.5).type.type))).toBe('real');
+  });
+
   it('reports a finite symbol and a finite tier for the consumers of the gate', () => {
     // A private engine: declaring symbols on the file-level `ce` would leak
     // into the other blocks.
     const engine = new ComputeEngine();
     engine.declare('xReal', 'real');
     engine.declare('zComplex', 'complex');
-    // `BoxedSymbol.isFinite` asks `matches('finite_number')`; before the
-    // bridge both answered `undefined`.
+    // `BoxedSymbol.isFinite` asks `matches('complex')`; before the lattice
+    // flip both answered `undefined`.
     expect(engine.box('xReal').isFinite).toBe(true);
     expect(engine.box('zComplex').isFinite).toBe(true);
     // The `Re`/`Im`/`Arg`/`Abs` type handlers narrow against the finite tier;
     // before the bridge the first three widened all the way to `number`.
-    expect(engine.box(['Re', 'zComplex']).type.toString()).toBe('finite_real');
-    expect(engine.box(['Im', 'zComplex']).type.toString()).toBe('finite_real');
-    expect(engine.box(['Arg', 'zComplex']).type.toString()).toBe('finite_real');
+    expect(engine.box(['Re', 'zComplex']).type.toString()).toBe('real');
+    expect(engine.box(['Im', 'zComplex']).type.toString()).toBe('real');
+    expect(engine.box(['Arg', 'zComplex']).type.toString()).toBe('real');
     expect(engine.box(['Abs', 'zComplex']).type.toString()).toBe(
-      'finite_real<0..>'
+      'real<0..>'
     );
+  });
+});
+
+describe('LATTICE PHASE 2: the retired `finite_*` names', () => {
+  // Phase 2 removed `finite_number`, `finite_complex`, `finite_real`,
+  // `finite_rational` and `finite_integer` from `NumericPrimitiveType`. Each
+  // denoted exactly the same values as a bare name, because every bare name
+  // under `number` is finite. What is left is the parse-time alias table and
+  // the claims the engine now makes in their place.
+
+  it('never SERIALIZES a retired spelling', () => {
+    // The aliases are normalized before a node is built, so a round trip
+    // through the parser emits the bare name.
+    for (const [alias, bare] of [
+      ['finite_number', 'complex'],
+      ['finite_complex', 'complex'],
+      ['finite_real', 'real'],
+      ['finite_rational', 'rational'],
+      ['finite_integer', 'integer'],
+    ] as const)
+      expect(typeToString(t(alias))).toBe(bare);
+    expect(typeToString(t('list<finite_integer>'))).toBe('list<integer>');
+    expect(typeToString(t('finite_real<0..1>'))).toBe('real<0..1>');
+  });
+
+  it('claims the TOP numeric type at a generic numeric point', () => {
+    // A generic numeric expression is finite-but-possibly-complex, which no
+    // bare name spells: `complex` would say PROVABLY non-real, which is what
+    // the compiler reads to choose its complex lowering lane. The sound and
+    // lane-preserving claim is the top type `number`.
+    const engine = new ComputeEngine();
+    expect(engine.parse('x \\times y').type.toString()).toBe('number');
+    expect(engine.parse('\\sin(x y)').type.toString()).toBe('number');
+    expect(isNonRealNumber('number')).toBe(false);
+  });
+
+  it('keeps a generic numeric node on the REAL compile lane', () => {
+    // The lane consequence of the claim above: in the default (strict) mode
+    // a `number`-typed node lowers to real arithmetic, and in complex mode
+    // `liftWideResult` still recognizes it as WIDE and lifts it.
+    const engine = new ComputeEngine();
+    const real = compile(engine.parse('\\sin(x y)'));
+    expect(real.code).toBe('Math.sin(_.x * _.y)');
+    const cx = compile(engine.parse('\\sin(x y)'), { mode: 'complex' });
+    expect(cx.code).toContain('_SYS.csin(');
+    expect(cx.code).toContain('_SYS.cplx(');
   });
 });

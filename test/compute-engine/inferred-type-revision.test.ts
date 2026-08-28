@@ -94,7 +94,7 @@ describe('an inferred type is revised when its value refutes it', () => {
     ce.assign('y', ce.box(['Add', 'x', 1]));
     expect(ce.box('y').type.toString()).toBe('number');
     ce.assign('x', 2);
-    expect(ce.box('y').type.toString()).toBe('number'); // finite_integer <: number
+    expect(ce.box('y').type.toString()).toBe('number'); // integer <: number
     ce.assign('x', 2.5);
     expect(ce.box('y').type.toString()).toBe('number');
     ce.assign('z', 5);

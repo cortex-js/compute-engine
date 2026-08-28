@@ -66,7 +66,7 @@ describe('BoxedType string predicates with a user-declared type', () => {
     expect(ce.type('integer | string').couldMatch('string')).toBe(true);
     // On an engine with NO user types at all — the resolver never enters.
     const bare = new ComputeEngine();
-    expect(bare.type('finite_integer').matches('integer')).toBe(true);
+    expect(bare.type('integer').matches('integer')).toBe(true);
     expect(() => bare.type('integer').matches('point')).toThrow();
   });
 });
@@ -106,10 +106,10 @@ describe('type handlers over user-typed operands', () => {
   test('ground-typed operands are typed exactly as before', () => {
     const bare = new ComputeEngine();
     expect(bare.box(['Sequence', 1, 'x']).type.toString()).toBe(
-      'tuple<finite_integer, unknown>'
+      'tuple<integer, unknown>'
     );
     expect(bare.box(['Pair', 1, 2]).type.toString()).toBe(
-      'tuple<finite_integer, finite_integer>'
+      'tuple<integer, integer>'
     );
   });
 });

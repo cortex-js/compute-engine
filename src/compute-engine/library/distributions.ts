@@ -71,7 +71,7 @@ function rangeError(ce: ComputeEngine, expected: string, x: Expression) {
 /** The closed unit interval, the proven-domain claim for
  * `BetaRegularized`'s first operand (a literal `0.5` subtypes it; a bare
  * `real` symbol does not, and stays on the wide claim). */
-const UNIT_INTERVAL = parseType('finite_real<0..1>')!;
+const UNIT_INTERVAL = parseType('real<0..1>')!;
 
 export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
   {
@@ -89,7 +89,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       signature: '(number, number) -> number',
       // A finite real ONLY on the proven domain a > 0, z ≥ 0 (there
       // Q(a, z) ∈ [0, 1]); outside it the kernel answers NaN
-      // (`Q(-1, 2)` is NaN), so the unconditional `finite_real` this
+      // (`Q(-1, 2)` is NaN), so the unconditional `real` this
       // definition used to claim was unsound. Both gates NARROW on
       // `true`, so the descriptor sign channel errs on the wide side: an
       // unproven sign claims `number`.
@@ -105,7 +105,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           positiveSign(a.facts.sgn) === true &&
           nonNegativeSign(z.facts.sgn) === true
         )
-          return 'finite_real';
+          return 'real';
         return 'number';
       },
       evaluate: ([a, z], { numericApproximation, engine: ce }) => {
@@ -134,7 +134,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       complexity: 7500,
       signature: '(number, number, number) -> number',
       // A finite real ONLY on the proven domain x ∈ [0, 1], a > 0, b > 0
-      // (there I_x(a, b) ∈ [0, 1]); the unconditional `finite_real` this
+      // (there I_x(a, b) ∈ [0, 1]); the unconditional `real` this
       // definition used to claim was unsound outside it. As for
       // `GammaRegularized` above, every gate narrows on `true`, so an
       // unproven fact claims the wide `number`.
@@ -152,7 +152,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           positiveSign(a.facts.sgn) === true &&
           positiveSign(b.facts.sgn) === true
         )
-          return 'finite_real';
+          return 'real';
         return 'number';
       },
       evaluate: ([x, a, b], { numericApproximation, engine: ce }) => {

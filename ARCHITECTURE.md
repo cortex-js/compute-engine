@@ -283,8 +283,15 @@ below it — `real`, `rational`, `integer`, `imaginary`), the infinite values
 as `∞ + i`), and the not-a-number marker (`nan`). Bare `real`, `rational`,
 `integer` and `complex` contain only finite values. `non_finite_number` is
 **exactly `{+∞, −∞}`** — the signed pair, now a subtype of `infinity` and no
-longer below `real` or `complex`; it retires when the deprecated `finite_*`
-names do. Every operator `type` handler follows these rules:
+longer below `real` or `complex`; it is kept, because the sign-aware gates
+and the `1/±∞ = 0` folds consume its signedness, which `infinity` (which
+admits the unsigned `~oo`) does not guarantee. The five `finite_*` names it
+used to sit beside are gone: `finite_integer`, `finite_rational`,
+`finite_real`, `finite_complex` and `finite_number` are retired from the
+type system, and the bare names carry those meanings. The old spellings
+still parse for one release cycle as deprecated aliases — each normalizes to
+its bare name, and `finite_number` to `complex` — and are never emitted.
+Every operator `type` handler follows these rules:
 
 1. **Claim `non_finite_number` only when the value is _provably_ `±∞`.**
    Examples: `Ln(0) = −∞`; `Round/Ceil/Floor/Truncate` of a provably real ±∞;
@@ -299,12 +306,16 @@ names do. Every operator `type` handler follows these rules:
    is a finiteness promise and must not cover a path that reaches a pole.
 3. **Unknown finiteness no longer exists for the bare tiers.** An operand
    declared `real` (or `integer`, `rational`, `complex`) is finite by its
-   type; `Sin(x)` with `x: real` claims `finite_real` because the input
-   provably is one. Only an operand whose type admits an infinity (`number`,
-   `infinity`, `non_finite_number`, an extended union) triggers the
-   non-finite analysis — and once an operand is provably non-finite, a claim
-   that depends on another operand being non-zero (e.g. `x · ∞ = ±∞`, where
-   `x = 0` gives NaN) must _prove_ it (via `sgn`), never assume it.
+   type; `Sin(x)` with `x: real` claims `real` because the input provably is
+   one. Only an operand whose type admits an infinity (`number`, `infinity`,
+   `non_finite_number`, an extended union) triggers the non-finite analysis
+   — and once an operand is provably non-finite, a claim that depends on
+   another operand being non-zero (e.g. `x · ∞ = ±∞`, where `x = 0` gives
+   NaN) must _prove_ it (via `sgn`), never assume it. An undeclared symbol
+   is such an operand: it has no finiteness evidence, so a generic numeric
+   application over undeclared operands — `x · y` — claims the top type
+   `number`. The finite tiers are claimed at the rungs where finiteness is
+   provable, not by default.
 
 The **values** type onto the new names: `oo` and `-oo` carry the singleton
 value-literal types `+oo`/`-oo` (widening to `infinity`); the value `~oo`

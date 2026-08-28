@@ -1140,9 +1140,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.value.toString()).toBe('(1, 2)');
-    expect(r.value.type.toString()).toBe(
-      'tuple<finite_integer, finite_integer>'
-    );
+    expect(r.value.type.toString()).toBe('tuple<integer, integer>');
   });
 
   test('a scalar newtype tags, a scalar alias does not', () => {
@@ -1288,7 +1286,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
   // A dictionary literal synthesizes `record{x: …, y: …}` (its keys are
   // statically known), so a `record`-bodied ALIAS is inhabitable from a
   // literal. Before record-aware synthesis the literal typed as
-  // `dictionary<finite_integer>` and this annotation failed `incompatible-type`
+  // `dictionary<integer>` and this annotation failed `incompatible-type`
   // even though the shape matched exactly.
   test('a record-bodied alias is inhabited by a dictionary literal', () => {
     const ce = new ComputeEngine();
@@ -1297,9 +1295,7 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
       'type alias pt = record{x: number, y: number}\nconst p: pt = {x -> 1, y -> 2}\np'
     );
     expect(r.diagnostics).toEqual([]);
-    expect(r.value.type.toString()).toBe(
-      'record{x: finite_integer, y: finite_integer}'
-    );
+    expect(r.value.type.toString()).toBe('record{x: integer, y: integer}');
   });
 
   test('a record-bodied alias still rejects a mismatched literal', () => {
@@ -1348,10 +1344,10 @@ describe('EPSIL TYPE CONSTRUCTORS', () => {
 //
 describe('EPSIL RECURSIVE TYPES', () => {
   const SELF =
-    'type alias json = missing | boolean | finite_real | string | list<json> | dictionary<json>\n';
+    'type alias json = missing | boolean | real | string | list<json> | dictionary<json>\n';
 
   const MUTUAL = [
-    'type alias json = missing | boolean | finite_real | string | type jsonArray | type jsonObject',
+    'type alias json = missing | boolean | real | string | type jsonArray | type jsonObject',
     'type alias jsonArray = list<json>',
     'type alias jsonObject = dictionary<json>',
     '',
@@ -1648,7 +1644,7 @@ describe('EPSIL TYPE RE-DECLARATION (in place)', () => {
     for (const _ of [1, 2, 3]) {
       const r = executeEpsil(ce, program);
       expect(r.diagnostics.map((d) => d.message)).toEqual([]);
-      expect(r.value.type.toString()).toBe('tree<finite_integer>');
+      expect(r.value.type.toString()).toBe('tree<integer>');
     }
     expect(ce.type('tree<integer>').matches('tree<number>')).toBe(true);
   });

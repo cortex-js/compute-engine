@@ -44,14 +44,14 @@ describe('Conjugate — (T) -> T where T: number', () => {
   test('scalar result types echo the operand (kind preserved)', () => {
     const ce = fresh();
     expect(ce.function('Conjugate', [ce.number(2)]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
     expect(ce.function('Conjugate', [ce.number(2.5)]).type.toString()).toBe(
-      'finite_real'
+      'real'
     );
     expect(
       ce.function('Conjugate', [ce.number(ce.complex(1, 2))]).type.toString()
-    ).toBe('finite_complex');
+    ).toBe('complex');
   });
 
   test('a declared symbol operand echoes its declared type', () => {
@@ -73,7 +73,7 @@ describe('Conjugate — (T) -> T where T: number', () => {
   test('D10 — broadcast over a vector keeps the collection type', () => {
     const ce = fresh();
     const e = ce.box(['Conjugate', ['List', 1, 2, 3]]);
-    expect(e.type.toString()).toBe('vector<finite_integer^3>');
+    expect(e.type.toString()).toBe('vector<integer^3>');
     expect(e.evaluate().toString()).toBe('[1,2,3]');
   });
 
@@ -87,20 +87,20 @@ describe('Conjugate — (T) -> T where T: number', () => {
   test('D10 — a matrix operand echoes the operand type, not a re-shaped lift', () => {
     const ce = fresh();
     const e = ce.box(['Conjugate', M22]);
-    expect(e.op1.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(e.op1.type.toString()).toBe('matrix<integer^(2x2)>');
     // D10 bound `T` to the FULL actual, so the arm's result IS the operand's
     // own type: the broadcast wrapper must not unwrap and re-shape it (that
-    // produced the mixed-encoding `list<vector<finite_integer^2>^(2x2)>`).
+    // produced the mixed-encoding `list<vector<integer^2>^(2x2)>`).
     // A GROUND broadcastable — `Sin`, `Sqrt` — already answers `matrix<…>`
     // here, so this is the shape that keeps the two paths in agreement.
-    expect(e.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(e.type.toString()).toBe('matrix<integer^(2x2)>');
     expect(e.evaluate().toString()).toBe('[[1,2],[3,4]]');
   });
 
   test('a non-indexed collection operand is unchanged (lift admission)', () => {
     const ce = fresh();
     const e = ce.box(['Conjugate', ['Set', 1, 2]]);
-    expect(e.type.toString()).toBe('set<finite_integer>');
+    expect(e.type.toString()).toBe('set<integer>');
     expect(e.evaluate().toString()).toBe('Conjugate(Set(1, 2))');
   });
 
@@ -142,9 +142,9 @@ describe('Conjugate — (T) -> T where T: number', () => {
     // only LaTeX form that reaches `Conjugate` is the operator name.
     const viaParse = ce.parse('\\operatorname{Conjugate}(2)');
     expect(viaParse.operator).toBe('Conjugate');
-    expect(viaFunction.type.toString()).toBe('finite_integer');
-    expect(viaBox.type.toString()).toBe('finite_integer');
-    expect(viaParse.type.toString()).toBe('finite_integer');
+    expect(viaFunction.type.toString()).toBe('integer');
+    expect(viaBox.type.toString()).toBe('integer');
+    expect(viaParse.type.toString()).toBe('integer');
     expect(viaFunction.evaluate().toString()).toBe('2');
     expect(viaBox.evaluate().toString()).toBe('2');
     expect(viaParse.evaluate().toString()).toBe('2');
@@ -154,14 +154,14 @@ describe('Conjugate — (T) -> T where T: number', () => {
     const ce = fresh();
     const list = ce.box(['List', 1, 2, 3]);
     expect(ce.function('Conjugate', [list]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(ce.box(['Conjugate', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(
       ce.parse('\\operatorname{Conjugate}(\\lbrack 1, 2, 3\\rbrack)').type.toString()
-    ).toBe('vector<finite_integer^3>');
+    ).toBe('vector<integer^3>');
   });
 });
 
@@ -169,12 +169,12 @@ describe('Inverse — (T) -> T where T: matrix', () => {
   test('§4.7 identity row — dimensions and kind are preserved verbatim', () => {
     const ce = fresh();
     expect(ce.box(['Inverse', M22]).type.toString()).toBe(
-      'matrix<finite_integer^(2x2)>'
+      'matrix<integer^(2x2)>'
     );
     // Non-square is a runtime error, but the STATIC echo still carries the
     // operand's dimensions (2x3 in, 2x3 out).
     expect(ce.box(['Inverse', M23]).type.toString()).toBe(
-      'matrix<finite_integer^(2x3)>'
+      'matrix<integer^(2x3)>'
     );
   });
 
@@ -195,7 +195,7 @@ describe('Inverse — (T) -> T where T: matrix', () => {
   test('nested application preserves the type', () => {
     const ce = fresh();
     expect(ce.box(['Inverse', ['Inverse', M22]]).type.toString()).toBe(
-      'matrix<finite_integer^(2x2)>'
+      'matrix<integer^(2x2)>'
     );
   });
 
@@ -205,7 +205,7 @@ describe('Inverse — (T) -> T where T: matrix', () => {
     expect(e.type.toString()).toBe('error');
     // §8: the declared bound `matrix` is what is displayed as expected.
     expect(JSON.stringify(e.json)).toBe(
-      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'set<finite_integer>\'"],["Set",1,2]]]'
+      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'set<integer>\'"],["Set",1,2]]]'
     );
   });
 
@@ -223,7 +223,7 @@ describe('Inverse — (T) -> T where T: matrix', () => {
     const e = ce.box(['Inverse', ['List', 1, 2, 3]]);
     expect(e.type.toString()).toBe('error');
     expect(JSON.stringify(e.json)).toBe(
-      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'vector<finite_integer^3>\'"],["List",1,2,3]]]'
+      '["Inverse",["Error",["ErrorCode","\'incompatible-type\'","\'matrix\'","\'vector<integer^3>\'"],["List",1,2,3]]]'
     );
   });
 
@@ -233,11 +233,11 @@ describe('Inverse — (T) -> T where T: matrix', () => {
       '[[-2,1],[3/2,-1/2]]'
     );
     expect(ce.box(['Inverse', M22]).evaluate().type.toString()).toBe(
-      'matrix<finite_rational^(2x2)>'
+      'matrix<rational^(2x2)>'
     );
     expect(ce.box(['Inverse', M22]).N().toString()).toBe('[[-2,1],[1.5,-0.5]]');
     expect(ce.box(['Inverse', M22]).N().type.toString()).toBe(
-      'matrix<finite_real^(2x2)>'
+      'matrix<real^(2x2)>'
     );
   });
 
@@ -260,10 +260,10 @@ describe('Inverse — (T) -> T where T: matrix', () => {
     const ce = fresh();
     const m = ce.box(M22);
     expect(ce.function('Inverse', [m]).type.toString()).toBe(
-      'matrix<finite_integer^(2x2)>'
+      'matrix<integer^(2x2)>'
     );
     expect(ce.box(['Inverse', M22]).type.toString()).toBe(
-      'matrix<finite_integer^(2x2)>'
+      'matrix<integer^(2x2)>'
     );
     expect(
       ce
@@ -271,6 +271,6 @@ describe('Inverse — (T) -> T where T: matrix', () => {
           '\\operatorname{Inverse}(\\lbrack\\lbrack 1,2\\rbrack,\\lbrack 3,4\\rbrack\\rbrack)'
         )
         .type.toString()
-    ).toBe('matrix<finite_integer^(2x2)>');
+    ).toBe('matrix<integer^(2x2)>');
   });
 });

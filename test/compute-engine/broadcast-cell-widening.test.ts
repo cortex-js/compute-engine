@@ -27,7 +27,7 @@ describe('broadcast cell widening', () => {
 
     test('an exact rational keeps its singleton-range literal type', () => {
       expect(ce.parse('\\frac{1}{2}').evaluate().type.toString()).toBe(
-        'finite_rational<0.5..0.5>'
+        'rational<0.5..0.5>'
       );
     });
 
@@ -42,9 +42,9 @@ describe('broadcast cell widening', () => {
       ]);
       const els = [...(m.evaluate() as any).each()];
       expect(els.map((e) => e.type.toString())).toEqual([
-        'finite_rational<0.25..0.25>',
-        'finite_rational<0.5..0.5>',
-        'finite_rational<0.75..0.75>',
+        'rational<0.25..0.25>',
+        'rational<0.5..0.5>',
+        'rational<0.75..0.75>',
       ]);
     });
 
@@ -58,7 +58,7 @@ describe('broadcast cell widening', () => {
       ]);
       const els = [...(m.evaluate() as any).each()];
       expect(els.map((e) => e.ops[0].type.toString())).toEqual([
-        'finite_rational<0.5..0.5>',
+        'rational<0.5..0.5>',
         '1',
       ]);
     });
@@ -74,11 +74,9 @@ describe('broadcast cell widening', () => {
       // and an ambient window give these same answers. It fails if that
       // storage-boundary widening changes and the read here is ambient again.
       const lst = ce.box(['List', ['Tuple', 0.5, 2], ['Tuple', 1.5, 3]]);
-      expect(lst.type.toString()).toBe(
-        'list<tuple<finite_real, finite_integer>^2>'
-      );
+      expect(lst.type.toString()).toBe('list<tuple<real, integer>^2>');
       const tuple = lst.ops[0];
-      expect(tuple.type.toString()).toBe('tuple<finite_real, finite_integer>');
+      expect(tuple.type.toString()).toBe('tuple<real, integer>');
       expect(tuple.ops.map((o) => o.type.toString())).toEqual(['0.5', '2']);
     });
   });
@@ -117,8 +115,8 @@ describe('broadcast cell widening', () => {
       beginBroadcastCell(ce);
       try {
         // The tier, not the value.
-        expect(half.type.toString()).toBe('finite_rational');
-        expect(two.type.toString()).toBe('finite_integer');
+        expect(half.type.toString()).toBe('rational');
+        expect(two.type.toString()).toBe('integer');
       } finally {
         endBroadcastCell(ce);
       }
@@ -130,11 +128,11 @@ describe('broadcast cell widening', () => {
       const x = ce.parse('\\frac{3}{4}').evaluate();
       beginBroadcastCell(ce);
       try {
-        expect(x.type.toString()).toBe('finite_rational');
+        expect(x.type.toString()).toBe('rational');
       } finally {
         endBroadcastCell(ce);
       }
-      expect(x.type.toString()).toBe('finite_rational<0.75..0.75>');
+      expect(x.type.toString()).toBe('rational<0.75..0.75>');
     });
   });
 
@@ -198,7 +196,7 @@ describe('broadcast cell widening', () => {
       ] as any);
       const els = [...(m.evaluate() as any).each()];
       expect(els.map((e) => e.toString())).toEqual(['[1,2]', '[2,3]', '[3,4]']);
-      expect(els[0].type.toString()).toBe('vector<finite_integer^2>');
+      expect(els[0].type.toString()).toBe('vector<integer^2>');
       expect(inBroadcastCell(ce)).toBe(false);
     });
 
@@ -226,7 +224,7 @@ describe('broadcast cell widening', () => {
   describe('diagnostics', () => {
     test('a per-element diagnostic names the value, not the tier', () => {
       // The window covers what the interpreter asks itself; a message is read
-      // by a person, so it must still name `2.5` rather than `finite_real`.
+      // by a person, so it must still name `2.5` rather than `real`.
       const m = ce.box([
         'Map',
         ['Function', ['Add', 'x', 1], ['Typed', 'x', 'integer']],
@@ -246,7 +244,7 @@ describe('broadcast cell widening', () => {
       try {
         const err = ce.typeError('integer', 'string', operand);
         expect(err.toString()).toContain('string');
-        expect(err.toString()).not.toContain('finite_real');
+        expect(err.toString()).not.toContain('real');
       } finally {
         endBroadcastCell(ce);
       }

@@ -860,7 +860,7 @@ The **contribution** of operand `aᵢ` separates *producing* the operand from
 
 `WithRandomSeed` — specified fully, as the canonical discharger:
 
-- Signature: `(finite_real | string, any) -> expression`, body position
+- Signature: `(real | string, any) -> expression`, body position
   held (`lazy: true`), bound `{any}`, **discharges `random`** on the body
   position. So `WithRandomSeed(42, Random())` computes `∅` — referentially
   transparent, as it truly is — while `WithRandomSeed(42, Block(Assign(x,1),

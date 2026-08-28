@@ -8,11 +8,11 @@ describe('NUMERIC TYPES', () => {
   });
   it('should recognize the type of a complex number', () => {
     const expr = ce.parse('3 + 4i');
-    expect(expr.type.toString()).toBe('finite_complex');
+    expect(expr.type.toString()).toBe('complex');
   });
   it('should recognize the type of a rational number', () => {
     const expr = ce.parse('3/4');
-    expect(expr.type.toString()).toBe('finite_rational<0.75..0.75>');
+    expect(expr.type.toString()).toBe('rational<0.75..0.75>');
   });
   it('should recognize the type of a real number', () => {
     const expr = ce.parse('3.4');
@@ -85,8 +85,8 @@ describe('NUMERIC SUBTYPES', () => {
     expect(expr.type.matches('real')).toBe(false);
     expect(expr.type.matches('integer')).toBe(false);
     expect(expr.type.matches('rational')).toBe(false);
-    expect(expr.type.matches('finite_integer')).toBe(false);
-    expect(expr.type.matches('finite_real')).toBe(false);
+    expect(expr.type.matches('integer')).toBe(false);
+    expect(expr.type.matches('real')).toBe(false);
     expect(expr.type.matches('complex')).toBe(false);
     // The extended real line is spelled out as a union.
     expect(expr.type.matches('real | infinity')).toBe(true);
@@ -97,7 +97,7 @@ describe('NUMERIC SUBTYPES', () => {
     // the signed-pair atom refuses it too.
     const expr = ce.parse('\\tilde\\infty');
     expect(expr.type.matches('complex')).toBe(false);
-    expect(expr.type.matches('finite_complex')).toBe(false);
+    expect(expr.type.matches('complex')).toBe(false);
     expect(expr.type.matches('real')).toBe(false);
     expect(expr.type.matches('infinity')).toBe(true);
     expect(expr.type.matches('non_finite_number')).toBe(false);
@@ -108,9 +108,10 @@ describe('NUMERIC SUBTYPES', () => {
     expect(expr.type.matches('number')).toBe(true);
     expect(expr.type.matches('nan')).toBe(true);
     expect(expr.type.matches('real')).toBe(false);
+    // `complex` is also the finiteness gate — every bare name under `number`
+    // denotes finite values alone — and NaN is not a finite number.
     expect(expr.type.matches('complex')).toBe(false);
     expect(expr.type.matches('infinity')).toBe(false);
-    expect(expr.type.matches('finite_number')).toBe(false);
     expect(expr.type.matches('non_finite_number')).toBe(false);
   });
 });

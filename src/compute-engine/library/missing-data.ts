@@ -16,8 +16,9 @@ import { enumerationDeclinedAfterWalk } from './collections.js';
  * symbol or a `NaN` number)?
  *
  * Decided from the collection's static element type: `real` and its subtypes
- * (`integer`, `finite_integer`, …) contain neither — `nan` is a subtype of
- * `number` but NOT of `real`, and `missing` is a subtype of neither. A
+ * (`integer`, `rational`, and every range over them) contain neither — `nan`
+ * is a subtype of `number` but NOT of `real`, and `missing` is a subtype of
+ * neither. A
  * collection typed `list<number>`, `list<integer> | missing`, or one whose
  * element type is unknown fails the test and is walked as before.
  *

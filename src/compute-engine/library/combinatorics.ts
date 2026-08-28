@@ -155,14 +155,14 @@ function binomialType(
     typeFact(n.type, 'integer') === true &&
     typeFact(k.type, 'integer') === true
   )
-    return 'finite_integer';
+    return 'integer';
   if (typeFact(n.type, 'real') === true && typeFact(k.type, 'real') === true) {
     if (
       typeFact(n.type, 'integer') === true &&
       negativeSign(operandSgn(n)) === true
     )
       return 'number';
-    return 'finite_real';
+    return 'real';
   }
   return 'number';
 }
@@ -319,7 +319,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Fibonacci: {
       description: 'Compute the nth Fibonacci number.',
       wikidata: 'Q47577',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
@@ -394,9 +394,9 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           typeFact(k.type, 'integer') === true &&
           nonNegativeSign(operandSgn(k)) === true
         ) {
-          if (typeFact(a.type, 'integer') === true) return 'finite_integer';
-          if (typeFact(a.type, 'rational') === true) return 'finite_rational';
-          if (typeFact(a.type, 'real') === true) return 'finite_real';
+          if (typeFact(a.type, 'integer') === true) return 'integer';
+          if (typeFact(a.type, 'rational') === true) return 'rational';
+          if (typeFact(a.type, 'real') === true) return 'real';
         }
         return 'number';
       },
@@ -555,7 +555,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Multinomial: {
       description: 'Compute the multinomial coefficient for multiple integers.',
       wikidata: 'Q20820114',
-      signature: '(integer+) -> finite_integer',
+      signature: '(integer+) -> integer',
       evaluate: (ops, { engine: ce }) => {
         const ks = ops.map(toInteger);
         if (ks.some((k) => k === null || k < 0)) return undefined;
@@ -590,7 +590,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Compute the number of derangements (subfactorial) of n items.',
       wikidata: 'Q2361661',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       evaluate: ([n], { engine: ce }) => {
         // Derangements are defined only for non-negative integers; stay
         // symbolic for anything else rather than rounding the argument.
@@ -621,7 +621,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Compute the Bell number B(n), the number of partitions of a set of n elements.',
       wikidata: 'Q816063',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       evaluate: ([n], { engine: ce }) => {
         // Bell numbers count set partitions, defined only for non-negative
         // integers; stay symbolic rather than rounding the argument.

@@ -276,7 +276,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
     // a filtered 3-vector was a lie.
     expect(
       ce.box(['Filter', ['List', 1, 2, 3], 'IsPrime']).type.toString()
-    ).toBe('list<finite_integer>');
+    ).toBe('list<integer>');
   });
 
   it('stamps an inline literal identically on every route', () => {
@@ -516,7 +516,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
     // Design E §3 (`docs/TYPE-SYSTEM.md`):
     // admission asks whether the operand is provably UNUSABLE, not whether it
     // is a subtype of the slot. `IsPrime: (number) -> boolean` overlaps the
-    // solved `(finite_integer) any -> boolean` at every position, so it enters
+    // solved `(integer) any -> boolean` at every position, so it enters
     // every converted slot and is never rebuilt.
     const ce = new ComputeEngine();
     const e = ce.box([op, XS, 'IsPrime'] as any);
@@ -676,9 +676,9 @@ describe('phase 1: `FlatMap` — R-D2′ result inference', () => {
     // The element type is the callback's own result. `n` is inferred
     // `integer` from `cs: list<integer>`, and since the finite-by-default
     // flip that annotation PROVES the argument finite, so the body keeps its
-    // exact `finite_integer` claim instead of being widened to `number`
+    // exact `integer` claim instead of being widened to `number`
     // against a parameter that might have bound `∞`.
-    expect(e.type.toString()).toBe('list<finite_integer>');
+    expect(e.type.toString()).toBe('list<integer>');
     expect(e.evaluate().toString()).toBe('[2,4,6]');
   });
 
@@ -893,7 +893,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
     // from the initial value would have stamped it.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-    expectTypeBetween(ce.box(1), { atMost: 'finite_integer' });
+    expectTypeBetween(ce.box(1), { atMost: 'integer' });
 
     const stamped = ce.box([
       'Reduce',
@@ -915,7 +915,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
       [
         'Function',
         ['Divide', 'a', 'x'],
-        ['Typed', 'a', { str: 'finite_integer' }],
+        ['Typed', 'a', { str: 'integer' }],
         ['Typed', 'x', { str: 'integer' }],
       ],
       1,
@@ -1667,7 +1667,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     expect(e.ops[2].toMathJson()).toEqual([
       'Function',
       ['Pair', 'a', 'b'],
-      ['Typed', 'a', "'finite_integer'"],
+      ['Typed', 'a', "'integer'"],
       ['Typed', 'b', "'string'"],
     ]);
   });
@@ -1689,8 +1689,8 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     expect(e.ops[1].toMathJson()).toEqual([
       'Function',
       ['Less', 1, 'p'],
-      ['Typed', 'p', "'finite_integer'"],
-      ['Typed', 'q', "'finite_integer'"],
+      ['Typed', 'p', "'integer'"],
+      ['Typed', 'q', "'integer'"],
     ]);
   });
 
@@ -1709,12 +1709,12 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     expect(e.ops[1].toMathJson()).toEqual([
       'Function',
       ['Less', 1, 'a'],
-      ['Typed', 'a', "'finite_integer'"],
+      ['Typed', 'a', "'integer'"],
     ]);
     expect(e.ops[2].toMathJson()).toEqual([
       'Function',
       ['Less', 'b', 1],
-      ['Typed', 'b', "'finite_integer'"],
+      ['Typed', 'b', "'integer'"],
     ]);
   });
 
@@ -1750,7 +1750,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     expect(e.ops[1].toMathJson()).toEqual([
       'Function',
       ['Less', 1, 'a'],
-      ['Typed', 'a', "'finite_integer'"],
+      ['Typed', 'a', "'integer'"],
       'b',
     ]);
   });

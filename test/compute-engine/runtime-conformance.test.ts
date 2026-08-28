@@ -148,7 +148,7 @@ describe('handler crashes become error values (§4.4 hardening)', () => {
     // `collections.test.ts` pins Count/Filter as hard errors. The crash
     // conversion must not swallow it. Routed through an `any`-typed symbol:
     // spelled inline the identity lambda is refused at boxing (its inferred
-    // `-> finite_integer` result fails the boolean slot).
+    // `-> integer` result fails the boolean slot).
     ce.declare('pred', 'any');
     ce.assign('pred', ce.box(['Function', 'x', 'x']));
     expect(() =>

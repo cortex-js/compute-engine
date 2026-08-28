@@ -152,9 +152,9 @@ function cacheResult(s: TypeString, type: Type): Type {
   // The cap rests on the assumption that "the working set of distinct type
   // strings is small". That holds for a hand-written program, but not for one
   // whose types carry LENGTHS: every distinct vector size is its own type
-  // string (`vector<finite_integer^303>`,
-  // `^304`, …), so a document indexing or slicing many differently-sized
-  // collections generates a working set that can exceed the cap. Past that
+  // string (`vector<integer^303>`, `^304`, …), so a document indexing or
+  // slicing many differently-sized collections generates a working set that
+  // can exceed the cap. Past that
   // point, clearing dropped 100% of the entries on every overflow, so the hit
   // rate collapsed to ~0 instead of degrading — measured at a 40–100× jump in
   // per-parse cost the moment the working set crossed the cap, flat above it,

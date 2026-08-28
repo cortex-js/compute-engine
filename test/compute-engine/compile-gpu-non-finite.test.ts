@@ -125,11 +125,11 @@ describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () =
 
 describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () => {
   it('a `complex`-typed Sqrt folds to the complex principal value', () => {
-    // `Sqrt(negative)` is typed complex (tightened to `finite_complex`
+    // `Sqrt(negative)` is typed complex (tightened to `complex`
     // 2026-07-31: √−5 = i√5 is finite), so the enclosing emission is the
     // vec2(re, im) complex codegen and the fold must agree with it — a scalar
     // NaN would be consumed as a real by the surrounding complex arithmetic.
-    expect(ce.box(['Sqrt', -5]).type.toString()).toBe('finite_complex');
+    expect(ce.box(['Sqrt', -5]).type.toString()).toBe('complex');
     expect(g(['Sqrt', -5])).toBe(`vec2(0.0, ${Math.sqrt(5)})`);
     expect(w(['Sqrt', -5])).toBe(`vec2f(0.0, ${Math.sqrt(5)})`);
     // …and it composes as a complex value.
@@ -140,20 +140,20 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
 
   it('a Power/Root fold agrees with the node TYPE on each branch', () => {
     // SUPERSEDED CONTRACT (2026-07-30 ruling). This test used to assert that
-    // `Power(-2, 0.3)` / `Root(-8, 4)` were typed `finite_number` and folded to
+    // `Power(-2, 0.3)` / `Root(-8, 4)` were typed `number` and folded to
     // the shader NaN — true only because the type handlers did not yet track
     // the negative-base branch. They now do: an exponent whose reduced-rational
     // denominator is EVEN (or an even root degree) is the principal COMPLEX
-    // branch and the node is typed `finite_complex`, so by the same
+    // branch and the node is typed `complex`, so by the same
     // type-agreement rule as `Sqrt(-5)` above the fold must be a `vec2`. A
     // scalar NaN there is silently scalar-broadcast into `vec2(NaN, NaN)` —
     // valid shader source, wrong value — which is exactly the regression the
     // ruling fixed. Do NOT restore the NaN assertion.
-    expect(ce.box(['Power', -2, 0.3]).type.toString()).toBe('finite_complex');
+    expect(ce.box(['Power', -2, 0.3]).type.toString()).toBe('complex');
     const p = principalComplexPow(-2, 0.3);
     expect(g(['Power', -2, 0.3])).toBe(`vec2(${p.re}, ${p.im})`);
     expect(w(['Power', -2, 0.3])).toBe(`vec2f(${p.re}, ${p.im})`);
-    expect(ce.box(['Root', -8, 4]).type.toString()).toBe('finite_complex');
+    expect(ce.box(['Root', -8, 4]).type.toString()).toBe('complex');
     const r = principalComplexPow(-8, 0.25);
     expect(g(['Root', -8, 4])).toBe(`vec2(${r.re}, ${r.im})`);
     expect(w(['Root', -8, 4])).toBe(`vec2f(${r.re}, ${r.im})`);
@@ -164,12 +164,12 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     );
 
     // The ODD-denominator branch keeps a REAL principal root, stays
-    // `finite_number`, and must fold to that real value — NOT to NaN, which is
+    // `number`, and must fold to that real value — NOT to NaN, which is
     // all the shader `pow` yields for a negative base. `Power` had no such
     // correction (only `Root` did), so this folded to NaN while the
     // interpreter returned 4.
     expect(ce.box(['Power', -8, ['Divide', 2, 3]]).type.toString()).toBe(
-      'finite_number'
+      'number'
     );
     expect(g(['Power', -8, ['Divide', 2, 3]])).toBe('4.0');
     expect(w(['Power', -8, ['Divide', 2, 3]])).toBe('4.0');
@@ -182,7 +182,7 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     // folds to the real `+2^(100/3)` on both shader targets instead of the
     // shader NaN it used to yield.
     expect(ce.box(['Power', -2, ['Divide', 100, 3]]).type.toString()).toBe(
-      'finite_number'
+      'number'
     );
     const real100over3 = `${Math.pow(2, 100 / 3)}`;
     expect(g(['Power', -2, ['Divide', 100, 3]])).toBe(real100over3);
@@ -193,7 +193,7 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     // The defect pattern was a refusal enforced at two sites while every
     // sibling reaching the same mathematical situation compiled and NaN-ed.
     //
-    // `Ln(-2)` is NOT one of them: it is typed `finite_complex`, so by the
+    // `Ln(-2)` is NOT one of them: it is typed `complex`, so by the
     // same type-agreement rule as `Sqrt(-5)` above its lowering is the complex
     // one — the scalar `log(-2.0)` this used to assert disagreed with the
     // `vec2` codegen its own parent emits (see
@@ -204,12 +204,12 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     // inverse heads now type a provably out-of-domain argument by the value it
     // takes — `arcsin(2) = π/2 − 1.3169…i`, a finite complex — so the SAME
     // type-agreement rule applies and its lowering is the complex one.
-    expect(ce.box(['Ln', -2]).type.toString()).toBe('finite_complex');
+    expect(ce.box(['Ln', -2]).type.toString()).toBe('complex');
     expect(g(['Ln', -2])).toBe('_gpu_cln(vec2(-2.0, 0.0))');
-    expect(ce.box(['Arcsin', 2]).type.toString()).toBe('finite_complex');
+    expect(ce.box(['Arcsin', 2]).type.toString()).toBe('complex');
     expect(g(['Arcsin', 2])).toBe('_gpu_casin(vec2(2.0, 0.0))');
     // An IN-domain argument is still real-typed and still lowers to the scalar.
-    expect(ce.box(['Arcsin', 0.5]).type.toString()).toBe('finite_real');
+    expect(ce.box(['Arcsin', 0.5]).type.toString()).toBe('real');
     expect(g(['Arcsin', 0.5])).toBe('asin(0.5)');
     // …including the SAME head with a variable operand, which cannot be caught
     // in principle, so the caller has to handle NaN either way.

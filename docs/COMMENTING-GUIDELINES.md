@@ -174,11 +174,11 @@ and it must say which direction of drift it guards. Three spellings:
 - **Sound, not over-narrow** — the same helper with both bounds, for a
   result the engine could over-claim: `above` names a claim that would be
   unsound, and the type must not match it —
-  `expectTypeBetween(expr, { atMost: 'rational', above: 'finite_integer' })`
-  for a quotient that can be `3/2`; `above: 'vector<finite_rational^2>'`
+  `expectTypeBetween(expr, { atMost: 'rational', above: 'integer' })`
+  for a quotient that can be `3/2`; `above: 'vector<rational^2>'`
   for `Sin` over a literal list.
 - **Exactly this tier** — the exact string,
-  `expect(String(t)).toBe('finite_rational')`, only where the exact tier is
+  `expect(String(t)).toBe('rational')`, only where the exact tier is
   the contract, and the comment or test name says why. Two contracts that
   look like accidental precision but are not: `number` cells for an operand
   whose type is `unknown` (it admits NaN and ±∞, so any narrower cell tier

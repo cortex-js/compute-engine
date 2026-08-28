@@ -677,21 +677,21 @@ describe('type handler', () => {
   test('a literal boolean-list condition types list<T^n>', () => {
     const ce = engine();
     const t = ce.box(['Which', ['List', 'True', 'False'], 1, 'True', 0]).type;
-    expect(t.matches(parseType('list<finite_integer^2>'))).toBe(true);
+    expect(t.matches(parseType('list<integer^2>'))).toBe(true);
   });
 
   test('a declared indexed_collection<boolean> condition types list<T>', () => {
     const ce = engine();
     ce.declare('b', 'indexed_collection<boolean>');
     const t = ce.box(['Which', 'b', 1, 'True', 0]).type;
-    expect(t.matches(parseType('list<finite_integer>'))).toBe(true);
+    expect(t.matches(parseType('list<integer>'))).toBe(true);
   });
 
   test('a derived condition (a broadcast comparison) types list<T^n>', () => {
     const ce = engine();
     ce.assign('n', ce.box(['List', 3, 2, 1, 3]));
     const e = ce.box(['Which', ['Equal', 'n', 3], 1, 'True', 0]);
-    expect(e.type.matches(parseType('list<finite_integer^4>'))).toBe(true);
+    expect(e.type.matches(parseType('list<integer^4>'))).toBe(true);
     expect(e.evaluate().type.matches(parseType('list<number>'))).toBe(true);
   });
 
@@ -700,8 +700,8 @@ describe('type handler', () => {
     // whole and never activates the elementwise path — the type must agree.
     const ce = engine();
     const e = ce.box(['Which', ['Tuple', 'True', 'False'], 1, 'True', 0]);
-    expect(e.type.matches(parseType('finite_integer'))).toBe(true);
-    expect(e.type.matches(parseType('list<finite_integer>'))).toBe(false);
+    expect(e.type.matches(parseType('integer'))).toBe(true);
+    expect(e.type.matches(parseType('list<integer>'))).toBe(false);
     expect(e.evaluate().operator).toBe('Which'); // inert at runtime
   });
 
@@ -714,13 +714,13 @@ describe('type handler', () => {
       'True',
       0,
     ]).type;
-    expect(t.matches(parseType('list<finite_integer^2>'))).toBe(true);
+    expect(t.matches(parseType('list<integer^2>'))).toBe(true);
   });
 
   test('If with a list condition types a list of the branch types', () => {
     const ce = engine();
     const t = ce.box(['If', ['List', 'True', 'False'], 1, 0]).type;
-    expect(t.matches(parseType('list<finite_integer^2>'))).toBe(true);
+    expect(t.matches(parseType('list<integer^2>'))).toBe(true);
   });
 
   test('NO default clause: the element type joins in the NaN marker', () => {
@@ -730,7 +730,7 @@ describe('type handler', () => {
     // type must admit it, or a consumer dispatching on `.type.matches()` is
     // promised a finite integer and handed a NaN.
     const e = ce.box(['Which', ['List', 'True', 'False'], 5]);
-    expect(e.type.matches(parseType('list<finite_integer^2>'))).toBe(false);
+    expect(e.type.matches(parseType('list<integer^2>'))).toBe(false);
     expect(e.type.matches(parseType('list<number^2>'))).toBe(true);
     // The runtime value is assignable to the declared type.
     const v = e.evaluate();
@@ -742,8 +742,8 @@ describe('type handler', () => {
     const ce = engine();
     const e = ce.box(['Which', ['List', 'True', 'False'], 5, 'True', 0]);
     // Not widened: an over-wide union would break `matches()` dispatch — the
-    // exact `finite_integer` join survives.
-    expect(e.type.matches(parseType('list<finite_integer^2>'))).toBe(true);
+    // exact `integer` join survives.
+    expect(e.type.matches(parseType('list<integer^2>'))).toBe(true);
     const v = e.evaluate();
     expect(v.type.matches(e.type)).toBe(true);
   });
@@ -790,14 +790,14 @@ describe('type handler', () => {
   test('If without an else branch widens; with one it does not', () => {
     const ce = engine();
     const noElse = ce.box(['If', ['List', 'True', 'False'], 1]);
-    expect(noElse.type.matches(parseType('list<finite_integer^2>'))).toBe(
+    expect(noElse.type.matches(parseType('list<integer^2>'))).toBe(
       false
     );
     expect(noElse.type.matches(parseType('list<number^2>'))).toBe(true);
     expect(noElse.evaluate().type.matches(noElse.type)).toBe(true);
 
     const withElse = ce.box(['If', ['List', 'True', 'False'], 1, 0]);
-    expect(withElse.type.matches(parseType('list<finite_integer^2>'))).toBe(
+    expect(withElse.type.matches(parseType('list<integer^2>'))).toBe(
       true
     );
   });
@@ -808,7 +808,7 @@ describe('type handler', () => {
     // is never even evaluated, so it must not type the result element-wise.
     const e = ce.box(['Which', 'True', 1, ['List', 'True', 'False'], 2]);
     expect(e.evaluate().re).toBe(1);
-    expect(e.type.toString()).toBe('finite_integer');
+    expect(e.type.toString()).toBe('integer');
   });
 
   test('a condition with Missing cells types element-wise, as it evaluates', () => {
@@ -817,14 +817,14 @@ describe('type handler', () => {
     // must too: `["True", "Missing"]` types `list<boolean | missing>`.
     const e = ce.box(['Which', ['List', 'True', 'Missing'], 1, 'True', 0]);
     expect(e.evaluate().operator).toBe('List');
-    expect(e.type.matches(parseType('list<finite_integer>'))).toBe(true);
+    expect(e.type.matches(parseType('list<integer>'))).toBe(true);
   });
 
   test('a condition typing plain unknown does NOT flip the result type', () => {
     const ce = engine();
     ce.declare('u', 'unknown');
     expect(ce.box(['Which', 'u', 1, 'True', 0]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
   });
 
@@ -842,7 +842,7 @@ describe('type handler', () => {
     const v = e.evaluate();
     expect(cells(v)).toEqual(['(1, 2)', '(0, 0)']);
     expect(
-      e.type.matches(parseType('list<tuple<finite_integer, finite_integer>^2>'))
+      e.type.matches(parseType('list<tuple<integer, integer>^2>'))
     ).toBe(true);
     expect(v.type.matches(e.type)).toBe(true);
   });
@@ -852,9 +852,9 @@ describe('type handler', () => {
     ce.declare('x', 'number');
     expect(
       ce.box(['Which', ['Equal', 'x', 4], 1, 'True', 0]).type.toString()
-    ).toBe('finite_integer');
+    ).toBe('integer');
     expect(ce.box(['If', ['Equal', 'x', 4], 1, 0]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
   });
 });

@@ -183,7 +183,7 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     // single `_fn_b` and the mismatch is reported as the escalation cause.
     expect(auto.success).toBe(true);
     // The call's result carries the idempotent `_SYS.cplx` of the
-    // lift-at-use rule: `b`'s declared result `finite_number` counts as a
+    // lift-at-use rule: `b`'s declared result `number` counts as a
     // WIDE numeric type since the finite-by-default flip put `complex` below
     // that name. The wrap does not change the value, and `_fn_b` is still
     // emitted once.

@@ -461,7 +461,7 @@ export function matchesDeclaredTypeAxes(
     return acceptsGenericFunctionLiteral(symbol ?? '', valueExpr, declared);
 
   // A concrete value inhabiting a value-component declared type (`z: 0` with
-  // `z := 0`): the synthesized type (`finite_integer`) cannot witness
+  // `z := 0`): the synthesized type (`integer`) cannot witness
   // membership in the value type. See `value-membership.ts`.
   if (valueExpr !== undefined && typeAcceptsValue(valueExpr, declared.type))
     return true;
@@ -726,7 +726,7 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   if (
     ascribedReturn === undefined &&
     args !== undefined &&
-    bodyTypeSource.matches('finite_number') &&
+    bodyTypeSource.matches('complex') &&
     args.some(
       (a) =>
         !provablyDisjoint(a.type, 'infinity') || !provablyDisjoint(a.type, 'nan')
@@ -736,8 +736,8 @@ export function functionLiteralSignatureType(expr: Expression): Type {
 
   // A DERIVED result type is a storage position: a NUMBER-LITERAL body's
   // type is literal cargo and projects to its tier (`() -> 21` types
-  // `() -> finite_integer`, not `() -> 21`; `() -> √2` types
-  // `() -> finite_real`, not the enclosure range — ruling O9's second half,
+  // `() -> integer`, not `() -> 21`; `() -> √2` types `() -> real`, not the
+  // enclosure range — ruling O9's second half,
   // 2026-08-23). Any OTHER body keeps its type verbatim: a non-literal
   // body's type is already a stored/derived type (handler results are
   // widened where they are stored), and walking it here could rewrite a

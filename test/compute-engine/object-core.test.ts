@@ -280,15 +280,15 @@ describe('BoxedObject — .json (the full B5 form)', () => {
     const p = obj(ce, 'Person', { name: ce.string('Alan'), age: ce.number(42) });
     const reboxed = ce.box(p.json);
     expect(reboxed.type.toString()).toBe(
-      'record{name: string, age: finite_integer}'
+      'record{name: string, age: integer}'
     );
     expect(reboxed.evaluate().type.toString()).toBe(
-      'record{name: string, age: finite_integer}'
+      'record{name: string, age: integer}'
     );
     // Nested objects are records all the way down.
     const outer = obj(ce, 'Box', { inner: p });
     expect(ce.box(outer.json).type.toString()).toBe(
-      'record{inner: record{name: string, age: finite_integer}}'
+      'record{inner: record{name: string, age: integer}}'
     );
   });
 
@@ -848,7 +848,7 @@ describe('The `Object` provenance head', () => {
     // a genuine record type, because the body is a real `Dictionary`.
     expect(reboxed.type.toString()).toBe(reboxed.op1.type.toString());
     expect(reboxed.type.toString()).toBe(
-      'record{name: string, age: finite_integer}'
+      'record{name: string, age: integer}'
     );
   });
 });

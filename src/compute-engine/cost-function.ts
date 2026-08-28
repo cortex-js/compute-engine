@@ -275,7 +275,7 @@ export function costFunction(expr: Expression): number {
       const isCoef =
         typeof coefType === 'number'
           ? Number.isInteger(coefType)
-          : t === 'finite_integer' || t === 'finite_rational';
+          : t === 'integer' || t === 'rational';
       if (isCoef) {
         const secondOp = ops[1].operator;
         const base = ['Ln', 'Log', 'Lb'].includes(secondOp) ? 1 : 2;

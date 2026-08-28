@@ -535,7 +535,7 @@ export class Product {
 
     const xs: { exponent: Rational; terms: Expression[] }[] = [];
     if (!this.coefficient.isOne) {
-      if (mode === 'rational' && this.coefficient.type === 'finite_rational') {
+      if (mode === 'rational' && this.coefficient.type === 'rational') {
         // Numerator
         const num = this.coefficient.numerator;
         if (!num.isOne) xs.push({ exponent: [1, 1], terms: [ce.number(num)] });
@@ -1586,7 +1586,7 @@ export function canonicalMultiply(
       if (
         isFunction(next, 'Sqrt') &&
         isNumber(next.op1) &&
-        next.op1.type.matches('finite_integer')
+        next.op1.type.matches('integer')
       ) {
         // Next is a sqrt of a literal integer
         let radical: number | NumericValue = next.op1.numericValue;
@@ -1600,7 +1600,7 @@ export function canonicalMultiply(
         }
 
         // Is it preceded by a rational?
-        if (x.type.matches('finite_rational')) {
+        if (x.type.matches('rational')) {
           const rational = x.numericValue;
           const [num, den] =
             typeof rational === 'number'

@@ -7,7 +7,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 // spelling of "positive", `real<0..> & !0`, combines a bound with the zero
 // exclusion. Before that read existed, a range-typed declaration answered
 // `sgn: undefined`, so `Sqrt(q)` with `q: integer<1..>` typed
-// `finite_complex` — the declaration's sign never reached the sign channel.
+// `complex` — the declaration's sign never reached the sign channel.
 // (ROADMAP: "Ranged types should carry sign (and a literal's value) through
 // type derivation"; plan doc §5.8 A1.)
 
@@ -94,7 +94,7 @@ describe('an assumption refines the symbol type to a range (§5.8 A2)', () => {
     ce.declare('n', 'integer');
     ce.assume(ce.parse('n > 0'));
     expect(ce.symbol('n').type.toString()).toBe('integer<1..>');
-    expect(ce.box(['Factorial', 'n']).type.toString()).toBe('finite_integer');
+    expect(ce.box(['Factorial', 'n']).type.toString()).toBe('integer');
   });
 
   test('assume on an undeclared symbol declares the range', () => {
@@ -122,7 +122,7 @@ describe('an assumption refines the symbol type to a range (§5.8 A2)', () => {
     ce.assume(ce.parse('x > 0'));
     const roots = (ce.parse('x^2 = a').solve('x') ?? []).map(String).sort();
     expect(roots).toEqual(['-sqrt(a)', 'sqrt(a)'].sort());
-    expect(ce.box(['Sqrt', 'a']).type.toString()).toBe('finite_real');
+    expect(ce.box(['Sqrt', 'a']).type.toString()).toBe('real');
   });
 });
 
@@ -234,23 +234,23 @@ describe('type-handler consumers of a ranged declaration', () => {
   const t = (json: unknown) => ce.box(json as any).type.toString();
 
   test('Sqrt of a provably non-negative real is real', () => {
-    expect(t(['Sqrt', 'p'])).toBe('finite_real');
-    expect(t(['Sqrt', 's'])).toBe('finite_real');
+    expect(t(['Sqrt', 'p'])).toBe('real');
+    expect(t(['Sqrt', 's'])).toBe('real');
     // Non-positive: the radicand may be 0 (→ 0) or negative (→ imaginary).
-    expect(t(['Sqrt', 'r'])).toBe('finite_complex');
+    expect(t(['Sqrt', 'r'])).toBe('complex');
   });
 
   test('Factorial and Gamma see the pole-free domain', () => {
-    expect(t(['Factorial', 'p'])).toBe('finite_integer');
-    expect(t(['Gamma', 'p'])).toBe('finite_real');
+    expect(t(['Factorial', 'p'])).toBe('integer');
+    expect(t(['Gamma', 'p'])).toBe('real');
   });
 
   test('Ln of a provably positive operand is real', () => {
-    expect(t(['Ln', 'p'])).toBe('finite_real');
-    expect(t(['Ln', 's'])).toBe('finite_real');
+    expect(t(['Ln', 'p'])).toBe('real');
+    expect(t(['Ln', 's'])).toBe('real');
   });
 
   test('a zero-pole reciprocal head accepts a proven non-zero operand', () => {
-    expect(t(['Csc', 's'])).toBe('finite_real');
+    expect(t(['Csc', 's'])).toBe('real');
   });
 });

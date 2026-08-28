@@ -16,7 +16,7 @@ import type { Type } from '../../src/common/type/types';
 //
 //  1. The minted signature is `where`-quantified and its RESULT is the
 //     APPLIED reference (`tree<T>`), so the rank-1 call-site solver types
-//     `tree(1, [])` as `tree<finite_integer>`. A `def.type` handler would
+//     `tree(1, [])` as `tree<integer>`. A `def.type` handler would
 //     overwrite that (it runs AFTER the instantiation), so a parameterized
 //     nominal mints none.
 //  2. A generic ALIAS still mints nothing — the load-bearing precedent that
@@ -111,11 +111,11 @@ describe('§5 — the minted constructor is `where`-quantified', () => {
 });
 
 describe('§5 — T is solved at the construction site', () => {
-  test('tree(1, []) is a tree<finite_integer>', () => {
+  test('tree(1, []) is a tree<integer>', () => {
     const ce = treeEngine();
     const t = ce.box(['tree', 1, ['List']]);
     expect(t.isValid).toBe(true);
-    expect(t.type.toString()).toBe('tree<finite_integer>');
+    expect(t.type.toString()).toBe('tree<integer>');
   });
 
   test('the result is the APPLIED reference, never the bare nominal', () => {
@@ -150,7 +150,7 @@ describe('§5 — T is solved at the construction site', () => {
     const ce = treeEngine();
     const t = ce.box(['tree', 1, ['List']]).evaluate();
     expect(t.json).toEqual(['tree', 1, ['List']]);
-    expect(t.type.toString()).toBe('tree<finite_integer>');
+    expect(t.type.toString()).toBe('tree<integer>');
   });
 
   test('Epsil route: the §2 flagship declares and constructs with no diagnostic', () => {
@@ -162,7 +162,7 @@ describe('§5 — T is solved at the construction site', () => {
         't'
     );
     expect(r.diagnostics).toEqual([]);
-    expect(r.value.type.toString()).toBe('tree<finite_integer>');
+    expect(r.value.type.toString()).toBe('tree<integer>');
   });
 
   test('D9 injectivity survives quantification', () => {
@@ -314,7 +314,7 @@ describe('§5 — D14a grounding: the overlap check never sees an open type', ()
     install(ce);
     const raw = ce.box(['tree', 3, ['List']]).evaluate();
     expect(raw.json).toEqual(['tree', 3, ['List']]);
-    expect(raw.type.toString()).toBe('tree<finite_integer>');
+    expect(raw.type.toString()).toBe('tree<integer>');
   });
 
   test('an unannotated same-arity user arm is still rejected as overlap', () => {
@@ -373,7 +373,7 @@ describe('§5 — a record body is inhabited by a generic constructor function',
     const ce = recordTreeEngine();
     const t = ce.box(['tree', 1, ['List']]);
     expect(t.isValid).toBe(true);
-    expect(t.type.toString()).toBe('tree<finite_integer>');
+    expect(t.type.toString()).toBe('tree<integer>');
     expect(t.evaluate().json).toEqual([
       'tree',
       { dict: { value: 1, children: [] } },
@@ -385,7 +385,7 @@ describe('§5 — a record body is inhabited by a generic constructor function',
     const t = ce.box(['tree', 1, ['List']]).evaluate();
     const rt = ce.box(t.json).evaluate();
     expect(rt.json).toEqual(t.json);
-    expect(rt.type.toString()).toBe('tree<finite_integer>');
+    expect(rt.type.toString()).toBe('tree<integer>');
   });
 
   test('a wrong-arity result-type application does not produce a constructor', () => {
@@ -456,13 +456,13 @@ describe('§4.3/§5 — an invariant nominal is still a constructor argument', (
     const ce = nestedEngine('inout');
     const t = ce.box(['w', ['cell', 1]]);
     expect(t.isValid).toBe(true);
-    expect(t.type.toString()).toBe('w<finite_integer>');
+    expect(t.type.toString()).toBe('w<integer>');
   });
 
   test('…exactly as the identical `out` shape already did', () => {
     const ce = nestedEngine('out');
     expect(ce.box(['w', ['cell', 1]]).type.toString()).toBe(
-      'w<finite_integer>'
+      'w<integer>'
     );
   });
 
@@ -481,7 +481,7 @@ describe('§4.3/§5 — an invariant nominal is still a constructor argument', (
     });
     const t = ce.box(['rt', 1, ['List', ['rt', 2, ['List']]]]);
     expect(t.isValid).toBe(true);
-    expect(t.type.toString()).toBe('rt<finite_integer>');
+    expect(t.type.toString()).toBe('rt<integer>');
   });
 
   // The DEFERRED window reads as `inout` (ruling C), so it hits the same
@@ -494,10 +494,10 @@ describe('§4.3/§5 — an invariant nominal is still a constructor argument', (
     });
     ce.declareType('c', 'tuple<x: b<T>>', { typeParams: ['T'] });
     const inner = ce.box(['b', 1, ['List']]).evaluate();
-    expect(inner.type.toString()).toBe('b<finite_integer>');
+    expect(inner.type.toString()).toBe('b<integer>');
     const outer = ce.box(['c', inner]);
     expect(outer.isValid).toBe(true);
-    expect(outer.type.toString()).toBe('c<finite_integer>');
+    expect(outer.type.toString()).toBe('c<integer>');
   });
 
   // The runtime VALUE-membership check is the other half of the split: with
@@ -522,14 +522,14 @@ describe('§4.3/§5 — an invariant nominal is still a constructor argument', (
     );
     const t = ce.box(['nest', ['cell', 1]]).evaluate();
     expect(t.json).toEqual(['nest', ['cell', 1], ['cell', 1]]);
-    expect(t.type.toString()).toBe('nest<finite_integer>');
+    expect(t.type.toString()).toBe('nest<integer>');
   });
 });
 
 // §10 "Recursion" — nested construction, pinned after Phase 1 landed because
 // the admission mechanism is now the variance-aware rule: `T` solves from
 // operand 0, and the inner list is checked against the already-instantiated
-// `list<tree<finite_integer>>`.
+// `list<tree<integer>>`.
 describe('§10 — recursion: nested construction', () => {
   test('a 2-deep tree constructs and stays applied at every level', () => {
     const ce = new ComputeEngine();
@@ -538,7 +538,7 @@ describe('§10 — recursion: nested construction', () => {
     });
     const t = ce.box(['tree', 1, ['List', ['tree', 2, ['List']]]]);
     expect(t.isValid).toBe(true);
-    expect(t.type.toString()).toBe('tree<finite_integer>');
+    expect(t.type.toString()).toBe('tree<integer>');
   });
 
   test('a 3-deep tree constructs (the §10 recursion witness)', () => {
@@ -552,6 +552,6 @@ describe('§10 — recursion: nested construction', () => {
       ['List', ['tree', 2, ['List', ['tree', 3, ['List']]]]],
     ]);
     expect(t.isValid).toBe(true);
-    expect(t.type.toString()).toBe('tree<finite_integer>');
+    expect(t.type.toString()).toBe('tree<integer>');
   });
 });

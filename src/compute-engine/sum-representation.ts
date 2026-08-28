@@ -95,9 +95,10 @@ export function bucketOf(t: Type): {
     if (r === 'string') return { bucket: 'string', complexNumber: false };
     // `never` is a subtype of everything — it must not answer `number`.
     if (r === 'never' || r === 'unknown' || r === 'any') return none;
-    // The real tower (`integer`, `rational`, `real`, `finite_real`, …) is a JS
-    // machine number. `number` and `complex`/`imaginary` may additionally be a
-    // `{re, im}` object, which the representation test has to accept.
+    // The real tower — `integer`, `rational`, `real` and every range or
+    // literal over them — is a JS machine number. `number` and
+    // `complex`/`imaginary` may additionally be a `{re, im}` object, which
+    // the representation test has to accept.
     if (isSubtype(r, 'real')) return { bucket: 'number', complexNumber: false };
     if (isSubtype(r, 'number'))
       return { bucket: 'number', complexNumber: true };

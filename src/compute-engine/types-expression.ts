@@ -880,10 +880,10 @@ export interface Expression {
    * `handlerTypeOf()` in `library/type-handlers.ts`): for a literal it
    * carries the value itself (`21`, `0.5` as value types, an exact
    * machine-representable rational as a singleton range such as
-   * `finite_rational<0.5..0.5>`); when no machine number holds the value
+   * `rational<0.5..0.5>`); when no machine number holds the value
    * exactly it carries a compact outward enclosure on the literal's tier
-   * (`finite_real<1.4..1.5>` for `√2`), falling back to a sign range
-   * (`finite_integer<0..> & !0` for `10⁴⁰⁰`) when the magnitude is
+   * (`real<1.4..1.5>` for `√2`), falling back to a sign range
+   * (`integer<0..> & !0` for `10⁴⁰⁰`) when the magnitude is
    * outside the double range. Since ruling O9's second half (2026-08-23)
    * the PUBLIC `.type` of a number literal is this literal type too;
    * every handler result is still widened back to ordinary types before
@@ -2273,8 +2273,8 @@ export interface Expression {
    *
    * Note on typing (SYMBOLIC P2-24, by design): `N()` produces a float
    * literal, so its `type` can widen relative to the exact input's — e.g.
-   * `1/3` has type `finite_rational` while `(1/3).N()` has type
-   * `finite_real`. The result type reflects the representation produced,
+   * `1/3` has type `rational` while `(1/3).N()` has type
+   * `real`. The result type reflects the representation produced,
    * not the mathematical value's tightest type.
    */
   N(): Expression;

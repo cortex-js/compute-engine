@@ -341,7 +341,7 @@ describe('OBJECT TYPE — generic declarations (B13)', () => {
     expect(isObject(value!)).toBe(true);
     // The APPLIED reference is pinned on the value, not the bare declaration
     // record (which carries no arguments and would match no use of the type).
-    expect(value!.type.toString()).toBe('Ref<finite_integer>');
+    expect(value!.type.toString()).toBe('Ref<integer>');
   });
 
   test('`out` on a stored-field variable is rejected on the Epsil route', () => {
@@ -458,12 +458,12 @@ describe('OBJECT TYPE — the declaration statement', () => {
       'let c = Cell(value: 3)\nc'
     );
     expect(diagnostics).toEqual([]);
-    expect(value!.type.toString()).toBe('Cell<finite_integer>');
-    expect(value!.type.matches('Cell<finite_integer>')).toBe(true);
+    expect(value!.type.toString()).toBe('Cell<integer>');
+    expect(value!.type.matches('Cell<integer>')).toBe(true);
     expect(value!.type.matches('object')).toBe(true);
     // And an annotated binding of that very type accepts it.
     expect(
-      executeEpsil(engine, 'let d: Cell<finite_integer> = c\nd').diagnostics
+      executeEpsil(engine, 'let d: Cell<integer> = c\nd').diagnostics
     ).toEqual([]);
   });
 

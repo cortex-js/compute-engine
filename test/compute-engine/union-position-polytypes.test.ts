@@ -92,7 +92,7 @@ describe('RULE U — `type opt<T> = T | missing`', () => {
     const ce = optEngine();
     const t = ce.box(['opt', 1]);
     expect(t.isValid).toBe(true);
-    expect(t.type.toString()).toBe('opt<finite_integer>');
+    expect(t.type.toString()).toBe('opt<integer>');
   });
 
   test('the MISSING value takes the ground arm and solves T = never', () => {
@@ -105,8 +105,8 @@ describe('RULE U — `type opt<T> = T | missing`', () => {
   test('the subtype triple under the verified-out default', () => {
     const ce = optEngine();
     const t = (s: string) => ce.type(s).type;
-    expect(isSubtype(t('opt<finite_integer>'), t('opt<number>'))).toBe(true);
-    expect(isSubtype(t('opt<number>'), t('opt<finite_integer>'))).toBe(false);
+    expect(isSubtype(t('opt<integer>'), t('opt<number>'))).toBe(true);
+    expect(isSubtype(t('opt<number>'), t('opt<integer>'))).toBe(false);
     expect(isSubtype(t('opt<never>'), t('opt<integer>'))).toBe(true);
   });
 
@@ -132,9 +132,9 @@ describe('RULE U — a union nested in a body', () => {
     expect(signatureOf(ce, 'bag')).toBe('(d: T | string) -> bag<T> where T');
     const b = ce.box(['bag', 1]);
     expect(b.isValid).toBe(true);
-    expect(b.type.toString()).toBe('bag<finite_integer>');
+    expect(b.type.toString()).toBe('bag<integer>');
     expect(ce.box(['Field', b, { str: 'd' }]).type.toString()).toBe(
-      'finite_integer | string'
+      'integer | string'
     );
   });
 });
@@ -147,7 +147,7 @@ describe('RULE U — refutation propagates out of the open arm', () => {
     expect(ce.box(['lu', 's']).isValid).toBe(false);
     // …while both arms' own inhabitants are accepted.
     expect(ce.box(['lu', ['List', 1, 2]]).type.toString()).toBe(
-      'lu<finite_integer>'
+      'lu<integer>'
     );
     expect(ce.box(['lu', { str: 'abc' }]).type.toString()).toBe('lu<never>');
   });
@@ -162,7 +162,7 @@ describe('RULE U — a declared BOUND still binds through the arm', () => {
     // The instantiated parameter names the whole union, not just the arm.
     expect(JSON.stringify(bad.json)).toContain('missing | number');
     // …and an in-bound operand solves normally.
-    expect(ce.box(['f', 2]).type.toString()).toBe('list<finite_integer>');
+    expect(ce.box(['f', 2]).type.toString()).toBe('list<integer>');
   });
 });
 
@@ -241,7 +241,7 @@ describe('RULE U — the consumers', () => {
     expect(
       couldMatch(
         parseType('(T | missing) -> list<T> where T')!,
-        parseType('(finite_integer) -> list<finite_integer>')!
+        parseType('(integer) -> list<integer>')!
       )
     ).toBe(true);
   });

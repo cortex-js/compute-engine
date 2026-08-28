@@ -25,7 +25,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position', () => {
   // The document shape from the report: `h`/`H` assigned, `g`/`X`/`Y` declared
   // but not yet assigned, so `H(X(t), Y(t))` types
-  // `broadcastable<vector<finite_number^2>>`.
+  // `broadcastable<vector<2>>`.
   const setUp = (assignCallees: boolean): ComputeEngine => {
     const ce = new ComputeEngine();
     for (const n of ['h', 'H', 'g', 'X', 'Y', 'G']) ce.declare(n, 'function');
@@ -49,7 +49,7 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
   test('the numerator really is broadcastable-wrapped (non-vacuity)', () => {
     const ce = setUp(false);
     expect(ce.parse('H(X(t), Y(t))', { strict: false }).type.toString()).toBe(
-      'broadcastable<vector<finite_number^2>>'
+      'broadcastable<vector<2>>'
     );
   });
 
@@ -113,7 +113,7 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
   //    component possibly NaN, so the element widens to `number` (a bare
   //    `x / g(t)` types `number` for the same reason) — `vector<2>` is the
   //    printed form of a `number`-element 2-vector;
-  //  - a `number`-DECLARED symbol keeps `finite_number`, as `x / s` does.
+  //  - a `number`-DECLARED symbol keeps `number`, as `x / s` does.
   test('the quotient keeps the numerator shape, like its sibling operators', () => {
     const ce = setUp(false);
     ce.declare('s', 'number');
@@ -127,10 +127,10 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     // branded `number` because `isFinite === false` fired for `g(t)`'s
     // non-number TYPE, making the two rows disagree).
     expect(typeOf('\\frac{H(X(t), Y(t))}{g(t)}')).toBe(
-      'broadcastable<vector<finite_number^2>>'
+      'broadcastable<vector<2>>'
     );
     expect(typeOf('\\frac{H(X(t), Y(t))}{s}')).toBe(
-      'broadcastable<vector<finite_number^2>>'
+      'broadcastable<vector<2>>'
     );
     // Scalar-path parity for the same denominators (the mirror the widening
     // is defined by). Distinct symbols: `s/s` would fold to 1 at
@@ -138,15 +138,15 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     ce.declare('w', 'number');
     // (`s/g(t)` carries its own broadcast wrap — `g(t)` could itself be a
     // collection dividing `s` elementwise — so the parity reads at the
-    // ELEMENT: `finite_number`, matching the scalar row `s/w` below and the
+    // ELEMENT: `number`, matching the scalar row `s/w` below and the
     // vector's components above.)
-    expect(typeOf('\\frac{s}{g(t)}')).toBe('broadcastable<finite_number>');
-    expect(typeOf('\\frac{s}{w}')).toBe('finite_number');
+    expect(typeOf('\\frac{s}{g(t)}')).toBe('broadcastable<number>');
+    expect(typeOf('\\frac{s}{w}')).toBe('number');
     // No denominator, no tier movement: the sibling operators echo the shape.
     for (const latex of ['H(X(t), Y(t)) - g(t)', '-H(X(t), Y(t))'])
       expect([latex, typeOf(latex)]).toEqual([
         latex,
-        'broadcastable<vector<finite_number^2>>',
+        'broadcastable<vector<2>>',
       ]);
   });
 
@@ -155,42 +155,42 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
   // hold the widened tiers so that echo cannot return.
   test('dividing a lifted integer vector claims rational, not integer, components', () => {
     const ce = new ComputeEngine();
-    ce.declare('bvec', 'broadcastable<vector<finite_integer^2>>');
+    ce.declare('bvec', 'broadcastable<vector<integer^2>>');
     ce.declare('bscal', 'broadcastable<number>');
-    ce.declare('intfn', '(number) -> finite_integer');
+    ce.declare('intfn', '(number) -> integer');
     ce.declare('tt', 'number');
     // Truth: [6,2]/4 = [3/2,1/2] — the components are rational, not integer.
     expect(
       ce.parse('\\frac{\\lbrack6,2\\rbrack}{4}').evaluate().toString()
     ).toBe('[3/2,1/2]');
     expect(ce.box(['Divide', 'bvec', ['intfn', 'tt']]).type.toString()).toBe(
-      'broadcastable<vector<finite_rational^2>>'
+      'broadcastable<vector<rational^2>>'
     );
     // A broadcast-lifted SCALAR denominator (could be a scalar, or an indexed
     // collection dividing elementwise) preserves the shape either way.
     expect(ce.box(['Divide', 'bvec', 'bscal']).type.toString()).toBe(
-      'broadcastable<vector<finite_number^2>>'
+      'broadcastable<vector<2>>'
     );
   });
 
   test('a tuple numerator widens its component tiers the same way', () => {
     const ce = new ComputeEngine();
-    ce.declare('tup', 'tuple<finite_integer, finite_integer>');
-    ce.declare('intfn', '(number) -> finite_integer');
-    ce.declare('realfn', '(number) -> finite_real');
+    ce.declare('tup', 'tuple<integer, integer>');
+    ce.declare('intfn', '(number) -> integer');
+    ce.declare('realfn', '(number) -> real');
     ce.declare('tt', 'number');
     expect(ce.box(['Divide', 'tup', ['intfn', 'tt']]).type.toString()).toBe(
-      'tuple<finite_rational, finite_rational>'
+      'tuple<rational, rational>'
     );
     expect(ce.box(['Divide', 'tup', ['realfn', 'tt']]).type.toString()).toBe(
-      'tuple<finite_real, finite_real>'
+      'tuple<real, real>'
     );
     expect(ce.box(['Divide', 'tup', 'tt']).type.toString()).toBe(
-      'tuple<finite_number, finite_number>'
+      'tuple<number, number>'
     );
     // A tuple-shaped denominator still makes no shape claim: tuple / tuple
     // has no defined quotient and canonicalDivide rejects it.
-    ce.declare('tup2', 'tuple<finite_integer, finite_integer>');
+    ce.declare('tup2', 'tuple<integer, integer>');
     expect(ce.box(['Divide', 'tup', 'tup2']).isValid).toBe(false);
   });
 
@@ -213,8 +213,8 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
   // every `S`. Before that, the hand-rolled arm tested only for a numeric
   // SCALAR base, so a mixed union base disagreed with its list counterpart.
   test.each([
-    'finite_integer | string',
-    'vector<finite_number^2>',
+    'integer | string',
+    'vector<2>',
     'tuple<number, number>',
     'number',
   ])('broadcastable<%s> is admitted exactly as list<%s> is', (base) => {

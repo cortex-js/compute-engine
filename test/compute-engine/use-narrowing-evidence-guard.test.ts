@@ -121,7 +121,7 @@ describe('use-narrowing evidence guard', () => {
 
     // The evidence recorded is the RAW right-hand-side type: `v = 1 - i`
     // stores widened `number`, which `⊄ complex` — but the raw
-    // `finite_complex` fits, so no false static error.
+    // `complex` fits, so no false static error.
     expect(
       one(['let Q: (complex) -> complex', 'let v = 1 - i', 'Q(v)'])
     ).toEqual([]);

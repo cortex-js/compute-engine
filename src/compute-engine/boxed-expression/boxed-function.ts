@@ -1293,7 +1293,7 @@ export class BoxedFunction
    * every other operator.
    *
    * `Measurement` types as its nominal's scalar type (see `measurementType()`),
-   * so `Integrate(…).N()` reports `finite_real` and `isNumber === true`. The
+   * so `Integrate(…).N()` reports `real` and `isNumber === true`. The
    * numeric read surface has to honor that: a head that claims to be a real
    * number and then answers `NaN` to every numeric accessor is not a strict
    * contract, it is an unfinished one — and the failure is silent, because a
@@ -1939,7 +1939,7 @@ export class BoxedFunction
     // Definitely-not requires a PROOF: the type must share no value with
     // either disjunct. `nan` qualifies (NaN is neither a finite real nor a
     // signed infinity). A type that merely fails to entail real-ness —
-    // `finite_number`, `number`, `complex` — overlaps the reals and is
+    // `number`, `complex` — overlaps the reals and is
     // indeterminate.
     if (
       provablyDisjoint(t.type, 'real') &&
@@ -2838,7 +2838,7 @@ export class BoxedFunction
    * The broadcasting arithmetic operators (`Add`, `Multiply`, …) carry no
    * collection handlers — broadcasting is not a collection operator, it is a
    * property of how they evaluate — so `count` was `undefined` for `[1,2,3]+1`
-   * even though the type says `vector<finite_integer^3>`, and for
+   * even though the type says `vector<integer^3>`, and for
    * `2(1..99)/99-1` even though the `Range` inside it reports 99. A caller that
    * wants to prove finiteness before deciding whether to evaluate (a
    * comprehension-domain guard, say) then had no way to do so short of the
@@ -2853,7 +2853,7 @@ export class BoxedFunction
    * than guessing.
    *
    * Deliberately NOT extended to `isCollection`/`isFiniteCollection`: those
-   * report `false`/`undefined` for a `list<finite_number>` by design, and
+   * report `false`/`undefined` for a `list<number>` by design, and
    * consumers rely on that. This answers the LENGTH question only.
    *
    * Gated on `broadcastable === true` (2026-08-12): agreement is the length
@@ -2866,7 +2866,7 @@ export class BoxedFunction
    */
   private _broadcastCount(): number | undefined {
     // Only a collection-SHAPED result can have an element count. `Add(1, 2)`
-    // types `finite_integer` and must keep answering `undefined`. UNKEYED:
+    // types `integer` and must keep answering `undefined`. UNKEYED:
     // broadcast lifts over element collections only, so a keyed-typed result
     // (never produced by an admitted broadcast) stays `undefined`.
     if (!typeCouldBeUnkeyedCollection(this.type.type)) return undefined;
@@ -4947,7 +4947,7 @@ function lambdaBroadcastType(
     // element type — so the ordinary wrap below is the whole answer. It
     // reproduces the retired echo short-circuit on the bare-echo shape
     // (`f([1,2,3])` under `(T) -> T where T` is `vector<…^3>`, since `T`
-    // binds `finite_integer` and the wrap re-adds the operand's rank) and
+    // binds `integer` and the wrap re-adds the operand's rank) and
     // fixes the variable-MENTIONING shapes the short-circuit could not
     // reach.
     // As at the generic wrapper's arm 1: when every mapped operand is a
@@ -4955,7 +4955,7 @@ function lambdaBroadcastType(
     // list<number>`, with no operand that is definitely a collection), the
     // application is not a collection and the result carries the union
     // through — `f(u)` for `f := x ↦ 2x` types
-    // `finite_number | list<finite_number>`, the same as `2u`, instead of
+    // `number | list<number>`, the same as `2u`, instead of
     // the definite `list<E>` that `u := 5` contradicts.
     const loneUnionResult = loneUnionBroadcastResultType(
       mapped.map((x) => x.type.type),
@@ -5114,8 +5114,8 @@ function type(expr: BoxedFunction): Type {
           // A BARE `missing` operand strips to `never`, and a `never`-typed
           // descriptor proves numeric claims vacuously (`never` is the
           // bottom type, so it matches `real`): `Sin(Missing)` would claim
-          // `finite_real` where the expressions shape — reading the
-          // unstripped `missing` — claims `finite_number`. There is no
+          // `real` where the expressions shape — reading the
+          // unstripped `missing` — claims `number`. There is no
           // present-value component to type for a bare marker, so the
           // descriptor keeps the operand's own type and the absorption
           // machinery downstream owns the absent case; the strip applies
@@ -5170,7 +5170,7 @@ function type(expr: BoxedFunction): Type {
         // first half): a handler that echoes one into its result must not
         // store an over-specific contract nobody wrote (`tuple<1, 2>`), so
         // every handler result is widened back to ordinary types here — the
-        // single place a handler result is stored. Ranges (`finite_real<0..>`)
+        // single place a handler result is stored. Ranges (`real<0..>`)
         // pass through untouched.
         sigResult = widenValueTypes(sigResult);
       }
@@ -5261,7 +5261,7 @@ function type(expr: BoxedFunction): Type {
         // `det(M+N)`). A handler WITHOUT the exemption that produces a
         // collection-bearing type over a collection operand did so by naive
         // `widen(…)` — e.g. `Remainder(10⁴·[1,2,3], 7)` widening to
-        // `finite_integer | vector<3>` while the value ALWAYS broadcasts to a
+        // `integer | vector<3>` while the value ALWAYS broadcasts to a
         // list — and must be repaired to the definite `list<E>`, so the
         // declared exemption is the ONLY thing that defers (a shape test on
         // `sigResult` cannot tell a deliberate union from a widen artifact).
@@ -5296,7 +5296,7 @@ function type(expr: BoxedFunction): Type {
           // valueless symbol declared `number | list<number>`, with no operand
           // that is definitely a collection. Such an operand is not a
           // collection, so the result carries the union through
-          // (`finite_number | list<finite_number>` for `2u`) instead of
+          // (`number | list<number>` for `2u`) instead of
           // claiming the definite `list<E>` the same expression contradicts
           // once `u := 5` makes it evaluate to the scalar `10`. See
           // `loneUnionBroadcastResultType` for the rule and for why a definite
@@ -5352,7 +5352,7 @@ function type(expr: BoxedFunction): Type {
 
           // Rank/shape-aware lift (§D6.1): mirror the operands'
           // statically-provable structure — `Sqrt(M)` with `M: matrix<2x2>`
-          // types `list<finite_number^2x2>`, statically compatible with
+          // types `list<number^2x2>`, statically compatible with
           // `matrix` signature parameters. Falls back to the plain unbounded
           // `list<E>` whenever the shape is not provable from every
           // broadcasting operand (see `broadcastShapedResultType`).

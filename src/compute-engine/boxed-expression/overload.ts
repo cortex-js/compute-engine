@@ -386,7 +386,7 @@ function prefilterAdmits(
 
   // A value-component parameter (`0`, `integer<0..10>`) is refutable by
   // MEMBERSHIP, which the type-level disjointness test below cannot see: a
-  // literal `1` overlaps the TYPE of the parameter `0` (`0 ⊆ finite_integer`)
+  // literal `1` overlaps the TYPE of the parameter `0` (`0 ⊆ integer`)
   // while provably not being the value. `admissionOf`'s `'refute'` is a
   // proof of non-membership — the same tri-state the runtime clause dispatch
   // trusts (`armAdmission`) — so it is a legitimate "provably impossible"

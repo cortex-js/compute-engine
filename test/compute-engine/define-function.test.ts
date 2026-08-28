@@ -39,7 +39,7 @@ describe('DEFINE FUNCTION — multi-clause fib (spec §1)', () => {
 
   it('declares the overload-set type', () => {
     expect(ce.box('fib').type.toString()).toMatchInlineSnapshot(
-      `"((z: 0) -> finite_integer) & ((o: 1) -> finite_integer) & ((n: integer) -> broadcastable<number>)"`
+      `"((z: 0) -> integer) & ((o: 1) -> integer) & ((n: integer) -> broadcastable<number>)"`
     );
   });
 

@@ -549,7 +549,7 @@ describe('VARIANCE — Epsil route parity', () => {
 
 // §10 "Construction at a widened type" — the test the original N6 deferral
 // failed, so it must exist before Phase 2 closes. `tree(1, [])` constructs a
-// `tree<finite_integer>`; the annotation `tree<number>` is reachable only
+// `tree<integer>`; the annotation `tree<number>` is reachable only
 // through the §4.3 subtype rule, so it works exactly when the parameter is
 // covariant — which the v3 default makes the common case. Under an explicit
 // `inout` this is ruling (c): the documented limitation, not a bug.
@@ -560,7 +560,7 @@ describe('§10 — construction at a widened type', () => {
       typeParams: [{ name: 'T', variance: 'out' }],
     });
     const t = ce.box(['tree', 1, ['List']]);
-    expect(t.type.toString()).toBe('tree<finite_integer>');
+    expect(t.type.toString()).toBe('tree<integer>');
     expect(t.type.matches('tree<number>')).toBe(true);
   });
 
@@ -591,13 +591,13 @@ describe('§10 — construction at a widened type', () => {
     });
     const t = ce.box(['tree', 1, ['List']]);
     expect(t.type.matches('tree<number>')).toBe(false);
-    expect(t.type.matches('tree<finite_integer>')).toBe(true);
+    expect(t.type.matches('tree<integer>')).toBe(true);
   });
 
   // The Epsil route says the same thing, as a DIAGNOSTIC rather than a
   // subtype verdict: ruling (c) is a documented limitation, so it has to be
   // legible at the surface the user writes. The construction itself succeeds
-  // (`tree(1, [])` is a `tree<finite_integer>`); it is the widened ANNOTATION
+  // (`tree(1, [])` is a `tree<integer>`); it is the widened ANNOTATION
   // that fails.
   test('the Epsil spelling reports ruling (c) as an incompatible-type', () => {
     const ce = new ComputeEngine();
@@ -609,7 +609,7 @@ describe('§10 — construction at a widened type', () => {
     expect(messages.length).toBe(1);
     expect(messages[0]).toContain('expected `');
     expect(messages[0]).toContain('tree<number>');
-    expect(messages[0]).toContain('tree<finite_integer>');
+    expect(messages[0]).toContain('tree<integer>');
   });
 });
 
@@ -703,9 +703,9 @@ describe('VARIANCE — deferral propagates through the window (ruling C)', () =>
     const ce = blockedPair();
     const inner = ce.box(['b', 1, ['List']]);
     expect(inner.isValid).toBe(true);
-    expect(inner.type.toString()).toBe('b<finite_integer>');
+    expect(inner.type.toString()).toBe('b<integer>');
     const outer = ce.box(['c', inner]);
     expect(outer.isValid).toBe(true);
-    expect(outer.type.toString()).toBe('c<finite_integer>');
+    expect(outer.type.toString()).toBe('c<integer>');
   });
 });

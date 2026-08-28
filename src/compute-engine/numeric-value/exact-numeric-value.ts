@@ -212,13 +212,12 @@ export class ExactNumericValue extends NumericValue {
     if (this.isPositiveInfinity || this.isNegativeInfinity)
       return 'non_finite_number';
     // a/b√c -> real number (c can't be a perfect square)
-    if (this.im !== 0)
-      return isZero(this.rational) ? 'imaginary' : 'finite_complex';
+    if (this.im !== 0) return isZero(this.rational) ? 'imaginary' : 'complex';
     if (this.radical !== 1) {
       console.assert(!isZero(this.rational));
-      return 'finite_real';
+      return 'real';
     }
-    return isInteger(this.rational) ? 'finite_integer' : 'finite_rational';
+    return isInteger(this.rational) ? 'integer' : 'rational';
   }
 
   get isExact(): boolean {
@@ -1265,7 +1264,7 @@ export class ExactNumericValue extends NumericValue {
   }
 
   // An exact value is an integer iff it has no radical part and a unit
-  // denominator. (`this.type` returns `'finite_integer'`, never `'integer'`.)
+  // denominator.
   floor(): NumericValue {
     if (this.isNaN || this.im !== 0) return this.clone(NaN);
     if (this.radical === 1 && isInteger(this.rational)) return this;

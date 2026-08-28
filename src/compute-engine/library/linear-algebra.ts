@@ -157,7 +157,7 @@ function rank1Components(x: Expression): ReadonlyArray<Expression> | undefined {
  *
  * Without this the operator claimed a flat `number` for every provably numeric
  * pair, which is strictly LOOSER than writing the same arithmetic out:
- * `1·3 + 2·4` is `finite_integer` where `Dot((1, 2), (3, 4))` was `number`. The
+ * `1·3 + 2·4` is `integer` where `Dot((1, 2), (3, 4))` was `number`. The
  * cost is not cosmetic — `number` includes complex, so no `real`-declared slot
  * accepts it, and `Hypot(Dot(p, p), Dot(q, q))` reported `incompatible-type`
  * on an expression that is real by construction.
@@ -173,14 +173,11 @@ function rank1Components(x: Expression): ReadonlyArray<Expression> | undefined {
  * Dropping the construction drops the FOLDS canonicalization performed, and
  * that changes two answers (user-ruled 2026-08-22, accepted): `Multiply(a, 1)`
  * used to reduce to `a`, so a sum over components declared `real` or `integer`
- * inherited those declared types verbatim. The ladder instead reports the
- * `finite_*` spelling directly — the same reading `Multiply(a, b)` already
- * gives for two `real` symbols — so `Dot((a, b), (1, 2))` now types
- * `finite_real` and its integer twin `finite_integer`. (The two spellings
- * denote the same values since the bare names became finite; the ladder's
- * answer is the one the rest of the numeric handlers give.) The fold also carried a
- * `finite_rational` product tier the ladder does not claim, so that row widens
- * to `finite_real`.
+ * inherited those declared types verbatim. The ladder instead reports the tier
+ * directly — the same reading `Multiply(a, b)` already gives for two `real`
+ * symbols — so `Dot((a, b), (1, 2))` now types `real`, and its integer twin
+ * types `integer`. The fold also carried a `rational` product tier the ladder
+ * does not claim, so that row widens to `real`.
  */
 function innerProductType(
   a: Expression,
@@ -279,7 +276,7 @@ function componentProductType(
  *   ±∞ (`∞·3 + 2·4`), while two of them can cancel to NaN and a non-real
  *   companion can produce `~oo`, both of which only the top type admits;
  * - `imaginary` is not closed under addition — the imaginary parts can cancel
- *   to 0, which is real — so a purely imaginary join reports `finite_complex`.
+ *   to 0, which is real — so a purely imaginary join reports `complex`.
  *
  * A one-term sum is the term itself, as in `addType`'s single-argument
  * shortcut: there is nothing to cancel, so an `imaginary` product stays
@@ -305,7 +302,7 @@ function innerProductSumType(types: ReadonlyArray<Type>): Type {
     return 'number';
   }
   const t = widen(...types);
-  return t === 'imaginary' ? 'finite_complex' : t;
+  return t === 'imaginary' ? 'complex' : t;
 }
 
 /**
@@ -397,7 +394,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // here: with a bare `number` result, signature inference passed the
       // OPERAND's type through instead (`Rank(i)` claimed `imaginary` while
       // evaluating to 0).
-      signature: '(value) -> finite_integer',
+      signature: '(value) -> integer',
       // The rank (number of dimensions) of a scalar is 0.
       sgn: (): Sign => 'non-negative',
       evaluate: ([xs], { engine: ce }) => ce.number(xs.rank),

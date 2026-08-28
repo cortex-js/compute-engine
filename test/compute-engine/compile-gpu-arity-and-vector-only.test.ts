@@ -57,7 +57,7 @@ const U3 = ['List', 7, 8, 9];
 /** An engine with a declared INTEGER symbol — a runtime rounding precision. */
 const cen = new ComputeEngine();
 cen.declare('n', 'integer');
-cen.declare('x', 'finite_real');
+cen.declare('x', 'real');
 cen.declare('k', 'integer');
 
 /** Evaluate emitted shader source as f64 arithmetic. The four builtins the

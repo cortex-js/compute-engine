@@ -137,7 +137,7 @@ export function operandSgn(d: OperandDescriptor): Sign | undefined {
  * whatever the handler returns — so the handler's job is to describe a single
  * scalar, and its gates must read the fully unwrapped element type. Gating on
  * the collection type itself would decide every question the wrong way
- * (`list<finite_real>` is not a subtype of `real`), and unwrapping only ONE
+ * (`list<real>` is not a subtype of `real`), and unwrapping only ONE
  * rank would do the same for every operand of rank two or more: one unwrap of
  * `matrix<real^(2x2)>` yields the ROW type `list<real^2>`, which proves
  * nothing about a scalar either. Broadcast is elementwise all the way down,
@@ -164,7 +164,7 @@ export function operandSgn(d: OperandDescriptor): Sign | undefined {
  * element type for tuples, sets, dictionaries, records and strings, which
  * broadcast does NOT map over, so nothing re-wraps their shape and the
  * handler's scalar claim is returned as the whole result. `Sinc(Tuple(1,2))`
- * therefore types `finite_real` while staying symbolic. That is the same
+ * therefore types `real` while staying symbolic. That is the same
  * answer the retired constant handler gave, so it is kept deliberately
  * rather than corrected here; changing it belongs with the broadcast call
  * site, which is what decides which operand shapes are lifted.
@@ -320,18 +320,12 @@ function mayBeNaN(d: OperandDescriptor): boolean {
 /**
  * The closed real interval `[lo, hi]` that the operand's type guarantees,
  * with `±Infinity` for an unbounded end. A range on the numeric bases
- * `number`, `complex`, `finite_complex` and `imaginary` is discarded: an
- * ordering bound says nothing about a value that need not be real. The
- * exclusion list is the one `signOfType` uses, copied so the two agree,
- * and — like it — it is not a complete list of the non-real bases:
- * `finite_number` also admits finite complex values, and a
- * `finite_number<a..b>` would be read here as the real interval `[a, b]`.
- * Nothing constructs a ranged `finite_number` (every range the engine
- * attaches sits on a real tier), and the one caller that does not first
- * prove its operand real — `logType`'s base gate — requires a positive
- * sign, which such a type could only obtain from the same list. A caller
- * that compares an operand it has neither proven real nor proven signed
- * must add `finite_number` to the exclusion list first.
+ * `number`, `complex` and `imaginary` is discarded: an ordering bound says
+ * nothing about a value that need not be real. The decision is made by an
+ * INCLUSION list — the real, NaN-free tiers named in `NAN_FREE_REAL_TIERS`
+ * (`numerics/interval-arithmetic.ts`), shared with `signOfType` so the two
+ * agree — so a base nobody thought to name is discarded rather than
+ * silently read as a real interval.
  *
  * Range endpoints in the type lattice are inclusive; a strict bound is
  * carried separately, as an intersection with a negated value type —
@@ -480,9 +474,9 @@ function provablyDiffers(d: OperandDescriptor, k: number): boolean {
  *
  * A *provably* non-finite (±∞) argument is excluded: such functions can send
  * ±∞ to ±∞ *or* NaN (`sin(∞) = NaN`, `sinh(∞) = ∞`), neither of which is a
- * `finite_real`, so the sound claim there is the top type `number`. A bare
+ * `real`, so the sound claim there is the top type `number`. A bare
  * `real` symbol is itself finite, so it needs no separate finiteness proof
- * and yields `finite_real` directly.
+ * and yields `real` directly.
  *
  * This is NOT sound for functions with poles or a restricted real domain
  * (`ln`, `csc`, `arcsin`, …): those use the dedicated handlers below, routed
@@ -492,21 +486,21 @@ export function numericTypeHandler(
   ops: ReadonlyArray<OperandDescriptor>
 ): Type {
   if (ops.some((d) => operandNonFiniteNumber(d))) return 'number';
-  if (ops.every((d) => typeFact(d.type, 'real') === true)) return 'finite_real';
-  return 'finite_number';
+  if (ops.every((d) => typeFact(d.type, 'real') === true)) return 'real';
+  return 'number';
 }
 
 /**
  * Result type for an additive-shift operator — one whose result stays in
  * its operands' numeric kind under a shift by a real constant: the claim is
- * the JOIN of the operand kinds (`PreIncrement(2)` is a `finite_integer`
+ * the JOIN of the operand kinds (`PreIncrement(2)` is a `integer`
  * because n + 1 is closed on the integers). The claim is made only when
  * every operand is provably finite and provably numeric; a non-finite,
  * unknown-finiteness, or non-numeric operand widens the claim to the top
  * type `number`, because kind closure says nothing about what the operator
  * does at ±∞ or NaN. One kind is special-cased: `imaginary` is NOT closed
  * under a real shift (i + 1 is complex, with a nonzero real part), so it
- * widens to `finite_complex` — the same widening `Add`'s own typing applies
+ * widens to `complex` — the same widening `Add`'s own typing applies
  * (`boxed-expression/arithmetic-add.ts`).
  *
  * This behavior is strictly OPT-IN. An operator with no type handler keeps
@@ -533,7 +527,7 @@ export function kindClosureType(ops: ReadonlyArray<OperandDescriptor>): Type {
     )
       return 'number';
     kinds.push(
-      t === 'imaginary' ? 'finite_complex' : (t as NumericPrimitiveType)
+      t === 'imaginary' ? 'complex' : (t as NumericPrimitiveType)
     );
   }
   return widen(...kinds);
@@ -557,7 +551,7 @@ function logType(ops: ReadonlyArray<OperandDescriptor>): Type {
   // every y), so non-1-ness must be PROVEN, not merely un-disproven.
   // `operandLiteralValue` answers `undefined` for every non-literal, so a
   // `!== 1` test on it would accept any positive finite compound —
-  // including `Exp(r)`, whose type `finite_real<0..> & !0` proves positive
+  // including `Exp(r)`, whose type `real<0..> & !0` proves positive
   // and finite yet whose value IS 1 at r = 0, and `Log(4, Exp(0)).N()` is
   // `+oo`. `provablyDiffers` requires the type's bounds or its sign to
   // exclude 1, so an operand that may be 1 makes the base unusable and the
@@ -580,7 +574,7 @@ function logType(ops: ReadonlyArray<OperandDescriptor>): Type {
   // The descriptor's sign fact covers the case that once made wiring this
   // to the log heads unsound — a sign only an operator `sgn` handler knows
   // (`Negate(Floor(Abs(x)))`, whose result type is a bare
-  // `finite_integer`) — because `describe()` consults those handlers for
+  // `integer`) — because `describe()` consults those handlers for
   // applications (open item O7 of
   // `docs/plans/2026-08-22-type-handlers-on-types.md`); the divergence
   // table in `test/compute-engine/type-handler-twins.test.ts` is empty, so
@@ -591,17 +585,17 @@ function logType(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (base && !usableBase(base)) return 'number';
   // Provably negative finite argument: `ln(x) = ln|x| + iπ` (e.g.
   // `ln(−1) = iπ`) — a finite complex value.
-  if (negativeSign(xSgn) === true) return 'finite_complex';
+  if (negativeSign(xSgn) === true) return 'complex';
   // Provably positive (hence real, and finite per the check above): real.
-  if (positiveSign(xSgn) === true) return 'finite_real';
+  if (positiveSign(xSgn) === true) return 'real';
   // Sign unknown: the value may be real (x > 0), −∞ (x = 0) or finite
   // complex (x < 0) — the join is `complex | non_finite_number`. The bare
   // name `complex` denotes the FINITE complex numbers, so it cannot carry
   // the `x = 0` pole on its own and the signed pair is spelled out.
   // Neither disjunct admits NaN, so the claim is only sound when the
   // operand's type excludes NaN too (`ln(NaN) = NaN`): an operand that may
-  // be NaN (`number`, and `finite_number`, which is not a lattice subtype
-  // of `complex`) keeps the top type.
+  // be NaN — `number`, which sits ABOVE `complex` rather than inside it —
+  // keeps the top type.
   return typeFact(x.type, 'complex') === true
     ? COMPLEX_OR_SIGNED_INFINITY_TYPE
     : 'number';
@@ -637,7 +631,7 @@ function poleReciprocalType(
   // `±∞`, which the bare (finite) name `real` does not match.
   if (operandNonFiniteNumber(x))
     return hyperbolic && typeFact(x.type, EXTENDED_REAL_TYPE) === true
-      ? 'finite_real'
+      ? 'real'
       : 'number';
   // Past the non-finite arm the operand is not provably infinite, so the
   // finite name is the right question here.
@@ -651,7 +645,7 @@ function poleReciprocalType(
     // no value here — and is not 0 either, so it is off every pole.
     return poleAtZero && operandLiteralValue(x) === 0
       ? 'number'
-      : 'finite_real';
+      : 'real';
   }
   // A non-literal CONSTANT (π/2, 2π/3, …) can sit exactly on a circular pole
   // — `Tan(π/2) = ~oo`, `Csc(π) = ~oo` — so it keeps `number`. The
@@ -660,19 +654,19 @@ function poleReciprocalType(
   // NARROWER ON A SYNTHETIC DESCRIPTOR: this is a WIDENING branch gated on
   // `closed`, and `describeType()` — which builds a descriptor from a type
   // alone — always leaves `closed` undefined, so such a descriptor skips
-  // the branch and claims `finite_real` for a value that may be an exact
+  // the branch and claims `real` for a value that may be an exact
   // pole. Every call site today passes a `describe()` descriptor built from
   // a real operand, where `closed` is populated from the structural view; a
   // recursive derivation that ever routes a type-only descriptor into this
   // helper has to widen here instead of falling through.
   if (!hyperbolic && x.facts.closed === true) return 'number';
-  if (!poleAtZero) return 'finite_real';
+  if (!poleAtZero) return 'real';
   // Zero-pole operators on a symbolic real: the pole at 0 — the one provable
   // pole — must be disproven; the rest of the pole set has measure zero
   // (generic-point convention).
   const s = operandSgn(x);
   if (positiveSign(s) === true || negativeSign(s) === true)
-    return 'finite_real';
+    return 'real';
   return 'number';
 }
 
@@ -700,12 +694,12 @@ export const iv = (
  *
  * These heads take a **complex** value outside their real domain
  * (`arcsin(−2) = −π/2 + 1.3169…i`, `arcosh(−2) = 1.3169… + iπ`), so claiming
- * `finite_real` for an argument that is not provably in-domain is unsound —
- * `finite_complex` does not match `finite_real`. The handler below therefore
+ * `real` for an argument that is not provably in-domain is unsound —
+ * `complex` does not match `real`. The handler below therefore
  * decides three ways (user ruling 2026-07-30):
  *
- * - argument provably in `real`    → `finite_real`  (tight)
- * - argument provably in `complex` → `finite_complex`
+ * - argument provably in `real`    → `real`  (tight)
+ * - argument provably in `complex` → `complex`
  * - argument provably at a `pole`  → `poleType`
  * - otherwise                      → the join of what is still possible
  *
@@ -809,19 +803,19 @@ export function boundedInverseTrigType(
       domain.real.some(({ lo, hi }) => r === lo || r === hi) ||
       domain.complex.some(({ lo, hi }) => r === lo || r === hi);
     if (!onBoundary) {
-      if (containsNumber(domain.real, r)) return 'finite_real';
-      if (containsNumber(domain.complex, r)) return 'finite_complex';
+      if (containsNumber(domain.real, r)) return 'real';
+      if (containsNumber(domain.complex, r)) return 'complex';
       return domain.poleType;
     }
   }
 
   if (domain.poles.some((p) => provablyEquals(x, p))) return domain.poleType;
-  if (provablyIn(x, domain.real)) return 'finite_real';
-  if (provablyIn(x, domain.complex)) return 'finite_complex';
+  if (provablyIn(x, domain.real)) return 'real';
+  if (provablyIn(x, domain.complex)) return 'complex';
   // Magnitude unknown: the join of what remains. A pole that is provably
   // avoided (or a head with no real pole) drops the non-finite arm.
-  if (domain.poles.every((p) => provablyDiffers(x, p))) return 'finite_complex';
-  // The join of `finite_complex` with the pole value. `complex` denotes the
+  if (domain.poles.every((p) => provablyDiffers(x, p))) return 'complex';
+  // The join of `complex` with the pole value. `complex` denotes the
   // FINITE complex numbers, so it cannot absorb the pole: a signed-infinity
   // pole (`poleType: 'non_finite_number'`) is spelled out in the union, and
   // a NaN-or-`~oo`-capable pole (`poleType: 'number'`) forces the top type.
@@ -906,7 +900,7 @@ const ARCSCH_DOMAIN: RealDomain = {
 
 /**
  * `Arctan`/`Arccot`: real-closed on the *extended* reals (`arctan(±∞) = ±π/2`),
- * so any real argument — provably infinite ones included — → `finite_real`.
+ * so any real argument — provably infinite ones included — → `real`.
  * The only poles are at ±i, so a non-real or unknown-realness argument can be
  * complex infinity (`arctan(i) = ~oo`, `arctan(~oo)`) → the final `number`.
  *
@@ -923,7 +917,7 @@ const ARCSCH_DOMAIN: RealDomain = {
 function arctanType(ops: ReadonlyArray<OperandDescriptor>): Type {
   const x = ops[0];
   if (!x) return 'number';
-  if (typeFact(x.type, EXTENDED_REAL_TYPE) === true) return 'finite_real';
+  if (typeFact(x.type, EXTENDED_REAL_TYPE) === true) return 'real';
   return 'number';
 }
 
@@ -940,7 +934,7 @@ function arctanType(ops: ReadonlyArray<OperandDescriptor>): Type {
  * non-positive sign. The descriptor's sign fact covers the case that once
  * made wiring this to the Γ family unsound — a sign only an operator
  * `sgn` handler knows (`Negate(Floor(Abs(x)))`, whose result type is a
- * bare `finite_integer`) — because `describe()` consults those handlers
+ * bare `integer`) — because `describe()` consults those handlers
  * for applications (open item O7 of
  * `docs/plans/2026-08-22-type-handlers-on-types.md`); the divergence
  * table in `test/compute-engine/type-handler-twins.test.ts` is empty, so
@@ -965,22 +959,22 @@ export function gammaPoleType(x: OperandDescriptor | undefined): Type {
  * - NaN → NaN, and a non-finite argument that may be `~oo` (or a non-finite
  *   complex) → `number`;
  * - a provably real ±∞ maps to itself: `non_finite_number` (provable);
- * - a *provably* non-real argument rounds component-wise → `finite_complex`
+ * - a *provably* non-real argument rounds component-wise → `complex`
  *   (widened to `number` when its finiteness is not established);
  * - otherwise (real or unknown, finiteness unknown = generic point) →
- *   `finite_integer`.
+ *   `integer`.
  *
  * Non-realness must be PROVEN, not merely un-disproven. For a non-literal
  * the proof is a type that excludes the reals; reading a mere "not provably
- * real" as "complex" made `Round(4Q)` (Q undeclared, so `finite_number`)
+ * real" as "complex" made `Round(4Q)` (Q undeclared, so `number`)
  * type `number` while the strictly less informative `Round(Q)` typed
- * `finite_integer` — more knowledge about the operand yielding a weaker
+ * `integer` — more knowledge about the operand yielding a weaker
  * result.
  *
  * For a number LITERAL the proof is the sign: `unsigned` means the value has
  * an imaginary part or is NaN, and NaN is already excluded by the non-finite
  * arm above, so a finite literal of sign `unsigned` is exactly a non-real
- * one. The type does not answer this — `1 + 2i` types `finite_complex`,
+ * one. The type does not answer this — `1 + 2i` types `complex`,
  * which is not disjoint from `real` — so the sign is the channel that
  * carries a literal's non-realness here.
  */
@@ -997,10 +991,10 @@ export function roundingFunctionType(x: OperandDescriptor | undefined): Type {
     ? x.facts.sgn === 'unsigned'
     : typeFact(x.type, 'imaginary') === true;
   if (provablyNonReal)
-    return x.facts.finite === true || typeFact(x.type, 'finite_number') === true
-      ? 'finite_complex'
+    return x.facts.finite === true || typeFact(x.type, 'complex') === true
+      ? 'complex'
       : 'number';
-  return 'finite_integer';
+  return 'integer';
 }
 
 /**
@@ -1045,7 +1039,7 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
   // |x| also preserves the numeric TIER of a real operand: the magnitude of
   // an integer is an integer, of a rational a rational (`|−1/2| = 1/2`). A
   // *complex* finite operand — whose magnitude is real but neither rational
-  // nor integer — matches no tier rung and lands on `finite_real`.
+  // nor integer — matches no tier rung and lands on `real`.
   // |x| ≥ 0, and the type says so: each tier claim carries its non-negative
   // range, so a type-channel consumer (`√|x|`, the GPU real-vs-complex
   // lowering) sees the sign the sgn handler always knew.
@@ -1054,34 +1048,21 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
   // the plain non-negative range `tier<0..>` otherwise — shared with the
   // Expression shape in `type-handlers.ts`, so the twins cannot diverge.
   //
-  // Each tier is walked in BOTH its spellings, tighter first: the bare
-  // names `integer`/`rational`/`real` and the `finite_*` names denote the
-  // same finite values, but they are formally distinct types until the
-  // `finite_*` names retire — `integer` is not a subtype of
-  // `finite_integer` — and the claim reports whichever spelling the operand
-  // actually carries, so an `integer` operand keeps the integer tier that
-  // the exact-mode Map compile tier's integer-closedness probe reads.
+  // The tiers are walked tightest first, so an `integer` operand keeps the
+  // integer tier that the exact-mode Map compile tier's integer-closedness
+  // probe reads.
   //
-  // The real tiers are tested DIRECTLY, not behind a `finite_number` gate:
-  // matching a real tier is itself the finiteness proof, so the claim does
-  // not depend on whether the lattice also relates that tier to the
-  // `finite_number` spelling. It also degrades gracefully — whatever a
-  // given lattice means by `real`, `|x|` of it is the non-negative half of
-  // that same set.
-  for (const tier of [
-    'finite_integer',
-    'integer',
-    'finite_rational',
-    'rational',
-    'finite_real',
-    'real',
-  ] as const)
+  // The real tiers are tested DIRECTLY, not behind a finiteness gate:
+  // matching a real tier is itself the finiteness proof, because every bare
+  // name under `number` denotes finite values alone. It also degrades
+  // gracefully — whatever a given lattice means by `real`, `|x|` of it is
+  // the non-negative half of that same set.
+  for (const tier of ['integer', 'rational', 'real'] as const)
     if (typeFact(t, tier) === true) return absRange(tier, t);
   // A finite operand that matched no real tier is complex, and the
   // magnitude of a finite complex number is a finite real that is neither
   // rational nor integer.
-  if (typeFact(t, 'finite_number') === true || typeFact(t, 'complex') === true)
-    return absRange('finite_real', t);
+  if (typeFact(t, 'complex') === true) return absRange('real', t);
   // The operand is neither provably finite nor provably infinite, so `|x|`
   // is either a non-negative real or `+∞` — the only infinite magnitude
   // there is. NaN is NOT covered by this claim: the exclusion above catches
@@ -1101,10 +1082,8 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
  * the claim narrows to the join tier of the operand types. A collection
  * operand (which may be empty or contain `Missing`) keeps `number`.
  *
- * The ladder walks the finite tiers before their bare spellings because the
- * two are formally distinct types until the `finite_*` names retire; both
- * halves denote finite values, so the first rung every operand matches is
- * the tightest true claim.
+ * The ladder walks the numeric tiers from tightest to widest, so the first
+ * rung every operand matches is the tightest true claim.
  *
  * An operand set containing a signed infinity matches no rung and takes the
  * top type. That is sound but loose — `max(+∞, 3)` really is `+∞`, so the
@@ -1117,14 +1096,7 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
 export function extremumType(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.length === 0) return 'number';
   if (!ops.every((d) => typeFact(d.type, 'number') === true)) return 'number';
-  for (const t of [
-    'finite_integer',
-    'finite_rational',
-    'finite_real',
-    'integer',
-    'rational',
-    'real',
-  ] as const)
+  for (const t of ['integer', 'rational', 'real'] as const)
     if (ops.every((d) => typeFact(d.type, t) === true)) return t;
   return 'number';
 }
@@ -1180,7 +1152,7 @@ export function bigOpResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
 /**
  * Result type for the elementary/inverse trig and log functions, dispatched by
  * operator so that pole-capable and domain-restricted operators do not claim
- * `finite_real` where their values are complex/infinite/NaN.
+ * `real` where their values are complex/infinite/NaN.
  */
 export function elementaryFunctionType(
   operator: string,
@@ -1230,7 +1202,7 @@ export function elementaryFunctionType(
         ops[0].facts.finite === false &&
         typeFact(ops[0].type, EXTENDED_REAL_TYPE) === true
       )
-        return 'finite_real';
+        return 'real';
       return numericTypeHandler(ops);
 
     case 'Arcsin':
@@ -1248,7 +1220,7 @@ export function elementaryFunctionType(
     // Inverse hyperbolic functions with real poles / restricted real domains.
     // `artanh(±1) = ±∞`, `arcoth(±1) = ±∞`, `arsech(0) = +∞`, `arcsch(0) = ~oo`
     // are non-finite, and outside the real domain the value is complex, so
-    // neither may claim `finite_real`.
+    // neither may claim `real`.
     case 'Artanh':
       return boundedInverseTrigType(ops, ARTANH_DOMAIN);
     case 'Arcoth':
@@ -1284,7 +1256,7 @@ export function adjoinType(ops: ReadonlyArray<OperandDescriptor>): Type {
     (base ? collectionElementType(base.type) : undefined) ?? 'unknown';
   const adjoined = ops.slice(1).map((d) => d.type);
   // `widen` treats `unknown` as "no information" and drops it, which would let
-  // `ℤ[x]` (an INDETERMINATE) claim `set<finite_integer>` — unsound, since the
+  // `ℤ[x]` (an INDETERMINATE) claim `set<integer>` — unsound, since the
   // elements are polynomials in `x`, not integers. An adjunct carrying no type
   // information takes the whole claim to `unknown`.
   if (baseElements === 'unknown' || adjoined.some((t) => t === 'unknown'))
@@ -1297,7 +1269,7 @@ export function adjoinType(ops: ReadonlyArray<OperandDescriptor>): Type {
  * by `m` (`ℤ_n` = `ℤ/nℤ`).
  *
  * The residues are represented by elements of the base ring, so the element
- * type is the base's: `QuotientRing(Integers, n)` is a `set<finite_integer>`.
+ * type is the base's: `QuotientRing(Integers, n)` is a `set<integer>`.
  * The quotient is never larger than the base, so this is an upper bound in
  * both directions and introduces no non-finite value.
  */

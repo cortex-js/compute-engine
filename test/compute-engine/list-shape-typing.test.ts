@@ -26,10 +26,10 @@ function typeOf(expr: any): string {
 describe('Phase A — honest List shape typing (§D3 normative table)', () => {
   // Phase C representation unification: literal lists type honestly
   // (list<finite_…^dims>).
-  test('[1,2,3] → vector<finite_integer^3> (honest literal-list typing)', () => {
+  test('[1,2,3] → vector<integer^3> (honest literal-list typing)', () => {
     // Phase C: every List is a plain canonical List; its cell type is the
     // honest global-widened element type reported from the List type handler.
-    expect(typeOf(['List', 1, 2, 3])).toBe('vector<finite_integer^3>');
+    expect(typeOf(['List', 1, 2, 3])).toBe('vector<integer^3>');
   });
 
   test('evaluated broadcast result: honest shaped type, subtype of declared', () => {
@@ -51,9 +51,9 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
     );
   });
 
-  test('[[1,2],[3.5,4.5]] → matrix<finite_real^(2x2)> (honest global widening)', () => {
+  test('[[1,2],[3.5,4.5]] → matrix<real^(2x2)> (honest global widening)', () => {
     const boxed = ce.box(['List', ['List', 1, 2], ['List', 3.5, 4.5]]);
-    expect(boxed.type.toString()).toBe('matrix<finite_real^(2x2)>');
+    expect(boxed.type.toString()).toBe('matrix<real^(2x2)>');
   });
 
   test('[[x,y],[z,w]] undeclared symbols → matrix<2x2> (fold at every leaf)', () => {
@@ -157,16 +157,14 @@ describe('Phase A — degenerate lists keep prior (no-claim) behavior', () => {
     expect(boxed.type.matches('matrix<2x2>')).toBe(false);
     // Mixed row dimensions surface as a list of differently-shaped vectors.
     expect(boxed.type.toString()).toBe(
-      'list<vector<finite_integer^1> | vector<finite_integer^2>>'
+      'list<vector<integer^1> | vector<integer^2>>'
     );
   });
 
   test('mixed-depth [1,[2]] → no shape claim', () => {
     const boxed = ce.box(['List', 1, ['List', 2]]);
     expect(boxed.type.matches('vector<2>')).toBe(false);
-    expect(boxed.type.toString()).toBe(
-      'list<finite_integer | vector<finite_integer^1>>'
-    );
+    expect(boxed.type.toString()).toBe('list<integer | vector<integer^1>>');
   });
 
   test('[[],[]] empty inner levels → no shape claim', () => {
@@ -192,17 +190,17 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
 
   test('a matrix LITERAL keeps the dimensioned matrix encoding', () => {
     const e = ce.box(['Negate', M22]);
-    expect(e.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(e.type.toString()).toBe('matrix<integer^(2x2)>');
     // The declared type is exactly what the value evaluates to — the mixed
     // encoding was a strictly worse claim about the same value.
-    expect(e.evaluate().type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(e.evaluate().type.toString()).toBe('matrix<integer^(2x2)>');
     expect(e.evaluate().toString()).toBe('[[-1,-2],[-3,-4]]');
   });
 
   test('rank 3 too — the re-wrap nested a matrix inside a rank-3 shape', () => {
     const e = ce.box(['Negate', ['List', M22, M22]]);
-    expect(e.type.toString()).toBe('list<finite_integer^(2x2x2)>');
-    expect(e.evaluate().type.toString()).toBe('list<finite_integer^(2x2x2)>');
+    expect(e.type.toString()).toBe('list<integer^(2x2x2)>');
+    expect(e.evaluate().type.toString()).toBe('list<integer^(2x2x2)>');
   });
 
   test('a matrix-TYPED symbol and rank 1 are unchanged', () => {
@@ -212,9 +210,9 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
       'matrix<integer^(2x2)>'
     );
     expect(ce.box(['Negate', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
-    expectTypeBetween(ce.box(['Negate', 5]), { atMost: 'finite_integer' });
+    expectTypeBetween(ce.box(['Negate', 5]), { atMost: 'integer' });
   });
 
   test('a SHAPELESS handler result still goes through the wrapper', () => {
@@ -236,15 +234,15 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
     // integers are irrational).
     expectTypeBetween(ce.box(['Sin', M22]), {
       atMost: 'matrix<2x2>',
-      above: 'matrix<finite_rational^(2x2)>',
+      above: 'matrix<rational^(2x2)>',
     });
     expectTypeBetween(ce.box(['Sqrt', M22]), {
       atMost: 'matrix<2x2>',
-      above: 'matrix<finite_rational^(2x2)>',
+      above: 'matrix<rational^(2x2)>',
     });
     expectTypeBetween(ce.box(['Sin', ['List', 1, 2, 3]]), {
       atMost: 'vector<3>',
-      above: 'vector<finite_rational^3>',
+      above: 'vector<rational^3>',
     });
   });
 
@@ -264,10 +262,10 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
       evaluate: (ops) => ops[0],
     } as any);
     const low = eng.box(['pg57', ['List', 10, 20], M22]);
-    expect(low.type.toString()).toBe('list<finite_integer>');
+    expect(low.type.toString()).toBe('list<integer>');
     expect(low.evaluate().type.matches(low.type.toString())).toBe(true);
     const dom = eng.box(['pg57', M22, ['List', 10, 20]]);
-    expect(dom.type.toString()).toBe('list<finite_integer>');
+    expect(dom.type.toString()).toBe('list<integer>');
     expect(dom.evaluate().type.matches(dom.type.toString())).toBe(true);
     // The ground counterpart, for the parity claim above.
     eng.declare('gg57', {
@@ -297,9 +295,9 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
     expect(e.evaluate().type.matches(e.type.toString())).toBe(true);
     // `Remainder(M, 7)` no longer widens to a union at all: element-binding
     // joins the matrix LEAF with the scalar, so the wrapper gives the clean
-    // matrix (was `list<finite_integer | vector<finite_integer^2>^(2x2)>`).
+    // matrix (was `list<integer | vector<integer^2>^(2x2)>`).
     expect(ce.box(['Remainder', M22, 7]).type.toString()).toBe(
-      'matrix<finite_integer^(2x2)>'
+      'matrix<integer^(2x2)>'
     );
   });
 });

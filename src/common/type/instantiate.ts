@@ -1013,7 +1013,7 @@ export function solveTypeArguments(
       // variable (`(T, T) -> T`) is routinely an innocent operand — its type
       // satisfies the bound, and its only role was to be joined with a later,
       // incompatible one (`f(5, matrix)` blamed operand 0, reporting `number`
-      // as expected against the perfectly good `finite_integer`). When every
+      // as expected against the perfectly good `integer`). When every
       // contribution individually satisfies the bound and only the JOIN
       // violates it, no single position is at fault, so the first pinning
       // position is blamed as before.

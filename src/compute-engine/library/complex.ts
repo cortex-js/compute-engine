@@ -68,12 +68,12 @@ export function signFromAssumedPart(
 const realPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
   if (!z) return 'number';
   const t = z.type;
-  if (t.matches('finite_number')) return 'finite_real';
+  if (t.matches('complex')) return 'real';
   if (t.matches('non_finite_number')) return 'non_finite_number';
   if (isNumber(z)) return 'number'; // a `nan` or `~oo` literal
   // Collection operand: scalar claim for the broadcast lift — elements
   // keep the generic finite-point convention (list-broadcast-typing).
-  if (t.matches('indexed_collection<any>')) return 'finite_real';
+  if (t.matches('indexed_collection<any>')) return 'real';
   // A real-typed operand is its own real part. The bare name `real` is
   // finite and excludes `~oo` and NaN, so this claim is exact; a
   // `number`-typed operand may be either of those and keeps the top type.
@@ -87,14 +87,13 @@ const realPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
 const imaginaryPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
   if (!z) return 'number';
   const t = z.type;
-  if (t.matches('finite_number') || t.matches('non_finite_number'))
-    return 'finite_real';
+  if (t.matches('complex') || t.matches('non_finite_number')) return 'real';
   if (isNumber(z)) return 'number'; // a `nan` or `~oo` literal
-  if (t.matches('indexed_collection<any>')) return 'finite_real';
+  if (t.matches('indexed_collection<any>')) return 'real';
   // A real-typed operand has Im = 0. The bare name `real` is finite and
   // excludes `~oo` and NaN; a `number`-typed operand may be either, and
   // their imaginary part is not a finite real.
-  return t.matches('real') ? 'finite_real' : 'number';
+  return t.matches('real') ? 'real' : 'number';
 };
 
 // Arg of a finite number — or of a real ±∞ (0 or π) — is a finite real.
@@ -104,14 +103,13 @@ const imaginaryPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
 const argumentType: OperatorTypeHandlerOnExpressions = ([z]) => {
   if (!z) return 'number';
   const t = z.type;
-  if (t.matches('finite_number') || t.matches('non_finite_number'))
-    return 'finite_real';
+  if (t.matches('complex') || t.matches('non_finite_number')) return 'real';
   if (isNumber(z)) return 'number'; // a `nan` or `~oo` literal
-  if (t.matches('indexed_collection<any>')) return 'finite_real';
+  if (t.matches('indexed_collection<any>')) return 'real';
   // A real-typed operand has Arg ∈ {0, π}. The bare name `real` is finite
   // and excludes `~oo` and NaN; a `number`-typed operand may be either,
   // where Arg is NaN.
-  return t.matches('real') ? 'finite_real' : 'number';
+  return t.matches('real') ? 'real' : 'number';
 };
 
 export const COMPLEX_LIBRARY: SymbolDefinitions[] = [

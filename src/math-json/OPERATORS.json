@@ -639,7 +639,7 @@
       "name": "BernoulliB",
       "category": "Number Theory",
       "arity": "1",
-      "signature": "(integer) -> finite_rational",
+      "signature": "(integer) -> rational",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -2059,7 +2059,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Test whether a value is an element of a collection. Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.\n\nElement supports two modes of operation:\n1. Set membership: Element(3, [List, 1, 2, 3]) checks if 3 is in the list\n2. Type-style membership: Element(x, integer) checks if x has type integer\n\nType-style membership works with:\n- Mathematical sets: Integers, RealNumbers, ComplexNumbers, etc.\n- Type names: integer, real, number, finite_real, positive_integer, etc.\n- Invalid type names remain unevaluated (e.g., Element(2, \"Booleans\"))"
+      "description": "Test whether a value is an element of a collection. Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.\n\nElement supports two modes of operation:\n1. Set membership: Element(3, [List, 1, 2, 3]) checks if 3 is in the list\n2. Type-style membership: Element(x, integer) checks if x has type integer\n\nType-style membership works with:\n- Mathematical sets: Integers, RealNumbers, ComplexNumbers, etc.\n- Type names: integer, rational, real, number, positive_integer, etc.\n- Invalid type names remain unevaluated (e.g., Element(2, \"Booleans\"))"
     },
     {
       "name": "ElementMax",
@@ -7565,7 +7565,7 @@
       "name": "WithRandomSeed",
       "category": "Core",
       "arity": "2",
-      "signature": "(finite_real | string, any) -> expression",
+      "signature": "(real | string, any) -> expression",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7642,7 +7642,7 @@
     {
       "name": "CatalanConstant",
       "category": "Arithmetic",
-      "type": "finite_real",
+      "type": "real",
       "description": "Catalan's constant G ≈ 0.9160.",
       "wikidata": "Q855282",
       "value": "{\"num\":\"0.91596559417721901505460351493238411077414937428167\\n                  21342664981196217630197762547694793565129261151062\\n                  48574422619196199579035898803325859059431594737481\\n                  15840699533202877331946051903872747816408786590902\\n                  47064841521630002287276409423882599577415088163974\\n                  70252482011560707644883807873370489900864775113225\\n                  99713434074854075532307685653357680958352602193823\\n                  23950800720680355761048235733942319149829836189977\\n                  06903640418086217941101917532743149978233976105512\\n                  24779530324875371878665828082360570225594194818097\\n                  53509711315712615804242723636439850017382875977976\\n                  53068370092980873887495610893659771940968726844441\\n                  66804621624339864838916280448281506273022742073884\\n                  31172218272190472255870531908685735423498539498309\\n                  91911596738846450861515249962423704374517773723517\\n                  75440708538464401321748392999947572446199754961975\\n                  87064007474870701490937678873045869979860644874974\\n                  64387206238513712392736304998503539223928787979063\\n                  36440323547845358519277777872709060830319943013323\\n                  16712476158709792455479119092126201854803963934243\\n                  \"}"
@@ -7656,7 +7656,7 @@
     {
       "name": "ComplexNumbers",
       "category": "Collections",
-      "type": "set<finite_complex>",
+      "type": "set<complex>",
       "description": "The set of all finite complex numbers."
     },
     {
@@ -7668,7 +7668,7 @@
     {
       "name": "e",
       "category": "Arithmetic",
-      "type": "finite_real",
+      "type": "real",
       "description": "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
       "value": "ExponentialE"
     },
@@ -7689,14 +7689,14 @@
     {
       "name": "EulerGamma",
       "category": "Arithmetic",
-      "type": "finite_real",
+      "type": "real",
       "description": "The Euler–Mascheroni constant γ ≈ 0.5772.",
       "wikidata": "Q273023"
     },
     {
       "name": "ExponentialE",
       "category": "Arithmetic",
-      "type": "finite_real",
+      "type": "real",
       "description": "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
       "wikidata": "Q82435"
     },
@@ -7741,7 +7741,7 @@
     {
       "name": "GoldenRatio",
       "category": "Arithmetic",
-      "type": "finite_real",
+      "type": "real",
       "description": "The golden ratio φ = (1+√5)/2 ≈ 1.618.",
       "wikidata": "Q41690",
       "value": "[\"Divide\",[\"Add\",1,[\"Sqrt\",5]],2]"
@@ -7756,7 +7756,7 @@
     {
       "name": "Half",
       "category": "Arithmetic",
-      "type": "finite_rational",
+      "type": "rational",
       "description": "The rational number one half (1/2).",
       "value": "[\"Rational\",1,2]"
     },
@@ -7782,13 +7782,13 @@
     {
       "name": "Integers",
       "category": "Collections",
-      "type": "set<finite_integer>",
+      "type": "set<integer>",
       "description": "The set of all finite integers."
     },
     {
       "name": "MachineEpsilon",
       "category": "Arithmetic",
-      "type": "finite_real",
+      "type": "real",
       "description": "The difference between 1 and the next larger floating point number (machine epsilon).",
       "value": "{\"num\":\"2.220446049250313e-16\"}"
     },
@@ -7857,7 +7857,7 @@
     {
       "name": "Pi",
       "category": "Trigonometry",
-      "type": "finite_real",
+      "type": "real",
       "description": "The constant π ≈ 3.14159, the ratio of a circle's circumference to its diameter.",
       "wikidata": "Q167"
     },
@@ -7890,13 +7890,13 @@
     {
       "name": "RationalNumbers",
       "category": "Collections",
-      "type": "set<finite_rational>",
+      "type": "set<rational>",
       "description": "The set of all finite rational numbers."
     },
     {
       "name": "RealNumbers",
       "category": "Collections",
-      "type": "set<finite_real>",
+      "type": "set<real>",
       "description": "The set of all finite real numbers."
     },
     {

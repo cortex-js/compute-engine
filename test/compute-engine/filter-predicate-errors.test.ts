@@ -27,7 +27,7 @@ describe('Filter with an Error-valued predicate result', () => {
     ce.assign('ds', ce.box(['List', 1, 2, 3]));
     const f = ce.box(['Filter', 'ds', ['Function', ['Greater', 'n', 0], 'n']]);
 
-    // First evaluation auto-annotates the parameter with `finite_integer`.
+    // First evaluation auto-annotates the parameter with `integer`.
     expect(f.evaluate().toString()).toBe('[1,2,3]');
 
     // Retract the source to floats: every element is now rejected by the
@@ -43,19 +43,19 @@ describe('Filter with an Error-valued predicate result', () => {
     const ce = new ComputeEngine();
     const xs = ['List', 1.5, 2.5];
     const filtered = ce
-      .box(['Filter', xs, annotatedPredicate('n', 'finite_integer')])
+      .box(['Filter', xs, annotatedPredicate('n', 'integer')])
       .evaluate();
     const mapped = ce
       .box([
         'Map',
-        ['Function', ['Add', 'n', 0], ['Typed', 'n', "'finite_integer'"]],
+        ['Function', ['Add', 'n', 0], ['Typed', 'n', "'integer'"]],
         xs,
       ])
       .evaluate();
     expect(filtered.toString()).toBe(mapped.toString());
     expect(filtered.toString()).toBe(
-      '[Error(ErrorCode("incompatible-type", "finite_integer", "1.5"), 1.5),' +
-        'Error(ErrorCode("incompatible-type", "finite_integer", "2.5"), 2.5)]'
+      '[Error(ErrorCode("incompatible-type", "integer", "1.5"), 1.5),' +
+        'Error(ErrorCode("incompatible-type", "integer", "2.5"), 2.5)]'
     );
   });
 
@@ -99,7 +99,7 @@ describe('Sibling predicate consumers with an Error-valued result', () => {
         .box([
           op,
           ['List', 1.5, 2.5],
-          annotatedPredicate('n', 'finite_integer'),
+          annotatedPredicate('n', 'integer'),
         ])
         .evaluate();
       expect(result.operator).toBe('Error');
@@ -155,7 +155,7 @@ describe('Any/All with an Error-valued predicate result', () => {
         .box([
           op,
           ['List', 1.5, 2.5],
-          annotatedPredicate('n', 'finite_integer'),
+          annotatedPredicate('n', 'integer'),
         ])
         .evaluate();
       expect(result.operator).toBe('Error');
@@ -173,7 +173,7 @@ describe('Any/All with an Error-valued predicate result', () => {
         .box([
           op,
           ['List', 1.5, op === 'Any' ? 7 : -1],
-          annotatedPredicate('n', 'finite_integer'),
+          annotatedPredicate('n', 'integer'),
         ])
         .evaluate();
       expect(result.operator).toBe('Error');
@@ -189,7 +189,7 @@ describe('Any/All with an Error-valued predicate result', () => {
           .box([
             op,
             ['List', op === 'Any' ? 7 : -1, 1.5],
-            annotatedPredicate('n', 'finite_integer'),
+            annotatedPredicate('n', 'integer'),
           ])
           .evaluate()
           .toString()
@@ -226,7 +226,7 @@ describe('Any/All with an Error-valued predicate result', () => {
     ce.assign('ds', ce.box(['List', 1, 2, 3]));
     const f = ce.box(['Any', 'ds', ['Function', ['Greater', 'n', 0], 'n']]);
 
-    // First evaluation auto-annotates the parameter with `finite_integer`.
+    // First evaluation auto-annotates the parameter with `integer`.
     expect(f.evaluate().toString()).toBe('"True"');
 
     // Retract the source to floats: the retained annotation now rejects every
@@ -258,7 +258,7 @@ describe('Any/All with an Error-valued predicate result', () => {
  * The site value appears twice: a number literal's type is its literal type,
  * so the actual-type slot of the message spells the same number. */
 const ERR = (site: string) =>
-  'Error(ErrorCode("incompatible-type", "finite_integer", ' +
+  'Error(ErrorCode("incompatible-type", "integer", ' +
   `"${site}"), ${site})`;
 
 describe('While family with an Error-valued predicate result', () => {
@@ -269,7 +269,7 @@ describe('While family with an Error-valued predicate result', () => {
         .box([
           'TakeWhile',
           ['List', 1.5, 2.5],
-          annotatedPredicate('n', 'finite_integer'),
+          annotatedPredicate('n', 'integer'),
         ])
         .evaluate()
         .toString()
@@ -283,7 +283,7 @@ describe('While family with an Error-valued predicate result', () => {
         .box([
           'TakeWhile',
           ['List', 1, 2.5, 3, 4],
-          annotatedPredicate('n', 'finite_integer'),
+          annotatedPredicate('n', 'integer'),
         ])
         .evaluate()
         .toString()
@@ -295,7 +295,7 @@ describe('While family with an Error-valued predicate result', () => {
     const expr = ce.box([
       'TakeWhile',
       ['List', 1.5, 2.5],
-      annotatedPredicate('n', 'finite_integer'),
+      annotatedPredicate('n', 'integer'),
     ]);
     expect(expr.isEmptyCollection).toBe(false);
     expect(expr.count).toBe(1);
@@ -334,7 +334,7 @@ describe('While family with an Error-valued predicate result', () => {
         .box([
           'DropWhile',
           ['List', 1.5, 2.5],
-          annotatedPredicate('n', 'finite_integer'),
+          annotatedPredicate('n', 'integer'),
         ])
         .evaluate()
         .toString()
@@ -348,7 +348,7 @@ describe('While family with an Error-valued predicate result', () => {
         .box([
           'DropWhile',
           ['List', 1, 2.5, 3, 4],
-          annotatedPredicate('n', 'finite_integer'),
+          annotatedPredicate('n', 'integer'),
         ])
         .evaluate()
         .toString()
@@ -393,7 +393,7 @@ describe('Filter contains with an Error-valued predicate result', () => {
     const filtered = ce.box([
       'Filter',
       ['List', 1.5, 2.5],
-      annotatedPredicate('n', 'finite_integer'),
+      annotatedPredicate('n', 'integer'),
     ]);
     expect(filtered.contains(ce.number(1.5))).toBe(undefined);
     // ...and the `Element` query stays symbolic instead of answering False.
@@ -405,7 +405,7 @@ describe('Filter contains with an Error-valued predicate result', () => {
           [
             'Filter',
             ['List', 1.5, 2.5],
-            annotatedPredicate('n', 'finite_integer'),
+            annotatedPredicate('n', 'integer'),
           ],
         ])
         .evaluate().operator

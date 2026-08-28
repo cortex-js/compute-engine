@@ -76,7 +76,7 @@ describe('NOMINAL declared type rejects a structurally-similar value', () => {
     // An error VALUE, not a throw — and coded `incompatible-type`.
     expect(result.operator).toBe('Error');
     expect(outcome(() => result.toString())).toMatchInlineSnapshot(
-      `"Error(ErrorCode("incompatible-type", "point", "tuple<finite_integer, finite_integer>"), "w")"`
+      `"Error(ErrorCode("incompatible-type", "point", "tuple<integer, integer>"), "w")"`
     );
     // No value was installed.
     expect(ce.box('w').evaluate().toString()).toBe('w');
@@ -103,7 +103,7 @@ describe('NOMINAL declared type rejects a structurally-similar value', () => {
     const result = ce.box(['Assign', 'p', ['Tuple', 1, 2]]).evaluate();
     expect(result.operator).toBe('Error');
     expect(outcome(() => result.toString())).toMatchInlineSnapshot(
-      `"Error(ErrorCode("incompatible-type", "point", "tuple<finite_integer, finite_integer>"), "p")"`
+      `"Error(ErrorCode("incompatible-type", "point", "tuple<integer, integer>"), "p")"`
     );
     // The value was NOT installed: `p` is still valueless.
     expect(ce.box('p').evaluate().toString()).toBe('p');
@@ -129,7 +129,7 @@ describe('NOMINAL declared type rejects a structurally-similar value', () => {
     }
     expect(message).toMatchInlineSnapshot(`
       "Symbol "q"
-      |   The value "(1, 2)" of type "tuple<finite_integer, finite_integer>" is not compatible with the type "point""
+      |   The value "(1, 2)" of type "tuple<integer, integer>" is not compatible with the type "point""
     `);
   });
 });
@@ -362,7 +362,7 @@ describe('the throw/value channel split for a declared-type rejection', () => {
     // The payload names both types, and the `where` names the symbol.
     expect(errorPayload(r)).toEqual([
       'point',
-      'tuple<finite_integer, finite_integer>',
+      'tuple<integer, integer>',
     ]);
     expect(ce.box('p').evaluate().toString()).toBe('p');
   });

@@ -12,8 +12,8 @@ import { isSubtype } from '../../../src/common/type/subtype';
  *
  * Contract: the type of the EXACT evaluate() result must be a subtype of the
  * statically-inferred .type. We check evaluate() (which stays exact/symbolic),
- * not .N() — .N() numericizes an exact rational to a float (typed finite_real,
- * never finite_rational) and can overflow a large finite to ±∞, both float
+ * not .N() — .N() numericizes an exact rational to a float (typed real,
+ * never rational) and can overflow a large finite to ±∞, both float
  * REPRESENTATION artifacts, not type-handler unsoundness (documented P2-24).
  */
 

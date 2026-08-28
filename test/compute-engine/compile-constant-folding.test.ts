@@ -487,9 +487,9 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
       expect(gpuFold(['Sqrt', -5])).toBe(`vec2(0.0, ${Math.sqrt(5)})`);
       // SUPERSEDED CONTRACT (2026-07-30 ruling). These two used to assert
       // `_gpu_nan()`, on the then-true grounds that a `Root`/`Power` with no
-      // real value was typed `finite_number`. The type handlers now narrow an
+      // real value was typed `number`. The type handlers now narrow an
       // EVEN root degree (or an even reduced-rational exponent denominator)
-      // over a negative base to `finite_complex`, so the enclosing emission is
+      // over a negative base to `complex`, so the enclosing emission is
       // the same `vec2(re, im)` convention as `Sqrt(-5)` above and the fold
       // must match it. A scalar NaN there is silently scalar-broadcast into
       // `vec2(NaN, NaN)`. Do NOT restore the `_gpu_nan()` assertion.
@@ -498,14 +498,14 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
       const p = principalComplexPow(-2, 0.3);
       expect(gpuFold(['Power', -2, 0.3])).toBe(`vec2(${p.re}, ${p.im})`);
       // An ODD denominator keeps a real principal root and stays
-      // `finite_number`, so it folds to that real value — `pow` alone yields
+      // `number`, so it folds to that real value — `pow` alone yields
       // only NaN for a negative base.
       expect(gpuFold(['Power', -8, ['Divide', 2, 3]])).toBe('4.0');
       // …including one whose EXACT denominator is odd but whose double
       // reconstructs to an even one (`100/3` → the dyadic
       // `4691249611844267/140737488355328`). The branch is decided by the exact
       // rational, so this folds to the real `+2^(100/3)`, matching the type
-      // (`finite_number`) and `.N()`. It used to fold to `_gpu_nan()`.
+      // (`number`) and `.N()`. It used to fold to `_gpu_nan()`.
       expect(gpuFold(['Power', -2, ['Divide', 100, 3]])).toBe(
         `${Math.pow(2, 100 / 3)}`
       );

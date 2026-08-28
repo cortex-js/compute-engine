@@ -461,7 +461,7 @@ describe('Measurement — units interaction (Phase 5)', () => {
 
 describe('Measurement — numeric projection (Tycho item 95)', () => {
   // `measurementType()` reports the nominal's scalar type, so a Measurement
-  // answers `finite_real` / `isNumber === true`. The numeric read surface has
+  // answers `real` / `isNumber === true`. The numeric read surface has
   // to honor that: every accessor used to answer NaN/undefined, so a consumer
   // reading `.re` silently got NaN for every numerically-integrated result and
   // could not distinguish it from a genuine NaN.
@@ -470,7 +470,7 @@ describe('Measurement — numeric projection (Tycho item 95)', () => {
 
   test('the fixture is in fact a Measurement claiming to be a real', () => {
     expect(m.operator).toBe('Measurement');
-    expect(m.type.toString()).toBe('finite_real');
+    expect(m.type.toString()).toBe('real');
     expect(m.isNumber).toBe(true);
     expect(m.isExtendedReal).toBe(true);
   });

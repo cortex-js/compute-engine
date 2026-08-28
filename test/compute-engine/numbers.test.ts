@@ -276,7 +276,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('Half is a rational', () => {
     expect(checkProps(ce.expr('Half'))).toMatchInlineSnapshot(`
       number literal: true
-      type: finite_rational<0.5..0.5>
+      type: rational<0.5..0.5>
       real: true
       rational: true
       integer: false
@@ -298,7 +298,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('1/2 is a rational', () => {
     expect(checkProps(ce.expr(['Rational', 1, 2]))).toMatchInlineSnapshot(`
       number literal: true
-      type: finite_rational<0.5..0.5>
+      type: rational<0.5..0.5>
       real: true
       rational: true
       integer: false
@@ -386,7 +386,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('Pi is a real number', () => {
     expect(checkProps(ce.symbol('Pi'))).toMatchInlineSnapshot(`
       number literal: false
-      type: finite_real<3.141592653589793..3.141592653589794>
+      type: real<3.141592653589793..3.141592653589794>
       real: true
       rational: undefined
       integer: undefined

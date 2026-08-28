@@ -728,7 +728,7 @@ export function typeCouldBeCollection(type: Type): boolean {
  * The keyed/unkeyed line is the admission boundary, not indexability: a
  * `set` cannot be indexed, yet a set operand is deliberately admitted — it
  * binds WHOLE under generic lift admission and the call stays typed
- * symbolic (`Conjugate(Set(1, 2))` types as `set<finite_integer>`; §5.3
+ * symbolic (`Conjugate(Set(1, 2))` types as `set<integer>`; §5.3
  * D10, pinned in `generic-function-literals.test.ts` and
  * `type-variables-linalg.test.ts`), keeping image-of-a-set semantics
  * available. A keyed collection in a scalar position is instead a loud
@@ -868,8 +868,8 @@ export function typeCouldBeNumericCollection(type: Type): boolean {
   // was refused, so a `Divide` numerator's parse validity depended on whether
   // its callees had been assigned yet (Tycho item 188, pinned in
   // `test/compute-engine/tycho-item-188-broadcastable-vector-divide.test.ts`);
-  // and a mixed union base (`finite_integer | string`) was refused here while
-  // the identical `list<finite_integer | string>` was admitted. Delegating
+  // and a mixed union base (`integer | string`) was refused here while
+  // the identical `list<integer | string>` was admitted. Delegating
   // keeps this kind in lockstep with every other collection kind by
   // construction.
   if (type.kind === 'broadcastable')
@@ -1231,7 +1231,7 @@ export function unionMayHoldACollection(t: Readonly<Type>): boolean {
  * (`u := 5` makes `2u` evaluate to the scalar `10`). The honest answer carries
  * the union through: the per-element result `E` unioned with `E` wrapped back
  * in each operand's collection branches, so `2u` types
- * `finite_number | list<finite_number>`. The declared union is carried through
+ * `number | list<number>`. The declared union is carried through
  * rather than recruited into the `broadcastable<T>` family, which is reserved
  * for operands whose collection-ness is not statically visible at all.
  *
@@ -1280,12 +1280,12 @@ export function loneUnionBroadcastResultType(
  * symbol types `unknown` only until the surrounding arithmetic's
  * `checkNumericArgs` infers it scalar-numeric, so treating it as
  * possibly-a-collection is order-dependent (`2x` on a cold engine would type
- * `broadcastable<number>` while a warm one gives `finite_number`) and
+ * `broadcastable<number>` while a warm one gives `number`) and
  * mis-routes the invisible-operator multiply-vs-Tuple gate (`6n`,
  * `(abc)(xyz)`). An application's top-typed result is never refined by
  * inference, so it genuinely may resolve to a collection at runtime. It also
  * excludes an inferred-`number` symbol: `Add(2, x)` stays `number` and
- * `Multiply(2, x)` stays `finite_number` (see the "non-interference with
+ * `Multiply(2, x)` stays `number` (see the "non-interference with
  * scalars" pins in `list-broadcast-typing.test.ts`). Statically-visible
  * collection/tuple/tensor operands are handled by the dedicated branches that
  * fire before this predicate is consulted.
@@ -1354,7 +1354,7 @@ export function isValuelessCollectionTyped(expr: Expression): boolean {
  * unwrapped scalar element (`broadcastElementType` — unions and collections
  * contribute their element, scalars themselves). The
  * widened element becomes the `broadcastable` element, with one adjustment: a
- * widened `imaginary` element becomes `finite_complex`, because sums and
+ * widened `imaginary` element becomes `complex`, because sums and
  * products of imaginaries can cancel to a real (`i + i` … `i·i = −1`).
  */
 export function broadcastableResultTypeOf(
@@ -1374,7 +1374,7 @@ export function broadcastableResultTypeOf(
   // Strip range/sign decorations before the join: an arithmetic result
   // does not lie in the union of its operands' ranges (`stripNumericRanges`).
   let element = widen(...contributions.map((t) => stripNumericRanges(t)));
-  if (element === 'imaginary') element = 'finite_complex';
+  if (element === 'imaginary') element = 'complex';
   return { kind: 'broadcastable', elements: element };
 }
 
@@ -2231,7 +2231,7 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
 /**
  * Describes a collection that contains EVERY value of an element type that
  * satisfies a sign constraint. The mathematical number sets are all of this
- * shape: `Integers` is every value of type `finite_integer` with no sign
+ * shape: `Integers` is every value of type `integer` with no sign
  * constraint, `PositiveNumbers` every value of type `real` whose sign is
  * `positive`, and so on.
  *
@@ -2240,7 +2240,7 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
  * sign fit inside the description is a subset of it — no enumeration, and the
  * answer holds for an infinite or oversized candidate subset too. A collection
  * that merely HAPPENS to have those elements (`Set(1, 2)`, whose element type
- * is also `finite_integer`) carries no such guarantee, which is why membership
+ * is also `integer`) carries no such guarantee, which is why membership
  * in this table is declared, not inferred from `elttype`/`eltsgn`.
  */
 export interface TypeSaturatedSet {
@@ -2372,7 +2372,7 @@ export function collectionSubset(
     // its declared element type says. The type is the fallback for a
     // collection with no such handler, and is an upper bound on the elements
     // either way. (A `Range` types `indexed_collection<integer>` and its
-    // handler reports `finite_integer`; the two now denote the same set,
+    // handler reports `integer`; the two now denote the same set,
     // since the bare name `integer` is itself finite and an infinite
     // endpoint marks extent rather than naming a member.)
     const elementType =

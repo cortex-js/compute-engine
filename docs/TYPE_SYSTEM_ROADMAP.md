@@ -252,7 +252,7 @@ depends on it, so the operative content:
 - At a call, an actual accepted by a **ground** arm binds the variables to
   `never` — the bottom of the family (`opt(Missing)` types `opt<never>`);
   otherwise the single open arm solves and refutes as usual
-  (`opt(3)` types `opt<finite_integer>`). Contravariant union positions
+  (`opt(3)` types `opt<integer>`). Contravariant union positions
   contribute no bound in v1.
 - A variable in an **intersection** or a **negation** is still rejected;
   the intersection message steers to the replacement spelling, a bound
@@ -622,11 +622,13 @@ with three rulings needed in order (see §7).
    deliberate v1 limits are tracked in `ROADMAP.md` ("Named-argument
    calls — v1 residuals"). Appendix B's constructors can now build on
    it.
-9. Numeric-lattice flip (§8, proposed 2026-08-26): bare numeric types
-   become finite-only; new `infinity` and `nan` types; the `finite_*`
-   tower and `non_finite_number` retire. Rulings L1–L10 in §8.4. One
-   ratification package with `docs/ERROR-MODEL.md` §4 (Contract B) and
-   §5 (the singleton refinements).
+9. Numeric-lattice flip (§8): **ratified 2026-08-27, shipped
+   2026-08-28.** Bare numeric types are finite-only; `infinity` and
+   `nan` are types; the five `finite_*` names have retired, surviving
+   one release cycle as deprecated parse-only aliases. Rulings L1–L10
+   in §8.4; L5 was amended in execution — `non_finite_number` did not
+   retire (§8.4). Ratified as one package with `docs/ERROR-MODEL.md`
+   §4 (Contract B) and §5 (the singleton refinements).
 10. Type-handler retirement (§1 north star, §9 census): which of the
     ranked declaration-language features to design first, and the
     default inversion of the closure-assumption narrowing (§9,
@@ -636,7 +638,7 @@ with three rulings needed in order (see §7).
     "declared result taken verbatim" and the 13 suppressor constants
     delete with no new flag.
 
-## 8. Numeric lattice: finite-by-default, `infinity`, and `nan` — RATIFIED 2026-08-27
+## 8. Numeric lattice: finite-by-default, `infinity`, and `nan` — RATIFIED 2026-08-27, SHIPPED 2026-08-28
 
 **Ratified 2026-08-27 with all recommendations accepted**, plus two
 amendments and one clarification recorded in the decision document
@@ -644,34 +646,37 @@ amendments and one clarification recorded in the decision document
 the ±∞-admitting predicates (`isReal` → `isExtendedReal`, family-wide, old
 names removed during migration rather than silently re-pointed); `isFinite`
 means finite MAGNITUDE (`∞ + i` answers `false`); L6 = option (a), to be
-documented. Implementation has not started; the section below is the
-ratified design.
+documented.
 
-Proposed from a design conversation on 2026-08-25/26; the behavior
-probes cited below were run those days against `main`. Nothing in this
-section is implemented. This section and `docs/ERROR-MODEL.md` §4
-(Contract B, domain signatures) and §5 (singleton refinements) are one
+Shipped in two phases: the lattice itself (finite bare tiers, `infinity`,
+`nan`), then the `finite_*` name retirement on 2026-08-28. One deviation
+from the ratified design, recorded at L5 below: `non_finite_number` did
+not retire in this release. The section below is the design as ratified;
+statements about "today" describe the pre-flip engine unless marked
+otherwise, and the behavior probes cited were run on 2026-08-25/26
+against the pre-flip `main`. This section and `docs/ERROR-MODEL.md` §4
+(Contract B, domain signatures) and §5 (singleton refinements) were one
 ratification package: each strengthens the others, and §8.6 lists what
 this section changes in that document.
 
-### 8.1 The problem
+### 8.1 The problem (the pre-flip lattice)
 
-The numeric tower today (`src/common/type/types.ts`) is two parallel
-towers plus one atom. The main tower `integer ⊂ rational ⊂ real ⊂
-complex ⊂ number` admits the two signed infinities at every level below
-`number`; a `finite_*` twin of each level (`finite_integer`, …,
-`finite_number`) excludes them; and `non_finite_number` = {`+oo`,
-`-oo`} is the atom both towers share. The two remaining exceptional
-points, `~oo` and `NaN`, are admitted only by the top type `number`
+Before the flip, the numeric tower (`src/common/type/types.ts`) was two
+parallel towers plus one atom. The main tower `integer ⊂ rational ⊂ real
+⊂ complex ⊂ number` admitted the two signed infinities at every level
+below `number`; a `finite_*` twin of each level (`finite_integer`, …,
+`finite_number`) excluded them; and `non_finite_number` = {`+oo`,
+`-oo`} was the atom both towers shared. The two remaining exceptional
+points, `~oo` and `NaN`, were admitted only by the top type `number`
 (ruled 2026-08-21, pinned in
 `test/compute-engine/non-finite-typing.test.ts`).
 
-Two costs, both measured:
+Two costs, both measured at the time:
 
-- **The most common contract has the long name.** Most operator
-  signatures want finite semantics: `finite_*` appears ~835 times in
-  `src/` (455 in `library/` alone; `library/arithmetic.ts` has 111)
-  and in 158 test files. The doubled tower exists only to give those
+- **The most common contract had the long name.** Most operator
+  signatures want finite semantics: `finite_*` appeared ~835 times in
+  `src/` (455 in `library/` alone; `library/arithmetic.ts` had 111)
+  and in 158 test files. The doubled tower existed only to give those
   sites a spelling.
 - **The top has an unnameable residue.** Because `~oo` and `NaN`
   inhabit only `number`, any result that might be either collapses to
@@ -702,9 +707,10 @@ types name the residue.
   `~oo` too is acceptable slop (the safe direction for a result type:
   it over-admits rather than under-claims), or exactly as
   `real | +oo | -oo` with the singletons.
-- `finite_number`, `finite_complex`, `finite_real`, `finite_rational`,
-  `finite_integer`, and `non_finite_number` are retired from the
-  `PrimitiveType` union (migration: L5, L7).
+- `finite_number`, `finite_complex`, `finite_real`, `finite_rational`
+  and `finite_integer` are retired from the `PrimitiveType` union
+  (migration: L7). `non_finite_number` was to retire with them (L5);
+  in execution it was kept, as a subtype of `infinity` — see L5.
 
 Value-level consequences: `oo.type` becomes the singleton `+oo`
 (principal, and it carries its sign, which the sign channel can read
@@ -816,6 +822,13 @@ entirely, and the common case has the short name.
   Migration is site by site: to `infinity` where the site means "any
   infinite value", to `+oo | -oo` where it consumes the signed
   guarantee.
+  **Amended in execution (2026-08-28): the name was kept, not
+  retired.** The signed guarantee has no one-word successor and the
+  ~43 sites consume it individually, so the type survives this release
+  with its meaning unchanged — exactly `{+oo, -oo}` — repositioned as
+  a subtype of `infinity` and no longer below `real` or `complex`.
+  The site-by-site migration L5 calls for is what a future retirement
+  still needs.
 - **L6 — the overflow escape.** A bare `real` result is a finiteness
   promise, and machine evaluation can break it: two finite operands
   can overflow (`MAX_VALUE + MAX_VALUE` → `Infinity`), and a
@@ -831,13 +844,14 @@ entirely, and the common case has the short name.
   float overflow to the marker like other non-representability (a
   value-level change: `MAX_VALUE + MAX_VALUE` would stop being
   `Infinity`).
-- **L7 — deprecation path for the retired names.** Recommended: the
-  `finite_*` spellings remain parse-accepted deprecated aliases for
-  one release cycle, normalizing to the bare names (their meanings
-  coincide after the flip), and are never emitted by serialization;
-  `non_finite_number` gets no alias (its meaning has no successor —
-  L5). The alternative hard cut breaks every stored type string at
-  once.
+- **L7 — deprecation path for the retired names. Shipped as
+  recommended (2026-08-28).** The five `finite_*` spellings remain
+  parse-accepted deprecated aliases for one release cycle, normalizing
+  to the bare names (their meanings coincide after the flip —
+  `finite_number` to `complex`), and are never emitted by
+  serialization. The alternative hard cut breaks every stored type
+  string at once. `non_finite_number` needs no alias: it was kept
+  under its own name (L5).
 - **L8 — ratify as one package with ERROR-MODEL §4/§5.** The flip
   changes §5's settled placement premise, and Contract B's carrier
   discipline is what makes the flip's short names pay off (see §8.6).
@@ -845,10 +859,11 @@ entirely, and the common case has the short name.
   signatures) would flip `oo.matches('real')` with no compensating
   signature story.
 - **L9 — admission tightening at wide-parameter, finite-result
-  heads.** The library already writes parameters wide and results
-  finite (`(integer) -> finite_integer` at ~30 sites in
-  `library/number-theory.ts`, plus `combinatorics.ts`). After the
-  flip the same spelling `(integer) -> integer` tightens the
+  heads.** The library already wrote parameters wide and results
+  finite — the pre-flip spelling `(integer) -> finite_integer` at ~30
+  sites in `library/number-theory.ts`, plus `combinatorics.ts`. After
+  the flip that same declaration reads `(integer) -> integer`, which
+  tightens the
   *parameter* from "integer or ±∞" to finite-only, so a call like
   `GCD(oo, 2)` moves from handler-visible to signature-rejected at
   boxing. Options: (a) accept the tightening (**recommended** — an
@@ -884,6 +899,11 @@ entirely, and the common case has the short name.
   `integer | +oo`.
 
 ### 8.5 Migration notes
+
+**Executed 2026-08-28.** The notes below were written before the
+migration and are kept as the record of what it planned for; the
+`finite_*` occurrences in them name the pre-flip spellings the codemod
+consumed.
 
 - **This is the silent-break class for consumers.** The flip changes
   the *meaning* of bare names rather than deleting them: a value
@@ -1000,11 +1020,12 @@ shape rule.
 ### 9.2 Ranked: feature → handlers retired
 
 1. **The §8 lattice flip.** ~55 handlers whose entire job is the
-   non-finite typing convention (claim `finite_*` at a generic point,
-   widen to `number` when NaN or `~oo` is possible) become plain
-   declared signatures — `(real) -> real` finally says it. It is also
-   the precondition for every row below. Two-thirds of handler text
-   is this convention restated, not computation.
+   non-finite typing convention — before the flip, claiming a
+   finite-twin type at a generic point and widening to `number` when
+   NaN or `~oo` is possible — become plain declared signatures, now
+   that `(real) -> real` finally says it. It is also the precondition
+   for every row below. Two-thirds of handler text is this convention
+   restated, not computation.
 2. **Guarded overload clauses over refinement parameters** — arms
    like `(real<0..> & !0) -> real<0..> & !0` with first-match-or-join
    semantics. Retires ~40 sign-cased handlers (the
@@ -1040,7 +1061,8 @@ shape rule.
    fallback (`library/statistics.ts:457-461` says so). The fallback
    is the closure-assumption narrowing
    (`boxed-expression/boxed-function.ts:5031-5071`): with no handler
-   and a declared result of exactly `number` or `finite_number`, the
+   and a declared result of exactly `number` or the any-finite-number
+   type (`finite_number` before the flip, `complex` after it), the
    engine narrows the result to the join of the argument types, on
    the premise that the operator maps argument kinds to themselves.
    The premise fails for aggregates twice over — `Mean(1, 2)` is
@@ -1056,9 +1078,10 @@ shape rule.
    premise actually holds opt into, exactly like
    `numericTypeHandler`'s family. Then "no handler" means "declared
    result taken verbatim" with no new flag, the 13 suppressor
-   constants simply delete, and the string-fragile
-   `'number' || 'finite_number'` trigger (a §8 flip touchpoint)
-   disappears. Probed 2026-08-26: opaque user-declared functions
+   constants simply delete, and the string-fragile dual-listed
+   declared-result trigger (a §8 flip touchpoint: it spelled the pair
+   `'number' || 'finite_number'` before the flip) disappears. Probed
+   2026-08-26: opaque user-declared functions
    (`ce.declare('f', '(number) -> number')`, no body) are NOT
    narrowed today, so the inversion is a library-internal migration
    with no public-API exposure; its cost is the inventory of heads

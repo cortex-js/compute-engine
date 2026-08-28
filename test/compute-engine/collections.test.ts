@@ -170,9 +170,9 @@ describe('LIST TENSOR ELIGIBILITY', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(isTensor(vector)).toBe(true);
-    expect(vector.type.toString()).toBe('vector<finite_integer^3>');
+    expect(vector.type.toString()).toBe('vector<integer^3>');
     expect(isTensor(matrix)).toBe(true);
-    expect(matrix.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(matrix.type.toString()).toBe('matrix<integer^(2x2)>');
   });
 });
 
@@ -196,7 +196,7 @@ describe('COUNT', () => {
     expect(evaluate(['Count', expression])).toMatchInlineSnapshot(`
       [
         "Error",
-        ["ErrorCode", "incompatible-type", "'collection'", "'finite_number'"],
+        ["ErrorCode", "incompatible-type", "'collection'", "'number'"],
         ["Add", ["Multiply", 3, "x"], 2],
         ["ErrorTrace", ["ErrorFrame", "'Count'", 1]]
       ]
@@ -460,7 +460,7 @@ describe('TAKE', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "'finite_number'"
+            "'number'"
           ],
           ["Add", ["Multiply", 3, "x"], 2]
         ],
@@ -494,7 +494,7 @@ describe('TAKE', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "record{x: finite_integer, y: finite_integer, z: finite_integer}"
+            "record{x: integer, y: integer, z: integer}"
           ],
           {dict: {x: 1; y: 2; z: 3}}
         ],
@@ -511,7 +511,7 @@ describe('TAKE', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "record{x: finite_integer, y: finite_integer, z: finite_integer}"
+            "record{x: integer, y: integer, z: integer}"
           ],
           {dict: {x: 1; y: 2; z: 3}}
         ],
@@ -604,7 +604,7 @@ describe('DROP 2', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "'finite_number'"
+            "'number'"
           ],
           ["Add", ["Multiply", 3, "x"], 2]
         ],
@@ -638,7 +638,7 @@ describe('DROP 2', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "record{x: finite_integer, y: finite_integer, z: finite_integer}"
+            "record{x: integer, y: integer, z: integer}"
           ],
           {dict: {x: 1; y: 2; z: 3}}
         ],
@@ -744,7 +744,7 @@ describe('SLICE (2,3)', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "'finite_number'"
+            "'number'"
           ],
           ["Add", ["Multiply", 3, "x"], 2]
         ],
@@ -780,7 +780,7 @@ describe('SLICE (2,3)', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "record{x: finite_integer, y: finite_integer, z: finite_integer}"
+            "record{x: integer, y: integer, z: integer}"
           ],
           {dict: {x: 1; y: 2; z: 3}}
         ],
@@ -875,7 +875,7 @@ describe('SLICE (range)', () => {
     expect(viaSpan.at(5)).toBeUndefined();
     expect(viaSpan.type.toString()).toBe(viaBounds.type.toString());
     expect(viaSpan.type.toString()).toMatchInlineSnapshot(
-      `list<finite_integer>`
+      `list<integer>`
     );
   });
 
@@ -1002,7 +1002,7 @@ describe('SLICE -1,1', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "'finite_number'"
+            "'number'"
           ],
           ["Add", ["Multiply", 3, "x"], 2]
         ],
@@ -1040,7 +1040,7 @@ describe('SLICE -1,1', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "record{x: finite_integer, y: finite_integer, z: finite_integer}"
+            "record{x: integer, y: integer, z: integer}"
           ],
           {dict: {x: 1; y: 2; z: 3}}
         ],
@@ -1132,13 +1132,13 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(m.type.toString()).toMatchInlineSnapshot(
-      `matrix<finite_integer^(3x3)>`
+      `matrix<integer^(3x3)>`
     );
     // A single index into the matrix yields a row (vector), not a scalar. The
     // access may be out of band, so the honest type carries the `| missing`
     // arm (§3.C `T | marker(T)`).
     expect(engine.box(['At', 'mtx', 2]).type.toString()).toMatchInlineSnapshot(
-      `missing | vector<finite_integer^3>`
+      `missing | vector<integer^3>`
     );
     // Nested `At` validates and evaluates (1-based indexing): row 2, column 1.
     expect(evaluate(['At', ['At', 'mtx', 2], 1])).toMatchInlineSnapshot(`6`);
@@ -1169,7 +1169,7 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // "present literal → exact" arm applies and the result carries no absence
     // marker. (A key-blind `dictionary<T>` base instead gives `T | marker(T)`,
     // which for a numeric `T` absorbs to `number`.)
-    expect(at.type.toString()).toMatchInlineSnapshot(`finite_integer`);
+    expect(at.type.toString()).toMatchInlineSnapshot(`integer`);
     expect(
       engine
         .box(['Add', ['At', dict, { str: 'x' }], 10])
@@ -1435,7 +1435,7 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
       ])
       .evaluate();
     expect(d.type.toString()).toBe(
-      'record{a: finite_integer, b: finite_integer}'
+      'record{a: integer, b: integer}'
     );
   });
 });
@@ -2867,7 +2867,7 @@ describe('DICTIONARY LITERAL TYPE SYNTHESIS', () => {
   test('synthesizes a record type naming the keys', () => {
     const ce = new ComputeEngine();
     expect(ce.box({ dict: { x: 1, y: 2 } }).type.toString()).toBe(
-      'record{x: finite_integer, y: finite_integer}'
+      'record{x: integer, y: integer}'
     );
   });
 
@@ -2879,7 +2879,7 @@ describe('DICTIONARY LITERAL TYPE SYNTHESIS', () => {
       ['KeyValuePair', { str: 'y' }, 2],
     ]);
     expect(d.type.toString()).toBe(
-      'record{x: finite_integer, y: finite_integer}'
+      'record{x: integer, y: integer}'
     );
   });
 
@@ -2898,11 +2898,11 @@ describe('DICTIONARY LITERAL TYPE SYNTHESIS', () => {
     // built from such a key would not round-trip through `parseType`.
     const ce = new ComputeEngine();
     expect(ce.box({ dict: { 'a b': 1 } }).type.toString()).toBe(
-      'dictionary<finite_integer>'
+      'dictionary<integer>'
     );
     // A word the type lexer reads as a keyword, not an identifier.
     expect(ce.box({ dict: { true: 1 } }).type.toString()).toBe(
-      'dictionary<finite_integer>'
+      'dictionary<integer>'
     );
   });
 
@@ -2949,7 +2949,7 @@ describe('KEYS / VALUES', () => {
   test('Values type reflects the value types', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Values', dict]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
   });
 
@@ -4094,7 +4094,7 @@ describe('At: lenient over-narrowed base (Tycho 19.3)', () => {
     expect(r.toString()).toBe('2');
   });
 
-  // A broadcast-aware union base (`finite_integer | vector<3>`, from arithmetic
+  // A broadcast-aware union base (`integer | vector<3>`, from arithmetic
   // over a list-returning lambda) must be lenient: it isn't a subtype of
   // `dictionary | indexed_collection`, but one member IS indexable, so it stays
   // inert and evaluates once the base resolves to a list.
@@ -4119,7 +4119,7 @@ describe('At: lenient over-narrowed base (Tycho 19.3)', () => {
     const ce = new ComputeEngine();
     // A declared (provable) scalar symbol whose type is a union of only scalar
     // members — no indexable member, so `At` must still reject it.
-    ce.declare('z', 'finite_integer | rational');
+    ce.declare('z', 'integer | rational');
     const at = ce.parse('z[1]');
     expect(at.isValid).toBe(false);
     expect(errorCode(at)).toBe('incompatible-type');
@@ -5276,7 +5276,7 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
     // this twin keeps the polarity visible next to the keyed-side pin.)
     const ce2 = new ComputeEngine();
     const e = ce2.box(['Conjugate', ['Set', 1, 2]]);
-    expect(e.type.toString()).toBe('set<finite_integer>');
+    expect(e.type.toString()).toBe('set<integer>');
     expect(e.evaluate().toString()).toBe('Conjugate(Set(1, 2))');
   });
 });

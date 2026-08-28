@@ -116,7 +116,7 @@ describe('shadow parity over the converted handlers', () => {
       // The rounding family. The interesting operand classes are the ones
       // the handler branches on: NaN, a provably non-finite real, `~oo`
       // (non-finite but not provably real), a provably non-real literal, and
-      // everything else (the generic-point `finite_integer` claim).
+      // everything else (the generic-point `integer` claim).
       ['Ceil', 3.7],
       ['Ceil', 'x'],
       ['Ceil', NaN],
@@ -154,7 +154,7 @@ describe('shadow parity over the converted handlers', () => {
 
       // The Bessel family is binary (order, argument), so it also exercises
       // the multi-operand folds of `numericTypeHandler`: one non-finite
-      // operand takes the whole claim to `number`, and the `finite_real`
+      // operand takes the whole claim to `number`, and the `real`
       // claim needs EVERY operand real.
       ['BesselJ', 0, 1],
       ['BesselJ', 'x', 'r'],
@@ -305,7 +305,7 @@ describe('shadow parity over the converted handlers', () => {
 
       // --- batch 2: library/special-functions.ts ---
       // `EllipticF` gates on a provably non-finite operand and otherwise
-      // hedges at `finite_number` — it never claims `finite_real`, because
+      // hedges at `number` — it never claims `real`, because
       // F(φ|m) is complex whenever m·sin²φ > 1.
       ['EllipticF', 1.5, 2],
       ['EllipticF', 'r', 'x'],
@@ -564,7 +564,7 @@ describe('shadow parity over the converted handlers', () => {
     // remains. This pins both halves — a reintroduced handler or a widened
     // signature result fails here. (The regex is anchored at the END of the
     // signature rather than matched exactly, so an effect label still
-    // passes: `(integer, integer?) random -> finite_integer`. A trailing
+    // passes: `(integer, integer?) random -> integer`. A trailing
     // `where` clause — the type-variable binder of a signature such as
     // `(collection<T>, …) -> boolean where T` — is allowed after the result
     // for the same reason, restricted to a comma-separated list of type

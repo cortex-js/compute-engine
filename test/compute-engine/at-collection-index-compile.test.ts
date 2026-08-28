@@ -179,7 +179,7 @@ describe('a collection-valued At is typed as a LIST, so parents compose', () => 
     // the source element type is numeric. A scalar index is `T | marker(T)`.
     expect(at(['List', 1, 3]).type.toString()).toBe('list<number>');
     expect(at(['List', 'True', 'False', 'True']).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
     expect(at(2).type.toString()).toBe('number');
   });
@@ -371,7 +371,7 @@ describe('At with a CHAINED (multi-)index — result type follows the chain', ()
     // A gather is `list<T | marker(T)>`; numeric `T` absorbs to `number`.
     expect(expr.type.toString()).toBe('list<number>');
     expect(ce.box(['At', ['Tuple', 10, 20, 30], 2] as any).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
   });
 });

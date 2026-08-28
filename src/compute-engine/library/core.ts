@@ -2497,7 +2497,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // What makes that contract say something is the SHAPE of the body the
       // object walk emits: the `["Dictionary", ["KeyValuePair", …], …]`
       // operator form, which re-boxes as a `BoxedDictionary` typed from its
-      // keys (`record{name: string, age: finite_integer}`). A body with no
+      // keys (`record{name: string, age: integer}`). A body with no
       // operator definition — `["Record", …]`, which no library declares —
       // would re-box as an inert application typed `unknown`, and this
       // handler would report `unknown` for every snapshot.
@@ -3913,7 +3913,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // Now the value, because the value-fit check inside
           // `protocolPropertyStore` must see the CONCRETE value. The static type
           // of a raw RHS is often wider than the property's declared type
-          // (`10 * i` in a loop body types `finite_number` against an `integer`
+          // (`10 * i` in a loop body types `number` against an `integer`
           // property), and the false refusal it produced was DISCARDED in
           // statement position — a silent no-op write, diverging from the
           // compiled tier, which performs it.
@@ -4657,7 +4657,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Type: {
       description:
         'The STATIC type of an expression, as a type value: ' +
-        '`Type(3)` is `TypeFrom("finite_integer")`. The observer does not ' +
+        '`Type(3)` is `TypeFrom("integer")`. The observer does not ' +
         'evaluate its operand. Recover the text with `StringFrom(Type(x))`; ' +
         'in a string interpolation a type value renders as its text ' +
         'directly. BREAKING (2026-08-19, ruling R3 of ' +
@@ -5352,7 +5352,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       discharges: { 1: ['random'] },
       // Hold the body: it must NOT evaluate before the frame exists.
       lazy: true,
-      signature: '(finite_real | string, any) -> expression',
+      signature: '(real | string, any) -> expression',
       // Carry the body's type through. Load-bearing, not cosmetic: a bare
       // `expression` makes a framed draw opaque, and a comparison over an
       // operand that might be a collection is declined by the compiler
@@ -5619,7 +5619,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // impure (the derived `pure`/`drawsRandom` getters read it).
       signature: '((collection<any> | set<real>)?) random -> any',
       type: ([domain]) => {
-        if (domain === undefined) return 'finite_real';
+        if (domain === undefined) return 'real';
         return randomElementType(domain);
       },
       // Derived from the DOMAIN's endpoints. (The old handler read
@@ -5832,7 +5832,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // quotient ring `ℤ_n = ℤ/nℤ` (see the `canonical` handler below), so
         // report the same type it does. Without this, a STRUCTURAL
         // `Subscript(Integers, n)` — which never reaches `canonical` — fell
-        // through to `collectionElementType` and claimed `finite_integer`:
+        // through to `collectionElementType` and claimed `integer`:
         // the element type of ℤ, not the type of the quotient RING.
         if (isRingConstant(op1)) return quotientRingType([op1, op2]);
 

@@ -196,8 +196,10 @@ describe('Less(Abs(q), 1)', () => {
     expect(bounds.upperStrict).toBe(true);
   });
 
-  it('refines q to finite_number (|q| bounded => finite)', () => {
-    expect(ce.expr('q').type.toString()).toBe('finite_number');
+  it('refines q to complex (|q| bounded => finite)', () => {
+    // `complex` is the widest FINITE numeric type, so it is what a bounded
+    // magnitude implies now that the `finite_number` spelling is retired.
+    expect(ce.expr('q').type.toString()).toBe('complex');
     expect(ce.expr('q').isExtendedReal).not.toBe(true);
   });
 
@@ -207,7 +209,7 @@ describe('Less(Abs(q), 1)', () => {
     expect(ce.expr('q').isFinite).toBe(true);
   });
 
-  it('a lower bound on Abs does not refine to finite_number', () => {
+  it('a lower bound on Abs does not refine to a finite type', () => {
     const ce2 = freshEngine();
     expect(
       ce2.assume(ce2.expr(['Greater', ['Abs', 'r'], 2], { canonical: false }))

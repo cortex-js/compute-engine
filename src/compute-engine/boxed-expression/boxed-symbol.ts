@@ -973,8 +973,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // non-positive, and `real<0..> & !0` (the intersection spelling of
     // "positive") combines the bound with the zero exclusion. Before this
     // read existed, a range-typed declaration answered `sgn: undefined`, so
-    // `Sqrt(q)` with `q: integer<1..>` typed `finite_complex` and
-    // `Factorial(q)` typed `finite_real` — the declaration's sign never
+    // `Sqrt(q)` with `q: integer<1..>` typed `complex` and
+    // `Factorial(q)` typed `real` — the declaration's sign never
     // reached the sign channel (measured 2026-08-22; see the ROADMAP entry
     // "Ranged types should carry sign (and a literal's value) through type
     // derivation").
@@ -1013,12 +1013,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const fromValue = this._valueIsFinite();
     if (fromValue !== undefined) return fromValue;
     // Type fallback (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1e): a
-    // `finite_number` refinement — e.g. from `assume(|q| < 1)` — entails
-    // finiteness even without a value. Symmetrically, an infinite or NaN
+    // `complex` refinement — e.g. from `assume(|q| < 1)` — entails
+    // finiteness even without a value, `complex` being the widest FINITE
+    // numeric type. Symmetrically, an infinite or NaN
     // type entails non-finiteness (see `get isInfinity`).
     const t = this.type;
     if (!t.isUnknown) {
-      if (t.matches('finite_number')) return true;
+      if (t.matches('complex')) return true;
       // `infinity` is any value of infinite magnitude (`+oo`, `-oo`, `~oo`),
       // so it also covers the signed pair `non_finite_number`; `nan` is the
       // NaN singleton, disjoint from `infinity`. Neither is a finite number,
@@ -1136,13 +1137,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // Three-valued discipline (D3), mirroring the repaired `isExtendedReal`:
     //   entailed (`matches`) → true; overlap → undefined; disjoint → false.
     if (t.matches('integer')) return true;
-    // A real-overlapping numeric type (`real`, `rational`, `finite_real`,
-    // `finite_rational`, …) could be an integer → indeterminate. `real` is
-    // checked before `complex` because `finite_real ⊑ complex` in this lattice.
+    // A real-overlapping numeric type (`real`, `rational`, …) could be an
+    // integer → indeterminate. `real` is checked before `complex` because
+    // `real ⊑ complex` in this lattice.
     if (t.matches('real')) return undefined;
-    // `number`/`finite_number` overlap the reals unless they are genuinely
-    // complex (`complex`/`imaginary`/`finite_complex`, which are non-integer
-    // by the same convention `isExtendedReal` uses).
+    // `number` overlaps the reals unless it is genuinely complex
+    // (`complex`/`imaginary`, which are non-integer by the same convention
+    // `isExtendedReal` uses).
     if (t.matches('number')) return isNonRealNumber(t.type) ? false : undefined;
     // Non-numeric / composite types (e.g. `!string`): definitely-not only when
     // provably disjoint from the integers.
@@ -1207,7 +1208,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return false;
 
     // `complex`/`imaginary`-typed symbols keep the historical definitive
-    // `false`. Other number types (`number`, `finite_number`, ...) overlap
+    // `false`. Other number types (`number`, a union, ...) overlap
     // `real`, so without a refuting fact the answer is indeterminate
     // (three-valued discipline, design §5.2).
     if (t.matches('number') && !isNonRealNumber(t.type)) return undefined;

@@ -367,7 +367,7 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
     );
     const e = engine.box(['pid', 5]);
     expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('finite_integer');
+    expect(e.type.toString()).toBe('integer');
     // The α-equivalence renaming map is prototype-free too.
     expect(isSubtype(parseType(SIGNATURE), parseType('(U) -> U where U'))).toBe(
       true
@@ -675,14 +675,14 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // at fault: blaming the first PINNING position named the innocent one.
     expect(
       blame('(T, T) -> T where T: number', [
-        'finite_integer',
+        'integer',
         'matrix<integer^(2x2)>',
       ])
     ).toBe(1);
     expect(
       blame('(T, T) -> T where T: number', [
         'matrix<integer^(2x2)>',
-        'finite_integer',
+        'integer',
       ])
     ).toBe(0);
     // Deterministic: the EARLIEST individually-violating position, never the
@@ -879,7 +879,7 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     ]);
     const e = ce.box(['entryOf', d]);
     expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('tuple<string, finite_integer>');
+    expect(e.type.toString()).toBe('tuple<string, integer>');
   });
 
   test('D10 waives ONLY the declared bound, not a positioned upper bound', () => {
@@ -954,20 +954,20 @@ describe('END TO END — a user-declared generic operator', () => {
   test('§4.7 rows, through `ce.declare` and a call', () => {
     const ce = fresh();
     ce.declare('idf', { signature: '(T) -> T where T' });
-    expect(ce.box(['idf', 5]).type.toString()).toBe('finite_integer');
+    expect(ce.box(['idf', 5]).type.toString()).toBe('integer');
 
     ce.declare('firstOf', { signature: '(list<T>) -> T where T' });
     expect(ce.box(['firstOf', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
 
     ce.declare('swap', { signature: '(tuple<T, U>) -> tuple<U, T> where T, U' });
     expect(
       ce.box(['swap', ['Tuple', 1, ce.string('a')]]).type.toString()
-    ).toBe('tuple<string, finite_integer>');
+    ).toBe('tuple<string, integer>');
 
     ce.declare('pack', { signature: '(T+) -> list<T> where T' });
-    expect(ce.box(['pack', 1, 2.5]).type.toString()).toBe('list<finite_real>');
+    expect(ce.box(['pack', 1, 2.5]).type.toString()).toBe('list<real>');
 
     ce.declare('opt', { signature: '(T?) -> list<T> where T' });
     expect(ce.box(['opt']).type.toString()).toBe('list<unknown>');
@@ -981,9 +981,9 @@ describe('END TO END — a user-declared generic operator', () => {
       signature: '(T) -> T where T: indexed_collection',
     });
     const m = ce.box(['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]);
-    expect(m.type.toString()).toBe('matrix<finite_integer^(2x3)>');
+    expect(m.type.toString()).toBe('matrix<integer^(2x3)>');
     expect(ce.box(['rev', m]).type.toString()).toBe(
-      'matrix<finite_integer^(2x3)>'
+      'matrix<integer^(2x3)>'
     );
   });
 
@@ -994,7 +994,7 @@ describe('END TO END — a user-declared generic operator', () => {
     expect(bad.isValid).toBe(false);
     // §8 rule 1: the displayed expected type is always GROUND.
     expect(bad.toString()).toContain('"indexed_collection"');
-    expect(bad.toString()).toContain('set<finite_integer>');
+    expect(bad.toString()).toContain('set<integer>');
     expect(bad.toString()).not.toContain('where');
   });
 
@@ -1006,7 +1006,7 @@ describe('END TO END — a user-declared generic operator', () => {
     const bad = ce.box(['rem2', 5, 'mtx']);
     expect(bad.isValid).toBe(false);
     // The `5` is innocent — it satisfies `T: number` on its own. Blaming it
-    // produced the self-contradictory "expected number, got finite_integer".
+    // produced the self-contradictory "expected number, got integer".
     expect(bad.op1.isValid).toBe(true);
     expect(bad.op1.toString()).toBe('5');
     expect(bad.op2.isValid).toBe(false);
@@ -1039,7 +1039,7 @@ describe('END TO END — a user-declared generic operator', () => {
       signature: '(list<T>, list<T>) -> list<T> where T',
     });
     expect(ce.box(['cat', ['List'], ['List', 1]]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
   });
 
@@ -1087,7 +1087,7 @@ describe('END TO END — a user-declared generic operator', () => {
     });
     const bad = ce.box(['keep', ['List', 1, 2, 3], 'sPred']);
     expect(bad.isValid).toBe(false);
-    expect(bad.toString()).toContain('"(finite_integer) -> boolean"');
+    expect(bad.toString()).toContain('"(integer) -> boolean"');
     expect(bad.toString()).toContain('"(string) -> boolean"');
   });
 
@@ -1107,10 +1107,10 @@ describe('END TO END — a user-declared generic operator', () => {
       signature: '(T) -> T where T: number',
       broadcastable: true,
     });
-    expect(ce.box(['neg2', 5]).type.toString()).toBe('finite_integer');
+    expect(ce.box(['neg2', 5]).type.toString()).toBe('integer');
     // Admission at the scalar base, `T` bound to the FULL actual.
     expect(ce.box(['neg2', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
   });
 
@@ -1128,13 +1128,13 @@ describe('END TO END — a user-declared generic operator', () => {
     // The polytype arm binds `T` to the operand's ELEMENT under D10 (re-ruled
     // 2026-08-04), so the wrapper builds the shape around it exactly as it
     // does for the ground reference — same encoding, no
-    // `list<vector<finite_integer^2>^(2x2)>` mix.
+    // `list<vector<integer^2>^(2x2)>` mix.
     expect(ce.box(['pEcho', m22]).type.toString()).toBe(
-      'matrix<finite_integer^(2x2)>'
+      'matrix<integer^(2x2)>'
     );
     // Rank 1 is unchanged (the re-shape happened to round-trip there).
     expect(ce.box(['pEcho', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(ce.box(['gEcho', ['List', 1, 2, 3]]).type.toString()).toBe(
       'vector<3>'
@@ -1146,17 +1146,17 @@ describe('END TO END — a user-declared generic operator', () => {
     );
     // A repeated variable over a collection AND a scalar (`Remainder(M, 7)`)
     // no longer produces a union at all: element-binding joins the matrix's
-    // LEAF with the scalar operand, so `T = finite_integer` and the wrapper
+    // LEAF with the scalar operand, so `T = integer` and the wrapper
     // gives the same clean matrix the ground reference does. (Before the
     // 2026-08-04 re-ruling this was the widen artifact
-    // `list<finite_integer | vector<finite_integer^2>^(2x2)>` — the very
+    // `list<integer | vector<integer^2>^(2x2)>` — the very
     // mixed encoding the wrapper exists to repair.)
     ce.declare('pRem', {
       signature: '(T, T) -> T where T: number',
       broadcastable: true,
     });
     expect(ce.box(['pRem', m22, 7]).type.toString()).toBe(
-      'matrix<finite_integer^(2x2)>'
+      'matrix<integer^(2x2)>'
     );
   });
 
@@ -1175,18 +1175,18 @@ describe('END TO END — a user-declared generic operator', () => {
     ce.declare('vList', '(T) -> list<T> where T');
     const xs = ['List', 1, 2, 3] as any;
     expect(ce.box(['vEcho', xs]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(ce.box(['vTuple', xs]).type.toString()).toBe(
-      'list<tuple<finite_integer>>'
+      'list<tuple<integer>>'
     );
     expect(ce.box(['vList', xs]).type.toString()).toBe(
-      'list<list<finite_integer>>'
+      'list<list<integer>>'
     );
     // A BOUNDED echo is still an echo.
     ce.declare('vBounded', '(T) -> T where T: indexed_collection');
     expect(ce.box(['vBounded', xs]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
   });
 
@@ -1202,7 +1202,7 @@ describe('END TO END — a user-declared generic operator', () => {
     ce.declare('gp', '(U) -> boolean where U');
     ce.declare('hof', { signature: '((T) -> boolean, T) -> T where T' });
     // The generic callback contributes NO bound; `T` is pinned by argument 2.
-    expect(ce.box(['hof', 'gp', 3]).type.toString()).toBe('finite_integer');
+    expect(ce.box(['hof', 'gp', 3]).type.toString()).toBe('integer');
     // With nothing else to pin it, `T` falls to S3.
     ce.declare('hof2', { signature: '((T) -> boolean) -> list<T> where T' });
     expect(ce.box(['hof2', 'gp']).type.toString()).toBe('list<unknown>');
@@ -1515,7 +1515,7 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
     expect(() => ce.assign('f', ce.parse('x \\mapsto x'))).not.toThrow();
     expect(ce.box('f').type.toString()).toBe('(T) -> T where T');
     expect(ce.box(['f', 5]).evaluate().toString()).toBe('5');
-    expect(ce.box(['f', 5]).type.toString()).toBe('finite_integer');
+    expect(ce.box(['f', 5]).type.toString()).toBe('integer');
   });
 
   test('route 1b — declare-with-value installs it too', () => {
@@ -1743,9 +1743,9 @@ describe('ROUTE PARITY — `ce.function`, `ce.box`, `ce.parse`', () => {
     const viaFn = ce.function('firstOf', [ce.box(['List', 1, 2])]);
     const viaBox = ce.box(['firstOf', ['List', 1, 2]]);
     const viaParse = ce.parse('\\mathrm{firstOf}(\\lbrack 1, 2\\rbrack)');
-    expect(viaFn.type.toString()).toBe('finite_integer');
-    expect(viaBox.type.toString()).toBe('finite_integer');
-    expect(viaParse.type.toString()).toBe('finite_integer');
+    expect(viaFn.type.toString()).toBe('integer');
+    expect(viaBox.type.toString()).toBe('integer');
+    expect(viaParse.type.toString()).toBe('integer');
     expect(viaFn.isValid && viaBox.isValid && viaParse.isValid).toBe(true);
   });
 });
@@ -1800,7 +1800,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
     });
     // The operand kind selects the arm, and each arm solves its own `T`.
     expect(ce.box(['pick', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'finite_integer'
+      'integer'
     );
     expect(ce.box(['pick', ['Set', 1, 2]]).type.toString()).toBe('boolean');
     // An operand no arm admits: the diagnosis reports the INSTANTIATED
@@ -1819,7 +1819,7 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
     });
     // The bounded arm takes the list; the ground arm takes the set.
     expect(ce.box(['rv', ['List', 1, 2]]).type.toString()).toBe(
-      'vector<finite_integer^2>'
+      'vector<integer^2>'
     );
     expect(ce.box(['rv', ['Set', 1, 2]]).type.toString()).toBe('number');
   });
@@ -1867,12 +1867,18 @@ describe('OVERLOADS × GENERICS (§6, per-arm instantiation)', () => {
       const ce = fresh();
       ce.declare('tie', { signature });
       ce.declare('n', 'integer');
-      // Ground wins the tie — the same answer both ways round.
+      ce.declare('m', 'integer<0..10>');
+      // Ground wins the tie — the same answer both ways round. An `integer`
+      // LITERAL ties as well: its type widens to `integer` at the solve
+      // position, which is exactly the ground arm's parameter.
       expect(ce.box(['tie', 'n']).type.toString()).toBe('string');
+      expect(ce.box(['tie', 5]).type.toString()).toBe('string');
       // Control: at an operand the generic arm instantiates STRICTLY more
-      // specifically (`finite_integer` <: `integer`), D11 does not apply and
+      // specifically (`integer<0..10>` <: `integer`), D11 does not apply and
       // the generic arm wins — the tie-break is a tie-break only.
-      expect(ce.box(['tie', 5]).type.toString()).toBe('list<finite_integer>');
+      expect(ce.box(['tie', 'm']).type.toString()).toBe(
+        'list<integer<0..10>>'
+      );
       // And where the ground arm does not apply at all, the generic one takes
       // the call.
       expect(ce.box(['tie', ce.string('a')]).type.toString()).toBe(

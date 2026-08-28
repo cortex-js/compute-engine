@@ -18,16 +18,16 @@ describe('Tycho item 194: scalar broadcast over a collection', () => {
   describe('declared element tier agrees with the evaluated value', () => {
     const cases: [string, string, string][] = [
       // latex, declared type, evaluated type
-      ['\\frac{1}{2}(1..4)', 'list<rational>', 'vector<finite_rational^4>'],
-      ['0.5(1..4)', 'list<real>', 'vector<finite_real^4>'],
-      ['(1..4)+\\frac{1}{2}', 'list<rational>', 'vector<finite_rational^4>'],
-      ['(1..4)-\\frac{1}{2}', 'list<rational>', 'vector<finite_rational^4>'],
+      ['\\frac{1}{2}(1..4)', 'list<rational>', 'vector<rational^4>'],
+      ['0.5(1..4)', 'list<real>', 'vector<real^4>'],
+      ['(1..4)+\\frac{1}{2}', 'list<rational>', 'vector<rational^4>'],
+      ['(1..4)-\\frac{1}{2}', 'list<rational>', 'vector<rational^4>'],
       // `canonicalDivide` rewrites a literal denominator into `Multiply`, so
       // this exercises the same arm through a different surface form.
-      ['(1..4)/2', 'list<rational>', 'vector<finite_rational^4>'],
+      ['(1..4)/2', 'list<rational>', 'vector<rational^4>'],
       // An integer scalar leaves the tier alone (no regression).
-      ['2(1..4)', 'list<integer>', 'vector<finite_integer^4>'],
-      ['(1..4)+1', 'list<integer>', 'vector<finite_integer^4>'],
+      ['2(1..4)', 'list<integer>', 'vector<integer^4>'],
+      ['(1..4)+1', 'list<integer>', 'vector<integer^4>'],
     ];
 
     for (const [latex, declared, evaluated] of cases) {
@@ -61,17 +61,17 @@ describe('Tycho item 194: scalar broadcast over a collection', () => {
   //
   // Neither sum nor product is closed over `imaginary`: `i + (-i) = 0` and
   // `i · i = -1` are both real, so the broadcast cell type must widen to
-  // `finite_complex` rather than claiming `imaginary`.
+  // `complex` rather than claiming `imaginary`.
   //
   test('an imaginary scalar over an imaginary list does not claim `imaginary`', () => {
     const ce = new ComputeEngine();
     const i = ['Complex', 0, 1];
     const prod = ce.box(['Multiply', i, ['List', i, ['Complex', 0, 2]]]);
-    expect(prod.type.toString()).toBe('vector<finite_complex^2>');
+    expect(prod.type.toString()).toBe('vector<complex^2>');
     expect(prod.evaluate().type.matches(prod.type)).toBe(true);
 
     const sum = ce.box(['Add', i, ['List', i, ['Complex', 0, -1]]]);
-    expect(sum.type.toString()).toBe('vector<finite_complex^2>');
+    expect(sum.type.toString()).toBe('vector<complex^2>');
     expect(sum.evaluate().type.matches(sum.type)).toBe(true);
   });
 
@@ -81,7 +81,7 @@ describe('Tycho item 194: scalar broadcast over a collection', () => {
   // multi-dimensional shape in `dimensions` (`matrix<2x2>` has `number`
   // elements), but a DIMENSIONLESS nested list carries it in `elements`
   // (`list<list<number>>`), so reading `elements` as the leaf there and
-  // widening a scalar against it produced `list<finite_integer | list<number>>`
+  // widening a scalar against it produced `list<integer | list<number>>`
   // — a union of a scalar and a collection. No evaluated value ever has that
   // type (every element stays a list), and union matching is all-members, so
   // `type.matches('collection')` answered a confident `false` on a value that
@@ -144,14 +144,14 @@ describe('Tycho item 194: scalar broadcast over a collection', () => {
       expect(ce.box(['Multiply', 0.5, 'X']).type.toString()).toBe(
         'matrix<2x2>'
       );
-      // A literal matrix has `finite_integer` leaves, which the float sharpens
+      // A literal matrix has `integer` leaves, which the float sharpens
       // — into the LEAF, not into the row type.
       const m = ce.box([
         'Multiply',
         0.5,
         ['List', ['List', 1, 2], ['List', 3, 4]],
       ]);
-      expect(m.type.toString()).toBe('matrix<finite_real^(2x2)>');
+      expect(m.type.toString()).toBe('matrix<real^(2x2)>');
       expect(m.evaluate().type.matches(m.type)).toBe(true);
     });
   });

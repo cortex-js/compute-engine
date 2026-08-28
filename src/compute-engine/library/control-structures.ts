@@ -1106,7 +1106,7 @@ function armElementType(t: Readonly<Type>): Type {
  * position no clause matches is `NaN` (R4), and `finite_*` types EXCLUDE NaN
  * under the non-finite typing convention: the element type must therefore
  * join in `number`, the narrowest type that admits NaN, or a consumer
- * dispatching on `.type.matches()` would be promised a `finite_integer` cell
+ * dispatching on `.type.matches()` would be promised a `integer` cell
  * and handed a `NaN`. WITH a default clause the no-match cell is unreachable
  * and the exact join is kept — widening unconditionally would hand every
  * element-wise conditional an over-wide union, which breaks that same
@@ -1548,7 +1548,7 @@ function canonicalLoopLike(
     // …and nothing typed the INDEX, either (the same bypass): the binder
     // hook declares each index `unknown`, and the body's arithmetic use
     // then widened it to `number` — so `for i in 1..3` typed `10 * i` as
-    // `finite_number`, wide enough to falsely refuse an `integer`-declared
+    // `number`, wide enough to falsely refuse an `integer`-declared
     // protocol-property write. Narrow the fresh binding to the collection's
     // ELEMENT type when it is known, BEFORE the body canonicalizes against
     // it (the `Element` canonical handler's own inference, sets.ts, which

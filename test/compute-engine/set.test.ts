@@ -49,12 +49,7 @@ describe('ELEMENT', () => {
       .toMatchInlineSnapshot(`
       [
         "Error",
-        [
-          "ErrorCode",
-          "incompatible-type",
-          "'boolean'",
-          "set<finite_integer>"
-        ],
+        ["ErrorCode", "incompatible-type", "'boolean'", "set<integer>"],
         ["ErrorTrace", ["ErrorFrame", "'Element'", 3]]
       ]
     `);
@@ -95,11 +90,11 @@ describe('ELEMENT', () => {
       `True`
     );
 
-    // Refined types like 'finite_real'
-    expect(ce.expr(['Element', 2, 'finite_real']).evaluate()).toMatchInlineSnapshot(
+    // Refined types like 'real'
+    expect(ce.expr(['Element', 2, 'real']).evaluate()).toMatchInlineSnapshot(
       `True`
     );
-    expect(ce.expr(['Element', 2, 'finite_integer']).evaluate()).toMatchInlineSnapshot(
+    expect(ce.expr(['Element', 2, 'integer']).evaluate()).toMatchInlineSnapshot(
       `True`
     );
 
@@ -390,15 +385,14 @@ describe('SUBSET', () => {
     expect(
       ce.expr(['Subset', 'NegativeIntegers', 'ExtendedIntegers']).evaluate()
     ).toMatchInlineSnapshot(`True`);
-    // Still False, but no longer because of the infinities. ℤ is declared over
-    // the deprecated synonym `finite_integer`, which is kept formally BELOW
-    // the bare `integer` while the synonyms survive (see the
-    // deprecated-synonym note on `NumericPrimitiveType` in
-    // `common/type/types.ts`), so `isSubtype('integer', 'finite_integer')` is
-    // false. Removing the synonyms turns this into True.
+    // True since the `finite_*` names retired. ℤ used to be declared over the
+    // deprecated synonym `finite_integer`, which was kept formally BELOW the
+    // bare `integer`, so `isSubtype('integer', 'finite_integer')` was false
+    // and this answered False for a reason that had nothing to do with the
+    // infinities. Both sets are now declared `set<integer>`.
     expect(
       ce.expr(['Subset', 'NegativeIntegers', 'Integers']).evaluate()
-    ).toMatchInlineSnapshot(`False`);
+    ).toMatchInlineSnapshot(`True`);
   });
 
   // An empty interval is a subset of every collection, including one that is

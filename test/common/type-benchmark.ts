@@ -27,19 +27,19 @@ const TYPE_STRINGS = [
   '(number, number) -> number',
   'integer | rational | real',
   'collection<number>',
-  'set<finite_complex>',
+  'set<complex>',
   'record{x: integer, y: string}',
   'number & real',
   'integer<0..10>',
   'vector<3>',
   'dictionary<number>',
   'string | nothing',
-  'finite_real',
+  'real',
 ];
 
 const SUBTYPE_PAIRS: [Type | string, Type | string][] = [
   ['integer', 'number'],
-  ['finite_integer', 'finite_real'],
+  ['integer', 'real'],
   ['real', 'complex'],
   ['list<integer>', 'list<number>'],
   ['list<integer>', 'collection<number>'],
@@ -54,24 +54,24 @@ const SUBTYPE_PAIRS: [Type | string, Type | string][] = [
 
 const WIDEN_PAIRS: [Type, Type][] = [
   ['integer', 'rational'],
-  ['finite_integer', 'finite_real'],
+  ['integer', 'real'],
   ['integer', 'imaginary'],
   ['real', 'complex'],
   ['integer', 'string'],
   ['boolean', 'string'],
   [parseType('list<integer>'), parseType('list<real>')],
-  ['finite_number', 'real'],
+  ['number', 'real'],
 ];
 
 const REDUCE_TYPES: Type[] = [
   { kind: 'union', types: ['integer', 'rational', 'real'] },
-  { kind: 'intersection', types: ['integer', 'finite_real'] },
+  { kind: 'intersection', types: ['integer', 'real'] },
   { kind: 'union', types: ['integer', 'integer', 'number'] },
   {
     kind: 'union',
     types: [parseType('list<integer>'), parseType('list<integer>')],
   },
-  { kind: 'intersection', types: ['finite_number', 'real'] },
+  { kind: 'intersection', types: ['number', 'real'] },
 ];
 
 function bench(name: string, n: number, fn: () => void): void {

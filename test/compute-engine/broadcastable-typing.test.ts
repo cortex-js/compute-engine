@@ -75,16 +75,16 @@ describe('broadcastable<T> typing (phase B)', () => {
     const ce = new ComputeEngine();
     // Inferred-number symbol: NOT triggered.
     expect(ce.box(['Add', 2, 'x']).type.toString()).toBe('number');
-    expect(ce.box(['Multiply', 2, 'x']).type.toString()).toBe('finite_number');
+    expect(ce.box(['Multiply', 2, 'x']).type.toString()).toBe('number');
     // Statically-visible collection/tuple/wrapper branches keep today's typing.
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(ce.box(['Multiply', 2, ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(
       ce.box(['Add', ['Tuple', 1, 2], ['Tuple', 3, 4]]).type.toString()
-    ).toBe('tuple<finite_integer, finite_integer>');
+    ).toBe('tuple<integer, integer>');
     expect(ce.box(['Multiply', 2, ['Range', 1, 5]]).type.toString()).toBe(
       'list<integer>'
     );
@@ -106,7 +106,7 @@ describe('broadcastable<T> typing (phase B)', () => {
     // mis-grouping `(b^3c^2d)(x^7y)` as `Tuple` via the invisible-operator
     // gate.
     let ce = new ComputeEngine();
-    expect(ce.parse('2x').type.toString()).toBe('finite_number');
+    expect(ce.parse('2x').type.toString()).toBe('number');
     ce = new ComputeEngine();
     const juxt = ce.parse('(b^3c^2d)(x^7y)');
     expect(juxt.operator).toBe('Multiply');
@@ -140,7 +140,7 @@ describe('broadcastable<T> typing (phase B)', () => {
     const ce = new ComputeEngine();
     const px = ce.box(['PointX', ['Tuple', 'x', 'y']]);
     expect(px.type.toString()).toBe('number');
-    expect(ce.box(['Power', px.json, 2]).type.toString()).toBe('finite_number');
+    expect(ce.box(['Power', px.json, 2]).type.toString()).toBe('number');
 
     // But a POSSIBLY-collection APPLICATION component keeps its honest type:
     // `PointX((h(1), y))` returns `h(1)`, which may be a list at run time —
@@ -151,13 +151,13 @@ describe('broadcastable<T> typing (phase B)', () => {
     expect(pxh.type.toString()).toBe('unknown');
     // Exactly this tier: the CELL claim follows the scalar generic-point
     // convention — `Power(px, 2)` on the scalar `number` component above
-    // claims `finite_number`, and a possibly-collection operand's cells get
+    // claims `number`, and a possibly-collection operand's cells get
     // the same claim (scalar/cell parity; before 2026-08-22 the cells were
     // branded `number` because `isFinite === false` fired for the non-number
     // TYPE of `pxh`, not for any value fact). The exact string also rejects
-    // a scalar fold (`finite_number <: broadcastable<finite_number>`).
+    // a scalar fold (`number <: broadcastable<number>`).
     expect(ce.box(['Power', pxh.json, 2]).type.toString()).toBe(
-      'broadcastable<finite_number>'
+      'broadcastable<number>'
     );
   });
 
@@ -228,7 +228,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
 
   test('a widen-produced scalar|collection union is repaired to a definite list', () => {
     // `Remainder` has no collection-aware handler — its naive `widen(…)` over
-    // a collection operand produced `finite_integer | vector<3>` while the
+    // a collection operand produced `integer | vector<3>` while the
     // value ALWAYS broadcasts to a list. Only `Add`/`Multiply`/`Negate`
     // (handlers that genuinely compute collection results, and now type
     // `matrix + scalar` as `matrix` themselves) defer; everyone else lifts.
@@ -237,7 +237,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     const rem = ce.box(['Remainder', v1, 7]);
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
-    expect(rem.type.toString()).toBe('vector<finite_integer^3>');
+    expect(rem.type.toString()).toBe('vector<integer^3>');
     expect(rem.evaluate().operator).toBe('List');
   });
 
@@ -247,19 +247,15 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     const arg = ['Subtract', ['Multiply', 2, ['h', 'x']], 1];
     // Exactly this tier: the cells follow each operator's SCALAR claim for
     // an unknown-finiteness operand (the generic-point convention): `Sin`,
-    // `Sqrt` and `Power` claim `finite_number` for a scalar of type
+    // `Sqrt` and `Power` claim `number` for a scalar of type
     // `number`, so their cells match (scalar/cell parity — before 2026-08-22
     // the cells were branded `number` by an `isFinite === false` read that
     // fired for the operand's non-number TYPE). The exact string also
     // rejects a scalar fold.
-    expect(ce.box(['Sin', arg]).type.toString()).toBe(
-      'broadcastable<finite_number>'
-    );
-    expect(ce.box(['Sqrt', arg]).type.toString()).toBe(
-      'broadcastable<finite_number>'
-    );
+    expect(ce.box(['Sin', arg]).type.toString()).toBe('broadcastable<number>');
+    expect(ce.box(['Sqrt', arg]).type.toString()).toBe('broadcastable<number>');
     expect(ce.box(['Power', arg, 2]).type.toString()).toBe(
-      'broadcastable<finite_number>'
+      'broadcastable<number>'
     );
     // `Abs` cells carry their non-negative range (ranged-results round), plus
     // the signed pair: unlike the heads above, `absFunctionType` does not
@@ -280,11 +276,11 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     // rational (hence integer) cell claim would be unsound for `Sin`.
     expectTypeBetween(ce.box(['Sin', ['Range', 1, 5]]), {
       atMost: 'list<number>',
-      above: 'list<finite_rational>',
+      above: 'list<rational>',
     });
     expectTypeBetween(ce.box(['Sin', ['List', 0, 1]]), {
       atMost: 'vector<2>',
-      above: 'vector<finite_rational^2>',
+      above: 'vector<rational^2>',
     });
   });
 
@@ -293,23 +289,23 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     // Nested arithmetic over a broadcastable inner node stays single-layer.
     // Exactly this tier: one `broadcastable<…>` layer (never nested, never a
     // scalar fold). The cell tier follows each operator's scalar claim:
-    // `Sin`'s cells are `finite_number` (generic-point convention), and the
-    // outer `Add` and `Sqrt` of a `finite_number` cell keep the finite
+    // `Sin`'s cells are `number` (generic-point convention), and the
+    // outer `Add` and `Sqrt` of a `number` cell keep the finite
     // claim, exactly as their scalar paths do.
     expect(
       ce.box(['Add', ['Sin', ['Multiply', 2, ['h', 'x']]], 1]).type.toString()
-    ).toBe('broadcastable<finite_number>');
+    ).toBe('broadcastable<number>');
     expect(
       ce.box(['Sqrt', ['Sin', ['Multiply', 2, ['h', 'x']]]]).type.toString()
-    ).toBe('broadcastable<finite_number>');
+    ).toBe('broadcastable<number>');
   });
 
   test('non-interference: bare-symbol and literal operands stay scalar', () => {
     const ce = mkEngine();
     // A bare (inference-pending) symbol is NOT possibly-collection typed.
-    expect(ce.box(['Sin', 'x']).type.toString()).toBe('finite_number');
+    expect(ce.box(['Sin', 'x']).type.toString()).toBe('number');
     // A literal argument numericizes/stays scalar as before.
-    expect(ce.box(['Sin', 0.5]).type.toString()).toBe('finite_real');
+    expect(ce.box(['Sin', 0.5]).type.toString()).toBe('real');
   });
 
   test('At over a phase-C broadcastable base is a valid `number`', () => {
@@ -345,8 +341,8 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto 2x'));
     const app = ce.box(['g', ['List', 1, 2, 3]]);
-    // Honest element per g's return (`2x` body → finite_number).
-    expect(app.type.toString()).toBe('vector<finite_number^3>');
+    // Honest element per g's return (`2x` body → number).
+    expect(app.type.toString()).toBe('vector<3>');
     // Type and value agree: evaluation broadcasts to a List.
     expect(app.evaluate().toString()).toBe('[2,4,6]');
   });
@@ -357,9 +353,7 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     ce.declare('h', '(number) -> unknown');
     const arg = ce.box(['Multiply', 2, ['h', 1]]);
     expect(arg.type.toString()).toBe('broadcastable<number>');
-    expect(ce.box(['g', arg]).type.toString()).toBe(
-      'broadcastable<finite_number>'
-    );
+    expect(ce.box(['g', arg]).type.toString()).toBe('broadcastable<number>');
   });
 
   test('numeric-tuple argument of an inferred-signature lambda types `any`', () => {
@@ -368,7 +362,7 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     const app = ce.box(['g', ['Tuple', 1, 2]]);
     // The tuple binds WHOLE to the scalar parameter (atomic, never mapped), then
     // the body's arithmetic broadcasts it: `2·(1,2) = (2,4)` — a tuple, not the
-    // scalar `finite_number` the inferred signature would report. Since the body
+    // scalar `number` the inferred signature would report. Since the body
     // shape isn't statically knowable, the honest type is `any`.
     expect(app.type.toString()).toBe('any');
     expect(app.evaluate().toString()).toBe('(2, 4)');
@@ -392,17 +386,17 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto 2x'));
     // A scalar argument: no broadcast — the type is the body's inferred result
-    // (`2x` with `x: unknown` is `finite_number`), NOT the closure narrowing
+    // (`2x` with `x: unknown` is `number`), NOT the closure narrowing
     // "all-integer arguments ⇒ integer result" that operators without a type
     // handler get. User code is exempt from that heuristic: it is unsound for a
-    // body like `n / 3` (`k(4)` was typed `finite_integer` while its value is
+    // body like `n / 3` (`k(4)` was typed `integer` while its value is
     // the rational `4/3`), and a user function's body already says what it
     // returns.
-    expect(ce.box(['g', 3]).type.toString()).toBe('finite_number');
+    expect(ce.box(['g', 3]).type.toString()).toBe('number');
     expect(ce.box(['g', 3]).evaluate().toString()).toBe('6');
     // The unsound case that motivated the exemption.
     ce.assign('k', ce.parse('n \\mapsto n / 3'));
-    expect(ce.box(['k', 4]).type.toString()).toBe('finite_number');
+    expect(ce.box(['k', 4]).type.toString()).toBe('number');
     expect(ce.box(['k', 4]).evaluate().toString()).toBe('4/3');
   });
 
@@ -421,7 +415,7 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     expect(app.type.toString()).toBe('list<vector<2>>');
     const ev = app.evaluate();
     expect(ev.toString()).toBe('[[1,-1],[2,-2]]');
-    expect(ev.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(ev.type.toString()).toBe('matrix<integer^(2x2)>');
     // The subtype encoding bridge (tensor-unification Phase C): a
     // dimensioned rank-2 list IS a list of fixed-length vectors, so
     // `evaluated ⊆ declared` holds across the two encodings.
@@ -436,20 +430,18 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     expect(p0.type.toString()).toBe('broadcastable<number>');
 
     const p1 = ce.box(['m', p0]);
-    expect(p1.type.toString()).toBe('broadcastable<finite_number>');
+    expect(p1.type.toString()).toBe('broadcastable<number>');
 
     // `At(m(2h(1)), 1)` is valid with an element type from the return. §3.C:
     // the access is `T | marker(T)`; a numeric `T` absorbs its absence value
-    // (I6/Q2), so the type widens to `number` (BREAKING — was `finite_number`).
+    // (I6/Q2), so the type widens to `number` (BREAKING — was `number`).
     const at = ce.box(['At', ['m', p0], 1]);
     expect(at.isValid).toBe(true);
     expect(hasErrorOperand(at)).toBe(false);
     expect(at.type.toString()).toBe('number');
 
     // Chaining stays single-layer broadcastable (idempotent).
-    expect(ce.box(['m', p1]).type.toString()).toBe(
-      'broadcastable<finite_number>'
-    );
+    expect(ce.box(['m', p1]).type.toString()).toBe('broadcastable<number>');
   });
 });
 
@@ -628,7 +620,7 @@ describe('fixed-shape vs generic-collection broadcast typing', () => {
     // refine, but not to a rational cell (unsound for `Sin`).
     expectTypeBetween(ce.box(['Sin', ['Multiply', 2, 'v']]), {
       atMost: 'vector<1>',
-      above: 'vector<finite_rational^1>',
+      above: 'vector<rational^1>',
     });
   });
 
@@ -649,11 +641,11 @@ describe('fixed-shape vs generic-collection broadcast typing', () => {
     // A generic `collection<number>` operand may be a non-indexed `set` at
     // runtime, which the evaluator never broadcasts (the broadcast paths are
     // all `isFiniteIndexedCollection`-gated). So `Sin(c)` must NOT be typed a
-    // definite `list<…>`; it keeps the scalar per-element result `finite_number`
+    // definite `list<…>`; it keeps the scalar per-element result `number`
     // (the sound type for the non-broadcasting value path).
     ce.declare('c', 'collection<number>');
     const t = ce.box(['Sin', 'c']).type.toString();
-    expect(t).toBe('finite_number');
+    expect(t).toBe('number');
     expect(t.startsWith('list<')).toBe(false);
   });
 });

@@ -67,10 +67,10 @@ describe('Random — no operand', () => {
     }
   });
 
-  it('types finite_real', () => {
-    expect(ce.box(['Random']).type.toString()).toBe('finite_real');
+  it('types real', () => {
+    expect(ce.box(['Random']).type.toString()).toBe('real');
     expect(ce.parse('\\operatorname{Random}()').type.toString()).toBe(
-      'finite_real'
+      'real'
     );
   });
 

@@ -1,6 +1,11 @@
 # Implementation plan: the finite-by-default numeric-lattice flip
 
-Status: **Phase 0 committed 2026-08-27; Phase 1 delivered 2026-08-28**
+Status: **Phases 0–2 complete 2026-08-28** (Phase 2 delivered and staged:
+the five `finite_*` names retired with one-cycle parse aliases;
+`finite_number` split `number`-at-claims / `complex`-at-gates to preserve
+compiler lane discrimination — recorded below; test sweep was 167 files,
+not 158). Previously: **Phase 0 committed 2026-08-27; Phase 1 delivered
+2026-08-28**
 (steps 1.1–1.8 complete; dual review passed with 17 merged findings
 applied; full suite green on the delivered base — 624 suites, 31,407
 tests, snapshot delta zero beyond the enumerated deliberate pin changes;
@@ -214,7 +219,7 @@ Phase 1 implementation notes (2026-08-27, recorded at completion):
 
 ## Phase 2 — The mechanical sweep
 
-- [ ] **Codemod** over `src/` (NOT `common/type/`, already rewritten):
+- [x] **Codemod** over `src/` (NOT `common/type/`, already rewritten):
       `finite_integer → integer`, `finite_rational → rational`,
       `finite_real → real`, `finite_complex → complex`,
       `finite_number → complex` (the one non-obvious mapping: "any
@@ -225,13 +230,13 @@ Phase 1 implementation notes (2026-08-27, recorded at completion):
       `'X' || 'finite_X'` pairs. EXCLUDED: every `non_finite_number`
       occurrence (done in 1.6), the 1.7 files (done by hand),
       comments (rewritten for meaning in the same pass, by hand).
-- [ ] The type-handler twins in one diff.
-- [ ] **L7 aliases:** the five `finite_*` names parse as deprecated
+- [x] The type-handler twins in one diff.
+- [x] **L7 aliases:** the five `finite_*` names parse as deprecated
       aliases normalizing to the bare names for one release cycle
       (`common/type/parser.ts`), never emitted by serialization;
       `non_finite_number` gets NO alias. Pin alias-in → bare-out.
-- [ ] Test-file sweep (158 files; mechanical, same mapping).
-- [ ] Docs: ARCHITECTURE.md's non-finite typing convention section,
+- [x] Test-file sweep (158 files; mechanical, same mapping).
+- [x] Docs: ARCHITECTURE.md's non-finite typing convention section,
       `doc/08-guide-types.md`, ERROR-MODEL §6's erasure-direction
       wording, CHANGELOG.
 

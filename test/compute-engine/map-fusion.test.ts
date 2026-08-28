@@ -166,7 +166,7 @@ describe('Map fusion — the structural gate (R2)', () => {
     expect(lowerMapSpine(deep)).toBeUndefined();
 
     // An annotation the source's element type does NOT satisfy keeps the
-    // original decline (the element type is `finite_real`, the annotation
+    // original decline (the element type is `real`, the annotation
     // `integer`). A SATISFIED annotation is admitted — see the
     // "annotated parameters" block below.
     const typed = ce.box([
@@ -774,10 +774,10 @@ describe('Map fusion: annotated parameters', () => {
     expect(typed.evaluate().toString()).toBe(bare.evaluate().toString());
   });
 
-  test('a WIDENING annotation is accepted (element finite_integer, annotation number)', () => {
+  test('a WIDENING annotation is accepted (element integer, annotation number)', () => {
     const ce = new ComputeEngine();
     const m = annotated(ce, ['List', 1, 2, 3], 'number');
-    expect(m.op2.type.toString()).toBe('vector<finite_integer^3>');
+    expect(m.op2.type.toString()).toBe('vector<integer^3>');
     expect(lowerMapSpine(m)).toBeDefined();
     expect(m.evaluate().toString()).toBe('[2,3,4]');
   });
@@ -990,7 +990,7 @@ describe('Map fusion: Error elements bubble, they are not laundered', () => {
 
   /** `Map(z ↦ z * 2, Map(y ↦ y + 1, cs))` — both levels lower. The parameters
    * are AUTO-STAMPED from `cs`'s element type at box time, so reassigning `cs`
-   * to a list with a `finite_real` element makes the inner level error on it. */
+   * to a list with a `real` element makes the inner level error on it. */
   const stack = (ce: ComputeEngine, outerBody: any): any =>
     ce.box([
       'Map',
@@ -1095,10 +1095,10 @@ describe('Map fusion: Error elements bubble, they are not laundered', () => {
   test('a STAMPED parameter passes an error element through unchanged too', () => {
     // The stricter half of the test above. A symbol declared `unknown` takes
     // its type from the assigned value, so the source's element type IS known
-    // and the fused parameter is stamped `Typed(w, 'finite_integer')` — even
+    // and the fused parameter is stamped `Typed(w, 'integer')` — even
     // though one element is an Error, since the type describes the list as
     // materialized. A stamped parameter is exactly where laundering could
-    // happen: the annotation says `finite_integer` and the element is not
+    // happen: the annotation says `integer` and the element is not
     // one. It must still arrive verbatim, never coerced to NaN.
     const ce = new ComputeEngine();
     ce.assign('cs2', ce.box(['List', 1, 2, 3] as any));
@@ -1122,7 +1122,7 @@ describe('Map fusion: Error elements bubble, they are not laundered', () => {
     expect(fused.ops[0].json).toEqual([
       'Function',
       ['Block', ['Multiply', 3, 'w']],
-      ['Typed', 'w', "'finite_integer'"],
+      ['Typed', 'w', "'integer'"],
     ]);
     const general = ce.box([
       'Map',

@@ -1013,9 +1013,9 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
     }
     // SUPERSEDED CONTRACT (2026-07-30 ruling). These two used to assert a
     // `'NaN'` fold, on the then-true grounds that a non-real `Power`/`Root` was
-    // typed `finite_number`. The type handlers now narrow a negative base with
+    // typed `number`. The type handlers now narrow a negative base with
     // an EVEN reduced-rational exponent denominator (or an even root degree) to
-    // `finite_complex`, so the enclosing expression emits `{re, im}` arithmetic
+    // `complex`, so the enclosing expression emits `{re, im}` arithmetic
     // and the fold must be the complex principal value — a `NaN` *number*
     // there is read as `{re: NaN, im: undefined}` by the parent. Do NOT restore
     // the `'NaN'` assertion.
@@ -1024,7 +1024,7 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
       [['Root', -4, 4], { re: 1, im: 0.9999999999999998 }],
     ] as const) {
       const expr = ce.box(src as any);
-      expect(expr.type.toString()).toBe('finite_complex');
+      expect(expr.type.toString()).toBe('complex');
       const result = compile(expr, { fallback: false });
       expect(result.run!()).toEqual(exp);
       // …matching the interpreter, which is the point of the ruling.
@@ -3496,7 +3496,7 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
     // the wide `number`, so the assertion is on scalar-ness rather than on the
     // spelling.
     const d = e.box(['Distance', ['List', 0, 0], ['List', 3, 4]]);
-    expect(d.type.toString()).toBe('finite_real');
+    expect(d.type.toString()).toBe('real');
     expect(d.type.matches('collection')).toBe(false);
   });
 

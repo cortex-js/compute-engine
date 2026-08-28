@@ -268,7 +268,7 @@ describe('M2 SUGARED GENERICS — end to end', () => {
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.value).toBe('("a", 1)');
-    expect(r.type).toBe('tuple<string, finite_integer>');
+    expect(r.type).toBe('tuple<string, integer>');
   });
 
   test('the effects slot works with the clause', () => {
@@ -679,7 +679,7 @@ describe('WHERE-CLAUSE BINDER — binding, bounds and generic behavior', () => {
     ).toMatchObject({
       diagnostics: [],
       value: '("a", 1)',
-      type: 'tuple<string, finite_integer>',
+      type: 'tuple<string, integer>',
     });
   });
 

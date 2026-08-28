@@ -87,7 +87,7 @@ describe('Matrix-operator typing (declared symbols)', () => {
     expect(e.type.toString()).toBe('number');
   });
 
-  // Was pinned as `finite_integer | matrix` ("the honest union"). Reversed:
+  // Was pinned as `integer | matrix` ("the honest union"). Reversed:
   // the scalar arm is UNREACHABLE — `matrix + scalar` broadcasts elementwise
   // and always evaluates to a matrix (`[[1,2],[3,4]]+1` → `[[2,3],[4,5]]`).
   // Keeping it cost real consumers: union matching is all-members, so
@@ -149,16 +149,16 @@ describe('Matrix-operator typing (undeclared symbols)', () => {
 });
 
 describe('Multiply numeric typing (regression — must be unchanged)', () => {
-  test('(2)(3) types finite_integer and evaluates to 6', () => {
+  test('(2)(3) types integer and evaluates to 6', () => {
     const ce = new ComputeEngine();
     const e = ce.parse('(2)(3)');
-    expectTypeBetween(e, { atMost: 'finite_integer' });
+    expectTypeBetween(e, { atMost: 'integer' });
     expect(e.evaluate().toString()).toBe('6');
   });
 
-  test('2x for a scalar x is unchanged (finite_number)', () => {
+  test('2x for a scalar x is unchanged (number)', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('2x').type.toString()).toBe('finite_number');
+    expect(ce.parse('2x').type.toString()).toBe('number');
   });
 });
 

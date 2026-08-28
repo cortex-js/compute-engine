@@ -333,7 +333,7 @@ describe('Field at an instantiated parameterized nominal body (§6)', () => {
     expect(r.diagnostics ?? []).toEqual([]);
     expect(r.value!.toString()).toBe('(1, 2, 3)');
     expect(r.value!.type.toString()).toBe(
-      'tuple<finite_integer, finite_integer, finite_integer>'
+      'tuple<integer, integer, integer>'
     );
   });
 

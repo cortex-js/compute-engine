@@ -406,7 +406,7 @@ describe('EPSIL EXECUTE — static (canonicalization-time) type errors', () => {
   test('the check does not perturb the session it checks', () => {
     // Canonicalizing auto-declares the symbols an expression mentions; the
     // static pass must not leak those into the program's own scope (a
-    // pre-declared `x` would make `let x = 2047` narrow to `finite_integer`).
+    // pre-declared `x` would make `let x = 2047` narrow to `integer`).
     const { value } = run('let x = 2047\nStringFrom(Type(x))');
     expect(value.string).toBe('integer');
   });

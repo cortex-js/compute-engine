@@ -149,6 +149,6 @@ describe('Element membership element-type inference (function parameters)', () =
     expect(ce.box('zz').type.toString()).toBe('unknown');
     // …and the evidence lands on the parameter's own binding (it would be
     // `unknown` if the body had written onto the global instead).
-    expect(paramBindingType(ce, 'isSmall')).toBe('finite_integer');
+    expect(paramBindingType(ce, 'isSmall')).toBe('integer');
   });
 });

@@ -117,7 +117,7 @@ import {
  * source: walking it twice would re-run a lazy element callback per datum.
  *
  * A datum with no FINITE real reading — `NaN`, a real `±∞`, or the complex
- * infinity `~oo` — is rejected the same way, as `finite_real`. It used to be
+ * infinity `~oo` — is rejected the same way, as `real`. It used to be
  * dropped from the sample (`data.filter(Number.isFinite)`), so
  * `BinCounts([1, +oo, 5], 2)` reported the counts of the two-point dataset
  * `[1, 5]` with no hint that a value had been discarded, and a non-finite
@@ -159,7 +159,7 @@ function computeBinning(
     return { rejected: { value: nonRealElement, constraint: 'real' } };
   const nonFiniteElement = nonFiniteDatum(elements);
   if (nonFiniteElement)
-    return { rejected: { value: nonFiniteElement, constraint: 'finite_real' } };
+    return { rejected: { value: nonFiniteElement, constraint: 'real' } };
   const data = elements.map(realProjection);
   // Every value that survived the two scans above is a finite real, so a
   // projection that is not finite means only one thing: the magnitude is
@@ -183,7 +183,7 @@ function computeBinning(
       return { rejected: { value: nonRealEdge, constraint: 'real' } };
     const nonFiniteEdge = nonFiniteDatum(edges);
     if (nonFiniteEdge)
-      return { rejected: { value: nonFiniteEdge, constraint: 'finite_real' } };
+      return { rejected: { value: nonFiniteEdge, constraint: 'real' } };
     binEdges = edges.map(realProjection);
     // As for the data above: a finite real edge whose projection is not finite
     // is one this kernel's machine-float comparisons cannot place.
@@ -231,12 +231,10 @@ function computeBinning(
 }
 
 /** Data whose every element is a proven finite real. */
-const FINITE_REAL_DATA = parseType('collection<finite_real>')!;
+const FINITE_REAL_DATA = parseType('collection<real>')!;
 
 /** The pair form of the same data: one collection of (x, y) points. */
-const FINITE_REAL_PAIRS = parseType(
-  'collection<tuple<finite_real, finite_real>>'
-)!;
+const FINITE_REAL_PAIRS = parseType('collection<tuple<real, real>>')!;
 
 /**
  * Result type of `Covariance`, `PopulationCovariance` and `Correlation`,
@@ -247,35 +245,32 @@ const FINITE_REAL_PAIRS = parseType(
  * a single non-finite data value poisons the whole result: with `NaN` or `±∞`
  * anywhere in the data the answer is `NaN`
  * (`Covariance([1, NaN], [2, 3])` evaluates to `NaN`), and only the top type
- * `number` admits that — the unconditional `finite_real` these three
- * definitions used to claim was unsound. The gate therefore narrows to
- * `finite_real` only when the operand types PROVE every data value is a
- * finite real, in whichever of the two input forms was used, and keeps the
- * wide `number` otherwise.
+ * `number` admits that — the unconditional `real` these three definitions
+ * used to claim was unsound. The gate therefore narrows to `real` only when
+ * the operand types PROVE every data value is a finite real, in whichever of
+ * the two input forms was used, and keeps the wide `number` otherwise.
  *
  * That claim describes the numeric answer only. An input the operator rejects
  * — fewer than two data points, two collections of different lengths, a
  * complex data value, or (for `Correlation`) zero variance — satisfies the
  * type gate but evaluates to an `Error(...)`, whose own type is outside the
- * numeric lattice, so it neither confirms nor contradicts a `finite_real`
- * result type.
+ * numeric lattice, so it neither confirms nor contradicts a `real` result
+ * type.
  *
  * The narrowing has one hole the operand types cannot close: finite real data
  * large enough to overflow the sums of squares (values around `1e200` at
- * machine precision) makes all three answer `NaN`, which `finite_real` does
- * not admit. Closing it needs a decision recorded in `ROADMAP.md`, under the
+ * machine precision) makes all three answer `NaN`, which `real` does not
+ * admit. Closing it needs a decision recorded in `ROADMAP.md`, under the
  * items left open by the type-handler retirement sweep.
  */
 function pairedStatisticType(ops: ReadonlyArray<OperandDescriptor>): Type {
   const [xs, ys] = ops;
   if (xs === undefined) return 'number';
   if (ys === undefined)
-    return typeFact(xs.type, FINITE_REAL_PAIRS) === true
-      ? 'finite_real'
-      : 'number';
+    return typeFact(xs.type, FINITE_REAL_PAIRS) === true ? 'real' : 'number';
   return typeFact(xs.type, FINITE_REAL_DATA) === true &&
     typeFact(ys.type, FINITE_REAL_DATA) === true
-    ? 'finite_real'
+    ? 'real'
     : 'number';
 }
 
@@ -304,11 +299,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'finite_complex' : 'number';
-        if (x.isExtendedReal === true) return 'finite_real';
+          return x.isFinite === true ? 'complex' : 'number';
+        if (x.isExtendedReal === true) return 'real';
         // Unknown realness: exclude a non-finite value (~oo) before hedging.
         if (provablyNonFiniteNumber(x)) return 'number';
-        return 'finite_number';
+        return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -338,11 +333,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'finite_complex' : 'number';
-        if (x.isExtendedReal === true) return 'finite_real';
+          return x.isFinite === true ? 'complex' : 'number';
+        if (x.isExtendedReal === true) return 'real';
         // Unknown realness: exclude a non-finite value (~oo) before hedging.
         if (provablyNonFiniteNumber(x)) return 'number';
-        return 'finite_number';
+        return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
@@ -374,12 +369,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // value reads are unavailable to a type handler).
         const v = operandLiteralValue(x);
         if (v !== undefined) {
-          if (v > -1 && v < 1) return 'finite_real';
+          if (v > -1 && v < 1) return 'real';
           if (v === 1 || v === -1) return 'non_finite_number';
           return 'number';
         }
-        if (x.isGreater(-1) === true && x.isLess(1) === true)
-          return 'finite_real';
+        if (x.isGreater(-1) === true && x.isLess(1) === true) return 'real';
         // Exact pole check for literals: `isEqual` is tolerance-based and
         // would put `1 + 10⁻²⁰` (whose value is NaN, not ±∞) at the pole.
         if (
@@ -420,9 +414,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'finite_complex' : 'number';
+          return x.isFinite === true ? 'complex' : 'number';
         if (x.isExtendedReal === true)
-          return x.isFinite === true ? 'finite_real' : EXTENDED_REAL_TYPE;
+          return x.isFinite === true ? 'real' : EXTENDED_REAL_TYPE;
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -454,7 +448,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature: '((collection<any>|number|distribution)+) -> number',
       // A data-consuming aggregate (§3.C): result type is the numeric base
-      // with NO `| missing` arm (I6 absorption) — `number`, NOT `finite_real`,
+      // with NO `| missing` arm (I6 absorption) — `number`, NOT `real`,
       // for two reasons: an absent datum or empty input evaluates to `NaN`,
       // and complex data has a complex mean (`Mean([1, 1+2i])` is `1 + i`),
       // which only the wide `number` admits.

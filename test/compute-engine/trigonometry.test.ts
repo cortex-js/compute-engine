@@ -243,7 +243,7 @@ describe('Arctan at ±∞', () => {
 });
 
 // Regression: literal poles of the inverse hyperbolic functions used to stay
-// symbolic with a bogus `finite_real` type. They are non-finite: artanh(±1) =
+// symbolic with a bogus `real` type. They are non-finite: artanh(±1) =
 // ±∞, arcoth(±1) = ±∞, arsech(0) = +∞, arcsch(0) = ~oo. `evaluate()` must fold
 // them (not just `.N()`) and the declared type must admit the non-finite value.
 describe('Inverse hyperbolic literal poles', () => {
@@ -259,16 +259,16 @@ describe('Inverse hyperbolic literal poles', () => {
     test(`${op}(${arg}) = ${expected} (exact, non-finite)`, () => {
       const e = engine.expr([op, arg]);
       expect(e.evaluate().toString()).toBe(expected);
-      // Type must not claim finite_real for a pole.
-      expect(e.type.matches('finite_real')).toBe(false);
+      // Type must not claim real for a pole.
+      expect(e.type.matches('real')).toBe(false);
     });
   }
 
-  test('non-pole arguments keep finite_real', () => {
-    expect(engine.expr(['Artanh', 0.5]).type.matches('finite_real')).toBe(true);
-    expect(engine.expr(['Arcoth', 2]).type.matches('finite_real')).toBe(true);
-    expect(engine.expr(['Arsech', 0.5]).type.matches('finite_real')).toBe(true);
-    expect(engine.expr(['Arcsch', 3]).type.matches('finite_real')).toBe(true);
+  test('non-pole arguments keep real', () => {
+    expect(engine.expr(['Artanh', 0.5]).type.matches('real')).toBe(true);
+    expect(engine.expr(['Arcoth', 2]).type.matches('real')).toBe(true);
+    expect(engine.expr(['Arsech', 0.5]).type.matches('real')).toBe(true);
+    expect(engine.expr(['Arcsch', 3]).type.matches('real')).toBe(true);
   });
 });
 
@@ -520,7 +520,7 @@ describe('numericization is skipped for arguments that cannot numericize', () =>
 //
 // The witness reaches evaluation through `At` on a heterogeneous list, because
 // only that shape is invisible to a boxing-time check: the operand's static
-// type is the union `finite_integer | missing | number | string`, which COULD
+// type is the union `integer | missing | number | string`, which COULD
 // be numeric, so admitting it at canonicalization is correct and only
 // evaluation can settle it. A literal `Sin("a")` is already rejected earlier.
 describe('non-numeric operands are reported, not absorbed', () => {

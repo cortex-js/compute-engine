@@ -12,7 +12,7 @@
  * This file pins both halves: that a type read builds nothing and advances no
  * cache axis, and the exact tier the derivation reports for each shape of
  * operand. The type rows are exact-string pins because the tier is the
- * contract — a consumer's `real`-declared slot accepts `finite_real` and
+ * contract — a consumer's `real`-declared slot accepts `real` and
  * rejects `number`.
  */
 
@@ -71,35 +71,27 @@ describe('a Dot type read builds nothing', () => {
 describe('the inner-product type table', () => {
   // Exactly these tiers: measured before the rewrite, and unchanged by it.
   const ladderRows: [string, unknown, string][] = [
-    [
-      'integer tuples',
-      ['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-      'finite_integer',
-    ],
-    [
-      'integer lists',
-      ['Dot', ['List', 1, 2], ['List', 3, 4]],
-      'finite_integer',
-    ],
+    ['integer tuples', ['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]], 'integer'],
+    ['integer lists', ['Dot', ['List', 1, 2], ['List', 3, 4]], 'integer'],
     [
       'mixed tuple and list',
       ['Dot', ['Tuple', 1, 2], ['List', 3, 4]],
-      'finite_integer',
+      'integer',
     ],
     [
       'real components',
       ['Dot', ['Tuple', 1.5, 2.5], ['Tuple', 3.5, 4.5]],
-      'finite_real',
+      'real',
     ],
     [
       'imaginary component',
       ['Dot', ['Tuple', 'ImaginaryUnit', 2], ['Tuple', 3, 4]],
-      'finite_complex',
+      'complex',
     ],
     [
       'complex component',
       ['Dot', ['Tuple', ['Complex', 1, 2], 2], ['Tuple', 3, 4]],
-      'finite_complex',
+      'complex',
     ],
   ];
 
@@ -175,7 +167,7 @@ describe('the inner-product type table', () => {
   });
 
   test('a one-component inner product keeps the product tier', () => {
-    // `imaginary`, not `finite_complex`: the imaginary closure of the sum rule
+    // `imaginary`, not `complex`: the imaginary closure of the sum rule
     // exists because two imaginary parts can cancel to 0, which is real; a
     // single term has nothing to cancel against, so the product's own tier
     // stands — the same single-argument shortcut `addType` takes.
@@ -187,21 +179,21 @@ describe('the inner-product type table', () => {
   });
 
   test('exact cancellation is not a type fact', () => {
-    // `finite_complex`, where the constructed form reported `finite_integer`:
+    // `complex`, where the constructed form reported `integer`:
     // canonicalization folded `z·1 + z·(−1)` to `0`. A derivation from the
-    // component types sees two `finite_complex` products and cannot know they
+    // component types sees two `complex` products and cannot know they
     // are opposites — recognizing that would re-implement `Add`'s term
     // combining inside a type read, which is the construction this rewrite
     // removes. Strictly wider, accepted under the 2026-08-22 ruling.
     const ce = new ComputeEngine();
-    ce.declare('z', 'finite_complex');
+    ce.declare('z', 'complex');
     expect(
       ce.box(['Dot', ['Tuple', 'z', 'z'], ['Tuple', 1, -1]]).type.toString()
-    ).toBe('finite_complex');
+    ).toBe('complex');
   });
 
   test('a rational component', () => {
-    // `finite_real`, where the constructed form reported `finite_rational`:
+    // `real`, where the constructed form reported `rational`:
     // canonicalization folded `1/2 · 3` to the rational literal `3/2` and the
     // sum inherited its tier, while `Multiply`'s ladder reaches its real arm
     // first and never claims a rational product. Strictly wider, so every slot
@@ -211,7 +203,7 @@ describe('the inner-product type table', () => {
       ['List', ['Rational', 1, 2], 2],
       ['List', 3, 4],
     ]);
-    expect(dot.type.toString()).toBe('finite_real');
+    expect(dot.type.toString()).toBe('real');
   });
 
   test('components declared `number`', () => {
@@ -219,11 +211,11 @@ describe('the inner-product type table', () => {
     ce.declare('an', 'number');
     ce.declare('bn', 'number');
     const dot = ce.box(['Dot', ['Tuple', 'an', 'bn'], ['Tuple', 'an', 'bn']]);
-    expect(dot.type.toString()).toBe('finite_number');
+    expect(dot.type.toString()).toBe('number');
   });
 
   test('components declared `real`, against a literal vector', () => {
-    // `finite_real`, where the constructed form reported `real` (which admits
+    // `real`, where the constructed form reported `real` (which admits
     // ±∞). The old answer was an artifact of canonicalization: `Multiply(a, 1)`
     // folded to `a`, so the sum inherited the symbol's declared type verbatim.
     // The derivation now applies the generic-finite-point convention the rest
@@ -234,7 +226,7 @@ describe('the inner-product type table', () => {
     ce.declare('ar', 'real');
     ce.declare('br', 'real');
     const dot = ce.box(['Dot', ['Tuple', 'ar', 'br'], ['Tuple', 1, 2]]);
-    expect(dot.type.toString()).toBe('finite_real');
+    expect(dot.type.toString()).toBe('real');
   });
 
   test('components declared `integer`, against a literal vector', () => {
@@ -245,7 +237,7 @@ describe('the inner-product type table', () => {
     ce.declare('ai', 'integer');
     ce.declare('bi', 'integer');
     const dot = ce.box(['Dot', ['Tuple', 'ai', 'bi'], ['Tuple', 1, 2]]);
-    expect(dot.type.toString()).toBe('finite_integer');
+    expect(dot.type.toString()).toBe('integer');
   });
 
   test('components declared `real` on both sides', () => {
@@ -255,7 +247,7 @@ describe('the inner-product type table', () => {
     const ce = new ComputeEngine();
     ce.declare('sx', 'real');
     const dot = ce.box(['Dot', ['Tuple', 'sx', 'sx'], ['Tuple', 'sx', 'sx']]);
-    expect(dot.type.toString()).toBe('finite_real');
+    expect(dot.type.toString()).toBe('real');
   });
 
   test('a declared vector symbol has no components to read', () => {

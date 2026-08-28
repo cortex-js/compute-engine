@@ -796,7 +796,7 @@ type Person is Scored {
 
   test('a loop-body SET whose value reads the loop index takes effect', () => {
     // Regression: the deferred `Assign(Field(…))` route ran the value-fit
-    // check on the RAW RHS, and `10 * i` statically types `finite_number` —
+    // check on the RAW RHS, and `10 * i` statically types `number` —
     // wider than the `integer` property — so the write was refused, and the
     // refusal error was discarded in statement position: a silent no-op
     // (each iteration read back the ORIGINAL `age`, answering 3), while the

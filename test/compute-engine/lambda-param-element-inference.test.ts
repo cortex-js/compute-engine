@@ -1104,7 +1104,7 @@ describe('signature-driven trigger: a user-defined callee', () => {
     const expr = ce.box(['gen', ['Function', ['Greater', 'n', 1], 'n'], 3]);
     expect(expr.toMathJson()).toEqual([
       'gen',
-      ['Function', ['Less', 1, 'n'], ['Typed', 'n', "'finite_integer'"]],
+      ['Function', ['Less', 1, 'n'], ['Typed', 'n', "'integer'"]],
       3,
     ]);
   });

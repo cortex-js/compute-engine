@@ -216,7 +216,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         '`Divides(a, b)` returns `True` if `a` divides `b` (i.e. `b` is an integer multiple of `a`), corresponding to the notation `a ∣ b`. Stays symbolic for non-integer operands.',
       complexity: 1200,
       // Params are `number` (not `integer`) — like `IsPrime`/`IsOdd` — so a
-      // symbolic operand (statically typed `number`/`finite_number`) is accepted
+      // symbolic operand (statically typed `number`) is accepted
       // and the relation stays symbolic; the `evaluate` handler reduces only
       // when both operands are concrete integers.
       signature: '(number, number) -> boolean',
@@ -276,7 +276,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     NthPrime: {
       description:
         'Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, …',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       examples: ['NthPrime(10)  // 29'],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -299,7 +299,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     NextPrime: {
       description:
         'Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`).',
-      signature: '(integer, integer?) -> finite_integer',
+      signature: '(integer, integer?) -> integer',
       examples: ['NextPrime(10)  // 11', 'NextPrime(10, -1)  // 7'],
       evaluate: ([n, kArg], { engine: ce }) => {
         const start = toBigint(n);
@@ -357,7 +357,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     PrimeNu: {
       description:
         'Return ω(n), the number of distinct prime factors of `n`. The sign of `n` is ignored; `PrimeNu(1)` is 0.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       examples: ['PrimeNu(360)  // 3'],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -372,7 +372,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     PrimeOmega: {
       description:
         'Return Ω(n), the number of prime factors of `n` counted with multiplicity. The sign of `n` is ignored; `PrimeOmega(1)` is 0.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       examples: ['PrimeOmega(360)  // 6'],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -390,7 +390,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     MoebiusMu: {
       description:
         'Return the Möbius function μ(n): 0 if `n` is divisible by a perfect square > 1, otherwise (-1) raised to the number of distinct prime factors. The sign of `n` is ignored.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       examples: ['MoebiusMu(30)  // -1'],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -424,7 +424,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Radical: {
       description:
         'Return the radical of `n` (its square-free kernel): the product of its distinct prime factors. The sign of `n` is ignored; `Radical(1)` is 1.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       examples: ['Radical(360)  // 30'],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -442,7 +442,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     PowerMod: {
       description:
         'Return `a^b mod m` (modular exponentiation). A negative `b` uses the modular inverse of `a`; the result is undefined when that inverse does not exist (i.e. when `a` and `m` are not coprime). The result is in the range [0, m).',
-      signature: '(integer, integer, integer) -> finite_integer',
+      signature: '(integer, integer, integer) -> integer',
       examples: ['PowerMod(2, 10, 1000)  // 24'],
       evaluate: ([aOp, bOp, mOp], { engine: ce }) => {
         const a = toBigint(aOp);
@@ -464,7 +464,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     ModularInverse: {
       description:
         'Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` in [0, m) with `a·x ≡ 1 (mod m)`. Undefined when `a` and `m` are not coprime.',
-      signature: '(integer, integer) -> finite_integer',
+      signature: '(integer, integer) -> integer',
       examples: ['ModularInverse(3, 7)  // 5'],
       evaluate: ([aOp, mOp], { engine: ce }) => {
         const a = toBigint(aOp);
@@ -508,7 +508,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     IntegerSqrt: {
       description:
         'Return the integer square root of `n`, i.e. the largest integer `m` such that `m² ≤ n`. Undefined for negative `n`.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       examples: ['IntegerSqrt(17)  // 4'],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -537,7 +537,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     CarmichaelLambda: {
       description:
         'Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. Defined for `n ≥ 1`.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       examples: ['CarmichaelLambda(15)  // 4'],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -549,7 +549,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     LucasL: {
       description:
         'Return the nth Lucas number: `LucasL(0)` is 2, `LucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. Negative indices follow `LucasL(-n) = (-1)^n · LucasL(n)`.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       examples: ['LucasL(10)  // 123'],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -577,7 +577,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     CatalanNumber: {
       description:
         'Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       examples: ['CatalanNumber(5)  // 42'],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -767,7 +767,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`.',
       signature: '(integer, integer?, integer?) -> integer | list<integer>',
       typeHandlerKind: 'types',
-      type: ([, , digit]) => (digit !== undefined ? 'finite_integer' : 'list'),
+      type: ([, , digit]) => (digit !== undefined ? 'integer' : 'list'),
       examples: ['DigitCount(122, 10, 2)  // 2'],
       evaluate: ([nOp, baseOp, digitOp], { engine: ce }) => {
         const k = toBigint(nOp);
@@ -802,7 +802,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return a random prime. `RandomPrime(n)` draws a prime in [2, n]; `RandomPrime(m, n)` draws a prime in [m, n]. Undefined if the range contains no prime.',
       // Draws from the ambient seeded stream: the `random` label.
-      signature: '(integer, integer?) random -> finite_integer',
+      signature: '(integer, integer?) random -> integer',
       examples: ['RandomPrime(100)  // e.g. 47'],
       evaluate: ([aOp, bOp], { engine: ce }) => {
         let lo: bigint | null;
@@ -837,7 +837,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     PrimePi: {
       description:
         'Return π(n), the prime-counting function: the number of primes less than or equal to `n`.',
-      signature: '(real) -> finite_integer',
+      signature: '(real) -> integer',
       examples: ['PrimePi(10)  // 4'],
       evaluate: ([n], { engine: ce }) => {
         const x = n?.re;
@@ -867,7 +867,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     BernoulliB: {
       description:
         'Return the nth Bernoulli number Bₙ as an exact rational, using the convention B₁ = -1/2. Odd `n > 1` give 0.',
-      signature: '(integer) -> finite_rational',
+      signature: '(integer) -> rational',
       examples: ['BernoulliB(2)  // 1/6'],
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -883,7 +883,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     FromDigits: {
       description:
         'Reconstruct an integer from its list of digits (most-significant first) in the given `base` (default 10). The inverse of `IntegerDigits`. Digits outside `[0, base)` are combined positionally (Horner evaluation).',
-      signature: '(collection<any>, integer?) -> finite_integer',
+      signature: '(collection<any>, integer?) -> integer',
       examples: ['FromDigits([1, 2, 3, 4])  // 1234'],
       evaluate: ([digitsOp, baseOp], { engine: ce }) => {
         const digits = Array.from(digitsOp?.each() ?? []).map(toBigint);
@@ -899,7 +899,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     DigitSum: {
       description:
         'Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored.',
-      signature: '(integer, integer?) -> finite_integer',
+      signature: '(integer, integer?) -> integer',
       examples: ['DigitSum(1234)  // 10'],
       evaluate: ([nOp, baseOp], { engine: ce }) => {
         const k = toBigint(nOp);
@@ -920,7 +920,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     DivisorSigma: {
       description:
         'The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. Defined for `n ≥ 1`.',
-      signature: '(integer, integer) -> finite_integer',
+      signature: '(integer, integer) -> integer',
       examples: ['DivisorSigma(2, 6)  // 50'],
       evaluate: ([kOp, nOp], { engine: ce }) => {
         const k = toBigint(kOp);
@@ -942,7 +942,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     JacobiSymbol: {
       description:
         'The Jacobi symbol (a/n) for an odd `n > 0`. Returns -1, 0, or 1. Undefined when `n` is even or non-positive.',
-      signature: '(integer, integer) -> finite_integer',
+      signature: '(integer, integer) -> integer',
       examples: ['JacobiSymbol(5, 21)  // 1'],
       evaluate: ([aOp, nOp], { engine: ce }) => {
         const a = toBigint(aOp);
@@ -956,7 +956,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     LegendreSymbol: {
       description:
         'The Legendre symbol (a/p) for an odd prime `p`. Returns -1, 0, or 1. Undefined when `p` is not an odd prime.',
-      signature: '(integer, integer) -> finite_integer',
+      signature: '(integer, integer) -> integer',
       examples: ['LegendreSymbol(3, 7)  // -1'],
       evaluate: ([aOp, pOp], { engine: ce }) => {
         const a = toBigint(aOp);
@@ -970,7 +970,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     MultiplicativeOrder: {
       description:
         'The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. Undefined unless `a` and `n` are coprime.',
-      signature: '(integer, integer) -> finite_integer',
+      signature: '(integer, integer) -> integer',
       examples: ['MultiplicativeOrder(2, 7)  // 3'],
       evaluate: ([aOp, nOp], { engine: ce }) => {
         const a0 = toBigint(aOp);
@@ -994,7 +994,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     PrimitiveRoot: {
       description:
         'The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p).',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       examples: ['PrimitiveRoot(7)  // 3'],
       evaluate: ([nOp], { engine: ce }) => {
         const n = toBigint(nOp);
@@ -1040,11 +1040,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         "Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n.",
       // `(number)`, not `(integer)`: a strict integer parameter rejects
       // symbolic operands at rule-boxing time — `Totient(2^n)` soundly types
-      // `finite_rational` since the WP-2.9 Power-type fix (n could be
+      // `rational` since the WP-2.9 Power-type fix (n could be
       // negative), which broke 4 Fungrim rules. The evaluate handler below
       // validates integrality at runtime (`toBigint` → null keeps
       // non-integers symbolic), same pattern as `Binomial` (WP-2.15).
-      signature: '(number) -> finite_integer',
+      signature: '(number) -> integer',
       evaluate: ([n], { engine: ce }) => {
         // Runtime integrality guard (the signature is deliberately loose, see
         // above; `toBigint` COERCES via rounding, so gate before it).
@@ -1057,7 +1057,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     Sigma0: {
       description: 'Number of positive divisors of n.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
@@ -1067,7 +1067,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     Sigma1: {
       description: 'Sum of positive divisors of n.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
@@ -1077,7 +1077,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     SigmaMinus1: {
       description: 'Sum of reciprocals of positive divisors of n.',
-      signature: '(integer) -> finite_rational',
+      signature: '(integer) -> rational',
       evaluate: ([n], { engine: ce, numericApproximation }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
@@ -1107,7 +1107,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Eulerian: {
       description:
         'Eulerian number A(n, m): number of permutations of {1..n} with exactly m ascents.',
-      signature: '(integer, integer) -> finite_integer',
+      signature: '(integer, integer) -> integer',
       evaluate: ([n, m], { engine: ce }) => {
         const nn = toBigint(n);
         const mm = toBigint(m);
@@ -1127,7 +1127,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Stirling: {
       description:
         'Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets.',
-      signature: '(integer, integer) -> finite_integer',
+      signature: '(integer, integer) -> integer',
       evaluate: ([n, m], { engine: ce }) => {
         const nn = toBigint(n);
         const mm = toBigint(m);
@@ -1147,7 +1147,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     StirlingS1: {
       description:
         'Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). Its absolute value counts the permutations of n elements with exactly m disjoint cycles.',
-      signature: '(integer, integer) -> finite_integer',
+      signature: '(integer, integer) -> integer',
       examples: ['StirlingS1(5, 2)  // -50'],
       evaluate: ([n, m], { engine: ce }) => {
         const nn = toBigint(n);
@@ -1174,7 +1174,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     NPartition: {
       description: 'Number of integer partitions of n.',
-      signature: '(integer) -> finite_integer',
+      signature: '(integer) -> integer',
       evaluate: ([n], { engine: ce }) => {
         const nn = toBigint(n);
         if (nn === null || nn < 0n) return undefined;

@@ -76,7 +76,7 @@ describe('DECLARING', () => {
   });
 
   test('Declare a variable and widen type', () => {
-    ce.declare('g', { value: 5 }); // Inferred as finite_integer
+    ce.declare('g', { value: 5 }); // Inferred as integer
     expect(ce.expr('g').type.toString()).toEqual('integer');
     ce.assign('g', 5.5);
     expect(ce.expr('g').type.toString()).toEqual('real');

@@ -438,7 +438,7 @@ describe('fail-open rule-condition guards', () => {
       );
       // A PRODUCT of `i` with an unconstrained symbol is NOT a witness: the
       // guard asks `isExtendedReal === false`, which requires a proof of
-      // non-realness, and `i·a` types `finite_number` because `a` may itself
+      // non-realness, and `i·a` types `number` because `a` may itself
       // be imaginary (`a = i` makes the product the real `−1`). The predicate
       // is three-valued for function expressions, so it answers `undefined`
       // here and the rule correctly declines.

@@ -164,7 +164,7 @@ export class _BoxedValueDefinition
    * 2026-08-18: re-refine on re-assignment; element only; `typeof` shows
    * the refinement). Assignment compatibility is checked against the
    * skeleton, so `a: list` still refuses `a = 42` after refining to
-   * `list<finite_integer>`, while `a = ["x"]` re-refines. `undefined` for
+   * `list<integer>`, while `a = ["x"]` re-refines. `undefined` for
    * every other declaration. */
   _placeholderSkeleton: Type | undefined = undefined;
 
@@ -357,7 +357,7 @@ export class _BoxedValueDefinition
         // A declared placeholder skeleton refines from the initializer,
         // exactly as it refines from an assignment (Phase 1 rulings, ruled
         // 2026-08-18): `let a: list = [1, 2, 3]` reports
-        // `list<finite_integer>` just as the split `let a: list; a = [1,2,3]`
+        // `list<integer>` just as the split `let a: list; a = [1,2,3]`
         // does.
         if (this._placeholderSkeleton !== undefined) {
           const refined = refineConstructorPlaceholder(
@@ -921,7 +921,7 @@ export function inferTypeFromValue(
   // to the most specific type possible based on the value's type.
 
   if (value.type.matches('integer')) {
-    // If the value matches an integer (or a finite_integer), we promote the type to `integer`
+    // An integer value, ranged or not, promotes to the bare tier `integer`:
     // x = 2 => integer
     return ce.type('integer');
   }
@@ -933,7 +933,7 @@ export function inferTypeFromValue(
   }
 
   if (value.type.matches('real')) {
-    // If the value matches a real number (or `finite_real_number`), we promote the type to `real`
+    // If the value matches a real number, we promote the type to `real`
     // x = 3.14 => real
     return ce.type('real');
   }

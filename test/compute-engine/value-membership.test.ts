@@ -6,7 +6,7 @@ import { typeAcceptsValue } from '../../src/compute-engine/boxed-expression/valu
  * (docs/TYPE-SYSTEM.md §4.1, §7):
  * value types are inhabitable. A concrete value is tested against a
  * value-component type by MEMBERSHIP (`typeAcceptsValue`), not by its
- * synthesized type — `ce.box(0).type` is `finite_integer`, which is not a
+ * synthesized type — `ce.box(0).type` is `integer`, which is not a
  * subtype of the value type `0`, yet `0` plainly inhabits it.
  */
 
@@ -18,21 +18,23 @@ beforeEach(() => {
 // ─── Lattice fix: a finite literal claims the finite base type ──────────────
 
 describe('VALUE TYPES — subtype lattice', () => {
-  it('an integer value type is a subtype of finite_integer', () => {
-    expect(ce.type('0').matches('finite_integer')).toBe(true);
+  it('an integer value type is a subtype of integer', () => {
     expect(ce.type('0').matches('integer')).toBe(true);
-    expect(ce.type('0').matches('finite_real')).toBe(true);
-    expect(ce.type('0').matches('finite_number')).toBe(true);
+    expect(ce.type('0').matches('rational')).toBe(true);
+    expect(ce.type('0').matches('real')).toBe(true);
+    // `complex` is the finiteness gate: every bare name under `number` is
+    // finite, and `complex` is the widest of them.
+    expect(ce.type('0').matches('complex')).toBe(true);
   });
 
-  it('a non-integer value type is a subtype of finite_real', () => {
-    expect(ce.type('3.5').matches('finite_real')).toBe(true);
+  it('a non-integer value type is a subtype of real', () => {
+    expect(ce.type('3.5').matches('real')).toBe(true);
     expect(ce.type('3.5').matches('real')).toBe(true);
     expect(ce.type('3.5').matches('integer')).toBe(false);
   });
 
   it('the reverse direction stays false', () => {
-    expect(ce.type('finite_integer').matches('0')).toBe(false);
+    expect(ce.type('integer').matches('0')).toBe(false);
     expect(ce.type('integer').matches('0')).toBe(false);
   });
 });

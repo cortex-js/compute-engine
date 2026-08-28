@@ -184,7 +184,7 @@ describe('WithRandomSeed — seed evaluation', () => {
     const ce = new ComputeEngine();
     let calls = 0;
     ce.declare('SeedProbe', {
-      signature: '() -> finite_real',
+      signature: '() -> real',
       evaluate: () => {
         calls++;
         return ce.number(3);
@@ -367,7 +367,7 @@ describe('WithRandomSeed — frame stack discipline', () => {
   it('pops the frame when the body throws (operator level)', () => {
     const ce = new ComputeEngine();
     ce.declare('BoomProbe', {
-      signature: '() -> finite_real',
+      signature: '() -> real',
       evaluate: () => {
         throw new Error('boom');
       },
@@ -507,17 +507,17 @@ describe('WithRandomSeed — typing', () => {
   // path. It reads the body's type, so the held body must be BOUND — which is
   // what the `canonical` handler's `op.canonical` does.
   //
-  // NOTE: the spec states `finite_real`; that is the type of the REDESIGNED
-  // `Random` (Phase 2). The legacy `Random` still types `finite_real`, and
+  // NOTE: the spec states `real`; that is the type of the REDESIGNED
+  // `Random` (Phase 2). The legacy `Random` still types `real`, and
   // what is asserted here is the pass-through, not the body's own type.
   it('carries the body type through, PRE-evaluation (box route)', () => {
     expect(boxed(['WithRandomSeed', 42, ['Random']]).type.toString()).toBe(
-      'finite_real'
+      'real'
     );
   });
 
   it('carries the body type through, PRE-evaluation (parse route)', () => {
-    expect(parsed(`${WRS}(42, ${RANDOM})`).type.toString()).toBe('finite_real');
+    expect(parsed(`${WRS}(42, ${RANDOM})`).type.toString()).toBe('real');
   });
 
   it('carries a collection body type through (box route)', () => {
@@ -527,21 +527,21 @@ describe('WithRandomSeed — typing', () => {
         42,
         ['List', ['Random'], ['Random']],
       ]).type.toString()
-    ).toBe('vector<finite_real^2>');
+    ).toBe('vector<real^2>');
   });
 
   // `HoldValues` had the same latent gap: its held body arrived unbound, so
   // its `type` handler read `unknown` on the box/parse routes.
   it('HoldValues carries its body type through (box route)', () => {
     expect(boxed(['HoldValues', ['Random']]).type.toString()).toBe(
-      'finite_real'
+      'real'
     );
   });
 
   it('HoldValues carries its body type through (parse route)', () => {
     expect(
       parsed(`\\operatorname{HoldValues}(${RANDOM})`).type.toString()
-    ).toBe('finite_real');
+    ).toBe('real');
   });
 });
 

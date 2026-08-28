@@ -67,7 +67,7 @@ the previous frame in a **`finally`**. That is the whole mechanism, and it gives
 
 | Property | Ruling |
 |---|---|
-| Seed type | `finite_real` or `string`. Complex and non-finite **literals** are signature-invalid; a seed *expression* evaluating to a non-finite or non-real value is a structured `out-of-range` error at frame entry, never a hash |
+| Seed type | `real` or `string`. Complex and non-finite **literals** are signature-invalid; a seed *expression* evaluating to a non-finite or non-real value is a structured `out-of-range` error at frame entry, never a hash |
 | Scoping | **Dynamic** — the frame is active through user-function calls, not just lexically inside `body` |
 | Nesting | Allowed; **innermost wins** (a config shadows) |
 | Counters | **Independent per frame** — a frame's *n*-th draw is `hash(seed, n)` regardless of nested frames |

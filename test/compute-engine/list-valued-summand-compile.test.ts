@@ -6,7 +6,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // `success: true`. Root cause: numeric-argument validation
 // (`checkNumericArgs`) inferred the scalar numeric context (`real`) onto a
 // possibly-collection operand — `a(i·t)` with inferred result signature
-// `vector<finite_number^2>` — WIDENING the shared definition to
+// `vector<2>` — WIDENING the shared definition to
 // `real | vector<…>`. Every function defined afterwards whose body called `a`
 // then inferred a scalar result, and the compiled Sum took the unrolled
 // scalar arm instead of the element-wise `_SYS.bcast` fold.
@@ -27,10 +27,10 @@ describe('list-valued function applications keep their signature under numeric u
     const a: any = ce.lookupDefinition('a');
     const B: any = ce.lookupDefinition('B');
     expect(a?.operator?.signature?.toString()).toEqual(
-      '(unknown) -> vector<finite_number^2>'
+      '(unknown) -> vector<2>'
     );
     expect(B?.operator?.signature?.toString()).toEqual(
-      '(unknown) -> vector<finite_number^2>'
+      '(unknown) -> vector<2>'
     );
   });
 
@@ -38,7 +38,7 @@ describe('list-valued function applications keep their signature under numeric u
     const ce = new ComputeEngine();
     // An unknown symbol in numeric context is still consumed as a number
     // (the guard exempts only possibly-collection operands).
-    expect(ce.parse('2q_a').type.toString()).toEqual('finite_number');
+    expect(ce.parse('2q_a').type.toString()).toEqual('number');
     // A scalar-valued application still narrows its inferred result.
     ce.parse('f(t)\\coloneq t^2+1').evaluate();
     ce.parse('2f(3)').evaluate();
@@ -190,7 +190,7 @@ describe('big-op bodies that cannot accumulate numerically (item 121 residue)', 
 describe('a list-valued call inside a big-op body is element-wise, not scalar (item 171)', () => {
   // The consumer registration shape: declare an open head, then assign the
   // lambda. It is what makes the declared result `unknown` rather than the
-  // inferred `vector<finite_number^2>`.
+  // inferred `vector<2>`.
   const setup = (hBody: any) => {
     const ce = new ComputeEngine();
     for (const id of ['h', 'a', 'A'])
@@ -223,7 +223,7 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
     // CONCRETELY vector-valued rather than `broadcastable<unknown>` — the
     // element-wise agreement below is what this test pins either way.
     const sumBody = (ce.box('A').value as any).ops[0].ops[0].ops[0];
-    expect(sumBody.type.toString()).toMatch(/vector<finite_number\^2>/);
+    expect(sumBody.type.toString()).toMatch(/vector<2>/);
 
     const [x, y] = [...ce.parse('A(0.3)').N().each()].map((e) => e.re);
     {

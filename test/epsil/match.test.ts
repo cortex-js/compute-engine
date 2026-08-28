@@ -806,6 +806,6 @@ describe('EPSIL MATCH — parameterized nominal subjects (§6)', () => {
         'mapTree(tree(1, [tree(2, [])]))'
     );
     expect(r.diagnostics).toEqual([]);
-    expect(r.value?.type.toString()).toBe('tree<finite_integer>');
+    expect(r.value?.type.toString()).toBe('tree<integer>');
   });
 });

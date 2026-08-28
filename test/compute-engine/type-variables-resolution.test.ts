@@ -117,7 +117,7 @@ describe('`OverloadResolution` carries only what a caller consumes', () => {
     expect(generic.selected?.typeParams?.length).toBe(1);
     // `selectedInstance` is GROUND: the clause is discharged.
     expect(generic.selectedInstance?.typeParams).toBeUndefined();
-    expect(generic.selectedSolution?.bindings.T).toBe('finite_integer');
+    expect(generic.selectedSolution?.bindings.T).toBe('integer');
 
     const ground = resolveOverload(ce, [ce.string('x')], arms);
     expect(ground.selected).toBe(arms[1]);
@@ -165,7 +165,7 @@ describe('the value-arm JOIN runs on INSTANTIATED arms (§4.2)', () => {
   });
 
   test('dispatch decided by the generic arm keeps its INSTANCE result', () => {
-    expect(setup().box(['vg', 2]).type.toString()).toBe('finite_integer');
+    expect(setup().box(['vg', 2]).type.toString()).toBe('integer');
   });
 
   test('a BLOCKED dispatch joins GROUND results, never an open one', () => {
@@ -296,7 +296,7 @@ describe('§4.5 parity on the VALUE-definition route', () => {
       // §8: the reported expected type is the ground BOUND, never variable
       // syntax — and it is the same string on every route.
       expect(JSON.stringify(e.json)).toBe(
-        `["${f}",["Error",["ErrorCode","'incompatible-type'","'indexed_collection'","'set<finite_integer>'"],["Set",1,2]]]`
+        `["${f}",["Error",["ErrorCode","'incompatible-type'","'indexed_collection'","'set<integer>'"],["Set",1,2]]]`
       );
     }
   });
@@ -311,11 +311,11 @@ describe('§4.5 parity on the VALUE-definition route', () => {
     const ce = setup();
     const e = ce.box(['vecho', M22]);
     expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(e.type.toString()).toBe('matrix<integer^(2x2)>');
     expect(e.type.toString()).toBe(e.op1.type.toString());
     // Route parity: the operator route says the same thing.
     expect(ce.box(['oecho', M22]).type.toString()).toBe(
-      'matrix<finite_integer^(2x2)>'
+      'matrix<integer^(2x2)>'
     );
   });
 
@@ -324,16 +324,14 @@ describe('§4.5 parity on the VALUE-definition route', () => {
     ce.declare('vid', '(T) -> T where T'); // value route
     ce.declare('oid', { signature: '(T) -> T where T' }); // operator route
     expect(ce.box(['vid', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(ce.box(['oid', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
-    expect(ce.box(['vid', M22]).type.toString()).toBe(
-      'matrix<finite_integer^(2x2)>'
-    );
+    expect(ce.box(['vid', M22]).type.toString()).toBe('matrix<integer^(2x2)>');
     // A scalar operand is unaffected.
-    expect(ce.box(['vid', 5]).type.toString()).toBe('finite_integer');
+    expect(ce.box(['vid', 5]).type.toString()).toBe('integer');
   });
 
   test('(iii) a scalar-bounded polytype echoes the actual, as on the operator route', () => {
@@ -346,19 +344,19 @@ describe('§4.5 parity on the VALUE-definition route', () => {
     // D10: the lift binds the FULL actual, so both routes echo the operand's
     // own type (this is what the migrated `Conjugate`/`Chop` handlers produce).
     expect(ce.box(['vnum', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(ce.box(['onum', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
-    expect(ce.box(['vnum', 2]).type.toString()).toBe('finite_integer');
+    expect(ce.box(['vnum', 2]).type.toString()).toBe('integer');
   });
 
   test('a migrated broadcastable operator still evaluates elementwise', () => {
     const ce = fresh();
     // `Chop`: `(T) -> T where T: number`, broadcastable.
     expect(ce.box(['Chop', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(
       ce

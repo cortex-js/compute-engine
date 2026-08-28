@@ -823,7 +823,7 @@ describe('One-sample statistics on complex data', () => {
       const n = ce.box([op, L([1, ['Sqrt', -2], 5]), 2] as any).N();
       expect(n.isValid).toBe(false);
       // `√-2` numericizes to a pure imaginary, so the reported type is
-      // `imaginary` rather than the `finite_complex` of `1 + 2i`.
+      // `imaginary` rather than the `complex` of `1 + 2i`.
       expect(n.toString()).toMatch(/incompatible-type.*real/);
       // A non-literal bin EDGE declines the same way.
       expect(
@@ -994,11 +994,11 @@ describe('One-sample statistics on complex data', () => {
 // against it be false and reported a row of zeros. There is no NaN-absorbing
 // result form to fall back on here — a histogram's answer is a vector of
 // COUNTS — so both now raise the structured `incompatible-type` error, naming
-// the `finite_real` constraint. A value the binning's machine-float
+// the `real` constraint. A value the binning's machine-float
 // arithmetic cannot represent is refused too, but as `out-of-range`: that is a
 // limit of the kernel, not a claim about the value.
 describe('Histogram/BinCounts reject values they cannot bin', () => {
-  const NON_FINITE = /incompatible-type.*finite_real/;
+  const NON_FINITE = /incompatible-type.*real/;
   const inf = { num: '+Infinity' } as any;
   const nan = { num: 'NaN' } as any;
   // Both spellings of the complex infinity: `ComplexInfinity` reports a real
@@ -1034,17 +1034,26 @@ describe('Histogram/BinCounts reject values they cannot bin', () => {
     }
   });
 
-  test('the complex rejection still names the `real` constraint, not `finite_real`', () => {
-    // A genuine complex datum is a different failure: it has a perfectly
-    // finite real part, it just has no place on the ordered line the bins cut.
-    const r = ce.box(['BinCounts', L([1, ['Complex', 1, 2], 5]), 2]).evaluate();
-    expect(r.isValid).toBe(false);
-    expect(r.toString()).toMatch(/incompatible-type.*real.*complex/);
-    expect(r.toString()).not.toMatch(/finite_real/);
+  test('every rejection names the `real` constraint and reports the datum type', () => {
+    // Both scans reject against the same constraint: `real` denotes the FINITE
+    // reals, so a complex datum and a non-finite one are both outside it. The
+    // rejections stay distinguishable through the GOT side — the offending
+    // datum's own type. (Before the `finite_*` names retired, the two scans
+    // named different constraints, `real` and `finite_real`.)
+    const complex = ce
+      .box(['BinCounts', L([1, ['Complex', 1, 2], 5]), 2])
+      .evaluate();
+    expect(complex.isValid).toBe(false);
+    expect(complex.toString()).toMatch(/incompatible-type.*real.*complex/);
+
+    const inf = { num: '+Infinity' } as any;
+    const infinite = ce.box(['BinCounts', L([1, inf, 5]), 2]).evaluate();
+    expect(infinite.isValid).toBe(false);
+    expect(infinite.toString()).toMatch(/incompatible-type.*real.*Infinity/);
   });
 
   test('a finite real beyond the MACHINE range is out-of-range, not mistyped', () => {
-    // `10^400` is an exact `finite_integer`: the value is a perfectly good
+    // `10^400` is an exact `integer`: the value is a perfectly good
     // finite real, and it is the binning's own double arithmetic — the sample
     // min/max, the bin width, every interval comparison — that cannot place
     // it. So the error names the kernel's range instead of claiming the datum

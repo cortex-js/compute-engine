@@ -16,10 +16,10 @@ import { subtypingVarianceOf } from './variance.js';
  * once on every handler result, at the single place that result is stored
  * (`boxed-function.ts`), and rewrites:
  *
- * - a numeric value node to its tier: an integer value to `finite_integer`,
- *   any other finite value to `finite_real` (the lattice deliberately does
- *   not class a bare numeric value as rational), `±∞` and the unsigned
- *   complex infinity `~oo` to `infinity`, and `NaN` to `nan`;
+ * - a numeric value node to its tier: an integer value to `integer`, any
+ *   other finite value to `real` (the lattice deliberately does not class a
+ *   bare numeric value as rational), `±∞` and the unsigned complex infinity
+ *   `~oo` to `infinity`, and `NaN` to `nan`;
  * - only in COVARIANT positions. Widening is "the new type is a supertype
  *   of the old", which reverses under contravariance: in a function
  *   PARAMETER a literal is left as written, since widening it would make
@@ -30,18 +30,16 @@ import { subtypingVarianceOf } from './variance.js';
  * String and boolean value nodes are leaves: they have no numeric tier to
  * widen to, and no handler manufactures them from an operand literal.
  *
- * OPEN ranges (`kind: 'numeric'`, e.g. `finite_real<0..>`) are handler
- * claims, not literals, and pass through unchanged — a ranged handler
- * result such as `Abs`'s `finite_real<0..>` is exactly what this walker
- * must preserve. A SINGLETON range on the rational tier
- * (`finite_rational<0.5..0.5>`) is the exact-rational literal
- * representation (ruling O9) and widens to its tier like a value node;
- * singleton ranges on other tiers are author/derivation narrowings and
- * pass through. A literal's ENCLOSURE range (`finite_real<1.4..1.5>` for
- * √2 — or the sign range `(finite_integer<0..>) & !0` it falls back to
- * beyond the double range) is shape-identical to a deliberate handler
- * claim (`Heaviside`'s `finite_rational<0..1>`, `Exp`'s
- * `(finite_real<0..>) & !0`), so
+ * OPEN ranges (`kind: 'numeric'`, e.g. `real<0..>`) are handler claims, not
+ * literals, and pass through unchanged — a ranged handler result such as
+ * `Abs`'s `real<0..>` is exactly what this walker must preserve. A SINGLETON
+ * range on the rational tier (`rational<0.5..0.5>`) is the exact-rational
+ * literal representation (ruling O9) and widens to its tier like a value
+ * node; singleton ranges on other tiers are author/derivation narrowings and
+ * pass through. A literal's ENCLOSURE range (`real<1.4..1.5>` for √2 — or the
+ * sign range `(integer<0..>) & !0` it falls back to beyond the double range)
+ * is shape-identical to a deliberate handler claim (`Heaviside`'s
+ * `rational<0..1>`, `Exp`'s `(real<0..>) & !0`), so
  * this walker cannot tell them apart and keeps both — call sites that
  * store an OPERAND's type distinguish by the operand (`_literalType`
  * defined) and project literal cargo through `stripNumericRanges` instead
@@ -120,7 +118,7 @@ function widenNode(
       // type.
       if (Number.isNaN(v)) return 'nan';
       if (!Number.isFinite(v)) return 'infinity';
-      return Number.isInteger(v) ? 'finite_integer' : 'finite_real';
+      return Number.isInteger(v) ? 'integer' : 'real';
     }
 
     case 'union':
@@ -228,19 +226,19 @@ function widenNode(
     }
 
     case 'numeric': {
-      // An OPEN range (`finite_real<0..>` from `Abs`) is a handler's claim
-      // and passes through. A SINGLETON range on the RATIONAL tier
-      // (`finite_rational<0.5..0.5>`) is a literal's exact-rational
-      // representation — the lattice has no value node that keeps the
+      // An OPEN range (`real<0..>` from `Abs`) is a handler's claim and
+      // passes through. A SINGLETON range on the RATIONAL tier
+      // (`rational<0.5..0.5>`) is a literal's exact-rational representation
+      // — the lattice has no value node that keeps the
       // rational tier, and no other tier spells a literal as a singleton
       // range — so at a storage position it is literal cargo exactly like a
       // value node, and widens to its tier (covariant positions only, same
       // polarity rule as `value`). A singleton range on any OTHER tier
-      // (`finite_integer<5..5>`) is an author's or a derivation's narrowing
-      // and passes through like an open range.
+      // (`integer<5..5>`) is an author's or a derivation's narrowing and
+      // passes through like an open range.
       if (
         covariant &&
-        t.type === 'finite_rational' &&
+        t.type === 'rational' &&
         typeof t.lower === 'number' &&
         t.lower === t.upper &&
         Number.isFinite(t.lower)

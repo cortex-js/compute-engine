@@ -832,7 +832,7 @@ describe('CANONICAL FORMS', () => {
               "ErrorCode",
               "incompatible-type",
               "'integer'",
-              "finite_real<3.141592653589793..3.141592653589794>"
+              "real<3.141592653589793..3.141592653589794>"
             ],
             "Pi"
           ]
@@ -864,7 +864,7 @@ describe('CANONICAL FORMS', () => {
               "ErrorCode",
               "incompatible-type",
               "'integer'",
-              "finite_real<2.718281828459045..2.718281828459046>"
+              "real<2.718281828459045..2.718281828459046>"
             ],
             "ExponentialE"
           ],
@@ -897,16 +897,16 @@ describe('CANONICAL FORMS', () => {
         expr = ['Complex', ['Rational', 1, 43]];
         expComplexNum(expr, 'imaginary');
 
-        // finite_complex / complex
+        // complex / complex
         expr = ['Complex', 3, 4];
-        expComplexNum(expr, 'finite_complex');
+        expComplexNum(expr, 'complex');
 
         //@fixme
         //(A present bug: that bignum args. get truncated when canonicalized as a complex-number:
         //regardless of set precision)
         //@note: precision is '100' for the engine used here...
         expr = ['Complex', '22975850700614579948873711', 4]; // bigIntRe
-        expComplexNum(expr, 'finite_complex');
+        expComplexNum(expr, 'complex');
 
         // A complex value with an infinite component has infinite magnitude,
         // so the finite-by-default numeric flip moved it out of `complex` and

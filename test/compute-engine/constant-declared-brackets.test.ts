@@ -21,14 +21,14 @@ import { ComputeEngine } from '../../src/compute-engine';
 const ce = new ComputeEngine();
 
 const BRACKETED: [string, string][] = [
-  ['ExponentialE', 'finite_real<2.718281828459045..2.718281828459046>'],
-  ['e', 'finite_real<2.718281828459045..2.718281828459046>'],
-  ['Pi', 'finite_real<3.141592653589793..3.141592653589794>'],
-  ['EulerGamma', 'finite_real<0.5772156649015328..0.5772156649015329>'],
-  ['CatalanConstant', 'finite_real<0.915965594177219..0.9159655941772191>'],
+  ['ExponentialE', 'real<2.718281828459045..2.718281828459046>'],
+  ['e', 'real<2.718281828459045..2.718281828459046>'],
+  ['Pi', 'real<3.141592653589793..3.141592653589794>'],
+  ['EulerGamma', 'real<0.5772156649015328..0.5772156649015329>'],
+  ['CatalanConstant', 'real<0.915965594177219..0.9159655941772191>'],
   // φ's value is the EXPRESSION `(1+√5)/2` — the constant the trusted-
   // dictionary rule exists for.
-  ['GoldenRatio', 'finite_real<1.618033988749894..1.618033988749895>'],
+  ['GoldenRatio', 'real<1.618033988749894..1.618033988749895>'],
 ];
 
 describe('CONSTANT VALUE BRACKETS', () => {
@@ -54,8 +54,8 @@ describe('CONSTANT VALUE BRACKETS', () => {
 
   it('the sign reaches type-channel consumers', () => {
     // `√φ` and `ln(π)` are real off the declared brackets alone.
-    expect(ce.box(['Sqrt', 'GoldenRatio']).type.toString()).toBe('finite_real');
-    expect(ce.box(['Ln', 'Pi']).type.toString()).toBe('finite_real');
+    expect(ce.box(['Sqrt', 'GoldenRatio']).type.toString()).toBe('real');
+    expect(ce.box(['Ln', 'Pi']).type.toString()).toBe('real');
   });
 
   it('the trusted path is library-only: a user mismatch still throws', () => {
@@ -65,7 +65,7 @@ describe('CONSTANT VALUE BRACKETS', () => {
     const e = new ComputeEngine();
     expect(() =>
       e.declare('badBracket', {
-        type: 'finite_real<0..1>',
+        type: 'real<0..1>',
         value: e.parse('1+\\sqrt{5}'),
         isConstant: true,
       })

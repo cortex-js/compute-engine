@@ -205,21 +205,21 @@ export function onBranchCut(
  * `z: complex ⇒ √(z²)` stays `√(z²)`, not `|z|`, since `√(i²) = i ≠ 1`).
  *
  * *Unconstrained* symbols (type `unknown`) — and composite expressions of them
- * (`x·y`, `x+1`, which the engine types `number`/`finite_number`) — keep the
+ * (`x·y`, `x+1`, which the engine types `number`) — keep the
  * documented generic-real convention and remain eligible.
  *
  * Detection is by **type**, not by `isExtendedReal`. That predicate is
  * three-valued for functions as well as symbols, so a composite expression of
- * unconstrained symbols answers `undefined` rather than `true`: `x·y` types
- * `finite_number` and `ln(x)` types `number`, and neither is below the
- * extended real line. Gating on it would therefore need a decision about the
+ * unconstrained symbols answers `undefined` rather than `true`: `x·y` and
+ * `ln(x)` both type `number`, which is not below the extended real line.
+ * Gating on it would therefore need a decision about the
  * `undefined` case, and treating `undefined` as "bail" would drop the
  * generic-real convention on `ln(x)+ln(y) → ln(xy)` and friends. A type that
  * matches `complex` but not `real` is a two-valued test that reliably
  * identifies declared/inferred complex operands, which is what D4 targets.
  *
  * @returns `false` (bail) when `x`'s type admits genuinely non-real complex
- *   values (`complex`/`imaginary`/`finite_complex`); `true` otherwise.
+ *   values — that is, `complex` or `imaginary`; `true` otherwise.
  */
 export function isEligibleRealRewrite(x: Expression): boolean {
   return !isNonRealNumber(x.type.type);

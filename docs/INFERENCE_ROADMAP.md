@@ -51,7 +51,7 @@ of collections (synthesis and extraction) but never **in** (inference):
 What already works and must not regress:
 
 - **Synthesis**: a literal's type is computed from its elements
-  (`[1,2,3]` → `vector<finite_integer^3>`); assignment to an undeclared
+  (`[1,2,3]` → `vector<integer^3>`); assignment to an undeclared
   symbol copies it, and re-assignment re-infers freely.
 - **Extraction (forward)**: generic signatures bind `T` from the operand —
   `xs: list<integer>` makes `xs[1]` an `integer`.
@@ -226,7 +226,7 @@ still refuses `a = 42`.
 
 1. A structural sibling of `refineDeclaredPlaceholders` that walks
    constructor arguments instead of signature slots: declared
-   `list<unknown>` + value `vector<finite_integer^3>` ⇒ adopt the element
+   `list<unknown>` + value `vector<integer^3>` ⇒ adopt the element
    type into the declared spelling. Runs where the signature version runs:
    the three install routes in `engine-declarations.ts` (value-def assign,
    operator-def assign, declare-with-value) and `matchesDeclaredTypeAxes`.
@@ -240,16 +240,16 @@ still refuses `a = 42`.
    existing `_infer`/type-setter path with its rollback journal and state
    events.
 
-**Confinement rule (hard):** only placeholder spellings participate.
-`list<integer>` must NOT refine to `list<finite_integer>` — a stated element
-type is a contract, and eroding it is the failure mode this design must
-prove it avoids. Likewise `list<any>` never refines: `any` is the contract
+**Confinement rule (hard):** only placeholder spellings participate. A
+declared `list<real>` assigned `[1,2,3]` must NOT refine to
+`list<integer>` — a stated element type is a contract, and eroding it is
+the failure mode this design must prove it avoids. Likewise `list<any>` never refines: `any` is the contract
 spelling by definition.
 
 ### Open rulings Phase 1 needs — ALL RULED 2026-08-18, as recommended (re-refine; element-only; typeof shows the refinement)
 
 - **R1 — Does refinement re-revise?** After `a: list` and `a = [1,2,3]`
-  (element refined to `finite_integer`), does `a = ["x"]` fail
+  (element refined to `integer`), does `a = ["x"]` fail
   (refinement hardened into contract) or re-refine (placeholder stays a
   placeholder)? _Recommendation: re-refine._ The contract the user wrote is
   list-ness, nothing more; hardening would make the annotated symbol
@@ -261,8 +261,8 @@ spelling by definition.
   re-derived on every body re-assignment anyway, which is the same
   observable behavior as re-refinement.
 - **R2 — Element only, or dimensions too?** `a: list` + `[1,2,3]`:
-  `list<finite_integer>` (element only, rank and length stay open) or the
-  value's full `vector<finite_integer^3>`? _Recommendation: element only._
+  `list<integer>` (element only, rank and length stay open) or the
+  value's full `vector<integer^3>`? _Recommendation: element only._
   The user wrote `list`; rank-openness is part of what the bare spelling
   says, and per-assignment length pinning would make `a = [1,2]` a spurious
   contract question under R1-hardening readings.

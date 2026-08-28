@@ -1075,7 +1075,7 @@ describe('SUM', () => {
       '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
     );
     // Honest List typing (tensor-unification Phase A): the shaped result
-    // carries its honest element type (e.g. `vector<finite_number^2>`), a
+    // carries its honest element type (e.g. `vector<2>`), a
     // strict subtype of `vector<2>`. The item-44a pin is the vector-ness
     // and length, asserted via `matches`.
     expect(sum.type.matches('vector<2>')).toBe(true);

@@ -178,7 +178,7 @@ describe('describe() on compound operands', () => {
 
 describe('describeType()', () => {
   test('a finite numeric type', () => {
-    const d = describeType('finite_integer');
+    const d = describeType('integer');
     expect(d.facts.finite).toBe(true);
     expect(d.facts.collection).toBe(false);
     // Facts a type alone cannot decide stay undefined.

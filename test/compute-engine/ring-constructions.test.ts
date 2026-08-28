@@ -278,23 +278,23 @@ describe('Serialization round-trips', () => {
 describe('Types', () => {
   test('Adjoin joins the base and adjunct element types', () => {
     expect(ce.parse('\\mathbb{Z}[\\sqrt{2}]').type.toString()).toBe(
-      'set<finite_real>'
+      'set<real>'
     );
     expect(ce.parse('\\mathbb{Z}[i]').type.toString()).toBe(
-      'set<finite_complex>'
+      'set<complex>'
     );
     // An indeterminate carries no type information: the honest claim is
-    // `unknown`, NOT the base's `finite_integer` (the elements are
+    // `unknown`, NOT the base's `integer` (the elements are
     // polynomials, not integers).
     expect(ce.parse('\\mathbb{Z}[x]').type.toString()).toBe('set<unknown>');
   });
 
   test('QuotientRing keeps the base element type', () => {
     expect(ce.parse('\\mathbb{Z}_n').type.toString()).toBe(
-      'set<finite_integer>'
+      'set<integer>'
     );
     expect(ce.parse('\\mathbb{Q}_p').type.toString()).toBe(
-      'set<finite_rational>'
+      'set<rational>'
     );
   });
 });
@@ -329,13 +329,13 @@ describe('Route parity: raw MathJSON reaches the same dispatch', () => {
   test('structural `Subscript` reports the QuotientRing type', () => {
     // Structural mode never reaches the `canonical` handler, so the `type`
     // handler has to know about ring constants on its own: without it, this
-    // claimed `finite_integer` (the element type of ℤ) instead of the type of
+    // claimed `integer` (the element type of ℤ) instead of the type of
     // the quotient RING.
     const e = ce.function('Subscript', [ce.symbol('Integers'), ce.symbol('n')], {
       structural: true,
     });
     expect(e.json).toEqual(['Subscript', 'Integers', 'n']);
-    expect(e.type.toString()).toBe('set<finite_integer>');
+    expect(e.type.toString()).toBe('set<integer>');
     expect(e.type.toString()).toBe(
       ce.box(['QuotientRing', 'Integers', 'n']).type.toString()
     );
@@ -349,7 +349,7 @@ describe('Route parity: raw MathJSON reaches the same dispatch', () => {
       structural: true,
     });
     expect(e.json).toEqual(['At', 'Integers', ['Sqrt', 2]]);
-    expect(e.type.toString()).toBe('set<finite_real>');
+    expect(e.type.toString()).toBe('set<real>');
     expect(e.type.toString()).toBe(
       ce.box(['Adjoin', 'Integers', ['Sqrt', 2]]).type.toString()
     );
@@ -444,7 +444,7 @@ describe('Inert (v1)', () => {
       ['Adjoin', 'Integers', ['Sqrt', 2]],
       'p',
     ]);
-    expect(e.type.toString()).toBe('set<finite_real>');
+    expect(e.type.toString()).toBe('set<real>');
   });
 });
 

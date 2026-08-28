@@ -174,7 +174,7 @@ describe('GENERIC TYPE ALIASES — A7 open-argument admission', () => {
       evaluate: (ops) => ops[0].ops?.[1],
     });
     const r = ce.box(['label', ['Tuple', { str: 'k' }, 7]]);
-    expect(r.type.toString()).toBe('finite_integer');
+    expect(r.type.toString()).toBe('integer');
     expect(r.evaluate().toString()).toBe('7');
   });
 

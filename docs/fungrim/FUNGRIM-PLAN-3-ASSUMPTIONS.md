@@ -89,14 +89,14 @@ All facts are stored as canonical boxed predicates in the map, in these normal f
 - `Element(z, SetMinus(S, Set(a, b, …)))` ⇒ recurse on `Element(z, S)` (type refinement or stored membership) **plus** stored `NotEqual(z, a)`, `NotEqual(z, b)`, ….
 - `Element(z, SetMinus(S, T))` with non-finite `T` ⇒ recurse on `Element(z, S)` **plus** stored `NotElement(z, T)`.
 - `Imaginary(tau) > 0` ⇒ store the bound on subject `im:tau` **plus** derived facts: `NotElement(tau, RealNumbers)` and `NotEqual(tau, 0)` are implied, and are stored. (Design conservatively: store the two derived facts, leave finiteness alone.)
-- `Abs(q) < 1` ⇒ store bound on subject `abs:q` **plus** refine `q`'s type to `finite_number` (|q| bounded ⇒ finite). The implicit lower bound `Abs(q) ≥ 0` is *not* stored (structural knowledge of `Abs`, available from the `Abs` sgn handler already).
+- `Abs(q) < 1` ⇒ store bound on subject `abs:q` **plus** refine `q`'s type to `complex` (|q| bounded ⇒ finite, and bare `complex` is the finite tier — it is the widest type that promises finiteness without also promising realness). The implicit lower bound `Abs(q) ≥ 0` is *not* stored (structural knowledge of `Abs`, available from the `Abs` sgn handler already).
 - `And(p1, p2, …)` in an assumption ⇒ assume each conjunct (new: `assume()` accepts `And`).
 
 Derived facts are *stored alongside*, not inferred at query time — this keeps the query path a lookup, not a search, which is the explicit non-goal boundary (§7).
 
 ### 3.3 Type refinement vs. facts — the division of labor
 
-The type system remains the home for what it can express (`integer`, `real`, `finite_number`, sign of a real symbol via value-def flags). Facts cover what it cannot: bounds, part-constraints, disequalities, non-membership, membership in non-primitive sets. The rule:
+The type system remains the home for what it can express (`integer`, `real`, `complex`, sign of a real symbol via value-def flags). Facts cover what it cannot: bounds, part-constraints, disequalities, non-membership, membership in non-primitive sets. The rule:
 
 > **`assume()` may only ever *narrow* a symbol's type (move down the subtype lattice), and only when the predicate genuinely implies the narrowing for the symbol itself.** `Re(s) > 1` implies `s` is a number — it does **not** imply `s : real`. The correct refinement for any part-predicate over `Real/Imaginary/Abs/Argument(s)` is at most `s : number`, and only if `s` is currently `unknown`.
 
@@ -160,7 +160,7 @@ So the work is to make **`evaluate()` on the predicate operators consult the fac
 **(e) Symbol predicates.**
 
 - `isInteger`, `isReal`, `isNumber`: unchanged — they read the type (`boxed-symbol.ts:~640-660`), and the `ZZGreaterEqual(1)`-style facts refine the type at assume time. ⇒ `Element(n, Range(1,∞))` yields `n.isInteger === true` and `n.isGreaterEqual(1) === true` through (a).
-- `isFinite`: currently `this.value?.isFinite` only (`boxed-symbol.ts:601`); extend to consult the type (`finite_number` refinement from `Abs(q) < 1`) — arguably a pre-existing gap.
+- `isFinite`: currently `this.value?.isFinite` only (`boxed-symbol.ts:601`); extend to consult the type (any type below `number` that excludes `infinity` and `nan` — such as the `complex` refinement from `Abs(q) < 1` — proves finiteness) — arguably a pre-existing gap.
 - `isReal === false` for `Im(tau) > 0`: the stored `NotElement(tau, RealNumbers)` fact is consulted by `isReal` as a final fallback (type says "number", fact says "not in ℝ" → `false`). This is the one predicate that needs a fact lookup rather than pure type reading, because types cannot express negation.
 - `.sgn` on symbols: unchanged (`getSignFromAssumptions`).
 
@@ -179,8 +179,8 @@ Invariant stated for the whole layer: **a predicate evaluation may return `True`
 |---|---|---|
 | `Element(n, ZZGreaterEqual(1))` | type(n) := integer; store `n ≥ 1` | `n.isInteger` → type; `n ≥ 1`, `n > 0`, `n ≠ 0` → bounds via (a)/(d) |
 | `Im(tau) > 0` | bound on `im:tau`; store `NotElement(tau, ℝ)`, `NotEqual(tau, 0)` | `Imaginary(tau).isPositive` via (b); `tau.isReal === false` via (e); `tau ≠ 0` via (d) |
-| `Abs(q) < 1` | bound on `abs:q`; type(q) := finite_number | `Abs(q) < 1` via (a); `q.isFinite === true` via (e) |
-| `Element(z, SetMinus(CC, Set(i, -i)))` | type(z) := number(=ℂ); store `z ≠ i`, `z ≠ -i` | query decomposes identically; conjunction of type check + disequality facts via (c)/(d) |
+| `Abs(q) < 1` | bound on `abs:q`; type(q) := complex | `Abs(q) < 1` via (a); `q.isFinite === true` via (e) |
+| `Element(z, SetMinus(CC, Set(i, -i)))` | type(z) := complex (= ℂ); store `z ≠ i`, `z ≠ -i` | query decomposes identically; conjunction of type check + disequality facts via (c)/(d) |
 
 ---
 
@@ -228,7 +228,7 @@ Invariant stated for the whole layer: **a predicate evaluation may return `True`
 | `assume(Re(s) > 1)` no longer types `s` as `real` | **Behavioral change.** Any downstream code relying on the (incorrect) `real` typing — e.g. `s.isReal === true`, real-only simplifications firing — changes answers from `true` to `undefined`. | This is the bug being fixed; changelog entry + tests asserting the new semantics. Bare-symbol inequalities (`x > 0`) keep the `real` inference, so the common case is untouched. |
 | `assume()` returns `'not-a-predicate'` instead of throwing on unsupported shapes | Callers using `try/catch` as the "unsupported" signal silently proceed. | Audit in-repo callers (tests, docs); the public docs already describe `AssumeResult` as the contract. Possibly keep a throw for outright malformed (non-predicate-operator) input and reserve `'not-a-predicate'` for well-formed-but-unsupported. |
 | `Element(x, PositiveNumbers)` (symbolic `x`, unknown sign) evaluates to unevaluated instead of `False` | Tests/users depending on the wrong `False`. | Same class as A3; fix is a correctness prerequisite, documented together. |
-| `forget(symbol)` does not undo type refinements | Pre-existing (`engine-assumptions.ts:288`: "don't change the domain"); new refinements (`integer`, `finite_number`) make it slightly more visible. | Document; optionally record refinements done by `assume()` in the scope so `forget` can revert exactly those (small follow-on, not required for Fungrim since guards are evaluated inside transient scopes). |
+| `forget(symbol)` does not undo type refinements | Pre-existing (`engine-assumptions.ts:288`: "don't change the domain"); new refinements (`integer`, `complex`) make it slightly more visible. | Document; optionally record refinements done by `assume()` in the scope so `forget` can revert exactly those (small follow-on, not required for Fungrim since guards are evaluated inside transient scopes). |
 | New evaluation hooks (`sgn`, relational, `Element`) consult the fact index | Performance regression risk on hot paths when no assumptions exist. | Index lookup is gated on a non-empty assumptions map (single emptiness check), and the index is generation-cached. |
 | `ask()` B2 generalization to subjects may produce new matches | Strictly additive; dedup via `pushResult` already in place. | Snapshot tests on existing `ask()` behavior. |
 

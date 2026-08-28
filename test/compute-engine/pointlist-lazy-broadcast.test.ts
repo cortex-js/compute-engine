@@ -187,7 +187,7 @@ describe('Tycho item 52 — lazy PointList transpose and projections', () => {
       .evaluate();
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
-    expect(px.type.toString()).toBe('vector<finite_integer^5>');
+    expect(px.type.toString()).toBe('vector<integer^5>');
   });
 
   test('projection of a SCALAR slot broadcasts (no fast-path shape change)', () => {
@@ -384,16 +384,16 @@ describe('Tycho item 222 — PointList over UNKNOWN-length views', () => {
     // One coordinate per component, whatever the source lengths are. The
     // arity-less `list<tuple>` this used to answer could not tell a list of
     // 2-D points from a list of 3-D ones. (The first slot's tier follows the
-    // view component's own scalar claim — `finite_number` since the
+    // view component's own scalar claim — `number` since the
     // 2026-08-22 shape-gate change that stopped branding possibly-collection
     // operands `number`.)
     expect(ce.box(['PointList', X_VIEW, 'A']).type.toString()).toBe(
-      'list<tuple<finite_number, number>>'
+      'list<tuple<number, number>>'
     );
     const finite = new ComputeEngine();
     finite.declare('L', 'list<integer>');
     expect(finite.box(['PointList', -6, 'L', 'L']).type.toString()).toBe(
-      'list<tuple<finite_integer, integer, integer>>'
+      'list<tuple<integer, integer, integer>>'
     );
   });
 

@@ -958,6 +958,71 @@ Historical note from the user: the lattice once had `positive_integer`
 and similar named types, simplified away; ranges are the replacement they
 should have been connected to.
 
+### Interval kernel: `Divide` and `Power` with exponent ≤ 0 (OPEN, capability — UNBLOCKED 2026-08-28 by lattice-flip Phase 1; deferred by ruling from the 2026-08-27 interval round)
+
+The interval-arithmetic result types (`numerics/interval-arithmetic.ts`)
+cover `Add`, `Multiply`, `Abs` and `Power` with a positive integer
+exponent. Quotients and reciprocals were deferred BY RULING until the
+finite-by-default lattice settled the pole story — and Phase 1 of that
+flip has now landed: pole joins are spelled `complex | non_finite_number`,
+NaN types `nan`, and the kernel's reader already excludes those tiers. So
+the unblock condition is MET; the remaining flip phases (the mechanical
+codemod, release) do not change the semantics this needs.
+
+What to build: `divIntervals(a, b)` — for a divisor interval that
+EXCLUDES zero (`b.lo > 0` or `b.hi < 0`, or an open endpoint at 0), the
+quotient is `a × [1/b.hi, 1/b.lo]` with directed reciprocals (a new
+`dirRecip` beside `dirProd`; exactness = the reciprocal is a power of
+two); then `Divide`'s type handler and the `Power` arms for `n ≤ 0`
+(`x⁻ⁿ = 1 / xⁿ`) call it. Openness follows the attainability rules of the
+open-bounds plan (`docs/plans/2026-08-28-open-bounds-in-ranged-types.md`
+§3.5): a quotient corner is attained iff both its endpoints are.
+
+Needs ONE ruling before the design doc: what a quotient claims when the
+divisor range ADMITS zero (`y: real<-1..1>`). Option (a) — drop the claim
+(the result tier already says `complex | non_finite_number` for the
+pole; no bounds). Option (b) — split around the pole and claim the hull,
+which is always the full line for a two-sided divisor and a half-line
+for a one-sided one (`x/y` with `x > 1, y: real<0..1>` is `> 1` or `+∞`).
+Recommendation: (a) for the first round — it is sound, needs no new
+representation, and (b) can be added as a refinement once the
+`non_finite_number` endpoint story is exercised elsewhere. Same
+dual-spec-review flow as the two prior rounds.
+
+### Interval kernel: tighten with finite-only tiers (OPEN, small — UNBLOCKED 2026-08-28 by lattice-flip Phase 1)
+
+The kernel was written under the pre-flip lattice, where a bare `real`
+admits `±∞`, so `intervalOfType('real')` reads as the FULL extended line
+and every unbounded side may be an actual infinity. Under the flip, bare
+`real`/`rational`/`integer` are finite-only: an unbounded side is a
+finite-but-unknown magnitude, never `±∞` itself. Two cheap
+tightenings follow: (1) the NaN-drop cases for `∞ + (−∞)` and `0 · ∞`
+become impossible when every operand tier is finite-only, so those
+endpoint claims need not be dropped; (2) `NAN_FREE_REAL_TIERS` can be
+split into finite and extended sets so `attachInterval` never has to
+consider an infinite endpoint on a finite tier. Neither changes any
+current answer's soundness — they only recover bounds the conservative
+model gives up. Do this AFTER the flip's Phase 2 codemod lands (it
+renames the very tier names the sets list), in one small diff with pins.
+
+### Boolean value types — RULED 2026-08-27 (O10), implementation OPEN (own measured round; no external unblock)
+
+Ruling O10 in `docs/plans/2026-08-22-type-handlers-on-types.md` §6:
+string literals keep the type `string`; BOOLEAN value types are wanted —
+not for the `True`/`False` constants (symbol identity already tells the
+compiler everything) but for DERIVED results: a predicate whose type
+handler proves `true` (`Equal(a, a)`, a bounds-settled domain test, now
+including open-bound domain proofs) lets `If`/`And`/`Or` eliminate dead
+branches where the value never folds. Not scheduled. Needs its own
+measured round exactly like the O9 public-type flip: extend the §4.3
+`widenValueTypes` walker to boolean value nodes at storage boundaries
+(today they are leaves because no handler manufactures them), sweep the
+type-keyed guards (`=== 'boolean'` switches — the
+retyping-breaks-guards class), and measure the full-suite blast radius
+before landing. Nothing blocks starting it; it competes only for
+attention with the `Divide` kernel item above, which has the larger
+capability payoff.
+
 ### Type derivation reaches state mutation at 7 handlers, 2 `elttype` handlers and 1 getter — AUDITED 2026-08-22 (OPEN, defects; the GETTER half is FIXED 2026-08-22 — `_reviseInferredType` no longer writes on read (R4, plan §4.2); the 7 handlers and 2 `elttype` handlers remain scheduled by the type-handler design)
 
 A transitive call-graph audit (depth ≤ 8) of every `type:` handler in

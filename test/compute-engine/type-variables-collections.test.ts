@@ -177,10 +177,10 @@ describe('TYPE VARIABLES / KeyValuePair — `(key: string, value: T) -> tuple<st
     const t = (v: any) =>
       ce.function('KeyValuePair', [ce.string('k'), v], { structural: true })
         .type.type;
-    expect(typeToString(t(ce.number(2)))).toBe('tuple<string, finite_integer>');
-    expect(typeToString(t(ce.number(2.5)))).toBe('tuple<string, finite_real>');
+    expect(typeToString(t(ce.number(2)))).toBe('tuple<string, integer>');
+    expect(typeToString(t(ce.number(2.5)))).toBe('tuple<string, real>');
     expect(typeToString(t(ce.box(['List', 1, 2, 3])))).toBe(
-      'tuple<string, vector<finite_integer^3>>'
+      'tuple<string, vector<integer^3>>'
     );
     // Canonical + box + parse routes all collapse to `Tuple`, but the result
     // type is the same one the deleted handler produced.
@@ -188,15 +188,15 @@ describe('TYPE VARIABLES / KeyValuePair — `(key: string, value: T) -> tuple<st
       ce
         .function('KeyValuePair', [ce.string('k'), ce.number(2)])
         .type.toString()
-    ).toBe('tuple<string, finite_integer>');
+    ).toBe('tuple<string, integer>');
     expect(ce.box(['KeyValuePair', { str: 'k' }, 2]).type.toString()).toBe(
-      'tuple<string, finite_integer>'
+      'tuple<string, integer>'
     );
     expect(
       ce
         .parse('\\operatorname{KeyValuePair}(\\text{k}, 2)')
         .type.toString()
-    ).toBe('tuple<string, finite_integer>');
+    ).toBe('tuple<string, integer>');
   });
 
   test('`T` is unbounded — a function-typed value is still admitted', () => {
@@ -233,19 +233,19 @@ describe('TYPE VARIABLES / Single, Pair, Triple — per-position echo', () => {
     const ce = engine();
     const t = (v: any) =>
       ce.function('Single', [v], { structural: true }).type.toString();
-    expect(t(ce.number(2))).toBe('tuple<finite_integer>');
+    expect(t(ce.number(2))).toBe('tuple<integer>');
     expect(t(ce.box(['List', 1, 2, 3]))).toBe(
-      'tuple<vector<finite_integer^3>>'
+      'tuple<vector<integer^3>>'
     );
     ce.declare('sgU', 'unknown');
     expect(t(ce.box('sgU'))).toBe('tuple<unknown>');
     // Canonical + box + parse.
     expect(ce.function('Single', [ce.number(2)]).type.toString()).toBe(
-      'tuple<finite_integer>'
+      'tuple<integer>'
     );
-    expect(ce.box(['Single', 2]).type.toString()).toBe('tuple<finite_integer>');
+    expect(ce.box(['Single', 2]).type.toString()).toBe('tuple<integer>');
     expect(ce.parse('\\operatorname{Single}(2)').type.toString()).toBe(
-      'tuple<finite_integer>'
+      'tuple<integer>'
     );
   });
 
@@ -255,13 +255,13 @@ describe('TYPE VARIABLES / Single, Pair, Triple — per-position echo', () => {
       ce
         .function('Pair', [ce.number(2), ce.string('a')], { structural: true })
         .type.toString()
-    ).toBe('tuple<finite_integer, string>');
+    ).toBe('tuple<integer, string>');
     expect(ce.box(['Pair', 2, { str: 'a' }]).type.toString()).toBe(
-      'tuple<finite_integer, string>'
+      'tuple<integer, string>'
     );
     expect(
       ce.parse('\\operatorname{Pair}(2, 3.5)').type.toString()
-    ).toBe('tuple<finite_integer, finite_real>');
+    ).toBe('tuple<integer, real>');
   });
 
   test('Triple keeps its three positions independent (three variables)', () => {
@@ -272,13 +272,13 @@ describe('TYPE VARIABLES / Single, Pair, Triple — per-position echo', () => {
           structural: true,
         })
         .type.toString()
-    ).toBe('tuple<finite_integer, string, boolean>');
+    ).toBe('tuple<integer, string, boolean>');
     expect(ce.box(['Triple', 2, { str: 'a' }, 'True']).type.toString()).toBe(
-      'tuple<finite_integer, string, boolean>'
+      'tuple<integer, string, boolean>'
     );
     expect(
       ce.parse('\\operatorname{Triple}(2, 3.5, 4)').type.toString()
-    ).toBe('tuple<finite_integer, finite_real, finite_integer>');
+    ).toBe('tuple<integer, real, integer>');
   });
 
   test('a dimensioned operand echoes verbatim in a BARE-variable position', () => {
@@ -326,7 +326,7 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
     );
     expect(
       ce.function('Reverse', [ce.box(['List', 1, 2, 3])]).type.toString()
-    ).toBe('vector<finite_integer^3>');
+    ).toBe('vector<integer^3>');
     expect(
       ce
         .function('Reverse', [
@@ -352,7 +352,7 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
     );
     expect(
       ce.function('Reverse', [ce.box(['Tuple', 1, { str: 'a' }])]).type.toString()
-    ).toBe('list<finite_integer | string>');
+    ).toBe('list<integer | string>');
     // A span reversed is descending, which the `range` type excludes.
     expect(
       ce.function('Reverse', [ce.box(['Range', 1, 10])]).type.toString()
@@ -368,15 +368,15 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
     const ce = engine();
     expect(
       ce.function('Reverse', [ce.box(['List', 1, 2, 3])]).type.toString()
-    ).toBe('vector<finite_integer^3>');
+    ).toBe('vector<integer^3>');
     expect(ce.box(['Reverse', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_integer^3>'
+      'vector<integer^3>'
     );
     expect(
       ce
         .parse('\\operatorname{Reverse}(\\lbrack 1,2,3\\rbrack)')
         .type.toString()
-    ).toBe('vector<finite_integer^3>');
+    ).toBe('vector<integer^3>');
   });
 
   test('the echo is idempotent (a reversed reverse keeps the type)', () => {
@@ -386,7 +386,7 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
       ce
         .function('Reverse', [ce.function('Reverse', [xs])])
         .type.toString()
-    ).toBe('vector<finite_integer^3>');
+    ).toBe('vector<integer^3>');
   });
 
   test('the declared bound still rejects a non-indexed operand', () => {
@@ -509,7 +509,7 @@ describe('TYPE VARIABLES / collections — the per-kind result rule', () => {
     // A matrix filters ROWS: the element type is the row type.
     expect(
       t(ce, 'Filter', ['List', ['List', 1, 2], ['List', 3, 4]], p)
-    ).toBe('list<vector<finite_integer^2>>');
+    ).toBe('list<vector<integer^2>>');
     // A non-indexed source keeps its type: no arity or shape to lie about.
     ce.declare('pkS', 'set<integer>');
     expect(t(ce, 'Filter', 'pkS', p)).toBe('set<integer>');
@@ -518,7 +518,7 @@ describe('TYPE VARIABLES / collections — the per-kind result rule', () => {
   test('the value a lazy view materializes to inhabits the claimed type', () => {
     const ce = engine();
     const cases: [any, string][] = [
-      [['Reverse', ['Tuple', 1, { str: 'a' }]], 'list<finite_integer | string>'],
+      [['Reverse', ['Tuple', 1, { str: 'a' }]], 'list<integer | string>'],
       [['Reverse', ['Range', 1, 4]], 'list<integer>'],
       [['Rest', ['Range', 1, 4]], 'list<integer>'],
       [['RotateLeft', ['Range', 1, 4]], 'list<integer>'],
@@ -566,19 +566,19 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
     // regressed to `incompatible-type`.
     expect(ce.box(['Take', m, 1]).evaluate().toString()).toBe('[[1,2,3]]');
     expect(ce.box(['Take', m, 1]).type.toString()).toBe(
-      'list<vector<finite_integer^3>>'
+      'list<vector<integer^3>>'
     );
     expect(ce.box(['Sort', m]).type.toString()).toBe(
-      'list<vector<finite_integer^3>>'
+      'list<vector<integer^3>>'
     );
     expect(ce.box(['Unique', m]).type.toString()).toBe(
-      'list<vector<finite_integer^3>>'
+      'list<vector<integer^3>>'
     );
     expect(ce.box(['Tally', m]).type.toString()).toBe(
-      'tuple<list<vector<finite_integer^3>>, list<integer>>'
+      'tuple<list<vector<integer^3>>, list<integer>>'
     );
     expect(ce.box(['ChunkBy', m, ['Function', 'x', 'x']]).type.toString()).toBe(
-      'list<list<vector<finite_integer^3>>>'
+      'list<list<vector<integer^3>>>'
     );
   });
 
@@ -588,13 +588,13 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
     const ce = engine();
     const xs = ['List', 1, 2, 3] as any;
     expect(ce.box(['Insert', xs, 1, { str: 'a' }]).type.toString()).toBe(
-      'list<finite_integer | string>'
+      'list<integer | string>'
     );
     expect(ce.box(['ReplaceAt', xs, 1, { str: 'a' }]).type.toString()).toBe(
-      'list<finite_integer | string>'
+      'list<integer | string>'
     );
     expect(ce.box(['Insert', xs, 1, 4]).type.toString()).toBe(
-      'list<finite_integer>'
+      'list<integer>'
     );
   });
 
@@ -656,7 +656,7 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
   test('§8 DISPLAY — a bound violated at a CONSTRUCTOR position shows the instantiated pattern', () => {
     // The blamed position may be a constructor pattern (`list<T>` at a
     // `T: integer` bound). Displaying the bare bound would read
-    // "expected `integer`, got `vector<finite_real^2>`" — incoherent for a
+    // "expected `integer`, got `vector<real^2>`" — incoherent for a
     // parameter whose true expected type is `list<integer>`. The bound is
     // substituted INTO the pattern for display, like the §8 callback case.
     const ce = engine();
@@ -692,11 +692,11 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
     ce.declare('fs', 'list<function>');
     expect(ce.box(['Insert', 'fs', 1, 2]).isValid).toBe(true);
     expect(ce.box(['Insert', 'fs', 1, 2]).type.toString()).toBe(
-      'list<finite_integer | function>'
+      'list<function | integer>'
     );
     expect(ce.box(['ReplaceAt', 'fs', 1, 2]).isValid).toBe(true);
     expect(ce.box(['ReplaceAt', 'fs', 1, 2]).type.toString()).toBe(
-      'list<finite_integer | function>'
+      'list<function | integer>'
     );
     // The other side of the same coin, and a DELIBERATE loosening vs the old
     // ground `value` third parameter: a function VALUE is admitted too. It
@@ -705,11 +705,11 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
     const xs = ['List', 1, 2, 3] as any;
     expect(ce.box(['Insert', xs, 1, 'cbF2']).isValid).toBe(true);
     expect(ce.box(['Insert', xs, 1, 'cbF2']).type.toString()).toBe(
-      'list<finite_integer | function>'
+      'list<function | integer>'
     );
     expect(ce.box(['ReplaceAt', xs, 1, 'cbF2']).isValid).toBe(true);
     expect(ce.box(['ReplaceAt', xs, 1, 'cbF2']).type.toString()).toBe(
-      'list<finite_integer | function>'
+      'list<function | integer>'
     );
   });
 

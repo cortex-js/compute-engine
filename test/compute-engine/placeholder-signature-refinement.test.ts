@@ -31,7 +31,7 @@ const BODY = 'P \\mapsto \\sqrt{P[1]^2+P[2]^2}';
 // The refined PARAMETER list is the contract and is pinned exactly: function
 // parameters are contravariant, so an UNREFINED `(unknown) -> …` signature is
 // a subtype of this one and would pass a bare `.matches(CONCRETE)`. Only the
-// result tier may refine (`broadcastable<finite_number>` still passes).
+// result tier may refine (`broadcastable<number>` still passes).
 const PARAMS = '(dictionary<any> | indexed_collection<any>)';
 const CONCRETE = `${PARAMS} -> broadcastable<number>`;
 function expectRefinedSignature(expr: { readonly type: BoxedType }): void {

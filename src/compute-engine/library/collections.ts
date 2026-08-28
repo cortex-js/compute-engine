@@ -455,12 +455,12 @@ const AT_SIGNATURE = parseType(
 );
 
 // True when `expr`'s type is a *union* with at least one member compatible with
-// an indexable base — a broadcast-aware inference such as `finite_integer |
+// an indexable base — a broadcast-aware inference such as `integer |
 // vector<3>` (from `2·h(3,4)-1` with `h` a list-returning lambda), or a declared
 // `number | list<number>` return. Such a base *could* be a collection at
 // runtime, so `At` keeps it inert and defers to runtime rather than rejecting
 // the whole union for not being a subtype of `dictionary | indexed_collection`.
-// A union of only scalar members (e.g. `finite_integer | rational`) has no such
+// A union of only scalar members (e.g. `integer | rational`) has no such
 // member and still errors loudly.
 function hasIndexableMember(expr: Expression): boolean {
   const t = expr.type.type;
@@ -926,7 +926,7 @@ function callbackCompatibilityError(
  * becomes the constant `() ↦ 5`. That is what made `Map(5, xs)` answer
  * `[5, 5, 5]` and `Any(xs, 5)` carry a thunk, while the EAGER siblings —
  * which route through {@link shorthandFunctionOperand} instead — reported
- * `incompatible-type function/finite_integer` for the identical `Sort(xs, 5)`.
+ * `incompatible-type function/integer` for the identical `Sort(xs, 5)`.
  * Declining the lift here hands the operand to the signature validation the
  * eager operators already use, so the whole family reports the same error
  * (ruled 2026-08-09: a parameterless operand at a callback slot is never what
@@ -1033,7 +1033,7 @@ function canonicalCallbackOperand(
  * and typing the fold `value` made `Add` itself reject `Reduce(L, Add, 0)`
  * as incompatible with `number`. The fold's value is an element combined
  * with the seed, so its type is the widening of the element type and the
- * seed's type — `finite_integer` for a sum of integers seeded with `0`,
+ * seed's type — `integer` for a sum of integers seeded with `0`,
  * `complex` over a `list<complex>` — or `unknown` when the element type is
  * not numeric.
  */
@@ -3393,9 +3393,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const t = target.re;
         // Symbolic target (no concrete numeric value): membership is
         // indeterminate unless the target's type rules it out entirely.
-        // (Refute against `'number'`, not `'finite_real'`: the type
+        // (Refute against `'number'`, not `'real'`: the type
         // intersection treats incomparable numeric primitives — e.g.
-        // `integer` vs `finite_real` — as disjoint, which would unsoundly
+        // `integer` vs `real` — as disjoint, which would unsoundly
         // refute symbols of extended numeric type.)
         if (Number.isNaN(t))
           return typeMembership(target, 'number') === false ? false : undefined;
@@ -3586,17 +3586,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       elttype: (expr) => {
         // Mirror the dynamic Range type: every present operand must be
-        // integer-valued for the element type to be finite_integer. An
+        // integer-valued for the element type to be integer. An
         // infinite endpoint is skipped — it marks unbounded extent and is
         // never itself an element, so it must not widen the element type.
-        if (!isFunction(expr)) return 'finite_integer';
+        if (!isFunction(expr)) return 'integer';
         for (let i = 1; i <= expr.nops; i++) {
           const op = (expr as any)[`op${i}`] as Expression;
           const r = op.re;
           if (r === Infinity || r === -Infinity) continue;
-          if (!op.isInteger) return 'finite_real';
+          if (!op.isInteger) return 'real';
         }
-        return 'finite_integer';
+        return 'integer';
       },
     },
   } as OperatorDefinition,
@@ -3765,7 +3765,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // An interval only contains (real) numbers: refute non-numbers
         // (strings, booleans, …) on type alone. Note: `'number'` rather
         // than `'real'` — the type-intersection reduction treats
-        // incomparable numeric primitives (e.g. `finite_number` vs `real`)
+        // incomparable numeric primitives (e.g. `imaginary` vs `real`)
         // as disjoint, which would unsoundly refute compound expressions
         // of indeterminate numeric type.
         if (typeMembership(target, 'number') === false) return false;
@@ -3831,7 +3831,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // never itself a member. The element type therefore does NOT widen
         // with the endpoints — `Interval(0, +oo)` reports the same elements
         // as `Interval(0, 1)`.
-        return 'finite_real';
+        return 'real';
       },
     },
   } as OperatorDefinition,
@@ -3926,7 +3926,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       contains: (expr, target) => {
         const t = target.re;
         // Symbolic target: indeterminate unless the type refutes membership
-        // (`'number'`, not `'finite_real'` — see the Range.contains note)
+        // (`'number'`, not `'real'` — see the Range.contains note)
         if (Number.isNaN(t))
           return typeMembership(target, 'number') === false ? false : undefined;
         if (target.im !== 0) return false;
@@ -4787,7 +4787,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // operator's tolerance. The accumulator is deliberately `unknown`, which
     // the stamp gate declines, because a fold's accumulator may CHANGE TYPE
     // mid-fold and an annotation would forbid it: `Reduce([1,2,3], (a, x) =>
-    // a / x, 1)` folds 1 → 1/2 → 1/6, which a `finite_integer` accumulator
+    // a / x, 1)` folds 1 → 1/2 → 1/6, which an `integer` accumulator
     // annotation (solved from the initial value) rejects at apply time. That
     // holds for the SEEDED form as much as the seedless one, so neither stamps
     // it — see the phase-2 audit in the design doc.
@@ -6608,7 +6608,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Restore the value operand when it failed only because its type is
       // retractable — the base may still resolve to a collection at runtime:
       //  - an *inferred* (not declared) scalar `number` type; or
-      //  - a *union* with an indexable member (e.g. `finite_integer |
+      //  - a *union* with an indexable member (e.g. `integer |
       //    vector<3>`, or a declared `number | list<number>` return; see
       //    `hasIndexableMember`); or
       //  - a `broadcastable<T>` base (e.g. `2h(x)-1` with `h` returning
@@ -6619,7 +6619,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       //    signature such as `Max`/`Min`): `value` is a strict supertype of
       //    `number` that also includes collection types, so it is no evidence
       //    of scalar-ness (mirrors the `value` handling in `invisible-operator`).
-      // A provably scalar base (`\pi`, `(5)`, `sin(3)`, `finite_integer |
+      // A provably scalar base (`\pi`, `(5)`, `sin(3)`, `integer |
       // rational`) is not restored and still errors loudly.
       const valueType = value?.type.type;
       if (
@@ -7478,7 +7478,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // lazy view materializes to. Static promise and runtime laziness are
     // decoupled: the value stays a lazy view either way.
     // Reversal in particular: `Reverse((1, "a"))` is `("a", 1)`, so the old
-    // `(T) -> T` claim of `tuple<finite_integer, string>` had the element
+    // `(T) -> T` claim of `tuple<integer, string>` had the element
     // types in the wrong ORDER; and `Reverse(1..10)` is `[10, 9, …, 1]`,
     // descending, which the `range` type excludes.
     // The LEADING arm is the string-preservation rule: reversing a string's
@@ -11737,7 +11737,7 @@ function sliceResultType(
  * (`docs/COLLECTIONS-MODEL.md`, Q2.1). The
  * binary handler used to be `joinResultType([ops[0]])`, which ignored the
  * appended value's type entirely — so `Append([1,2], "x")` claimed
- * `list<finite_integer>`. Folding the trailing types in fixes that, and makes
+ * `list<integer>`. Folding the trailing types in fixes that, and makes
  * the flattened form agree with the nested one it replaces.
  *
  * The source contribution is computed HERE rather than deferred to

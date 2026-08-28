@@ -13,9 +13,9 @@
  * Each case is checked against the INTERPRETER's value, not against source.
  *
  * `Power`/`Root` over a NEGATIVE base joined this set on 2026-07-30: the type
- * handlers now narrow to `finite_complex` when the exponent's reduced-rational
+ * handlers now narrow to `complex` when the exponent's reduced-rational
  * denominator is EVEN (an ODD denominator has a real principal root —
- * `(−8)^(2/3) = 4` — and stays `finite_number`). The emitters had to follow;
+ * `(−8)^(2/3) = 4` — and stays `number`). The emitters had to follow;
  * until they did, the parent emitted `{re, im}` arithmetic around a real `NaN`
  * fold. Both branches are pinned below.
  *
@@ -85,7 +85,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       it(`${name} out of domain: agrees with the interpreter`, () => {
         const ce = engineWithNegativeAssignment();
         const expr = ce.parse(latex);
-        expect(expr.type.toString()).toBe('finite_complex');
+        expect(expr.type.toString()).toBe('complex');
         const result = compile(expr, { fallback: false });
         expect(result.success).toBe(true);
         const val = result.run!() as { re: number; im: number };
@@ -193,10 +193,10 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
 
     it('Power/Root on the COMPLEX branch of a negative base agree with the interpreter', () => {
       // SUPERSEDED CONTRACT (2026-07-30 ruling). This test used to assert that
-      // these stayed real (typed `finite_number`) and ran to `NaN` — true only
+      // these stayed real (typed `number`) and ran to `NaN` — true only
       // because the type handlers did not yet track the negative-base branch.
       // They now do: a negative base with an exponent whose reduced-rational
-      // denominator is EVEN (or an even root degree) is typed `finite_complex`,
+      // denominator is EVEN (or an even root degree) is typed `complex`,
       // so the ENCLOSING `1 + …` emits `{re, im}` arithmetic. Leaving the real
       // NaN fold in place made the parent read `.re`/`.im` off a `NaN` *number*
       // — `{re: NaN, im: undefined}` behind `success: true`, the very defect
@@ -204,7 +204,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       const ce = engineWithNegativeAssignment();
       for (const latex of ['1 + (-2)^{0.3}', '1 + \\sqrt[4]{-8}']) {
         const expr = ce.parse(latex);
-        expect(expr.type.toString()).toBe('finite_complex');
+        expect(expr.type.toString()).toBe('complex');
         const result = compile(expr, { fallback: false });
         expect(result.success).toBe(true);
         const val = result.run!() as { re: number; im: number };
@@ -222,11 +222,11 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       // `Math.pow` misses (`Math.pow(-8, 2/3)` is `NaN`). `Root` already
       // corrected for this; `Power` did not, so `(-8)^(2/3)` compiled to `NaN`
       // while the interpreter returned `4`. The node correctly stays
-      // `finite_number` — the parent emits real arithmetic — so the FOLD is
+      // `number` — the parent emits real arithmetic — so the FOLD is
       // what had to change.
       const ce = engineWithNegativeAssignment();
       const expr = ce.parse('(-8)^{\\frac{2}{3}}');
-      expect(expr.type.toString()).toBe('finite_number');
+      expect(expr.type.toString()).toBe('number');
       const result = compile(expr, { fallback: false });
       expect(result.code).toBe('4');
       expect(result.run!()).toBe(4);
@@ -242,11 +242,11 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       // the type handler reads. `100/3`'s double reconstructs by continued
       // fractions to the dyadic `4691249611844267/140737488355328` — an EVEN
       // denominator — so a float-first decision reported this complex (fold:
-      // NaN) while the type said `finite_number`. Type, `.N()` and the compiled
+      // NaN) while the type said `number`. Type, `.N()` and the compiled
       // constant now tell one story: the real `+2^(100/3)`.
       const ce = engineWithNegativeAssignment();
       const expr = ce.parse('(-2)^{\\frac{100}{3}}');
-      expect(expr.type.toString()).toBe('finite_number');
+      expect(expr.type.toString()).toBe('number');
       // `constantFold: false`: the subject is the EMITTER's own fold of a
       // negative base with an odd-denominator exponent (the branch that used
       // to produce NaN), which is what runs when the whole-expression

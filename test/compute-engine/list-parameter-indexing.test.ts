@@ -577,7 +577,7 @@ describe('non-regressions', () => {
   test('a SCALAR-bodied function still broadcasts over a list argument', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'g', ['Function', ['Multiply', 2, 'x'], 'x']]).evaluate();
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> finite_number');
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> number');
     expect(ce.box(['g', ['List', 1, 2, 3]]).evaluate().toString()).toBe(
       '[2,4,6]'
     );

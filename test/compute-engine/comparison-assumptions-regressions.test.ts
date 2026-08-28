@@ -173,7 +173,7 @@ describe('WP-2.4 P0-31: .is() is symmetric for expression-valued bindings', () =
 describe('multi-symbol inequalities entail no numeric bound', () => {
   test('assume(b > y + 1) does not bound b', () => {
     const ce = new ComputeEngine();
-    ce.declare('b', 'finite_real');
+    ce.declare('b', 'real');
     ce.declare('y', 'real');
     ce.assume(ce.box(['Greater', 'b', ['Add', 'y', 1]]));
     expect(ce.box('b').isGreater(1)).toBeUndefined();
@@ -188,7 +188,7 @@ describe('multi-symbol inequalities entail no numeric bound', () => {
     // of `y` asks the sign of `-b`, which asks the sign of `y`. The
     // in-flight guard answers `undefined` for a re-entrant subject.
     const ce = new ComputeEngine();
-    ce.declare('b', 'finite_real');
+    ce.declare('b', 'real');
     ce.declare('y', 'real');
     ce.assume(ce.box(['Greater', 'b', ['Add', 'y', 1]]));
     expect(ce.box('y').isPositive).toBeUndefined();
@@ -210,10 +210,10 @@ describe('multi-symbol inequalities entail no numeric bound', () => {
     const ce = new ComputeEngine();
     ce.declare('h', 'real');
     ce.assume(ce.box(['Less', 0, 'h', ['Rational', 1, 2]]));
-    expect(ce.box(['Artanh', 'h']).type.toString()).toBe('finite_real');
+    expect(ce.box(['Artanh', 'h']).type.toString()).toBe('real');
     const ce2 = new ComputeEngine();
     ce2.declare('t', 'real');
     ce2.assume(ce2.box(['Less', 0, 't', ['Rational', 1, 3]]));
-    expect(ce2.box(['Artanh', 't']).type.toString()).toBe('finite_real');
+    expect(ce2.box(['Artanh', 't']).type.toString()).toBe('real');
   });
 });

@@ -40,8 +40,8 @@ export type CompiledFunctionEntry =
 
 /**
  * The arithmetic discipline a compilation runs under: how a numeric binding
- * whose static type is wide (`unknown`, `number`, `finite_number`, an
- * unannotated parameter) is shaped, and what happens when a complex-shaped
+ * whose static type is wide (`unknown`, `number`, an unannotated
+ * parameter) is shaped, and what happens when a complex-shaped
  * value reaches one:
  *
  * - `'strict'` — shape follows static analysis: a `complex`/`imaginary`-typed

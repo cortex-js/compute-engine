@@ -106,7 +106,7 @@ describe('exact Map compile — the item-103 witness', () => {
     expect(compiled.map((x) => x.re)).toEqual(expected);
 
     // R3: EXACT integer literals, not floats that print alike.
-    expectTypeBetween(compiled[0], { atMost: 'finite_integer' });
+    expectTypeBetween(compiled[0], { atMost: 'integer' });
     expect(compiled[0].isExact).toBe(true);
     expect(compiled[0].json).toBe(30);
   });
@@ -541,7 +541,7 @@ describe('exact Map compile — symbol-valued sources (amendment R6)', () => {
     expect(stats.compiledHits).toBe(600);
     for (let i = 0; i < compiled.length; i++)
       expect([i, compiled[i].isSame(interpreted[i])]).toEqual([i, true]);
-    expectTypeBetween(compiled[0], { atMost: 'finite_integer' });
+    expectTypeBetween(compiled[0], { atMost: 'integer' });
     expect(compiled[0].isExact).toBe(true);
   });
 });
@@ -586,7 +586,7 @@ describe('exact Map compile — the proof declines', () => {
 
   test('a ZERO-valued symbolic modulus declines (the interval excludes 0)', () => {
     const ce = new ComputeEngine() as any;
-    ce.declare('mz', 'finite_integer');
+    ce.declare('mz', 'integer');
     const m = lazyMap(ce, ['Range', 1, 200], ['Mod', '_1', 'mz']);
     ce.assign('mz', 0);
     expect(m.at(1).isNaN).toBe(true);
@@ -595,7 +595,7 @@ describe('exact Map compile — the proof declines', () => {
 
   test('an UNASSIGNED symbolic modulus declines (no value to bound)', () => {
     const ce = new ComputeEngine() as any;
-    ce.declare('mu', 'finite_integer');
+    ce.declare('mu', 'integer');
     const m = lazyMap(ce, ['Range', 1, 200], ['Mod', '_1', 'mu']);
     expect(m.at(1).toString()).toContain('mu'); // symbolic element
     expect(stats.attempts).toBe(0);
@@ -609,7 +609,7 @@ describe('exact Map compile — the proof declines', () => {
     // follow the divisor.
     for (const modulus of [7, -7]) {
       const ce = new ComputeEngine() as any;
-      ce.declare('mv', 'finite_integer');
+      ce.declare('mv', 'integer');
       const m = lazyMap(ce, ['Range', 1, 200], ['Mod', '_1', 'mv']);
       ce.assign('mv', modulus);
       _resetMapAutoCompileStats();
@@ -826,7 +826,7 @@ describe('exact Map compile — coexistence with the float tier', () => {
     expect(stats.compiledHits).toBe(2700);
     // Same values, but the exact drain yields EXACT integer literals.
     expect(exact[0].isSame(30)).toBe(true);
-    expectTypeBetween(exact[0], { atMost: 'finite_integer' });
+    expectTypeBetween(exact[0], { atMost: 'integer' });
   });
 
   test("ce.jit = 'off' disables the exact tier too", () => {
@@ -866,7 +866,7 @@ describe('exact Map compile — annotated parameters', () => {
     expect(snapshot.compiledHits).toBe(MIN_EXACT_COMPILE_COUNT);
     expect(snapshot.elementFallbacks).toBe(0);
     expect(compiled[0].isSame(2)).toBe(true);
-    expectTypeBetween(compiled[0], { atMost: 'finite_integer' });
+    expectTypeBetween(compiled[0], { atMost: 'integer' });
   });
 
   test('the annotated and bare spellings compile to the same values', () => {
@@ -909,7 +909,7 @@ describe('exact Map compile — annotated parameters', () => {
   });
 
   test('a NARROWING annotation never attempts, and errors loudly', () => {
-    // The source's element type (`finite_real`) does not satisfy `integer`, so
+    // The source's element type (`real`) does not satisfy `integer`, so
     // the gate declines: no compile attempt, and the unfused route raises the
     // per-element mismatch error exactly as it does today.
     const ce = new ComputeEngine() as any;

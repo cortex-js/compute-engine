@@ -2646,7 +2646,7 @@ export function assignFn(
       // DECLARATION it would have been had it come first: apply the literal
       // promotion, so `y_r := 5` settles on `integer` whether or not a boxing
       // auto-declared `y_r` beforehand. Without this the widen above installs
-      // the value's RAW type (`finite_integer`), and the settled type
+      // the value's RAW type (`integer`), and the settled type
       // depended on the boxing-vs-assignment order (observed by the Tycho
       // team's order-matrix probe at their 0.106.0 adoption). Skipped when
       // D11 fired: adopting the raw type for an incompatible guess is
@@ -2677,8 +2677,8 @@ export function assignFn(
       // (c) The promoted type is installed only when it is itself below the
       //     incumbent; otherwise the value's raw type is (which is always
       //     sound, having just passed the strict-subtype test). Promotion
-      //     can widen — `finite_integer` promotes to `integer`, which is NOT
-      //     below a `finite_real` incumbent — and installing it would break
+      //     can widen — `integer` promotes to `integer`, which is NOT
+      //     below a `real` incumbent — and installing it would break
       //     a use that the incumbent recorded. The non-finite arms widen the
       //     same way: the `+oo` singleton promotes to `infinity`, which an
       //     incumbent of `integer | +oo` does not contain, so that assignment
@@ -2820,7 +2820,7 @@ function assertAssignableValueDef(
   if (def.inferredType || def.type.isUnknown) return;
   // A declared PLACEHOLDER SKELETON (`a: list` — bare constructor, elements
   // to be determined) is the contract; the stored type may carry a previous
-  // assignment's element REFINEMENT (`list<finite_integer>`), which must not
+  // assignment's element REFINEMENT (`list<integer>`), which must not
   // harden into the contract: `a = ["x"]` re-refines (Phase 1 ruling R1,
   // 2026-08-18), so compatibility is judged against the skeleton.
   const contract =

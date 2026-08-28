@@ -517,7 +517,7 @@ export function checkNumericArgs(
         // broadcast, not as a scalar, so it gets the same exclusion the
         // top-level operand gets on the branch below. Without it,
         // `Multiply(2, [L, L])` with `L := [1, 2]` narrowed `L`'s value
-        // definition from `vector<finite_integer^2>` to `real` while
+        // definition from `vector<integer^2>` to `real` while
         // evaluating to the matrix `[[2, 4], [2, 4]]` — an unsound declared
         // type for a value that is still a list, and one that made a second
         // broadcast over the same symbol claim `vector<real^2>` for a
@@ -550,7 +550,7 @@ export function checkNumericArgs(
  * at canonicalization does not need this guard for a statically non-numeric
  * operand — but it does for one whose static type is a UNION that could
  * still be numeric, such as the element type of a heterogeneous list
- * (`Sin(At(["a", 2], 1))` types `finite_integer | missing | number |
+ * (`Sin(At(["a", 2], 1))` types `integer | missing | number |
  * string`). Only evaluation can settle that operand, so only an
  * evaluate-time check can report it.
  *
@@ -966,8 +966,8 @@ function evidenceGuardedNarrow(
  *   the boxing-time refusal (`FactorInteger("abc")` is still an error at
  *   boxing);
  * - a SYMBOLIC argument admits iff its type OVERLAPS the parameter — the
- *   two share an inhabitant (`finite_number` at a `complex` slot, they
- *   share `finite_complex`) — deferring the decision to the runtime
+ *   two share an inhabitant (`number` at a `complex` slot, they share
+ *   `complex`) — deferring the decision to the runtime
  *   conformance check at dispatch (`runtimeConformanceError`); `string` at
  *   `integer` shares nothing and still refuses at boxing.
  *
@@ -1004,7 +1004,7 @@ function overlapAdmission(op: Expression, param: Type): boolean {
   // evidence diagnostics lost to overlap admission", paths 1 and 2, both
   // ruled 2026-08-23): during the static pre-pass a symbol carries the type
   // of its last top-level assignment as evidence — a concrete literal's
-  // exact type (`1.5`, not the widened `finite_real`) or the right-hand
+  // exact type (`1.5`, not the widened `real`) or the right-hand
   // side's static type (`number`, for `x = g()`). The pre-pass is a LINTER
   // and is deliberately stricter than engine admission: evidence that does
   // not FIT the parameter is refused here, at boxing, which is what the
@@ -2479,7 +2479,7 @@ export function validateArguments(
       // treatment with the variable set to the bound itself: the blamed
       // position may be a CONSTRUCTOR pattern (`list<T>` at a `T: integer`
       // bound), where displaying the bare bound would read "expected
-      // `integer`, got `vector<finite_real^2>`" — the instantiated pattern
+      // `integer`, got `vector<real^2>`" — the instantiated pattern
       // (`list<integer>`) is the position's true expected type. For a
       // bare-variable position the instantiation IS the bound, so the message
       // is unchanged there.
