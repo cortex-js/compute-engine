@@ -18,8 +18,8 @@
 // entries into not-evaluable ones. Entries that need the widenings simply
 // come out `not-evaluable` here.
 //
-// Evaluation is interruptible (ROADMAP item 2): each N()/evaluate() is
-// bounded by ce.timeLimit and throws CancellationError when exceeded, so
+// Evaluation is interruptible: each N()/evaluate() runs inside a
+// `ce.withTimeLimit` span and throws CancellationError when exceeded, so
 // representation entries (series/integral/product/limit) and
 // Derivative-containing formulas run like any others. The former external
 // stall watchdog, FUNGRIM_SKIP_IDS denylist, and structural skips for those
@@ -55,12 +55,16 @@ const PRECISION = 30;
 const MAX_INSTANCES = 5;
 const MAX_CANDIDATES = 24;
 const ENTRY_BUDGET_MS = 5000;
-// Per-evaluation deadline (ce.timeLimit). Evaluation is interruptible
-// (ROADMAP item 2): a slow N() throws CancellationError, recorded as
-// not-evaluable, instead of stalling the harness. This replaced the
+// Per-evaluation deadline, armed with `ce.withTimeLimit` around each
+// evaluation. Evaluation is interruptible: a slow N() throws
+// CancellationError, recorded as not-evaluable, instead of stalling the
+// harness. (The engine's `ce.timeLimit` property was retired on 2026-07-20 —
+// see `docs/TIMEOUT-MODEL.md` §5 — and an assignment to it is a silent no-op,
+// which is how this harness lost its deadline until 2026-08-29.) This replaced the
 // external stall watchdog, the FUNGRIM_SKIP_IDS hang denylist, and the
 // structural representation/derivative skips.
 const EVAL_TIME_LIMIT_MS = 1000;
+const EVAL_LIMIT = { ms: EVAL_TIME_LIMIT_MS, label: 'fungrim:stage2' };
 
 export type Instance = {
   assignment: Assignment;
@@ -297,12 +301,16 @@ export function numericCheckEntry(
 
         // Assumption filter: only a definitive True accepts the assignment
         if (assumptions) {
-          const a = assumptions.subs(sub).evaluate();
+          const a = ce.withTimeLimit(EVAL_LIMIT, () =>
+            assumptions!.subs(sub).evaluate()
+          );
           if (sym(a) !== 'True') continue;
         }
 
         const inst = formula.subs(sub);
-        const { outcome, detail } = checkInstance(inst);
+        const { outcome, detail } = ce.withTimeLimit(EVAL_LIMIT, () =>
+          checkInstance(inst)
+        );
         base.instances.push({ assignment, outcome, detail });
       } catch (err: any) {
         base.instances.push({
@@ -348,7 +356,6 @@ export function runStage2(
 
   const ce = createEngine(corpus.declarations, { compat: false });
   ce.precision = PRECISION;
-  ce.timeLimit = EVAL_TIME_LIMIT_MS;
 
   const report: Stage2Report = {
     seed,

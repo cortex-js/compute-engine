@@ -1294,12 +1294,13 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // the sum-of-two-radicals power. The Bondarenko nested-radical family (#2, #10,
   // #11, #12, #15, #17, #18). D-verified by finite-differencing F.N() (the
   // antiderivatives carry artanh/arctan of radicals that can exceed 1 → a complex
-  // constant that a symbolic derivative would strand). Heavy: BOTH budgets raised
-  // (engine `timeLimit` AND loader `timeLimitMs`); every case goes INERT under
+  // constant that a symbolic derivative would strand). Heavy: the loader budget
+  // `timeLimitMs` is raised (there is no engine-level budget any more — the
+  // ambient `ce.timeLimit` was retired, so an evaluation with no enclosing
+  // `withTimeLimit` span is unbounded); every case goes INERT under
   // `RUBI_NO_R31=1`.
   describe('nested-radical substitution fallback (Bondarenko, R31)', () => {
     const ce = new ComputeEngine();
-    ce.timeLimit = 30_000;
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
 
     // `NO_R31` is captured at module load. Under `RUBI_NO_R31=1` the rung is
@@ -1399,7 +1400,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // `RUBI_NO_R32` for a clean A/B toggle.
   describe('Euler-substitution lever (Bondarenko #9, R32)', () => {
     const ce = new ComputeEngine();
-    ce.timeLimit = 30_000;
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
 
     const NO_R32 = process.env.RUBI_NO_R32 !== undefined;

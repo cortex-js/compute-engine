@@ -238,6 +238,97 @@ function improperEndpointValue(
   return result.isNaN === true ? undefined : result;
 }
 
+/** A numeric integrand split into its real and imaginary parts.
+ *
+ * The compiled runner and the interpreted `applicable` both answer a complex
+ * value as an object with numeric `re`/`im` fields (a real value as a plain
+ * number, or an object with `im` = 0). The quadrature kernels integrate REAL
+ * functions, so the caller integrates `re` first and, when `sawImaginary()`
+ * reports that some sample carried a non-zero imaginary part, integrates
+ * `im` as well and combines the two into one complex result. Reading only
+ * `.re` — the previous behavior — silently dropped the imaginary part:
+ * `∫₀^π e^{ix} dx` numericized to `0` instead of `2i`. */
+type IntegrandParts = {
+  re: (...args: number[]) => number;
+  im: (...args: number[]) => number;
+  sawImaginary: () => boolean;
+  /** True once any sample produced a number at all. An integrand that never
+   * does — one holding a free symbol the caller could not detect, such as an
+   * operator name (`D`) used as a variable — has no numeric value, and the
+   * integral must stay symbolic rather than answer `NaN`. */
+  sawNumeric: () => boolean;
+};
+
+function numericIntegrandParts(
+  raw: (...args: number[]) => unknown
+): IntegrandParts {
+  let imaginary = false;
+  let numeric = false;
+  const parts = (v: unknown): [re: number, im: number] => {
+    if (typeof v === 'number') {
+      if (!Number.isNaN(v)) numeric = true;
+      return [v, 0];
+    }
+    if (v !== null && typeof v === 'object') {
+      const re = (v as { re?: unknown }).re;
+      const im = (v as { im?: unknown }).im;
+      if (typeof re !== 'number') return [NaN, NaN];
+      const imN = typeof im === 'number' ? im : 0;
+      if (!Number.isNaN(re)) numeric = true;
+      // Any non-zero imaginary component — a non-finite one included, so
+      // that `re: 1, im: Infinity` is not mistaken for a real sample and the
+      // non-finite part reaches the estimate — makes the integrand complex.
+      if (imN !== 0) imaginary = true;
+      return [re, imN];
+    }
+    return [NaN, NaN];
+  };
+  // One evaluation of `raw` yields BOTH parts, but the real part is integrated
+  // first and the imaginary part in a second pass over (mostly) the same
+  // sample points. Keep the computed pairs so the second pass does not
+  // re-evaluate an expensive integrand (a nested integral, a special
+  // function) at a point the first pass already visited. The cache is
+  // bounded: a Monte-Carlo pass can take 10⁷ samples, which must not be
+  // retained — past the cap, points are evaluated without caching.
+  const MAX_CACHED_SAMPLES = 1 << 16;
+  const cache = new Map<string, [re: number, im: number]>();
+  const at = (args: number[]): [re: number, im: number] => {
+    const key = args.length === 1 ? String(args[0]) : args.join(',');
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const pair = parts(raw(...args));
+    if (cache.size < MAX_CACHED_SAMPLES) cache.set(key, pair);
+    return pair;
+  };
+  return {
+    re: (...args) => at(args)[0],
+    im: (...args) => at(args)[1],
+    sawImaginary: () => imaginary,
+    sawNumeric: () => numeric,
+  };
+}
+
+/** Assemble the numeric result of an integral from its real part and, when
+ * present, its imaginary part. A NaN estimate (a divergent level, a NaN
+ * bound) has no value to report an uncertainty ABOUT — `Measurement(NaN,
+ * NaN)` would dress that up as a measured quantity — so it answers `NaN`.
+ * The two error bars combine in quadrature. */
+function measurementFromParts(
+  ce: ComputeEngine,
+  re: { estimate: number; error: number },
+  im?: { estimate: number; error: number }
+): Expression {
+  if (Number.isNaN(re.estimate)) return ce.NaN;
+  if (im === undefined)
+    return ce.expr(['Measurement', ce.number(re.estimate), ce.number(re.error)]);
+  if (Number.isNaN(im.estimate)) return ce.NaN;
+  return ce.expr([
+    'Measurement',
+    ce.number(ce.complex(re.estimate, im.estimate)),
+    ce.number(Math.hypot(re.error, im.error)),
+  ]);
+}
+
 /**
  * Iterated numeric quadrature for a multi-limit `Integrate`, e.g.
  * `Integrate(f, Limits(x, 0, 3), Limits(y, 0, 2))`. Limits follow the
@@ -343,12 +434,16 @@ function nIntegrateMultiple(
         : ce.NaN;
 
   const compiled = implicitCompile(ce, fnExpr);
-  let jsf: (...args: number[]) => number;
-  if (compiled?.success) jsf = compiled.run as (...args: number[]) => number;
+  let raw: (...args: number[]) => unknown;
+  if (compiled?.success) raw = compiled.run as (...args: number[]) => unknown;
   else {
     const app = applicable(fnExpr);
-    jsf = (...args: number[]) => app(args.map((x) => ce.number(x)))?.re ?? NaN;
+    raw = (...args: number[]) => app(args.map((x) => ce.number(x)));
   }
+  const integrand = numericIntegrandParts(raw);
+  // The part being integrated: the real part first, then — only when a
+  // sample showed a non-zero imaginary part — the imaginary part.
+  let jsf: (...args: number[]) => number = integrand.re;
 
   // Nested adaptive Gauss–Kronrod, one level per limit; a level that fails to
   // converge falls back to 1-D Monte Carlo (as the single-limit path does).
@@ -434,10 +529,10 @@ function nIntegrateMultiple(
   // The reported uncertainty is the outermost level's error estimate, inflated
   // by the propagated inner-level error (see `inflate` above).
   const r = integrateDim(0);
-  // No value to report an uncertainty ABOUT — a divergent level, or a NaN
-  // bound. `Measurement(NaN, NaN)` would dress that up as a measured quantity.
-  if (Number.isNaN(r.estimate)) return ce.NaN;
-  return ce.expr(['Measurement', ce.number(r.estimate), ce.number(r.error)]);
+  if (Number.isNaN(r.estimate) && !integrand.sawNumeric()) return undefined;
+  if (!integrand.sawImaginary()) return measurementFromParts(ce, r);
+  jsf = integrand.im;
+  return measurementFromParts(ce, r, integrateDim(0));
 }
 
 /**
@@ -1773,89 +1868,99 @@ volumes
                 : ce.NaN;
 
           const compiled = implicitCompile(ce, fnExpr);
-          const jsf =
-            (compiled?.run as (x: number) => number) ?? applicableN1(fnExpr);
+          const raw: (x: number) => unknown = compiled?.success
+            ? (compiled.run as (x: number) => unknown)
+            : ((app) => (x: number) => app([ce.number(x)]))(applicable(fnExpr));
+          const integrand = numericIntegrandParts(raw);
 
-          // Semi-infinite interval: a conditionally-convergent oscillatory
-          // integrand (∫₀^∞ sin x/x, ∫₀^∞ sin(x²)) defeats Monte-Carlo
-          // importance sampling. Try the dedicated lobe-integration +
-          // ε-acceleration quadrature first; it returns null (→ Monte Carlo)
-          // for non-oscillatory or divergent integrands.
-          const aInf = !isFinite(lower);
-          const bInf = !isFinite(upper);
-          if (aInf !== bInf) {
-            const osc = bInf
-              ? integrateSemiInfiniteOscillatory(jsf, lower, ce._deadline)
-              : integrateSemiInfiniteOscillatory(
-                  (t) => jsf(-t),
-                  -upper,
-                  ce._deadline
-                );
-            if (osc)
-              return ce.expr([
-                'Measurement',
-                ce.number(osc.estimate),
-                ce.number(osc.error),
-              ]);
-          }
+          // ONE sub-stream for both passes: the imaginary pass continues where
+          // the real pass stopped. Re-deriving the stream per pass would give
+          // both passes the same draws, while `measurementFromParts` combines
+          // their errors as independent (see `nIntegrateMultiple`, which
+          // shares its stream across levels for the same reason).
+          const draw = ce._substream(mixTags(f.hash, firstLimit.hash));
 
-          // (2) Deterministic adaptive Gauss–Kronrod (GK15) for finite or
-          // transformable (semi-infinite / doubly-infinite) bounds — near
-          // machine precision on smooth integrands, and matches the compiled
-          // integration path. Falls through to Monte Carlo only when it fails
-          // to converge (endpoint singularities, oscillatory tails) AND the
-          // sampler could actually do better — a stalled panel budget still
-          // routinely carries a tighter bound than 1e7 samples can reach, and
-          // for an expensive integrand (an inner quadrature, a compiled model)
-          // those samples cost minutes.
-          if (compiled?.success) {
-            // `deadline`: bounds the adaptive loop (per-panel check, partial
-            // salvage) AND is re-published as the ambient deadline so an
-            // integrand that is itself an integral — interpreted, or compiled
-            // to `_SYS.integrate`, which has no engine access — inherits it
-            // (Tycho item 183).
-            const gk = adaptiveQuadrature(jsf, lower, upper, {
-              deadline: ce._deadline,
-            });
-            // A diagnosed divergence has no finite value. Monte Carlo would
-            // still return one — a mean of samples that never saw the
-            // singularity — so the fallback is skipped, not just the report.
-            if (gk.divergent) return ce.NaN;
-            if (
-              (gk.converged || quadratureBeatsMonteCarlo(gk, 1e7)) &&
-              Number.isFinite(gk.estimate)
-            )
-              return ce.expr([
-                'Measurement',
-                ce.number(gk.estimate),
-                ce.number(gk.error),
-              ]);
-          }
+          // Integrate ONE real-valued part of the integrand over the interval.
+          const integrateReal = (
+            jsf: (x: number) => number
+          ): { estimate: number; error: number } => {
 
-          const mce = monteCarloEstimate(
-            jsf,
-            lower,
-            upper,
-            compiled?.success ? 1e7 : 1e4,
-            ce._deadline,
-            ce._substream(mixTags(f.hash, firstLimit.hash))
-          );
-          // KNOWN LIMITATION (CORRECTNESS_FINDINGS #29 / C15): the reported
-          // error bar is the Monte-Carlo standard error, which is *optimistic*
-          // (~1.3–1.6× too small) for endpoint-singular integrands such as
-          // ∫₋₁¹ √(1−x²)/(1+x²) dx or ∫₀¹ x^(−1/2) dx. Uniform sampling
-          // under-weights the neighborhood of the singularity, so the sample
-          // variance underestimates the true quadrature error and the ± bound
-          // can be tighter than the actual deviation from the exact value. A
-          // faithful bound needs singularity-aware quadrature (e.g. tanh-sinh
-          // with endpoint clustering); until then the estimate is sound but the
-          // uncertainty on singular integrands should be treated as a lower
-          // bound, not a guarantee.
-          return ce.expr([
-            'Measurement',
-            ce.number(mce.estimate),
-            ce.number(mce.error),
-          ]);
+            // Semi-infinite interval: a conditionally-convergent oscillatory
+            // integrand (∫₀^∞ sin x/x, ∫₀^∞ sin(x²)) defeats Monte-Carlo
+            // importance sampling. Try the dedicated lobe-integration +
+            // ε-acceleration quadrature first; it returns null (→ Monte Carlo)
+            // for non-oscillatory or divergent integrands.
+            const aInf = !isFinite(lower);
+            const bInf = !isFinite(upper);
+            if (aInf !== bInf) {
+              const osc = bInf
+                ? integrateSemiInfiniteOscillatory(jsf, lower, ce._deadline)
+                : integrateSemiInfiniteOscillatory(
+                    (t) => jsf(-t),
+                    -upper,
+                    ce._deadline
+                  );
+              if (osc) return { estimate: osc.estimate, error: osc.error };
+            }
+
+            // (2) Deterministic adaptive Gauss–Kronrod (GK15) for finite or
+            // transformable (semi-infinite / doubly-infinite) bounds — near
+            // machine precision on smooth integrands, and matches the compiled
+            // integration path. Falls through to Monte Carlo only when it fails
+            // to converge (endpoint singularities, oscillatory tails) AND the
+            // sampler could actually do better — a stalled panel budget still
+            // routinely carries a tighter bound than 1e7 samples can reach, and
+            // for an expensive integrand (an inner quadrature, a compiled model)
+            // those samples cost minutes.
+            if (compiled?.success) {
+              // `deadline`: bounds the adaptive loop (per-panel check, partial
+              // salvage) AND is re-published as the ambient deadline so an
+              // integrand that is itself an integral — interpreted, or compiled
+              // to `_SYS.integrate`, which has no engine access — inherits it
+              // (Tycho item 183).
+              const gk = adaptiveQuadrature(jsf, lower, upper, {
+                deadline: ce._deadline,
+              });
+              // A diagnosed divergence has no finite value. Monte Carlo would
+              // still return one — a mean of samples that never saw the
+              // singularity — so the fallback is skipped, not just the report.
+              if (gk.divergent) return { estimate: NaN, error: NaN };
+              if (
+                (gk.converged || quadratureBeatsMonteCarlo(gk, 1e7)) &&
+                Number.isFinite(gk.estimate)
+              )
+                return { estimate: gk.estimate, error: gk.error };
+            }
+
+            const mce = monteCarloEstimate(
+              jsf,
+              lower,
+              upper,
+              compiled?.success ? 1e7 : 1e4,
+              ce._deadline,
+              draw
+            );
+            // KNOWN LIMITATION (CORRECTNESS_FINDINGS #29 / C15): the reported
+            // error bar is the Monte-Carlo standard error, which is *optimistic*
+            // (~1.3–1.6× too small) for endpoint-singular integrands such as
+            // ∫₋₁¹ √(1−x²)/(1+x²) dx or ∫₀¹ x^(−1/2) dx. Uniform sampling
+            // under-weights the neighborhood of the singularity, so the sample
+            // variance underestimates the true quadrature error and the ± bound
+            // can be tighter than the actual deviation from the exact value. A
+            // faithful bound needs singularity-aware quadrature (e.g. tanh-sinh
+            // with endpoint clustering); until then the estimate is sound but the
+            // uncertainty on singular integrands should be treated as a lower
+            // bound, not a guarantee.
+            return { estimate: mce.estimate, error: mce.error };
+          };
+
+          const re = integrateReal(integrand.re);
+          // No sample was a number: nothing was integrated. Stay symbolic
+          // (the closed form, when there is one, is then still reachable).
+          if (Number.isNaN(re.estimate) && !integrand.sawNumeric())
+            return undefined;
+          if (!integrand.sawImaginary()) return measurementFromParts(ce, re);
+          return measurementFromParts(ce, re, integrateReal(integrand.im));
         }
 
         const limitsSequence = ops.slice(1);
@@ -2092,34 +2197,44 @@ volumes
         const [lower, upper] = [a.N().re, b.N().re];
         if (isNaN(lower) || isNaN(upper)) return undefined;
         const compiled = implicitCompile(engine, f);
-        const jsf = (compiled?.run as (x: number) => number) ?? applicableN1(f);
+        // The integrand may be complex-valued: integrate its real part, and
+        // its imaginary part too when a sample carried one (see
+        // `numericIntegrandParts` and the `Integrate` numeric path).
+        const raw: (x: number) => unknown = compiled?.success
+          ? (compiled.run as (x: number) => unknown)
+          : ((app) => (x: number) => app([engine.number(x)]))(applicable(f));
+        const integrand = numericIntegrandParts(raw);
+        // One stream for both passes (see the `Integrate` numeric path).
+        const draw = engine._substream(mixTags(f.hash, a.hash, b.hash));
 
-        // Dedicated oscillatory quadrature for semi-infinite intervals (see
-        // the `Integrate` numeric path); null → fall back to Monte Carlo.
-        const aInf = !isFinite(lower);
-        const bInf = !isFinite(upper);
-        if (aInf !== bInf) {
-          const osc = bInf
-            ? integrateSemiInfiniteOscillatory(jsf, lower, engine._deadline)
-            : integrateSemiInfiniteOscillatory(
-                (t) => jsf(-t),
-                -upper,
-                engine._deadline
-              );
-          if (osc) return new BoxedNumber(engine, osc.estimate);
-        }
-
-        return new BoxedNumber(
-          engine,
-          monteCarloEstimate(
+        const estimate = (jsf: (x: number) => number): number => {
+          // Dedicated oscillatory quadrature for semi-infinite intervals (see
+          // the `Integrate` numeric path); null → fall back to Monte Carlo.
+          const aInf = !isFinite(lower);
+          const bInf = !isFinite(upper);
+          if (aInf !== bInf) {
+            const osc = bInf
+              ? integrateSemiInfiniteOscillatory(jsf, lower, engine._deadline)
+              : integrateSemiInfiniteOscillatory(
+                  (t) => jsf(-t),
+                  -upper,
+                  engine._deadline
+                );
+            if (osc) return osc.estimate;
+          }
+          return monteCarloEstimate(
             jsf,
             lower,
             upper,
             compiled?.success ? 1e7 : 1e4,
             engine._deadline,
-            engine._substream(mixTags(f.hash, a.hash, b.hash))
-          ).estimate
-        );
+            draw
+          ).estimate;
+        };
+
+        const re = estimate(integrand.re);
+        if (!integrand.sawImaginary()) return new BoxedNumber(engine, re);
+        return engine.number(engine.complex(re, estimate(integrand.im)));
       },
     },
 

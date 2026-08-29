@@ -438,3 +438,53 @@ describe('SIGNED INFINITIES AT POLES (7c follow-up; 2026-07-10 convention)', () 
     expect(limDir(['Ln', 'x'], 0, -1).operator).toBe('Limit');
   });
 });
+
+describe('LEADING-ORDER REWRITE KEEPS ARGUMENTS OF FAST-GROWING HEADS', () => {
+  // Regression (found 2026-08-29 by the Fungrim Stage-2 harness): the
+  // leading-order pass dropped a dominated additive term INSIDE every
+  // function argument, so `Fibonacci(n+1)` became `Fibonacci(n)` and the
+  // ratio `Fibonacci(n+1)/Fibonacci(n)` answered a wrong `1` (likewise
+  // `Γ(x+1)/(x·Γ(x))` → 0 and `f(n+1)/f(n)` → 1 for an UNKNOWN `f`). The
+  // rewrite is only sound under heads that vary slowly enough (`ln`, roots,
+  // x-free powers); under an exponential-class or unknown head the argument
+  // must stay intact.
+  test('Γ(x+1)/(x·Γ(x)) → 1, not 0', () => {
+    const e = lim(
+      ['Divide', ['Gamma', ['Add', 'x', 1]], ['Multiply', 'x', ['Gamma', 'x']]],
+      'PositiveInfinity'
+    ).evaluate();
+    expect(e.is(1)).toBe(true);
+  });
+  test('Fibonacci(x+1)/Fibonacci(x) never answers 1', () => {
+    const e = lim(
+      ['Divide', ['Fibonacci', ['Add', 'x', 1]], ['Fibonacci', 'x']],
+      'PositiveInfinity'
+    ).evaluate();
+    expect(e.is(1)).not.toBe(true);
+    // Either the golden ratio or the inert limit — never a wrong finite value.
+    if (e.operator !== 'Limit') expect(e.is(ce.expr('GoldenRatio'))).toBe(true);
+  });
+  test('an unknown function f(x+1)/f(x) stays inert', () => {
+    ce.declare('fq', 'function');
+    const e = lim(
+      ['Divide', ['fq', ['Add', 'x', 1]], ['fq', 'x']],
+      'PositiveInfinity'
+    ).evaluate();
+    expect(e.operator).toBe('Limit');
+  });
+  test('slowly varying heads still rewrite: ln(x+1)/ln x → 1, (x+1)²/x² → 1', () => {
+    expect(
+      lim(['Divide', ['Ln', ['Add', 'x', 1]], ['Ln', 'x']], 'PositiveInfinity')
+        .evaluate()
+        .is(1)
+    ).toBe(true);
+    expect(
+      lim(
+        ['Divide', ['Power', ['Add', 'x', 1], 2], ['Power', 'x', 2]],
+        'PositiveInfinity'
+      )
+        .evaluate()
+        .is(1)
+    ).toBe(true);
+  });
+});

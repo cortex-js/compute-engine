@@ -455,3 +455,25 @@ export function measurementTrig(
     );
   return undefined;
 }
+
+/**
+ * Apply a unary operator `head` that is 1-Lipschitz on complex numbers —
+ * `Real`, `Imaginary`, `Conjugate`, `Abs` — to a Measurement. The nominal
+ * becomes `head(value)`; the error bound is kept as is, since each of these
+ * maps changes its argument by at most the argument's own change (a projection
+ * onto an axis, a reflection, a distance to the origin), so the first-order
+ * error cannot grow. For `Real`/`Imaginary` of a real-only error this is
+ * conservative (the other axis carries none of it) but never wrong.
+ *
+ * Returns `undefined` when `m` is not a Measurement, so a caller can fall
+ * through to its ordinary evaluation.
+ */
+export function measurementLipschitzUnary(
+  ce: ComputeEngine,
+  head: 'Real' | 'Imaginary' | 'Conjugate' | 'Abs',
+  m: Expression
+): Expression | undefined {
+  if (!isMeasurement(m)) return undefined;
+  const value = ce.function(head, [m.op1]).evaluate();
+  return makeMeasurement(ce, value, m.op2);
+}

@@ -234,6 +234,7 @@ import {
   measurementRoot,
   measurementLn,
   measurementLog,
+  measurementLipschitzUnary,
 } from './measurement-arithmetic.js';
 import {
   range,
@@ -5024,6 +5025,10 @@ function evaluateAbs(
   // (`Abs([3,-4]) → [3,4]`).
   if (isTuple(arg))
     return ce.function('Norm', [arg]).evaluate({ numericApproximation });
+  // `Abs(Measurement(v, σ))` is `Measurement(Abs(v), σ)` (see
+  // `measurementLipschitzUnary`).
+  const m = measurementLipschitzUnary(ce, 'Abs', arg);
+  if (m !== undefined) return numericApproximation ? m.N() : m;
   if (isNumber(arg)) {
     const num = arg.numericValue;
     if (typeof num === 'number') return ce.number(Math.abs(num));

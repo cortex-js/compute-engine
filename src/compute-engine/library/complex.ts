@@ -23,6 +23,7 @@ import {
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { neg } from '../numerics/rationals.js';
+import { measurementLipschitzUnary } from './measurement-arithmetic.js';
 
 /**
  * Assumption-based sign fallback for the part extractors
@@ -130,6 +131,11 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         return re > 0 ? 'positive' : 'negative';
       },
       evaluate: (ops, { engine: ce }) => {
+        // `Real(Measurement(v, σ))` is `Measurement(Real(v), σ)`: a numeric
+        // integral of a complex-valued integrand comes back as a complex
+        // Measurement, and its parts must stay extractable.
+        const m = measurementLipschitzUnary(ce, 'Real', ops[0]);
+        if (m !== undefined) return m;
         if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
         // A real value is its own real part: return the operand unchanged so an
@@ -162,6 +168,9 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         return im > 0 ? 'positive' : 'negative';
       },
       evaluate: (ops, { engine: ce }) => {
+        // See `Real`: the imaginary part of a complex Measurement.
+        const m = measurementLipschitzUnary(ce, 'Imaginary', ops[0]);
+        if (m !== undefined) return m;
         if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
         if (typeof op === 'number' || op.im === 0) return ce.Zero;
@@ -281,6 +290,9 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       signature: '(T) -> T where T: number',
       sgn: ([z]) => z.sgn,
       evaluate: (ops, { engine: ce }) => {
+        // See `Real`: the conjugate of a complex Measurement.
+        const m = measurementLipschitzUnary(ce, 'Conjugate', ops[0]);
+        if (m !== undefined) return m;
         if (!isNumber(ops[0])) return undefined;
         const op = ops[0].numericValue;
         if (typeof op === 'number' || op.im === 0) return ops[0];

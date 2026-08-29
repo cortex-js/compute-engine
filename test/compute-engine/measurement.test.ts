@@ -716,3 +716,53 @@ describe('`.abs()` on a Negate head — |−x| = |x|, not −x', () => {
     expect(ce.box(['PlusMinus', 5, -3]).toString()).toBe('PlusMinus(5, 3)');
   });
 });
+
+describe('Measurement — complex-valued numeric integrals', () => {
+  // Regression (found 2026-08-29 by the Fungrim Stage-2 harness): numeric
+  // quadrature read only the REAL part of the integrand, so `∫₀^π e^{ix} dx`
+  // numericized to `0` instead of `2i`. The integrand is now split into its
+  // real and imaginary parts, each integrated, and combined into one complex
+  // Measurement; `Real`/`Imaginary`/`Abs`/`Conjugate` then propagate through
+  // the Measurement so the parts stay extractable.
+  const I = ['Integrate', ['Exp', ['Multiply', 'ImaginaryUnit', 'x']], ['Limits', 'x', 0, 'Pi']];
+  test('∫₀^π e^{ix} dx numericizes to 2i', () => {
+    const m = ce.box(I).N();
+    expect(m.operator).toBe('Measurement');
+    expect(m.op1.re).toBeCloseTo(0, 9);
+    expect(m.op1.im).toBeCloseTo(2, 9);
+  });
+  test('Imaginary, Real and Abs of a complex Measurement', () => {
+    expect(nominal(ce.box(['Imaginary', I]).N())).toBeCloseTo(2, 9);
+    expect(nominal(ce.box(['Real', I]).N())).toBeCloseTo(0, 9);
+    expect(nominal(ce.box(['Abs', I]).N())).toBeCloseTo(2, 9);
+    const c = ce.box(['Conjugate', I]).N();
+    expect(c.operator).toBe('Measurement');
+    expect(c.op1.im).toBeCloseTo(-2, 9);
+  });
+  test('a real integrand still yields a real Measurement', () => {
+    const m = ce.box(['Integrate', ['Sin', 'x'], ['Limits', 'x', 0, 'Pi']]).N();
+    expect(m.operator).toBe('Measurement');
+    expect(isNumber(m.op1) && m.op1.im === 0).toBe(true);
+    expect(nominal(m)).toBeCloseTo(2, 9);
+  });
+  test('NIntegrate of a complex integrand answers a complex number', () => {
+    const r = ce
+      .box(['NIntegrate', ['Function', ['Exp', ['Multiply', 'ImaginaryUnit', 'x']], 'x'], 0, 'Pi'])
+      .evaluate();
+    // Monte-Carlo estimate: loose tolerance.
+    expect(r.re).toBeCloseTo(0, 1);
+    expect(r.im).toBeCloseTo(2, 1);
+  });
+  test('iterated integral of a complex integrand', () => {
+    const m = ce
+      .box([
+        'Integrate',
+        ['Multiply', ['Exp', ['Multiply', 'ImaginaryUnit', 'x']], 'y'],
+        ['Limits', 'x', 0, 'Pi'],
+        ['Limits', 'y', 0, 1],
+      ])
+      .N();
+    expect(m.op1.re).toBeCloseTo(0, 9);
+    expect(m.op1.im).toBeCloseTo(1, 9);
+  });
+});

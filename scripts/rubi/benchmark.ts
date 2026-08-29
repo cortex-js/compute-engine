@@ -64,6 +64,8 @@ const PARAM_ASSIGNMENTS = 2;
 // giant results; this caps the slow-but-not-huge tail too. On expiry the
 // verdict is taken from the evidence gathered so far (see classifyTimeout).
 const VERIFY_BUDGET_MS = 8000;
+// Wall-clock budget for ONE numeric sample point (see `complexAt`).
+const POINT_TIME_LIMIT_MS = 2000;
 
 const KNOWN_CONSTANTS = new Set([
   'ExponentialE',
@@ -137,12 +139,17 @@ function complexAt(
 ): C | null {
   const xv =
     typeof value === 'number' ? value : expr.engine.number(value);
-  // N() respects ce.timeLimit and throws CancellationError when a single
-  // evaluation runs too long (a slow ₂F₁/Appell point); treat that as an
-  // unusable point (null), not a harness error.
+  // Each point runs inside a `withTimeLimit` span and throws
+  // CancellationError when a single evaluation runs too long (a slow
+  // ₂F₁/Appell point); treat that as an unusable point (null), not a harness
+  // error. The span is required: the engine has no ambient time limit (the
+  // `ce.timeLimit` property was retired), so an unwrapped N() is unbounded.
   let v: BoxedExpression;
   try {
-    v = expr.subs({ [x]: xv as any }).N();
+    v = expr.engine.withTimeLimit(
+      { ms: POINT_TIME_LIMIT_MS, label: 'rubi:benchmark:point' },
+      () => expr.subs({ [x]: xv as any }).N()
+    );
   } catch (e) {
     if (e instanceof Error && e.constructor.name === 'CancellationError')
       return null;

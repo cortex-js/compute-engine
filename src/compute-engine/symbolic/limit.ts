@@ -634,12 +634,39 @@ function leadingOrder(
     return terms.length === 1 ? terms[0] : ce.function('Add', terms);
   }
 
-  if (oo(e) && oo(e).length > 0) {
+  // Rewrite INSIDE an argument only under a head that is insensitive to a
+  // dominated additive term there: for these heads `f(x + o(x))` has the same
+  // leading order as `f(x)` (`ln(x+1) ~ ln x`, `(x+1)² ~ x²`, `√(x+1) ~ √x`).
+  // Every other head keeps its argument intact. Under an exponential-class
+  // head the dropped term changes the VALUE, not just a lower order:
+  // `Fibonacci(n+1)/Fibonacci(n)` → φ, `Γ(x+1)/(x·Γ(x))` → 1, `(1+1/x)^x`
+  // → e; rewriting `n+1` to `n` inside those made each ratio collapse to 1
+  // (or `x^x/x^x`) — a wrong finite answer. An unknown function `f(n+1)` is
+  // in the same class: nothing is known about how fast it varies.
+  if (op === 'Power') {
+    const expo = o2(e);
+    if (expo.has(x)) return e;
+    return ce.function('Power', [leadingOrder(o1(e), x, ce, depth + 1), expo]);
+  }
+  if (LEADING_ORDER_TRANSPARENT_HEADS.has(op) && oo(e) && oo(e).length > 0) {
     const newOps = oo(e).map((o) => leadingOrder(o, x, ce, depth + 1));
     return ce.function(op, newOps);
   }
   return e;
 }
+
+/** Heads whose argument may be replaced by its leading order — see
+ * `leadingOrder`. `Add` and `Power` are handled inline there. */
+const LEADING_ORDER_TRANSPARENT_HEADS = new Set([
+  'Multiply',
+  'Divide',
+  'Negate',
+  'Ln',
+  'Log',
+  'Sqrt',
+  'Root',
+  'Abs',
+]);
 
 /** From a list of terms, return those of maximal growth as x → +∞ (ties kept). */
 function dominantTerms(
