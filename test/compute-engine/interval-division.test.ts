@@ -1,5 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import {
+  negInterval,
+  absInterval,
+  powInterval,
   recipInterval,
   divIntervals,
   powIntervalSigned,
@@ -246,11 +249,38 @@ describe('INTERVAL DIVISION — kernel boundary cases (the review list)', () => 
     }
   });
 
+  it('the reciprocal of an unbounded divisor is an OPEN 0 only for a finite-tier divisor', () => {
+    // A `real` divisor's +∞ endpoint means "unbounded": 1/x > 0 always,
+    // so the 0 is open. A `non_finite_number` divisor may BE +∞, whose
+    // reciprocal is exactly 0: the 0 must be closed (the flag is the
+    // `finite` mark the reader sets for finite tiers).
+    const fin = recipInterval({ lo: 3, hi: Infinity, finite: true })!;
+    expect(fin.lo).toBe(0);
+    expect(fin.loOpen).toBe(true);
+    const ext = recipInterval({ lo: 3, hi: Infinity })!;
+    expect(ext.lo).toBe(0);
+    expect(ext.loOpen).toBeUndefined();
+  });
+
+  it('the finite mark survives the reciprocal, so 0 / x is exactly 0 (kernel)', () => {
+    // `divIntervals` is recip then mul; without the mark carried through
+    // the reciprocal the `0 × unbounded` tightening never fired for a
+    // quotient (dual-review catch).
+    const x = { lo: 0, hi: 5, loOpen: true, finite: true };
+    expect(recipInterval(x)?.finite).toBe(true);
+    const q = divIntervals({ lo: 0, hi: 0, finite: true }, x)!;
+    expect(q).toMatchObject({ lo: 0, hi: 0 });
+    // and through negate / abs / power
+    expect(negInterval(x).finite).toBe(true);
+    expect(absInterval({ lo: -3, hi: 2, finite: true }).finite).toBe(true);
+    expect(powInterval({ lo: -3, hi: 2, finite: true }, 2)?.finite).toBe(true);
+  });
+
   it('open-at-zero limits and infinite endpoints, all four shapes', () => {
     expect(recipInterval(iv(0, 1, true))).toEqual({ lo: 1, hi: Infinity });
     expect(recipInterval(iv(-1, 0, false, true))).toEqual({ lo: -Infinity, hi: -1 });
-    expect(recipInterval(iv(0, Infinity, true))).toEqual({ lo: 0, hi: Infinity, loOpen: true });
-    expect(recipInterval(iv(-Infinity, 0, false, true))).toEqual({ lo: -Infinity, hi: 0, hiOpen: true });
+    expect(recipInterval({ ...iv(0, Infinity, true), finite: true })).toMatchObject({ lo: 0, hi: Infinity, loOpen: true });
+    expect(recipInterval({ ...iv(-Infinity, 0, false, true), finite: true })).toMatchObject({ lo: -Infinity, hi: 0, hiOpen: true });
     // A closed zero admits zero: no reciprocal.
     expect(recipInterval(iv(0, 1))).toBeUndefined();
     expect(recipInterval(iv(-1, 1))).toBeUndefined();
@@ -267,8 +297,10 @@ describe('INTERVAL DIVISION — kernel boundary cases (the review list)', () => 
   });
 
   it('the composition needs no signed zero: the open 0 corner never attains', () => {
-    // (-∞, 0) recip → (-∞, 0 open); times [1, 2] → (-∞, 0 open).
-    const q = divIntervals(iv(1, 2), iv(-Infinity, 0, false, true))!;
+    // A FINITE-tier (-∞, 0) recip → (-∞, 0 open); times [1, 2] → (-∞, 0 open).
+    // (Without the finite mark the divisor may BE -∞ and the 0 is closed —
+    // see the finite-only gate pin above.)
+    const q = divIntervals(iv(1, 2), { ...iv(-Infinity, 0, false, true), finite: true })!;
     expect(q.hi).toBe(0);
     expect(q.hiOpen).toBe(true);
     expect(q.lo).toBe(-Infinity);

@@ -1051,7 +1051,20 @@ representation, and (b) can be added as a refinement once the
 `non_finite_number` endpoint story is exercised elsewhere. Same
 dual-spec-review flow as the two prior rounds.
 
-### Interval kernel: tighten with finite-only tiers (OPEN, small — UNBLOCKED 2026-08-28 by lattice-flip Phase 1)
+### Interval kernel: tighten with finite-only tiers (SHIPPED 2026-08-29 — the one recoverable claim was the `0 · unbounded` corner)
+
+Shipped: `Interval` carries a `finite` flag, set by `intervalOfType` for
+the finite-only tiers and their ranges (a union is finite iff every
+member is; an intersection iff any is), and `mulIntervals` answers the
+`0 × unbounded` corner as the exact 0 when the unbounded operand is
+finite-tier, instead of dropping it as the `0 · ∞` form — `0 · z` for
+`z: real` types `real<0..0>`. Measured before implementing: this was the
+ONLY claim the pre-flip model gave up. The other case the entry
+anticipated — `∞ + (−∞)` at `addIntervals` — is not a loss at all: a sum
+of two opposite unbounded finite ranges genuinely covers the line, so no
+bound was ever recoverable there. Pinned in
+`test/compute-engine/interval-result-types.test.ts`. The original entry
+follows for the record.
 
 The kernel was written under the pre-flip lattice, where a bare `real`
 admits `±∞`, so `intervalOfType('real')` reads as the FULL extended line

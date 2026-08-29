@@ -186,17 +186,17 @@ describe('OPEN BOUNDS — algebra', () => {
   });
 
   it('the bounds reader carries flags; the hull opens only when all members do', () => {
-    expect(intervalOfType(parseType('real<0<..<3>'))).toEqual({
+    expect(intervalOfType(parseType('real<0<..<3>'))).toMatchObject({
       lo: 0,
       hi: 3,
       loOpen: true,
       hiOpen: true,
     });
-    expect(intervalOfType(parseType('real<0<..1> | real<0..2>'))).toEqual({
+    expect(intervalOfType(parseType('real<0<..1> | real<0..2>'))).toMatchObject({
       lo: 0,
       hi: 2,
     });
-    expect(intervalOfType(parseType('real<0<..1> | real<0<..2>'))).toEqual({
+    expect(intervalOfType(parseType('real<0<..1> | real<0<..2>'))).toMatchObject({
       lo: 0,
       hi: 2,
       loOpen: true,

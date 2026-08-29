@@ -2,6 +2,29 @@
 
 ### New Features
 
+- **Zero times an unbounded real is exactly zero in the type.** The interval
+  arithmetic behind result types treats an infinite endpoint of a `real`-,
+  `rational`- or `integer`-typed range as "unbounded on that side" rather
+  than as a value that may be infinite — under the finite-by-default
+  lattice no such value exists — so `0 · z` with `z: real` now types the
+  singleton `real<0..0>` instead of the bare `real`, and a range that
+  contains zero keeps its zero corner when multiplied by an unbounded
+  finite range. An operand typed `non_finite_number` (or a union admitting
+  it) keeps the conservative answer, since `0 · ∞` is genuinely
+  indeterminate there.
+
+### Bug Fixes
+
+- **The reciprocal of an unbounded non-finite divisor no longer excludes
+  zero.** The kernel's reciprocal marked the resulting zero endpoint OPEN
+  for every unbounded divisor (`1/x` for `x ≥ 3` is in `(0, 1/3]`), which
+  is right for a `real` divisor — no real IS infinite — but wrong for a
+  divisor typed `non_finite_number`, which may be `+oo` itself, whose
+  reciprocal is exactly `0`. The zero is now open only for a finite-tier
+  divisor. (Not reachable through the `Divide` handler, whose non-finite
+  arm answers `1/±∞` directly; found and fixed at the kernel.)
+
+
 - **Quotients and negative powers carry computed bounds.** The interval
   arithmetic behind result types now covers `Divide` and `Power` with a
   negative literal integer exponent: with `x: real<2<..<3>` and

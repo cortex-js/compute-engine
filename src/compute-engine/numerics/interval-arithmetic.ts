@@ -43,6 +43,15 @@ export type Interval = {
    * `docs/plans/2026-08-28-open-bounds-in-ranged-types.md` §3.5. */
   loOpen?: boolean;
   hiOpen?: boolean;
+  /** Every member of the interval is a FINITE number: an infinite endpoint
+   * then means only "unbounded on that side", never a value that IS
+   * `±∞`. Set by `intervalOfType` for the finite-only tiers
+   * (`integer`/`rational`/`real` and their ranges — bare tiers are finite
+   * under the finite-by-default lattice); absent for `non_finite_number`
+   * and for anything mixing it in. Lets `mulIntervals` answer the
+   * `0 · unbounded` corner exactly (`0 · x = 0` for every finite `x`)
+   * instead of dropping it as the `0 · ∞` indeterminate form. */
+  finite?: boolean;
 };
 
 const FULL: Interval = { lo: -Infinity, hi: Infinity };
@@ -107,18 +116,24 @@ export function intervalOfType(
   t: Type,
   seen?: Set<object>
 ): Interval | undefined {
-  if (typeof t === 'string')
-    return NAN_FREE_REAL_TIERS.has(t) ? FULL : undefined;
+  if (typeof t === 'string') {
+    if (!NAN_FREE_REAL_TIERS.has(t)) return undefined;
+    return t === 'non_finite_number' ? { ...FULL } : { ...FULL, finite: true };
+  }
   switch (t.kind) {
-    case 'value':
-      return typeof t.value === 'number' && !Number.isNaN(t.value)
-        ? { lo: t.value, hi: t.value }
-        : undefined;
+    case 'value': {
+      if (typeof t.value !== 'number' || Number.isNaN(t.value)) return undefined;
+      const iv: Interval = { lo: t.value, hi: t.value };
+      // A finite literal is finite; `±∞` value types are not.
+      if (Number.isFinite(t.value)) iv.finite = true;
+      return iv;
+    }
     case 'numeric': {
       if (!NAN_FREE_REAL_TIERS.has(t.type)) return undefined;
       const iv: Interval = { lo: t.lower ?? -Infinity, hi: t.upper ?? Infinity };
       if (t.lowerOpen) iv.loOpen = true;
       if (t.upperOpen) iv.hiOpen = true;
+      if (t.type !== 'non_finite_number') iv.finite = true;
       return iv;
     }
     case 'reference': {
@@ -135,10 +150,12 @@ export function intervalOfType(
       // Meet: at an equal endpoint OPEN wins.
       let loOpen = false;
       let hiOpen = false;
+      let anyFinite = false; // a subset of a finite member is finite
       for (const m of t.types) {
         const b = intervalOfType(m, seen);
         if (b === undefined) continue;
         answered = true;
+        if (b.finite === true) anyFinite = true;
         if (b.lo > lo) {
           lo = b.lo;
           loOpen = b.loOpen === true;
@@ -150,7 +167,9 @@ export function intervalOfType(
       }
       if (!answered || lo > hi) return undefined;
       if (lo === hi && (loOpen || hiOpen)) return undefined;
-      return withFlags({ lo, hi }, loOpen, hiOpen);
+      const r = withFlags({ lo, hi }, loOpen, hiOpen);
+      if (anyFinite) r.finite = true;
+      return r;
     }
     case 'union': {
       // Hull: an endpoint is open only if EVERY member reaching it is open.
@@ -158,9 +177,11 @@ export function intervalOfType(
       let hi = -Infinity;
       let loOpen = true;
       let hiOpen = true;
+      let allFinite = true; // a union is finite only if EVERY member is
       for (const m of t.types) {
         const b = intervalOfType(m, seen);
         if (b === undefined) return undefined;
+        if (b.finite !== true) allFinite = false;
         if (b.lo < lo) {
           lo = b.lo;
           loOpen = b.loOpen === true;
@@ -170,7 +191,10 @@ export function intervalOfType(
           hiOpen = b.hiOpen === true;
         } else if (b.hi === hi && !b.hiOpen) hiOpen = false;
       }
-      return lo > hi ? undefined : withFlags({ lo, hi }, loOpen, hiOpen);
+      if (lo > hi) return undefined;
+      const r = withFlags({ lo, hi }, loOpen, hiOpen);
+      if (allFinite) r.finite = true;
+      return r;
     }
     default:
       return undefined;
@@ -366,15 +390,31 @@ export function addIntervals(a: Interval, b: Interval): Interval {
     lo: Number.isNaN(lo) ? -Infinity : lo,
     hi: Number.isNaN(hi) ? Infinity : hi,
   };
-  return withFlags(
+  const out = withFlags(
     r,
     (a.loOpen || b.loOpen) === true && sumExact(a.lo, b.lo, lo),
     (a.hiOpen || b.hiOpen) === true && sumExact(a.hi, b.hi, hi)
   );
+  if (a.finite === true && b.finite === true) out.finite = true;
+  return out;
 }
 
 export function negInterval(a: Interval): Interval {
-  return withFlags({ lo: -a.hi, hi: -a.lo }, a.hiOpen === true, a.loOpen === true); // exact
+  return keepFinite(
+    withFlags({ lo: -a.hi, hi: -a.lo }, a.hiOpen === true, a.loOpen === true), // exact
+    a
+  );
+}
+
+/** Carry the `finite` mark from a source interval onto a derived one:
+ * negation, magnitude, an integer power and the reciprocal of a nonzero
+ * finite value are all finite. A derived interval without the mark is
+ * only a LOST tightening downstream (`0 / x` could not answer the exact 0
+ * while the reciprocal forgot the divisor was finite — dual-review
+ * catch), never unsound. */
+function keepFinite(r: Interval, ...sources: Interval[]): Interval {
+  if (sources.every((s) => s.finite === true)) r.finite = true;
+  return r;
 }
 
 export function mulIntervals(a: Interval, b: Interval): Interval {
@@ -414,30 +454,44 @@ export function mulIntervals(a: Interval, b: Interval): Interval {
     [a.hi, a.hiOpen === true, b.hi, b.hiOpen === true],
   ] as const) {
     const open = cornerOpen(x, xo, y, yo);
-    const cLo = dirProd(x, y, -1);
+    // `0 · ±∞` is NaN in double arithmetic, but when the infinite endpoint
+    // belongs to a FINITE-tier operand it only means "unbounded" — no value
+    // there IS infinite — so `0 · x` is exactly 0 for every admitted `x`.
+    // Take the corner as the exact 0 instead of dropping it (the
+    // finite-only tightening, ROADMAP "Interval kernel: tighten with
+    // finite-only tiers"). An operand that may BE infinite keeps the drop.
+    const zeroTimesUnbounded =
+      (x === 0 && !Number.isFinite(y) && b.finite === true) ||
+      (y === 0 && !Number.isFinite(x) && a.finite === true);
+    const cLo = zeroTimesUnbounded ? 0 : dirProd(x, y, -1);
     if (!Number.isNaN(cLo)) {
       loSeen = true;
-      const o = open && prodExact(x, y, cLo);
+      // The synthetic 0 corner is exact by construction; `prodExact(0, ∞)`
+      // would see `0 · ∞ = NaN` and wrongly refuse it, CLOSING an open zero
+      // (`(0, 1] × [1, ∞)` must stay open at 0 — dual-review catch).
+      const o = open && (zeroTimesUnbounded || prodExact(x, y, cLo));
       if (cLo < lo) {
         lo = cLo;
         loOpen = o;
       } else if (cLo === lo && !o) loOpen = false;
     }
-    const cHi = dirProd(x, y, 1);
+    const cHi = zeroTimesUnbounded ? 0 : dirProd(x, y, 1);
     if (!Number.isNaN(cHi)) {
       hiSeen = true;
-      const o = open && prodExact(x, y, cHi);
+      const o = open && (zeroTimesUnbounded || prodExact(x, y, cHi));
       if (cHi > hi) {
         hi = cHi;
         hiOpen = o;
       } else if (cHi === hi && !o) hiOpen = false;
     }
   }
-  return withFlags(
+  const r = withFlags(
     { lo: loSeen ? lo : -Infinity, hi: hiSeen ? hi : Infinity },
     loSeen && loOpen,
     hiSeen && hiOpen
   );
+  if (a.finite === true && b.finite === true) r.finite = true;
+  return r;
 }
 
 /** Does the interval EXCLUDE zero — the precondition for a reciprocal?
@@ -458,11 +512,11 @@ export function intervalExcludesZero(b: Interval): boolean {
  * reciprocal (`dirRecip` is never called with 0):
  * - a divisor endpoint AT zero (open, by the precondition) maps to the
  *   unbounded side: `(0, h]` → `[1/h, +∞)`, `[l, 0)` → `(−∞, 1/l]`;
- * - an infinite divisor endpoint maps to an OPEN 0: `[l, +∞)` → `(0, 1/l]`.
- *   That openness is a hard-coded limit, sound because the divisor's
- *   tier is finite-only under the post-flip lattice (no `real` value IS
- *   `±∞`, so `1/x` is never exactly 0); an extension of interval
- *   attachment to a tier that attains `±∞` must revisit it.
+ * - an infinite divisor endpoint maps to 0 — OPEN when the divisor is
+ *   FINITE-tier (`b.finite`: its infinite endpoint means "unbounded", and
+ *   `1/x` is never exactly 0), CLOSED otherwise (a `non_finite_number`
+ *   divisor may BE `±∞`, whose reciprocal is exactly 0): `[l, +∞)` →
+ *   `(0, 1/l]` for a `real` divisor.
  * A finite nonzero endpoint follows the general attainability rule
  * (`docs/plans/2026-08-28-open-bounds-in-ranged-types.md` §3.5): open iff
  * the divisor endpoint is open AND the reciprocal was exact (a stepped
@@ -474,8 +528,11 @@ export function recipInterval(b: Interval): Interval | undefined {
   let lo: number;
   let loOpen: boolean;
   if (b.hi === Infinity) {
+    // The 0 is OPEN only when the divisor is FINITE-tier (its infinite
+    // endpoint means "unbounded", and 1/x is never exactly 0). A divisor
+    // that may BE +∞ (`non_finite_number`) attains 1/∞ = 0: closed.
     lo = 0;
-    loOpen = true;
+    loOpen = b.finite === true;
   } else if (b.hi === 0) {
     lo = -Infinity;
     loOpen = false;
@@ -492,7 +549,7 @@ export function recipInterval(b: Interval): Interval | undefined {
   let hiOpen: boolean;
   if (b.lo === -Infinity) {
     hi = 0;
-    hiOpen = true;
+    hiOpen = b.finite === true;
   } else if (b.lo === 0) {
     hi = Infinity;
     hiOpen = false;
@@ -500,7 +557,7 @@ export function recipInterval(b: Interval): Interval | undefined {
     hi = dirRecip(b.lo, 1);
     hiOpen = b.loOpen === true && isPowerOfTwo(b.lo);
   }
-  return withFlags({ lo, hi }, loOpen, hiOpen);
+  return keepFinite(withFlags({ lo, hi }, loOpen, hiOpen), b);
 }
 
 /** Quotient interval: `a / b = a × (1/b)`, through `mulIntervals`, which
@@ -518,6 +575,10 @@ export function divIntervals(a: Interval, b: Interval): Interval | undefined {
 export function absInterval(a: Interval): Interval {
   if (a.lo >= 0) return a;
   if (a.hi <= 0) return negInterval(a);
+  return keepFinite(absCrossingZero(a), a);
+}
+
+function absCrossingZero(a: Interval): Interval {
   // Crosses zero: the lower bound 0 is an INTERIOR point of the operand —
   // always attained, so always closed. The upper bound is attained iff
   // the winning endpoint is; a tie between |lo| and hi is closed if
@@ -535,6 +596,11 @@ export function absInterval(a: Interval): Interval {
  * powers are computed by repeated directed multiplication, never
  * `Math.pow`. Negative exponents go through `powIntervalSigned`. */
 export function powInterval(a: Interval, n: number): Interval | undefined {
+  const r = powIntervalRaw(a, n);
+  return r === undefined ? r : keepFinite(r, a);
+}
+
+function powIntervalRaw(a: Interval, n: number): Interval | undefined {
   if (!Number.isInteger(n) || n < 1) return undefined;
   if (n === 1) return a;
   // Monotone arms: one candidate per side; openness carries iff the

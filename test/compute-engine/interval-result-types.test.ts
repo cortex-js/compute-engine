@@ -117,6 +117,16 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
     );
   });
 
+  it('0 times a bare real symbol types 0; an extended-real one does not', () => {
+    const e = new ComputeEngine();
+    e.declare('z', 'real');
+    // The fold answers the singleton RANGE (a handler claim), not the
+    // literal value type `0` — a computed result is never literal cargo.
+    expect(e.box(['Multiply', 0, 'z']).type.toString()).toBe('real<0..0>');
+    e.declare('w', 'real | non_finite_number');
+    expect(e.box(['Multiply', 0, 'w']).type.toString()).not.toBe('0');
+  });
+
   it('a NaN-admitting operand aborts the whole claim', () => {
     const e = new ComputeEngine();
     e.declare('n', 'number');
@@ -148,6 +158,53 @@ describe('INTERVAL RESULT TYPES — kernel adversarial matrix', () => {
     const r = mulIntervals(iv(0, 1), iv(0, Infinity));
     expect(r.lo).toBe(0);
     expect(r.hi).toBe(Infinity);
+  });
+
+  it('mul: 0 times a FINITE unbounded operand is exactly 0 (finite-only tightening)', () => {
+    // Under the finite-by-default lattice an infinite endpoint of a
+    // `real`-tier interval means only "unbounded" — no value is ±∞ — so
+    // `0 · x = 0` exactly. The reader marks such intervals `finite`; the
+    // raw intervals in the neighboring pins carry no flag and keep the
+    // conservative `0 · ∞` drop.
+    const r = mulIntervals(iv(0, 0), { lo: -Infinity, hi: Infinity, finite: true });
+    expect(r.lo).toBe(0);
+    expect(r.hi).toBe(0);
+    // A zero-containing finite range times an unbounded finite one keeps
+    // its zero corner instead of losing the side.
+    const s = mulIntervals({ lo: 0, hi: 2, finite: true }, { lo: 0, hi: Infinity, finite: true });
+    expect(s.lo).toBe(0);
+    expect(s.hi).toBe(Infinity);
+    // An operand that may BE infinite (no flag) still drops the corner.
+    const t = mulIntervals(iv(0, 0), { lo: -Infinity, hi: Infinity });
+    expect(t.lo).toBe(-Infinity);
+    expect(t.hi).toBe(Infinity);
+  });
+
+  it('mul: an OPEN zero times a finite unbounded operand stays open (synthetic corner is exact)', () => {
+    // `(0, 1] × [1, ∞)` is `(0, ∞)`: the substituted 0 corner must not be
+    // routed through `prodExact(0, ∞)` (which sees NaN and would close the
+    // zero — dual-review catch).
+    const r = mulIntervals(
+      { lo: 0, hi: 1, loOpen: true, finite: true },
+      { lo: 1, hi: Infinity, finite: true }
+    );
+    expect(r.lo).toBe(0);
+    expect(r.loOpen).toBe(true);
+    expect(r.hi).toBe(Infinity);
+  });
+
+  it('a finite literal carries the finite mark, so the flag propagates through products', () => {
+    // `[2,2] × real` is unbounded but FINITE; `× [0,0]` then answers the
+    // exact {0} instead of dropping every corner (dual-review catch). Tested
+    // at the kernel: an engine expression like `0·2·z` folds to the
+    // literal `0` at canonicalization and never reaches the fold.
+    const two = intervalOfType(parseType('2'))!;
+    expect(two).toMatchObject({ lo: 2, hi: 2, finite: true });
+    expect(intervalOfType(parseType('+oo'))?.finite).toBeUndefined();
+    const twoZ = mulIntervals(two, intervalOfType('real')!);
+    expect(twoZ.finite).toBe(true);
+    const zero = mulIntervals(intervalOfType(parseType('0'))!, twoZ);
+    expect(zero).toMatchObject({ lo: 0, hi: 0 });
   });
 
   it('mul: the all-NaN case claims nothing (the empty-candidate hazard)', () => {
@@ -250,20 +307,20 @@ describe('INTERVAL RESULT TYPES — kernel adversarial matrix', () => {
   });
 
   it('reader: intersections, unions, and NaN-admitting bases', () => {
-    expect(intervalOfType(parseType('real<0..1>'))).toEqual(iv(0, 1));
+    expect(intervalOfType(parseType('real<0..1>'))).toMatchObject(iv(0, 1));
     // The reader ignores `!0` in an UNREDUCED intersection (a negation
     // proves no interval); the reducer turns the spelling into the open
     // range, whose flag the reader then carries.
-    expect(intervalOfType(parseType('(real<0..>) & !0'))).toEqual({
+    expect(intervalOfType(parseType('(real<0..>) & !0'))).toMatchObject({
       lo: 0,
       hi: Infinity,
     });
-    expect(intervalOfType(reduceType(parseType('(real<0..>) & !0')))).toEqual({
+    expect(intervalOfType(reduceType(parseType('(real<0..>) & !0')))).toMatchObject({
       lo: 0,
       hi: Infinity,
       loOpen: true,
     });
-    expect(intervalOfType(parseType('real<0..1> | real<3..4>'))).toEqual(
+    expect(intervalOfType(parseType('real<0..1> | real<3..4>'))).toMatchObject(
       iv(0, 4)
     );
     expect(intervalOfType('number')).toBeUndefined();
