@@ -1,15 +1,32 @@
 {
-  "generated": "2026-07-10T18:36:03.984Z",
+  "generated": "2026-08-29T16:33:11.485Z",
   "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
   "stage1": {
     "total": 2551,
-    "ok": 2551,
-    "boxError": 0,
+    "ok": 2547,
+    "boxError": 4,
     "unknownSymbol": 0,
     "timeout": 0,
-    "passRate": 1,
-    "elapsedMs": 1314,
-    "failureBuckets": [],
+    "passRate": 0.9984,
+    "elapsedMs": 3499,
+    "failureBuckets": [
+      {
+        "error": "[\"Error\",[\"ErrorCode\",\"'expected-function'\",\"'chi'\",\"'integer'\"],\"'chi'\"]",
+        "count": 3,
+        "ids": [
+          "3ab92d",
+          "4c3678",
+          "f4de66"
+        ]
+      },
+      {
+        "error": "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'number'\",\"'function'\"],\"chi\"]",
+        "count": 1,
+        "ids": [
+          "288207"
+        ]
+      }
+    ],
     "perTopic": {
       "agm": {
         "total": 42,
@@ -121,9 +138,14 @@
       },
       "dirichlet": {
         "total": 64,
-        "ok": 64,
-        "passRate": 1,
-        "failures": []
+        "ok": 60,
+        "passRate": 0.9375,
+        "failures": [
+          "288207",
+          "3ab92d",
+          "4c3678",
+          "f4de66"
+        ]
       },
       "eisenstein": {
         "total": 61,
@@ -354,7 +376,41 @@
         "failures": []
       }
     },
-    "failures": []
+    "failures": [
+      {
+        "id": "288207",
+        "topic": "dirichlet",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'number'\",\"'function'\"],\"chi\"]"
+        ]
+      },
+      {
+        "id": "3ab92d",
+        "topic": "dirichlet",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'expected-function'\",\"'chi'\",\"'integer'\"],\"'chi'\"]"
+        ]
+      },
+      {
+        "id": "4c3678",
+        "topic": "dirichlet",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'expected-function'\",\"'chi'\",\"'integer'\"],\"'chi'\"]"
+        ]
+      },
+      {
+        "id": "f4de66",
+        "topic": "dirichlet",
+        "outcome": "box-error",
+        "errors": [
+          "[\"Error\",[\"ErrorCode\",\"'expected-function'\",\"'chi'\",\"'integer'\"],\"'chi'\"]",
+          "[\"Error\",[\"ErrorCode\",\"'expected-function'\",\"'chi'\",\"'integer'\"],\"'chi'\"]"
+        ]
+      }
+    ]
   },
   "stage2": {
     "seed": 42,

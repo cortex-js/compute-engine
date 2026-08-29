@@ -220,17 +220,29 @@ export function inferType(dom: unknown): string {
  * Infer a type for each variable of an entry from its `Element` conjuncts
  * (assumptions and formula-internal indexing sets alike). Variables without
  * an Element conjunct default to `complex`.
+ *
+ * A variable that the entry APPLIES — one that appears in head position,
+ * such as `chi` in `chi(m)` (a Dirichlet character) or `f` in `f(z)` — is
+ * declared `function`, and this wins over any Element conjunct. The engine
+ * (strict mode) reports `expected-function` when a symbol declared with a
+ * non-function type is applied, so declaring such a variable `complex` makes
+ * the whole entry fail Stage 1. A `DirichletGroup` membership, for example,
+ * falls through `inferType` to `complex`, yet `chi` is a function.
  */
 export function variableTypes(e: Entry): Record<string, string> {
   const types: Record<string, string> = {};
+  const applied = new Set<string>();
+  const vars = new Set(e.variables);
   const walk = (x: unknown): void => {
     if (!Array.isArray(x)) return;
+    if (typeof x[0] === 'string' && vars.has(x[0])) applied.add(x[0]);
     if (x[0] === 'Element' && typeof x[1] === 'string' && x.length >= 3)
       types[x[1]] ??= inferType(x[2]);
     for (const y of x) walk(y);
   };
   walk(e.assumptions);
   walk(e.formula);
+  for (const v of applied) types[v] = 'function';
   return types;
 }
 

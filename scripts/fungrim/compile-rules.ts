@@ -1339,6 +1339,13 @@ function findNumericSeed(
     if (guardDepth[i] === -1 && !closures[i](sub)) return null;
   if (vars.length === 0) return {};
 
+  // A variable the entry APPLIES (`chi` in `chi(m)`) is typed `function` by
+  // `variableTypes` in `load.ts`. Every candidate below is a number literal,
+  // and a number substituted for a function head is an `expected-function`
+  // error on every branch, so numeric backtracking cannot succeed: decline
+  // instead of burning the guard budget on instantiations that always fail.
+  if (vars.some((v) => seedTypes[v] === 'function')) return null;
+
   const candidates = vars.map((v) =>
     seedTypes[v] === 'integer'
       ? INTEGER_CANDIDATES
