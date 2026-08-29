@@ -4,7 +4,9 @@ import { flatten } from './flatten.js';
 import { order, sortAddTerms } from './order.js';
 import { Type } from '../../common/type/types.js';
 import {
+  broadcastResultType,
   collectionElementType,
+  resolveTypeAlias,
   stripNumericRanges,
   widen,
 } from '../../common/type/utils.js';
@@ -421,6 +423,23 @@ export function absorbScalarsIntoCells(
   return { kind: 'indexed_collection', elements: cell };
 }
 
+/** The tuple ELEMENT type of `x` when `x` is statically a list of points —
+ *  a `list`/`indexed_collection` whose element type is a tuple — or
+ *  `undefined`. The type must be DEFINITELY a rank-1 list: a union with a
+ *  scalar branch (`number | list<tuple<…>>`) is not one, since that branch
+ *  produces no list at run time. A literal point list carries a length
+ *  (`list<tuple<integer, integer>^2>`); it qualifies like a dimensionless
+ *  one, which is why this does not use `broadcastCollectionElementType`
+ *  (that helper leaves every dimensioned list to tensor typing). */
+function pointListElementType(x: Expression): Type | undefined {
+  const t = resolveTypeAlias(x.type.type);
+  if (typeof t === 'string') return undefined;
+  if (t.kind !== 'list' && t.kind !== 'indexed_collection') return undefined;
+  if (t.kind === 'list' && (t.dimensions?.length ?? 0) > 1) return undefined;
+  const elt = t.elements;
+  return typeof elt !== 'string' && elt.kind === 'tuple' ? elt : undefined;
+}
+
 export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   if (args.length === 0) return 'integer'; // = 0
   if (args.length === 1) return args[0].type;
@@ -433,8 +452,38 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // COULD-semantics (`couldBeNumericTuple`): a tuple whose elements type
   // `unknown` (e.g. `(S(x,y,0), S(x,y,1))` with `S: (…) -> unknown`) is still
   // statically a tuple, so its sums keep a tuple type too (Tycho item 30).
-  if (args.some((x) => couldBeNumericTuple(x)))
+  if (args.some((x) => couldBeNumericTuple(x))) {
+    // A point BROADCAST over a list of points: `[(0,0),(3,4)] + (1,2)` adds
+    // the point to every element, so the sum is a list of points, not the
+    // union `list<tuple<…>> | tuple<…>` the widen below would report. That
+    // union is not merely loose: a consumer that routes on the type — the
+    // `PointX`/`PointY` lowering of the JavaScript compile target — reads a
+    // non-list type as ONE point and indexes the list's first element
+    // (Tycho item 234). The result keeps the list kind and widens the point's
+    // component types with the list's element tuple. Only a list whose
+    // ELEMENT type is provably a tuple qualifies: a list of scalars plus a
+    // point is a per-element `incompatible-type` error in the value path
+    // and keeps the honest union.
+    const pointLists = args.filter(
+      (x) => !couldBeNumericTuple(x) && pointListElementType(x) !== undefined
+    );
+    if (
+      pointLists.length > 0 &&
+      args.every(
+        (x) => couldBeNumericTuple(x) || pointListElementType(x) !== undefined
+      )
+    )
+      return broadcastResultType(
+        widen(
+          ...args.map((x) =>
+            stripNumericRanges(
+              couldBeNumericTuple(x) ? x.type.type : pointListElementType(x)!
+            )
+          )
+        )
+      );
     return widen(...args.map((x) => stripNumericRanges(x.type.type)));
+  }
   // Element-wise sum of a single tensor (vector/matrix) with scalars keeps the
   // tensor's shape/type. The list-broadcast wrapper is skip-listed for tensor
   // Add (addTensors handles the value), so the honest list type must come from

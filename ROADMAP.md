@@ -204,6 +204,274 @@ deliberately left out of that change.
   from an `!x.isFinite` test.
 
 
+### Doc-sweep triage (2026-08-29)
+
+- **`Infinity^Infinity` canonicalizes to `~oo` where the direction is
+  knowable.** `(+∞)^(+∞)` has a well-defined positive direction, so `+oo`
+  is the sharper answer; the engine currently answers the unsigned `~oo`
+  (defensible only where the direction is genuinely lost, as in
+  `(-∞)^∞`). Value-level canonicalization in the `Power` rules; measured
+  2026-08-29 during the documentation sweep.
+
+Found by checking published examples and reference prose against the engine,
+closing out the doc sweeps of the numeric-lattice migration. Each item was
+measured on the main tree at that date. The items the same round FIXED —
+`Count`'s dishonest `integer` result, the `(number)` carriers on
+`Totient`/`Divides`, and `Which`'s odd-arity operand count — are not listed
+here.
+
+- **A compiled pole passed a `non_finite_number` clause guard that the
+  interpreter refuses** (RESOLVED BY DECLINE 2026-08-29; the compilability
+  it cost is still OPEN, below). Measured on the clause set
+  `g(a: non_finite_number) = 1; g(x: number) = 0`: compiled `g(1 / w)` at
+  `w = 0` answered `1`, the interpreter answers `0`. The cause is the pole
+  encoding, which keeps a pole's magnitude and drops its direction: the
+  interpreter's `1 / 0` is the unsigned `~oo`, which types `infinity` and is
+  NOT below `non_finite_number`, while compiled `1 / 0` is the JS
+  `Infinity`, which satisfied the emitted guard `typeof a === "number" &&
+  !Number.isFinite(a) && !Number.isNaN(a)`. The PRODUCED-value route is the
+  only one that diverged: a `~oo` handed in as an ARGUMENT across the
+  interpreter→JS boundary arrives as `NaN` (its `valueOf()` is the string
+  `~oo`) and failed the guard as it should.
+
+  A guard over a JS number cannot recover the dropped direction, so
+  `non_finite_number` now joins `infinity` and `nan` in the §8
+  whole-function decline: `jsClauseParamGuard` (`src/compute-engine/
+  compilation/base-compiler.ts`) returns `undefined` for it, the clause set
+  runs interpreted, and the two routes agree again. Pinned in
+  `test/compute-engine/multi-clause-compile.test.ts`. The value-literal
+  `+oo`/`-oo` parameter guards are untouched — they test `a === Infinity`,
+  which the boundary route satisfies exactly.
+
+  STILL OPEN: the decline is a fail-closed workaround, not the fix. A clause
+  set that dispatches on `+∞`/`−∞` no longer compiles at all, which is a real
+  loss of coverage. Restoring compilability needs a ruling on how a compiled
+  pole should be ENCODED — whether a produced `1 / 0` keeps a direction the
+  target can test, or whether the compiler must refuse to fold a pole into a
+  plain JS number — not a better guard over the current encoding.
+- **An Epsil effects violation is swallowed with zero diagnostics.** A
+  function whose body writes to a binding of the ENCLOSING call needs the
+  `scope` effect declared. When it is missing, the inner `DefineFunction`
+  evaluates to `Error(ErrorCode("incompatible-type", "non-scope effects
+  (writes outside a function requires a declared `scope` effect)", "scope
+  effects"))` — raised at `src/compute-engine/boxed-expression/
+  effects-inference.ts:193` — but the program reports NO diagnostic and the
+  enclosing function silently becomes uncallable. Chain: `evaluateStatements`
+  short-circuits on the `Error` (`src/compute-engine/function-utils.ts:1805`),
+  then `makeLambda`'s nullary-scoped-block arm ends `return result.isValid ?
+  result : undefined` (`function-utils.ts:2583`), and an `Error` is not
+  `isValid`, so `apply()` falls through to an inert `Apply`
+  (`function-utils.ts:1749`). Engine-level repro:
+  `Apply(Function(Block(Declare(n, {value: 0}), DefineFunction(h,
+  Function(Block(Assign(n, Add(n, 1)), n))), 99)))` evaluates to itself. The
+  swallow point is `function-utils.ts:2583`; the error should reach the user.
+  (This is what broke the `counter()` closure example in
+  `src/epsil/docs/evaluation.md`, now fixed there by declaring the effect.)
+- **`if cond { }` with an EMPTY block yields an inert `Block`, not
+  `Nothing`.** `if 1 < 2 { }` parses to `["If", ["Less", 1, 2], ["Block"]]`
+  and evaluates to `["Block"]` — rendered `{}` — with type `unknown`, where
+  `src/epsil/docs/control-flow.md:906` says an empty block's value is
+  `Nothing`. It is NOT the empty-SET parse it looks like: `["Block"]` is a
+  genuine empty block, and `{}` is only how an empty `Block` renders. Both
+  correct implementations already exist and are unreachable: `canonicalBlock`
+  returns `null` for zero operands
+  (`src/compute-engine/library/control-structures.ts:1372`), and `null` means
+  "cannot be put in canonical form" (`src/compute-engine/
+  types-definitions.ts:824`), so the node stays non-canonical and unbound and
+  neither its `type` handler (`'nothing'` at zero args,
+  `control-structures.ts:98`) nor its `evaluate` handler (`ce.Nothing` at
+  zero args, `control-structures.ts:1309`) ever runs. Fix = stop declining in
+  `canonicalBlock` for the zero-operand case.
+- **`.value =` does not infer a symbol's type, while `ce.assign()` does.**
+  `doc/04-guide-symbols.md:19-27` promises inference and uses `n.value = 5`
+  as its live example. Measured: after `ce.expr('n')` then `n.value = 5`, the
+  type is `unknown`; after `ce.assign('n', 5)` it is `integer` (and `assign`
+  refines even when the definition already exists). The setter ends at
+  `ce._setSymbolValue` (`src/compute-engine/boxed-expression/
+  boxed-symbol.ts:811`), and `setSymbolValue` writes only `def.value.value`,
+  never `def.value.type` (`src/compute-engine/engine-declarations.ts:654`);
+  `assignFn` instead either declares with inference
+  (`engine-declarations.ts:2584`) or runs its explicit inferred-type update
+  just below `assertAssignableValueDef`. Worse than a missing inference: the
+  setter can leave the declared type INCONSISTENT with the held value —
+  after `ce.assign('m', 1)` (type `integer`), `m.value = ce.string('hi')`
+  leaves type `integer` holding `"hi"`.
+- **`assume(t ∈ ExtendedRealNumbers)` answers `ok` but leaves `t: unknown`.**
+  `RealNumbers` gives `real`, `Integers` gives `integer`, `ComplexNumbers`
+  gives `complex`; `ExtendedRealNumbers` and `ExtendedComplexNumbers` give
+  `unknown`, and `t.isReal`/`t.isNumber` stay `undefined` — though the
+  structural fact IS recorded (`Element(t, ExtendedRealNumbers)` evaluates
+  `True`). Cause: `domainToType` (`src/compute-engine/boxed-expression/
+  utils.ts:574-585`) is a hardcoded six-entry table with no extended-set
+  entry, falling through to `return 'unknown'`; it is called from
+  `assume.ts:1083` and `assume.ts:1126`. The right type is already available
+  two ways — the set definition declares `set<real | non_finite_number>` and
+  its `elttype()` returns `EXTENDED_REAL_TYPE`
+  (`src/compute-engine/library/sets.ts:298-312`).
+- **The `Sqrt` overload recipe cannot work for a literal argument.**
+  `doc/06-guide-augmenting.md:1055` shows redeclaring `Sqrt` with a wrapping
+  `evaluate` handler; measured, `Sqrt(-4)` still answers `2i` and the handler
+  never runs. The override IS installed and IS reached for non-literal
+  operands (`Sqrt(z)` with `z` complex, and `Sqrt(w)` with `w := -4`, both
+  reach it). A LITERAL never survives to evaluation: `ce.box(['Sqrt', -4])`
+  canonicalizes to `["Complex", 0, 2]` in the name-keyed numeric fast path
+  (`src/compute-engine/boxed-expression/box.ts:2904-2905`, `if (name ===
+  'Sqrt') return withSourceOffsets(canonicalRoot(ops[0], 2), metadata);`) —
+  which the `Sqrt` definition's own commented-out `canonical` handler already
+  flags (`// @fastpath: canonicalization is done in the function
+  makeNumericFunction()`, `src/compute-engine/library/arithmetic.ts:3470`).
+  So overriding `Sqrt` requires overriding canonicalization, which the
+  documented recipe does not do; either the recipe or the fast path has to
+  change. The example has a second defect: its guard `y?.isExtendedReal ? y :
+  ce.NaN` is three-valued-unsafe — a symbolic result reports `undefined`
+  there and collapses to `NaN` instead of staying symbolic.
+- **Else-less `\keyword{if}` does not parse to `If`, and fails silently.**
+  `doc/07-guide-latex-syntax.md:298-300` says the `else` branch is optional.
+  Measured, `\keyword{if} x > 0 \keyword{then} x` parses to
+  `["Less", ["Text", 0, "'then'", "x"], ["Text", "'if'", "x"]]` — the
+  keywords degrade to ordinary text juxtaposed with the operands — and it
+  reports `isValid: true`, so nothing signals the failure. Cause:
+  `parseIfExpression` makes `else` MANDATORY
+  (`src/compute-engine/latex-syntax/dictionary/definitions-core.ts:5220`,
+  `if (!matchKeyword(parser, 'else')) return null;`); the `null` aborts the
+  whole `if` build and the parser backtracks. The true-branch parse at
+  `:5213` also terminates only on `else`, so recognizing an else-less `if`
+  needs a second termination condition. Separately, the operand-order note at
+  `doc/07-guide-latex-syntax.md:295` is wrong: it shows
+  `["If", ["Greater", "x", 0], …]`, but the snippet reads `.json` off the
+  CANONICAL parse, which measures `["If", ["Less", 0, "x"], …]` —
+  canonicalization rewrites `Greater(x, 0)` to `Less(0, x)`. The `Greater`
+  spelling appears only under `{canonical: false}`.
+- **`Clamp` has no one-argument form, and its doc example is wrong twice.**
+  `doc/80-reference-arithmetic.md:486-508` documents
+  `<Signature name="Clamp">_value_</Signature>` with defaults −1 and +1.
+  Measured, the signature is `(number, number, number) -> number` with all
+  three required (`src/compute-engine/library/arithmetic.ts:4201`), so
+  canonicalization pads the absent operands and `Clamp(0.42)` evaluates to
+  `Error("missing")`; the two-argument form `Clamp(0.42, 0)` errors the same
+  way. The doc's own example is also self-contradictory independently of
+  this: it claims `["Clamp", 0.42] ➔ 1`, which violates the rule stated three
+  lines above it ("Otherwise, evaluate to `value`") under BOTH candidate
+  ranges — the answer is `0.42`. The adjacent `["Clamp", 4.2] ➔ 1` is correct
+  for [−1, +1], and both three-argument examples check out. Decide whether to
+  implement the documented defaults or drop the one-argument form from the
+  doc.
+- **A qualified protocol call on an UNDECLARED protocol name throws instead
+  of erroring.** The reported symptom `Comparable.compare("a", "b")` →
+  "expected 1, got 2" does NOT reproduce for the documented form: with the
+  protocols declared as `src/epsil/docs/protocols.md:153-170` does,
+  `Comparable.compare("a", "b")` answers `"<"` and `Comparator.compare("a",
+  "b")` answers `-1`, exactly as documented. It reproduces only when
+  `Comparable` is undeclared, and then the failure mode is bad. The parse is
+  correct (`["Apply", ["Field", "Comparable", {"str": "compare"}], "a",
+  "b"]`), but `Field`'s handlers key off the protocol registry
+  (`protocolOfSymbol`, `src/compute-engine/library/collections.ts:6147` and
+  `:6195`), an unregistered name falls through leaving a free undeclared
+  symbol, and `canonicalFunctionLiteral` then LIFTS that symbol into an
+  implicit parameter — making the callee the unary lambda `("Comparable") =>
+  Field("Comparable", "compare")`, which rejects two arguments. On the raw
+  engine route it THROWS out of `invoke`
+  (`src/compute-engine/function-utils.ts:2761`) rather than returning an
+  error value. Wanted: an unknown protocol name should say so.
+
+
+### Four Fungrim Dirichlet entries are not representable: a `Sum` index is always `integer`, and `Conjugate` refuses a function-typed symbol (OPEN, type-system — found 2026-08-29 by `validate.ts --check`)
+
+**Context.** Since 2026-08-18 (commit 00405934) the engine reports
+`expected-function` when a symbol declared with a non-function type is
+applied. The Fungrim Stage-1 tool (`scripts/fungrim/load.ts`) declared every
+entry variable `complex` by default, so `chi(m)` with a Dirichlet character
+`chi` failed. Fixed 2026-08-29: a variable that appears in head position is
+declared `function`. The committed report
+(`scripts/fungrim/validation-report.json`) was regenerated; 32 of the 36
+regressions closed. The four that remain (`data/fungrim/corpus/dirichlet.json`
+ids `288207`, `3ab92d`, `4c3678`, `f4de66`) are engine limits:
+
+1. **`Sum`/`Product` pin their index to `integer` whatever the indexing set
+   holds.** `Sum` and `Product` declare their bound variable with
+   `scoped: indexingSetSites(1, 'integer')` (`library/arithmetic.ts`), and the
+   numeric iteration in `reduceBigOp` relies on that declaration to `assign`
+   the index. So `Sum(chi(n), Element(chi, DirichletGroup(q)))` — or any
+   `Sum(f(x), Element(x, S))` with `S: set<function>` — declares `chi:
+   integer`, and the body `chi(n)` is then an `expected-function` error. The
+   index of an `Element` clause should take the element type of the set
+   (`S: set<T>` → index `T`, falling back to `integer` only for range-shaped
+   clauses `Limits`/`Tuple`/bare symbol). The assign in `reduceBigOp` is
+   range-only, so the pin is only needed on those shapes.
+
+2. **`Conjugate` accepts only numbers.** Entry `288207` writes
+   `DirichletLambda(1 - s, Conjugate(chi))` — the conjugate character. With
+   `chi: function` the argument check reports `incompatible-type number
+   function`. Either `Conjugate` gains a function arm (pointwise conjugate, a
+   function literal `x ↦ Conjugate(chi(x))`), or the corpus entry stays
+   listed as a Stage-1 failure in the report.
+
+Until both are decided the report lists these four as known Stage-1 failures,
+and `--check` is green against that baseline.
+
+**Stage 2 hung for minutes — FIXED 2026-08-29 (harness deadline was a
+silent no-op).** `validate.ts --numeric` recorded Stage 2 at 121 s on
+2026-07-10; on 2026-08-29 it had not finished after 12 minutes. Measured per
+topic with a 3-minute cap, nine topics stalled (`bell_numbers`,
+`const_catalan`, `const_gamma`, `fibonacci`, `pi`, `prime_numbers`,
+`lambertw`, `jacobi_theta`, `sinc`), each on an infinite `Sum`, an infinite
+`Product`, or a `Limit` at infinity whose numeric evaluation calls an exact
+big-integer kernel per term (`Binomial(2n, n)`, `BellNumber(n)`,
+`PrimeNumber(N)`) for up to 32 768 terms. Two facts explain the change since
+July: (1) numeric evaluation of infinite series and products landed on
+2026-07-10/11 (`a6c2b394`, `46b8d906`), AFTER the July report, so those entries
+used to come back unevaluated in milliseconds; (2) the harness armed its
+per-evaluation deadline with `ce.timeLimit = 1000`, a property the engine
+retired on 2026-07-20 (`6723fa0a`, `docs/TIMEOUT-MODEL.md` §5) — the
+assignment became an expando on the engine object and no deadline was ever
+installed. The engine itself is sound: under `ce.withTimeLimit(500, …)` every
+stalled shape throws `CancellationError` within ~500 ms, because the series
+loop's `extrapolate` and the `NthPrime`/`BellNumber` kernels all call
+`checkDeadline`. Fix: `scripts/fungrim/numeric-check.ts` wraps each
+assumption evaluation and each instance check in
+`ce.withTimeLimit({ ms: 1000, label: 'fungrim:stage2' }, …)`. Two dead
+`ce.timeLimit = 30_000` lines in `test/compute-engine/integration-rules.test.ts`
+were removed for the same reason. Search for any other `ce.timeLimit =`
+before relying on a deadline: `tsx` and `ts-jest` do not typecheck, so the
+dead assignment raises no error.
+
+**With the deadline restored Stage 2 finished in 47 s and reported 16 False
+instances in 6 entries (July: 0 — the same shapes were then unevaluated).
+Triage, all on 2026-08-29:**
+
+- FIXED (engine): `Limit(Fibonacci(n+1)/Fibonacci(n), n→∞)` answered `1`
+  (entries `2b6e60`, `d56025`, `fdfdcc`). `leadingOrder` in
+  `symbolic/limit.ts` dropped a dominated additive term inside EVERY function
+  argument, so `Fibonacci(n+1)` became `Fibonacci(n)`; the same rewrite gave
+  `Γ(x+1)/(x·Γ(x))` → 0 and `f(n+1)/f(n)` → 1 for an unknown `f`. The
+  rewrite now enters an argument only under a slowly varying head (products,
+  quotients, `Ln`/`Log`, roots, x-free powers). The Fibonacci ratio now stays
+  an inert `Limit` (no growth class for `Fibonacci`); resolving it to φ needs
+  a growth level for exponential-class special functions — OPEN, low.
+- FIXED (engine): `Integrate(…).N()` of a COMPLEX-valued integrand dropped
+  the imaginary part (entry `f4e249`, `∫₀^π e^{e^{e^{ix}}} sin(nx) dx`):
+  `library/calculus.ts` read `.re` of every sample. The integrand is now split
+  into real and imaginary parts, both integrated, and returned as a complex
+  `Measurement`; `Real`/`Imaginary`/`Abs`/`Conjugate` propagate through a
+  Measurement (`measurementLipschitzUnary`). `BellNumber(n)` from that
+  integral now evaluates to `n`'s Bell number to 15 digits.
+- FIXED (upstream source, 2026-08-29): `419b45` stated `π = Σ n!/(2n+1)!!`;
+  the sum is π/2 (checked independently in Python to 16 digits, and the
+  engine agrees). The Fungrim source in the `arnog/fungrim` fork
+  (`pygrim/formulas/pi.py`) now reads `π = 2·Σ …`; the corpus was regenerated
+  and `data/fungrim/MANIFEST.json` carries the new content hash (the fork
+  commit id in the manifest must be refreshed once that fork change is
+  committed).
+- FIXED (translator, 2026-08-29): `4099d2` used `Power(Range(1, N), n)` for
+  Fungrim's CARTESIAN power (n-tuples), which the Compute Engine reads as an
+  elementwise power. `grim2mathjson` now emits the shell `CartesianPower(S, n)`
+  when the base of `Pow` is a set or domain constructor (`translate_pow` in
+  `grim2mathjson/structural.py`); the entry is now `not-evaluable`
+  (shell head) instead of False. `scripts/fungrim/load.ts` `setify` keeps the
+  `collection` base parameter for that shell (a `Range` is an indexed
+  collection, not a set). A Compute Engine `CartesianPower` operator would
+  make the entry evaluable — OPEN, low.
+
 ### A re-declared operator carrying a caller `compile` handler switches off the compiler's call-sharing (OPEN, design — measured 2026-08-21 under Tycho item 217)
 
 `R(i,x,y) = R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` compiles to a linear
@@ -1079,6 +1347,32 @@ consider an infinite endpoint on a finite tier. Neither changes any
 current answer's soundness — they only recover bounds the conservative
 model gives up. Do this AFTER the flip's Phase 2 codemod lands (it
 renames the very tier names the sets list), in one small diff with pins.
+
+### Assumptions bake into stored types — OPEN 2026-08-29 (design rev 3 after two spec reviews; third review pending)
+
+`assume()` WRITES the assumed symbol's type (`assume.ts`:
+`refineSymbolType`, `refineTypeIfUnknown`), and `forget()` / a scope pop
+rewind only that symbol (`rewindAssumedTypeWrites`). A type DERIVED from
+the write and stored elsewhere is not rewound: `assume(p > 3);
+f := x ↦ (p > 2); forget(p)` leaves `f` typed `(x) -> true`, and the
+compiler then drops a branch on a retracted proof. The same hazard holds
+for every numeric range stored from an assumption since 2026-08-22
+(function-literal signatures, dictionary cells, generic-arm solutions,
+receivers, outer-scope symbols assigned from inside the assuming scope).
+Found by the boolean-value-types code review (2026-08-29); the user
+directed a rethink: assumptions are ephemeral and must not be baked into
+durable types. Design: `docs/plans/2026-08-29-assumptions-as-facts-type.md`
+— assumptions contribute a `facts.type` merged into the symbol's type at
+READ time (one intersection, versioned like every other read), `assume()`
+stops writing types, and every type WRITE derives from the declaration
+channel at one choke point (the type setter / `_infer` take the
+derivation as a thunk run under `_withoutFacts`). Two rulings
+(2026-08-29): (A) an assumption-derived proof is never visible through
+an ASSIGNED function — `assume(p > 3); f := x ↦ (p > 2)` stores
+`(x) -> boolean`, since an application's type is read from the stored
+signature; (B) the handler-side "value types survive" half of the
+boolean-value-types ruling is re-ruled for the ASSUMPTION case (declared
+ranges still flow into stored types).
 
 ### Boolean value types — SHIPPED 2026-08-29 (O10)
 
@@ -3951,7 +4245,8 @@ load heavy families can still flake between solved and inert. The principled
 follow-up is O(nodes) pre-filters / absolute caps on speculative sub-routes,
 replacing budget-relative slicing. (Two independent budgets trap:
 `loadIntegrationRules(ce, { timeLimitMs })` (default 10 s) is independent of
-`ce.timeLimit` — heavy tests must raise both.)
+any `withTimeLimit` span — a heavy test must raise the loader budget and arm a
+long enough span.)
 
 **Benchmark protocol.**
 `npx tsx scripts/rubi/benchmark.ts --rubi "data/rubi/corpus/4 Trig functions" --chapter "4 Trig functions/4.1 Sine" --sample 120 --seed 5 --report /tmp/x.json`.
