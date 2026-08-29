@@ -2,6 +2,56 @@
 
 ### New Features
 
+- **Quotients and negative powers carry computed bounds.** The interval
+  arithmetic behind result types now covers `Divide` and `Power` with a
+  negative literal integer exponent: with `x: real<2<..<3>` and
+  `y: real<1<..<2>`, `x / y` types `real<1<..<3>`, `1 / y` types
+  `real<0.5<..<1>`, and `x^-2` types `real<0.1111..<0.25>` (the reciprocal
+  of a power of two is exact and keeps its endpoint's openness; an inexact
+  bound is rounded outward and closed). `1 / x` for `x > 3` types
+  `real<0<..0.3334>` — the zero is the open limit of the unbounded side.
+  The reciprocal is computed with directed rounding (exact only for
+  power-of-two divisors, decided by the IEEE-754 significand bits;
+  overflow saturates toward the sound side), and a negative power is
+  refined only when the COMPUTED positive power provably excludes zero.
+
+### Bug Fixes
+
+- **A quotient whose divisor may be zero no longer claims `real`.** `1 / z`
+  with `z: real<-1..1>` (or a bare `real` divisor with no sign proof) typed
+  `real`, although `1 / 0` evaluates to the complex infinity `~oo` and
+  `0 / 0` to `NaN` — neither a real number. The type is now
+  `real | infinity | nan`: exactly the three things a real quotient can be
+  (a finite real, the projective infinity, or the indeterminate marker),
+  and strictly tighter than `number`, which would also admit non-real
+  finite complex values a real quotient can never produce. A divisor that
+  provably excludes zero — an open range at 0, `assume(y > 0)`, a nonzero
+  literal — keeps its real tier and gains bounds.
+
+- **A negative power of a value that may be zero no longer claims a finite
+  type.** `x^-2` with `x: integer<-2..2>` (or any base whose range admits
+  zero and whose sign is unproven) typed the finite `rational<0..>`,
+  although `0^-2` evaluates to the complex infinity `~oo`. Such a power now
+  types `real | infinity | nan`, exactly like a quotient by a possibly-zero
+  divisor; a base that provably excludes zero keeps its finite tier and
+  gains the reciprocal bounds (`p^-2` for `p: real<0<..1>` is `real<1..>`).
+
+- **A quotient whose numerator may be infinite no longer claims `real`.**
+  With `x: real | non_finite_number` and a finite nonzero divisor, `x / p`
+  typed `real`, although `x` may be `+oo`; it now types
+  `real | infinity | nan`. (A provably infinite numerator was already
+  typed correctly; this is the unknown-finiteness case.)
+
+- **An empty-range operand no longer turns an expression into a matrix.** A
+  symbol declared with an empty range (`integer<2<..<3>`, whose type is
+  the bottom type `never`) made `Power(m, 2)` canonicalize to a
+  `MatrixPower` typed `matrix`, because the bottom type is a subtype of
+  every type — `matrix` included — and the shape rewrites tested only
+  `matches('matrix')`. An operand with no value has no shape: such an
+  application now types `never` on every route, and the matrix rewrites
+  apply only to operands that are genuinely matrices.
+
+
 - **Ranged types can exclude an endpoint.** A range type spells an open
   endpoint with an inequality marker: `real<0<..>` is x > 0, `real<..<3>`
   is x < 3, `real<0<..<3>` is 0 < x < 3 (read the markers as the chained

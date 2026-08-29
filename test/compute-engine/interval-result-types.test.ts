@@ -76,12 +76,13 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
     expect(e.box(['Power', 'k', 2]).type.toString()).toBe(
       'integer<4..25>'
     );
-    // n = 0 and negative exponents are deferred (the pole story rides the
-    // lattice flip): no interval claim — the pre-existing positive-base
-    // sign arm answers, not a computed range.
+    // A NEGATIVE exponent is the reciprocal of the positive power since
+    // the interval-division round (2026-08-29): `c^-2` for `c: real<2..3>`
+    // lies in [1/9, 1/4]. (Pinned as the sign-only claim while the pole
+    // story was deferred to the lattice flip.)
     e.declare('c', 'real<2..3>');
     expect(e.box(['Power', 'c', -2]).type.toString()).toBe(
-      'real<0<..>'
+      'real<0.1111..0.25>'
     );
   });
 

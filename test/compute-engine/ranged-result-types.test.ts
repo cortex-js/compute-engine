@@ -34,8 +34,12 @@ describe('RANGED RESULTS — the enumerated heads', () => {
     expect(ce.box(['Power', 'k', 2]).type.toString()).toBe(
       'integer<0..>'
     );
+    // A bare `integer` base ADMITS zero, and `0^-2` is the projective
+    // `~oo`: since the interval-division round (2026-08-29) a negative
+    // power of a possibly-zero base is the pole tier, not the finite
+    // `rational<0..>` this pinned (which was unsound).
     expect(ce.box(['Power', 'k', -2]).type.toString()).toBe(
-      'rational<0..>'
+      'infinity | nan | real'
     );
     // An ODD power claims no sign.
     expect(ce.parse('x^3').type.toString()).toBe('real');

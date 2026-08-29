@@ -2828,7 +2828,14 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
       // If the lhs is a matrix-typed symbol, return the matrix inverse
       // i.e. A^{-1} -> Inverse(A)
-      if (symType?.matches(new BoxedType('matrix'))) {
+      // A `never`-typed symbol (an empty declared range) matches `matrix`
+      // vacuously — the bottom type matches everything — but has no
+      // shape; it must not take the inverse rewrite.
+      if (
+        symType !== undefined &&
+        symType.type !== 'never' &&
+        symType.matches(new BoxedType('matrix'))
+      ) {
         parser.match('<}>');
         return ['Inverse', lhs] as MathJsonExpression;
       }

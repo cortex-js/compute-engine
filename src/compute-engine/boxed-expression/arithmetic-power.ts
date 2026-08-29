@@ -20,6 +20,13 @@ import { apply, apply2 } from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 
+/** Is the expression statically a MATRIX — a shape decision, so the bottom
+ * type must answer no: `never` is a subtype of `matrix` (of everything),
+ * but an expression with no value has no shape to rewrite for. */
+function isMatrixTyped(x: Expression): boolean {
+  return x.type.type !== 'never' && x.type.matches(new BoxedType('matrix'));
+}
+
 function isSqrt(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
   return (
@@ -352,7 +359,11 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // product. (Element-wise power of a matrix is not expressed via `^`.) Routing
   // at canonicalization keeps `A^2` from element-wise broadcasting at
   // evaluation. Vectors and non-integer exponents are left to other handling.
-  if (b.isInteger === true && a.type.matches(new BoxedType('matrix'))) {
+  // `isMatrixTyped`, not a bare `matches('matrix')`: the bottom type
+  // `never` (an EMPTY declared range, `integer<2<..<3>`) matches every
+  // type, and a shape REWRITE keyed on that vacuous match turned
+  // `Power(never, 2)` into a `MatrixPower` typed `matrix`.
+  if (b.isInteger === true && isMatrixTyped(a)) {
     const n = b.re;
     if (n === 1) return a;
     // Preserve the existing canonical form for the inverse.
@@ -421,8 +432,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     }
 
     // Matrix inverse: A^{-1} -> Inverse(A)
-    if (a.type.matches(new BoxedType('matrix')))
-      return ce.function('Inverse', [a]);
+    if (isMatrixTyped(a)) return ce.function('Inverse', [a]);
 
     // (note: case of `0^-1 = ~∞` is covered prior...)
     if (!(a.isCanonical || a.isStructural))

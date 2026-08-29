@@ -4885,7 +4885,10 @@ function skipBroadcastForVectorOps(
   // vector Hadamard is unchanged.
   if (exempt('tensors')) {
     if (hasTensors) return true;
-    if (ops.some((x) => x.type.matches('matrix'))) return true;
+    // A `never`-typed operand matches `matrix` vacuously (the bottom type
+    // matches everything) but has no shape to broadcast over; exclude it.
+    if (ops.some((x) => x.type.type !== 'never' && x.type.matches('matrix')))
+      return true;
   }
 
   // `'tuples'`: numeric tuples (points/vectors in ℝⁿ) are combined
@@ -4966,7 +4969,7 @@ function skipBroadcastForVectorOps(
     (ops[0].isCollection ||
       (!ops[0].type.isUnknown &&
         ops[0].type.type !== 'any' &&
-        ops[0].type.matches('collection<any>')))
+        ops[0].type.type !== 'never' && ops[0].type.matches('collection<any>')))
   )
     return true;
   return false;
@@ -5358,11 +5361,35 @@ function type(expr: BoxedFunction): Type {
               engine: expr.engine,
             })
         );
-      } else
-        calculatedType = (def.type as OperatorTypeHandlerOnExpressions)(
-          expr.ops,
-          { engine: expr.engine, operandTypes }
-        );
+        // An operand typed `never` (the EMPTY type — a symbol declared with
+        // an empty range, `integer<2<..<3>`) has no value, so no application
+        // of it has one: the result is `never`. Applied AFTER the handler,
+        // on the descriptors it already derived — never by reading operand
+        // types ahead of dispatch, which forced derivation in a different
+        // order and made the constant folder's memo, hence the COMPILED
+        // OUTPUT, run-dependent (measured: 2 distinct outputs of one
+        // source). The handler's own answer is wrong for `never`: the
+        // bottom type matches every type, `matrix` included, so shape arms
+        // fire vacuously.
+        if (descriptors.some((d) => d.type === 'never')) calculatedType = 'never';
+      } else {
+        // Derive every operand's type BEFORE the handler runs, making the
+        // derivation point singular and deterministic for this shape too —
+        // exactly what building the descriptors does for the `'types'`
+        // shape. An expressions-shape handler may skip operands (the
+        // `Divide` handler returns on `ops.length !== 2` without reading
+        // `ops[2]`), so a post-handler `never` scan could otherwise be the
+        // FIRST derivation of an operand, in an order that depends on the
+        // handler's control flow — the run-dependent compiled output this
+        // narrowing must not reintroduce (dual-review catch).
+        const anyNever = expr.ops.some((x) => x.type.type === 'never');
+        calculatedType = anyNever
+          ? 'never'
+          : (def.type as OperatorTypeHandlerOnExpressions)(expr.ops, {
+              engine: expr.engine,
+              operandTypes,
+            });
+      }
       // Differential parity for the migration: while a converted operator's
       // legacy handler is installed in the test-only shadow registry, both
       // shapes run and a divergence throws. No-op (one Map.size read) when

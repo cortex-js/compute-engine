@@ -265,6 +265,47 @@ function dirProd(a: number, b: number, dir: -1 | 1): number {
   return err > 0 ? nextUp(p) : p;
 }
 
+/** Is `x` an exact power of two? The IEEE-754 bit test — a zero
+ * significand for a normal double, a one-hot significand for a subnormal
+ * one — read through a `BigUint64Array` view. This is the exactness test
+ * for the reciprocal (`1/x` is representable iff `x` is a power of two).
+ * `Number.isInteger(Math.log2(x))` is NOT that test: the float logarithm
+ * rounds to an integer on 4,080 of 4,092 near-neighbors of powers of two
+ * (measured 2026-08-29), which would suppress the outward step and claim
+ * an exact bound that is not. */
+const F64 = new Float64Array(1);
+const U64 = new BigUint64Array(F64.buffer);
+function isPowerOfTwo(x: number): boolean {
+  if (!Number.isFinite(x) || x === 0) return false;
+  F64[0] = Math.abs(x);
+  const bits = U64[0];
+  const mant = bits & ((1n << 52n) - 1n);
+  const exp = (bits >> 52n) & 0x7ffn;
+  if (exp === 0n) return mant !== 0n && (mant & (mant - 1n)) === 0n;
+  return mant === 0n;
+}
+
+/** Directed reciprocal: `dir < 0` returns a value ≤ the exact `1/x`,
+ * `dir > 0` a value ≥ it, for a NONZERO finite or infinite `x`. Never
+ * called with 0 — `recip()` handles the zero-side endpoint of an
+ * open-at-0 divisor as a LIMIT, before any reciprocal is taken.
+ *
+ * `1/±∞` is exactly 0. Overflow is gated on the computed RESULT, never on
+ * the operand's magnitude class: the subnormal `2e-308` has the finite
+ * reciprocal `5e307` and must not saturate (saturating a lower bound to
+ * `MAX_VALUE` would EXCEED the true reciprocal). `1/x` overflows exactly
+ * when `|x| < 2⁻¹⁰²³` (measured), which reaches into the bottom normal
+ * binade — hence the result gate. An exact reciprocal (power-of-two `x`)
+ * is returned as is; otherwise one ulp outward. */
+function dirRecip(x: number, dir: -1 | 1): number {
+  if (x === Infinity || x === -Infinity) return 0;
+  const q = 1 / x;
+  if (q === Infinity) return dir < 0 ? Number.MAX_VALUE : Infinity;
+  if (q === -Infinity) return dir > 0 ? -Number.MAX_VALUE : -Infinity;
+  if (isPowerOfTwo(x)) return q;
+  return dir < 0 ? nextDown(q) : nextUp(q);
+}
+
 function withFlags(iv: Interval, loOpen: boolean, hiOpen: boolean): Interval {
   if (loOpen && Number.isFinite(iv.lo)) iv.loOpen = true;
   if (hiOpen && Number.isFinite(iv.hi)) iv.hiOpen = true;
@@ -399,6 +440,81 @@ export function mulIntervals(a: Interval, b: Interval): Interval {
   );
 }
 
+/** Does the interval EXCLUDE zero — the precondition for a reciprocal?
+ * True for a range strictly on one side of 0, or touching 0 only at an
+ * OPEN endpoint (`real<0<..>`, the canonical "positive"). */
+export function intervalExcludesZero(b: Interval): boolean {
+  if (b.lo > 0 || b.hi < 0) return true;
+  if (b.lo === 0 && b.loOpen === true) return true;
+  if (b.hi === 0 && b.hiOpen === true) return true;
+  return false;
+}
+
+/**
+ * The reciprocal interval `{ 1/x : x ∈ b }` of a divisor interval that
+ * EXCLUDES zero (`intervalExcludesZero`; `undefined` otherwise — the
+ * caller attaches no bounds). `1/x` is monotone decreasing on each side
+ * of zero, so the endpoints swap. Two limit cases are handled without a
+ * reciprocal (`dirRecip` is never called with 0):
+ * - a divisor endpoint AT zero (open, by the precondition) maps to the
+ *   unbounded side: `(0, h]` → `[1/h, +∞)`, `[l, 0)` → `(−∞, 1/l]`;
+ * - an infinite divisor endpoint maps to an OPEN 0: `[l, +∞)` → `(0, 1/l]`.
+ *   That openness is a hard-coded limit, sound because the divisor's
+ *   tier is finite-only under the post-flip lattice (no `real` value IS
+ *   `±∞`, so `1/x` is never exactly 0); an extension of interval
+ *   attachment to a tier that attains `±∞` must revisit it.
+ * A finite nonzero endpoint follows the general attainability rule
+ * (`docs/plans/2026-08-28-open-bounds-in-ranged-types.md` §3.5): open iff
+ * the divisor endpoint is open AND the reciprocal was exact (a stepped
+ * reciprocal is closed, like every stepped bound).
+ */
+export function recipInterval(b: Interval): Interval | undefined {
+  if (!intervalExcludesZero(b)) return undefined;
+  // Lower endpoint of the reciprocal comes from the divisor's UPPER one.
+  let lo: number;
+  let loOpen: boolean;
+  if (b.hi === Infinity) {
+    lo = 0;
+    loOpen = true;
+  } else if (b.hi === 0) {
+    lo = -Infinity;
+    loOpen = false;
+  } else {
+    lo = dirRecip(b.hi, -1);
+    // The flag is decided by the divisor endpoint alone, without knowing
+    // whether `dirRecip` SATURATED (a power of two below 2⁻¹⁰²³ overflows
+    // and returns ±MAX_VALUE/±∞). That stays sound: saturation happens
+    // only when the true reciprocal strictly exceeds MAX_VALUE, so at a
+    // saturated bound BOTH the closed (≥) and the open (>) claim hold.
+    loOpen = b.hiOpen === true && isPowerOfTwo(b.hi);
+  }
+  let hi: number;
+  let hiOpen: boolean;
+  if (b.lo === -Infinity) {
+    hi = 0;
+    hiOpen = true;
+  } else if (b.lo === 0) {
+    hi = Infinity;
+    hiOpen = false;
+  } else {
+    hi = dirRecip(b.lo, 1);
+    hiOpen = b.loOpen === true && isPowerOfTwo(b.lo);
+  }
+  return withFlags({ lo, hi }, loOpen, hiOpen);
+}
+
+/** Quotient interval: `a / b = a × (1/b)`, through `mulIntervals`, which
+ * already handles every sign combination, corner ties, the closed-zero
+ * corner (`0 / y` attains 0 when `a` does) and NaN-dropping. The only
+ * zero endpoint `recipInterval` can carry is the OPEN 0 of an infinite
+ * divisor endpoint, and `mulIntervals`' zero-corner rule reads the FLAG,
+ * not a sign — so no signed zero is needed anywhere. `undefined` when
+ * the divisor admits zero. */
+export function divIntervals(a: Interval, b: Interval): Interval | undefined {
+  const r = recipInterval(b);
+  return r === undefined ? undefined : mulIntervals(a, r);
+}
+
 export function absInterval(a: Interval): Interval {
   if (a.lo >= 0) return a;
   if (a.hi <= 0) return negInterval(a);
@@ -415,10 +531,9 @@ export function absInterval(a: Interval): Interval {
   return withFlags({ lo: 0, hi: Math.max(l, h) }, false, hiOpen); // exact operations only
 }
 
-/** `x^n` over an interval, for a LITERAL integer exponent `n ≥ 1` (the
- * ruled first-round scope; `n ≤ 0` is deferred with `Divide` — the pole
- * story). All powers are computed by repeated directed multiplication,
- * never `Math.pow`. */
+/** `x^n` over an interval, for a LITERAL integer exponent `n ≥ 1`. All
+ * powers are computed by repeated directed multiplication, never
+ * `Math.pow`. Negative exponents go through `powIntervalSigned`. */
 export function powInterval(a: Interval, n: number): Interval | undefined {
   if (!Number.isInteger(n) || n < 1) return undefined;
   if (n === 1) return a;
@@ -480,6 +595,24 @@ function powExact(x: number, n: number, v: number): boolean {
     }
   }
   return Math.abs(v) === result;
+}
+
+/** `x^n` over an interval for ANY nonzero literal integer exponent:
+ * `n ≥ 1` is `powInterval`; `n ≤ -1` is `1 / x^|n|` — the power first,
+ * then `recipInterval`, which answers `undefined` when the COMPUTED power
+ * admits zero. The gate is on the computed power, not the base: a base
+ * that mathematically excludes zero (`real<1e-300..>`, closed) squares to
+ * a lower bound that UNDERFLOWS to a closed 0 (dual-review catch), and
+ * that 0 must not reach a reciprocal. `n = 0` answers `undefined` (the
+ * `0^0` pole is the handler's business). */
+export function powIntervalSigned(
+  a: Interval,
+  n: number
+): Interval | undefined {
+  if (!Number.isInteger(n) || n === 0) return undefined;
+  if (n > 0) return powInterval(a, n);
+  const p = powInterval(a, -n);
+  return p === undefined ? undefined : recipInterval(p);
 }
 
 /** `x^n` for one endpoint, `n ≥ 1` integer, directed. Negative bases are

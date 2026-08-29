@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { isSubtype } from '../../src/common/type/subtype';
+import { intervalOfType } from '../../src/compute-engine/numerics/interval-arithmetic';
+import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 
 /**
  * Type-soundness grid (deterministic reduced core of the ~1,600-check operator
@@ -77,9 +79,31 @@ function soundness(expr: any): string | null {
   // is what soundness must be judged against; a symbolic result keeps the
   // public-type comparison.
   const evalT = v._literalType ?? v.type.type;
-  if (!isSubtype(evalT, staticT.type))
-    return `static=${staticT} evaluated="${v.toString()}" evalType=${v.type}`;
-  return null;
+  if (isSubtype(evalT, staticT.type)) return null;
+  // Two ENCLOSURES of one value are not subtypes of each other in either
+  // direction unless one is nested in the other: a computed quotient
+  // interval keeps 4 significant digits (`real<0.5405..0.5406>`), while
+  // the evaluated literal's own enclosure keeps 2 (`real<0.54..0.55>`), so
+  // the type comparison fails although the VALUE sits inside both. For a
+  // number result the sound question is whether the value lies within the
+  // static claim's bounds; judge that directly (bounds off the static
+  // type, value off the literal), and keep the type comparison only for a
+  // symbolic result.
+  if (isNumber(v)) {
+    const b = intervalOfType(staticT.type);
+    if (b !== undefined && v.im === 0 && Number.isFinite(v.re)) {
+      const re = v.re;
+      const inside =
+        (re > b.lo || (re === b.lo && b.loOpen !== true)) &&
+        (re < b.hi || (re === b.hi && b.hiOpen !== true));
+      // `re` is a rounding of the exact value; a bound within one ulp of
+      // it is inconclusive either way, so admit that margin.
+      const nearLo = Math.abs(re - b.lo) <= Math.abs(re) * 2 * Number.EPSILON;
+      const nearHi = Math.abs(re - b.hi) <= Math.abs(re) * 2 * Number.EPSILON;
+      if (inside || nearLo || nearHi) return null;
+    }
+  }
+  return `static=${staticT} evaluated="${v.toString()}" evalType=${v.type}`;
 }
 
 describe('TYPE SOUNDNESS GRID — evaluate().type ⊑ static .type', () => {

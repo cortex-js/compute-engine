@@ -1,7 +1,6 @@
 # Interval arithmetic for quotients: `Divide` and `Power` with exponent ≤ 0
 
-Status: RULED 2026-08-29, implementation pending the lattice flip's Phase
-3 commit — design for ROADMAP "Interval kernel: `Divide` and `Power` with
+Status: RULED and IMPLEMENTED 2026-08-29 (kernel: `recipInterval`/`divIntervals`/`powIntervalSigned` in `numerics/interval-arithmetic.ts`; handlers in `library/arithmetic.ts`; pins: `test/compute-engine/interval-division.test.ts`) — design for ROADMAP "Interval kernel: `Divide` and `Power` with
 exponent ≤ 0" (deferred by ruling from the 2026-08-27 interval round;
 unblocked by lattice-flip Phase 1). The §6 question was RULED by the
 user 2026-08-29: option (a) — a zero-admitting divisor gets NO bounds and

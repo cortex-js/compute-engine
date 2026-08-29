@@ -175,6 +175,23 @@ deliberately left out of that change.
   `Error` value ("this condition is not a boolean"), and picking between them
   is a ruling, not a fix. Site: the `If` evaluate handler in
   `src/compute-engine/library/control-structures.ts`.
+  - **`Which` throws the same way, and a published example trips it**
+    (measured 2026-08-29 during the doc-sweep triage). `evaluateWhich` in the
+    same file ends with the identical `throw new Error('Condition must
+    evaluate to "True" or "False". …')` for a condition that is not
+    boolean-ish, and `test/compute-engine/conditional-values.test.ts` pins it
+    ("a non-boolean Which condition still throws"), so the ruling above must
+    cover both handlers or they will diverge. The reachable case:
+    `doc/84-reference-control-structures.md` documents
+    `["Block", ["Assign", "n", -10], ["Which", ["Greater", "n", 0], "n",
+    ["Negate", "n"], "n"]]` with the expected value `10`, and it throws —
+    `Negate(n)` sits in a CONDITION position, where it evaluates to the
+    non-boolean `10`. That example is malformed independently of this item
+    (the operands it wants are `["Greater", "n", 0], "n", "True",
+    ["Negate", "n"]`, which does answer `10`), but a correct answer to this
+    ruling would turn its failure into a value or an inert form instead of a
+    host exception. The doc file is gitignored and generated, so the example
+    itself must be fixed at its source.
 - **`Factorial(±oo)` and `Factorial2(±oo)` stay inert.** The `NaN` half of the
   §4 propagate policy now conforms across the numeric family (the kernel
   dispatchers `apply`/`apply2`/`applyN` propagate a NaN argument, and the
@@ -989,7 +1006,21 @@ Historical note from the user: the lattice once had `positive_integer`
 and similar named types, simplified away; ranges are the replacement they
 should have been connected to.
 
-### Interval kernel: `Divide` and `Power` with exponent ≤ 0 (OPEN, capability — UNBLOCKED 2026-08-28 by lattice-flip Phase 1; deferred by ruling from the 2026-08-27 interval round)
+### Interval kernel: `Divide` and `Power` with exponent ≤ 0 (SHIPPED 2026-08-29 — ruled, designed and implemented per `docs/plans/2026-08-29-interval-division.md`; deferred by ruling from the 2026-08-27 interval round, unblocked by lattice-flip Phase 1)
+
+Shipped: `recipInterval`/`divIntervals`/`powIntervalSigned` in
+`numerics/interval-arithmetic.ts` (directed reciprocal, exact iff the
+divisor is a power of two by the IEEE bit test — `Math.log2` is NOT that
+test; overflow gated on the computed result, threshold `2⁻¹⁰²³`); the
+`Divide` handler's two real rungs attach quotient bounds, and a divisor
+that admits zero claims the ruled pole tier `real | infinity | nan`
+(fixing the pre-existing unsound `real`); `Power`'s `refinePow` handles
+negative literal exponents through the computed positive power's
+zero-exclusion, in all three arm families. Also fixed alongside: a
+`never`-typed operand (an empty declared range) made `Power(m, 2)` a
+`MatrixPower` typed `matrix` through vacuous `matches('matrix')` shape
+gates. Pinned in `test/compute-engine/interval-division.test.ts`. The
+original plan text follows for the record.
 
 The interval-arithmetic result types (`numerics/interval-arithmetic.ts`)
 cover `Add`, `Multiply`, `Abs` and `Power` with a positive integer

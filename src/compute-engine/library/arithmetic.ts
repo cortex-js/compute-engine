@@ -153,12 +153,32 @@ import {
 } from './type-handlers.js';
 import {
   attachInterval,
+  divIntervals,
   finalizeInterval,
   foldIntervalsOfTypes,
+  intervalExcludesZero,
   intervalOfType,
   mulIntervals,
-  powInterval,
+  powIntervalSigned,
 } from '../numerics/interval-arithmetic.js';
+
+/** The tier of a real quotient whose divisor may be zero: a finite real,
+ * the projective `~oo` of `1/0`, or the `NaN` of `0/0` — never a non-real
+ * finite complex, so this is strictly tighter than `number` (lattice
+ * ruling L3: over-admit only within the `infinity` branch). */
+// Built as a literal node, not `parseType(...)`: this runs at module
+// initialization, and under jest's CommonJS module graph `parse.js` is not
+// yet initialized when this file's top level executes (a temporal-dead-zone
+// `ReferenceError`); `tsx` happened to order the modules differently.
+// Frozen: returned BY REFERENCE from the Divide and Power handlers and
+// stored as-is (the parse fast path and the widening walker both return a
+// valid, unchanged node by identity), so an in-place mutation anywhere
+// downstream would corrupt every later pole type in the process — the
+// same rationale as `EXTENDED_REAL_TYPE` in `common/type/primitive.ts`.
+const POSSIBLY_ZERO_QUOTIENT_TYPE: Type = Object.freeze({
+  kind: 'union',
+  types: Object.freeze(['real', 'infinity', 'nan']) as unknown as Type[],
+}) as Type;
 // The `'types'`-shape twins of the helpers above: they take one
 // `OperandDescriptor` per operand instead of the operand expression, and are
 // wired to the definitions that declare `typeHandlerKind: 'types'`. The two
@@ -810,7 +830,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // - if numer product of numbers, or denom product of numbers,
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
       signature: '(number, number+) -> number',
-      type: ([num, den]) => {
+      type: (ops) => {
+        const [num, den] = ops;
         if (den.isSame(1)) return num.type;
         // A numeric tuple (point/vector) divided by a scalar keeps the tuple
         // type, mirroring the `Multiply` handler. `canonicalDivide` scales
@@ -933,8 +954,50 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // type.
           return 'number';
         }
-        if (den.isInteger && num.isInteger) return 'rational';
-        if (den.isExtendedReal && num.isExtendedReal) return 'real';
+        // The two real-quotient rungs (interval-division plan,
+        // `docs/plans/2026-08-29-interval-division.md` §3.4–§3.5).
+        //
+        // A divisor whose range ADMITS zero — and whose sign does not prove
+        // it non-zero — makes the quotient a finite real, the projective
+        // `~oo` of `1/0` (type `~oo <: infinity`), or the `NaN` of `0/0`:
+        // the sound tier is `real | infinity | nan` (user-ruled 2026-08-29;
+        // spelled with its branches per lattice ruling L3 rather than the
+        // over-admitting `number`, which would also admit a non-real
+        // finite complex that a real quotient can never be). Claiming
+        // `real` here was a pre-existing unsoundness.
+        //
+        // A divisor that EXCLUDES zero keeps its tier and gains the
+        // quotient interval. The handler reads two operands; a STRUCTURAL
+        // n-ary `Divide(a, b, c)` (never canonical) must not get bounds
+        // computed from `a / b` alone.
+        if (
+          (den.isInteger && num.isInteger) ||
+          (den.isExtendedReal && num.isExtendedReal)
+        ) {
+          const tier: Type = den.isInteger && num.isInteger ? 'rational' : 'real';
+          const dIv = intervalOfType(den.type.type);
+          const denSgn = operandSgn(den);
+          const provablyNonZero =
+            denSgn === 'positive' ||
+            denSgn === 'negative' ||
+            denSgn === 'not-zero';
+          // A numerator whose finiteness is NOT proven (`x: real |
+          // non_finite_number`) may be `±∞`, and `∞ / finite` is `±∞`,
+          // `∞ / ∞` NaN — neither in the finite tier. A PROVABLY infinite
+          // numerator was answered by the non-finite arm above; this is
+          // the unknown-finiteness residue (pre-existing: this rung
+          // claimed `real` for it before the interval round too).
+          if (num.isFinite !== true) return POSSIBLY_ZERO_QUOTIENT_TYPE;
+          if (dIv === undefined || !intervalExcludesZero(dIv)) {
+            if (!provablyNonZero) return POSSIBLY_ZERO_QUOTIENT_TYPE;
+            return tier;
+          }
+          if (ops.length !== 2) return tier;
+          const nIv = intervalOfType(num.type.type);
+          if (nIv === undefined) return tier;
+          const q = divIntervals(nIv, dIv);
+          return q === undefined ? tier : attachInterval(tier, finalizeInterval(q));
+        }
         // Real/pure-imaginary quotients (mirrors the Multiply type handler;
         // `imaginary`-typed operands are non-zero and non-real by type —
         // `imaginary ∩ real = nothing` in the lattice, and 0 is real):
@@ -2705,10 +2768,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // carries such values today — the exactness gate in
           // `boxed-number.ts` refuses the whole span — but the guard
           // keeps the invariant local.)
-          return nv !== undefined && Number.isSafeInteger(nv) && nv >= 1
+          // Any NONZERO safe integer: a negative exponent is the reciprocal
+          // of the positive power (`powIntervalSigned`); `n = 0` stays out
+          // — `0^0` is the pole guard's business above.
+          return nv !== undefined && Number.isSafeInteger(nv) && nv !== 0
             ? nv
             : undefined;
         })();
+        // A NEGATIVE literal exponent over a base that may be ZERO is a
+        // pole: `0^-2 = ~oo` (the projective infinity, type `infinity`), so
+        // the finite `rational`/`real` fallbacks the arms below reach for
+        // are unsound there — the same obligation the `Divide` handler
+        // meets with `POSSIBLY_ZERO_QUOTIENT_TYPE` (dual-review catch). The
+        // base admits zero when its interval does not exclude it AND its
+        // sign does not prove it non-zero.
+        const negativePoleTier = (): Type | undefined => {
+          if (powN === undefined || powN > 0) return undefined;
+          const bIv = intervalOfType(base.type.type);
+          if (bIv !== undefined && intervalExcludesZero(bIv)) return undefined;
+          const s = operandSgn(base);
+          if (s === 'positive' || s === 'negative' || s === 'not-zero')
+            return undefined;
+          return POSSIBLY_ZERO_QUOTIENT_TYPE;
+        };
         const refinePow = (
           tier: Type,
           opts?: { clampNonNegative?: boolean; requirePositive?: boolean }
@@ -2716,7 +2798,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (powN === undefined) return undefined;
           const bIv = intervalOfType(base.type.type);
           if (bIv === undefined) return undefined;
-          const p = powInterval(bIv, powN);
+          const p = powIntervalSigned(bIv, powN);
           if (p === undefined) return undefined;
           const iv = finalizeInterval(p);
           if (opts?.clampNonNegative) iv.lo = Math.max(iv.lo, 0);
@@ -2737,13 +2819,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               (even ? nonNegativeRangeType('integer') : 'integer')
             );
           }
-          return operandIsEven(exp) === true
-            ? nonNegativeRangeType('rational')
-            : 'rational';
+          {
+            // A possibly-negative integer exponent: the quotient tier is
+            // `rational`, refined by the reciprocal interval when the
+            // literal exponent is known (`x: integer<2<..<3>`, `x^-2`) —
+            // unless the base may be zero, a pole.
+            const even = operandIsEven(exp) === true;
+            return (
+              negativePoleTier() ??
+              refinePow('rational', { clampNonNegative: even }) ??
+              (even ? nonNegativeRangeType('rational') : 'rational')
+            );
+          }
         }
         if (base.isRational && exp.isInteger) {
           const even = operandIsEven(exp) === true;
           return (
+            negativePoleTier() ??
             refinePow('rational', { clampNonNegative: even }) ??
             (even ? nonNegativeRangeType('rational') : 'rational')
           );
@@ -2768,16 +2860,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             );
           if (nonNegativeSign(baseSgn) === true)
             return (
+              negativePoleTier() ??
               refinePow('real', { clampNonNegative: true }) ??
               nonNegativeRangeType('real')
             );
           if (operandIsEven(exp) === true)
             return (
+              negativePoleTier() ??
               refinePow('real', { clampNonNegative: true }) ??
               nonNegativeRangeType('real')
             );
           if (exp.isInteger)
-            return refinePow('real') ?? 'real';
+            return negativePoleTier() ?? refinePow('real') ?? 'real';
           // A *provably negative* base with an exponent that provably lands on
           // the complex branch (`(−2)^0.3`) is a finite complex value — the
           // `number` default below is true but too coarse for the
