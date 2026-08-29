@@ -5448,6 +5448,63 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
     expect(finite.matches(declared)).toBe(true);
   });
 
+  test('the type Count reports satisfies the type Count declares', () => {
+    // Migration parity with `Length` above. `Count` ALREADY evaluated to `+oo`
+    // over an unbounded source while declaring a bare `integer`, so the value
+    // was not below the declaration. The declaration is now `integer |
+    // infinity`, spelled with `infinity` for the same `widenValueTypes()`
+    // reason `Length` documents.
+    const declared = (ce2.lookupDefinition('Count')!.operator as any).signature
+      .type.result;
+    for (const source of [
+      ['Range', 1, OO],
+      ['Repeat', 5],
+    ] as any[]) {
+      const call = ce2.expr(['Count', source]);
+      expect(call.evaluate().toString()).toBe('+oo');
+      expect(call.type.matches(declared)).toBe(true);
+    }
+    // The 1-arg form narrows to the exact `integer` for the two cases it can
+    // decide STRUCTURALLY: a literal `List`/`Set` node holds exactly the
+    // operands it was written with, and a list type with declared dimensions
+    // fixes the count in the type itself.
+    expect(ce2.expr(['Count', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'integer'
+    );
+    expect(ce2.expr(['Count', ['List', 1, 2, 3]]).evaluate().toString()).toBe(
+      '3'
+    );
+    expect(ce2.expr(['Count', ['Set', 1, 2, 3]]).type.toString()).toBe(
+      'integer'
+    );
+    const dimensioned = new ComputeEngine();
+    dimensioned.declare('v3', 'vector<integer^3>');
+    expect(dimensioned.box(['Count', 'v3']).type.toString()).toBe('integer');
+    // Every other source keeps the wide claim, `Range(1, 5)` included:
+    // narrowing it would mean asking the source whether it is finite, and
+    // that facet walks a lazy collection.
+    expect(ce2.expr(['Count', ['Range', 1, 5]]).type.toString()).toBe(
+      'infinity | integer'
+    );
+    dimensioned.declare('lst', 'list<integer>');
+    expect(dimensioned.box(['Count', 'lst']).type.toString()).toBe(
+      'infinity | integer'
+    );
+    // Both 2-arg forms decline on a non-finite source, so they keep the exact
+    // `integer` — a count used as an index is not widened by a case that
+    // cannot arise there.
+    const value = ce2.expr(['Count', ['List', 1, 2, 2], 2]);
+    expect(value.type.toString()).toBe('integer');
+    expect(value.evaluate().toString()).toBe('2');
+    const predicate = ce2.expr([
+      'Count',
+      ['Range', 1, OO],
+      ['Function', ['Greater', 'x', 2], 'x'],
+    ]);
+    expect(predicate.type.toString()).toBe('integer');
+    expect(predicate.evaluate().operator).toBe('Count');
+  });
+
   test('a Range with an infinite LOWER bound produces no elements', () => {
     // The elements of a `Range` are `lower + k·step`, so an infinite lower
     // bound is the enumeration origin — and it is an extent marker, never a

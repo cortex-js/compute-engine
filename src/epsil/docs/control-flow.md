@@ -511,7 +511,8 @@ the body to bind `a` to when the alternatives disagree on shape.
 ### Range patterns
 
 `lo..hi` in pattern position is an **inclusive numeric membership test**: the
-case is selected when the subject is a real number and `lo ≤ subject ≤ hi`.
+case is selected when the subject is a real number or an infinity and
+`lo ≤ subject ≤ hi`.
 The call spelling `Range(lo, hi)` means exactly the same thing — the pattern
 form keys on the operator, not on how it was written:
 
@@ -525,9 +526,9 @@ match x {
 
 Both endpoints are included, and they are compared with the same tolerance
 `match` uses for every other number leaf, so a subject a hair outside an
-endpoint still selects the case. Only a **number** matches: a symbol, a
-collection, a string, a complex number and `NaN` all fall through to the next
-case.
+endpoint still selects the case. Only a number **on the real line** matches: a
+symbol, a collection, a string, a complex number with a nonzero imaginary part
+and `NaN` all fall through to the next case.
 
 Bounds must be **numeric literals** — negated literals and `Infinity` /
 `-Infinity` included, so `0..Infinity` reads as "any nonnegative number":

@@ -2,6 +2,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
+import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * Compile-decline diagnostics (Tycho item 109a).
@@ -111,6 +113,74 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
       expect(r.error).toMatch(
         /List: cannot compile — the operator is known to the engine/
       );
+    });
+  });
+
+  // `Count(xs)` is the cardinality, but `Count(xs, v)` counts the elements
+  // equal to `v` and `Count(xs, p)` the elements satisfying `p`. Both targets
+  // lowered every arity to `.length`/`len`, which answers the cardinality —
+  // so the 2-arg forms compiled "successfully" and returned the wrong number
+  // with no diagnostic. They now decline, like `At`'s multi-index form.
+  //
+  // The sources below carry a symbolic bound so constant folding cannot
+  // answer before the `Count` handler is reached.
+  describe('Count: the 2-arg forms decline instead of answering the size', () => {
+    const engine = () => {
+      const e = new ComputeEngine();
+      e.declare('n', 'integer');
+      return e;
+    };
+    const cardinality = () => engine().box(['Count', ['Range', 1, 'n']]);
+    const byValue = () => engine().box(['Count', ['Range', 1, 'n'], 2]);
+    const byPredicate = () =>
+      engine().box([
+        'Count',
+        ['Range', 1, 'n'],
+        ['Function', ['Greater', '_', 2]],
+      ]);
+
+    it('the 1-arg cardinality form still compiles on both targets', () => {
+      expect(new JavaScriptTarget().compile(cardinality()).success).toBe(true);
+      expect(new PythonTarget().compile(cardinality()).success).toBe(true);
+      expect(compile(cardinality())?.run?.({ n: 5 })).toBe(5);
+    });
+
+    it('javascript names the unsupported arity', () => {
+      expect(() => new JavaScriptTarget().compile(byValue())).toThrow(
+        /Count: only the single-argument cardinality form compiles.*Fail closed \(D6\)/s
+      );
+      expect(() => new JavaScriptTarget().compile(byPredicate())).toThrow(
+        /Count: only the single-argument cardinality form compiles/
+      );
+    });
+
+    it('python names the unsupported arity', () => {
+      expect(() => new PythonTarget().compile(byValue())).toThrow(
+        /Count: only the single-argument cardinality form compiles.*Fail closed \(D6\)/s
+      );
+      expect(() => new PythonTarget().compile(byPredicate())).toThrow(
+        /Count: only the single-argument cardinality form compiles/
+      );
+    });
+
+    it('the interpreted fallback answers what the interpreter answers', () => {
+      // `Range(1, 5)` holds one element equal to 2 and three greater than 2 —
+      // NOT the five the old `.length` lowering returned for both.
+      const v = compile(byValue());
+      expect(v?.success).toBe(false);
+      expect(v?.run?.({ n: 5 })).toBe(1);
+      const p = compile(byPredicate());
+      expect(p?.success).toBe(false);
+      expect(p?.run?.({ n: 5 })).toBe(3);
+
+      const ce2 = new ComputeEngine();
+      ce2.assign('n', 5);
+      expect(ce2.box(['Count', ['Range', 1, 'n'], 2]).evaluate().re).toBe(1);
+      expect(
+        ce2
+          .box(['Count', ['Range', 1, 'n'], ['Function', ['Greater', '_', 2]]])
+          .evaluate().re
+      ).toBe(3);
     });
   });
 

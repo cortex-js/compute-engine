@@ -182,9 +182,11 @@ Read more about **lists, sets, tuples and dictionaries**.
 ## Future Directions
 
 Several keywords are **reserved but not designed** — they are held so that a
-future version of Epsil can introduce them without breaking existing programs,
-and using one as an ordinary name today is an error. None of the following are
-part of the language yet:
+future version of Epsil can introduce them without breaking existing programs.
+None of the following are part of the language yet, and because the grammar
+does not claim any of them, each is still an ordinary identifier today:
+`let import = 5` binds a variable named `import`. Prefer not to use them as
+names, so that a program keeps working when the language does claim them.
 
 - **Modules and imports** — `import`, `export`, `module`.
 - **Error-handling keywords** — `try`, `catch`, `throw`. In Epsil, errors are
@@ -192,5 +194,7 @@ part of the language yet:
 - **Concurrency** — `async`, `await`, `parallel`.
 - **Macros** and compile-time metaprogramming.
 
-If you need a symbol whose name collides with one of these reserved words, use
-the verbatim form (`` `match` ``).
+A word the grammar DOES claim — a literal or an active keyword such as `match`,
+`for` or `if` — cannot be spelled as a plain symbol at all. Use the verbatim
+form for those (`` `match` ``); it works for the reserved words above too.
+[`literals.md`](/epsil/literals#symbols) lists which words are in which group.

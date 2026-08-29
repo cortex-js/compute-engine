@@ -2271,7 +2271,21 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Same fail-closed (D6) discipline and interpreter-verified semantics as
   // the JavaScript target: 1-based indexes, `Nothing` → nan, counts clamped.
   Length: (args, compile) => `len(${pyCollArg('Length', args[0], compile)})`,
-  Count: (args, compile) => `len(${pyCollArg('Count', args[0], compile)})`,
+  // Only the 1-arg cardinality form. `Count(xs, v)` counts the elements equal
+  // to `v` and `Count(xs, p)` the elements satisfying the predicate `p`
+  // (`library/collections.ts`); `len` answers neither, so compiling the 2-arg
+  // forms this way returned the whole size and diverged from the interpreter
+  // with no diagnostic. Decline instead, as `At` does below for its
+  // multi-index form: the interpreted fallback still evaluates them.
+  Count: (args, compile) => {
+    if (args.length !== 1)
+      throw new Error(
+        `Count: only the single-argument cardinality form compiles; the ` +
+          `value and predicate forms (\`Count(xs, v)\`, \`Count(xs, p)\`) are ` +
+          `not supported. Fail closed (D6).`
+      );
+    return `len(${pyCollArg('Count', args[0], compile)})`;
+  },
   IsEmpty: (args, compile) =>
     `(len(${pyCollArg('IsEmpty', args[0], compile)}) == 0)`,
   At: (args, compile) => {

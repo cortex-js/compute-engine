@@ -2966,8 +2966,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   IsEmpty: (args, compile) =>
     `((${elementsArg('IsEmpty', args[0], compile)}).length === 0)`,
   // Number of elements — same as `Length` for an indexed collection.
-  Count: (args, compile) =>
-    `(${elementsArg('Count', args[0], compile)}).length`,
+  //
+  // Only the 1-arg cardinality form. `Count(xs, v)` counts the elements equal
+  // to `v` and `Count(xs, p)` the elements satisfying the predicate `p`
+  // (`library/collections.ts`); `.length` answers neither, so compiling the
+  // 2-arg forms this way returned the whole size and diverged from the
+  // interpreter with no diagnostic. Decline instead, as `At` does for its
+  // multi-index form (D6 fail-closed): the interpreted fallback still
+  // evaluates them.
+  Count: (args, compile) => {
+    if (args.length !== 1)
+      throw new Error(
+        `Count: only the single-argument cardinality form compiles; the ` +
+          `value and predicate forms (\`Count(xs, v)\`, \`Count(xs, p)\`) are ` +
+          `not supported. Fail closed (D6).`
+      );
+    return `(${elementsArg('Count', args[0], compile)}).length`;
+  },
   // Membership via SameValueZero (`includes`) — value equality only for
   // primitive elements, so compound element types fail closed.
   Contains: (args, compile) => {

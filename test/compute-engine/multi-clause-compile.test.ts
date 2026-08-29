@@ -314,13 +314,18 @@ describe('MULTI-CLAUSE COMPILE — whole-function decline (spec §8)', () => {
     expect(() => glsl.compile(ce.box(['f', 'u']))).toThrow(/fail closed/i);
   });
 
-  // Compiled JavaScript has no distinct value for complex infinity: `~oo`
-  // lowers to the JS value NaN. The interpreter, though, types `~oo` as
-  // `infinity` and NOT as `nan` — the two tiers are disjoint there. So neither
-  // tier has a faithful JS guard: `Number.isNaN(a)` would accept a compiled
-  // `~oo` from a `nan` parameter that the interpreter refuses, and any
-  // `infinity` test over JS numbers refuses a compiled `~oo` the interpreter
-  // accepts. Both decline instead, and the interpreted fallback dispatches.
+  // Compiled JavaScript has no distinct value for complex infinity, and `~oo`
+  // reaches compiled code as two different JS values: NaN when it crosses the
+  // interpreter→JS boundary as an argument, and `Infinity` when the compiled
+  // body PRODUCES it (a pole such as `1 / 0`). The interpreter, though, types
+  // `~oo` as `infinity`, disjoint there from both `nan` and
+  // `non_finite_number`. So none of the three tiers has a faithful JS guard:
+  // `Number.isNaN(a)` would accept a boundary `~oo` from a `nan` parameter
+  // that the interpreter refuses, any `infinity` test over JS numbers refuses
+  // that same argument where the interpreter accepts it, and "neither finite
+  // nor NaN" accepts a PRODUCED `~oo` from a `non_finite_number` parameter
+  // that the interpreter refuses. All three decline instead, and the
+  // interpreted fallback dispatches.
 
   it('a `nan` parameter declines the whole function, and the fallback agrees', () => {
     clause('gnan', ['Function', 1, p('a', 'nan')]);
@@ -356,16 +361,17 @@ describe('MULTI-CLAUSE COMPILE — whole-function decline (spec §8)', () => {
     expect(compile(ce.box(['ginf', 'ComplexInfinity']))?.run?.({})).toBe(1);
   });
 
-  it('a `non_finite_number` parameter still COMPILES and dispatches ±∞', () => {
+  it('a `non_finite_number` parameter declines the whole function, and the fallback agrees', () => {
     // The signed pair `+∞ | −∞` excludes both complex infinity and NaN, so
-    // "a number that is neither finite nor NaN" is an exact test: compiled
-    // ±∞ are the JS values `Infinity`/`-Infinity` and pass it, and compiled
-    // `~oo` — a NaN — correctly fails it.
+    // "a number that is neither finite nor NaN" is exact for an ARGUMENT that
+    // crossed the boundary — but not for a `~oo` the compiled body PRODUCES,
+    // which is the JS `Infinity` and passes a test the interpreter refuses.
     clause('gnfn', ['Function', 1, p('a', 'non_finite_number')]);
     clause('gnfn', ['Function', 0, p('x', 'number')]);
     const r = compile(ce.box(['gnfn', 'w']));
-    expect(r?.success).toBe(true);
-    expect(r?.code ?? '').toContain('_fn_gnfn(');
+    expect(r?.success).toBe(false);
+    expect(r?.code ?? '').toBe('');
+    // The interpreted fallback dispatches every tier as the interpreter does.
     expect(r?.run?.({ w: Infinity })).toBe(1);
     expect(r?.run?.({ w: -Infinity })).toBe(1);
     expect(r?.run?.({ w: NaN })).toBe(0);
@@ -375,5 +381,12 @@ describe('MULTI-CLAUSE COMPILE — whole-function decline (spec §8)', () => {
     expect(ce.box(['gnfn', 'NaN']).evaluate().re).toBe(0);
     expect(ce.box(['gnfn', 'ComplexInfinity']).evaluate().re).toBe(0);
     expect(compile(ce.box(['gnfn', 'ComplexInfinity']))?.run?.({})).toBe(0);
+    // The produced-`~oo` divergence the decline removes: `1 / w` at `w = 0`
+    // is `~oo`, which the interpreter sends to the `number` clause. While the
+    // guard was emitted, the compiled call answered 1 here.
+    expect(ce.box(['gnfn', ['Divide', 1, 0]]).evaluate().re).toBe(0);
+    expect(compile(ce.box(['gnfn', ['Divide', 1, 'w']]))?.run?.({ w: 0 })).toBe(
+      0
+    );
   });
 });

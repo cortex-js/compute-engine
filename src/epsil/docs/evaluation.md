@@ -61,7 +61,7 @@ element by element:
 ```epsil
 let xs = [1, 2, 3]
 xs[2] = 9
-// ➔ Error(ErrorCode("incompatible-type", "symbol", "number"))
+// ➔ Error(ErrorCode("incompatible-type", "symbol", "integer | nan"), At("xs", 2))
 ```
 
 Build the value you want and rebind the name:
@@ -138,7 +138,7 @@ share it:
 ```epsil
 function counter() {
   let n = 0
-  function bump() { n = n + 1; n }
+  function bump() scope { n = n + 1; n }
   bump
 }
 let c1 = counter()
@@ -148,6 +148,12 @@ let c2 = counter()
 ```
 
 `c1` and `c2` count independently.
+
+`bump` writes to `n`, which belongs to the enclosing call rather than to
+`bump` itself. Writing to a binding outside the function is the `scope`
+effect, and it must be declared — without the specifier the definition is
+rejected and `counter()` never produces a callable. See
+[Effect specifiers](/epsil/control-flow#effect-specifiers).
 
 Reach for `const` when a name should not move at all. Constness is a property
 of the *binding*, not of the value it holds — every value is immutable

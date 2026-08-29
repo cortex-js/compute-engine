@@ -696,6 +696,17 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       ['Fibonacci', ['Fibonacci', { num: '+Infinity' }], '\\operatorname{Fibonacci}(\\infty)'],
       // library/collections.ts — the `count` parameter of `Repeat`
       ['Repeat', ['Repeat', 7, { num: '+Infinity' }], '\\operatorname{Repeat}(7, \\infty)'],
+      // `Totient` and `Divides` used to declare `(number)` parameters, on the
+      // stated grounds that an `integer` carrier would reject symbolic
+      // operands at rule-boxing time. That is no longer how validation works:
+      // it rejects only what the types PROVE disjoint, so every symbolic
+      // operand is still admitted (see the test below) and only a provably
+      // non-integer literal is refused. Both now take the same carrier as the
+      // other number-theory heads.
+      ['Totient', ['Totient', { num: '+Infinity' }], '\\operatorname{Totient}(\\infty)'],
+      // `Divides` is binary, so BOTH slots are pinned.
+      ['Divides (1st slot)', ['Divides', { num: '+Infinity' }, 2], '\\operatorname{Divides}(\\infty, 2)'],
+      ['Divides (2nd slot)', ['Divides', 2, { num: '+Infinity' }], '\\operatorname{Divides}(2, \\infty)'],
     ];
 
     test.each(REJECTED)('%s rejects an infinite argument (box route)', (
@@ -726,6 +737,53 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(engine.box(['Repeat', 7, 3]).evaluate().toString()).toBe(
         '[7,7,7]'
       );
+      expect(engine.box(['Totient', 12]).evaluate().toString()).toBe('4');
+      expect(engine.box(['Divides', 3, 12]).evaluate().toString()).toBe(
+        '"True"'
+      );
+      expect(engine.box(['Divides', 4, 10]).evaluate().toString()).toBe(
+        '"False"'
+      );
+      // `NotDivides` canonicalizes to `Not(Divides(…))`, so it inherits the
+      // carrier and must agree.
+      expect(engine.box(['NotDivides', 4, 10]).evaluate().toString()).toBe(
+        '"True"'
+      );
+    });
+
+    test('an `integer` carrier still admits every SYMBOLIC operand', () => {
+      // The reason the `(number)` spellings on `Totient`/`Divides` were not
+      // needed: validation rejects an argument only when its type is PROVABLY
+      // disjoint from the parameter's. A symbol declared `real` and a compound
+      // typed `number` both overlap `integer`, so they are admitted and the
+      // application stays symbolic — which is what the Fungrim rules that
+      // apply these heads to a compound (`Totient(2^n)`) depend on.
+      const engine = new ComputeEngine();
+      engine.declare('r', 'real');
+      for (const expr of [
+        ['Totient', 'r'],
+        ['Totient', ['Power', 2, 'n']],
+        ['Divides', 'a', 'b'],
+        ['Divides', 2, ['Power', 2, 'n']],
+      ] as any[]) {
+        const x = engine.box(expr);
+        expect(x.type.toString()).not.toBe('error');
+        expect(x.evaluate().toString()).not.toContain('incompatible-type');
+      }
+    });
+
+    test('a provably NON-INTEGER argument is refused by the same carrier', () => {
+      // The infinities are not the only thing a bare `integer` excludes: the
+      // carrier is finite integers, so a fractional literal is refused too.
+      // `Divides(2.5, 3)` used to stay symbolic, which answered neither the
+      // question nor the type error.
+      const engine = new ComputeEngine();
+      for (const expr of [
+        ['Totient', 2.5],
+        ['Divides', 2.5, 3],
+        ['Divides', 3, 2.5],
+      ] as any[])
+        expect(engine.box(expr).toString()).toContain('incompatible-type');
     });
 
     test('a WIDE-parameter head still admits the infinity', () => {

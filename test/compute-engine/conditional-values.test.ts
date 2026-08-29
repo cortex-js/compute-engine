@@ -197,6 +197,74 @@ describe('CONDITIONAL VALUES — Undefined conditions (decision 9)', () => {
   });
 });
 
+describe('CONDITIONAL VALUES — Which operand pairing', () => {
+  // `Which` takes alternating `(condition, value)` operands, and the
+  // unconditional default clause is a literal `True` condition — NOT a
+  // trailing unpaired operand. The LaTeX `cases` parser settles the
+  // convention: a row written without a condition is normalized to an
+  // explicit `True` one, so it produces an even operand count too.
+  it('an EVEN operand count selects the first True clause', () => {
+    expect(ce.box(['Which', 'True', 1, 'False', 2]).evaluate().isSame(1)).toBe(
+      true
+    );
+    expect(ce.box(['Which', 'False', 1, 'True', 2]).evaluate().isSame(2)).toBe(
+      true
+    );
+  });
+
+  it('a literal True condition is how a default clause is written', () => {
+    expect(
+      ce.box(['Which', ['Less', 3, 0], 1, 'True', 2]).evaluate().isSame(2)
+    ).toBe(true);
+  });
+
+  it('an EVEN, unmatched Which is Missing', () => {
+    expect(
+      ce.box(['Which', 'False', 1, 'False', 2]).evaluate().symbol
+    ).toBe('Missing');
+    // The no-operand case is the same rule with no clauses to try.
+    expect(ce.box(['Which']).evaluate().symbol).toBe('Missing');
+  });
+
+  it('a condition-less LaTeX cases row becomes an explicit True clause', () => {
+    const cases = ce.parse(
+      '\\begin{cases} x & x>0 \\\\ -x \\end{cases}'
+    );
+    expect(cases.ops!.length).toBe(4);
+    expect(cases.ops![2].symbol).toBe('True');
+  });
+
+  it('an ODD operand count is a malformed call, not a value', () => {
+    // Both of these used to canonicalize to `Nothing` — a malformed call
+    // quietly becoming an ordinary value, which hid the mistake and made the
+    // two calls indistinguishable despite their opposite conditions.
+    for (const expr of [
+      ['Which', 'True', 1, 2],
+      ['Which', 'False', 1, 2],
+      ['Which', 1],
+    ] as any[]) {
+      const x = ce.box(expr);
+      expect(x.type.toString()).toBe('error');
+      expect(x.toString()).toContain('even number of operands');
+    }
+  });
+
+  it('an ODD structural Which types as the error it evaluates to', () => {
+    // The structural form skips canonicalization, so the odd operand list
+    // survives to the `type` handler. It does not survive EVALUATION: the
+    // structural expression canonicalizes first, and canonicalization is what
+    // rejects the odd count. So the type must be the `error` that call
+    // produces, not the `integer` its second operand suggests.
+    const s = ce.function('Which', [ce.True, ce.box(1), ce.box(2)], {
+      form: 'structural',
+    });
+    expect(s.operator).toBe('Which');
+    expect(s.nops).toBe(3);
+    expect(s.type.toString()).toBe('error');
+    expect(s.evaluate().toString()).toContain('even number of operands');
+  });
+});
+
 describe('CONDITIONAL VALUES — predicates stay conservative (decision 2)', () => {
   it('When(x, x>0).isPositive is undefined', () => {
     expect(ce.box(whenX).isPositive).toBeUndefined();

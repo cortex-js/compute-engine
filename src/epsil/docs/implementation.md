@@ -452,6 +452,12 @@ fib(0) = 0
   ["Function", 0, ["Typed", "literalParam_1", {"str": "0"}]]]
 ```
 
+The type text is the literal as written, so the non-finite literals reach the
+type as their own spellings: `f(NaN) = …` gives `{"str": "NaN"}`, `f(oo) = …`
+gives `{"str": "oo"}`, and `f(-oo) = …` gives `{"str": "-oo"}`. The `Infinity`
+spelling is normalized to `oo` on the way in — `f(Infinity) = …` also lowers to
+`{"str": "oo"}` — so the two spellings produce the same clause.
+
 ### Anonymous functions
 
 ```epsil
@@ -736,6 +742,21 @@ match z {
 Such patterns work when evaluating a `match`, but are not supported by
 `compile()`; compiling a `match` with an operator pattern fails closed, naming
 the offending pattern in the error.
+
+Two other constructs fail closed the same way, both because the JavaScript
+target cannot represent a distinction the interpreter makes. A multi-clause
+function with a clause typed `infinity` or `nan` declines as a WHOLE and runs
+interpreted — `g(a: infinity) = 1` beside `g(x: number) = 0` compiles to no
+code at all — because complex infinity has no JavaScript value of its own to
+test for, so no emitted guard could agree with the interpreter on every
+argument.
+
+Compiled arithmetic also projects a pole differently from the interpreter. At a
+pole the interpreter answers the unsigned `~oo`, but compiled code answers the
+IEEE `Infinity`: `x => 1/x` compiles to `(x) => 1 / x`, which at `x = 0` gives
+`Infinity`, where the interpreter's `1/0` is `~oo`. The magnitude survives the
+projection and the missing direction does not, so a program that distinguishes
+the two must not rely on `compile()` to preserve it.
 
 When no case matches, evaluation produces `Error("match-no-case", subject)`.
 

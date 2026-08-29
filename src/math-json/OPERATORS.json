@@ -16,7 +16,7 @@
       "name": "Abs",
       "category": "Arithmetic",
       "arity": "1",
-      "signature": "(number) -> real",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": true,
@@ -789,7 +789,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Evaluate a sequence of expressions in a local scope, **sequentially**. Each operand is evaluated in order; later operands observe side effects (`Assign`, `Declare`) of earlier operands. The block's value is the value of the last expression. Short-circuiting heads (`Return`, `Break`, `Continue`) terminate the sequence early.\n\nIMPORTANT — consumers translating *simultaneous* action tuples (e.g. Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp first, then assign the temps to the LHS symbols. The canonical recipe is in `doc/84-reference-control-structures.md`."
+      "description": "Evaluate a sequence of expressions in a local scope, **sequentially**. Each operand is evaluated in order; later operands observe side effects (`Assign`, `Declare`) of earlier operands. The block's value is the value of the last expression. Short-circuiting heads (`Return`, `Break`, `Continue`) terminate the sequence early.\n\nIMPORTANT — consumers translating *simultaneous* action tuples (e.g. Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp first, then assign the temps to the LHS symbols. See `doc/84-reference-control-structures.md` for the canonical recipe."
     },
     {
       "name": "Boole",
@@ -1273,6 +1273,18 @@
       "description": "Test whether a value satisfies one or more conditions."
     },
     {
+      "name": "Conforms",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(subject: any, protocols: string+) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "True iff the subject conforms to EVERY named protocol. A `type` VALUE subject asks whether that type conforms (the branch is unambiguous because the `type` primitive itself declares no conformances); any other subject is evaluated once and its precise type is asked. This is the lowering of the Epsil `x is Hashable & Comparable` test. A valueless or unresolved subject stays symbolic; an unknown protocol name is an error; an Error-valued subject answers `False` (the `error` type declares no conformances). Conformance is monotone but late-bound: the answer reflects the registry at the moment of evaluation."
+    },
+    {
       "name": "Congruent",
       "category": "Relational Operators",
       "arity": "3",
@@ -1459,7 +1471,7 @@
       "name": "Count",
       "category": "Collections",
       "arity": "optional",
-      "signature": "(collection<any>, any?) -> integer",
+      "signature": "(collection<any>, any?) -> integer | infinity",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1495,7 +1507,7 @@
       "name": "Cross",
       "category": "Linear Algebra",
       "arity": "2",
-      "signature": "(vector, vector) -> vector",
+      "signature": "(vector|tuple, vector|tuple) -> vector",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1603,7 +1615,7 @@
       "name": "DeclareType",
       "category": "Core",
       "arity": "optional",
-      "signature": "(symbol|string, type: string|symbol, attributes: dictionary<any>?) scope -> nothing",
+      "signature": "(symbol|string, type: string|symbol|type, attributes: dictionary<any>?) scope -> nothing",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1900,13 +1912,13 @@
       "name": "Divides",
       "category": "Number Theory",
       "arity": "2",
-      "signature": "(number, number) -> boolean",
+      "signature": "(integer, integer) -> boolean",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "`Divides(a, b)` returns `True` if `a` divides `b` (i.e. `b` is an integer multiple of `a`), corresponding to the notation `a ∣ b`. Stays symbolic for non-integer operands.",
+      "description": "`Divides(a, b)` returns `True` if `a` divides `b` (i.e. `b` is an integer multiple of `a`), corresponding to the notation `a ∣ b`. Both operands are integers; a symbolic operand keeps the relation unevaluated.",
       "examples": [
         "Divides(3, 12)  // \"True\""
       ]
@@ -2633,7 +2645,7 @@
       "name": "FresnelC",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(number) -> real",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -2645,7 +2657,7 @@
       "name": "FresnelS",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(number) -> real",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -2845,7 +2857,7 @@
       "name": "Heaviside",
       "category": "Arithmetic",
       "arity": "1",
-      "signature": "(number) -> real",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3025,6 +3037,18 @@
       "lazy": true,
       "broadcastable": false,
       "description": "Conditional branch: evaluate one of two expressions."
+    },
+    {
+      "name": "Im",
+      "category": "Arithmetic",
+      "arity": "1",
+      "signature": "(number) -> real",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "`Im` is an alias for `Imaginary`, which is the preferred name. Returns the imaginary part of a complex number."
     },
     {
       "name": "Imaginary",
@@ -3236,7 +3260,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the intersection of two or more collections as a set.",
+      "description": "Return the intersection of one or more collections as a set.",
       "wikidata": "Q185837"
     },
     {
@@ -3345,7 +3369,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "`IsComposite(n)` returns `True` if `n` is not a prime number"
+      "description": "`IsComposite(n)` returns `True` if `n` is a composite number"
     },
     {
       "name": "IsDiagonal",
@@ -3825,13 +3849,13 @@
       "name": "Length",
       "category": "Collections",
       "arity": "1",
-      "signature": "(any) -> integer",
+      "signature": "(any) -> integer | infinity",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Number of elements in a collection. Returns undefined for non-collections and for infinite collections."
+      "description": "Number of elements in a collection. Returns +oo for an unbounded Range, and undefined for non-collections and for other infinite collections."
     },
     {
       "name": "Less",
@@ -4008,7 +4032,7 @@
       "name": "LogIntegral",
       "category": "special-functions",
       "arity": "1",
-      "signature": "(number) -> real",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4115,6 +4139,18 @@
       "lazy": true,
       "broadcastable": false,
       "description": "A case of a `Match`: `MatchCase(pattern, body)` or `MatchCase(pattern, guard, body)`. The pattern holds engine wildcards; the body references the bound capture names."
+    },
+    {
+      "name": "MatchesType",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(subject: any, type: string|type) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "True iff the first operand, EVALUATED, is a value of the given type — the engine form of the Epsil `x is T` test and of `match` type patterns, which both lower here. The subject is never unwrapped: a type VALUE is a value like any other, so `MatchesType(TypeFrom(\"integer\"), \"number\")` is `False` while `MatchesType(TypeFrom(\"integer\"), \"type\")` is `True`; the type-to-type question is `Subtype`. A settled subject is decided both ways; a valueless or unresolved subject answers from its static type when that decides it, and stays symbolic otherwise."
     },
     {
       "name": "Matrix",
@@ -4538,7 +4574,7 @@
       "name": "Normal",
       "category": "Calculus",
       "arity": "1",
-      "signature": "(value) -> number",
+      "signature": "(value) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4940,7 +4976,7 @@
       "name": "Ordering",
       "category": "Collections",
       "arity": "optional",
-      "signature": "(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number))?) -> list<integer> where T",
+      "signature": "(indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<integer> where T",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5864,7 +5900,7 @@
       "name": "Rank",
       "category": "Linear Algebra",
       "arity": "1",
-      "signature": "(value) -> number",
+      "signature": "(value) -> integer",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5875,8 +5911,8 @@
     {
       "name": "Rational",
       "category": "Arithmetic",
-      "arity": "optional",
-      "signature": "(number, integer?) -> rational",
+      "arity": "1",
+      "signature": "((real) -> rational) | ((integer, integer) -> rational)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5899,6 +5935,18 @@
         "Rationalize(1.75)  // 7/4",
         "Rationalize(Sqrt(3), 1/500)  // 26/15"
       ]
+    },
+    {
+      "name": "Re",
+      "category": "Arithmetic",
+      "arity": "1",
+      "signature": "(number) -> real",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "`Re` is an alias for `Real`, which is the preferred name. Returns the real part of a complex number."
     },
     {
       "name": "Real",
@@ -6325,7 +6373,7 @@
       "name": "SigmaMinus1",
       "category": "Number Theory",
       "arity": "1",
-      "signature": "(integer) -> number",
+      "signature": "(integer) -> rational",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6337,7 +6385,7 @@
       "name": "Sign",
       "category": "Arithmetic",
       "arity": "1",
-      "signature": "(number) -> integer",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6385,7 +6433,7 @@
       "name": "Sinc",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(number) -> real",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6509,7 +6557,7 @@
       "name": "Sort",
       "category": "Collections",
       "arity": "optional",
-      "signature": "((T, order: (((character) any -> unknown) | ((character, character) any -> number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number))?) -> list<T> where T)",
+      "signature": "((T, order: (((character) any -> unknown) | ((character, character) any -> number | boolean))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> number | boolean))?) -> list<T> where T)",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -6787,6 +6835,18 @@
       "broadcastable": true,
       "description": "Difference between two or more values.",
       "wikidata": "Q40754"
+    },
+    {
+      "name": "Subtype",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(subtype: string|type, supertype: string|type) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "True iff the FIRST operand is a subtype of the second — `Subtype(\"integer\", \"number\")` is `True`, `Subtype(\"number\", \"integer\")` is `False`. This is the same compatibility relation annotations and signatures use. Operands are type values or type text; a quantified (`where`) type is not comparable and errors."
     },
     {
       "name": "Succeeds",
@@ -7118,7 +7178,7 @@
       "name": "Totient",
       "category": "Number Theory",
       "arity": "1",
-      "signature": "(number) -> integer",
+      "signature": "(integer) -> integer",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7324,13 +7384,13 @@
       "name": "Type",
       "category": "Core",
       "arity": "1",
-      "signature": "(any) -> string",
+      "signature": "(any) -> type",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the type of an expression as a string."
+      "description": "The STATIC type of an expression, as a type value: `Type(3)` is `TypeFrom(\"integer\")`. The observer does not evaluate its operand. Recover the text with `StringFrom(Type(x))`; in a string interpolation a type value renders as its text directly. BREAKING (2026-08-19, ruling R3 of `docs/TYPE-SYSTEM.md`): the result used to be a STRING, and `Type(x) == \"some text\"` is now always `False` — use `x is T`, `Subtype(Type(x), u)`, or compare `StringFrom` text."
     },
     {
       "name": "Typed",
@@ -7343,6 +7403,18 @@
       "lazy": true,
       "broadcastable": false,
       "description": "Ascribe a type to an expression. The type is asserted for the type system (ascription, not a check); evaluation is transparent. Used to annotate `Function` literal parameters and return types."
+    },
+    {
+      "name": "TypeFrom",
+      "category": "Core",
+      "arity": "1",
+      "signature": "(text: string) -> type",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "A type expression as a first-class value, constructed from its text: `TypeFrom(\"list<integer>\")`. The value SETTLES at construction — the text is parsed, reduced, and stored back as its canonical form — so two values built from equivalent spellings (`\"integer|real\"`, `\"real|integer\"`) are the same value. `==` between two type values is mutual subtyping (it also equates an alias with its body); `==` between a type value and anything else, a string included, is `False`. Construction never touches the type registry: a forward reference (`type X`) or an unknown name is an error, not a registration."
     },
     {
       "name": "Unevaluated",
@@ -7493,7 +7565,7 @@
       "name": "Vector",
       "category": "Linear Algebra",
       "arity": "variadic",
-      "signature": "(number+) -> vector",
+      "signature": "(any+) -> vector",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -7642,7 +7714,7 @@
     {
       "name": "CatalanConstant",
       "category": "Arithmetic",
-      "type": "real",
+      "type": "real<0.915965594177219..0.9159655941772191>",
       "description": "Catalan's constant G ≈ 0.9160.",
       "wikidata": "Q855282",
       "value": "{\"num\":\"0.91596559417721901505460351493238411077414937428167\\n                  21342664981196217630197762547694793565129261151062\\n                  48574422619196199579035898803325859059431594737481\\n                  15840699533202877331946051903872747816408786590902\\n                  47064841521630002287276409423882599577415088163974\\n                  70252482011560707644883807873370489900864775113225\\n                  99713434074854075532307685653357680958352602193823\\n                  23950800720680355761048235733942319149829836189977\\n                  06903640418086217941101917532743149978233976105512\\n                  24779530324875371878665828082360570225594194818097\\n                  53509711315712615804242723636439850017382875977976\\n                  53068370092980873887495610893659771940968726844441\\n                  66804621624339864838916280448281506273022742073884\\n                  31172218272190472255870531908685735423498539498309\\n                  91911596738846450861515249962423704374517773723517\\n                  75440708538464401321748392999947572446199754961975\\n                  87064007474870701490937678873045869979860644874974\\n                  64387206238513712392736304998503539223928787979063\\n                  36440323547845358519277777872709060830319943013323\\n                  16712476158709792455479119092126201854803963934243\\n                  \"}"
@@ -7650,7 +7722,7 @@
     {
       "name": "ComplexInfinity",
       "category": "Arithmetic",
-      "type": "complex",
+      "type": "number",
       "description": "Complex infinity, a single unsigned infinity in the complex plane."
     },
     {
@@ -7668,7 +7740,7 @@
     {
       "name": "e",
       "category": "Arithmetic",
-      "type": "real",
+      "type": "real<2.718281828459045..2.718281828459046>",
       "description": "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
       "value": "ExponentialE"
     },
@@ -7689,39 +7761,39 @@
     {
       "name": "EulerGamma",
       "category": "Arithmetic",
-      "type": "real",
+      "type": "real<0.5772156649015328..0.5772156649015329>",
       "description": "The Euler–Mascheroni constant γ ≈ 0.5772.",
       "wikidata": "Q273023"
     },
     {
       "name": "ExponentialE",
       "category": "Arithmetic",
-      "type": "real",
+      "type": "real<2.718281828459045..2.718281828459046>",
       "description": "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
       "wikidata": "Q82435"
     },
     {
       "name": "ExtendedComplexNumbers",
       "category": "Collections",
-      "type": "set<complex>",
+      "type": "set<complex | infinity>",
       "description": "The set of all complex numbers, including infinities."
     },
     {
       "name": "ExtendedIntegers",
       "category": "Collections",
-      "type": "set<integer>",
+      "type": "set<integer | non_finite_number>",
       "description": "The set of all integers, including infinities."
     },
     {
       "name": "ExtendedRationalNumbers",
       "category": "Collections",
-      "type": "set<rational>",
+      "type": "set<rational | non_finite_number>",
       "description": "The set of all rational numbers, including infinities."
     },
     {
       "name": "ExtendedRealNumbers",
       "category": "Collections",
-      "type": "set<real>",
+      "type": "set<real | non_finite_number>",
       "description": "The set of all real numbers, including infinities."
     },
     {
@@ -7741,7 +7813,7 @@
     {
       "name": "GoldenRatio",
       "category": "Arithmetic",
-      "type": "real",
+      "type": "real<1.618033988749894..1.618033988749895>",
       "description": "The golden ratio φ = (1+√5)/2 ≈ 1.618.",
       "wikidata": "Q41690",
       "value": "[\"Divide\",[\"Add\",1,[\"Sqrt\",5]],2]"
@@ -7808,7 +7880,7 @@
     {
       "name": "NegativeInfinity",
       "category": "Arithmetic",
-      "type": "non_finite_number",
+      "type": "-oo",
       "description": "Negative infinity (−∞).",
       "value": "null"
     },
@@ -7857,7 +7929,7 @@
     {
       "name": "Pi",
       "category": "Trigonometry",
-      "type": "real",
+      "type": "real<3.141592653589793..3.141592653589794>",
       "description": "The constant π ≈ 3.14159, the ratio of a circle's circumference to its diameter.",
       "wikidata": "Q167"
     },
@@ -7871,7 +7943,7 @@
     {
       "name": "PositiveInfinity",
       "category": "Arithmetic",
-      "type": "non_finite_number",
+      "type": "+oo",
       "description": "Positive infinity (+∞).",
       "value": "null"
     },

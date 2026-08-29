@@ -213,19 +213,36 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     Divides: {
       description:
-        '`Divides(a, b)` returns `True` if `a` divides `b` (i.e. `b` is an integer multiple of `a`), corresponding to the notation `a ∣ b`. Stays symbolic for non-integer operands.',
+        '`Divides(a, b)` returns `True` if `a` divides `b` (i.e. `b` is an integer multiple of `a`), corresponding to the notation `a ∣ b`. Both operands are integers; a symbolic operand keeps the relation unevaluated.',
       complexity: 1200,
-      // Params are `number` (not `integer`) — like `IsPrime`/`IsOdd` — so a
-      // symbolic operand (statically typed `number`) is accepted
-      // and the relation stays symbolic; the `evaluate` handler reduces only
-      // when both operands are concrete integers.
-      signature: '(number, number) -> boolean',
+      // Divisibility is a relation on the integers, so both slots take the
+      // `integer` carrier, like the other number-theory heads (`Sigma0`,
+      // `NthPrime`, `Divisors`). A provably non-integer operand is rejected at
+      // the signature with `incompatible-type` (ruling L9(a): an argument
+      // outside the operator's mathematical domain is the declared contract's
+      // to refuse). This does NOT close the symbolic route: validation rejects
+      // only what the types PROVE disjoint, so every symbolic operand is still
+      // admitted — `Divides(a, b)`, and a compound such as `Divides(2, 2^n)`
+      // whose type is the wide `number`, all reach the handler and stay
+      // unevaluated there.
+      //
+      // The wide `(number)` carrier that `IsPrime`/`IsOdd` use is the
+      // MEMBERSHIP-PREDICATE convention (`docs/SIGNATURE-GUIDELINES.md` §3.3),
+      // which applies to a predicate that answers `False` for a non-member.
+      // `Divides` is not one: whether a non-integer divides an integer has no
+      // ring-independent answer (in the rationals every non-zero element
+      // divides every element), so there is no `False` to give and the
+      // question itself is out of domain.
+      signature: '(integer, integer) -> boolean',
       examples: ['Divides(3, 12)  // "True"'],
       evaluate: ([aOp, bOp], { engine: ce }) => {
         // Exact-integrality gate: `toBigint` ROUNDS a non-integer (2.5 → 3),
-        // and the declared `number` parameters admit one, so without this
-        // gate `Divides(2.5, 3)` answered the rounded question `3 | 3` →
-        // `True` (same guard family as the `Mod` modular reduction).
+        // so without this gate `Divides(2.5, 3)` answered the rounded
+        // question `3 | 3` → `True` (same guard family as the `Mod` modular
+        // reduction). The `integer` parameters now refuse a literal `2.5`
+        // before the handler runs, but the gate still earns its place: a
+        // SYMBOLIC operand is admitted by the signature and reaches here with
+        // its integrality undecided.
         if (aOp.isInteger !== true || bOp.isInteger !== true) return undefined;
         const a = toBigint(aOp);
         const b = toBigint(bOp);
@@ -240,12 +257,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         '`NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`.',
       complexity: 1200,
-      // Params match `Divides` (`number`, not `integer`): the canonical
-      // rewrite to `Not(Divides(…))` means `Divides`' declared signature is
-      // what governs after canonicalization — a stricter spelling here
-      // would never be enforced. Non-integer operands stay symbolic,
-      // exactly as `Divides` does.
-      signature: '(number, number) -> boolean',
+      // Params match `Divides`: the canonical rewrite to `Not(Divides(…))`
+      // means `Divides`' declared signature is what governs after
+      // canonicalization, so the two spellings must agree or the stricter one
+      // would silently decide both.
+      signature: '(integer, integer) -> boolean',
       canonical: (ops, { engine }) => engine.expr(['Not', ['Divides', ...ops]]),
     },
 
@@ -1038,16 +1054,21 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q190026',
       description:
         "Euler's totient function φ(n): count of positive integers ≤ n that are coprime to n.",
-      // `(number)`, not `(integer)`: a strict integer parameter rejects
-      // symbolic operands at rule-boxing time — `Totient(2^n)` soundly types
-      // `rational` since the WP-2.9 Power-type fix (n could be
-      // negative), which broke 4 Fungrim rules. The evaluate handler below
-      // validates integrality at runtime (`toBigint` → null keeps
-      // non-integers symbolic), same pattern as `Binomial` (WP-2.15).
-      signature: '(number) -> integer',
+      // The `integer` carrier, like the other number-theory heads: φ counts
+      // integers coprime to an integer, so a provably non-integer argument is
+      // rejected at the signature with `incompatible-type` (ruling L9(a)).
+      // The Fungrim rules that apply φ to a compound (`Totient(2^n)`,
+      // `Totient(m^n)`, `Totient(p^k)`) are unaffected: validation rejects
+      // only what the types PROVE disjoint, and those compounds type `number`,
+      // which overlaps `integer`. The evaluate handler still gates integrality
+      // at runtime, because a symbolic operand reaches it undecided
+      // (`toBigint` COERCES via rounding, so the gate must come first).
+      signature: '(integer) -> integer',
       evaluate: ([n], { engine: ce }) => {
-        // Runtime integrality guard (the signature is deliberately loose, see
-        // above; `toBigint` COERCES via rounding, so gate before it).
+        // Runtime integrality guard. The `integer` signature refuses a
+        // provably non-integer argument, but a SYMBOLIC one is admitted and
+        // arrives here undecided, and `toBigint` COERCES via rounding — so
+        // gate before it.
         if (n.isInteger !== true) return undefined;
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;

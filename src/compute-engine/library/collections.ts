@@ -544,8 +544,17 @@ const peekMembershipPreserving = (
 // Parsed signatures (kept in sync with the `signature:` strings on the
 // respective definitions) for the count/membership canonical handlers to
 // delegate operand validation to `validateArguments`.
+// The result type both `Length` and `Count` report when the source may be
+// unbounded. The `+oo` singleton is deliberate — a count is never negatively
+// infinite — and is widened to `integer | infinity` by `widenValueTypes()`
+// before it reaches the caller; see the comments on those two `type:`
+// handlers. One constant so the two cannot drift apart.
+const COUNT_OR_INFINITE = parseType('integer | +oo');
+
 const LENGTH_SIGNATURE = parseType('(any) -> integer | infinity');
-const COUNT_SIGNATURE = parseType('(collection<any>, any?) -> integer');
+const COUNT_SIGNATURE = parseType(
+  '(collection<any>, any?) -> integer | infinity'
+);
 const ISEMPTY_SIGNATURE = parseType('(collection<any>) -> boolean');
 const CONTAINS_SIGNATURE = parseType(
   '(collection<any>, element: any) -> boolean'
@@ -2789,7 +2798,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       xs !== undefined &&
       isFunction(xs, 'Range') &&
       xs.ops.some((op) => op.type.matches('infinity'))
-        ? parseType('integer | +oo')
+        ? COUNT_OR_INFINITE
         : 'integer',
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a length (see `peekCountPreserving`).
@@ -4027,7 +4036,60 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     keywords: ['cardinality', 'tally', 'occurrences'],
     complexity: 8200,
-    signature: '(collection<any>, any?) -> integer',
+    signature: '(collection<any>, any?) -> integer | infinity',
+    // Only the 1-arg cardinality form can answer an infinity: it reports
+    // `xs.count` as it stands, and an unbounded source counts infinitely many
+    // elements (`Count(Range(1, +oo))` and `Count(Repeat(5))` are both `+oo`).
+    // Both 2-arg forms decline on a source that is not a finite collection —
+    // the predicate form reads the count of a `Filter` over it, which is
+    // unknown for a non-finite source, and the value form tests
+    // `isFiniteCollection` before it walks — so they always answer a finite
+    // `integer`. Reporting that keeps a count used as an index or a loop bound
+    // from being widened by a case that cannot arise at those forms. The claim
+    // describes what those forms can ANSWER: a 2-arg call over an infinite
+    // source declines, and a declined call stays inert with no value at all,
+    // so it never contradicts the `integer`.
+    //
+    // The 1-arg form reports the wide claim for every source EXCEPT the two
+    // structural cases below, which are finite by construction. Narrowing it
+    // in general would mean asking the source whether it is finite, and that
+    // facet dispatches the per-operator `isFinite` collection handler. Where
+    // an operator supplies no explicit handler, the synthesized default
+    // (`makeCollectionHandlers`, `collection-utils.ts`) derives finiteness
+    // from `count` — and counting a lazy source WALKS it, running whatever
+    // caller-supplied callback the source carries. A type handler must not do
+    // that: a callback that mutates would then be observable from merely
+    // asking a type. `Length` above can afford the narrow claim because its
+    // own `evaluate` answers `+oo` for one structural case only (an unbounded
+    // `Range`), which the type channel decides without dispatching anything.
+    //
+    // The two structural cases the 1-arg form can decide without dispatching
+    // anything: a literal `List`/`Set` node holds exactly the operands it was
+    // written with, and a list type carrying declared DIMENSIONS
+    // (`vector<integer^3>`, `list<real^(2x3)>`) fixes the element count in the
+    // type itself. Both are finite, so they report the exact `integer`.
+    //
+    // The handler's `+oo` singleton does not survive as written: a handler
+    // result is passed through `widenValueTypes()`
+    // (`boxed-expression/boxed-function.ts`), which turns every value-literal
+    // type into its ordinary counterpart, so the call reports
+    // `integer | infinity`. The DECLARATION is spelled `infinity` for that
+    // reason: a declared `+oo` names a type no stored result can ever have, so
+    // the reported type would not be a subtype of the declared one. The
+    // handler keeps the tighter `+oo` because a count is never negatively
+    // infinite. `Length` above carries the same pair of spellings for the same
+    // reason.
+    type: (ops) => {
+      if (ops.length !== 1) return 'integer';
+      const xs = ops[0];
+      if (xs !== undefined) {
+        if (isFunction(xs, 'List') || isFunction(xs, 'Set')) return 'integer';
+        const t = xs.type.type;
+        if (typeof t !== 'string' && t.kind === 'list' && t.dimensions)
+          return 'integer';
+      }
+      return COUNT_OR_INFINITE;
+    },
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a count (see `peekCountPreserving`). Only the
     // 1-arg cardinality form is safe to strip: the 2-arg forms may carry an

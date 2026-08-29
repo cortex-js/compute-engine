@@ -1291,7 +1291,11 @@ with no snapshot churn beyond the four deliberately re-pinned rows):
    rewrite is harmless: `NotDivides(2.5, 3)` stays symbolic. Its
    declaration is narrowed to `(number, number)` to match what the
    rewrite preserves (`Divides`' own contract, the only one that
-   governs after canonicalization).
+   governs after canonicalization). SUPERSEDED 2026-08-29: `Divides` was
+   itself narrowed from `(number, number)` to `(integer, integer)`, so
+   `NotDivides` now carries that same pair. A non-integer operand no
+   longer stays symbolic — `NotDivides(2.5, 3)` is rejected at
+   canonicalization with `incompatible-type`, as `Divides(2.5, 3)` is.
 3. `Subtract` and 4. `Multiply` unary folds — the fold sites (`Subtract`
    canonical in `library/arithmetic.ts`; both unary returns of
    `canonicalMultiply` in `arithmetic-mul-div.ts`) now reject a lone
@@ -1325,7 +1329,12 @@ concrete integers" comment, and reaching `NotDivides` through its
 rewrite (`NotDivides(2.5, 3)` → `False`; the truth is `True`). Fixed per
 the 2026-08-24 ruling with an exact integrality gate (`.isInteger`):
 non-integer operands stay symbolic, as the comment always promised, and
-`NotDivides(2.5, 3)` now stays symbolic too. The same gate was added to
+`NotDivides(2.5, 3)` now stays symbolic too. SUPERSEDED 2026-08-29: both
+declarations were narrowed to `(integer, integer)`, so a non-integer
+operand no longer reaches the gate — `Divides(2.5, 3)` and
+`NotDivides(2.5, 3)` are now `incompatible-type` errors at
+canonicalization rather than symbolic. The gate still governs the
+symbolic route (`Divides(x, 3)` with `x` valueless). The same gate was added to
 `FromContinuedFraction`'s term extraction, which used to reconstruct
 from a rounded non-integer term. The CLASS is worth remembering: the
 conformance fuzz can never catch a handler whose declared signature

@@ -3,8 +3,8 @@
  *
  * `Nothing` is the engine's erasure marker, not a value. A `Nothing` operand
  * of an arithmetic head is dropped at canonicalization (`Add(Nothing, x)` is
- * `x`), but the bare symbol itself can still reach a compiler — for instance a
- * malformed `Which` with a dangling clause canonicalizes to `Nothing`. The
+ * `x`), but the bare symbol itself can still reach a compiler — an empty
+ * `Sequence` canonicalizes to it, there being nothing left to splice. The
  * JavaScript target refused it in its own `var` hook; the shader targets
  * emitted the undefined identifier `Nothing` behind `success: true` (a
  * driver-side compile error), Python the undefined name `Nothing`, and the
@@ -38,13 +38,21 @@ describe('a bare Nothing fails closed on every target', () => {
     );
   });
 
+  // The original witness here was a malformed `Which` with a dangling clause,
+  // which used to canonicalize to `Nothing`. It no longer does — an odd
+  // operand count is now reported as an `Error` instead of quietly becoming an
+  // ordinary value — so the route that still reaches a compiler with the bare
+  // symbol is an empty `Sequence`: splicing nothing leaves nothing.
   test.each(TARGETS)(
-    '%s: a malformed Which (dangling clause) canonicalizes to Nothing and is declined',
+    '%s: an empty Sequence canonicalizes to Nothing and is declined',
     (to) => {
-      const malformed = ['Which', ['Less', 't', 1], ['Add', 't', 1], ['Add', 't', 2]];
-      expect(ce.box(malformed as never).toString()).toBe('"Nothing"');
-      const r = compileOn(to, malformed);
+      const empty = ['Sequence'];
+      expect(ce.box(empty as never).symbol).toBe('Nothing');
+      const r = compileOn(to, empty);
       expect(r.success).toBe(false);
+      expect(r.diagnostic?.message ?? r.error ?? '').toMatch(
+        /erasure marker is not a value/
+      );
     }
   );
 

@@ -3803,11 +3803,12 @@ export class BaseCompiler {
         target.boundVars?.has(s) === true ||
         target.varsKeys?.has(s) === true;
       // `Nothing` is the engine's ERASURE marker, not a value: an arithmetic
-      // operand spelled `Nothing` is dropped at canonicalization, and a
-      // malformed form (an odd-length `Which` clause list) canonicalizes to
-      // the bare symbol. Reaching this point means an emitter is about to
-      // splice it in as an ordinary operand, and every target's free-symbol
-      // plumbing then produces something that looks like success: the shader
+      // operand spelled `Nothing` is dropped at canonicalization, and a form
+      // evaluated for effect — a `Loop` that runs to completion without a
+      // `Break`/`Return` value — evaluates to the bare symbol. Reaching this
+      // point means an emitter is about to splice it in as an ordinary
+      // operand, and every target's free-symbol plumbing then produces
+      // something that looks like success: the shader
       // targets emitted the undefined identifier `Nothing` (a driver-side
       // compile error behind `success: true`), the Python target the
       // undefined name `Nothing`, and the interval target a `_.Nothing`
@@ -13456,9 +13457,9 @@ export class BaseCompiler {
    * primitives → `typeof`/`Number.isInteger`/`Number.isFinite` where JS can
    * express them. Every bare numeric name denotes a FINITE value, so its
    * guard rejects `Infinity` and `NaN` at run time exactly as the
-   * interpreter's signature check does. The `infinity` and `nan` tiers cannot
-   * be told apart in compiled JavaScript (complex infinity lowers to NaN
-   * there) and therefore decline; see the comment on those cases below.
+   * interpreter's signature check does. The `non_finite_number`, `infinity`
+   * and `nan` tiers have no faithful JS test and therefore decline; see the
+   * comment on those cases below.
    * The JS calling convention represents a complex value as a `{re, im}`
    * object and a real one as a plain number, and BOTH inhabit `complex` (and
    * `number`): those two guards accept either shape, so a complex-valued
@@ -13486,29 +13487,54 @@ export class BaseCompiler {
         // carries both parts, so both are tested.
         case 'complex':
           return `(Number.isFinite(${a}) || (${jsComplexObjectTest(a)} && Number.isFinite(${a}.re) && Number.isFinite(${a}.im)))`;
-        // `non_finite_number` is the SIGNED pair `+∞ | −∞`. It excludes
-        // complex infinity and it excludes NaN, so "a number that is neither
-        // finite nor NaN" is an exact test: compiled `+∞`/`−∞` are the JS
-        // values `Infinity`/`-Infinity` and pass it, while compiled complex
-        // infinity (see below) is NaN and correctly fails it.
-        case 'non_finite_number':
-          return `(typeof ${a} === "number" && !Number.isFinite(${a}) && !Number.isNaN(${a}))`;
-        // `infinity` and `nan` have NO faithful JS test, so a clause set that
-        // uses either declines as a whole and runs interpreted.
+        // `non_finite_number` (the SIGNED pair `+∞ | −∞`), `infinity` and
+        // `nan` have NO faithful JS test, so a clause set that uses any of
+        // the three declines as a whole and runs interpreted.
         //
-        // The reason is a representation collision. Compiled JavaScript has no
-        // distinct value for complex infinity: `~oo` lowers to the JS value
-        // NaN. But the interpreter types `~oo` as `infinity` and NOT as `nan`
-        // — the two are disjoint there. So `Number.isNaN(a)` would accept a
-        // compiled `~oo` that the interpreter refuses from a `nan` parameter,
-        // and any `infinity` test expressible over JS numbers would refuse a
-        // compiled `~oo` that the interpreter accepts. Both directions were
-        // measured on the clause set `g(a: T) = 1; g(x: number) = 0`.
+        // The reason is a representation collision, and `~oo` reaches
+        // compiled code as two DIFFERENT JS values depending on where it
+        // comes from:
+        //
+        //  - PRODUCED by compiled code, `~oo` is the JS value `Infinity`.
+        //    That holds on every internal route — an embedded `~oo` literal,
+        //    a constant-folded pole (`Gamma(-2)`), a pole computed at run
+        //    time (`Gamma(x)` at `x = -2`, `1 / x` at `x = 0`), and
+        //    arithmetic over one — because the pole encoding keeps the
+        //    magnitude and drops the direction it cannot express.
+        //  - Handed in as an ARGUMENT across the interpreter→JS boundary,
+        //    `~oo` has no JS number to become: its `valueOf()` is the string
+        //    `~oo`, which coerces to NaN.
+        //
+        // The interpreter meanwhile types `~oo` as `infinity`, which is
+        // disjoint there from both `nan` and `non_finite_number`. So none of
+        // the three tiers has a JS test that agrees with the interpreter on
+        // both routes:
+        //
+        //  - `Number.isNaN(a)` accepts a `~oo` ARGUMENT that the interpreter
+        //    refuses from a `nan` parameter, and an `infinity` test over JS
+        //    numbers refuses that same argument where the interpreter accepts
+        //    it.
+        //  - "a number that is neither finite nor NaN" — the only candidate
+        //    test for `non_finite_number` — accepts a `~oo` that compiled code
+        //    PRODUCED, because that value is the JS `Infinity`. Measured on
+        //    the clause set `g(a: non_finite_number) = 1; g(x: number) = 0`:
+        //    with such a guard in place, compiled `g(1 / w)` at `w = 0`
+        //    answered 1 where the interpreter answers 0, since the
+        //    interpreter's `1 / 0` is `~oo` and types `infinity`, which is not
+        //    below `non_finite_number`.
+        //
+        // Every direction above was measured on the clause set
+        // `g(a: T) = 1; g(x: number) = 0`. The guard decides whatever value
+        // reaches the parameter — an argument that crossed the
+        // interpreter→JS boundary and a value the compiled body itself
+        // produced alike — so a disagreement on EITHER route is enough to
+        // make the decline necessary.
         //
         // Declining rather than diverging is the compilation model's posture
         // for a construct the target cannot represent (D6 fail-closed, and the
         // §8 whole-function decline this return value expresses): the
         // interpreted fallback still dispatches such a clause set correctly.
+        case 'non_finite_number':
         case 'infinity':
         case 'nan':
           return undefined;

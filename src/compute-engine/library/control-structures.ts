@@ -531,7 +531,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // operand. Held-position (production) effects are unaffected.
       invokes: false,
       type: (args) => {
-        if (args.length % 2 !== 0) return 'nothing';
+        // The operands are strictly PAIRED, so an odd count is a malformed
+        // call, and the `canonical` handler below turns such a call into an
+        // `Error`. An odd list still reaches this handler on the structural
+        // route, which skips canonicalization — but that expression
+        // canonicalizes when it is evaluated, so its VALUE is that same
+        // `Error`. The one route that reads an odd list as a working
+        // selection is `ce._fn('Which', …)`, which tags the node canonical
+        // without running the handler; that is internal engine construction,
+        // not something user input reaches. Report what every user-reachable
+        // route produces.
+        if (args.length % 2 !== 0) return 'error';
         let arms = args.filter((_, i) => i % 2 === 1);
         let conds = args.filter((_, i) => i % 2 === 0);
         // Only the REACHABLE clauses contribute: a literal `True` condition is
@@ -582,7 +592,23 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         return reduceType({ kind: 'union', types: [armType, 'missing'] });
       },
       canonical: (args, options) => {
-        if (args.length % 2 !== 0) return options.engine.Nothing;
+        // The operands are strictly PAIRED `(condition, value)`, so the
+        // count must be even. An unconditional default clause is written as
+        // a literal `True` condition — that is what the LaTeX `cases` parser
+        // emits for a row that carries no condition
+        // (`\begin{cases} x & x>0 \\ -x \end{cases}` boxes as
+        // `Which(0 < x, x, "True", -x)`), and what the `type` handler above
+        // reads to decide that no clause after it is reachable. There is no
+        // trailing-default form, so an odd operand count is a malformed
+        // call. Report it: answering `Nothing` turned a malformed call into
+        // an ordinary value, which hid the mistake — `Which(True, 1, 2)` and
+        // `Which(False, 1, 2)` both came back `Nothing`.
+        if (args.length % 2 !== 0)
+          return options.engine.error(
+            '`Which` takes alternating condition and value operands, so it ' +
+              'needs an even number of operands. Write an unconditional ' +
+              'default clause as a `True` condition: `Which(cond, a, True, b)`'
+          );
         return options.engine._fn(
           'Which',
           args.map((x) => x.canonical)

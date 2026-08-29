@@ -883,7 +883,7 @@ The program pulls together most of the language:
   `(v, j) := parseValue(cs, j)`.
 - `parseValue` dispatches on the next character with a **`match`
   expression**; the string scanner decodes escapes with another.
-- The character predicates take `string | missing`: an indexed read `cs[j]`
+- The character predicates take `character | missing`: an indexed read `cs[j]`
   is absent past the end of input, and that possibility is part of its type.
 
 ```epsil

@@ -42,11 +42,13 @@ most precise claim there is — the value itself:
 
 A literal type sits inside its numeric tier — `42` is an `integer`, `2.5` a
 `real` — so a literal is accepted anywhere its tier is. An exact value no
-machine number holds — `1/3`, `√2`, an astronomically large integer — is
-typed by the narrowest safe claim instead: its tier plus its sign (for
-example `Type(1/3)` reports a positive-rational type). And anything
-*stored* carries the tier: `let n = 42` declares `n: integer`, and the
-`radius` example below infers `real`.
+machine number holds — `1/3`, `√2`, an astronomically large integer — has no
+literal type to report, so it is typed by the narrowest safe claim instead:
+its tier, narrowed by a range that encloses the value. `Type(1/3)` reports
+`rational<0.33..0.34>` and `Type(Sqrt(2))` reports `real<1.4..1.5>` — bounds
+wide enough to be certainly true, which is also what fixes the sign. And
+anything *stored* carries the tier: `let n = 42` declares `n: integer`, and
+the `radius` example below infers `real`.
 
 Collections carry the type of what is in them, and how many:
 
@@ -59,6 +61,13 @@ Numeric types form a tower — `integer ⊂ rational ⊂ real ⊂ complex ⊂ nu
 and a value of a narrower type is accepted wherever a wider one is expected,
 with no conversion and no cast. An `integer` *is* a `real`, so a function
 declared `f(x: real)` takes `3` happily.
+
+Every name in that tower up to `complex` means a **finite** number. The
+infinities and `NaN` are not in any of them: they have types of their own,
+`infinity` and `nan`, and only the top of the tower covers all three —
+`number` is `complex`, `infinity` and `nan` together. So `f(x: real)` takes
+`3` and rejects `Infinity` and `NaN` with an `incompatible-type` error, while
+`f(x: number)` takes all of them.
 
 ## When to write an annotation
 
@@ -755,7 +764,8 @@ Epsil distinguishes three related kinds of absence:
 - `Nothing` means “no value here” and is removed from function arguments and
   collection literals.
 - `Missing` is a position-preserving missing value. Its type is `missing`.
-- `NaN` is the numeric form of an absent or undefined result. Numeric
+- `NaN` is the numeric form of an absent or undefined result. Its type is
+  `nan`, which sits outside `real` and `complex` and inside `number`. Numeric
   operations and missing numeric fields generally normalize absence to `NaN`.
 
 `IsMissing(x)` recognizes both `Missing` and `NaN`, regardless of how the
@@ -785,7 +795,9 @@ curious about why the system behaves the way it does.
 The foundation is **subtyping**: types are arranged in a hierarchy, and most
 questions the engine asks are of the form "is this type a subtype of that
 one?". The numeric tower — `integer ⊂ rational ⊂ real ⊂ complex ⊂ number` — is
-the familiar part. Around it the type language adds unions
+the familiar part; its one surprise is that every step up to `complex` is
+finite, so the infinities and `NaN` join only at `number`. Around it the type
+language adds unions
 (`integer | boolean`), range refinements (`integer<0..10>`), collections with
 element types (`list<integer>`, `set<string>`), tuples and records, and
 function signatures with effect labels.

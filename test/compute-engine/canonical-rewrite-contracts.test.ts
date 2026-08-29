@@ -73,15 +73,36 @@ describe('Rational: two-argument form is an (integer, integer) constructor', () 
 });
 
 describe('Divides: no reduction through the rounding toBigint', () => {
-  test('Divides(2.5, 3) stays symbolic (was: rounded to 3 | 3 → True)', () => {
+  // The contract this block protects is that a non-integer operand never
+  // reduces to a boolean through `toBigint`'s ROUNDING — `Divides(2.5, 3)`
+  // must not answer the rounded question `3 | 3` → `True`.
+  //
+  // The REMEDY changed on 2026-08-29. It used to be inertness, because the
+  // parameters were declared `(number, number)` and so admitted `2.5`; they
+  // now declare `(integer, integer)` like the other number-theory heads, so a
+  // provably non-integer operand is refused at the signature instead (ruling
+  // L9(a)). That is the same contract enforced earlier and more loudly: the
+  // wrong boolean is still impossible, and the caller now learns why. The
+  // handler's integrality gate stays — a SYMBOLIC operand is still admitted
+  // and still reaches it undecided.
+  test('Divides(2.5, 3) is refused, never rounded to 3 | 3 → True', () => {
     const result = ce.box(['Divides', 2.5, 3]).evaluate();
-    expect(result.operator).toBe('Divides');
+    expect(result.symbol).not.toBe('True');
+    expect(result.toString()).toContain('incompatible-type');
   });
 
-  test('NotDivides(2.5, 3) stays symbolic through its Not(Divides(…)) rewrite', () => {
+  test('NotDivides(2.5, 3) is refused through its Not(Divides(…)) rewrite', () => {
     const result = ce.box(['NotDivides', 2.5, 3]).evaluate();
-    expect(result.operator).toBe('Not');
-    expect(result.op1.operator).toBe('Divides');
+    expect(result.symbol).not.toBe('True');
+    expect(result.toString()).toContain('incompatible-type');
+  });
+
+  test('a SYMBOLIC operand is still admitted and stays unevaluated', () => {
+    // The carrier refuses only what the types PROVE non-integer, so the
+    // symbolic route the previous remedy protected is untouched.
+    const result = ce.box(['Divides', 'a', 'b']).evaluate();
+    expect(result.operator).toBe('Divides');
+    expect(result.toString()).not.toContain('incompatible-type');
   });
 
   test('integer divisibility still decides', () => {

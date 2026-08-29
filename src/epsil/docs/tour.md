@@ -39,7 +39,7 @@ numerical algorithm:
 
 ```epsil
 N(Sqrt(2))
-// ➔ 1.4142135623730951
+// ➔ 1.4142135623730950488
 ```
 
 Capitalized names such as `Simplify`, `Sqrt`, and `N` are Compute Engine
@@ -81,7 +81,7 @@ formula after `=`:
 ```epsil
 circleArea(r) = Pi * r^2
 circleArea(3)
-// ➔ 9π
+// ➔ 9pi
 ```
 
 For a function with local names or several steps, use a block. The last
