@@ -223,12 +223,19 @@ describe('COMPILE constant folding - constant collections', () => {
       '_fn_Qc(({ re: 1, im: -1 }))'
     );
 
-    // The same rule keeps a real-valued `At` with a COMPLEX INDEX structural:
-    // `isComplexValued` answers for the operands, so the index alone makes
-    // the node look complex while the element it selects is a plain number.
+    // A real-valued `At` with a COMPLEX INDEX folds the same way. It used to
+    // stay structural, because the read typed a bare `number` and the oracle
+    // hedged on it; the absence marker now types the read `integer | nan`,
+    // which is provably real, so the fold is admitted and inlines the
+    // interpreter's own answer. The `constantFold: false` emission still shows
+    // the structural shape, where the complex index survives as an object.
     const at = ce.box(['At', ['List', 10, 20, 30], ['Complex', 1, 2]] as any);
     expect(at.N().re).toBe(10);
-    expect(compile(at).code).toBe('_SYS.at([10, 20, 30], ({ re: 1, im: 2 }))');
+    expect(compile(at).code).toBe('10');
+    expect(compile(at).run!({})).toBe(10);
+    expect(compile(at, { constantFold: false }).code).toBe(
+      '_SYS.at([10, 20, 30], ({ re: 1, im: 2 }))'
+    );
   });
 
   it('a complex-ish COLLECTION never folds, in either direction', () => {

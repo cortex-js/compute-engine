@@ -205,14 +205,33 @@ describe('run-time index into a MIXED collection fails closed (D6)', () => {
   });
 
   test('a COMPLEX index is left to its own handling, not this guard', () => {
-    // `At(List(10, 20, 30), Complex(1, 2))` must keep reporting complex from
-    // the INDEX and stay unfolded — the elements say nothing about it.
+    // `At(List(10, 20, 30), Complex(1, 2))` must not DECLINE: the elements are
+    // all real, so this guard has nothing to say about the index. The
+    // structural lowering keeps the complex index as an object and defers to
+    // `_SYS.at`, which is what `constantFold: false` shows.
     const ce = new ComputeEngine();
-    const r = compile(
+    const structural = compile(
+      ce.box(['At', ['List', 10, 20, 30], ['Complex', 1, 2]] as any),
+      { constantFold: false }
+    )!;
+    expect(structural.success).toBe(true);
+    expect(structural.code).toEqual(
+      '_SYS.at([10, 20, 30], ({ re: 1, im: 2 }))'
+    );
+    // On the DEFAULT path the read is a closed constant expression, so the
+    // constant folder gets there first and inlines the interpreter's own
+    // answer. It used to stay structural here too, because the read typed a
+    // bare `number` and the complexness oracle hedged on it; the absence
+    // marker now types `integer | nan`, which is provably real, so the fold is
+    // admitted. Same value either way, which is the property that matters.
+    const folded = compile(
       ce.box(['At', ['List', 10, 20, 30], ['Complex', 1, 2]] as any)
     )!;
-    expect(r.success).toBe(true);
-    expect(r.code).toEqual('_SYS.at([10, 20, 30], ({ re: 1, im: 2 }))');
+    expect(folded.success).toBe(true);
+    expect(folded.code).toEqual('10');
+    expect(folded.run!({})).toEqual(
+      ce.box(['At', ['List', 10, 20, 30], ['Complex', 1, 2]] as any).N().re
+    );
   });
 });
 

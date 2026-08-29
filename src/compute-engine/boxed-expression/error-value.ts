@@ -50,6 +50,31 @@ const COLLECTION_OPERATORS = new Set([
 ]);
 
 /**
+ * True when `expr` is headed by an operator that DECIDES AT EVALUATION which
+ * of its held operands to evaluate (`selectsOperands` — `If`, `Which`,
+ * `And`/`Or`, `Coalesce`, …).
+ *
+ * An `Error` inside such a subtree is only POTENTIALLY a failure: it becomes
+ * the value of the node when the operator selects that operand, and is dead
+ * code when it does not (`docs/ERROR-MODEL.md` §3, the demanded-operands
+ * rule). Nothing outside the node can tell which, so the error walks below
+ * treat the whole subtree as opaque and let it evaluate; what its evaluation
+ * RETURNS is what bubbles.
+ *
+ * Excluded, matching the absorption rungs in `boxed-function.ts`: an observer
+ * (`inspectsErrors`), which is entitled to see the error and answer about it,
+ * and a collection head, whose failed cell is frozen in place rather than
+ * bubbled at all.
+ */
+export function defersErrorAbsorption(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  const def = expr.operatorDefinition;
+  if (def === undefined || def.selectsOperands !== true) return false;
+  if (def.inspectsErrors) return false;
+  return !isCollectionHead(expr);
+}
+
+/**
  * One breadcrumb frame: the error sat in operand `index` (1-based) of an
  * application of `operator`.
  */
@@ -79,6 +104,14 @@ export type ErrorFrame = { operator: string; index: number };
  * (`getSubexpressions('Error')`, which descends everywhere) rather than a
  * call to it.
  *
+ * **Selecting subtrees are not descended into either**, at any depth
+ * including the root: an error under an `If`/`And`/`Coalesce` may be dead
+ * code, and only that node's own evaluation can say
+ * (`defersErrorAbsorption`). So `Sin(If(True, 5, <error>))` carries no error
+ * value, while the `<error>` that `If(False, 5, <error>)` RETURNS does — it
+ * is then an ordinary `Error` value in the operand position, and this walk
+ * finds it there.
+ *
  * `isValid` is `false` exactly when a tree contains an `Error` node (only
  * `BoxedFunction` overrides it), so the walk runs only on values already known
  * to carry one, and prunes on it at every level.
@@ -93,7 +126,7 @@ export function errorValue(
 ): Expression | undefined {
   if (!expr || expr.isValid) return undefined;
   const path: ErrorFrame[] = [];
-  const err = firstEmbeddedError(expr, path);
+  const err = firstEmbeddedError(expr, path, true);
   if (err === undefined) return undefined;
   // `path` is collected outermost-first on the way down; the breadcrumb reads
   // innermost (failure site) first.
@@ -102,21 +135,54 @@ export function errorValue(
   return withErrorFrames(err, path);
 }
 
-/** The first `Error` node in `expr`, not descending into collection values.
- * `path` accumulates the frames traversed to reach it, outermost first. */
+/**
+ * The error `expr` MIGHT answer with once every selecting operator inside it
+ * has decided — the answer `errorValue()` would give if the
+ * demanded-operands rule did not exist.
+ *
+ * Its first use is to tell the two reasons `errorValue()` can decline apart.
+ * That happens both for a tree whose errors are all under selecting heads
+ * (where the node must be EVALUATED, because a selection may still demand the
+ * failing operand) and for a tree whose errors are all inside collection
+ * literals (where the node freezes with the failed cell in place). This walk
+ * answers only the first of those, so the caller can pick the right one.
+ *
+ * Its second use is to locate the operand a returned error came from, for the
+ * breadcrumb: the operand still holds the error as authored, whereas the copy
+ * the handler returned may have grown frames on its way out.
+ *
+ * No breadcrumb is built here — the frames a caller wants are the ones on the
+ * RETURNED error, not the ones this walk happens to cross.
+ */
+export function potentialErrorValue(
+  expr: Expression
+): Expression | undefined {
+  if (expr.isValid) return undefined;
+  return firstEmbeddedError(expr, [], false);
+}
+
+/** The first `Error` node in `expr`, not descending into collection values —
+ * nor, when `skipSelectors`, into a subtree whose evaluation decides for
+ * itself whether that error is demanded (`defersErrorAbsorption`). `path`
+ * accumulates the frames traversed to reach it, outermost first. */
 function firstEmbeddedError(
   expr: Expression,
-  path: ErrorFrame[]
+  path: ErrorFrame[],
+  skipSelectors: boolean
 ): Expression | undefined {
+  // The `Error` test comes first: a selecting operator that RETURNS the error
+  // of an operand it demanded is answering with an error value, not hiding
+  // one, and that value must be seen even though its own head defers.
   if (isFunction(expr, 'Error')) return expr;
   if (!isFunction(expr) || COLLECTION_OPERATORS.has(expr.operator))
     return undefined;
+  if (skipSelectors && defersErrorAbsorption(expr)) return undefined;
   const ops = expr.ops;
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     if (op === undefined || op.isValid) continue;
     path.push({ operator: expr.operator, index: i + 1 });
-    const err = firstEmbeddedError(op, path);
+    const err = firstEmbeddedError(op, path, skipSelectors);
     if (err !== undefined) return err;
     path.pop();
   }
@@ -182,7 +248,7 @@ export function errorWhere(err: Expression): Expression | undefined {
 
 /** `err` with `frames` appended to its breadcrumb (a no-op for an empty
  * chain). The historical operands are preserved untouched. */
-function withErrorFrames(
+export function withErrorFrames(
   err: Expression,
   frames: ReadonlyArray<ErrorFrame>
 ): Expression {

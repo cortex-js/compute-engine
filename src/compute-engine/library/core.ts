@@ -2270,6 +2270,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // each held operand (value-safe: `.canonical` binds structure without
       // substituting assigned symbol values).
       lazy: true,
+      // Selects among its operands, so an error in an operand it does not
+      // choose does not bubble (`docs/ERROR-MODEL.md` §3).
+      selectsOperands: true,
       // Accept absence into any operand position (a `Missing` operand is the
       // whole point) — declared `handle`, stripping every position (§3.A).
       missingBehavior: 'handle',

@@ -81,6 +81,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'broadcastable',
   'broadcastExemptions',
   'inspectsErrors',
+  'selectsOperands',
   'namedArgumentsRequired',
   'missingBehavior',
   'missingStrip',
@@ -183,6 +184,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   broadcastExemptions: ReadonlyArray<BroadcastExemption> = [];
 
   inspectsErrors = false;
+  selectsOperands = false;
   namedArgumentsRequired = false;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
   missingStrip: 'all' | number[] = 'all';
@@ -849,6 +851,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       broadcastable: this.broadcastable,
       broadcastExemptions: this.broadcastExemptions,
       inspectsErrors: this.inspectsErrors,
+      selectsOperands: this.selectsOperands,
       namedArgumentsRequired: this.namedArgumentsRequired,
       missingBehavior: this.missingBehavior,
       missingStrip: this.missingStrip,
@@ -911,6 +914,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.broadcastable = s.broadcastable;
     this.broadcastExemptions = s.broadcastExemptions ?? [];
     this.inspectsErrors = s.inspectsErrors;
+    this.selectsOperands = s.selectsOperands;
     this.namedArgumentsRequired = s.namedArgumentsRequired;
     this.missingBehavior = s.missingBehavior;
     this.missingStrip = s.missingStrip;
@@ -1028,6 +1032,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.broadcastExemptions =
       def.broadcastExemptions ?? this.broadcastExemptions;
     this.inspectsErrors = def.inspectsErrors ?? this.inspectsErrors;
+    this.selectsOperands = def.selectsOperands ?? this.selectsOperands;
+    // `selectsOperands` says the operator decides at evaluation WHICH held
+    // operands to evaluate, so it is meaningless without `lazy`: a strict
+    // operator's operands are all evaluated before its handler is called, and
+    // there is nothing left to select. Deferred error absorption keys on the
+    // flag, so setting it on a strict operator would silently stop that
+    // operator's operand errors from bubbling.
+    console.assert(
+      !this.selectsOperands || this.lazy,
+      `Operator Definition "${this.name}": 'selectsOperands' requires 'lazy'`
+    );
     this.namedArgumentsRequired =
       def.namedArgumentsRequired ?? this.namedArgumentsRequired;
     this.missingBehavior = def.missingBehavior ?? this.missingBehavior;

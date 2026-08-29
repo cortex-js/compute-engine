@@ -80,6 +80,25 @@ exact value's type.
    "no, 3.5 is not prime" into a type error — a category mistake. (A
    spelling like `range<1,oo>` is doubly wrong: it bakes the answer's
    support into the question's domain.)
+
+   *Where a carrier exclusion goes*: `IsPrime` and `IsComposite` accept all
+   of `number` except the infinities — primality is a question about finite
+   integers. They still DECLARE `(number) -> boolean` and enforce the
+   exclusion in the handler, which answers the same `incompatible-type`
+   error at evaluation. Writing the narrower carrier into the signature
+   (`(complex | nan)`) was tried and reverted: a declared parameter type is
+   also what an undeclared argument symbol is inferred FROM, so `IsPrime(n)`
+   declared the caller's own `n` as `complex | nan` — this predicate's
+   private exclusion stamped onto a name the rest of the program uses. Read
+   the rule as: put in the signature what a CALLER should be held to; put
+   in the handler what only the implementation knows. `NaN` needs no arm of
+   its own here — it rides in on `number` and the handler answers `False`,
+   which is the job `nanBehavior: 'handle'` will name once that machinery
+   exists. Two related decisions the predicate makes in the same place:
+   `IsPrime(-7)` is `False` — a prime is a positive integer greater than 1
+   (SymPy's convention, ruled 2026-08-29) — and `IsComposite` is NOT
+   `Not(IsPrime(n))`, since `0`, `1` and every non-integer are neither
+   prime nor composite.
 4. **Domain-restricted functions answer in the wider codomain, not with
    an error.** `Sqrt(-2)` is a complex number; `Arcsin(2)` is complex.
    The declared result widens (`-> complex`, or a union per rule §2.2);
@@ -134,7 +153,7 @@ handle.
 | Result with known bounds | narrowest named tier + range (`rational<0..1>`) | — |
 | Result that can blow up | `real \| infinity` (≤2 arms) | — |
 | ≥3 literal result values | a range, not a literal union | — |
-| Membership predicate | `(number) -> boolean`, `handle` | non-member → `False` at evaluate |
+| Membership predicate | `(number) -> boolean`, `handle` | non-member → `False` at evaluate; a carrier exclusion goes in the HANDLER (§3.3) |
 | Domain-restricted function | precise carrier, wider codomain | `Sqrt(-2)` → complex, no error |
 | Index/count/dimension slot | `integer`-family, `reject` | violation → `Error` at boxing when provable |
 | Mathematical integer slot | `integer`, explicit `propagate` | `NaN` flows at evaluate |

@@ -125,6 +125,75 @@
 
   `non_finite_number` is unchanged this release.
 
+- **`NaN` now PROPAGATES through a numeric operator under `evaluate()`, not
+  only under `.N()`.** `Sin(NaN)`, `Ln(NaN)`, `Gamma(NaN)`, `Heaviside(NaN)`,
+  `Sign(NaN)` and the rest of the numeric family evaluate to `NaN` where they
+  used to stay unevaluated. `NaN` is a float, so by the exactness contract a
+  numeric function of it has no exactness to preserve; the aggregates
+  (`Max(1, NaN, 3)`) already behaved this way. `BoxedNumber.isExact` is
+  `false` for `NaN` accordingly — it used to be `true`, disagreeing with the
+  same value stored in a `MachineNumericValue`. The signed infinities are
+  unchanged and stay exact.
+
+- **`IsPrime` answers `False` for a decidable non-member, and rejects an
+  infinite argument.** `IsPrime(3.5)`, `IsPrime(π)`, `IsPrime(i)` and
+  `IsPrime(NaN)` are `False` where they stayed unevaluated: a membership
+  predicate's `False` is a success value, not a failure to answer.
+  `IsPrime(oo)`, `IsPrime(-oo)` and `IsPrime(~oo)` are now an
+  `incompatible-type` Error at evaluation — primality is a question about
+  finite integers. The declared parameter stays the wide `(number)`, so
+  calling `IsPrime(n)` on an undeclared `n` still infers `n: number`.
+  A negative integer answers `False` too: this engine defines a
+  prime as a positive integer greater than 1, which is SymPy's convention for
+  `isprime` — Mathematica's `PrimeQ` takes the other one and accepts the
+  negatives of primes (primality up to units). An argument that could still
+  be an integer, such as an unknown symbol, is the only case that stays
+  unevaluated.
+  **`IsComposite` no longer canonicalizes to `Not(IsPrime(n))`** and has its
+  own definition: composite means a positive integer greater than 1 that is
+  not prime, so `IsComposite(1)` and `IsComposite(0)` are now `False` (both
+  were `True`), and `IsComposite(3.5)` and `IsComposite(-4)` are `False`.
+
+- **A selecting operator no longer fails on an error in an operand it does
+  not choose.** `If(True, 5, <error>)` evaluates to `5`, `And(False,
+  <error>)` to `False`, `Or(True, <error>)` to `True`, and `Coalesce(5,
+  <error>)` to `5`; `Which` selects past an error in an unreached clause. All
+  of these used to evaluate to the error. The boxed expression is unchanged —
+  `isValid` is still `false` and the diagnostic stays in place — so editor
+  and static analysis behavior does not move; only `evaluate()` and `N()`
+  change. An operand the operator DOES demand still propagates
+  (`If(False, 5, <error>)`, `If(<error>, 5, 7)`, `And(True, <error>)`), and
+  every other operator keeps absorbing errors before its handler runs.
+  Definitions can opt in with the new `selectsOperands` operator flag (valid
+  on a `lazy` operator only); it is set on `If`, `Which`, `And`, `Or`,
+  `Implies`, `Nand`, `Nor` and `Coalesce`.
+
+  The rule holds under composition, so `1 + If(True, <error>)`-style nesting
+  answers what the inner selection does: `1 + If(True, 5, <error>)` is `6`,
+  `Not(And(False, <error>))` is `True`, and `[If(True, 5, <error>)]` is
+  `[5]`. A selection whose condition is not decided yet stays unevaluated
+  with its diagnostic in place, and a bubbled error records the selecting
+  operator on its breadcrumb.
+
+  One consequence to be aware of: error propagation is demand-ordered and
+  therefore not commutative. `And(False, 1)` is `False` while `And(1, False)`
+  is the `incompatible-type` error on the `1` — canonicalization mints the
+  diagnostic in both, but only the second demands it.
+
+- **More heads propagate a `NaN` argument.** `Root(NaN, 3)`, `Mod(NaN, 2)`,
+  `Binomial(NaN, 2)`, `Power(2, NaN)`, `Factorial(NaN)`, `Factorial2(NaN)`,
+  `GCD(NaN, 2)` and `LCM(NaN, 2)` evaluate to `NaN` where they stayed
+  unevaluated even under `.N()`.
+
+- **An out-of-band-capable accessor types `T | nan` instead of bare
+  `number`.** `At([1,2,3], 99)`, `First([1,2,3])` and `Last([1,2,3])` type
+  `integer | nan` where they typed `number`, and an out-of-range literal
+  tuple index types `missing | nan` instead of `missing | number`. With the
+  bare tiers finite, `NaN` is no longer absorbed into `number`, so the
+  type-level absence marker names the `nan` singleton and the element tier
+  survives. Values did not move: the access still evaluates to `NaN`, and
+  `Missing` is still the marker for non-numeric elements.
+
 
 ### New Features
 

@@ -426,8 +426,11 @@ describe('(e) point-accessor RESULT typing follows the runtime dispatch', () => 
   const ce = new ComputeEngine();
 
   test('the flat point spelling types a SCALAR', () => {
+    // A scalar, not a `vector<2>`. The `| nan` arm is the coordinate slot's
+    // absence marker (`withMarker`, §3.C): a numeric slot's marker is the
+    // `nan` singleton, so the arm is additive and the tier survives.
     const e = ce.box(['PointX', ['List', 3, 4]]);
-    expect(e.type.toString()).toBe('number');
+    expect(e.type.toString()).toBe('integer | nan');
     expect(e.evaluate().toString()).toBe('3');
   });
 
@@ -591,7 +594,9 @@ describe('non-regressions', () => {
     const ce = new ComputeEngine();
     ce.assign('L', ce.box(['List', 10, 20, 30]));
     ce.box(['Assign', 'f', ['Function', ['Add', ['At', 'L', 't'], 1], 't']]).evaluate();
-    expect(ce.box('f').type.toString()).toBe('(unknown) -> number');
+    // The body's indexed read types `integer | nan` (the out-of-band access
+    // marker of a numeric element type), and adding `1` keeps both arms.
+    expect(ce.box('f').type.toString()).toBe('(unknown) -> integer | nan');
     expect(ce.box(['f', 2]).evaluate().toString()).toBe('21');
   });
 });

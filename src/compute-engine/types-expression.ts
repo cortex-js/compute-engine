@@ -218,6 +218,10 @@ type OperatorDefinitionFlags = {
     | 'single-collection-join'
   >;
   inspectsErrors: boolean;
+  /** True when this operator decides at evaluation which of its held operands
+   * to evaluate, so an error in an operand it does not choose is dead code.
+   * Only valid on a `lazy` operator. See `types-definitions.ts`. */
+  selectsOperands: boolean;
   /** True when every argument must be written with its parameter's name (an
    * object-type constructor). See `types-definitions.ts`. */
   namedArgumentsRequired: boolean;

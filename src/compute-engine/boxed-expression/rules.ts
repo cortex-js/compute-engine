@@ -31,7 +31,7 @@ import {
 import type { Parser, Terminator } from '../latex-syntax/types.js';
 import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary.js';
 
-import { isPrime } from './predicates.js';
+import { isComposite, isPrime } from './predicates.js';
 import { sameSyntactic } from './compare.js';
 import {
   isString,
@@ -213,14 +213,7 @@ export const CONDITIONS = {
   odd: (x: Expression) => x.isOdd,
 
   prime: (x: Expression) => isPrime(x) === true,
-  // A composite number is a positive integer greater than 1 that is not prime.
-  // `isPrime(1) === false`, so the previous `isPrime(x) === false` test wrongly
-  // classified 1 (and 0) as composite.
-  composite: (x: Expression) =>
-    x.isInteger === true &&
-    x.isPositive === true &&
-    x.isEqual(1) === false &&
-    isPrime(x) === false,
+  composite: (x: Expression) => isComposite(x) === true,
 
   // Fail-closed, three-valued: only when *provably* not equal to 0 / 1. The
   // previous `isSame(0)` was a structural check, so an unknown symbol (never

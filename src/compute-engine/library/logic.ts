@@ -364,8 +364,25 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     // would impose), and `isEqual`/`isIdenticallyEqual` compare modulo
     // permutation and nesting via the `eq` handler. `isSame` stays strictly
     // syntactic and evaluation still short-circuits left to right.
+    //
+    // The commutativity this restores is a claim about VALUES, and it does not
+    // extend to error propagation, which is demand-ordered: `And(False, 1)`
+    // answers `False` while `And(1, False)` answers the `incompatible-type`
+    // error on the `1`. Canonicalization mints that diagnostic in both trees —
+    // `1` is not a boolean — but evaluation demands operands left to right and
+    // stops at the first decisive one, so the error is dead code in the first
+    // tree and demanded in the second (the demanded-operands rule,
+    // `docs/ERROR-MODEL.md` §3; `selectsOperands` below is what implements
+    // it). Both trees stay INVALID and keep the diagnostic in place for static
+    // analysis; only the evaluated answers differ. This exception is
+    // deliberate: making it symmetric would mean either failing `And(False, 1)`
+    // — reporting an arm the program never reaches — or swallowing a genuine
+    // fault in `And(1, False)`.
     commutativeMatch: true,
     eq: (a, b, prover) => acEquivalentBoolean('And', a, b, prover),
+    // Selects among its operands, so an error in an operand it does not
+    // choose does not bubble (`docs/ERROR-MODEL.md` §3).
+    selectsOperands: true,
     canonical: canonicalShortCircuit('And', true),
     evaluate: evaluateShortCircuit('And', decideAnd, evaluateAnd),
     evaluateAsync: evaluateShortCircuitAsync('And', decideAnd, evaluateAnd),
@@ -388,6 +405,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     // "Option B" — see `And` above.
     commutativeMatch: true,
     eq: (a, b, prover) => acEquivalentBoolean('Or', a, b, prover),
+    // Selects among its operands, so an error in an operand it does not
+    // choose does not bubble (`docs/ERROR-MODEL.md` §3).
+    selectsOperands: true,
     canonical: canonicalShortCircuit('Or', true),
     evaluate: evaluateShortCircuit('Or', decideOr, evaluateOr),
     evaluateAsync: evaluateShortCircuitAsync('Or', decideOr, evaluateOr),
@@ -444,6 +464,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 10200,
     signature: '(boolean, boolean) -> boolean',
+    // Selects among its operands, so an error in an operand it does not
+    // choose does not bubble (`docs/ERROR-MODEL.md` §3).
+    selectsOperands: true,
     canonical: canonicalShortCircuit('Implies', false),
     evaluate: evaluateShortCircuit('Implies', decideImplies, evaluateImplies),
     evaluateAsync: evaluateShortCircuitAsync(
@@ -478,6 +501,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 10200,
     signature: '(boolean+) -> boolean',
+    // Selects among its operands, so an error in an operand it does not
+    // choose does not bubble (`docs/ERROR-MODEL.md` §3).
+    selectsOperands: true,
     canonical: canonicalShortCircuit('Nand', false),
     evaluate: evaluateShortCircuit('Nand', decideNand, evaluateNand),
     evaluateAsync: evaluateShortCircuitAsync('Nand', decideNand, evaluateNand),
@@ -496,6 +522,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 10200,
     signature: '(boolean+) -> boolean',
+    // Selects among its operands, so an error in an operand it does not
+    // choose does not bubble (`docs/ERROR-MODEL.md` §3).
+    selectsOperands: true,
     canonical: canonicalShortCircuit('Nor', false),
     evaluate: evaluateShortCircuit('Nor', decideNor, evaluateNor),
     evaluateAsync: evaluateShortCircuitAsync('Nor', decideNor, evaluateNor),

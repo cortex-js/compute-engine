@@ -43,6 +43,7 @@ import type {
   BoxedValueDefinition,
 } from '../global-types.js';
 import { spellCheckMessage } from '../boxed-expression/validate.js';
+import { errorValue } from '../boxed-expression/error-value.js';
 import {
   isFunction,
   isSymbol,
@@ -124,6 +125,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     If: {
       description: 'Conditional branch: evaluate one of two expressions.',
       lazy: true,
+      // Selects among its operands, so an error in an operand it does not
+      // choose does not bubble (`docs/ERROR-MODEL.md` §3).
+      selectsOperands: true,
       signature: '(expression, expression, expression?) -> any',
       // A SELECTOR: the condition is tested and one branch is evaluated and
       // RETURNED — no position ever applies a function-valued operand. So
@@ -190,6 +194,16 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         const [cond, ifTrue, ifFalse] = ops;
         const engine = options.engine;
         const evaluated = cond.canonical.evaluate();
+        // The condition is the one operand `If` ALWAYS demands, so an error
+        // in it propagates — the dual obligation of the demanded-operands
+        // rule (`docs/ERROR-MODEL.md` §3), which this handler owns because a
+        // lazy operator is not pre-absorbed. Answering here also keeps the
+        // error a value: a lazy operator's handler faults are re-thrown
+        // rather than converted to an `Error` expression, so an error condition
+        // that reached the typo throw at the end of this handler would escape
+        // as a host exception.
+        const condError = errorValue(evaluated);
+        if (condError !== undefined) return condError;
         const evaluatedCond = sym(evaluated);
         if (evaluatedCond === 'True')
           return ifTrue?.evaluate() ?? engine.Missing;
@@ -508,6 +522,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       description: 'Return the value for the first condition that is true.',
       keywords: ['piecewise'],
       lazy: true,
+      // Selects among its operands, so an error in an operand it does not
+      // choose does not bubble (`docs/ERROR-MODEL.md` §3).
+      selectsOperands: true,
       signature: '(expression+) -> unknown',
       // A SELECTOR, like `If`: conditions are tested, the first matching arm is
       // evaluated and RETURNED, and no position applies a function-valued
@@ -1186,6 +1203,13 @@ function evaluateWhich(
   let i = 0;
   while (i < args.length - 1) {
     const evaluated = args[i].canonical.evaluate();
+    // A guard `Which` reaches is DEMANDED, so an error in it propagates —
+    // the same obligation `If` discharges for its condition (see the comment
+    // there): a lazy operator owns propagation for what it demands, and an
+    // error left to reach the typo throw below would escape as a host
+    // exception rather than as a value.
+    const condError = errorValue(evaluated);
+    if (condError !== undefined) return condError;
     const cond = sym(evaluated);
     if (cond === 'True') {
       // A selected clause with no arm has no value to answer: `Missing`, the

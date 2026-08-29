@@ -1874,6 +1874,37 @@ export type OperatorDefinitionFlags = {
   inspectsErrors: boolean;
 
   /**
+   * If `true`, this operator DECIDES AT EVALUATION which of its held operands
+   * to evaluate — `If` takes one arm, `Which` takes one clause, `And`/`Or`
+   * stop at the decisive operand, `Coalesce` stops at the first present one.
+   *
+   * **Only valid on a `lazy` operator** (asserted in
+   * `_BoxedOperatorDefinition`). A strict operator's operands are all
+   * evaluated before its handler runs, so there is nothing left for it to
+   * select, and the deferred absorption this flag turns on would only stop
+   * its operand errors from bubbling.
+   *
+   * The consequence for the error model: an `Error` in an operand such an
+   * operator does not choose is DEAD CODE, so it must not make the
+   * application fail. `If(True, 5, <error>)` evaluates to `5`
+   * (`docs/ERROR-MODEL.md` §3, the demanded-operands rule). Absorption is
+   * therefore deferred past the handler for these operators instead of
+   * happening before it, and an error the handler DID demand still bubbles,
+   * because it comes back embedded in the handler's result.
+   *
+   * The obligation this places on the handler: an operand it demands and
+   * finds to be an error must be RETURNED, not thrown on and not swallowed.
+   * `If` and `Which` answer their condition's error explicitly for that
+   * reason. Do not set this flag on an operator that demands all of its
+   * operands — pre-absorption is both correct and cheaper there — and do not
+   * set it on an operator whose handler quietly answers something else (a
+   * `Nothing`, a rebuilt node) when an operand it demanded is unusable.
+   *
+   * **Default**: `false`
+   */
+  selectsOperands: boolean;
+
+  /**
    * Whether every argument of an application MUST be written with its
    * parameter's name (`Person(firstName: "Alan", age: 42)`).
    *

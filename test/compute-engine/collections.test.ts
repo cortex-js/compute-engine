@@ -1150,10 +1150,13 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     engine.assign('vec', engine.box(list));
     // Phase C representation unification: literal lists type honestly, so a
     // single index reports the honest element type.
-    // §3.C: `At(list<T>, i) : T | marker(T)`; a numeric `T` absorbs its own
-    // absence value (`NaN ∈ number`, I6/Q2), so the type widens to `number`.
+    // §3.C: `At(list<T>, i) : T | marker(T)`. The marker of a numeric `T` is
+    // the `nan` singleton, so the arm is ADDITIVE and the element tier
+    // survives. It used to absorb to a bare `number` on the reasoning that
+    // `NaN ∈ number`; the finite-by-default lattice flip repealed that
+    // premise (`docs/ERROR-MODEL.md` §7, the 2026-08-28 `markerType` entry).
     expect(engine.box(['At', 'vec', 1]).type.toString()).toMatchInlineSnapshot(
-      `number`
+      `integer | nan`
     );
     expect(evaluate(['At', 'vec', 1])).toMatchInlineSnapshot(`7`);
   });
@@ -1168,7 +1171,7 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // LITERAL key that names an existing field is statically present — the
     // "present literal → exact" arm applies and the result carries no absence
     // marker. (A key-blind `dictionary<T>` base instead gives `T | marker(T)`,
-    // which for a numeric `T` absorbs to `number`.)
+    // which for a numeric `T` is `T | nan`.)
     expect(at.type.toString()).toMatchInlineSnapshot(`integer`);
     expect(
       engine
@@ -1191,10 +1194,9 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // BREAKING (§3.C): an out-of-range LITERAL tuple index is a definite miss,
     // so it types as `marker(⊔S)` — the absence marker over the widened slots,
     // NOT the widened slots themselves (the value is absent).
-    // `marker(integer ⊔ string ⊔ boolean)` = `number ⊔ missing ⊔ missing`.
-    expect(ce.box(['At', 'tpl', 5]).type.toString()).toEqual(
-      'missing | number'
-    );
+    // `marker(integer ⊔ string ⊔ boolean)` = `nan ⊔ missing ⊔ missing`: the
+    // numeric arm names the `nan` singleton, not the whole `number` tier.
+    expect(ce.box(['At', 'tpl', 5]).type.toString()).toEqual('missing | nan');
   });
 
   test('First', () =>

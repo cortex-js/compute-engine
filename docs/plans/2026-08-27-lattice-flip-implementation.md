@@ -249,18 +249,26 @@ parser's alias table and historical docs.
 
 - [ ] Full suite + nightly type-soundness grid; snapshot blast radius
       surfaced as a number in the phase report.
-- [ ] Conformance suite: re-examine every remaining gap row (several
-      close under the ratified rulings — the `Sin(NaN)` evaluate gap,
-      `markerType()`'s `number`, `IsPrime` per
-      `docs/SIGNATURE-GUIDELINES.md` §3.3).
-- [ ] **Now-unblocked defect:** the confirmed
-      `compile(Heaviside)(NaN) → 1` (ROADMAP entry) — R-A's
-      ratification settles the answer (per-slot `propagate` for a real
-      slot ⇒ compiled `NaN`): fix the JavaScript kernel and sweep the
-      interval-JS and GPU siblings, update the suite's pin. The
-      `compile(1/x)(0) → Infinity` vs `~oo` divergence stays OPEN (a
-      float target cannot represent `~oo`; needs its own small ruling
-      — saturation escape or decline).
+- [x] Conformance suite: every §7 gap row this suite covered is CLOSED
+      and re-pinned as ordinary conformance (`Sin(NaN)` and the whole
+      numeric family; `Heaviside(NaN)` plus its `Sign` twin;
+      `markerType()`/`withMarker()` answering `nan`; the `IsPrime`
+      family per `docs/SIGNATURE-GUIDELINES.md` §3.3, with the
+      `IsComposite` definition repaired alongside it; and
+      `If(True, 5, err)` under the demanded-operands rule, implemented
+      as the new `selectsOperands` definition flag). The `IsPrime(-7)`
+      per-operator convention was RULED 2026-08-29 in the same round: a
+      prime is a positive integer greater than 1 (SymPy's convention), so
+      a negative integer answers `False`. Still OPEN in §7: only the
+      `internal-error` native-fault code, which is not in the ratified
+      package.
+- [x] **Now-unblocked defect:** the confirmed
+      `compile(Heaviside)(NaN) → 1` (ROADMAP entry) — fixed across the
+      three lowerings, and the interpreter was aligned in the
+      conformance round so the route divergence the compiled fix opened
+      is closed too. The `compile(1/x)(0) → Infinity` vs `~oo`
+      divergence was RULED 2026-08-28 (the float projection of a pole)
+      and is documented in `docs/COMPILATION-MODEL.md`.
 - [ ] Release notes: every new primitive (`infinity`, `nan`, the
       singleton spellings) and every retirement named explicitly;
       `matches('real')`-flip called out as the silent-break;

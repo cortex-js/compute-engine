@@ -149,10 +149,15 @@ import {
 } from './utils.js';
 import {
   broadcastContextMessage,
+  defersErrorAbsorption,
+  errorOpsWithoutTrace,
   errorValue,
   isCollectionHead,
+  potentialErrorValue,
   withBroadcastFrame,
+  withErrorFrames,
 } from './error-value.js';
+import type { ErrorFrame } from './error-value.js';
 import { match } from './match.js';
 import { factor } from './factor.js';
 import { holdMap, holdMapAsync } from './hold.js';
@@ -3316,6 +3321,9 @@ export class BoxedFunction
    *   collection freezes with the error in place and stays iterable. Keyed on
    *   collection-ness (the definition's `collection` handler block), not on
    *   laziness — see §6a.2.
+   * - **Selecting operators** (`selectsOperands`): absorption is DEFERRED to
+   *   after the handler, so an error in an operand the operator never chooses
+   *   does not bubble — see `_defersErrorAbsorption`.
    */
   private _invalidValue(): Expression | undefined {
     const def = this._def ?? undefined;
@@ -3331,7 +3339,9 @@ export class BoxedFunction
         ? def.value.value
         : this.engine._getSymbolValue(this._operator);
       if (!value?.type.matches('function')) return undefined;
-      return this._firstOperandError() ?? this;
+      const d = this._operandErrorDisposition();
+      if (d === 'evaluate') return undefined;
+      return d === 'freeze' ? this : d;
     }
 
     if (
@@ -3345,11 +3355,112 @@ export class BoxedFunction
 
     if (isOperatorDef(def) && def.operator.inspectsErrors) return undefined;
 
+    // Rung 4: an operator that SELECTS among its operands propagates only
+    // what it demands, so absorption is DEFERRED past its handler rather
+    // than done here — see `_defersErrorAbsorption`.
+    if (this._defersErrorAbsorption()) return undefined;
+
+    const d = this._operandErrorDisposition();
+    if (d === 'evaluate') return undefined;
     // Rung 3: a collection freezes with the failed cell in place; everything
     // else bubbles.
-    if (isCollectionHead(this)) return this;
+    if (d === 'freeze' || isCollectionHead(this)) return this;
+    return d;
+  }
 
-    return this._firstOperandError() ?? this;
+  /**
+   * What this node's operands' errors make of the node, once the
+   * demanded-operands rule has been applied to them:
+   *
+   * - an `Error` — an error is reachable in an operand without crossing a
+   *   SELECTING operator, so it is this node's value (rung 3; a collection
+   *   turns that into a freeze instead — see `_invalidValue`);
+   * - `'evaluate'` — every error left in the tree sits behind a selecting
+   *   operand, which decides for itself whether it demands the failing arm.
+   *   Nothing outside that operand can say, so this node must EVALUATE and
+   *   absorb whatever its result carries (`_absorbsErrorAfterHandler`). This
+   *   is what makes the demanded-operands rule hold under COMPOSITION:
+   *   `1 + If(True, 5, <error>)` is `6` and `[If(True, 5, <error>)]` is
+   *   `[5]`, exactly as the bare `If` is `5`;
+   * - `'freeze'` — the errors that remain sit inside collection-literal
+   *   operands, which no error walk descends into (`f([1, <error>])`), so the
+   *   node keeps them in place and stays as it is.
+   */
+  private _operandErrorDisposition(): Expression | 'evaluate' | 'freeze' {
+    const err = this._firstOperandError();
+    if (err !== undefined) return err;
+    if (this._ops.some((x) => potentialErrorValue(x) !== undefined))
+      return 'evaluate';
+    return 'freeze';
+  }
+
+  /**
+   * True when this node's error absorption happens AFTER its handler has run
+   * rather than before it — the set of nodes `_invalidValue()` deliberately
+   * lets through.
+   *
+   * Two populations: a selecting operator, whose own operands may be dead
+   * code (`_defersErrorAbsorption`), and any node whose errors all sit behind
+   * such an operand (`_operandErrorDisposition` answering `'evaluate'`). Both
+   * owe an absorption on the RESULT, because that is where the question they
+   * postponed is finally answered.
+   *
+   * Excluded, as at every absorption site: an observer, entitled to see the
+   * error and answer about it, and a collection, which keeps a failed cell in
+   * place instead of bubbling it.
+   */
+  private _absorbsErrorAfterHandler(): boolean {
+    if (this.isValid) return false;
+    // An UNBOUND node (`_def` is null, not undefined) has no handler to
+    // absorb after, and `_invalidValue` answers `this` for it.
+    const def = this._def ?? undefined;
+    if (def === undefined) return false;
+    if (isOperatorDef(def) && def.operator.inspectsErrors) return false;
+    if (isCollectionHead(this)) return false;
+    if (this._defersErrorAbsorption()) return true;
+    return this._operandErrorDisposition() === 'evaluate';
+  }
+
+  /**
+   * True when this node's error absorption waits until after the handler has
+   * run, instead of happening before it.
+   *
+   * A `selectsOperands` operator propagates an error only from an operand it
+   * actually DEMANDS (`docs/ERROR-MODEL.md` §3, the demanded-operands rule):
+   * an error in an arm the operator never selects is dead code, so
+   * `If(True, 5, <error>)` answers `5` and `And(False, <error>)` answers
+   * `False`. Absorbing before the handler runs cannot express that, because
+   * at that point nothing has decided which operands the handler will ask
+   * for.
+   *
+   * Deferring, rather than skipping, is what keeps the dual obligation: an
+   * operand the handler DOES demand comes back as the error (an `Error` node
+   * evaluates to itself), the error is therefore embedded in the handler's
+   * result, and the deferred absorption in `_computeValue` bubbles it.
+   *
+   * The flag is what limits this to operators that genuinely choose. Applying
+   * it to every `lazy` operator was measured and is wrong: most lazy handlers
+   * demand all of their operands, and several answer something else entirely
+   * when a demanded operand is unusable — `Numerator(<error>)` answered
+   * `Nothing`, and `D(<error>, x)` threw out of the handler — so their errors
+   * must keep being absorbed before the handler runs.
+   *
+   * The boxed tree is untouched either way: `isValid` stays `false` and the
+   * diagnostic stays in place for editors and static analysis; only what
+   * `evaluate()` and `N()` select changes.
+   *
+   * Excluded, matching the rungs above: an observer, which is entitled to see
+   * the error and answer about it; and a collection head, whose failed cell
+   * is frozen in place rather than bubbled at all.
+   *
+   * The same predicate governs the error WALKS (`errorValue`,
+   * `potentialErrorValue`), which is why it lives in `error-value.ts`: a node
+   * that defers its own absorption must equally be opaque to the absorption
+   * an ENCLOSING node performs, or composition would undo the deferral —
+   * `1 + If(True, 5, <error>)` would fail where the bare `If` answers `5`.
+   */
+  private _defersErrorAbsorption(): boolean {
+    return defersErrorAbsorption(this);
   }
 
   /** The error carried by the first operand that is — or embeds — one, with
@@ -3365,7 +3476,78 @@ export class BoxedFunction
     return undefined;
   }
 
+  /**
+   * The error this node's RESULT carries, or `undefined` when it carries
+   * none — the late half of the absorption `_absorbsErrorAfterHandler`
+   * describes.
+   *
+   * `errorValue` does not descend into a selecting head (§3), so a result
+   * that is still an application of a selecting operator — an undecided `If`,
+   * a `Coalesce` waiting on a value — yields nothing here and stays inert
+   * with its diagnostic in place, which is the point of deferring.
+   */
+  private _resultError(result: Expression): Expression | undefined {
+    if (isFunction(result, 'Error')) {
+      // A bare error IS already this node's value, so there is nothing to
+      // absorb — except a breadcrumb for a SELECTING operator, whose handler
+      // hands back the demanded operand's error with no record of which
+      // operand that was.
+      if (!this._defersErrorAbsorption()) return undefined;
+      return withErrorFrames(result, [this._deferredErrorFrame(result)]);
+    }
+    return errorValue(result);
+  }
+
+  /**
+   * The breadcrumb frame for an error a selecting operator returned: the
+   * operand position the error came from.
+   *
+   * The handler returns the error as a bare value, so the position has to be
+   * recovered here, by finding the operand whose own tree holds that same
+   * error. The comparison is on the error's CODE and context — the operands
+   * still carry the error as authored, while the returned copy may have grown
+   * breadcrumb frames from hops taken inside the operand
+   * (`If(Sin(<error>), 1, 2)` returns it with `{Sin, 1}` already recorded).
+   *
+   * Two operands carrying byte-identical errors are indistinguishable this
+   * way, and so is an error the handler minted itself rather than took from
+   * an operand. Both fall back to operand 1 — the position every selecting
+   * operator in the library always demands (the condition of `If`/`Which`,
+   * the first operand of `And`/`Or`/`Coalesce`) — so the operator hop is
+   * recorded even when the exact position is not recoverable.
+   */
+  private _deferredErrorFrame(err: Expression): ErrorFrame {
+    const core = errorOpsWithoutTrace(err);
+    for (let i = 0; i < this._ops.length; i++) {
+      const op = this._ops[i];
+      if (op.isValid) continue;
+      const candidate = potentialErrorValue(op);
+      if (candidate === undefined) continue;
+      const candidateCore = errorOpsWithoutTrace(candidate);
+      if (candidateCore.length !== core.length) continue;
+      if (candidateCore.every((x, j) => x.isSame(core[j])))
+        return { operator: this._operator, index: i + 1 };
+    }
+    return { operator: this._operator, index: 1 };
+  }
+
   _computeValue(options?: Partial<EvaluateOptions>): () => Expression {
+    const compute = this._computeValueUnabsorbed(options);
+    // The late half of the demanded-operands rule
+    // (`_absorbsErrorAfterHandler`): the handler runs on the invalid tree,
+    // and only an error that reached its RESULT — i.e. one a selection
+    // actually demanded — bubbles. The cached `isValid` test comes FIRST so a
+    // valid tree, the common case, never pays for the rest.
+    if (this.isValid || !this._absorbsErrorAfterHandler()) return compute;
+    return () => {
+      const result = compute();
+      return this._resultError(result) ?? result;
+    };
+  }
+
+  private _computeValueUnabsorbed(
+    options?: Partial<EvaluateOptions>
+  ): () => Expression {
     return () => {
       // Cooperative deadline checkpoint on the per-node evaluation path.
       // Specialized loops (collection enumeration, polynomial GCD, Rubi
@@ -3673,6 +3855,34 @@ export class BoxedFunction
       const tail = holdMap(this, (x) => x.evaluate(options));
 
       //
+      // 4-err/ An operand that was held back by the demanded-operands rule
+      // has now evaluated: if a selection did demand the failing arm, the
+      // error is that operand's VALUE, and an error value in an operand
+      // position bubbles like any other (rung 3). Absorbing it HERE, before
+      // the handler, is what keeps a handler from answering something else
+      // about an operand it cannot use — `Sin(<error>)` must be the error,
+      // not `NaN`.
+      //
+      // Gated on the node being statically invalid, so a valid tree never
+      // pays for the scan and no error minted during THIS evaluation changes
+      // its propagation. `_absorbsErrorAfterHandler` excludes the observers
+      // and collections, as every absorption site does; it also excludes a
+      // selecting operator scanning its OWN operands, which `tail` still
+      // holds unevaluated (it is lazy) — there an error is precisely the arm
+      // whose demand is not decided yet, and the absorption belongs on the
+      // result instead.
+      //
+      if (this._absorbsErrorAfterHandler() && !this._defersErrorAbsorption()) {
+        for (let i = 0; i < tail.length; i++) {
+          const err = errorValue(tail[i], {
+            operator: this._operator,
+            index: i + 1,
+          });
+          if (err !== undefined) return err;
+        }
+      }
+
+      //
       // 4a/ Missing-value behavior gate (§3.E of the missing-value typing
       // design). A `propagate` operator with an absent SCALAR operand
       // (`Missing`, or a `NaN`) yields `NaN` in the numeric result cell (I6
@@ -3972,6 +4182,19 @@ export class BoxedFunction
   }
 
   _computeValueAsync(
+    options?: Partial<EvaluateOptions>
+  ): () => Promise<Expression> {
+    const compute = this._computeValueAsyncUnabsorbed(options);
+    // Late error absorption, mirroring `_computeValue` (`isValid` first, for
+    // the same reason).
+    if (this.isValid || !this._absorbsErrorAfterHandler()) return compute;
+    return async () => {
+      const result = await compute();
+      return this._resultError(result) ?? result;
+    };
+  }
+
+  private _computeValueAsyncUnabsorbed(
     options?: Partial<EvaluateOptions>
   ): () => Promise<Expression> {
     return async () => {

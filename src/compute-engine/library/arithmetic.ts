@@ -78,7 +78,7 @@ import {
 } from '../numerics/special-functions.js';
 import { factorial2, gcd, lcm, realGcd, realLcm } from '../numerics/numeric.js';
 import { rationalize } from '../numerics/rationals.js';
-import { isPrime } from '../boxed-expression/predicates.js';
+import { isComposite, isPrime } from '../boxed-expression/predicates.js';
 
 import {
   canonicalAdd,
@@ -190,6 +190,10 @@ import { parseType } from '../../common/type/parse.js';
 // lowerings) read the sign and bounds without consulting the sgn handler.
 const HEAVISIDE_REAL_TYPE = parseType('rational<0..1>');
 const SIGN_REAL_TYPE = parseType('integer<-1..1>');
+
+/** The carrier of `IsPrime`/`IsComposite`: all of `number` except the
+ * infinities. See `notFiniteEnoughForPrimality`, which enforces it. */
+const PRIMALITY_CARRIER_TYPE = parseType('complex | nan');
 import {
   foldQuantityOperands,
   isQuantity,
@@ -1138,6 +1142,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.im !== 0 && x.im !== undefined)
           return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
 
+        // A `NaN` argument propagates. This handler computes Γ(x+1) itself
+        // rather than through the kernel dispatchers, so it does not inherit
+        // their NaN-propagation guard (`apply2`, `boxed-expression/apply.ts`),
+        // and the non-finiteness test below would otherwise leave `NaN!`
+        // inert — inertness as the terminal answer to a decided question,
+        // which `docs/ERROR-MODEL.md` §1 forbids. The INFINITE arguments do
+        // stay inert here, which is a separate open question.
+        if (x.isNaN === true) return ce.NaN;
+
         // The argument is real...
         if (!x.isFinite) return undefined;
 
@@ -1173,6 +1186,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Is the argument a complex number?
         if (x.im !== 0 && x.im !== undefined)
           return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
+
+        // A `NaN` argument propagates — see the synchronous handler above.
+        if (x.isNaN === true) return ce.NaN;
 
         // The argument is real...
         if (!x.isFinite) return undefined;
@@ -1248,6 +1264,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
 
         const x = ops[0];
+        // A `NaN` argument propagates, as in `Factorial` above: this handler
+        // computes without the kernel dispatchers, so it does not inherit
+        // their NaN guard, and the integrality test below would leave `NaN!!`
+        // inert — inertness as the terminal answer to a decided question,
+        // which `docs/ERROR-MODEL.md` §1 forbids.
+        if (x.isNaN === true) return x.engine.NaN;
         // The double factorial of a non-integer is an exact constant with no
         // simple closed form here, so stay symbolic rather than rounding the
         // argument to an integer (which non-strict mode would otherwise allow).
@@ -3232,6 +3254,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       sgn: ([x]) =>
         x.type.matches(EXTENDED_REAL_TYPE) ? 'non-negative' : undefined,
       evaluate: ([x], { engine }) => {
+        // A `NaN` argument propagates instead of leaving the application
+        // inert. This operator declares a numeric carrier and a numeric
+        // result, which is the condition for the derived `propagate` NaN
+        // policy of `docs/ERROR-MODEL.md` §4; the three sign tests below all
+        // answer `false` for `NaN`, so without this arm a decidable question
+        // would get inertness as its terminal answer (forbidden by §1). The
+        // compiled JavaScript kernel already answers `NaN` here, so this arm
+        // is also what keeps the interpreter and the compiled lane in step.
+        if (x.isNaN === true) return engine.NaN;
         if (x.isSame(0)) return engine.Half;
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.Zero;
@@ -3253,6 +3284,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: ([x]) => realOnlyStepType(x, SIGN_REAL_TYPE),
       sgn: ([x]) => x.sgn,
       evaluate: ([x], { engine }) => {
+        // `NaN` propagates, for the reason given on `Heaviside` above: the
+        // declaration is numeric in and numeric out, so the derived
+        // `propagate` NaN policy applies, and the three sign tests below are
+        // all `false` for `NaN`, which would otherwise make inertness the
+        // terminal answer to a decidable question.
+        if (x.isNaN === true) return engine.NaN;
         if (x.isSame(0)) return engine.Zero;
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.NegativeOne;
@@ -3713,8 +3750,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q49008',
       complexity: 1200,
       broadcastable: true,
+      // A membership predicate takes the WIDE numeric carrier and answers
+      // `False` for a non-member: "is 3.5 prime?" is a well-formed question
+      // whose answer is no, and a narrow `(integer)` carrier would turn that
+      // answer into a type error (`docs/SIGNATURE-GUIDELINES.md` §3.3). `NaN`
+      // rides in on that same carrier and is answered `False` by the handler
+      // rather than propagated — what Contract B will express as
+      // `nanBehavior: 'handle'` (`docs/ERROR-MODEL.md` §4).
+      //
+      // The infinities are the one part of `number` primality does not accept,
+      // and the DECLARATION deliberately does not say so. A narrower spelling
+      // (`complex | nan`) is a working carrier, but a declared parameter type
+      // is also what an undeclared argument symbol is inferred FROM, so it
+      // stamps the exclusion on the user's own symbol: `IsPrime(n)` declared
+      // `n: complex | nan` — an implementation detail of this predicate
+      // appearing in a name the program will use elsewhere. The carrier is
+      // enforced in the handler instead, where it answers the same
+      // `incompatible-type` error without touching inference.
       signature: '(number) -> boolean',
       evaluate: ([n], { engine }) => {
+        const outOfDomain = notFiniteEnoughForPrimality(engine, n);
+        if (outOfDomain !== undefined) return outOfDomain;
         const result = isPrime(n);
         if (result === undefined) return undefined;
         return engine.symbol(result ? 'True' : 'False');
@@ -3722,11 +3778,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
     IsComposite: {
       description:
-        '`IsComposite(n)` returns `True` if `n` is not a prime number',
+        '`IsComposite(n)` returns `True` if `n` is a composite number',
       complexity: 1200,
       broadcastable: true,
+      // The same carrier as `IsPrime`, for the same reasons — see there.
       signature: '(number) -> boolean',
-      canonical: (ops, { engine }) => engine.expr(['Not', ['IsPrime', ...ops]]),
+      // A composite number is a positive integer greater than 1 that is not
+      // prime, so `0`, `1`, the negative integers and every non-integer are
+      // neither prime nor composite. Compositeness is therefore not the
+      // negation of primality, and `Not(IsPrime(n))` is the wrong definition
+      // for it. `isComposite` is the shared one, used by the `:composite`
+      // pattern guard in `rules.ts` as well.
+      evaluate: ([n], { engine }) => {
+        const outOfDomain = notFiniteEnoughForPrimality(engine, n);
+        if (outOfDomain !== undefined) return outOfDomain;
+        const result = isComposite(n);
+        if (result === undefined) return undefined;
+        return engine.symbol(result ? 'True' : 'False');
+      },
     },
 
     IsOdd: {
@@ -4667,6 +4736,31 @@ function productAccumulate(
  * Under `numericApproximation` (i.e. `.N()`), folding to a float is the desired
  * behavior and no symbolic accumulation is done.
  */
+/**
+ * The `incompatible-type` error for an operand of `IsPrime`/`IsComposite`
+ * that is outside their carrier, or `undefined` when the operand is inside
+ * it.
+ *
+ * Primality is a question about finite integers, so an infinite argument is
+ * out of domain — a contract violation, not a `False` answer. The rest of
+ * `number` is in: a non-integer, a complex value and `NaN` are all decidable
+ * non-members and get `False`.
+ *
+ * This lives in the handler rather than in the declared signature because a
+ * declared parameter type is what an undeclared argument symbol is inferred
+ * FROM: writing the exclusion into the signature declared the caller's own
+ * `n` as `complex | nan`. The error is minted with the carrier the signature
+ * would have spelled, so the diagnostic a caller reads is the same either
+ * way.
+ */
+function notFiniteEnoughForPrimality(
+  ce: ComputeEngine,
+  n: Expression | undefined
+): Expression | undefined {
+  if (n === undefined || !n.type.matches('infinity')) return undefined;
+  return ce.typeError(PRIMALITY_CARRIER_TYPE, n.type, n);
+}
+
 function sumAccumulate(
   acc: Expression,
   term: Expression,
@@ -5273,6 +5367,14 @@ function evaluateGcdLcm(
       ops = current;
     }
   }
+
+  // A `NaN` operand propagates. Both branches below defer a non-integer,
+  // non-finite operand to the symbolic tail, so without this arm `gcd(NaN, 2)`
+  // came back as itself — inertness as the terminal answer to a decided
+  // question, which `docs/ERROR-MODEL.md` §1 forbids. GCD/LCM take a numeric
+  // carrier and answer a number, which is the condition for the derived
+  // `propagate` NaN policy of §4.
+  if (ops.some((x) => x.isNaN === true)) return ce.NaN;
 
   // Exactness contract: an inexact (float) argument numericizes, like
   // `cos(5.1) → 0.377`. GCD/LCM of non-integer reals fold via the tolerant

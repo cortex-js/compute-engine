@@ -1935,35 +1935,63 @@ export function objectFieldStore(
 /**
  * The TYPE-LEVEL absence marker for a value of type `t` (§3.C):
  * ```
- * marker(T) = number            if T <: number               (absence value NaN)
+ * marker(T) = nan               if T <: number               (absence value NaN)
  *           = missing           if T is a settled non-numeric type
  *                               (missing itself, empty joins, never)
- *           = number | missing  if T is indeterminate (unknown / any)
+ *           = nan | missing     if T is indeterminate (unknown / any)
  * marker(A | B) = marker(A) ⊔ marker(B)                       (arm-split)
  * ```
+ *
+ * The numeric arm names the `nan` singleton, not the whole `number` tier: the
+ * absence value inside a numeric domain is exactly `NaN`, and since the
+ * finite-by-default lattice flip that value has a type of its own instead of
+ * being smuggled inside `number`. Saying `number` here would have claimed
+ * that an out-of-band access could also produce an infinity, and would have
+ * thrown away the element tier on the way (`integer` accessors reported a
+ * bare `number`).
  */
 function markerType(t: Type): Type {
   if (typeof t !== 'string' && t.kind === 'union')
-    return widen(...t.types.map((x) => markerType(x))) as Type;
+    return reduceType({
+      kind: 'union',
+      types: t.types.map((x) => markerType(x)),
+    });
   if (t === 'never') return 'missing';
   if (t === 'unknown' || t === 'any')
-    return parseType('number | missing') as Type;
-  if (isSubtype(t, 'number')) return 'number';
+    return parseType('nan | missing') as Type;
+  if (isSubtype(t, 'number')) return 'nan';
   return 'missing';
 }
 
 /**
- * `T | marker(T)`, normalized (§3.C): a numeric `T` absorbs its own absence
- * value (`NaN ∈ number`, I6) so the marker adds no arm and integer→number
- * (Q2); an indeterminate `T` normalizes to `unknown` (I5-sound — `unknown`
- * does not claim non-missing); a settled non-numeric `T` gains a visible
+ * `T | marker(T)`, normalized (§3.C): a numeric `T` gains a visible `| nan`
+ * arm, an indeterminate `T` normalizes to `unknown` (I5-sound — `unknown`
+ * does not claim non-missing), and a settled non-numeric `T` gains a visible
  * `| missing` arm.
+ *
+ * The numeric arm used to be absorbed instead of added, on the reasoning that
+ * `NaN ∈ number` so `T | NaN` collapsed to `number` anyway. The lattice flip
+ * repealed that premise — the bare tiers are finite and `NaN` is no longer
+ * one of their members — so the marker is genuinely additive now, and
+ * `integer | nan` is both spellable and honest where the old answer was a
+ * bare `number` that lost the element tier.
+ *
+ * One numeric tier still absorbs the arm: `nan <: number` remains true, so
+ * `withMarker(number)` reduces back to a bare `number` while `integer`,
+ * `real`, `rational` and `complex` all gain a visible `| nan`. That is why a
+ * downstream `matches('number')` gate sees no change from this function —
+ * every accessor result it used to admit still matches, the narrower ones
+ * because `nan <: number` makes `integer | nan` a subtype of `number` too.
+ *
+ * The arms are joined with `reduceType`, NOT with `widen`: widening climbs the
+ * numeric ladder, so it answers a bare `number` for `integer ⊔ nan` and
+ * throws the element tier away again — the very loss this function stopped
+ * taking.
  */
 function withMarker(t: Type): Type {
   if (t === 'never') return 'missing';
   if (t === 'unknown' || t === 'any') return 'unknown';
-  if (isSubtype(t, 'number')) return 'number';
-  return widen(t, markerType(t)) as Type;
+  return reduceType({ kind: 'union', types: [t, markerType(t)] });
 }
 
 /**
@@ -2264,9 +2292,9 @@ function pointComponentType(
       }
       return 'number';
     }
-    // A point access is `slotType | marker(slotType)` (§3.C): a coordinate is
-    // numeric, so the marker is absorbed (`withMarker(number) = number`); an
-    // out-of-band or non-numeric slot gains the marker.
+    // A point access is `slotType | marker(slotType)` (§3.C): a numeric
+    // coordinate gains a `| nan` arm, an out-of-band or non-numeric slot a
+    // `| missing` one.
     return withMarker(ct);
   }
   // A list of points broadcasts. The coordinate type is not reliably
@@ -7085,8 +7113,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // `missing | tuple<…>`, and without the strip every indexed-then-accessed
   // chain (`S[n].x`) errored at canonicalization (Tycho item 164). At run
   // time an absent point's coordinate is a numeric slot's marker — `NaN`,
-  // per the accessors' own §3.C convention (`withMarker(number) = number`) —
-  // which the §3.E gate substitutes before the evaluate handler runs.
+  // per the accessors' own §3.C convention (`withMarker(T) = T | nan` for a
+  // numeric `T`) — which the §3.E gate substitutes before the evaluate
+  // handler runs.
   PointX: {
     description:
       'The x-coordinate of a point, broadcasting over a list of points.',

@@ -115,6 +115,16 @@ export function apply(
   if (!isNumber(expr)) return undefined;
   const ce = expr.engine;
 
+  // A `NaN` ARGUMENT propagates: the kernels use a NaN result to mean
+  // "outside this kernel's implemented domain", which is why one otherwise
+  // leaves the application symbolic (`isNaNKernelResult`), but a NaN that was
+  // already in the argument is not a report about the domain — it is the
+  // indeterminate value flowing through, and `f(NaN)` is `NaN`. Without this
+  // the cascade reads the propagated NaN as a domain exit and the application
+  // stays inert, which ERROR-MODEL §1 forbids as a terminal answer.
+  // `applyN` carries the same guard for the n-ary kernels.
+  if (Number.isNaN(expr.re) || Number.isNaN(expr.im)) return ce.NaN;
+
   let result: number | Complex | BigDecimal | undefined = undefined;
   if (expr.im !== 0) result = complexFn?.(ce.complex(expr.re, expr.im));
   else {
@@ -225,6 +235,18 @@ export function apply2(
   if (!isNumber(expr1) || !isNumber(expr2)) return undefined;
 
   const ce = expr1.engine;
+
+  // A `NaN` ARGUMENT propagates — the same rule as in `apply`/`applyN` above.
+  // The real branch below skips a NaN operand outright, which left the
+  // application with no result and therefore symbolic; that reads a
+  // propagated NaN as a report about the kernel's domain, which it is not.
+  if (
+    Number.isNaN(expr1.re) ||
+    Number.isNaN(expr1.im) ||
+    Number.isNaN(expr2.re) ||
+    Number.isNaN(expr2.im)
+  )
+    return ce.NaN;
 
   let result: number | Complex | BigDecimal | undefined = undefined;
   if (expr1.im !== 0 || expr2.im !== 0) {

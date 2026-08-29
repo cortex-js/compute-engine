@@ -1113,8 +1113,31 @@ export class BoxedNumber
 
   get isExact(): boolean {
     const n = this._value;
-    if (typeof n === 'number')
+    if (typeof n === 'number') {
+      // `NaN` is NOT exact. It is a machine float with no exact value to
+      // preserve, so under the exactness contract a numeric function of a
+      // `NaN` argument numericizes under plain `evaluate()` — `sin(NaN)`
+      // answers `NaN` instead of staying inert, which ERROR-MODEL §1 forbids
+      // as a terminal answer to a decidable question. The two other storage
+      // lanes for the same value already answer `false` here
+      // (`MachineNumericValue`/`BigNumericValue` both test `isInteger`, which
+      // `NaN` fails), so without this arm one mathematical value reports two
+      // different exactness answers depending on how it happens to be stored.
+      //
+      // The signed infinities stay exact, on the other side of that argument:
+      // an infinity IS an exact value of the extended real line, with nothing
+      // approximated about it, so there is no float residue to disown. The
+      // `isInteger` test in the two `NumericValue` lanes answers `false` for
+      // them and therefore DISAGREES with this line. That divergence is not
+      // observable through `ce.number()`: `fromNumericValue` (`box.ts`) maps a
+      // lane value of infinite magnitude to the `PositiveInfinity` /
+      // `NegativeInfinity` constants before any `BoxedNumber` is built, so no
+      // expression ever carries an infinity in a lane whose answer would
+      // differ. Aligning the lanes would change their own contracts, which is
+      // why it is left alone rather than done here.
+      if (Number.isNaN(n)) return false;
       return !Number.isFinite(n) || Number.isInteger(n);
+    }
     return n.isExact;
   }
 

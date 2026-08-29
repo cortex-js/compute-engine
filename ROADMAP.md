@@ -156,6 +156,37 @@ fixed in that change. Every one is small; several need a ruling first.
   decline it too would make the value tier consistent with the primitives.
 
 
+### Open items from the error-model conformance round (2026-08-29)
+
+Found while making the error/absence kit conform to `docs/ERROR-MODEL.md`
+(the executable suite is `test/compute-engine/error-model.test.ts`). Both were
+deliberately left out of that change.
+
+- **`If(x, 5)` throws a host exception when the condition cannot be proven
+  boolean.** With `x` an undeclared symbol, `ce.box(['If', 'x', 5]).evaluate()`
+  throws `Error: Condition must evaluate to "True" or "False".` out of the `If`
+  handler instead of returning a value or staying inert. The tree is fully
+  valid — no diagnostic is involved — so this is not about error propagation;
+  it is the handler's final `throw` firing on an undecided condition. It went
+  unnoticed because error PRE-absorption used to intercept the `If(x, <error>)`
+  shapes before the handler ran; the demanded-operands rule now lets the
+  handler see them, which is what surfaced it. The two candidate answers are
+  inertness ("not yet" — the condition may still resolve to a boolean) and an
+  `Error` value ("this condition is not a boolean"), and picking between them
+  is a ruling, not a fix. Site: the `If` evaluate handler in
+  `src/compute-engine/library/control-structures.ts`.
+- **`Factorial(±oo)` and `Factorial2(±oo)` stay inert.** The `NaN` half of the
+  §4 propagate policy now conforms across the numeric family (the kernel
+  dispatchers `apply`/`apply2`/`applyN` propagate a NaN argument, and the
+  handlers that compute without them carry their own arm). The INFINITE
+  arguments are a separate question: `Factorial(+oo)` is `+oo` mathematically
+  and `Factorial(-oo)` has no value, so the two directions need different
+  answers, and the same shape recurs across the Γ family. Sites: the
+  `Factorial` and `Factorial2` evaluate handlers in
+  `src/compute-engine/library/arithmetic.ts`, both of which return `undefined`
+  from an `!x.isFinite` test.
+
+
 ### A re-declared operator carrying a caller `compile` handler switches off the compiler's call-sharing (OPEN, design — measured 2026-08-21 under Tycho item 217)
 
 `R(i,x,y) = R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` compiles to a linear

@@ -120,9 +120,14 @@ describe('P1 — `Nothing` erasure (§3.G)', () => {
 });
 
 describe('P1 — out-of-band access markers (§3.C)', () => {
-  test('At(list<number>, oob) : number = NaN', () => {
+  test('At(list<integer>, oob) : integer | nan = NaN', () => {
+    // The marker of a numeric element type is the `nan` singleton, so the arm
+    // is ADDITIVE and the element tier survives. It used to absorb to a bare
+    // `number` on the reasoning that `NaN` was a member of `number`; the
+    // finite-by-default lattice flip repealed that premise (see the
+    // 2026-08-28 `markerType` entry in `docs/ERROR-MODEL.md` §7).
     const e = ce.box(['At', ['List', 10, 20, 30], 9]);
-    expect(e.type.toString()).toBe('number');
+    expect(e.type.toString()).toBe('integer | nan');
     expect(e.evaluate().isNaN).toBe(true);
   });
 
@@ -147,8 +152,9 @@ describe('P1 — out-of-band access markers (§3.C)', () => {
   test('At(tuple, out-of-range literal) : marker(⊔S), NOT bare missing', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('tpl', ce2.type('tuple<integer, string, boolean>'));
-    // marker(integer ⊔ string ⊔ boolean) = number ⊔ missing ⊔ missing.
-    expect(ce2.box(['At', 'tpl', 5]).type.toString()).toBe('missing | number');
+    // marker(integer ⊔ string ⊔ boolean) = nan ⊔ missing ⊔ missing: the
+    // numeric arm names the `nan` singleton, not the whole `number` tier.
+    expect(ce2.box(['At', 'tpl', 5]).type.toString()).toBe('missing | nan');
   });
 
   test('gather is length-preserving with holes (§3.C, BREAKING)', () => {
@@ -201,8 +207,10 @@ describe('P1 — out-of-band access markers (§3.C)', () => {
     ).toBe(true);
   });
 
-  test('First(list<number>) : number (T | marker(T), absorbed)', () => {
-    expect(ce.box(['First', ['List', 1, 2, 3]]).type.toString()).toBe('number');
+  test('First(list<integer>) : integer | nan (T | marker(T), additive)', () => {
+    expect(ce.box(['First', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'integer | nan'
+    );
   });
 });
 

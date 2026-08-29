@@ -225,7 +225,7 @@ re-check whenever new evidence settles.
    operator may stay inert only while a later re-evaluation could still
    change the answer.
 
-## 3. Propagation — Settled, except the demanded-operands amendment (Proposed)
+## 3. Propagation — Settled, demanded operands included (implemented 2026-08-28)
 
 **`Error` is the absorbing element of strict evaluation — over demanded
 operands.** Evaluating an expression that demands an error-carrying
@@ -256,15 +256,37 @@ first three in `_invalidValue()`,
 - **A non-function callee reports its own problem first** (`a := 5;
   a(err)` reports that `a` is not callable rather than bubbling the
   argument's error).
-- **Lazy operators propagate only what they demand** — *Proposed
-  amendment, 2026-08-25 review*. An error in an operand a lazy operator
-  never demands does not bubble at evaluation:
-  `If(True, 5, err).evaluate()` should be `5`. The boxed expression still
-  carries the error for editor diagnostics — static analysis sees dead
-  code; evaluation does not execute it. This matches the declared lazy
-  semantics ("lazy in unselected arms", `docs/LANGUAGE-MODEL.md`). The
-  dual obligation: a lazy handler that *does* demand an operand and gets
-  an error must propagate it. Current behavior differs (§7).
+- **A selecting operator propagates only what it demands** — ratified
+  2026-08-27 with Contract B, implemented 2026-08-28. An error in an
+  operand such an operator never demands does not bubble at evaluation:
+  `If(True, 5, err).evaluate()` is `5`, and so are `And(False, err)` →
+  `False` and `Coalesce(5, err)` → `5`. The boxed expression still carries
+  the error for editor diagnostics — static analysis sees dead code;
+  evaluation does not execute it. This matches the declared lazy semantics
+  ("lazy in unselected arms", `docs/LANGUAGE-MODEL.md`). The dual
+  obligation holds: a handler that *does* demand an operand and gets an
+  error propagates it (`If(False, 5, err)`, `If(err, 5, 7)`). The
+  implementation DEFERS absorption past the handler rather than skipping
+  it, which is what discharges the dual obligation automatically — an
+  error the handler demanded is embedded in its result and bubbles from
+  there. The scope is the `selectsOperands` definition flag, NOT laziness:
+  most lazy operators demand every operand, and several answer something
+  else entirely when a demanded operand is unusable, so they keep
+  absorbing before the handler runs (§7, the 2026-08-28 entry).
+
+  **The rule holds under composition.** It is a property of the
+  expression, not of the root: `1 + If(True, 5, err)` is `6`,
+  `Not(And(False, err))` is `True`, and `[If(True, 5, err)]` is `[5]`,
+  each the same answer the selecting subexpression gives on its own. An
+  enclosing operator therefore treats a selecting subtree as opaque when
+  it looks for errors to absorb, and evaluates it like any other operand;
+  what that evaluation *returns* is what bubbles. The dual obligation
+  still holds one level up — `Sin(If(False, 5, err))` is the error,
+  because the selection demanded the failing arm and the error is then
+  the operand's value. A selection that is not decided yet
+  (`If(x == 4, 5, err)` with a free `x`, `Coalesce(x, err)`) stays inert
+  with its diagnostic in place: it has neither demanded nor rejected the
+  failing arm.
 
 **Why collapse at evaluation rather than stay inert.** Expressions are
 immutable, so evaluating does not destroy the in-place, multi-error
@@ -304,10 +326,13 @@ interactions follow `docs/COLLECTIONS-MODEL.md` and
 `docs/BROADCAST-MODEL.md`. **`Nothing` splices** (statistics skip it;
 `Missing`/`NaN` propagate).
 
-Because errors absorb *before* ordinary handlers run, a **strict**
+Because errors absorb *before* ordinary handlers run, an ordinary
 operator handler never receives an error operand and needs no error
-tests; a **lazy** handler owns propagation for the operands it demands.
-An operator that wants to *see* errors must be declared an observer. Any
+tests — laziness does not change that, since a lazy handler that demands
+every operand is served by the same pre-absorption. A **selecting**
+handler (`selectsOperands`) is the exception: it runs on the invalid tree
+and owns propagation for the operands it demands. An operator that wants
+to *see* errors must be declared an observer. Any
 future recovery operator (an `IfError(expr, fallback)` in the style of
 Mathematica's `Check`) would be built on the same `inspectsErrors` flag
 plus a hold on its first operand; the mechanism already exists.
@@ -529,10 +554,16 @@ other way. **Predicates declare wide**: a membership-style predicate
 (`IsPrime`, `IsInteger`, …) is a claim "x ∈ S", and `False` is a
 *success* value, not a failure — "3.5 is not prime" is a well-formed true
 sentence, so `IsPrime` is genuinely total on its numeric carrier and
-declares `(complex) -> boolean` with `nanBehavior: handle` (explicit),
+declares `(number) -> boolean` with `nanBehavior: handle` (explicit),
 answering `False` for a provably non-integer argument, `NaN` included.
-`IsPrime(~oo)`, by contrast, is an `Error` (outside the `complex`
-carrier), and the asymmetry with `IsPrime(NaN) → False` is deliberate:
+The one part of `number` it does not accept — the infinities — is
+enforced by the HANDLER, not written into the signature: a declared
+parameter type is also what an undeclared argument symbol is inferred
+from, so the narrower spelling declared the caller's own `n` as
+`complex | nan`. Put in the signature what a caller should be held to;
+put in the handler what only the implementation knows.
+`IsPrime(~oo)`, by contrast, is an `Error` (outside the carrier), and the
+asymmetry with `IsPrime(NaN) → False` is deliberate:
 `NaN` is the one value governed by a *policy* channel — IEEE gives it
 dataflow semantics of its own — while `~oo` is an ordinary, if
 exceptional, value governed by carrier types like any other. A pure
@@ -717,10 +748,12 @@ probes belong in the §7 sweep.
 
 ## 7. Conformance snapshot and open questions
 
-Probed 2026-08-24/25 against `src/` (route: `ce.box(json)` then
-`.evaluate()` / `.N()`). "exact, unreduced" means the application
-evaluated to its own exact symbolic form and awaits numericization (§1) —
-it is not rule-7 inertness.
+First probed 2026-08-24/25 against `src/` and re-probed 2026-08-28/29
+after the conformance round (route: `ce.box(json)` then `.evaluate()` /
+`.N()`; every row is also executed on all three construction routes by
+the suite named at the end of this section). "exact, unreduced" means the
+application evaluated to its own exact symbolic form and awaits
+numericization (§1) — it is not rule-7 inertness.
 
 | Input | Boxed | `evaluate()` | `.N()` | Verdict vs. §2 |
 | --- | --- | --- | --- | --- |
@@ -733,31 +766,119 @@ it is not rule-7 inertness.
 | `Mod(1, 0)` | inert | `NaN` | `NaN` | conforms (rule 4) |
 | `At([1,2], 99)` | inert | `NaN` | `NaN` | conforms (rule 5, numeric elements) |
 | `First([])` | inert | `Missing` | `Missing` | conforms (rule 5) |
-| `Sin(NaN)` | inert | inert | `NaN` | **gap** (below) |
-| `Heaviside(NaN)` | inert | inert | inert | **gap** (below) |
-| `IsPrime(3.5)`, `IsPrime(π)`, `IsPrime(i)`, `IsPrime(NaN)` | inert | inert | inert | **gap** (should be `False`, §4 predicates) |
-| `If(True, 5, err)` | error preserved in place | `Error` | `Error` | **gap** under the demanded-operands amendment (should be `5`) |
+| `Sin(NaN)` | inert | `NaN` | `NaN` | conforms (§4 propagate) |
+| `Heaviside(NaN)` | inert | `NaN` | `NaN` | conforms (§4 propagate) |
+| `IsPrime(3.5)`, `IsPrime(π)`, `IsPrime(i)`, `IsPrime(NaN)` | inert | `False` | `False` | conforms (§4 predicates) |
+| `IsPrime(-7)` | inert | `False` | `False` | conforms (convention ruled 2026-08-29) |
+| `IsPrime(~oo)`, `IsPrime(±oo)` | valid | `Error(incompatible-type)` | `Error` | conforms (outside the carrier, ruling L9) |
+| `If(True, 5, err)` | error preserved in place | `5` | `5` | conforms (demanded operands, §3) |
+| `1 + If(True, 5, err)`, `[If(True, 5, err)]` | error preserved in place | `6`, `[5]` | same | conforms (demanded operands under composition, §3) |
+| `Factorial(NaN)`, `Root(NaN, 3)`, `GCD(NaN, 2)` | inert | `NaN` | `NaN` | conforms (§4 propagate) |
 | `Sum(x, (n, 5, 1))` | inert | `0` | `0` | conforms (rule 3, empty range) |
 
-Conformance gaps (deficiencies under this model; listed for ratification
-because current behavior might be a deliberate decline):
+Conformance record. Each entry was a gap — a place where the engine did
+not do what this model asks — until the ruling named in it settled the
+answer and the fix landed. An entry with no FIXED date is still open.
 
-- **`Sin(NaN)` should evaluate to `NaN` under `evaluate()`.** `NaN` is a
-  float, and by the exactness contract (§2) a numeric function of an
-  inexact argument numericizes under `evaluate()`; per-slot `propagate`
-  says the same. The aggregates already behave this way
-  (`Max(1, NaN, 3) → NaN`).
-- **`Heaviside(NaN)` is inert even under `.N()`** — same class, stricter
-  symptom; under §1 this makes inertness a terminal answer to a decidable
-  question.
-- **`If(True, 5, err)` evaluates to the error today**; under the
-  demanded-operands amendment (§3) it should evaluate to `5` while the
-  boxed form keeps the diagnostic.
+- **FIXED 2026-08-28: `Sin(NaN)` evaluates to `NaN`.** `NaN` is a float,
+  and by the exactness contract (§2) a numeric function of an inexact
+  argument numericizes under plain `evaluate()`; the per-slot `propagate`
+  policy says the same, and the aggregates already behaved this way
+  (`Max(1, NaN, 3) → NaN`). The cause was a single shared exactness test:
+  `BoxedNumber.isExact` admitted every non-finite raw number as exact, so
+  a `NaN` operand looked like an exact value with something to preserve —
+  while the same value stored as a `MachineNumericValue` or a
+  `BigNumericValue` already reported `false`, so one mathematical value
+  answered two ways depending on how it happened to be stored. Excluding
+  `NaN` there conformed the whole numeric family at once (`Sin`, `Cos`,
+  `Tan`, `Exp`, `Ln`, `Sqrt`, `Arctan`, `Sinh`, `Abs`, `Gamma`, `Floor`,
+  `Round`, `Erf`, …), not `Sin` alone. The signed infinities are untouched
+  and stay exact.
+- **FIXED 2026-08-28: `Heaviside(NaN)` answers `NaN` under `evaluate()`
+  and `.N()`.** Same propagate class as `Sin(NaN)`, but its handler is a
+  sign dispatch, not a numeric kernel: all three of its sign tests are
+  `false` for `NaN`, so the shared exactness fix does not reach it and it
+  carries its own `NaN` arm. `Sign` had the identical handler shape and
+  was fixed with it. This also closes the route divergence the compiled
+  lane opened: `compile(Heaviside)(NaN)` had been conformed to `NaN`
+  first, leaving the interpreter inert.
+- **FIXED 2026-08-28: the `IsPrime` family answers `False` for a decidable
+  non-member.** A membership predicate's `False` is a success value, so
+  `IsPrime(3.5)`, `IsPrime(π)`, `IsPrime(i)` and `IsPrime(NaN)` are all
+  `False` (`docs/SIGNATURE-GUIDELINES.md` §3.3). The predicate answers
+  `False` whenever the argument is provably not an integer — from its
+  value, or, for a constant with no literal integrality answer (`π`, `e`,
+  `φ`), from its type not overlapping `integer`; an argument that could
+  still be an integer stays inert. `IsPrime(~oo)` (and the signed pair) is
+  the wanted `incompatible-type` Error under ruling L9, minted by the
+  HANDLER: the declared carrier stays the wide `(number)`, because a
+  declared parameter type is also what an undeclared argument symbol is
+  inferred from, and the narrower `complex | nan` spelling declared the
+  caller's own `n` as `complex | nan`. `NaN` needs no arm of its own —
+  it rides in on `number` and the handler answers `False`, which is what
+  Contract B will name `nanBehavior: 'handle'`. A negative integer
+  answers `False` too, under
+  the convention ruled 2026-08-29 (below). `IsComposite` gained a real
+  definition in the same change: it used to canonicalize to
+  `Not(IsPrime(n))`, which called `0` and `1` composite and would have
+  called `3.5` and `NaN` composite once `IsPrime` started deciding them.
+- **FIXED 2026-08-28: `If(True, 5, err)` evaluates to `5`.** The
+  demanded-operands rule (§3) now has an implementation: absorption is
+  DEFERRED past the handler for an operator that chooses among its
+  operands, instead of happening before it. Deferring rather than skipping
+  is what keeps the dual obligation — an operand the handler does demand
+  comes back as the error, so the error is embedded in the handler's
+  result and bubbles from there (`If(False, 5, err)`, `If(err, 5, 7)`,
+  `And(True, err)`). The scope is a new definition flag,
+  `selectsOperands`, set on `If`, `Which`, `And`, `Or`, `Implies`, `Nand`,
+  `Nor` and `Coalesce`; keying it on `lazy` instead was measured and is
+  wrong, because most lazy operators demand every operand and several
+  answer something else entirely when a demanded operand is unusable
+  (`Numerator(err)` answered `Nothing`, `D(err, x)` threw out of the
+  handler). `If` and `Which` gained an explicit propagation of their
+  condition's error, which is the obligation the flag imposes.
+- **FIXED 2026-08-29: the demanded-operands rule holds under
+  composition.** `If(True, 5, err)` answered `5` on its own but made
+  every expression it was nested in fail — `1 + If(True, 5, err)`,
+  `Not(And(False, err))`, `Block(If(True, 5, err))` were all the error,
+  and `[If(True, 5, err)]` froze the unevaluated `If` into the list.
+  The cause was that an enclosing node's absorption walked the whole
+  operand tree, straight through the selecting head. The error walks now
+  treat a selecting subtree as opaque at any depth, and a node whose
+  errors all sit behind one EVALUATES instead of freezing; what the
+  subtree returns is what bubbles. A selection that is undecided
+  (`If(x == 4, 5, err)` with a free `x`) stays inert with its diagnostic
+  in place. The absorption a selecting operator owes is now attached to
+  its RESULT rather than to its operands, which also restored the
+  breadcrumb frame those operators had been dropping: `If(err, 1, 2)`
+  records `{If, 1}` the way `Sin(err)` records `{Sin, 1}`.
+- **FIXED 2026-08-29: the multi-argument numeric heads propagate `NaN`.**
+  `Root(NaN, 3)`, `Mod(NaN, 2)`, `Binomial(NaN, 2)` and `Power(2, NaN)`
+  stayed inert even under `.N()`. Their kernels are reached through
+  `apply2`, whose real branch skipped a NaN operand outright and left the
+  application with no result — reading a propagated NaN as the kernels'
+  "outside my implemented domain" signal, which it is not. `apply2` now
+  answers `NaN` for a NaN argument, as `applyN` already did, and `apply`
+  carries the same guard. `Factorial`, `Factorial2`, `GCD` and `LCM`
+  compute without those dispatchers, so each gained its own arm. The
+  INFINITE arguments of the factorial family remain inert (`ROADMAP.md`,
+  the 2026-08-29 conformance round).
+- **FIXED 2026-08-28: `markerType()` answers `nan`.** The §5 singleton is
+  live, so the type-level absence marker of a numeric slot names exactly
+  `NaN` instead of the whole `number` tier, and `withMarker(T)` is a
+  genuinely additive `T | nan` — the `NaN ∈ number` absorption reasoning
+  was repealed by the lattice flip. The stored types of the
+  out-of-band-capable accessors sharpened accordingly:
+  `At([1,2,3], 99)`, `First([1,2,3])` and `Last([1,2,3])` type
+  `integer | nan` where they typed a bare `number`. The arms are joined
+  with `reduceType`, not `widen`: widening climbs the numeric ladder and
+  would answer `number` for `integer ⊔ nan`, losing the element tier
+  again. Values did not move — an out-of-band numeric access is still
+  `NaN`, and `Missing` is still the non-numeric marker.
 - **Native handler faults are converted to plain user-facing errors
   today** (`boxed-function.ts` crash-conversion); under the §1 amendment
-  they should carry a distinct `internal-error` code with the stack.
-- **`markerType()` answers `number` where the concept says `nan`**
-  (`collections.ts`) — sharpens only after the §5 singleton lands.
+  they should carry a distinct `internal-error` code with the stack. NOT
+  part of the ratified package — still open.
 - **FIXED 2026-08-28: `compile(Heaviside)(NaN)` answers `NaN`** under
   ratified Contract B's derived `propagate` default (it answered `1` — a
   fail-closed violation, confirmed 2026-08-26: both comparisons in the
@@ -833,15 +954,24 @@ document's history):
   placement (the singletons stay; the directed infinities moved) and
   strengthens Contract B's carrier discipline (§4) by giving the
   precise carriers the short names.
-- **Choose and document per-operator conventions where references
-  diverge** — the authority is this engine's own documented definition,
-  not external agreement. `IsPrime(-7)` is the type case: Mathematica's
-  `PrimeQ` accepts negatives (primality up to units), SymPy's `isprime`
-  does not (naturals > 1) — a definitional difference, not mathematical
-  indeterminacy, so "references disagree → return the marker" is NOT the
-  rule. CE picks one definition, writes it in the operator's definition
-  with the precedent cited, and the conformance suite pins it. External
-  practice is evidence for the choice, never the decider.
+- **RULED 2026-08-29: `IsPrime(-7)` is `False` — a prime is a positive
+  integer greater than 1.** This is the general rule about per-operator
+  conventions, settled on its type case. Where references diverge, the
+  authority is this engine's own documented definition, not external
+  agreement: Mathematica's `PrimeQ` accepts the negatives of primes
+  (primality up to units), SymPy's `isprime` does not (naturals above 1).
+  That is a definitional difference, not a mathematical indeterminacy, so
+  "references disagree → return the marker" is NOT the rule — CE picks one
+  definition, writes it in the operator's definition with the precedent
+  cited, and the conformance suite pins it. External practice is evidence
+  for the choice, never the decider. SymPy's convention was adopted: it
+  keeps the uniform set-membership reading the predicate gives every other
+  decidable non-member (`3.5`, `π`, `i`, `NaN` are all `False`), so no
+  argument in the carrier is answered by inertness except one that could
+  genuinely still be prime. `IsComposite` inherits it through its
+  positivity test, so no negative integer is composite either. Recorded in
+  `isPrime` (`src/compute-engine/boxed-expression/predicates.ts`) and
+  pinned on all three routes in the conformance suite.
 - **RULED 2026-08-27: a selection with no selected branch answers
   `Missing`** — unconditionally, not the type-directed marker of the
   arms. `Which()` (and `Which` where every guard is `False` or
@@ -862,15 +992,18 @@ document's history):
   include errors eventually be a *valid* container of partially-invalid
   cells, with a type that says so? Favored eventually by the 2026-08-25
   review; not current behavior; needs a design.
-- **The executable conformance suite EXISTS** (built 2026-08-26):
-  `test/compute-engine/error-model.test.ts`, 117 tests — every row of the
-  table above across the three construction routes (`ce.box`, `ce.parse`,
-  `ce.function` with pre-boxed arguments), the §3 propagation rules, the
-  §5 `~oo` arithmetic, and six compiled-lane rows. Documented gaps are
-  pinned as CURRENT behavior in a labeled block: changing them requires
-  ratification, and the pin is what measures the change. One negative
-  finding worth keeping: the three routes AGREED on every probe in the
-  canonical kit — no route divergence exists there today.
+- **The executable conformance suite EXISTS** (built 2026-08-26;
+  146 tests as of 2026-08-29): `test/compute-engine/error-model.test.ts`
+  — every row of the table above across the three construction routes
+  (`ce.box`, `ce.parse`, `ce.function` with pre-boxed arguments), the §3
+  propagation rules, the §5 `~oo` arithmetic, and the compiled-lane rows.
+  The block that pinned the documented gaps as CURRENT behavior is gone:
+  the rulings settled every gap it held, so those rows are ordinary
+  conformance pins now, grouped under the rule that decides each. A new
+  gap goes back into a labeled block naming the eventual behavior, and the
+  pin is what measures the change. One negative finding worth keeping: the
+  three routes AGREED on every probe in the canonical kit — no route
+  divergence exists there today.
 
 ## Related documents
 
