@@ -299,7 +299,7 @@ check('Invalid argument in sequence', () =>
       1,
       [
         "Error",
-        ["ErrorCode", "incompatible-type", "'number'", "'boolean'"],
+        ["ErrorCode", "incompatible-type", "'number'", "'true'"],
         ["Equal", 2, 2]
       ],
       3
@@ -317,7 +317,7 @@ check('Invalid argument positional', () =>
         2,
         [
           "Error",
-          ["ErrorCode", "incompatible-type", "'number'", "'boolean'"],
+          ["ErrorCode", "incompatible-type", "'number'", "'true'"],
           ["Equal", 2, 2]
         ]
       ],

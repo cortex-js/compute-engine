@@ -89,6 +89,10 @@ export function bucketOf(t: Type): {
 } {
   const none = { bucket: undefined, complexNumber: false } as const;
   const r = resolveTypeForCompilation(t);
+  // A boolean VALUE type (`true`, a proven predicate's claim) is the
+  // `boolean` bucket — the resolver unfolds references only.
+  if (typeof r === 'object' && r.kind === 'value' && typeof r.value === 'boolean')
+    return { bucket: 'boolean', complexNumber: false };
   if (typeof r === 'string') {
     if (r === 'nothing') return { bucket: 'null', complexNumber: false };
     if (r === 'boolean') return { bucket: 'boolean', complexNumber: false };

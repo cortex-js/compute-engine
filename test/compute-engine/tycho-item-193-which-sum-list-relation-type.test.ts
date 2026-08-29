@@ -147,8 +147,10 @@ describe('Which/Sum over a list-valued relation: type follows evaluation', () =>
       ce.declare('a', 'number');
       ce.declare('b', 'number');
       expectAgrees(ce.parse('a=b'), 'boolean');
-      expect(ce.box(['Equal', 1, 1]).type.toString()).toBe('boolean');
-      expect(ce.box(['NotEqual', 1, 2]).type.toString()).toBe('boolean');
+      // A closed literal comparison is decided by its type (`true`); the
+      // point of this control is that it is SCALAR, not a collection.
+      expect(ce.box(['Equal', 1, 1]).type.toString()).toBe('true');
+      expect(ce.box(['NotEqual', 1, 2]).type.toString()).toBe('true');
     });
 
     test('a definite collection vs a definite scalar is a definite mask', () => {

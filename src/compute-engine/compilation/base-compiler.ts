@@ -21,6 +21,7 @@ import {
 } from '../boxed-expression/boxed-function.js';
 import { lookupApplicable } from '../function-utils.js';
 import {
+  couldBeNumericTuple,
   isFiniteIndexedCollection,
   isNumericTuple,
   isPointListValue,
@@ -31,6 +32,7 @@ import {
   collectionElementType,
   finitePartOfType,
   isNonRealNumber,
+  resolveTypeAlias,
   resolveTypeForCompilation,
   stripMissingFromType,
   typeContainsMissing,
@@ -59,6 +61,7 @@ import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import {
   functionLiteralBoundNames,
   functionLiteralParameterName,
+  functionLiteralParameters,
   functionLiteralParameterType,
   isDestructuringParameter,
 } from '../boxed-expression/function-literal.js';
@@ -4088,6 +4091,18 @@ export class BaseCompiler {
   ): TargetSource {
     if (h === 'Error') throw new Error('Error');
 
+    // A node whose TYPE is the value `true` or `false` — a comparison proven
+    // by its operands' types (`Equal(a, a)` over a NaN-free `a`), a
+    // connective of such, a literal predicate — lowers to the target's own
+    // `True`/`False` literal instead of the runtime test, when it is
+    // compile-pure (`booleanClaim`). Control-flow heads are exempt: they
+    // may lower to statements, which a literal cannot replace.
+    if (node !== undefined && !BaseCompiler.CONTROL_FLOW_HEADS.has(h)) {
+      const claim = BaseCompiler.booleanClaim(node);
+      if (claim !== undefined)
+        return BaseCompiler.compile(claim ? engine.True : engine.False, target);
+    }
+
     if (h === 'Sequence') {
       if (args.length === 0) return '';
       return `(${args
@@ -5008,17 +5023,10 @@ export class BaseCompiler {
       );
       if (selection !== null && selection !== undefined) return selection;
       BaseCompiler.assertScalarCondition(args[0]);
-      const fn = target.functions?.(h);
-      if (fn) {
-        if (typeof fn === 'function') {
-          return fn(args, BaseCompiler.operandCompiler(node, target), target);
-        }
-        return `${fn}(${args
-          .map((x) => BaseCompiler.compile(x, target))
-          .join(', ')})`;
-      }
       // Mixed real/complex arms: coerce to one convention (Tycho item 60 —
-      // see `branchComplexCoercion`).
+      // see `branchComplexCoercion`). Computed over BOTH arms even when one
+      // is dead (below): the node's shape, which its consumers read, still
+      // counts the dead arm.
       const coerce = BaseCompiler.branchComplexCoercion(
         [args[1], args[2]],
         target
@@ -5029,6 +5037,20 @@ export class BaseCompiler {
         const code = BaseCompiler.compileOp(node, i, target, 0, v);
         return coerce ? coerce(v, code) : code;
       };
+      // A condition whose TYPE is the value `true` or `false` (a proven
+      // comparison such as `Equal(a, a)` over a NaN-free `a`) selects its
+      // arm at compile time: the other arm and the test are not emitted.
+      const claim = BaseCompiler.booleanClaim(args[0]);
+      if (claim !== undefined) return claim ? arm(args[1], 1) : arm(args[2], 2);
+      const fn = target.functions?.(h);
+      if (fn) {
+        if (typeof fn === 'function') {
+          return fn(args, BaseCompiler.operandCompiler(node, target), target);
+        }
+        return `${fn}(${args
+          .map((x) => BaseCompiler.compile(x, target))
+          .join(', ')})`;
+      }
       return `((${BaseCompiler.compile(
         args[0],
         target
@@ -5079,10 +5101,17 @@ export class BaseCompiler {
         if (i >= args.length) return coerce ? '({ re: NaN, im: NaN })' : 'NaN';
         const cond = args[i];
         const val = args[i + 1];
+        // A condition proven `false` by its TYPE skips its clause BEFORE
+        // the clause's value is compiled (see the `If` branch above): a
+        // dead arm must neither cost compile time nor fail the compile
+        // with a construct the target cannot lower.
+        const claim = BaseCompiler.booleanClaim(cond);
+        if (claim === false) return compilePair(i + 2);
         const armCode = BaseCompiler.compileOp(node, i + 1, target, 0, val);
         const valCode = coerce ? coerce(val, armCode) : armCode;
-        // If condition is the symbol True, it's the default branch
-        if (isSymbol(cond, 'True')) {
+        // If condition is the symbol True, or proven `true` by its type,
+        // it's the default branch.
+        if (isSymbol(cond, 'True') || claim === true) {
           return `(${valCode})`;
         }
         const condCode =
@@ -6184,6 +6213,10 @@ export class BaseCompiler {
     // — a numeric tuple multiplied by a list (set in the `Multiply` carve-out
     // below, consumed at the emission at the end of this method).
     let atomicTuple: Expression | undefined;
+    // Set with `atomicTuple` when the OTHER operand is a list of POINTS (the
+    // `Add` point-list shape below): the outer level must then map exactly
+    // one level deep, where `_SYS.bcast` would descend into each point.
+    let atomicTupleOverPoints = false;
     if (h === 'Multiply') {
       const isArrayish = (a: Expression): boolean =>
         // A string matches `indexed_collection` but is not array-shaped — see
@@ -6317,12 +6350,73 @@ export class BaseCompiler {
     // A possibly-collection operand (`broadcastable<T>`, a top-typed call)
     // counts as a list here even though it may be a scalar at run time — the
     // shape is unprovable, and declining an unprovable shape is the D6 rule.
-    if (
-      (h === 'Add' || h === 'Divide') &&
-      args.some((a) => isNumericTuple(a)) &&
-      args.some((a) => !isNumericTuple(a) && isArrayOperand(a))
-    )
-      return null;
+    //
+    // ONE exception is a broadcast in the interpreter and compiles: a point
+    // SUMMED with a list of POINTS (`[(0,0),(3,4)] + (1,2)` is
+    // `[(1,2),(4,6)]` — the point is added to every element). The point is
+    // kept ATOMIC through the nested emission at the end of this method
+    // (`atomicTuple`), exactly as the `Multiply` point-family shape above:
+    // a flat `_SYS.bcast` would zip the point's components against the
+    // list's elements instead. The list operands must PROVABLY hold points
+    // (their element type is a tuple; a declared `list<tuple<number,
+    // number>>` parameter qualifies, a bare `list` or a possibly-collection
+    // operand does not), and there must be exactly one point: two points
+    // in the same sum would need one nested level per point.
+    //
+    // The tuple test is the COULD-form (`couldBeNumericTuple`): a tuple whose
+    // components are undeclared symbols types `tuple<unknown, unknown>`,
+    // which the strict `isNumericTuple` rejects. Such a tuple used to escape
+    // this decline and was zipped flat against the list: `4P + 0.3(t, 2t)`
+    // over a list of points ran to `[(4x + 0.3t, 4y + 0.3t), …]` — the
+    // SECOND component scaled by the first — behind `success: true` (Tycho
+    // item 234).
+    if (h === 'Add' || h === 'Divide') {
+      const tuples = args.filter((a) => couldBeNumericTuple(a));
+      const lists = args.filter(
+        (a) => !couldBeNumericTuple(a) && isArrayOperand(a)
+      );
+      if (tuples.length > 0 && lists.length > 0) {
+        // The list must PROVABLY hold real points: every element is a tuple
+        // whose components are numeric and not complex (a `{re, im}` object
+        // would reach the real-only closure below — the element analysis
+        // cannot see inside a declared element type), and its arity, when
+        // both are known, matches the point's. The tuple is compared by its
+        // known component count only: a `tuple<unknown, unknown>` point is
+        // admitted for its arity, not for its component types.
+        const isProvablyPointList = (a: Expression): boolean => {
+          if (isBoundPossiblyCollectionTyped(a)) return false;
+          const elt = collectionElementType(compilationType(a));
+          if (elt === undefined || typeof elt === 'string') return false;
+          if (elt.kind !== 'tuple') return false;
+          if (
+            !elt.elements.every(
+              (c) =>
+                isSubtype(c.type, 'number') && !isNonRealNumber(c.type)
+            )
+          )
+            return false;
+          const pt = resolveTypeAlias(tuples[0].type.type);
+          return (
+            typeof pt === 'string' ||
+            pt.kind !== 'tuple' ||
+            pt.elements.length === elt.elements.length
+          );
+        };
+        // Exactly the two-operand shape: a third SCALAR operand mixed into a
+        // point sum is a per-element `incompatible-type` error in the
+        // interpreter, not a broadcast.
+        if (
+          h !== 'Add' ||
+          args.length !== 2 ||
+          tuples.length !== 1 ||
+          lists.length !== 1 ||
+          !isProvablyPointList(lists[0])
+        )
+          return null;
+        atomicTuple = tuples[0];
+        atomicTupleOverPoints = true;
+      }
+    }
 
     // What the closure's element parameter for each operand holds at run time:
     // `true` for a `{re, im}` object, `false` for a plain number. A SCALAR
@@ -6473,6 +6567,24 @@ export class BaseCompiler {
         outerSources.push(bound[i]);
         return p;
       });
+      // A point added to a list of POINTS: the outer level walks the list
+      // ONE level deep, handing each point whole to the inner `_SYS.bcast`,
+      // which zips it against the atomic point (`[x, y] + [1, 2]` →
+      // `[x + 1, y + 2]`). An outer `_SYS.bcast` — right for the scalar
+      // sources of the `Multiply` shape — would recurse INTO each point and
+      // add the whole atomic point to every COMPONENT (`[[1, 2], [1, 2]]`
+      // for the element `(0, 0)`). Exactly one list source reaches here
+      // (the decision above declines more). A non-array source is the
+      // interpreter's inert result, projected to NaN as `_SYS.bcast` does.
+      if (atomicTupleOverPoints) {
+        return (
+          `((${bound.join(', ')}) => ` +
+          `(Array.isArray(${outerSources[0]}) ? ` +
+          `${outerSources[0]}.map((${outerParams[0]}) => ` +
+          `_SYS.bcast(${closure}, ${innerArgs.join(', ')})) : NaN))` +
+          `(${compiledArgs.join(', ')})`
+        );
+      }
       return (
         `((${bound.join(', ')}) => ` +
         `_SYS.bcast((${outerParams.join(', ')}) => ` +
@@ -10603,6 +10715,23 @@ export class BaseCompiler {
    * the gate belongs here — the shared condition guard both `If` and
    * `guardCondition` already funnel through.
    */
+  /**
+   * The boolean VALUE a condition's type proves — `true`/`false` when its
+   * type is that value type, else `undefined`. The claim comes from the
+   * producer's type handler (boolean value types,
+   * `docs/plans/2026-08-29-boolean-value-types.md` §4): a proof over TYPES
+   * and facts, never an evaluation. Dropping the test is only allowed when
+   * the condition is compile-pure — an impure condition (a `Print` inside
+   * it) must still run — so an unproven purity keeps the test.
+   */
+  static booleanClaim(cond: Expression): boolean | undefined {
+    if (cond.isPure !== true) return undefined;
+    const t = cond.type.type;
+    if (typeof t === 'object' && t.kind === 'value' && typeof t.value === 'boolean')
+      return t.value;
+    return undefined;
+  }
+
   static assertScalarCondition(cond: Expression): void {
     if (cond.type.matches('collection<any>'))
       throw new Error(
@@ -14583,8 +14712,46 @@ export class BaseCompiler {
       v !== null &&
       typeof (v as ComplexResult).re === 'number' &&
       typeof (v as ComplexResult).im === 'number';
-    const boxArg = (v: unknown): Expression =>
-      isComplexArg(v) ? ce.number(ce.complex(v.re, v.im)) : ce.expr(v as never);
+    // A JS ARRAY is a collection VALUE — the runner-argument shape of a list
+    // or point parameter (`{ P: [[0, 0], [3, 4]] }`) — not MathJSON:
+    // `ce.expr([1, 2])` reads it as an application and boxes an
+    // `unexpected-mathjson` error, so a list-valued argument ran the
+    // interpreter against an error value (Tycho item 234). Box it element by
+    // element, guided by the parameter's DECLARED type when one is in scope:
+    // an array in a `tuple<…>` position is a point, in a `list<…>` position
+    // a list whose elements follow the list's element type, and with no type
+    // evidence an array is a `List` — the same reading `PointList` and the
+    // compiled runtime give a bare array.
+    const boxArg = (v: unknown, type?: Type): Expression => {
+      if (isComplexArg(v)) return ce.number(ce.complex(v.re, v.im));
+      if (Array.isArray(v)) {
+        const t = type === undefined ? undefined : resolveTypeAlias(type);
+        if (typeof t !== 'string' && t?.kind === 'tuple')
+          return ce.function(
+            'Tuple',
+            v.map((x, i) => boxArg(x, t.elements[i]?.type))
+          );
+        const elt =
+          typeof t !== 'string' &&
+          (t?.kind === 'list' || t?.kind === 'indexed_collection')
+            ? t.elements
+            : undefined;
+        return ce.function(
+          'List',
+          v.map((x) => boxArg(x, elt))
+        );
+      }
+      return ce.expr(v as never);
+    };
+    // The declared type of a free symbol of `expr`, when it has one in the
+    // scope the fallback was built in — the shadow declared by `run` below
+    // must admit the argument value under that declaration's shape.
+    const declaredTypeOf = (k: string): Type | undefined => {
+      const def = ce.lookupDefinition(k);
+      if (!isValueDef(def)) return undefined;
+      const t = def.value.type.type;
+      return t === 'unknown' || t === 'any' ? undefined : t;
+    };
 
     // Declarative reference analysis so the (success: false) result still tells
     // the caller *why* it could not be compiled without parsing `error`. Never
@@ -14605,9 +14772,18 @@ export class BaseCompiler {
     // the function to its positional arguments via the interpreter; otherwise
     // positional arguments are silently dropped.
     if (isFunction(expr, 'Function')) {
+      // A positional argument is boxed under its parameter's declared type
+      // (`(p: tuple<number, number>) -> …` receives `[0, 0]` as a POINT), as
+      // the vars-object convention below does through `declaredTypeOf`.
+      const paramTypes = functionLiteralParameters(expr).map((p) => p.type);
       const lambdaRun = ((...args: unknown[]) =>
         interpretedRunValue(
-          ce.function('Apply', [expr, ...args.map(boxArg)]).evaluate()
+          ce
+            .function('Apply', [
+              expr,
+              ...args.map((a, i) => boxArg(a, paramTypes[i])),
+            ])
+            .evaluate()
         )) as unknown as CompiledRunner;
       return {
         target: targetName,
@@ -14639,6 +14815,13 @@ export class BaseCompiler {
             if (isComplexArg(v)) {
               ce.declare(k, 'complex');
               ce.assign(k, ce.number(ce.complex(v.re, v.im)));
+            } else if (Array.isArray(v)) {
+              // A collection argument: the shadow takes the value's own
+              // type (a `List` of points types `list<tuple<…>>`), which is
+              // what the expression's typing of the parameter admits.
+              const boxed = boxArg(v, declaredTypeOf(k));
+              ce.declare(k, boxed.type.type);
+              ce.assign(k, boxed);
             } else {
               ce.declare(k, 'number');
               ce.assign(k, v as number);

@@ -752,9 +752,12 @@ describe('P3 — relational absence: IEEE over NaN, Kleene over Missing (§3.D, 
     expect(e.box(['Less', 'q', 2]).type.matches('boolean | missing')).toBe(
       true
     );
-    // Otherwise boolean (unchanged).
-    expect(e.box(['Equal', 2, 3]).type.toString()).toBe('boolean');
-    expect(e.box(['Less', 2, 3]).type.toString()).toBe('boolean');
+    // Otherwise the comparison's own answer: a closed comparison over
+    // literals is decided by its type (boolean value types), and an
+    // undecided one keeps `boolean`.
+    expect(e.box(['Equal', 2, 3]).type.toString()).toBe('false');
+    expect(e.box(['Less', 2, 3]).type.toString()).toBe('true');
+    expect(e.box(['Less', 'x', 3]).type.toString()).toBe('boolean');
   });
 
   test('broadcast is per-cell (Kleene Missing / IEEE NaN)', () => {

@@ -1,3 +1,4 @@
+import type { Type } from '../../common/type/types.js';
 import type {
   Expression,
   SymbolDefinitions,
@@ -312,6 +313,49 @@ function finishShortCircuit(
   return reduce(values, { engine: ce });
 }
 
+
+/** The boolean VALUE an operand's type proves: `true`/`false` for a value
+ * type, `undefined` otherwise (boolean value types,
+ * `docs/plans/2026-08-29-boolean-value-types.md` §3.1). */
+function booleanClaim(x: Expression): boolean | undefined {
+  const t = x.type.type;
+  return typeof t === 'object' && t.kind === 'value' && typeof t.value === 'boolean'
+    ? t.value
+    : undefined;
+}
+
+/** Result type of a connective from its operands' claims by the truth
+ * table: `And` is `false` as soon as one operand is, `true` when all are;
+ * `Or` the dual; `Not` flips; `Xor` folds when every operand is decided.
+ * Anything undecided keeps `boolean`. An operand whose type is not a plain
+ * `boolean` (it may be absent, or a collection) keeps the head's declared
+ * answer: this refines only a result that is already the bare `boolean`. */
+function connectiveType(
+  head: 'And' | 'Or' | 'Not' | 'Xor',
+  ops: ReadonlyArray<Expression>
+): Type {
+  if (!ops.every((x) => x.type.matches('boolean'))) return 'boolean';
+  const claims = ops.map(booleanClaim);
+  const verdict = (v: boolean): Type => ({ kind: 'value', value: v });
+  if (head === 'Not') {
+    const c = claims[0];
+    return c === undefined ? 'boolean' : verdict(!c);
+  }
+  if (head === 'And') {
+    if (claims.some((c) => c === false)) return verdict(false);
+    if (claims.every((c) => c === true)) return verdict(true);
+    return 'boolean';
+  }
+  if (head === 'Or') {
+    if (claims.some((c) => c === true)) return verdict(true);
+    if (claims.every((c) => c === false)) return verdict(false);
+    return 'boolean';
+  }
+  if (claims.every((c) => c !== undefined))
+    return verdict(claims.filter((c) => c === true).length % 2 === 1);
+  return 'boolean';
+}
+
 export const LOGIC_LIBRARY: SymbolDefinitions = {
   True: {
     description: 'The boolean truth value true.',
@@ -333,6 +377,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   // logic rules for simplify)
   // See also: https://en.wikipedia.org/wiki/Prenex_normal_form
   And: {
+    type: (ops) => connectiveType('And', ops),
     description:
       'Logical conjunction (AND): true when all operands are true. ' +
       'Short-circuits: operands are evaluated left to right and evaluation ' +
@@ -388,6 +433,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluateAsync: evaluateShortCircuitAsync('And', decideAnd, evaluateAnd),
   },
   Or: {
+    type: (ops) => connectiveType('Or', ops),
     description:
       'Logical disjunction (OR): true when at least one operand is true. ' +
       'Short-circuits: operands are evaluated left to right and evaluation ' +
@@ -413,6 +459,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluateAsync: evaluateShortCircuitAsync('Or', decideOr, evaluateOr),
   },
   Not: {
+    type: (ops) => connectiveType('Not', ops),
     description: 'Logical negation (NOT).',
     wikidata: 'Q190558',
     broadcastable: true,
@@ -476,6 +523,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     ),
   },
   Xor: {
+    type: (ops) => connectiveType('Xor', ops),
     description: 'Exclusive or: true when an odd number of operands are true',
     wikidata: 'Q498186',
     broadcastable: true,

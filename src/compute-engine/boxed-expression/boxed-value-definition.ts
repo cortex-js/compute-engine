@@ -908,6 +908,12 @@ export function widenAssignedType(ce: ComputeEngine, t: Type): Type {
   if (bt.matches('complex')) return 'number';
   if (bt.matches('infinity')) return 'infinity';
   if (bt.matches('nan')) return 'nan';
+  // A boolean VALUE type (`true`, the claim of a proven comparison) widens
+  // to the tier `boolean`: the claim is a proof over the symbols' types and
+  // assumptions at assignment time, and a stored `true` would have no
+  // rewind when `forget()` or a scope pop retracts one of those
+  // assumptions (only the assumed symbol's own writes are rewound).
+  if (bt.matches('boolean')) return 'boolean';
   return t;
 }
 
@@ -958,6 +964,13 @@ export function inferTypeFromValue(
     // holds the not-a-number marker.
     // x = NaN => nan
     return ce.type('nan');
+  }
+
+  if (value.type.matches('boolean')) {
+    // A boolean value type widens to `boolean` for the reason given at
+    // `widenAssignedType`: the proof it records may be retracted later.
+    // x = (a < b) => boolean
+    return ce.type('boolean');
   }
   // No promotion for other types.
   // @todo: could consider promoting `list<T>` to `list` or...?

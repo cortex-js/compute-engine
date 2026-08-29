@@ -1014,7 +1014,9 @@ describe('SIGNATURE-GUIDELINES §3.3 — a membership predicate answers False fo
       test(`[${route}] ${label} answers False under evaluate() and N()`, () => {
         expect(symbolName(expr.evaluate())).toBe('False');
         expect(symbolName(expr.N())).toBe('False');
-        expect(expr.type.toString()).toBe('boolean');
+        // Typed boolean: a literal argument (`3.5`) is decided by the type
+        // handler itself (`false`), the others keep the bare `boolean`.
+        expect(expr.type.matches('boolean')).toBe(true);
       });
     }
   }

@@ -1080,23 +1080,25 @@ current answer's soundness — they only recover bounds the conservative
 model gives up. Do this AFTER the flip's Phase 2 codemod lands (it
 renames the very tier names the sets list), in one small diff with pins.
 
-### Boolean value types — RULED 2026-08-27 (O10), implementation OPEN (own measured round; no external unblock)
+### Boolean value types — SHIPPED 2026-08-29 (O10)
 
-Ruling O10 in `docs/plans/2026-08-22-type-handlers-on-types.md` §6:
-string literals keep the type `string`; BOOLEAN value types are wanted —
-not for the `True`/`False` constants (symbol identity already tells the
-compiler everything) but for DERIVED results: a predicate whose type
-handler proves `true` (`Equal(a, a)`, a bounds-settled domain test, now
-including open-bound domain proofs) lets `If`/`And`/`Or` eliminate dead
-branches where the value never folds. Not scheduled. Needs its own
-measured round exactly like the O9 public-type flip: extend the §4.3
-`widenValueTypes` walker to boolean value nodes at storage boundaries
-(today they are leaves because no handler manufactures them), sweep the
-type-keyed guards (`=== 'boolean'` switches — the
-retyping-breaks-guards class), and measure the full-suite blast radius
-before landing. Nothing blocks starting it; it competes only for
-attention with the `Divide` kernel item above, which has the larger
-capability payoff.
+Ruling O10 in `docs/plans/2026-08-22-type-handlers-on-types.md` §6 asked
+for boolean VALUE types on DERIVED results, not on the `True`/`False`
+constants. Shipped per `docs/plans/2026-08-29-boolean-value-types.md`
+(rev 2, three rulings 2026-08-29): the comparison heads, `Equal`/`NotEqual`,
+`And`/`Or`/`Not`/`Xor`, the literal number-theory predicates and literal
+`Element` claim the type `true` or `false` when the operands' types and
+facts prove the verdict (`1 < 2`, `Equal(a, a)` over a NaN-free `a`,
+`p > q` for `p: real<3<..>`, `q: real<..<2>`), and stay `boolean` otherwise
+(`Equal(n, n)` with `n: number` — `NaN ≠ NaN`; `Equal(True, False)`;
+two big integers in one coarse range). The claim survives every
+handler-side boundary; ASSIGNMENT widens it to `boolean`
+(`widenAssignedType`), because a stored proof over an assumed symbol would
+have no rewind. The compiler drops a proven `If`/`Which` arm and folds a
+proven test to the target literal, when the condition is compile-pure.
+Residue: none open — the two remaining type-keyed `'boolean'` string sites
+(`sum-representation.ts` bucket, `multi-clause.ts` domain enumeration)
+were taught the value node in the same round.
 
 ### Type derivation reaches state mutation at 7 handlers, 2 `elttype` handlers and 1 getter — AUDITED 2026-08-22 (OPEN, defects; the GETTER half is FIXED 2026-08-22 — `_reviseInferredType` no longer writes on read (R4, plan §4.2); the 7 handlers and 2 `elttype` handlers remain scheduled by the type-handler design)
 

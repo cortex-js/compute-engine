@@ -29,6 +29,11 @@ import {
 } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
+import {
+  compareIntervals,
+  intervalOfType,
+} from '../numerics/interval-arithmetic.js';
+import { handlerTypeOf, operandLiteralValue } from './type-handlers.js';
 import { toBigint } from '../boxed-expression/numerics.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
 import {
@@ -325,7 +330,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // the arm), `boolean` otherwise.
     missingBehavior: 'handle',
 
-    type: (ops) => comparisonResultType(ops),
+    type: (ops) => comparisonType('Equal', comparisonResultType, ops),
 
     // Broadcast element-wise over a list operand (Desmos `L[d=4]` filtering).
     // Restricted to the list-vs-scalar case by the exemption below: with two
@@ -642,7 +647,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // stays off.
     missingBehavior: 'handle',
 
-    type: comparisonResultType,
+    type: (ops) => comparisonType('NotEqual', comparisonResultType, ops),
 
     // Broadcast element-wise over a list operand (list-vs-scalar only; two or
     // more collection operands compare whole, as at `Equal` above).
@@ -760,7 +765,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // operand validates and the propagate gate stays off.
     missingBehavior: 'handle',
 
-    type: relationalAbsenceType,
+    type: (ops) => comparisonType('Less', relationalAbsenceType, ops),
 
     lazy: true,
     // Broadcast element-wise over a list operand so `L > 0` (canonicalizes to
@@ -837,6 +842,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   Greater: {
+    type: (ops) => comparisonType('Greater', relationalAbsenceType, ops),
     description: 'Greater-than comparison (strictly greater than).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
@@ -869,7 +875,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // here).
     missingBehavior: 'handle',
 
-    type: relationalAbsenceType,
+    type: (ops) => comparisonType('LessEqual', relationalAbsenceType, ops),
 
     lazy: true,
     // Broadcast element-wise over a list operand (see `Less`).
@@ -945,6 +951,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   GreaterEqual: {
+    type: (ops) => comparisonType('GreaterEqual', relationalAbsenceType, ops),
     description: 'Greater-than-or-equal comparison (greater than or equal to).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
@@ -1158,6 +1165,108 @@ function relationalAbsenceType(ops: ReadonlyArray<Expression>) {
   if (definite) return 'missing';
   if (possible) return parseType('boolean | missing');
   return 'boolean';
+}
+
+type ComparisonHead =
+  | 'Less'
+  | 'LessEqual'
+  | 'Greater'
+  | 'GreaterEqual'
+  | 'Equal'
+  | 'NotEqual';
+
+/**
+ * A comparison's VALUE type — `true` or `false` — when the operands' TYPES
+ * and facts decide it, else `undefined` (boolean value types,
+ * `docs/plans/2026-08-29-boolean-value-types.md` §3.1). Layered strictly
+ * onto the head's absence/broadcast answer: `comparisonType` calls it only
+ * when that answer is the bare, scalar `boolean`, so an operand that may
+ * be absent or collection-shaped never reaches it. The proof reads
+ * intervals only (`intervalOfType` — a NaN-admitting operand has none and
+ * declines automatically; `NaN < 1` and `NaN == NaN` are both `False`, so
+ * no order proof may be built over a possible NaN).
+ *
+ * `Equal`: two number literals compare by VALUE through
+ * `operandLiteralValue` (which unifies the value-node and the rational
+ * singleton spellings: `0.5` and `1/2` are equal) — never by comparing
+ * type nodes, since `True` and `False` both type the bare `boolean` and
+ * two large integers can share one coarse range. The same SYMBOL on both
+ * sides proves `true` only when its type is NaN-free (`NaN ≠ NaN`); the
+ * absence case was already excluded by the caller.
+ */
+function comparisonValueType(
+  head: ComparisonHead,
+  ops: ReadonlyArray<Expression>
+): Type | undefined {
+  if (ops.length !== 2) return undefined;
+  const [a, b] = ops;
+  const verdict = (v: boolean): Type => ({ kind: 'value', value: v });
+
+  if (head === 'Equal' || head === 'NotEqual') {
+    const eq = literalEquality(a, b);
+    if (eq !== undefined) return verdict(head === 'Equal' ? eq : !eq);
+  }
+  const ia = intervalOfType(handlerTypeOf(a));
+  const ib = intervalOfType(handlerTypeOf(b));
+  if (ia === undefined || ib === undefined) return undefined;
+  const c = compareIntervals(ia, ib);
+  if (c === undefined) return undefined;
+  // The evaluated comparison is TOLERANCE-based: `Less(0.3, 0.3 + 1e-12)`
+  // evaluates `False` and `Equal` of the pair evaluates `True`, because
+  // two numbers closer than `engine.tolerance` count as equal. A claim
+  // that the operands are SEPARATED (`Less` is `true`, `Equal` is
+  // `false`) therefore needs the gap between the two ranges to exceed
+  // the tolerance in force when the type is derived; the non-strict
+  // claims (`LessEqual` is `true` when `a` ends where `b` starts) agree
+  // with the tolerant evaluation as they stand.
+  const tol = a.engine.tolerance;
+  const eq = c === 'equal';
+  const lt = c === 'less' && ib.lo - ia.hi > tol;
+  const gt = c === 'greater' && ia.lo - ib.hi > tol;
+  const le = eq || c === 'less' || c === 'lessOrEqual';
+  const ge = eq || c === 'greater' || c === 'greaterOrEqual';
+  switch (head) {
+    case 'Less':
+      return lt ? verdict(true) : ge ? verdict(false) : undefined;
+    case 'Greater':
+      return gt ? verdict(true) : le ? verdict(false) : undefined;
+    case 'LessEqual':
+      return le ? verdict(true) : gt ? verdict(false) : undefined;
+    case 'GreaterEqual':
+      return ge ? verdict(true) : lt ? verdict(false) : undefined;
+    case 'Equal':
+      return eq ? verdict(true) : lt || gt ? verdict(false) : undefined;
+    case 'NotEqual':
+      return eq ? verdict(false) : lt || gt ? verdict(true) : undefined;
+  }
+}
+
+/** Equality of two operands decided WITHOUT intervals: the same symbol
+ * (NaN-free by type), or two number literals with the SAME value. Two
+ * literals with different values are left to the interval proof, which
+ * applies the tolerance gate (`comparisonValueType`): `0.3` and
+ * `0.3 + 1e-12` are different values but evaluate as equal. */
+function literalEquality(a: Expression, b: Expression): boolean | undefined {
+  if (isSymbol(a) && isSymbol(b) && a.symbol === b.symbol)
+    return intervalOfType(a.type.type) !== undefined ? true : undefined;
+  const va = operandLiteralValue(a);
+  const vb = operandLiteralValue(b);
+  if (va !== undefined && vb !== undefined && va === vb) return true;
+  return undefined;
+}
+
+/** The head's existing absence/broadcast answer, refined to a VALUE type
+ * when the proof exists. `base` is the head's own result-type function
+ * (`comparisonResultType` for the equality heads, `relationalAbsenceType`
+ * for the ordering heads), whose non-`boolean` answers are kept as is. */
+function comparisonType(
+  head: ComparisonHead,
+  base: (ops: ReadonlyArray<Expression>) => Type,
+  ops: ReadonlyArray<Expression>
+): Type {
+  const t = base(ops);
+  if (t !== 'boolean') return t;
+  return comparisonValueType(head, ops) ?? 'boolean';
 }
 
 /**

@@ -804,6 +804,46 @@ export function absRange(tier: NumericPrimitiveType, operandType: Type): Type {
 }
 
 /**
+ * Ordering of two intervals, when the intervals DECIDE it: `'less'` when
+ * every value of `a` is below every value of `b`, `'greater'` for the
+ * reverse, `'equal'` when both are the same attained point, and
+ * `undefined` when they overlap (or touch without deciding). The proofs
+ * behind a comparison predicate's value type (boolean value types,
+ * `docs/plans/2026-08-29-boolean-value-types.md` §3.1): a strict `<` is
+ * proven by `'less'`; a non-strict `≤` by `'less'` or `'equal'`, or by a
+ * touch where the shared endpoint is attained on at most one side.
+ *
+ * Touching endpoints follow the open-bounds rule: `a.hi === b.lo` decides
+ * `a < b` iff at least one of the two touching endpoints is OPEN (then no
+ * value of `a` equals a value of `b` there); when both are closed, the
+ * shared point is attained on both sides — `a ≤ b` still holds, `a < b`
+ * does not, and the intervals are `'equal'` only if both are that
+ * single point. An unbounded side never decides against the other
+ * interval. Both intervals must be NaN-free (the reader guarantees it —
+ * a NaN-admitting type has no interval).
+ */
+export function compareIntervals(
+  a: Interval,
+  b: Interval
+): 'less' | 'greater' | 'equal' | 'lessOrEqual' | 'greaterOrEqual' | undefined {
+  const aPoint = a.lo === a.hi && !a.loOpen && !a.hiOpen && Number.isFinite(a.lo);
+  const bPoint = b.lo === b.hi && !b.loOpen && !b.hiOpen && Number.isFinite(b.lo);
+  if (aPoint && bPoint && a.lo === b.lo) return 'equal';
+  if (a.hi < b.lo) return 'less';
+  if (b.hi < a.lo) return 'greater';
+  if (a.hi === b.lo && Number.isFinite(a.hi)) {
+    // Touching: strict when either touching endpoint is open.
+    if (a.hiOpen === true || b.loOpen === true) return 'less';
+    return 'lessOrEqual';
+  }
+  if (b.hi === a.lo && Number.isFinite(b.hi)) {
+    if (b.hiOpen === true || a.loOpen === true) return 'greater';
+    return 'greaterOrEqual';
+  }
+  return undefined;
+}
+
+/**
  * Attach a finalized interval to a result TIER. The tier must be one of
  * the NaN-free real tiers (callers guarantee it — a range on a
  * NaN-admitting tier would claim an order relation about a value that

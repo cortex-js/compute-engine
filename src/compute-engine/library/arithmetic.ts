@@ -200,6 +200,7 @@ import {
   operandSgn as operandSgnOnTypes,
 } from './type-handlers-types.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { isPrime as isPrimeNumber } from '../numerics/primes.js';
 import { parseType } from '../../common/type/parse.js';
 
 // The proven-real result claims of the two step functions, parsed once at
@@ -580,6 +581,22 @@ function scaleTupleComponents(
     ),
   };
 }
+
+
+/** A literal-only boolean claim for a number-theory predicate: when the
+ * operand is a number LITERAL, the verdict is a type fact (boolean value
+ * types, `docs/plans/2026-08-29-boolean-value-types.md` §3.1). Anything
+ * else — a symbol, a compound — keeps `boolean`. Reads the literal's value
+ * through `operandLiteralValue`. */
+function literalPredicateType(
+  ops: ReadonlyArray<Expression>,
+  decide: (n: number) => boolean
+): Type {
+  const v = ops.length === 1 ? operandLiteralValue(ops[0]) : undefined;
+  if (v === undefined || !Number.isFinite(v)) return 'boolean';
+  return { kind: 'value', value: decide(v) };
+}
+
 
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   {
@@ -3841,6 +3858,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
   {
     IsPrime: {
+      type: (ops) => literalPredicateType(ops, (n) => Number.isInteger(n) && isPrimeNumber(n)),
       description: '`IsPrime(n)` returns `True` if `n` is a prime number',
       wikidata: 'Q49008',
       complexity: 1200,
@@ -3872,6 +3890,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
     },
     IsComposite: {
+      type: (ops) => literalPredicateType(ops, (n) => Number.isInteger(n) && n > 3 && !isPrimeNumber(n)),
       description:
         '`IsComposite(n)` returns `True` if `n` is a composite number',
       complexity: 1200,
@@ -3894,6 +3913,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     IsOdd: {
+      type: (ops) => literalPredicateType(ops, (n) => Number.isInteger(n) && Math.abs(n % 2) === 1),
       description: '`IsOdd(n)` returns `True` if `n` is an odd number',
       complexity: 1200,
       broadcastable: true,
@@ -3917,6 +3937,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
     },
     IsEven: {
+      type: (ops) => literalPredicateType(ops, (n) => Number.isInteger(n) && n % 2 === 0),
       description: 'Even Number',
       complexity: 1200,
       broadcastable: true,

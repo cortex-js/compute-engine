@@ -13,6 +13,7 @@ import { flatten } from '../boxed-expression/flatten.js';
 import {
   isFunction,
   isNumber,
+  isString,
   isSymbol,
   sym,
 } from '../boxed-expression/type-guards.js';
@@ -174,6 +175,38 @@ function signedMembership(
 // A directly-constructed MathJSON `["List", a, b]` or `["Tuple", a, b]` is a
 // two-element collection, never an interval, so set operations here apply
 // plain collection semantics to it.
+
+/** A literal-only membership claim: a number or string literal tested
+ * against a `List`/`Set` literal whose elements are all number or string
+ * literals decides `Element` at the type level (boolean value types,
+ * `docs/plans/2026-08-29-boolean-value-types.md` §3.1). A member that is
+ * the SAME value (`isSame`) proves `true` for both kinds. A `false` proof
+ * must match the evaluated `Element`: a `List` holds by `isSame` only, but
+ * a `Set` also admits a number within `engine.tolerance` of a member
+ * (`literalSetContains`, `library/collections.ts`), so a number tested
+ * against a `Set` with a number member closer than the tolerance keeps
+ * `boolean`. Any other operand shape (a symbol, a range, a type-style
+ * membership, a filtered three-operand form) keeps the declared `boolean`. */
+function elementLiteralType(ops: ReadonlyArray<Expression>): Type {
+  if (ops.length !== 2) return 'boolean';
+  const [value, collection] = ops;
+  const isLiteral = (x: Expression): boolean => isNumber(x) || isString(x);
+  if (!isLiteral(value)) return 'boolean';
+  const isSet = isFunction(collection, 'Set');
+  if (!isSet && !isFunction(collection, 'List')) return 'boolean';
+  if (!collection.ops.every(isLiteral)) return 'boolean';
+  if (collection.ops.some((x) => x.isSame(value)))
+    return { kind: 'value', value: true };
+  if (isSet && isNumber(value)) {
+    const v = value.re;
+    const tol = value.engine.tolerance;
+    const near = collection.ops.some(
+      (x) => isNumber(x) && Math.abs(x.re - v) <= tol
+    );
+    if (near) return 'boolean';
+  }
+  return { kind: 'value', value: false };
+}
 
 export const SETS_LIBRARY: SymbolDefinitions = {
   //
@@ -527,6 +560,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // Predicates
   //
   Element: {
+    type: elementLiteralType,
     complexity: 11200,
     keywords: ['element of', 'member'],
     // EL-3: Extended signature to support optional condition for filtered iteration

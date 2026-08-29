@@ -1550,6 +1550,9 @@ function enumerateFiniteDomain(
 ): Expression[] | undefined {
   if (t === 'boolean') return [ce.True, ce.False];
   if (typeof t === 'object') {
+    // A boolean VALUE type (`true`) is a one-element domain.
+    if (t.kind === 'value' && typeof t.value === 'boolean')
+      return [t.value ? ce.True : ce.False];
     if (t.kind === 'value') {
       const v = t.value;
       if (typeof v === 'number') return [ce.number(v)];

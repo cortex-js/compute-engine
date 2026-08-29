@@ -55,7 +55,7 @@ describe('Validation Entrypoints', () => {
       1,
       [
         'Error',
-        ['ErrorCode', 'incompatible-type', 'number', 'boolean'],
+        ['ErrorCode', 'incompatible-type', 'number', 'true'],
         ['Equal', 2, 2],
       ],
       3,
