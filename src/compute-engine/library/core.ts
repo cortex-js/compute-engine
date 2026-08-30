@@ -207,7 +207,11 @@ import {
   journalCheckpointMapEntry,
   journalCheckpointField,
 } from '../checkpoint-journal.js';
-import { journalDefinitionRecord } from '../boxed-expression/boxed-value-definition.js';
+import {
+  journalDefinitionRecord,
+  widenAssignedType,
+} from '../boxed-expression/boxed-value-definition.js';
+import { reduceType } from '../../common/type/reduce.js';
 
 /**
  * Literal narrowing at a typed declaration or assignment: the character a
@@ -3474,7 +3478,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // Trigger auto-declaration if the symbol isn't declared yet
           if (!ce.lookupDefinition(symbolName)) ce.symbol(symbolName);
           const def = ce.lookupDefinition(symbolName);
-          if (def && isValueDef(def) && def.value.inferredType) {
+          // A recorded type that already admits a function — a signature the
+          // block's `Declare` hoisted (`let f: (integer) -> integer`), or the
+          // wildcard `function` itself — already ties the recursion knot, and
+          // replacing it with the wildcard would ERASE the declared signature
+          // for every read on the canonical routes. Only a non-callable
+          // recorded type (unknown, or stale scalar evidence from an earlier
+          // assignment) is retyped.
+          if (
+            def &&
+            isValueDef(def) &&
+            def.value.inferredType &&
+            !def.value.type.matches('function')
+          ) {
             // Rollback journal (family 1): same as `DefineFunction`'s
             // recursion-knot retype above — the binding may pre-exist the
             // rollback frame (an outer scope's inferred symbol), and the
@@ -3485,7 +3501,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               const slots = target._typeSlotSnapshot();
               frame.record({ undo: () => target._restoreTypeSlots(slots) });
             }
+            const wasCallable = containsSignatureArm(def.value.type.type);
             def.value.type = ce.type('function');
+            // The `_type` expression caches key on the engine's `any` axis,
+            // which a bare definition-type write does not advance: without
+            // the event, an expression typed before this write keeps its
+            // stale type for the rest of the generation.
+            ce._noteStateEvent({
+              kind: 'type-write',
+              callableBefore: wasCallable,
+              callableAfter: true,
+            });
           }
         }
 
@@ -3548,6 +3574,72 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               // A conflict (D5 collision, D14a overlap) is diagnosed on the
               // evaluate route, which runs the same recognition and throws
               // with the full message; canonicalization stays silent.
+            }
+          }
+        }
+
+        // A DATA-valued RHS records assignment evidence on an inferred,
+        // valueless target binding at CANONICALIZATION time, mirroring the
+        // `Function`-valued branch above. `Assign` only writes its binding at
+        // evaluation time, so without this a block-local bound by assignment
+        // (`Block(Assign(d, [4,5,4]), Length(d))`, and the hoisted binding
+        // `canonicalBlock` creates for it) stays `unknown`-typed on every
+        // route that never evaluates — compilation in particular, whose
+        // operand type gates then fail closed on a local whose type is
+        // manifest in the program (Tycho item 235).
+        //
+        // The recorded type is the JOIN over every `Assign` canonicalized
+        // against this binding (each pass widens through the same
+        // `widenAssignedType` table the evaluation-time assignment uses), so
+        // a read placed between two assignments of different kinds sees a
+        // type that admits both — reads resolve the binding lazily, so every
+        // read in the block observes the final joined type, including
+        // re-reads in a loop body after a reassignment. The binding stays
+        // `inferred` and valueless: evaluation still creates the runtime
+        // binding afresh and type-checks the assigned value there.
+        if (symbolName !== undefined && !isFunction(canonRhs, 'Function')) {
+          const def = ce.lookupDefinition(symbolName);
+          if (
+            def &&
+            isValueDef(def) &&
+            def.value.inferredType &&
+            !def.value.isConstant &&
+            def.value.value === undefined
+          ) {
+            const rhsType = canonRhs.type;
+            if (!rhsType.isUnknown && canonRhs.isValid) {
+              const widened = widenAssignedType(ce, rhsType.type);
+              const recorded = def.value.type;
+              const next = recorded.isUnknown
+                ? widened
+                : reduceType({
+                    kind: 'union',
+                    types: [recorded.type, widened],
+                  });
+              if (next !== undefined) {
+                // Rollback journal (family 1), as in the `Function` branch
+                // above: the binding may pre-exist the rollback frame, and
+                // the static checking pass must be able to undo the write.
+                const frame = activeRollbackFrame(ce);
+                if (frame !== undefined) {
+                  const target = def.value;
+                  const slots = target._typeSlotSnapshot();
+                  frame.record({ undo: () => target._restoreTypeSlots(slots) });
+                }
+                const wasCallable = containsSignatureArm(recorded.type);
+                def.value.type = ce.type(next);
+                // The `_type` expression caches key on the engine's `any`
+                // axis, which a bare definition-type write does not advance:
+                // without the event, an expression typed before this join —
+                // a lambda body canonicalized earlier in the same block —
+                // keeps its stale narrower type for the rest of the
+                // generation.
+                ce._noteStateEvent({
+                  kind: 'type-write',
+                  callableBefore: wasCallable,
+                  callableAfter: containsSignatureArm(def.value.type.type),
+                });
+              }
             }
           }
         }

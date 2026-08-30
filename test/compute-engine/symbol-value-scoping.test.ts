@@ -89,7 +89,13 @@ describe('SPEC: staleness (one-evaluate-late)', () => {
     const ce = engine();
     assignD(ce);
     ce.box(['Assign', 'x', 2]).evaluate();
-    expect(compile(ce.box('d'))?.code).toEqual('13');
+    // The JS target binds `d`'s folded value once in the preamble
+    // (`const _val_d = 13;` — the Tycho item 225 shared-value emission), so
+    // the agreement this spec pins is on the RUN value, with the folded
+    // constant visible in the preamble.
+    const r = compile(ce.box('d'));
+    expect(r?.preamble).toContain('const _val_d = 13;');
+    expect(r?.run()).toEqual(13);
     expect(ce.box('d').evaluate().toString()).toEqual('13');
   });
 

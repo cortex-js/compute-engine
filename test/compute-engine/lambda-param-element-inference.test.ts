@@ -303,9 +303,13 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
     // codegen under test would never run.
     const r = compile(expr, { fallback: false, constantFold: false });
     expect(r.success).toBe(true);
+    // `cs`'s assigned value is a compound pure value, so the JS-family
+    // targets bind it once in the preamble (`const _val_cs = …`) and the
+    // code reads it by name (the Tycho item 225 shared-value emission).
     expect(r.code).toBe(
-      '((_f) => ([1, 2, 3]).filter((_x) => _f(_x)).length)(((n) => 1 < n))'
+      '((_f) => (_val_cs).filter((_x) => _f(_x)).length)(((n) => 1 < n))'
     );
+    expect(r.preamble).toContain('const _val_cs = [1, 2, 3];');
     expect((r.run as () => unknown)()).toBe(2);
     expect(
       new PythonTarget().compile(expr, { constantFold: false })?.code

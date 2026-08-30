@@ -24,6 +24,7 @@ import {
   isTupleShapedType,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
+import { isValidType } from '../../common/type/primitive.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
@@ -1384,10 +1385,66 @@ function canonicalBlock(
   // this block: it is popped once the statements are canonicalized, so an `i`
   // outside the block is the imaginary unit again.
   const declaredNames: string[] = [];
+  // The statically-readable declared type of each `Declare(name, "type")`
+  // statement, keyed by name. The hoisted binding (below) carries this type
+  // from the CANONICAL pass on: `Declare` only registers its type at
+  // evaluation time, so without it a read of the local later in the block —
+  // `Length(d)` after `Declare(d, "list<number>")` — types against a bare
+  // `unknown` binding, and a compilation of the block (which never evaluates
+  // the `Declare`) fails its operand type gates on a local whose type the
+  // program states outright (Tycho item 235). Only a positional string or
+  // symbol type operand is read; a computed type (an attributes dictionary,
+  // a `TypeFrom(…)` expression) stays evaluation-time-only and the binding
+  // stays `unknown`, as before.
+  const declaredTypes = new Map<string, Type>();
   for (const op of ops) {
     if (isFunction(op, 'Declare')) {
       const nameExpr = op.ops[0];
-      if (nameExpr && isSymbol(nameExpr)) declaredNames.push(nameExpr.symbol);
+      if (nameExpr && isSymbol(nameExpr)) {
+        declaredNames.push(nameExpr.symbol);
+        // The type may be the positional operand (`Declare(d, "list<…>")`)
+        // or a literal `type` entry of an attributes dictionary
+        // (`Declare(d, {type: "list<…>", value: …})`). The dictionary is
+        // read STRUCTURALLY, from its raw key/value pairs — canonicalizing
+        // it here would bind its value expressions in the enclosing scope,
+        // before the block's own locals are hoisted (measured: it broke
+        // `let doc = {name: …}`, whose Dictionary operand is data the
+        // evaluate handler will bind later).
+        let typeOp: Expression | undefined = op.ops[1];
+        if (typeOp !== undefined && typeOp.operator === 'Dictionary') {
+          let entry: Expression | undefined = undefined;
+          if (isFunction(typeOp)) {
+            for (const pair of typeOp.ops) {
+              if (!isFunction(pair) || pair.ops.length !== 2) continue;
+              const key = isString(pair.ops[0])
+                ? pair.ops[0].string
+                : sym(pair.ops[0]);
+              if (key === 'type') {
+                entry = pair.ops[1];
+                break;
+              }
+            }
+          }
+          typeOp = entry;
+        }
+        const source =
+          typeOp === undefined
+            ? undefined
+            : isString(typeOp)
+              ? typeOp.string
+              : sym(typeOp);
+        if (source !== undefined) {
+          try {
+            const parsed = parseType(source, ce._typeResolver);
+            if (isValidType(parsed))
+              declaredTypes.set(nameExpr.symbol, parsed);
+          } catch {
+            // Not a type expression (e.g. a mistyped name): leave the
+            // binding `unknown`; the `Declare` evaluate handler reports the
+            // error on the routes that run it.
+          }
+        }
+      }
     }
   }
 
@@ -1408,13 +1465,19 @@ function canonicalBlock(
   //
   // The hoisted binding is identical to an auto-declared one (inferred type,
   // no value), so the `Declare` evaluate handler upgrades it in place at
-  // runtime exactly as it upgrades an auto-declared binding.
+  // runtime exactly as it upgrades an auto-declared binding. A
+  // statically-readable declared type rides on the binding (still marked
+  // `inferred`, still valueless — both the evaluate-time upgrade and the
+  // stale-binding hiding in `hideBodyScopeParams` key on that pair, so
+  // runtime behavior is unchanged); it is what lets reads of the local later
+  // in the block, and the compiler's operand type gates, see the type the
+  // program declared.
   if (scope) {
     for (const name of declaredNames) {
       if (name !== 'Nothing' && !scope.bindings.has(name))
         ce._declareSymbolValue(
           name,
-          { type: 'unknown', inferred: true },
+          { type: declaredTypes.get(name) ?? 'unknown', inferred: true },
           scope
         );
     }

@@ -161,6 +161,21 @@
 
 ### Bug Fixes
 
+- **A `Block`-bound local keeps its declared and assigned type on the
+  compilation routes.** `Declare` and `Assign` register their binding at
+  evaluation time, so on any route that never evaluates — compilation in
+  particular — a block-local stayed `unknown`-typed and the operand type
+  gates failed closed: `Block(Declare(d, "list<number>"), Assign(d,
+  [4,5,4]), Length(d))` refused with "operand is not an indexed
+  collection", while the same binding through a function parameter
+  compiled. The binding a `Block` hoists for its locals now carries the
+  statically-readable `Declare` type, and each `Assign` canonicalized
+  against an inferred, valueless binding records the assigned value's
+  (widened) type — joined over all assignments, so a local reassigned a
+  different kind of value reads as the union and shape-sensitive
+  lowerings still fail closed rather than emit wrong code. Evaluation
+  behavior is unchanged. (Tycho item 235.)
+
 - **A symbol's assigned value is compiled once and read by name.** Compiled
   source is text, so a value that referenced another symbol's value from
   several places was written out once per reference path: `f(k) := f(k-1) +
