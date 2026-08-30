@@ -111,16 +111,23 @@ whose live entry was stale within its generation silently changed answer.
 The bracket is an API shape and this document is its audit; neither is a proof.
 Three residues are known and accepted:
 
-- A VALIDATION verdict is taken on the live effective type, and a rejected
-  argument records no evidence. So `declare hh (list<integer>) -> integer` and
-  `assume(zz ∈ Integers)` makes `hh(zz)` an `incompatible-type` error, and `zz`
-  is left un-narrowed even after `forget(zz)`, where a fact-free engine would
-  have stored `list<integer>` on it. This is not a write reading a fact behind
-  the bracket's back: the fact genuinely refutes the call, and refusing it is
-  what a live read is for. What is arguable is only that the missing evidence
-  outlives the fact. Deciding whether a validation refusal should also be taken
-  fact-blind needs a ruling, because a fact-blind refusal would store a type
-  that is EMPTY once intersected with the fact still in force.
+- An argument that a fact contradicts is still admitted, and its inferred
+  contract can be empty while the fact holds. The admission decision for a
+  use-driven narrowing runs fact-blind (the `evidenceGuardedNarrow` gates in
+  `validate.ts`), so with `declare hh (list<integer>) -> integer` and
+  `assume(zz ∈ Integers)`, boxing `hh(zz)` records the same evidence a
+  fact-free engine records: `zz`'s stored contract becomes `list<integer>`,
+  identical to the twin without the assumption, and that is the property the
+  bracket exists to give. The cost is visible only while the fact is in
+  force: `zz`'s effective type reads `never` — the truthful intersection of
+  the two contradictory claims the user made about `zz` — and no diagnostic
+  points at the call. `forget(zz)` heals the read to `list<integer>`. An
+  earlier revision of this document described the opposite behavior (a live
+  `incompatible-type` refusal that recorded no evidence); that was measured
+  before the review pass bracketed these gates, and it no longer holds. If a
+  diagnostic at the call site is wanted, it has to be a separate LIVE
+  consistency check layered after the fact-blind write — the same two-phase
+  shape assignment uses — not a return to deciding the write on live facts.
 - A routine OUTSIDE this inventory can still write a type through the public
   accessors. The accessors bracket the write itself, so what such a routine
   stores is written fact-blind, but a decision it made beforehand is not
