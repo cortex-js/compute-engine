@@ -39,6 +39,7 @@ import {
   inferType,
   variableTypes,
   COMPAT_OVERRIDES,
+  setify,
 } from './load';
 import type { Entry, Declarations } from './load';
 
@@ -208,11 +209,6 @@ function guardShellPayload(g: GuardSpec): MathJSON {
   if (g.k === 'ne') return [g.lhs, g.rhs];
   if (g.k === 'eval') return g.pred;
   return null;
-}
-
-/** `collection` → `set` in shell signatures (same rewrite as load.ts). */
-function setify(signature: string): string {
-  return signature.replace(/\bcollection\b/g, 'set');
 }
 
 // ---------------------------------------------------------------------------
@@ -1411,7 +1407,7 @@ export function createScratchEngine(
     // corpus declarations table was generated are caught here.
     if (ce.lookupDefinition(name) !== undefined) continue;
     try {
-      ce.declare(name, setify(declarations.declarations[name].signature));
+      ce.declare(name, setify(name, declarations.declarations[name].signature));
     } catch {
       /* unable to declare (e.g. reserved name) */
     }
@@ -1618,7 +1614,7 @@ export function compileEntries(
     if (builtinProbe.lookupDefinition(name) !== undefined) continue;
     const rec = declarations.declarations[name];
     pruned[name] = {
-      signature: setify(rec.signature),
+      signature: setify(name, rec.signature),
       ...(rec.description !== undefined ? { description: rec.description } : {}),
       ...(rec.arity !== undefined && rec.arity !== null ? { arity: rec.arity } : {}),
     };

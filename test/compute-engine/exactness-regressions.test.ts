@@ -79,8 +79,8 @@ describe('P0-16i — Sum.evaluate() preserves exactness', () => {
   test('long numeric sum does not lose exactness or blow up', () => {
     // No wall-clock assertion: under full-suite worker contention this
     // legitimately takes >10s. The blow-up guard is the shared engine's
-    // `timeLimit` (test/utils.ts) — a quadratic regression on 100k terms
-    // exceeds it and fails with CancellationError.
+    // `withTimeLimit` span (test/utils.ts) — a quadratic regression on 100k
+    // terms exceeds it and fails with CancellationError.
     expect(evalStr(['Sum', 'k', ['Tuple', 'k', 1, 100000]])).toEqual(
       '5000050000'
     );

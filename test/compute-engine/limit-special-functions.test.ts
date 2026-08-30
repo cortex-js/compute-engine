@@ -277,8 +277,8 @@ describe('HARD GRUNTZ LIMITS RESPECT THE DEADLINE (CORRECTNESS_FINDINGS #28)', (
   // exp/log towers) had no deadline check, and its numeric probes evaluated the
   // towers with arbitrary-precision `.N()`, building 10-million-digit
   // intermediates. The engine can't do these limits, but it must give up
-  // quickly (bounded by `ce.timeLimit`) rather than hang, and it must never
-  // throw a `CancellationError` at the caller.
+  // quickly (bounded by the `withTimeLimit` span) rather than hang, and it
+  // must never throw a `CancellationError` at the caller.
   const INF = { sym: 'PositiveInfinity' };
 
   // Isolate the tight time budget from the shared engine.

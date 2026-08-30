@@ -1159,7 +1159,7 @@
         [
          "Filter",
          [
-          "Power",
+          "CartesianPower",
           [
            "Range",
            1,
@@ -1210,6 +1210,7 @@
    "class": "representation",
    "subclass": "limit",
    "heads": [
+    "CartesianPower",
     "Filter",
     "GCD",
     "Limit",

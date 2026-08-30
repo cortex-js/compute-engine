@@ -235,8 +235,9 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     // A high-power integrand's symbolic-antiderivative attempt expands
     // `(trinomial)^p` into a multinomial (`C(p+2,2)` terms) and scans the
     // integration rule set against it — unboundedly slow. The compile-time
-    // attempt is bounded by `ce.timeLimit`: `evaluate()` now checkpoints its
-    // power expansion (`expandPower`) and rule scan (`matchAnyRules`) against
+    // attempt is bounded by the `withTimeLimit` span: `evaluate()` now
+    // checkpoints its power expansion (`expandPower`) and rule scan
+    // (`matchAnyRules`) against
     // the deadline, so compilation degrades to quadrature instead of hanging.
     // (Tycho item 8, 2026-07-15.)
     // The checkpoint itself is pinned deterministically elsewhere: the

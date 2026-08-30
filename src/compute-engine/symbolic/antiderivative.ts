@@ -2867,7 +2867,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
   // Bound the symbolic-integration recursion by the engine deadline: some
   // rational/parametric integrands (e.g. a linear numerator over a fully
   // symbolic quadratic) explore an unbounded search here, and without a
-  // checkpoint the recursion ignored `ce.timeLimit` entirely.
+  // checkpoint the recursion ignored the evaluation deadline entirely.
   checkDeadline(fn.engine._deadlineFrame);
 
   if (isFunction(fn, 'Function')) return antiderivative(fn.op1, index);

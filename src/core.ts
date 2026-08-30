@@ -25,7 +25,7 @@ export interface ComputeEngineConstructor {
 export const ComputeEngine: ComputeEngineConstructor = ComputeEngineImpl;
 export type ComputeEngine = IComputeEngine;
 
-// Thrown when an evaluation exceeds `ce.timeLimit` or `ce.iterationLimit`
+// Thrown when an evaluation exceeds a `ce.withTimeLimit` span or `ce.iterationLimit`
 export { CancellationError } from './common/interruptible.js';
 export type { CancellationCause } from './common/interruptible.js';
 

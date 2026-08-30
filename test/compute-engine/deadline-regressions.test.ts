@@ -4,8 +4,8 @@ import { CancellationError } from '../../src/common/interruptible';
 /**
  * Regression tests for WP-2.11 / EX-14 (P0-19): a family of bignum
  * Gamma/GammaLn/Zeta kernels (`numerics/special-functions.ts`) and
- * combinatorics loops (`library/combinatorics.ts`) ignored `ce.timeLimit`
- * and ran for 15s+ before being interrupted (the originally-documented
+ * combinatorics loops (`library/combinatorics.ts`) ignored the evaluation
+ * deadline and ran for 15s+ before being interrupted (the originally-documented
  * repro was `Gamma(1e300).N()`).
  *
  * Each case is fixed at one (or both) of two layers:

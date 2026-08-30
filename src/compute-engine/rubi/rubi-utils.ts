@@ -437,7 +437,7 @@ export function polyDivideX(
   return [toExpr(q), toExpr(pc)];
 }
 
-// simplify() now respects the engine deadline (ce.timeLimit), so runaway
+// simplify() now respects the engine deadline (a `withTimeLimit` span), so runaway
 // cases (radical-tower polynomial GCD) get interrupted instead of running
 // for minutes. The cap is kept only as a fast-path skip for clearly
 // oversized expressions (raised from the old correctness-trading 120).

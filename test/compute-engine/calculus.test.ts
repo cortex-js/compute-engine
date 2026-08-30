@@ -1561,8 +1561,8 @@ describe('LIMIT', () => {
   test('variable-bound Sum in a limit at ∞ honors the deadline (γ)', () => {
     // Stage-2 corpus-audit P1 (corpus const_gamma/4644c0): the Richardson
     // ladder samples at x = 8^k, so the compiled Sum ran an ever-longer
-    // uninterruptible loop — N() of this limit ran >30 s with a 2 s
-    // ce.timeLimit. With the probe iteration budget the over-budget rungs
+    // uninterruptible loop — N() of this limit ran >30 s under a 2 s
+    // deadline. With the probe iteration budget the over-budget rungs
     // read as NaN, the ladder stops at its clean prefix, and extrapolation
     // converges to γ from the remaining rungs — in milliseconds.
     // Converging to γ at all is the assertion: without the probe budget the

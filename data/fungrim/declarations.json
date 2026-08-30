@@ -257,6 +257,16 @@
    "domainTable": null,
    "wikidata": null
   },
+  "CartesianPower": {
+   "fungrimId": null,
+   "description": null,
+   "arity": 2,
+   "signature": "(collection, integer) -> collection",
+   "signatureSource": "curated",
+   "signatureInferred": true,
+   "domainTable": null,
+   "wikidata": null
+  },
   "ChebyshevT": {
    "fungrimId": "1a0c43",
    "description": "Chebyshev polynomial of the first kind",

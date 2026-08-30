@@ -431,8 +431,8 @@ describe('TIMEOUT', () => {
     // against that huge `Add` (~100ms per rule). Neither the multinomial
     // expansion (`expandPower`) nor the rule scan (`matchAnyRules`) is on the
     // per-node `_computeValue` checkpoint path, so before the fix `evaluate()`
-    // ran unboundedly past `ce.timeLimit` (Tycho item 8, 2026-07-15). Both now
-    // checkpoint the deadline.
+    // ran unboundedly past the evaluation deadline (Tycho item 8,
+    // 2026-07-15). Both now checkpoint the deadline.
     it('high-power integrand throws CancellationError', () => {
       // Throwing IS the assertion, and it is the deterministic one: an
       // expansion and rule scan that never consult the deadline simply run to
@@ -542,7 +542,7 @@ describe('Symbolic polynomial GCD terminates', () => {
   // The Euclidean loop divided by a symbolic constant, which produced a
   // spurious nonzero constant remainder (never structurally 0), so the loop
   // spun forever building ever-larger coefficient expressions. This surfaced
-  // as a definite integral hanging ~109 s under a 3 s `timeLimit`
+  // as a definite integral hanging ~109 s under a 3 s deadline
   // (∫₀ˣ (u−a)/(b₂u²+b₁u+b₀) du). A nonzero constant remainder now correctly
   // resolves the GCD to 1 (coprime over the field); the test hanging at all
   // would fail via Jest's own timeout.

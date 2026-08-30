@@ -4,7 +4,7 @@
   "generator": "scripts/fungrim/compile-rules.ts",
   "upstream": {
     "name": "fungrim",
-    "snapshotSha256": "3a299164c68361d8019002efed10fc3ad308b8d2f6a79da908fc6509a426b760",
+    "snapshotSha256": "9ac399f742e3c508bf43f6fc08df99b306619fc00e00cc1c205b008781fed424",
     "translator": "grim2mathjson 0.1.0"
   },
   "slice": {

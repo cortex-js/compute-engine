@@ -1485,7 +1485,7 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
   - **Tests.** D-verified loader cases (∫arcsinh, ∫arctanh, ∫arccosh, ∫x·arctanh,
     ∫arcsinh(2x)² by-parts/IntHide, and ∫1/arccosh(1+2x²) → CoshIntegral/
     SinhIntegral exercising the new kernel end-to-end) in
-    `integration-rules.test.ts` (30s timeLimit for the Chi/Shi-carrying case);
+    `integration-rules.test.ts` (30 s loader `timeLimitMs` for the Chi/Shi-carrying case);
     Shi/Chi kernel unit tests in `special-functions.test.ts`.
 - **Phase R22 — the trig-subproblem bridge (ch5 inverse-trig lever) LANDED
   (2026-07-10).** The R20/R21 residual censuses named the

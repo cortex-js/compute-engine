@@ -10,10 +10,10 @@
     "parent": {
       "repository": "https://github.com/fredrik-johansson/fungrim",
       "commit": "b7c3ca6e565e1058638cab6ba2bc811090296767",
-      "note": "pygrim/ content = upstream commit + 4 fix commits (Equal-paren in 6c2b31/e54e61; Element(w,CC) x24 in jacobi_theta.py; empty assumption interval in a172c7; missing polygamma order in b16177) \u2014 submitted upstream as PRs; numerically verified at 30 digits"
+      "note": "pygrim/ content = upstream commit + 5 fix commits (Equal-paren in 6c2b31/e54e61; Element(w,CC) x24 in jacobi_theta.py; empty assumption interval in a172c7; missing polygamma order in b16177; factor 2 in 419b45: π = 2·Σ n!/(2n+1)!!) — submitted upstream as PRs; numerically verified at 30 digits"
     },
     "pin": {
-      "sha256": "3a299164c68361d8019002efed10fc3ad308b8d2f6a79da908fc6509a426b760",
+      "sha256": "9ac399f742e3c508bf43f6fc08df99b306619fc00e00cc1c205b008781fed424",
       "method": "cd fungrim && find pygrim -name '*.py' -type f | LC_ALL=C sort | xargs cat | shasum -a 256",
       "fileCount": 70
     },

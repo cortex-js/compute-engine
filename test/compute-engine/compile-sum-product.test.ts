@@ -270,7 +270,7 @@ describe('COMPILE Sum - iterationBudget', () => {
   // The budget keeps a single compiled call cheap enough for the engine
   // deadline to be honored between calls on the numeric limit ladder (the
   // Stage-2 corpus-audit deadline escape: N() of a Limit at +∞ whose body
-  // contains a variable-bound Sum ran unbounded past ce.timeLimit).
+  // contains a variable-bound Sum ran unbounded past the evaluation deadline).
   test('within budget: normal result', () => {
     const expr = ce.parse('\\sum_{k=1}^{n} k');
     const result = compile(expr, { iterationBudget: 1e6 });

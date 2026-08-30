@@ -7,7 +7,7 @@ import {
 
 /**
  * Iteration budget for a single Pollard-rho invocation, a backstop for the
- * no-deadline case (`ce.timeLimit = 0`, or a caller with no span armed): the
+ * no-deadline case (a caller with no `withTimeLimit` span armed): the
  * rho inner loop is otherwise bounded only by the evaluation deadline, so a
  * hard semiprime with no deadline armed would spin forever.
  *

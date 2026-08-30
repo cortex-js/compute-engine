@@ -600,8 +600,9 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     // file. (Verified 2026-07-10: not a regression — A/B timing against the
     // recent engine commits is identical; the default deadline was simply
     // marginal for this family under load.) NOTE: the driver keeps its OWN
-    // wall-clock budget (loader default 10 s), independent of ce.timeLimit;
-    // exhausting it declines cleanly to an inert Integrate — no
+    // wall-clock budget (loader default 10 s), independent of any
+    // `withTimeLimit` span; exhausting it declines cleanly to an inert
+    // Integrate — no
     // CancellationError. Under full-suite worker contention the ~2 s chain
     // can stretch past 10 s, so the heavy describes raise BOTH budgets.
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
@@ -1659,7 +1660,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   });
 
   // Regression: a rational integrand with fully symbolic coefficients used to
-  // hang (~109 s under a 3 s `timeLimit`) in the polynomial-GCD Euclidean loop.
+  // hang (~109 s under a 3 s deadline) in the polynomial-GCD Euclidean loop.
   // It now closes to an ArcTanh/Ln form. The test completing at all proves the
   // hang is gone; the assertion pins the closure.
   describe('symbolic-coefficient rational integrand (was a hang)', () => {

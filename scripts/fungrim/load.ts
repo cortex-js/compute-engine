@@ -132,7 +132,13 @@ export const COMPAT_OVERRIDES: Record<string, string> = {
  * Rewrite `collection` -> `set` in shell signatures. (`set` is a subtype of
  * `collection`, so Element/indexing-set usages keep working.)
  */
-function setify(signature: string): string {
+export function setify(name: string, signature: string): string {
+  // The base of a Cartesian power is any collection — the corpus applies it
+  // to a `Range`, which is an indexed collection, not a set — while the power
+  // itself is a set of tuples. Rewriting its parameter would reject the
+  // `Range` base as `incompatible-type` at Stage 1.
+  if (name === 'CartesianPower')
+    return signature.replace(/->\s*collection\b/, '-> set');
   return signature.replace(/\bcollection\b/g, 'set');
 }
 
@@ -175,7 +181,7 @@ export function createEngine(
       continue;
     }
     if (!shells.has(name)) continue; // built-in: never widen or shadow
-    ce.declare(name, setify(rec.signature));
+    ce.declare(name, setify(name, rec.signature));
   }
   if (compat)
     for (const [name, sig] of Object.entries(COMPAT_OVERRIDES))

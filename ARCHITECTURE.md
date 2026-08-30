@@ -517,8 +517,9 @@ public API groups into:
   selects 64-bit float), `tolerance` (default `1e-10`), `angularUnit`
   (default `'rad'`), `strict` (validation depth), `iterationLimit` /
   `recursionLimit` (default 1024). Time budgets are set with `withTimeLimit`
-  spans; the global `timeLimit` property (default 2000 ms) is deprecated in
-  favor of them.
+  spans; the former global `timeLimit` property was removed (see
+  `docs/TIMEOUT-MODEL.md` §5) — an evaluation with no enclosing span has no
+  time budget.
 
 Internally these responsibilities are delegated to focused services
 (`engine-startup-coordinator.ts`, `engine-scope.ts`, `engine-declarations.ts`,

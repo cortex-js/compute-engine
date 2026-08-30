@@ -342,8 +342,9 @@ describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => 
   // Deadline safety net for the exact-rational recurrence grind: samples that
   // fit a rational L=2 recurrence with |roots| = 1 (bounded magnitude) never
   // trip the magnitude-overshoot guard, so the anchor search iterates while the
-  // exact denominators balloon. It must honor `ce.timeLimit` (findRecurrence-
-  // UpperBound checks the deadline every step) instead of running for minutes.
+  // exact denominators balloon. It must honor the `withTimeLimit` span
+  // (findRecurrenceUpperBound checks the deadline every step) instead of
+  // running for minutes.
   test('recurrence anchor search honors the evaluation deadline', () => {
     // s(k) = (3/2)·s(k−1) − s(k−2): 0, 2, 3, 5/2, 3/4, −11/8, … (bounded,
     // oscillating). Anchor 100 is never reached, so the search would grind.

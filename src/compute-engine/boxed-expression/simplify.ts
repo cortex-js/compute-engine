@@ -918,7 +918,8 @@ function simplifyExpression(
   options: Partial<InternalSimplifyOptions>,
   steps: RuleSteps
 ): RuleSteps {
-  // Respect the engine deadline (`ce.timeLimit`): simplifyExpression is the
+  // Respect the engine deadline (the enclosing `withTimeLimit` span):
+  // simplifyExpression is the
   // per-node choke point of the simplification recursion, and each call does
   // a full rule scan, so an unstrided check is cheap relative to the work.
   checkDeadline(expr.engine._deadlineFrame);

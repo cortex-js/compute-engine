@@ -110,8 +110,8 @@ function expandPower(base: Expression, exp: number): Expression | null {
     // A high power of a sum enumerates a multinomial with `C(exp+m-1, m-1)`
     // terms — e.g. `(a+b+c)^350` is ~6·10⁴ — so this loop can run for many
     // seconds. Checkpoint the engine deadline (stride-amortized) so a runaway
-    // expansion honors `ce.timeLimit` instead of stalling (e.g. the compiler's
-    // symbolic-antiderivative attempt on `(trinomial)^p`).
+    // expansion honors the `withTimeLimit` span instead of stalling (e.g.
+    // the compiler's symbolic-antiderivative attempt on `(trinomial)^p`).
     if ((++count & 0xff) === 0) checkDeadline(deadline);
     const product = [ce.number(multinomialCoefficient(val))];
     for (let i = 0; i < val.length; i += 1) {

@@ -1005,31 +1005,35 @@
     "Equal",
     "Pi",
     [
-     "Sum",
+     "Multiply",
+     2,
      [
-      "Divide",
+      "Sum",
       [
-       "Factorial",
-       "n"
+       "Divide",
+       [
+        "Factorial",
+        "n"
+       ],
+       [
+        "Factorial2",
+        [
+         "Add",
+         [
+          "Multiply",
+          2,
+          "n"
+         ],
+         1
+        ]
+       ]
       ],
       [
-       "Factorial2",
-       [
-        "Add",
-        [
-         "Multiply",
-         2,
-         "n"
-        ],
-        1
-       ]
+       "Limits",
+       "n",
+       0,
+       "PositiveInfinity"
       ]
-     ],
-     [
-      "Limits",
-      "n",
-      0,
-      "PositiveInfinity"
      ]
     ]
    ],
