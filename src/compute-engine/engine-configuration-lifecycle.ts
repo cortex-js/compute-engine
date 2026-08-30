@@ -182,6 +182,7 @@ export class EngineConfigurationLifecycle {
   private _worldVersion = 0;
   private _callableVersion = 0;
   private _ephemeralWriteDepth = 0;
+  private _factSuppressionDepth = 0;
   private _scratchDeclarationScopes: object[] = [];
   private _tracker = new ConfigurationChangeTracker();
 
@@ -207,6 +208,16 @@ export class EngineConfigurationLifecycle {
 
   set ephemeralWriteDepth(value: number) {
     this._ephemeralWriteDepth = value;
+  }
+
+  /** See `IComputeEngine._factSuppressionDepth`: while this is above zero the
+   * assumptions store answers every QUERY as if it were empty. */
+  get factSuppressionDepth(): number {
+    return this._factSuppressionDepth;
+  }
+
+  set factSuppressionDepth(value: number) {
+    this._factSuppressionDepth = value;
   }
 
   get scratchDeclarationScopes(): object[] {

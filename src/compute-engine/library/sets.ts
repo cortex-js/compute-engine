@@ -19,8 +19,10 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { validateArguments } from '../boxed-expression/validate.js';
 import {
+  contextAssumptions,
   getFactIndex,
   hasAssumptions,
+  isFactTrue,
   subjectKey,
   subjectOf,
 } from '../boxed-expression/constraint-subject.js';
@@ -1550,8 +1552,8 @@ function membershipKleene(
       // `x` reaches this point evaluated, while stored facts are canonical
       // but unevaluated — also compare the evaluated fact subject (cheap:
       // only for facts whose set already matches).
-      for (const [fact, truth] of ce.context.assumptions) {
-        if (truth !== true || !isFunction(fact)) continue;
+      for (const [fact, records] of contextAssumptions(ce)) {
+        if (!isFactTrue(records) || !isFunction(fact)) continue;
         if (fact.operator !== 'Element' && fact.operator !== 'NotElement')
           continue;
         if (fact.nops !== 2) continue;

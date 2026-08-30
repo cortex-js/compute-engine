@@ -19,6 +19,7 @@ import { findUnivariateRoots } from './solve.js';
 import { getPolynomialCoefficients } from './polynomials.js';
 import { interval } from '../numerics/interval.js';
 import { tryDiophantineSolve, isIntegerDomain } from './diophantine.js';
+import { contextAssumptions, isFactTrue } from './constraint-subject.js';
 
 /**
  * Inequality relational operators. A univariate `Solve` of one of these is
@@ -1371,13 +1372,12 @@ export function filterRootsByAssumptions(
   roots: ReadonlyArray<Expression>,
   unknown: string
 ): ReadonlyArray<Expression> {
-  const assumptions = ce.context?.assumptions;
-  if (!assumptions) return roots;
+  const assumptions = contextAssumptions(ce);
 
   // Collect (once) the assumptions that constrain ONLY the unknown.
   const relevant: Expression[] = [];
-  for (const [a, truth] of assumptions.entries()) {
-    if (truth !== true) continue;
+  for (const [a, records] of assumptions.entries()) {
+    if (!isFactTrue(records)) continue;
     const op = a.operator;
     if (!op || !FILTERABLE_ASSUMPTION_OPS.has(op)) continue;
     const free = a.unknowns;

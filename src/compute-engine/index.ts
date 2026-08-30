@@ -1029,6 +1029,32 @@ export class ComputeEngine implements IComputeEngine {
     this._configurationLifecycle.ephemeralWriteDepth = value;
   }
 
+  /**
+   * When > 0, the assumptions store answers as EMPTY to every consumer that
+   * queries it through `contextAssumptions()`, so a computation bracketed by
+   * this depth behaves as if no assumption were in force. Sites that COPY or
+   * SNAPSHOT the store (a scope push, a checkpoint) are exempt.
+   * @internal
+   */
+  get _factSuppressionDepth(): number {
+    return this._configurationLifecycle.factSuppressionDepth;
+  }
+
+  set _factSuppressionDepth(value: number) {
+    this._configurationLifecycle.factSuppressionDepth = value;
+  }
+
+  /** The source of the `id` of an assumption record. Monotone for the
+   * lifetime of the engine, so two assertions of the same normalized fact
+   * never share an id.
+   * @internal */
+  _nextFactId(): number {
+    this._factIdCounter += 1;
+    return this._factIdCounter;
+  }
+
+  private _factIdCounter = 0;
+
   get _scratchDeclarationScopes(): object[] {
     return this._configurationLifecycle.scratchDeclarationScopes;
   }

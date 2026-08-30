@@ -1,4 +1,7 @@
-import type { BoxedDefinition } from './types-definitions.js';
+import type {
+  BoxedDefinition,
+  BoxedValueDefinition,
+} from './types-definitions.js';
 import type { IComputeEngine as ComputeEngine } from './types-engine.js';
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type {
@@ -9,6 +12,8 @@ import type {
   EvaluateOptions as KernelEvaluateOptions,
   EvalContext as KernelEvalContext,
   ExpressionMapInterface as KernelExpressionMapInterface,
+  FactRecord as KernelFactRecord,
+  FactSubject as KernelFactSubject,
   Rule as KernelRule,
   RuleConditionFunction as KernelRuleConditionFunction,
   RuleFunction as KernelRuleFunction,
@@ -133,4 +138,23 @@ export type ScopeNarrowing = KernelScopeNarrowing<BoxedDefinition>;
 export type NarrowingSink = KernelNarrowingSink<BoxedDefinition>;
 
 /** Evaluation context specialized to this engine/runtime model. */
-export type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;
+export type EvalContext = KernelEvalContext<
+  Expression,
+  BoxedDefinition,
+  BoxedValueDefinition
+>;
+
+/**
+ * One subject of an assumption, specialized to this engine/runtime model.
+ *
+ * @category Assumptions
+ */
+export type FactSubject = KernelFactSubject<BoxedValueDefinition>;
+
+/**
+ * One assertion recorded by `assume()`, specialized to this engine/runtime
+ * model. The assumptions store maps a normalized fact to a list of these.
+ *
+ * @category Assumptions
+ */
+export type FactRecord = KernelFactRecord<BoxedValueDefinition>;

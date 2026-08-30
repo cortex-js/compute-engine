@@ -1,7 +1,13 @@
 import { BLUE, BOLD, CYAN, GREY, RESET } from '../common/ansi-codes.js';
 import { typeToString } from '../common/type/serialize.js';
 
-import type { BoxedDefinition, IComputeEngine, Scope } from './global-types.js';
+import type {
+  BoxedDefinition,
+  BoxedValueDefinition,
+  FactRecord,
+  IComputeEngine,
+  Scope,
+} from './global-types.js';
 
 /** One frame of the engine's evaluation-context stack. */
 type EvalContext = IComputeEngine['_evalContextStack'][number];
@@ -54,6 +60,10 @@ export function pushEvalContext(
     lexicalScope: scope,
     name,
     assumptions: new ExpressionMap(ce.context?.assumptions ?? []),
+    // The assumed-value overlay has the same lifetime as the fact map: the
+    // new context starts from a copy of the enclosing one, and the copy dies
+    // with the context, so a value assumed inside is reverted by the pop.
+    assumedValues: new Map(ce.context?.assumedValues ?? []),
     // Pushing advances no axis, so record all three axis versions for the
     // pop's clean-bracket check (see `_anyVersionAtPush` in
     // `types-kernel-evaluation.ts` for why `any` alone is not enough).
@@ -174,6 +184,8 @@ export function inScope<T>(
     lexicalScope: scope,
     name: '',
     assumptions: new ExpressionMap(ce.context?.assumptions ?? []),
+    // See `pushEvalContext`: the overlay is copied and dropped with the frame.
+    assumedValues: new Map(ce.context?.assumedValues ?? []),
   });
 
   try {
@@ -232,8 +244,13 @@ export function printStack(
     //
     // Display assumptions
     //
+    const names =
+      context.assumptions.size === 0
+        ? new Map<BoxedValueDefinition, string>()
+        : bindingNames(context.lexicalScope);
     const assumptions = [...context.assumptions.entries()].map(
-      ([k, v]) => `${k}: ${v}`
+      ([k, v]) =>
+        `${k}: ${v.map((r) => factRecordToString(r, names)).join(', ')}`
     );
     if (assumptions.length > 0) {
       console.groupCollapsed(
@@ -261,6 +278,41 @@ export function printStack(
     // Next execution context
     depth += 1;
   }
+}
+
+/**
+ * The name each reachable scope binds to a value definition, innermost
+ * binding first. An assumption record points at a DEFINITION, while the
+ * reader of a scope dump wants a name; a definition bound in no reachable
+ * scope has none to show.
+ */
+function bindingNames(
+  scope: Scope | null | undefined
+): Map<BoxedValueDefinition, string> {
+  const names = new Map<BoxedValueDefinition, string>();
+  while (scope) {
+    for (const [name, def] of scope.bindings)
+      if (isValueDef(def) && !names.has(def.value)) names.set(def.value, name);
+    scope = scope.parent;
+  }
+  return names;
+}
+
+/** One assumption record for the scope dump: the truth value the assertion
+ * carries, and the subjects it was recorded against, as `part:name` pairs
+ * (`self:x`, `re:s`). A record with no named subject — a fact about symbols
+ * with no value definition, or one whose scope is gone — prints its truth
+ * value alone. */
+function factRecordToString(
+  record: FactRecord,
+  names: Map<BoxedValueDefinition, string>
+): string {
+  const subjects = record.subjects
+    .map((s) => `${s.part}:${names.get(s.def) ?? '?'}`)
+    .join(', ');
+  return subjects.length === 0
+    ? `${record.truth}`
+    : `${record.truth} (${subjects})`;
 }
 
 function defToString(name: string, def: BoxedDefinition): string {

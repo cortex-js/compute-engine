@@ -6,11 +6,11 @@
     "name": "fungrim",
     "repository": "https://github.com/arnog/fungrim",
     "branch": "grim2mathjson",
-    "commit": "0bb0a4411040ed5918870980965c7c22a6b465f5",
+    "commit": "e5eae129c08bfefb81cb6d085a8eb19b74d5747c",
     "parent": {
       "repository": "https://github.com/fredrik-johansson/fungrim",
       "commit": "b7c3ca6e565e1058638cab6ba2bc811090296767",
-      "note": "pygrim/ content = upstream commit + 5 fix commits (Equal-paren in 6c2b31/e54e61; Element(w,CC) x24 in jacobi_theta.py; empty assumption interval in a172c7; missing polygamma order in b16177; factor 2 in 419b45: π = 2·Σ n!/(2n+1)!!) — submitted upstream as PRs; numerically verified at 30 digits"
+      "note": "pygrim/ content = upstream commit + 5 fix commits (Equal-paren in 6c2b31/e54e61; Element(w,CC) x24 in jacobi_theta.py; empty assumption interval in a172c7; missing polygamma order in b16177; factor 2 in 419b45: π = 2·Σ n!/(2n+1)!!) — submitted upstream as PRs #36, #37, #39, #41 (b16177) and #40 (419b45); numerically verified at 30 digits"
     },
     "pin": {
       "sha256": "9ac399f742e3c508bf43f6fc08df99b306619fc00e00cc1c205b008781fed424",

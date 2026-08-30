@@ -1571,6 +1571,12 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
   /** Release resources owned by this definition when its scope is disposed. */
   dispose(): void;
 
+  /** True once `dispose()` has run — the scope that owned this binding has
+   * been discarded, so the definition names nothing any more. An assumption
+   * recorded against it is about a value that no longer exists.
+   * @internal */
+  disposed: boolean;
+
   /** Bumped on every semantic change to this definition (value write, type
    * change, disposal). Used to validate per-dependency caches.
    * @internal */

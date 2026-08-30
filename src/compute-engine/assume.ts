@@ -10,6 +10,8 @@ import {
   AssumeResult,
   BoxedValueDefinition,
   Expression,
+  FactRecord,
+  FactSubject,
   IComputeEngine as ComputeEngine,
   IntervalBounds,
   Sign,
@@ -43,7 +45,65 @@ import {
   signFromBounds,
   getFactIndex,
   hasAssumptions,
+  contextAssumptions,
 } from './boxed-expression/constraint-subject.js';
+
+/**
+ * The subjects of a fact: every symbol it mentions that has a value
+ * definition, resolved to that definition, with the part of the value the
+ * fact constrains.
+ *
+ * A part term (`Real(s)`, `Abs(z)`) resolves to the definition of the WHOLE
+ * value `s`/`z` with a non-`'self'` part, and its inner symbol is NOT
+ * revisited — the fact is about the part, not about the bare symbol. A
+ * symbol with no value definition contributes nothing: there is no
+ * definition to record the assertion against.
+ */
+function factSubjects(
+  ce: ComputeEngine,
+  fact: Expression
+): ReadonlyArray<FactSubject> {
+  const found = new Map<string, FactSubject>();
+
+  const visit = (expr: Expression): void => {
+    const subject = subjectOf(expr);
+    if (subject !== undefined) {
+      const key = subjectKey(subject);
+      if (!found.has(key)) {
+        const def = ce.lookupDefinition(subject.symbol);
+        if (def !== undefined && isValueDef(def))
+          found.set(key, Object.freeze({ def: def.value, part: subject.part }));
+      }
+      // A part term has been accounted for as a whole; descending into it
+      // would also record its inner symbol under the 'self' part.
+      if (subject.part !== 'self') return;
+    }
+    if (isFunction(expr)) for (const op of expr.ops) visit(op);
+  };
+
+  visit(fact);
+  return Object.freeze([...found.values()]);
+}
+
+/**
+ * Record `fact` in the current context's assumptions store.
+ *
+ * One key holds a LIST of assertions and this appends a fresh frozen record
+ * to a NEW array, never mutating the array in place: a scope push
+ * shallow-copies the map, so the inner and the enclosing context share the
+ * array objects, and only installing a replacement leaves the enclosing
+ * scope's assertions untouched.
+ */
+function recordFact(ce: ComputeEngine, fact: Expression, truth: boolean): void {
+  const assumptions = ce.context.assumptions;
+  const record: FactRecord = Object.freeze({
+    id: ce._nextFactId(),
+    truth,
+    subjects: factSubjects(ce, fact),
+  });
+  const previous = assumptions.get(fact);
+  assumptions.set(fact, previous ? [...previous, record] : [record]);
+}
 
 /**
  * Record an assumption-driven type write in the definition's provenance
@@ -384,7 +444,7 @@ function storeNotEqual(
     if (isSymbol(val, 'False')) return 'contradiction';
   }
 
-  ce.context.assumptions.set(fact, true);
+  recordFact(ce, fact, true);
   return 'ok';
 }
 
@@ -420,7 +480,7 @@ function storeNotElement(
     if (isSymbol(val, 'False')) return 'contradiction';
   }
 
-  ce.context.assumptions.set(fact, true);
+  recordFact(ce, fact, true);
   return 'ok';
 }
 
@@ -469,7 +529,7 @@ function assumeEquality(proposition: Expression): AssumeResult {
     const def = ce.lookupDefinition(lhs);
     if (!def || !isValueDef(def)) {
       ce.declare(lhs, { value: val });
-      markAssumptionValue(ce, lhs);
+      markAssumptionValue(ce, lhs, val);
       return 'ok';
     }
     if (def.value.type && !val.type.matches(def.value.type))
@@ -479,7 +539,6 @@ function assumeEquality(proposition: Expression): AssumeResult {
     // assumed value is automatically reverted when this scope is popped.
     // If lhs is declared in a parent scope, shadow it in the current scope
     // so we don't permanently mutate the parent definition.
-    markAssumptionValue(ce, lhs);
     if (!ce.context.lexicalScope.bindings.has(lhs)) {
       ce.declare(lhs, { value: val });
     } else {
@@ -495,6 +554,10 @@ function assumeEquality(proposition: Expression): AssumeResult {
       }
       ce._setSymbolValue(lhs, val);
     }
+    // Marked after the value is installed, so the overlay resolves the
+    // definition the value actually landed on — the shadow this branch may
+    // have just declared, not the enclosing one.
+    markAssumptionValue(ce, lhs, val);
     return 'ok';
   }
 
@@ -529,7 +592,8 @@ function assumeEquality(proposition: Expression): AssumeResult {
     // code assigned `x := List(2, −2)` — a *list* — as the value of `x`,
     // which then broadcast through arithmetic, e.g. `x + 1 → List(3, −1)`.)
     if (sols.length !== 1) {
-      ce.context.assumptions.set(
+      recordFact(
+        ce,
         ce.function('Equal', [proposition.op1.sub(proposition.op2), 0]),
         true
       );
@@ -541,10 +605,9 @@ function assumeEquality(proposition: Expression): AssumeResult {
     const val = sols[0];
     if (!def || !isValueDef(def)) {
       ce.declare(lhs, { value: val });
-      markAssumptionValue(ce, lhs);
+      markAssumptionValue(ce, lhs, val);
       return 'ok';
     }
-    markAssumptionValue(ce, lhs);
     if (!ce.context.lexicalScope.bindings.has(lhs)) {
       ce.declare(lhs, { value: val });
     } else {
@@ -557,10 +620,12 @@ function assumeEquality(proposition: Expression): AssumeResult {
       }
       ce._setSymbolValue(lhs, val);
     }
+    // Marked after the value is installed: see the note in Case 2.
+    markAssumptionValue(ce, lhs, val);
     return 'ok';
   }
 
-  ce.context.assumptions.set(proposition, true);
+  recordFact(ce, proposition, true);
   return 'ok';
 }
 
@@ -659,7 +724,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
   //     }
   //   } else {
   //     ce.defineSymbol(proposition.op1.symbol, { type: 'real' });
-  //     ce.context.assumptions.set(proposition, true);
+  //     recordFact(ce, proposition, true);
   //   }
   //   return 'ok';
   // }
@@ -771,7 +836,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
     refineTypeIfUnknown(ce, partSubject.symbol, impliedType, result);
 
     // Store the normalized part-bound (normal form §3.2)
-    ce.context.assumptions.set(result, true);
+    recordFact(ce, result, true);
 
     // Derived facts (design §3.2), stored alongside — never inferred at
     // query time: `Imaginary(x)` bounded away from 0 implies `x ∉ ℝ` and
@@ -1043,7 +1108,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
 
   // Case 3, 4
   console.assert(result.operator === 'Less' || result.operator === 'LessEqual');
-  ce.context.assumptions.set(result, true);
+  recordFact(ce, result, true);
   return 'ok';
 }
 
@@ -1090,7 +1155,7 @@ function assumeElement(proposition: Expression): AssumeResult {
     // assumption verbatim (used to throw "Invalid domain")
   }
   if (undefs.length > 0) {
-    ce.context.assumptions.set(proposition, true);
+    recordFact(ce, proposition, true);
     return 'ok';
   }
 
@@ -1233,7 +1298,7 @@ function assumeElementOfSet(
   if (isNumber(setExpr) || isString(setExpr)) return 'not-a-predicate';
   const fact = ce.function('Element', [ce.symbol(symbol), setExpr]);
   if (!fact.isValid) return 'not-a-predicate';
-  ce.context.assumptions.set(fact, true);
+  recordFact(ce, fact, true);
   return 'ok';
 }
 
@@ -1523,9 +1588,25 @@ function undefinedIdentifiers(expr: Expression): string[] {
  * an `assume(symbol = …)` (SYM P2-10). No-arg `forget()` consults this set to
  * clear assumption-installed values while leaving user `declare()`/`assign()`
  * values untouched.
+ *
+ * The same fact is recorded a second time in the context's `assumedValues`
+ * overlay, keyed by the DEFINITION the value landed on rather than by name.
+ * The overlay is copied on a scope push and dropped on the pop, so it gives
+ * an assumed value the lifetime of the scope that assumed it even when the
+ * definition itself belongs to an enclosing scope — which a name set and a
+ * value written onto an outer definition cannot express. Call this only
+ * AFTER the value is installed, so the lookup resolves the definition the
+ * value actually reached.
  */
-function markAssumptionValue(ce: ComputeEngine, symbol: string): void {
+function markAssumptionValue(
+  ce: ComputeEngine,
+  symbol: string,
+  value: Expression
+): void {
   (ce.context.assumptionBindings ??= new Set<string>()).add(symbol);
+  const def = ce.lookupDefinition(symbol);
+  if (def !== undefined && isValueDef(def))
+    ce.context.assumedValues.set(def.value, value);
 }
 
 function hasValue(ce: ComputeEngine, s: string): boolean {
@@ -1639,8 +1720,7 @@ function getSignFromAssumptionsLegacy(
   ce: ComputeEngine,
   subj: Subject
 ): Sign | undefined {
-  const assumptions = ce.context?.assumptions;
-  if (!assumptions) return undefined;
+  const assumptions = contextAssumptions(ce);
 
   for (const [assumption, _] of assumptions.entries()) {
     const op = assumption.operator;

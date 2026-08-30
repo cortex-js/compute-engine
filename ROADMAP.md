@@ -1348,7 +1348,20 @@ current answer's soundness — they only recover bounds the conservative
 model gives up. Do this AFTER the flip's Phase 2 codemod lands (it
 renames the very tier names the sets list), in one small diff with pins.
 
-### Assumptions bake into stored types — OPEN 2026-08-29 (design rev 3 after two spec reviews; third review pending)
+### Three compiled-code pins fail at HEAD `cb30c8be` — OPEN 2026-08-30 (found by a full-suite run; NOT touched)
+
+`design-d-callback-contract.test.ts:249`, `lambda-param-element-inference.test.ts:306`
+and `symbol-value-scoping.test.ts:92` expect a compiled symbol value to
+be FOLDED (`([1, 2, 3]).filter(…)`, `13`) and receive a late-bound
+reference (`_val_cs`, `_val_d`) instead. Reproduced in a clean worktree
+at HEAD (3 failed / 252 passed), so the failures predate the
+fact-store phase-1 work; the last commit in the area is `1ec661bf`
+"Enhance compilation process to optimize symbol value handling". Either
+the pins or the new symbol-value lowering is wrong; the session that
+landed `1ec661bf` should decide which. Left untouched to avoid crossing
+a peer's in-flight work.
+
+### Assumptions bake into stored types — RULED 2026-08-30, implementation IN PROGRESS (phase 1: fact store)
 
 `assume()` WRITES the assumed symbol's type (`assume.ts`:
 `refineSymbolType`, `refineTypeIfUnknown`), and `forget()` / a scope pop

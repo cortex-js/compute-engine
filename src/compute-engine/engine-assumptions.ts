@@ -9,10 +9,17 @@ import type { MathJsonSymbol } from '../math-json/types.js';
 
 import { isWildcard, wildcardName } from './boxed-expression/pattern-utils.js';
 import { isSymbol, isFunction } from './boxed-expression/type-guards.js';
-import { subjectOf } from './boxed-expression/constraint-subject.js';
+import {
+  contextAssumptions,
+  isFactTrue,
+  subjectOf,
+} from './boxed-expression/constraint-subject.js';
 import { isValueDef } from './boxed-expression/utils.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
-import type { BoxedDefinition } from './types-definitions.js';
+import type {
+  BoxedDefinition,
+  BoxedValueDefinition,
+} from './types-definitions.js';
 
 import {
   assume as assumeImpl,
@@ -101,12 +108,12 @@ export function ask(
     result.push(m);
   };
 
-  const assumptions = ce.context.assumptions;
+  const assumptions = contextAssumptions(ce);
 
   const candidatesFromAssumptions = (): string[] => {
     const candidates = new Set<string>();
-    for (const [assumption, val] of assumptions) {
-      if (val !== true) continue;
+    for (const [assumption, records] of assumptions) {
+      if (!isFactTrue(records)) continue;
       for (const s of assumption.symbols) candidates.add(s);
     }
     return [...candidates];
@@ -264,8 +271,8 @@ export function ask(
   }
 
   const patternsToTry = normalizedInequalityPatterns(pat);
-  for (const [assumption, val] of assumptions) {
-    if (val !== true) continue;
+  for (const [assumption, records] of assumptions) {
+    if (!isFactTrue(records)) continue;
     for (const { pattern: p, matchPermutations } of patternsToTry) {
       const m = assumption.match(p, {
         useVariations: true,
@@ -458,6 +465,30 @@ function rewindAssumedTypeWrites(
   binding.value.type = base ?? ce.type('real');
 }
 
+/**
+ * Every value definition `name` is bound to along the current context's
+ * lexical scope chain — the innermost binding and each one it shadows.
+ *
+ * `forget(name)` removes what the name reaches from HERE: an assertion
+ * recorded against an enclosing scope's definition is in force in this
+ * context and must go, while a definition of the same name in a sibling
+ * scope is not reachable and is left alone.
+ */
+function valueDefinitionsNamed(
+  ce: IComputeEngine,
+  name: MathJsonSymbol
+): Set<BoxedValueDefinition> {
+  const result = new Set<BoxedValueDefinition>();
+  let scope: IComputeEngine['context']['lexicalScope'] | null | undefined =
+    ce.context?.lexicalScope;
+  while (scope) {
+    const binding = scope.bindings.get(name);
+    if (binding !== undefined && isValueDef(binding)) result.add(binding.value);
+    scope = scope.parent;
+  }
+  return result;
+}
+
 export function forget(
   ce: IComputeEngine,
   symbol: undefined | MathJsonSymbol | MathJsonSymbol[]
@@ -472,6 +503,9 @@ export function forget(
 
   if (symbol === undefined) {
     ce.context.assumptions?.clear();
+    // The overlay holds the values `assume(x = …)` put in force, so a
+    // no-argument forget drops it whole, exactly like the fact map.
+    ce.context.assumedValues?.clear();
 
     // Also undo value bindings installed by `assume(x = …)` (SYM P2-10): the
     // docstring promises no-arg forget() removes *all* assumptions, but a
@@ -515,9 +549,37 @@ export function forget(
     // reference to this symbol, even if there are assumptions about
     // it in a parent scope. However, when the current scope exits,
     // any previous assumptions about the symbol will be restored).
-    for (const [assumption, _val] of ce.context.assumptions) {
-      if (assumption.has(symbol)) ce.context.assumptions.delete(assumption);
+    //
+    // Two reasons to drop an entry, because an assertion is recorded against
+    // a DEFINITION while the fact expression is written with NAMES:
+    // an assertion whose subjects include a definition this name is bound to
+    // in the current context, and — the historical test, kept so this never
+    // removes less than it used to — any fact whose expression mentions the
+    // name at all (a fact about a symbol with no value definition has no
+    // subject to match). Dropping the last assertion of a key drops the key.
+    // Today every subject is resolved from a symbol that appears in the fact
+    // expression, so the name test below always fires first and the
+    // subject filter never removes anything on its own; it becomes the
+    // live path when facts are keyed by definition and a re-declared name
+    // must keep the facts about the OTHER definition (phase 2 of
+    // `docs/plans/2026-08-29-assumptions-as-facts-type.md`).
+    const definitions = valueDefinitionsNamed(ce, symbol);
+    for (const [assumption, records] of [...ce.context.assumptions.entries()]) {
+      if (assumption.has(symbol)) {
+        ce.context.assumptions.delete(assumption);
+        continue;
+      }
+      const kept = records.filter(
+        (record) => !record.subjects.some((s) => definitions.has(s.def))
+      );
+      if (kept.length === records.length) continue;
+      if (kept.length === 0) ce.context.assumptions.delete(assumption);
+      else ce.context.assumptions.set(assumption, kept);
     }
+
+    // The overlay is keyed by definition, so drop the entry of every
+    // definition this name reaches in the current context.
+    for (const def of definitions) ce.context.assumedValues.delete(def);
 
     // Also reset the symbol's value in the current scope's bindings.
     // When ce.assume('x = 5') is called, it may declare x in the current

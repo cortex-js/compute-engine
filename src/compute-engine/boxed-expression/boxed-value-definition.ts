@@ -600,6 +600,10 @@ export class _BoxedValueDefinition
       _activationOf: this._activationOf,
       _isShield: this._isShield,
       _isDevolvedShadow: this._isDevolvedShadow,
+      // A definition disposed inside a checkpoint window comes back alive on
+      // restore, like every other field of the record: the record object is
+      // restored in place and live expressions still hold it by identity.
+      disposed: this.disposed,
       holdUntil: this.holdUntil,
       eq: this.eq,
       neq: this.neq,
@@ -641,6 +645,7 @@ export class _BoxedValueDefinition
     this._activationOf = s._activationOf as BoxedValueDefinition | undefined;
     this._isShield = s._isShield as true | undefined;
     this._isDevolvedShadow = s._isDevolvedShadow as true | undefined;
+    this.disposed = s.disposed as boolean;
     this.holdUntil = s.holdUntil as 'never' | 'evaluate' | 'N';
     this.eq = s.eq as typeof this.eq;
     this.neq = s.neq as typeof this.neq;
@@ -769,7 +774,15 @@ export class _BoxedValueDefinition
     if (this.isConstant) this._value = null;
   }
 
+  /** Set by `dispose()` and never cleared except by a checkpoint restore.
+   * Nothing reads it yet: the fact index will skip an assertion whose
+   * subject definition is disposed, and a checkpoint restore will drop such
+   * assertions, once the effective-type merge lands (phase 2 of
+   * `docs/plans/2026-08-29-assumptions-as-facts-type.md`). */
+  disposed = false;
+
   dispose(): void {
+    this.disposed = true;
     this._writeVersion += 1;
     this._unsubscribeFromConfigurationChange?.();
     this._unsubscribeFromConfigurationChange = undefined;

@@ -50,11 +50,13 @@
  */
 
 import type {
+  BoxedValueDefinition,
   Expression,
   IComputeEngine,
   EngineCheckpoint,
+  EvalContext,
+  FactRecord,
 } from './global-types.js';
-import type { EvalContext } from './types-kernel-evaluation.js';
 import { CheckpointWindow } from './checkpoint-journal.js';
 import { clearClauseProvenance } from './clause-identity.js';
 import {
@@ -106,8 +108,17 @@ type BoundedSnapshot = {
  * its own entry. */
 type ContextAssumptions = {
   readonly context: EvalContext;
-  readonly entries: ReadonlyArray<readonly [Expression, boolean]>;
+  readonly entries: ReadonlyArray<
+    readonly [Expression, ReadonlyArray<FactRecord>]
+  >;
   readonly dirty: boolean | undefined;
+  /** The values `assume(x = …)` put in force, keyed by definition. Copied
+   * because the overlay is mutated in place; the definition records
+   * themselves are restored in place by the journal, so holding them by
+   * reference is what the restore needs. */
+  readonly assumedValues: ReadonlyArray<
+    readonly [BoxedValueDefinition, Expression]
+  >;
   /** The names whose VALUE an `assume(x = …)` installed, copied because the
    * set is mutated in place. `undefined` when the frame had no such set yet —
    * a distinct state from an empty one, since a no-argument `forget()` reads
@@ -316,9 +327,10 @@ function snapshotAssumptions(
   return ce._evalContextStack.map((context) => ({
     context,
     entries: [...context.assumptions.entries()] as ReadonlyArray<
-      readonly [Expression, boolean]
+      readonly [Expression, ReadonlyArray<FactRecord>]
     >,
     dirty: context._assumptionsDirty,
+    assumedValues: [...context.assumedValues.entries()],
     bindings:
       context.assumptionBindings === undefined
         ? undefined
@@ -327,12 +339,21 @@ function snapshotAssumptions(
 }
 
 function restoreAssumptions(snapshot: ReadonlyArray<ContextAssumptions>): void {
-  for (const { context, entries, dirty, bindings } of snapshot) {
+  for (const { context, entries, dirty, assumedValues, bindings } of snapshot) {
     // The MAP is mutated, never replaced: `assume`/`forget` and the scope
-    // machinery hold it by identity.
+    // machinery hold it by identity. Refilling it advances the map's own
+    // `version`, which is what retires an index built from the contents the
+    // window installed — the engine's generation counters cannot see a
+    // refill that lands within one generation.
     context.assumptions.clear();
-    for (const [expr, value] of entries) context.assumptions.set(expr, value);
+    for (const [expr, records] of entries)
+      context.assumptions.set(expr, records);
     context._assumptionsDirty = dirty;
+    // The assumed-value overlay is part of the same assumption state and is
+    // restored the same way, in place.
+    context.assumedValues.clear();
+    for (const [def, value] of assumedValues)
+      context.assumedValues.set(def, value);
     // Value provenance rides with the assumptions it describes. Without it a
     // name that `assume(x = …)` introduced during the window stays marked as
     // assumption-owned, so a later no-argument `forget()` would clear a value

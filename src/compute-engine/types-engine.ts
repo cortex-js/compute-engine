@@ -92,7 +92,11 @@ type AssignValue = KernelAssignValue<
 type Scope = KernelScope<BoxedDefinition>;
 type InspectableScope = KernelInspectableScope<BoxedDefinition>;
 type NarrowingSink = KernelNarrowingSink<BoxedDefinition>;
-type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;
+type EvalContext = KernelEvalContext<
+  Expression,
+  BoxedDefinition,
+  BoxedValueDefinition
+>;
 
 /** Minimal interface for a LaTeX parser/serializer.
  *  Structurally compatible with `LatexSyntax` without importing it. */
@@ -908,6 +912,19 @@ export interface IComputeEngine {
   /** When > 0, value writes are ephemeral loop-index writes.
    * @internal */
   _ephemeralWriteDepth: number;
+
+  /** When > 0, the assumptions store reads as EMPTY to every consumer that
+   * QUERIES it through `contextAssumptions()`, so a computation bracketed by
+   * this depth answers as if no assumption were in force. Sites that COPY or
+   * SNAPSHOT the store (a scope push, a checkpoint) are exempt and keep
+   * reading `ce.context.assumptions` directly.
+   * @internal */
+  _factSuppressionDepth: number;
+
+  /** Allocate the next assumption-record id. Each `assume()` insertion takes
+   * one, so two assertions of the same normalized fact stay distinguishable.
+   * @internal */
+  _nextFactId(): number;
 
   /** Scopes that a computation currently on the stack pushed as SCRATCH and
    * will pop. A `declare` whose resolved target scope is one of these advances

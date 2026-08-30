@@ -142,6 +142,11 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   /** Release resources owned by this definition when its scope is disposed. */
   dispose(): void;
 
+  /** True once `dispose()` has run — mirror of the member documented in
+   * `types-definitions.ts`.
+   * @internal */
+  disposed: boolean;
+
   /** Bumped on every semantic change to this definition (value write, type
    * change, disposal). Used to validate per-dependency caches.
    * @internal */

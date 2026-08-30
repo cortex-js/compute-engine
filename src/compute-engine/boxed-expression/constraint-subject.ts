@@ -1,10 +1,13 @@
 import type {
   Expression,
+  ExpressionMapInterface,
+  FactRecord,
   IComputeEngine as ComputeEngine,
   IntervalBounds,
   Sign,
 } from '../global-types.js';
 import { isFunction, isSymbol, isNumber } from './type-guards.js';
+import { ExpressionMap } from './expression-map.js';
 
 /**
  * Constraint subjects (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §2).
@@ -13,8 +16,11 @@ import { isFunction, isSymbol, isNumber } from './type-guards.js';
  * algebra of "subjects": a symbol, or one of the four part-extractors
  * (`Real`, `Imaginary`, `Abs`, `Argument`) applied to exactly a bare symbol.
  *
- * This module is a leaf: it only imports types from `global-types` and the
- * runtime type guards. Do not add imports that could create cycles.
+ * This module is a leaf: it imports types from `global-types`, the runtime
+ * type guards, and the `ExpressionMap` class — used only to build the frozen
+ * empty store that `contextAssumptions()` answers while facts are suppressed.
+ * `expression-map.ts` has no imports of its own, so that edge cannot close a
+ * cycle. Do not add imports that could create cycles.
  */
 
 /** The "part" of a symbol that a constraint subject refers to. */
@@ -218,6 +224,53 @@ export function mergeTightestBounds(
 }
 
 //
+// ─── The fact store ─────────────────────────────────────────────────────────
+//
+
+/** The scoped assumptions store: normalized fact expression → assertions. */
+export type AssumptionStore = ExpressionMapInterface<ReadonlyArray<FactRecord>>;
+
+/**
+ * The map every QUERY reader consults while facts are suppressed. Shared and
+ * frozen because nothing ever writes to it: a reader that finds `size === 0`
+ * stops before touching it further.
+ */
+const EMPTY_ASSUMPTIONS: AssumptionStore = Object.freeze(
+  new ExpressionMap<ReadonlyArray<FactRecord>>()
+);
+
+/**
+ * The assumptions the current context puts in force, for a consumer that
+ * ASKS the store what is known.
+ *
+ * Every such consumer goes through this accessor rather than reading
+ * `ce.context.assumptions`, because a computation may be bracketed so that
+ * it derives its answer WITHOUT the facts: while `ce._factSuppressionDepth`
+ * is above zero the accessor hands back an empty store and the consumer
+ * answers as if nothing were assumed. Sites that COPY or SNAPSHOT the store
+ * — a scope push, a checkpoint, the scope dump — are exempt and read
+ * `ce.context.assumptions` by identity, since a scope pushed or a checkpoint
+ * taken inside such a bracket must still carry the real facts.
+ */
+export function contextAssumptions(ce: ComputeEngine): AssumptionStore {
+  if (ce._factSuppressionDepth > 0) return EMPTY_ASSUMPTIONS;
+  return ce.context?.assumptions ?? EMPTY_ASSUMPTIONS;
+}
+
+/**
+ * Whether the fact keyed by a list of assertions holds.
+ *
+ * One key can carry several assertions — an inner scope inherits the
+ * enclosing scope's records and may assert the same normalized fact against
+ * its own definition of a name — so the list, not a single value, decides.
+ * The fact holds when ANY of its assertions claims it does.
+ */
+export function isFactTrue(records: ReadonlyArray<FactRecord>): boolean {
+  for (const record of records) if (record.truth === true) return true;
+  return false;
+}
+
+//
 // ─── Fact index (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §3.1) ────────────────────────
 //
 
@@ -279,21 +332,24 @@ type FactIndexCacheEntry = {
   /** `ce._anyVersion` at build time. `assume()`/`forget()` bump it. */
   generation: number;
   /**
-   * Identity of the assumptions map at build time. `pushScope`/`popScope`
-   * swap the map object, so scope changes invalidate the cache even when
-   * the generation counter is untouched.
+   * The map's own mutation counter at build time. Catches a `.set()` or
+   * `.delete()` that changed the contents without advancing the engine's
+   * generation — a checkpoint restore refills a map in place, and internal
+   * storage of a normalized fact can replace one key's records.
    */
-  assumptions: unknown;
-  /**
-   * Entry count at build time. Catches direct `.set()`/`.delete()` on the
-   * map that bypass the generation bump (e.g. internal storage of
-   * normalized facts).
-   */
-  count: number;
+  version: number;
   index: FactIndex;
 };
 
-const factIndexCache = new WeakMap<ComputeEngine, FactIndexCacheEntry>();
+/**
+ * Keyed by the assumptions map itself rather than by the engine: a scope
+ * push installs a fresh copy of the map (`engine-scope.ts`), so a single
+ * per-engine slot would rebuild the index on every push — and a read-only
+ * scoped probe pushes and pops per read. Keeping one entry per map lets the
+ * enclosing scope's index survive a nested scope, and an entry dies with the
+ * map it describes.
+ */
+const factIndexCache = new WeakMap<AssumptionStore, FactIndexCacheEntry>();
 
 /** Collect the distinct subjects appearing as top-level terms of a
  * normalized inequality lhs (bare term, `Negate(term)`, or summands of an
@@ -348,7 +404,7 @@ function symbolDifference(
 }
 
 function buildFactIndex(
-  assumptions: Iterable<[Expression, boolean]>
+  assumptions: Iterable<[Expression, ReadonlyArray<FactRecord>]>
 ): FactIndex {
   const bySubject = new Map<string, SubjectFacts>();
   const membership = new Map<string, MembershipFacts>();
@@ -383,7 +439,7 @@ function buildFactIndex(
     return facts;
   };
 
-  for (const [assumption, val] of assumptions) {
+  for (const [assumption, records] of assumptions) {
     const op = assumption.operator;
     if (!op || !isFunction(assumption)) continue;
 
@@ -397,7 +453,7 @@ function buildFactIndex(
           inequalitySubjects.add(subjectKey(subject));
     }
 
-    if (val !== true) continue;
+    if (!isFactTrue(records)) continue;
 
     //
     // Normalized inequalities: Less/LessEqual(lhs, 0)
@@ -454,38 +510,32 @@ function buildFactIndex(
  * - Returns a shared empty index (cheaply, with no cache machinery) when
  *   there are no assumptions — hot paths with zero assumptions pay only an
  *   emptiness check.
- * - Otherwise, the index is cached per engine and invalidated when
- *   `ce._anyVersion` changes (bumped by `assume()`, `forget()`,
- *   declarations…), when the assumptions map object changes (scope
- *   push/pop), or when the number of stored assumptions changes (direct
- *   `.set()`/`.delete()` on the map).
+ * - Otherwise, the index is cached against the assumptions map itself and
+ *   invalidated when `ce._anyVersion` changes (bumped by `assume()`,
+ *   `forget()`, declarations…) or when the map's own `version` changes
+ *   (any `.set()`/`.delete()`/`.clear()`, including one that leaves the
+ *   entry count unchanged).
  *
  * The returned index must be treated as read-only.
  */
 export function getFactIndex(ce: ComputeEngine): FactIndex {
-  const assumptions = ce.context?.assumptions;
-  if (!assumptions) return EMPTY_FACT_INDEX;
+  // The accessor hands back an empty store while facts are suppressed, so
+  // that case exits here and needs no place in the cache key.
+  const assumptions = contextAssumptions(ce);
+  if (assumptions.size === 0) return EMPTY_FACT_INDEX;
 
-  // Count entries (also serves as the fast empty check: the common case of
-  // zero assumptions exits before touching the cache or building anything).
-  let count = 0;
-  for (const _entry of assumptions) count += 1;
-  if (count === 0) return EMPTY_FACT_INDEX;
-
-  const cached = factIndexCache.get(ce);
+  const cached = factIndexCache.get(assumptions);
   if (
     cached &&
     cached.generation === ce._anyVersion &&
-    cached.assumptions === assumptions &&
-    cached.count === count
+    cached.version === assumptions.version
   )
     return cached.index;
 
   const index = buildFactIndex(assumptions);
-  factIndexCache.set(ce, {
+  factIndexCache.set(assumptions, {
     generation: ce._anyVersion,
-    assumptions,
-    count,
+    version: assumptions.version,
     index,
   });
   return index;
@@ -499,13 +549,10 @@ export function getFactIndex(ce: ComputeEngine): FactIndex {
  * Fast emptiness check for the assumptions store. The P3 query hooks
  * (relational operators, sgn fallbacks, membership lookups, symbol
  * predicates) are gated on this so that zero-assumption engines pay only
- * an (empty) iterator check before any subject or index work.
+ * one size read before any subject or index work.
  */
 export function hasAssumptions(ce: ComputeEngine): boolean {
-  const assumptions = ce.context?.assumptions;
-  if (!assumptions) return false;
-  for (const _entry of assumptions) return true;
-  return false;
+  return contextAssumptions(ce).size !== 0;
 }
 
 /**

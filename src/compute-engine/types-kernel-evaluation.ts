@@ -36,6 +36,13 @@ export interface Assumption<Expr = unknown, CE = unknown> {
 
 /** @category Assumptions */
 export interface ExpressionMapInterface<U, Expr = unknown> {
+  /** The number of entries, in constant time. */
+  readonly size: number;
+  /** A counter advanced by every `set`, `delete` and `clear`, so a derived
+   * cache can revalidate with one integer comparison. It counts MUTATIONS,
+   * not entries: a map that was filled and then cleared has `size === 0`
+   * and a non-zero `version`, and a map copied from another starts at 0. */
+  readonly version: number;
   has(expr: Expr): boolean;
   get(expr: Expr): U | undefined;
   set(expr: Expr, value: U): void;
@@ -44,6 +51,51 @@ export interface ExpressionMapInterface<U, Expr = unknown> {
   [Symbol.iterator](): IterableIterator<[Expr, U]>;
   entries(): IterableIterator<[Expr, U]>;
 }
+
+/**
+ * One subject of an assumption: the WHOLE-VALUE definition the fact is
+ * about, plus which part of that value the fact constrains.
+ *
+ * `part` is `'self'` when the fact mentions the symbol directly (`x > 3`),
+ * and `'re'`/`'im'`/`'abs'`/`'arg'` when it constrains `Real(x)`,
+ * `Imaginary(x)`, `Abs(x)` or `Argument(x)`. In every case `def` is the
+ * definition of the WHOLE value `x`, never of the part. The four spellings
+ * repeat the `SubjectPart` union of
+ * `boxed-expression/constraint-subject.ts`, which cannot be imported here:
+ * this file is a kernel type module with no compute-engine imports.
+ *
+ * @category Assumptions
+ */
+export type FactSubject<Def = unknown> = Readonly<{
+  def: Def;
+  part: 'self' | 're' | 'im' | 'abs' | 'arg';
+}>;
+
+/**
+ * One assertion recorded by a call to `assume()`.
+ *
+ * The assumptions store maps a normalized fact expression to a LIST of these
+ * records: the same normalized fact can be asserted against two different
+ * definitions of one name, because an inner scope's assumption map is a copy
+ * of the enclosing one and the inner scope may redeclare the name.
+ *
+ * Records are frozen and their list is replaced, never mutated in place. A
+ * scope push shallow-copies the map, so the inner and outer maps share the
+ * list objects; installing a fresh list in the inner map is what leaves the
+ * enclosing scope's assertions untouched.
+ *
+ * @category Assumptions
+ */
+export type FactRecord<Def = unknown> = Readonly<{
+  /** The assertion occurrence, from a per-engine counter. Distinguishes two
+   * assertions of the same fact so a consumer can select whole assertions. */
+  id: number;
+  /** What the assertion claims about the fact expression. */
+  truth: boolean;
+  /** Every symbol the fact mentions that has a value definition, resolved at
+   * insertion time. A symbol with no value definition is not represented. */
+  subjects: ReadonlyArray<FactSubject<Def>>;
+}>;
 
 /** @category Assumptions */
 export type AssumeResult =
@@ -397,9 +449,26 @@ export interface NarrowingSink<Binding = unknown> {
 }
 
 /** @category Compute Engine */
-export type EvalContext<Expr = unknown, Binding = unknown> = {
+export type EvalContext<
+  Expr = unknown,
+  Binding = unknown,
+  ValueDef = unknown,
+> = {
   lexicalScope: Scope<Binding>;
-  assumptions: ExpressionMapInterface<boolean, Expr>;
+  assumptions: ExpressionMapInterface<
+    ReadonlyArray<FactRecord<ValueDef>>,
+    Expr
+  >;
+  /**
+   * Values `assume(x = …)` put in force for this context, keyed by the
+   * definition the equality is about rather than by name — a name can be
+   * bound to different definitions in different scopes.
+   *
+   * Copied when a context is pushed and dropped when it is popped, exactly
+   * like the fact map, so an assumed value has the lifetime of the scope
+   * that assumed it. Cleared by a no-argument `forget()`.
+   */
+  assumedValues: Map<ValueDef, Expr>;
   name: undefined | string;
   /**
    * Names of symbols in this context whose *value* was installed by
