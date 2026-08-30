@@ -862,8 +862,15 @@ export class BaseCompiler {
    *   point where the compile visibly stalls, quadrupling with every level
    *   after it.
    * The limit therefore caps a single fold at roughly 60 KB of generated
-   * source. It bounds the blow-up rather than removing it: the general fix is
-   * common-subexpression binding, which would emit each shared node once.
+   * source.
+   *
+   * On a target that can bind a folded value once as a shared local
+   * (`bindsFoldedValue` — the JavaScript-family targets), the sharing is
+   * removed rather than bounded: a symbol's compound pure value is emitted
+   * ONCE in the preamble (`const _val_f = …;`) and every reference reads that
+   * name, so the tower above emits three nodes per level. The size walk
+   * charges what the emitter then actually writes — each bound value once,
+   * each reference to it as one node — and this limit applies to that total.
    */
   private static readonly MAX_FOLD_EXPANDED_NODES = 20_000;
 
@@ -1315,6 +1322,9 @@ export class BaseCompiler {
       // The fold-value memo has the same staleness boundary: engine symbol
       // values are stable within one compilation but not across them.
       BaseCompiler._foldValueMemo = new WeakMap();
+      BaseCompiler._foldValueBlockedMemo = new Map();
+      BaseCompiler._foldValueImpureMemo = new Map();
+      BaseCompiler._foldValueMentionsMemo = new Map();
       // (The fold-aware oracle latch `_oracleFoldTarget` is synced below,
       // OUTSIDE this depth-0 block — a re-entrant nested compile must be
       // able to switch it off.)
@@ -3060,6 +3070,154 @@ export class BaseCompiler {
     >
   >();
 
+  /**
+   * Per-compilation memo of `foldValueBlocked`, keyed by node identity.
+   * Reset together with `_foldValueMemo` at each outermost compilation entry,
+   * for the same reason: the answer reads engine symbol VALUES, which are
+   * stable within one compilation but not across compilations.
+   */
+  private static _foldValueBlockedMemo = new Map<Expression, boolean>();
+
+  /**
+   * Per-compilation memo of `foldValueImpure`, keyed by node identity; reset
+   * with `_foldValueMemo` at each outermost compilation entry.
+   */
+  private static _foldValueImpureMemo = new Map<Expression, boolean>();
+
+  /**
+   * Per-compilation memo of `foldValueMentions`, keyed by node identity;
+   * reset with `_foldValueMemo` at each outermost compilation entry.
+   */
+  private static _foldValueMentionsMemo = new Map<
+    Expression,
+    ReadonlySet<string>
+  >();
+
+  /**
+   * Is `expr` impure once every assigned symbol value it reaches is looked
+   * through? `expr.isPure` stops at a symbol that has a value, so
+   * `a := r + r` with `r := Random()` reports pure. A value evaluated once
+   * where the interpreter re-evaluates it at every reference must not be
+   * shared, and that decision needs the transitive answer.
+   *
+   * Linear in the DISTINCT nodes reached (memoized by identity for the
+   * compilation); a value that refers to itself is answered `false` on
+   * re-entry.
+   */
+  private static foldValueImpure(expr: Expression): boolean {
+    const memo = BaseCompiler._foldValueImpureMemo;
+    const cached = memo.get(expr);
+    if (cached !== undefined) return cached;
+    memo.set(expr, false);
+    let impure = !expr.isPure;
+    if (!impure) {
+      const engine = expr.engine;
+      const visit = (node: Expression): boolean => {
+        if (isSymbol(node)) {
+          const v = engine._getSymbolValue(node.symbol);
+          return v !== undefined && BaseCompiler.foldValueImpure(v);
+        }
+        if (isDictionary(node)) {
+          for (const v of node.values) if (visit(v)) return true;
+          return false;
+        }
+        if (isFunction(node)) {
+          for (const op of node.ops) if (visit(op)) return true;
+        }
+        return false;
+      };
+      impure = visit(expr);
+    }
+    memo.set(expr, impure);
+    return impure;
+  }
+
+  /**
+   * Every symbol name `expr` mentions, once every assigned symbol value it
+   * reaches is looked through — free names AND value-carrying names, at any
+   * depth. The interpreter resolves a value's symbols at the point of use, so
+   * a value mentioning a name that some enclosing binder rebinds (a `Sum`
+   * index, a function parameter) reads the binder's variable there; this set
+   * is what a caller intersects with the bound names to find out.
+   *
+   * Linear in the DISTINCT nodes reached (memoized by identity for the
+   * compilation); a value that refers to itself contributes nothing on
+   * re-entry.
+   */
+  private static foldValueMentions(expr: Expression): ReadonlySet<string> {
+    const memo = BaseCompiler._foldValueMentionsMemo;
+    const cached = memo.get(expr);
+    if (cached !== undefined) return cached;
+    const EMPTY: ReadonlySet<string> = new Set();
+    memo.set(expr, EMPTY);
+    const out = new Set<string>();
+    const engine = expr.engine;
+    const visit = (node: Expression): void => {
+      if (isSymbol(node)) {
+        out.add(node.symbol);
+        const v = engine._getSymbolValue(node.symbol);
+        if (v !== undefined)
+          for (const n of BaseCompiler.foldValueMentions(v)) out.add(n);
+      } else if (isDictionary(node)) {
+        for (const v of node.values) visit(v);
+      } else if (isFunction(node)) {
+        for (const op of node.ops) visit(op);
+      }
+    };
+    visit(expr);
+    memo.set(expr, out);
+    return out;
+  }
+
+  /**
+   * Does `expr` mention a free symbol, or an impure operation, once every
+   * assigned symbol value it reaches is looked through?
+   *
+   * `expr.unknowns` and `expr.isPure` both stop at a symbol that has a
+   * value. `f8` with `f8 := f7 + 2 f7`, …, `f0 := x` reports no unknowns,
+   * yet evaluating it yields `6561x`, never a literal: without this check
+   * the constant fold evaluated such a subtree at every level of the chain
+   * until its time budget expired — and the interpreter's cost on a value
+   * that references another value from several places grows exponentially
+   * with the depth of the chain — only to decline on the symbolic result
+   * each time. And `r + r` with `r := Random()` reports pure, so the fold
+   * baked ONE sample into the artifact where the interpreter draws two fresh
+   * ones at every evaluation.
+   *
+   * Linear in the DISTINCT nodes reached: each node's answer is memoized by
+   * identity for the compilation, so a value referenced from many places is
+   * walked once. A value that refers to itself is answered `false` on
+   * re-entry, which only lets the fold proceed to its usual gates.
+   */
+  private static foldValueBlocked(expr: Expression): boolean {
+    const memo = BaseCompiler._foldValueBlockedMemo;
+    const cached = memo.get(expr);
+    if (cached !== undefined) return cached;
+    // Provisional answer for a re-entrant reference.
+    memo.set(expr, false);
+    let reaches = expr.unknowns.length > 0 || !expr.isPure;
+    if (!reaches) {
+      const engine = expr.engine;
+      const visit = (node: Expression): boolean => {
+        if (isSymbol(node)) {
+          const v = engine._getSymbolValue(node.symbol);
+          return v !== undefined && BaseCompiler.foldValueBlocked(v);
+        }
+        if (isDictionary(node)) {
+          for (const v of node.values) if (visit(v)) return true;
+          return false;
+        }
+        if (isFunction(node)) {
+          for (const op of node.ops) if (visit(op)) return true;
+        }
+        return false;
+      };
+      reaches = visit(expr);
+    }
+    memo.set(expr, reaches);
+    return reaches;
+  }
+
   private static constantFoldValue(
     expr: Expression,
     target: CompileTarget<Expression>
@@ -3082,6 +3240,10 @@ export class BaseCompiler {
 
     if (expr.unknowns.length > 0) return undefined;
     if (!expr.isPure) return undefined;
+    // A free symbol or an impure operation reached only THROUGH an assigned
+    // value also disqualifies the evaluation, which `unknowns` and `isPure`
+    // do not see.
+    if (BaseCompiler.foldValueBlocked(expr)) return undefined;
 
     const t = compilationType(expr);
     if (
@@ -3306,7 +3468,28 @@ export class BaseCompiler {
     if (++c.visits > CONSTANT_FOLD_MAX_VISITS) return Infinity;
     if (depth > CONSTANT_FOLD_MAX_DEPTH) return Infinity;
     if (isNumber(expr) || isString(expr) || isCharacter(expr)) return 1;
-    if (isSymbol(expr)) return 1;
+    if (isSymbol(expr)) {
+      // A symbol with an assigned value costs that value: the evaluator reads
+      // it in the symbol's place. Cached by name, under a prefix that cannot
+      // collide with an operator name, so a value referenced from many
+      // places is priced once; a value that reaches itself has no static
+      // bound. Pricing it as a leaf let a chain of values that each mention
+      // the previous one twice pass the gate with an estimate of a few units
+      // while its evaluation grew exponentially with the chain's depth.
+      const value = expr.engine._getSymbolValue(expr.symbol);
+      if (value === undefined || !isFunction(value)) return 1;
+      const key = `value:${expr.symbol}`;
+      const cached = c.cache.get(key);
+      if (cached !== undefined) return cached;
+      if (c.inProgress.has(key)) return Infinity;
+      c.inProgress.add(key);
+      const cost = 1 + BaseCompiler.foldCostEstimate(value, depth + 1, c);
+      c.inProgress.delete(key);
+      // As for the operator arm below: a non-finite answer is relative to the
+      // depth it was reached at, so it is not cached under a depth-free key.
+      if (Number.isFinite(cost)) c.cache.set(key, cost);
+      return cost;
+    }
     if (isDictionary(expr)) {
       let total = 1;
       for (const v of expr.values) {
@@ -9439,6 +9622,11 @@ export class BaseCompiler {
    * engine-value fallback below must not read through it (a loop counter
    * named `i` must not pick up the imaginary unit's value).
    */
+  /** Symbols whose assigned VALUE `isComplexValued` is currently analyzing
+   * (see the symbol arm): a value that mentions its own symbol is answered
+   * from the declared type on re-entry. */
+  private static readonly _complexValueInProgress = new Set<string>();
+
   static isComplexValued(expr: Expression): boolean {
     if (isNumber(expr)) {
       // `~oo` is not complex-valued, even though the value carries an
@@ -9484,7 +9672,22 @@ export class BaseCompiler {
         if (BaseCompiler._binderShield[i].has(expr.symbol))
           return BaseCompiler.wideIsComplex(t.type);
       const v = expr.engine._getSymbolValue(expr.symbol);
-      if (v !== undefined) return BaseCompiler.isComplexValued(v);
+      // A value that mentions its own symbol (`b := b + 1`, storable in raw
+      // form) would recurse here without end; the interpreter leaves such a
+      // symbol unevaluated. Answer from the declared type while the symbol's
+      // own value is being analyzed, so the compile reaches the emitter's
+      // fail-closed refusal instead of overflowing the stack.
+      if (v !== undefined) {
+        const inProgress = BaseCompiler._complexValueInProgress;
+        if (inProgress.has(expr.symbol))
+          return BaseCompiler.wideIsComplex(t.type);
+        inProgress.add(expr.symbol);
+        try {
+          return BaseCompiler.isComplexValued(v);
+        } finally {
+          inProgress.delete(expr.symbol);
+        }
+      }
       return BaseCompiler.wideIsComplex(t.type);
     }
 
@@ -11593,7 +11796,160 @@ export class BaseCompiler {
     // capture set (see `CompileTarget.symbolDeps`). Nested symbols inside the
     // value are recorded by the recursive compile below.
     target.symbolDeps?.add(id);
-    return BaseCompiler.compile(value, target, BaseCompiler.FOLD_OPERAND_PREC);
+    if (BaseCompiler.bindsFoldedValue(target, target.boundVars, value))
+      return BaseCompiler.ensureFoldedValueEmitted(id, value, target);
+    // The inline fold of a value that mentions its own symbol (`a := a + 1`,
+    // storable in raw form) would recurse without end. Refuse it the same way
+    // the bound route does.
+    const inProgress = BaseCompiler._inlineFoldInProgress;
+    if (inProgress.has(id)) throw new Error(BaseCompiler.selfReferenceRefusal(id));
+    inProgress.add(id);
+    try {
+      return BaseCompiler.compile(
+        value,
+        target,
+        BaseCompiler.FOLD_OPERAND_PREC
+      );
+    } finally {
+      inProgress.delete(id);
+    }
+  }
+
+  /** Symbols whose value `tryFoldKnownSymbol` is currently folding INLINE. */
+  private static readonly _inlineFoldInProgress = new Set<string>();
+
+  /** The fail-closed message for a value that refers to its own symbol. */
+  private static selfReferenceRefusal(id: string): string {
+    return (
+      `${id}: the value assigned to this symbol refers to itself, so it ` +
+      `cannot be compiled. Fail closed (D6).`
+    );
+  }
+
+  /**
+   * Would the emitter bind `value` (a symbol's assigned value) once as a
+   * shared preamble local when it is requested from a position whose bound
+   * names are `bound`, on `target`? When not, the value is folded inline at
+   * that position.
+   *
+   * Three conditions. The target must own the default (JavaScript arrow)
+   * user-function registry: the emitted definitions land in the same
+   * preamble as `_fn_*`, inside the wrapper that receives the vars object, so
+   * a value that reads `_.x` resolves there. A registry with its own
+   * `lowering` (the shader targets) declares statically typed functions and
+   * has no place for an untyped value binding, so it keeps the inline fold.
+   *
+   * The value must be worth sharing and safe to share: an application — a
+   * leaf (number, symbol, string) is no shorter as a name than as itself —
+   * that is pure THROUGH every assigned value it reaches
+   * (`foldValueImpure`): a preamble local is evaluated once per call of the
+   * compiled function, so `a := r + r` with `r := Random()` bound once would
+   * draw two samples where the interpreter draws two at EVERY reference. And
+   * a collection-shaped value stays inline when the compile carries
+   * caller-supplied functions, which may keep or mutate an array they are
+   * handed (see the gate below).
+   *
+   * And the binding must not change what the value's names denote. The
+   * interpreter resolves a value's symbols at the point of use: inside a
+   * `Sum` whose index `n` shadows a global `n`, the value `a := n + 1` reads
+   * the index. A preamble local is evaluated once, in the scope of the
+   * target that owns the preamble (`userFunctions.valueRoot`, else `root`).
+   * When the requesting position binds exactly that owner's names — the
+   * SAME set object, which is how an unchanged binding environment is
+   * inherited through the compiler's target spreads — every name resolves
+   * identically in both places and the value binds. Any other binding
+   * environment (a binder inside the expression, an emitted definition's
+   * parameters) may rebind a name the value mentions, possibly under the
+   * owner's own spelling (`(n) ↦ Sum(a, n, 1, 3)` rebinds the root's `n`),
+   * so the value binds only if it mentions NONE of that environment's bound
+   * names (`foldValueMentions`, transitive through assigned values).
+   */
+  private static bindsFoldedValue(
+    target: CompileTarget<Expression>,
+    bound: ReadonlySet<string> | undefined,
+    value: Expression
+  ): boolean {
+    const registry = target.userFunctions;
+    if (!registry || registry.lowering !== undefined) return false;
+    if (!isFunction(value) || BaseCompiler.foldValueImpure(value))
+      return false;
+    // A caller-supplied function (`functions` option; its names are
+    // `foldExcludedOps`) receives an array itself and may keep or mutate it,
+    // and the compiler never optimizes around such a call: every reference
+    // must hand it a fresh array, as the inline fold does. A scalar has no
+    // identity, so only a collection-shaped value is held back.
+    if (
+      target.foldExcludedOps !== undefined &&
+      target.foldExcludedOps.size > 0 &&
+      isSubtype(value.type.type, COLLECTION_SHAPE_TYPE)
+    )
+      return false;
+    const ownerBound = (registry.valueRoot ?? registry.root)?.boundVars;
+    if (bound === ownerBound) return true;
+    if ((bound?.size ?? 0) === 0 && (ownerBound?.size ?? 0) === 0)
+      return true;
+    if (bound === undefined) return true;
+    const mentions = BaseCompiler.foldValueMentions(value);
+    for (const name of bound) if (mentions.has(name)) return false;
+    return true;
+  }
+
+  /** The preamble local that holds the folded value of symbol `id`. */
+  private static foldedValueName(
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    id: string
+  ): string {
+    return BaseCompiler.registryLocalName(registry, '_val_', id);
+  }
+
+  /**
+   * Emit the folded value of `id` ONCE as a preamble local and return that
+   * name. Shares the user-function registry's `defs` map, in insertion order:
+   * the entry is written AFTER the value compiled, so every value or user
+   * function it references (which the compile below emitted) precedes it in
+   * the preamble. This is what makes a value that references another symbol
+   * value from several places — a tower `f_{k} := f_{k-1} + 2 f_{k-1}` — emit
+   * linear source: each level is written once and read by name.
+   *
+   * The value compiles against the target that owns the preamble
+   * (`userFunctions.valueRoot` — the lambda's own target on the
+   * `Function`-literal route, whose definitions sit inside the lambda body —
+   * else `root`) with an isolated shape frame, like a user-function
+   * definition: a requester's parameter shadowing, loop-index substitution or
+   * complex-lane frame must not reach it.
+   *
+   * A value whose compile re-enters its own binding (`a := a + 1`) would emit
+   * `const _val_a = _val_a + 1`, a temporal-dead-zone throw at run time.
+   * Neither the interpreter nor the inline fold can evaluate such a value, so
+   * this fails closed (D6) at compile time.
+   */
+  private static ensureFoldedValueEmitted(
+    id: string,
+    value: Expression,
+    target: CompileTarget<Expression>
+  ): string {
+    const registry = target.userFunctions!;
+    const name = BaseCompiler.foldedValueName(registry, id);
+    if (registry.defs.has(name)) return name;
+    if (registry.compiling.has(name))
+      throw new Error(BaseCompiler.selfReferenceRefusal(id));
+    registry.compiling.add(name);
+    try {
+      const root = registry.valueRoot ?? registry.root ?? target;
+      const code = BaseCompiler.withLocalShapeFrame(
+        new Map(),
+        new Map(),
+        () =>
+          BaseCompiler.withNestedCseHarvest(value, root, [], () =>
+            BaseCompiler.compile(value, root)
+          ),
+        true
+      );
+      registry.defs.set(name, `const ${name} = ${code};`);
+    } finally {
+      registry.compiling.delete(name);
+    }
+    return name;
   }
 
   /**
@@ -11620,16 +11976,34 @@ export class BaseCompiler {
    * ONCE as a shared local, so it does not multiply along paths. Anything else
    * counts as a leaf, which can only make the count an underestimate — never
    * an overestimate that would refuse a legitimate fold.
+   *
+   * On a target that binds folded values (`bindsFoldedValue`), the walk
+   * charges what that emitter writes instead: a symbol whose value binds at
+   * the position where it is met counts as one node — the name read — and
+   * its value is charged ONCE per symbol, the first time, since the preamble
+   * holds a single copy per symbol (two symbols assigned the same value
+   * object are two locals). Whether a value binds depends on the names bound
+   * at the position (a binder inside the value — a `Sum` index, a function
+   * literal's parameters — can force a nested reference inline), so the walk
+   * carries the bound names down through binder nodes exactly as the emitter
+   * does, and memoizes per (bound-name set, node).
    */
   private static expandedFoldSize(
     engine: ComputeEngine,
     value: Expression,
     target: CompileTarget<Expression>
   ): number {
-    const memo = new Map<Expression, number>();
+    type Bound = ReadonlySet<string> | undefined;
+    const memos = new Map<Bound, Map<Expression, number>>();
     const inProgress = new Set<Expression>();
+    // Values the preamble would hold once, by symbol; their sizes accumulate
+    // here.
+    const boundOnce = new Set<string>();
+    let boundTotal = 0;
 
-    const walk = (node: Expression): number => {
+    const walk = (node: Expression, bound: Bound): number => {
+      let memo = memos.get(bound);
+      if (memo === undefined) memos.set(bound, (memo = new Map()));
       const cached = memo.get(node);
       if (cached !== undefined) return cached;
       if (inProgress.has(node)) return 1;
@@ -11637,24 +12011,62 @@ export class BaseCompiler {
       let size = 1;
       if (isSymbol(node)) {
         const s = node.symbol;
-        if (
-          target.boundVars?.has(s) !== true &&
-          target.varsKeys?.has(s) !== true
-        ) {
+        if (bound?.has(s) !== true && target.varsKeys?.has(s) !== true) {
           const v = engine._getSymbolValue(s);
-          if (v !== undefined) size = walk(v);
+          if (v !== undefined) {
+            if (BaseCompiler.bindsFoldedValue(target, bound, v)) {
+              if (!boundOnce.has(s)) {
+                boundOnce.add(s);
+                // The bound value compiles in the preamble owner's scope.
+                boundTotal += walk(
+                  v,
+                  (target.userFunctions?.valueRoot ?? target.userFunctions?.root)
+                    ?.boundVars
+                );
+              }
+            } else size = walk(v, bound);
+          }
         }
       } else if (isDictionary(node)) {
-        for (const v of node.values) size += walk(v);
+        for (const v of node.values) size += walk(v, bound);
       } else if (isFunction(node)) {
-        for (const op of node.ops) size += walk(op);
+        const inner = BaseCompiler.binderBoundNames(node, bound);
+        for (const op of node.ops) size += walk(op, inner);
       }
       inProgress.delete(node);
       memo.set(node, size);
       return size;
     };
 
-    return walk(value);
+    return walk(value, target.boundVars) + boundTotal;
+  }
+
+  /**
+   * The bound-name set in effect INSIDE `node`, given the set `bound` in
+   * effect around it: unchanged for an ordinary application; for a `Function`
+   * literal, extended with its parameter names; for an operator whose
+   * definition binds names (`scoped` — `Sum`, `Product`, `Integrate`, …),
+   * extended with every symbol spelled in its operands after the body, which
+   * is where the index and its bounds live. Over-collecting there (an upper
+   * bound that is itself a symbol) only makes `expandedFoldSize` treat a
+   * nested reference as inline, never as cheaper than it is.
+   */
+  private static binderBoundNames(
+    node: Expression & FunctionInterface,
+    bound: ReadonlySet<string> | undefined
+  ): ReadonlySet<string> | undefined {
+    const isLiteral = node.operator === 'Function';
+    if (!isLiteral && !node.operatorDefinition?.scoped) return bound;
+    const names: string[] = [];
+    const collect = (e: Expression): void => {
+      if (isSymbol(e)) names.push(e.symbol);
+      else if (isFunction(e)) for (const op of e.ops) collect(op);
+    };
+    for (const op of node.ops.slice(1)) collect(op);
+    if (names.length === 0) return bound;
+    const out = new Set(bound);
+    for (const n of names) out.add(n);
+    return out;
   }
 
   /**
@@ -11682,16 +12094,21 @@ export class BaseCompiler {
     const kb = (size * BaseCompiler.FOLD_CHARS_PER_NODE) / 1024;
     const emitted =
       kb < 1024 ? `${kb.toFixed(0)} KB` : `${(kb / 1024).toFixed(1)} MB`;
+    // On a target that binds each folded value once, the count IS the
+    // program's size; on the others a shared sub-value is written out once
+    // per reference path, which is what inflates it.
+    const why = BaseCompiler.bindsFoldedValue(target, target.boundVars, value)
+      ? `even with every shared sub-value bound once as a preamble local`
+      : `Generated source is text on this target, so a sub-value shared by ` +
+        `several references is written out once per reference path`;
     throw new Error(
       `${id}: cannot compile — the value assigned to this symbol expands to ` +
         `${size} nodes of generated source (an estimated ${emitted}) ` +
         `once baked in, above the fold-size limit of ` +
-        `${BaseCompiler.MAX_FOLD_EXPANDED_NODES} nodes. Generated source is ` +
-        `text, so a sub-value shared by several references is written out ` +
-        `once per reference path; folding this value is refused rather than ` +
-        `emitting a program that size. A caller using the default ` +
-        `\`fallback: true\` falls back to interpreted evaluation. Fail ` +
-        `closed (D6).`
+        `${BaseCompiler.MAX_FOLD_EXPANDED_NODES} nodes, ${why}; folding ` +
+        `this value is refused rather than emitting a program that size. A ` +
+        `caller using the default \`fallback: true\` falls back to ` +
+        `interpreted evaluation. Fail closed (D6).`
     );
   }
 
@@ -11739,8 +12156,41 @@ export class BaseCompiler {
    * the `$…$e<n>` protocol helper names can never collide with a user
    * function's emitted name.
    */
-  private static userFunctionName(id: string): string {
-    return `_fn_${id.replace(/[^\w$]/g, '_')}`;
+  /**
+   * The emitted local name for `id` under `prefix` (`_fn_` for a user
+   * function, `_val_` for a bound symbol value), allocated once per registry.
+   *
+   * The sanitizer that turns a symbol into an identifier is not injective —
+   * `α` and `β` both become `_` — and the registry treats a name already in
+   * `defs` as "emitted, reuse it", so without this allocation a second symbol
+   * landing on an emitted name would silently read the first symbol's
+   * definition. A name already handed out to a DIFFERENT id gets a numeric
+   * suffix (`_fn___2`); the suffix is checked against the taken set too, so
+   * every id maps to exactly one name and no two ids share one.
+   */
+  private static registryLocalName(
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    prefix: string,
+    id: string
+  ): string {
+    const names = (registry.names ??= new Map());
+    const key = prefix + id;
+    const known = names.get(key);
+    if (known !== undefined) return known;
+    const taken = (registry.taken ??= new Set());
+    const base = prefix + id.replace(/[^\w$]/g, '_');
+    let name = base;
+    for (let k = 2; taken.has(name); k++) name = `${base}_${k}`;
+    taken.add(name);
+    names.set(key, name);
+    return name;
+  }
+
+  private static userFunctionName(
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    id: string
+  ): string {
+    return BaseCompiler.registryLocalName(registry, '_fn_', id);
   }
 
   /**
@@ -12709,7 +13159,7 @@ export class BaseCompiler {
       isFunction(body, 'Block') && body.nops === 1 ? body.op1 : body;
     if (isFunction(statement, 'Block') || statement.isPure !== true)
       return undefined;
-    if (registry.compiling.has(BaseCompiler.userFunctionName(h)))
+    if (registry.compiling.has(BaseCompiler.userFunctionName(registry, h)))
       return undefined;
     const inlining = (registry.inlining ??= new Set<string>());
     if (inlining.has(h)) return undefined;
@@ -13081,7 +13531,7 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     registry: NonNullable<CompileTarget<Expression>['userFunctions']>
   ): string | undefined {
-    const name = BaseCompiler.userFunctionName(h);
+    const name = BaseCompiler.userFunctionName(registry, h);
 
     if (!registry.defs.has(name)) {
       // Re-entrant reference: `h`'s definition is on the in-flight compile
@@ -13275,7 +13725,7 @@ export class BaseCompiler {
 
     // Already emitted (a repeated reference): share the one definition, and
     // in particular do NOT draw fresh temp names for it.
-    const name = BaseCompiler.userFunctionName(s);
+    const name = BaseCompiler.userFunctionName(registry, s);
     if (registry.defs.has(name)) return name;
 
     const arity = builtinCallbackArity(engine, s);
@@ -13431,7 +13881,7 @@ export class BaseCompiler {
 
     if (target.language !== 'javascript' || registry.lowering) return undefined; // fail closed on non-JS targets (§8)
 
-    const name = BaseCompiler.userFunctionName(h);
+    const name = BaseCompiler.userFunctionName(registry, h);
     if (registry.defs.has(name) || registry.compiling.has(name)) return name;
 
     // ── Plan the chain BEFORE emitting anything (whole-function decline) ──
@@ -14027,6 +14477,7 @@ export class BaseCompiler {
       // `$` cannot appear in a MathJSON symbol, so these names can never
       // collide with an emitted user function.
       const name = BaseCompiler.userFunctionName(
+        registry,
         `${call.implKey}$${c.protocol}$e${c.edgeIndex}${convention}`
       );
       helperNames.push(name);
@@ -14066,6 +14517,7 @@ export class BaseCompiler {
     // before any call, so forward references are safe — the multi-clause
     // argument).
     const dName = BaseCompiler.userFunctionName(
+      registry,
       `${call.implKey}$${call.protocol ?? ''}$d`
     );
     if (!registry.defs.has(dName)) {

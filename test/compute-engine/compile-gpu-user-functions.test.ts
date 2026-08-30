@@ -435,9 +435,9 @@ describe('GPU USER FUNCTIONS — the JS target is unchanged', () => {
       `_SYS.bcastFn((_tv1) => _fn_f(_tv1), _.u) + _fn_f(2 * _.u)`
     );
     // The JS lowering keeps its arrow-function definition form, spliced into
-    // the generated function's own body (there is no `preamble` channel on
-    // this route — the artifact is self-contained).
-    expect(r.preamble).toBeUndefined();
+    // the generated function's own body; the result also reports it as the
+    // `preamble` (the artifact is self-contained either way).
+    expect(r.preamble).toContain('const _fn_f = (x) =>');
     expect(r.run!({ u: 0.3 })).toBeCloseTo(
       ce.parse('f(u) + f(2u)').subs({ u: 0.3 }).N().re,
       12

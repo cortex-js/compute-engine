@@ -70,9 +70,9 @@ describe('unrolled Sum/Product: a constant collection is emitted once', () => {
     expect(r.success).toBe(true);
     const js = source(r);
     expect(occurrences(js, /Array\.from/g)).toBe(1);
-    // The single construction is a `const` in the accumulating IIFE, not a
-    // term operand.
-    expect(js).toMatch(/const _tv\d+ = _SYS\.bcast\(.*Array\.from/);
+    // The single construction is a `const` — the assigned value `R` bound
+    // once in the preamble — not a term operand.
+    expect(js).toMatch(/const _val_R = _SYS\.bcast\(.*Array\.from/);
   });
 
   it('returns the same values as the flat-chain emission did', () => {
@@ -121,7 +121,9 @@ describe('unrolled Sum/Product: a constant collection is emitted once', () => {
       to: 'javascript',
       fallback: true,
     });
-    expect(occurrences(source(r), /Array\.from/g)).toBe(3);
+    // The assigned value `K` is bound once in the preamble (`_val_K`); the
+    // three terms read it by name.
+    expect(occurrences(source(r), /Array\.from/g)).toBe(1);
     expect(r.run!({ x: 1 })).toBe(9);
   });
 });

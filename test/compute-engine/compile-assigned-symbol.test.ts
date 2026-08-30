@@ -154,11 +154,19 @@ describe('COMPILE: assigned-symbol folding', () => {
     // variable-free subtree, so compile-time constant folding would collapse
     // it to `1.5707963267948966` and the parenthesization this test pins
     // would no longer be observable. The splicing under test is unaffected.
+    // The JavaScript target binds the compound value once and reads it by
+    // name; Python folds it inline, which is where the parenthesization
+    // shows.
+    const js = ce
+      ._getCompilationTarget('javascript')!
+      .compile(expr, { constantFold: false });
+    expect(js.code).toBe('Math.sin(_val_a * _.x)');
+    expect(js.preamble).toContain('const _val_a = 0.5 * Math.PI;');
     expect(
       ce
-        ._getCompilationTarget('javascript')!
+        ._getCompilationTarget('python')!
         .compile(expr, { constantFold: false }).code
-    ).toBe('Math.sin((0.5 * Math.PI) * _.x)');
+    ).toBe('np.sin((0.5 * np.pi) * x)');
   });
 
   // A symbol assigned a *symbolic* value whose value itself references a free
@@ -178,8 +186,13 @@ describe('COMPILE: assigned-symbol folding', () => {
     it('parenthesizes the compound value in a product', () => {
       const ce = freshEngine();
       const r = ce._getCompilationTarget('javascript')!.compile(ce.parse('b x'));
-      expect(r.code).toBe('(_.c + 1) * _.x');
+      // Bound once on JavaScript; spliced inline (parenthesized) on Python.
+      expect(r.code).toBe('_val_b * _.x');
+      expect(r.preamble).toContain('const _val_b = _.c + 1;');
       expect(r.run!({ c: 2, x: 3 })).toBe(9); // (2+1)*3
+      expect(
+        ce._getCompilationTarget('python')!.compile(ce.parse('b x')).code
+      ).toBe('(c + 1) * x');
     });
 
     it('parenthesizes the compound value under a coefficient and a power', () => {
@@ -192,8 +205,9 @@ describe('COMPILE: assigned-symbol folding', () => {
     it('routes the inner free symbol through the vars object (not a bare global)', () => {
       const ce = freshEngine();
       const r = ce._getCompilationTarget('javascript')!.compile(ce.parse('b x'));
-      expect(r.code).toContain('_.c');
-      expect(r.code).not.toMatch(/(^|[^.\w])c([^\w]|$)/); // no bare `c`
+      const artifact = (r.preamble ?? '') + r.code;
+      expect(artifact).toContain('_.c');
+      expect(artifact).not.toMatch(/(^|[^.\w])c([^\w]|$)/); // no bare `c`
       // freeSymbols surfaces the transitively-referenced input.
       expect(r.freeSymbols!.sort()).toEqual(['c', 'x']);
     });

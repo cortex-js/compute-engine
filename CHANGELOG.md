@@ -135,6 +135,29 @@
 
 ### Bug Fixes
 
+- **A symbol's assigned value is compiled once and read by name.** Compiled
+  source is text, so a value that referenced another symbol's value from
+  several places was written out once per reference path: `f(k) := f(k-1) +
+  2 f(k-1)` quadrupled per level, and the fold-size guard refused it from
+  depth 13, degrading the compile to the (also exponential) interpreter. The
+  `javascript` and `interval-js` targets now emit each folded compound pure
+  value once as a local (`const _val_f7 = …;`) beside the user-function
+  definitions and read it by name; the same tower compiles at depth 30 in
+  milliseconds. A leaf value, an impure value (`Random()` must re-sample at
+  each reference) and a value read under a binder that shadows one of its
+  names (a `Sum` index) keep the inline fold, and so does a collection-valued
+  symbol when the compile carries caller-supplied `functions` (which may keep
+  or mutate an array they receive). Python keeps the inline fold and the
+  guard. The constant-folding pre-pass on the same expressions was
+  also exponential: it could not see a free symbol, or an impure operation,
+  reachable only through an assigned value, and priced a value-carrying
+  symbol as a leaf — so it evaluated the tower at every level until its
+  budget expired, and baked ONE sample of `r + r` with `r := Random()` into
+  the artifact where the interpreter draws two fresh ones. It now looks
+  through assigned values. A value that refers to its own symbol
+  (`b := b + 1`, storable raw) overflowed the stack in the compiler; it now
+  fails closed ("refers to itself"). Tycho item 225.
+
 - **A point added to a list of points compiles element-wise on the
   `javascript` target.** With `P: list<tuple<number, number>>`, the sum
   `4P + 0.3(t, t)` is a broadcast over the list in the interpreter (the

@@ -1061,6 +1061,27 @@ export interface CompileTarget<Expr = unknown> {
      * target instead of the requesting one.
      */
     root?: CompileTarget<Expr>;
+    /**
+     * The target whose bound names are in scope where the preamble is
+     * EMITTED, when that is not `root`. The `Function`-literal route places
+     * the preamble inside the lambda body, so the lambda's own parameters are
+     * visible there; a folded symbol value (`const _val_a = …;`, see
+     * `BaseCompiler.ensureFoldedValueEmitted`) that mentions a parameter can
+     * then be bound in that preamble. User-function DEFINITIONS keep
+     * compiling against `root`: their bodies must not capture an enclosing
+     * lambda's parameter. Defaults to `root`.
+     */
+    valueRoot?: CompileTarget<Expr>;
+    /**
+     * Emitted local names by prefixed symbol id (`_fn_` + id, `_val_` + id)
+     * and the set of names already handed out, so two distinct symbols never
+     * share one local: the sanitizer that maps a symbol to an identifier is
+     * not injective (`α` and `β` both sanitize to `_`), and a second symbol
+     * landing on an emitted name would silently reuse the first symbol's
+     * definition. See `BaseCompiler.registryLocalName`.
+     */
+    names?: Map<string, string>;
+    taken?: Set<string>;
     /** Symbols proven (this compile) NOT to name a user-defined function, so a
      * repeated bare free symbol in value position doesn't re-hit
      * `lookupDefinition` on every occurrence. Populated lazily. */

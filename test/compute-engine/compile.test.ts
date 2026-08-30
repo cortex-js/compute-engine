@@ -2963,7 +2963,8 @@ describe('COMPILE user-defined function calls', () => {
       expect(expr.evaluate().re).toBe(7);
       const r = compile(expr);
       expect(r.success).toBe(true);
-      expect(r.code).toBe('_fn_p([3, 4])');
+      // The assigned tuple is a bound value (`const _val_T = [3, 4];`).
+      expect(r.code).toBe('_fn_p(_val_T)');
       expect(r.run!()).toBe(7);
     });
 

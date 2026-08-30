@@ -7746,6 +7746,10 @@ function compileToTarget(
       var: (id) => (params.includes(id) ? id : target.var(id)),
       boundVars: BaseCompiler.withBoundNames(target, params),
     };
+    // The emitted definitions land inside the lambda body (below), where the
+    // parameters are in scope: a folded symbol value that mentions one is
+    // bound there rather than re-emitted at every reference.
+    if (target.userFunctions) target.userFunctions.valueRoot = lambdaTarget;
     // The lambda BODY is the bindable region here (the root region holds only
     // the `Function` node itself), pushed under the lambda's own target so any
     // temporaries land inside the emitted arrow function.
@@ -7845,6 +7849,9 @@ function compileToTarget(
     target: 'javascript' as const,
     success: true,
     code: js,
+    // The helper preamble plus the emitted definitions (`_fn_*` user
+    // functions, `_val_*` bound symbol values), which `code` reads by name.
+    ...(preamble ? { preamble } : {}),
     calling: 'expression' as const,
     run: fn as unknown as CompiledRunner<CompiledValue, number | ComplexResult>,
   };
