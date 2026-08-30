@@ -1414,7 +1414,8 @@ function gpuIsComponentwise(code: string, vector?: string): string | undefined {
  * Derived from the shape helpers the rest of the GPU analysis already uses —
  * `isNonScalarShape` ("is this a scalar at all?") and `vectorComponentCount`
  * ("does it have a `vec2`–`vec4` lowering?") — so it stays in step with them
- * rather than re-deciding shape from scratch.
+ * rather than re-deciding shape from scratch, plus `gpuIsCollectionShaped` for
+ * the collection type spellings `isNonScalarShape` does not recognize.
  *
  * A COMPLEX value reads as a scalar here, even though it lowers to a `vec2` of
  * (re, im): the complex convention is its own, carried by the complex codegen
@@ -1426,7 +1427,8 @@ export function gpuOperandShape(
   expr: Expression
 ): 'scalar' | 'matrix' | 'array' | 2 | 3 | 4 {
   if (BaseCompiler.isComplexValued(expr)) return 'scalar';
-  if (!BaseCompiler.isNonScalarShape(expr)) return 'scalar';
+  if (!BaseCompiler.isNonScalarShape(expr) && !gpuIsCollectionShaped(expr))
+    return 'scalar';
   const width = BaseCompiler.vectorComponentCount(expr);
   if (width !== undefined) return width;
   if (isFunction(expr, 'Matrix')) return 'matrix';
@@ -1440,6 +1442,35 @@ export function gpuOperandShape(
   // A non-scalar with no `vecN` and no matrix reading: a 1-element or
   // 5+-element list, or a list of unknown length — a shader ARRAY.
   return 'array';
+}
+
+/**
+ * Whether `expr` is COLLECTION-SHAPED by its declared type, whatever spelling
+ * that type uses and whether or not a static element count can be read off it.
+ *
+ * `isNonScalarShape` recognizes only the `list` type CONSTRUCTOR, so an
+ * operand declared with a sibling spelling read back as a shader SCALAR and
+ * every shape gate stepped aside for it: `Sin(L)` for `L: collection<number>`
+ * emitted `sin(L)`, source that is valid only if the host happens to bind `L`
+ * to a `vecN` uniform — a shape the compiler asserts but cannot see. The
+ * spellings that slipped through are the other collection kinds
+ * (`collection<T>`, `indexed_collection<T>`, `set<T>`, `dictionary`) and the
+ * BARE names `list` and `collection`, which the type representation carries as
+ * primitive strings rather than as a `list` node.
+ *
+ * The question is asked against the absence-admitting top `collection<any>`,
+ * not the bare name `collection`: a bare collection name is the values-only
+ * synonym of its `<unknown>` form, so `list<any>` and `list<integer|missing>`
+ * would not match it.
+ *
+ * A `string` is excluded. It matches `collection` in the lattice — its
+ * elements are its grapheme clusters — but this target has no strings at all,
+ * so a string operand keeps the "provably not a number" diagnostic naming its
+ * type, which is the diagnostic it has always received.
+ */
+function gpuIsCollectionShaped(expr: Expression): boolean {
+  const t = gpuType(expr);
+  return isSubtype(t, COLLECTION_SHAPE_TYPE) && !isSubtype(t, 'string');
 }
 
 /** How `gpuCheckOperandShapes` names a shape in a diagnostic. */
@@ -5511,17 +5542,29 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    * conversion of the top 24 bits of the same `w0` the f64 tier is built
    * from, so the two tiers agree to within 2⁻²⁴ by construction rather than
    * by tuning. See `gpuRandomDraw`.
+   *
+   * `markAggregateConsuming` for the one-operand form: the DOMAIN is a
+   * collection (an `Interval` is `set<real>`, a `Range` is `range`), and
+   * `gpuRandomDomainDraw` DESTRUCTURES it into scalar endpoints — the draw
+   * arithmetic contains the endpoints, never the collection. Without the
+   * declaration the generic shape gate judges the emission against an array
+   * operand shape that the emission does not contain. A domain this head
+   * cannot destructure still fails closed, through the head's own diagnostic.
    */
-  Random: (args, compile, target) => {
-    if (args.length === 0) return gpuRandomDraw(target);
-    if (args.length === 1) return gpuRandomDomainDraw(args[0], compile, target);
-    throw new Error(
-      'Random: expects at most one operand, the DOMAIN to draw from ' +
-        '(`Random()`, `Random(Interval(a, b))`, `Random(Range(…))`). The ' +
-        'seed argument was removed by the Random family redesign — seed with ' +
-        '`WithRandomSeed(seed, body)`.'
-    );
-  },
+  Random: markAggregateConsuming(
+    (args, compile, target) => {
+      if (args.length === 0) return gpuRandomDraw(target);
+      if (args.length === 1)
+        return gpuRandomDomainDraw(args[0], compile, target);
+      throw new Error(
+        'Random: expects at most one operand, the DOMAIN to draw from ' +
+          '(`Random()`, `Random(Interval(a, b))`, `Random(Range(…))`). The ' +
+          'seed argument was removed by the Random family redesign — seed ' +
+          'with `WithRandomSeed(seed, body)`.'
+      );
+    },
+    (args) => args.length === 1
+  ),
 
   /**
    * A LEXICALLY scoped random-seed frame (§4 "The GPU boundary is genuinely

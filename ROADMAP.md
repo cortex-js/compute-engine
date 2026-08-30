@@ -109,6 +109,19 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+- **Destructured Block locals stay `unknown`-typed on the compilation
+  routes.** The Tycho item 235 fix (2026-08-30) gives a `Block`-hoisted
+  local its statically-readable `Declare` type and joins `Assign` evidence
+  into an inferred, valueless binding — but only for a plain symbol target.
+  A name bound by a destructuring assignment (`(x, y) := v` — a `Tuple`
+  first operand) is excluded by the same `sym()`-based guard in both the
+  `canonicalBlock` hoist loop and the `Assign` canonical handler, so such a
+  local still types `unknown` and a compile reading it fails closed, as it
+  did before the fix. Not silently wrong — the interpreter fallback answers
+  correctly — just uncompiled. Extending the fix wants `tuplePatternNames()`
+  (already used for `Loop`/`Comprehension` index patterns) plus a per-leaf
+  type derived from the corresponding position of the RHS tuple type.
+
 ### Open items from the finite-by-default flip (Phase 1, 2026-08-27)
 
 Each item below was discovered during Phase 1 of the numeric-lattice flip
@@ -147,13 +160,43 @@ fixed in that change. Every one is small; several need a ruling first.
   from `infinity`/`nan` while the equivalent structural spelling is — the
   lambda-body widening treats the two spellings differently. Sound but
   asymmetric; the resolution hook belongs in `src/common/type/subtype.ts`.
-- **The compiled `NaN` VALUE-type clause guard admits a compiled `~oo`.**
-  `jsClauseParamGuard` declines the `nan`/`infinity` PRIMITIVE guards
-  because compiled `~oo` lowers to JS `NaN`, but the value-literal `NaN`
-  guard still emits `Number.isNaN`, which a compiled `~oo` satisfies while
-  the interpreter refutes it. Pinned intent (`multi-clause-compile.test.ts`
-  "Infinity and NaN clauses compile") keeps it emitting today; deciding to
-  decline it too would make the value tier consistent with the primitives.
+- **The non-finite VALUE-type clause guards admitted a compiled `~oo` that
+  the interpreter refuses** (RESOLVED BY DECLINE 2026-08-30; the
+  compilability it costs is the same trade the `non_finite_number` decline
+  made, below). The original entry said the `NaN` value guard was the only
+  leak, because compiled `~oo` used to lower to JS `NaN`. Re-measuring showed
+  that reading was stale: since the pole-encoding change of 2026-08-28,
+  compiled `~oo` lowers to the IEEE `Infinity` on every route, and a `~oo`
+  handed in as an ARGUMENT reads `Infinity` too (`.re` and `.N().re` are both
+  `Infinity`; its `valueOf()` is the non-numeric string `~oo`, which no
+  numeric guard accepts). The leak had therefore moved rather than closed,
+  and it covered all three non-finite value types. Measured on the clause set
+  `g(a: oo) = 1; g(b: -oo) = 2; g(c: NaN) = 3; g(x: number) = 0`, with the
+  guards still emitted:
+
+  | call, `w = 0` | interpreter | compiled |
+  | --- | --- | --- |
+  | `g(1 / w)` | `0` | `1` |
+  | `g(-(1 / w))` | `0` | `2` |
+  | `g(1 / w - 1 / w)` | `0` | `3` |
+
+  The interpreter answers `0` for each because its `1 / 0` is the unsigned
+  `~oo`, which inhabits none of `oo`, `-oo` and `NaN`. Compiled, the same
+  three expressions are `Infinity`, `-Infinity` and `Infinity - Infinity`
+  (NaN), so they satisfied `a === Infinity`, `a === -Infinity` and
+  `Number.isNaN(a)` respectively. The boundary route agreed throughout: a
+  genuine `Infinity`, `-Infinity`, `NaN` or `7` argument selected the same
+  clause in both engines.
+
+  A guard over a JS number cannot recover the direction the pole encoding
+  drops, so a numeric value type whose value is non-finite now declines the
+  whole function, exactly as the `nan`, `infinity` and `non_finite_number`
+  PRIMITIVES do; the value tier is consistent with the primitive tier. FINITE
+  value literals are unaffected and still compile to `===`. The interpreted
+  fallback dispatches a declined clause set correctly on both routes. Pinned
+  by `multi-clause-compile.test.ts`, "non-finite value clauses decline the
+  whole function, and the fallback agrees" and "a FINITE value clause still
+  compiles beside a number clause".
 
 
 ### Open items from the error-model conformance round (2026-08-29)
@@ -230,9 +273,10 @@ here.
   NOT below `non_finite_number`, while compiled `1 / 0` is the JS
   `Infinity`, which satisfied the emitted guard `typeof a === "number" &&
   !Number.isFinite(a) && !Number.isNaN(a)`. The PRODUCED-value route is the
-  only one that diverged: a `~oo` handed in as an ARGUMENT across the
-  interpreter→JS boundary arrives as `NaN` (its `valueOf()` is the string
-  `~oo`) and failed the guard as it should.
+  one that diverged. (This entry originally added that a `~oo` handed in as
+  an ARGUMENT arrives as `NaN` and failed the guard as it should. Re-measured
+  on 2026-08-30, that is not so: such an argument reads `Infinity`, so it
+  would have passed the guard too. The decline is right either way.)
 
   A guard over a JS number cannot recover the dropped direction, so
   `non_finite_number` now joins `infinity` and `nan` in the §8
@@ -240,15 +284,72 @@ here.
   compilation/base-compiler.ts`) returns `undefined` for it, the clause set
   runs interpreted, and the two routes agree again. Pinned in
   `test/compute-engine/multi-clause-compile.test.ts`. The value-literal
-  `+oo`/`-oo` parameter guards are untouched — they test `a === Infinity`,
-  which the boundary route satisfies exactly.
+  `+oo`/`-oo` parameter guards were left emitting at the time, on the reading
+  that `a === Infinity` is exact for the boundary route; they diverged on the
+  produced route for the same reason as this item and now decline as well
+  (see the non-finite VALUE-type entry above).
 
-  STILL OPEN: the decline is a fail-closed workaround, not the fix. A clause
-  set that dispatches on `+∞`/`−∞` no longer compiles at all, which is a real
-  loss of coverage. Restoring compilability needs a ruling on how a compiled
-  pole should be ENCODED — whether a produced `1 / 0` keeps a direction the
-  target can test, or whether the compiler must refuse to fold a pole into a
-  plain JS number — not a better guard over the current encoding.
+  RULED 2026-08-30 — "align the boundary, lift what measurement supports".
+  The decline was a fail-closed workaround, and a clause set that dispatches
+  on `+∞`/`−∞` still does not compile, which is a real loss of coverage. The
+  ruling asked for two things: give the pole ONE spelling on both routes by
+  making a `~oo` ARGUMENT arrive as `Infinity` too, and then re-admit the
+  `infinity` and `nan` guards if — and only if — measurement showed them
+  faithful. The boundary half SHIPPED; the re-admission half was REFUTED by
+  the measurement the ruling required. Both are described below.
+
+  SHIPPED — the boundary now agrees with the produced route. Before this
+  change, handing a boxed `~oo` to a compiled function did not merely give a
+  different answer: it THREW. The runner's entry check reads a `{re, im}`
+  value bound to a real-analyzed symbol as a caller mistake, and the
+  interpreter's `~oo` carries `{re: ∞, im: ∞}`, so
+  `compile(ce.box(['Add', 'x', 1])).run({ x: ce.box('ComplexInfinity') })`
+  raised `TypeError: "x" was compiled as a real number but received a complex
+  {re, im} value`. It now projects that one value to `Infinity` and answers
+  `Infinity`, which is what the interpreter answers for `x + 1` with
+  `x := ~oo` and what compiled code already produces for a pole of its own
+  (`1 / 0`). A genuine complex still throws: `3 + 4i` bound to a real symbol
+  is a caller mistake as before, and only a value with an infinite part AND a
+  non-zero imaginary part is projected (`isUnsignedPole`,
+  `src/compute-engine/compilation/javascript-target.ts`). Measured on
+  ordinary, non-clause compiled functions, every route where the interpreter
+  produces a number now agrees: `x + 1`, `x`, `Abs(x)`, `2x` and `1 / x`
+  answer `Infinity`, `Infinity`, `Infinity`, `Infinity` and `0` on both
+  sides, and `Sin(x)` answers `NaN` on both.
+
+  NEW DIVERGENCES this creates, both where the interpreter produces no number
+  at all: compiled `Heaviside(x)` at `x = ~oo` now answers `1` where the
+  interpreter leaves `Heaviside(~oo)` unevaluated, and compiled `x > 0`
+  answers `true` where the interpreter leaves `0 < ~oo` unevaluated. Both
+  previously threw, so the change replaces an error with the answer the
+  projection implies, but they are the rows to look at first if this reads
+  wrong.
+
+  REFUTED — `infinity` and `nan` clause guards stay declined. The re-admission
+  the ruling proposed rests on the premise that a pole reaching a guard is
+  still a pole. It is not, once compiled float arithmetic has touched it. The
+  interpreter's `~oo - ~oo` is `~oo`, but compiled that is
+  `Infinity - Infinity`, which is `NaN`. So on the clause set
+  `g(a: infinity) = 1; g(x: number) = 0`, compiled `g(1 / w - 1 / w)` at
+  `w = 0` answers `0` where the interpreter answers `1`; and on
+  `g(a: nan) = 1; g(x: number) = 0`, the same call answers `1` where the
+  interpreter answers `0`. No choice of guard can undo that, because the two
+  engines are being asked about two different values by the time the guard
+  runs. Every other route measured — a produced `~oo` (`1 / w` at `w = 0`), a
+  produced `-(1 / w)`, a folded pole (`Gamma(w)` at `w = -2`), an embedded
+  `~oo` literal, a projected `~oo` argument, a genuine produced `NaN`
+  (`u / w` at `u = w = 0`), and boundary `Infinity`, `-Infinity`, `NaN` and
+  finite arguments — agrees for both tiers, so the degradation route is the
+  only row keeping them declined. `non_finite_number` stays declined for the
+  reason given above, and the boundary projection adds a second divergence to
+  it (a projected `~oo` argument would now pass its guard, where the
+  interpreter refuses it).
+
+  STILL OPEN: restoring compilability for these tiers is not a guard problem.
+  It needs either a float encoding in which a pole survives arithmetic as a
+  pole, or a compiler that refuses to fold a pole into a plain JS number at
+  all. Whether the two `Heaviside`/`x > 0` divergences above are acceptable is
+  also open, and is the narrower question.
 - **An Epsil effects violation is swallowed with zero diagnostics.** A
   function whose body writes to a binding of the ENCLOSING call needs the
   `scope` effect declared. When it is missing, the inner `DefineFunction`
@@ -3060,28 +3161,36 @@ A compile decline is not a slow path — the consumer's JS wrapper installs a
 `() => NaN` stub, so a declining row **draws nothing**. Treat these as
 correctness gaps with a performance-shaped symptom.
 
-- **Callback parameter complexness is not analyzed (pre-existing, surfaced by
-  the 2026-08-03 built-in-callback review).** A callback body — inline literal
-  or emitted wrapper alike — compiles its parameter as statically real, so
-  `Map(Abs, [3+4i])` (and `x ↦ Abs(x)` over the same list) emits `Math.abs`,
-  receives the `{re, im}` object at runtime, and silently returns `NaN` instead
-  of 5 or failing closed. Verified identical for inline literals and
-  named/eta-expanded callbacks, so no regression — but it is a
-  silent-wrong-value class, unlike the ledger's declining rows. The fix is a
-  complexness projection from the collection's element type into the callback's
-  parameter (or a fail-closed gate when the element type is provably complex);
-  it belongs with the complexness-analysis machinery (items 147/148), not with
-  CSE.
+- **Callback parameter complexness — CLOSED for a provably complex source.** A
+  bare built-in callback symbol used to compile its synthesized parameter as
+  statically real, so `Map(Abs, zs)` over `zs: list<complex>` emitted
+  `const _fn_Abs = (_tv1) => Math.abs(_tv1)`, received the `{re, im}` element
+  and silently answered `NaN` instead of 5. `fnArg` (the single JS callback
+  splice chokepoint) now hands the compiler the annotated eta-expansion
+  `(x: complex) ↦ Abs(x)` (`BaseCompiler.complexElementCallbackEta`), so the
+  body takes the same complex lane an inline `x ↦ Abs(x)` callback already
+  reached; `test/compute-engine/compile-callback-complexness.test.ts` pins it
+  over a declared symbol, where constant folding cannot mask the lowering.
+  **Still open:** a source whose element type is only `number` keeps the real
+  lane and still answers `NaN` for a complex element supplied at run time.
+  `number` is a supertype of both the real and the complex numbers, so no
+  static classification is possible there; annotating the parameter `complex`
+  would change the RESULT shape of the ordinary real case, and declining would
+  send every `number`-typed source to the interpreter. Closing that residue
+  needs a runtime lane guard on the callback parameter, alongside the
+  complexness-analysis machinery (items 147/148).
 
-- **Single-uppercase-letter operator names (`D`, `N`) in callback position emit
-  `_.D` (broken artifact) — deliberate carve-out, 2026-08-03.** The fail-closed
-  refusal for un-expandable built-in names exempts `/^[A-Z]$/` because
-  `devolveUnappliedOperator` reads an un-applied single-uppercase-letter symbol
-  as a caller variable by convention (`∫ D x² dx` parses `D` as a variable; 9
-  integrate/derivative tests pin it). Consequence: `Map(D, xs)` keeps the old
-  runtime-throw behavior. A position-aware refusal (callback operand positions
-  only) would close it but the JS target has ~9 separate callback splice sites
-  and no chokepoint — revisit only with a witness.
+- **Single-uppercase-letter operator names in callback position — CLOSED.**
+  `Map(D, xs)` emitted the free-symbol read `_.D` and threw
+  `_f is not a function` at run time, because the shared value-position
+  refusal for un-expandable built-in names exempts `/^[A-Z]$/`: an UN-APPLIED
+  single-uppercase symbol reads as a caller variable by convention (`∫ D x² dx`
+  parses `D` as a variable, and the integrate/derivative suites pin it). The
+  refusal is now position-aware — `BaseCompiler.assertBuiltinCallbackUsable`,
+  called from the JS callback splice chokepoint only — so the value-position
+  convention is untouched and a caller symbol that merely happens to be named
+  `D` (declared, or assigned a function literal) keeps its route. `N`
+  eta-expands and already declined for want of a lowering.
 
 **JavaScript band** (230 members / 81 states fail). Per the consumer's
 per-bucket provenance rules, **82 members / 25 states are our target gaps**; the
@@ -3103,24 +3212,61 @@ ours — 202/69 — and they corrected it in review. Use 82/25.)
   shader targets need a monomorphized (per-call-site arity) lowering since they
   have no variadic dispatch.
 
-- **Generic user functions decline compilation whole-fn** (feature-parity note,
-  2026-08-04 — the generic-function-literals milestone made them reachable; no
-  corpus sizing yet). A generic body (`function f<T>(x: T) -> T { … }`, or a
-  literal assigned to a `forall` declaration) takes the standard decline in
-  `ensureUserFunctionEmitted` (G3,
-  `docs/TYPE-SYSTEM.md`): a polytype
-  has no ground parameter type to read (`userFunctionParamType` returns
-  `undefined`, `userFunctionParamsAreScalar` answers `false`), so an emitted
-  call boundary would lose both its coercion wrap and its broadcast wrap —
-  measured pre-guard, `gd([1,2,3])` under `forall T: number. (T) -> T` compiled
-  to `_fn_gd([1, 2, 3])` and ran to `null` where the interpreter broadcasts
-  `[2,4,6]`: the silent-wrong-value class, hence the whole-fn decline
-  (interpreted fallback is sound and pinned). The principled lift is
-  per-call-site **monomorphization** (instantiate the clause, emit one
-  specialization per ground argument shape); a cheaper interim — sound for
-  scalar-only use — would be to emit with the quantified parameter read **at its
-  bound** and a broadcast wrap derived the way `paramsAreScalar` reads bounds at
-  evaluation.
+- **Generic user functions: BOUNDED ones now compile whole-fn on JavaScript;
+  unbounded ones still decline** (feature-parity note, 2026-08-04; the lift
+  landed 2026-08-30 — no corpus sizing yet). A generic body
+  (`function f<T>(x: T) -> T { … }`, or a literal assigned to a `forall`
+  declaration) used to take the standard decline in `ensureUserFunctionEmitted`
+  (G3, `docs/TYPE-SYSTEM.md`), because a polytype has no ground parameter type
+  to read: an emitted call boundary would have lost both its coercion wrap and
+  its broadcast wrap, and `gd([1,2,3])` under `forall T: number. (T) -> T`
+  compiled to `_fn_gd([1, 2, 3])` and ran to a wrong value where the
+  interpreter broadcasts `[2,4,6]`.
+
+  **What shipped: the bound reading, not per-call-site monomorphization.** A
+  quantified parameter is read at its DECLARED BOUND, which is the reading the
+  interpreter's own broadcast gate already performs (`paramsAreScalar` calls
+  `substituteDeclaredBounds` before asking whether a parameter is scalar). So
+  `gd: (x: T) -> T where T: number` is emitted ONCE, as the ground
+  `(x: number) -> number` it is bounded by, and its call sites get the
+  coercion and broadcast wraps that ground signature earns:
+  `gd(5)` compiles to `_fn_gd(5)` and runs to `10`; `gd([1,2,3])` compiles to
+  `_SYS.bcastFn((_tv1) => _fn_gd(_tv1), [1, 2, 3])` and runs to `[2,4,6]`, the
+  interpreter's answer. A bound of `complex` puts the body in the complex lane
+  and the call site lifts a real argument into `{ re, im }`, exactly as a
+  ground `(complex) -> complex` declaration does. The reading is sound because
+  every argument an instantiation admits is a subtype of the bound, so no call
+  site can reach a shape the one emission was not compiled for. Per-call-site
+  monomorphization was rejected rather than deferred for lack of time: it
+  would reintroduce the `$`-suffixed per-call-site function specializations
+  that were retired 2026-08-16 in favour of one emission per function shaped
+  by the declaration and the compile mode (see the comment on
+  `userFunctionName`, `compilation/base-compiler.ts`), it has no call site to
+  instantiate from on the VALUE-position route (`Map(gd, xs)`), and it needs
+  an extra termination rule for a recursive generic — while buying nothing the
+  bound reading does not already give for a bounded variable.
+
+  A generic call site never takes the provably-scalar fast path: at a generic
+  parameter the argument's static type is INFERRED from the bound rather than
+  declared by the caller, so `gd(y)` types the free `y` as `number` and yet
+  `run({ y: [1,2,3] })` still hands the call an array. The runtime dispatch is
+  emitted for every non-literal argument, and applies the closure directly when
+  nothing is an array.
+
+  **What still declines** (whole-fn, with the sound interpreted fallback):
+  a variable with NO ground bound — `(x: T) -> T where T` names no type to
+  compile against, so `gd(y)` there emits no `_fn_gd` and the fallback runner
+  answers `42` for `y = 21` and `[2,4,6]` for `y = [1,2,3]`; every target other
+  than JavaScript, since the coercion and the `_SYS.bcastFn` broadcast are
+  JavaScript conventions and the shader targets synthesize a static signature
+  this reading was never validated against; a declared `broadcastable<T>`
+  parameter over a possibly-collection argument, which fails closed as before;
+  and a body the target cannot emit against the bound — `(xs: T) -> number
+  where T: list<number>` with a `Length(xs)` body declines on `Length`, because
+  the erased parameter carries no collection type into the body. A generic
+  BLOCK-LOCAL function (`const g = (x: T) => …` inside a `Block`) also still
+  fails closed in `tryCompileLocalFunctionCall`; that route reads the declared
+  literal's own signature and was not lifted.
 
 **GLSL/WGSL band** (204 members / 90 states compile on JS but not GPU — the
 GPU→CPU demotion class). Buckets triaged below.
@@ -3266,19 +3412,55 @@ Known candidates, all currently defended as "documented and deliberate":
   `Negate([1,2,3])` closed, even though the comprehension fan-out added in the
   same round makes `[-_tv1 for _tv1 in L]` expressible. The guard may simply
   have outlived its reason.
-- **`Sin(Tuple(1,2))` broadcasts when compiled but stays inert in the
-  interpreter** (`isBroadcastParticipant` excludes tuples). This one is a
-  _consistency_ defect — compiled and interpreted disagree — so it needs
-  resolving in one direction, not defending.
-- **`Sin(L)` for an unknown-length `list<number>` on GPU emits `sin(L)`**, valid
-  only if the caller happens to bind `L` to a `vecN` uniform. We assert a shape
-  we cannot see.
-- **An all-scalar `PointList(u, v)` with an `unknown`-typed component bound to a
-  list at run time compiles as a plain point** and produces a malformed value
-  (filed 2026-07-31 from the PointList design pass). The zip lowering guards its
-  opaque slots at run time (`Array.isArray → NaN`); the all-scalar path has no
-  such guard because `unknown`-as-scalar is load-bearing for free plot variables
-  — same static-type-assertion class as `Sin(L)` above.
+- **RESOLVED (user ruling, 2026-08-30): the interpreter gained the tuple
+  broadcast.** `Sin(Tuple(1, 2))` used to broadcast to `(sin 1, sin 2)` when
+  compiled while `.evaluate()` left it as the inert `sin((1, 2))`, because the
+  broadcast participation test excluded tuples. The two lanes now agree:
+  `.evaluate()` answers the tuple `(sin 1, sin 2)`, and a `broadcastable`
+  head over a tuple maps over its components the way it maps over the
+  elements of a list. A tuple still binds atomically where the engine gives
+  it a meaning of its own — the `'tuples'`-exempt arithmetic heads combine
+  points component-wise in their own handlers, `Abs` and `Hypot` read the
+  point's norm, the relational heads compare a point as one value, and a
+  user function receives the whole point. The gate is `broadcastsOverTuples`
+  in `boxed-expression/boxed-function.ts`.
+- **`Hypot((1, 2), 2)` disagrees between the lanes** (surfaced 2026-08-30 by
+  the tuple-broadcast round; pre-existing). The interpreter reads the tuple as
+  a point and answers `3` through the point norm (`pointNormType` and the
+  `Square(Norm(v))` construction in Hypot's evaluate handler); the compiled
+  JavaScript lane broadcasts and answers the pair `[2.236…, 2.828…]`. Same
+  consistency class as the resolved `Sin(Tuple(...))` item: it needs one ruled
+  direction, not a defense of either behavior.
+- **CLOSED — `Sin(L)` for a collection-typed `L` on GPU emitted `sin(L)`**,
+  valid only if the caller happens to bind `L` to a `vecN` uniform: a shape the
+  compiler asserted but could not see. The mechanism was narrower than the
+  filing suggested. `gpuOperandShape` is built on `isNonScalarShape`, which
+  recognizes only the `list` type CONSTRUCTOR, so the other collection kinds
+  (`collection<T>`, `indexed_collection<T>`, `set<T>`) and the BARE names
+  `list`/`collection` — primitive strings in the type representation, not nodes
+  — all read back as shader SCALARS and every shape gate stepped aside for
+  them. `gpuIsCollectionShaped` now asks the absence-admitting top
+  `collection<any>` (strings excluded, so they keep their own diagnostic), and
+  such an operand reads as an `array` unless it has a static 2–4 component
+  count, which still lowers to `sin(vecN)`. An `unknown`-typed symbol is not
+  collection-shaped, so the free-variable admission is untouched. The one
+  lowering that legitimately DESTRUCTURES a collection operand — `Random` over
+  an `Interval` (`set<real>`) or `Range` domain, which splices the endpoints
+  into the draw arithmetic — now declares itself with `markAggregateConsuming`
+  instead of relying on the shape reading to miss it.
+- **CLOSED — an all-scalar `PointList(u, v)` with an `unknown`-typed component
+  bound to a list at run time compiled as a plain point** and produced a
+  malformed value (`[1, [10, 20]]`, which no consumer of a point can read;
+  filed 2026-07-31 from the PointList design pass). The `unknown`-as-scalar
+  static admission is load-bearing for free plot variables and is unchanged, so
+  the answer is at run time: on JavaScript — the one target where a list is an
+  expression-level value — each component whose type does not prove it a number
+  is now wrapped in `_SYS.pointSlot`, which yields `NaN` for an array-valued
+  slot. That is the same self-describing absence marker the zip lowering
+  already applies to its own opaque slots, and the same deliberate divergence
+  from the interpreter, which re-reads such a component as a list source and
+  transposes it. A `PointList` of provably numeric components still compiles
+  byte-identically to the equivalent `Tuple`.
 - The `Multiply` ≥2-arrayish carve-out and the complex-element deferral —
   preserved verbatim through the broadcast rework, never re-examined.
 
@@ -3318,7 +3500,13 @@ Still open, in rough priority:
   `isCollection === false` and so route through it:
   `Add(P: vector<real^3>, Q: vector<real^2>)` still emits `P + Q`, and WGSL
   `Add(Matrix, 2)` emits `2.0 + mat2x2f(…)` (invalid WGSL, valid GLSL). Gating
-  it is a perf-sensitive change and wants its own scoped pass.
+  it is a perf-sensitive change and wants its own scoped pass. New JavaScript
+  witness (found 2026-08-30 by the tuple-broadcast round): `Add(Sin((1, 2)), 1)`
+  compiles to a runtime STRING — the `+` operator concatenates the array-valued
+  left operand — where the interpreter answers
+  `Error(incompatible-type, tuple, number)`. The tuple broadcast made this
+  shape easy to reach, so the JS lane of this gate has a live silent-wrong-value
+  repro, not only the GPU shape mismatches.
 - **Complex-element collections** — `gpuOperandShape` reads a list of complex
   elements as `scalar` (via `isComplexValued`'s operand fallback), so the
   generic gate is inert for them. The fan-out path declines them explicitly; the

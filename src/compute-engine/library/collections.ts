@@ -3111,11 +3111,33 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           );
         return undefined;
       }
-      // Emit byte-identically to the equivalent `Tuple(...)`. Targets with no
+      // Emit byte-identically to the equivalent `Tuple(...)`, except for the
+      // opaque-slot guard the JavaScript arm adds below. Targets with no
       // `Tuple` lowering (`interval-javascript`) are not enumerated, so
       // `PointList` fails closed there too — matching `Tuple`.
       const parts = args.map((a) => compile(a));
-      if (language === 'javascript') return `[${parts.join(', ')}]`;
+      if (language === 'javascript') {
+        // An OPAQUE component — one whose type does not prove it is a number,
+        // typically the `unknown` of a free plot variable — may nevertheless
+        // hold a LIST at run time, and JavaScript is the one target where a
+        // list is an ordinary expression-level value (an array), so the list
+        // would be spliced into the point: `PointList(u, v)` with `v` bound to
+        // `[10, 20]` produced `[1, [10, 20]]`, which no consumer of a point
+        // can read. `_SYS.pointSlot` replaces such a slot with `NaN`, the same
+        // self-describing absence marker the zipped lowering of `PointList`
+        // (`compileJSPointList`, `javascript-target.ts`) already produces for
+        // exactly this situation.
+        //
+        // Admitting the opaque component STATICALLY stays load-bearing and is
+        // NOT reconsidered here: a per-pixel plot body is parsed LaTeX whose
+        // free variables type as `unknown` and are scalars at run time. This
+        // is a run-time question, so it gets a run-time answer.
+        return `[${args
+          .map((a, i) =>
+            a.type.matches('number') ? parts[i] : `_SYS.pointSlot(${parts[i]})`
+          )
+          .join(', ')}]`;
+      }
       if (language === 'python') return `(${parts.join(', ')})`;
       if (language === 'glsl' || language === 'wgsl') {
         const suffix = language === 'wgsl' ? 'f' : '';

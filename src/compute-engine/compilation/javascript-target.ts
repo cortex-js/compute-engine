@@ -6483,6 +6483,24 @@ const SYS_HELPERS = {
       );
     return NaN;
   },
+  // One component slot of an all-scalar compiled `PointList` whose static type
+  // did not prove it a number (`unknown`, `value` — the type a free plot
+  // variable carries).
+  //
+  // Such a slot is admitted statically because a per-pixel plot body is parsed
+  // LaTeX whose free variables are `unknown` and are scalars at run time. When
+  // one turns out to hold a LIST instead, the point would otherwise get a
+  // whole array spliced into a component — `PointList(u, v)` with `v` bound to
+  // `[10, 20]` produced `[1, [10, 20]]` — and no consumer of a point can read
+  // that. The array becomes NaN, a self-describing absence marker, which is
+  // the convention the ZIPPED lowering of `PointList` (`compileJSPointList`)
+  // already applies to its own opaque slots.
+  //
+  // Deliberate divergence from the interpreter, shared with that zip guard:
+  // the interpreter re-reads such a component as a list SOURCE and transposes
+  // it, which the compiled form cannot know to do, and a silently-wrong point
+  // is worse than an absent one.
+  pointSlot: (v: unknown): unknown => (Array.isArray(v) ? NaN : v),
   // Positional access for compiled `At`. CE `At` is 1-based; a negative index
   // counts from the end. A zero or out-of-range index yields NaN (the
   // interpreter returns `Nothing`, projected to NaN on a real target).
@@ -7116,7 +7134,9 @@ function makeSysHelpers(ce: ComputeEngine): SysHelpers {
  *
  * - analyzed REAL: a `{re, im}` object THROWS a `TypeError` naming the symbol
  *   — the compiled code reads it as a number, and every arithmetic on it
- *   would be silently wrong (`NaN`, or `"[object Object]1"` under `+`);
+ *   would be silently wrong (`NaN`, or `"[object Object]1"` under `+`). The
+ *   one exception is the unsigned pole `~oo`, which is PROJECTED to
+ *   `Infinity` instead of throwing (see `isUnsignedPole` below);
  * - analyzed COMPLEX (a `complex`-typed symbol or annotated parameter): a
  *   plain number is LIFTED to `{re, im: 0}` — a real IS a complex, and the
  *   compiled code reads `.re`/`.im` off it;
@@ -7136,6 +7156,26 @@ const isComplexObject = (v: unknown): v is ComplexResult =>
   typeof (v as ComplexResult).re === 'number' &&
   typeof (v as ComplexResult).im === 'number';
 
+/**
+ * Whether a `{re, im}`-shaped value is the interpreter's UNSIGNED pole `~oo`
+ * (`ComplexInfinity`) rather than a genuine complex number. The interpreter
+ * carries `~oo` as a complex value with an infinite part and a NON-ZERO
+ * imaginary part — `ComplexInfinity` itself reads `{re: ∞, im: ∞}`, and any
+ * complex it builds with an infinite part collapses to `~oo` as well
+ * (`Complex(3, ∞)` types `~oo`). A signed real infinity keeps `im === 0` and
+ * so is not matched here; neither is a finite complex such as `3 + 4i`.
+ *
+ * This mirrors the `isInfinity && im !== 0` test the compiler already uses to
+ * recognize `~oo` when it FOLDS a constant subtree (`tryConstantFold` in
+ * base-compiler.ts), so the two routes agree on what counts as a pole.
+ */
+const isUnsignedPole = (v: ComplexResult): boolean =>
+  v.im !== 0 &&
+  (v.re === Infinity ||
+    v.re === -Infinity ||
+    v.im === Infinity ||
+    v.im === -Infinity);
+
 function entryCheckError(binding: string): TypeError {
   return new TypeError(
     `${binding} was compiled as a real number but received a complex {re, im} value. Declare it complex, or compile with \`mode: 'complex'\`.`
@@ -7147,9 +7187,23 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
     const vars = argumentsList[0];
     if (typeof vars !== 'object' || vars === null) return argumentsList;
     const v = vars as Record<string, unknown>;
-    for (const id of plan.real)
-      if (isComplexObject(v[id])) throw entryCheckError(`"${id}"`);
     let lifted: Record<string, unknown> | undefined;
+    // A `~oo` argument is PROJECTED to `Infinity` rather than refused: the
+    // compiled body has no value for the unsigned pole, and `Infinity` is the
+    // spelling it already gives a pole it PRODUCES itself, so projecting here
+    // gives one pole one spelling on both routes. The projection keeps the
+    // magnitude and drops the direction `~oo` never had — the same trade the
+    // constant-folding path makes for an embedded `~oo` literal. Every other
+    // complex value still throws: reading `3 + 4i` as a number would be
+    // silently wrong, while reading `~oo` as `Infinity` is the documented
+    // float encoding of it.
+    for (const id of plan.real) {
+      const x = v[id];
+      if (!isComplexObject(x)) continue;
+      if (!isUnsignedPole(x)) throw entryCheckError(`"${id}"`);
+      lifted ??= { ...v };
+      lifted[id] = Infinity;
+    }
     for (const id of plan.complex) {
       const x = v[id];
       if (typeof x === 'number') {
@@ -7159,10 +7213,16 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
     }
     return lifted === undefined ? argumentsList : [lifted];
   }
-  for (const i of plan.real)
-    if (isComplexObject(argumentsList[i]))
-      throw entryCheckError(`argument ${i + 1}`);
   let lifted: unknown[] | undefined;
+  // The positional-parameter route makes the same `~oo` projection as the
+  // free-symbol route above.
+  for (const i of plan.real) {
+    const x = argumentsList[i];
+    if (!isComplexObject(x)) continue;
+    if (!isUnsignedPole(x)) throw entryCheckError(`argument ${i + 1}`);
+    lifted ??= [...argumentsList];
+    lifted[i] = Infinity;
+  }
   for (const i of plan.complex) {
     const x = argumentsList[i];
     if (typeof x === 'number') {
@@ -8599,6 +8659,19 @@ function fnArg(
   // accumulator prefix) is planned by `combinerPlan`.
   if (extraArgTypes.length === 0)
     BaseCompiler.assertCallbackLaneMatch(callback, source);
+  // A single-uppercase built-in operator name is exempt from the shared
+  // value-position refusal because an un-applied one reads as a caller
+  // variable; in CALLBACK position it is applied, so the exemption would ship
+  // a `_.D` that throws at run time.
+  BaseCompiler.assertBuiltinCallbackUsable(kind, callback);
+  // A bare BUILT-IN operator symbol over complex ELEMENTS compiles its
+  // synthesized parameter in the real lane and silently answers `NaN`. Hand
+  // the compiler the annotated eta-expansion instead, so the body takes the
+  // complex lane the inline-literal callback route already takes.
+  if (extraArgTypes.length === 0) {
+    const eta = BaseCompiler.complexElementCallbackEta(callback, source);
+    if (eta !== undefined) return compile(eta);
+  }
   return compile(callback!);
 }
 
@@ -8641,6 +8714,7 @@ function zipFnArg(
     callback,
     BaseCompiler.zipCallbackArgTypes(kind, sources, 2)
   );
+  BaseCompiler.assertBuiltinCallbackUsable(kind, callback);
   return compile(callback!);
 }
 

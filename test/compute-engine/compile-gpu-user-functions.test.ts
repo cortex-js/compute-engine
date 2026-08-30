@@ -374,7 +374,14 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
 
   it('an argument whose shape disagrees with the parameter fails closed', () => {
     const ce = engineWithF();
-    expect(() => glsl.compile(ce.expr(['f', ['Tuple', 1, 2]]))).toThrow(
+    // Constant folding is off for the same reason as the broadcast test
+    // above: `f((1, 2))` binds the point whole to `x`, and the body's own
+    // component-wise arithmetic (`sin` and the square of a tuple both map
+    // over the components) then reduces the call to a literal pair, which
+    // would never reach the shape gate under test.
+    expect(() =>
+      glsl.compile(ce.expr(['f', ['Tuple', 1, 2]]), { constantFold: false })
+    ).toThrow(
       /argument 1 `\(1, 2\)` lowers to "vec2" but parameter "x" is declared "float"/
     );
   });

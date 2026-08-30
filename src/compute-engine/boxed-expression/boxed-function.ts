@@ -50,13 +50,16 @@ import {
   couldBeUnkeyedCollectionOperand,
   isPossiblyCollectionTyped,
   isTuple,
+  isTupleBroadcastParticipant,
   isUnknownLengthBroadcast,
   typeCouldBeCollection,
   typeCouldBeUnkeyedCollection,
   lazyBroadcastMapIfNeeded,
   lazyMapNumericApproximation,
   zip,
+  zipParticipates,
 } from '../collection-utils.js';
+import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
   validElementMemo,
@@ -4035,6 +4038,27 @@ export class BoxedFunction
       }
 
       //
+      // 4t/ Component-wise broadcast over TUPLE operands — `Sin((1, 2))` is
+      // `(sin 1, sin 2)`, the rule the arithmetic operators already apply to
+      // `(1, 2) · 3` and the one the JavaScript compile target applies when it
+      // maps a scalar kernel over a tuple's array. Placed AFTER step 4b so a
+      // mixed tuple-and-list application keeps its existing meaning (the list
+      // supplies the cells, the tuple is lifted whole into each of them), and
+      // decided on the evaluated `tail` so an operand that only becomes a
+      // tuple at evaluation broadcasts like a literal one.
+      //
+      const tupleCells = tupleBroadcastCells(this, def, tail);
+      if (tupleCells !== undefined) {
+        if (!Array.isArray(tupleCells)) return tupleCells;
+        return this.engine._fn(
+          'Tuple',
+          tupleCells.map((cell) =>
+            this.engine._fn(this.operator, cell).evaluate(options)
+          )
+        );
+      }
+
+      //
       // 4b-decl/ The post-evaluation twin of step 2c: a DECLARED
       // `broadcastable<T>` slot whose argument only BECAME a finite indexed
       // collection after evaluation (`f(lst(3))`). `tail` is already evaluated,
@@ -4596,6 +4620,23 @@ export class BoxedFunction
       }
 
       //
+      // 3t/ Component-wise broadcast over TUPLE operands — the async twin of
+      // the sync step 4t.
+      //
+      if (def) {
+        const tupleCells = tupleBroadcastCells(this, def, tail);
+        if (tupleCells !== undefined) {
+          if (!Array.isArray(tupleCells)) return tupleCells;
+          const resolved = await Promise.all(
+            tupleCells.map((cell) =>
+              this.engine._fn(this.operator, cell).evaluateAsync(options)
+            )
+          );
+          return this.engine._fn('Tuple', resolved);
+        }
+      }
+
+      //
       // 3b-decl/ The post-evaluation twin of step 2b-decl — mirrors the sync
       // step 4b-decl.
       //
@@ -4725,6 +4766,174 @@ export class BoxedFunction
  */
 function isBroadcastParticipant(op: Expression): boolean {
   return isFiniteBroadcastParticipant(op);
+}
+
+/**
+ * Heads that read a tuple operand as a POINT and answer its NORM — one
+ * scalar, not one result per component: `|(3, 4)|` is 5, and
+ * `Hypot((3, 4), 12)` is 13, because the point enters the sum of squares
+ * through its norm. Both compute that in their own `evaluate` handlers
+ * (`evaluateAbs` routes a tuple to `Norm`) and type it with `pointNormType`,
+ * so the component-wise broadcast must leave a tuple operand to them.
+ *
+ * Spelled as a head list here rather than as a `'tuples'` entry in each
+ * definition's `broadcastExemptions`, because ANY declared exemption also
+ * makes the JavaScript compile target fail closed for that head — which
+ * would take away the element-wise `Abs([3, -4])` and `Hypot([3, 6], 4)`
+ * lowerings these heads still have and want.
+ */
+const TUPLE_NORM_HEADS: ReadonlySet<string> = new Set(['Abs', 'Hypot']);
+
+/**
+ * Does an application of `operator` map a TUPLE operand component-wise?
+ *
+ * A tuple is an atomic value (a point, a vector) almost everywhere, but a
+ * `broadcastable` head applied to one maps over its components, exactly as
+ * it maps over the elements of a list: `Sin((1, 2))` is `(sin 1, sin 2)`.
+ * Four families of heads are excluded, so a tuple stays atomic wherever the
+ * engine already gives it a meaning of its own:
+ *
+ * - a head declaring the `'tuples'` broadcast exemption computes the shape in
+ *   its own handlers: `Add`, `Multiply`, `Negate`, `Subtract` and `Divide`
+ *   combine points component-wise there;
+ * - the heads in {@link TUPLE_NORM_HEADS}, which read a point's norm;
+ * - the relational heads compare a point as ONE value, so
+ *   `Equal((1, 2), (1, 2))` is the scalar `True` and `Less((1, 2), 3)` stays
+ *   inert rather than fanning out to a pair of booleans. The compiled kernels
+ *   refuse a tuple operand on those heads for the same reason instead of
+ *   looking inside its array representation;
+ * - a USER FUNCTION binds a tuple argument WHOLE to a scalar parameter, so
+ *   `f((1, 2))` passes the point to `f`. That arm is the lambda broadcast
+ *   (step 2b/4b), which excludes tuples deliberately; a lambda reaches this
+ *   predicate at all only because `broadcastable` is derived from
+ *   `paramsAreScalar` for an annotated literal assigned bare.
+ */
+function broadcastsOverTuples(
+  operator: string,
+  def: BoxedOperatorDefinition
+): boolean {
+  return (
+    def.broadcastable === true &&
+    !def.broadcastExemptions.includes('tuples') &&
+    !TUPLE_NORM_HEADS.has(operator) &&
+    !isRelationalOperator(operator) &&
+    !isLambdaDef(def) &&
+    !isUserFunctionDef(def)
+  );
+}
+
+/**
+ * How many components the component-wise tuple broadcast of `ops` produces,
+ * read from the operand TYPES, or `undefined` when the application does not
+ * statically take that arm.
+ *
+ * The type-level companion of {@link tupleBroadcastCells}, which decides the
+ * same question on evaluated VALUES. It answers only for the shape the type
+ * arm can name honestly: at least one operand is a tuple of statically-known
+ * arity, every tuple operand agrees on that arity, and no operand supplies
+ * cells of its own — a list operand makes the result a `List` instead, and an
+ * operand whose collection-ness is unknown makes it unknowable.
+ *
+ * Three outcomes, so the type arm can stay in step with the value arm:
+ *
+ * - a NUMBER is the component count of a tuple whose components are all
+ *   scalars. The result is a tuple of that many copies of the per-component
+ *   type, which the type arm spells exactly;
+ * - `'unknown-components'` says the broadcast does happen but its component
+ *   types cannot be spelled: at least one tuple component is collection-shaped,
+ *   so the per-component results differ in shape and a tuple of identical
+ *   component types cannot describe them. `tupleBroadcastCells` broadcasts this
+ *   case all the same, so the type arm must claim the wide bare `tuple` instead
+ *   of the scalar type the operator handler computed;
+ * - `undefined` says this application is not a component-wise tuple broadcast.
+ *   An EMPTY tuple answers `undefined` as well: there is no component to map,
+ *   and `tupleBroadcastCells` declines a zero-length operand and leaves the
+ *   application inert, so an empty-tuple type here would describe a value that
+ *   never becomes a tuple.
+ */
+function tupleBroadcastArity(
+  ops: ReadonlyArray<Expression>
+): number | 'unknown-components' | undefined {
+  let arity: number | undefined;
+  let unknownComponents = false;
+  for (const op of ops) {
+    const t = op.type.type;
+    if (typeof t !== 'string' && t.kind === 'tuple') {
+      if (t.elements.some((el) => isSubtype(el.type, COLLECTION_SHAPE_TYPE)))
+        unknownComponents = true;
+      if (arity === undefined) arity = t.elements.length;
+      else if (t.elements.length !== arity) return undefined;
+      continue;
+    }
+    if (
+      isFiniteBroadcastParticipant(op) ||
+      isBroadcastCollectionType(op) ||
+      isFixedShapeCollection(op) ||
+      isPossiblyCollectionTyped(op)
+    )
+      return undefined;
+  }
+  if (arity === undefined || arity === 0) return undefined;
+  return unknownComponents ? 'unknown-components' : arity;
+}
+
+/**
+ * The per-cell operand lists of a component-wise broadcast of `operator` over
+ * the TUPLE operands in `tail`.
+ *
+ * Answers `undefined` when this application is not such a broadcast, and an
+ * error expression when two tuple operands disagree in length — a mismatch is
+ * an error, never a truncation to the shorter one, which is the same ruling
+ * and the same `incompatible-dimensions` error the list broadcast applies.
+ *
+ * Consulted on EVALUATED operands, so an operand that only becomes a tuple at
+ * evaluation (`Sin(3 · (1, 2))`) broadcasts like a literal one. Every operand
+ * that supplies cells must be a tuple: a mixed tuple-and-list application
+ * keeps its existing meaning, where the list supplies the cells and the tuple
+ * is lifted whole into each of them.
+ */
+function tupleBroadcastCells(
+  expr: Expression,
+  def: BoxedOperatorDefinition,
+  tail: ReadonlyArray<Expression>
+): Expression[][] | Expression | undefined {
+  if (!broadcastsOverTuples(expr.operator, def)) return undefined;
+  if (skipBroadcastForVectorOps(def, false, tail)) return undefined;
+  if (!tail.some(isTupleBroadcastParticipant)) return undefined;
+
+  const ce = expr.engine;
+  let length: number | undefined;
+  for (const op of tail) {
+    if (isTupleBroadcastParticipant(op)) {
+      const n = op.count;
+      if (n === undefined) return undefined;
+      if (length === undefined) length = n;
+      else if (n !== length)
+        return ce.error('incompatible-dimensions', `${length} vs ${n}`);
+      continue;
+    }
+    // An operand that is not a tuple but would supply cells of its own at the
+    // `zip` below leaves this application alone: a list leaves it to the list
+    // broadcast, which ran before this one, and a non-indexed collection such
+    // as a set has no component-wise meaning here at all. The test must be
+    // `zip`'s OWN participation predicate, because `zip` is what pulls the
+    // cells a few lines down: a set is not an indexed collection, so a
+    // narrower gate would pass it through and then let it fan the tuple out
+    // over its members.
+    if (zipParticipates(op)) return undefined;
+  }
+  if (length === undefined || length === 0) return undefined;
+
+  const items = zip(tail);
+  const cells: Expression[][] = [];
+  while (true) {
+    const { done, value } = items.next();
+    if (done) break;
+    cells.push(value);
+  }
+  // A tuple whose components cannot all be walked (a lazy view that runs dry
+  // before its advertised count) is left inert rather than silently shortened.
+  return cells.length === length ? cells : undefined;
 }
 
 /**
@@ -5484,6 +5693,36 @@ function type(expr: BoxedFunction): Type {
         !typeLevelWholeCompareSkip &&
         !skipBroadcastForVectorOps(def, hasTensors, expr.ops)
       ) {
+        // Arm 0 (tuple) — the TYPING twin of the component-wise tuple
+        // broadcast (step 4t in `_computeValue`). The value is a `Tuple` of
+        // one per-component result, so the declared type must be a tuple of
+        // that many copies of the per-component type rather than the scalar
+        // the handler computed. Only a statically-sized tuple of scalar
+        // components can be named this way; anything else falls through to
+        // the list arms below and keeps the handler's own answer.
+        //
+        // A tuple whose components are collection-shaped is the one case where
+        // this arm cannot name the components but must still not fall through:
+        // the value arm broadcasts it (a nested tuple of a list component and
+        // a scalar component is what the compiled lane produces too), so the
+        // scalar handler type would be a lie. The wide bare `tuple` is claimed
+        // instead — unspecific, but true of every value that arm produces.
+        // The two guards move together on purpose: whatever the value arm
+        // broadcasts, this arm must describe as a tuple of some shape.
+        if (broadcastsOverTuples(expr.operator, def)) {
+          const arity = tupleBroadcastArity(expr.ops);
+          if (arity === 'unknown-components') return maybeAbsorb('tuple');
+          if (arity !== undefined) {
+            const element = broadcastElementType(sigResult);
+            return maybeAbsorb({
+              kind: 'tuple',
+              elements: Array.from({ length: arity }, () => ({
+                type: element as Type,
+              })),
+            });
+          }
+        }
+
         // Arm 1 (statically-visible collection) — PRIORITY. A materialized
         // finite indexed collection, an operand whose declared type is an
         // unbounded list / indexed-collection, or — when the handler's own

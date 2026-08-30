@@ -1327,39 +1327,65 @@ describe('§5.12 — the ground invariant holds at every installed application',
   });
 });
 
-describe('§5.13 — G3, compile() declines a generic user function whole-fn', () => {
-  // §2.7: the emitted code can neither coerce nor broadcast open parameters —
-  // a lifted call would run the scalar body on the collection and silently
-  // compute a wrong value. `ensureUserFunctionEmitted` returns undefined
-  // (the decline convention), so compile() serves the interpreted fallback.
+describe('§5.13 — G3, compile() emits a BOUNDED generic user function whole-fn', () => {
+  // §2.7 declined every generic whole-fn: the emitted code could neither
+  // coerce nor broadcast open parameters, and a lifted call would have run the
+  // scalar body on the collection and silently computed a wrong value.
+  //
+  // A BOUNDED variable is now read at its bound — the reading the
+  // interpreter's own broadcast gate performs (`paramsAreScalar` calls
+  // `substituteDeclaredBounds`) — so the function is emitted once as the
+  // ground signature it is bounded by and its call sites get that signature's
+  // coercion and broadcast wraps. A variable with NO bound still has no ground
+  // reading and keeps the decline, with the interpreted fallback. The full set
+  // of pins for the lift is in
+  // `test/compute-engine/compile-generic-monomorphization.test.ts`.
   const {
     compile,
   } = require('../../src/compute-engine/compilation/compile-expression');
 
-  it('declared route (E3): declines, fallback agrees with the interpreter', () => {
+  it('declared route (E3): emits, and the call broadcasts like the interpreter', () => {
     const ce = fresh();
     ce.declare('gd', '(x: T) -> T where T: number');
     ce.assign('gd', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
     const r = compile(ce.box(['gd', 'y'] as any));
-    // No lowering emitted for the generic fn: the whole expression declined.
-    expect(r?.code ?? '').not.toContain('_fn_gd');
-    // The fallback runner is the honest party.
+    expect(r?.code ?? '').toContain('_fn_gd');
     expect(r?.run?.({ y: 21 })).toBe(42);
+    expect(r?.run?.({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
     expect(ce.box(['gd', 21] as any).evaluate().re).toBe(42);
+    expect(
+      ce
+        .box(['gd', ['List', 1, 2, 3]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[2,4,6]');
   });
 
-  it('bare-assign route (own polytype marker): declines too', () => {
+  it('bare-assign route (own polytype marker): emits too', () => {
     const ce = fresh();
     ce.assign(
       'hd',
       e2(ce, ['Add', 'x', 'x'], '(x: T) -> T where T: number', 'x')
     );
     const r = compile(ce.box(['hd', 'y'] as any));
-    expect(r?.code ?? '').not.toContain('_fn_hd');
+    expect(r?.code ?? '').toContain('_fn_hd');
     expect(r?.run?.({ y: 21 })).toBe(42);
+    expect(r?.run?.({ y: [1, 2, 3] })).toEqual([2, 4, 6]);
   });
 
-  it('a GROUND annotated literal still compiles (the guard is generic-only)', () => {
+  it('an UNBOUNDED variable still declines, fallback agrees with the interpreter', () => {
+    const ce = fresh();
+    ce.declare('gu', '(x: T) -> T where T');
+    ce.assign('gu', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
+    const r = compile(ce.box(['gu', 'y'] as any));
+    // No lowering emitted for the open generic: the whole expression declined.
+    expect(r?.code ?? '').not.toContain('_fn_gu');
+    // The fallback runner is the honest party.
+    expect(r?.run?.({ y: 21 })).toBe(42);
+    expect(ce.box(['gu', 21] as any).evaluate().re).toBe(42);
+  });
+
+  it('a GROUND annotated literal still compiles (the lift changes nothing there)', () => {
     const ce = fresh();
     ce.assign(
       'kd',

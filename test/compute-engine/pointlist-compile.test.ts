@@ -13,7 +13,11 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * point and compiles byte-identically to the equivalent `Tuple(...)` on each
  * target — including the load-bearing case of *free* plot variables (typed
  * `unknown`), which the compile model treats as numeric parameters exactly as
- * it does for `Tuple`. A component that is a list SOURCE lowers on JavaScript
+ * it does for `Tuple`. The one departure from byte-identity is on JavaScript,
+ * where a list IS an expression-level value: a slot whose type does not prove
+ * it a number is wrapped in `_SYS.pointSlot`, so a binding that turns out to
+ * hold a list yields NaN instead of being spliced into the point. A component
+ * that is a list SOURCE lowers on JavaScript
  * to the zipped list of points (see `pointlist-compile-zip.test.ts`); on every
  * other target, and for a component that is neither a scalar slot nor a source
  * (a tuple, set, map, or a union with a collection member), it fails closed
@@ -140,11 +144,19 @@ describe('PointList compile — render-shaped case s(PointList(x,y))', () => {
     }
   });
 
-  it('javascript: the LaTeX-parsed body with FREE plot variables compiles identically to the Tuple spelling and runs the same', () => {
+  it('javascript: the LaTeX-parsed body with FREE plot variables compiles to the Tuple spelling wrapped in the opaque-slot guard, and runs the same', () => {
     // The load-bearing render case: a per-pixel body is parsed LaTeX whose
     // `x`/`y` are free (undeclared → `unknown`). The compile model treats free
     // unknown symbols as numeric parameters, so `PointList(x, y)` must compile
-    // its components as scalar slots exactly as the `(x, y)` Tuple spelling.
+    // its components as scalar slots, exactly as the `(x, y)` Tuple spelling
+    // does — no decline.
+    //
+    // The one difference is `_SYS.pointSlot` around each slot whose type does
+    // not prove it a number: a `PointList` slot that turns out to hold a list
+    // at run time yields NaN rather than splicing the whole list into the
+    // point. `Tuple` needs no such guard, since a tuple containing a list is a
+    // well-formed value. For a numeric run-time binding the guard is the
+    // identity, so the two spellings still run the same.
     const ce = new ComputeEngine();
     const plBody =
       '\\operatorname{PointX}(\\operatorname{PointList}(x,y))^2 + \\operatorname{PointY}(\\operatorname{PointList}(x,y))^2 - 4';
@@ -158,10 +170,13 @@ describe('PointList compile — render-shaped case s(PointList(x,y))', () => {
     const tp = compile(ce.parse(tpBody)) as typeof pl;
     expect(pl.success).toBe(true);
     expect(tp.success).toBe(true);
-    // Byte-identical source. (A point accessor over an atomic tuple types
-    // its component `number` — see `pointComponentType` — so the body stays
-    // scalar-typed and compiles to plain scalar code, not `_SYS.bcast`.)
-    expect(pl.code).toBe(tp.code);
+    // Identical source once the per-slot guard is stripped. (A point accessor
+    // over an atomic tuple types its component `number` — see
+    // `pointComponentType` — so the body stays scalar-typed and compiles to
+    // plain scalar code, not `_SYS.bcast`.)
+    expect(pl.code.replace(/_SYS\.pointSlot\((_\.[a-z]+)\)/g, '$1')).toBe(
+      tp.code
+    );
     // Run parity + interpreter parity.
     for (const [gx, gy] of [
       [3, 4],
@@ -203,17 +218,21 @@ describe('PointList compile — render-shaped case s(PointList(x,y))', () => {
 describe('PointList compile — scalar-slot type coverage', () => {
   // The guard fails closed only for a *provably non-scalar* component (a
   // subtype of `collection`). `unknown` and `value` are scalar slots that
-  // `Tuple` compiles, so `PointList` must too.
-  it('javascript: an `unknown`-typed component compiles (parity with Tuple)', () => {
+  // `Tuple` compiles, so `PointList` must too — each wrapped in the run-time
+  // `_SYS.pointSlot` guard, which is the identity on a scalar and is what
+  // keeps a list-valued binding from being spliced into the point.
+  it('javascript: an `unknown`-typed component compiles, guarded', () => {
     const ce = new ComputeEngine(); // x, y undeclared → unknown
     const js = new JavaScriptTarget();
     const pl = js.compile(ce.box(['PointList', 'x', 'y']));
     const tp = js.compile(ce.box(['Tuple', 'x', 'y']));
     expect(pl.success).toBe(true);
-    expect(pl.code).toBe(tp.code);
+    expect(tp.code).toBe('[_.x, _.y]');
+    expect(pl.code).toBe('[_SYS.pointSlot(_.x), _SYS.pointSlot(_.y)]');
+    expect((pl.run as (s: any) => unknown)({ x: 3, y: 4 })).toEqual([3, 4]);
   });
 
-  it('javascript: a `value`-typed component compiles (parity with Tuple)', () => {
+  it('javascript: a `value`-typed component compiles, guarded; the provably numeric one is not', () => {
     const ce = new ComputeEngine();
     ce.declare('vv', 'value');
     ce.declare('x', 'number');
@@ -221,7 +240,76 @@ describe('PointList compile — scalar-slot type coverage', () => {
     const pl = js.compile(ce.box(['PointList', 'x', 'vv']));
     const tp = js.compile(ce.box(['Tuple', 'x', 'vv']));
     expect(pl.success).toBe(true);
-    expect(pl.code).toBe(tp.code);
+    expect(tp.code).toBe('[_.x, _.vv]');
+    expect(pl.code).toBe('[_.x, _SYS.pointSlot(_.vv)]');
+    expect((pl.run as (s: any) => unknown)({ x: 3, vv: 4 })).toEqual([3, 4]);
+  });
+});
+
+/**
+ * The opaque-slot guard on the ALL-SCALAR path.
+ *
+ * A `PointList` component whose type does not prove it a number is admitted
+ * statically — that admission is load-bearing for free plot variables, which
+ * are `unknown` and are scalars at run time — so whether it really holds a
+ * scalar is a RUN-TIME question. When it holds a list instead, the compiled
+ * point used to splice the whole list into a component (`PointList(u, v)` with
+ * `v = [10, 20]` produced `[1, [10, 20]]`), a value no consumer of a point can
+ * read. It now yields NaN, the same self-describing absence marker the ZIPPED
+ * lowering already produces for its own opaque slots.
+ *
+ * Deliberate divergence from the interpreter, shared with that zip guard: the
+ * interpreter re-reads such a component as a list source and transposes it
+ * (`PointList(1, [10, 20])` evaluates to `[(1, 10), (1, 20)]`), which the
+ * compiled form cannot know to do.
+ */
+describe('PointList compile — the all-scalar opaque-slot guard', () => {
+  const js = new JavaScriptTarget();
+
+  function opaqueEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('u', 'unknown');
+    ce.declare('v', 'unknown');
+    ce.declare('k', 'number');
+    return ce;
+  }
+
+  it('scalar bindings produce an ordinary point', () => {
+    const r = js.compile(opaqueEngine().box(['PointList', 'u', 'v']));
+    expect(r.success).toBe(true);
+    expect((r.run as (s: any) => unknown)({ u: 1, v: 2 })).toEqual([1, 2]);
+  });
+
+  it('an opaque component holding a LIST yields NaN, not a spliced array', () => {
+    const r = js.compile(opaqueEngine().box(['PointList', 'u', 'v']));
+    const pt = (r.run as (s: any) => unknown[])({ u: 1, v: [10, 20] });
+    expect(pt).toHaveLength(2);
+    expect(pt[0]).toBe(1);
+    expect(Number.isNaN(pt[1])).toBe(true);
+    const pt2 = (r.run as (s: any) => unknown[])({ u: [10, 20], v: 3 });
+    expect(Number.isNaN(pt2[0])).toBe(true);
+    expect(pt2[1]).toBe(3);
+  });
+
+  it('a provably numeric component beside an opaque one is left unguarded', () => {
+    const r = js.compile(opaqueEngine().box(['PointList', 'k', 'v']));
+    expect(r.code).toBe('[_.k, _SYS.pointSlot(_.v)]');
+    const pt = (r.run as (s: any) => unknown[])({ k: 1, v: [10, 20] });
+    expect(pt[0]).toBe(1);
+    expect(Number.isNaN(pt[1])).toBe(true);
+  });
+
+  it('the shader and Python targets keep the plain point — they have no run-time list value to guard against', () => {
+    const ce = opaqueEngine();
+    expect(
+      new GLSLTarget().compile(ce.box(['PointList', 'u', 'v'])).code
+    ).toBe('vec2(u, v)');
+    expect(
+      new WGSLTarget().compile(ce.box(['PointList', 'u', 'v'])).code
+    ).toBe('vec2f(u, v)');
+    expect(
+      new PythonTarget().compile(ce.box(['PointList', 'u', 'v'])).code
+    ).toBe('(u, v)');
   });
 });
 

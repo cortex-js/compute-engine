@@ -373,3 +373,83 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
     expect(() => w(['ElementMax', V3, 2])).toThrow(/MATCHING genType/);
   });
 });
+
+/**
+ * A fourth hole of the same class, on the OPERAND side rather than the source
+ * side: the shape reading itself answered "scalar" for a collection-typed
+ * symbol whose type is not spelled with the `list` constructor.
+ *
+ * `isNonScalarShape` — the predicate `gpuOperandShape` is built on — recognizes
+ * a `list` type NODE. It therefore said "scalar" for the other collection kinds
+ * (`collection<T>`, `indexed_collection<T>`, `set<T>`) and for the BARE names
+ * `list` and `collection`, which the type representation carries as primitive
+ * strings rather than as nodes. Every shape gate then stepped aside and
+ * `Sin(L)` emitted `sin(L)` — source that compiles only if the host happens to
+ * bind `L` to a `vecN` uniform, a shape the compiler asserts but cannot see.
+ *
+ * The fix is a shape READING, not a decline list: an operand with a static
+ * component count of 2–4 keeps its `vecN` lowering whatever spelling its type
+ * uses, and only the counts a shader has no type for (unknown, 1, 5+) decline.
+ */
+describe('GPU SHAPE GATE — collection-typed operands with no static count', () => {
+  /** A fresh engine declaring `L` with the given type spelling. */
+  const withL = (type: string): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('L', type as any);
+    return e;
+  };
+
+  const NO_STATIC_COUNT = [
+    'list<number>',
+    'list',
+    'collection<number>',
+    'collection',
+    'indexed_collection<number>',
+    'set<number>',
+    'vector<real^7>',
+  ];
+
+  it('a componentwise builtin declines for every collection spelling with no vec2–vec4 count', () => {
+    for (const type of NO_STATIC_COUNT) {
+      const e = withL(type);
+      for (const emit of [g, w])
+        expect(() => emit(['Sin', 'L'], e)).toThrow(
+          /^Sin: the shader builtin `sin` .* the operand shapes \(array\) have no lowering\. Fail closed \(D6\)\.$/s
+        );
+    }
+  });
+
+  it('a static component count of 2–4 still compiles to the `vecN` call', () => {
+    for (const type of ['vector<real^3>', 'list<real^3>']) {
+      const e = withL(type);
+      expect(g(['Sin', 'L'], e)).toBe('sin(L)');
+      expect(w(['Sin', 'L'], e)).toBe('sin(L)');
+    }
+    expect(g(['Sin', 'L'], withL('tuple<real, real>'))).toBe('sin(L)');
+  });
+
+  it('an `unknown`-typed symbol stays a scalar — the free-variable admission is untouched', () => {
+    const e = withL('unknown');
+    expect(g(['Sin', 'L'], e)).toBe('sin(L)');
+    expect(w(['Sin', 'L'], e)).toBe('sin(L)');
+  });
+
+  it('a STRING operand keeps its own diagnostic rather than being reported as an array', () => {
+    const e = withL('string');
+    for (const emit of [g, w])
+      expect(() => emit(['Sin', 'L'], e)).toThrow(/string/);
+  });
+
+  it('`Random` over an Interval or Range domain is unaffected — it destructures the domain', () => {
+    // `Interval(0, 1)` is `set<real>` and `Range(1, 10)` is `range`: both are
+    // collection-shaped operands, and both are consumed into scalar endpoints
+    // by the `Random` lowering rather than passed through to a builtin, which
+    // is why that lowering declares itself aggregate-consuming.
+    expect(g(['WithRandomSeed', 7, ['Random', ['Interval', 0, 1]]])).toContain(
+      '_gpu_rnd_draw'
+    );
+    expect(g(['WithRandomSeed', 7, ['Random', ['Range', 1, 10]]])).toContain(
+      'floor('
+    );
+  });
+});

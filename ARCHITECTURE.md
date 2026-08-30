@@ -329,12 +329,20 @@ constant, `1/0`, `Divide(~oo, 5)`, `Add(1, ~oo)`, `(-1)!`, `Gamma(-2)`,
 `isExtendedReal` — the former `isReal`, renamed when bare `real` became a
 finiteness promise; NaN answers `false` to it.
 
-Compiled output follows the type rather than the value's shape: a `~oo` on a
-real-emitting lane lowers to `NaN` — the real lane's "no real value" — on both
-the constant-folded and structural paths, and on the shader targets. Because
-compiled `~oo` and NaN are the same runtime value, a compiled clause guard for
-the `infinity` or `nan` type cannot be faithful and the clause set declines to
-compile; the `non_finite_number` guard (`±∞` only) remains expressible.
+On a float-only compile target, a `~oo` lowers to IEEE `+Infinity` (ruled
+2026-08-28): the pole's magnitude survives, and the direction `~oo` never had
+is dropped. This holds on the constant-folded, structural, and shader paths,
+and — since 2026-08-30 — for a `~oo` handed ACROSS the boundary as an argument
+to a compiled function, which is projected to `+Infinity` instead of being
+refused as a complex value. One consequence is that no compiled guard over a
+plain JS number can distinguish `~oo` from a true `+oo`; another is that float
+arithmetic can change a pole's non-finite class where the interpreter's
+projective arithmetic does not (`Infinity - Infinity` is `NaN`, while the
+interpreter's `~oo - ~oo` stays `~oo`). A multi-clause parameter guard for the
+`infinity`, `nan`, or `non_finite_number` type therefore cannot be faithful,
+and such a clause set declines to compile whole-function, running interpreted
+instead; the same holds for non-finite VALUE-literal clauses (`oo`, `-oo`,
+`NaN`). The measurements behind each decline are recorded in `ROADMAP.md`.
 
 The shared handler implementations (and per-operator dispatch) live in
 `src/compute-engine/library/type-handlers.ts`; the convention is pinned by

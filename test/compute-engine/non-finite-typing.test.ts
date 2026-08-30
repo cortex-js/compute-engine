@@ -664,13 +664,16 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     });
 
     test('Sqrt of a non-number is undecided, not non-finite', () => {
-      // `Sqrt(Tuple(1, 2))` is admitted with type `number` rather than
+      // `Sqrt(Set(1, 2))` is admitted with type `number` rather than
       // rejected, so the same propagation applies. It folds nothing today —
       // the product type also requires every factor to be provably real —
       // so this pins the claim itself rather than a downstream value.
+      // A SET is the witness rather than a tuple: `Sqrt` maps over a tuple's
+      // components, so `Sqrt((1, 2))` is a tuple of numbers and not a
+      // non-number operand at all.
       const engine = new ComputeEngine();
-      expect(engine.box(['Sqrt', ['Tuple', 1, 2]]).isFinite).toBe(undefined);
-      expect(engine.box(['Sqrt', ['Tuple', 1, 2]]).isNumber).toBe(true);
+      expect(engine.box(['Sqrt', ['Set', 1, 2]]).isFinite).toBe(undefined);
+      expect(engine.box(['Sqrt', ['Set', 1, 2]]).isNumber).toBe(true);
       // Numeric operands are untouched.
       expect(engine.box(['Sqrt', 5]).isFinite).toBe(true);
       expect(engine.box(['Abs', -5]).isFinite).toBe(true);

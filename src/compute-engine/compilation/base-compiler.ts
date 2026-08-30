@@ -41,8 +41,16 @@ import {
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { parseType } from '../../common/type/parse.js';
-import { isPolymorphicType } from '../../common/type/instantiate.js';
-import type { Type, TypeReference } from '../../common/type/types.js';
+import {
+  hasFreeTypeVariables,
+  isPolymorphicType,
+} from '../../common/type/instantiate.js';
+import { substituteDeclaredBounds } from '../boxed-expression/generic-instantiation.js';
+import type {
+  FunctionSignature,
+  Type,
+  TypeReference,
+} from '../../common/type/types.js';
 import { declarationOf } from '../../common/type/reference.js';
 import {
   isInequalityOperator,
@@ -122,6 +130,7 @@ import {
 import type { CseHarvest, CseHarvestOptions, CseRegion } from './cse.js';
 import {
   builtinCallbackArity,
+  builtinOperatorDefinition,
   isRefusableBuiltinCallback,
 } from './builtin-callback.js';
 
@@ -12242,6 +12251,106 @@ export class BaseCompiler {
   }
 
   /**
+   * The complex-lane eta-expansion of a bare BUILT-IN operator symbol used as
+   * a unary ELEMENT callback over a `source` whose elements are complex
+   * scalars — `(x: complex) ↦ Abs(x)` for `Map(Abs, zs)` — or `undefined`
+   * when nothing needs to change.
+   *
+   * Without it the built-in reference took the shared value-position
+   * emission, whose synthesized parameter carries no type and is therefore
+   * compiled in the REAL lane: `const _fn_Abs = (_tv1) => Math.abs(_tv1)`
+   * received the `{ re, im }` element and answered `NaN` behind
+   * `success: true`, where the interpreter answers 5. Compiling an annotated
+   * literal instead routes the body through the same per-application
+   * parameter typing an INLINE `x ↦ Abs(x)` callback already gets, so the
+   * emitted body is `_SYS.cabs(x)` and the compiled value matches the
+   * interpreter. This mirrors what `combinerPlan` does for the
+   * accumulator/element pair of a `Reduce`-shaped callback.
+   *
+   * Restricted to a callback the engine can expand at a FIXED unary arity
+   * (`builtinCallbackArity`): a user definition shadowing the name takes the
+   * user-function route (and its own `assertCallbackLaneMatch` decline), and
+   * a variadic or optional-tail operator has no single wrapper arity and is
+   * already refused.
+   *
+   * A source whose element type is merely `number` is NOT rewritten. `number`
+   * is a supertype of both the real and the complex numbers, so no static
+   * classification is possible; annotating the parameter `complex` there
+   * would force every element into the `{ re, im }` encoding and change the
+   * RESULT shape of the ordinary real case, and declining would send every
+   * `number`-typed source to the interpreter. Such a source keeps the real
+   * lane — the same posture an inline `x ↦ Abs(x)` callback and a direct
+   * `Abs(n)` on a `number`-typed operand already take.
+   */
+  static complexElementCallbackEta(
+    callback: Expression | undefined,
+    source: Expression | undefined
+  ): Expression | undefined {
+    if (callback === undefined || source === undefined) return undefined;
+    if (!isSymbol(callback)) return undefined;
+    const engine = callback.engine;
+    if (builtinCallbackArity(engine, callback.symbol) !== 1) return undefined;
+    if (!BaseCompiler.hasUniformComplexScalarElements(source)) return undefined;
+
+    // Annotate with the source's own element type when that type is itself
+    // provably non-real, so a narrower spelling (`imaginary`) survives; the
+    // uniform-elements evidence that admitted a looser type says `complex`.
+    const eltType = BaseCompiler.collectionElementTypeOf(source);
+    const eltTypeText =
+      eltType !== undefined && isNonRealNumber(eltType)
+        ? typeToString(eltType)
+        : 'complex';
+    const x = engine.symbol('_x');
+    const eta = engine.function('Function', [
+      engine.function(callback.symbol, [x]),
+      engine.function('Typed', [x, engine.box({ str: eltTypeText })]),
+    ]);
+    // A built-in whose canonicalization refuses a complex argument would
+    // yield an error body: leave the previous route alone rather than emit it.
+    if (!isFunction(eta, 'Function') || !eta.isValid) return undefined;
+    return eta;
+  }
+
+  /**
+   * Fail closed (D6) when `callback` is a single-uppercase-letter symbol that
+   * names a built-in OPERATOR the engine cannot eta-expand (`D`).
+   *
+   * `isRefusableBuiltinCallback` deliberately exempts single-uppercase names,
+   * because an UN-APPLIED one reads as a caller-supplied variable by
+   * convention — the `D` of `\int D x^2 dx` is a coefficient, not a broken
+   * callback. That exemption is right for a free-symbol position and wrong
+   * here: a CALLBACK operand is applied, so `Map(D, xs)` emitted the
+   * free-symbol read `_.D` and threw `_f is not a function` at run time. The
+   * refusal is therefore position-aware — it lives at the callback splice,
+   * not in the shared value-position predicate.
+   *
+   * A caller symbol that merely happens to be named `D` is untouched:
+   * `builtinOperatorDefinition` answers `undefined` for any binding that is
+   * not the engine's own system-scope operator record, so a declared variable
+   * or an assigned function literal keeps its route. A caller who genuinely
+   * wants to supply `D` through the vars object declares it first.
+   */
+  static assertBuiltinCallbackUsable(
+    kind: string,
+    callback: Expression | undefined
+  ): void {
+    if (callback === undefined || !isSymbol(callback)) return;
+    const s = callback.symbol;
+    if (!/^[A-Z]$/.test(s)) return;
+    const engine = callback.engine;
+    if (builtinOperatorDefinition(engine, s) === undefined) return;
+    // An expandable arity takes the eta-expansion route, which emits a real
+    // function value (and declines on its own if the body has no lowering).
+    if (builtinCallbackArity(engine, s) !== undefined) return;
+    throw new Error(
+      `${kind}: the built-in operator '${s}' has no fixed arity, so it ` +
+        `cannot be used as a callback value — the artifact would read '${s}' ` +
+        `from the vars object and throw at run time. Declare '${s}' as a ` +
+        `variable if it names caller-supplied data. Fail closed (D6).`
+    );
+  }
+
+  /**
    * `provablyScalarArg`, extended to a symbol the innermost local shape frame
    * records as a SCALAR (`LOCAL_SCALAR`). A declared-complex parameter is
    * entered that way (`addDeclaredComplexParams`): its declared type says
@@ -12345,8 +12454,12 @@ export class BaseCompiler {
     // whether the callee can be emitted is irrelevant to whether this call
     // is sound. A target with its own definition lowering (the shader
     // targets) checks the argument shapes against its static signature.
+    //
+    // The callee's `Function` literal, when it has a single one (a
+    // multi-clause function does not). Read once here: the strict-lane gate
+    // below and the generic broadcast decision at the end both need it.
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
     if (BaseCompiler.strictLanes && !target.userFunctions?.lowering) {
-      const literal = BaseCompiler.userFunctionLiteral(engine, h);
       if (literal !== undefined) {
         const i = BaseCompiler.laneMismatchAt(engine, h, literal, args);
         if (i >= 0)
@@ -12429,12 +12542,30 @@ export class BaseCompiler {
       // clause set instead.
       return BaseCompiler.multiClauseParamIsComplex(engine, h, i);
     });
+    // A GENERIC callee always takes the runtime broadcast dispatch (when its
+    // parameters are scalar at their bounds), never the provably-scalar fast
+    // path. At a generic parameter the argument's static type is INFERRED
+    // FROM THE BOUND rather than declared by the caller — `gd(y)` under
+    // `(x: T) -> T where T: number` types the free `y` as `number` — so
+    // "provably not a collection" is not proof there: `run({ y: [1,2,3] })`
+    // still hands the call an array, which the interpreter broadcasts. The
+    // dispatch applies the closure directly when no argument is an array, so
+    // the only cost is one closure on the scalar path.
     return BaseCompiler.emitUserFunctionCall(
       name,
       args,
       target,
       coerceToComplex,
-      BaseCompiler.userFunctionParamsAreScalar(engine, h)
+      BaseCompiler.userFunctionParamsAreScalar(engine, h),
+      // No `literal !== undefined` pre-gate: `userFunctionIsGeneric` itself
+      // accepts an absent literal (a multi-clause callee) and can still
+      // answer from the operator/value definition's declared polymorphic
+      // signature. Gating on `literal` here would silently drop that
+      // definition-sourced answer for any literal-less callee, which is
+      // harmless today only because a literal-less function currently routes
+      // to the multi-clause emitter before this generic-bound dispatch is
+      // ever reached.
+      BaseCompiler.userFunctionIsGeneric(engine, h, literal)
     );
   }
 
@@ -12615,13 +12746,19 @@ export class BaseCompiler {
    *
    * `coerceToComplex[i]` marks an argument to wrap in the `{ re, im }`
    * convention; `paramsAreScalar` says no parameter binds a collection whole.
+   * `alwaysDispatch` suppresses the provably-scalar fast path, so the runtime
+   * broadcast dispatch is emitted even for arguments whose static type says
+   * they cannot be collections — the callee's parameters are open type
+   * variables and that static type came from their bounds, not from the
+   * caller (see the call in `tryCompileUserFunction`).
    */
   private static emitUserFunctionCall(
     name: string,
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
     coerceToComplex: ReadonlyArray<boolean>,
-    paramsAreScalar: boolean
+    paramsAreScalar: boolean,
+    alwaysDispatch = false
   ): TargetSource {
     const provablyScalarArg = BaseCompiler.provablyScalarArg;
 
@@ -12681,7 +12818,9 @@ export class BaseCompiler {
     if (
       target.language === 'javascript' &&
       args.length > 0 &&
-      !args.every(provablyScalarArg) &&
+      !args.every(
+        alwaysDispatch ? BaseCompiler.certainlyScalarArg : provablyScalarArg
+      ) &&
       !args.some((a) => isTuple(a)) &&
       !args.some((a) => BaseCompiler.isNominalAtomicArg(a)) &&
       paramsAreScalar
@@ -12770,16 +12909,22 @@ export class BaseCompiler {
     if (!('value' in def) || def.value === undefined) return true;
     const declared = def.value.type?.type;
     if (typeof declared === 'object' && declared.kind === 'signature') {
-      // A GENERIC signature has open parameters: it neither broadcasts nor
-      // coerces (a generic user function declines whole-fn — G3,
+      // A GENERIC signature is read at its declared bounds, the same reading
+      // `paramsAreScalar` itself performs and the same one the emission uses
+      // (`userFunctionSignature`). A variable with no ground bound leaves the
+      // parameters open: the function declines whole-fn there (G3,
       // generic-function-literals design §2.7, enforced in
-      // `ensureUserFunctionEmitted`). Answering `true` here would silently
-      // claim scalar parameters for a `(T) -> T where T`.
-      if (isPolymorphicType(declared)) return false;
-      return paramsAreScalar(declared);
+      // `ensureUserFunctionEmitted`), and answering `true` would silently
+      // claim scalar parameters for a signature nothing was emitted for.
+      const ground = BaseCompiler.groundSignature(declared);
+      return ground === undefined ? false : paramsAreScalar(ground);
     }
     const literal = def.value.value?.type?.type;
     if (literal === undefined) return true;
+    if (typeof literal === 'object' && literal.kind === 'signature') {
+      const ground = BaseCompiler.groundSignature(literal);
+      return ground === undefined ? false : paramsAreScalar(ground);
+    }
     return paramsAreScalar(literal);
   }
 
@@ -12860,6 +13005,28 @@ export class BaseCompiler {
     a.type.matches('boolean') ||
     a.type.matches('string');
 
+  /**
+   * Is `a` a scalar by CONSTRUCTION rather than by its static type — a number,
+   * string or character LITERAL, whose runtime value is the literal itself?
+   *
+   * The stricter sibling of {@link provablyScalarArg}, for the call boundary
+   * of a callee whose parameter types are read off a `where` clause rather
+   * than declared by the caller. A scalar TYPE is not proof there (a free
+   * symbol at a `T: number` parameter types `number` by inference, yet
+   * `run({ y: [1,2,3] })` still hands the call an array); a literal is.
+   */
+  private static readonly certainlyScalarArg = (a: Expression): boolean =>
+    (isNumber(a) && a.isNumberLiteral === true) ||
+    isString(a) ||
+    isCharacter(a) ||
+    // A boolean LITERAL — the symbols `True`/`False` — is scalar by
+    // construction, the same way a number/string/character literal is: its
+    // runtime value cannot be an array. `a.type.matches('boolean')`, used by
+    // `provablyScalarArg`, is not enough here, since a free symbol bound to a
+    // `boolean`-typed parameter can still be an array at run time.
+    isSymbol(a, 'True') ||
+    isSymbol(a, 'False');
+
   private static checkDeclaredBroadcast(
     engine: ComputeEngine,
     h: string,
@@ -12932,6 +13099,44 @@ export class BaseCompiler {
     h: string,
     i: number
   ): Type | undefined {
+    const t = BaseCompiler.userFunctionSignature(engine, h);
+    if (t === undefined) return undefined;
+    const nArgs = t.args?.length ?? 0;
+    if (i < nArgs) return t.args![i].type;
+    const nOpt = t.optArgs?.length ?? 0;
+    if (i < nArgs + nOpt) return t.optArgs![i - nArgs].type;
+    return t.variadicArg?.type;
+  }
+
+  /**
+   * The signature user-defined function `h` COMPILES AS: its declared
+   * signature (from a value definition's function type, else an operator
+   * definition's signature), with a GENERIC one read at its declared bounds.
+   * `undefined` when there is no signature, or when the bound reading leaves
+   * a type variable behind — the decline convention (never a throw).
+   *
+   * A polytype's parameter is a type VARIABLE, which the compiler can neither
+   * coerce nor decide a broadcast against, so a generic used to decline here
+   * unconditionally. Substituting each variable by its DECLARED BOUND is the
+   * reading the interpreter's own broadcast gate already performs
+   * (`paramsAreScalar` calls `substituteDeclaredBounds` before asking whether
+   * a parameter is scalar), so a function declared `(x: T) -> T where T:
+   * number` compiles exactly as the ground `(x: number) -> number` does — one
+   * emission, whose call sites then get the coercion and broadcast wraps a
+   * ground signature earns. Every admissible argument is a subtype of the
+   * bound, so no call site can reach a shape that emission was not compiled
+   * for.
+   *
+   * An UNBOUNDED variable (`where T`), or a bound that itself mentions a
+   * variable (`where T: list<U>, U`), has no ground reading: those decline,
+   * which keeps the whole-function decline and the sound interpreted
+   * fallback. Whether an emission is then actually allowed is decided by the
+   * TARGET in `ensureUserFunctionEmitted` — only JavaScript emits a generic.
+   */
+  private static userFunctionSignature(
+    engine: ComputeEngine,
+    h: string
+  ): FunctionSignature | undefined {
     const def = engine.lookupDefinition(h);
     if (!def) return undefined;
     const boxed =
@@ -12940,21 +13145,29 @@ export class BaseCompiler {
         : 'operator' in def
           ? def.operator.signature
           : undefined;
-    const t = boxed?.type;
+    return BaseCompiler.groundSignature(boxed?.type);
+  }
+
+  /**
+   * `t` as a GROUND function signature: `t` itself when it is a signature
+   * with no `where` clause, its bound reading when every quantified variable
+   * has a ground declared bound, and `undefined` otherwise (not a signature,
+   * or no ground reading — see {@link userFunctionSignature}).
+   */
+  private static groundSignature(
+    t: Type | undefined
+  ): FunctionSignature | undefined {
     if (t === undefined || typeof t === 'string' || t.kind !== 'signature')
       return undefined;
-    // A GENERIC signature's parameter is a type VARIABLE, not a type the
-    // compiler can coerce or broadcast against: DECLINE (return `undefined`,
-    // never throw — the decline convention). The `kind !== 'signature'` guard
-    // above does not catch it: `typeParams` lives ON the signature. Threading
-    // call-site instantiated signatures into compilation is future work
-    // (§6/§9.2 of the type-variables design).
-    if (isPolymorphicType(t)) return undefined;
-    const nArgs = t.args?.length ?? 0;
-    if (i < nArgs) return t.args![i].type;
-    const nOpt = t.optArgs?.length ?? 0;
-    if (i < nArgs + nOpt) return t.optArgs![i - nArgs].type;
-    return t.variadicArg?.type;
+    if (!isPolymorphicType(t)) return t;
+    // `substituteDeclaredBounds` replaces every BOUNDED variable and drops it
+    // from the `where` clause; an unbounded one stays, and so does any
+    // variable a bound itself mentions (the substitution is single-pass).
+    // Both leftovers are caught below.
+    const g = substituteDeclaredBounds(t.typeParams, t);
+    if (typeof g === 'string' || g.kind !== 'signature') return undefined;
+    if (g.typeParams !== undefined && g.typeParams.length > 0) return undefined;
+    return hasFreeTypeVariables(g) ? undefined : g;
   }
 
   /**
@@ -13061,7 +13274,7 @@ export class BaseCompiler {
   private static userFunctionIsGeneric(
     engine: ComputeEngine,
     h: string,
-    literal: Expression
+    literal: Expression | undefined
   ): boolean {
     const def = engine.lookupDefinition(h);
     if (def !== undefined) {
@@ -13069,7 +13282,11 @@ export class BaseCompiler {
         if (def.operator.signature?.isPolymorphic) return true;
       } else if ('value' in def && def.value?.type?.isPolymorphic) return true;
     }
-    const own = literal.type?.type;
+    // A multi-clause function has no single literal (`userFunctionLiteral`
+    // returns `undefined` for it): the definition lookup above is then the
+    // only source of an answer, and a definition that does not settle it
+    // means "not provably generic" rather than a literal to fall back on.
+    const own = literal?.type?.type;
     return own !== undefined && isPolymorphicType(own);
   }
 
@@ -13250,16 +13467,35 @@ export class BaseCompiler {
     if (literal === undefined)
       return BaseCompiler.tryEmitMultiClauseFunction(engine, h, target);
 
-    // A GENERIC user function declines whole-fn (G3, generic-function-
-    // literals design §2.7): its parameters are open type variables, so the
-    // emitted code can neither coerce nor broadcast a call — a lifted call
-    // (`f([1,2,3])` under `(T) -> T where T: number`) would run the scalar
-    // body on the array and silently compute a wrong value. The declared
-    // signature is authoritative when there is one (an E3 install stores a
-    // plain literal whose own arrow is ground); the literal's own polytype
-    // covers the bare-assign route.
-    if (BaseCompiler.userFunctionIsGeneric(engine, h, literal))
-      return undefined;
+    // A GENERIC user function is emitted as its BOUND reading, and declines
+    // whole-fn when it has none (G3, generic-function-literals design §2.7).
+    //
+    // The decline exists because a polytype's parameters are open type
+    // variables: the emitted code could neither coerce nor broadcast a call,
+    // so a lifted call (`f([1,2,3])` under `(T) -> T where T: number`) ran the
+    // scalar body on the array and silently computed a wrong value. Reading
+    // each variable at its declared bound closes that hole for a BOUNDED
+    // generic: the function is emitted once as the ground `(number) ->
+    // number` it is bounded by, and its call sites get the same coercion and
+    // broadcast wraps a ground signature earns, so `f([1,2,3])` broadcasts to
+    // `[2,4,6]` exactly as the interpreter does. See
+    // `userFunctionSignature` for why the bound is a sound reading.
+    //
+    // Two conditions gate it. The bound reading must be GROUND — an unbounded
+    // `where T` names no type to compile against — and the target must be
+    // JAVASCRIPT: the coercion and the `_SYS.bcastFn` broadcast the emitted
+    // call boundary relies on are both JavaScript conventions, and a target
+    // with its own definition lowering (the shader targets) synthesizes a
+    // static signature this reading was never validated against. Every other
+    // target keeps the whole-function decline and its sound interpreted
+    // fallback. The declared signature is authoritative when there is one (an
+    // E3 install stores a plain literal whose own arrow is ground); the
+    // literal's own polytype covers the bare-assign route.
+    if (BaseCompiler.userFunctionIsGeneric(engine, h, literal)) {
+      if (target.language !== 'javascript') return undefined;
+      if (BaseCompiler.userFunctionSignature(engine, h) === undefined)
+        return undefined;
+    }
 
     // The generated code bakes this user function's current definition: record
     // it in the capture set (see `CompileTarget.symbolDeps`). Symbols its body
@@ -14029,15 +14265,15 @@ export class BaseCompiler {
    * anything), or `undefined` when the type has **no faithful JS test** —
    * the §8 whole-function decline. Guard kinds mirror the runtime admission
    * (`typeAcceptsValue`/`admissionOf`) on the target's value model:
-   * value types → `===` (faithful for the machine numbers, strings and
-   * booleans compiled code traffics in; the `NaN` value type admits exactly
-   * NaN, so it tests `Number.isNaN`); numeric ranges → base guard
+   * value types → `===` (faithful for the FINITE machine numbers, strings
+   * and booleans compiled code traffics in); numeric ranges → base guard
    * plus inclusive bound checks (a NaN argument fails `>=`, as it should);
    * primitives → `typeof`/`Number.isInteger`/`Number.isFinite` where JS can
    * express them. Every bare numeric name denotes a FINITE value, so its
    * guard rejects `Infinity` and `NaN` at run time exactly as the
    * interpreter's signature check does. The `non_finite_number`, `infinity`
-   * and `nan` tiers have no faithful JS test and therefore decline; see the
+   * and `nan` primitives, and the NON-FINITE numeric value types `NaN`,
+   * `oo` and `-oo`, have no faithful JS test and therefore decline; see the
    * comment on those cases below.
    * The JS calling convention represents a complex value as a `{re, im}`
    * object and a real one as a plain number, and BOTH inhabit `complex` (and
@@ -14070,37 +14306,52 @@ export class BaseCompiler {
         // `nan` have NO faithful JS test, so a clause set that uses any of
         // the three declines as a whole and runs interpreted.
         //
-        // The reason is a representation collision, and `~oo` reaches
-        // compiled code as two DIFFERENT JS values depending on where it
-        // comes from:
+        // The reason is a representation collision. Compiled JavaScript has
+        // no value for the unsigned pole `~oo`, so it lowers `~oo` to the
+        // IEEE `Infinity`, which keeps the magnitude and drops the direction
+        // it cannot express. That holds on every route — an embedded `~oo`
+        // literal, a constant-folded pole (`Gamma(-2)`), a pole computed at
+        // run time (`Gamma(x)` at `x = -2`, `1 / x` at `x = 0`), and a `~oo`
+        // handed in as an ARGUMENT, which the entry check projects to
+        // `Infinity` (`isUnsignedPole` in javascript-target.ts).
         //
-        //  - PRODUCED by compiled code, `~oo` is the JS value `Infinity`.
-        //    That holds on every internal route — an embedded `~oo` literal,
-        //    a constant-folded pole (`Gamma(-2)`), a pole computed at run
-        //    time (`Gamma(x)` at `x = -2`, `1 / x` at `x = 0`), and
-        //    arithmetic over one — because the pole encoding keeps the
-        //    magnitude and drops the direction it cannot express.
-        //  - Handed in as an ARGUMENT across the interpreter→JS boundary,
-        //    `~oo` has no JS number to become: its `valueOf()` is the string
-        //    `~oo`, which coerces to NaN.
+        // The collision that no guard can undo is the one float ARITHMETIC
+        // creates downstream of that lowering: compiled `1 / x - 1 / x` at
+        // `x = 0` is `Infinity - Infinity`, that is NaN, where the
+        // interpreter's answer for the same expression is `~oo`. So a pole
+        // can change its non-finite CLASS between the two engines before any
+        // guard sees it, and the guard is then asked about two different
+        // values.
         //
         // The interpreter meanwhile types `~oo` as `infinity`, which is
         // disjoint there from both `nan` and `non_finite_number`. So none of
-        // the three tiers has a JS test that agrees with the interpreter on
-        // both routes:
+        // the three tiers has a JS test that agrees with the interpreter:
         //
-        //  - `Number.isNaN(a)` accepts a `~oo` ARGUMENT that the interpreter
-        //    refuses from a `nan` parameter, and an `infinity` test over JS
-        //    numbers refuses that same argument where the interpreter accepts
-        //    it.
         //  - "a number that is neither finite nor NaN" — the only candidate
-        //    test for `non_finite_number` — accepts a `~oo` that compiled code
-        //    PRODUCED, because that value is the JS `Infinity`. Measured on
-        //    the clause set `g(a: non_finite_number) = 1; g(x: number) = 0`:
-        //    with such a guard in place, compiled `g(1 / w)` at `w = 0`
-        //    answered 1 where the interpreter answers 0, since the
-        //    interpreter's `1 / 0` is `~oo` and types `infinity`, which is not
-        //    below `non_finite_number`.
+        //    test for `non_finite_number` — accepts a `~oo` that compiled
+        //    code produced, because that value is the JS `Infinity`, while
+        //    the SIGNED pair excludes `~oo`. Measured on the clause set
+        //    `g(a: non_finite_number) = 1; g(x: number) = 0`: with such a
+        //    guard in place, compiled `g(1 / w)` at `w = 0` answered 1 where
+        //    the interpreter answers 0, since the interpreter's `1 / 0` is
+        //    `~oo`, which is not below `non_finite_number`.
+        //  - `Number.isNaN(a)` accepts the NaN that compiled arithmetic over
+        //    a produced `~oo` yields. Measured on
+        //    `g(a: nan) = 1; g(x: number) = 0`: compiled `g(1 / w - 1 / w)`
+        //    at `w = 0` answered 1 where the interpreter answers 0, the
+        //    interpreter's `~oo - ~oo` being `~oo` rather than NaN.
+        //  - "a number that is neither finite nor NaN" is also the only
+        //    candidate test for `infinity`, and it FAILS on the same
+        //    expression from the other side. Measured on
+        //    `g(a: infinity) = 1; g(x: number) = 0`: compiled
+        //    `g(1 / w - 1 / w)` at `w = 0` answered 0 where the interpreter
+        //    answers 1, because `~oo` IS an `infinity` there while the
+        //    compiled NaN is not. Every OTHER route agrees for this tier —
+        //    a produced `~oo`, a produced `-(1 / w)`, a folded `Gamma(-2)`,
+        //    an embedded `~oo` literal, a projected `~oo` argument, and a
+        //    boundary `Infinity`/`-Infinity`/`NaN`/finite argument — so the
+        //    degradation route is the single row that keeps this tier
+        //    declined.
         //
         // Every direction above was measured on the clause set
         // `g(a: T) = 1; g(x: number) = 0`. The guard decides whatever value
@@ -14131,11 +14382,22 @@ export class BaseCompiler {
       case 'value': {
         const v = t.value;
         if (typeof v === 'number') {
-          // The `NaN` value type admits exactly NaN (amended D1, "match
-          // only themselves") — `===` is the one comparison that would NOT
-          // be faithful for it.
-          if (Number.isNaN(v)) return `Number.isNaN(${a})`;
-          return `${a} === ${v === Infinity ? 'Infinity' : v === -Infinity ? '-Infinity' : String(v)}`;
+          // A NON-FINITE numeric value type — `NaN`, `oo` or `-oo` — declines
+          // the whole function, for the same representation collision that
+          // makes the `nan`, `infinity` and `non_finite_number` PRIMITIVES
+          // decline just above: compiled JavaScript lowers the interpreter's
+          // unsigned pole `~oo` to the IEEE `Infinity`, so a guard over JS
+          // numbers cannot tell a `~oo` from a signed infinity, nor from the
+          // NaN that arithmetic over a produced `~oo` yields. Measured on
+          // the clause set `g(a: oo) = 1; g(b: -oo) = 2; g(c: NaN) = 3;
+          // g(x: number) = 0`, with the guards emitted, all three value
+          // clauses answered where the interpreter sends the call to the
+          // `number` clause instead: compiled `g(1 / w)` at `w = 0` answered
+          // 1, `g(-(1 / w))` answered 2, and `g(1 / w - 1 / w)` answered 3,
+          // while the interpreter answers 0 for each, its `1 / 0` being `~oo`
+          // and `~oo` inhabiting none of the three value types.
+          if (!Number.isFinite(v)) return undefined;
+          return `${a} === ${String(v)}`;
         }
         if (typeof v === 'string') return `${a} === ${JSON.stringify(v)}`;
         if (typeof v === 'boolean') return `${a} === ${v}`;

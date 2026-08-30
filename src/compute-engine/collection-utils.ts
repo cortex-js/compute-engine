@@ -333,6 +333,22 @@ export function isFiniteBroadcastParticipant(x: Expression): boolean {
 }
 
 /**
+ * A materialized TUPLE whose components an eager, component-wise broadcast
+ * can zip over right now.
+ *
+ * The companion of {@link isFiniteBroadcastParticipant}, which excludes
+ * tuples because at most broadcast sites a tuple is ONE atomic value (a point
+ * or a vector), spliced whole into every cell. The component-wise application
+ * of a scalar function is the one place where a tuple supplies the cells
+ * instead: `Sin((1, 2))` is `(sin 1, sin 2)`, the same rule the arithmetic
+ * operators already follow for `(1, 2) · 3` and the same one the compiled
+ * kernels apply. Only that broadcast arm consults this predicate.
+ */
+export function isTupleBroadcastParticipant(x: Expression): boolean {
+  return isTuple(x) && isFiniteIndexedCollection(x);
+}
+
+/**
  * A broadcast-eligible operand whose length is NOT a known-finite number: an
  * infinite collection (`Cycle`, whose `count` is `Infinity`), or one whose
  * count is statically unknown (`Filter`, or a symbolic-length `Range` whose
@@ -2132,8 +2148,14 @@ export function repeat(
  * ATOMIC under broadcast, so `String("x=", [1, 2])` must lift `"x="` into both
  * cells rather than pair `"x"` with `1` and `"="` with `2`. Same rule as
  * `isBroadcastableCollection`, applied at the zip.
+ *
+ * Wider than `isBroadcastableCollection` in one respect: it accepts a
+ * collection that is not INDEXED, such as a set, which that predicate rejects.
+ * A broadcast arm that decides which operands supply cells and then hands the
+ * operands to `zip` must therefore gate on THIS predicate, or an operand it
+ * meant to lift whole silently supplies cells instead.
  */
-function zipParticipates(x: Expression): boolean {
+export function zipParticipates(x: Expression): boolean {
   return x.isCollection && !isTextAtom(x);
 }
 

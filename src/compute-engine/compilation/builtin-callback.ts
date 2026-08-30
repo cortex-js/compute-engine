@@ -110,6 +110,11 @@ export function builtinCallbackArity(
  * as VARIABLES when they appear un-applied among numeric operands — the `D`
  * of `\int D x^2 dx` is a coefficient the caller supplies at run time, not a
  * broken callback. Refusing them would contradict that convention.
+ *
+ * That exemption is about the VALUE position only. A callback OPERAND is
+ * applied, so the convention does not hold there and the refusal is made
+ * position-aware at the callback splice instead
+ * (`BaseCompiler.assertBuiltinCallbackUsable`).
  */
 export function isRefusableBuiltinCallback(
   engine: ComputeEngine,
