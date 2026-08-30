@@ -3029,11 +3029,17 @@ function makeLambda(
     // redefined impure since (`effectsOf` is memoized, so the read is
     // cheap). The key carries the numeric-approximation flag — the exact
     // and the `.N()` answers differ — and spells `-0` apart from `0`, which
-    // `JSON.stringify` would collapse.
+    // `JSON.stringify` would collapse. It also carries whether the
+    // assumptions are hidden right now: a body that reads a symbol whose
+    // value an `assume(x = …)` put in force answers differently inside a
+    // fact-blind bracket, and the two answers must not be confused
+    // (`docs/plans/2026-08-30-assumptions-memo-inventory.md`).
     const memoKey =
       evaluatedArgs.every((a) => isNumber(a)) &&
       isPureComputedEffects(effectsOf(body))
-        ? `${options?.numericApproximation ? 'N' : 'E'}|${evaluatedArgs
+        ? `${options?.numericApproximation ? 'N' : 'E'}${
+            ce._factsHidden() ? 'H' : ''
+          }|${evaluatedArgs
             .map((a) => (Object.is(a.re, -0) ? '-0' : JSON.stringify(a.json)))
             .join('|')}`
         : undefined;

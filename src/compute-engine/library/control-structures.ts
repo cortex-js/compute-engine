@@ -1652,12 +1652,17 @@ function canonicalLoopLike(
     // only use is `for c in cs` types as a collection (and the lambda
     // auto-broadcast then binds a collection argument whole instead of mapping
     // over it).
-    if (
-      isSymbol(collCanonical) &&
-      collCanonical.valueDefinition?.inferredType &&
-      collCanonical.type.type === 'unknown'
-    )
-      collCanonical._infer('collection', 'narrow');
+    // The guard reads an EFFECTIVE type, so it runs fact-blind together with
+    // the write it gates: an assumption that gives the operand a type would
+    // otherwise decide whether this contract-bearing narrowing happens at all.
+    ce._withoutFacts(() => {
+      if (
+        isSymbol(collCanonical) &&
+        collCanonical.valueDefinition?.inferredType &&
+        collCanonical.type.type === 'unknown'
+      )
+        collCanonical._infer(() => 'collection', 'narrow');
+    });
     // …and nothing typed the INDEX, either (the same bypass): the binder
     // hook declares each index `unknown`, and the body's arithmetic use
     // then widened it to `number` — so `for i in 1..3` typed `10 * i` as
@@ -1677,13 +1682,18 @@ function canonicalLoopLike(
     const idxCanonical = isFunction(indexExpr, 'Tuple')
       ? indexExpr
       : indexExpr.canonical;
-    if (isSymbol(idxCanonical)) {
-      const elt = collectionElementType(
-        resolveTypeForCompilation(collCanonical.type.type)
-      );
-      if (elt !== undefined && elt !== 'any' && elt !== 'unknown')
-        idxCanonical._infer(elt, 'narrow');
-    }
+    // The element type is read fact-blind: the collection's EFFECTIVE type can
+    // be narrowed by an assumption, and the index binding this write creates is
+    // a contract that must not carry a fact the next statement can retract.
+    ce._withoutFacts(() => {
+      if (isSymbol(idxCanonical)) {
+        const elt = collectionElementType(
+          resolveTypeForCompilation(collCanonical.type.type)
+        );
+        if (elt !== undefined && elt !== 'any' && elt !== 'unknown')
+          idxCanonical._infer(() => elt, 'narrow');
+      }
+    });
     return ce._fn('Element', [idxCanonical, collCanonical]);
   });
   const canonicalBody: Expression = canonicalStatement(ce, body);

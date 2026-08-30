@@ -320,7 +320,11 @@ function measurementFromParts(
 ): Expression {
   if (Number.isNaN(re.estimate)) return ce.NaN;
   if (im === undefined)
-    return ce.expr(['Measurement', ce.number(re.estimate), ce.number(re.error)]);
+    return ce.expr([
+      'Measurement',
+      ce.number(re.estimate),
+      ce.number(re.error),
+    ]);
   if (Number.isNaN(im.estimate)) return ce.NaN;
   return ce.expr([
     'Measurement',
@@ -1208,14 +1212,20 @@ volumes
         // ODE, parsed as an invisible product while `y` was still unknown —
         // canonicalize to a function application, exactly as an
         // operator-position use (`["y", "x"]`) would have inferred it.
-        if (isSymbol(fn)) fn._infer('function');
+        if (isSymbol(fn)) fn._infer(() => 'function');
         const orders = ops.slice(1).map((o) => {
           const order = o.canonical;
           // A symbolic order — `f^{(n)}`, documented as `Derivative(f, n)` —
           // is a free variable used as a number: infer it, as the function
           // symbol above is inferred, instead of rejecting its still-`unknown`
           // type with `incompatible-type`.
-          if (isSymbol(order) && order.type.isUnknown) order._infer('number');
+          // Fact-blind: the guard reads the order's EFFECTIVE type, and an
+          // assumption that gives it a tier must not decide whether this
+          // narrowing — a contract that outlives the assumption — is stored.
+          engine._withoutFacts(() => {
+            if (isSymbol(order) && order.type.isUnknown)
+              order._infer(() => 'number');
+          });
           return checkType(engine, order, 'number');
         });
         return engine._fn('Derivative', [fn, ...orders]);
@@ -1870,7 +1880,10 @@ volumes
           const compiled = implicitCompile(ce, fnExpr);
           const raw: (x: number) => unknown = compiled?.success
             ? (compiled.run as (x: number) => unknown)
-            : ((app) => (x: number) => app([ce.number(x)]))(applicable(fnExpr));
+            : (
+                (app) => (x: number) =>
+                  app([ce.number(x)])
+              )(applicable(fnExpr));
           const integrand = numericIntegrandParts(raw);
 
           // ONE sub-stream for both passes: the imaginary pass continues where
@@ -1884,7 +1897,6 @@ volumes
           const integrateReal = (
             jsf: (x: number) => number
           ): { estimate: number; error: number } => {
-
             // Semi-infinite interval: a conditionally-convergent oscillatory
             // integrand (∫₀^∞ sin x/x, ∫₀^∞ sin(x²)) defeats Monte-Carlo
             // importance sampling. Try the dedicated lobe-integration +
@@ -2202,7 +2214,10 @@ volumes
         // `numericIntegrandParts` and the `Integrate` numeric path).
         const raw: (x: number) => unknown = compiled?.success
           ? (compiled.run as (x: number) => unknown)
-          : ((app) => (x: number) => app([engine.number(x)]))(applicable(f));
+          : (
+              (app) => (x: number) =>
+                app([engine.number(x)])
+            )(applicable(f));
         const integrand = numericIntegrandParts(raw);
         // One stream for both passes (see the `Integrate` numeric path).
         const draw = engine._substream(mixTags(f.hash, a.hash, b.hash));

@@ -64,6 +64,15 @@ interface SpineMemo {
   /** `ce._semanticVersion` at record time (only consulted when `typeExprs`
    * is non-empty). */
   generation: number;
+  /** Whether the assumptions were hidden (`ce._factsHidden()`) when
+   * the walk ran. An admission on a parameter ANNOTATION reads a source's
+   * EFFECTIVE type, which an assumption can narrow, so an outcome recorded
+   * inside a fact-blind bracket must not be served to a read that can see the
+   * facts, or the other way round
+   * (`docs/plans/2026-08-30-assumptions-memo-inventory.md`). Separate from
+   * `generation` because opening or closing such a bracket moves no version
+   * axis. */
+  factsHidden: boolean;
 }
 
 /**
@@ -107,7 +116,9 @@ function typeKeyOf(typeExprs: ReadonlyArray<Expression>): string {
  */
 export function lowerMapSpine(expr: Expression): LoweredSpine | undefined {
   const ce = expr.engine;
-  const memo = spineMemo.get(expr);
+  const factsHidden = ce._factsHidden();
+  const recorded = spineMemo.get(expr);
+  const memo = recorded?.factsHidden === factsHidden ? recorded : undefined;
   if (memo !== undefined) {
     if (memo.typeExprs.length === 0) return memo.spine ?? undefined;
     if (memo.generation === ce._semanticVersion) return memo.spine ?? undefined;
@@ -133,6 +144,7 @@ export function lowerMapSpine(expr: Expression): LoweredSpine | undefined {
       typeExprs,
       typeKey: typeKeyOf(typeExprs),
       generation: ce._semanticVersion,
+      factsHidden,
     });
   };
 

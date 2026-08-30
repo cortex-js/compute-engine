@@ -578,6 +578,17 @@ export function mapAutoCompileRunner(
   const ce = expr.engine;
   if (ce.jit === 'off') return undefined;
 
+  // A drain made while the assumptions are hidden (`ce._withoutFacts`, the
+  // bracket every type-write routine runs in) stays on the interpreter. The
+  // compiled closure BAKES symbol values, and a value an `assume(x = …)` put
+  // in force is one of them, so a closure compiled on one side of the bracket
+  // would answer for the other; the cache holds one closure per instance and
+  // has no room for both. Declining here neither reads nor writes it, which
+  // is the fail-closed direction: an element evaluated by the interpreter is
+  // always correct, only slower, and a bracketed write does not drain
+  // collections in bulk (`docs/plans/2026-08-30-assumptions-memo-inventory.md`).
+  if (ce._factsHidden()) return undefined;
+
   // ── Tier selection ───────────────────────────────────────────────────
   // A marked (`Block(N(…))`) lambda takes the float tier, which stays gated
   // on machine precision: at bignum precision the interpreter produces digits

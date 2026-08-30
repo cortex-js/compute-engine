@@ -921,6 +921,53 @@ export interface IComputeEngine {
    * @internal */
   _factSuppressionDepth: number;
 
+  /** Run `thunk` with the assumptions hidden — the bracket every routine that
+   * WRITES a type, a signature or a definition puts around its whole
+   * derive-and-write phase, so that what it stores is a function of the
+   * declarations and the stored values alone and stays true when a fact is
+   * retracted.
+   *
+   * Re-entrant (the depth is a counter) and restored on the way out, an
+   * exception included. SYNCHRONOUS ONLY: a thunk that returns a promise
+   * throws, because its work would resume after the bracket closed. `assume()`
+   * and `forget()` throw inside the bracket — mutating the fact store from a
+   * computation that cannot see it is a program error.
+   * @internal */
+  _withoutFacts<T>(thunk: () => T): T;
+
+  /** Is a fact-blind bracket hiding anything RIGHT NOW — that is, is
+   * `_factSuppressionDepth` above zero AND does the current context actually
+   * hold an assumption or an assumed value?
+   *
+   * The second half matters: with an empty store the accessors answer the same
+   * on both sides of a bracket, so the bracket is observationally a no-op and
+   * must not split a memo into two cells. Splitting it anyway costs an
+   * assumption-free engine a second derivation of every node a write reads —
+   * and worse, it leaves the LIVE cell of such a node cold, which takes away
+   * the previous value a self-referential derivation terminates on.
+   *
+   * Every memo that carries the suppression state — the composite generation
+   * below, and the `factsHidden` fields listed in
+   * `docs/plans/2026-08-30-assumptions-memo-inventory.md` — asks this rather
+   * than reading the depth, so they all agree on when the two sides differ.
+   * A fact MUTATION is refused on the raw depth instead: `assume()` inside a
+   * bracket is a program error whether or not anything is assumed yet.
+   * @internal */
+  _factsHidden(): boolean;
+
+  /** The composite key every generation-keyed memo uses: the `any`
+   * invalidation axis in the high bits, and whether the assumptions are
+   * hidden right now in the low bit — `_anyVersion * 2 + (_factsHidden() ? 1 : 0)`.
+   *
+   * A computation that runs while the facts are hidden derives a DIFFERENT
+   * answer from the same node, so its result must not be served to a read
+   * that can see the facts, and the other way round. The suppression state
+   * cannot be carried by an axis bump instead: a bump inside a scope makes
+   * the pop of that scope permanently dirty. Mixing the state into the memo
+   * key leaves every axis where it is.
+   * @internal */
+  _cacheGeneration(): number;
+
   /** Allocate the next assumption-record id. Each `assume()` insertion takes
    * one, so two assertions of the same normalized fact stay distinguishable.
    * @internal */

@@ -640,17 +640,25 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       //   which applies them SCOPED (P1-6: a refinement in a pushed scope
       //   must not leak).
       const canonicalValue = value.canonical;
-      if (
-        isSymbol(canonicalValue) &&
-        ce._isShadowedParameter(canonicalValue.symbol) &&
-        canonicalValue.valueDefinition?.inferredType &&
-        canonicalValue.type.type === 'unknown' &&
-        !canonicalCollection.type.matches('set<any>')
-      ) {
-        const elt = collectionElementType(canonicalCollection.type.type);
-        if (elt !== undefined && elt !== 'any' && elt !== 'unknown')
-          canonicalValue._infer(elt, 'narrow');
-      }
+      // The whole decision runs fact-blind, not only the `_infer` write it
+      // ends with. The guard reads the collection's EFFECTIVE type to pick the
+      // element type, so an assumption that narrows the collection symbol
+      // would otherwise choose the type this write then stores on the
+      // parameter. Inside the bracket the assumption store reads as empty, so
+      // the element type comes from the declaration channel alone.
+      ce._withoutFacts(() => {
+        if (
+          isSymbol(canonicalValue) &&
+          ce._isShadowedParameter(canonicalValue.symbol) &&
+          canonicalValue.valueDefinition?.inferredType &&
+          canonicalValue.type.type === 'unknown' &&
+          !canonicalCollection.type.matches('set<any>')
+        ) {
+          const elt = collectionElementType(canonicalCollection.type.type);
+          if (elt !== undefined && elt !== 'any' && elt !== 'unknown')
+            canonicalValue._infer(() => elt, 'narrow');
+        }
+      });
 
       // Validate optional third argument
       if (condition && sym(condition) !== 'Nothing') {

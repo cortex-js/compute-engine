@@ -261,6 +261,16 @@ export function staticDiagnostics(
   // host `pushScope(undefined, 'epsil:static-check')` cannot forge the
   // surrogate and smuggle a nested `DeclareType` past the top-level rule).
   ce._staticTypeCheckDepth += 1;
+  // The pre-pass is one long WRITE: it applies the type effect of every
+  // top-level statement onto real definitions (`_infer`,
+  // `_setElementRefinement`, the assignment-evidence map). None of that may
+  // record what an assumption in force happens to prove, so the whole pass
+  // runs with the assumptions hidden — the same bracket every other write
+  // routine uses (`docs/plans/2026-08-29-assumptions-as-facts-type.md`
+  // §2.4). The depth is raised on the line just before the `try` whose
+  // `finally` lowers it, so no exception thrown by the setup between here
+  // and the `try` can leave it raised: a leaked depth would silently hide
+  // the assumptions from every later read on this engine.
   ce.pushScope(undefined, 'epsil:static-check');
   // Assignment EVIDENCE for this pass (see `applyAssignmentTypeEffect`):
   // maps a symbol's value-definition record to the RAW type of the last
@@ -270,6 +280,7 @@ export function staticDiagnostics(
   // evidence intact, mirroring `_epsilBatchId`.
   const enclosingEvidence = ce._staticAssignmentEvidence;
   ce._staticAssignmentEvidence = new Map();
+  ce._factSuppressionDepth += 1;
   try {
     // One INFERENCE ROLLBACK FRAME spans the whole pass (phase 2b of
     // `docs/TYPE-SYSTEM.md`). It journals — and
@@ -301,6 +312,7 @@ export function staticDiagnostics(
   } finally {
     ce._staticAssignmentEvidence = enclosingEvidence;
     ce.popScope();
+    ce._factSuppressionDepth -= 1;
     ce._staticTypeCheckDepth -= 1;
     rollbackTypes();
     rollbackProtocols();
@@ -464,7 +476,7 @@ function applyAssignmentTypeEffect(
         const leafSym = ce.box(leaf.symbol);
         const leafDef = leafSym.valueDefinition;
         if (leafDef === undefined) return;
-        leafSym._infer(widenAssignedType(ce, leafType), 'replace');
+        leafSym._infer(() => widenAssignedType(ce, leafType), 'replace');
         evidence.set(leafDef, leafType);
       });
     }
@@ -491,7 +503,7 @@ function applyAssignmentTypeEffect(
     );
     if (refined !== def.type.type) def._setElementRefinement(ce.type(refined));
   } else {
-    sym._infer(inferTypeFromValue(ce, rhs).type, 'replace');
+    sym._infer(() => inferTypeFromValue(ce, rhs).type, 'replace');
   }
   // The INFERRED type above stays deliberately widened ("more likely, not
   // broadest"); only the EVIDENCE carries a literal right-hand side's exact
@@ -1206,7 +1218,7 @@ function registerPinnedSignature(
     // statement's right-hand side is.
     const already = name === null ? undefined : pinned.get(name);
     if (already !== undefined) {
-      ce.box(name!)._infer(already, 'narrow');
+      ce.box(name!)._infer(() => already, 'narrow');
       return;
     }
     const rhs = boxed.ops[1];
@@ -1243,7 +1255,12 @@ function registerPinnedSignature(
     )
       return;
   }
-  if (ce.box(name)._infer(type, 'narrow')) pinned.set(name, type);
+  // Bound to a `const` so the thunk keeps the narrowing the guards above
+  // established (`type` is a reassignable local, which a closure widens back
+  // to `Type | undefined`).
+  const pinnedType = type;
+  if (ce.box(name)._infer(() => pinnedType, 'narrow'))
+    pinned.set(name, pinnedType);
 }
 
 /** Is `t` a function signature declaring at least one parameter NAME — the

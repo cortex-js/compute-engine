@@ -1052,19 +1052,18 @@ export function getFactIndex(ce: ComputeEngine): FactIndex {
   //
   // A memo filled by a producer read inside this window — `BoxedFunction`'s
   // `_type`/`_sgn`/`_structural` through `cachedValue`, the `_typeGeneration`
-  // fast path, `BoxedDictionary._type` — is keyed on `_anyVersion` alone, so
-  // it can serve its fact-free answer to a LIVE read of the same generation.
-  // Phase 3 keys those memos on the composite generation that carries the
-  // suppression bit (`docs/plans/2026-08-29-assumptions-as-facts-type.md`
-  // §2.4); until then the exposure stands.
+  // fast path, `BoxedDictionary._type` — keys on `ce._cacheGeneration()`,
+  // which carries the suppression state in its low bit. So the fact-free
+  // answer this build produces is stored apart from the live one and is never
+  // served to a read made outside the window. The complete list of the memos
+  // that observe the state, and of the ones that provably cannot reach a
+  // fact, is `docs/plans/2026-08-30-assumptions-memo-inventory.md`.
   const shielded = _shieldedDefinitions;
   _shieldedDefinitions = undefined;
-  ce._factSuppressionDepth += 1;
   let index: FactIndex;
   try {
-    index = buildFactIndex(assumptions);
+    index = ce._withoutFacts(() => buildFactIndex(assumptions));
   } finally {
-    ce._factSuppressionDepth -= 1;
     _shieldedDefinitions = shielded;
   }
   factIndexCache.set(assumptions, {

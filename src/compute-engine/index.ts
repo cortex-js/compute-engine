@@ -1044,6 +1044,60 @@ export class ComputeEngine implements IComputeEngine {
     this._configurationLifecycle.factSuppressionDepth = value;
   }
 
+  /** See `IComputeEngine._withoutFacts()`.
+   * @internal */
+  _withoutFacts<T>(thunk: () => T): T {
+    // An `async` thunk is refused BEFORE it is invoked: calling it would
+    // start its body immediately, and every continuation after its first
+    // `await` would run once the bracket below has closed — with the
+    // assumptions visible again, the opposite of what the bracket promises.
+    if (thunk.constructor.name === 'AsyncFunction')
+      throw new Error(
+        'A fact-blind bracket must be synchronous: an async thunk is refused before it runs, because everything after its first await would see the assumptions again'
+      );
+    const lifecycle = this._configurationLifecycle;
+    lifecycle.factSuppressionDepth += 1;
+    let result: T;
+    try {
+      result = thunk();
+    } finally {
+      lifecycle.factSuppressionDepth -= 1;
+    }
+    // A plain (non-async) thunk can still hand back a promise, and by now
+    // its work has already escaped the bracket. Refuse the result rather
+    // than hand back a value derived under conditions the caller did not
+    // ask for — after detaching the orphaned promise's rejection, so the
+    // refusal does not also surface an unhandled-rejection warning later.
+    if (typeof (result as { then?: unknown } | undefined)?.then === 'function') {
+      void Promise.resolve(result as PromiseLike<unknown>).then(
+        undefined,
+        () => {}
+      );
+      throw new Error(
+        'A fact-blind bracket must be synchronous: its thunk returned a promise, whose work would run after the bracket closed and would see the assumptions again'
+      );
+    }
+    return result;
+  }
+
+  /** See `IComputeEngine._factsHidden()`.
+   * @internal */
+  _factsHidden(): boolean {
+    if (this._factSuppressionDepth === 0) return false;
+    const context = this.context;
+    if (context === undefined) return false;
+    return (
+      (context.assumptions?.size ?? 0) !== 0 ||
+      (context.assumedValues?.size ?? 0) !== 0
+    );
+  }
+
+  /** See `IComputeEngine._cacheGeneration()`.
+   * @internal */
+  _cacheGeneration(): number {
+    return this._anyVersion * 2 + (this._factsHidden() ? 1 : 0);
+  }
+
   /** The source of the `id` of an assumption record. Monotone for the
    * lifetime of the engine, so two assertions of the same normalized fact
    * never share an id.

@@ -16,9 +16,7 @@
   refutes a fact in force throws, also for an already-valued symbol;
   re-asserting an inherited fact against a re-declared symbol answers
   `ok` rather than `tautology`; `declare s string; assume(Re(s) > 1)` is
-  a `contradiction`. Until the write-side bracketing lands (phase 3 of
-  `docs/plans/2026-08-29-assumptions-as-facts-type.md`), a stored
-  signature derived under an assumption still captures the refinement.
+  a `contradiction`.
   API: `TypeProvenanceEntry.previousType` and the `'assumed'` provenance
   kind are removed (also from `InferenceWriteEvent.kind`);
   `assumptionBindings` and `ContextAssumptions.bindings` are removed in
@@ -27,6 +25,42 @@
   booleans; `ExpressionMapInterface` gains `size` and `version`;
   `BoxedValueDefinition` gains `declaredType`, `storedValue` and
   `disposed`.
+
+- **A stored type or signature is now derived with the assumptions
+  hidden.** A definition's type is a contract, so every routine that
+  writes one — an assignment, a declaration that carries a value, a
+  lambda's signature derivation, each use-driven inference — runs its
+  whole derive-and-write phase in a window where the assumption store and
+  the assumed-value overlay read as empty. What it stores is therefore a
+  function of the declarations and the stored values alone, and it stays
+  true after a `forget()`. Behavior changes, all of them a stale answer
+  that is now correct at both ends:
+
+  - `declare p real; assume(p > 3); f := x ↦ (p > 2)` stores
+    `(unknown) -> boolean`, not `(unknown) -> true`. The proof is still
+    visible in every direct read: `(p > 2).type` is `true`. A DECLARED
+    range is unchanged — `declare p real<3<..>` still gives
+    `(unknown) -> true`.
+  - `declare q number; assume(q > 0); r := t ↦ √q` stores
+    `(unknown) -> number`, not `(unknown) -> real`. The sign channel is
+    hidden at a write like the type channel.
+  - `assume(q > 3); d := {a: q}` stores `record{a: real}`;
+    `declare L list; assume(r > 3); L := [r]` stores `list<real>`;
+    `declare M {type: list, value: [q]}` stores `list<real>`; and
+    `declare c {value: q, isConstant: true}` stores `real`. Each of these
+    used to keep the assumed range for the lifetime of the engine,
+    including after `forget(q)`.
+  - `assume(q > 3); ce.box({a: q}).type` still answers
+    `record{a: real<3<..>}` while the fact holds, and now answers
+    `record{a: real}` after `forget(q)`. A dictionary literal's type was
+    computed once and returned forever.
+
+  Callers who write a `canonical` or `evaluate` handler should know that
+  `assume()` and `forget()` THROW when they are called from inside such a
+  window: changing the facts while they are hidden is a program error. A
+  handler reached from a write — a generic instantiation, a dispatch
+  read — inherits the hiding, by design, because its answer feeds a
+  stored type.
 
 - **Bare numeric types now contain only finite values.** The types `integer`,
   `rational`, `real`, and `complex` do not contain infinity or `NaN`. The
@@ -160,6 +194,24 @@
   negative infinity. Use `'ceiling'` to round toward positive infinity.
 
 ### Bug Fixes
+
+- **Setting a symbol's type to a signature no longer corrupts the stored
+  signature.** `f.type = '(integer) -> integer'` on a symbol that already
+  had an operator definition stored the raw type node in the signature
+  slot instead of a `BoxedType`. Every later read of `f.type` then
+  returned a bare object: `toString()` gave `[object Object]` and
+  `matches()` threw "is not a function".
+
+- **A use-driven type inference no longer depends on what is assumed.**
+  Several operators read an operand's EFFECTIVE type to decide whether to
+  record a use as type evidence — `Length(x)` narrowing `x` to a
+  collection, a loop index taking the iterated collection's element type,
+  `x ∈ [q]` narrowing a parameter, the scalar numeric context of an
+  arithmetic argument list, `Derivative`'s symbolic order. An assumption
+  in force at boxing time could change what was recorded, and the record
+  outlived the assumption. Those decisions are now made with the
+  assumptions hidden, so the evidence a use contributes is the same
+  whether or not anything is assumed.
 
 - **A `Block`-bound local keeps its declared and assigned type on the
   compilation routes.** `Declare` and `Assign` register their binding at

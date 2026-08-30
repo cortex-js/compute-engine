@@ -397,10 +397,27 @@ function exprHasWildcards(expr: Expression): boolean {
   return false;
 }
 
+/**
+ * Refuse a fact MUTATION made from inside a fact-blind bracket
+ * (`ce._withoutFacts`, the window every type-write routine runs in).
+ *
+ * Such a call reads an empty store and would decide entailment, tautology and
+ * contradiction against facts it cannot see, then commit the result to the
+ * real store. There is no sensible answer, so it is a program error rather
+ * than a silently wrong one.
+ */
+function assertFactsVisible(ce: IComputeEngine, operation: string): void {
+  if (ce._factSuppressionDepth > 0)
+    throw new Error(
+      `"${operation}" cannot run while the assumptions are hidden: a computation whose result is stored must not change what is assumed`
+    );
+}
+
 export function assumeFn(
   ce: IComputeEngine,
   predicate: Expression | string
 ): AssumeResult {
+  assertFactsVisible(ce, 'assume');
   try {
     // Accept string predicates ('x > 0', '$x > 0$', '\\pi > 0') — parsed as
     // LaTeX by the shared `predicateFromArg` helper, consistent with verify()
@@ -485,6 +502,8 @@ export function forget(
   // VALUE of the current scope's binding of that name, whoever wrote it. The
   // no-argument form does not — a user `assign()` value survives it.
   //
+
+  assertFactsVisible(ce, 'forget');
 
   if (symbol === undefined) {
     ce.context.assumptions?.clear();

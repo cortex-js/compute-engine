@@ -301,26 +301,32 @@ export function checkNumericArgs(
       while (padded.length < count) padded.push(ce.error('missing'));
       xs = padded;
     }
-    let inferredType: Type = 'real';
-    // If any of the arguments is a complex or imaginary number,
-    // we'll infer the type as number
-    for (const x of xs)
-      if (couldBeNonRealNumber(x.type.type)) {
-        inferredType = 'number';
-        break;
-      }
-    // Numeric operators are threadable: an operand that could be a collection
-    // at runtime (a `vector<n>`-returning application, `number | list`, a
-    // tuple) is consumed by BROADCAST, so the scalar numeric context must not
-    // be inferred onto it — `x._infer('real')` on a call whose inferred result
-    // signature is already `vector<2>` WIDENS the shared definition to
-    // `real | vector<2>`, and every later use of that function then types as
-    // `number` (Tycho item 121: the compiled Sum then emits scalar `+` over
-    // arrays). The exclusion is wider than admission — see
-    // `excludedFromScalarInference` — and mirrors the guard on the
-    // signature-validation route (`validateSignature`).
-    for (const x of xs)
-      if (!excludedFromScalarInference(x)) x._infer(inferredType);
+    // The scan that CHOOSES the inferred type runs inside the same fact-blind
+    // bracket as the writes it feeds: it reads each operand's effective type,
+    // so an assumption that narrows one operand out of the complex tier would
+    // otherwise flip the type stored on all the others.
+    ce._withoutFacts(() => {
+      let inferredType: Type = 'real';
+      // If any of the arguments is a complex or imaginary number,
+      // we'll infer the type as number
+      for (const x of xs)
+        if (couldBeNonRealNumber(x.type.type)) {
+          inferredType = 'number';
+          break;
+        }
+      // Numeric operators are threadable: an operand that could be a collection
+      // at runtime (a `vector<n>`-returning application, `number | list`, a
+      // tuple) is consumed by BROADCAST, so the scalar numeric context must not
+      // be inferred onto it — `x._infer('real')` on a call whose inferred result
+      // signature is already `vector<2>` WIDENS the shared definition to
+      // `real | vector<2>`, and every later use of that function then types as
+      // `number` (Tycho item 121: the compiled Sum then emits scalar `+` over
+      // arrays). The exclusion is wider than admission — see
+      // `excludedFromScalarInference` — and mirrors the guard on the
+      // signature-validation route (`validateSignature`).
+      for (const x of xs)
+        if (!excludedFromScalarInference(x)) x._infer(() => inferredType);
+    });
     return xs;
   }
 
@@ -486,51 +492,57 @@ export function checkNumericArgs(
     }
   }
 
-  // Only if all arguments are valid, we infer the type of the arguments
+  // Only if all arguments are valid, we infer the type of the arguments.
+  // The whole pass — the scan that chooses the type and the writes that store
+  // it — runs fact-blind, so an assumption narrowing one operand out of the
+  // complex tier cannot decide what is inferred onto the others.
   if (isValid) {
-    let inferredType: Type = 'real';
-    // If any of the arguments is a complex number, we'll infer the type as `number`
-    for (const x of xs)
-      if (couldBeNonRealNumber(x.type.type)) {
-        inferredType = 'number';
-        break;
-      }
-    for (const x of xs)
-      if (isFiniteIndexedCollection(x)) {
-        // `.each()` on a *lazy* collection (e.g. a large `Range`) materializes
-        // every element, so walking it just to run no-op inferences enumerates
-        // the whole collection at parse time (item 16: `\frac{[1...1e8]}{2}`
-        // hung `ce.parse`). Skip the walk for ANY lazy collection: the
-        // materialization cost is O(size) and does NOT depend on free variables,
-        // so a lazy source with a free variable (`Map(x ↦ x+k, Range(1,2e5))`)
-        // must be skipped just like a variable-free `Range` — walking it just to
-        // run element inferences that narrow nothing (`k` stays `unknown`) is
-        // pure overhead. Element validation/inference is deferred to evaluate
-        // time (fail-open), mirroring the admission-branch guard above. Eager
-        // collections (e.g. a literal `List`) already store their elements as
-        // operands, so walking them is cheap regardless of `unknowns`:
-        // `BoxedFunction._infer()` also narrows an inferred *result signature*
-        // (not just free symbols), so a concrete literal list containing an
-        // inferred function call still needs the walk.
-        if (x.isLazyCollection) continue;
-        // An ELEMENT that is itself a collection is consumed by NESTED
-        // broadcast, not as a scalar, so it gets the same exclusion the
-        // top-level operand gets on the branch below. Without it,
-        // `Multiply(2, [L, L])` with `L := [1, 2]` narrowed `L`'s value
-        // definition from `vector<integer^2>` to `real` while
-        // evaluating to the matrix `[[2, 4], [2, 4]]` — an unsound declared
-        // type for a value that is still a list, and one that made a second
-        // broadcast over the same symbol claim `vector<real^2>` for a
-        // `matrix<...^(2x2)>` result.
-        for (const y of x.each())
-          if (!excludedFromScalarInference(y)) y._infer(inferredType);
-      } else if (!excludedFromScalarInference(x)) x._infer(inferredType);
-    // A possibly-collection operand (a `vector<n>`-returning application,
-    // `number | list`, a tuple, a `dictionary<…>`-shaped signature) is not a
-    // scalar: inferring the scalar numeric context onto it would WIDEN a
-    // shared inferred result signature to `real | vector<…>` (Tycho item
-    // 121) — same guard as the signature-validation route above, and wider
-    // than broadcast admission (see `excludedFromScalarInference`).
+    ce._withoutFacts(() => {
+      let inferredType: Type = 'real';
+      // If any of the arguments is a complex number, we'll infer the type as `number`
+      for (const x of xs)
+        if (couldBeNonRealNumber(x.type.type)) {
+          inferredType = 'number';
+          break;
+        }
+      for (const x of xs)
+        if (isFiniteIndexedCollection(x)) {
+          // `.each()` on a *lazy* collection (e.g. a large `Range`) materializes
+          // every element, so walking it just to run no-op inferences enumerates
+          // the whole collection at parse time (item 16: `\frac{[1...1e8]}{2}`
+          // hung `ce.parse`). Skip the walk for ANY lazy collection: the
+          // materialization cost is O(size) and does NOT depend on free variables,
+          // so a lazy source with a free variable (`Map(x ↦ x+k, Range(1,2e5))`)
+          // must be skipped just like a variable-free `Range` — walking it just to
+          // run element inferences that narrow nothing (`k` stays `unknown`) is
+          // pure overhead. Element validation/inference is deferred to evaluate
+          // time (fail-open), mirroring the admission-branch guard above. Eager
+          // collections (e.g. a literal `List`) already store their elements as
+          // operands, so walking them is cheap regardless of `unknowns`:
+          // `BoxedFunction._infer()` also narrows an inferred *result signature*
+          // (not just free symbols), so a concrete literal list containing an
+          // inferred function call still needs the walk.
+          if (x.isLazyCollection) continue;
+          // An ELEMENT that is itself a collection is consumed by NESTED
+          // broadcast, not as a scalar, so it gets the same exclusion the
+          // top-level operand gets on the branch below. Without it,
+          // `Multiply(2, [L, L])` with `L := [1, 2]` narrowed `L`'s value
+          // definition from `vector<integer^2>` to `real` while
+          // evaluating to the matrix `[[2, 4], [2, 4]]` — an unsound declared
+          // type for a value that is still a list, and one that made a second
+          // broadcast over the same symbol claim `vector<real^2>` for a
+          // `matrix<...^(2x2)>` result.
+          for (const y of x.each())
+            if (!excludedFromScalarInference(y)) y._infer(() => inferredType);
+        } else if (!excludedFromScalarInference(x))
+          x._infer(() => inferredType);
+      // A possibly-collection operand (a `vector<n>`-returning application,
+      // `number | list`, a tuple, a `dictionary<…>`-shaped signature) is not a
+      // scalar: inferring the scalar numeric context onto it would WIDEN a
+      // shared inferred result signature to `real | vector<…>` (Tycho item
+      // 121) — same guard as the signature-validation route above, and wider
+      // than broadcast admission (see `excludedFromScalarInference`).
+    });
   }
 
   return xs;
@@ -907,14 +919,14 @@ function distributeLiteralElementInference(op: Expression, param: Type): void {
     op.ops.forEach((el, i) => {
       const slot = param.elements[i].type;
       if (slot === 'unknown' || slot === 'any') return;
-      if (isSymbol(el)) el._infer(slot, 'narrow');
+      if (isSymbol(el)) el._infer(() => slot, 'narrow');
     });
     return;
   }
   const element = collectionElementType(param);
   if (element === undefined || element === 'unknown' || element === 'any')
     return;
-  for (const el of op.ops) if (isSymbol(el)) el._infer(element, 'narrow');
+  for (const el of op.ops) if (isSymbol(el)) el._infer(() => element, 'narrow');
 }
 
 /**
@@ -946,7 +958,7 @@ function evidenceGuardedNarrow(
   const staticEvidence =
     held === undefined ? ce._staticAssignmentEvidence?.get(def) : undefined;
   if (held === undefined && staticEvidence === undefined) {
-    op._infer(param, 'narrow');
+    op._infer(() => param, 'narrow');
     return 'narrowed';
   }
   const evidenceType = held !== undefined ? held.type.type : staticEvidence!;
@@ -1951,19 +1963,33 @@ export function validateArguments(
     // NOT while a parameter is still OPEN (§4.2 rule 1): `param` here is the
     // INSTANTIATED ground projection, and a site that could not be
     // instantiated skips the write rather than narrowing to a type variable.
-    if (
-      !paramStillOpen &&
-      op.valueDefinition?.inferredType &&
-      isSubtype(param, op.type.type) &&
-      !hasValueComponent(param) &&
-      // Design E §3: never narrow a symbol's type TO an arrow slot's arrow —
-      // the slot is a per-call supply, not evidence of the symbol's own
-      // signature, and the write would manufacture a contract that makes a
-      // later, differently-instantiated call reject a symbol that both calls
-      // admit. The compatibility gate below admits with no write instead.
-      paramArrowArms(param) === undefined &&
-      narrowingPreservesEffects(op.type.type, param)
-    ) {
+    //
+    // The eligibility test and the narrow itself both run with the
+    // assumptions hidden. The test reads the operand's type, which an
+    // assumption can narrow, and the narrow it gates writes a stored
+    // contract that outlives the assumption; a fact that holds only at this
+    // boxing must therefore not decide whether the contract is written.
+    // `evidenceGuardedNarrow` reads the operand's type and the held value in
+    // the same bracket, for the same reason.
+    const narrowVerdict = ce._withoutFacts(() => {
+      if (
+        !(
+          !paramStillOpen &&
+          op.valueDefinition?.inferredType &&
+          isSubtype(param, op.type.type) &&
+          !hasValueComponent(param) &&
+          // Design E §3: never narrow a symbol's type TO an arrow slot's
+          // arrow — the slot is a per-call supply, not evidence of the
+          // symbol's own signature, and the write would manufacture a
+          // contract that makes a later, differently-instantiated call
+          // reject a symbol that both calls admit. The compatibility gate
+          // below admits with no write instead.
+          paramArrowArms(param) === undefined &&
+          narrowingPreservesEffects(op.type.type, param)
+        )
+      )
+        return 'fall-through';
+
       // EVIDENCE BEATS REQUIREMENT (`docs/INFERENCE_ROADMAP.md`, Phase 0
       // verdict, ruled 2026-08-18): use-narrowing is the CAS reading — a
       // use of a VALUELESS symbol declares what it must be (`k(n)` makes
@@ -1981,10 +2007,11 @@ export function validateArguments(
       // whose own type fits is admitted with no write; one that does not
       // falls through to the ordinary `incompatible-type` error, minted at
       // canonicalization.
-      if (evidenceGuardedNarrow(ce, op, param) !== 'fall-through') {
-        result.push(op);
-        continue;
-      }
+      return evidenceGuardedNarrow(ce, op, param);
+    });
+    if (narrowVerdict !== 'fall-through') {
+      result.push(op);
+      continue;
     }
 
     if (op.operatorDefinition?.inferredSignature && op.type.matches(param)) {
@@ -2188,20 +2215,28 @@ export function validateArguments(
     // effect axis (`narrowingPreservesEffects`); NOT to a value-component
     // type; NOT to an arrow slot's arrow (Design E — see the required-param
     // gate).
-    if (
-      !paramStillOpen &&
-      op.valueDefinition?.inferredType &&
-      isSubtype(param, op.type.type) &&
-      !hasValueComponent(param) &&
-      paramArrowArms(param) === undefined &&
-      narrowingPreservesEffects(op.type.type, param)
-    ) {
-      // Evidence-beats-requirement — see `evidenceGuardedNarrow`.
-      if (evidenceGuardedNarrow(ce, op, param) !== 'fall-through') {
-        result.push(op);
-        i += 1;
-        continue;
-      }
+    //
+    // Evidence-beats-requirement — see `evidenceGuardedNarrow`. Decision and
+    // write are fact-blind for the reason given at the required-parameter
+    // gate above.
+    const optNarrowVerdict = ce._withoutFacts(() => {
+      if (
+        !(
+          !paramStillOpen &&
+          op.valueDefinition?.inferredType &&
+          isSubtype(param, op.type.type) &&
+          !hasValueComponent(param) &&
+          paramArrowArms(param) === undefined &&
+          narrowingPreservesEffects(op.type.type, param)
+        )
+      )
+        return 'fall-through';
+      return evidenceGuardedNarrow(ce, op, param);
+    });
+    if (optNarrowVerdict !== 'fall-through') {
+      result.push(op);
+      i += 1;
+      continue;
     }
     // Broadcastable operand: could be a plain scalar at runtime, admit it.
     if (broadcastableBaseMatches(op.type.type, param)) {
@@ -2346,19 +2381,27 @@ export function validateArguments(
       // a subtype of the current inferred type: narrow rather than error. NOT
       // on the effect axis (`narrowingPreservesEffects`); NOT to a
       // value-component type (see the required-param gate).
-      if (
-        !paramStillOpen &&
-        op.valueDefinition?.inferredType &&
-        isSubtype(varParam, op.type.type) &&
-        !hasValueComponent(varParam) &&
-        paramArrowArms(varParam) === undefined &&
-        narrowingPreservesEffects(op.type.type, varParam)
-      ) {
-        // Evidence-beats-requirement — see `evidenceGuardedNarrow`.
-        if (evidenceGuardedNarrow(ce, op, varParam) !== 'fall-through') {
-          result.push(op);
-          continue;
-        }
+      //
+      // Evidence-beats-requirement — see `evidenceGuardedNarrow`. Decision
+      // and write are fact-blind for the reason given at the
+      // required-parameter gate above.
+      const varNarrowVerdict = ce._withoutFacts(() => {
+        if (
+          !(
+            !paramStillOpen &&
+            op.valueDefinition?.inferredType &&
+            isSubtype(varParam, op.type.type) &&
+            !hasValueComponent(varParam) &&
+            paramArrowArms(varParam) === undefined &&
+            narrowingPreservesEffects(op.type.type, varParam)
+          )
+        )
+          return 'fall-through';
+        return evidenceGuardedNarrow(ce, op, varParam);
+      });
+      if (varNarrowVerdict !== 'fall-through') {
+        result.push(op);
+        continue;
       }
       // Broadcastable operand: could be a plain scalar at runtime, admit it.
       if (broadcastableBaseMatches(op.type.type, varParam)) {
@@ -2510,47 +2553,54 @@ export function validateArguments(
   // When an operand was substituted, infer on (and return) the substituted
   // list: `result` and `ops` are index-aligned on the valid path (one entry
   // pushed per consumed operand).
+  // The whole pass is fact-blind. `couldBeUnkeyedCollectionOperand` reads each
+  // operand's EFFECTIVE type to decide whether the parameter type is inferred
+  // onto it at all, and that decision writes a contract: an assumption that
+  // gives the operand a scalar tier must not suppress a narrowing which
+  // outlives the assumption.
   const finalOps = substituted ? result : ops;
-  i = 0;
-  for (const param of params) {
-    const t = inferenceTypeAt(i, param);
-    if (t !== undefined && !lazy && !deferredIdx.has(i))
-      if (
-        !isThreadableAt(threadable, i) ||
-        !couldBeUnkeyedCollectionOperand(finalOps[i])
-      ) {
-        finalOps[i]._infer(t);
-        distributeLiteralElementInference(finalOps[i], t);
-      }
-    i += 1;
-  }
-  for (const param of optParams) {
-    if (!finalOps[i]) break;
-    const t = inferenceTypeAt(i, param);
-    if (t !== undefined && !lazy && !deferredIdx.has(i))
-      if (
-        !isThreadableAt(threadable, i) ||
-        !couldBeUnkeyedCollectionOperand(finalOps[i])
-      ) {
-        finalOps[i]._infer(t);
-        distributeLiteralElementInference(finalOps[i], t);
-      }
-    i += 1;
-  }
-  if (varParam) {
-    for (const op of finalOps.slice(i)) {
-      const t = inferenceTypeAt(i, varParam);
+  ce._withoutFacts(() => {
+    i = 0;
+    for (const param of params) {
+      const t = inferenceTypeAt(i, param);
       if (t !== undefined && !lazy && !deferredIdx.has(i))
         if (
           !isThreadableAt(threadable, i) ||
-          !couldBeUnkeyedCollectionOperand(op)
+          !couldBeUnkeyedCollectionOperand(finalOps[i])
         ) {
-          op._infer(t);
-          distributeLiteralElementInference(op, t);
+          finalOps[i]._infer(() => t);
+          distributeLiteralElementInference(finalOps[i], t);
         }
       i += 1;
     }
-  }
+    for (const param of optParams) {
+      if (!finalOps[i]) break;
+      const t = inferenceTypeAt(i, param);
+      if (t !== undefined && !lazy && !deferredIdx.has(i))
+        if (
+          !isThreadableAt(threadable, i) ||
+          !couldBeUnkeyedCollectionOperand(finalOps[i])
+        ) {
+          finalOps[i]._infer(() => t);
+          distributeLiteralElementInference(finalOps[i], t);
+        }
+      i += 1;
+    }
+    if (varParam) {
+      for (const op of finalOps.slice(i)) {
+        const t = inferenceTypeAt(i, varParam);
+        if (t !== undefined && !lazy && !deferredIdx.has(i))
+          if (
+            !isThreadableAt(threadable, i) ||
+            !couldBeUnkeyedCollectionOperand(op)
+          ) {
+            op._infer(() => t);
+            distributeLiteralElementInference(op, t);
+          }
+        i += 1;
+      }
+    }
+  });
   return substituted ? result : null;
 }
 

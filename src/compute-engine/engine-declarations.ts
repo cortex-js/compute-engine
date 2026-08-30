@@ -2596,169 +2596,17 @@ export function assignFn(
     // (see `assertAssignable`).
     assertAssignableValueDef(ce, id, def.value, value);
 
-    // We have a value definition, update the inferred type...
-    //
-    // A symbol DECLARED `unknown` takes this path too, even though its type
-    // is not marked inferred. `unknown` is a placeholder that refines per
-    // use, not a contract (`any` is the contract spelling), so the
-    // declaration withheld type evidence rather than supplying it, and the
-    // assignment is the first evidence there is. Without this,
-    // `ce.declare('v', 'unknown')` followed by `ce.assign('v', 5)` left `v`
-    // typed `unknown` while the same assignment with no prior declaration
-    // settled on `integer` — so a declaration that says nothing was
-    // SUPPRESSING inference rather than deferring it, and a later use had to
-    // supply the type instead (arriving at the wider `number`, since a use
-    // knows less than the value does). The type is marked inferred once it
-    // moves, matching the no-declaration route exactly: nothing downstream
-    // can then tell the two orders apart.
-    const placeholderIncumbent =
-      !def.value.inferredType && def.value.type.isUnknown;
-    if (def.value.inferredType || placeholderIncumbent) {
-      const current = def.value.type.type;
-      const vt = value.type.type;
-      // Normally widen the inferred type to cover the assigned value (an
-      // `integer` guess refined by a `real` value widens to `real`). But when
-      // the guess is genuinely incompatible with the value — widening yields a
-      // union, e.g. a symbol heuristically auto-declared `function` by the
-      // juxtaposition parser now given a scalar value (`number | function`) —
-      // the guess was simply wrong: adopt the value's own type instead (D11).
-      const widened = widen(current, vt);
-      const d11 = typeof widened === 'object' && widened.kind === 'union';
-      let adopted = d11 ? vt : widened;
-      // The same promotion a FRESH `v := 5` declaration applies
-      // (`inferTypeFromValue`, boxed-value-definition.ts): a value's narrow
-      // literal type promotes to the natural variable type. Shared by the
-      // unknown-incumbent branch just below and the narrowing branch further
-      // down. The last two arms carry an infinite value and NaN to their own
-      // tiers: both are disjoint from `real` and from `complex`, so they reach
-      // none of the finite arms, and `v := oo` must stay reassignable to `-oo`
-      // without a retype.
-      const promotedValueType = () =>
-        value.type.matches('integer')
-          ? 'integer'
-          : value.type.matches('rational') || value.type.matches('real')
-            ? 'real'
-            : value.type.matches('complex')
-              ? 'number'
-              : value.type.matches('infinity')
-                ? 'infinity'
-                : value.type.matches('nan')
-                  ? 'nan'
-                  : vt;
-      // An `unknown` incumbent is an auto-declare that recorded no type
-      // evidence (the symbol's uses were all type-vacuous — a bare `List`
-      // sibling, a binder-body occurrence). Treat the assignment as the
-      // DECLARATION it would have been had it come first: apply the literal
-      // promotion, so `y_r := 5` settles on `integer` whether or not a boxing
-      // auto-declared `y_r` beforehand. Without this the widen above installs
-      // the value's RAW type (`integer`), and the settled type
-      // depended on the boxing-vs-assignment order (observed by the Tycho
-      // team's order-matrix probe at their 0.106.0 adoption). Skipped when
-      // D11 fired: adopting the raw type for an incompatible guess is
-      // established semantics.
-      if (!d11 && current === 'unknown') adopted = promotedValueType();
-      // Assignment NARROWING (user-ruled 2026-08-13; the phase-3 question of
-      // docs/TYPE-SYSTEM.md): when the
-      // assigned value's type strictly REFINES a use-inferred guess (`x·v`
-      // inferred `v: number`, now `v := 5`), adopt the value's promoted type
-      // instead of keeping the wider guess — landing exactly where the
-      // reverse site order (`v := 5` then `x·v`) already lands, so the
-      // inferred type no longer depends on which site the engine saw first.
-      // Sound wrt recorded uses: use-narrowing is monotone-down, so any
-      // type below the current one satisfies every use that produced it.
-      // A DECLARED type is never touched (this whole branch is gated on
-      // `inferredType`). Three constraints bound the rewrite:
-      //
-      // (a) The incumbent must have come from a USE: the latest type-axis
-      //     provenance entry is an inference write. An assignment-derived
-      //     incumbent stays widen-only — otherwise alternating `v := 2.5`
-      //     and `v := 5` would oscillate the type — and a binding whose type
-      //     was only ever set by an assignment has no `'inferred'` entry at
-      //     all. (This block records `'value-derived'` after it moves a
-      //     type, so a second assignment after a narrow no longer narrows.)
-      // (b) The D11 union-adopt above must not have fired: adopting the
-      //     value's raw type when the guess is incompatible is established
-      //     semantics, and re-promoting that result would change it.
-      // (c) The promoted type is installed only when it is itself below the
-      //     incumbent; otherwise the value's raw type is (which is always
-      //     sound, having just passed the strict-subtype test). Promotion
-      //     can widen — `integer` promotes to `integer`, which is NOT
-      //     below a `real` incumbent — and installing it would break
-      //     a use that the incumbent recorded. The non-finite arms widen the
-      //     same way: the `+oo` singleton promotes to `infinity`, which an
-      //     incumbent of `integer | +oo` does not contain, so that assignment
-      //     installs the singleton instead.
-      const prov = def.value._typeProvenance;
-      let incumbentFromUse = false;
-      if (prov !== undefined) {
-        for (let i = prov.length - 1; i >= 0; i--) {
-          if (prov[i].axis !== 'type') continue;
-          incumbentFromUse = prov[i].kind === 'inferred';
-          break;
-        }
-      }
-      if (
-        incumbentFromUse &&
-        !d11 &&
-        vt !== current &&
-        isSubtype(vt, current) &&
-        !isSubtype(current, vt) // strict refinement only; equal types no-op
-      ) {
-        const promoted = promotedValueType();
-        adopted = isSubtype(promoted, current) ? promoted : vt;
-      }
-      // State event (§2c): the D11 adopt branch can REMOVE a callable arm
-      // (a `function` guess replaced by the scalar value's own type) before
-      // the value write below classifies — emit `type-write` when the
-      // arm-containment changes; the arm-preserving widen emits nothing.
-      const armBefore = containsSignatureArm(current);
-      const armAfter = containsSignatureArm(adopted);
-      if (armBefore !== armAfter)
-        ce._noteStateEvent({
-          kind: 'type-write',
-          callableBefore: armBefore,
-          callableAfter: armAfter,
-        });
-      const previousType = def.value.type;
-      def.value.type = ce.type(adopted);
-      // A placeholder that has now taken a type from its value is in exactly
-      // the state the no-declaration route produces, so it must carry the
-      // same marker: later uses may refine it, and `assertAssignableValueDef`
-      // must keep treating it as a guess rather than a contract to hold the
-      // next assignment to.
-      if (placeholderIncumbent && !def.value.type.isUnknown)
-        def.value.inferredType = true;
-      // Provenance: an assignment-driven type update (widen, D11 adopt, or
-      // the narrowing above) records kind 'value-derived' with the assigned
-      // value as cause — activating the kind reserved for exactly this in
-      // `TypeProvenanceEntry`. Recorded only when the type actually moved;
-      // constructor-time promotion on a FRESH declaration stays unrecorded
-      // (engine-construction cost — `inferredType === true` with a value is
-      // its marker).
-      if (previousType.type !== def.value.type.type)
-        recordTypeProvenance(ce, def.value, {
-          type: def.value.type,
-          kind: 'value-derived',
-          axis: 'type',
-          cause: value,
-          epoch: currentBoxingEpoch(ce),
-        });
-    }
-
-    // A declared placeholder skeleton adopts the assigned value's ELEMENT
-    // type — element only, re-computed on every assignment, and shown by
-    // `typeof` (Phase 1 rulings R1-R3, 2026-08-18;
-    // `refineConstructorPlaceholder`). `inferredType` stays false: the
-    // refinement is declaration-flavored — argument positions must not
-    // narrow it further (use-driven element inference is Phase 3).
-    if (def.value._placeholderSkeleton !== undefined) {
-      const refined = refineConstructorPlaceholder(
-        def.value._placeholderSkeleton,
-        value.type.type
-      );
-      if (refined !== def.value.type.type)
-        def.value._setElementRefinement(ce.type(refined));
-    }
+    // Everything from here to the value write is the DERIVE-AND-WRITE phase,
+    // and it runs with the assumptions hidden. The validation above needed
+    // them (a fact in force is a constraint the value must satisfy); the type
+    // this phase settles on is a contract that has to stay true after
+    // `forget()`, so neither the incumbent reads, the `isSubtype` branches,
+    // the promotion, nor the placeholder refinement below may see a fact
+    // (`docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.4; the
+    // closed-over variables are listed in
+    // `docs/plans/2026-08-30-assumptions-write-audit.md`).
+    const valueDef = def.value;
+    ce._withoutFacts(() => deriveAndWriteAssignedType(ce, valueDef, value));
 
     // ... and set the value
     ce._setSymbolValue(id, value);
@@ -2791,6 +2639,185 @@ export function assignFn(
   }
 
   return ce;
+}
+
+/**
+ * The type half of an assignment onto an EXISTING value definition: widen or
+ * narrow the inferred type to fit the assigned value, then re-refine a
+ * declared placeholder skeleton from the value's element type.
+ *
+ * Called by {@link assignFn} inside its fact-blind bracket, so every read it
+ * makes of the incumbent type is the DECLARED one and nothing an assumption
+ * proves reaches the type it installs.
+ */
+function deriveAndWriteAssignedType(
+  ce: IComputeEngine,
+  valueDef: BoxedValueDefinition,
+  value: Expression
+): void {
+  // We have a value definition, update the inferred type...
+  //
+  // A symbol DECLARED `unknown` takes this path too, even though its type
+  // is not marked inferred. `unknown` is a placeholder that refines per
+  // use, not a contract (`any` is the contract spelling), so the
+  // declaration withheld type evidence rather than supplying it, and the
+  // assignment is the first evidence there is. Without this,
+  // `ce.declare('v', 'unknown')` followed by `ce.assign('v', 5)` left `v`
+  // typed `unknown` while the same assignment with no prior declaration
+  // settled on `integer` — so a declaration that says nothing was
+  // SUPPRESSING inference rather than deferring it, and a later use had to
+  // supply the type instead (arriving at the wider `number`, since a use
+  // knows less than the value does). The type is marked inferred once it
+  // moves, matching the no-declaration route exactly: nothing downstream
+  // can then tell the two orders apart.
+  const placeholderIncumbent =
+    !valueDef.inferredType && valueDef.type.isUnknown;
+  if (valueDef.inferredType || placeholderIncumbent) {
+    const current = valueDef.type.type;
+    const vt = value.type.type;
+    // Normally widen the inferred type to cover the assigned value (an
+    // `integer` guess refined by a `real` value widens to `real`). But when
+    // the guess is genuinely incompatible with the value — widening yields a
+    // union, e.g. a symbol heuristically auto-declared `function` by the
+    // juxtaposition parser now given a scalar value (`number | function`) —
+    // the guess was simply wrong: adopt the value's own type instead (D11).
+    const widened = widen(current, vt);
+    const d11 = typeof widened === 'object' && widened.kind === 'union';
+    let adopted = d11 ? vt : widened;
+    // The same promotion a FRESH `v := 5` declaration applies
+    // (`inferTypeFromValue`, boxed-value-definition.ts): a value's narrow
+    // literal type promotes to the natural variable type. Shared by the
+    // unknown-incumbent branch just below and the narrowing branch further
+    // down. The last two arms carry an infinite value and NaN to their own
+    // tiers: both are disjoint from `real` and from `complex`, so they reach
+    // none of the finite arms, and `v := oo` must stay reassignable to `-oo`
+    // without a retype.
+    const promotedValueType = () =>
+      value.type.matches('integer')
+        ? 'integer'
+        : value.type.matches('rational') || value.type.matches('real')
+          ? 'real'
+          : value.type.matches('complex')
+            ? 'number'
+            : value.type.matches('infinity')
+              ? 'infinity'
+              : value.type.matches('nan')
+                ? 'nan'
+                : vt;
+    // An `unknown` incumbent is an auto-declare that recorded no type
+    // evidence (the symbol's uses were all type-vacuous — a bare `List`
+    // sibling, a binder-body occurrence). Treat the assignment as the
+    // DECLARATION it would have been had it come first: apply the literal
+    // promotion, so `y_r := 5` settles on `integer` whether or not a boxing
+    // auto-declared `y_r` beforehand. Without this the widen above installs
+    // the value's RAW type (`integer`), and the settled type
+    // depended on the boxing-vs-assignment order (observed by the Tycho
+    // team's order-matrix probe at their 0.106.0 adoption). Skipped when
+    // D11 fired: adopting the raw type for an incompatible guess is
+    // established semantics.
+    if (!d11 && current === 'unknown') adopted = promotedValueType();
+    // Assignment NARROWING (user-ruled 2026-08-13; the phase-3 question of
+    // docs/TYPE-SYSTEM.md): when the
+    // assigned value's type strictly REFINES a use-inferred guess (`x·v`
+    // inferred `v: number`, now `v := 5`), adopt the value's promoted type
+    // instead of keeping the wider guess — landing exactly where the
+    // reverse site order (`v := 5` then `x·v`) already lands, so the
+    // inferred type no longer depends on which site the engine saw first.
+    // Sound wrt recorded uses: use-narrowing is monotone-down, so any
+    // type below the current one satisfies every use that produced it.
+    // A DECLARED type is never touched (this whole branch is gated on
+    // `inferredType`). Three constraints bound the rewrite:
+    //
+    // (a) The incumbent must have come from a USE: the latest type-axis
+    //     provenance entry is an inference write. An assignment-derived
+    //     incumbent stays widen-only — otherwise alternating `v := 2.5`
+    //     and `v := 5` would oscillate the type — and a binding whose type
+    //     was only ever set by an assignment has no `'inferred'` entry at
+    //     all. (This block records `'value-derived'` after it moves a
+    //     type, so a second assignment after a narrow no longer narrows.)
+    // (b) The D11 union-adopt above must not have fired: adopting the
+    //     value's raw type when the guess is incompatible is established
+    //     semantics, and re-promoting that result would change it.
+    // (c) The promoted type is installed only when it is itself below the
+    //     incumbent; otherwise the value's raw type is (which is always
+    //     sound, having just passed the strict-subtype test). Promotion
+    //     can widen — `integer` promotes to `integer`, which is NOT
+    //     below a `real` incumbent — and installing it would break
+    //     a use that the incumbent recorded. The non-finite arms widen the
+    //     same way: the `+oo` singleton promotes to `infinity`, which an
+    //     incumbent of `integer | +oo` does not contain, so that assignment
+    //     installs the singleton instead.
+    const prov = valueDef._typeProvenance;
+    let incumbentFromUse = false;
+    if (prov !== undefined) {
+      for (let i = prov.length - 1; i >= 0; i--) {
+        if (prov[i].axis !== 'type') continue;
+        incumbentFromUse = prov[i].kind === 'inferred';
+        break;
+      }
+    }
+    if (
+      incumbentFromUse &&
+      !d11 &&
+      vt !== current &&
+      isSubtype(vt, current) &&
+      !isSubtype(current, vt) // strict refinement only; equal types no-op
+    ) {
+      const promoted = promotedValueType();
+      adopted = isSubtype(promoted, current) ? promoted : vt;
+    }
+    // State event (§2c): the D11 adopt branch can REMOVE a callable arm
+    // (a `function` guess replaced by the scalar value's own type) before
+    // the value write below classifies — emit `type-write` when the
+    // arm-containment changes; the arm-preserving widen emits nothing.
+    const armBefore = containsSignatureArm(current);
+    const armAfter = containsSignatureArm(adopted);
+    if (armBefore !== armAfter)
+      ce._noteStateEvent({
+        kind: 'type-write',
+        callableBefore: armBefore,
+        callableAfter: armAfter,
+      });
+    const previousType = valueDef.type;
+    valueDef.type = ce.type(adopted);
+    // A placeholder that has now taken a type from its value is in exactly
+    // the state the no-declaration route produces, so it must carry the
+    // same marker: later uses may refine it, and `assertAssignableValueDef`
+    // must keep treating it as a guess rather than a contract to hold the
+    // next assignment to.
+    if (placeholderIncumbent && !valueDef.type.isUnknown)
+      valueDef.inferredType = true;
+    // Provenance: an assignment-driven type update (widen, D11 adopt, or
+    // the narrowing above) records kind 'value-derived' with the assigned
+    // value as cause — activating the kind reserved for exactly this in
+    // `TypeProvenanceEntry`. Recorded only when the type actually moved;
+    // constructor-time promotion on a FRESH declaration stays unrecorded
+    // (engine-construction cost — `inferredType === true` with a value is
+    // its marker).
+    if (previousType.type !== valueDef.type.type)
+      recordTypeProvenance(ce, valueDef, {
+        type: valueDef.type,
+        kind: 'value-derived',
+        axis: 'type',
+        cause: value,
+        epoch: currentBoxingEpoch(ce),
+      });
+  }
+
+  // A declared placeholder skeleton adopts the assigned value's ELEMENT
+  // type — element only, re-computed on every assignment, and shown by
+  // `typeof` (Phase 1 rulings R1-R3, 2026-08-18;
+  // `refineConstructorPlaceholder`). `inferredType` stays false: the
+  // refinement is declaration-flavored — argument positions must not
+  // narrow it further (use-driven element inference is Phase 3).
+  if (valueDef._placeholderSkeleton !== undefined) {
+    const refined = refineConstructorPlaceholder(
+      valueDef._placeholderSkeleton,
+      value.type.type
+    );
+    if (refined !== valueDef.type.type)
+      valueDef._setElementRefinement(ce.type(refined));
+  }
 }
 
 /**

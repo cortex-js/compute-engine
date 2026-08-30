@@ -269,6 +269,23 @@ export class _BoxedValueDefinition
   ) {
     this._engine = ce;
     this.name = name;
+    // The whole constructor is a type WRITE: the `declare(name, { value })`
+    // route derives `_type` from the value it is handed, and that derived type
+    // is a contract the next `forget()` must not falsify. Running the body
+    // with the assumptions hidden is what keeps `declare q real; assume q > 3;
+    // declare M { type: list, value: [q] }` storing `list<real>` rather than
+    // `list<real<3<..>>` (`docs/plans/2026-08-29-assumptions-as-facts-type.md`
+    // §2.4). Everything else the body does — validation, handler copying — is
+    // unaffected by the hiding, so the bracket spans the whole of it rather
+    // than the derivation alone.
+    ce._withoutFacts(() => this._construct(def, options));
+  }
+
+  private _construct(
+    def: Partial<ValueDefinition>,
+    options?: { trustedLibraryDefinition?: boolean }
+  ): void {
+    const ce = this._engine;
 
     if (def.wikidata) this.wikidata = def.wikidata;
     if (def.description) this.description = def.description;
@@ -834,6 +851,32 @@ export class _BoxedValueDefinition
   }
 
   set type(t: Type | TypeString | BoxedType) {
+    // The public accessor keeps its `Type`-valued shape and delegates to the
+    // thunk API, so a caller cannot bypass the fact-blind bracket. A function
+    // is never a `Type`, so one reaching here is a thunk handed to the wrong
+    // entry point — say so instead of storing a nonsense type.
+    if (typeof t === 'function')
+      throw new Error(
+        `The type of "${this.name}" was set to a function. Use "_setType()" to compute a type inside the write's fact-blind bracket.`
+      );
+    this._setType(() => t);
+  }
+
+  /** Write this definition's declared type, deriving it with the assumptions
+   * hidden.
+   *
+   * The thunk runs inside the bracket together with the write itself, so both
+   * the type stored and the decisions that chose it are a function of the
+   * declarations and the stored values alone
+   * (`docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.4). A caller
+   * whose decision phase reads the incumbent type must read `declaredType`,
+   * and must do so inside its own bracket or inside this thunk.
+   * @internal */
+  _setType(thunk: () => Type | TypeString | BoxedType): void {
+    this._engine._withoutFacts(() => this._writeType(thunk()));
+  }
+
+  private _writeType(t: Type | TypeString | BoxedType): void {
     if (this._isConstant)
       throw new Error(
         `The type of the constant "${this.name}" cannot be changed`
@@ -875,10 +918,16 @@ export class _BoxedValueDefinition
    * `_placeholderSkeleton`, unlike the public `type` setter above.
    * @internal */
   _setElementRefinement(t: BoxedType): void {
-    // Checkpoint journal (funnel 2): same coupled tuple as the setters above.
-    journalDefinitionRecord(this._engine, this, 'type-write');
-    this._type = t;
-    this._writeVersion += 1;
+    // Fact-blind like every other type write, so that a refinement derived
+    // from an assigned value keeps standing after the assumptions change. The
+    // DECISION that produced `t` belongs to the caller's own bracket.
+    this._engine._withoutFacts(() => {
+      // Checkpoint journal (funnel 2): same coupled tuple as the setters
+      // above.
+      journalDefinitionRecord(this._engine, this, 'type-write');
+      this._type = t;
+      this._writeVersion += 1;
+    });
   }
 
   onConfigurationChange(): void {

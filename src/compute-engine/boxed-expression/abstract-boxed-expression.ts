@@ -1086,7 +1086,12 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
-  _infer(_t: Type, _inferenceMode?: 'narrow' | 'widen' | 'replace'): boolean {
+  _infer(
+    _t: () => Type,
+    _inferenceMode?: 'narrow' | 'widen' | 'replace'
+  ): boolean {
+    // The thunk is never called: nothing is inferred here, so the caller's
+    // type computation is skipped along with the write it would have fed.
     return false; // The inference was ignored if false
   }
 

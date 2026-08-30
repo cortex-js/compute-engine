@@ -57,6 +57,21 @@ const BUMP_KINDS = [
 ] as const;
 export type BumpKind = (typeof BUMP_KINDS)[number];
 
+/**
+ * How an evaluation context was discarded.
+ *
+ * A CLEAN pop is one where no axis moved while the context was on the stack,
+ * so the pop reverts nothing and must not advance the generation. That is what
+ * keeps a read-only scoped probe — a comprehension count, a lazy emptiness
+ * walk, which push and pop a context per read — from retiring every type and
+ * sign cache in the engine. The clean share of all pops is therefore the
+ * measure of whether such a probe still costs nothing, and it is compared
+ * against a baseline whenever the write path gains a new bracket
+ * (`engine-scope.ts`, `discardEvalContext`).
+ */
+const SCOPE_POP_KINDS = ['clean', 'dirty'] as const;
+export type ScopePopKind = (typeof SCOPE_POP_KINDS)[number];
+
 /** True when `CE_CACHE_STATS` is set (and not `'0'`) in the environment at
  * module load. Hot-path hooks test this constant before recording. */
 export const CACHE_STATS: boolean = (() => {
@@ -85,12 +100,22 @@ const bumps: Record<BumpKind, number> = (() => {
   return b;
 })();
 
+const scopePops: Record<ScopePopKind, number> = (() => {
+  const p = {} as Record<ScopePopKind, number>;
+  for (const k of SCOPE_POP_KINDS) p[k] = 0;
+  return p;
+})();
+
 export function recordCache(cls: CacheClass, ev: CacheEvent): void {
   stats[cls][ev] += 1;
 }
 
 export function recordBump(kind: BumpKind): void {
   bumps[kind] += 1;
+}
+
+export function recordScopePop(kind: ScopePopKind): void {
+  scopePops[kind] += 1;
 }
 
 // The instrumented mirror of `cachedValue()` used to live here, as a
@@ -105,16 +130,18 @@ export function recordBump(kind: BumpKind): void {
 export type CacheStatsSnapshot = {
   caches: Record<CacheClass, CacheCounters>;
   bumps: Record<BumpKind, number>;
+  scopePops: Record<ScopePopKind, number>;
 };
 
 export function cacheStatsSnapshot(): CacheStatsSnapshot {
-  return structuredClone({ caches: stats, bumps });
+  return structuredClone({ caches: stats, bumps, scopePops });
 }
 
 export function resetCacheStats(): void {
   for (const cls of CACHE_CLASSES)
     for (const ev of CACHE_EVENTS) stats[cls][ev] = 0;
   for (const k of BUMP_KINDS) bumps[k] = 0;
+  for (const k of SCOPE_POP_KINDS) scopePops[k] = 0;
 }
 
 /** Human-readable report: per-cache reads, hit rate, miss breakdown, and the
@@ -168,6 +195,10 @@ export function formatCacheStats(): string {
       `epoch ${bumps.semanticEpoch}, ` +
       `value-writes ${bumps.valueWrite} ` +
       `(+${bumps.ephemeralValueWrite} ephemeral)`
+  );
+  lines.push(
+    `scope pops: clean ${scopePops.clean}, dirty ${scopePops.dirty} ` +
+      `(clean ${pct(scopePops.clean, scopePops.clean + scopePops.dirty)})`
   );
   return lines.join('\n');
 }

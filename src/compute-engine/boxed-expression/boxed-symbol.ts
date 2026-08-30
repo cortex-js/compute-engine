@@ -461,7 +461,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * @inheritdoc
    */
   _infer(
-    t: Type,
+    t: () => Type,
     inferenceMode: 'narrow' | 'widen' | 'replace' = 'narrow'
   ): boolean {
     if (!this._def) return false;
@@ -471,7 +471,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // every call site is fire-and-forget, so declining is safe.
     if (this.engine._resolveOnlyDepth > 0) return false;
 
-    const def = this._def;
+    // Everything below — the caller's type computation, the incumbent read,
+    // the narrow/widen and the no-op comparison — runs with the assumptions
+    // hidden: what this method writes is stored on a definition and must stay
+    // true after a `forget()`.
+    return this.engine._withoutFacts(() =>
+      this._inferWithoutFacts(t(), inferenceMode)
+    );
+  }
+
+  private _inferWithoutFacts(
+    t: Type,
+    inferenceMode: 'narrow' | 'widen' | 'replace'
+  ): boolean {
+    const def = this._def!;
 
     if (isValueDef(def)) {
       // The type of a constant cannot be changed, so it is never inferred,
@@ -712,12 +725,42 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (!this._def)
       throw new Error(`Cannot set value of non-canonical ${this._id}`);
 
-    const ce = this.engine;
-
     //
     // Clear assumptions about this symbol
     //
-    ce.forget(this._id);
+    // OUTSIDE the fact-blind bracket below, and first: this is a deliberate
+    // state mutation (a write to a symbol RETRACTS what was assumed about it),
+    // and a fact mutation made from inside the bracket throws.
+    this.engine.forget(this._id);
+
+    // The derive-and-write phase runs with the assumptions hidden: what it
+    // installs — a value, and through it a definition's type or signature — is
+    // a contract that must stay true after the next `forget()`
+    // (`docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.4).
+    this.engine._withoutFacts(() => this._writeValue(value));
+  }
+
+  private _writeValue(
+    value:
+      | boolean
+      | string
+      | BigNum
+      | number[]
+      | OneOf<
+          [
+            { re: number; im: number },
+            { num: number; denom: number },
+            Expression,
+          ]
+        >
+      | number
+      | _BoxedExpression
+      | undefined
+  ): void {
+    const ce = this.engine;
+    // Non-null: the setter above refuses a non-canonical symbol before it
+    // opens the bracket.
+    const symbolDef = this._def!;
 
     //
     // Determine the new value
@@ -771,7 +814,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // The constant guard runs BEFORE the function branch: both branches
     // replace the definition, and the setter's documented contract is that
     // writing a constant throws — for a lambda value as much as for `0`.
-    if (isValueDef(this._def) && this._def.value.isConstant)
+    if (isValueDef(symbolDef) && symbolDef.value.isConstant)
       throw new Error(
         `The value of the constant "${this._id}" cannot be changed`
       );
@@ -782,7 +825,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // clause-provenance side channels keyed on the outer record must be
       // dropped first — a surviving origin stamp would read a later clause
       // as redefining a clause this replacement threw away.
-      clearClauseProvenance(this._def);
+      clearClauseProvenance(symbolDef);
       // Route the swap through `updateDef` so the operator half is a real
       // `_BoxedOperatorDefinition` — provenance carried over, rollback
       // journaling, provisional-dependent repair — rather than a raw object
@@ -793,8 +836,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // the body (`inferredSignature = true`), so a later `ce.assign` can
       // full-replace it and no body-inferred effects specifier is promoted
       // to an author-declared contract.
-      const callableBefore = defIsCallableShaped(this._def);
-      updateDef(ce, this._id, this._def, {
+      const callableBefore = defIsCallableShaped(symbolDef);
+      updateDef(ce, this._id, symbolDef, {
         evaluate: v, // Evaluate as a lambda
       });
       // No value-setter write happens on this branch, so the `redefine`
@@ -842,14 +885,29 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         `The type of the wildcard "${this._id}" cannot be changed`
       );
 
-    // Clear assumptions about this symbol
+    // Clear assumptions about this symbol.
+    //
+    // OUTSIDE the fact-blind bracket below, and first, for the same reason as
+    // in the value setter: retracting what was assumed is a deliberate state
+    // mutation, and a fact mutation made from inside the bracket throws.
     this.engine.forget(this._id);
+
+    // The derive-and-write phase runs with the assumptions hidden: the type
+    // this setter installs is a contract, and the branch decisions it makes
+    // read the incumbent type, which must be the DECLARED one.
+    this.engine._withoutFacts(() => this._writeType(t));
+  }
+
+  private _writeType(t: Type | TypeString | BoxedType): void {
+    // Non-null: the setter above refuses a non-canonical symbol and a
+    // wildcard before it opens the bracket.
+    const symbolDef = this._def!;
 
     if (typeof t === 'string') t = parseType(t);
     else if (t instanceof BoxedType) t = t.type;
 
     if (t === 'function' || isSignatureType(t)) {
-      if (isOperatorDef(this._def)) {
+      if (isOperatorDef(symbolDef)) {
         // We are changing the signature of a function.
         // State event: an in-place signature write with no legacy bump — a
         // bare route like §2c's, callable on both sides.
@@ -858,16 +916,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           callableBefore: true,
           callableAfter: true,
         });
-        // @ts-expect-error - signature is readonly but we need to update it
-        this._def.operator.signature = t;
+        // The signature accessor stores what it is given as-is, so the raw
+        // `Type` node has to be wrapped first: a bare node left in the
+        // `signature` slot has no `matches`, `toString` or `type` member, so
+        // every later read of the symbol's type fails on it (the symbol-type
+        // branch below wraps for the same reason).
+        symbolDef.operator.signature = this.engine.type(t);
       } else {
         // We are changing a symbol to a function.
         // `type-write`, not `redefine`: this caller bumps NOTHING today (the
         // only legacy advance is `updateDef`'s internal G, emitted there as
         // `binding-repair`), so the event must carry a zero parity mask —
         // the callable axis selects `type-write{either side}` identically.
-        const callableBefore = defIsCallableShaped(this._def);
-        updateDef(this.engine, this._id, this._def, { signature: t });
+        const callableBefore = defIsCallableShaped(symbolDef);
+        updateDef(this.engine, this._id, symbolDef, { signature: t });
         this.engine._noteStateEvent({
           kind: 'type-write',
           callableBefore,
@@ -875,11 +937,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         });
       }
     } else {
-      if (isOperatorDef(this._def)) {
+      if (isOperatorDef(symbolDef)) {
         // We are changing a function to a symbol — callability LEAVES the
         // binding (§2b). Zero-mask `type-write` for the same parity reason
         // as the symbol→function branch above.
-        updateDef(this.engine, this._id, this._def, { type: t });
+        updateDef(this.engine, this._id, symbolDef, { type: t });
         this.engine._noteStateEvent({
           kind: 'type-write',
           callableBefore: true,
@@ -887,13 +949,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         });
       } else {
         // We are changing the type of a symbol — the bare route of §2c.
-        const before = containsSignatureArm(this._def.value.type?.type);
+        const before = containsSignatureArm(symbolDef.value.type?.type);
         this.engine._noteStateEvent({
           kind: 'type-write',
           callableBefore: before,
           callableAfter: containsSignatureArm(t as Type),
         });
-        this._def.value.type = this.engine.type(t);
+        symbolDef.value.type = this.engine.type(t);
         // An explicit retype through this public setter is a DECLARATION,
         // not a guess: clear the inferred marker so nothing downstream —
         // in particular the read-time revision of inferred types
@@ -902,7 +964,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // type was first inferred from an assignment kept `inferredType`
         // through an explicit `.type = …` write, and a later change to one
         // of its value's dependencies silently replaced the explicit type.
-        this._def.value.inferredType = false;
+        symbolDef.value.inferredType = false;
       }
     }
   }

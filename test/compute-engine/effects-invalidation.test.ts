@@ -139,7 +139,7 @@ describe('callable transitions invalidate (§6 matrix)', () => {
     const before = ce._callableVersion;
     ce.box(['Apply', 'uSym', 1]); // ensure binding exists
     ce.symbol('uSym')._infer(
-      { kind: 'signature', result: 'number' },
+      () => ({ kind: 'signature', result: 'number' }),
       'narrow'
     );
     if (ce._callableVersion > before) expect(readCost(e)).toBeGreaterThan(0);

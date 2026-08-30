@@ -1458,9 +1458,9 @@ function bareMappingElementType(
   if (entry === undefined || entry.engine !== ce || entry.key !== probeKey) {
     // A different engine or a different set of inputs is a different question:
     // start a fresh slot rather than letting `cachedValue` serve the old one.
-    // The engine is part of the identity because `_anyVersion` is per-engine
-    // and both counters start at zero, so a generation from one would
-    // spuriously validate against the other.
+    // The engine is part of the identity because the cache generation is
+    // per-engine and both counters start at zero, so a generation from one
+    // would spuriously validate against the other.
     entry = {
       engine: ce,
       key: probeKey,
@@ -1477,7 +1477,7 @@ function bareMappingElementType(
   // merges it into any enclosing collector.
   return cachedValue(
     entry.slot,
-    ce._anyVersion,
+    ce._cacheGeneration(),
     () => probeBareMappingElementType(ce, body, paramIndex, elementTypes),
     undefined,
     ce
@@ -1966,8 +1966,7 @@ function markerType(t: Type): Type {
       types: t.types.map((x) => markerType(x)),
     });
   if (t === 'never') return 'missing';
-  if (t === 'unknown' || t === 'any')
-    return parseType('nan | missing') as Type;
+  if (t === 'unknown' || t === 'any') return parseType('nan | missing') as Type;
   if (isSubtype(t, 'number')) return 'nan';
   return 'missing';
 }
@@ -2814,14 +2813,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // is: narrow it, so a function parameter whose only use is
       // `Length(cs)` types as a collection (and the lambda auto-broadcast
       // then binds a collection argument whole instead of mapping over it).
+      // The guard runs fact-blind with the write it gates: it reads the
+      // target's EFFECTIVE type, so an assumption that gives the target a
+      // tier would suppress a narrowing that outlives the assumption.
       const target = stripped[0];
-      if (
-        target !== undefined &&
-        isSymbol(target) &&
-        target.valueDefinition?.inferredType &&
-        target.type.type === 'unknown'
-      )
-        target._infer('collection', 'narrow');
+      ce._withoutFacts(() => {
+        if (
+          target !== undefined &&
+          isSymbol(target) &&
+          target.valueDefinition?.inferredType &&
+          target.type.type === 'unknown'
+        )
+          target._infer(() => 'collection', 'narrow');
+      });
       const adjusted = validateArguments(
         ce,
         stripped,
@@ -12161,20 +12165,36 @@ function sliceBounds(
   // private to `BoxedFunction` and covers only the nullary `count`/`isEmpty`/
   // `isFinite` facets, so it is not reachable for this; a WeakMap keyed by the
   // node holds the entry for exactly as long as the node itself lives.
+  const factsHidden = expr.engine._factsHidden();
   const cached = SLICE_BOUNDS_MEMO.get(expr);
-  if (cached !== undefined && cached.worldVersion === expr.engine._worldVersion)
+  if (
+    cached !== undefined &&
+    cached.worldVersion === expr.engine._worldVersion &&
+    cached.factsHidden === factsHidden
+  )
     return cached.bounds;
   const bounds = computeSliceBounds(expr);
   SLICE_BOUNDS_MEMO.set(expr, {
     worldVersion: expr.engine._worldVersion,
+    factsHidden,
     bounds,
   });
   return bounds;
 }
 
+/** The bounds walk EVALUATES the span operands and reads the source's count,
+ * either of which an assumed value can shape, so an entry filled while the
+ * assumptions were hidden must not be served to a read that can see them
+ * (`docs/plans/2026-08-30-assumptions-memo-inventory.md`). The suppression
+ * state is a field rather than a bit in `worldVersion`, because opening or
+ * closing a fact-blind bracket moves no version axis. */
 const SLICE_BOUNDS_MEMO = new WeakMap<
   Expression,
-  { worldVersion: number; bounds: { start: number; end: number } | undefined }
+  {
+    worldVersion: number;
+    factsHidden: boolean;
+    bounds: { start: number; end: number } | undefined;
+  }
 >();
 
 /** The uncached body of `sliceBounds()`; call `sliceBounds()`, never this. */

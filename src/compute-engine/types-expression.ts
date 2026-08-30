@@ -166,6 +166,11 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _setElementRefinement(t: BoxedType): void;
 
+  /** Fact-blind declared-type write — mirror of the member documented in
+   * `types-definitions.ts`.
+   * @internal */
+  _setType(thunk: () => Type | TypeString | BoxedType): void;
+
   /** Opaque snapshot/restore of the coupled type/value slots — mirror of
    * the members documented in `types-definitions.ts`.
    * @internal */
@@ -343,6 +348,10 @@ interface BoxedOperatorDefinition
    * time, not declared by the author. @internal */
   _derivedSignature: boolean;
   signature: BoxedType;
+  /** Fact-blind signature write — mirror of the member documented in
+   * `types-definitions.ts`.
+   * @internal */
+  _setSignature(thunk: () => BoxedType): void;
   /** The binding-site selector of the declaration's `scoped` flag, when one
    * was given — `undefined` for a plain `scoped: true` and for an unscoped
    * operator. Narrowed to the operand PATH here: `BindingSiteSelector` lives
@@ -2100,10 +2109,20 @@ export interface Expression {
    * If the given type is incompatible with the declared or previously inferred
    * type, return `false`.
    *
+   * The type is passed as a THUNK, and the implementation calls it inside the
+   * write's fact-blind bracket: an inferred type is stored on a definition and
+   * outlives the assumptions in force when it was computed, so neither the
+   * type nor the narrow/widen decision made from it may see a fact
+   * (`docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.4). Put the
+   * computation inside the thunk rather than in a variable computed before the
+   * call.
    *
    * @internal
    */
-  _infer(t: Type, inferenceMode?: 'narrow' | 'widen' | 'replace'): boolean;
+  _infer(
+    t: () => Type,
+    inferenceMode?: 'narrow' | 'widen' | 'replace'
+  ): boolean;
 
   /**
    * Update the definition associated with this expression, using the

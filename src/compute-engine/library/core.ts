@@ -494,6 +494,11 @@ function pipeImplicitMap(
  * served only when the axis has not moved since (a later declaration or
  * assignment can change the answer) and the topic is the same object, since
  * the type depends on both operands while only the stage is the key.
+ *
+ * The generation is the COMPOSITE one (`ce._cacheGeneration()`): the derived
+ * type can be narrowed by an assumption about a symbol the topic mentions, so
+ * an answer derived while the engine was hiding its assumptions must not be
+ * served to a read that can see them.
  */
 const PIPE_IMPLICIT_MAP_TYPE = new WeakMap<
   Expression,
@@ -596,7 +601,7 @@ function pipeImplicitMapType(
   const memo = PIPE_IMPLICIT_MAP_TYPE.get(stage);
   if (
     memo !== undefined &&
-    memo.generation === ce._anyVersion &&
+    memo.generation === ce._cacheGeneration() &&
     memo.topic === topic
   )
     return memo.type;
@@ -609,7 +614,7 @@ function pipeImplicitMapType(
   );
   const type = mapped?.type.type;
   PIPE_IMPLICIT_MAP_TYPE.set(stage, {
-    generation: ce._anyVersion,
+    generation: ce._cacheGeneration(),
     topic,
     type,
   });

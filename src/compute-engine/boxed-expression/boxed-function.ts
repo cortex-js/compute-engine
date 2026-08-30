@@ -171,7 +171,7 @@ import {
   nonPositiveSign,
   sgn,
 } from './sgn.js';
-import { cachedValue, CachedValue } from './cache.js';
+import { cachedCell, cachedValue, CachedValue } from './cache.js';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
 import {
   beginObjectDeps,
@@ -481,6 +481,17 @@ export class BoxedFunction
    * element memo (`collection-element-memo.ts`). */
   private _lazyValueEpoch = -1;
 
+  /** Whether the engine was hiding its assumptions when the lazy-collection
+   * evaluate memo was filled (`ce._factsHidden()`). An evaluation
+   * resolves symbols and can read a value an assumption put in force, so an
+   * entry filled with the facts hidden answers a different question from one
+   * filled with them in force, and neither may be served for the other.
+   *
+   * This is the same bit `ce._cacheGeneration()` carries in its low position,
+   * spelled as a flag because it must also guard the CONSTANT entry, which
+   * has no generation to carry it in. Checked on both kinds of entry. */
+  private _lazyValueFactsHidden = false;
+
   /** The ambient lexical scope a GENERATION-GATED lazy-collection memo entry
    * was filled under. `ce._anyVersion` alone does not characterize the
    * resolution environment: re-pushing an already-populated scope bumps
@@ -529,6 +540,15 @@ export class BoxedFunction
          * computation itself caused is absorbed (the element-memo stamp
          * discipline). */
         worldVersion: number;
+        /** Whether the assumptions were hidden (`ce._factsHidden()`)
+         * when the entries were computed. A facet walks a collection and can
+         * read a symbol's assumed value or effective type on the way, so the
+         * same node has two answers and an entry may only be served to a read
+         * on the same side of a fact-blind bracket
+         * (`docs/plans/2026-08-30-assumptions-memo-inventory.md`). A boolean
+         * rather than a bit in `worldVersion`, because a suppression window
+         * moves no axis. */
+        factsHidden: boolean;
         deps: MemoDeps;
         count?: FacetEntry<number | undefined>;
         isEmpty?: FacetEntry<boolean | undefined>;
@@ -542,7 +562,13 @@ export class BoxedFunction
    * compute, so `get type` reads this first: within one generation both
    * `isPure` and `isConstant` are stable, so the key would come out exactly as
    * it did last time and `cachedValue` would hit — the recomputation cannot
-   * change the answer. `-1` is "never computed" (generations start at 0). */
+   * change the answer. `-1` is "never computed" (generations start at 0).
+   *
+   * The COMPOSITE generation (`ce._cacheGeneration()`), so that the fast path
+   * closes when the engine starts or stops hiding its assumptions. One field
+   * for both cells of `_type`: a read that alternates between the two sides
+   * simply misses the fast path and goes to `cachedValue`, which serves the
+   * right cell. */
   private _typeGeneration = -1;
 
   constructor(
@@ -593,7 +619,10 @@ export class BoxedFunction
    * For function expressions, `_infer()` infers the result type of the function
    * based on the provided type and inference mode.
    */
-  _infer(t: Type, inferenceMode?: 'narrow' | 'widen' | 'replace'): boolean {
+  _infer(
+    t: () => Type,
+    inferenceMode?: 'narrow' | 'widen' | 'replace'
+  ): boolean {
     const def = this.operatorDefinition;
     if (!def || !def.inferredSignature) return false;
 
@@ -602,6 +631,19 @@ export class BoxedFunction
     // every call site is fire-and-forget, so declining is safe.
     if (this.engine._resolveOnlyDepth > 0) return false;
 
+    // The caller's type computation, the incumbent signature read and the
+    // narrow/widen all run with the assumptions hidden: the result is stored
+    // on a shared operator definition and must survive a `forget()`.
+    return this.engine._withoutFacts(() =>
+      this._inferWithoutFacts(def, t(), inferenceMode)
+    );
+  }
+
+  private _inferWithoutFacts(
+    def: BoxedOperatorDefinition,
+    t: Type,
+    inferenceMode?: 'narrow' | 'widen' | 'replace'
+  ): boolean {
     const previousSignature = def.signature;
 
     // Rollback journal (family 2): capture the signature `BoxedType` for an
@@ -932,18 +974,22 @@ export class BoxedFunction
    * persistent entry is EMPTY, which is the state the `cachedValue` commit
    * rule leaves a payload it refused to store in. */
   private _memoizedStructural(): Expression {
-    if (this._structural.value === null) {
+    const gen = this.engine._cacheGeneration();
+    // The entry has one cell per fact-suppression state, and the transient
+    // fallback answers for the cell this read uses.
+    const cell = cachedCell(this._structural, gen);
+    if (cell.value === null) {
       const hit = _transientStructural?.get(this);
       if (hit !== undefined) return hit;
     }
     const result = cachedValue(
       this._structural,
-      this.engine._anyVersion,
+      gen,
       () => this._computeStructural(),
       undefined,
       this.engine
     );
-    if (this._structural.value === null)
+    if (cell.value === null)
       (_transientStructural ??= new Map()).set(this, result);
     return result;
   }
@@ -1357,7 +1403,7 @@ export class BoxedFunction
     // node's answer still moves when its OPERATOR's definition is rewritten
     // in place, so a generation-independent key would never expire. The full
     // account is on the same key in `get type`.
-    const gen = this.engine._anyVersion;
+    const gen = this.engine._cacheGeneration();
     const compute = (): Sign | undefined => {
       if (!this.isValid || this.isNumber !== true) return undefined;
       return sgn(this);
@@ -1967,11 +2013,17 @@ export class BoxedFunction
 
   /** The type of the value of the function */
   get type(): BoxedType {
-    const generation = this.engine._anyVersion;
+    const generation = this.engine._cacheGeneration();
     // Fast path: the cache was already consulted at this generation, so the
     // key it was consulted with — which costs a purity projection and an
     // `isConstant` subtree walk — is necessarily the same one now. See
     // `_typeGeneration`.
+    //
+    // The generation is the COMPOSITE one, so that the assumption-bearing
+    // answer and the answer derived with the assumptions hidden never stand
+    // in for each other here — this path decides for itself and would
+    // otherwise serve the live type inside a suppressed window. The cell is
+    // selected the same way `cachedValue` selects it.
     //
     // This path bypasses `cachedValue`, so it repeats that helper's two
     // object-dependency duties itself: an entry whose recorded
@@ -1979,14 +2031,15 @@ export class BoxedFunction
     // store advances no engine generation, so `_typeGeneration` alone cannot
     // see it), and a served entry must fold its dependencies into any
     // enclosing collector, since a hit performs no field reads of its own.
+    const typeCell = cachedCell(this._type, generation);
     if (
       this._typeGeneration === generation &&
-      this._type.value !== null &&
-      objectDepsValid(this._type.objectDeps)
+      typeCell.value !== null &&
+      objectDepsValid(typeCell.objectDeps)
     ) {
-      mergeObjectDeps(this._type.objectDeps);
+      mergeObjectDeps(typeCell.objectDeps);
       if (CACHE_STATS) recordCache('type', 'hitFastPath');
-      return this._type.value ?? BoxedType.unknown;
+      return typeCell.value ?? BoxedType.unknown;
     }
 
     // Keyed on the engine generation, unconditionally. An earlier shape gave
@@ -2009,13 +2062,12 @@ export class BoxedFunction
     // slots here never had: a hit also requires `_lazyValueEpoch` to equal
     // the engine's current `_worldVersion`, and a redefinition advances that
     // version, so its generation-independent entries do expire.
-    const gen = this.engine._anyVersion;
     const compute = (): BoxedType =>
       new BoxedType(type(this), this.engine._typeResolver);
     const result =
       cachedValue(
         this._type,
-        gen,
+        generation,
         compute,
         CACHE_STATS
           ? {
@@ -2302,11 +2354,16 @@ export class BoxedFunction
    * value write can invalidate, a generation-gated entry is valid for that
    * generation and that resolution environment only. Both kinds expire at a
    * semantic epoch change. This keeps the hot path (a re-read of an
-   * already-evaluated constant view) free of the purity/constancy walk. */
+   * already-evaluated constant view) free of the purity/constancy walk.
+   *
+   * The suppression stamp is checked on BOTH kinds of entry — see
+   * {@link _lazyValueFactsHidden}. */
   private _lazyCollectionMemoHit(): Expression | undefined {
+    const factsHidden = this.engine._factsHidden();
     if (
       this._value.value !== null &&
       this._lazyValueEpoch === this.engine._worldVersion &&
+      this._lazyValueFactsHidden === factsHidden &&
       (this._value.generation === undefined ||
         (this._value.generation === this.engine._anyVersion &&
           this._lazyValueScope === this.engine.context?.lexicalScope)) &&
@@ -2330,6 +2387,11 @@ export class BoxedFunction
     if (CACHE_STATS) {
       if (this._value.value === null) recordCache('lazyValue', 'missCold');
       else if (this._lazyValueEpoch !== this.engine._worldVersion)
+        recordCache('lazyValue', 'missEpoch');
+      else if (this._lazyValueFactsHidden !== factsHidden)
+        // The entry answers the other side of a fact-suppression window.
+        // Counted with the epoch misses: both are a change of what the engine
+        // shows the computation, not a change of a value.
         recordCache('lazyValue', 'missEpoch');
       else if (this._value.generation !== this.engine._anyVersion)
         recordCache('lazyValue', 'missGeneration');
@@ -2367,6 +2429,11 @@ export class BoxedFunction
       // making the entry born stale.
       this._lazyValueEpoch = this.engine._worldVersion;
       this._lazyValueScope = this.engine.context?.lexicalScope;
+      // Which side of a fact-suppression window this walk ran on. Sampled
+      // here rather than before the walk: a walk that raised the depth itself
+      // has lowered it again by now, so what is recorded is the state the
+      // result belongs to.
+      this._lazyValueFactsHidden = this.engine._factsHidden();
     }
 
     // Prime the result's own memo with itself — but only with the
@@ -2389,6 +2456,8 @@ export class BoxedFunction
         // Same epoch axis as the write above; no scope stamp is needed for a
         // constant entry, which resolves no symbol through the ambient chain.
         result._lazyValueEpoch = this.engine._worldVersion;
+        // The suppression stamp IS needed: it guards the constant entry too.
+        result._lazyValueFactsHidden = this.engine._factsHidden();
       }
     }
   }
@@ -2720,8 +2789,13 @@ export class BoxedFunction
     compute: () => T
   ): T {
     const ce = this.engine;
+    const factsHidden = ce._factsHidden();
     const slot = this._facetMemo;
-    if (slot !== undefined && slot.worldVersion === ce._worldVersion) {
+    if (
+      slot !== undefined &&
+      slot.worldVersion === ce._worldVersion &&
+      slot.factsHidden === factsHidden
+    ) {
       const entry = slot[facet] as FacetEntry<T> | undefined;
       if (entry !== undefined) {
         // A store to a mutable object moves neither `_worldVersion` nor any
@@ -2789,6 +2863,7 @@ export class BoxedFunction
     if (
       target === undefined ||
       target.worldVersion !== world ||
+      target.factsHidden !== factsHidden ||
       !memoDepsStillValid(this, target.deps)
     ) {
       const deps = snapshotMemoDeps(this);
@@ -2797,7 +2872,7 @@ export class BoxedFunction
         if (CACHE_STATS) recordCache('collectionFacet', 'declineStore');
         return value;
       }
-      target = { worldVersion: world, deps };
+      target = { worldVersion: world, factsHidden, deps };
       this._facetMemo = target;
     }
     // The (facet → T) pairing is maintained by the three call sites (`count`
@@ -3209,7 +3284,7 @@ export class BoxedFunction
     // node's answer still moves when its OPERATOR's definition is rewritten
     // in place, so a generation-independent key would never expire. The full
     // account is on the same key in `get type`.
-    const gen = this.engine._anyVersion;
+    const gen = this.engine._cacheGeneration();
     const evaluated = cachedValue(
       this._eagerSource,
       gen,

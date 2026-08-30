@@ -1,7 +1,9 @@
 # Assumptions are facts, not type writes: `facts.type` merged at read time
 
-Status: RULED 2026-08-30, implementation IN PROGRESS (phase 1 of three,
-see §5). Revs 1–5 were dual-reviewed (25 + 24 + 23 + 25 + 30 findings,
+Status: RULED 2026-08-30, all three phases IMPLEMENTED 2026-08-30 (see
+§5; the fact store and the read-time merge, the memo keys and the
+fact-blind write bracket, then the write-routine regression matrix and
+the exit criteria). Revs 1–5 were dual-reviewed (25 + 24 + 23 + 25 + 30 findings,
 all logged in `docs/scratch/ASSUMPTIONS_AS_FACTS_TYPE_SPEC_REVIEW.md`);
 rev 6 folds in every rev-5 finding. The user chose phased implementation
 with code review per phase over a sixth document round.
@@ -602,7 +604,7 @@ definitions. Symbols are declared `real` unless stated.
 | `assume(And(x > 3, Foo(y)))` (y undeclared)                           | `not-a-predicate`; `y` declared?   | `not-a-predicate`; `x` published, `y` not |
 | `assume x > 3; assume x > 1`                                          | `tautology`                        | `tautology`                              |
 | `assume w > 3; declare w integer`                                     | throws "already declared"          | `ok` — the auto-declaration is inferred, not a contract; `declare` upgrades it (phase 2 measured; rev 6 said "throws", wrongly) |
-| `assume s ≠ √2; assume s = √2`                                        | `ok` (gap)                         | `ok` (§7)                                |
+| `assume s ≠ √2; assume s = √2`                                        | `ok` (gap)                         | `contradiction` — the gap CLOSED, unplanned: the transaction's value-versus-fact check catches an equality that names an excluded value, even though the exclusion contributes nothing to the type (measured after phase 3; §7's entry is retired) |
 | `lookupDefinition(x).value.type` after `assume x > 4`                 | `real<4<..>`                       | `real<4<..>` (`.declaredType`: `real`)   |
 
 ## 5. Implementation plan and exit criteria
@@ -700,8 +702,10 @@ definitions. Symbols are declared `real` unless stated.
   whole-value tier they prove does move.
 - Dependency stamps on stored types (§3).
 - The name-keyed sign/bounds/membership channels (Q1).
-- `assume(s ≠ √2); assume(s = √2)`; a value-union type for
-  `x ∈ <finite literal set>`.
+- A value-union type for `x ∈ <finite literal set>`.
+  (`assume(s ≠ √2); assume(s = √2)` was listed here and is no longer a
+  gap: the per-conjunct transaction answers `contradiction`, measured
+  after phase 3. See the §4 row.)
 - Healing a stored type after a REDECLARATION of a symbol it mentioned.
 - A stored VALUE shaped by a fact before the write (§3): only the type
   derived from it is fact-free.

@@ -540,6 +540,11 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
     // recursing. What must not happen — and used to — is that the computation
     // consuming that answer goes on to commit, freezing a previous
     // generation's value under the new key.
+    //
+    // The generations below are EVEN, so both belong to the same cell of the
+    // entry: a `cachedValue` key is the composite `ce._cacheGeneration()`,
+    // whose low bit says whether the engine was hiding its assumptions, and
+    // the two parities are two cells that never answer for each other.
     const p = person();
     const slot: { value: number | null; generation: number | undefined } = {
       value: null,
@@ -552,28 +557,28 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
       return runs;
     };
 
-    expect(cachedValue(slot, 1, readAge, undefined, ce)).toBe(1);
+    expect(cachedValue(slot, 2, readAge, undefined, ce)).toBe(1);
 
     // A new generation, with nothing about `p` changed: the entry is stale by
     // KEY only, which is what makes it servable to a re-entrant read.
     let seen: number | undefined;
     const outerPass = (): number => {
-      seen = cachedValue(slot, 2, readAge, undefined, ce); // re-entrant read of this very slot
+      seen = cachedValue(slot, 4, readAge, undefined, ce); // re-entrant read of this very slot
       return readAge();
     };
-    expect(cachedValue(slot, 2, outerPass, undefined, ce)).toBe(2);
+    expect(cachedValue(slot, 4, outerPass, undefined, ce)).toBe(2);
     expect(seen).toBe(1); // the previous value, served provisionally
 
     // …and nothing was frozen: the entry is back at its own key, holding its
     // own value. It is kept rather than emptied because it is what the NEXT
     // re-entrant read has to be answered with.
     expect(slot.value).toBe(1);
-    expect(slot.generation).toBe(1);
+    expect(slot.generation).toBe(2);
 
     // The dependency channel still governs that surviving entry: a store to
     // the object it read invalidates it.
     p._store('age', ce.number(43));
-    expect(cachedValue(slot, 1, readAge, undefined, ce)).toBe(3);
+    expect(cachedValue(slot, 2, readAge, undefined, ce)).toBe(3);
   });
 
   test('a computation that consumed a provisional answer commits nothing — not even an OUTER one', () => {
@@ -596,28 +601,28 @@ describe('CACHE FAMILY — cachedValue (_type, _sgn, _eagerSource)', () => {
 
     // Prime `inner` at an OLDER generation, so a re-entrant read of it has a
     // previous value to be answered with.
-    expect(cachedValue(inner, 1, () => 0)).toBe(0);
+    expect(cachedValue(inner, 2, () => 0)).toBe(0);
 
     let pass = 0;
     const computeInner = (): number => {
       pass += 1;
-      if (pass === 1) return cachedValue(inner, 2, computeInner, undefined, ce);
+      if (pass === 1) return cachedValue(inner, 4, computeInner, undefined, ce);
       return ageOf();
     };
     const computeOuter = (): number =>
-      cachedValue(inner, 2, computeInner, undefined, ce);
+      cachedValue(inner, 4, computeInner, undefined, ce);
 
-    expect(cachedValue(outer, 2, computeOuter, undefined, ce)).toBe(0); // provisional
+    expect(cachedValue(outer, 4, computeOuter, undefined, ce)).toBe(0); // provisional
     expect(outer.value).toBeNull(); // …and not frozen
     // Nor did the entry that was re-entered move: still the primed value, at
     // its own key, so the new key it was asked for was never stamped over it.
     expect(inner.value).toBe(0);
-    expect(inner.generation).toBe(1);
+    expect(inner.generation).toBe(2);
 
     // The proof that the dependency-free 0 never became an entry: a store the
     // outer computation could not have recorded still changes what it returns.
     p._store('age', ce.number(43));
-    expect(cachedValue(outer, 2, computeOuter, undefined, ce)).toBe(43);
+    expect(cachedValue(outer, 4, computeOuter, undefined, ce)).toBe(43);
   });
 
   test('a hit is refused once a recorded object version has moved', () => {

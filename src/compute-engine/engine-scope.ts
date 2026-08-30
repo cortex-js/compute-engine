@@ -1,4 +1,5 @@
 import { BLUE, BOLD, CYAN, GREY, RESET } from '../common/ansi-codes.js';
+import { CACHE_STATS, recordScopePop } from '../common/cache-stats.js';
 import { typeToString } from '../common/type/serialize.js';
 
 import type {
@@ -165,6 +166,7 @@ function discardEvalContext(
     context?._anyVersionAtPush === ce._anyVersion &&
     context?._semanticVersionAtPush === ce._semanticVersion &&
     context?._worldVersionAtPush === ce._worldVersion;
+  if (CACHE_STATS) recordScopePop(clean ? 'clean' : 'dirty');
   ce._noteStateEvent({
     kind: 'scope-pop',
     assumptionsDirty: context?._assumptionsDirty === true,

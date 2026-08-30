@@ -486,6 +486,15 @@ interface ExactProofMemo {
   /** `ce._semanticVersion` at proof time (only consulted when `dynamic` or
    * `typeExprs` is non-empty). */
   generation: number;
+  /** Whether the assumptions were hidden (`ce._factsHidden()`) when
+   * the proof was taken. The proof reads source VALUES and, for an annotated
+   * parameter, source TYPES; an assumed value or an assumption-narrowed type
+   * changes both, so a proof taken inside a fact-blind bracket must not be
+   * served to a read that can see the facts, or the other way round
+   * (`docs/plans/2026-08-30-assumptions-memo-inventory.md`). Separate from
+   * `generation` because opening or closing such a bracket moves no version
+   * axis. */
+  factsHidden: boolean;
 }
 
 /** The recorded keys of `typeExprs`, recomputed. */
@@ -516,7 +525,9 @@ export function exactTierShape(
   ce: ComputeEngine,
   expr: Expression
 ): ExactTierShape | undefined {
-  const memo = exactProofMemo.get(expr);
+  const factsHidden = ce._factsHidden();
+  const recorded = exactProofMemo.get(expr);
+  const memo = recorded?.factsHidden === factsHidden ? recorded : undefined;
   if (memo !== undefined) {
     if (!memo.dynamic && memo.typeExprs.length === 0) return memo.shape;
     if (memo.generation === ce._semanticVersion) return memo.shape;
@@ -562,6 +573,7 @@ export function exactTierShape(
     typeExprs: ctx.typeExprs,
     typeKey: typeKeyOf(ctx.typeExprs),
     generation: ce._semanticVersion,
+    factsHidden,
   });
   return shape;
 }

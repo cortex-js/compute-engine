@@ -1655,6 +1655,14 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _setElementRefinement(t: BoxedType): void;
 
+  /** Write the declared type, deriving it inside the write's fact-blind
+   * bracket: the thunk and the write both run with the assumptions hidden, so
+   * neither the stored type nor the decisions that chose it can carry a fact
+   * that a later `forget()` retracts. The public {@link type} setter delegates
+   * here.
+   * @internal */
+  _setType(thunk: () => Type | TypeString | BoxedType): void;
+
   /** History of writes to this definition's type: which type each write
    * installed, by which mechanism, and — for inference writes — the
    * expression whose canonicalization triggered it. Appended only when a
@@ -2286,6 +2294,13 @@ export interface BoxedOperatorDefinition
 
   /** The type of the arguments and return value of this function */
   signature: BoxedType;
+
+  /** Write the signature, deriving it inside the write's fact-blind bracket:
+   * the thunk and the write both run with the assumptions hidden, so a stored
+   * arrow never encodes a proof the next `forget()` retracts. The public
+   * {@link signature} setter delegates here.
+   * @internal */
+  _setSignature(thunk: () => BoxedType): void;
 
   /**
    * The *resolved* missing-value behavior (§3.A of the missing-value typing

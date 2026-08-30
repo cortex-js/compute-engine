@@ -9,6 +9,7 @@ import type {
 } from '../global-types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { cachedValue, type CachedValue } from './cache.js';
 import { hashCode } from './utils.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -66,7 +67,15 @@ export class BoxedDictionary
    * it were the stored value. Every read below must therefore avoid
    * prototype-derived methods too — see `has` and `match`. */
   private readonly _keyValues: Record<string, Expression> = Object.create(null);
-  private _type: BoxedType | undefined;
+  /** Memo for {@link type}, keyed on the composite cache generation
+   * (`ce._cacheGeneration()`). A cell's type can be narrowed by an
+   * assumption about a symbol it mentions — `{a: q}` with `q` assumed
+   * greater than 3 types `record{a: real<3<..>}` — and that is a FACT about
+   * the current state, not a property of the literal, so the entry must
+   * expire when `assume()` or `forget()` moves the engine generation. It was
+   * unversioned before, which left the narrowed answer standing after the
+   * assumption was retracted. */
+  private _type: CachedValue<BoxedType> = { value: null, generation: -1 };
   /** Set when the input was not a well-formed dictionary. Boxing checks this
    * and returns the error INSTEAD of the half-built dictionary, so a caller
    * boxing untrusted input never has to catch a JS exception — the contract
@@ -308,7 +317,16 @@ export class BoxedDictionary
   }
 
   get type(): BoxedType {
-    if (this._type) return this._type;
+    return cachedValue(
+      this._type,
+      this.engine._cacheGeneration(),
+      () => this._computeType(),
+      undefined,
+      this.engine
+    );
+  }
+
+  private _computeType(): BoxedType {
     const keys = Object.keys(this._keyValues);
     // A dictionary literal always knows its keys, so synthesize the narrower
     // `record{k: T, …}` — the shape a `record`-bodied type can accept. It is a
@@ -332,16 +350,14 @@ export class BoxedDictionary
       // included.)
       for (const key of keys)
         elements[key] = storedCellType(this._keyValues[key]);
-      this._type = new BoxedType({ kind: 'record', elements });
-      return this._type;
+      return new BoxedType({ kind: 'record', elements });
     }
     const eltType = widen(
       // Same storage rule as the record arm: `widen` is a JOIN and a join of
       // one literal type is that literal type, so project the cells first.
       ...Object.values(this._keyValues).map(storedCellType)
     );
-    this._type = new BoxedType({ kind: 'dictionary', values: eltType });
-    return this._type;
+    return new BoxedType({ kind: 'dictionary', values: eltType });
   }
 
   get isPure(): boolean {

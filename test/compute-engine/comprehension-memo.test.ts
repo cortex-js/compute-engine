@@ -149,7 +149,7 @@ describe('Comprehension element memo', () => {
     const before = ce._semanticVersion;
     // Narrow the generic `function` signature to a concrete one — this hits the
     // `def.operator.signature = newType` exit of the operator-def branch.
-    const changed = (s as any)._infer('(number) -> number', 'narrow');
+    const changed = (s as any)._infer(() => '(number) -> number', 'narrow');
     expect(changed).toBe(true);
     expect((ce.box('opmemo') as any)._def?.operator?.signature?.toString()).toBe(
       '(number) -> number'

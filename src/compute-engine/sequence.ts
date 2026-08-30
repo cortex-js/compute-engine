@@ -395,8 +395,20 @@ export function createSequenceHandler(
       return undefined;
     }
 
-    // Generate memo key
-    const memoKey = isMultiIndex ? indices.join(',') : indices[0];
+    // Generate memo key.
+    //
+    // The key carries whether the assumptions are hidden right now
+    // (`ce._withoutFacts`, the bracket every type-write routine runs in): a
+    // recurrence whose body mentions a symbol answers differently when an
+    // `assume(x = …)` value is in force and when it is not, and a term
+    // computed on one side of the bracket must not be served to a read on the
+    // other (`docs/plans/2026-08-30-assumptions-memo-inventory.md`). The
+    // prefix is added only inside such a window, so ordinary keys — the ones a
+    // caller of `getSequenceCache` sees — keep the shape they had.
+    const indexKey = isMultiIndex ? indices.join(',') : indices[0];
+    const memoKey = engine._factsHidden()
+      ? `facts-hidden|${indexKey}`
+      : indexKey;
 
     // Check memo first
     if (memo?.has(memoKey)) return memo.get(memoKey)!;

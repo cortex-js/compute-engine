@@ -546,9 +546,33 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       return this._signature;
     },
     set(this: _BoxedOperatorDefinition, value: BoxedType) {
-      this._signature = value;
+      // The public accessor keeps its type-valued shape and delegates to the
+      // thunk API, so no write can bypass the fact-blind bracket. A function
+      // is never a signature, so one arriving here is a thunk handed to the
+      // wrong entry point.
+      if (typeof value === 'function')
+        throw new Error(
+          `The signature of "${this.name}" was set to a function. Use "_setSignature()" to compute a signature inside the write's fact-blind bracket.`
+        );
+      this._setSignature(() => value);
     },
   };
+
+  /** Write this definition's signature, deriving it with the assumptions
+   * hidden.
+   *
+   * A signature is a CONTRACT: `assume(p > 3); f := x ↦ (p > 2)` must store
+   * `(unknown) -> boolean`, not the `-> true` the fact would prove, because
+   * the next statement can retract the fact while the stored signature stays
+   * (`docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.4). The thunk
+   * runs inside the bracket with the write, so the derivation and the write
+   * see the same, fact-free, state.
+   * @internal */
+  _setSignature(thunk: () => BoxedType): void {
+    this.engine._withoutFacts(() => {
+      this._signature = thunk();
+    });
+  }
 
   constructor(ce: ComputeEngine, name: string, def: OperatorDefinition) {
     Object.defineProperty(
@@ -1270,33 +1294,42 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         isFunction(boxedFn) &&
         boxedFn.operator === 'Function'
       ) {
-        const body = boxedFn.ops[0];
-        const params = boxedFn.ops.slice(1);
-        // The signature is assembled as a Type OBJECT, never as a string that
-        // is re-parsed: a body type may REFERENCE a type declared inside the
-        // body's own scope (`function f(a) { type inner = …; inner(a, a) }`),
-        // and that name is not resolvable from the declaration site the
-        // definition is installed at — serializing it to `"(unknown) -> inner"`
-        // and re-parsing here threw "Unknown type". The `TypeReference` object
-        // carries its own `def`, so it stays usable wherever it escapes to.
-        const signature: Type = {
-          kind: 'signature',
-          // A parameter slot is `unknown` unless the body's uses inferred a
-          // COLLECTION type for it (`v[1]` narrows `v` through `At`'s
-          // signature): surfacing that keeps `paramsAreScalar` false, so a
-          // list argument is applied to the function rather than broadcast
-          // element-wise over it. Same rule, same helper as the literal's own
-          // arrow (`functionLiteralSignatureType`).
-          ...(params.length > 0
-            ? {
-                args: params.map((p) => ({
-                  type: inferredCollectionParameterType(p) ?? 'unknown',
-                })),
-              }
-            : {}),
-          result: body.type.type,
-        };
-        this.signature = new BoxedType(signature, this.engine._typeResolver);
+        // The whole derivation runs inside `_setSignature`'s fact-blind
+        // bracket: the body's type and each parameter's inferred collection
+        // type are read there, so an assumption in force when the definition
+        // is installed cannot reach the stored arrow. Without it,
+        // `assume(p > 3); f := x ↦ (p > 2)` froze `(unknown) -> true`, which
+        // survived `forget(p)`.
+        this._setSignature(() => {
+          const body = boxedFn.ops[0];
+          const params = boxedFn.ops.slice(1);
+          // The signature is assembled as a Type OBJECT, never as a string
+          // that is re-parsed: a body type may REFERENCE a type declared
+          // inside the body's own scope
+          // (`function f(a) { type inner = …; inner(a, a) }`), and that name
+          // is not resolvable from the declaration site the definition is
+          // installed at — serializing it to `"(unknown) -> inner"` and
+          // re-parsing here threw "Unknown type". The `TypeReference` object
+          // carries its own `def`, so it stays usable wherever it escapes to.
+          const signature: Type = {
+            kind: 'signature',
+            // A parameter slot is `unknown` unless the body's uses inferred a
+            // COLLECTION type for it (`v[1]` narrows `v` through `At`'s
+            // signature): surfacing that keeps `paramsAreScalar` false, so a
+            // list argument is applied to the function rather than broadcast
+            // element-wise over it. Same rule, same helper as the literal's
+            // own arrow (`functionLiteralSignatureType`).
+            ...(params.length > 0
+              ? {
+                  args: params.map((p) => ({
+                    type: inferredCollectionParameterType(p) ?? 'unknown',
+                  })),
+                }
+              : {}),
+            result: body.type.type,
+          };
+          return new BoxedType(signature, this.engine._typeResolver);
+        });
       }
 
       // Mark this operator definition as backed by a user-defined function

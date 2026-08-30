@@ -2172,16 +2172,23 @@ function narrowArgsFromInferredSignature(
   args: ReadonlyArray<Expression>
 ): void {
   if (typeof sig === 'string' || sig.kind !== 'signature' || !sig.args) return;
-  const n = Math.min(args.length, sig.args.length);
-  for (let i = 0; i < n; i++) {
-    const arg = args[i];
-    if (!isSymbol(arg)) continue;
-    if (!arg.valueDefinition?.inferredType) continue;
-    if (arg.type.type !== 'unknown') continue;
-    const paramType = sig.args[i].type;
-    if (!isCollectionOnlyType(paramType)) continue;
-    arg._infer(paramType, 'narrow');
-  }
+  const sigArgs = sig.args;
+  const n = Math.min(args.length, sigArgs.length);
+  if (n === 0) return;
+  // The eligibility test reads each argument's EFFECTIVE type, so it runs
+  // fact-blind with the write it gates: an assumption that gives the argument
+  // a tier would otherwise suppress a narrowing that outlives the assumption.
+  args[0].engine._withoutFacts(() => {
+    for (let i = 0; i < n; i++) {
+      const arg = args[i];
+      if (!isSymbol(arg)) continue;
+      if (!arg.valueDefinition?.inferredType) continue;
+      if (arg.type.type !== 'unknown') continue;
+      const paramType = sigArgs[i].type;
+      if (!isCollectionOnlyType(paramType)) continue;
+      arg._infer(() => paramType, 'narrow');
+    }
+  });
 }
 
 /**

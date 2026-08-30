@@ -120,6 +120,15 @@ interface ElementMemoCache {
    * engine-configuration input (tolerance/precision/angular unit), which is
    * why no separate configuration stamps are kept. */
   worldVersion: number;
+  /** Whether the assumptions were hidden (`ce._factsHidden()`) while
+   * the elements were computed. A walk evaluates elements, and an element can
+   * be shaped by an assumed value or by a symbol's effective type, so the same
+   * instance has two element lists and an entry may only be served to a read
+   * on the same side of a fact-blind bracket
+   * (`docs/plans/2026-08-30-assumptions-memo-inventory.md`). A boolean rather
+   * than a bit in `worldVersion`, because a suppression window moves no
+   * axis. */
+  factsHidden: boolean;
   deps: ElementMemoDep[];
   /** True when `elements` is the whole collection. `each()` serves only
    * complete entries; `at()`/`elementMemoFillTo` serve any covering prefix.
@@ -718,6 +727,10 @@ export function validElementMemo(
     if (CACHE_STATS) recordCache('elementMemo', 'missEpoch');
     return undefined;
   }
+  if (entry.factsHidden !== ce._factsHidden()) {
+    if (CACHE_STATS) recordCache('elementMemo', 'missEpoch');
+    return undefined;
+  }
   if (!memoDepsStillValid(expr, entry.deps)) {
     if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
     return undefined;
@@ -826,6 +839,7 @@ function commitRecordedWalk(
   }
   elementMemoCaches.set(expr, {
     worldVersion: expr.engine._worldVersion,
+    factsHidden: expr.engine._factsHidden(),
     deps: endDeps,
     complete,
     elements: buffer,
@@ -996,6 +1010,7 @@ export function elementMemoFillTo(
     const ce = expr.engine;
     elementMemoCaches.set(expr, {
       worldVersion: ce._worldVersion,
+      factsHidden: ce._factsHidden(),
       deps,
       complete,
       elements,

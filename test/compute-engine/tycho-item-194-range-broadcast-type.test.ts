@@ -211,7 +211,7 @@ describe('inference marks its own writes inferred', () => {
     const ce = new ComputeEngine();
     ce.declare('z', 'unknown');
     const z = ce.symbol('z');
-    expect(z._infer(ce.type('integer').type)).toBe(true);
+    expect(z._infer(() => ce.type('integer').type)).toBe(true);
     expect(z.type.toString()).toBe('integer');
     // The narrowing is a guess, not a contract.
     expect(z.valueDefinition?.inferredType).toBe(true);
@@ -227,7 +227,7 @@ describe('inference marks its own writes inferred', () => {
     expect(ce.symbol('w').valueDefinition?.inferredType).toBe(false);
     expect(() => ce.assign('w', ce.box(['Rational', 1, 2]))).toThrow();
     // ...and inference cannot quietly move it off the declared track either.
-    expect(ce.symbol('w')._infer(ce.type('real').type)).toBe(false);
+    expect(ce.symbol('w')._infer(() => ce.type('real').type)).toBe(false);
     expect(ce.symbol('w').valueDefinition?.inferredType).toBe(false);
   });
 });

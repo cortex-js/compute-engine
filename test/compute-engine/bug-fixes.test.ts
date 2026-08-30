@@ -234,7 +234,7 @@ describe('Playground regressions', () => {
     test('_infer() is a no-op on constants', () => {
       const ce = new ComputeEngine();
       const placeholder = ce.symbol('ContinuationPlaceholder');
-      expect(placeholder._infer('integer')).toBe(false);
+      expect(placeholder._infer(() => 'integer')).toBe(false);
       expect(placeholder.type.toString()).toBe('unknown');
     });
   });
