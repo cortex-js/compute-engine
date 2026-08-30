@@ -1361,7 +1361,36 @@ the pins or the new symbol-value lowering is wrong; the session that
 landed `1ec661bf` should decide which. Left untouched to avoid crossing
 a peer's in-flight work.
 
-### Assumptions bake into stored types — RULED 2026-08-30, implementation IN PROGRESS (phase 1: fact store)
+### Assumption transaction residue — OPEN 2026-08-30 (phase-2 code review; small, scoped)
+
+Three items the phase-2 review surfaced and the fixer scoped out, each
+with its fix named:
+
+- **Provisional definitions are discarded on rollback only for the raw
+  route.** `ce.assume(['And', ['Greater','p',0], ['Less','p',-5]])` now
+  leaves `p` undeclared after the `'contradiction'`, but
+  `ce.assume(ce.parse('p > 0 \\land p < -5'))` and the string route
+  still leave `p` declared, because `ce.parse`/`ce.box` auto-declare
+  free symbols in the CALLER's frame before `assume()` runs (and
+  `predicateFromArg` canonicalizes strings inside itself). Pre-existing
+  behavior. Fix: `predicateFromArg` boxes raw for `assume` only and the
+  pre-canonical name capture moves inside it (~3 lines; the `isValid`
+  check then runs on a non-canonical expression — verify it still
+  refuses what it refuses today).
+- **`assume(Element(m, Union(Range(1,3), Range(5,7))))` types `m` as
+  `unknown`.** `membershipType` maps a union of ranges to `integer`, but
+  the evaluated operand is apparently no longer a `Union` of `Range`s
+  when the fact index reads it. Pre-existing. Fix: normalize the union
+  operand once in `assumeElementOfSet` and record the normalized form.
+- **A rejected first conjunct that disposes a name the second conjunct
+  re-declares** (`And(Foo(y), y > 3)`): the fact expression's `y` node
+  points at the disposed definition while the assertion's subject is the
+  new one. Readers of `ce.box('y')` answer correctly (measured); flagged
+  because the identity rule had not previously met this shape. Fix, if
+  wanted: resolve the fact's symbol nodes against the transaction
+  registry before recording.
+
+### Assumptions bake into stored types — RULED 2026-08-30, implementation IN PROGRESS (phase 1 COMMITTED `838fd336`; phase 2 — effective read + assume stops writing — in flight)
 
 `assume()` WRITES the assumed symbol's type (`assume.ts`:
 `refineSymbolType`, `refineTypeIfUnknown`), and `forget()` / a scope pop
@@ -1754,7 +1783,54 @@ transient map is deliberately not generation-keyed — a cache-axis bump
 DURING one synchronous read serves earlier-rebuilt nodes from the map —
 which is what "validates nothing" means here and is confined to one call.
 
-### Compiling a DAG-shared symbol value is exponential in the emitted source — BOUNDED 2026-08-23 by the fail-closed fold-size guard (user-ruled); the CSE initiative remains the general fix
+### Compiling a DAG-shared symbol value is exponential in the emitted source — RESOLVED 2026-08-29 on the JavaScript-family targets (folded values bound once); the fail-closed guard remains for the inline targets
+
+RESOLVED 2026-08-29 (Tycho item 225, the "CSE extension" the ruling below
+asked for). On a target that owns the default user-function registry (the
+`javascript` and `interval-js` targets), `tryFoldKnownSymbol` now emits a
+symbol's compound pure value ONCE as a preamble local — `const _val_f7 =
+…;`, in the same `defs` map and insertion order as the `_fn_*`
+definitions, so a dependency precedes its dependent — and every reference
+reads the name (`ensureFoldedValueEmitted`, `base-compiler.ts`). The
+`f(k) := f(k-1) + 2 f(k-1)` tower that was refused from depth 13 compiles
+at depth 30 in about 50 ms with the exact value. On the `Function`-literal
+route the definitions sit inside the lambda body, so a value that mentions a
+lambda parameter binds there too (`userFunctions.valueRoot`). Three cases
+keep the inline fold on purpose: a leaf value, an impure value (a preamble
+local would sample `Random()` once per call where the interpreter draws at
+every reference), and a fold requested under a binder whose bound names
+differ from the preamble's owner (`a := n + 1` under `Sum(a, n, 1, 3)` reads
+the index in the interpreter). The size guard stays, charging what the
+emitter writes — each bound value once — and still refuses the inline
+targets (Python) above the limit.
+
+Two further exponential engines on the same witness were found and fixed
+in the same round, both in the constant-folding pre-pass: it saw no
+`unknowns` in the tower (a symbol with a value is not unknown) and ran an
+exponential `N()` at every level until its 2 s budget expired, and its cost
+estimate priced a value-carrying symbol as a leaf. `constantFoldValue` now
+declines when a free symbol — or an impure operation, which fixes `r + r`
+with `r := Random()` compiling to a baked constant — is reachable through
+an assigned value (`foldValueBlocked`, memoized per compilation), and
+`foldCostEstimate` prices a symbol's value, cached by name. A value that
+refers to its own symbol (`b := b + 1`, storable raw) overflowed the stack
+in `isComplexValued` and in the inline fold; both now fail closed with
+"refers to itself". Pinned in `compile-fold-shared-values.test.ts`;
+`compile-fold-size-guard.test.ts` moved its refusal cases to Python.
+
+OPEN, found while pinning the binder rule (pre-existing, not introduced
+here): inside an emitted user-function body the compiler folds a symbol's
+value INLINE, so a value that mentions the function's parameter name reads
+the parameter (`a := 3t + 1`, `g(t) := t + a`: compiled `g(2)` is 9), while
+the interpreter resolves the value's `t` to the GLOBAL `t` — symbol-value
+resolution skips a foreign call-frame activation — and answers `2 + (3t +
+1)` with the outer `t`. The two disagree whenever a value mentions a
+parameter name of a function that reads it. Whichever side is right is a
+ruling on the activation-skip rule (see `docs/plans` for the 2026-08-21
+symbol-resolution round); the compiler side was left as it was.
+
+The record of the guard ruling follows.
+
 
 With the effects-memo and structural-memo fixes in (see CHANGELOG
 "Unreleased"), the item-225 witness (`art/nxlddeh5zv`, the valueless-slider

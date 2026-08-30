@@ -568,7 +568,10 @@ definitions. Symbols are declared `real` unless stated.
 | … then `forget x; f.type`                                             | `(unknown) -> true` (STALE)        | `(unknown) -> boolean`                   |
 | `declare p real<3<..>; g := t ↦ (p > 2); g.type`                      | `(unknown) -> true`                | `(unknown) -> true`                      |
 | `assume x > 4; (x > 2).type`                                          | `true`                             | `true`                                   |
-| `assume y ≠ 2; y.type`                                                | `real`                             | `real & !2`                              |
+| `assume y ≠ 2; y.type`                                                | `real`                             | `real & !2` (a subject declared `unknown` gets no `!k`: a bare `!3` has no tier and broke the solver's root filter — the fact still serves queries) |
+| `assume Im(τ) > 0; τ.type`                                            | `number`                           | `number & !0` (the derived `τ ≠ 0` fact now contributes) |
+| `declare s string; assume Re(s) > 1`                                  | `ok`, type untouched               | `contradiction` (`string ∩ number` is empty) |
+| `assign v 5; assume v ∈ ℝ; v.type`                                    | `real` (the `Element` route widened) | `integer` (stored-value rule; both routes now agree) |
 | `assume z = 5` (undeclared): `z.type` / after `forget`                | `integer` / `unknown`              | `integer` / `unknown`                    |
 | `assign v 5; assume v > 10`                                           | `contradiction`                    | `contradiction`                          |
 | `assign v 5; assume v > 3; v.type`                                    | `integer`                          | `integer`                                |
@@ -598,7 +601,7 @@ definitions. Symbols are declared `real` unless stated.
 | `assume x > 3; x.type = 'real'; ask(x > 3)`                           | nothing (write retracts)           | nothing                                  |
 | `assume(And(x > 3, Foo(y)))` (y undeclared)                           | `not-a-predicate`; `y` declared?   | `not-a-predicate`; `x` published, `y` not |
 | `assume x > 3; assume x > 1`                                          | `tautology`                        | `tautology`                              |
-| `assume w > 3; declare w integer`                                     | throws "already declared"          | throws                                   |
+| `assume w > 3; declare w integer`                                     | throws "already declared"          | `ok` — the auto-declaration is inferred, not a contract; `declare` upgrades it (phase 2 measured; rev 6 said "throws", wrongly) |
 | `assume s ≠ √2; assume s = √2`                                        | `ok` (gap)                         | `ok` (§7)                                |
 | `lookupDefinition(x).value.type` after `assume x > 4`                 | `real<4<..>`                       | `real<4<..>` (`.declaredType`: `real`)   |
 

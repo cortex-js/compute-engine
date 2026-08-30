@@ -119,13 +119,6 @@ type ContextAssumptions = {
   readonly assumedValues: ReadonlyArray<
     readonly [BoxedValueDefinition, Expression]
   >;
-  /** The names whose VALUE an `assume(x = …)` installed, copied because the
-   * set is mutated in place. `undefined` when the frame had no such set yet —
-   * a distinct state from an empty one, since a no-argument `forget()` reads
-   * this to decide which values it owns, and inventing an empty set would
-   * change nothing today but would misreport provenance to anything that
-   * tests for the set's presence. */
-  readonly bindings: ReadonlyArray<string> | undefined;
 };
 
 /** Host configuration a user program can reach. Stores that mutate IN PLACE
@@ -331,39 +324,33 @@ function snapshotAssumptions(
     >,
     dirty: context._assumptionsDirty,
     assumedValues: [...context.assumedValues.entries()],
-    bindings:
-      context.assumptionBindings === undefined
-        ? undefined
-        : [...context.assumptionBindings],
   }));
 }
 
 function restoreAssumptions(snapshot: ReadonlyArray<ContextAssumptions>): void {
-  for (const { context, entries, dirty, assumedValues, bindings } of snapshot) {
+  for (const { context, entries, dirty, assumedValues } of snapshot) {
     // The MAP is mutated, never replaced: `assume`/`forget` and the scope
     // machinery hold it by identity. Refilling it advances the map's own
     // `version`, which is what retires an index built from the contents the
     // window installed — the engine's generation counters cannot see a
     // refill that lands within one generation.
     context.assumptions.clear();
-    for (const [expr, records] of entries)
-      context.assumptions.set(expr, records);
+    for (const [expr, records] of entries) {
+      // An assertion whose subject definition was DISPOSED between the
+      // snapshot and the restore is about a binding that no longer exists —
+      // its scope was discarded — so it is not brought back. Dropping the
+      // last assertion of a key drops the key.
+      const live = records.filter(
+        (record) => !record.subjects.some((s) => s.def.disposed)
+      );
+      if (live.length !== 0) context.assumptions.set(expr, live);
+    }
     context._assumptionsDirty = dirty;
     // The assumed-value overlay is part of the same assumption state and is
     // restored the same way, in place.
     context.assumedValues.clear();
     for (const [def, value] of assumedValues)
-      context.assumedValues.set(def, value);
-    // Value provenance rides with the assumptions it describes. Without it a
-    // name that `assume(x = …)` introduced during the window stays marked as
-    // assumption-owned, so a later no-argument `forget()` would clear a value
-    // the replay assigned itself.
-    if (bindings === undefined) context.assumptionBindings = undefined;
-    else {
-      const set = (context.assumptionBindings ??= new Set<string>());
-      set.clear();
-      for (const name of bindings) set.add(name);
-    }
+      if (!def.disposed) context.assumedValues.set(def, value);
   }
 }
 

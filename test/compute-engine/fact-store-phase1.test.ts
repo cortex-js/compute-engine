@@ -172,7 +172,10 @@ describe('checkpoint restore round-trips the store', () => {
     ce.assume(ce.parse('q = 5'));
 
     const cp = ce.checkpoint();
-    expect(ce.context.assumptions.size).toBe(1);
+    // Two facts — the inequality, and the equality, which is recorded
+    // alongside the overlay entry so that the tier it proves has somewhere to
+    // be read from.
+    expect(ce.context.assumptions.size).toBe(2);
     expect(ce.context.assumedValues.size).toBe(1);
 
     ce.forget();
@@ -180,7 +183,7 @@ describe('checkpoint restore round-trips the store', () => {
     expect(ce.context.assumedValues.size).toBe(0);
 
     ce.restore(cp);
-    expect(ce.context.assumptions.size).toBe(1);
+    expect(ce.context.assumptions.size).toBe(2);
     expect(ce.context.assumedValues.size).toBe(1);
 
     // The restored record is the record — its subject reference survives,

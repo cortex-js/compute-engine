@@ -67,6 +67,13 @@ export interface ExpressionMapInterface<U, Expr = unknown> {
  * @category Assumptions
  */
 export type FactSubject<Def = unknown> = Readonly<{
+  /** The name the fact expression mentions. Kept alongside the definition
+   * because the fact expression is written with NAMES while the assertion is
+   * recorded against a DEFINITION: a consumer that reads a contribution out
+   * of the fact expression (the type contribution of `x ∈ Range(a, b)` is
+   * about `x`, not about `a` or `b`) needs to know which subject the part of
+   * the expression it read belongs to. */
+  symbol: string;
   def: Def;
   part: 'self' | 're' | 'im' | 'abs' | 'arg';
 }>;
@@ -470,13 +477,6 @@ export type EvalContext<
    */
   assumedValues: Map<ValueDef, Expr>;
   name: undefined | string;
-  /**
-   * Names of symbols in this context whose *value* was installed by
-   * `assume(x = …)` (as opposed to a user `declare()`/`assign()`). No-arg
-   * `forget()` clears these value bindings — but must leave user-assigned
-   * values intact — so their provenance is tracked here (SYM P2-10).
-   */
-  assumptionBindings?: Set<string>;
   /**
    * Set when `assume()`/`forget()` modified THIS context's assumptions.
    * Popping the context then silently reverts them, so the pop must bump

@@ -1500,17 +1500,15 @@ export type TypeProvenanceEntry = {
    *   boxing a free symbol or a function parameter, before any evidence.
    * - `'inferred'` — an `_infer()` write: narrowed from an argument use or
    *   widened from a result/value position.
-   * - `'assumed'` — written by the assumptions machinery (`ce.assume`).
    * - `'value-derived'` — reserved: a type promoted from an assigned
    *   value currently records no entry; `inferredType === true` with a
-   *   value is the marker. */
-  kind: 'declared' | 'auto-declared' | 'inferred' | 'assumed' | 'value-derived';
-  /** For an `'assumed'` write: the type the definition carried BEFORE the
-   * assumption wrote it — `undefined` when the assumption itself created
-   * the declaration. `forget()` rewinds a tail run of `'assumed'` entries
-   * to the first one's `previousType`, so removing the assumption also
-   * removes the range it encoded into the type. */
-  previousType?: BoxedType;
+   *   value is the marker.
+   *
+   * There is deliberately no kind for an assumption: an assumption never
+   * writes a type. It is a FACT the type READ merges into the declared type,
+   * and the read heals on its own when the fact is retracted
+   * (`docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.5). */
+  kind: 'declared' | 'auto-declared' | 'inferred' | 'value-derived';
   /** Which axis of the declaration contract the write touched. Phase 1
    * records only `'type'` (value types and operator signatures); the
    * effects axis (`effectsDeclared`) is the planned second user. */
@@ -1605,11 +1603,19 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
     */
   holdUntil: 'never' | 'evaluate' | 'N';
 
-  /** The current value of the symbol. For constants, this is immutable.
-   *  The definition object is the single source of truth — there is no
-   *  separate evaluation-context values map.
+  /** The current value of the symbol: the value an `assume(x = …)` puts in
+   *  force for the current context if there is one, else the stored value.
+   *  For constants, this is immutable.
    */
   value: Expression | undefined;
+
+  /** The value STORED on this definition — what `assign()`, a
+   *  `declare(name, { value })` or a library constant put here — with no
+   *  assumed value overlaid on it. A definition is USER-VALUED when this is
+   *  defined; an assumed value never lands here, so it cannot outlive the
+   *  scope that assumed it.
+   *  @internal */
+  readonly storedValue: Expression | undefined;
 
   /**
    * True if the current value refers to the symbol itself (a degenerate
@@ -1706,7 +1712,18 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _restoreCheckpointSnapshot(snapshot: unknown): void;
 
+  /** The type known in the CURRENT state: {@link declaredType} narrowed by
+   * everything the assumptions in force prove about this definition. Reading
+   * it is what makes a fact visible; nothing derived from it may be STORED
+   * (see {@link declaredType}). */
   type: BoxedType;
+
+  /** The type this definition DECLARES — its contract, built from the
+   * declaration and the stored value alone and never from an assumption.
+   * A write must read this rather than {@link type}: a type derived from a
+   * fact and then stored would outlive the fact it was proved from.
+   * @internal */
+  readonly declaredType: BoxedType;
 
   /**
    * Custom evaluation handler for subscripted expressions of this symbol.

@@ -2,6 +2,32 @@
 
 ### Breaking Changes
 
+- **Assumptions no longer write types.** An assumption is a fact about
+  the current scope; a declaration is a contract. `ce.assume(x > 3)` now
+  records a fact against `x`'s definition and `x.type` MERGES it at read
+  time (`real<3<..>`), instead of writing the range into the declaration.
+  The merge is keyed by definition identity, so a re-declared inner `x`
+  does not inherit facts about the outer one. Consequences: `forget()`
+  and a scope pop retract the type refinement with the fact (no rewind
+  machinery); `assume(x = 5)` installs its value in a per-scope overlay,
+  not in the definition; `assume(y ≠ 2)` refines `y.type` to
+  `real & !2`; a symbol with a stored value keeps the value's type
+  (`assign v 5; assume v ∈ ℝ` leaves `integer`); assigning a value that
+  refutes a fact in force throws, also for an already-valued symbol;
+  re-asserting an inherited fact against a re-declared symbol answers
+  `ok` rather than `tautology`; `declare s string; assume(Re(s) > 1)` is
+  a `contradiction`. Until the write-side bracketing lands (phase 3 of
+  `docs/plans/2026-08-29-assumptions-as-facts-type.md`), a stored
+  signature derived under an assumption still captures the refinement.
+  API: `TypeProvenanceEntry.previousType` and the `'assumed'` provenance
+  kind are removed (also from `InferenceWriteEvent.kind`);
+  `assumptionBindings` and `ContextAssumptions.bindings` are removed in
+  favor of `assumedValues`; `ce.context.assumptions` values are now
+  immutable arrays of fact records (`{ id, truth, subjects }`) instead of
+  booleans; `ExpressionMapInterface` gains `size` and `version`;
+  `BoxedValueDefinition` gains `declaredType`, `storedValue` and
+  `disposed`.
+
 - **Bare numeric types now contain only finite values.** The types `integer`,
   `rational`, `real`, and `complex` do not contain infinity or `NaN`. The
   numeric type hierarchy now defines `number` as

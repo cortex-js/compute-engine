@@ -56,7 +56,12 @@ import {
 import {
   constructorAssignmentError,
   declaredTypeError,
+  TypeCompatibilityError,
 } from './boxed-expression/type-compatibility-error.js';
+import {
+  provenTypeNode,
+  refutingFact,
+} from './boxed-expression/constraint-subject.js';
 import { osaDistance } from '../common/fuzzy-string-match.js';
 
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
@@ -2807,6 +2812,27 @@ function assertAssignableValueDef(
   if (def.isConstant)
     throw Error(`Cannot assign a value to the constant "${id}"`);
 
+  // A fact in force is a CONSTRAINT the new value has to satisfy: `assume(v >
+  // 3)` refuses `assign(v, 1)`. Read from what the facts prove ON THEIR OWN,
+  // because neither of the checks below sees it — an assumption writes no
+  // type, and the merged type this symbol reports skips the facts entirely
+  // once it holds a value (`assign u 5; assume u > 3; assign u 1`). Checked
+  // BEFORE the write, so a refusal leaves the value and the type untouched.
+  const proven = provenTypeNode(ce, def);
+  if (proven !== undefined) {
+    const provenType = ce.type(proven);
+    if (!value.type.matches(provenType))
+      throw assumptionRefusalError(id, value, provenType, undefined);
+  }
+
+  // The type is only a summary of the facts — an equality contributes the
+  // promoted TIER of its value, so `assume(x = 5)` leaves the check above
+  // happy with `assign(x, 7)`. Ask the facts themselves: substitute the
+  // candidate value into each one and refuse a value that makes one false.
+  const refuted = refutingFact(ce, def, value);
+  if (refuted !== undefined)
+    throw assumptionRefusalError(id, value, def.declaredType, refuted);
+
   // An INFERRED type widens to cover the value (see the caller): nothing to
   // reject. When the type was DECLARED, hold the assigned value to it — the
   // same per-axis check the declare-with-value route applies in the
@@ -2838,6 +2864,38 @@ function assertAssignableValueDef(
     )
   )
     throw declaredTypeError(id, value, contract);
+}
+
+/**
+ * The refusal an ASSUMPTION makes of an assigned value.
+ *
+ * Deliberately not a {@link declaredTypeError}: nothing declared `v` to be
+ * greater than 3 — an assumption in force says so, and the way to lift it is
+ * `forget("v")`, not a change to the declaration. The message names the fact
+ * that refuses the value when there is one, and otherwise the type the facts
+ * prove together.
+ */
+function assumptionRefusalError(
+  id: string,
+  value: Expression,
+  requirement: BoxedType,
+  fact: Expression | undefined
+): TypeCompatibilityError {
+  const because =
+    fact !== undefined
+      ? `the assumption in force "${fact.toString()}"`
+      : `the assumptions in force, which require the type "${requirement}"`;
+  return new TypeCompatibilityError(
+    id,
+    requirement,
+    value.type,
+    'value',
+    [
+      `Symbol "${id}"`,
+      `The value "${value.toString()}" is refused by ${because}`,
+      `Use forget("${id}") to lift the assumptions about "${id}"`,
+    ].join('\n|   ')
+  );
 }
 
 /**

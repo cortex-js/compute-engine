@@ -1,7 +1,4 @@
-import { makeNumericRangeType } from '../common/type/numeric-range.js';
-import { nextDown, nextUp } from './numerics/numeric.js';
 import { isEmptyType, isSubtype } from '../common/type/subtype.js';
-import { reduceType } from '../common/type/reduce.js';
 import { functionResult } from '../common/type/utils.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import type { Type } from '../common/type/types.js';
@@ -16,10 +13,6 @@ import {
   IntervalBounds,
   Sign,
 } from './global-types.js';
-import {
-  recordTypeProvenance,
-  currentBoxingEpoch,
-} from './boxed-expression/type-provenance.js';
 
 import { findUnivariateRoots } from './boxed-expression/solve.js';
 import {
@@ -28,6 +21,7 @@ import {
   isOperatorDef,
   assignedVariableNames,
 } from './boxed-expression/utils.js';
+import { SIGNED_NUMBER_SETS } from './boxed-expression/number-set-types.js';
 import { isInequalityOperator } from './latex-syntax/utils.js';
 import {
   isFunction,
@@ -42,10 +36,17 @@ import {
   subjectKey,
   matchesSubject,
   boundsFromNormalizedInequality,
+  containsPartTerm,
+  mergeTightestBounds,
+  partBoundSubject,
   signFromBounds,
   getFactIndex,
   hasAssumptions,
   contextAssumptions,
+  membershipType,
+  provenTypeNode,
+  refutingFact,
+  withShieldedValues,
 } from './boxed-expression/constraint-subject.js';
 
 /**
@@ -72,7 +73,14 @@ function factSubjects(
       if (!found.has(key)) {
         const def = ce.lookupDefinition(subject.symbol);
         if (def !== undefined && isValueDef(def))
-          found.set(key, Object.freeze({ def: def.value, part: subject.part }));
+          found.set(
+            key,
+            Object.freeze({
+              symbol: subject.symbol,
+              def: def.value,
+              part: subject.part,
+            })
+          );
       }
       // A part term has been accounted for as a whole; descending into it
       // would also record its inner symbol under the 'self' part.
@@ -85,6 +93,23 @@ function factSubjects(
   return Object.freeze([...found.values()]);
 }
 
+/** True if `expr` carries an `incompatible-type` error anywhere. The code sits
+ * either directly under the `Error` head or inside its `ErrorCode` wrapper,
+ * depending on whether the error carries the expected and actual types. */
+function hasIncompatibleTypeError(expr: Expression): boolean {
+  if (isFunction(expr, 'Error')) {
+    const code = expr.op1;
+    if (isString(code) && code.string === 'incompatible-type') return true;
+    if (
+      isFunction(code, 'ErrorCode') &&
+      isString(code.op1) &&
+      code.op1.string === 'incompatible-type'
+    )
+      return true;
+  }
+  return isFunction(expr) && expr.ops.some(hasIncompatibleTypeError);
+}
+
 /**
  * Record `fact` in the current context's assumptions store.
  *
@@ -93,8 +118,24 @@ function factSubjects(
  * shallow-copies the map, so the inner and the enclosing context share the
  * array objects, and only installing a replacement leaves the enclosing
  * scope's assertions untouched.
+ *
+ * Answers `'ok'` when the fact was stored. An INVALID fact is never stored,
+ * because an error expression as a key would be handed to every reader of the
+ * store, and to the index that turns facts into types.
  */
-function recordFact(ce: ComputeEngine, fact: Expression, truth: boolean): void {
+function recordFact(
+  ce: ComputeEngine,
+  fact: Expression,
+  truth: boolean
+): AssumeResult {
+  // A predicate that does not type-check is no fact. `declare s string;
+  // assume(Re(s) > 1)` reduces to the `incompatible-type` error itself: a
+  // string has no real part, so the predicate is REFUTED and the answer is a
+  // contradiction. Any other invalid shape is simply not a predicate the
+  // assumptions layer can represent.
+  if (!fact.isValid)
+    return hasIncompatibleTypeError(fact) ? 'contradiction' : 'not-a-predicate';
+
   const assumptions = ce.context.assumptions;
   const record: FactRecord = Object.freeze({
     id: ce._nextFactId(),
@@ -102,100 +143,201 @@ function recordFact(ce: ComputeEngine, fact: Expression, truth: boolean): void {
     subjects: factSubjects(ce, fact),
   });
   const previous = assumptions.get(fact);
+  const tx = _transaction;
+  if (tx !== undefined) {
+    tx.undo.push(() => {
+      if (previous === undefined) assumptions.delete(fact);
+      else assumptions.set(fact, previous);
+    });
+    for (const s of record.subjects) tx.touched.add(s.def);
+  }
   assumptions.set(fact, previous ? [...previous, record] : [record]);
+  return 'ok';
+}
+
+//
+// ─── The assume transaction (design §2.5) ───────────────────────────────────
+//
+// `assume()` applies its conjuncts for real, against an UNDO LOG, and rolls
+// the log back when the result is a contradiction — where it used to validate
+// the whole conjunction in a throw-away child scope and then replay it. The
+// log is what makes a conjunction atomic (`And(p > 0, p < −5)` reports a
+// contradiction and leaves `p > 0` nowhere), and it is also what lets a
+// contradiction be detected by READING the effective type after the fact is
+// stored, now that storing a fact writes no type.
+
+type AssumeTransaction = {
+  readonly ce: ComputeEngine;
+  /** Applied in reverse to put both stores back exactly as they were. */
+  readonly undo: (() => void)[];
+  /** Every definition an applied fact is about: what the consistency checks
+   * re-read once the whole proposition is in. */
+  readonly touched: Set<BoxedValueDefinition>;
+  /** The assumed values this transaction installed, with what the overlay
+   * held for that definition before. */
+  readonly stagedValues: Map<
+    BoxedValueDefinition,
+    { prior: Expression | undefined; next: Expression }
+  >;
+  /** The scope the transaction opened in: where a binding it introduced is
+   * removed from when it gives that binding up. */
+  readonly scope: ComputeEngine['context']['lexicalScope'];
+  /** Names nothing had declared when the proposition was written, and that no
+   * conjunct has claimed yet. Canonicalizing the proposition binds every free
+   * symbol it mentions, so without this list the bindings a rolled-back
+   * transaction introduced could not be told from the ones the user made. */
+  readonly unattributed: Set<string>;
+  /** The names claimed by a conjunct that was applied: they go only if the
+   * WHOLE transaction rolls back. A name claimed by a conjunct the assumptions
+   * layer refuses is discarded with that conjunct instead, and never reaches
+   * this list. */
+  readonly introduced: string[];
+};
+
+/** The open transaction, if any. `assume()` is synchronous and one
+ * proposition is applied at a time, so module state is the whole story; a
+ * nested `assume()` (a conjunct, a link of a chain, a bound implied by a
+ * membership) joins the transaction its caller opened. */
+let _transaction: AssumeTransaction | undefined;
+
+function rollbackTransaction(tx: AssumeTransaction): void {
+  for (let i = tx.undo.length - 1; i >= 0; i--) tx.undo[i]();
+  // Every binding the transaction introduced goes with it — the ones a
+  // conjunct claimed as well as the ones no conjunct reached.
+  for (const name of tx.introduced) discardBinding(tx, name);
+  for (const name of tx.unattributed) discardBinding(tx, name);
 }
 
 /**
- * Record an assumption-driven type write in the definition's provenance
- * history (`_typeProvenance` — see `TypeProvenanceEntry` in
- * `types-definitions.ts`). Called AFTER the write, so the entry reads the
- * installed type back off the definition. Assumption writes are deliberately
- * NOT routed through `_noteInferenceWrite`: they never reported to the
- * narrowing sink or the fresh-inference set, and recording provenance must
- * not change that — the history is their only observer.
+ * Remove from the transaction's own scope a binding it introduced.
+ *
+ * The definition is DISPOSED as well as unbound: an expression boxed while the
+ * proposition was being applied still holds it by identity, and the flag is
+ * what tells the fact index and a checkpoint restore that assertions about it
+ * are about a value that no longer exists.
  */
-function recordAssumedType(
+function discardBinding(tx: AssumeTransaction, name: string): void {
+  const binding = tx.scope.bindings.get(name);
+  if (binding === undefined) return;
+  if (isValueDef(binding)) binding.value.dispose();
+  tx.scope.bindings.delete(name);
+}
+
+/**
+ * Install `value` as the assumed value of `def` in the current context's
+ * overlay.
+ *
+ * The definition itself is untouched: an assumed value is a FACT about the
+ * current scope's state, and the overlay is copied on a scope push and
+ * dropped on the pop, so the value has the lifetime of the scope that assumed
+ * it even when the definition belongs to an enclosing one.
+ */
+function stageAssumedValue(
   ce: ComputeEngine,
-  value: BoxedValueDefinition,
-  cause?: Expression,
-  previous?: BoxedType
+  def: BoxedValueDefinition,
+  value: Expression
 ): void {
-  // Append-on-change: a re-assertion that lands on the type already recorded
-  // (repeating `assume(q > 0)`) records nothing — a duplicate entry would
-  // burn the history cap and let a later no-op assertion masquerade as the
-  // type's source. Only the history entry is skipped: the caller's WRITE
-  // (and its `_writeVersion` bump) is pre-existing behavior and stands.
-  if (previous !== undefined && previous.toString() === value.type.toString())
-    return;
-  recordTypeProvenance(ce, value, {
-    type: value.type,
-    kind: 'assumed',
-    axis: 'type',
-    cause,
-    epoch: currentBoxingEpoch(ce),
-    // What the type was BEFORE this assumption wrote it (undefined for a
-    // declaration the assumption itself created). `forget()` rewinds a tail
-    // run of 'assumed' entries to the first one's previous type.
-    previousType: previous,
+  const overlay = ce.context.assumedValues;
+  const had = overlay.has(def);
+  const prior = overlay.get(def);
+  const tx = _transaction;
+  if (tx !== undefined) {
+    tx.undo.push(() => {
+      if (had) overlay.set(def, prior!);
+      else overlay.delete(def);
+    });
+    tx.stagedValues.set(def, { prior, next: value });
+    tx.touched.add(def);
+  }
+  overlay.set(def, value);
+}
+
+/**
+ * Give `symbol` a definition for a fact to be recorded against, when nothing
+ * declared it.
+ *
+ * The definition is PROVISIONAL: its type is `unknown` — an assumption
+ * declares nothing, it only states a fact, and what the fact proves is merged
+ * in by the type read — and the transaction discards the binding if it rolls
+ * back.
+ */
+function declareProvisional(ce: ComputeEngine, symbol: string): void {
+  if (ce.lookupDefinition(symbol) !== undefined) return;
+  ce.declare(symbol, { type: 'unknown', inferred: true });
+  const scope = ce.context.lexicalScope;
+  _transaction?.undo.push(() => {
+    const binding = scope.bindings.get(symbol);
+    if (binding !== undefined && isValueDef(binding)) binding.value.dispose();
+    scope.bindings.delete(symbol);
   });
 }
 
-/**
- * Record provenance on a binding the assumption itself installed via
- * `ce.declare()` — a symbol the assumption CREATED, or a current-scope
- * shadow of a parent binding (P1-6). Declaration is unconditional evidence
- * (there is no previous type to compare against), so no append-on-change
- * skip applies.
- */
-function recordDeclaredByAssumption(
+/** The type the FACTS alone prove about `def`, or `undefined` when they prove
+ * nothing. */
+function provenType(
   ce: ComputeEngine,
-  symbol: string,
-  cause?: Expression,
-  previous?: BoxedType
-): void {
-  const def = ce.lookupDefinition(symbol);
-  if (isValueDef(def)) recordAssumedType(ce, def.value, cause, previous);
+  def: BoxedValueDefinition
+): BoxedType | undefined {
+  const node = provenTypeNode(ce, def);
+  return node === undefined ? undefined : new BoxedType(node, ce._typeResolver);
 }
 
 /**
- * Infer a promoted type from a value expression. The promotion drops the
- * detail a single value carries — a range, or a literal type — and keeps only
- * the tier a symbol can be re-assigned within:
+ * The consistency checks that can only be run once the whole proposition is
+ * stored, because what a fact proves is now read back off the store rather
+ * than written into a definition.
  *
- * - an integer value, bounded or not, promotes to bare `integer`.
- * - a rational value promotes to `real`, one rung up: a symbol that held a
- *   rational is expected to accept any real.
- * - a real value promotes to bare `real`.
- * - a complex or imaginary value promotes to `number`, the numeric top.
- * - `+oo`, `-oo` and `~oo` promote to `infinity`, so that a symbol holding
- *   one infinity accepts another.
- * - NaN promotes to `nan`, which keeps the marker visible.
- *
- * This table must stay identical to the two other copies of it,
- * `widenAssignedType`/`inferTypeFromValue` in
- * `boxed-expression/boxed-value-definition.ts` and `promotedValueType` in
- * `engine-declarations.ts`: a symbol must get the same type whether an
- * assumption, a fresh declaration or an assignment supplied its value.
+ * Returns `'contradiction'` when the applied facts cannot all hold, and the
+ * caller then rolls the transaction back.
  */
-function inferTypeFromValue(ce: ComputeEngine, value: Expression): BoxedType {
-  // An integer value, ranged or not, keeps its tier and drops the range.
-  if (value.type.matches('integer')) return ce.type('integer');
+function transactionConsistency(
+  tx: AssumeTransaction
+): 'contradiction' | undefined {
+  const ce = tx.ce;
 
-  // A rational value moves one rung up, to the reals.
-  if (value.type.matches('rational')) return ce.type('real');
+  for (const [def, staged] of tx.stagedValues) {
+    if (def.disposed) continue;
+    // Two assumed values for one symbol in one proposition: `And(x = 1, x =
+    // 2)`. Compared arithmetically, so `x = 1` and `x = 2/2` agree.
+    if (
+      staged.prior !== undefined &&
+      staged.prior.isEqual(staged.next) === false
+    )
+      return 'contradiction';
+    // A DECLARED type is a contract the assumed value must inhabit
+    // (`declare w integer<0..3>; assume w = 5`). An INFERRED type is a guess
+    // and is not enforced.
+    const declared = def.declaredType;
+    if (
+      !def.inferredType &&
+      !declared.isUnknown &&
+      !staged.next.type.matches(declared)
+    )
+      return 'contradiction';
+    // What the other facts prove IS enforced, inferred declaration or not: a
+    // fact is an assertion, not a guess (`assume(x > 3); assume(x = 1)`).
+    const proven = provenType(ce, def);
+    if (proven !== undefined && !staged.next.type.matches(proven))
+      return 'contradiction';
+    // The type a fact proves is only a summary of it — an equality proves the
+    // promoted TIER of its value, so the check above lets `x = 1` past `x =
+    // 2`, and a fact relating two symbols proves no type at all, so it lets
+    // `And(x > y, y = 5, x = 1)` past. The facts themselves decide: put the
+    // staged value back into each one and ask whether it still holds.
+    if (refutingFact(ce, def, staged.next) !== undefined)
+      return 'contradiction';
+  }
 
-  // A real value keeps its tier and drops the range or the literal.
-  if (value.type.matches('real')) return ce.type('real');
+  // The facts about a definition must leave it something to be: `declare x
+  // real<..-1>; assume(x > 0)` reduces to an empty type. A definition holding
+  // a stored value is exempt — facts never merge into its type, and the value
+  // itself was checked against the predicate before it was recorded.
+  for (const def of tx.touched) {
+    if (def.disposed || def.storedValue !== undefined) continue;
+    if (isEmptyType(def.type.type)) return 'contradiction';
+  }
 
-  // A complex or imaginary value promotes to the numeric top.
-  if (value.type.matches('complex')) return ce.type('number');
-
-  // An infinite value and NaN are disjoint from `real` and from `complex`, so
-  // they reach none of the rungs above. Each promotes to its own tier, which
-  // keeps `x = oo` reassignable to `-oo` and keeps the NaN marker visible.
-  if (value.type.matches('infinity')) return ce.type('infinity');
-  if (value.type.matches('nan')) return ce.type('nan');
-  return value.type;
+  return undefined;
 }
 
 /**
@@ -223,29 +365,95 @@ function inferTypeFromValue(ce: ComputeEngine, value: Expression): BoxedType {
  *
  */
 
-// The names whose assigned values the value-blindness shield has stripped
-// for the CURRENT `assume()` dispatch — consulted by the type-refinement
-// tail of `assumeInequality`, which must treat those symbols as assigned
-// (checked, never retyped) even though their values read as undefined
-// while the shield is up. `undefined` outside a shielded dispatch.
-let _valueBlindNames: ReadonlySet<string> | undefined;
+export function assume(
+  proposition: Expression,
+  /** The names the proposition mentions that nothing had declared before it
+   * was canonicalized (`assumeFn`, `engine-assumptions.ts`). Canonicalization
+   * binds every free symbol, so this is the only record of which bindings the
+   * transaction is answerable for. */
+  undeclared?: ReadonlyArray<string>
+): AssumeResult {
+  // A nested call — a conjunct, a link of a chain, a bound a membership
+  // implies — joins the transaction its caller opened, so the whole
+  // proposition is applied and rolled back as one.
+  if (_transaction !== undefined)
+    return assumeConjunct(_transaction, proposition);
 
-function valueBlindNames(): ReadonlySet<string> | undefined {
-  return _valueBlindNames;
+  const ce = proposition.engine;
+  const tx: AssumeTransaction = {
+    ce,
+    undo: [],
+    touched: new Set(),
+    stagedValues: new Map(),
+    scope: ce.context.lexicalScope,
+    unattributed: new Set(undeclared),
+    introduced: [],
+  };
+  _transaction = tx;
+  try {
+    let result = assumeConjunct(tx, proposition);
+    if (result !== 'contradiction' && result !== 'internal-error')
+      result = transactionConsistency(tx) ?? result;
+    if (result === 'contradiction' || result === 'internal-error')
+      rollbackTransaction(tx);
+    return result;
+  } catch (e) {
+    rollbackTransaction(tx);
+    throw e;
+  } finally {
+    _transaction = undefined;
+    // EVERY outcome ends here, a rollback included: the store moved and moved
+    // back, and a memo computed against the staged facts in between must not
+    // survive the answer.
+    ce._noteStateEvent({ kind: 'assumption' });
+  }
 }
 
-export function assume(proposition: Expression): AssumeResult {
-  //
-  // ── Value-blindness shield (ARCHITECTURE.md, "Bound variables, free symbols,
-  //    and assigned values"; ratified 2026-07-24) ─────────────────────────────
-  //
-  // When the predicate mentions assigned, non-constant free symbols, evaluating
-  // it *through* those values would fold it to `True`/`False` before the
-  // assumption system can record it. For example `w := 5; assume(w > 0)` folded
-  // to a no-op `'tautology'` (and `w := -2` to `'contradiction'`), silently
-  // dropping the fact. Shield + record: keep the consistency signal, but record
-  // the surviving predicate as a fact about the *symbol*, not its value.
-  //
+/**
+ * Apply one conjunct — or the whole proposition, when it is not a conjunction
+ * — inside the open transaction, claiming for it the bindings it is the first
+ * to need.
+ *
+ * A conjunct the assumptions layer cannot represent is DROPPED and the
+ * conjuncts applied before it stand (`assume(And(x > 3, Foo(y)))` keeps `x >
+ * 3`). The scope follows the same rule: the names the rejected conjunct alone
+ * introduced go with it, while a name an earlier, committed conjunct already
+ * needed stays bound.
+ */
+function assumeConjunct(
+  tx: AssumeTransaction,
+  proposition: Expression
+): AssumeResult {
+  // A conjunction is not a conjunct: claiming its names here would leave its
+  // conjuncts nothing to answer for.
+  if (proposition.operator === 'And') return assumeShielded(proposition);
+
+  const claimed: string[] = [];
+  if (tx.unattributed.size !== 0)
+    for (const name of proposition.symbols)
+      if (tx.unattributed.delete(name)) claimed.push(name);
+
+  const result = assumeShielded(proposition);
+  if (result === 'not-a-predicate')
+    for (const name of claimed) discardBinding(tx, name);
+  else tx.introduced.push(...claimed);
+  return result;
+}
+
+/**
+ * Record `proposition`, with the values of the symbols it mentions hidden.
+ *
+ * ── Value-blindness shield (ARCHITECTURE.md, "Bound variables, free symbols,
+ *    and assigned values"; ratified 2026-07-24) ─────────────────────────────
+ *
+ * When the predicate mentions assigned, non-constant free symbols, evaluating
+ * it *through* those values would fold it to `True`/`False` before the
+ * assumption system can record it. For example `w := 5; assume(w > 0)` folded
+ * to a no-op `'tautology'` (and `w := -2` to `'contradiction'`), silently
+ * dropping the fact. Shield + record: keep the consistency signal, but record
+ * the surviving predicate as a fact about the *symbol*, not its value.
+ */
+function assumeShielded(proposition: Expression): AssumeResult {
   const names = assignedVariableNames(proposition);
   if (names.length === 0) return assumeDispatch(proposition);
 
@@ -254,35 +462,16 @@ export function assume(proposition: Expression): AssumeResult {
   //    signal). `True`/indeterminate falls through to value-blind recording.
   if (isSymbol(proposition.evaluate(), 'False')) return 'contradiction';
 
-  // 2. Record value-blind. The values must be shielded IN PLACE (strip +
-  //    restore in the current context): `withValueShield` pushes a fresh
-  //    eval-context whose assumptions map is discarded on pop, which would lose
-  //    the very fact being recorded, so it cannot be used here.
-  return withValueBlindRecording(names, () => assumeDispatch(proposition));
-
-  /** Strip the assigned value of each name for the duration of `fn`, then
-   * restore it, so the recording pipeline sees the symbols as valueless (a
-   * fact `w > 0` instead of the folded `5 > 0 → True`). */
-  function withValueBlindRecording<T>(names: string[], fn: () => T): T {
-    const ce = proposition.engine;
-    const saved: { name: string; value: Expression }[] = [];
-    for (const name of names) {
-      const def = ce.lookupDefinition(name);
-      if (!isValueDef(def) || def.value.isConstant) continue;
-      const value = def.value.value;
-      if (value === undefined || value === null) continue;
-      saved.push({ name, value });
-      ce._setSymbolValue(name, undefined);
-    }
-    if (saved.length === 0) return fn();
-    _valueBlindNames = new Set(saved.map((s) => s.name));
-    try {
-      return fn();
-    } finally {
-      _valueBlindNames = undefined;
-      for (const { name, value } of saved) ce._setSymbolValue(name, value);
-    }
+  // 2. Record value-blind. The shield hides the definitions rather than
+  //    stripping and restoring their values: a strip is two value WRITES per
+  //    symbol, which move the invalidation axis and are not re-entrant.
+  const ce = proposition.engine;
+  const shielded = new Set<BoxedValueDefinition>();
+  for (const name of names) {
+    const def = ce.lookupDefinition(name);
+    if (isValueDef(def) && !def.value.isConstant) shielded.add(def.value);
   }
+  return withShieldedValues(shielded, () => assumeDispatch(proposition));
 }
 
 function assumeDispatch(proposition: Expression): AssumeResult {
@@ -316,34 +505,6 @@ function assumeDispatch(proposition: Expression): AssumeResult {
  * structural-predicate layer cannot represent (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md
  * §7 non-goals). `assume()` reports these as `'not-a-predicate'`.
  */
-/**
- * Signed number-set symbols (SYM P2-11) that decompose into a base type plus
- * a single sign bound. `domainToType` only maps the *unsigned* primitive sets
- * (ℂ, ℝ, ℚ, ℤ, …); these carry a sign that must also be stored as a bound
- * fact for `isPositive`/`isNegative`/`isNonNegative`/`isNonPositive` to fire.
- *
- * Integer variants use ±1 rather than 0 for the strict cases so the bound is
- * the tight integer bound (`PositiveIntegers` ⇒ `≥ 1`, `NegativeIntegers` ⇒
- * `≤ −1`); the real variants use an open bound at 0.
- */
-const SIGNED_NUMBER_SETS: Record<
-  string,
-  {
-    type: Type;
-    op: 'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual';
-    value: number;
-  }
-> = {
-  PositiveNumbers: { type: 'real', op: 'Greater', value: 0 },
-  NonNegativeNumbers: { type: 'real', op: 'GreaterEqual', value: 0 },
-  NegativeNumbers: { type: 'real', op: 'Less', value: 0 },
-  NonPositiveNumbers: { type: 'real', op: 'LessEqual', value: 0 },
-  PositiveIntegers: { type: 'integer', op: 'GreaterEqual', value: 1 },
-  NonNegativeIntegers: { type: 'integer', op: 'GreaterEqual', value: 0 },
-  NegativeIntegers: { type: 'integer', op: 'LessEqual', value: -1 },
-  NonPositiveIntegers: { type: 'integer', op: 'LessEqual', value: 0 },
-};
-
 const UNSUPPORTED_PREDICATE_OPERATORS = new Set<string>([
   'Or',
   'Not',
@@ -370,35 +531,13 @@ function assumeConjunction(proposition: Expression): AssumeResult {
   console.assert(proposition.operator === 'And');
   if (!isFunction(proposition)) return 'not-a-predicate';
 
-  const ce = proposition.engine;
-
-  // Atomicity (SYM P2-9): a conjunction must apply all-or-nothing when it
-  // contradicts. The historical loop applied each conjunct in turn, so a
-  // later contradictory conjunct left the earlier ones installed (e.g.
-  // `And(p > 0, p < −5)` reported `'contradiction'` yet left `p > 0`).
-  //
-  // Validate the whole conjunction in an isolated child scope first: the
-  // child inherits the caller's assumptions (copied) and symbol bindings (via
-  // the scope chain) but discards all of its own mutations on `popScope`. If
-  // the trial contradicts, nothing touched the caller's scope. Only a
-  // contradiction-free trial is replayed for real in the caller's scope,
-  // reproducing the historical `ok`/`tautology`/`not-a-predicate` outcome
-  // (including the partial application of the valid conjuncts in the
-  // `not-a-predicate` case).
-  ce.pushScope();
-  let trial: AssumeResult;
-  try {
-    trial = assumeConjunctionInner(proposition);
-  } finally {
-    ce.popScope();
-  }
-  if (trial === 'contradiction' || trial === 'internal-error') return trial;
-
-  return assumeConjunctionInner(proposition);
-}
-
-function assumeConjunctionInner(proposition: Expression): AssumeResult {
-  if (!isFunction(proposition)) return 'not-a-predicate';
+  // Atomicity (SYM P2-9): a conjunction applies all-or-nothing when it
+  // contradicts — `And(p > 0, p < −5)` must report `'contradiction'` and
+  // leave `p > 0` nowhere. The undo log of the enclosing transaction is what
+  // provides it: each conjunct is applied for real and the whole log is
+  // rolled back on a contradiction. A `'not-a-predicate'` conjunct is NOT a
+  // rollback — the conjuncts applied before it stand, which is the historical
+  // behavior of `assume(And(x > 3, Foo(x)))`.
   let sawOk = false;
   let sawNotAPredicate = false;
   for (const conjunct of proposition.ops) {
@@ -444,8 +583,7 @@ function storeNotEqual(
     if (isSymbol(val, 'False')) return 'contradiction';
   }
 
-  recordFact(ce, fact, true);
-  return 'ok';
+  return recordFact(ce, fact, true);
 }
 
 /**
@@ -480,8 +618,7 @@ function storeNotElement(
     if (isSymbol(val, 'False')) return 'contradiction';
   }
 
-  recordFact(ce, fact, true);
-  return 'ok';
+  return recordFact(ce, fact, true);
 }
 
 function assumeEquality(proposition: Expression): AssumeResult {
@@ -526,39 +663,7 @@ function assumeEquality(proposition: Expression): AssumeResult {
   if (lhs && !hasValue(ce, lhs) && !proposition.op2.has(lhs)) {
     const val = proposition.op2.evaluate();
     if (!val.isValid) return 'not-a-predicate';
-    const def = ce.lookupDefinition(lhs);
-    if (!def || !isValueDef(def)) {
-      ce.declare(lhs, { value: val });
-      markAssumptionValue(ce, lhs, val);
-      return 'ok';
-    }
-    if (def.value.type && !val.type.matches(def.value.type))
-      if (!def.value.inferredType) return 'contradiction';
-
-    // Set the value for the symbol, scoped to the current context so the
-    // assumed value is automatically reverted when this scope is popped.
-    // If lhs is declared in a parent scope, shadow it in the current scope
-    // so we don't permanently mutate the parent definition.
-    if (!ce.context.lexicalScope.bindings.has(lhs)) {
-      ce.declare(lhs, { value: val });
-    } else {
-      // Set the (inferred) type *before* the value. The `set type` accessor
-      // resets `_value` when the new type is `unknown` (which `inferTypeFromValue`
-      // yields for a free-symbol rhs like `a = b`); doing it after
-      // `_setSymbolValue` would silently wipe the assigned value. Setting the
-      // value last guarantees it survives.
-      if (def.value.inferredType) {
-        const previous = def.value.type;
-        def.value.type = inferTypeFromValue(ce, val);
-        recordAssumedType(ce, def.value, proposition, previous);
-      }
-      ce._setSymbolValue(lhs, val);
-    }
-    // Marked after the value is installed, so the overlay resolves the
-    // definition the value actually landed on — the shadow this branch may
-    // have just declared, not the enclosing one.
-    markAssumptionValue(ce, lhs, val);
-    return 'ok';
+    return storeEquality(ce, lhs, val);
   }
 
   // Case 3
@@ -591,91 +696,19 @@ function assumeEquality(proposition: Expression): AssumeResult {
     // `verify()` DB lookup) rather than assigning a value. (P1-3: the old
     // code assigned `x := List(2, −2)` — a *list* — as the value of `x`,
     // which then broadcast through arithmetic, e.g. `x + 1 → List(3, −1)`.)
-    if (sols.length !== 1) {
-      recordFact(
+    if (sols.length !== 1)
+      return recordFact(
         ce,
         ce.function('Equal', [proposition.op1.sub(proposition.op2), 0]),
         true
       );
-      return 'ok';
-    }
 
-    // Exactly one root: assign it as the symbol's value, scoped to the current
-    // context so it is reverted when this scope is popped.
-    const val = sols[0];
-    if (!def || !isValueDef(def)) {
-      ce.declare(lhs, { value: val });
-      markAssumptionValue(ce, lhs, val);
-      return 'ok';
-    }
-    if (!ce.context.lexicalScope.bindings.has(lhs)) {
-      ce.declare(lhs, { value: val });
-    } else {
-      // Set the (inferred) type before the value: see the note in Case 2. A
-      // `set type(unknown)` would otherwise wipe the value assigned just below.
-      if (def.value.inferredType) {
-        const previous = def.value.type;
-        def.value.type = inferTypeFromValue(ce, val);
-        recordAssumedType(ce, def.value, proposition, previous);
-      }
-      ce._setSymbolValue(lhs, val);
-    }
-    // Marked after the value is installed: see the note in Case 2.
-    markAssumptionValue(ce, lhs, val);
-    return 'ok';
+    // Exactly one root: it is the symbol's value for as long as the fact
+    // holds.
+    return storeEquality(ce, lhs, sols[0]);
   }
 
-  recordFact(ce, proposition, true);
-  return 'ok';
-}
-
-/**
- * The comparison a proposition states ABOUT ITS SYMBOL, once the symbol's
- * side is accounted for: `Less(a, sym)` says the symbol is GREATER than
- * `a`. Shared by every range-refinement branch so the flip logic lives in
- * one place.
- */
-function effectiveComparisonOp(
-  originalOp: string,
-  symbolOnLeft: boolean
-): 'greater' | 'greaterEqual' | 'less' | 'lessEqual' {
-  if (originalOp === 'Greater') return symbolOnLeft ? 'greater' : 'less';
-  if (originalOp === 'GreaterEqual')
-    return symbolOnLeft ? 'greaterEqual' : 'lessEqual';
-  if (originalOp === 'Less') return symbolOnLeft ? 'less' : 'greater';
-  return symbolOnLeft ? 'lessEqual' : 'greaterEqual';
-}
-
-/**
- * The type a simple comparison against a finite real literal proves for its
- * symbol: `x > k` proves the OPEN range `real<k<..>`, `x ≥ k` the closed
- * `real<k..>`, `x < k` `real<..<k>`, `x ≤ k` `real<..k>` (open-bound
- * ranged types, `docs/plans/2026-08-28-open-bounds-in-ranged-types.md`
- * §3.4) — the type is the single channel for a symbol's own strict
- * magnitude bound; the assumption fact index keeps serving what a type
- * cannot say (a bound on `Re(s)`, expression-level orderings).
- *
- * `exact` says whether the machine number `k` IS the assumed bound or a
- * ROUNDING of it (`assume(x > 1 − 10⁻³⁰)` has `k === 1`). A rounded
- * bound is moved OUTWARD by one ulp (a lower bound down, an upper bound
- * up) so the range admits every value the assumption admits — the old
- * behavior rounded a lower bound UP to 1 and over-proved `x > 1` in
- * every consumer — and its open flag is demoted to closed: the strict
- * fact was about the original endpoint, and the moved bound is no longer
- * that endpoint.
- */
-function rangeTypeForComparison(
-  op: 'greater' | 'greaterEqual' | 'less' | 'lessEqual',
-  k: number,
-  exact: boolean
-): Type {
-  const strict = op === 'greater' || op === 'less';
-  const isLower = op === 'greater' || op === 'greaterEqual';
-  const bound = exact ? k : isLower ? nextDown(k) : nextUp(k);
-  const open = strict && exact;
-  return isLower
-    ? makeNumericRangeType('real', bound, Infinity, open, false)
-    : makeNumericRangeType('real', -Infinity, bound, false, open);
+  return recordFact(ce, proposition, true);
 }
 
 function assumeInequality(proposition: Expression): AssumeResult {
@@ -804,39 +837,22 @@ function assumeInequality(proposition: Expression): AssumeResult {
     // the *same* subject (design §4.3; cross-subject consistency is out of
     // scope).
     if (newBounds !== undefined) {
-      const existing = getInequalityBoundsFromAssumptions(ce, partSubject);
+      const existing = boundsForCurrentDefinition(ce, partSubject);
       const status = checkBoundsAgainst(existing, newBounds);
       if (status !== undefined) return status;
     }
 
-    // Type side-effect (design §3.3): a part-predicate over
-    // Real/Imaginary/Abs/Argument(x) implies at most `x: number` — never
-    // `x: real` — and only when the type is currently unknown/inferred.
-    // Exception: a finite upper bound on `Abs(x)` implies `x` is finite
-    // (design §3.2), so refine to `complex` — the widest FINITE numeric
-    // type — in that case.
-    //
-    // `complex` is the honest claim and it is deliberately not narrowed to a
-    // real type. A bound on the modulus says nothing about the imaginary
-    // part, so a symbol that only carries `|x| < c` may still be a
-    // non-real complex number. The cost is that simplifications gated on a
-    // real symbol decline for it: `sqrt(q^2)` stays `sqrt(q^2)` instead of
-    // becoming `|q|`, which is correct, because that rewrite is false at
-    // `q = i` (`sqrt(i^2) = sqrt(-1) = i`, while `|i| = 1`). The benefit we
-    // keep is the finiteness entailment: the symbol is known finite, so
-    // every consumer that needs finiteness alone is served. A caller that
-    // wants the real-only rewrites must state the realness separately, for
-    // example with an additional `assume(q in RealNumbers)`.
-    const impliedType: Type =
-      partSubject.part === 'abs' &&
-      newBounds !== undefined &&
-      numericBoundValue(newBounds.upper) !== undefined
-        ? 'complex'
-        : 'number';
-    refineTypeIfUnknown(ce, partSubject.symbol, impliedType, result);
+    // What a part-predicate over Real/Imaginary/Abs/Argument(x) proves about
+    // the WHOLE value — at most `x: number`, or `complex` when a finite
+    // upper bound on `Abs(x)` proves finiteness — is a CONTRIBUTION the type
+    // read merges in from the fact recorded just below, derived in
+    // `boxed-expression/constraint-subject.ts`. All this path owes it is a
+    // definition to be recorded against.
+    declareProvisional(ce, partSubject.symbol);
 
     // Store the normalized part-bound (normal form §3.2)
-    recordFact(ce, result, true);
+    const stored = recordFact(ce, result, true);
+    if (stored !== 'ok') return stored;
 
     // Derived facts (design §3.2), stored alongside — never inferred at
     // query time: `Imaginary(x)` bounded away from 0 implies `x ∉ ℝ` and
@@ -861,7 +877,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
   // (for single-symbol inequalities)
   if (unknowns.length === 1) {
     const symbol = unknowns[0];
-    const bounds = getInequalityBoundsFromAssumptions(ce, symbol);
+    const bounds = boundsForCurrentDefinition(ce, toSubject(symbol));
 
     // The normalized form is Less(p, 0) or LessEqual(p, 0) where p = lhs - rhs
     // For a simple symbol case like "x > k", this becomes Less(-x + k, 0) meaning k - x < 0, i.e., x > k
@@ -993,123 +1009,37 @@ function assumeInequality(proposition: Expression): AssumeResult {
     }
   }
 
-  // Case 3: single unknown - ensure the symbol has type 'real'
-  // (inequalities imply the symbol is a real number).
+  // Case 3: single unknown. An inequality implies the symbol is a real
+  // number, and a simple comparison against a finite literal implies a
+  // RANGE. Both are CONTRIBUTIONS the type READ merges into the declared
+  // type from the fact recorded just below — nothing is written here, so
+  // retracting the fact retracts what it proved and no stored type can be
+  // built from it (`docs/plans/2026-08-29-assumptions-as-facts-type.md`
+  // §2.5; the contributions themselves are derived in
+  // `boxed-expression/constraint-subject.ts`).
   //
-  // EXCEPT when the inequality involves a part term (Real/Imaginary/Abs/
-  // Argument of a symbol): `Re(s) + Im(s) < 0` does not imply `s: real`
-  // (design §4.2, case 4 — this was the `Re(s) > 1` destructive-retype bug).
+  // A part term (Real/Imaginary/Abs/Argument of a symbol) is excluded here
+  // as it was before: `Re(s) + Im(s) < 0` does not imply `s: real` (design
+  // §4.2, case 4 — this was the `Re(s) > 1` destructive-retype bug).
+  //
+  // All this path still owes the fact is a definition to be recorded
+  // against, so that the contribution has a subject.
   if (
     unknowns.length === 1 &&
     (normalizedLhs === undefined || !containsPartTerm(normalizedLhs))
-  ) {
-    const symbol = unknowns[0];
-
-    // A simple `symbol <op> finite-literal` comparison proves a RANGE type
-    // (`assume(p > 0)` → `real<0..> & !0`), so the assumption reaches every
-    // consumer that reads the TYPE — the solver's root filter, the compile
-    // targets' real/complex lowering, an assignment check — and not only the
-    // sign channel (`getSignFromAssumptions`), which those consumers never
-    // consult. (Plan doc `docs/plans/2026-08-22-type-handlers-on-types.md`
-    // §5.8 A2; the solver-drops-roots measurement is §5.7.)
-    let rangeType: Type | undefined;
-    {
-      const symbolOnLeft = isSymbol(proposition.op1, symbol);
-      const other = symbolOnLeft ? proposition.op2 : proposition.op1;
-      // The bound must be a MACHINE-representable literal: `numericValue`
-      // is a plain JS number exactly then. Reading `.re` instead would
-      // coerce an exact big integer or rational (`x > 1/3`) to a rounded
-      // double, and a rounding toward the inside would install a type that
-      // wrongly EXCLUDES admissible values — unlike the documented
-      // strict-bound-to-closed-range approximation, which only widens.
-      // A non-representable bound leaves `rangeType` undefined (bare
-      // `real`), matching the sibling bounds-consistency guard above.
-      const k =
-        (symbolOnLeft || isSymbol(proposition.op2, symbol)) && isNumber(other)
-          ? other.numericValue
-          : undefined;
-      if (typeof k === 'number' && Number.isFinite(k) && other!.im === 0) {
-        // `numericValue` is a plain number only for a machine literal, so
-        // this branch is exact by construction; a non-machine bound (the
-        // bignum `1 − 10⁻³⁰`, the exact `1/3`) takes the branch below.
-        const exact = true;
-        const effectiveOp = effectiveComparisonOp(
-          proposition.operator,
-          symbolOnLeft
-        );
-        rangeType = rangeTypeForComparison(effectiveOp, k, exact);
-      } else if (
-        (symbolOnLeft || isSymbol(proposition.op2, symbol)) &&
-        isNumber(other) &&
-        other.im === 0 &&
-        Number.isFinite(other.re)
-      ) {
-        // A NON-machine bound (bignum, exact rational, radical): the type
-        // used to stay bare `real` here. Its machine projection `re` is a
-        // ROUNDING, so the range takes it rounded OUTWARD (the
-        // direction-blind over-proof this fixes), closed.
-        const effectiveOp = effectiveComparisonOp(
-          proposition.operator,
-          symbolOnLeft
-        );
-        const re = other.re;
-        // Machine-exact after all (`1/2` IS 0.5 — the isSame convention)?
-        // Then the bound is exact and keeps its open flag.
-        const exact = other.isSame(ce.number(re));
-        rangeType = rangeTypeForComparison(effectiveOp, re, exact);
-      }
-    }
-
-    // A symbol whose assigned value is SHIELDED by the value-blindness
-    // wrapper (`w := 5; assume(w > 0)`) looks valueless here, but it has
-    // assignment evidence: assigned symbols are CHECKED against their
-    // value, never rewritten by an assumption (the 2026-08-18
-    // inference-direction ruling) — the pre-shield consistency check is the
-    // check, and the fact store below is the record. Skip the type write
-    // entirely: installing the range would turn the assumption into a
-    // contract on later re-assignments, and even the pre-range widening to
-    // `real` was a value-inferred guess this path has no business
-    // hardening.
-    const shielded = valueBlindNames()?.has(symbol) === true;
-
-    const def = ce.lookupDefinition(symbol);
-    if (shielded) {
-      // fall through to the fact store below with the type untouched
-    } else if (!def) {
-      // Symbol not defined yet — declare with the proven range, or bare
-      // `real` when the comparison is not a simple literal bound.
-      ce.declare(symbol, { type: rangeType ?? 'real' });
-      recordDeclaredByAssumption(ce, symbol, result);
-    } else if (isValueDef(def) && def.value.inferredType) {
-      // Symbol was auto-declared with an inferred type — the assumption
-      // REPLACES the inferred guess with the proven range (or bare
-      // `real`). `refineSymbolType` owns the write: it shadows a
-      // parent-scope definition in the current scope (P1-6), sets
-      // `inferredType` to false so a SECOND bound on the same symbol
-      // narrows by meet instead of clobbering the first (`0 < x < 10`
-      // decomposes into two calls; before this routing the second replaced
-      // the first — review catch, 2026-08-23), and records provenance.
-      const refined = refineSymbolType(ce, symbol, rangeType ?? 'real', result);
-      if (refined === 'contradiction') return 'contradiction';
-    } else if (
-      rangeType !== undefined &&
-      isValueDef(def) &&
-      !def.value.isConstant &&
-      def.value.value === undefined
-    ) {
-      // An EXPLICITLY declared, valueless symbol is narrowed to the meet of
-      // its declared type and the proven range (`p: real`, `assume(p > 0)`
-      // → `real<0..> & !0`); an empty meet is a contradiction with the
-      // declaration and the fact is NOT stored.
-      const refined = refineSymbolType(ce, symbol, rangeType, result);
-      if (refined === 'contradiction') return 'contradiction';
-    }
-  }
+  )
+    declareProvisional(ce, unknowns[0]);
 
   // Case 3, 4
-  console.assert(result.operator === 'Less' || result.operator === 'LessEqual');
-  recordFact(ce, result, true);
-  return 'ok';
+  // An INVALID result is not a normalized inequality — `Re(s) > 1` on a
+  // `string` subject reduces to the `incompatible-type` error itself — and
+  // `recordFact` refuses it just below, so it must not trip this assert.
+  console.assert(
+    !result.isValid ||
+      result.operator === 'Less' ||
+      result.operator === 'LessEqual'
+  );
+  return recordFact(ce, result, true);
 }
 
 function assumeElement(proposition: Expression): AssumeResult {
@@ -1137,27 +1067,16 @@ function assumeElement(proposition: Expression): AssumeResult {
 
   // Case 1: bare symbol — decompose the set
   const propOp1 = proposition.op1;
-  if (isSymbol(propOp1))
-    return assumeElementOfSet(ce, propOp1.symbol, dom, proposition);
+  if (isSymbol(propOp1)) return assumeElementOfSet(ce, propOp1.symbol, dom);
 
-  // Case 2: compound lhs
+  // Case 2: compound lhs. Stored verbatim, as a fact about the expression:
+  // `x + 2 ∈ ℝ` says nothing about `x` that a fact about `x` itself could
+  // carry, and an assumption declares nothing.
+  //
   // Note: this is not 'unknowns' because proposition is not canonical (so
   // all symbols are "unknowns")
   const undefs = undefinedIdentifiers(propOp1);
-  if (undefs.length === 1) {
-    const type = domainToType(dom);
-    if (type !== 'unknown') {
-      ce.declare(undefs[0], type);
-      recordDeclaredByAssumption(ce, undefs[0], proposition);
-      return 'ok';
-    }
-    // The domain does not map to a type: fall through to storing the
-    // assumption verbatim (used to throw "Invalid domain")
-  }
-  if (undefs.length > 0) {
-    recordFact(ce, proposition, true);
-    return 'ok';
-  }
+  if (undefs.length > 0) return recordFact(ce, proposition, true);
 
   // Case 3
   const val = proposition.evaluate();
@@ -1184,23 +1103,24 @@ function assumeElement(proposition: Expression): AssumeResult {
 function assumeElementOfSet(
   ce: ComputeEngine,
   symbol: string,
-  setExpr: Expression,
-  cause?: Expression
+  setExpr: Expression
 ): AssumeResult {
-  // 1. Primitive number sets → pure type refinement
+  // 1. Primitive number sets → the membership fact alone; the type it
+  //    proves is merged in by the type read (`membershipType`,
+  //    `boxed-expression/constraint-subject.ts`).
   const type = domainToType(setExpr);
-  if (type !== 'unknown') return refineSymbolType(ce, symbol, type, cause);
+  if (type !== 'unknown') return recordMembership(ce, symbol, setExpr, type);
 
   // 1b. Signed number sets (SYM P2-11): the positive/negative/non-negative/
   //     non-positive integer and real sets decompose into a base type
-  //     refinement *plus* a sign bound, so that `isInteger`/`isPositive` etc.
+  //     *plus* a sign bound, so that `isInteger`/`isPositive` etc.
   //     respond (e.g. `assume(k ∈ PositiveIntegers)` ⇒ `k` integer and > 0).
-  //     `domainToType` alone only yields a type, never the bound.
+  //     The membership fact alone yields no bound.
   if (isSymbol(setExpr)) {
     const signed = SIGNED_NUMBER_SETS[setExpr.symbol];
     if (signed !== undefined) {
-      if (refineSymbolType(ce, symbol, signed.type, cause) === 'contradiction')
-        return 'contradiction';
+      const r = recordMembership(ce, symbol, setExpr, signed.type);
+      if (r !== 'ok') return r;
       const b = assumeBound(ce, symbol, signed.op, ce.number(signed.value));
       return b === 'contradiction' ? 'contradiction' : 'ok';
     }
@@ -1209,8 +1129,8 @@ function assumeElementOfSet(
   // 2. Range(lo, hi[, step]): integer-valued (`ZZGreaterEqual(1)`
   //    translates to Range(1, +∞))
   if (isFunction(setExpr, 'Range') && setExpr.ops.length >= 2) {
-    const result = refineSymbolType(ce, symbol, 'integer', cause);
-    if (result === 'contradiction') return result;
+    const result = recordMembership(ce, symbol, setExpr, 'integer');
+    if (result !== 'ok') return result;
 
     let [lo, hi] = setExpr.ops;
     const step = setExpr.ops[2];
@@ -1227,8 +1147,8 @@ function assumeElementOfSet(
 
   // 3. Interval(lo, hi), endpoints possibly wrapped in `Open`
   if (isFunction(setExpr, 'Interval') && setExpr.ops.length === 2) {
-    const result = refineSymbolType(ce, symbol, 'real', cause);
-    if (result === 'contradiction') return result;
+    const result = recordMembership(ce, symbol, setExpr, 'real');
+    if (result !== 'ok') return result;
 
     let [lo, hi] = setExpr.ops;
     let loStrict = false;
@@ -1275,129 +1195,117 @@ function assumeElementOfSet(
     return r === 'tautology' ? 'ok' : r;
   }
 
-  // 5. Union of intervals/ranges: refine the type only; the membership
-  //    fact is stored verbatim (a union yields a disjunction of bounds,
-  //    which the fact layer does not represent)
-  if (isFunction(setExpr, 'Union') && setExpr.ops.length > 0) {
-    if (setExpr.ops.every((s) => isFunction(s, 'Range'))) {
-      if (refineSymbolType(ce, symbol, 'integer', cause) === 'contradiction')
-        return 'contradiction';
-    } else if (
-      setExpr.ops.every(
-        (s) => isFunction(s, 'Interval') || isFunction(s, 'Range')
-      )
-    ) {
-      if (refineSymbolType(ce, symbol, 'real', cause) === 'contradiction')
-        return 'contradiction';
-    }
-    // ...fall through to store the membership fact
-  }
-
-  // 6. Inert/unknown set: store a membership fact (design §4.1 — this used
-  //    to throw "Invalid domain")
+  // 5, 6. A union of intervals/ranges, and any inert or unknown set: store
+  //    the membership fact verbatim (design §4.1 — this used to throw
+  //    "Invalid domain"). A union yields a disjunction of bounds, which the
+  //    fact layer does not represent, so only the type it proves — `integer`
+  //    for a union of ranges, `real` when an interval is in the mix —
+  //    reaches the reader, through the same fact.
   if (isNumber(setExpr) || isString(setExpr)) return 'not-a-predicate';
-  const fact = ce.function('Element', [ce.symbol(symbol), setExpr]);
-  if (!fact.isValid) return 'not-a-predicate';
-  recordFact(ce, fact, true);
-  return 'ok';
+  // A union of ranges/intervals still proves a tier, and the same producer the
+  // fact index uses derives it, so the refusal check just below judges the
+  // membership by exactly what a reader will later see it prove. An inert or
+  // unknown set proves nothing, and `'unknown'` turns that check off.
+  return recordMembership(
+    ce,
+    symbol,
+    setExpr,
+    membershipType(setExpr) ?? 'unknown'
+  );
 }
 
 /**
- * Narrow the declared type of `symbol` to `type` from an `Element`
- * assumption (historical cases 1 & 2 of `assumeElement`, merged).
+ * Record `symbol ∈ setExpr` as a fact, after making sure the subject can
+ * carry it.
+ *
+ * `type` is what the membership proves about the subject; it is passed only
+ * to refuse a membership an OPERATOR definition's result type cannot satisfy
+ * — the contribution the type read merges in is derived from the stored fact
+ * itself, never from this argument.
  */
-function refineSymbolType(
+function recordMembership(
   ce: ComputeEngine,
   symbol: string,
-  type: Type,
-  cause?: Expression
+  setExpr: Expression,
+  type: Type
 ): AssumeResult {
-  if (!hasDef(ce, symbol)) {
-    ce.declare(symbol, type);
-    recordDeclaredByAssumption(ce, symbol, cause);
-    return 'ok';
-  }
+  const check = checkOperatorSubject(ce, symbol, type);
+  if (check !== 'ok') return check;
+  declareProvisional(ce, symbol);
+  const fact = ce.function('Element', [ce.symbol(symbol), setExpr]);
+  return recordFact(ce, fact, true);
+}
 
-  // Shadow a parent-scope declaration in the current scope so the
-  // assumption is reverted when the scope is popped. The shadow is declared
-  // with the MEET of the inherited type and the assumed one, computed
-  // BEFORE the shadow exists: declaring with the raw assumed type first
-  // (as this path once did) made the meet below a trivial self-meet, so an
-  // inherited contract (`n: integer` in the parent) was silently dropped
-  // and a contradiction with it (`x: real<..-1>` in the parent, then a
-  // scoped `assume(x > 0)`) could never fire (review catch, 2026-08-23).
-  // An empty meet refuses before anything is declared. The shadow's
-  // creation is recorded with the INHERITED type as the previous type, so
-  // `forget()` can rewind the shadow to it.
-  if (!ce.context?.lexicalScope?.bindings.has(symbol)) {
-    const inherited = ce.lookupDefinition(symbol);
-    let shadowType: Type = type;
-    let inheritedType: BoxedType | undefined;
-    if (
-      isValueDef(inherited) &&
-      inherited.value.type &&
-      !inherited.value.type.isUnknown &&
-      !inherited.value.inferredType
-    ) {
-      inheritedType = inherited.value.type;
-      const meet = reduceType({
-        kind: 'intersection',
-        types: [type, inheritedType.type],
-      });
-      if (isEmptyType(meet)) return 'contradiction';
-      shadowType = meet;
-    }
-    ce.declare(symbol, shadowType);
-    recordDeclaredByAssumption(ce, symbol, cause, inheritedType);
-  }
-
+/**
+ * Refuse a membership assumption about a symbol bound to an OPERATOR
+ * definition whose result type cannot be a member (`assume(f ∈ Integers)`
+ * for an `f` declared `(number) -> string`).
+ *
+ * A VALUE definition needs no check here: what the facts prove about it is
+ * merged into its type by the read, and an empty result is caught by the
+ * transaction's consistency pass.
+ */
+function checkOperatorSubject(
+  ce: ComputeEngine,
+  symbol: string,
+  type: Type
+): AssumeResult {
+  // `'unknown'` is the caller saying the membership proves no type at all (an
+  // inert set). There is nothing to compare, and `isSubtype('unknown', T)` is
+  // false for every `T`, so comparing would report a contradiction for a
+  // membership that claims nothing.
+  if (type === 'unknown') return 'ok';
   const def = ce.lookupDefinition(symbol);
-  if (isValueDef(def)) {
-    // An explicitly declared, known type is *narrowed* to the meet of the
-    // declared type and the assumed type. It is a contradiction only when
-    // that meet is empty. The old check (`!isSubtype(assumed, declared)`)
-    // misfired whenever the assumed type was not a *subtype* of the declared
-    // one even though they overlapped, e.g. `assume(q ∈ ℤ)` on a
-    // `number`-declared `q` (`integer ⊄ number` in the subtype direction
-    // the old check asked for — the meet is the satisfiable `integer`).
-    if (
-      def.value.type &&
-      !def.value.type.isUnknown &&
-      !def.value.inferredType
-    ) {
-      const meet = reduceType({
-        kind: 'intersection',
-        types: [type, def.value.type.type],
-      });
-      if (isEmptyType(meet)) return 'contradiction';
-      const previousMeet = def.value.type;
-      def.value.type = new BoxedType(meet, ce._typeResolver);
-      def.value.inferredType = false;
-      recordAssumedType(ce, def.value, cause, previousMeet);
-      return 'ok';
-    }
-    const previous = def.value.type;
-    def.value.type = new BoxedType(type, ce._typeResolver);
-    // The type was explicitly asserted: it is no longer an inferred type
-    // (so a subsequent bare-symbol inequality won't widen it to 'real')
-    def.value.inferredType = false;
-    recordAssumedType(ce, def.value, cause, previous);
-    return 'ok';
+  if (def === undefined || isValueDef(def)) return 'ok';
+  if (!isOperatorDef(def)) return 'not-a-predicate';
+  // `functionResult` yields `undefined` when the signature has no single
+  // result type — an overload set (an intersection of signatures) is the
+  // reachable case. "Cannot determine the result type" is not a proven
+  // contradiction, so decline to claim one.
+  const result = functionResult(def.operator.signature.type);
+  if (result === undefined) return 'ok';
+  return isSubtype(type, result) ? 'ok' : 'contradiction';
+}
+
+/**
+ * The interval bounds the facts recorded against the definition that
+ * `subject`'s name is bound to NOW put on it.
+ *
+ * `getInequalityBoundsFromAssumptions` answers by NAME — which is what the
+ * query channels want — but an assertion is recorded against a DEFINITION,
+ * and the redundancy and consistency of a NEW assertion have to be judged
+ * against the same value it is about. Without this, re-declaring `x` in an
+ * inner scope and asserting a bound on the new `x` was answered from the
+ * enclosing `x`'s bounds: `assume(x > 3)` reported `'tautology'` and recorded
+ * nothing, leaving the inner `x` unbounded.
+ *
+ * Falls back to the name-keyed bounds when the name has no value definition
+ * to record an assertion against, so nothing is ever seen LESS than before.
+ */
+function boundsForCurrentDefinition(
+  ce: ComputeEngine,
+  subject: Subject
+): IntervalBounds {
+  const def = ce.lookupDefinition(subject.symbol);
+  if (!isValueDef(def)) return getInequalityBoundsFromAssumptions(ce, subject);
+  const target = def.value;
+  const result: IntervalBounds = {};
+  for (const [assumption, records] of contextAssumptions(ce).entries()) {
+    const aboutTarget = records.some(
+      (record) =>
+        record.truth === true &&
+        record.subjects.some(
+          (s) =>
+            s.def === target &&
+            s.symbol === subject.symbol &&
+            s.part === subject.part
+        )
+    );
+    if (!aboutTarget) continue;
+    const partial = boundsFromNormalizedInequality(assumption, subject);
+    if (partial !== undefined) mergeTightestBounds(result, partial);
   }
-  if (isOperatorDef(def)) {
-    // `functionResult` yields `undefined` when the signature has no single
-    // result type — an overload set (an intersection of signatures) is the
-    // reachable case. The `!` that used to be here was a lie: `isSubtype`
-    // dereferenced the `undefined` and threw a raw TypeError.
-    //
-    // "Cannot determine the result type" is not a proven contradiction, so
-    // decline to claim one.
-    const result = functionResult(def.operator.signature.type);
-    if (result === undefined) return 'ok';
-    if (!isSubtype(type, result)) return 'contradiction';
-    return 'ok';
-  }
-  return 'not-a-predicate';
+  return result;
 }
 
 /**
@@ -1417,49 +1325,6 @@ function assumeBound(
   // Canonical boxing normalizes the operator to Less/LessEqual (possibly
   // swapping the operands), which `assumeInequality` handles directly.
   return assumeInequality(ce.function(op, [ce.symbol(symbol), bound]));
-}
-
-/**
- * Recognize a normalized-inequality lhs of the form `±Part(x) + k` where
- * `Part ∈ {Real, Imaginary, Abs, Argument}` and `k` is an optional numeric
- * constant. Returns the (non-self) subject, or `undefined`.
- *
- * Deliberately stricter than `boundsFromNormalizedInequality`: an lhs with
- * a non-numeric extra term (e.g. `Re(s) + Im(s)`) is *not* a part-bound and
- * is stored opaque instead.
- */
-function partBoundSubject(lhs: Expression): Subject | undefined {
-  const partOf = (term: Expression): Subject | undefined => {
-    const inner =
-      isFunction(term, 'Negate') && term.ops.length === 1 ? term.op1 : term;
-    const s = subjectOf(inner);
-    return s !== undefined && s.part !== 'self' ? s : undefined;
-  };
-
-  const direct = partOf(lhs);
-  if (direct !== undefined) return direct;
-
-  if (!isFunction(lhs, 'Add')) return undefined;
-  let subject: Subject | undefined = undefined;
-  for (const term of lhs.ops) {
-    const s = partOf(term);
-    if (s !== undefined) {
-      if (subject !== undefined) return undefined; // more than one part term
-      subject = s;
-    } else if (!isNumber(term)) {
-      return undefined; // non-numeric extra term
-    }
-  }
-  return subject;
-}
-
-/** True if `expr` contains a part term (`Real/Imaginary/Abs/Argument` of a
- * bare symbol) anywhere. */
-function containsPartTerm(expr: Expression): boolean {
-  if (!isFunction(expr)) return false;
-  const s = subjectOf(expr);
-  if (s !== undefined && s.part !== 'self') return true;
-  return expr.ops.some(containsPartTerm);
 }
 
 /** The numeric (finite, real) value of a bound expression, or undefined. */
@@ -1537,44 +1402,6 @@ function boundsExcludeZero(bounds: IntervalBounds): boolean {
   return false;
 }
 
-/**
- * Narrow the type of `symbol` to `type` only when its current type is
- * unknown, or inferred and `type` actually narrows it. Never widens, and
- * never overrides an explicit declaration (design §3.3).
- */
-function refineTypeIfUnknown(
-  ce: ComputeEngine,
-  symbol: string,
-  type: Type,
-  cause?: Expression
-): void {
-  const def = ce.lookupDefinition(symbol);
-  if (!def) {
-    ce.declare(symbol, type);
-    recordDeclaredByAssumption(ce, symbol, cause);
-    return;
-  }
-  if (!isValueDef(def) || def.value.isConstant) return;
-  const current = def.value.type;
-  const narrows =
-    !current ||
-    current.isUnknown ||
-    (def.value.inferredType && isSubtype(type, current.type));
-  if (!narrows) return;
-
-  // If the definition lives in a parent scope, shadow it in the current scope
-  // rather than mutating the parent definition (P1-6): the refinement must be
-  // reverted when the scope is popped.
-  if (!ce.context?.lexicalScope?.bindings.has(symbol)) {
-    ce.declare(symbol, type);
-    recordDeclaredByAssumption(ce, symbol, cause);
-    return;
-  }
-  const previous = def.value.type;
-  def.value.type = ce.type(type);
-  recordAssumedType(ce, def.value, cause, previous);
-}
-
 function hasDef(ce: ComputeEngine, s: string): boolean {
   return ce.lookupDefinition(s) !== undefined;
 }
@@ -1584,29 +1411,50 @@ function undefinedIdentifiers(expr: Expression): string[] {
 }
 
 /**
- * Record that the *value* of `symbol` in the current context was installed by
- * an `assume(symbol = …)` (SYM P2-10). No-arg `forget()` consults this set to
- * clear assumption-installed values while leaving user `declare()`/`assign()`
- * values untouched.
+ * Record `symbol = value`.
  *
- * The same fact is recorded a second time in the context's `assumedValues`
- * overlay, keyed by the DEFINITION the value landed on rather than by name.
- * The overlay is copied on a scope push and dropped on the pop, so it gives
- * an assumed value the lifetime of the scope that assumed it even when the
- * definition itself belongs to an enclosing scope — which a name set and a
- * value written onto an outer definition cannot express. Call this only
- * AFTER the value is installed, so the lookup resolves the definition the
- * value actually reached.
+ * Two records, and no write to the definition: the equality itself becomes a
+ * FACT (what it proves about the type — the promoted tier of the value — is
+ * merged in by the type read, so `forget()` retracts it), and the value goes
+ * into the current context's assumed-value overlay, which the scope that
+ * assumed it drops on its pop. A user `declare()`/`assign()` value is stored
+ * on the definition instead, and the two never collide.
  */
-function markAssumptionValue(
+function storeEquality(
   ce: ComputeEngine,
   symbol: string,
   value: Expression
-): void {
-  (ce.context.assumptionBindings ??= new Set<string>()).add(symbol);
+): AssumeResult {
+  declareProvisional(ce, symbol);
   const def = ce.lookupDefinition(symbol);
-  if (def !== undefined && isValueDef(def))
-    ce.context.assumedValues.set(def.value, value);
+  if (!isValueDef(def)) return 'not-a-predicate';
+  const fact = ce.function('Equal', [ce.symbol(symbol), value]);
+  if (!fact.isValid) return 'not-a-predicate';
+
+  // The recording shield hides the value the FIRST assertion installed, so
+  // re-asserting the same equality reaches this point instead of folding to
+  // `1 = 1`. It states nothing new about the same definition, so it is a
+  // tautology and stores nothing: appending a second record for it would grow
+  // the store on every repetition and make `forget()` more expensive for no
+  // added knowledge.
+  const subjects = factSubjects(ce, fact);
+  const existing = ce.context.assumptions.get(fact);
+  if (
+    existing?.some(
+      (record) =>
+        record.truth === true &&
+        record.subjects.length === subjects.length &&
+        record.subjects.every(
+          (s, i) => s.def === subjects[i].def && s.part === subjects[i].part
+        )
+    )
+  )
+    return 'tautology';
+
+  const stored = recordFact(ce, fact, true);
+  if (stored !== 'ok') return stored;
+  stageAssumedValue(ce, def.value, value);
+  return 'ok';
 }
 
 function hasValue(ce: ComputeEngine, s: string): boolean {

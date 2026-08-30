@@ -90,19 +90,22 @@ describe('INFERENCE PROVENANCE — inferred writes carry the enclosing operator 
   });
 });
 
-describe('INFERENCE PROVENANCE — assumption writes', () => {
-  test('an assumption-driven refinement records kind "assumed" with the proposition', () => {
+describe('INFERENCE PROVENANCE — an assumption writes nothing', () => {
+  test('an assumption records no provenance entry at all', () => {
     const ce = new ComputeEngine();
     ce.box(['Add', 'q', 1]);
+    const before = historyOf(ce, 'q');
     ce.assume(ce.parse('q > 0'));
-    const history = historyOf(ce, 'q');
-    const assumed = history.filter(([kind]) => kind === 'assumed');
-    expect(assumed).toHaveLength(1);
-    // Since the §5.8 A2 change an inequality refines to the proven RANGE
-    // type, and that is what the provenance row records.
-    expect(assumed[0][1]).toBe('real<0<..>');
-    // The cause is the (normalized) proposition the assumption installed.
-    expect(assumed[0][2]).toBeDefined();
+    // An assumption is a FACT, not a write: what it proves is merged into the
+    // type by the READ, so nothing lands in the write history and there is no
+    // `'assumed'` kind to find. The proven range is still what the type
+    // reports while the fact is in force.
+    expect(historyOf(ce, 'q')).toEqual(before);
+    expect(ce.box('q').type.toString()).toBe('real<0<..>');
+    // ...and it is gone again once the fact is retracted, with no rewind:
+    // what is left is exactly the type the USE inferred (`q + 1` ⇒ `number`).
+    ce.forget('q');
+    expect(ce.box('q').type.toString()).toBe('number');
   });
 });
 

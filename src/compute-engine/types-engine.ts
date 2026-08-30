@@ -217,9 +217,9 @@ export type InferenceWriteEvent = {
   from: BoxedType;
   /** The type the write installed. */
   to: BoxedType;
-  /** `'inferred'` for `_infer()` writes, `'assumed'` for writes by the
-   * assumptions machinery. */
-  kind: 'inferred' | 'assumed';
+  /** `'inferred'` for `_infer()` writes. The only kind: an assumption never
+   * writes a type, so it never reports one here. */
+  kind: 'inferred';
 };
 
 /**

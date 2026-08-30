@@ -81,8 +81,10 @@ describe('Greater(Imaginary(tau), 0)', () => {
 
   it('does NOT retype tau as real', () => {
     expect(ce.expr('tau').isExtendedReal).not.toBe(true);
-    // The only refinement allowed for a part-predicate is `number`
-    expect(ce.expr('tau').type.toString()).toBe('number');
+    // A part-predicate proves at most `number` about the whole value, and the
+    // disequality it derives — `Im(tau)` bounded away from zero implies
+    // `tau ≠ 0` — excludes the one value the type can name.
+    expect(ce.expr('tau').type.toString()).toBe('number & !0');
   });
 
   it('stores the bound on the im:tau subject in the fact index', () => {

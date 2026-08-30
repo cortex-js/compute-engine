@@ -17,8 +17,17 @@ import {
   widen,
 } from '../../common/type/utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
+import { reduceType } from '../../common/type/reduce.js';
 
 import { defaultCollectionHandlers } from '../collection-utils.js';
+import {
+  type FactIndex,
+  contextAssumedValues,
+  contextAssumptions,
+  getFactIndex,
+  isValueShielded,
+  typeFor,
+} from './constraint-subject.js';
 import type { LatexString } from '../latex-syntax/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
@@ -424,10 +433,40 @@ export class _BoxedValueDefinition
     return this._isSelfReferential;
   }
 
-  get value(): Expression | undefined {
+  /** The value STORED on this definition — what `assign()`, a
+   * `declare(name, { value })` or a library constant put here — with no
+   * assumed value overlaid on it.
+   *
+   * This is the write path's read: a definition is USER-VALUED when this is
+   * defined, and a value an `assume(x = …)` put in force is not stored here
+   * at all (it lives in the context's assumed-value overlay, which the scope
+   * that assumed it discards on its pop). */
+  get storedValue(): Expression | undefined {
     if (this._value === null)
       this._value = dynamicValue(this._engine, this._defValue);
     return this._value;
+  }
+
+  /**
+   * The value this definition has in the CURRENT state: the assumed value the
+   * context puts in force, else the stored one.
+   *
+   * `undefined` while a recording-time shield hides this definition, so that
+   * `assume()` records a predicate about the SYMBOL rather than folding it
+   * through the value (`w := 5; assume(w > 0)`; see `withShieldedValues`).
+   */
+  private _effectiveValue(): Expression | undefined {
+    if (isValueShielded(this)) return undefined;
+    const overlay = contextAssumedValues(this._engine);
+    if (overlay.size !== 0) {
+      const assumed = overlay.get(this);
+      if (assumed !== undefined) return assumed;
+    }
+    return this.storedValue;
+  }
+
+  get value(): Expression | undefined {
+    return this._effectiveValue();
   }
 
   set value(v: Expression | undefined) {
@@ -656,12 +695,85 @@ export class _BoxedValueDefinition
     this._writeVersion += 1;
   }
 
-  get type(): BoxedType {
+  /**
+   * The type this definition DECLARES — its contract. Built from the
+   * declaration and the stored value only, never from an assumption, so a
+   * type derived from it and stored elsewhere stays true when a fact is
+   * retracted (`docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.2).
+   *
+   * This is the read for the write path, for provenance and for a hover: use
+   * {@link type} for what is known in the current state.
+   */
+  get declaredType(): BoxedType {
     const t = this._type;
     if (t === undefined || t === null)
-      return this._value?.type ?? BoxedType.unknown;
+      return this.storedValue?.type ?? BoxedType.unknown;
     return this._reviseInferredType(t);
   }
+
+  /**
+   * The type known in the CURRENT state: the declared type narrowed by
+   * everything the assumptions in force prove about this definition.
+   *
+   * The single site where the two channels meet. A fact contributes only to
+   * the definition its assertion was recorded against, so a name re-declared
+   * in an inner scope keeps its own type and the facts about the enclosing
+   * definition stay with that one. A definition holding a STORED value takes
+   * its type from the value alone: an assumption about such a symbol is
+   * CHECKED against the value when it is made and never retypes it.
+   *
+   * The operands are intersected as one type NODE and reduced once — the meet
+   * (`narrow()`) would answer `never` for `real & !2`, which is exactly the
+   * shape a disequality fact contributes.
+   */
+  get type(): BoxedType {
+    const declared = this.declaredType;
+    const ce = this._engine;
+    if (contextAssumptions(ce).size === 0) return declared;
+    // A constant is never a fact's subject (`soleSelfSubject` filters it out),
+    // so there is nothing to merge — and answering before the `storedValue`
+    // probe below matters: reading that value FORCES a constant's lazy value,
+    // which for a precision-dependent constant such as `Pi` is a full
+    // evaluation this getter has no need of.
+    if (this._isConstant) return declared;
+    if (this.storedValue !== undefined) return declared;
+
+    const index = getFactIndex(ce);
+    const contributions = typeFor(index, this);
+    if (contributions.length === 0) return declared;
+
+    // The index is rebuilt whenever the facts change (a new engine generation
+    // or a mutation of the store), so keying on its identity is what heals
+    // this cache on `assume()`, `forget()`, a scope change and a checkpoint
+    // restore alike; `_writeVersion` covers a write to the declaration.
+    const cached = this._effectiveType;
+    if (
+      cached !== undefined &&
+      cached.index === index &&
+      cached.writeVersion === this._writeVersion
+    )
+      return cached.type;
+
+    const merged = new BoxedType(
+      reduceType({
+        kind: 'intersection',
+        types: [declared.type, ...contributions],
+      }),
+      ce._typeResolver
+    );
+    this._effectiveType = {
+      index,
+      writeVersion: this._writeVersion,
+      type: merged,
+    };
+    return merged;
+  }
+
+  /** Memo for {@link type}'s merge, keyed on the fact index it was computed
+   * from and on this record's own write counter. */
+  private _effectiveType:
+    | { index: FactIndex; writeVersion: number; type: BoxedType }
+    | undefined = undefined;
 
   /**
    * Revision of an INFERRED type against its own value (user-ruled
@@ -713,8 +825,8 @@ export class _BoxedValueDefinition
   private _reviseInferredType(recorded: BoxedType): BoxedType {
     if (!this.inferredType || this._isConstant || this._isSelfReferential)
       return recorded;
-    const v = this._value;
-    if (v === undefined || v === null || !isFunction(v)) return recorded;
+    const v = this.storedValue;
+    if (v === undefined || !isFunction(v)) return recorded;
     if (v.operator === 'Function') return recorded;
     const live = v.type;
     if (live.isUnknown || live.matches(recorded)) return recorded;
@@ -775,10 +887,16 @@ export class _BoxedValueDefinition
   }
 
   /** Set by `dispose()` and never cleared except by a checkpoint restore.
-   * Nothing reads it yet: the fact index will skip an assertion whose
-   * subject definition is disposed, and a checkpoint restore will drop such
-   * assertions, once the effective-type merge lands (phase 2 of
-   * `docs/plans/2026-08-29-assumptions-as-facts-type.md`). */
+   *
+   * An assumption is recorded against a DEFINITION, so a definition whose
+   * scope is gone leaves assertions about a value that no longer exists.
+   * Three readers act on this flag: the fact index skips an assertion any of
+   * whose subjects is disposed (`collectTypeContributions`,
+   * `boxed-expression/constraint-subject.ts`); a checkpoint restore drops
+   * those assertions and the assumed-value overlay entries keyed by a
+   * disposed definition (`restoreAssumptions`, `checkpoint.ts`); and the
+   * `assume()` transaction's consistency pass ignores a disposed definition
+   * when it re-reads what the applied facts prove (`assume.ts`). */
   disposed = false;
 
   dispose(): void {

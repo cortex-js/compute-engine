@@ -2945,6 +2945,31 @@ Assumption predicates bound to this compute engine.
 
 <MemberCard>
 
+### FactSubject {#factsubject}
+
+```ts
+type FactSubject = KernelFactSubject<BoxedValueDefinition>;
+```
+
+One subject of an assumption, specialized to this engine/runtime model.
+
+</MemberCard>
+
+<MemberCard>
+
+### FactRecord {#factrecord}
+
+```ts
+type FactRecord = KernelFactRecord<BoxedValueDefinition>;
+```
+
+One assertion recorded by `assume()`, specialized to this engine/runtime
+model. The assumptions store maps a normalized fact to a list of these.
+
+</MemberCard>
+
+<MemberCard>
+
 ### AssumeResult {#assumeresult}
 
 ```ts
@@ -3558,12 +3583,6 @@ A three-valued fact about an operand: `true` (provably yes), `false`
 type OperandFacts = {
   finite: Tri;
   sgn: Sign;
-  bounds: {
-     lower: number;
-     lowerStrict: boolean;
-     upper: number;
-     upperStrict: boolean;
-    };
   closed: Tri;
   collection: Tri;
   finiteCollection: Tri;
@@ -4426,8 +4445,7 @@ references to the definition in bound expressions.
 ```ts
 type TypeProvenanceEntry = {
   type: BoxedType;
-  kind: "declared" | "auto-declared" | "inferred" | "assumed" | "value-derived";
-  previousType: BoxedType;
+  kind: "declared" | "auto-declared" | "inferred" | "value-derived";
   axis: "type" | "effects";
   cause: Expression;
   epoch: number;
@@ -4522,9 +4540,9 @@ Some examples:
 value: Expression | undefined;
 ```
 
-The current value of the symbol. For constants, this is immutable.
- The definition object is the single source of truth — there is no
- separate evaluation-context values map.
+The current value of the symbol: the value an `assume(x = …)` puts in
+ force for the current context if there is one, else the stored value.
+ For constants, this is immutable.
 
 </MemberCard>
 
@@ -4615,6 +4633,11 @@ accepted and re-stamped, never checked against the declaration.
 ```ts
 type: BoxedType;
 ```
+
+The type known in the CURRENT state: declaredType narrowed by
+everything the assumptions in force prove about this definition. Reading
+it is what makes a fact visible; nothing derived from it may be STORED
+(see declaredType).
 
 </MemberCard>
 
@@ -4716,6 +4739,7 @@ type OperatorDefinitionFlags = {
   broadcastable: boolean;
   broadcastExemptions: ReadonlyArray<BroadcastExemption>;
   inspectsErrors: boolean;
+  selectsOperands: boolean;
   namedArgumentsRequired: boolean;
   missingBehavior: "reject" | "propagate" | "handle";
   missingStrip: "all" | number[];
@@ -9034,7 +9058,7 @@ type InferenceWriteEvent = {
   valueDef: BoxedValueDefinition;
   from: BoxedType;
   to: BoxedType;
-  kind: "inferred" | "assumed";
+  kind: "inferred";
 };
 ```
 
@@ -11451,7 +11475,7 @@ One outer-definition narrowing observed by an [InspectableScope](#inspectablesco
 ### EvalContext {#evalcontext}
 
 ```ts
-type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;
+type EvalContext = KernelEvalContext<Expression, BoxedDefinition, BoxedValueDefinition>;
 ```
 
 Evaluation context specialized to this engine/runtime model.
@@ -16748,6 +16772,8 @@ type NumericType = {
   type: NumericPrimitiveType;
   lower: number;
   upper: number;
+  lowerOpen: boolean;
+  upperOpen: boolean;
 };
 ```
 

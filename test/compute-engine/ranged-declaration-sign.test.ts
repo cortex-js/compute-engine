@@ -149,14 +149,21 @@ describe('assumption type-refinement — review hardening (2026-08-23)', () => {
 
   test('an assumption about an ASSIGNED symbol never touches its type', () => {
     // The value-blindness shield makes the symbol look valueless during
-    // dispatch; the refinement must still treat it as assigned (checked,
-    // never rewritten) so the assumption does not become a contract on
-    // later re-assignments.
+    // dispatch; the symbol is still treated as assigned (checked, never
+    // rewritten), so its TYPE keeps coming from its value.
     const ce = new ComputeEngine();
     ce.assign('w', 5);
     expect(ce.assume(ce.parse('w > 0'))).toBe('ok');
     expect(ce.symbol('w').type.toString()).toBe('integer');
-    ce.assign('w', -3); // still re-assignable
+    // The assumption is a live CONSTRAINT, though, not a contract: a value
+    // that refutes it is refused while it is in force…
+    expect(() => ce.assign('w', -3)).toThrow();
+    expect(ce.symbol('w').value?.toString()).toBe('5');
+    // …and accepted again once the fact is retracted. A declared range would
+    // have refused it either way — that is the difference between a fact and
+    // a contract.
+    ce.forget('w');
+    ce.assign('w', -3);
     expect(ce.symbol('w').value?.toString()).toBe('-3');
   });
 

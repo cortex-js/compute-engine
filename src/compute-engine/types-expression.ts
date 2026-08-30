@@ -131,7 +131,7 @@ interface BoxedBaseDefinition extends Partial<BaseDefinition> {
  * the canonical documentation lives on the original. */
 type TypeProvenanceEntryMirror = {
   type: BoxedType;
-  kind: 'declared' | 'auto-declared' | 'inferred' | 'assumed' | 'value-derived';
+  kind: 'declared' | 'auto-declared' | 'inferred' | 'value-derived';
   axis: 'type' | 'effects';
   cause?: Expression;
   epoch?: number;
@@ -182,6 +182,10 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
 
   holdUntil: 'never' | 'evaluate' | 'N';
   value: Expression | undefined;
+  /** The value stored on the definition, with no assumed value overlaid —
+   * mirror of the member documented in `types-definitions.ts`.
+   * @internal */
+  readonly storedValue: Expression | undefined;
   readonly isSelfReferential: boolean;
   eq?: (a: Expression) => boolean | undefined;
   neq?: (a: Expression) => boolean | undefined;
@@ -198,6 +202,10 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
    * track. See `types-definitions.ts`. */
   effectsDeclared: boolean;
   type: BoxedType;
+  /** The declared type, with nothing an assumption proves merged in —
+   * mirror of the member documented in `types-definitions.ts`.
+   * @internal */
+  readonly declaredType: BoxedType;
   subscriptEvaluate?: (
     subscript: Expression,
     options: {

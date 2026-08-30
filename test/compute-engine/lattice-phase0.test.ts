@@ -377,7 +377,7 @@ describe('LATTICE PHASE 1: assuming realness of a non-finite symbol', () => {
     const e = new ComputeEngine();
     e.assign('v', e.box(5));
     expect(e.assume(e.parse('v \\in \\R'))).toBe('ok');
-    expect(e.box('v').type.toString()).toBe('real');
+    expect(e.box('v').type.toString()).toBe('integer');
   });
 });
 

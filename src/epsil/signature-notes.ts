@@ -210,9 +210,9 @@ function provenanceNote(
 }
 
 /** The note for the most recent history entry that (1) resulted from
- * evidence (inference or an assumption — a creation anchor explains
- * nothing), (2) knows what expression committed it, and (3) installed the
- * type the error reports as the actual type. */
+ * evidence — an inference; a creation anchor explains nothing, and an
+ * assumption never writes a type — (2) knows what expression committed it,
+ * and (3) installed the type the error reports as the actual type. */
 function noteFromHistory(
   name: string,
   history: NonNullable<BoxedExpr['valueDefinition']>['_typeProvenance'],
@@ -221,14 +221,11 @@ function noteFromHistory(
   if (history === undefined) return undefined;
   for (let i = history.length - 1; i >= 0; i--) {
     const entry = history[i];
-    if (entry.kind !== 'inferred' && entry.kind !== 'assumed') continue;
+    if (entry.kind !== 'inferred') continue;
     if (entry.cause === undefined) continue;
     if (entry.type.toString() !== actual) continue;
     return {
-      message:
-        entry.kind === 'assumed'
-          ? `\`${name}\` was assumed to have type \`${actual}\` (from \`${entry.cause.toString()}\`)`
-          : `\`${name}\` was inferred to have type \`${actual}\` from its use in \`${entry.cause.toString()}\``,
+      message: `\`${name}\` was inferred to have type \`${actual}\` from its use in \`${entry.cause.toString()}\``,
     };
   }
   return undefined;

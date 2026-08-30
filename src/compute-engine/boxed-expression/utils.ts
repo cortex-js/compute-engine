@@ -19,7 +19,6 @@ import {
   recordEffectsTransition,
 } from './effects-provenance.js';
 import { foldSeed } from '../numerics/random.js';
-import { Type } from '../../common/type/types.js';
 import { containsSignatureArm } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
@@ -571,18 +570,9 @@ export function getLocalVariables(expr: Expression): string[] {
   return [];
 }
 
-export function domainToType(expr: Expression): Type {
-  if (!isSymbol(expr)) return 'unknown';
-  // if (expr.symbol === 'Booleans') return 'boolean';
-  // if (expr.symbol === 'Strings') return 'string';
-  if (expr.symbol === 'Numbers') return 'number';
-  if (expr.symbol === 'ComplexNumbers') return 'complex';
-  if (expr.symbol === 'ImaginaryNumbers') return 'imaginary';
-  if (expr.symbol === 'RealNumbers') return 'real';
-  if (expr.symbol === 'RationalNumbers') return 'rational';
-  if (expr.symbol === 'Integers') return 'integer';
-  return 'unknown';
-}
+// The number-set tables live in a leaf module so that the fact index can read
+// them without importing this file, which would close a dependency cycle.
+export { domainToType } from './number-set-types.js';
 
 function angleToRadians(x: Expression | undefined): Expression | undefined {
   if (!x) return x;

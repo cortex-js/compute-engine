@@ -576,6 +576,10 @@ describe('snapshot completeness — the drift guard', () => {
     '_engine', // identity
     '_writeVersion', // monotone counter: BUMPED by a restore, never restored
     '_unsubscribeFromConfigurationChange', // live handle owned by dispose()
+    // A memo of the effective type, not state: it is keyed on the fact index
+    // it was computed from and on `_writeVersion`, so a restore that moves
+    // either one retires it, and a stale entry can never be served.
+    '_effectiveType',
   ]);
 
   const OPERATOR_DEF_EXCLUSIONS = new Set([

@@ -15,11 +15,7 @@ import {
   subjectOf,
 } from './boxed-expression/constraint-subject.js';
 import { isValueDef } from './boxed-expression/utils.js';
-import type { BoxedType } from '../common/type/boxed-type.js';
-import type {
-  BoxedDefinition,
-  BoxedValueDefinition,
-} from './types-definitions.js';
+import type { BoxedValueDefinition } from './types-definitions.js';
 
 import {
   assume as assumeImpl,
@@ -416,53 +412,34 @@ export function assumeFn(
     // `{ canonical: false }`, which was silently ignored and so always
     // produced a canonical predicate; a later refactor swapped it to
     // `{ form: 'raw' }`, inadvertently feeding raw predicates through.)
-    const pred = predicateFromArg(ce, predicate, 'assume').canonical;
+    const raw = predicateFromArg(ce, predicate, 'assume');
 
-    // The new assumption could affect existing expressions
-    ce._noteStateEvent({ kind: 'assumption' });
+    // The names the proposition mentions that nothing has declared YET.
+    // Canonicalizing below binds every free symbol it mentions, so this is the
+    // last moment at which a binding the assumption is answerable for can be
+    // told from one the user made: a transaction that rolls back — or a
+    // conjunct the assumptions layer refuses — has to leave the scope as it
+    // found it. (A caller who canonicalizes the predicate itself, as
+    // `ce.assume(ce.parse('x > 3'))` does, has already bound them; the
+    // transaction then has nothing to answer for and leaves them alone.)
+    const undeclared = raw.symbols.filter(
+      (s) => ce.lookupDefinition(s) === undefined
+    );
+
+    const pred = raw.canonical;
+
     // Popping this context silently reverts the assumption: mark it so the
-    // pop bumps `_semanticVersion` too (clean pops don't).
+    // pop bumps `_semanticVersion` too (clean pops don't). The `assumption`
+    // state event itself is emitted by `assume()` on EVERY outcome, a rollback
+    // included, so emitting one here as well would be a second advance for the
+    // same change.
     if (ce.context) ce.context._assumptionsDirty = true;
 
-    return assumeImpl(pred);
+    return assumeImpl(pred, undeclared);
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     throw e;
   }
-}
-
-/**
- * Rewind the ASSUMPTION-driven type writes on a current-scope binding: pop
- * the tail run of `'assumed'` provenance entries and restore the type the
- * first of them replaced. Without this, `declare(p, 'real'); assume(p > 0);
- * forget(p)` left `p` typed `(real<0..>) & !0` — the assumption's range
- * survived in the TYPE (and so in the sign channel) after the fact itself
- * was removed. A declaration the assumption CREATED has no previous type;
- * it rewinds to the historical bare `real` those declarations used before
- * ranges were installed (2026-08-22). Entries of other kinds, and any
- * `'assumed'` entry buried under a later non-assumed write, are left alone:
- * the later write superseded the assumption's.
- */
-function rewindAssumedTypeWrites(
-  ce: IComputeEngine,
-  binding: BoxedDefinition | undefined
-): void {
-  if (!isValueDef(binding) || binding.value.isConstant) return;
-  const prov = binding.value._typeProvenance;
-  if (!prov || prov.length === 0) return;
-  let sawAssumed = false;
-  let base: BoxedType | undefined;
-  while (
-    prov.length > 0 &&
-    prov[prov.length - 1].kind === 'assumed' &&
-    prov[prov.length - 1].axis === 'type'
-  ) {
-    const entry = prov.pop()!;
-    sawAssumed = true;
-    base = entry.previousType;
-  }
-  if (!sawAssumed) return;
-  binding.value.type = base ?? ce.type('real');
 }
 
 /**
@@ -496,39 +473,26 @@ export function forget(
   //
   // ## THEORY OF OPERATIONS
   //
-  // When forgeting we need to preserve existing definitions for symbols,
-  // as some expressions may be pointing to them. Instead, we
-  // reset the value of those definitions, but don't change the domain.
+  // Forgetting removes FACTS. Existing definitions are preserved —
+  // expressions point at them — and their declared TYPES are never touched,
+  // because an assumption never wrote one: a type an assumption proved was
+  // merged in by the READ, so dropping the fact is all it takes for the read
+  // to stop proving it. A value an assumption installed lives in the
+  // context's assumed-value overlay, not on the definition, so dropping the
+  // overlay entry is all that form of retraction takes either.
+  //
+  // The one-name form does one thing more, as it always has: it resets the
+  // VALUE of the current scope's binding of that name, whoever wrote it. The
+  // no-argument form does not — a user `assign()` value survives it.
   //
 
   if (symbol === undefined) {
     ce.context.assumptions?.clear();
     // The overlay holds the values `assume(x = …)` put in force, so a
-    // no-argument forget drops it whole, exactly like the fact map.
+    // no-argument forget drops it whole, exactly like the fact map. A user
+    // `declare()`/`assign()` value is stored on the definition and is
+    // untouched.
     ce.context.assumedValues?.clear();
-
-    // Also undo value bindings installed by `assume(x = …)` (SYM P2-10): the
-    // docstring promises no-arg forget() removes *all* assumptions, but a
-    // value assigned via `assume` used to survive (so `x` still evaluated to
-    // its assumed value). Only assumption-installed values are cleared — user
-    // `declare()`/`assign()` values (never recorded in `assumptionBindings`)
-    // are left intact.
-    const installed = ce.context.assumptionBindings;
-    if (installed) {
-      for (const s of installed) {
-        const binding = ce.context.lexicalScope.bindings.get(s);
-        if (binding && isValueDef(binding) && !binding.value.isConstant)
-          binding.value.value = undefined;
-      }
-      installed.clear();
-    }
-
-    // Rewind assumption-driven TYPE writes on every current-scope binding
-    // (parent-scope bindings were only ever refined through a current-scope
-    // shadow, so the current scope is the complete reach — see
-    // `refineSymbolType`'s P1-6 shadowing).
-    for (const binding of ce.context.lexicalScope.bindings.values())
-      rewindAssumedTypeWrites(ce, binding);
 
     // The removed assumptions could affect existing expressions
     ce._noteStateEvent({ kind: 'assumption' });
@@ -557,12 +521,6 @@ export function forget(
     // removes less than it used to — any fact whose expression mentions the
     // name at all (a fact about a symbol with no value definition has no
     // subject to match). Dropping the last assertion of a key drops the key.
-    // Today every subject is resolved from a symbol that appears in the fact
-    // expression, so the name test below always fires first and the
-    // subject filter never removes anything on its own; it becomes the
-    // live path when facts are keyed by definition and a re-declared name
-    // must keep the facts about the OTHER definition (phase 2 of
-    // `docs/plans/2026-08-29-assumptions-as-facts-type.md`).
     const definitions = valueDefinitionsNamed(ce, symbol);
     for (const [assumption, records] of [...ce.context.assumptions.entries()]) {
       if (assumption.has(symbol)) {
@@ -578,25 +536,23 @@ export function forget(
     }
 
     // The overlay is keyed by definition, so drop the entry of every
-    // definition this name reaches in the current context.
+    // definition this name reaches in the current context — the same reach
+    // the fact loop above uses.
     for (const def of definitions) ce.context.assumedValues.delete(def);
 
-    // Also reset the symbol's value in the current scope's bindings.
-    // When ce.assume('x = 5') is called, it may declare x in the current
-    // scope via ce.declare(). forget() must undo that value so that
-    // subsequent lookups return no value (evaluating x returns x, not 5).
+    // `forget(name)` also resets the VALUE of the current scope's binding, as
+    // the theory of operations above states: the value goes, the declared
+    // type stays. This is broader than the assumption store — a
+    // `declare(name, { value })` value goes too — and it is the documented
+    // behavior of the one-name form, unlike the no-argument form, which
+    // drops only what the assumptions put in force.
     const scopeBinding = ce.context.lexicalScope.bindings.get(symbol);
     if (
       scopeBinding &&
       isValueDef(scopeBinding) &&
       !scopeBinding.value.isConstant
-    ) {
+    )
       scopeBinding.value.value = undefined;
-    }
-    // Rewind assumption-driven TYPE writes for this symbol (see the helper).
-    rewindAssumedTypeWrites(ce, scopeBinding);
-    // Keep the provenance set accurate (SYM P2-10).
-    ce.context.assumptionBindings?.delete(symbol);
   }
   // The removed assumptions could affect existing expressions
   ce._noteStateEvent({ kind: 'assumption' });

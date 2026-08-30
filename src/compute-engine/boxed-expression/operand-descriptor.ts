@@ -21,8 +21,6 @@ import {
 } from '../../common/type/primitive.js';
 import { signOfType } from '../../common/type/utils.js';
 import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
-import { hasAssumptions } from './constraint-subject.js';
-import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
 import {
   functionLiteralBody,
   functionLiteralParameters,

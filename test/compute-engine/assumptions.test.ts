@@ -78,12 +78,14 @@ describe('INEQUALITY EVALUATION USING ASSUMPTIONS', () => {
 // #20: Tautology and Contradiction Detection
 // ce.assume() should return 'tautology' for redundant assumptions and 'contradiction' for conflicting ones
 describe('TAUTOLOGY AND CONTRADICTION DETECTION', () => {
-  // Value-blindness shield (ratified 2026-07-24): `tautology` is reserved for
-  // predicates redundant relative to TYPES/ASSUMPTIONS, not relative to an
-  // assigned value. `one` carries the assigned value 1, so re-asserting
-  // `one = 1` is recorded value-blind and returns `ok`, not `tautology`.
-  test(`assuming one = 1 again is value-blind and returns ok`, () => {
-    expect(ce.assume(ce.expr(['Equal', 'one', 1]))).toEqual('ok');
+  // `one = 1` is already asserted about this very definition, so re-asserting
+  // it states nothing new: it is a tautology and records nothing. (The
+  // value-blindness shield still applies — it is what makes the second
+  // assertion reach the store at all instead of folding to `1 = 1` — but the
+  // duplicate is then recognized against the assertions already recorded, not
+  // against the value.)
+  test(`assuming one = 1 again is a tautology`, () => {
+    expect(ce.assume(ce.expr(['Equal', 'one', 1]))).toEqual('tautology');
   });
 
   test(`assuming one < 0 should return contradiction (one = 1)`, () => {

@@ -941,14 +941,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   // The sign of the value of the symbol
   //
-  // Mixed binding semantics (SYMBOLIC P2-13, documented): type-backed
-  // predicates (`type`, `isInteger`, …) read the definition captured in
-  // `_def` at construction/binding time, while sign predicates resolve
-  // *dynamically* by symbol name against the live assumptions. In the
-  // common path both agree — `assume()` mutates the bound definition in
-  // place — but a held instance whose symbol is re-declared in a new scope
-  // keeps its construction-time type while its sign tracks the current
-  // scope's assumptions.
+  // Mixed binding semantics (SYMBOLIC P2-13, documented). The TYPE channel is
+  // keyed by DEFINITION: `type` and the type-backed predicates (`isInteger`,
+  // …) read the definition captured in `_def` when this instance was bound,
+  // and an assumption is merged into it only when the assertion was recorded
+  // against that same definition. The SIGN channel is still keyed by NAME: it
+  // resolves dynamically against whatever the current scope assumes about the
+  // spelling. The two therefore disagree on a shadowed name — `assume(x > 3)`
+  // then an inner `declare x string` leaves `x.type` `string` while
+  // `x.isPositive` is still `true`. Folding the sign, bounds and membership
+  // channels onto the definition is the next round of
+  // `docs/plans/2026-08-29-assumptions-as-facts-type.md` (§6 Q1); until then
+  // the divergence stands, pinned as a known-wrong result.
   get sgn(): Sign | undefined {
     // First check if there's an assigned value
     const value = this.value;
