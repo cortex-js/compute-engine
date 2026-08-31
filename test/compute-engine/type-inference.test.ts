@@ -142,15 +142,15 @@ describe('TYPE INFERENCE FOR STATISTICS FUNCTIONS', () => {
 describe('TYPE INFERENCE FOR LOG FUNCTIONS', () => {
   // An unknown-sign real may be negative (`ln(−2) = 0.693… + iπ`) or zero
   // (`ln(0) = −∞`), so `real` was unsound — the sound join is
-  // `complex | non_finite_number`. The signed pair is named explicitly
+  // `complex | signed_infinity`. The signed pair is named explicitly
   // because the bare name `complex` denotes the FINITE complex numbers and
   // does not admit the `x = 0` pole; neither disjunct admits NaN. Ruled
   // 2026-07-30, same ruling as the bounded inverse-trig heads.
-  it('Ln of unknown-sign real → complex | non_finite_number', () => {
+  it('Ln of unknown-sign real → complex | signed_infinity', () => {
     const localCe = new ComputeEngine();
     localCe.declare('x', { type: 'real' });
     const expr = localCe.parse('\\ln(x)');
-    expect(expr.type.toString()).toBe('complex | non_finite_number');
+    expect(expr.type.toString()).toBe('complex | signed_infinity');
   });
 
   it('Ln of provably-positive real → real', () => {
@@ -204,9 +204,9 @@ describe('TYPE INFERENCE FOR ARITHMETIC FUNCTIONS', () => {
 
   // REVIEW.md B12: `!exp.isFinite` was true for a symbolic exponent (whose
   // isFinite is `undefined`), so any symbolic exponent was classified
-  // `non_finite_number`. The `real` branch also over-claimed for a
+  // `signed_infinity`. The `real` branch also over-claimed for a
   // possibly-negative base with a non-integer exponent.
-  it('Power with a symbolic exponent is not non_finite_number', () => {
+  it('Power with a symbolic exponent is not signed_infinity', () => {
     const localCe = new ComputeEngine();
     localCe.declare('x', { type: 'real' });
     // 2^x: a positive base raised to a real exponent is a POSITIVE finite
@@ -232,11 +232,11 @@ describe('TYPE INFERENCE FOR ARITHMETIC FUNCTIONS', () => {
   it('Power with an infinite operand types the +oo singleton', () => {
     // `(+∞)² = +∞` folds at canonicalization, so what is typed here is the
     // resulting LITERAL, and a literal carries the singleton that names its
-    // exact value. The singleton is below `non_finite_number`, so this is a
+    // exact value. The singleton is below `signed_infinity`, so this is a
     // narrowing of the previous claim, not a contradiction of it.
     const p = ce.expr(['Power', 'PositiveInfinity', 2]);
-    expect(p.type.toString()).toBe('Infinity');
-    expect(p.type.matches('non_finite_number')).toBe(true);
+    expect(p.type.toString()).toBe('+oo');
+    expect(p.type.matches('signed_infinity')).toBe(true);
     // The Power type HANDLER — reached when the fold does not apply — still
     // claims the signed pair.
     expect(
@@ -245,7 +245,7 @@ describe('TYPE INFERENCE FOR ARITHMETIC FUNCTIONS', () => {
           form: 'structural',
         })
         .type.toString()
-    ).toBe('non_finite_number');
+    ).toBe('signed_infinity');
   });
 });
 
@@ -414,12 +414,12 @@ describe('TYPE INFERENCE FOR REAL × IMAGINARY ARITHMETIC (D10 shim retirement)'
     );
   });
 
-  it('ln(−1) is complex; ln(0) is non_finite_number (provable −∞ pole)', () => {
+  it('ln(−1) is complex; ln(0) is signed_infinity (provable −∞ pole)', () => {
     expect(ce.box(['Ln', -1]).type.toString()).toBe('complex');
     // SYM P2-23 option b: `ln(0) = −∞` is *provably* ±∞, so the log type
-    // handler claims `non_finite_number` (see the non-finite typing
+    // handler claims `signed_infinity` (see the non-finite typing
     // convention in ARCHITECTURE.md).
-    expect(ce.box(['Ln', 0]).type.toString()).toBe('non_finite_number');
+    expect(ce.box(['Ln', 0]).type.toString()).toBe('signed_infinity');
   });
 });
 

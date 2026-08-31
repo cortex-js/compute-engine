@@ -419,7 +419,7 @@ export type Tri = boolean | undefined;
 export type OperandFacts = {
   /** `true` for a `finite_*`-typed operand or a finite number literal;
    * `false` for an operand whose type is below `infinity` or `nan` — which
-   * covers the signed pair `non_finite_number`, the unsigned `~oo` and the
+   * covers the signed pair `+oo | -oo`, the unsigned `~oo` and the
    * NaN marker — and for a `±∞`/`NaN` literal; `undefined` otherwise
    * (including every non-number operand). Treating a NaN operand as an
    * unknown-finiteness generic point would let a total-real-function

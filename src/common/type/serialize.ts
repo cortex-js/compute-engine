@@ -74,6 +74,13 @@ export function typeToString(type: Type, precedence = 0): string {
       // so `toString()` on it would print `[object Object]` instead of a
       // spelling the parser can read back.
       else if (isComplexInfinityValue(type.value)) result = '~oo';
+      // The signed infinities print as `+oo`/`-oo` — the spelling the
+      // parser documents first and the one the retired
+      // `non_finite_number` normalizes into, so an extended-real union
+      // reads `real | +oo | -oo` rather than JavaScript's
+      // `Infinity`/`-Infinity`.
+      else if (type.value === Infinity) result = '+oo';
+      else if (type.value === -Infinity) result = '-oo';
       else result = type.value.toString();
       break;
 
@@ -113,7 +120,17 @@ export function typeToString(type: Type, precedence = 0): string {
         else flat.push(typeToString(t, UNION_PRECEDENCE));
       };
       type.types.forEach(pushMember);
-      result = flat.sort().join(' | ');
+      // The two signed-infinity singletons collapse to their intentional
+      // one-word spelling: `signed_infinity` IS the union `+oo | -oo` (the
+      // named spelling that replaced the retired `non_finite_number`), so
+      // a union containing both members prints the name — `real |
+      // signed_infinity`, never `+oo | -oo | real`. A lone singleton
+      // keeps its own `+oo`/`-oo` spelling.
+      if (flat.includes('+oo') && flat.includes('-oo')) {
+        const rest = flat.filter((m) => m !== '+oo' && m !== '-oo');
+        rest.push('signed_infinity');
+        result = rest.sort().join(' | ');
+      } else result = flat.sort().join(' | ');
       break;
     }
 

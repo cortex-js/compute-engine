@@ -1382,10 +1382,10 @@ describe('isFinite propagation (B3 latent finiteness gap)', () => {
 
   test('type-provable non-finiteness is reported (not just structural)', () => {
     // `Ln(0)` is −∞. There is no `Ln` case in the structural propagation
-    // above, so finiteness comes from the static type (`non_finite_number`,
+    // above, so finiteness comes from the static type (`signed_infinity`,
     // i.e. the infinities). Previously `isFinite` was type-blind here and
     // returned `undefined` even though `.type` proved the value non-finite.
-    expect(engine.parse('\\ln(0)').type.toString()).toBe('non_finite_number');
+    expect(engine.parse('\\ln(0)').type.toString()).toBe('signed_infinity');
     expect(engine.parse('\\ln(0)').isFinite).toBe(false);
     expect(engine.expr(['Ln', 0]).isFinite).toBe(false);
     expect(engine.parse('\\log(0)').isFinite).toBe(false);

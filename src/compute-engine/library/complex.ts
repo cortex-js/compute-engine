@@ -70,7 +70,7 @@ const realPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
   if (!z) return 'number';
   const t = z.type;
   if (t.matches('complex')) return 'real';
-  if (t.matches('non_finite_number')) return 'non_finite_number';
+  if (t.matches('+oo | -oo')) return '+oo | -oo';
   if (isNumber(z)) return 'number'; // a `nan` or `~oo` literal
   // Collection operand: scalar claim for the broadcast lift — elements
   // keep the generic finite-point convention (list-broadcast-typing).
@@ -88,7 +88,7 @@ const realPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
 const imaginaryPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
   if (!z) return 'number';
   const t = z.type;
-  if (t.matches('complex') || t.matches('non_finite_number')) return 'real';
+  if (t.matches('complex') || t.matches('+oo | -oo')) return 'real';
   if (isNumber(z)) return 'number'; // a `nan` or `~oo` literal
   if (t.matches('indexed_collection<any>')) return 'real';
   // A real-typed operand has Im = 0. The bare name `real` is finite and
@@ -104,7 +104,7 @@ const imaginaryPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
 const argumentType: OperatorTypeHandlerOnExpressions = ([z]) => {
   if (!z) return 'number';
   const t = z.type;
-  if (t.matches('complex') || t.matches('non_finite_number')) return 'real';
+  if (t.matches('complex') || t.matches('+oo | -oo')) return 'real';
   if (isNumber(z)) return 'number'; // a `nan` or `~oo` literal
   if (t.matches('indexed_collection<any>')) return 'real';
   // A real-typed operand has Arg ∈ {0, π}. The bare name `real` is finite

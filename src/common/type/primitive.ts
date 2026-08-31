@@ -8,7 +8,6 @@ export const NUMERIC_TYPES: NumericPrimitiveType[] = [
   'real',
   'rational',
   'integer',
-  'non_finite_number',
   // A number of infinite magnitude, of any direction (`+∞`, `−∞`, `~∞`,
   // `∞ + i`), and the not-a-number marker. Together with `complex` they
   // partition `number`: see the numeric tree comment on
@@ -159,9 +158,34 @@ export const DICTIONARY_SHAPE_TYPE: Type = Object.freeze({
  *
  * Frozen for the same sharing reason as the shape constants above.
  */
+/**
+ * Exactly the SIGNED pair `+∞`/`−∞`, as the union of the two value types.
+ * The parser accepts the one-word spelling `signed_infinity` for this
+ * union and the serializer prints a union containing both members under
+ * that name, so `real | signed_infinity` round-trips. It replaced the
+ * retired name `non_finite_number` (ruling L5 executed 2026-08-31; the
+ * old name was misleading: `~∞` and `∞ + i` are non-finite numbers, yet
+ * neither was a member). Use this where the sign-aware guarantee matters
+ * (the `1/±∞ = 0` folds, sign-reading gates); use `infinity` where any
+ * infinite value is acceptable.
+ *
+ * Frozen for the same sharing reason as the shape constants above.
+ */
+export const SIGNED_INFINITY_TYPE: Type = Object.freeze({
+  kind: 'union',
+  types: [
+    { kind: 'value', value: Infinity },
+    { kind: 'value', value: -Infinity },
+  ],
+}) as Type;
+
 export const EXTENDED_REAL_TYPE: Type = Object.freeze({
   kind: 'union',
-  types: ['real', 'non_finite_number'],
+  types: [
+    'real',
+    { kind: 'value', value: Infinity },
+    { kind: 'value', value: -Infinity },
+  ],
 }) as Type;
 
 export const COLLECTION_TYPES: PrimitiveType[] = [

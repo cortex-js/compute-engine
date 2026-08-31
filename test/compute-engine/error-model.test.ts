@@ -342,7 +342,7 @@ describe('ERROR-MODEL §2 rule 3 — standard mathematical extensions, no failur
     ])) {
       test(`[${route}] boxes unreduced with a provably non-finite type and evaluates to -oo`, () => {
         expect(expr.operator).toBe('Ln');
-        expect(expr.type.toString()).toBe('non_finite_number');
+        expect(expr.type.toString()).toBe('signed_infinity');
         expect(expr.evaluate().isSame(ce.NegativeInfinity)).toBe(true);
         expect(expr.N().isSame(ce.NegativeInfinity)).toBe(true);
       });
@@ -710,9 +710,9 @@ describe('ERROR-MODEL §5 — ~oo is a definite point with defined arithmetic, n
     expect(ce.ComplexInfinity.type.matches('infinity')).toBe(true);
     expect(ce.NaN.type.matches('nan')).toBe(true);
     // The directed infinities are no longer ordinary values of `real`: they
-    // inhabit `infinity`, through the signed-pair atom `non_finite_number`.
+    // inhabit `infinity`, through the signed pair `signed_infinity`.
     expect(ce.PositiveInfinity.type.matches('real')).toBe(false);
-    expect(ce.PositiveInfinity.type.matches('non_finite_number')).toBe(true);
+    expect(ce.PositiveInfinity.type.matches('signed_infinity')).toBe(true);
     expect(ce.PositiveInfinity.type.matches('infinity')).toBe(true);
     // The extended real line is spelled out as a union.
     expect(ce.PositiveInfinity.type.matches('real | infinity')).toBe(true);

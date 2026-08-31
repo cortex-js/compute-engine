@@ -73,15 +73,15 @@ describe('Numeric primitive meets (G15)', () => {
   test('subtype-related pairs reduce to the narrower type', () => {
     expect(intersectStr('integer', 'rational')).toBe('integer');
     expect(intersectStr('integer', 'number')).toBe('integer');
-    expect(intersectStr('non_finite_number', 'infinity')).toBe(
-      'non_finite_number'
-    );
+    // The signed pair is spelled as the union of the two signed-infinity
+    // value types, so it has to be parsed rather than passed as a bare name.
+    expect(intersectStr(parseType('signed_infinity'), 'infinity')).toBe('signed_infinity');
   });
 
   test('an infinity meets no finite numeric name', () => {
     // `integer` is finite now, so it shares no value with the signed pair.
-    // (Before the finite-by-default flip this meet was `non_finite_number`.)
-    expect(intersectStr('non_finite_number', 'integer')).toBe('never');
+    // (Before the finite-by-default flip this meet was the signed pair.)
+    expect(intersectStr(parseType('signed_infinity'), 'integer')).toBe('never');
     expect(intersectStr('infinity', 'real')).toBe('never');
     expect(intersectStr('nan', 'complex')).toBe('never');
   });
@@ -258,20 +258,21 @@ const reduceStr = (s: string): string => {
 
 describe('The doubled tower is gone (finite-by-default flip)', () => {
   // Before the flip the numeric names were doubled: `real` admitted ±∞ while
-  // its `finite_real` twin did not, so the union `finite_X | non_finite_number`
-  // covered exactly the same values as `X` and had to collapse to it. The bare
+  // its `finite_real` twin did not, so the union of a finite name with the
+  // signed pair `signed_infinity` covered exactly the same values as `X` and had to
+  // collapse to it. The bare
   // names are finite now, so the union is STRICTLY WIDER than `X` — it adds
   // the infinities — and nothing collapses it. The machinery that recognized
   // the old equivalence (`COVERING_UNION_MAP`, `unionCoveringMembers`, the
   // collapse in `reduce.ts`) is deleted, and these pins record its absence.
   //
-  // The reduced spelling lists the members in dedup-key order, which puts
-  // `non_finite_number` first.
+  // The reduced spelling lists the members in dedup-key order, which puts the
+  // two signed infinities first.
   const PAIRS: [string, string][] = [
-    ['non_finite_number | real', 'real'],
-    ['non_finite_number | rational', 'rational'],
-    ['integer | non_finite_number', 'integer'],
-    ['complex | non_finite_number', 'complex'],
+    ['real | signed_infinity', 'real'],
+    ['rational | signed_infinity', 'rational'],
+    ['integer | signed_infinity', 'integer'],
+    ['complex | signed_infinity', 'complex'],
   ];
 
   for (const [union, single] of PAIRS) {
@@ -298,26 +299,21 @@ describe('The doubled tower is gone (finite-by-default flip)', () => {
     expect(isSubtype('number', 'complex')).toBe(false);
   });
 
-  test('"complex | non_finite_number" is not the top numeric type', () => {
+  test('"complex | signed_infinity" is not the top numeric type', () => {
     // It misses `nan` and the unsigned `~oo`, so it cannot cover `number`.
-    expect(isSubtype('number', 'complex | non_finite_number')).toBe(false);
+    expect(isSubtype('number', parseType('complex | signed_infinity'))).toBe(false);
   });
 
   test('a redundant subtype member is still folded', () => {
     // Union reduction keeps dropping members subsumed by another member; only
     // the covering-union step is gone.
-    expect(reduceStr('integer | real | non_finite_number')).toBe(
-      'non_finite_number | real'
-    );
+    expect(reduceStr('integer | real | signed_infinity')).toBe('real | signed_infinity');
   });
 
-  test('non_finite_number alone is not spuriously widened', () => {
-    const t = reduceType(parseType('non_finite_number | boolean'));
+  test('the signed pair alone is not spuriously widened', () => {
+    const t = reduceType(parseType('boolean | signed_infinity'));
     expect((t as any).kind).toBe('union');
-    expect([...(t as any).types].sort()).toEqual([
-      'boolean',
-      'non_finite_number',
-    ]);
+    expect(typeToString(t)).toBe('boolean | signed_infinity');
   });
 
   test('a non-covering union is left intact (no spurious collapse)', () => {
@@ -421,8 +417,8 @@ describe('Bounded numeric meets (SYM P1-18b)', () => {
   test('range ∩ disjoint primitive = the empty type', () =>
     expect(isect('integer<0..10>', 'boolean')).toBe('never'));
 
-  test('range ∩ non_finite_number (disjoint) = the empty type', () =>
-    expect(isect('integer<0..10>', 'non_finite_number')).toBe('never'));
+  test('range ∩ the signed pair (disjoint) = the empty type', () =>
+    expect(isect('integer<0..10>', 'signed_infinity')).toBe('never'));
 
   test('half-open intersection is bounded from both', () =>
     expect(isect('integer<0..>', 'integer<..10>')).toBe('integer<0..10>'));
@@ -446,7 +442,7 @@ describe('Lattice property sanity: meet ⊑ operands, operand ⊑ union', () => 
     'number',
     'integer',
     'real',
-    'non_finite_number',
+    'signed_infinity',
     'boolean',
     'string',
     'integer<0..10>',

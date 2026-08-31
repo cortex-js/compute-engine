@@ -108,6 +108,7 @@ import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
   COLLECTION_SHAPE_TYPE,
   EXTENDED_REAL_TYPE,
+  SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import {
   absorbNumericAbsence,
@@ -1429,9 +1430,9 @@ export class BoxedFunction
   get isInfinity(): boolean | undefined {
     if (!this.isNumber) return false;
     // Type fallback: the static type can prove non-finiteness where no
-    // structural analysis can — e.g. `Ln(0)` types `non_finite_number`.
+    // structural analysis can — e.g. `Ln(0)` types `+oo | -oo`.
     // `infinity` is any value of infinite magnitude, which is exactly what
-    // `isInfinity` asks, and it covers the signed pair `non_finite_number`
+    // `isInfinity` asks, and it covers the signed pair `+oo | -oo`
     // (`+oo`, `-oo`) as well as the unsigned `~oo`. A type that has no value
     // in common with `infinity` answers `false`: that is `nan` (NaN is not an
     // infinity), and, now that the bare name `real` denotes the FINITE reals,
@@ -1470,7 +1471,7 @@ export class BoxedFunction
         // NUMBER", not "infinite" — and propagating that `false` claimed the
         // norm was infinite. `multiplyType` reads `isFinite === false` as a
         // provably non-finite factor, so `3·|(1, 2)|` typed
-        // `non_finite_number`, and `Divide` then folded `1/(3·|(1, 2)|)` to a
+        // `+oo | -oo`, and `Divide` then folded `1/(3·|(1, 2)|)` to a
         // literal `0`: a silently wrong value, not an error (the correct
         // answer is √5/15). A non-number operand leaves finiteness undecided,
         // which is what the sibling `Norm(Tuple(1, 2))` already reports.
@@ -1981,7 +1982,7 @@ export class BoxedFunction
   get isExtendedReal(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
-    // Rationals and integers are real. `non_finite_number` is admitted
+    // Rationals and integers are real. `+oo | -oo` is admitted
     // explicitly: the bare name `real` denotes the FINITE reals, and this
     // predicate means "on the EXTENDED real line", so a signed infinity
     // answers `true` — the meaning the sign-aware folds (`1/±∞ = 0`, the
@@ -1989,8 +1990,8 @@ export class BoxedFunction
     //
     // The entailment test is against the WHOLE extended real line, not
     // against each disjunct in turn: a head whose honest result claim is the
-    // union `real | non_finite_number` (`li`, `Ei`, which reach `-∞` at an
-    // interior point) is below neither `real` nor `non_finite_number` alone,
+    // union `real | +oo | -oo` (`li`, `Ei`, which reach `-∞` at an
+    // interior point) is below neither `real` nor `+oo | -oo` alone,
     // so a member-wise test answered `false` for a value that is always an
     // extended real.
     if (isSubtype(t.type, EXTENDED_REAL_TYPE)) return true;
@@ -2001,7 +2002,7 @@ export class BoxedFunction
     // indeterminate.
     if (
       provablyDisjoint(t.type, 'real') &&
-      provablyDisjoint(t.type, 'non_finite_number')
+      provablyDisjoint(t.type, SIGNED_INFINITY_TYPE)
     )
       return false;
     // `complex`/`imaginary` types keep the historical definitive `false`,

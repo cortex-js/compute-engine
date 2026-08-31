@@ -65,7 +65,7 @@ export class BigNumericValue extends NumericValue {
       if (this.decimal.isZero()) return 'imaginary';
       return 'complex';
     }
-    if (!this.decimal.isFinite()) return 'non_finite_number';
+    if (!this.decimal.isFinite()) return 'infinity';
     if (this.decimal.isInteger()) return 'integer';
     return 'real';
   }

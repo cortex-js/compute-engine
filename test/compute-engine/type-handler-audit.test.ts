@@ -98,8 +98,8 @@ describe('TYPE AUDIT: pole reciprocals (Tan/Sec/Csc/Cot/Coth/Csch)', () => {
 
 describe('TYPE AUDIT: pole-free hyperbolics at ±∞', () => {
   it('sinh/cosh send real ±∞ to a provable ±∞', () => {
-    expect(typeOf(['Sinh', 'PositiveInfinity'])).toBe('non_finite_number');
-    expect(typeOf(['Cosh', 'NegativeInfinity'])).toBe('non_finite_number');
+    expect(typeOf(['Sinh', 'PositiveInfinity'])).toBe('signed_infinity');
+    expect(typeOf(['Cosh', 'NegativeInfinity'])).toBe('signed_infinity');
     const sinhNegInf = ce.box(['Sinh', 'NegativeInfinity']).N();
     expect(sinhNegInf.isInfinity).toBe(true);
     expect(sinhNegInf.isNegative).toBe(true);
@@ -159,7 +159,7 @@ describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
 describe('TYPE AUDIT: complex part extractors', () => {
   it('Real follows operand finiteness', () => {
     expect(typeOf(['Real', ['Complex', 2, 1]])).toBe('real');
-    expect(typeOf(['Real', 'PositiveInfinity'])).toBe('non_finite_number');
+    expect(typeOf(['Real', 'PositiveInfinity'])).toBe('signed_infinity');
     expect(typeOf(['Real', 'ComplexInfinity'])).toBe('number');
     expectSound(['Real', 'PositiveInfinity']);
   });
@@ -182,8 +182,8 @@ describe('TYPE AUDIT: complex part extractors', () => {
 describe('TYPE AUDIT: Erf family and elliptic integrals', () => {
   it('ErfInv: real inside (−1, 1), ±∞ poles at ±1, NaN outside', () => {
     expect(typeOf(['ErfInv', 0.5])).toBe('real');
-    expect(typeOf(['ErfInv', 1])).toBe('non_finite_number');
-    expect(typeOf(['ErfInv', -1])).toBe('non_finite_number');
+    expect(typeOf(['ErfInv', 1])).toBe('signed_infinity');
+    expect(typeOf(['ErfInv', -1])).toBe('signed_infinity');
     expect(typeOf(['ErfInv', 2])).toBe('number');
     expect(typeOf(['ErfInv', 'PositiveInfinity'])).toBe('number');
     expect(ce.box(['ErfInv', 2]).N().isNaN).toBe(true);
@@ -203,7 +203,7 @@ describe('TYPE AUDIT: Erf family and elliptic integrals', () => {
 
   it('EllipticK: real below 1, +∞ pole at 1, complex above', () => {
     expect(typeOf(['EllipticK', 0.5])).toBe('real');
-    expect(typeOf(['EllipticK', 1])).toBe('non_finite_number');
+    expect(typeOf(['EllipticK', 1])).toBe('signed_infinity');
     expect(typeOf(['EllipticK', 2])).toBe('complex');
     const kPole = ce.box(['EllipticK', 1]).evaluate();
     expect(kPole.isInfinity).toBe(true);
@@ -289,7 +289,7 @@ describe('TYPE AUDIT: integral special functions with unproven-real operands', (
     // EXTENDED real line — the bare name `real` denotes the finite reals and
     // would exclude the pole.
     expect(typeOf(['SinIntegral', 'r'])).toBe('real');
-    expect(typeOf(['CosIntegral', 'r'])).toBe('non_finite_number | real');
+    expect(typeOf(['CosIntegral', 'r'])).toBe('real | signed_infinity');
     const ciPole = ce.box(['CosIntegral', 0]);
     expect(ciPole.evaluate().isInfinity).toBe(true);
     expect(ciPole.evaluate().type.matches(ciPole.type)).toBe(true);
@@ -306,7 +306,7 @@ describe('TYPE AUDIT: integral special functions with unproven-real operands', (
     }
     // Chi has a pole at 0 as well as Chi(±∞) = +∞, so proving the argument
     // finite does not buy a finite claim.
-    expect(typeOf(['CoshIntegral', 'r'])).toBe('non_finite_number | real');
+    expect(typeOf(['CoshIntegral', 'r'])).toBe('real | signed_infinity');
     const chiPole = ce.box(['CoshIntegral', 0]);
     expect(chiPole.evaluate().isInfinity).toBe(true);
     expect(chiPole.evaluate().type.matches(chiPole.type)).toBe(true);
@@ -365,11 +365,11 @@ describe('TYPE AUDIT: Abs (magnitude)', () => {
     // A finite COMPLEX magnitude is real but neither rational nor integer.
     expect(typeOf(['Abs', 'ImaginaryUnit'])).toBe('real<0..>');
     expect(typeOf(['Abs', 'az'])).toBe('real<0..>');
-    expect(typeOf(['Abs', 'PositiveInfinity'])).toBe('non_finite_number');
+    expect(typeOf(['Abs', 'PositiveInfinity'])).toBe('signed_infinity');
     // `|~oo| = +∞`, and the claim has to admit that value: a bare tier
     // denotes the FINITE values alone, so `real<0..>` would exclude the
     // very value this expression evaluates to.
-    expect(typeOf(['Abs', 'ComplexInfinity'])).toBe('non_finite_number');
+    expect(typeOf(['Abs', 'ComplexInfinity'])).toBe('signed_infinity');
     expect(ce.box(['Abs', 'ComplexInfinity']).evaluate().toString()).toBe(
       '+oo'
     );
@@ -380,7 +380,7 @@ describe('TYPE AUDIT: Abs (magnitude)', () => {
     // infinite outcome. (`number` also admits NaN, which this claim does
     // NOT cover — a hole the pre-flip `real<0..>` had as well, since NaN
     // was never a member of `real`.)
-    expect(typeOf(['Abs', 'u'])).toBe('(real<0..>) | non_finite_number');
+    expect(typeOf(['Abs', 'u'])).toBe('(real<0..>) | signed_infinity');
     // The claim admits `+∞`, the value `Abs` of such an operand can reach.
     expect(
       isSubtype(

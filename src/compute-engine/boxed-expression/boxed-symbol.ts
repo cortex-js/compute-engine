@@ -20,7 +20,10 @@ import {
   isSubtype,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
-import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
+import {
+  EXTENDED_REAL_TYPE,
+  SIGNED_INFINITY_TYPE,
+} from '../../common/type/primitive.js';
 import type { OneOf } from '../../common/one-of.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
@@ -1087,7 +1090,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (!t.isUnknown) {
       if (t.matches('complex')) return true;
       // `infinity` is any value of infinite magnitude (`+oo`, `-oo`, `~oo`),
-      // so it also covers the signed pair `non_finite_number`; `nan` is the
+      // so it also covers the signed pair `+oo | -oo`; `nan` is the
       // NaN singleton, disjoint from `infinity`. Neither is a finite number,
       // which is what `isFinite` asks: a NaN VALUE answers `false` here too.
       if (t.matches('infinity')) return false;
@@ -1115,11 +1118,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (fromValue !== undefined) return fromValue;
     // Type fallback, mirroring `BoxedFunction.isInfinity`: the static type can
     // prove non-finiteness where no value is available — e.g. a symbol
-    // declared `infinity` or `non_finite_number`.
+    // declared `infinity` or `+oo | -oo`.
     const t = this.type;
     if (!t.isUnknown) {
       // `infinity` is any value of infinite magnitude, which is exactly what
-      // `isInfinity` asks; it covers the signed pair `non_finite_number`
+      // `isInfinity` asks; it covers the signed pair `+oo | -oo`
       // (`+oo`, `-oo`) and the unsigned `~oo` alike. A declared type that has
       // no value in common with `infinity` answers `false`: that is `nan` (a
       // NaN VALUE answers `false` here, so a `nan`-typed symbol does too),
@@ -1240,18 +1243,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   get isExtendedReal(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
-    // `non_finite_number` is admitted explicitly: the bare name `real` denotes
+    // `+oo | -oo` is admitted explicitly: the bare name `real` denotes
     // the FINITE reals, and this predicate means "on the EXTENDED real line",
     // so a symbol declared to be a signed infinity answers `true` — the
-    // meaning the sign-aware folds (`1/±∞ = 0`) consume. `non_finite_number`
+    // meaning the sign-aware folds (`1/±∞ = 0`) consume. `+oo | -oo`
     // is the signed pair `+∞ | -∞`, so the unsigned `~∞` is excluded: its own
     // singleton type shares no value with either disjunct and is refuted
     // further down. A symbol declared the TIER `infinity` stays undecided —
     // that tier admits `+∞` (an extended real) and `~∞` (not one) alike.
     //
     // The test is against the WHOLE extended real line, not against each
-    // disjunct in turn: a symbol declared the union `real | non_finite_number`
-    // is below neither `real` nor `non_finite_number` alone, so a member-wise
+    // disjunct in turn: a symbol declared the union `real | +oo | -oo`
+    // is below neither `real` nor `+oo | -oo` alone, so a member-wise
     // test left a value that is always an extended real undecided.
     if (isSubtype(t.type, EXTENDED_REAL_TYPE)) return true;
 
@@ -1269,7 +1272,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // reaches this point through the `number` arm below otherwise.
     if (
       provablyDisjoint(t.type, 'real') &&
-      provablyDisjoint(t.type, 'non_finite_number')
+      provablyDisjoint(t.type, SIGNED_INFINITY_TYPE)
     )
       return false;
 

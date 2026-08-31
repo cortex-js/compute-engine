@@ -1049,7 +1049,7 @@ describe('Histogram/BinCounts reject values they cannot bin', () => {
     const inf = { num: '+Infinity' } as any;
     const infinite = ce.box(['BinCounts', L([1, inf, 5]), 2]).evaluate();
     expect(infinite.isValid).toBe(false);
-    expect(infinite.toString()).toMatch(/incompatible-type.*real.*Infinity/);
+    expect(infinite.toString()).toMatch(/incompatible-type.*real.*\+oo/);
   });
 
   test('a finite real beyond the MACHINE range is out-of-range, not mistyped', () => {

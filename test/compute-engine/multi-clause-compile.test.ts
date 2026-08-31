@@ -105,8 +105,9 @@ describe('MULTI-CLAUSE COMPILE — guard chain (spec §8)', () => {
     // `oo`, `-oo` and `NaN` are VALUE types, but their guards would run over
     // JS numbers, where the interpreter's unsigned pole `~oo` is
     // indistinguishable from a signed infinity: compiled code lowers `~oo` to
-    // the IEEE `Infinity`. So they decline for the same reason as the `nan`,
-    // `infinity` and `non_finite_number` PRIMITIVES (see the block below).
+    // the IEEE `Infinity`. So they decline for the same reason as the `nan`
+    // and `infinity` primitives and the signed pair `signed_infinity` (see the
+    // block below).
     clause('g', ['Function', 1, p('a', 'oo')]);
     clause('g', ['Function', 2, p('b', '-oo')]);
     clause('g', ['Function', 3, p('c', 'NaN')]);
@@ -363,9 +364,9 @@ describe('MULTI-CLAUSE COMPILE — whole-function decline (spec §8)', () => {
   // Compiled JavaScript has no distinct value for complex infinity: it lowers
   // `~oo` to the IEEE `Infinity`, which keeps the magnitude and drops the
   // direction. The interpreter, though, types `~oo` as `infinity`, disjoint
-  // there from both `nan` and `non_finite_number`. So none of the three tiers
+  // there from both `nan` and `signed_infinity`. So none of the three tiers
   // has a faithful JS guard: "neither finite nor NaN" accepts a PRODUCED
-  // `~oo` from a `non_finite_number` parameter that the interpreter refuses,
+  // `~oo` from a `signed_infinity` parameter that the interpreter refuses,
   // `Number.isNaN(a)` accepts the NaN that compiled arithmetic over a
   // produced `~oo` yields (`1 / w - 1 / w` at `w = 0`) from a `nan` parameter
   // that the interpreter refuses, and an `infinity` test over JS numbers
@@ -439,12 +440,12 @@ describe('MULTI-CLAUSE COMPILE — whole-function decline (spec §8)', () => {
     ).toBe(1);
   });
 
-  it('a `non_finite_number` parameter declines the whole function, and the fallback agrees', () => {
+  it('a `signed_infinity` parameter declines the whole function, and the fallback agrees', () => {
     // The signed pair `+∞ | −∞` excludes both complex infinity and NaN, so
     // "a number that is neither finite nor NaN" is exact for an ARGUMENT that
     // crossed the boundary — but not for a `~oo` the compiled body PRODUCES,
     // which is the JS `Infinity` and passes a test the interpreter refuses.
-    clause('gnfn', ['Function', 1, p('a', 'non_finite_number')]);
+    clause('gnfn', ['Function', 1, p('a', 'signed_infinity')]);
     clause('gnfn', ['Function', 0, p('x', 'number')]);
     const r = compile(ce.box(['gnfn', 'w']));
     expect(r?.success).toBe(false);

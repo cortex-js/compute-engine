@@ -3,17 +3,17 @@
  *
  * The bare numeric names contain only finite values, and the values of
  * infinite magnitude have their own names: the singletons `+oo`, `-oo` and
- * `~oo`, the signed-pair atom `non_finite_number` above the first two, and the
+ * `~oo`, the signed pair `signed_infinity` — the union of the first two — and the
  * tier `infinity` above all three. `nan` names the NaN marker. The rules the
  * type handlers follow:
  *
- * - `non_finite_number` is claimed ONLY when the value is provably a SIGNED
+ * - `signed_infinity` is claimed ONLY when the value is provably a SIGNED
  *   real infinity — it is the guarantee the sign-aware folds (`1/±∞ = 0`)
  *   consume.
  * - When ±∞/`~oo`/NaN is merely POSSIBLE, the claim is the top type `number`
- *   — never a finite type, and never a speculative `non_finite_number`.
+ *   — never a finite type, and never a speculative `signed_infinity`.
  * - A VALUE that is provably infinite carries its own singleton type: `~oo`
- *   for the unsigned infinity, `Infinity`/`-Infinity` for the signed pair.
+ *   for the unsigned infinity, `+oo`/`-oo` for the signed pair.
  *   A mixed directed value such as `∞ + i` has no singleton spelling and
  *   carries the tier `infinity` (ruling L2(a)).
  * - Unknown finiteness is a generic point (finite); zero-ness must be proven.
@@ -40,9 +40,9 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     // unknown. The bare name `real` no longer spells this — it denotes the
     // finite reals — so a control for "unknown finiteness" must name the
     // union.
-    ce.declare('xr_u', 'real | non_finite_number');
+    ce.declare('xr_u', 'real | signed_infinity');
     ce.declare('z_f', 'real'); // provably finite, sign unknown
-    ce.declare('nf_sym', 'non_finite_number'); // provably ±∞, no value
+    ce.declare('nf_sym', 'signed_infinity'); // provably ±∞, no value
     ce.declare('f_sym', 'complex'); // provably finite, no value
     ce.declare('inf_val', 'number');
     ce.assign('inf_val', ce.PositiveInfinity); // decided by its VALUE
@@ -52,15 +52,15 @@ describe('NON-FINITE TYPING CONVENTION', () => {
   });
   afterAll(() => ce.popScope());
 
-  describe('provably ±∞ → non_finite_number', () => {
+  describe('provably ±∞ → signed_infinity', () => {
     test('Ln(0) = −∞', () =>
-      expect(typeOf(['Ln', 0])).toBe('non_finite_number'));
+      expect(typeOf(['Ln', 0])).toBe('signed_infinity'));
 
     test('Log(0, 3) = −∞', () =>
-      expect(typeOf(['Log', 0, 3])).toBe('non_finite_number'));
+      expect(typeOf(['Log', 0, 3])).toBe('signed_infinity'));
 
     test('EllipticK(1) = +∞', () =>
-      expect(typeOf(['EllipticK', 1])).toBe('non_finite_number'));
+      expect(typeOf(['EllipticK', 1])).toBe('signed_infinity'));
 
     test('Round/Floor of a real ±∞', () => {
       // Rounding a signed infinity gives that same infinity back. The
@@ -68,28 +68,28 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       // (`roundingFunctionType`, `library/type-handlers-types.ts`), which is
       // what makes this arm reachable: a signed infinity does not match the
       // bare name `real`, which denotes the finite reals.
-      expect(typeOf(['Round', 'PositiveInfinity'])).toBe('non_finite_number');
-      expect(typeOf(['Floor', 'NegativeInfinity'])).toBe('non_finite_number');
+      expect(typeOf(['Round', 'PositiveInfinity'])).toBe('signed_infinity');
+      expect(typeOf(['Floor', 'NegativeInfinity'])).toBe('signed_infinity');
     });
 
     test('±∞ · provably non-zero real', () =>
       expect(typeOf(['Multiply', 'p_r', 'PositiveInfinity'])).toBe(
-        'non_finite_number'
+        'signed_infinity'
       ));
 
     test('±∞ + real terms (generic-point finiteness)', () =>
       expect(typeOf(['Add', 'x_r', 'PositiveInfinity'])).toBe(
-        'non_finite_number'
+        'signed_infinity'
       ));
 
     // A provably non-finite TERM may be visible only in its static type:
-    // `Ln(0)` types `non_finite_number` while its structural `isFinite` stays
+    // `Ln(0)` types `signed_infinity` while its structural `isFinite` stays
     // `undefined`. The Add/Multiply/Divide handlers must consult the type —
     // without it, `1 + Ln(0)` widened to `integer` and `2·Ln(0)` claimed
     // `integer` (unsound; the value is −∞). Fixed 2026-07-31.
     test('a type-only-provable −∞ term: 1 + Ln(0)', () => {
-      expect(typeOf(['Add', 1, ['Ln', 0]])).toBe('non_finite_number');
-      expect(typeOf(['Add', 1, ['Artanh', 1]])).toBe('non_finite_number');
+      expect(typeOf(['Add', 1, ['Ln', 0]])).toBe('signed_infinity');
+      expect(typeOf(['Add', 1, ['Artanh', 1]])).toBe('signed_infinity');
     });
 
     // Ruling 2026-08-03: a provably non-finite REAL factor is implicitly
@@ -98,34 +98,34 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     // non-zero sign — yet `2·Ln(0) = −∞`. Before the ruling both of these
     // widened to `number`.
     test('a provably non-finite real factor is implicitly nonzero (ruling 2026-08-03)', () => {
-      expect(typeOf(['Multiply', 2, ['Ln', 0]])).toBe('non_finite_number');
-      expect(typeOf(['Multiply', 2, ['Artanh', 1]])).toBe('non_finite_number');
+      expect(typeOf(['Multiply', 2, ['Ln', 0]])).toBe('signed_infinity');
+      expect(typeOf(['Multiply', 2, ['Artanh', 1]])).toBe('signed_infinity');
       // `Ln(0)/2` canonicalizes to `Multiply(1/2, Ln(0))`, so this is the
       // Multiply handler too.
-      expect(typeOf(['Divide', ['Ln', 0], 2])).toBe('non_finite_number');
+      expect(typeOf(['Divide', ['Ln', 0], 2])).toBe('signed_infinity');
     });
 
     test('non-finite real numerator over a finite non-zero real denominator', () => {
       // Canonically, `Ln(0)/π` no longer survives as a Divide: `canonicalDivide`
       // folds `±∞/finite-nonzero` to the numerator (`Ln(0)`), which types
-      // `non_finite_number` on its own. The observable claim is unchanged.
+      // `signed_infinity` on its own. The observable claim is unchanged.
       const canonical = ce.box(['Divide', ['Ln', 0], 'Pi']);
       expect(canonical.operator).toBe('Ln');
-      expect(canonical.type.toString()).toBe('non_finite_number');
+      expect(canonical.type.toString()).toBe('signed_infinity');
       // The structural route keeps the Divide head and exercises the Divide
       // type handler's tight branch directly.
       const structural = ce.function('Divide', [ce.box(['Ln', 0]), ce.Pi], {
         structural: true,
       });
       expect(structural.operator).toBe('Divide');
-      expect(structural.type.toString()).toBe('non_finite_number');
+      expect(structural.type.toString()).toBe('signed_infinity');
     });
 
     test('negative controls: the non-finite factor must be REAL, finite factors keep their sign obligation', () => {
       // `∞·i = ~oo`, not a signed infinity — `isFinite === false` does not
       // imply real. The VALUE is pinned separately below ("~oo takes no sign
       // from a factor"); here the claim is only that the TYPE cannot be
-      // `non_finite_number`, which admits ±∞ alone.
+      // `signed_infinity`, which admits ±∞ alone.
       expect(typeOf(['Multiply', 'ImaginaryUnit', 'PositiveInfinity'])).toBe(
         'number'
       );
@@ -216,7 +216,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     });
 
     test('a direction-unproven REAL infinity does not guess `~oo`', () => {
-      ce.declare('nf_u', 'non_finite_number');
+      ce.declare('nf_u', 'signed_infinity');
       // `nf_u + 1` is provably infinite and real, but its direction is
       // unproven: the projection falls through to the AsciiMath form instead
       // of guessing complex infinity (it used to return `'~oo'`).
@@ -257,7 +257,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     test('√(−∞) = i·∞ = ~oo claims number, not complex', () =>
       expect(typeOf(['Sqrt', 'NegativeInfinity'])).toBe('number'));
 
-    test('Round of ~oo claims number, not non_finite_number', () =>
+    test('Round of ~oo claims number, not signed_infinity', () =>
       expect(typeOf(['Round', 'ComplexInfinity'])).toBe('number'));
 
     test('∞/∞ folds to the NaN value, which carries the NaN singleton', () => {
@@ -281,7 +281,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     test('ComplexInfinity value/symbol', () => {
       expect(ce.ComplexInfinity.type.toString()).toBe('~oo');
       expect(ce.ComplexInfinity.type.matches('infinity')).toBe(true);
-      expect(ce.ComplexInfinity.type.matches('non_finite_number')).toBe(false);
+      expect(ce.ComplexInfinity.type.matches('signed_infinity')).toBe(false);
       expect(ce.ComplexInfinity.type.matches('complex')).toBe(false);
       // `1/0` canonicalizes directly to the ~oo value (`x/0 → ~∞` fold),
       // so this reports the value's type, not a Divide handler claim.
@@ -483,7 +483,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Gamma', 'x_r'])).toBe('real');
     });
 
-    test('rounding a finite complex is complex (was mistyped non_finite_number)', () => {
+    test('rounding a finite complex is complex (was mistyped signed_infinity)', () => {
       expect(typeOf(['Round', 'ImaginaryUnit'])).toBe('complex');
       expect(typeOf(['Truncate', ['Complex', 2.5, 1]])).toBe('complex');
     });
@@ -496,12 +496,12 @@ describe('NON-FINITE TYPING CONVENTION', () => {
   });
 
   describe('a symbol’s declared type decides its finiteness predicates', () => {
-    // A symbol with no value has only its type to go on. `non_finite_number`
+    // A symbol with no value has only its type to go on. `signed_infinity`
     // is exactly the signed infinities, so it proves BOTH predicates —
     // mirroring the type consult in `BoxedFunction.isInfinity` that decides
     // `Ln(0)`. The three arithmetic type handlers below rely on it: they test
     // `isFinite === false` alone, with no type disjunct of their own.
-    test('a `non_finite_number` symbol is decided by its type', () => {
+    test('a `signed_infinity` symbol is decided by its type', () => {
       const s = ce.box('nf_sym');
       expect(s.isInfinity).toBe(true);
       expect(s.isFinite).toBe(false);
@@ -522,14 +522,14 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     });
 
     test('an extended-real symbol decides neither (control)', () => {
-      // `real | non_finite_number` is the generic point of the extended real
+      // `real | signed_infinity` is the generic point of the extended real
       // line: it is below neither `complex` nor `infinity`, so nothing
       // is proven either way.
       const s = ce.box('xr_u');
       expect(s.isFinite).toBe(undefined);
       expect(s.isInfinity).toBe(undefined);
       // …but real-ness IS proven, and the union must be recognized as a
-      // whole: a member-wise `<: real` / `<: non_finite_number` test would
+      // whole: a member-wise `<: real` / `<: signed_infinity` test would
       // leave it undecided.
       expect(s.isExtendedReal).toBe(true);
     });
@@ -553,14 +553,14 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     });
 
     // Regression pins for the three arithmetic type handlers (Add, Multiply,
-    // Divide) that used to carry a `|| x.type.matches('non_finite_number')`
+    // Divide) that used to carry a `|| x.type.matches('signed_infinity')`
     // disjunct purely because symbol operands were type-blind.
-    test('arithmetic over a `non_finite_number` symbol types soundly', () => {
+    test('arithmetic over a `signed_infinity` symbol types soundly', () => {
       // Without a decided `isFinite`, this fell through to the "every operand
       // is finite" tail and claimed `integer` — unsound.
-      expect(typeOf(['Multiply', 2, 'nf_sym'])).toBe('non_finite_number');
-      expect(typeOf(['Add', 1, 'nf_sym'])).toBe('non_finite_number');
-      expect(typeOf(['Divide', 'nf_sym', 2])).toBe('non_finite_number');
+      expect(typeOf(['Multiply', 2, 'nf_sym'])).toBe('signed_infinity');
+      expect(typeOf(['Add', 1, 'nf_sym'])).toBe('signed_infinity');
+      expect(typeOf(['Divide', 'nf_sym', 2])).toBe('signed_infinity');
       expect(typeOf(['Divide', 1, 'nf_sym'])).toBe('0');
       // ∞/∞ is indeterminate.
       // ∞/∞ is indeterminate: `canonicalDivide` folds it to the NaN VALUE,
@@ -569,9 +569,9 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     });
 
     test('arithmetic over a type-only-provable ±∞ function types soundly', () => {
-      expect(typeOf(['Multiply', 2, ['Ln', 0]])).toBe('non_finite_number');
-      expect(typeOf(['Add', 1, ['Ln', 0]])).toBe('non_finite_number');
-      expect(typeOf(['Divide', ['Ln', 0], 2])).toBe('non_finite_number');
+      expect(typeOf(['Multiply', 2, ['Ln', 0]])).toBe('signed_infinity');
+      expect(typeOf(['Add', 1, ['Ln', 0]])).toBe('signed_infinity');
+      expect(typeOf(['Divide', ['Ln', 0], 2])).toBe('signed_infinity');
       expect(typeOf(['Divide', 1, ['Ln', 0]])).toBe('0');
     });
   });
@@ -585,7 +585,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     // number whose OPERAND is not.
     //
     // Consequence when it was read as "infinite": `|(1, 2)|` claimed to be
-    // non-finite, so `3·|(1, 2)|` typed `non_finite_number`, and `Divide`
+    // non-finite, so `3·|(1, 2)|` typed `signed_infinity`, and `Divide`
     // applied the sound `1/±∞ = 0` fold to it. `1/(3·|(1, 2)|)` canonicalized
     // to a literal `0` — not an error and not a NaN, a silently wrong value
     // where the answer is √5/15. Reported from a consumer's field use, where
@@ -805,14 +805,14 @@ describe('NON-FINITE TYPING CONVENTION', () => {
   });
 
   describe('the extended real line is recognized as a whole', () => {
-    // `real | non_finite_number` is the honest result claim of a head whose
+    // `real | signed_infinity` is the honest result claim of a head whose
     // value can be infinite at an interior point (`li(1) = −∞`). It is below
     // NEITHER disjunct, so a predicate that tested `<: real` and
-    // `<: non_finite_number` separately answered "not an extended real" for a
+    // `<: signed_infinity` separately answered "not an extended real" for a
     // value that always is one.
     test('a union-typed function result IS an extended real', () => {
       const e = ce.parse('\\operatorname{li}(1)');
-      expect(e.type.toString()).toBe('non_finite_number | real');
+      expect(e.type.toString()).toBe('real | signed_infinity');
       expect(e.isExtendedReal).toBe(true);
     });
 

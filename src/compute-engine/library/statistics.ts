@@ -370,7 +370,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const v = operandLiteralValue(x);
         if (v !== undefined) {
           if (v > -1 && v < 1) return 'real';
-          if (v === 1 || v === -1) return 'non_finite_number';
+          if (v === 1 || v === -1) return '+oo | -oo';
           return 'number';
         }
         if (x.isGreater(-1) === true && x.isLess(1) === true) return 'real';
@@ -381,7 +381,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             ? x.isSame(1) || x.isSame(-1)
             : x.isEqual(1) === true || x.isEqual(-1) === true
         )
-          return 'non_finite_number';
+          return '+oo | -oo';
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {

@@ -1,6 +1,7 @@
 import type { Type } from './types.js';
 import { isComplexInfinityValue } from './types.js';
 import { isSubtype } from './subtype.js';
+import { SIGNED_INFINITY_TYPE } from './primitive.js';
 import { reduceType } from './reduce.js';
 import { subtypingVarianceOf } from './variance.js';
 
@@ -18,8 +19,13 @@ import { subtypingVarianceOf } from './variance.js';
  *
  * - a numeric value node to its tier: an integer value to `integer`, any
  *   other finite value to `real` (the lattice deliberately does not class a
- *   bare numeric value as rational), `±∞` and the unsigned complex infinity
- *   `~oo` to `infinity`, and `NaN` to `nan`;
+ *   bare numeric value as rational), the unsigned complex infinity `~oo`
+ *   to `infinity`, and `NaN` to `nan`. A SIGNED infinity widens to the
+ *   pair `+oo | -oo` — its canonical spelling since the retirement of the
+ *   one-word name — never to the lone singleton (a contract inferred from
+ *   one observed `+∞` must not reject a later `−∞`) and never to
+ *   `infinity` (which would admit the unsigned `~oo` and destroy the
+ *   extended-real claims);
  * - only in COVARIANT positions. Widening is "the new type is a supertype
  *   of the old", which reverses under contravariance: in a function
  *   PARAMETER a literal is left as written, since widening it would make
@@ -108,16 +114,17 @@ function widenNode(
       // rather than a JavaScript number.
       if (isComplexInfinityValue(v)) return 'infinity';
       if (typeof v !== 'number') return t; // string/boolean values: leaves
-      // A NaN literal widens to `nan` and a signed infinity to `infinity`:
-      // under the finite-by-default numeric tree these are the tiers those
-      // values live on, and the wide `number` the two used to widen to says
-      // nothing at all. `infinity` rather than the narrower
-      // `non_finite_number` because the tier is what a stored contract should
-      // read as "this may blow up"; the signed pair is a guarantee only the
-      // sign-aware folds consume, and they read the value, not the stored
-      // type.
+      // A NaN literal widens to `nan` — the tier that names exactly that
+      // singleton. A SIGNED infinity widens to the PAIR `+oo | -oo`: since
+      // the retirement of the one-word signed-pair name (ruling L5,
+      // 2026-08-31) the pair is the canonical spelling of every
+      // extended-real claim (`real | +oo | -oo`, `Ln(0)`'s claim), so
+      // widening to `infinity` — which also admits the unsigned `~oo` —
+      // would destroy the sign-aware claim every handler result carries
+      // through this seam; and preserving the LONE singleton would make a
+      // contract inferred from one observed `+∞` reject a later `−∞`.
       if (Number.isNaN(v)) return 'nan';
-      if (!Number.isFinite(v)) return 'infinity';
+      if (!Number.isFinite(v)) return SIGNED_INFINITY_TYPE;
       return Number.isInteger(v) ? 'integer' : 'real';
     }
 

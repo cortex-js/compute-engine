@@ -20,7 +20,10 @@ import {
 export class BoxedType {
   static unknown = new BoxedType('unknown');
   static number = new BoxedType('number');
-  static non_finite_number = new BoxedType('non_finite_number');
+  // The signed pair {+∞, −∞}. The former static `non_finite_number` was
+  // REMOVED with the retirement of that type name (2026-08-31, ruling L5
+  // executed — the Phase 2 `finite_*` statics went the same way).
+  static signed_infinity = new BoxedType('+oo | -oo');
   static infinity = new BoxedType('infinity');
   static nan = new BoxedType('nan');
   static complex = new BoxedType('complex');

@@ -599,13 +599,12 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
       // point for the same values: `stripNumericRanges` projects the `+oo` and
       // `-oo` VALUE nodes to `infinity`, while a read inside a broadcast cell,
       // where the literal type is withheld, sees the bare tiers `nan` and
-      // `non_finite_number` instead. All three are held exactly by a float64,
+      // `+oo | -oo` instead. All three are held exactly by a float64,
       // which is how the `NaN` / `PositiveInfinity` / `NegativeInfinity`
       // named constants at the top of this function are classified too.
       // Sending `infinity` to `complex128` promoted a real tensor such as
       // `[1, +oo]` to the complex field for no gain.
       case 'nan':
-      case 'non_finite_number':
       case 'infinity':
         return 'float64';
 

@@ -1550,8 +1550,10 @@ describe('Phase 3: guard-closure semantics (synthetic artifact)', () => {
 
   it('type complex: a PROVABLY-infinite literal (±∞, complex ∞) still stays undecided', () => {
     // The real/rational/integer acceptance must not leak to genuine
-    // infinities: `non_finite_number` (±∞) matches `real` in the lattice but
-    // has isFinite === false, and ComplexInfinity is not finite either.
+    // infinities: `signed_infinity` (±∞) is outside bare `real` in the lattice
+    // (the bare names are finite-only since the finite-by-default flip)
+    // and has isFinite === false, and ComplexInfinity is not finite
+    // either.
     for (const inf of ['PositiveInfinity', 'NegativeInfinity', 'ComplexInfinity']) {
       const ce = load();
       const e = ce.expr(['ComplexF', inf]);

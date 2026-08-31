@@ -265,13 +265,17 @@ const RETIRED_NUMERIC_ALIASES: Readonly<Record<string, string>> =
                    | "set" | "record" | "dictionary"
 
 <numeric_primitive> ::= "number" | "complex" | "imaginary" | "real"
-                      | "rational" | "integer" | "non_finite_number"
+                      | "rational" | "integer"
                       | "infinity" | "nan"
 
-(* The retired `finite_*` spellings are still ACCEPTED as input aliases for
-   one release cycle and normalized to the names above (see
+(* `signed_infinity` is a PERMANENT one-word spelling of the union
+   `+oo | -oo` (`parseSignedInfinityName()`), spliced flat into an
+   enclosing union; the serializer prints the pair back under this name.
+   The retired `finite_*` spellings are still ACCEPTED as input aliases
+   for one release cycle and normalized to the names above (see
    `RETIRED_NUMERIC_ALIASES`); they never appear in a parsed node and are
-   never serialized. *)
+   never serialized. The retired `non_finite_number` spelling is likewise
+   accepted for one cycle and normalizes to the same `+oo | -oo` union. *)
 
 
 (* --- Terminals (Lexical Tokens) --- *)
@@ -678,7 +682,21 @@ export class Parser {
     }
 
     if (types.length === 1) return types[0];
-    return this.createNode<UnionTypeNode>('union', { types });
+    // Splice a member that is ITSELF a union into the enclosing union —
+    // union is associative, so the flat spelling is the same type, and
+    // `reduceType` flattens the same way. Without this, a member the
+    // retired `non_finite_number` alias expanded to `+oo | -oo` stayed a
+    // NESTED union node inside `real | non_finite_number`, and the nested
+    // spelling was not mutually a subtype of the flat one — the alias
+    // would not have been the drop-in the one-cycle deprecation promises
+    // (measured: `isExtendedReal` answered `undefined` for a symbol
+    // declared with the alias spelling, `true` with the flat one).
+    const flat: TypeNode[] = [];
+    for (const t of types) {
+      if (t.kind === 'union') flat.push(...(t as UnionTypeNode).types);
+      else flat.push(t);
+    }
+    return this.createNode<UnionTypeNode>('union', { types: flat });
   }
 
   private parseIntersectionType(): TypeNode | undefined {
@@ -1032,10 +1050,48 @@ export class Parser {
       this.parseExpressionType() ||
       this.parseSymbolType() ||
       this.parseNumericType() ||
+      this.parseSignedInfinityName() ||
       this.parsePrimitiveType() ||
       this.parseValue() ||
       this.parseTypeReference()
     );
+  }
+
+  /**
+   * The named spelling of the signed pair `+∞`/`−∞`: `signed_infinity` is
+   * a PERMANENT one-word alias for the union `+oo | -oo` — the exact same
+   * set, never the wider `infinity` (which also admits the unsigned `~∞`
+   * and would silently weaken every sign-consuming guard). The serializer
+   * prints the pair back under this name, so it round-trips.
+   *
+   * The retired spelling `non_finite_number` (ruled retired 2026-08-31,
+   * executing ruling L5 of the numeric-lattice migration — see
+   * `docs/TYPE_SYSTEM_ROADMAP.md` §8.4) normalizes to the same union. That
+   * name always denoted exactly the signed pair, and was judged
+   * misleading: `~oo` and `∞ + i` are non-finite numbers, yet neither was
+   * a member. It is accepted on input for one release cycle only and is
+   * never serialized back out.
+   */
+  private parseSignedInfinityName(): UnionTypeNode | undefined {
+    if (
+      this.current.type !== 'IDENTIFIER' ||
+      (this.current.value !== 'signed_infinity' &&
+        this.current.value !== 'non_finite_number')
+    )
+      return undefined;
+    this.advance();
+    return this.createNode<UnionTypeNode>('union', {
+      types: [
+        this.createNode<ValueNode>('value', {
+          value: Infinity,
+          valueType: 'infinity',
+        }),
+        this.createNode<ValueNode>('value', {
+          value: -Infinity,
+          valueType: 'infinity',
+        }),
+      ],
+    });
   }
 
   /**

@@ -624,7 +624,7 @@ function gpuResultIsComplexValued(
     const t = engine.function(head, [...args], { form: 'structural' }).type;
     // The infinite and NaN branches are dropped first, exactly as the two
     // sites named above do: a head whose value can blow up at a pole claims a
-    // union such as `complex | non_finite_number` (`Artanh`, `Arcoth`,
+    // union such as `complex | +oo | -oo` (`Artanh`, `Arcoth`,
     // `Arsech`, `Ln`, `Log`), and only its FINITE part decides the lane.
     // Asking `isNonRealNumber` of the whole union answers false and takes the
     // scalar lane while the parent takes the complex one.

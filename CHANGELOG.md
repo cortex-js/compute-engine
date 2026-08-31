@@ -2,6 +2,20 @@
 
 ### Breaking Changes
 
+- **The type `non_finite_number` is renamed `signed_infinity`.** The old
+  name was misleading: `~oo` (the unsigned complex infinity) and `∞ + i`
+  are non-finite numbers, but neither was a member — the type contains
+  exactly the two signed infinities `+∞` and `−∞`. The new name says
+  what the members are. `signed_infinity` is exactly the union
+  `+oo | -oo` (both spellings are accepted and mean the same type), and
+  a union containing both signed infinities prints under the name: a
+  type that used to display as `real | non_finite_number` now displays
+  as `real | signed_infinity`. Use `infinity` instead when any infinite
+  value is acceptable, including `~oo`. For one release cycle the old
+  name is still accepted in type strings; it is never printed. The
+  signed infinity value types themselves also print as `+oo` and `-oo`
+  now, instead of `Infinity` and `-Infinity`.
+
 - **Assumptions no longer write types.** An assumption is a fact about
   the current scope; a declaration is a contract. `ce.assume(x > 3)` now
   records a fact against `x`'s definition and `x.type` MERGES it at read

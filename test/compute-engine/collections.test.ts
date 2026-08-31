@@ -5439,7 +5439,7 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
     const declared = (ce2.lookupDefinition('Length')!.operator as any).signature
       .type.result;
     const reported = ce2.expr(['Length', ['Range', 1, OO]]).type;
-    expect(reported.toString()).toBe('infinity | integer');
+    expect(reported.toString()).toBe('integer | signed_infinity');
     expect(reported.matches(declared)).toBe(true);
     // A finite collection keeps the tighter report, still within the
     // declaration.
@@ -5484,11 +5484,11 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
     // narrowing it would mean asking the source whether it is finite, and
     // that facet walks a lazy collection.
     expect(ce2.expr(['Count', ['Range', 1, 5]]).type.toString()).toBe(
-      'infinity | integer'
+      'integer | signed_infinity'
     );
     dimensioned.declare('lst', 'list<integer>');
     expect(dimensioned.box(['Count', 'lst']).type.toString()).toBe(
-      'infinity | integer'
+      'integer | signed_infinity'
     );
     // Both 2-arg forms decline on a non-finite source, so they keep the exact
     // `integer` — a count used as an index is not widened by a case that

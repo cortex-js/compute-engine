@@ -360,12 +360,13 @@ describe('SUBSET', () => {
     ).toBe(true);
 
     // An operand whose type is the SIGNED PAIR itself — not one of the two
-    // points — is a member too. The sets name the infinities by the type
-    // `non_finite_number`; spelling them as the two value types `+oo | -oo`
-    // instead left `nf` outside the union, and the membership test answered
-    // `undefined` (the expression stayed unevaluated) rather than True.
+    // points — is a member too. The set's type names the infinities as the
+    // two value types (`real | signed_infinity`), so the membership test has to
+    // recognize the whole union `signed_infinity` as being inside it. A test that
+    // looks for one of the two points alone leaves `nf` outside and answers
+    // `undefined` (the expression stays unevaluated) rather than True.
     const nfEngine = new ComputeEngine();
-    nfEngine.declare('nf', 'non_finite_number');
+    nfEngine.declare('nf', 'signed_infinity');
     expect(
       nfEngine.box(['Element', 'nf', 'ExtendedRealNumbers']).evaluate().json
     ).toBe('True');

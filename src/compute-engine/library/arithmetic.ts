@@ -209,7 +209,6 @@ import { parseType } from '../../common/type/parse.js';
 // −1, 0 and 1, so each claim is the finitely-valued tier WITH its range —
 // the range is what lets a type-channel consumer (`signOfType`, compile
 // lowerings) read the sign and bounds without consulting the sgn handler.
-const HEAVISIDE_REAL_TYPE = parseType('rational<0..1>');
 const SIGN_REAL_TYPE = parseType('integer<-1..1>');
 
 /** The carrier of `IsPrime`/`IsComposite`: all of `number` except the
@@ -611,7 +610,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       idempotent: true,
       complexity: 1200,
       // The DECLARED result must admit every answer the type handler can
-      // give, and `absFunctionType` legitimately claims `non_finite_number`
+      // give, and `absFunctionType` legitimately claims `+oo | -oo`
       // for `±∞`/`~oo` and the top `number` where finiteness is not proven
       // (a NaN operand, in particular). Neither is below `real`, so the
       // declaration is the top numeric type and the handler tightens it
@@ -930,7 +929,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (den.isSame(0)) return 'number';
         // A non-finite operand: `x/±∞ = 0`, `±∞/finite = ±∞`, but `∞/∞`,
         // `∞/i`, `i/∞` give NaN/~oo. Operands like `Ln(0)`, or a symbol
-        // declared `non_finite_number`, have no value to probe: `isFinite`
+        // declared `+oo | -oo`, have no value to probe: `isFinite`
         // consults the static type on that path (see `BoxedFunction`/
         // `BoxedSymbol` `isInfinity`), so it decides them too.
         const nonFinite = (x: Expression) => provablyNonFiniteNumber(x);
@@ -941,7 +940,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // non-finite numerator needs no proven sign of its own (`±∞ ≠ 0` is
           // a theorem); the denominator keeps the full obligation.
           // `isExtendedReal` is required on both — `∞/i = ~oo` is not
-          // `non_finite_number`. The
+          // `+oo | -oo`. The
           // denominator must be provably finite (`isFinite === true`), not
           // merely "not provably infinite": unknown finiteness admits `∞/∞`,
           // which is NaN.
@@ -953,7 +952,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ) {
             const s = operandSgn(den);
             if (s === 'positive' || s === 'negative' || s === 'not-zero')
-              return 'non_finite_number';
+              return '+oo | -oo';
           }
           // The symmetric claim: a provably finite, real numerator over a
           // provably non-finite REAL denominator is exactly `0`. Both
@@ -1000,7 +999,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             denSgn === 'negative' ||
             denSgn === 'not-zero';
           // A numerator whose finiteness is NOT proven (`x: real |
-          // non_finite_number`) may be `±∞`, and `∞ / finite` is `±∞`,
+          // +oo | -oo`) may be `±∞`, and `∞ / finite` is `±∞`,
           // `∞ / ∞` NaN — neither in the finite tier. A PROVABLY infinite
           // numerator was answered by the non-finite arm above; this is
           // the unknown-finiteness residue (pre-existing: this rung
@@ -1189,7 +1188,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         )
           return 'integer';
         // A *negative* integer is a pole of Γ(x+1): the value is `~oo`,
-        // which no finite type admits and which `non_finite_number` — the
+        // which no finite type admits and which `+oo | -oo` — the
         // SIGNED pair — excludes, so the claim is the top type `number`
         // (non-finite typing convention).
         if (
@@ -1604,7 +1603,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       // ζ(1) is the pole; its value `~oo` is neither finite nor a member of
-      // the signed pair `non_finite_number`, so only `number` admits it. The
+      // the signed pair `+oo | -oo`, so only `number` admits it. The
       // pole test is the literal-value channel: `isSame` is strictly
       // syntactic, so only a literal 1 ever answered `true` here, and
       // `operandLiteralValue` selects exactly that population.
@@ -2415,8 +2414,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return broadcastableResultTypeOf(ops);
         if (ops.some((x) => x.isNaN)) return 'number';
         // A provably non-finite factor may be visible only in its static
-        // TYPE: `Ln(0)` types `non_finite_number`, as does a symbol declared
-        // `non_finite_number`, and neither has a value to probe.
+        // TYPE: `Ln(0)` types `+oo | -oo`, as does a symbol declared
+        // `+oo | -oo`, and neither has a value to probe.
         // `provablyNonFiniteNumber`  catches them; without
         // it `2·Ln(0)` fell through to the "every operand is finite" tail and
         // claimed `integer` (unsound; the value is −∞).
@@ -2436,7 +2435,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // including the non-finite one: structural `isFinite === false` does
           // not imply real
           // (`ComplexInfinity` has `isFinite === false` with type `complex`),
-          // and `∞·i = ~oo` must not be claimed `non_finite_number`.
+          // and `∞·i = ~oo` must not be claimed `+oo | -oo`.
           if (
             ops.every((x) => {
               if (x.isExtendedReal !== true) return false;
@@ -2447,7 +2446,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               return s === 'positive' || s === 'negative' || s === 'not-zero';
             })
           )
-            return 'non_finite_number';
+            return '+oo | -oo';
           return 'number';
         }
         // From here every operand is finite (no `isFinite === false`).
@@ -2776,7 +2775,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `∞^0`, `1^∞`, `i^∞`, `∞^i` are all indeterminate. Only a
         // *non-negative real* base raised to a *positive finite real* exponent
         // is guaranteed non-finite (`(+∞)^2 = +∞`); everything else widens to
-        // the top type (the old `non_finite_number` ignored the NaN forms).
+        // the top type (the old `+oo | -oo` ignored the NaN forms).
         // `=== false` (not `!`): a symbolic operand has `isFinite ===
         // undefined`, which must not be treated as non-finite.
         // Sign reads combine the value channel with the TYPE channel
@@ -2791,7 +2790,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             positiveSign(expSgn) === true &&
             provablyNonFiniteNumber(base)
           )
-            return 'non_finite_number';
+            return '+oo | -oo';
           return 'number';
         }
         // `0` raised to a non-positive power is a pole: `0^0` is indeterminate
@@ -3371,37 +3370,40 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Heaviside step function.',
       complexity: 1200,
       broadcastable: true,
-      signature: '(number) -> number',
-      // H's values on the real line are exactly 0, 1/2 and 1, so the tight
-      // per-element claim is a finite rational in [0, 1] — the range carries
-      // the non-negativity through the type channel (`signOfType`), matching
-      // the gated `sgn` handler below. The claim holds at the ends of the
-      // line too (H(±∞) is 0 or 1). Everywhere else H has no value, so the
-      // gate answers the wide `number`; see `realOnlyStepType`.
-      typeHandlerKind: 'types',
-      type: ([x]) => realOnlyStepType(x, HEAVISIDE_REAL_TYPE),
-      // H(x) ∈ {0, 1/2, 1} — non-negative — but only where H has a value at
-      // all, i.e. on the real line. At NaN, at `~oo` and off the real axis
-      // there is no value, and the unconditional `non-negative` this
-      // definition used to claim asserted a sign for those inputs anyway
-      // (`Heaviside(NaN).isNonNegative` was `true`). Realness is read from
-      // the TYPE, which is the same gate the `type` handler above uses, and
-      // which also decides an operand that has no value to probe. It is
-      // EXTENDED realness, again like the `type` handler: `H(±∞)` is 0 or 1
-      // and so does carry a sign, but the bare (finite) name `real` does not
-      // match a `±∞` operand.
+      // The FIRST Contract B domain signature (`docs/ERROR-MODEL.md` §4's
+      // worked example; the Phase F pilot of
+      // `docs/plans/2026-08-30-error-model-implementation.md`, carrier
+      // ruled 2026-08-31): the carrier is exactly where H has a value —
+      // the extended real line, `H(±∞)` = 1/0 included — and the success
+      // type is exactly its values {0, ½, 1}. The consequences, each
+      // ruled: `Heaviside(i)` and `Heaviside(~oo)` are boxing errors
+      // (they were inert forever); the application TYPE is the derived
+      // `rational<0..1>` for a proven extended-real argument and
+      // `rational<0..1> | nan` for a maybe-NaN one — no hand-written type
+      // handler (the `realOnlyStepType` claim is now read off this
+      // declaration by the generic derivation).
+      signature: '(real | signed_infinity) -> rational<0..1>',
+      // Explicit: the DERIVED default answers `reject` for this carrier
+      // (an extended-real carrier is not a subtype of `complex`, which is
+      // the mechanical propagate test), and `H(NaN)` must be `NaN` — the
+      // conformed §4 behavior.
+      nanBehavior: 'propagate',
+      // H has a value at EVERY point of its carrier, and its three values
+      // are exactly machine-representable, so the numeric route cannot
+      // fail either: the strong claim is true, and it is what discharges
+      // the marker arm so the derived type is exactly `rational<0..1>`
+      // for an in-carrier argument.
+      partiality: 'total',
+      // H(x) ∈ {0, 1/2, 1} — non-negative wherever H has a value. Every
+      // VALID operand is in the extended-real carrier now, but the sign
+      // channel can be probed before validation settles, so the guard
+      // stays: extended realness, matching the carrier.
       sgn: ([x]) =>
         x.type.matches(EXTENDED_REAL_TYPE) ? 'non-negative' : undefined,
       evaluate: ([x], { engine }) => {
-        // A `NaN` argument propagates instead of leaving the application
-        // inert. This operator declares a numeric carrier and a numeric
-        // result, which is the condition for the derived `propagate` NaN
-        // policy of `docs/ERROR-MODEL.md` §4; the three sign tests below all
-        // answer `false` for `NaN`, so without this arm a decidable question
-        // would get inertness as its terminal answer (forbidden by §1). The
-        // compiled JavaScript kernel already answers `NaN` here, so this arm
-        // is also what keeps the interpreter and the compiled lane in step.
-        if (x.isNaN === true) return engine.NaN;
+        // Only mathematics: the NaN arm this handler used to carry is the
+        // generic policy gate's job now (`nanBehavior: 'propagate'`
+        // above), and an off-carrier operand never reaches this handler.
         if (x.isSame(0)) return engine.Half;
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.Zero;
@@ -3423,11 +3425,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: ([x]) => realOnlyStepType(x, SIGN_REAL_TYPE),
       sgn: ([x]) => x.sgn,
       evaluate: ([x], { engine }) => {
-        // `NaN` propagates, for the reason given on `Heaviside` above: the
-        // declaration is numeric in and numeric out, so the derived
-        // `propagate` NaN policy applies, and the three sign tests below are
-        // all `false` for `NaN`, which would otherwise make inertness the
-        // terminal answer to a decidable question.
+        // `NaN` propagates, and THIS handler must still answer it itself:
+        // `Sign` has not migrated to a Contract B domain signature — its
+        // carrier is the plain `(number)`, which ADMITS `nan`, so the
+        // generic NaN-policy gate resolves to `'inert'` and stands down.
+        // Without this arm the three sign tests below are all `false` for
+        // `NaN` and inertness would be the terminal answer to a decidable
+        // question. (Heaviside above migrated and dropped its arm — the
+        // gate owns NaN there because its precise carrier binds the
+        // policy.)
         if (x.isNaN === true) return engine.NaN;
         if (x.isSame(0)) return engine.Zero;
         if (x.isPositive) return engine.One;
@@ -3458,20 +3464,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNaN) return 'number';
         if (provablyNonFiniteNumber(x)) {
           // √(−∞) = i·∞ = ~oo (complex infinity), not a real ±∞ — and the
-          // signed pair `non_finite_number` excludes `~oo`, so only the top
+          // signed pair `+oo | -oo` excludes `~oo`, so only the top
           // type admits it (non-finite typing convention).
           if (x.isNegative === true) return 'number';
-          if (x.isNonNegative === true) return 'non_finite_number';
+          if (x.isNonNegative === true) return '+oo | -oo';
           return 'number';
         }
         // Whether the operand's TYPE proves it finite.
         // `matches('complex')` is the engine's canonical finiteness test:
         // every bare name under `number` denotes finite values alone, and
         // `complex` is the widest of them. It separates an operand whose type NAMES a non-finite
-        // disjunct — the `(real<0..>) | non_finite_number` that `Abs` claims
+        // disjunct — the `(real<0..>) | +oo | -oo` that `Abs` claims
         // for a `number` operand — from one that is finite outright, and the
         // extended-real arm below needs that distinction: `√(+∞) = +∞`, so a
-        // `finite_*` claim over a type that spells out `non_finite_number`
+        // `finite_*` claim over a type that spells out `+oo | -oo`
         // would be a lie.
         const finiteOperand = x.type.matches('complex');
         if (x.isExtendedReal) {
@@ -3503,7 +3509,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (nonNegativeSign(operandSgn(x)) === true)
             return finiteOperand
               ? 'real'
-              : 'real | non_finite_number';
+              : 'real | +oo | -oo';
           return finiteOperand ? 'complex' : 'number';
         }
         // An operand that is not on the extended real line keeps the generic-
@@ -3730,7 +3736,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     PositiveInfinity: {
       description: 'Positive infinity (+∞).',
-      // The exact singleton, not the signed pair `non_finite_number`: this
+      // The exact singleton, not the signed pair `+oo | -oo`: this
       // constant has one value, and its value's own type is that singleton,
       // so declaring the pair would make the declaration weaker than the
       // thing it declares.

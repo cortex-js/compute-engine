@@ -72,15 +72,14 @@ function typeIntersection(a: Type, b: Type): Type {
 // member of any of these three. The extended COMPLEX plane is the one that
 // takes it, and it takes every infinite magnitude with it.
 //
-// The infinities are named by the TYPE `non_finite_number` — the signed pair
-// {+∞, −∞} — and not by the two value types `+oo | -oo`. A value type only
-// admits that one value, so an operand whose type is `non_finite_number`
-// itself (`Ln(0)`, or a symbol declared `non_finite_number`) is not a subtype
-// of `real | +oo | -oo` and its membership would stay undecided.
-// `non_finite_number` excludes both `~oo` and NaN, so the two-point claim
-// above is unaffected.
-const EXTENDED_RATIONAL_TYPE = parseType('rational | non_finite_number');
-const EXTENDED_INTEGER_TYPE = parseType('integer | non_finite_number');
+// The infinities are spelled as the two value types `+oo | -oo` — the
+// signed pair {+∞, −∞}, which is also what the retired one-word name
+// `non_finite_number` normalizes to on input. An operand typed with the
+// pair (`Ln(0)`, a symbol declared with the retired spelling) IS a subtype
+// of `real | +oo | -oo`, so its membership decides. The pair excludes both
+// `~oo` and NaN, so the two-point claim above is unaffected.
+const EXTENDED_RATIONAL_TYPE = parseType('rational | +oo | -oo');
+const EXTENDED_INTEGER_TYPE = parseType('integer | +oo | -oo');
 const EXTENDED_COMPLEX_TYPE = parseType('complex | infinity');
 
 /**
@@ -331,7 +330,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedRealNumbers: {
-    type: 'set<real | non_finite_number>',
+    type: 'set<real | +oo | -oo>',
     isConstant: true,
     description: 'The set of all real numbers, including infinities.',
     collection: {
@@ -363,7 +362,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedIntegers: {
-    type: 'set<integer | non_finite_number>',
+    type: 'set<integer | +oo | -oo>',
     isConstant: true,
     description: 'The set of all integers, including infinities.',
     collection: {
@@ -395,7 +394,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   },
 
   ExtendedRationalNumbers: {
-    type: 'set<rational | non_finite_number>',
+    type: 'set<rational | +oo | -oo>',
     isConstant: true,
     description: 'The set of all rational numbers, including infinities.',
     collection: {

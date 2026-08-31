@@ -325,7 +325,7 @@ export class BoxedNumber
     // arm must recognize every string the type getters return for an infinite
     // value, or a future route reaching it would silently fall through to
     // `Number`.
-    if (type === 'non_finite_number' || type === 'infinity') return 'Infinity';
+    if (type === 'infinity') return 'Infinity';
 
     // Fallback for any other numeric type
     return 'Number';
@@ -739,22 +739,33 @@ export class BoxedNumber
       // The TIER answers, not the singleton: this fallback is what a read
       // inside a broadcast cell gets, where the literal type is withheld.
       //
-      // A signed `±∞` reports `non_finite_number` here, which is NARROWER
-      // than what the two value-node projections give for the same literal:
-      // `widenValueTypes` and `stripNumericRanges` both send a `±∞` value
-      // node to `infinity`, the tier that also admits the unsigned `~oo`.
-      // The difference is deliberate — this window knows the value is one of
-      // the signed pair, so it reports the more informative tier, matching
-      // `NumericValue.type`. A consumer that classifies both spellings (for
-      // example the tensor dtype switch in `tensor/tensor-fields.ts`) must
-      // therefore accept `infinity` and `non_finite_number` alike.
+      // A signed `±∞` reports the pair `+oo | -oo` here, which is NARROWER
+      // than what the value-node projections and the kernel give for the
+      // same literal: `widenValueTypes`, `stripNumericRanges` and
+      // `NumericValue.type` all send a `±∞` to `infinity`, the tier that
+      // also admits the unsigned `~oo`. The difference is deliberate — this
+      // window knows the value is one of the signed pair, so it reports the
+      // more informative claim. A consumer that classifies both spellings
+      // (for example the tensor dtype switch in `tensor/tensor-fields.ts`)
+      // must therefore accept `infinity` and `+oo | -oo` alike.
       if (Number.isNaN(this._value)) return BoxedType.nan;
-      if (!Number.isFinite(this._value)) return BoxedType.non_finite_number;
+      if (!Number.isFinite(this._value)) return BoxedType.signed_infinity;
       return Number.isInteger(this._value)
         ? BoxedType.integer
         : BoxedType.real;
     }
 
+    // A signed-infinity KERNEL value claims its value singleton, exactly
+    // like the machine-literal window above: the kernel's own `.type`
+    // answers the tier `infinity` (no primitive names the signed pair),
+    // and letting that tier through here made membership in the extended
+    // sets representation-dependent — an NV-backed `+∞` failed
+    // `⊑ +oo | -oo` while the same value as a plain machine number
+    // succeeded.
+    if (this._value.isPositiveInfinity)
+      return new BoxedType({ kind: 'value', value: Infinity });
+    if (this._value.isNegativeInfinity)
+      return new BoxedType({ kind: 'value', value: -Infinity });
     return new BoxedType(this._value.type, this.engine._typeResolver);
   }
 
@@ -1094,20 +1105,21 @@ export class BoxedNumber
     // A machine float is on the extended real line unless it is NaN: the two
     // machine infinities ARE `±∞`. NaN is excluded here so that this route
     // agrees with the NumericValue route below, where a NaN value carries the
-    // type `nan`, which is below neither `real` nor `non_finite_number`.
+    // type `nan`, which is below neither `real` nor `+oo | -oo`.
     if (typeof this._value === 'number') return !Number.isNaN(this._value);
 
     // If it's 'complex', it has an imaginary part, otherwise it's real
     //    complex :> real :> rational :> integer
-    // `non_finite_number` is admitted explicitly: the bare name `real` denotes
-    // the FINITE reals, and this predicate means "on the EXTENDED real line",
-    // so a signed infinity must answer `true`. The two type getters that
-    // matter say `non_finite_number` for a signed `±∞` and `infinity` only for
-    // `~∞` or a mixed infinite complex value, so this disjunct admits exactly
-    // the signed pair and nothing else.
+    // A signed infinity is admitted explicitly: the bare name `real`
+    // denotes the FINITE reals, and this predicate means "on the EXTENDED
+    // real line". The sign is read off the VALUE, not the type: the
+    // kernel's `.type` claims `infinity` for the unsigned `~∞` and for
+    // mixed infinite complex values too, and neither of those is on the
+    // extended real line.
     return (
       isSubtype(this._value.type, 'real') ||
-      isSubtype(this._value.type, 'non_finite_number')
+      this._value.isPositiveInfinity ||
+      this._value.isNegativeInfinity
     );
   }
 

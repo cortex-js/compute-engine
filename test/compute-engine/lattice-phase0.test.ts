@@ -43,9 +43,9 @@ describe('LATTICE PHASE 0: the new primitive names parse', () => {
 
   it('keeps the value spellings of the infinities and of NaN', () => {
     for (const spelling of ['oo', '∞', 'Infinity', '+oo', '+∞', '+infinity'])
-      expect(typeToString(t(spelling))).toBe('Infinity');
+      expect(typeToString(t(spelling))).toBe('+oo');
     for (const spelling of ['-oo', '-∞', '-infinity'])
-      expect(typeToString(t(spelling))).toBe('-Infinity');
+      expect(typeToString(t(spelling))).toBe('-oo');
     expect(typeToString(t('NaN'))).toBe('NaN');
   });
 
@@ -77,15 +77,19 @@ describe('LATTICE PHASE 0: the new primitive names parse', () => {
 });
 
 describe('LATTICE PHASE 0: where the new primitives sit', () => {
-  it('places `infinity` between `number` and `non_finite_number`', () => {
+  it('places `infinity` between `number` and the signed pair', () => {
+    // The signed pair is no longer a primitive of its own: it is spelled as
+    // the union of the two singleton value types, so the tier relation is
+    // asked of the union rather than of `isPrimitiveSubtype`.
     expect(isPrimitiveSubtype('infinity', 'number')).toBe(true);
-    expect(isPrimitiveSubtype('non_finite_number', 'infinity')).toBe(true);
-    expect(isPrimitiveSubtype('infinity', 'non_finite_number')).toBe(false);
+    expect(isSubtype(t('signed_infinity'), 'infinity')).toBe(true);
+    expect(isSubtype('infinity', t('signed_infinity'))).toBe(false);
   });
 
   it('keeps `infinity` out of `complex` and its subtypes', () => {
     // An unsigned infinity is not a complex number, so `infinity` is NOT below
-    // `complex`. The signed pair still is, through `non_finite_number`.
+    // `complex`. The signed pair `signed_infinity` is not below it either: the bare
+    // names denote the finite values alone.
     for (const above of ['complex', 'real', 'rational', 'integer'] as const)
       expect(isPrimitiveSubtype('infinity', above)).toBe(false);
   });
@@ -98,18 +102,23 @@ describe('LATTICE PHASE 0: where the new primitives sit', () => {
       'rational',
       'integer',
       'infinity',
-      'non_finite_number',
     ] as const)
       expect(isPrimitiveSubtype('nan', above)).toBe(false);
+    // The signed pair is a union of value types, so it is asked of `isSubtype`.
+    expect(isSubtype('nan', t('signed_infinity'))).toBe(false);
   });
 
   it('meets `infinity` with the real tower at nothing', () => {
     // The bare numeric names are finite, so they share no value with
     // `infinity`. (Before the flip the overlap was the signed pair
-    // `non_finite_number`, which is now below `infinity` alone.)
+    // `signed_infinity`, which is now below `infinity` alone.)
     expect(meetPrimitiveTypes('real', 'infinity')).toEqual([]);
     expect(meetPrimitiveTypes('complex', 'infinity')).toEqual([]);
-    expect(meetPrimitiveTypes('integer', 'non_finite_number')).toEqual([]);
+    // The signed pair is a union of value types rather than a primitive, so
+    // its meet is taken through the general intersection reduction.
+    expect(
+      reduceType({ kind: 'intersection', types: ['integer', t('signed_infinity')] })
+    ).toBe('never');
   });
 
   it('meets `nan` with every other numeric type at nothing', () => {
@@ -127,7 +136,7 @@ describe('LATTICE PHASE 0: the singleton value types', () => {
     // Unsigned: neither a complex number nor one of the signed infinities.
     expect(isSubtype(t('~oo'), 'complex')).toBe(false);
     expect(isSubtype(t('~oo'), 'real')).toBe(false);
-    expect(isSubtype(t('~oo'), 'non_finite_number')).toBe(false);
+    expect(isSubtype(t('~oo'), t('signed_infinity'))).toBe(false);
     expect(isSubtype(t('~oo'), 'nan')).toBe(false);
   });
 
@@ -144,7 +153,7 @@ describe('LATTICE PHASE 0: the singleton value types', () => {
 
   it('places the signed infinity singletons under `infinity` alone', () => {
     for (const spelling of ['+oo', '-oo']) {
-      expect(isSubtype(t(spelling), 'non_finite_number')).toBe(true);
+      expect(isSubtype(t(spelling), t('signed_infinity'))).toBe(true);
       expect(isSubtype(t(spelling), 'infinity')).toBe(true);
       // The flip: `real` is finite now, so a signed infinity is outside it.
       expect(isSubtype(t(spelling), 'real')).toBe(false);
@@ -153,12 +162,17 @@ describe('LATTICE PHASE 0: the singleton value types', () => {
     }
   });
 
-  it('widens every infinite literal to `infinity` and NaN to `nan`', () => {
-    // The tiers a literal projects to when a handler result is stored. All
-    // three infinities share one tier; NaN has its own.
+  it('widens `~oo` to `infinity`, NaN to `nan`, and a signed singleton to the pair', () => {
+    // The tiers a literal projects to when a handler result is stored. The
+    // unsigned infinity projects to `infinity` and NaN to `nan`. A signed
+    // infinity widens to the PAIR `signed_infinity` — the only type above the
+    // singletons that still separates the signed pair from `~oo` — never
+    // to the lone singleton (a contract inferred from one observed `+∞`
+    // must not reject a later `−∞`) and never to `infinity` (which would
+    // throw the sign away).
     expect(widenValueTypes(t('~oo'))).toBe('infinity');
-    expect(widenValueTypes(t('+oo'))).toBe('infinity');
-    expect(widenValueTypes(t('-oo'))).toBe('infinity');
+    expect(widenValueTypes(t('+oo'))).toEqual(t('signed_infinity'));
+    expect(widenValueTypes(t('-oo'))).toEqual(t('signed_infinity'));
     expect(widenValueTypes(t('NaN'))).toBe('nan');
   });
 
@@ -204,14 +218,13 @@ describe('LATTICE PHASE 1: the flipped world', () => {
 
   it('gives ±∞ a singleton principal type', () => {
     // A literal's public type is the singleton that names it (ruling O9). The
-    // serializer spells a numeric value type with the JavaScript number it
-    // carries, so `+∞` prints `Infinity` rather than the `+oo` the type
-    // grammar also accepts for it.
-    expect(ce.parse('\\infty').type.toString()).toBe('Infinity');
-    expect(ce.box(Infinity).type.toString()).toBe('Infinity');
-    expect(ce.box(-Infinity).type.toString()).toBe('-Infinity');
+    // serializer spells the two signed infinities with the `+oo`/`-oo` forms
+    // of the type grammar, not with the JavaScript number they carry.
+    expect(ce.parse('\\infty').type.toString()).toBe('+oo');
+    expect(ce.box(Infinity).type.toString()).toBe('+oo');
+    expect(ce.box(-Infinity).type.toString()).toBe('-oo');
     // The tier below the singleton is the signed pair, and thence `infinity`.
-    expect(ce.box(Infinity).type.matches('non_finite_number')).toBe(true);
+    expect(ce.box(Infinity).type.matches('signed_infinity')).toBe(true);
     expect(ce.box(Infinity).type.matches('infinity')).toBe(true);
   });
 
@@ -228,7 +241,7 @@ describe('LATTICE PHASE 1: the flipped world', () => {
     const nan = ce.box(NaN).type;
     expect(nan.toString()).toBe('NaN');
     expect(nan.matches('nan')).toBe(true);
-    expect(nan.matches('non_finite_number')).toBe(false);
+    expect(nan.matches('signed_infinity')).toBe(false);
     expect(nan.matches('infinity')).toBe(false);
     expect(nan.matches('real')).toBe(false);
   });
@@ -239,7 +252,7 @@ describe('LATTICE PHASE 1: the flipped world', () => {
     expect(cinf.matches('number')).toBe(true);
     expect(cinf.matches('infinity')).toBe(true);
     // Unsigned, so not the signed pair; infinite, so not finite `complex`.
-    expect(cinf.matches('non_finite_number')).toBe(false);
+    expect(cinf.matches('signed_infinity')).toBe(false);
     expect(cinf.matches('complex')).toBe(false);
   });
 
@@ -398,10 +411,10 @@ describe('LATTICE PHASE 0: review-round fixes', () => {
   });
 
   it('joins the new names at `infinity`, not `number`', () => {
-    expect(typeToString(widen(t('~oo'), 'non_finite_number'))).toBe(
+    expect(typeToString(widen(t('~oo'), t('signed_infinity')))).toBe(
       'infinity'
     );
-    expect(typeToString(widen('non_finite_number', t('~oo')))).toBe(
+    expect(typeToString(widen(t('signed_infinity'), t('~oo')))).toBe(
       'infinity'
     );
     // The finite rungs of the probe order still answer with the `finite_*`
@@ -412,7 +425,7 @@ describe('LATTICE PHASE 0: review-round fixes', () => {
     // A finite type joined with an infinity reaches only the top: the three
     // children of `number` are disjoint. (Before the flip this answered
     // `integer`, which admitted both.)
-    expect(typeToString(widen('non_finite_number', 'integer'))).toBe(
+    expect(typeToString(widen(t('signed_infinity'), 'integer'))).toBe(
       'number'
     );
   });
@@ -502,7 +515,7 @@ describe('STEP 1.3: isExtendedReal', () => {
     // The fix this rename carried. The machine-number fast path used to
     // return `true` for ANY float, NaN included, while the NumericValue route
     // answered `false` for the same value (NaN types `nan`, which is below
-    // neither `real` nor `non_finite_number`). NaN is not a point of the
+    // neither `real` nor `signed_infinity`). NaN is not a point of the
     // extended real line, so both routes now say `false`.
     expect(ce.box(NaN).isExtendedReal).toBe(false);
     expect(ce.box('NaN').isExtendedReal).toBe(false);
@@ -550,11 +563,9 @@ describe('STEP 1.3: isExtendedReal', () => {
     // The `Multiply` and `Add` folds require `isExtendedReal === true` of
     // every operand, which is what keeps `∞·i = ~oo` out of the claim.
     expect(ce.box(['Multiply', 2, ['Ln', 0]]).type.toString()).toBe(
-      'non_finite_number'
+      'signed_infinity'
     );
-    expect(ce.box(['Add', 2, ['Ln', 0]]).type.toString()).toBe(
-      'non_finite_number'
-    );
+    expect(ce.box(['Add', 2, ['Ln', 0]]).type.toString()).toBe('signed_infinity');
   });
 });
 
@@ -575,8 +586,10 @@ describe('REVIEW ROUND: finiteness gate', () => {
   it('keeps the non-finite names out of `complex`', () => {
     // `number` is the top of the numeric tree and admits `infinity` and `nan`,
     // so it is NOT finite; the three below are not finite either.
-    for (const name of ['number', 'infinity', 'nan', 'non_finite_number'])
+    for (const name of ['number', 'infinity', 'nan'])
       expect(isPrimitiveSubtype(name as any, 'complex')).toBe(false);
+    // The signed pair is a union of value types, so it is asked of `isSubtype`.
+    expect(isSubtype(t('signed_infinity'), 'complex')).toBe(false);
   });
 
   it('answers `isNonRealNumber` false for the generic numeric type', () => {
@@ -599,6 +612,14 @@ describe('REVIEW ROUND: finiteness gate', () => {
     expect(typeToString(t('finite_integer'))).toBe('integer');
     // …including in a RANGED spelling, whose base normalizes too.
     expect(typeToString(t('finite_real<0..1>'))).toBe('real<0..1>');
+  });
+
+  it('accepts the retired `non_finite_number` spelling as a parse-time alias', () => {
+    // The signed pair no longer has a name of its own: it is the union of the
+    // two signed-infinity value types. The retired name stays readable for one
+    // release cycle and normalizes to that union before a node is built, so it
+    // is never serialized back.
+    expect(typeToString(t('non_finite_number'))).toBe('signed_infinity');
   });
 
   it('does not resolve an `Object.prototype` member as an alias', () => {

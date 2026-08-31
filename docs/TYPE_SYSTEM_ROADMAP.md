@@ -829,6 +829,17 @@ entirely, and the common case has the short name.
   a subtype of `infinity` and no longer below `real` or `complex`.
   The site-by-site migration L5 calls for is what a future retirement
   still needs.
+  **RETIRED 2026-08-31 (ruled by Arno; L5 executed).** The name was
+  judged misleading — `~oo` and `∞ + i` are non-finite numbers, yet
+  neither was a member — so the site-by-site migration ran: the signed
+  pair is spelled `+oo | -oo` (the union of the two value types, with a
+  frozen `SIGNED_INFINITY_TYPE` constant in
+  `src/common/type/primitive.ts`), `infinity` is the spelling where any
+  infinite value is meant, and the old name is a one-cycle parse alias
+  normalizing to `+oo | -oo` — the exact same set, never the wider
+  `infinity` — and is never emitted. The kernel `NumericValue.type`
+  gates claim `infinity` for a signed infinity, with the sign read off
+  the value.
 - **L6 — the overflow escape.** A bare `real` result is a finiteness
   promise, and machine evaluation can break it: two finite operands
   can overflow (`MAX_VALUE + MAX_VALUE` → `Infinity`), and a

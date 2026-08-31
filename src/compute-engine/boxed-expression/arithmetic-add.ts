@@ -11,7 +11,10 @@ import {
   widen,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  SIGNED_INFINITY_TYPE,
+} from '../../common/type/primitive.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
@@ -587,7 +590,7 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
     return broadcastableResultTypeOf(args);
   if (args.some((x) => x.isNaN)) return 'number';
   // A provably non-finite operand may be visible only in its static TYPE:
-  // `Ln(0)`, `Artanh(1)` and a symbol declared `non_finite_number` have no
+  // `Ln(0)`, `Artanh(1)` and a symbol declared `+oo | -oo` have no
   // value to probe before evaluation; `provablyNonFiniteNumber` reads that
   // type path (see `BoxedFunction`/`BoxedSymbol` `isInfinity`). Its
   // `matches('number')` qualifier also keeps a non-number operand the shape
@@ -609,7 +612,7 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
       nf.isExtendedReal === true &&
       args.every((x) => x === nf || x.isExtendedReal === true)
     )
-      return 'non_finite_number';
+      return SIGNED_INFINITY_TYPE;
     return 'number';
   }
   // Ranges and sign exclusions are stripped from the join inputs: a sum

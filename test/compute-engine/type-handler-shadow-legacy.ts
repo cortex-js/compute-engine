@@ -51,7 +51,10 @@ import {
   widen,
 } from '../../src/common/type/utils';
 import { parseType } from '../../src/common/type/parse';
-import { EXTENDED_REAL_TYPE } from '../../src/common/type/primitive';
+import {
+  EXTENDED_REAL_TYPE,
+  SIGNED_INFINITY_TYPE,
+} from '../../src/common/type/primitive';
 import { typeToString } from '../../src/common/type/serialize';
 import {
   negativeSign,
@@ -219,7 +222,7 @@ function frozenLogType(ops: ReadonlyArray<Expression>): Type {
     b.isFinite === true &&
     !b.isSame(1);
   if (x.isSame(0)) {
-    if (base === undefined || usableBase(base)) return 'non_finite_number';
+    if (base === undefined || usableBase(base)) return SIGNED_INFINITY_TYPE;
     return 'number';
   }
   if (positiveSign(xSgn) === false && negativeSign(xSgn) !== true)
@@ -231,7 +234,7 @@ function frozenLogType(ops: ReadonlyArray<Expression>): Type {
   // `complex`, which admitted `±∞`. The bare name now denotes the FINITE
   // complex numbers, so the `x = 0` pole (`ln(0) = −∞`) has to be named.
   return x.type.matches('complex')
-    ? parseType('complex | non_finite_number')
+    ? parseType('complex | signed_infinity')
     : 'number';
 }
 
@@ -281,7 +284,7 @@ function frozenArctanType(ops: ReadonlyArray<Expression>): Type {
 function frozenRoundingFunctionType(x: Expression | undefined): Type {
   if (!x || x.isNaN) return 'number';
   if (frozenProvablyNonFiniteNumber(x))
-    return x.isExtendedReal === true ? 'non_finite_number' : 'number';
+    return x.isExtendedReal === true ? SIGNED_INFINITY_TYPE : 'number';
   const provablyNonReal = isNumber(x)
     ? x.isExtendedReal === false
     : x.type.matches('imaginary');
@@ -402,7 +405,7 @@ function frozenElementaryFunctionType(
         ops[0]?.isFinite === false &&
         ops[0].type.matches(EXTENDED_REAL_TYPE)
       )
-        return 'non_finite_number';
+        return SIGNED_INFINITY_TYPE;
       return frozenNumericTypeHandler(ops);
     case 'Tanh':
     case 'Sech':
@@ -656,9 +659,13 @@ export const LEGACY_TYPE_HANDLERS: Record<
  *   `real`: li(1) = −∞) on a proven non-negative real.
  * - `Sinc`/`FresnelS`/`FresnelC` (library/trigonometry.ts),
  *   `Covariance`/`PopulationCovariance`/`Correlation` (library/statistics.ts)
- *   and `Heaviside`/`Sign` (library/arithmetic.ts): `Sinc(NaN)` and
+ *   and `Sign` (library/arithmetic.ts): `Sinc(NaN)` and
  *   `Covariance([1, NaN], [2, 3])` both numericize to `NaN`, and
  *   `sinc`/`FresnelS`/`FresnelC` of a non-real argument are complex.
+ *   `Heaviside` was in this list until it became the Contract B Phase F
+ *   pilot (2026-08-31): it now has NO `'types'` handler at all — its
+ *   claim is derived entirely from the declared domain signature
+ *   `(real | signed_infinity) -> rational<0..1>`.
  */
 export const RETIRED_CONSTANT_TYPE_HANDLERS: ReadonlyArray<
   [operator: string, declaredResult: string]

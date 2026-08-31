@@ -131,11 +131,11 @@ describe('LIST-BROADCAST TYPING — wrapper-lifted families (sound list<R>)', ()
     ['Ln', ['Ln', ['List', 1, 2]], 'vector<2>'],
     ['Sqrt', ['Sqrt', ['List', 4, 9]], 'vector<2>'],
     ['Gamma (special fn)', ['Gamma', ['List', 1, 2]], 'vector<2>'],
-    // The `Abs` cell is `(real<0..>) | non_finite_number`, not a bare `real`:
+    // The `Abs` cell is `(real<0..>) | signed_infinity`, not a bare `real`:
     // a broadcast cell reads its operand at the widened bare tier, and
     // `absFunctionType` carries the `+∞` an operand of unproven finiteness can
     // reach. The bound is therefore the non-negative range plus that pair.
-    ['Abs', ['Abs', ['List', -1, 2]], 'vector<(real<0..>) | non_finite_number^2>'],
+    ['Abs', ['Abs', ['List', -1, 2]], 'vector<(real<0..>) | signed_infinity^2>'],
     ['Negate', ['Negate', ['List', 'a', 'b']], 'vector<2>'],
     ['Real (complex)', ['Real', ['List', 2, 3]], 'vector<real^2>'],
     ['Conjugate (complex)', ['Conjugate', ['List', 2, 3]], 'vector<integer^2>'],

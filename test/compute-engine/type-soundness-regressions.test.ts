@@ -130,11 +130,11 @@ describe('SYM P0-13 — imaginary ± imaginary is not typed imaginary', () => {
 });
 
 describe('SYM P0-15 — Multiply/Divide/Mod finiteness/NaN claims are sound', () => {
-  it('0 · ∞ is not typed non_finite_number', () => {
+  it('0 · ∞ is not typed signed_infinity', () => {
     const ce = new ComputeEngine();
     const t = ce.expr(['Multiply', 0, 'PositiveInfinity']).type;
     // 0·∞ = NaN, only representable by `number`.
-    expect(t.matches('non_finite_number')).toBe(false);
+    expect(t.matches('signed_infinity')).toBe(false);
   });
 
   it('Mod(2, 0) is not typed integer', () => {
@@ -143,10 +143,10 @@ describe('SYM P0-15 — Multiply/Divide/Mod finiteness/NaN claims are sound', ()
     expect(ce.expr(['Mod', 2, 0]).type.matches('integer')).toBe(false);
   });
 
-  it('Divide(∞, i) is not typed non_finite_number', () => {
+  it('Divide(∞, i) is not typed signed_infinity', () => {
     const ce = new ComputeEngine();
     const t = ce.expr(['Divide', 'PositiveInfinity', 'ImaginaryUnit']).type;
-    expect(t.matches('non_finite_number')).toBe(false);
+    expect(t.matches('signed_infinity')).toBe(false);
   });
 });
 
@@ -216,11 +216,11 @@ describe('Tycho item 89 — rounding a symbolic number stays integer-valued', ()
     expect(typeOf('\\mathrm{Round}(Q, 2)')).toBe('real');
     expect(typeOf('\\mathrm{Round}(3.14159, 2)')).toBe('real');
     expect(typeOf('\\mathrm{Round}(1.2+3.4i, 2)')).toBe('complex');
-    expect(typeOf('\\mathrm{Round}(\\infty, 2)')).toBe('non_finite_number');
+    expect(typeOf('\\mathrm{Round}(\\infty, 2)')).toBe('signed_infinity');
   });
 
   it('the non-finite and NaN claims are unchanged', () => {
-    expect(typeOf('\\mathrm{Round}(\\infty)')).toBe('non_finite_number');
+    expect(typeOf('\\mathrm{Round}(\\infty)')).toBe('signed_infinity');
     expect(typeOf('\\mathrm{Round}(\\mathrm{NaN})')).toBe('number');
   });
 

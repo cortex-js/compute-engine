@@ -1,3 +1,4 @@
+import { SIGNED_INFINITY_TYPE } from '../../common/type/primitive.js';
 import type {
   SymbolDefinitions,
   Expression,
@@ -88,7 +89,7 @@ const ELLIPTIC_K_DOMAIN: RealDomain = {
   real: [iv(-Infinity, false, 1, false)],
   complex: [iv(1, false, Infinity, false)],
   poles: [1],
-  poleType: 'non_finite_number',
+  poleType: SIGNED_INFINITY_TYPE,
 };
 
 /** Complete `EllipticE`: real for m ≤ 1 (E(1) = 1), finite complex for m > 1. */

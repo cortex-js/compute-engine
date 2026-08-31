@@ -48,8 +48,8 @@ semantics: quiet, absorbing through numeric operations, `NaN == NaN` is
 `False`. Its lattice position: `NaN` is admitted **only by the top type
 `number` and by its own type `nan`** — every other numeric type excludes
 it (`complex`, `real`, `rational`, `integer`, all of which are
-finite-only; `infinity`; and `non_finite_number`, which is `±oo`
-exactly). `~oo` (`ComplexInfinity`) is likewise outside `complex`, but
+finite-only; `infinity`; and the signed-pair spelling `+oo | -oo`, which
+is `±oo` exactly). `~oo` (`ComplexInfinity`) is likewise outside `complex`, but
 it now has a home of its own: it is a member of `infinity`. The top
 therefore decomposes with nothing left over —
 `number = complex ⊔ infinity ⊔ nan` — and the exceptional points that
@@ -955,16 +955,19 @@ document's history):
   flip** (`docs/TYPE_SYSTEM_ROADMAP.md` §8). Bare numeric types are
   finite-only; `±oo` moved out of `real`/`complex` into the `infinity`
   type, which sits beside the `nan` singleton under `number`; the
-  extended real line is spelled `real | non_finite_number` (the
+  extended real line is spelled `real | +oo | -oo` (the
   `EXTENDED_REAL_TYPE` constant — `real | infinity` would also admit the
   unsigned `~oo`). The five `finite_*`
   twins have retired: `finite_integer`, `finite_rational`,
   `finite_real`, `finite_complex` and `finite_number` remain
   parse-accepted deprecated aliases for one release cycle — normalizing
   to `integer`, `rational`, `real`, `complex` and `complex`
-  respectively — and are never emitted. `non_finite_number` did NOT
-  retire in this release: it keeps its meaning, the signed pair
-  {`+oo`, `-oo`}, and now sits below `infinity`. The flip amends §5's
+  respectively — and are never emitted. `non_finite_number` initially
+  survived the flip, repositioned below `infinity` — and then RETIRED on
+  2026-08-31 (the name was misleading: `~oo` and `∞ + i` are non-finite
+  numbers, yet neither was a member). The signed pair is spelled
+  `+oo | -oo`; the old name is a one-cycle parse alias for that union,
+  never emitted. The flip amends §5's
   placement (the singletons stay; the directed infinities moved) and
   strengthens Contract B's carrier discipline (§4) by giving the
   precise carriers the short names.

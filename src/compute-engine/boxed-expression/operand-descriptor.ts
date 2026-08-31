@@ -45,7 +45,7 @@ function factsFromType(t: Type): {
   shape: readonly number[] | undefined;
 } {
   // `infinity` is any value of infinite magnitude — the signed pair
-  // `non_finite_number` is one of its subtypes, so testing it covers `±∞`
+  // `+oo | -oo` is one of its subtypes, so testing it covers `±∞`
   // as well as `~oo` — and `nan` is the NaN singleton, which is disjoint
   // from `infinity` and needs its own arm.
   const finite: Tri = isSubtype(t, 'complex')

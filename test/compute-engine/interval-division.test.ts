@@ -123,12 +123,12 @@ describe('INTERVAL DIVISION — headline claims', () => {
   });
 
   it('a numerator of unproven finiteness widens the quotient to the pole tier', () => {
-    // `x: real | non_finite_number` may be `+oo`; `x / p` is then `+oo`, not
+    // `x: real | signed_infinity` may be `+oo`; `x / p` is then `+oo`, not
     // a `real`. The non-finite arm handles a PROVABLY infinite numerator;
     // this is the unknown-finiteness residue (pre-existing, found by the
     // review of this round).
     const e = new ComputeEngine();
-    e.declare('x', 'real | non_finite_number');
+    e.declare('x', 'real | signed_infinity');
     e.declare('p', 'real<1..2>');
     expect(e.box(['Divide', 'x', 'p']).type.toString()).toBe('infinity | nan | real');
     e.declare('f', 'real<0..1>');
@@ -251,7 +251,7 @@ describe('INTERVAL DIVISION — kernel boundary cases (the review list)', () => 
 
   it('the reciprocal of an unbounded divisor is an OPEN 0 only for a finite-tier divisor', () => {
     // A `real` divisor's +∞ endpoint means "unbounded": 1/x > 0 always,
-    // so the 0 is open. A `non_finite_number` divisor may BE +∞, whose
+    // so the 0 is open. A `signed_infinity` divisor may BE +∞, whose
     // reciprocal is exactly 0: the 0 must be closed (the flag is the
     // `finite` mark the reader sets for finite tiers).
     const fin = recipInterval({ lo: 3, hi: Infinity, finite: true })!;

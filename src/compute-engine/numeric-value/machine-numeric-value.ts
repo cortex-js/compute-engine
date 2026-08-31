@@ -71,7 +71,7 @@ export class MachineNumericValue extends NumericValue {
       if (this.decimal === 0) return 'imaginary';
       return 'complex';
     }
-    if (!Number.isFinite(this.decimal)) return 'non_finite_number';
+    if (!Number.isFinite(this.decimal)) return 'infinity';
     if (Number.isInteger(this.decimal)) return 'integer';
     return 'real';
   }

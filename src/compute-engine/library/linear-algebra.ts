@@ -1,3 +1,4 @@
+import { SIGNED_INFINITY_TYPE } from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { widen } from '../../common/type/utils.js';
@@ -284,7 +285,7 @@ function componentProductType(
  */
 function innerProductSumType(types: ReadonlyArray<Type>): Type {
   if (types.length === 1) return types[0];
-  const nonFinite = types.filter((t) => isSubtype(t, 'non_finite_number'));
+  const nonFinite = types.filter((t) => isSubtype(t, SIGNED_INFINITY_TYPE));
   if (nonFinite.length > 0) {
     // Exactly one signed infinity among terms that are otherwise FINITE
     // reals sums to that infinity. Only the OTHER terms are tested against
@@ -292,13 +293,13 @@ function innerProductSumType(types: ReadonlyArray<Type>): Type {
     // real, so requiring every term to be one would make this refinement
     // unreachable.
     const finiteTerms = types.filter(
-      (t) => !isSubtype(t, 'non_finite_number')
+      (t) => !isSubtype(t, SIGNED_INFINITY_TYPE)
     );
     if (
       nonFinite.length === 1 &&
       finiteTerms.every((t) => isSubtype(t, 'real'))
     )
-      return 'non_finite_number';
+      return SIGNED_INFINITY_TYPE;
     return 'number';
   }
   const t = widen(...types);

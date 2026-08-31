@@ -863,7 +863,18 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     for (let i = 0; i < ops.length; i++) {
       if (this.resolvedNanBehaviorAt(i, armSignature) !== 'propagate')
         continue;
-      if (isSubtype('nan', ops[i].type.type)) return 'widen-nan';
+      const opT = ops[i].type.type;
+      // A PROVEN NaN in a propagating slot makes the application's value
+      // NaN — the sharp type is exactly the marker, not a widened union
+      // (`Heaviside(NaN).type` is `nan`, not `rational<0..1> | nan`).
+      // Testing only the may-carry direction below missed this: `nan` is
+      // not a subtype of the NaN value singleton, so a proven-NaN
+      // argument derived NO arm and the stored type excluded the very
+      // value the application has. The bottom type is excluded first:
+      // `never` is a subtype of everything, and a `never`-typed operand
+      // means "no possible value" — a contradiction — not "proven NaN".
+      if (opT !== 'never' && isSubtype(opT, 'nan')) return 'is-marker';
+      if (isSubtype('nan', opT)) return 'widen-nan';
     }
     return 'none';
   }

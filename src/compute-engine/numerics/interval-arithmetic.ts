@@ -47,7 +47,7 @@ export type Interval = {
    * then means only "unbounded on that side", never a value that IS
    * `±∞`. Set by `intervalOfType` for the finite-only tiers
    * (`integer`/`rational`/`real` and their ranges — bare tiers are finite
-   * under the finite-by-default lattice); absent for `non_finite_number`
+   * under the finite-by-default lattice); absent for `+oo | -oo`
    * and for anything mixing it in. Lets `mulIntervals` answer the
    * `0 · unbounded` corner exactly (`0 · x = 0` for every finite `x`)
    * instead of dropping it as the `0 · ∞` indeterminate form. */
@@ -78,14 +78,13 @@ export const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
 /** The numeric primitives whose values are totally ordered on the
  * extended real line and exclude NaN — the only tiers an interval can
  * describe, and the only tiers a computed range may attach to.
- * (`non_finite_number` is the signed pair `±∞`, ordered; the new
+ * (`+oo | -oo` is the signed pair `±∞`, ordered; the new
  * `infinity` primitive is NOT here — it admits the unordered complex
  * infinity `~oo` — and neither is `nan`.) */
 const NAN_FREE_REAL_TIERS = new Set<string>([
   'integer',
   'rational',
   'real',
-  'non_finite_number',
 ]);
 
 /**
@@ -117,8 +116,13 @@ export function intervalOfType(
   seen?: Set<object>
 ): Interval | undefined {
   if (typeof t === 'string') {
+    // The bare tiers here are all finite; the SIGNED infinities reach this
+    // reader as `±Infinity` VALUE types (points, handled below) or as their
+    // union `+oo | -oo` (hulled by the union arm to the full line with the
+    // `finite` flag unset — the same claim the retired one-word tier name
+    // used to make).
     if (!NAN_FREE_REAL_TIERS.has(t)) return undefined;
-    return t === 'non_finite_number' ? { ...FULL } : { ...FULL, finite: true };
+    return { ...FULL, finite: true };
   }
   switch (t.kind) {
     case 'value': {
@@ -133,7 +137,8 @@ export function intervalOfType(
       const iv: Interval = { lo: t.lower ?? -Infinity, hi: t.upper ?? Infinity };
       if (t.lowerOpen) iv.loOpen = true;
       if (t.upperOpen) iv.hiOpen = true;
-      if (t.type !== 'non_finite_number') iv.finite = true;
+      // Every base this reader admits is a finite tier (see the set above).
+      iv.finite = true;
       return iv;
     }
     case 'reference': {
@@ -514,7 +519,7 @@ export function intervalExcludesZero(b: Interval): boolean {
  *   unbounded side: `(0, h]` → `[1/h, +∞)`, `[l, 0)` → `(−∞, 1/l]`;
  * - an infinite divisor endpoint maps to 0 — OPEN when the divisor is
  *   FINITE-tier (`b.finite`: its infinite endpoint means "unbounded", and
- *   `1/x` is never exactly 0), CLOSED otherwise (a `non_finite_number`
+ *   `1/x` is never exactly 0), CLOSED otherwise (a `+oo | -oo`
  *   divisor may BE `±∞`, whose reciprocal is exactly 0): `[l, +∞)` →
  *   `(0, 1/l]` for a `real` divisor.
  * A finite nonzero endpoint follows the general attainability rule
@@ -530,7 +535,7 @@ export function recipInterval(b: Interval): Interval | undefined {
   if (b.hi === Infinity) {
     // The 0 is OPEN only when the divisor is FINITE-tier (its infinite
     // endpoint means "unbounded", and 1/x is never exactly 0). A divisor
-    // that may BE +∞ (`non_finite_number`) attains 1/∞ = 0: closed.
+    // that may BE +∞ (`+oo | -oo`) attains 1/∞ = 0: closed.
     lo = 0;
     loOpen = b.finite === true;
   } else if (b.hi === 0) {

@@ -731,11 +731,11 @@ describe('SYM P0-15 residual — kind-closure typing gates finiteness on operand
   // that fallback is deleted (an operator with no handler now keeps its
   // declared result type verbatim), and these pins now exercise the opt-in
   // handler. The observable types are unchanged.
-  test('non-finite operand is NOT narrowed to non_finite_number', () => {
+  test('non-finite operand is NOT narrowed to signed_infinity', () => {
     // finite-in → finite-out is an unsound closure assumption at ±∞ even for
     // an operator whose kind closure holds on finite values; with a
     // non-finite operand the result finiteness must stay `number` (was
-    // `non_finite_number`).
+    // `signed_infinity`).
     expect(ce.box(['PreIncrement', 'PositiveInfinity']).type.toString()).toEqual(
       'number'
     );

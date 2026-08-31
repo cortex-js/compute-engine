@@ -67,21 +67,21 @@ const LITERAL_CASES: [string, number, string][] = [
   // |x| < 1, ±∞ at ±1
   ['Artanh', 0, 'real'],
   ['Artanh', -0.5, 'real'],
-  ['Artanh', 1, 'non_finite_number'],
-  ['Artanh', -1, 'non_finite_number'],
+  ['Artanh', 1, 'signed_infinity'],
+  ['Artanh', -1, 'signed_infinity'],
   ['Artanh', 2, 'complex'],
   ['Artanh', -2, 'complex'],
   // |x| > 1, ±∞ at ±1
   ['Arcoth', 2, 'real'],
   ['Arcoth', -2, 'real'],
-  ['Arcoth', 1, 'non_finite_number'],
-  ['Arcoth', -1, 'non_finite_number'],
+  ['Arcoth', 1, 'signed_infinity'],
+  ['Arcoth', -1, 'signed_infinity'],
   ['Arcoth', 0, 'complex'],
   ['Arcoth', 0.5, 'complex'],
   // 0 < x ≤ 1, +∞ at 0
   ['Arsech', 0.5, 'real'],
   ['Arsech', 1, 'real'],
-  ['Arsech', 0, 'non_finite_number'],
+  ['Arsech', 0, 'signed_infinity'],
   ['Arsech', 2, 'complex'],
   ['Arsech', -2, 'complex'],
   // |x| ≥ 1, NaN at 0
@@ -104,7 +104,7 @@ const LITERAL_CASES: [string, number, string][] = [
  * `[head, bare real symbol, `w ≥ 2`, `0 < v < 1`]`.
  *
  * The bare-symbol column is the JOIN: `complex` for a head with no real
- * pole, `complex | non_finite_number` for one whose pole value is `±∞`, and
+ * pole, `complex | signed_infinity` for one whose pole value is `±∞`, and
  * `number` when the pole value may be NaN. The signed pair is spelled out in
  * that union because the bare name `complex` denotes the FINITE complex
  * numbers and cannot absorb the pole on its own.
@@ -113,15 +113,15 @@ const LITERAL_CASES: [string, number, string][] = [
  * value the head actually produces.)
  *
  * The claim is printed with its disjuncts in the lattice's own order, which
- * is why the expected string reads `complex | non_finite_number`.
+ * is why the expected string reads `complex | signed_infinity`.
  */
 const SYMBOLIC_CASES: [string, string, string, string][] = [
   ['Arcsin', 'complex', 'complex', 'real'],
   ['Arccos', 'complex', 'complex', 'real'],
   ['Arcosh', 'complex', 'real', 'complex'],
-  ['Artanh', 'complex | non_finite_number', 'complex', 'real'],
-  ['Arcoth', 'complex | non_finite_number', 'real', 'complex'],
-  ['Arsech', 'complex | non_finite_number', 'complex', 'real'],
+  ['Artanh', 'complex | signed_infinity', 'complex', 'real'],
+  ['Arcoth', 'complex | signed_infinity', 'real', 'complex'],
+  ['Arsech', 'complex | signed_infinity', 'complex', 'real'],
   ['Arcsec', 'number', 'real', 'complex'],
   ['Arccsc', 'number', 'real', 'complex'],
 ];
@@ -147,11 +147,11 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
     // …and why a pole-carrying head cannot claim `complex` alone: the bare
     // name denotes the FINITE complex numbers, so the signed infinities are
     // NOT below it and have to be named in the union.
-    expect(ce.type('non_finite_number').matches('complex')).toBe(false);
+    expect(ce.type('signed_infinity').matches('complex')).toBe(false);
     expect(
-      ce.type('non_finite_number').matches('complex | non_finite_number')
+      ce.type('signed_infinity').matches('complex | signed_infinity')
     ).toBe(true);
-    expect(ce.type('complex').matches('complex | non_finite_number')).toBe(
+    expect(ce.type('complex').matches('complex | signed_infinity')).toBe(
       true
     );
   });
@@ -175,7 +175,7 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
           expect([witness, finite && real]).toEqual([witness, true]);
         else if (expected === 'complex')
           expect([witness, finite]).toEqual([witness, true]);
-        else if (expected === 'non_finite_number')
+        else if (expected === 'signed_infinity')
           expect([witness, real && !finite && !Number.isNaN(v.re)]).toEqual([
             witness,
             true,

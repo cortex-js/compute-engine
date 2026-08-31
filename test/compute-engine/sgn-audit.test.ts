@@ -105,7 +105,7 @@ describe('SGN HANDLER AUDIT', () => {
       'real<0..>'
     );
     expect(ce.box(['Abs', 'PositiveInfinity']).type.toString()).toBe(
-      'non_finite_number'
+      'signed_infinity'
     );
   });
 

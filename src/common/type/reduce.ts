@@ -708,15 +708,11 @@ function meetNumericRanges(a: NumericType, b: NumericType): Type {
   const finite = lower !== -Infinity || upper !== Infinity;
   const ranges: Type[] = [];
   for (const base of bases) {
-    // No value of `non_finite_number` (±∞), `infinity` (±∞ and the unsigned
-    // `~oo`) or `nan` is finite, so none of them can inhabit a finite
-    // interval. Without this, the meet builds a range such as `infinity<0..10>`
-    // that has no members but presents itself as a bounded real.
-    if (
-      finite &&
-      (base === 'non_finite_number' || base === 'infinity' || base === 'nan')
-    )
-      continue;
+    // No value of `infinity` (±∞ and the unsigned `~oo`) or `nan` is
+    // finite, so neither can inhabit a finite interval. Without this, the
+    // meet builds a range such as `infinity<0..10>` that has no members but
+    // presents itself as a bounded real.
+    if (finite && (base === 'infinity' || base === 'nan')) continue;
     // `bases` are the meet of two numeric primitives, hence numeric.
     ranges.push(
       makeNumericRangeType(

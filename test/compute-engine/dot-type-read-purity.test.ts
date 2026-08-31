@@ -103,7 +103,7 @@ describe('the inner-product type table', () => {
     });
 
   test('an infinite component', () => {
-    // `non_finite_number`, not `number`: exactly one term is provably ±∞ and
+    // `signed_infinity`, not `number`: exactly one term is provably ±∞ and
     // every term is real, so the sum is provably ±∞ too. Two infinite terms
     // could cancel to NaN, and a non-real companion could give `~oo`; both of
     // those report `number` instead.
@@ -112,7 +112,7 @@ describe('the inner-product type table', () => {
       ['Tuple', 'PositiveInfinity', 2],
       ['Tuple', 3, 4],
     ]);
-    expect(dot.type.toString()).toBe('non_finite_number');
+    expect(dot.type.toString()).toBe('signed_infinity');
   });
 
   test('a NaN component', () => {

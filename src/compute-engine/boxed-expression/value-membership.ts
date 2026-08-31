@@ -281,7 +281,7 @@ function accepts(
     // infinity `~oo`. Decide those on the value.
     //
     // The signed infinities need no arm here: they synthesize
-    // `non_finite_number`, which IS a primitive subtype of `infinity`, so the
+    // `+oo | -oo`, which IS a primitive subtype of `infinity`, so the
     // subtype fallback below already admits them.
     if (t === 'nan') return isNumber(v) && v.isNaN === true;
     if (t === 'infinity' && isComplexInfinityLiteral(v)) return true;

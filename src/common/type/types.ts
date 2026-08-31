@@ -119,12 +119,12 @@ export type PrimitiveType =
  * and no value is two of those — `number = complex ⊔ infinity ⊔ nan` as a
  * partition of the values. Every bare name below `complex` contains only
  * finite values. A bare `real` result type is therefore a promise of
- * finiteness, and the extended real line is written out as
- * `real | non_finite_number` — `non_finite_number` being the SIGNED pair
- * `+∞`/`−∞`, so the union excludes the unsigned `~∞` that `infinity` would
- * bring in. That spelling is shared as the frozen `EXTENDED_REAL_TYPE`
- * constant in `common/type/primitive.ts`; use it rather than rebuilding the
- * union.
+ * finiteness, and the extended real line is spelled
+ * `real | signed_infinity` — `signed_infinity` being the named union of
+ * the two signed-infinity value types (equivalently `real | +oo | -oo`),
+ * so it excludes the unsigned `~∞` that `infinity` would bring in. That
+ * spelling is shared as the frozen `EXTENDED_REAL_TYPE` constant in
+ * `common/type/primitive.ts`; use it rather than rebuilding the union.
  *
  * The partition is a statement about values, NOT one the SUBTYPE RELATION
  * closes over. `isSubtype('complex | infinity | nan', 'number')` is true, but
@@ -148,11 +148,16 @@ export type PrimitiveType =
  *   `+∞` and `−∞`, the unsigned complex infinity `~∞`, and mixed directed
  *   values such as `∞ + i`. Disjoint from `complex`: an infinity is not a
  *   finite number.
- * - `non_finite_number`: exactly the SIGNED pair `+∞`, `−∞`. It sits under
- *   `infinity` alone and is the atom the sign-aware folds (`1/±∞ = 0`)
- *   consume; `infinity` itself admits the unsigned `~∞`, which has no sign.
  * - `nan`: the not-a-number marker. Its only supertype is `number`, so it is
  *   disjoint from `complex`, `infinity` and every type below them.
+ *
+ * The SIGNED pair `+∞`/`−∞` has no one-word name: spell it `+oo | -oo`
+ * (the union of the two value types) where the sign-aware guarantee
+ * matters — the `1/±∞ = 0` folds, the sign-reading gates — and `infinity`
+ * where any infinite value is acceptable. The former one-word name
+ * `non_finite_number` was retired 2026-08-31 (ruling L5 executed): the
+ * name was misleading — `~∞` and `∞ + i` are non-finite numbers, yet
+ * neither was a member.
  *
  * RETIRED SPELLINGS. The five names that prefixed a tier with `finite_` are
  * no longer members of this union. Each denoted exactly the same set of values
@@ -171,10 +176,10 @@ export type NumericPrimitiveType =
   | 'real'
   | 'rational'
   | 'integer'
-  | 'non_finite_number'
   // A number of infinite magnitude, of any direction: `+∞`, `−∞`, the
-  // unsigned `~∞` and mixed values such as `∞ + i`. Supertype of
-  // `non_finite_number` (the signed pair), and disjoint from `complex`.
+  // unsigned `~∞` and mixed values such as `∞ + i`. Disjoint from
+  // `complex`. The signed pair alone is spelled `+oo | -oo` (its
+  // one-word name `non_finite_number` is retired — see above).
   | 'infinity'
   // The not-a-number marker. Disjoint from every numeric type but `number`.
   | 'nan';

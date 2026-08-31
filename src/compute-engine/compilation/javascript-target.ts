@@ -4636,7 +4636,7 @@ function resultIsComplexValued(
     const t = engine.function(head, [...args], { form: 'structural' }).type;
     // The infinite branches are dropped first, exactly as the mirrored
     // branch of `isComplexValued` does: a head whose value can blow up
-    // claims a union such as `complex | non_finite_number`, and only its
+    // claims a union such as `complex | +oo | -oo`, and only its
     // finite part decides the lane.
     return isNonRealNumber(finitePartOfType(t.type));
   } catch {
@@ -8056,7 +8056,7 @@ export function isNonFiniteBound(expr: Expression): boolean {
   if (isNumber(expr) && !Number.isFinite(expr.re)) return true;
   // Both non-finite tiers, not just the signed pair: `infinity` also holds
   // the unsigned `~oo`, and NaN types `nan`. A bound of either kind has no
-  // terminating loop, and neither is a subtype of `non_finite_number`.
+  // terminating loop, and neither is a subtype of `+oo | -oo`.
   return expr.type.matches('infinity') || expr.type.matches('nan');
 }
 

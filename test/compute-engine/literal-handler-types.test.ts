@@ -109,8 +109,8 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     // spelling (a value node holds one JavaScript number), so it still carries
     // nothing beyond its public type.
     expect(lit(NaN)).toBe('NaN');
-    expect(lit(Infinity)).toBe('Infinity');
-    expect(lit(-Infinity)).toBe('-Infinity');
+    expect(lit(Infinity)).toBe('+oo');
+    expect(lit(-Infinity)).toBe('-oo');
     expect(lit(ce.ComplexInfinity)).toBe('~oo');
     expect(lit(ce.parse('2+3i').evaluate())).toBeUndefined();
   });
@@ -241,14 +241,19 @@ describe('widenValueTypes — the §4.3 walker', () => {
     expect(widenStr('"abc"')).toBe('"abc"');
   });
 
-  it('rewrites NaN and ±∞ value nodes', () => {
+  it('rewrites the NaN value node and widens a signed infinity to the pair', () => {
     // The tiers the non-finite singletons widen to since the numeric tree
-    // became finite-by-default: all three infinities share `infinity`, and NaN
-    // has `nan`. Both used to widen to the top type `number`.
+    // became finite-by-default: NaN has `nan`, and `~oo` has `infinity`.
+    // Both used to widen to the top type `number`. A SIGNED infinity
+    // widens to the union `signed_infinity` — the only type above the
+    // singletons that still separates the signed pair from `~oo` — so the
+    // sign-aware claim survives without pinning the contract to the one
+    // observed sign.
     const nan: Type = { kind: 'value', value: NaN };
     const inf: Type = { kind: 'value', value: Infinity };
     expect(widenValueTypes(nan)).toBe('nan');
-    expect(widenValueTypes(inf)).toBe('infinity');
+    expect(widenValueTypes(inf)).toEqual(parseType('signed_infinity'));
+    expect(widenValueTypes(parseType('~oo'))).toBe('infinity');
   });
 
   it('returns an unchanged type by identity (no rebuild, no cycle risk)', () => {
@@ -257,9 +262,11 @@ describe('widenValueTypes — the §4.3 walker', () => {
     // A recursive type reaches its own body only through a `reference`
     // node, which is a leaf here — identity again.
     const e = new ComputeEngine();
-    e.declareType('LinkedList', 'tuple<value: integer, next: LinkedList>', {
-      nominal: true,
-    });
+    // Nominal is the default (`alias: true` is the opt-out), and the
+    // options object accepts no `nominal` member — the previous
+    // `{ nominal: true }` argument was an invalid option that silently
+    // did nothing (ts-jest does not typecheck, so nothing caught it).
+    e.declareType('LinkedList', 'tuple<value: integer, next: LinkedList>');
     const rec = e.type('LinkedList').type;
     expect(widenValueTypes(rec)).toBe(rec);
   });

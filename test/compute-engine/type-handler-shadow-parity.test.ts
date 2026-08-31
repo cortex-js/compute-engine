@@ -62,7 +62,7 @@ describe('shadow parity over the converted handlers', () => {
     ce.declare('hnan', 'number');
     ce.assign('hnan', ce.NaN);
     // Non-finiteness carried by the TYPE, with no value at all.
-    ce.declare('nf', 'non_finite_number');
+    ce.declare('nf', 'signed_infinity');
 
     const corpus: unknown[] = [
       // Coalesce: literals, symbols, exact rationals, missing-typed mixes

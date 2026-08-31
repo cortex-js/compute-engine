@@ -1376,7 +1376,7 @@ export function overlapsForDeferredValidation(
  * is returned verbatim. Widening it would only lose information — the union
  * IS the tightest name for the set — and the lattice often has no tighter
  * supertype than `number`: `LogIntegral`'s honest claim
- * `non_finite_number | real` would otherwise reach the broadcast wrapper as
+ * `+oo | -oo | real` would otherwise reach the broadcast wrapper as
  * `list<number>`.
  */
 export function broadcastElementType(type: Readonly<Type>): Type {
@@ -1441,12 +1441,12 @@ export function isNonRealNumber(t: Readonly<Type>): boolean {
  * decides nothing there; the finite part of the claim does. This matters
  * because a head whose value can blow up must spell its result as a union
  * now that the bare numeric names are finite — `Artanh(r)` claims
- * `complex | non_finite_number` — and `isNonRealNumber` of that whole union
+ * `complex | +oo | -oo` — and `isNonRealNumber` of that whole union
  * is `false`, which would report a real lane for a head whose emitter
  * produces `{re, im}`.
  *
  * Returns `t` unchanged when it is not a union, and when dropping the
- * branches would leave nothing (a claim of `non_finite_number` alone has no
+ * branches would leave nothing (a claim of `+oo | -oo` alone has no
  * finite part to read).
  */
 export function finitePartOfType(t: Readonly<Type>): Type {
@@ -1576,8 +1576,9 @@ function containsArm(
  *   `nan` are absent because a NaN value has no sign, `infinity` is absent
  *   because it admits the unsigned `~oo`, and `complex` and `imaginary` are
  *   absent because a value off the real axis has no sign either. The SIGNED
- *   infinities are signed reals here (`+∞` is positive), so an unbounded side
- *   or a `non_finite_number` base does not block a claim.
+ *   infinities are signed reals here (`+∞` is positive), so an unbounded
+ *   side does not block a claim; a signed-infinity VALUE type carries its
+ *   sign as a point.
  * - An intersection may combine facts from its members (the intersection is
  *   a subset of each member, so any member's sign constraint holds); members
  *   that carry no sign information are ignored.
@@ -1587,12 +1588,7 @@ function containsArm(
  * The result vocabulary is the subset of the engine's `Sign` type that a
  * type can express (a type never proves `unsigned`).
  */
-const REAL_NAN_FREE_PRIMITIVES = new Set([
-  'integer',
-  'rational',
-  'real',
-  'non_finite_number',
-]);
+const REAL_NAN_FREE_PRIMITIVES = new Set(['integer', 'rational', 'real']);
 
 export function signOfType(
   t: Readonly<Type> | undefined,

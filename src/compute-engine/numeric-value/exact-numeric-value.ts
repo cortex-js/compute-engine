@@ -205,12 +205,13 @@ export class ExactNumericValue extends NumericValue {
 
   get type(): NumericPrimitiveType {
     if (this.isNaN) return 'nan';
-    // A signed real infinity keeps the narrow `non_finite_number` rather than
-    // the wider `infinity`: that name carries the guarantee "infinite AND real
-    // AND signed" which the sign-aware folds (`1/±∞ = 0`) consume, while
-    // `infinity` also admits the unsigned `~oo`.
-    if (this.isPositiveInfinity || this.isNegativeInfinity)
-      return 'non_finite_number';
+    // A signed real infinity claims `infinity` — since the retirement of
+    // the one-word signed-pair name (ruling L5, 2026-08-31) there is no
+    // narrower PRIMITIVE to claim. A consumer that needs the "infinite AND
+    // real AND signed" guarantee reads the VALUE's sign
+    // (`isPositiveInfinity`/`isNegativeInfinity`), or tests against the
+    // union `+oo | -oo` at the type level.
+    if (this.isPositiveInfinity || this.isNegativeInfinity) return 'infinity';
     // a/b√c -> real number (c can't be a perfect square)
     if (this.im !== 0) return isZero(this.rational) ? 'imaginary' : 'complex';
     if (this.radical !== 1) {

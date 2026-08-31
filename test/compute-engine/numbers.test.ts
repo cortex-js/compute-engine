@@ -122,7 +122,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('PositiveInfinity is a non-finite-number', () => {
     expect(checkProps(ce.expr('PositiveInfinity'))).toMatchInlineSnapshot(`
       number literal: true
-      type: Infinity
+      type: +oo
       real: true
       rational: false
       integer: false
@@ -144,7 +144,7 @@ describe('PROPERTIES OF NUMBERS', () => {
   test('NegativeInfinity is a non-finite-number', () => {
     expect(checkProps(ce.expr('NegativeInfinity'))).toMatchInlineSnapshot(`
       number literal: true
-      type: -Infinity
+      type: -oo
       real: true
       rational: false
       integer: false

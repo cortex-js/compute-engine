@@ -325,6 +325,38 @@ files, 174 test sites in 26 files, 13 doc files, and the three
   NO site widens to `infinity` in this pass — a widening admits `~oo`
   and is a behavior change, so any such upgrade is a separate, measured
   follow-up per site.
+
+  **Execution findings (2026-08-31), each load-bearing:**
+  - **`widenValueTypes` must PRESERVE the ±∞ value types.** The O9 seam
+    widens every handler result to strip over-specific literal-type
+    contracts, and it sent ±∞ value nodes to `infinity` — which
+    destroyed every signed-pair claim the retirement had just respelled
+    (`Ln(0)` typed `infinity`, and joins degraded `1 + Ln(0)` to bare
+    `number`, breaking `isExtendedReal` downstream). Post-retirement the
+    `+oo`/`-oo` value types ARE the canonical spelling of the
+    extended-real claims, so the widener now keeps them (NaN still
+    widens to `nan`).
+  - The kernel windows keep the coarser tier: `NumericValue.type`,
+    `stripNumericRanges` and the broadcast-cell window answer
+    `infinity` for a signed infinity (no primitive names the pair), and
+    the sign is read off the VALUE where it matters. A consumer that
+    classifies both must accept `infinity` and `+oo | -oo` alike
+    (recorded at the literal-type window in `boxed-number.ts`).
+  - `BoxedType.non_finite_number` static RENAMED to
+    `BoxedType.signed_infinity` (breaking, the Phase 2 `finite_*`
+    statics precedent).
+  - The signed-infinity value types now PRINT as `+oo`/`-oo` (they
+    printed `Infinity`/`-Infinity`).
+  - **`signed_infinity` is the intentional one-word spelling of the
+    pair** (ruled by Arno 2026-08-31, after questioning whether widening
+    to an anonymous union read as arbitrary): the parser accepts it as a
+    permanent named spelling of `+oo | -oo`, and the serializer prints a
+    union containing both members under the name — an extended-real
+    union displays `real | signed_infinity`. The retired
+    `non_finite_number` alias normalizes to the same union. The
+    `widen(+oo)` chain reads `+oo → signed_infinity → infinity →
+    number`, each rung forgetting exactly one fact (which sign;
+    directedness; everything).
 - **R3 — test sweep + full-suite blast radius** (type-string assertions
   update mechanically; snapshot delta measured and reported).
 - **R4 — docs sweep, CHANGELOG breaking entry, L5 closure note in the

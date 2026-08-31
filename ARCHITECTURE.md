@@ -281,9 +281,11 @@ top type partitions into three groups of values that share no member:
 below it — `real`, `rational`, `integer`, `imaginary`), the infinite values
 (`infinity`: the signed `+∞`/`-∞`, the unsigned `~oo`, and mixed values such
 as `∞ + i`), and the not-a-number marker (`nan`). Bare `real`, `rational`,
-`integer` and `complex` contain only finite values. `non_finite_number` is
-**exactly `{+∞, −∞}`** — the signed pair, now a subtype of `infinity` and no
-longer below `real` or `complex`; it is kept, because the sign-aware gates
+`integer` and `complex` contain only finite values. The signed pair
+**exactly `{+∞, −∞}`** is spelled `signed_infinity` — the union of the two value
+types; its former one-word name `non_finite_number` was retired 2026-08-31
+(the name was misleading: `~∞` and `∞ + i` are non-finite numbers, yet
+neither was a member). The sign-aware gates
 and the `1/±∞ = 0` folds consume its signedness, which `infinity` (which
 admits the unsigned `~oo`) does not guarantee. The five `finite_*` names it
 used to sit beside are gone: `finite_integer`, `finite_rational`,
@@ -293,13 +295,14 @@ still parse for one release cycle as deprecated aliases — each normalizes to
 its bare name, and `finite_number` to `complex` — and are never emitted.
 Every operator `type` handler follows these rules:
 
-1. **Claim `non_finite_number` only when the value is _provably_ `±∞`.**
+1. **Claim the signed pair `signed_infinity` only when the value is _provably_
+   `±∞`.**
    Examples: `Ln(0) = −∞`; `Round/Ceil/Floor/Truncate` of a provably real ±∞;
    `±∞ · (finite reals all provably non-zero)`; `EllipticK(1) = +∞`;
    `(+∞)^p` for finite real `p > 0`; `±∞ + (real terms)`.
 2. **A result that may blow up is claimed as a union with the non-finite
    branch spelled out.** A pole-capable operator whose argument may land on a
-   pole claims `complex | non_finite_number` (the unknown-sign `Ln`, the
+   pole claims `complex | +oo | -oo` (the unknown-sign `Ln`, the
    bounded inverse functions at their poles); a result that may be `~oo` or
    NaN — `x · ∞` with a possibly-zero `x`, `∞/∞`, `k/0` — claims `number`,
    the only type that admits every numeric value. A claim of bare `complex`
@@ -308,7 +311,7 @@ Every operator `type` handler follows these rules:
    declared `real` (or `integer`, `rational`, `complex`) is finite by its
    type; `Sin(x)` with `x: real` claims `real` because the input provably is
    one. Only an operand whose type admits an infinity (`number`, `infinity`,
-   `non_finite_number`, an extended union) triggers the non-finite analysis
+   the `±oo` value types, an extended union) triggers the non-finite analysis
    — and once an operand is provably non-finite, a claim that depends on
    another operand being non-zero (e.g. `x · ∞ = ±∞`, where `x = 0` gives
    NaN) must _prove_ it (via `sgn`), never assume it. An undeclared symbol
@@ -324,7 +327,7 @@ with an infinite real or imaginary part and a finite other part (`∞ + i`)
 types `infinity`. Every spelling of the same value — the `ComplexInfinity`
 constant, `1/0`, `Divide(~oo, 5)`, `Add(1, ~oo)`, `(-1)!`, `Gamma(-2)`,
 `Zeta(1)` — types identically. The extended real line is spelled
-`real | non_finite_number` (the `EXTENDED_REAL_TYPE` constant in
+`real | +oo | -oo` (the `EXTENDED_REAL_TYPE` constant in
 `src/common/type/primitive.ts`), and the value predicate for it is
 `isExtendedReal` — the former `isReal`, renamed when bare `real` became a
 finiteness promise; NaN answers `false` to it.
@@ -339,7 +342,8 @@ plain JS number can distinguish `~oo` from a true `+oo`; another is that float
 arithmetic can change a pole's non-finite class where the interpreter's
 projective arithmetic does not (`Infinity - Infinity` is `NaN`, while the
 interpreter's `~oo - ~oo` stays `~oo`). A multi-clause parameter guard for the
-`infinity`, `nan`, or `non_finite_number` type therefore cannot be faithful,
+`infinity` or `nan` type, or for the signed pair `signed_infinity`, therefore
+cannot be faithful,
 and such a clause set declines to compile whole-function, running interpreted
 instead; the same holds for non-finite VALUE-literal clauses (`oo`, `-oo`,
 `NaN`). The measurements behind each decline are recorded in `ROADMAP.md`.

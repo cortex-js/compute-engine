@@ -53,9 +53,9 @@ describe('PARSING OF NUMBER', () => {
     const expr = parse('1e1000000000000000000000');
     // The exponent overflows to `+∞`, and a literal's public type is the
     // singleton naming its value (ruling O9); the tier below it is the
-    // signed-pair atom.
-    expect(expr.type.toString()).toBe('Infinity');
-    expect(expr.type.matches('non_finite_number')).toBe(true);
+    // signed pair.
+    expect(expr.type.toString()).toBe('+oo');
+    expect(expr.type.matches('signed_infinity')).toBe(true);
     expect(() => expr.json).not.toThrow();
     expect(expr.re).toBe(Infinity);
     // The decimal-mantissa variant never reaches bigint() and crashed at

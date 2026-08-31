@@ -43,9 +43,9 @@ The projection does NOT make non-finite clause guards compilable. Float
 arithmetic can degrade one non-finite class into another before a guard
 runs — compiled `1/w - 1/w` at `w = 0` computes `Infinity - Infinity =
 NaN` while the interpreter's operand stays `~oo` — so a parameter guard
-typed `infinity`, `nan`, or `non_finite_number`, and a clause guarded on
-a non-finite VALUE literal (`oo`, `-oo`, `NaN`), each decline the whole
-function. This was measured, not assumed: re-admitting the `infinity`
+typed `infinity` or `nan`, and a clause guarded on a non-finite VALUE
+literal or their unions (`oo`, `-oo`, `NaN`, the signed pair
+`+oo | -oo`), each decline the whole function. This was measured, not assumed: re-admitting the `infinity`
 and `nan` guards under the boundary projection made each diverge from
 the interpreter through the degradation route. Restoring compilability
 here requires a tagged pole representation (a full pole lane), not a

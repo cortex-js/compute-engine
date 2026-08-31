@@ -123,7 +123,7 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
     // The fold answers the singleton RANGE (a handler claim), not the
     // literal value type `0` — a computed result is never literal cargo.
     expect(e.box(['Multiply', 0, 'z']).type.toString()).toBe('real<0..0>');
-    e.declare('w', 'real | non_finite_number');
+    e.declare('w', 'real | signed_infinity');
     expect(e.box(['Multiply', 0, 'w']).type.toString()).not.toBe('0');
   });
 

@@ -2147,7 +2147,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const inf = e.box(['Repeat', 7, 'PositiveInfinity']);
     expect(inf.type.toString()).toBe('error');
     expect(inf.evaluate().toString()).toBe(
-      'Repeat(7, Error(ErrorCode("incompatible-type", "integer", "Infinity"), +oo))'
+      'Repeat(7, Error(ErrorCode("incompatible-type", "integer", "+oo"), +oo))'
     );
     expect(() => compile(inf, { fallback: false })).toThrow(
       /Cannot compile invalid expression/

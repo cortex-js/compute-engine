@@ -226,10 +226,10 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
 describe('a POLE JOIN drives the GPU complex lane by its FINITE part', () => {
   // A head that is complex off its real domain AND blows up at a pole types as
   // a union of the two: `Artanh(x)` for a real `x` is
-  // `complex | non_finite_number` (complex for |x| > 1, ±∞ at x = ±1).
+  // `complex | signed_infinity` (complex for |x| > 1, ±∞ at x = ±1).
   //
   // The lane test must therefore ask about the FINITE part of that union.
-  // Asking about the whole union answers "not complex" — `non_finite_number`
+  // Asking about the whole union answers "not complex" — `signed_infinity`
   // is a real tier — and the emitter would take the SCALAR lane while the
   // parent, which consults `BaseCompiler.isComplexValued` (already reading the
   // finite part), takes the complex one. On a shader that is not a type error:
@@ -240,7 +240,7 @@ describe('a POLE JOIN drives the GPU complex lane by its FINITE part', () => {
   it('types the pole heads as a union of a complex and a non-finite branch', () => {
     for (const head of ['Artanh', 'Arcoth', 'Arsech'])
       expect(ce.box([head, 'xr']).type.toString()).toBe(
-        'complex | non_finite_number'
+        'complex | signed_infinity'
       );
   });
 

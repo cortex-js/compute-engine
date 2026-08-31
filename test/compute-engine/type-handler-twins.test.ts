@@ -63,7 +63,7 @@ beforeAll(() => {
   ce.declare('a', 'integer');
   ce.assign('a', 5);
   ce.declare('L', 'list<real>');
-  ce.declare('nf', 'non_finite_number');
+  ce.declare('nf', 'signed_infinity');
 
   battery = [
     ['0', ce.number(0)],
@@ -305,7 +305,7 @@ describe('absFunctionType', () => {
     // shape claimed `real<0..>`. The TYPE channel does separate them —
     // `~oo` is a subtype of `infinity` and NaN is not — so both shapes now
     // take an infinite arm ahead of the NaN exclusion and answer
-    // `non_finite_number`, which is what `|~oo| = +∞` deserves.
+    // `signed_infinity`, which is what `|~oo| = +∞` deserves.
     //
     // The `hnan=NaN` row (a symbol declared `number` and assigned NaN) is
     // deliberately an AGREEMENT: both shapes answer `number`. The expression
@@ -425,7 +425,7 @@ describe('elementaryFunctionType', () => {
   // `Sinh`/`Cosh`/`Tanh`/`Sech` take the non-finite arm on a REAL ±∞. Both
   // shapes now read realness from the TYPE. The expressions shape used to
   // test the value predicate (then spelled `isReal`), which a NaN literal
-  // answered `true` — so it claimed `non_finite_number` (resp. `real`)
+  // answered `true` — so it claimed `signed_infinity` (resp. `real`)
   // for a value that is NaN. That was corrected on the expressions
   // side rather than recorded as a divergence, because the twin's answer was
   // the sound one; the corrected NaN behavior is pinned in
@@ -501,9 +501,9 @@ describe('elementaryFunctionType', () => {
       abHead(head, ARCSEC_D));
 
   // The unknown-magnitude join of a head whose pole value is `±∞` is spelled
-  // `complex | non_finite_number`: `complex` denotes the FINITE complex
+  // `complex | signed_infinity`: `complex` denotes the FINITE complex
   // numbers, so it cannot absorb the pole on its own.
-  const POLE_JOIN = 'complex | non_finite_number';
+  const POLE_JOIN = 'complex | signed_infinity';
 
   test('Artanh — the exact-value fast path and the declared ranges', () =>
     abHead('Artanh', {

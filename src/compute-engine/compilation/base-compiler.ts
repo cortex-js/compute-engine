@@ -6171,7 +6171,7 @@ export class BaseCompiler {
    * bare `number` (deliberately — `Im(~oo)` is `NaN`), which would otherwise
    * fall through to the conservative operand recursion and report complex,
    * failing the real-only-helper gate closed on `Mod(Imaginary(z), 1)` (Tycho
-   * item 147). And a `Real(±∞)` can type `non_finite_number`, so the
+   * item 147). And a `Real(±∞)` can type `+oo | -oo`, so the
    * short-circuit must also precede the `isNonRealNumber` branch.
    *
    * Deliberately excludes `Conjugate` (complex → complex: emits `vec2` /
@@ -10153,7 +10153,7 @@ export class BaseCompiler {
     // A head that is real-shaped by definition answers `false` BEFORE any
     // type-based branch (Tycho item 147): `Imaginary` types bare `number`
     // (so the conservative operand recursion would report complex) and
-    // `Real(±∞)` can type `non_finite_number` (so the `isNonRealNumber`
+    // `Real(±∞)` can type `+oo | -oo` (so the `isNonRealNumber`
     // branch would too) — yet every target emits a real scalar for both.
     if (BaseCompiler.REAL_BY_DEFINITION_HEADS.has(expr.operator)) return false;
     // A head whose lowering is REAL-ONLY (`Floor`, `Mod`, `Max`, the
@@ -10270,7 +10270,7 @@ export class BaseCompiler {
     // Check the function's return type from its operator definition.
     //
     // The infinite and NaN branches are dropped first: a head whose value can
-    // blow up at a pole claims a union such as `complex | non_finite_number`
+    // blow up at a pole claims a union such as `complex | +oo | -oo`
     // (`Artanh`, `Arcoth`, `Arsech`, `Ln`, `Log`), and only its FINITE part
     // decides the lane. THREE SITES MUST STAY IN AGREEMENT, because they
     // answer the same question for the same node and a disagreement is a
@@ -10327,7 +10327,7 @@ export class BaseCompiler {
     // The REAL verdict reads the same finite part the non-real verdict above
     // does. Asking `t.matches('real')` of the whole union answers false for a
     // head that can blow up — `Abs` of a complex operand of unproven
-    // finiteness claims `real<0..> | non_finite_number` — and such a node then
+    // finiteness claims `real<0..> | +oo | -oo` — and such a node then
     // fell through to the conservative operand recursion below, which reported
     // it complex from its complex operand. The parent then read `.re`/`.im`
     // off the plain number `_SYS.cabs` returns, so `|z| − 4` compiled to
@@ -15090,7 +15090,7 @@ export class BaseCompiler {
    * primitives → `typeof`/`Number.isInteger`/`Number.isFinite` where JS can
    * express them. Every bare numeric name denotes a FINITE value, so its
    * guard rejects `Infinity` and `NaN` at run time exactly as the
-   * interpreter's signature check does. The `non_finite_number`, `infinity`
+   * interpreter's signature check does. The `+oo | -oo`, `infinity`
    * and `nan` primitives, and the NON-FINITE numeric value types `NaN`,
    * `oo` and `-oo`, have no faithful JS test and therefore decline; see the
    * comment on those cases below.
@@ -15121,7 +15121,7 @@ export class BaseCompiler {
         // carries both parts, so both are tested.
         case 'complex':
           return `(Number.isFinite(${a}) || (${jsComplexObjectTest(a)} && Number.isFinite(${a}.re) && Number.isFinite(${a}.im)))`;
-        // `non_finite_number` (the SIGNED pair `+∞ | −∞`), `infinity` and
+        // `+oo | -oo` (the SIGNED pair `+∞ | −∞`), `infinity` and
         // `nan` have NO faithful JS test, so a clause set that uses any of
         // the three declines as a whole and runs interpreted.
         //
@@ -15143,17 +15143,17 @@ export class BaseCompiler {
         // values.
         //
         // The interpreter meanwhile types `~oo` as `infinity`, which is
-        // disjoint there from both `nan` and `non_finite_number`. So none of
+        // disjoint there from both `nan` and `+oo | -oo`. So none of
         // the three tiers has a JS test that agrees with the interpreter:
         //
         //  - "a number that is neither finite nor NaN" — the only candidate
-        //    test for `non_finite_number` — accepts a `~oo` that compiled
+        //    test for `+oo | -oo` — accepts a `~oo` that compiled
         //    code produced, because that value is the JS `Infinity`, while
         //    the SIGNED pair excludes `~oo`. Measured on the clause set
-        //    `g(a: non_finite_number) = 1; g(x: number) = 0`: with such a
+        //    `g(a: +oo | -oo) = 1; g(x: number) = 0`: with such a
         //    guard in place, compiled `g(1 / w)` at `w = 0` answered 1 where
         //    the interpreter answers 0, since the interpreter's `1 / 0` is
-        //    `~oo`, which is not below `non_finite_number`.
+        //    `~oo`, which is not below `+oo | -oo`.
         //  - `Number.isNaN(a)` accepts the NaN that compiled arithmetic over
         //    a produced `~oo` yields. Measured on
         //    `g(a: nan) = 1; g(x: number) = 0`: compiled `g(1 / w - 1 / w)`
@@ -15183,7 +15183,6 @@ export class BaseCompiler {
         // for a construct the target cannot represent (D6 fail-closed, and the
         // §8 whole-function decline this return value expresses): the
         // interpreted fallback still dispatches such a clause set correctly.
-        case 'non_finite_number':
         case 'infinity':
         case 'nan':
           return undefined;
@@ -15203,7 +15202,7 @@ export class BaseCompiler {
         if (typeof v === 'number') {
           // A NON-FINITE numeric value type — `NaN`, `oo` or `-oo` — declines
           // the whole function, for the same representation collision that
-          // makes the `nan`, `infinity` and `non_finite_number` PRIMITIVES
+          // makes the `nan`, `infinity` and `+oo | -oo` PRIMITIVES
           // decline just above: compiled JavaScript lowers the interpreter's
           // unsigned pole `~oo` to the IEEE `Infinity`, so a guard over JS
           // numbers cannot tell a `~oo` from a signed infinity, nor from the

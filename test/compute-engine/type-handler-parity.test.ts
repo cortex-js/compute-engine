@@ -213,10 +213,14 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     // Both are defined on the REAL line only, where their values are a
     // finite set: H(x) ∈ {0, 1/2, 1} (H(0) = 1/2 is this engine's
     // convention) and Sign(x) ∈ {−1, 0, 1}, at ±∞ included. The claims
-    // carry the RANGE, so the type channel alone proves the bounds and the
-    // sign (`Sqrt(Heaviside(s))` stays `real` with no sgn-handler
-    // consultation). At NaN, at `~oo` and off the real line they have no
-    // value, so an undecided operand keeps the wide `number`.
+    // carry the RANGE, so the type channel alone proves the bounds and
+    // the sign (`Sqrt(Heaviside(s))` stays `real` with no sgn-handler
+    // consultation). Heaviside is the Phase F Contract B pilot: its claim
+    // is DERIVED from the declared domain signature
+    // `(real | signed_infinity) -> rational<0..1>` — a proven-NaN
+    // argument types exactly `nan` (the propagated value), a maybe-NaN
+    // one `rational<0..1> | nan`, and an off-carrier argument (`~oo`, a
+    // complex value) is a boxing error rather than staying inert.
     const NAN = { num: 'NaN' };
     ce.declare('s', 'real');
     ce.declare('u', 'number');
@@ -229,11 +233,13 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     expect(
       ce.box(['Heaviside', { num: '-Infinity' }] as any).type.toString()
     ).toBe('rational<0..1>');
-    expect(ce.box(['Heaviside', NAN] as any).type.toString()).toBe('number');
-    expect(
-      ce.box(['Heaviside', ['Complex', 1, 2]] as any).type.toString()
-    ).toBe('number');
-    expect(ce.box(['Heaviside', 'u'] as any).type.toString()).toBe('number');
+    expect(ce.box(['Heaviside', NAN] as any).type.toString()).toBe('nan');
+    expect(ce.box(['Heaviside', ['Complex', 1, 2]] as any).isValid).toBe(
+      false
+    );
+    expect(ce.box(['Heaviside', 'u'] as any).type.toString()).toBe(
+      '(rational<0..1>) | nan'
+    );
     expect(ce.box(['Sign', -2] as any).type.toString()).toBe(
       'integer<-1..1>'
     );
@@ -304,13 +310,13 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
   test('LogIntegral claims the extended reals only on the non-negative axis', () => {
     // li(x) = Ei(ln x) is real-valued only for x ≥ 0, and infinite there at
     // both ends of its domain (li(1) = −∞, li(+∞) = +∞) — so the EXTENDED
-    // real line, `non_finite_number | real`, is the narrowest sound claim.
+    // real line, `real | signed_infinity`, is the narrowest sound claim.
     // The bare name `real` denotes the finite reals and would exclude both
     // ends. For x < 0, ln x is complex and so is the value; and
     // `LogIntegral(NaN).N()` is `NaN`. The flat `real` result this definition
     // used to declare admitted neither, so the result was widened to `number`
     // and a domain-gated handler re-narrows on a proven non-negative real.
-    const XR = 'non_finite_number | real';
+    const XR = 'real | signed_infinity';
     const NAN = { num: 'NaN' };
     ce.declare('nn', 'real<0..>');
     ce.declare('s', 'real');
@@ -371,10 +377,10 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     // Deliberate soundness CORRECTION, not a migration side effect: the
     // Sinh/Cosh/Tanh/Sech arms tested the value predicate (then spelled
     // `isReal`), which a NaN literal answered `true` while also being
-    // non-finite — so they claimed `non_finite_number` (resp. `real`)
+    // non-finite — so they claimed `signed_infinity` (resp. `real`)
     // for calls that produce NaN, and neither type admits it. Realness is now
     // read from the TYPE, which NaN does not satisfy and a real ±∞ (typed
-    // `non_finite_number`) does. The predicate itself was later renamed to
+    // `signed_infinity`) does. The predicate itself was later renamed to
     // `isExtendedReal` and now excludes NaN as well, so both channels agree.
     const NAN = { num: 'NaN' };
     const INF = { num: '+Infinity' };
@@ -391,7 +397,7 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     // The real-±∞ claims the arms exist for are unchanged.
     for (const op of ['Sinh', 'Cosh'])
       expect(`${op}(oo)=${ce.box([op, INF] as any).type.toString()}`).toBe(
-        `${op}(oo)=non_finite_number`
+        `${op}(oo)=signed_infinity`
       );
     for (const op of ['Tanh', 'Sech'])
       expect(`${op}(oo)=${ce.box([op, INF] as any).type.toString()}`).toBe(
@@ -614,7 +620,7 @@ describe('bounded inverse trig heads read ranged types', () => {
     // A machine-representable literal still classifies exactly.
     expect(ce.box(['Arcsin', 0.5]).type.toString()).toBe('real');
     expect(ce.box(['Arcsin', 2]).type.toString()).toBe('complex');
-    expect(ce.box(['Artanh', 1]).type.toString()).toBe('non_finite_number');
+    expect(ce.box(['Artanh', 1]).type.toString()).toBe('signed_infinity');
   });
 
   it('an unknown-magnitude real keeps the sound join', () => {
@@ -622,7 +628,7 @@ describe('bounded inverse trig heads read ranged types', () => {
     // `Artanh`'s poles at ±1 are `±∞`, which the bare (finite) name `complex`
     // does not admit, so the join names the signed pair explicitly.
     expect(ce.box(['Artanh', 'r']).type.toString()).toBe(
-      'complex | non_finite_number'
+      'complex | signed_infinity'
     );
   });
 });

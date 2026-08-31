@@ -53,26 +53,26 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   // the not-a-number marker (`nan`), and no value is two of those. It shares
   // `NUMERIC_TYPES` by reference, so it lists every numeric name.
   number: NUMERIC_TYPES,
-  non_finite_number: [], //  PositiveInfinity, NegativeInfinity
-  // A number of infinite magnitude, of any direction. Its only primitive
-  // subtype is the SIGNED pair `non_finite_number` (`+∞`, `−∞`); the unsigned
-  // `~∞` is a value literal, placed under `infinity` by the value-literal rules
-  // in `isSubtype`, and a mixed directed value such as `∞ + i` is an anonymous
-  // further inhabitant with no name of its own. `infinity` is deliberately
-  // absent from the child list of every other entry, and `non_finite_number`
-  // now appears under `infinity` ALONE: the bare numeric names are finite, so
-  // `real ∩ infinity` is empty (`meetPrimitiveTypes('real', 'infinity')` =
-  // `[]`).
-  infinity: ['non_finite_number'],
+  // A number of infinite magnitude, of any direction: the signed `+∞`/`−∞`
+  // and the unsigned `~∞` are value literals placed under `infinity` by the
+  // value-literal rules in `isSubtype`, and a mixed directed value such as
+  // `∞ + i` is an anonymous further inhabitant with no name of its own. The
+  // signed pair has no one-word name — spell it `+oo | -oo` (its former
+  // name `non_finite_number` retired 2026-08-31, ruling L5 executed).
+  // `infinity` is deliberately absent from the child list of every other
+  // entry: the bare numeric names are finite, so `real ∩ infinity` is empty
+  // (`meetPrimitiveTypes('real', 'infinity')` = `[]`).
+  infinity: [],
   // The not-a-number marker: an atom with no subtypes, and — being listed by
   // no entry but `number` (through `NUMERIC_TYPES`) — disjoint from every other
   // numeric type.
   nan: [],
   // `complex` is the FINITE complex numbers, and so is the whole chain below
   // it: after the lattice flip every bare name under `number` admits only
-  // finite values. `real ⊂ complex` properly, and the infinities are gone from
-  // this subtree — `non_finite_number` is listed under `infinity` only, which
-  // is what makes `number` decompose disjointly. `matches('complex')` is
+  // finite values. `real ⊂ complex` properly, and the infinities are gone
+  // from this subtree — they live under `infinity` alone, as value
+  // literals — which is what makes `number` decompose disjointly.
+  // `matches('complex')` is
   // therefore the engine's canonical finiteness test (`BoxedSymbol.isFinite`,
   // `factsFromType`, the `Re`/`Im`/`Arg`/`Abs` type handlers all ask it).
   complex: ['imaginary', 'real', 'rational', 'integer'],
@@ -1071,23 +1071,23 @@ export function isSubtype(
 
     if (lhs.kind === 'value') {
       if (typeof lhs.value === 'boolean') return rhs === 'boolean';
-      // The unsigned complex infinity `~oo` claims `infinity`, not
-      // `non_finite_number`: that type names the SIGNED pair `+∞`/`−∞`, and
-      // `~∞` has no sign, so it is neither real nor complex. Tested before the
-      // numeric branches because the sentinel is an object, not a number.
+      // The unsigned complex infinity `~oo` claims `infinity`: it has no
+      // sign, so it is neither real nor complex. Tested before the numeric
+      // branches because the sentinel is an object, not a number.
       if (isComplexInfinityValue(lhs.value))
         return isPrimitiveSubtype('infinity', rhs as PrimitiveType);
       if (typeof lhs.value === 'number') {
         // Each numeric literal claims its PRINCIPAL type: NaN inhabits `nan`,
         // the marker type that names exactly that singleton; ±∞ inhabit
-        // `non_finite_number`, the SIGNED pair, which sits under `infinity`
-        // alone and not under `real`; a *finite* literal claims the bare tier
-        // it belongs to, which is already a finite type (`value 0 <: integer`).
+        // `infinity`, which sits apart from `real` (a signed-pair claim needs
+        // the union `+oo | -oo`, which the value-vs-union path covers by
+        // value equality); a *finite* literal claims the bare tier it belongs
+        // to, which is already a finite type (`value 0 <: integer`).
         // Matches the value-vs-bounded-numeric path.
         if (Number.isNaN(lhs.value))
           return isPrimitiveSubtype('nan', rhs as PrimitiveType);
         if (!Number.isFinite(lhs.value))
-          return isPrimitiveSubtype('non_finite_number', rhs as PrimitiveType);
+          return isPrimitiveSubtype('infinity', rhs as PrimitiveType);
         if (Number.isInteger(lhs.value))
           return isPrimitiveSubtype('integer', rhs as PrimitiveType);
         // A non-integer number literal (e.g. 3.5) is a real number, not just
@@ -1752,13 +1752,13 @@ export function isSubtype(
     if (typeof lhs.value !== 'number') return false;
     // NaN is unordered: it inhabits no bounded range. (Without the explicit
     // check, `NaN < lower` and `NaN > upper` are both false and the range
-    // would ADMIT it.) ±∞ claim their principal `non_finite_number`, which is
-    // below `infinity` alone, so the base-kind test below already refuses them
-    // for every range over a bare (finite) numeric name; the ordinary bound
-    // checks then reject them from any finite-bounded range as well.
+    // would ADMIT it.) ±∞ claim their principal `infinity`, which sits apart
+    // from every bare (finite) numeric name, so the base-kind test below
+    // already refuses them for every range over a bare name; the ordinary
+    // bound checks then reject them from any finite-bounded range as well.
     if (Number.isNaN(lhs.value)) return false;
     const baseKind: NumericPrimitiveType = !Number.isFinite(lhs.value)
-      ? 'non_finite_number'
+      ? 'infinity'
       : Number.isInteger(lhs.value)
         ? 'integer'
         : 'real';
@@ -1835,11 +1835,10 @@ export function isSubtype(
     if (isComplexInfinityValue(lhs.value)) return isSubtype('infinity', rhs);
     if (typeof lhs.value === 'number') {
       // Principal-type claims, matching the value-vs-primitive path above:
-      // NaN → `nan`, ±∞ → `non_finite_number`, finite literals → the bare tier
+      // NaN → `nan`, ±∞ → `infinity`, finite literals → the bare tier
       // they belong to, which is already finite (`value 0 <: integer`).
       if (Number.isNaN(lhs.value)) return isSubtype('nan', rhs);
-      if (!Number.isFinite(lhs.value))
-        return isSubtype('non_finite_number', rhs);
+      if (!Number.isFinite(lhs.value)) return isSubtype('infinity', rhs);
       if (Number.isInteger(lhs.value)) return isSubtype('integer', rhs);
       return isSubtype('real', rhs);
     }
@@ -2331,13 +2330,12 @@ export function widen(...types: Readonly<Type>[]): Readonly<Type> {
  * The numeric rungs are the bare tower, from `integer` up to `number`: one
  * rung per name now that the `finite_*` spellings are retired.
  *
- * `non_finite_number` and `infinity` lead, and `nan` sits immediately before
- * `number`. Their exact position does not interact with the finite rungs: the
- * three children of `number` are disjoint, so a pair drawn from two of them
- * joins at `number` whatever the order in between.
+ * `infinity` leads, and `nan` sits immediately before `number`. Their exact
+ * position does not interact with the finite rungs: the three children of
+ * `number` are disjoint, so a pair drawn from two of them joins at `number`
+ * whatever the order in between.
  */
 const SUPERTYPE_PROBE_ORDER: PrimitiveType[] = [
-  'non_finite_number',
   'infinity',
   'integer',
   'rational',
