@@ -203,19 +203,22 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   WITH a by-design ruling is an acceptable answer for heads outside the
   scalar-interval-domain contract. Repro: tycho
   `scripts/repros/2026-08-30-ce-interval-lowering-batch-probe.mts`.
-- **A constant `Limit` no longer folds — a convergent one pays `_SYS.limit`
-  per call.** The fold-determinism change (2026-08-30) declines every
-  `Limit`/`NLimit`/`Residue` fold, because a NON-settling limit reaches a
-  million-evaluation extrapolation and the two cases are not statically
-  separable. Measured A/B: `lim_{x→0} sin(x)/x + t` compiled to `_.t + 1`
-  before and compiles to `_.t + _SYS.limit((x) => Math.sin(x)/x, 0)` now —
-  a per-sample runtime limit evaluation inside any kernel that embeds a
-  constant limit. Possible recovery without reintroducing wall-clock
-  nondeterminism: the `Limit` LOWERING could first attempt a SYMBOLIC
-  evaluation (L'Hôpital / series — deterministic, no numeric fallback) and
-  emit the closed value when one exists, declining to `_SYS.limit` only
-  when the symbolic route answers nothing. Needs a ruling on whether the
-  symbolic attempt's own cost at compile time is acceptable.
+- **`symbolicLimit` claims a value at a jump discontinuity — one-sided
+  limits of `|x|/x` answer 0 on every route.** `lim_{x→0⁻} |x|/x`
+  evaluates to `0` (should be −1; the right-sided twin should be +1; the
+  two-sided limit should stay inert). Mechanism, verified in
+  `symbolic/limit.ts` (`limitAtFinite`): L'Hôpital rewrites the ratio to
+  `sgn(x)/1`, and step 1's direct substitution then answers `sgn(0) = 0` —
+  substitution is only sound for a subterm CONTINUOUS at the point, and
+  `Sign` jumps there. The repair wants one-sided substitution semantics
+  for the jump-discontinuous heads (`Sign`, `Heaviside`, `Floor`,
+  `Ceiling`, `Round`, `Mod` at their jump points): decline direct
+  substitution when the point sits on a jump of a subterm and resolve
+  per-direction instead. Pre-existing (predates the 2026-08-31
+  symbolic-first Limit lowering, which faithfully mirrors it into
+  compiled output — interpreter and compiled lanes AGREE on the wrong
+  value, so there is no lane divergence). Witness:
+  `ce.parse('\\lim_{x\\to 0^-}\\frac{|x|}{x}').evaluate()`.
 - **Destructured Block locals stay `unknown`-typed on the compilation
   routes.** The Tycho item 235 fix (2026-08-30) gives a `Block`-hoisted
   local its statically-readable `Declare` type and joins `Assign` evidence
