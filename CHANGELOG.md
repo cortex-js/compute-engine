@@ -170,7 +170,10 @@
   type (`list<real | nan>`), not the collection. The adjustment is
   invisible for result types that already include `NaN`, such as bare
   `number`, so existing types do not change unless an operator declares
-  the new contract fields.
+  the new contract fields. User-defined functions are not affected: a
+  lambda or a multi-clause function owns its own argument handling and
+  dispatch, so neither the runtime behavior nor the type of its
+  applications changes.
 
 - **A domain failure in a non-numeric operation returns `Missing`.** When
   a declared `definedWhen` condition is provably false and the result
@@ -196,6 +199,29 @@
   indexed-collection-typed operand folds at run time, and anything else
   fails closed (D6). `Random(source)` (an interval, range, or collection
   source) also fails closed rather than guess its support.
+
+- **Bounded generic user functions compile on the `javascript` target.** A
+  function declared with a bounded quantified signature — for example
+  `(x: T) -> T where T: number` — used to take the whole-function decline
+  (a polytype has no ground parameter type), and a call boundary that
+  slipped past it lost its coercion and broadcast wraps: `gd([1,2,3])` ran
+  to a wrong value. Each quantified parameter is now read at its declared
+  BOUND — the same reading the interpreter's broadcast gate performs — so
+  the function is emitted once at that ground signature and every call
+  site gets the wraps it earns. A variable with no ground bound
+  (`where T`) still declines, as does every other target.
+
+- **Tuple-returning user functions compile on the `javascript` target.** A
+  function whose result is a tuple — written directly, through a
+  broadcast whose result carries its arity in its type, or through a
+  transparent tuple ALIAS — now compiles and runs to the point value. A
+  NOMINAL type over a tuple still declines, with a diagnostic saying why.
+
+- **Componentwise functions broadcast over tuples in the interpreter.**
+  `Sin((1, 2))` evaluates to `(sin 1, sin 2)`, matching what the compiled
+  lane already did for point-valued expressions. Point-family readings are
+  unchanged: `Abs` of a tuple is still its norm (`Abs((-1, 2))` is `√5`),
+  not a componentwise map.
 
 - **Boolean value types.** A predicate whose operands' TYPES prove its
   verdict now carries that verdict as its type: `1 < 2` types `true`,
@@ -256,6 +282,40 @@
 
 ### Bug Fixes
 
+- **An element-wise `Which`/`If` selection no longer refuses a
+  complex-TYPED branch.** The JavaScript lowering declined any selection
+  arm whose static type was complex, on the premise that a compiled
+  complex value (a `{re, im}` object) had no cell convention inside a
+  selection array. The premise was wrong twice over: an arm such as
+  `Sqrt(x)` over an unknown-sign `x` TYPES complex while every runtime
+  value is real, and where a cell IS complex the convention already exists
+  — compiled arrays mix plain numbers with `{re, im}` objects wherever a
+  complex helper runs element-wise. The blanket refusal is removed;
+  selections with complex-typed and genuinely complex arms compile with
+  interpreter parity. (Tycho item 236.)
+
+- **A built-in operator used as an element callback keeps the complex
+  lane.** `Map(Abs, zs)` eta-expands a bare operator symbol into a shared
+  wrapper whose synthesized parameter carried no type, so the wrapper body
+  compiled in the REAL lane: `Math.abs` received a `{re, im}` element and
+  answered `NaN` behind `success: true`, where the interpreter answers the
+  modulus. The source's element complexness is now projected into the
+  callback parameter, so the callback compiles through the same complex
+  lane an inline `x ↦ Abs(x)` already reached.
+
+- **A compiled user-function call broadcasts an array argument at run
+  time.** A call site whose arguments were all STATICALLY scalar emitted a
+  bare direct call — but that static reading is usually an inference from
+  the callee's declared parameter, not a fact about the value: with
+  `f(x: number) = 2x + 1`, `run({y: [1, 2, 3]})` handed the bare
+  `_fn_f(_.y)` an array and computed `NaN` where the interpreter
+  broadcasts to `[3, 5, 7]`. Such calls now carry a runtime
+  `Array.isArray` guard that keeps the direct call on the scalar branch
+  and dispatches through the broadcast helper otherwise; a literal
+  argument cannot be an array at run time and pays neither. A function
+  literal with a complex-declared parameter spliced in value position is
+  also lifted correctly now.
+
 - **A constant limit compiles to its closed value again — symbolically.**
   The fold-determinism change made every `Limit` decline constant folding,
   so `lim_{x→0} sin(x)/x` inside a compiled kernel paid a runtime
@@ -300,8 +360,10 @@
   nesting level), so a cheap constant integral still folds to its value
   while an iterated integral deterministically compiles through its
   numeric emitter instead; a numeric `Limit` (whose non-settling fallback
-  is a million-evaluation extrapolation) never folds. A caller-armed
-  ambient deadline still cancels the whole compilation.
+  is a million-evaluation extrapolation) never folds — instead, the
+  `Limit` lowering resolves a constant limit symbolically (see the entry
+  above). A caller-armed ambient deadline still cancels the whole
+  compilation.
 
   The same audit closed four value-scaled library loops that ran
   unbounded on any route with no deadline armed: `NthPrime` and
