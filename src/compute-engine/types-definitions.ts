@@ -2411,7 +2411,11 @@ export interface BoxedOperatorDefinition
    * otherwise. Recomputed from the current signature — never cached.
    */
   resolvedNanBehaviorAt(
-    i: number
+    i: number,
+    /** The resolved overload arm to derive from, when the caller has one:
+     * per-arm carriers give per-arm derived policies. Explicit
+     * `nanBehavior` declarations remain operator-level. */
+    armSignature?: Type
   ): 'reject' | 'propagate' | 'handle' | 'inert';
 
   /**
@@ -2421,29 +2425,25 @@ export interface BoxedOperatorDefinition
    */
   readonly resolvedPartiality: 'total' | 'may-marker' | 'defined-when';
 
-  /** True when the declared result type is numeric (a subtype of
-   * `number`); `false` for an overload set. The partiality gate and the
-   * derived-application-type seam use it to pick the codomain marker. */
-  readonly signatureResultIsNumeric: boolean;
-
   /**
    * The Contract B adjustment to a derived application result type for
-   * these arguments (`docs/ERROR-MODEL.md` §4): `'is-nan'` when the
-   * declared `definedWhen` is provably false (the value IS the codomain
-   * marker), `'widen-nan'` when a `nan` arm belongs on the result (a
-   * `propagate` slot's argument may be `NaN`, or a DECLARED partiality is
-   * undischarged), `'none'` otherwise. Numeric codomains only; the
-   * omitted `may-marker` default contributes no arm (see the
-   * implementation note in `boxed-operator-definition.ts`).
+   * these arguments (`docs/ERROR-MODEL.md` §4): `'is-marker'` when the
+   * declared `definedWhen` is provably false — the value IS the codomain
+   * marker (§2 rule 4: `NaN` for a numeric codomain, `Missing` for a
+   * settled non-numeric one); `'widen-marker'` when a DECLARED partiality
+   * is undischarged (`definedWhen` undecided, or an explicit
+   * `may-marker`) — every cell of the result gains its marker arm;
+   * `'widen-nan'` when only the NaN evidence fires (a `propagate` slot's
+   * argument may be `NaN`) — numeric cells gain `| nan`; `'none'`
+   * otherwise. The omitted `may-marker` default contributes no arm (see
+   * the implementation note in `boxed-operator-definition.ts`).
    */
   contractBResultAdjustment(
     ops: ReadonlyArray<Expression>,
-    /** Overrides the numeric-codomain gate when the caller already proved
-     * the instantiated result numeric — how an overload set (whose raw
-     * signature is an intersection) participates through its resolved
-     * arm. */
-    resultIsNumeric?: boolean
-  ): 'none' | 'widen-nan' | 'is-nan';
+    /** The resolved overload arm, when the caller has one — the NaN
+     * evidence derives per-slot policies from its carriers. */
+    armSignature?: Type
+  ): 'none' | 'widen-nan' | 'widen-marker' | 'is-marker';
 
   /** True if operand position `i` may INVOKE a function-valued operand — the
    * per-position reader for the `invokes` flag of {@link OperatorDefinitionFlags}.

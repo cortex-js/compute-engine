@@ -120,11 +120,13 @@ import {
   isWildcardFunctionType,
   narrow,
   numericMissingSlot,
+  codomainMarkerType,
   staticCollectionDims,
   stripMissingFromType,
   typeContainsMissing,
   typeHasNanFreeNumericCell,
   widen,
+  widenCellsWithMarker,
   widenNumericCellsWithNan,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
@@ -3962,6 +3964,27 @@ export class BoxedFunction
         }
       }
 
+      // The resolved overload arm for the Contract B gates below, computed
+      // at most once per evaluation: both the NaN-policy gate and the
+      // partiality gate consult it, and re-deriving a cold-path overload
+      // resolution twice in one call is waste.
+      let cbArmCache: Type | undefined;
+      let cbArmComputed = false;
+      const contractBArm = (): Type | undefined => {
+        if (!cbArmComputed) {
+          cbArmComputed = true;
+          cbArmCache =
+            def instanceof _BoxedOperatorDefinition
+              ? resolvedArm(this, def.signature.type)
+              : undefined;
+        }
+        return cbArmCache;
+      };
+      // Explicitly `boolean`: the raw type-predicate result would narrow
+      // `def` to `never` past the negations in the gates below (the
+      // predicate names the whole class).
+      const cbIsUserFn: boolean = isUserFunctionDef(def);
+
       //
       // 4a-0/ Contract B NaN-policy gate (`docs/ERROR-MODEL.md` §4). Runs
       // BEFORE the missing-value gate so the stronger channel wins when both
@@ -3986,6 +4009,12 @@ export class BoxedFunction
         // structured out-of-range error for a NaN seed) — and the dispatch
         // conformance check excludes them for the same reason.
         def.lazy !== true &&
+        // User functions (lambdas, multi-clause definitions) are a
+        // sanctioned opt-out too: their own dispatch owns the NaN — a
+        // clause guarded on `NaN` or `infinity` must SEE the value, and a
+        // wide fallback clause must catch it — exactly why the dispatch
+        // conformance check (`genericRuntimeConformance`) excludes them.
+        !cbIsUserFn &&
         tail.some((x) => x.isNaN === true) &&
         // The collection stand-down is scoped to BROADCASTABLE operators:
         // only there does the element-wise broadcast re-enter this gate per
@@ -3997,10 +4026,15 @@ export class BoxedFunction
           tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
         )
       ) {
+        // Per-overload attachment (`docs/ERROR-MODEL.md` §4): the derived
+        // per-slot policy reads the RESOLVED arm's carriers when the call
+        // resolved an overload set; a plain signature answers `undefined`
+        // here at trivial cost.
+        const nanArm = contractBArm();
         let sawPropagate = false;
         for (let i = 0; i < tail.length; i++) {
           if (tail[i].isNaN !== true) continue;
-          const policy = def.resolvedNanBehaviorAt(i);
+          const policy = def.resolvedNanBehaviorAt(i, nanArm);
           if (policy === 'reject')
             return this.engine.error([
               'unexpected-argument',
@@ -4024,40 +4058,64 @@ export class BoxedFunction
       }
 
       //
-      // 4a-1/ Contract B partiality channels (`docs/ERROR-MODEL.md` §4; the
-      // minimal generic enforcement of Phase D of
-      // `docs/plans/2026-08-30-error-model-implementation.md`). `requires`
-      // is the contract precondition — provably false → the Error channel
-      // (§2 rule 6). `definedWhen` is the mathematical domain condition —
-      // provably false → the codomain marker (§2 rule 4): `NaN` for a
-      // numeric result type, while a non-numeric codomain is left to the
-      // handler, which owns its own marker vocabulary. Runs on the
-      // evaluated tail, after the NaN row (the §4 behavior table orders the
-      // NaN policy first), with the broadcast stand-down of the sibling
-      // gates. An `undefined` verdict (undecidable for these arguments)
-      // falls through to the handler. Lockstep twin: `evaluateAsync`
-      // step 3a-1.
+      // 4a-1/ Contract B partiality channels (`docs/ERROR-MODEL.md` §4;
+      // Phase D of `docs/plans/2026-08-30-error-model-implementation.md`).
+      // `requires` is the contract precondition — provably false → the
+      // Error channel (§2 rule 6). `definedWhen` is the mathematical
+      // domain condition — provably false → the codomain marker (§2 rule
+      // 4): `NaN` into a numeric codomain, `Missing` — the one primitive
+      // quiet datum — into a settled non-numeric or indeterminate one,
+      // read off the RESOLVED arm for an overload set. Runs on the
+      // evaluated tail, after the NaN row (the §4 behavior table orders
+      // the NaN policy first), with the broadcast stand-down of the
+      // sibling gates. An `undefined` verdict (undecidable for these
+      // arguments) falls through to the handler. Lockstep twin:
+      // `evaluateAsync` step 3a-1.
       //
       if (
         def instanceof _BoxedOperatorDefinition &&
-        // Lazy operators are a sanctioned opt-out — see the NaN gate above.
+        // Lazy operators and user functions are sanctioned opt-outs — see
+        // the NaN gate above.
         def.lazy !== true &&
+        !cbIsUserFn &&
         (def.requires !== undefined || def.definedWhen !== undefined) &&
         !(
           def.broadcastable === true &&
           tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
         )
       ) {
-        if (def.requires?.(tail) === false)
+        // The predicates carry a never-throw purity contract, but a
+        // violation must not crash evaluation: a throw reads as
+        // "undecidable", exactly the fall-through verdict.
+        let requiresVerdict: boolean | undefined;
+        try {
+          requiresVerdict = def.requires?.(tail);
+        } catch {
+          requiresVerdict = undefined;
+        }
+        if (requiresVerdict === false)
           return this.engine.error([
             'evaluation-error',
             `the arguments do not satisfy the precondition of ${this.operator}`,
           ]);
-        if (
-          def.definedWhen?.(tail) === false &&
-          def.signatureResultIsNumeric
-        )
-          return this.engine.NaN;
+        let definedVerdict: boolean | undefined;
+        try {
+          definedVerdict = def.definedWhen?.(tail);
+        } catch {
+          definedVerdict = undefined;
+        }
+        if (definedVerdict === false) {
+          // The codomain marker (`docs/ERROR-MODEL.md` §2 rule 4), read
+          // off the RESOLVED arm for an overload set: `NaN` into a
+          // numeric codomain; `Missing` — the one primitive quiet datum —
+          // for a settled non-numeric or indeterminate one.
+          const markerArm = contractBArm();
+          const resultT =
+            functionResult(markerArm ?? def.signature.type) ?? 'unknown';
+          return isSubtype(resultT, 'number')
+            ? this.engine.NaN
+            : this.engine.Missing;
+        }
       }
 
       //
@@ -4661,6 +4719,23 @@ export class BoxedFunction
         async (x) => await x.evaluateAsync(options)
       );
 
+      // The resolved overload arm for the Contract B gates below, computed
+      // at most once per evaluation — see the sync path's twin.
+      let cbArmCache: Type | undefined;
+      let cbArmComputed = false;
+      const contractBArm = (): Type | undefined => {
+        if (!cbArmComputed) {
+          cbArmComputed = true;
+          cbArmCache =
+            def instanceof _BoxedOperatorDefinition
+              ? resolvedArm(this, def.signature.type)
+              : undefined;
+        }
+        return cbArmCache;
+      };
+      // Explicitly `boolean` — see the sync path's twin.
+      const cbIsUserFn: boolean = isUserFunctionDef(def);
+
       //
       // 3a-0/ Contract B NaN-policy gate — parity with the sync path's step
       // 4a-0 (the two must stay in lockstep). Before the missing gate so the
@@ -4674,6 +4749,12 @@ export class BoxedFunction
         // structured out-of-range error for a NaN seed) — and the dispatch
         // conformance check excludes them for the same reason.
         def.lazy !== true &&
+        // User functions (lambdas, multi-clause definitions) are a
+        // sanctioned opt-out too: their own dispatch owns the NaN — a
+        // clause guarded on `NaN` or `infinity` must SEE the value, and a
+        // wide fallback clause must catch it — exactly why the dispatch
+        // conformance check (`genericRuntimeConformance`) excludes them.
+        !cbIsUserFn &&
         tail.some((x) => x.isNaN === true) &&
         // The collection stand-down is scoped to BROADCASTABLE operators:
         // only there does the element-wise broadcast re-enter this gate per
@@ -4685,10 +4766,15 @@ export class BoxedFunction
           tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
         )
       ) {
+        // Per-overload attachment (`docs/ERROR-MODEL.md` §4): the derived
+        // per-slot policy reads the RESOLVED arm's carriers when the call
+        // resolved an overload set; a plain signature answers `undefined`
+        // here at trivial cost.
+        const nanArm = contractBArm();
         let sawPropagate = false;
         for (let i = 0; i < tail.length; i++) {
           if (tail[i].isNaN !== true) continue;
-          const policy = def.resolvedNanBehaviorAt(i);
+          const policy = def.resolvedNanBehaviorAt(i, nanArm);
           if (policy === 'reject')
             return this.engine.error([
               'unexpected-argument',
@@ -4714,28 +4800,53 @@ export class BoxedFunction
       //
       // 3a-1/ Contract B partiality channels — parity with the sync path's
       // step 4a-1 (the two must stay in lockstep). `requires` false →
-      // Error; `definedWhen` false → `NaN` for a numeric codomain.
+      // Error; `definedWhen` false → the codomain marker: `NaN` for a
+      // numeric codomain, `Missing` otherwise, per the resolved arm.
       //
       if (
         def instanceof _BoxedOperatorDefinition &&
-        // Lazy operators are a sanctioned opt-out — see the NaN gate above.
+        // Lazy operators and user functions are sanctioned opt-outs — see
+        // the NaN gate above.
         def.lazy !== true &&
+        !cbIsUserFn &&
         (def.requires !== undefined || def.definedWhen !== undefined) &&
         !(
           def.broadcastable === true &&
           tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
         )
       ) {
-        if (def.requires?.(tail) === false)
+        // The predicates carry a never-throw purity contract, but a
+        // violation must not crash evaluation: a throw reads as
+        // "undecidable", exactly the fall-through verdict.
+        let requiresVerdict: boolean | undefined;
+        try {
+          requiresVerdict = def.requires?.(tail);
+        } catch {
+          requiresVerdict = undefined;
+        }
+        if (requiresVerdict === false)
           return this.engine.error([
             'evaluation-error',
             `the arguments do not satisfy the precondition of ${this.operator}`,
           ]);
-        if (
-          def.definedWhen?.(tail) === false &&
-          def.signatureResultIsNumeric
-        )
-          return this.engine.NaN;
+        let definedVerdict: boolean | undefined;
+        try {
+          definedVerdict = def.definedWhen?.(tail);
+        } catch {
+          definedVerdict = undefined;
+        }
+        if (definedVerdict === false) {
+          // The codomain marker (`docs/ERROR-MODEL.md` §2 rule 4), read
+          // off the RESOLVED arm for an overload set: `NaN` into a
+          // numeric codomain; `Missing` — the one primitive quiet datum —
+          // for a settled non-numeric or indeterminate one.
+          const markerArm = contractBArm();
+          const resultT =
+            functionResult(markerArm ?? def.signature.type) ?? 'unknown';
+          return isSubtype(resultT, 'number')
+            ? this.engine.NaN
+            : this.engine.Missing;
+        }
       }
 
       //
@@ -5767,17 +5878,41 @@ function type(expr: BoxedFunction): Type {
     const applyContractB = (t: Type): Type => {
       if (typeHandlerAnswered) return t;
       if (!(def instanceof _BoxedOperatorDefinition)) return t;
-      if (!typeHasNanFreeNumericCell(t)) return t;
-      // The seam has just proven a nan-free numeric cell exists, so the
-      // numeric-codomain gate is passed by construction — this is what
-      // lets an OVERLOAD SET participate: its resolved arm's result is in
-      // `t` even though the definition's raw signature is an intersection.
-      const adjust = def.contractBResultAdjustment(expr.ops, true);
+      // Cheap candidacy: with no declared partiality the only possible
+      // adjustment is the NaN arm, which needs a nan-free numeric cell. A
+      // DECLARED partiality can mark any codomain — rule 4's `Missing`
+      // for the settled non-numeric ones — so it always consults the
+      // adjustment. Overload sets participate implicitly: the adjustment
+      // no longer gates on the raw signature's codomain, and `t` is the
+      // resolved arm's instantiated result.
+      const declaresPartiality =
+        def.definedWhen !== undefined || def.partiality === 'may-marker';
+      if (!declaresPartiality && !typeHasNanFreeNumericCell(t)) return t;
+      // `resolved` is the arm this call resolved to (or the plain
+      // signature): the NaN-evidence derivation inside must read the SAME
+      // carriers the runtime gates read, or an overload's numeric arm
+      // propagates NaN at runtime while the derived type stays NaN-free.
+      const adjust = def.contractBResultAdjustment(expr.ops, resolved);
       if (adjust === 'none') return t;
-      if (adjust === 'is-nan' && isSubtype(t, 'number')) return 'nan';
-      // `widen-nan` — and `is-nan` on a collection-shaped result: a
-      // `definedWhen` verdict computed against collection operands is not
-      // a per-cell claim, so it degrades to the widened cells.
+      if (adjust === 'is-marker') {
+        // The value IS the codomain marker (`docs/ERROR-MODEL.md` §2 rule
+        // 4): `nan` for a numeric codomain, `missing` for a settled
+        // non-numeric one, the per-arm markers for a union. A
+        // collection-shaped result (a broadcast lift) is not a
+        // whole-codomain claim — the failure lands per cell — so it
+        // degrades to the cell widening.
+        if (
+          typeof t !== 'string' &&
+          (t.kind === 'list' ||
+            t.kind === 'collection' ||
+            t.kind === 'indexed_collection' ||
+            t.kind === 'broadcastable' ||
+            t.kind === 'tuple')
+        )
+          return widenCellsWithMarker(t);
+        return codomainMarkerType(t);
+      }
+      if (adjust === 'widen-marker') return widenCellsWithMarker(t);
       return widenNumericCellsWithNan(t);
     };
     const maybeAbsorb = (t: Type): Type =>

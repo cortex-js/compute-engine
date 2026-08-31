@@ -207,11 +207,53 @@ predicate.
 declarations without a runtime channel are a lie): steps 4a-1 (sync) and
 3a-1 (async) in `boxed-function.ts` — `requires` provably false → an
 `evaluation-error`; `definedWhen` provably false → `NaN`, but only into a
-NUMERIC codomain (`signatureResultIsNumeric`); a non-numeric codomain is
-left to the handler, which owns its own marker vocabulary. Still open in
-this phase: per-overload attachment, the non-numeric codomain markers
-(`Missing` for collections?), and typing-side discharge (a proven
-`definedWhen` should sharpen the derived application type — Phase C).
+NUMERIC codomain; a non-numeric codomain was left to the handler.
+
+**Full Phase D SHIPPED 2026-08-31**:
+
+- **The codomain marker generalizes past numeric** (§2 rule 4): a false
+  `definedWhen` answers `NaN` into a numeric codomain and `Missing` — the
+  one primitive quiet datum — into a settled non-numeric or indeterminate
+  one, at evaluation (both routes) and in the derived application type
+  (`codomainMarkerType`; per-arm markers for a union codomain). An
+  undischarged DECLARED partiality widens every cell of the result with
+  its own marker (`widenCellsWithMarker` — numeric cells `| nan`,
+  non-numeric settled cells `| missing`). The adjustment verdicts are now
+  `'none' | 'widen-nan' | 'widen-marker' | 'is-marker'`; the
+  numeric-codomain gate and the `resultIsNumeric` hint parameter are
+  gone, which is also what lets overload sets participate everywhere.
+- **Per-overload attachment, for everything DERIVABLE** (§4 "attach per
+  overload"): `resolvedNanBehaviorAt(i, armSignature?)` derives per-slot
+  policies from the RESOLVED arm; the runtime NaN gates and the marker
+  gate read the arm off `_resolvedOverload` (via `resolvedArm`), so an
+  overloaded operator's numeric arm propagates NaN and marks with `NaN`
+  while its string arm marks with `Missing`.
+- Both predicates are try/caught at the runtime gates too (a purity
+  violation reads as "undecidable", never a crash).
+- **USER FUNCTIONS (lambdas, multi-clause definitions) are a sanctioned
+  opt-out of ALL the runtime gates** — found by the full-suite gate, not
+  assumed: a multi-clause function's own dispatch owns a NaN operand (a
+  clause guarded on `NaN` or `infinity` must SEE the value; a wide
+  fallback clause must catch it), and the generic gates were preempting
+  it (4 test failures across the compiled and Epsil multi-clause
+  suites). The gates now exclude `isUserFunctionDef` exactly as the
+  dispatch conformance check always has. TypeScript trap on the way in:
+  the negated type predicate narrows `def` to `never` — the hoisted
+  `boolean` const is load-bearing, as at `genericRuntimeConformance`.
+- `signatureResultIsNumeric` deleted (its last consumer was the minimal-D
+  gate).
+
+Deliberate deferrals, recorded here rather than discovered later:
+
+- **Explicit PER-ARM declaration spellings** (a different explicit
+  `nanBehavior`/`partiality` per overload arm) are not representable. The
+  derived defaults are per-arm; explicit declarations stay
+  operator-level. No operator needs the distinction today; the spelling
+  gets designed when one does.
+- **The boxing admission carve-in stays operator-level**: `nanPolicyAt`
+  is consulted during arm TRIALS, before a resolution exists, so it
+  cannot read "the" arm. Overload sets therefore keep plain carrier
+  semantics at boxing; the runtime gates own the per-arm behavior.
 
 ### Phase E — the higher-order floor
 

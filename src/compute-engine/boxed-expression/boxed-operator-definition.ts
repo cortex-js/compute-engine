@@ -719,7 +719,13 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    *   `'reject'` otherwise (an index, a digit count, a dimension).
    */
   resolvedNanBehaviorAt(
-    i: number
+    i: number,
+    /** The RESOLVED overload arm to derive from, when the caller has one
+     * (the runtime gates read it off `_resolvedOverload`): per-arm
+     * carriers give per-arm derived policies — the "attach per overload"
+     * clause of `docs/ERROR-MODEL.md` §4 for everything derivable.
+     * Explicit `nanBehavior` declarations remain operator-level. */
+    armSignature?: Type
   ): 'reject' | 'propagate' | 'handle' | 'inert' {
     const declared = this.nanBehavior;
     if (declared !== undefined) {
@@ -728,7 +734,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       if (slot !== undefined) return slot;
     }
     if (this.inferredSignature) return 'inert';
-    const sig = this.signature.type;
+    const sig = armSignature ?? this.signature.type;
     const carrier = parameterTypeAt(sig, i);
     if (carrier === undefined) return 'inert';
     if (isSubtype('nan', carrier)) return 'inert';
@@ -757,55 +763,40 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   }
 
   /**
-   * True when the declared result type is numeric (a subtype of `number`).
-   * The partiality gate uses it to pick the codomain marker: a false
-   * `definedWhen` answers `NaN` only into a numeric codomain (rule 4 of
-   * `docs/ERROR-MODEL.md` §2); a non-numeric codomain is the handler's to
-   * mark. `false` for an overload set — each arm has its own result, so no
-   * single marker is derivable here.
-   */
-  get signatureResultIsNumeric(): boolean {
-    const sig = this.signature.type;
-    if (typeof sig === 'string') return false;
-    if (sig.kind !== 'signature') return false;
-    return isSubtype(sig.result, 'number');
-  }
-
-  /**
    * The Contract B adjustment to a derived application RESULT type
    * (`docs/ERROR-MODEL.md` §4: the application type is
    * `S | marker(S) | nan`, narrowing to exactly `S` only when both the
    * partiality and every propagating slot are discharged). Answers for the
    * CURRENT arguments:
    *
-   * - `'is-nan'` — the declared `definedWhen` condition is provably false
-   *   for these arguments: the value IS the codomain marker.
-   * - `'widen-nan'` — a `nan` arm belongs on the result: a `propagate`
-   *   slot's argument may be `NaN`, or a DECLARED partiality concedes an
-   *   undischarged failure (`definedWhen` undecided for these arguments,
-   *   or an explicit `may-marker`). A declared `total` discharges the
-   *   partiality but never the NaN arm.
+   * - `'is-marker'` — the declared `definedWhen` condition is provably
+   *   false for these arguments: the value IS the codomain marker (§2
+   *   rule 4 — `NaN` for a numeric codomain, `Missing` for a settled
+   *   non-numeric one; the consumer maps the verdict to its codomain).
+   * - `'widen-marker'` — a DECLARED partiality is undischarged
+   *   (`definedWhen` undecided for these arguments, or an explicit
+   *   `may-marker`): every cell of the result gains its marker arm.
+   * - `'widen-nan'` — only the NaN evidence fires: a `propagate` slot's
+   *   argument may be `NaN`, so numeric cells gain `| nan`. A declared
+   *   `total` discharges the partiality but never this arm.
    * - `'none'` — no adjustment.
    *
-   * Two deliberate scope guards: only NUMERIC codomains (a non-numeric
-   * codomain's marker vocabulary belongs to its handler), and the
-   * UNDECLARED partiality default (`may-marker` by omission) contributes
-   * NO arm — widening every precise numeric result to `S | nan`
-   * engine-wide would silently defeat `matches('integer')`-style
-   * type-keyed guards, so the omitted default binds only through explicit
-   * declarations until that migration is measured (the Phase C staging
-   * note in `docs/plans/2026-08-30-error-model-implementation.md`).
+   * One deliberate scope guard, MEASURED not assumed: the UNDECLARED
+   * partiality default (`may-marker` by omission) contributes NO arm —
+   * binding it engine-wide broke 126 tests across 28 suites (the Phase C
+   * measurement in `docs/plans/2026-08-30-error-model-implementation.md`)
+   * by silently defeating `matches('integer')`-style type-keyed guards,
+   * so the omitted default binds only through explicit declarations until
+   * the Phase F migration.
    */
   contractBResultAdjustment(
     ops: ReadonlyArray<Expression>,
-    // The caller may have already proven the codomain numeric — the
-    // derived-type seam checks the INSTANTIATED result it holds, which
-    // covers an overload set (raw signature: an intersection, for which
-    // the getter answers false) through its resolved arm.
-    resultIsNumeric: boolean = this.signatureResultIsNumeric
-  ): 'none' | 'widen-nan' | 'is-nan' {
-    if (!resultIsNumeric) return 'none';
-    let marker = false;
+    /** The RESOLVED overload arm, when the caller has one: the NaN
+     * evidence below derives per-slot policies from ITS carriers, keeping
+     * the derived type in step with the runtime gates (which pass the
+     * same arm to `resolvedNanBehaviorAt`). */
+    armSignature?: Type
+  ): 'none' | 'widen-nan' | 'widen-marker' | 'is-marker' {
     if (this.definedWhen) {
       let v: boolean | undefined;
       try {
@@ -817,19 +808,19 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         // exactly the undischarged verdict.
         v = undefined;
       }
-      if (v === false) return 'is-nan';
-      if (v === undefined) marker = true;
-    } else if (this.partiality === 'may-marker') marker = true;
-    if (!marker) {
-      for (let i = 0; i < ops.length; i++) {
-        if (this.resolvedNanBehaviorAt(i) !== 'propagate') continue;
-        if (isSubtype('nan', ops[i].type.type)) {
-          marker = true;
-          break;
-        }
-      }
+      if (v === false) return 'is-marker';
+      if (v === undefined) return 'widen-marker';
+      // Proven defined: the partiality is discharged — fall through to
+      // the NaN-evidence arm below.
+    } else if (this.partiality === 'may-marker') return 'widen-marker';
+    // No undischarged partiality claim: the only possible adjustment is
+    // the NaN arm — a `propagate` slot whose argument may carry a `NaN`.
+    for (let i = 0; i < ops.length; i++) {
+      if (this.resolvedNanBehaviorAt(i, armSignature) !== 'propagate')
+        continue;
+      if (isSubtype('nan', ops[i].type.type)) return 'widen-nan';
     }
-    return marker ? 'widen-nan' : 'none';
+    return 'none';
   }
 
   /** True if operand position `i` may INVOKE a function-valued operand.

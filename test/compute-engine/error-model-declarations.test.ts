@@ -309,15 +309,97 @@ describe('Contract B — partiality channels at runtime (Phase D, minimal)', () 
     expect(e.box(['PilotDW', 1, 2]).evaluate().isSame(42)).toBe(true);
   });
 
-  test('a false definedWhen with a NON-numeric codomain is left to the handler', () => {
+  test('a false definedWhen with a NON-numeric codomain answers Missing', () => {
+    // Rule 4 of `docs/ERROR-MODEL.md` §2: the codomain marker for a
+    // settled non-numeric result type is `Missing` — the one primitive
+    // quiet datum, carried through comparisons by Kleene semantics. The
+    // gate preempts the handler (which would answer `True`).
     const e = new ComputeEngine();
     e.declare('PilotDWBool', {
       signature: '(number) -> boolean',
       definedWhen: () => false,
       evaluate: (_ops, { engine }) => engine.symbol('True'),
     });
-    // No numeric marker to emit — the handler owns its own vocabulary.
-    expect(e.box(['PilotDWBool', 1]).evaluate().symbol).toBe('True');
+    expect(e.box(['PilotDWBool', 1]).evaluate().symbol).toBe('Missing');
+    expect(e.box(['PilotDWBool', 1]).type.matches('missing')).toBe(true);
+  });
+
+  test('a false definedWhen with a string codomain also answers Missing', () => {
+    const e = new ComputeEngine();
+    e.declare('PilotDWStr', {
+      signature: '(real) -> string',
+      definedWhen: () => false,
+      evaluate: (_ops, { engine }) => engine.string('x'),
+    });
+    expect(e.box(['PilotDWStr', 1]).evaluate().symbol).toBe('Missing');
+  });
+
+  test('an explicit may-marker with a boolean codomain widens the type with | missing', () => {
+    const e = new ComputeEngine();
+    e.declare('PilotMarkerBool', {
+      signature: '(real) -> boolean',
+      partiality: 'may-marker',
+      evaluate: (_ops, { engine }) => engine.symbol('True'),
+    });
+    const ty = e.box(['PilotMarkerBool', 2]).type;
+    expect(ty.matches('boolean | missing')).toBe(true);
+    expect(ty.matches('boolean')).toBe(false);
+  });
+
+  test('the marker follows the RESOLVED overload arm: NaN for the numeric arm, Missing for the string arm', () => {
+    const e = new ComputeEngine();
+    e.declare('PilotOverM', {
+      signature: '((integer) -> integer) & ((string) -> string)',
+      definedWhen: () => false,
+      evaluate: ([x]) => x,
+    });
+    expect(e.box(['PilotOverM', 2]).evaluate().isNaN).toBe(true);
+    expect(
+      e.function('PilotOverM', [e.string('a')]).evaluate().symbol
+    ).toBe('Missing');
+  });
+
+  test('per-overload derived NaN policy: the resolved real arm propagates a dynamic NaN', () => {
+    const e = new ComputeEngine();
+    e.declare('MakeNaND', {
+      signature: '() -> number',
+      evaluate: (_ops, { engine }) => engine.NaN,
+    });
+    e.declare('PilotOverNaN', {
+      signature: '((real) -> real) & ((string) -> string)',
+      evaluate: ([x]) => x,
+    });
+    // The dynamic NaN resolves against the `(real) -> real` arm, whose
+    // derived per-slot policy is `propagate`.
+    const v = e.box(['PilotOverNaN', ['MakeNaND']]).evaluate();
+    expect(v.isNaN).toBe(true);
+  });
+
+  test('the derived type reads the RESOLVED arm: a maybe-NaN argument into the numeric arm types | nan', () => {
+    // The runtime gate and the type derivation must read the SAME arm:
+    // the `(real) -> real` arm's derived per-slot policy is `propagate`,
+    // so a `number`-typed argument (which admits `nan`) adds the arm.
+    const e = new ComputeEngine();
+    e.declare('PilotOverT', {
+      signature: '((real) -> real) & ((string) -> string)',
+      evaluate: ([x]) => x,
+    });
+    e.declare('nw', 'number');
+    const ty = e.box(['PilotOverT', 'nw']).type;
+    expect(ty.matches('real | nan')).toBe(true);
+    expect(ty.matches('real')).toBe(false);
+  });
+
+  test('an overload set participates in the derived application type', () => {
+    const e = new ComputeEngine();
+    e.declare('PilotOverW', {
+      signature: '((real) -> real) & ((string) -> string)',
+      partiality: 'may-marker',
+      evaluate: ([x]) => x,
+    });
+    const ty = e.box(['PilotOverW', 2]).type;
+    expect(ty.matches('real | nan')).toBe(true);
+    expect(ty.matches('real')).toBe(false);
   });
 
   test('a false requires answers the Error channel', () => {

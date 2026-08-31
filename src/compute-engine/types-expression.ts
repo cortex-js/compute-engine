@@ -390,20 +390,18 @@ interface BoxedOperatorDefinition
   /** The resolved Contract B NaN policy for parameter position `i`. See
    * `types-definitions.ts`. */
   resolvedNanBehaviorAt(
-    i: number
+    i: number,
+    armSignature?: Type
   ): 'reject' | 'propagate' | 'handle' | 'inert';
   /** The resolved Contract B partiality of the declaration. See
    * `types-definitions.ts`. */
   readonly resolvedPartiality: 'total' | 'may-marker' | 'defined-when';
-  /** True when the declared result type is numeric. See
-   * `types-definitions.ts`. */
-  readonly signatureResultIsNumeric: boolean;
   /** The Contract B adjustment to a derived application result type for
    * these arguments. See `types-definitions.ts`. */
   contractBResultAdjustment(
     ops: ReadonlyArray<Expression>,
-    resultIsNumeric?: boolean
-  ): 'none' | 'widen-nan' | 'is-nan';
+    armSignature?: Type
+  ): 'none' | 'widen-nan' | 'widen-marker' | 'is-marker';
   /** True if operand position `i` may INVOKE a function-valued operand.
    * See `types-definitions.ts`. */
   invokesAt(i: number): boolean;

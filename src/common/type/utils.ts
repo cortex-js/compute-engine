@@ -847,6 +847,77 @@ export function typeHasNanFreeNumericCell(t: Readonly<Type>): boolean {
  * pass through. The union is built unreduced — `isSubtype`/`matches`
  * treat it correctly, and the `nan`-free guard keeps it duplicate-free.
  */
+/**
+ * Widen every cell of `t` with its codomain marker (rule 4 of
+ * `docs/ERROR-MODEL.md` §2): a `nan`-free numeric cell gains `| nan`; a
+ * settled non-numeric cell gains `| missing` — the one primitive quiet
+ * datum, of which `NaN` is the numeric absorption; a cell that already
+ * admits its marker (bare `number`, `unknown`) is left alone. Used for an
+ * UNDISCHARGED declared partiality, where a domain failure may land in
+ * any cell of the result.
+ */
+export function widenCellsWithMarker(t: Readonly<Type>): Type {
+  if (isSubtype(t, 'number')) {
+    if (isSubtype('nan', t)) return t as Type;
+    return { kind: 'union', types: [t as Type, 'nan'] };
+  }
+  if (typeof t !== 'string') {
+    switch (t.kind) {
+      case 'union':
+        return {
+          kind: 'union',
+          types: t.types.map((x) => widenCellsWithMarker(x)),
+        };
+      case 'list':
+      case 'collection':
+      case 'indexed_collection':
+      case 'broadcastable':
+        return { ...t, elements: widenCellsWithMarker(t.elements) };
+      case 'tuple':
+        return {
+          ...t,
+          elements: t.elements.map((e) => ({
+            ...e,
+            type: widenCellsWithMarker(e.type),
+          })),
+        };
+    }
+  }
+  if (isSubtype('missing', t)) return t as Type;
+  return { kind: 'union', types: [t as Type, 'missing'] };
+}
+
+/**
+ * The marker TYPE of a codomain (rule 4 of `docs/ERROR-MODEL.md` §2): the
+ * type of the value a domain failure answers — `nan` for a numeric
+ * codomain, `missing` for a settled non-numeric one, and the per-arm
+ * markers for a union codomain (which is sharper than the rule's
+ * "union of the two" for the indeterminate case, and reduces to it for
+ * `unknown`-like arms).
+ */
+export function codomainMarkerType(t: Readonly<Type>): Type {
+  if (isSubtype(t, 'number')) return 'nan';
+  if (typeof t !== 'string') {
+    switch (t.kind) {
+      case 'union':
+        return {
+          kind: 'union',
+          types: t.types.map((x) => codomainMarkerType(x)),
+        };
+      // A collection-shaped codomain (arm) is not a whole-value claim —
+      // the failure lands per cell — so it takes the cell widening, the
+      // same rule its top-level consumer applies before calling here.
+      case 'list':
+      case 'collection':
+      case 'indexed_collection':
+      case 'broadcastable':
+      case 'tuple':
+        return widenCellsWithMarker(t);
+    }
+  }
+  return 'missing';
+}
+
 export function widenNumericCellsWithNan(t: Readonly<Type>): Type {
   if (isSubtype(t, 'number')) {
     if (isSubtype('nan', t)) return t as Type;

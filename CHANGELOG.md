@@ -172,6 +172,15 @@
   `number`, so existing types do not change unless an operator declares
   the new contract fields.
 
+- **A domain failure in a non-numeric operation returns `Missing`.** When
+  a declared `definedWhen` condition is provably false and the result
+  type is not numeric — a boolean, a string, a collection — the
+  application returns `Missing` instead of an unevaluated expression, and
+  its type is `missing`. `NaN` remains the marker for numeric result
+  types. For an operator with several signatures, the marker follows the
+  signature the call resolved to, and a `NaN` argument is propagated or
+  rejected according to that signature's parameter types.
+
 - **`interval-js` target: a second lowering batch** (Tycho item 237, the
   item-220 mold). `Choose` lowers to the existing `_IA.binomial` runtime
   helper; `Apply` of a function literal — the `f'` prime-derivative
