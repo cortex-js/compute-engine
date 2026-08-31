@@ -38,6 +38,22 @@ import {
 const MAX_VALUE_SCALED_ITERATIONS = 1e7;
 
 /**
+ * Above this many decimal digits, an exact sequence value (`LucasL`,
+ * `CatalanNumber`) is impractical to materialize — the loop's bigint
+ * operands grow with every iteration, so a STEP cap cannot bound the work.
+ * Stay symbolic above it instead. Mirrors `MAX_EXACT_COMBINATORICS_DIGITS`
+ * in `library/combinatorics.ts` (same value, same convention — dedicated
+ * per-file constants, as for `MAX_VALUE_SCALED_ITERATIONS` above).
+ */
+const MAX_EXACT_RESULT_DIGITS = 1_000_000;
+
+/** log10(φ): L(n), like F(n), has ≈ n·log10(φ) decimal digits. */
+const LOG10_GOLDEN_RATIO = Math.log10((1 + Math.sqrt(5)) / 2);
+
+/** log10(4): the Catalan number C(n) ~ 4^n/n^{3/2} has ≈ n·log10(4) digits. */
+const LOG10_4 = Math.log10(4);
+
+/**
  * Above this many digits (in the target base), materializing or iterating an
  * integer's digit representation (`IntegerDigits`, `DigitCount`, `DigitSum`)
  * is impractical — stay symbolic instead (mirrors `MAX_EXACT_POW_DIGITS` in
@@ -305,7 +321,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         let steps = 0;
         while (count < k) {
           candidate += 2n;
-          if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+          if ((++steps & 0x3ff) === 0) {
+            checkDeadline(ce._deadlineFrame);
+            // Backstop: this loop scales with the VALUE of `n`, so without
+            // a budget it is bounded only by the deadline — a no-deadline
+            // route (compile-time constant folding included) ran unbounded
+            // (see MAX_VALUE_SCALED_ITERATIONS; same shape as `PrimePi`).
+            if (steps > MAX_VALUE_SCALED_ITERATIONS)
+              throw new CancellationError({
+                message: `NthPrime: exceeded ${MAX_VALUE_SCALED_ITERATIONS} iterations`,
+                cause: 'iteration-limit-exceeded',
+              });
+          }
           if (isPrimeBigint(candidate)) count += 1n;
         }
         return ce.number(candidate);
@@ -325,18 +352,31 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
         let p = start;
         let steps = 0;
+        // Backstop, as in `NthPrime`: the scan scales with `k` (and with the
+        // prime gaps it crosses), so without a budget a no-deadline route
+        // runs unbounded (see MAX_VALUE_SCALED_ITERATIONS).
+        const step = () => {
+          if ((++steps & 0x3ff) === 0) {
+            checkDeadline(ce._deadlineFrame);
+            if (steps > MAX_VALUE_SCALED_ITERATIONS)
+              throw new CancellationError({
+                message: `NextPrime: exceeded ${MAX_VALUE_SCALED_ITERATIONS} iterations`,
+                cause: 'iteration-limit-exceeded',
+              });
+          }
+        };
         if (k > 0n) {
           for (let i = 0n; i < k; i++) {
             do {
               p += 1n;
-              if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+              step();
             } while (!isPrimeBigint(p));
           }
         } else {
           for (let i = 0n; i > k; i--) {
             do {
               p -= 1n;
-              if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+              step();
               if (p < 2n) return undefined; // no prime below 2
             } while (!isPrimeBigint(p));
           }
@@ -572,6 +612,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (k === null) return undefined;
         const neg = k < 0n;
         const kk = neg ? -k : k;
+        // L(n) has ~n·log10(φ) digits, like F(n): for huge n the loop below
+        // would grind out an unusable number — stay symbolic instead
+        // (mirrors `Fibonacci` in `library/combinatorics.ts`; a step counter
+        // cannot bound this loop, since the bigint operands themselves grow
+        // with every iteration).
+        if (Number(kk) * LOG10_GOLDEN_RATIO > MAX_EXACT_RESULT_DIGITS)
+          return undefined;
         let a = 2n;
         let b = 1n;
         let steps = 0;
@@ -598,6 +645,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 0n) return undefined;
+        // C(n) ~ 4^n / n^{3/2}, so the result has ~n·log10(4) digits: for
+        // huge n the loop below would grind out an unusable number — stay
+        // symbolic instead (the `Fibonacci`/`LucasL` digit-cap convention; a
+        // step counter cannot bound a loop whose bigint operands grow with
+        // every iteration).
+        if (Number(k) * LOG10_4 > MAX_EXACT_RESULT_DIGITS) return undefined;
         let c = 1n;
         let steps = 0;
         for (let i = 0n; i < k; i++) {

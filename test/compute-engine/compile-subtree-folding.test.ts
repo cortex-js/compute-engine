@@ -302,6 +302,69 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
     expect(results.size).toBe(1);
   });
 
+  it('an ambient deadline never swaps the folded value for a lowered one', () => {
+    // The regression ROADMAP prescribed for the wall-clock removal: compile
+    // one folding expression under a tight and a loose ambient deadline;
+    // whenever neither run throws, the emitted code must be identical. An
+    // ambient expiry mid-fold cancels the whole compilation (rethrown), so
+    // the only two observable outcomes are "same code" and "loud failure" —
+    // never a silent branch swap.
+    const e = new ComputeEngine();
+    const unbudgeted = compile(e.parse('\\sqrt{2}+\\sin(1)')).code;
+    for (const ms of [50, 5000]) {
+      let code: unknown;
+      try {
+        code = e.withTimeLimit({ ms, label: 'test:ambient' }, () => {
+          return compile(e.parse('\\sqrt{2}+\\sin(1)')).code;
+        });
+      } catch {
+        continue; // a loud cancellation is a legal outcome
+      }
+      expect(code).toBe(unbudgeted);
+    }
+  });
+
+  it('prices a definite integral by its quadrature worst case', () => {
+    // A definite integral is a handful of syntax nodes while its evaluation
+    // may run the full adaptive interval budget (~22 500 integrand
+    // evaluations per nesting level). The per-fold wall-clock deadline that
+    // used to backstop this class made the fold decision load-dependent and
+    // was removed (user ruling, 2026-08-30); the estimate now prices it.
+    // A cheap single integral still folds to its value…
+    const one = new ComputeEngine();
+    const single = compile(one.parse('\\int_0^1 \\sin x\\,dx'));
+    expect(single.code).toMatch(/^\(?0\.4596976941318603\)?$/);
+    // …while an ITERATED integral declines the fold (the price is
+    // multiplicative per nesting level) and compiles through the numeric
+    // emitter — deterministically: five compiles, one output.
+    const nested = new ComputeEngine();
+    const outputs = new Set<string>();
+    for (let i = 0; i < 5; i++) {
+      const r = compile(
+        nested.parse('\\int_0^1\\int_0^1 \\sin(xy)\\,dx\\,dy')
+      );
+      expect(r.success).toBe(true);
+      outputs.add(r.code as string);
+    }
+    expect(outputs.size).toBe(1);
+    expect([...outputs][0]).toContain('integrate');
+  });
+
+  it('declines to fold a numeric limit', () => {
+    // A limit whose probe samples never settle falls back to Richardson
+    // extrapolation with a 1e6-evaluation budget — work invisible to a
+    // syntax walk, with no cheap tier that is statically recognizable. The
+    // fold declines and the structural lowering (`_SYS.limit`) evaluates at
+    // run time; a compile of an oscillatory constant limit must return
+    // promptly rather than pay the extrapolation at compile time.
+    const e = new ComputeEngine();
+    const t0 = Date.now();
+    const r = compile(e.parse('\\lim_{x\\to 0}\\sin(1/x) + t'));
+    expect(Date.now() - t0).toBeLessThan(5_000);
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.limit');
+  });
+
   it('prices the one-operand collection-reducer form by its source size', () => {
     // `Sum(xs)` reduces every element of `xs`, but it is only three syntax
     // nodes — the generic pricing let `Sum(Range(1, 1000000))` fold, taking

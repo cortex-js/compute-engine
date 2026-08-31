@@ -142,14 +142,30 @@ import {
 const GENERATED_NAME_RE = /(?<![\p{L}\p{N}_])_(?:tv|cse)[\p{L}\p{N}_]*/gu;
 
 /**
- * Time budget (ms) for evaluating one constant subtree at compile time
- * (`tryConstantFold`). Typical folds complete in microseconds; the budget
- * exists so a pathological constant (a `Sum` over millions of terms, a
- * slow-converging quadrature) degrades to structural compilation instead of
- * stalling the compile. Armed through `withTimeLimit`, which nests as
- * `min()` — an already-armed tighter ambient deadline still governs.
+ * The work `foldCostEstimate` charges for ONE numeric quadrature, in
+ * integrand evaluations: the adaptive Gauss–Kronrod worst case. Reaching
+ * the `maxIntervals` budget (1500, the `adaptiveQuadrature` default in
+ * `numerics/gauss-kronrod.ts`) evaluates BOTH child panels of every split,
+ * so the panel count is ~2× the live-interval budget — ~3000 panels of 15
+ * GK15 nodes each. A definite integral's syntax is a handful of nodes while
+ * its evaluation may run that whole budget, so without this arm a constant
+ * integral was the canonical "estimate miss" — the class the retired
+ * per-fold wall-clock deadline existed to catch (a wall-clock which made
+ * the fold decision depend on machine load; removed by user ruling,
+ * 2026-08-30). Priced at the WORST case, not the typical converged cost
+ * (~16 panels): the estimate is the only anti-hang gate, so it must bound
+ * what the evaluation can do.
+ *
+ * NOT covered by this figure, deliberately: the Monte-Carlo fallback a
+ * non-converged `Integrate` can take after the quadrature (1e7 samples of a
+ * COMPILED integrand, `library/calculus.ts`). Its sample count is a
+ * deterministic constant, so it is a bounded tail — comparable to the 2 s
+ * the retired wall-clock budget tolerated — not a hang, and pricing it
+ * would decline every constant integral from folding. `NIntegrate`, which
+ * goes to that sample budget by design rather than as a fallback, is
+ * declined outright in the pricing arm instead.
  */
-const CONSTANT_FOLD_BUDGET_MS = 2000;
+const FOLD_QUADRATURE_EVALS = 45_000;
 
 /**
  * The maximum estimated work a subtree may cost before the fold declines
@@ -3384,19 +3400,28 @@ export class BaseCompiler {
         CONSTANT_FOLD_MAX_COLLECTION_SIZE
       );
       if (neutralizeAngle) engine.angularUnit = 'rad';
-      value = engine.withTimeLimit(
-        { ms: CONSTANT_FOLD_BUDGET_MS, label: 'compile:constant-fold' },
-        () => {
-          const v = expr.N();
-          elements = BaseCompiler.foldableCollectionElements(
-            v,
-            target.maxInlineElements ?? CONSTANT_FOLD_MAX_INLINE_ELEMENTS
-          );
-          return v;
-        }
-      );
+      // The evaluation runs with NO wall-clock budget of its own (user
+      // ruling, 2026-08-30): a per-fold deadline made the fold decision
+      // depend on machine load — five in-process compiles of the same
+      // source produced two different programs at load ~30 — which is the
+      // very nondeterminism `foldCostEstimate` exists to prevent. The
+      // estimate is now the ONLY anti-hang gate, so every evaluation class
+      // whose work is invisible to a syntax walk must be priced there (see
+      // the quadrature arm), and the remaining evaluation bounds are
+      // themselves deterministic: `engine.iterationLimit`, the
+      // `maxCollectionSize` clamp above, and the quadrature interval
+      // budget. An AMBIENT deadline armed by the caller still cancels the
+      // whole compilation through the ordinary check sites.
+      value = (() => {
+        const v = expr.N();
+        elements = BaseCompiler.foldableCollectionElements(
+          v,
+          target.maxInlineElements ?? CONSTANT_FOLD_MAX_INLINE_ELEMENTS
+        );
+        return v;
+      })();
     } catch (e) {
-      // The fold's own expired budget is a quiet decline — but a cancellation
+      // An evaluation error is a quiet decline — but a cancellation
       // raised because the AMBIENT (outer) deadline expired must keep
       // cancelling the whole compilation, not be swallowed as a fold miss.
       if (!engine._shouldContinueExecution()) throw e;
@@ -3412,8 +3437,8 @@ export class BaseCompiler {
       BaseCompiler._foldValueMemo.set(target, byExpr);
     }
     if (value === undefined) {
-      // A budget-expired evaluation is memoized too: a retry at the second
-      // call site might land a DIFFERENT degraded estimate, which is exactly
+      // A failed evaluation is memoized too: a retry at the second call
+      // site might land a DIFFERENT degraded estimate, which is exactly
       // the emit/analyze divergence this memo exists to prevent.
       byExpr.set(expr, 'declined');
       return undefined;
@@ -3511,6 +3536,48 @@ export class BaseCompiler {
 
     const op = expr.operator;
     const ops = expr.ops;
+
+    // A definite integral costs its integrand once per quadrature node,
+    // and its evaluation may run the full adaptive interval budget — work
+    // entirely invisible to a syntax walk (the node is a handful of
+    // operands). Priced at the quadrature WORST case
+    // (`FOLD_QUADRATURE_EVALS`), multiplicatively: a NESTED inner
+    // integral's own arm multiplies again, which is what makes an iterated
+    // integral decline. A FLAT multi-limit spelling
+    // (`Integrate(body, Limits(x, …), Limits(y, …))`) is the same iterated
+    // work in one node — `nIntegrateMultiple` runs a complete inner
+    // quadrature per outer sample — and two worst-case levels always
+    // exceed the ceiling, so it declines directly. `NIntegrate` declines
+    // too: it goes to the 1e7-sample Monte-Carlo path BY DESIGN
+    // (`library/calculus.ts`), a price that no fold survives.
+    // An INDEFINITE integral takes the quadrature price although its
+    // `.N()` stays symbolic: over-pricing it merely declines a fold that
+    // could not have produced a number anyway.
+    // A numeric limit's fallback is Richardson extrapolation with a
+    // 1e6-evaluation budget (`numerics/richardson.ts`), reached whenever the
+    // probe samples never settle — an oscillatory constant limit such as
+    // `lim_{x→0} sin(1/x)` — and its per-iteration Neville update makes the
+    // worst case far beyond any fold ceiling. The work is invisible to a
+    // syntax walk, and unlike quadrature there is no cheap-and-typical tier
+    // to admit: whether the samples settle is not readable statically.
+    // Decline the fold; the structural lowering (`_SYS.limit`) evaluates at
+    // run time, where the caller's deadline governs. `Residue` reaches the
+    // same numeric limit machinery through its evaluation.
+    if (op === 'Limit' || op === 'NLimit' || op === 'Residue')
+      return Infinity;
+
+    if (op === 'Integrate' || op === 'NIntegrate') {
+      if (op === 'NIntegrate') return Infinity;
+      if (ops.length > 2) return Infinity;
+      const body = BaseCompiler.foldCostEstimate(ops[0], depth + 1, c);
+      if (!Number.isFinite(body)) return Infinity;
+      let boundsCost = 0;
+      for (const operand of ops.slice(1)) {
+        boundsCost += BaseCompiler.foldCostEstimate(operand, depth + 1, c);
+        if (!Number.isFinite(boundsCost)) return Infinity;
+      }
+      return 1 + boundsCost + FOLD_QUADRATURE_EVALS * body;
+    }
 
     // A big op costs its body once per iteration. `bigOpBoundConstant`
     // already answers `undefined` for a bound that is symbolic or mentions a

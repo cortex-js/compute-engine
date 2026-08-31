@@ -26,7 +26,9 @@ import {
   isSymbol,
   isNumber,
   isFunction,
+  isString,
 } from '../boxed-expression/type-guards.js';
+import { collectionElementType } from '../../common/type/utils.js';
 
 import {
   BaseCompiler,
@@ -849,6 +851,10 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   GammaLn: (args, compile) => `_IA.gammaln(${compile(args[0])})`,
   Binomial: (args, compile) =>
     `_IA.binomial(${compile(args[0])}, ${compile(args[1])})`,
+  // `Choose(n, k)` is the binomial coefficient — the same runtime helper,
+  // exactly as on the JavaScript target (Tycho item 237).
+  Choose: (args, compile) =>
+    `_IA.binomial(${compile(args[0])}, ${compile(args[1])})`,
   GCD: (args, compile) => `_IA.gcd(${compile(args[0])}, ${compile(args[1])})`,
   LCM: (args, compile) => `_IA.lcm(${compile(args[0])}, ${compile(args[1])})`,
   // Tolerance baked at compile time from the engine, matching the
@@ -959,6 +965,87 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   And: (args, compile) => compileIntervalFold('_IA.and', args, compile),
   Or: (args, compile) => compileIntervalFold('_IA.or', args, compile),
   Not: (args, compile) => `_IA.not(${compile(args[0])})`,
+  // Apply a function literal to arguments — the `f'` prime-derivative
+  // spelling lowers to `Apply(Function(…), x)`. As on the JavaScript target,
+  // `Apply` with a *symbol* head canonicalizes to a direct call, so only the
+  // function-literal form reaches this handler; the literal compiles to an
+  // arrow over intervals through the shared `Function` lowering.
+  // (Tycho item 237.)
+  Apply: (args, compile) => {
+    if (args[0] == null) throw new Error('Apply: missing function');
+    // Only an exact-arity application of a FUNCTION LITERAL compiles. The
+    // interpreter THROWS on an over-applied call and CURRIES an
+    // under-applied one (`function-utils.ts`, `makeLambda`); a plain
+    // JavaScript call would instead silently truncate the extras or bind
+    // the missing parameters to `undefined`. A non-literal callee (a
+    // valueless function symbol) has no parameter list to check against.
+    // Fail closed (D6) on all of those.
+    const fn = args[0];
+    if (!isFunction(fn, 'Function'))
+      throw new Error(
+        `Apply: only a function-literal callee compiles on the interval ` +
+          `target. Fail closed (D6).`
+      );
+    const paramCount = fn.ops.length - 1;
+    if (args.length - 1 !== paramCount)
+      throw new Error(
+        `Apply: the function takes ${paramCount} parameter(s) but ` +
+          `${args.length - 1} argument(s) are supplied — the interpreter ` +
+          `curries or throws there, which this target cannot express. ` +
+          `Fail closed (D6).`
+      );
+    return `(${compile(args[0])})(${args
+      .slice(1)
+      .map((a) => compile(a))
+      .join(', ')})`;
+  },
+  // A random draw, enclosed by its distribution's SUPPORT: every value
+  // `Random()` can produce lies in [0, 1], so the constant interval is a
+  // sound band for any draw, on any evaluation. Threading the actual seeded
+  // sequence through this lane would be UNSOUND instead: the interval lane
+  // samples at different points and in a different order than the scalar
+  // lane, so its draw sequence would diverge from the values the scalar
+  // lane actually plots, and the band would no longer enclose them. Only
+  // the nullary form is claimed: `Random(source)` draws from an interval, a
+  // range, or a collection, whose support this handler does not compute —
+  // fail closed (D6) rather than emit a wrong enclosure.
+  // (Tycho item 237.)
+  Random: (args) => {
+    if (args.length !== 0)
+      throw new Error(
+        `Random: only the nullary form compiles on the interval target — ` +
+          `the support of \`Random(source)\` is not derived here. ` +
+          `Fail closed (D6).`
+      );
+    return '({ lo: 0, hi: 1 })';
+  },
+  // The body's random draws are enclosed by their support (see `Random`
+  // above), which no seed can narrow or shift — so the frame contributes
+  // nothing on this target and only the body is emitted. The seed operand is
+  // a plain value (a number or a string) and is not emitted.
+  // (Tycho item 237.)
+  WithRandomSeed: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        `WithRandomSeed: expected exactly two arguments. Fail closed (D6).`
+      );
+    // Only a LITERAL seed is accepted — a finite real or a string, the
+    // values the interpreter's own validation admits. A compound seed
+    // expression would have to be evaluated once per frame entry (the
+    // interpreter's contract), and this target has no emission for that
+    // evaluation — silently discarding it would also discard the
+    // out-of-range error an invalid seed raises. Fail closed (D6) instead.
+    const seed = args[0];
+    const literalSeed =
+      (isNumber(seed) && seed.im === 0 && Number.isFinite(seed.re)) ||
+      isString(seed);
+    if (!literalSeed)
+      throw new Error(
+        `WithRandomSeed: only a literal finite real or string seed compiles ` +
+          `on the interval target. Fail closed (D6).`
+      );
+    return compile(args[1]);
+  },
 };
 
 /**
@@ -1048,6 +1135,217 @@ function compileIntervalBound(
 }
 
 /**
+ * Heads that broadcast ELEMENT-WISE over a collection operand in the
+ * interpreter, used by `intervalCollectionElements` to decompose a
+ * collection-valued big-op operand (`Sum([0.64, 0.77]²)`) into per-element
+ * scalar expressions. Deliberately small: only heads whose one-collection
+ * broadcast is a plain per-element map, with every OTHER operand scalar.
+ * A head outside this set leaves the operand undecomposed, and the reduce
+ * form then fails closed rather than guess.
+ *
+ * The rebuild re-emits the scalar SIBLING operand once per element
+ * (`Add(L, s)` compiles `s` for every `L_k`). That is sound on this target
+ * because every interval emission is effect-free and per-call stable —
+ * `Random()` compiles to a constant support interval, and no lowering
+ * writes state — so repeated emission cannot diverge from a once-evaluated
+ * sibling. A future lowering that is NOT per-call stable must hoist the
+ * sibling to a temporary first (the `compileIntervalChain` pattern).
+ */
+const ELEMENTWISE_INTERVAL_HEADS: ReadonlySet<string> = new Set([
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'Negate',
+  'Power',
+  'Square',
+  'Sqrt',
+  'Abs',
+  'Exp',
+  'Ln',
+]);
+
+/**
+ * The per-element EXPRESSIONS of a collection-valued big-op operand, or
+ * `undefined` when the operand cannot be decomposed statically (which makes
+ * the reduce form fall back to the runtime-array path, or fail closed).
+ * At most `budget` elements are produced — mirroring the indexed form's
+ * `INTERVAL_UNROLL_LIMIT` cap on emitted terms.
+ *
+ * Shapes handled, recursively:
+ * - a literal `List`/`Tuple`, written inline or held as a symbol's assigned
+ *   value (`literalCollectionOps`);
+ * - `Range` with literal integer bounds (ascending, unit or literal step);
+ * - `Map(fn, collection)` — each element becomes `Apply(fn, element)`, which
+ *   the `Apply` lowering compiles (and canonicalization may reduce);
+ * - an element-wise head (`ELEMENTWISE_INTERVAL_HEADS`) with exactly ONE
+ *   decomposable collection operand, every other operand provably scalar —
+ *   rebuilt per element (`Power(L, 2)` → `Power(L_k, 2)`).
+ */
+function intervalCollectionElements(
+  e: Expression,
+  target: CompileTarget<Expression>,
+  budget: number
+): ReadonlyArray<Expression> | undefined {
+  const literal = literalCollectionOps(e, target);
+  if (literal !== undefined)
+    return literal.length <= budget ? literal : undefined;
+
+  const node = assignedLiteral(e, target) ?? e;
+  if (!isFunction(node)) return undefined;
+  const ce = node.engine;
+
+  if (node.operator === 'Range') {
+    // The interpreter's contract, mirrored from `literalRange` and the
+    // Range collection handlers (`library/collections.ts`): `Range(hi)`
+    // counts from 1; a two-operand range infers step ±1 from the bounds'
+    // order; real bounds and steps are legal; the element count is
+    // `max(0, floor((hi - lo) / step) + 1)` (a zero step is empty).
+    // Iteration is COUNT-driven with `lo + i·step` elements — an
+    // endpoint-driven `k += step` loop can fail to make progress past
+    // 2^53 and hang the compilation.
+    const nums = node.ops.map((op) =>
+      isNumber(op) && op.im === 0 && Number.isFinite(op.re) ? op.re : undefined
+    );
+    if (nums.some((n) => n === undefined)) return undefined;
+    let lo: number, hi: number, step: number;
+    if (nums.length === 1) [lo, hi, step] = [1, nums[0]!, 1];
+    else if (nums.length === 2)
+      [lo, hi, step] = [nums[0]!, nums[1]!, nums[1]! >= nums[0]! ? 1 : -1];
+    else if (nums.length === 3) [lo, hi, step] = [nums[0]!, nums[1]!, nums[2]!];
+    else return undefined;
+    if (step === 0) return [];
+    const count = Math.max(0, Math.floor((hi - lo) / step) + 1);
+    if (!Number.isFinite(count) || count > budget) return undefined;
+    const elements: Expression[] = [];
+    for (let i = 0; i < count; i++) elements.push(ce.number(lo + i * step));
+    return elements;
+  }
+
+  if (node.operator === 'Map' && node.ops.length === 2) {
+    const inner = intervalCollectionElements(node.ops[1], target, budget);
+    if (inner === undefined) return undefined;
+    const fn = node.ops[0];
+    return inner.map((el) => ce.function('Apply', [fn, el]));
+  }
+
+  if (ELEMENTWISE_INTERVAL_HEADS.has(node.operator)) {
+    let collectionAt = -1;
+    let elements: ReadonlyArray<Expression> | undefined = undefined;
+    for (let i = 0; i < node.ops.length; i++) {
+      const op = node.ops[i];
+      if (op.type.matches('number')) continue;
+      // At most one non-scalar operand, and it must itself decompose.
+      if (collectionAt !== -1) return undefined;
+      const decomposed = intervalCollectionElements(op, target, budget);
+      if (decomposed === undefined) return undefined;
+      collectionAt = i;
+      elements = decomposed;
+    }
+    if (collectionAt === -1 || elements === undefined) return undefined;
+    return elements.map((el) =>
+      ce.function(
+        node.operator,
+        node.ops.map((op, i) => (i === collectionAt ? el : op))
+      )
+    );
+  }
+
+  return undefined;
+}
+
+/**
+ * Compile the collection (reduce) form of `Sum`/`Product` — no indexing set,
+ * the operand IS the collection (`Sum([3, 4, 5])`, the Desmos sum-a-list
+ * spelling; Tycho item 237). A statically decomposable operand
+ * (`intervalCollectionElements`) folds its compiled elements with
+ * `_IA.add`/`_IA.mul`; the empty collection is the identity, matching the
+ * interpreter (`Sum([]) = 0`, `Product([]) = 1`). An operand that is
+ * statically an indexed collection but not decomposable (a vars-supplied
+ * list) folds at run time, `_IA.point`-lifting raw numeric elements; a
+ * runtime scalar returns itself (the interpreter's `Sum(scalar) = scalar`).
+ * Anything else fails closed (D6).
+ */
+function compileIntervalCollectionReduce(
+  kind: 'Sum' | 'Product',
+  operand: Expression,
+  target: CompileTarget<Expression>
+): string {
+  const iaOp = kind === 'Sum' ? '_IA.add' : '_IA.mul';
+  const identity = kind === 'Sum' ? '_IA.point(0)' : '_IA.point(1)';
+  const elements = intervalCollectionElements(
+    operand,
+    target,
+    INTERVAL_UNROLL_LIMIT
+  );
+  if (elements !== undefined) {
+    // A provably NON-numeric element (a string, a boolean, a nested
+    // collection) would reach `_IA.add`/`_IA.mul`, which read `.lo`/`.hi`
+    // off whatever they are handed and answer NaN bounds behind
+    // `success: true` — the same silent-wrong class the scalar-kernel gate
+    // (`assertScalarIntervalOperands`) closes. The interpreter errors on
+    // such an element; fail closed (D6) to match.
+    for (const el of elements) {
+      const t = el.type;
+      if (
+        t.matches('string') ||
+        t.matches('boolean') ||
+        t.matches('collection<any>')
+      )
+        throw new Error(
+          `${kind}: cannot compile the collection form — an element is not ` +
+            `numeric (type \`${t.toString()}\`). Fail closed (D6).`
+        );
+    }
+    if (elements.length === 0) return identity;
+    return elements
+      .map((el) => BaseCompiler.compile(el, target))
+      .reduce((acc, cur) => `${iaOp}(${acc}, ${cur})`);
+  }
+  // The runtime-array fold below hands each element to `_IA.add`/`_IA.mul`,
+  // so it requires elements PROVABLY numeric — the bare shape test
+  // (`isIndexedCollectionOperand`) admits `list<any>`, whose elements are
+  // unconstrained, and a nested list or string element would fold to NaN
+  // bounds behind `success: true` (this is the reduce-form counterpart of
+  // `assertScalarBigOpBody` on the indexed form).
+  // A `Range` that did not decompose (symbolic bounds, or a count past the
+  // unroll budget) has no lowering of its own on this target — the indexed
+  // Sum/Product form reads Range bounds directly and never compiles the
+  // node — so letting it fall through to `BaseCompiler.compile` would
+  // produce a generic "Range has no lowering" error blaming the wrong
+  // node. Name the operation instead.
+  const resolved = assignedLiteral(operand, target) ?? operand;
+  if (isFunction(resolved, 'Range'))
+    throw new Error(
+      `${kind}: cannot compile the collection form — the Range operand has ` +
+        `symbolic bounds or too many elements to expand statically. ` +
+        `Fail closed (D6).`
+    );
+  const elementType = collectionElementType(operand.type.type);
+  const elementsProvablyNumeric =
+    elementType !== undefined &&
+    operand.engine.type(elementType).matches('number');
+  if (!isIndexedCollectionOperand(operand) || !elementsProvablyNumeric) {
+    // Name the OPERATION in the diagnostic, not the operand's head: a
+    // `Range` that did not decompose (symbolic bounds, or past the unroll
+    // budget) has no lowering of its own on this target, and the generic
+    // "Range has no lowering" message would blame the wrong node.
+    throw new Error(
+      `${kind}: cannot compile the collection form — the operand is not a ` +
+        `statically decomposable collection, and its type ` +
+        `(\`${operand.type.toString()}\`) does not prove an indexed ` +
+        `collection of numbers. Fail closed (D6).`
+    );
+  }
+  const code = BaseCompiler.compile(operand, target);
+  return (
+    `((_c) => Array.isArray(_c) ? _c.reduce((_a, _b) => ` +
+    `${iaOp}(_a, typeof _b === 'number' ? _IA.point(_b) : _b), ${identity})` +
+    ` : _c)(${code})`
+  );
+}
+
+/**
  * Compile Sum or Product for the interval arithmetic target.
  *
  * The iteration variable is substituted with `_IA.point(k)` so the
@@ -1063,6 +1361,10 @@ function compileIntervalSumProduct(
   target: CompileTarget<Expression>
 ): string {
   if (!args[0]) throw new Error(`${kind}: no body`);
+  // No indexing set: the collection (reduce) form — the operand IS the
+  // collection (`Sum([3, 4, 5])`). See `compileIntervalCollectionReduce`.
+  if (!args[1] && args.length === 1)
+    return compileIntervalCollectionReduce(kind, args[0], target);
   if (!args[1]) throw new Error(`${kind}: no indexing set`);
 
   // Reject a collection-valued body for the indexed form (see

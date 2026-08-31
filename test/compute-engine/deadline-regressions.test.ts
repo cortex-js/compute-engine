@@ -313,12 +313,20 @@ describe('WP-2.18: huge-exponent BigDecimal serialization (src/big-decimal/big-d
 });
 
 describe('WP-2.11 / EX-14: controls (must remain correct/fast, unaffected)', () => {
-  it('LucasL(1e9) still cancels via its existing deadline check (~2s)', () => {
-    expect(() =>
-      ce.withTimeLimit({ ms: 2000, label: 'test:lucasl-deadline' }, () =>
-        ce.box(['LucasL', 1_000_000_000]).evaluate()
-      )
-    ).toThrow(CancellationError);
+  it('LucasL(1e9) stays symbolic instead of grinding to a deadline', () => {
+    // This control used to pin that the linear loop CANCELS via its
+    // deadline check after ~2 s. `LucasL` now pre-checks the result's digit
+    // count and stays symbolic for huge indices — the `Fibonacci` digit-cap
+    // convention — so the loop is never entered and no deadline is needed:
+    // the answer is immediate on every route, deadline or not (the
+    // no-deadline route, compile-time constant folding included, used to
+    // run this loop unbounded).
+    const r = ce.withTimeLimit({ ms: 2000, label: 'test:lucasl-deadline' }, () =>
+      ce.box(['LucasL', 1_000_000_000]).evaluate()
+    );
+    expect(r.toString()).toBe('LucasL(1000000000)');
+    // A moderate index is still exact.
+    expect(ce.box(['LucasL', 30]).evaluate().toString()).toBe('1860498');
   });
 
   it('Fibonacci(100) is still exact', () => {
