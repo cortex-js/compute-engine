@@ -5661,3 +5661,16 @@ is in git history. The only items deliberately left open:
 recurring bug class (A3, G3, the sets/Union/Range contains family, NaN
 comparisons); validation-by-corpus (the Fungrim harness) found 15 engine bugs
 that targeted review missed — keep running it.
+
+### Load-sensitive test flakes under a full-suite run (observed 2026-08-31)
+
+Three suites failed under a 6-worker full-suite run and pass cleanly — at
+bare HEAD `3e8bd6ed` and with the error-model diff alike — when run alone
+on an idle box, so the failures are contention artifacts, not code defects:
+`functions.test.ts` ("ASYNC LANE KEEPS A SCOPED HANDLER'S LOCAL SCOPE
+ALIVE", 6 tests — concurrency-timing sensitive), `fungrim-loader.test.ts`
+("loads in a reasonable time" — a wall-clock budget pin), and
+`rubi-utils.test.ts` (one R18 closure). If these recur in quiet-box full
+runs, they stop being flakes and deserve a real investigation; until then a
+full-suite report should attribute them before blaming the change under
+test.

@@ -247,6 +247,33 @@
 
 ### Bug Fixes
 
+- **Compiling the same expression always produces the same code, whatever
+  the machine load.** Compile-time constant folding evaluated each
+  constant subtree under a 2-second wall-clock deadline whose expiry was a
+  silent decline, so on a busy machine the same source could compile to
+  the folded constant on one call and to the unfolded expression on the
+  next — values that can differ in the last digits, since a folded value
+  comes from bignum evaluation while the structural lowering computes in
+  doubles. The wall-clock is removed; eligibility now rests entirely on
+  the deterministic work estimate, which gains a price for the one
+  evaluation class it could not see: a definite integral is charged its
+  adaptive-quadrature worst case (~22 500 integrand evaluations per
+  nesting level), so a cheap constant integral still folds to its value
+  while an iterated integral deterministically compiles through its
+  numeric emitter instead; a numeric `Limit` (whose non-settling fallback
+  is a million-evaluation extrapolation) never folds. A caller-armed
+  ambient deadline still cancels the whole compilation.
+
+  The same audit closed four value-scaled library loops that ran
+  unbounded on any route with no deadline armed: `NthPrime` and
+  `NextPrime` now stop with an `iteration-limit-exceeded` cancellation
+  after 10⁷ candidate steps (the `PrimePi` convention), and `LucasL` and
+  `CatalanNumber` stay symbolic when the exact result would exceed a
+  million digits (the `Fibonacci` convention — a step counter cannot
+  bound a loop whose bigint operands grow with every iteration, so
+  `LucasL(10⁹)` now answers symbolically at once instead of grinding
+  toward a deadline).
+
 - **Setting a symbol's type to a signature no longer corrupts the stored
   signature.** `f.type = '(integer) -> integer'` on a symbol that already
   had an operator definition stored the raw type node in the signature

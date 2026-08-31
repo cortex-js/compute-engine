@@ -1,7 +1,7 @@
-let x ;
-print(Type(x))
-Heaviside(x)
-
+// let x ;
+// print(Type(x))
+// Heaviside(x)
+print(Type(List(Tuple(0, 1), Tuple(10, 100))))
 
 // const f: (integer) -> list
 // let xs: list;
