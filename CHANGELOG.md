@@ -136,6 +136,47 @@
 
 ### New Features
 
+- **Operator definitions can declare their error-model contract.** Four new
+  declaration fields implement the ratified error model
+  (`docs/ERROR-MODEL.md` §4, Contract B):
+  - `nanBehavior: 'propagate' | 'handle' | 'reject'` — how a `NaN` argument
+    is treated, per parameter slot or for the whole operator. Without a
+    declaration the policy is derived from the signature: a slot whose type
+    still admits `nan` (such as bare `number`) keeps its current behavior;
+    a slot with a precise numeric type propagates (`NaN` in → `NaN` out)
+    when the result is numeric, and rejects otherwise. `IsPrime` and
+    `IsComposite` declare `handle` (they answer `False`).
+  - `partiality: 'total' | 'may-marker'` — whether membership in the
+    parameter types proves the operation succeeds. Omitted means
+    `may-marker`, the sound default.
+  - `definedWhen(args)` — the named mathematical domain condition. A
+    provably false condition returns `NaN` for a numeric result type,
+    before the handler runs. `Mod` declares it: the operands must be finite
+    reals and the divisor must not be zero.
+  - `requires(args)` — a contract precondition. A provably false
+    precondition returns an error.
+
+  One behavior change follows from the derived policy: an operator that
+  already declares a precise numeric parameter type — such as
+  `Degrees: (real) -> real` — now accepts a `NaN` argument and returns
+  `NaN`, where it used to report an `incompatible-type` error.
+
+- **`interval-js` target: a second lowering batch** (Tycho item 237, the
+  item-220 mold). `Choose` lowers to the existing `_IA.binomial` runtime
+  helper; `Apply` of a function literal — the `f'` prime-derivative
+  spelling — compiles to a direct call of the compiled arrow;
+  `WithRandomSeed`/`Random()` are enclosed by the draw's SUPPORT
+  (`[0, 1]`), which is a sound band for any draw on any evaluation — the
+  seeded sequence is deliberately NOT threaded through, since the interval
+  lane samples at different points than the scalar lane and its draws
+  would not enclose the plotted values; and the index-less `Sum` over a
+  collection body (the Desmos sum-a-list spelling) folds its elements with
+  `_IA.add` — a literal list, a literal `Range`, a `Map` over one, or an
+  element-wise head over one decomposes statically, an
+  indexed-collection-typed operand folds at run time, and anything else
+  fails closed (D6). `Random(source)` (an interval, range, or collection
+  source) also fails closed rather than guess its support.
+
 - **Boolean value types.** A predicate whose operands' TYPES prove its
   verdict now carries that verdict as its type: `1 < 2` types `true`,
   `Equal(a, a)` types `true` for a NaN-free real `a`, `p > q` types `true`
@@ -310,7 +351,15 @@
   runtime division by zero now give the same infinite magnitude. Indeterminate
   forms such as `0/0` and `0 * Infinity` still give `NaN`. Only the magnitude
   is guaranteed. The sign can differ between a folded expression and an
-  equivalent expression that is evaluated at runtime.
+  equivalent expression that is evaluated at runtime. The same projection
+  applies to arguments: a `~oo` value passed to a compiled function becomes
+  `Infinity` at the boundary instead of causing an error. As a consequence,
+  compiled `Heaviside(~oo)` returns `1` and compiled `~oo > 0` returns
+  `true`, where the interpreter keeps both symbolic. Function clauses that
+  match on a non-finite type (`infinity`, `nan`, `non_finite_number`) or on
+  a non-finite literal value still cause the whole function to fall back to
+  the interpreter, because float arithmetic cannot keep these classes
+  distinct.
 
 - **A selection with no selected branch now returns `Missing`.** This applies
   to `Which` and to `If` without an `else` branch. A result type includes

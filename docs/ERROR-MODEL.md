@@ -899,6 +899,20 @@ answer and the fix landed. An entry with no FIXED date is still open.
   fold and by runtime). `NaN` stays reserved for the indeterminate
   (`0/0`, `0·∞`) and for `propagate`. Documented as the float-target
   carve-out in `docs/COMPILATION-MODEL.md`; conformed pins in the suite.
+- **RULED 2026-08-30 (pole-encoding extension, shipped): the projection
+  also applies at the argument boundary** — a `~oo` value passed into
+  compiled code becomes `+Infinity` at entry instead of throwing (a
+  genuine complex value still rejects on a real lane). The second half
+  of the proposal — re-admitting `infinity`/`nan` parameter clause
+  guards under the now-faithful encoding — was REFUTED by measurement:
+  float arithmetic degrades one non-finite class into another before a
+  guard runs (compiled `1/w - 1/w` at `w = 0` is `NaN`; the
+  interpreter's operand stays `~oo`), so every non-finite primitive
+  clause type AND every non-finite value-literal clause still declines
+  the whole function. Two accepted divergences, recorded in
+  `ROADMAP.md`: compiled `Heaviside(~oo)` → `1` and compiled
+  `~oo > 0` → `true`, both symbolic in the interpreter. Details in
+  `docs/COMPILATION-MODEL.md`.
 - **The table above conflates two boxing behaviors**: `1/0` folds to `~oo`
   AT BOXING, but `Factorial(-2)` boxes as an unevaluated application and
   reaches `~oo` only at `evaluate()`. Both conform to rule 3; the shared

@@ -823,7 +823,15 @@ export function runtimeConformanceError(
   cacheKey: object,
   signature: BoxedType,
   broadcastable: boolean,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  /** Contract B per-slot NaN policy (`docs/ERROR-MODEL.md` §4): a
+   * proven-`NaN` operand in a `propagate`/`handle` slot was ADMITTED past
+   * the carrier at boxing, so re-testing it here must not refute what the
+   * policy admitted — the policy gate (dispatch step 4a-0) and the handler
+   * own it. Mirrors `nanPolicyAdmitsParam` on the static route. */
+  nanPolicyAt?: (
+    index: number
+  ) => 'reject' | 'propagate' | 'handle' | 'inert'
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
   const allArms = runtimeConformanceArms(cacheKey, signature);
@@ -835,9 +843,18 @@ export function runtimeConformanceError(
 
   // The verdict for one operand against one (non-null) parameter:
   // `true` = this operand refutes the parameter.
-  const refutes = (op: Expression, param: RuntimeCheckParam): boolean => {
+  const refutes = (
+    op: Expression,
+    param: RuntimeCheckParam,
+    idx: number
+  ): boolean => {
     if (!op.isValid) return false;
     if (broadcastable && couldBeUnkeyedCollectionOperand(op)) return false;
+    // Contract B NaN admission — see the `nanPolicyAt` parameter above.
+    if (op.isNaN === true && nanPolicyAt !== undefined) {
+      const policy = nanPolicyAt(idx);
+      if (policy === 'propagate' || policy === 'handle') return false;
+    }
     const v = concreteValueOf(op);
     if (v === undefined && !isSymbol(op, 'Nothing')) return false;
     // A collection-shaped value at a parameter with a collection arm is the
@@ -857,7 +874,7 @@ export function runtimeConformanceError(
     for (let i = 0; i < ops.length; i++) {
       const param = armParamAt(arm, i);
       if (param === null) continue;
-      if (refutes(ops[i], param)) {
+      if (refutes(ops[i], param, i)) {
         accepted = false;
         anyRefuted = true;
         break;
@@ -873,7 +890,7 @@ export function runtimeConformanceError(
   // to the first arm's first refuted position.)
   for (let i = 0; i < ops.length; i++) {
     const params = arms.map((a) => armParamAt(a, i));
-    if (params.some((p) => p === null || !refutes(ops[i], p))) continue;
+    if (params.some((p) => p === null || !refutes(ops[i], p, i))) continue;
     const expected: Type =
       params.length === 1
         ? params[0]!.t
@@ -882,7 +899,7 @@ export function runtimeConformanceError(
   }
   for (let i = 0; i < ops.length; i++) {
     const param = armParamAt(arms[0], i);
-    if (param !== null && refutes(ops[i], param))
+    if (param !== null && refutes(ops[i], param, i))
       return ce.typeError(param.t, ops[i].type, ops[i]);
   }
   return undefined;
@@ -1487,6 +1504,30 @@ function strippedMatchesParam(
   return stripped === 'never' || isSubtype(stripped, param);
 }
 
+/**
+ * Contract B NaN admission (`docs/ERROR-MODEL.md` §4, composition rule
+ * step 1): the NaN policy is tested BEFORE ordinary type disjointness, so a
+ * proven-`NaN` operand in a `propagate` or `handle` slot is admitted even
+ * though `nan` lies outside the slot's carrier — the runtime gate (or the
+ * handler) owns it from there. A `reject` slot deliberately gets NO
+ * carve-in: the ordinary carrier mismatch already produces the immediate
+ * `Error` the policy asks for. Inert while the operator's carriers admit
+ * `nan` (`resolvedNanBehaviorAt` answers `'inert'` there), which is every
+ * operator not yet migrated to precise Contract B carriers.
+ */
+function nanPolicyAdmitsParam(
+  op: Expression,
+  idx: number,
+  nanPolicyAt?: (
+    index: number
+  ) => 'reject' | 'propagate' | 'handle' | 'inert'
+): boolean {
+  if (!nanPolicyAt) return false;
+  if (op.isNaN !== true) return false;
+  const policy = nanPolicyAt(idx);
+  return policy === 'propagate' || policy === 'handle';
+}
+
 /** Engine-internal knobs of {@link validateArguments} (phase 2c of
  * `docs/TYPE-SYSTEM.md`). Not for library callers. */
 export interface ValidateArgumentsInternals {
@@ -1498,6 +1539,15 @@ export interface ValidateArgumentsInternals {
    * The winning arm's REAL validation — non-trial, no frame — performs any
    * repairs, exactly once. */
   trial?: boolean;
+  /** Contract B per-slot NaN policy of the operator being validated
+   * (`docs/ERROR-MODEL.md` §4). When present, a proven-`NaN` operand in a
+   * `propagate`/`handle` slot is admitted ahead of type disjointness — see
+   * {@link nanPolicyAdmitsParam}. Passed by the operator boxing sites,
+   * which have the definition in hand; ad-hoc library validations against
+   * literal signatures do not pass it and keep plain carrier semantics. */
+  nanPolicyAt?: (
+    index: number
+  ) => 'reject' | 'propagate' | 'handle' | 'inert';
   /** Second-pass trial: the R1 overlap admission is active inside this
    * trial. The FIRST resolution pass keeps trials strict, so an arm that
    * strictly accepts always beats one that merely overlaps — a declared
@@ -1645,6 +1695,9 @@ export function validateArguments(
                   trial: true,
                   overlapTrial: overlapTrial || undefined,
                   armSolution: solution,
+                  // The NaN policy is the operator's, not the arm's, so it
+                  // rides into every arm trial unchanged.
+                  nanPolicyAt: internals?.nanPolicyAt,
                   // The arity verdict at an arrow slot is worded around the
                   // operator's name and DECLINES without one, so an unnamed
                   // trial would judge an inapplicable callback admissible and
@@ -2075,6 +2128,14 @@ export function validateArguments(
         deferredIdx.add(result.length - 1);
         continue;
       }
+      // Contract B NaN admission — see `nanPolicyAdmitsParam`. Deferred
+      // like the sibling admissions: the final `_infer(param)` pass must
+      // not narrow a `nan`-typed symbol to the carrier.
+      if (nanPolicyAdmitsParam(op, idx, internals?.nanPolicyAt)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        continue;
+      }
       if (internals?.trial) {
         // TRIAL mode: the two construction-level repairs are admitted by
         // their write-free preconditions and NOT executed — a repair
@@ -2289,6 +2350,13 @@ export function validateArguments(
         i += 1;
         continue;
       }
+      // Contract B NaN admission — see the required-param gate.
+      if (nanPolicyAdmitsParam(op, i, internals?.nanPolicyAt)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        i += 1;
+        continue;
+      }
       // Overlap-deferred validation (§D6.2) — see the required-param gate.
       if (overlapsForDeferredValidation(op.type.type, param)) {
         result.push(op);
@@ -2443,6 +2511,12 @@ export function validateArguments(
         // Strip-before-validate (§3.B) — see the required-param gate. The
         // operand index is `i - 1` (already incremented at the loop top).
         if (strippedMatchesParam(op, varParam, i - 1, stripMissing)) {
+          result.push(op);
+          deferredIdx.add(result.length - 1);
+          continue;
+        }
+        // Contract B NaN admission — see the required-param gate.
+        if (nanPolicyAdmitsParam(op, i - 1, internals?.nanPolicyAt)) {
           result.push(op);
           deferredIdx.add(result.length - 1);
           continue;

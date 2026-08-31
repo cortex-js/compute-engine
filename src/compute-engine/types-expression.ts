@@ -245,6 +245,22 @@ type OperatorDefinitionFlags = {
   namedArgumentsRequired: boolean;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
   missingStrip: 'all' | number[];
+  /** Per-parameter NaN policy of Contract B (`docs/ERROR-MODEL.md` §4). A
+   * single value applies to every slot; an array is per-slot. See
+   * `types-definitions.ts`. */
+  nanBehavior?:
+    | 'reject'
+    | 'propagate'
+    | 'handle'
+    | ReadonlyArray<'reject' | 'propagate' | 'handle' | undefined>;
+  /** Contract B partiality claim; omitted means `'may-marker'`. See
+   * `types-definitions.ts`. */
+  partiality?: 'total' | 'may-marker';
+  /** Named mathematical domain condition (false → the codomain marker). See
+   * `types-definitions.ts`. */
+  definedWhen?: (ops: ReadonlyArray<Expression>) => boolean | undefined;
+  /** Contract precondition (false → `Error`). See `types-definitions.ts`. */
+  requires?: (ops: ReadonlyArray<Expression>) => boolean | undefined;
   associative: boolean;
   commutative: boolean;
   /** Permutation matching without the canonical sort `commutative` implies.
@@ -371,6 +387,14 @@ interface BoxedOperatorDefinition
     | 'handle'
     | 'pass-through';
   stripsMissingAt(i: number): boolean;
+  /** The resolved Contract B NaN policy for parameter position `i`. See
+   * `types-definitions.ts`. */
+  resolvedNanBehaviorAt(
+    i: number
+  ): 'reject' | 'propagate' | 'handle' | 'inert';
+  /** The resolved Contract B partiality of the declaration. See
+   * `types-definitions.ts`. */
+  readonly resolvedPartiality: 'total' | 'may-marker' | 'defined-when';
   /** True if operand position `i` may INVOKE a function-valued operand.
    * See `types-definitions.ts`. */
   invokesAt(i: number): boolean;

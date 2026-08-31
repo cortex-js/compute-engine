@@ -3961,6 +3961,104 @@ export class BoxedFunction
       }
 
       //
+      // 4a-0/ Contract B NaN-policy gate (`docs/ERROR-MODEL.md` §4). Runs
+      // BEFORE the missing-value gate so the stronger channel wins when both
+      // fire (§4 composition rule step 3: a `reject`-slot `NaN` → `Error`
+      // beats a propagating absence → `NaN`). The gate reads the RESOLVED
+      // per-slot policy: for every operator whose carriers still admit `nan`
+      // the policy is `'inert'` and the gate stands down — `NaN` is an
+      // ordinary domain member there and the handler owns it — so behavior
+      // only binds as signatures migrate to precise Contract B carriers (or
+      // declare `nanBehavior` explicitly). Runs on the EVALUATED tail, so
+      // sibling operands' effects and evaluation counts never change (§4
+      // composition rule step 2). The collection-shape stand-down and the
+      // per-element broadcast re-entry are the missing gate's (4a below);
+      // this test must stay in lockstep with its twin in `evaluateAsync`
+      // (step 3a-0).
+      //
+      if (
+        def instanceof _BoxedOperatorDefinition &&
+        // Lazy operators are a sanctioned opt-out (`docs/ERROR-MODEL.md`
+        // §4): they own their operand handling — a held operand's NaN can
+        // carry operator-specific meaning (`WithRandomSeed` answers its own
+        // structured out-of-range error for a NaN seed) — and the dispatch
+        // conformance check excludes them for the same reason.
+        def.lazy !== true &&
+        tail.some((x) => x.isNaN === true) &&
+        // The collection stand-down is scoped to BROADCASTABLE operators:
+        // only there does the element-wise broadcast re-enter this gate per
+        // cell. A non-broadcastable operator takes a collection operand as
+        // an ordinary whole value, so the policy on its scalar slots still
+        // applies.
+        !(
+          def.broadcastable === true &&
+          tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
+        )
+      ) {
+        let sawPropagate = false;
+        for (let i = 0; i < tail.length; i++) {
+          if (tail[i].isNaN !== true) continue;
+          const policy = def.resolvedNanBehaviorAt(i);
+          if (policy === 'reject')
+            return this.engine.error([
+              'unexpected-argument',
+              tail[i].toString(),
+            ]);
+          if (policy === 'propagate') sawPropagate = true;
+        }
+        // Across channels the stronger verdict wins (`docs/ERROR-MODEL.md`
+        // §4, composition rule step 3): when the MISSING channel is about
+        // to reject — an absent operand at a `reject` operator, decided by
+        // the missing gate below — that Error beats this quiet NaN, so fall
+        // through instead of answering.
+        if (
+          sawPropagate &&
+          !(
+            def.resolvedMissingBehavior === 'reject' &&
+            tail.some((x) => isSymbol(x, 'Missing'))
+          )
+        )
+          return this.engine.NaN;
+      }
+
+      //
+      // 4a-1/ Contract B partiality channels (`docs/ERROR-MODEL.md` §4; the
+      // minimal generic enforcement of Phase D of
+      // `docs/plans/2026-08-30-error-model-implementation.md`). `requires`
+      // is the contract precondition — provably false → the Error channel
+      // (§2 rule 6). `definedWhen` is the mathematical domain condition —
+      // provably false → the codomain marker (§2 rule 4): `NaN` for a
+      // numeric result type, while a non-numeric codomain is left to the
+      // handler, which owns its own marker vocabulary. Runs on the
+      // evaluated tail, after the NaN row (the §4 behavior table orders the
+      // NaN policy first), with the broadcast stand-down of the sibling
+      // gates. An `undefined` verdict (undecidable for these arguments)
+      // falls through to the handler. Lockstep twin: `evaluateAsync`
+      // step 3a-1.
+      //
+      if (
+        def instanceof _BoxedOperatorDefinition &&
+        // Lazy operators are a sanctioned opt-out — see the NaN gate above.
+        def.lazy !== true &&
+        (def.requires !== undefined || def.definedWhen !== undefined) &&
+        !(
+          def.broadcastable === true &&
+          tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
+        )
+      ) {
+        if (def.requires?.(tail) === false)
+          return this.engine.error([
+            'evaluation-error',
+            `the arguments do not satisfy the precondition of ${this.operator}`,
+          ]);
+        if (
+          def.definedWhen?.(tail) === false &&
+          def.signatureResultIsNumeric
+        )
+          return this.engine.NaN;
+      }
+
+      //
       // 4a/ Missing-value behavior gate (§3.E of the missing-value typing
       // design). A `propagate` operator with an absent SCALAR operand
       // (`Missing`, or a `NaN`) yields `NaN` in the numeric result cell (I6
@@ -4560,6 +4658,83 @@ export class BoxedFunction
         this,
         async (x) => await x.evaluateAsync(options)
       );
+
+      //
+      // 3a-0/ Contract B NaN-policy gate — parity with the sync path's step
+      // 4a-0 (the two must stay in lockstep). Before the missing gate so the
+      // stronger channel wins; inert for every wide-carrier operator.
+      //
+      if (
+        def instanceof _BoxedOperatorDefinition &&
+        // Lazy operators are a sanctioned opt-out (`docs/ERROR-MODEL.md`
+        // §4): they own their operand handling — a held operand's NaN can
+        // carry operator-specific meaning (`WithRandomSeed` answers its own
+        // structured out-of-range error for a NaN seed) — and the dispatch
+        // conformance check excludes them for the same reason.
+        def.lazy !== true &&
+        tail.some((x) => x.isNaN === true) &&
+        // The collection stand-down is scoped to BROADCASTABLE operators:
+        // only there does the element-wise broadcast re-enter this gate per
+        // cell. A non-broadcastable operator takes a collection operand as
+        // an ordinary whole value, so the policy on its scalar slots still
+        // applies.
+        !(
+          def.broadcastable === true &&
+          tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
+        )
+      ) {
+        let sawPropagate = false;
+        for (let i = 0; i < tail.length; i++) {
+          if (tail[i].isNaN !== true) continue;
+          const policy = def.resolvedNanBehaviorAt(i);
+          if (policy === 'reject')
+            return this.engine.error([
+              'unexpected-argument',
+              tail[i].toString(),
+            ]);
+          if (policy === 'propagate') sawPropagate = true;
+        }
+        // Across channels the stronger verdict wins (`docs/ERROR-MODEL.md`
+        // §4, composition rule step 3): when the MISSING channel is about
+        // to reject — an absent operand at a `reject` operator, decided by
+        // the missing gate below — that Error beats this quiet NaN, so fall
+        // through instead of answering.
+        if (
+          sawPropagate &&
+          !(
+            def.resolvedMissingBehavior === 'reject' &&
+            tail.some((x) => isSymbol(x, 'Missing'))
+          )
+        )
+          return this.engine.NaN;
+      }
+
+      //
+      // 3a-1/ Contract B partiality channels — parity with the sync path's
+      // step 4a-1 (the two must stay in lockstep). `requires` false →
+      // Error; `definedWhen` false → `NaN` for a numeric codomain.
+      //
+      if (
+        def instanceof _BoxedOperatorDefinition &&
+        // Lazy operators are a sanctioned opt-out — see the NaN gate above.
+        def.lazy !== true &&
+        (def.requires !== undefined || def.definedWhen !== undefined) &&
+        !(
+          def.broadcastable === true &&
+          tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
+        )
+      ) {
+        if (def.requires?.(tail) === false)
+          return this.engine.error([
+            'evaluation-error',
+            `the arguments do not satisfy the precondition of ${this.operator}`,
+          ]);
+        if (
+          def.definedWhen?.(tail) === false &&
+          def.signatureResultIsNumeric
+        )
+          return this.engine.NaN;
+      }
 
       //
       // 3a/ Missing-value behavior gate (§3.E) — parity with the sync path's
@@ -6894,7 +7069,10 @@ function genericRuntimeConformance(
     def,
     def.signature,
     def.broadcastable === true,
-    ops
+    ops,
+    // Contract B NaN policy: an operand the boxing admission carved in must
+    // not be re-refuted at dispatch (`docs/ERROR-MODEL.md` §4).
+    (i) => def.resolvedNanBehaviorAt(i)
   );
 }
 

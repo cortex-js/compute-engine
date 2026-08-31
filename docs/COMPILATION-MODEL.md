@@ -32,6 +32,28 @@ promise; the sign is the direction `~oo` does not have, and a float lane
 may report either. Code that must not see a signed answer at a pole should
 test `Number.isFinite`, never the sign.
 
+The carve-out also covers the ARGUMENT boundary (extension ruled
+2026-08-30): a `~oo` value passed INTO compiled code projects to
+`+Infinity` at entry (`isUnsignedPole` in the JavaScript target), so one
+pole has one spelling on both the produced and the boundary routes. A
+genuine complex value with a nonzero imaginary part still rejects at a
+real-lane entry; only the unsigned pole projects.
+
+The projection does NOT make non-finite clause guards compilable. Float
+arithmetic can degrade one non-finite class into another before a guard
+runs — compiled `1/w - 1/w` at `w = 0` computes `Infinity - Infinity =
+NaN` while the interpreter's operand stays `~oo` — so a parameter guard
+typed `infinity`, `nan`, or `non_finite_number`, and a clause guarded on
+a non-finite VALUE literal (`oo`, `-oo`, `NaN`), each decline the whole
+function. This was measured, not assumed: re-admitting the `infinity`
+and `nan` guards under the boundary projection made each diverge from
+the interpreter through the degradation route. Restoring compilability
+here requires a tagged pole representation (a full pole lane), not a
+cheaper encoding. Two divergences from the projection itself are
+accepted and pinned: compiled `Heaviside(~oo)` answers `1` and compiled
+`~oo > 0` answers `true`, where the interpreter leaves both symbolic
+(both formerly threw at the boundary).
+
 ## Target boundaries
 
 The JavaScript target supports the broadest dynamic representation. Python,

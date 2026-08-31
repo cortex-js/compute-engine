@@ -2015,6 +2015,33 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       signature: '(number, number) -> number',
+      // The named domain condition (Contract B, `docs/ERROR-MODEL.md` §4):
+      // a floored remainder exists exactly for a finite real dividend and a
+      // finite, non-zero real modulus — the same condition the `type`
+      // handler below reasons from. `false` routes to the codomain marker
+      // (`Mod(1, 0)` → `NaN`), never to `Error`; an undecidable operand (a
+      // symbol, an unevaluated compound) answers `undefined`.
+      definedWhen: ([dividend, divisor]) => {
+        if (dividend === undefined || divisor === undefined) return undefined;
+        if (!isNumber(dividend) || !isNumber(divisor)) return undefined;
+        if (divisor.isSame(0)) return false;
+        // A provably non-real or infinite operand has no floored remainder.
+        if (
+          dividend.isExtendedReal === false ||
+          divisor.isExtendedReal === false
+        )
+          return false;
+        if (dividend.isFinite === false || divisor.isFinite === false)
+          return false;
+        if (
+          dividend.isExtendedReal !== true ||
+          divisor.isExtendedReal !== true ||
+          dividend.isFinite !== true ||
+          divisor.isFinite !== true
+        )
+          return undefined;
+        return true;
+      },
       type: ([a, b]) => {
         if (!a || !b) return 'number';
         // A floored remainder is defined only for a finite real dividend and a
@@ -3881,6 +3908,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // enforced in the handler instead, where it answers the same
       // `incompatible-type` error without touching inference.
       signature: '(number) -> boolean',
+      nanBehavior: 'handle',
       evaluate: ([n], { engine }) => {
         const outOfDomain = notFiniteEnoughForPrimality(engine, n);
         if (outOfDomain !== undefined) return outOfDomain;
@@ -3897,6 +3925,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // The same carrier as `IsPrime`, for the same reasons — see there.
       signature: '(number) -> boolean',
+      nanBehavior: 'handle',
       // A composite number is a positive integer greater than 1 that is not
       // prime, so `0`, `1`, the negative integers and every non-integer are
       // neither prime nor composite. Compositeness is therefore not the

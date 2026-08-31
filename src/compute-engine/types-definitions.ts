@@ -1992,6 +1992,75 @@ export type OperatorDefinitionFlags = {
    */
   missingStrip: 'all' | number[];
 
+  /**
+   * How this operator treats a `NaN` argument, per Contract B of
+   * `docs/ERROR-MODEL.md` §4 (ratified 2026-08-27). Symmetric with
+   * `missingBehavior`:
+   *
+   * - `'propagate'` — a `NaN` in the slot makes the application evaluate to
+   *   `NaN`.
+   * - `'handle'` — the handler sees the `NaN` and answers in its own
+   *   codomain (membership predicates: `IsPrime(NaN)` → `False`). Always an
+   *   explicit opt-in — a boolean codomain never implies the handler
+   *   understands `NaN`.
+   * - `'reject'` — a `NaN` in the slot is a contract violation → `Error`
+   *   (an index, a digit count, a dimension).
+   *
+   * A single value applies to every parameter slot; an array gives per-slot
+   * values (a hole falls back to the derived default).
+   *
+   * If undeclared, the *resolved* per-slot policy is derived mechanically
+   * from the signature — see
+   * {@link BoxedOperatorDefinition.resolvedNanBehaviorAt}. While the slot's
+   * declared carrier still ADMITS `nan` (bare `number`, `any`, a union with
+   * `nan`), the policy channel is inert: `NaN` is an ordinary domain member
+   * there and the handler owns it, which is the status quo for every
+   * operator that has not yet migrated to a precise Contract B carrier.
+   */
+  nanBehavior?:
+    | 'reject'
+    | 'propagate'
+    | 'handle'
+    | ReadonlyArray<'reject' | 'propagate' | 'handle' | undefined>;
+
+  /**
+   * The partiality declaration of Contract B (`docs/ERROR-MODEL.md` §4):
+   * does membership in the carrier types prove success?
+   *
+   * - `'total'` — every argument inside the carriers has a successful
+   *   result, on the numeric route as well (the value's float image is
+   *   representable). A strong claim; opt in only when it is true.
+   * - `'may-marker'` — a domain or numeric-route failure is possible
+   *   without naming the condition. **The default when omitted** — the
+   *   sound assumption for every operator.
+   *
+   * An operator that can NAME its domain condition declares `definedWhen`
+   * instead; declaring both `partiality: 'total'` and `definedWhen` is a
+   * definition error.
+   */
+  partiality?: 'total' | 'may-marker';
+
+  /**
+   * The named *mathematical* domain condition of Contract B: the arguments
+   * for which this operator has a value (`Mod`: the divisor is not zero).
+   * `false` routes to the codomain marker channel (rule 4 of
+   * `docs/ERROR-MODEL.md` §2), never to `Error`; `undefined` means the
+   * condition cannot be decided for these arguments (unbound symbols).
+   * Declaring it supersedes `partiality` (the partiality IS this
+   * predicate).
+   */
+  definedWhen?: (ops: ReadonlyArray<Expression>) => boolean | undefined;
+
+  /**
+   * A *contract* precondition of Contract B: a well-formedness requirement
+   * on the arguments that is not a mathematical domain condition
+   * (`MatrixMultiply`: the inner dimensions agree; an option value in
+   * range). `false` routes to the `Error` channel (rule 6 of
+   * `docs/ERROR-MODEL.md` §2); `undefined` means undecidable for these
+   * arguments.
+   */
+  requires?: (ops: ReadonlyArray<Expression>) => boolean | undefined;
+
   /** If `true`, `["f", ["f", a], b]` simplifies to `["f", a, b]`
    *
    * **Default**: `false`
@@ -2320,6 +2389,28 @@ export interface BoxedOperatorDefinition
    * validation (§3.A). Only `propagate`/`handle` operators strip; `missingStrip`
    * selects the positions. */
   stripsMissingAt(i: number): boolean;
+
+  /**
+   * The *resolved* NaN policy for parameter position `i` (Contract B,
+   * `docs/ERROR-MODEL.md` §4). An explicit `nanBehavior` declaration wins.
+   * Otherwise, while the slot's declared carrier admits `nan` (bare
+   * `number`, an inferred signature, a union with `nan`) the answer is
+   * `'inert'` — `NaN` is an ordinary domain member and the handler owns
+   * it. For a precise carrier that excludes `nan`, the derived default is
+   * `'propagate'` when the carrier is a subtype of `complex` that is not a
+   * subtype of `integer` and the result type is numeric, `'reject'`
+   * otherwise. Recomputed from the current signature — never cached.
+   */
+  resolvedNanBehaviorAt(
+    i: number
+  ): 'reject' | 'propagate' | 'handle' | 'inert';
+
+  /**
+   * The *resolved* partiality of the declaration (Contract B): the
+   * declared `partiality`, `'defined-when'` when a `definedWhen` predicate
+   * is declared, and the sound `'may-marker'` default when nothing is.
+   */
+  readonly resolvedPartiality: 'total' | 'may-marker' | 'defined-when';
 
   /** True if operand position `i` may INVOKE a function-valued operand — the
    * per-position reader for the `invokes` flag of {@link OperatorDefinitionFlags}.

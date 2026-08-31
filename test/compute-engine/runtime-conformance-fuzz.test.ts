@@ -108,7 +108,12 @@ const SKIP = new Set([
   'Forget',
 ]);
 
-type Outcome = 'error' | 'inert' | 'value' | 'throw';
+// `nan-propagated` is the Contract B propagate policy answering
+// (`docs/ERROR-MODEL.md` §4): a `NaN` probe into a precise numeric carrier
+// with a numeric result evaluates to `NaN`. That is CONFORMANT behavior —
+// the declared (or derived) per-slot NaN policy, not a handler trusting the
+// static gate — so it is counted separately from `value`.
+type Outcome = 'error' | 'inert' | 'value' | 'nan-propagated' | 'throw';
 type Row = { key: string; lazy: boolean; outcome: Outcome; detail: string };
 
 function runFuzz(): Row[] {
@@ -280,6 +285,8 @@ function runFuzz(): Row[] {
         if (!result.isValid) outcome = 'error';
         else if (result.operator === canonicalOp || result.isSame(call))
           outcome = 'inert';
+        else if (probeName === 'nan' && result.isNaN === true)
+          outcome = 'nan-propagated';
         else outcome = 'value';
         rows.push({
           key,

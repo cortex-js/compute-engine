@@ -86,12 +86,15 @@ Checklist (the sites follow the adding-a-primitive-type pattern):
 - [x] CHANGELOG entry naming the NEW PRIMITIVES explicitly (downstream
       consumers match primitive names as literal strings; every new
       name must be called out).
-- [ ] **Tycho heads-up (exit item):** send the exact list of new type
+- [x] **Tycho heads-up (exit item):** send the exact list of new type
       names and singleton spellings, and the Phase 1/2 retirement list
       (`finite_number`, `finite_complex`, `finite_real`,
       `finite_rational`, `finite_integer`, `non_finite_number`), so
       their name-switch classifiers get lead time before the breaking
-      release.
+      release. Sent to the Tycho POC session 2026-08-29: new primitives,
+      the `matches('real')` silent break, the retirement/alias contract,
+      the `isExtendedReal` rename, and the `BoxedType.finite_*` statics
+      removal.
 
 Exit gate: `npm run typecheck` + full-src native tsc clean; full suite
 green under the box lock; snapshot delta ~0 (report the exact count);

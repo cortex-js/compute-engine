@@ -85,6 +85,10 @@ const OPERATOR_DEF_KEYS = new Set([
   'namedArgumentsRequired',
   'missingBehavior',
   'missingStrip',
+  'nanBehavior',
+  'partiality',
+  'definedWhen',
+  'requires',
   'associative',
   'commutative',
   'commutativeMatch',
@@ -171,6 +175,31 @@ function signatureAllParamsNumeric(signature: Type): boolean {
   return params.every((t) => isSubtype(t, 'number'));
 }
 
+/**
+ * The declared carrier type of parameter position `i` (0-based): the
+ * required parameters first, then the optional ones, and past both every
+ * position belongs to the variadic parameter. `undefined` for a
+ * non-signature type and for a position beyond a non-variadic signature.
+ * Used by the Contract B NaN-policy resolution
+ * ({@link _BoxedOperatorDefinition.resolvedNanBehaviorAt}).
+ *
+ * An OVERLOAD SET deliberately answers `undefined` — and the resolution
+ * therefore answers `'inert'`, the conservative floor: with several arms
+ * there is no single carrier to derive a policy from, so the operator
+ * keeps plain carrier semantics until it declares `nanBehavior`
+ * explicitly (or until per-arm derivation lands — a Phase C/E item of
+ * `docs/plans/2026-08-30-error-model-implementation.md`).
+ */
+function parameterTypeAt(signature: Type, i: number): Type | undefined {
+  if (typeof signature === 'string') return undefined;
+  if (signature.kind !== 'signature') return undefined;
+  const req = signature.args ?? [];
+  if (i < req.length) return req[i].type;
+  const opt = signature.optArgs ?? [];
+  if (i < req.length + opt.length) return opt[i - req.length].type;
+  return signature.variadicArg?.type;
+}
+
 export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   engine: ComputeEngine;
 
@@ -188,6 +217,23 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   namedArgumentsRequired = false;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
   missingStrip: 'all' | number[] = 'all';
+  /** Contract B per-parameter NaN policy (`docs/ERROR-MODEL.md` §4). A single
+   * value applies to every slot; an array is per-slot with holes falling back
+   * to the derived default. Read through {@link resolvedNanBehaviorAt}. */
+  nanBehavior?:
+    | 'reject'
+    | 'propagate'
+    | 'handle'
+    | ReadonlyArray<'reject' | 'propagate' | 'handle' | undefined>;
+  /** Contract B partiality claim; `undefined` resolves to `'may-marker'`,
+   * the sound default. Read through {@link resolvedPartiality}. */
+  partiality?: 'total' | 'may-marker';
+  /** Named mathematical domain condition — `false` routes to the codomain
+   * marker channel. Its presence IS the partiality declaration (asserted
+   * mutually exclusive with `partiality: 'total'` in `_update`). */
+  definedWhen?: (ops: ReadonlyArray<Expression>) => boolean | undefined;
+  /** Contract precondition — `false` routes to the `Error` channel. */
+  requires?: (ops: ReadonlyArray<Expression>) => boolean | undefined;
   associative = false;
   commutative = false;
   /** Backing store for `commutativeMatch`: `undefined` until EXPLICITLY
@@ -654,6 +700,77 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     return this.missingStrip === 'all' || this.missingStrip.includes(i);
   }
 
+  /**
+   * The *resolved* Contract B NaN policy for parameter position `i`
+   * (`docs/ERROR-MODEL.md` §4). An explicit `nanBehavior` declaration wins
+   * in every case. Otherwise the policy is derived from the CURRENT
+   * signature — never cached, like {@link resolvedMissingBehavior}:
+   *
+   * - An inferred signature carries no authored carrier, so it derives
+   *   nothing: `'inert'`.
+   * - A carrier that ADMITS `nan` (bare `number`, `any`, a union with
+   *   `nan`) leaves the channel `'inert'`: `NaN` is an ordinary domain
+   *   member there and the handler owns it — the status quo for every
+   *   operator that has not migrated to a precise Contract B carrier.
+   * - A precise carrier that excludes `nan` gets the §4 mechanical
+   *   default: `'propagate'` when the carrier is a subtype of `complex`
+   *   that is not a subtype of `integer` AND the result type is numeric
+   *   (a quiet failure must speak the codomain's vocabulary);
+   *   `'reject'` otherwise (an index, a digit count, a dimension).
+   */
+  resolvedNanBehaviorAt(
+    i: number
+  ): 'reject' | 'propagate' | 'handle' | 'inert' {
+    const declared = this.nanBehavior;
+    if (declared !== undefined) {
+      if (typeof declared === 'string') return declared;
+      const slot = declared[i];
+      if (slot !== undefined) return slot;
+    }
+    if (this.inferredSignature) return 'inert';
+    const sig = this.signature.type;
+    const carrier = parameterTypeAt(sig, i);
+    if (carrier === undefined) return 'inert';
+    if (isSubtype('nan', carrier)) return 'inert';
+    const resultIsNumeric =
+      typeof sig !== 'string' &&
+      sig.kind === 'signature' &&
+      isSubtype(sig.result, 'number');
+    if (
+      resultIsNumeric &&
+      isSubtype(carrier, 'complex') &&
+      !isSubtype(carrier, 'integer')
+    )
+      return 'propagate';
+    return 'reject';
+  }
+
+  /**
+   * The *resolved* Contract B partiality of the declaration: a declared
+   * `definedWhen` predicate IS the partiality condition (`'defined-when'`),
+   * an explicit `partiality` claim stands, and the omitted default is the
+   * sound `'may-marker'`.
+   */
+  get resolvedPartiality(): 'total' | 'may-marker' | 'defined-when' {
+    if (this.definedWhen) return 'defined-when';
+    return this.partiality ?? 'may-marker';
+  }
+
+  /**
+   * True when the declared result type is numeric (a subtype of `number`).
+   * The partiality gate uses it to pick the codomain marker: a false
+   * `definedWhen` answers `NaN` only into a numeric codomain (rule 4 of
+   * `docs/ERROR-MODEL.md` §2); a non-numeric codomain is the handler's to
+   * mark. `false` for an overload set — each arm has its own result, so no
+   * single marker is derivable here.
+   */
+  get signatureResultIsNumeric(): boolean {
+    const sig = this.signature.type;
+    if (typeof sig === 'string') return false;
+    if (sig.kind !== 'signature') return false;
+    return isSubtype(sig.result, 'number');
+  }
+
   /** True if operand position `i` may INVOKE a function-valued operand.
    * A map's missing indices default to `true` — the conservative answer. */
   invokesAt(i: number): boolean {
@@ -879,6 +996,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       namedArgumentsRequired: this.namedArgumentsRequired,
       missingBehavior: this.missingBehavior,
       missingStrip: this.missingStrip,
+      nanBehavior: this.nanBehavior,
+      partiality: this.partiality,
+      definedWhen: this.definedWhen,
+      requires: this.requires,
       associative: this.associative,
       commutative: this.commutative,
       _commutativeMatch: this._commutativeMatch,
@@ -942,6 +1063,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.namedArgumentsRequired = s.namedArgumentsRequired;
     this.missingBehavior = s.missingBehavior;
     this.missingStrip = s.missingStrip;
+    this.nanBehavior = s.nanBehavior;
+    this.partiality = s.partiality;
+    this.definedWhen = s.definedWhen;
+    this.requires = s.requires;
     this.associative = s.associative;
     this.commutative = s.commutative;
     this._commutativeMatch = s._commutativeMatch;
@@ -1071,6 +1196,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       def.namedArgumentsRequired ?? this.namedArgumentsRequired;
     this.missingBehavior = def.missingBehavior ?? this.missingBehavior;
     this.missingStrip = def.missingStrip ?? this.missingStrip;
+    this.nanBehavior = def.nanBehavior ?? this.nanBehavior;
+    this.partiality = def.partiality ?? this.partiality;
+    this.definedWhen = def.definedWhen ?? this.definedWhen;
+    this.requires = def.requires ?? this.requires;
+    // `definedWhen` IS the partiality declaration (the named condition), so
+    // combining it with the claim "no such condition exists" is contradictory.
+    if (this.partiality === 'total' && this.definedWhen)
+      throw new Error(
+        `Operator Definition "${this.name}": 'partiality: "total"' and 'definedWhen' are mutually exclusive — the 'definedWhen' predicate IS the partiality condition`
+      );
     this.associative = def.associative ?? this.associative;
     this.commutative = def.commutative ?? this.commutative;
     // Permutation matching WITHOUT canonical sorting. The default (follow

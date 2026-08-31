@@ -2390,7 +2390,12 @@ function applyOperatorDefinition(
             threadableGate(opDef.signature.type, opDef.broadcastable === true),
             undefined,
             undefined,
-            { resolutionOut: lazyResolutionOut, operatorName: name }
+            {
+              resolutionOut: lazyResolutionOut,
+              operatorName: name,
+              // Contract B NaN admission — same as the strict site above.
+              nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
+            }
           ) ?? xs),
       { metadata, canonical: true, scope }
     );
@@ -2551,7 +2556,14 @@ function applyOperatorDefinition(
         // an absent (`Missing`) or possibly-absent (`T | missing`) operand in a
         // stripped position; the runtime gate carries the absence.
         (i) => opDef.stripsMissingAt(i),
-        { resolutionOut, operatorName: name }
+        {
+          resolutionOut,
+          operatorName: name,
+          // Contract B NaN admission (`docs/ERROR-MODEL.md` §4): the policy
+          // is tested ahead of carrier disjointness — see
+          // `nanPolicyAdmitsParam` in `validate.ts`.
+          nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
+        }
       );
 
   if (adjustedArgs) {
