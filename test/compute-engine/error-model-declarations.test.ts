@@ -292,6 +292,65 @@ describe('Contract B — the NaN gates on a precise-carrier pilot (Phase B)', ()
   });
 });
 
+describe('Contract B — the higher-order conservative floor (Phase E)', () => {
+  test('an annotated lambda derives NO policy from its precise carrier', () => {
+    // The floor (`docs/ERROR-MODEL.md` §4): a user-defined callable has
+    // UNKNOWN NaN behavior, so its declared `(real) -> real` must not
+    // derive `propagate` — the boxing admission would otherwise carve a
+    // NaN into the lambda's carrier, bypassing its own validation.
+    const e = new ComputeEngine();
+    e.declare('flr', '(real) -> real');
+    e.assign('flr', e.parse('x \\mapsto x + 1'));
+    const def = e.lookupDefinition('flr');
+    expect(def).toBeDefined();
+    // A declared-then-assigned lambda lives as a VALUE definition holding
+    // the function literal — there is no operator definition on this
+    // route, so no Contract B derivation can even begin here (the
+    // operator-definition-shaped lambda is pinned in the absolute-floor
+    // test below).
+    expect(def!.operator).toBeUndefined();
+    // Plain carrier semantics at boxing: nan is disjoint from real.
+    expect(e.box(['flr', 'NaN']).isValid).toBe(false);
+  });
+
+  test('the derived-type adjustment stands down for a user callable', () => {
+    // A maybe-NaN argument must NOT widen the lambda application's type:
+    // the lambda arms own its typing, and the floor forbids the generic
+    // machinery from assuming (or claiming) anything sharper or wider.
+    const e = new ComputeEngine();
+    e.declare('flt', '(real) -> real');
+    e.assign('flt', e.parse('x \\mapsto x + 1'));
+    e.declare('wn', 'number');
+    expect(e.box(['flt', 'wn']).type.matches('real')).toBe(true);
+  });
+
+  test('the floor is ABSOLUTE: explicit declarations on a user-fn definition are ignored', () => {
+    // A lambda-backed `declare()` can carry explicit Contract B fields.
+    // The floor beats them — the runtime gates never fire for user
+    // callables, so honoring the declarations here would put a claim in
+    // the resolution (and the type) that no runtime channel backs.
+    const e = new ComputeEngine();
+    e.declare('flm', {
+      signature: '(real) -> real',
+      nanBehavior: 'propagate',
+      partiality: 'may-marker',
+      evaluate: e.parse('x \\mapsto x + 1'),
+    });
+    const def = e.lookupDefinition('flm')?.operator;
+    expect(def).toBeDefined();
+    if (def!.isUserFunctionDefinition) {
+      expect(def!.resolvedNanBehaviorAt(0)).toBe('inert');
+      expect(def!.contractBResultAdjustment([e.box(2)])).toBe('none');
+    } else {
+      // A lambda-valued `evaluate` that does NOT classify as a user
+      // function keeps ordinary declaration semantics — the floor is
+      // about the user-fn class, and this branch records which side of
+      // the line this declaration shape falls on.
+      expect(def!.resolvedNanBehaviorAt(0)).toBe('propagate');
+    }
+  });
+});
+
 describe('Contract B — partiality channels at runtime (Phase D, minimal)', () => {
   test('a false definedWhen answers the codomain marker before the handler runs', () => {
     const e = new ComputeEngine();

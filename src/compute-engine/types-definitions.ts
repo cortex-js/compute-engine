@@ -2401,7 +2401,10 @@ export interface BoxedOperatorDefinition
 
   /**
    * The *resolved* NaN policy for parameter position `i` (Contract B,
-   * `docs/ERROR-MODEL.md` §4). An explicit `nanBehavior` declaration wins.
+   * `docs/ERROR-MODEL.md` §4). For a user-defined callable the answer is
+   * always `'inert'` — the higher-order conservative floor, absolute even
+   * over an explicit declaration (see `isUserFunctionDefinition`).
+   * Otherwise an explicit `nanBehavior` declaration wins.
    * Otherwise, while the slot's declared carrier admits `nan` (bare
    * `number`, an inferred signature, a union with `nan`) the answer is
    * `'inert'` — `NaN` is an ordinary domain member and the handler owns
@@ -2424,6 +2427,14 @@ export interface BoxedOperatorDefinition
    * is declared, and the sound `'may-marker'` default when nothing is.
    */
   readonly resolvedPartiality: 'total' | 'may-marker' | 'defined-when';
+
+  /** True for a USER-DEFINED callable — a lambda, or an unscoped strict
+   * multi-clause definition. The sanctioned opt-out of the Contract B
+   * machinery: its own application machinery owns every exceptional
+   * operand, and the higher-order conservative floor
+   * (`docs/ERROR-MODEL.md` §4) caps what a consumer may assume about it
+   * at `may-marker` with unknown NaN behavior. */
+  readonly isUserFunctionDefinition: boolean;
 
   /**
    * The Contract B adjustment to a derived application result type for

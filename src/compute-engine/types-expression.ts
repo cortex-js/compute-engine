@@ -396,6 +396,10 @@ interface BoxedOperatorDefinition
   /** The resolved Contract B partiality of the declaration. See
    * `types-definitions.ts`. */
   readonly resolvedPartiality: 'total' | 'may-marker' | 'defined-when';
+  /** True for a user-defined callable (lambda, unscoped strict
+   * multi-clause) — the Contract B opt-out class. See
+   * `types-definitions.ts`. */
+  readonly isUserFunctionDefinition: boolean;
   /** The Contract B adjustment to a derived application result type for
    * these arguments. See `types-definitions.ts`. */
   contractBResultAdjustment(

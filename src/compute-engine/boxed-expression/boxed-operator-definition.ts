@@ -702,9 +702,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   /**
    * The *resolved* Contract B NaN policy for parameter position `i`
-   * (`docs/ERROR-MODEL.md` §4). An explicit `nanBehavior` declaration wins
-   * in every case. Otherwise the policy is derived from the CURRENT
-   * signature — never cached, like {@link resolvedMissingBehavior}:
+   * (`docs/ERROR-MODEL.md` §4). For a USER-DEFINED callable the
+   * higher-order conservative floor is ABSOLUTE — always `'inert'`, an
+   * explicit declaration included: the callable's own application
+   * machinery owns every exceptional operand, and the runtime gates
+   * exclude user functions unconditionally, so honoring a declaration
+   * here would split the type story from the runtime story. Otherwise an
+   * explicit `nanBehavior` declaration wins, and the policy is derived
+   * from the CURRENT signature — never cached, like
+   * {@link resolvedMissingBehavior}:
    *
    * - An inferred signature carries no authored carrier, so it derives
    *   nothing: `'inert'`.
@@ -727,6 +733,20 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
      * Explicit `nanBehavior` declarations remain operator-level. */
     armSignature?: Type
   ): 'reject' | 'propagate' | 'handle' | 'inert' {
+    // The higher-order conservative floor (`docs/ERROR-MODEL.md` §4,
+    // "Policies are part of a callable's contract"): a USER-DEFINED
+    // callable has UNKNOWN NaN behavior, so nothing is derived from its
+    // declared signature — its own application machinery (runtime
+    // validation, clause dispatch) owns every exceptional operand. The
+    // floor is ABSOLUTE — checked before an explicit declaration — so
+    // that this resolution can never disagree with the runtime gates,
+    // which exclude user functions unconditionally. Making the floor
+    // structural HERE, rather than at each consumer, is what keeps the
+    // boxing admission from carving a `NaN` into an annotated lambda's
+    // precise carrier, and makes any future consumer floor-safe by
+    // construction. The runtime-gate exclusions in `boxed-function.ts`
+    // remain as the belt.
+    if (this.isUserFunctionDefinition) return 'inert';
     const declared = this.nanBehavior;
     if (declared !== undefined) {
       if (typeof declared === 'string') return declared;
@@ -760,6 +780,22 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   get resolvedPartiality(): 'total' | 'may-marker' | 'defined-when' {
     if (this.definedWhen) return 'defined-when';
     return this.partiality ?? 'may-marker';
+  }
+
+  /**
+   * True for a USER-DEFINED callable: a function-literal (lambda)
+   * definition, or an unscoped strict multi-clause definition. These are
+   * the sanctioned opt-outs of the Contract B machinery — their own
+   * application machinery (runtime validation, clause dispatch) owns
+   * every exceptional operand, and the higher-order conservative floor
+   * (`docs/ERROR-MODEL.md` §4) says a consumer may assume nothing
+   * sharper than `may-marker` with unknown NaN behavior about them.
+   * The single source of truth for the predicate — the dispatch-site
+   * `isUserFunctionDef` (`boxed-function.ts`) delegates here.
+   */
+  get isUserFunctionDefinition(): boolean {
+    if (this._isLambda) return true;
+    return this._isMultiClause && this.lazy !== true && !this.scoped;
   }
 
   /**
@@ -797,6 +833,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
      * same arm to `resolvedNanBehaviorAt`). */
     armSignature?: Type
   ): 'none' | 'widen-nan' | 'widen-marker' | 'is-marker' {
+    // The higher-order conservative floor — see `resolvedNanBehaviorAt`,
+    // whose ordering this mirrors: ABSOLUTE for user-defined callables,
+    // explicit declarations included. A user callable's application types
+    // through its own lambda and multi-clause arms; the floor forbids
+    // ASSUMING anything sharper about it, the measured churn policy (the
+    // Phase C note) forbids silently WIDENING it, and the runtime gates
+    // never fire for it — so an adjustment here would put a claim in the
+    // type that no runtime channel backs.
+    if (this.isUserFunctionDefinition) return 'none';
     if (this.definedWhen) {
       let v: boolean | undefined;
       try {

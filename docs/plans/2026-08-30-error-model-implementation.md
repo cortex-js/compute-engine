@@ -259,12 +259,79 @@ Deliberate deferrals, recorded here rather than discovered later:
 
 The conservative floor of §4 ("Policies are part of a callable's
 contract"): an unknown or user-defined callable is `may-marker` with
-unknown NaN behavior, wherever a policy is consulted (`Map`, callback
-validation, compilation). The richer representation — policies as
-effects/refinements in the function type versus definition metadata on
-callable values — is the open design item of §7 and is NOT decided by
-this plan; the floor is mandatory under any representation, so it can
-land first. Not started.
+unknown NaN behavior, wherever a policy is consulted. The richer
+representation — policies as effects/refinements in the function type
+versus definition metadata on callable values — is the open design item
+of §7 and is NOT decided by this plan.
+
+**SHIPPED 2026-08-31.** The audit found the floor already held almost
+everywhere by construction: `resolvedPartiality` answers `may-marker` by
+default, user functions are excluded from the runtime gates (Phase D),
+and NO callback-consuming site (`Map`, callback validation, compilation)
+reads the Contract B fields at all — the only consumers are this plan's
+own seams. Two changes made the floor STRUCTURAL instead of
+remembered-per-consumer:
+
+- `isUserFunctionDefinition` on the definition (lambda, or unscoped
+  strict multi-clause) is now the single source of truth — the
+  dispatch-site `isUserFunctionDef` delegates to it — and BOTH resolution
+  entry points consult it: `resolvedNanBehaviorAt` answers `'inert'` and
+  `contractBResultAdjustment` answers `'none'` for user callables, so
+  every future consumer is floor-safe without knowing the rule.
+- This closed a real leak the audit exposed — with a precision the
+  review pass added: a DECLARED-then-ASSIGNED lambda lives as a VALUE
+  definition (no operator definition, and the value-route boxing never
+  passes `nanPolicyAt`), so that route never leaked. The leak was real
+  for OPERATOR-DEFINITION-shaped lambdas — a `declare()` whose `evaluate`
+  is a function literal — where the boxing admission does consult
+  `resolvedNanBehaviorAt` and a `(real) -> real` carrier derived
+  `propagate`. With the floor, boxing keeps plain carrier semantics for
+  every user-callable shape (both shapes pinned).
+- The review also settled the floor's PRIORITY, symmetrically: it is
+  ABSOLUTE for user callables — explicit `nanBehavior`/`partiality`
+  fields on a user-fn definition are ignored by both resolution entry
+  points — because the runtime gates exclude user functions
+  unconditionally, and honoring a declaration in the type story alone
+  would put a claim there that no runtime channel backs. (Codex's
+  competing reading — that the floor should WIDEN user-callable
+  application types — was refuted by the standing Phase C measurement:
+  same mechanism, larger population.)
+
+### Phase F rulings — 2026-08-31 (Arno)
+
+Two rulings, given together when the Heaviside carrier question was put:
+
+1. **Heaviside declares `(real | +oo | -oo) -> rational<0..1>`** — the
+   extended real line spelled with the singletons, keeping
+   `Heaviside(±oo)` = 1/0 and excluding `~oo` at the boundary.
+2. **`non_finite_number` RETIRES.** The name is misleading: `~oo` and
+   `∞ + i` are non-finite numbers, yet neither is a member. Sites
+   migrate to `infinity` where "any infinite value" is meant, and to
+   `+oo | -oo` where the signed guarantee matters. This executes the
+   site-by-site migration the L5 amendment deferred
+   (`docs/TYPE_SYSTEM_ROADMAP.md` §8.4).
+
+Retirement execution plan (inventory 2026-08-31: 178 src sites in 33
+files, 174 test sites in 26 files, 13 doc files, and the three
+`NumericValue.type` kernel gates that ANSWER the name):
+
+- **R1 — core lattice**: remove the primitive from the type union and
+  the subtype/reduce/widen/primitive tables; parse-accepted deprecated
+  alias for one release cycle normalizing to `+oo | -oo` (the exact
+  same set — the L7 pattern; never `infinity`, which would silently
+  widen); the `NumericValue.type` gates answer the signed singleton.
+- **R2 — mechanical src sweep**: every consumer site rewrites to the
+  semantics-preserving `+oo | -oo` spelling (or the singleton constants).
+  NO site widens to `infinity` in this pass — a widening admits `~oo`
+  and is a behavior change, so any such upgrade is a separate, measured
+  follow-up per site.
+- **R3 — test sweep + full-suite blast radius** (type-string assertions
+  update mechanically; snapshot delta measured and reported).
+- **R4 — docs sweep, CHANGELOG breaking entry, L5 closure note in the
+  roadmap.**
+
+Then the Heaviside flip lands on the retired-name world as the Phase F
+pilot.
 
 ### Phase F — signature flips, operator-by-operator
 

@@ -7148,8 +7148,11 @@ function isUserFunctionDef(
   def: BoxedOperatorDefinition | undefined
 ): def is _BoxedOperatorDefinition {
   if (!(def instanceof _BoxedOperatorDefinition)) return false;
-  if (def._isLambda) return true;
-  return def._isMultiClause && def.lazy !== true && !def.scoped;
+  // The predicate itself lives on the definition
+  // (`isUserFunctionDefinition`), where the Contract B resolution also
+  // consults it — one source of truth for "whose machinery owns the
+  // exceptional operands".
+  return def.isUserFunctionDefinition;
 }
 
 /**
