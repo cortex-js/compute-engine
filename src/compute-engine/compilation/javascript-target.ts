@@ -1839,8 +1839,70 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     compileSumProduct('Product', args, compile, target),
   Sum: (args, compile, target) =>
     compileSumProduct('Sum', args, compile, target),
-  Limit: (args, compile) =>
-    `_SYS.limit(${compile(args[0])}, ${compile(args[1])})`,
+  // Symbolic-first: a CONSTANT limit is evaluated symbolically at compile
+  // time and its closed value emitted. A plain `evaluate()` of a `Limit`
+  // runs ONLY the exact `symbolicLimit` route (the numeric Richardson
+  // fallback is gated behind `numericApproximation`), so the attempt is
+  // deterministic — no wall-clock participates in the decision — and an
+  // undecided limit comes back as an inert `Limit`. Its work is bounded by
+  // structure, not by a time span: recursion depth is capped (14), each
+  // internal `simplify()` is step-capped, and the eligibility gate below
+  // caps the operand size — a deliberate contrast with `closedFormIntegral`'s
+  // wall-clock budget pool, which trades determinism for latency and is
+  // exactly the trade the constant-fold determinism ruling removed. This
+  // recovers the folding of convergent constant limits — `lim_{x→0}
+  // sin x / x` emits `1` — which the fold's deterministic eligibility gate
+  // declines wholesale, because it cannot statically separate the
+  // convergent case from the oscillatory one whose NUMERIC fallback is a
+  // million-evaluation extrapolation. An undecided or free-variable limit
+  // emits the `_SYS.limit` runtime call, where the caller's deadline
+  // governs.
+  Limit: (args, compile, target) => {
+    const [f, x, dir] = args;
+    if (f == null || x == null) throw new Error('Limit: missing argument');
+    if (symbolicLimitAttemptAllowed(f, x, dir, target)) {
+      const engine = f.engine;
+      // Isolation scope, as `closedFormIntegral` uses for the analogous
+      // compile-time `Integrate` evaluation: `symbolicLimit`'s
+      // infinite-point helpers call `ce.symbol(name)`, which auto-declares
+      // an undeclared name in the CURRENT scope — without the push, merely
+      // compiling a constant limit at infinity could leave a stray binding
+      // in the caller's engine for good.
+      engine.pushScope();
+      try {
+        const v = engine
+          ._fn('Limit', dir == null ? [f, x] : [f, x, dir])
+          .evaluate();
+        if (v.isValid && !v.has('Limit') && v.unknowns.length === 0) {
+          // The emission bakes whatever engine values the evaluation read:
+          // record every symbol of the node in the capture set, so a
+          // consumer keyed on `symbolDeps` recompiles when one is
+          // re-assigned. Over-recording (a symbol read but not baked) only
+          // makes invalidation conservative.
+          if (target.symbolDeps)
+            for (const op of [f, x, dir])
+              if (op != null)
+                for (const s of op.symbols) target.symbolDeps.add(s);
+          return `(${compile(v)})`;
+        }
+      } catch (e) {
+        // An ordinary evaluation error degrades to the runtime call — but a
+        // cancellation raised because the AMBIENT deadline expired must
+        // keep cancelling the whole compilation, not be swallowed as a
+        // missed fold (the same rule as `tryConstantFold`'s catch).
+        if (!engine._shouldContinueExecution()) throw e;
+      } finally {
+        engine.popScope();
+      }
+    }
+    // The direction operand rides along when present — it used to be
+    // dropped, so a compiled one-sided limit (`lim_{x→0⁻}`) silently
+    // computed the right-sided limit (`_SYS.limit`'s `dir` defaults to 1,
+    // like the interpreter's own unspecified-direction default).
+    return `_SYS.limit(${compile(f)}, ${compile(x)}${
+      dir == null ? '' : `, ${compile(dir)}`
+    })`;
+  },
   Ln: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       // The operand may be complex only by WIDENESS (the complex discipline
@@ -9073,6 +9135,77 @@ function compileExtremum(
  *     (dictionary / string / set) has no array lowering, so fail closed (D6)
  *     rather than emit code that silently NaNs (finding A3).
  */
+/**
+ * Node count of an expression tree, capped: the walk stops once `cap` is
+ * exceeded, so the counter can never become the expense it guards.
+ */
+function nodeCountCapped(e: Expression, cap: number): number {
+  let count = 1;
+  if (isFunction(e))
+    for (const op of e.ops) {
+      count += nodeCountCapped(op, cap - count);
+      if (count > cap) return count;
+    }
+  return count;
+}
+
+/**
+ * Largest operand tree (in nodes) for which the `Limit` lowering attempts a
+ * compile-time symbolic evaluation. `symbolicLimit`'s work scales with the
+ * body it rewrites (differentiation, step-capped simplification, at
+ * recursion depth ≤ 14), so a structural size cap is the deterministic
+ * bound on the attempt — a real-world convergent limit's body is a handful
+ * of nodes, while a pathological one is exactly what should go to the
+ * `_SYS.limit` runtime call.
+ */
+const SYMBOLIC_LIMIT_MAX_NODES = 128;
+
+/**
+ * Whether the `Limit` lowering may attempt a compile-time SYMBOLIC
+ * evaluation of this limit. The attempt evaluates on the expression's own
+ * engine, so every gate that protects `tryConstantFold`'s compile-time
+ * evaluation applies here too:
+ *
+ * - all operands constant (a free symbol reads its runtime value);
+ * - `constantFold: false` disables every compile-time evaluation;
+ * - a `vars`-mapped symbol is the caller's live binding and must never be
+ *   folded through (checked against ALL symbols of the operands — a bound
+ *   parameter sharing a mapped name over-declines, which is safe);
+ * - a caller-overridden operator (`foldExcludedOps`) evaluates differently
+ *   at run time than the engine definition would at compile time;
+ * - an impure body must re-evaluate per call, never bake one sample;
+ * - a non-radian angular unit would evaluate the ALREADY-REWRITTEN body
+ *   (`rewriteAngularUnit`) under a second conversion — `tryConstantFold`
+ *   neutralizes the unit around its evaluation; here the rare degree-mode
+ *   case simply declines;
+ * - the operand size cap (`SYMBOLIC_LIMIT_MAX_NODES`) bounds the attempt's
+ *   work deterministically.
+ */
+function symbolicLimitAttemptAllowed(
+  f: Expression,
+  x: Expression,
+  dir: Expression | null | undefined,
+  target: CompileTarget<Expression>
+): boolean {
+  if (target.constantFold === false) return false;
+  const ops = dir == null ? [f, x] : [f, x, dir];
+  for (const op of ops) if (op.unknowns.length > 0) return false;
+  if (f.engine.angularUnit !== 'rad') return false;
+  if (f.isPure !== true) return false;
+  if (target.varsKeys !== undefined && target.varsKeys.size > 0)
+    for (const op of ops)
+      for (const s of op.symbols) if (target.varsKeys.has(s)) return false;
+  if (target.foldExcludedOps !== undefined)
+    for (const name of target.foldExcludedOps)
+      for (const op of ops) if (op.has(name)) return false;
+  let nodes = 0;
+  for (const op of ops) {
+    nodes += nodeCountCapped(op, SYMBOLIC_LIMIT_MAX_NODES - nodes);
+    if (nodes > SYMBOLIC_LIMIT_MAX_NODES) return false;
+  }
+  return true;
+}
+
 function compileGcdLcm(
   kind: 'GCD' | 'LCM',
   args: ReadonlyArray<Expression>,

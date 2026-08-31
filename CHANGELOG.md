@@ -256,6 +256,36 @@
 
 ### Bug Fixes
 
+- **A constant limit compiles to its closed value again — symbolically.**
+  The fold-determinism change made every `Limit` decline constant folding,
+  so `lim_{x→0} sin(x)/x` inside a compiled kernel paid a runtime
+  `_SYS.limit` evaluation per call. The `javascript` target's `Limit`
+  lowering now attempts a plain symbolic evaluation first — the exact,
+  depth-capped route only, never the numeric extrapolation — inside an
+  isolation scope and behind the same gates that protect compile-time
+  constant folding (`constantFold: false`, `vars` mappings,
+  caller-overridden operators, impure bodies, non-radian angular units,
+  an operand-size cap); it emits the closed value when one exists, and an
+  undecided or free-variable limit keeps the runtime call. Also fixed on
+  the same line: the DIRECTION operand of a one-sided limit was dropped
+  from the runtime emission, so a compiled `lim_{x→0⁻}` silently computed
+  the right-sided limit; it now rides along.
+
+- **One-sided limits at jump discontinuities are resolved per direction.**
+  Direct substitution claimed the value AT the point for a
+  jump-discontinuous subterm, so `lim_{x→0⁻} |x|/x` — which reaches
+  `sgn(x)` through L'Hôpital — answered `sgn(0) = 0` where the one-sided
+  limits are ∓1. A subterm of `Sign`, `Heaviside`, `Floor`, `Ceil`,
+  `Round` (one-operand form), or `Mod` (constant real modulus, either
+  sign) sitting ON its jump is now replaced by its one-sided value — the
+  side read from the offset's leading Laurent sign, nested jumps resolved
+  innermost first — and a two-sided limit over a jump combines the two
+  directions: equal sides are the limit (`lim_{x→0} sgn(x)² = 1`),
+  unequal sides stay inert (`lim_{x→0} |x|/x`). Anything the classifier
+  cannot decide (a two-operand `Round`, a symbolic modulus, a non-real
+  argument value) declines rather than guesses, and off its jump such a
+  subterm substitutes directly, as before.
+
 - **Compiling the same expression always produces the same code, whatever
   the machine load.** Compile-time constant folding evaluated each
   constant subtree under a 2-second wall-clock deadline whose expiry was a

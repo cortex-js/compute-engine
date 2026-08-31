@@ -350,6 +350,81 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
     expect([...outputs][0]).toContain('integrate');
   });
 
+  it('a constant limit lowers symbolic-first', () => {
+    // The fold gate declines every Limit (it cannot statically separate the
+    // convergent case from the oscillatory one), so the Limit LOWERING
+    // itself attempts a plain `evaluate()` — which runs only the exact,
+    // depth-capped `symbolicLimit` route — and emits the closed value when
+    // one exists.
+    const conv = compile(
+      new ComputeEngine().parse('\\lim_{x\\to 0}\\frac{\\sin x}{x}+t')
+    );
+    expect(conv.code).toBe('_.t + (1)');
+    const lhopital = compile(
+      new ComputeEngine().parse('\\lim_{x\\to 0}\\frac{e^x-1}{x}+t')
+    );
+    expect(lhopital.code).toBe('_.t + (1)');
+    // A limit with a free symbol in the point stays a runtime call, with
+    // the free symbol read from the vars record.
+    const free = compile(
+      new ComputeEngine().parse('\\lim_{x\\to a}\\frac{\\sin x}{x}+t')
+    );
+    expect(free.code).toContain('_SYS.limit');
+    expect(free.code).toContain('_.a');
+  });
+
+  it('a constant limit at infinity folds without leaking a binding', () => {
+    // `symbolicLimit`'s infinite-point helpers call `ce.symbol(name)`, which
+    // auto-declares an undeclared name in the current scope: the lowering
+    // evaluates inside an isolation scope (the `closedFormIntegral`
+    // pattern), so compiling must not declare the limit variable in the
+    // caller's engine.
+    const e = new ComputeEngine();
+    const r = compile(e.parse('\\lim_{x\\to\\infty}\\frac{1}{x}+t'));
+    expect(r.code).toBe('_.t + (0)');
+    expect(e.context.lexicalScope.bindings.has('x')).toBe(false);
+  });
+
+  it('the symbolic limit attempt respects the compile gates', () => {
+    // `constantFold: false` disables every compile-time evaluation.
+    const off = compile(
+      new ComputeEngine().parse('\\lim_{x\\to 0}\\frac{\\sin x}{x}+t'),
+      { constantFold: false }
+    );
+    expect(off.code).toContain('_SYS.limit');
+    // A `vars`-mapped symbol is the caller's live binding: the limit point
+    // must compile to the mapping, never fold through the engine value.
+    const e = new ComputeEngine();
+    e.assign('c', 5);
+    const mapped = compile(e.parse('\\lim_{x\\to c}\\frac{\\sin x}{x}+t'), {
+      vars: { c: 'globalThis.__c' },
+    });
+    expect(mapped.code).toContain('_SYS.limit');
+    expect(mapped.code).toContain('globalThis.__c');
+    // A degree-mode engine declines: the operand body is already rewritten
+    // by `rewriteAngularUnit`, and evaluating it on the degree engine would
+    // convert a second time.
+    const deg = new ComputeEngine();
+    deg.angularUnit = 'deg';
+    const degR = compile(deg.parse('\\lim_{x\\to 0}\\frac{\\sin x}{x}+t'));
+    expect(degR.code).toContain('_SYS.limit');
+  });
+
+  it('a one-sided limit keeps its direction in the runtime call', () => {
+    // The direction operand used to be dropped from the `_SYS.limit`
+    // emission, so a compiled left-sided limit silently computed the
+    // right-sided one (`dir` defaults to 1 at the runtime, like the
+    // interpreter's unspecified-direction default). A shape the symbolic
+    // route cannot settle keeps the runtime call; its direction must ride
+    // along.
+    const e = new ComputeEngine();
+    e.declare('a', 'real');
+    const left = compile(e.parse('\\lim_{x\\to a^-}\\frac{|x|}{x}'));
+    expect(left.code).toMatch(/_SYS\.limit\(.*, _\.a, -1\)/);
+    const right = compile(e.parse('\\lim_{x\\to a^+}\\frac{|x|}{x}'));
+    expect(right.code).toMatch(/_SYS\.limit\(.*, _\.a, 1\)/);
+  });
+
   it('declines to fold a numeric limit', () => {
     // A limit whose probe samples never settle falls back to Richardson
     // extrapolation with a 1e6-evaluation budget — work invisible to a

@@ -22,6 +22,7 @@ import {
   checkDeadline,
   CancellationError,
 } from '../../common/interruptible.js';
+import { isNumber } from '../boxed-expression/type-guards.js';
 import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
 
 // The base `Expression` type exposes operands only after a type-guard narrows it
@@ -240,6 +241,229 @@ function signedPoleInfinity(
   return s > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
 }
 
+/**
+ * Operator heads with JUMP discontinuities: piecewise-constant-like
+ * functions whose value changes discontinuously as their argument crosses a
+ * threshold. Direct substitution is unsound for a subterm of one of these
+ * sitting ON its jump: the value AT the point is not the limit from either
+ * side (`sgn(0) = 0`, but `lim_{x→0⁻} sgn x = −1`). The finite-point
+ * strategies resolve such a subterm per DIRECTION instead — see
+ * `substituteAtFinitePoint`. Kink-continuous heads (`Abs`) do not belong
+ * here: their value at the point IS the two-sided limit.
+ */
+const JUMP_FNS = ['Sign', 'Heaviside', 'Floor', 'Ceil', 'Round', 'Mod'];
+
+/**
+ * Where `sub` (a `JUMP_FNS` application) stands relative to its jumps at
+ * `x = a` — a TRI-STATE, because "not on a jump" and "cannot decide" must
+ * not be conflated: the first authorizes direct substitution, the second
+ * must decline the whole substitution (treating an undecidable case as
+ * continuous is how a wrong value slips through — e.g. a negative-modulus
+ * `Mod` sitting on a jump).
+ *
+ * - `'off'` — provably not on a jump: substitution at the point is sound;
+ * - an OFFSET expression — ON a jump; the offset's sign as `x → a` selects
+ *   the side of the jump;
+ * - `'unknown'` — unclassifiable: a non-literal or non-real argument value,
+ *   an arity this analysis does not model (`Round(u, precision)` jumps on
+ *   a scaled lattice), a symbolic or zero modulus.
+ *
+ * The classification reads the argument's value as a NUMBER LITERAL only
+ * (`isNumber` guard): an algebraically-zero-but-unreduced compound must
+ * not be classified by a tolerance comparison, and `.re` of a complex
+ * value would pass the integer tests while describing nothing. Integer
+ * tests use `Number.isSafeInteger`: past 2^53 the double reading cannot
+ * distinguish a value from its neighbors, so on/off is undecidable there
+ * — `'unknown'`, never a guess.
+ */
+function jumpOffsetAt(
+  sub: Expression,
+  x: string,
+  a: Expression,
+  ce: ComputeEngine
+): Expression | 'off' | 'unknown' {
+  const u = o1(sub);
+  if (u === undefined) return 'unknown';
+  const at = u.subs({ [x]: a }).evaluate();
+  if (!isNumber(at) || !at.isValid || at.isFinite !== true || at.im !== 0)
+    return 'unknown';
+  const op = sub.operator;
+  const arity = oo(sub).length;
+  if (op === 'Sign' || op === 'Heaviside') {
+    if (arity !== 1) return 'unknown';
+    return at.is(0) ? u : 'off';
+  }
+  if (op === 'Floor' || op === 'Ceil') {
+    if (arity !== 1) return 'unknown';
+    if (!Number.isSafeInteger(at.re))
+      return Math.abs(at.re) >= 2 ** 53 ? 'unknown' : 'off';
+    return ce.function('Subtract', [u, ce.number(at.re)]);
+  }
+  if (op === 'Round') {
+    if (arity !== 1) return 'unknown';
+    if (Math.abs(at.re) >= 2 ** 52) return 'unknown';
+    if (Number.isInteger(at.re) || !Number.isInteger(at.re * 2))
+      return 'off';
+    return ce.function('Subtract', [
+      u,
+      ce.box(['Rational', Math.round(at.re * 2), 2]),
+    ]);
+  }
+  if (op === 'Mod') {
+    const m = o2(sub);
+    if (m === undefined || m.has(x) || arity !== 2) return 'unknown';
+    const mv = m.evaluate();
+    if (
+      !isNumber(mv) ||
+      mv.isFinite !== true ||
+      mv.im !== 0 ||
+      mv.is(0) === true
+    )
+      return 'unknown';
+    const ratio = at.div(mv).evaluate();
+    if (!isNumber(ratio) || Math.abs(ratio.re) >= 2 ** 53) return 'unknown';
+    if (!Number.isInteger(ratio.re)) return 'off';
+    return ce.function('Subtract', [u, at]);
+  }
+  return 'unknown';
+}
+
+/**
+ * Substitute `x = a` into `e` — SOUNDLY. Plain substitution answers the
+ * value AT the point, which for an expression containing a `JUMP_FNS`
+ * subterm ON its jump is not the limit from either side (`|x|/x` reaches
+ * this via L'Hôpital as `sgn(x)/1`, and `sgn(0) = 0` where the one-sided
+ * limits are ∓1). When such a subterm is present:
+ *
+ * - a DIRECTIONAL substitution (`dir = ±1`) replaces the subterm by its
+ *   one-sided value — the side read from the sign of the offset's leading
+ *   Laurent term (`laurentSignNear`) — and substitutes into the rewritten
+ *   expression, iterating while jumps remain. Candidates are resolved
+ *   INNERMOST-FIRST (smallest by node count): a jump nested inside another
+ *   jump's argument must be replaced before the outer offset is readable
+ *   at all.
+ * - a TWO-SIDED substitution (`dir = 0`) answers `undefined`; the caller
+ *   (`limitAtFinite`) resolves the two directions independently and
+ *   combines them.
+ *
+ * ANY `'unknown'` classification declines the whole substitution rather
+ * than answer from a partial rewrite, and an offset whose approach sign
+ * cannot be decided does the same.
+ */
+function substituteAtFinitePoint(
+  e: Expression,
+  x: string,
+  a: Expression,
+  dir: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  let current = e;
+  // Each pass resolves ONE on-jump subterm (innermost first); the rewrite
+  // can nest, so iterate, capped well above any practical nesting.
+  for (let pass = 0; pass < 8; pass++) {
+    if (!current.has(JUMP_FNS))
+      return current.subs({ [x]: a }).evaluate();
+    let jump: Expression | undefined = undefined;
+    let offset: Expression | undefined = undefined;
+    let jumpSize = Infinity;
+    for (const head of JUMP_FNS) {
+      for (const sub of current.getSubexpressions(head)) {
+        const off = jumpOffsetAt(sub, x, a, ce);
+        if (off === 'unknown') return undefined;
+        if (off === 'off') continue;
+        const size = sub.getSubexpressions('').length;
+        if (size < jumpSize) {
+          jump = sub;
+          offset = off;
+          jumpSize = size;
+        }
+      }
+    }
+    if (jump === undefined)
+      return current.subs({ [x]: a }).evaluate();
+    if (dir === 0) return undefined;
+    // The expansion anchor must be EXACT when representable: a machine-float
+    // point (`0.5` parsed from the limit) mixed with the exact subtrahend of
+    // the offset leaves an unfoldable `−1/2 + 0.5` constant term in the
+    // series (machine floats are excluded from canonical `Add` folding), a
+    // broken datum whose sign read declines. Integers and half-integers —
+    // the anchors this code's offsets create — exactify losslessly.
+    let anchor = a;
+    const ar = a.re;
+    if (Number.isFinite(ar) && Number.isInteger(ar * 2))
+      anchor = Number.isInteger(ar)
+        ? ce.number(ar)
+        : ce.box(['Rational', Math.round(ar * 2), 2]);
+    const L = laurentData(offset!, x, anchor, ce, 3);
+    if (!L) return undefined;
+    const s = laurentSignNear(L, dir);
+    if (s === undefined) return undefined;
+    const value = jumpReplacementValue(jump, s, x, a, ce);
+    if (value === undefined) return undefined;
+    current = replaceSubterm(current, jump, value);
+  }
+  return undefined;
+}
+
+/**
+ * The constant `sub` (a `JUMP_FNS` application ON its jump at `x = a`)
+ * equals as `x → a` from the side where its offset has sign `s`. In each
+ * case the function is constant on either side of the jump, so the
+ * one-sided limit is the neighboring plateau's value. (The `.re` readings
+ * are safe here: `jumpOffsetAt` already refused the magnitudes where a
+ * double cannot represent the neighboring plateau exactly.)
+ */
+function jumpReplacementValue(
+  sub: Expression,
+  s: 1 | -1,
+  x: string,
+  a: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  const op = sub.operator;
+  if (op === 'Sign') return ce.number(s);
+  if (op === 'Heaviside') return s > 0 ? ce.One : ce.Zero;
+  const u = o1(sub);
+  if (u === undefined) return undefined;
+  const at = u.subs({ [x]: a }).evaluate();
+  const n = at.re;
+  if (!Number.isFinite(n)) return undefined;
+  if (op === 'Floor') return ce.number(s > 0 ? n : n - 1);
+  if (op === 'Ceil') return ce.number(s > 0 ? n + 1 : n);
+  if (op === 'Round') return ce.number(s > 0 ? n + 0.5 : n - 0.5);
+  if (op === 'Mod') {
+    // The engine's Mod takes the DIVISOR's sign (result in [0, m) for
+    // m > 0, in (m, 0] for m < 0), so which plateau adjoins which side
+    // depends on that sign: for m > 0 the value climbs to m from below a
+    // multiple and restarts at 0 above it; for m < 0 it decays to m from
+    // ABOVE and restarts at 0 below.
+    const m = o2(sub)?.evaluate();
+    if (m === undefined || !isNumber(m)) return undefined;
+    if (m.re > 0) return s > 0 ? ce.Zero : m;
+    return s > 0 ? m : ce.Zero;
+  }
+  return undefined;
+}
+
+/** `e` with every occurrence of `target` (by `isSame`) replaced. */
+function replaceSubterm(
+  e: Expression,
+  target: Expression,
+  replacement: Expression
+): Expression {
+  if (e.isSame(target)) return replacement;
+  const ops = oo(e);
+  if (ops.length === 0) return e;
+  let changed = false;
+  const next = ops.map((op) => {
+    const r = replaceSubterm(op, target, replacement);
+    if (r !== op) changed = true;
+    return r;
+  });
+  return changed ? e.engine.function(e.operator, next) : e;
+}
+
+
 function limitAtFinite(
   e: Expression,
   x: string,
@@ -248,16 +472,37 @@ function limitAtFinite(
   ce: ComputeEngine,
   depth: number
 ): Expression | undefined {
-  // 1. Direct substitution (continuous case).
-  const direct = e.subs({ [x]: a }).evaluate();
-  if (isDefiniteValue(direct, x)) return direct;
+  // 1. Direct substitution (continuous case) — through the jump-aware
+  //    substitution, which resolves a `JUMP_FNS` subterm sitting on its
+  //    jump per direction instead of reading its value AT the point
+  //    (`sgn(0) = 0` is not a limit of `sgn`). Computed ONCE and shared
+  //    with the two-sided combine below.
+  const direct = substituteAtFinitePoint(e, x, a, dir, ce);
+  if (direct !== undefined && isDefiniteValue(direct, x)) return direct;
+
+  // 1a. A TWO-SIDED limit whose substitution declined and that contains a
+  //     jump head: resolve each direction independently and combine —
+  //     equal sides are the limit (`sgn(x)²` → 1), unequal or undecided
+  //     sides fall THROUGH to the remaining strategies (an `'unknown'`
+  //     jump classification declines substitution too, and the later
+  //     steps may still resolve such a limit; `sgn(x)` and `|x|/x` end
+  //     inert). The directional recursions carry `dir = ±1`, so they never
+  //     re-enter this combine. Gated on the presence of a jump head — the
+  //     `SPECIAL_POLE_FNS` idiom — so ordinary limits skip it.
+  if (dir === 0 && direct === undefined && e.has(JUMP_FNS)) {
+    const below = limitAtFinite(e, x, a, -1, ce, depth + 1);
+    if (below !== undefined) {
+      const above = limitAtFinite(e, x, a, 1, ce, depth + 1);
+      if (above !== undefined && below.isSame(above)) return below;
+    }
+  }
 
   // 1b. Fallback: a simplified form may cancel a removable singularity
   //     ((x²−1)/(x−1) → x+1) — try substituting into it too.
   const es = e.simplify();
   if (!es.isSame(e)) {
-    const direct2 = es.subs({ [x]: a }).evaluate();
-    if (isDefiniteValue(direct2, x)) return direct2;
+    const direct2 = substituteAtFinitePoint(es, x, a, dir, ce);
+    if (direct2 !== undefined && isDefiniteValue(direct2, x)) return direct2;
   }
 
   // 2. L'Hôpital for a quotient that is 0/0 or ∞/∞ (use the original structure,
