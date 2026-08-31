@@ -343,3 +343,104 @@ describe('Contract B — partiality channels at runtime (Phase D, minimal)', () 
     expect(def.definedWhen!([e.PositiveInfinity, e.box(2)])).toBe(false);
   });
 });
+
+describe('Contract B — derived application type (Phase C)', () => {
+  // These operators have no type handler, so their application type comes
+  // from the declared signature through the Contract B derivation
+  // (`S | nan`, narrowing to exactly `S` when discharged).
+
+  test('a propagate slot whose argument may be NaN adds the | nan arm', () => {
+    const e = new ComputeEngine();
+    e.declare('TPilot', {
+      signature: '(real) -> real',
+      evaluate: ([x]) => x,
+    });
+    e.declare('w', 'number'); // `number` admits nan
+    const ty = e.box(['TPilot', 'w']).type;
+    expect(ty.matches('real | nan')).toBe(true);
+    // Not plain `real`: the nan arm is real — this is what makes the type
+    // honest about `TPilot(w)` evaluating to NaN when `w` holds one.
+    expect(ty.matches('real')).toBe(false);
+  });
+
+  test('a proven-real argument keeps the sharp declared result', () => {
+    const e = new ComputeEngine();
+    e.declare('TSharp', {
+      signature: '(real) -> real',
+      evaluate: ([x]) => x,
+    });
+    expect(e.box(['TSharp', 2]).type.matches('real')).toBe(true);
+  });
+
+  test('an EXPLICIT may-marker declaration widens even a proven-real application', () => {
+    const e = new ComputeEngine();
+    e.declare('TMarker', {
+      signature: '(real) -> real',
+      partiality: 'may-marker',
+      evaluate: ([x]) => x,
+    });
+    const ty = e.box(['TMarker', 2]).type;
+    expect(ty.matches('real | nan')).toBe(true);
+    expect(ty.matches('real')).toBe(false);
+  });
+
+  test('total discharges the partiality but never the NaN arm', () => {
+    const e = new ComputeEngine();
+    e.declare('TTotal', {
+      signature: '(real) -> real',
+      partiality: 'total',
+      evaluate: ([x]) => x,
+    });
+    // Proven-real argument: exactly the declared result.
+    expect(e.box(['TTotal', 2]).type.matches('real')).toBe(true);
+    // Maybe-NaN argument: the propagate slot still contributes the arm.
+    e.declare('u', 'number');
+    const ty = e.box(['TTotal', 'u']).type;
+    expect(ty.matches('real | nan')).toBe(true);
+    expect(ty.matches('real')).toBe(false);
+  });
+
+  test('definedWhen routes the type: false → nan, true → sharp, undecided → | nan', () => {
+    const e = new ComputeEngine();
+    e.declare('TDW', {
+      signature: '(real, real) -> real',
+      definedWhen: ([_a, b]) => {
+        if (b === undefined) return undefined;
+        if (b.symbol) return undefined; // symbolic → undecidable
+        return !b.isSame(0);
+      },
+      evaluate: ([x]) => x,
+    });
+    expect(e.box(['TDW', 1, 0]).type.matches('nan')).toBe(true);
+    expect(e.box(['TDW', 1, 2]).type.matches('real')).toBe(true);
+    e.declare('v', 'real');
+    const undecided = e.box(['TDW', 1, 'v']).type;
+    expect(undecided.matches('real | nan')).toBe(true);
+    expect(undecided.matches('real')).toBe(false);
+  });
+
+  test('a broadcast application widens the CELLS, not the collection', () => {
+    // Under a broadcast the propagated NaN (or an undischarged declared
+    // partiality) lands in individual cells, so the honest lifted type is
+    // `list<real | nan>` — never a top-level union with the list.
+    const e = new ComputeEngine();
+    e.declare('TBroadcast', {
+      signature: '(real) -> real',
+      broadcastable: true,
+      partiality: 'may-marker',
+      evaluate: ([x]) => x,
+    });
+    const ty = e.box(['TBroadcast', ['List', 1, 2, 3]]).type;
+    expect(ty.matches('list<real | nan>')).toBe(true);
+    expect(ty.matches('list<real>')).toBe(false);
+  });
+
+  test('an operator WITH a type handler keeps its own claim untouched', () => {
+    // `Degrees` types through `numericTypeHandlerOnTypes` — the handler is
+    // the sharper, evidence-conditioned authority, and the derivation must
+    // not widen it.
+    const e = new ComputeEngine();
+    e.declare('p', 'real');
+    expect(e.box(['Degrees', 'p']).type.matches('real')).toBe(true);
+  });
+});

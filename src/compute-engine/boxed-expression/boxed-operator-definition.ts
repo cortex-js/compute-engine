@@ -771,6 +771,67 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     return isSubtype(sig.result, 'number');
   }
 
+  /**
+   * The Contract B adjustment to a derived application RESULT type
+   * (`docs/ERROR-MODEL.md` §4: the application type is
+   * `S | marker(S) | nan`, narrowing to exactly `S` only when both the
+   * partiality and every propagating slot are discharged). Answers for the
+   * CURRENT arguments:
+   *
+   * - `'is-nan'` — the declared `definedWhen` condition is provably false
+   *   for these arguments: the value IS the codomain marker.
+   * - `'widen-nan'` — a `nan` arm belongs on the result: a `propagate`
+   *   slot's argument may be `NaN`, or a DECLARED partiality concedes an
+   *   undischarged failure (`definedWhen` undecided for these arguments,
+   *   or an explicit `may-marker`). A declared `total` discharges the
+   *   partiality but never the NaN arm.
+   * - `'none'` — no adjustment.
+   *
+   * Two deliberate scope guards: only NUMERIC codomains (a non-numeric
+   * codomain's marker vocabulary belongs to its handler), and the
+   * UNDECLARED partiality default (`may-marker` by omission) contributes
+   * NO arm — widening every precise numeric result to `S | nan`
+   * engine-wide would silently defeat `matches('integer')`-style
+   * type-keyed guards, so the omitted default binds only through explicit
+   * declarations until that migration is measured (the Phase C staging
+   * note in `docs/plans/2026-08-30-error-model-implementation.md`).
+   */
+  contractBResultAdjustment(
+    ops: ReadonlyArray<Expression>,
+    // The caller may have already proven the codomain numeric — the
+    // derived-type seam checks the INSTANTIATED result it holds, which
+    // covers an overload set (raw signature: an intersection, for which
+    // the getter answers false) through its resolved arm.
+    resultIsNumeric: boolean = this.signatureResultIsNumeric
+  ): 'none' | 'widen-nan' | 'is-nan' {
+    if (!resultIsNumeric) return 'none';
+    let marker = false;
+    if (this.definedWhen) {
+      let v: boolean | undefined;
+      try {
+        v = this.definedWhen(ops);
+      } catch {
+        // This runs inside the cached `.type` derivation, which a
+        // throwing predicate must not crash: an exception means the
+        // condition could not be decided for these arguments, which is
+        // exactly the undischarged verdict.
+        v = undefined;
+      }
+      if (v === false) return 'is-nan';
+      if (v === undefined) marker = true;
+    } else if (this.partiality === 'may-marker') marker = true;
+    if (!marker) {
+      for (let i = 0; i < ops.length; i++) {
+        if (this.resolvedNanBehaviorAt(i) !== 'propagate') continue;
+        if (isSubtype('nan', ops[i].type.type)) {
+          marker = true;
+          break;
+        }
+      }
+    }
+    return marker ? 'widen-nan' : 'none';
+  }
+
   /** True if operand position `i` may INVOKE a function-valued operand.
    * A map's missing indices default to `true` — the conservative answer. */
   invokesAt(i: number): boolean {

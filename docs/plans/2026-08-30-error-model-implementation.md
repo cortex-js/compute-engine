@@ -143,10 +143,58 @@ main tree as unstaged changes). Pins:
 Result-type derivation reads the declaration: the application type is
 `S | marker(S) | nan`, dropping `| nan` when no propagating slot's
 argument type can contain `nan`, and dropping the marker when partiality
-is `total` or `definedWhen` is proven for these arguments. The
-`realOnlyStepType` class of hand-written type handlers becomes the
-framework default read off the declaration (pilot: `Heaviside`). Not
-started.
+is `total` or `definedWhen` is proven for these arguments.
+
+**Core derivation SHIPPED 2026-08-31**
+(`contractBResultAdjustment` on the definition;
+`applyContractB` inside the `maybeAbsorb` funnel of `type()` in
+`boxed-function.ts` — every def-path return flows through it). Three
+deliberate scope decisions, each reversible in one line once measured:
+
+- **Handler authority**: the derivation applies only when NO per-operator
+  type handler answered. A handler's claim is conditioned on the evidence
+  it read (`realOnlyStepType` answers `rational<0..1>` only for a
+  proven-real operand); widening it would degrade the sharper authority,
+  observable as `Heaviside(x).isNonNegative` regressing through
+  `signOfType`.
+- **The omitted `may-marker` default contributes no type arm yet.**
+  Binding it engine-wide flips every handler-less precise numeric result
+  to `S | nan` at once, which silently defeats `matches('integer')`-style
+  type-keyed guards (a recorded pitfall class). Explicit declarations —
+  `partiality: 'may-marker'`, `definedWhen` — do bind.
+  **MEASURED 2026-08-31**: the one-line flip
+  (`resolvedPartiality` instead of the raw field in
+  `contractBResultAdjustment`) was run against the full suite in a
+  worktree — 126 test failures across 28 suites plus 1 snapshot, versus
+  ZERO with the staged opt-in default. The failures are structural
+  (polytype echo pins, broadcast lifts, overload-arm specificity,
+  aggregate typing, generic `(T) -> T` echoes), confirming the staging.
+  The doc-faithful default binds with the Phase F flips, after those
+  consumers learn to condition on the derived application type — the
+  migration path §4 itself prescribes.
+- **Broadcast-lifted results are widened PER CELL**
+  (`widenNumericCellsWithNan`, `common/type/utils.ts` — the recursive
+  twin of `absorbNumericAbsence`): a broadcast application types
+  `list<real | nan>`, never a top-level union with the collection.
+  (The original scalar-only cut was reversed by the Phase C dual review.)
+- **Overload sets participate through the seam's numeric proof**: the raw
+  signature of an overload set is an intersection, for which
+  `signatureResultIsNumeric` answers false, so the seam passes its own
+  instantiated-result verdict as `contractBResultAdjustment`'s second
+  argument. The RUNTIME partiality gate (Phase D) still reads the getter
+  and therefore still skips overload sets — open with the rest of full
+  Phase D.
+- **`definedWhen`/`requires` carry a documented purity contract** (pure,
+  structure-and-static-types only, exceptions treated as undecided): the
+  predicates now run inside the cached `.type` derivation, and the
+  type-path call is wrapped so a throwing predicate degrades to the
+  undischarged verdict instead of crashing the getter.
+
+Also open: the `realOnlyStepType`-class handler retirement waits on the
+Phase F signature flips (with today's `(number)` carriers the handlers
+are what carry the sharpness — `Heaviside` cannot be the pilot until its
+carrier is precise). Pins: the "derived application type" describe in
+`test/compute-engine/error-model-declarations.test.ts`.
 
 ### Phase D — partiality channels at runtime
 

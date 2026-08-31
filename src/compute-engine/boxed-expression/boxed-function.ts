@@ -123,7 +123,9 @@ import {
   staticCollectionDims,
   stripMissingFromType,
   typeContainsMissing,
+  typeHasNanFreeNumericCell,
   widen,
+  widenNumericCellsWithNan,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import type { BigDecimal } from '../../big-decimal/index.js';
@@ -5743,8 +5745,43 @@ function type(expr: BoxedFunction): Type {
     const absorbMissing =
       def.resolvedMissingBehavior === 'propagate' &&
       expr.ops.some((x) => typeContainsMissing(x.type.type));
+
+    // Contract B derived application type (`docs/ERROR-MODEL.md` §4; Phase
+    // C of `docs/plans/2026-08-30-error-model-implementation.md`). Applied
+    // only when NO per-operator type handler answered: a handler's claim
+    // is already conditioned on the evidence it read (`realOnlyStepType`
+    // answers `rational<0..1>` only for a proven-real operand), so
+    // widening it would degrade the sharper authority. The candidacy test
+    // (`typeHasNanFreeNumericCell`) keeps the adjustment byte-invisible
+    // everywhere the result type is not yet precise: a result whose
+    // numeric cells already admit `nan` (bare `number`) is left alone. A
+    // broadcast-lifted collection result is widened PER CELL
+    // (`list<real | nan>`) — under a broadcast the propagated `NaN` lands
+    // in individual cells. `typeHandlerAnswered` is settled before any
+    // adjusted return runs: every def-path return except the
+    // lambda-broadcast one funnels through `maybeAbsorb`, all after the
+    // handler block below, and the lambda-broadcast return calls
+    // `applyContractB` directly (it must not pick up the missing-value
+    // absorption, which never applied on that path).
+    let typeHandlerAnswered = false;
+    const applyContractB = (t: Type): Type => {
+      if (typeHandlerAnswered) return t;
+      if (!(def instanceof _BoxedOperatorDefinition)) return t;
+      if (!typeHasNanFreeNumericCell(t)) return t;
+      // The seam has just proven a nan-free numeric cell exists, so the
+      // numeric-codomain gate is passed by construction — this is what
+      // lets an OVERLOAD SET participate: its resolved arm's result is in
+      // `t` even though the definition's raw signature is an intersection.
+      const adjust = def.contractBResultAdjustment(expr.ops, true);
+      if (adjust === 'none') return t;
+      if (adjust === 'is-nan' && isSubtype(t, 'number')) return 'nan';
+      // `widen-nan` — and `is-nan` on a collection-shaped result: a
+      // `definedWhen` verdict computed against collection operands is not
+      // a per-cell claim, so it degrades to the widened cells.
+      return widenNumericCellsWithNan(t);
+    };
     const maybeAbsorb = (t: Type): Type =>
-      absorbMissing ? absorbNumericAbsence(t) : t;
+      applyContractB(absorbMissing ? absorbNumericAbsence(t) : t);
 
     // If there is a type handler, call it. Strip-before-validate (§3.B step 3):
     // for a `propagate`/`handle` operator with an absent operand, convey the
@@ -5870,6 +5907,7 @@ function type(expr: BoxedFunction): Type {
           calculatedType
         );
       if (calculatedType) {
+        typeHandlerAnswered = true;
         if (calculatedType instanceof BoxedType)
           sigResult = calculatedType.type;
         else
@@ -6176,7 +6214,11 @@ function type(expr: BoxedFunction): Type {
         declaredSlots,
         def.inferredSignature
       );
-      if (lifted !== undefined) return lifted;
+      // Through `applyContractB` directly, NOT `maybeAbsorb`: the
+      // missing-value absorption never applied on this return, and the
+      // Contract B adjustment must still see a future scalar-numeric
+      // lift rather than silently skipping the derivation.
+      if (lifted !== undefined) return applyContractB(lifted);
     }
 
     return maybeAbsorb(sigResult);

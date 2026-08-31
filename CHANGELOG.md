@@ -161,6 +161,17 @@
   `Degrees: (real) -> real` — now accepts a `NaN` argument and returns
   `NaN`, where it used to report an `incompatible-type` error.
 
+- **The type of an application reflects its error-model contract.** For an
+  operator without a custom type handler, the result type now carries a
+  `| nan` arm when a `NaN` argument can propagate into it, or when a
+  declared `partiality`/`definedWhen` condition is not discharged for the
+  given arguments, and it is exactly `nan` when the `definedWhen`
+  condition is provably false. A broadcast application widens the element
+  type (`list<real | nan>`), not the collection. The adjustment is
+  invisible for result types that already include `NaN`, such as bare
+  `number`, so existing types do not change unless an operator declares
+  the new contract fields.
+
 - **`interval-js` target: a second lowering batch** (Tycho item 237, the
   item-220 mold). `Choose` lowers to the existing `_IA.binomial` runtime
   helper; `Apply` of a function literal — the `f'` prime-derivative

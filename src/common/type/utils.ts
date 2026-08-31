@@ -812,6 +812,71 @@ export function typeContainsMissing(t: Readonly<Type>): boolean {
  * `Add(Missing, matrix) : matrix`. Applied ONLY when absence is possible (some
  * operand carries a `missing` arm), so Missing-free programs are untouched.
  */
+/**
+ * True when `t` contains a numeric cell that excludes `nan` — the
+ * candidacy test for the Contract B derived-application-type adjustment
+ * (`docs/ERROR-MODEL.md` §4): only such a cell can be made more honest by
+ * a `| nan` arm. Recurses through unions, collections, `broadcastable`
+ * and tuples the way {@link absorbNumericAbsence} does.
+ */
+export function typeHasNanFreeNumericCell(t: Readonly<Type>): boolean {
+  if (isSubtype(t, 'number')) return !isSubtype('nan', t);
+  if (typeof t === 'string') return false;
+  switch (t.kind) {
+    case 'union':
+      return t.types.some((x) => typeHasNanFreeNumericCell(x));
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return typeHasNanFreeNumericCell(t.elements);
+    case 'tuple':
+      return t.elements.some((e) => typeHasNanFreeNumericCell(e.type));
+    default:
+      return false;
+  }
+}
+
+/**
+ * Widen every `nan`-free numeric cell of `t` with a `| nan` arm — the
+ * Contract B result adjustment applied through collection shapes
+ * (`docs/ERROR-MODEL.md` §4): under a broadcast, a propagated `NaN` (or an
+ * undischarged partiality) lands in individual CELLS, so the honest lifted
+ * type is `list<real | nan>`, never a widened top-level union. A cell that
+ * already admits `nan` (bare `number`) is left alone; non-numeric cells
+ * pass through. The union is built unreduced — `isSubtype`/`matches`
+ * treat it correctly, and the `nan`-free guard keeps it duplicate-free.
+ */
+export function widenNumericCellsWithNan(t: Readonly<Type>): Type {
+  if (isSubtype(t, 'number')) {
+    if (isSubtype('nan', t)) return t as Type;
+    return { kind: 'union', types: [t as Type, 'nan'] };
+  }
+  if (typeof t === 'string') return t;
+  switch (t.kind) {
+    case 'union':
+      return {
+        kind: 'union',
+        types: t.types.map((x) => widenNumericCellsWithNan(x)),
+      };
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return { ...t, elements: widenNumericCellsWithNan(t.elements) };
+    case 'tuple':
+      return {
+        ...t,
+        elements: t.elements.map((e) => ({
+          ...e,
+          type: widenNumericCellsWithNan(e.type),
+        })),
+      };
+    default:
+      return t as Type;
+  }
+}
+
 export function absorbNumericAbsence(t: Readonly<Type>): Type {
   // A whole `missing`/`never` cell in a `propagate` result is numeric-domain
   // (I6): its runtime value is `NaN`, so it is `number`. (`never <: number`,

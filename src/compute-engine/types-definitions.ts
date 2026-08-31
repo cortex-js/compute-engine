@@ -2048,6 +2048,14 @@ export type OperatorDefinitionFlags = {
    * condition cannot be decided for these arguments (unbound symbols).
    * Declaring it supersedes `partiality` (the partiality IS this
    * predicate).
+   *
+   * CONTRACT: the predicate runs inside the cached `.type` derivation as
+   * well as at evaluation, so it must be PURE — no engine-state writes, no
+   * evaluation of its operands — and must decide from the operands'
+   * canonical structure and static types alone (it receives CANONICAL,
+   * unevaluated operands; answer `undefined` for anything it cannot read
+   * that way). A thrown exception is treated as `undefined`, never
+   * propagated.
    */
   definedWhen?: (ops: ReadonlyArray<Expression>) => boolean | undefined;
 
@@ -2057,7 +2065,8 @@ export type OperatorDefinitionFlags = {
    * (`MatrixMultiply`: the inner dimensions agree; an option value in
    * range). `false` routes to the `Error` channel (rule 6 of
    * `docs/ERROR-MODEL.md` §2); `undefined` means undecidable for these
-   * arguments.
+   * arguments. The purity contract of `definedWhen` applies to this
+   * predicate identically.
    */
   requires?: (ops: ReadonlyArray<Expression>) => boolean | undefined;
 
@@ -2411,6 +2420,30 @@ export interface BoxedOperatorDefinition
    * is declared, and the sound `'may-marker'` default when nothing is.
    */
   readonly resolvedPartiality: 'total' | 'may-marker' | 'defined-when';
+
+  /** True when the declared result type is numeric (a subtype of
+   * `number`); `false` for an overload set. The partiality gate and the
+   * derived-application-type seam use it to pick the codomain marker. */
+  readonly signatureResultIsNumeric: boolean;
+
+  /**
+   * The Contract B adjustment to a derived application result type for
+   * these arguments (`docs/ERROR-MODEL.md` §4): `'is-nan'` when the
+   * declared `definedWhen` is provably false (the value IS the codomain
+   * marker), `'widen-nan'` when a `nan` arm belongs on the result (a
+   * `propagate` slot's argument may be `NaN`, or a DECLARED partiality is
+   * undischarged), `'none'` otherwise. Numeric codomains only; the
+   * omitted `may-marker` default contributes no arm (see the
+   * implementation note in `boxed-operator-definition.ts`).
+   */
+  contractBResultAdjustment(
+    ops: ReadonlyArray<Expression>,
+    /** Overrides the numeric-codomain gate when the caller already proved
+     * the instantiated result numeric — how an overload set (whose raw
+     * signature is an intersection) participates through its resolved
+     * arm. */
+    resultIsNumeric?: boolean
+  ): 'none' | 'widen-nan' | 'is-nan';
 
   /** True if operand position `i` may INVOKE a function-valued operand — the
    * per-position reader for the `invokes` flag of {@link OperatorDefinitionFlags}.
