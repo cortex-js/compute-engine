@@ -96,7 +96,14 @@ describe('synthetic rule generation helper', () => {
   });
 });
 
-describe('rule-dispatch scale benchmark (M0 baseline)', () => {
+// Timing-asserting suite: excluded from the default run (its measured
+// ratios are only meaningful on a quiet machine) and run via `npm run
+// test:perf`, serially, ideally under the box lock — the same env-gate
+// pattern as the CE_NIGHTLY tier.
+const PERF = process.env.CE_PERF === '1';
+const describePerf = PERF ? describe : describe.skip;
+
+describePerf('rule-dispatch scale benchmark (M0 baseline)', () => {
   it('measures simplify() degradation from +1,500 inert (never-firing) rules', () => {
     const ce = new ComputeEngine();
     declareSyntheticHeads(ce);
@@ -198,7 +205,7 @@ describe('rule-dispatch scale benchmark (M0 baseline)', () => {
 // symbols; the corpus' specific values are outside the artifact heads).
 // ---------------------------------------------------------------------------
 
-describe('rule-dispatch real-corpus benchmark (M5, Fungrim Phase-1 artifact)', () => {
+describePerf('rule-dispatch real-corpus benchmark (M5, Fungrim Phase-1 artifact)', () => {
   it('measures simplify() with the full 558-rule artifact loaded via loadIdentities()', () => {
     // Two engines: ceBase stays unloaded, ceLoaded gets the full artifact.
     // Interleaved runs make each (base, loaded) pair share the same load

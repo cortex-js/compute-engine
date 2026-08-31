@@ -35,7 +35,12 @@ if [ "$VARIANT" = "coverage" ] || [ "$VARIANT" = "-coverage" ]; then
       --reporters summary -- test/compute-engine/checkpoint-differential.test.ts
 elif [ "$VARIANT" = "test" ] || [ "$VARIANT" = "-test" ]; then
     run_declaration_type_tests
-    npx jest --config ./config/jest.config.cjs --no-cache --reporters summary
+    # The jest cache stays ON for the full suite: the transform cache is
+    # content-keyed (a changed file re-transpiles, an unchanged one does not),
+    # and the timing cache is what lets jest schedule the slowest test files
+    # first — without it files are ordered by SIZE, and a small-but-slow file
+    # scheduled last extends the whole run by its own duration.
+    npx jest --config ./config/jest.config.cjs --reporters summary
     # The checkpoint journal's bypass canary (CE_CHECKPOINT_CANARY) is a
     # module-load flag, so its assertions are inert in the run above. Re-run
     # the one differential-harness file in a fresh process with the flag set:

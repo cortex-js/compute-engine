@@ -56,7 +56,14 @@ function longSum(k: number): string {
   return Array.from({ length: k }, (_, i) => `${i + 1}x^{${i + 1}}`).join('+');
 }
 
-describe('LaTeX parsing scale benchmarks', () => {
+// Timing-asserting suite: excluded from the default run (its measured
+// ratios are only meaningful on a quiet machine) and run via `npm run
+// test:perf`, serially, ideally under the box lock — the same env-gate
+// pattern as the CE_NIGHTLY tier.
+const PERF = process.env.CE_PERF === '1';
+const describePerf = PERF ? describe : describe.skip;
+
+describePerf('LaTeX parsing scale benchmarks', () => {
   it('tokenizer scales ~linearly with input length (non-ASCII path)', () => {
     // Non-ASCII input forces the grapheme-array path in the tokenizer,
     // where `match()` used to do `slice(pos).join('')` — a full copy of

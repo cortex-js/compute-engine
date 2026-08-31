@@ -30,7 +30,14 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
  * sides, and their observed margins are one to two orders of magnitude.
  */
 
-describe('COMPILATION PERFORMANCE', () => {
+// Timing-asserting suite: excluded from the default run (its measured
+// ratios are only meaningful on a quiet machine) and run via `npm run
+// test:perf`, serially, ideally under the box lock — the same env-gate
+// pattern as the CE_NIGHTLY tier.
+const PERF = process.env.CE_PERF === '1';
+const describePerf = PERF ? describe : describe.skip;
+
+describePerf('COMPILATION PERFORMANCE', () => {
   const verbose =
     process.env.COMPILE_PERF_VERBOSE === '1' ||
     process.env.BENCH_VERBOSE === '1' ||

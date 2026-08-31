@@ -17,6 +17,7 @@
     "test:epsil-runtime": "node ./test/consumer/epsil-runtime-smoke.mjs",
     "test:epsil-cli": "node ./test/consumer/epsil-cli-smoke.mjs",
     "test:nightly": "CE_NIGHTLY=1 jest --config ./config/jest.config.cjs --reporters default -- test/compute-engine/nightly/",
+    "test:perf": "CE_PERF=1 jest --config ./config/jest.config.cjs --runInBand --reporters default -- test/compute-engine/compile-performance.test.ts test/compute-engine/benchmarks/parse.benchmark.test.ts test/compute-engine/benchmarks/rule-dispatch.benchmark.test.ts",
     "check:deps": "madge --circular --extensions ts src/compute-engine && echo 'No circular dependencies found'",
     "check:corpus": "npx --yes tsx docs/mathnet/scripts/check-corpus.ts",
     "check:roundtrip": "npx --yes tsx docs/mathnet/scripts/check-roundtrip.ts",

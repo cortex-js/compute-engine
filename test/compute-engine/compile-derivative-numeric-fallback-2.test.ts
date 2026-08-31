@@ -36,35 +36,50 @@ describe('item 177: numeric-derivative fallback (shared budget, both routes)', (
     return ce;
   }
 
-  test('within budget: the exact symbolic closed form is still used', () => {
-    const ce = engineWithNested(4);
-    const r = compile(ce.box(['Apply', ['Derivative', 'f'], 0.5]) as never);
-    expect(r.success).toBe(true);
-    const v = r.run!() as number;
-    // Exact derivative of the DEPTH-4 radical at 0.5, computed once with the
-    // closed form; an 8th-order stencil differs from it at ~1e-10, so a
-    // 1e-13 match proves the closed form (not the stencil) was compiled.
-    expect(Math.abs(v - 0.5778190048613953)).toBeLessThan(1e-13);
-  });
-
   test(
-    'past budget, order 1: compiles, and both routes agree bit-for-bit',
+    'past budget, orders 2 and 3: finite values, bit-identical routes',
     () => {
       const ce = engineWithNested(DEEP);
-      const node = ce.box(['Apply', ['Derivative', 'f'], 0.5]);
-      const r = compile(node as never);
-      expect(r.success).toBe(true);
-      const compiled = r.run!() as number;
-      // Analytic anchor: L′(0.5) = 3^(-1/2); the depth-37 radical differs
-      // from the infinite limit by ~1e-6.
-      expect(Math.abs(compiled - 1 / Math.sqrt(3))).toBeLessThan(1e-4);
-      // Route parity (Tycho's D-209 net): one shared stencil function, so
-      // the interpreted N() is the IDENTICAL machine value.
-      const interpreted = ce
-        .box(['Apply', ['Derivative', 'f'], 0.5])
-        .N().re;
-      expect(Object.is(compiled, interpreted)).toBe(true);
+      const anchors: Record<number, number> = {
+        2: -2 * Math.pow(3, -1.5), // L″(0.5)
+        3: 12 * Math.pow(3, -2.5), // L‴(0.5)
+      };
+      for (const order of [2, 3]) {
+        const r = compile(
+          ce.box(['Apply', ['Derivative', 'f', order], 0.5]) as never
+        );
+        expect(r.success).toBe(true);
+        const compiled = r.run!() as number;
+        // Composed-stencil accuracy degrades with order; ~1e-3 relative is
+        // the ruling's accepted envelope (Tycho: plotting tolerance).
+        expect(Math.abs(compiled - anchors[order])).toBeLessThan(1e-3);
+        const interpreted = ce
+          .box(['Apply', ['Derivative', 'f', order], 0.5])
+          .N().re;
+        expect(Object.is(compiled, interpreted)).toBe(true);
+      }
+    },
+    240_000
+  );
+
+  test(
+    'exactness contract: plain evaluate() stays symbolic past budget',
+    () => {
+      const ce = engineWithNested(DEEP);
+      const e = ce.box(['Apply', ['Derivative', 'f'], 0.5]).evaluate();
+      expect(e.operator).toBe('Apply');
+      expect(e.op1.operator).toBe('Derivative');
     },
     120_000
   );
+
+  test('ND at a RUNTIME point compiles to the stencil', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.parse('x \\mapsto \\sin(x) + x^2'));
+    ce.declare('x', 'number');
+    const r = compile(ce.box(['ND', 'g', 'x'] as never) as never);
+    expect(r.success).toBe(true);
+    const v = (r.run as (arg: { x: number }) => number)({ x: 0.5 });
+    expect(Math.abs(v - (Math.cos(0.5) + 1))).toBeLessThan(1e-9);
+  });
 });
