@@ -203,22 +203,18 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   WITH a by-design ruling is an acceptable answer for heads outside the
   scalar-interval-domain contract. Repro: tycho
   `scripts/repros/2026-08-30-ce-interval-lowering-batch-probe.mts`.
-- **`symbolicLimit` claims a value at a jump discontinuity — one-sided
-  limits of `|x|/x` answer 0 on every route.** `lim_{x→0⁻} |x|/x`
-  evaluates to `0` (should be −1; the right-sided twin should be +1; the
-  two-sided limit should stay inert). Mechanism, verified in
-  `symbolic/limit.ts` (`limitAtFinite`): L'Hôpital rewrites the ratio to
-  `sgn(x)/1`, and step 1's direct substitution then answers `sgn(0) = 0` —
-  substitution is only sound for a subterm CONTINUOUS at the point, and
-  `Sign` jumps there. The repair wants one-sided substitution semantics
-  for the jump-discontinuous heads (`Sign`, `Heaviside`, `Floor`,
-  `Ceiling`, `Round`, `Mod` at their jump points): decline direct
-  substitution when the point sits on a jump of a subterm and resolve
-  per-direction instead. Pre-existing (predates the 2026-08-31
-  symbolic-first Limit lowering, which faithfully mirrors it into
-  compiled output — interpreter and compiled lanes AGREE on the wrong
-  value, so there is no lane divergence). Witness:
-  `ce.parse('\\lim_{x\\to 0^-}\\frac{|x|}{x}').evaluate()`.
+- **RESOLVED 2026-08-31: one-sided limits at jump discontinuities.**
+  `lim_{x→0⁻} |x|/x` answered 0 on every route (direct substitution claimed
+  `sgn(0)` after L'Hôpital). Fixed by the tri-state jump classifier and
+  per-direction substitution in `symbolic/limit.ts`
+  (`substituteAtFinitePoint`), covering `Sign`, `Heaviside`, `Floor`,
+  `Ceil`, one-operand `Round`, and constant-modulus `Mod` (either sign);
+  two-sided limits over a jump combine the directions. Pinned in
+  `test/compute-engine/limit-jump-discontinuity.test.ts`. Note for future
+  extension: `Ceiling` is an INERT alias (the head is `Ceil`), and the
+  two-operand `Round(u, precision)` deliberately stays unresolved (its
+  jumps live on a scaled lattice the classifier does not model).
+
 - **Destructured Block locals stay `unknown`-typed on the compilation
   routes.** The Tycho item 235 fix (2026-08-30) gives a `Block`-hoisted
   local its statically-readable `Declare` type and joins `Assign` evidence
