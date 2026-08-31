@@ -139,10 +139,14 @@ describe('destructuring assign from a tuple-VALUED call', () => {
       'do { let v = 0; let j = 1; (v, j) := step(j); 100*v + j }'
     );
     const code = agrees(expr, 202);
-    expect(code.match(/_fn_step\(/g)?.length ?? 0).toBe(1);
+    // ONE call site. A non-literal argument carries a runtime broadcast guard,
+    // whose two branches each name the callee, so the site spells `_fn_step`
+    // twice; the guard's own argument is bound once, ahead of both branches.
+    expect(code.match(/_fn_step\(/g)?.length ?? 0).toBe(2);
+    expect(code.match(/Array\.isArray/g)?.length ?? 0).toBe(1);
     // Every read of the temporary happens after the single bind, so the write
     // to `j` cannot clobber the `j` the call reads.
-    const bind = code.search(/_tv\d+ = _fn_step\(j\)/);
+    const bind = code.search(/_tv\d+ = .*_fn_step\(/);
     expect(bind).toBeGreaterThan(-1);
     expect(code.search(/\bv = _SYS\.at\(_tv/)).toBeGreaterThan(bind);
     expect(code.search(/\bj = _SYS\.at\(_tv/)).toBeGreaterThan(bind);

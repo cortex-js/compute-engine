@@ -456,13 +456,16 @@ export interface CompileTarget<Expr = unknown> {
   ) => TargetSource | null;
 
   /**
-   * Apply a `broadcastable` head's scalar element lowering across a single
-   * finite indexed collection operand (`Sin([1,2,3])`, `-[1,2,3]`).
+   * Apply a `broadcastable` head's scalar element lowering across its single
+   * collection operand (`Sin([1,2,3])`, `-[1,2,3]`, `1 + L`).
    *
    * `lowering.collection()` compiles the collection operand in the enclosing
    * target; `lowering.element(code)` re-invokes the head's OWN scalar codegen
    * with `code` spliced in as the (bare) element operand, so complex handling
-   * and constant folding stay identical to the scalar path.
+   * and constant folding stay identical to the scalar path. The head need not
+   * be unary: any SCALAR operand alongside the collection is spliced into the
+   * element lowering at its own position, so a hook that fans out writes the
+   * same spelling whatever the arity.
    *
    * Targets differ in KIND here, not just in syntax, which is why this is a
    * hook rather than a default: Python fans the scalar lowering out over the

@@ -33,6 +33,21 @@ const probeBoxed = () =>
 const occurrences = (code: string, needle: string): number =>
   code.split(needle).length - 1;
 
+/**
+ * How many CALL SITES of the emitted user function `name` the JavaScript
+ * artifact `code` holds.
+ *
+ * A call site is emitted in one of three forms: a bare `name(…)`; an
+ * unconditional `_SYS.bcastFn((_p) => name(_p), …)` dispatch; or a runtime
+ * broadcast guard, which holds BOTH of those —
+ * `((_t) => Array.isArray(_t) ? _SYS.bcastFn((_p) => name(_p), _t) : name(_t))(arg)`
+ * — and therefore spells the callee TWICE for one site. Discounting the guard's
+ * direct branch recovers the number of sites, which is what the CSE tests
+ * measure: whether a repeated call was bound once or left duplicated.
+ */
+const callSites = (code: string, name: string): number =>
+  occurrences(code, `${name}(`) - occurrences(code, `) : ${name}(`);
+
 /** The `sin(6·v)` atom of the probe, as raw MathJSON. */
 const sin6 = (v: string | number): any => ['Sin', ['Multiply', 6, v]];
 
@@ -1332,7 +1347,7 @@ describe('COMPILE CSE — user-function body dedup', () => {
     );
     // …and the two call sites are still two calls: `f(t)` and `f(2t)` are
     // different expressions, so there is nothing to merge.
-    expect(occurrences(result.code, '_fn_f(')).toBe(2);
+    expect(callSites(result.code, '_fn_f')).toBe(2);
 
     expect((result.run as (t: number) => number)(0.3)).toBeCloseTo(
       compile(engineWithF().parse('t \\mapsto f(t) + f(2t)'), {
@@ -1349,7 +1364,9 @@ describe('COMPILE CSE — user-function body dedup', () => {
     const result = compile(expr, { fallback: false });
 
     // ONE call for the three occurrences (item 120 follow-up), …
-    expect(occurrences(result.code, '_fn_f(2 * t)')).toBe(1);
+    expect(callSites(result.code, '_fn_f')).toBe(1);
+    // …reached with its argument computed once as well.
+    expect(occurrences(result.code, '2 * t')).toBe(1);
     // …plus the body's own binding: two temporaries in the artifact.
     expect(occurrences(result.code, 'const _cse')).toBe(2);
     // The body still deduplicates its three `sin(6x)`.
@@ -1420,7 +1437,7 @@ describe('COMPILE CSE — repeated pure calls in definition bodies (item 120)', 
     const def = result.code
       .split('\n')
       .find((l) => l.includes('const _fn_R_0'))!;
-    expect(occurrences(def, '_fn_R_0(')).toBe(1);
+    expect(callSites(def, '_fn_R_0')).toBe(1);
     // The binding sits INSIDE the ternary's recursive arm: the base case
     // must not evaluate the recursive call.
     expect(def.indexOf('?')).toBeLessThan(def.indexOf('const _cse'));
@@ -1459,7 +1476,7 @@ describe('COMPILE CSE — repeated pure calls in definition bodies (item 120)', 
     const def = result.code
       .split('\n')
       .find((l) => l.includes('const _fn_W_0'))!;
-    expect(occurrences(def, '_fn_D_0(')).toBe(2);
+    expect(callSites(def, '_fn_D_0')).toBe(2);
     expect(def).not.toContain('_cse');
   });
 
@@ -1519,7 +1536,7 @@ describe('COMPILE CSE — repeated pure calls in definition bodies (item 120)', 
     const def = result.code
       .split('\n')
       .find((l) => l.includes('const _fn_m_1'))!;
-    expect(occurrences(def, '_fn_h_1(')).toBe(2);
+    expect(callSites(def, '_fn_h_1')).toBe(2);
     expect(def).not.toContain('_cse');
   });
 });
@@ -1541,8 +1558,10 @@ describe('COMPILE CSE — repeated pure calls at the ROOT (item 120 follow-up)',
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
     // The single call is the binding's initializer — no other call site.
-    expect(occurrences(result.code, '_fn_f_2(')).toBe(1);
-    expect(result.code).toContain('const _cse1 = _fn_f_2(');
+    expect(callSites(result.code, '_fn_f_2')).toBe(1);
+    // The binding's initializer IS the call site — a guarded one, so the
+    // temporary is bound to the guard rather than to a bare `_fn_f_2(…)`.
+    expect(result.code).toMatch(/const _cse\d+ = \(\(_tv\d+\) => Array\.isArray/);
 
     expect((result.run as (v: any) => number)({ x: 0.3 })).toBeCloseTo(
       compile(expr, { fallback: false, cse: false }).run!({
@@ -1562,7 +1581,7 @@ describe('COMPILE CSE — repeated pure calls at the ROOT (item 120 follow-up)',
     const result = compile(expr, { fallback: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
-    expect(occurrences(result.code, '_fn_f_3(')).toBe(1);
+    expect(callSites(result.code, '_fn_f_3')).toBe(1);
 
     expect((result.run as (v: any) => number)({ x: 0.3 })).toBeCloseTo(
       compile(expr, { fallback: false, cse: false }).run!({
@@ -1583,7 +1602,7 @@ describe('COMPILE CSE — repeated pure calls at the ROOT (item 120 follow-up)',
     });
 
     expect(result.code).not.toMatch(/_cse\d/);
-    expect(occurrences(result.code, '_fn_d_2(')).toBe(2);
+    expect(callSites(result.code, '_fn_d_2')).toBe(2);
   });
 });
 

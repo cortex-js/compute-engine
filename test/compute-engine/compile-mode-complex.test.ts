@@ -99,12 +99,22 @@ describe('complex mode — one emission per user function, lift at use (design �
     // hold a complex value and whose lowering hands back whatever it holds.
     // The wrap is redundant here (the single `_fn_b` is emitted in the complex
     // lane and already returns `{re, im}`), and idempotent, so the value is
-    // unchanged.
+    // unchanged. The call site itself carries the runtime broadcast guard
+    // every non-literal argument gets — `z` types complex, which is no proof
+    // that `run()` will not supply an array — and both of its branches call
+    // the one `_fn_b`.
     const bz = compile(ce.parse('b(z)'), CX);
-    expect(bz.code).toBe('_SYS.cplx(_fn_b(_.z))');
+    expect(bz.code).toBe(
+      '_SYS.cplx(((_tv1) => Array.isArray(_tv1) ? ' +
+        '_SYS.bcastFn((_tv2) => _fn_b(_tv2), _tv1) : _fn_b(_tv1))(_.z))'
+    );
     expect(bz.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
     const bs = compile(ce.parse('b(\\sqrt{a})'), CX);
-    expect(bs.code).toBe('_SYS.cplx(_fn_b(_SYS.csqrt(_SYS.cplx(_.a))))');
+    expect(bs.code).toBe(
+      '_SYS.cplx(((_tv1) => Array.isArray(_tv1) ? ' +
+        '_SYS.bcastFn((_tv2) => _fn_b(_tv2), _tv1) : _fn_b(_tv1))' +
+        '(_SYS.csqrt(_SYS.cplx(_.a))))'
+    );
     expect(bs.run!({ a: -2 })).toEqual({ re: 0, im: 2 * Math.SQRT2 });
   });
 

@@ -424,7 +424,7 @@ describe('element-wise selection: what stays unchanged', () => {
     );
   });
 
-  test('a complex-valued arm over a list condition fails closed (D6)', () => {
+  test('a complex-valued arm over a list condition selects element-wise', () => {
     const expr = ce.box([
       'Which',
       ['List', 'True', 'False'],
@@ -434,10 +434,16 @@ describe('element-wise selection: what stays unchanged', () => {
     ] as any);
     // `constantFold: false`: every operand is a literal, so the compiler
     // would otherwise evaluate the subtree and emit its value, never
-    // reaching the element-wise complex gate this test pins.
-    expect(() =>
-      compile(expr, { fallback: false, constantFold: false })
-    ).toThrow(/Fail closed/);
+    // reaching the element-wise lowering this test pins.
+    expect(code(expr)).toContain('_SYS.select');
+    // A complex cell is the target's `{ re, im }` object, sitting beside a
+    // real cell in the same array — the convention every compiled array
+    // already uses. `interpreted()` above projects a number to its real part,
+    // so the full cell-by-cell parity table lives in
+    // `compile-which-complex-selection.test.ts` instead of here.
+    expect(
+      compile(expr, { fallback: false, constantFold: false })!.run!({})
+    ).toEqual([{ re: 1, im: 2 }, 0]);
     // The SCALAR complex conditional is untouched.
     const scalar = ce.box([
       'Which',

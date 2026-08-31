@@ -835,3 +835,180 @@ describeMaybe('PYTHON EXECUTION PARITY — collections (venv)', () => {
     for (const c of COLLECTION_CASES) expectDeepClose(actual[c.name], c.expected);
   });
 });
+
+/**
+ * Arithmetic over a LIST-TYPED parameter.
+ *
+ * The Python target used to refuse every arithmetic head that had a
+ * collection-typed operand, because its infix lowering is wrong for a Python
+ * list: `v + 1` raises `TypeError` (a list concatenates, it does not add) and
+ * `2 * v` REPEATS the list instead of scaling it. A head with exactly one
+ * collection operand now fans out into a list comprehension instead, which the
+ * cases below verify by RUNNING the emitted Python.
+ *
+ * Each case is executed twice, once with a plain Python list bound to the
+ * parameter and once with a NumPy array, because the reason the guard existed
+ * is that a compiled artifact cannot constrain which of the two the caller
+ * binds. Both runs must equal the interpreter's own answer.
+ */
+const ELEMENTWISE_CASES: Array<{
+  name: string;
+  expr: any;
+  value: number[];
+}> = [
+  { name: 'ew_negate', expr: ['Negate', 'v'], value: [1, -2, 3.5] },
+  { name: 'ew_add_scalar', expr: ['Add', 'v', 1], value: [1, 2, 3] },
+  { name: 'ew_mul_scalar', expr: ['Multiply', 2, 'v'], value: [1, -2, 3] },
+  { name: 'ew_sub_from_scalar', expr: ['Subtract', 3, 'v'], value: [1, 2, 3] },
+  { name: 'ew_div_by_scalar', expr: ['Divide', 'v', 2], value: [1, 3, 5] },
+  { name: 'ew_scalar_over', expr: ['Divide', 2, 'v'], value: [1, 2, 4] },
+  { name: 'ew_power', expr: ['Power', 'v', 2], value: [1, 2, 3] },
+  { name: 'ew_scalar_power', expr: ['Power', 2, 'v'], value: [0, 1, 3] },
+  // The scalar operand is an expression, not a literal: it is spliced into the
+  // comprehension body, so it must still parenthesize correctly.
+  {
+    name: 'ew_scalar_expr',
+    expr: ['Multiply', 'v', ['Add', 3, 4]],
+    value: [1, 2, 3],
+  },
+  // A fan-out nested inside a natively-broadcasting head (`np.sin` of a list).
+  {
+    name: 'ew_nested_in_sin',
+    expr: ['Sin', ['Multiply', 2, 'v']],
+    value: [0, 0.5, 1],
+  },
+  // Two fan-outs nested in each other (`Subtract` canonicalizes to Add+Negate).
+  { name: 'ew_nested_fanout', expr: ['Subtract', 5, 'v'], value: [1, 2, 3] },
+  // An EMPTY binding: the interpreter answers the empty list for a binary head
+  // (`Add([], 1)` is `[]`), and so does the comprehension.
+  { name: 'ew_empty', expr: ['Add', 'v', 1], value: [] },
+];
+
+describeMaybe('PYTHON EXECUTION PARITY — arithmetic over a list (venv)', () => {
+  const python = new PythonTarget();
+
+  it('emitted comprehensions match the interpreter for list and ndarray bindings', () => {
+    let src = 'import numpy as np\nimport json\n\n';
+    const expected: Record<string, number[]> = {};
+
+    for (const c of ELEMENTWISE_CASES) {
+      ce.pushScope();
+      // Declared but NOT assigned, so the compiler sees a list-TYPED operand
+      // rather than a foldable literal — the shape the guard used to refuse.
+      ce.declare('v', 'list<number>');
+      src += `${python.compileFunction(ce.box(c.expr), `fn_${c.name}`, ['v'])}\n`;
+      ce.assign('v', ce.box(['List', ...c.value]));
+      const iv = ce.box(c.expr).N();
+      ce.popScope();
+      expected[c.name] = (iv.ops ?? []).map((o) => o.re);
+    }
+
+    src +=
+      '\ndef _ser(z):\n' +
+      '    if isinstance(z, np.ndarray): return _ser(z.tolist())\n' +
+      '    if isinstance(z, (list, tuple)): return [_ser(v) for v in z]\n' +
+      '    return float(z)\n\n';
+    src += 'results = {}\n';
+    for (const c of ELEMENTWISE_CASES) {
+      const lit = JSON.stringify(c.value);
+      src += `results[${JSON.stringify(c.name)}] = [_ser(fn_${c.name}(${lit})), _ser(fn_${c.name}(np.array(${lit}, dtype=float)))]\n`;
+    }
+    src += 'print(json.dumps(results))\n';
+
+    const file = path.join(os.tmpdir(), `ce-py-elementwise-${process.pid}.py`);
+    fs.writeFileSync(file, src);
+    let out = '';
+    try {
+      out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+    const actual = JSON.parse(out) as Record<string, [number[], number[]]>;
+
+    for (const c of ELEMENTWISE_CASES) {
+      const [fromList, fromArray] = actual[c.name];
+      expectDeepClose(fromList, expected[c.name]);
+      expectDeepClose(fromArray, expected[c.name]);
+    }
+  });
+});
+
+/**
+ * The shapes that KEEP failing closed, each for a reason no Python emission
+ * removes. Not venv-gated: these never reach execution.
+ */
+describe('PYTHON — arithmetic over a collection that stays declined', () => {
+  const python = new PythonTarget();
+
+  it('declines two collection operands', () => {
+    // The interpreter answers `Error("incompatible-dimensions", "2 vs 3")` for
+    // `[1,2] + [3,4,5]`. NumPy would answer `[4,5,6]` for `[1] + [3,4,5]` (it
+    // recycles a length-1 axis) and a `zip` comprehension would truncate to
+    // the shorter operand, so neither reproduces the error.
+    ce.pushScope();
+    ce.declare('v1', 'list<number>');
+    ce.declare('v2', 'list<number>');
+    expect(() => python.compile(ce.box(['Add', 'v1', 'v2']))).toThrow(
+      /Fail closed/
+    );
+    expect(() =>
+      python.compile(ce.box(['Add', ['List', 1, 2], ['List', 3, 4, 5]]))
+    ).toThrow(/Fail closed/);
+    ce.popScope();
+  });
+
+  it('declines a collection whose elements are not scalars', () => {
+    // One level of fan-out would hand a whole ROW, or a POINT, to a scalar
+    // operator. The interpreter answers `[[2, 3], [4, 5]]` for the matrix and
+    // `[(3, 4), (6, 8)]` for the point list — neither is element-wise.
+    ce.pushScope();
+    ce.declare('mx', 'matrix<2x2>');
+    ce.declare('pts', 'list<tuple<number, number>>');
+    expect(() => python.compile(ce.box(['Add', 'mx', 1]))).toThrow(
+      /Fail closed/
+    );
+    expect(() => python.compile(ce.box(['Multiply', 'pts', 2]))).toThrow(
+      /Fail closed/
+    );
+    ce.popScope();
+  });
+
+  it('declines an operand that is only possibly a collection', () => {
+    // A `broadcastable<T>` operand and a top-typed call may each bind to a
+    // list at run time, which is the repeat/concatenate divergence itself.
+    ce.pushScope();
+    ce.declare('bc', 'broadcastable<number>');
+    ce.declare('hh', '(number) -> unknown');
+    expect(() => python.compile(ce.box(['Multiply', 2, 'bc']))).toThrow(
+      /Fail closed/
+    );
+    expect(() => python.compile(ce.box(['Add', ['hh', 1], 1]))).toThrow(
+      /Fail closed/
+    );
+    ce.popScope();
+  });
+
+  it('declines a negative integer exponent over a collection base', () => {
+    // The one element lowering whose result depends on the container the
+    // caller binds — the divergence the comprehension exists to remove.
+    // Python's `**` answers a float for a negative integer exponent of an
+    // `int` (`2 ** -2` is `0.25`), while NumPy refuses the same operation on
+    // an integer array element: `np.int64(2) ** -2` raises `ValueError:
+    // Integers to negative integer powers are not allowed` (measured, NumPy
+    // 2.4.2). A `list<number>` operand admits an integer ndarray, so the
+    // emitted comprehension would compute for one binding and throw for
+    // another, where the interpreter answers `[1, 1/4, 1/16]` for both. This
+    // shape used to compile and was executed here over a float ndarray only,
+    // which never exercised the failing binding.
+    ce.pushScope();
+    ce.declare('vn', 'list<number>');
+    expect(() => python.compile(ce.box(['Power', 'vn', -2]))).toThrow(
+      /Fail closed/
+    );
+    // A non-negative integer exponent is uniform on both containers.
+    expect(python.compile(ce.box(['Power', 'vn', 2])).code).toBe(
+      '[_tv1 ** 2 for _tv1 in vn]'
+    );
+    ce.popScope();
+  });
+});

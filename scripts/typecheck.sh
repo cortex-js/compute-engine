@@ -5,17 +5,31 @@ set -e
 # Runs on the native (Go) compiler (@typescript/native, npm:typescript@7),
 # referenced by its explicit path because it and the TS 6 API package
 # (@typescript/typescript6, aliased as `typescript`) both ship a `tsc` bin.
+# A git WORKTREE has no node_modules of its own, so when the local path is
+# absent the binary is resolved through the main checkout, which every
+# worktree shares via the repository's common git directory.
 # A file argument makes tsc ignore tsconfig.json (error TS5112), so the full
 # option set is passed on the CLI with --ignoreConfig. "bundler" replaces the
 # removed node10 resolution; --types node restores @types/node (no longer
 # auto-discovered); strict is on by default.
+TSC=./node_modules/@typescript/native/bin/tsc
+if [ ! -x "$TSC" ]; then
+  MAIN_ROOT="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  MAIN_ROOT="${MAIN_ROOT%/.git}"
+  TSC="$MAIN_ROOT/node_modules/@typescript/native/bin/tsc"
+  if [ ! -x "$TSC" ]; then
+    echo "FAIL: cannot find @typescript/native's tsc (looked in ./node_modules and $MAIN_ROOT/node_modules)."
+    exit 1
+  fi
+fi
+
 echo "Running TypeScript type check..."
-./node_modules/@typescript/native/bin/tsc --target es2022 --module es2022 --moduleResolution bundler --types node \
+"$TSC" --target es2022 --module es2022 --moduleResolution bundler --types node \
   --skipLibCheck -d --allowImportingTsExtensions true --emitDeclarationOnly \
   --ignoreConfig --outDir /tmp/typecheck ./src/compute-engine.ts
 
 echo "Checking Epsil CLI..."
-./node_modules/@typescript/native/bin/tsc --target es2022 --module es2022 --moduleResolution bundler --types node \
+"$TSC" --target es2022 --module es2022 --moduleResolution bundler --types node \
   --skipLibCheck --allowImportingTsExtensions true --noEmit \
   --ignoreConfig ./src/cli/epsil.ts
 
@@ -33,7 +47,7 @@ echo "Checking Epsil CLI..."
 # the line it guards stops erroring, tsc reports the unused directive.
 echo ""
 echo "Checking type-level pins in the test suite..."
-./node_modules/@typescript/native/bin/tsc --target es2022 --module es2022 --moduleResolution bundler --types node,jest \
+"$TSC" --target es2022 --module es2022 --moduleResolution bundler --types node,jest \
   --skipLibCheck --allowImportingTsExtensions true --noEmit --ignoreConfig \
   ./test/compute-engine/compile-free-function-typing.test.ts \
   ./test/compute-engine/compile-mode-plumbing.test.ts \

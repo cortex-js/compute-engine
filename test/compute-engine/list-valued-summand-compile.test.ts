@@ -711,7 +711,7 @@ describe('a contradicted scalar declaration declines in every scalar position (2
     const expr = ce.box(['a', 'u']);
     const r = compile(expr, { fallback: true });
     expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u)');
+    expect((r as any).code).toEqual('((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_a(_tv2), _tv1) : _fn_a(_tv1))(_.u)');
     const v = (r as any).run({ u: 0.3 });
     expect(v[0]).toBeCloseTo(Math.cos(0.3), 10);
     expect(v[1]).toBeCloseTo(Math.sin(0.3), 10);
@@ -833,7 +833,7 @@ describe('a contradicted scalar declaration declines at DEFINITION emission (202
     const ce = withDeclaration('(number) -> number');
     const r = compile(ce.box(['a', 'u']), { fallback: true });
     expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u)');
+    expect((r as any).code).toEqual('((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_a(_tv2), _tv1) : _fn_a(_tv1))(_.u)');
     const v = (r as any).run({ u: 0.3 });
     expect(v[0]).toBeCloseTo(Math.cos(0.3), 10);
     expect(v[1]).toBeCloseTo(Math.sin(0.3), 10);
@@ -1018,7 +1018,7 @@ describe('a contradicted scalar declaration declines for a MULTI-CLAUSE function
     const ce = withClauses('(number) -> number', 'mixed');
     const r = compile(ce.box(['a', 'u']), { fallback: true });
     expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u)');
+    expect((r as any).code).toEqual('((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_a(_tv2), _tv1) : _fn_a(_tv1))(_.u)');
     // Integer branch: the truthful scalar clause.
     expect((r as any).run({ u: 3 })).toBe(7);
     // Real branch: the list-constructing clause, returned intact.
@@ -1041,7 +1041,7 @@ describe('a contradicted scalar declaration declines for a MULTI-CLAUSE function
     const ce = withClauses('(number) -> number', 'lying');
     const r = compile(ce.box(['List', ['a', 'u'], 1]), { fallback: true });
     expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('[_fn_a(_.u), 1]');
+    expect((r as any).code).toEqual('[((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_a(_tv2), _tv1) : _fn_a(_tv1))(_.u), 1]');
   });
 
   // CONTROL: a TRUTHFUL `-> number` clause set — no contradiction, so every
@@ -1050,7 +1050,7 @@ describe('a contradicted scalar declaration declines for a MULTI-CLAUSE function
     const ce = withClauses('(number) -> number', 'truthful');
     const r = compile(ce.box(['Add', ['a', 'u'], 1]), { fallback: true });
     expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u) + 1');
+    expect((r as any).code).toEqual('((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_a(_tv2), _tv1) : _fn_a(_tv1))(_.u) + 1');
     expect((r as any).run({ u: 3 })).toBe(8);
     const rs = compile(ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]), {
       fallback: true,
@@ -1216,7 +1216,7 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
     const ce = withDeclaration('(number) -> number');
     const r = compile(ce.box(['a', 'u']), { fallback: true });
     expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u)');
+    expect((r as any).code).toEqual('((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_a(_tv2), _tv1) : _fn_a(_tv1))(_.u)');
   });
 
   // POSITIVE-EVIDENCE-ONLY: a `Return` in an EARLIER statement means the last
@@ -1236,7 +1236,7 @@ describe('a contradicted scalar declaration is seen through a MULTI-STATEMENT bo
     ce.declare('u', 'number');
     const r = compile(ce.box(['Add', ['a', 'u'], 1]), { fallback: true });
     expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u) + 1');
+    expect((r as any).code).toEqual('((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_a(_tv2), _tv1) : _fn_a(_tv1))(_.u) + 1');
   });
 
   // CONTROL: a TRUTHFUL multi-statement scalar body — no contradiction, so every
@@ -1437,7 +1437,7 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
     const ce = withBody(['List', ['Cos', 't'], ['Sin', 't']]);
     const r = compile(ce.box(['b', 'u']), { fallback: true });
     expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_b(_.u)');
+    expect((r as any).code).toEqual('((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_b(_tv2), _tv1) : _fn_b(_tv1))(_.u)');
     const v = (r as any).run({ u: 0.3 });
     expect(v[0]).toBeCloseTo(Math.cos(0.3), 10);
     expect(v[1]).toBeCloseTo(Math.sin(0.3), 10);

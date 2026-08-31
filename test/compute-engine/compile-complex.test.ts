@@ -1427,17 +1427,27 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
   });
 
   // FORM 2 — a provably REAL argument is wrapped statically, so no runtime
-  // test is emitted. The negative assertion is the one that backs that claim:
-  // a regression degenerating to `_SYS.cplx({ re: _.u, im: 0 })` would still
+  // COERCION test is emitted. The negative assertion is the one that backs
+  // that claim: a regression degenerating to `_SYS.cplx(…)` would still
   // contain the static substring.
+  //
+  // The call site does carry a runtime broadcast guard, which is a separate
+  // question — `u` is declared `real`, but `run()` is free to supply an array
+  // and the interpreter broadcasts there. The argument is bound to a temporary
+  // by that guard, so the static wrap reads the temporary rather than `_.u`.
   it('a provably REAL argument is wrapped statically, with no runtime test', () => {
     const engine = makeEngine();
     engine.declare('u', 'real');
     const r = compile(engine.box(['Q', 'u']), { constantFold: false });
     expect(r.success).toBe(true);
-    expect(r.code).toContain('{ re: _.u, im: 0 }');
+    expect(r.code).toContain('_fn_Q(({ re: _tv1, im: 0 }))');
     expect(r.code).not.toContain('_SYS.cplx(');
     expect(r.run!({ u: 2 })).toEqual({ re: 2, im: 1 });
+    // The broadcast branch wraps the ELEMENT statically for the same reason.
+    expect(r.run!({ u: [2, 3] })).toEqual([
+      { re: 2, im: 1 },
+      { re: 3, im: 1 },
+    ]);
   });
 
   // FORM 3 — everything else takes the runtime coercion, and it is the branch
@@ -1531,6 +1541,79 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
     expect(r.code).not.toContain('$v');
     expect(r.code).not.toContain('_SYS.cplx(');
     expect(r.run!({})).toEqual([2, 3, 4]);
+  });
+
+  it('a nested literal enters its REAL parameters in its own frame, so an outer complex name of the same spelling does not reach them', () => {
+    // A shape query answers from the innermost frame that MENTIONS the name,
+    // so a literal that frames only its complex-lane parameters leaves its
+    // REAL ones to be answered by an enclosing frame. Here `Q`'s declared
+    // complex parameter `w` is framed for the whole body, and the nested
+    // generic literal binds its own real `w`: that inner `w` compiled in the
+    // complex lane, emitting
+    // `(z, w) => ({ re: w.re + z.re, im: w.im })` and answering `{re: null}`
+    // behind `success: true`, where the interpreter answers `6`. Every
+    // parameter of a literal is now entered in the frame that literal pushes.
+    const { ComputeEngine } =
+      require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    const engine = new ComputeEngine();
+    engine.declare('Q2', { signature: '(complex) -> number' });
+    const inner = engine.box([
+      'Function',
+      [
+        'Typed',
+        ['Add', ['Re', 'z'], 'w'],
+        "'(z: T, w: U) -> number where T: complex, U: number'",
+      ],
+      'z',
+      'w',
+    ]);
+    engine.assign(
+      'Q2',
+      engine.box([
+        'Function',
+        ['Apply', inner.json, ['Complex', 1, 2], 5],
+        'w',
+      ])
+    );
+    const call = engine.box(['Q2', ['Complex', 3, 4]]);
+    const r2 = compile(call, { constantFold: false, fallback: false });
+    expect(r2.preamble).toContain('(z, w) => w + (z).re');
+    expect(r2.run!({})).toBe(6); // Re(1+2i) + 5
+    expect(call.evaluate().toString()).toBe('6');
+  });
+
+  it('a nested literal with NO complex parameter still shadows an enclosing frame of the same spelling', () => {
+    // The same leak, with a literal that has nothing complex about it at all
+    // and so used to push no frame of its own. `R`'s declared complex
+    // parameter `z` is framed for the whole body; the callback `(z) ↦ 2z`
+    // binds its own real `z`, and the enclosing frame answered for it. The
+    // body compiled in the `{ re, im }` lane while `_SYS.map` handed it plain
+    // numbers, so `run()` answered `[{re: NaN, im: NaN}, …]` behind
+    // `success: true`, where the interpreter answers `[2, 4, 6]`. A literal
+    // now describes its own parameters whenever a frame belonging to another
+    // scope mentions one of their names.
+    const { ComputeEngine } =
+      require('../../src/compute-engine') as typeof import('../../src/compute-engine');
+    const engine = new ComputeEngine();
+    engine.declare('R2', { signature: '(complex) -> list<number>' });
+    engine.assign(
+      'R2',
+      engine.box([
+        'Function',
+        [
+          'Map',
+          ['Function', ['Multiply', 2, 'z'], 'z'],
+          ['List', 1, 2, 3],
+        ],
+        'z',
+      ])
+    );
+    const call = engine.box(['R2', ['Complex', 1, 2]]);
+    expect(call.evaluate().toString()).toBe('[2,4,6]');
+    const r3 = compile(call, { constantFold: false, fallback: false });
+    expect(r3.success).toBe(true);
+    expect(r3.preamble).toContain('(z) => 2 * z');
+    expect(r3.run!({})).toEqual([2, 4, 6]);
   });
 });
 
@@ -1754,6 +1837,97 @@ describe('COMPILE COMPLEX - Reduce/Scan ACCUMULATOR lane (combinerPlan)', () => 
     );
     expect(r.success).toBe(true);
     expect(r.code).toContain('cmath.log(');
+  });
+
+  // The frame `compileCombinerLiteral` pushes for the combiner is the
+  // AUTHORITATIVE description of its parameters: the same `combinerPlan` that
+  // fills it also decides which operands the fold's wrapper lifts to
+  // `{ re, im }`. A combiner carrying a GENERIC complex bound in its return
+  // marker (`(a: T, x: T) -> T where T: complex`) declares both parameters
+  // complex, which disagrees with a plan that keeps the accumulator real. The
+  // declaration used to win — the literal pushed a second, declaration-derived
+  // shape frame over the owner frame — and the fold answered a STRING behind
+  // `success: true`.
+  describe('a GENERIC complex-bounded combiner defers to the plan', () => {
+    /** `(a, x) ↦ a + |x|` under `(a: T, x: T) -> T where T: complex`. */
+    const GENERIC_STAYS_REAL = [
+      'Function',
+      [
+        'Typed',
+        ['Add', 'a', ['Abs', 'x']],
+        { str: '(a: T, x: T) -> T where T: complex' },
+      ],
+      'a',
+      'x',
+    ];
+
+    test('the fold itself computes the real accumulator', () => {
+      const engine = makeEngine();
+      const r = compile(
+        engine.box(['Reduce', 'L', GENERIC_STAYS_REAL, 0]),
+        opts
+      );
+      expect(r.success).toBe(true);
+      expect(r.run!({})).toBeCloseTo(1 + Math.sqrt(5), 12);
+    });
+
+    test('a PARENT of the fold agrees on the real lane', () => {
+      // Before the plan won, this answered the string
+      // `'[object Object]1'`: the body returned `{ re, im }` while the
+      // parent's `+` was emitted for the plan's real accumulator.
+      const engine = makeEngine();
+      const r = compile(
+        engine.box(['Add', ['Reduce', 'L', GENERIC_STAYS_REAL, 0], 1]),
+        opts
+      );
+      expect(r.success).toBe(true);
+      expect(r.run!({})).toBeCloseTo(2 + Math.sqrt(5), 12);
+    });
+
+    test('the emission matches the same combiner written without the bound', () => {
+      const engine = makeEngine();
+      const generic = compile(
+        engine.box(['Reduce', 'L', GENERIC_STAYS_REAL, 0]),
+        opts
+      );
+      const plain = compile(
+        engine.box([
+          'Reduce',
+          'L',
+          ['Function', ['Add', 'a', ['Abs', 'x']], 'a', 'x'],
+          0,
+        ]),
+        opts
+      );
+      expect(generic.code).toBe(plain.code);
+    });
+
+    test('a bound the plan AGREES with still binds both lanes complex', () => {
+      // The over-correction direction: deferring to the plan must not strip a
+      // lane the plan itself made complex. `a + 2x` widens the accumulator, so
+      // both lanes are complex with or without the bound.
+      const engine = makeEngine();
+      const r = compile(
+        engine.box([
+          'Reduce',
+          'L',
+          [
+            'Function',
+            [
+              'Typed',
+              ['Add', 'a', ['Multiply', 2, 'x']],
+              { str: '(a: T, x: T) -> T where T: complex' },
+            ],
+            'a',
+            'x',
+          ],
+          0,
+        ]),
+        opts
+      );
+      expect(r.success).toBe(true);
+      expect(r.run!({})).toEqual(cx(2, 6));
+    });
   });
 });
 

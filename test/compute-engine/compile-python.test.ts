@@ -246,16 +246,54 @@ describe('PYTHON TARGET', () => {
         python.compile(ce3.box(['Add', ['h', 'x'], 1]))
       ).toThrow(/Fail closed/);
 
-      // A statically-VISIBLE list-typed operand fails closed too (guard parity
-      // with the JS target): `v + 1` on a Python list binding raises TypeError
-      // (concatenation), and `2 * v` silently repeats the list.
+      // Two collection operands fail closed: the interpreter answers
+      // `Error("incompatible-dimensions")` when the lengths disagree, and
+      // neither NumPy (which recycles a length-1 axis) nor `zip` (which
+      // truncates) reproduces that, so no faithful emission exists.
       const ce4 = new ComputeEngine();
       ce4.declare('v', 'list<number>');
-      expect(() => python.compile(ce4.box(['Add', 'v', 1]))).toThrow(
+      ce4.declare('w', 'list<number>');
+      expect(() => python.compile(ce4.box(['Add', 'v', 'w']))).toThrow(
         /Fail closed/
       );
-      expect(() => python.compile(ce4.box(['Multiply', 2, 'v']))).toThrow(
+
+      // A collection whose elements are not scalars fails closed as well: one
+      // level of fan-out would hand a whole row, or a point, to a scalar
+      // operator. The interpreter answers `[[2, 3], [4, 5]]` for the matrix and
+      // `[(3, 4), (6, 8)]` for the point list.
+      const ce5 = new ComputeEngine();
+      ce5.declare('m', 'matrix<2x2>');
+      ce5.declare('p', 'list<tuple<number, number>>');
+      expect(() => python.compile(ce5.box(['Add', 'm', 1]))).toThrow(
         /Fail closed/
+      );
+      expect(() => python.compile(ce5.box(['Multiply', 'p', 2]))).toThrow(
+        /Fail closed/
+      );
+    });
+
+    it('fans a single list-typed operand out into a comprehension', () => {
+      // A statically-VISIBLE list-typed operand is element-wise expressible:
+      // the infix lowering is wrong for it (`v + 1` on a Python list binding
+      // raises TypeError, `2 * v` repeats the list), but a comprehension
+      // iterates a list, a tuple and an ndarray alike, so the emission does
+      // not depend on what the caller binds.
+      const ce4 = new ComputeEngine();
+      ce4.declare('v', 'list<number>');
+      expect(python.compile(ce4.box(['Negate', 'v'])).code).toBe(
+        '[-_tv1 for _tv1 in v]'
+      );
+      expect(python.compile(ce4.box(['Add', 'v', 1])).code).toBe(
+        '[_tv1 + 1 for _tv1 in v]'
+      );
+      expect(python.compile(ce4.box(['Multiply', 2, 'v'])).code).toBe(
+        '[2 * _tv1 for _tv1 in v]'
+      );
+      expect(python.compile(ce4.box(['Power', 'v', 2])).code).toBe(
+        '[_tv1 ** 2 for _tv1 in v]'
+      );
+      expect(python.compile(ce4.box(['Divide', 2, 'v'])).code).toBe(
+        '[2 / _tv1 for _tv1 in v]'
       );
     });
 

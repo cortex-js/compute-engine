@@ -264,12 +264,12 @@ describe('COMPILE a `function` definition', () => {
     expect(interpreted).toBe('2');
   });
 
-  it('a GENERIC definition fails closed, as for a definition (rule G3)', () => {
-    // A polymorphic signature's parameters are type VARIABLES, which the
-    // compiler cannot resolve at the call site, so it can decide neither the
-    // complex coercion nor the broadcast; the engine-defined route declines
-    // such a callee in `ensureUserFunctionEmitted`. Both `function` spellings
-    // keep the polytype through boxing, so both reach this gate.
+  it('an UNBOUNDED generic definition fails closed, as for a definition (rule G3)', () => {
+    // A type variable with no declared bound names no type to compile the
+    // parameter against, so the compiler can decide neither the complex
+    // coercion nor the broadcast; the engine-defined route declines such a
+    // callee in `ensureUserFunctionEmitted`. Both `function` spellings keep
+    // the polytype through boxing, so both reach this gate.
     for (const src of [
       'function id<T>(x: T) -> T { x }\nid(3)',
       'function id(x: T) -> T where T { x }\nid([1, 2, 3])',
@@ -280,6 +280,51 @@ describe('COMPILE a `function` definition', () => {
       // …and the interpreter still answers.
       expect(program(src).evaluate().toString()).not.toContain('Error');
     }
+  });
+
+  it('a BOUNDED generic definition compiles at its bound, like an engine-level one', () => {
+    // A bounded type variable is read at its declared bound — the reading the
+    // interpreter's own broadcast gate performs — so the local is emitted once
+    // as the ground function it is bounded by and its call sites get the
+    // broadcast wrap that ground signature earns. Without it the two spellings
+    // of one function disagreed: the engine-level `gd` compiled while the
+    // block-local `gd` declined.
+    const src = 'function gd(x: T) -> T where T: number { 2x }\n';
+    const scalar = both(`${src}gd(5)`, { constantFold: false });
+    expect(scalar.code).toContain('let gd = ((x) => 2 * x)');
+    expect(scalar.compiled).toBe(10);
+    expect(scalar.interpreted).toBe('10');
+    const list = both(`${src}gd([1, 2, 3])`, { constantFold: false });
+    expect(list.code).toContain('_SYS.bcastFn');
+    expect(list.compiled).toEqual([2, 4, 6]);
+    expect(list.interpreted).toBe('[2,4,6]');
+  });
+
+  it('a COLLECTION-bounded generic definition compiles its body at the bound', () => {
+    // Reading the bound settled the CALL boundary — a `list<number>`-bounded
+    // parameter is handed the list WHOLE, not one element per call — but the
+    // BODY canonicalized against the ERASED parameter, which analyzes as a
+    // scalar. So `2x` emitted the scalar `2 * x`, which multiplies the whole
+    // array as a number and answers NaN at run time, where the interpreter
+    // broadcasts. The literal is now re-boxed with the ground parameter types
+    // stamped on, exactly as the engine-level route does, so the body
+    // canonicalizes at the type the bound proves.
+    const src = 'function gd(x: T) -> T where T: list<number> { 2x }\n';
+    const list = both(`${src}gd([1, 2, 3])`, { constantFold: false });
+    expect(list.code).toContain('_SYS.bcast');
+    expect(list.compiled).toEqual([2, 4, 6]);
+    expect(list.interpreted).toBe('[2,4,6]');
+
+    // A body that needs the list SHAPE also compiles now: `Length` lowers only
+    // over something array-shaped, and the erased parameter analyzed as a bare
+    // `collection`, which is not.
+    const len = both(
+      'function gl(x: T) -> number where T: list<number> { Length(x) }\ngl([1, 2, 3])',
+      { constantFold: false }
+    );
+    expect(len.code).toContain('.length');
+    expect(len.compiled).toBe(3);
+    expect(len.interpreted).toBe('3');
   });
 
   it('compiles to the SAME code as the equivalent `const` binding', () => {

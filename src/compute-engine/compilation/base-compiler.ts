@@ -3,7 +3,10 @@ import type {
   FunctionInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import type { MathJsonSymbol } from '../../math-json/types.js';
+import type {
+  MathJsonExpression,
+  MathJsonSymbol,
+} from '../../math-json/types.js';
 import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
@@ -46,6 +49,7 @@ import {
   isPolymorphicType,
 } from '../../common/type/instantiate.js';
 import { substituteDeclaredBounds } from '../boxed-expression/generic-instantiation.js';
+import { ascribeDeclaredParameterTypes } from '../engine-declarations.js';
 import type {
   FunctionSignature,
   Type,
@@ -68,9 +72,11 @@ import {
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import {
   functionLiteralBoundNames,
+  functionLiteralDeclaredSignature,
   functionLiteralParameterName,
   functionLiteralParameters,
   functionLiteralParameterType,
+  functionLiteralReturnMarker,
   isDestructuringParameter,
 } from '../boxed-expression/function-literal.js';
 import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
@@ -150,9 +156,11 @@ const GENERATED_NAME_RE = /(?<![\p{L}\p{N}_])_(?:tv|cse)[\p{L}\p{N}_]*/gu;
  * GK15 nodes each. A definite integral's syntax is a handful of nodes while
  * its evaluation may run that whole budget, so without this arm a constant
  * integral was the canonical "estimate miss" — the class the retired
- * per-fold wall-clock deadline existed to catch (a wall-clock which made
- * the fold decision depend on machine load; removed by user ruling,
- * 2026-08-30). Priced at the WORST case, not the typical converged cost
+ * per-fold wall-clock deadline existed to catch. That wall-clock made the
+ * fold decision depend on machine load and was removed by user ruling; see
+ * the ROADMAP.md entry "compile-time constant-fold eligibility is
+ * deterministic — the wall-clock backstop is removed". Priced at the WORST
+ * case, not the typical converged cost
  * (~16 panels): the estimate is the only anti-hang gate, so it must bound
  * what the evaluation can do.
  *
@@ -2934,17 +2942,26 @@ export class BaseCompiler {
    * - names bound by an enclosing binding form (lambda parameters, loop
    *   indices — the evaluator would read the engine symbol they shadow);
    * - `vars`-mapped symbols and caller-overridden operators
-   *   (`mentionsExcludedName`).
+   *   (`mentionsExcludedName`);
+   * - a deterministic WORK ESTIMATE over the subtree's syntax
+   *   (`foldCostEstimate` against `CONSTANT_FOLD_MAX_COST`), which prices one
+   *   numeric quadrature at its worst case (`FOLD_QUADRATURE_EVALS`) and
+   *   declines outright the heads whose work no syntax walk can price
+   *   (`NIntegrate`, `Limit`, `NLimit`, `Residue`, and a flat multi-limit
+   *   `Integrate`).
    *
-   * The evaluation runs under a short deadline (`withTimeLimit` nests as
-   * `min()`, so a tighter ambient deadline still governs) and under the
-   * engine's `maxCollectionSize` clamped to a fold-specific cap, so a
-   * constant subtree over a huge range degrades to structural compilation
-   * instead of stalling the compile. One accepted consequence: a deadline-
-   * degradable numeric operator (adaptive quadrature is best-effort under a
-   * deadline) folds to the estimate the budget allows — for a fully constant
-   * call that is the value computed ONCE at compile time rather than on
-   * every invocation, which is the point of folding it.
+   * The evaluation itself runs under NO per-fold wall-clock deadline, and this
+   * function arms none. The work estimate above is the only anti-hang gate, and
+   * it is deliberately the only one: eligibility is decided from the expression
+   * alone, so the same input always compiles to the same output, where a
+   * wall-clock cutoff made the fold decision depend on machine load. The bounds
+   * the evaluation does run under are themselves deterministic —
+   * `engine.iterationLimit`, the engine's `maxCollectionSize` clamped to a
+   * fold-specific cap (so a constant subtree over a huge range degrades to
+   * structural compilation instead of stalling the compile), and the adaptive
+   * quadrature's own interval budget. An AMBIENT deadline armed by the CALLER
+   * around the whole compilation still cancels it, through the ordinary
+   * `_shouldContinueExecution` check sites.
    */
   private static tryConstantFold(
     expr: Expression,
@@ -3400,11 +3417,14 @@ export class BaseCompiler {
         CONSTANT_FOLD_MAX_COLLECTION_SIZE
       );
       if (neutralizeAngle) engine.angularUnit = 'rad';
-      // The evaluation runs with NO wall-clock budget of its own (user
-      // ruling, 2026-08-30): a per-fold deadline made the fold decision
-      // depend on machine load — five in-process compiles of the same
-      // source produced two different programs at load ~30 — which is the
-      // very nondeterminism `foldCostEstimate` exists to prevent. The
+      // The evaluation runs with NO wall-clock budget of its own: a per-fold
+      // deadline made the fold decision depend on machine load — five
+      // in-process compiles of the same source produced two different
+      // programs at load ~30 — which is the very nondeterminism
+      // `foldCostEstimate` exists to prevent, so it was removed by user
+      // ruling (the ROADMAP.md entry "compile-time constant-fold
+      // eligibility is deterministic — the wall-clock backstop is
+      // removed"). The
       // estimate is now the ONLY anti-hang gate, so every evaluation class
       // whose work is invisible to a syntax walk must be priced there (see
       // the quadrature arm), and the remaining evaluation bounds are
@@ -3956,7 +3976,16 @@ export class BaseCompiler {
         ops.push(...arg.ops);
         continue;
       }
-      const t = compilationType(arg);
+      // The arity is read through a transparent type ALIAS but NOT through a
+      // nominal type, so `resolveTypeAlias` is the right resolver here and
+      // `compilationType` is not: this gate asks what may be spliced, an
+      // admissibility question, rather than what the layout is. A nominal type
+      // is deliberately not a subtype of the tuple it names, so `At` rejects an
+      // operand carrying the tag; unfolding the tag here spliced anyway and
+      // built `f(At(Error(incompatible-type, …), 1), …)`, and the compiler then
+      // reported that error node instead of the decline below. The interpreter
+      // does not splice a nominal value either — it leaves the call symbolic.
+      const t = resolveTypeAlias(arg.type.type);
       if (typeof t !== 'string' && t.kind === 'tuple') {
         for (let i = 1; i <= t.elements.length; i++)
           ops.push(ce.function('At', [arg, ce.number(i)]));
@@ -4559,8 +4588,14 @@ export class BaseCompiler {
             // (`compilesToArray`, `isArrayOperand`) carry.
             !isProvablyStringOperand(a) &&
             (a.isCollection ||
-              a.type.matches('list<any>') ||
-              a.type.matches('indexed_collection<any>') ||
+              // The COLLECTION shape top, not the list/indexed spellings: a
+              // SET-typed operand matches neither `list<any>` nor
+              // `indexed_collection<any>`, and with the narrower test it
+              // escaped this guard entirely — `Add(T, 1)` for
+              // `T: set<number>` emitted `_.T + 1` (string concatenation or
+              // garbage at run time) where the interpreter answers an
+              // `incompatible-type` error.
+              a.type.matches('collection<any>') ||
               isBoundPossiblyCollectionTyped(a))
         )
       ) {
@@ -4577,16 +4612,20 @@ export class BaseCompiler {
     // Python target: arithmetic over a collection-typed or possibly-collection
     // operand (a concrete/declared `list`/`indexed_collection`, a
     // `broadcastable<T>`, or a top-typed application such as `h(x)` — the same
-    // operand predicate as the JS D6 guard above) cannot be compiled soundly.
-    // Python's arithmetic operators do NOT broadcast a plain
-    // `list`: `2 * [1, 2]` REPEATS (`[1, 2, 1, 2]`), `[1, 2] - 1` raises — both
-    // diverge from the interpreter's element-wise result (`[2, 4]` / `[0, 1]`).
-    // A NumPy array WOULD broadcast, but the compiled artifact cannot constrain
-    // what the caller binds, so the outcome is binding-dependent. Unlike the JS
-    // target there is no `_SYS.bcast` closure path here (Python's arithmetic
-    // heads lower to infix operators, not scalar function codegen), so fail
-    // closed (D6) and let the engine fall back to the interpreter, which
-    // broadcasts correctly. Only infix-lowering arithmetic heads are affected;
+    // operand predicate as the JS D6 guard above) cannot be lowered to the
+    // target's INFIX arithmetic. Python's arithmetic operators do NOT broadcast
+    // a plain `list`: `2 * [1, 2]` REPEATS (`[1, 2, 1, 2]`), `[1, 2] - 1`
+    // raises — both diverge from the interpreter's element-wise result
+    // (`[2, 4]` / `[0, 1]`). A NumPy array WOULD broadcast, but the compiled
+    // artifact cannot constrain what the caller binds, so the outcome is
+    // binding-dependent.
+    //
+    // What IS soundly expressible is a fan-out over the ONE collection operand
+    // (`tryCompilePythonElementwise`): the target spells the element-wise map
+    // as a list comprehension, which is element-wise for a plain Python list,
+    // a tuple and an ndarray alike. When that route declines, fail closed (D6)
+    // and let the engine fall back to the interpreter, which broadcasts
+    // correctly. Only infix-lowering arithmetic heads are affected;
     // element-wise math functions (`Sin` → `np.sin`) broadcast natively over a
     // NumPy array and are left untouched. Bare unknown symbols are NOT
     // possibly-collection-typed, so plain scalar plot bodies are unaffected.
@@ -4601,19 +4640,13 @@ export class BaseCompiler {
       const opMap = target.operators?.(h);
       const lowersToInfix =
         opMap !== undefined && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]);
-      // One shape IS soundly expressible and must reach its lowering: a UNARY
-      // broadcastable head over a FINITE INDEXED collection (`Negate([1,2,3])`).
-      // No infix arithmetic over a list is emitted for it at all — the target's
-      // `broadcastUnary` hook fans it out as a list comprehension
-      // (`[(-_tv1) for _tv1 in [1, 2, 3]]`), which is element-wise for a plain
-      // Python list exactly as for an ndarray. The predicate mirrors the
-      // dispatch site in the function-codegen path below one for one, so the
-      // guard only stands aside when that dispatch will actually fire; if the
-      // hook then declines, that path fails closed (D6) on its own. Everything
-      // else keeps failing closed: every binary/n-ary shape (`[1,2] + [3,4]`,
-      // `2 * [1,2]`, `[1,2] ** 2`) — which the unary hook cannot express — and
-      // a merely collection-TYPED operand, whose runtime binding (list vs
-      // ndarray) the compiled artifact cannot constrain.
+      // One shape reaches its lowering WITHOUT going through the fan-out below:
+      // a UNARY broadcastable head over a FINITE INDEXED collection
+      // (`Negate([1,2,3])`), which the function-codegen path further down
+      // already fans out through the target's `broadcastUnary` hook. The
+      // predicate mirrors that dispatch site one for one, so the guard only
+      // stands aside when the dispatch will actually fire; if the hook then
+      // declines, that path fails closed (D6) on its own.
       const isUnaryBroadcastOverCollection =
         target.broadcastUnary !== undefined &&
         args.length === 1 &&
@@ -4628,14 +4661,28 @@ export class BaseCompiler {
         args.some(
           (a) =>
             a.isCollection ||
-            a.type.matches('list<any>') ||
-            a.type.matches('indexed_collection<any>') ||
+            // The COLLECTION shape top, for the same reason as the JavaScript
+            // guard above: a SET-typed operand matches neither `list<any>`
+            // nor `indexed_collection<any>` and escaped the guard, emitting
+            // `T + 1` where the interpreter answers `incompatible-type`.
+            // The fan-out below keeps its own narrower participation test,
+            // so a set never fans out (unordered — a comprehension has no
+            // defined order); it declines here instead.
+            a.type.matches('collection<any>') ||
             isBoundPossiblyCollectionTyped(a)
         )
-      )
+      ) {
+        const elementwise = BaseCompiler.tryCompilePythonElementwise(
+          engine,
+          h,
+          args,
+          target
+        );
+        if (elementwise !== undefined) return elementwise;
         throw new Error(
           `${h}: cannot compile arithmetic over a possibly-collection-typed operand on the Python target — Python's arithmetic operators repeat/concatenate a list instead of broadcasting element-wise, diverging from the interpreter. Fail closed (D6). Materialize the operand with evaluate() and compile a scalar element function instead.`
         );
+      }
     }
 
     // GPU shader targets: a comparison or logical connective over a non-scalar
@@ -5096,15 +5143,51 @@ export class BaseCompiler {
           (expr) => BaseCompiler.compileValueOperand(expr, target),
           target
         );
+      // A GENERIC literal is lowered at its GROUND BOUND reading, the same
+      // repair the engine-defined route performs in
+      // `ensureUserFunctionEmitted`. Reading the bound settles what the CALL
+      // boundary does with each argument, but the BODY still canonicalizes
+      // against an ERASED parameter (rule G1), so a parameter bounded by a
+      // COLLECTION analyzed as a scalar: a block-local
+      // `(x: T) -> T where T: list<number>` with a `2x` body emitted `2 * x`,
+      // which multiplies the whole array as a number and answers NaN at run
+      // time, where the interpreter broadcasts to `[2, 4, 6]`.
+      // `literalAtGroundSignature` stamps the ground parameter types onto the
+      // literal and re-boxes it, so the body canonicalizes at the type the
+      // bound proves. It leaves a SCALAR bound unstamped, so a `where T:
+      // number` or `where T: complex` literal is unchanged by it and still
+      // reaches the complex shape frame below. JavaScript only, as on the
+      // engine route: the coercion and broadcast an emitted call boundary
+      // relies on are both JavaScript conventions, and a target with its own
+      // definition lowering was never validated against this reading.
+      let literal = node;
+      let ops = args;
+      if (target.language === 'javascript' && isFunction(node, 'Function')) {
+        const declared = functionLiteralDeclaredSignature(node);
+        const bound =
+          declared !== undefined && isPolymorphicType(declared)
+            ? BaseCompiler.groundSignature(declared)
+            : undefined;
+        if (bound !== undefined) {
+          const grounded = BaseCompiler.literalAtGroundSignature(
+            engine,
+            node,
+            bound
+          );
+          literal = grounded;
+          ops = grounded.ops;
+        }
+      }
+
       // Default: JavaScript arrow function
-      BaseCompiler.assertNoDestructuringParams(args.slice(1));
-      const params = args
+      BaseCompiler.assertNoDestructuringParams(ops.slice(1));
+      const params = ops
         .slice(1)
         .map((x) => functionLiteralParameterName(x) || '_');
       // A parameter that would shadow the vars object is emitted under a
       // generated name (see `lambdaParamBinding`); `boundVars` keeps the
       // literal's OWN parameter names, which are what the expression binds.
-      const binding = BaseCompiler.lambdaParamBinding(params, args[0], target);
+      const binding = BaseCompiler.lambdaParamBinding(params, ops[0], target);
       const lambdaTarget: CompileTarget<Expression> = {
         ...target,
         var: binding.varOf,
@@ -5116,15 +5199,144 @@ export class BaseCompiler {
         // `CompileTarget.lexicalFunctions`.
         localFunctions: target.lexicalFunctions ?? target.localFunctions,
       };
+      // Which parameters are declared a NON-REAL NUMBER type, and so make the
+      // body compute in the `{ re, im }` complex lane? A parameter's own
+      // annotation answers first. Failing that, the literal's declared
+      // SIGNATURE does, read at its bounds: a quantified parameter is erased
+      // before the literal canonicalizes (rule G1), so for a generic literal
+      // such as `(x: T) -> T where T: complex` the bound is the only place the
+      // parameter's type survives at all. That is the same ground reading the
+      // call boundary performs, so a literal and its call sites agree on which
+      // arguments carry the complex convention.
+      const ground =
+        literal === undefined
+          ? undefined
+          : BaseCompiler.groundSignature(
+              functionLiteralDeclaredSignature(literal)
+            );
+      const annotated = ops.slice(1).map(BaseCompiler.declaredParamType);
+      const complexParam = annotated.map((own, i) => {
+        const pt = own ?? BaseCompiler.signatureParamType(ground, i);
+        return pt !== undefined && isNonRealNumber(pt);
+      });
+
+      // A parameter whose complexness comes from the BOUND rather than from its
+      // own annotation carries it nowhere the body can read — the parameter
+      // symbol's type is the erased one — so the body would compile in the real
+      // lane and multiply the `{ re, im }` object it is handed as a number.
+      // Enter those parameters in a shape frame, the channel
+      // `addDeclaredComplexParams` already uses to put an engine-defined
+      // function's declared-complex parameters in the complex lane, so both
+      // spellings of one function emit the same body.
+      //
+      // When such a frame is pushed, EVERY parameter of the literal is entered
+      // in it, not only the complex ones. A shape query answers from the
+      // innermost frame that MENTIONS the name (`isComplexValued`,
+      // `localShapeFrameOf`), and this frame stacks on the enclosing ones, so a
+      // parameter left out of its own literal's frame would be answered by an
+      // outer frame that happens to bind the same name — a nested literal's
+      // REAL `z` would compile in the complex lane under an enclosing complex
+      // `z`. Entering every bound name is the discipline `compileBlock` and
+      // `withBinderMask` already follow for the names they bind. A non-complex
+      // parameter is entered `LOCAL_UNSHAPED`, not `LOCAL_SCALAR`: the entry
+      // records that the name is bound here without claiming a shape the
+      // declaration does not prove, since a collection-bounded parameter holds
+      // an array and `LOCAL_SCALAR` would let a nested call skip its broadcast.
+      //
+      // The same leak reaches a literal with NO complex parameter at all, which
+      // is why the frame is also pushed whenever an enclosing frame describing
+      // some other scope already mentions one of these parameter names
+      // (`isFramedByForeignScope`). `Map((z) ↦ 2z, [1, 2, 3])` inside a
+      // function whose own parameter is a declared-complex `z` compiled its
+      // real `z` in the complex lane and answered `[{re: NaN, im: NaN}, …]`
+      // behind `success: true`, where the interpreter answers `[2, 4, 6]`.
+      // A frame pushed FOR this literal is not a foreign scope and is left in
+      // place: `compileCombinerLiteral` frames a fold's combiner in the lanes
+      // the fold passes, and shadowing that frame would discard them.
+      const framedComplex = new Map<string, boolean>();
+      const framedVector = new Map<string, number>();
+      if (target.language === 'javascript') {
+        const boundDerived = complexParam.some(
+          (isComplex, i) => isComplex && annotated[i] === undefined
+        );
+        const leaked = params.some((name) =>
+          BaseCompiler.isFramedByForeignScope(name, node)
+        );
+        // A frame already pushed FOR this literal describes every one of its
+        // parameters, and that description WINS over the declaration: a fold
+        // frames its combiner in the lanes `combinerPlan` chose, and the same
+        // plan decides whether the fold's own wrapper lifts the accumulator and
+        // the element to `{ re, im }`. A generic combiner such as
+        // `(a: T, x: T) -> T where T: complex` makes `boundDerived` true even
+        // where the plan keeps the accumulator real, so the declaration is the
+        // half that must give way.
+        //
+        // Deferring means taking the frame's lanes for the WHOLE lowering, not
+        // just skipping the second frame: `complexParam` also selects which
+        // arguments the literal's own coercing wrapper lifts, and a body left
+        // in the frame's real lane behind a wrapper that lifts anyway received
+        // `{ re, im }` where it added a number — `Reduce([1+2i, i], (a, x) ↦
+        // a + |x|, 0)` under that signature answered the string
+        // `"[object Object]2.236…"`, where the interpreter answers `1 + √5`.
+        const ownLane = params.map((name) =>
+          BaseCompiler.framedLaneByOwnScope(name, node)
+        );
+        const selfFramed = ownLane.every((lane) => lane !== undefined);
+        if (selfFramed)
+          ownLane.forEach((lane, i) => (complexParam[i] = lane!));
+        if (leaked || (boundDerived && !selfFramed))
+          params.forEach((name, i) => {
+            // The parameter's own lane, from its annotation or from the
+            // signature's bound (`complexParam`) — not merely the
+            // bound-derived part of it: a parameter the author annotated
+            // `complex` is complex here too, and entering it `false` would put
+            // the body's reads of it in the real lane.
+            framedComplex.set(name, complexParam[i]);
+            framedVector.set(
+              name,
+              complexParam[i]
+                ? BaseCompiler.LOCAL_SCALAR
+                : BaseCompiler.LOCAL_UNSHAPED
+            );
+          });
+      }
+
       // The body is a bindable region of its own (§5.1(a)); pushed under the
       // lambda's target, so its temporaries land inside the arrow function.
-      return `((${binding.emitted.join(', ')}) => ${BaseCompiler.compileOp(
-        node,
-        0,
-        lambdaTarget,
-        0,
-        args[0].canonical
-      )})`;
+      const compileBody = () =>
+        BaseCompiler.compileOp(literal, 0, lambdaTarget, 0, ops[0].canonical);
+      const arrow = `((${binding.emitted.join(', ')}) => ${
+        framedComplex.size > 0
+          ? // Owned by the node being lowered: the frame describes THIS
+            // literal's parameters, so a re-entrant emission of the same
+            // literal keeps it, while a nested literal binding the same name
+            // sees a foreign frame and shadows it.
+            BaseCompiler.withLocalShapeFrame(
+              framedComplex,
+              framedVector,
+              compileBody,
+              false,
+              node
+            )
+          : compileBody()
+      })`;
+
+      // A complex-lane body reads `.re`/`.im` off its parameter, while every
+      // consumer of a function VALUE hands the callee a RAW element:
+      // `Map((x: complex) ↦ 2x, [1, 2, 3])` fed the arrow plain numbers and
+      // answered `[{re: null, im: null}, …]` behind `success: true`, where the
+      // interpreter answers `[2, 4, 6]`. A NAMED function is protected by the
+      // `$v` shim (`ensureUserFunctionValueRef`); a literal has no name to bind
+      // one under, so it takes the same wrapper inline, at the same positions.
+      // The `{ re, im }` convention is a JavaScript one, so a target that never
+      // wraps its arguments emits the bare arrow as before.
+      if (target.language === 'javascript' && complexParam.some((c) => c))
+        return `(${BaseCompiler.complexCoercingWrapper(
+          arrow,
+          complexParam,
+          target
+        )})`;
+      return arrow;
     }
 
     if (h === 'Declare') {
@@ -6892,6 +7104,133 @@ export class BaseCompiler {
       h,
       operand,
       { collection: () => BaseCompiler.compile(operand, target), element },
+      target
+    );
+    return out === undefined || out === '' ? undefined : out;
+  }
+
+  /**
+   * The Python target's element-wise lowering for an arithmetic head that has
+   * exactly ONE collection operand — `Negate(L)`, `1 + L`, `2 * L`, `L ** 2`,
+   * `2 / L` for an `L` typed `list<number>`, and the same shapes over a `List`
+   * literal whose elements are not all constants (`[x, y] + 1`). Returns
+   * `undefined` to decline, and the caller then fails closed (D6).
+   *
+   * The map is spelled by the target through its `broadcastUnary` hook (Python
+   * emits a list comprehension, `[1 + _tv1 for _tv1 in L]`), which iterates a
+   * plain Python list, a tuple and a NumPy array alike — so the emission does
+   * not depend on what container the caller binds, which is the reason the
+   * infix lowering (`1 + L`, a TypeError for a list) cannot be used. The
+   * element body is produced by re-entering `compileExpr` on the same head with
+   * the collection position replaced by the loop variable, so every scalar
+   * convention of this target — operator precedence, complex dispatch, the
+   * `**`/`np.power` split — is the scalar lane's, not a second implementation
+   * of it.
+   *
+   * The admission is deliberately narrow, because each restriction removes a
+   * shape whose Python result would NOT match the interpreter's:
+   *
+   * - **Exactly one collection operand.** With two (`L + M`) the interpreter
+   *   answers `Error("incompatible-dimensions")` on any length disagreement,
+   *   while a fan-out would have to pick a length; NumPy would silently recycle
+   *   a length-1 axis (`np.add([1], [3,4,5])` is `[4,5,6]`) and `zip` would
+   *   truncate. Neither reproduces the error, so that shape keeps declining.
+   * - **The collection is an ordered list of numbers.** A comprehension over a
+   *   `set` has no defined order; a `list<string>` would concatenate per
+   *   element; a list of TUPLES (a point list) combines component-wise in the
+   *   interpreter (`[1,2] * (3,4)` is `[(3,4),(6,8)]`), not element-wise; and a
+   *   list of LISTS is not necessarily rectangular, so a one-level fan-out
+   *   would hand a row to a scalar operator.
+   * - **Every other operand is provably a number.** An `unknown`-typed operand
+   *   may bind to a list at run time, which is the very repeat/concatenate
+   *   divergence this guard exists for.
+   * - **A `Power` over a collection BASE has a safe scalar exponent.** This is
+   *   the one head whose element lowering is container-dependent: Python's `**`
+   *   answers a float for a negative integer exponent of an `int` (`2 ** -2` is
+   *   `0.25`), while NumPy REFUSES the same operation on an integer array
+   *   element — `np.int64(2) ** -2` raises `ValueError: Integers to negative
+   *   integer powers are not allowed` (measured, NumPy 2.4.2). The comprehension
+   *   would therefore answer for a plain Python list and throw for an integer
+   *   ndarray, and the artifact cannot constrain which the caller binds.
+   *   Admitted are the two exponents both containers agree on: one provably a
+   *   NON-NEGATIVE INTEGER (`v ** 2`), and one provably NOT an integer
+   *   (`v ** 0.5`, a float on either container). A collection in the EXPONENT
+   *   position (`2 ** v`) is deliberately NOT gated by this rule — its
+   *   elements carry no static proof, so gating would refuse the whole
+   *   shape. The user accepted the residual divergence because it is LOUD:
+   *   an integer ndarray holding a negative element raises the ValueError
+   *   at run time rather than answering a wrong value, while lists, tuples
+   *   and float ndarrays all answer correctly. (ROADMAP.md, the
+   *   Python arithmetic-guard entry, records the decision.)
+   *
+   * The scalar operands are spliced into the comprehension BODY, so their code
+   * runs once per element rather than once. That is a cost, not a semantic
+   * difference, while this target has no impure lowering (`Random` and its
+   * family decline); the `Equal` collection chain already relies on the same
+   * property when it compiles a shared middle operand twice.
+   */
+  private static tryCompilePythonElementwise(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    if (target.broadcastUnary === undefined) return undefined;
+
+    // The operand shape gate: an ordered collection whose elements are numbers.
+    // `list<any>` (not the bare `list`) is the absence-admitting shape top, and
+    // the element test then excludes `list<string>`, a point list and a nested
+    // list, none of which a one-level fan-out lowers faithfully.
+    const isElementwiseSource = (a: Expression): boolean => {
+      if (!a.type.matches('list<any>')) return false;
+      const elt = collectionElementType(resolveTypeForCompilation(a.type.type));
+      return elt !== undefined && isSubtype(elt, 'number');
+    };
+    // A scalar companion: provably a number, so it cannot be the list the
+    // fan-out would otherwise splice into a scalar operator position.
+    const isScalarCompanion = (a: Expression): boolean => {
+      const t = resolveTypeForCompilation(a.type.type);
+      return t !== 'never' && isSubtype(t, 'number');
+    };
+
+    let index = -1;
+    for (let i = 0; i < args.length; i++) {
+      if (isScalarCompanion(args[i])) continue;
+      if (index >= 0 || !isElementwiseSource(args[i])) return undefined;
+      index = i;
+    }
+    if (index < 0) return undefined;
+
+    // The `Power` exponent gate described above: a negative integer exponent
+    // over a collection BASE computes on a plain Python list and raises on an
+    // integer ndarray, so it fails closed rather than emit a comprehension
+    // whose result depends on the container the caller binds.
+    if (h === 'Power' && args.length === 2 && index === 0) {
+      const exponent = args[1];
+      const uniform =
+        isNumber(exponent) &&
+        exponent.im === 0 &&
+        (!Number.isInteger(exponent.re) || exponent.re >= 0);
+      if (!uniform) return undefined;
+    }
+
+    const source = args[index];
+    const element = (code: TargetSource): TargetSource => {
+      const v = BaseCompiler.tempVar(target);
+      const innerTarget: CompileTarget<Expression> = {
+        ...target,
+        var: (id: string) => (id === v ? code : target.var(id)),
+        boundVars: BaseCompiler.withBoundNames(target, [v]),
+      };
+      // The loop variable stands for ONE element, so it is not
+      // collection-typed and the Python guard above does not fire again.
+      const elementArgs = args.map((a, i) => (i === index ? engine.expr(v) : a));
+      return BaseCompiler.compileExpr(engine, h, elementArgs, 0, innerTarget);
+    };
+    const out = target.broadcastUnary(
+      h,
+      source,
+      { collection: () => BaseCompiler.compile(source, target), element },
       target
     );
     return out === undefined || out === '' ? undefined : out;
@@ -10137,6 +10476,105 @@ export class BaseCompiler {
   static readonly LOCAL_UNSHAPED = -4;
 
   /**
+   * The expression a local shape frame was pushed to describe, keyed by the
+   * frame map itself (see `withLocalShapeFrame`'s `owner`).
+   *
+   * Keyed by the map rather than kept as a parallel stack because the complex
+   * and vector stacks do not always grow together — `withBinderMask` pushes a
+   * complex frame and only sometimes a vector one — so a positional pairing
+   * would drift.
+   */
+  private static readonly _shapeFrameOwner = new WeakMap<object, Expression>();
+
+  /**
+   * Is `name` answered by a local shape frame that describes some OTHER scope
+   * than `owner`?
+   *
+   * A shape query answers from the innermost frame that MENTIONS the name, so
+   * a `Function` literal that pushes no frame of its own has its parameters
+   * answered by whatever enclosing frame happens to bind the same spelling.
+   * That is how a nested lambda's real `z` inherited an enclosing complex `z`
+   * and compiled in the `{ re, im }` lane over plain numbers. A literal asks
+   * this question of each of its parameter names and pushes a shadowing frame
+   * when the answer is `true`.
+   *
+   * The answer is `false` when no frame mentions the name at all, and also
+   * when the innermost mentioning frame in BOTH stacks was pushed for `owner`
+   * itself — the case of a combiner lambda, whose caller
+   * (`compileCombinerLiteral`) frames its accumulator and element parameters in
+   * the lanes the fold actually passes BEFORE compiling it. That frame must not
+   * be shadowed, or the lanes it establishes are lost.
+   *
+   * Fails closed: an unowned frame, an unidentified `owner`, or a frame pushed
+   * for a different expression all answer `true`, which makes the literal
+   * describe its own parameters rather than inherit a foreign description.
+   */
+  static isFramedByForeignScope(
+    name: string,
+    owner: Expression | undefined
+  ): boolean {
+    const foreign = (stack: ReadonlyArray<Map<string, unknown>>): boolean => {
+      for (let i = stack.length - 1; i >= 0; i--) {
+        if (!stack[i].has(name)) continue;
+        return (
+          owner === undefined ||
+          BaseCompiler._shapeFrameOwner.get(stack[i]) !== owner
+        );
+      }
+      return false;
+    };
+    return (
+      foreign(BaseCompiler._localComplex) ||
+      foreign(BaseCompiler._localVector)
+    );
+  }
+
+  /**
+   * The complex lane `name` is already given by a local shape frame that was
+   * pushed FOR `owner` itself, or `undefined` when no such frame describes it.
+   *
+   * Tri-state on purpose: this is NOT the negation of
+   * `isFramedByForeignScope`, which also answers `false` when NO frame mentions
+   * the name — the absence of a description rather than a description the owner
+   * may rely on. A caller that must decide whether to leave an existing frame
+   * in place asks this question instead, so that an unmentioned name does not
+   * read as self-described.
+   *
+   * The lane comes back with the verdict because a caller that defers to its
+   * own frame must emit the REST of its lowering in that frame's lanes too: a
+   * combiner lambda's argument coercion is chosen from the same per-parameter
+   * complexness as its body's arithmetic, and the two disagreeing is what turns
+   * a `{ re, im }` argument into a string concatenation.
+   *
+   * Both stacks must answer, because a frame that enters the name in only one
+   * of them leaves the other stack's answer to an enclosing scope, which is not
+   * this owner's description. An unidentified `owner` owns nothing.
+   */
+  static framedLaneByOwnScope(
+    name: string,
+    owner: Expression | undefined
+  ): boolean | undefined {
+    if (owner === undefined) return undefined;
+    const ownsInnermost = (
+      stack: ReadonlyArray<Map<string, unknown>>
+    ): boolean => {
+      for (let i = stack.length - 1; i >= 0; i--) {
+        if (!stack[i].has(name)) continue;
+        return BaseCompiler._shapeFrameOwner.get(stack[i]) === owner;
+      }
+      return false;
+    };
+    if (!ownsInnermost(BaseCompiler._localVector)) return undefined;
+    for (let i = BaseCompiler._localComplex.length - 1; i >= 0; i--) {
+      const frame = BaseCompiler._localComplex[i];
+      if (!frame.has(name)) continue;
+      if (BaseCompiler._shapeFrameOwner.get(frame) !== owner) return undefined;
+      return frame.get(name)!;
+    }
+    return undefined;
+  }
+
+  /**
    * The innermost local shape frame that mentions `name`, or `undefined`.
    *
    * The frame IDENTITY, for a target that keeps a parallel per-frame channel
@@ -10192,13 +10630,25 @@ export class BaseCompiler {
    * emitted at module level, so when one definition's body triggers the
    * emission of another, the callee's body must not see the caller's parameter
    * shapes (a same-named global would take the caller's width).
+   *
+   * `owner` names the expression the frame was pushed to DESCRIBE — normally a
+   * `Function` literal whose parameters the frame enters. A frame with an owner
+   * is authoritative for that expression: when the literal is then compiled, it
+   * reuses the frame instead of pushing one of its own
+   * (`isFramedByForeignScope`). Without an owner the frame describes some
+   * enclosing scope, and a nested literal binding the same name must shadow it.
    */
   static withLocalShapeFrame<T>(
     complex: Map<string, boolean>,
     vector: Map<string, number>,
     fn: () => T,
-    isolate = false
+    isolate = false,
+    owner?: Expression
   ): T {
+    if (owner !== undefined) {
+      BaseCompiler._shapeFrameOwner.set(complex, owner);
+      BaseCompiler._shapeFrameOwner.set(vector, owner);
+    }
     const savedComplex = BaseCompiler._localComplex;
     const savedVector = BaseCompiler._localVector;
     if (isolate) {
@@ -12651,7 +13101,10 @@ export class BaseCompiler {
    * an engine definition; everything downstream of that — complex `{re, im}`
    * coercion, the `_SYS.bcastFn` runtime broadcast — is the shared
    * `emitUserFunctionCall`, so a local and an engine-level function of the
-   * same shape compile to the same call.
+   * same shape compile to the same call. A GENERIC literal is read at its
+   * declared bounds, the same reading the engine route performs, so the two
+   * spellings of one bounded generic no longer disagree about whether it
+   * compiles at all.
    *
    * Returns `undefined` when `h` is not such a local, leaving the caller's
    * fail-closed throw in place. An ARITY mismatch fails closed here instead:
@@ -12705,51 +13158,87 @@ export class BaseCompiler {
     );
     if (folded !== undefined) return folded;
 
-    const signature = literal.type?.type;
+    const declared = literal.type?.type;
 
-    // The two fail-closed gates the ENGINE-defined route enforces, applied to
-    // the declared LITERAL's signature. Both are about what the emitted call
-    // would COMPUTE, not about whether the callee can be emitted, so a local
-    // is no more exempt from them than a definition is.
+    // The signature gates the ENGINE-defined route enforces, applied to the
+    // declared LITERAL's signature. They are about what the emitted call would
+    // COMPUTE, not about whether the callee can be emitted, so a local is no
+    // more exempt from them than a definition is.
     //
-    // GENERIC. A polymorphic signature's parameter is a type VARIABLE, which
-    // the compiler can neither coerce nor decide a broadcast against; the
-    // engine route declines such a callee outright in
-    // `ensureUserFunctionEmitted` (rule G3, generic-function-literals design
-    // §2.7). Emitting the call anyway would run the scalar body on whatever
-    // the argument happens to be.
-    if (signature !== undefined && isPolymorphicType(signature))
-      throw new Error(
-        `${h}: cannot compile — the block-local function has a GENERIC ` +
-          `signature, whose parameters are type variables the compiler cannot ` +
-          `resolve at the call site (rule G3). Fail closed (D6). Evaluate ` +
-          `this expression with evaluate() instead, or annotate the ` +
-          `parameters with ground types.`
-      );
-
     // DECLARED `broadcastable<T>`. An elementwise contract that maps exactly
     // one rank down, which neither emitted call form expresses — see
     // `checkDeclaredBroadcast` for the full rule. Without this,
     // `const pair = (x: broadcastable<value>) => (x, x)` applied to a list
     // emitted a direct call and answered `[[1,2,3],[1,2,3]]` where the
-    // interpreter answers `[(1,1),(2,2),(3,3)]`.
+    // interpreter answers `[(1,1),(2,2),(3,3)]`. Read from the DECLARED
+    // signature, generic or not, and checked before the generic reading below
+    // so that a `broadcastable<T>` parameter of a generic local reports the
+    // broadcast reason the engine route reports for the same declaration.
     BaseCompiler.checkDeclaredBroadcastAgainst(
       h,
       args,
       BaseCompiler.provablyScalarArg,
-      broadcastableParamSlots(signature),
-      () => declaresBroadcastableParam(signature)
+      broadcastableParamSlots(declared),
+      () => declaresBroadcastableParam(declared)
     );
 
-    const paramTypes =
-      typeof signature === 'object' && signature.kind === 'signature'
-        ? signature.args
-        : undefined;
+    // GENERIC. A polytype's parameter is a type VARIABLE, which the compiler
+    // can neither coerce nor decide a broadcast against, so it is read at its
+    // DECLARED BOUND — the same reading the engine-defined route performs in
+    // `ensureUserFunctionEmitted` and `userFunctionSignature`, and the one the
+    // interpreter's own broadcast gate already performs. A local declared
+    // `(x: T) -> T where T: number` therefore compiles exactly as the ground
+    // `(x: number) -> number` local does, and its call sites earn the coercion
+    // and broadcast wraps that ground signature earns.
+    //
+    // Two conditions gate it, matching the engine route. The target must be
+    // JAVASCRIPT, since the coercion and the `_SYS.bcastFn` broadcast the
+    // emitted call boundary relies on are both JavaScript conventions; and the
+    // bound reading must be GROUND, which an unbounded `where T` is not — it
+    // names no type to compile against. Either way the call fails closed here
+    // and the interpreted fallback answers.
+    let signature: Type | undefined = declared;
+    const generic = declared !== undefined && isPolymorphicType(declared);
+    if (generic) {
+      if (target.language !== 'javascript')
+        throw new Error(
+          `${h}: cannot compile — the block-local function has a GENERIC ` +
+            `signature, and reading its type variables at their declared ` +
+            `bounds is a JavaScript-only convention: the argument coercion ` +
+            `and the runtime broadcast an emitted call would rely on are ` +
+            `both spelled in JavaScript (rule G3). Fail closed (D6). ` +
+            `Evaluate this expression with evaluate() instead, or annotate ` +
+            `the parameters with ground types.`
+        );
+      signature = BaseCompiler.groundSignature(declared);
+      if (signature === undefined)
+        throw new Error(
+          `${h}: cannot compile — the block-local function has a GENERIC ` +
+            `signature whose type variables have no ground declared bound, ` +
+            `so there is no type to compile the parameters against (rule ` +
+            `G3). Fail closed (D6). Evaluate this expression with evaluate() ` +
+            `instead, bound the type variables (\`where T: number\`), or ` +
+            `annotate the parameters with ground types.`
+        );
+    }
+
     // Parameter-typed, not argument-typed — see the sibling computation in
     // `ensureUserFunctionEmitted` for why.
+    //
+    // A bound that is a NON-REAL NUMBER type used to decline here, and no
+    // longer does. A quantified parameter is ERASED before the literal's body
+    // canonicalizes (rule G1), so the parameter symbol's own type says nothing
+    // about the bound: the local's body — emitted by the ordinary
+    // function-literal lowering — computed in the REAL lane while this
+    // coercion handed it a `{ re, im }` object it multiplied as a number. That
+    // lowering now reads the same ground bound this route reads, puts such a
+    // parameter in the complex lane through a shape frame, and coerces at the
+    // value splice (see the `Function` case of `compileExpr`), so the two
+    // halves of the boundary agree and the local compiles as the engine-level
+    // spelling of the same function does.
     const coerceToComplex = args.map((_a, i) => {
       if (target.language !== 'javascript') return false;
-      const pt = paramTypes?.[i]?.type;
+      const pt = BaseCompiler.signatureParamType(signature, i);
       return pt !== undefined && isNonRealNumber(pt);
     });
 
@@ -12758,7 +13247,13 @@ export class BaseCompiler {
       args,
       target,
       coerceToComplex,
-      signature === undefined ? true : paramsAreScalar(signature)
+      signature === undefined ? true : paramsAreScalar(signature),
+      // A GENERIC callee always takes the runtime broadcast dispatch: at a
+      // generic parameter the argument's static type is INFERRED FROM THE
+      // BOUND rather than declared by the caller, so "provably not a
+      // collection" is no proof there. Same reasoning as the engine route —
+      // see the call in `tryCompileUserFunction`.
+      generic
     );
   }
 
@@ -12803,8 +13298,9 @@ export class BaseCompiler {
   }
 
   /**
-   * The call site of an already-emitted user function `name`: either a direct
-   * scalar call or the runtime broadcast dispatch, per the rules below.
+   * The call site of an already-emitted user function `name`: a direct scalar
+   * call, the unconditional broadcast dispatch, or a runtime `Array.isArray`
+   * guard that chooses between the two, per the rules below.
    *
    * Shared by the ENGINE-defined route (`tryCompileUserFunction`) and the
    * BLOCK-LOCAL route (`tryCompileLocalFunctionCall`), which differ only in
@@ -12875,47 +13371,119 @@ export class BaseCompiler {
     //     `size(bag([1,2,3]))` answering `[42,42,42]` where the interpreter
     //     answers `42`. Leave those on the direct-call path too;
     //   - every argument PROVABLY not a collection (`provablyScalarArg`, at
-    //     the top of this function) can never broadcast at run time, so the
-    //     dispatch would be dead weight in the hot path.
+    //     the top of this function) takes the cheaper runtime `Array.isArray`
+    //     guard below instead of this unconditional dispatch. That static
+    //     reading is a claim about the TYPE, not about the value, so it
+    //     chooses the form of the test and never removes it.
     // The dispatch is `_SYS.bcastFn`, not `_SYS.bcast`: applying a function
     // literal to an EMPTY collection zips zero elements and answers `[]` in
     // the interpreter, where an empty operator position answers `Nothing`
     // (NaN). Everything else — mismatch → NaN, scalar reuse, nesting — is
     // shared.
-    if (
+    //
+    // The three conditions that are NOT about the argument's shape class —
+    // the JavaScript target, a scalar-parameter callee, and no atomic (tuple
+    // or nominal) argument — gate BOTH emitted broadcast forms: the
+    // unconditional dispatch just below, and the runtime guard after it.
+    const mayBroadcast =
       target.language === 'javascript' &&
       args.length > 0 &&
-      !args.every(
-        alwaysDispatch ? BaseCompiler.certainlyScalarArg : provablyScalarArg
-      ) &&
       !args.some((a) => isTuple(a)) &&
       !args.some((a) => BaseCompiler.isNominalAtomicArg(a)) &&
-      paramsAreScalar
-    ) {
-      // A complex-typed parameter is coerced INSIDE the closure, on the
-      // element the broadcast selected: wrapping the whole argument would
-      // both hand the callee `{ re: [1,2,3], im: 0 }` and (before) force the
-      // entire call onto the direct scalar path, so a sibling collection
-      // argument never broadcast.
+      paramsAreScalar;
+
+    /** The scalar call, with each argument's complex coercion applied. */
+    const directCall = (codes: ReadonlyArray<string>) =>
+      `${name}(${codes
+        .map((code, i) =>
+          coerceToComplex[i] ? complexWrap(code, args[i], target) : code
+        )
+        .join(', ')})`;
+
+    /**
+     * `_SYS.bcastFn(closure, …)` over `codes`.
+     *
+     * A complex-typed parameter is coerced INSIDE the closure, on the element
+     * the broadcast selected: wrapping the whole argument would both hand the
+     * callee `{ re: [1,2,3], im: 0 }` and (before) force the entire call onto
+     * the direct scalar path, so a sibling collection argument never
+     * broadcast. The wrap applies to the ELEMENT the broadcast selected, but
+     * the ARGUMENT's realness still settles which wrap: a provably
+     * real-valued operand — a scalar like `0`, or a collection of reals —
+     * yields only real elements, so the static wrap holds and no runtime test
+     * is emitted. Anything else takes `_SYS.cplx`.
+     */
+    const dispatchCall = (codes: ReadonlyArray<string>) => {
       const params = args.map(() => BaseCompiler.tempVar(target));
-      // Inside the broadcast closure the wrap applies to the ELEMENT the
-      // broadcast selected, but the ARGUMENT's realness still settles it: a
-      // provably real-valued operand — a scalar like `0`, or a collection of
-      // reals — yields only real elements, so the static wrap holds and no
-      // runtime test is emitted. Anything else takes `_SYS.cplx`.
       const callParams = params.map((p, i) =>
         coerceToComplex[i] ? complexWrap(p, args[i], target) : p
       );
       return `_SYS.bcastFn((${params.join(', ')}) => ${name}(${callParams.join(
         ', '
-      )}), ${compiledArgs.join(', ')})`;
+      )}), ${codes.join(', ')})`;
+    };
+
+    if (
+      mayBroadcast &&
+      !args.every(
+        alwaysDispatch ? BaseCompiler.certainlyScalarArg : provablyScalarArg
+      )
+    )
+      return dispatchCall(compiledArgs);
+
+    // A statically scalar argument is still not a run-time scalar. Reaching
+    // here, every argument's TYPE says it cannot be a collection — but that
+    // type is usually an INFERENCE from the callee's own declared parameter,
+    // not a fact about the value: `f(x: number) = 2x + 1` types the free `y`
+    // in `f(y)` as `number`, and `run({ y: [1, 2, 3] })` then hands the call
+    // an array all the same. A bare `_fn_f(_.y)` computed NaN there, where
+    // the interpreter broadcasts to `[3, 5, 7]`.
+    //
+    // So the shape class only chooses WHERE the test happens, never whether
+    // there is one: a provably-scalar argument list keeps the direct call in
+    // the taken branch of a runtime `Array.isArray` guard (measured at about
+    // 3 ns per call, ruled acceptable) instead of dispatching through
+    // `_SYS.bcastFn` unconditionally.
+    //
+    // The guard binds each tested argument to a temporary, so an argument
+    // expression is evaluated exactly once however the test goes. A LITERAL
+    // argument (`certainlyScalarArg` — a number, string, character or boolean
+    // literal) is a run-time scalar by construction: it is neither tested nor
+    // bound, and a call whose arguments are all literals keeps the bare
+    // direct call it emitted before.
+    //
+    // An array is not always a collection to broadcast over: a POINT — a
+    // tuple-typed value — lowers to a JS array too, and mapping the callee
+    // over its coordinates would answer one result per coordinate where the
+    // interpreter answers one result for the whole point. The guard cannot
+    // reach such a value. It is emitted only where `mayBroadcast` holds, which
+    // requires a callee whose parameters are all SCALAR — a tuple-, point- or
+    // collection-typed parameter makes `paramsAreScalar` false and keeps the
+    // bare direct call — and only where every argument passed
+    // `provablyScalarArg`, whose answer is `true` for exactly the `number`,
+    // `boolean` and `string` types. A point-typed argument fails that test, so
+    // it never reaches the guard; it takes whichever path it took before.
+    if (mayBroadcast && !args.every(BaseCompiler.certainlyScalarArg)) {
+      const tested = args
+        .map((a, i) => (BaseCompiler.certainlyScalarArg(a) ? -1 : i))
+        .filter((i) => i >= 0);
+      const temps = new Map(
+        tested.map((i) => [i, BaseCompiler.tempVar(target)] as const)
+      );
+      // Each argument as the guarded branches see it: a bound temporary where
+      // one was made, the literal's own code everywhere else.
+      const bound = compiledArgs.map((code, i) => temps.get(i) ?? code);
+      const test = tested
+        .map((i) => `Array.isArray(${temps.get(i)})`)
+        .join(' || ');
+      return (
+        `((${tested.map((i) => temps.get(i)).join(', ')}) => ${test} ? ` +
+        `${dispatchCall(bound)} : ${directCall(bound)})` +
+        `(${tested.map((i) => compiledArgs[i]).join(', ')})`
+      );
     }
 
-    return `${name}(${compiledArgs
-      .map((code, i) =>
-        coerceToComplex[i] ? complexWrap(code, args[i], target) : code
-      )
-      .join(', ')})`;
+    return directCall(compiledArgs);
   }
 
   /**
@@ -13166,8 +13734,29 @@ export class BaseCompiler {
     h: string,
     i: number
   ): Type | undefined {
-    const t = BaseCompiler.userFunctionSignature(engine, h);
-    if (t === undefined) return undefined;
+    return BaseCompiler.signatureParamType(
+      BaseCompiler.userFunctionSignature(engine, h),
+      i
+    );
+  }
+
+  /**
+   * The type signature `t` gives positional parameter `i`: the required
+   * parameters first, then the optional ones, then the variadic tail.
+   * `undefined` when `t` is not a signature, or states no type at that
+   * position.
+   *
+   * Shared by the ENGINE-defined route, which reads `t` from a definition
+   * (`userFunctionParamType`), and the BLOCK-LOCAL route, which reads it from
+   * the declared literal's own type — so the two agree on what a parameter is
+   * declared as.
+   */
+  private static signatureParamType(
+    t: Type | undefined,
+    i: number
+  ): Type | undefined {
+    if (t === undefined || typeof t === 'string' || t.kind !== 'signature')
+      return undefined;
     const nArgs = t.args?.length ?? 0;
     if (i < nArgs) return t.args![i].type;
     const nOpt = t.optArgs?.length ?? 0;
@@ -13558,10 +14147,12 @@ export class BaseCompiler {
     // fallback. The declared signature is authoritative when there is one (an
     // E3 install stores a plain literal whose own arrow is ground); the
     // literal's own polytype covers the bare-assign route.
+    let emitted = literal;
     if (BaseCompiler.userFunctionIsGeneric(engine, h, literal)) {
       if (target.language !== 'javascript') return undefined;
-      if (BaseCompiler.userFunctionSignature(engine, h) === undefined)
-        return undefined;
+      const ground = BaseCompiler.userFunctionSignature(engine, h);
+      if (ground === undefined) return undefined;
+      emitted = BaseCompiler.literalAtGroundSignature(engine, literal, ground);
     }
 
     // The generated code bakes this user function's current definition: record
@@ -13571,10 +14162,117 @@ export class BaseCompiler {
 
     return BaseCompiler.emitFunctionLiteralDefinition(
       h,
-      literal,
+      emitted,
       target,
       registry
     );
+  }
+
+  /**
+   * The GENERIC literal `literal`, rewritten so its bare parameters carry the
+   * parameter types of the ground signature `ground` it is being emitted at.
+   *
+   * Reading a quantified parameter at its declared bound settled the CALL
+   * boundary — which coercion and broadcast wraps a call site gets — but the
+   * BODY was still compiled against an erased parameter, because the type a
+   * body operand reports is the one its parameter was BOUND at, not one the
+   * emission passes alongside. So a `(xs: T) -> number where T: list<number>`
+   * whose body is `Length(xs)` reached the `Length` lowering with `xs` typed
+   * `collection` (usage inference), which is not array-shaped, and the whole
+   * function declined even though the bound proves a list.
+   *
+   * The repair routes the bound through the channel a CONCRETE declaration
+   * already uses: `ascribeDeclaredParameterTypes` stamps the declared type
+   * onto each bare parameter as a `Typed` annotation and re-boxes the literal,
+   * so the body is canonicalized afresh with its parameter references bound at
+   * that type. Handing it the ground signature instead of the polytype gives a
+   * generic body exactly the reading `(list<number>) -> number` gets, and the
+   * gates that consume it — the indexed-collection shape tests behind
+   * `Length`/`At`/`Reduce`/`Filter`, the possibly-collection analysis — need no
+   * knowledge of genericity at all.
+   *
+   * Reusing that function also inherits its skips, which are the ones wanted
+   * here: an author-annotated parameter keeps its own annotation, a
+   * `broadcastable<T>` slot is never stamped (it is a declaration-level
+   * contract with its own enforcement), and a SCALAR bound is not stamped
+   * either, since only a parameter that binds a collection WHOLE can be handed
+   * a value a scalar-compiled body cannot read. A `where T: number` or
+   * `where T: complex` generic therefore emits byte-identically to before this
+   * rewrite (measured over the scalar, complex, boolean, two-parameter and
+   * recursive cases pinned in
+   * `test/compute-engine/compile-generic-monomorphization.test.ts`). A bound
+   * that does not prove what the body needs is not repaired by the stamp:
+   * `where T: collection<number>` under an `At` body stamps
+   * `collection<number>`, which is not array-shaped, and the body fails closed
+   * exactly as an equally weak concrete declaration does.
+   *
+   * The stamped literal is used for the EMISSION only — it is never stored
+   * back on the definition, so the engine's own value keeps its polytype and
+   * the interpreter still instantiates per call.
+   */
+  private static literalAtGroundSignature(
+    engine: ComputeEngine,
+    literal: Expression & FunctionInterface,
+    ground: FunctionSignature
+  ): Expression & FunctionInterface {
+    const grounded = BaseCompiler.markerAtGroundSignature(
+      engine,
+      literal,
+      ground
+    );
+    const ascribed = ascribeDeclaredParameterTypes(engine, grounded, ground);
+    return isFunction(ascribed, 'Function') ? ascribed : grounded;
+  }
+
+  /**
+   * `literal` with its own FULL-SIGNATURE MARKER — the `Typed` node wrapping
+   * the body that makes a literal self-describing — restated at the ground
+   * signature `ground`. Unchanged when the literal carries no such marker, or
+   * carries a ground one already.
+   *
+   * A generic literal installed against a declaration carries the declared
+   * polytype as that marker, and the marker is what the literal's own type is
+   * read from. While it says `where T`, a parameter annotation added next to
+   * it does not survive canonicalization — the parameter annotations of a
+   * generic literal are erased, since an annotation naming a ground type would
+   * contradict the quantified parameter the marker declares. Stamping the
+   * ground parameter types therefore has to restate the marker in the same
+   * breath: with both halves ground the literal reads as the ordinary
+   * `(xs: list<number>) -> number` declaration it is being emitted at.
+   *
+   * Rebuilt through the same authoring form the ascription helpers use — the
+   * type as an ungrouped signature TEXT in the body slot, re-boxed so
+   * canonicalization normalizes the marker back onto the body Block's last
+   * statement.
+   */
+  private static markerAtGroundSignature(
+    engine: ComputeEngine,
+    literal: Expression & FunctionInterface,
+    ground: FunctionSignature
+  ): Expression & FunctionInterface {
+    const declared = functionLiteralDeclaredSignature(literal);
+    if (declared === undefined || !isPolymorphicType(declared)) return literal;
+    const marker = functionLiteralReturnMarker(literal);
+    const inner = marker?.op1;
+    if (marker === undefined || inner === undefined) return literal;
+
+    // The canonical marker wraps the LAST statement of the body Block; in the
+    // not-yet-normalized authoring form the marker IS the body slot.
+    const body = literal.ops[0];
+    const stripped: MathJsonExpression = isFunction(body, 'Block')
+      ? ([
+          'Block',
+          ...body.ops.slice(0, -1).map((s) => s.json),
+          inner.json,
+        ] as MathJsonExpression)
+      : inner.json;
+
+    const rebuilt = engine.box([
+      'Function',
+      ['Typed', stripped, `'${typeToString(ground)}'`],
+      ...literal.ops.slice(1).map((p) => p.json),
+    ]);
+    return isFunction(rebuilt, 'Function') ? rebuilt : literal;
   }
 
   /**
@@ -13732,6 +14430,14 @@ export class BaseCompiler {
    * body's operand analysis — and therefore its emitted arithmetic — treats
    * them as the values the fold actually passes. The frame STACKS on the
    * enclosing ones (the lambda is lexically inside the fold's expression).
+   *
+   * The frame is pushed as the literal's OWNER, so the literal's own emission
+   * recognizes it as its own description and does not shadow it with a frame
+   * built from the declaration alone (`isFramedByForeignScope`). A REAL lane is
+   * entered explicitly rather than left out, so that the frame answers for both
+   * parameters in both stacks: a name left unmentioned would be answered by an
+   * enclosing frame, which is neither this plan's lane nor a description of
+   * this lambda.
    */
   static compileCombinerLiteral(
     plan: { op: Expression; accComplex: boolean; eltComplex: boolean },
@@ -13746,14 +14452,18 @@ export class BaseCompiler {
     const vector = new Map<string, number>();
     if (accName) {
       vector.set(accName, BaseCompiler.LOCAL_SCALAR);
-      if (plan.accComplex) complex.set(accName, true);
+      complex.set(accName, plan.accComplex);
     }
     if (eltName) {
       vector.set(eltName, BaseCompiler.LOCAL_SCALAR);
-      if (plan.eltComplex) complex.set(eltName, true);
+      complex.set(eltName, plan.eltComplex);
     }
-    return BaseCompiler.withLocalShapeFrame(complex, vector, () =>
-      compile(literal)
+    return BaseCompiler.withLocalShapeFrame(
+      complex,
+      vector,
+      () => compile(literal),
+      false,
+      literal
     );
   }
 
@@ -13802,19 +14512,43 @@ export class BaseCompiler {
     if (!complexParam.some((c) => c)) return name;
 
     const shimName = `${name}$v`;
-    if (!registry.defs.has(shimName)) {
-      const params = complexParam.map(() => BaseCompiler.tempVar(target));
-      const args = params.map((p, i) =>
-        complexParam[i] ? `_SYS.cplx(${p})` : p
-      );
+    if (!registry.defs.has(shimName))
       registry.defs.set(
         shimName,
-        `const ${shimName} = (${params.join(', ')}) => ${name}(${args.join(
-          ', '
-        )});`
+        `const ${shimName} = ${BaseCompiler.complexCoercingWrapper(
+          name,
+          complexParam,
+          target
+        )};`
       );
-    }
     return shimName;
+  }
+
+  /**
+   * A wrapper around `callee` that lifts a plain number into the `{ re, im }`
+   * convention at each parameter position `complexParam` marks:
+   * `(_tv1) => callee(_SYS.cplx(_tv1))`.
+   *
+   * `_SYS.cplx` is used rather than a static `{ re: …, im: 0 }` wrap because
+   * the value's realness is a property of whatever calls the wrapper, which is
+   * unknown here; the helper is idempotent, so an already-complex value passes
+   * through instead of nesting.
+   *
+   * Shared by the two places a function whose body computes in the complex
+   * lane is handed to a consumer that supplies RAW elements — a named function
+   * referenced as a value (`ensureUserFunctionValueRef`, which binds the
+   * wrapper under its own `$v` name) and a function LITERAL spliced in value
+   * position, which has no name to bind and takes the wrapper inline. Both
+   * therefore coerce at the same positions and in the same way.
+   */
+  private static complexCoercingWrapper(
+    callee: string,
+    complexParam: ReadonlyArray<boolean>,
+    target: CompileTarget<Expression>
+  ): string {
+    const params = complexParam.map(() => BaseCompiler.tempVar(target));
+    const args = params.map((p, i) => (complexParam[i] ? `_SYS.cplx(${p})` : p));
+    return `(${params.join(', ')}) => ${callee}(${args.join(', ')})`;
   }
 
   /**
@@ -14138,20 +14872,38 @@ export class BaseCompiler {
     const out: Record<string, Type> = {};
     for (const p of literal.ops.slice(1)) {
       if (!isFunction(p, 'Typed') || !isSymbol(p.ops[0])) continue;
-      const src = p.ops[1];
-      const text = isString(src)
-        ? src.string
-        : isSymbol(src)
-          ? src.symbol
-          : undefined;
-      if (text === undefined) continue;
-      try {
-        out[p.ops[0].symbol] = parseType(text, literal.engine._typeResolver);
-      } catch {
-        // Unparseable annotation: skip.
-      }
+      const t = BaseCompiler.declaredParamType(p);
+      if (t !== undefined) out[p.ops[0].symbol] = t;
     }
     return out;
+  }
+
+  /**
+   * The DECLARED type carried by the function-literal parameter operand `p`
+   * (`Typed(x, "complex")` — the E1 annotation spelling), or `undefined` when
+   * `p` carries no annotation or the annotation does not parse. An
+   * unannotated or unparseable parameter therefore reads as undeclared, the
+   * safe direction.
+   *
+   * Positional, so the callers that need the parameters BY POSITION — the
+   * value-position coercion of an inline literal — and the one that needs
+   * them by name agree on what a parameter is declared as.
+   */
+  private static declaredParamType(p: Expression): Type | undefined {
+    if (!isFunction(p, 'Typed') || !isSymbol(p.ops[0])) return undefined;
+    const src = p.ops[1];
+    const text = isString(src)
+      ? src.string
+      : isSymbol(src)
+        ? src.symbol
+        : undefined;
+    if (text === undefined) return undefined;
+    try {
+      return parseType(text, p.engine._typeResolver);
+    } catch {
+      // Unparseable annotation: read as undeclared.
+      return undefined;
+    }
   }
 
   /**

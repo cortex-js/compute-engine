@@ -189,4 +189,70 @@ describe('Spread: compilation', () => {
     ce.assign('p', ce.box(['Tuple', 3, 4]));
     expect(expr.evaluate().isSame(r!.run!({ p: [3, 4] }))).toBe(true);
   });
+
+  test('a broadcast result carries its arity in its type and compiles', () => {
+    // A component-wise broadcast over a tuple types its result
+    // `tuple<number, number>`, so the arity is statically known even though
+    // the argument is a function call rather than a declared symbol.
+    const ce = new ComputeEngine();
+    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
+    const expr = ce.box(['a', ['Spread', ['Sin', ['Tuple', 1, 2]]]]);
+    const r = compile(expr);
+    expect(r?.success).toBe(true);
+    // `sin` is transcendental, so the interpreter's exact answer only meets
+    // the compiled float after `.N()`, and then only to machine precision.
+    expect(r!.run!()).toBeCloseTo(expr.evaluate().N().re, 12);
+  });
+
+  test('a tuple-returning user function compiles', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(number) -> tuple<number, number>');
+    ce.assign('f', ce.parse('x \\mapsto (x, x+1)'));
+    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
+    const expr = ce.box(['a', ['Spread', ['f', 2]]]);
+    const r = compile(expr);
+    expect(r?.success).toBe(true);
+    expect(expr.evaluate().isSame(r!.run!())).toBe(true);
+  });
+
+  test('a transparent tuple ALIAS compiles', () => {
+    // A `type alias` IS its definition, so the arity is statically known and
+    // the positional `At` accesses the splice emits are well typed.
+    const ce = new ComputeEngine();
+    ce.declareType('Pair', 'tuple<number, number>', { alias: true });
+    ce.declare('p', 'Pair');
+    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
+    const r = compile(ce.box(['a', ['Spread', 'p']]));
+    expect(r?.success).toBe(true);
+    expect(r!.run!({ p: [3, 4] })).toBe(11);
+  });
+
+  test('a NOMINAL type over a tuple declines, and says why', () => {
+    // A nominal type is not a subtype of the tuple it names, so `At` rejects
+    // an operand carrying the tag and the interpreter leaves such a spread
+    // symbolic. Reading the arity through the tag spliced anyway and reported
+    // the resulting `incompatible-type` error node instead of this decline.
+    const ce = new ComputeEngine();
+    ce.declareType('Pt', 'tuple<number, number>');
+    ce.declare('p', 'Pt');
+    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
+    expect(ce.box(['a', ['Spread', 'p']]).evaluate().operator).toBe('a');
+    const r = compile(ce.box(['a', ['Spread', 'p']]));
+    expect(r?.success).toBe(false);
+    expect(r?.error).toContain('tuple arity is not statically known');
+    expect(r?.error).not.toContain('incompatible-type');
+  });
+
+  test.each([
+    ['a bare tuple type (arity unknown)', 'tuple'],
+    ['a list', 'list<number>'],
+    ['a fixed-shape vector', 'vector<number^3>'],
+  ] as const)('%s does not spread-compile', (_label, type) => {
+    const ce = new ComputeEngine();
+    ce.declare('p', type);
+    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
+    const r = compile(ce.box(['a', ['Spread', 'p']]));
+    expect(r?.success).toBe(false);
+    expect(r?.error).toContain('tuple arity is not statically known');
+  });
 });

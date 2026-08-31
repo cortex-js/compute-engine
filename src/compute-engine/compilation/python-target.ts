@@ -865,8 +865,11 @@ def _ce_creal(_v):
  * recycle a dimension.
  *
  * This helper is keyed to a fixed set of NumPy operations. General arithmetic
- * over possibly collection-valued inputs still declines because Python lists
- * repeat or concatenate instead of broadcasting element-wise.
+ * takes the other route: a head with exactly ONE collection operand fans out
+ * into a list comprehension (`tryCompilePythonElementwise`), and a head with
+ * two or more of them still declines, because the interpreter answers an
+ * `incompatible-dimensions` error on a length disagreement and neither NumPy
+ * (which recycles a length-1 axis) nor `zip` (which truncates) reproduces it.
  */
 const PYTHON_BCAST_HELPER = `def _ce_bcast_apply(_op, _arrs):
     if _op == 'clip':
@@ -2821,12 +2824,15 @@ export class PythonTarget implements LanguageTarget<Expression> {
         `[${body} ${bindings
           .map(([name, code]) => `for ${name} in [${code}]`)
           .join(' ')}][0]`,
-      // A `broadcastable` unary head over a collection (`Sin([1,2,3])`) fans
-      // out as a LIST COMPREHENSION — always valid Python, and it preserves
-      // the element-wise semantics exactly, without assuming the caller bound
-      // a NumPy array (`np.sin` of a plain list happens to work, but `-L`
-      // negates only an ndarray; the comprehension is uniform for both, and
-      // for a head with no NumPy vectorization at all).
+      // A `broadcastable` head over its single collection operand
+      // (`Sin([1,2,3])`, `1 + L`) fans out as a LIST COMPREHENSION — always
+      // valid Python, and it preserves the element-wise semantics exactly,
+      // without assuming the caller bound a NumPy array (`np.sin` of a plain
+      // list happens to work, but `-L` negates only an ndarray, and `2 * L`
+      // REPEATS a list; the comprehension is uniform for a list, a tuple and
+      // an ndarray alike, and for a head with no NumPy vectorization at all).
+      // Any scalar operand is spliced into the body by `lowering.element`, so
+      // the arity of the head does not change the spelling.
       broadcastUnary: (_head, _operand, lowering, bcTarget) => {
         const v = BaseCompiler.tempVar(bcTarget);
         return `[${lowering.element(v)} for ${v} in ${lowering.collection()}]`;

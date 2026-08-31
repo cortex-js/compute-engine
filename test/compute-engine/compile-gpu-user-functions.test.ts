@@ -435,11 +435,12 @@ describe('GPU USER FUNCTIONS — the JS target is unchanged', () => {
   it('still emits the JS arrow-function form and allows recursion', () => {
     const ce = engineWithF();
     const r = compile(ce.parse('f(u) + f(2u)'), { fallback: false });
-    // `u` is wide-typed, so the first call keeps the JS target's runtime
-    // broadcast dispatch — the behavior a shader has no analog for, and the
-    // reason the GPU call-site hook fails closed instead.
+    // `u` is wide-typed, so the first call keeps the JS target's unconditional
+    // broadcast dispatch and the second its runtime `Array.isArray` guard —
+    // the behavior a shader has no analog for, and the reason the GPU
+    // call-site hook fails closed instead.
     expect(r.code).toMatchInlineSnapshot(
-      `_SYS.bcastFn((_tv1) => _fn_f(_tv1), _.u) + _fn_f(2 * _.u)`
+      `_SYS.bcastFn((_tv1) => _fn_f(_tv1), _.u) + ((_tv2) => Array.isArray(_tv2) ? _SYS.bcastFn((_tv3) => _fn_f(_tv3), _tv2) : _fn_f(_tv2))(2 * _.u)`
     );
     // The JS lowering keeps its arrow-function definition form, spliced into
     // the generated function's own body; the result also reports it as the

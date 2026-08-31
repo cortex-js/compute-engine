@@ -945,10 +945,18 @@ function compileJSCollectionBoolean(
  * Returns `null` when every condition is provably scalar: the base compiler
  * then emits its ternary chain, unchanged.
  *
- * Declines when a value arm is complex-valued: the compiled
- * complex convention is a `{ re, im }` object, and a selection array mixing
- * those with real cells has no settled rendering. Scalar complex
- * `Which`/`If` is untouched — it never reaches here.
+ * A COMPLEX-valued arm needs nothing special here. The cell convention it was
+ * once said to lack is the one every compiled array already uses: the complex
+ * helpers return a plain number when the result is real and a `{ re, im }`
+ * object otherwise, so `Sqrt(Negate(List(4, 9, 16)))` on its own compiles to
+ * `[{re: 0, im: 2}, {re: 0, im: 3}, {re: 0, im: 4}]`, and a list whose cells
+ * are a mix of numbers and complex objects is what the interpreter's own
+ * element-wise selection produces. `select` never inspects a cell — it copies
+ * `v[j]` through verbatim — and it distinguishes a per-element array arm from
+ * an arm lifted whole with `Array.isArray`, which a `{ re, im }` OBJECT fails,
+ * so a scalar complex arm broadcasts to its selected positions correctly. An
+ * arm therefore compiles exactly as it would outside the selection, and the
+ * assembled array agrees with interpretation cell by cell.
  */
 function compileJSSelection(
   args: ReadonlyArray<Expression>,
@@ -960,13 +968,6 @@ function compileJSSelection(
     a.type.matches('collection<any>') ||
     isPossiblyCollectionTypedJS(a);
   if (!conds.some(collectionish)) return null;
-  const arms = args.filter((_x, i) => i % 2 === 1);
-  if (arms.some((a) => BaseCompiler.isComplexValued(a)))
-    throw new Error(
-      `Which: cannot compile an element-wise selection with a complex-valued ` +
-        `branch — a compiled complex value is a \`{ re, im }\` object, which ` +
-        `has no cell convention inside a selection array. Fail closed (D6).`
-    );
   // Every clause is a thunk the runtime helper owns the evaluation of, so each
   // position after the first condition is a conditionally-evaluated operand:
   // pass its index, and the CSE pass pushes the matching region instance

@@ -109,6 +109,113 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+- **RESOLVED 2026-08-30 (user-ruled same day): compile-time constant-fold
+  eligibility is deterministic — the wall-clock backstop is removed.** The
+  ruling picked the deterministic-estimate option: the
+  `compile:constant-fold` `withTimeLimit` wrapper and
+  `CONSTANT_FOLD_BUDGET_MS` are gone; `foldCostEstimate` alone gates the
+  fold, gaining a quadrature arm (`FOLD_QUADRATURE_EVALS`, the
+  split-inclusive GK15 worst case) with flat multi-limit integrals,
+  `NIntegrate`, and `Limit`/`NLimit`/`Residue` declining outright. Four
+  value-scaled library loops that ran unbounded on no-deadline routes were
+  capped in the same audit (`NthPrime`/`NextPrime` step backstops,
+  `LucasL`/`CatalanNumber` digit pre-checks, `library/number-theory.ts`).
+  The ambient-deadline rethrow is unchanged, pinned by the regression the
+  original entry prescribed (`compile-subtree-folding.test.ts`). Historical
+  record of the defect (originally observed 2026-08-30): In a full-suite run on a loaded box
+  (load ~30+), `compile-subtree-folding.test.ts` › "compiles the same
+  source to the same output every time" failed: five in-process compiles
+  of `A(0.3)` produced 2 distinct code strings. Solo on a quiet box it
+  passes 44/44. The test's own comment records this class (a former
+  100 ms wall-clock fold budget); the only remaining wall-clock read on
+  the fold path is the antiderivative budget
+  (`BaseCompiler.closedFormIntegral`), which `A(0.3)` — trig/mod/Sum, no
+  integrals — should never reach. Evidence: full-run log
+  (session CE-Tycho-POC scratchpad `fullrun237.log`, worktree at
+  d66d6553, diff touching only `interval-javascript-target.ts`).
+
+  MECHANISM IDENTIFIED (2026-08-30, follow-up diagnosis): the fold's
+  ELIGIBILITY estimate is deterministic, but the fold EVALUATION itself
+  still runs under a wall-clock deadline —
+  `engine.withTimeLimit({ ms: CONSTANT_FOLD_BUDGET_MS, label:
+  'compile:constant-fold' }, () => expr.N())` in the fold-value memo
+  routine (`compilation/base-compiler.ts`, search the label). An expiry
+  is a QUIET DECLINE ("value = undefined"), memoized as `'declined'` —
+  but the memo (`_foldValueMemo`) is keyed per compile TARGET, so five
+  separate `compile()` calls each arm a fresh deadline and each can land
+  on a different side of it under load. The deadline is an anti-hang
+  backstop for expressions whose deterministic cost estimate under-prices
+  their evaluation; under box load ~30 even a correctly-priced
+  evaluation can blow a fixed ms budget. Candidate fixes, each with a
+  cost: (a) drop the backstop and trust the deterministic cost estimate
+  alone — restores determinism, but an estimate miss then hangs the
+  compile until the AMBIENT deadline; (b) keep the backstop but treat
+  its expiry as a whole-compilation error instead of a silent fold
+  decline — deterministic output, but compiles can fail under load;
+  (c) replace the wall-clock with a deterministic evaluation-effort cap
+  (an operation-count budget inside `.N()`), the principled fix if the
+  interpreter can meter evaluation effort. Needs a ruling on the
+  trade-off before implementing.
+
+  RULED AND SHIPPED (option c, 2026-08-30): the wall-clock backstop was
+  removed and the deterministic cost estimate gained quadrature pricing
+  and Integrate/NIntegrate/Limit/NLimit/Residue decline arms; the four
+  uncapped value-scaled loops in `library/number-theory.ts` got
+  deterministic step backstops, combinatorics was already digit-capped,
+  and collection materialization is clamped during folds.
+
+  STANDING AUDIT (open): the coverage claim is per-surface, not
+  exhaustive — no one has swept EVERY library file for the pattern
+  "a loop whose bound derives from an operand VALUE with only
+  `checkDeadline` inside" (the pattern the `number-theory.ts` header
+  documents). Any such loop reachable from a constant fold is a
+  compile-time stall the deterministic estimate cannot see. The audit
+  is a grep-shaped pass over `src/compute-engine/library/`; run it
+  before trusting the fold path with untrusted input, and add either a
+  step backstop or a fold-estimate arm for each hit.
+
+  A migration note for test authors: under the OLD build, fold
+  granularity depended on where the 2-second clock expired
+  (`NthPrime(1e6) + 0.5` could emit `0.5 + 15485863` — the whole-
+  expression fold timed out, then the subtree fold ran with a fresh
+  clock). Any test pinning a PARTIALLY-folded emission of that class
+  was pinning a clock artifact; the new build folds it whole
+  (`15485863.5`).
+- **Tycho item 236 — element-wise `Which` refused complex-typed branches**
+  (RESOLVED 2026-08-30, same day it was filed). `Which(L<10, Sqrt(L-3),
+  True, 0)` over `L=[4,9,16]` failed closed because `Sqrt` of an
+  unknown-sign operand types `finite_complex`. The decline's premise was
+  wrong: the `{re, im}` cell convention it claimed was missing already
+  exists — `_SYS.select` copies cells with `Array.isArray(v) ? v[j] : v`,
+  so a scalar complex `{re, im}` object lifts whole and a complex array
+  indexes per element. The blanket arm-complexness refusal in
+  `compileJSSelection` was removed; a 13-shape parity table (real,
+  complex-typed-but-real, genuinely complex, mixed, `If` spelling,
+  no-default) matches the interpreter cell for cell. Pinned in
+  `test/compute-engine/compile-which-complex-selection.test.ts`.
+  A complex-valued CONDITION still declines (the complex numbers are
+  unordered), and the GPU target keeps its own genuinely different
+  decline (homogeneous `vec2` arrays).
+- **`interval-js` target: four heads confirmed with no lowering** (Tycho
+  item 237, filed 2026-08-30, the item-220 batch mold): `Choose`, `Apply`
+  (the `f'` prime-derivative spelling lowers to `Apply(Function(…), x)`),
+  `WithRandomSeed`, and index-less `Sum` over a collection body. A decline
+  WITH a by-design ruling is an acceptable answer for heads outside the
+  scalar-interval-domain contract. Repro: tycho
+  `scripts/repros/2026-08-30-ce-interval-lowering-batch-probe.mts`.
+- **A constant `Limit` no longer folds — a convergent one pays `_SYS.limit`
+  per call.** The fold-determinism change (2026-08-30) declines every
+  `Limit`/`NLimit`/`Residue` fold, because a NON-settling limit reaches a
+  million-evaluation extrapolation and the two cases are not statically
+  separable. Measured A/B: `lim_{x→0} sin(x)/x + t` compiled to `_.t + 1`
+  before and compiles to `_.t + _SYS.limit((x) => Math.sin(x)/x, 0)` now —
+  a per-sample runtime limit evaluation inside any kernel that embeds a
+  constant limit. Possible recovery without reintroducing wall-clock
+  nondeterminism: the `Limit` LOWERING could first attempt a SYMBOLIC
+  evaluation (L'Hôpital / series — deterministic, no numeric fallback) and
+  emit the closed value when one exists, declining to `_SYS.limit` only
+  when the symbolic route answers nothing. Needs a ruling on whether the
+  symbolic attempt's own cost at compile time is acceptable.
 - **Destructured Block locals stay `unknown`-typed on the compilation
   routes.** The Tycho item 235 fix (2026-08-30) gives a `Block`-hoisted
   local its statically-readable `Declare` type and joins `Assign` evidence
@@ -1491,7 +1598,7 @@ with its fix named:
   wanted: resolve the fact's symbol nodes against the transaction
   registry before recording.
 
-### Assumptions bake into stored types — RULED 2026-08-30, implementation IN PROGRESS (phase 1 COMMITTED `838fd336`; phase 2 — effective read + assume stops writing — in flight)
+### Assumptions bake into stored types — RULED 2026-08-30, SHIPPED 2026-08-30 (phase 1 `838fd336`, phase 2 `ebd850f5`, phase 3 staged 2026-08-30)
 
 `assume()` WRITES the assumed symbol's type (`assume.ts`:
 `refineSymbolType`, `refineTypeIfUnknown`), and `forget()` / a scope pop
@@ -1510,12 +1617,26 @@ READ time (one intersection, versioned like every other read), `assume()`
 stops writing types, and every type WRITE derives from the declaration
 channel at one choke point (the type setter / `_infer` take the
 derivation as a thunk run under `_withoutFacts`). Two rulings
-(2026-08-29): (A) an assumption-derived proof is never visible through
-an ASSIGNED function — `assume(p > 3); f := x ↦ (p > 2)` stores
-`(x) -> boolean`, since an application's type is read from the stored
-signature; (B) the handler-side "value types survive" half of the
-boolean-value-types ruling is re-ruled for the ASSUMPTION case (declared
-ranges still flow into stored types).
+(2026-08-30, on the corrected premise — the earlier "read from the
+stored signature" justification was a mis-measurement): (A) an
+assumption-derived proof is never visible through an ASSIGNED function —
+`assume(p > 3); f := x ↦ (p > 2)` stores `(x) -> boolean`; (B) the
+handler-side "value types survive" half of the boolean-value-types
+ruling is re-ruled for the ASSUMPTION case (declared ranges still flow
+into stored types).
+
+Phase 3 (staged 2026-08-30) closed the write side: every type/signature
+write routine runs its decision and its write under `_withoutFacts`,
+memos that can reach the facts are keyed on the composite generation
+(`_cacheGeneration()`, two-cell `CachedValue`), and the exit criteria of
+the design doc §5 step 8 hold — full suite green (three pre-existing
+compile pins aside, since fixed by the item-235 round), snapshot blast
+radius zero, wall-clock-independent perf counters exact. The
+benchmark-based ±2% criterion (a) could not be certified on a loaded
+shared box (control rows swung ±13%); the structural argument and the
+counter criteria stand in for it, recorded in the design doc. Artifacts:
+`docs/plans/2026-08-30-assumptions-memo-inventory.md`,
+`docs/plans/2026-08-30-assumptions-write-audit.md`.
 
 ### Boolean value types — SHIPPED 2026-08-29 (O10)
 
@@ -2685,42 +2806,21 @@ member must also be declared on `IComputeEngine` (`types-engine.ts`) — that
 applies to `_`-prefixed members too, 60 of which are already declared there — so
 each conversion is an implementation + interface change, not a one-file edit.
 
-### The constant fold's own 2000 ms stall guard can still swap a folded value for a lowered one (OPEN, correctness — narrow residual; the AMBIENT-deadline path is already correct)
+### The constant fold's 2000 ms stall guard — RESOLVED 2026-08-30 (wall-clock removed by user ruling)
 
-`foldCostEstimate` made the fold ELIGIBILITY decision a property of the
-expression alone, so the same input always makes the same fold/decline choice.
-The fold BODY is still wrapped in a stall guard —
-`engine.withTimeLimit({ ms: CONSTANT_FOLD_BUDGET_MS })` in
-`compilation/base-compiler.ts` (`CONSTANT_FOLD_BUDGET_MS = 2000`) — and crossing
-THAT budget is a quiet decline: the catch sets `value = undefined` and
-compilation continues down the structural lowering with no diagnostic.
-
-Why a quiet decline is a correctness matter and not a lost optimization: the
-comment on `CONSTANT_FOLD_MAX_COST` records that the folded value comes from
-`.N()` in bignum while the structural lowering computes in doubles, so the two
-branches differ in the last digits. A budget crossing therefore changes the
-compiled VALUE, and because 2000 ms of wall clock is machine-load dependent, two
-runs on the same input can disagree — exactly the property the cost gate was
-introduced to remove.
-
-**The ambient-deadline path is NOT part of this defect, and a fix must not
-disturb it.** `withTimeLimit` nests as `min()`, so a caller's tighter deadline
-does reach the fold — but an expiry attributable to the AMBIENT deadline is
-rethrown (`if (!engine._shouldContinueExecution()) throw e`) and cancels the
-whole compilation rather than being swallowed as a fold miss. Measured
-2026-08-15 on a 7-term `Sum` of user-function calls: an ambient span of 1 ms and
-5 ms threw `Timeout exceeded`, while 50 ms and 500 ms returned code
-byte-identical to the unbudgeted compile. There is no silent branch swap via a
-consumer's span budget; a consumer that budgets its compiles gets a loud failure
-or the same answer.
-
-So the exposure is only the fold's own 2000 ms ceiling, which no caller can
-tighten — hard to reach, but reachable on a slow machine under load for an
-expression the cost estimator admits. Fix shape when picked up: make the fold's
-own decline deterministic or observable rather than a silent branch change; keep
-the ambient rethrow exactly as it is. A regression should compile one folding
-expression under a tight and a loose ambient deadline and assert the emitted
-code is identical whenever neither run throws.
+The fold's own `withTimeLimit` stall guard (`CONSTANT_FOLD_BUDGET_MS`) is
+deleted: its expiry was a quiet decline, so two runs of the same input on a
+loaded machine could compile to different values (folded bignum vs
+structural doubles). `foldCostEstimate` is now the only gate, extended to
+price numeric quadrature and to decline the heads whose evaluation work a
+syntax walk cannot see (flat multi-limit `Integrate`, `NIntegrate`,
+`Limit`/`NLimit`/`Residue`). The value-scaled loops in
+`library/number-theory.ts` that a fold could reach with no deadline armed
+were bounded in the same change. The ambient-deadline path is exactly as
+this entry required — an ambient expiry cancels the whole compilation,
+never swaps the branch — and the prescribed regression is pinned in
+`compile-subtree-folding.test.ts` ("an ambient deadline never swaps the
+folded value for a lowered one").
 
 ### Degree-mode folding flips `angularUnit` per fold attempt, purging caches (OPEN, perf — small)
 
@@ -3253,6 +3353,90 @@ ours — 202/69 — and they corrected it in review. Use 82/25.)
   emitted for every non-literal argument, and applies the closure directly when
   nothing is an array.
 
+  **No call site takes a static fast path any more (ruled and landed
+  2026-08-30).** The same reasoning applies to a CONCRETE declaration, and the
+  fast path there was answering a wrong value behind `success: true`. With
+  `f(x: number) = 2x + 1`, the free `y` in `f(y)` types `number` — inferred
+  from `f`'s own declared parameter, which says nothing about what the caller
+  supplies. The call emitted a bare `_fn_f(_.y)`, so `run({ y: [1,2,3] })`
+  computed `2 * [1,2,3] + 1`, which is the string-coerced `NaN`; the
+  interpreter broadcasts the same call to `[3,5,7]` (auto-broadcast is
+  documented, pinned design — `doc/08-guide-types.md` §Broadcasting). It now
+  emits a runtime guard instead:
+  `((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_f(_tv2), _tv1) : _fn_f(_tv1))(_.y)`.
+  `run({ y: 21 })` still answers `43` through the direct branch and
+  `run({ y: [1,2,3] })` answers `[3,5,7]`. The cost of the guard was measured
+  at about 3 ns per call in the scalar case and ruled acceptable (Arno,
+  2026-08-30) against silently wrong arithmetic.
+
+  The argument is bound to a temporary, so its expression is evaluated exactly
+  once whichever branch is taken, and each argument of a multi-argument call is
+  tested independently: `g(u, v)` broadcasts when either is an array and reuses
+  the scalar for every element, matching `_SYS.bcastFn`. A LITERAL argument
+  (a number, string, character or boolean literal) cannot be an array at run
+  time, so it is neither tested nor bound and `f(3)` still emits the bare
+  `_fn_f(3)`. The static shape class therefore now chooses only WHERE the test
+  happens, never whether there is one. Three call shapes still emit the bare
+  direct call, because a broadcast would be WRONG there rather than merely
+  unnecessary: a tuple argument, a nominal-typed argument (both atomic — the
+  interpreter binds them whole), and a callee with a collection-typed
+  parameter, which binds its argument whole. So does every target other than
+  JavaScript.
+
+  A POINT is the case that makes those exemptions matter at run time rather
+  than only statically. A point is tuple-typed and lowers to a plain JS array,
+  so `Array.isArray` is true for the value a point-taking function EXPECTS, and
+  broadcasting there would call the body once per coordinate and answer a list
+  where the interpreter answers one number. The guard cannot reach such a
+  value, on either side of the boundary: a tuple-, point- or collection-typed
+  PARAMETER makes the callee non-scalar and no broadcast form is emitted at
+  all, and the guard is in any case emitted only where every ARGUMENT's static
+  type is `number`, `boolean` or `string`, which a point-typed argument is not.
+  `mid(p)` under `(v: tuple<number, number>) -> number` therefore still emits
+  the bare `_fn_mid(_.p)` and `run({ p: [3, 5] })` answers `4`, the
+  interpreter's value.
+
+  **The BODY reads the bound too (landed 2026-08-30).** The first round lifted
+  the CALL boundary only; the body was still compiled against an erased
+  parameter, so `(xs: T) -> number where T: list<number>` with a `Length(xs)`
+  body declined with `Length: cannot compile — operand is not an indexed
+  collection`. The parameter analyzed as `collection` — what usage inference
+  reads out of `Length(xs)` — and a bare `collection` is not array-shaped, so
+  every collection gate in the body refused it while the bound one hop away
+  proved a list. It now compiles: `g([4,5,4])` emits
+  `const _fn_g = (xs) => (xs).length;` and runs to `3`, the interpreter's
+  answer, and `At`, `Reduce` and `Filter` bodies compile the same way.
+
+  The bound reaches the body through the channel a CONCRETE declaration already
+  uses. `ascribeDeclaredParameterTypes` (`engine-declarations.ts`) stamps a
+  declared parameter type onto a bare parameter as a `Typed` annotation and
+  re-boxes the literal, so the body is canonicalized with its parameter
+  references bound at that type; the emission hands that function the GROUND
+  signature instead of the polytype (`literalAtGroundSignature`,
+  `compilation/base-compiler.ts`). One extra step is needed first: a generic
+  literal carries its declared polytype as a full-signature marker on the body,
+  and a ground parameter annotation added beside a `where T` marker does not
+  survive canonicalization — the two would contradict each other, so the
+  annotation is erased. The marker is therefore restated at the ground
+  signature in the same rebuild (`markerAtGroundSignature`). The stamped
+  literal is used for the EMISSION only and is never stored back, so the
+  engine's own value keeps its polytype and the interpreter still instantiates
+  per call. Because both halves come from the ground signature, the emitted
+  definition is the one the equivalent ground declaration emits, byte for
+  byte — pinned by a concrete/generic comparison in
+  `test/compute-engine/compile-generic-monomorphization.test.ts`.
+
+  Two properties fall out of reusing that function rather than teaching each
+  operand gate about genericity. A SCALAR bound stamps nothing (only a
+  parameter that binds a collection whole can be handed a value a
+  scalar-compiled body cannot read), so `where T: number` and
+  `where T: complex` emit byte-identically to before. And a bound that does
+  not prove what the body needs is not repaired by the stamp: under
+  `where T: collection<number>`, an `At(xs, 1)` body now fails closed — it
+  used to emit `_SYS.at(xs, 1)` off the erased parameter — because
+  `collection<number>` proves a collection but not indexed access, which is
+  exactly how the ground `(collection<number>) -> number` declaration behaves.
+
   **What still declines** (whole-fn, with the sound interpreted fallback):
   a variable with NO ground bound — `(x: T) -> T where T` names no type to
   compile against, so `gd(y)` there emits no `_fn_gd` and the fallback runner
@@ -3261,12 +3445,67 @@ ours — 202/69 — and they corrected it in review. Use 82/25.)
   JavaScript conventions and the shader targets synthesize a static signature
   this reading was never validated against; a declared `broadcastable<T>`
   parameter over a possibly-collection argument, which fails closed as before;
-  and a body the target cannot emit against the bound — `(xs: T) -> number
-  where T: list<number>` with a `Length(xs)` body declines on `Length`, because
-  the erased parameter carries no collection type into the body. A generic
-  BLOCK-LOCAL function (`const g = (x: T) => …` inside a `Block`) also still
-  fails closed in `tryCompileLocalFunctionCall`; that route reads the declared
-  literal's own signature and was not lifted.
+  and a body whose bound does not prove the capability it needs, such as an
+  indexed read under a `collection<number>` bound.
+
+  **A generic BLOCK-LOCAL function reads the same bounds (resolved).** A
+  function declared inside a `Block` (`const g = (x: T) => …`) is called
+  through `tryCompileLocalFunctionCall`, which reads the callee's signature
+  from the declared literal rather than from an engine definition. That route
+  threw on any polymorphic signature, so one function compiled or declined
+  depending only on where it was written: for the doubling literal bounded by
+  `where T: number`, the engine-level spelling compiled `gd(5)` to `_fn_gd(5)`
+  and `gd([1,2,3])` to the `_SYS.bcastFn` broadcast, while the block-local
+  spelling of the same function failed closed on both and fell back to the
+  interpreter. The block-local route now reads each quantified parameter at its
+  declared bound, exactly as the engine route does: the call site earns the
+  same coercion and broadcast wraps, so `gd(5)` runs to `10` and `gd([1,2,3])`
+  to `[2,4,6]` on either spelling. It declines on the same two conditions — an
+  unbounded variable and every target other than JavaScript — and the
+  `broadcastable<T>` gate is unchanged.
+
+  **A complex-declared function LITERAL in value position (resolved
+  2026-08-30).** `Map((x: complex) -> complex ↦ 2x, [1,2,3])` compiled the
+  arrow in the complex lane — the body reads `.re`/`.im` — while `_SYS.map`
+  handed it the plain numbers `1`, `2`, `3`, so `2 * x.re` read `undefined`
+  and the run answered `[{re: null, im: null}, …]` behind `success: true`
+  where the interpreter answers `[2,4,6]`. A declared-complex ENGINE function
+  passed the same way was already correct, because `ensureUserFunctionValueRef`
+  binds a `_fn_h$v` coercing shim for it; a literal has no name to hang a shim
+  on. It now takes the same wrapper inline at the value splice, built by the
+  shared `complexCoercingWrapper`, so the two routes coerce at the same
+  positions and in the same way, and the literal case runs to `[2,4,6]`. A
+  literal with no complex-declared parameter emits the bare arrow, byte for
+  byte as before.
+
+  **A NON-REAL NUMBER bound on a block local (resolved 2026-08-30).** This was
+  the last bound the block-local route declined where the engine route
+  compiled: `const gd = (x: T) -> T where T: complex => 2x` applied to `3`
+  failed closed and fell back to the interpreter, which answers `6`. A
+  quantified parameter is erased before the literal's body canonicalizes (rule
+  G1), and a block local's body is emitted by the ordinary function-literal
+  lowering, which reads the parameter's own type — so the arrow computed in the
+  real lane while the call site coerced its argument to `{ re, im }`, an object
+  that body would have multiplied as a number. An engine definition has a
+  second emission path that overrides the body's lane from the declared
+  signature (`addDeclaredComplexParams`); a local has none.
+
+  An earlier attempt at the lift was reverted because putting the literal's
+  body in the complex lane broke the value-position case above: with the
+  wrapper in place, that regression is gone, and the two halves of the boundary
+  can be moved together. The function-literal lowering now reads the parameter
+  types of the literal's own declared signature at their bounds — the same
+  ground reading the call boundary performs — enters a bound-only complex
+  parameter in a shape frame so the body compiles in the complex lane, and
+  wraps the arrow in the `_SYS.cplx` coercion at those positions. `gd(3)` runs
+  to `6`, `gd(3 + 4i)` to `6 + 8i`, and `gd(y)` with `run({ y: [1,2,3] })` to
+  `[2,4,6]`, all agreeing with the interpreter and with the engine-level
+  spelling of the same function. The regression gate —
+  `Map((x: T) -> T where T: complex ↦ 2x, [1,2,3])`, the exact expression that
+  reverted the first attempt — is pinned in
+  `test/compute-engine/compile-generic-monomorphization.test.ts`. The
+  block-local route now declines on exactly the engine route's conditions: an
+  unbounded variable, and every target other than JavaScript.
 
 **GLSL/WGSL band** (204 members / 90 states compile on JS but not GPU — the
 GPU→CPU demotion class). Buckets triaged below.
@@ -3408,10 +3647,58 @@ see whether it is refused there too.
 
 Known candidates, all currently defended as "documented and deliberate":
 
-- **Python's arithmetic-infix D6 guard** (`base-compiler.ts` ~869) still fails
-  `Negate([1,2,3])` closed, even though the comprehension fan-out added in the
-  same round makes `[-_tv1 for _tv1 in L]` expressible. The guard may simply
-  have outlived its reason.
+- **PARTLY RESOLVED — Python's arithmetic-infix D6 guard has been narrowed to
+  the shapes that still need it.** The guard used to refuse every arithmetic
+  head that had a collection operand, on the ground that Python's `+` and `*`
+  concatenate and repeat a list rather than broadcasting it. That reason covers
+  only the INFIX lowering, and the comprehension fan-out added in the same
+  round expresses the element-wise result without it. An arithmetic head with
+  exactly ONE collection operand — the collection being an ordered list of
+  numbers, every other operand provably a number — now compiles through
+  `tryCompilePythonElementwise` (`base-compiler.ts`), which asks the target to
+  spell the map and gets back a list comprehension whose body is the head's own
+  scalar lowering. For a `v` declared `list<number>`: `Negate(v)` used to
+  decline and now emits `[-_tv1 for _tv1 in v]`; `Add(v, 1)` emits
+  `[_tv1 + 1 for _tv1 in v]`; `Multiply(2, v)` emits `[2 * _tv1 for _tv1 in v]`;
+  `Power(v, 2)` emits `[_tv1 ** 2 for _tv1 in v]`. A comprehension iterates a
+  plain Python list, a tuple and a NumPy array alike, so the emission no longer
+  depends on what the caller binds — which was the guard's real objection. The
+  executed parity cases are in `test/compute-engine/compile-python-parity.test.ts`
+  ("arithmetic over a list"), which runs each emission against both a list and
+  an ndarray binding.
+
+  Three shapes keep failing closed, each for a reason no Python emission
+  removes. **Two or more collection operands** (`v + w`): the interpreter
+  answers `Error("incompatible-dimensions", "2 vs 3")` on a length
+  disagreement, and nothing in Python reproduces that — NumPy silently recycles
+  a length-1 axis (`np.add([1], [3,4,5])` is `[4,5,6]`, where the interpreter
+  errors) and a `zip` comprehension truncates to the shorter operand. **A
+  collection whose elements are not scalars** — a matrix (`list<list<number>>`)
+  or a point list (`list<tuple<number, number>>`): one level of fan-out would
+  hand a whole row, or a point, to a scalar operator, and the interpreter
+  answers `[[2,3],[4,5]]` and `[(3,4),(6,8)]` respectively, neither of which is
+  element-wise. **An operand that is only possibly a collection** — a
+  `broadcastable<T>` or a top-typed call `h(x)`: it may still bind to a list at
+  run time, which is the repeat/concatenate divergence itself.
+
+  Two residues, both recorded rather than papered over. A unary broadcast over
+  an EMPTY collection disagrees between the lanes: the interpreter answers
+  `Nothing` for `Negate([])` but the empty list for the binary `Add([], 1)`,
+  while the compiled comprehension answers the empty list for both. That
+  asymmetry is the interpreter's, and it predates the fan-out (the literal
+  route has emitted a comprehension since the hook was added). And the
+  `Power` container dependence, settled in two halves on 2026-08-30. A
+  collection in the BASE position with a negative (or unproven-integer)
+  scalar exponent now DECLINES in the fan-out: `[t ** -2 for t in v]`
+  answers floats for a Python list but raises
+  `ValueError: Integers to negative integer powers are not allowed` for an
+  integer ndarray element (measured, NumPy 2.4.2), so the emitted artifact's
+  behavior depended on what the caller bound. A collection in the EXPONENT
+  position (`Power(2, v)`) KEEPS COMPILING, by user ruling: its elements
+  carry no static non-negativity proof, so gating it would refuse the whole
+  shape, and the residual divergence is LOUD — an integer ndarray holding a
+  negative element raises at run time rather than answering a wrong value,
+  while lists, tuples and float ndarrays all answer correctly.
 - **RESOLVED (user ruling, 2026-08-30): the interpreter gained the tuple
   broadcast.** `Sin(Tuple(1, 2))` used to broadcast to `(sin 1, sin 2)` when
   compiled while `.evaluate()` left it as the inert `sin((1, 2))`, because the
@@ -3424,6 +3711,77 @@ Known candidates, all currently defended as "documented and deliberate":
   point's norm, the relational heads compare a point as one value, and a
   user function receives the whole point. The gate is `broadcastsOverTuples`
   in `boxed-expression/boxed-function.ts`.
+- **A bare-function, assign-inferred point function compiled with a LIST
+  argument reads it as ONE point** (witness from the Tycho D-15 session,
+  2026-08-30; filed here, compile lane). With `f(v) = PointList(…)` declared
+  as a bare `function` and its signature inferred at assign time,
+  `compile(f(P), {to: 'javascript'})` SUCCEEDS and the emitted `_fn_f(v)`
+  reads its argument as a single point (`v[0]`/`v[1]`); a LIST-of-points
+  argument then throws `RangeError: PointList: source component 1 is not an
+  array` at run time. Loud, not silent — but it diverges from the
+  interpreter, and it is a sibling of the D-232 lambda auto-broadcast
+  residual. It also pins a design constraint for the ruled runtime
+  broadcast-dispatch guard: `Array.isArray` cannot distinguish a
+  list-to-broadcast-over from a point that IS the argument, so the guard
+  must key on the parameter's DECLARED scalar type, never on the runtime
+  shape alone. Repro: tycho `scripts/repros/d15-eval-cost-probe.mts`
+  (lands with the D-15 diff).
+- **A `set`-typed operand escaped BOTH scalar-infix arithmetic guards**
+  (surfaced 2026-08-30 by the guard-narrowing round; RESOLVED same day).
+  With `T: set<number>`, the interpreter answers
+  `Error(incompatible-type, number, set<number>)` for `Add(T, 1)`, but the
+  Python target emitted `T + 1` and the JavaScript target `_.T + 1`, both
+  behind `success: true` — the guards' operand predicate asked `list<any>` /
+  `indexed_collection<any>`, and a set matches neither. The same
+  shape-predicate class as the closed GPU `gpuIsCollectionShaped` item
+  above, and the two guards are a PAIR, so both gained the fix together:
+  the predicate now tests the collection shape top (`collection<any>`), and
+  a set-typed operand declines on both targets (the Python fan-out keeps
+  its own narrower participation test, so a set never fans out — it is
+  unordered, so a comprehension has no defined order). Pinned in
+  `test/compute-engine/compile-broadcast-unary.test.ts`.
+- **Unary broadcast over an empty collection disagrees between the lanes, and
+  the interpreter is internally asymmetric** (surfaced 2026-08-30; predates
+  the Python guard change). `Negate([])` evaluates to `Nothing` while
+  `Add([], 1)` evaluates to `[]`; the compiled comprehension answers `[]` for
+  both, on the Python and JavaScript targets alike. The `Nothing` looks like
+  the quirk — a broadcast over zero elements has a natural empty-list answer —
+  but making the interpreter consistent needs its own decision, since the
+  `Nothing` spelling may be load-bearing for erasure somewhere.
+- **`Equal`/`NotEqual` with exactly one collection operand declines on the
+  Python target but is now expressible** by the same comprehension machinery
+  the arithmetic guard uses (`[_tv1 == 5 for _tv1 in L]` with the target's
+  existing tolerance test is the interpreter's list of booleans). Left
+  declined because the relational family is deliberately excluded from the
+  arithmetic guard; it is the same lift one operator family over, when someone
+  wants it.
+- **The arithmetic OPERAND boundary has the same statically-scalar-but-
+  actually-array hole the call boundary just had** (surfaced 2026-08-30 while
+  implementing the runtime broadcast-dispatch guard). The guard fixes the
+  CALL boundary: `f(y)` with `run({y: [1,2,3]})` now broadcasts. But an
+  arithmetic node between the input and the call does not: `f(y + z)` with
+  `run({y: [1,2,3], z: 0})` emits `(_.y + _.z)`, JavaScript string-
+  concatenates the array to `"1,2,30"`, `Array.isArray` on the RESULT is
+  false, and the guarded call's direct branch answers `NaN`. Fixing it
+  means the same declared-scalar-type-keyed treatment at scalar-infix
+  operand boundaries (or a broadcast-aware `+` lowering), which is the
+  same perf-sensitive shape as the ungated infix `target.operators` path
+  entry above — the two should be designed together.
+- **Arity-mismatched user-function calls diverge between the lanes, and the
+  interpreter's too-many-arguments path THROWS a raw JS error out of
+  `.evaluate()`** (surfaced 2026-08-30 by the Spread round; reproduces on a
+  direct call with no `Spread` involved). Too few arguments: the interpreter
+  answers a partial application (`a(3, 4)` for a 3-parameter function returns
+  `(_) => _ + 7`), while compiled code calls with `undefined` holes and runs
+  to `null`/`NaN`. Too many: compiled code silently drops the extras and
+  computes, while the interpreter throws an UNCAUGHT
+  `Error: Too many arguments for function ...` from
+  `src/compute-engine/function-utils.ts` (~line 2761) instead of returning an
+  error expression — an `.evaluate()` that throws a raw JS error is a defect
+  independent of the lane divergence. Two fixes needed: the interpreter's
+  too-many path must produce an error EXPRESSION, and the compiled call
+  emission must mirror whichever arity semantics are affirmed (partial
+  application is likely too rich to compile — a decline is acceptable there).
 - **`Hypot((1, 2), 2)` disagrees between the lanes** (surfaced 2026-08-30 by
   the tuple-broadcast round; pre-existing). The interpreter reads the tuple as
   a point and answers `3` through the point norm (`pointNormType` and the
@@ -3431,6 +3789,29 @@ Known candidates, all currently defended as "documented and deliberate":
   JavaScript lane broadcasts and answers the pair `[2.236…, 2.828…]`. Same
   consistency class as the resolved `Sin(Tuple(...))` item: it needs one ruled
   direction, not a defense of either behavior.
+- **RESOLVED 2026-08-30 — a nested function literal leaked its parameter names
+  to an enclosing shape frame, and the compiled code answered a wrong value
+  behind `success: true`.** The compiler keeps a stack of local shape frames
+  that record which names hold `{ re, im }` complex objects; a shape query is
+  answered by the innermost frame that MENTIONS the name. A `Function` literal
+  that pushed no frame of its own therefore had its parameters answered by
+  whatever enclosing frame bound the same spelling. Input: `R` declared
+  `(complex) -> list<number>` with the body `Map((z) ↦ 2z, [1, 2, 3])`, called
+  as `R(1 + 2i)`. Old behavior: the outer complex parameter `z` reached the
+  callback's own real `z`, so the callback compiled as
+  `(z) => ({ re: 2 * z.re, im: 2 * z.im })` while `_SYS.map` handed it plain
+  numbers, and `run()` answered `[{re: NaN, im: NaN}, …]` where the interpreter
+  answers `[2, 4, 6]`. New behavior: `run()` answers `[2, 4, 6]`, from the
+  emitted `(z) => 2 * z`. The fix gives a frame an OWNER — the expression it
+  was pushed to describe — so a literal can tell an enclosing scope's frame
+  (which it must shadow) from a frame pushed for the literal itself (which it
+  must keep). A fold's combiner is the second kind: `compileCombinerLiteral`
+  frames the accumulator and element parameters in the lanes the fold passes
+  before compiling the lambda, and shadowing that frame would discard them.
+  `BaseCompiler.isFramedByForeignScope` asks the question, and fails closed —
+  an unowned frame or an unidentified literal answers "foreign", which makes
+  the literal describe its own parameters. Pinned in
+  `test/compute-engine/compile-complex.test.ts`.
 - **CLOSED — `Sin(L)` for a collection-typed `L` on GPU emitted `sin(L)`**,
   valid only if the caller happens to bind `L` to a `vecN` uniform: a shape the
   compiler asserted but could not see. The mechanism was narrower than the

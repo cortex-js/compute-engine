@@ -30,6 +30,16 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const ce = new ComputeEngine();
 ce.declare('L', 'list<number>');
 ce.declare('Z', 'list<complex>');
+// A collection whose elements are not scalars, and an operand that is only
+// possibly a collection: the two shapes the Python fan-out must still refuse.
+ce.declare('M', 'matrix<2x2>');
+ce.declare('B', 'broadcastable<number>');
+// A SET-typed operand: it matches neither `list<any>` nor
+// `indexed_collection<any>`, so a guard written with those spellings lets it
+// through — `Add(SN, 1)` emitted `SN + 1` on both scalar-infix targets where
+// the interpreter answers an `incompatible-type` error. The guards now test
+// the collection shape top (`collection<any>`).
+ce.declare('SN', 'set<number>');
 
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
@@ -191,23 +201,90 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       expect(p(['Negate', ['Add', 'W', 1]])).toBe('(-(W + 1))');
     });
 
-    it('still fails closed on the shapes the unary hook cannot express', () => {
-      // Binary/n-ary arithmetic over collections: Python's infix operators
-      // repeat/concatenate a list instead of broadcasting.
+    it('fans a BINARY arithmetic head out over its one collection operand', () => {
+      // The scalar operand is spliced into the comprehension body, so the
+      // arity of the head does not change the spelling. A comprehension
+      // iterates a plain list, a tuple and an ndarray alike, which the infix
+      // lowering does not: `2 * [1,2,3]` REPEATS a Python list.
+      expect(p(['Multiply', 2, ['List', 1, 2, 3]])).toBe(
+        '[2 * _tv1 for _tv1 in [1, 2, 3]]'
+      );
+      expect(p(['Power', ['List', 1, 2, 3], 2])).toBe(
+        '[_tv1 ** 2 for _tv1 in [1, 2, 3]]'
+      );
+      // A collection in the EXPONENT position keeps compiling too.
+      expect(p(['Power', 2, 'L'])).toBe('[2 ** _tv1 for _tv1 in L]');
+    });
+
+    it('declines a NEGATIVE INTEGER exponent over a collection base', () => {
+      // This is the one element lowering whose result depends on the container
+      // the caller binds, which is what the comprehension exists to avoid.
+      // Python's `**` answers a float for a negative integer exponent of an
+      // `int` (`2 ** -2` is `0.25`), while NumPy refuses the same operation on
+      // an integer array element: `np.int64(2) ** -2` raises `ValueError:
+      // Integers to negative integer powers are not allowed` (measured, NumPy
+      // 2.4.2). A `list<number>` operand admits an integer ndarray, so the
+      // artifact would compute for one binding and throw for another, and the
+      // interpreter answers `[1, 1/4, 1/16]` for both. Fail closed instead.
+      expect(() => p(['Power', 'L', -2])).toThrow(
+        /cannot compile arithmetic over a possibly-collection-typed operand/
+      );
+      expect(() => p(['Power', ['List', 1, 2, 4], -2])).toThrow(
+        /cannot compile arithmetic over a possibly-collection-typed operand/
+      );
+      // The two exponents both containers agree on stay admitted: a
+      // non-negative integer, and a provably non-integer one (`v ** 0.5` is a
+      // float on a plain list and on an integer ndarray alike — here it
+      // canonicalizes to `Sqrt`, which NumPy broadcasts natively).
+      expect(p(['Power', 'L', 3])).toBe('[_tv1 ** 3 for _tv1 in L]');
+      expect(p(['Power', 'L', 0.5])).toBe('np.emath.sqrt(L)');
+    });
+
+    it('fans out over a merely collection-TYPED operand as well', () => {
+      // The comprehension does not assume a container, so the artifact no
+      // longer has to constrain what the caller binds to `L`.
+      expect(p(['Negate', 'L'])).toBe('[-_tv1 for _tv1 in L]');
+      expect(p(['Add', 'L', 1])).toBe('[_tv1 + 1 for _tv1 in L]');
+    });
+
+    it('still fails closed on the shapes no comprehension expresses', () => {
+      // Two collection operands: the interpreter answers
+      // `Error("incompatible-dimensions")` when the lengths disagree, and no
+      // Python form reproduces that — NumPy recycles a length-1 axis and a
+      // `zip` comprehension truncates to the shorter operand.
       expect(() => p(['Add', ['List', 1, 2, 3], ['List', 4, 5, 6]])).toThrow(
         /cannot compile arithmetic over a possibly-collection-typed operand/
       );
-      expect(() => p(['Multiply', 2, ['List', 1, 2, 3]])).toThrow(
+      // A collection of NON-scalars: one level of fan-out would hand a whole
+      // row to a scalar operator.
+      expect(() => p(['Add', 'M', 1])).toThrow(
         /cannot compile arithmetic over a possibly-collection-typed operand/
       );
-      expect(() => p(['Power', ['List', 1, 2, 3], 2])).toThrow(
+      // An operand that is only POSSIBLY a collection: it may still bind to a
+      // list at run time, which is the repeat/concatenate divergence itself.
+      expect(() => p(['Multiply', 2, 'B'])).toThrow(
         /cannot compile arithmetic over a possibly-collection-typed operand/
       );
-      // A merely collection-TYPED operand: the artifact cannot constrain what
-      // the caller binds, so it stays closed even for the unary head.
-      expect(() => p(['Negate', 'L'])).toThrow(
+      // A SET-typed operand: unordered, so a comprehension has no defined
+      // order — and the interpreter answers `incompatible-type` anyway. It
+      // used to ESCAPE the guard entirely (a set matches neither `list<any>`
+      // nor `indexed_collection<any>`) and emitted `SN + 1`.
+      expect(() => p(['Add', 'SN', 1])).toThrow(
         /cannot compile arithmetic over a possibly-collection-typed operand/
       );
+    });
+
+    it('a set-typed operand fails closed on the JavaScript target too', () => {
+      // Paired guard: the JavaScript scalar-infix gate had the identical
+      // list/indexed spelling and the identical escape (`_.SN + 1`, string
+      // concatenation or garbage at run time). Both guards read the
+      // collection shape top together.
+      expect(() =>
+        compile(ce.box(['Add', 'SN', 1]), {
+          constantFold: false,
+          fallback: false,
+        })
+      ).toThrow(/cannot compile scalar arithmetic over a list-valued operand/);
     });
   });
 
