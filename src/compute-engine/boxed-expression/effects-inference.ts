@@ -974,15 +974,27 @@ function walkLiteral(
   walker.sequence([body], { declared: new Set(params.keys()) });
 }
 
-/** All symbol names occurring inside any nested `Function` literal of `expr`. */
-function collectNestedLiteralSymbols(expr: Expression, out: Set<string>): void {
+/** All symbol names occurring inside any nested `Function` literal of `expr`.
+ *
+ * An expression that SHARES operands is a DAG: the same node object can be
+ * reachable along exponentially many paths (`test/compute-engine/
+ * dag-shared-walks.test.ts`). The scan only ADDS names to `out`, so visiting
+ * a node a second time contributes nothing — the `seen` set makes the walk
+ * linear in distinct nodes instead of in paths. */
+function collectNestedLiteralSymbols(
+  expr: Expression,
+  out: Set<string>,
+  seen: Set<Expression> = new Set()
+): void {
   if (isSymbol(expr)) return;
   if (!isFunction(expr)) return;
+  if (seen.has(expr)) return;
+  seen.add(expr);
   if (expr.operator === 'Function') {
     collectSymbolsMasked(expr, new Set(), out);
     return;
   }
-  for (const op of expr.ops) collectNestedLiteralSymbols(op, out);
+  for (const op of expr.ops) collectNestedLiteralSymbols(op, out, seen);
 }
 
 /**
@@ -998,7 +1010,13 @@ function collectNestedLiteralSymbols(expr: Expression, out: Set<string>): void {
 function collectSymbolsMasked(
   expr: Expression,
   mask: ReadonlySet<string>,
-  out: Set<string>
+  out: Set<string>,
+  /** Nodes already collected UNDER THE SAME MASK OBJECT. The mask only
+   * changes at a nested `Function` (which builds a new, extended set), so
+   * within one mask a shared node's second mention adds nothing — the memo
+   * keeps the collection linear in distinct nodes on a DAG that would
+   * otherwise unfold once per path. */
+  seen: Map<ReadonlySet<string>, Set<Expression>> = new Map()
 ): void {
   const name = sym(expr);
   if (name !== undefined) {
@@ -1006,16 +1024,23 @@ function collectSymbolsMasked(
     return;
   }
   if (!isFunction(expr)) return;
+  let seenForMask = seen.get(mask);
+  if (seenForMask === undefined) {
+    seenForMask = new Set();
+    seen.set(mask, seenForMask);
+  }
+  if (seenForMask.has(expr)) return;
+  seenForMask.add(expr);
   out.add(expr.operator);
   if (expr.operator === 'Function') {
     // Every name the parameter list binds, destructuring leaves included.
     const extended = new Set(mask);
     for (const name of functionLiteralBoundNames(expr.ops.slice(1)))
       extended.add(name);
-    for (const op of expr.ops) collectSymbolsMasked(op, extended, out);
+    for (const op of expr.ops) collectSymbolsMasked(op, extended, out, seen);
     return;
   }
-  for (const op of expr.ops) collectSymbolsMasked(op, mask, out);
+  for (const op of expr.ops) collectSymbolsMasked(op, mask, out, seen);
 }
 
 class Walker {
@@ -1033,6 +1058,69 @@ class Walker {
     /** See the parameter of the same name on {@link walkLiteral}. */
     private expanding: Set<string>
   ) {}
+
+  /**
+   * Function nodes already visited, with the context they were visited under.
+   *
+   * A body that SHARES operands is a DAG: the same node object is reachable
+   * along exponentially many paths (a depth-30 tower of `Max(e, e)` holds 31
+   * distinct nodes that unfold to 2^30 — `test/compute-engine/
+   * dag-shared-walks.test.ts`). Every write this walk performs is a monotone
+   * union into the current accumulator (`this.state`, `this.localLiterals`),
+   * so re-walking an identical node under an identical context can add
+   * nothing, and skipping the repeat is exact, not an approximation.
+   *
+   * "Identical context" is four-part, and each part is a key or snapshot in
+   * the map below:
+   *
+   * - the accumulator OBJECT — a {@link visitDischarged} sub-walk uses a
+   *   fresh one, and its contributions are filtered before merging, so a
+   *   node's contribution must be recomputed per accumulator (the
+   *   {@link dischargedSubwalks} cache keeps that recomputation linear);
+   * - the confinement-frontier SET object and its SIZE — {@link sequence}
+   *   grows its frontier in place between statements, and a `Declare` that
+   *   lands between two mentions of a node changes what a write inside it
+   *   contributes;
+   * - the {@link localLiteralsGen} generation — an `Assign(f, (…) ↦ …)`
+   *   between two mentions of a shared `f(…)` node rebinds what applying
+   *   `f` projects, without touching the frontier or the accumulator.
+   *
+   * The inner value is a SNAPSHOT (frontier size + generation), overwritten
+   * on re-visit: both counters only advance, so a superseded snapshot can
+   * never be a future context and keeping one entry per (node, accumulator,
+   * frontier) suffices — and keeps the lookup O(1) rather than a scan over
+   * every context the node was ever seen under.
+   */
+  private seen = new Map<
+    Expression,
+    Map<WalkState, Map<Set<string>, { size: number; gen: number }>>
+  >();
+
+  /**
+   * Generation counter for {@link localLiterals}: advanced whenever
+   * {@link recordLocalLiteral} rebinds a name to a different literal. Memo
+   * entries snapshot it so that a binding change invalidates every node
+   * visited under the previous bindings.
+   */
+  private localLiteralsGen = 0;
+
+  /**
+   * Completed sub-walk results for operands visited under a DISCHARGING
+   * position, keyed by operand and frontier, snapshot-checked like
+   * {@link seen}. {@link visitDischarged} walks its operand into a fresh
+   * accumulator every time, so the `seen` memo (keyed on the accumulator
+   * object) can never collapse two discharged mentions of a shared operand —
+   * a tower with two distinct `WithRandomSeed(…, shared)` wrappers per level
+   * would still unfold once per path. The RAW inner result is cached here
+   * (before any label subtraction, so one entry serves every discharge set)
+   * and replayed instead of re-walked. A result is only stored when the walk
+   * left the local-literal bindings unchanged — a walk that rebound a name
+   * computed with a mix of generations and is not replayable.
+   */
+  private dischargedSubwalks = new Map<
+    Expression,
+    Map<Set<string>, { size: number; gen: number; result: WalkState }>
+  >();
 
   /** Straight-line dominance: a `Declare(n, …)` statement dominates the
    * statements that FOLLOW it in the same sequence, and nothing else. The
@@ -1064,6 +1152,10 @@ class Walker {
     // second. Scan the remaining operands for a literal.
     for (const op of expr.ops.slice(valueIndex))
       if (isFunction(op, 'Function')) {
+        // A REBINDING invalidates the shared-node memos: a node visited under
+        // the old binding may resolve this name differently now. Re-recording
+        // the same literal changes nothing and keeps the memos.
+        if (this.localLiterals.get(name) !== op) this.localLiteralsGen++;
         this.localLiterals.set(name, op);
         return;
       }
@@ -1079,6 +1171,34 @@ class Walker {
     )
       return;
     if (!isFunction(expr)) return;
+
+    // Shared-node cutoff — see the {@link seen} field for why the skip is
+    // exact. Recorded before descending: an expression is a DAG (no cycles),
+    // so the entry cannot be consulted mid-visit of the same node. The
+    // snapshot carries the ENTRY generation; a descent that rebinds a local
+    // literal advances the generation, so the stale snapshot simply never
+    // matches again and the next mention re-walks.
+    let byState = this.seen.get(expr);
+    let byFrontier = byState?.get(this.state);
+    const prior = byFrontier?.get(ctx.declared);
+    if (
+      prior !== undefined &&
+      prior.size === ctx.declared.size &&
+      prior.gen === this.localLiteralsGen
+    )
+      return;
+    if (byState === undefined) {
+      byState = new Map();
+      this.seen.set(expr, byState);
+    }
+    if (byFrontier === undefined) {
+      byFrontier = new Map();
+      byState.set(this.state, byFrontier);
+    }
+    byFrontier.set(ctx.declared, {
+      size: ctx.declared.size,
+      gen: this.localLiteralsGen,
+    });
 
     const head = expr.operator;
 
@@ -1326,19 +1446,49 @@ class Walker {
     discharge: readonly EffectLabel[]
   ): void {
     const outer = this.state;
-    const inner: WalkState = {
-      effects: undefined,
-      readsRandomFrame: false,
-      draws: false,
-      unresolvedHead: false,
-      escapingWrite: false,
-      consultsRegistry: false,
-    };
-    this.state = inner;
-    try {
-      this.visit(op, ctx);
-    } finally {
-      this.state = outer;
+    // Replay a completed sub-walk of the same operand under the same context
+    // instead of re-walking it — see {@link dischargedSubwalks} for why the
+    // `seen` memo cannot do this job. The cached result is read-only from
+    // here on: the merge below only reads `inner`.
+    const cached = this.dischargedSubwalks.get(op)?.get(ctx.declared);
+    let inner: WalkState;
+    if (
+      cached !== undefined &&
+      cached.size === ctx.declared.size &&
+      cached.gen === this.localLiteralsGen
+    ) {
+      inner = cached.result;
+    } else {
+      const entryGen = this.localLiteralsGen;
+      inner = {
+        effects: undefined,
+        readsRandomFrame: false,
+        draws: false,
+        unresolvedHead: false,
+        escapingWrite: false,
+        consultsRegistry: false,
+      };
+      this.state = inner;
+      try {
+        this.visit(op, ctx);
+      } finally {
+        this.state = outer;
+      }
+      // Only a walk that left the local-literal bindings unchanged is
+      // replayable — one that rebound a name computed under a mix of
+      // generations, and the next mention must re-walk.
+      if (this.localLiteralsGen === entryGen) {
+        let byFrontier = this.dischargedSubwalks.get(op);
+        if (byFrontier === undefined) {
+          byFrontier = new Map();
+          this.dischargedSubwalks.set(op, byFrontier);
+        }
+        byFrontier.set(ctx.declared, {
+          size: ctx.declared.size,
+          gen: entryGen,
+          result: inner,
+        });
+      }
     }
     const kept = subtractEffects(inner.effects, discharge);
     // `subtractEffects` works on the runtime `ComputedEffects` lattice, whose

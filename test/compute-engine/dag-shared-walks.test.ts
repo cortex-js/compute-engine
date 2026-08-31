@@ -26,6 +26,7 @@ import {
 } from '../../src/compute-engine/boxed-expression/polynomial-degree';
 import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
 import { effectsComputeCount } from '../../src/compute-engine/boxed-expression/boxed-function';
+import { inferFunctionLiteralEffects } from '../../src/compute-engine/boxed-expression/effects-inference';
 
 const ce = new ComputeEngine();
 
@@ -171,6 +172,55 @@ describe('walks over a shared tower are linear in distinct nodes', () => {
       depth++;
     }
     expect(depth).toBe(30);
+  });
+
+  test('discharged positions over a shared tower are linear (the sub-walk cache)', () => {
+    // Two DISTINCT `WithRandomSeed` wrappers per level around ONE shared
+    // child. `WithRandomSeed` discharges `random` at its body position, and
+    // the effects walk runs each discharged sub-walk into a FRESH
+    // accumulator — so a memo keyed on the accumulator alone re-walks the
+    // shared child once per wrapper, 2^30 sub-walks for 30 levels. The
+    // discharged sub-walk cache (`Walker.dischargedSubwalks`,
+    // `effects-inference.ts`) replays the child's completed result instead.
+    let e = ce.box(['Add', 'x', 'y']);
+    for (let i = 0; i < 30; i++)
+      e = ce.function('Max', [
+        ce.function('WithRandomSeed', [1, e]),
+        ce.function('WithRandomSeed', [2, e]),
+      ]);
+    const r = ce.box(['Apply', ['Function', ['Hold', e], 't'], 1]).evaluate();
+    expect(r.operator).toBe('Hold');
+  });
+
+  test('the shared-node memo yields to a local rebinding between two mentions', () => {
+    // The effects walk skips a node it has already visited under an identical
+    // context — but "context" includes the LOCAL LITERAL BINDINGS: the same
+    // shared `g(1)` node before and after `Assign(g, (…) ↦ Random())` in one
+    // `Block` applies two different literals, and skipping the second mention
+    // would infer a drawing body pure. Built raw so both mentions stay ONE
+    // object — canonicalization could rebuild them into two, and two distinct
+    // nodes never consult the memo at all.
+    const call = ce.box(['Apply', 'g', 1], { form: 'raw' });
+    const lit = ce.box(
+      [
+        'Function',
+        [
+          'Block',
+          ['Assign', 'g', ['Function', 1]],
+          call,
+          ['Assign', 'g', ['Function', ['Random']]],
+          call,
+        ],
+      ],
+      { form: 'raw' }
+    );
+    // The fixture only pins the bug while the two mentions are one node.
+    const block = lit.ops[0];
+    expect(isFunction(block) && block.ops[1]).toBe(
+      isFunction(block) && block.ops[3]
+    );
+    const inferred = inferFunctionLiteralEffects(ce, lit);
+    expect(inferred.effects).toContain('random');
   });
 
   test('a lazy collection over the tower snapshots its dependencies once', () => {
