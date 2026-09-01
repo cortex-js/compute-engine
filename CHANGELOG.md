@@ -196,6 +196,58 @@
     (compiled `sin(x)` at `x = Infinity` still returns `NaN` — the same
     class of accepted divergence as compiled `Heaviside(~oo)`).
 
+- **The remaining trigonometric, hyperbolic, and special-function
+  operators now declare their mathematical domains** (following the
+  `Sin`/`Sqrt`/`Ln`/`Erf` change above). Each operator's carrier is
+  decided from where the function has a genuine value:
+
+  - `Cos`, `Tan`, `Sec`, `Csc`, `Cot`, and `Arccos` are defined on the
+    finite complex numbers only. An infinite argument of any kind
+    (`±∞`, `~oo`) is now an `incompatible-type` error; it used to stay
+    unevaluated and answer `NaN` under `N()`. The poles (`Tan(π/2)`,
+    `Cot(0)`) are finite arguments and still answer `~oo`.
+  - The hyperbolics fold their genuine limits exactly, on `evaluate()`
+    and `N()` alike: `Sinh(±∞) = ±∞`, `Cosh(±∞) = +∞`, `Tanh(±∞) = ±1`,
+    `Coth(±∞) = ±1`, `Sech(±∞) = Csch(±∞) = 0`. A `~oo` argument is an
+    error for all six.
+  - `Arsinh(±∞) = ±∞` and `Arcoth(±∞) = 0` now answer their genuine
+    values (both used to answer `NaN` — an artifact of the numeric
+    kernels' formulas). `Artanh(±∞) = ∓(π/2)i` and
+    `Arsech(±∞) = (π/2)i` answer the finite imaginary limits of the
+    principal branch (matching Mathematica). `Arcosh(+∞) = +∞`, and
+    `Arcosh(−∞)` stays symbolic under `evaluate()` and answers
+    `∞ + iπ` under `N()`, like `Ln(−∞)`.
+  - `Arcsec`, `Arccsc`, `Arcoth`, and `Arcsch` accept EVERY infinity,
+    including `~oo`: they compose through `1/x`, so all directions of
+    infinity give the same value (`Arcsec(~oo) = π/2` — exact now; it
+    used to answer a machine float — `Arccsc(~oo) = Arcoth(~oo) =
+    Arcsch(~oo) = 0`).
+  - `Arccot(+∞) = 0` and `Arccot(−∞) = π` (the ends of the (0, π)
+    branch), but `Arccot(~oo)` is now an `incompatible-type` error: the
+    two real approaches disagree, so there is no value at complex
+    infinity. The old answer (`0`) contradicted `Arccot(−∞) = π`.
+  - `Erfc`, `Sinc`, `FresnelS`, and `FresnelC` keep their values at
+    `±∞` (`Erfc(−∞) = 2`, `Sinc(±∞) = 0`, `S(±∞) = C(±∞) = ±1/2`) and
+    now report an `incompatible-type` error for `~oo` when the
+    expression is created (they used to stay unevaluated).
+  - A `NaN` argument still answers `NaN` for every operator above, and
+    a provably-`NaN` argument now gives `Erfc`/`Sinc`/`FresnelS`/
+    `FresnelC` applications the sharp type `nan`.
+  - The simplification rules agree with these semantics now: simplify
+    folds the same values (`Artanh(+∞)` simplifies to `−iπ/2`, not the
+    previous `NaN`) and declines where the function has no value
+    (`Cos(∞)` stays unevaluated under `simplify()`; the evaluate route
+    reports the error).
+  - Inverse-circular values at an infinite argument are angles in the
+    current `angularUnit`, like the finite folds: in degree mode
+    `Arctan(∞)` now answers `90` (it used to answer the radian `π/2`),
+    and the new `Arccot`/`Arcsec` values convert the same way.
+  - As with the previous batch: the error is reported at evaluation for
+    the trig-factory heads and at creation for
+    `Erfc`/`Sinc`/`FresnelS`/`FresnelC`; a valueless symbol declared
+    with a non-finite type stays symbolic; compiled code keeps its
+    numeric behavior at these points.
+
 - **`IsPrime` and `IsComposite` now use positive-integer definitions.**
   `IsPrime` returns `False` for a decidable value that is not a positive
   integer greater than 1. It reports an `incompatible-type` error for an

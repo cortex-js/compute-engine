@@ -36,6 +36,7 @@ import {
 import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
+import { parseType } from '../../common/type/parse.js';
 import { isTuple } from '../collection-utils.js';
 import { euclideanNormType, pointNormBroadcasts } from './utils.js';
 import {
@@ -103,8 +104,12 @@ import {
  * `S(±∞) = C(±∞) = ±1/2`), so on a proven real argument — finite or not —
  * the value is a finite real.
  *
- * The wide fallback is what makes that claim sound. `Sinc(NaN)` and
- * `FresnelS(NaN)` numericize to `NaN`, a value only the top type `number`
+ * A provably-NaN argument DECLINES so the framework's proven-NaN arm
+ * answers the sharp `nan` (the `Sqrt`/`Erf` treatment — a handler answer
+ * is never widened, so answering `number` here would suppress it).
+ *
+ * The wide fallback is what makes the remaining claims sound. A maybe-NaN
+ * argument numericizes to `NaN`, a value only the top type `number`
  * admits, and off the real line all three are complex-valued: an unconditional
  * `real`, which these three definitions used to claim, was wrong in
  * both places. A proven FINITE argument claims the top numeric type
@@ -126,9 +131,12 @@ import {
  * the arguments the finite-limit argument above is about — and send
  * `Sinc(∞)` (whose value is 0) to the top type.
  */
-function boundedEntireRealType(x: OperandDescriptor | undefined): Type {
+function boundedEntireRealType(
+  x: OperandDescriptor | undefined
+): Type | undefined {
   if (x === undefined) return 'number';
   const t = broadcastOperandType(x);
+  if (typeFact(t, 'nan') === true) return undefined;
   if (typeFact(t, EXTENDED_REAL_TYPE) === true) return 'real';
   const scalar = x.facts.collection === true ? undefined : x;
   if (scalar?.facts.finite === true || typeFact(t, 'complex') === true)
@@ -418,7 +426,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // The definition of other trig functions may rely on Sin, so it is defined
     // first in this preliminary section
     Sin: {
-      ...trigFunction('Sin', 5000, 'Sine of an angle.', 'types', true),
+      ...trigFunction('Sin', 5000, 'Sine of an angle.', 'types', 'complex'),
       keywords: ['sine'],
       // The carrier is the FINITE complex numbers: sine is entire but has
       // no value and no limit at any infinity, so `Sin(±∞)` and
@@ -460,9 +468,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       sgn: ([x]) => x.sgn,
       evaluate: ([x], { numericApproximation, engine }) => {
         // arctan(±∞) = ±π/2 (the horizontal asymptotes). Needed for improper
-        // integrals: ∫₀^∞ 1/(1+x²) = arctan(∞) − arctan(0) = π/2.
+        // integrals: ∫₀^∞ 1/(1+x²) = arctan(∞) − arctan(0) = π/2. Built
+        // from `halfTurnAngle` because the result is an angle in the
+        // engine's current `angularUnit`, at an infinite argument exactly
+        // as at a finite one (in degree mode `arctan(1)` answers 45, so
+        // `arctan(∞)` answers 90, not π/2).
         if (x.isInfinity && (x.isPositive || x.isNegative)) {
-          const v = x.isPositive ? engine.Pi.div(2) : engine.Pi.div(-2);
+          const half = halfTurnAngle(engine);
+          const v = x.isPositive ? half.div(2) : half.div(-2);
           return numericApproximation ? v.N() : v;
         }
         if (numericApproximation) return evalTrig('Arctan', x);
@@ -555,12 +568,17 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
 
     Cos: {
-      ...trigFunction('Cos', 5050, 'Cosine of an angle.', 'types'),
+      // Like `Sin`: no value at any infinity (oscillates toward the real
+      // infinities, no limit at `~oo`).
+      ...trigFunction('Cos', 5050, 'Cosine of an angle.', 'types', 'complex'),
       keywords: ['cosine'],
     },
 
     Tan: {
-      ...trigFunction('Tan', 5100, 'Tangent of an angle.', 'types'),
+      // No value at any infinity. The POLES (odd multiples of π/2) are
+      // in-carrier finite points whose VALUE is `~oo` — the carrier
+      // restricts arguments, not results.
+      ...trigFunction('Tan', 5100, 'Tangent of an angle.', 'types', 'complex'),
       keywords: ['tangent'],
     },
 
@@ -579,11 +597,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // functions: Arsinh, Arcosh, Artanh, etc. (not Arcsinh, Arccosh, Arctanh)
     // The "ar" prefix stands for "area", which is mathematically correct
     // since these functions relate to areas on a hyperbola, not arc lengths.
+    // `Arcosh(+∞) = +∞`; `Arcosh(−∞) = ∞ + iπ` follows the `Ln(−∞)`
+    // treatment (symbolic under `evaluate()`, machine complex under
+    // `.N()`); no value at `~oo` (the `Ln(~oo)` ruling — the modulus
+    // diverges in every direction but the limit point does not exist).
     Arcosh: trigFunction(
       'Arcosh',
       6200,
       'Inverse hyperbolic cosine (area hyperbolic cosine).',
-      'types'
+      'types',
+      'complex | signed_infinity'
     ),
 
     Arcsin: {
@@ -592,7 +615,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         5500,
         'Arcsine, the inverse sine function.',
         'types',
-        true
+        'complex'
       ),
       keywords: ['asin', 'inverse sine'],
       // Same carrier and rationale as `Sin` above: arcsine extends to the
@@ -605,48 +628,76 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(complex) -> number',
     },
 
+    // `Arsinh(±∞) = ±∞` (odd, increasing on the whole real line); the two
+    // signs disagree, so no value at `~oo`.
     Arsinh: trigFunction(
       'Arsinh',
       6100,
       'Inverse hyperbolic sine (area hyperbolic sine).',
-      'types'
+      'types',
+      'complex | signed_infinity'
     ),
 
+    // `Artanh(±∞) = ∓(π/2)i` — the imaginary asymptotes of the principal
+    // branch (ruled 2026-09-01: a finite imaginary value at a real
+    // infinity is encoded, not rejected). The two signs disagree, so no
+    // value at `~oo`.
     Artanh: trigFunction(
       'Artanh',
       6300,
       'Inverse hyperbolic tangent (area hyperbolic tangent).',
-      'types'
+      'types',
+      'complex | signed_infinity'
     ),
 
     Cosh: {
-      ...trigFunction('Cosh', 6050, 'Hyperbolic cosine.', 'types'),
+      // `Cosh(±∞) = +∞`; no value at `~oo` (oscillates along the
+      // imaginary directions).
+      ...trigFunction(
+        'Cosh',
+        6050,
+        'Hyperbolic cosine.',
+        'types',
+        'complex | signed_infinity'
+      ),
       keywords: ['hyperbolic cosine'],
     },
 
+    // Cot/Csc/Sec: like the other circular functions, no value at any
+    // infinity; their poles are in-carrier finite points valued `~oo`.
     Cot: trigFunction(
       'Cot',
       5600,
       'Cotangent, the reciprocal of tangent.',
-      'types'
+      'types',
+      'complex'
     ),
 
     Csc: trigFunction(
       'Csc',
       5600,
       'Cosecant, the reciprocal of sine.',
-      'types'
+      'types',
+      'complex'
     ),
 
     Sec: trigFunction(
       'Sec',
       5600,
       'Secant, the reciprocal of cosine.',
-      'types'
+      'types',
+      'complex'
     ),
 
     Sinh: {
-      ...trigFunction('Sinh', 6000, 'Hyperbolic sine.', 'types'),
+      // `Sinh(±∞) = ±∞`; the two signs disagree, so no value at `~oo`.
+      ...trigFunction(
+        'Sinh',
+        6000,
+        'Hyperbolic sine.',
+        'types',
+        'complex | signed_infinity'
+      ),
       keywords: ['hyperbolic sine'],
     },
 
@@ -697,83 +748,119 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
   },
   {
+    // `Csch(±∞) = Sech(±∞) = 0`; no value at `~oo` (both oscillate along
+    // the imaginary directions, where cosh/sinh have zeros).
     Csch: trigFunction(
       'Csch',
       6200,
       'Hyperbolic cosecant, the reciprocal of hyperbolic sine.',
-      'types'
+      'types',
+      'complex | signed_infinity'
     ),
 
     Sech: trigFunction(
       'Sech',
       6200,
       'Hyperbolic secant, the reciprocal of hyperbolic cosine.',
-      'types'
+      'types',
+      'complex | signed_infinity'
     ),
 
     Tanh: {
-      ...trigFunction('Tanh', 6200, 'Hyperbolic tangent.', 'types'),
+      // `Tanh(±∞) = ±1` (the horizontal asymptotes); the two signs
+      // disagree, so no value at `~oo`.
+      ...trigFunction(
+        'Tanh',
+        6200,
+        'Hyperbolic tangent.',
+        'types',
+        'complex | signed_infinity'
+      ),
       keywords: ['hyperbolic tangent'],
     },
   },
   {
     Arccos: {
+      // Like `Arcsin`: extends to the whole finite complex plane but
+      // diverges toward every infinity — no value at any of them.
       ...trigFunction(
         'Arccos',
         5550,
         'Arccosine, the inverse cosine function.',
-        'types'
+        'types',
+        'complex'
       ),
       keywords: ['acos', 'inverse cosine'],
     },
 
+    // `Arccot(+∞) = 0`, `Arccot(−∞) = π` (the ends of the engine's
+    // (0, π) branch). The two disagree, so no value at `~oo` — this head
+    // used to answer `Arccot(~oo) = 0`, which contradicted its own
+    // `Arccot(−∞)`; the flip makes `~oo` an incompatible-type error.
     Arccot: trigFunction(
       'Arccot',
       5650,
       'Arccotangent, the inverse cotangent function.',
-      'types'
+      'types',
+      'complex | signed_infinity'
     ),
 
+    // Arcoth/Arcsch/Arcsec/Arccsc admit EVERY infinity (ruled
+    // 2026-09-01): each is a composition through `1/x` whose inner head
+    // (artanh, arsinh, arccos, arcsin) is continuous at 0, so all
+    // directions of infinity — `+∞`, `−∞` and `~oo` alike — give the same
+    // genuine value (0, 0, π/2, 0).
     Arcoth: trigFunction(
       'Arcoth',
       6350,
       'Inverse hyperbolic cotangent (area hyperbolic cotangent).',
-      'types'
+      'types',
+      'complex | infinity'
     ),
 
     Arcsch: trigFunction(
       'Arcsch',
       6250,
       'Inverse hyperbolic cosecant (area hyperbolic cosecant).',
-      'types'
+      'types',
+      'complex | infinity'
     ),
 
     Arcsec: trigFunction(
       'Arcsec',
       5650,
       'Arcsecant, the inverse secant function.',
-      'types'
+      'types',
+      'complex | infinity'
     ),
 
+    // `Arsech(±∞) = (π/2)i` — both real approaches give `arcosh(0)`
+    // (ruled 2026-09-01, the imaginary-value ruling) — but the complex
+    // directions disagree (arcosh's branch cut passes through 0), so
+    // unlike its four neighbors above `~oo` is off-carrier.
     Arsech: trigFunction(
       'Arsech',
       6250,
       'Inverse hyperbolic secant (area hyperbolic secant).',
-      'types'
+      'types',
+      'complex | signed_infinity'
     ),
 
     Arccsc: trigFunction(
       'Arccsc',
       5650,
       'Arccosecant, the inverse cosecant function.',
-      'types'
+      'types',
+      'complex | infinity'
     ),
 
+    // `Coth(±∞) = ±1`; the two signs disagree, so no value at `~oo`.
     Coth: trigFunction(
       'Coth',
       6300,
       'Hyperbolic cotangent, the reciprocal of hyperbolic tangent.',
-      'types'
+      'types',
+      'complex | signed_infinity'
     ),
 
     //
@@ -793,7 +880,17 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Unnormalized sinc function: sin(x)/x with sinc(0)=1.',
       complexity: 5100,
       broadcastable: true,
-      signature: '(number) -> number',
+      // The carrier is every point where sinc has a value: the finite
+      // complex numbers (entire, sinc(0) = 1) and the signed infinities
+      // (`sinc(±∞) = 0`). Every value is finite, so the RESULT is plain
+      // `complex`. `~oo` is off-carrier — sin(z)/z has no limit at
+      // complex infinity (it diverges along the imaginary directions) —
+      // and errors at BOXING (no `canonical` handler bypasses
+      // validation here). `NaN` propagates (explicit: this carrier is
+      // not a subtype of `complex`, so the derived default would be
+      // `reject`).
+      signature: '(complex | signed_infinity) -> complex',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: ([x]) => boundedEntireRealType(x),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -815,7 +912,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Fresnel sine integral.',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> number',
+      // Same carrier rationale as `Sinc` above: entire with genuine
+      // finite values at the signed infinities (`S(±∞) = ±1/2`), no
+      // limit at `~oo` (off-carrier, a boxing error), result `complex`
+      // (every value finite), `NaN` propagates by explicit declaration.
+      signature: '(complex | signed_infinity) -> complex',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: ([x]) => boundedEntireRealType(x),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -837,7 +939,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Fresnel cosine integral.',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> number',
+      // Same carrier rationale as `Sinc` above: entire with genuine
+      // finite values at the signed infinities (`C(±∞) = ±1/2`), no
+      // limit at `~oo` (off-carrier, a boxing error), result `complex`
+      // (every value finite), `NaN` propagates by explicit declaration.
+      signature: '(complex | signed_infinity) -> complex',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: ([x]) => boundedEntireRealType(x),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -1177,6 +1284,88 @@ function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
 }
 
 /**
+ * The genuine value of a trig-factory head at an in-carrier infinity, or
+ * `undefined` when the point has no closed form under the current route.
+ * Consulted only from the factory's evaluate seam, AFTER the carrier
+ * admission check — so a `~oo` operand (`isPositive`/`isNegative` both
+ * undefined) reaches here only for the `complex | infinity` heads, whose
+ * value is the same in every direction of infinity.
+ *
+ * Every value is the limit of the branch the engine already implements at
+ * finite arguments, verified against those values (e.g. `Artanh(2)`
+ * answers `0.549… − (π/2)i` today, and its real part tends to 0 — so
+ * `Artanh(+∞) = −(π/2)i` is the continuation, not a convention picked
+ * here). The values are exact, so the caller folds them on both routes.
+ */
+function nonFiniteTrigValue(
+  operator: string,
+  x: Expression,
+  ce: IComputeEngine,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const pos = x.isPositive === true;
+  switch (operator) {
+    case 'Sinh':
+    case 'Arsinh':
+      return pos ? ce.PositiveInfinity : ce.NegativeInfinity;
+    case 'Cosh':
+      return ce.PositiveInfinity;
+    case 'Tanh':
+    case 'Coth':
+      return pos ? ce.One : ce.NegativeOne;
+    case 'Sech':
+    case 'Csch':
+      return ce.Zero;
+    case 'Arcosh':
+      if (pos) return ce.PositiveInfinity;
+      // Arcosh(−∞) = ∞ + iπ — an infinite real part with a finite
+      // imaginary offset, which no exact number spells. `evaluate()`
+      // stays symbolic and only `.N()` numericizes, as a machine complex
+      // (the `Ln(−∞)` treatment; `Arcosh(−2)` already answers
+      // `1.317… + iπ`, so this is the continuation of the same branch).
+      return numericApproximation
+        ? ce.number(ce.complex(Infinity, Math.PI))
+        : undefined;
+    case 'Artanh':
+      // The imaginary asymptotes of the principal branch: the real part
+      // of `artanh(x)` tends to 0 as `x → ±∞` and the imaginary part is
+      // the constant `∓π/2` beyond the cuts.
+      return pos ? ce.I.mul(ce.Pi).div(-2) : ce.I.mul(ce.Pi).div(2);
+    case 'Arsech':
+      // Both real approaches give `arcosh(0) = iπ/2` (`arsech(x) =
+      // arcosh(1/x)`); the complex directions disagree — arcosh's branch
+      // cut passes through 0 — which is why the carrier admits only the
+      // SIGNED infinities.
+      return ce.I.mul(ce.Pi).div(2);
+    // The two angle-valued cases below build on `halfTurnAngle` (π rad /
+    // 180 deg / 200 grad / 1/2 turn) because inverse-circular results
+    // are angles in the engine's current `angularUnit`, at an infinite
+    // argument exactly as at a finite one (`arctan(1)` answers 45 in
+    // degree mode). The inverse-HYPERBOLIC values above and below are
+    // areas, not angles, so they take no unit conversion.
+    case 'Arccot':
+      // The engine's branch has range (0, π) — `Arccot(−1) = 3π/4` — so
+      // the two ends of the real line map to the two ends of the range.
+      // The disagreement (0 vs π) is also why `~oo` is off-carrier for
+      // this head alone among the inverse reciprocals.
+      return pos ? ce.Zero : halfTurnAngle(ce);
+    case 'Arcsec':
+      // arcsec(z) = arccos(1/z) and arccos is continuous at 0, so every
+      // direction of infinity gives arccos(0) = π/2.
+      return halfTurnAngle(ce).div(2);
+    case 'Arccsc':
+    case 'Arcoth':
+    case 'Arcsch':
+      // arcsin(1/z), artanh(1/z), arsinh(1/z): each inner head is
+      // continuous at 0 with value 0, so every direction of infinity
+      // gives 0.
+      return ce.Zero;
+    default:
+      return undefined;
+  }
+}
+
+/**
  * The shared definition of the 23 one-argument trigonometric, hyperbolic and
  * inverse heads. Everything but the `type` handler is identical across them;
  * `typeHandlerKind` selects which SHAPE of `type` handler this head gets, and
@@ -1218,20 +1407,48 @@ function trigFunction(
   complexity: number,
   description?: string,
   typeHandlerKind: 'expressions' | 'types' = 'expressions',
-  // Contract B finite-complex carrier (`(complex)` — Sin/Arcsin): the
-  // operator has no value at ANY infinity. The `canonical` handler below
-  // replaces boxing-time signature validation with an arity check, so an
-  // opted-in head enforces the carrier at evaluation instead: a concrete
-  // non-finite operand (±∞, `~oo`) gets the same incompatible-type error
-  // value boxing would have produced. `NaN` is NOT an error — it
-  // propagates, per the carrier's derived policy.
-  finiteComplexCarrier = false
+  // Contract B carrier of the head, chosen from the head's mathematical
+  // domain (rulings of 2026-08-31 and 2026-09-01, recorded in
+  // `docs/plans/2026-08-30-error-model-implementation.md`):
+  //
+  // - `'complex'`: no value at ANY infinity (`Sin`, `Cos`, `Tan`, `Sec`,
+  //   `Csc`, `Cot`, `Arcsin`, `Arccos` — the circular functions oscillate
+  //   toward real infinity, and their inverses diverge there).
+  // - `'complex | signed_infinity'`: a genuine value at `+∞` and `−∞` but
+  //   none at `~oo` — the two real approaches disagree, or a branch cut
+  //   makes the complex directions disagree (the hyperbolics, `Arsinh`,
+  //   `Arcosh`, `Artanh`, `Arsech`, `Arccot`).
+  // - `'complex | infinity'`: a genuine value at `~oo` as well — these are
+  //   compositions through `1/x` whose inner inverse-trig head is
+  //   continuous at 0, so every direction of infinity gives the same value
+  //   (`Arcsec`, `Arccsc`, `Arcoth`, `Arcsch`).
+  //
+  // The `canonical` handler below replaces boxing-time signature validation
+  // with an arity check, so the head enforces the carrier at EVALUATION
+  // instead: a concrete off-carrier non-finite operand gets the same
+  // incompatible-type error value boxing would have produced, and an
+  // in-carrier infinity folds to the head's value there
+  // (`nonFiniteTrigValue`) — the tracked timing deviation of
+  // `docs/SIGNATURE-GUIDELINES.md` §4. `NaN` is NOT an error — it
+  // propagates: derived for the `complex` carrier, declared explicitly for
+  // the extended carriers (which are not subtypes of `complex`, so the
+  // mechanical default there would be `reject`).
+  //
+  // Every call site passes the carrier explicitly; the parameter defaults
+  // to the MOST RESTRICTIVE carrier (TypeScript disallows a required
+  // parameter after the optional ones above) so an omitted argument fails
+  // loudly at the first infinity instead of silently admitting one.
+  carrier: 'complex' | 'complex | signed_infinity' | 'complex | infinity' = 'complex'
 ): OperatorDefinition {
+  // Parsed once per head at module load, for the incompatible-type error
+  // value the evaluate seam produces.
+  const carrierType = parseType(carrier);
   const common: OperatorDefinition = {
     complexity,
     description,
     broadcastable: true,
-    signature: '(number) -> number',
+    signature: `(${carrier}) -> number`,
+    ...(carrier !== 'complex' ? { nanBehavior: 'propagate' as const } : {}),
     sgn: ([x]) => trigSign(operator, x),
     canonical: (ops, { engine: ce }) => {
       if (ops.length === 1) {
@@ -1253,16 +1470,26 @@ function trigFunction(
       // no boxing-time check can settle.
       const nonNumeric = nonNumericOperandError(engine, [x]);
       if (nonNumeric !== undefined) return nonNumeric;
-      // The finite-complex carrier, enforced at the evaluate seam (see the
-      // factory parameter's comment): a non-finite non-NaN number operand
-      // is off-carrier.
-      if (
-        finiteComplexCarrier &&
-        isNumber(x) &&
-        x.isFinite === false &&
-        x.isNaN !== true
-      )
-        return engine.typeError('complex', x.type, x);
+      // The carrier, enforced at the evaluate seam (see the factory
+      // parameter's comment). A non-finite non-NaN number operand is
+      // either off-carrier (an incompatible-type error, the value boxing
+      // validation would have produced) or an in-carrier infinity, which
+      // folds to the head's genuine value at that point on BOTH routes —
+      // the values are exact, so folding them under `evaluate()` honors
+      // the exactness contract (the `Erf(±∞) = ±1` precedent). The one
+      // in-carrier point with no exact spelling, `Arcosh(−∞) = ∞ + iπ`,
+      // stays symbolic under `evaluate()` and numericizes under `.N()`
+      // (the `Ln(−∞)` precedent).
+      if (isNumber(x) && x.isFinite === false && x.isNaN !== true) {
+        const signed = x.isPositive === true || x.isNegative === true;
+        const admitted =
+          carrier === 'complex | infinity' ||
+          (carrier === 'complex | signed_infinity' && signed);
+        if (!admitted) return engine.typeError(carrierType, x.type, x);
+        const v = nonFiniteTrigValue(operator, x, engine, numericApproximation);
+        if (v !== undefined) return numericApproximation ? v.N() : v;
+        return engine._fn(operator, [x]);
+      }
       // Measurement error propagation (Sin/Cos/Tan only; other operators fall
       // through). Guard on the evaluated argument being a Measurement.
       const evalX = x.evaluate();

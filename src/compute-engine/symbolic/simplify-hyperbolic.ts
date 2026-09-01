@@ -133,18 +133,33 @@ export function simplifyHyperbolic(x: Expression): RuleStep | undefined {
       if (arg.isInfinity === true && arg.isPositive === true) {
         return { value: ce.PositiveInfinity, because: 'arcosh(+inf) -> +inf' };
       }
-      if (arg.isInfinity === true && arg.isNegative === true) {
-        return { value: ce.NaN, because: 'arcosh(-inf) -> NaN' };
-      }
+      // No arm for −∞ on purpose: `arcosh(−∞) = ∞ + iπ` — an infinite
+      // real part with a finite imaginary offset, which no exact number
+      // spells — so the expression stays symbolic here as under
+      // `evaluate()`, and only `.N()` numericizes (the `Ln(−∞)`
+      // treatment). The old `-> NaN` rewrite contradicted that value.
 
       // Note: arcosh(x) -> ln(...) conversion is an expansion, not included
       // here to preserve function identity for even function abs rules.
     }
 
     if (op === 'Artanh') {
-      // artanh(±inf) -> NaN
-      if (arg.isInfinity === true) {
-        return { value: ce.NaN, because: 'artanh(±inf) -> NaN' };
+      // artanh(±∞) = ∓(π/2)i — the imaginary asymptotes of the
+      // principal branch, the same values the evaluate route folds. A
+      // `~oo` argument (isPositive/isNegative both undefined) falls
+      // through: the two signs disagree, so artanh has no value there
+      // and the evaluate route reports the incompatible-type error.
+      if (arg.isInfinity === true && arg.isPositive === true) {
+        return {
+          value: ce.I.mul(ce.Pi).div(-2),
+          because: 'artanh(+inf) -> -iπ/2',
+        };
+      }
+      if (arg.isInfinity === true && arg.isNegative === true) {
+        return {
+          value: ce.I.mul(ce.Pi).div(2),
+          because: 'artanh(-inf) -> iπ/2',
+        };
       }
 
       // Note: artanh(x) -> ln(...) conversion is an expansion, not included
@@ -159,9 +174,19 @@ export function simplifyHyperbolic(x: Expression): RuleStep | undefined {
     }
 
     if (op === 'Arsech') {
-      // arsech(±inf) -> NaN
-      if (arg.isInfinity === true) {
-        return { value: ce.NaN, because: 'arsech(±inf) -> NaN' };
+      // arsech(±∞) = (π/2)i — both real approaches give arcosh(0), the
+      // same value the evaluate route folds. A `~oo` argument falls
+      // through (arcosh's branch cut passes through 0, so the complex
+      // directions disagree; the evaluate route reports the
+      // incompatible-type error).
+      if (
+        arg.isInfinity === true &&
+        (arg.isPositive === true || arg.isNegative === true)
+      ) {
+        return {
+          value: ce.I.mul(ce.Pi).div(2),
+          because: 'arsech(±inf) -> iπ/2',
+        };
       }
     }
 

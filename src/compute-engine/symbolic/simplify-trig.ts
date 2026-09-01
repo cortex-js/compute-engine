@@ -5,13 +5,13 @@ import type {
 } from '../global-types.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
+import { halfTurnAngle } from '../boxed-expression/trigonometry.js';
 
 /**
  * Trigonometric simplification rules consolidated from simplify-rules.ts.
  * Handles ~80 patterns for simplifying trig expressions.
  *
  * Categories:
- * - Trig with infinity -> NaN
  * - Odd/even function properties with negation
  * - Pi transformations (pi - x, pi + x)
  * - Co-function identities (pi/2 - x)
@@ -256,10 +256,11 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     const arg = x.op1;
     if (!arg) return undefined;
 
-    // Trig with infinity -> NaN
-    if (arg.isInfinity === true) {
-      return { value: ce.NaN, because: `${op}(infinity) -> NaN` };
-    }
+    // No infinity arm on purpose: the circular functions declare the
+    // FINITE `complex` carrier — they have no value at any infinity — so
+    // an infinite argument is an incompatible-type error, reported by the
+    // evaluate route. Simplify declines rather than duplicating the error
+    // (the old `-> NaN` rewrite here contradicted that contract).
 
     // Odd/even function properties with negation
     if (isFunction(arg, 'Negate')) {
@@ -448,37 +449,49 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     const arg = x.op1;
     if (!arg) return undefined;
 
-    // Arcsin/Arccos with infinity -> NaN
-    if (op === 'Arcsin' || op === 'Arccos') {
-      if (arg.isInfinity === true) {
-        return { value: ce.NaN, because: `${op}(infinity) -> NaN` };
-      }
-    }
+    // No Arcsin/Arccos infinity arm on purpose: both declare the FINITE
+    // `complex` carrier (they diverge toward every infinity), so an
+    // infinite argument is an incompatible-type error reported by the
+    // evaluate route; simplify declines (the old `-> NaN` rewrite here
+    // contradicted that contract).
+
+    // The angle values below are built from `halfTurnAngle` — π rad /
+    // 180 deg / 200 grad / 1/2 turn — because inverse-circular results
+    // are angles in the engine's current `angularUnit`, at an infinite
+    // argument exactly as at a finite one (`arctan(1)` answers 45 in
+    // degree mode).
 
     // Arctan with infinity -> ±π/2
     if (op === 'Arctan') {
       if (arg.isInfinity === true && arg.isPositive === true) {
-        return { value: ce.Pi.div(2), because: 'arctan(+inf) -> π/2' };
+        return { value: halfTurnAngle(ce).div(2), because: 'arctan(+inf) -> π/2' };
       }
       if (arg.isInfinity === true && arg.isNegative === true) {
-        return { value: ce.Pi.div(-2), because: 'arctan(-inf) -> -π/2' };
+        return { value: halfTurnAngle(ce).div(-2), because: 'arctan(-inf) -> -π/2' };
       }
     }
 
-    // Arccot with infinity
+    // Arccot with a SIGNED infinity: the ends of the (0, π) branch.
+    // `~oo` deliberately has no arm — the two ends disagree, so arccot
+    // has no value at complex infinity (the evaluate route reports the
+    // incompatible-type error).
     if (op === 'Arccot') {
       if (arg.isInfinity === true && arg.isPositive === true) {
         return { value: ce.Zero, because: 'arccot(+inf) -> 0' };
       }
       if (arg.isInfinity === true && arg.isNegative === true) {
-        return { value: ce.Pi, because: 'arccot(-inf) -> π' };
+        return { value: halfTurnAngle(ce), because: 'arccot(-inf) -> π' };
       }
     }
 
-    // Arcsec with infinity -> π/2
+    // Arcsec with infinity -> π/2 (every direction, `~oo` included:
+    // arcsec(z) = arccos(1/z) and arccos is continuous at 0).
     if (op === 'Arcsec') {
       if (arg.isInfinity === true) {
-        return { value: ce.Pi.div(2), because: 'arcsec(±inf) -> π/2' };
+        return {
+          value: halfTurnAngle(ce).div(2),
+          because: 'arcsec(±inf) -> π/2',
+        };
       }
     }
 

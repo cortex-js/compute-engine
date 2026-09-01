@@ -549,6 +549,102 @@ DIVERGED between routes — evaluate → NaN, `.N()` → an arbitrary
   `Ln(+∞) = +∞`). The fix postdates the batch's dual review; it is
   verified by the two limit suites plus calculus.
 
+**Batch 5 — the remaining complex-extension heads (the 21 remaining
+trig-factory heads + `Erfc`, `Sinc`, `FresnelS`, `FresnelC`) —
+IMPLEMENTED 2026-09-01.** Three rulings taken before implementation
+(Arno, 2026-09-01), each option recommended and ratified:
+
+1. **A head whose value is the same in every direction of infinity
+   admits `~oo`** (carrier `complex | infinity`): `Arcsec`, `Arccsc`,
+   `Arcoth`, `Arcsch` — each composes through `1/x` and the inner
+   inverse head (arccos, arcsin, artanh, arsinh) is continuous at 0.
+   `Arcsec(~oo)` is the exact `π/2` now (it used to answer a machine
+   float even under `evaluate()`).
+2. **A finite IMAGINARY value at a real infinity is encoded, not
+   rejected**: `Artanh(±∞) = ∓(π/2)i`, `Arsech(±∞) = (π/2)i` — the
+   continuations of the principal branch the engine already implements
+   at finite arguments (`Artanh(2)` answers `0.549… − (π/2)i`), and
+   Mathematica's values. They used to answer `NaN` by kernel artifact.
+3. **`Arcosh(−∞)` follows the `Ln(−∞)` treatment**: in-carrier,
+   symbolic under `evaluate()`, `∞ + iπ` (machine complex) under `.N()`.
+
+One correction to ruling 1's premise, found after the ruling and
+recorded in the head's comment: **`Arccot` fell OUT of the ruling's
+scope.** The question listed it among the five reciprocal-composed
+heads, but the engine's branch has range `(0, π)` (`Arccot(−1) = 3π/4`),
+so `Arccot(+∞) = 0` and `Arccot(−∞) = π` disagree — there is no value
+at the single point `~oo`, and the old answer (`Arccot(~oo) = 0`)
+contradicted the engine's own `Arccot(−∞)`. `Arccot` is therefore
+`complex | signed_infinity` and `Arccot(~oo)` is an error. The ruling's
+PRINCIPLE (admit `~oo` exactly where a genuine direction-independent
+value exists) is what the code implements; the same analysis keeps
+`~oo` off-carrier for `Arsech` (arcosh's branch cut passes through 0,
+so the complex directions disagree even though both real approaches
+give `iπ/2`).
+
+What shipped:
+
+- **The factory flag generalized to a carrier parameter**:
+  `trigFunction(…, carrier)` with the three spellings `'complex'`
+  (no value at any infinity — `Sin`, `Arcsin`, and now `Cos`, `Tan`,
+  `Sec`, `Csc`, `Cot`, `Arccos`), `'complex | signed_infinity'`
+  (values at `±∞` only — the six hyperbolics, `Arsinh`, `Arcosh`,
+  `Artanh`, `Arsech`, `Arccot`), and `'complex | infinity'` (the four
+  ruling-1 heads). The factory builds the signature from the carrier,
+  declares `nanBehavior: 'propagate'` for the extended carriers (they
+  are not subtypes of `complex`, so the derived default would be
+  `reject`), and its evaluate arm — the enforcement seam for every
+  factory head, since the `canonical` handler bypasses boxing
+  validation — errors off-carrier infinities and folds in-carrier ones
+  through the new `nonFiniteTrigValue` table on BOTH routes (the
+  values are exact; the `Erf(±∞) = ±1` precedent).
+- **Two NaN-by-artifact defects fixed by the fold**: `Arsinh(−∞)` and
+  `Arcoth(±∞)` answered `NaN` (the kernels' `ln`-based formulas hit
+  `−∞ + ∞`); their genuine values (`−∞`, `0`) answer now.
+- `Erfc` mirrors `Erf` verbatim (`(complex | signed_infinity) ->
+  complex`, explicit propagate, proven-NaN handler decline);
+  `Sinc`/`FresnelS`/`FresnelC` take the same carrier and result (every
+  value finite), all four validating at BOXING. Their shared
+  `boundedEntireRealType` handler declines a provably-NaN element type
+  so the framework answers the sharp `nan`.
+- **Compiled lanes verified unaffected**: `Map(Cos, xs)` stays on the
+  real kernel (the batch-4 `laneRequestParamType` builtin exemption
+  covers all factory heads), and results stay the wide `number` for
+  every kind-preserving factory head (`resultIsComplexValued`
+  reliance).
+- Fungrim: 3/3 suites green — no identity in the bundled artifact
+  became unboxable.
+- Old pins swept: `type-handler-parity.test.ts`'s `Sinc(NaN)=number`
+  and `Sinc(~oo)=number` rows updated to the sharp `nan` / boxing
+  error. Family pins added to `error-model.test.ts` ("the remaining
+  complex-extension heads").
+- `Exp` remains deferred to `Power`'s flip; `Arctan`, `Arctan2`,
+  `Haversine`, `InverseHaversine`, and the four integral functions
+  (`SinIntegral` etc.) were NOT in this batch's scope and keep their
+  current signatures.
+- **Dual review caught two real defects, both fixed with the batch**
+  (Codex; the Claude leg added one style nit):
+  1. The SIMPLIFY rules still rewrote the flipped heads at infinities to
+     `NaN` (`simplify-trig.ts`, `simplify-hyperbolic.ts`) — and had
+     diverged for `Sin`/`Arcsin`/`Arccos` since batch 4 unnoticed. The
+     rules now fold the same values as the evaluate route and DECLINE
+     where the head has no value (the evaluate route owns the error);
+     the `simplify.test.ts` blocks pinning the old `-> NaN` rewrites
+     were updated, and route-agreement pins added to
+     `error-model.test.ts`.
+  2. The new inverse-circular values at infinity ignored `angularUnit`
+     while the finite folds convert (`arctan(1)` answers 45 in degree
+     mode) — and the same defect pre-existed in `Arctan(±∞)`'s own
+     evaluate arm and simplify rule. All now build on `halfTurnAngle`;
+     inverse-HYPERBOLIC values are areas, not angles, and deliberately
+     take no conversion. Pinned in `error-model.test.ts`.
+  Two review findings were refuted as already-ruled accepted classes:
+  compiled lanes keeping numeric behavior at the new points (the real
+  lane cannot represent `−iπ/2`; the batch-4 CHANGELOG precedent), and
+  the evaluation-time error seam for canonical-handler heads (the
+  tracked timing deviation of `docs/SIGNATURE-GUIDELINES.md` §4, pinned
+  deliberately since batch 4).
+
 ### Phase F — signature flips, operator-by-operator
 
 Each flip (e.g. `Heaviside: (real) -> rational<0..1>`, `total`) is its

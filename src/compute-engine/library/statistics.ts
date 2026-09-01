@@ -339,11 +339,22 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Erfc: {
       description: 'Complementary error function: 1 - Erf(x)',
       complexity: 7500,
-      signature: '(number) -> number',
+      // The same carrier as `Erf` (erfc = 1 − erf): the finite complex
+      // numbers plus the signed infinities, where the values are genuine
+      // (`Erfc(+∞) = 0`, `Erfc(−∞) = 2`) — and finite, which is why the
+      // RESULT is plain `complex`. `~oo` is off-carrier — erfc has no
+      // limit at complex infinity — and errors at BOXING (nothing
+      // bypasses validation here); it used to stay inert. `NaN`
+      // propagates (explicit: this carrier is not a subtype of
+      // `complex`, so the derived default would be `reject`).
+      signature: '(complex | signed_infinity) -> complex',
+      nanBehavior: 'propagate',
       // Same shape as Erf: entire, bounded on the reals (Erfc(±∞) = 2, 0).
       type: (ops) => {
         const x = ops[0];
-        if (!x || x.isNaN) return 'number';
+        // A proven-NaN operand: decline, so the framework's proven-NaN
+        // arm answers the sharp `nan`.
+        if (!x || x.isNaN) return undefined;
         if (x.isExtendedReal === false)
           return x.isFinite === true ? 'complex' : 'number';
         if (x.isExtendedReal === true) return 'real';

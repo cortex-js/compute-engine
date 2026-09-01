@@ -363,8 +363,11 @@ describe('Canonicalization: Inverse Hyperbolic Trig and Infinity', () => {
     checkSimplify('\\arsinh(\\infty)', '\\infty'));
   test('arcosh(infinity) = infinity', () =>
     checkSimplify('\\arcosh(\\infty)', '\\infty'));
-  test('arcosh(-infinity) = NaN', () =>
-    checkSimplify('\\arcosh(-\\infty)', NaN));
+  // `arcosh(−∞) = ∞ + iπ` has no exact spelling (infinite real part,
+  // finite imaginary offset), so simplify and evaluate() both leave it
+  // symbolic and only `.N()` numericizes — the `Ln(−∞)` treatment.
+  test('arcosh(-infinity) stays symbolic', () =>
+    checkSimplify('\\arcosh(-\\infty)', '\\arcosh(-\\infty)'));
 });
 
 // ============================================================
@@ -761,27 +764,48 @@ describe('Rules: Division and Infinity', () => {
 });
 
 describe('Rules: Trig and Infinity', () => {
-  test('sin(infinity) = NaN', () => checkSimplify('\\sin(\\infty)', NaN));
-  test('cos(infinity) = NaN', () => checkSimplify('\\cos(\\infty)', NaN));
-  test('tan(infinity) = NaN', () => checkSimplify('\\tan(\\infty)', NaN));
-  test('cot(infinity) = NaN', () => checkSimplify('\\cot(\\infty)', NaN));
-  test('sec(infinity) = NaN', () => checkSimplify('\\sec(\\infty)', NaN));
-  test('csc(infinity) = NaN', () => checkSimplify('\\csc(\\infty)', NaN));
-  test('sin(-infinity) = NaN', () => checkSimplify('\\sin(-\\infty)', NaN));
-  test('cos(-infinity) = NaN', () => checkSimplify('\\cos(-\\infty)', NaN));
-  test('tan(-infinity) = NaN', () => checkSimplify('\\tan(-\\infty)', NaN));
-  test('cot(-infinity) = NaN', () => checkSimplify('\\cot(-\\infty)', NaN));
-  test('sec(-infinity) = NaN', () => checkSimplify('\\sec(-\\infty)', NaN));
-  test('csc(-infinity) = NaN', () => checkSimplify('\\csc(-\\infty)', NaN));
+  // The circular functions declare the FINITE `complex` carrier — no
+  // value at any infinity — so an infinite argument is an
+  // incompatible-type error on the evaluate route, and SIMPLIFY DECLINES
+  // rather than claiming the old `NaN`.
+  test('sin(infinity) declines', () =>
+    checkSimplify('\\sin(\\infty)', '\\sin(\\infty)'));
+  test('cos(infinity) declines', () =>
+    checkSimplify('\\cos(\\infty)', '\\cos(\\infty)'));
+  test('tan(infinity) declines', () =>
+    checkSimplify('\\tan(\\infty)', '\\tan(\\infty)'));
+  test('cot(infinity) declines', () =>
+    checkSimplify('\\cot(\\infty)', '\\cot(\\infty)'));
+  test('sec(infinity) declines', () =>
+    checkSimplify('\\sec(\\infty)', '\\sec(\\infty)'));
+  test('csc(infinity) declines', () =>
+    checkSimplify('\\csc(\\infty)', '\\csc(\\infty)'));
+  test('sin(-infinity) declines', () =>
+    checkSimplify('\\sin(-\\infty)', '\\sin(-\\infty)'));
+  test('cos(-infinity) declines', () =>
+    checkSimplify('\\cos(-\\infty)', '\\cos(-\\infty)'));
+  test('tan(-infinity) declines', () =>
+    checkSimplify('\\tan(-\\infty)', '\\tan(-\\infty)'));
+  test('cot(-infinity) declines', () =>
+    checkSimplify('\\cot(-\\infty)', '\\cot(-\\infty)'));
+  test('sec(-infinity) declines', () =>
+    checkSimplify('\\sec(-\\infty)', '\\sec(-\\infty)'));
+  test('csc(-infinity) declines', () =>
+    checkSimplify('\\csc(-\\infty)', '\\csc(-\\infty)'));
 });
 
 describe('Rules: Inverse Trig and Infinity', () => {
-  test('arcsin(infinity) = NaN', () => checkSimplify('\\arcsin(\\infty)', NaN));
-  test('arccos(infinity) = NaN', () => checkSimplify('\\arccos(\\infty)', NaN));
-  test('arcsin(-infinity) = NaN', () =>
-    checkSimplify('\\arcsin(-\\infty)', NaN));
-  test('arccos(-infinity) = NaN', () =>
-    checkSimplify('\\arccos(-\\infty)', NaN));
+  // Arcsin/Arccos also carry the finite `complex` carrier (they diverge
+  // toward every infinity): simplify declines, the evaluate route
+  // reports the incompatible-type error.
+  test('arcsin(infinity) declines', () =>
+    checkSimplify('\\arcsin(\\infty)', '\\arcsin(\\infty)'));
+  test('arccos(infinity) declines', () =>
+    checkSimplify('\\arccos(\\infty)', '\\arccos(\\infty)'));
+  test('arcsin(-infinity) declines', () =>
+    checkSimplify('\\arcsin(-\\infty)', '\\arcsin(-\\infty)'));
+  test('arccos(-infinity) declines', () =>
+    checkSimplify('\\arccos(-\\infty)', '\\arccos(-\\infty)'));
   test('arctan(infinity) = pi/2', () =>
     checkSimplify('\\arctan(\\infty)', '\\frac{\\pi}{2}'));
   test('arctan(-infinity) = -pi/2', () =>
@@ -819,16 +843,22 @@ describe('Rules: Hyperbolic Trig and Infinity', () => {
 describe('Rules: Inverse Hyperbolic Trig and Infinity', () => {
   test('arsinh(-infinity) = -infinity', () =>
     checkSimplify('\\arsinh(-\\infty)', '-\\infty'));
-  test('artanh(infinity) = NaN', () => checkSimplify('\\artanh(\\infty)', NaN));
-  test('artanh(-infinity) = NaN', () =>
-    checkSimplify('\\artanh(-\\infty)', NaN));
+  // The imaginary asymptotes of the principal branch (they used to be
+  // rewritten to NaN, contradicting the evaluate route's values).
+  test('artanh(infinity) = -i pi/2', () =>
+    checkSimplify('\\artanh(\\infty)', '-\\frac{\\pi}{2}i'));
+  test('artanh(-infinity) = i pi/2', () =>
+    checkSimplify('\\artanh(-\\infty)', '\\frac{\\pi}{2}i'));
   test('arccoth(infinity) = 0', () =>
     checkSimplify('\\operatorname{arccoth}(\\infty)', 0));
   test('arccoth(-infinity) = 0', () =>
     checkSimplify('\\operatorname{arccoth}(-\\infty)', 0));
-  test('arsech(infinity) = NaN', () => checkSimplify('\\arsech(\\infty)', NaN));
-  test('arsech(-infinity) = NaN', () =>
-    checkSimplify('\\arsech(-\\infty)', NaN));
+  // Both real approaches give arcosh(0) = iπ/2 (the old NaN rewrite
+  // contradicted the evaluate route's value).
+  test('arsech(infinity) = i pi/2', () =>
+    checkSimplify('\\arsech(\\infty)', '\\frac{\\pi}{2}i'));
+  test('arsech(-infinity) = i pi/2', () =>
+    checkSimplify('\\arsech(-\\infty)', '\\frac{\\pi}{2}i'));
   test('arcsch(infinity) = 0', () => checkSimplify('\\arcsch(\\infty)', 0));
   test('arcsch(-infinity) = 0', () => checkSimplify('\\arcsch(-\\infty)', 0));
 });

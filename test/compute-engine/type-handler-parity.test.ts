@@ -164,8 +164,11 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
       expect(`${op}(s)=${ce.box([op, 's'] as any).type.toString()}`).toBe(
         `${op}(s)=real`
       );
+      // A proven-NaN operand: the handler DECLINES (Phase F flip of the
+      // three heads, 2026-09-01) and the framework's proven-NaN arm
+      // answers the sharp `nan` — the `Sqrt`/`Erf` treatment.
       expect(`${op}(NaN)=${ce.box([op, NAN] as any).type.toString()}`).toBe(
-        `${op}(NaN)=number`
+        `${op}(NaN)=nan`
       );
       expect(
         `${op}(i)=${ce.box([op, ['Complex', 1, 2]] as any).type.toString()}`
@@ -182,11 +185,11 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     // entire function maps a finite point to a finite value, real or complex.
     ce.declare('fn', 'complex');
     expect(ce.box(['Sinc', 'fn'] as any).type.toString()).toBe('number');
-    // `~oo` types `number` — the same descriptor a NaN produces — so neither
-    // gate fires and the wide claim stands.
-    expect(ce.box(['Sinc', 'ComplexInfinity'] as any).type.toString()).toBe(
-      'number'
-    );
+    // `~oo` is OFF-CARRIER since the Phase F flip (2026-09-01):
+    // `Sinc: (complex | signed_infinity)` and sinc has no limit at complex
+    // infinity, so the application is a boxing-time incompatible-type
+    // error, not a wide numeric claim.
+    expect(ce.box(['Sinc', 'ComplexInfinity'] as any).isValid).toBe(false);
   });
 
   test('a broadcastable gate reads through EVERY collection rank', () => {

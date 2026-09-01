@@ -798,6 +798,7 @@ describe('ERROR-MODEL §6 — compiled lane must agree with the interpreter (fai
 
 describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operator', () => {
   const ce = new ComputeEngine();
+  const isTypeError = (e: any) => e.operator === 'Error';
 
   describe('Sin(NaN) evaluates to NaN, not just under N()', () => {
     for (const { route, expr } of routes(
@@ -979,7 +980,6 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // enforces the carrier in the evaluate handler (the tracked timing
     // deviation of `docs/SIGNATURE-GUIDELINES.md` §4).
     const ce2 = new ComputeEngine();
-    const isTypeError = (e: any) => e.operator === 'Error';
     // NaN propagates for the whole family, on evaluate AND N.
     for (const op of ['Sqrt', 'Ln', 'Erf', 'Sin', 'Arcsin']) {
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
@@ -1020,6 +1020,161 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // The sharp NaN types where the handler declines for a proven NaN.
     expect(ce2.box(['Sqrt', 'NaN']).type.toString()).toBe('nan');
     expect(ce2.box(['Erf', 'NaN']).type.toString()).toBe('nan');
+  });
+
+  test('the remaining complex-extension heads: per-head carriers from the mathematical domain', () => {
+    // Phase F batch 5 (ruled 2026-09-01). Every head keeps NaN
+    // propagation; the carrier — hence which infinities error and which
+    // fold to genuine values — is decided per head:
+    //
+    // - `(complex)`: the circular functions and `Arccos` have no value at
+    //   ANY infinity (they oscillate toward the real infinities; the
+    //   inverses diverge). Enforced, like `Sin`, in the trig factory's
+    //   evaluate arm (its `canonical` handler bypasses boxing validation).
+    // - `(complex | signed_infinity)`: genuine values at `±∞` only —
+    //   the hyperbolics and most inverse hyperbolics, plus
+    //   `Erfc`/`Sinc`/`FresnelS`/`FresnelC` (which validate at BOXING —
+    //   no canonical handler in the way).
+    // - `(complex | infinity)`: `Arcsec`/`Arccsc`/`Arcoth`/`Arcsch` have
+    //   the SAME genuine value in every direction of infinity (they
+    //   compose through 1/x and the inner inverse head is continuous at
+    //   0), so `~oo` is in-carrier too.
+    const ce2 = new ComputeEngine();
+    const POS = 'PositiveInfinity';
+    const NEG = 'NegativeInfinity';
+    const COO = 'ComplexInfinity';
+
+    // Group 1 — no value at any infinity: error on both routes at the
+    // evaluate seam (was symbolic-then-NaN).
+    for (const op of ['Cos', 'Tan', 'Cot', 'Csc', 'Sec', 'Arccos']) {
+      expect(isTypeError(ce2.box([op, POS]).evaluate())).toBe(true);
+      expect(isTypeError(ce2.box([op, NEG]).N())).toBe(true);
+      expect(isTypeError(ce2.box([op, COO]).evaluate())).toBe(true);
+      expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
+    }
+    // The circular poles are in-carrier finite points valued `~oo` still.
+    expect(
+      ce2.parse('\\tan(\\pi/2)').evaluate().isSame(ce2.ComplexInfinity)
+    ).toBe(true);
+
+    // Group 2 — genuine values at ±∞ (exact, on BOTH routes — several
+    // were NaN-by-kernel-artifact before: `Arsinh(−∞)`, `Arcoth(±∞)`,
+    // `Artanh(±∞)`, `Arsech(±∞)`); `~oo` errors.
+    const expectVal = (op: string, arg: string, v: any) => {
+      expect(ce2.box([op, arg]).evaluate().isSame(v)).toBe(true);
+    };
+    expectVal('Sinh', POS, ce2.PositiveInfinity);
+    expectVal('Sinh', NEG, ce2.NegativeInfinity);
+    expectVal('Cosh', NEG, ce2.PositiveInfinity);
+    expectVal('Tanh', POS, 1);
+    expectVal('Tanh', NEG, -1);
+    expectVal('Coth', NEG, -1);
+    expectVal('Sech', POS, 0);
+    expectVal('Csch', NEG, 0);
+    expectVal('Arsinh', NEG, ce2.NegativeInfinity);
+    expectVal('Arccot', POS, 0);
+    expectVal('Arccot', NEG, ce2.Pi);
+    // The imaginary asymptote values (ruled 2026-09-01): continuations of
+    // the engine's own principal branch.
+    expect(
+      ce2.box(['Artanh', POS]).evaluate().isSame(ce2.I.mul(ce2.Pi).div(-2))
+    ).toBe(true);
+    expect(
+      ce2.box(['Arsech', NEG]).evaluate().isSame(ce2.I.mul(ce2.Pi).div(2))
+    ).toBe(true);
+    // `Arcosh(−∞) = ∞ + iπ` follows the `Ln(−∞)` treatment: symbolic
+    // under evaluate(), machine complex under .N().
+    expect(ce2.box(['Arcosh', NEG]).evaluate().operator).toBe('Arcosh');
+    const acosh = ce2.box(['Arcosh', NEG]).N();
+    expect(acosh.re).toBe(Infinity);
+    expect(acosh.im).toBeCloseTo(Math.PI, 12);
+    for (const op of ['Sinh', 'Tanh', 'Arsinh', 'Arcosh', 'Artanh', 'Arsech', 'Arccot']) {
+      expect(isTypeError(ce2.box([op, COO]).evaluate())).toBe(true);
+      expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
+    }
+
+    // Group 3 — the same genuine value in EVERY direction of infinity:
+    // `~oo` folds too (`Arcsec(~oo)` used to answer a machine float even
+    // under evaluate(); it is the exact π/2 now).
+    expectVal('Arcsec', COO, ce2.Pi.div(2));
+    expectVal('Arcsec', POS, ce2.Pi.div(2));
+    expectVal('Arccsc', COO, 0);
+    expectVal('Arcoth', COO, 0);
+    expectVal('Arcoth', POS, 0);
+    expectVal('Arcsch', NEG, 0);
+    expectVal('Arcsch', COO, 0);
+
+    // The boxing-seam quartet: ±∞ values unchanged, `~oo` invalid at
+    // boxing (was inert), NaN propagates.
+    expectVal('Erfc', POS, 0);
+    expectVal('Erfc', NEG, 2);
+    expectVal('Sinc', POS, 0);
+    expectVal('FresnelS', NEG, ce2.Half.neg());
+    expectVal('FresnelC', POS, ce2.Half);
+    for (const op of ['Erfc', 'Sinc', 'FresnelS', 'FresnelC']) {
+      expect(ce2.box([op, COO]).isValid).toBe(false);
+      expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
+    }
+  });
+
+  test('the simplify route agrees with the flipped evaluate semantics at infinities', () => {
+    // The simplify rules used to rewrite these to NaN, contradicting the
+    // carriers: a head with NO value at an infinity now DECLINES under
+    // simplify (the evaluate route owns the incompatible-type error), and
+    // a head WITH a value folds the same value on both routes.
+    const ce2 = new ComputeEngine();
+    // Declines — the expression stays put, no NaN claim.
+    expect(ce2.box(['Cos', 'PositiveInfinity']).simplify().operator).toBe(
+      'Cos'
+    );
+    expect(ce2.box(['Arccos', 'NegativeInfinity']).simplify().operator).toBe(
+      'Arccos'
+    );
+    expect(ce2.box(['Arcosh', 'NegativeInfinity']).simplify().operator).toBe(
+      'Arcosh'
+    );
+    expect(ce2.box(['Arccot', 'ComplexInfinity']).simplify().operator).toBe(
+      'Arccot'
+    );
+    // Folds — the ruled values, identical to evaluate().
+    expect(
+      ce2
+        .box(['Artanh', 'PositiveInfinity'])
+        .simplify()
+        .isSame(ce2.I.mul(ce2.Pi).div(-2))
+    ).toBe(true);
+    expect(
+      ce2
+        .box(['Arsech', 'NegativeInfinity'])
+        .simplify()
+        .isSame(ce2.I.mul(ce2.Pi).div(2))
+    ).toBe(true);
+    expect(ce2.box(['Arcoth', 'ComplexInfinity']).simplify().isSame(0)).toBe(
+      true
+    );
+  });
+
+  test('inverse-circular values at infinity are angles in the current angular unit', () => {
+    // The finite folds already convert (`arctan(1)` answers 45 in degree
+    // mode), so the infinite folds must too — they used to answer raw
+    // radians. Inverse-HYPERBOLIC values are areas, not angles, and take
+    // no conversion.
+    const ce2 = new ComputeEngine();
+    ce2.angularUnit = 'deg';
+    expect(ce2.box(['Arctan', 'PositiveInfinity']).evaluate().isSame(90)).toBe(
+      true
+    );
+    expect(ce2.box(['Arccot', 'NegativeInfinity']).evaluate().isSame(180)).toBe(
+      true
+    );
+    expect(ce2.box(['Arcsec', 'ComplexInfinity']).evaluate().isSame(90)).toBe(
+      true
+    );
+    // Radian mode is unchanged.
+    const ce3 = new ComputeEngine();
+    expect(
+      ce3.box(['Arctan', 'NegativeInfinity']).evaluate().isSame(ce3.Pi.div(-2))
+    ).toBe(true);
   });
 
   test('compile(Heaviside)(NaN) agrees with the interpreter now', () => {
