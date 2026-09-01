@@ -357,12 +357,22 @@ function substituteAtFinitePoint(
   dir: number,
   ce: ComputeEngine
 ): Expression | undefined {
+  // A substitution can land an operand outside a Contract B carrier — at
+  // `x = 0`, `Ln(1/x²)` substitutes to `Ln(~oo)` (division by zero folds
+  // to the unsigned pole), which is an incompatible-type Error since the
+  // complex-extension carrier flips. An invalid substitute is NOT the
+  // limit's answer: the LIMIT can still exist through the directed
+  // strategies (the inner limit of `1/x²` is `+∞`, and `Ln(+∞) = +∞`),
+  // so decline and let the caller fall through to them.
+  const substituteAndCheck = (expr: Expression): Expression | undefined => {
+    const at = expr.subs({ [x]: a }).evaluate();
+    return at.isValid ? at : undefined;
+  };
   let current = e;
   // Each pass resolves ONE on-jump subterm (innermost first); the rewrite
   // can nest, so iterate, capped well above any practical nesting.
   for (let pass = 0; pass < 8; pass++) {
-    if (!current.has(JUMP_FNS))
-      return current.subs({ [x]: a }).evaluate();
+    if (!current.has(JUMP_FNS)) return substituteAndCheck(current);
     let jump: Expression | undefined = undefined;
     let offset: Expression | undefined = undefined;
     let jumpSize = Infinity;
@@ -379,8 +389,7 @@ function substituteAtFinitePoint(
         }
       }
     }
-    if (jump === undefined)
-      return current.subs({ [x]: a }).evaluate();
+    if (jump === undefined) return substituteAndCheck(current);
     if (dir === 0) return undefined;
     // The expansion anchor must be EXACT when representable: a machine-float
     // point (`0.5` parsed from the limit) mixed with the exact subtrahend of

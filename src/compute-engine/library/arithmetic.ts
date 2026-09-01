@@ -1149,6 +1149,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 3500,
 
+      // NOT flipped to a Contract B domain signature with the rest of the
+      // complex-extension family (2026-08-31): `Exp(x)` canonicalizes to
+      // `Power(e, x)` below, so no `Exp` application survives to be
+      // validated or evaluated — its behavior at every exceptional point
+      // (`Exp(~oo)`, `Exp(NaN)`) is `Power`'s, and a precise carrier
+      // declared here would be a claim nothing enforces. The flip rides
+      // with `Power`'s own future migration.
       signature: '(number) -> number',
       // Because it gets canonicalized to Power, the sgn handler is not called
       // sgn: ([x]) => {
@@ -1916,7 +1923,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 4000,
       broadcastable: true,
 
-      signature: '(number, base: number?) -> number',
+      // The carrier is every point where the logarithm has a value: the
+      // finite complex numbers — `Ln(0) = −∞` is an in-carrier pole VALUE,
+      // and `Ln(−1) = iπ` is the complex extension — plus the signed
+      // infinities (`Ln(+∞) = +∞`; `Ln(−∞) = ∞ + iπ`, which is why the
+      // result carries the wide `infinity` arm). `~oo` is off-carrier —
+      // an incompatible-type error, surfaced at EVALUATION by the
+      // dispatch-time conformance re-test (like `Sqrt` above, this
+      // operator's fast-pathed canonicalization bypasses boxing
+      // validation — the tracked timing deviation) — by the family-wide
+      // ruling (2026-08-31): `Ln(~oo)` used to DIVERGE between routes
+      // (`evaluate()` answered `NaN`, `.N()` an arbitrary `∞ + iπ/4`),
+      // and the carrier error replaces both. `NaN` in either slot
+      // propagates (explicit: this carrier is not a subtype of `complex`,
+      // so the derived default would be `reject`).
+      signature: '(complex | signed_infinity, base: number?) -> complex | infinity',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: (ops) => elementaryFunctionTypeOnTypes('Ln', ops),
       sgn: ([x]) => lnSign(x),
@@ -3567,9 +3589,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 3000,
       broadcastable: true,
 
-      signature: '(number) -> number',
+      // The carrier is every point where the square root has a value: the
+      // finite complex numbers and the two signed infinities
+      // (`√(+∞) = +∞`, `√(−∞) = i·∞ = ~oo`). `~oo` is off-carrier — an
+      // incompatible-type error — by the family-wide ruling (2026-08-31):
+      // its square root was answering `NaN`, and carrier discipline
+      // replaces that with the loud error. The error surfaces at
+      // EVALUATION, not boxing: this operator's canonicalization is
+      // fast-pathed (`makeNumericFunction`), which bypasses declared-
+      // signature validation, so the dispatch-time conformance re-test is
+      // the seam that answers — the tracked timing deviation of
+      // `docs/SIGNATURE-GUIDELINES.md` §4. The result needs the
+      // `infinity` arm because `√(−∞)` is `~oo`, which the signed pair
+      // excludes.
+      signature: '(complex | signed_infinity) -> complex | infinity',
+      // Explicit: the DERIVED default answers `reject` for a carrier that
+      // is not a subtype of `complex`, and `Sqrt(NaN)` must be `NaN`.
+      nanBehavior: 'propagate',
       type: ([x]) => {
-        if (x.isNaN) return 'number';
+        // A proven-NaN operand: decline, so the framework's proven-NaN arm
+        // answers the sharp `nan` (the propagated value's own type).
+        if (x.isNaN) return undefined;
         if (provablyNonFiniteNumber(x)) {
           // √(−∞) = i·∞ = ~oo (complex infinity), not a real ±∞ — and the
           // signed pair `+oo | -oo` excludes `~oo`, so only the top

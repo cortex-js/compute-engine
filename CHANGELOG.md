@@ -168,6 +168,34 @@
     explicitly that they handle `NaN` themselves (an unordered `NaN`
     makes the comparison `False`, per IEEE — the existing behavior).
 
+- **`Sin`, `Arcsin`, `Sqrt`, `Ln`, and `Erf` now declare their
+  mathematical domains.** `Sqrt`, `Ln`, and `Erf` are defined on the
+  finite complex numbers and the two signed infinities
+  (`Sqrt(+∞) = +∞`, `Sqrt(−∞) = ~oo`, `Ln(+∞) = +∞`, `Ln(0) = −∞`,
+  `Erf(±∞) = ±1` — all unchanged). `Sin` and `Arcsin` are defined on the
+  finite complex numbers only: sine and arcsine have no value and no
+  limit at any infinity. Consequences:
+  - `Sin(±∞)`, `Arcsin(±∞)` are now `incompatible-type` errors. They
+    used to stay unevaluated symbolically and answer `NaN` under `N()`.
+  - A `~oo` (complex infinity) argument is now an `incompatible-type`
+    error for all five operators. The previous behavior was
+    inconsistent — `Sqrt(~oo)` answered `NaN`, `Erf(~oo)` answered
+    `~oo`, and `Ln(~oo)` answered `NaN` on `evaluate()` but an arbitrary
+    `∞ + iπ/4` on `.N()`. The error is uniform and identical on both
+    routes now.
+  - A `NaN` argument still gives `NaN` for all five.
+  - `Exp` is not changed: `Exp(x)` becomes `Power(e, x)` when the
+    expression is canonicalized, so its behavior at exceptional points
+    is `Power`'s.
+  - Depending on the operator, the error is reported when the expression
+    is created or when it is evaluated (`Erf` reports at creation;
+    `Sqrt`/`Ln`/`Sin`/`Arcsin` at evaluation). Two bounded exceptions: a
+    symbol that is merely DECLARED with a non-finite type but holds no
+    value stays symbolic (there is no value to report an error for), and
+    compiled code keeps its existing numeric behavior at these points
+    (compiled `sin(x)` at `x = Infinity` still returns `NaN` — the same
+    class of accepted divergence as compiled `Heaviside(~oo)`).
+
 - **`IsPrime` and `IsComposite` now use positive-integer definitions.**
   `IsPrime` returns `False` for a decidable value that is not a positive
   integer greater than 1. It reports an `incompatible-type` error for an

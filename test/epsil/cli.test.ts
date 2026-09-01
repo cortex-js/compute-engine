@@ -518,8 +518,11 @@ describe('Epsil CLI signature error notes', () => {
   test('explains a builtin, which has a signature but no definition site', async () => {
     const { io, stderr } = makeIo();
     expect(await main(['-e', 'Ln()\n42'], io)).toBe(1);
+    // The Phase F carrier is long enough that the note wraps, so the
+    // signature is asserted separately from the lead-in.
+    expect(stderr()).toContain('`Ln` has signature');
     expect(stderr()).toContain(
-      '`Ln` has signature `(number, base: number?) -> number`'
+      '(complex | signed_infinity, base: number?) -> complex | infinity'
     );
     expect(stderr()).not.toContain('is defined here');
   });

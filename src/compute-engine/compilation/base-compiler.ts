@@ -12758,7 +12758,8 @@ export class BaseCompiler {
     const literal = BaseCompiler.userFunctionLiteral(engine, callback.symbol);
     if (literal === undefined || literal.ops.length !== 2) return;
     if (!BaseCompiler.hasUniformComplexScalarElements(source)) return;
-    const pt = BaseCompiler.userFunctionParamType(engine, callback.symbol, 0);
+    // `laneRequestParamType`, not the raw param type — see its comment.
+    const pt = BaseCompiler.laneRequestParamType(engine, callback.symbol, 0);
     if (pt === undefined || !isNonRealNumber(pt))
       BaseCompiler.laneMismatch(
         'user-function value position',
@@ -12894,6 +12895,29 @@ export class BaseCompiler {
    * on a generic or multi-clause signature, where `userFunctionParamType`
    * declines — those keep the previous emission exactly.
    */
+  /**
+   * The parameter type that requests the complex `{ re, im }` LANE for
+   * position `i` of `h` — a USER declaration only. An engine-authored
+   * built-in's declared parameter is a DOMAIN statement, not a lane
+   * request: a Contract B carrier such as `Sin: (complex)` spells "the
+   * finite complex numbers, reals included", and reading it as a lane
+   * request flipped every synthesized builtin-callback wrapper
+   * (`Map(Sin, xs)` → `_fn_Sin`) to the complex kernel inside real-lane
+   * surroundings — `_SYS.csin` cells under a scalar `reduce`. A built-in
+   * used as a callback keeps the real-default-plus-runtime-rule
+   * discipline its direct applications use. The builtin test is the same
+   * one the wrapper synthesis performs (`builtinCallbackArity`: the name
+   * resolves to the engine-authored system-scope definition).
+   */
+  private static laneRequestParamType(
+    engine: ComputeEngine,
+    h: string,
+    i: number
+  ): Type | undefined {
+    if (builtinCallbackArity(engine, h) !== undefined) return undefined;
+    return BaseCompiler.userFunctionParamType(engine, h, i);
+  }
+
   private static addDeclaredComplexParams(
     h: string,
     literal: Expression & FunctionInterface,
@@ -12910,7 +12934,7 @@ export class BaseCompiler {
     literal.ops.slice(1).forEach((p, i) => {
       const name = functionLiteralParameterName(p);
       if (!name) return;
-      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      const pt = BaseCompiler.laneRequestParamType(engine, h, i);
       if (pt === undefined || !isNonRealNumber(pt)) return;
       frames.complex.set(name, true);
       frames.vector.set(name, BaseCompiler.LOCAL_SCALAR);
@@ -14506,7 +14530,9 @@ export class BaseCompiler {
     const nParams = literal.ops.length - 1;
     const complexParam: boolean[] = [];
     for (let i = 0; i < nParams; i++) {
-      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      // `laneRequestParamType`, not the raw param type: a built-in's
+      // Contract B carrier is a domain statement, never a lane request.
+      const pt = BaseCompiler.laneRequestParamType(engine, h, i);
       complexParam.push(pt !== undefined && isNonRealNumber(pt));
     }
     if (!complexParam.some((c) => c)) return name;

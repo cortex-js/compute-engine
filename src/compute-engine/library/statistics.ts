@@ -290,14 +290,26 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Erf: {
       description: 'Gauss error function',
       complexity: 7500,
-      signature: '(number) -> number',
+      // The carrier is every point where erf has a value: the finite
+      // complex numbers (erf is entire) and the signed infinities
+      // (`Erf(±∞) = ±1` — which is also why the RESULT is plain
+      // `complex`: every value is finite). `~oo` is off-carrier — an
+      // incompatible-type error — by the family-wide ruling (2026-08-31);
+      // it used to answer `~oo`, a value erf does not have (erf has no
+      // limit at complex infinity). `NaN` propagates (explicit: this
+      // carrier is not a subtype of `complex`, so the derived default
+      // would be `reject`).
+      signature: '(complex | signed_infinity) -> complex',
+      nanBehavior: 'propagate',
       // Erf is entire and bounded on the reals (Erf(±∞) = ±1); a finite
       // complex argument gives a finite complex value. An operand of unproven
       // realness (a `number`-typed symbol) keeps the generic finite hedge —
       // its value may be complex, so it must not claim real.
       type: (ops) => {
         const x = ops[0];
-        if (!x || x.isNaN) return 'number';
+        // A proven-NaN operand: decline, so the framework's proven-NaN
+        // arm answers the sharp `nan`.
+        if (!x || x.isNaN) return undefined;
         if (x.isExtendedReal === false)
           return x.isFinite === true ? 'complex' : 'number';
         if (x.isExtendedReal === true) return 'real';

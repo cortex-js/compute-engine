@@ -470,6 +470,85 @@ this note). What each part got, and why:
   (2) `widenNumericCellsWithNan`/`widenCellsWithMarker` now splice
   `nan` into an existing union instead of minting the nested shape.
 
+**Batch 4 — the complex-extension family (`Sin`, `Sqrt`, `Ln`,
+`Arcsin`, `Erf`; `Exp` deferred) — IMPLEMENTED 2026-08-31.** Two
+rulings taken before implementation (Arno, 2026-08-31): `Sin`/`Arcsin`
+declare the FINITE complex carrier and an infinite argument is an
+incompatible-type error (no value, no limit — ruling L9's chain); and
+`~oo` is uniformly off-carrier for the whole family (it had been
+inconsistent: `Sqrt(~oo)` → NaN, `Erf(~oo)` → `~oo`, and `Ln(~oo)`
+DIVERGED between routes — evaluate → NaN, `.N()` → an arbitrary
+`∞ + iπ/4`). What shipped:
+
+- `Sqrt`/`Ln`/`Erf`: `(complex | signed_infinity)` carriers (their
+  values at ±∞ are genuine — `√±∞`, `Ln(+∞) = +∞`, `Erf(±∞) = ±1`;
+  `Ln(0) = −∞` is an in-carrier pole VALUE), explicit
+  `nanBehavior: 'propagate'`, results `complex | infinity`
+  (`√(−∞) = ~oo`, `Ln(−∞) = ∞ + iπ`) / plain `complex` for `Erf`
+  (bounded). `Sin`/`Arcsin`: `(complex) -> number`.
+- **Three enforcement seams, and the seam is part of each pin**
+  (`error-model.test.ts`): `Erf` validates at BOXING (no
+  canonical/fastpath); `Sqrt`/`Ln` fast-path canonicalization
+  (`makeNumericFunction`), so the dispatch-time conformance re-test
+  answers the error at EVALUATION; the trig factory's `canonical`
+  handler bypasses BOTH, so `Sin`/`Arcsin` enforce the carrier in the
+  factory's evaluate handler behind a new `finiteComplexCarrier`
+  factory flag — all three are instances of the tracked timing
+  deviation of `docs/SIGNATURE-GUIDELINES.md` §4.
+- **`Exp` is NOT flipped**: `Exp(x)` canonicalizes to `Power(e, x)`,
+  so no `Exp` application survives to validate or evaluate — a precise
+  carrier there would be a claim nothing enforces. Recorded at the
+  definition; the flip rides with `Power`'s own future migration.
+- **`Sin`/`Arcsin` deliberately declare the RESULT `number`, not
+  `complex`**: the compiled lanes' kind-preservation discipline
+  documents its reliance on the wide result
+  (`resultIsComplexValued`, javascript-target.ts), and the per-call
+  sharpness lives in the type handlers.
+- **One compiler fix the batch surfaced, general**: the complex-LANE
+  machinery (`addDeclaredComplexParams`, `ensureUserFunctionValueRef`,
+  `assertCallbackLaneMatch`) read a declared `complex` parameter as a
+  lane request. True for a USER declaration (`f(z: complex) := …` wants
+  `{re, im}`), false for a built-in's Contract B carrier — `Sin:
+  (complex)` spells "finite complex, reals included" — and the
+  misreading flipped the synthesized `Map(Sin, xs)` callback wrapper to
+  `_SYS.csin` cells under a scalar `reduce` (a wrong `0`). The shared
+  `laneRequestParamType` now answers `undefined` for engine-authored
+  built-ins (the `builtinCallbackArity` class), keeping builtin
+  callbacks on the real-default-plus-runtime-rule discipline their
+  direct applications use. (The guard is load-bearing at
+  `addDeclaredComplexParams` — the synthesized-wrapper body's lane; the
+  other two sites are literal-gated so an unshadowed built-in never
+  reaches them today, and carry the guard as defensive consistency.)
+- **Two bounded enforcement gaps, documented as accepted** (both
+  surfaced by the batch's dual review): a VALUELESS symbol declared
+  with an off-carrier type (`s: signed_infinity`; `Sin(s)`) stays
+  symbolic — the fast-path/canonical boxing bypass skips the type-level
+  rejection, and evaluation has no value to report on — and the
+  COMPILED lanes keep their pre-flip numeric behavior at the new error
+  points (compiled `sin(Infinity)` → `NaN`), the same accepted-
+  divergence class as compiled `Heaviside(~oo)` (see the CHANGELOG
+  breaking entry). Also reviewed and left as-is: the `Sqrt`/`Erf` type
+  handlers' `'number'` fallback branches for maybe-NaN operands — a
+  narrower `complex | infinity` answer there would EXCLUDE the `nan`
+  the propagate policy can deliver while handler authority suppresses
+  the framework's own `| nan` arm, so the wide answer is the NaN-honest
+  one.
+- Type handlers all KEPT (they carry the per-call sharpness); the only
+  handler edits make `Sqrt`/`Erf` decline on a proven-NaN operand so
+  the framework answers the sharp `nan`.
+- **Full-suite gate: 3 failures, each triaged and fixed** (all other
+  suites green, snapshot delta 0): two pins updated to the new
+  signatures (the epsil CLI diagnostic quoting `Ln`'s signature;
+  `Derivative(Sin)` now typing `(complex) -> number`), and ONE real
+  regression fixed in `symbolic/limit.ts` — `lim ln(1/x²)` at 0 had
+  been RIGHT BY ACCIDENT (substitution folds `1/0²` to `~oo`, and the
+  old `Ln(~oo).N()` happened to have `re = ∞`); post-flip the
+  substitute is an incompatible-type Error and the limit machinery
+  returned it as the answer. `substituteAtFinitePoint` now declines an
+  INVALID substitute so the directed strategies answer (`1/x² → +∞`,
+  `Ln(+∞) = +∞`). The fix postdates the batch's dual review; it is
+  verified by the two limit suites plus calculus.
+
 ### Phase F — signature flips, operator-by-operator
 
 Each flip (e.g. `Heaviside: (real) -> rational<0..1>`, `total`) is its

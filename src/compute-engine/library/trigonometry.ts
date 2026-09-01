@@ -418,8 +418,24 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // The definition of other trig functions may rely on Sin, so it is defined
     // first in this preliminary section
     Sin: {
-      ...trigFunction('Sin', 5000, 'Sine of an angle.', 'types'),
+      ...trigFunction('Sin', 5000, 'Sine of an angle.', 'types', true),
       keywords: ['sine'],
+      // The carrier is the FINITE complex numbers: sine is entire but has
+      // no value and no limit at any infinity, so `Sin(±∞)` and
+      // `Sin(~oo)` are incompatible-type errors (family-wide ruling,
+      // 2026-08-31 — they answered symbolic-then-NaN before). The factory
+      // `canonical` handler replaces boxing-time signature validation
+      // with an arity check, so the carrier is enforced by the
+      // dispatch-time conformance re-test at evaluation — the tracked
+      // timing deviation of `docs/SIGNATURE-GUIDELINES.md` §4. `NaN`
+      // propagates by the mechanical default (finite complex carrier,
+      // numeric result). The RESULT stays the wide `number` on purpose:
+      // the compiled lanes' kind-preservation discipline documents its
+      // reliance on it (`resultIsComplexValued`,
+      // `compilation/javascript-target.ts` — a declared `complex` result
+      // flips synthesized callback wrappers to the complex kernel), and
+      // the per-call sharpness lives in the type handler.
+      signature: '(complex) -> number',
     },
   },
   {
@@ -575,9 +591,18 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'Arcsin',
         5500,
         'Arcsine, the inverse sine function.',
-        'types'
+        'types',
+        true
       ),
       keywords: ['asin', 'inverse sine'],
+      // Same carrier and rationale as `Sin` above: arcsine extends to the
+      // whole finite complex plane (`Arcsin(2)` is complex) but has no
+      // value at any infinity, so a non-finite argument is an
+      // incompatible-type error, enforced in the factory's evaluate
+      // handler (its `canonical` handler bypasses boxing validation — the
+      // tracked timing deviation). The result stays the wide `number` for
+      // the same compiled-lane reason as `Sin` above.
+      signature: '(complex) -> number',
     },
 
     Arsinh: trigFunction(
@@ -1192,7 +1217,15 @@ function trigFunction(
   operator: string,
   complexity: number,
   description?: string,
-  typeHandlerKind: 'expressions' | 'types' = 'expressions'
+  typeHandlerKind: 'expressions' | 'types' = 'expressions',
+  // Contract B finite-complex carrier (`(complex)` — Sin/Arcsin): the
+  // operator has no value at ANY infinity. The `canonical` handler below
+  // replaces boxing-time signature validation with an arity check, so an
+  // opted-in head enforces the carrier at evaluation instead: a concrete
+  // non-finite operand (±∞, `~oo`) gets the same incompatible-type error
+  // value boxing would have produced. `NaN` is NOT an error — it
+  // propagates, per the carrier's derived policy.
+  finiteComplexCarrier = false
 ): OperatorDefinition {
   const common: OperatorDefinition = {
     complexity,
@@ -1220,6 +1253,16 @@ function trigFunction(
       // no boxing-time check can settle.
       const nonNumeric = nonNumericOperandError(engine, [x]);
       if (nonNumeric !== undefined) return nonNumeric;
+      // The finite-complex carrier, enforced at the evaluate seam (see the
+      // factory parameter's comment): a non-finite non-NaN number operand
+      // is off-carrier.
+      if (
+        finiteComplexCarrier &&
+        isNumber(x) &&
+        x.isFinite === false &&
+        x.isNaN !== true
+      )
+        return engine.typeError('complex', x.type, x);
       // Measurement error propagation (Sin/Cos/Tan only; other operators fall
       // through). Guard on the evaluated argument being a Measurement.
       const evalX = x.evaluate();

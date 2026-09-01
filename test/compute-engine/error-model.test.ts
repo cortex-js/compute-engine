@@ -966,6 +966,62 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(ce2.box(['LessEqual', 'NaN', 1]).evaluate().symbol).toBe('False');
   });
 
+  test('the complex-extension family: precise carriers, ~oo uniformly off-carrier', () => {
+    // Phase F flip (ruled 2026-08-31): `Sqrt`/`Ln`/`Erf` declare
+    // `(complex | signed_infinity)` (their values at ±∞ are genuine:
+    // `√+∞ = +∞`, `Ln +∞ = +∞`, `Erf(±∞) = ±1`), and `Sin`/`Arcsin`
+    // declare `(complex)` — no value at ANY infinity. `~oo` is
+    // off-carrier for all five. Where the error lands differs by seam,
+    // and the seam is part of the pin: `Erf` validates at BOXING;
+    // `Sqrt`/`Ln` fast-path canonicalization, so the dispatch-time
+    // conformance re-test answers the error at EVALUATION; `Sin`/`Arcsin`
+    // have a `canonical` handler that bypasses both, so their factory
+    // enforces the carrier in the evaluate handler (the tracked timing
+    // deviation of `docs/SIGNATURE-GUIDELINES.md` §4).
+    const ce2 = new ComputeEngine();
+    const isTypeError = (e: any) => e.operator === 'Error';
+    // NaN propagates for the whole family, on evaluate AND N.
+    for (const op of ['Sqrt', 'Ln', 'Erf', 'Sin', 'Arcsin']) {
+      expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
+      expect(isNaNValue(ce2, ce2.box([op, 'NaN']).N())).toBe(true);
+    }
+    // ~oo: boxing error where validation runs, evaluate-time error
+    // elsewhere — an Error either way, on both routes.
+    expect(ce2.box(['Erf', 'ComplexInfinity']).isValid).toBe(false);
+    for (const op of ['Sqrt', 'Ln', 'Sin', 'Arcsin']) {
+      expect(isTypeError(ce2.box([op, 'ComplexInfinity']).evaluate())).toBe(
+        true
+      );
+      expect(isTypeError(ce2.box([op, 'ComplexInfinity']).N())).toBe(true);
+    }
+    // `Ln(~oo)` used to DIVERGE between routes (evaluate → NaN,
+    // N → an arbitrary ∞ + iπ/4); both routes agree on the error now
+    // (covered by the loop above — this comment records why the pin
+    // exists).
+    // Sin/Arcsin at ±∞: no value, no limit → error (was
+    // symbolic-then-NaN).
+    for (const op of ['Sin', 'Arcsin']) {
+      expect(isTypeError(ce2.box([op, 'PositiveInfinity']).evaluate())).toBe(
+        true
+      );
+      expect(isTypeError(ce2.box([op, 'NegativeInfinity']).N())).toBe(true);
+    }
+    // The genuine extended values are unchanged.
+    expect(ce2.box(['Sqrt', 'PositiveInfinity']).evaluate().isSame(ce2.PositiveInfinity)).toBe(true);
+    expect(ce2.box(['Erf', 'PositiveInfinity']).evaluate().isSame(1)).toBe(
+      true
+    );
+    expect(ce2.box(['Erf', 'NegativeInfinity']).evaluate().isSame(-1)).toBe(
+      true
+    );
+    expect(
+      ce2.box(['Ln', 0]).evaluate().isSame(ce2.NegativeInfinity)
+    ).toBe(true);
+    // The sharp NaN types where the handler declines for a proven NaN.
+    expect(ce2.box(['Sqrt', 'NaN']).type.toString()).toBe('nan');
+    expect(ce2.box(['Erf', 'NaN']).type.toString()).toBe('nan');
+  });
+
   test('compile(Heaviside)(NaN) agrees with the interpreter now', () => {
     // The compiled lane was fixed first (2026-08-28) under ratified Contract
     // B's derived `propagate` default, which left a route divergence: the

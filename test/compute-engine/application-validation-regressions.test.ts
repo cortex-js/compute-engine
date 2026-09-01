@@ -202,12 +202,13 @@ describe('SYM P1-19 — higher-order result types are sound', () => {
     // NOTE: the *evaluated* closed form (`cos(_)`) still under-reports as
     // `number` — see the residual documented in `Derivative.evaluate`.
     // The Derivative type handler preserves the derived function's signature
-    // (a derivative of Sin is itself `(number) -> number`), so the type is a
-    // concrete signature, not the bare `function` it reported before.
+    // (a derivative of Sin has Sin's own carrier — `(complex) -> number`
+    // since the Phase F flip), so the type is a concrete signature, not the
+    // bare `function` it reported before.
     const ce = strictEngine();
     const t = ce.box(['Derivative', 'Sin']).type;
     expect(t.matches('function')).toBe(true);
-    expect(t.toString()).toBe('(number) -> number');
+    expect(t.toString()).toBe('(complex) -> number');
   });
 });
 
