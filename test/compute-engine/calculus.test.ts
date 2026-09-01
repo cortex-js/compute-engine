@@ -1313,7 +1313,7 @@ describe('IMPROPER INTEGRATION (ROADMAP B3)', () => {
   // and lim_{y→∞} poly·e^{−y/2}=0 at the ∞ endpoint. The built-in
   // antiderivative can't close this integrand (no Erf), so on the shared engine
   // it stays inert — but must never leak NaN. (The Rubi-closed exact form is
-  // asserted in integration-rules.test.ts.)
+  // asserted in integration-rules-substitutions.test.ts.)
   test('∫ₓ^∞ y^(3/2) e^(−y/2) never leaks NaN (was NaN)', () => {
     const F = engine.parse('\\int_x^\\infty y^{3/2} e^{-y/2} dy').evaluate();
     expect(F.isNaN).not.toBe(true);
