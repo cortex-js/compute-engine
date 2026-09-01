@@ -645,6 +645,125 @@ What shipped:
   tracked timing deviation of `docs/SIGNATURE-GUIDELINES.md` §4, pinned
   deliberately since batch 4).
 
+**Batch 6 — `Power`, with `Exp`/`Exp2` riding along — IMPLEMENTED
+2026-09-01.** The last Phase F batch. Three rulings taken before
+implementation (Arno, 2026-09-01), each option recommended and ratified:
+
+1. **The EXPONENT slot excludes `~oo`**: `b^z` has no value at `z = ~oo`
+   for ANY base — the result depends on the direction of approach in
+   every case (the same analysis that made `Sin(±∞)` an error). So
+   `2^~oo`, `0^~oo`, `(~oo)^~oo`, `Exp(~oo)`, `Exp2(~oo)` are
+   incompatible-type errors (they all answered NaN).
+2. **The BASE slot admits `~oo`** (carrier `complex | infinity`): a
+   positive power of `~oo` is `~oo` and a negative power is 0 in every
+   direction, so the values are genuine. This also fixed a defect:
+   `(~oo)^-1` answered NaN through `.inv()` while `(~oo)^-2` answered 0
+   and the `Divide` route's `1/~oo` answered 0 — it answers 0 now (the
+   fix is in `canonicalPower`'s `-1`-exponent arm; `NumericValue.inv()`
+   itself is untouched). `(~oo)^0` keeps the indeterminate-form NaN.
+3. **A non-real base at a `±∞` exponent folds by its modulus**, closing
+   a route divergence (`(1+i)^{+∞}` stayed symbolic under `evaluate()`
+   and answered NaN under `.N()`): |b| > 1 → `~oo`, |b| < 1 → 0,
+   |b| = 1 with b ≠ 1 → NaN (`complexBaseAtInfiniteExponent`,
+   `arithmetic-power.ts`; an EXACT base whose |b|² merely rounds to the
+   boundary declines rather than risk a wrong claim).
+
+The signature is the family's first PER-SLOT carrier pair:
+`(complex | infinity, complex | signed_infinity) -> number`, explicit
+`nanBehavior: 'propagate'`, result kept the wide `number`
+(`resultIsComplexValued` reliance, like `Sin`). What the batch measured
+and recorded:
+
+- **The enforcement seam is the EVALUATE HANDLER, not the dispatch-time
+  conformance re-test.** The batch brief predicted the `Sqrt`/`Ln` seam
+  (fast-pathed canonicalization → conformance re-test at evaluation),
+  but `genericRuntimeConformance` SKIPS any definition with a custom
+  `canonical` handler — and `Power` has one — so the re-test never runs
+  for it. Measured mid-batch: with only the signature flipped, `2^~oo`
+  still answered NaN. `Power` therefore enforces the exponent carrier in
+  its own evaluate handler (`POWER_EXPONENT_CARRIER_TYPE` +
+  `engine.typeError`), the trig-factory arrangement. Any future flip of
+  an operator with a `canonical` handler needs the same in-handler arm.
+- **`canonicalPower` had to STOP folding the off-carrier points** (the
+  `x^~oo → NaN`, `0^~oo → NaN`, and `1^~oo → NaN` arms now return the
+  node unchanged): the folds ran at boxing, before any enforcement seam,
+  so the error could never surface. The in-carrier indeterminate forms
+  (`0^0`, `1^±∞`, `(±∞)^0`, `(+∞)^i`) still fold to NaN at
+  canonicalization.
+- **Batch 4 missed the `Sqrt`/`Ln` SIMPLIFY twins** — found by this
+  batch's route-agreement survey: `Sqrt(~oo).simplify()` and
+  `Ln(~oo).simplify()` still rewrote to NaN through the `.sqrt()`/`.ln()`
+  methods while the evaluate route answered the carrier error. Both
+  rules now decline on `~oo` (the batch-5 trig convention). This
+  re-confirms the standing rule: every evaluate-semantics flip must
+  sweep the simplify twins, and the twins of PRIOR batches deserve a
+  probe too.
+- Type sharpness matches the `Sin` precedent, not `Sqrt`'s: the type
+  handler declines on a proven-NaN operand, but canonical-handler heads
+  do not get the framework's sharp-`nan` arm, so `Power(NaN, 2)` types
+  `number` (as `Sin(NaN)` does). Recorded, not fought.
+- Blast radius: ONE behavioral pin updated
+  (`arithmetic.test.ts` — `(+∞)^~oo` NaN → error) and six inline
+  snapshots in `canonical-form.test.ts` (the `x^{~oo}` block — nodes now
+  survive canonicalization unfolded). Family pins added to
+  `error-model.test.ts` ("Power: per-slot carriers"). No Fungrim
+  identity uses a `~oo` exponent (verified by artifact scan); the
+  canaries (both sinc limits, `∫₀^∞ e^(−x)`, `∫₀^∞ sin(x)/x` under
+  `.N()`, `lim ln(1/x²)` at 0, `∫₀^∞ 1/(1+x²)`, `lim (1+1/n)^n`,
+  `√2·√2`) all stayed green.
+- `(+∞)^(+∞) = +∞` (ruled earlier this release) is untouched.
+- **Dual review caught two real defects, both fixed with the batch**
+  (the modulus-boundary one flagged by BOTH legs, from opposite sides):
+  1. The unit-circle boundary of the modulus fold was decided by machine
+     doubles, which cannot decide it in either direction — an exact
+     `(1 + 10⁻¹⁰i)` (modulus > 1) computed `re² + im²` as exactly 1 and
+     wrongly answered NaN, and a float `√3/2 + 0.5i` (modulus 1)
+     computed 0.9999999999999999 and wrongly answered 0. Fixed with an
+     EXACT integer test: every exact value is `(p/q)√c + (r/s)√m·i`, so
+     |v|² is the rational `(p²c·s² + r²m·q²)/(q²s²)` and the comparison
+     against 1 is bigint arithmetic (`exactModulusSquaredVsOne`) —
+     definitive for rational AND radical components
+     (`((√2/2)(1+i))^∞ = NaN` exactly). A float base within a few ulps
+     of the circle answers NaN (machine precision cannot distinguish it
+     from modulus 1); an exact base outside the exact test's reach
+     declines inside a 10⁻⁹ band. The review also caught that the
+     comment's worked example `(3+4i)/5 → 1.0000000000000002` was
+     empirically FALSE (3-4-5 rounds to exactly 1; `(5+12i)/13` is a
+     real reproduction) — a "verify math empirically" lapse.
+  2. `Power(NaN, ~oo)` answers NaN, not the carrier error: the
+     dispatch-time NaN-propagation gate runs before the evaluate
+     handler, so a NaN operand short-circuits the whole application and
+     the handler's carrier check never sees it. PINNED AS INTENDED
+     rather than fought: it matches IEEE `pow(NaN, x) = NaN` and
+     Mathematica's Indeterminate propagation, and the opposite ordering
+     (error wins, as `Round(NaN, ~oo)` gets) is an artifact of Round's
+     earlier BOXING seam — the per-head seam-timing differences are the
+     already-accepted class. Recorded in the handler comment, the
+     CHANGELOG, and a pin. ⚠️ For any future MULTI-SLOT canonical-handler
+     flip: the evaluate-seam carrier check runs only on NaN-free
+     applications; if error-wins semantics is ever wanted there, it
+     needs a framework change, not a handler change.
+  3. One missed simplification closed (review nit): an exact base whose
+     components OVERFLOW the double range (`(10⁴⁰⁰ + i)^∞`) now folds
+     through the overflow arm (a finite literal with a non-finite
+     double read has modulus far above 1) instead of declining.
+- **The full-suite gate caught one more defect in the batch's own code**
+  (fixed, gate re-run): widening the `-1`-exponent fold's guard from
+  `a.isInfinity && (a.isNegative || a.isPositive)` to bare `a.isInfinity`
+  made a symbol with the EMPTY type `never` fold to 0 — the bottom type
+  matches every type, so a never-typed operand answers `isInfinity` true
+  (the exact trap `isMatrixTyped` guards against a few lines up, and the
+  reason `interval-division.test.ts` pins `Power(m, -1)` as `never`).
+  Chasing it exposed the PRE-EXISTING siblings: a never-typed base
+  already folded `m^∞ → ~oo`, `m^-∞ → 0`, `m^0 → 1`, and a never-typed
+  exponent folded `2^m → +∞` — the 2026-08-29 interval-division fix had
+  guarded only the matrix rewrite. `canonicalPower` now has a single
+  early-out for a `never`-typed operand (either slot), pinned in
+  `interval-division.test.ts`. ⚠️ General rule this re-teaches: any fold
+  keyed on a bare type-channel predicate (`isInfinity`, `isFinite`,
+  `isGreater`, sign reads) must exclude the bottom type or keep a
+  value/literal witness, or `never`-typed operands walk in.
+
 ### Phase F — signature flips, operator-by-operator
 
 Each flip (e.g. `Heaviside: (real) -> rational<0..1>`, `total`) is its

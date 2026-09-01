@@ -27,6 +27,118 @@ function isMatrixTyped(x: Expression): boolean {
   return x.type.type !== 'never' && x.type.matches(new BoxedType('matrix'));
 }
 
+/** A number literal denoting the direction-less complex infinity `~oo` —
+ * infinite, but with no signed direction. */
+function isComplexInfinityLiteral(x: Expression): boolean {
+  return (
+    isNumber(x) &&
+    x.isInfinity === true &&
+    x.isPositive !== true &&
+    x.isNegative !== true
+  );
+}
+
+/**
+ * Whether an exact value's modulus is exactly 1: `0` when |v|² = 1, `1`
+ * when |v|² > 1, `-1` when |v|² < 1, `undefined` when the components do
+ * not admit the exact computation. An exact value is
+ * `(p/q)·√c + (r/s)·√m·i`, so |v|² is the RATIONAL
+ * `(p²c·s² + r²m·q²) / (q²s²)`, and the comparison against 1 is exact
+ * integer arithmetic — the machine doubles cannot decide it: `(5+12i)/13`
+ * computes `re² + im²` as 1.0000000000000002 though its modulus is
+ * exactly 1, and `1 + 10⁻¹⁰i` computes exactly 1 though its modulus is
+ * not.
+ */
+function exactModulusSquaredVsOne(nv: ExactNumericValue): number | undefined {
+  const toBig = (x: number | bigint): bigint | undefined =>
+    typeof x === 'bigint'
+      ? x
+      : Number.isSafeInteger(x)
+        ? BigInt(x)
+        : undefined;
+  const p = toBig(nv.rational[0]);
+  const q = toBig(nv.rational[1]);
+  const r = toBig(nv.imRational[0]);
+  const s = toBig(nv.imRational[1]);
+  const c = toBig(nv.radical);
+  const m = toBig(nv.imRadical);
+  if (
+    p === undefined ||
+    q === undefined ||
+    r === undefined ||
+    s === undefined ||
+    c === undefined ||
+    m === undefined ||
+    q === 0n ||
+    s === 0n
+  )
+    return undefined;
+  const lhs = p * p * c * s * s + r * r * m * q * q;
+  const rhs = q * q * s * s;
+  return lhs === rhs ? 0 : lhs > rhs ? 1 : -1;
+}
+
+/**
+ * The value of `a^(±∞)` for a NON-REAL finite number literal `a`, decided by
+ * the modulus (ruled 2026-09-01): for the +∞ exponent, |a| > 1 gives the
+ * direction-less `~oo` (the modulus grows without bound while the argument
+ * rotates), |a| < 1 gives 0, and |a| = 1 oscillates on the unit circle with
+ * no limit — NaN. The −∞ exponent mirrors through `a^(−∞) = (1/a)^∞`.
+ *
+ * How the modulus is compared depends on the literal's exactness:
+ *
+ * - An EXACT base takes the exact integer test (`exactModulusSquaredVsOne`
+ *   above), which is definitive — `i^∞ = NaN`, `((5+12i)/13)^∞ = NaN`,
+ *   `(1 + 10⁻¹⁰i)^∞ = ~oo`. If the exact test does not apply, machine
+ *   doubles classify only comfortably away from the unit circle; inside
+ *   the boundary band the base DECLINES rather than risk a wrong claim
+ *   (the node stays symbolic; `.N()` numericizes the operands and the
+ *   float arm below answers for those values).
+ * - An INEXACT (float-component) base is classified by its doubles — they
+ *   ARE its value — except within a few ulps of the unit circle, where
+ *   the true modulus of the doubles differs from 1 by no more than
+ *   representation error: at machine precision the power oscillates
+ *   rather than converging, so the value is NaN (`√3/2 + 0.5i` computes
+ *   `re² + im²` as 0.9999999999999999; folding that to 0 would amplify a
+ *   1-ulp artifact into a definite value).
+ *
+ * Returns `undefined` when the rule does not apply (real base, infinite
+ * operand, or boundary-ambiguous exact base) — the caller leaves the node
+ * unchanged.
+ */
+function complexBaseAtInfiniteExponent(
+  a: Expression,
+  ce: Expression['engine'],
+  expPositive: boolean
+): Expression | undefined {
+  if (!isNumber(a) || a.im === 0) return undefined;
+  if (!Number.isFinite(a.re) || !Number.isFinite(a.im)) {
+    // The literal itself is finite — the caller handles infinite operands
+    // — so a non-finite double read means an exact component OVERFLOWED
+    // the double range: the modulus is far above 1.
+    if (a.isFinite === true)
+      return expPositive ? ce.ComplexInfinity : ce.Zero;
+    return undefined;
+  }
+  const m2 = a.re * a.re + a.im * a.im;
+  if (a.isExact) {
+    const nv = a.numericValue;
+    if (nv instanceof ExactNumericValue) {
+      const t = exactModulusSquaredVsOne(nv);
+      if (t === 0) return ce.NaN;
+      if (t === 1) return expPositive ? ce.ComplexInfinity : ce.Zero;
+      if (t === -1) return expPositive ? ce.Zero : ce.ComplexInfinity;
+    }
+    if (Math.abs(m2 - 1) < 1e-9) return undefined;
+  } else if (Math.abs(m2 - 1) < 1e-12) {
+    return ce.NaN;
+  }
+  if (m2 > 1) return expPositive ? ce.ComplexInfinity : ce.Zero;
+  if (m2 < 1) return expPositive ? ce.Zero : ce.ComplexInfinity;
+  // Unreachable: every m2 === 1 case was answered by an arm above.
+  return undefined;
+}
+
 function isSqrt(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
   return (
@@ -282,6 +394,16 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   const unchanged = () =>
     ce._fn('Power', [a, b], { canonical: fullyCanonical });
 
+  // An operand with the EMPTY type `never` (e.g. a symbol declared
+  // `integer<2<..<3>`) has no value — but the bottom type matches every
+  // type, so the value folds below, keyed on type-channel predicates
+  // (`isInfinity`, `isFinite`, `isGreater`, sign reads), would all fire
+  // for it: a never-typed base folded `m^∞` to `~oo` and `m^0` to 1. No
+  // fold applies to a valueless operand; leave the node unchanged and its
+  // TYPE stays `never` (the same guard `isMatrixTyped` carries for the
+  // matrix rewrite).
+  if (a.type.type === 'never' || b.type.type === 'never') return unchanged();
+
   if (isFunction(a, 'Power')) {
     const [base, aPow] = a.ops;
     // (a^n)^m -> a^{n*m} only when mathematically safe:
@@ -383,7 +505,11 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       if (b.isPositive) return ce.Zero; // 0^∞ = 0
       // 0^-∞ = ~∞
       if (b.isNegative) return ce.ComplexInfinity;
-      return ce.NaN; // 0^~∞ = NaN
+      // A `~oo` exponent is off-carrier for `Power` (ruled 2026-09-01: no
+      // base has a value there). Leave the node unfolded so the `Power`
+      // evaluate handler answers the incompatible-type error — folding
+      // here (the old `0^~∞ = NaN`) would bypass that seam.
+      return unchanged();
     }
     //(note: these should be applicable only to the reals)
     if (b.isGreater(0)) return ce.Zero;
@@ -412,7 +538,15 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // One as base
   // (note: 1^∞ = NaN - Because there are various cases where lim(x(t),t)=1, lim(y(t),t)=∞ (or -∞),
   // but lim( x(t)^y(t), t) != 1.)
-  if (aIsNum && a.isSame(1)) return b.isFinite ? ce.One : ce.NaN;
+  // A `~oo` exponent stays unfolded: it is off-carrier for `Power` (ruled
+  // 2026-09-01), and the `Power` evaluate handler owns the
+  // incompatible-type error. `1^±∞` keeps the indeterminate-form NaN and
+  // `1^NaN` the propagated NaN.
+  if (aIsNum && a.isSame(1)) {
+    if (b.isFinite) return ce.One;
+    if (isComplexInfinityLiteral(b)) return unchanged();
+    return ce.NaN;
+  }
 
   // One as exponent
   // (Permit the base to be a FN-expr. here, too...)
@@ -421,8 +555,15 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // -1 exponent
   if (b.isSame(-1)) {
     if (aIsNum) {
-      // (-∞)^-1 = 0, ∞^-1 = 0  (exclude ~oo)
-      if (a.isInfinity && (a.isNegative || a.isPositive)) return ce.Zero;
+      // 1/∞ = 0 for EVERY infinite base, `~oo` included: the modulus is
+      // infinite in every direction, so the reciprocal's modulus is 0 in
+      // every direction. This agrees with the `Divide` route (`1/~oo = 0`)
+      // and with `(~oo)^-2 = 0`; excluding `~oo` here used to send it to
+      // `.inv()`, which answered NaN. `isNumber` restricts the fold to a
+      // LITERAL infinity: a symbol with the EMPTY type `never` answers
+      // `isInfinity` true (the bottom type matches every type — the same
+      // trap `isMatrixTyped` guards against), and has no value to fold.
+      if (isNumber(a) && a.isInfinity === true) return ce.Zero;
 
       // (-1)^-1 = -1
       if (a.isSame(-1)) return ce.NegativeOne;
@@ -473,6 +614,19 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
         return ce.Zero;
       }
 
+      // A non-real literal base is decided by its modulus (ruled
+      // 2026-09-01): |a| > 1 spirals outward — the modulus grows without
+      // bound while the argument rotates, so the direction-less `~oo`
+      // (`(1+i)^∞ = ~oo`, matching the real `(-2)^∞` above); |a| < 1
+      // spirals into 0; |a| = 1 with a ≠ 1 oscillates on the unit circle
+      // with no limit (`i^∞ = NaN`, like `(-1)^∞`). These used to stay
+      // symbolic under `evaluate()` while `.N()` answered NaN — a route
+      // divergence.
+      {
+        const fold = complexBaseAtInfiniteExponent(a, ce, true);
+        if (fold !== undefined) return fold;
+      }
+
       return unchanged();
     }
 
@@ -492,13 +646,21 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
         // Must be < 0
         return a.isGreater(-1) ? ce.ComplexInfinity : ce.Zero;
       }
+      // Non-real literal base: the mirror of the +∞ arm above —
+      // a^(−∞) = (1/a)^∞, so |a| > 1 gives 0 and |a| < 1 gives `~oo`.
+      {
+        const fold = complexBaseAtInfiniteExponent(a, ce, false);
+        if (fold !== undefined) return fold;
+      }
       return unchanged();
     }
 
-    //Must be 'x^ComplexInfinity'
-    // b^~∞ = NaN
-    // Because b^z has no limit as z -> ~∞.
-    return ce.NaN;
+    // Must be 'x^~oo'. A `~oo` exponent is off-carrier for `Power` (ruled
+    // 2026-09-01): `b^z` has no value at `z = ~oo` for ANY base — the
+    // result depends on the direction of approach. Leave the node unfolded
+    // so the `Power` evaluate handler answers the incompatible-type error
+    // (the old fold to NaN bypassed that seam).
+    return unchanged();
   }
 
   //'AnyInfinity^b'
@@ -1031,9 +1193,6 @@ export function pow(
   if (canonicalResult.operator !== 'Power') return canonicalResult;
 
   const e = typeof exp === 'number' ? exp : exp.im === 0 ? exp.re : undefined;
-
-  // @todo: this should be canonicalized to a number, so it should never happen here
-  if (isSymbol(x, 'ComplexInfinity')) return ce.NaN;
 
   if (isSymbol(x, 'ExponentialE')) {
     // e^(ln(y)) = y. (Previously this only reduced because `ln(y)` of a

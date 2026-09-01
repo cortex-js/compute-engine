@@ -205,6 +205,12 @@ import { parseType } from '../../common/type/parse.js';
 /** The carrier of `IsPrime`/`IsComposite`: all of `number` except the
  * infinities. See `notFiniteEnoughForPrimality`, which enforces it. */
 const PRIMALITY_CARRIER_TYPE = parseType('complex | nan');
+
+/** The carrier of `Power`'s EXPONENT slot: the finite complex numbers and
+ * the signed infinities, excluding `~oo` (no base has a value there). The
+ * `Power` evaluate handler enforces it — see the comment on the `Power`
+ * signature. */
+const POWER_EXPONENT_CARRIER_TYPE = parseType('complex | signed_infinity');
 import {
   foldQuantityOperands,
   isQuantity,
@@ -1149,13 +1155,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 3500,
 
-      // NOT flipped to a Contract B domain signature with the rest of the
-      // complex-extension family (2026-08-31): `Exp(x)` canonicalizes to
-      // `Power(e, x)` below, so no `Exp` application survives to be
-      // validated or evaluated — its behavior at every exceptional point
-      // (`Exp(~oo)`, `Exp(NaN)`) is `Power`'s, and a precise carrier
-      // declared here would be a claim nothing enforces. The flip rides
-      // with `Power`'s own future migration.
+      // Deliberately NOT given a precise domain signature of its own:
+      // `Exp(x)` canonicalizes to `Power(e, x)` below, so no `Exp`
+      // application survives to be validated or evaluated — its behavior
+      // at every exceptional point is `Power`'s, and a precise carrier
+      // declared here would be a claim nothing enforces. `Power`'s own
+      // flip landed 2026-09-01, and governs: `Exp(~oo)` is an
+      // incompatible-type error (the exponent slot excludes `~oo`),
+      // `Exp(NaN)` propagates, `Exp(±∞)` keeps its values (+∞ and 0).
       signature: '(number) -> number',
       // Because it gets canonicalized to Power, the sgn handler is not called
       // sgn: ([x]) => {
@@ -2851,9 +2858,42 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q33456',
       broadcastable: true,
       complexity: 3500,
-      signature: '(number, number) -> number',
+      // The signature declares, PER SLOT, exactly the points where the
+      // power has a value (ruled 2026-09-01):
+      // - The BASE admits the finite complex numbers, the signed
+      //   infinities (`(+∞)^2 = +∞`), and `~oo` — a positive power of
+      //   `~oo` is `~oo` and a negative power is 0 in every direction of
+      //   approach, so those values are genuine (`(~oo)^-1 = 0`, agreeing
+      //   with the `Divide` route's `1/~oo`).
+      // - The EXPONENT excludes `~oo`: `b^z` has no value at `z = ~oo`
+      //   for ANY base — the result depends on the direction of approach
+      //   in every case — so `2^~oo`, `0^~oo`, `(~oo)^~oo`, and
+      //   `Exp(~oo)`/`Exp2(~oo)` (which canonicalize to `Power`) are
+      //   incompatible-type errors. Indeterminate FORMS between admitted
+      //   operands keep their NaN value (`0^0`, `1^∞`, `(±∞)^0`).
+      // The error surfaces at EVALUATION, inside the `evaluate` handler
+      // below: because this operator has a custom `canonical` handler,
+      // neither the boxing-time signature validation nor the dispatch-time
+      // conformance re-test runs for it, so the handler itself is the
+      // enforcement seam — the same arrangement as the trigonometric
+      // heads' factory (`trigFunction`, trigonometry.ts), and a tracked
+      // timing deviation of `docs/SIGNATURE-GUIDELINES.md` §4.
+      // `canonicalPower` deliberately leaves the off-carrier points
+      // unfolded so the node survives to that seam. `NaN` in either slot
+      // propagates (declared explicitly: these extended carriers are not
+      // subtypes of `complex`, so the policy derived from the signature
+      // would be `reject` — see `docs/ERROR-MODEL.md` §4). The RESULT
+      // stays the wide `number`: the compiled lanes' kind-preservation
+      // discipline relies on it (`resultIsComplexValued`,
+      // javascript-target.ts), and the per-call sharpness lives in the
+      // type handler below.
+      signature: '(complex | infinity, complex | signed_infinity) -> number',
+      nanBehavior: 'propagate',
       type: ([base, exp]) => {
-        if (base.isNaN || exp.isNaN) return 'number';
+        // A proven-NaN operand: decline, so the framework's proven-NaN arm
+        // answers the sharp `nan` from the propagate policy (the
+        // `Sqrt`/`Erf` precedent).
+        if (base.isNaN || exp.isNaN) return undefined;
         // A non-finite base or exponent can produce ±∞ *or* NaN — `0^∞`,
         // `∞^0`, `1^∞`, `i^∞`, `∞^i` are all indeterminate. Only a
         // *non-negative real* base raised to a *positive finite real* exponent
@@ -3123,6 +3163,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // evaluation.
         const nonNumeric = nonNumericOperandError(engine!, [x, n]);
         if (nonNumeric !== undefined) return nonNumeric;
+        // The exponent carrier, enforced at the evaluate seam (see the
+        // comment on the signature above): a `~oo` exponent — infinite
+        // with no signed direction — is off-carrier, and gets the same
+        // incompatible-type error value that boxing validation would have
+        // produced. `NaN` is not an error (it propagates), and the signed
+        // infinities are admitted values. The BASE slot needs no twin
+        // check: its carrier admits every non-finite number. When BOTH
+        // conditions hold — `Power(NaN, ~oo)` — the NaN wins: the
+        // dispatch-time NaN-propagation gate runs before this handler, so
+        // a NaN operand short-circuits the whole application (matching
+        // IEEE `pow(NaN, x) = NaN`); this check only ever sees NaN-free
+        // operands.
+        if (
+          isNumber(n) &&
+          n.isFinite === false &&
+          n.isNaN !== true &&
+          n.isPositive !== true &&
+          n.isNegative !== true
+        )
+          return engine!.typeError(POWER_EXPONENT_CARRIER_TYPE, n.type, n);
         const evalBase = x;
         if (evalBase.operator === 'Quantity') {
           const r = quantityPower(engine!, evalBase, n);

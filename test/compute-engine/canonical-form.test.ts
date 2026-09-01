@@ -610,41 +610,43 @@ describe('CANONICAL FORMS', () => {
     });
 
     test(`x^{~oo}`, () => {
+      // A `~oo` exponent no longer folds to NaN at canonicalization
+      // (`Power` signature flip, ruled 2026-09-01): it is outside the
+      // exponent slot's declared domain, and the node must survive
+      // canonicalization unfolded so the `Power` evaluate handler can
+      // answer the incompatible-type error. See the pins in
+      // `error-model.test.ts` ("Power: per-slot carriers").
       expect(checkPower('0^{\\operatorname{ComplexInfinity}}'))
         .toMatchInlineSnapshot(`
         box        = ["Power", 0, "ComplexInfinity"]
-        canonForms = NaN
-        canonical  = NaN
+        canonForms = ["Power", 0, "ComplexInfinity"]
       `);
       expect(checkPower('1^{\\operatorname{ComplexInfinity}}'))
         .toMatchInlineSnapshot(`
         box        = ["Power", 1, "ComplexInfinity"]
-        canonForms = NaN
-        canonical  = NaN
+        canonForms = ["Power", 1, "ComplexInfinity"]
       `);
       expect(checkPower('-1^{\\operatorname{ComplexInfinity}}'))
         .toMatchInlineSnapshot(`
         box        = ["Negate", ["Power", 1, "ComplexInfinity"]]
-        canonForms = NaN
-        canonical  = NaN
+        canonForms = ["Negate", ["Power", 1, "ComplexInfinity"]]
       `);
       expect(checkPower('\\infty^{\\operatorname{ComplexInfinity}}'))
         .toMatchInlineSnapshot(`
         box        = ["Power", "PositiveInfinity", "ComplexInfinity"]
-        canonForms = NaN
-        canonical  = NaN
+        canonForms = ["Power", "PositiveInfinity", "ComplexInfinity"]
       `);
       expect(checkPower('{-\\infty}^{\\operatorname{ComplexInfinity}}'))
         .toMatchInlineSnapshot(`
         box        = ["Power", ["Negate", "PositiveInfinity"], "ComplexInfinity"]
-        canonForms = NaN
-        canonical  = NaN
+        canonForms = ["Power", "NegativeInfinity", "ComplexInfinity"]
+        canonical  = ["Power", "NegativeInfinity", "ComplexInfinity"]
       `);
       expect(checkPower('{-\\mathrm{NaN}}^{\\operatorname{ComplexInfinity}}'))
         .toMatchInlineSnapshot(`
         box        = ["Power", ["Negate", "NaN"], "ComplexInfinity"]
-        canonForms = NaN
-        canonical  = NaN
+        canonForms = ["Power", "NaN", "ComplexInfinity"]
+        canonical  = ["Power", "NaN", "ComplexInfinity"]
       `);
     });
 

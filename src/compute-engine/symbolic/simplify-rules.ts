@@ -578,6 +578,17 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!isNumber(x.op1)) return undefined;
 
     if (x.operator === 'Sqrt') {
+      // A `~oo` operand is outside `Sqrt`'s declared domain (ruled
+      // 2026-08-31), and the evaluate route owns the incompatible-type
+      // error — so this rule DECLINES rather than rewrite to NaN (the
+      // `.sqrt()` method's answer). Same route-agreement convention as
+      // the trigonometric heads.
+      if (
+        x.op1.isInfinity === true &&
+        x.op1.isPositive !== true &&
+        x.op1.isNegative !== true
+      )
+        return undefined;
       // sqrt(-10) -> i*sqrt(10)
       // Canonicalization already folds Sqrt of the (positive) numeric operand
       // — Sqrt(4)→2, Sqrt(12)→2√3, Sqrt(10)→√10 — so the canonical Multiply is
@@ -646,6 +657,17 @@ export const SIMPLIFY_RULES: Rule[] = [
   (x): RuleStep | undefined => {
     if (!isFunction(x)) return undefined;
     if (x.operator === 'Ln') {
+      // A `~oo` operand is outside `Ln`'s declared domain (ruled
+      // 2026-08-31), and the evaluate route owns the incompatible-type
+      // error — so this rule DECLINES rather than rewrite to NaN (the
+      // `.ln()` method's answer). Same route-agreement convention as the
+      // trigonometric heads.
+      if (
+        x.op1.isInfinity === true &&
+        x.op1.isPositive !== true &&
+        x.op1.isNegative !== true
+      )
+        return undefined;
       // Skip ln of non-integer rationals — simplifyLog decomposes ln(p/q) → ln(p) - ln(q)
       if (x.op1.operator === 'Rational' && x.op1.isInteger === false)
         return undefined;

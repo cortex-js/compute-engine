@@ -192,6 +192,15 @@ describe('INTERVAL DIVISION — an empty-range operand (found alongside)', () =>
     expect(e.box('m').type.toString()).toBe('never');
     for (const n of [2, -2, -1, 3])
       expect(e.box(['Power', 'm', n]).type.toString()).toBe('never');
+    // The VALUE folds must not fire for a never-typed operand either —
+    // `isInfinity`/`isFinite`/`isGreater` all answer true for the bottom
+    // type, and the infinite-exponent and zero-exponent folds used to
+    // read them: `m^∞` folded to `~oo`, `m^0` to 1, `2^m` to `+oo`
+    // (found by the Power signature-flip batch, 2026-09-01; the guard is
+    // an early-out in `canonicalPower`).
+    for (const x of ['PositiveInfinity', 'NegativeInfinity', 0])
+      expect(e.box(['Power', 'm', x]).type.toString()).toBe('never');
+    expect(e.box(['Power', 2, 'm']).type.toString()).toBe('never');
     expect(e.box(['Add', 'm', 1]).type.toString()).toBe('never');
     expect(e.box(['Sin', 'm']).type.toString()).toBe('never');
     // Genuine matrices still take the rewrites.

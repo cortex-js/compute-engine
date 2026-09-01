@@ -248,6 +248,36 @@
     with a non-finite type stays symbolic; compiled code keeps its
     numeric behavior at these points.
 
+- **`Power` now declares its mathematical domain, per operand** (closing
+  out the domain-declaration batches above; `Exp` and `Exp2` follow
+  along, since they canonicalize to `Power`). The base accepts every
+  number, including all three infinities; the exponent accepts the
+  finite complex numbers and `±∞`, but not `~oo` — `b^z` has no value
+  at `z = ~oo` for any base, because the result depends on the
+  direction of approach. Consequences:
+
+  - `2^~oo`, `0^~oo`, `(~oo)^~oo`, `Exp(~oo)`, and `Exp2(~oo)` are now
+    `incompatible-type` errors, reported at evaluation on both routes.
+    They all used to answer `NaN`.
+  - `(~oo)^{-1}` now answers `0`, agreeing with `(~oo)^{-2} = 0` and
+    with `1/~oo = 0`. It used to answer `NaN` — an internal
+    inconsistency.
+  - A non-real base raised to `±∞` is decided by its modulus, on both
+    routes: `(1+i)^{+∞} = ~oo` (the modulus grows without bound while
+    the argument rotates), `(1+i)^{-∞} = 0`, and a base on the unit
+    circle other than 1 has no limit — `i^{+∞} = NaN`. These used to
+    stay unevaluated under `evaluate()` and answer `NaN` under `N()`.
+  - Everything else is unchanged: the indeterminate forms (`0^0`,
+    `1^{±∞}`, `(±∞)^0`) still answer `NaN`, `NaN` in either operand
+    still propagates — including `NaN^{~oo}`, where the `NaN` wins over
+    the domain error, matching IEEE `pow(NaN, x) = NaN` — and all the
+    real extended values (`2^{+∞} = +∞`, `0^{-1} = ~oo`,
+    `(+∞)^{+∞} = +∞`, …) keep their values.
+  - The simplification rules for `Sqrt` and `Ln` no longer rewrite a
+    `~oo` argument to `NaN` (a leftover from before their own domain
+    declarations): they decline, and the evaluate route reports the
+    error, like the other declared-domain operators.
+
 - **`IsPrime` and `IsComposite` now use positive-integer definitions.**
   `IsPrime` returns `False` for a decidable value that is not a positive
   integer greater than 1. It reports an `incompatible-type` error for an

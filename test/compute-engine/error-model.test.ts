@@ -1177,6 +1177,148 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     ).toBe(true);
   });
 
+  test('Power: per-slot carriers — the base admits every infinity, the exponent excludes ~oo', () => {
+    // Power signature flip (ruled 2026-09-01):
+    // `(complex | infinity, complex | signed_infinity) -> number`, with
+    // `Exp`/`Exp2` riding along (they canonicalize to `Power`). `Power`
+    // has a custom `canonical` handler, so — like the trig heads —
+    // neither boxing validation nor the dispatch-time conformance re-test
+    // runs for it: its own EVALUATE handler is the enforcement seam, and
+    // the error lands at evaluation on both routes.
+    const ce2 = new ComputeEngine();
+    const POS = 'PositiveInfinity';
+    const NEG = 'NegativeInfinity';
+    const COO = 'ComplexInfinity';
+
+    // The EXPONENT slot excludes `~oo`: `b^z` has no value at `z = ~oo`
+    // for ANY base — the result depends on the direction of approach in
+    // every case. These all answered NaN before the flip.
+    for (const base of [2, 0.5, 0, -2, 'ImaginaryUnit', POS, COO]) {
+      expect(isTypeError(ce2.box(['Power', base, COO]).evaluate())).toBe(true);
+      expect(isTypeError(ce2.box(['Power', base, COO]).N())).toBe(true);
+    }
+    expect(isTypeError(ce2.box(['Exp', COO]).evaluate())).toBe(true);
+    expect(isTypeError(ce2.box(['Exp2', COO]).evaluate())).toBe(true);
+
+    // The BASE slot admits `~oo`: a positive power is `~oo` and a
+    // negative power is 0 in every direction of approach. `(~oo)^-1`
+    // used to answer NaN through `.inv()`, contradicting both
+    // `(~oo)^-2 = 0` and the `Divide` route's `1/~oo = 0`.
+    expect(
+      ce2.box(['Power', COO, 2]).evaluate().isSame(ce2.ComplexInfinity)
+    ).toBe(true);
+    expect(ce2.box(['Power', COO, -1]).evaluate().isSame(0)).toBe(true);
+    expect(ce2.box(['Power', COO, -2]).evaluate().isSame(0)).toBe(true);
+
+    // A NON-REAL base at a ±∞ exponent folds by its modulus now (it used
+    // to stay symbolic under evaluate() while .N() answered NaN — a route
+    // divergence): |b| > 1 spirals out to `~oo`, |b| < 1 spirals into 0,
+    // and |b| = 1 with b ≠ 1 oscillates on the unit circle — NaN.
+    const onePlusI = ['Add', 1, 'ImaginaryUnit'];
+    expect(
+      ce2.box(['Power', onePlusI, POS]).evaluate().isSame(ce2.ComplexInfinity)
+    ).toBe(true);
+    expect(ce2.box(['Power', onePlusI, NEG]).evaluate().isSame(0)).toBe(true);
+    expect(
+      isNaNValue(ce2, ce2.box(['Power', 'ImaginaryUnit', POS]).evaluate())
+    ).toBe(true);
+    expect(
+      isNaNValue(ce2, ce2.box(['Power', 'ImaginaryUnit', POS]).N())
+    ).toBe(true);
+    // The unit-circle boundary is decided EXACTLY for an exact base —
+    // the machine doubles cannot: `(5+12i)/13` has modulus exactly 1
+    // (re² + im² computes 1.0000000000000002 in doubles), while
+    // `1 + 10⁻¹⁰i` has modulus > 1 (its re² + im² rounds to exactly 1).
+    expect(
+      isNaNValue(
+        ce2,
+        ce2
+          .box(['Power', ['Divide', ['Complex', 5, 12], 13], POS])
+          .evaluate()
+      )
+    ).toBe(true);
+    expect(
+      ce2
+        .box([
+          'Power',
+          ['Add', 1, ['Multiply', ['Divide', 1, ['Power', 10, 10]], 'ImaginaryUnit']],
+          POS,
+        ])
+        .evaluate()
+        .isSame(ce2.ComplexInfinity)
+    ).toBe(true);
+    // A FLOAT base within a few ulps of the unit circle answers NaN on
+    // both routes — at machine precision the power oscillates, and
+    // classifying by the last ulp would amplify a representation
+    // artifact into a definite value (√3/2 + 0.5i computes re² + im²
+    // as 0.9999999999999999).
+    expect(
+      isNaNValue(
+        ce2,
+        ce2
+          .box(['Power', ['Complex', Math.sqrt(3) / 2, 0.5], POS])
+          .evaluate()
+      )
+    ).toBe(true);
+    expect(
+      isNaNValue(
+        ce2,
+        ce2.box(['Power', ['Complex', Math.sqrt(3) / 2, 0.5], NEG]).N()
+      )
+    ).toBe(true);
+
+    // NaN PROPAGATES in either slot — never an error. That includes
+    // `Power(NaN, ~oo)`, where a NaN base meets the off-carrier exponent:
+    // the dispatch-time NaN-propagation gate runs before the evaluate
+    // handler's carrier check, so the NaN wins over the domain error
+    // (matching IEEE `pow(NaN, x) = NaN`).
+    for (const [a, b] of [
+      ['NaN', 2],
+      [2, 'NaN'],
+      ['NaN', 0],
+      ['NaN', 'NaN'],
+      ['NaN', COO],
+      [COO, 'NaN'],
+    ] as const) {
+      expect(isNaNValue(ce2, ce2.box(['Power', a, b]).evaluate())).toBe(true);
+      expect(isNaNValue(ce2, ce2.box(['Power', a, b]).N())).toBe(true);
+    }
+
+    // The indeterminate FORMS between admitted operands keep their NaN
+    // value, and the genuine extended values are untouched.
+    for (const [a, b] of [
+      [0, 0],
+      [1, POS],
+      [POS, 0],
+      [COO, 0],
+      [-1, POS],
+    ] as const) {
+      expect(isNaNValue(ce2, ce2.box(['Power', a, b]).evaluate())).toBe(true);
+    }
+    expect(
+      ce2.box(['Power', 2, POS]).evaluate().isSame(ce2.PositiveInfinity)
+    ).toBe(true);
+    expect(
+      ce2.box(['Power', POS, POS]).evaluate().isSame(ce2.PositiveInfinity)
+    ).toBe(true);
+    expect(
+      ce2.box(['Power', 0, -1]).evaluate().isSame(ce2.ComplexInfinity)
+    ).toBe(true);
+    expect(ce2.box(['Power', 2, NEG]).evaluate().isSame(0)).toBe(true);
+    expect(ce2.box(['Exp', POS]).evaluate().isSame(ce2.PositiveInfinity)).toBe(
+      true
+    );
+    expect(ce2.box(['Exp', NEG]).evaluate().isSame(0)).toBe(true);
+
+    // The simplify route DECLINES at the off-carrier exponent (the
+    // evaluate route owns the error) — the same route-agreement
+    // convention as the trig heads. `Sqrt`/`Ln`'s own simplify twins,
+    // which still rewrote `~oo` to NaN, were fixed with this batch.
+    expect(ce2.box(['Power', 2, COO]).simplify().operator).toBe('Power');
+    expect(ce2.box(['Sqrt', COO]).simplify().operator).toBe('Sqrt');
+    expect(ce2.box(['Ln', COO]).simplify().operator).toBe('Ln');
+  });
+
   test('compile(Heaviside)(NaN) agrees with the interpreter now', () => {
     // The compiled lane was fixed first (2026-08-28) under ratified Contract
     // B's derived `propagate` default, which left a route divergence: the
