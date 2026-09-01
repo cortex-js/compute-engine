@@ -5861,9 +5861,9 @@ function type(expr: BoxedFunction): Type {
     // Contract B derived application type (`docs/ERROR-MODEL.md` §4; Phase
     // C of `docs/plans/2026-08-30-error-model-implementation.md`). Applied
     // only when NO per-operator type handler answered: a handler's claim
-    // is already conditioned on the evidence it read (`realOnlyStepType`
-    // answers `rational<0..1>` only for a proven-real operand), so
-    // widening it would degrade the sharper authority. The candidacy test
+    // is already conditioned on the evidence it read (`gammaPoleType`
+    // claims a pole-free tier only for an operand proven off the poles),
+    // so widening it would degrade the sharper authority. The candidacy test
     // (`typeHasNanFreeNumericCell`) keeps the adjustment byte-invisible
     // everywhere the result type is not yet precise: a result whose
     // numeric cells already admit `nan` (bare `number`) is left alone. A

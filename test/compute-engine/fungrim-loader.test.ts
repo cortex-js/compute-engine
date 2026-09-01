@@ -83,8 +83,12 @@ describe('loadIdentities (full artifact)', () => {
     // One fewer since the finite-by-default numeric flip: the artifact no
     // longer carries 310f36 (`z^0 -> 1` guarded `_z: complex`), whose match
     // side a `complex`-typed — hence finite — base now folds to `1` at
-    // canonicalization.
-    expect(report.loaded).toBe(1434);
+    // canonicalization. One fewer again since the Phase F `Sign` flip: the
+    // artifact no longer carries 09c107 (`Sign(i) -> i`, the complex sign
+    // convention `z/|z|`), whose match side is a boxing error under the
+    // declared extended-real carrier — this engine's `Sign` declines off
+    // the real line by design.
+    expect(report.loaded).toBe(1433);
     // The only default-load skips are the solve templates (solve-disabled).
     expect(report.skipped.every((s) => s.reason === 'solve-disabled')).toBe(
       true
@@ -102,7 +106,7 @@ describe('loadIdentities (full artifact)', () => {
 
   it('reports byTarget and byPurpose consistent with the artifact manifest', () => {
     expect(report.byTarget).toEqual({
-      simplify: 1434,
+      simplify: 1433,
       solve: 0,
       harmonization: 0,
     });
@@ -112,7 +116,8 @@ describe('loadIdentities (full artifact)', () => {
       // 1311/116 → 1304/123 in the 2026-08-14 regen (7 net
       // simplify→expand re-labels among the 98 reoriented rules).
       // Finite-by-default flip: −1 (310f36).
-      simplify: 1303,
+      // Phase F Sign flip: −1 (09c107, `Sign(i) -> i`).
+      simplify: 1302,
       transform: 8,
       expand: 123,
     });

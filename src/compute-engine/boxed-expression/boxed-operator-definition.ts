@@ -50,7 +50,11 @@ import {
   functionLiteralBody,
   functionLiteralParameters,
 } from './function-literal.js';
-import { functionResult, signatureArms } from '../../common/type/utils.js';
+import {
+  broadcastElementType,
+  functionResult,
+  signatureArms,
+} from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -875,6 +879,36 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // means "no possible value" — a contradiction — not "proven NaN".
       if (opT !== 'never' && isSubtype(opT, 'nan')) return 'is-marker';
       if (isSubtype('nan', opT)) return 'widen-nan';
+      // Broadcast operands carry their numbers in CELLS: for a
+      // broadcastable operator a collection operand in a numeric
+      // propagate slot is a broadcast lift, and the NaN evidence rides in
+      // the ELEMENT type — `Sign(L)` for `L: list<number>` must widen its
+      // per-cell claim, and `Sign([1, NaN])` puts a literal `NaN` in one
+      // cell. The two subtype probes above see only the collection type
+      // (`nan` is not a subtype of `list<number>`), so descend to the
+      // element type — with `broadcastElementType`, the union-aware
+      // descent the broadcast machinery itself uses, so a union of
+      // collection shapes (`list<real> | list<nan>`) is covered too —
+      // and re-test. The helper returns its argument by REFERENCE when no
+      // descent is possible, which is the loop's fixpoint. The verdict
+      // for element-level evidence is always `widen-nan`, never
+      // `is-marker`: a NaN element makes ONE cell NaN, not the whole
+      // application, and the widening is applied per cell
+      // (`widenNumericCellsWithNan`).
+      if (this.broadcastable) {
+        let elT: Type = opT;
+        while (true) {
+          const e = broadcastElementType(elT);
+          if (e === elT) break;
+          elT = e;
+        }
+        if (
+          elT !== opT &&
+          elT !== 'never' &&
+          (isSubtype('nan', elT) || isSubtype(elT, 'nan'))
+        )
+          return 'widen-nan';
+      }
     }
     return 'none';
   }

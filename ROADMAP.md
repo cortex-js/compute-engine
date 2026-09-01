@@ -1555,6 +1555,25 @@ current answer's soundness — they only recover bounds the conservative
 model gives up. Do this AFTER the flip's Phase 2 codemod lands (it
 renames the very tier names the sets list), in one small diff with pins.
 
+### Nightly type-soundness grid: 6 binary arithmetic suites fail on a range-granularity artifact — OPEN 2026-08-31 (pre-existing; found while running the grid for the Sign Phase F flip)
+
+`CE_NIGHTLY=1` on `test/compute-engine/nightly/type-soundness-grid.test.ts`
+fails the `Add`/`Subtract`/`Multiply`/`Divide`/`Power`/`Root` suites
+(18–21 cells each; unary suites all pass). Reproduced identically at
+HEAD `ec3c8456` with and without the Sign-flip changes, so the class is
+not new. The shape, from a sample cell: `Add(2/3, 0.5)` gets the static
+claim `real<1.16..1.171>` (interval propagation), evaluates to the
+big-decimal `1.1666…67`, and that VALUE's own literal type is spelled
+with coarser bounds — `real<1.1..1.2>` — which is a WIDER interval, so
+`isSubtype(evalType, staticT)` fails even though the value lies inside
+the static range. The value is right and the static claim is right; the
+disagreement is between two range-spelling granularities (the evaluated
+literal's range keeps fewer digits than the interval propagation). To
+close: either the evaluated big-decimal literal's range spelling keeps
+enough digits to stay inside propagated claims, or the grid's oracle
+should compare the VALUE against the static range instead of comparing
+the two range spellings. Nightly-only, so no default-suite impact.
+
 ### Three compiled-code pins fail at HEAD `cb30c8be` — OPEN 2026-08-30 (found by a full-suite run; NOT touched)
 
 `design-d-callback-contract.test.ts:249`, `lambda-param-element-inference.test.ts:306`

@@ -20,23 +20,23 @@
     "entries": 1648
   },
   "counts": {
-    "rules": 1444,
+    "rules": 1443,
     "byPurpose": {
       "expand": 123,
-      "simplify": 1313,
+      "simplify": 1312,
       "transform": 8
     },
     "byClass": {
       "identity": 1099,
-      "specific-value": 345
+      "specific-value": 344
     },
     "byTarget": {
-      "simplify": 1434,
+      "simplify": 1433,
       "solve": 10
     }
   },
   "ledger": {
-    "box-error": 1,
+    "box-error": 2,
     "compat-signature": 3,
     "curated-exclude": 4,
     "duplicate-undirected": 15,
@@ -202,7 +202,6 @@
 {"id":"fungrim:0984ef","match":["Power",["Sqrt","_z"],2],"replace":"_z","guards":[{"k":"type","wc":"_z","t":"complex"}],"purpose":"simplify","target":"simplify","class":"identity","heads":[],"topics":["sqrt"]},
 {"id":"fungrim:099b19","match":["Real",["Ln","_z"]],"replace":["Ln",["Abs","_z"]],"guards":[{"k":"type","wc":"_z","t":"complex"},{"k":"ne","lhs":"_z","rhs":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["Abs","Ln","Real"],"topics":["log"]},
 {"id":"fungrim:09a494","match":["Divide","Pi",["Multiply",4,["Sqrt","_x"]]],"replace":["CarlsonRC","_x",["Multiply",2,"_x"]],"guards":[{"k":"type","wc":"_x","t":"complex"}],"purpose":"simplify","target":"simplify","class":"identity","heads":["CarlsonRC"],"topics":["carlson_elliptic"]},
-{"id":"fungrim:09c107","match":["Sign",["Complex",0,1]],"replace":"ImaginaryUnit","guards":[],"purpose":"simplify","target":"simplify","class":"specific-value","heads":["Sign"],"topics":["imaginary_unit"]},
 {"id":"fungrim:0a2120","match":["Divide",["EisensteinG",["Multiply",2,"_k"],"_tau"],["Multiply",2,["Zeta",["Multiply",2,"_k"]]]],"replace":["EisensteinE",["Multiply",2,"_k"],"_tau"],"guards":[{"k":"type","wc":"_k","t":"integer"},{"k":"cmp","wc":"_k","op":"gt","bound":0},{"k":"part-cmp","wc":"_tau","part":"im","op":"gt","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["EisensteinE","EisensteinG","Zeta"],"topics":["eisenstein"]},
 {"id":"fungrim:0a5ef4","match":["Add",["Multiply",-480,["Power",["DedekindEta",["Multiply",2,"_tau"]],12]],["Multiply",8192,["Divide",["Power",["DedekindEta",["Multiply",4,"_tau"]],24],["Power",["DedekindEta",["Multiply",2,"_tau"]],12]]],["Divide",["Power",["DedekindEta","_tau"],24],["Power",["DedekindEta",["Multiply",2,"_tau"]],12]],["Multiply",-16896,["Divide",["Multiply",["Power",["DedekindEta",["Multiply",2,"_tau"]],12],["Power",["DedekindEta",["Multiply",4,"_tau"]],8]],["Power",["DedekindEta","_tau"],8]]]],"replace":["EisensteinE",6,"_tau"],"guards":[{"k":"part-cmp","wc":"_tau","part":"im","op":"gt","bound":0}],"purpose":"simplify","target":"simplify","class":"identity","heads":["DedekindEta","EisensteinE"],"topics":["eisenstein"]},
 {"id":"fungrim:0a7aff","match":["LCM","_a",0],"replace":0,"guards":[{"k":"type","wc":"_a","t":"integer"}],"purpose":"simplify","target":"simplify","class":"identity","heads":["LCM"],"topics":["gcd"]},

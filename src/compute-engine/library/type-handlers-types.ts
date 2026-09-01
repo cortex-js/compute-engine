@@ -186,35 +186,6 @@ function isBroadcastableType(t: Type): boolean {
 }
 
 /**
- * Result type of a step function that is defined on the REAL line only:
- * `Heaviside` (0, 1/2, 1) and `Sign` (−1, 0, 1). On the reals the value is
- * one of finitely many finite numbers, at the ends of the line included
- * (`H(−∞) = 0`, `Sign(+∞) = 1`), so a proven real argument has a finite
- * value of the tier the caller names in `onReal`.
- *
- * Nothing else has a value at all: neither step function is defined at NaN,
- * at `~oo`, or off the real line (where `Sign`'s usual convention `z/|z|`
- * would be complex, not an integer), and no finite type admits those. So the
- * gate narrows only on a PROVEN real, and an argument whose type cannot
- * decide realness keeps the wide `number` — the non-finite typing convention.
- * The claim is per-element: both operators are broadcastable.
- *
- * Realness here means EXTENDED realness: the bare name `real` denotes the
- * finite reals, so a `±∞` argument does not match it, and gating on `real`
- * alone would send `H(−∞)` and `Sign(+∞)` — both of which do have a value —
- * to the top type.
- */
-export function realOnlyStepType(
-  x: OperandDescriptor | undefined,
-  onReal: Type
-): Type {
-  if (x === undefined) return 'number';
-  return typeFact(broadcastOperandType(x), EXTENDED_REAL_TYPE) === true
-    ? onReal
-    : 'number';
-}
-
-/**
  * Is this descriptor a number LITERAL? The structural view answers `number`
  * for a literal and nothing else, which is the same population the
  * expression-shape helpers select with `isNumber(x)`. A synthetic

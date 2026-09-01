@@ -365,6 +365,54 @@ files, 174 test sites in 26 files, 13 doc files, and the three
 Then the Heaviside flip lands on the retired-name world as the Phase F
 pilot.
 
+**Retirement (R1–R4), the `signed_infinity` naming, and the Heaviside
+pilot ALL SHIPPED 2026-08-31** (one commit; final combined gate 645/645
+suites, 31,279 tests, snapshot delta 0). The pilot proved the full
+pattern: domain signature declared, hand-written type handler deleted,
+claims framework-derived, off-carrier inputs erroring at boxing per the
+ruling. Two per-flip traps recorded for the batches ahead: an
+extended-real carrier DERIVES `reject` (declare `nanBehavior:
+'propagate'` explicitly), and each flip must sweep tests pinning the old
+inert-forever behavior plus the migration-fixture ledger comments.
+Next batches, in order: `Sign`; the order-dependent family
+(`Floor`/`Ceil`/`Round`/`Truncate`, comparisons); the complex-extension
+family (`Sin`, `Sqrt`, `Ln`, `Exp`, `Arcsin`, `Erf` → `(complex)`
+carriers). One measured batch at a time.
+
+**Batch 2 — `Sign` — SHIPPED 2026-08-31.** The pilot pattern verbatim:
+`Sign: (real | signed_infinity) -> integer<-1..1>` with explicit
+`nanBehavior: 'propagate'` (extended-real carrier derives `reject`) and
+`partiality: 'total'`; the hand-written `realOnlyStepType` handler and
+its `SIGN_REAL_TYPE` constant are deleted — and with `Sign` migrated the
+`realOnlyStepType` helper itself had no callers left, so the
+`realOnlyStepType`-class retirement Phase C left open is now COMPLETE
+(the helper is removed from `type-handlers-types.ts`). Consequences,
+each pinned in `type-handler-parity.test.ts` / `error-model.test.ts`:
+`Sign(NaN)` types `nan` (was `number`) and still evaluates `NaN` — via
+the generic gate now, the handler's own NaN arm is dropped; `Sign(i)`,
+`Sign(1+2i)` and `Sign(~oo)` are boxing errors (were inert forever);
+`Sign(u)` for `u: number` types `(integer<-1..1>) | nan` (was
+`number`); proven extended reals keep the sharp `integer<-1..1>`. The
+sgn handler stays the plain operand forward (already
+evidence-conditioned, unlike Heaviside's constant claim). The nightly
+`type-soundness-grid` ALLOW entries `Sign(i)`/`Sign(1+i)` are removed
+(the grid skips invalid expressions).
+
+The batch also FIXED a broadcast unsoundness in the shipped Phase C/D
+derivation, witnessed by the flip: `contractBResultAdjustment` probed
+only the operand's own type for NaN evidence, and `nan` is not a
+subtype of `list<number>` — so a broadcast application over
+maybe-NaN elements claimed SHARP cells (`Heaviside(L)` for
+`L: list<number>` typed `list<rational<0..1>>` while
+`Heaviside([1, NaN])` evaluates a `NaN` cell). For a broadcastable
+operator the adjustment now descends to the element type (the same
+descent the broadcast machinery performs) and answers `widen-nan` on
+element-level evidence — never `is-marker`, since a NaN element makes
+one CELL NaN, not the whole application. Proven NaN-free elements
+(`list<real>`) keep sharp cells. Pinned in
+`error-model-declarations.test.ts` ("broadcast NaN evidence is read off
+the ELEMENT type").
+
 ### Phase F — signature flips, operator-by-operator
 
 Each flip (e.g. `Heaviside: (real) -> rational<0..1>`, `total`) is its

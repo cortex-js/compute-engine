@@ -913,9 +913,11 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       // Same propagate class as `Sin(NaN)`, but `Heaviside`'s handler is a
       // sign dispatch rather than a numeric kernel: all three of its sign
       // tests are `false` for `NaN`, so the shared exactness fix does not
-      // reach it and it carries its own `NaN` arm. Leaving it inert made
-      // inertness the terminal answer to a decidable question, which
-      // ERROR-MODEL §1 forbids.
+      // reach it. The generic NaN-policy gate owns the answer now (the
+      // Phase F flip declared `nanBehavior: 'propagate'` on the precise
+      // carrier and the handler's own `NaN` arm was dropped). Leaving it
+      // inert made inertness the terminal answer to a decidable question,
+      // which ERROR-MODEL §1 forbids.
       test(`[${route}] both evaluate() and N() answer NaN`, () => {
         expect(isNaNValue(ce, expr.evaluate())).toBe(true);
         expect(isNaNValue(ce, expr.N())).toBe(true);
@@ -924,6 +926,9 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
   });
 
   test('Sign(NaN) propagates too — the same sign-dispatch handler shape', () => {
+    // `Sign` took the same Phase F flip as `Heaviside`: the precise carrier
+    // `(real | signed_infinity)` with `nanBehavior: 'propagate'`, so the
+    // generic gate — not a handler arm — answers `NaN` here.
     const ce2 = new ComputeEngine();
     expect(isNaNValue(ce2, ce2.box(['Sign', 'NaN']).evaluate())).toBe(true);
     // The finite and infinite arms are unchanged for both operators.

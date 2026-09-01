@@ -657,15 +657,16 @@ export const LEGACY_TYPE_HANDLERS: Record<
  *   x < 0, and `LogIntegral(NaN)` numericizes to NaN. Its declared result
  *   was widened to `number` and the handler now re-narrows to `real` (not
  *   `real`: li(1) = −∞) on a proven non-negative real.
- * - `Sinc`/`FresnelS`/`FresnelC` (library/trigonometry.ts),
- *   `Covariance`/`PopulationCovariance`/`Correlation` (library/statistics.ts)
- *   and `Sign` (library/arithmetic.ts): `Sinc(NaN)` and
- *   `Covariance([1, NaN], [2, 3])` both numericize to `NaN`, and
- *   `sinc`/`FresnelS`/`FresnelC` of a non-real argument are complex.
- *   `Heaviside` was in this list until it became the Contract B Phase F
- *   pilot (2026-08-31): it now has NO `'types'` handler at all — its
- *   claim is derived entirely from the declared domain signature
- *   `(real | signed_infinity) -> rational<0..1>`.
+ * - `Sinc`/`FresnelS`/`FresnelC` (library/trigonometry.ts) and
+ *   `Covariance`/`PopulationCovariance`/`Correlation`
+ *   (library/statistics.ts): `Sinc(NaN)` and `Covariance([1, NaN], [2, 3])`
+ *   both numericize to `NaN`, and `sinc`/`FresnelS`/`FresnelC` of a
+ *   non-real argument are complex.
+ *   `Heaviside` and `Sign` were in this list until their Contract B Phase F
+ *   flips (Heaviside was the pilot, both 2026-08-31): each now has NO
+ *   `'types'` handler at all — the claim is derived entirely from the
+ *   declared domain signature (`(real | signed_infinity) -> rational<0..1>`
+ *   and `(real | signed_infinity) -> integer<-1..1>` respectively).
  */
 export const RETIRED_CONSTANT_TYPE_HANDLERS: ReadonlyArray<
   [operator: string, declaredResult: string]

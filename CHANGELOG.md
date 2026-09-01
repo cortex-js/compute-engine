@@ -126,6 +126,24 @@
   `Power`, `Factorial`, `Factorial2`, `GCD`, and `LCM`. The property
   `BoxedNumber.isExact` now returns `false` for `NaN`.
 
+- **`Heaviside` and `Sign` now declare their mathematical domain in their
+  signatures.** Both operators are defined on the extended real line only,
+  and their signatures now say so: `Heaviside` is
+  `(real | signed_infinity) -> rational<0..1>` and `Sign` is
+  `(real | signed_infinity) -> integer<-1..1>`. Consequences:
+  - An argument that is provably not an extended real — a complex value
+    such as `i` or `1 + 2i`, or the unsigned `~oo` — is now an
+    `incompatible-type` error. It used to stay unevaluated.
+  - The values are unchanged where the operators are defined:
+    `Heaviside(±∞)` is `1`/`0`, `Sign(±∞)` is `±1`, and a `NaN` argument
+    still gives `NaN` (its type is now `nan`).
+  - The static types are sharper. For `x` of type `number`, `Sign(x)` has
+    the type `integer<-1..1> | nan` instead of `number`, and the same
+    per-element claim applies to a broadcast over a collection.
+  - The Fungrim identity `09c107` (`Sign(i) → i`, the complex sign
+    convention `z/|z|`) is removed from the bundled identity artifact: its
+    match side is not representable under the real-only `Sign`.
+
 - **`IsPrime` and `IsComposite` now use positive-integer definitions.**
   `IsPrime` returns `False` for a decidable value that is not a positive
   integer greater than 1. It reports an `incompatible-type` error for an

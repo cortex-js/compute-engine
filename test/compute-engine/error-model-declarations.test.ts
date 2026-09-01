@@ -576,6 +576,45 @@ describe('Contract B — derived application type (Phase C)', () => {
     expect(ty.matches('list<real>')).toBe(false);
   });
 
+  test('broadcast NaN evidence is read off the ELEMENT type', () => {
+    // A broadcast operand carries its numbers in cells, so a propagate
+    // slot's NaN evidence rides in the ELEMENT type: `nan` is not a
+    // subtype of `list<number>`, and probing only the collection type
+    // claimed sharp cells for an operand whose cells may evaluate to NaN
+    // (unsound: `TP([1, NaN])` evaluates a NaN cell). The adjustment
+    // descends to the element type; proven NaN-free elements stay sharp.
+    const e = new ComputeEngine();
+    e.declare('TP', {
+      // The `(real)` carrier derives `propagate` mechanically, and the
+      // declared `total` discharges the partiality — so the only possible
+      // arm is the NaN one, which is exactly what this pin isolates.
+      signature: '(real) -> real',
+      broadcastable: true,
+      partiality: 'total',
+      evaluate: ([x]) => x,
+    });
+    e.declare('L', 'list<number>');
+    e.declare('K', 'list<real>');
+    const maybeNan = e.box(['TP', 'L']).type;
+    expect(maybeNan.matches('list<real | nan>')).toBe(true);
+    expect(maybeNan.matches('list<real>')).toBe(false);
+    const literalNan = e.box(['TP', ['List', 1, { num: 'NaN' }]]).type;
+    expect(literalNan.matches('list<real | nan>')).toBe(true);
+    expect(literalNan.matches('list<real>')).toBe(false);
+    // Proven NaN-free elements keep the sharp per-cell claim.
+    expect(e.box(['TP', 'K']).type.matches('list<real>')).toBe(true);
+    expect(e.box(['TP', ['List', 1, 2]]).type.matches('list<real>')).toBe(
+      true
+    );
+    // A UNION of collection shapes is descended too: the element probe
+    // uses the union-aware broadcast descent, so the `list<nan>` arm's
+    // evidence is not lost behind the union.
+    e.declare('U', 'list<real> | list<nan>');
+    const unionNan = e.box(['TP', 'U']).type;
+    expect(unionNan.matches('list<real | nan>')).toBe(true);
+    expect(unionNan.matches('list<real>')).toBe(false);
+  });
+
   test('an operator WITH a type handler keeps its own claim untouched', () => {
     // `Degrees` types through `numericTypeHandlerOnTypes` — the handler is
     // the sharper, evidence-conditioned authority, and the derivation must

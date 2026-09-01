@@ -16,12 +16,15 @@
  * - `GammaRegularized`/`BetaRegularized` claim `real` only on
  *   their proven domain and `number` otherwise (the non-finite typing
  *   convention: claim wide whenever NaN is possible).
- * - `Sinc`/`FresnelS`/`FresnelC`, `Heaviside`/`Sign`, `LogIntegral` and the
+ * - `Sinc`/`FresnelS`/`FresnelC`, `LogIntegral` and the
  *   paired statistics `Covariance`/`PopulationCovariance`/`Correlation`
  *   follow the same rule: each once claimed an unconditional type that its
  *   own values contradict off the operator's real domain (`Sinc(NaN).N()`,
  *   `LogIntegral(NaN).N()` and `Covariance([1, NaN], [2, 3]).N()` are all
  *   `NaN`), and each now narrows only on a proven-real operand.
+ *   `Heaviside` and `Sign` were in this list until their Phase F Contract B
+ *   flips (2026-08-31): each now has NO `'types'` handler — the claim is
+ *   derived from the declared domain signature.
  * - `Heaviside`'s SIGN claim is gated on that same proven realness: its
  *   values 0, 1/2 and 1 are non-negative only where it has a value, so the
  *   once-unconditional `non-negative` (which answered for `Heaviside(NaN)`
@@ -240,18 +243,20 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     expect(ce.box(['Heaviside', 'u'] as any).type.toString()).toBe(
       '(rational<0..1>) | nan'
     );
+    // `Sign` is the second Phase F flip (after the Heaviside pilot above):
+    // same declared domain signature shape,
+    // `(real | signed_infinity) -> integer<-1..1>`, same consequences.
     expect(ce.box(['Sign', -2] as any).type.toString()).toBe(
       'integer<-1..1>'
     );
     expect(ce.box(['Sign', 's'] as any).type.toString()).toBe(
       'integer<-1..1>'
     );
-    expect(ce.box(['Sign', NAN] as any).type.toString()).toBe('number');
-    expect(ce.box(['Sign', 'ComplexInfinity'] as any).type.toString()).toBe(
-      'number'
-    );
-    expect(ce.box(['Sign', ['Complex', 1, 2]] as any).type.toString()).toBe(
-      'number'
+    expect(ce.box(['Sign', NAN] as any).type.toString()).toBe('nan');
+    expect(ce.box(['Sign', 'ComplexInfinity'] as any).isValid).toBe(false);
+    expect(ce.box(['Sign', ['Complex', 1, 2]] as any).isValid).toBe(false);
+    expect(ce.box(['Sign', 'u'] as any).type.toString()).toBe(
+      '(integer<-1..1>) | nan'
     );
     // Broadcast: the per-element claim is wrapped in the operand's shape.
     expect(ce.box(['Sign', ['List', 1, -2]] as any).type.toString()).toBe(
@@ -262,10 +267,13 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     expect(
       ce.box(['Sqrt', ['Heaviside', 's']] as any).type.toString()
     ).toBe('real');
-    // A collection whose ELEMENT type cannot decide realness keeps the wide
-    // claim per element, exactly as the scalar operand `u: number` does.
+    // A collection whose ELEMENT type may carry a NaN gains the propagated
+    // arm per CELL, exactly as the scalar operand `u: number` does — the
+    // NaN evidence is read off the element type under a broadcast.
     ce.declare('L', 'list<number>');
-    expect(ce.box(['Sign', 'L'] as any).type.toString()).toBe('list<number>');
+    expect(ce.box(['Sign', 'L'] as any).type.toString()).toBe(
+      'list<(integer<-1..1>) | nan>'
+    );
   });
 
   test("Heaviside's SIGN is claimed only where it has a value", () => {

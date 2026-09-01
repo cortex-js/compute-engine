@@ -187,7 +187,6 @@ const POSSIBLY_ZERO_QUOTIENT_TYPE: Type = Object.freeze({
 // suffix here to keep both shapes readable side by side while the migration
 // runs.
 import {
-  realOnlyStepType,
   kindClosureType,
   numericTypeHandler as numericTypeHandlerOnTypes,
   elementaryFunctionType as elementaryFunctionTypeOnTypes,
@@ -202,14 +201,6 @@ import {
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isPrime as isPrimeNumber } from '../numerics/primes.js';
 import { parseType } from '../../common/type/parse.js';
-
-// The proven-real result claims of the two step functions, parsed once at
-// module load. `Heaviside` takes exactly the values 0, 1/2 and 1 on the
-// real line (H(0) = 1/2 is this engine's convention) and `Sign` exactly
-// −1, 0 and 1, so each claim is the finitely-valued tier WITH its range —
-// the range is what lets a type-channel consumer (`signOfType`, compile
-// lowerings) read the sign and bounds without consulting the sgn handler.
-const SIGN_REAL_TYPE = parseType('integer<-1..1>');
 
 /** The carrier of `IsPrime`/`IsComposite`: all of `number` except the
  * infinities. See `notFiniteEnoughForPrimality`, which enforces it. */
@@ -3380,8 +3371,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (they were inert forever); the application TYPE is the derived
       // `rational<0..1>` for a proven extended-real argument and
       // `rational<0..1> | nan` for a maybe-NaN one — no hand-written type
-      // handler (the `realOnlyStepType` claim is now read off this
-      // declaration by the generic derivation).
+      // handler (the claim the retired real-only step-function handler
+      // used to compute is now read off this declaration by the generic
+      // derivation).
       signature: '(real | signed_infinity) -> rational<0..1>',
       // Explicit: the DERIVED default answers `reject` for this carrier
       // (an extended-real carrier is not a subtype of `complex`, which is
@@ -3415,26 +3407,44 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Sign of a number: -1, 0, or 1.',
       complexity: 1200,
       broadcastable: true,
-      signature: '(number) -> number',
-      // The sign of a real — ±∞ included — is exactly −1, 0 or 1, so the
-      // tight per-element claim is a finite integer in [−1, 1]. Off the real
-      // line the usual convention `z/|z|` is complex and this operator
-      // declines, so an unproven-real argument keeps the wide `number`; see
-      // `realOnlyStepType`.
-      typeHandlerKind: 'types',
-      type: ([x]) => realOnlyStepType(x, SIGN_REAL_TYPE),
+      // Contract B domain signature (the second Phase F flip, after the
+      // `Heaviside` pilot above): the carrier is exactly where the sign is
+      // defined — the extended real line, `Sign(±∞)` = ±1 included — and
+      // the result is exactly its values {−1, 0, 1}, the finitely-valued
+      // tier WITH its range so type-channel consumers read the bounds
+      // without consulting the sgn handler. Off the real line the usual
+      // convention `z/|z|` is complex and this operator declines, so a
+      // PROVEN off-carrier operand (`Sign(i)`, `Sign(~oo)`) is a boxing
+      // error now (it was inert forever); the application type is the
+      // derived `integer<-1..1>` for a proven extended-real argument and
+      // `integer<-1..1> | nan` for a maybe-NaN one — no hand-written type
+      // handler.
+      signature: '(real | signed_infinity) -> integer<-1..1>',
+      // Explicit: the DERIVED default answers `reject` for this carrier
+      // (an extended-real carrier is not a subtype of `complex`, which is
+      // the mechanical propagate test), and `Sign(NaN)` must be `NaN` —
+      // the conformed §4 behavior.
+      nanBehavior: 'propagate',
+      // The sign is defined at EVERY point of the carrier and its three
+      // values are exactly machine-representable, so the numeric route
+      // cannot fail either: the strong claim is what discharges the marker
+      // arm and keeps the derived type sharp for an in-carrier argument.
+      partiality: 'total',
+      // Forwarding the operand's own sign is sound on the carrier and for
+      // a propagated NaN alike: `Sign(x)` and `x` have the same sign
+      // wherever `Sign` has a value, and `Sign(NaN)` is `NaN`, whose sign
+      // IS the operand's (`unsigned`). Unlike `Heaviside` above, no
+      // carrier guard is needed: `Heaviside`'s handler asserts a CONSTANT
+      // claim (`non-negative`) that is wrong off the carrier, while a
+      // DIRECTIONAL answer from the operand's own sign channel
+      // (`positive`/`negative`/`zero`…) already proves the operand is an
+      // extended real — the sign channel answers `unsigned`/`undefined`,
+      // never a direction, for an operand not proven on the real line.
       sgn: ([x]) => x.sgn,
       evaluate: ([x], { engine }) => {
-        // `NaN` propagates, and THIS handler must still answer it itself:
-        // `Sign` has not migrated to a Contract B domain signature — its
-        // carrier is the plain `(number)`, which ADMITS `nan`, so the
-        // generic NaN-policy gate resolves to `'inert'` and stands down.
-        // Without this arm the three sign tests below are all `false` for
-        // `NaN` and inertness would be the terminal answer to a decidable
-        // question. (Heaviside above migrated and dropped its arm — the
-        // gate owns NaN there because its precise carrier binds the
-        // policy.)
-        if (x.isNaN === true) return engine.NaN;
+        // Only mathematics: the NaN arm this handler used to carry is the
+        // generic policy gate's job now (`nanBehavior: 'propagate'`
+        // above), and an off-carrier operand never reaches this handler.
         if (x.isSame(0)) return engine.Zero;
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.NegativeOne;
