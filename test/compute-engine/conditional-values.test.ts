@@ -190,10 +190,14 @@ describe('CONDITIONAL VALUES — Undefined conditions (decision 9)', () => {
     );
   });
 
-  it('a non-boolean Which condition still throws', () => {
-    expect(() =>
-      ce.box(['Which', 5, 1, ['Greater', 3, 0], 2]).evaluate()
-    ).toThrow();
+  it('a non-boolean Which condition stays inert', () => {
+    // A condition the engine cannot read as `True` or `False` — here the
+    // number 5 — leaves the whole `Which` unevaluated instead of raising a
+    // host exception (user ruling 2026-08-31). The later clauses are NOT
+    // consulted: `Greater(3, 0)` is True, yet the answer is not 2.
+    const r = ce.box(['Which', 5, 1, ['Greater', 3, 0], 2]).evaluate();
+    expect(r.operator).toBe('Which');
+    expect(r.op1.isSame(5)).toBe(true);
   });
 });
 

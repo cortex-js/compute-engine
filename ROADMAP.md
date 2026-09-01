@@ -234,38 +234,42 @@ Each item below was discovered during Phase 1 of the numeric-lattice flip
 (`docs/plans/2026-08-27-lattice-flip-implementation.md`) and deliberately not
 fixed in that change. Every one is small; several need a ruling first.
 
-- **An annotated parameter named `i` loses the imaginary-unit shield.**
-  `Tabulate(['Typed','i',"'integer'"] ↦ …)` canonicalizes the body's `i` to
-  the imaginary unit, so `IdentityMatrix` built that way evaluates to an
-  all-zero matrix. Renaming the parameter (`k`) avoids it, so the defect is
-  specific to the `Typed`-wrapped spelling of `i`. Related to the open
-  subscript-index shielding item. Repro and context: the `lazyConstantMatrix`
-  doc comment in `src/compute-engine/library/linear-algebra.ts`.
-- **`IdentityMatrix(1e6)`'s lazy element type is `number`, not `integer`.**
-  The inner generator's parameter slot is genuinely un-inferred, so the
-  lambda-body finiteness widening fires. Fixing it wants either slot
-  inference for nested `Tabulate` callbacks or the `i`-shield fix above (so
-  the parameter can be annotated). Pinned as current behavior in
-  `test/compute-engine/linear-algebra.test.ts`.
-- **`euclideanNormType` claims bare `real` when finiteness is unproven** —
-  post-flip a false finiteness promise (`‖(∞, 1)‖ = +∞`). The honest claim
-  `real | non_finite_number` no longer satisfies `Hypot`'s declared
-  `(real, real) -> real`, so the two must change together. Needs one ruling
-  covering both (and it interacts with the L9 question of whether `Hypot`
-  should admit infinite arguments at all — `Hypot(2, oo)` currently rejects
-  at the signature although its value is well-defined `+oo`).
+- **An annotated parameter named `i` loses the imaginary-unit shield**
+  (FIXED 2026-08-31 — two defects with one root: the shared-binding
+  adoption in `canonicalFunctionLiteralArguments` skipped annotated
+  parameters, and `desugarSignatureString` built parameter symbols with a
+  canonical lookup that returns the imaginary-unit literal for `i`. Both
+  fixed in `src/compute-engine/function-utils.ts`; pins in
+  `test/compute-engine/function-parameter-shadowing.test.ts`).
+- **`IdentityMatrix(1e6)`'s lazy element type is `number`, not `integer`**
+  (FIXED 2026-08-31 with the `i`-shield fix above: `lazyConstantMatrix`
+  now annotates its index parameters `integer`, and the pin in
+  `test/compute-engine/linear-algebra.test.ts` asserts `integer`).
+- **`euclideanNormType` claims bare `real` when finiteness is unproven**
+  (FIXED 2026-08-31, ruled with the Hypot widening: `Hypot` declares
+  `(real | signed_infinity, real | signed_infinity) -> real | +oo | nan`
+  with `nanBehavior: 'handle'` and infinity-over-NaN precedence matching
+  IEEE `Math.hypot` — so `Hypot(2, oo)` is `+oo` and both lanes agree —
+  and `euclideanNormType` claims `real | +oo` when component finiteness is
+  unproven, with a type-level finiteness proof keeping compound real-typed
+  components sharp).
 - **`liftWideResult` wraps every `finite_number`-typed user-function call in
   `_SYS.cplx(...)` in complex compile mode.** `complex ⊑ finite_number` is a
   new edge from the flip, so `finite_number` now counts as WIDE. The wrap is
   idempotent and values are unchanged — pure code bloat. A redundancy skip
   ("operand already emitted in the complex lane") is a compiler design
   change awaiting a decision. Sites: `liftWideResult`/`wideNumericType` in
-  `src/compute-engine/compilation/base-compiler.ts`.
-- **`provablyDisjoint` does not resolve nominal `reference` types**, so a
-  parameter typed by an object alias (`Outer`) is never proven disjoint
-  from `infinity`/`nan` while the equivalent structural spelling is — the
-  lambda-body widening treats the two spellings differently. Sound but
-  asymmetric; the resolution hook belongs in `src/common/type/subtype.ts`.
+  `src/compute-engine/compilation/base-compiler.ts`. Deferred by ruling
+  2026-08-31 (held out of the small-fix release batch: no wrong values,
+  and the fix is a compiler design change, not a small fix).
+- **`provablyDisjoint` does not resolve nominal `reference` types**
+  (FIXED 2026-08-31: both reference arms resolve through
+  `resolveTypeReference`, cycle-keyed on the declaration record, positive
+  direction only so nominal opacity for subtyping is unchanged. An
+  inferred arrow with an object/nominal-typed parameter now keeps its
+  exact result type, and argument-type errors previously dropped for
+  nominal-typed parameters are kept. Pins in
+  `test/compute-engine/type-disjointness.test.ts`).
 - **The non-finite VALUE-type clause guards admitted a compiled `~oo` that
   the interpreter refuses** (RESOLVED BY DECLINE 2026-08-30; the
   compilability it costs is the same trade the `non_finite_number` decline
@@ -324,6 +328,14 @@ deliberately left out of that change.
   `Error` value ("this condition is not a boolean"), and picking between them
   is a ruling, not a fix. Site: the `If` evaluate handler in
   `src/compute-engine/library/control-structures.ts`.
+  (RULED AND FIXED 2026-08-31: inertness, for both handlers — the
+  expression is returned unevaluated with the condition evaluated in
+  place, so it can resolve later; a provably NON-boolean condition is also
+  inert; `Missing` conditions still produce a catchable error expression,
+  since absence is decided and can never resolve. Both throws removed,
+  along with the now-dead `isBooleanishCondition` gate. Two follow-ups
+  filed below: the lost spell-check hint, and interpreted-vs-compiled
+  failure-mode parity.)
   - **`Which` throws the same way, and a published example trips it**
     (measured 2026-08-29 during the doc-sweep triage). `evaluateWhich` in the
     same file ends with the identical `throw new Error('Condition must
@@ -351,7 +363,54 @@ deliberately left out of that change.
   `Factorial` and `Factorial2` evaluate handlers in
   `src/compute-engine/library/arithmetic.ts`, both of which return `undefined`
   from an `!x.isFinite` test.
+  (RULED AND FIXED 2026-08-31: `+oo → +oo`, `-oo → NaN`, for `Factorial`,
+  `Factorial2`, `Gamma` and `GammaLn` — each direction verified
+  numerically at large finite arguments before encoding; `~oo → NaN`
+  across the family, making `Factorial2` consistent with the other three.
+  Shared helper `infiniteGammaFamilyValue` in `library/arithmetic.ts`;
+  pins in `test/compute-engine/arithmetic.test.ts`. `Digamma`/`Trigamma`/
+  `PolyGamma` deliberately NOT swept — see the open entry below.)
 
+### Open items from the small-fix release batch (2026-08-31)
+
+- **`Digamma`/`Trigamma`/`PolyGamma` stay inert at ±∞.** The ruling
+  principle from the Γ-family round applies (the direction with a
+  well-defined limit gets it; the direction with no limit gets NaN), but
+  the limit shapes differ per head — `ψ(x) → +∞` as `x → +∞` while
+  `ψ'(x) → 0` — so each head needs its own empirical verification before
+  encoding. Sites: the polygamma handlers in
+  `src/compute-engine/library/special-functions.ts`.
+- **`Norm((+oo, NaN))` answers `NaN`; should an infinite component
+  dominate?** Under the IEEE reading applied to `Hypot` (2026-08-31), an
+  infinite magnitude arguably makes a Euclidean norm `+oo` regardless of a
+  NaN sibling. `Hypot` deliberately MATCHES `Norm` here (a point leg
+  counts as infinite only when it has a signed-infinite component and no
+  NaN component), so the two are consistent today; flipping them means
+  changing the `Norm` handler, which ripples to `Abs` of a point and the
+  compiled point lanes. Related inconsistency to settle with it:
+  `Norm((~oo, 3))` is `+oo` while a `~oo` component never counts as
+  infinite for `Hypot`'s precedence. Needs a ruling; both current
+  boundaries are pinned in `test/compute-engine/type-handler-audit.test.ts`.
+- **No LaTeX parse route exists for annotated lambda parameters.**
+  `ce.parse('(i: integer) \\mapsto 2i')` produces `Colon`/
+  `unexpected-operator` output instead of an annotated parameter — a
+  parser-surface capability gap found 2026-08-31 while fixing the
+  `i`-shield. The raw-MathJSON route and the signature-string sugar route
+  both work.
+- **The spell-check hint for a misspelled condition symbol no longer
+  fires.** It rode on the `If`/`Which` host throw removed by the
+  inertness ruling (2026-08-31): `Which(Tru, …)` now returns a held
+  `Which` with no diagnostic. Candidate fix: a validation-time `Error`
+  operand for a provably-non-boolean condition, which would restore the
+  diagnostic without reintroducing the throw.
+- **Interpreted and compiled `If`/`Which` fail closed differently.** The
+  interpreter holds an undecidable condition inert; a compiled artifact
+  still throws at run time (a compiled function must return a concrete
+  value and cannot stay symbolic). Both lanes agree that no branch is
+  ever picked on an undecided condition — the divergence is only in the
+  failure channel. Pinned as the shared requirement in
+  `test/compute-engine/compile-elementwise-which.test.ts`. Aligning the
+  channels, if wanted, is a ruling.
 
 ### Doc-sweep triage (2026-08-29)
 
@@ -361,6 +420,11 @@ deliberately left out of that change.
   (defensible only where the direction is genuinely lost, as in
   `(-∞)^∞`). Value-level canonicalization in the `Power` rules; measured
   2026-08-29 during the documentation sweep.
+  (FIXED 2026-08-31: `(+∞)^(+∞)` canonicalizes to `+oo`; `(-∞)^(+∞)`
+  stays `~oo` — the sign alternates, verified numerically — and
+  `(±∞)^(−∞)` stays `0`. Pins in `test/compute-engine/arithmetic.test.ts`
+  and the updated inline snapshot in
+  `test/compute-engine/canonical-form.test.ts`.)
 
 Found by checking published examples and reference prose against the engine,
 closing out the doc sweeps of the numeric-lattice migration. Each item was
@@ -1574,7 +1638,12 @@ enough digits to stay inside propagated claims, or the grid's oracle
 should compare the VALUE against the static range instead of comparing
 the two range spellings. Nightly-only, so no default-suite impact.
 
-### Three compiled-code pins fail at HEAD `cb30c8be` — OPEN 2026-08-30 (found by a full-suite run; NOT touched)
+### Three compiled-code pins fail at HEAD `cb30c8be` — CLOSED 2026-08-31 (fixed by the item-235 round; verified stale)
+
+Verified 2026-08-31: all three suites pass at the current base
+(3 suites / 255 tests green). The item-235 round's symbol-value lowering
+work resolved the fold-vs-late-binding disagreement the pins recorded.
+Original entry kept below for the record.
 
 `design-d-callback-contract.test.ts:249`, `lambda-param-element-inference.test.ts:306`
 and `symbol-value-scoping.test.ts:92` expect a compiled symbol value to
@@ -1587,7 +1656,20 @@ the pins or the new symbol-value lowering is wrong; the session that
 landed `1ec661bf` should decide which. Left untouched to avoid crossing
 a peer's in-flight work.
 
-### Assumption transaction residue — OPEN 2026-08-30 (phase-2 code review; small, scoped)
+### Assumption transaction residue — FIXED 2026-08-31 (all three items, with a review refinement)
+
+All three items below were fixed 2026-08-31 in the small-fix release
+batch. The rollback fix was refined by the batch's dual review: ownership
+is decided by an ENTRY SNAPSHOT (a rollback removes exactly the bindings
+the `assume()` call itself created), so the string and raw-MathJSON
+routes leave no residual declaration while a binding that existed at
+entry — including an empty auto-declared placeholder a caller still holds
+a boxed reference to — is never disposed, preserving symbol identity.
+The union-of-ranges fix normalizes the set operand once and records the
+normalized form (a `SetMinus` arm rides with it: `x ∈ S∖T ⇒ x ∈ S`).
+The fact-identity fix resolves a recorded fact's symbol nodes against the
+transaction registry. Pins in `test/compute-engine/assumptions.test.ts`.
+Original entry kept below for the record.
 
 Three items the phase-2 review surfaced and the fixer scoped out, each
 with its fix named:

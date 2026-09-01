@@ -428,6 +428,129 @@ describe('CONJUNCTION ATOMICITY (SYM P2-9)', () => {
   });
 });
 
+describe('A ROLLED-BACK assume() LEAVES THE SCOPE AS IT FOUND IT', () => {
+  // A rollback gives back only the bindings the `assume()` call itself
+  // created: the names the scope did not already bind when the call was
+  // entered. `ce.parse()` and `ce.box()` auto-declare every free symbol they
+  // meet, so a caller who parses or boxes the predicate first owns the
+  // placeholder for `p`, and the rollback must leave it alone.
+  test('MathJSON route: no residual declaration', () => {
+    const ce = new ComputeEngine();
+    // The predicate is boxed INSIDE assume(), so `p` is the call's own.
+    expect(ce.assume(['And', ['Greater', 'p', 0], ['Less', 'p', -5]])).toBe(
+      'contradiction'
+    );
+    expect(ce.lookupDefinition('p')).toBeUndefined();
+  });
+
+  test('pre-parsed route: the caller-made placeholder survives', () => {
+    const ce = new ComputeEngine();
+    // `ce.parse()` auto-declared `p` before assume() was entered, so the
+    // rollback leaves exactly what a bare `ce.parse('p > 0')` leaves: an
+    // empty placeholder, still bound, still the same definition the
+    // pre-parsed expression holds.
+    const parsed = ce.parse('p > 0 \\land p < -5');
+    const before = ce.lookupDefinition('p');
+    expect(before).toBeDefined();
+
+    expect(ce.assume(parsed)).toBe('contradiction');
+
+    const after = ce.lookupDefinition('p');
+    expect(after).toBe(before);
+    const def = (after as { value: { disposed: boolean } }).value;
+    expect(def.disposed).toBe(false);
+    // Still an empty placeholder: no type the assumption left behind, and no
+    // value.
+    expect(ce.box('p').type.isUnknown).toBe(true);
+    expect(ce.box('p').valueDefinition).toBe(def);
+    expect((def as unknown as { storedValue: unknown }).storedValue).toBe(
+      undefined
+    );
+    // ...and the refuted bound is not in force.
+    expect(ce.box('p').isPositive).toBe(undefined);
+  });
+
+  test('a binding the caller made before the call keeps its identity', () => {
+    // The caller holds an expression that points at the placeholder
+    // `ce.box('x')` auto-declared. A rollback that disposed and unbound it
+    // would leave that expression pointing at a dead definition, and a later
+    // `ce.box('x')` would resolve to a different one.
+    const ce = new ComputeEngine();
+    const x = ce.box('x');
+    const heldDef = x.valueDefinition;
+    expect(heldDef).toBeDefined();
+
+    expect(ce.assume(['And', ['Greater', 'x', 0], ['Less', 'x', -5]])).toBe(
+      'contradiction'
+    );
+
+    expect(heldDef!.disposed).toBe(false);
+    expect(x.valueDefinition).toBe(heldDef);
+    expect(ce.box('x').valueDefinition).toBe(heldDef);
+    expect(
+      (ce.lookupDefinition('x') as { value: unknown } | undefined)?.value
+    ).toBe(heldDef);
+  });
+
+  test('string route: no residual declaration', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume('p > 0 \\land p < -5')).toBe('contradiction');
+    expect(ce.lookupDefinition('p')).toBeUndefined();
+  });
+
+  test('a declaration the user made survives the rollback', () => {
+    // Only an EMPTY placeholder is claimed: an explicit declaration is a
+    // contract the assumption never had the right to remove.
+    const ce = new ComputeEngine();
+    ce.declare('p', 'real');
+    expect(ce.assume('p > 0 \\land p < -5')).toBe('contradiction');
+    expect(ce.lookupDefinition('p')).toBeDefined();
+    expect(ce.box('p').type.toString()).toBe('real');
+  });
+
+  test('a successful assume keeps the binding it needed', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume('p > 0')).toBe('ok');
+    expect(ce.lookupDefinition('p')).toBeDefined();
+    expect(ce.box('p').isPositive).toBe(true);
+  });
+});
+
+describe('A REFUSED CONJUNCT LEAVES NO STALE DEFINITION BEHIND', () => {
+  // `Foo(y)` is not a predicate, so it is dropped and the binding it alone
+  // introduced is discarded — the definition is DISPOSED. The next conjunct
+  // mentions `y` again and gets a FRESH definition, so the fact recorded for
+  // it must be about that one: the fact expression and the subject recorded
+  // with it have to name the same definition.
+  //
+  // The predicate is passed as MathJSON, not pre-boxed: only a binding the
+  // `assume()` call itself created is ever discarded, so pre-boxing it would
+  // make `y` the caller's and no definition would be disposed of at all.
+  test('the surviving conjunct is recorded against the live definition', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(['And', ['Foo', 'y'], ['Greater', 'y', 3]])).toBe(
+      'not-a-predicate'
+    );
+
+    const def = ce.lookupDefinition('y');
+    expect(def).toBeDefined();
+    const live = (def as { value: { disposed: boolean } }).value;
+    expect(live.disposed).toBe(false);
+
+    // Every symbol node of every stored fact resolves to a live definition.
+    for (const [fact] of ce.context.assumptions) {
+      const visit = (expr: typeof fact): void => {
+        if (expr.symbol === 'y') expect(expr.valueDefinition).toBe(live);
+        for (const op of expr.ops ?? []) visit(op);
+      };
+      visit(fact);
+    }
+
+    // ...and the bound the fact carries reaches the symbol.
+    expect(ce.box('y').isGreater(3)).toBe(true);
+  });
+});
+
 describe('NO-ARG forget() UNDOES ASSUMED VALUES (SYM P2-10)', () => {
   test('assume(x = 5) is undone by a no-arg forget()', () => {
     const ce = new ComputeEngine();
@@ -494,6 +617,74 @@ describe('domainToType SIGNED-SET COVERAGE (SYM P2-11)', () => {
     const ce = new ComputeEngine();
     expect(ce.assume(ce.box(['Element', 'm', 'PositiveIntegers']))).toBe('ok');
     expect(ce.assume(ce.parse('m < 0'))).toBe('contradiction');
+  });
+});
+
+describe('A UNION OF RANGES OR INTERVALS PROVES A TIER', () => {
+  // A union yields a disjunction of bounds, which the fact layer does not
+  // represent, so only the tier reaches the reader. The set must be recorded
+  // in the form that tier was read from: evaluating a union of SMALL finite
+  // ranges materializes it into a finite set literal, which proves nothing.
+  test('a union of finite ranges proves integer', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.assume(
+        ce.box(['Element', 'm', ['Union', ['Range', 1, 3], ['Range', 5, 7]]])
+      )
+    ).toBe('ok');
+    expect(ce.box('m').type.toString()).toBe('integer');
+    expect(ce.box('m').isInteger).toBe(true);
+  });
+
+  test('a union of ranges too large to materialize proves integer too', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.assume(
+        ce.box([
+          'Element',
+          'm',
+          ['Union', ['Range', 1, 1000], ['Range', 5000, 6000]],
+        ])
+      )
+    ).toBe('ok');
+    expect(ce.box('m').type.toString()).toBe('integer');
+  });
+
+  test('an exclusion from a union of ranges still proves integer', () => {
+    // Removing elements never adds any, so the base of a `SetMinus` proves
+    // the tier: `x ∈ S ∖ T` implies `x ∈ S`. The exclusion is kept as its own
+    // disequality fact.
+    const ce = new ComputeEngine();
+    expect(
+      ce.assume(
+        ce.box([
+          'Element',
+          'm',
+          [
+            'SetMinus',
+            ['Union', ['Range', 1, 3], ['Range', 5, 7]],
+            ['Set', 2],
+          ],
+        ])
+      )
+    ).toBe('ok');
+    expect(ce.box('m').type.toString()).toBe('integer');
+    expect(ce.box('m').isInteger).toBe(true);
+    expect(ce.box(['Equal', 'm', 2]).evaluate().json).toBe('False');
+  });
+
+  test('a union with an interval proves real', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.assume(
+        ce.box([
+          'Element',
+          'm',
+          ['Union', ['Interval', 1, 3], ['Interval', 5, 7]],
+        ])
+      )
+    ).toBe('ok');
+    expect(ce.box('m').type.toString()).toBe('real');
   });
 });
 

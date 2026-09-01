@@ -453,8 +453,15 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       // Because of oscillations in the limit.
       if (a.isSame(-1)) return ce.NaN;
 
-      //↓note:the case for all infinites.
-      if (a.isInfinity) return ce.ComplexInfinity;
+      // An infinite base: (+∞)^∞ = +∞, because the DIRECTION is known —
+      // nⁿ grows through +∞ (10¹⁰, 100¹⁰⁰ = 10²⁰⁰, 1000¹⁰⁰⁰ overflows the
+      // double range), never changing sign. (-∞)^∞ and (~∞)^∞ keep the
+      // direction-less ~∞: (-n)ⁿ alternates with the parity of n
+      // ((-10)¹⁰ = +10¹⁰, (-11)¹¹ = -2.85·10¹¹), so no signed limit exists.
+      if (a.isInfinity) {
+        if (a.isPositive === true) return ce.PositiveInfinity;
+        return ce.ComplexInfinity;
+      }
 
       if (a.isNaN) return ce.NaN;
 

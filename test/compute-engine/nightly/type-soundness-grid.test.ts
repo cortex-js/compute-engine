@@ -62,15 +62,10 @@ const BINARY = [
 // KNOWN-OPEN type residuals, keyed `Op(arg…)`. See FINDINGS-TRACKER
 // "Known open findings".
 const ALLOW = new Set<string>([
-  // Round(i) result types (documented residual): rounding of an exact
-  // complex yields a value whose type is not covered by the static type.
-  // (`Sign(i)`/`Sign(1+i)` left this list with Sign's Phase F Contract B
-  // flip, 2026-08-31: a proven off-carrier operand is a boxing error now,
-  // and the grid skips invalid expressions.)
-  'Round(i)', 'Round(1+i)',
-  'Ceil(i)', 'Ceil(1+i)',
-  'Floor(i)', 'Floor(1+i)',
-  'Truncate(i)', 'Truncate(1+i)',
+  // The rounding-family and `Sign` complex-argument residuals left this
+  // list with their Phase F Contract B flips (2026-08-31): each operator
+  // now declares the extended-real carrier, a proven off-carrier operand
+  // is a boxing error, and the grid skips invalid expressions.
 ]);
 
 // Documented finiteness-soundness class (SYM P0-12 / P0-15): a handler whose

@@ -1214,6 +1214,12 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       }
     );
 
+    // The Phase F Contract B flip moved the rounding family's decline
+    // EARLIER: `Floor`/`Round`/`Truncate`/`Ceil` declare the extended-real
+    // carrier, so a statically non-real operand is already a boxing error
+    // and compile refuses the invalid expression — still fail-closed, at an
+    // earlier seam. The wide-carrier heads keep the compile-time decline.
+    const FLIPPED = new Set(['Floor', 'Round', 'Truncate', 'Ceil']);
     test.each(HEADS)(
       '%s over a STATICALLY non-real operand still declines',
       (h, rest) => {
@@ -1223,7 +1229,11 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
             fallback: false,
             constantFold: false,
           })
-        ).toThrow(/non-real operand/);
+        ).toThrow(
+          FLIPPED.has(h as string)
+            ? /invalid expression/
+            : /non-real operand/
+        );
       }
     );
 
@@ -1617,16 +1627,15 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   it('If over a NON-boolean collection condition fails closed at run time', () => {
     // `d` is `[10, 20, 30]`: not a condition value in any cell. The compile
     // succeeds (the shape is only knowable at run time), and `_SYS.select`
-    // then throws the same message the interpreter does, rather than picking
-    // a branch.
+    // then throws rather than picking a branch. The interpreter cannot pick a
+    // branch either; it holds the `If` unevaluated instead of throwing
+    // (undecidable-condition ruling 2026-08-31).
     const e = mkEngine();
     const js = new JavaScriptTarget();
     const r = js.compile(e.box(['If', 'd', 1, 2]));
     expect(r.success).toBe(true);
     expect(() => r.run!()).toThrow(/Condition must evaluate/);
-    expect(() => e.box(['If', 'd', 1, 2]).evaluate()).toThrow(
-      /Condition must evaluate/
-    );
+    expect(e.box(['If', 'd', 1, 2]).evaluate().operator).toBe('If');
   });
 
   it('the free-function compile() converts the throw to success:false + fallback', () => {

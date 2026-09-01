@@ -280,21 +280,6 @@ function frozenArctanType(ops: ReadonlyArray<Expression>): Type {
   return 'number';
 }
 
-/** Frozen copy of `roundingFunctionType` (library/type-handlers.ts). */
-function frozenRoundingFunctionType(x: Expression | undefined): Type {
-  if (!x || x.isNaN) return 'number';
-  if (frozenProvablyNonFiniteNumber(x))
-    return x.isExtendedReal === true ? SIGNED_INFINITY_TYPE : 'number';
-  const provablyNonReal = isNumber(x)
-    ? x.isExtendedReal === false
-    : x.type.matches('imaginary');
-  if (provablyNonReal)
-    return x.isFinite === true || x.type.matches('complex')
-      ? 'complex'
-      : 'number';
-  return 'integer';
-}
-
 /** Frozen copy of `extremumType` (library/type-handlers.ts). */
 function frozenExtremumType(ops: ReadonlyArray<Expression>): Type {
   if (ops.length === 0) return 'number';
@@ -532,17 +517,12 @@ export const LEGACY_TYPE_HANDLERS: Record<
   },
 
   // From library/arithmetic.ts, pre-conversion (commit 045c2655).
-  Ceil: ([x]) => frozenRoundingFunctionType(x),
-  Floor: ([x]) => frozenRoundingFunctionType(x),
-  Truncate: ([x]) => frozenRoundingFunctionType(x),
-  // `Round` is the only member of the rounding family that reads a second
-  // operand: with a precision argument the result is generally not an
-  // integer (`Round(3.14159, 2)` is `3.14`), so the integer claim — and only
-  // that claim — is replaced by `real`.
-  Round: ([x, n]) => {
-    const t = frozenRoundingFunctionType(x);
-    return n !== undefined && t === 'integer' ? 'real' : t;
-  },
+  // The rounding family (`Ceil`/`Floor`/`Truncate`/`Round`) was here until
+  // its Phase F Contract B flip (2026-08-31): each now declares
+  // `(real | signed_infinity)` and its slim handler deliberately answers
+  // DIFFERENTLY from the frozen legacy shape (it declines instead of
+  // claiming `number`/`complex`, and the component-wise Gaussian arms are
+  // gone with the carrier), so the differential parity no longer applies.
   Fract: ([x]) => frozenNumericTypeHandler([x]),
   LambertW: (ops) => frozenNumericTypeHandler(ops),
   BesselJ: (ops) => frozenNumericTypeHandler(ops),

@@ -764,6 +764,16 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // `LessEqual`'s) covers all four orderings. Declared `handle` so a `Missing`
     // operand validates and the propagate gate stays off.
     missingBehavior: 'handle',
+    // The Contract B declaration for the same arm (`docs/ERROR-MODEL.md`
+    // §4): the handler owns `NaN` — it answers `False`, a success value in
+    // the boolean codomain, per the IEEE unordered rule above. The
+    // comparisons keep their wide `(any, any+)` carriers on purpose: the
+    // chain decomposition (`a < b < c`), quantity and `Missing` operands
+    // all ride through them, ordering is checked at evaluation, and as
+    // `lazy` operators they sit in §4's sanctioned validation opt-out —
+    // so the order-dependent "declare `(real)`" rule of §4 deliberately
+    // does NOT reshape these signatures.
+    nanBehavior: 'handle',
 
     type: (ops) => comparisonType('Less', relationalAbsenceType, ops),
 
@@ -846,6 +856,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     description: 'Greater-than comparison (strictly greater than).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
+    // Same declared contract as `Less` (which this operator canonicalizes
+    // into): the handler owns `NaN` — IEEE unordered → `False`.
+    nanBehavior: 'handle',
     lazy: true,
     // Broadcast element-wise over a list operand (canonicalizes to `Less`; the
     // flag is kept here for a non-canonicalized `Greater`).
@@ -874,6 +887,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // amended 2026-07-24); see `Less`. Covers `GreaterEqual` too (canonicalizes
     // here).
     missingBehavior: 'handle',
+    // See `Less`: the handler owns `NaN` (IEEE unordered → `False`), and
+    // the wide chain carrier is deliberate.
+    nanBehavior: 'handle',
 
     type: (ops) => comparisonType('LessEqual', relationalAbsenceType, ops),
 
@@ -955,6 +971,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     description: 'Greater-than-or-equal comparison (greater than or equal to).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
+    // Same declared contract as `LessEqual` (which this operator
+    // canonicalizes into): the handler owns `NaN` — IEEE unordered →
+    // `False`.
+    nanBehavior: 'handle',
 
     lazy: true,
     // Broadcast element-wise over a list operand (canonicalizes to `LessEqual`).

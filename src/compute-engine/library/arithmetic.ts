@@ -1,4 +1,3 @@
-import { Complex } from 'complex-esm';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import {
@@ -141,6 +140,7 @@ import {
 import {
   EXTENDED_REAL_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
+  SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import type { Type } from '../../common/type/types.js';
 import {
@@ -587,6 +587,42 @@ function literalPredicateType(
   return { kind: 'value', value: decide(v) };
 }
 
+/**
+ * The value of a Γ-family head (`Gamma`, `GammaLn`, `Factorial`,
+ * `Factorial2`) at an infinite argument, or `undefined` when the argument
+ * is not infinite.
+ *
+ * - At `+∞` all four diverge to `+∞`. Verified numerically: Γ(x) grows
+ *   past the double range between x = 171 and x = 1000, Γ(x+1) does the
+ *   same one step later, and ln Γ(10⁶) ≈ 1.28·10⁷ while
+ *   ln Γ(10¹²) ≈ 2.66·10¹³.
+ * - At `−∞` there is NO limit, so the value is `NaN`. Γ has a pole at
+ *   every non-positive integer, so the function is undefined at infinitely
+ *   many points of any neighbourhood of `−∞`, and between consecutive
+ *   poles its sign alternates (Γ(−5.5) ≈ +1.09·10⁻², Γ(−10.5) ≈
+ *   −2.64·10⁻⁷). `ln Γ` inherits both, and it is not even real-valued on
+ *   the negative axis in this implementation.
+ * - At the unsigned `~∞` there is no limit either — an argument approaching
+ *   the single point at infinity from no fixed direction has none — so the
+ *   value is `NaN` as well. This arm makes the family uniform: `Gamma`,
+ *   `GammaLn` and `Factorial` already reached `NaN` at `~∞` through their
+ *   own numeric routes, while `Factorial2` stopped at its integrality test
+ *   and stayed inert, which `docs/ERROR-MODEL.md` §1 forbids as the
+ *   terminal answer to a decided question.
+ *
+ * A MIXED directed value such as `∞ + i` is not covered: it reports
+ * `isInfinity === false` (only `±∞` and `~∞` report true), so it falls
+ * through to each handler's own complex route.
+ */
+function infiniteGammaFamilyValue(
+  x: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!isNumber(x) || x.isInfinity !== true) return undefined;
+  if (x.isPositive === true) return ce.PositiveInfinity;
+  return ce.NaN;
+}
+
 
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   {
@@ -758,7 +794,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       keywords: ['round up', 'ceiling'],
       complexity: 1250,
       broadcastable: true,
-      signature: '(number) -> integer',
+      // The carrier is the extended real line: rounding depends on the
+      // order of the real line, which the complex numbers lack, and
+      // `Ceil(±∞) = ±∞` puts the signed infinities on both sides. A
+      // proven off-carrier operand — a complex value, `~oo` — is a boxing
+      // error; there is no component-wise ceiling of a complex number
+      // (the compiled lanes agree — they are real-only for this
+      // operator). The slim `'types'` handler only NARROWS: a proven
+      // finite real sharpens the claim to `integer`, a proven ±∞ to the
+      // signed pair, and everything else falls to the declared result
+      // plus the derived `nan` arm exactly where the argument can carry
+      // one. (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4
+      // "Choosing carriers".)
+      signature: '(real | signed_infinity) -> integer | signed_infinity',
+      // Explicit: the DERIVED default answers `reject` for an
+      // extended-real carrier, and `Ceil(NaN)` must be `NaN`.
+      nanBehavior: 'propagate',
+      // Defined at every point of the carrier, and the numeric route
+      // cannot fail (an exact real always has a ceiling): the strong claim
+      // discharges the marker arm.
+      partiality: 'total',
       typeHandlerKind: 'types',
       type: ([x]) => roundingFunctionTypeOnTypes(x),
       sgn: ([x]) => {
@@ -767,21 +822,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonNegative) return 'non-negative';
         if (x.isNonPositive && x.isGreater(-1)) return 'zero';
         if (x.isNonPositive) return 'non-positive';
-        // Component-wise ceiling of a complex: real result iff ⌈im⌉ = 0
-        // (im ∈ (-1, 0]), and then the sign is that of ⌈re⌉ — not of re
-        // itself (⌈-0.5 - 0.5i⌉ = 0, not negative).
-        if (x.isExtendedReal == false && isNumber(x))
-          return x.im! > 0 || x.im! <= -1
-            ? 'unsigned'
-            : numberSgn(Math.ceil(x.re)); //.re and .im should be more general.
         return undefined;
       },
       evaluate: ([x]) =>
         apply(
           x,
           Math.ceil,
-          (x) => x.ceil(),
-          (z) => z.ceil(0)
+          (x) => x.ceil()
         ),
     },
 
@@ -1218,9 +1265,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // their NaN-propagation guard (`apply2`, `boxed-expression/apply.ts`),
         // and the non-finiteness test below would otherwise leave `NaN!`
         // inert — inertness as the terminal answer to a decided question,
-        // which `docs/ERROR-MODEL.md` §1 forbids. The INFINITE arguments do
-        // stay inert here, which is a separate open question.
+        // which `docs/ERROR-MODEL.md` §1 forbids.
         if (x.isNaN === true) return ce.NaN;
+
+        // An infinite argument is a decided question as well: `+∞` at `+∞`,
+        // NaN at `−∞` and at the unsigned `~∞` (no limit either way).
+        const infinite = infiniteGammaFamilyValue(x, ce);
+        if (infinite !== undefined) return infinite;
 
         // The argument is real...
         if (!x.isFinite) return undefined;
@@ -1260,6 +1311,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
         // A `NaN` argument propagates — see the synchronous handler above.
         if (x.isNaN === true) return ce.NaN;
+
+        // `(±∞)!` and `(~∞)!` — see the synchronous handler above.
+        const infinite = infiniteGammaFamilyValue(x, ce);
+        if (infinite !== undefined) return infinite;
 
         // The argument is real...
         if (!x.isFinite) return undefined;
@@ -1341,6 +1396,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // inert — inertness as the terminal answer to a decided question,
         // which `docs/ERROR-MODEL.md` §1 forbids.
         if (x.isNaN === true) return x.engine.NaN;
+        // `n!!` at an infinite argument has the same limits as `n!`: the
+        // double factorial only thins the product, so it still diverges to
+        // `+∞` at `+∞`, and it inherits the poles of Γ going the other way.
+        // This arm is also what stops `(~∞)!!` from staying inert on the
+        // integrality test below, where the rest of the family answers NaN.
+        const infinite = infiniteGammaFamilyValue(x, x.engine);
+        if (infinite !== undefined) return infinite;
         // The double factorial of a non-integer is an exact constant with no
         // simple closed form here, so stay symbolic rather than rounding the
         // argument to an integer (which non-strict mode would otherwise allow).
@@ -1368,7 +1430,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1250,
       broadcastable: true,
 
-      signature: '(number) -> integer',
+      // Same domain-signature shape and rationale as `Ceil` above: the
+      // extended-real carrier (`Floor(±∞) = ±∞`), `NaN` propagated by the
+      // generic gate, a proven off-carrier operand a boxing error, and
+      // the slim handler narrowing to `integer` / the signed pair where
+      // the operand proves it.
+      signature: '(real | signed_infinity) -> integer | signed_infinity',
+      nanBehavior: 'propagate',
+      partiality: 'total',
       typeHandlerKind: 'types',
       type: ([x]) => roundingFunctionTypeOnTypes(x),
       sgn: ([x]) => {
@@ -1376,21 +1445,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isGreaterEqual(1)) return 'positive';
         if (x.isNonNegative && x.isLess(1)) return 'zero';
         if (x.isNonNegative) return 'non-negative';
-        // Component-wise floor of a complex: real result iff ⌊im⌋ = 0
-        // (im ∈ [0, 1)), and then the sign is that of ⌊re⌋ — not of re
-        // itself (⌊0.5 + 0.5i⌋ = 0, not positive).
-        if (x.isExtendedReal == false && isNumber(x))
-          return x.im! < 0 || x.im! >= 1
-            ? 'unsigned'
-            : numberSgn(Math.floor(x.re)); //.re and .im should be more general.
         return undefined;
       },
       evaluate: ([x]) =>
         apply(
           x,
           Math.floor,
-          (x) => x.floor(),
-          (z) => z.floor(0)
+          (x) => x.floor()
         ),
     },
 
@@ -1486,6 +1547,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // This is exact, so return it regardless of numericApproximation.
         if (isNumber(x) && x.im === 0 && x.isInteger && x.isNonPositive)
           return engine.ComplexInfinity;
+        // Γ at an infinite argument. Also exact, so it does not wait for
+        // `numericApproximation` either.
+        const infinite = infiniteGammaFamilyValue(x, engine);
+        if (infinite !== undefined) return infinite;
         return shouldNumericize(numericApproximation, x)
           ? apply(
               x,
@@ -1512,6 +1577,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // This is exact, so return it regardless of numericApproximation.
         if (isNumber(x) && x.im === 0 && x.isInteger && x.isNonPositive)
           return engine.PositiveInfinity;
+        // ln Γ(x) → +∞ as x → +∞ (ln Γ(10¹²) ≈ 2.66·10¹³), and it has no
+        // limit as x → −∞, nor at the unsigned `~∞` — same reasons as Γ
+        // itself.
+        const infinite = infiniteGammaFamilyValue(x, engine);
+        if (infinite !== undefined) return infinite;
         return shouldNumericize(numericApproximation, x)
           ? apply(
               x,
@@ -3306,18 +3376,50 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Optional precision arg (Desmos/spreadsheet `round(x, n)`): round to `n`
       // decimal places. Without it, rounds to the nearest integer.
-      signature: '(number, integer?) -> number',
+      //
+      // The carrier is the extended real line — rounding depends on the
+      // order of the real line, and `Round(±∞) = ±∞` — so a proven
+      // off-carrier operand (a complex value, `~oo`) is a boxing error,
+      // and a `NaN` argument in the VALUE slot propagates through the
+      // generic gate (an extended-real carrier derives `reject`, hence
+      // the explicit declaration). The declared result is
+      // `real | signed_infinity`, not the family's
+      // `integer | signed_infinity`, because the precision form is
+      // generally non-integer (`Round(3.14159, 2)` is `3.14`); the
+      // handler below restores the sharp `integer` claim for the
+      // single-argument form. The precision slot keeps the DERIVED `NaN`
+      // policy for an integer carrier (`reject`): a `NaN` digit count is
+      // an error, not a value to propagate — which is why `nanBehavior`
+      // is the one-element array (slot 0 only) rather than operator-wide.
+      // NO `partiality: 'total'` claim, deliberately: the precision form
+      // computes `10^n` first, and an exact power beyond the
+      // materialization limit stays symbolic, so an in-carrier call such
+      // as `Round(1, 500001)` remains unevaluated — the omitted
+      // (may-marker) default is the honest declaration.
+      // (`docs/ERROR-MODEL.md` §4; the Phase F record in
+      // `docs/plans/2026-08-30-error-model-implementation.md`.)
+      signature: '(real | signed_infinity, integer?) -> real | signed_infinity',
+      nanBehavior: ['propagate'],
       typeHandlerKind: 'types',
       type: ([x, n]) => {
         const t = roundingFunctionTypeOnTypes(x);
+        if (n === undefined) return t;
         // With a precision arg the result is generally non-integer
-        // (`Round(3.14159, 2)` is `3.14`): keep the complex/non-finite/NaN
+        // (`Round(3.14159, 2)` is `3.14`): keep the non-finite
         // classification, but replace the integer claim by `real`.
         // The replacement must apply to EVERY operand that rounds to
         // `integer`, including a bare `real` symbol of unknown
         // finiteness — an earlier guard on `isFinite === true` let
         // `Round(x, 2)` with `x: real` fall through to `integer`.
-        return n !== undefined && t === 'integer' ? 'real' : t;
+        if (t === 'integer') return 'real';
+        if (t === undefined) return undefined;
+        // A pure signed-infinity claim survives the precision arg
+        // (`Round(±∞, n) = ±∞`); any mixed claim relaxes to
+        // `real | signed_infinity`, which IS the declared result, so
+        // decline and let it apply. Structural test, not object identity:
+        // the helper's claim must not be tied to which constant it built
+        // the type from.
+        return isSubtype(t, SIGNED_INFINITY_TYPE) ? t : undefined;
       },
       sgn: ([x, n]) => {
         // Only reason about the sign in the single-argument (round-to-integer)
@@ -3329,9 +3431,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // (Round(-1/2) = -1); Math.round ties toward +∞, so negate-and-round
         // for negative reals or `.sgn` and `.evaluate()` disagree at -0.5.
         if (isNumber(x))
-          return x.im! >= 0.5 || x.im! <= -0.5
-            ? 'unsigned'
-            : numberSgn(x.re < 0 ? -Math.round(-x.re) : Math.round(x.re));
+          return numberSgn(x.re < 0 ? -Math.round(-x.re) : Math.round(x.re));
         if (x.isGreaterEqual(0.5)) return 'positive';
         if (x.isLessEqual(-0.5)) return 'negative';
         if (x.isLess(0.5) && x.isGreater(-0.5)) return 'zero';
@@ -3344,8 +3444,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           apply(
             v,
             Math.round,
-            (v) => v.round(),
-            (v) => v.round(0)
+            (v) => v.round()
           );
         if (n === undefined) return roundToInteger(x);
         // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places.
@@ -3407,18 +3506,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Sign of a number: -1, 0, or 1.',
       complexity: 1200,
       broadcastable: true,
-      // Contract B domain signature (the second Phase F flip, after the
-      // `Heaviside` pilot above): the carrier is exactly where the sign is
-      // defined — the extended real line, `Sign(±∞)` = ±1 included — and
-      // the result is exactly its values {−1, 0, 1}, the finitely-valued
-      // tier WITH its range so type-channel consumers read the bounds
-      // without consulting the sgn handler. Off the real line the usual
-      // convention `z/|z|` is complex and this operator declines, so a
-      // PROVEN off-carrier operand (`Sign(i)`, `Sign(~oo)`) is a boxing
-      // error now (it was inert forever); the application type is the
-      // derived `integer<-1..1>` for a proven extended-real argument and
-      // `integer<-1..1> | nan` for a maybe-NaN one — no hand-written type
-      // handler.
+      // The carrier is exactly where the sign is defined — the extended
+      // real line, `Sign(±∞)` = ±1 included — and the result is exactly
+      // its values {−1, 0, 1}, the finitely-valued tier WITH its range so
+      // type-channel consumers read the bounds without consulting the sgn
+      // handler. Off the real line the usual convention `z/|z|` is
+      // complex and this operator declines, so a PROVEN off-carrier
+      // operand (`Sign(i)`, `Sign(~oo)`) is a boxing error; the
+      // application type is the derived `integer<-1..1>` for a proven
+      // extended-real argument and `integer<-1..1> | nan` for a maybe-NaN
+      // one — no hand-written type handler. (Same domain-signature
+      // doctrine as `Heaviside` above: `docs/ERROR-MODEL.md` §4.)
       signature: '(real | signed_infinity) -> integer<-1..1>',
       // Explicit: the DERIVED default answers `reject` for this carrier
       // (an extended-real carrier is not a subtype of `complex`, which is
@@ -3645,7 +3743,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Rounds a number towards zero (removes the fractional part)',
       complexity: 1250,
       broadcastable: true,
-      signature: '(number) -> integer',
+      // Same domain-signature shape and rationale as `Ceil`/`Floor`
+      // above.
+      signature: '(real | signed_infinity) -> integer | signed_infinity',
+      nanBehavior: 'propagate',
+      partiality: 'total',
       typeHandlerKind: 'types',
       type: ([x]) => roundingFunctionTypeOnTypes(x),
       // trunc(x) = 0 for |x| < 1, so the sign of x alone is not enough
@@ -3656,20 +3758,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isGreater(-1) && x.isLess(1)) return 'zero';
         if (x.isNonNegative) return 'non-negative';
         if (x.isNonPositive) return 'non-positive';
-        // Component-wise truncation of a complex: real result iff |im| < 1,
-        // and then the sign is that of trunc(re).
-        if (x.isExtendedReal === false && isNumber(x))
-          return x.im! >= 1 || x.im! <= -1
-            ? 'unsigned'
-            : numberSgn(Math.trunc(x.re));
         return undefined;
       },
       evaluate: ([x]) =>
         apply(
           x,
           Math.trunc,
-          (x) => x.trunc(),
-          (z) => new Complex(Math.trunc(z.re), Math.trunc(z.im))
+          (x) => x.trunc()
         ),
     },
   },

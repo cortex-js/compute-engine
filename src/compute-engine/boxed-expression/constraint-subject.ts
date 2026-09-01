@@ -754,6 +754,13 @@ export function membershipType(setExpr: Expression): Type | undefined {
     )
       return 'real';
   }
+  // Removing elements from a set never adds any: `x ∈ S ∖ T` implies `x ∈ S`,
+  // so the base proves the tier and the exclusion only sharpens it (which the
+  // separate disequality facts `assume()` records alongside carry). Without
+  // this arm `x ∈ (Range(1, 3) ∪ Range(5, 7)) ∖ {2}` proved nothing, because
+  // evaluating that difference materializes it into a finite set literal.
+  if (isFunction(setExpr, 'SetMinus') && setExpr.ops.length === 2)
+    return membershipType(setExpr.op1);
   return undefined;
 }
 

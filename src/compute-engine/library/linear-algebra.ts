@@ -73,6 +73,12 @@ const MAX_POINT_LIST_NORM = 10000;
  * expression is boxed in a single `ce.expr` call so the enclosing `Function`
  * scopes bind `i`/`j` as parameters — building the pieces separately would let a
  * bare `i` canonicalize to the imaginary unit before it is bound.
+ *
+ * Both index parameters are annotated `integer`: a `Tabulate` index is always a
+ * 1-based integer, and without the annotation the parameter slot reads
+ * `unknown`, so the lambda-body widening replaces a cell's finite `integer`
+ * claim with the top numeric type and the matrix reports
+ * `indexed_collection<indexed_collection<number>>`.
  */
 function lazyConstantMatrix(
   ce: ComputeEngine,
@@ -80,9 +86,14 @@ function lazyConstantMatrix(
   n: number,
   cell: ExpressionInput
 ): Expression {
+  const index = (name: string): ExpressionInput => [
+    'Typed',
+    name,
+    "'integer'",
+  ];
   return ce.expr([
     'Tabulate',
-    ['Function', ['Tabulate', ['Function', cell, 'j'], n], 'i'],
+    ['Function', ['Tabulate', ['Function', cell, index('j')], n], index('i')],
     m,
   ]);
 }

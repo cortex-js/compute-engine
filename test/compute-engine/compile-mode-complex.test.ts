@@ -353,18 +353,27 @@ describe('complex mode — D2/D6 runtime rules', () => {
   });
 
   it('Floor/Mod/Max: the real lowering on a real value, NaN on a complex one', () => {
+    // `Floor` took its Phase F Contract B flip: the declared
+    // `(real | signed_infinity)` carrier now INFERS an undeclared `a` as
+    // extended-real, so the parameter is compiled as a real binding and a
+    // complex runtime value is a loud entry-check TypeError — no longer a
+    // silent runtime-NaN projection. (`Mod`/`Max` keep wide carriers and
+    // keep the runtime rule.)
     expect(compile(ce.parse('\\lfloor a \\rfloor'), CX).run!({ a: 2.5 })).toBe(
       2
     );
-    expect(
+    expect(() =>
       compile(ce.parse('\\lfloor a \\rfloor'), CX).run!({ a: { re: 0, im: 1 } })
-    ).toBeNaN();
+    ).toThrow(/compiled as a real number/);
     const mod = compile(ce.box(['Mod', 'z', 3]), CX);
     expect(mod.run!({ z: 7 })).toBe(1);
     expect(mod.run!({ z: { re: 0, im: 1 } })).toBeNaN();
-    const max = compile(ce.box(['Max', 'a', 'b']), CX);
-    expect(max.run!({ a: 1, b: 2 })).toBe(2);
-    expect(max.run!({ a: { re: 1, im: 1 }, b: 2 })).toBeNaN();
+    // Fresh symbols for the Max row: the `\lfloor a \rfloor` parse above
+    // already inferred `a` extended-real on this shared engine, and Max
+    // must exercise the WIDE-carrier runtime rule.
+    const max = compile(ce.box(['Max', 'p_mx', 'q_mx']), CX);
+    expect(max.run!({ p_mx: 1, q_mx: 2 })).toBe(2);
+    expect(max.run!({ p_mx: { re: 1, im: 1 }, q_mx: 2 })).toBeNaN();
   });
 
   it('D6: Erf(x) → erf(0.5) at 0.5, NaN at i (a complex-typed x)', () => {
@@ -487,8 +496,12 @@ describe('complex mode — D2/D6 runtime rules', () => {
   });
 
   it('the Python target emits its own syntax for the runtime rule and passes non-numbers through the lift', () => {
+    // `Erf`, not `Floor`: post-Phase F, `Floor`'s extended-real carrier
+    // types its operand real and the runtime rule is statically elided —
+    // `Erf` keeps the wide carrier, so its operand stays possibly-complex
+    // and the emission this test pins still fires.
     const e = new ComputeEngine();
-    const r = compile(e.box(['Less', ['Floor', 'a'], 2]), {
+    const r = compile(e.box(['Less', ['Erf', 'a'], 2]), {
       mode: 'complex',
       to: 'python',
       fallback: false,

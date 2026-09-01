@@ -508,11 +508,18 @@ describe('CANONICAL FORMS', () => {
         canonForms = NaN
         canonical  = NaN
       `);
+      // `(+∞)^∞` keeps its DIRECTION: nⁿ grows through +∞ without ever
+      // changing sign (10¹⁰, 100¹⁰⁰ = 10²⁰⁰, 1000¹⁰⁰⁰ overflows the double
+      // range), so the limit is `+∞` and not the direction-less `~∞` this
+      // used to answer (user ruling 2026-08-31).
       expect(checkPower('{\\infty}^\\infty')).toMatchInlineSnapshot(`
         box        = ["Power", "PositiveInfinity", "PositiveInfinity"]
-        canonForms = ComplexInfinity
-        canonical  = ComplexInfinity
+        canonForms = PositiveInfinity
+        canonical  = PositiveInfinity
       `);
+      // `(−∞)^∞` genuinely loses the direction — (−n)ⁿ alternates with the
+      // parity of n ((−10)¹⁰ = +10¹⁰, (−11)¹¹ ≈ −2.85·10¹¹) — so it stays
+      // `~∞`.
       expect(checkPower('{-\\infty}^\\infty')).toMatchInlineSnapshot(`
         box        = ["Power", ["Negate", "PositiveInfinity"], "PositiveInfinity"]
         canonForms = ComplexInfinity

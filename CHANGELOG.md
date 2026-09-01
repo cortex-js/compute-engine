@@ -144,6 +144,30 @@
     convention `z/|z|`) is removed from the bundled identity artifact: its
     match side is not representable under the real-only `Sign`.
 
+- **`Floor`, `Ceil`, `Round`, and `Truncate` are now defined on the
+  extended real line only.** Rounding depends on the order of the real
+  line, so each operator now declares the domain signature
+  `(real | signed_infinity) -> integer | signed_infinity` (`Round` takes
+  an optional integer precision argument and declares the result
+  `real | signed_infinity`). Consequences:
+  - A complex argument is now an `incompatible-type` error. The
+    component-wise (Gaussian) rounding of a complex number — for example
+    `Floor(1.5 + 2.7i)` — is removed. Compiled code was already
+    real-only for these operators (a complex value produced `NaN` or a
+    compile error), so the interpreter and the compiler now agree.
+    `~oo` is also an error (it was unevaluated before).
+  - The values are unchanged on the domain: `Floor(±∞)` is `±∞`, and a
+    `NaN` argument still gives `NaN` (its type is now `nan`).
+  - The static types are sharper and honest about infinities: a finite
+    real argument keeps the `integer` claim, while an argument that may
+    be infinite types `integer | signed_infinity` (plus `| nan` exactly
+    when the argument may be `NaN`).
+  - The comparison operators (`Less`, `LessEqual`, and the canonicalized
+    `Greater`/`GreaterEqual`) are unchanged: they keep their wide
+    signatures for chains, quantities, and `Missing`, and now declare
+    explicitly that they handle `NaN` themselves (an unordered `NaN`
+    makes the comparison `False`, per IEEE — the existing behavior).
+
 - **`IsPrime` and `IsComposite` now use positive-integer definitions.**
   `IsPrime` returns `False` for a decidable value that is not a positive
   integer greater than 1. It reports an `incompatible-type` error for an
@@ -167,6 +191,36 @@
   out-of-range literal tuple index has the type `missing | nan`.
 
 ### New Features
+
+- **`Hypot` accepts infinite arguments, with IEEE semantics.** The declared
+  signature is now
+  `(real | signed_infinity, real | signed_infinity) -> real | +oo | nan`
+  with `nanBehavior: 'handle'`: `Hypot(2, oo)` evaluates to `+oo` instead
+  of rejecting at the signature, an infinite leg dominates a NaN leg
+  (`Hypot(+oo, NaN)` is `+oo`, both orders, matching IEEE `Math.hypot`, so
+  the interpreted and compiled lanes agree), and `Hypot(NaN, 1)` stays
+  `NaN`. A point leg with a signed-infinite component and no NaN component
+  counts as infinite (`Hypot((+oo, 3), NaN)` is `+oo`), matching `Norm`'s
+  own answers. `euclideanNormType` (the norm-type helper shared by
+  `Norm`/`Abs`/`Distance`) claims `real | +oo` when component finiteness
+  is unproven (sharper than the previous `number`), and its finiteness
+  proof now also accepts a type-level proof, so compound real-typed
+  components stay sharp (`Hypot(Norm((3,4)), 1)` is still `real`). Two
+  consumer-visible notes: a stored/inferred result reads
+  `real | signed_infinity` (the engine's value-widening rule: a contract
+  inferred from one observed `+∞` must not reject a later `−∞`), and
+  undeclared symbols used as `Hypot` arguments now infer
+  `real | signed_infinity` instead of `real`.
+
+- **`Factorial`, `Factorial2`, `Gamma` and `GammaLn` now resolve infinite
+  arguments.** `Factorial(+oo)` evaluates to `+oo` (the limit exists);
+  `Factorial(-oo)` evaluates to `NaN` (Gamma oscillates through poles as
+  x → −∞ — no value); same for the other three heads, on the evaluate,
+  evaluateAsync and parse routes. `Factorial2(~oo)` now answers `NaN` like
+  the rest of the family instead of staying inert (`Factorial2(∞ + i)`
+  stays inert — a mixed infinity is not an infinity value and is out of
+  this scope). `Digamma`/`Trigamma`/`PolyGamma` are unchanged (their limit
+  shapes differ per head; tracked in `ROADMAP.md`).
 
 - **Operator definitions can declare their error-model contract.** Four new
   declaration fields implement the ratified error model
@@ -313,6 +367,69 @@
   negative infinity. Use `'ceiling'` to round toward positive infinity.
 
 ### Bug Fixes
+
+- **An `If` or `Which` condition that cannot be decided no longer throws a
+  host exception.** `ce.box(['If', 'x', 5]).evaluate()` with `x` undeclared
+  used to throw `Error: Condition must evaluate to "True" or "False"` out
+  of `evaluate()`; the expression now stays inert (returned unevaluated,
+  with the condition evaluated in place), so it can resolve later if the
+  condition becomes decidable. This also covers conditions that evaluate to
+  a non-boolean value. Consumer code that caught that exception should test
+  for an unevaluated `If`/`Which` result instead. Compiled targets still
+  fail closed by throwing; neither route ever picks a branch on an
+  undecided condition. An absent (`Missing`) condition still produces a
+  catchable error expression — absence is decided and can never resolve.
+  Note: the spell-check hint for a misspelled condition symbol
+  (`Which(Tru, …)`) rode on the removed throw and no longer fires.
+
+- **`(+∞)^(+∞)` canonicalizes to `+oo`, not `~oo`.** The direction is
+  knowable, so the sharper answer is correct. `(-∞)^(+∞)` still answers
+  `~oo` (the sign alternates — direction genuinely lost), and `(±∞)^(−∞)`
+  still answers `0`.
+
+- **Type inference no longer widens through a nominal type alias.**
+  `provablyDisjoint` resolves nominal `reference` types through their
+  definitions (positive direction only — opacity for subtyping is
+  unchanged), so a parameter annotated with an object ALIAS now behaves
+  like the equivalent structural spelling. What kind of consumer code to
+  re-measure: an inferred arrow whose parameter is object/nominal-typed
+  now keeps its exact result type (`-> integer` where it used to widen to
+  `-> number`), and argument-type errors previously dropped for
+  nominal-typed parameters are now kept (a sound tightening).
+
+- **An annotated (`Typed`-wrapped) function-literal parameter named after
+  a library constant (`i`, `e`) now shadows the constant**, like a plain
+  parameter does. `Tabulate(['Typed','i',"'integer'"] ↦ …)` used to
+  canonicalize the body's `i` to the imaginary unit, so `IdentityMatrix`
+  built that way evaluated to an all-zero matrix. The same root cause
+  (a canonical symbol lookup returning the imaginary-unit literal) also
+  made the signature-string sugar (`"'(i: integer) -> integer'"`) report
+  `expected-a-symbol` for a parameter named `i` — also fixed. The
+  library's lazy constant matrices now annotate their index parameters, so
+  `IdentityMatrix(1e6)`'s lazy element type is `integer` (was `number`).
+
+- **`assume()` rollback leaves the scope as it found it.** Ownership is
+  decided by an entry snapshot: a contradictory assumption removes exactly
+  the bindings the `assume()` call itself created — the string and
+  raw-MathJSON routes leave no residual declaration (the string route used
+  to leave `p` declared after `assume('p > 0 \\land p < -5')`), while a
+  binding that existed at entry is never disposed, so an expression the
+  caller already holds keeps its symbol identity (a placeholder created by
+  the caller's own `ce.parse` survives a contradiction as the same empty
+  placeholder a bare `ce.parse` would leave).
+
+- **`assume(Element(m, Union(Range(1,3), Range(5,7))))` now types `m` as
+  `integer`** (was `unknown`): the set operand is normalized once and the
+  normalized form is both decomposed and recorded, so the recorded fact
+  itself proves the tier. Same through a `SetMinus` wrapper
+  (`x ∈ S∖T ⇒ x ∈ S` — the base proves the tier; the exclusion is carried
+  by the disequality facts recorded alongside), which also keeps a large
+  difference symbolic instead of materializing it into a set literal.
+
+- **A partially rolled-back compound assumption records its facts against
+  live definitions.** When one conjunct is refused and another re-declares
+  the same symbol, the recorded fact's symbol nodes now resolve to the
+  surviving definition instead of the disposed one.
 
 - **An element-wise `Which`/`If` selection no longer refuses a
   complex-TYPED branch.** The JavaScript lowering declined any selection

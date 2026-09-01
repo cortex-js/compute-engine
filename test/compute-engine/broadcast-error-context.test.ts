@@ -25,6 +25,33 @@ function withBump(ce: ComputeEngine): void {
   );
 }
 
+/**
+ * `Boom(x)` — an operator whose evaluate handler raises a host exception, and
+ * `pick(c) = Boom(c)`, a scalar-parameter lambda around it. This is the vehicle
+ * for the THROWN-element-failure tests: a broadcast element that throws must
+ * abort the whole broadcast with the element-wise context appended to the
+ * message, and nothing in the built-in library is guaranteed to keep throwing
+ * from an evaluate handler, so the throw is supplied by the test itself.
+ *
+ * With `only` given, the handler throws for that one argument value and answers
+ * `0` for every other, which is how an element INDEX can be pinned: the failure
+ * has to be attributed to the slot it came from, not merely reported.
+ *
+ * A conditional used to serve as this vehicle (`pick(c) = If(c, 1, 2)` over a
+ * list of numbers). It no longer throws: an undecidable condition leaves the
+ * `If` inert (ruling 2026-08-31), which the companion tests below pin.
+ */
+function withBoom(ce: ComputeEngine, only?: number): void {
+  ce.declare('Boom', {
+    signature: '(any) -> number',
+    evaluate: ([x]) => {
+      if (only === undefined || x.isSame(only))
+        throw new Error('boom in element');
+      return ce.number(0);
+    },
+  });
+}
+
 describe('BROADCAST ERROR CONTEXT — box route', () => {
   test('an element error carries an `ErrorBroadcast` breadcrumb entry', () => {
     const ce = new ComputeEngine();
@@ -80,12 +107,27 @@ describe('BROADCAST ERROR CONTEXT — box route', () => {
 
   test('a THROWN element failure enriches the message with the context', () => {
     const ce = new ComputeEngine();
-    // `If` on a non-boolean throws rather than returning an error value, so
-    // the failure aborts the whole broadcast and cannot carry a breadcrumb.
-    ce.assign('pick', ce.box(['Function', ['If', 'c', 1, 2], 'c']));
+    // A host exception out of an element aborts the whole broadcast, so it
+    // cannot carry a breadcrumb operand the way an error VALUE does. The
+    // context is appended to the exception's message instead.
+    withBoom(ce);
+    ce.assign('pick', ce.box(['Function', ['Boom', 'c'], 'c']));
     expect(() => ce.box(['pick', ['List', 1, 2, 3, 4]]).evaluate()).toThrow(
       /while applying 'pick' element-wise over 4 elements \(element 1\)/
     );
+  });
+
+  test('an INERT element does not abort the broadcast — it completes', () => {
+    // The contrast case for the test above. An undecidable condition is inert,
+    // not a throw (ruling 2026-08-31), so a conditional body that cannot decide
+    // is not an element FAILURE at all: the broadcast runs to completion and
+    // each unresolved element keeps its held `If`.
+    const ce = new ComputeEngine();
+    ce.assign('pick', ce.box(['Function', ['If', 'c', 1, 2], 'c']));
+    const result = ce.box(['pick', ['List', true, false, 3]]).evaluate();
+    expect(result.json).toEqual(['List', 1, 2, ['If', 3, 1, 2]]);
+    // No element carries a broadcast breadcrumb: nothing failed.
+    expect(JSON.stringify(result.json)).not.toContain('ErrorBroadcast');
   });
 });
 
@@ -130,8 +172,9 @@ describe('BROADCAST ERROR CONTEXT — value-definition route', () => {
 
   test('a THROWN element failure enriches the message with the context', () => {
     const ce = new ComputeEngine();
+    withBoom(ce);
     ce.declare('pick', 'function');
-    ce.assign('pick', ce.box(['Function', ['If', 'c', 1, 2], 'c']));
+    ce.assign('pick', ce.box(['Function', ['Boom', 'c'], 'c']));
     expect(() => ce.box(['pick', ['List', 1, 2, 3, 4]]).evaluate()).toThrow(
       /while applying 'pick' element-wise over 4 elements \(element 1\)/
     );
@@ -141,11 +184,13 @@ describe('BROADCAST ERROR CONTEXT — value-definition route', () => {
 describe('BROADCAST ERROR CONTEXT — async route', () => {
   test('a rejection is attributed to its element index', async () => {
     const ce = new ComputeEngine();
-    ce.assign('pick', ce.box(['Function', ['If', 'c', 1, 2], 'c']));
+    // `Boom` raises only on the argument `3`, so elements 1 and 2 succeed.
+    withBoom(ce, 3);
+    ce.assign('pick', ce.box(['Function', ['Boom', 'c'], 'c']));
     // `Promise.all` cannot attribute a rejection, but each element's promise
     // is created in a known slot: the third element is the one that fails.
     await expect(
-      ce.box(['pick', ['List', true, false, 3]]).evaluateAsync()
+      ce.box(['pick', ['List', 1, 2, 3]]).evaluateAsync()
     ).rejects.toThrow(
       /while applying 'pick' element-wise over 3 elements \(element 3\)/
     );
@@ -153,7 +198,8 @@ describe('BROADCAST ERROR CONTEXT — async route', () => {
 
   test('the context is appended exactly once', async () => {
     const ce = new ComputeEngine();
-    ce.assign('pick', ce.box(['Function', ['If', 'c', 1, 2], 'c']));
+    withBoom(ce);
+    ce.assign('pick', ce.box(['Function', ['Boom', 'c'], 'c']));
     // The per-element wrapper enriches; the outer `Promise.all` handler must
     // not enrich the same error a second time.
     const message = await ce
@@ -194,9 +240,10 @@ describe('BROADCAST ERROR CONTEXT — Epsil route', () => {
 
   test('a thrown element failure surfaces as an error VALUE with the context', () => {
     const ce = new ComputeEngine();
+    withBoom(ce);
     const { value } = executeEpsil(
       ce,
-      `function pick(c) { if c { 1 } else { 2 } }\npick([1, 2, 3, 4])`
+      `function pick(c) { Boom(c) }\npick([1, 2, 3, 4])`
     );
     expect(value.toString()).toContain(
       `while applying 'pick' element-wise over 4 elements (element 1)`

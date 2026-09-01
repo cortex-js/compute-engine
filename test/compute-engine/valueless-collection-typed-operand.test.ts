@@ -217,13 +217,15 @@ describe('a collection-TYPED but valueless operand', () => {
       expect(result.isCollection).toBe(true);
     });
 
-    // The throw is RESERVED for a condition that can never be boolean, where
-    // the spell-check hint is the useful outcome. Widening the hold must not
-    // have swallowed that.
-    it('still throws for a condition that is not booleanish at all', () => {
+    // A condition that can never be boolean is held too — the same answer the
+    // undecided cases get, so the two cannot diverge (ruling 2026-08-31). What
+    // matters is that the `Which` does NOT fall through to the `True` clause
+    // and answer 2.
+    it('holds a condition that is not booleanish at all', () => {
       const ce = new ComputeEngine();
       ce.declare('N', 'list<number>');
-      expect(() => ce.box(['Which', 'N', 1, 'True', 2]).evaluate()).toThrow();
+      const r = ce.box(['Which', 'N', 1, 'True', 2]).evaluate();
+      expect(r.operator).toBe('Which');
     });
   });
 

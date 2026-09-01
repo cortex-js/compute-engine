@@ -550,43 +550,6 @@ export function gammaPoleType(x: Expression | undefined): Type {
 }
 
 /**
- * Rounding family (`Round`, `Ceil`, `Floor`, `Truncate`), which extends
- * component-wise to complex arguments (Gaussian rounding):
- * - NaN → NaN, and a non-finite argument that may be `~oo` (or a non-finite
- *   complex) → `number`;
- * - a provably real ±∞ maps to itself: `+oo | -oo` (provable);
- * - a *provably* non-real argument rounds component-wise → `complex`
- *   (widened to `number` when its finiteness is not established);
- * - otherwise (real or unknown, finiteness unknown = generic point) →
- *   `integer`.
- *
- * Non-realness must be PROVEN, not merely un-disproven. On a function
- * expression `isExtendedReal` is derived from the type (a subtype of `real`
- * or of `+oo | -oo`), so it answers `false` for an operand that is
- * simply not *provably* real:
- * `4Q` (Q undeclared) types `number`, which admits both readings.
- * Reading that `false` as "complex" made `Round(4Q)` type `number` while the
- * strictly less informative `Round(Q)` typed `integer` — more knowledge
- * about the operand yielding a weaker result. Only a number *literal* (whose
- * `isExtendedReal` is a value, not a type, question) or a type that excludes
- * the reals proves the complex case; everything else keeps the generic-point
- * convention.
- */
-export function roundingFunctionType(x: Expression | undefined): Type {
-  if (!x || x.isNaN) return 'number';
-  if (provablyNonFiniteNumber(x))
-    return x.isExtendedReal === true ? SIGNED_INFINITY_TYPE : 'number';
-  const provablyNonReal = isNumber(x)
-    ? x.isExtendedReal === false
-    : x.type.matches('imaginary');
-  if (provablyNonReal)
-    return x.isFinite === true || x.type.matches('complex')
-      ? 'complex'
-      : 'number';
-  return 'integer';
-}
-
-/**
  * `Abs` — |x| is a non-negative real whose finiteness follows the operand:
  * |±∞| = |~oo| = +∞, |NaN| = NaN, and a finite x (real or complex) has a
  * finite magnitude. A finite tier is only claimed when finiteness is

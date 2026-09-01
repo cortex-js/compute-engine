@@ -547,11 +547,14 @@ describe('activation gate', () => {
     expect(r.toString()).toMatch(/Infinity/);
   });
 
-  test('a collection of non-booleans is not reinterpreted (typo path unchanged)', () => {
+  test('a collection of non-booleans is not reinterpreted (held, not selected)', () => {
+    // The cells are numbers, so the element-wise gate does not open. The
+    // conditional is then held whole rather than raising a host exception
+    // (undecidable-condition ruling 2026-08-31).
     const ce = engine();
-    expect(() =>
-      ce.box(['Which', ['List', 1, 2], 1, 'True', 0]).evaluate()
-    ).toThrow(/must evaluate to/);
+    const r = ce.box(['Which', ['List', 1, 2], 1, 'True', 0]).evaluate();
+    expect(r.operator).toBe('Which');
+    expect(r.op2.isSame(1)).toBe(true);
   });
 
   test('a Set of booleans (not indexed) does not activate', () => {
@@ -609,11 +612,13 @@ describe('scalar behavior is unchanged', () => {
     ).toBe('Error');
   });
 
-  test('the scalar typo path still throws', () => {
+  test('the scalar typo path is held, not thrown', () => {
+    // `3` can never be a condition, but an undecidable condition is answered
+    // with inertness rather than a host exception (ruling 2026-08-31).
     const ce = engine();
-    expect(() => ce.box(['If', 3, 1, 2]).evaluate()).toThrow(
-      /must evaluate to/
-    );
+    const r = ce.box(['If', 3, 1, 2]).evaluate();
+    expect(r.operator).toBe('If');
+    expect(r.op1.isSame(3)).toBe(true);
   });
 });
 

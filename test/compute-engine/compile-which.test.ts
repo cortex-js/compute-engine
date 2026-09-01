@@ -165,11 +165,12 @@ describe('COMPILE Which', () => {
     });
   });
 
-  // CO-P2-24: a non-boolean condition (notably one that evaluates to NaN) makes
-  // the interpreter throw ("Condition must evaluate to True or False"). A
-  // compiled ternary would silently treat it as falsy and take the default
-  // branch. The JS target guards a non-provably-boolean condition with
-  // `_SYS.cond`, which rethrows — matching the interpreter (D6).
+  // CO-P2-24: a non-boolean condition (notably one that evaluates to NaN) must
+  // never take the default branch. A compiled ternary would silently treat it
+  // as falsy and return 9. The JS target guards a non-provably-boolean
+  // condition with `_SYS.cond`, which throws; the interpreter holds the
+  // `Which` unevaluated (undecidable-condition ruling 2026-08-31). The two
+  // lanes agree on what matters: neither answers the default arm (D6).
   describe('non-boolean condition (JS) fails closed like the interpreter', () => {
     it('throws at run time on a NaN condition instead of taking the default', () => {
       // The condition x/y is numeric, not boolean; at (0,0) it is NaN.
@@ -177,9 +178,11 @@ describe('COMPILE Which', () => {
       const result = compile(expr, { fallback: false })!;
       expect(result.success).toBe(true);
       expect(result.code).toContain('_SYS.cond(');
-      // Interpreter throws for a NaN / numeric condition …
-      expect(() => ce.box(['Which', ['Divide', 0, 0], 5, 'True', 9]).N()).toThrow();
-      // … and so does the compiled function (rather than returning 9).
+      // The interpreter holds a NaN / numeric condition rather than deciding …
+      expect(
+        ce.box(['Which', ['Divide', 0, 0], 5, 'True', 9]).N().operator
+      ).toBe('Which');
+      // … and the compiled function throws (rather than returning 9).
       expect(() => result.run!({ x: 0, y: 0 })).toThrow();
       // A finite-but-numeric (non-boolean) condition also throws, matching the
       // interpreter's "must be True or False" contract.

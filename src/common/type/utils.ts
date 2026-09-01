@@ -859,6 +859,12 @@ export function typeHasNanFreeNumericCell(t: Readonly<Type>): boolean {
 export function widenCellsWithMarker(t: Readonly<Type>): Type {
   if (isSubtype(t, 'number')) {
     if (isSubtype('nan', t)) return t as Type;
+    // Splice into an existing union rather than nesting one: a nested
+    // union is a legal Type but a needlessly hostile shape for downstream
+    // set reasoning (`(integer | signed_infinity) | nan` vs the flat
+    // three-member union).
+    if (typeof t !== 'string' && t.kind === 'union')
+      return { kind: 'union', types: [...t.types, 'nan'] };
     return { kind: 'union', types: [t as Type, 'nan'] };
   }
   if (typeof t !== 'string') {
@@ -921,6 +927,12 @@ export function codomainMarkerType(t: Readonly<Type>): Type {
 export function widenNumericCellsWithNan(t: Readonly<Type>): Type {
   if (isSubtype(t, 'number')) {
     if (isSubtype('nan', t)) return t as Type;
+    // Splice into an existing union rather than nesting one: a nested
+    // union is a legal Type but a needlessly hostile shape for downstream
+    // set reasoning (`(integer | signed_infinity) | nan` vs the flat
+    // three-member union).
+    if (typeof t !== 'string' && t.kind === 'union')
+      return { kind: 'union', types: [...t.types, 'nan'] };
     return { kind: 'union', types: [t as Type, 'nan'] };
   }
   if (typeof t === 'string') return t;

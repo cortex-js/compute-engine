@@ -113,12 +113,15 @@ describe('TYPE AUDIT: pole-free hyperbolics at ±∞', () => {
 });
 
 describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
-  // All three heads declare a bare `real` parameter, which since the
-  // finite-by-default flip means a FINITE real, so an infinite argument is
-  // rejected at the signature instead of reaching the handler (ruling L9(a)
-  // of the numeric-lattice ratification: signature-level rejection is the
-  // declared contract doing its job). The finite-argument claims below are
-  // unchanged, and they are what these heads exist to describe.
+  // `Haversine` and `InverseHaversine` declare a bare `real` parameter,
+  // which since the finite-by-default flip means a FINITE real, so an
+  // infinite argument is rejected at the signature instead of reaching the
+  // handler (ruling L9(a) of the numeric-lattice ratification:
+  // signature-level rejection is the declared contract doing its job).
+  // `Hypot` is the exception, and the reason the exception exists: its value
+  // at an infinite argument is well defined, so it declares the extended real
+  // line instead (see its own test below). The finite-argument claims below
+  // are unchanged, and they are what these heads exist to describe.
   it('Haversine rejects a non-finite argument at the signature', () => {
     expect(typeOf(['Haversine', 'PositiveInfinity'])).toBe('error');
     expect(typeOf(['Haversine', 2])).toBe('real');
@@ -139,14 +142,77 @@ describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
     expectSound(['InverseHaversine', 2.5]);
   });
 
-  it('Hypot rejects a non-finite operand at the signature', () => {
-    // `Hypot(2, ∞) = +∞` is a well-defined value, so this rejection is a
-    // real capability loss rather than a domain correction — it follows from
-    // the declared `(real, real)` parameters alone. Widening them to the
-    // extended real line would also retype every undeclared symbol used as
-    // an argument, which is why it is not done here.
-    expect(typeOf(['Hypot', 2, 'PositiveInfinity'])).toBe('error');
+  it('Hypot admits a signed infinity: its carrier is the extended real line', () => {
+    // `Hypot(2, ∞) = +∞` is a well-defined value, so the old `(real, real)`
+    // parameters — finite since the lattice flip — cost a real capability
+    // rather than correcting a domain. The carrier is the extended real line
+    // now (user ruling 2026-08-31), so an infinite leg is admitted and makes
+    // the hypotenuse infinite whatever the other leg is.
+    expect(typeOf(['Hypot', 2, 'PositiveInfinity'])).toBe(
+      'real | signed_infinity'
+    );
+    const value = (expr: any) => ce.box(expr).evaluate().toString();
+    expect(value(['Hypot', 2, 'PositiveInfinity'])).toBe('+oo');
+    // `-∞` is admitted as an OPERAND and still norms to `+∞`: the result is
+    // non-negative, which is why the declared result is `real | +oo`.
+    expect(value(['Hypot', 2, 'NegativeInfinity'])).toBe('+oo');
+    expect(value(['Hypot', 'PositiveInfinity', 'NegativeInfinity'])).toBe(
+      '+oo'
+    );
+    // An infinite leg wins over a NaN leg, in either operand order: that is
+    // what `Math.hypot(Infinity, NaN) === Infinity` says, and the compiled
+    // lane emits `Math.hypot`, so any other answer here would be a route
+    // divergence. This is why `Hypot` declares `nanBehavior: 'handle'` —
+    // under `propagate` the generic gate answers NaN before the handler
+    // runs (see error-model-declarations.test.ts).
+    expect(value(['Hypot', 'PositiveInfinity', 'NaN'])).toBe('+oo');
+    expect(value(['Hypot', 'NaN', 'PositiveInfinity'])).toBe('+oo');
+    expect(value(['Hypot', 'NegativeInfinity', 'NaN'])).toBe('+oo');
+    expect(value(['Hypot', 'NaN', 'NegativeInfinity'])).toBe('+oo');
+    expect(ce.box(['Hypot', 'PositiveInfinity', 'NaN']).N().toString()).toBe(
+      '+oo'
+    );
+    // With no infinite leg, a NaN leg still makes the result NaN, on both
+    // routes.
+    expect(ce.box(['Hypot', 'NaN', 1]).evaluate().isNaN).toBe(true);
+    expect(ce.box(['Hypot', 1, 'NaN']).evaluate().isNaN).toBe(true);
+    expect(ce.box(['Hypot', 'NaN', 1]).N().isNaN).toBe(true);
+    expectSound(['Hypot', 'NaN', 1]);
+    expectSound(['Hypot', 'PositiveInfinity', 'NaN']);
+    // A point leg enters the sum of squares through its norm, so the same
+    // precedence applies to it: `Norm((∞, 3))` is `+oo`, which makes the
+    // hypotenuse infinite whatever the other leg is.
+    expect(value(['Hypot', ['Tuple', 'PositiveInfinity', 3], 'NaN'])).toBe(
+      '+oo'
+    );
+    expect(value(['Hypot', 'NaN', ['Tuple', 3, 'PositiveInfinity']])).toBe(
+      '+oo'
+    );
+    expect(value(['Hypot', ['Tuple', 3, 'NegativeInfinity'], 'NaN'])).toBe(
+      '+oo'
+    );
+    // Control: a FINITE point leg withholds the proof, so the NaN leg wins.
+    expect(ce.box(['Hypot', ['Tuple', 3, 4], 'NaN']).evaluate().isNaN).toBe(
+      true
+    );
+    // A point that carries the NaN itself withholds it too: `Norm((∞, NaN))`
+    // answers `NaN` — the point's own NaN is not resolved inside the norm —
+    // and `Hypot` agrees with the norm it is defined through.
+    expect(
+      ce.box(['Hypot', ['Tuple', 'PositiveInfinity', 'NaN'], 2]).evaluate()
+        .isNaN
+    ).toBe(true);
+    // `~oo` proves nothing in a point either: it is not a signed real, so
+    // such a leg goes to the ordinary norm construction, unchanged.
+    expect(
+      ce.box(['Hypot', ['Tuple', 'ComplexInfinity', 3], 'NaN']).evaluate().isNaN
+    ).toBe(true);
+    // The finite claim is unchanged, and it is what this head exists to
+    // describe.
     expect(typeOf(['Hypot', 2, 3])).toBe('real');
+    // The carrier stops at the SIGNED infinities: `~oo` is not a signed real,
+    // so it is still refused at the signature.
+    expect(typeOf(['Hypot', 2, 'ComplexInfinity'])).toBe('error');
   });
 
   it('Degrees of a non-real argument does not claim real', () => {

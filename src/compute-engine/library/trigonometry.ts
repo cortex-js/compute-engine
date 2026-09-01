@@ -37,9 +37,8 @@ import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { isTuple } from '../collection-utils.js';
-import { pointNormBroadcasts } from './utils.js';
+import { euclideanNormType, pointNormBroadcasts } from './utils.js';
 import {
-  numericTypeHandler,
   elementaryFunctionType,
   boundedInverseTrigType,
   iv,
@@ -308,7 +307,31 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Hypot: {
       description: 'Hypotenuse length: sqrt(x^2 + y^2).',
       broadcastable: true,
-      signature: '(real, real) -> real',
+      // The carrier is the EXTENDED real line, because `√(x² + y²)` has a
+      // value at an infinite operand: an infinite leg makes the hypotenuse
+      // infinite, whatever the other leg is (`Math.hypot(∞, 2)` is
+      // `Infinity`, and `hypot(2, y)` for y = 10⁵, 10¹⁰⁰, 10³⁰⁰ is y to
+      // within the rounding of the small leg). Spelling the carrier `real`
+      // rejected `Hypot(2, +oo)` as `incompatible-type` although its value
+      // is well defined. The result is `real | +oo` for the same reason:
+      // `+∞` is the ONLY infinite value a norm can take — it is
+      // non-negative — and `-oo` is admitted as an OPERAND only. The `nan`
+      // arm is the codomain vocabulary the `handle` policy below needs: a
+      // `NaN` leg enters through the NaN policy channel rather than
+      // through the carrier, and the handler answers `NaN` for it. The
+      // sharp claim for an application still comes from the type handler,
+      // which reports `real` for two finite legs.
+      signature:
+        '(real | signed_infinity, real | signed_infinity) -> real | +oo | nan',
+      // Explicit, because neither policy the framework can derive is right
+      // here: the DERIVED Contract B default for this carrier is `reject`
+      // (an extended-real carrier is not a subtype of `complex`, which is
+      // the mechanical propagate test — `docs/ERROR-MODEL.md` §4), and
+      // `propagate` answers `NaN` from the generic gate BEFORE the handler
+      // runs, which loses the infinity precedence below (`Hypot(∞, NaN)`
+      // is `+∞`, not `NaN`). With `handle` the gate stands down and the
+      // handler owns every non-finite operand, on both routes.
+      nanBehavior: 'handle',
       // A point argument with a broadcasting component zips into one result
       // per element (via its norm below) — report the honest list type, not
       // a decided-but-wrong scalar (the Tycho item-44 class).
@@ -318,32 +341,22 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           (y && isTuple(y) && pointNormBroadcasts(y))
         )
           return 'list<number>';
-        // A point with a non-finite component has a non-finite norm
-        // (`Hypot((∞, 3), 2) = +∞`), and a component that is not PROVABLY a
-        // number (an application of an `unknown`-returning function that the
-        // broadcast arm above did not take) leaves the norm undecidable —
-        // both must widen to `number` rather than let the tuple be silently
-        // dropped from the computation, which would decide the type from the
-        // remaining scalar operands alone.
-        if (
-          [x, y].some(
-            (o) =>
-              o &&
-              isTuple(o) &&
-              isFunction(o) &&
-              o.ops.some(
-                (el) =>
-                  provablyNonFiniteNumber(el) || !el.type.matches('number')
-              )
-          )
-        )
-          return 'number';
-        // Fixed-arity points square through their (finite real) norm; the
-        // scalar operands decide the rest — a non-finite one makes the result
-        // non-finite (`Hypot(∞, 2) = +∞`), a complex one makes it complex.
-        return numericTypeHandler(
-          [x, y].filter((o): o is Expression => o !== undefined && !isTuple(o))
-        );
+        // Both operands enter ONE sum of squares — a fixed-arity point
+        // through its own norm — so the application is itself a Euclidean
+        // norm over the flattened components, and `euclideanNormType` is
+        // the claim for it. Flattening the point in is what keeps a tuple
+        // from being silently dropped from the computation, which would
+        // decide the type from the remaining scalar operands alone; a
+        // tuple-TYPED operand that is not a literal has no components to
+        // flatten and stands as itself, where the non-numeric arm of
+        // `euclideanNormType` widens it to `number`.
+        const components: Expression[] = [];
+        for (const o of [x, y]) {
+          if (o === undefined) continue;
+          if (isTuple(o) && isFunction(o)) components.push(...o.ops);
+          else components.push(o);
+        }
+        return euclideanNormType(components);
       },
       sgn: () => 'non-negative',
       // Evaluate the constructed √(x²+y²) so `.N()` returns a number, not an
@@ -353,6 +366,47 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // A fixed-arity point squares through its Euclidean norm (`Square` of a
       // bare `Tuple` is inert): Hypot((3,4), 1) = √(‖(3,4)‖² + 1²).
       evaluate: ([x, y], { engine, numericApproximation }) => {
+        // An infinite leg makes the hypotenuse infinite whatever the other
+        // leg is, NaN included — so this test comes before the NaN one.
+        // IEEE says the same (`Math.hypot(Infinity, NaN)` is `Infinity`),
+        // and the compiled lane emits `Math.hypot`, so any other answer
+        // here would be a route divergence. The test asks for a signed
+        // infinity: `~oo` is refused at the carrier, and a bare
+        // `!isFinite` would also be true for a non-number operand.
+        const isSignedInfinity = (v: Expression | undefined): boolean =>
+          v !== undefined &&
+          isNumber(v) &&
+          v.isInfinity === true &&
+          (v.isPositive === true || v.isNegative === true);
+        // A leg is infinite in MAGNITUDE when it is a signed infinity, or
+        // when it is a fixed-arity point whose norm is `+oo` — a point
+        // enters the sum of squares through that norm, so an infinite norm
+        // makes the hypotenuse infinite exactly as an infinite scalar does
+        // (`Hypot((∞, 3), NaN) = +∞`). The point test mirrors what `Norm`
+        // itself answers: `Norm((∞, 3))` is `+oo`, but `Norm((∞, NaN))` is
+        // `NaN` — the point's own NaN is not resolved inside the norm — so
+        // a NaN component withholds the proof here too and `Hypot` keeps
+        // agreeing with the norm it is defined through. `~oo` proves
+        // nothing in either position: the carrier refuses it as a scalar,
+        // and a `~oo` component leaves the point to the construction
+        // below, unchanged.
+        const isInfiniteMagnitude = (v: Expression | undefined): boolean => {
+          if (v === undefined) return false;
+          if (isSignedInfinity(v)) return true;
+          if (!isTuple(v) || !isFunction(v)) return false;
+          return (
+            v.ops.some((c) => isSignedInfinity(c)) &&
+            !v.ops.some((c) => c.isNaN === true)
+          );
+        };
+        // `+oo` is the same value on both routes, so `numericApproximation`
+        // changes nothing here.
+        if (isInfiniteMagnitude(x) || isInfiniteMagnitude(y))
+          return engine.PositiveInfinity;
+        // With no infinite leg, a NaN leg makes the result NaN. The
+        // operator declares `nanBehavior: 'handle'`, so this handler is
+        // where that answer comes from on both routes.
+        if (x?.isNaN === true || y?.isNaN === true) return engine.NaN;
         const sq = (v: Expression): Expression =>
           engine.expr(isTuple(v) ? ['Square', ['Norm', v]] : ['Square', v]);
         return engine

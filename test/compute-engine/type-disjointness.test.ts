@@ -195,3 +195,59 @@ describe('negations and intersections in disjointness', () => {
     expect(isSubtype('integer', '!integer & number')).toBe(false);
   });
 });
+
+describe('a NOMINAL reference answers disjointness from its definition', () => {
+  // A nominal type is not a subtype of its definition, but its values still
+  // have the definition's shape, so disjointness is inherited: nothing that
+  // fails to inhabit the definition inhabits the name. Before that rule the
+  // predicate declined on every nominal reference, so a type spelled by NAME
+  // and the same type spelled STRUCTURALLY got different answers — and the
+  // lambda-body finiteness widening in
+  // `src/compute-engine/boxed-expression/effects-inference.ts`, which fires
+  // when a parameter slot is not provably disjoint from `infinity` and `nan`,
+  // widened a body claim for the named spelling only. That consequence is
+  // pinned in `protocol-property-effects.test.ts` ("a NESTED and an INDEXED
+  // receiver both infer `state`").
+  //
+  // An `object{…}` body may only be the definition of a named type, so the
+  // object case has no structural spelling of its own; `record{…}` is the
+  // structural counterpart it is compared against here.
+  const nom = new ComputeEngine();
+  nom.declareType('Outer', 'object{x: real}');
+  nom.declareType('Rec', 'record{x: real}');
+  nom.declareType('RecAlias', 'record{x: real}', { alias: true });
+
+  it('the named and the structural spelling agree on `infinity` and `nan`', () => {
+    for (const spelling of ['Outer', 'Rec', 'RecAlias', 'record{x: real}']) {
+      expect(nom.type(spelling).isDisjointFrom('infinity')).toBe(true);
+      expect(nom.type(spelling).isDisjointFrom('nan')).toBe(true);
+      expect(nom.type(spelling).isDisjointFrom('signed_infinity')).toBe(true);
+    }
+  });
+
+  it('a primitive-bodied nominal type is disjoint from what its body is', () => {
+    expect(nom.type('Outer').isDisjointFrom('string')).toBe(true);
+    // In-file control that the verdicts above are not a blanket `true`: the
+    // body of `Rec` overlaps this one.
+    expect(nom.type('Rec').isDisjointFrom('record{x: number}')).toBe(false);
+  });
+
+  it('never claims two names over the same body are disjoint', () => {
+    // Only the positive direction is inherited. Two distinct nominal types
+    // with the same definition overlap as far as this predicate can tell, and
+    // claiming otherwise would feed negation subtyping (`A <: !B`).
+    nom.declareType('Meters', 'number');
+    nom.declareType('Feet', 'number');
+    expect(nom.type('Meters').isDisjointFrom('Feet')).toBe(false);
+    expect(nom.type('Meters').isDisjointFrom('number')).toBe(false);
+    expect(nom.type('number').isDisjointFrom('Meters')).toBe(false);
+  });
+
+  it('terminates on a RECURSIVE nominal type', () => {
+    // The definition mentions the name it defines, so an unguarded unfold
+    // would spin.
+    nom.declareType('Node', 'object{kids: list<Node>}');
+    expect(nom.type('Node').isDisjointFrom('string')).toBe(true);
+    expect(nom.type('Node').isDisjointFrom('Node')).toBe(false);
+  });
+});

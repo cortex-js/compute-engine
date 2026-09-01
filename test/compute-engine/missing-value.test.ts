@@ -944,10 +944,18 @@ describe('P3 — absent If/Which condition is a catchable error expression (reso
     expect(r.re).toBe(2);
   });
 
-  test('the typo path still throws (not-a-boolean-at-all keeps the spell-check crash)', () => {
-    expect(() => ce.box(['If', 3, 1, 2]).evaluate()).toThrow(
-      /must evaluate to/
-    );
+  test('a not-a-boolean-at-all condition holds the If, and does not crash the host', () => {
+    // Absence is not the only condition the engine refuses to branch on: a
+    // condition that can never BE a boolean — the number 3, a misspelled
+    // symbol — is held instead (undecidable-condition ruling 2026-08-31).
+    // This used to raise a host exception carrying a spell-check hint; that
+    // hint is gone, and the two kinds of unbranchable condition now differ
+    // only in channel. `Missing` is a decided data state that can never
+    // resolve, so it is an error EXPRESSION; a non-boolean may still become
+    // one under substitution, so it is inertness.
+    const r = ce.box(['If', 3, 1, 2]).evaluate();
+    expect(r.operator).toBe('If');
+    expect(r.op1.isSame(3)).toBe(true);
   });
 
   test('an undecided symbolic condition still holds the If (unchanged)', () => {

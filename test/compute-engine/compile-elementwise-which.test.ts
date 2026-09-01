@@ -179,14 +179,16 @@ describe('element-wise selection: absence and no-match (R4/R4′)', () => {
   });
 
   test('a NON-boolean condition cell fails closed at run time', () => {
-    // `Which([10, 20], …)`: not a condition value in any cell. The
-    // interpreter throws; so does the compiled artifact, rather than picking
-    // a branch.
+    // `Which([10, 20], …)`: not a condition value in any cell. The compiled
+    // artifact throws rather than picking a branch. The interpreter has no
+    // branch to pick either, but it can hold the expression instead of
+    // failing, which is what it does (undecidable-condition ruling
+    // 2026-08-31); the shared requirement is that NEITHER lane answers 0.
     const expr = ce.box(['Which', ['List', 10, 20], 1, 'True', 0] as any);
     const r = compile(expr, { fallback: false })!;
     expect(r.success).toBe(true);
     expect(() => r.run!()).toThrow(/Condition must evaluate/);
-    expect(() => expr.evaluate()).toThrow(/Condition must evaluate/);
+    expect(expr.evaluate().operator).toBe('Which');
   });
 });
 

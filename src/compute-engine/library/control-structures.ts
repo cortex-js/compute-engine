@@ -43,13 +43,11 @@ import type {
   CollectionHandlers,
   BoxedValueDefinition,
 } from '../global-types.js';
-import { spellCheckMessage } from '../boxed-expression/validate.js';
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
   isFunction,
   isSymbol,
   isString,
-  isAbsentValue,
   sym,
 } from '../boxed-expression/type-guards.js';
 import { isValueDef } from '../boxed-expression/utils.js';
@@ -234,12 +232,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             options
           );
         }
-        // An UNDECIDED boolean condition — e.g. a relation with free
-        // variables (`x = 4` stays symbolic under evaluate()) — leaves the
-        // `If` unevaluated rather than erroring: it may become decidable
-        // once the variables are bound. The throw below is reserved for
-        // conditions that are not boolean at all (a number, a misspelled
-        // symbol), where the spell-check hint is the useful outcome.
+        // Every other condition leaves the `If` UNEVALUATED. That covers an
+        // undecided boolean — a relation with free variables (`x = 4` stays
+        // symbolic under evaluate()), a symbol with no value — and equally a
+        // condition that is not a boolean at all (the number 10, a misspelled
+        // symbol, a list of numbers). An undecidable conditional is a symbolic
+        // expression, not a program defect: it may become decidable once its
+        // variables are bound, and a host exception thrown from here escapes
+        // past every caller that only asked for a value. (User ruling
+        // 2026-08-31, shared with `evaluateWhich` so the two cannot diverge.)
         //
         // The node is rebuilt around the EVALUATED condition (the held arms
         // untouched): `If` is `lazy`, and a lazy handler that returns
@@ -250,15 +251,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // had assigned (see `evaluateBigOpTerm`, `library/utils.ts`). The
         // `isSame` guard keeps this a fixpoint: an unchanged condition returns
         // `undefined` as before, so the rebuilt node evaluates to itself.
-        if (isBooleanishCondition(evaluated))
-          return evaluated.isSame(cond)
-            ? undefined
-            : engine._fn('If', [evaluated, ...ops.slice(1)]);
-        throw new Error(
-          `Condition must evaluate to "True" or "False". ${spellCheckMessage(
-            cond
-          )}`
-        );
+        return evaluated.isSame(cond)
+          ? undefined
+          : engine._fn('If', [evaluated, ...ops.slice(1)]);
       },
     },
 
@@ -806,84 +801,16 @@ function whenCollectionHandlers(): CollectionHandlers {
 }
 
 /**
- * A conditional guard is "boolean-ish" — well-typed for `If`/`Which` even
- * though it did not reduce to a bare `True`/`False` — when it is a scalar
- * boolean OR a broadcast finite collection of booleans. The latter arises when
- * a predicate maps element-wise over a collection (e.g. `total(P[i..j])` where
- * `total` broadcasts over the slice, yielding `[b1, …, bn]`). Such a guard is
- * held (the conditional stays symbolic) rather than throwing the "not a
- * boolean" error: a scalar relation may become decidable once free variables
- * are bound, and crashing an enclosing `Comprehension` on a broadcast guard is
- * worse than yielding a held value. Mirrors `When`'s broadcast detection.
- */
-/**
  * The catchable error for a scalar condition that evaluated to the `Missing`
- * symbol (an absent guard). Distinct from the "not a boolean at all" typo
- * throw: absence is a runtime DATA state of a correct program, so it yields
- * an error expression the host can render or catch, instead of crashing
- * `.evaluate()`.
+ * symbol (an absent guard). Distinct from an UNDECIDED condition, which leaves
+ * the conditional inert: absence is a runtime DATA state that can never become
+ * decidable, so branching on it is a genuine fault and yields an error
+ * expression the host can render or catch.
  */
 function absentConditionError(ce: ComputeEngine): Expression {
   return ce.error(
     'The condition is absent (`Missing`). Discharge absence with ' +
       '`Coalesce()` or `IsMissing()` before branching'
-  );
-}
-
-function isBooleanishCondition(evaluated: Expression): boolean {
-  if (evaluated.type.matches('boolean')) return true;
-  // A condition whose TYPE is already a boolean collection but which carries
-  // no value yet — a symbol declared `list<boolean>`, or a call whose head
-  // returns one — has cells that cannot be walked, so the element-wise check
-  // below cannot run. That makes it UNDECIDED, not "not a boolean at all":
-  // the caller holds the operator on `true` here and reserves the throw for a
-  // condition that can never be one (a number, a misspelled symbol), where
-  // the spell-check hint is the useful outcome. Without this,
-  // `Which(B, 1, True, 2)` with `B` declared `list<boolean>` threw out of
-  // `evaluate()` — while the SAME condition evaluates element-wise once `B`
-  // is assigned, and while the compiled path already holds it
-  // (`compilation/interval-javascript-target.ts` tests
-  // `c.isCollection || c.type.matches('collection<any>')`), so the interpreter and
-  // the compiler disagreed about what a collection-typed condition is.
-  if (
-    !evaluated.isCollection &&
-    evaluated.type.matches(BOOLEAN_COLLECTION_TYPE)
-  )
-    return true;
-  // A condition typed `broadcastable<boolean>` — a comparison whose broadcast
-  // outcome the engine cannot settle statically, `h(x) = 10` with `h`
-  // undeclared or `C = 5` with `C` unknown (`comparisonResultType`,
-  // `library/relational-operator.ts`) — that has NOT evaluated to a value is
-  // undecided in exactly the same way: it is a scalar boolean or a boolean
-  // list once its operands resolve, and neither can be picked now. The type
-  // handlers of `If`/`Which` already read this type
-  // (`possiblyElementwiseCondition`); the evaluate side did not, so
-  // `Which(h(x) = 10, 1, True, 0)` — held as an ordinary undecided condition
-  // before comparisons over unresolved operands started typing
-  // `broadcastable<boolean>` (Tycho item 193, 2026-08-15) — threw the
-  // spell-check error out of `evaluate()`. `broadcastable<boolean>` is the
-  // union `boolean | indexed_collection<boolean>`, which is a subtype of
-  // NEITHER check above, which is why a third one is needed.
-  if (!evaluated.isCollection && possiblyElementwiseCondition([evaluated]))
-    return true;
-  if (!evaluated.isCollection || !evaluated.isFiniteCollection) return false;
-  const items = Array.from(evaluated.each()) as Expression[];
-  // A broadcast (list) condition is held when every cell is boolean — or ABSENT
-  // (`Missing`/`NaN`), which is Kleene-undecidable, so the `Which` stays held
-  // rather than crashing the surrounding comprehension. This surfaces when a
-  // broadcast condition contains a Kleene-`Missing` comparison cell (§3.D,
-  // amended 2026-07-24: `Missing` is Kleene, so `Equal(Missing, k)` /
-  // `Less(Missing, k)` are `Missing`; a `NaN` cell is IEEE and yields a plain
-  // boolean, which is already covered). A SCALAR absent condition still fails
-  // closed (throws), unchanged.
-  return (
-    items.length > 0 &&
-    items.every(
-      (x) =>
-        x.type.matches('boolean') ||
-        x.type.matches('missing') ||
-        isAbsentValue(x)
-    )
   );
 }
 
@@ -1268,31 +1195,31 @@ function evaluateWhich(
         );
         if (result) return result;
       }
-      // An UNDECIDED boolean condition (e.g. `x = 4` with a free `x`, which
-      // stays symbolic under evaluate()) leaves the `Which` unevaluated:
-      // picking a later branch would be wrong once the condition becomes
-      // decidable. The throw is reserved for conditions that are not
-      // boolean at all, where the spell-check hint is the useful outcome.
+      // Every other condition leaves the WHOLE `Which` unevaluated: an
+      // undecided boolean (`x = 4` with a free `x`, which stays symbolic under
+      // evaluate()), and equally a condition that is not a boolean at all (a
+      // number, a misspelled symbol, a list of numbers). Picking a later
+      // branch would be wrong once the condition becomes decidable, and an
+      // undecidable conditional is a symbolic expression rather than a program
+      // defect — never a host exception. (User ruling 2026-08-31, shared with
+      // the `If` handler so the two cannot diverge.)
       //
       // Rebuilt around the EVALUATED condition, arms and later clauses
       // untouched — same reason as `If`: `Which` is `lazy`, and returning
       // `undefined` would hand back the ORIGINAL node with the condition's
       // evaluation discarded (`Which(C = U[1], …)` kept `U[1]` where the
       // condition had read `10`; in a big-op loop it kept the index symbol
-      // in place of the assigned value). Fixpoint-guarded with `isSame`.
-      if (isBooleanishCondition(evaluated))
-        return evaluated.isSame(args[i])
-          ? undefined
-          : options.engine._fn('Which', [
-              ...args.slice(0, i),
-              evaluated,
-              ...args.slice(i + 1),
-            ]);
-      throw new Error(
-        `Condition must evaluate to "True" or "False". ${spellCheckMessage(
-          args[i]
-        )}`
-      );
+      // in place of the assigned value). The earlier clauses (already decided
+      // `False`/`Undefined`) are carried over AS WRITTEN: the held node stays
+      // a faithful copy of the original conditional, so nothing is lost if the
+      // undecided condition later resolves. Fixpoint-guarded with `isSame`.
+      return evaluated.isSame(args[i])
+        ? undefined
+        : options.engine._fn('Which', [
+            ...args.slice(0, i),
+            evaluated,
+            ...args.slice(i + 1),
+          ]);
     }
     // `False` — or `Undefined` (decision 9), treated as not-True — falls
     // through to the next clause.

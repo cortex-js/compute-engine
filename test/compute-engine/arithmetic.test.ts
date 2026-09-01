@@ -2685,6 +2685,100 @@ describe('Factorial of non-integer reals (REVIEW.md B16)', () => {
   });
 });
 
+// The Γ family at the SIGNED infinities (user ruling 2026-08-31). These
+// arguments used to leave the application inert, which `docs/ERROR-MODEL.md`
+// §1 forbids for a decided question — and both directions are decided:
+//
+// - `Γ(x) → +∞` as `x → +∞`. Verified numerically: Γ(171) ≈ 7.26·10³⁰⁶ and
+//   Γ(1000) overflows the double range, ln Γ(10⁶) ≈ 1.28·10⁷ and
+//   ln Γ(10¹²) ≈ 2.66·10¹³. `x! = Γ(x+1)` and `x!!` follow.
+// - As `x → −∞` there is NO limit, so the value is NaN. Γ has a pole at
+//   every non-positive integer, so it is undefined at infinitely many points
+//   of every neighbourhood of −∞, and its sign alternates between
+//   consecutive poles (Γ(−5.5) ≈ +1.09·10⁻², Γ(−10.5) ≈ −2.64·10⁻⁷).
+describe('the Γ family at ±∞', () => {
+  const value = (expr: any) => ce.expr(expr).evaluate().toString();
+  const numeric = (expr: any) => ce.expr(expr).N().toString();
+
+  it('diverges to +∞ at +∞', () => {
+    for (const head of ['Factorial', 'Factorial2', 'Gamma', 'GammaLn']) {
+      expect(value([head, 'PositiveInfinity'])).toBe('+oo');
+      // The answer is exact, so `.N()` agrees rather than re-deriving it.
+      expect(numeric([head, 'PositiveInfinity'])).toBe('+oo');
+    }
+  });
+
+  it('has no limit at −∞, so the value is NaN', () => {
+    for (const head of ['Factorial', 'Factorial2', 'Gamma', 'GammaLn']) {
+      expect(value([head, 'NegativeInfinity'])).toBe('NaN');
+      expect(numeric([head, 'NegativeInfinity'])).toBe('NaN');
+    }
+  });
+
+  it('has no limit at the unsigned ~∞ either, so the value is NaN', () => {
+    // An argument approaching the single point at infinity from no fixed
+    // direction has no limit, so the answer is NaN for the whole family.
+    // `Gamma`, `GammaLn` and `Factorial` already reached NaN here through
+    // their own numeric routes; `Factorial2` used to stop at its
+    // integrality test and stay inert, which `docs/ERROR-MODEL.md` §1
+    // forbids as the terminal answer to a decided question.
+    for (const head of ['Factorial', 'Factorial2', 'Gamma', 'GammaLn']) {
+      expect(value([head, 'ComplexInfinity'])).toBe('NaN');
+      expect(numeric([head, 'ComplexInfinity'])).toBe('NaN');
+    }
+  });
+
+  it('the finite arguments are untouched', () => {
+    expect(value(['Factorial', 5])).toBe('120');
+    expect(value(['Factorial2', 7])).toBe('105');
+    // A pole of Γ is still the unsigned infinity, and `ln Γ` still reads it
+    // as +∞ (|Γ| → ∞ there).
+    expect(value(['Gamma', 0])).toBe('~oo');
+    expect(value(['GammaLn', 0])).toBe('+oo');
+    expect(value(['Factorial', -1])).toBe('~oo');
+    expect(numeric(['Gamma', 5])).toBe('24');
+  });
+});
+
+// An infinite base raised to an infinite exponent (user ruling 2026-08-31).
+// `(+∞)^∞` used to canonicalize to the direction-less `~∞` although the
+// direction is knowable: nⁿ grows through +∞ without ever changing sign
+// (10¹⁰, 100¹⁰⁰ = 10²⁰⁰, 1000¹⁰⁰⁰ overflows the double range). `(−∞)^∞`
+// genuinely loses it — (−n)ⁿ alternates with the parity of n
+// ((−10)¹⁰ = +10¹⁰, (−11)¹¹ ≈ −2.85·10¹¹).
+describe('an infinite base at an infinite exponent', () => {
+  const value = (expr: any) => ce.expr(expr).evaluate().toString();
+
+  it('(+∞)^∞ is +∞, the sharper answer', () => {
+    expect(value(['Power', 'PositiveInfinity', 'PositiveInfinity'])).toBe(
+      '+oo'
+    );
+    expect(
+      ce.expr(['Power', 'PositiveInfinity', 'PositiveInfinity']).type.toString()
+    ).toBe('+oo');
+  });
+
+  it('a base with no signed direction still answers ~∞', () => {
+    expect(value(['Power', 'NegativeInfinity', 'PositiveInfinity'])).toBe(
+      '~oo'
+    );
+    expect(value(['Power', 'ComplexInfinity', 'PositiveInfinity'])).toBe('~oo');
+    // The finite bases below −1 are unchanged, for the same parity reason.
+    expect(value(['Power', -2, 'PositiveInfinity'])).toBe('~oo');
+  });
+
+  it('the neighbouring cases are unchanged', () => {
+    // Magnitude → 0 at a −∞ exponent, whatever the base direction:
+    // n⁻ⁿ = 10⁻¹⁰, 10⁻²⁰⁰, then 0 at n = 1000, and (−n)⁻ⁿ tracks it.
+    expect(value(['Power', 'PositiveInfinity', 'NegativeInfinity'])).toBe('0');
+    expect(value(['Power', 'NegativeInfinity', 'NegativeInfinity'])).toBe('0');
+    // An UNDIRECTED exponent has no limit at all.
+    expect(value(['Power', 'PositiveInfinity', 'ComplexInfinity'])).toBe('NaN');
+    // A finite base greater than 1 was already +∞.
+    expect(value(['Power', 2, 'PositiveInfinity'])).toBe('+oo');
+  });
+});
+
 // REVIEW.md A13: a symbol whose *value* is infinite, times 0, is NaN (not 0) —
 // the `BoxedSymbol.mul(0)` fastpath short-circuited to Zero.
 describe('Infinite-symbol times zero (REVIEW.md A13)', () => {

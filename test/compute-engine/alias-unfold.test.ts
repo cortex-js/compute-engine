@@ -102,9 +102,15 @@ describe('alias LHS-unfold: matches() in both directions', () => {
     // the LHS unfold reaches it with no rule of its own.
     expect(ce.type('pt').isDisjointFrom('tuple<number, number>')).toBe(false);
     expect(ce.type('id').isDisjointFrom('string')).toBe(true);
-    // A NOMINAL reference stays conservative ("may overlap"), never
-    // "provably disjoint" — its meaning is resolver-dependent.
-    expect(ce.type('nid').isDisjointFrom('string')).toBe(false);
+    // A NOMINAL reference answers from its definition here, and only here:
+    // every value of `nid` is an integer, so none of them is a string.
+    // Disjointness is inherited from the definition even though the
+    // subtype relation stays opaque (the two `matches` cases above).
+    expect(ce.type('nid').isDisjointFrom('string')).toBe(true);
+    // The opacity is preserved where it matters: `npt` and its own definition
+    // are not claimed disjoint, so nothing here says a `npt` value is not a
+    // pair of numbers.
+    expect(ce.type('npt').isDisjointFrom('tuple<number, number>')).toBe(false);
   });
 
   test('couldMatch respects the unfold', () => {

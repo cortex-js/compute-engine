@@ -66,6 +66,69 @@ describe('Function parameter shadows a same-named constant', () => {
   });
 });
 
+/**
+ * An ANNOTATED parameter — `["Typed", name, type]`, and the signature-string
+ * sugar that desugars into it — shields a constant-named parameter exactly as
+ * the bare spelling does.
+ *
+ * Two defects made the annotated spelling lose the shield while the bare one
+ * kept it:
+ *
+ * - The parameter declaration in `canonicalFunctionLiteralArguments` adopted
+ *   the binding the body's references had auto-declared only for a BARE
+ *   parameter. An annotated one always got a fresh binding, so when the first
+ *   reference sat in a nested scope (the body of an inner lambda) the two
+ *   differed, the parameter-repair rewrite re-boxed those occurrences, and a
+ *   re-boxed `i` came back as the imaginary unit. `IdentityMatrix(1000000)`,
+ *   whose lazy form is a nested `Tabulate` over row index `i`, evaluated to an
+ *   all-zero matrix.
+ * - `desugarSignatureString` built its parameter symbols canonically, and
+ *   `ce.symbol('i')` is the imaginary-unit NUMBER literal, not a symbol — so
+ *   `"'(i: integer) -> integer'"` reported `expected-a-symbol`.
+ */
+describe('An ANNOTATED parameter shadows a same-named constant too', () => {
+  const typed = (name: string) => ['Typed', name, "'integer'"];
+
+  // The row index of a nested lazy tabulation: the parameter's only reference
+  // sits inside an inner lambda's body, which is the arrangement that broke.
+  // The inner tabulation is long enough to stay lazy, so applying the outer
+  // lambda returns a `Tabulate` whose cell still mentions the parameter.
+  const nested = (name: string, param: unknown) => [
+    'Function',
+    ['Tabulate', ['Function', ['Add', name, 1000], 'j'], 1000000],
+    param,
+  ];
+
+  it('λ(i: integer). … — a NESTED reference is the parameter, not the imaginary unit', () => {
+    const ce = new ComputeEngine();
+    const row = apply(ce, ce.box(nested('i', typed('i')) as any), 3);
+    expect(ce.box(['At', row, 1]).evaluate().valueOf()).toBe(1003);
+  });
+
+  it('λi. … — the bare spelling still shields the same nested reference', () => {
+    const ce = new ComputeEngine();
+    const row = apply(ce, ce.box(nested('i', 'i') as any), 3);
+    expect(ce.box(['At', row, 1]).evaluate().valueOf()).toBe(1003);
+  });
+
+  it('λ(e: integer). … — `e` is the parameter, not Euler’s number', () => {
+    const ce = new ComputeEngine();
+    const row = apply(ce, ce.box(nested('e', typed('e')) as any), 3);
+    expect(ce.box(['At', row, 1]).evaluate().valueOf()).toBe(1003);
+  });
+
+  it('the signature-string sugar names an `i` parameter without error', () => {
+    const ce = new ComputeEngine();
+    const f = ce.box([
+      'Function',
+      ['Add', 'i', 1000],
+      "'(i: integer) -> integer'",
+    ]);
+    expect(f.isValid).toBe(true);
+    expect(apply(ce, f, 3).valueOf()).toBe(1003);
+  });
+});
+
 describe('Constants are unaffected when not used as a parameter', () => {
   it('bare `i` is still the imaginary unit', () => {
     const ce = new ComputeEngine();

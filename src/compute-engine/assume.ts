@@ -111,6 +111,32 @@ function hasIncompatibleTypeError(expr: Expression): boolean {
 }
 
 /**
+ * `fact`, with every symbol node bound to the definition its name is bound to
+ * NOW.
+ *
+ * A conjunct the assumptions layer refuses gives back the bindings it alone
+ * introduced, and the definitions go with them — DISPOSED, so that an
+ * assertion about one is known to be about a value that no longer exists. A
+ * LATER conjunct of the same proposition that mentions the same name gets a
+ * fresh definition, while the expression it was canonicalized into still holds
+ * the dead one: `assume(And(Foo(y), y > 3))` recorded `y > 3` with its subject
+ * on the live `y` and the fact expression's own `y` on the disposed one, so
+ * the two disagreed about which value the assertion is about. Re-boxing the
+ * fact against the live scope puts them back in agreement.
+ *
+ * The re-boxing is reached only when a disposed definition is actually
+ * present; every other fact pays one traversal and is returned unchanged.
+ */
+function withLiveDefinitions(ce: ComputeEngine, fact: Expression): Expression {
+  const hasDisposedDef = (expr: Expression): boolean => {
+    if (isSymbol(expr)) return expr.valueDefinition?.disposed === true;
+    return isFunction(expr) && expr.ops.some(hasDisposedDef);
+  };
+  if (!hasDisposedDef(fact)) return fact;
+  return ce.expr(fact.json);
+}
+
+/**
  * Record `fact` in the current context's assumptions store.
  *
  * One key holds a LIST of assertions and this appends a fresh frozen record
@@ -125,9 +151,15 @@ function hasIncompatibleTypeError(expr: Expression): boolean {
  */
 function recordFact(
   ce: ComputeEngine,
-  fact: Expression,
+  assertion: Expression,
   truth: boolean
 ): AssumeResult {
+  // The fact expression and the subjects recorded with it must be about the
+  // same definitions: `factSubjects` resolves each name in the live scope,
+  // and the expression can still hold a definition an earlier, rolled-back
+  // conjunct disposed of.
+  const fact = withLiveDefinitions(ce, assertion);
+
   // A predicate that does not type-check is no fact. `declare s string;
   // assume(Re(s) > 1)` reduces to the `incompatible-type` error itself: a
   // string has no real part, so the predicate is REFUTED and the answer is a
@@ -182,10 +214,10 @@ type AssumeTransaction = {
   /** The scope the transaction opened in: where a binding it introduced is
    * removed from when it gives that binding up. */
   readonly scope: ComputeEngine['context']['lexicalScope'];
-  /** Names nothing had declared when the proposition was written, and that no
+  /** Names the scope did not bind when this transaction started, and that no
    * conjunct has claimed yet. Canonicalizing the proposition binds every free
    * symbol it mentions, so without this list the bindings a rolled-back
-   * transaction introduced could not be told from the ones the user made. */
+   * transaction introduced could not be told from the ones that predate it. */
   readonly unattributed: Set<string>;
   /** The names claimed by a conjunct that was applied: they go only if the
    * WHOLE transaction rolls back. A name claimed by a conjunct the assumptions
@@ -367,10 +399,11 @@ function transactionConsistency(
 
 export function assume(
   proposition: Expression,
-  /** The names the proposition mentions that nothing had declared before it
-   * was canonicalized (`assumeFn`, `engine-assumptions.ts`). Canonicalization
-   * binds every free symbol, so this is the only record of which bindings the
-   * transaction is answerable for. */
+  /** The names the proposition mentions that the scope did not bind when the
+   * call started (`introducibleNames`, `engine-assumptions.ts`).
+   * Canonicalization binds every free symbol, so this is the only record of
+   * which bindings the transaction caused, and therefore of the only ones it
+   * may take back. */
   undeclared?: ReadonlyArray<string>
 ): AssumeResult {
   // A nested call — a conjunct, a link of a chain, a bound a membership
@@ -1042,6 +1075,31 @@ function assumeInequality(proposition: Expression): AssumeResult {
   return recordFact(ce, result, true);
 }
 
+/**
+ * The form of a set expression a membership assumption is decomposed from and
+ * recorded in.
+ *
+ * The set is EVALUATED, so that a name (`Integers`, a symbol bound to a set)
+ * and a computed set expression alike reach the decomposition below as the set
+ * they denote. Evaluation, however, also MATERIALIZES a union of finite
+ * ranges: `Union(Range(1, 3), Range(5, 7))` folds to `Set(1, 2, 3, 5, 6, 7)`,
+ * and a finite set literal proves no type at all (`membershipType`,
+ * `boxed-expression/constraint-subject.ts`), so `assume(m ∈ Union(Range(1, 3),
+ * Range(5, 7)))` left `m` `unknown` where the very same union with an infinite
+ * arm — which evaluation leaves alone — proves `integer`. Keep the written
+ * form whenever evaluating it loses the type it proves.
+ *
+ * The choice is made ONCE, here, and the chosen form is both decomposed and
+ * recorded: the tier the membership is judged by and the tier a reader later
+ * derives from the stored fact come from the same expression.
+ */
+function normalizedSetOperand(setExpr: Expression): Expression {
+  const evaluated = setExpr.evaluate();
+  if (!evaluated.isValid || membershipType(evaluated) !== undefined)
+    return evaluated;
+  return membershipType(setExpr) !== undefined ? setExpr : evaluated;
+}
+
 function assumeElement(proposition: Expression): AssumeResult {
   console.assert(proposition.operator === 'Element');
 
@@ -1062,7 +1120,7 @@ function assumeElement(proposition: Expression): AssumeResult {
   const ce = proposition.engine;
   if (!isFunction(proposition)) return 'not-a-predicate';
 
-  const dom = proposition.op2.evaluate();
+  const dom = normalizedSetOperand(proposition.op2);
   if (!dom.isValid) return 'not-a-predicate';
 
   // Case 1: bare symbol — decompose the set
@@ -1178,7 +1236,7 @@ function assumeElementOfSet(
   // 4. SetMinus(S, T): recurse on S, then store exclusions
   if (isFunction(setExpr, 'SetMinus') && setExpr.ops.length === 2) {
     const [base, excluded] = setExpr.ops;
-    const result = assumeElementOfSet(ce, symbol, base.evaluate());
+    const result = assumeElementOfSet(ce, symbol, normalizedSetOperand(base));
     if (result === 'contradiction' || result === 'internal-error')
       return result;
 

@@ -257,8 +257,8 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     test('√(−∞) = i·∞ = ~oo claims number, not complex', () =>
       expect(typeOf(['Sqrt', 'NegativeInfinity'])).toBe('number'));
 
-    test('Round of ~oo claims number, not signed_infinity', () =>
-      expect(typeOf(['Round', 'ComplexInfinity'])).toBe('number'));
+    test('Round of ~oo is a boxing error (Phase F extended-real carrier)', () =>
+      expect(ce.box(['Round', 'ComplexInfinity'] as any).isValid).toBe(false));
 
     test('∞/∞ folds to the NaN value, which carries the NaN singleton', () => {
       // The canonical route folds this to the NaN VALUE, so the type read is
@@ -483,9 +483,11 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Gamma', 'x_r'])).toBe('real');
     });
 
-    test('rounding a finite complex is complex (was mistyped signed_infinity)', () => {
-      expect(typeOf(['Round', 'ImaginaryUnit'])).toBe('complex');
-      expect(typeOf(['Truncate', ['Complex', 2.5, 1]])).toBe('complex');
+    test('rounding a finite complex is a boxing error (Phase F extended-real carrier)', () => {
+      expect(ce.box(['Round', 'ImaginaryUnit'] as any).isValid).toBe(false);
+      expect(ce.box(['Truncate', ['Complex', 2.5, 1]] as any).isValid).toBe(
+        false
+      );
     });
 
     test('non-pole exact special values keep their finite types', () => {

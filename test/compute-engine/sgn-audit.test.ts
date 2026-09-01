@@ -47,12 +47,15 @@ describe('SGN HANDLER AUDIT', () => {
     expect(ce.box(['LCM', 4, 6]).sgn).toBe('positive');
   });
 
-  it('Floor/Ceil of a complex: sign of the rounded real part', () => {
-    // ⌊0.5+0.5i⌋ = 0 and ⌈-0.5-0.5i⌉ = 0; the raw real part's sign was
-    // previously claimed.
-    expect(ce.box(['Floor', ['Complex', 0.5, 0.5]]).sgn).toBe('zero');
-    expect(ce.box(['Ceil', ['Complex', -0.5, -0.5]]).sgn).toBe('zero');
-    expect(ce.box(['Floor', ['Complex', 1.5, 0.5]]).sgn).toBe('positive');
+  it('Floor/Ceil of a complex: a boxing error, no sign claim', () => {
+    // The Phase F Contract B flip made a complex operand a boxing error
+    // (the extended-real carrier; the component-wise Gaussian rounding is
+    // gone), so no sign is claimed for these invalid applications at all —
+    // the audit keeps them as the guard that no stale directional claim
+    // returns.
+    expect(ce.box(['Floor', ['Complex', 0.5, 0.5]]).sgn).toBe(undefined);
+    expect(ce.box(['Ceil', ['Complex', -0.5, -0.5]]).sgn).toBe(undefined);
+    expect(ce.box(['Floor', ['Complex', 1.5, 0.5]]).isValid).toBe(false);
   });
 
   it('Factorial: only negative INTEGERS are poles', () => {

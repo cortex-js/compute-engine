@@ -943,6 +943,29 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     );
   });
 
+  test('the rounding family propagates NaN through the gate and rejects off-carrier operands', () => {
+    // Phase F flip of the order-dependent family: each of
+    // `Floor`/`Ceil`/`Round`/`Truncate` declares
+    // `(real | signed_infinity)` with `nanBehavior: 'propagate'`, so a
+    // `NaN` argument is admitted and propagated by the generic gate,
+    // `±∞` maps to itself, and a proven off-carrier operand (a complex
+    // value, `~oo`) is a boxing error.
+    const ce2 = new ComputeEngine();
+    for (const op of ['Floor', 'Ceil', 'Round', 'Truncate']) {
+      expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
+      expect(isNaNValue(ce2, ce2.box([op, 'NaN']).N())).toBe(true);
+      expect(
+        ce2.box([op, 'PositiveInfinity']).evaluate().isInfinity
+      ).toBe(true);
+      expect(ce2.box([op, ['Complex', 1, 2]]).isValid).toBe(false);
+      expect(ce2.box([op, 'ComplexInfinity']).isValid).toBe(false);
+    }
+    // The IEEE arm of the comparisons is a declared `handle` now — the
+    // handler answers `False` for an unordered `NaN`, a success value.
+    expect(ce2.box(['Less', 1, 'NaN']).evaluate().symbol).toBe('False');
+    expect(ce2.box(['LessEqual', 'NaN', 1]).evaluate().symbol).toBe('False');
+  });
+
   test('compile(Heaviside)(NaN) agrees with the interpreter now', () => {
     // The compiled lane was fixed first (2026-08-28) under ratified Contract
     // B's derived `propagate` default, which left a route divergence: the
@@ -1154,6 +1177,94 @@ describe('SIGNATURE-GUIDELINES §3.3 — a membership predicate answers False fo
         arg,
         symbolName(ce2.box(['IsComposite', arg]).evaluate()),
       ]).toEqual([arg, want]);
+  });
+});
+
+describe('ERROR-MODEL §1 — an UNDECIDABLE condition is inert, never a host throw', () => {
+  // Ruled 2026-08-31. A condition the engine cannot read as `True` or `False`
+  // leaves the conditional unevaluated — the "not yet" channel — on both the
+  // `If` and the `Which` handler, so the two cannot diverge. It is never a
+  // JavaScript exception out of `evaluate()`: a caller that only asked for a
+  // value must get one, and the condition may become decidable later.
+
+  describe('If(x, 5) with an undeclared x', () => {
+    const ce = new ComputeEngine();
+    for (const { route, expr } of routes(
+      ce,
+      ['If', 'x', 5],
+      '\\operatorname{If}(x, 5)',
+      'If',
+      () => [ce.box('x'), ce.box(5)]
+    )) {
+      test(`[${route}] stays inert under evaluate() AND N()`, () => {
+        expect(() => expr.evaluate()).not.toThrow();
+        expect(expr.evaluate().operator).toBe('If');
+        expect(symbolName(operand(expr.evaluate(), 1))).toBe('x');
+        expect(expr.N().operator).toBe('If');
+      });
+    }
+  });
+
+  describe('Which(x = 4, 1, True, 2) — an undecided guard holds the whole Which', () => {
+    const ce = new ComputeEngine();
+    for (const { route, expr } of routes(
+      ce,
+      ['Which', ['Equal', 'x', 4], 1, 'True', 2],
+      '\\operatorname{Which}(x = 4, 1, \\operatorname{True}, 2)',
+      'Which',
+      () => [ce.box(['Equal', 'x', 4]), ce.box(1), ce.box('True'), ce.box(2)]
+    )) {
+      test(`[${route}] does not fall through to the True clause`, () => {
+        expect(() => expr.evaluate()).not.toThrow();
+        const r = expr.evaluate();
+        expect(r.operator).toBe('Which');
+        expect(operandsOf(r)).toHaveLength(4);
+        expect(r.N().operator).toBe('Which');
+      });
+    }
+  });
+
+  test('a condition that is not a boolean AT ALL is inert too, not a throw', () => {
+    // The number 10, a list of numbers, and a `NaN` condition can never be
+    // read as `True`/`False`. They used to raise a host exception carrying a
+    // spell-check hint; the ruling makes every undecidable condition inert.
+    const ce = new ComputeEngine();
+    expect(ce.box(['If', 10, 1, 2]).evaluate().operator).toBe('If');
+    expect(
+      ce.box(['Which', ['List', 10, 20], 1, 'True', 0]).evaluate().operator
+    ).toBe('Which');
+    expect(
+      ce.box(['Which', ['Divide', 0, 0], 5, 'True', 9]).N().operator
+    ).toBe('Which');
+  });
+
+  test('a PARTIALLY decidable Which holds as a whole, keeping its earlier clauses', () => {
+    // The first guard is `False` and the second is undecided. The walk cannot
+    // pass the undecided guard, so the whole conditional is held — and it is
+    // held AS WRITTEN, the already-`False` clause included, so nothing is lost
+    // if `x` is bound later.
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Which', 'False', 1, ['Equal', 'x', 4], 2, 'True', 3])
+      .evaluate();
+    expect(r.operator).toBe('Which');
+    expect(operandsOf(r)).toHaveLength(6);
+    expect(symbolName(operand(r, 1))).toBe('False');
+    // Fixpoint: a held conditional evaluates to itself.
+    expect(r.evaluate().isSame(r)).toBe(true);
+  });
+
+  test('a decidable condition is still decided — inertness is not a new default', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['If', ['Equal', 2, 2], 1, 2]).evaluate().isSame(1)).toBe(
+      true
+    );
+    expect(
+      ce.box(['Which', ['Less', 3, 0], 1, 'True', 2]).evaluate().isSame(2)
+    ).toBe(true);
+    // An ABSENT condition is a different channel: `Missing` is a decided data
+    // state that can never resolve, so it is a catchable Error, not inertness.
+    expect(isErrorValue(ce.box(['If', 'Missing', 1, 2]).evaluate())).toBe(true);
   });
 });
 

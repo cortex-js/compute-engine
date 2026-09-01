@@ -926,47 +926,62 @@ export function gammaPoleType(x: OperandDescriptor | undefined): Type {
 }
 
 /**
- * Rounding family (`Round`, `Ceil`, `Floor`, `Truncate`), which extends
- * component-wise to complex arguments (Gaussian rounding):
- * - NaN → NaN, and a non-finite argument that may be `~oo` (or a non-finite
- *   complex) → `number`;
- * - a provably real ±∞ maps to itself: `+oo | -oo` (provable);
- * - a *provably* non-real argument rounds component-wise → `complex`
- *   (widened to `number` when its finiteness is not established);
- * - otherwise (real or unknown, finiteness unknown = generic point) →
- *   `integer`.
+ * Rounding family (`Round`, `Ceil`, `Floor`, `Truncate`) — the SLIM
+ * finiteness-narrowing handler that remains after the family's Contract B
+ * domain-signature flip (each declares
+ * `(real | signed_infinity) -> integer | signed_infinity`; an off-carrier
+ * operand — a complex value, `~oo` — is a boxing error, so this handler
+ * never needs the component-wise Gaussian arms it used to carry):
  *
- * Non-realness must be PROVEN, not merely un-disproven. For a non-literal
- * the proof is a type that excludes the reals; reading a mere "not provably
- * real" as "complex" made `Round(4Q)` (Q undeclared, so `number`)
- * type `number` while the strictly less informative `Round(Q)` typed
- * `integer` — more knowledge about the operand yielding a weaker
- * result.
+ * - a provably FINITE real operand rounds to a finite integer → `integer`
+ *   (the load-bearing sharp claim: `matches('integer')` gates downstream
+ *   read it);
+ * - a provably infinite extended real maps to itself → `+oo | -oo`;
+ * - a proven extended real of UNDECIDED finiteness — e.g. an undeclared
+ *   symbol the carrier itself inferred as `real | signed_infinity` —
+ *   gets the union of those two outcomes, `integer | signed_infinity`,
+ *   which is sharper than the family's declared `Round` result and, for
+ *   the others, NaN-free where the declared-result fallback would add
+ *   the `nan` arm the proof excludes;
+ * - anything else — realness undecided, or a propagate-admitted `NaN` —
+ *   DECLINES (`undefined`), so the framework derives the honest claim
+ *   from the declared signature (`integer | signed_infinity`, with the
+ *   `nan` arm exactly where the argument can carry one).
  *
- * For a number LITERAL the proof is the sign: `unsigned` means the value has
- * an imaginary part or is NaN, and NaN is already excluded by the non-finite
- * arm above, so a finite literal of sign `unsigned` is exactly a non-real
- * one. The type does not answer this — `1 + 2i` types `complex`,
- * which is not disjoint from `real` — so the sign is the channel that
- * carries a literal's non-realness here.
+ * The operand is unwrapped to its broadcast element first, so a
+ * `list<real>` operand keeps the sharp per-cell `integer` claim.
  */
-export function roundingFunctionType(x: OperandDescriptor | undefined): Type {
-  if (!x) return 'number';
-  // EXTENDED realness: the operand this arm exists for IS `±∞`, which the
-  // bare (finite) name `real` does not match, so gating on `real` alone made
-  // the arm unreachable and sent `Round(∞)` to the top type.
-  if (operandNonFiniteNumber(x))
-    return typeFact(x.type, EXTENDED_REAL_TYPE) === true
+const INTEGER_OR_SIGNED_INFINITY_TYPE = parseType('integer | signed_infinity');
+
+export function roundingFunctionType(
+  x: OperandDescriptor | undefined
+): Type | undefined {
+  if (!x) return undefined;
+  const t = broadcastOperandType(x);
+  // The VALUE channel first: `facts.finite === false` is a PROOF of
+  // non-finiteness the descriptor can read through an application whose
+  // static type stays a union (`Ceil(Abs(w))` with `w := +∞` — the type
+  // alone says only `real<0..> | +oo | -oo`). A proven non-finite,
+  // provably extended-real operand IS `±∞`, and rounding maps it to
+  // itself. The same fact holds for a NaN operand (the facts channel
+  // cannot tell NaN and `~oo` from `±∞`), but there the extended-real
+  // test fails and the handler declines — the framework's proven-NaN arm
+  // answers `nan`. The fact describes the OPERAND, not its elements, so
+  // it is only consulted for a scalar operand (the convention
+  // `boundedEntireRealType` and the `LogIntegral` handler follow); a
+  // collection operand's cells answer through the element-type arms
+  // below.
+  if (x.facts.collection !== true && operandNonFiniteNumber(x))
+    return typeFact(t, EXTENDED_REAL_TYPE) === true
       ? SIGNED_INFINITY_TYPE
-      : 'number';
-  const provablyNonReal = isNumberLiteral(x)
-    ? x.facts.sgn === 'unsigned'
-    : typeFact(x.type, 'imaginary') === true;
-  if (provablyNonReal)
-    return x.facts.finite === true || typeFact(x.type, 'complex') === true
-      ? 'complex'
-      : 'number';
-  return 'integer';
+      : undefined;
+  // Bare `real` names the FINITE reals (finite-by-default lattice), so this
+  // single fact is the whole finiteness proof.
+  if (typeFact(t, 'real') === true) return 'integer';
+  if (typeFact(t, SIGNED_INFINITY_TYPE) === true) return SIGNED_INFINITY_TYPE;
+  if (typeFact(t, EXTENDED_REAL_TYPE) === true)
+    return INTEGER_OR_SIGNED_INFINITY_TYPE;
+  return undefined;
 }
 
 /**

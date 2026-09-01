@@ -483,7 +483,7 @@ describe('the inference channel: a function body that stores', () => {
       run(`${FIELD_BACKED}
 function f(x: P) { x.age = 43 }
 Type(f)`).value
-    ).toBe('TypeFrom("(x: P) state -> number")');
+    ).toBe('TypeFrom("(x: P) state -> integer")');
   });
 
   test('…and annotating that function `pure` is REFUSED, as an error value', () => {
@@ -507,7 +507,7 @@ function f(x: P) pure { x.age = 43 }`);
       run(`${COMPUTED}
 function f(x: Q) { x.age = 3 }
 Type(f)`).value
-    ).toBe('TypeFrom("(x: Q) state -> number")');
+    ).toBe('TypeFrom("(x: Q) state -> integer")');
   });
 
   test('…and annotating THAT function `pure` is refused too', () => {
@@ -531,16 +531,15 @@ function f(x: Q) pure { x.age = 3 }`);
 type Outer = object{child: Inner}
 function f(o: Outer) { o.child.age = 9 }
 Type(f)`).value
-    ).toBe('TypeFrom("(o: Outer) state -> number")');
-    // The `state` effect is what this test is about; the two RESULT types
-    // differ only because of the lambda-body widening
+    ).toBe('TypeFrom("(o: Outer) state -> integer")');
+    // The `state` effect is what this test is about; the RESULT type is
+    // decided by the lambda-body widening
     // (`boxed-expression/effects-inference.ts`), which replaces a finite
     // numeric body claim with `number` when some parameter slot could bind a
-    // non-finite value. A `list<Inner>` slot provably cannot, so the literal
-    // body `9` keeps its exact type. The `Outer` slot above is a nominal
-    // REFERENCE type, which `provablyDisjoint` does not resolve to its object
-    // definition, so it is not proven disjoint from the infinities and the
-    // widening still fires there.
+    // non-finite value. Neither slot can: a `list<Inner>` is provably disjoint
+    // from the infinities, and so is the object type `Outer` — a nominal
+    // reference, which `provablyDisjoint` resolves to its definition to answer
+    // that. So the literal body `9` keeps its exact type in both.
     expect(
       run(`type Inner = object{age: integer}
 function f(xs: list<Inner>) { xs[1].age = 9 }
@@ -616,7 +615,7 @@ function f(x: Q) { x.age = 3 }
 Type(f)`,
         ce
       ).value
-    ).toBe('TypeFrom("(x: Q) state -> number")');
+    ).toBe('TypeFrom("(x: Q) state -> integer")');
 
     // A LATER batch declares the protocol and the conformance; the arrow is
     // unchanged, because it never depended on them.
@@ -629,7 +628,9 @@ type Q is Aged {
 }`,
       ce
     );
-    expect(run('Type(f)', ce).value).toBe('TypeFrom("(x: Q) state -> number")');
+    expect(run('Type(f)', ce).value).toBe(
+      'TypeFrom("(x: Q) state -> integer")'
+    );
   });
 
   test('…so a `pure` annotation is refused at the definition, not later', () => {

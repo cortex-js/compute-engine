@@ -281,15 +281,13 @@ describe('gammaPoleType', () => {
   });
 });
 
-describe('roundingFunctionType', () => {
-  test('equal everywhere, including the complex and non-finite literals', () => {
-    // A complex literal's non-realness travels on the SIGN here: `1 + 2i`
-    // types `complex`, which is not disjoint from `real`, so only
-    // `sgn === 'unsigned'` (an imaginary part, NaN having been excluded by
-    // the non-finite arm) proves it.
-    abUnary(legacy.roundingFunctionType, twin.roundingFunctionType, {});
-  });
-});
+// `roundingFunctionType` no longer has a twin pair to compare: the rounding
+// family took its Phase F Contract B flip (2026-08-31) — the `'types'`-shape
+// handler became a slim finiteness narrower over the declared
+// `(real | signed_infinity)` carrier, and the legacy expressions-shape
+// function (whose only caller was this A/B) was deleted with the flip. The
+// adopted behavior is pinned in `type-soundness-regressions.test.ts` and
+// `type-handler-parity.test.ts`.
 
 describe('absFunctionType', () => {
   test('the NaN exclusion is the descriptor test, so it covers ~oo and a held NaN', () => {

@@ -16,7 +16,10 @@ import { numericValueOf } from '../boxed-expression/numerics.js';
 
 import { checkDeadline } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import {
+  EXTENDED_REAL_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
 import { MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
 import {
@@ -76,16 +79,24 @@ export function pointNormBroadcasts(point: Expression): boolean {
  * `incompatible-type('real', 'number')` on a value real by construction.
  *
  * The claim demands PROVEN finiteness of every component, because `real`
- * itself now means finite. Two component sets therefore keep the wide
- * `number`:
+ * itself now means finite. A component that is non-finite, or whose
+ * finiteness is merely unknown, therefore demotes the claim — `‖(∞, 1)‖`
+ * is `+∞`, and `‖(x, 1)‖` with `x: number` may be `+∞` too.
  *
- * - a component known to be non-finite — NaN or `±∞`, proven by a value
- *   (a literal, or a symbol's held value) or by an `infinity`/`nan` type.
- *   The norm of such a point is NaN or `+∞`, and neither is `real`.
- * - a component whose finiteness is merely UNKNOWN, such as a symbol
- *   declared `number`. `‖(x, 1)‖` with `x: number` cannot claim `real`,
- *   because `x` may be `±∞` and the norm is then `+∞`. The `number` claim
- *   covers both readings.
+ * How far it demotes depends on what the components can be:
+ *
+ * - Every component on the EXTENDED real line (a finite real, `+∞` or
+ *   `−∞`) gives `real | +oo`. A norm is non-negative, so `+∞` is the only
+ *   infinite value it can take, and no such component set can produce NaN.
+ *   This is the same carrier and the same result type the `Hypot`
+ *   signature declares. Note that the STORED type of an application prints
+ *   `real | signed_infinity`: every type-handler result passes through
+ *   `widenValueTypes` (`common/type/widen-value.ts`), which widens a lone
+ *   signed infinity to the pair on purpose, so that a contract inferred
+ *   from one observed `+∞` cannot reject a later `−∞`.
+ * - Anything else numeric — a component that may be NaN or `~∞`, or a
+ *   non-finite complex — keeps the wide `number`: those component sets can
+ *   make the norm NaN, which `real | +oo` excludes.
  *
  * A component that is not provably numeric at all — a matrix ROW, a string, an
  * `unknown`-typed element — keeps `number` too, ahead of both: those have no
@@ -106,7 +117,18 @@ export function euclideanNormType(
   if (!components.every((c) => c.type.matches('number'))) return 'number';
   // `real` is a finiteness promise, so it needs every component PROVEN
   // finite. An unproven one (`x: number`, which admits `±∞`) demotes.
-  return components.every((c) => c.isFinite === true) ? 'real' : 'number';
+  // The proof can come from the VALUE channel or from the TYPE: bare
+  // `complex` contains only finite values since the finite-by-default flip,
+  // so `matches('complex')` is itself a finiteness test, and it is the only
+  // proof a compound operand has — `isFinite` is `undefined` on an
+  // unevaluated `Norm((3, 4))` even though its type is `real`.
+  if (components.every((c) => c.isFinite === true || c.type.matches('complex')))
+    return 'real';
+  // On the extended real line the demotion is exactly one step: the norm is
+  // a non-negative real, or `+∞` when a component is infinite.
+  if (components.every((c) => c.type.matches(EXTENDED_REAL_TYPE)))
+    return 'real | +oo';
+  return 'number';
 }
 
 /**

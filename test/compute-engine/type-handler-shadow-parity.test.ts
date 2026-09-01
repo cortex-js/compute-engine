@@ -113,33 +113,12 @@ describe('shadow parity over the converted handlers', () => {
       ['When', 'x', 'True'],
 
       // --- batch 2: library/arithmetic.ts ---
-      // The rounding family. The interesting operand classes are the ones
-      // the handler branches on: NaN, a provably non-finite real, `~oo`
-      // (non-finite but not provably real), a provably non-real literal, and
-      // everything else (the generic-point `integer` claim).
-      ['Ceil', 3.7],
-      ['Ceil', 'x'],
-      ['Ceil', NaN],
-      ['Ceil', { num: '+Infinity' }],
-      ['Ceil', 'ImaginaryUnit'],
-      ['Floor', ['Rational', 7, 2]],
-      ['Floor', 'r'],
-      ['Floor', 'nf'],
-      ['Floor', ['Sqrt', 2]],
-      ['Floor', 'ComplexInfinity'],
-      ['Truncate', -2.5],
-      ['Truncate', 'bigd'],
-      ['Truncate', 'hnan'],
-      ['Truncate', 'w'],
-      ['Truncate', ['List', 1.5, 2.5]],
-      // `Round`'s second operand is the branch the rest of the family lacks.
-      ['Round', 3.14159],
-      ['Round', 3.14159, 2],
-      ['Round', 'x', 2],
-      ['Round', 'r', 3],
-      ['Round', NaN, 2],
-      ['Round', { num: '+Infinity' }],
-
+      // The rounding family (`Ceil`/`Floor`/`Truncate`/`Round`) left this
+      // mix with its Phase F Contract B flip (2026-08-31): the handlers
+      // now deliberately diverge from the frozen legacy shape (see the
+      // note at their retired `LEGACY_TYPE_HANDLERS` entries), and the
+      // adopted behavior is pinned directly in
+      // `type-handler-parity.test.ts`.
       ['Fract', 3.7],
       ['Fract', 'x'],
       ['Fract', NaN],

@@ -398,6 +398,13 @@ evidence-conditioned, unlike Heaviside's constant claim). The nightly
 `type-soundness-grid` ALLOW entries `Sign(i)`/`Sign(1+i)` are removed
 (the grid skips invalid expressions).
 
+One artifact consequence, found by the batch's own full-suite gate: the
+Fungrim identity `09c107` (`Sign(i) -> i` — the complex sign convention
+`z/|z|`) is not representable under the real-only carrier, so it is
+removed from the bundled artifact, ledgered in the manifest as a
+`box-error` disposition (the `310f36` precedent from the
+finite-by-default flip), and noted in the CHANGELOG.
+
 The batch also FIXED a broadcast unsoundness in the shipped Phase C/D
 derivation, witnessed by the flip: `contractBResultAdjustment` probed
 only the operand's own type for NaN evidence, and `nan` is not a
@@ -412,6 +419,56 @@ one CELL NaN, not the whole application. Proven NaN-free elements
 (`list<real>`) keep sharp cells. Pinned in
 `error-model-declarations.test.ts` ("broadcast NaN evidence is read off
 the ELEMENT type").
+
+**Batch 3 — the order-dependent family
+(`Floor`/`Ceil`/`Round`/`Truncate`, comparisons) — IMPLEMENTED
+2026-08-31** (delivered to the main tree; gate pending at the time of
+this note). What each part got, and why:
+
+- **`Floor`/`Ceil`/`Truncate`:
+  `(real | signed_infinity) -> integer | signed_infinity`**, explicit
+  `nanBehavior: 'propagate'`, `partiality: 'total'`. `Round` is
+  `(real | signed_infinity, integer?) -> real | signed_infinity` (the
+  precision form is generally non-integer) with the one-element
+  `nanBehavior: ['propagate']` so the precision slot keeps the DERIVED
+  integer-slot `reject` — `Round(2.5, NaN)` is an error, not a
+  propagation.
+- **The component-wise complex (Gaussian) rounding is REMOVED.** §4's
+  "Choosing carriers" rules order-dependent operators onto `(real)`,
+  and the compiled lanes were ALREADY real-only (runtime NaN, or a
+  compile-time capability decline, for a complex operand) — the flip
+  closes that interpreter/compiler divergence. `Floor(i)`,
+  `Round(1+2i)`, `Truncate(~oo)` are boxing errors now (CHANGELOG
+  breaking entry).
+- **Unlike the pilots, the family KEEPS a (slim) `'types'` handler** —
+  `roundingFunctionType` — because the declared result cannot carry the
+  finiteness split: a proven finite real sharpens to `integer` (the
+  load-bearing claim `matches('integer')` gates read), a proven
+  non-finite extended real — by TYPE or by the VALUE channel the
+  descriptor reads through an application (`Ceil(Abs(w))`, `w := +∞`) —
+  to the signed pair, a proven extended real of unknown finiteness to
+  `integer | signed_infinity`, and everything else DECLINES so the
+  framework derives the honest claim (with the `nan` arm) from the
+  declaration. The legacy expressions-shape twin and the family's
+  shadow-parity rows retire with the flip (the handler now deliberately
+  diverges from the frozen legacy shape).
+- **The comparisons are NOT carrier-flipped, by design.** `Less`/
+  `LessEqual` (and the canonicalized `Greater`/`GreaterEqual`) keep
+  their wide `(any, any+)` chain carriers: chain decomposition, quantity
+  operands and `Missing` all ride through them, they are `lazy` (§4's
+  sanctioned validation opt-out), and their `NaN` behavior was already
+  ruled (IEEE unordered → `False`, 2026-07-24). The Phase F change is
+  the explicit `nanBehavior: 'handle'` declaration documenting that
+  ruling on the definition, where §4's conformance sweep can read it.
+- **Two engine fixes the batch surfaced, both general:** (1)
+  `isSubtype`'s union ⊑ union probe required every lhs member to fit a
+  SINGLE rhs member, so a member that is itself a (legal, unreduced)
+  nested union was wrongly rejected — witnessed by `widenValueTypes`
+  tripping its own supertype assert on
+  `(integer | signed_infinity) | nan`; a union member now recurses
+  against the whole rhs (pinned in `internals/type-lattice.test.ts`).
+  (2) `widenNumericCellsWithNan`/`widenCellsWithMarker` now splice
+  `nan` into an existing union instead of minting the nested shape.
 
 ### Phase F — signature flips, operator-by-operator
 

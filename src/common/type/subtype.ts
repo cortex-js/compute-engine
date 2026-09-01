@@ -392,32 +392,59 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
   if (a === 'never' || b === 'never') return true; // empty set
   if (a === 'any' || b === 'any') return false;
 
-  // A STRUCTURAL alias IS its definition, on either side — the same rule as
-  // the LHS unfold in `isSubtype`. Without it the category test below sees a
-  // `reference` (no bucket) and falls through to the conservative "may
-  // overlap", so `id` (an alias of `integer`) was not provably disjoint from
-  // `string`. A NOMINAL reference keeps that conservative answer: its
-  // inhabitants are not the definition's.
+  // A reference is answered from the type it names, on either side. Without
+  // this the category test below sees a `reference` (no bucket) and falls
+  // through to the conservative "may overlap", so `id` (an alias of `integer`)
+  // was not provably disjoint from `string`.
   //
-  // Guarded by the same cycle detection as `isSubtype` (an alias whose
-  // definition is another alias can cycle); on a cycle we answer `false` —
-  // "may overlap" — which is this predicate's safe direction.
+  // A STRUCTURAL alias IS its definition — the same rule as the LHS unfold in
+  // `isSubtype`.
+  //
+  // A NOMINAL reference is deliberately NOT a subtype of its definition
+  // (`isSubtype` keeps it opaque, so a value of the same shape but of another
+  // name is refused), yet every value of the nominal type does have the
+  // definition's shape. Disjointness is therefore inherited in the one
+  // direction this predicate needs: if no value inhabits both the definition
+  // and `b`, none inhabits both the reference and `b`. The reverse is never
+  // claimed — a definition that overlaps `b` gives `false`, "may overlap",
+  // which is the safe answer, so two distinct names over the same body stay
+  // non-disjoint. Before this arm resolved nominal references, a parameter
+  // typed by a declared object type (`type Outer = object{…}`) was never
+  // proven disjoint from `infinity`/`nan` while the same type spelled
+  // structurally was, and the lambda-body finiteness widening
+  // (`boxed-expression/effects-inference.ts`) then fired for one spelling and
+  // not the other.
+  //
+  // `resolveTypeReference` (this file) follows the chain and instantiates an
+  // applied reference at its arguments — a nominal body left uninstantiated
+  // would hand the recursion a bare type variable, which this predicate's
+  // ground-input contract forbids. It answers `undefined` for an unfulfilled
+  // forward reference and for a chain that cycles.
+  //
+  // The recursion is guarded by the same cycle detection as `isSubtype`, keyed
+  // on the DECLARATION record (an application is a fresh object each time it
+  // is instantiated, so the node itself is not a stable key); on a cycle we
+  // answer `false` — "may overlap" — which is this predicate's safe direction.
   if (typeof a === 'object' && a.kind === 'reference') {
-    if (a.alias !== true || a.def === undefined) return false;
-    if (!beginUnfold(a)) return false;
+    const def = resolveTypeReference(a);
+    if (def === undefined) return false;
+    const frame = declarationOf(a);
+    if (!beginUnfold(frame)) return false;
     try {
-      return provablyDisjoint(a.def, b);
+      return provablyDisjoint(def, b);
     } finally {
-      endUnfold(a);
+      endUnfold(frame);
     }
   }
   if (typeof b === 'object' && b.kind === 'reference') {
-    if (b.alias !== true || b.def === undefined) return false;
-    if (!beginUnfold(b)) return false;
+    const def = resolveTypeReference(b);
+    if (def === undefined) return false;
+    const frame = declarationOf(b);
+    if (!beginUnfold(frame)) return false;
     try {
-      return provablyDisjoint(a, b.def);
+      return provablyDisjoint(a, def);
     } finally {
-      endUnfold(b);
+      endUnfold(frame);
     }
   }
   // `unknown` absorbs every type, and its lattice entry has no subtypes — so
@@ -1224,12 +1251,20 @@ export function isSubtype(
     if (typeof lhs !== 'string' && lhs.kind === 'broadcastable')
       return broadcastableFitsUnion(lhs);
     if (typeof lhs !== 'string' && lhs.kind === 'union') {
-      // lhs is a union, rhs is a union
-      return lhs.types.every((lhsType) =>
-        typeof lhsType !== 'string' && lhsType.kind === 'broadcastable'
-          ? broadcastableFitsUnion(lhsType)
-          : rhsMembers.some((rhsType) => isSubtype(lhsType, rhsType))
-      );
+      // lhs is a union, rhs is a union. A member that is ITSELF a union (a
+      // nested, unreduced union is a legal Type value) must be probed
+      // against the WHOLE rhs union — its own members may be covered by
+      // DIFFERENT rhs members (`(integer | +oo | -oo) | nan` against the
+      // flat `integer | +oo | -oo | nan`); requiring a single covering rhs
+      // member wrongly rejected exactly that case.
+      return lhs.types.every((lhsType) => {
+        if (typeof lhsType !== 'string') {
+          if (lhsType.kind === 'broadcastable')
+            return broadcastableFitsUnion(lhsType);
+          if (lhsType.kind === 'union') return isSubtype(lhsType, rhs);
+        }
+        return rhsMembers.some((rhsType) => isSubtype(lhsType, rhsType));
+      });
     }
     return rhsMembers.some((t) => isSubtype(lhs, t));
   }

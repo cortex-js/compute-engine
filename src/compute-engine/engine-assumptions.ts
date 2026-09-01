@@ -41,14 +41,44 @@ import { parse as parseLatex } from './latex-syntax/latex-syntax.js';
  * expression.
  *
  * A **non-string** input is boxed raw, exactly preserving the previous
- * behavior (an already-canonical `BoxedExpression` stays canonical). A
- * **string** is boxed CANONICALLY: a freshly parsed relational such as
- * `Less(x, 0)` only reduces against the assumptions DB (`x < 0 → False` under
- * `assume(x > 0)`) once its operator definition is bound, i.e. in canonical
- * form — a raw parse would evaluate back to itself and `verify()` would return
- * `undefined` where the boxed-expression path returns `false`.
+ * behavior (an already-canonical `BoxedExpression` stays canonical).
+ *
+ * A **string** is boxed CANONICALLY for `verify()`: a freshly parsed
+ * relational such as `Less(x, 0)` only reduces against the assumptions DB
+ * (`x < 0 → False` under `assume(x > 0)`) once its operator definition is
+ * bound, i.e. in canonical form — a raw parse would evaluate back to itself
+ * and `verify()` would return `undefined` where the boxed-expression path
+ * returns `false`.
+ *
+ * For `assume()` a string is boxed RAW instead, and `assume()` canonicalizes
+ * it itself, so that the whole predicate is canonicalized in one place —
+ * canonicalization binds every free symbol the predicate mentions, and
+ * `assume()` must be the call that does it for the names it is answerable
+ * for. The ownership snapshot the rollback needs is therefore taken here,
+ * before the string is parsed or boxed (`introducibleNames`).
  */
 function predicateFromArg(
+  ce: IComputeEngine,
+  predicate: Expression | string,
+  who: 'assume' | 'verify'
+): { predicate: Expression; undeclared: string[] } {
+  // The ownership snapshot: the names the scope already binds, read BEFORE
+  // this call parses or boxes anything, so a binding the call itself causes
+  // can be told from one that predates it (`introducibleNames`).
+  const boundAtEntry = who === 'assume' ? boundNamesInScope(ce) : undefined;
+  const boxed = boxPredicate(ce, predicate, who);
+  return {
+    predicate: boxed,
+    // The names the predicate mentions that the assumption is answerable
+    // for. Read here, on the still-uncanonicalized predicate, because
+    // canonicalizing it binds every free symbol it mentions.
+    undeclared: boundAtEntry ? introducibleNames(boxed, boundAtEntry) : [],
+  };
+}
+
+/** Box the predicate argument, per the rules described on
+ * `predicateFromArg`. */
+function boxPredicate(
   ce: IComputeEngine,
   predicate: Expression | string,
   who: 'assume' | 'verify'
@@ -58,7 +88,10 @@ function predicateFromArg(
   // `asLatexString` strips `$…$`/`$$…$$`; a plain string is used verbatim.
   const latex = asLatexString(predicate) ?? predicate;
   const parsed = parseLatex(latex);
-  const boxed = parsed === null ? null : ce.expr(parsed);
+  const boxed =
+    parsed === null
+      ? null
+      : ce.expr(parsed, { form: who === 'assume' ? 'raw' : 'canonical' });
   if (boxed === null || !boxed.isValid)
     throw new Error(
       `${who}(): cannot parse the predicate string ${JSON.stringify(
@@ -66,6 +99,57 @@ function predicateFromArg(
       )} as a mathematical expression`
     );
   return boxed;
+}
+
+/**
+ * Every symbol name the current context's scope chain binds, at the moment
+ * this is called.
+ *
+ * `lookupDefinition()` resolves a name by walking exactly this chain, so a
+ * name absent from the returned set is a name nothing had bound.
+ */
+function boundNamesInScope(ce: IComputeEngine): Set<string> {
+  const names = new Set<string>();
+  let scope: IComputeEngine['context']['lexicalScope'] | null | undefined =
+    ce.context?.lexicalScope;
+  while (scope) {
+    for (const name of scope.bindings.keys()) names.add(name);
+    scope = scope.parent;
+  }
+  return names;
+}
+
+/**
+ * The names `predicate` mentions that the `assume()` call itself brought into
+ * existence: the ones missing from `boundAtEntry`, the set of names the scope
+ * chain already bound when the call started.
+ *
+ * A transaction that rolls back — or a conjunct the assumptions layer refuses
+ * — has to leave the scope as it found it, so it may give up only the bindings
+ * it caused. Ownership is decided by that entry snapshot, and never by what a
+ * binding holds. `ce.parse()` and `ce.box()` auto-declare every free symbol
+ * they meet, so `const x = ce.box('x')` leaves behind an EMPTY placeholder —
+ * no declared type, no value, nothing the facts prove — but the caller holds
+ * an expression that points at it. Removing that placeholder on a rollback
+ * would break the identity of the binding: a later `ce.box('x')` would resolve
+ * to a different definition than the one the caller's expression still holds,
+ * and that one would be disposed.
+ *
+ * The three routes into `assume()` therefore differ in what a rollback leaves,
+ * because they differ in who binds the names. `ce.assume(['Greater', 'p', 0])`
+ * and `ce.assume('p > 0')` box or parse the predicate INSIDE the call, so `p`
+ * is claimed and a rollback leaves it undeclared; `ce.assume(ce.parse('p >
+ * 0'))` arrives with `p` already bound, so a rollback leaves the placeholder
+ * exactly as a bare `ce.parse('p > 0')` with no assumption at all would.
+ *
+ * An explicit `ce.declare('p', …)` is never claimed either, for the same
+ * reason: it was made before the call.
+ */
+function introducibleNames(
+  predicate: Expression,
+  boundAtEntry: ReadonlySet<string>
+): string[] {
+  return predicate.symbols.filter((name) => !boundAtEntry.has(name));
 }
 
 export function ask(
@@ -329,7 +413,7 @@ function verifyInner(
 ): boolean | undefined {
   // Accept string predicates ('x > 0', '$x > 0$', '\\pi > 0'); throws on
   // unparseable input (SYM P3-1).
-  const boxed = predicateFromArg(ce, query, 'verify');
+  const boxed = predicateFromArg(ce, query, 'verify').predicate;
 
   const expr = boxed.evaluate();
   if (isSymbol(expr)) {
@@ -429,18 +513,15 @@ export function assumeFn(
     // `{ canonical: false }`, which was silently ignored and so always
     // produced a canonical predicate; a later refactor swapped it to
     // `{ form: 'raw' }`, inadvertently feeding raw predicates through.)
-    const raw = predicateFromArg(ce, predicate, 'assume');
-
-    // The names the proposition mentions that nothing has declared YET.
-    // Canonicalizing below binds every free symbol it mentions, so this is the
-    // last moment at which a binding the assumption is answerable for can be
-    // told from one the user made: a transaction that rolls back — or a
-    // conjunct the assumptions layer refuses — has to leave the scope as it
-    // found it. (A caller who canonicalizes the predicate itself, as
-    // `ce.assume(ce.parse('x > 3'))` does, has already bound them; the
-    // transaction then has nothing to answer for and leaves them alone.)
-    const undeclared = raw.symbols.filter(
-      (s) => ce.lookupDefinition(s) === undefined
+    // `undeclared` are the names this call is answerable for: the ones the
+    // scope did not already bind when the call started. A transaction that
+    // rolls back — or a conjunct the assumptions layer refuses — has to leave
+    // the scope as it found it, and may give back only those
+    // (`introducibleNames`).
+    const { predicate: raw, undeclared } = predicateFromArg(
+      ce,
+      predicate,
+      'assume'
     );
 
     const pred = raw.canonical;

@@ -476,3 +476,24 @@ describe('Lattice property sanity: meet ⊑ operands, operand ⊑ union', () => 
     }
   }
 });
+
+describe('Nested unions on the lhs of a union ⊑ union probe', () => {
+  // A nested, unreduced union is a legal Type value (composition sites can
+  // mint `union[handlerClaim, 'nan']` where the claim is itself a union).
+  // The union ⊑ union probe used to require each lhs MEMBER to fit inside a
+  // single rhs member, so a union-shaped member whose parts are covered by
+  // DIFFERENT rhs members was wrongly rejected — witnessed by
+  // `widenValueTypes` tripping its own supertype assert on
+  // `(integer | signed_infinity) | nan`. A union member now recurses
+  // against the whole rhs union.
+  test('a union member spreads across the rhs members', () => {
+    const inner = parseType('integer | signed_infinity')!;
+    const nested: Type = { kind: 'union', types: [inner, 'nan'] };
+    const flat = parseType('integer | signed_infinity | nan')!;
+    expect(isSubtype(nested, flat)).toBe(true);
+    expect(isSubtype(flat, nested)).toBe(true);
+    // The false case stays false: drop a part the rhs cannot cover.
+    const flatNoNan = parseType('integer | signed_infinity')!;
+    expect(isSubtype(nested, flatNoNan)).toBe(false);
+  });
+});

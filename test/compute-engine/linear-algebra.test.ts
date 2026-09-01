@@ -1517,15 +1517,28 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
     expect(ce.box(['At', result, 5, 5]).evaluate().re).toBe(1);
     expect(ce.box(['At', result, 5, 6]).evaluate().re).toBe(0);
     // Lazy result is an indexed collection (serializes as a list, not a set).
-    // The element type is `number`, not `integer`: the lazy form is a nested
-    // `Tabulate` whose inner generator is an UNANNOTATED lambda, so its
-    // parameter slot reads `unknown` and could bind a non-finite value. The
-    // lambda-body widening therefore replaces the cell's finite `integer`
-    // claim with the top numeric type. The eager form (`IdentityMatrix(3)`)
-    // has no lambda and keeps the exact element type.
+    // The element type is the exact `integer`, as in the eager form: the index
+    // parameters of the nested `Tabulate` generators are annotated `integer`
+    // (`lazyConstantMatrix`), so the lambda-body widening has no `unknown`
+    // parameter slot to widen the cell's finite claim against.
     expect(result.type.toString()).toBe(
-      'indexed_collection<indexed_collection<number>>'
+      'indexed_collection<indexed_collection<integer>>'
     );
+  });
+
+  it('the lazy IdentityMatrix is a GENUINE identity, not an all-zero matrix', () => {
+    // The lazy generators are `["Typed", "i", "'integer'"]` / `["Typed", "j",
+    // "'integer'"]` lambdas, and the row index is named after the
+    // imaginary-unit constant. If the annotated parameter loses its shield, the
+    // cell `KroneckerDelta(i, j)` reads `i` as the imaginary unit — it is then
+    // never equal to a row number, and every entry of the matrix is 0.
+    const result = ce.expr(['IdentityMatrix', 1000000]).evaluate();
+    const row = ce.box(['At', result, 7]).evaluate();
+    for (let j = 1; j <= 10; j++)
+      expect(ce.box(['At', row, j]).evaluate().re).toBe(j === 7 ? 1 : 0);
+    // The row index really is substituted: the row is a closed collection with
+    // no free `i` left in it.
+    expect(row.unknowns).toEqual([]);
   });
 
   it('builds ZeroMatrix(100000, 100000) lazily without OOM', () => {
@@ -1614,10 +1627,18 @@ describe('Norm — result type is real', () => {
     ).toBe('sqrt(|z|^2 + 1)');
   });
 
-  it('an unproven-finite component demotes the claim to `number`', () => {
+  it('an unproven-finite component demotes the claim', () => {
     // `real` is a finiteness promise, so every component must be PROVEN
     // finite for it. A `number`-declared symbol admits `±∞`, and the norm
     // of such a point is `+∞`, which is not `real`.
+    //
+    // How far the claim demotes depends on what the component can be. A
+    // `number`-declared symbol can also be NaN or `~∞`, so the norm can be
+    // NaN and only the top type covers it. A component on the EXTENDED real
+    // line cannot: a norm is non-negative, so the only infinite value it can
+    // take is `+∞`. The claim for that set is `real | +oo`, which prints
+    // `real | signed_infinity` once the handler result is stored (a lone
+    // signed infinity widens to the pair — `widenValueTypes`).
     const eng = new ComputeEngine();
     eng.declare('u', 'number');
     eng.declare('r', 'real');
@@ -1627,7 +1648,19 @@ describe('Norm — result type is real', () => {
     expect(eng.expr(['Norm', ['Tuple', 'r', 1]]).type.toString()).toBe('real');
     expect(
       eng.expr(['Norm', ['Tuple', 'PositiveInfinity', 1]]).type.toString()
-    ).toBe('number');
+    ).toBe('real | signed_infinity');
+    // And the value is the `+∞` the claim admits.
+    expect(
+      eng
+        .expr(['Norm', ['Tuple', 'PositiveInfinity', 1]])
+        .evaluate()
+        .toString()
+    ).toBe('+oo');
+    // A component that may be NaN keeps the top type: `‖(NaN, 1)‖` is NaN,
+    // which `real | +oo` excludes.
+    expect(eng.expr(['Norm', ['Tuple', 'NaN', 1]]).type.toString()).toBe(
+      'number'
+    );
   });
 
   it('composes into a `real`-declared slot', () => {

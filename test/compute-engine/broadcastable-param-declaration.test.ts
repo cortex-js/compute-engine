@@ -370,11 +370,31 @@ describe('DECLARED broadcastable<T> — non-arithmetic bodies', () => {
 
   test('a THROWN element failure is enriched with the element-wise context', () => {
     const ce = new ComputeEngine();
-    // `If` on a non-boolean throws rather than returning an error value.
-    assignTyped(ce, 'pick', ['If', 'x', 1, 2], 'broadcastable<value>');
+    // A host exception raised while an element is evaluated aborts the whole
+    // broadcast, and the message names the function, the length and the slot.
+    // The throw is supplied by a test-local operator: nothing in the built-in
+    // library is guaranteed to keep raising from an evaluate handler.
+    ce.declare('Boom', {
+      signature: '(any) -> number',
+      evaluate: () => {
+        throw new Error('boom in element');
+      },
+    });
+    assignTyped(ce, 'pick', ['Boom', 'x'], 'broadcastable<value>');
     expect(() => ce.box(['pick', ['List', 1, 2, 3, 4]]).evaluate()).toThrow(
       /while applying 'pick' element-wise over 4 elements/
     );
+  });
+
+  test('an INERT element body does not abort the map — it completes', () => {
+    // The contrast case. An `If` whose condition cannot be decided is held,
+    // not thrown (ruling 2026-08-31), so a body that cannot decide is not an
+    // element failure: the map runs to completion and the undecided elements
+    // keep their held `If`.
+    const ce = new ComputeEngine();
+    assignTyped(ce, 'pick', ['If', 'x', 1, 2], 'broadcastable<value>');
+    const result = ce.box(['pick', ['List', true, false, 3]]).evaluate();
+    expect(result.json).toEqual(['List', 1, 2, ['If', 3, 1, 2]]);
   });
 });
 

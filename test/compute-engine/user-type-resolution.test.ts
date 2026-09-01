@@ -40,7 +40,7 @@ describe('BoxedType string predicates with a user-declared type', () => {
   });
 
   test('isDisjointFrom() accepts a user type name', () => {
-    // `provablyDisjoint` is conservative about a nominal reference, so the
+    // `point` is an alias of the very tuple it is compared against, so the
     // answer is `false` either way; what matters is that the name resolves
     // instead of throwing `Failed to parse type "point"`.
     expect(() => ce.type('string').isDisjointFrom('point')).not.toThrow();

@@ -290,6 +290,52 @@ describe('Contract B — the NaN gates on a precise-carrier pilot (Phase B)', ()
     expect(expr.isValid).toBe(true);
     expect(expr.evaluate().isNaN).toBe(true);
   });
+
+  test('an EXTENDED-REAL carrier derives reject, so Hypot declares handle explicitly', () => {
+    // The trap this pins: `real | signed_infinity` is NOT a subtype of
+    // `complex` (bare `complex` is finite since the lattice flip), and the
+    // mechanical §4 propagate test asks exactly that — so the DERIVED
+    // default for an extended-real carrier is `reject`, and `Hypot(NaN, 1)`
+    // would become an Error. `Hypot` therefore declares its policy
+    // explicitly. It declares `handle`, not `propagate`, because the
+    // generic gate answers a propagating `NaN` BEFORE the handler runs,
+    // which would lose the infinity precedence: an infinite leg makes the
+    // hypotenuse infinite whatever the other leg is, `NaN` included
+    // (`Math.hypot(Infinity, NaN)` is `Infinity`, and the compiled lane
+    // emits `Math.hypot`). With `handle` the handler owns both answers.
+    const e = new ComputeEngine();
+    const def = e.lookupDefinition('Hypot')!.operator!;
+    expect(def.resolvedNanBehaviorAt(0)).toBe('handle');
+    expect(def.resolvedNanBehaviorAt(1)).toBe('handle');
+    const expr = e.box(['Hypot', 'NaN', 1]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.evaluate().isNaN).toBe(true);
+    // The precedence the `handle` policy buys, in both operand orders.
+    expect(
+      e.box(['Hypot', 'PositiveInfinity', 'NaN']).evaluate().toString()
+    ).toBe('+oo');
+    expect(
+      e.box(['Hypot', 'NaN', 'NegativeInfinity']).evaluate().toString()
+    ).toBe('+oo');
+    // A point leg reaches the hypotenuse through its norm, and an infinite
+    // norm has the same precedence as an infinite scalar.
+    expect(
+      e
+        .box(['Hypot', ['Tuple', 'PositiveInfinity', 3], 'NaN'])
+        .evaluate()
+        .toString()
+    ).toBe('+oo');
+    // Without the explicit declaration the same carrier derives `reject`.
+    e.declare('TestExtendedRealCarrier', {
+      signature: '(real | signed_infinity) -> real',
+      evaluate: ([x]) => x,
+    });
+    expect(
+      e
+        .lookupDefinition('TestExtendedRealCarrier')!
+        .operator!.resolvedNanBehaviorAt(0)
+    ).toBe('reject');
+  });
 });
 
 describe('Contract B — the higher-order conservative floor (Phase E)', () => {

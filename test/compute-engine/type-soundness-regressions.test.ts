@@ -187,12 +187,20 @@ describe('Tycho item 89 — rounding a symbolic number stays integer-valued', ()
   const ce = new ComputeEngine();
   const typeOf = (s: string) => ce.parse(s).type.toString();
 
+  // The family took its Phase F Contract B flip (2026-08-31): each
+  // operator declares `(real | signed_infinity)`, so a proven off-carrier
+  // operand (a complex value) is a boxing error, an undeclared symbol is
+  // inferred extended-real from the carrier and claims
+  // `integer | signed_infinity`, and a maybe-NaN operand carries the
+  // propagated `nan` arm. The original item-89 concern — a MORE
+  // informative operand must never produce a WEAKER claim — still holds
+  // on the flipped claims and stays pinned below.
   it('Round of a literal, a bare symbol and an arithmetic term all agree', () => {
-    // `4Q` types `number`, whose `isExtendedReal` is `false` only in the sense
-    // of "not PROVABLY real" — reading that as "complex" made the more
-    // informative operand produce the weaker type.
     expect(typeOf('\\mathrm{Round}(4.7)')).toBe('integer');
-    expect(typeOf('\\mathrm{Round}(Q)')).toBe('integer');
+    // `Q` is inferred `real | signed_infinity` from the carrier, so the
+    // claim is the mixed-finiteness union; the finite product `4Q` then
+    // sharpens back to `integer` — more information, sharper type.
+    expect(typeOf('\\mathrm{Round}(Q)')).toBe('integer | signed_infinity');
     expect(typeOf('\\mathrm{Round}(4Q)')).toBe('integer');
   });
 
@@ -201,27 +209,35 @@ describe('Tycho item 89 — rounding a symbolic number stays integer-valued', ()
     expect(typeOf('\\lceil 4Q \\rceil')).toBe('integer');
   });
 
-  it('a PROVABLY non-real argument still rounds component-wise', () => {
-    expect(typeOf('\\mathrm{Round}(1.2+3.4i)')).toBe('complex');
-    expect(typeOf('\\mathrm{Round}(i)')).toBe('complex');
+  it('a PROVABLY non-real argument is a boxing error now', () => {
+    expect(ce.parse('\\mathrm{Round}(1.2+3.4i)').isValid).toBe(false);
+    expect(ce.parse('\\mathrm{Round}(i)').isValid).toBe(false);
   });
 
   it('a precision argument never claims integer, whatever the finiteness', () => {
     // `Round(x, 2)` with `x: real` (finiteness unknown) used to fall through
     // to the integer claim while evaluating to `3.14`-like rationals.
+    // (`xr`/`xf` parse as juxtaposition PRODUCTS of undeclared symbols —
+    // they always have — so those rows exercise a maybe-NaN compound
+    // operand, which now honestly carries the propagated `nan` arm.)
     ce.declare('xr', 'real');
     ce.declare('xf', 'real');
-    expect(typeOf('\\mathrm{Round}(xr, 2)')).toBe('real');
-    expect(typeOf('\\mathrm{Round}(xf, 2)')).toBe('real');
-    expect(typeOf('\\mathrm{Round}(Q, 2)')).toBe('real');
+    expect(typeOf('\\mathrm{Round}(xr, 2)')).toBe(
+      'nan | real | signed_infinity'
+    );
+    expect(typeOf('\\mathrm{Round}(xf, 2)')).toBe(
+      'nan | real | signed_infinity'
+    );
+    expect(typeOf('\\mathrm{Round}(Q, 2)')).toBe('real | signed_infinity');
     expect(typeOf('\\mathrm{Round}(3.14159, 2)')).toBe('real');
-    expect(typeOf('\\mathrm{Round}(1.2+3.4i, 2)')).toBe('complex');
+    expect(ce.parse('\\mathrm{Round}(1.2+3.4i, 2)').isValid).toBe(false);
     expect(typeOf('\\mathrm{Round}(\\infty, 2)')).toBe('signed_infinity');
   });
 
-  it('the non-finite and NaN claims are unchanged', () => {
+  it('the non-finite and NaN claims', () => {
     expect(typeOf('\\mathrm{Round}(\\infty)')).toBe('signed_infinity');
-    expect(typeOf('\\mathrm{Round}(\\mathrm{NaN})')).toBe('number');
+    // A proven-NaN argument in the propagate slot types exactly `nan`.
+    expect(typeOf('\\mathrm{Round}(\\mathrm{NaN})')).toBe('nan');
   });
 
   it('a precision argument still gives a real, not an integer', () => {

@@ -661,43 +661,44 @@ export function canonicalFunctionLiteralArguments(
     for (const name of functionLiteralParameterNames(param)) {
       if (block.localScope!.bindings.has(name)) continue;
       // A destructuring pattern's leaves carry no annotation of their own, so
-      // they always take the bare-parameter branch below.
+      // they are always declared with the inferred `unknown` type below.
       const t = isDestructuringParameter(param)
         ? undefined
         : functionLiteralParameterType(param);
-      if (t !== undefined)
+      // A parameter whose first reference sat in a NESTED Block scope (an `if`
+      // branch, a loop body, the body of a nested function literal)
+      // auto-declared its shared binding there, not here. Adopt that binding as
+      // the parameter's: it is the one every body occurrence resolves to, and
+      // the one that carries the type evidence inference wrote (e.g. `cs[j]` ⇒
+      // `cs: indexed_collection`). Declaring a fresh binding instead severs the
+      // signature from the body's evidence: the lambda auto-broadcast then
+      // wrongly maps the function over a collection argument that the body
+      // consumes whole, and — for a parameter named after a library constant —
+      // the parameter-repair rewrite below re-boxes the body occurrences, which
+      // turns a nested `i` back into the imaginary unit.
+      // An ANNOTATED parameter's shared binding already carries the declared
+      // type: the first reference creates it with that type, non-inferred (see
+      // the annotated branch of the shadowed-parameter resolution in
+      // `engine-expression-entrypoints.ts`).
+      const shared = shadowedDefs.get(name);
+      if (shared !== undefined) {
+        // Checkpoint journal (funnel 4): a binding write outside the declare
+        // routes. The target is the literal's own block scope, which a
+        // restore normally discards along with the literal — journaled all
+        // the same, because a re-canonicalization of a literal that PREDATES
+        // the window writes into a scope the window must be able to rewind.
+        journalCheckpointMapEntry(
+          ce,
+          block.localScope!.bindings,
+          name,
+          name,
+          'declare'
+        );
+        block.localScope!.bindings.set(name, shared);
+      } else if (t !== undefined)
         ce.declare(name, { inferred: false, type: t }, block.localScope);
-      else {
-        // A bare parameter whose first reference sat in a NESTED Block scope
-        // (an `if` branch, a loop body) auto-declared its shared binding there,
-        // not here. Adopt that binding as the parameter's: it is the one every
-        // body occurrence resolves to, and the one that carries the type
-        // evidence inference wrote (e.g. `cs[j]` ⇒ `cs: indexed_collection`).
-        // Declaring a fresh `unknown` binding instead severs the signature from
-        // the body's evidence, and the lambda auto-broadcast then wrongly maps
-        // the function over a collection argument that the body consumes whole.
-        const shared = shadowedDefs.get(name);
-        if (shared !== undefined) {
-          // Checkpoint journal (funnel 4): a binding write outside the declare
-          // routes. The target is the literal's own block scope, which a
-          // restore normally discards along with the literal — journaled all
-          // the same, because a re-canonicalization of a literal that PREDATES
-          // the window writes into a scope the window must be able to rewind.
-          journalCheckpointMapEntry(
-            ce,
-            block.localScope!.bindings,
-            name,
-            name,
-            'declare'
-          );
-          block.localScope!.bindings.set(name, shared);
-        } else
-          ce.declare(
-            name,
-            { inferred: true, type: 'unknown' },
-            block.localScope
-          );
-      }
+      else
+        ce.declare(name, { inferred: true, type: 'unknown' }, block.localScope);
     }
   }
 
@@ -1423,12 +1424,23 @@ function desugarSignatureString(
   // no type variable may become the type of a symbol. Ground-typed arguments
   // keep their `Typed` marker and are enforced as usual.
   const generic = isPolymorphicType(type);
+  // The parameter symbols are built RAW: a canonical `ce.symbol(name)` reads a
+  // library constant of that spelling, and `ce.symbol('i')` is not a symbol at
+  // all but the imaginary-unit number literal — which the parameter reading
+  // below then rejects with `expected-a-symbol`. A raw symbol is also what
+  // every other parameter-building route produces (`anonymousParameters`,
+  // `annotateFunctionLiteralParams`), so the desugared operands are
+  // indistinguishable from the hand-written structural spelling.
+  const paramSymbol = (name: string): Expression =>
+    ce.symbol(name, { canonical: false });
   const params = args.map((a) =>
     isWide(a.type) || (generic && mentionsQuantifiedVariable(a.type, type))
-      ? ce.symbol(a.name!)
-      : ce._fn('Typed', [ce.symbol(a.name!), ce.string(typeToString(a.type))], {
-          canonical: false,
-        })
+      ? paramSymbol(a.name!)
+      : ce._fn(
+          'Typed',
+          [paramSymbol(a.name!), ce.string(typeToString(a.type))],
+          { canonical: false }
+        )
   );
   let newBody = body;
   if (generic) {
