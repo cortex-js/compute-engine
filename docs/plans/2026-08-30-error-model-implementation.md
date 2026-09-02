@@ -157,7 +157,8 @@ deliberate scope decisions, each reversible in one line once measured:
   proven-real operand); widening it would degrade the sharper authority,
   observable as `Heaviside(x).isNonNegative` regressing through
   `signOfType`.
-- **The omitted `may-marker` default contributes no type arm yet.**
+- **The omitted `may-marker` default does not add `| nan` to result
+  types yet.**
   Binding it engine-wide flips every handler-less precise numeric result
   to `S | nan` at once, which silently defeats `matches('integer')`-style
   type-keyed guards (a recorded pitfall class). Explicit declarations —
@@ -172,6 +173,27 @@ deliberate scope decisions, each reversible in one line once measured:
   The doc-faithful default binds with the Phase F flips, after those
   consumers learn to condition on the derived application type — the
   migration path §4 itself prescribes.
+  **RE-MEASURED 2026-09-01, after Phase F completed** (two-line flip:
+  `resolvedPartiality` in BOTH `contractBResultAdjustment` and the
+  `applyContractB` candidacy gate, so settled non-numeric codomains take
+  the `missing` arm too, as §2 rule 4 says): **412 failures across 86
+  suites plus 7 snapshots** — three times the 08-31 number, and the
+  same structural classes: `integer → integer | nan` (76 pins),
+  `string → missing | string` (56), `tree<integer> → tree<integer> |
+  missing`, and SHAPE claims destroyed (`vector<integer^3>` →
+  `list<integer | nan^3>`, matrices likewise). Phase F did not shrink the
+  population: the flipped heads carry type handlers, and the widening
+  hits the HANDLER-LESS majority. Conclusion: binding the default is not
+  a batch but a library-wide migration — every total builtin would have
+  to declare `partiality: 'total'` (or the default stays opt-in and
+  `docs/ERROR-MODEL.md` §4 is amended to say so).
+  **RULED 2026-09-01 (Arno): the default stays opt-in — CLOSED.** The
+  omitted `may-marker` is a runtime contract and contributes no type
+  arm; `docs/ERROR-MODEL.md` §4 and its derived-type block are amended,
+  with the ruling logged there. No code change: the staged opt-in IS
+  the ratified semantics. `total` keeps its meaning as the stronger
+  auditable claim. The input-side twin (`Length(First(t))` receiving
+  `Missing`) is governed by `missingBehavior`, already shipped.
 - **Broadcast-lifted results are widened PER CELL**
   (`widenNumericCellsWithNan`, `common/type/utils.ts` — the recursive
   twin of `absorbNumericAbsence`): a broadcast application types

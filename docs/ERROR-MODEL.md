@@ -438,7 +438,40 @@ is mandatory:
      `may-marker`** — the sound default; inferring `total` would
      recreate the `Mod(1, 0)` unsoundness. Authors opt into `total`, or
      supply the predicate so the gate — or a static analysis — can
-     discharge it and recover sharpness. `may-marker` also covers
+     discharge it and recover sharpness.
+
+     **RULED 2026-09-01: the omitted default is a RUNTIME contract only
+     — it does not add `| nan` or `| missing` to the result type.**
+     With no `partiality` declared, the
+     value of an application may still be the codomain marker at
+     runtime (rule 4 of §2, the `definedWhen` gate, and NaN propagation
+     all keep their obligations), but the derived application type
+     stays the sharp `S`: `Length(xs)` types `integer`, not
+     `integer | nan`. The reason is the same one this section gives
+     for `error`: an inferred, universal possibility carries no
+     information when annotated — `Length` never yields the marker and
+     `Sin` can, and a default cannot tell them apart — so spelling it
+     on every handler-less head would only destroy sharpness (measured
+     2026-09-01: binding `S | marker(S)` engine-wide broke 412 tests
+     across 86 suites, turning `vector<integer^3>` into
+     `list<integer | nan^3>`). For a numeric codomain this also matches
+     the IEEE expectation that any numeric value may be `NaN` and that
+     `NaN` propagates. A type therefore describes the *successes*; the
+     result type says `| nan` (or `| missing`) exactly when an author
+     DECLARES the partiality
+     (`partiality: 'may-marker'`, or a `definedWhen` predicate that the
+     arguments do not discharge) or the operands PROVE it (a provably
+     `NaN` argument in a propagating slot). `total` stays meaningful as
+     the stronger, auditable claim that even the runtime cannot produce
+     the marker. The same holds on the INPUT side, for the same reason
+     `| error` is never spelled there: an operand may arrive as a marker
+     (`Length(First(t))` receives `Missing` when `t` is empty) without
+     the parameter type saying so, and the per-parameter
+     `missingBehavior` / `nanBehavior` policies govern what happens —
+     a `propagate` slot absorbs it to the result marker, `reject`
+     errors, `handle` lets the handler answer.
+
+     `may-marker` also covers
      *numeric-route* failures, not only mathematical ones: an exact
      value whose float image is not representable produces the marker
      too (`Sin(10000i)` is mathematically finite, but `.N()` overflows
@@ -472,13 +505,16 @@ honest about what has and has not been proven:
 
 ```
 S
-  | marker(S)   while the partiality condition is not discharged
+  | marker(S)   while a DECLARED partiality condition is not discharged
   | nan         while a propagating parameter might receive NaN
 ```
 
-narrowing to exactly `S` only when *both* are discharged: the partiality
-is `total` (or its predicate is proven for these arguments) *and* every
-propagating slot's argument type excludes `NaN`. This needs the `nan`
+narrowing to exactly `S` when *both* are discharged: the declared
+partiality (`may-marker`, or a `definedWhen` predicate) is absent,
+`total`, or proven for these arguments, *and* every propagating slot's
+argument type excludes `NaN`. (Per the 2026-09-01 ruling above, only a
+DECLARED partiality puts `marker(S)` into the type; an omitted one does
+not.) This needs the `nan`
 singleton of §5 to be expressible — `rational<0..1> | nan` says vastly
 more than a collapse to bare `number`. `realOnlyStepType` is a
 hand-written special case of this derivation; under B it and its class
@@ -942,6 +978,24 @@ document's history):
   `may-marker` with unknown NaN behavior). The floor is mandatory under
   any representation; the question is how much precision higher-order
   code — `Map`, callback validation, compilation — can recover.
+- **RULED 2026-09-01: the omitted `may-marker` default is a runtime
+  contract only — it does not add `| nan` or `| missing` to the result
+  type** (§4, with the derived-type block amended).
+  Weighed after re-measuring the doc-faithful alternative once Phase F
+  was complete: binding `S | marker(S)` for every head with no declared
+  partiality failed 412 tests across 86 suites (and 7 snapshots) —
+  `integer → integer | nan`, `string → missing | string`, shape claims
+  such as `vector<integer^3>` collapsing to `list<integer | nan^3>` —
+  and the alternative of declaring `partiality: 'total'` on every total
+  builtin was judged a library-wide migration for no sharpness gain
+  over silence. Adopted: a type describes the successes; the marker
+  arm appears only from a declared partiality or from proven NaN
+  evidence; `total` remains the stronger auditable claim; on the input
+  side the marker is governed by `missingBehavior`/`nanBehavior`, never
+  spelled in the parameter type. Recorded expectation: this may surface
+  as a user surprise ("`Length` said `integer` and returned `Missing`")
+  — for `NaN` it is the IEEE expectation, for `Missing` it is the same
+  bargain as `error`; revisit if feedback shows otherwise.
 - **RULED 2026-08-27: `~oo` is a singleton member of the `infinity`
   type.** The options weighed were: (a) inside `complex` — rejected: it
   breaks `complex`'s structural promise (every complex value has

@@ -412,6 +412,23 @@ deliberately left out of that change.
   `test/compute-engine/compile-elementwise-which.test.ts`. Aligning the
   channels, if wanted, is a ruling.
 
+### Open items from the Power signature flip and the may-marker ruling (2026-09-01)
+
+- **`Length` stays inert on a decidable non-collection or on the
+  `Missing` marker.** `Length(5)` evaluates to the unevaluated
+  `Length(5)` and `Length(Missing)` (what `Length(First(t))` receives
+  for an empty `t`) to `Length(Missing)`, both typed `integer`. Both
+  questions are decidable, so `docs/ERROR-MODEL.md` §1 forbids inertness
+  as the terminal answer: by §2 rule 4 a decidable "no length" is the
+  numeric codomain marker `NaN` (or, if the ruling is that a
+  non-collection operand is a contract violation, an `Error`). The
+  `(any)` carrier admits `missing`, so the marker reaches the handler
+  (`missingBehavior` resolves to handler-owned) and the handler simply
+  declines. Decide which channel, then fix the handler in
+  `src/compute-engine/library/collections.ts` (`Length`) and sweep the
+  sibling size operators (`Count`, `Dimensions`) for the same shape.
+  Found while writing the 2026-09-01 may-marker ruling.
+
 ### Doc-sweep triage (2026-08-29)
 
 - **`Infinity^Infinity` canonicalizes to `~oo` where the direction is

@@ -302,6 +302,18 @@
 
 ### New Features
 
+- **Documented: a result type describes the successes.** `docs/ERROR-MODEL.md`
+  now states the rule the engine has followed since the error-model work
+  began: an operator that declares no `partiality` keeps its sharp result
+  type (`Length(xs)` types `integer`), even though at runtime the value may
+  be the absence marker of its codomain — `NaN` for a numeric result, the
+  IEEE expectation that any numeric value may be `NaN`, or `Missing` for a
+  non-numeric one — in the same way every application may produce an error
+  without its type saying so. The marker appears in a type only when an
+  operator declares its partiality (`partiality: 'may-marker'` or a
+  `definedWhen` condition the arguments do not discharge) or when an
+  argument is provably `NaN`. No behavior changed.
+
 - **`Hypot` accepts infinite arguments, with IEEE semantics.** The declared
   signature is now
   `(real | signed_infinity, real | signed_infinity) -> real | +oo | nan`
