@@ -68,10 +68,12 @@ describe('§11.2 Greater(Imaginary(tau), 0)', () => {
 
     // The sgn fallback flows through BoxedFunction.sgn into isPositive
     expect(ce.expr(['Imaginary', 'tau']).isPositive).toBe(true);
-    // The part-bound proves only `number` about the whole value — never
-    // `real` — and the disequality it derives (`Im(tau)` bounded away from
-    // zero implies `tau ≠ 0`) excludes the one value the type can name.
-    expect(ce.expr('tau').type.toString()).toBe('number & !0');
+    // The part-bound never proves `real` about the whole value — the use
+    // under `Imaginary` infers that operator's carrier `complex | infinity`
+    // into the fresh symbol — and the disequality it derives (`Im(tau)`
+    // bounded away from zero implies `tau ≠ 0`) excludes the one value the
+    // type can name.
+    expect(ce.expr('tau').type.toString()).toBe('complex & !0 | infinity');
   });
 
   it('stays undefined without the assumption', () => {
@@ -106,7 +108,9 @@ describe('§11.3 Greater(Real(s), 1)', () => {
 
   it('does not declare s real (no destructive retype)', () => {
     expect(ce.expr('s').isExtendedReal).not.toBe(true);
-    expect(ce.expr('s').type.toString()).toBe('number');
+    // The use under `Real` infers its carrier `complex | infinity` — not
+    // `real`.
+    expect(ce.expr('s').type.toString()).toBe('complex | infinity');
   });
 
   it('Real(s).isPositive flows through the sgn fallback', () => {

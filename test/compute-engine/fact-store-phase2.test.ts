@@ -67,10 +67,13 @@ describe('what a fact contributes to the type', () => {
     expect(ce.box('n').type.toString()).toBe('unknown');
   });
 
-  test('a part-bound proves the whole value is a number, never that it is real', () => {
+  test('a part-bound never proves the whole value is real', () => {
     const ce = new ComputeEngine();
     expect(ce.assume(ce.box(['Greater', ['Real', 's'], 1]))).toBe('ok');
-    expect(ce.box('s').type.toString()).toBe('number');
+    // The type is the carrier the use under `Real` infers into the fresh
+    // symbol (`complex | infinity`); the fact itself adds no realness.
+    expect(ce.box('s').type.toString()).toBe('complex | infinity');
+    expect(ce.box('s').type.matches('real')).toBe(false);
   });
 
   test('a finite modulus bound proves the whole value is finite', () => {

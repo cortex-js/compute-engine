@@ -1092,6 +1092,176 @@ What shipped, and what the batch measured:
      unverifiable. The code comments at both heads state the reading.
      Reopen if a directed-infinity value ever lands.
 
+**Batch 9 — the complex accessors (`Real`/`Re`, `Imaginary`/`Im`,
+`Argument`/`Arg`, `Conjugate`, `AbsArg`, `ComplexRoots`) and the
+error-function remainder (`Erfi`, `ErfInv`) — IMPLEMENTED 2026-09-02.**
+Survey first (every head, every exceptional point, three routes):
+`Real(~oo)` and `Imaginary(~oo)` answered `+∞` (the `(∞, ∞)`
+representation read component-wise); `Imaginary(NaN)` answered `0`;
+`Conjugate(NaN)` answered an `unexpected-argument` ERROR — and so did
+`Chop(NaN)`, `Remainder(NaN, 2)`, `BaseForm(NaN)` and `Identity(NaN)`:
+every polytype head whose bound admits `nan` derived `reject`, because
+`resolvedNanBehaviorAt` compared the bare type VARIABLE against the
+carriers (`isSubtype('nan', T)` is false for a variable); `ComplexRoots`
+answered `[NaN, ~oo]` for `+∞` and `[~oo, ~oo]` for `−∞`, and stayed
+inert for a NaN radicand or a root count of `0`/`NaN`/`+∞`; `Erfi(~oo)`
+answered `~oo` although erfi is bounded on the imaginary axis
+(`erfi(iy) = i·erf(y)`, checked: `Erfi(1.5i) = 0.966i`); `ErfInv` stayed
+inert for `~oo`, `∞ + i` and a non-real finite argument. Four rulings
+(Arno, 2026-09-02), each recommended and ratified:
+
+1. **The part extractors read the COMPONENTS of an anonymous infinity**
+   (`∞ + i`): `Real = +∞`, `Imaginary = 1`, `Argument = 0` (the direction
+   of the vector; `π` for `−∞ + 2i`), `Conjugate = ∞ − i`. The batch-8
+   rule (anonymous → NaN) is for heads that need a limit; these read
+   components that exist. `~oo` alone has no direction, so no real part,
+   imaginary part or phase angle: NaN on all three.
+2. **`ComplexRoots` takes `(complex, integer)`** with the precondition
+   `n ≥ 1` (`requires`; `ComplexRoots(8, 0)` is an evaluation error). An
+   infinite radicand is off-carrier — a boxing error — rather than a list
+   of `~oo`. The NaN policy is per slot: `['propagate', 'reject']` — a
+   NaN radicand is the bare `NaN`, a NaN root count a contract violation.
+3. **`ErfInv` stays SYMBOLIC where the real kernel cannot compute the
+   value** (real `|x| > 1`, a non-real finite `x`): erf is entire and
+   non-constant, so `erf(z) = 2` has complex solutions — a capability
+   gap, the batch-8 `LambertW` off-branch precedent — and `ErfInv(2)`
+   moves from NaN to symbolic. Every infinity is a decided NaN (no
+   limit). Carrier `complex | infinity`.
+4. **`AbsArg(NaN)` is the bare `NaN`**, not `(NaN, NaN)`: `nanBehavior:
+   'propagate'`, uniform with `Abs` and `Argument`. Declared result
+   `tuple<real | +oo, real>`, with a one-literal type handler claiming
+   `tuple<+oo, nan>` for `~oo`.
+
+Decided by precedent, not asked: `Erfi` takes `complex |
+signed_infinity` (the `Erf` arrangement — `~oo` and an anonymous
+infinity are off-carrier); the polytype fix below.
+
+Three FRAMEWORK defects fixed with the batch, all found by the survey
+and its collateral runs:
+
+- **Type-variable carriers.** `resolvedNanBehaviorAt` now resolves a
+  variable carrier to its `where`-clause bound (`resolveCarrierBound`;
+  an unbounded variable is `any`, an unnamed one stays `inert`): `T:
+  number` admits `nan` → `inert`, the handler owns it. And the POLYTYPE
+  boxing route has its own admission seam: a NaN literal at a strict
+  bound (`T: complex`) is refused by the generic solver as a BOUND
+  failure (`solved.failures`, kind `'bound'`), not by the per-position
+  gate where `nanPolicyAdmitsParam` lives, so a declared `propagate`
+  policy was ignored there. The failure loop in `validateArguments`
+  (validate.ts) now applies the same carve-in (deferred, like the sibling
+  admissions); pinned on a declared strict-bound operator. ⚠️ Rule: a
+  polytype head that declares a NaN policy is admitted through the
+  bound-failure carve-in, not the per-position one — a third admission
+  seam to keep in step.
+  **`Conjugate` keeps the bound `T: number`** and declares
+  `nanBehavior: 'propagate'` explicitly. Two spellings were tried and
+  measured: a ground carrier `(complex | infinity) -> number` with an
+  echo type handler guts `type-variables-linalg.test.ts`, whose D10
+  broadcast pins use `Conjugate` as the polytype exemplar; the precise
+  bound `T: complex | infinity` unloads THIRTEEN Fungrim identities
+  (`Conjugate(Sinc(_z))`, `Conjugate(Gamma(_z))`, …) and turns every
+  matrix of `Conjugate`-inferred unknowns in `linear-algebra.test.ts`
+  into an `incompatible-type` error, because the generic solver tests a
+  bound by SUBTYPE — a `number`-typed operand is a bound violation —
+  where a ground carrier admits such an operand provisionally and leaves
+  the refutation to the runtime. ⚠️ OPEN (type-variables design, not
+  this batch): the polytype route is statically STRICTER than a ground
+  carrier for overlapping-but-wider operand types; until it gains that
+  parity, a polytype head cannot spell a precise Contract B bound.
+- **A numeric-union element type blocked the matrix shape claim**
+  (pre-existing on the main tree; exposed by the precise-bound trial
+  above, then confirmed for `Abs`-inferred symbols): `shapedListType`
+  withdrew the shape claim for ANY union of cell types, so
+  `[[a, b], [c, d]]` with `a: complex | infinity` (what `Abs(a)` infers)
+  typed as a flat `list<complex | infinity>` and `Determinant` refused
+  it. A union that is a subtype of `number` is a homogeneous numeric
+  population: the claim now stands with the union as the element type
+  (`list<complex | infinity^(2x2)>` — round-trips through the type
+  parser; the `matrix<…>` spelling stays reserved for primitive
+  elements).
+- **A declared tuple/list codomain widened PER CELL.** Phase C's
+  per-cell rule was written for broadcast lifts, but the seam applied it
+  to every collection-shaped result type, so `AbsArg(NaN)` typed
+  `tuple<+oo | nan | real, nan | real>` while the value is the bare
+  `NaN`, and `ComplexRoots(u, 2)` for `u: number` typed `list<number>`
+  (the candidacy gate saw no nan-free numeric cell and never consulted
+  the adjustment). The verdict now names its EVIDENCE:
+  `'is-nan'`/`'widen-nan'` for a scalar operand (the whole application
+  is/may be `NaN` → exactly `nan` / a top-level `| nan` arm,
+  `widenWithNan` in `common/type/utils.ts`), `'widen-nan-cells'` for
+  element evidence or any evidence under a broadcast lift (the lift test
+  mirrors the runtime gate's stand-down: broadcastable + a
+  collection-shaped operand). The candidacy gate consults the adjustment
+  whenever the codomain does not admit `nan` as a whole. The
+  `definedWhen`-false branch keeps its collection-shaped degradation (no
+  head exercises it — recorded here so the next batch that declares
+  `definedWhen` on a list codomain re-examines it).
+
+Seams, per head (each pinned): `Real`/`Imaginary`/`Argument`/`AbsArg`
+have no off-carrier non-NaN point (every infinity is admitted; `~oo`
+answers NaN from the handlers via `infinitePoint`); the aliases share the
+targets' carriers and type handlers, so the structural route agrees.
+`ComplexRoots` and `Erfi` have no `canonical` handler and are not
+fast-pathed, so BOXING rejects the off-carrier infinities (the `Erf`
+seam) and the dispatch conformance re-test refutes a later-arriving
+value. `ErfInv` has no off-carrier point.
+
+Pins swept: the audit rows (`Real`/`Imaginary`/`Argument` at `~oo` claim
+`nan`; `ErfInv(2)` symbolic, `ErfInv(+∞)` claims `nan`). The
+`type-variables-linalg` suite is unchanged (the `Conjugate` bound stays
+`number`). Family pins added to `error-model.test.ts` ("the complex
+accessors and the error-function remainder"), the generic-carrier pins
+(`Chop`/`Remainder`/`BaseForm`/`Identity` at NaN) and the strict-bound
+polytype carve-in pin included. Fungrim: all 1433 simplify identities
+load (the precise-bound trial had unloaded 13). The `Real([1, NaN])`
+list claim (`vector<real^2>`) is the standing list-broadcast-typing
+convention (elements keep the generic finite-point claim) and is
+untouched.
+
+Full-suite gate (worktree, box lock held), first run: 6 failures /
+32,175 tests, snapshot delta 0 — all six expected pin moves: five
+fresh-symbol inference pins (`Real(s)`/`Imaginary(tau)` under `assume`
+now infer `complex | infinity`, the carrier, instead of `number`; the
+tests' claim "never real" still holds and is pinned as such —
+`assume-extended`, `query-hooks`, `fact-store-phase2`) and the bignum
+suite's `ErfInv(2) = NaN` pin (ruling 3). Second run of those four
+suites: 165/165.
+
+Dual review (Codex 3 medium; Claude 1 medium + 1 nit), every finding
+applied:
+1. FIXED (Codex): the `Real`/`Imaginary` `sgn` handlers read the raw
+   machine components, so `Real(~oo)` reported `positive` (its `re`
+   projects to `+∞`) and `Imaginary(NaN)` reported `zero` (its `im`
+   projects to `0`) while both values are NaN; both answer `unsigned`
+   for a NaN operand and for `~oo` now.
+2. FIXED (Codex): the collection branch of the three part-extractor
+   type handlers claimed `real` for every indexed collection, while a
+   NaN cell now propagates through the lift (`Imaginary([1, NaN])` is
+   `[0, NaN]`, was `[0, 0]`); `collectionPartClaim` descends to the
+   element type and claims `number` when it admits `nan`.
+3. FIXED (Codex, and one rank deeper than the finding): `AbsArg([1,
+   NaN])` — the per-cell widener descended into the tuple's fields, so
+   the lifted element type never admitted the bare-NaN cell. Two layers:
+   `widenNumericCellsWithNan` widens a tuple cell as a whole as well
+   (`tuple<…> | nan`, sound under both readings of a tuple under
+   broadcast); and the BROADCAST LIFT itself unwrapped a declared tuple
+   result with `broadcastElementType`, typing every tuple-valued
+   broadcast head as a list of NUMBERS — `AbsArg([1, 2])` was
+   `list<+oo | real^2>` and `NumeratorDenominator([1/2, 3/4])` was
+   `vector<2>` for values that are lists of pairs (pre-existing,
+   unsound). The lift keeps a tuple result — or a union with a tuple
+   branch — as the cell (`cellResult`, boxed-function.ts):
+   `list<tuple<+oo | real, real>^2>` and
+   `list<nothing | tuple<number, number>^2>` now.
+4. FIXED (Claude): the validate.ts carve-in comment cited `Conjugate`
+   under a `complex | infinity` bound, which is not its declaration; the
+   comment now names the pinned strict-bound case.
+5. FIXED (Claude, nit): an unwrapped JSDoc line in
+   `types-definitions.ts`.
+
+Final full-suite gate (main tree, post-review, box lock held): 647/647
+suites, 31,316 tests, snapshot delta 0.
+
 ### Phase F — signature flips, operator-by-operator
 
 Each flip (e.g. `Heaviside: (real) -> rational<0..1>`, `total`) is its

@@ -129,6 +129,7 @@ import {
   widen,
   widenCellsWithMarker,
   widenNumericCellsWithNan,
+  widenWithNan,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import type { BigDecimal } from '../../big-decimal/index.js';
@@ -5888,13 +5889,32 @@ function type(expr: BoxedFunction): Type {
       // resolved arm's instantiated result.
       const declaresPartiality =
         def.definedWhen !== undefined || def.partiality === 'may-marker';
-      if (!declaresPartiality && !typeHasNanFreeNumericCell(t)) return t;
+      // A codomain that already admits `nan` as a whole and in every
+      // numeric cell (bare `number`) has nothing to gain. A non-numeric
+      // codomain (`tuple<real, real>`, `list<number>`) does NOT admit the
+      // bare `NaN` the runtime gate answers for a scalar NaN operand, so
+      // it consults the adjustment as well.
+      if (
+        !declaresPartiality &&
+        !typeHasNanFreeNumericCell(t) &&
+        isSubtype('nan', t)
+      )
+        return t;
       // `resolved` is the arm this call resolved to (or the plain
       // signature): the NaN-evidence derivation inside must read the SAME
       // carriers the runtime gates read, or an overload's numeric arm
       // propagates NaN at runtime while the derived type stays NaN-free.
       const adjust = def.contractBResultAdjustment(expr.ops, resolved);
       if (adjust === 'none') return t;
+      // A scalar NaN operand in a `propagate` slot makes the VALUE of the
+      // whole application `NaN`, whatever the codomain's shape: the NaN
+      // gate answers the bare marker before the handler runs (`AbsArg(NaN)`
+      // is `NaN`, not `(NaN, NaN)`). So the proven case is exactly `nan`,
+      // and the may-carry case is a top-level `| nan` arm — never a
+      // per-cell widening, which is reserved for a broadcast lift, where
+      // the NaN lands in individual cells (`'widen-nan-cells'`).
+      if (adjust === 'is-nan') return 'nan';
+      if (adjust === 'widen-nan') return widenWithNan(t);
       if (adjust === 'is-marker') {
         // The value IS the codomain marker (`docs/ERROR-MODEL.md` §2 rule
         // 4): `nan` for a numeric codomain, `missing` for a settled
@@ -5914,6 +5934,8 @@ function type(expr: BoxedFunction): Type {
         return codomainMarkerType(t);
       }
       if (adjust === 'widen-marker') return widenCellsWithMarker(t);
+      // `'widen-nan-cells'`: the NaN evidence rides in a broadcast operand's
+      // elements, so the lifted result widens per cell (`list<real | nan>`).
       return widenNumericCellsWithNan(t);
     };
     const maybeAbsorb = (t: Type): Type =>
@@ -6184,6 +6206,23 @@ function type(expr: BoxedFunction): Type {
         // `scalar | list<E>` union (a naive `widen(…)` over a collection
         // operand); `broadcastElementType` unwraps both so the wrapper does
         // not nest a list or a union inside the broadcast result.
+        // The per-cell result the lift re-shapes. `broadcastElementType`
+        // unwraps ONE rank — the handler-leaked `list<E>` and the
+        // `scalar | list<E>` union above — but a declared TUPLE result is
+        // not a leaked rank: it is the structured value each cell holds
+        // (`AbsArg([1, 2])` is `[(1, 0), (2, 0)]`,
+        // `NumeratorDenominator([1/2, 3/4])` is `[(1, 2), (3, 4)]`), and
+        // unwrapping it typed those lists as lists of NUMBERS. A tuple
+        // result — or a union with a tuple branch, such as
+        // `NumeratorDenominator`'s `tuple<number, number> | nothing` —
+        // stays the cell.
+        const hasTupleBranch = (t: Type): boolean =>
+          typeof t !== 'string' &&
+          (t.kind === 'tuple' ||
+            (t.kind === 'union' && t.types.some((m) => hasTupleBranch(m))));
+        const cellResult = hasTupleBranch(sigResult)
+          ? sigResult
+          : broadcastElementType(sigResult);
         const handlerOwnsCollectionTyping =
           def.broadcastExemptions.includes('collection-result');
         const deferToHandler =
@@ -6216,7 +6255,7 @@ function type(expr: BoxedFunction): Type {
           // collection sibling (`Add([1, 2], u)`) keeps the `list<E>` typing.
           const loneUnionResult = loneUnionBroadcastResultType(
             broadcastingOps.map((x) => x.type.type),
-            broadcastElementType(sigResult)
+            cellResult
           );
           if (loneUnionResult !== undefined)
             return maybeAbsorb(loneUnionResult);
@@ -6272,7 +6311,7 @@ function type(expr: BoxedFunction): Type {
           return maybeAbsorb(
             broadcastShapedResultType(
               broadcastingOps.map((x) => x.type.type),
-              broadcastElementType(sigResult)
+              cellResult
             )
           );
         }
@@ -6295,7 +6334,7 @@ function type(expr: BoxedFunction): Type {
         )
           return maybeAbsorb({
             kind: 'broadcastable',
-            elements: broadcastElementType(sigResult),
+            elements: cellResult,
           });
       }
     }

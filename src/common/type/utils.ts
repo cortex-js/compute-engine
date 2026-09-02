@@ -924,6 +924,22 @@ export function codomainMarkerType(t: Readonly<Type>): Type {
   return 'missing';
 }
 
+/**
+ * Widen `t` as a WHOLE with a `| nan` arm — the Contract B adjustment for
+ * a scalar operand that may carry `NaN` in a `propagate` slot: the NaN
+ * gate answers the bare marker for the whole application, whatever the
+ * codomain's shape, so the honest type is `tuple<real, real> | nan`, never
+ * `tuple<real | nan, real | nan>` (which is the per-cell widening of a
+ * broadcast lift, {@link widenNumericCellsWithNan}). A type that already
+ * admits `nan` is left alone; a union is spliced flat.
+ */
+export function widenWithNan(t: Readonly<Type>): Type {
+  if (isSubtype('nan', t)) return t as Type;
+  if (typeof t !== 'string' && t.kind === 'union')
+    return { kind: 'union', types: [...t.types, 'nan'] };
+  return { kind: 'union', types: [t as Type, 'nan'] };
+}
+
 export function widenNumericCellsWithNan(t: Readonly<Type>): Type {
   if (isSubtype(t, 'number')) {
     if (isSubtype('nan', t)) return t as Type;
@@ -948,13 +964,19 @@ export function widenNumericCellsWithNan(t: Readonly<Type>): Type {
     case 'broadcastable':
       return { ...t, elements: widenNumericCellsWithNan(t.elements) };
     case 'tuple':
-      return {
+      // A tuple reached through a broadcast lift is the per-cell RESULT
+      // of a structured head (`AbsArg([1, NaN])` is `[(1, 0), NaN]`): the
+      // NaN cell replaces the whole tuple, so the tuple gains a top-level
+      // `| nan` arm. Its fields are widened as well, for the reading in
+      // which the tuple is itself the broadcast container (a point whose
+      // components are the cells) — sound under either reading.
+      return widenWithNan({
         ...t,
         elements: t.elements.map((e) => ({
           ...e,
           type: widenNumericCellsWithNan(e.type),
         })),
-      };
+      });
     default:
       return t as Type;
   }

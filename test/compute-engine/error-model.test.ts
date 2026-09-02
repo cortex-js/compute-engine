@@ -1743,6 +1743,204 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['PolyLog', 'NaN', ['Rational', 1, 2]], isNaNv); // used to stay inert
   });
 
+  test('the complex accessors and the error-function remainder declare their domains', () => {
+    // Signature flips of 2026-09-02 (batch 9), with four rulings taken
+    // first: (1) the part extractors read the COMPONENTS of an anonymous
+    // infinity (`∞ + i`): `Re = +∞`, `Im = 1`, `Arg = 0`, `Conjugate =
+    // ∞ − i`; (2) `ComplexRoots` takes a FINITE radicand — an infinite one
+    // is a boxing error (it used to answer `[NaN, ~oo]`) — and a positive
+    // integer root count, decided by `requires`; (3) `ErfInv` stays
+    // SYMBOLIC where the real kernel cannot compute the value (real
+    // |x| > 1, a non-real finite x) and answers NaN at every infinity;
+    // (4) `AbsArg(NaN)` is the bare marker `NaN`, not `(NaN, NaN)`.
+    // Every pin below holds on evaluate() AND N().
+    const ce2 = new ComputeEngine();
+    const POS = 'PositiveInfinity';
+    const NEG = 'NegativeInfinity';
+    const COO = 'ComplexInfinity';
+    const ANON = ['Complex', POS, 1];
+    const ANON_NEG = ['Complex', NEG, 2];
+    const both = (expr: any, check: (v: any) => boolean) => {
+      expect(check(ce2.box(expr).evaluate())).toBe(true);
+      expect(check(ce2.box(expr).N())).toBe(true);
+    };
+    const isNaNv = (v: any) => isNaNValue(ce2, v);
+    const is = (n: any) => (v: any) => v.isSame(n);
+    const isPos = is(ce2.PositiveInfinity);
+    const isNeg = is(ce2.NegativeInfinity);
+    const isCoo = is(ce2.ComplexInfinity);
+    // `π` exactly under evaluate(), the float under N().
+    const isPi = (v: any) =>
+      v.isSame(ce2.Pi) || Math.abs(v.re - Math.PI) < 1e-12;
+    const symbolic = (head: string) => (v: any) => v.operator === head;
+    const boxError = (expr: any) => {
+      const e = ce2.box(expr);
+      expect(e.isValid).toBe(false);
+      expect(e.evaluate().operator).toBe('Error');
+    };
+
+    // `~oo` has no direction, so no real part, no imaginary part and no
+    // phase angle: NaN on all three (Real and Imaginary used to answer +∞).
+    // The signed infinities keep their axis; an anonymous infinity reads
+    // its components (ruling 1). NaN propagates (Imaginary(NaN) used to
+    // answer 0).
+    for (const h of ['Real', 'Imaginary', 'Argument']) {
+      both([h, COO], isNaNv);
+      both([h, 'NaN'], isNaNv);
+      expect(ce2.box([h, COO]).type.toString()).toBe('nan');
+    }
+    both(['Real', POS], isPos);
+    both(['Real', NEG], isNeg);
+    both(['Real', ANON], isPos);
+    both(['Real', ANON_NEG], isNeg);
+    both(['Imaginary', POS], is(0));
+    both(['Imaginary', ANON], is(1));
+    both(['Imaginary', ANON_NEG], is(2));
+    both(['Argument', POS], is(0));
+    both(['Argument', NEG], isPi);
+    both(['Argument', ANON], is(0));
+    both(['Argument', ANON_NEG], isPi);
+    // The aliases follow their targets on every route.
+    both(['Re', COO], isNaNv);
+    both(['Im', ANON], is(1));
+    both(['Arg', ANON_NEG], isPi);
+
+    // Conjugate: a polytype head (`(T) -> T where T: number`), the first to
+    // declare `nanBehavior` explicitly (it used to answer an
+    // `unexpected-argument` error for NaN, from the derived `reject` of a
+    // bare type variable). Its bound stays `number` on purpose — see the
+    // definition — so a `number`-typed operand is admitted as before.
+    both(['Conjugate', 'NaN'], isNaNv);
+    expect(ce2.box(['Conjugate', 'NaN']).type.toString()).toBe('nan');
+    both(['Conjugate', POS], isPos);
+    both(['Conjugate', NEG], isNeg);
+    both(['Conjugate', COO], isCoo);
+    const conjAnon = ce2.box(['Conjugate', ANON]).evaluate();
+    expect(conjAnon.re).toBe(Infinity);
+    expect(conjAnon.im).toBe(-1);
+    expect(ce2.box(['Conjugate', ['Sinc', 'z9']]).isValid).toBe(true);
+    // The NaN admission reaches the POLYTYPE boxing route too: a NaN
+    // literal at a bound the generic solver refuses (`nan` is not below
+    // `complex`) is admitted when the declared policy is `propagate`, and
+    // the gate answers NaN. Pinned on a declared operator, since no
+    // library head spells a strict bound with a NaN policy yet.
+    ce2.declare('strictConj9', {
+      signature: '(T) -> T where T: complex',
+      nanBehavior: 'propagate',
+      evaluate: ([x]) => x,
+    } as any);
+    expect(ce2.box(['strictConj9', 'NaN']).isValid).toBe(true);
+    both(['strictConj9', 'NaN'], isNaNv);
+    expect(ce2.box(['strictConj9', ['Complex', 1, 2]]).evaluate().im).toBe(2);
+    expect(ce2.box(['strictConj9', POS]).isValid).toBe(false);
+
+    // AbsArg: the pair follows Abs and Argument; NaN is the bare marker
+    // (ruling 4), typed `nan`; the `~oo` pair is `(+∞, NaN)`, claimed
+    // exactly; a may-NaN scalar operand widens the TUPLE codomain with a
+    // top-level `| nan` arm, never per cell.
+    both(['AbsArg', 'NaN'], isNaNv);
+    expect(ce2.box(['AbsArg', 'NaN']).type.toString()).toBe('nan');
+    const absArgCoo = ce2.box(['AbsArg', COO]).evaluate();
+    expect(absArgCoo.operator).toBe('Tuple');
+    expect(absArgCoo.op1.isSame(ce2.PositiveInfinity)).toBe(true);
+    expect(isNaNValue(ce2, absArgCoo.op2)).toBe(true);
+    expect(ce2.box(['AbsArg', COO]).type.toString()).toBe(
+      'tuple<signed_infinity, nan>'
+    );
+    ce2.declare('u9', 'number');
+    expect(ce2.box(['AbsArg', 'u9']).type.matches('nan')).toBe(false);
+    expect(
+      ce2.box(['AbsArg', 'u9']).type.matches('tuple<real | +oo, real> | nan')
+    ).toBe(true);
+    expect(
+      ce2.box(['AbsArg', 'u9']).type.matches('tuple<number, number>')
+    ).toBe(false);
+    // Review catches: the sign handlers follow the NaN values (`Real(~oo)`
+    // read `re = +∞` as `positive`; `Imaginary(NaN)` read `im = 0` as
+    // `zero`); a NaN cell propagates through a broadcast and the lifted
+    // claim admits it (`Imaginary([1, NaN])` was typed `vector<real^2>`);
+    // and a tuple-valued head broadcast over a list keeps the TUPLE in
+    // its type (the lift unwrapped it to a list of numbers, for
+    // `NumeratorDenominator` too).
+    expect(ce2.box(['Real', COO]).sgn).toBe('unsigned');
+    expect(ce2.box(['Imaginary', COO]).sgn).toBe('unsigned');
+    expect(ce2.box(['Imaginary', 'NaN']).sgn).toBe('unsigned');
+    expect(ce2.box(['Real', 'NaN']).sgn).toBe('unsigned');
+    const imList = ce2.box(['Imaginary', ['List', 1, 'NaN']]);
+    expect(imList.evaluate().toString()).toBe('[0,NaN]');
+    expect(imList.type.matches('list<number>')).toBe(true);
+    expect(imList.type.matches('list<real>')).toBe(false);
+    expect(ce2.box(['Real', ['List', 2, 3]]).type.toString()).toBe(
+      'vector<real^2>'
+    );
+    expect(ce2.box(['AbsArg', ['List', 1, 2]]).type.toString()).toBe(
+      'list<tuple<+oo | real, real>^2>'
+    );
+    const absArgList = ce2.box(['AbsArg', ['List', 1, 'NaN']]);
+    expect(absArgList.evaluate().toString()).toBe('[(1, 0),NaN]');
+    // The cell admits the bare NaN (and, for the reading in which the tuple
+    // is the broadcast container, so do its fields).
+    expect(absArgList.type.matches('list<tuple<number, number> | nan>')).toBe(
+      true
+    );
+    expect(absArgList.type.matches('list<tuple<number, number>>')).toBe(false);
+    expect(
+      ce2
+        .box(['NumeratorDenominator', ['List', ['Rational', 1, 2], 3]])
+        .type.matches('list<tuple<number, number> | nothing>')
+    ).toBe(true);
+
+    // ComplexRoots (ruling 2): NaN radicand propagates to the bare marker
+    // (it used to stay inert); an infinite radicand is a boxing error; a
+    // NaN or non-positive root count is a contract violation.
+    both(['ComplexRoots', 'NaN', 2], isNaNv);
+    expect(ce2.box(['ComplexRoots', 'NaN', 2]).type.toString()).toBe('nan');
+    for (const z of [POS, NEG, COO, ANON]) boxError(['ComplexRoots', z, 2]);
+    boxError(['ComplexRoots', 8, 'NaN']);
+    expect(ce2.box(['ComplexRoots', 8, 0]).evaluate().operator).toBe('Error');
+    expect(ce2.box(['ComplexRoots', 8, -1]).evaluate().operator).toBe('Error');
+    expect(ce2.box(['ComplexRoots', 8, 'n9']).evaluate().operator).toBe(
+      'ComplexRoots'
+    );
+    expect(ce2.box(['ComplexRoots', 8, 3]).evaluate().nops).toBe(3);
+
+    // Erfi: bounded on the imaginary axis (`erfi(iy) = i·erf(y)`), so no
+    // limit at complex infinity — `~oo` and an anonymous infinity are
+    // off-carrier (the `Erf` arrangement; `Erfi(~oo)` used to answer
+    // `~oo`); the signed infinities keep their values; NaN propagates.
+    both(['Erfi', POS], isPos);
+    both(['Erfi', NEG], isNeg);
+    both(['Erfi', 'NaN'], isNaNv);
+    expect(ce2.box(['Erfi', 'NaN']).type.toString()).toBe('nan');
+    boxError(['Erfi', COO]);
+    boxError(['Erfi', ANON]);
+
+    // ErfInv (ruling 3): NaN at every infinity — `~oo`, an anonymous
+    // infinity and a non-real finite argument used to stay inert; the real
+    // arguments outside [−1, 1] used to answer NaN and stay symbolic now.
+    for (const x of [POS, NEG, COO, ANON]) both(['ErfInv', x], isNaNv);
+    both(['ErfInv', 'NaN'], isNaNv);
+    both(['ErfInv', 2], symbolic('ErfInv'));
+    both(['ErfInv', -2], symbolic('ErfInv'));
+    both(['ErfInv', ['Complex', 1, 2]], symbolic('ErfInv'));
+    both(['ErfInv', 1], isPos);
+    both(['ErfInv', -1], isNeg);
+    both(['ErfInv', 0], is(0));
+
+    // The type-variable carriers: a polytype parameter (`(T) -> T where
+    // T: number`) used to derive `reject` for NaN because a bare variable
+    // is not a subtype of anything — `Chop(NaN)`, `Remainder(NaN, 2)`,
+    // `BaseForm(NaN)` and `Identity(NaN)` all answered an
+    // `unexpected-argument` error. The bound is the carrier now: `T:
+    // number` admits NaN, so these heads own it (inert policy) and answer
+    // NaN from their own arms.
+    both(['Chop', 'NaN'], isNaNv);
+    both(['Remainder', 'NaN', 2], isNaNv);
+    both(['Remainder', 7, 'NaN'], isNaNv);
+    both(['BaseForm', 'NaN'], isNaNv);
+    both(['Identity', 'NaN'], isNaNv);
+  });
+
   test('compile(Heaviside)(NaN) agrees with the interpreter now', () => {
     // The compiled lane was fixed first (2026-08-28) under ratified Contract
     // B's derived `propagate` default, which left a route divergence: the

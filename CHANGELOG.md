@@ -280,6 +280,70 @@
     declarations): they decline, and the evaluate route reports the
     error, like the other declared-domain operators.
 
+- **The complex part extractors, `Conjugate`, `AbsArg`, `ComplexRoots`,
+  `Erfi` and `ErfInv` now declare their mathematical domains**, and a
+  type-variable parameter stops rejecting `NaN`:
+
+  - `Real`, `Imaginary`, `Argument` (with the aliases `Re`, `Im`, `Arg`)
+    and `AbsArg` take the carrier `complex | infinity`; `Conjugate` keeps
+    its generic signature and declares the `NaN` policy explicitly. The
+    unsigned complex infinity `~oo` has a modulus but no direction, so it
+    has no real part, no imaginary part and no phase angle: `Real(~oo)`,
+    `Imaginary(~oo)` and `Argument(~oo)` answer `NaN` (`Real` and
+    `Imaginary` used to answer `+oo`). The signed infinities keep their
+    axis (`Real(-oo) = -oo`, `Imaginary(±oo) = 0`, `Argument(-oo) = π`),
+    and a complex literal with an infinite real component reads its
+    components (`Real(∞ + i) = +oo`, `Imaginary(∞ + i) = 1`,
+    `Argument(-∞ + 2i) = π`, `Conjugate(∞ + i) = ∞ − i`). A `NaN` operand
+    propagates: `Imaginary(NaN)` is `NaN` (it answered `0`),
+    `Conjugate(NaN)` is `NaN` (it answered an `unexpected-argument`
+    error), and `AbsArg(NaN)` is the bare `NaN` (it answered the pair
+    `(NaN, NaN)`).
+  - `ComplexRoots(z, n)` takes a finite complex radicand and an integer
+    root count: an infinite radicand is an `incompatible-type` error
+    (`ComplexRoots(+oo, 2)` answered `[NaN, ~oo]`), a `NaN` radicand
+    propagates (it stayed inert), and a root count below 1 fails the
+    operator's precondition — an evaluation error (it stayed inert).
+  - `Erfi` takes `complex | signed_infinity`, like `Erf`: `Erfi(±oo) =
+    ±oo` as before, while `~oo` and a complex literal with an infinite
+    component are `incompatible-type` errors now. Erfi is bounded on the
+    imaginary axis (`erfi(iy) = i·erf(y)`), so it has no limit at complex
+    infinity (`Erfi(~oo)` answered `~oo`).
+  - `ErfInv` takes `complex | infinity`. Every infinity answers `NaN`
+    (`ErfInv(~oo)` and `ErfInv(∞ + i)` stayed inert). Where the value
+    exists but the engine's real kernel cannot compute it — a real
+    argument outside `[-1, 1]`, or a non-real finite argument — the
+    application stays symbolic on `evaluate()` and `.N()` alike:
+    `ErfInv(2)` used to answer `NaN`.
+  - **A type-variable parameter no longer rejects `NaN`.** The NaN policy
+    derived from a signature such as `(T) -> T where T: number` compared
+    the bare variable `T` against the numeric carriers, and every such
+    head answered an `unexpected-argument` error for a `NaN` operand:
+    `Chop(NaN)`, `Remainder(NaN, 2)`, `BaseForm(NaN)` and `Identity(NaN)`
+    answer `NaN` now. The variable's bound is its carrier.
+  - **A declared tuple or list codomain takes its `| nan` arm as a
+    whole.** For a scalar operand that may be `NaN`, the derived
+    application type widened such a codomain per cell
+    (`tuple<real | nan, real | nan>`) while the value is the bare `NaN`.
+    `AbsArg(u)` for `u: number` is typed `tuple<real | +oo, real> | nan`
+    now, and a proven `NaN` operand types exactly `nan`. Per-cell widening
+    remains the rule for a broadcast over a collection operand, where the
+    `NaN` lands in the cells.
+  - **A matrix of unknowns typed with a numeric union keeps its shape.**
+    A symbol used under a declared-domain operator infers that operator's
+    carrier (`Abs(a)` types `a` as `complex | infinity`), and a literal
+    list of such symbols lost its shape claim — `Determinant([[a, b],
+    [c, d]])` answered an `incompatible-type` error instead of
+    `a·d − b·c`. A union of numeric types is a homogeneous numeric
+    population and the shape claim stands.
+  - **A tuple-valued operator broadcast over a list keeps the tuple in
+    its type.** `AbsArg([1, 2])` evaluates to `[(1, 0), (2, 0)]` but was
+    typed `list<+oo | real^2>`, and `NumeratorDenominator([1/2, 3/4])`
+    was typed `vector<2>` for a list of pairs: the broadcast lift
+    unwrapped the declared tuple result as if it were a leaked list
+    rank. Both are typed as lists of tuples now
+    (`list<tuple<+oo | real, real>^2>`).
+
 - **The Γ family and the special functions now declare their
   mathematical domains**: `Gamma` (both forms), `GammaLn`, `Factorial`,
   `Factorial2`, `Digamma`, `Trigamma`, `PolyGamma`, `Zeta`, `Beta`,

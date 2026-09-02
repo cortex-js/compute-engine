@@ -223,36 +223,54 @@ describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
 });
 
 describe('TYPE AUDIT: complex part extractors', () => {
+  // `~oo` has no real part, no imaginary part and no phase angle: the
+  // extractors answer NaN there and claim exactly `nan` (they used to
+  // answer `+∞`, `+∞` and NaN under the top type `number`). An anonymous
+  // infinity (`∞ + i`) reads its components.
   it('Real follows operand finiteness', () => {
     expect(typeOf(['Real', ['Complex', 2, 1]])).toBe('real');
     expect(typeOf(['Real', 'PositiveInfinity'])).toBe('signed_infinity');
-    expect(typeOf(['Real', 'ComplexInfinity'])).toBe('number');
+    expect(typeOf(['Real', 'ComplexInfinity'])).toBe('nan');
+    expect(typeOf(['Real', ['Complex', 'PositiveInfinity', 1]])).toBe(
+      'signed_infinity'
+    );
     expectSound(['Real', 'PositiveInfinity']);
+    expectSound(['Real', 'ComplexInfinity']);
   });
 
   it('Imaginary: finite for finite numbers and for real ±∞ (Im = 0)', () => {
     expect(typeOf(['Imaginary', ['Complex', 2, 1]])).toBe('real');
     expect(typeOf(['Imaginary', 'PositiveInfinity'])).toBe('real');
-    expect(typeOf(['Imaginary', 'ComplexInfinity'])).toBe('number');
+    expect(typeOf(['Imaginary', 'ComplexInfinity'])).toBe('nan');
+    expect(typeOf(['Imaginary', ['Complex', 'PositiveInfinity', 1]])).toBe(
+      'real'
+    );
     expect(ce.box(['Imaginary', 'PositiveInfinity']).N().re).toBe(0);
+    expectSound(['Imaginary', 'ComplexInfinity']);
   });
 
   it('Argument: finite for finite numbers and real ±∞; NaN for ~oo', () => {
     expect(typeOf(['Argument', -2])).toBe('real');
     expect(typeOf(['Argument', 'NegativeInfinity'])).toBe('real');
-    expect(typeOf(['Argument', 'ComplexInfinity'])).toBe('number');
+    expect(typeOf(['Argument', 'ComplexInfinity'])).toBe('nan');
     expect(ce.box(['Argument', 'ComplexInfinity']).N().isNaN).toBe(true);
+    expectSound(['Argument', 'ComplexInfinity']);
   });
 });
 
 describe('TYPE AUDIT: Erf family and elliptic integrals', () => {
-  it('ErfInv: real inside (−1, 1), ±∞ poles at ±1, NaN outside', () => {
+  it('ErfInv: real inside (−1, 1), ±∞ poles at ±1, symbolic outside', () => {
     expect(typeOf(['ErfInv', 0.5])).toBe('real');
     expect(typeOf(['ErfInv', 1])).toBe('signed_infinity');
     expect(typeOf(['ErfInv', -1])).toBe('signed_infinity');
+    // Outside [−1, 1] the value exists (erf is entire) but the real kernel
+    // cannot compute it: the application stays symbolic, under N() too
+    // (it used to answer NaN).
     expect(typeOf(['ErfInv', 2])).toBe('number');
-    expect(typeOf(['ErfInv', 'PositiveInfinity'])).toBe('number');
-    expect(ce.box(['ErfInv', 2]).N().isNaN).toBe(true);
+    expect(ce.box(['ErfInv', 2]).N().operator).toBe('ErfInv');
+    // No limit at any infinity: a decided NaN, claimed exactly.
+    expect(typeOf(['ErfInv', 'PositiveInfinity'])).toBe('nan');
+    expect(ce.box(['ErfInv', 'PositiveInfinity']).N().isNaN).toBe(true);
     const erfInvPole = ce.box(['ErfInv', 1]).evaluate();
     expect(erfInvPole.isInfinity).toBe(true);
     expect(erfInvPole.isPositive).toBe(true);

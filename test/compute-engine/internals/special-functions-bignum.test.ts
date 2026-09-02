@@ -126,7 +126,7 @@ describe('B23: exact special values still fold in evaluate()', () => {
     expect(ev(['Erfc', 'NegativeInfinity']).isSame(2)).toBe(true);
   });
 
-  test('ErfInv: 0 → 0, ±1 → ±∞, outside [−1,1] → NaN', () => {
+  test('ErfInv: 0 → 0, ±1 → ±∞, outside [−1,1] symbolic', () => {
     expect(ev(['ErfInv', 0]).isSame(0)).toBe(true);
     const plus = ev(['ErfInv', 1]);
     expect(plus.isInfinity).toBe(true);
@@ -134,7 +134,9 @@ describe('B23: exact special values still fold in evaluate()', () => {
     const minus = ev(['ErfInv', -1]);
     expect(minus.isInfinity).toBe(true);
     expect(minus.isNegative).toBe(true);
-    expect(ev(['ErfInv', 2]).isNaN).toBe(true);
+    // Outside [−1, 1] the value exists (erf is entire) but the real kernel
+    // cannot compute it: the application stays symbolic.
+    expect(ev(['ErfInv', 2]).operator).toBe('ErfInv');
   });
 
   test('Sinc: 0 → 1, ±∞ → 0', () => {

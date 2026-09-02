@@ -1,4 +1,5 @@
 import type { Type, ListType } from '../../common/type/types.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import {
   isAtomicValueType,
   stripNumericRanges,
@@ -64,7 +65,19 @@ export function shapedListType(ops: ReadonlyArray<Expression>): Type | null {
   // element type: return it unshaped rather than `null`, so the caller's raw
   // fallback — where `widen(unknown, color)` would absorb the unknown and
   // unsoundly claim `list<color>` for `[x, Rgb]` — never applies here.
-  if (typeof widened !== 'string' && widened.kind === 'union')
+  //
+  // A NUMERIC union is not heterogeneous: `complex | infinity` and
+  // `real | signed_infinity` are the carriers the declared-domain operators
+  // infer into a fresh symbol (`Abs(a)` types `a` as `complex | infinity`),
+  // and a matrix of such symbols is as much a matrix as one of `number`
+  // symbols — `Determinant([[a, b], [c, d]])` went inert with an
+  // `incompatible-type` error once `a` had been used under `Abs`. The
+  // shape claim stands, with the union as the honest element type.
+  if (
+    typeof widened !== 'string' &&
+    widened.kind === 'union' &&
+    !isSubtype(widened, 'number')
+  )
     return { kind: 'list', elements: widened };
 
   const result: ListType = {

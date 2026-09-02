@@ -2574,6 +2574,26 @@ export function validateArguments(
       const idx = f.index ?? 0;
       if (idx >= result.length) continue;
       if (!result[idx].isValid) continue;
+      // Contract B NaN admission on the polytype route — the twin of the
+      // per-position carve-in (`nanPolicyAdmitsParam`): a proven-`NaN`
+      // operand at a `propagate` or `handle` slot is admitted although its
+      // type `nan` violates a declared bound that excludes it (a polytype
+      // `(T) -> T where T: complex` with `nanBehavior: 'propagate'`) — the
+      // runtime gate owns it. No library head spells such a bound yet
+      // (`Conjugate` keeps `T: number`, which admits `nan` and never fails
+      // here); the seam is pinned on a declared operator in
+      // `test/compute-engine/error-model.test.ts`.
+      // A bound violation is the only failure a NaN literal can raise here
+      // (it demands no contravariant instantiation). Deferred like the
+      // sibling admissions, so the final inference pass does not narrow a
+      // `nan`-typed symbol to the bound.
+      if (
+        f.kind === 'bound' &&
+        nanPolicyAdmitsParam(ops[idx], idx, internals?.nanPolicyAt)
+      ) {
+        deferredIdx.add(idx);
+        continue;
+      }
       // A `where T is P` constraint (protocols design P19) is not a subtype
       // violation, so it does not report as one: the offending operand carries
       // `protocol-constraint-unsatisfied`, naming the protocol and the type

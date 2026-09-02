@@ -21,6 +21,7 @@ import {
 } from '../numerics/special-functions.js';
 import { erfComplex, erfiComplex } from '../numerics/numeric-complex.js';
 import { apply, shouldNumericize } from '../boxed-expression/apply.js';
+import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import {
   isFunction,
   isNumber,
@@ -379,12 +380,24 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     ErfInv: {
       description: 'Inverse of the error function',
       complexity: 7500,
-      signature: '(number) -> number',
-      // Real domain (−1, 1) → finite real; ±1 are the ±∞ poles; outside the
-      // domain (or non-real / ±∞ argument) the evaluate handler yields NaN,
-      // so nothing narrower than `number` is sound there.
+      // The engine has a REAL kernel only. On the real segment (−1, 1) the
+      // value is a finite real, ±1 are the ±∞ poles, and everywhere else on
+      // the carrier the application has a value the engine cannot compute
+      // — erf is entire and non-constant, so `erf(z) = 2` has complex
+      // solutions — and stays SYMBOLIC (a capability gap, the `LambertW`
+      // off-branch precedent; ruled 2026-09-02, batch 9 of
+      // `docs/plans/2026-08-30-error-model-implementation.md`). Every
+      // infinity is decided: erfinv has no limit there, so `±∞`, `~oo` and
+      // an anonymous infinity answer NaN. `NaN` propagates (explicit: the
+      // carrier is not below `complex`).
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       type: ([x]) => {
-        if (!x || provablyNonFiniteNumber(x)) return 'number';
+        // A proven-NaN operand declines, so the framework's proven-NaN arm
+        // answers; an infinite literal is a decided NaN.
+        if (!x || x.isNaN === true) return undefined;
+        if (infinitePoint(x) !== undefined) return 'nan';
+        if (provablyNonFiniteNumber(x)) return 'number';
         if (x.isExtendedReal !== true) return 'number';
         // A literal's handler-visible value classifies exactly — and it is
         // never a rounded double, so it cannot put `1 − 10⁻³⁰` at a pole
@@ -408,12 +421,19 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
+        if (!isNumber(x)) return undefined;
+        if (x.isNaN === true) return ce.NaN;
+        // No limit at any infinity: NaN on both routes (the real kernel used
+        // to answer NaN for ±∞ and the others stayed inert).
+        if (infinitePoint(x) !== undefined) return ce.NaN;
+        // A non-real argument, or a real one outside [−1, 1], has a value
+        // the real kernel cannot compute: stay symbolic, under N() too.
+        if (x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation
         if (x.isSame(0)) return ce.Zero;
         if (x.isSame(1)) return ce.PositiveInfinity;
         if (x.isSame(-1)) return ce.NegativeInfinity;
-        if (x.re < -1 || x.re > 1) return ce.NaN; // outside the domain
+        if (x.re < -1 || x.re > 1) return undefined;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         return apply(
           x,
@@ -426,16 +446,26 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Erfi: {
       description: 'Imaginary error function: -i·Erf(i·x)',
       complexity: 7500,
-      signature: '(number) -> number',
+      // The carrier is every point where erfi has a value: the finite
+      // complex numbers (erfi is entire) and the signed infinities
+      // (`Erfi(±∞) = ±∞`). `~oo` is off-carrier — an `incompatible-type`
+      // error, the `Erf` arrangement: erfi is bounded on the imaginary axis
+      // (`erfi(iy) = i·erf(y)`, so `|erfi(iy)| ≤ 1`) while it grows without
+      // bound on the real axis, so it has no limit at complex infinity (it
+      // used to answer `~oo`, a value erfi does not have). `NaN` propagates
+      // (explicit: the carrier is not below `complex`).
+      signature: '(complex | signed_infinity) -> complex | signed_infinity',
+      nanBehavior: 'propagate',
       // Erfi is entire and odd: a finite real → finite real, but Erfi(±∞) =
       // ±∞, so an argument only known to be on the EXTENDED real line needs
       // the extended real line as its claim — the bare name `real` denotes the
       // finite reals and would exclude ±∞. A finite complex argument gives a
       // finite complex value. Unproven realness → `number` (Erfi is unbounded,
-      // so no finite hedge is available).
+      // so no finite hedge is available). A proven-NaN operand declines, so
+      // the framework's proven-NaN arm answers the sharp `nan`.
       type: (ops) => {
         const x = ops[0];
-        if (!x || x.isNaN) return 'number';
+        if (!x || x.isNaN) return undefined;
         if (x.isExtendedReal === false)
           return x.isFinite === true ? 'complex' : 'number';
         if (x.isExtendedReal === true)

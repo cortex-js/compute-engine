@@ -2444,9 +2444,13 @@ export interface BoxedOperatorDefinition
    * settled non-numeric one); `'widen-marker'` when a DECLARED partiality
    * is undischarged (`definedWhen` undecided, or an explicit
    * `may-marker`) — every cell of the result gains its marker arm;
-   * `'widen-nan'` when only the NaN evidence fires (a `propagate` slot's
-   * argument may be `NaN`) — numeric cells gain `| nan`; `'none'`
-   * otherwise. The omitted `may-marker` default contributes no arm (see
+   * `'is-nan'` when a scalar argument in a `propagate` slot is a proven
+   * `NaN` — the value of the whole application is `NaN`, whatever the
+   * codomain's shape; `'widen-nan'` when such an argument may be `NaN` —
+   * the application gains a top-level `| nan` arm; `'widen-nan-cells'`
+   * when the NaN evidence rides in the cells of a broadcast lift — the
+   * lifted result's numeric cells gain `| nan`; `'none'` otherwise. The
+   * omitted `may-marker` default contributes no arm (see
    * the implementation note in `boxed-operator-definition.ts`).
    */
   contractBResultAdjustment(
@@ -2454,7 +2458,13 @@ export interface BoxedOperatorDefinition
     /** The resolved overload arm, when the caller has one — the NaN
      * evidence derives per-slot policies from its carriers. */
     armSignature?: Type
-  ): 'none' | 'widen-nan' | 'widen-marker' | 'is-marker';
+  ):
+    | 'none'
+    | 'is-nan'
+    | 'widen-nan'
+    | 'widen-nan-cells'
+    | 'widen-marker'
+    | 'is-marker';
 
   /** True if operand position `i` may INVOKE a function-valued operand — the
    * per-position reader for the `invokes` flag of {@link OperatorDefinitionFlags}.

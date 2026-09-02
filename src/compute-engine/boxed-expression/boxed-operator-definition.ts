@@ -194,6 +194,34 @@ function signatureAllParamsNumeric(signature: Type): boolean {
  * explicitly (or until per-arm derivation lands — a Phase C/E item of
  * `docs/plans/2026-08-30-error-model-implementation.md`).
  */
+/**
+ * The carrier a type variable stands for, read from the signature's
+ * `where` clause. A polytype parameter such as `(T) -> T where T: number`
+ * has the variable `T` as its declared carrier, and the policy derivation
+ * below compares carriers with `isSubtype`, which answers "not a subtype"
+ * for a bare variable: without this step every generic head derived
+ * `reject` for a NaN operand, and `Conjugate(NaN)`, `Chop(NaN)` and
+ * `Remainder(NaN, 2)` answered an `unexpected-argument` error where the
+ * bound `number` admits NaN. The BOUND is the contract the variable can
+ * take, so it is the carrier: `T: number` admits `nan` (inert, the handler
+ * owns it), `T: complex` excludes it (propagate or reject by the ordinary
+ * rule). An unbounded variable admits every value, so it answers the top
+ * type; a variable the clause does not name resolves to `undefined` (the
+ * conservative `inert`).
+ */
+function resolveCarrierBound(
+  signature: Type,
+  carrier: Type | undefined
+): Type | undefined {
+  if (carrier === undefined || typeof carrier === 'string') return carrier;
+  if (carrier.kind !== 'variable') return carrier;
+  if (typeof signature === 'string' || signature.kind !== 'signature')
+    return undefined;
+  const param = signature.typeParams?.find((p) => p.name === carrier.name);
+  if (param === undefined) return undefined;
+  return param.bound ?? 'any';
+}
+
 function parameterTypeAt(signature: Type, i: number): Type | undefined {
   if (typeof signature === 'string') return undefined;
   if (signature.kind !== 'signature') return undefined;
@@ -759,7 +787,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     }
     if (this.inferredSignature) return 'inert';
     const sig = armSignature ?? this.signature.type;
-    const carrier = parameterTypeAt(sig, i);
+    const carrier = resolveCarrierBound(sig, parameterTypeAt(sig, i));
     if (carrier === undefined) return 'inert';
     if (isSubtype('nan', carrier)) return 'inert';
     const resultIsNumeric =
@@ -816,9 +844,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * - `'widen-marker'` — a DECLARED partiality is undischarged
    *   (`definedWhen` undecided for these arguments, or an explicit
    *   `may-marker`): every cell of the result gains its marker arm.
-   * - `'widen-nan'` — only the NaN evidence fires: a `propagate` slot's
-   *   argument may be `NaN`, so numeric cells gain `| nan`. A declared
+   * - `'is-nan'` — a SCALAR argument in a `propagate` slot is a proven
+   *   `NaN`: the value of the whole application is `NaN` whatever the
+   *   codomain's shape (the NaN gate answers the bare marker before the
+   *   handler runs — `AbsArg(NaN)` is `NaN`, not a tuple of markers).
+   * - `'widen-nan'` — a scalar argument in a `propagate` slot may be
+   *   `NaN`: the application gains a top-level `| nan` arm. A declared
    *   `total` discharges the partiality but never this arm.
+   * - `'widen-nan-cells'` — the NaN evidence rides in the ELEMENTS of a
+   *   broadcast operand (or a scalar operand of a broadcast lift): the
+   *   propagated `NaN` lands in individual cells of the lifted result, so
+   *   its numeric cells gain `| nan`.
    * - `'none'` — no adjustment.
    *
    * One deliberate scope guard, MEASURED not assumed: the UNDECLARED
@@ -836,7 +872,13 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
      * the derived type in step with the runtime gates (which pass the
      * same arm to `resolvedNanBehaviorAt`). */
     armSignature?: Type
-  ): 'none' | 'widen-nan' | 'widen-marker' | 'is-marker' {
+  ):
+    | 'none'
+    | 'is-nan'
+    | 'widen-nan'
+    | 'widen-nan-cells'
+    | 'widen-marker'
+    | 'is-marker' {
     // The higher-order conservative floor — see `resolvedNanBehaviorAt`,
     // whose ordering this mirrors: ABSOLUTE for user-defined callables,
     // explicit declarations included. A user callable's application types
@@ -864,6 +906,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     } else if (this.partiality === 'may-marker') return 'widen-marker';
     // No undischarged partiality claim: the only possible adjustment is
     // the NaN arm — a `propagate` slot whose argument may carry a `NaN`.
+    //
+    // Whether the application is a BROADCAST LIFT decides where a NaN
+    // lands. The runtime NaN gate stands down for a broadcastable operator
+    // with a collection-shaped operand (its test is mirrored here) and the
+    // per-element re-entry applies the policy cell by cell, so under a
+    // lift every NaN — a scalar operand's included (`Power(NaN, L)` is a
+    // list of NaN cells) — is a per-cell fact. Without a lift the gate
+    // answers the bare `NaN` for the whole application.
+    const lifted =
+      this.broadcastable &&
+      ops.some((x) => x.isCollection || x.type.matches('collection<any>'));
     for (let i = 0; i < ops.length; i++) {
       if (this.resolvedNanBehaviorAt(i, armSignature) !== 'propagate')
         continue;
@@ -877,8 +930,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // value the application has. The bottom type is excluded first:
       // `never` is a subtype of everything, and a `never`-typed operand
       // means "no possible value" — a contradiction — not "proven NaN".
-      if (opT !== 'never' && isSubtype(opT, 'nan')) return 'is-marker';
-      if (isSubtype('nan', opT)) return 'widen-nan';
+      if (opT !== 'never' && isSubtype(opT, 'nan'))
+        return lifted ? 'widen-nan-cells' : 'is-nan';
+      if (isSubtype('nan', opT))
+        return lifted ? 'widen-nan-cells' : 'widen-nan';
       // Broadcast operands carry their numbers in CELLS: for a
       // broadcastable operator a collection operand in a numeric
       // propagate slot is a broadcast lift, and the NaN evidence rides in
@@ -891,8 +946,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // collection shapes (`list<real> | list<nan>`) is covered too —
       // and re-test. The helper returns its argument by REFERENCE when no
       // descent is possible, which is the loop's fixpoint. The verdict
-      // for element-level evidence is always `widen-nan`, never
-      // `is-marker`: a NaN element makes ONE cell NaN, not the whole
+      // for element-level evidence is always `widen-nan-cells`, never
+      // `is-nan`: a NaN element makes ONE cell NaN, not the whole
       // application, and the widening is applied per cell
       // (`widenNumericCellsWithNan`).
       if (this.broadcastable) {
@@ -907,7 +962,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           elT !== 'never' &&
           (isSubtype('nan', elT) || isSubtype(elT, 'nan'))
         )
-          return 'widen-nan';
+          return 'widen-nan-cells';
       }
     }
     return 'none';

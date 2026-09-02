@@ -405,7 +405,13 @@ interface BoxedOperatorDefinition
   contractBResultAdjustment(
     ops: ReadonlyArray<Expression>,
     armSignature?: Type
-  ): 'none' | 'widen-nan' | 'widen-marker' | 'is-marker';
+  ):
+    | 'none'
+    | 'is-nan'
+    | 'widen-nan'
+    | 'widen-nan-cells'
+    | 'widen-marker'
+    | 'is-marker';
   /** True if operand position `i` may INVOKE a function-valued operand.
    * See `types-definitions.ts`. */
   invokesAt(i: number): boolean;
