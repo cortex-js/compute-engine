@@ -158,13 +158,15 @@ describe('INCOMPLETE GAMMA FUNCTION Γ(s, z)', () => {
     expect(ce.parse('\\Gamma(\\frac{k}{2}, \\infty)').evaluate().isSame(0)).toBe(
       true
     );
-    // A provably-infinite first argument stays symbolic (Γ(∞,∞) is indeterminate).
+    // Two infinite operands: Γ(∞, ∞) is an indeterminate form, so the
+    // answer is NaN (ruled 2026-09-01; it used to stay symbolic, which
+    // ERROR-MODEL §1 forbids as the terminal answer to a decided question).
     expect(
       ce
         .expr(['Gamma', 'PositiveInfinity', 'PositiveInfinity'])
         .evaluate()
-        .operator
-    ).toBe('Gamma');
+        .isNaN
+    ).toBe(true);
   });
 
   test('Γ(2, -1) = 0 (real, integer s, negative z)', () => {
@@ -496,11 +498,17 @@ describe('LAMBERT W FUNCTION', () => {
     expect(Math.abs(wVal * Math.exp(wVal) - x)).toBeLessThan(1e-14);
   });
 
-  test('W₋₁ returns NaN outside its real domain (like the principal branch)', () => {
-    // x >= 0 is outside W₋₁'s real domain → NaN, matching W₀'s out-of-domain
-    // behavior (e.g. W₀(-1) with -1 < -1/e is also NaN).
-    expect(ce.expr(['LambertW', { num: '0.5' }, -1]).N().operator).toBe('NaN');
-    expect(ce.expr(['LambertW', -1]).N().operator).toBe('NaN');
+  test('W stays symbolic outside a branch\'s real domain (both real branches)', () => {
+    // x >= 0 is outside W₋₁'s real domain, and −1 < −1/e is outside W₀'s.
+    // The value there is a finite COMPLEX number (W₀(−1) = −0.318 + 1.337i)
+    // that the real kernels cannot compute, so the application stays
+    // symbolic (ruled 2026-09-01; it used to answer NaN, which misreports
+    // a capability gap as an indeterminate value).
+    expect(ce.expr(['LambertW', { num: '0.5' }, -1]).N().operator).toBe(
+      'LambertW'
+    );
+    expect(ce.expr(['LambertW', -1]).N().operator).toBe('LambertW');
+    expect(ce.expr(['LambertW', -1]).evaluate().operator).toBe('LambertW');
   });
 
   test('LambertW stays inert for unsupported / symbolic branch indices', () => {
@@ -1439,10 +1447,11 @@ describe('COMPLEX-ARGUMENT Ei, Si, Ci', () => {
     expectApprox(ce.expr(['SinIntegral', 2]), 1.6054129768026948, 1e-12);
     expectApprox(ce.expr(['CosIntegral', 2]), 0.4229808287748649, 1e-12);
     expectApprox(ce.expr(['ExpIntegralEi', -2]), -0.04890051070806112, 1e-12);
-    // Ci(−2): the machine kernel returns the real part Ci(|x|) (real result).
+    // Ci(−2) is the PRINCIPAL value Ci(2) + iπ (ruled 2026-09-01; the
+    // machine kernel used to return the real part Ci(|x|) alone).
     const cm2 = ce.expr(['CosIntegral', -2]).N();
     expect(Math.abs(cm2.re - 0.4229808287748649)).toBeLessThan(1e-12);
-    expect(cm2.im ?? 0).toBe(0);
+    expect(cm2.im).toBeCloseTo(Math.PI, 12);
   });
 });
 
@@ -1581,10 +1590,12 @@ describe('HYPERBOLIC SINE & COSINE INTEGRALS (Shi, Chi)', () => {
     ).toBe(Infinity);
   });
 
-  test('Chi(−2): machine kernel returns the real part Chi(|x|)', () => {
+  test('Chi(−2) is the principal value Chi(2) + iπ', () => {
+    // Ruled 2026-09-01; the machine kernel used to return the real part
+    // Chi(|x|) alone.
     const c = ce.expr(['CoshIntegral', -2]).N();
     expect(Math.abs(c.re - 2.4526669226469145)).toBeLessThan(1e-12);
-    expect(c.im ?? 0).toBe(0);
+    expect(c.im).toBeCloseTo(Math.PI, 12);
   });
 
   test('d/dx Shi(x) = sinh(x)/x, d/dx Chi(x) = cosh(x)/x', () => {

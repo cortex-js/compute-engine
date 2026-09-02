@@ -914,9 +914,22 @@ function arctanType(ops: ReadonlyArray<OperandDescriptor>): Type {
  * `PolyGamma`) are wired to it (`PolyGamma` gates inline on its second
  * operand and falls back to `numericTypeHandler`, mirroring its legacy
  * shape).
+ *
+ * A provably-NaN operand DECLINES, as `Sqrt` and `Erf` do (the Γ family
+ * declares `nanBehavior: 'propagate'` on its `complex | infinity`
+ * carrier). Measured
+ * consequence: the derived claim is `number`, not the sharp `nan`, because
+ * the Γ heads keep the wide `number` result and the result-adjustment
+ * seam adds a `nan` arm only to a NaN-free declared result (the `Sin(NaN)`
+ * precedent; `specialFunctionType` in library/arithmetic.ts says the
+ * same). The frozen legacy twin reaches `number` by a different route,
+ * so the Γ family does not run shadow parity.
  */
-export function gammaPoleType(x: OperandDescriptor | undefined): Type {
+export function gammaPoleType(
+  x: OperandDescriptor | undefined
+): Type | undefined {
   if (!x) return 'number';
+  if (typeFact(x.type, 'nan') === true) return undefined;
   if (
     typeFact(x.type, 'integer') === true &&
     nonPositiveSign(operandSgn(x)) === true

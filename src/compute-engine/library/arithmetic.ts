@@ -203,6 +203,11 @@ import {
   operandSgn as operandSgnOnTypes,
 } from './type-handlers-types.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import {
+  infinitePoint,
+  isRealLiteral,
+} from '../boxed-expression/infinite-point.js';
+import type { OperandDescriptor } from '../types-definitions.js';
 import { isPrime as isPrimeNumber } from '../numerics/primes.js';
 import { parseType } from '../../common/type/parse.js';
 
@@ -620,17 +625,295 @@ function literalPredicateType(
  *   and stayed inert, which `docs/ERROR-MODEL.md` §1 forbids as the
  *   terminal answer to a decided question.
  *
- * A MIXED directed value such as `∞ + i` is not covered: it reports
- * `isInfinity === false` (only `±∞` and `~∞` report true), so it falls
- * through to each handler's own complex route.
+ * - An "anonymous" infinity such as `∞ + i` (a complex literal with an
+ *   infinite component, which neither `isInfinity` nor `isFinite` reports)
+ *   carries no usable direction, so the value is `NaN` as well, the
+ *   uniform rule for every special-function head of this file.
+ *
+ * The four heads declare the carrier `complex | infinity`, so every one of
+ * these points is IN the carrier and the answer is a value, never a
+ * boxing error (the Γ-family convention: the direction with a limit gets
+ * it, the direction without one gets `NaN`; ruling recorded in
+ * `docs/plans/2026-08-30-error-model-implementation.md`, Phase F batch 8).
  */
 function infiniteGammaFamilyValue(
   x: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!isNumber(x) || x.isInfinity !== true) return undefined;
-  if (x.isPositive === true) return ce.PositiveInfinity;
+  const point = infinitePoint(x);
+  if (point === undefined) return undefined;
+  if (point === '+oo') return ce.PositiveInfinity;
   return ce.NaN;
+}
+
+/**
+ * The value of a polygamma head `ψ⁽ⁿ⁾` (`Digamma` is n = 0, `Trigamma` is
+ * n = 1, `PolyGamma(n, x)` in general) at an exceptional point of `x`, or
+ * `undefined` at an ordinary point. Every answer is exact, so it is given
+ * on `evaluate()` and `.N()` alike (ruling recorded in
+ * `docs/plans/2026-08-30-error-model-implementation.md`, Phase F batch 8;
+ * each limit verified numerically at 10², 10⁴ and 10⁶):
+ *
+ * - `+∞`: `ψ(x) → +∞` (ψ(10⁶) = 13.8, growing like ln x) and every
+ *   derivative `ψ⁽ⁿ⁾(x) → 0` for n ≥ 1 (ψ₁(10⁶) = 10⁻⁶, ψ₂ = −10⁻¹²,
+ *   ψ₃ = 2·10⁻¹⁸). The Fungrim identity 1cbe83 states the same.
+ * - `−∞` and `~∞`: no limit — the poles at the non-positive integers
+ *   accumulate there, and between consecutive poles ψ₁ returns to ≈ π²
+ *   (ψ₁(−10⁶ − ½) = 9.87) — so the value is `NaN`. An anonymous infinity
+ *   (`∞ + i`) is `NaN` too.
+ * - A pole (a non-positive integer): `~∞` for every order. Near `−k`,
+ *   `ψ⁽ⁿ⁾(x) ≈ (−1)ⁿ⁺¹ n!/(x + k)ⁿ⁺¹`; the engine spells such a pole
+ *   `~∞` whatever the parity of n + 1, exactly as it folds `1/0²` to
+ *   `~∞` (a complex pole has no direction), and as `Gamma(0)` answers.
+ *   Mathematica agrees (`PolyGamma[1, 0]` is `ComplexInfinity`).
+ *
+ * The order must be a KNOWN non-negative integer for every arm: the value
+ * at `+∞` depends on it, and the pole arm holds for the derivative orders
+ * only — the kernels reject a negative order, and the generalized
+ * negative-order polygammas do not all keep these poles. A symbolic or
+ * negative order leaves the application symbolic at a pole.
+ */
+function polygammaValueAtExceptionalPoint(
+  order: number | null,
+  x: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!isNumber(x)) return undefined;
+  const point = infinitePoint(x);
+  if (point !== undefined && point !== '+oo') return ce.NaN;
+  if (order === null || order < 0) return undefined;
+  if (point === '+oo') return order === 0 ? ce.PositiveInfinity : ce.Zero;
+  if (x.im === 0 && x.isInteger === true && x.isNonPositive === true)
+    return ce.ComplexInfinity;
+  return undefined;
+}
+
+/**
+ * The value of a Bessel head at an exceptional point of its ARGUMENT `x`
+ * (the order `n` is a known integer), or `undefined` at an ordinary point.
+ * Exact, so given on `evaluate()` and `.N()` alike (ruling recorded in
+ * `docs/plans/2026-08-30-error-model-implementation.md`, Phase F batch 8;
+ * each limit verified numerically at 10², 10⁴, 10⁶):
+ *
+ * - `J_n(±∞) = 0` and `Y_n(+∞) = 0`: the amplitude decays like `x^(−1/2)`
+ *   (J₀(10⁶) = 3·10⁻⁴). `Y_n(−∞) = 0` as well: on the negative axis
+ *   `Y_n(−x) = (−1)ⁿ(Y_n(x) + 2i·J_n(x))`, and both terms decay.
+ * - `I_n(+∞) = +∞` (I₀(100) = 10⁴²). `I_n(−x) = (−1)ⁿ I_n(x)`, so
+ *   `I_n(−∞)` is `+∞` for an even order and `−∞` for an odd one
+ *   (I₁(−100) = −1.07·10⁴²).
+ * - `K_n(+∞) = 0` (K₀(100) = 5·10⁻⁴⁵). `K_n(−x) = (−1)ⁿK_n(x) − iπ·I_n(x)`,
+ *   whose modulus grows without bound in the imaginary direction: an
+ *   infinite value in a non-real direction, which the engine spells `~∞`
+ *   (`i·∞` itself boxes to `~∞`).
+ * - `~∞` and an anonymous infinity: `NaN`. Every Bessel function grows
+ *   exponentially in some direction of the complex plane and decays in
+ *   another (`J_n(iy) = iⁿ I_n(y)`), so there is no value at the
+ *   direction-less point.
+ * - The origin: `J_n(0)` and `I_n(0)` are the finite values the kernels
+ *   compute (1 for n = 0, else 0). `Y_n` and `K_n` have a pole there:
+ *   `Y₀(x) ≈ (2/π) ln x → −∞` and `K₀(x) ≈ −ln x → +∞` (the imaginary
+ *   part of the complex continuation stays bounded, the `Ln(0) = −∞`
+ *   convention), while for n ≠ 0 the leading term is `1/xⁿ`, a complex
+ *   pole, spelled `~∞`.
+ */
+function besselValueAtExceptionalPoint(
+  kind: 'J' | 'Y' | 'I' | 'K',
+  n: number,
+  x: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!isNumber(x)) return undefined;
+  const point = infinitePoint(x);
+  if (point === '~oo' || point === 'anonymous') return ce.NaN;
+  if (point === '+oo') return kind === 'I' ? ce.PositiveInfinity : ce.Zero;
+  if (point === '-oo') {
+    if (kind === 'J' || kind === 'Y') return ce.Zero;
+    if (kind === 'K') return ce.ComplexInfinity;
+    return n % 2 === 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+  }
+  if ((kind === 'Y' || kind === 'K') && x.im === 0 && x.isSame(0)) {
+    if (n !== 0) return ce.ComplexInfinity;
+    return kind === 'Y' ? ce.NegativeInfinity : ce.PositiveInfinity;
+  }
+  return undefined;
+}
+
+/**
+ * The shared evaluate handler of the four Bessel heads. The order must be
+ * a known integer and the argument a real literal for the kernels to run;
+ * the exceptional points of the argument are answered first, on both
+ * routes (`besselValueAtExceptionalPoint`). Everything the real
+ * integer-order kernels cannot compute — a non-integer order, a non-real
+ * argument, a negative real argument for `Y`/`K` (a complex value there) —
+ * stays symbolic.
+ */
+function evaluateBessel(
+  kind: 'J' | 'Y' | 'I' | 'K',
+  n: Expression,
+  x: Expression,
+  ce: ComputeEngine,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!isNumber(n) || !isNumber(x)) return undefined;
+  const order = asSmallInteger(n);
+  if (order === null) return undefined;
+  const special = besselValueAtExceptionalPoint(kind, order, x, ce);
+  if (special !== undefined) return special;
+  if (!isRealLiteral(x)) return undefined;
+  if ((kind === 'Y' || kind === 'K') && x.isNegative === true)
+    return undefined;
+  if (!shouldNumericize(numericApproximation, n, x)) return undefined;
+  const kernel =
+    kind === 'J'
+      ? besselJ
+      : kind === 'Y'
+        ? besselY
+        : kind === 'I'
+          ? besselI
+          : besselK;
+  return apply2(n, x, kernel);
+}
+
+/**
+ * The value of an Airy head at an infinite argument, or `undefined` at a
+ * finite one. Exact, so given on `evaluate()` and `.N()` alike (ruling
+ * recorded in `docs/plans/2026-08-30-error-model-implementation.md`,
+ * Phase F batch 8; each limit verified numerically at 10², 10⁴, 10⁶):
+ *
+ * - `+∞`: `Ai` and `Ai′` decay to 0 (Ai(100) = 3·10⁻²⁹¹); `Bi` and `Bi′`
+ *   grow to `+∞`.
+ * - `−∞`: `Ai` and `Bi` oscillate with an amplitude that decays like
+ *   `|x|^(−1/4)`, so both tend to 0 (Ai(−10⁶) = −0.002). `Ai′` and `Bi′`
+ *   oscillate with an amplitude that GROWS like `|x|^(1/4)` (Ai′(−10⁶) =
+ *   17.7), so they have no limit: `NaN`.
+ * - `~∞` and an anonymous infinity: `NaN` — the Airy functions grow
+ *   exponentially in some sectors of the complex plane and decay in others.
+ */
+function airyValueAtInfinity(
+  kind: 'Ai' | 'Bi' | 'AiPrime' | 'BiPrime',
+  x: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  const point = infinitePoint(x);
+  if (point === undefined) return undefined;
+  if (point === '+oo')
+    return kind === 'Ai' || kind === 'AiPrime'
+      ? ce.Zero
+      : ce.PositiveInfinity;
+  if (point === '-oo') return kind === 'Ai' || kind === 'Bi' ? ce.Zero : ce.NaN;
+  return ce.NaN;
+}
+
+/**
+ * The value of `Beta(a, b)` when at least one operand is infinite, or
+ * `undefined` when both are finite (ruling recorded in
+ * `docs/plans/2026-08-30-error-model-implementation.md`, Phase F batch 8;
+ * each limit verified numerically at 10², 10⁴, 10⁶):
+ *
+ * - An anonymous infinity (`∞ + i`) in either slot: `NaN`, the uniform
+ *   rule for every special-function head.
+ * - When the other operand is a positive integer m, the exact rational
+ *   form `B(a, m) = (m−1)!/(a(a+1)⋯(a+m−1))` holds at every point, and its
+ *   denominator is infinite at `±∞` and at `~∞` alike: the value is 0.
+ * - `B(+∞, b) → 0` whenever the real part of a finite b is positive
+ *   (B(10⁶, ½) = 0.0018, decaying like `a^(−b)`); for a non-positive real
+ *   part the modulus diverges with a sign that depends on b
+ *   (B(10⁶, −½) = −3545), so the value is `NaN`.
+ * - `−∞` and `~∞` otherwise: `NaN`. The Γ-poles of the first operand
+ *   accumulate at `−∞`, so there is no limit.
+ */
+function betaValueAtInfinity(
+  a: Expression,
+  b: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!isNumber(a) || !isNumber(b)) return undefined;
+  const pa = infinitePoint(a);
+  const pb = infinitePoint(b);
+  if (pa === undefined && pb === undefined) return undefined;
+  if (pa === 'anonymous' || pb === 'anonymous') return ce.NaN;
+  const positiveInteger = (x: Expression): boolean =>
+    isNumber(x) &&
+    infinitePoint(x) === undefined &&
+    x.im === 0 &&
+    x.isInteger === true &&
+    x.isPositive === true;
+  if ((pa !== undefined && positiveInteger(b)) || (pb !== undefined && positiveInteger(a)))
+    return ce.Zero;
+  const positiveRealPart = (x: Expression): boolean =>
+    isNumber(x) && infinitePoint(x) === undefined && x.re > 0;
+  if ((pa === '+oo' && positiveRealPart(b)) || (pb === '+oo' && positiveRealPart(a)))
+    return ce.Zero;
+  return ce.NaN;
+}
+
+/**
+ * The value of the upper incomplete gamma `Gamma(s, z)` when at least one
+ * operand is infinite, or `undefined` when both are finite (ruling
+ * recorded in `docs/plans/2026-08-30-error-model-implementation.md`,
+ * Phase F batch 8; each limit verified numerically):
+ *
+ * - `Γ(s, +∞) = 0` for every finite s, a symbolic parameter included (a
+ *   parameter is implicitly finite unless its type says otherwise): the
+ *   `e^(−t)` tail vanishes.
+ * - `Γ(+∞, z) = +∞` for a finite positive real z (Γ(300, 5) overflows
+ *   the double range). `Γ(−∞, z)` depends on where z sits against 1:
+ *   the integrand `t^(s−1)` on `[z, ∞)` is dominated by `z^s`, which
+ *   vanishes for z > 1 and explodes for z < 1 — `Γ(−∞, z) = 0` for z ≥ 1
+ *   (Γ(−10⁴, 1.1) = 0; Γ(−10⁴, 1) = 3.7·10⁻⁵ and decreasing) and `+∞` for
+ *   0 < z < 1 (Γ(−10⁴, 0.9) overflows the double range; the integrand is
+ *   positive, so the sign is fixed). For any other finite z nothing is
+ *   verified, so the application stays symbolic there.
+ * - `Γ(s, −∞)`: `NaN`. For an integer s the value is `±∞` with a sign
+ *   that alternates with the parity of s (Γ(2, −100) = −2.7·10⁴⁵,
+ *   Γ(3, −100) = +2.6·10⁴⁷), and for a non-integer s it is a complex
+ *   infinity, so there is no single limit to encode.
+ * - `~∞`, an anonymous infinity, or two infinite operands: `NaN` (`Γ(∞, ∞)`
+ *   is an indeterminate form).
+ */
+function incompleteGammaValueAtInfinity(
+  s: Expression,
+  z: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  const ps = infinitePoint(s);
+  const pz = infinitePoint(z);
+  if (ps === undefined && pz === undefined) return undefined;
+  if (ps !== undefined && pz !== undefined) return ce.NaN;
+  if (pz === '+oo') return s.isFinite === false ? ce.NaN : ce.Zero;
+  if (pz !== undefined) return isNumber(s) ? ce.NaN : undefined;
+  // s is the infinite operand and z is finite.
+  if (ps === '~oo' || ps === 'anonymous') return ce.NaN;
+  if (!isNumber(z) || z.im !== 0 || z.isPositive !== true) return undefined;
+  if (ps === '+oo') return ce.PositiveInfinity;
+  if (z.isGreaterEqual(1) === true) return ce.Zero;
+  if (z.isLess(1) === true) return ce.PositiveInfinity;
+  return undefined;
+}
+
+/**
+ * The shared `'types'` handler of the special-function heads whose result
+ * is otherwise the generic numeric claim. A provably-NaN operand DECLINES,
+ * as `Sqrt` and `Erf` do: a handler answer is never widened, so a `number`
+ * answer would suppress any sharper claim the framework could derive.
+ * MEASURED consequence for these heads: the framework derives `number`,
+ * not the sharp `nan` — the result-adjustment seam adds a `nan` arm only
+ * to a NaN-FREE declared result (`typeHasNanFreeNumericCell`,
+ * boxed-function.ts), and every head here keeps the wide `number` result
+ * for the compiled lanes (`resultIsComplexValued`), exactly as `Sin(NaN)`
+ * types `number`. The decline keeps the family uniform and lets a future
+ * narrowing of the declared result pick up the sharp arm without a
+ * handler change. Every other operand takes the generic claim (`real` for
+ * proven-real finite operands, else `number`).
+ */
+function specialFunctionType(
+  ops: ReadonlyArray<OperandDescriptor | undefined>
+): Type | undefined {
+  if (ops.some((d) => d !== undefined && typeFact(d.type, 'nan') === true))
+    return undefined;
+  return numericTypeHandlerOnTypes(
+    ops.filter((d): d is OperandDescriptor => d !== undefined)
+  );
 }
 
 
@@ -1236,14 +1519,33 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // than `(integer) -> integer`. This keeps ill-typed calls (`Factorial("x")`)
       // invalid while honestly typing `Factorial(1/2)` (= Γ(3/2), a real) and
       // `Factorial(i)` (complex) instead of the unsound `integer`.
-      signature: '(number) -> number',
+      //
+      // The carrier is every number except NaN: every finite complex point
+      // has a value (a pole, `~oo`, at the negative integers), and every
+      // infinity is in the carrier with the Γ-family values (`+∞` at `+∞`,
+      // `NaN` where there is no limit — `infiniteGammaFamilyValue`). `NaN`
+      // propagates (explicit: the carrier is not a subtype of `complex`, so
+      // the policy derived from the signature would be `reject`). The
+      // result stays the wide `number`: the compiled lanes' kind-preservation
+      // discipline reads it (`resultIsComplexValued`), and the type handler
+      // carries the per-call sharpness. This head has a `canonical`
+      // handler, so boxing validation and the dispatch-time conformance
+      // re-test never see it: the evaluate handler is the only seam, and
+      // with every numeric point in the carrier it enforces nothing but
+      // the NaN arm.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       // The negative-integer branch widens the claim to `number` on the
       // Γ(x+1) pole. On a compound operand (`Negate(Floor(Abs(r)))`) that
       // negative sign is an operator `sgn` handler's to prove, and the
       // descriptor's sign fact carries it (open item O7 of
-      // `docs/plans/2026-08-22-type-handlers-on-types.md`).
+      // `docs/plans/2026-08-22-type-handlers-on-types.md`). A provably-NaN
+      // operand declines (`specialFunctionType` records what that buys:
+      // the derived claim stays `number` for a `number`-result head).
       typeHandlerKind: 'types',
       type: ([x]) => {
+        if (x !== undefined && typeFact(x.type, 'nan') === true)
+          return undefined;
         const s = x ? operandSgnOnTypes(x) : undefined;
         // A non-negative integer factorial is a (finite) positive integer.
         if (
@@ -1283,10 +1585,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // If argument is symbolic (not a number literal), keep unevaluated
         if (!isNumber(x)) return undefined;
 
-        // Is the argument a complex number?
-        if (x.im !== 0 && x.im !== undefined)
-          return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
-
         // A `NaN` argument propagates. This handler computes Γ(x+1) itself
         // rather than through the kernel dispatchers, so it does not inherit
         // their NaN-propagation guard (`apply2`, `boxed-expression/apply.ts`),
@@ -1296,9 +1594,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNaN === true) return ce.NaN;
 
         // An infinite argument is a decided question as well: `+∞` at `+∞`,
-        // NaN at `−∞` and at the unsigned `~∞` (no limit either way).
+        // NaN at `−∞`, at the unsigned `~∞` and at an anonymous infinity
+        // such as `∞ + i` (no limit in any of those). This runs BEFORE the
+        // complex arm below, which would otherwise hand `∞ + i` to the
+        // complex kernel.
         const infinite = infiniteGammaFamilyValue(x, ce);
         if (infinite !== undefined) return infinite;
+
+        // Is the argument a complex number?
+        if (x.im !== 0 && x.im !== undefined)
+          return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
 
         // The argument is real...
         if (!x.isFinite) return undefined;
@@ -1332,16 +1637,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // If argument is symbolic (not a number literal), keep unevaluated
         if (!isNumber(x)) return undefined;
 
-        // Is the argument a complex number?
-        if (x.im !== 0 && x.im !== undefined)
-          return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
-
         // A `NaN` argument propagates — see the synchronous handler above.
         if (x.isNaN === true) return ce.NaN;
 
-        // `(±∞)!` and `(~∞)!` — see the synchronous handler above.
+        // `(±∞)!`, `(~∞)!` and `(∞ + i)!` — see the synchronous handler
+        // above (this arm runs before the complex one for the same reason).
         const infinite = infiniteGammaFamilyValue(x, ce);
         if (infinite !== undefined) return infinite;
+
+        // Is the argument a complex number?
+        if (x.im !== 0 && x.im !== undefined)
+          return ce.number(gammaComplex(ce.complex(x.re, x.im).add(1)));
 
         // The argument is real...
         if (!x.isFinite) return undefined;
@@ -1380,15 +1686,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `n!!` is only computed for integer n (see `evaluate` below), but a
       // symbolic or real-typed argument must still be accepted and stay
       // symbolic rather than erroring — mirror `Factorial`'s signature
-      // pattern rather than `(integer) -> integer`.
-      signature: '(number) -> number',
+      // pattern rather than `(integer) -> integer`. The carrier, the NaN
+      // policy and the wide result are `Factorial`'s (see there); the
+      // infinite points take the Γ-family values. A non-integer finite
+      // argument stays symbolic (no closed form here), which is a
+      // capability gap, not an off-carrier point. No `canonical` handler,
+      // so a proven off-carrier operand (a string) is rejected at boxing.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       // Same shape as `Factorial` above: the negative-integer branch widens
       // the claim to `number`, and on a compound operand that negative sign
       // is an operator `sgn` handler's to prove — carried by the
       // descriptor's sign fact (open item O7 of
-      // `docs/plans/2026-08-22-type-handlers-on-types.md`).
+      // `docs/plans/2026-08-22-type-handlers-on-types.md`). A provably-NaN
+      // operand declines (`specialFunctionType` records what that buys:
+      // the derived claim stays `number` for a `number`-result head).
       typeHandlerKind: 'types',
       type: ([x]) => {
+        if (x !== undefined && typeFact(x.type, 'nan') === true)
+          return undefined;
         const s = x ? operandSgnOnTypes(x) : undefined;
         if (
           x !== undefined &&
@@ -1517,14 +1833,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q190573',
       complexity: 8000,
       broadcastable: true,
-      signature: '(number, number?) -> number',
+      // The carrier is every number except NaN, on both slots: every finite
+      // complex point has a value (a pole, `~oo`, at the non-positive
+      // integers), and every infinity is in the carrier with the Γ-family
+      // values — `Γ(+∞) = +∞`, `NaN` at `−∞`, `~oo` and an anonymous
+      // infinity (`infiniteGammaFamilyValue`); the incomplete form's
+      // infinite points are `incompleteGammaValueAtInfinity`'s. `NaN`
+      // propagates (explicit: the carrier is not a subtype of `complex`, so
+      // the policy derived from the signature would be `reject`). The
+      // result stays the wide `number` (the compiled lanes read it —
+      // `resultIsComplexValued` — and the type handler carries the per-call
+      // sharpness). No `canonical` handler and no fast path, so a proven
+      // off-carrier operand is rejected at BOXING; with every numeric
+      // point in the carrier, that seam only ever sees a non-number.
+      signature: '(complex | infinity, (complex | infinity)?) -> number',
+      nanBehavior: 'propagate',
       // Γ(z) has poles (value `~oo`) at the non-positive integers; the
-      // incomplete Γ(s, z) keeps the generic handler.
+      // incomplete Γ(s, z) keeps the generic handler. A provably-NaN
+      // operand declines (`specialFunctionType` records what that buys:
+      // the derived claim stays `number` for a `number`-result head).
       typeHandlerKind: 'types',
       type: (ops) =>
         ops.length === 1
           ? gammaPoleTypeOnTypes(ops[0])
-          : numericTypeHandlerOnTypes(ops),
+          : specialFunctionType(ops),
 
       // Γ is positive on the positive reals; 0 and the negative integers are
       // poles (value ~oo, hence 'unsigned' — NOT 'zero': Γ never vanishes).
@@ -1544,15 +1876,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Upper incomplete gamma Γ(s, z) (Mathematica/Rubi `Gamma[s, z]`).
         if (ops.length === 2) {
           const [s, z] = ops;
-          // Γ(s, +∞) = ∫_{+∞}^∞ tˢ⁻¹e⁻ᵗ dt = 0 for any finite s (the e⁻ᵗ tail
-          // vanishes). Exact, so return it regardless of numericApproximation.
-          // A non-finite s (Γ(∞, ∞)) is indeterminate — leave it symbolic.
-          if (
-            z.isInfinity === true &&
-            z.isPositive === true &&
-            s.isFinite !== false
-          )
-            return engine.Zero;
+          // The infinite points (`Γ(s, +∞) = 0`, `Γ(±∞, z)`, `NaN` for the
+          // rest) are exact, so they are answered regardless of
+          // numericApproximation.
+          const infinite = incompleteGammaValueAtInfinity(s, z, engine);
+          if (infinite !== undefined) return infinite;
           // Γ(s, 0) = Γ(s): reduce so the 1-arg exact paths (incl. poles)
           // apply.
           if (isNumber(z) && z.isSame(0))
@@ -1593,7 +1921,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Natural logarithm of the gamma function.',
       complexity: 8000,
       broadcastable: true,
-      signature: '(number) -> number',
+      // Carrier, NaN policy, result and seam as for `Gamma` (see there):
+      // `ln Γ` has a value at every finite complex point (`+∞` at the
+      // poles) and takes the Γ-family values at the infinite points.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: (ops) => gammaPoleTypeOnTypes(ops[0]),
 
@@ -1628,13 +1960,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q1142755',
       complexity: 8200,
       broadcastable: true,
-      signature: '(number) -> number',
+      // Carrier, NaN policy, result and seam as for `Gamma` (see there).
+      // The values at the exceptional points — `ψ(+∞) = +∞`, `NaN` at `−∞`,
+      // `~oo` and an anonymous infinity, `~oo` at the poles — are
+      // `polygammaValueAtExceptionalPoint`'s, answered on both routes. A
+      // non-real finite argument stays symbolic: there is no complex
+      // kernel, a capability gap and not an off-carrier point.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: (ops) => gammaPoleTypeOnTypes(ops[0]),
-      evaluate: ([x], { numericApproximation, engine }) =>
-        shouldNumericize(numericApproximation, x)
+      evaluate: ([x], { numericApproximation, engine }) => {
+        const special = polygammaValueAtExceptionalPoint(0, x, engine);
+        if (special !== undefined) return special;
+        return shouldNumericize(numericApproximation, x)
           ? apply(x, digamma, (x) => bigDigamma(engine, x))
-          : undefined,
+          : undefined;
+      },
     },
 
     // Trigamma function ψ₁(x) = d/dx ψ(x) = d²/dx² ln(Γ(x))
@@ -1644,13 +1986,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q2371722',
       complexity: 8400,
       broadcastable: true,
-      signature: '(number) -> number',
+      // As `Digamma` above: the exceptional points are
+      // `polygammaValueAtExceptionalPoint`'s (`ψ₁(+∞) = 0`).
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: (ops) => gammaPoleTypeOnTypes(ops[0]),
-      evaluate: ([x], { numericApproximation, engine }) =>
-        shouldNumericize(numericApproximation, x)
+      evaluate: ([x], { numericApproximation, engine }) => {
+        const special = polygammaValueAtExceptionalPoint(1, x, engine);
+        if (special !== undefined) return special;
+        return shouldNumericize(numericApproximation, x)
           ? apply(x, trigamma, (x) => bigTrigamma(engine, x))
-          : undefined,
+          : undefined;
+      },
     },
 
     // PolyGamma function ψₙ(x) = dⁿ/dxⁿ ψ(x)
@@ -1662,24 +2010,48 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q1817679',
       complexity: 8500,
       broadcastable: true,
-      signature: '(order: integer, number) -> number',
-      // ψⁿ(x) has poles (value `~oo`) at the non-positive integers.
+      // The order stays `integer` (the kernels are defined for integer
+      // orders only); the argument slot is the Γ-family carrier, as for
+      // `Digamma` above. The exceptional points of the argument are
+      // `polygammaValueAtExceptionalPoint`'s and need a KNOWN non-negative
+      // order (`+∞` for order 0 at `+∞`, else 0; `~oo` at the poles); a
+      // symbolic or negative order leaves them symbolic.
+      signature: '(order: integer, complex | infinity) -> number',
+      nanBehavior: 'propagate',
+      // ψⁿ(x) has poles (value `~oo`) at the non-positive integers. A
+      // provably-NaN operand declines (`specialFunctionType` records what
+      // that buys: the derived claim stays `number` for a `number`-result
+      // head).
       typeHandlerKind: 'types',
-      type: ([n, x]) =>
-        x !== undefined &&
-        typeFact(x.type, 'integer') === true &&
-        nonPositiveSign(operandSgnOnTypes(x)) === true
+      type: ([n, x]) => {
+        if (
+          (n !== undefined && typeFact(n.type, 'nan') === true) ||
+          (x !== undefined && typeFact(x.type, 'nan') === true)
+        )
+          return undefined;
+        return x !== undefined &&
+          typeFact(x.type, 'integer') === true &&
+          nonPositiveSign(operandSgnOnTypes(x)) === true
           ? 'number'
-          : numericTypeHandlerOnTypes([n, x]),
-      evaluate: ([n, x], { numericApproximation, engine }) =>
-        shouldNumericize(numericApproximation, n, x)
+          : numericTypeHandlerOnTypes([n, x]);
+      },
+      evaluate: ([n, x], { numericApproximation, engine }) => {
+        const order = asSmallInteger(n);
+        const special = polygammaValueAtExceptionalPoint(order, x, engine);
+        if (special !== undefined) return special;
+        // The kernels implement the derivative orders only (n ≥ 0): a
+        // negative literal order is a capability gap, so the application
+        // stays symbolic instead of reporting the kernel's `NaN`.
+        if (order !== null && order < 0) return undefined;
+        return shouldNumericize(numericApproximation, n, x)
           ? apply2(
               n,
               x,
               (n, x) => polygamma(n, x),
               (n, x) => bigPolygamma(engine, n, x)
             )
-          : undefined,
+          : undefined;
+      },
     },
 
     // Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s
@@ -1689,18 +2061,44 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q187235',
       complexity: 8500,
       broadcastable: true,
-      signature: '(number) -> number',
+      // The carrier is every number except NaN: ζ has a value at every
+      // finite complex point (the pole `~oo` at 1 — `ζ(1 ± 10⁻⁹) = ±10⁹`,
+      // so the pole has no sign), and the infinite points are in the
+      // carrier: `ζ(+∞) = 1` (ζ(100) = 1 to 30 digits), and `NaN` at `−∞`
+      // (the trivial zeros at the even negative integers alternate with
+      // values like ζ(−10⁶ − ½) = −10^4767531: no limit), at `~oo` and at
+      // an anonymous infinity. A
+      // non-real finite argument stays symbolic — no complex kernel, a
+      // capability gap. `NaN` propagates (explicit: the carrier is not a
+      // subtype of `complex`). No `canonical` handler, so a proven
+      // off-carrier operand is rejected at boxing.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       // ζ(1) is the pole; its value `~oo` is neither finite nor a member of
       // the signed pair `+oo | -oo`, so only `number` admits it. The
       // pole test is the literal-value channel: `isSame` is strictly
       // syntactic, so only a literal 1 ever answered `true` here, and
-      // `operandLiteralValue` selects exactly that population.
+      // `operandLiteralValue` selects exactly that population. A
+      // provably-NaN operand declines (`specialFunctionType` records what
+      // that buys: the derived claim stays `number` for a `number`-result
+      // head).
       typeHandlerKind: 'types',
-      type: ([x]) =>
-        x !== undefined && operandLiteralValueOnTypes(x) === 1
+      type: ([x]) => {
+        if (x !== undefined && typeFact(x.type, 'nan') === true)
+          return undefined;
+        return x !== undefined && operandLiteralValueOnTypes(x) === 1
           ? 'number'
-          : numericTypeHandlerOnTypes([x]),
+          : numericTypeHandlerOnTypes([x]);
+      },
       evaluate: ([x], { numericApproximation, engine }) => {
+        // The pole and the infinite points are exact, so they are answered
+        // on both routes, before the kernel is consulted.
+        if (isNumber(x)) {
+          const point = infinitePoint(x);
+          if (point === '+oo') return engine.One;
+          if (point !== undefined) return engine.NaN;
+          if (x.im === 0 && x.isSame(1)) return engine.ComplexInfinity;
+        }
         if (shouldNumericize(numericApproximation, x))
           return apply(x, zeta, (x) => bigZeta(engine, x));
 
@@ -1736,7 +2134,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q189062',
       complexity: 8200,
       broadcastable: true,
-      signature: '(number, number) -> number',
+      // Both slots take the Γ-family carrier (`Gamma` says why): every
+      // finite complex point has a value (a Γ-pole, `~oo`, where an operand
+      // is a non-positive integer and nothing cancels it), and the infinite
+      // points are `betaValueAtInfinity`'s. `NaN` propagates (explicit: the
+      // carrier is not a subtype of `complex`). No `canonical` handler, so
+      // a proven off-carrier operand is rejected at boxing. A non-real
+      // finite operand stays symbolic — no complex kernel.
+      signature: '(complex | infinity, complex | infinity) -> number',
+      nanBehavior: 'propagate',
       // B(a, b) has Γ-poles (value `~oo`) where a or b is a non-positive
       // integer (unless cancelled). Such an argument may be a pole → claim the
       // top type `number` per the non-finite typing convention, rather than
@@ -1748,6 +2154,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return numericTypeHandler(ops);
       },
       evaluate: ([a, b], { numericApproximation, engine }) => {
+        // The infinite points are exact, so they are answered on both
+        // routes (the exact rational form below already answered 0 for a
+        // SIGNED infinity against a positive-integer partner; `~oo` and the
+        // other combinations fell through to the kernel).
+        const infinite = betaValueAtInfinity(a, b, engine);
+        if (infinite !== undefined) return infinite;
         // Exact reductions and Γ-pole handling for real (im === 0) arguments.
         // The naive B(a,b) = Γ(a)Γ(b)/Γ(a+b) formula turns the Γ-pole at a
         // non-positive integer into silent overflow garbage (e.g. B(−1, 2)
@@ -1788,9 +2200,36 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // kept as a plain `number?` (not `integer`) in the signature — an
       // `integer`-typed parameter has broken rule boxing in this repo — and
       // validated in `evaluate` instead.
-      signature: '(number, number?) -> number',
+      //
+      // The argument slot is the carrier `complex | infinity`: W has a
+      // value at every finite complex point, and the infinite points are
+      // decided here (ruling recorded in
+      // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
+      // batch 8; each limit verified numerically):
+      // `W₀(+∞) = +∞` (W₀(10⁶) = 11.4, growing like ln x); `W₀(−∞)`
+      // follows the `Ln(−∞)` treatment — `W₀(−x) ≈ ln x + iπ` (W₀(−10¹²) =
+      // 24.4 + 3.02i, the imaginary part tending to π), an infinite real
+      // part with a finite imaginary offset that no exact number spells,
+      // so `evaluate()` stays symbolic and `.N()` answers the machine
+      // complex `∞ + iπ`; `W(~oo) = ~oo` by the modulus rule
+      // (|W(z)| grows without bound in every direction); an anonymous
+      // infinity is `NaN`. The `~oo` and anonymous-infinity answers hold
+      // for every branch (`W_k(z) ≈ ln z + 2πik` has an infinite modulus
+      // in every direction on every branch); the `±∞` values are the
+      // PRINCIPAL branch's, and the −1 branch stays symbolic at the two
+      // real infinities (its values there are other complex infinities
+      // that are not verified). Outside a
+      // branch's real domain (`W₀(−1)`, `W₋₁(0.5)`) the value is a finite
+      // complex number the real kernels cannot compute, so the application
+      // stays SYMBOLIC: `NaN` there would misreport a capability gap as
+      // an indeterminate value. `NaN` propagates (explicit: the carrier is
+      // not a subtype of `complex`).
+      // No `canonical` handler, so a proven off-carrier operand is rejected
+      // at boxing.
+      signature: '(complex | infinity, number?) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops) => specialFunctionType(ops),
       evaluate: (ops, { numericApproximation, engine }) => {
         const x = ops[0];
         // Branch index: default 0 (principal W₀). Only the real branches 0
@@ -1802,30 +2241,59 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (k === null || (k !== 0 && k !== -1)) return undefined;
           branch = k;
         }
-        return shouldNumericize(numericApproximation, x)
-          ? apply(
-              x,
-              (v) => lambertW(v, branch),
-              (v) => bigLambertW(engine, v, branch)
-            )
-          : undefined;
+        const point = infinitePoint(x);
+        if (point !== undefined) {
+          if (point === 'anonymous') return engine.NaN;
+          if (point === '~oo') return engine.ComplexInfinity;
+          if (branch !== 0) return undefined;
+          if (point === '+oo') return engine.PositiveInfinity;
+          return numericApproximation
+            ? engine.number(engine.complex(Infinity, Math.PI))
+            : undefined;
+        }
+        if (!shouldNumericize(numericApproximation, x)) return undefined;
+        const result = apply(
+          x,
+          (v) => lambertW(v, branch),
+          (v) => bigLambertW(engine, v, branch)
+        );
+        // A `NaN` from the kernel means "outside this branch's real
+        // domain" (the argument itself is never NaN here: the dispatch
+        // gate propagated it before the handler ran), and the value there
+        // is complex — stay symbolic rather than report `NaN`.
+        if (result !== undefined && result.isNaN === true) return undefined;
+        return result;
       },
     },
 
     // Bessel function of the first kind J_n(x)
     // Solution to Bessel's differential equation that is finite at the origin
+    //
+    // The four Bessel heads share one signature shape. The ORDER slot is
+    // finite-only (`complex`): an infinite order is a boxing error —
+    // nobody means an infinite order, and the limits there depend on the
+    // order in which the two slots go to infinity (ruling recorded in
+    // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
+    // batch 8). The ARGUMENT slot is the carrier `complex | infinity`,
+    // with the values at its exceptional points in
+    // `besselValueAtExceptionalPoint`, answered on both routes. The
+    // kernels are real, integer-order kernels: a non-integer order, a
+    // non-real argument, and a negative real argument for `Y`/`K` (whose
+    // value is complex there) all stay SYMBOLIC — capability gaps, not
+    // off-carrier points. `NaN` propagates (explicit: the argument
+    // carrier is not a subtype of `complex`). No
+    // `canonical` handler, so the order slot is enforced at BOXING.
     BesselJ: {
       description: 'Bessel function of the first kind',
       wikidata: 'Q627488',
       complexity: 8500,
       broadcastable: true,
-      signature: '(order: number, number) -> number',
+      signature: '(order: complex, complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
-      evaluate: ([n, x], { numericApproximation }) =>
-        shouldNumericize(numericApproximation, n, x)
-          ? apply2(n, x, besselJ)
-          : undefined,
+      type: (ops) => specialFunctionType(ops),
+      evaluate: ([n, x], { numericApproximation, engine }) =>
+        evaluateBessel('J', n, x, engine, numericApproximation),
     },
 
     // Bessel function of the second kind Y_n(x)
@@ -1835,13 +2303,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q627488',
       complexity: 8500,
       broadcastable: true,
-      signature: '(order: number, number) -> number',
+      // Signature shape and seams: see `BesselJ` above.
+      signature: '(order: complex, complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
-      evaluate: ([n, x], { numericApproximation }) =>
-        shouldNumericize(numericApproximation, n, x)
-          ? apply2(n, x, besselY)
-          : undefined,
+      type: (ops) => specialFunctionType(ops),
+      evaluate: ([n, x], { numericApproximation, engine }) =>
+        evaluateBessel('Y', n, x, engine, numericApproximation),
     },
 
     // Modified Bessel function of the first kind I_n(x)
@@ -1850,13 +2318,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q627488',
       complexity: 8500,
       broadcastable: true,
-      signature: '(order: number, number) -> number',
+      // Signature shape and seams: see `BesselJ` above.
+      signature: '(order: complex, complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
-      evaluate: ([n, x], { numericApproximation }) =>
-        shouldNumericize(numericApproximation, n, x)
-          ? apply2(n, x, besselI)
-          : undefined,
+      type: (ops) => specialFunctionType(ops),
+      evaluate: ([n, x], { numericApproximation, engine }) =>
+        evaluateBessel('I', n, x, engine, numericApproximation),
     },
 
     // Modified Bessel function of the second kind K_n(x)
@@ -1867,13 +2335,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q627488',
       complexity: 8500,
       broadcastable: true,
-      signature: '(order: number, number) -> number',
+      // Signature shape and seams: see `BesselJ` above.
+      signature: '(order: complex, complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
-      evaluate: ([n, x], { numericApproximation }) =>
-        shouldNumericize(numericApproximation, n, x)
-          ? apply2(n, x, besselK)
-          : undefined,
+      type: (ops) => specialFunctionType(ops),
+      evaluate: ([n, x], { numericApproximation, engine }) =>
+        evaluateBessel('K', n, x, engine, numericApproximation),
     },
 
     // Airy function of the first kind Ai(x)
@@ -1883,13 +2351,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q403629',
       complexity: 8400,
       broadcastable: true,
-      signature: '(number) -> number',
+      // The four Airy heads share one signature: the carrier
+      // `complex | infinity` (an entire function has a value at every
+      // finite complex point, and the infinite points are decided in
+      // `airyValueAtInfinity`, answered on both routes). A non-real finite
+      // argument stays symbolic: no complex kernel, a capability gap.
+      // `NaN` propagates (explicit: the carrier is not a subtype of
+      // `complex`). No `canonical` handler, so a proven off-carrier
+      // operand is rejected at boxing.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
-      evaluate: ([x], { numericApproximation }) =>
-        shouldNumericize(numericApproximation, x)
+      type: (ops) => specialFunctionType(ops),
+      evaluate: ([x], { numericApproximation, engine }) =>
+        airyValueAtInfinity('Ai', x, engine) ??
+        (shouldNumericize(numericApproximation, x)
           ? apply(x, airyAi)
-          : undefined,
+          : undefined),
     },
 
     // Airy function of the second kind Bi(x)
@@ -1898,13 +2376,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q403629',
       complexity: 8400,
       broadcastable: true,
-      signature: '(number) -> number',
+      // Signature and seams: see `AiryAi` above.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
-      evaluate: ([x], { numericApproximation }) =>
-        shouldNumericize(numericApproximation, x)
+      type: (ops) => specialFunctionType(ops),
+      evaluate: ([x], { numericApproximation, engine }) =>
+        airyValueAtInfinity('Bi', x, engine) ??
+        (shouldNumericize(numericApproximation, x)
           ? apply(x, airyBi)
-          : undefined,
+          : undefined),
     },
 
     // Derivative of the Airy function of the first kind Ai'(x)
@@ -1913,13 +2394,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q403629',
       complexity: 8400,
       broadcastable: true,
-      signature: '(number) -> number',
+      // Signature and seams: see `AiryAi` above.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
-      evaluate: ([x], { numericApproximation }) =>
-        shouldNumericize(numericApproximation, x)
+      type: (ops) => specialFunctionType(ops),
+      evaluate: ([x], { numericApproximation, engine }) =>
+        airyValueAtInfinity('AiPrime', x, engine) ??
+        (shouldNumericize(numericApproximation, x)
           ? apply(x, airyAiPrime)
-          : undefined,
+          : undefined),
     },
 
     // Derivative of the Airy function of the second kind Bi'(x)
@@ -1928,13 +2412,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q403629',
       complexity: 8400,
       broadcastable: true,
-      signature: '(number) -> number',
+      // Signature and seams: see `AiryAi` above.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
-      evaluate: ([x], { numericApproximation }) =>
-        shouldNumericize(numericApproximation, x)
+      type: (ops) => specialFunctionType(ops),
+      evaluate: ([x], { numericApproximation, engine }) =>
+        airyValueAtInfinity('BiPrime', x, engine) ??
+        (shouldNumericize(numericApproximation, x)
           ? apply(x, airyBiPrime)
-          : undefined,
+          : undefined),
     },
 
     Ln: {

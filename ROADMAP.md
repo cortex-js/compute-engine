@@ -379,7 +379,16 @@ deliberately left out of that change.
   the limit shapes differ per head — `ψ(x) → +∞` as `x → +∞` while
   `ψ'(x) → 0` — so each head needs its own empirical verification before
   encoding. Sites: the polygamma handlers in
-  `src/compute-engine/library/special-functions.ts`.
+  `src/compute-engine/library/arithmetic.ts`.
+  (RULED AND FIXED 2026-09-01, with the Γ/special-function signature-flip
+  batch: `ψ(+∞) = +∞`, `ψ⁽ⁿ⁾(+∞) = 0` for n ≥ 1, `~oo` at every pole for
+  every order (`1/0²` folds to `~oo`; Mathematica agrees), NaN at `−∞`,
+  `~oo` and an anonymous infinity — each limit verified numerically at
+  10², 10⁴ and 10⁶ before encoding. Shared helper
+  `polygammaValueAtExceptionalPoint` in `library/arithmetic.ts`; pins in
+  `test/compute-engine/error-model.test.ts` ("the Γ and special-function
+  family"). The batch record is in
+  `docs/plans/2026-08-30-error-model-implementation.md`, Phase F batch 8.)
 - **`Norm((+oo, NaN))` answers `NaN`; should an infinite component
   dominate?** Under the IEEE reading applied to `Hypot` (2026-08-31), an
   infinite magnitude arguably makes a Euclidean norm `+oo` regardless of a

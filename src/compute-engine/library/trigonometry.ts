@@ -35,6 +35,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
+import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
@@ -1005,7 +1006,20 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Sine integral: ∫₀ˣ sin(t)/t dt.',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> number',
+      // The four trigonometric integrals share the carrier
+      // `complex | infinity` (every finite complex point has a value — they
+      // are entire, or have a pole at 0 — and the infinite points are
+      // decided in each handler), explicit `nanBehavior: 'propagate'` (the
+      // carrier is not a subtype of `complex`, so the derived policy would
+      // be `reject`), the wide `number` result (the compiled lanes read
+      // it), and boxing as the seam (no `canonical` handler). At `~oo` and
+      // at an anonymous infinity (`∞ + i`) none of the four has a value —
+      // `Si(iy) = i·Shi(y)` diverges while `Si(±∞) = ±π/2` — so all four
+      // answer `NaN` there (ruling recorded in
+      // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
+      // batch 8).
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       // Si is entire and odd: a real argument → finite real (including ±∞:
       // Si(±∞) = ±π/2); a finite complex argument → finite complex value. An
       // operand of unproven realness (a `number`-typed symbol) must not claim
@@ -1023,14 +1037,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
-        if (x.im === 0) {
-          // Exact special values, regardless of numericApproximation
-          if (x.isSame(0)) return ce.Zero;
-          if (x.isInfinity) {
-            const v = x.isPositive ? ce.Pi.div(2) : ce.Pi.div(-2);
-            return numericApproximation ? v.N() : v;
-          }
+        // Exact special values, regardless of numericApproximation.
+        const point = infinitePoint(x);
+        if (point === '+oo' || point === '-oo') {
+          const v = point === '+oo' ? ce.Pi.div(2) : ce.Pi.div(-2);
+          return numericApproximation ? v.N() : v;
         }
+        if (point !== undefined) return ce.NaN;
+        if (x.im === 0 && x.isSame(0)) return ce.Zero;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the E₁-based kernel.
         return apply(x, (x) => sinIntegral(x), undefined, sinIntegralComplex);
@@ -1039,39 +1053,64 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /**
      * CosIntegral(x) = γ + ln x + ∫₀ˣ (cos t − 1)/t dt — Ci(0⁺) = −∞,
-     * Ci(∞) = 0. For x < 0 the function is complex; the real part Ci(|x|) is
-     * returned. Machine-precision only (no bignum kernel; ROADMAP B1).
+     * Ci(∞) = 0. For x < 0 the value is the PRINCIPAL one, `Ci(−x) = Ci(x) +
+     * iπ` (Mathematica's `CosIntegral[-1]` is `0.337 + 3.142i`; the engine's
+     * own `Ln(−1) = iπ` is the same convention; ruling recorded in
+     * `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
+     * batch 8). Machine-precision only (no bignum kernel; ROADMAP B1).
      */
     CosIntegral: {
       description: 'Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt.',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> number',
-      // An argument on the EXTENDED real line maps to a value on the extended
-      // real line: `Ci(0) = −∞` is the one infinite value, so the claim has to
-      // spell the signed infinities out — the bare name `real` denotes the
-      // finite reals and would exclude the pole. Proving the argument finite
-      // does not narrow the claim, because the pole is AT a finite argument. A
-      // finite complex argument → finite complex value. Unproven realness →
-      // `number` (the value may be complex, and −∞ rules out the finite hedge).
+      // Carrier, NaN policy, result and seam: see `SinIntegral` above.
+      // The infinite points: `Ci(+∞) = 0` (Ci(10⁶) = −3.5·10⁻⁷) and
+      // `Ci(−∞) = iπ` — the real part vanishes as it does at `+∞`, the
+      // imaginary part is the constant π of the principal branch (the
+      // same encoding as a finite imaginary value at a real infinity,
+      // `Artanh(±∞) = ∓iπ/2`).
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
+      // On the NON-NEGATIVE extended real line the value is on the extended
+      // real line: `Ci(0) = −∞` is the one infinite value, so the claim has
+      // to spell the signed infinities out — the bare name `real` denotes
+      // the finite reals and would exclude the pole. Proving the argument
+      // finite does not narrow the claim, because the pole is AT a finite
+      // argument. A negative real argument gives a COMPLEX value (`Ci(x) +
+      // iπ`), so realness alone proves nothing and the claim is `number`.
+      // A finite complex argument → finite complex value. Unproven realness
+      // → `number`.
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isExtendedReal === false)
           return x.isFinite === true ? 'complex' : 'number';
-        return x.isExtendedReal === true ? EXTENDED_REAL_TYPE : 'number';
+        return x.isExtendedReal === true && x.isNonNegative === true
+          ? EXTENDED_REAL_TYPE
+          : 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
-        if (x.im === 0) {
-          // Exact special values, regardless of numericApproximation.
-          // For real x < 0 the machine kernel returns the real part Ci(|x|).
-          if (x.isSame(0)) return ce.NegativeInfinity;
-          if (x.isInfinity && x.isPositive) return ce.Zero;
+        // Exact special values, regardless of numericApproximation.
+        const point = infinitePoint(x);
+        if (point === '+oo') return ce.Zero;
+        if (point === '-oo') {
+          const v = ce.I.mul(ce.Pi);
+          return numericApproximation ? v.N() : v;
         }
+        if (point !== undefined) return ce.NaN;
+        if (x.im === 0 && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
-        // Real args use the machine kernel; complex args the E₁-based kernel.
-        return apply(x, (x) => cosIntegral(x), undefined, cosIntegralComplex);
+        // A non-negative real argument uses the machine kernel; a negative
+        // real one is the principal value `Ci(−x) = Ci(x) + iπ`, built from
+        // the real kernel (the complex kernel hands an exactly-real
+        // argument back to the real kernel, which would drop the offset).
+        return apply(
+          x,
+          (v) => (v < 0 ? ce.complex(cosIntegral(-v), Math.PI) : cosIntegral(v)),
+          undefined,
+          cosIntegralComplex
+        );
       },
     },
 
@@ -1083,7 +1122,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Hyperbolic sine integral: ∫₀ˣ sinh(t)/t dt.',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> number',
+      // Carrier, NaN policy, result and seam: see `SinIntegral` above.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       // Shi is entire and odd: a finite real → finite real, a finite complex
       // argument → finite complex value, Shi(±∞) = ±∞. An argument only known
       // to be on the EXTENDED real line therefore needs the extended real line
@@ -1101,12 +1142,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
-        if (x.im === 0) {
-          // Exact special values, regardless of numericApproximation
-          if (x.isSame(0)) return ce.Zero;
-          if (x.isInfinity)
-            return x.isPositive ? ce.PositiveInfinity : ce.NegativeInfinity;
-        }
+        // Exact special values, regardless of numericApproximation
+        const point = infinitePoint(x);
+        if (point === '+oo') return ce.PositiveInfinity;
+        if (point === '-oo') return ce.NegativeInfinity;
+        if (point !== undefined) return ce.NaN;
+        if (x.im === 0 && x.isSame(0)) return ce.Zero;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
         // Real args use the machine kernel; complex args the Si-based kernel.
         return apply(x, (x) => sinhIntegral(x), undefined, sinhIntegralComplex);
@@ -1115,40 +1156,63 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /**
      * CoshIntegral(x) = γ + ln|x| + ∫₀ˣ (cosh t − 1)/t dt — Chi(0⁺) = −∞,
-     * Chi(∞) = ∞. For x < 0 the function is complex; the real part Chi(|x|) is
-     * returned. Machine-precision only (no bignum kernel; ROADMAP B1).
+     * Chi(∞) = ∞. For x < 0 the value is the PRINCIPAL one, `Chi(−x) =
+     * Chi(x) + iπ` (the `CosIntegral` convention above).
+     * Machine-precision only (no bignum kernel; ROADMAP B1).
      */
     CoshIntegral: {
       description:
         'Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> number',
-      // An argument on the EXTENDED real line maps to a value on the extended
-      // real line: `Chi(0) = −∞` and `Chi(±∞) = +∞` are both infinite, so the
-      // claim has to spell the signed infinities out — the bare name `real`
-      // denotes the finite reals and would exclude them. Proving the argument
-      // finite does not narrow the claim, because the pole is AT a finite
-      // argument. A finite complex argument → finite complex value. Unproven
-      // realness → `number`.
+      // Carrier, NaN policy, result and seam: see `SinIntegral` above.
+      // The infinite points: `Chi(+∞) = +∞` (Chi(100) = 1.4·10⁴¹) and
+      // `Chi(−∞) = ∞ + iπ` under the principal convention — an infinite
+      // real part with a finite imaginary offset, which no exact number
+      // spells, so `evaluate()` stays symbolic and `.N()` answers the
+      // machine complex (the `Ln(−∞)` treatment).
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
+      // On the NON-NEGATIVE extended real line the value is on the extended
+      // real line: `Chi(0) = −∞` and `Chi(+∞) = +∞` are both infinite, so
+      // the claim has to spell the signed infinities out — the bare name
+      // `real` denotes the finite reals and would exclude them. Proving the
+      // argument finite does not narrow the claim, because the pole is AT a
+      // finite argument. A negative real argument gives a COMPLEX value
+      // (`Chi(x) + iπ`), so realness alone proves nothing and the claim is
+      // `number`. A finite complex argument → finite complex value.
+      // Unproven realness → `number`.
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isExtendedReal === false)
           return x.isFinite === true ? 'complex' : 'number';
-        return x.isExtendedReal === true ? EXTENDED_REAL_TYPE : 'number';
+        return x.isExtendedReal === true && x.isNonNegative === true
+          ? EXTENDED_REAL_TYPE
+          : 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
-        if (x.im === 0) {
-          // Exact special values, regardless of numericApproximation.
-          // For real x < 0 the machine kernel returns the real part Chi(|x|).
-          if (x.isSame(0)) return ce.NegativeInfinity;
-          if (x.isInfinity) return ce.PositiveInfinity;
-        }
+        // Exact special values, regardless of numericApproximation.
+        const point = infinitePoint(x);
+        if (point === '+oo') return ce.PositiveInfinity;
+        if (point === '-oo')
+          return numericApproximation
+            ? ce.number(ce.complex(Infinity, Math.PI))
+            : undefined;
+        if (point !== undefined) return ce.NaN;
+        if (x.im === 0 && x.isSame(0)) return ce.NegativeInfinity;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
-        // Real args use the machine kernel; complex args the Ci-based kernel.
-        return apply(x, (x) => coshIntegral(x), undefined, coshIntegralComplex);
+        // A non-negative real argument uses the machine kernel; a negative
+        // real one is the principal value `Chi(−x) = Chi(x) + iπ`, built
+        // from the real kernel (see `CosIntegral` above).
+        return apply(
+          x,
+          (v) =>
+            v < 0 ? ce.complex(coshIntegral(-v), Math.PI) : coshIntegral(v),
+          undefined,
+          coshIntegralComplex
+        );
       },
     },
 

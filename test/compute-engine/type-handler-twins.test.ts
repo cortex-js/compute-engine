@@ -277,7 +277,19 @@ describe('gammaPoleType', () => {
     // so a compound operand whose non-positivity is a handler's proof —
     // `Neg(Floor(Abs(r)))` — fires the gate in both shapes and the
     // Γ-family handlers are convertible.
-    abUnary(legacy.gammaPoleType, twin.gammaPoleType, {});
+    //
+    // ONE recorded divergence: a provably-NaN operand. The Γ family took
+    // its Phase F Contract B flip (2026-09-01) onto the `complex | infinity`
+    // carrier with `nanBehavior: 'propagate'`, and the `'types'`-shape
+    // handler now DECLINES on a proven-NaN operand (the batch-4/5
+    // convention); the frozen legacy shape answers `number` there. The
+    // derived application type is `number` either way (the Γ heads keep
+    // the wide `number` result, which already admits NaN), so the row is
+    // a handler-shape divergence, not a claim change; pinned in
+    // `error-model.test.ts` ("the Γ and special-function family").
+    abUnary(legacy.gammaPoleType, twin.gammaPoleType, {
+      NaN: ['number', 'undefined'],
+    });
   });
 });
 

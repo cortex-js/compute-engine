@@ -250,10 +250,16 @@ export function apply2(
 
   let result: number | Complex | BigDecimal | undefined = undefined;
   if (expr1.im !== 0 || expr2.im !== 0) {
-    result = complexFn?.(
+    // A non-real operand needs the complex kernel. Without one the
+    // application stays symbolic: the real branches below read only `.re`,
+    // so falling through would silently DROP the imaginary part and answer
+    // the value at a different point.
+    if (!complexFn) return undefined;
+    result = complexFn(
       ce.complex(expr1.re, expr1.im),
       ce.complex(expr2.re, expr2.im)
     );
+    if (result === undefined) return undefined;
   }
 
   if (result === undefined && bigFn) {

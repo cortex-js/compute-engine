@@ -280,6 +280,96 @@
     declarations): they decline, and the evaluate route reports the
     error, like the other declared-domain operators.
 
+- **The Γ family and the special functions now declare their
+  mathematical domains**: `Gamma` (both forms), `GammaLn`, `Factorial`,
+  `Factorial2`, `Digamma`, `Trigamma`, `PolyGamma`, `Zeta`, `Beta`,
+  `LambertW`, `BesselJ`/`BesselY`/`BesselI`/`BesselK`,
+  `AiryAi`/`AiryBi`/`AiryAiPrime`/`AiryBiPrime`, `SinIntegral`,
+  `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `ExpIntegralEi`,
+  `LogIntegral`, `EllipticK`/`EllipticE`/`EllipticF`/`EllipticPi`, `AGM`,
+  `Hypergeometric2F1`, `Hypergeometric1F1`, `AppellF1`, `PolyLog`,
+  `JacobiTheta`, `DedekindEta` and `EisensteinE`. Every numeric slot takes
+  the carrier `complex | infinity` (the Γ-family convention: a point with
+  no limit answers `NaN` and is never a boxing error), except the Bessel
+  ORDER slot, which is finite-only — `BesselJ(∞, x)` is now an
+  `incompatible-type` error. The values at the exceptional points, each
+  verified numerically before it was encoded, and each answered the same
+  way by `evaluate()` and `.N()`:
+
+  - **The polygammas**: `Digamma(+∞) = +∞`; `Trigamma(+∞)` and
+    `PolyGamma(n ≥ 1, +∞)` are 0; every pole (a non-positive integer) is
+    `~oo` for every known non-negative order, on both routes
+    (`Digamma(0)` folded only under `.N()`, and `Trigamma(0)`,
+    `PolyGamma(2, 0)` answered `NaN`); a symbolic order stays symbolic at
+    a pole, and a negative order (not implemented by the kernels) stays
+    symbolic everywhere instead of answering `NaN`; `−∞`, `~oo` and an
+    anonymous infinity such as `∞ + i` answer `NaN` (no limit).
+  - **`Zeta(1)` is `~oo` on both routes** (`.N()` answered `+∞`; the pole
+    of `1/(s − 1)` has no sign); `Zeta(+∞) = 1` (was `NaN`); `Zeta(−∞)`
+    and `Zeta(~oo)` are `NaN`.
+  - **`LambertW`**: `W(+∞) = +∞` under `evaluate()` too; `W(−∞)` follows
+    `Ln(−∞)` — symbolic under `evaluate()`, `∞ + iπ` under `.N()` (it
+    answered `−∞`); `W(~oo) = ~oo`. Outside a real branch (`W₀(−1)`,
+    `W₋₁(0.5)`) the value is a finite complex number the real kernels
+    cannot compute, so the application now stays symbolic instead of
+    answering `NaN`.
+  - **Bessel**: `J_n(±∞) = Y_n(±∞) = K_n(+∞) = 0`, `I_n(+∞) = +∞`,
+    `I_n(−∞) = ±∞` by the parity of n, `K_n(−∞) = ~oo`; the poles
+    `Y₀(0) = −∞`, `K₀(0) = +∞`, `Y_n(0) = K_n(0) = ~oo` for n ≠ 0; `~oo`
+    answers `NaN`. All of these answered `NaN` before. A non-integer
+    order, a non-real argument, and a negative real argument of `Y`/`K`
+    (a complex value) now stay symbolic — the kernels are real,
+    integer-order kernels — instead of answering `NaN`.
+  - **Airy**: `Ai(±∞) = Bi(−∞) = Ai′(+∞) = 0`, `Bi(+∞) = Bi′(+∞) = +∞`,
+    `Ai′(−∞)` and `Bi′(−∞)` are `NaN` (the amplitude grows), `~oo` is
+    `NaN`. All answered `NaN` before.
+  - **`CosIntegral` and `CoshIntegral` take the PRINCIPAL value on the
+    negative axis**: `Ci(−x) = Ci(x) + iπ` and `Chi(−x) = Chi(x) + iπ`
+    (Mathematica's values; the machine kernels returned the real part
+    alone), so `CosIntegral(−2).N()` is `0.423 + 3.142i`,
+    `CosIntegral(−∞) = iπ` (was 0 under `.N()`), and `CoshIntegral(−∞)`
+    follows `Ln(−∞)` (was `+∞`). A real argument of unknown sign therefore
+    types `number` for these two heads; a proven non-negative one keeps
+    `real | signed_infinity`. `~oo` and an anonymous infinity answer
+    `NaN` for all four trigonometric integrals (`SinhIntegral(∞ + i)`
+    answered `~oo`).
+  - `ExpIntegralEi(~oo)` is `NaN` (was symbolic); `LogIntegral(−∞) = ~oo`
+    (both components of `Ei(ln x + iπ)` diverge; was symbolic).
+  - **Elliptic**: `EllipticK` is 0 at `±∞` and `~oo` (stayed symbolic
+    under `evaluate()`); the complete `EllipticE(−∞) = +∞` and
+    `EllipticE(+∞) = ~oo` (the value tends to `i·∞`, an infinite value in
+    a non-real direction, which the engine spells `~oo`); the incomplete
+    forms stay symbolic at an infinite operand (`EllipticF(~oo, m)`
+    answered `~oo` through the kernel).
+  - **`AGM(a, +∞) = +∞`** for a positive real a, now under `evaluate()`
+    too; `AGM(a, −∞)` and `AGM(a, ~oo)` are `~oo` (non-real direction /
+    the modulus rule); `AGM(0, ∞) = 0` (zero annihilates the AGM); two
+    infinite operands are `NaN`.
+  - **`Beta`**: 0 at every infinity (including `~oo`, which answered
+    `NaN`) against a positive-integer partner, 0 at `+∞` against a finite
+    partner with a positive real part, `NaN` otherwise. The incomplete
+    `Gamma(+∞, z) = +∞` for a positive finite z; `Gamma(−∞, z)` is 0 for
+    z ≥ 1 and `+∞` for 0 < z < 1 (the `z^s` factor decides);
+    `Gamma(s, −∞)` and `Gamma(∞, ∞)` are `NaN` (the latter stayed
+    symbolic). `PolyLog(s, 0) = 0` for an infinite order too.
+  - **The parameter-heavy heads** (`Hypergeometric2F1`,
+    `Hypergeometric1F1`, `AppellF1`, `PolyLog` at an infinite argument,
+    the incomplete elliptic integrals, `JacobiTheta`) stay symbolic at an
+    infinite operand: their limits depend on the parameters through
+    connection formulas the engine does not implement
+    (`Hypergeometric1F1(1, 2, +∞).N()` answered `+∞` by kernel overflow).
+    Two exceptions, the cusp values of the modular heads:
+    `DedekindEta(i∞) = 0` and `EisensteinE(2k, i∞) = 1` (the engine boxes
+    `i·∞` as `~oo`).
+  - **A complex operand no longer loses its imaginary part** in the
+    two-argument numeric dispatcher: `Beta(1 + 2i, 2).N()` answered
+    `B(1, 2)`, `PolyGamma(2, 1 + 2i).N()` answered ψ₂(1), and
+    `BesselJ(0, 1 + 2i).N()` answered `J₀(1)`. A head without a complex
+    kernel now stays symbolic for a non-real operand (`Beta`, the
+    polygammas, the Bessel and Airy functions, `Zeta`, `LambertW`).
+  - A `NaN` argument answers `NaN` for every operator above
+    (`PolyLog(NaN, z)` stayed inert).
+
 - **`Abs`, `Log` (with `Log2`, `Log10`, `Lb`, `Lg`), `Arctan`, `Arctan2`,
   `Root`, and `Sqrt`/`Ln` at complex infinity now declare their
   mathematical domains**, completing the elementary functions. The values

@@ -58,8 +58,6 @@ import {
 import { typeToString } from '../../src/common/type/serialize';
 import {
   negativeSign,
-  nonNegativeSign,
-  nonPositiveSign,
   positiveSign,
 } from '../../src/compute-engine/boxed-expression/sgn';
 import {
@@ -236,14 +234,6 @@ function frozenLogType(ops: ReadonlyArray<Expression>): Type {
   return x.type.matches('complex')
     ? parseType('complex | signed_infinity')
     : 'number';
-}
-
-/** Frozen copy of `gammaPoleType` (library/type-handlers.ts). */
-function frozenGammaPoleType(x: Expression | undefined): Type {
-  if (!x || x.isNaN) return 'number';
-  if (x.isInteger === true && nonPositiveSign(frozenOperandSgn(x)) === true)
-    return 'number';
-  return frozenNumericTypeHandler([x]);
 }
 
 /** Frozen copy of `poleReciprocalType` (library/type-handlers.ts). */
@@ -469,32 +459,14 @@ export const LEGACY_TYPE_HANDLERS: Record<
   },
 
   // From library/arithmetic.ts, pre-conversion (commit 68238141) — the
-  // once-O7-held Γ family, factorials and log heads.
-  Gamma: (ops) =>
-    ops.length === 1
-      ? frozenGammaPoleType(ops[0])
-      : frozenNumericTypeHandler(ops),
-  GammaLn: (ops) => frozenGammaPoleType(ops[0]),
-  Digamma: (ops) => frozenGammaPoleType(ops[0]),
-  Trigamma: (ops) => frozenGammaPoleType(ops[0]),
-  PolyGamma: ([n, x]) =>
-    x?.isInteger === true && nonPositiveSign(frozenOperandSgn(x)) === true
-      ? 'number'
-      : frozenNumericTypeHandler([n, x]),
-  Factorial: ([x]) => {
-    const s = x ? frozenOperandSgn(x) : undefined;
-    if (x?.isInteger === true && nonNegativeSign(s) === true)
-      return 'integer';
-    if (x?.isInteger === true && negativeSign(s) === true) return 'number';
-    return frozenNumericTypeHandler([x]);
-  },
-  Factorial2: ([x]) => {
-    const s = x ? frozenOperandSgn(x) : undefined;
-    if (x?.isInteger === true && nonNegativeSign(s) === true)
-      return 'integer';
-    if (x?.isInteger === true && negativeSign(s) === true) return 'number';
-    return frozenNumericTypeHandler([x]);
-  },
+  // once-O7-held log heads. The Γ family (`Gamma`, `GammaLn`, `Digamma`,
+  // `Trigamma`, `PolyGamma`, `Factorial`, `Factorial2`) was here until its
+  // Phase F Contract B flip (2026-09-01): each now declares the carrier
+  // `complex | infinity` with `nanBehavior: 'propagate'`, and its `'types'`
+  // handler deliberately answers DIFFERENTLY from the frozen legacy shape
+  // (it declines on a provably-NaN operand, where the legacy shape claimed
+  // `number`; the derived application type is `number` either way), so
+  // the differential parity no longer applies.
   Ln: (ops) => frozenElementaryFunctionType('Ln', ops),
   Log: (ops) => frozenElementaryFunctionType('Log', ops),
 
@@ -524,21 +496,16 @@ export const LEGACY_TYPE_HANDLERS: Record<
   // claiming `number`/`complex`, and the component-wise Gaussian arms are
   // gone with the carrier), so the differential parity no longer applies.
   Fract: ([x]) => frozenNumericTypeHandler([x]),
-  LambertW: (ops) => frozenNumericTypeHandler(ops),
-  BesselJ: (ops) => frozenNumericTypeHandler(ops),
-  BesselY: (ops) => frozenNumericTypeHandler(ops),
-  BesselI: (ops) => frozenNumericTypeHandler(ops),
-  BesselK: (ops) => frozenNumericTypeHandler(ops),
-  AiryAi: (ops) => frozenNumericTypeHandler(ops),
-  AiryBi: (ops) => frozenNumericTypeHandler(ops),
-  AiryAiPrime: (ops) => frozenNumericTypeHandler(ops),
-  AiryBiPrime: (ops) => frozenNumericTypeHandler(ops),
+  // `LambertW`, the four Bessel heads, the four Airy heads and `Zeta` were
+  // here until their Phase F Contract B flip (2026-09-01): each now
+  // declares the carrier `complex | infinity` with `nanBehavior:
+  // 'propagate'`, and its `'types'` handler declines on a provably-NaN
+  // operand (the frozen shape claimed `number`; the derived application
+  // type is `number` either way), so the differential parity no longer
+  // applies.
   ElementMax: (ops) => frozenNumericTypeHandler(ops),
   ElementMin: (ops) => frozenNumericTypeHandler(ops),
   Clamp: (ops) => frozenNumericTypeHandler(ops),
-  // ζ(1) is the pole of the Riemann zeta function (the harmonic series
-  // diverges), so the argument literal 1 takes the claim to `number`.
-  Zeta: ([x]) => (x?.isSame(1) ? 'number' : frozenNumericTypeHandler([x])),
   Negate: ([x]) => frozenNegateNumericType(x.type.type),
   Measurement: frozenMeasurementType,
   Max: (ops) => frozenExtremumType(ops),

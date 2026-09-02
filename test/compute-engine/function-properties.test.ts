@@ -75,8 +75,12 @@ describe('ANALYTIC-PROPERTY METADATA STORE (ROADMAP item 7)', () => {
       // Gamma already returns ComplexInfinity at its poles; unchanged.
       expect(ce.expr(['Gamma', -1]).N().toString()).toBe('~oo');
       expect(ce.expr(['Gamma', 0]).N().toString()).toBe('~oo');
-      // Zeta returns a directed +oo at s = 1; the override must not touch it.
-      expect(ce.expr(['Zeta', 1]).N().toString()).toBe('+oo');
+      // Zeta answers its pole `~oo` at s = 1 on both routes (the pole of
+      // `1/(s − 1)` has no sign: ζ(1 ± 10⁻⁹) = ±10⁹; `.N()` used to answer
+      // the kernel's `+oo`, ruled a wrong value 2026-09-01); the override
+      // must not touch it.
+      expect(ce.expr(['Zeta', 1]).N().toString()).toBe('~oo');
+      expect(ce.expr(['Zeta', 1]).evaluate().toString()).toBe('~oo');
     });
 
     test('non-pole arguments are unaffected', () => {

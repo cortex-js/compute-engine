@@ -351,11 +351,15 @@ describe('TYPE AUDIT: integral special functions with unproven-real operands', (
     expect(ce.box(['SinIntegral', 'u']).type.matches('real')).toBe(false);
     expect(ce.box(['CosIntegral', 'u']).type.toString()).toBe('number');
     // Real operands keep their claims. Si is bounded, so it claims the finite
-    // reals; Ci has a pole at 0 (`Ci(0) = −∞`), so it has to claim the
-    // EXTENDED real line — the bare name `real` denotes the finite reals and
-    // would exclude the pole.
+    // reals. Ci is real only on the NON-NEGATIVE axis (a negative argument
+    // gives the principal value `Ci(x) + iπ`, ruled 2026-09-01), so a real
+    // operand of unknown sign keeps `number`; a proven non-negative one has
+    // a pole at 0 (`Ci(0) = −∞`), so it claims the EXTENDED real line — the
+    // bare name `real` denotes the finite reals and would exclude the pole.
     expect(typeOf(['SinIntegral', 'r'])).toBe('real');
-    expect(typeOf(['CosIntegral', 'r'])).toBe('real | signed_infinity');
+    expect(typeOf(['CosIntegral', 'r'])).toBe('number');
+    ce.declare('ciArg', 'real<0..>');
+    expect(typeOf(['CosIntegral', 'ciArg'])).toBe('real | signed_infinity');
     const ciPole = ce.box(['CosIntegral', 0]);
     expect(ciPole.evaluate().isInfinity).toBe(true);
     expect(ciPole.evaluate().type.matches(ciPole.type)).toBe(true);
@@ -370,9 +374,14 @@ describe('TYPE AUDIT: integral special functions with unproven-real operands', (
       expect(at.evaluate().isInfinity).toBe(true);
       expect(at.evaluate().type.matches(at.type)).toBe(true);
     }
-    // Chi has a pole at 0 as well as Chi(±∞) = +∞, so proving the argument
-    // finite does not buy a finite claim.
-    expect(typeOf(['CoshIntegral', 'r'])).toBe('real | signed_infinity');
+    // Chi is real only on the NON-NEGATIVE axis (a negative argument gives
+    // the principal value `Chi(x) + iπ`, ruled 2026-09-01), so a real
+    // operand of unknown sign keeps `number`. A proven non-negative one has
+    // a pole at 0 as well as Chi(+∞) = +∞, so proving the argument finite
+    // does not buy a finite claim.
+    expect(typeOf(['CoshIntegral', 'r'])).toBe('number');
+    ce.declare('chiArg', 'real<0..>');
+    expect(typeOf(['CoshIntegral', 'chiArg'])).toBe('real | signed_infinity');
     const chiPole = ce.box(['CoshIntegral', 0]);
     expect(chiPole.evaluate().isInfinity).toBe(true);
     expect(chiPole.evaluate().type.matches(chiPole.type)).toBe(true);

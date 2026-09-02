@@ -910,6 +910,188 @@ for future corner-value rulings: grep for callers that DELEGATE to the
 head with raw components — they can feed it a representation, not a
 value.
 
+**Batch 8 — the Γ and special-function family (36 heads: `Gamma`,
+`GammaLn`, `Factorial`, `Factorial2`, `Digamma`, `Trigamma`, `PolyGamma`,
+`Zeta`, `Beta`, `LambertW`, the four Bessel and four Airy heads, the four
+trigonometric integrals, `ExpIntegralEi`, `LogIntegral`, and the 14 heads
+of `library/special-functions.ts`) — IMPLEMENTED 2026-09-01/02.** Survey
+first (every head, every exceptional point — 0, the negative integers,
+`±∞`, `~oo`, NaN, `i`, `1 + 2i`, `∞ + i` — on all three routes; the
+survey table is reproduced by the family pin block in
+`test/compute-engine/error-model.test.ts`), then every claimed limit verified numerically at
+10², 10⁴, 10⁶ and on both sides of each pole, then eight rulings put as
+plain-language questions (Arno, 2026-09-01), each recommendation ratified:
+
+1. **The Γ-family convention for the whole batch.** Every numeric slot
+   takes the carrier `complex | infinity`, and a point with no limit
+   answers `NaN` — never a boxing error (the trig convention). Rationale:
+   `Gamma(−∞) = NaN` was ruled 2026-08-31 and the derived heads must agree
+   with the family head; every kernel already answered NaN at those
+   points, so the blast radius is smallest; and the three Fungrim
+   identities at an infinity (`PolyGamma(m, +∞)` 1cbe83,
+   `DedekindEta(i∞)` 6b9935, `EisensteinE(2k, i∞)` ad9ba2) stay boxable.
+2. **The verified value table** (the ROADMAP polygamma item closes with
+   it): `ψ(+∞) = +∞`, `ψ⁽ⁿ⁾(+∞) = 0` for n ≥ 1; every polygamma pole is
+   `~oo` for every order (the engine folds `1/0²` to `~oo`; Mathematica
+   agrees); `Zeta(1) = ~oo` on both routes (ζ(1 ± 10⁻⁹) = ±10⁹, so the
+   `.N()` answer `+oo` was wrong), `Zeta(+∞) = 1`; `W₀(+∞) = +∞`,
+   `W₀(−∞)` = the `Ln(−∞)` treatment (W₀(−10¹²) = 24.4 + 3.02i, the
+   imaginary part tending to π; `.N()` answered `−∞` because the real
+   kernel passes a non-finite argument through), `W(~oo) = ~oo`;
+   `J_n(±∞) = Y_n(±∞) = K_n(+∞) = 0`, `I_n(+∞) = +∞`, `I_n(−∞) = (−1)ⁿ∞`
+   (I₁(−100) = −1.07·10⁴²); `Ai(±∞) = Bi(−∞) = Ai′(+∞) = 0`,
+   `Bi(+∞) = Bi′(+∞) = +∞`, `Ai′(−∞)`/`Bi′(−∞)` NaN (amplitude grows like
+   |x|^(1/4): 17.7 at −10⁶); `K(±∞) = K(~oo) = 0` (K(10⁶) = 0.0016 −
+   0.008i); `E(−∞) = +∞`; `B(+∞, b) = 0` for Re b > 0 (B(10⁶, ½) =
+   0.0018; B(10⁶, −½) = −3545 so anything else is NaN), 0 at every
+   infinity against a positive-integer partner; `Γ(+∞, z) = +∞`,
+   `Γ(−∞, z) = 0` for finite z > 0, `Γ(s, −∞)` NaN (the sign alternates
+   with the parity of s).
+3. **`LambertW` outside its real branch stays symbolic** (`W₀(−1)`,
+   `W₋₁(0.5)`): the value is a finite complex number the real kernels
+   cannot compute; the old `NaN` misreported a capability gap as an
+   indeterminate value. (A complex Halley kernel is a feature, not taken.)
+4. **The Bessel ORDER slot is finite-only** (`complex`): `BesselJ(+∞, 1)`
+   is a boxing error. Nobody means an infinite order, and the limits there
+   depend on the order in which the two slots go to infinity.
+5. **A limit that is an infinite value in a NON-REAL direction is spelled
+   `~oo`** — the engine's own spelling of `i·∞` (`Complex(0, +∞)` boxes to
+   `~oo`): `EllipticE(+∞)` (tends to i·∞: E(10⁶) = −0.02 + 1000.1i),
+   `BesselK(n, −∞)` (∓i·∞), `AGM(a, −∞)` (∞·e^{iθ}), `LogIntegral(−∞)`
+   (both components of `Ei(ln x + iπ)` diverge).
+6. **Anonymous infinities (`∞ + i`) answer NaN uniformly** across the
+   batch's heads (they answered NaN, `~oo` or stayed inert depending on the
+   kernel), detected with `hasInfiniteComponent`; the batch-7 heads keep
+   their own treatment.
+7. **The parameter-heavy heads stay symbolic at an infinite operand**
+   (`Hypergeometric2F1`, `Hypergeometric1F1`, `AppellF1`, `PolyLog` at an
+   infinite argument, the incomplete elliptic integrals, `JacobiTheta`):
+   their limits go through connection formulas the engine does not
+   implement (`₂F₁(1,1;2;z) → 0` while `₂F₁(−1,1;2;z)` diverges) — the
+   `Zeta(3)` class. `Hypergeometric1F1(1, 2, +∞).N()` had answered `+∞` by
+   kernel overflow. Two exceptions at the cusp of the upper half-plane,
+   which the engine spells `~oo`: `DedekindEta(~oo) = 0` and
+   `EisensteinE(2k, ~oo) = 1` (the Fungrim identities).
+8. **`CosIntegral` and `CoshIntegral` take the principal value on the
+   negative axis** (`Ci(−x) = Ci(x) + iπ`, Mathematica's value and the
+   engine's own `Ln(−1) = iπ` convention) instead of the documented
+   "real part only" kernel convention; so `Ci(−∞) = iπ` (the batch-5
+   finite-imaginary-at-a-real-infinity precedent) and `Chi(−∞)` takes the
+   `Ln(−∞)` treatment. Consequence for the type handlers: a real operand
+   of unknown sign claims `number`; a proven non-negative one keeps
+   `real | signed_infinity`.
+
+What shipped, and what the batch measured:
+
+- **A shared classifier**, `infinitePoint` (new file
+  `boxed-expression/infinite-point.ts`): `'+oo' | '-oo' | '~oo' |
+  'anonymous' | undefined`, asked of the numeric value (never of the
+  machine projections — the batch-7 `10^1000` trap). Every handler of the
+  batch consults it BEFORE numericizing, so the exceptional points are
+  decided by the handler's own arms on both routes instead of by whatever
+  the kernel returns for an `Infinity` argument. Per-family value tables:
+  `infiniteGammaFamilyValue` (extended with the anonymous arm),
+  `polygammaValueAtExceptionalPoint`, `besselValueAtExceptionalPoint` +
+  `evaluateBessel`, `airyValueAtInfinity`, `betaValueAtInfinity`,
+  `incompleteGammaValueAtInfinity` (library/arithmetic.ts);
+  `symbolicAtInfinity` and `agmValueAtInfinity`
+  (library/special-functions.ts).
+- **A general dispatcher defect fixed**: `apply2` (boxed-expression/apply.ts)
+  fell through to the REAL branches for a complex operand when the head
+  had no complex kernel, reading only `.re` — so `Beta(1 + 2i, 2).N()`
+  answered `B(1, 2)`, `PolyGamma(2, 1 + 2i).N()` answered ψ₂(1) and
+  `BesselJ(0, 1 + 2i).N()` answered `J₀(1)`. It now stays symbolic (`apply`
+  and `applyN` already did). Callers outside the batch that lacked a
+  complex kernel (`Mod`, `Binomial`) go from a wrong value to symbolic.
+- **Seams, measured**: only `Factorial` has a `canonical` handler, so its
+  seam is the evaluate handler; every other head validates at BOXING (the
+  `Erf` seam; `Zeta("x")` is invalid at creation, `BesselJ(+∞, 1)` too).
+  With ruling 1 there is no off-carrier numeric point except the Bessel
+  order slot, so the seams carry only NaN propagation — which now reaches
+  `PolyLog(NaN, z)` (it stayed inert) through the dispatch gate.
+- **Type sharpness, measured and recorded rather than claimed**: every
+  `'types'`-shape handler of the batch declines on a provably-NaN operand
+  (the batch-4/5 convention), but the derived claim stays `number`, not
+  the sharp `nan`: the result-adjustment seam adds the `nan` arm only to a
+  NaN-FREE declared result (`typeHasNanFreeNumericCell`), and these heads
+  keep the wide `number` result for the compiled lanes
+  (`resultIsComplexValued`) — exactly `Sin(NaN)`'s situation, unlike
+  `Sinc`/`Erf`, whose declared result is `complex`. The first draft of the
+  batch's comments claimed the sharp `nan`; the probe refuted it and the
+  comments say the measured fact (`specialFunctionType`,
+  library/arithmetic.ts). ⚠️ For future flips: a proven-NaN decline buys a
+  sharp `nan` ONLY on a NaN-free declared result.
+- **Kernel-gap honesty**: `BesselJ(1/2, 1)`, `BesselY(0, −1)`,
+  `LambertW(−1)` answered `NaN` where the kernel was merely unimplemented
+  (non-integer order; the complex value on the negative axis; the
+  complex branch value). They stay symbolic now, the `Zeta(i)` /
+  `Digamma(i)` convention this batch keeps for every real-only kernel.
+- **`Γ(s, +∞) = 0` for a SYMBOLIC s** regressed in the first draft (the
+  new helper required a literal `s`) and was caught by the existing
+  special-functions pin; restored (a parameter is implicitly finite
+  unless its type says otherwise).
+- **The legacy shadow fixture** loses its Γ-family, `LambertW`, Bessel,
+  Airy and `Zeta` rows (each handler now declines where the frozen shape
+  claimed `number`), and the `gammaPoleType` twins table records the one
+  NaN row as a handler-shape divergence, not a claim change.
+- Pins swept: the `Zeta(1).N() = +oo` pin (function-properties.test.ts —
+  the pin's own comment called it "a directed +oo"; the pole has no sign),
+  the `LambertW` out-of-domain `NaN` pins, the `Ci(−2)`/`Chi(−2)`
+  real-part pins, the `Γ(∞, ∞)` stays-symbolic pin, and the Ci/Chi type
+  audit rows. Family pins added to `error-model.test.ts` ("the Γ and
+  special-function family"). Fungrim: the three infinite-argument
+  identities stay boxable (`i·∞` boxes to `~oo`, in the carrier); 3/3
+  suites green. Canaries green (both sinc limits, `∫₀^∞ e^(−x)`,
+  `∫₀^∞ sin(x)/x` under `.N()`, `lim ln(1/x²)` at 0, `∫₀^∞ 1/(1+x²)`,
+  `lim (1+1/n)^n`, `√2·√2`, `Γ(5) = 24`, `5! = 120`).
+- Not in this batch, by ruling: a complex `LambertW` kernel; `LogIntegral`
+  on the negative axis (li(−1) = 0.0737 + 3.42i exists through the complex
+  `Ei` kernel — a capability, not a defect; the application stays
+  symbolic there); the order-slot limits of the Bessel heads (ruling 4).
+- **Dual review (Codex 4 high + 1 medium + 1 low; Claude 1 medium + 1
+  low), every finding applied but one:**
+  1. FIXED (Codex, high): `Γ(−∞, z)` was encoded as 0 for EVERY positive
+     finite z from a single verification at z = 5. The integrand's `z^s`
+     factor decides: 0 for z ≥ 1, `+∞` for 0 < z < 1 (Γ(−10⁴, 0.9)
+     overflows the double range; Γ(−10⁴, 1.1) = 0). A "verify math
+     empirically" lapse — one sample point is not a limit table.
+  2. FIXED (Codex, high): `AGM(0, ∞)` was NaN ("indeterminate"); zero is
+     an annihilator of the AGM (`AGM(0, b) = 0` identically, the kernels
+     agree), so the value is 0.
+  3. FIXED (Codex, high): the polygamma pole arm ignored the order, so
+     `PolyGamma(−2, 0)` and `PolyGamma(m, 0)` (symbolic m) folded to
+     `~oo` although the kernels reject a negative order and the
+     generalized negative-order polygammas do not all keep the poles. The
+     pole arm now needs a known non-negative order; the pin that said
+     "the pole needs no order" was wrong and was flipped.
+  4. FIXED (Codex, medium): the PolyLog infinity hold ran before the
+     `Liₛ(0) = 0` reduction, so `PolyLog(+∞, 0)` stayed symbolic; the
+     zero-argument value is decided first.
+  5. FIXED (Claude, medium): `EisensteinE` and `JacobiTheta` answered NaN
+     for an anonymous infinity BEFORE validating their discrete parameter
+     (weight / index / derivative order), so an invalid parameter — which
+     leaves the application symbolic at every finite τ — got a decided
+     value at `∞ + i`. The parameters are validated first now.
+  6. FIXED (Claude, low): the `LambertW` comment claimed the −1 branch
+     stays symbolic at EVERY infinity while the code answers `~oo` and
+     NaN for every branch (correctly: the modulus rule holds on every
+     branch); the comment now says what the code does.
+  7. FIXED (Codex, low): the new comments carried date stamps and
+     behavior-history clauses ("it used to answer NaN"), against
+     `docs/COMMENTING-GUIDELINES.md` ("Keep comments durable"); the pass
+     removed them, keeping the numerical justifications and one pointer
+     to this record per head.
+  8. REFUTED-BY-RULING (Codex, high): "`DedekindEta(~oo) = 0` and
+     `EisensteinE(2k, ~oo) = 1` equate the direction-less `~oo` with the
+     vertical cusp `i·∞`; along τ = n + i the functions do not approach
+     those values." The mathematics is right, and it is exactly the
+     trade-off ruling 7 took: the engine boxes `i·∞` AS `~oo` (there is no
+     directed complex infinity in the value model), the functions are
+     defined only on the upper half-plane whose single point at infinity
+     is the cusp, and without the fold the two Fungrim identities are
+     unverifiable. The code comments at both heads state the reading.
+     Reopen if a directed-infinity value ever lands.
+
 ### Phase F — signature flips, operator-by-operator
 
 Each flip (e.g. `Heaviside: (real) -> rational<0..1>`, `total`) is its

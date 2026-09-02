@@ -1477,6 +1477,272 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     ).toBe('Arctan');
   });
 
+  test('the Γ and special-function family declare their domains', () => {
+    // Signature flips of 2026-09-01 (batch 8), with eight rulings taken
+    // first: (1) the Γ-family convention for the whole batch — every
+    // numeric slot takes the carrier `complex | infinity` and a point with
+    // no limit answers NaN, never a boxing error; (2) the verified limit
+    // table (polygammas, Zeta, LambertW, Bessel, Airy, EllipticK/E, Beta,
+    // incomplete Γ); (3) LambertW outside a real branch stays symbolic;
+    // (4) the Bessel ORDER slot is finite-only; (5) a limit that is an
+    // infinite value in a non-real direction is spelled `~oo`; (6) an
+    // anonymous infinity (`∞ + i`) answers NaN; (7) the parameter-heavy
+    // heads stay symbolic at an infinite operand, except the two cusp
+    // values; (8) Ci/Chi take the principal value on the negative axis.
+    // Every pin below holds on evaluate() AND N().
+    const ce2 = new ComputeEngine();
+    const POS = 'PositiveInfinity';
+    const NEG = 'NegativeInfinity';
+    const COO = 'ComplexInfinity';
+    const ANON = ['Complex', POS, 1];
+    const both = (expr: any, check: (v: any) => boolean) => {
+      expect(check(ce2.box(expr).evaluate())).toBe(true);
+      expect(check(ce2.box(expr).N())).toBe(true);
+    };
+    const isCoo = (v: any) => v.isSame(ce2.ComplexInfinity);
+    const isNaNv = (v: any) => isNaNValue(ce2, v);
+    const is = (n: any) => (v: any) => v.isSame(n);
+    const isPos = is(ce2.PositiveInfinity);
+    const isNeg = is(ce2.NegativeInfinity);
+    const symbolic = (head: string) => (v: any) => v.operator === head;
+
+    // The Γ family keeps its 2026-08-31 values; an anonymous infinity is
+    // NaN on every head now (Factorial2 used to stay inert there).
+    for (const h of ['Gamma', 'GammaLn', 'Factorial', 'Factorial2']) {
+      both([h, POS], isPos);
+      both([h, NEG], isNaNv);
+      both([h, COO], isNaNv);
+      both([h, ANON], isNaNv);
+      both([h, 'NaN'], isNaNv);
+    }
+    // The incomplete Γ(s, z): `Γ(s, +∞) = 0` (a symbolic s included),
+    // `Γ(±∞, z)` for a positive finite z, NaN for the rest.
+    both(['Gamma', 2, POS], is(0));
+    expect(ce2.parse('\\Gamma(s, \\infty)').evaluate().isSame(0)).toBe(true);
+    both(['Gamma', POS, 5], isPos);
+    both(['Gamma', NEG, 5], is(0)); // z ≥ 1: the z^s factor vanishes
+    both(['Gamma', NEG, 1], is(0));
+    both(['Gamma', NEG, ['Rational', 1, 2]], isPos); // 0 < z < 1: it explodes
+    both(['Gamma', 2, NEG], isNaNv);
+    both(['Gamma', POS, POS], isNaNv);
+    both(['Gamma', 2, COO], isNaNv);
+
+    // The polygammas (the ROADMAP item): `ψ(+∞) = +∞`, `ψ⁽ⁿ⁾(+∞) = 0` for
+    // n ≥ 1, `~oo` at every pole for every order (the pole used to fold
+    // only under N() for Digamma and answered NaN for the others), NaN at
+    // −∞, ~oo and an anonymous infinity.
+    both(['Digamma', POS], isPos);
+    both(['Trigamma', POS], is(0));
+    both(['PolyGamma', 2, POS], is(0));
+    both(['PolyGamma', 3, POS], is(0));
+    for (const x of [0, -1, -7]) {
+      both(['Digamma', x], isCoo);
+      both(['Trigamma', x], isCoo);
+      both(['PolyGamma', 2, x], isCoo);
+      // The pole arm needs a KNOWN non-negative order: the kernels reject
+      // a negative order, and a symbolic one may be negative.
+      both(['PolyGamma', 'm', x], symbolic('PolyGamma'));
+      both(['PolyGamma', -2, x], symbolic('PolyGamma'));
+    }
+    for (const h of [['Digamma'], ['Trigamma'], ['PolyGamma', 2]]) {
+      both([...h, NEG], isNaNv);
+      both([...h, COO], isNaNv);
+      both([...h, ANON], isNaNv);
+    }
+    // A symbolic order at +∞ depends on the order: stays symbolic.
+    both(['PolyGamma', 'm', POS], symbolic('PolyGamma'));
+    // No complex kernel: a non-real argument stays symbolic on N() too
+    // (PolyGamma(2, 1+2i).N() used to answer ψ₂(1), the imaginary part
+    // silently dropped by the two-argument dispatcher).
+    both(['PolyGamma', 2, ['Complex', 1, 2]], symbolic('PolyGamma'));
+
+    // Zeta: the pole is `~oo` on both routes (N() answered +∞), `ζ(+∞) = 1`
+    // (was NaN), no limit at −∞ (the trivial zeros alternate with huge
+    // values), none at ~oo.
+    both(['Zeta', 1], isCoo);
+    both(['Zeta', POS], is(1));
+    both(['Zeta', NEG], isNaNv);
+    both(['Zeta', COO], isNaNv);
+    both(['Zeta', ANON], isNaNv);
+
+    // Beta: 0 at every infinity against a positive-integer partner (the
+    // exact rational form; `Beta(~oo, 2)` answered NaN), 0 at +∞ against a
+    // finite partner with a positive real part, NaN otherwise; a non-real
+    // finite operand stays symbolic (N() used to answer B(1, 2) for
+    // B(1+2i, 2)).
+    both(['Beta', COO, 2], is(0));
+    both(['Beta', 2, NEG], is(0));
+    both(['Beta', POS, ['Rational', 1, 2]], is(0));
+    both(['Beta', POS, ['Rational', -1, 2]], isNaNv);
+    both(['Beta', NEG, ['Rational', 1, 2]], isNaNv);
+    both(['Beta', ANON, 2], isNaNv);
+    both(['Beta', ['Complex', 1, 2], 2], symbolic('Beta'));
+
+    // LambertW: `W₀(+∞) = +∞` folds under evaluate() (it folded only under
+    // N()); `W₀(−∞)` follows Ln(−∞) — symbolic under evaluate(), `∞ + iπ`
+    // under N() (N() used to answer −∞); `W(~oo) = ~oo`; outside a real
+    // branch the application stays symbolic (it used to answer NaN).
+    both(['LambertW', POS], isPos);
+    expect(ce2.box(['LambertW', NEG]).evaluate().operator).toBe('LambertW');
+    const wNeg = ce2.box(['LambertW', NEG]).N();
+    expect(wNeg.re).toBe(Infinity);
+    expect(wNeg.im).toBeCloseTo(Math.PI, 12);
+    both(['LambertW', COO], isCoo);
+    both(['LambertW', ANON], isNaNv);
+    both(['LambertW', -1], symbolic('LambertW'));
+    both(['LambertW', ['Rational', 1, 2], -1], symbolic('LambertW'));
+    both(['LambertW', NEG, -1], symbolic('LambertW'));
+
+    // Bessel: the ORDER slot is finite-only (a boxing error at ±∞ and ~oo);
+    // the argument slot has the verified limits, `~oo` for K at −∞ (the
+    // value tends to −i·∞), the poles of Y and K at 0, and NaN at ~oo.
+    // The kernels are real, integer-order kernels: a non-integer order, a
+    // non-real argument and a negative real argument for Y/K stay
+    // symbolic (they answered NaN; a complex argument was evaluated at its
+    // real part).
+    expect(ce2.box(['BesselJ', POS, 1]).isValid).toBe(false);
+    expect(ce2.box(['BesselI', COO, 1]).isValid).toBe(false);
+    for (const h of ['BesselJ', 'BesselY']) {
+      both([h, 0, POS], is(0));
+      both([h, 3, NEG], is(0));
+    }
+    both(['BesselI', 0, POS], isPos);
+    both(['BesselI', 2, NEG], isPos);
+    both(['BesselI', 1, NEG], isNeg);
+    both(['BesselK', 0, POS], is(0));
+    both(['BesselK', 0, NEG], isCoo);
+    both(['BesselY', 0, 0], isNeg);
+    both(['BesselK', 0, 0], isPos);
+    both(['BesselY', 1, 0], isCoo);
+    both(['BesselK', 2, 0], isCoo);
+    for (const h of ['BesselJ', 'BesselY', 'BesselI', 'BesselK']) {
+      both([h, 0, COO], isNaNv);
+      both([h, 0, ANON], isNaNv);
+      both([h, 0, 'NaN'], isNaNv);
+      both([h, 0, ['Complex', 1, 2]], symbolic(h));
+      both([h, ['Rational', 1, 2], 1], symbolic(h));
+    }
+    both(['BesselY', 0, -1], symbolic('BesselY'));
+    both(['BesselK', 0, -1], symbolic('BesselK'));
+
+    // Airy: Ai/Ai′ decay at +∞ and Bi/Bi′ grow; at −∞ Ai and Bi decay
+    // (amplitude |x|^(−1/4)) while Ai′/Bi′ oscillate with a growing
+    // amplitude (no limit); NaN at ~oo. All four answered NaN before.
+    both(['AiryAi', POS], is(0));
+    both(['AiryAiPrime', POS], is(0));
+    both(['AiryBi', POS], isPos);
+    both(['AiryBiPrime', POS], isPos);
+    both(['AiryAi', NEG], is(0));
+    both(['AiryBi', NEG], is(0));
+    both(['AiryAiPrime', NEG], isNaNv);
+    both(['AiryBiPrime', NEG], isNaNv);
+    for (const h of ['AiryAi', 'AiryBi', 'AiryAiPrime', 'AiryBiPrime']) {
+      both([h, COO], isNaNv);
+      both([h, ANON], isNaNv);
+    }
+
+    // The trigonometric integrals: Si keeps ±π/2; Ci/Chi take the
+    // PRINCIPAL value on the negative axis (`Ci(−x) = Ci(x) + iπ`; the
+    // kernels returned the real part alone), so `Ci(−∞) = iπ` (N()
+    // answered 0) and `Chi(−∞)` follows Ln(−∞) (it answered +∞); NaN at
+    // ~oo and at an anonymous infinity (Shi/Chi answered ~oo there).
+    // (The exact values numericize under N(), per the exactness contract.)
+    expect(ce2.box(['SinIntegral', POS]).evaluate().isSame(ce2.Pi.div(2))).toBe(true);
+    expect(ce2.box(['SinIntegral', POS]).N().re).toBeCloseTo(Math.PI / 2, 12);
+    expect(ce2.box(['CosIntegral', NEG]).evaluate().isSame(ce2.I.mul(ce2.Pi))).toBe(true);
+    const ciInf = ce2.box(['CosIntegral', NEG]).N();
+    expect(ciInf.re).toBe(0);
+    expect(ciInf.im).toBeCloseTo(Math.PI, 12);
+    const ciNeg = ce2.box(['CosIntegral', -2]).N();
+    expect(ciNeg.re).toBeCloseTo(0.4229808287748649, 12);
+    expect(ciNeg.im).toBeCloseTo(Math.PI, 12);
+    expect(ce2.box(['CoshIntegral', NEG]).evaluate().operator).toBe(
+      'CoshIntegral'
+    );
+    const chiNeg = ce2.box(['CoshIntegral', NEG]).N();
+    expect(chiNeg.re).toBe(Infinity);
+    expect(chiNeg.im).toBeCloseTo(Math.PI, 12);
+    for (const h of ['SinIntegral', 'CosIntegral', 'SinhIntegral', 'CoshIntegral']) {
+      both([h, COO], isNaNv);
+      both([h, ANON], isNaNv);
+    }
+    // A real operand of unknown sign no longer claims a real value for
+    // Ci/Chi; a proven non-negative one keeps the extended real line.
+    ce2.declare('sgnUnknown', 'real');
+    ce2.declare('nonNeg', 'real<0..>');
+    expect(ce2.box(['CosIntegral', 'sgnUnknown']).type.toString()).toBe('number');
+    expect(ce2.box(['CosIntegral', 'nonNeg']).type.toString()).toBe(
+      'real | signed_infinity'
+    );
+
+    // Ei and li: `Ei(~oo)` has no value (was symbolic); `li(−∞) = ~oo`
+    // (both components of `Ei(ln x + iπ)` diverge; was symbolic).
+    both(['ExpIntegralEi', POS], isPos);
+    both(['ExpIntegralEi', NEG], is(0));
+    both(['ExpIntegralEi', COO], isNaNv);
+    both(['ExpIntegralEi', ANON], isNaNv);
+    both(['LogIntegral', POS], isPos);
+    both(['LogIntegral', NEG], isCoo);
+    both(['LogIntegral', COO], isNaNv);
+    both(['LogIntegral', -1], symbolic('LogIntegral'));
+
+    // The elliptic integrals: K is 0 at every infinity (it stayed
+    // symbolic); the complete E is +∞ at −∞ and `~oo` at +∞ (the value
+    // tends to i·∞); the incomplete forms stay symbolic at an infinite
+    // operand (`EllipticF(~oo, 1/2)` answered ~oo through the kernel).
+    both(['EllipticK', POS], is(0));
+    both(['EllipticK', NEG], is(0));
+    both(['EllipticK', COO], is(0));
+    both(['EllipticK', ANON], isNaNv);
+    both(['EllipticE', NEG], isPos);
+    both(['EllipticE', POS], isCoo);
+    both(['EllipticE', COO], isCoo);
+    both(['EllipticF', COO, ['Rational', 1, 2]], symbolic('EllipticF'));
+    both(['EllipticE', POS, ['Rational', 1, 2]], symbolic('EllipticE'));
+    both(['EllipticPi', COO, ['Rational', 1, 2]], symbolic('EllipticPi'));
+
+    // AGM: +∞ against a positive real partner, `~oo` for a non-real
+    // direction (−∞, or ~oo), 0 against a zero partner (zero annihilates
+    // the AGM), NaN for two infinities.
+    both(['AGM', 1, POS], isPos);
+    both(['AGM', 1, NEG], isCoo);
+    both(['AGM', 1, COO], isCoo);
+    both(['AGM', 0, POS], is(0));
+    both(['AGM', COO, 0], is(0));
+    both(['AGM', POS, POS], isNaNv);
+    // `Liₛ(0) = 0` for every order, an infinite one included; the
+    // parameter-heavy heads stay symbolic for an invalid discrete
+    // parameter even at an anonymous infinity.
+    both(['PolyLog', POS, 0], is(0));
+    both(['EisensteinE', 3, ANON], symbolic('EisensteinE'));
+    both(['JacobiTheta', 9, ANON, 'ImaginaryUnit'], symbolic('JacobiTheta'));
+
+    // The parameter-heavy heads stay symbolic at an infinite operand
+    // (`₁F₁(1; 2; +∞)` answered +∞ by kernel overflow under N()); an
+    // anonymous infinity is NaN; the two cusp values of the modular heads
+    // (Fungrim 6b9935 and ad9ba2 — `i·∞` boxes to `~oo`).
+    both(['Hypergeometric2F1', 1, 1, 2, POS], symbolic('Hypergeometric2F1'));
+    both(['Hypergeometric1F1', 1, 2, POS], symbolic('Hypergeometric1F1'));
+    both(['PolyLog', 2, COO], symbolic('PolyLog'));
+    both(['PolyLog', 0, POS], symbolic('PolyLog')); // the reduction would answer ∞/(1−∞)
+    both(['JacobiTheta', 3, POS, 'ImaginaryUnit'], symbolic('JacobiTheta'));
+    both(['Hypergeometric2F1', 1, 1, 2, ANON], isNaNv);
+    both(['DedekindEta', ['Multiply', 'ImaginaryUnit', POS]], is(0));
+    both(['EisensteinE', 4, ['Multiply', 'ImaginaryUnit', POS]], is(1));
+    both(['DedekindEta', POS], symbolic('DedekindEta'));
+    both(['EisensteinE', 4, ANON], isNaNv);
+
+    // Seams: no head of the batch has a `canonical` handler except
+    // `Factorial`, so a proven off-carrier operand is rejected at BOXING
+    // (the Bessel order slot above; a string anywhere), and NaN
+    // propagates through the dispatch gate on every head.
+    expect(ce2.box(['Zeta', { str: 'x' }]).isValid).toBe(false);
+    expect(ce2.box(['Factorial', { str: 'x' }]).evaluate().operator).toBe('Error');
+    both(['Beta', 'NaN', 2], isNaNv);
+    both(['AGM', 1, 'NaN'], isNaNv);
+    both(['PolyLog', 'NaN', ['Rational', 1, 2]], isNaNv); // used to stay inert
+  });
+
   test('compile(Heaviside)(NaN) agrees with the interpreter now', () => {
     // The compiled lane was fixed first (2026-08-28) under ratified Contract
     // B's derived `propagate` default, which left a route divergence: the
