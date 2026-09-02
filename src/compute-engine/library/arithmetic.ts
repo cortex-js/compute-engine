@@ -128,7 +128,6 @@ import {
   broadcastCellType,
   broadcastResultType,
   collectionElementType,
-  isNonRealNumber,
   negateNumericType,
   nonNegativeRangeType,
   positiveRangeType,
@@ -3694,12 +3693,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // real), so its finite integer powers are nonzero. A *pure-imaginary*
         // base cycles with period 4: (βi)^p is real with sign (-1)^(p/2) for
         // even integer p, and pure imaginary — hence unsigned — for odd p.
-        // (The two `isFinite` reads are implied by the tier tests beside
-        // them — every bare numeric name denotes a finite value — and are
-        // kept as an explicit statement of what the rule needs: `β^∞` is 0
-        // for |β| < 1, so neither operand may be infinite.)
+        // The proof is `isExtendedReal === false` (three-valued: a claimed
+        // `imaginary` refutes real-ness, a bare `complex` claim is a hedge —
+        // `Sqrt(x)` for an `x` of unknown sign, which IS 0 at `x = 0` — and
+        // decides nothing). (The two `isFinite` reads are implied by the
+        // tier tests beside them — every bare numeric name denotes a finite
+        // value — and are kept as an explicit statement of what the rule
+        // needs: `β^∞` is 0 for |β| < 1, so neither operand may be
+        // infinite.)
         if (
-          isNonRealNumber(a.type.type) &&
+          a.isExtendedReal === false &&
           a.isFinite === true &&
           b.isInteger === true &&
           b.isFinite === true
@@ -4446,12 +4449,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             : 'non-negative';
         }
         // x² of a pure-imaginary x is real and negative: (βi)² = -β², with
-        // β ≠ 0 since `imaginary` excludes 0. For any other finite non-real
-        // x, x² is nonzero but may be negative-real (x pure imaginary at
-        // runtime) or non-real, so only `not-zero` is sound — `unsigned`
-        // would claim a definite imaginary part.
+        // β ≠ 0 since `imaginary` excludes 0. For any other finite,
+        // PROVABLY non-real x (`isExtendedReal === false`; a bare `complex`
+        // claim is a hedge that may hold 0 and decides nothing), x² is
+        // nonzero but may be negative-real (x pure imaginary at runtime) or
+        // non-real, so only `not-zero` is sound — `unsigned` would claim a
+        // definite imaginary part.
         if (x.type.matches('imaginary')) return 'negative';
-        if (isNonRealNumber(x.type.type) && x.isFinite === true)
+        if (x.isExtendedReal === false && x.isFinite === true)
           return 'not-zero';
         if (x.isNaN) return 'unsigned';
         return undefined;

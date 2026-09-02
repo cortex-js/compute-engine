@@ -293,7 +293,13 @@
   symbol declared `number | string` or `any` answers `undefined` to
   `isNumber` (it answered `false`), and a symbol declared `complex`
   answers `undefined` to `isInteger` and `isRational` (it answered
-  `false`: `complex` contains the integers).
+  `false`: `complex` contains the integers). `isExtendedReal` follows the
+  same rule: a bare `complex` claim — a declared symbol, or `Sqrt(x)` for
+  a real `x` of unknown sign — is undecided (it answered `false`), while
+  `imaginary`, `NaN`, `~oo`, a string or a list still answer `false`. The
+  `Power` and `Square` sign folds now require that proof: `Sqrt(x)^2`
+  for such an `x` is no longer reported non-zero (it is 0 at `x = 0`); a
+  pure-imaginary base still is.
 
 - **The rational and parity family now declares its mathematical
   domains**: `Mod`, `Fract`, `Rationalize`, `ContinuedFraction`, `IsOdd`,

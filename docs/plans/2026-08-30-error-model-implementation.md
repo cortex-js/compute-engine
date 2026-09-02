@@ -1472,7 +1472,41 @@ alias re-wraps the `Add`/`Multiply` handlers' alias-preserving answers
 (`Multiply(2, L)` typed `list<nums>`); the lift path needs one alias
 policy end to end. Final full-suite gate for the ruling (main tree,
 post-review, box lock held): 648/648 suites, 31,323 tests, snapshot
-delta 0.
+delta 0. Committed as `d104a71f`.
+
+Follow-up ruling (Arno, same day): `isExtendedReal` follows the same
+three-valued rule. Both shapes already tested entailment and provable
+disjointness against the extended real line; the one arm that differed
+was the "historical definitive `false`" for a bare `complex` claim (and,
+on the symbol, a `false` fall-through for any other non-entailed type such
+as `number | string`). Both now end in `staticMembership(t,
+EXTENDED_REAL_TYPE)`; the symbol keeps its assumption-fact refutation
+(`NotElement(x, RealNumbers)` from `assume(Im(x) > 0)`) before it.
+`imaginary` stays `false` — it is provably disjoint from the extended
+line in this lattice. Pins in `membership-predicates.test.ts`. Dual
+review: Codex 1 low (a contradictory comment, fixed); Claude 1 medium +
+1 low + 1 nit. The medium: `isNonRealNumber` (`common/type/utils.ts`)
+still reads a bare `complex` claim as non-real — right for its
+documented job, the compiler's real-versus-complex LANE (a hedge must
+take the complex-shaped emission) — but the `Power` and `Square` sign
+folds used it as a mathematical proof and answered `not-zero` for
+`Sqrt(x)^2`, which is 0 at `x = 0`; both folds now key on
+`isExtendedReal === false`. `isEligibleRealRewrite`
+(function-properties) keeps it as a deliberate conservative bail. The
+low (the `=== false` ripple across the sign folds and the `:notreal`
+pattern tag degrades to `undefined`, never to a wrong verdict) is
+measured by the full-suite gate; the nit (a redundant `isSubtype` in the
+symbol getter) is kept for the textual parallel with the helper. The
+gate (pre-fold-fix code) found three pins of the old convention:
+`sgn-nonreal.test.ts` asserted `not-zero` for `w²` with `w` declared
+`complex` (now `undefined`: `w` may be 0), and `compile-complex.test.ts`
+asserted `promoted: true` for `√(x² + zf1²)` with `zf1: complex := 5` —
+the old `not-zero` from the declaration hid the value-based positive sign
+of `zf1²`; the radicand is now proven non-negative and the real kernel
+folds it to `x² + 25` with the right value (a genuinely complex
+assignment, `5i`, still promotes — pinned alongside). Final full-suite
+gate (main tree, post-review, box lock held): 648/648 suites, 31,325
+tests, snapshot delta 0.
 
 Final full-suite gate (main tree, post-review, box lock held): 647/647
 suites, 31,317 tests, snapshot delta 0.

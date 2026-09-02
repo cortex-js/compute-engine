@@ -67,6 +67,43 @@ describe('membership predicates are three-valued on function expressions', () =>
   });
 });
 
+describe('isExtendedReal follows the same three-valued rule', () => {
+  test('a bare `complex` claim is undecided, a disjoint claim is refuted', () => {
+    // A declared `complex` symbol and a `complex`-claiming compound used to
+    // answer `false` ("a general complex value"); `complex` contains the
+    // reals, so neither is a proof.
+    expect(ce.box('z').isExtendedReal).toBeUndefined();
+    expect(ce.box(['Sqrt', 'r']).isExtendedReal).toBeUndefined();
+    expect(ce.box('ns').isExtendedReal).toBeUndefined();
+    // Provably disjoint from the extended real line: refuted.
+    expect(ce.box('im').isExtendedReal).toBe(false);
+    expect(ce.box('s').isExtendedReal).toBe(false);
+    expect(ce.box(['List', 'r', 'r']).isExtendedReal).toBe(false);
+    expect(ce.NaN.isExtendedReal).toBe(false);
+    expect(ce.ComplexInfinity.isExtendedReal).toBe(false);
+    // Entailed: the finite reals and the signed infinities.
+    expect(ce.box('r').isExtendedReal).toBe(true);
+    expect(ce.box(['Add', 'r', 1]).isExtendedReal).toBe(true);
+    expect(ce.PositiveInfinity.isExtendedReal).toBe(true);
+    // An assumption still refutes what the type cannot.
+    const e = new ComputeEngine();
+    e.assume(e.parse('\\Im(w) > 0'));
+    expect(e.box('w').isExtendedReal).toBe(false);
+  });
+
+  test('the Power and Square sign folds need a PROOF of non-reality', () => {
+    // `Sqrt(r)` claims `complex` for a real `r` of unknown sign, and is 0
+    // at `r = 0`: its square is not provably non-zero (the fold used to
+    // answer `not-zero` from the bare `complex` claim).
+    expect(ce.box(['Power', ['Sqrt', 'r'], 2]).sgn).not.toBe('not-zero');
+    expect(ce.box(['Square', ['Sqrt', 'r']]).sgn).not.toBe('not-zero');
+    // A pure-imaginary base is provably non-real, hence non-zero.
+    expect(ce.box(['Power', 'im', 3]).sgn).toBe('unsigned');
+    expect(ce.box(['Power', 'im', 2]).sgn).toBe('negative');
+    expect(ce.box(['Square', 'im']).sgn).toBe('negative');
+  });
+});
+
 describe('a never-typed operand makes every application never', () => {
   test('a declare-then-assign function agrees with a library operator', () => {
     const e = new ComputeEngine();

@@ -7,7 +7,6 @@ import { isValidSymbol, validateSymbol } from '../../math-json/symbols.js';
 import type { Type, TypeString } from '../../common/type/types.js';
 import {
   isSignatureType,
-  isNonRealNumber,
   staticMembership,
   widen,
   narrow,
@@ -21,7 +20,6 @@ import {
 } from '../../common/type/subtype.js';
 import {
   EXTENDED_REAL_TYPE,
-  SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import type { OneOf } from '../../common/one-of.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -1205,8 +1203,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   // (`staticMembership`): entailed → `true`; provably disjoint → `false`;
   // overlap → `undefined`. A symbol declared `complex` is undecided, not a
   // non-integer: `complex` contains the integers in this lattice, and a
-  // `false` means "certainly not". (`isExtendedReal` still reads a declared
-  // `complex` as non-real — a different predicate with its own contract.)
+  // `false` means "certainly not". `isExtendedReal` below reads a declared
+  // `complex` the same way.
   get isInteger(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
@@ -1245,22 +1243,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       if (facts?.notIn.some((s) => isSymbol(s, 'RealNumbers'))) return false;
     }
 
-    // A type that shares no value with either disjunct of the extended real
-    // line refutes the predicate outright — `nan` is the case that matters
-    // here, since NaN is neither a finite real nor a signed infinity, and it
-    // reaches this point through the `number` arm below otherwise.
-    if (
-      provablyDisjoint(t.type, 'real') &&
-      provablyDisjoint(t.type, SIGNED_INFINITY_TYPE)
-    )
-      return false;
-
-    // `complex`/`imaginary`-typed symbols keep the historical definitive
-    // `false`. Other number types (`number`, a union, ...) overlap
-    // `real`, so without a refuting fact the answer is indeterminate
-    // (three-valued discipline, design §5.2).
-    if (t.matches('number') && !isNonRealNumber(t.type)) return undefined;
-    return false;
+    // Otherwise the same three-valued rule as `isInteger` and `isRational`
+    // (`staticMembership`): a type that shares no value with the extended
+    // real line — `nan`, `~oo`, `imaginary`, a string, a list — refutes the
+    // predicate; a type that merely overlaps it (`number`, bare `complex`,
+    // `number | string`) leaves it undecided. A declared `complex` is not a
+    // proof of a non-real value: `complex` contains the reals.
+    return staticMembership(t.type, EXTENDED_REAL_TYPE);
   }
 
   get re(): number {

@@ -1951,14 +1951,31 @@ describe('COMPILE COMPLEX - folded value of a complex-declared symbol', () => {
     ]);
   const expected = Math.sqrt(89) - 1;
 
-  it('auto promotes and computes the real value', () => {
+  it('auto computes the real value on the real lane', () => {
     ce.declare('zf1', 'complex');
     ce.assign('zf1', 5);
     const r = compile(witness('zf1'), { mode: 'auto', fallback: false });
     expect(r.success).toBe(true);
-    expect(r.promoted).toBe(true);
+    // No promotion: the sign analysis reads the ASSIGNED value through
+    // `zf1²` (positive), so the radicand is proven non-negative and the
+    // real kernel folds it to `x² + 25`. The `Power` sign fold used to
+    // answer `not-zero` from the `complex` declaration alone, which hid
+    // that proof and forced the complex lane; a declared `complex` is not
+    // a proof of a non-real value.
+    expect(r.promoted).toBe(false);
     expect(r.run!({ x: -8 })).toBeCloseTo(expected, 10);
     ce.forget('zf1');
+  });
+
+  it('auto promotes for a genuinely complex assigned value', () => {
+    ce.declare('zf5', 'complex');
+    ce.assign('zf5', ce.box(['Complex', 0, 5]));
+    const r = compile(witness('zf5'), { mode: 'auto', fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.promoted).toBe(true);
+    // √(64 − 25) − 1
+    expect(r.run!({ x: -8 })).toBeCloseTo(Math.sqrt(39) - 1, 10);
+    ce.forget('zf5');
   });
 
   it('complex mode computes the real value', () => {

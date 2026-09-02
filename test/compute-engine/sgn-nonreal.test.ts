@@ -36,19 +36,17 @@ describe('SGN OF POWERS OF NON-REAL BASES', () => {
     expect(ce.box(['Power', 'z', 'n']).sgn).toBe('not-zero');
   });
 
-  it('finite non-real base: integer powers are only not-zero', () => {
-    // w may be pure imaginary at runtime (w = 2i → w² = -4, real negative),
-    // so neither `negative` nor `unsigned` is sound.
-    expect(ce.box(['Power', 'w', 2]).sgn).toBe('not-zero');
-    expect(ce.box(['Power', 'w', 3]).sgn).toBe('not-zero');
-  });
-
-  it('bare `complex` base behaves like `complex`: only not-zero', () => {
-    // Since the finite-by-default flip the bare name `complex` excludes
-    // ComplexInfinity, so this base answers exactly as the `complex`
-    // one above: non-zero, with no sound sign claim. A base that admitted an
-    // infinity would be indeterminate instead, because ∞^-2 = 0.
-    expect(ce.box(['Power', 'c', 2]).sgn).toBe('not-zero');
+  it('a base declared `complex` is undecided: complex contains 0', () => {
+    // A declared `complex` is not a proof of a non-real value — `complex`
+    // contains the reals, 0 included — so `w²` may be 0 and no sign claim
+    // is sound (the fold used to answer `not-zero`, reading the declaration
+    // as "genuinely non-real"). The membership predicates are three-valued:
+    // `isExtendedReal` answers `undefined` for `w`, `false` only for a
+    // provably non-real type such as `imaginary`.
+    expect(ce.box('w').isExtendedReal).toBeUndefined();
+    expect(ce.box(['Power', 'w', 2]).sgn).toBeUndefined();
+    expect(ce.box(['Power', 'w', 3]).sgn).toBeUndefined();
+    expect(ce.box(['Power', 'c', 2]).sgn).toBeUndefined();
   });
 
   it('matches numeric ground truth for literal bases', () => {

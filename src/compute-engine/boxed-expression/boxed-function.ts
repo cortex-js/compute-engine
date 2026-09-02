@@ -108,7 +108,6 @@ import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
   COLLECTION_SHAPE_TYPE,
   EXTENDED_REAL_TYPE,
-  SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import {
   absorbNumericAbsence,
@@ -116,7 +115,6 @@ import {
   broadcastResultType,
   broadcastShapedResultType,
   functionResult,
-  isNonRealNumber,
   staticMembership,
   isSignatureType,
   isWildcardFunctionType,
@@ -2002,22 +2000,13 @@ export class BoxedFunction
     // interior point) is below neither `real` nor `+oo | -oo` alone,
     // so a member-wise test answered `false` for a value that is always an
     // extended real.
-    if (isSubtype(t.type, EXTENDED_REAL_TYPE)) return true;
-    // Definitely-not requires a PROOF: the type must share no value with
-    // either disjunct. `nan` qualifies (NaN is neither a finite real nor a
-    // signed infinity). A type that merely fails to entail real-ness —
-    // `number`, `complex` — overlaps the reals and is
-    // indeterminate.
-    if (
-      provablyDisjoint(t.type, 'real') &&
-      provablyDisjoint(t.type, SIGNED_INFINITY_TYPE)
-    )
-      return false;
-    // `complex`/`imaginary` types keep the historical definitive `false`,
-    // matching `BoxedSymbol.isExtendedReal`: an explicit complex type signals
-    // a general complex value even though `real` is below `complex`.
-    if (isNonRealNumber(t.type)) return false;
-    return undefined;
+    // Definitely-not requires a PROOF (`staticMembership`, the rule the
+    // other membership predicates follow): the type must share no value
+    // with the extended real line — `nan`, `~oo`, `imaginary`, a string, a
+    // list. A claim that merely fails to entail real-ness — `number`, and
+    // bare `complex`, which is a hedge for an operand of unknown sign
+    // (`Sqrt(x)`) and contains the reals — is undecided.
+    return staticMembership(t.type, EXTENDED_REAL_TYPE);
   }
 
   get isFunctionExpression(): true {
