@@ -497,6 +497,13 @@ export function functionResult(
 // the helper now agrees with them. Both spellings are pinned together in
 // `test/common/types.test.ts` so they cannot drift apart again.
 export function collectionElementType(type: Readonly<Type>): Type | undefined {
+  // A transparent alias of a collection IS that collection, so its elements
+  // are the body's elements: `At(L, 1)` for `L: myints` (an alias of
+  // `list<integer>`) yields an integer, and the broadcast lift reads the
+  // same cell type through `broadcastElementType`. A nominal reference is
+  // not unfolded (it is deliberately not a subtype of its definition) and
+  // answers `undefined`, as it did before.
+  type = resolveTypeAlias(type);
   if (type === 'collection') return 'unknown';
   if (type === 'indexed_collection') return 'unknown';
   if (type === 'list') return 'unknown';
@@ -550,6 +557,91 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * The transparent-alias declarations a structural descent has already
+ * unfolded on its current path, each with how many times. `undefined` until
+ * the first unfold, so a walk over ordinary types allocates nothing.
+ */
+export type AliasDescent = ReadonlyMap<TypeReference, number> | undefined;
+
+/**
+ * How many times one declaration may be unfolded on one path of a
+ * structural descent before the descent cuts it.
+ *
+ * Two, not one. The answer for a recursive occurrence of an alias is what
+ * the alias's NON-recursive arms give — the least fixed point — and a walk
+ * meets those arms only by unfolding the alias once more:
+ * `type alias json = list<json> | integer` has numeric elements because of
+ * its `integer` arm, which the element walk reaches on the SECOND unfold
+ * (the first unfold, from the collection walk, descended into `list<json>`).
+ * The third occurrence is the cut: by then every non-recursive arm has been
+ * seen from both entry points of a walk (a collection kind and its element),
+ * so unfolding again can only repeat the same two steps.
+ */
+const ALIAS_UNFOLDS_PER_PATH = 2;
+
+/**
+ * Record one unfold of the declaration `decl` on a descent path: the
+ * descent to hand to the recursive calls, or `undefined` when the
+ * declaration has spent its allowance on this path and the descent must cut
+ * (see {@link unfoldAliasOnDescent}). Sibling arms never share a path — the
+ * map is copied, never mutated — so an alias met in two arms of a union is
+ * not a cycle. Exported for the one walker that unfolds NOMINAL references
+ * too (`mayHoldAnIndexedCollection`, `collection-utils.ts`) and so cannot use
+ * the alias-only helper.
+ */
+export function recordUnfoldOnDescent(
+  decl: TypeReference,
+  seen: AliasDescent
+): AliasDescent | undefined {
+  const count = seen?.get(decl) ?? 0;
+  if (count >= ALIAS_UNFOLDS_PER_PATH) return undefined;
+  const next = new Map(seen);
+  next.set(decl, count + 1);
+  return next;
+}
+
+/**
+ * Unfold a transparent alias for a STRUCTURAL DESCENT — a walk that reads
+ * the body's parts (list elements, union arms, tuple components) and
+ * recurses into them.
+ *
+ * {@link resolveTypeAlias} guards only the reference CHAIN inside one call.
+ * A walk that recurses into the unfolded body meets the same alias again
+ * when the alias is self-referential — `type alias nest = list<nest>`
+ * reaches itself through a constructor, `type alias cyc = cyc | 0` through a
+ * bare union arm — and each recursive call would unfold it afresh, forever
+ * (`RangeError: Maximum call stack size exceeded` out of `.type`). The
+ * descent `seen` counts the unfolds of each declaration on the current
+ * PATH ({@link recordUnfoldOnDescent}). Only the outermost declaration of a
+ * chain is recorded: a chain cannot reach back to a later declaration (a
+ * type name must exist before it is referenced), so every cycle closes
+ * through a declaration that names itself, which is the one recorded.
+ *
+ * Returns `undefined` when `t` is an alias whose allowance on this path is
+ * spent: the alias reaches itself, and the caller stops with its
+ * conservative answer — the occurrence contributes no members (`false` for
+ * a COULD predicate, `null` for a shape, the type unchanged for a rewrite).
+ * Otherwise returns the unfolded type and the descent to hand to every
+ * recursive call. A type that is not a transparent alias comes back
+ * unchanged, with the same descent.
+ */
+export function unfoldAliasOnDescent(
+  t: Readonly<Type>,
+  seen: AliasDescent
+): { type: Type; seen: AliasDescent } | undefined {
+  if (
+    typeof t !== 'object' ||
+    t.kind !== 'reference' ||
+    t.alias !== true ||
+    t.def === undefined
+  )
+    return { type: t as Type, seen };
+  const next = recordUnfoldOnDescent(declarationOf(t), seen);
+  if (next === undefined) return undefined;
+  return { type: resolveTypeAlias(t), seen: next };
 }
 
 /**
@@ -940,8 +1032,22 @@ export function widenWithNan(t: Readonly<Type>): Type {
   return { kind: 'union', types: [t as Type, 'nan'] };
 }
 
-export function widenNumericCellsWithNan(t: Readonly<Type>): Type {
-  if (isSubtype(t, 'number')) {
+export function widenNumericCellsWithNan(
+  t: Readonly<Type>,
+  seen?: AliasDescent
+): Type {
+  // A transparent alias of a collection is widened cell by cell like the
+  // collection it names, and the result is the structure, not the name (the
+  // alias policy of the broadcast lift). A SCALAR alias keeps its name: it is
+  // widened as a whole, so `meters | nan` names the cell, not `number | nan`.
+  // The unfold runs under the descent guard: a self-referential alias
+  // (`type alias nest = list<nest>`) is returned unchanged at its first
+  // repeat (`unfoldAliasOnDescent`).
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return t as Type;
+  const r = unfolded.type;
+  seen = unfolded.seen;
+  if (isSubtype(r, 'number')) {
     if (isSubtype('nan', t)) return t as Type;
     // Splice into an existing union rather than nesting one: a nested
     // union is a legal Type but a needlessly hostile shape for downstream
@@ -951,18 +1057,20 @@ export function widenNumericCellsWithNan(t: Readonly<Type>): Type {
       return { kind: 'union', types: [...t.types, 'nan'] };
     return { kind: 'union', types: [t as Type, 'nan'] };
   }
-  if (typeof t === 'string') return t;
-  switch (t.kind) {
-    case 'union':
-      return {
-        kind: 'union',
-        types: t.types.map((x) => widenNumericCellsWithNan(x)),
-      };
+  if (typeof r === 'string') return t as Type;
+  switch (r.kind) {
+    case 'union': {
+      const types = r.types.map((x) => widenNumericCellsWithNan(x, seen));
+      // Nothing widened (an alias of a scalar-free union): keep the spelling
+      // the caller handed in, alias name included.
+      if (types.every((x, i) => x === r.types[i])) return t as Type;
+      return { kind: 'union', types };
+    }
     case 'list':
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
-      return { ...t, elements: widenNumericCellsWithNan(t.elements) };
+      return { ...r, elements: widenNumericCellsWithNan(r.elements, seen) };
     case 'tuple':
       // A tuple reached through a broadcast lift is the per-cell RESULT
       // of a structured head (`AbsArg([1, NaN])` is `[(1, 0), NaN]`): the
@@ -971,10 +1079,10 @@ export function widenNumericCellsWithNan(t: Readonly<Type>): Type {
       // which the tuple is itself the broadcast container (a point whose
       // components are the cells) — sound under either reading.
       return widenWithNan({
-        ...t,
-        elements: t.elements.map((e) => ({
+        ...r,
+        elements: r.elements.map((e) => ({
           ...e,
-          type: widenNumericCellsWithNan(e.type),
+          type: widenNumericCellsWithNan(e.type, seen),
         })),
       });
     default:
@@ -1182,19 +1290,34 @@ export function broadcastResultType(elementType: Readonly<Type>): Type {
  * - bare `list` / `collection` / `indexed_collection` (no element info) →
  *   `null` (rank unknown — a bare `list` could be a list of lists)
  */
-export function staticCollectionDims(t: Readonly<Type>): number[] | null {
+export function staticCollectionDims(
+  t: Readonly<Type>,
+  seen?: AliasDescent
+): number[] | null {
+  // A transparent alias of a shaped list carries that list's dimensions:
+  // `Sin(v)` for `v: vec2` (an alias of `vector<2>`) mirrors the shape onto
+  // the lifted result exactly as `Sin(w)` for `w: vector<2>` does. The
+  // element is unfolded too, so a list of an aliased row type keeps its
+  // rank. Both unfolds run under the descent guard: a self-referential
+  // alias (`type alias nest = list<nest>`) stops at its first repeat with
+  // rank unknown (`unfoldAliasOnDescent`).
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return null;
+  t = unfolded.type;
   if (typeof t === 'string') return null;
   if (t.kind !== 'list') return null;
   // Rank comes from BOTH the explicit dimensions (if any) and the element
   // nesting: `list<list<number>^2>` (2 rows, each an open-length numeric
   // list) is rank 2 — `[2, -1]` — not rank 1. An `unknown`/`any`/bare-
   // collection element could itself be a list → rank unknown.
-  const el = t.elements;
+  const element = unfoldAliasOnDescent(t.elements, unfolded.seen);
+  if (element === undefined) return null;
+  const el = element.type;
   const outer: number[] = t.dimensions ? [...t.dimensions] : [-1];
   if (el === 'unknown' || el === 'any' || el === 'list' || el === 'collection')
     return null;
   if (typeof el !== 'string' && el.kind === 'list') {
-    const inner = staticCollectionDims(el);
+    const inner = staticCollectionDims(el, element.seen);
     return inner === null ? null : [...outer, ...inner];
   }
   return outer;
@@ -1250,13 +1373,24 @@ export function broadcastShapedResultType(
 /** The scalar leaf type of a (possibly nested/dimensioned) collection type:
  *  descend list-kind elements to the non-list leaf. `null` when the leaf is
  *  not statically known (bare `list`/`collection`, `unknown`/`any` element). */
-function collectionLeafType(t: Readonly<Type>): Type | null {
+function collectionLeafType(
+  t: Readonly<Type>,
+  seen?: AliasDescent
+): Type | null {
+  // A transparent alias of a collection has the leaf of the collection it
+  // names (same rule, and same descent guard, as `staticCollectionDims`).
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return null;
+  t = unfolded.type;
+  seen = unfolded.seen;
   if (typeof t === 'string') return null; // bare collection kind — no element info
   if (t.kind === 'list') {
-    const el = t.elements;
+    const element = unfoldAliasOnDescent(t.elements, seen);
+    if (element === undefined) return null;
+    const el = element.type;
     if (el === 'unknown' || el === 'any') return null;
     if (typeof el !== 'string' && el.kind === 'list')
-      return collectionLeafType(el);
+      return collectionLeafType(el, element.seen);
     return el;
   }
   if (
@@ -1264,7 +1398,9 @@ function collectionLeafType(t: Readonly<Type>): Type | null {
     t.kind === 'indexed_collection' ||
     t.kind === 'broadcastable'
   ) {
-    const el = t.elements;
+    const element = unfoldAliasOnDescent(t.elements, seen);
+    if (element === undefined) return null;
+    const el = element.type;
     if (el === 'unknown' || el === 'any') return null;
     // Recurse through a collection-kind element to the LEAF, exactly as the
     // `list` branch above does. Without this, a refined
@@ -1279,7 +1415,7 @@ function collectionLeafType(t: Readonly<Type>): Type | null {
         el.kind === 'collection' ||
         el.kind === 'indexed_collection')
     )
-      return collectionLeafType(el);
+      return collectionLeafType(el, element.seen);
     return el as Type;
   }
   return null;
@@ -1413,14 +1549,26 @@ export function overlapsForDeferredValidation(
  * `+oo | -oo | real` would otherwise reach the broadcast wrapper as
  * `list<number>`.
  */
-export function broadcastElementType(type: Readonly<Type>): Type {
-  if (typeof type !== 'string' && type.kind === 'union') {
-    const branches = type.types.map((t) => broadcastElementType(t));
-    if (branches.every((t, i) => t === type.types[i])) return type as Type;
+export function broadcastElementType(
+  type: Readonly<Type>,
+  seen?: AliasDescent
+): Type {
+  // A transparent alias of a collection is unwrapped like the collection it
+  // names, and an alias of a union of collections is descended arm by arm.
+  // A SCALAR alias contributes its own type, name included (`meters`, not
+  // `number`), like every other scalar. The unfold runs under the descent
+  // guard: a self-referential alias (`type alias cyc = cyc | 0`) is
+  // returned unchanged at its first repeat (`unfoldAliasOnDescent`).
+  const unfolded = unfoldAliasOnDescent(type, seen);
+  if (unfolded === undefined) return type as Type;
+  const r = unfolded.type;
+  if (typeof r !== 'string' && r.kind === 'union') {
+    const branches = r.types.map((t) => broadcastElementType(t, unfolded.seen));
+    if (branches.every((t, i) => t === r.types[i])) return type as Type;
     return widen(...branches);
   }
-  if (type === 'string') return 'string';
-  return collectionElementType(type) ?? (type as Type);
+  if (r === 'string') return type as Type;
+  return collectionElementType(r) ?? (type as Type);
 }
 
 /**
@@ -1435,9 +1583,18 @@ export function broadcastElementType(type: Readonly<Type>): Type {
  */
 export function broadcastCellType(type: Readonly<Type>): Type {
   let t = type as Type;
+  let spellings: Set<string> | undefined;
   for (;;) {
     const e = broadcastElementType(t);
     if (e === t) return t;
+    // A self-referential alias can unwrap to a type that is never the same
+    // object as its predecessor yet repeats in spelling — the arms of
+    // `type alias json = list<json> | integer` widen to a fresh union on
+    // every turn — so the descent also stops at the first repeated
+    // spelling. An ordinary type has finite rank and never repeats.
+    const spelling = typeToString(t);
+    if (spellings?.has(spelling)) return t;
+    (spellings ??= new Set()).add(spelling);
     t = e;
   }
 }

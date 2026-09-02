@@ -5,8 +5,12 @@ import {
   resolveTypeForCompilation as resolveType,
   resolveTypeAlias,
   stripNumericRanges,
+  unfoldAliasOnDescent,
+  recordUnfoldOnDescent,
+  type AliasDescent,
 } from '../common/type/utils.js';
 import { isSubtype, resolveTypeReference } from '../common/type/subtype.js';
+import { declarationOf } from '../common/type/reference.js';
 import { reduceType } from '../common/type/reduce.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -550,16 +554,26 @@ function isUnresolvedCollectionShape(x: Expression): boolean {
  * untouched in practice: canonical flattening dissolves it, so
  * `[1,2] + (2 + h(x))` still broadcasts to `[h(x) + 3, h(x) + 4]`.
  */
-function mayHoldAnIndexedCollection(t: Type): boolean {
+function mayHoldAnIndexedCollection(t: Type, seen?: AliasDescent): boolean {
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
   if (t.kind !== 'union') return false;
   return t.types.some((branch) => {
+    // A reference — alias OR nominal, since a nominal collection type may
+    // hold an indexed collection too — is unfolded under the descent guard:
+    // a self-referential declaration (`type alias cyc = cyc | 0`) reaches
+    // itself through a bare arm, and that occurrence contributes no members
+    // (`recordUnfoldOnDescent`).
+    let next = seen;
+    if (typeof branch === 'object' && branch.kind === 'reference') {
+      next = recordUnfoldOnDescent(declarationOf(branch), seen);
+      if (next === undefined) return false;
+    }
     const b = resolveTypeReference(branch) ?? branch;
     if (isTupleShapedType(b) || isSubtype(b, 'string')) return false;
     return (
       isSubtype(b, INDEXED_COLLECTION_SHAPE_TYPE) ||
-      mayHoldAnIndexedCollection(b)
+      mayHoldAnIndexedCollection(b, next)
     );
   });
 }
@@ -653,10 +667,19 @@ export function couldBeNumericTuple(expr: Expression): boolean {
  * because *broadcast* (not element-could-be-numeric) semantics leave those to
  * tensor typing.
  */
-function couldBeNumericElement(el: Type): boolean {
+function couldBeNumericElement(el: Type, seen?: AliasDescent): boolean {
+  // An alias element is judged by the body it names, so a union alias is
+  // taken arm by arm below: `type alias nz = 0 | list<nz>` has numeric
+  // elements because of its `0` arm, which only the unfold reveals. Under
+  // the descent guard, a self-referential occurrence that has spent its
+  // allowance contributes no members (`unfoldAliasOnDescent`).
+  const unfolded = unfoldAliasOnDescent(el, seen);
+  if (unfolded === undefined) return false;
+  el = unfolded.type;
+  seen = unfolded.seen;
   // A union element COULD be numeric if any arm could (COULD-semantics).
   if (typeof el !== 'string' && el.kind === 'union')
-    return el.types.some((t) => couldBeNumericElement(t));
+    return el.types.some((t) => couldBeNumericElement(t, seen));
   // Note: `signature`-kind elements deliberately do NOT qualify — a function
   // value is not a numeric component, and blessing its collection here would
   // leak numeric broadcast/tuple result types through the shared
@@ -668,8 +691,8 @@ function couldBeNumericElement(el: Type): boolean {
     el === 'unknown' ||
     isSubtype(el, 'number') ||
     isSubtype('number', el) ||
-    typeCouldBeNumericCollection(el) ||
-    typeCouldBeNumericTuple(el)
+    typeCouldBeNumericCollection(el, seen) ||
+    typeCouldBeNumericTuple(el, seen)
   );
 }
 
@@ -691,10 +714,20 @@ function couldBeNumericElement(el: Type): boolean {
  * pairs, not elements, so in a scalar position they get a loud
  * `incompatible-type` error rather than admission.
  */
-export function typeCouldBeCollection(type: Type): boolean {
+export function typeCouldBeCollection(
+  type: Type,
+  seen?: AliasDescent
+): boolean {
   // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
   // here and a nominal reference is not.
-  type = resolveTypeAlias(type);
+  // The unfold runs under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | 0`,
+  // `type alias nest = list<nest>`) stops at its first repeat, and that arm
+  // contributes no members.
+  const unfolded = unfoldAliasOnDescent(type, seen);
+  if (unfolded === undefined) return false;
+  type = unfolded.type;
+  seen = unfolded.seen;
   if (typeof type === 'string') {
     return (
       type === 'collection' ||
@@ -729,7 +762,7 @@ export function typeCouldBeCollection(type: Type): boolean {
   )
     return true;
   if (type.kind === 'union')
-    return type.types.some((t) => typeCouldBeCollection(t));
+    return type.types.some((t) => typeCouldBeCollection(t, seen));
   return false;
 }
 
@@ -759,10 +792,20 @@ export function typeCouldBeCollection(type: Type): boolean {
  * split; recorded so the asymmetry is a documented choice, not an
  * accident.)
  */
-export function typeCouldBeUnkeyedCollection(type: Type): boolean {
+export function typeCouldBeUnkeyedCollection(
+  type: Type,
+  seen?: AliasDescent
+): boolean {
   // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
   // here and a nominal reference is not.
-  type = resolveTypeAlias(type);
+  // The unfold runs under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | 0`,
+  // `type alias nest = list<nest>`) stops at its first repeat, and that arm
+  // contributes no members.
+  const unfolded = unfoldAliasOnDescent(type, seen);
+  if (unfolded === undefined) return false;
+  type = unfolded.type;
+  seen = unfolded.seen;
   if (typeof type === 'string') {
     return (
       type === 'collection' ||
@@ -786,7 +829,7 @@ export function typeCouldBeUnkeyedCollection(type: Type): boolean {
   )
     return true;
   if (type.kind === 'union')
-    return type.types.some((t) => typeCouldBeUnkeyedCollection(t));
+    return type.types.some((t) => typeCouldBeUnkeyedCollection(t, seen));
   return false;
 }
 
@@ -838,14 +881,24 @@ export function couldBeUnkeyedCollectionOperand(op: Expression): boolean {
  * path and lets the `Add` scalar-plus-tuple guard bake `incompatible-type`
  * (Tycho item 30).
  */
-export function typeCouldBeNumericCollection(type: Type): boolean {
+export function typeCouldBeNumericCollection(
+  type: Type,
+  seen?: AliasDescent
+): boolean {
   // A TRANSPARENT alias IS its definition, so unfold one before asking about
   // its kind: `isSubtype` unfolds an alias reference on both sides, and a
   // gate that reads `type.kind` directly must agree with it or an alias of a
   // collection is admitted at one layer and refused at the other. A NOMINAL
   // reference is left alone — it is deliberately not a subtype of its
   // definition, so it must keep failing this gate.
-  type = resolveTypeAlias(type);
+  // The unfold runs under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | 0`,
+  // `type alias nest = list<nest>`) stops at its first repeat, and that arm
+  // contributes no members.
+  const unfolded = unfoldAliasOnDescent(type, seen);
+  if (unfolded === undefined) return false;
+  type = unfolded.type;
+  seen = unfolded.seen;
   if (typeof type === 'string') {
     return (
       type === 'list' ||
@@ -868,7 +921,7 @@ export function typeCouldBeNumericCollection(type: Type): boolean {
     type.kind === 'list' ||
     type.kind === 'set'
   )
-    return couldBeNumericElement(type.elements);
+    return couldBeNumericElement(type.elements, seen);
   // A `broadcastable<S>` operand COULD be a numeric indexed collection at
   // runtime. `broadcastable<any>`/`broadcastable<unknown>` qualify too; a
   // plainly non-numeric element (e.g. `broadcastable<string>`) does not.
@@ -889,9 +942,9 @@ export function typeCouldBeNumericCollection(type: Type): boolean {
   // keeps this kind in lockstep with every other collection kind by
   // construction.
   if (type.kind === 'broadcastable')
-    return couldBeNumericElement(type.elements);
+    return couldBeNumericElement(type.elements, seen);
   if (type.kind === 'union')
-    return type.types.some((t) => typeCouldBeNumericCollection(t));
+    return type.types.some((t) => typeCouldBeNumericCollection(t, seen));
   return false;
 }
 
@@ -910,10 +963,21 @@ export function typeCouldBeNumericCollection(type: Type): boolean {
  * (`Add`/`Multiply`/…) *without walking its elements* — the element type
  * already disproves numericity.
  */
-export function typeIsProvablyNonNumericCollection(type: Type): boolean {
+export function typeIsProvablyNonNumericCollection(
+  type: Type,
+  seen?: AliasDescent
+): boolean {
   // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
   // here and a nominal reference is not.
-  type = resolveTypeAlias(type);
+  // The unfold runs under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | 0`,
+  // `type alias nest = list<nest>`) stops at its first repeat, and that arm
+  // contributes no members, so
+  // it is vacuously non-numeric.
+  const unfolded = unfoldAliasOnDescent(type, seen);
+  if (unfolded === undefined) return true;
+  type = unfolded.type;
+  seen = unfolded.seen;
   if (typeof type === 'string') return false; // bare kind: could be numeric
   if (
     type.kind === 'collection' ||
@@ -923,16 +987,17 @@ export function typeIsProvablyNonNumericCollection(type: Type): boolean {
   ) {
     const el = type.elements;
     if (el === 'any' || el === 'unknown') return false;
-    return !couldBeNumericElement(el);
+    return !couldBeNumericElement(el, seen);
   }
   // Expressed as the exact negation of the companion so the two cannot drift:
   // the companion's broadcastable arm already returns `true` for
   // `any`/`unknown` elements and for a collection- or tuple-typed base.
-  if (type.kind === 'broadcastable') return !typeCouldBeNumericCollection(type);
+  if (type.kind === 'broadcastable')
+    return !typeCouldBeNumericCollection(type, seen);
   // A union is provably non-numeric only if EVERY member is (any could-be-
   // numeric member keeps the whole union admissible).
   if (type.kind === 'union')
-    return type.types.every((t) => typeIsProvablyNonNumericCollection(t));
+    return type.types.every((t) => typeIsProvablyNonNumericCollection(t, seen));
   return false;
 }
 
@@ -944,15 +1009,25 @@ export function typeIsProvablyNonNumericCollection(type: Type): boolean {
  * arithmetic type handlers — see `typeCouldBeNumericCollection` on why the
  * two layers must not diverge.
  */
-export function typeCouldBeNumericTuple(type: Type): boolean {
+export function typeCouldBeNumericTuple(
+  type: Type,
+  seen?: AliasDescent
+): boolean {
   // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
   // here and a nominal reference is not.
-  type = resolveTypeAlias(type);
+  // The unfold runs under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | 0`,
+  // `type alias nest = list<nest>`) stops at its first repeat, and that arm
+  // contributes no members.
+  const unfolded = unfoldAliasOnDescent(type, seen);
+  if (unfolded === undefined) return false;
+  type = unfolded.type;
+  seen = unfolded.seen;
   if (typeof type === 'string') return type === 'tuple';
   if (type.kind === 'tuple')
-    return type.elements.every((el) => couldBeNumericElement(el.type));
+    return type.elements.every((el) => couldBeNumericElement(el.type, seen));
   if (type.kind === 'union')
-    return type.types.some((t) => typeCouldBeNumericTuple(t));
+    return type.types.some((t) => typeCouldBeNumericTuple(t, seen));
   return false;
 }
 
@@ -972,19 +1047,29 @@ export function typeCouldBeNumericTuple(type: Type): boolean {
  * has a dedicated branch for a broadcast-lifted shaped numerator that must
  * keep the lift in the result, and blessing it here would strip it.
  */
-export function typeCouldBeNumericTupleCollection(type: Type): boolean {
+export function typeCouldBeNumericTupleCollection(
+  type: Type,
+  seen?: AliasDescent
+): boolean {
   // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
   // here and a nominal reference is not.
-  type = resolveTypeAlias(type);
+  // The unfold runs under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | 0`,
+  // `type alias nest = list<nest>`) stops at its first repeat, and that arm
+  // contributes no members.
+  const unfolded = unfoldAliasOnDescent(type, seen);
+  if (unfolded === undefined) return false;
+  type = unfolded.type;
+  seen = unfolded.seen;
   if (typeof type === 'string') return false;
   if (type.kind === 'union')
-    return type.types.some((t) => typeCouldBeNumericTupleCollection(t));
+    return type.types.some((t) => typeCouldBeNumericTupleCollection(t, seen));
   if (
     type.kind === 'list' ||
     type.kind === 'indexed_collection' ||
     type.kind === 'collection'
   )
-    return typeCouldBeNumericTuple(type.elements);
+    return typeCouldBeNumericTuple(type.elements, seen);
   return false;
 }
 
@@ -1039,7 +1124,11 @@ export function isLinearAlgebraCollection(expr: Expression): boolean {
  * produces.
  */
 export function isFixedShapeCollection(expr: Expression): boolean {
-  const t = expr.type.type;
+  // A transparent alias of a fixed shape IS that shape (see
+  // `typeCouldBeNumericCollection`): a symbol declared with an alias of
+  // `vector<2>` broadcasts exactly like one declared `vector<2>`, so the
+  // trigger must see the shape, not the reference node.
+  const t = resolveTypeAlias(expr.type.type);
   return (
     typeof t !== 'string' && t.kind === 'list' && t.dimensions !== undefined
   );
@@ -1079,7 +1168,20 @@ export function broadcastCollectionElementType(
   return dimensionlessIndexedElement(expr.type.type);
 }
 
-function dimensionlessIndexedElement(t: Type): Type | undefined {
+function dimensionlessIndexedElement(
+  t: Type,
+  seen?: AliasDescent
+): Type | undefined {
+  // A transparent alias of a list IS that list (see
+  // `typeCouldBeNumericCollection`), so the trigger reads the body it
+  // names. A nominal reference stays opaque and is not a broadcast trigger.
+  // The unfold runs under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | 0`) stops at its first
+  // repeat, and that arm is not a broadcast trigger.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return undefined;
+  t = unfolded.type;
+  seen = unfolded.seen;
   if (t === 'list' || t === 'indexed_collection') return 'any';
   // An index span is dimensionless and its elements are finite positive
   // integers — a known element type, unlike the bare types above.
@@ -1093,7 +1195,7 @@ function dimensionlessIndexedElement(t: Type): Type | undefined {
     return t.dimensions === undefined ? t.elements : undefined;
   if (t.kind === 'union') {
     for (const b of t.types) {
-      const e = dimensionlessIndexedElement(b);
+      const e = dimensionlessIndexedElement(b, seen);
       if (e !== undefined) return e;
     }
   }
@@ -1127,6 +1229,11 @@ function dimensionlessIndexedElement(t: Type): Type | undefined {
  * non-list `indexed_collection` at runtime must not be claimed a `list`.
  */
 export function broadcastSiblingType(t: Readonly<Type>): Type {
+  // A transparent alias is unfolded so the sibling contributes the
+  // collection type it names: the broadcast result is typed by the structure
+  // it builds, never by an operand's alias name (the alias policy of the
+  // broadcast lift, `test/compute-engine/alias-broadcast-lift.test.ts`).
+  t = resolveTypeAlias(t);
   if (typeof t === 'string' || t.kind !== 'union') return t as Type;
   const branches = t.types.filter(
     (b) => dimensionlessIndexedElement(b) !== undefined
@@ -1149,6 +1256,8 @@ export function broadcastSiblingType(t: Readonly<Type>): Type {
  * `indexed_collection` — becomes an `indexed_collection<elements>`.
  */
 function rewrapCollectionBranch(branch: Type, elements: Type): Type {
+  // An alias branch is re-wrapped as the collection kind it names.
+  branch = resolveTypeAlias(branch);
   if (branch === 'list') return { kind: 'list', elements };
   if (
     typeof branch !== 'string' &&
@@ -1186,6 +1295,10 @@ function rewrapCollectionBranch(branch: Type, elements: Type): Type {
 export function scalarOrCollectionUnionBranches(
   t: Readonly<Type>
 ): Type[] | undefined {
+  // An alias of such a union is classified like the union it names, so a
+  // valueless `j: json` (`type alias json = list<json> | integer`) carries
+  // its scalar arm through the lift instead of claiming a definite list.
+  t = resolveTypeAlias(t);
   if (typeof t === 'string' || t.kind !== 'union') return undefined;
   const collections: Type[] = [];
   let hasScalarBranch = false;
@@ -1483,6 +1596,9 @@ export function isCollectionShaped(x: Expression): boolean {
  * over" must therefore recognize the KIND, not the values-only subtype.
  */
 export function isTupleShapedType(t: Type): boolean {
+  // A transparent alias of a tuple IS a tuple (see
+  // `typeCouldBeNumericCollection`); a nominal reference stays opaque.
+  t = resolveTypeAlias(t);
   return t === 'tuple' || (typeof t === 'object' && t.kind === 'tuple');
 }
 
@@ -1495,6 +1611,7 @@ export function isTupleShapedType(t: Type): boolean {
  * absence-typed field.
  */
 export function isRecordShapedType(t: Type): boolean {
+  t = resolveTypeAlias(t);
   return t === 'record' || (typeof t === 'object' && t.kind === 'record');
 }
 
@@ -1512,8 +1629,14 @@ export function isRecordShapedType(t: Type): boolean {
  * claim — and by {@link typeMayCarryQuotientShape}, the gate of the
  * degenerate-divisor rules in `arithmetic-mul-div.ts`.
  */
-export function isShapedNumericType(t: Type): boolean {
-  t = resolveTypeAlias(t);
+export function isShapedNumericType(t: Type, seen?: AliasDescent): boolean {
+  // The unfold runs under the descent guard (`unfoldAliasOnDescent`): a
+  // self-referential alias (`type alias cyc = cyc | 0`) stops at its first
+  // repeat, and that arm carries no shape.
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  t = unfolded.type;
+  seen = unfolded.seen;
   if (typeof t === 'string')
     return (
       t === 'tuple' ||
@@ -1522,8 +1645,9 @@ export function isShapedNumericType(t: Type): boolean {
       t === 'indexed_collection' ||
       t === 'set'
     );
-  if (t.kind === 'union') return t.types.some((a) => isShapedNumericType(a));
-  if (t.kind === 'broadcastable') return isShapedNumericType(t.elements);
+  if (t.kind === 'union')
+    return t.types.some((a) => isShapedNumericType(a, seen));
+  if (t.kind === 'broadcastable') return isShapedNumericType(t.elements, seen);
   return (
     t.kind === 'tuple' ||
     t.kind === 'list' ||
@@ -1531,6 +1655,29 @@ export function isShapedNumericType(t: Type): boolean {
     t.kind === 'indexed_collection' ||
     t.kind === 'set'
   );
+}
+
+/**
+ * `t` with a transparent alias of a SHAPE unfolded, and every other type
+ * unchanged.
+ *
+ * This is the alias policy of the broadcast lift and of the handlers that
+ * scale or negate a collection cell by cell: a result built from an aliased
+ * shaped operand is typed by the structure it builds (`Negate(L)` for
+ * `L: nums`, an alias of `list<number>`, is `list<number>`), never by the
+ * operand's alias name — the evaluated value carries the structure and no
+ * name either. A SCALAR alias is a different case and keeps its name: `-m`
+ * for `m: meters` (an alias of `number`) is the same kind of value as `m`,
+ * and the scalar arithmetic handlers echo it (`m + 1` is `meters`). The
+ * split lets a handler that echoes its operand's type (`Negate`) apply the
+ * lift policy to shaped operands only. A nominal reference is never
+ * unfolded ({@link resolveTypeAlias}).
+ *
+ * Pinned in `test/compute-engine/alias-broadcast-lift.test.ts`.
+ */
+export function resolveShapedTypeAlias(t: Type): Type {
+  const resolved = resolveTypeAlias(t);
+  return resolved !== t && isShapedNumericType(resolved) ? resolved : t;
 }
 
 /**
@@ -1572,12 +1719,14 @@ export function typeMayCarryQuotientShape(t: Type): boolean {
  * body's arithmetic would broadcast the point into a list.
  */
 export function isTuple(expr: Expression): boolean {
-  const t = expr.type.type;
+  // A transparent alias of a tuple IS a tuple (see
+  // `typeCouldBeNumericCollection`); a nominal reference stays opaque.
+  const t = resolveTypeAlias(expr.type.type);
   if (typeof t !== 'string' && t.kind === 'tuple') return true;
   if (isSymbol(expr)) {
     const v = expr.value;
     if (v !== undefined && !isSymbol(v)) {
-      const vt = v.type.type;
+      const vt = resolveTypeAlias(v.type.type);
       return typeof vt !== 'string' && vt.kind === 'tuple';
     }
   }

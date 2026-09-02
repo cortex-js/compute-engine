@@ -789,6 +789,61 @@
 
 ### Bug Fixes
 
+- **The broadcast lift now sees through a transparent collection alias,
+  and a lifted result is typed by its structure, never by the alias
+  name.** With `ce.declareType('nums', 'list<number>', { alias: true })`
+  and `ce.declare('L', 'nums')`, a valueless `L` was not a broadcast
+  trigger for the type derivation: `Sin(L)` typed the scalar `number` and
+  `Mod(L, 2)` the scalar `real`, while both evaluate to a list once `L`
+  holds one. With a value assigned, `Multiply(2, L)` and `Negate(L)` typed
+  `list<nums>` (a list of lists the value contradicts), and for an alias of
+  `list<integer>` the cell-scaling handlers echoed the alias although the
+  cells changed kind (`0.5 · L` typed the alias; its cells are reals).
+  `At(L, 1)` and `First(L)` typed `unknown`. Every seam of the lift path
+  now unfolds a transparent alias before reading its structure — the
+  triggers, the element and dimension readers, the per-cell result, the
+  handler echoes of `Add`/`Multiply`/`Negate`, and the tuple scaling — and
+  the result is the structure it builds: `Sin(L)` is `list<number>`,
+  `Sin(v)` for an alias of `vector<3>` is `vector<3>`, `0.5 · L` for an
+  alias of `list<integer>` is `list<real>`, `-p` for an alias of a tuple is
+  the tuple. The symbol itself still reports its alias (`ce.box('L').type`
+  is `nums`), and a scalar alias is not a lift and keeps its name (`m + 1`
+  for `m: meters` is `meters`). A nominal type is still refused at the
+  operand gate. Consequence: `Multiply(2, L)` for `L: nums` now types
+  `list<number>` where it used to type `nums`. The same change closes a
+  stack overflow: arithmetic over a symbol declared with a
+  self-referential alias (`type alias json = list<json> | integer`,
+  `type alias nest = list<nest>`) threw `Maximum call stack size exceeded`
+  out of `.type`, because the admission predicates unfolded the alias
+  afresh at every level. Every structural walker now runs under one
+  descent guard, so `2j` for `j: json` types `list<number> | number` and
+  evaluates `[2, [4, 6]]` for `j := [1, [2, 3]]`, while an alias with no
+  numeric member (`nest`) is refused at the operand gate.
+
+- **Interval arithmetic: a jump discontinuity now carries its enclosure.**
+  The interval kernel (the `interval-js` compilation target and the
+  `IntervalArithmetic` library) reported every discontinuity as
+  `{ kind: 'singular' }`, whether the function was unbounded there (`1/x`
+  across 0, a pole) or merely not continuous (`floor(x)` across an
+  integer, a finite jump). A consumer that only needs a bound, such as an
+  implicit-curve sign test, could do nothing with a jump but treat it as
+  a pole. A jump is now `singular` WITH a `value`: a sound finite
+  enclosure of the function over the input (`floor` over `[0.5, 1.5]`
+  answers `value: [0, 1]`, `mod(x, 6.3)` across a period boundary answers
+  `[0, 6.3]`, `sign` across 0 answers `[-1, 1]`), with `at` and
+  `continuity` kept. A pole is still `singular` without a `value`. Every
+  operation propagates a jump by computing over its enclosure and
+  re-tagging the result, so `mod(100/(x²+y²), 6.3) − 3` over a cell that
+  spans one ring is `singular` with `value: [-3, 3.3]` instead of an
+  unbounded `singular`; a result that comes out unbounded (`1/floor(x)`
+  across 0) degrades to a pole. Comparisons, `unionResults` and
+  `integrate` use the enclosure, so `∫₀³ ⌊t⌋ dt` is now a bounded
+  interval around 3 instead of `singular`. Producers: `Floor`, `Ceil`,
+  `Round`, `Fract`, `Trunc`, `Mod`, `Heaviside`, `Sign`. Also fixed on the
+  same path: those step functions reported a discontinuity "at NaN" for a
+  NaN input; they now propagate a NaN interval like the arithmetic
+  kernels. (Tycho item 239.)
+
 - **An `If` or `Which` condition that cannot be decided no longer throws a
   host exception.** `ce.box(['If', 'x', 5]).evaluate()` with `x` undeclared
   used to throw `Error: Condition must evaluate to "True" or "False"` out

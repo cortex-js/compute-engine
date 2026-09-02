@@ -926,12 +926,14 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     // dividing each component, and `tuple / s` with a declared scalar symbol
     // stayed an inert `Divide` that never folded.
     //
-    // The purely structural `isTuple` used for the DIVISOR above is not the
-    // right test here: it does not unfold a transparent type alias, so an
-    // alias of a numeric tuple (`p: pt` with `type pt = tuple<number,
-    // number>`) would miss this branch, canonicalize to a `Multiply`, and
-    // report the alias name as the quotient type — claiming a shape the
-    // component-widened quotient no longer has.
+    // The structural `isTuple` used for the DIVISOR above is not the right
+    // test here: this branch must admit every tuple `checkNumericArgs`
+    // admits, including one whose components are not yet proven numeric
+    // (`unknown`-typed components), which only the COULD-semantics
+    // `couldBeNumericTuple` answers. Both predicates unfold a transparent
+    // alias, so an alias of a numeric tuple (`p: pt` with `type pt =
+    // tuple<number, number>`) takes this branch and its quotient is typed by
+    // the component-widened tuple, not by the alias name.
     const op1Tuple = couldBeNumericTuple(op1);
     if (op1Tuple) {
       // Strip trivial divisors: the generic a/1 rule below is unreachable

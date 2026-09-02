@@ -118,6 +118,7 @@ import {
   staticMembership,
   isSignatureType,
   isWildcardFunctionType,
+  resolveTypeAlias,
   narrow,
   numericMissingSlot,
   codomainMarkerType,
@@ -5218,7 +5219,9 @@ function tupleBroadcastArity(
   let arity: number | undefined;
   let unknownComponents = false;
   for (const op of ops) {
-    const t = op.type.type;
+    // A transparent alias of a tuple supplies its components like the tuple
+    // it names (`Sin(p)` for `p: pt`, an alias of `tuple<number, number>`).
+    const t = resolveTypeAlias(op.type.type);
     if (typeof t !== 'string' && t.kind === 'tuple') {
       if (t.elements.some((el) => isSubtype(el.type, COLLECTION_SHAPE_TYPE)))
         unknownComponents = true;
@@ -6218,12 +6221,30 @@ function type(expr: BoxedFunction): Type {
         // result — or a union with a tuple branch, such as
         // `NumeratorDenominator`'s `tuple<number, number> | nothing` —
         // stays the cell.
-        const hasTupleBranch = (t: Type): boolean =>
-          typeof t !== 'string' &&
-          (t.kind === 'tuple' ||
-            (t.kind === 'union' && t.types.some((m) => hasTupleBranch(m))));
+        //
+        // ALIAS POLICY of the lift (one rule at every seam of this path —
+        // the triggers, the cell readers, this cell result, the handler
+        // echo below, and the shaped re-wrap): a transparent alias is
+        // unfolded before its structure is read, and the lifted result is
+        // typed by the structure it builds, never by an operand's alias
+        // name. `Sin(L)` for `L: nums` (an alias of `list<number>`) is
+        // `list<number>`, as `Sin(M)` is for `M: list<number>`; the
+        // evaluated value carries the structure and no name either. A
+        // handler that echoes the aliased operand (`Negate`, `Multiply`)
+        // answers the alias, so its echo is unfolded here too, or the
+        // valued case re-wrapped it to `list<nums>` — a list of lists the
+        // value contradicts. Pinned in
+        // `test/compute-engine/alias-broadcast-lift.test.ts`.
+        const hasTupleBranch = (t: Type): boolean => {
+          t = resolveTypeAlias(t);
+          return (
+            typeof t !== 'string' &&
+            (t.kind === 'tuple' ||
+              (t.kind === 'union' && t.types.some((m) => hasTupleBranch(m))))
+          );
+        };
         const cellResult = hasTupleBranch(sigResult)
-          ? sigResult
+          ? resolveTypeAlias(sigResult)
           : broadcastElementType(sigResult);
         const handlerOwnsCollectionTyping =
           def.broadcastExemptions.includes('collection-result');
@@ -6302,7 +6323,7 @@ function type(expr: BoxedFunction): Type {
             isSubtype(sigResult, COLLECTION_SHAPE_TYPE) &&
             staticCollectionDims(sigResult) !== null
           )
-            return maybeAbsorb(sigResult);
+            return maybeAbsorb(resolveTypeAlias(sigResult));
 
           // Rank/shape-aware lift (§D6.1): mirror the operands'
           // statically-provable structure — `Sqrt(M)` with `M: matrix<2x2>`

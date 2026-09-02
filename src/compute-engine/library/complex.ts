@@ -25,7 +25,7 @@ import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequali
 import type { Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { broadcastElementType } from '../../common/type/utils.js';
+import { broadcastCellType } from '../../common/type/utils.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { neg } from '../numerics/rationals.js';
 import { measurementLipschitzUnary } from './measurement-arithmetic.js';
@@ -98,12 +98,7 @@ export function signFromAssumedPart(
 // type handler's answer is authoritative, so this is the one place the
 // per-cell NaN is accounted for.
 function collectionPartClaim(t: BoxedType): 'real' | 'number' {
-  let el: Type = t.type;
-  while (true) {
-    const e = broadcastElementType(el);
-    if (e === el) break;
-    el = e;
-  }
+  const el = broadcastCellType(t.type);
   return isSubtype('nan', el) ? 'number' : 'real';
 }
 

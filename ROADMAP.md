@@ -196,6 +196,23 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   A complex-valued CONDITION still declines (the complex numbers are
   unordered), and the GPU target keeps its own genuinely different
   decline (homogeneous `vec2` arrays).
+- **Tycho item 239 — `interval-js`: a jump discontinuity reported as an
+  unbounded `singular`** (RESOLVED 2026-09-02, the day it was filed).
+  `Floor`, `Ceil`, `Round`, `Fract`, `Trunc`, `Mod`, `Heaviside` and
+  `Sign` answered `{ kind: 'singular', at, continuity }` across a jump,
+  the same shape as a pole, so Tycho's implicit quadtree could only cull
+  the cell (38 % of `mod(100/r², 6.3) = 3` came back white). A jump now
+  carries `value`, a sound finite enclosure (`[floor(lo), floor(hi)]`,
+  one period `[0, b]` for `Mod`), and every kernel operation is exported
+  through `liftJump` (`interval/util.ts`), which computes over the
+  enclosure and re-tags its bounded result as the same jump — an
+  unbounded result degrades to a pole. `unionResults`, the comparisons
+  and `integrate` read the enclosure. Contract documented on
+  `IntervalResult` (`interval/types.ts`); pinned in
+  `test/compute-engine/tycho-item-239-jump-enclosure.test.ts`. Tycho's
+  side of the close: read `value` on a `singular` in the corner-sign gate
+  (`implicit-scheduler.ts`) and re-run
+  `oeupgr064p-ring-with-ce-interval.mts` for `falseEmpty: 0`.
 - **`interval-js` target: four heads confirmed with no lowering** (Tycho
   item 237, filed 2026-08-30, the item-220 batch mold): `Choose`, `Apply`
   (the `f'` prime-derivative spelling lowers to `Apply(Function(…), x)`),
@@ -437,27 +454,6 @@ deliberately left out of that change.
   `src/compute-engine/library/collections.ts` (`Length`) and sweep the
   sibling size operators (`Count`, `Dimensions`) for the same shape.
   Found while writing the 2026-09-01 may-marker ruling.
-
-### The broadcast lift does not see through a transparent collection alias (OPEN, typing — found 2026-09-02 by the three-valued membership-predicate review)
-
-A VALUELESS symbol declared with a transparent alias of a list
-(`ce.declareType('myints', 'list<integer>', { alias: true })`,
-`ce.declare('L', 'myints')`) is not a broadcast trigger for the type
-derivation: `isBroadcastCollectionType` and `isFixedShapeCollection`
-(`collection-utils.ts`) read the raw reference node, so `Sin(L)` types the
-scalar `number` and `Mod(L, 2)` the scalar `integer`, while both evaluate
-to a list once `L` holds one (`[sin(3), sin(4), sin(5)]`, `[1, 0, 1]`).
-With a value assigned the claim is right (the value's own type is read).
-
-Resolving the alias in the two triggers is NOT the fix on its own: it makes
-the lift re-wrap the `Add`/`Multiply` handlers' alias-PRESERVING answers
-(`Multiply(2, L)` for `L: nums` typed `list<nums>` instead of `nums`,
-the pin in `alias-unfold.test.ts`), because `deferToHandler` and
-`cellResult` in `boxed-function.ts` do not see through the alias either.
-The fix is one alias-resolution policy for the whole lift path — triggers,
-`deferToHandler`, `cellResult`, `broadcastCellType`
-(`common/type/utils.ts`) — decided together with whether a lifted result
-keeps the alias name (`nums`) or the resolved shape (`list<number>`).
 
 ### Doc-sweep triage (2026-08-29)
 

@@ -329,6 +329,16 @@ export function absorbScalarsIntoCells(
   collectionType: Readonly<Type>,
   scalarTypes: ReadonlyArray<Type>
 ): Type {
+  // A transparent alias of a collection is unfolded FIRST, so the scalars
+  // fold into the cells it names and the result is the structure, never the
+  // alias name: `0.5 · L` for `L: myints` (an alias of `list<integer>`) is
+  // `list<real>`, which the name `myints` no longer describes. This holds
+  // with no scalars too (`L + L` is `list<integer>`): the alias policy of
+  // the broadcast lift types every cell-wise result by what it builds.
+  // Only the operand itself is unfolded; an alias in the CELLS is left to
+  // the `reference` exclusion below, which is what keeps this recursion
+  // terminating.
+  collectionType = resolveTypeAlias(collectionType);
   if (scalarTypes.length === 0) return collectionType as Type;
   // A `broadcastable<S>` co-operand is either a scalar `S` or an indexed
   // collection of `S` that zips with these cells (a length mismatch is an

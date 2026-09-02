@@ -286,6 +286,7 @@ import {
   isTextAtom,
   isTuple,
   isShapedNumericType,
+  resolveShapedTypeAlias,
 } from '../collection-utils.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { signFromAssumedPart } from './complex.js';
@@ -573,6 +574,11 @@ function scaleTupleComponents(
   t: Readonly<Type>,
   scalarTypes: ReadonlyArray<Type>
 ): Type {
+  // A transparent alias of a tuple is scaled like the tuple it names, and
+  // the result is that tuple, not the alias name: `0.5 · p` for `p: ipt` (an
+  // alias of `tuple<integer, integer>`) has real components, which `ipt` no
+  // longer describes (the alias policy of the broadcast lift).
+  t = resolveTypeAlias(t);
   if (typeof t === 'string' || t.kind !== 'tuple' || scalarTypes.length === 0)
     return t as Type;
   // Range decorations are stripped on BOTH sides of the join: a scaled
@@ -2903,7 +2909,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ops.some((x) => couldBeNumericTuple(x))
         ) {
           const tupleType = widen(
-            ...ops.filter((x) => couldBeNumericTuple(x)).map((x) => x.type.type)
+            ...ops
+              .filter((x) => couldBeNumericTuple(x))
+              .map((x) => resolveTypeAlias(x.type.type))
           );
           // Each element of the collection scales the point's COMPONENTS, so
           // the collection's element type widens them exactly as a declared
@@ -2961,7 +2969,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               tupleOps[0].type.type,
               others.map((x) => x.type.type)
             );
-          return tupleOps[0].type;
+          // The echo unfolds a transparent alias: the product is typed by the
+          // tuple it names (the alias policy of the broadcast lift).
+          return resolveTypeAlias(tupleOps[0].type.type);
         }
         // Element-wise product of a single tensor (vector/matrix) with scalars
         // keeps the tensor's shape/type. The list-broadcast wrapper is
@@ -3041,7 +3051,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               collectionOps[0].type.type,
               others.map((x) => x.type.type)
             );
-          return collectionOps[0].type;
+          // The echo unfolds a transparent alias: the product is typed by the
+          // collection it names (the alias policy of the broadcast lift).
+          return resolveTypeAlias(collectionOps[0].type.type);
         }
         if (collectionOps.length > 1) {
           // A point LIST paired with a sibling collection of SCALARS scales
@@ -3336,8 +3348,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // echoing `real<0..>` verbatim claimed a sign the value contradicts.
       // Ranges reflect about zero, tiers are their own negation
       // (`negateNumericType`).
+      // A transparent alias of a SHAPE is unfolded before the echo, so `-L`
+      // for `L: nums` (an alias of `list<number>`) is `list<number>` — the
+      // alias policy of the broadcast lift — while a scalar alias keeps its
+      // name (`-m` for `m: meters` is `meters`, like `m + 1`).
       typeHandlerKind: 'types',
-      type: ([x]) => negateNumericType(x.type),
+      type: ([x]) => negateNumericType(resolveShapedTypeAlias(x.type)),
       sgn: ([x]) => oppositeSgn(x.sgn),
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args);

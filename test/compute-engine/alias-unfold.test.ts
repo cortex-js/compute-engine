@@ -257,9 +257,13 @@ describe('alias unfold: shaped aliases in arithmetic', () => {
   test('Multiply admits an alias of a tuple, like the direct spelling', () => {
     expect(ce.box(['Multiply', 2, 'p']).errors).toHaveLength(0);
     expect(ce.box(['Multiply', 2, 'q']).errors).toHaveLength(0);
-    // The result keeps the tuple shape rather than collapsing to `number`;
-    // the alias reports its own name, exactly as `ce.box('m').type` does.
-    expect(ce.box(['Multiply', 2, 'p']).type.toString()).toBe('pt');
+    // The result keeps the tuple shape rather than collapsing to `number`.
+    // It is typed by the STRUCTURE the scaling builds, not by the alias
+    // name: only the symbol itself reports `pt` (the alias policy of the
+    // broadcast lift, ruled 2026-09-02 — see `alias-broadcast-lift.test.ts`).
+    expect(ce.box(['Multiply', 2, 'p']).type.toString()).toBe(
+      'tuple<number, number>'
+    );
     expect(ce.box(['Multiply', 2, 'q']).type.toString()).toBe(
       'tuple<number, number>'
     );
@@ -278,7 +282,9 @@ describe('alias unfold: shaped aliases in arithmetic', () => {
 
   test('Negate admits an alias of a tuple, like the direct spelling', () => {
     expect(ce.box(['Negate', 'p']).errors).toHaveLength(0);
-    expect(ce.box(['Negate', 'p']).type.toString()).toBe('pt');
+    expect(ce.box(['Negate', 'p']).type.toString()).toBe(
+      'tuple<number, number>'
+    );
     expect(ce.box(['Negate', 'q']).type.toString()).toBe(
       'tuple<number, number>'
     );
@@ -307,14 +313,14 @@ describe('alias unfold: shaped aliases in arithmetic', () => {
 
   test('arithmetic admits an alias of a list', () => {
     expect(ce.box(['Multiply', 2, 'L']).errors).toHaveLength(0);
-    expect(ce.box(['Multiply', 2, 'L']).type.toString()).toBe('nums');
+    expect(ce.box(['Multiply', 2, 'L']).type.toString()).toBe('list<number>');
     expect(ce.box(['Add', ['List', 1, 2], 'L']).errors).toHaveLength(0);
     expect(ce.box(['Add', ['List', 1, 2], 'M']).errors).toHaveLength(0);
   });
 
   test('arithmetic admits an alias of a vector', () => {
     expect(ce.box(['Multiply', 2, 'v']).errors).toHaveLength(0);
-    expect(ce.box(['Multiply', 2, 'v']).type.toString()).toBe('vec2');
+    expect(ce.box(['Multiply', 2, 'v']).type.toString()).toBe('vector<2>');
     expect(ce.box(['Multiply', 2, 'w']).errors).toHaveLength(0);
   });
 });
@@ -340,7 +346,10 @@ describe('alias unfold: shaped aliases evaluate once assigned', () => {
 
     expect(ce.box(['Multiply', 2, 'L']).evaluate().toString()).toBe('[2,4,6]');
     expect(
-      ce.box(['Add', ['List', 1, 2, 3], 'L']).evaluate().toString()
+      ce
+        .box(['Add', ['List', 1, 2, 3], 'L'])
+        .evaluate()
+        .toString()
     ).toBe('[2,4,6]');
   });
 });
