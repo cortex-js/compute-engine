@@ -8,15 +8,14 @@ import type { Type, TypeString } from '../../common/type/types.js';
 import {
   isSignatureType,
   isNonRealNumber,
+  staticMembership,
   widen,
   narrow,
   containsSignatureArm,
   typeElementCount,
   signOfType,
 } from '../../common/type/utils.js';
-import { reduceType } from '../../common/type/reduce.js';
 import {
-  isEmptyType,
   isSubtype,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
@@ -1197,47 +1196,27 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   get isNumber(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
-    return t.matches('number');
+    // Three-valued, like `isInteger` below: a symbol declared `number |
+    // string` or `any` may hold a number, so it is undecided, not `false`.
+    return staticMembership(t.type, 'number');
   }
 
+  // Three-valued discipline (D3), the same rule as `BoxedFunction`
+  // (`staticMembership`): entailed → `true`; provably disjoint → `false`;
+  // overlap → `undefined`. A symbol declared `complex` is undecided, not a
+  // non-integer: `complex` contains the integers in this lattice, and a
+  // `false` means "certainly not". (`isExtendedReal` still reads a declared
+  // `complex` as non-real — a different predicate with its own contract.)
   get isInteger(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
-    // Three-valued discipline (D3), mirroring the repaired `isExtendedReal`:
-    //   entailed (`matches`) → true; overlap → undefined; disjoint → false.
-    if (t.matches('integer')) return true;
-    // A real-overlapping numeric type (`real`, `rational`, …) could be an
-    // integer → indeterminate. `real` is checked before `complex` because
-    // `real ⊑ complex` in this lattice.
-    if (t.matches('real')) return undefined;
-    // `number` overlaps the reals unless it is genuinely complex
-    // (`complex`/`imaginary`, which are non-integer by the same convention
-    // `isExtendedReal` uses).
-    if (t.matches('number')) return isNonRealNumber(t.type) ? false : undefined;
-    // Non-numeric / composite types (e.g. `!string`): definitely-not only when
-    // provably disjoint from the integers.
-    if (
-      isEmptyType(
-        reduceType({ kind: 'intersection', types: [t.type, 'integer'] })
-      )
-    )
-      return false;
-    return undefined;
+    return staticMembership(t.type, 'integer');
   }
 
   get isRational(): boolean | undefined {
     const t = this.type;
     if (t.isUnknown) return undefined;
-    if (t.matches('rational')) return true;
-    if (t.matches('real')) return undefined;
-    if (t.matches('number')) return isNonRealNumber(t.type) ? false : undefined;
-    if (
-      isEmptyType(
-        reduceType({ kind: 'intersection', types: [t.type, 'rational'] })
-      )
-    )
-      return false;
-    return undefined;
+    return staticMembership(t.type, 'rational');
   }
 
   get isExtendedReal(): boolean | undefined {

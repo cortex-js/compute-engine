@@ -1,6 +1,7 @@
 import type { Expression, SymbolDefinitions } from '../global-types.js';
 import { toBigint } from '../boxed-expression/numerics.js';
-import { isFunction } from '../boxed-expression/type-guards.js';
+import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { rationalize } from '../numerics/rationals.js';
 import {
   canEnumerateOperand,
   groundEnumerationOperand,
@@ -679,15 +680,39 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     ContinuedFraction: {
       description:
-        'Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully; for an inexact value the expansion is truncated to the optional `n` terms (default 20).',
-      signature: '(number, integer?) -> list<integer>',
+        'Return the continued-fraction expansion of `x` as a list of integer terms `[a0, a1, …]`. An exact rational is expanded fully; an inexact value is expanded as its best rational approximation at working precision (see `Rationalize`), truncated to the optional `n` terms (default 20).',
+      // The value is a FINITE real: the expansion needs the order of the
+      // real line and an infinity has no expansion, so every infinity and
+      // every non-real number is off-carrier — an `incompatible-type`
+      // error at boxing (no `canonical` handler, no fast path; a non-real
+      // operand used to be expanded from its real part). The result is a
+      // list, not a number, so a NaN cannot speak the codomain's vocabulary:
+      // `NaN` in either slot is a contract violation, `reject` (the derived
+      // policy for both slots, declared explicitly). The term count must be
+      // a positive integer: `requires` decides it for a literal count (an
+      // evaluation error; it used to stay inert) and leaves a symbolic one
+      // to the handler. Ruling recorded in
+      // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
+      // batch 10.
+      signature: '(real, integer?) -> list<integer>',
+      nanBehavior: ['reject', 'reject'],
+      requires: ([, n]) => {
+        // Decided for an INTEGER literal only: a non-integer value is outside
+        // the `integer` carrier, and the carrier refuses it — a `false` here
+        // would answer the precondition error for a value a symbol holds,
+        // because the precondition gate runs before the dispatch conformance
+        // re-test.
+        if (n === undefined || !isNumber(n) || n.isInteger !== true)
+          return undefined;
+        return n.re >= 1;
+      },
       examples: ['ContinuedFraction(43/19)  // [2, 3, 1, 4]'],
       // Decline-only: the provable declines are a definitively unavailable
       // `x`, and a term count that `Number(toBigint(nOp) ?? 0n)` puts below 1
       // (a valueless symbol included). Success on a ground `x` further
-      // depends on the branch taken (exact Euclidean expansion vs. a bounded
-      // float expansion, which declines on a non-finite value), so this never
-      // answers `true`.
+      // depends on the branch taken (exact Euclidean expansion vs. the
+      // rational approximation of a float, which declines on a non-finite
+      // value), so this never answers `true`.
       canEnumerate: (expr) => {
         if (!isFunction(expr)) return undefined;
         const x = groundEnumerationOperand(expr.ops[0]);
@@ -707,37 +732,51 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           nOp === undefined ? undefined : Number(toBigint(nOp) ?? 0n);
         if (maxTerms !== undefined && maxTerms < 1) return undefined;
 
-        const terms: bigint[] = [];
+        // The expansion is the exact Euclidean expansion of a rational
+        // `a / b`: the operand itself when it is exact, and its best
+        // rational approximation at working precision (`rationalize`: the
+        // last continued-fraction convergent the float can resolve) when
+        // it is not. Expanding the double directly, term by term, mixes
+        // rounding noise into the tail: `7/3` arriving as
+        // `2.3333333333333335` under `.N()` came out as `[2, 2, 1]` where
+        // `evaluate()` answers `[2, 3]`, and `π` to machine precision had
+        // seven meaningless terms after the thirteenth. The approximant is
+        // a true convergent of the value (Legendre's criterion: its
+        // denominator is below `1/√(2δ)` for the float's half-ulp `δ`), so
+        // every term is a term of the value's own expansion, written in
+        // canonical form — a final `…, a, 1` is spelled `…, a + 1`.
+        let a: bigint | null;
+        let b: bigint | null;
+        let cap = maxTerms;
         if (xOp.isRational) {
-          // Exact: Euclidean expansion of numerator/denominator.
-          let a = toBigint(xOp.numerator);
-          let b = toBigint(xOp.denominator);
-          if (a === null || b === null || b === 0n) return undefined;
-          if (b < 0n) {
-            a = -a;
-            b = -b;
-          }
-          while (b !== 0n) {
-            // Floor division (bigint `/` truncates toward zero).
-            let q: bigint = a / b;
-            if (a % b !== 0n && a < 0n !== b < 0n) q -= 1n;
-            terms.push(q);
-            [a, b] = [b, a - q * b];
-            if (maxTerms !== undefined && terms.length >= maxTerms) break;
-          }
+          a = toBigint(xOp.numerator);
+          b = toBigint(xOp.denominator);
         } else {
-          // Inexact: expand the float value to a bounded number of terms.
-          let val = xOp.re;
+          const val = xOp.re;
           if (!Number.isFinite(val)) return undefined;
-          const cap = maxTerms ?? 20;
-          for (let i = 0; i < cap; i++) {
-            const fl = Math.floor(val);
-            terms.push(BigInt(fl));
-            const frac = val - fl;
-            if (frac < 1e-12) break;
-            val = 1 / frac;
-            if (!Number.isFinite(val)) break;
+          const approximant = rationalize(val);
+          if (typeof approximant === 'number') {
+            a = BigInt(approximant);
+            b = 1n;
+          } else {
+            a = BigInt(approximant[0]);
+            b = BigInt(approximant[1]);
           }
+          cap ??= 20;
+        }
+        if (a === null || b === null || b === 0n) return undefined;
+        if (b < 0n) {
+          a = -a;
+          b = -b;
+        }
+        const terms: bigint[] = [];
+        while (b !== 0n) {
+          // Floor division (bigint `/` truncates toward zero).
+          let q: bigint = a / b;
+          if (a % b !== 0n && a < 0n !== b < 0n) q -= 1n;
+          terms.push(q);
+          [a, b] = [b, a - q * b];
+          if (cap !== undefined && terms.length >= cap) break;
         }
         return ce.function(
           'List',

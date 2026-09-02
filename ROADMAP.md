@@ -438,6 +438,27 @@ deliberately left out of that change.
   sibling size operators (`Count`, `Dimensions`) for the same shape.
   Found while writing the 2026-09-01 may-marker ruling.
 
+### The broadcast lift does not see through a transparent collection alias (OPEN, typing — found 2026-09-02 by the three-valued membership-predicate review)
+
+A VALUELESS symbol declared with a transparent alias of a list
+(`ce.declareType('myints', 'list<integer>', { alias: true })`,
+`ce.declare('L', 'myints')`) is not a broadcast trigger for the type
+derivation: `isBroadcastCollectionType` and `isFixedShapeCollection`
+(`collection-utils.ts`) read the raw reference node, so `Sin(L)` types the
+scalar `number` and `Mod(L, 2)` the scalar `integer`, while both evaluate
+to a list once `L` holds one (`[sin(3), sin(4), sin(5)]`, `[1, 0, 1]`).
+With a value assigned the claim is right (the value's own type is read).
+
+Resolving the alias in the two triggers is NOT the fix on its own: it makes
+the lift re-wrap the `Add`/`Multiply` handlers' alias-PRESERVING answers
+(`Multiply(2, L)` for `L: nums` typed `list<nums>` instead of `nums`,
+the pin in `alias-unfold.test.ts`), because `deferToHandler` and
+`cellResult` in `boxed-function.ts` do not see through the alias either.
+The fix is one alias-resolution policy for the whole lift path — triggers,
+`deferToHandler`, `cellResult`, `broadcastCellType`
+(`common/type/utils.ts`) — decided together with whether a lifted result
+keeps the alias name (`nums`) or the resolved shape (`list<number>`).
+
 ### Doc-sweep triage (2026-08-29)
 
 - **`Infinity^Infinity` canonicalizes to `~oo` where the direction is

@@ -5,7 +5,7 @@ import { parseType } from './parse.js';
 import { isValidType, NUMERIC_TYPES_SET } from './primitive.js';
 import { declarationOf } from './reference.js';
 import { typeToString } from './serialize.js';
-import { isSubtype, widen } from './subtype.js';
+import { isSubtype, provablyDisjoint, widen } from './subtype.js';
 
 // Re-export isValidType from primitive for backward compatibility
 export { isValidType };
@@ -1424,6 +1424,25 @@ export function broadcastElementType(type: Readonly<Type>): Type {
 }
 
 /**
+ * The type of the values an operand contributes to an application under a
+ * broadcast lift: the operand's own type for a scalar, and its element
+ * type with EVERY collection rank unwrapped for a collection —
+ * `broadcastElementType` applied to its fixpoint (it returns its argument
+ * by reference when no descent is possible). A type handler or a
+ * `definedWhen` predicate that reads this claims per CELL, which is what
+ * the lift re-shapes; the Contract B result adjustment reads it to find
+ * NaN evidence in a lifted operand's cells.
+ */
+export function broadcastCellType(type: Readonly<Type>): Type {
+  let t = type as Type;
+  for (;;) {
+    const e = broadcastElementType(t);
+    if (e === t) return t;
+    t = e;
+  }
+}
+
+/**
  * A `broadcastable<S>` operand COULD be a plain scalar `S` at runtime — that
  * is the meaning of the lift (`S`, or an indexed collection of `S` that
  * broadcasts). When the scalar base matches the parameter type, admit the
@@ -1464,6 +1483,31 @@ export function broadcastableBaseMatches(
  */
 export function isNonRealNumber(t: Readonly<Type>): boolean {
   return isSubtype(t as Type, 'complex') && !isSubtype(t as Type, 'real');
+}
+
+/**
+ * Whether every value of the static type `t` is a member of `target`, in
+ * the three-valued discipline the membership predicates (`isNumber`,
+ * `isInteger`, `isRational`) answer with: `true` when `t` is a subtype of
+ * `target` (every value is a member), `false` when the two types are
+ * provably disjoint (no value is), and `undefined` otherwise — the types
+ * overlap, so the answer depends on the value. `unknown` and `any` are
+ * always undecided.
+ *
+ * The distinction matters for a claimed type that is a HEDGE rather than a
+ * proof: `Divide(k, 2)` for an integer `k` claims `real`, and `Sqrt(x)` for
+ * a real `x` of unknown sign claims `complex`; neither claim proves the
+ * value is not an integer, so a two-valued "not a subtype of `integer`"
+ * answer would have called `k / 2` a non-integer for an even `k`.
+ */
+export function staticMembership(
+  t: Readonly<Type>,
+  target: Readonly<Type>
+): boolean | undefined {
+  if (t === 'unknown' || t === 'any') return undefined;
+  if (isSubtype(t as Type, target as Type)) return true;
+  if (provablyDisjoint(t as Type, target as Type)) return false;
+  return undefined;
 }
 
 /**

@@ -1262,6 +1262,221 @@ applied:
 Final full-suite gate (main tree, post-review, box lock held): 647/647
 suites, 31,316 tests, snapshot delta 0.
 
+**Batch 10 — the rational and parity family (`Mod`, `Fract`,
+`Rationalize`, `ContinuedFraction`, `IsOdd`, `IsEven`, `Numerator`,
+`Denominator`, `NumeratorDenominator`) — IMPLEMENTED 2026-09-02.**
+Survey first (every head at NaN, `±∞`, `~oo`, `∞ + i`, `2 + 3i`, `0`, a
+negative real, a non-integer real, a valueless symbol, and a zero divisor
+for `Mod`, on the three routes; simplify is value-blind on every head, so
+no simplify twin diverged). The defects: `IsOdd(x)` answered `False` for
+a valueless `x` (the handler read `op.im !== 0`, which is true of a
+symbol) and `IsEven(x)` `True`; `IsEven` canonicalized to
+`Not(IsOdd(x))`, so every non-odd non-integer (`2.5`, `NaN`, `2 + 3i`)
+was "even", the type claimed `true` for `IsEven(2.5)`, and it printed as
+`\lnot\mathrm{IsOdd}`; `IsOdd(2.5)` stayed inert while its type claimed
+`false`; `Numerator(y)` for `y := 1/2` answered `y` (the lazy handler
+never evaluated the held operand) while `NumeratorDenominator(y)` boxed
+as `(1, 2)` by evaluating at CANONICALIZATION; `Rationalize(+oo)`
+answered `+oo` typed `rational`, `Rationalize(NaN)` was typed `rational`,
+a negative tolerance was read as `|tol|` and a NaN tolerance ignored;
+`Fract(2 + 3i)` answered `0` (a Gaussian integer) and `Fract(+oo).sgn`
+reported `non-negative` for a NaN value; `ContinuedFraction(2 + 3i)`
+answered `[2]` and the float branch answered `[2, 2, 1]` for `7/3` under
+`.N()` where `evaluate()` answers `[2, 3]`; `Mod` answered `NaN` for
+every infinity and non-real operand under bare `number` carriers, and its
+type handler answered `number` for a NaN operand and a zero modulus. Four
+rulings (Arno, 2026-09-02):
+
+1. **`Fract` takes the `Floor` carrier**, `(real | signed_infinity) ->
+   real<0..1>`, with `definedWhen: x finite`: `Fract(±∞)` is the marker
+   `NaN` (typed exactly `nan`, the same answer `x − Floor(x)` composes
+   to), and a non-real operand or `~oo` is a boxing error. No type
+   handler: the declared result is the sharp claim and the framework adds
+   `| nan` while finiteness is unproven.
+2. **`Rationalize` takes `(real, real<0..>?)`** — the tolerance carrier
+   spelled as the range type, so a negative literal tolerance is refused
+   at BOXING (not by a `requires` check), and the NaN policy is the pair
+   `['propagate', 'reject']` (the derived policy for a `real` slot would
+   be `propagate`).
+3. **An inexact `ContinuedFraction` operand is expanded as its best
+   rational approximation** (`rationalize`, the `Rationalize` value),
+   then by exact Euclid. The approximant is a true convergent of the
+   value (Legendre: its denominator is below `1/√(2δ)` for the float's
+   half-ulp `δ`), so every term is a term of the value's expansion; the
+   last one is written in canonical form (`…, a, 1` is `…, a + 1`). The
+   Wester `Sqrt(23)` pin moved from twenty terms ending `…, 8, 1, 3, 1`
+   to nineteen ending `…, 8, 1, 4` — the same number.
+4. **`Numerator`/`Denominator`/`NumeratorDenominator` HANDLE NaN**: they
+   keep the whole of `number` as carrier with `nanBehavior: 'handle'`
+   declared, `NaN` being its own numerator over `1` (the invariant
+   `Numerator(v)/Denominator(v) = v` holds at every point). The value fix
+   rides along: the evaluate handlers evaluate the held operand (exactly,
+   then numericized under `.N()`), and the `NumeratorDenominator`
+   canonical handler is value-blind (`asRational(op)`, no `.evaluate()`).
+
+Decided by precedent, not asked: **`Mod: (real, real) -> real`**, the
+worked declaration of `docs/ERROR-MODEL.md` §4 itself — every infinity
+and non-real operand is a boxing error now (was `NaN`); the limit table
+`Mod(7, +∞) = 7`, `Mod(−7, +∞) = +∞` was noted and not taken. The type
+handler DECLINES (returns `undefined`) for a NaN operand, a provably zero
+modulus, and whenever it cannot claim a kind, so the framework's sharp
+`nan` / `real | nan` shows (a handler answer is never widened).
+**`IsOdd`/`IsEven` take the `IsPrime` arrangement**: `(number) ->
+boolean` with `nanBehavior: 'handle'`, the infinities enforced by the
+handler (`infiniteOperandOfIntegerPredicate`, the renamed
+`notFiniteEnoughForPrimality`, shared by the four integer-membership
+predicates), every provable non-integer `False`, a symbol answered through
+the parity channel (`isOdd`/`isEven`: an assigned value or an
+assumption) and inert otherwise; `IsEven` is its own head with its own
+evaluate (`parityPredicate`). **`ContinuedFraction: (real, integer?)`**
+with `nanBehavior: ['reject', 'reject']` (the result is a list, so
+`propagate` is illegal) and `requires n ≥ 1` (the `ComplexRoots`
+precedent).
+
+One FRAMEWORK fix rode along, found by the type probes: the derived
+application type (`contractBResultAdjustment`) consulted a declared
+`definedWhen` BEFORE the NaN evidence, so a predicate that cannot classify
+a NaN operand (`Fract`'s finiteness test) reported the undischarged
+`real<0..1> | nan` while the runtime NaN gate answers the bare `NaN`
+first (the §4 table: the NaN row runs before the domain rows). A proven
+NaN in a propagating slot of an unlifted application now answers
+`'is-nan'` before the partiality branch; the lifted case keeps its
+per-cell widening either way. `Mod` was unaffected only because its
+predicate happens to answer `false` for NaN.
+
+Seams, per head: none of the nine has a `canonical` handler that folds
+the exceptional points or a fast path, so an off-carrier literal is
+rejected at BOXING (`Mod`, `Fract`, `Rationalize`, `ContinuedFraction`);
+`IsOdd`/`IsEven` reject the infinities in the handler (the wide-carrier
+arrangement); the accessors have no off-carrier point. `Fract` and `Mod`
+also lost the compiler's own "non-real operand" decline for a statically
+non-real operand — the boxing rejection comes first (`compile.test.ts`
+`FLIPPED` set, the rounding-family precedent).
+
+Pins swept: the Wester `Sqrt(23)` expansion (ruling 3); the `Mod` type
+audit (`Mod(fk, fm)` claims `real | nan`, was `number`; `Mod(1/2, 0)` and
+`Mod(fk, NaN)` claim `nan`; `Mod(i, i)` and `Mod(+∞, 5)` are invalid at
+boxing); `type-inference` (`Fract(real)` is `real<0..1>`, `Fract(number)`
+is `real<0..1> | nan`); the shadow-parity legacy table and corpus no
+longer list `Fract` (no handler to shadow); the `compile.test.ts`
+statically-non-real rows for `Fract` and `Mod` expect the boxing
+rejection. Family pins added to `error-model.test.ts` ("the rational and
+parity family declares its domains"). Fungrim: all 1433 simplify
+identities load (the `Which(Not(IsOdd(_n)), …)` identities match on the
+`Not(IsOdd)` spelling and are untouched). Targeted suites (15 files,
+`-w 2`, worktree): green after the five expected pin moves.
+
+First full-suite gate (worktree, box lock held): 6 failures / 32,176
+tests, snapshot delta 0, three of them defects of this batch's own
+declaration, fixed before the second gate:
+
+- **A `definedWhen` predicate must not decide an OFF-carrier operand.**
+  The partiality gate (step 4a-1) runs BEFORE the dispatch conformance
+  re-test, so `Mod`'s predicate answering `false` for an infinite or
+  non-real operand put the marker where the carrier error belongs: a
+  symbol holding `+∞` evaluated to `NaN` instead of the
+  `incompatible-type` error (the runtime-conformance fuzz caught it —
+  `Mod × +oo`, `Mod × complex`). The predicate now answers `undefined`
+  outside the carrier and leaves the refusal to the re-test. Rule for
+  every later `definedWhen`: decide the domain condition INSIDE the
+  carrier only.
+- **A `definedWhen` predicate and a type handler read the CELL type
+  under a broadcast lift** (`broadcastCellType`, arithmetic.ts: the
+  static type with every collection rank unwrapped). The lift hands the
+  handler the whole list operand, so `Mod([0, 1, 2, 3, 4], 2)` declined
+  its kind claim and the predicate could not discharge the zero-modulus
+  condition — `list<nan | real^5>` where the cells are proven integers.
+  It claims `vector<integer^5>` now (the pin used to accept the wide
+  `vector<5>`); `Mod(Range(0, 3N), N)` keeps `list<nan | real>` (a
+  symbolic modulus may be zero — the honest claim, sharper than the old
+  `list<number>`), and the `broadcastable-typing` hop probe keeps its
+  shape (`matches('vector<3>')`).
+- **Cross-test symbol inference in a shared-engine file**: the WGSL
+  suite's shared `x` is inferred `real` by its `Mod(x, y)` emission now,
+  and the target lowers `Arcosh`/`Artanh` of a PROVEN real through the
+  complex helper (both are complex on parts of the real line) — the
+  inverse-hyperbolic pins moved to a local engine so they keep pinning
+  the real lowering of an unknown-kind operand. The GLSL fail-closed
+  pin for `Mod(Complex(1, 2), 1)` expects the boxing rejection;
+  `Mod(Sqrt(-2), 1)` still reaches the target helper's own decline
+  (the radicand's sign is not a boxing-time proof).
+
+Second full-suite gate (worktree, box lock held): 646/647 suites,
+31,305 of 32,176 tests, snapshot delta 0 — the one failure the Phase D
+declaration pin that asserted `Mod`'s predicate answers `false` for an
+off-carrier operand (moved to `undefined` + the boxing rejection, per the
+rule above); its suite re-run green.
+
+Dual review (Codex 4 medium + 1 low; Claude 1 high + 2 low + 1 nit; no
+overlap), every finding applied, one amended:
+1. FIXED (Claude, rated medium): `Mod`'s predicate tested the zero
+   divisor BEFORE the carrier test, so `Mod(h, 0)` for a symbol holding
+   `+∞` took the marker — the very rule of the first gate; the carrier
+   test comes first now.
+2. FIXED (Codex): `Fract`'s predicate answered `false` for `~oo` and an
+   anonymous infinity (off-carrier) — `infinitePoint` decides the two
+   signed infinities only.
+3. FIXED (Codex): `ContinuedFraction`'s `requires` tested `n ≥ 1` on any
+   literal, so a symbol holding `0.5` got the precondition error instead
+   of the carrier error; decided for an integer literal only.
+4. FIXED, amended (Codex): the parity predicates now answer `False` for a
+   SYMBOL whose declared type excludes the integers (`im: imaginary`),
+   not only a literal. The suggested "any operand with `isInteger ===
+   false`" is refuted: a COMPOUND answers `isInteger` from its claimed
+   type alone (`BoxedFunction.isInteger` is `isSubtype(type, 'integer')`),
+   so `k / 2` for an integer `k` answers `false` although it is an
+   integer for an even `k` — see the open question below.
+5. FIXED (Codex): the lazy accessors evaluate a held operand outside the
+   generic conformance re-test, so a symbol holding a string came back as
+   its own "numerator"; `accessorOperand` refuses a value that refutes
+   the `number` carrier (`admissionOf`) with the same error.
+6. FIXED (Codex): a head with NO type handler took its declared result
+   verbatim for a `never`-typed operand (`Fract(x)` for an empty-typed
+   `x` claimed `real<0..1>`); the handlerless path now answers `never`,
+   the rule both handler shapes already applied (boxed-function.ts).
+7. FIXED (Claude): `NumeratorDenominator`'s `Rational`/`Divide` branch
+   returned the operands unevaluated; it evaluates them and threads
+   `numericApproximation` like its siblings.
+8. FIXED (Claude, style): the proven-NaN test in
+   `contractBResultAdjustment` is one local helper (`provenNan`).
+9. FIXED (Claude, nit): the element-type fixpoint loop is
+   `broadcastCellType` in `common/type/utils.ts`, used by the adjustment
+   and by `Mod`'s handler and predicate.
+
+RULED 2026-09-02 (Arno), surfaced by finding 4: `isNumber`, `isInteger`
+and `isRational` are THREE-valued on every expression shape — `true` is
+"certainly a member", `false` "certainly not", `undefined` "the claimed
+type does not decide it". `BoxedFunction` answered two-valued from the
+claimed type (`isSubtype`, so `false` meant "not proven":
+`Divide(k, 2).isInteger === false` for an integer `k`), and
+`BoxedSymbol.isNumber` did the same with `matches`. Implemented as a
+separate change on top of the batch: `staticMembership(t, target)` in
+`common/type/utils.ts` (subtype → `true`, `provablyDisjoint` → `false`,
+otherwise `undefined`; `unknown`/`any` undecided) backs the three
+getters on BOTH shapes. The symbol's `isInteger`/`isRational` used to
+read a declared `complex` as "non-real, hence non-integer" (the
+`isNonRealNumber` convention `isExtendedReal` still uses); under the
+ruling that is `undefined` — `complex` contains the integers — and the
+dual review (Codex) asked for the migration to be complete. Pins:
+`test/compute-engine/membership-predicates.test.ts`. The 21 `=== false`
+call sites in `src/` are sound under the new reading (a `false` is now a
+proof); the full-suite gate measured the blast radius (function-shape
+getters alone: 648/648 suites, 31,321 tests, snapshot delta 0). One
+review catch rode along: the declare-then-assign function route answers
+`never` for a `never`-typed operand like the operator route (Codex). A
+second (Codex: `broadcastCellType` should resolve a transparent alias)
+is refuted-by-mechanism for this change and recorded in `ROADMAP.md` —
+an aliased collection operand is not a broadcast trigger today, so the
+descent never meets one under a lift, and making the triggers see the
+alias re-wraps the `Add`/`Multiply` handlers' alias-preserving answers
+(`Multiply(2, L)` typed `list<nums>`); the lift path needs one alias
+policy end to end. Final full-suite gate for the ruling (main tree,
+post-review, box lock held): 648/648 suites, 31,323 tests, snapshot
+delta 0.
+
+Final full-suite gate (main tree, post-review, box lock held): 647/647
+suites, 31,317 tests, snapshot delta 0.
+
 ### Phase F — signature flips, operator-by-operator
 
 Each flip (e.g. `Heaviside: (real) -> rational<0..1>`, `total`) is its

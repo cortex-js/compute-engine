@@ -203,6 +203,10 @@ describe('Number theory', () => {
 
   test(`continued fraction of sqrt(23) = [4; 1,3,1,8 repeating]`, () => {
     // Wester (via Stark): 4 + 1/(1 + 1/(3 + 1/(1 + 1/(8 + …
+    // The expansion of an inexact value is that of its best rational
+    // approximation at machine precision, a true convergent of √23 spelled
+    // in canonical form: the twenty-term prefix `…, 8, 1, 3, 1` is the same
+    // number as `…, 8, 1, 4`, since a final `a, 1` collapses to `a + 1`.
     expect(
       ce.expr(['ContinuedFraction', ['Sqrt', 23]]).evaluate().json
     ).toEqual([
@@ -225,8 +229,7 @@ describe('Number theory', () => {
       1,
       8,
       1,
-      3,
-      1,
+      4,
     ]);
   });
 });

@@ -1215,11 +1215,19 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
     );
 
     // The Phase F Contract B flip moved the rounding family's decline
-    // EARLIER: `Floor`/`Round`/`Truncate`/`Ceil` declare the extended-real
-    // carrier, so a statically non-real operand is already a boxing error
+    // EARLIER: `Floor`/`Round`/`Truncate`/`Ceil` (and `Fract`, which shares
+    // their carrier) declare the extended-real carrier and `Mod` the finite
+    // real one, so a statically non-real operand is already a boxing error
     // and compile refuses the invalid expression — still fail-closed, at an
     // earlier seam. The wide-carrier heads keep the compile-time decline.
-    const FLIPPED = new Set(['Floor', 'Round', 'Truncate', 'Ceil']);
+    const FLIPPED = new Set([
+      'Floor',
+      'Round',
+      'Truncate',
+      'Ceil',
+      'Fract',
+      'Mod',
+    ]);
     test.each(HEADS)(
       '%s over a STATICALLY non-real operand still declines',
       (h, rest) => {

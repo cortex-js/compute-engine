@@ -495,7 +495,10 @@ export const LEGACY_TYPE_HANDLERS: Record<
   // DIFFERENTLY from the frozen legacy shape (it declines instead of
   // claiming `number`/`complex`, and the component-wise Gaussian arms are
   // gone with the carrier), so the differential parity no longer applies.
-  Fract: ([x]) => frozenNumericTypeHandler([x]),
+  // `Fract` followed with its own flip (2026-09-02, Phase F batch 10): it
+  // declares `(real | signed_infinity) -> real<0..1>` with a `definedWhen`
+  // condition and has NO type handler at all — the claim is derived from
+  // the declaration, so there is no handler to shadow.
   // `LambertW`, the four Bessel heads, the four Airy heads and `Zeta` were
   // here until their Phase F Contract B flip (2026-09-01): each now
   // declares the carrier `complex | infinity` with `nanBehavior:

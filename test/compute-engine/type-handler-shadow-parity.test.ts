@@ -118,12 +118,9 @@ describe('shadow parity over the converted handlers', () => {
       // now deliberately diverge from the frozen legacy shape (see the
       // note at their retired `LEGACY_TYPE_HANDLERS` entries), and the
       // adopted behavior is pinned directly in
-      // `type-handler-parity.test.ts`.
-      ['Fract', 3.7],
-      ['Fract', 'x'],
-      ['Fract', NaN],
-      ['Fract', { num: '+Infinity' }],
-      ['Fract', 'ImaginaryUnit'],
+      // `type-handler-parity.test.ts`. `Fract` left with its own flip
+      // (2026-09-02): it has no type handler any more, and its claims are
+      // pinned in `error-model.test.ts` and `type-inference.test.ts`.
 
       ['LambertW', 1],
       ['LambertW', 'r'],

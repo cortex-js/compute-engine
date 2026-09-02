@@ -109,18 +109,24 @@ describe('TYPE INFERENCE FOR SPECIAL FUNCTIONS', () => {
     );
   });
 
-  it('Fract of real → real', () => {
+  it('Fract of real → real<0..1>', () => {
+    // The declared success type: the fractional part of a finite real lies
+    // in [0, 1), and a bare `real` operand is finite, so the `definedWhen`
+    // condition is discharged and the claim is sharp.
     const localCe = new ComputeEngine();
     localCe.declare('x', { type: 'real' });
     const expr = localCe.expr(['Fract', 'x']);
-    expect(expr.type.toString()).toBe('real');
+    expect(expr.type.toString()).toBe('real<0..1>');
   });
 
-  it('Fract of number → number', () => {
+  it('Fract of number → real<0..1> | nan', () => {
+    // A `number` operand may be NaN (propagated) or infinite (no fractional
+    // part: the marker), so the claim carries the `| nan` arm.
     const localCe = new ComputeEngine();
     localCe.declare('z', { type: 'number' });
     const expr = localCe.expr(['Fract', 'z']);
-    expect(expr.type.toString()).toBe('number');
+    expect(expr.type.matches('real<0..1> | nan')).toBe(true);
+    expect(expr.type.matches('real')).toBe(false);
   });
 });
 

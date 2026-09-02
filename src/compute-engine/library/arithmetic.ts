@@ -7,6 +7,7 @@ import {
   nonNumericOperandError,
 } from '../boxed-expression/validate.js';
 import {
+  admissionOf,
   evidenceAdmissionOf,
   heldNonNumericScalar,
 } from '../boxed-expression/value-membership.js';
@@ -124,6 +125,7 @@ import {
   root,
 } from '../boxed-expression/arithmetic-power.js';
 import {
+  broadcastCellType,
   broadcastResultType,
   collectionElementType,
   isNonRealNumber,
@@ -211,9 +213,10 @@ import type { OperandDescriptor } from '../types-definitions.js';
 import { isPrime as isPrimeNumber } from '../numerics/primes.js';
 import { parseType } from '../../common/type/parse.js';
 
-/** The carrier of `IsPrime`/`IsComposite`: all of `number` except the
- * infinities. See `notFiniteEnoughForPrimality`, which enforces it. */
-const PRIMALITY_CARRIER_TYPE = parseType('complex | nan');
+/** The carrier of the integer-membership predicates (`IsPrime`,
+ * `IsComposite`, `IsOdd`, `IsEven`): all of `number` except the infinities.
+ * See `infiniteOperandOfIntegerPredicate`, which enforces it. */
+const INTEGER_PREDICATE_CARRIER_TYPE = parseType('complex | nan');
 
 /** The carrier of `Power`'s EXPONENT slot: the finite complex numbers and
  * the signed infinities, excluding `~oo` (no base has a value there). The
@@ -1802,11 +1805,50 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Fractional part of a number: x - floor(x)',
       complexity: 1250,
       broadcastable: true,
-      signature: '(number) -> number',
-      typeHandlerKind: 'types',
-      type: ([x]) => numericTypeHandlerOnTypes([x]),
+      // The same carrier as `Floor`: `x − floor(x)` needs the order of the
+      // real line, so a non-real operand is off-carrier (a boxing error —
+      // this head has no `canonical` handler and no fast path, so the
+      // boxing seam decides; `Fract(2 + 3i)` used to answer `0`). The
+      // signed infinities are IN the carrier but have no fractional part:
+      // `∞ − floor(∞)` is `∞ − ∞`, and `x − floor(x)` has no limit at
+      // either end (it sweeps `[0, 1)` forever), so `definedWhen` names the
+      // finiteness condition and the gate answers the codomain marker,
+      // `NaN`, exactly as `x − Floor(x)` composes. `NaN` propagates. The
+      // successes lie in `[0, 1)`; `real<0..1>` is the closest declared
+      // spelling, and it is sharp enough that no type handler is needed —
+      // the framework adds `| nan` while the operand is not proven finite.
+      // Ruling recorded in `docs/plans/2026-08-30-error-model-implementation.md`,
+      // Phase F batch 10.
+      signature: '(real | signed_infinity) -> real<0..1>',
+      nanBehavior: 'propagate',
+      definedWhen: ([x]) => {
+        if (x === undefined) return undefined;
+        // The STATIC type decides for a symbol or a compound (`Fract(r + 1)`
+        // for `r: real`): bare `real` names the finite reals. The value
+        // predicates are type-blind on compounds, so they are asked of a
+        // literal only.
+        if (x.type.matches('real')) return true;
+        if (!isNumber(x)) return undefined;
+        // Only the two SIGNED infinities are inside the carrier and decided
+        // here; `~oo` and an anonymous infinity are outside it, and the
+        // carrier — not this predicate — refuses them (a `false` would put
+        // the marker where the carrier error belongs for a value a symbol
+        // holds, because the partiality gate runs before the dispatch
+        // conformance re-test).
+        const point = infinitePoint(x);
+        if (point === '+oo' || point === '-oo') return false;
+        if (point !== undefined) return undefined;
+        if (x.isFinite === true) return true;
+        return undefined;
+      },
+      // The fractional part of EVERY finite real is in `[0, 1)` (the floored
+      // convention: `Fract(−7/2) = 1/2`), so the claim does not depend on the
+      // operand's sign. A NaN or an infinite operand has the NaN value.
       sgn: ([x]) => {
-        if (x.isNonNegative) return 'non-negative';
+        if (x.isNaN === true || (isNumber(x) && x.isInfinity === true))
+          return 'unsigned';
+        if (x.isFinite === true && x.isExtendedReal === true)
+          return 'non-negative';
         return undefined;
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -2651,62 +2693,80 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 2500,
       broadcastable: true,
 
-      signature: '(number, number) -> number',
+      // The declaration `docs/ERROR-MODEL.md` §4 gives as its worked
+      // example: both operands are FINITE reals (a floored remainder needs
+      // the order of the real line, and `Mod(±∞, m)` has no limit — it
+      // sweeps `[0, m)` forever), so an infinite or non-real operand is
+      // off-carrier — an `incompatible-type` error at boxing (no `canonical`
+      // handler, no fast path), where it used to answer `NaN`. `NaN`
+      // propagates. The one failure INSIDE the carrier is the zero modulus,
+      // named by `definedWhen` below, which the gate routes to the codomain
+      // marker (`Mod(1, 0)` → `NaN`), never to `Error`.
+      signature: '(real, real) -> real',
+      nanBehavior: 'propagate',
       // The named domain condition (Contract B, `docs/ERROR-MODEL.md` §4):
-      // a floored remainder exists exactly for a finite real dividend and a
-      // finite, non-zero real modulus — the same condition the `type`
-      // handler below reasons from. `false` routes to the codomain marker
-      // (`Mod(1, 0)` → `NaN`), never to `Error`; an undecidable operand (a
-      // symbol, an unevaluated compound) answers `undefined`.
+      // inside the carrier, a floored remainder exists exactly for a
+      // non-zero modulus. `false` routes to the codomain marker
+      // (`Mod(1, 0)` → `NaN`), never to `Error`; an undecidable modulus (a
+      // symbol of unknown sign, a collection) answers `undefined`. The
+      // operands are read from their STATIC types — the value predicates
+      // are type-blind on compounds — and under a broadcast lift from the
+      // ELEMENT type (`Mod([0, 1, 2], 2)` is decided per cell). An operand
+      // OUTSIDE the carrier (infinite, non-real) is not this predicate's to
+      // decide: the carrier refuses it — at boxing for a literal, by the
+      // dispatch conformance re-test for a value a symbol holds — and a
+      // `false` here would put the marker where the carrier error belongs,
+      // because the partiality gate runs before that re-test.
       definedWhen: ([dividend, divisor]) => {
         if (dividend === undefined || divisor === undefined) return undefined;
-        if (!isNumber(dividend) || !isNumber(divisor)) return undefined;
-        if (divisor.isSame(0)) return false;
-        // A provably non-real or infinite operand has no floored remainder.
+        // The carrier test comes FIRST: `Mod(m, 0)` for an `m` that is not
+        // proven real is not decided here either, or a symbol holding `+∞`
+        // would take the marker instead of the carrier error.
         if (
-          dividend.isExtendedReal === false ||
-          divisor.isExtendedReal === false
-        )
-          return false;
-        if (dividend.isFinite === false || divisor.isFinite === false)
-          return false;
-        if (
-          dividend.isExtendedReal !== true ||
-          divisor.isExtendedReal !== true ||
-          dividend.isFinite !== true ||
-          divisor.isFinite !== true
+          !isSubtype(broadcastCellType(dividend.type.type), 'real') ||
+          !isSubtype(broadcastCellType(divisor.type.type), 'real')
         )
           return undefined;
-        return true;
+        if (isNumber(divisor)) return !divisor.isSame(0);
+        const s = divisor.sgn;
+        if (positiveSign(s) === true || negativeSign(s) === true)
+          return true;
+        return s === 'not-zero' ? true : undefined;
       },
       type: ([a, b]) => {
-        if (!a || !b) return 'number';
+        if (!a || !b) return undefined;
         // A floored remainder is defined only for a finite real dividend and a
-        // finite, non-zero real modulus. A zero/complex/infinite modulus, or an
-        // infinite dividend, yields NaN (the old `widen(...)` claimed e.g.
-        // `rational` for `Mod(1/2, 0)` and `imaginary` for `Mod(i, i)`).
-        // The 0-pole needs sgn-nonzero (the `poleReciprocalType` idiom): a
-        // `integer` modulus MAY be zero, so `b.isSame(0)` alone was
-        // unsound (`Mod(k, m)` claimed `integer` while `m = 0` yields
-        // NaN). Operand tests read the STATIC type — the value predicates
+        // finite, non-zero real modulus, and it stays in the operands' common
+        // numeric kind (`Mod(k, 900)` is an integer for an integer `k`). The
+        // handler claims that kind when it is proven, and DECLINES otherwise:
+        // a declined claim falls through to the declared `real` result and
+        // the Contract B derivation, which answers exactly `nan` for a
+        // provably NaN operand or a provably zero modulus and `real | nan`
+        // while the `definedWhen` condition is undischarged (a modulus that
+        // MAY be zero). A handler answer is never widened by the framework,
+        // so claiming a kind here for a possibly-zero modulus would hide the
+        // marker (`Mod(k, m)` claimed `integer` while `m = 0` yields NaN).
+        // The 0-pole needs sgn-nonzero (the `poleReciprocalType` idiom).
+        // Operand tests read the STATIC type — the value predicates
         // (`isFinite`, `isInteger`) are type-blind on compound operands like
-        // `Mod(k + 29, 900)`.
+        // `Mod(k + 29, 900)` — and under a broadcast lift the ELEMENT type,
+        // so `Mod([0, 1, 2], 2)` claims `integer` per cell.
+        if (a.isNaN === true || b.isNaN === true) return undefined;
         const bSgn = operandSgn(b);
         const bNonZero = isNumber(b)
           ? !b.isSame(0)
           : positiveSign(bSgn) === true ||
             negativeSign(bSgn) === true ||
             bSgn === 'not-zero';
-        if (!bNonZero) return 'number';
-        const ta = a.type;
-        const tb = b.type;
-        if (ta.matches('integer') && tb.matches('integer'))
+        if (!bNonZero) return undefined;
+        const ta = broadcastCellType(a.type.type);
+        const tb = broadcastCellType(b.type.type);
+        if (isSubtype(ta, 'integer') && isSubtype(tb, 'integer'))
           return 'integer';
-        if (ta.matches('rational') && tb.matches('rational'))
+        if (isSubtype(ta, 'rational') && isSubtype(tb, 'rational'))
           return 'rational';
-        if (ta.matches('real') && tb.matches('real'))
-          return 'real';
-        return 'number';
+        if (isSubtype(ta, 'real') && isSubtype(tb, 'real')) return 'real';
+        return undefined;
       },
       sgn: (ops) => {
         const n = ops[1]; //base of Mod
@@ -3855,7 +3915,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description:
         'Approximate a real number by a rational. With a second argument `tolerance`, return the rational with the smallest denominator that approximates the number to within `tolerance` (a continued-fraction convergent); with no tolerance, rationalize at full working precision, as single-argument `Rational`.',
       complexity: 2400,
-      signature: '(number, number?) -> rational',
+      // The value is a FINITE real: no rational lies within any tolerance of
+      // an infinity, and the continued-fraction expansion needs the order of
+      // the real line, so every infinity and every non-real number is
+      // off-carrier — an `incompatible-type` error at boxing (no `canonical`
+      // handler, no fast path). `Rationalize(+∞)` used to answer `+∞` under
+      // a `rational` claim. A NaN value propagates. The tolerance is a
+      // NON-NEGATIVE finite real, spelled as the range type: a negative
+      // literal is refused at boxing (it used to be read as its absolute
+      // value), and a NaN tolerance is a contract violation (`reject`), not
+      // a value to propagate — the derived policy for a `real` slot would
+      // be `propagate`, hence the explicit pair. Ruling recorded in
+      // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
+      // batch 10.
+      signature: '(real, real<0..>?) -> rational',
+      nanBehavior: ['propagate', 'reject'],
       examples: [
         'Rationalize(1.75)  // 7/4',
         'Rationalize(Sqrt(3), 1/500)  // 26/15',
@@ -3869,7 +3943,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.length >= 2) {
           const tol = ops[1].N();
           if (!isNumber(tol) || tol.im !== 0) return undefined;
-          return ce.number(rationalize(f.re, Math.abs(tol.re)));
+          return ce.number(rationalize(f.re, tol.re));
         }
         return ce.number(rationalize(f.re));
       },
@@ -4701,7 +4775,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> boolean',
       nanBehavior: 'handle',
       evaluate: ([n], { engine }) => {
-        const outOfDomain = notFiniteEnoughForPrimality(engine, n);
+        const outOfDomain = infiniteOperandOfIntegerPredicate(engine, n);
         if (outOfDomain !== undefined) return outOfDomain;
         const result = isPrime(n);
         if (result === undefined) return undefined;
@@ -4724,7 +4798,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // for it. `isComposite` is the shared one, used by the `:composite`
       // pattern guard in `rules.ts` as well.
       evaluate: ([n], { engine }) => {
-        const outOfDomain = notFiniteEnoughForPrimality(engine, n);
+        const outOfDomain = infiniteOperandOfIntegerPredicate(engine, n);
         if (outOfDomain !== undefined) return outOfDomain;
         const result = isComposite(n);
         if (result === undefined) return undefined;
@@ -4737,32 +4811,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: '`IsOdd(n)` returns `True` if `n` is an odd number',
       complexity: 1200,
       broadcastable: true,
+      // The same arrangement as `IsPrime`: the wide carrier with the
+      // infinities enforced by the handler, `NaN` handled (answered `False`,
+      // as every non-integer is — "is 2.5 odd?" is a well-formed question
+      // whose answer is no). See the `IsPrime` comment for why the exclusion
+      // of the infinities is not written into the declaration.
       signature: '(number) -> boolean',
-      evaluate: (ops, { engine }) => {
-        let fail = false;
-        const result = ops.every((op) => {
-          if (op.im !== 0) return false;
-
-          const b = asBigint(op);
-          if (b !== null) return b % BigInt(2) !== BigInt(0);
-
-          const n = op.re;
-          if (Number.isInteger(n)) return n % 2 !== 0;
-
-          fail = true;
-          return false;
-        });
-        if (fail) return undefined;
-        return engine.symbol(result ? 'True' : 'False');
-      },
+      nanBehavior: 'handle',
+      evaluate: ([n], { engine }) => parityPredicate(engine, n, 'odd'),
     },
     IsEven: {
       type: (ops) => literalPredicateType(ops, (n) => Number.isInteger(n) && n % 2 === 0),
-      description: 'Even Number',
+      description: '`IsEven(n)` returns `True` if `n` is an even number',
       complexity: 1200,
       broadcastable: true,
+      // Its own head, NOT `Not(IsOdd(n))`: a non-integer is neither odd nor
+      // even, so the negation answered `True` for `2.5`, `NaN` and `2 + 3i`
+      // (and `IsEven(x)` printed as `¬IsOdd(x)`). Same carrier and NaN
+      // policy as `IsOdd`.
       signature: '(number) -> boolean',
-      canonical: (ops, { engine }) => engine.expr(['Not', ['IsOdd', ...ops]]),
+      nanBehavior: 'handle',
+      evaluate: ([n], { engine }) => parityPredicate(engine, n, 'even'),
     },
     // @todo: Divisor:
   },
@@ -4834,7 +4903,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       lazy: true,
+      // A STRUCTURAL accessor, not a numeric function: it reads the
+      // numerator of whatever it is given, a symbol included, and the
+      // invariant `Numerator(v) / Denominator(v) = v` holds at every point
+      // of `number`. A number that is not a quotient is its own numerator
+      // over the denominator `1` — `NaN` and the infinities included
+      // (`NumeratorDenominator(NaN)` is `(NaN, 1)`), which is why the
+      // carrier stays the whole of `number` and `NaN` is HANDLED rather
+      // than propagated (`Denominator(NaN)` is `1`, not `NaN`). Ruling
+      // recorded in `docs/plans/2026-08-30-error-model-implementation.md`,
+      // Phase F batch 10. The same holds for `Denominator` and
+      // `NumeratorDenominator` below.
       signature: '(number) -> number | nothing',
+      nanBehavior: 'handle',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want Numerator to work on non-canonical
         // expressions, so that you can determine if a user input is
@@ -4849,7 +4930,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return engine._fn('Numerator', canonical(engine, ops));
       },
       sgn: ([x]) => x.sgn,
-      evaluate: (ops, { engine }) => {
+      evaluate: (ops, { engine, numericApproximation }) => {
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
         const op = ops[0];
@@ -4857,8 +4938,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           (op.operator === 'Rational' || op.operator === 'Divide') &&
           isFunction(op)
         )
-          return op.op1.evaluate();
-        return op.numerator;
+          return op.op1.evaluate({ numericApproximation });
+        // The operand is HELD (`lazy`), so it must be evaluated here before
+        // its numerator is read: a symbol holding `1/2` has the numerator
+        // `1`, not itself. Exactly, then numericized: the numerator of
+        // `1/2` is `1` on both routes, while `0.5` has no numerator but
+        // itself.
+        const v = accessorOperand(ce, op);
+        if (!v.isValid) return v;
+        const result = v.numerator;
+        return numericApproximation ? result.N() : result;
       },
     },
 
@@ -4868,7 +4957,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       lazy: true,
+      // A structural accessor over the whole of `number`, `NaN` handled —
+      // see `Numerator`.
       signature: '(number) -> number | nothing',
+      nanBehavior: 'handle',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want Denominator to work on non-canonical
         // expressions, so that you can determine if a user input is
@@ -4885,7 +4977,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return engine._fn('Denominator', canonical(engine, ops));
       },
       sgn: () => 'positive',
-      evaluate: (ops, { engine }) => {
+      evaluate: (ops, { engine, numericApproximation }) => {
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
         const op = ops[0];
@@ -4893,8 +4985,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           (op.operator === 'Rational' || op.operator === 'Divide') &&
           isFunction(op)
         )
-          return op.op2.evaluate();
-        return op.denominator;
+          return op.op2.evaluate({ numericApproximation });
+        // The held operand is evaluated first — see `Numerator`.
+        const v = accessorOperand(ce, op);
+        if (!v.isValid) return v;
+        const result = v.denominator;
+        return numericApproximation ? result.N() : result;
       },
     },
 
@@ -4904,7 +5000,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
 
       lazy: true,
+      // A structural accessor over the whole of `number`, `NaN` handled —
+      // see `Numerator`.
       signature: '(number) -> tuple<number, number> | nothing',
+      nanBehavior: 'handle',
       canonical: (ops, { engine }) => {
         // **IMPORTANT**: We want NumeratorDenominator to work on non-canonical
         // expressions, so that you can determine if a user input is
@@ -4916,16 +5015,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           isFunction(op)
         )
           return engine.tuple(...op.ops);
-        const num = asRational(op.evaluate());
+        // Canonicalization is value-blind (the same rule as `Denominator`
+        // above): a rational LITERAL folds here, a symbol holding one does
+        // not — its pair is read by `evaluate`, so the canonical form does
+        // not depend on the symbol's current assignment.
+        const num = asRational(op);
         if (num !== undefined)
           return engine.tuple(engine.number(num[0]), engine.number(num[1]));
-        return engine._fn(
-          'NumeratorDenominator',
-          ops.map((x) => x.evaluate())
-        );
+        return engine._fn('NumeratorDenominator', canonical(engine, ops));
       },
 
-      evaluate: (ops, { engine }) => {
+      evaluate: (ops, { engine, numericApproximation }) => {
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
         const op = ops[0];
@@ -4933,9 +5033,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           (op.operator === 'Rational' || op.operator === 'Divide') &&
           isFunction(op)
         )
-          return ce.tuple(...op.ops);
+          return ce.tuple(
+            op.op1.evaluate({ numericApproximation }),
+            op.op2.evaluate({ numericApproximation })
+          );
 
-        return ce.tuple(...op.numeratorDenominator);
+        // The held operand is evaluated first — see `Numerator`.
+        const v = accessorOperand(ce, op);
+        if (!v.isValid) return v;
+        const [num, den] = v.numeratorDenominator;
+        return numericApproximation
+          ? ce.tuple(num.N(), den.N())
+          : ce.tuple(num, den);
       },
     },
   },
@@ -5689,12 +5798,69 @@ function productAccumulate(
  * would have spelled, so the diagnostic a caller reads is the same either
  * way.
  */
-function notFiniteEnoughForPrimality(
+/**
+ * The held operand of a structural accessor (`Numerator`, `Denominator`,
+ * `NumeratorDenominator`), evaluated. These heads are `lazy`, so the
+ * generic runtime conformance re-test never sees the value the operand
+ * resolves to; a value that refutes the `number` carrier (a string, a
+ * boolean) is refused here instead, as the same `incompatible-type` error.
+ * An error value is returned as is; a still-symbolic value passes through
+ * and is its own numerator over `1`.
+ */
+function accessorOperand(ce: ComputeEngine, op: Expression): Expression {
+  const v = op.evaluate();
+  if (!v.isValid) return v;
+  if (admissionOf(v, 'number') === 'refute')
+    return ce.typeError('number', v.type, v);
+  return v;
+}
+
+/**
+ * The `incompatible-type` error an integer-membership predicate (`IsPrime`,
+ * `IsComposite`, `IsOdd`, `IsEven`) answers for an infinite operand, or
+ * `undefined` when the operand is not provably infinite. The predicates
+ * declare the wide `number` carrier so that a caller's own symbol is not
+ * inferred narrower than `number` (see the `IsPrime` comment), and enforce
+ * the exclusion of the infinities here instead.
+ */
+function infiniteOperandOfIntegerPredicate(
   ce: ComputeEngine,
   n: Expression | undefined
 ): Expression | undefined {
   if (n === undefined || !n.type.matches('infinity')) return undefined;
-  return ce.typeError(PRIMALITY_CARRIER_TYPE, n.type, n);
+  return ce.typeError(INTEGER_PREDICATE_CARRIER_TYPE, n.type, n);
+}
+
+/**
+ * The verdict of `IsOdd` / `IsEven` for one operand: a membership predicate
+ * over the integers, so every provable non-integer — `NaN`, a non-integer
+ * real, a non-real number — is a `False`, and an infinite operand is the
+ * carrier error above. A symbol answers through the parity channel
+ * (`isOdd` / `isEven` read an assigned value or an assumption); an operand
+ * whose parity is not decided stays inert. The parity of an integer literal
+ * comes from the exact channel (`BoxedNumber.isOdd`), never from the
+ * machine projection `.re`, which rounds past 2^53.
+ *
+ * The non-integer test is asked of a literal or a symbol only. A compound
+ * answers `isInteger` from its claimed type, three-valued (`k / 2` for an
+ * integer `k` claims `real` and answers `undefined`), so it could be asked
+ * too; but a compound reaches this handler only when it stayed symbolic
+ * under evaluation, and its parity channel is the honest answer for it —
+ * inert until the value is known.
+ */
+function parityPredicate(
+  ce: ComputeEngine,
+  n: Expression | undefined,
+  parity: 'odd' | 'even'
+): Expression | undefined {
+  if (n === undefined) return undefined;
+  const outOfDomain = infiniteOperandOfIntegerPredicate(ce, n);
+  if (outOfDomain !== undefined) return outOfDomain;
+  if (n.isNaN === true) return ce.False;
+  if ((isNumber(n) || isSymbol(n)) && n.isInteger === false) return ce.False;
+  const verdict = parity === 'odd' ? n.isOdd : n.isEven;
+  if (verdict === undefined) return undefined;
+  return verdict ? ce.True : ce.False;
 }
 
 function sumAccumulate(

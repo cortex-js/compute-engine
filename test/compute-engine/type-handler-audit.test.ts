@@ -534,15 +534,26 @@ describe('TYPE AUDIT: Mod (floored remainder)', () => {
     expect(typeOf(['Add', 1, ['Mod', ['Add', 'fk', 29], 900]])).toBe('integer');
   });
 
-  it('a possibly-zero symbolic modulus keeps number (Mod(k, 0) is NaN)', () => {
-    expect(typeOf(['Mod', 'fk', 'fm'])).toBe('number');
+  it('a possibly-zero symbolic modulus admits the marker (Mod(k, 0) is NaN)', () => {
+    // The handler declines the claim, and the declared `real` result gains
+    // the `| nan` arm while the `definedWhen` condition (a non-zero modulus)
+    // is undischarged.
+    const t = ce.box(['Mod', 'fk', 'fm']).type;
+    expect(t.matches('real | nan')).toBe(true);
+    expect(t.matches('real')).toBe(false);
   });
 
-  it('NaN outcomes keep number: zero/complex modulus, non-finite operands', () => {
-    expect(typeOf(['Mod', ['Rational', 1, 2], 0])).toBe('number');
-    expect(typeOf(['Mod', 'ImaginaryUnit', 'ImaginaryUnit'])).toBe('number');
-    expect(typeOf(['Mod', 'fk', { num: 'NaN' }])).toBe('number');
-    expect(typeOf(['Mod', { num: '+Infinity' }, 5])).toBe('number');
+  it('NaN outcomes claim nan; off-carrier operands are boxing errors', () => {
+    // The carrier is `(real, real)`: a zero modulus is the one failure
+    // inside it (the `definedWhen` marker, typed exactly `nan`), a NaN
+    // operand propagates (typed `nan`), and a non-real or infinite operand
+    // is outside it — an `incompatible-type` error at boxing.
+    expect(typeOf(['Mod', ['Rational', 1, 2], 0])).toBe('nan');
+    expect(typeOf(['Mod', 'fk', { num: 'NaN' }])).toBe('nan');
+    expect(ce.box(['Mod', 'ImaginaryUnit', 'ImaginaryUnit']).isValid).toBe(
+      false
+    );
+    expect(ce.box(['Mod', { num: '+Infinity' }, 5]).isValid).toBe(false);
     // A bare `integer` operand is finite — every bare numeric name is — so it
     // narrows like the other finite-typed operands above. It kept `number`
     // while the retired `finite_integer` spelling existed alongside it: the

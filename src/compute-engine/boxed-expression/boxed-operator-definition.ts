@@ -51,7 +51,7 @@ import {
   functionLiteralParameters,
 } from './function-literal.js';
 import {
-  broadcastElementType,
+  broadcastCellType,
   functionResult,
   signatureArms,
 } from '../../common/type/utils.js';
@@ -888,6 +888,39 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // never fire for it — so an adjustment here would put a claim in the
     // type that no runtime channel backs.
     if (this.isUserFunctionDefinition) return 'none';
+    // Whether the application is a BROADCAST LIFT decides where a NaN
+    // lands. The runtime NaN gate stands down for a broadcastable operator
+    // with a collection-shaped operand (its test is mirrored here) and the
+    // per-element re-entry applies the policy cell by cell, so under a
+    // lift every NaN — a scalar operand's included (`Power(NaN, L)` is a
+    // list of NaN cells) — is a per-cell fact. Without a lift the gate
+    // answers the bare `NaN` for the whole application.
+    const lifted =
+      this.broadcastable &&
+      ops.some((x) => x.isCollection || x.type.matches('collection<any>'));
+    // The NaN policy row runs BEFORE the domain rows (the derived behavior
+    // table of `docs/ERROR-MODEL.md` §4, and the runtime gate order: the
+    // NaN gate answers before the partiality gate), so a PROVEN NaN in a
+    // propagating slot decides the whole application before any declared
+    // `definedWhen` is consulted: the value is the bare `NaN`, and the
+    // sharp type is exactly `nan` — not the undischarged `S | nan` that a
+    // predicate which cannot classify a NaN operand would report
+    // (`Fract(NaN)` typed `real<0..1> | nan` while the gate answers `NaN`).
+    // Only the scalar, unlifted case is decided here: under a lift a NaN
+    // is a per-cell fact, and the marker arm below widens per cell too.
+    // The bottom type is excluded: `never` is a subtype of everything, and
+    // a `never`-typed operand means "no possible value" — a contradiction —
+    // not "proven NaN". (`nan` is not a subtype of the NaN value singleton,
+    // so the may-carry test below cannot stand in for this one.)
+    const provenNan = (t: Type): boolean =>
+      t !== 'never' && isSubtype(t, 'nan');
+    if (!lifted) {
+      for (let i = 0; i < ops.length; i++) {
+        if (this.resolvedNanBehaviorAt(i, armSignature) !== 'propagate')
+          continue;
+        if (provenNan(ops[i].type.type)) return 'is-nan';
+      }
+    }
     if (this.definedWhen) {
       let v: boolean | undefined;
       try {
@@ -906,17 +939,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     } else if (this.partiality === 'may-marker') return 'widen-marker';
     // No undischarged partiality claim: the only possible adjustment is
     // the NaN arm — a `propagate` slot whose argument may carry a `NaN`.
-    //
-    // Whether the application is a BROADCAST LIFT decides where a NaN
-    // lands. The runtime NaN gate stands down for a broadcastable operator
-    // with a collection-shaped operand (its test is mirrored here) and the
-    // per-element re-entry applies the policy cell by cell, so under a
-    // lift every NaN — a scalar operand's included (`Power(NaN, L)` is a
-    // list of NaN cells) — is a per-cell fact. Without a lift the gate
-    // answers the bare `NaN` for the whole application.
-    const lifted =
-      this.broadcastable &&
-      ops.some((x) => x.isCollection || x.type.matches('collection<any>'));
     for (let i = 0; i < ops.length; i++) {
       if (this.resolvedNanBehaviorAt(i, armSignature) !== 'propagate')
         continue;
@@ -924,14 +946,13 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // A PROVEN NaN in a propagating slot makes the application's value
       // NaN — the sharp type is exactly the marker, not a widened union
       // (`Heaviside(NaN).type` is `nan`, not `rational<0..1> | nan`).
-      // Testing only the may-carry direction below missed this: `nan` is
-      // not a subtype of the NaN value singleton, so a proven-NaN
-      // argument derived NO arm and the stored type excluded the very
-      // value the application has. The bottom type is excluded first:
-      // `never` is a subtype of everything, and a `never`-typed operand
-      // means "no possible value" — a contradiction — not "proven NaN".
-      if (opT !== 'never' && isSubtype(opT, 'nan'))
-        return lifted ? 'widen-nan-cells' : 'is-nan';
+      // Testing only the may-carry direction below missed this: a
+      // proven-NaN argument derived NO arm and the stored type excluded
+      // the very value the application has. (Reached for a lifted
+      // application, and for an unlifted one whose partiality is
+      // discharged — the early exit above already answered the other
+      // unlifted cases.)
+      if (provenNan(opT)) return lifted ? 'widen-nan-cells' : 'is-nan';
       if (isSubtype('nan', opT))
         return lifted ? 'widen-nan-cells' : 'widen-nan';
       // Broadcast operands carry their numbers in CELLS: for a
@@ -941,22 +962,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // per-cell claim, and `Sign([1, NaN])` puts a literal `NaN` in one
       // cell. The two subtype probes above see only the collection type
       // (`nan` is not a subtype of `list<number>`), so descend to the
-      // element type — with `broadcastElementType`, the union-aware
-      // descent the broadcast machinery itself uses, so a union of
-      // collection shapes (`list<real> | list<nan>`) is covered too —
-      // and re-test. The helper returns its argument by REFERENCE when no
-      // descent is possible, which is the loop's fixpoint. The verdict
-      // for element-level evidence is always `widen-nan-cells`, never
-      // `is-nan`: a NaN element makes ONE cell NaN, not the whole
+      // cell type — `broadcastCellType`, the union-aware descent the
+      // broadcast machinery itself uses, so a union of collection shapes
+      // (`list<real> | list<nan>`) is covered too — and re-test. The
+      // verdict for element-level evidence is always `widen-nan-cells`,
+      // never `is-nan`: a NaN element makes ONE cell NaN, not the whole
       // application, and the widening is applied per cell
       // (`widenNumericCellsWithNan`).
       if (this.broadcastable) {
-        let elT: Type = opT;
-        while (true) {
-          const e = broadcastElementType(elT);
-          if (e === elT) break;
-          elT = e;
-        }
+        const elT = broadcastCellType(opT);
         if (
           elT !== opT &&
           elT !== 'never' &&

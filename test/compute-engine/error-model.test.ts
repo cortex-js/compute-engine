@@ -1941,6 +1941,221 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['Identity', 'NaN'], isNaNv);
   });
 
+  test('the rational and parity family declares its domains', () => {
+    // Signature flips of 2026-09-02 (batch 10), with four rulings taken
+    // first: (1) `Fract` takes the `Floor` carrier (`real |
+    // signed_infinity`) and answers NaN at ±∞ through `definedWhen`
+    // (`x − floor(x)` has no limit there); (2) `Rationalize` takes a
+    // finite real and a NON-NEGATIVE finite tolerance, spelled as the
+    // range type `real<0..>`; (3) an inexact `ContinuedFraction` operand
+    // is expanded as its best rational approximation, so both routes
+    // agree; (4) `Numerator`, `Denominator` and `NumeratorDenominator`
+    // are structural accessors that HANDLE NaN (`NaN` is `NaN/1`), and
+    // they evaluate their held operand. By precedent: `Mod` takes the
+    // `(real, real) -> real` declaration of `docs/ERROR-MODEL.md` §4, and
+    // `IsOdd`/`IsEven` take the `IsPrime` arrangement, `IsEven` as its own
+    // head. Every pin below holds on evaluate() AND N().
+    const ce2 = new ComputeEngine();
+    const POS = 'PositiveInfinity';
+    const NEG = 'NegativeInfinity';
+    const COO = 'ComplexInfinity';
+    const ANON = ['Complex', POS, 1];
+    const NONREAL = ['Complex', 2, 3];
+    const both = (expr: any, check: (v: any) => boolean) => {
+      expect(check(ce2.box(expr).evaluate())).toBe(true);
+      expect(check(ce2.box(expr).N())).toBe(true);
+    };
+    const isNaNv = (v: any) => isNaNValue(ce2, v);
+    const is = (n: any) => (v: any) => v.isSame(n);
+    const isFalse = (v: any) => symbolName(v) === 'False';
+    const isTrue = (v: any) => symbolName(v) === 'True';
+    const isError = (v: any) => v.operator === 'Error';
+    const boxError = (expr: any) => {
+      const e = ce2.box(expr);
+      expect(e.isValid).toBe(false);
+      expect(e.evaluate().operator).toBe('Error');
+    };
+    const typeOf = (expr: any) => ce2.box(expr).type.toString();
+
+    // Fract (ruling 1): NaN at the signed infinities, typed exactly `nan`;
+    // a non-real operand or `~oo` is off-carrier (`Fract(2 + 3i)` used to
+    // answer `0`); the sign handler follows the values (`Fract(+oo)` used
+    // to report `non-negative`), and every finite real has its fractional
+    // part in [0, 1), the negative ones included.
+    both(['Fract', POS], isNaNv);
+    both(['Fract', NEG], isNaNv);
+    both(['Fract', 'NaN'], isNaNv);
+    expect(typeOf(['Fract', 'NaN'])).toBe('nan');
+    expect(typeOf(['Fract', POS])).toBe('nan');
+    for (const x of [COO, ANON, NONREAL]) boxError(['Fract', x]);
+    both(['Fract', ['Rational', -7, 2]], (v) => v.re === 0.5);
+    expect(ce2.box(['Fract', POS]).sgn).toBe('unsigned');
+    expect(ce2.box(['Fract', 'NaN']).sgn).toBe('unsigned');
+    expect(ce2.box(['Fract', ['Rational', -7, 2]]).sgn).toBe('non-negative');
+    ce2.declare('r10', 'real');
+    ce2.declare('w10', 'number');
+    expect(typeOf(['Fract', 'r10'])).toBe('real<0..1>');
+    expect(typeOf(['Fract', ['Add', 'r10', 1]])).toBe('real<0..1>');
+    expect(ce2.box(['Fract', 'w10']).type.matches('real | nan')).toBe(true);
+    expect(ce2.box(['Fract', 'w10']).type.matches('real')).toBe(false);
+
+    // Mod: the zero modulus is the marker (typed `nan`), NaN propagates in
+    // either slot (typed `nan`; the type handler used to claim `number`),
+    // and every infinity or non-real operand is a boxing error (each used
+    // to answer NaN).
+    both(['Mod', 7, 0], isNaNv);
+    both(['Mod', 'NaN', 3], isNaNv);
+    both(['Mod', 7, 'NaN'], isNaNv);
+    expect(typeOf(['Mod', 7, 0])).toBe('nan');
+    expect(typeOf(['Mod', 'NaN', 3])).toBe('nan');
+    for (const x of [POS, NEG, COO, ANON, NONREAL]) {
+      boxError(['Mod', x, 3]);
+      boxError(['Mod', 7, x]);
+    }
+    both(['Mod', 7, -3], is(-2));
+    ce2.declare('m10', 'integer');
+    expect(ce2.box(['Mod', 7, 'm10']).type.matches('real | nan')).toBe(true);
+    expect(ce2.box(['Mod', 7, 'm10']).type.matches('real')).toBe(false);
+    expect(typeOf(['Mod', 'm10', 3])).toBe('integer');
+
+    // Rationalize (ruling 2): NaN propagates (typed `nan`, the claim used
+    // to be `rational`); every infinity and non-real value is a boxing
+    // error (`Rationalize(+oo)` used to answer `+oo`); a negative, NaN or
+    // infinite tolerance is refused at boxing (a negative one used to be
+    // read as its absolute value, a NaN one ignored).
+    both(['Rationalize', 'NaN'], isNaNv);
+    expect(typeOf(['Rationalize', 'NaN'])).toBe('nan');
+    for (const x of [POS, NEG, COO, ANON, NONREAL]) boxError(['Rationalize', x]);
+    boxError(['Rationalize', 1.75, -0.01]);
+    boxError(['Rationalize', 1.75, 'NaN']);
+    boxError(['Rationalize', 1.75, POS]);
+    both(['Rationalize', 1.75], is(ce2.number([7, 4])));
+    both(['Rationalize', 1.75, 0], is(ce2.number([7, 4])));
+    both(['Rationalize', 1.75, 0.3], is(2));
+
+    // IsOdd / IsEven: the `IsPrime` arrangement — every non-integer
+    // (NaN, a non-integer real, a non-real) is `False`, every infinity is
+    // the carrier error, a symbol stays inert until its parity is decided.
+    // `IsOdd(x)` used to answer `False` for an unknown `x` (and `IsEven(x)`
+    // `True`), and `IsEven`, canonicalized to `Not(IsOdd(x))`, answered
+    // `True` for every non-integer.
+    for (const h of ['IsOdd', 'IsEven']) {
+      both([h, 'NaN'], isFalse);
+      both([h, 2.5], isFalse);
+      both([h, ['Rational', -7, 2]], isFalse);
+      both([h, NONREAL], isFalse);
+      for (const x of [POS, NEG, COO, ANON]) both([h, x], isError);
+      expect(ce2.box([h, 'u10']).evaluate().operator).toBe(h);
+      expect(ce2.box([h, ['Add', 'u10', 1]]).evaluate().operator).toBe(h);
+    }
+    both(['IsOdd', -3], isTrue);
+    both(['IsEven', -3], isFalse);
+    both(['IsEven', 0], isTrue);
+    both(['IsEven', 2.5], isFalse);
+    expect(ce2.box(['IsEven', 3]).json).toEqual(['IsEven', 3]);
+    expect(typeOf(['IsEven', 2.5])).toBe('false');
+    expect(typeOf(['IsEven', 4])).toBe('true');
+    ce2.assign('p10', 7);
+    both(['IsOdd', 'p10'], isTrue);
+    both(['IsEven', 'p10'], isFalse);
+
+    // ContinuedFraction (ruling 3): a finite real only — NaN, every
+    // infinity and a non-real value are boxing errors (`2 + 3i` used to be
+    // expanded from its real part); a NaN term count is a contract
+    // violation and a non-positive one an evaluation error (`requires`; it
+    // used to stay inert); an inexact operand expands its best rational
+    // approximation, so `7/3` answers `[2, 3]` under N() as well (it used
+    // to answer `[2, 2, 1]`) and π to machine precision has no rounding
+    // tail (thirteen terms, every one a term of π's own expansion).
+    for (const x of ['NaN', POS, NEG, COO, ANON, NONREAL])
+      boxError(['ContinuedFraction', x]);
+    boxError(['ContinuedFraction', ['Rational', 43, 19], 'NaN']);
+    for (const n of [0, -3])
+      both(['ContinuedFraction', ['Rational', 43, 19], n], isError);
+    expect(
+      ce2.box(['ContinuedFraction', ['Rational', 43, 19], 'n10']).evaluate()
+        .operator
+    ).toBe('ContinuedFraction');
+    both(
+      ['ContinuedFraction', ['Rational', 7, 3]],
+      (v) => v.toString() === '[2,3]'
+    );
+    expect(ce2.box(['ContinuedFraction', Math.PI]).evaluate().toString()).toBe(
+      '[3,7,15,1,292,1,1,1,2,1,3,1,14]'
+    );
+
+    // The accessors (ruling 4): `NaN` and the infinities are their own
+    // numerator over `1`; a held symbol is evaluated before its parts are
+    // read (`Numerator(y)` for `y := 1/2` used to answer `y`), and the
+    // canonical form of `NumeratorDenominator(y)` no longer depends on the
+    // assignment (it used to evaluate at canonicalization).
+    both(['Numerator', 'NaN'], isNaNv);
+    both(['Denominator', 'NaN'], is(1));
+    both(['Denominator', POS], is(1));
+    const ndNaN = ce2.box(['NumeratorDenominator', 'NaN']).evaluate();
+    expect(ndNaN.operator).toBe('Tuple');
+    expect(isNaNValue(ce2, ndNaN.op1)).toBe(true);
+    expect(ndNaN.op2.isSame(1)).toBe(true);
+    ce2.assign('y10', ce2.box(['Rational', 1, 2]));
+    both(['Numerator', 'y10'], is(1));
+    both(['Denominator', 'y10'], is(2));
+    expect(ce2.box(['NumeratorDenominator', 'y10']).operator).toBe(
+      'NumeratorDenominator'
+    );
+    both(
+      ['NumeratorDenominator', 'y10'],
+      (v) => v.operator === 'Tuple' && v.op1.isSame(1) && v.op2.isSame(2)
+    );
+    ce2.assign('a10', 5);
+    both(
+      ['NumeratorDenominator', ['Divide', 'a10', 4]],
+      (v) => v.operator === 'Tuple' && v.op1.isSame(5) && v.op2.isSame(4)
+    );
+
+    // Review catches. A value that arrives through a SYMBOL reaches the
+    // partiality gate before the dispatch conformance re-test, so a
+    // `definedWhen` or `requires` predicate must not decide an operand
+    // OUTSIDE the carrier: `Fract` of a symbol holding `~oo`, `Mod(h, 0)`
+    // for a symbol holding `+∞`, and a non-integer term count for
+    // `ContinuedFraction` are the carrier's `incompatible-type` errors,
+    // never the marker or the precondition error. The lazy accessors are
+    // outside that re-test altogether and refuse a non-number themselves.
+    // A symbol declared non-integer answers `False` to the parity
+    // predicates; a `never`-typed operand makes `Fract` `never`.
+    const held = (name: string, value: any) => {
+      ce2.assign(name, value);
+      return ce2.box(name);
+    };
+    const errorCodeOf = (v: any) => errorCode(v);
+    expect(
+      errorCodeOf(ce2.function('Fract', [held('hc10', COO)]).evaluate())
+    ).toBe('incompatible-type');
+    expect(
+      errorCodeOf(
+        ce2.function('Mod', [held('hp10', POS), ce2.box(0)]).evaluate()
+      )
+    ).toBe('incompatible-type');
+    expect(
+      errorCodeOf(
+        ce2
+          .function('ContinuedFraction', [
+            ce2.box(['Rational', 43, 19]),
+            held('hh10', 0.5),
+          ])
+          .evaluate()
+      )
+    ).toBe('incompatible-type');
+    for (const h of ['Numerator', 'Denominator', 'NumeratorDenominator'])
+      expect(
+        errorCodeOf(ce2.function(h, [held('hs10', "'abc'")]).evaluate())
+      ).toBe('incompatible-type');
+    ce2.declare('im10', 'imaginary');
+    both(['IsOdd', 'im10'], isFalse);
+    both(['IsEven', 'im10'], isFalse);
+    ce2.declare('nev10', 'integer<2<..<3>');
+    expect(typeOf(['Fract', 'nev10'])).toBe('never');
+  });
+
   test('compile(Heaviside)(NaN) agrees with the interpreter now', () => {
     // The compiled lane was fixed first (2026-08-28) under ratified Contract
     // B's derived `propagate` default, which left a route divergence: the

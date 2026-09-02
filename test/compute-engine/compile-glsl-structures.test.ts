@@ -764,11 +764,14 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     expect(() => glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)).toThrow(
       /real-only target helper "mod" cannot represent a complex-valued argument/
     );
+    // `Mod` declares the finite real carrier (Contract B), so a non-real
+    // LITERAL operand is already an `incompatible-type` error at boxing and
+    // compile refuses the invalid expression — fail-closed at an earlier
+    // seam than the target helper's own check, which the two compound
+    // operands above and below still reach.
     expect(() =>
       glsl.compile(e.box(['Mod', ['Complex', 1, 2], 1]), NO_FOLD)
-    ).toThrow(
-      /real-only target helper "mod" cannot represent a complex-valued argument/
-    );
+    ).toThrow(/invalid expression/);
     // Propagated through a `Multiply`, the head whose type answer this fix
     // replaced with operand recursion.
     expect(() =>

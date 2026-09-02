@@ -205,7 +205,13 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
       ],
       1,
     ]);
-    expect(probe.type.toString()).toBe('vector<3>');
+    // The shape `^3` survives every hop. The cells are `real | nan` rather
+    // than bare `number`: `Mod` declares a real result with a `definedWhen`
+    // condition, and a `number`-typed cell (what `Sin` claims here) is not
+    // proven finite, so the marker arm stays — `vector<3>` is `list<number^3>`,
+    // which the claim refines.
+    expect(probe.type.matches('vector<3>')).toBe(true);
+    expect(probe.type.matches('list<any>')).toBe(true);
     const at = ce.box(['At', probe.json, 1]);
     expect(at.isValid).toBe(true);
   });

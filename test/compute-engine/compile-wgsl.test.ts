@@ -149,15 +149,21 @@ describe('WGSL COMPILATION', () => {
     });
 
     it('should compile inverse hyperbolic functions', () => {
-      expect(wgsl.compile(ce.expr(['Arcosh', 'x'])).code).toMatchInlineSnapshot(
-        `acosh(x)`
-      );
-      expect(wgsl.compile(ce.expr(['Arsinh', 'x'])).code).toMatchInlineSnapshot(
-        `asinh(x)`
-      );
-      expect(wgsl.compile(ce.expr(['Artanh', 'x'])).code).toMatchInlineSnapshot(
-        `atanh(x)`
-      );
+      // A local engine: these pins are the REAL lowerings of an operand of
+      // unknown kind. The shared engine's `x` is inferred `real` by the
+      // `Mod(x, y)` emission above (the carrier of `Mod`), and `Arcosh` /
+      // `Artanh` of a proven real take the complex helper (both are complex
+      // on parts of the real line: `arcosh(0.5)`, `artanh(2)`).
+      const local = new ComputeEngine();
+      expect(
+        wgsl.compile(local.expr(['Arcosh', 'x'])).code
+      ).toMatchInlineSnapshot(`acosh(x)`);
+      expect(
+        wgsl.compile(local.expr(['Arsinh', 'x'])).code
+      ).toMatchInlineSnapshot(`asinh(x)`);
+      expect(
+        wgsl.compile(local.expr(['Artanh', 'x'])).code
+      ).toMatchInlineSnapshot(`atanh(x)`);
     });
 
     it('should compile reciprocal hyperbolic functions', () => {

@@ -280,6 +280,99 @@
     declarations): they decline, and the evaluate route reports the
     error, like the other declared-domain operators.
 
+- **`isNumber`, `isInteger` and `isRational` are three-valued on every
+  expression.** `true` means the value is certainly a member, `false` that
+  it certainly is not, and `undefined` that the claimed type does not
+  decide it. A function expression used to answer `false` whenever its
+  claimed type was not a subtype of the target, so `Divide(k, 2)` for an
+  integer `k` (claimed `real`) reported "certainly not an integer"
+  although it is one for an even `k`, and `Sqrt(x)` for a real `x`
+  (claimed `complex`, a hedge for an unknown sign) reported the same. Both
+  are `undefined` now; a claim provably disjoint from the target — a
+  list, a string, `imaginary` for `isInteger` — still answers `false`. A
+  symbol declared `number | string` or `any` answers `undefined` to
+  `isNumber` (it answered `false`), and a symbol declared `complex`
+  answers `undefined` to `isInteger` and `isRational` (it answered
+  `false`: `complex` contains the integers).
+
+- **The rational and parity family now declares its mathematical
+  domains**: `Mod`, `Fract`, `Rationalize`, `ContinuedFraction`, `IsOdd`,
+  `IsEven`, `Numerator`, `Denominator` and `NumeratorDenominator`. Every
+  point below is answered the same way by `evaluate()` and `.N()`:
+
+  - `Mod(x, m)` takes two finite reals, the declaration `docs/ERROR-MODEL.md`
+    gives as its worked example. An infinite or non-real operand in either
+    slot is an `incompatible-type` error at boxing (`Mod(+oo, 3)`,
+    `Mod(7, ~oo)` and `Mod(7, 2 + 3i)` all answered `NaN`). A zero modulus
+    stays the marker `NaN`, and `NaN` propagates in either slot. The type
+    of an application is sharper: `Mod(7, 0)` and `Mod(NaN, 3)` are typed
+    exactly `nan` (they were typed `number`), `Mod(k, m)` for a modulus
+    that may be zero is typed `real | nan`, and a broadcast over a list
+    claims per cell (`Mod([0, 1, 2, 3, 4], 2)` is typed `vector<integer^5>`,
+    was `vector<5>`).
+  - `Fract(x)` takes `real | signed_infinity`, the carrier of `Floor`. The
+    fractional part has no limit at either infinity (it sweeps `[0, 1)`
+    forever), so `Fract(±oo)` is `NaN`, typed exactly `nan`; a non-real
+    operand or `~oo` is an `incompatible-type` error (`Fract(2 + 3i)`
+    answered `0`). The declared result is `real<0..1>`: `Fract(x)` for a
+    real `x` is typed `real<0..1>` (it was `real`), and for a `number` it
+    is `real<0..1> | nan` (it was `number`). The sign of `Fract(x)` is
+    `non-negative` for every finite real `x`, negative ones included, and
+    `unsigned` for `NaN` and the infinities (`Fract(+oo)` reported
+    `non-negative` while its value is `NaN`).
+  - `Rationalize(x, tolerance?)` takes a finite real `x` and a
+    non-negative finite real tolerance, spelled as the range type
+    `real<0..>`. `Rationalize(+oo)` answered `+oo` under a `rational`
+    claim; every infinity and every non-real value is an
+    `incompatible-type` error now, and `Rationalize(NaN)` is `NaN`, typed
+    `nan`. A negative tolerance is refused at boxing (it was read as its
+    absolute value), and so are a `NaN` or an infinite tolerance (a `NaN`
+    tolerance was ignored).
+  - `ContinuedFraction(x, n?)` takes a finite real `x`: `NaN`, every
+    infinity and every non-real value are `incompatible-type` errors
+    (`ContinuedFraction(2 + 3i)` answered `[2]`, from the real part). A
+    term count below 1 fails the operator's precondition — an evaluation
+    error (it stayed inert). **An inexact `x` is expanded as its best
+    rational approximation at working precision** (the `Rationalize`
+    value), then exactly: `ContinuedFraction(7/3).N()` answers `[2, 3]`,
+    as `evaluate()` does (it answered `[2, 2, 1]`), and `π` to machine
+    precision answers thirteen terms, every one a term of π's own
+    expansion (it answered twenty, the last seven rounding noise). The
+    final term of an irrational's expansion is written in canonical form:
+    `Sqrt(23)` ends `…, 8, 1, 4` where the twenty-term prefix
+    `…, 8, 1, 3, 1` is the same number.
+  - `IsOdd` and `IsEven` follow the `IsPrime` arrangement: they keep the
+    wide numeric carrier and answer `False` for every non-integer — `2.5`,
+    `-7/2`, `2 + 3i` and `NaN` included (they stayed inert for a
+    non-integer real and for `NaN`); an infinity is an `incompatible-type`
+    error. **`IsOdd(x)` for an unknown `x` answered `False`** (and
+    `IsEven(x)` `True`): the handler read a symbol as a non-real. Both stay
+    inert for a symbol whose parity is not decided, and answer through an
+    assigned value or an assumption. **`IsEven` is its own operator**: it
+    canonicalized to `Not(IsOdd(x))`, which answered `True` for `2.5`,
+    `NaN` and `2 + 3i` and printed `IsEven(3)` as `\lnot\mathrm{IsOdd}(3)`.
+  - `Numerator`, `Denominator` and `NumeratorDenominator` are structural
+    accessors: a number that is not a quotient is its own numerator over
+    the denominator `1`, `NaN` and the infinities included
+    (`NumeratorDenominator(NaN)` is `(NaN, 1)`), and they declare that
+    `NaN` policy explicitly (`handle`). **They now evaluate a held
+    operand**: with `y := 1/2`, `Numerator(y)` answers `1` and
+    `Denominator(y)` `2` (they answered `y` and `1`), and the canonical
+    form of `NumeratorDenominator(y)` no longer depends on the current
+    assignment (it evaluated at canonicalization and boxed as `(1, 2)`).
+    A held operand that evaluates to a non-number is an
+    `incompatible-type` error (a symbol holding a string was returned as
+    its own numerator).
+  - **An operator with no type handler answers `never` for a `never`-typed
+    operand**, as the operators with a handler already did: `Fract(x)` for
+    an `x` declared with an empty range is typed `never`, not `real<0..1>`.
+  - **A proven `NaN` operand types `nan` ahead of a declared partiality
+    condition.** The derived application type consulted a declared
+    `definedWhen` before the NaN evidence, so a predicate that cannot
+    classify a `NaN` operand reported the undischarged `S | nan` where
+    the runtime NaN gate answers the bare `NaN` first: `Fract(NaN)` is
+    typed exactly `nan` now.
+
 - **The complex part extractors, `Conjugate`, `AbsArg`, `ComplexRoots`,
   `Erfi` and `ErfInv` now declare their mathematical domains**, and a
   type-variable parameter stops rejecting `NaN`:

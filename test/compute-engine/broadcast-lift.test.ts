@@ -135,7 +135,10 @@ describe('BROADCAST LIFT Phase 1 — eager forms unchanged', () => {
   test('Mod([0,1,2,3,4],2) → [0,1,0,1,0]', () => {
     const e = ce.box(['Mod', ['List', 0, 1, 2, 3, 4], 2]);
     expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('vector<5>');
+    // The cell claim is sharp: the type handler reads the ELEMENT type of a
+    // lifted operand, and integers modulo a non-zero integer are integers
+    // (the claim used to be the wide `vector<5>`).
+    expect(e.type.toString()).toBe('vector<integer^5>');
     expect(JSON.stringify(e.evaluate().json)).toBe(
       JSON.stringify(['List', 0, 1, 0, 1, 0])
     );
@@ -216,8 +219,12 @@ describe('BROADCAST LIFT Phase 2 — declared type agrees with the broadcast val
       expect(expr.isValid).toBe(true);
       expect(expr.type.matches('list<any>')).toBe(true);
       expect(expr.type.matches('number')).toBe(false);
-      // No `scalar | list<…>` union at the top level.
-      expect(expr.type.toString()).not.toContain('|');
+      // No `scalar | list<…>` union at the top level: the type IS a list.
+      // (The cells of `Mod` carry `| nan` while `N` may be zero — the
+      // declared `definedWhen` condition, undischarged for a symbolic
+      // modulus — so the union is inside the list, never at the top.)
+      const t = expr.type.type;
+      expect(typeof t !== 'string' && t.kind === 'list').toBe(true);
       expect(expr.evaluate().operator).toBe('Map');
     });
 

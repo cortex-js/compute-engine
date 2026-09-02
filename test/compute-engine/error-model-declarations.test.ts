@@ -522,12 +522,24 @@ describe('Contract B — partiality channels at runtime (Phase D, minimal)', () 
     expect(e.box(['PilotReq', 2]).evaluate().isSame(2)).toBe(true);
   });
 
-  test('Mod claims no value for a complex or infinite operand', () => {
+  test('Mod leaves a complex or infinite operand to its carrier', () => {
+    // A complex or infinite operand is OUTSIDE the carrier `(real, real)`,
+    // and the carrier — not the partiality condition — refuses it: the
+    // application is an `incompatible-type` error at boxing. The
+    // predicate answers `undefined` there (it used to answer `false`),
+    // because the partiality gate runs before the dispatch conformance
+    // re-test and a `false` would put the NaN marker where the carrier
+    // error belongs for a value that arrives through a symbol. The one
+    // condition it decides is the zero modulus.
     const e = new ComputeEngine();
     const def = e.lookupDefinition('Mod')!.operator!;
     const i = e.box(['Complex', 0, 1]).evaluate();
-    expect(def.definedWhen!([e.box(1), i])).toBe(false);
-    expect(def.definedWhen!([e.PositiveInfinity, e.box(2)])).toBe(false);
+    expect(def.definedWhen!([e.box(1), i])).toBeUndefined();
+    expect(def.definedWhen!([e.PositiveInfinity, e.box(2)])).toBeUndefined();
+    expect(def.definedWhen!([e.box(1), e.box(0)])).toBe(false);
+    expect(def.definedWhen!([e.box(1), e.box(2)])).toBe(true);
+    expect(e.box(['Mod', 1, i]).isValid).toBe(false);
+    expect(e.box(['Mod', 'PositiveInfinity', 2]).isValid).toBe(false);
   });
 });
 

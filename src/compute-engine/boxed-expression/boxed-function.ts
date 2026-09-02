@@ -117,6 +117,7 @@ import {
   broadcastShapedResultType,
   functionResult,
   isNonRealNumber,
+  staticMembership,
   isSignatureType,
   isWildcardFunctionType,
   narrow,
@@ -1964,20 +1965,26 @@ export class BoxedFunction
     return isValueDef(this._def) ? this._def.value : undefined;
   }
 
+  // The membership predicates answer three-valued from the claimed type
+  // (`staticMembership`): `true` only when every value of the type is a
+  // member, `false` only when none is, `undefined` when the type merely
+  // overlaps the target — a claimed `real` for `k / 2` does not prove the
+  // value is not an integer, so a `false` there would be wrong for an
+  // even `k`. A `false` means "certainly not".
   get isNumber(): boolean | undefined {
     if (this.type.isUnknown) return undefined;
-    return isSubtype(this.type.type, 'number');
+    return staticMembership(this.type.type, 'number');
   }
 
   get isInteger(): boolean | undefined {
     if (this.type.isUnknown) return undefined;
-    return isSubtype(this.type.type, 'integer');
+    return staticMembership(this.type.type, 'integer');
   }
 
   get isRational(): boolean | undefined {
     if (this.type.isUnknown) return undefined;
-    // integers are rationals
-    return isSubtype(this.type.type, 'rational');
+    // Every integer is a rational: `integer` is below `rational`.
+    return staticMembership(this.type.type, 'rational');
   }
 
   get isExtendedReal(): boolean | undefined {
@@ -6079,6 +6086,12 @@ function type(expr: BoxedFunction): Type {
         // pass through untouched.
         sigResult = widenValueTypes(sigResult);
       }
+    } else if (expr.ops.some((x) => x.type.type === 'never')) {
+      // The same rule both handler shapes apply above, for a head with NO
+      // type handler: an operand typed `never` has no value, so the
+      // application has none either, whatever the declared result says
+      // (`Fract(x)` for an empty-typed `x` is `never`, not `real<0..1>`).
+      sigResult = 'never';
     }
     // With no per-operator type handler, the declared result type is taken
     // verbatim. Do not add a generic argument-based narrowing here (e.g.
@@ -6417,6 +6430,11 @@ function type(expr: BoxedFunction): Type {
     // wildcard's absent parameter types read as scalar and the application is
     // broadcast-typed (`list<unknown^3>`) while the value is the scalar the
     // literal computes.
+    // An operand typed `never` has no value, so the application has none:
+    // the same rule the operator-definition route applies (with and without
+    // a type handler), so a declare-then-assign function agrees with a
+    // library operator on an empty-typed argument.
+    if (expr.ops.some((x) => x.type.type === 'never')) return 'never';
     const declaredType = expr.valueDefinition.type.type;
     const sigSource = isWildcardFunctionType(declaredType)
       ? (expr.valueDefinition.value?.type.type ?? declaredType)
