@@ -10,6 +10,7 @@ import {
   containsExtremum,
   containsZero,
   unwrapOrPropagate,
+  liftJump,
 } from './util.js';
 import { div } from './arithmetic.js';
 import {
@@ -27,7 +28,7 @@ const THREE_HALF_PI = (3 * Math.PI) / 2;
  *
  * Sin is bounded [-1, 1] and periodic with extrema at pi/2 + n*pi.
  */
-export function sin(x: Interval | IntervalResult): IntervalResult {
+function sinRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -59,7 +60,7 @@ export function sin(x: Interval | IntervalResult): IntervalResult {
  *
  * Cos is bounded [-1, 1] and periodic with extrema at n*pi.
  */
-export function cos(x: Interval | IntervalResult): IntervalResult {
+function cosRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -92,7 +93,7 @@ export function cos(x: Interval | IntervalResult): IntervalResult {
  * Has singularities at pi/2 + n*pi. Within a single branch,
  * tan is monotonically increasing.
  */
-export function tan(x: Interval | IntervalResult): IntervalResult {
+function tanRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -127,7 +128,7 @@ export function tan(x: Interval | IntervalResult): IntervalResult {
  *
  * cot(x) = cos(x)/sin(x), has singularities at n*pi.
  */
-export function cot(x: Interval | IntervalResult): IntervalResult {
+function cotRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -155,7 +156,7 @@ export function cot(x: Interval | IntervalResult): IntervalResult {
  *
  * sec(x) = 1/cos(x), has singularities at pi/2 + n*pi.
  */
-export function sec(x: Interval | IntervalResult): IntervalResult {
+function secRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -194,7 +195,7 @@ export function sec(x: Interval | IntervalResult): IntervalResult {
  *
  * csc(x) = 1/sin(x), has singularities at n*pi.
  */
-export function csc(x: Interval | IntervalResult): IntervalResult {
+function cscRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -232,7 +233,7 @@ export function csc(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: [-1, 1], Range: [-pi/2, pi/2]
  */
-export function asin(x: Interval | IntervalResult): IntervalResult {
+function asinRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -262,7 +263,7 @@ export function asin(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: [-1, 1], Range: [0, pi]
  */
-export function acos(x: Interval | IntervalResult): IntervalResult {
+function acosRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -292,7 +293,7 @@ export function acos(x: Interval | IntervalResult): IntervalResult {
  * Domain: all reals, Range: (-pi/2, pi/2)
  * Monotonically increasing.
  */
-export function atan(x: Interval | IntervalResult): IntervalResult {
+function atanRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -305,7 +306,7 @@ export function atan(x: Interval | IntervalResult): IntervalResult {
  * atan2(y, x) gives the angle of the point (x, y).
  * Handles all quadrants correctly.
  */
-export function atan2(
+function atan2Raw(
   y: Interval | IntervalResult,
   x: Interval | IntervalResult
 ): IntervalResult {
@@ -342,7 +343,7 @@ export function atan2(
  *
  * Domain: all reals, monotonically increasing.
  */
-export function sinh(x: Interval | IntervalResult): IntervalResult {
+function sinhRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -354,7 +355,7 @@ export function sinh(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: all reals, minimum at x=0.
  */
-export function cosh(x: Interval | IntervalResult): IntervalResult {
+function coshRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -376,7 +377,7 @@ export function cosh(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: all reals, Range: (-1, 1), monotonically increasing.
  */
-export function tanh(x: Interval | IntervalResult): IntervalResult {
+function tanhRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -388,7 +389,7 @@ export function tanh(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: all reals, monotonically increasing.
  */
-export function asinh(x: Interval | IntervalResult): IntervalResult {
+function asinhRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -400,7 +401,7 @@ export function asinh(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: [1, +Infinity)
  */
-export function acosh(x: Interval | IntervalResult): IntervalResult {
+function acoshRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -424,7 +425,7 @@ export function acosh(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: (-1, 1)
  */
-export function atanh(x: Interval | IntervalResult): IntervalResult {
+function atanhRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -455,7 +456,7 @@ export function atanh(x: Interval | IntervalResult): IntervalResult {
  * at 0 (unlike the `atan(1/x)` form, which is on (−π/2, π/2)\{0} and jumps at
  * 0). Because it is decreasing, the endpoints swap.
  */
-export function acot(x: Interval | IntervalResult): IntervalResult {
+function acotRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -470,7 +471,7 @@ export function acot(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: |x| >= 1. Has a singularity at x = 0.
  */
-export function acsc(x: Interval | IntervalResult): IntervalResult {
+function acscRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -485,7 +486,7 @@ export function acsc(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: |x| >= 1. Has a singularity at x = 0.
  */
-export function asec(x: Interval | IntervalResult): IntervalResult {
+function asecRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -500,7 +501,7 @@ export function asec(x: Interval | IntervalResult): IntervalResult {
  *
  * Has a singularity at x = 0.
  */
-export function coth(x: Interval | IntervalResult): IntervalResult {
+function cothRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -515,7 +516,7 @@ export function coth(x: Interval | IntervalResult): IntervalResult {
  *
  * Has a singularity at x = 0.
  */
-export function csch(x: Interval | IntervalResult): IntervalResult {
+function cschRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -530,7 +531,7 @@ export function csch(x: Interval | IntervalResult): IntervalResult {
  *
  * Always valid since cosh(x) >= 1.
  */
-export function sech(x: Interval | IntervalResult): IntervalResult {
+function sechRaw(x: Interval | IntervalResult): IntervalResult {
   return div(ok({ lo: 1, hi: 1 }), cosh(x));
 }
 
@@ -539,7 +540,7 @@ export function sech(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: |x| > 1. Has a singularity at x = 0.
  */
-export function acoth(x: Interval | IntervalResult): IntervalResult {
+function acothRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -554,7 +555,7 @@ export function acoth(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: x != 0.
  */
-export function acsch(x: Interval | IntervalResult): IntervalResult {
+function acschRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -569,7 +570,7 @@ export function acsch(x: Interval | IntervalResult): IntervalResult {
  *
  * Domain: (0, 1]. Has a singularity at x = 0.
  */
-export function asech(x: Interval | IntervalResult): IntervalResult {
+function asechRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -597,7 +598,7 @@ const SINC_EXTREMA = [
   29.8116, 32.95639,
 ];
 
-export function sinc(x: Interval | IntervalResult): IntervalResult {
+function sincRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -662,7 +663,7 @@ for (let n = 1; n <= 20; n++) {
  * Conservative approach: evaluate at endpoints and known extrema,
  * take min/max. S is bounded (|S(x)| ≤ ~0.7139).
  */
-export function fresnelS(x: Interval | IntervalResult): IntervalResult {
+function fresnelSRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -722,7 +723,7 @@ function fresnelConvergenceBound(
  * Conservative approach: evaluate at endpoints and known extrema,
  * take min/max. C is bounded (|C(x)| ≤ ~0.7799).
  */
-export function fresnelC(x: Interval | IntervalResult): IntervalResult {
+function fresnelCRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -749,3 +750,35 @@ export function fresnelC(x: Interval | IntervalResult): IntervalResult {
 
   return ok({ lo, hi });
 }
+
+// Every operation above is exported through `liftJump` so that a finite
+// jump in an operand (a `singular` result carrying a `value`) is re-tagged
+// on the result instead of being forgotten — see `liftJump` in `util.ts`.
+export const sin = liftJump(sinRaw);
+export const cos = liftJump(cosRaw);
+export const tan = liftJump(tanRaw);
+export const cot = liftJump(cotRaw);
+export const sec = liftJump(secRaw);
+export const csc = liftJump(cscRaw);
+export const asin = liftJump(asinRaw);
+export const acos = liftJump(acosRaw);
+export const atan = liftJump(atanRaw);
+export const atan2 = liftJump(atan2Raw);
+export const sinh = liftJump(sinhRaw);
+export const cosh = liftJump(coshRaw);
+export const tanh = liftJump(tanhRaw);
+export const asinh = liftJump(asinhRaw);
+export const acosh = liftJump(acoshRaw);
+export const atanh = liftJump(atanhRaw);
+export const acot = liftJump(acotRaw);
+export const acsc = liftJump(acscRaw);
+export const asec = liftJump(asecRaw);
+export const coth = liftJump(cothRaw);
+export const csch = liftJump(cschRaw);
+export const sech = liftJump(sechRaw);
+export const acoth = liftJump(acothRaw);
+export const acsch = liftJump(acschRaw);
+export const asech = liftJump(asechRaw);
+export const sinc = liftJump(sincRaw);
+export const fresnelS = liftJump(fresnelSRaw);
+export const fresnelC = liftJump(fresnelCRaw);

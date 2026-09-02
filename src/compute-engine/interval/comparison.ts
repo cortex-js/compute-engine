@@ -5,7 +5,7 @@
  */
 
 import type { Interval, IntervalResult, BoolInterval } from './types.js';
-import { unionResults, unwrapOrPropagate } from './util.js';
+import { unionResults, unwrapOrPropagate, liftJump } from './util.js';
 
 /** Normalize a value that may be a plain Interval or an IntervalResult. */
 function toResult(x: Interval | IntervalResult): IntervalResult {
@@ -152,7 +152,7 @@ export function not(a: BoolInterval): BoolInterval {
  * @param trueBranch - Function for when condition is true
  * @param falseBranch - Function for when condition is false
  */
-export function piecewise(
+function piecewiseRaw(
   xOrCond: Interval | IntervalResult | BoolInterval,
   conditionOrTrue:
     | ((x: Interval) => BoolInterval)
@@ -236,7 +236,7 @@ export function restrict(
  *
  * clamp(x, lo, hi) returns x clamped to [lo, hi].
  */
-export function clamp(
+function clampRaw(
   x: Interval | IntervalResult,
   lo: Interval | IntervalResult,
   hi: Interval | IntervalResult
@@ -258,3 +258,9 @@ export function clamp(
 
   return { kind: 'interval', value: { lo: resultLo, hi: resultHi } };
 }
+
+// Every operation above is exported through `liftJump` so that a finite
+// jump in an operand (a `singular` result carrying a `value`) is re-tagged
+// on the result instead of being forgotten — see `liftJump` in `util.ts`.
+export const piecewise = liftJump(piecewiseRaw);
+export const clamp = liftJump(clampRaw);

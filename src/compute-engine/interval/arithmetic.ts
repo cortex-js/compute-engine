@@ -5,7 +5,7 @@
  */
 
 import type { Interval, IntervalResult } from './types.js';
-import { ok, unwrapOrPropagate } from './util.js';
+import { ok, unwrapOrPropagate, liftJump } from './util.js';
 
 /**
  * Add two intervals (or IntervalResults).
@@ -15,7 +15,7 @@ import { ok, unwrapOrPropagate } from './util.js';
  * Addition is always defined and produces a valid interval.
  * If inputs are IntervalResults, propagates errors (empty, entire, singular).
  */
-export function add(
+function addRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
@@ -33,7 +33,7 @@ export function add(
  * Subtraction is always defined and produces a valid interval.
  * If inputs are IntervalResults, propagates errors (empty, entire, singular).
  */
-export function sub(
+function subRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
@@ -48,7 +48,7 @@ export function sub(
  *
  * -[a, b] = [-b, -a]
  */
-export function negate(x: Interval | IntervalResult): IntervalResult {
+function negateRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -90,7 +90,7 @@ function _prod(x: number, y: number): number {
  * spans from minimum to maximum.
  * If inputs are IntervalResults, propagates errors (empty, entire, singular).
  */
-export function mul(
+function mulRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
@@ -111,7 +111,7 @@ export function mul(
  * This is the key operation for singularity detection in plotting.
  * If inputs are IntervalResults, propagates errors (empty, entire, singular).
  */
-export function div(
+function divRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
@@ -182,3 +182,12 @@ function _div(a: Interval, b: Interval): IntervalResult {
   // Case 5: Divisor is exactly [0, 0] - division by zero
   return { kind: 'empty' };
 }
+
+// Every operation above is exported through `liftJump` so that a finite
+// jump in an operand (a `singular` result carrying a `value`) is re-tagged
+// on the result instead of being forgotten — see `liftJump` in `util.ts`.
+export const add = liftJump(addRaw);
+export const sub = liftJump(subRaw);
+export const negate = liftJump(negateRaw);
+export const mul = liftJump(mulRaw);
+export const div = liftJump(divRaw);

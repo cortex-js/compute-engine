@@ -5,7 +5,14 @@
  */
 
 import type { Interval, IntervalResult } from './types.js';
-import { ok, containsZero, isNegative, unwrapOrPropagate } from './util.js';
+import {
+  ok,
+  containsZero,
+  isNegative,
+  unwrapOrPropagate,
+  liftJump,
+  jump,
+} from './util.js';
 import { sub, mul, div } from './arithmetic.js';
 import {
   gamma as scalarGamma,
@@ -29,7 +36,7 @@ import { choose as scalarBinomial } from '../boxed-expression/expand.js';
  * - Entirely non-negative: straightforward monotonic
  * - Straddles zero: partial result with lower bound clipped
  */
-export function sqrt(x: Interval | IntervalResult): IntervalResult {
+function sqrtRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -60,7 +67,7 @@ function _sqrt(x: Interval): IntervalResult {
  *
  * Need to handle sign change at 0 since x^2 is not monotonic.
  */
-export function square(x: Interval | IntervalResult): IntervalResult {
+function squareRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -110,10 +117,7 @@ function intPow(base: Interval, n: number): Interval {
  * - Negative integer: x^(-n) = 1/x^n, singular if base contains 0
  * - Fractional: requires non-negative base for real result
  */
-export function pow(
-  base: Interval | IntervalResult,
-  exp: number
-): IntervalResult {
+function powRaw(base: Interval | IntervalResult, exp: number): IntervalResult {
   const unwrapped = unwrapOrPropagate(base);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [baseVal] = unwrapped;
@@ -173,7 +177,7 @@ export function pow(
  * For simplicity, we evaluate at the four corners and take the hull.
  * This requires base to be positive for real results.
  */
-export function powInterval(
+function powIntervalRaw(
   base: Interval | IntervalResult,
   exp: Interval | IntervalResult
 ): IntervalResult {
@@ -258,7 +262,7 @@ function realRatPow(x: number, p: number, exp: number): number {
  * the point 0 when it is interior and the exponent is positive — therefore
  * bracket the range. A negative exponent has a pole at 0.
  */
-export function powRational(
+function powRationalRaw(
   base: Interval | IntervalResult,
   p: number,
   q: number
@@ -293,7 +297,7 @@ export function powRational(
  * EVEN `n` it reduces to `x^(1/n)`, which requires a non-negative base — a
  * negative base has no real value (`empty`/`partial`), as with `sqrt`.
  */
-export function nthRoot(
+function nthRootRaw(
   base: Interval | IntervalResult,
   n: number
 ): IntervalResult {
@@ -313,7 +317,7 @@ export function nthRoot(
  *
  * Always valid, monotonically increasing.
  */
-export function exp(x: Interval | IntervalResult): IntervalResult {
+function expRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -328,7 +332,7 @@ export function exp(x: Interval | IntervalResult): IntervalResult {
  * - Entirely positive: straightforward monotonic
  * - Contains/touches zero: partial with -Infinity lower bound
  */
-export function ln(x: Interval | IntervalResult): IntervalResult {
+function lnRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -354,7 +358,7 @@ export function ln(x: Interval | IntervalResult): IntervalResult {
 /**
  * Base-10 logarithm.
  */
-export function log10(x: Interval | IntervalResult): IntervalResult {
+function log10Raw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -376,7 +380,7 @@ export function log10(x: Interval | IntervalResult): IntervalResult {
 /**
  * Base-2 logarithm.
  */
-export function log2(x: Interval | IntervalResult): IntervalResult {
+function log2Raw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -398,7 +402,7 @@ export function log2(x: Interval | IntervalResult): IntervalResult {
 /**
  * Absolute value of an interval.
  */
-export function abs(x: Interval | IntervalResult): IntervalResult {
+function absRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -417,16 +421,18 @@ export function abs(x: Interval | IntervalResult): IntervalResult {
  *
  * Has jump discontinuities at every integer.
  */
-export function floor(x: Interval | IntervalResult): IntervalResult {
+function floorRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   const flo = Math.floor(xVal.lo);
   const fhi = Math.floor(xVal.hi);
   if (flo === fhi) return ok({ lo: flo, hi: fhi });
-  // Interval spans an integer boundary — discontinuity
-  // floor is right-continuous: lim_{x→n+} floor(x) = floor(n) = n
-  return { kind: 'singular', at: flo + 1, continuity: 'right' };
+  // Interval spans an integer boundary — a finite jump. floor is
+  // right-continuous: lim_{x→n+} floor(x) = floor(n) = n. Its values on the
+  // interval lie in [floor(lo), floor(hi)], which is carried as the enclosure.
+  return jump(flo + 1, 'right', { lo: flo, hi: fhi });
 }
 
 /**
@@ -434,17 +440,31 @@ export function floor(x: Interval | IntervalResult): IntervalResult {
  *
  * Has jump discontinuities at every integer.
  */
-export function ceil(x: Interval | IntervalResult): IntervalResult {
+function ceilRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   const clo = Math.ceil(xVal.lo);
   const chi = Math.ceil(xVal.hi);
   if (clo === chi) return ok({ lo: clo, hi: chi });
-  // Interval spans an integer boundary — discontinuity
-  // ceil is left-continuous: lim_{x→n-} ceil(x) = ceil(n) = n
-  return { kind: 'singular', at: clo, continuity: 'left' };
+  // Interval spans an integer boundary — a finite jump. ceil is
+  // left-continuous: lim_{x→n-} ceil(x) = ceil(n) = n. Its values on the
+  // interval lie in [ceil(lo), ceil(hi)], which is carried as the enclosure.
+  return jump(clo, 'left', { lo: clo, hi: chi });
 }
+
+/**
+ * A NaN bound propagates as a NaN interval (Contract B `propagate`, ratified
+ * 2026-08-27) — the same value the plain arithmetic kernels produce for a NaN
+ * input. Every step function below checks this first: their `Math.floor`-style
+ * point rules answer NaN for NaN, and `NaN === NaN` is false, so without the
+ * check they reported a discontinuity "at NaN" that the input never touched.
+ */
+function isNaNInterval(x: Interval): boolean {
+  return Number.isNaN(x.lo) || Number.isNaN(x.hi);
+}
+const NAN_INTERVAL: Interval = { lo: NaN, hi: NaN };
 
 /** Round half away from zero (Round(-2.5) = -3) — the interpreter's convention.
  *  This differs from JS `Math.round` (half toward +∞: Math.round(-2.5) = -2). */
@@ -456,7 +476,8 @@ function roundHalfAway(n: number): number {
  * Sound enclosure of a step-rounding function on an interval, given its
  * point-rounding rule. If both endpoints round to the same integer the function
  * is constant on the interval; otherwise it spans a half-integer jump and the
- * result is `singular` (mirrors the Floor/Ceil enclosure discipline).
+ * result is `singular` carrying the enclosure `[round(lo), round(hi)]`
+ * (mirrors the Floor/Ceil enclosure discipline).
  *
  * The first jump is at `rlo + 0.5`. Continuity is derived from the rule itself
  * (`right` when the value at the jump matches the value just above it), so this
@@ -466,15 +487,15 @@ function roundStep(
   x: Interval,
   pointRound: (n: number) => number
 ): IntervalResult {
+  if (isNaNInterval(x)) return ok(NAN_INTERVAL);
   const rlo = pointRound(x.lo);
   const rhi = pointRound(x.hi);
   if (rlo === rhi) return ok({ lo: rlo, hi: rhi });
   const at = rlo + 0.5;
-  return {
-    kind: 'singular',
-    at,
-    continuity: pointRound(at) === rlo + 1 ? 'right' : 'left',
-  };
+  return jump(at, pointRound(at) === rlo + 1 ? 'right' : 'left', {
+    lo: Math.min(rlo, rhi),
+    hi: Math.max(rlo, rhi),
+  });
 }
 
 /**
@@ -486,7 +507,7 @@ function roundStep(
  * through 0; an interval that stays within one step returns that constant
  * value, one that spans a half-integer returns `singular`.
  */
-export function round(x: Interval | IntervalResult): IntervalResult {
+function roundRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -498,19 +519,21 @@ export function round(x: Interval | IntervalResult): IntervalResult {
  *
  * Sawtooth function with discontinuities at every integer.
  */
-export function fract(x: Interval | IntervalResult): IntervalResult {
+function fractRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   const flo = Math.floor(xVal.lo);
   const fhi = Math.floor(xVal.hi);
   if (flo === fhi) {
     // No integer crossing — fract is continuous (linear)
     return ok({ lo: xVal.lo - flo, hi: xVal.hi - flo });
   }
-  // Interval spans an integer — sawtooth discontinuity
-  // fract is right-continuous (inherits from floor)
-  return { kind: 'singular', at: flo + 1, continuity: 'right' };
+  // Interval spans an integer — a sawtooth jump. fract is right-continuous
+  // (inherits from floor). Across a jump the sawtooth takes every value in
+  // [0, 1), so the enclosure is [0, 1].
+  return jump(flo + 1, 'right', { lo: 0, hi: 1 });
 }
 
 /**
@@ -521,32 +544,38 @@ export function fract(x: Interval | IntervalResult): IntervalResult {
  * For positive values: right-continuous at discontinuities (like floor).
  * For negative values: left-continuous at discontinuities (like ceil).
  */
-export function trunc(x: Interval | IntervalResult): IntervalResult {
+function truncRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   const tlo = Math.trunc(xVal.lo);
   const thi = Math.trunc(xVal.hi);
   if (tlo === thi) return ok({ lo: tlo, hi: thi });
-  // Interval spans a discontinuity
+  // Interval spans a jump. trunc is monotone, so its values on the interval
+  // lie in [trunc(lo), trunc(hi)] — carried as the enclosure in every arm.
+  const value = { lo: tlo, hi: thi };
   if (xVal.lo >= 0) {
     // Entirely non-negative: behaves like floor (right-continuous)
-    return { kind: 'singular', at: tlo + 1, continuity: 'right' };
+    return jump(tlo + 1, 'right', value);
   }
   // First integer in range (toward zero)
   const firstInt = Math.ceil(xVal.lo);
   if (firstInt !== 0) {
-    // Entirely negative: behaves like ceil (left-continuous)
-    return { kind: 'singular', at: firstInt, continuity: 'left' };
+    // The first jump is at a negative integer, where trunc behaves like
+    // ceil (left-continuous). This also covers an interval that spans zero
+    // from at or below -1: its first jump is still the negative one.
+    return jump(firstInt, 'left', value);
   }
-  // Spans zero: first discontinuity is at +1 (right-continuous like floor)
-  return { kind: 'singular', at: 1, continuity: 'right' };
+  // Starts inside (-1, 0) and spans zero: trunc is continuous at 0, so the
+  // first discontinuity is at +1 (right-continuous like floor)
+  return jump(1, 'right', value);
 }
 
 /**
  * Minimum of two intervals.
  */
-export function min(
+function minRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
@@ -562,7 +591,7 @@ export function min(
 /**
  * Maximum of two intervals.
  */
-export function max(
+function maxRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
@@ -586,13 +615,14 @@ export function max(
  * a conservative approximation of the period. This may produce bounds
  * that are too narrow for wide modulus intervals.
  */
-export function mod(
+function modRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
   const unwrapped = unwrapOrPropagate(a, b);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [aVal, bVal] = unwrapped;
+  if (isNaNInterval(aVal) || isNaNInterval(bVal)) return ok(NAN_INTERVAL);
   // Division by zero in mod
   if (containsZero(bVal)) {
     return { kind: 'singular' };
@@ -627,10 +657,17 @@ export function mod(
   const flo = Math.floor(aVal.lo / period);
   const fhi = Math.floor(aVal.hi / period);
 
+  // Across a period boundary the sawtooth takes every value of one period:
+  // [0, b) for a positive divisor, (b, 0] for a negative one. The closed hull
+  // is the enclosure a jump carries.
+  const wrapValue = divisorNegative
+    ? { lo: -period, hi: 0 }
+    : { lo: 0, hi: period };
+
   if (flo !== fhi) {
-    // Interval spans a multiple of the period — discontinuity
-    // mod has sawtooth discontinuities, right-continuous
-    return { kind: 'singular', at: (flo + 1) * period, continuity: 'right' };
+    // Interval spans a multiple of the period — a finite jump. mod has
+    // sawtooth discontinuities, right-continuous.
+    return jump((flo + 1) * period, 'right', wrapValue);
   }
 
   // No discontinuity — mod is continuous (linear) on this interval.
@@ -642,8 +679,7 @@ export function mod(
     // floored(a, b<0) = Euclidean(a, |b|) − |b|, except it is 0 at multiples
     // of |b| (a right-discontinuity). If `aVal.lo` sits on a multiple
     // (`modLo === 0`), the interval straddles that jump.
-    if (modLo === 0)
-      return { kind: 'singular', at: aVal.lo, continuity: 'right' };
+    if (modLo === 0) return jump(aVal.lo, 'right', wrapValue);
     return ok({ lo: modLo - period, hi: modHi - period });
   }
 
@@ -657,7 +693,7 @@ export function mod(
  * Discontinuities arise from the `round` step when `a/b` spans
  * a half-integer boundary.
  */
-export function remainder(
+function remainderRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
@@ -670,7 +706,7 @@ export function remainder(
  * H(x) = 0 for x < 0, 1/2 for x = 0, 1 for x > 0.
  * Has a jump discontinuity at 0.
  */
-export function heaviside(x: Interval | IntervalResult): IntervalResult {
+function heavisideRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -684,8 +720,8 @@ export function heaviside(x: Interval | IntervalResult): IntervalResult {
   if (xVal.lo > 0) return ok({ lo: 1, hi: 1 });
   if (xVal.hi < 0) return ok({ lo: 0, hi: 0 });
   if (xVal.lo === 0 && xVal.hi === 0) return ok({ lo: 0.5, hi: 0.5 });
-  // Interval spans zero — discontinuity
-  return { kind: 'singular', at: 0 };
+  // Interval spans zero — a finite jump; the values lie in [0, 1].
+  return jump(0, undefined, { lo: 0, hi: 1 });
 }
 
 /**
@@ -694,7 +730,7 @@ export function heaviside(x: Interval | IntervalResult): IntervalResult {
  * Returns -1, 0, or 1 depending on the sign.
  * Has a jump discontinuity at 0.
  */
-export function sign(x: Interval | IntervalResult): IntervalResult {
+function signRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -706,8 +742,8 @@ export function sign(x: Interval | IntervalResult): IntervalResult {
   if (xVal.lo > 0) return ok({ lo: 1, hi: 1 });
   if (xVal.hi < 0) return ok({ lo: -1, hi: -1 });
   if (xVal.lo === 0 && xVal.hi === 0) return ok({ lo: 0, hi: 0 });
-  // Interval spans zero — discontinuity
-  return { kind: 'singular', at: 0 };
+  // Interval spans zero — a finite jump; the values lie in [-1, 1].
+  return jump(0, undefined, { lo: -1, hi: 1 });
 }
 
 // x coordinate of gamma's minimum: the positive root of digamma(x) = 0
@@ -722,7 +758,7 @@ const GAMMA_MIN_Y = 0.8856031944108887;
  * a unique minimum at x ≈ 1.4616 for positive x. Between consecutive
  * negative integers it is monotonic (but alternates direction).
  */
-export function gamma(x: Interval | IntervalResult): IntervalResult {
+function gammaRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -819,7 +855,7 @@ function _gamma(x: Interval): IntervalResult {
  * -Infinity near poles instead of ±Infinity. For positive x, gammaln is
  * monotonically increasing.
  */
-export function gammaln(x: Interval | IntervalResult): IntervalResult {
+function gammalnRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -869,7 +905,7 @@ function _gammaln(x: Interval): IntervalResult {
  * increasing. For interval arguments, we evaluate at both endpoints.
  * Non-integer or negative values produce NaN.
  */
-export function factorial(x: Interval | IntervalResult): IntervalResult {
+function factorialRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -884,7 +920,7 @@ export function factorial(x: Interval | IntervalResult): IntervalResult {
 /**
  * Double factorial on an interval.
  */
-export function factorial2(x: Interval | IntervalResult): IntervalResult {
+function factorial2Raw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -948,7 +984,7 @@ function enumerateInteger2(
  * Both arguments are rounded to nearest integer. C(n, k) is not monotone in k
  * (it peaks at k ≈ n/2), so the enclosure enumerates the integer grid.
  */
-export function binomial(
+function binomialRaw(
   n: Interval | IntervalResult,
   k: Interval | IntervalResult
 ): IntervalResult {
@@ -972,7 +1008,7 @@ export function binomial(
  * gcd is not monotone (e.g. gcd(6, 5) = 1 sits between gcd(6, 6) = 6 and
  * gcd(6, 4) = 2), so the enclosure enumerates the integer grid.
  */
-export function gcd(
+function gcdRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
@@ -1000,7 +1036,7 @@ export function gcd(
  * lcm is not monotone (e.g. lcm(2, 5) = 10 exceeds lcm(2, 6) = 6), so the
  * enclosure enumerates the integer grid.
  */
-export function lcm(
+function lcmRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
@@ -1032,7 +1068,7 @@ export function lcm(
  * `ce.tolerance`, matching the interpreter's `Chop`); it defaults to the
  * scalar chop's static default.
  */
-export function chop(
+function chopRaw(
   x: Interval | IntervalResult,
   tolerance?: number
 ): IntervalResult {
@@ -1049,7 +1085,7 @@ export function chop(
  * Error function on an interval.
  * erf is monotonically increasing, so evaluate at endpoints.
  */
-export function erf(x: Interval | IntervalResult): IntervalResult {
+function erfRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -1060,7 +1096,7 @@ export function erf(x: Interval | IntervalResult): IntervalResult {
  * Complementary error function on an interval.
  * erfc is monotonically decreasing, so swap endpoints.
  */
-export function erfc(x: Interval | IntervalResult): IntervalResult {
+function erfcRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -1071,7 +1107,7 @@ export function erfc(x: Interval | IntervalResult): IntervalResult {
 /**
  * 2^x on an interval. Monotonically increasing.
  */
-export function exp2(x: Interval | IntervalResult): IntervalResult {
+function exp2Raw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
@@ -1082,7 +1118,7 @@ export function exp2(x: Interval | IntervalResult): IntervalResult {
  * Hypot(x, y) = sqrt(x^2 + y^2) on intervals.
  * Always non-negative, evaluate four corners.
  */
-export function hypot(
+function hypotRaw(
   x: Interval | IntervalResult,
   y: Interval | IntervalResult
 ): IntervalResult {
@@ -1107,3 +1143,41 @@ export function hypot(
   if (xVal.lo <= 0 && xVal.hi >= 0 && yVal.lo <= 0 && yVal.hi >= 0) lo = 0;
   return ok({ lo, hi: Math.max(...vals) });
 }
+
+// Every operation above is exported through `liftJump` so that a finite
+// jump in an operand (a `singular` result carrying a `value`) is re-tagged
+// on the result instead of being forgotten — see `liftJump` in `util.ts`.
+export const sqrt = liftJump(sqrtRaw);
+export const square = liftJump(squareRaw);
+export const pow = liftJump(powRaw);
+export const powInterval = liftJump(powIntervalRaw);
+export const powRational = liftJump(powRationalRaw);
+export const nthRoot = liftJump(nthRootRaw);
+export const exp = liftJump(expRaw);
+export const ln = liftJump(lnRaw);
+export const log10 = liftJump(log10Raw);
+export const log2 = liftJump(log2Raw);
+export const abs = liftJump(absRaw);
+export const floor = liftJump(floorRaw);
+export const ceil = liftJump(ceilRaw);
+export const round = liftJump(roundRaw);
+export const fract = liftJump(fractRaw);
+export const trunc = liftJump(truncRaw);
+export const min = liftJump(minRaw);
+export const max = liftJump(maxRaw);
+export const mod = liftJump(modRaw);
+export const remainder = liftJump(remainderRaw);
+export const heaviside = liftJump(heavisideRaw);
+export const sign = liftJump(signRaw);
+export const gamma = liftJump(gammaRaw);
+export const gammaln = liftJump(gammalnRaw);
+export const factorial = liftJump(factorialRaw);
+export const factorial2 = liftJump(factorial2Raw);
+export const binomial = liftJump(binomialRaw);
+export const gcd = liftJump(gcdRaw);
+export const lcm = liftJump(lcmRaw);
+export const chop = liftJump(chopRaw);
+export const erf = liftJump(erfRaw);
+export const erfc = liftJump(erfcRaw);
+export const exp2 = liftJump(exp2Raw);
+export const hypot = liftJump(hypotRaw);

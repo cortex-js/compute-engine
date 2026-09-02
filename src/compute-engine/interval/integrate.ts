@@ -6,7 +6,7 @@
 
 import { add, mul, sub } from './arithmetic.js';
 import type { Interval, IntervalResult } from './types.js';
-import { ok, point, unwrapOrPropagate } from './util.js';
+import { ok, point, unwrapOrPropagate, liftJump } from './util.js';
 
 /**
  * Default number of subintervals the point-bound core partitions the
@@ -130,7 +130,16 @@ function isFiniteInterval(x: Interval): boolean {
  * whole integral's answer, or `undefined` when the result carries a usable
  * interval (kind `interval` or `partial`).
  *
- * - `singular`: the range crosses a pole, so no finite enclosure exists.
+ * - `singular` without a `value`: the range crosses a pole, so no finite
+ *   enclosure exists. A `singular` WITH a `value` is a finite jump (`floor`
+ *   across an integer): the integrand is bounded there, so the piece is
+ *   integrated over the enclosure the jump carries like any other. The
+ *   integral of a jump in the integration variable is continuous, so the
+ *   result is a plain interval. A jump the integrand inherits from a
+ *   captured parameter (`∫₀¹ floor(x) dt`, `x` an interval across an
+ *   integer) is integrated the same way: the bound is sound, but the result
+ *   no longer says that it jumps in `x`. Telling the two apart would need
+ *   the jump to record which variable it came from.
  * - `empty`: the integrand is undefined somewhere on the range, so the
  *   integral is undefined.
  * - `entire`: the integrand is unbounded on the range.
@@ -150,7 +159,7 @@ function propagatedKind(
       return { kind: 'entire' };
     return undefined;
   }
-  if (v.kind === 'singular') return v;
+  if (v.kind === 'singular') return v.value === undefined ? v : undefined;
   if (v.kind === 'empty' || v.kind === 'entire') return { kind: v.kind };
   return undefined;
 }
@@ -161,7 +170,7 @@ function isPartial(v: Interval | IntervalResult): boolean {
 }
 
 /** The interval carried by an integrand result known to carry one (kind
- *  `interval` or `partial`, or a bare interval). */
+ *  `interval` or `partial`, a jump, or a bare interval). */
 function valueOf(v: Interval | IntervalResult): Interval {
   return 'kind' in v ? (v as { value: Interval }).value : v;
 }
@@ -247,8 +256,9 @@ function accumulate(
   if (propagated !== undefined) return propagated;
   if (isPartial(v)) acc.clipped = true;
   const term = add(acc.value, mul(v, w));
-  // `add`/`mul` answer `interval` for interval operands; the propagation
-  // check above ruled the others out.
+  // `add`/`mul` answer `interval` for interval operands, or a jump carrying
+  // its bound when `v` is one; the propagation check above ruled the others
+  // out.
   acc.value = valueOf(term);
   acc.mag += magnitude(valueOf(v)) * w.hi;
   acc.ops += 3;
@@ -327,7 +337,7 @@ function bracket(
  * `n` is the number of subintervals of the point-bound bracket; the compiler
  * sizes it from `INTERVAL_QUADRATURE_BUDGET` by nesting depth.
  */
-export function integrate(
+function integrateRaw(
   f: (t: Interval) => Interval | IntervalResult,
   a: Interval | IntervalResult,
   b: Interval | IntervalResult,
@@ -420,7 +430,7 @@ function integrateCore(
  *
  * `closed` is a thunk so the closed form is evaluated only when it is used.
  */
-export function integrateClosed(
+function integrateClosedRaw(
   closed: () => Interval | IntervalResult,
   f: (t: Interval) => Interval | IntervalResult,
   a: Interval | IntervalResult,
@@ -446,3 +456,10 @@ export function integrateClosed(
     activeIntegrals--;
   }
 }
+
+// Both are exported through `liftJump` so that a jump in a BOUND (`∫ from
+// floor(x) to 5`) is re-tagged on the result — the integral is continuous in
+// its bounds, so it inherits the bound's discontinuity. The integrand's own
+// jumps are handled in `propagatedKind` above.
+export const integrate = liftJump(integrateRaw);
+export const integrateClosed = liftJump(integrateClosedRaw);

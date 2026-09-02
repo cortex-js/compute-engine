@@ -30,6 +30,7 @@ import {
   point,
   unionResults,
   unwrapOrPropagate,
+  liftJump,
 } from './util.js';
 
 /**
@@ -93,7 +94,7 @@ function normalizeElement(element: unknown): IntervalResult | undefined {
  * answers absence).
  * @param index The 1-based index, as an interval or interval result.
  */
-export function at(
+function atRaw(
   coll: unknown,
   index: Interval | IntervalResult
 ): Interval | IntervalResult {
@@ -180,3 +181,8 @@ export function component(coll: unknown, k: number): Interval | IntervalResult {
   if (element === undefined) return { kind: 'entire' };
   return element;
 }
+
+// Every operation above is exported through `liftJump` so that a finite
+// jump in an operand (a `singular` result carrying a `value`) is re-tagged
+// on the result instead of being forgotten — see `liftJump` in `util.ts`.
+export const at = liftJump(atRaw);
