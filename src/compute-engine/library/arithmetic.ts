@@ -23,6 +23,10 @@ import {
 } from '../boxed-expression/numerics.js';
 import { addOrder } from '../boxed-expression/order.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
+import {
+  hasInfiniteComponent,
+  logarithmAtExceptionalPoint,
+} from '../boxed-expression/logarithm.js';
 
 import {
   apply,
@@ -642,13 +646,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       idempotent: true,
       complexity: 1200,
-      // The DECLARED result must admit every answer the type handler can
+      // The parameter carrier is every number except NaN: the modulus has
+      // a value at every finite complex number and at every infinity
+      // (`|±∞| = |~oo| = +∞`), so nothing is off-carrier; `NaN`
+      // propagates (explicit: the carrier is not a subtype of `complex`,
+      // so the policy derived from the signature would be `reject`). The
+      // DECLARED result must admit every answer the type handler can
       // give, and `absFunctionType` legitimately claims `+oo | -oo`
       // for `±∞`/`~oo` and the top `number` where finiteness is not proven
       // (a NaN operand, in particular). Neither is below `real`, so the
       // declaration is the top numeric type and the handler tightens it
-      // per call.
-      signature: '(number) -> number',
+      // per call. A numeric tuple operand (a point, whose norm `Abs`
+      // computes) is admitted by the numeric-argument validation's tuple
+      // lane (`typeCouldBeNumericTuple`, validate.ts), not by this
+      // carrier.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
       // `isTuple` (type-based, follows symbol value bindings), not an
       // `operator === 'Tuple'` check: a tuple-TYPED symbol or lambda
       // parameter is a point too, even without a literal `Tuple` node.
@@ -1930,26 +1943,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 4000,
       broadcastable: true,
 
-      // The carrier is every point where the logarithm has a value: the
-      // finite complex numbers — `Ln(0) = −∞` is an in-carrier pole VALUE,
-      // and `Ln(−1) = iπ` is the complex extension — plus the signed
-      // infinities (`Ln(+∞) = +∞`; `Ln(−∞) = ∞ + iπ`, which is why the
-      // result carries the wide `infinity` arm). `~oo` is off-carrier —
-      // an incompatible-type error, surfaced at EVALUATION by the
-      // dispatch-time conformance re-test (like `Sqrt` above, this
-      // operator's fast-pathed canonicalization bypasses boxing
-      // validation — the tracked timing deviation) — by the family-wide
-      // ruling (2026-08-31): `Ln(~oo)` used to DIVERGE between routes
-      // (`evaluate()` answered `NaN`, `.N()` an arbitrary `∞ + iπ/4`),
-      // and the carrier error replaces both. `NaN` in either slot
-      // propagates (explicit: this carrier is not a subtype of `complex`,
-      // so the derived default would be `reject`).
-      signature: '(complex | signed_infinity, base: number?) -> complex | infinity',
+      // The carrier is every point where the logarithm has a value — all
+      // of `number` except NaN: the finite complex numbers (`Ln(0) = −∞`
+      // is an in-carrier pole VALUE; `Ln(−1) = iπ` is the complex
+      // extension), the signed infinities (`Ln(+∞) = +∞`;
+      // `Ln(−∞) = ∞ + iπ`, which is why the result carries the wide
+      // `infinity` arm), and `~oo`: `Ln(~oo) = ~oo`, because the real
+      // part grows without bound in every direction of approach while the
+      // imaginary part stays bounded, so the modulus is infinite — the
+      // point at infinity (ruled 2026-09-01, reversing the 2026-08-31
+      // choice that made `~oo` an error here for uniformity with `Sin`;
+      // the same modulus rule gives `Power(~oo, 1/2) = ~oo`). The values
+      // at these points are the quotient rule of
+      // `logarithmAtExceptionalPoint` (boxed-expression/logarithm.ts),
+      // which the `Log` handler shares. `NaN` propagates (explicit: this
+      // carrier is not a subtype of `complex`, so the policy derived from
+      // the signature would be `reject`). The optional base slot is a
+      // pass-through: `Ln(a, b)` canonicalizes to `Log(a, b)`, whose base
+      // carrier applies.
+      signature: '(complex | infinity, base: complex | infinity?) -> complex | infinity',
       nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: (ops) => elementaryFunctionTypeOnTypes('Ln', ops),
       sgn: ([x]) => lnSign(x),
-      // @fastpath: this doesn't get called. See makeNumericFunction()
       evaluate: ([z], { numericApproximation, engine }) => {
         // Ln(a, b) = Log(a, b), so no need to check second argument
         // Non-lazy: `z` is already evaluated by the driver.
@@ -1961,6 +1977,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return numericApproximation ? r?.N() : r;
         }
         if (!numericApproximation) return z.ln();
+
+        // The exceptional points answer the same exact values on the
+        // numeric route (`Ln(+∞) = +∞`, `Ln(~oo) = ~oo`), and `Ln(−∞)` its
+        // machine complex `∞ + iπ`.
+        const special = logarithmAtExceptionalPoint(
+          engine,
+          z,
+          undefined,
+          true
+        );
+        if (special !== undefined) return special;
 
         return apply(
           z,
@@ -1987,7 +2014,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 4100,
       broadcastable: true,
 
-      signature: '(number, base: number?) -> number',
+      // `Log(x, b)` is DEFINED as `Ln(x) / Ln(b)` at every point (ruled
+      // 2026-09-01), so both carriers are `Ln`'s — all of `number` except
+      // NaN — and the values at the exceptional points are the quotient
+      // rule of `logarithmAtExceptionalPoint` (boxed-expression/
+      // logarithm.ts): `Log(8, 1) = ln 8 / 0 = ~oo`, `Log(8, 0) =
+      // ln 8 / (−∞) = 0`, `Log(0, 1/2) = +∞`, `Log(8, ~oo) = 0`,
+      // `Log(+∞, +∞) = NaN`, `Log(1, 1) = NaN`, and a negative base is a
+      // finite complex quotient (`Log(8, −2) = ln 8 / (ln 2 + iπ)`). Every
+      // route answers the same value; before the ruling `evaluate()`,
+      // `.N()` and `simplify()` disagreed at most of these points. `NaN`
+      // propagates (explicit, the carriers not being subtypes of
+      // `complex`). The result stays the wide `number`: it ranges over the
+      // finite complex numbers, every infinity, and NaN, and the per-call
+      // sharpness lives in the type handler.
+      signature: '(complex | infinity, base: complex | infinity?) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: (ops) => elementaryFunctionTypeOnTypes('Log', ops),
 
@@ -2019,6 +2061,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         if (!numericApproximation) return ops[0]?.ln(ops[1] ?? 10) ?? undefined;
         const ce = engine;
+        // The exceptional points answer their exact quotient values on the
+        // numeric route too (the machine kernels below would give the
+        // wrong sign at `Log(0, 1/2)` and NaN at `Log(8, −∞)`), and
+        // `Log(−∞, b)` its machine complex.
+        {
+          const special = logarithmAtExceptionalPoint(
+            ce,
+            ops[0],
+            ops[1] ?? ce.number(10),
+            true
+          );
+          if (special !== undefined) return special;
+        }
         if (ops[1] === undefined)
           return apply(
             ops[0],
@@ -2036,22 +2091,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                   : ce.complex(x.toNumber()).log().div(Math.LN10),
             (z) => (z.isZero() ? NaN : z.log().div(Math.LN10))
           );
+        // A negative real argument OR base has a complex logarithm
+        // (`ln(−2) = ln 2 + iπ`); every lane routes it through the complex
+        // logarithm, so `Log(−2, 10).N()` and `Log(8, −2).N()` are the
+        // finite complex quotients and not NaN (a machine `Math.log` of a
+        // negative number is NaN). The bignum lane falls back to machine
+        // precision for a negative base: the quotient is then complex, and
+        // the complex lane is machine-only.
+        const lnOf = (v: number) => (v < 0 ? ce.complex(v).log() : Math.log(v));
         return apply2(
           ops[0],
           ops[1],
-          // A negative real argument has a complex logarithm; the one-arg
-          // path already falls back to `ce.complex(...).log()`, so the
-          // two-arg lanes must too (otherwise `Log(-2, 10).N()` → NaN while
-          // `Ln(-2).N()` → complex).
+          (z, b) => {
+            const lz = lnOf(z);
+            const lb = lnOf(b);
+            if (typeof lz === 'number' && typeof lb === 'number') return lz / lb;
+            return ce.complex(lz).div(lb);
+          },
           (z, b) =>
-            z < 0
-              ? ce.complex(z).log().div(Math.log(b))
-              : Math.log(z) / Math.log(b),
-          (z, b) =>
-            z.isNegative()
-              ? ce.complex(z.toNumber()).log().div(Math.log(b.toNumber()))
+            z.isNegative() || b.isNegative()
+              ? ce.complex(lnOf(z.toNumber())).div(lnOf(b.toNumber()))
               : z.log(b),
-          (z, b) => z.log().div(typeof b === 'number' ? Math.log(b) : b.log())
+          (z, b) => z.log().div(typeof b === 'number' ? lnOf(b) : b.log())
         );
       },
     },
@@ -3333,16 +3394,40 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 3200,
       broadcastable: true,
 
-      signature: '(number, number) -> number',
+      // `Root(x, n)` IS `Power(x, 1/n)`, at every point (ruled 2026-09-01),
+      // and both carriers follow from that: the radicand takes `Power`'s
+      // base carrier — every number except NaN, `~oo` included
+      // (`Root(~oo, 3) = ~oo` by the modulus rule, `Root(~oo, −2) = 0`) —
+      // and the index admits every number except NaN too, because `1/n`
+      // is then a signed infinity (`n = 0`), 0 (`n = ±∞` or `~oo`), or a
+      // finite number, and `Power` decides from there: `Root(x, ±∞) =
+      // x^0 = 1` for a finite non-zero `x` and NaN for `Root(0, ±∞)` and
+      // `Root(±∞, ±∞)` (the `0^0`/`∞^0` forms), `Root(2, 1/2) = 2^2 = 4`.
+      // The one index with NO value is 0: `1/0 = ~oo`, and a `~oo`
+      // exponent is outside `Power`'s domain, so `Root(x, 0)` is an
+      // Error — declared as the `requires` precondition, which the
+      // dispatch gate answers before the handler runs. `NaN` in either
+      // slot propagates (explicit: these carriers are not subtypes of
+      // `complex`, so the policy derived from the signature would be
+      // `reject`). The values are folded by `root()` (arithmetic-power.ts),
+      // which delegates the non-finite cases to `pow`.
+      signature: '(complex | infinity, complex | infinity) -> number',
+      nanBehavior: 'propagate',
+      requires: ([, n]) => {
+        if (n === undefined || !isNumber(n)) return undefined;
+        return n.isSame(0) ? false : undefined;
+      },
       type: ([base, exp]) => {
-        if (base.isNaN || exp.isNaN) return 'number';
+        // A proven-NaN operand: decline, so the framework's proven-NaN arm
+        // answers the sharp `nan` (the `Sqrt` precedent).
+        if (base.isNaN || exp.isNaN) return undefined;
         // Root(x, n) = x^(1/n). A non-finite base or index makes the result
         // indeterminate: Root(±∞, n) ∈ {0, ±∞, complex}, Root(x, ±∞) = x^0
         // (often 1 but 0^0/∞^0 are NaN). Widen to the top type.
         if (provablyNonFiniteNumber(base) || provablyNonFiniteNumber(exp))
           return 'number';
-        // Root(x, 0) = x^(1/0): a pole (the old `integer` was wrong —
-        // Root(2,0), Root(0,0), Root(−2,0) all evaluate to NaN).
+        // Root(x, 0) = x^(1/0) = x^~oo: an Error at evaluation (the
+        // `requires` precondition above); the type stays the wide hedge.
         if (exp.isSame(0)) return 'number';
         if (exp.isSame(1)) return base.type;
         // Root(0, n): 0 for n>0, a pole (±∞) for n≤0, NaN for a complex index.
@@ -3649,20 +3734,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 3000,
       broadcastable: true,
 
-      // The carrier is every point where the square root has a value: the
-      // finite complex numbers and the two signed infinities
-      // (`√(+∞) = +∞`, `√(−∞) = i·∞ = ~oo`). `~oo` is off-carrier — an
-      // incompatible-type error — by the family-wide ruling (2026-08-31):
-      // its square root was answering `NaN`, and carrier discipline
-      // replaces that with the loud error. The error surfaces at
-      // EVALUATION, not boxing: this operator's canonicalization is
-      // fast-pathed (`makeNumericFunction`), which bypasses declared-
-      // signature validation, so the dispatch-time conformance re-test is
-      // the seam that answers — the tracked timing deviation of
-      // `docs/SIGNATURE-GUIDELINES.md` §4. The result needs the
-      // `infinity` arm because `√(−∞)` is `~oo`, which the signed pair
-      // excludes.
-      signature: '(complex | signed_infinity) -> complex | infinity',
+      // The carrier is every point where the square root has a value —
+      // all of `number` except NaN: the finite complex numbers, the
+      // signed infinities (`√(+∞) = +∞`, `√(−∞) = i·∞ = ~oo`), and
+      // `~oo`: `√(~oo) = ~oo`, because the modulus grows without bound in
+      // every direction of approach, so the value is the point at
+      // infinity (ruled 2026-09-01 — the same modulus rule that gives
+      // `Power(~oo, 1/2) = ~oo`; it reverses the 2026-08-31 choice that
+      // made `~oo` an error here for uniformity with `Sin`). The values
+      // live in `BoxedNumber.sqrt()`, which both routes call. The result
+      // needs the `infinity` arm because `√(−∞)` and `√(~oo)` are `~oo`,
+      // which the signed pair excludes.
+      signature: '(complex | infinity) -> complex | infinity',
       // Explicit: the DERIVED default answers `reject` for a carrier that
       // is not a subtype of `complex`, and `Sqrt(NaN)` must be `NaN`.
       nanBehavior: 'propagate',
@@ -3764,6 +3847,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
 
         if (!numericApproximation) return x.sqrt();
+
+        // An infinite radicand — a named infinity, or an "anonymous" one
+        // with an infinite component (`∞ + i`) — has an exact value on the
+        // numeric route too (`BoxedNumber.sqrt()`); the numeric-value
+        // kernel below answers NaN for `~oo` and `∞ − ∞` for `∞ + i`.
+        if (
+          isNumber(x) &&
+          (x.isInfinity === true || hasInfiniteComponent(x.numericValue))
+        )
+          return x.sqrt();
 
         const [c, rest] = x.toNumericValue();
         const cSqrt = engine.number(c.sqrt().N());

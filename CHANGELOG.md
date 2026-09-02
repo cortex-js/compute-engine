@@ -178,11 +178,13 @@
   - `Sin(±∞)`, `Arcsin(±∞)` are now `incompatible-type` errors. They
     used to stay unevaluated symbolically and answer `NaN` under `N()`.
   - A `~oo` (complex infinity) argument is now an `incompatible-type`
-    error for all five operators. The previous behavior was
-    inconsistent — `Sqrt(~oo)` answered `NaN`, `Erf(~oo)` answered
-    `~oo`, and `Ln(~oo)` answered `NaN` on `evaluate()` but an arbitrary
-    `∞ + iπ/4` on `.N()`. The error is uniform and identical on both
-    routes now.
+    error for `Sin`, `Arcsin`, and `Erf`, which have no value there.
+    `Sqrt(~oo)` and `Ln(~oo)` answer `~oo` (see the `Abs`/`Log`/`Root`
+    entry below: their modulus is infinite in every direction of
+    approach). The previous behavior was inconsistent — `Sqrt(~oo)`
+    answered `NaN`, `Erf(~oo)` answered `~oo`, and `Ln(~oo)` answered
+    `NaN` on `evaluate()` but an arbitrary `∞ + iπ/4` on `.N()`. Each
+    answer is now identical on both routes.
   - A `NaN` argument still gives `NaN` for all five.
   - `Exp` is not changed: `Exp(x)` becomes `Power(e, x)` when the
     expression is canonicalized, so its behavior at exceptional points
@@ -277,6 +279,50 @@
     `~oo` argument to `NaN` (a leftover from before their own domain
     declarations): they decline, and the evaluate route reports the
     error, like the other declared-domain operators.
+
+- **`Abs`, `Log` (with `Log2`, `Log10`, `Lb`, `Lg`), `Arctan`, `Arctan2`,
+  `Root`, and `Sqrt`/`Ln` at complex infinity now declare their
+  mathematical domains**, completing the elementary functions. The values
+  at the exceptional points follow four rules:
+
+  - **The modulus rule for `~oo`.** A function whose modulus grows without
+    bound in every direction of approach has the value `~oo` at complex
+    infinity: `Sqrt(~oo)`, `Root(~oo, n)`, `Ln(~oo)`, and `Log(~oo, b)` all
+    answer `~oo` (consistent with `Power(~oo, 1/2) = ~oo`). `Sqrt(~oo)` and
+    `Ln(~oo)` were `incompatible-type` errors in the previous entry;
+    `Root(~oo, 3)` answered `NaN`. `Abs` accepts every number; `Abs(~oo)`
+    is `+∞` as before.
+  - **`Log(x, b)` is `Ln(x) / Ln(b)` at every point**, computed with the
+    engine's extended arithmetic: `Log(8, 1) = ~oo`, `Log(8, 0) = 0`,
+    `Log(8, ±∞) = Log(8, ~oo) = 0`, `Log(0, 1/2) = +∞`, `Log(+∞, +∞) =
+    NaN`, `Log(0, 0) = NaN`, `Log(1, 1) = NaN`, and a negative base gives
+    a finite complex number (`Log(8, −2).N() = 0.139 − 0.631i`).
+    `evaluate()`, `.N()` and `simplify()` disagreed at most of these
+    points before; three `evaluate()` answers were wrong (`Log(0, 1/2)`
+    gave `−∞`, `Log(+∞, +∞)` gave `1`, `Log(0, 0)` gave `−∞`), and `.N()`
+    gave `NaN` for a negative base. `Ln(+∞)` now evaluates to `+∞` (it
+    stayed symbolic under `evaluate()`). `Log(−∞, b)` follows `Ln(−∞)`:
+    symbolic under `evaluate()`, `∞ + i·π/ln b` under `.N()`.
+  - **`Root(x, n)` is `Power(x, 1/n)` at every point**: `Root(x, 0)` is an
+    error (the exponent `1/0 = ~oo` is outside `Power`'s domain; it used
+    to answer `NaN` under `.N()` and stay symbolic under `evaluate()`);
+    `Root(x, ±∞)` is `x^0` — `1` for a finite non-zero `x`, `NaN` for
+    `Root(0, ±∞)` and `Root(±∞, ±∞)`; `Root(±∞, 3)` folds to `±∞` and
+    `Root(2, 1/2)` to `4` under `evaluate()` (both stayed symbolic).
+  - **`Arctan2` takes IEEE `atan2`'s values at the infinite corners**:
+    `Arctan2(+∞, +∞) = π/4`, `(+∞, −∞) = 3π/4`, `(−∞, +∞) = −π/4`,
+    `(−∞, −∞) = −3π/4` (they answered `NaN`; the compiled code already
+    answered these), and `Arctan2(y, −∞)` is `−π` for a negative `y`
+    (`evaluate()` answered `π`). The values are angles in the current
+    `angularUnit`, under `simplify()` as well (which answered radians in
+    degree mode). `Argument(~oo)` stays `NaN` (complex infinity has no
+    direction) — it guards the point itself instead of reading it as the
+    diagonal corner.
+  - `Arctan(~oo)` and any `Arctan2` with a `~oo` or non-real operand are
+    now `incompatible-type` errors, reported when the expression is
+    created (`Arctan2` used to stay unevaluated). `Arctan(±i)` evaluates
+    to `~oo` (it stayed symbolic; `.N()` already answered `~oo`).
+  - A `NaN` argument still answers `NaN` for every operator above.
 
 - **`IsPrime` and `IsComposite` now use positive-integer definitions.**
   `IsPrime` returns `False` for a decidable value that is not a positive

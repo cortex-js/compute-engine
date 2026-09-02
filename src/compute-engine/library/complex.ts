@@ -228,6 +228,12 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // operand would be reported as if it were on the negative real axis
         // (`Argument(NaN)` → `π`).
         if (ops[0].isNaN) return ce.NaN;
+        // `~oo` has no direction, so no phase angle: NaN. Its internal
+        // representation is `(∞, ∞)`, which the `Arctan2` delegation below
+        // would read as the direction π/4 (`Arctan2(+∞, +∞)` is IEEE's
+        // diagonal corner since 2026-09-01). The signed infinities keep
+        // their axis (`Argument(−∞) = π`) through the real branch.
+        if (ops[0].isInfinity === true && ops[0].im !== 0) return ce.NaN;
         const op = ops[0].numericValue;
         if (typeof op === 'number' || op.im === 0) {
           const isNonNegative = typeof op === 'number' ? op >= 0 : op.re >= 0;

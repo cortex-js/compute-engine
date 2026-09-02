@@ -786,6 +786,130 @@ and recorded:
   `isGreater`, sign reads) must exclude the bottom type or keep a
   value/literal witness, or `never`-typed operands walk in.
 
+**Batch 7 — the elementary remainder (`Abs`, `Log` + aliases, `Arctan`,
+`Arctan2`, `Root`), with `Sqrt`/`Ln` re-ruled at `~oo` — IMPLEMENTED
+2026-09-01.** Survey first (all five heads, every exceptional point, all
+three routes): `Abs` was clean; `Log` disagreed across the three routes at
+almost every point and `evaluate()` was wrong at three (`Log(0, 1/2)`,
+`Log(+∞, +∞)`, `Log(0, 0)`); `Arctan2` lost the sign of `y` at `x = −∞`,
+answered NaN at the four infinite corners, and stayed INERT for `~oo` or
+complex operands; `Root` stayed symbolic under `evaluate()` at several
+exact points; and the Power ruling had exposed an inconsistency —
+`Power(~oo, 1/2) = ~oo` (pre-existing) against `Sqrt(~oo)` = Error
+(batch 4) and `Root(~oo, 3)` = NaN. Four rulings (Arno, 2026-09-01), each
+recommended and ratified:
+
+1. **The modulus rule decides `~oo`**: a head whose modulus grows without
+   bound in every direction has the value `~oo` — `√(~oo) = ∛(~oo) =
+   ln(~oo) = log_b(~oo) = ~oo`. This REVERSES batch 4's `Sqrt`/`Ln`
+   error at `~oo`, which was a uniformity choice (with `Sin`), not a
+   no-value argument. `Erf(~oo)` stays an error (bounded oscillation).
+   Carriers: `Sqrt`, `Ln`, `Log`, `Root`, `Abs` all take
+   `complex | infinity`.
+2. **`Log(x, b) := Ln(x) / Ln(b)` at every point**, under extended
+   arithmetic — no special table: `Log(8, 1) = ~oo`, `Log(8, 0) = 0`,
+   `Log(1, 1) = NaN`, `Log(0, 1/2) = +∞`, negative base = finite complex.
+   Implemented once, in `logarithmAtExceptionalPoint`
+   (`boxed-expression/logarithm.ts`), and consumed by `BoxedNumber.ln()`
+   (evaluate route + simplify twin), the `Ln`/`Log` N handlers, and
+   `simplifyLog` (whose hand-rolled table had drifted: base 0/1 → NaN).
+3. **`Root(x, n) := Power(x, 1/n)` at every point**: index 0 is `x^~oo`
+   → an Error, declared as the `requires` precondition (the dispatch
+   gate answers it); index `±∞`/`~oo` is `x^0` (1, or NaN for `0^0`/
+   `∞^0`); an infinite radicand delegates to `pow` (`rootAtExceptionalPoint`);
+   an exact non-integer rational index rewrites to `Power` at
+   canonicalization (`Root(2, 1/2) = 4`).
+4. **`Arctan2` takes the IEEE corner values** (`±π/4`, `±3π/4`), matching
+   the compiled lane's `Math.atan2` and Mathematica; the `x = −∞` sign
+   defect is fixed alongside. Both folds are built on `halfTurnAngle`
+   (the batch-5 rule); the simplify twin was ALSO using raw `ce.Pi`
+   (pre-existing, fixed).
+
+Decided by precedent, not asked: `Arctan(~oo)` is an error (the branch
+ends `±π/2` disagree — the `Arccot` analysis); `Arctan(±i) = ~oo` folds
+under `evaluate()`.
+
+Seams, per head (each pinned): `Arctan`/`Arctan2` have no `canonical`
+handler and are not fast-pathed, so BOXING validation rejects `~oo` and
+complex operands at creation (the `Erf` seam), and the dispatch
+conformance re-test refutes a value that arrives later (a symbol
+assigned `i` after boxing) — a held value at boxing time is admission
+evidence and is rejected at creation too. `Sqrt`/`Ln`/`Log`/`Root` no
+longer have any off-carrier non-NaN point, so their seams carry no
+error; `Root(x, 0)` is the `requires` gate (an `evaluation-error`, not an
+`incompatible-type` error — the value `0` IS in the carrier; the
+PRECONDITION fails).
+
+Other defects fixed with the batch: `Ln(+∞)` stayed symbolic under
+`evaluate()` (batch 4's "`Ln(+∞) = +∞`" was the `.N()` route);
+`Log(−∞, b).N()` answered `~oo` (now `∞ + i·π/ln b`, the `Ln(−∞)`
+convention); `Log(8, −2).N()` answered NaN; the box-time fold
+`Log(1, b) → 0` fired for `b = 1` (now `0/0 = NaN`) and `b = NaN`; the
+`Root` simplify twin rewrote index 0 to NaN and `Root(0, n < 0)` to NaN
+(evaluate: Error / `~oo`) and folded `Root(0, +∞) → 0` against evaluate's
+NaN — it now delegates infinite literal operands to `evaluate()`.
+
+Pins swept: the batch-4 family test (`Sqrt`/`Ln` moved from the error
+loop to a value loop), the Power-batch simplify-decline pins for
+`Sqrt`/`Ln` (they FOLD now), `simplify.test.ts` Rules blocks (`root(0)(2)`
+declines, `root(−π)(0) = ~oo`, `log_c(0)` declines for a symbolic base,
+`log_1(3) = ~oo`), and `trigonometry.test.ts`'s complex-`Arctan2` pin
+(symbolic → boxing error). Family pins added to `error-model.test.ts`
+("the elementary remainder"). Fungrim: no identity at a changed point
+(artifact scan + 3 suites). Canaries green.
+
+Dual review (both legs stalled twice on the harness's stream watchdog
+before a clean run; Codex 5 medium, Claude 1 high + 1 low):
+- FIXED: `Arctan(±i)` was detected through the machine projections
+  (`re === 0 && |im| === 1`), so an exact `(1 − 2⁻⁵⁴)i` folded to `~oo`
+  — the same double-boundary class as the Power batch's modulus finding;
+  it compares with `isSame(I)` now.
+- FIXED (a class the numeric model had left unnamed): "anonymous"
+  infinities — a complex literal with an infinite component (`∞ + i`),
+  a member of the `infinity` TYPE that neither `isInfinity` nor
+  `isFinite` reports — were classified finite by the logarithm helper
+  and missed `BoxedNumber.sqrt()`'s new arm (the generic kernel computed
+  `∞ − ∞`). Both now consult `hasInfiniteComponent` (logarithm.ts),
+  which asks the NUMERIC VALUE (`bignumRe.isFinite()`), because the
+  machine projection cannot tell `∞ + i` from a finite bignum beyond the
+  double range: `10^1000` projects `re` to `Infinity`, and the first fix
+  attempt made `Log(−∞, 10^1000)` answer NaN. ⚠️ Rule: never test
+  finiteness of a literal through `.re`/`.im`.
+- FIXED: `Math.log(base.re)` in the `Log(−∞, b)` numeric arm lost a
+  bignum base (now `bignumRe.ln()`).
+- FIXED (low): the `Arctan2` infinity table was duplicated in the
+  simplify rule; `arctan2AtInfinity` now lives in
+  `boxed-expression/trigonometry.ts` beside `halfTurnAngle` and both
+  routes call it.
+- REFUTED (Codex): "`Log(1, b)` with a symbolic base folds to 0 against
+  the quotient rule" — it is the engine's generic-point convention, the
+  same that folds `1^x` to 1 (documented there as matching
+  SymPy/Mathematica; Mathematica's `Log[b, 1]` is 0). The convention is
+  now named in the `box.ts` fold comment.
+- REFUTED (Claude, rated high): "the simplify twin regressed — a symbol
+  holding `+∞` no longer folds under `Ln`". Measured on the pre-batch
+  tree: it never folded — `simplify()` is deliberately VALUE-BLIND (the
+  `hasAssignedVariable` guard in simplify.ts; `BoxedSymbol.ln()` says
+  the same), so the old generic-getter checks were never reached with
+  such an operand. The reviewer verified the new behavior but not the
+  old. The classifier was nonetheless moved to the generic getters
+  (harmless, and it carries the anonymous-infinity fix), with a comment
+  that states the value-blindness fact instead of the reviewer's
+  assumed one.
+
+Full-suite gate, first run: 3 failures / 32,173, snapshot delta 0. Two
+stale pins (the Epsil CLI note quoting `Ln`'s signature; an
+assume-extended pin expecting a fresh `r` used in `Abs(r)` to stay
+`number` — the use now infers `Abs`'s carrier `complex | infinity`, the
+same inference every flipped head produces), and ONE real defect the
+ruling created through a caller: `Argument(z)` delegates to
+`Arctan2(im, re)`, and `~oo` is represented as `(∞, ∞)`, so the IEEE
+corner rule turned the direction-less `~oo` into the direction `π/4`.
+`Argument` now guards `~oo` itself (NaN, as its own test pins). ⚠️ Rule
+for future corner-value rulings: grep for callers that DELEGATE to the
+head with raw components — they can feed it a representation, not a
+value.
+
 ### Phase F — signature flips, operator-by-operator
 
 Each flip (e.g. `Heaviside: (real) -> rational<0..1>`, `total`) is its

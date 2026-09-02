@@ -840,6 +840,24 @@ export function canonicalRoot(
   if (exp !== undefined && exp < 0 && Number.isInteger(exp))
     return ce._fn('Divide', [ce.One, canonicalRoot(a, -exp)]);
 
+  // An exact NON-INTEGER rational index `p/q` is the power `a^(q/p)`
+  // (`Root(a, b)` is `Power(a, 1/b)` at every point, ruled 2026-09-01):
+  // `Root(2, 1/2) = 2^2 = 4`, `Root(8, 2/3) = 8^(3/2)`. Only a canonical
+  // radicand takes the rewrite — `canonicalPower` builds canonical
+  // structure.
+  if (
+    typeof b !== 'number' &&
+    isNumber(b) &&
+    b.im === 0 &&
+    exp !== undefined &&
+    !Number.isInteger(exp) &&
+    (a.isCanonical || a.isStructural)
+  ) {
+    const r = asRational(b);
+    if (r !== undefined && r[0] !== 0)
+      return canonicalPower(a, ce.number([r[1], r[0]] as Rational));
+  }
+
   return ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b], {
     canonical:
       (a.isCanonical || a.isStructural) &&
@@ -1427,6 +1445,48 @@ export function pow(
   return ce._fn('Power', [x, ce.expr(exp)]);
 }
 
+/**
+ * `Root(a, b)` at the points where one operand is NaN, infinite, or — for
+ * the index — 0: `Root(a, b)` IS `Power(a, 1/b)` (ruled 2026-09-01), so
+ * the value is `pow`'s at the exponent `1/b`, computed with the engine's
+ * extended arithmetic (`1/±∞ = 1/~oo = 0`, `1/0 = ~oo`). Concretely:
+ * `Root(2, ±∞) = 2^0 = 1`, `Root(0, ±∞) = 0^0 = NaN`, `Root(±∞, ±∞) =
+ * NaN`, `Root(±∞, 3)` and `Root(~oo, 3)` follow `Power`'s infinite-base
+ * arms (`−∞`, `~oo`), NaN propagates. An index of 0 is left alone: the
+ * `Root` definition declares it a violated precondition (an Error), which
+ * the dispatch gate answers before the handler runs.
+ *
+ * Returns `undefined` when no operand is at such a point.
+ */
+function rootAtExceptionalPoint(
+  a: Expression,
+  b: Expression
+): Expression | undefined {
+  const ce = a.engine;
+  if (!isNumber(a) && !isNumber(b)) return undefined;
+  if ((isNumber(a) && a.isNaN) || (isNumber(b) && b.isNaN)) return ce.NaN;
+  if (isNumber(b)) {
+    if (b.isSame(0)) return undefined;
+    if (b.isInfinity === true) {
+      // The exponent `1/b` is 0: `a^0` is 1 for a finite non-zero base and
+      // the indeterminate NaN for a zero or infinite one.
+      if (!isNumber(a)) return undefined;
+      if (a.isSame(0) || a.isInfinity === true) return ce.NaN;
+      return ce.One;
+    }
+  }
+  if (isNumber(a) && a.isInfinity === true && isNumber(b)) {
+    // An infinite radicand with a finite non-zero index: `Power`'s
+    // infinite-base arms decide (`(−∞)^(1/3) = −∞`, `(+∞)^(1/2) = +∞`,
+    // `(~oo)^(1/n) = ~oo`, a negative index gives 0).
+    // The canonical `Divide` keeps `1/b` exact (`1/3` stays a rational).
+    return pow(a, ce.function('Divide', [ce.One, b]), {
+      numericApproximation: false,
+    });
+  }
+  return undefined;
+}
+
 export function root(
   a: Expression,
   b: Expression,
@@ -1434,6 +1494,9 @@ export function root(
 ): Expression {
   if (!(a.isCanonical || a.isStructural) || !(b.isCanonical || b.isStructural))
     return a.engine._fn('Root', [a, b], { canonical: false });
+
+  const special = rootAtExceptionalPoint(a, b);
+  if (special !== undefined) return special;
 
   if (numericApproximation) {
     if (isNumber(a) && isNumber(b)) {

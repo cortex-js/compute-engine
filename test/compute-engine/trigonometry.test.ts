@@ -210,17 +210,31 @@ describe('Arctan2 three-valued sign discipline (P0-9 / SYMBOLIC P0-6)', () => {
     });
   }
 
-  test('complex operand: evaluate and N behave identically (stay symbolic)', () => {
+  test('complex operand: an incompatible-type error at creation, on every route', () => {
     // atan2 is a real-plane function; a non-real operand has no well-defined
-    // quadrant. evaluate() previously continued analytically (0.549i) while
-    // N() silently dropped the imaginary part (0). Both must now stay symbolic.
-    const ev = engine.expr(['Arctan2', 'i', 2]).evaluate();
-    const n = engine.expr(['Arctan2', 'i', 2]).N();
-    expect(ev.operator).toBe('Arctan2');
-    expect(n.operator).toBe('Arctan2');
-    expect(engine.expr(['Arctan2', 'i', 2]).simplify().operator).toBe(
-      'Arctan2'
-    );
+    // quadrant. It used to leave the application symbolic on both routes
+    // (before that, evaluate() continued analytically to 0.549i while N()
+    // silently dropped the imaginary part). Since the carrier flip
+    // (`(real | signed_infinity, real | signed_infinity)`, 2026-09-01) a
+    // literal complex operand is rejected by boxing validation, and every
+    // route reports the error.
+    const ev = engine.expr(['Arctan2', 'i', 2]);
+    expect(ev.isValid).toBe(false);
+    expect(ev.evaluate().operator).toBe('Error');
+    expect(ev.N().operator).toBe('Error');
+    // A complex value that ARRIVES after boxing — a wide `number` symbol,
+    // valueless when the application is created (the type admits reals,
+    // so boxing admits it), assigned `i` afterwards — is refuted by the
+    // dispatch-time conformance re-test instead: the same error, at
+    // evaluation. (A value held at boxing time is admission evidence, and
+    // a held `i` is rejected at creation like the literal.)
+    const e2 = new ComputeEngine();
+    e2.declare('zc', 'number');
+    const held = e2.box(['Arctan2', 'zc', 2]);
+    expect(held.isValid).toBe(true);
+    e2.assign('zc', e2.I);
+    expect(held.evaluate().operator).toBe('Error');
+    expect(held.N().operator).toBe('Error');
   });
 });
 

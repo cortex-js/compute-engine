@@ -366,9 +366,25 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
         };
     }
 
+    // An index of 0 has no value: `Root(x, 0)` is `x^(1/0) = x^~oo`, which
+    // the evaluate route answers with a violated-precondition Error. This
+    // rule declines — the evaluate route owns the error (it used to
+    // rewrite to NaN).
+    if (rootIndex.isSame(0)) return undefined;
+
     // Let exact numeric root evaluation expose perfect-power structure during
-    // simplify as well as evaluate (`Root(4,3) -> 2^(2/3)`).
-    if (isNumber(arg) && rootIndex.isInteger === true) {
+    // simplify as well as evaluate (`Root(4,3) -> 2^(2/3)`). An INFINITE
+    // literal operand takes the same delegation: `Root(x, n)` is
+    // `Power(x, 1/n)` at every point (ruled 2026-09-01), and the evaluate
+    // route folds those exact values (`Root(2, ±∞) = 1`, `Root(0, +∞) =
+    // 0^0 = NaN`, `Root(+∞, +∞) = NaN`, `Root(~oo, 3) = ~oo`) — the
+    // hand-written arms this rule used to keep for them had drifted.
+    if (
+      isNumber(arg) &&
+      (rootIndex.isInteger === true ||
+        (isNumber(rootIndex) &&
+          (arg.isFinite === false || rootIndex.isFinite === false)))
+    ) {
       const evaluated = x.evaluate();
       if (!evaluated.isSame(x))
         return {
@@ -378,17 +394,17 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
         };
     }
 
-    // Edge case: 0th root is undefined -> NaN
-    if (rootIndex.isSame(0)) {
-      return { value: ce.NaN, because: 'root(x, 0) -> NaN' };
-    }
-
-    // Edge case: root(0, n)
+    // Edge case: root(0, n) — a positive index gives 0; a negative one is
+    // the pole `0^(−1/n) = ~oo` (the evaluate route's value; this arm
+    // used to say NaN); an index of unknown sign declines.
     if (arg.isSame(0)) {
       if (rootIndex.isPositive === true) {
         return { value: ce.Zero, because: 'root(0, n) -> 0 when n > 0' };
       }
-      return { value: ce.NaN, because: 'root(0, n) -> NaN when n <= 0' };
+      if (rootIndex.isNegative === true) {
+        return { value: ce.ComplexInfinity, because: 'root(0, n) -> ~oo when n < 0' };
+      }
+      return undefined;
     }
 
     // Edge case: root(1, n) = 1 for all nonzero n

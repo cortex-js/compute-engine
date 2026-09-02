@@ -6,6 +6,7 @@ import {
   nonNumericOperandError,
 } from '../boxed-expression/validate.js';
 import {
+  arctan2AtInfinity,
   constructibleValues,
   evalTrig,
   halfTurnAngle,
@@ -457,7 +458,19 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q2257242',
       complexity: 5200,
       broadcastable: true,
-      signature: '(number) -> number',
+      // The carrier is the finite complex numbers and the signed
+      // infinities (`arctan(±∞) = ±π/2`). `~oo` is outside it: the two
+      // real approaches disagree (`+π/2` against `−π/2`), so there is no
+      // value at the single point at infinity — the same analysis as
+      // `Arccot` (2026-09-01). This operator has no `canonical` handler,
+      // so boxing validation enforces the carrier: `Arctan(~oo)` is an
+      // invalid expression at creation. The logarithmic singularities
+      // `arctan(±i)` are in-carrier finite points valued `~oo`. `NaN`
+      // propagates (explicit: the carrier is not a subtype of `complex`).
+      // The result stays the wide `number` (a complex argument gives a
+      // complex value; the type handler carries the per-call sharpness).
+      signature: '(complex | signed_infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: (ops) => elementaryFunctionTypeOnTypes('Arctan', ops),
       // arctan is odd and strictly increasing with arctan(0) = 0, so it
@@ -467,6 +480,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // and returned undefined for every input.)
       sgn: ([x]) => x.sgn,
       evaluate: ([x], { numericApproximation, engine }) => {
+        // arctan(±i) = ~oo: the logarithmic singularities of
+        // `(i/2)·ln((i+z)/(i−z))`, where the modulus grows without bound.
+        // Exact on both routes (`.N()` already answered `~oo`; `evaluate()`
+        // used to stay symbolic). `isSame` compares the exact value — an
+        // exact literal a hair off `i`, such as `(1 − 2⁻⁵⁴)i`, projects to
+        // the machine double `im === 1` but is a finite point.
+        if (isNumber(x) && (x.isSame(engine.I) || x.isSame(engine.I.neg())))
+          return engine.ComplexInfinity;
         // arctan(±∞) = ±π/2 (the horizontal asymptotes). Needed for improper
         // integrals: ∫₀^∞ 1/(1+x²) = arctan(∞) − arctan(0) = π/2. Built
         // from `halfTurnAngle` because the result is an angle in the
@@ -495,7 +516,17 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q776598',
       complexity: 5200,
       broadcastable: true,
-      signature: '(y:number, x: number) -> real',
+      // atan2 is a function of the real plane: each carrier is the reals
+      // and the signed infinities (a point may be at infinity along an
+      // axis or a diagonal). A complex operand has no quadrant and `~oo`
+      // no direction, so both are outside the carrier; this operator has
+      // no `canonical` handler, so boxing validation rejects them at
+      // creation (they used to leave the application inert). `NaN`
+      // propagates (explicit: the carriers are not subtypes of
+      // `complex`). The values at infinity are IEEE `atan2`'s, which the
+      // compiled lane (`Math.atan2`) already answers (ruled 2026-09-01).
+      signature: '(y: real | signed_infinity, x: real | signed_infinity) -> real',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([y, x], { engine: ce, numericApproximation }) => {
@@ -503,12 +534,17 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // operand is not finite, so without this early return it would slip
         // through the isFinite/isPositive guards below (isPositive is
         // undefined for NaN) and be assigned a spurious definite angle.
+        // (The dispatch NaN gate answers this first for a literal NaN; the
+        // guard stays for a held value the gate cannot see.)
         if (y.isNaN === true || x.isNaN === true) return ce.NaN;
 
-        // atan2 is a real-plane function; a non-real (complex) operand has no
-        // well-defined quadrant. Stay symbolic in BOTH paths — otherwise
-        // evaluate() would continue analytically via Arctan (e.g. 0.549i) while
-        // .N()/apply2 silently reads the real part (0), and the two disagree.
+        // A non-real operand is outside the carrier: boxing validation
+        // rejects a literal, and the dispatch-time conformance re-test a
+        // value that arrives later. This guard is the last line — a
+        // complex value that reached the handler would stay symbolic in
+        // BOTH paths rather than let evaluate() continue analytically via
+        // Arctan (e.g. 0.549i) while .N()/apply2 silently reads the real
+        // part (0).
         if ((isNumber(y) && y.im !== 0) || (isNumber(x) && x.im !== 0))
           return undefined;
 
@@ -516,28 +552,26 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // the engine's current `angularUnit`: the numeric path converts via
         // `radiansToAngle`, the exact paths below build on `halfTurnAngle`
         // (π rad / 180 deg / 200 grad / 1/2 turn).
+        const halfTurn = halfTurnAngle(ce);
+
+        // The values at an infinite operand are exact and answer on BOTH
+        // routes (the bignum `atan2` kernel answers NaN at the diagonal
+        // corners): fold them first, numericized under `.N()`.
+        if (y.isFinite === false || x.isFinite === false) {
+          const v = arctan2AtInfinity(y, x, halfTurn, ce);
+          if (v !== undefined) return numericApproximation ? v.N() : v;
+          return undefined;
+        }
+
         if (numericApproximation)
           return radiansToAngle(
             apply2(y, x, Math.atan2, (a, b) => BigDecimal.atan2(a, b))
           );
 
-        const halfTurn = halfTurnAngle(ce);
-
         // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
         // Three-valued discipline throughout: only act on an === true / ===
         // false sign, never on an undefined one (which stays symbolic).
-        if (y.isFinite === false && x.isFinite === false) return ce.NaN;
         if (y.isSame(0) && x.isSame(0)) return ce.Zero;
-        if (x.isFinite === false) {
-          if (x.isPositive === true) return ce.Zero;
-          if (x.isNegative === true) return halfTurn;
-          return undefined;
-        }
-        if (y.isFinite === false) {
-          if (y.isPositive === true) return halfTurn.div(2);
-          if (y.isNegative === true) return halfTurn.div(-2);
-          return undefined;
-        }
         if (y.isSame(0)) {
           if (x.isPositive === true) return ce.Zero;
           if (x.isNegative === true) return halfTurn;

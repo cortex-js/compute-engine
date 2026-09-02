@@ -378,9 +378,15 @@ describe('Canonicalization: Inverse Hyperbolic Trig and Infinity', () => {
 // ============================================================
 
 describe('Rules: Roots', () => {
-  test('root(0)(2) = NaN', () => checkSimplify('\\sqrt[0]{2}', NaN));
+  // `Root(x, n)` is `Power(x, 1/n)` at every point (ruled 2026-09-01): an
+  // index of 0 is `x^~oo`, an Error under evaluate() — simplify DECLINES
+  // (it used to rewrite to NaN) — and `Root(0, −π) = 0^(−1/π)` is the
+  // pole `~oo` (it used to rewrite to NaN).
+  test('root(0)(2) declines (evaluate answers the precondition error)', () =>
+    checkSimplify('\\sqrt[0]{2}', '\\sqrt[0]{2}'));
   test('root(pi)(0) = 0', () => checkSimplify('\\sqrt[\\pi]{0}', 0));
-  test('root(-pi)(0) = NaN', () => checkSimplify('\\sqrt[-\\pi]{0}', NaN));
+  test('root(-pi)(0) = ~oo', () =>
+    checkSimplify('\\sqrt[-\\pi]{0}', '\\tilde\\infty'));
   test('root(pi)(1) = 1', () => checkSimplify('\\sqrt[\\pi]{1}', 1));
   test('root(-pi)(1) = 1', () => checkSimplify('\\sqrt[-\\pi]{1}', 1));
 });
@@ -585,9 +591,15 @@ describe('Rules: Log', () => {
     checkSimplify('\\log_c(y/c^x)', '\\log_c(y)-x'));
   test('log_c(c) = 1', () => checkSimplify('\\log_c(c)', 1));
   test('log_c(c^x) = x', () => checkSimplify('\\log_c(c^x)', 'x'));
-  test('log_c(0) = NaN', () => checkSimplify('\\log_c(0)', NaN));
-  test('log_1(3) = NaN', () =>
-    checkSimplify('\\log_1(3)', '\\operatorname{NaN}'));
+  // `Log(x, b)` is `Ln(x) / Ln(b)` at every point (ruled 2026-09-01):
+  // `Log(0, c)` with a SYMBOLIC base has no single value (`−∞` for
+  // `c > 1`, `+∞` for `0 < c < 1`, `~oo` for a complex `c`), so simplify
+  // declines (it used to rewrite to NaN); `Log(3, 1) = ln 3 / 0 = ~oo`
+  // (it used to rewrite to NaN).
+  test('log_c(0) declines for a symbolic base', () =>
+    checkSimplify('\\log_c(0)', '\\log_{c}(0)'));
+  test('log_1(3) = ~oo', () =>
+    checkSimplify('\\log_1(3)', '\\tilde\\infty'));
   test('log_2(x)-log_2(xy) = -log_2(y)', () =>
     checkSimplify('\\log_2(x)-\\log_2(xy)', '-\\log_2(y)'));
   test('3^{log_3(x)+2} = 9x', () => checkSimplify('3^{\\log_3(x)+2}', '9x'));

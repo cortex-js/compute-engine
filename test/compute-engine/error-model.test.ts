@@ -967,7 +967,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(ce2.box(['LessEqual', 'NaN', 1]).evaluate().symbol).toBe('False');
   });
 
-  test('the complex-extension family: precise carriers, ~oo uniformly off-carrier', () => {
+  test('the complex-extension family: precise carriers; ~oo errors where there is no value, folds where there is', () => {
     // Phase F flip (ruled 2026-08-31): `Sqrt`/`Ln`/`Erf` declare
     // `(complex | signed_infinity)` (their values at ±∞ are genuine:
     // `√+∞ = +∞`, `Ln +∞ = +∞`, `Erf(±∞) = ±1`), and `Sin`/`Arcsin`
@@ -985,19 +985,30 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).N())).toBe(true);
     }
-    // ~oo: boxing error where validation runs, evaluate-time error
-    // elsewhere — an Error either way, on both routes.
+    // ~oo where the head has NO value (`Erf` oscillates; `Sin`/`Arcsin`
+    // have no limit): boxing error where validation runs, evaluate-time
+    // error elsewhere — an Error either way, on both routes.
     expect(ce2.box(['Erf', 'ComplexInfinity']).isValid).toBe(false);
-    for (const op of ['Sqrt', 'Ln', 'Sin', 'Arcsin']) {
+    for (const op of ['Sin', 'Arcsin']) {
       expect(isTypeError(ce2.box([op, 'ComplexInfinity']).evaluate())).toBe(
         true
       );
       expect(isTypeError(ce2.box([op, 'ComplexInfinity']).N())).toBe(true);
     }
-    // `Ln(~oo)` used to DIVERGE between routes (evaluate → NaN,
-    // N → an arbitrary ∞ + iπ/4); both routes agree on the error now
-    // (covered by the loop above — this comment records why the pin
-    // exists).
+    // ~oo where the head HAS a value: `√(~oo) = ~oo` and `Ln(~oo) = ~oo`
+    // — the modulus grows without bound in every direction of approach
+    // (ruled 2026-09-01, reversing the 2026-08-31 uniformity choice that
+    // made them errors; the same rule gives `Power(~oo, 1/2) = ~oo`).
+    // `Ln(~oo)` used to DIVERGE between routes (evaluate → NaN, N → an
+    // arbitrary ∞ + iπ/4); both routes agree on the value now.
+    for (const op of ['Sqrt', 'Ln']) {
+      expect(
+        ce2.box([op, 'ComplexInfinity']).evaluate().isSame(ce2.ComplexInfinity)
+      ).toBe(true);
+      expect(
+        ce2.box([op, 'ComplexInfinity']).N().isSame(ce2.ComplexInfinity)
+      ).toBe(true);
+    }
     // Sin/Arcsin at ±∞: no value, no limit → error (was
     // symbolic-then-NaN).
     for (const op of ['Sin', 'Arcsin']) {
@@ -1312,11 +1323,158 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
 
     // The simplify route DECLINES at the off-carrier exponent (the
     // evaluate route owns the error) — the same route-agreement
-    // convention as the trig heads. `Sqrt`/`Ln`'s own simplify twins,
-    // which still rewrote `~oo` to NaN, were fixed with this batch.
+    // convention as the trig heads. `Sqrt`/`Ln` FOLD `~oo` under
+    // simplify, to the same `~oo` their evaluate route answers (ruled
+    // 2026-09-01; between the Power flip and that ruling their simplify
+    // twins declined).
     expect(ce2.box(['Power', 2, COO]).simplify().operator).toBe('Power');
-    expect(ce2.box(['Sqrt', COO]).simplify().operator).toBe('Sqrt');
-    expect(ce2.box(['Ln', COO]).simplify().operator).toBe('Ln');
+    expect(ce2.box(['Sqrt', COO]).simplify().isSame(ce2.ComplexInfinity)).toBe(true);
+    expect(ce2.box(['Ln', COO]).simplify().isSame(ce2.ComplexInfinity)).toBe(true);
+  });
+
+  test('the elementary remainder: Abs, Log, Arctan, Arctan2, Root declare their domains', () => {
+    // Signature flips of 2026-09-01, with four rulings taken first:
+    // (1) the modulus rule admits `~oo` wherever the modulus is infinite in
+    // every direction — `√(~oo) = ∛(~oo) = ln(~oo) = ~oo`; (2) `Log(x, b)`
+    // IS `Ln(x)/Ln(b)` at every point; (3) `Root(x, n)` IS `Power(x, 1/n)`
+    // at every point; (4) `Arctan2` takes IEEE `atan2`'s values at the
+    // infinite corners. Every pin below holds on evaluate() AND N(); the
+    // simplify route agrees where noted.
+    const ce2 = new ComputeEngine();
+    const POS = 'PositiveInfinity';
+    const NEG = 'NegativeInfinity';
+    const COO = 'ComplexInfinity';
+    const both = (expr: any, check: (v: any) => boolean) => {
+      expect(check(ce2.box(expr).evaluate())).toBe(true);
+      expect(check(ce2.box(expr).N())).toBe(true);
+    };
+    const isCoo = (v: any) => v.isSame(ce2.ComplexInfinity);
+    const isNaNv = (v: any) => isNaNValue(ce2, v);
+    const is = (n: any) => (v: any) => v.isSame(n);
+
+    // Abs: every number except NaN is in the carrier; the modulus of every
+    // infinity is +∞; NaN propagates.
+    both(['Abs', COO], is(ce2.PositiveInfinity));
+    both(['Abs', NEG], is(ce2.PositiveInfinity));
+    both(['Abs', 'NaN'], isNaNv);
+
+    // Sqrt / Ln at ~oo: values now (they were errors under the 2026-08-31
+    // uniformity choice); `Ln(+∞)` folds under evaluate() (it used to stay
+    // symbolic while N() answered +∞).
+    both(['Sqrt', COO], isCoo);
+    both(['Ln', COO], isCoo);
+    both(['Ln', POS], is(ce2.PositiveInfinity));
+    expect(ce2.box(['Ln', COO]).simplify().isSame(ce2.ComplexInfinity)).toBe(true);
+
+    // Log(x, b) = Ln(x)/Ln(b): the quotient rule at every exceptional
+    // point, identical on all three routes (they disagreed at most of
+    // these before: e.g. `Log(8, 1)` was symbolic / +∞ / NaN).
+    const logRows: Array<[any, any, (v: any) => boolean]> = [
+      [8, 1, isCoo], // ln 8 / 0
+      [8, 0, is(0)], // ln 8 / (−∞)
+      [8, POS, is(0)],
+      [8, NEG, is(0)],
+      [8, COO, is(0)],
+      [0, ['Rational', 1, 2], is(ce2.PositiveInfinity)], // (−∞)/(−ln 2); was −∞
+      [POS, 2, is(ce2.PositiveInfinity)],
+      [POS, ['Rational', 1, 2], is(ce2.NegativeInfinity)],
+      [POS, POS, isNaNv], // ∞/∞; was 1
+      [0, 0, isNaNv], // (−∞)/(−∞); was −∞
+      [1, 1, isNaNv], // 0/0
+      [COO, 2, isCoo],
+      [8, 'NaN', isNaNv],
+    ];
+    for (const [x, b, check] of logRows) {
+      both(['Log', x, b], check);
+      expect(check(ce2.box(['Log', x, b]).simplify())).toBe(true);
+    }
+    // A negative base is a finite complex quotient (N() used to answer NaN).
+    const negBase = ce2.box(['Log', 8, -2]).N();
+    expect(negBase.re).toBeCloseTo(0.13926097, 6);
+    expect(negBase.im).toBeCloseTo(-0.63118087, 6);
+    // `Log(−∞, b)` follows `Ln(−∞)`: symbolic under evaluate(), the machine
+    // complex `∞ + i·π/ln b` under N() (it used to answer `~oo`).
+    expect(ce2.box(['Log', NEG, 10]).evaluate().operator).toBe('Log');
+    const negArg = ce2.box(['Log', NEG, 10]).N();
+    expect(negArg.re).toBe(Infinity);
+    expect(negArg.im).toBeCloseTo(Math.PI / Math.LN10, 10);
+    // The Log aliases canonicalize to Log and inherit the values.
+    both(['Log2', COO], isCoo);
+    both(['Lg', POS], is(ce2.PositiveInfinity));
+
+    // Arctan: `~oo` has no value (the branch ends ±π/2 disagree) and is
+    // rejected at BOXING (no canonical handler); `arctan(±i) = ~oo` folds
+    // under evaluate() (it used to stay symbolic while N() answered ~oo).
+    expect(ce2.box(['Arctan', COO]).isValid).toBe(false);
+    both(['Arctan', 'ImaginaryUnit'], isCoo);
+    both(['Arctan', ['Negate', 'ImaginaryUnit']], isCoo);
+    both(['Arctan', 'NaN'], isNaNv);
+
+    // Arctan2: the IEEE corners (were NaN), the `x = −∞` sign (evaluate()
+    // answered π for a negative y), `~oo`/complex rejected at boxing,
+    // NaN propagates. Values are angles in the current unit.
+    const angle = (expr: any, exact: any, radians: number) => {
+      expect(ce2.box(expr).evaluate().isSame(exact)).toBe(true);
+      expect(ce2.box(expr).N().re).toBeCloseTo(radians, 12);
+    };
+    angle(['Arctan2', POS, POS], ce2.Pi.div(4), Math.PI / 4);
+    angle(['Arctan2', POS, NEG], ce2.Pi.mul(3).div(4), (3 * Math.PI) / 4);
+    angle(['Arctan2', NEG, POS], ce2.Pi.div(-4), -Math.PI / 4);
+    angle(['Arctan2', NEG, NEG], ce2.Pi.mul(-3).div(4), (-3 * Math.PI) / 4);
+    angle(['Arctan2', -1, NEG], ce2.Pi.neg(), -Math.PI);
+    angle(['Arctan2', 0, NEG], ce2.Pi, Math.PI);
+    expect(ce2.box(['Arctan2', POS, NEG]).simplify().isSame(ce2.Pi.mul(3).div(4))).toBe(true);
+    expect(ce2.box(['Arctan2', 1, COO]).isValid).toBe(false);
+    expect(ce2.box(['Arctan2', COO, 1]).isValid).toBe(false);
+    both(['Arctan2', 'NaN', POS], isNaNv);
+    const deg = new ComputeEngine();
+    deg.angularUnit = 'deg';
+    expect(deg.box(['Arctan2', POS, NEG]).evaluate().isSame(135)).toBe(true);
+    expect(deg.box(['Arctan2', POS, NEG]).simplify().isSame(135)).toBe(true);
+    expect(deg.box(['Arctan2', -1, NEG]).simplify().isSame(-180)).toBe(true);
+
+    // Root(x, n) = Power(x, 1/n): index 0 is `x^~oo`, a violated
+    // precondition (an Error on both routes; simplify declines); an
+    // infinite index is `x^0`; an infinite radicand takes Power's arms.
+    both(['Root', 2, 0], (v) => v.operator === 'Error');
+    expect(ce2.box(['Root', 2, 0]).simplify().operator).toBe('Root');
+    both(['Root', 2, POS], is(1));
+    both(['Root', 2, COO], is(1));
+    both(['Root', 0, POS], isNaNv); // 0^0; N() used to answer 1
+    both(['Root', POS, POS], isNaNv); // ∞^0
+    both(['Root', POS, 3], is(ce2.PositiveInfinity)); // used to stay symbolic
+    both(['Root', NEG, 3], is(ce2.NegativeInfinity));
+    both(['Root', COO, 3], isCoo); // was NaN
+    both(['Root', COO, -2], is(0));
+    both(['Root', 0, -2], isCoo);
+    both(['Root', 2, ['Rational', 1, 2]], is(4)); // 2^2; used to stay symbolic
+    both(['Root', 'NaN', 2], isNaNv);
+    both(['Root', 2, 'NaN'], isNaNv);
+    expect(ce2.box(['Root', 0, POS]).simplify().isSame(ce2.NaN)).toBe(true);
+
+    // An "anonymous" infinity — a complex literal with an infinite
+    // component (`∞ + i`), a member of the `infinity` type that neither
+    // `isInfinity` nor `isFinite` reports — takes the same rules: its
+    // modulus is infinite. A finite bignum beyond the double range
+    // (`10^1000`) is NOT one, although its machine projection is
+    // `Infinity` (dual-review catch, 2026-09-01).
+    const anon = ['Complex', POS, 1];
+    both(['Sqrt', anon], is(ce2.PositiveInfinity));
+    both(['Sqrt', ['Complex', NEG, 1]], isCoo);
+    both(['Log', anon, POS], isNaNv); // ∞/∞
+    const huge = ['Power', 10, 1000];
+    expect(ce2.box(['Log', NEG, huge]).N().im).toBeCloseTo(
+      Math.PI / (1000 * Math.LN10),
+      12
+    );
+    expect(ce2.box(['Sqrt', huge]).evaluate().isSame(ce2.box(['Power', 10, 500]).evaluate())).toBe(true);
+    // The exact `i` folds; an exact value a hair off `i` — which projects
+    // to the machine double `im === 1` — is a finite point.
+    expect(
+      ce2
+        .box(['Arctan', ['Complex', 0, ['Subtract', 1, ['Power', 2, -54]]]])
+        .evaluate().operator
+    ).toBe('Arctan');
   });
 
   test('compile(Heaviside)(NaN) agrees with the interpreter now', () => {

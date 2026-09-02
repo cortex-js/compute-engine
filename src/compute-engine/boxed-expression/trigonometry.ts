@@ -850,3 +850,47 @@ function quadrant(theta: Expression): [number | undefined, number | undefined] {
   // Use Math.floor to determine the quadrant
   return [Math.floor(normalizedTheta / (Math.PI / 2)) + 1, undefined];
 }
+
+/**
+ * `Arctan2(y, x)` with at least one INFINITE operand — the IEEE `atan2`
+ * values (ruled 2026-09-01), in the engine's current angular unit
+ * (`halfTurn` is π rad / 180 deg / 200 grad / 1/2 turn):
+ *
+ * - both infinite: the diagonal corners `(+∞, +∞) = π/4`,
+ *   `(+∞, −∞) = 3π/4`, `(−∞, +∞) = −π/4`, `(−∞, −∞) = −3π/4`;
+ * - `x = +∞`: 0; `x = −∞`: `π` for `y ≥ 0`, `−π` for `y < 0`;
+ * - `y = ±∞` with a finite `x`: `±π/2`.
+ *
+ * Three-valued sign discipline: an operand whose sign is not proven
+ * (`undefined`) leaves the application symbolic. Only the signed
+ * infinities reach here — `~oo` is outside the carrier.
+ */
+export function arctan2AtInfinity(
+  y: Expression,
+  x: Expression,
+  halfTurn: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  const sign = (v: Expression): 1 | -1 | 0 =>
+    v.isPositive === true ? 1 : v.isNegative === true ? -1 : 0;
+  if (y.isFinite === false && x.isFinite === false) {
+    const ySign = sign(y);
+    const xSign = sign(x);
+    if (ySign === 0 || xSign === 0) return undefined;
+    const quarter = halfTurn.div(4);
+    const v = xSign > 0 ? quarter : quarter.mul(3);
+    return ySign > 0 ? v : v.neg();
+  }
+  if (x.isFinite === false) {
+    if (x.isPositive === true) return ce.Zero;
+    if (x.isNegative === true) {
+      if (y.isNegative === true) return halfTurn.neg();
+      if (y.isNonNegative === true) return halfTurn;
+    }
+    return undefined;
+  }
+  // `y = ±∞`, `x` finite.
+  if (y.isPositive === true) return halfTurn.div(2);
+  if (y.isNegative === true) return halfTurn.div(-2);
+  return undefined;
+}

@@ -2928,7 +2928,18 @@ function makeNumericFunction(
       // Ln(1) -> 0, Log(1) -> 0 — literal only: `.isSame(1)` follows symbol
       // value bindings, and a mutable symbol's transient value must not fold
       // into canonical structure (`Ln(x)` while `x` holds 1 stays `Ln(x)`).
-      if (isNumber(ops[0]) && ops[0].isSame(1)) return ce.Zero;
+      // Not for a literal base of 1 or NaN: `Log(1, 1)` is the quotient
+      // `0/0 = NaN` and `Log(1, NaN)` propagates the NaN — both are the
+      // evaluate route's answers (`logarithmAtExceptionalPoint`). A
+      // SYMBOLIC base does fold: `Log(1, b) = 0` is the generic-point
+      // convention, the same one that folds `1^x` to 1 without assuming
+      // the exceptional exponent — the value `b` may later take is not
+      // assumed to be 1.
+      const base = ops[1];
+      const baseIsOneOrNaN =
+        base !== undefined && isNumber(base) && (base.isSame(1) || base.isNaN);
+      if (isNumber(ops[0]) && ops[0].isSame(1) && !baseIsOneOrNaN)
+        return ce.Zero;
       // Ln(a) -> Ln(a), Log(a) -> Log(a)
       if (ops.length === 1)
         return new BoxedFunction(ce, name, ops, { metadata, canonical: true });

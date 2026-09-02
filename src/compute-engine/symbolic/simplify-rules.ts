@@ -40,6 +40,10 @@ import {
 } from './simplify-abs.js';
 import { simplifyInfinity } from './simplify-infinity.js';
 import { simplifyLog } from './simplify-log.js';
+import {
+  arctan2AtInfinity,
+  halfTurnAngle,
+} from '../boxed-expression/trigonometry.js';
 import { simplifyPower } from './simplify-power.js';
 import { simplifyTrig } from './simplify-trig.js';
 import { simplifyHyperbolic } from './simplify-hyperbolic.js';
@@ -578,17 +582,6 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!isNumber(x.op1)) return undefined;
 
     if (x.operator === 'Sqrt') {
-      // A `~oo` operand is outside `Sqrt`'s declared domain (ruled
-      // 2026-08-31), and the evaluate route owns the incompatible-type
-      // error — so this rule DECLINES rather than rewrite to NaN (the
-      // `.sqrt()` method's answer). Same route-agreement convention as
-      // the trigonometric heads.
-      if (
-        x.op1.isInfinity === true &&
-        x.op1.isPositive !== true &&
-        x.op1.isNegative !== true
-      )
-        return undefined;
       // sqrt(-10) -> i*sqrt(10)
       // Canonicalization already folds Sqrt of the (positive) numeric operand
       // — Sqrt(4)→2, Sqrt(12)→2√3, Sqrt(10)→√10 — so the canonical Multiply is
@@ -657,17 +650,6 @@ export const SIMPLIFY_RULES: Rule[] = [
   (x): RuleStep | undefined => {
     if (!isFunction(x)) return undefined;
     if (x.operator === 'Ln') {
-      // A `~oo` operand is outside `Ln`'s declared domain (ruled
-      // 2026-08-31), and the evaluate route owns the incompatible-type
-      // error — so this rule DECLINES rather than rewrite to NaN (the
-      // `.ln()` method's answer). Same route-agreement convention as the
-      // trigonometric heads.
-      if (
-        x.op1.isInfinity === true &&
-        x.op1.isPositive !== true &&
-        x.op1.isNegative !== true
-      )
-        return undefined;
       // Skip ln of non-integer rationals — simplifyLog decomposes ln(p/q) → ln(p) - ln(q)
       if (x.op1.operator === 'Rational' && x.op1.isInteger === false)
         return undefined;
@@ -877,33 +859,33 @@ export const SIMPLIFY_RULES: Rule[] = [
     if ((isNumber(y) && y.im !== 0) || (isNumber(x) && x.im !== 0))
       return undefined;
 
-    if (y.isFinite === false && x.isFinite === false)
-      return { value: ce.NaN, because: 'arctan2' };
+    // Every angle below is built from `halfTurnAngle` — π rad / 180 deg /
+    // 200 grad / 1/2 turn — so it is in the engine's current `angularUnit`,
+    // exactly as the evaluate handler's values are (a raw `ce.Pi` answered
+    // radians in degree mode).
+    const halfTurn = halfTurnAngle(ce);
+
+    // An infinite operand: the IEEE `atan2` values, from the SAME helper
+    // the evaluate handler uses (`arctan2AtInfinity`, trigonometry.ts) —
+    // one table, no drift between the routes. It declines when a needed
+    // sign is not proven.
+    if (y.isFinite === false || x.isFinite === false) {
+      const v = arctan2AtInfinity(y, x, halfTurn, ce);
+      return v === undefined ? undefined : { value: v, because: 'arctan2' };
+    }
     if (y.isSame(0) && x.isSame(0))
       return { value: ce.Zero, because: 'arctan2' };
-    if (x.isFinite === false) {
-      if (x.isPositive === true) return { value: ce.Zero, because: 'arctan2' };
-      if (x.isNegative === true) return { value: ce.Pi, because: 'arctan2' };
-      return undefined;
-    }
-    if (y.isFinite === false) {
-      if (y.isPositive === true)
-        return { value: ce.Pi.div(2), because: 'arctan2' };
-      if (y.isNegative === true)
-        return { value: ce.Pi.div(-2), because: 'arctan2' };
-      return undefined;
-    }
     if (y.isSame(0)) {
       if (x.isPositive === true) return { value: ce.Zero, because: 'arctan2' };
-      if (x.isNegative === true) return { value: ce.Pi, because: 'arctan2' };
+      if (x.isNegative === true) return { value: halfTurn, because: 'arctan2' };
       return undefined;
     }
     // x = 0 (and y ≠ 0): the angle is ±π/2
     if (x.isSame(0)) {
       if (y.isPositive === true)
-        return { value: ce.Pi.div(2), because: 'arctan2' };
+        return { value: halfTurn.div(2), because: 'arctan2' };
       if (y.isNegative === true)
-        return { value: ce.Pi.div(-2), because: 'arctan2' };
+        return { value: halfTurn.div(-2), because: 'arctan2' };
       return undefined;
     }
 
@@ -923,9 +905,9 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (x.isNegative === true) {
       const principal = ce.function('Arctan', [y.div(x)]).evaluate();
       if (y.isNonNegative === true)
-        return { value: principal.add(ce.Pi), because: 'arctan2' };
+        return { value: principal.add(halfTurn), because: 'arctan2' };
       if (y.isNegative === true)
-        return { value: principal.sub(ce.Pi), because: 'arctan2' };
+        return { value: principal.sub(halfTurn), because: 'arctan2' };
     }
     // Sign of x (or of y, when x < 0) is indeterminate: leave as Arctan2.
     return undefined;

@@ -66,6 +66,10 @@ import type {
   NumberLiteralInterface,
 } from '../global-types.js';
 import { isNumber, isSymbol } from './type-guards.js';
+import {
+  hasInfiniteComponent,
+  logarithmAtExceptionalPoint,
+} from './logarithm.js';
 
 /** Is the exact rational `r` equal to the double `re`? Exact: the double is
  * decomposed into its dyadic fraction (power-of-two scaling of a double is
@@ -554,6 +558,27 @@ export class BoxedNumber
 
   sqrt(): Expression {
     const ce = this.engine;
+    // Non-finite radicands, decided by the modulus (ruled 2026-09-01):
+    // `√(+∞) = +∞`; `√(−∞) = i·∞`, the direction-less `~oo`; and
+    // `√(~oo) = ~oo` — the modulus grows without bound in every direction
+    // of approach, so the square root has a genuine value at the point at
+    // infinity (the value `Power(~oo, 1/2)` already answers). `NaN`
+    // propagates. The generic numeric-value `sqrt` below answered NaN for
+    // `~oo`.
+    if (this.isNaN) return this;
+    if (this.isInfinity === true)
+      return this.isPositive === true ? this : ce.ComplexInfinity;
+    // An "anonymous" infinity — a complex literal with an infinite
+    // component (`∞ + i`), a member of the `infinity` type whose
+    // `isInfinity` is false: its square root has infinite modulus and half
+    // its direction, so `+∞` when the value points along +∞ (a positive
+    // infinite real part with a finite imaginary part) and the
+    // direction-less `~oo` otherwise. The generic complex kernel below
+    // computes `∞ − ∞` for it and answers NaN.
+    if (hasInfiniteComponent(this._value))
+      return this.re === Infinity && Number.isFinite(this.im)
+        ? ce.PositiveInfinity
+        : ce.ComplexInfinity;
     // @fastpath
     if (typeof this._value === 'number') {
       const v = this._value;
@@ -609,13 +634,14 @@ export class BoxedNumber
     const ce = this.engine;
     const base = semiBase ? ce.expr(semiBase) : undefined;
 
-    // Mathematica returns `Log[0]` as `-∞`
-    if (this.isSame(0)) return ce.NegativeInfinity;
-
-    // log_b(1) = 0 and ln(1) = 0. (Previously this fell through to the numeric
-    // path, which returned an exact 0 only by accident; the exact reduction
-    // must be explicit now that the fallback stays symbolic.)
-    if (this.isSame(1)) return ce.Zero;
+    // The exceptional points — 0, 1, the infinities and NaN, in the
+    // argument or the base — follow the quotient `Ln(x) / Ln(base)` under
+    // extended arithmetic (`logarithmAtExceptionalPoint`): `ln 0 = −∞`,
+    // `ln 1 = 0`, `Log(8, 1) = ~oo`, `Log(0, 1/2) = +∞`, and so on. The one
+    // value with no exact spelling, `Ln(−∞) = ∞ + iπ`, is left to the
+    // symbolic form below (`.N()` numericizes it).
+    const special = logarithmAtExceptionalPoint(ce, this, base, false);
+    if (special !== undefined) return special;
 
     if (base && this.isSame(base)) return ce.One;
     if (

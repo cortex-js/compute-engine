@@ -5,6 +5,7 @@ import {
   onBranchCut,
 } from '../function-properties/index.js';
 import { toBigint } from '../boxed-expression/numerics.js';
+import { logarithmAtExceptionalPoint } from '../boxed-expression/logarithm.js';
 
 /**
  * Logarithm simplification rules consolidated from simplify-rules.ts.
@@ -76,18 +77,16 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
     const arg = x.op1;
     if (!arg) return undefined;
 
-    // ln(0) -> -inf (matches `evaluate()`/`BoxedNumber.ln()`, and Mathematica's
-    // `Log[0] == -Infinity`). This branch is currently shadowed by the
-    // unconditional "Ln, Log (basic evaluation)" rule in simplify-rules.ts,
-    // which calls `.ln()` and already reduces `Ln(0)` before this one runs —
-    // but keep this in sync with `evaluate()` in case that ordering changes.
-    if (arg.isSame(0)) {
-      return { value: ce.NegativeInfinity, because: 'ln(0) -> -inf' };
-    }
-
-    // ln(+inf) -> +inf
-    if (arg.isInfinity === true && arg.isPositive === true) {
-      return { value: ce.PositiveInfinity, because: 'ln(+inf) -> +inf' };
+    // ln(0) = −∞, ln(+∞) = +∞, ln(~oo) = ~oo, ln(NaN) = NaN: the same values
+    // as the evaluate route (`logarithmAtExceptionalPoint`). This branch is
+    // currently shadowed by the unconditional "Ln, Log (basic evaluation)"
+    // rule in simplify-rules.ts, which calls `.ln()` and reduces these
+    // before this one runs — but keep it in sync with `evaluate()` in case
+    // that ordering changes. `ln(−∞)` has no exact spelling and declines.
+    {
+      const special = logarithmAtExceptionalPoint(ce, arg, undefined, false);
+      if (special !== undefined)
+        return { value: special, because: 'ln at an exceptional point' };
     }
 
     // ln(p/q) -> ln(p) - ln(q) for positive rational p/q (not integer)
@@ -230,29 +229,20 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
     // Default base is 10 if not specified (base may be Nothing symbol)
     const logBase = !base || sym(base) === 'Nothing' ? ce.number(10) : base;
 
-    // log_c(x) -> NaN when c is 0 or 1
-    if (logBase.isSame(0) || logBase.isSame(1)) {
-      return { value: ce.NaN, because: 'log base 0 or 1 -> NaN' };
+    // The exceptional points — 0, 1, the infinities and NaN, in the
+    // argument or the base — take the same values as the evaluate route:
+    // the quotient rule of `logarithmAtExceptionalPoint`, the single source
+    // of truth (`Log(8, 1) = ~oo`, `Log(8, 0) = 0`, `Log(0, 1/2) = +∞`,
+    // `Log(+∞, +∞) = NaN`, …). This rule used to keep its own table, which
+    // had drifted (base 0 or 1 rewrote to NaN). `Log(−∞, b)` has no exact
+    // spelling and declines here, as it stays symbolic under `evaluate()`.
+    {
+      const special = logarithmAtExceptionalPoint(ce, arg, logBase, false);
+      if (special !== undefined)
+        return { value: special, because: 'log at an exceptional point' };
     }
 
-    // log_c(0) -> -inf when c > 1, +inf when 0 < c < 1, NaN otherwise
-    if (arg.isSame(0)) {
-      if (logBase.isGreater(1) === true) {
-        return {
-          value: ce.NegativeInfinity,
-          because: 'log_c(0) -> -inf when c > 1',
-        };
-      }
-      if (logBase.isPositive === true && logBase.isLess(1) === true) {
-        return {
-          value: ce.PositiveInfinity,
-          because: 'log_c(0) -> +inf when 0 < c < 1',
-        };
-      }
-      return { value: ce.NaN, because: 'log_c(0) -> NaN' };
-    }
-
-    // log_c(c) -> 1 (but not when c is infinity — indeterminate form)
+    // log_c(c) -> 1 (an infinite base was answered above: `∞/∞` is NaN)
     if (arg.isSame(logBase) && logBase.isInfinity !== true) {
       return { value: ce.One, because: 'log_c(c) -> 1' };
     }
@@ -264,48 +254,6 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
         value: ce.One.div(ce._fn('Ln', [logBase])),
         because: 'log_c(e) -> 1/ln(c)',
       };
-    }
-
-    // log_inf(inf) -> NaN (indeterminate form)
-    if (
-      logBase.isInfinity === true &&
-      logBase.isPositive === true &&
-      arg.isInfinity === true
-    ) {
-      return { value: ce.NaN, because: 'log_inf(inf) -> NaN' };
-    }
-
-    // log_inf(x) -> 0 when x is positive, x != 1, and x is finite
-    if (
-      logBase.isInfinity === true &&
-      logBase.isPositive === true &&
-      arg.isPositive === true &&
-      arg.isSame(1) === false &&
-      arg.isFinite === true
-    ) {
-      return { value: ce.Zero, because: 'log_inf(x) -> 0' };
-    }
-
-    // log_c(+inf) patterns (c must be finite)
-    if (
-      arg.isInfinity === true &&
-      arg.isPositive === true &&
-      logBase.isFinite === true
-    ) {
-      // log_c(+inf) -> +inf when c > 1
-      if (logBase.isGreater(1) === true) {
-        return {
-          value: ce.PositiveInfinity,
-          because: 'log_c(+inf) -> +inf when c > 1',
-        };
-      }
-      // log_c(+inf) -> -inf when 0 < c < 1
-      if (logBase.isLess(1) === true && logBase.isPositive === true) {
-        return {
-          value: ce.NegativeInfinity,
-          because: 'log_c(+inf) -> -inf when 0 < c < 1',
-        };
-      }
     }
 
     // log_c(c^x) -> x

@@ -216,8 +216,12 @@ describe('Less(Abs(q), 1)', () => {
     expect(
       ce2.assume(ce2.expr(['Greater', ['Abs', 'r'], 2], { canonical: false }))
     ).toBe('ok');
-    // |r| > 2 says nothing about finiteness: only `number`
-    expect(ce2.expr('r').type.toString()).toBe('number');
+    // |r| > 2 says nothing about finiteness. The use `Abs(r)` infers `r`
+    // from `Abs`'s parameter carrier — `complex | infinity`, every number
+    // except NaN (signature flip of 2026-09-01) — which still admits every
+    // infinity; nothing here narrows to a finite type.
+    expect(ce2.expr('r').type.toString()).toBe('complex | infinity');
+    expect(ce2.expr('r').type.matches('complex')).toBe(false);
   });
 });
 
