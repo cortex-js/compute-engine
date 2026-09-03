@@ -44,7 +44,7 @@ await scenario('hover', undefined, async (c) => {
   const length = await c.hover(URI, 3, 14);
   check(
     'a library function shows its signature and description',
-    length?.contents.value.includes('Length: (any) -> integer') === true &&
+    length?.contents.value.includes('Length: (any) -> infinity | integer') === true &&
       length.contents.value.includes('*function*') &&
       length.contents.value.toLowerCase().includes('number of elements'),
     JSON.stringify(length)
@@ -58,7 +58,7 @@ await scenario('hover', undefined, async (c) => {
   const pi = await c.hover(URI, 3, 34);
   check(
     'a constant shows its type and value',
-    pi?.contents.value.includes('Pi: finite_real') === true &&
+    pi?.contents.value.includes('Pi: real') === true &&
       pi.contents.value.includes('3.14159'),
     JSON.stringify(pi)
   );
@@ -130,7 +130,7 @@ await scenario('signature notes', undefined, async (c) => {
   check(
     'the signature note appears in the hover instead',
     hover?.contents.value.includes(
-      '*note:* `Ln` has signature `(number, base: number?) -> number`'
+      '*note:* `Ln` has signature `(complex | infinity, base: complex | infinity?) -> complex | infinity`'
     ) === true,
     JSON.stringify(hover)
   );
