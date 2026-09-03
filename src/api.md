@@ -1300,17 +1300,17 @@ declare(symbols): IComputeEngine
 
 ####### symbols
 
-###### declare(id, def, scope)
+###### declare(id, type, scope)
 
 ```ts
-declare(id, def, scope?): IComputeEngine
+declare(id, type, scope?): IComputeEngine
 ```
 
 ####### id
 
 `string`
 
-####### def
+####### type
 
   \| `string`
   \| [`AlgebraicType`](#algebraictype)
@@ -1330,134 +1330,24 @@ declare(id, def, scope?): IComputeEngine
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
-  \| `Partial`\<`OnlyFirst`\<[`ValueDefinition`](#valuedefinition), [`BaseDefinition`](#basedefinition) & \{
-  `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
-  `type`:   \| `string`
-     \| [`AlgebraicType`](#algebraictype)
-     \| [`NegationType`](#negationtype)
-     \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
-     \| [`SetType`](#settype)
-     \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
-     \| [`ObjectType`](#objecttype)
-     \| [`DictionaryType`](#dictionarytype)
-     \| [`TupleType`](#tupletype)
-     \| [`SymbolType`](#symboltype)
-     \| [`ExpressionType`](#expressiontype)
-     \| [`NumericType`](#numerictype)
-     \| [`FunctionSignature`](#functionsignature)
-     \| [`ValueType`](#valuetype)
-     \| [`TypeVariable`](#typevariable)
-     \| [`TypeReference`](#typereference)
-     \| [`BoxedType`](#boxedtype);
-  `inferred`: `boolean`;
-  `effectsDeclared`: `boolean`;
-  `value`: ExpressionInput \| ((ce: ComputeEngine) =\> Expression \| null);
-  `eq`: (`a`) => `boolean` \| `undefined`;
-  `neq`: (`a`) => `boolean` \| `undefined`;
-  `cmp`: (`a`) => `"<"` \| `">"` \| `"="` \| `undefined`;
-  `collection`: [`CollectionHandlers`](#collectionhandlers);
-  `subscriptEvaluate`: (`subscript`, `options`) => [`Expression`](#expression-5) \| `undefined`;
- \} & [`OperatorDefinition`](#operatordefinition)\>\>
-  \| `Partial`\<`Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
-  `typeHandlerKind`: `"expressions"`;
-  `type`: [`OperatorTypeHandlerOnExpressions`](#operatortypehandleronexpressions);
- \} & \{
-  `signature`:   \| `string`
-     \| [`AlgebraicType`](#algebraictype)
-     \| [`NegationType`](#negationtype)
-     \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
-     \| [`SetType`](#settype)
-     \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
-     \| [`ObjectType`](#objecttype)
-     \| [`DictionaryType`](#dictionarytype)
-     \| [`TupleType`](#tupletype)
-     \| [`SymbolType`](#symboltype)
-     \| [`ExpressionType`](#expressiontype)
-     \| [`NumericType`](#numerictype)
-     \| [`FunctionSignature`](#functionsignature)
-     \| [`ValueType`](#valuetype)
-     \| [`TypeVariable`](#typevariable)
-     \| [`TypeReference`](#typereference)
-     \| [`BoxedType`](#boxedtype);
-  `inferredSignature`: `boolean`;
-  `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
-  `isPositive`: `boolean`;
-  `isNonNegative`: `boolean`;
-  `isNegative`: `boolean`;
-  `isNonPositive`: `boolean`;
-  `even`: (`ops`, `options`) => `boolean` \| `undefined`;
-  `complexity`: `number`;
-  `canonical`: (`ops`, `options`) => [`Expression`](#expression-5) \| `null`;
-  `evaluate`:   \| [`Expression`](#expression-5)
-     \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
-  `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
-  `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
-  `neq`: (`a`, `b`) => `boolean` \| `undefined`;
-  `collection`: [`CollectionHandlers`](#collectionhandlers);
-  `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
-  `elementCount`: (`expr`) => `number` \| `undefined`;
- \} & \{
-  `holdUntil`: `undefined`;
-  `inferred`: `undefined`;
-  `value`: `undefined`;
-  `cmp`: `undefined`;
-  `subscriptEvaluate`: `undefined`;
- \}\>
-  \| `Partial`\<`Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
-  `typeHandlerKind`: `"types"`;
-  `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
- \} & \{
-  `signature`:   \| `string`
-     \| [`AlgebraicType`](#algebraictype)
-     \| [`NegationType`](#negationtype)
-     \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
-     \| [`SetType`](#settype)
-     \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
-     \| [`ObjectType`](#objecttype)
-     \| [`DictionaryType`](#dictionarytype)
-     \| [`TupleType`](#tupletype)
-     \| [`SymbolType`](#symboltype)
-     \| [`ExpressionType`](#expressiontype)
-     \| [`NumericType`](#numerictype)
-     \| [`FunctionSignature`](#functionsignature)
-     \| [`ValueType`](#valuetype)
-     \| [`TypeVariable`](#typevariable)
-     \| [`TypeReference`](#typereference)
-     \| [`BoxedType`](#boxedtype);
-  `inferredSignature`: `boolean`;
-  `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
-  `isPositive`: `boolean`;
-  `isNonNegative`: `boolean`;
-  `isNegative`: `boolean`;
-  `isNonPositive`: `boolean`;
-  `even`: (`ops`, `options`) => `boolean` \| `undefined`;
-  `complexity`: `number`;
-  `canonical`: (`ops`, `options`) => [`Expression`](#expression-5) \| `null`;
-  `evaluate`:   \| [`Expression`](#expression-5)
-     \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
-  `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
-  `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
-  `neq`: (`a`, `b`) => `boolean` \| `undefined`;
-  `collection`: [`CollectionHandlers`](#collectionhandlers);
-  `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
-  `elementCount`: (`expr`) => `number` \| `undefined`;
- \} & \{
-  `holdUntil`: `undefined`;
-  `inferred`: `undefined`;
-  `value`: `undefined`;
-  `cmp`: `undefined`;
-  `subscriptEvaluate`: `undefined`;
- \}\>
+
+####### scope?
+
+`Scope`
+
+###### declare(id, def, scope)
+
+```ts
+declare(id, def, scope?): IComputeEngine
+```
+
+####### id
+
+`string`
+
+####### def
+
+[`SymbolDefinitionInput`](#symboldefinitioninput)
 
 ####### scope?
 
@@ -1620,7 +1510,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `value`: `undefined`;
   `cmp`: `undefined`;
   `subscriptEvaluate`: `undefined`;
- \}\>
+ \}\> & \{
+  `typeHandlerKind`: `"types"`;
+ \}
+  \| [`BoxedOperatorDefinition`](#boxedoperatordefinition)
 
 ####### arg3?
 
@@ -4062,6 +3955,75 @@ following rules are recommended:
 
 </MemberCard>
 
+<MemberCard>
+
+### PartialSymbolDefinition {#partialsymboldefinition}
+
+```ts
+type PartialSymbolDefinition<T> = T extends {
+  typeHandlerKind: "types";
+ } ? Partial<T> & {
+  typeHandlerKind: "types";
+} : Partial<T>;
+```
+
+`Partial` distributed over the [SymbolDefinition](#symboldefinition) union, except that
+the `typeHandlerKind: 'types'` discriminant stays REQUIRED on its arm.
+A plain `Partial` would make the discriminant optional, at which point an
+object literal with an unannotated `type: (ops) => …` handler matches both
+handler shapes and TypeScript can no longer contextually type the
+handler's parameters — every legacy definition in the library would stop
+type-checking.
+
+#### Type Parameters
+
+• T = [`SymbolDefinition`](#symboldefinition)
+
+</MemberCard>
+
+<MemberCard>
+
+### SymbolDefinitionInput {#symboldefinitioninput}
+
+```ts
+type SymbolDefinitionInput = 
+  | PartialSymbolDefinition
+  | BoxedOperatorDefinition;
+```
+
+A definition as `ce.declare()` accepts it: a partial definition, or the
+boxed operator definition read back from `expr.operatorDefinition`.
+
+A boxed definition records the shape of its `type` handler as the wide
+`'expressions' | 'types'` flag, so it fits neither arm of
+[OperatorTypeHandlerVariant](#operatortypehandlervariant). Admitting it here is what lets an
+operator be re-declared from its existing definition with some handlers
+replaced:
+
+```ts
+const sqrt = ce.expr('Sqrt').operatorDefinition!;
+ce.declare('Sqrt', {
+  ...sqrt,
+  evaluate: (ops, options) => sqrt.evaluate!(ops, options),
+});
+```
+
+The boxed definition's update routine reads `typeHandlerKind` off the
+incoming definition, so the stored `type` handler keeps its shape across
+such a re-declaration.
+
+Limitation of the map form `ce.declare({ f: {…} })`: its entry type also
+admits a `Type` or a type string. Those members have no `typeHandlerKind`
+property, and TypeScript discriminates an object literal that OMITS a
+property only when every union member declares it, so an inline
+`type: (ops) => …` handler without `typeHandlerKind` gets implicitly-`any`
+parameters in that form. State `typeHandlerKind: 'expressions'` next to
+the handler, or annotate its parameters. The two-argument form
+`ce.declare('f', {…})` keeps the type and the definition in separate
+overloads and has no such limit.
+
+</MemberCard>
+
 ### LibraryDefinition {#librarydefinition}
 
 A library bundles symbol/operator definitions with their LaTeX dictionary
@@ -4743,6 +4705,13 @@ type OperatorDefinitionFlags = {
   namedArgumentsRequired: boolean;
   missingBehavior: "reject" | "propagate" | "handle";
   missingStrip: "all" | number[];
+  nanBehavior:   | "reject"
+     | "propagate"
+     | "handle"
+     | ReadonlyArray<"reject" | "propagate" | "handle" | undefined>;
+  partiality: "total" | "may-marker";
+  definedWhen: (ops) => boolean | undefined;
+  requires: (ops) => boolean | undefined;
   associative: boolean;
   commutative: boolean;
   commutativeOrder: ((a, b) => number) | undefined;
@@ -4874,6 +4843,37 @@ when present, otherwise
 `'propagate'` for a declared all-numeric signature and `'pass-through'`
 for everything else. Recomputed from the current signature — never cached
 across a signature mutation.
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.resolvedPartiality {#resolvedpartiality}
+
+```ts
+readonly resolvedPartiality: "total" | "may-marker" | "defined-when";
+```
+
+The *resolved* partiality of the declaration (Contract B): the
+declared `partiality`, `'defined-when'` when a `definedWhen` predicate
+is declared, and the sound `'may-marker'` default when nothing is.
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.isUserFunctionDefinition {#isuserfunctiondefinition}
+
+```ts
+readonly isUserFunctionDefinition: boolean;
+```
+
+True for a USER-DEFINED callable — a lambda, or an unscoped strict
+multi-clause definition. The sanctioned opt-out of the Contract B
+machinery: its own application machinery owns every exceptional
+operand, and the higher-order conservative floor
+(`docs/ERROR-MODEL.md` §4) caps what a consumer may assume about it
+at `may-marker` with unknown NaN behavior.
 
 </MemberCard>
 
@@ -5087,6 +5087,84 @@ selects the positions.
 ####### i
 
 `number`
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.resolvedNanBehaviorAt() {#resolvednanbehaviorat}
+
+```ts
+resolvedNanBehaviorAt(i, armSignature?): "reject" | "propagate" | "handle" | "inert"
+```
+
+The *resolved* NaN policy for parameter position `i` (Contract B,
+`docs/ERROR-MODEL.md` §4). For a user-defined callable the answer is
+always `'inert'` — the higher-order conservative floor, absolute even
+over an explicit declaration (see `isUserFunctionDefinition`).
+Otherwise an explicit `nanBehavior` declaration wins.
+Otherwise, while the slot's declared carrier admits `nan` (bare
+`number`, an inferred signature, a union with `nan`) the answer is
+`'inert'` — `NaN` is an ordinary domain member and the handler owns
+it. For a precise carrier that excludes `nan`, the derived default is
+`'propagate'` when the carrier is a subtype of `complex` that is not a
+subtype of `integer` and the result type is numeric, `'reject'`
+otherwise. Recomputed from the current signature — never cached.
+
+####### i
+
+`number`
+
+####### armSignature?
+
+[`Type`](#type-3)
+
+The resolved overload arm to derive from, when the caller has one:
+per-arm carriers give per-arm derived policies. Explicit
+`nanBehavior` declarations remain operator-level.
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.contractBResultAdjustment() {#contractbresultadjustment}
+
+```ts
+contractBResultAdjustment(ops, armSignature?): 
+  | "none"
+  | "is-nan"
+  | "widen-nan"
+  | "widen-nan-cells"
+  | "widen-marker"
+  | "is-marker"
+```
+
+The Contract B adjustment to a derived application result type for
+these arguments (`docs/ERROR-MODEL.md` §4): `'is-marker'` when the
+declared `definedWhen` is provably false — the value IS the codomain
+marker (§2 rule 4: `NaN` for a numeric codomain, `Missing` for a
+settled non-numeric one); `'widen-marker'` when a DECLARED partiality
+is undischarged (`definedWhen` undecided, or an explicit
+`may-marker`) — every cell of the result gains its marker arm;
+`'is-nan'` when a scalar argument in a `propagate` slot is a proven
+`NaN` — the value of the whole application is `NaN`, whatever the
+codomain's shape; `'widen-nan'` when such an argument may be `NaN` —
+the application gains a top-level `| nan` arm; `'widen-nan-cells'`
+when the NaN evidence rides in the cells of a broadcast lift — the
+lifted result's numeric cells gain `| nan`; `'none'` otherwise. The
+omitted `may-marker` default contributes no arm (see
+the implementation note in `boxed-operator-definition.ts`).
+
+####### ops
+
+readonly [`Expression`](#expression-5)[]
+
+####### armSignature?
+
+[`Type`](#type-3)
+
+The resolved overload arm, when the caller has one — the NaN
+evidence derives per-slot policies from its carriers.
 
 </MemberCard>
 
@@ -10489,17 +10567,17 @@ declare(symbols): IComputeEngine
 
 ####### symbols
 
-###### declare(id, def, scope)
+###### declare(id, type, scope)
 
 ```ts
-declare(id, def, scope?): IComputeEngine
+declare(id, type, scope?): IComputeEngine
 ```
 
 ####### id
 
 `string`
 
-####### def
+####### type
 
   \| `string`
   \| [`AlgebraicType`](#algebraictype)
@@ -10519,134 +10597,24 @@ declare(id, def, scope?): IComputeEngine
   \| [`ValueType`](#valuetype)
   \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
-  \| `Partial`\<`OnlyFirst`\<[`ValueDefinition`](#valuedefinition), [`BaseDefinition`](#basedefinition) & \{
-  `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
-  `type`:   \| `string`
-     \| [`AlgebraicType`](#algebraictype)
-     \| [`NegationType`](#negationtype)
-     \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
-     \| [`SetType`](#settype)
-     \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
-     \| [`ObjectType`](#objecttype)
-     \| [`DictionaryType`](#dictionarytype)
-     \| [`TupleType`](#tupletype)
-     \| [`SymbolType`](#symboltype)
-     \| [`ExpressionType`](#expressiontype)
-     \| [`NumericType`](#numerictype)
-     \| [`FunctionSignature`](#functionsignature)
-     \| [`ValueType`](#valuetype)
-     \| [`TypeVariable`](#typevariable)
-     \| [`TypeReference`](#typereference)
-     \| [`BoxedType`](#boxedtype);
-  `inferred`: `boolean`;
-  `effectsDeclared`: `boolean`;
-  `value`: ExpressionInput \| ((ce: ComputeEngine) =\> Expression \| null);
-  `eq`: (`a`) => `boolean` \| `undefined`;
-  `neq`: (`a`) => `boolean` \| `undefined`;
-  `cmp`: (`a`) => `"<"` \| `">"` \| `"="` \| `undefined`;
-  `collection`: [`CollectionHandlers`](#collectionhandlers);
-  `subscriptEvaluate`: (`subscript`, `options`) => [`Expression`](#expression-5) \| `undefined`;
- \} & [`OperatorDefinition`](#operatordefinition)\>\>
-  \| `Partial`\<`Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
-  `typeHandlerKind`: `"expressions"`;
-  `type`: [`OperatorTypeHandlerOnExpressions`](#operatortypehandleronexpressions);
- \} & \{
-  `signature`:   \| `string`
-     \| [`AlgebraicType`](#algebraictype)
-     \| [`NegationType`](#negationtype)
-     \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
-     \| [`SetType`](#settype)
-     \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
-     \| [`ObjectType`](#objecttype)
-     \| [`DictionaryType`](#dictionarytype)
-     \| [`TupleType`](#tupletype)
-     \| [`SymbolType`](#symboltype)
-     \| [`ExpressionType`](#expressiontype)
-     \| [`NumericType`](#numerictype)
-     \| [`FunctionSignature`](#functionsignature)
-     \| [`ValueType`](#valuetype)
-     \| [`TypeVariable`](#typevariable)
-     \| [`TypeReference`](#typereference)
-     \| [`BoxedType`](#boxedtype);
-  `inferredSignature`: `boolean`;
-  `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
-  `isPositive`: `boolean`;
-  `isNonNegative`: `boolean`;
-  `isNegative`: `boolean`;
-  `isNonPositive`: `boolean`;
-  `even`: (`ops`, `options`) => `boolean` \| `undefined`;
-  `complexity`: `number`;
-  `canonical`: (`ops`, `options`) => [`Expression`](#expression-5) \| `null`;
-  `evaluate`:   \| [`Expression`](#expression-5)
-     \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
-  `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
-  `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
-  `neq`: (`a`, `b`) => `boolean` \| `undefined`;
-  `collection`: [`CollectionHandlers`](#collectionhandlers);
-  `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
-  `elementCount`: (`expr`) => `number` \| `undefined`;
- \} & \{
-  `holdUntil`: `undefined`;
-  `inferred`: `undefined`;
-  `value`: `undefined`;
-  `cmp`: `undefined`;
-  `subscriptEvaluate`: `undefined`;
- \}\>
-  \| `Partial`\<`Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
-  `typeHandlerKind`: `"types"`;
-  `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
- \} & \{
-  `signature`:   \| `string`
-     \| [`AlgebraicType`](#algebraictype)
-     \| [`NegationType`](#negationtype)
-     \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
-     \| [`SetType`](#settype)
-     \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
-     \| [`ObjectType`](#objecttype)
-     \| [`DictionaryType`](#dictionarytype)
-     \| [`TupleType`](#tupletype)
-     \| [`SymbolType`](#symboltype)
-     \| [`ExpressionType`](#expressiontype)
-     \| [`NumericType`](#numerictype)
-     \| [`FunctionSignature`](#functionsignature)
-     \| [`ValueType`](#valuetype)
-     \| [`TypeVariable`](#typevariable)
-     \| [`TypeReference`](#typereference)
-     \| [`BoxedType`](#boxedtype);
-  `inferredSignature`: `boolean`;
-  `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
-  `isPositive`: `boolean`;
-  `isNonNegative`: `boolean`;
-  `isNegative`: `boolean`;
-  `isNonPositive`: `boolean`;
-  `even`: (`ops`, `options`) => `boolean` \| `undefined`;
-  `complexity`: `number`;
-  `canonical`: (`ops`, `options`) => [`Expression`](#expression-5) \| `null`;
-  `evaluate`:   \| [`Expression`](#expression-5)
-     \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
-  `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
-  `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
-  `neq`: (`a`, `b`) => `boolean` \| `undefined`;
-  `collection`: [`CollectionHandlers`](#collectionhandlers);
-  `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
-  `elementCount`: (`expr`) => `number` \| `undefined`;
- \} & \{
-  `holdUntil`: `undefined`;
-  `inferred`: `undefined`;
-  `value`: `undefined`;
-  `cmp`: `undefined`;
-  `subscriptEvaluate`: `undefined`;
- \}\>
+
+####### scope?
+
+`Scope`
+
+###### declare(id, def, scope)
+
+```ts
+declare(id, def, scope?): IComputeEngine
+```
+
+####### id
+
+`string`
+
+####### def
+
+[`SymbolDefinitionInput`](#symboldefinitioninput)
 
 ####### scope?
 
@@ -10809,7 +10777,10 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `value`: `undefined`;
   `cmp`: `undefined`;
   `subscriptEvaluate`: `undefined`;
- \}\>
+ \}\> & \{
+  `typeHandlerKind`: `"types"`;
+ \}
+  \| [`BoxedOperatorDefinition`](#boxedoperatordefinition)
 
 ####### arg3?
 
@@ -15582,10 +15553,10 @@ static number: BoxedType;
 
 <MemberCard>
 
-##### BoxedType.non\_finite\_number {#non_finite_number}
+##### BoxedType.signed\_infinity {#signed_infinity}
 
 ```ts
-static non_finite_number: BoxedType;
+static signed_infinity: BoxedType;
 ```
 
 </MemberCard>
@@ -16336,7 +16307,6 @@ type NumericPrimitiveType =
   | "real"
   | "rational"
   | "integer"
-  | "non_finite_number"
   | "infinity"
   | "nan";
 ```
@@ -16346,12 +16316,12 @@ finite number, a number of infinite magnitude, or the not-a-number marker,
 and no value is two of those — `number = complex ⊔ infinity ⊔ nan` as a
 partition of the values. Every bare name below `complex` contains only
 finite values. A bare `real` result type is therefore a promise of
-finiteness, and the extended real line is written out as
-`real | non_finite_number` — `non_finite_number` being the SIGNED pair
-`+∞`/`−∞`, so the union excludes the unsigned `~∞` that `infinity` would
-bring in. That spelling is shared as the frozen `EXTENDED_REAL_TYPE`
-constant in `common/type/primitive.ts`; use it rather than rebuilding the
-union.
+finiteness, and the extended real line is spelled
+`real | signed_infinity` — `signed_infinity` being the named union of
+the two signed-infinity value types (equivalently `real | +oo | -oo`),
+so it excludes the unsigned `~∞` that `infinity` would bring in. That
+spelling is shared as the frozen `EXTENDED_REAL_TYPE` constant in
+`common/type/primitive.ts`; use it rather than rebuilding the union.
 
 The partition is a statement about values, NOT one the SUBTYPE RELATION
 closes over. `isSubtype('complex | infinity | nan', 'number')` is true, but
@@ -16375,11 +16345,16 @@ not read the `⊔` above as a subtyping identity.
   `+∞` and `−∞`, the unsigned complex infinity `~∞`, and mixed directed
   values such as `∞ + i`. Disjoint from `complex`: an infinity is not a
   finite number.
-- `non_finite_number`: exactly the SIGNED pair `+∞`, `−∞`. It sits under
-  `infinity` alone and is the atom the sign-aware folds (`1/±∞ = 0`)
-  consume; `infinity` itself admits the unsigned `~∞`, which has no sign.
 - `nan`: the not-a-number marker. Its only supertype is `number`, so it is
   disjoint from `complex`, `infinity` and every type below them.
+
+The SIGNED pair `+∞`/`−∞` has no one-word name: spell it `+oo | -oo`
+(the union of the two value types) where the sign-aware guarantee
+matters — the `1/±∞ = 0` folds, the sign-reading gates — and `infinity`
+where any infinite value is acceptable. The former one-word name
+`non_finite_number` was retired 2026-08-31 (ruling L5 executed): the
+name was misleading — `~∞` and `∞ + i` are non-finite numbers, yet
+neither was a member.
 
 RETIRED SPELLINGS. The five names that prefixed a tier with `finite_` are
 no longer members of this union. Each denoted exactly the same set of values
