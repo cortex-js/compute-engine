@@ -1148,8 +1148,17 @@ document's history):
   of an UNKNOWN operand (a free symbol), where the interpreter is Kleene;
   for a NaN VALUE the interpreter's ordered comparison answers `False`
   (IEEE) and `If(NaN > 0, 1, -1)` evaluates to `-1`, so the two lanes
-  disagree at a literal NaN — recorded in `ROADMAP.md` under the
-  undecided-condition items, ruling pending.
+  disagreed at a literal NaN. RULED 2026-09-03 (Arno): the INTERPRETER
+  changes — a NaN operand of a branch condition is undecided, so the
+  `If`/`Which` selects no arm (the comparison itself keeps its IEEE
+  `False` everywhere else); the compiled lane's answer stands. Three
+  companion rulings the same day: the three-valued lowering extends to
+  IMPURE conditions (every leaf bound once — the triple-evaluation reason
+  for the exemption no longer holds under the lazy shape); a repeated
+  vars-object member read inside a guard stays free (a getter with
+  effects is outside the compiled contract); a desugared `while` exit
+  test keeps the no-arm rule (an undecided loop condition runs to the
+  iteration cap).
 - **FIXED 2026-09-02 (ruled the same day): a provably non-boolean
   condition is refused at boxing.** The 2026-08-31 inertness ruling
   removed the host throw that carried the only diagnostic for

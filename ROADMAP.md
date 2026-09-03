@@ -524,7 +524,7 @@ deliberately left out of that change.
 
 ### Open items from the Phase F batches 11, 12, 13 and 14 (2026-09-02)
 
-- **NEEDS A RULING — three defects in the exact numeric layer, measured
+- **RULED 2026-09-03 (Arno): fix all four in one gated round of their own.** The exact numeric layer — measured
   while fixing the distributions' bignum handling (2026-09-02):**
   1. **`ExactNumericValue.lt/lte/gt/gte` compare the DOUBLE projections**
      (`numeric-value/exact-numeric-value.ts`, `return this.re < other.re`),
@@ -557,7 +557,7 @@ deliberately left out of that change.
   the double projection as the exact layer's comparison contract and
   document it.
 
-- **`BetaRegularized` stays symbolic at every point outside
+- **RULED 2026-09-03 (Arno): keep it symbolic — closed.** `BetaRegularized` stays symbolic at every point outside
   `x ∈ [0, 1], a > 0, b > 0`, infinite points included.** The batch-8
   convention answers `NaN` for an anonymous infinity uniformly; this head
   deviates because on the polynomial region (integer `a`, `b`) the value
@@ -586,7 +586,7 @@ deliberately left out of that change.
   the day the kernel is accurate. A two-pass or Welford accumulation would
   fix it and would also settle whether those kernels should scale their
   sums (the paired-statistics typing item below).
-- **A distribution built with a SYMBOL parameter and left unevaluated
+- **RULED 2026-09-03 (Arno): add a boxing validation seam for canonical-handler heads, its own measured round.** A distribution built with a SYMBOL parameter and left unevaluated
   keeps an off-carrier held value.** The constructors have `canonical`
   handlers, which the boxing signature validation does not reach, and a
   handler cannot see a symbol's value, so `PoissonDistribution(s)` with
@@ -594,7 +594,7 @@ deliberately left out of that change.
   (`Variance(PoissonDistribution(s))`) re-canonicalizes with the literal
   and answers the `out-of-range` error, which is pinned; only the bare,
   unevaluated distribution escapes. Narrowed 2026-09-02, not closed.
-- **NEEDS A RULING — the discrete pmfs at a SYMBOLIC point are not
+- **RULED 2026-09-03 (Arno): guard the symbolic forms (`Which` on integrality, `Floor` in the CDF); the compile-parity pin moves.** The discrete pmfs at a SYMBOLIC point are not
   guarded.** `PDF(PoissonDistribution(2), 0.5)` is `0` (the pmf is zero
   off the non-negative integers) but `PDF(PoissonDistribution(2), x)`
   with `x` substituted by `0.5` afterwards is `0.216`; likewise
@@ -608,7 +608,7 @@ deliberately left out of that change.
   continuous interpolation. Recommendation: guard them; the literal and
   symbolic routes should not disagree on a value.
 
-- **`Norm(v, p)` does not round-trip through LaTeX.** The serializer
+- **RULED 2026-09-03 (Arno): add the notation `\|v\|_p` with `_1`, `_2`, `_\infty`, `_F`, accepted on `\|…\|` and `\left\Vert…\right\Vert`; no subscript stays the 2-norm.** `Norm(v, p)` does not round-trip through LaTeX today. The serializer
   writes `\left\Vert v\right\Vert` and drops the ORDER operand, so
   `ce.box(['Norm', ['List', 3, 4], 1])` reparses as the 2-norm. The
   remedy is a notation — a subscript spelling such as `\|v\|_1` and
@@ -627,7 +627,7 @@ deliberately left out of that change.
   `If`/`Which` ruling), so the lane degrades the error to `NaN` rather
   than refusing to compile a whole program for one bad order. Recorded,
   not planned.
-- **NEEDS A RULING — `Mean` of a nested collection and of an empty
+- **RULED 2026-09-03 (Arno): keep both errors — closed.** `Mean` of a nested collection and of an empty
   string are errors now.** `Mean([[1, 2], [3, 4]])` is an
   `incompatible-type` error (a matrix has no mean under
   `broadcastable: false`; it used to stay inert — numpy would flatten and
@@ -636,7 +636,7 @@ deliberately left out of that change.
   collection of zero characters). Options: keep the errors (recommended —
   the literal and the general rule agree), or flatten nested collections
   and treat an empty string as empty data.
-- **The type serializer drops the parentheses around a variadic union.**
+- **RULED 2026-09-03 (Arno): fix the serializer.** The type serializer drops the parentheses around a variadic union.
   `(complex | infinity, (complex | infinity)+) -> number` prints as
   `(complex | infinity, complex | infinity+) -> number`. The round trip is
   semantically stable (`parseType(typeToString(t))` equals `t`), so this
@@ -649,7 +649,7 @@ or `false` at run time takes no branch") is implemented for the
 JavaScript-family lowering of both the expression form and the statement
 form (`BaseCompiler.conditionDecidability`). Two reaches of it are open.
 
-- **NEEDS A RULING — the interpreter and the compiled lane DISAGREE at a
+- **RULED 2026-09-03 (Arno): option (a) — the interpreter treats a NaN branch operand as undecided.** The interpreter and the compiled lane DISAGREE today at a
   literal `NaN` operand.** Measured 2026-09-02 while lowering the
   connectives: `If(NaN > 0, 1, -1).evaluate()` is `-1` (the interpreter's
   ordered comparisons follow IEEE, `Greater(NaN, 0)` is `False`, so the
@@ -673,7 +673,7 @@ form (`BaseCompiler.conditionDecidability`). Two reaches of it are open.
 - (FIXED 2026-09-02: a logical connective in condition position is
   lowered three-valued on the JavaScript and Python targets — see
   `docs/ERROR-MODEL.md` §7 and the plan doc's Phase F section.)
-- **A `while` loop whose condition becomes undecided never exits.** The
+- **RULED 2026-09-03 (Arno): keep the rule; the iteration cap is the backstop — closed.** A `while` loop whose condition becomes undecided never exits. The
   Epsil parser desugars `while c { … }` to `Loop(Block(If(Not(c), Break),
   …))`, a statement-form `If`, so the exit test inherits the no-branch
   rule on both targets (`if (k === k && (!(k < 5))) { break }`; Python
@@ -682,7 +682,7 @@ form (`BaseCompiler.conditionDecidability`). Two reaches of it are open.
   same `If` and relies on its iteration cap. Recorded 2026-09-02 as a
   consequence of the ruling; a desugared exit test could be exempted (a
   synthesized `If` is not a user selection) if that is preferred.
-- **NEEDS A RULING — an IMPURE connective in condition position still
+- **RULED 2026-09-03 (Arno): extend the three-valued lowering to impure conditions, lone relations included, binding every leaf once.** An IMPURE connective in condition position still
   selects by truthiness.** `conditionDecidability` answers `null` for any
   condition with an impure leaf, so `If(Random() > 0.5 ∧ x > 0, a, b)` at
   `x = NaN` takes the else arm. A lone impure relation behaves the same
@@ -691,7 +691,7 @@ form (`BaseCompiler.conditionDecidability`). Two reaches of it are open.
   exemption's reason no longer holds for connectives — but extending
   single-evaluation to impure conditions (lone relations included) is a
   scope change beyond the ruling. Options: extend, or keep the exemption.
-- **NEEDS A RULING — a vars-object member read is repeated inside a
+- **RULED 2026-09-03 (Arno): keep the convention, a member read is free — closed.** A vars-object member read is repeated inside a
   Kleene leaf.** `_.x` appears in the decidedness test and in the
   comparison (`_.x === _.x && _.x !== undefined ? (0 < _.x) : …`), exactly
   as the pre-existing single-relation guard repeats it; `ATOMIC_FRAGMENT`
