@@ -39,10 +39,13 @@ import {
   resolveTypeForCompilation,
   stripMissingFromType,
   typeContainsMissing,
+  unfoldAliasOnDescent,
   widen,
+  type AliasDescent,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
+import { boundVariableNames } from '../boxed-expression/binders.js';
 import { parseType } from '../../common/type/parse.js';
 import {
   hasFreeTypeVariables,
@@ -1036,6 +1039,16 @@ export function statementBodyHead(
   if (isFunction(body, 'Declare')) return 'Declare';
   return undefined;
 }
+
+/**
+ * The value shape a broadcast closure's parameter holds at run time for one
+ * operand: `true` for a `{re, im}` object at every position, `false` for a
+ * plain number at every position, `'mixed'` when the positions do not all
+ * share one shape or the shape cannot be decided statically, `undefined`
+ * when no broadcast closure may be built over the operand at all. See
+ * `BaseCompiler.operandElementLane`.
+ */
+type ElementLane = boolean | 'mixed' | undefined;
 
 /**
  * Base compiler class containing language-agnostic compilation logic
@@ -2945,6 +2958,233 @@ export class BaseCompiler {
     const elements = BaseCompiler.elementComplexness(collection);
     if (elements === undefined || elements.length < 2) return false;
     return elements.some((e) => e !== elements[0]);
+  }
+
+  /**
+   * The heads whose broadcast closure can be built from a RUN-TIME
+   * DISPATCHING scalar helper (`_SYS.sadd`, `_SYS.smul`: each accepts a plain
+   * number or a `{re, im}` object in either position and answers in kind).
+   * Over an operand whose element lane is `'mixed'` (see
+   * {@link operandElementLane}) this is the only sound closure: a lane-
+   * specific body is emitted once for every position, so it needs one shape
+   * per operand. `Subtract` and `Negate` are spelled through `_SYS.smul` by
+   * `−1`. `Divide` has no dispatching helper and stays declined.
+   */
+  private static readonly DISPATCHING_BROADCAST_HEADS = new Set([
+    'Add',
+    'Subtract',
+    'Multiply',
+    'Negate',
+  ]);
+
+  /**
+   * The closure body for a {@link DISPATCHING_BROADCAST_HEADS} head over the
+   * element temps `params`, as a call chain of the run-time helpers.
+   */
+  private static dispatchingScalarBody(
+    h: string,
+    params: ReadonlyArray<string>
+  ): string {
+    const fold = (helper: string): string =>
+      params.slice(1).reduce((acc, p) => `${helper}(${acc}, ${p})`, params[0]);
+    if (h === 'Add') return fold('_SYS.sadd');
+    if (h === 'Multiply') return fold('_SYS.smul');
+    if (h === 'Negate') return `_SYS.smul(-1, ${params[0]})`;
+    if (h === 'Subtract')
+      return `_SYS.sadd(${params[0]}, _SYS.smul(-1, ${params[1]}))`;
+    throw new Error(`${h}: no dispatching broadcast lowering`);
+  }
+
+  /**
+   * Whether an application of `h` over one or more array operands lowers, on
+   * this target, to ONE scalar closure mapped over its arrays by
+   * `tryCompileBroadcast` — a built-in `broadcastable` head with a JavaScript
+   * codegen, no broadcast exemption that method does not itself reproduce,
+   * and no user `operators` override that takes the list operands over. The
+   * elements of such an emission all share the closure's value shape, which
+   * is what {@link operandElementLane} relies on.
+   */
+  private static isElementwiseBroadcastHead(
+    engine: ComputeEngine,
+    h: string,
+    target: CompileTarget<Expression>
+  ): boolean {
+    const def = engine.lookupDefinition(h);
+    if (!isOperatorDef(def) || def.operator.broadcastable !== true)
+      return false;
+    if (
+      def.operator.broadcastExemptions.length > 0 &&
+      !['Add', 'Multiply', 'Negate', 'Subtract', 'Divide'].includes(h)
+    )
+      return false;
+    if (h === 'Equal' || h === 'NotEqual' || isRelationalOperator(h))
+      return false;
+    if (BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h)) return false;
+    const opMap = target.operators?.(h);
+    if (opMap !== undefined && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]))
+      return false;
+    return target.functions?.(h) !== undefined;
+  }
+
+  /**
+   * Memo for {@link operandElementLane}, layered exactly like the complexness
+   * memo (`_complexMemoStack`): a lane answer embeds `isComplexValued`
+   * answers, so it is valid in precisely the same lexical context. Managed by
+   * the same four bookkeeping helpers.
+   */
+  private static _elementLaneMemoStack: WeakMap<object, ElementLane>[] = [
+    new WeakMap(),
+  ];
+
+  /**
+   * What the broadcast closure's parameter for operand `a` holds at run
+   * time: `true` for a `{re, im}` object at every position, `false` for a
+   * plain number at every position, `'mixed'` when the positions do not all
+   * share one shape or the shape cannot be decided statically.
+   *
+   * A SCALAR operand is passed whole, so its own `isComplexValued` verdict is
+   * the answer. An ARRAY operand contributes one element per position, and
+   * the whole-collection verdict describes no single element (`[1+i, 2]`
+   * types `vector<complex^2>` and reads complex while its second element is
+   * the plain number `2`), so the answer comes from the elements:
+   *
+   * - visible elements (`elementComplexness`) answer directly — one shape
+   *   shared by all, or `'mixed'`;
+   * - an application of an ELEMENT-WISE head (`isElementwiseBroadcastHead`)
+   *   lowers to one closure mapped over its arrays, so its elements share
+   *   that closure's shape: when every operand lane of the application is
+   *   decided, that is the application's own `isComplexValued` verdict —
+   *   the closure is built by the head's scalar codegen from the very
+   *   predicates `isComplexValued` reads (`√L` lowers to `_SYS.csqrt` at
+   *   every element and the node reads complex; `sin L` to `Math.sin` and
+   *   reads real). Before this rule, `L + √L` declined while `√L` alone
+   *   compiled: the sum saw the radical's whole-node verdict, could not
+   *   attribute it to an element, and failed closed (Tycho item 246).
+   *   When some operand lane of the application is `'mixed'`, so is its
+   *   result: the application itself lowers through the dispatching helpers
+   *   (or declines, which fails the whole compile);
+   * - any other array operand with complexness evidence — a `list<complex>`
+   *   element type, or a complex whole-collection verdict — is `'mixed'`:
+   *   the evidence cannot be attributed to individual elements. A rank-2
+   *   list (a matrix) is treated the same way: its lowering is not the
+   *   element-wise closure this analysis describes.
+   */
+  private static operandElementLane(
+    a: Expression,
+    engine: ComputeEngine,
+    target: CompileTarget<Expression>
+  ): ElementLane {
+    // The same operand predicate `tryCompileBroadcast` uses to decide which
+    // operands the closure sees element-wise (`isArrayOperand`); everything
+    // else is a scalar it sees whole.
+    const isArray =
+      !isProvablyStringOperand(a) &&
+      (a.isCollection ||
+        a.type.matches('list<any>') ||
+        a.type.matches('indexed_collection<any>') ||
+        isBoundPossiblyCollectionTyped(a));
+    if (!isArray) return BaseCompiler.isComplexValued(a);
+    const memo = BaseCompiler._compileDepth > 0;
+    const stack = BaseCompiler._elementLaneMemoStack;
+    if (memo) {
+      const layer = stack[stack.length - 1];
+      if (layer.has(a)) return layer.get(a);
+    }
+    const result = BaseCompiler._operandElementLane(a, engine, target);
+    if (memo) {
+      const after = BaseCompiler._elementLaneMemoStack;
+      after[after.length - 1].set(a, result);
+    }
+    return result;
+  }
+
+  /** The array arm of {@link operandElementLane}; the memo lives above. */
+  private static _operandElementLane(
+    a: Expression,
+    engine: ComputeEngine,
+    target: CompileTarget<Expression>
+  ): ElementLane {
+    const elements = BaseCompiler.elementComplexness(a);
+    if (elements !== undefined && elements.length > 0)
+      return elements.every((e) => e === elements[0]) ? elements[0] : 'mixed';
+    const t = compilationType(a);
+    const isRank2 =
+      typeof t !== 'string' &&
+      t.kind === 'list' &&
+      (t.dimensions?.length ?? 0) > 1;
+    if (
+      !isRank2 &&
+      isFunction(a) &&
+      BaseCompiler.isElementwiseBroadcastHead(engine, a.operator, target)
+    ) {
+      const lanes = a.ops.map((op) =>
+        BaseCompiler.operandElementLane(op, engine, target)
+      );
+      if (lanes.some((l) => l === undefined)) return undefined;
+      if (lanes.some((l) => l === 'mixed')) return 'mixed';
+      return BaseCompiler.isComplexValued(a);
+    }
+    const complexEvidence =
+      BaseCompiler.typeHasComplexLeaf(t) ||
+      BaseCompiler.hasAnyComplexElement(a) ||
+      BaseCompiler.isComplexValued(a);
+    if (!complexEvidence) return false;
+    // A possibly-collection operand (`bc: broadcastable<complex>`, a
+    // top-typed call) is a SCALAR at run time as often as an array, and a
+    // scalar binding of a complex-typed parameter is refused at the
+    // compiled function's entry (the parameter analysis reads such a type
+    // as real). Compiling the array case behind that refusal would trade
+    // an honest decline for a run-time throw, so this shape keeps
+    // declining (pinned in `broadcastable-compile.test.ts`).
+    if (isBoundPossiblyCollectionTyped(a)) return undefined;
+    return 'mixed';
+  }
+
+  /**
+   * Whether a collection type has a complex-typed LEAF anywhere in its
+   * element structure — a `list<complex>`, a point list whose declared
+   * column type is complex (`list<tuple<number, complex>>`), a nested
+   * `list<list<complex>>`. The broadcast closure is applied at the leaves,
+   * so a complex leaf is what makes an element lane undecidable from the
+   * type alone.
+   *
+   * The walk descends through tuple components, union arms and collection
+   * elements, so a self-referential transparent alias
+   * (`type alias json = integer | list<json>`) is met again at every level;
+   * the descent guard (`unfoldAliasOnDescent`) stops the recursion when the
+   * alias reaches itself, and that occurrence contributes no leaf.
+   */
+  private static typeHasComplexLeaf(t: Type, seen?: AliasDescent): boolean {
+    const unfolded = unfoldAliasOnDescent(t, seen);
+    if (unfolded === undefined) return false;
+    const r = unfolded.type;
+    seen = unfolded.seen;
+    if (isNonRealNumber(r)) return true;
+    if (typeof r === 'string') return false;
+    if (r.kind === 'tuple')
+      return r.elements.some((e) =>
+        BaseCompiler.typeHasComplexLeaf(e.type, seen)
+      );
+    if (r.kind === 'union')
+      return r.types.some((m) => BaseCompiler.typeHasComplexLeaf(m, seen));
+    const elt = collectionElementType(r);
+    if (elt === undefined) return false;
+    return BaseCompiler.typeHasComplexLeaf(elt, seen);
+  }
+
+  /**
+   * Whether the symbol `name` occurs FREE in `expr`: an occurrence that is
+   * not shadowed by a binder inside `expr` (a `Function` literal's parameter,
+   * a scoped form's bound variable — `boundVariableNames`). A plain
+   * structural search (`has`) counts a shadowed occurrence too, so a source
+   * such as `Filter(A, x ↦ x > 0)` under a loop binder `x` would be read as
+   * mentioning the loop variable, which it does not.
+   */
+  private static symbolOccursFree(expr: Expression, name: string): boolean {
+    if (isSymbol(expr)) return expr.symbol === name;
+    if (!isFunction(expr)) return false;
+    if (boundVariableNames(expr).includes(name)) return false;
+    return expr.ops.some((op) => BaseCompiler.symbolOccursFree(op, name));
   }
 
   /**
@@ -6939,6 +7179,26 @@ export class BaseCompiler {
       return isNonRealNumber(elt);
     };
 
+    // A LIST OF POINTS by its static type: a rank-1 list whose element type
+    // is a tuple (a declared `list<tuple<number, number>>` parameter, a
+    // literal point list, a `PointList` application). The interpreter gives
+    // a point list the arithmetic of its elements — a point plus a scalar or
+    // a product of two points is an error at every element — so the shapes
+    // that decline for a single point must decline for a list of them too.
+    // A possibly-collection operand is not a point list: its shape is
+    // unprovable.
+    const isPointListShaped = (a: Expression): boolean => {
+      if (isBoundPossiblyCollectionTyped(a)) return false;
+      const t = compilationType(a);
+      if (typeof t !== 'string' && t.kind === 'list' && (t.dimensions?.length ?? 0) > 1)
+        return false;
+      const elt = collectionElementType(t);
+      return (
+        elt !== undefined &&
+        (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
+      );
+    };
+
     // A `broadcastable<T>`-typed operand is scalar OR an indexed collection at
     // run time (the static type of arithmetic over an unknown-return call, e.g.
     // `2·h(x)` with `h: (number) -> unknown`). Routing it through `_SYS.bcast`
@@ -7009,6 +7269,18 @@ export class BaseCompiler {
         const isMatrix = (a: Expression): boolean =>
           (isTensorValue(a) && a.shape.length >= 2) || a.type.matches('matrix');
         if (args.some(isMatrix)) return null;
+        // Two POINT-SHAPED operands — a numeric tuple, or a list whose
+        // elements are provably tuples — have no product: the interpreter
+        // answers the `no-product-between-points` error (at every element,
+        // for two point lists). A flat `_SYS.bcast` zipped two point lists
+        // into the component-wise product `[(1,4),(9,16)]` behind
+        // `success: true` (Tycho item 245). The single-tuple case is refined
+        // below; two or more point-shaped operands decline here.
+        if (
+          collection.filter((a) => isNumericTuple(a) || isPointListShaped(a))
+            .length > 1
+        )
+          return null;
         // ONE numeric tuple among list operands is the point-family shape
         // `[1,2,3]·(cos a, sin a)`: the interpreter broadcasts over the LIST
         // and scales the point whole at every element, answering a list of
@@ -7157,29 +7429,49 @@ export class BaseCompiler {
     // the expression when the point's component is itself a list.
     if (args.some((a) => BaseCompiler.isHypotPointLeg(h, a))) return null;
 
+    // A list of POINTS summed with a SCALAR-shaped operand — a number, or a
+    // list of numbers — is `point + scalar` at every element, which the
+    // interpreter answers as an `incompatible-type` error per element. The
+    // flat `_SYS.bcast` descended into each point and added the scalar to
+    // both components (`[(1,2),(3,4)] + 10` ran to `[(11,12),(13,14)]`
+    // behind `success: true`, Tycho item 245). Every co-operand of a point
+    // list must itself be a point (broadcast over the list, handled below)
+    // or a point list (zipped element-wise); anything else declines.
+    // `Subtract` is listed for the structural spelling: the canonical form
+    // is `Add(a, Negate(b))`, and `Negate` of a point list is a point list.
+    if (
+      (h === 'Add' || h === 'Subtract') &&
+      args.some(isPointListShaped) &&
+      args.some((a) => !isPointListShaped(a) && !couldBeNumericTuple(a))
+    )
+      return null;
+    // Dividing BY a point list is `x / point` at every element: the
+    // interpreter's `no-division-by-point` error. Only a point list in the
+    // dividend position (`P / 2`, `P / L`) scales points.
+    if (h === 'Divide' && args.length === 2 && isPointListShaped(args[1]))
+      return null;
+
     if (h === 'Add' || h === 'Divide') {
       const tuples = args.filter((a) => couldBeNumericTuple(a));
       const lists = args.filter(
         (a) => !couldBeNumericTuple(a) && isArrayOperand(a)
       );
       if (tuples.length > 0 && lists.length > 0) {
-        // The list must PROVABLY hold real points: every element is a tuple
-        // whose components are numeric and not complex (a `{re, im}` object
-        // would reach the real-only closure below — the element analysis
-        // cannot see inside a declared element type), and its arity, when
-        // both are known, matches the point's. The tuple is compared by its
-        // known component count only: a `tuple<unknown, unknown>` point is
-        // admitted for its arity, not for its component types.
+        // The list must PROVABLY hold points: every element is a tuple whose
+        // components are numeric, and its arity, when both are known,
+        // matches the point's. The tuple is compared by its known component
+        // count only: a `tuple<unknown, unknown>` point is admitted for its
+        // arity, not for its component types. A COMPLEX component is
+        // admitted: the element-lane analysis below sees it as a lane it
+        // cannot decide, and `Add` then lowers to the run-time dispatching
+        // `_SYS.sadd` (Tycho item 246: a Desmos polygon column carries
+        // `√-1` as its "undefined vertex" separator).
         const isProvablyPointList = (a: Expression): boolean => {
           if (isBoundPossiblyCollectionTyped(a)) return false;
           const elt = collectionElementType(compilationType(a));
           if (elt === undefined || typeof elt === 'string') return false;
           if (elt.kind !== 'tuple') return false;
-          if (
-            !elt.elements.every(
-              (c) => isSubtype(c.type, 'number') && !isNonRealNumber(c.type)
-            )
-          )
+          if (!elt.elements.every((c) => isSubtype(c.type, 'number')))
             return false;
           const pt = resolveTypeAlias(tuples[0].type.type);
           return (
@@ -7205,47 +7497,27 @@ export class BaseCompiler {
     }
 
     // What the closure's element parameter for each operand holds at run time:
-    // `true` for a `{re, im}` object, `false` for a plain number. A SCALAR
-    // operand is passed whole, so its own complex-ness is the answer; an ARRAY
-    // operand contributes one element per position, so the answer is the
-    // complex-ness its elements SHARE. `undefined` means no single answer
-    // exists for that operand and the closure cannot be built.
-    const elementComplexnessOfOperand = (
-      a: Expression
-    ): boolean | undefined => {
-      // A scalar operand IS what the parameter holds, so its own verdict is
-      // the answer. For an ARRAY operand it is not: `isComplexValued` reports
-      // for the whole collection, and a list is emitted element by element, so
-      // that verdict describes no single element — `[1+i, 2]` types
-      // `vector<complex^2>` and reads complex while its second element
-      // is the plain number `2`. Only the element analysis may answer here.
-      if (!isArrayOperand(a)) return BaseCompiler.isComplexValued(a);
-      // Elements that DISAGREE (`[√(t−1), 1]`) have no single closure: one
-      // position holds `{re, im}` and another a plain number, and the body
-      // below is emitted once for all of them. Declining hands the form to the
-      // fail-closed path, which is what it did for every complex element
-      // before this. Measured with a real closure over such an array,
-      // `2·[1+i, 2]` ran to `[{re: 2, im: 2}, {re: NaN, im: NaN}]` where the
-      // interpreter answers `[2+2i, 4]`.
-      // One walk, both verdicts: `uniformElementComplexness` and
-      // `hasMixedElementComplexness` would each re-derive this same array.
-      const elements = BaseCompiler.elementComplexness(a);
-      if (elements !== undefined && elements.length > 0)
-        return elements.every((e) => e === elements[0])
-          ? elements[0]
-          : undefined;
-      // The elements are not visible. Any remaining evidence of complexness —
-      // a `list<complex>` ELEMENT TYPE (`hasComplexElement`, hoisted above) or
-      // the whole-collection verdict — cannot be attributed to an individual
-      // element, so decline exactly as before this method carried complex at
-      // all.
-      return hasComplexElement(a) || BaseCompiler.isComplexValued(a)
-        ? undefined
-        : false;
-    };
-    const argIsComplex = args.map(elementComplexnessOfOperand);
-    if (argIsComplex.some((c) => c === undefined)) return null;
-    const anyComplex = argIsComplex.some((c) => c === true);
+    // `true` for a `{re, im}` object, `false` for a plain number, `'mixed'`
+    // when the elements do not all share one shape or the shape cannot be
+    // decided (`operandElementLane`). A closure built from the head's own
+    // scalar codegen is emitted once for every position, so it needs one
+    // shape per operand. A `'mixed'` operand can still be broadcast by a head
+    // that has a RUN-TIME DISPATCHING scalar helper (`_SYS.sadd`/`_SYS.smul`
+    // accept a number or a `{re, im}` object in either position); every other
+    // head declines. Before the dispatching lowering, a `√(t−1)` beside a `1`
+    // in one list, or a point list whose declared column type is `complex`,
+    // failed closed here — measured with a real closure over such an array,
+    // `2·[1+i, 2]` ran to `[{re: 2, im: 2}, {re: NaN, im: NaN}]` where the
+    // interpreter answers `[2+2i, 4]`.
+    const argLanes = args.map((a) =>
+      BaseCompiler.operandElementLane(a, engine, target)
+    );
+    if (argLanes.some((l) => l === undefined)) return null;
+    const dispatch = argLanes.some((l) => l === 'mixed');
+    if (dispatch && !BaseCompiler.DISPATCHING_BROADCAST_HEADS.has(h))
+      return null;
+    const argIsComplex = argLanes.map((l) => l === true);
+    const anyComplex = argIsComplex.some((c) => c);
 
     // A STRING-mapped head is a real-only scalar helper (`Math.sign`,
     // `Math.hypot`, `_SYS.sinc`): it has no complex call form, so a complex
@@ -7309,8 +7581,9 @@ export class BaseCompiler {
       BaseCompiler._broadcastRadicalVerdict.push(radicalFrame);
     let scalarBody: string;
     try {
-      scalarBody =
-        typeof fn === 'function'
+      scalarBody = dispatch
+        ? BaseCompiler.dispatchingScalarBody(h, params)
+        : typeof fn === 'function'
           ? fn(
               params.map((p) => engine.expr(p)),
               (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
@@ -9287,6 +9560,61 @@ export class BaseCompiler {
       narrowedElements.push(elem as unknown as NarrowedElement);
     }
 
+    // Two binder shapes the emitted `for (const x of …)` loops cannot carry
+    // (Tycho item 245); both compiled and then THREW at run time, where a
+    // refusal at compile time is the honest answer (D6).
+    for (let i = 0; i < narrowedElements.length; i++) {
+      const binder = narrowedElements[i].ops[0] as Expression & {
+        symbol: string;
+      };
+      const name = binder.symbol;
+      // A binder that occurs in its own source, or in the source of an OUTER
+      // clause: `[P.x + 1 for P in P]` emitted `for (const P of P)`, a
+      // temporal-dead-zone read of the loop variable it declares. The
+      // interpreter leaves the form inert. An outer source is emitted
+      // before this clause's binding exists, so a mention there is the same
+      // read. Only a FREE occurrence counts: a source whose own lambda reuses
+      // the name (`Filter(A, x ↦ x > 0)` under a binder `x`) binds it afresh
+      // and never reads the loop variable.
+      for (let j = 0; j <= i; j++)
+        if (BaseCompiler.symbolOccursFree(narrowedElements[j].ops[1], name))
+          throw new Error(
+            `Loop: the binder \`${name}\` occurs in the collection it (or an ` +
+              `enclosing clause) iterates, which the emitted loop would read ` +
+              `before binding it. Fail closed (D6) — the interpreter ` +
+              `evaluates it.`
+          );
+      // A binder whose static type contradicts the source's element type. The
+      // body was typed under the binder's type, so its lowering assumes that
+      // shape; the loop hands it the source's elements instead. Measured:
+      // `[q.x + 1 for q in C]` over a point `C: tuple<number, number>` typed
+      // the binder `matrix` (the body's `PointX(q)` use retyped it), lowered
+      // `PointX(q)` as a list-of-points read, and threw `q.map is not a
+      // function` at run time on the number the loop bound. A binder type
+      // NARROWER than the element type is the ordinary inference of a use and
+      // is kept when it keeps the element's VALUE SHAPE: a binder inferred
+      // `integer` over `number` elements lowers the same JavaScript. A
+      // non-real binder over real elements does not — `complex <: number`,
+      // but the body then reads `.re`/`.im` off the plain numbers the loop
+      // binds — so that narrowing declines with the disjoint case.
+      const eltType = collectionElementType(
+        compilationType(narrowedElements[i].ops[1])
+      );
+      const binderType = compilationType(binder);
+      if (
+        eltType !== undefined &&
+        !isSubtype(eltType, binderType) &&
+        (!isSubtype(binderType, eltType) ||
+          (isNonRealNumber(binderType) && !isNonRealNumber(eltType)))
+      )
+        throw new Error(
+          `Loop: the binder \`${name}\` is typed \`${typeToString(binderType)}\` ` +
+            `but iterates elements of type \`${typeToString(eltType)}\`; the ` +
+            `body's lowering assumes a shape the loop never binds. ` +
+            `Fail closed (D6) — the interpreter evaluates it.`
+        );
+    }
+
     // For wrapping targets (e.g. interval-js where `target.number(0)` is
     // `_IA.point(0)`), each loop variable must be wrapped wherever it appears
     // in the body or in an inner collection expression. Without this, code
@@ -10102,11 +10430,13 @@ export class BaseCompiler {
    */
   private static _invalidateComplexMemo(): void {
     BaseCompiler._complexMemoStack = [new WeakMap()];
+    BaseCompiler._elementLaneMemoStack = [new WeakMap()];
   }
 
   /** Enter a lexical context: answers cached inside must not escape it. */
   private static _pushComplexMemoLayer(): void {
     BaseCompiler._complexMemoStack.push(new WeakMap());
+    BaseCompiler._elementLaneMemoStack.push(new WeakMap());
   }
 
   /**
@@ -10118,6 +10448,9 @@ export class BaseCompiler {
     BaseCompiler._complexMemoStack.pop();
     if (BaseCompiler._complexMemoStack.length === 0)
       BaseCompiler._complexMemoStack = [new WeakMap()];
+    BaseCompiler._elementLaneMemoStack.pop();
+    if (BaseCompiler._elementLaneMemoStack.length === 0)
+      BaseCompiler._elementLaneMemoStack = [new WeakMap()];
   }
 
   /**
@@ -10128,6 +10461,9 @@ export class BaseCompiler {
   private static _resetComplexMemoTop(): void {
     BaseCompiler._complexMemoStack[BaseCompiler._complexMemoStack.length - 1] =
       new WeakMap();
+    BaseCompiler._elementLaneMemoStack[
+      BaseCompiler._elementLaneMemoStack.length - 1
+    ] = new WeakMap();
   }
 
   /**

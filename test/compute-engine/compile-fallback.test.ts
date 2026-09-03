@@ -122,32 +122,41 @@ describe('Compilation of scalar↔list arithmetic (broadcast + complex fail-clos
     expect(r.run!({})).toEqual([2, 4, 6]);
   });
 
-  test('a complex-valued list fails closed (no scalar-garbage success)', () => {
+  test('a complex-valued list lowers through the dispatching closure (no scalar-garbage success)', () => {
+    // A declared `list<complex>` parameter may hold `{re, im}` objects and
+    // plain numbers side by side at run time, so no lane-specific closure
+    // fits every position. The product lowers through the run-time
+    // dispatching `_SYS.smul` (Tycho item 246; it used to fail closed) and
+    // never emits the scalar `2 * Z` garbage.
     const ce2 = new ComputeEngine();
     ce2.declare('Z', 'list<complex>');
     const r = compile(ce2.box(['Multiply', 2, 'Z']));
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/list-valued operand/);
-    expect(r.calling).toBe('expression');
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.smul');
+    expect(r.run!({ Z: [{ re: 1, im: 1 }, 2] })).toEqual([
+      { re: 2, im: 2 },
+      4,
+    ]);
   });
 
-  test('fallback:false surfaces the diagnostic as a throw (mixed-element list)', () => {
-    // A list whose elements DISAGREE about being complex is what still fails
-    // closed. It is emitted element by element, so `[1+i, 2]` lowers to the
-    // heterogeneous `[{re, im}, 2]`, and the single scalar closure the
-    // broadcast wraps holds one convention for every position — a real closure
-    // reads `.re` off nothing and a complex one reads it off the plain `2`.
-    // Measured with a complex closure over this array: `[{re: 2, im: 2},
-    // {re: NaN, im: NaN}]` where the interpreter answers `[2+2i, 4]`.
-    expect(() =>
-      compile(ce.box(['Multiply', 2, ['List', ['Complex', 1, 1], 2]]), {
-        fallback: false,
-        // `constantFold: false`: every operand is a literal, so the product
-        // would otherwise be folded to a literal list and the decline under
-        // test would never fire.
-        constantFold: false,
-      })
-    ).toThrow(/list-valued operand/);
+  test('a mixed-element list lowers through the dispatching closure', () => {
+    // A list whose elements DISAGREE about being complex is emitted element
+    // by element, so `[1+i, 2]` lowers to the heterogeneous `[{re, im}, 2]`,
+    // and a single lane-specific closure holds one convention for every
+    // position — a real closure reads `.re` off nothing and a complex one
+    // reads it off the plain `2`. Measured with a complex closure over this
+    // array: `[{re: 2, im: 2}, {re: NaN, im: NaN}]` where the interpreter
+    // answers `[2+2i, 4]`. The product now lowers through `_SYS.smul`, which
+    // dispatches on each element's run-time shape (Tycho item 246).
+    const r = compile(ce.box(['Multiply', 2, ['List', ['Complex', 1, 1], 2]]), {
+      fallback: false,
+      // `constantFold: false`: every operand is a literal, so the product
+      // would otherwise be folded to a literal list and the lowering under
+      // test would never be emitted.
+      constantFold: false,
+    });
+    expect(r.code).toContain('_SYS.smul');
+    expect(r.run!({})).toEqual([{ re: 2, im: 2 }, 4]);
   });
 
   test('a NESTED list is judged at its leaves, not at its sublists', () => {
@@ -159,17 +168,23 @@ describe('Compilation of scalar↔list arithmetic (broadcast + complex fail-clos
     // the real leaves `2` and `4`. Measured before the leaf rule,
     // `2·[[1+i, 2], [3+i, 4]]` ran to
     // `[[{re: 2, im: 2}, {re: NaN, im: NaN}], [{re: 6, im: 2}, {re: NaN, im: NaN}]]`
-    // where the interpreter answers `[[2+2i, 4], [6+2i, 8]]`.
+    // where the interpreter answers `[[2+2i, 4], [6+2i, 8]]`. Mixed leaves
+    // now lower through the run-time dispatching `_SYS.smul` (Tycho item
+    // 246), which `_SYS.bcast` applies at every leaf.
     const mixedLeaves = [
       'List',
       ['List', ['Complex', 1, 1], 2],
       ['List', ['Complex', 3, 1], 4],
     ];
-    expect(
-      compile(ce.box(['Multiply', 2, mixedLeaves] as any), {
-        constantFold: false,
-      }).success
-    ).toBe(false);
+    const mixed = compile(ce.box(['Multiply', 2, mixedLeaves] as any), {
+      constantFold: false,
+    });
+    expect(mixed.success).toBe(true);
+    expect(mixed.code).toContain('_SYS.smul');
+    expect(mixed.run!({})).toEqual([
+      [{ re: 2, im: 2 }, 4],
+      [{ re: 6, im: 2 }, 8],
+    ]);
 
     // Leaves that DO agree still broadcast, at depth.
     const allComplexLeaves = [

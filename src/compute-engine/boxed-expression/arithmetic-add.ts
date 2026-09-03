@@ -2,7 +2,11 @@ import { getImaginaryFactor } from './utils.js';
 
 import { flatten } from './flatten.js';
 import { order, sortAddTerms } from './order.js';
-import { Type } from '../../common/type/types.js';
+import type {
+  NamedElement,
+  TupleType,
+  Type,
+} from '../../common/type/types.js';
 import {
   broadcastResultType,
   collectionElementType,
@@ -454,6 +458,57 @@ function pointListElementType(x: Expression): Type | undefined {
   return typeof elt !== 'string' && elt.kind === 'tuple' ? elt : undefined;
 }
 
+/**
+ * The component-wise sum type of operands that are ALL tuples of one arity
+ * when at least one component is a list-shaped collection, or `undefined`
+ * when the operands are not that shape (a non-tuple operand, tuples of
+ * different arities, or all-scalar components, which `widen` types exactly).
+ *
+ * At each position the component types combine the way `addType` combines
+ * whole operands: a list-shaped component absorbs the scalar components at
+ * that position into its cells (`number + list<number>` is `list<number>`),
+ * and scalar-only positions widen. The result keeps the tuple kind, with the
+ * component names dropped: a sum has no field names to preserve.
+ */
+function tupleComponentwiseAddType(
+  args: ReadonlyArray<Expression>
+): Type | undefined {
+  const tuples: TupleType[] = [];
+  for (const x of args) {
+    const t = resolveTypeAlias(x.type.type);
+    if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
+    tuples.push(t);
+  }
+  const arity = tuples[0].elements.length;
+  if (tuples.some((t) => t.elements.length !== arity)) return undefined;
+  const isListShaped = (t: Type): boolean => {
+    const r = resolveTypeAlias(t);
+    return (
+      r === 'list' ||
+      (typeof r !== 'string' &&
+        (r.kind === 'list' || r.kind === 'indexed_collection'))
+    );
+  };
+  if (!tuples.some((t) => t.elements.some((e) => isListShaped(e.type))))
+    return undefined;
+  const elements: NamedElement[] = [];
+  for (let i = 0; i < arity; i++) {
+    const components = tuples.map((t) => stripNumericRanges(t.elements[i].type));
+    const lists = components.filter(isListShaped);
+    if (lists.length === 0) {
+      // A sum is not closed over `imaginary` (`i + (−i) = 0` is real):
+      // `complex` covers the closure — the same repair the scalar tail of
+      // `addType` applies, and `absorbScalarsIntoCells` applies to a cell.
+      const scalar = widen(...components);
+      elements.push({ type: scalar === 'imaginary' ? 'complex' : scalar });
+      continue;
+    }
+    const scalars = components.filter((c) => !isListShaped(c));
+    elements.push({ type: absorbScalarsIntoCells(widen(...lists), scalars) });
+  }
+  return { kind: 'tuple', elements };
+}
+
 export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   if (args.length === 0) return 'integer'; // = 0
   if (args.length === 1) return args[0].type;
@@ -496,6 +551,19 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
           )
         )
       );
+    // Tuples of the same arity add COMPONENT-WISE, and a component that is a
+    // list broadcasts against the other operands' components at that
+    // position: `(g_x, g_y) + (L, L₂)` evaluates to the tuple
+    // `(g_x + L, g_y + L₂)` — a tuple of two lists. `widen` does not see
+    // positions, so it reported the union
+    // `tuple<list<number>, list<number>> | tuple<number, number>`, a type no
+    // evaluated value ever has; a consumer that routes on the type (a layout
+    // classifier over the JavaScript compile target's output) cannot admit a
+    // union of two layouts (Tycho item 246). Only a tuple with a list-shaped
+    // component takes this branch: for all-scalar tuples `widen` already
+    // answers the exact component-wise type.
+    const componentwise = tupleComponentwiseAddType(args);
+    if (componentwise !== undefined) return componentwise;
     return widen(...args.map((x) => stripNumericRanges(x.type.type)));
   }
   // Element-wise sum of a single tensor (vector/matrix) with scalars keeps the

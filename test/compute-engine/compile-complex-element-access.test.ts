@@ -236,15 +236,20 @@ describe('run-time index into a MIXED collection fails closed (D6)', () => {
 });
 
 describe('broadcast over a collection with a complex element', () => {
-  test('scalar·list declines instead of mapping real codegen over objects', () => {
-    // The broadcast closure binds bare element parameters and cannot carry
-    // complex scalar codegen, so it must defer. Its complex-element test was
-    // TYPE-based, and a list mixing a complex and a real element unifies to a
-    // wide element type that is neither — so the test answered `false`.
-    // Measured before: `2·h(t)` ran to `[NaN, 2]` against `[0.6i, 2]`.
+  test('scalar·list over a mixed-element call lowers through the dispatching closure', () => {
+    // A list mixing a complex and a real element unifies to a wide element
+    // type that is neither, so no lane-specific closure fits both positions.
+    // Measured with a real closure: `2·h(t)` ran to `[NaN, 2]` against
+    // `[0.6i, 2]`. The product now lowers through the run-time dispatching
+    // `_SYS.smul` (Tycho item 246), which answers the interpreter's value.
     const ce = withFn('h', ['List', ['Multiply', 'ImaginaryUnit', 't'], 1]);
     const r = compile(ce.box(['Multiply', 2, ['h', 't']] as any))!;
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.smul');
+    const v = r.run!({ t: 0.3 }) as [{ re: number; im: number }, number];
+    expect(v[0].re).toBe(0);
+    expect(v[0].im).toBeCloseTo(0.6, 12);
+    expect(v[1]).toBe(2);
   });
 
   test('an all-real list still broadcasts', () => {
@@ -487,17 +492,25 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
     expect(out[1].im).toBeCloseTo(2 * Math.sqrt(1.7), 12);
   });
 
-  test('a MIXED body still fails closed — one closure cannot fit both elements', () => {
+  test('a MIXED body lowers through the dispatching closure', () => {
     // `[√(t−1), 1]` promotes only its first element, so the run-time array is
-    // `[{re, im}, 1]`. The broadcast wraps ONE scalar closure and maps it over
-    // both positions, so neither convention fits: a complex closure reads
-    // `.re` off the plain `1`. This is the shape that must keep declining.
+    // `[{re, im}, 1]`. No lane-specific closure fits both positions (a
+    // complex closure reads `.re` off the plain `1`), so the product lowers
+    // through the run-time dispatching `_SYS.smul` instead (Tycho item 246;
+    // this shape used to fail closed).
     const r = compiled(
       ['List', ['Sqrt', ['Subtract', 't', 1]], 1],
       ['Multiply', 2, ['w', 't']],
       'complex'
     );
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/list-valued operand/);
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.smul');
+    const v = r.run!({ t: 0.3 } as any) as unknown as [
+      { re: number; im: number },
+      number,
+    ];
+    expect(v[0].re).toBe(0);
+    expect(v[0].im).toBeCloseTo(2 * Math.sqrt(0.7), 12);
+    expect(v[1]).toBe(2);
   });
 });

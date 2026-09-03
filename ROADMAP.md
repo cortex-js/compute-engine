@@ -671,6 +671,52 @@ failures, such as a `match-no-case`. Probe:
 `executeEpsil(ce, 'let g = x => Error("neg")\ng(1)')` (diagnostic, `g(1)`
 inert).
 
+### A scalar handler lifted over a list of points drops the tuple level: `Sqrt(P)`, `Sin(P)`, `Power(P, 2)` type `list<number>` for a value that is a list of points (OPEN, typing — found 2026-09-03 while fixing Tycho items 245/246)
+
+With `ce.declare('P', 'list<tuple<number, number>>')`, `Sqrt(P)`, `Sin(P)`
+and `Power(P, 2)` all type `list<number>`, while their values are lists of
+points (`Power(P, 2)` with `P := [(1,2), (3,4)]` evaluates to
+`[(1,4), (9,16)]`). The same handlers over ONE point are typed right
+(`Sqrt(C)` for `C: tuple<number, number>` is `tuple<number, number>`), and
+`Negate(P)` and `2·P`, whose handlers own their collection typing, are
+right too. The cause is the generic broadcast lift in the type-handler
+wrapper (`boxed-function.ts`, "arm 1"): the solver binds the lifted
+operand's CELL type through `broadcastCellType`, which unwraps every rank
+including the tuple's (`collectionElementType(tuple<…>)` is the widen of
+the components), so the handler is asked about `number` and the lift
+re-wraps its scalar answer as `list<number>`. A tuple is atomic under
+broadcast (the value path never maps into it), so the cell handed to the
+handler should stop at the tuple; the handler then answers
+`tuple<number, number>` as it does for `C`, and the lift re-wraps it as
+`list<tuple<number, number>>`. Not fixed in the item-245/246 round
+because the cell binding sits in the type-handler machinery that the
+type-handler shape retirement (worktree `ce-wt-typehandlers`, 2026-09-03)
+is rewriting; the fix belongs with that retirement. A consumer that routes
+on the type — the JavaScript target's `PointX`/`PointY` lowering, a
+layout classifier — reads such a list as a list of NUMBERS. Probe:
+`ce.declare('P','list<tuple<number, number>>'); ce.box(['Sqrt','P']).type`.
+
+### A comprehension binder is retyped by a use in the body, against the element type of the collection it iterates (OPEN, inference — found 2026-09-03 while fixing Tycho item 245)
+
+With `ce.declare('C', 'tuple<number, number>')`, the comprehension
+`[q.x + 1 for q in C]` (`Comprehension(Add(PointX(q), 1), Element(q, C))`)
+boxes as VALID with the binder `q` typed `matrix`, the body typed `vector`
+and the whole form `indexed_collection<vector>`. The loop binds each
+component of `C` — a number — to `q`, so `PointX(q)` is an
+`incompatible-type` error at every element when evaluated; the binder's
+declared type (`number`, from the element type of `C`) was overwritten by
+the body's `PointX(q)` use, which infers its operand as an indexed
+collection. A use of a symbol whose type is fixed by its binding site
+should be CHECKED against that type (as an assigned symbol's uses are —
+`docs/INFERENCE_ROADMAP.md`, the asymmetric-inference rule), not rewrite
+it: the form should box invalid, as `PointX(5)` does. The JavaScript
+compiler used to trust the binder type and emit `q.map(…)`, which threw at
+run time; it now refuses the form when the binder type is disjoint from
+the element type (`compileElementLoops`, "Fail closed (D6)"). Ruling
+needed: should a binding-site type be authoritative over the body's
+inference (the body's use becomes a type error), and does the same apply
+to `Sum`/`Product` indices and function-literal parameters?
+
 ### A valueless collection-typed operand is silently dropped by the lazy collection operators (OPEN, semantics — found 2026-09-03 while implementing the `Join` scalar-operand ruling)
 
 With `ce.declare('v', 'list<number>')` and no value, `Join([1], v).evaluate()`

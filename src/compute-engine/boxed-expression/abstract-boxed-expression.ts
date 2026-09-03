@@ -373,18 +373,23 @@ export abstract class _BoxedExpression implements Expression {
     // faithful-head exemption.
     // A symbol always serializes as its name — its spelling must not depend
     // on what the name currently holds (Tycho item 100).
+    // `materialization: false` is the by-contract opt-out: the expression is
+    // serialized as it stands and NOTHING is evaluated. It used to reach the
+    // `evaluate()` call below with the flag set to `false`, which skips the
+    // materialization step but still evaluates the operands — for
+    // `Join(p)` with `p` bound to an unevaluated chain `m(m(m(p_0)))`, that
+    // evaluated the whole chain to print the 18-character `\mathrm{Join}(p)`
+    // (Tycho item 247: seconds, then minutes, per serialization).
     const explicitMaterialization = options?.materialization !== undefined;
     if (
+      options?.materialization !== false &&
       this.isLazyCollection &&
       this.symbol === undefined &&
       (explicitMaterialization || !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator))
     ) {
       // See the `latex` getter: materialization evaluates, and a printable
       // expression whose evaluation fails must still print (Tycho item 168).
-      // `materialization: false` is the by-contract opt-out — it reaches here
-      // but leaves the collection lazy, so the fall-through below prints the
-      // operator form without this catch ever firing. A CancellationError
-      // still propagates.
+      // A CancellationError still propagates.
       try {
         const materialized = this.evaluate({
           materialization: options?.materialization ?? true,

@@ -2268,13 +2268,17 @@ describe('COMPILE COMPLEX - a tuple element that folds to a real number broadcas
     expect(v[1]).toEqual([2, 2]);
   });
 
-  it('a genuinely complex tuple element still fails closed', () => {
-    expect(() =>
-      compile(
-        ce.box(['Add', ['Tuple', ['Complex', 1, 1], 0], ['Tuple', 1, 0]] as never),
-        { fallback: false }
-      )
-    ).toThrow(/list-valued operand|list-arithmetic/);
+  it('a genuinely complex tuple element broadcasts through the dispatching closure', () => {
+    // The elements DISAGREE about being complex (`1+i` beside `0`), so no
+    // lane-specific closure fits both positions. `Add` has a run-time
+    // dispatching scalar helper (`_SYS.sadd`), so the broadcast lowers
+    // through it instead of failing closed (Tycho item 246).
+    const r = compile(
+      ce.box(['Add', ['Tuple', ['Complex', 1, 1], 0], ['Tuple', 1, 0]] as never),
+      { fallback: false }
+    );
+    expect(r.code).toContain('_SYS.sadd');
+    expect(r.run!({})).toEqual([{ re: 2, im: 1 }, 0]);
   });
 
   it('an indexed read of the folded broadcast agrees with the emission', () => {
@@ -2296,29 +2300,36 @@ describe('COMPILE COMPLEX - a tuple element that folds to a real number broadcas
     expect(r.run!({})).toBeCloseTo(1 + 1 + C, 12);
   });
 
-  it('under constantFold: false the fold-aware path stands down and declines', () => {
+  it('under constantFold: false the fold-aware path stands down and the sum still compiles', () => {
     // The emission opt-out means the folded literal may not be inlined, and
     // the element's structural lowering emits the complex convention — so
     // the analysis must not report the element real either. Both sides key
-    // off the same `foldTarget`, restoring the pre-fold decline.
-    expect(() =>
-      compile(
-        ce.box(['Add', ['Tuple', 1, 0], ['Tuple', sqrt5m, 0]] as never),
-        { fallback: false, constantFold: false }
-      )
-    ).toThrow(/list-valued operand|list-arithmetic/);
+    // off the same `foldTarget`. The sum used to decline here; it now
+    // compiles (the dispatching `Add` closure, Tycho item 246) and its value
+    // agrees with the interpreter's.
+    const r = compile(
+      ce.box(['Add', ['Tuple', 1, 0], ['Tuple', sqrt5m, 0]] as never),
+      { fallback: false, constantFold: false }
+    );
+    const v = r.run!({}) as number[];
+    expect(v[0]).toBeCloseTo(1 + C, 12);
+    expect(v[1]).toBe(0);
   });
 
-  it('a symbolic possibly-complex tuple element still fails closed', () => {
+  it('a symbolic possibly-complex tuple element broadcasts through the dispatching closure', () => {
     // `√(t−9)` does not fold (free variable), so the element keeps its
-    // complex shape verdict and the closure declines, as before the fix.
-    expect(() =>
-      compile(
-        ce.box(
-          ['Multiply', 't', ['Tuple', ['Sqrt', ['Subtract', 't', 9]], 0]] as never
-        ),
-        { fallback: false }
-      )
-    ).toThrow(/list-valued operand|list-arithmetic/);
+    // complex shape verdict; the product lowers through `_SYS.smul`
+    // (Tycho item 246) and answers what the interpreter answers.
+    const r = compile(
+      ce.box(
+        ['Multiply', 't', ['Tuple', ['Sqrt', ['Subtract', 't', 9]], 0]] as never
+      ),
+      { fallback: false }
+    );
+    expect(r.code).toContain('_SYS.smul');
+    const v = r.run!({ t: 2 }) as [{ re: number; im: number }, number];
+    expect(v[0].re).toBe(0);
+    expect(v[0].im).toBeCloseTo(2 * Math.sqrt(7), 12);
+    expect(v[1]).toBe(0);
   });
 });

@@ -16,6 +16,42 @@
 
 ### Resolved Issues
 
+- **`toLatex({ materialization: false })` no longer evaluates anything.** On
+  a lazy collection such as `Join(p)`, the opt-out still called `evaluate()`
+  with materialization off, which evaluated the operands' bound values: with
+  `p` bound to an unevaluated chain `m(m(m(p_0)))`, printing the
+  18-character `\mathrm{Join}(p)` cost seconds, then minutes, per level of
+  the chain. The option now serializes the expression as it stands
+  (Tycho item 247).
+- **The `javascript` target refuses the point arithmetic the interpreter
+  rejects.** A product of two point lists (`P·P`), a point list plus or minus
+  a scalar or a list of scalars (`P + 2`, `P − L`), and a scalar divided by a
+  point list compiled to plausible values (`[(1,2),(3,4)]·[(1,2),(3,4)]` ran
+  to `[(1,4),(9,16)]`) where `evaluate()` answers an error per element. They
+  now fail closed to the interpreter. A comprehension whose binder occurs in
+  the collection it iterates (`[P.x + 1 for P in P]`) and one whose binder
+  type contradicts the collection's element type used to compile and then
+  throw at run time; both are refused at compile time (Tycho item 245).
+- **A radical or logarithm over a list is a list operand of the
+  `javascript` target's list arithmetic.** `L + √L`, `−√L`, `2·√L`,
+  `L + ln L` and `L + L^{0.5}` failed closed ("cannot compile scalar
+  arithmetic over a list-valued operand") while `√L` alone and `L + sin L`
+  compiled: the element analysis could not attribute the radical's complex
+  verdict to its elements. A broadcast emission's elements now share its
+  closure's lane, so a list body with a square root inside a sum compiles
+  (Tycho item 246).
+- **List arithmetic over elements that mix real and complex values
+  compiles.** `Add`, `Subtract`, `Multiply` and `Negate` over a list whose
+  elements disagree about being complex — `2·[1+i, 2]`, a declared
+  `list<complex>` parameter, a point list whose column carries `√-1` as
+  Desmos's "undefined vertex" separator — lower through the run-time
+  dispatching helpers (`_SYS.sadd`, `_SYS.smul`) instead of failing closed.
+  Other heads over such a list still fail closed (Tycho item 246).
+- **`point + (list, list)` types as a tuple of lists.** With
+  `G: tuple<number, number>` and `L`, `L₂: list<number>`, `G + (L, L₂)`
+  typed the union `tuple<list<number>, list<number>> | tuple<number,
+  number>`, a type no evaluated value has; it is now the component-wise
+  `tuple<list<number>, list<number>>` (Tycho item 246).
 - Fixed the LaTeX serializer recursing without end (`RangeError: Maximum call
   stack size exceeded`) on a product with a factor of the empty type `never`,
   such as `f(f(b)) - f(f(a)) = (f'(c))^2 (b - a)`, where the left side reads

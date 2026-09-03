@@ -265,17 +265,20 @@ describe('COMPILE constant folding - constant collections', () => {
     ]);
     expect(compile(negRoots, { mode: 'strict' }).code).toContain('Math.sqrt');
 
-    // And a collection whose structural lowering fails closed keeps failing
-    // closed, rather than the fold quietly answering for it. The witness is a
-    // MIXED list: its elements disagree about being complex, so the single
-    // scalar closure a broadcast wraps fits neither, and it is refused. (An
-    // all-complex list does broadcast — every element parameter is declared
-    // complex — so it is not a fail-closed witness.)
+    // A MIXED list — its elements disagree about being complex — is
+    // answered by the structural lowering, never by the fold: a
+    // complex-ish collection does not fold in either direction. The product
+    // lowers through the run-time dispatching `_SYS.smul` closure (Tycho
+    // item 246; it used to fail closed), so the emitted code carries the
+    // helper, not a folded literal, and the value agrees with the
+    // interpreter's `[2+2i, 4]`.
     const cplx = compile(
       ce.box(['Multiply', 2, ['List', ['Complex', 1, 1], 2]]),
       { fallback: true }
     );
-    expect(cplx.success).toBe(false);
+    expect(cplx.success).toBe(true);
+    expect(cplx.code).toContain('_SYS.smul');
+    expect(cplx.run!({})).toEqual([{ re: 2, im: 2 }, 4]);
   });
 });
 

@@ -147,11 +147,30 @@ describe('Tycho item 234 — point + list of points, JavaScript target', () => {
     for (const json of [
       ['Add', 'P', ['Tuple', 1, 2], 1],
       ['Add', 'S', ['Tuple', 1, 2]],
-      ['Add', 'Z', ['Tuple', 1, 2]],
     ]) {
       const r = compile(ce.box(json as never), { to: 'javascript' });
       expect(r.success).toBe(false);
     }
+    // Complex cells used to fail closed too. A point list whose declared
+    // column type is complex has no single element lane, so the sum lowers
+    // through the run-time dispatching `_SYS.sadd` (Tycho item 246) and
+    // answers the interpreter's value.
+    const r = compile(ce.box(['Add', 'Z', ['Tuple', 1, 2]] as never), {
+      to: 'javascript',
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.sadd');
+    expect(
+      r.run({
+        Z: [
+          [{ re: 1, im: 1 }, 0],
+          [3, 4],
+        ],
+      })
+    ).toEqual([
+      [{ re: 2, im: 1 }, 2],
+      [4, 6],
+    ]);
   });
 
   test('the lambda-convention fallback boxes a positional array under its parameter type', () => {
