@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -1010,5 +1011,98 @@ describe('PYTHON — arithmetic over a collection that stays declined', () => {
       '[_tv1 ** 2 for _tv1 in vn]'
     );
     ce.popScope();
+  });
+});
+
+/**
+ * Two emissions whose bug was that the source did not PARSE, or raised as soon
+ * as it ran, behind `success: true`. Both are checked the only way that
+ * settles it: `ast.parse` on the emitted module, then running it.
+ *
+ * - A rank-3 `Norm(t, "Frobenius")`. The Frobenius norm is the entry-wise
+ *   `√(Σ|xᵢ|²)` at every rank, which is `np.linalg.norm`'s default order; only
+ *   the SPELLING `'fro'` is matrix-only. The lowering used to fail closed
+ *   above rank 1.
+ * - A statement-form `If` with an else, inside a `Block`. Python assignment is
+ *   a statement, so the conditional expression the value-arm lowering emits
+ *   (`((r = 1) if (0 < x) else (r = 2))`) is a SyntaxError.
+ */
+describeMaybe('PYTHON EXECUTION PARITY — statement If and rank-3 Norm (venv)', () => {
+  const python = new PythonTarget();
+
+  /** `ast.parse` the source, then run it and return its stdout. */
+  function parseAndRun(source: string): string {
+    const file = path.join(os.tmpdir(), `ce-py-stmt-${process.pid}.py`);
+    fs.writeFileSync(file, source);
+    try {
+      // A parse failure is reported on its own, so a SyntaxError in the
+      // emitted module is never mistaken for a run-time error below.
+      execFileSync(
+        VENV_PYTHON,
+        ['-c', `import ast,sys; ast.parse(open(${JSON.stringify(file)}).read())`],
+        { encoding: 'utf8' }
+      );
+      return execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+  }
+
+  it('a Block with a statement-form If parses, runs, and matches the interpreter', () => {
+    const BLOCK = [
+      'Block',
+      ['Declare', 'r', { str: 'unknown' }, 0],
+      ['If', ['Greater', 'x', 0], ['Assign', 'r', 1], ['Assign', 'r', 2]],
+      'r',
+    ];
+    const scoped = new ComputeEngine();
+    const fn = python.compileFunction(scoped.box(BLOCK as any), 'fn_stmt_if', [
+      'x',
+    ]);
+    const out = parseAndRun(
+      'import numpy as np\nimport cmath, math, json\n\n' +
+        `${fn}\n` +
+        'print(json.dumps([fn_stmt_if(3), fn_stmt_if(-3), fn_stmt_if(float("nan"))]))\n'
+    );
+    // Decided: the selected assignment runs. Undecided (NaN): NEITHER branch
+    // runs and `r` keeps its initial 0 — the interpreter holds such an `If`
+    // rather than choosing an arm, and the JavaScript statement form agrees.
+    expect(JSON.parse(out)).toEqual([1, 2, 0]);
+    // …and the two decided answers ARE the interpreted ones.
+    for (const [x, expected] of [
+      [3, 1],
+      [-3, 2],
+    ] as const) {
+      const run = new ComputeEngine();
+      run.assign('x', x);
+      expect(run.box(BLOCK as any).evaluate().re).toBe(expected);
+    }
+  });
+
+  it('a rank-3 Frobenius Norm parses, runs, and matches the interpreter', () => {
+    const scoped = new ComputeEngine();
+    const T3 = [
+      'List',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      ['List', ['List', 5, 6], ['List', 7, 8]],
+    ];
+    // `constantFold: false`, or the fully constant call is evaluated at
+    // compile time and there is no `np.linalg.norm` left to run.
+    const fn = python.compileFunction(
+      scoped.box(['Norm', T3, { str: 'Frobenius' }] as any),
+      'fn_norm3',
+      [],
+      undefined,
+      { constantFold: false }
+    );
+    expect(fn).toContain('np.linalg.norm([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])');
+    const out = parseAndRun(
+      'import numpy as np\nimport cmath, math, json\n\n' +
+        `${fn}\n` +
+        'print(json.dumps(float(fn_norm3())))\n'
+    );
+    const interpreted = scoped.box(['Norm', T3, { str: 'Frobenius' }] as any).N().re!;
+    expect(interpreted).toBeCloseTo(Math.sqrt(204), 10);
+    expect(JSON.parse(out) as number).toBeCloseTo(interpreted, 10);
   });
 });

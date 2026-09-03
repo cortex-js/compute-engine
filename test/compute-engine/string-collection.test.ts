@@ -644,12 +644,16 @@ describe('strings are atomic where the lattice would otherwise shred them', () =
     }
   });
 
-  test('`Quantile` of a string is inert, never a character', () => {
-    // The handler is declared `-> number`; sorting by `.re` is a no-op on
-    // non-numeric elements, and the boundary exits used to hand back the
-    // element itself.
+  test('`Quantile` of a string is a type error, never a character', () => {
+    // The handler is declared `-> real | signed_infinity | nan`; sorting by
+    // `.re` is a no-op on non-numeric elements, and the boundary exits used
+    // to hand back the element itself. A character datum is now refused with
+    // the same error shape the statistics operators use for a datum that is
+    // not a number at all (the `number` constraint); it used to leave the
+    // application inert.
     const e = ce.box(['Quantile', str('abc'), 0.5]).evaluate();
-    expect(e.operator).toBe('Quantile');
+    expect(e.operator).toBe('Error');
+    expect(e.toString()).toContain('incompatible-type');
     // A numeric collection still answers.
     expect(ce.box(['Quantile', ['List', 1, 2, 3], 0.5]).evaluate().re).toBe(2);
   });

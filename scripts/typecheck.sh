@@ -86,7 +86,11 @@ fi
 echo ""
 echo "Checking public type surfaces for explicit 'any'..."
 
-ANY_PATTERN='as any\b|:\s*any\b|<any>|any\[\]'
+# Spelled in POSIX extended syntax only — `[[:space:]]` for a blank and an
+# explicit identifier boundary instead of `\s` and `\b`, which are GNU and
+# ripgrep extensions that a strict `grep -E` does not know. `rg` reads the
+# same pattern.
+ANY_PATTERN='as any([^[:alnum:]_]|$)|:[[:space:]]*any([^[:alnum:]_]|$)|<any>|any\[\]'
 # Comment-ONLY lines are excluded: the check targets TypeScript type
 # surfaces, and doc comments legitimately spell the ENGINE's type-language
 # literals (`collection<any>`, `list<any>`), which are unrelated to
@@ -103,8 +107,19 @@ ANY_PATTERN='as any\b|:\s*any\b|<any>|any\[\]'
 # without the conventional leading `*` is not dropped and still trips the
 # gate; prettier formats doc comments with the `*` prefix, so that spelling
 # does not occur in practice.
+# `rg` is not installed on every machine that runs this script. When it is
+# missing, `rg … || true` used to swallow the "command not found" failure,
+# so the check printed its success line without having searched anything.
+# The search falls back to `grep -rE` (the `--include` globs cover the same
+# files as the `rg` globs: `types*.ts` also matches `types-*.ts`), and both
+# spellings of the pattern are plain ERE, so the two tools agree.
+if command -v rg >/dev/null 2>&1; then
+  ANY_MATCHES=$(rg -n --glob 'types*.ts' --glob 'types-*.ts' --glob 'global-types.ts' "$ANY_PATTERN" src/compute-engine || true)
+else
+  ANY_MATCHES=$(grep -rnE --include='types*.ts' --include='global-types.ts' "$ANY_PATTERN" src/compute-engine || true)
+fi
 ANY_OUTPUT=$(
-  rg -n --glob 'types*.ts' --glob 'types-*.ts' --glob 'global-types.ts' "$ANY_PATTERN" src/compute-engine |
+  printf '%s\n' "$ANY_MATCHES" |
     grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*([[:space:]]|$)|/\*([^*]|\*[^/])*(\*/)?[[:space:]]*$)' || true
 )
 

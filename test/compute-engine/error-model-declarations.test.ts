@@ -682,3 +682,47 @@ describe('Contract B — derived application type (Phase C)', () => {
     expect(e.box(['Degrees', 'p']).type.matches('real')).toBe(true);
   });
 });
+
+describe('Contract B — the arithmetic core declarations (Phase F batch 11)', () => {
+  // The five flipped heads of the arithmetic core. `Square` is absent on
+  // purpose: it canonicalizes to `Power(x, 2)` and so declares no carrier
+  // of its own (the `Exp` arrangement).
+
+  test('Divide and Negate declare the extended complex carrier and propagate', () => {
+    // Every point of `complex | infinity` has a value or is an
+    // indeterminate FORM whose value is `NaN`, so there is no domain
+    // condition: `Negate` claims `total`, and `Divide` leaves the sound
+    // `may-marker` default because the indeterminate forms ARE the marker.
+    // Both declare `propagate` explicitly: the extended carrier is not a
+    // subtype of `complex`, so the derived policy would be `reject`.
+    const e = new ComputeEngine();
+    const divide = e.lookupDefinition('Divide')!.operator!;
+    expect(divide.resolvedNanBehaviorAt(0)).toBe('propagate');
+    expect(divide.resolvedNanBehaviorAt(1)).toBe('propagate');
+    const negate = e.lookupDefinition('Negate')!.operator!;
+    expect(negate.resolvedNanBehaviorAt(0)).toBe('propagate');
+    expect(negate.resolvedPartiality).toBe('total');
+    // `Negate` no longer declares `missingBehavior`: with every parameter
+    // numeric the resolution derives `propagate` on its own.
+    expect(negate.resolvedMissingBehavior).toBe('propagate');
+  });
+
+  test('Clamp, ElementMax and ElementMin declare the extended real carrier, total, propagate', () => {
+    // An extremum is defined by the ORDER of the real line, so the carrier
+    // is `real | signed_infinity` in every slot; `min`/`max` and the
+    // `min(max(x, lo), hi)` clamp select one of their operands at every
+    // point of it, `lo > hi` included, hence `total`.
+    const e = new ComputeEngine();
+    for (const [name, arity] of [
+      ['Clamp', 3],
+      ['ElementMax', 2],
+      ['ElementMin', 2],
+    ] as [string, number][]) {
+      const def = e.lookupDefinition(name)!.operator!;
+      for (let i = 0; i < arity; i++)
+        expect(def.resolvedNanBehaviorAt(i)).toBe('propagate');
+      expect(def.resolvedPartiality).toBe('total');
+      expect(def.signature.toString()).toContain('real | signed_infinity');
+    }
+  });
+});

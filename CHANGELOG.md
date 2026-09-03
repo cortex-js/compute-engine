@@ -301,6 +301,215 @@
   for such an `x` is no longer reported non-zero (it is 0 at `x = 0`); a
   pure-imaginary base still is.
 
+- **The arithmetic core now declares its mathematical domains**:
+  `Divide`, `Negate`, `Clamp`, `ElementMax` and `ElementMin`.
+
+  - `Clamp(x, lo, hi)`, `ElementMax` and `ElementMin` take the EXTENDED
+    REAL line — `real | signed_infinity` in every slot — because an
+    extremum is defined by the order of the real line, which the complex
+    numbers lack. A non-real operand or `~oo` is an `incompatible-type`
+    error at boxing now: `Clamp(i, 0, 1)`, `Clamp(~oo, 0, 1)`,
+    `ElementMax(i, 1)` and `ElementMax(~oo, 1)` used to be admitted and
+    stay unevaluated forever. The signed infinities keep their values
+    (`Clamp(+oo, 0, 1) = 1`, `ElementMax(+oo, 1) = +oo`), and `NaN`
+    propagates. Application types are sharper: `ElementMin(2, 5)` is
+    typed `integer` (was `real`), `Clamp([1, 2], 0, 1)` is typed
+    `vector<integer^2>` (was `vector<2>`), `Clamp(NaN, 0, 1)` exactly
+    `nan`, and an application with an infinite operand claims
+    `real | signed_infinity` (was `number`). Compiling one of these heads
+    over a statically non-real operand now fails on the invalid
+    expression rather than on the compiler's own real-only decline —
+    still fail-closed, at an earlier seam. `Max` and `Min`, which reduce
+    collections rather than broadcast, are unchanged.
+  - `Divide` and `Negate` take the extended complex plane
+    (`complex | infinity`) in every slot, with `NaN` propagating.
+    **No answer changes**: every point of that carrier has a value, or is
+    an indeterminate form whose value is `NaN` (`0/0`, `∞/∞`, `~oo/~oo`,
+    `~oo/∞`, `∞/~oo`), so the declaration only records what these two
+    operators already did. Both are enforced by their canonicalization
+    (which refuses a string or a boolean operand, as before), not by the
+    signature.
+  - `Square` is deliberately left with its wide declaration: it
+    canonicalizes to `Power(x, 2)`, so `Power`'s base carrier already
+    governs every exceptional point.
+  - One defect found alongside: an operand whose type is the EMPTY type
+    `never` (a symbol declared with an empty range, `integer<2<..<3>`)
+    made `Divide(m, 2)` fold to `NaN` and `Divide(2, m)` fold to `0`, so
+    the application lost the `never` claim its operand carries. The
+    bottom type answers every type test, and the folds are keyed on
+    those; canonicalization leaves such a quotient alone now, as
+    `Power`, `Multiply` and `Add` already did.
+
+- **The linear-algebra scalars now declare their mathematical domains**:
+  `Norm`, `Trace`, `MatrixPower` and `Determinant`.
+
+  - `Norm` takes a number, a numeric vector or matrix, a point, or a list
+    of points, and an order that is a positive real, `+oo`, `"Frobenius"`
+    or `"Infinity"`. A string or boolean operand (`Norm("a")`,
+    `Norm(True)`, `Norm([1, "a"])`) is an `incompatible-type` error at
+    boxing — it used to stay unevaluated forever — and so is a complex,
+    `NaN` or negative-infinite order. A non-positive or unknown order
+    (`Norm([3, 4], 0)`, `Norm([3, 4], "foo")`) violates the declared
+    precondition and answers an evaluation error instead of staying inert.
+    Several values were wrong: `Norm([])` is `0` for every order (was
+    inert); `Norm(v, "Frobenius")` of a VECTOR is its L2 norm (was inert;
+    the Frobenius norm is the entry-wise L2 norm at any rank), and the
+    Frobenius norm of a rank-3 or higher tensor is computed over its
+    entries (was inert); `Norm(("a", 3), "Infinity")` used to answer `3`
+    by silently dropping the string component — a non-numeric component is
+    an `incompatible-type` error in every order now; and `Norm(5, p)` with
+    a not-yet-known order `p` used to answer `5` and forget the order — it
+    stays unevaluated until `p` is known. The result is
+    declared `real | +oo | nan`, so a norm whose components cannot be read
+    (a vector-typed symbol, a matrix) types that union instead of `number`.
+    A `NaN` component still gives `NaN`, and an infinite one `+oo`.
+  - `Trace` takes a number or a numeric tensor; a string or a boolean is a
+    boxing error (was inert). Its result is declared `number | tensor`.
+  - `MatrixPower` takes a REAL exponent. `MatrixPower(M, i)` used to return
+    the identity matrix (the handler read only the real part of the
+    exponent, which is 0); it is an `incompatible-type` error now, as are
+    `NaN`, `+oo`, `-oo` and `~oo` exponents (were inert). A half-integer
+    power of an exact 2×2 positive-semidefinite matrix now also works
+    under `.N()` and with a float exponent
+    (`MatrixPower([[4, 0], [0, 9]], 0.5)` is `[[2, 0], [0, 3]]`, and
+    `MatrixPower([[1/4, 0], [0, 9]], 1/2).N()` is `[[0.5, 0], [0, 3]]`;
+    both used to stay inert). The compiled JavaScript used to return `NaN`
+    behind a successful compile for any exponent that is not an integer at
+    run time; it now compiles `MatrixPower` only for an exponent that is
+    statically an integer and otherwise declines, so the expression is
+    interpreted.
+  - `Determinant` of a matrix with integer, rational, real or complex
+    entries is typed in that tier (`Determinant([[1, 2], [3, 4]])` is
+    `integer`, was `number`). Infinite and `NaN` entries are computed by
+    IEEE, as before.
+  - The Python target lowers `Norm(v, "Frobenius")` of a vector to
+    `np.linalg.norm(v)` instead of refusing to compile it; the numpy
+    spelling `'fro'` stays matrix-only.
+
+- **`D` differentiates a piecewise definition.** `D(Which(c₁, v₁, …,
+  cₙ, vₙ), x)` is `Which(c₁, D(v₁, x), …, cₙ, D(vₙ, x))` — each arm on its
+  own region, the conditions unchanged — and the same for `If`. It used to
+  stay unevaluated, so the piecewise densities above had no derivative:
+  `D(CDF(ExponentialDistribution(2), x).evaluate(), x)` is
+  `Which(x < 0, 0, True, 2e^(-2x))` now.
+
+- **The Python target emits a statement `if` for a statement-form `If`
+  with an else inside a block.** It used to emit `(r = 1) if … else
+  (r = 2)`, which is not valid Python. The statement form takes the same
+  decidedness guard as the expression form (an undecided condition runs
+  neither branch), including inside a loop body; a statement `If` in a
+  value-returning position, and a rank-3 tensor norm with an order numpy
+  cannot take, now decline to compile instead of producing code that
+  raises at run time. A rank-3 or higher Frobenius norm compiles to
+  `np.linalg.norm(t)`.
+
+- **A compiled `And`/`Or`/`Not` in a branch condition is now
+  three-valued.** `If(x > 0 ∧ y > 0, 1, -1)` compiled to
+  `(0 < _.x && 0 < _.y) ? 1 : -1`, so at `x = 1, y = NaN` the `&&`
+  answered `false` and the else arm was taken — an answer from no
+  evidence, where a lone `x > 0` at `NaN` already yields `NaN` under the
+  undecided-condition rule. The connectives now combine the decidedness
+  and the value of their operands by the Kleene tables on the JavaScript
+  and Python targets: that expression is `NaN` at `x = 1, y = NaN`, `-1`
+  at `x = -1, y = NaN` (a decided `false` still decides an `And`), and
+  `1` at `x = 1, y = 2`. Short-circuiting is preserved: a decided-false
+  guard never evaluates the operands after it (`If(x ≠ 0 ∧ 1/x > 1, …)`
+  at `x = 0` takes the else arm without computing `1/x`), and a condition
+  made only of comparisons that cannot be undecided compiles exactly as
+  before. The GPU targets keep JavaScript-style selection, as ruled.
+
+- **`Binomial`, `Choose`, `Pochhammer`, `GammaRegularized` and
+  `BetaRegularized` now declare their mathematical domains** — the
+  extended complex plane in every slot, `NaN` propagating, following the
+  Γ family — and answer their limits at the infinities instead of staying
+  unevaluated under `evaluate()` while `.N()` answered `NaN`:
+  `Binomial(+oo, 2)` is `+oo`, `Binomial(5, +oo)` is `0`,
+  `Binomial(-oo, 3)` is `-oo`, `Pochhammer(3, +oo)` is `+oo`,
+  `GammaRegularized(a, +oo)` is `0`, `GammaRegularized(+oo, z)` is `1`,
+  `BetaRegularized(x, a, +oo)` is `1` for `x > 0`, and a point with no
+  limit (`Binomial(-oo, 2.5)`, `GammaRegularized(2, -oo)`) is `NaN` on both
+  routes. Wrong finite values fixed alongside: `Binomial(2.5, -2)` and
+  `Binomial(-2.5, -1.5)` are `0` (a Γ-pole in the denominator; they were a
+  tiny float and `NaN`), `Binomial(-3, 1/2)` is `~oo` (was `-8.86e48`),
+  and `Binomial(n, k)` for two negative integers is no longer `0` when
+  the two Γ-poles cancel (`Binomial(-3, -3)` is `1`, `Binomial(-2, -4)`
+  is `3`; the simplifier already answered these); `simplify()` no longer
+  folds `Binomial(n, n)` to `1` at an infinite or NaN `n`;
+  `Pochhammer(3, -2)` is `1/2` (the negative-index product; it stayed
+  unevaluated), `Pochhammer(2.5, 1.5).N()` numericizes through the Γ ratio
+  (stayed unevaluated), `Pochhammer(i, 2)` evaluates to `-1 + i`;
+  `GammaRegularized(a, 0)` no longer folds to `1` for every `a`
+  (`GammaRegularized(-1, 0)` is `NaN`), `GammaRegularized(-1, 2)` and
+  `GammaRegularized(0, 2)` are `0` (a pole of `Γ(a)`), and
+  `GammaRegularized(n, z)` for a positive integer `n` is the exact
+  `e^{-z} Σ_{k<n} z^k/k!` at any real `z`, negative included (it used to
+  answer `NaN` under `.N()`); `GammaRegularized(-1/2, 2)`, a finite
+  negative real the kernel does not compute, stays symbolic instead of
+  answering `NaN`. `BetaRegularized(0, a, b)` and `BetaRegularized(1, a,
+  b)` fold to `0` and `1` only for provably positive `a` and `b`. A
+  complex operand stays symbolic (no complex kernel).
+
+- **The distributions now declare their parameter and argument domains.**
+  `NormalDistribution(μ, σ)`, `UniformDistribution(a, b)`,
+  `PoissonDistribution(λ)` and `ExponentialDistribution(λ)` take real
+  parameters and `BinomialDistribution(n, p)` an integer `n` and a
+  probability `p` in `[0, 1]`: a `NaN`, infinite or complex parameter is
+  an `incompatible-type` error (it used to be admitted silently). `PDF`
+  and `CDF` take a real or signed-infinite argument and are typed
+  `real<0..> | nan` and `real<0..1> | nan`; `Quantile` takes a probability
+  in `[0, 1]`, so `Quantile(D, 1.5)` is refused at boxing. Values fixed
+  alongside:
+  - The uniform and exponential densities and cumulative functions are
+    piecewise now. `PDF(UniformDistribution(0, 1), x)` used to be `1` for
+    every `x` (and `1` at `±oo`, at `NaN` and at `i`); it is
+    `1` on `[0, 1]` and `0` outside, `0` at `±oo`, `NaN` at `NaN`.
+    `CDF(UniformDistribution(0, 1), +oo)` was `+oo` (now `1`) and
+    `CDF(ExponentialDistribution(2), -oo)` was `-oo` (now `0`). As a
+    result `Integrate(PDF(UniformDistribution(0, 1), x), x, -1, 2)` is `1`;
+    it used to be `3`.
+  - `PDF(PoissonDistribution(2), +oo)` was `+oo` and
+    `PDF(PoissonDistribution(2), -1)` a division by `(-1)!`; both are `0`.
+    `PDF(BinomialDistribution(10, 0.5), ±oo)` was `NaN`, is `0`; the
+    binomial and Poisson `CDF` at `±oo` are `1` and `0` instead of an
+    unevaluated regularized function.
+  - The discrete quantiles are computed under `.N()`:
+    `Quantile(BinomialDistribution(10, 0.5), 0.5).N()` is `5` and
+    `Quantile(PoissonDistribution(2), 0.5).N()` is `2`; under plain
+    `evaluate()` they stay symbolic, because the search compares
+    floating-point cumulative probabilities and an exact answer must not
+    be read off a tolerance. `Quantile(D, NaN)` is `NaN` for every
+    distribution, `Quantile([], p)` is `NaN`, and `Quantile` of a string
+    or of a list with a non-numeric element is an `incompatible-type`
+    error instead of an unevaluated expression.
+
+- **The statistics aggregates now declare how they treat absent data and
+  what they return**: `Mean`, `Median`, `Variance`, `PopulationVariance`,
+  `StandardDeviation`, `PopulationStandardDeviation`, `Kurtosis`,
+  `Skewness`, `Mode`, `Quartiles`, `InterquartileRange`, `Covariance`,
+  `PopulationCovariance` and `Correlation` declare that a `NaN` or
+  `Missing` datum is handled (the aggregate is `NaN`), and their result
+  types are the narrowest sound claims instead of `number`: the variance
+  family is `real<0..> | nan`, `Median` and `Mode` are
+  `real | signed_infinity | nan`, `Kurtosis`, `Skewness`, `Covariance`,
+  `PopulationCovariance` and `Correlation` are `real | nan`,
+  `InterquartileRange` is `real<0..> | +oo | nan`; `Mean` keeps `number`
+  because complex data has a complex mean. Values fixed alongside:
+  - A string, boolean or nested-collection datum (`Mean([1, "a", 3])`,
+    `Mean([1, True, 3])`, `Mean([[1, 2], [3, 4]])`) and a whole string
+    operand (`Mean("abc")`, which was walked character by character) used
+    to leave every aggregate unevaluated; each is an `incompatible-type`
+    error now. `LinearRegression` and `PolynomialFit` report the same
+    diagnosis for such data.
+  - A one-point sample is its own quartiles: `Quartiles(5)` is `(5, 5, 5)`
+    and `InterquartileRange(5)` is `0` (both used to report a missing
+    value). The compiled code moved with it.
+  - `Quartiles`' result tuple named its components in the wrong order
+    (`mid` read the lower quartile); the names are `lower`, `mid`, `upper`
+    now, matching the values.
+  - An absent datum in paired data (`Covariance([1, 2, 3], [1, Missing,
+    3])`) answers `NaN`, as the same input spelled with `NaN` already did,
+    instead of a shape error. A genuine shape error still wins over `NaN`.
+
 - **The rational and parity family now declares its mathematical
   domains**: `Mod`, `Fract`, `Rationalize`, `ContinuedFraction`, `IsOdd`,
   `IsEven`, `Numerator`, `Denominator` and `NumeratorDenominator`. Every

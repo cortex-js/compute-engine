@@ -13,7 +13,13 @@ import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { negativeSign, nonNegativeSign } from '../boxed-expression/sgn.js';
 import { operandNonFiniteNumber, operandSgn } from './type-handlers-types.js';
-import { apply2 } from '../boxed-expression/apply.js';
+import { apply2, shouldNumericize } from '../boxed-expression/apply.js';
+import {
+  infinitePoint,
+  isNegativeIntegerLiteral,
+  isNonPositiveIntegerLiteral,
+  isRealLiteral,
+} from '../boxed-expression/infinite-point.js';
 import { gamma, bigGamma, gammaln } from '../numerics/special-functions.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { kleeneEvery } from '../../common/kleene.js';
@@ -78,10 +84,18 @@ function estimatedBellDigits(n: number): number {
 /**
  * Exact binomial coefficient for bigint n, k.
  *
- * - k < 0 → 0 (no combinatorial meaning, regardless of n).
+ * - k < 0 → 0, because `1/Γ(k+1)` vanishes at a pole of `Γ` — UNLESS `Γ(n+1)`
+ *   is a pole as well (`n` a negative integer), where the two poles cancel
+ *   and the quotient is finite. On that both-negative diagonal the value is
+ *   `(-1)^(n-k)·Binomial(-k-1, -n-1)` for n ≥ k (`C(-3,-3) = 1`,
+ *   `C(-3,-4) = -3`, `C(-3,-5) = 6`) and 0 for n < k, where `Γ(n-k+1)` puts a
+ *   second pole in the denominator (`C(-5,-3) = 0`). Verified against a
+ *   high-precision reference over the whole -6..0 square. The `k < 0 → 0`
+ *   short cut used to apply "regardless of n", so `Binomial(-3, -3)` answered
+ *   0 while `simplify`'s own `C(n, n) → 1` rewrite answered 1.
  * - n ≥ 0 and k > n → 0 (standard convention).
- * - n < 0 → the standard extension via Pascal's rule analytic continuation:
- *   Binomial(n, k) = (-1)^k · Binomial(k-n-1, k), e.g.
+ * - n < 0 and k ≥ 0 → the standard extension via Pascal's rule analytic
+ *   continuation: Binomial(n, k) = (-1)^k · Binomial(k-n-1, k), e.g.
  *   Binomial(-2, 3) = (-1)³·Binomial(4, 3) = -4 (matches Mathematica/sympy).
  *
  * Returns `undefined` (stay symbolic) rather than an exact bigint when the
@@ -93,7 +107,14 @@ function binomialBigint(
   k: bigint,
   deadline?: number
 ): bigint | undefined {
-  if (k < 0n) return 0n;
+  if (k < 0n) {
+    // A pole of Γ(k+1) in the denominator, so 0 — unless Γ(n+1) is a pole
+    // too and cancels it, and Γ(n−k+1) does not put a second pole back.
+    if (n >= 0n || n < k) return 0n;
+    const sign = (n - k) % 2n === 0n ? 1n : -1n;
+    const inner = binomialBigint(-k - 1n, -n - 1n, deadline);
+    return inner === undefined ? undefined : sign * inner;
+  }
   if (n < 0n) {
     const sign = k % 2n === 0n ? 1n : -1n;
     const inner = binomialBigint(k - n - 1n, k, deadline);
@@ -112,6 +133,124 @@ function binomialBigint(
     result = (result * (n - kk + i)) / i;
   }
   return result;
+}
+
+/**
+ * The value of `Binomial(n, k)` = Γ(n+1)/(Γ(k+1)·Γ(n−k+1)) when at least one
+ * operand is an infinite point, or `undefined` when both are finite (and for
+ * the combinations below whose limit is not established). Each answer is
+ * exact, so it is given on `evaluate()` and `.N()` alike. The limits were
+ * verified against an independent high-precision computation at |n| or |k| =
+ * 10², 10⁴ and 10⁶, and — for the direction-less `~oo` — along the
+ * directions `R·e^{iθ}` for θ ∈ {0, π/3, π/2, 2π/3, π}:
+ *
+ * - A NEGATIVE INTEGER `k` makes `C(n, k)` the zero function: `1/Γ(k+1)` is
+ *   `0` at every pole of `Γ`. The value is `0` at every `n`, infinite ones
+ *   included.
+ * - `C(n, k) ~ n^k/Γ(k+1)` as `n → +∞`, so `C(+∞, k)` is `+∞` for `k > 0`,
+ *   `1` for `k = 0` (`C(10⁶, 0) = 1`) and `0` for `k < 0`
+ *   (`C(10⁶, −2.5) = 4.2·10⁻¹⁶`).
+ * - Towards `−∞` the poles of `Γ(n+1)` at the negative integers get in the
+ *   way. For a non-negative INTEGER `k`, `C(n, k)` is the polynomial
+ *   `n(n−1)⋯(n−k+1)/k!`, which has no poles: `C(−∞, k)` is `1` for `k = 0`
+ *   and `(−1)^k·∞` for `k ≥ 1` (`C(−10⁶, 3) = −1.67·10¹⁷`). For a
+ *   NON-INTEGER `k` the value oscillates in sign and modulus between
+ *   consecutive poles without settling (`C(−10⁶−0.1, 0.5) = 3473`,
+ *   `C(−10⁶−0.5, 0.5) = 0`, `C(−10⁶−0.9, 0.5) = −3473`), so there is no
+ *   limit: `NaN`.
+ * - `C(~oo, k)`: the polynomial arm again. `1` for `k = 0` and `~oo` for a
+ *   positive integer `k` — the modulus diverges in every direction while the
+ *   direction itself does not settle. For a non-integer `k` the negative
+ *   real axis is again a line of poles, so there is no limit: `NaN`.
+ * - `C(n, ±∞)` is decided by the same asymptotic read in `k`:
+ *   `|C(n, k)| ~ |Γ(n+1)/π|·|sin(π(n−k+1))|·k^(−n−1)`. For a finite real
+ *   `n > −1` the power wins and the value is `0` (`C(0.5, −10⁶) =
+ *   2.8·10⁻¹⁰`); for `n ≤ −1` the power diverges while the sine oscillates,
+ *   so there is no limit: `NaN` (`C(−2.5, 10⁶) = 7.5·10⁸` against
+ *   `C(−2.5, 10⁶+0.5) = 0`).
+ * - `C(n, ~oo)`: `NaN`. The modulus wanders between 0 and `+∞` with the
+ *   direction (`C(5, 10⁶·e^{i}) = 10¹¹⁴⁸⁰⁴⁸` against
+ *   `C(5, −10⁶) = 1.5·10⁻⁴⁴`).
+ * - Two infinite operands, or an anonymous infinity such as `∞ + i` in
+ *   either slot: `NaN` (the uniform rule of the special-function heads).
+ *
+ * A finite operand that is not a real literal (a complex number, a symbol)
+ * leaves the application symbolic: nothing here is proven for it.
+ */
+function binomialValueAtInfinity(
+  n: Expression,
+  k: Expression,
+  ce: Expression['engine']
+): Expression | undefined {
+  const pn = infinitePoint(n);
+  const pk = infinitePoint(k);
+  if (pn === undefined && pk === undefined) return undefined;
+  if (pn === 'anonymous' || pk === 'anonymous') return ce.NaN;
+
+  // The zero function: `C(n, k) = 0` for every negative integer `k`.
+  if (pk === undefined && isNegativeIntegerLiteral(k)) return ce.Zero;
+
+  if (pn !== undefined && pk !== undefined) return ce.NaN;
+
+  if (pn !== undefined) {
+    // `n` is infinite, `k` is finite.
+    if (!isRealLiteral(k)) return undefined;
+    if (k.isSame(0)) return ce.One;
+    if (pn === '+oo')
+      return k.isPositive === true ? ce.PositiveInfinity : ce.Zero;
+    // `-oo` and `~oo`: only the polynomial (non-negative integer `k`) arm
+    // has a limit; the negative-integer `k` is already answered above.
+    if (k.isInteger !== true) return ce.NaN;
+    if (pn === '~oo') return ce.ComplexInfinity;
+    const ki = toBigint(k);
+    if (ki === null) return undefined;
+    return ki % 2n === 0n ? ce.PositiveInfinity : ce.NegativeInfinity;
+  }
+
+  // `k` is infinite, `n` is finite.
+  if (pk === '~oo') return ce.NaN;
+  if (!isRealLiteral(n)) return undefined;
+  if (n.isGreater(-1) === true) return ce.Zero;
+  if (n.isLessEqual(-1) === true) return ce.NaN;
+  return undefined;
+}
+
+/**
+ * The value of `Binomial(n, k)` at a finite real point where one of the three
+ * `Γ` factors of `Γ(n+1)/(Γ(k+1)·Γ(n−k+1))` sits on a pole, or `undefined`
+ * away from those points. Exact, so given on both routes.
+ *
+ * A pole in the DENOMINATOR makes the quotient `0`; a pole in the numerator
+ * alone makes it the engine's spelling of an unsigned pole, `~oo` (the same
+ * answer `Gamma(0)` and `Beta(−1, 2)` give). The naive Γ-ratio kernel
+ * answered overflow garbage at all of these (`C(2.5, −2)` was
+ * `−2.1·10⁻⁵¹` instead of `0`, `C(−3, 0.5)` was `−8.9·10⁴⁸` instead of
+ * `~oo`) or `NaN` (`C(−2.5, −1.5)`, where `n − k + 1 = 0`, is `0`: the
+ * limit `C(−2.5, −1.5±ε)` crosses zero, ±0.0067 at ε = 0.01).
+ *
+ * Only reached when `n` and `k` are not both integers — that case has its own
+ * exact bigint route (`binomialBigint`), which is where a pole in the
+ * numerator meets one in the denominator and the finite ratio decides.
+ */
+function binomialPoleValue(
+  n: Expression,
+  k: Expression,
+  ce: Expression['engine']
+): Expression | undefined {
+  if (!isRealLiteral(n) || !isRealLiteral(k)) return undefined;
+  // A negative-integer `n` AND a negative-integer `k` put a pole on both
+  // sides of the quotient; the finite ratio is the exact bigint route's, so
+  // decline rather than answer either pole's naive value.
+  if (isNegativeIntegerLiteral(n) && isNegativeIntegerLiteral(k))
+    return undefined;
+  // `Γ(k+1)` on a pole: `k` a negative integer, with nothing to cancel it.
+  if (isNegativeIntegerLiteral(k)) return ce.Zero;
+  // `Γ(n−k+1)` on a pole: `n − k` a negative integer.
+  const nk = ce.function('Subtract', [n, k]).evaluate();
+  if (isNegativeIntegerLiteral(nk)) return ce.Zero;
+  // `Γ(n+1)` on a pole and neither denominator factor on one.
+  if (isNegativeIntegerLiteral(n)) return ce.ComplexInfinity;
+  return undefined;
 }
 
 /**
@@ -146,9 +285,17 @@ function binomialBigint(
 function binomialType(
   n: OperandDescriptor | undefined,
   k: OperandDescriptor | undefined
-): Type {
-  // A NaN operand is caught by the non-finiteness fact (`finite === false`),
-  // and answers the same `number` the dedicated NaN test gave.
+): Type | undefined {
+  // A provably-NaN operand DECLINES: a handler answer is never widened, so
+  // answering `number` here would suppress any sharper claim the framework
+  // can derive. (What that buys today is recorded on `specialFunctionType`
+  // in `library/arithmetic.ts`: for a head whose declared result is the wide
+  // `number`, the derived claim stays `number`.)
+  if (
+    (n && typeFact(n.type, 'nan') === true) ||
+    (k && typeFact(k.type, 'nan') === true)
+  )
+    return undefined;
   if (!n || !k) return 'number';
   if (operandNonFiniteNumber(n) || operandNonFiniteNumber(k)) return 'number';
   if (
@@ -173,6 +320,11 @@ function evaluateBinomial(
   numericApproximation: boolean | undefined,
   ce: Expression['engine']
 ): Expression | undefined {
+  // The infinite points are exact, so they are answered on both routes and
+  // BEFORE any numeric kernel sees an `Infinity` argument.
+  const infinite = binomialValueAtInfinity(nExpr, kExpr, ce);
+  if (infinite !== undefined) return infinite;
+
   // Exact integers: exact bigint arithmetic (handles negative n).
   if (
     isNumber(nExpr) &&
@@ -196,6 +348,11 @@ function evaluateBinomial(
     (isNumber(kExpr) && kExpr.im !== 0)
   )
     return undefined;
+
+  // A Γ factor on a pole. Exact, so answered on both routes, and before the
+  // kernel — the Γ-ratio overflows to garbage there.
+  const pole = binomialPoleValue(nExpr, kExpr, ce);
+  if (pole !== undefined) return pole;
 
   // Inexact (float) operands numericize even under plain evaluate(); exact
   // non-integer operands (rationals, radicals, π, ...) only numericize
@@ -253,51 +410,184 @@ function evaluateBinomial(
 }
 
 /**
- * Evaluate `Pochhammer(a, k)` — the rising factorial (a)_k = a(a+1)…(a+k-1)
- * — for a small nonnegative integer `k` (Wester B13).
+ * The sign of `Γ(a)` for a NEGATIVE, NON-INTEGER real literal `a`: `Γ` is
+ * negative on `(−1, 0)` and alternates across every pole, so the sign is
+ * `−1` when `⌊−a⌋` is even and `+1` when it is odd (`Γ(−0.5) = −3.54`,
+ * `Γ(−1.5) = +2.36`, `Γ(−2.5) = −0.95`, `Γ(−3.5) = +0.27`). The parity is
+ * read through `Floor` on the engine so a magnitude beyond the double range
+ * is still decided correctly. Returns `undefined` when the parity cannot be
+ * settled.
+ */
+function negativeGammaSign(
+  a: Expression,
+  ce: Expression['engine']
+): 1 | -1 | undefined {
+  const f = ce.function('Floor', [ce.function('Negate', [a])]).evaluate();
+  if (f.isEven === true) return -1;
+  if (f.isOdd === true) return 1;
+  return undefined;
+}
+
+/**
+ * The value of `Pochhammer(a, k)` = Γ(a+k)/Γ(a) when at least one operand is
+ * an infinite point, or `undefined` when both are finite (and where the limit
+ * is not established). Exact, so given on `evaluate()` and `.N()` alike.
+ * Every limit was verified against an independent high-precision computation
+ * at 10², 10⁴ and 10⁶, and at three offsets between consecutive poles when
+ * the approach is along the negative axis:
  *
- * - `k` not a small nonnegative integer literal: stay symbolic (inert).
+ * - `(a)_k ~ a^k` as `|a| → ∞`, so `(+∞)_k` is `+∞` for `k > 0`, `1` for
+ *   `k = 0` and `0` for `k < 0` (`(10⁶)_{−2.5} = 10⁻¹⁵`).
+ * - `(−∞)_k` and `(~oo)_k` are decided by the polynomial arm: `1` for
+ *   `k = 0`, `(−1)^k·∞` (respectively `~oo`) for a positive integer `k`
+ *   (`(−10⁶−½)_3 = −10¹⁸`), and `0` for a negative integer `k` — there
+ *   `(a)_k = 1/((a−1)⋯(a+k))`, which has no pole for large `|a|`
+ *   (`(−10⁶−½)_{−2} = 10⁻¹²`). For a NON-INTEGER `k` the poles of `Γ(a+k)`
+ *   sit between the zeros of `1/Γ(a)`, so the value alternates between `0`
+ *   and an infinite value without settling: `NaN` (`(−10⁶−¼)_{0.5} = −1000`,
+ *   `(−10⁶−½)_{0.5} = ∞`, `(−10⁶−¾)_{0.5} = +1000`).
+ * - `(a)_{+∞}`: `0` when `a` is a non-positive integer (`1/Γ(a) = 0`), and
+ *   otherwise `sign(Γ(a))·∞` — `+∞` for `a > 0`, and the alternating sign of
+ *   `Γ` below zero (`(−2.5)_{10⁶}` is negative, `Γ(−2.5) = −0.95`).
+ * - `(a)_{−∞}`: `0` when `a` is a non-positive integer, `NaN` otherwise.
+ *   `Γ(a+k)` has a pole at every `k` with `a + k` a non-positive integer, so
+ *   for any other `a` the value is unbounded arbitrarily far out
+ *   (`(0.5)_{−10⁶} = 2·10⁻⁵⁵⁶⁵⁷⁰⁶` but `(0.5)_{−10⁶−½} = ∞`); the poles are
+ *   cancelled by the pole of `Γ(a)` exactly when `a` is a non-positive
+ *   integer.
+ * - `(a)_{~oo}`: `NaN`. `|Γ(a+k)|` decays like `e^{−π|Im k|/2}` in the
+ *   imaginary direction and diverges along the positive real axis, so the
+ *   modulus has no limit.
+ * - Two infinite operands, or an anonymous infinity such as `∞ + i` in
+ *   either slot: `NaN`.
+ */
+function pochhammerValueAtInfinity(
+  a: Expression,
+  k: Expression,
+  ce: Expression['engine']
+): Expression | undefined {
+  const pa = infinitePoint(a);
+  const pk = infinitePoint(k);
+  if (pa === undefined && pk === undefined) return undefined;
+  if (pa === 'anonymous' || pk === 'anonymous') return ce.NaN;
+  if (pa !== undefined && pk !== undefined) return ce.NaN;
+
+  if (pa !== undefined) {
+    // `a` is infinite, `k` is finite.
+    if (!isRealLiteral(k)) return undefined;
+    if (k.isSame(0)) return ce.One;
+    if (pa === '+oo')
+      return k.isPositive === true ? ce.PositiveInfinity : ce.Zero;
+    if (k.isInteger !== true) return ce.NaN;
+    if (k.isNegative === true) return ce.Zero;
+    if (pa === '~oo') return ce.ComplexInfinity;
+    const ki = toBigint(k);
+    if (ki === null) return undefined;
+    return ki % 2n === 0n ? ce.PositiveInfinity : ce.NegativeInfinity;
+  }
+
+  // `k` is infinite, `a` is finite.
+  if (pk === '~oo') return ce.NaN;
+  if (!isRealLiteral(a)) return undefined;
+  if (isNonPositiveIntegerLiteral(a)) return ce.Zero;
+  if (pk === '-oo') return ce.NaN;
+  if (a.isPositive === true) return ce.PositiveInfinity;
+  const sign = negativeGammaSign(a, ce);
+  if (sign === undefined) return undefined;
+  return sign > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+}
+
+/**
+ * Evaluate `Pochhammer(a, k)` — the rising factorial (a)_k = Γ(a+k)/Γ(a).
+ *
+ * - The infinite points are `pochhammerValueAtInfinity`'s, answered on both
+ *   routes before any kernel sees an `Infinity` argument.
+ * - A small integer `k` (Wester B13): the explicit finite product. For
+ *   `k ≥ 0` that is the rising factorial `a(a+1)…(a+k-1)`; for `k < 0` it is
+ *   the reciprocal falling form `1/((a−1)(a−2)…(a+k))`, so `(3)_{−2} = 1/2`.
+ *   Both hold for a symbolic `a`, where the product is kept non-canonical so
+ *   the factored structure survives serialization.
  * - Numeric `a`: fold to the numeric value (exact for integer/rational `a`,
  *   float for an inexact `a`).
- * - Symbolic `a`: return the explicit factored product, kept non-canonical so
- *   the factored structure survives serialization.
+ * - Otherwise the Γ ratio: a real `a` and a real `k` numericize under `.N()`
+ *   (and under plain `evaluate()` when either is inexact). A `Γ` factor on a
+ *   pole is answered exactly first — `1/Γ(a) = 0` where `a` is a non-positive
+ *   integer, and `Γ(a+k)` on a pole makes the value the unsigned `~oo`.
+ * - A complex `a` with a non-integer or large `k`, and a symbolic operand,
+ *   stay symbolic: there is no complex kernel here.
  */
 function evaluatePochhammer(
   aExpr: Expression,
   kExpr: Expression,
+  ce: Expression['engine'],
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const infinite = pochhammerValueAtInfinity(aExpr, kExpr, ce);
+  if (infinite !== undefined) return infinite;
+
+  const k =
+    isNumber(kExpr) && kExpr.im === 0 && kExpr.isInteger === true
+      ? toBigint(kExpr)
+      : null;
+  if (k !== null && k >= -SYMBOLIC_EXPANSION_CAP && k <= SYMBOLIC_EXPANSION_CAP)
+    return pochhammerProduct(aExpr, Number(k), ce);
+
+  // The Γ ratio. Only real operands: `apply2` has no complex kernel here.
+  if (!isRealLiteral(aExpr) || !isRealLiteral(kExpr)) return undefined;
+  const aPole = isNonPositiveIntegerLiteral(aExpr);
+  const sPole = isNonPositiveIntegerLiteral(
+    ce.function('Add', [aExpr, kExpr]).evaluate()
+  );
+  // Both on a pole: `k` is then an integer past the expansion cap, and the
+  // finite ratio of the two poles is what decides — a value this handler does
+  // not build. Stay symbolic rather than let the kernel answer `NaN/NaN`.
+  if (aPole && sPole) return undefined;
+  if (aPole) return ce.Zero;
+  if (sPole) return ce.ComplexInfinity;
+  if (!shouldNumericize(numericApproximation, aExpr, kExpr)) return undefined;
+  return apply2(
+    aExpr,
+    kExpr,
+    (a, k) => gamma(a + k) / gamma(a),
+    (a, k) => bigGamma(ce, a.add(k)).div(bigGamma(ce, a))
+  );
+}
+
+/**
+ * `Pochhammer(a, k)` as an explicit product of `|k|` factors, for a literal
+ * integer `k` inside `SYMBOLIC_EXPANSION_CAP`.
+ *
+ * The terms are built with `ce.function('Add', …)` rather than the `.add()`
+ * METHOD: the method folds two exact literals to a machine float, so an exact
+ * irrational `a` lost its exactness on the first term (`(√2)_2` →
+ * 3.41421356… instead of `2 + √2`). For a numeric `a` the product is
+ * evaluated (floats are excluded from canonical folding, so it must be
+ * evaluated rather than merely constructed) and the trailing `.evaluate()`
+ * still folds a float argument to a float, so both halves of the exact/`.N()`
+ * contract hold. For a symbolic `a` the product is left non-canonical.
+ */
+function pochhammerProduct(
+  aExpr: Expression,
+  kn: number,
   ce: Expression['engine']
 ): Expression | undefined {
-  if (!isNumber(kExpr) || kExpr.im !== 0 || !kExpr.isInteger) return undefined;
-  const k = toBigint(kExpr);
-  if (k === null || k < 0n || k > SYMBOLIC_EXPANSION_CAP) return undefined;
-  const kn = Number(k);
   if (kn === 0) return ce.One;
   if (kn === 1) return aExpr;
+  const numeric = isNumber(aExpr);
 
-  // Numeric first argument: fold the product to a number (evaluate() respects
-  // the exact/float split — floats are otherwise excluded from canonical
-  // folding, so the product must be evaluated rather than merely constructed).
-  //
-  // Build the terms with `ce.function('Add', …)`, matching the symbolic branch
-  // below: the `.add()` METHOD folds two exact literals to a machine float, so
-  // an exact irrational `a` lost its exactness on the first term
-  // (`(√2)_2` → 3.41421356… instead of `2 + √2`). The trailing `.evaluate()`
-  // still folds a float argument to a float, so both halves of the exact/N
-  // contract hold.
-  if (isNumber(aExpr) && aExpr.im === 0) {
-    const factors: Expression[] = [];
-    for (let i = 0; i < kn; i++)
-      factors.push(ce.function('Add', [aExpr, ce.number(i)]));
-    return ce.function('Multiply', factors).evaluate();
-  }
+  // (a)_k = a(a+1)…(a+k−1) for k > 0; (a)_k = 1/((a−1)(a−2)…(a+k)) for k < 0.
+  const offsets: number[] = [];
+  if (kn > 0) for (let i = 0; i < kn; i++) offsets.push(i);
+  else for (let i = 1; i <= -kn; i++) offsets.push(-i);
 
-  // Symbolic first argument: explicit rising-factorial product, non-canonical.
-  const factors: Expression[] = [aExpr];
-  for (let i = 1; i < kn; i++)
-    factors.push(
-      ce.function('Add', [aExpr, ce.number(i)], { form: 'structural' })
-    );
-  return ce.function('Multiply', factors, { form: 'structural' });
+  const form = numeric ? undefined : ({ form: 'structural' } as const);
+  const factors = offsets.map((i) =>
+    i === 0 ? aExpr : ce.function('Add', [aExpr, ce.number(i)], form)
+  );
+  const product = ce.function('Multiply', factors, form);
+  if (kn > 0) return numeric ? product.evaluate() : product;
+  const reciprocal = ce.function('Divide', [ce.One, product], form);
+  return numeric ? reciprocal.evaluate() : reciprocal;
 }
 
 export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
@@ -306,7 +596,12 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Binomial coefficient: number of ways to choose k items from n. Agrees with Binomial for all defined values.',
       complexity: 1200,
-      signature: '(n:number, m:number) -> number',
+      // The same carrier as `Binomial`: the two names share `evaluateBinomial`
+      // and are documented to agree, so they must also admit the same
+      // operands and infer the same type for a fresh symbol. See `Binomial`
+      // for what the carrier and the explicit `nanBehavior` say.
+      signature: '(n:complex | infinity, m:complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: ([n, k]) => binomialType(n, k),
 
@@ -365,7 +660,20 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // non-integer (rational, radical, symbolic n/k inferred as `number`)
       // into an Error() at canonicalization time, before `evaluate` ever
       // ran. Binomial is well-defined (via Gamma) for real n, k.
-      signature: '(number, number) -> number',
+      //
+      // Both slots now take the Γ-family carrier: every finite complex point
+      // has a value (a Γ-pole, `~oo`, where `Γ(n+1)` is one and nothing
+      // cancels it), and every infinity is in the carrier with the values
+      // `binomialValueAtInfinity` gives, so a point with no limit answers
+      // `NaN` rather than a boxing error. `NaN` propagates — stated
+      // explicitly because the carrier is not a subtype of `complex`, so the
+      // policy derived from the signature alone would be `reject`. The
+      // declared result stays the wide `number`: the handler carries the
+      // per-call sharpness. There is no `canonical` handler, so a proven
+      // off-carrier operand is rejected at BOXING; with every numeric point
+      // in the carrier, that seam only ever sees a non-number.
+      signature: '(complex | infinity, complex | infinity) -> number',
+      nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: ([n, k]) => binomialType(n, k),
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
@@ -375,18 +683,30 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Rising factorial (Pochhammer symbol) (a)_k = a(a+1)…(a+k-1).',
       wikidata: 'Q2367490',
-      signature: '(number, number) -> number',
+      // Both slots take the Γ-family carrier, as `Binomial` does: every
+      // finite complex point has a value (the poles of `Γ(a)` and `Γ(a+k)`
+      // included) and every infinity is in the carrier with the values
+      // `pochhammerValueAtInfinity` gives, so a point with no limit answers
+      // `NaN` rather than a boxing error. `NaN` propagates (explicit: the
+      // carrier is not a subtype of `complex`).
+      signature: '(complex | infinity, complex | infinity) -> number',
+      nanBehavior: 'propagate',
       // (a)_k with a provably non-negative integer k is a finite product of
       // k terms: integer for integer a, real for real a. Any other k reaches
       // the Γ-ratio continuation, which can hit poles (→ `~oo`) or complex
       // values. The `nonNegativeSign` gate can be proven by an operator
       // `sgn` handler on a compound operand — a proof the descriptor's sign
       // fact carries (open item O7 of
-      // `docs/plans/2026-08-22-type-handlers-on-types.md`). A NaN operand is
-      // caught by the non-finiteness fact (`finite === false`), answering
-      // the same `number` the dedicated NaN test gave.
+      // `docs/plans/2026-08-22-type-handlers-on-types.md`).
       typeHandlerKind: 'types',
       type: ([a, k]) => {
+        // A provably-NaN operand declines, as `binomialType` does and for the
+        // same reason: a handler answer is never widened.
+        if (
+          (a && typeFact(a.type, 'nan') === true) ||
+          (k && typeFact(k.type, 'nan') === true)
+        )
+          return undefined;
         if (!a || !k) return 'number';
         if (operandNonFiniteNumber(a) || operandNonFiniteNumber(k))
           return 'number';
@@ -400,7 +720,8 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         }
         return 'number';
       },
-      evaluate: ([a, k], { engine: ce }) => evaluatePochhammer(a, k, ce),
+      evaluate: ([a, k], { numericApproximation, engine: ce }) =>
+        evaluatePochhammer(a, k, ce, numericApproximation),
     },
     CartesianProduct: {
       description: 'Return the Cartesian product of input sets.',

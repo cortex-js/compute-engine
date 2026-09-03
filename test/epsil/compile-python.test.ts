@@ -51,12 +51,17 @@ describe('EPSIL → PYTHON', () => {
       'while k < 5 { s = s + k\nk = k + 1 }',
       's',
     ].join('\n');
+    // The parser desugars `while c { … }` to `Loop(Block(If(Not(c), Break),
+    // …))`, a genuine `If` statement, so its exit test carries the same
+    // decidedness guard every statement-form `If` does (an undecided
+    // condition runs neither branch) — the JavaScript target emits
+    // `if (k === k && (!(k < 5))) { break }` for this program.
     expect(compileToPythonDef(source, 'g', [])).toBe(
       'def g():\n' +
         '    s = 0\n' +
         '    k = 0\n' +
         '    while True:\n' +
-        '        if not (k < 5):\n' +
+        '        if k == k and (not (k < 5)):\n' +
         '            break\n' +
         '        s = k + s\n' +
         '        k = k + 1\n' +

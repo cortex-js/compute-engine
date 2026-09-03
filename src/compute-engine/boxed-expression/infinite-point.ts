@@ -47,3 +47,19 @@ export function isRealLiteral(x: Expression): boolean {
   if (p === '~oo' || p === 'anonymous') return false;
   return x.im === 0;
 }
+
+/**
+ * Whether `x` is a finite real number literal that is an integer and is
+ * strictly negative (`−1`, `−2`, …) — a pole of `Γ(x + 1)`.
+ */
+export function isNegativeIntegerLiteral(x: Expression): boolean {
+  return isRealLiteral(x) && x.isInteger === true && x.isNegative === true;
+}
+
+/**
+ * Whether `x` is a finite real number literal that is an integer and is
+ * non-positive (`0`, `−1`, `−2`, …) — a pole of `Γ(x)`.
+ */
+export function isNonPositiveIntegerLiteral(x: Expression): boolean {
+  return isRealLiteral(x) && x.isInteger === true && x.isNonPositive === true;
+}

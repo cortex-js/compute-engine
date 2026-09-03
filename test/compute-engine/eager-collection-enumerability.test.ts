@@ -444,17 +444,25 @@ describe('post-sweep fixes', () => {
     // `bigMedian` of an empty half threw a TypeError (`sorted[-1].add`):
     // reachable from a fully-GROUND single inexact datum, and from any
     // symbolic datum reaching the numeric path.
-    it('a single inexact datum computes instead of throwing', () => {
+    //
+    // The answer moved from `(NaN, 2.5, NaN)` to `(2.5, 2.5, 2.5)`, and from
+    // `NaN` to `0` for the range: not crashing was the fix here, but reporting
+    // the quartiles of a one-point sample as unknown was still wrong. The
+    // Moore–McCabe split excludes the overall median from both halves, which
+    // for one datum leaves both halves empty; a single datum is its own lower
+    // quartile, median and upper quartile, as NumPy's
+    // `percentile([x], [25, 50, 75])` also reports.
+    it('a single datum is its own quartiles instead of throwing', () => {
       const e = ce();
       expect(e.box(['Quartiles', 2.5]).evaluate().toString()).toBe(
-        '(NaN, 2.5, NaN)'
+        '(2.5, 2.5, 2.5)'
       );
       expect(
         e
           .box(['InterquartileRange', ['List', 2.5]])
           .evaluate()
           .toString()
-      ).toBe('NaN');
+      ).toBe('0');
     });
 
     // Symbolic data stays INERT — not `(…, NaN, …)`, which a later

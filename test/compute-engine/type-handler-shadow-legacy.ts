@@ -192,22 +192,6 @@ function frozenNumericTypeHandler(ops: ReadonlyArray<Expression>): Type {
   return 'number';
 }
 
-/** Frozen copy of `binomialType` (library/combinatorics.ts). */
-function frozenBinomialType(
-  n: Expression | undefined,
-  k: Expression | undefined
-): Type {
-  if (!n || !k || n.isNaN || k.isNaN) return 'number';
-  if (frozenProvablyNonFiniteNumber(n) || frozenProvablyNonFiniteNumber(k))
-    return 'number';
-  if (n.isInteger === true && k.isInteger === true) return 'integer';
-  if (n.isExtendedReal === true && k.isExtendedReal === true) {
-    if (n.isInteger === true && n.isNegative === true) return 'number';
-    return 'real';
-  }
-  return 'number';
-}
-
 /** Frozen copy of `logType` (library/type-handlers.ts). */
 function frozenLogType(ops: ReadonlyArray<Expression>): Type {
   const x = ops[0];
@@ -440,23 +424,13 @@ export const LEGACY_TYPE_HANDLERS: Record<
   DigitCount: ([, , digit]) =>
     digit !== undefined ? 'integer' : 'list',
 
-  // From library/combinatorics.ts, pre-conversion (commit 68238141) — the
-  // once-O7-held trio, converted after the sign channel reached function
-  // applications (open item O7 of the plan doc). `frozenBinomialType` below
-  // is the verbatim legacy `binomialType`.
-  Binomial: ([n, k]) => frozenBinomialType(n, k),
-  Choose: ([n, k]) => frozenBinomialType(n, k),
-  Pochhammer: ([a, k]) => {
-    if (!a || !k || a.isNaN || k.isNaN) return 'number';
-    if (frozenProvablyNonFiniteNumber(a) || frozenProvablyNonFiniteNumber(k))
-      return 'number';
-    if (k.isInteger === true && k.isNonNegative === true) {
-      if (a.isInteger === true) return 'integer';
-      if (a.isRational === true) return 'rational';
-      if (a.isExtendedReal === true) return 'real';
-    }
-    return 'number';
-  },
+  // The once-O7-held trio of library/combinatorics.ts — `Binomial`, `Choose`
+  // and `Pochhammer` — was here until its Phase F Contract B flip: each now
+  // declares the carrier `complex | infinity` with `nanBehavior: 'propagate'`,
+  // and its `'types'` handler deliberately answers DIFFERENTLY from the
+  // frozen legacy shape (it declines on a provably-NaN operand, where the
+  // legacy shape claimed `number`; the derived application type is `number`
+  // either way), so the differential parity no longer applies.
 
   // From library/arithmetic.ts, pre-conversion (commit 68238141) — the
   // once-O7-held log heads. The Γ family (`Gamma`, `GammaLn`, `Digamma`,
@@ -506,9 +480,14 @@ export const LEGACY_TYPE_HANDLERS: Record<
   // operand (the frozen shape claimed `number`; the derived application
   // type is `number` either way), so the differential parity no longer
   // applies.
-  ElementMax: (ops) => frozenNumericTypeHandler(ops),
-  ElementMin: (ops) => frozenNumericTypeHandler(ops),
-  Clamp: (ops) => frozenNumericTypeHandler(ops),
+  // `ElementMax`, `ElementMin` and `Clamp` were here until their Phase F
+  // Contract B flip (2026-09-02, batch 11): each now declares the extended
+  // real line `(real | signed_infinity, …) -> real | signed_infinity`, and
+  // its slim handler deliberately answers DIFFERENTLY from the frozen
+  // legacy shape (it claims `integer` for all-integer operands and
+  // DECLINES where the frozen shape claimed `number`), so the differential
+  // parity no longer applies. Their adopted claims are pinned in
+  // `error-model.test.ts` and `element-max-min-clamp.test.ts`.
   Negate: ([x]) => frozenNegateNumericType(x.type.type),
   Measurement: frozenMeasurementType,
   Max: (ops) => frozenExtremumType(ops),
@@ -565,17 +544,6 @@ export const LEGACY_TYPE_HANDLERS: Record<
   Adjoin: frozenAdjoinType,
   QuotientRing: frozenQuotientRingType,
 
-  // From library/statistics.ts, pre-conversion (commit 045c2655).
-  Mean: () => 'number',
-  Median: () => 'number',
-  Variance: () => 'number',
-  PopulationVariance: () => 'number',
-  StandardDeviation: () => 'number',
-  PopulationStandardDeviation: () => 'number',
-  Kurtosis: () => 'number',
-  Skewness: () => 'number',
-  Mode: () => 'number',
-  InterquartileRange: () => 'number',
 };
 
 /**
@@ -598,9 +566,10 @@ export const LEGACY_TYPE_HANDLERS: Record<
  * behavior-preserving move, so none of them has a differential shadow; they
  * are pinned directly in `type-handler-parity.test.ts`:
  *
- * - `GammaRegularized`/`BetaRegularized` (library/special-functions.ts):
- *   the old constant `real` claim was unsound off the proven domain
- *   (`GammaRegularized(-1, 2)` is NaN).
+ * - `GammaRegularized`/`BetaRegularized` (library/distributions.ts): the old
+ *   constant `real` claim was unsound off the proven domain — the value can
+ *   be negative (`GammaRegularized(-0.5, 2) = -0.0085`) or complex
+ *   (`GammaRegularized(0.5, -1) = 1 - 1.65i`).
  * - `LogIntegral` (library/special-functions.ts): it never had a `type`
  *   handler — its declared result was a flat `real` — but that claim was
  *   wrong off the non-negative real axis: li(x) = Ei(ln x) is complex for
@@ -617,6 +586,21 @@ export const LEGACY_TYPE_HANDLERS: Record<
  *   `'types'` handler at all — the claim is derived entirely from the
  *   declared domain signature (`(real | signed_infinity) -> rational<0..1>`
  *   and `(real | signed_infinity) -> integer<-1..1>` respectively).
+ *
+ *   The ten data-consuming statistics — `Mean`, `Median`, the variance and
+ *   standard-deviation pairs, `Kurtosis`, `Skewness`, `Mode` and
+ *   `InterquartileRange` — left this ledger the same way in their own
+ *   Contract B flip. Each carried a constant `() => 'number'` handler kept
+ *   on the belief that deleting it would activate the no-handler fallback
+ *   narrowing; that fallback was measured NOT to fire for any of them (their
+ *   parameters are collections, not numbers), so the handlers were inert and
+ *   are gone. Their claims are now the declared results, which are sharper
+ *   than the `number` the handlers answered: `real<0..> | nan` for the
+ *   variance family, `real | signed_infinity | nan` for the order-based
+ *   heads, `real | nan` for the standardized moments. `Mean` keeps the bare
+ *   `number` result — its data may be complex, infinite or absent — but has
+ *   no handler either. Their pins live in
+ *   `test/compute-engine/error-model-statistics.test.ts`.
  */
 export const RETIRED_CONSTANT_TYPE_HANDLERS: ReadonlyArray<
   [operator: string, declaredResult: string]

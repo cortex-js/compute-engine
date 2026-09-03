@@ -269,9 +269,17 @@ export function bigMode(values: Iterable<BigDecimal>): BigDecimal {
 // overall median itself from either half when n is odd. This keeps Q1 and Q3
 // symmetric around the median (Q1 + Q3 = 2·Q2 for symmetric data), unlike a
 // mixed slicing that includes the median in only one half.
+//
+// A ONE-POINT sample is the convention's degenerate case and is answered
+// directly: excluding the overall median leaves both halves empty, so the
+// split would take the median of nothing and report `NaN` for Q1 and Q3.
+// A single datum is its own lower quartile, median and upper quartile — the
+// answer NumPy's `percentile([x], [25, 50, 75])` gives — which also makes
+// `InterquartileRange` of one datum `0` rather than unknown.
 export function quartiles(values: Iterable<number>): [number, number, number] {
   const sorted = [...values].sort((a, b) => a - b);
   const n = sorted.length;
+  if (n === 1) return [sorted[0], sorted[0], sorted[0]];
   const mid = Math.floor(n / 2);
   const upperStart = mid + (n % 2);
 
@@ -287,6 +295,8 @@ export function bigQuartiles(
 ): [BigDecimal, BigDecimal, BigDecimal] {
   const sorted = [...values].sort((a, b) => a.cmp(b));
   const n = sorted.length;
+  // Same one-point convention as `quartiles()` above.
+  if (n === 1) return [sorted[0], sorted[0], sorted[0]];
   const mid = Math.floor(n / 2);
   const upperStart = mid + (n % 2);
 

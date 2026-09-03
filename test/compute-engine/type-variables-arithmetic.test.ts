@@ -17,10 +17,14 @@ import { ComputeEngine } from '../../src/compute-engine';
  * non-inferable-`unknown` edge, §4.3 bound-join table).
  *
  * `Negate` (the fourth audited candidate) is NOT converted: its
- * `missingBehavior: 'propagate'` absorption reads the operand's own `missing`
+ * missing-value absorption reads the operand's own `missing`
  * type, which a stripped-before-inference position (§4.5) no longer supplies —
  * `Negate(Missing)` typed `value` instead of `number`, and `('x = y').solve('x')`
  * regressed to no solution. Its echo handler stays; see the round report.
+ * (Its `missingBehavior: 'propagate'` is no longer written at the
+ * definition: since the Contract B carrier flip every parameter is numeric,
+ * so the resolution derives `propagate` on its own. The absorption is
+ * unchanged.)
  *
  * Every operator is probed on all three routes (`ce.function`, `ce.box`,
  * `ce.parse`) — the standing route-parity pin.
@@ -40,8 +44,10 @@ describe('TYPE VARIABLES / arithmetic — declared signatures', () => {
       '(T, U) -> tuple<T, U> where T: value, U: value'
     );
     expect(sig('Remainder')).toBe('(T, T) -> T where T: number');
-    // NOT converted — see the file header.
-    expect(sig('Negate')).toBe('(value) -> value');
+    // NOT converted to a `where` signature — see the file header. Its
+    // carrier moved with the Contract B arithmetic-core flip (Phase F
+    // batch 11): the extended complex plane, on which negation is total.
+    expect(sig('Negate')).toBe('(complex | infinity) -> number');
   });
 });
 

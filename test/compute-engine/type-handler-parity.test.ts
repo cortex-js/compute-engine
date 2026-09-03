@@ -424,6 +424,11 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     // not admit. Both accepted input forms — two equal-length collections, or
     // one collection of (x, y) pairs — narrow when the data types prove
     // finite reals.
+    //
+    // Where the types do NOT prove it the handler now DECLINES, so the
+    // declared `real | nan` of the Contract B flip applies. It used to answer
+    // the wide `number`, which hid that declaration: a handler answer is
+    // never widened, so `number` was what the application reported.
     const NAN = { num: 'NaN' };
     for (const op of ['Covariance', 'PopulationCovariance', 'Correlation']) {
       expect(
@@ -443,7 +448,7 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
         `${op}(NaN)=${ce
           .box([op, ['List', 1, NAN], ['List', 2, 3]] as any)
           .type.toString()}`
-      ).toBe(`${op}(NaN)=number`);
+      ).toBe(`${op}(NaN)=nan | real`);
     }
     expect(
       ce

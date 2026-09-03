@@ -1102,6 +1102,54 @@ export function extremumType(ops: ReadonlyArray<OperandDescriptor>): Type {
 }
 
 /**
+ * `ElementMax`/`ElementMin`/`Clamp` — the SLIM finiteness-narrowing handler
+ * that remains after the family's Contract B domain-signature flip (each
+ * declares the extended real line, `(real | signed_infinity, …) ->
+ * real | signed_infinity`, so a non-real or `~oo` operand is a boxing error
+ * and never reaches this handler).
+ *
+ * Each of these heads returns ONE OF ITS OPERANDS — `max`, `min` and the
+ * `min(max(x, lo), hi)` composition all select, they never compute — so the
+ * result stays in the operands' common numeric tier:
+ *
+ * - every operand a provably finite integer → `integer`;
+ * - every operand a provably finite real → `real`;
+ * - anything else — an operand that may be infinite, whose realness is not
+ *   proven, or a propagate-admitted `NaN` — DECLINES (`undefined`), so the
+ *   framework derives the honest claim from the declared signature
+ *   (`real | signed_infinity`, with the `nan` arm exactly where an operand
+ *   can carry one). Declining rather than answering `number` is what lets
+ *   that derivation show: a handler answer is never widened NOR sharpened
+ *   by the framework.
+ *
+ * Each operand is unwrapped to its broadcast element first, so a
+ * `list<integer>` operand keeps the sharp per-cell claim under the
+ * broadcast lift the family's `broadcastable: true` flag performs.
+ *
+ * Ruling recorded in the arithmetic-core record of
+ * `docs/plans/2026-08-30-error-model-implementation.md`.
+ */
+export function elementExtremumType(
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  if (ops.length === 0) return undefined;
+  const ts = ops.map((d) => broadcastOperandType(d));
+  // An operand that cannot hold a value — the EMPTY type `never`, from an
+  // empty range such as `integer<2<..<3>` — answers TRUE to every fact
+  // below, because the bottom type is a subtype of every type. Decline, or
+  // the tier scan claims a sharp finite tier for a valueless operand. The
+  // framework's own generic guard intercepts a SCALAR `never` operand, but
+  // it reads the top-level type only, not the element type unwrapped just
+  // above, so a `list<never>` cell reaches here.
+  if (ts.some((t) => isSubtype(t, 'never'))) return undefined;
+  // Bare `integer`/`real` name the FINITE values (finite-by-default
+  // lattice), so each of these single facts is the whole finiteness proof.
+  if (ts.every((t) => typeFact(t, 'integer') === true)) return 'integer';
+  if (ts.every((t) => typeFact(t, 'real') === true)) return 'real';
+  return undefined;
+}
+
+/**
  * `Measurement(value, error)` — a nominal value carrying a 1σ absolute error.
  * The type is the nominal's scalar type (typically `real`); the error bar does
  * not widen it.

@@ -1639,11 +1639,16 @@ describe('Norm — result type is real', () => {
     // take is `+∞`. The claim for that set is `real | +oo`, which prints
     // `real | signed_infinity` once the handler result is stored (a lone
     // signed infinity widens to the pair — `widenValueTypes`).
+    //
+    // Where the components prove nothing at all the handler DECLINES, and
+    // the answer is `Norm`'s own declared result `real | +oo | nan` rather
+    // than the top type: a norm is a non-negative real, `+∞` or NaN, never
+    // a complex value or `-∞`.
     const eng = new ComputeEngine();
     eng.declare('u', 'number');
     eng.declare('r', 'real');
     expect(eng.expr(['Norm', ['Tuple', 'u', 1]]).type.toString()).toBe(
-      'number'
+      '+oo | nan | real'
     );
     expect(eng.expr(['Norm', ['Tuple', 'r', 1]]).type.toString()).toBe('real');
     expect(
@@ -1656,10 +1661,10 @@ describe('Norm — result type is real', () => {
         .evaluate()
         .toString()
     ).toBe('+oo');
-    // A component that may be NaN keeps the top type: `‖(NaN, 1)‖` is NaN,
+    // A component that may be NaN keeps the `nan` arm: `‖(NaN, 1)‖` is NaN,
     // which `real | +oo` excludes.
     expect(eng.expr(['Norm', ['Tuple', 'NaN', 1]]).type.toString()).toBe(
-      'number'
+      '+oo | nan | real'
     );
   });
 
@@ -1677,14 +1682,15 @@ describe('Norm — result type is real', () => {
     expect(
       eng.expr(['Norm', ['Tuple', ['List', 1, 2], 3]]).type.toString()
     ).toBe('list<number>');
-    // No components to read.
-    expect(eng.expr(['Norm', 'p']).type.toString()).toBe('number');
-    // A matrix's elements are ROWS, not scalars.
+    // No components to read: the handler declines and the declared result
+    // stands.
+    expect(eng.expr(['Norm', 'p']).type.toString()).toBe('+oo | nan | real');
+    // A matrix's elements are ROWS, not scalars — nothing to read either.
     expect(
       eng
         .expr(['Norm', ['List', ['List', 1, 2], ['List', 3, 4]]])
         .type.toString()
-    ).toBe('number');
+    ).toBe('+oo | nan | real');
   });
 });
 
@@ -3368,5 +3374,153 @@ describe('Exact linear algebra (rational null space / rank / eigenvectors)', () 
       const lambdaV = ce.expr(['Multiply', lambda, v]).evaluate();
       expect(Av.json).toEqual(lambdaV.json);
     }
+  });
+});
+
+describe('Determinant — the empty element type claims no numeric tier', () => {
+  it('a `matrix<never>` does not claim `integer`', () => {
+    const eng = new ComputeEngine();
+    eng.declare('Mnever', 'matrix<never>');
+    // `never` is a subtype of EVERY type, so a tier claim keyed on a subtype
+    // test alone let the empty element type claim the narrowest tier.
+    expect(eng.expr(['Determinant', 'Mnever']).type.toString()).toBe('number');
+    // The tiers a matrix with inhabited cells does claim are unchanged.
+    eng.declare('Mint', 'matrix<integer>');
+    expect(eng.expr(['Determinant', 'Mint']).type.toString()).toBe('integer');
+  });
+});
+
+describe('MatrixPower — half-integer exponents', () => {
+  it('an EXACT exponent that only ROUNDS to 1/2 stays inert', () => {
+    const eng = new ComputeEngine();
+    // (2^54 + 1)/2^55 is not 1/2, but the nearest double to it IS 0.5, so a
+    // half-integer test made on the rounded value would accept it.
+    const exponent = eng
+      .expr([
+        'Divide',
+        { num: '18014398509481985' },
+        { num: '36028797018963968' },
+      ])
+      .evaluate();
+    expect(exponent.re).toBe(0.5);
+    const result = eng
+      .expr(['MatrixPower', ['List', ['List', 4, 0], ['List', 0, 9]], exponent])
+      .evaluate();
+    expect(result.operator).toBe('MatrixPower');
+  });
+
+  it('the exact 1/2 power of a rational matrix survives `.N()`', () => {
+    const eng = new ComputeEngine();
+    const A: Expression = [
+      'List',
+      ['List', ['Rational', 1, 4], 0],
+      ['List', 0, 9],
+    ];
+    // `evaluate()` computes the principal square root exactly.
+    expect(
+      eng.expr(['MatrixPower', A, ['Divide', 1, 2]]).evaluate().json
+    ).toEqual(['List', ['List', ['Rational', 1, 2], 0], ['List', 0, 3]]);
+    // Under `.N()` the driver numericizes the matrix before the handler sees
+    // it, so the exact root has to be computed from the un-numericized node.
+    expect(eng.expr(['MatrixPower', A, ['Divide', 1, 2]]).N().json).toEqual([
+      'List',
+      ['List', 0.5, 0],
+      ['List', 0, 3],
+    ]);
+  });
+});
+
+describe('Norm — an explicit order is honored before every shortcut', () => {
+  it('a scalar operand keeps an unreadable order inert', () => {
+    const eng = new ComputeEngine();
+    // `‖5‖_p` answered 5 whatever `p` was, so an order the operator has no
+    // value for was discarded by the scalar shortcut.
+    const inert = eng.expr(['Norm', 5, 'pNorm']).evaluate();
+    expect(inert.operator).toBe('Norm');
+    expect(inert.nops).toBe(2);
+  });
+
+  it('a scalar operand answers once the order resolves', () => {
+    const eng = new ComputeEngine();
+    eng.assign('pNorm', 2);
+    expect(eng.expr(['Norm', 5, 'pNorm']).evaluate().json).toBe(5);
+  });
+
+  it('a scalar operand reports the precondition for a non-positive order', () => {
+    const eng = new ComputeEngine();
+    eng.assign('pNorm', -1);
+    const result = eng.expr(['Norm', 5, 'pNorm']).evaluate();
+    expect(result.operator).toBe('Error');
+    expect(result.toString()).toContain('evaluation-error');
+  });
+
+  it('an empty vector keeps an unreadable order inert', () => {
+    const eng = new ComputeEngine();
+    const inert = eng.expr(['Norm', ['List'], 'pNorm']).evaluate();
+    expect(inert.operator).toBe('Norm');
+    // With a readable order the empty vector still norms to 0.
+    expect(eng.expr(['Norm', ['List'], 1]).evaluate().json).toBe(0);
+  });
+});
+
+describe('Norm — a non-numeric component is refused in every order', () => {
+  it('a string component is an incompatible-type error, L2 and L∞ alike', () => {
+    const eng = new ComputeEngine();
+    // The L∞ branch used to DROP such a component: `Abs("a")` has `re = NaN`
+    // and every comparison with NaN is false, so `‖("a", 3)‖_∞` answered 3.
+    for (const e of [
+      eng.expr(['Norm', ['Tuple', { str: 'a' }, 3]]).evaluate(),
+      eng
+        .expr(['Norm', ['Tuple', { str: 'a' }, 3], { str: 'Infinity' }])
+        .evaluate(),
+    ]) {
+      expect(e.operator).toBe('Error');
+      expect(e.toString()).toContain('incompatible-type');
+    }
+  });
+
+  it('an unresolved component leaves the L∞ norm inert', () => {
+    const eng = new ComputeEngine();
+    const inert = eng
+      .expr(['Norm', ['Tuple', 'xNorm', 3], { str: 'Infinity' }])
+      .evaluate();
+    expect(inert.operator).toBe('Norm');
+  });
+
+  it('an unresolved matrix ENTRY leaves the L1 and L∞ norms inert', () => {
+    const eng = new ComputeEngine();
+    const M: Expression = ['List', ['List', 'xNorm', 1], ['List', 2, 3]];
+    // The column and row sums are numeric folds, and `|x|` for an unassigned
+    // `x` reads `re = NaN` exactly as a NaN literal does, so folding it in
+    // reported NaN for a question these branches cannot decide.
+    expect(eng.expr(['Norm', M, 1]).evaluate().operator).toBe('Norm');
+    expect(eng.expr(['Norm', M, { str: 'Infinity' }]).evaluate().operator).toBe(
+      'Norm'
+    );
+    // A genuine NaN entry is still the norm.
+    const N: Expression = ['List', ['List', 'NaN', 1], ['List', 2, 3]];
+    expect(eng.expr(['Norm', N, 1]).evaluate().toString()).toBe('NaN');
+  });
+});
+
+describe('Norm — the Frobenius norm at rank 3', () => {
+  it('is the entry-wise L2 norm of every cell', () => {
+    const eng = new ComputeEngine();
+    const t: Expression = [
+      'List',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      ['List', ['List', 5, 6], ['List', 7, 8]],
+    ];
+    // 1 + 4 + 9 + 16 + 25 + 36 + 49 + 64 = 204, and √204 = 2√51.
+    expect(eng.expr(['Norm', t]).evaluate().toString()).toBe('2sqrt(51)');
+    expect(
+      eng
+        .expr(['Norm', t, { str: 'Frobenius' }])
+        .evaluate()
+        .toString()
+    ).toBe('2sqrt(51)');
+    expect(eng.expr(['Norm', t]).N().re).toBeCloseTo(Math.sqrt(204), 10);
+    // An operator norm has no rank-3 reading here and stays inert.
+    expect(eng.expr(['Norm', t, 1]).evaluate().operator).toBe('Norm');
   });
 });

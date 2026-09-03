@@ -522,6 +522,117 @@ deliberately left out of that change.
   operand a connective reaches is undecided still picks a branch — see
   the open item below.)
 
+### Open items from the Phase F batches 11, 12, 13 and 14 (2026-09-02)
+
+- **NEEDS A RULING — three defects in the exact numeric layer, measured
+  while fixing the distributions' bignum handling (2026-09-02):**
+  1. **`ExactNumericValue.lt/lte/gt/gte` compare the DOUBLE projections**
+     (`numeric-value/exact-numeric-value.ts`, `return this.re < other.re`),
+     so `Less(10^400, 10^500)` is `False` and `Greater(10^500, 10^400)` is
+     also `False` — `a.isLess(b)` and `b.isGreater(a)` disagree. The
+     distributions work around it with a file-local `litOrder` that reads
+     the sign of the exact difference; the root fix is an exact comparison
+     (bigint cross-multiplication with the radical parts) on a hot path,
+     which is why it was not landed inside a library batch.
+  2. **`Factorial(10^400)` does not return** (more than 120 s), so the
+     Poisson pmf keeps an off-scale index away from the closed form and
+     answers the float `0` there.
+  3. **`Divide(1/10^400, 1).evaluate()` is `0`** — exact division collapses
+     an underflowing rational that `Add`, `Subtract` and `Multiply` all
+     preserve; `CDF(UniformDistribution(0, 1), 10^-400)` answers `0`
+     instead of `10^-400`.
+  4. **A `Rational` with a large denominator is boxed with a FLOAT
+     denominator.** `ce.box(['Rational', 99999999999999999999n,
+     100000000000000000000n])` keeps the numerator as a bigint but its
+     JSON shows the denominator as the plain number `1e+20`; the value
+     prints `99999999999999999999/1e+20`, still claims `isExact`, and
+     `Divide(r, 1)` folds it to `1` (`Divide(r, 2)` to `1/2`) while
+     `Multiply(r, 1)` keeps it. At `(2^53 ± 1)` both parts stay exact, so
+     the threshold is above 2^53 — the `Rational` normalization or the
+     boxing of a bigint pair converts one part through `Number()`. A silent
+     exact-value loss for any rational with a part beyond that threshold;
+     `CDF(UniformDistribution(0, 1), 1 - 1/10^20)` answers `1` because of it.
+  Options: fix all three in the numeric-value layer as one round with its
+  own gate (recommended — the comparison defect is engine-wide), or accept
+  the double projection as the exact layer's comparison contract and
+  document it.
+
+- **`BetaRegularized` stays symbolic at every point outside
+  `x ∈ [0, 1], a > 0, b > 0`, infinite points included.** The batch-8
+  convention answers `NaN` for an anonymous infinity uniformly; this head
+  deviates because on the polynomial region (integer `a`, `b`) the value
+  at `x = ±∞` is a defined infinity, and the head is already symbolic at
+  the corresponding finite points. Needs a ruling: keep the uniform
+  symbolic answer, or encode the polynomial limits and answer `NaN`
+  elsewhere.
+- **`GammaRegularized(a, 0)` for a negative non-integer `a`** is a decided
+  divergence (`sign(Γ(a))·∞`, verified) left symbolic for uniformity with
+  the surrounding `a < 0` capability gap (the kernel computes `Q(a, z)`
+  for `a > 0, z ≥ 0` only; `Q(-1/2, 2)` is a finite negative real the
+  engine cannot produce). A downward recurrence from a positive `a` would
+  close the gap.
+- **Past the exact-expansion caps a few Γ-ratio points stay symbolic**:
+  `Pochhammer(a, k)` with both `Γ(a)` and `Γ(a + k)` on a pole and
+  `|k| > 20` (`SYMBOLIC_EXPANSION_CAP`), and `GammaRegularized(n, z)` for
+  `z < 0` and `n > 20` (`MAX_GAMMA_Q_SERIES_ORDER`). Honest gaps, never
+  `NaN`.
+
+- **`Correlation` cannot declare `real<-1..1>` until the paired kernels
+  stop cancelling.** A fuzz of 3000 random samples at machine precision
+  measured `max |r| = 1.0000000000063`: the `Σxy − ΣxΣy/n` form of the
+  covariance kernels loses digits on a two-point sample with ordinary
+  magnitudes. `Correlation` declares `real | nan`, and the pin in
+  `error-model-statistics.test.ts` re-derives the overshoot so it fails
+  the day the kernel is accurate. A two-pass or Welford accumulation would
+  fix it and would also settle whether those kernels should scale their
+  sums (the paired-statistics typing item below).
+- **A distribution built with a SYMBOL parameter and left unevaluated
+  keeps an off-carrier held value.** The constructors have `canonical`
+  handlers, which the boxing signature validation does not reach, and a
+  handler cannot see a symbol's value, so `PoissonDistribution(s)` with
+  `s := -3` boxes silently. Evaluating any application of it
+  (`Variance(PoissonDistribution(s))`) re-canonicalizes with the literal
+  and answers the `out-of-range` error, which is pinned; only the bare,
+  unevaluated distribution escapes. Narrowed 2026-09-02, not closed.
+- **NEEDS A RULING — the discrete pmfs at a SYMBOLIC point are not
+  guarded.** `PDF(PoissonDistribution(2), 0.5)` is `0` (the pmf is zero
+  off the non-negative integers) but `PDF(PoissonDistribution(2), x)`
+  with `x` substituted by `0.5` afterwards is `0.216`; likewise
+  `CDF(PoissonDistribution(2), x)` omits the `Floor` the literal route
+  applies (`0.261` vs `0.135` at `x = 0.5`, `NaN` vs `0` at `x = -1`),
+  and the binomial does the same. The guard is a `Which` on integrality
+  (and a `Floor` in the CDF), which would change the bare
+  `GammaRegularized(x + 1, λ)` form that `a1-c1-compile-parity.test.ts`
+  compiles and that users see. Options: guard the symbolic forms (honest,
+  a visible change of shape), or document the symbolic forms as the
+  continuous interpolation. Recommendation: guard them; the literal and
+  symbolic routes should not disagree on a value.
+
+- **`Norm(v, p)` does not round-trip through LaTeX.** The serializer
+  writes `\left\Vert v\right\Vert` and drops the ORDER operand, so
+  `ce.box(['Norm', ['List', 3, 4], 1])` reparses as the 2-norm. The
+  remedy is a notation — a subscript spelling such as `\|v\|_1` and
+  `\|v\|_\infty` with a matching parse rule — which is a feature and needs
+  a ruling on the spelling. Until then a norm with an explicit order must
+  be built as MathJSON.
+- **A matrix p-norm for `p ∉ {1, 2, ∞}` stays inert.** The order passes
+  the declared precondition (it is a well-formed order at rank 1) and the
+  operand is inside the carrier, but the general matrix p-norm has no
+  closed form and would need a numeric kernel. (The Frobenius norm of a
+  rank ≥ 3 tensor, which was inert for the same structural reason, is
+  computed now.)
+- **A compiled `Norm(v, 0)` answers `NaN` where the interpreter answers
+  the precondition error.** An `Error` has no float representation, and
+  `NaN` is the documented compiled spelling for "no value" (the compiled
+  `If`/`Which` ruling), so the lane degrades the error to `NaN` rather
+  than refusing to compile a whole program for one bad order. Recorded,
+  not planned.
+- **The type serializer drops the parentheses around a variadic union.**
+  `(complex | infinity, (complex | infinity)+) -> number` prints as
+  `(complex | infinity, complex | infinity+) -> number`. The round trip is
+  semantically stable (`parseType(typeToString(t))` equals `t`), so this
+  is a readability defect in hovers and error messages only.
+
 ### Open items from the undecided-condition ruling (2026-09-02)
 
 The ruling ("a compiled `If`/`Which` whose condition is not exactly `true`
@@ -529,18 +640,39 @@ or `false` at run time takes no branch") is implemented for the
 JavaScript-family lowering of both the expression form and the statement
 form (`BaseCompiler.conditionDecidability`). Two reaches of it are open.
 
-- **A logical connective in condition position is still decided by
-  truthiness.** SCHEDULED 2026-09-02 (Arno): a three-valued lowering of
-  the connectives, its own session after the Phase F batches 11 and 13.
-  `If(x > 0 && y > 0, 1, -1)` at `x = 1, y = NaN` compiles to
-  `(0 < _.x && 0 < _.y) ? 1 : -1`, whose `&&` answers `false`, so the
-  else arm is taken; the interpreter holds the `If`. The short-circuit
-  cases already agree (a decided `false` operand decides an `And`
-  whatever its siblings do), so only the "every operand reached is
-  undecided" case diverges. Closing it needs the value AND the
-  decidedness of each operand combined by the Kleene table, which the
-  current one-pass emitter cannot build without recompiling the operands
-  outside their CSE regions.
+- **NEEDS A RULING — the interpreter and the compiled lane DISAGREE at a
+  literal `NaN` operand.** Measured 2026-09-02 while lowering the
+  connectives: `If(NaN > 0, 1, -1).evaluate()` is `-1` (the interpreter's
+  ordered comparisons follow IEEE, `Greater(NaN, 0)` is `False`, so the
+  else arm is taken), and so is `If(u > 0, 1, -1)` for `u := NaN`; the
+  compiled JavaScript and Python answer `NaN` for the same inputs. The
+  ruling's premise ("the interpreter holds such an application inert")
+  holds for an UNKNOWN operand — a free symbol — where the interpreter is
+  genuinely Kleene (`And(True, unknown)` holds the `If`, `And(False,
+  unknown)` takes the else arm) and the compiled lane now agrees; it does
+  not hold for a NaN VALUE. Three options: (a) the interpreter treats a
+  NaN operand of a branch condition as undecided (the comparison stays
+  `False` elsewhere; only branch selection changes) — parity with the
+  compiled lane; (b) the compiled lane follows IEEE for a NaN operand
+  (else arm) and keeps the no-branch answer only for an unsupplied
+  variable and a non-boolean value — reverting that part of the ruling;
+  (c) accept the divergence and document it. `docs/ERROR-MODEL.md` §6
+  says compilation is fail-closed, which (c) contradicts. Recommendation:
+  (a) — a comparison with NaN carries no evidence for either arm, which
+  is the ruling's own rationale.
+
+- (FIXED 2026-09-02: a logical connective in condition position is
+  lowered three-valued on the JavaScript and Python targets — see
+  `docs/ERROR-MODEL.md` §7 and the plan doc's Phase F section.)
+- **A `while` loop whose condition becomes undecided never exits.** The
+  Epsil parser desugars `while c { … }` to `Loop(Block(If(Not(c), Break),
+  …))`, a statement-form `If`, so the exit test inherits the no-branch
+  rule on both targets (`if (k === k && (!(k < 5))) { break }`; Python
+  `if k == k and (not (k < 5)): break`): at `k = NaN` the loop neither
+  breaks nor terminates otherwise. The interpreter's `Loop` holds the
+  same `If` and relies on its iteration cap. Recorded 2026-09-02 as a
+  consequence of the ruling; a desugared exit test could be exempted (a
+  synthesized `If` is not a user selection) if that is preferred.
 - **The GPU targets keep JavaScript-style selection.** Python IS aligned:
   its `If`/`Which` entries share the compiler's decidability analysis and
   answer `float('nan')` for an undecided condition

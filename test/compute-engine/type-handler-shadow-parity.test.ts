@@ -166,21 +166,12 @@ describe('shadow parity over the converted handlers', () => {
       ['AiryBiPrime', 'w'],
       ['AiryBiPrime', 'hnan'],
 
-      ['ElementMax', 1, 2],
-      ['ElementMax', 'x', 'r'],
-      ['ElementMax', 1, NaN],
-      ['ElementMax', ['List', 1, 2], 3],
-      ['ElementMin', 1, 2.5],
-      ['ElementMin', 'x', { num: '+Infinity' }],
-      ['ElementMin', 'ImaginaryUnit', 1],
-      ['ElementMin', ['Sqrt', 2], 'bigd'],
-
-      // `Clamp` is the 3-operand arity of `numericTypeHandler`.
-      ['Clamp', 5, 0, 1],
-      ['Clamp', 'r', 0, 1],
-      ['Clamp', NaN, 0, 1],
-      ['Clamp', 'x', 'r', 'bigd'],
-      ['Clamp', { num: '+Infinity' }, 0, 1],
+      // `ElementMax`/`ElementMin`/`Clamp` left this mix with their Phase F
+      // Contract B flip (2026-09-02): the slim handler deliberately
+      // diverges from the frozen legacy shape (see the note at their
+      // retired `LEGACY_TYPE_HANDLERS` entries), and the adopted claims
+      // are pinned in `error-model.test.ts` and
+      // `element-max-min-clamp.test.ts`.
 
       // ζ(1) is the pole (the harmonic series diverges): the literal-1 gate
       // in front of the generic numeric claim.
@@ -321,31 +312,6 @@ describe('shadow parity over the converted handlers', () => {
       ['QuotientRing', 'Integers', 'x'],
       ['QuotientRing', 'RealNumbers', 2],
       ['QuotientRing', 'ComplexNumbers', 2],
-
-      // --- batch 2: library/statistics.ts ---
-      // Ten unconditional `number` claims that read nothing from their
-      // operands; one row each proves the dispatch, and the symbol-operand
-      // row proves it does not depend on the argument being a literal list.
-      ['Mean', ['List', 1, 2, 3]],
-      ['Mean', 'L'],
-      ['Median', ['List', 1, 2, 3]],
-      ['Median', 'L'],
-      ['Variance', ['List', 1, 2, 3]],
-      ['Variance', 'L'],
-      ['PopulationVariance', ['List', 1, 2, 3]],
-      ['PopulationVariance', 'L'],
-      ['StandardDeviation', ['List', 1, 2, 3]],
-      ['StandardDeviation', 'L'],
-      ['PopulationStandardDeviation', ['List', 1, 2, 3]],
-      ['PopulationStandardDeviation', 'L'],
-      ['Kurtosis', ['List', 1, 2, 3, 4]],
-      ['Kurtosis', 'L'],
-      ['Skewness', ['List', 1, 2, 3, 4]],
-      ['Skewness', 'L'],
-      ['Mode', ['List', 1, 2, 2, 3]],
-      ['Mode', 'L'],
-      ['InterquartileRange', ['List', 1, 2, 3, 4]],
-      ['InterquartileRange', 'L'],
 
       // --- the descriptor's application-level FINITENESS channel ---
       // A COMPOUND operand whose non-finiteness lives only in a held value:

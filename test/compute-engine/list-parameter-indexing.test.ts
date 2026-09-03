@@ -574,7 +574,13 @@ describe('non-regressions', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Norm', -5]).evaluate().toString()).toBe('5');
     ce.box(['Assign', 'n', ['Function', ['Norm', 'a'], 'a']]).evaluate();
-    expect(ce.box('n').type.toString()).toBe('(unknown) -> number');
+    // The body's type is `Norm`'s declared `real | +oo | nan` — the handler
+    // has no components to read for a lambda parameter. A lone signed
+    // infinity widens to the pair when the type is STORED (`widenValueTypes`),
+    // which is why the `+oo` arm prints as `signed_infinity` here.
+    expect(ce.box('n').type.toString()).toBe(
+      '(unknown) -> nan | real | signed_infinity'
+    );
   });
 
   test('a SCALAR-bodied function still broadcasts over a list argument', () => {

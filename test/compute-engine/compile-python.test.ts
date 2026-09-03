@@ -718,15 +718,40 @@ describe('PYTHON TARGET', () => {
     });
 
     it('a condition decided by construction emits no extra test', () => {
-      // `And`/`Or` keep the behavior they had: their three-valued lowering is
-      // scheduled separately (see ROADMAP, the undecided-condition ruling).
+      // A string comparison has no undecided value to guard against: neither
+      // operand can be NaN. So the analysis reports "decided by construction"
+      // and the plain conditional expression is emitted, with nothing added.
+      const e = new ComputeEngine();
+      e.declare('s', 'string');
+      e.declare('t', 'string');
+      expect(
+        python.compile(
+          e.box(['If', ['And', ['Less', 's', 't'], ['Less', 't', 's']], 1, 2])
+        ).code
+      ).toBe('((1) if (s < t and t < s) else (2))');
+    });
+
+    it('a connective over relations is decided by the Kleene tables', () => {
+      // The condition compiles to a three-valued VALUE — `True`, `False` or
+      // `None` — which the selection then inspects. The lowering is lazy: the
+      // second operand sits inside a `lambda` that is entered only when the
+      // first has not already settled the `and`. See
+      // `compile-three-valued-connectives.test.ts` for the full table, the
+      // short-circuit pins and the execution parity.
       const e = new ComputeEngine();
       e.declare('x', 'number');
       expect(
         python.compile(
           e.box(['If', ['And', ['Greater', 'x', 0], ['Less', 'x', 2]], 1, 2])
         ).code
-      ).toBe('((1) if (0 < x and x < 2) else (2))');
+      ).toBe(
+        '(lambda _CND: ((1) if (isinstance(_CND, (bool, np.bool_)) and _CND) ' +
+          "else ((2) if isinstance(_CND, (bool, np.bool_)) else float('nan'))))" +
+          '((lambda _tv1: (False if _tv1 is not None and not _tv1 else ' +
+          '(lambda _tv2: (_tv2 if _tv1 is not None and _tv1 else ' +
+          '(False if _tv2 is not None and not _tv2 else None)))' +
+          '(((x < 2) if x == x else None))))(((0 < x) if x == x else None)))'
+      );
     });
 
     it('When with no default uses float(nan), not a bare NaN', () => {
@@ -951,12 +976,78 @@ describe('PYTHON TARGET', () => {
     // the `np.linalg.norm` call whose order argument is what these tests pin.
     const noFold = { constantFold: false };
 
-    it('a matrix-only string order over a vector fails closed (D6)', () => {
+    it('the Frobenius order over a vector is numpy default order', () => {
+      // The Frobenius norm is the entry-wise L2 norm at any rank, which is
+      // `np.linalg.norm`'s default for a 1-D input. Only the SPELLING
+      // `'fro'` is matrix-only in numpy, so a rank-1 operand drops it
+      // instead of failing closed. The interpreter and the JavaScript
+      // target answer the same 5 here.
+      expect(
+        python.compile(
+          ce.box(['Norm', ['List', 3, 4], { str: 'Frobenius' }] as any),
+          noFold
+        ).code
+      ).toBe('np.linalg.norm([3, 4])');
+      // An operand whose rank is NOT statically known still fails closed:
+      // `'fro'` would raise at run time if it turned out to be a vector.
+      const scoped = new ComputeEngine();
+      scoped.declare('anyRank', 'unknown');
       expect(() =>
         python.compile(
-          ce.box(['Norm', ['List', 3, 4], { str: 'Frobenius' }] as any)
+          scoped.box(['Norm', 'anyRank', { str: 'Frobenius' }] as any)
         )
       ).toThrow(/matrix-only.*Fail closed/s);
+    });
+
+    // A rank-3 literal: √(1² + 2² + … + 8²) = √204 = 14.2828568570857.
+    const T3 = [
+      'List',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      ['List', ['List', 5, 6], ['List', 7, 8]],
+    ];
+    const T3_SRC = '[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]';
+
+    it('the Frobenius order above rank 2 is numpy default order', () => {
+      // The Frobenius norm is the entry-wise L2 norm at EVERY rank: the
+      // interpreter computes it over the tensor's flattened cells above rank 2
+      // (`library/linear-algebra.ts`), and `np.linalg.norm` with no `ord`
+      // argument flattens the array and computes the same sum. Only the
+      // SPELLING `'fro'` is matrix-only, so it is dropped here rather than
+      // failing closed.
+      expect(
+        python.compile(
+          ce.box(['Norm', T3, { str: 'Frobenius' }] as any),
+          noFold
+        ).code
+      ).toBe(`np.linalg.norm(${T3_SRC})`);
+      // The order 2 names that same norm in the interpreter, and so does an
+      // absent order.
+      expect(
+        python.compile(ce.box(['Norm', T3, 2] as any), noFold).code
+      ).toBe(`np.linalg.norm(${T3_SRC})`);
+      expect(python.compile(ce.box(['Norm', T3] as any), noFold).code).toBe(
+        `np.linalg.norm(${T3_SRC})`
+      );
+    });
+
+    it('every OTHER order above rank 2 fails closed (D6)', () => {
+      // Above rank 2 the interpreter defines only the Frobenius norm; the
+      // remaining orders are operator norms, which it leaves symbolic. NumPy
+      // raises `ValueError: Improper number of dimensions to norm` for any
+      // explicit order on a 3-D input, so emitting the call would report
+      // `success: true` for code that cannot run.
+      expect(() =>
+        python.compile(
+          ce.box(['Norm', T3, { str: 'Infinity' }] as any),
+          noFold
+        )
+      ).toThrow(/above rank 2.*Fail closed/s);
+      expect(() =>
+        python.compile(ce.box(['Norm', T3, 1] as any), noFold)
+      ).toThrow(/above rank 2.*Fail closed/s);
+      expect(() =>
+        python.compile(ce.box(['Norm', T3, 3] as any), noFold)
+      ).toThrow(/above rank 2.*Fail closed/s);
     });
 
     it('a string Frobenius order over a matrix still compiles', () => {
@@ -1301,12 +1392,16 @@ describe('PYTHON TARGET', () => {
           '    s = 0\n' +
           '    k = 1\n' +
           '    while True:\n' +
-          '        if 5 <= k:\n' +
+          '        if k == k and (5 <= k):\n' +
           '            break\n' +
           '        s = k + s\n' +
           '        k = k + 1\n' +
           '    return s\n'
       );
+      // `k == k` is the decidedness test: a condition that is not exactly
+      // `True` or `False` when the function runs takes NEITHER branch, so an
+      // undecided `k` does not fire the `break`. The JavaScript statement form
+      // emits the same test (`k === k`, `BaseCompiler.compileLoopBody`).
       // The If compiled to a statement, not `(break) if (…) else …` (a
       // SyntaxError); the loop is a `while`, not a JS IIFE.
       expect(code).not.toContain('=>');
@@ -1328,13 +1423,79 @@ describe('PYTHON TARGET', () => {
         ['Element', 'k', ['Range', 1, 5]],
       ]);
       const code = python.compileFunction(expr, 'g', ['s']);
+      // With an else branch the decidedness test (`k == k`) guards BOTH arms,
+      // so it is a second `if` wrapped around the selection: an undecided `k`
+      // must neither `continue` nor add to `s`. Same shape as the JavaScript
+      // statement form's `if (k === k) { if (2 < k) … else … }`.
       expect(code).toBe(
         'def g(s):\n' +
           '    for k in range(1, 6):\n' +
-          '        if 2 < k:\n' +
-          '            continue\n' +
-          '        else:\n' +
-          '            s = k + s\n'
+          '        if k == k:\n' +
+          '            if 2 < k:\n' +
+          '                continue\n' +
+          '            else:\n' +
+          '                s = k + s\n'
+      );
+    });
+
+    it('a single-statement Block around a control-flow arm is read through', () => {
+      // `Block(break)` IS `break`, so an `If` that selects it is a statement
+      // the same way `If(c, break)` is. The arm test used to answer "not a
+      // statement" for any one-operand `Block` that was not an assignment, so
+      // the selection went to the conditional-EXPRESSION lowering and emitted
+      // `((break) if (0 < x) else (continue))` — a Python SyntaxError behind
+      // `success: true`. Each wrapped form must emit exactly what the
+      // unwrapped form emits.
+      const arms = (then: any, otherwise: any) =>
+        ce.box(['If', ['Greater', 'x', 0], then, otherwise] as any);
+      const loop = [
+        'Loop',
+        ['Assign', 'x', ['Add', 'x', 1]],
+        ['Element', 'i', ['Range', 1, 3]],
+      ];
+      for (const [bare, wrapped] of [
+        [['Break'], ['Block', ['Break']]],
+        [['Continue'], ['Block', ['Continue']]],
+        [['Return', 'x'], ['Block', ['Return', 'x']]],
+        [loop, ['Block', loop]],
+      ] as any) {
+        const expected = python.compile(arms(bare, 1)).code;
+        expect(python.compile(arms(wrapped, 1)).code).toBe(expected);
+        // A statement block, not a conditional expression.
+        expect(expected).toMatch(/^if x == x:\n/);
+      }
+      // Both arms wrapped, and the emission spelled out.
+      expect(
+        python.compile(arms(['Block', ['Break']], ['Block', ['Continue']])).code
+      ).toBe(
+        'if x == x:\n' +
+          '    if 0 < x:\n' +
+          '        break\n' +
+          '    else:\n' +
+          '        continue'
+      );
+    });
+
+    it('a Block-wrapped Break in a loop body matches the unwrapped form', () => {
+      const body = (then: any) =>
+        ce.box([
+          'Loop',
+          [
+            'Block',
+            ['If', ['GreaterEqual', 'k', 5], then],
+            ['Assign', 'k', ['Add', 'k', 1]],
+          ],
+        ] as any);
+      const expected = python.compileFunction(body(['Break']), 'f', ['k']);
+      expect(expected).toBe(
+        'def f(k):\n' +
+          '    while True:\n' +
+          '        if k == k and (5 <= k):\n' +
+          '            break\n' +
+          '        k = k + 1\n'
+      );
+      expect(python.compileFunction(body(['Block', ['Break']]), 'f', ['k'])).toBe(
+        expected
       );
     });
 
@@ -1370,9 +1531,79 @@ describe('PYTHON TARGET', () => {
       expect(code).toBe(
         'def r(k):\n' +
           '    while True:\n' +
-          '        if 3 <= k:\n' +
+          '        if k == k and (3 <= k):\n' +
           '            return k\n' +
           '        k = k + 1\n'
+      );
+    });
+  });
+
+  // A statement-form `If` in a plain function-body `Block` — not a loop body.
+  // Python assignment is a STATEMENT, so the conditional EXPRESSION the `If`
+  // handler emits for value arms cannot carry one: `If(x > 0, r ≔ 1, r ≔ 2)`
+  // came out as `((r = 1) if (0 < x) else (r = 2))`, which Python does not
+  // parse, behind `success: true`. (JavaScript has no such split — `(r = 1)`
+  // is a valid JavaScript expression — so the JavaScript target keeps its
+  // ternary here.)
+  describe('Block → statement-position If', () => {
+    it('an If whose branches are assignments compiles to an `if:`/`else:` block', () => {
+      const scoped = new ComputeEngine();
+      const expr = scoped.box([
+        'Block',
+        ['Declare', 'r', { str: 'unknown' }, 0],
+        ['If', ['Greater', 'x', 0], ['Assign', 'r', 1], ['Assign', 'r', 2]],
+        'r',
+      ] as any);
+      const code = python.compileFunction(expr, 'f', ['x']);
+      // `x == x` is the decidedness test: a condition that is not exactly
+      // `True` or `False` when the function runs takes NEITHER branch, so `r`
+      // keeps its initial 0. With an else branch that test guards both arms,
+      // so it is a second `if` wrapped around the selection — the shape the
+      // JavaScript statement form uses (`BaseCompiler.compileLoopBody`).
+      expect(code).toBe(
+        'def f(x):\n' +
+          '    r = 0\n' +
+          '    if x == x:\n' +
+          '        if 0 < x:\n' +
+          '            r = 1\n' +
+          '        else:\n' +
+          '            r = 2\n' +
+          '    return r\n'
+      );
+      // The invalid emission this replaces.
+      expect(code).not.toContain('(r = 1)');
+    });
+
+    it('an ELSE-LESS If in a Block still declines', () => {
+      // Unchanged: the base compiler's statement-form admission for a
+      // two-operand `If` in a block is plain-JavaScript only, so the shape
+      // never reaches this target's statement lowering and falls back to the
+      // interpreter (`compile-elseless-if-statement.test.ts`).
+      const scoped = new ComputeEngine();
+      const expr = scoped.box([
+        'Block',
+        ['Declare', 'r', { str: 'unknown' }, 0],
+        ['If', ['Greater', 'x', 0], ['Assign', 'r', 1]],
+        'r',
+      ] as any);
+      expect(() => python.compileFunction(expr, 'g', ['x'])).toThrow(
+        /If: wrong number of arguments/
+      );
+    });
+
+    it('a statement-form If cannot be the block’s VALUE (D6)', () => {
+      // An `if:`/`else:` block cannot be returned (`return if …:` does not
+      // parse), and dropping the `return` would answer `None` where the
+      // interpreter answers the assigned value — a silent wrong result. So
+      // this fails closed instead.
+      const scoped = new ComputeEngine();
+      const expr = scoped.box([
+        'Block',
+        ['Declare', 'r', { str: 'unknown' }, 0],
+        ['If', ['Greater', 'x', 0], ['Assign', 'r', 1], ['Assign', 'r', 2]],
+      ] as any);
+      expect(() => python.compileFunction(expr, 'h', ['x'])).toThrow(
+        /selection whose branches are statements.*Fail closed/s
       );
     });
   });

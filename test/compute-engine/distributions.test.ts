@@ -409,14 +409,28 @@ describe('distribution operators', () => {
 
   describe('GammaRegularized / BetaRegularized operators', () => {
     test('special values fold on the evaluate path', () => {
-      expect(ev(['GammaRegularized', 3, 0])).toBe('1'); // Q(a,0)=1
+      expect(ev(['GammaRegularized', 3, 0])).toBe('1'); // Q(a,0)=1 for a > 0
       expect(ev(['GammaRegularized', 1, 'z'])).toBe('e^(-z)'); // Q(1,z)=e^{-z}
-      expect(ev(['BetaRegularized', 0, 'a', 'b'])).toBe('0'); // I_0=0
-      expect(ev(['BetaRegularized', 1, 'a', 'b'])).toBe('1'); // I_1=1
+      // I_0 = 0 and I_1 = 1 need PROVABLY POSITIVE a and b: below zero the
+      // incomplete integral diverges at the endpoint and the endpoint values
+      // are not 0 and 1 (I_1(−1, 3) and I_1(2, −1) are both NaN). With
+      // symbolic parameters nothing is proven, so the application stays
+      // symbolic instead of folding to a value that may be wrong.
+      expect(ev(['BetaRegularized', 0, 2, 3])).toBe('0');
+      expect(ev(['BetaRegularized', 1, 2, 3])).toBe('1');
+      expect(ev(['BetaRegularized', 0, 'a', 'b'])).toBe('BetaRegularized(0, a, b)');
+      expect(ev(['BetaRegularized', 1, 'a', 'b'])).toBe('BetaRegularized(1, a, b)');
     });
 
     test('exact args stay symbolic', () => {
-      expect(ev(['GammaRegularized', 3, 10])).toBe('GammaRegularized(3, 10)');
+      // `Q(n, z)` for a positive integer n and a real z is the exact finite
+      // sum `e^{−z}·Σ_{k<n} z^k/k!`, so the exactness contract asks for it on
+      // the evaluate path — `Q(3, 10) = 61·e^{−10}`. (The generic case, a
+      // non-integer first operand, still has no closed form.)
+      expect(ev(['GammaRegularized', 3, 10])).toBe('61 / e^(10)');
+      expect(ev(['GammaRegularized', ['Rational', 5, 2], 10])).toBe(
+        'GammaRegularized(5/2, 10)'
+      );
       expect(ev(['BetaRegularized', ['Rational', 3, 10], 2, 3])).toBe(
         'BetaRegularized(3/10, 2, 3)'
       );
@@ -579,9 +593,15 @@ describe('distribution operators', () => {
       }
     });
 
-    test('discrete Quantile stays symbolic under evaluate, searches under .N()', () => {
+    test('discrete Quantile searches under .N()', () => {
+      // A discrete quantile has no closed form. Its value IS an exact
+      // integer, but the search compares the machine CDF against p with a
+      // tolerance (see `discreteQuantile` in `numerics/distributions.ts`), so
+      // it cannot certify that integer: an exact p a hair above a CDF jump
+      // would select the previous support point. The search therefore stays
+      // on the `.N()` route and `evaluate()` leaves the application symbolic.
       const q = ce.box(['Quantile', ['BinomialDistribution', 10, ['Rational', 1, 2]], ['Rational', 1, 2]]);
-      expect(q.evaluate().operator).toBe('Quantile'); // symbolic
+      expect(q.evaluate().operator).toBe('Quantile');
       expect(q.N().re).toBe(5);
     });
 

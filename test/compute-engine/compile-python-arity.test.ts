@@ -161,12 +161,15 @@ describe('PYTHON ARITY — Norm / Covariance operand guards', () => {
     expect(src(['Norm', ['List', 3, -4], { str: 'Infinity' }])).toBe(
       'np.linalg.norm([3, -4], np.inf)'
     );
-    // `'fro'` is matrix-only in numpy: on a 1-D input `np.linalg.norm(v,
-    // 'fro')` raises ValueError, so a vector Frobenius order fails closed
-    // instead of emitting source that cannot run.
-    expect(() =>
-      src(['Norm', ['List', 3, 4], { str: 'Frobenius' }])
-    ).toThrow(/Fail closed/);
+    // The SPELLING `'fro'` is matrix-only in numpy: on a 1-D input
+    // `np.linalg.norm(v, 'fro')` raises a ValueError. The Frobenius NORM is
+    // the entry-wise L2 norm at any rank, though — which is numpy's default
+    // order for a 1-D input, and what the interpreter and the JavaScript
+    // target answer — so a rank-1 operand drops the order instead of
+    // emitting source that cannot run.
+    expect(src(['Norm', ['List', 3, 4], { str: 'Frobenius' }])).toBe(
+      'np.linalg.norm([3, 4])'
+    );
     expect(() =>
       src(['Norm', ['List', 3, 4], { str: 'bogus' }])
     ).toThrow(/Fail closed/);

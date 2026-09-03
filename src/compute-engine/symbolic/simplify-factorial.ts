@@ -1,5 +1,28 @@
 import type { Expression, RuleStep } from '../global-types.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { infinitePoint } from '../boxed-expression/infinite-point.js';
+
+/**
+ * True when `x` is a number literal at a non-finite point — `NaN`, one of the
+ * three named infinities, or an "anonymous" infinity such as `∞ + i`. The
+ * infinity test goes through `infinitePoint`, not through `isFinite`: an
+ * anonymous infinity reports `isFinite === true`, and a finite bignum beyond
+ * the double range projects `re` to `Infinity`.
+ */
+function isNonFiniteLiteral(x: Expression): boolean {
+  return isNumber(x) && (x.isNaN === true || infinitePoint(x) !== undefined);
+}
+
+/**
+ * True when `x` is a number literal that `Binomial`'s evaluate handler
+ * answers `NaN` for whatever the other operand is: the `NaN` literal (which
+ * propagates) and an anonymous infinity. The three named infinities are NOT
+ * in this set — `C(±∞, 0)` and `C(~oo, 0)` are `1`, the value the
+ * `C(n, 0) → 1` rewrite gives.
+ */
+function isIndeterminateLiteral(x: Expression): boolean {
+  return isNumber(x) && (x.isNaN === true || infinitePoint(x) === 'anonymous');
+}
 
 /**
  * Extracts base + integer offset from an expression.
@@ -33,6 +56,15 @@ export function baseOffset(
  * - C(n, 1) → n
  * - C(n, n) → 1
  * - C(n, n-1) → n
+ *
+ * The two rules that fold to the CONSTANT 1 are guarded against a non-finite
+ * first operand, because they are pattern rewrites that never look at a
+ * value: without the guard `Binomial(∞, ∞).simplify()` answered `1` where
+ * `evaluate()` answers `NaN` (`C(10⁶, 10⁶+d)` is 0 or unbounded depending on
+ * `d`, so the diagonal has no limit), and `Binomial(NaN, 0).simplify()`
+ * answered `1` where `NaN` must propagate. The two rewrites that return an
+ * OPERAND rather than a constant (`C(n, 1) → n`, `C(n, n−1) → n`) need no
+ * guard: they agree with `evaluate()` at every point, `NaN` included.
  */
 export function simplifyBinomial(x: Expression): RuleStep | undefined {
   if (x.operator !== 'Binomial' && x.operator !== 'Choose') return undefined;
@@ -44,14 +76,19 @@ export function simplifyBinomial(x: Expression): RuleStep | undefined {
 
   const ce = x.engine;
 
-  // C(n, 0) → 1
-  if (k.isSame(0)) return { value: ce.One, because: 'C(n,0) -> 1' };
+  // C(n, 0) → 1. Holds at the three named infinities too (C(±∞, 0) and
+  // C(~oo, 0) are 1), so only the points whose value is NaN whatever the
+  // second operand — the NaN literal and an anonymous infinity — are excluded.
+  if (k.isSame(0) && !isIndeterminateLiteral(n))
+    return { value: ce.One, because: 'C(n,0) -> 1' };
 
   // C(n, 1) → n
   if (k.isSame(1)) return { value: n, because: 'C(n,1) -> n' };
 
-  // C(n, n) → 1
-  if (k.isSame(n)) return { value: ce.One, because: 'C(n,n) -> 1' };
+  // C(n, n) → 1. The diagonal has no limit at any infinite point, so every
+  // non-finite literal is excluded here. A symbolic n still simplifies.
+  if (k.isSame(n) && !isNonFiniteLiteral(n))
+    return { value: ce.One, because: 'C(n,n) -> 1' };
 
   // C(n, n-1) → n (structural check via baseOffset)
   const nBO = baseOffset(n);

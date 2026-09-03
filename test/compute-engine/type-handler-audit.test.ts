@@ -340,7 +340,11 @@ describe('TYPE AUDIT: Binomial / Pochhammer / Rank', () => {
     // Negative integer n with non-integer k reaches the Γ(n+1) pole.
     expect(typeOf(['Binomial', -2, ['Rational', 1, 2]])).toBe('number');
     expect(typeOf(['Binomial', 2, 'PositiveInfinity'])).toBe('number');
-    expect(ce.box(['Binomial', 2, 'PositiveInfinity']).N().isNaN).toBe(true);
+    // `C(n, +∞) = 0` for a finite real n > −1 (|C(n, k)| decays like
+    // k^(−n−1)); the old `NaN` was the Γ-ratio kernel's answer to an
+    // `Infinity` argument, not a limit. The claim stays the wide `number`:
+    // for n ≤ −1 the same point is `NaN`.
+    expect(ce.box(['Binomial', 2, 'PositiveInfinity']).N().isSame(0)).toBe(true);
     expectSound(['Binomial', 0.5, 2.5]);
   });
 

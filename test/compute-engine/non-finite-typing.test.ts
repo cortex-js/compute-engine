@@ -236,12 +236,19 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Multiply', 'z_f', 'PositiveInfinity'])).toBe('number');
     });
 
-    test('ElementMax/ElementMin/Clamp with a non-finite operand widen to number', () => {
-      // Element-wise extrema use `numericTypeHandler`, which conservatively
-      // widens to `number` when any operand may be non-finite (matching `Max`).
-      expect(typeOf(['ElementMax', 'PositiveInfinity', 5])).toBe('number');
-      expect(typeOf(['ElementMin', 'NegativeInfinity', 5])).toBe('number');
-      expect(typeOf(['Clamp', 'x_r', 0, 'PositiveInfinity'])).toBe('number');
+    test('ElementMax/ElementMin/Clamp with a non-finite operand claim the extended real line', () => {
+      // These three left the "widen to number" convention with their
+      // Contract B flip (Phase F batch 11): they declare the extended real
+      // line `(real | signed_infinity, …) -> real | signed_infinity`, so
+      // `±∞` are ordinary values of the carrier rather than a reason to
+      // widen. The slim handler claims the operands' common finite tier
+      // and DECLINES otherwise, and the declared result is what shows
+      // here. (`Max`/`Min`, which reduce collections, keep the wide
+      // carrier and the `number` claim.)
+      const EXT = 'real | signed_infinity';
+      expect(typeOf(['ElementMax', 'PositiveInfinity', 5])).toBe(EXT);
+      expect(typeOf(['ElementMin', 'NegativeInfinity', 5])).toBe(EXT);
+      expect(typeOf(['Clamp', 'x_r', 0, 'PositiveInfinity'])).toBe(EXT);
     });
 
     test('poles that evaluate to ~oo claim number, not complex/finite', () => {
@@ -793,8 +800,10 @@ describe('NON-FINITE TYPING CONVENTION', () => {
 
     test('a WIDE-parameter head still admits the infinity', () => {
       // Not every number-theory head tightened: `GCD`/`LCM` declare `any*`
-      // and `Binomial` declares `number`, so nothing about their admission
-      // changed. They stay symbolic, exactly as before.
+      // and `Binomial` declares the Γ-family carrier `complex | infinity`,
+      // which ADMITS the infinities, so nothing about their admission
+      // changed. (`Binomial` now answers `+oo` there rather than staying
+      // symbolic; this row is about admission, not about the value.)
       const engine = new ComputeEngine();
       for (const head of ['GCD', 'LCM'])
         expect(

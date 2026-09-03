@@ -47,10 +47,14 @@ export function nonRealDataError(
  *   modes, because `real` now names the FINITE reals: the value is a complex
  *   number and the statistic has no convention-free complex extension, or the
  *   value is `NaN`, a real `±∞`, or the complex infinity `~oo`.
+ * - `number` — the value is not a number at all: a string, a character, a
+ *   boolean, a nested collection. No statistic has a reading for it, not even
+ *   the two that accept complex data (`Mean` and the variance family), so this
+ *   is the constraint they name instead of `real`.
  * - `machine_range` — the value IS a finite real, but its magnitude lies
  *   outside the double range the asking kernel computes in.
  */
-export type DataConstraint = 'real' | 'machine_range';
+export type DataConstraint = 'real' | 'number' | 'machine_range';
 
 /** The expectation a `machine_range` rejection names. */
 const MACHINE_RANGE_EXPECTATION =
@@ -61,9 +65,9 @@ const MACHINE_RANGE_EXPECTATION =
  * fails one of the constraints above, naming the operator and the (truncated)
  * datum alongside it.
  *
- * A `real` rejection is an `incompatible-type` error carrying the failed
- * constraint and the datum's own type: it is a statement about what the value
- * IS. The binning heads `Histogram`/`BinCounts`
+ * A `real` or `number` rejection is an `incompatible-type` error carrying the
+ * failed constraint and the datum's own type: it is a statement about what the
+ * value IS. The binning heads `Histogram`/`BinCounts`
  * (`library/statistics.ts`) raise `real` where the heads that ABSORB a
  * non-finite datum (`Mean([1, NaN, 5])` is `NaN`) cannot, because a
  * histogram's result is a vector of COUNTS and no count means "the data had no

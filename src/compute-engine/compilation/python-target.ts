@@ -13,6 +13,7 @@ import type {
   CompilationResult,
 } from './types.js';
 import { compileDiagnosticOf } from './diagnostics.js';
+import type { ConditionDialect } from './base-compiler.js';
 import {
   BaseCompiler,
   couldBeCollectionParticipant,
@@ -632,26 +633,12 @@ function compilePythonStatements(
   if (h === 'Return')
     return `return ${BaseCompiler.compileOp(expr, 0, target, 0, expr.ops[0])}`;
 
-  if (h === 'If') {
-    // The Python target's comparisons already emit real Python booleans, so —
-    // unlike the JS `compileLoopBody`, whose interval-JS targets need a
-    // `scalarConditionTarget` to avoid comparison *objects* — the condition is
-    // compiled directly. The condition is a value expression (its own bindable
-    // region); each branch is a statement list again (design §5.1(c)).
-    const cond = BaseCompiler.compileOp(expr, 0, target, 0, expr.ops[0]);
-    let code = `if ${cond}:\n${indentPythonStatements(
-      BaseCompiler.withCseScope(expr, 1, target, () =>
-        compilePythonStatements(expr.ops[1], target)
-      )
-    )}`;
-    if (expr.ops.length > 2)
-      code += `\nelse:\n${indentPythonStatements(
-        BaseCompiler.withCseScope(expr, 2, target, () =>
-          compilePythonStatements(expr.ops[2], target)
-        )
-      )}`;
-    return code;
-  }
+  // The Python target's comparisons already emit real Python booleans, so —
+  // unlike the JS `compileLoopBody`, whose interval-JS targets need a
+  // `scalarConditionTarget` to avoid comparison *objects* — the condition is
+  // compiled directly. The condition is a value expression (its own bindable
+  // region); each branch is a statement list again (design §5.1(c)).
+  if (h === 'If') return compilePythonIfStatement(expr.ops, target, expr);
 
   if (h === 'Block') {
     // As in `BaseCompiler.compileLoopBody`: a statement list is where a
@@ -841,6 +828,32 @@ function pyStaticRank(e: Expression): number | undefined {
   )
     return 1;
   return undefined;
+}
+
+/**
+ * Fail closed (D6) when a `Norm` whose order is NOT the entry-wise Frobenius
+ * one is taken over an operand of statically known rank 3 or more.
+ *
+ * Above rank 2 the interpreter (`library/linear-algebra.ts`) computes only the
+ * Frobenius norm — the entry-wise `√(Σ|xᵢ|²)` over the flattened cells, which
+ * is the order 2, the default and the `"Frobenius"` spelling. Every other
+ * order is an OPERATOR norm, defined through a matrix acting on vectors, and
+ * the handler stays symbolic for it. NumPy has no reading for those either:
+ * `np.linalg.norm` raises `ValueError: Improper number of dimensions to norm`
+ * for any explicit `ord` on an input with more than two axes. Emitting the
+ * call would report `success: true` for code that raises when it runs.
+ *
+ * A rank that is not statically known is not this guard's business — the
+ * callers decide that case for themselves.
+ */
+function assertPythonNormRankAtMost2(rank: number | undefined): void {
+  if (rank === undefined || rank <= 2) return;
+  throw new Error(
+    `Norm: above rank 2 the interpreter computes only the Frobenius norm ` +
+      `(the order 2, which is also the default), and \`np.linalg.norm\` ` +
+      `raises for any explicit order on an input with more than two axes. ` +
+      `Fail closed (D6).`
+  );
 }
 
 /**
@@ -1225,6 +1238,28 @@ function pythonAssertExpressionBody(subject: string, expr: Expression): void {
  * branch (`Block(s ≔ x; s)` → `def f(x):\n    s = x\n    return s\n`).
  */
 function pythonAssertReturnableBody(subject: string, expr: Expression): void {
+  // The third shape, which `statementBodyHead` does not report: a selection
+  // whose arms are statements (`If(c, r ≔ 1, r ≔ 2)`) lowers to an
+  // `if:`/`else:` BLOCK (`compilePythonIfStatement`), and a block cannot be
+  // returned any more than an assignment can — the emission would be
+  // `return if …:`. Nor may the `return` simply be dropped: the block's value
+  // is the selection's, so a `def` that fell through would answer `None` where
+  // the interpreter answers the assigned value.
+  let value = expr;
+  while (isFunction(value, 'Block') && value.ops.length > 0)
+    value = value.ops[value.ops.length - 1];
+  if (
+    isFunction(value, 'If') &&
+    (pythonArmIsStatement(value.ops[1]) || pythonArmIsStatement(value.ops[2]))
+  )
+    throw new Error(
+      `${subject}: the body's value statement is a selection whose branches ` +
+        `are statements, which Python writes as an \`if:\`/\`else:\` block — ` +
+        `and a block cannot be returned, so this route would emit ` +
+        `\`return if …:\`. Give the block a VALUE statement ` +
+        `(\`Block(If(c, r ≔ 1, r ≔ 2); r)\`), which compiles to the \`if\` ` +
+        `block followed by \`return r\`. Fail closed (D6).`
+    );
   const head = statementBodyHead(expr);
   if (head === undefined) return;
   throw new Error(
@@ -1525,6 +1560,37 @@ const pythonIsBoolean = (x: string): string =>
   `isinstance(${x}, (bool, np.bool_))`;
 
 /**
+ * Python’s spellings of the pieces a branch condition’s decidedness test is
+ * built from. The tests themselves, and the way a connective combines its
+ * operands’, are the compiler’s shared analysis
+ * (`BaseCompiler.conditionDecidability`); only the wording is this target’s.
+ *
+ * `not` is a word, so it carries its own trailing space: the fragment it
+ * precedes is a name or a parenthesized expression, and `notx` would be an
+ * identifier.
+ */
+const PYTHON_CONDITION_DIALECT: ConditionDialect = {
+  decidedNumber: PYTHON_DECIDED_NUMBER,
+  and: 'and',
+  not: 'not ',
+  // `None` is the undecided value. Every three-valued fragment this lowering
+  // builds is a `bool`, a `np.bool_` or `None`, so `is None` decides it
+  // exactly — where `== None` and `is True` would not (`np.True_ is True` is
+  // false, and `1 == True` is true).
+  undecided: 'None',
+  trueValue: 'True',
+  falseValue: 'False',
+  isTrue: (x) => `${x} is not None and ${x}`,
+  isFalse: (x) => `${x} is not None and not ${x}`,
+  isUndecided: (x) => `${x} is None`,
+  kleeneOfValue: (x, negate) =>
+    `((${negate ? `not ${x}` : x}) if ${pythonIsBoolean(x)} else None)`,
+  ternary: (test, then, otherwise) => `(${then} if ${test} else ${otherwise})`,
+  bind: (params, body, args) =>
+    `(lambda ${params.join(', ')}: ${body})(${args.join(', ')})`,
+};
+
+/**
  * Produce a Python conditional expression that takes an arm only when its
  * condition is exactly `True` or `False` when the function runs. A condition
  * that is anything else takes neither arm and the value is `float('nan')`.
@@ -1535,7 +1601,16 @@ const pythonIsBoolean = (x: string): string =>
  * comparison against NaN gives an ordinary `False` in Python exactly as it
  * does in JavaScript, so a condition that cannot be decided looks the same as
  * one decided to be false, and the difference has to be read off the
- * comparison’s operands. Only the wording of the tests is Python’s.
+ * comparison’s operands. Only the wording of the tests is Python’s
+ * (`PYTHON_CONDITION_DIALECT`).
+ *
+ * A condition built from `and`/`or`/`not` is decided by the same three-valued
+ * (Kleene) tables the JavaScript target uses: an `and` is decided when one
+ * operand is decided `False` — that operand settles the result whatever its
+ * siblings hold — or when every operand is decided, and an `or` is the mirror
+ * image. Python’s `and`/`or` short circuit and return an operand, exactly as
+ * JavaScript’s `&&`/`||` do, so the connective’s ordinary emitted source is
+ * the correct VALUE wherever that test holds.
  *
  * One case does not arise in Python. A compiled JavaScript function reads its
  * free symbols out of an object, where a missing entry is `undefined` and
@@ -1559,12 +1634,29 @@ function compilePythonBranch(
   if (decidability === null)
     return `((${thenCode}) if (${compileCond(cond)}) else (${elseCode}))`;
 
-  if (decidability === 'value') {
+  if (
+    decidability.test.kind === 'value' ||
+    decidability.test.kind === 'connective'
+  ) {
     // `Not` is applied by exchanging the two constants the tests compare
     // against, never by emitting `np.logical_not`: negating a value that is
     // not a boolean would produce a confident answer from no evidence.
-    const { expr, negate } = BaseCompiler.peelNegations(cond);
-    const code = compileCond(expr);
+    //
+    // A condition that reaches a connective is compiled to its three-valued
+    // value — `True`, `False` or `None` — and inspected the same way. The
+    // negation, and the lazy bindings the lowering needs, are inside that
+    // value, so nothing is exchanged here.
+    const connective = decidability.test.kind === 'connective';
+    const { expr, negate } = connective
+      ? { expr: cond, negate: false }
+      : BaseCompiler.peelNegations(cond);
+    const code = connective
+      ? BaseCompiler.kleeneCondition(
+          decidability,
+          target,
+          PYTHON_CONDITION_DIALECT
+        )
+      : compileCond(expr);
     // The value is inspected twice (once for its kind, once for its truth), so
     // anything that is not already a name is bound to a lambda parameter and
     // evaluated once. Both arms stay inside the lambda, so an unselected arm
@@ -1582,7 +1674,7 @@ function compilePythonBranch(
   // to compute is bound to a name, which the condition then reads: the
   // condition contains the operand once and the tests name it twice more.
   const { value, bindings } = BaseCompiler.withConditionOperands(
-    decidability,
+    decidability.test.operands,
     target,
     target.bindExpr !== undefined,
     (conjuncts) => {
@@ -1593,9 +1685,183 @@ function compilePythonBranch(
         ' and '
       )}) else float('nan'))`;
     },
-    PYTHON_DECIDED_NUMBER
+    PYTHON_CONDITION_DIALECT
   );
   return bindings.length === 0 ? value : target.bindExpr!(bindings, value);
+}
+
+/**
+ * True when `arm` lowers to Python STATEMENTS, so an `If` that selects it has
+ * no conditional-EXPRESSION emission and must be written as an `if:`/`else:`
+ * statement block instead.
+ *
+ * Python assignment is a statement, not an expression (this target does not
+ * emit the walrus operator), and so are `break`, `continue`, `return`, a loop
+ * and a multi-statement sequence. JavaScript has no such split — `(s = -1)` is
+ * an ordinary JavaScript expression — which is why the JavaScript target keeps
+ * its ternary in this position and only Python needs the statement form:
+ * `If(x > 0, r ≔ 1, r ≔ 2)` as a statement of a `Block` came out as
+ * `((r = 1) if (0 < x) else (r = 2))`, which Python does not parse.
+ *
+ * The heads listed here are the ones `compilePythonStatements` lowers itself;
+ * everything else it hands to `BaseCompiler.compile`, which produces an
+ * expression. A `Block` of exactly one statement is that statement, so it is
+ * read through. `Declare` is deliberately absent: this target emits nothing at
+ * all for a declaration, so an `If` arm that is one has no honest statement
+ * form either and keeps failing on the expression route.
+ */
+function pythonArmIsStatement(arm: Expression | undefined): boolean {
+  if (arm === undefined) return false;
+  // Unwraps a `Block` tail, so `Block(s ≔ 1)` and a nested one answer too.
+  if (statementBodyHead(arm) === 'Assign') return true;
+  if (!isFunction(arm)) return false;
+  const h = arm.operator;
+  if (h === 'Break' || h === 'Continue' || h === 'Return' || h === 'Loop')
+    return true;
+  // A `Block` of one statement IS that statement, so read it through: the
+  // `Assign` unwrap above answers only for an assignment tail, and
+  // `Block(break)` must reach the statement form the same way a bare `break`
+  // does. Any other `Block` (empty, or a sequence) has no expression form.
+  // A `Block` of one statement IS that statement, so read it through: the
+  // `Assign` unwrap above answers only for an assignment tail, and
+  // `Block(break)` must reach the statement form the same way a bare `break`
+  // does. Any other `Block` (empty, or a sequence) has no expression form.
+  if (h === 'Block')
+    return arm.ops.length !== 1 || pythonArmIsStatement(arm.ops[0]);
+  // A nested selection is a statement exactly when one of ITS arms is.
+  if (h === 'If')
+    return pythonArmIsStatement(arm.ops[1]) || pythonArmIsStatement(arm.ops[2]);
+  return false;
+}
+
+/**
+ * Compile an `If` in STATEMENT position — a statement of a `Block`, or of a
+ * loop body — to a Python `if:`/`else:` statement block.
+ *
+ * A statement has no value, so a branch cannot be spliced into the conditional
+ * expression `compilePythonBranch` builds: see `pythonArmIsStatement` for what
+ * has no expression form in Python and why JavaScript needs none of this.
+ *
+ * The condition takes the SAME decidedness test the conditional expression
+ * takes, read the statement way: a condition that is not exactly `True` or
+ * `False` when the compiled function runs takes NEITHER branch, and execution
+ * continues with the next statement. That is the interpreter's own inertness —
+ * it holds an undecidable `If` rather than choosing an arm, so no assignment
+ * inside it happens and no `break` under it fires — and it is what the
+ * JavaScript statement form does (`BaseCompiler.compileLoopBody`). The
+ * analysis is the compiler's shared one (`BaseCompiler.conditionDecidability`);
+ * only the wording is this target's (`PYTHON_CONDITION_DIALECT`).
+ *
+ * A temporary the test needs is emitted as an assignment statement BEFORE the
+ * `if`, where the JavaScript form wraps the whole thing in a block with a
+ * `const`: Python has no block scope, so there is nothing to wrap, and the
+ * name is drawn from the compilation's naming context so it cannot collide.
+ */
+function compilePythonIfStatement(
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  /** The `If` node, when the caller has it: the CSE regions of the condition
+   * and of each branch are keyed by the `(node, operandIndex)` edge. Omitting
+   * it costs only the optimization. */
+  node: Expression | undefined
+): string {
+  const cond = args[0];
+  if (cond === undefined || args[1] === undefined)
+    throw new Error('If: wrong number of arguments');
+
+  /** One branch, compiled as statements inside its own CSE region. */
+  const branch = (i: number): string =>
+    BaseCompiler.withCseScope(node, i, target, () =>
+      compilePythonStatements(args[i], target)
+    );
+  const compileCond = (c: Expression): string =>
+    BaseCompiler.compileOp(node, 0, target, 0, c);
+  /** A `head:` line with `body` indented beneath it (`pass` when empty). */
+  const suite = (head: string, body: string): string =>
+    `${head}\n${indentPythonStatements(body)}`;
+  const hasElse = args.length > 2 && args[2] !== undefined;
+
+  const decidability = BaseCompiler.conditionDecidability(cond);
+
+  // Decided by construction: the plain `if`/`else` needs no extra test.
+  if (decidability === null) {
+    const code = suite(`if ${compileCond(cond)}:`, branch(1));
+    return hasElse ? `${code}\n${suite('else:', branch(2))}` : code;
+  }
+
+  const kind = decidability.test.kind;
+  if (kind === 'value' || kind === 'connective') {
+    // `Not` is applied by exchanging the two constants the tests compare
+    // against, never by an emitted negation: negating a value that is not a
+    // boolean would produce a confident answer from no evidence. A condition
+    // that reaches a connective is compiled to its three-valued value and
+    // carries its own negation, so nothing is exchanged for it.
+    const connective = kind === 'connective';
+    const { expr: condExpr, negate } = connective
+      ? { expr: cond, negate: false }
+      : BaseCompiler.peelNegations(cond);
+    const code = connective
+      ? BaseCompiler.withCseOperand(node, 0, target, () =>
+          BaseCompiler.kleeneCondition(
+            decidability,
+            target,
+            PYTHON_CONDITION_DIALECT
+          )
+        )
+      : compileCond(condExpr);
+    // The value is inspected twice — once for its kind, once for its truth —
+    // so anything that is not already a name is computed into a temporary
+    // first.
+    let prelude = '';
+    let name = code;
+    if (!PYTHON_ATOM.test(code)) {
+      name = BaseCompiler.tempVar(target);
+      prelude = `${name} = ${code}\n`;
+    }
+    const isBool = pythonIsBoolean(name);
+    let out = suite(
+      `if ${isBool} and ${negate ? `not ${name}` : name}:`,
+      branch(1)
+    );
+    // The else arm repeats the boolean test rather than being a bare `else:`,
+    // so a value that is neither `True` nor `False` reaches no branch at all.
+    if (hasElse) out += `\n${suite(`elif ${isBool}:`, branch(2))}`;
+    return prelude + out;
+  }
+
+  // A comparison always produces a real boolean, so whether it could be
+  // decided has to be read off its operands. An operand that costs something
+  // to compute is bound to a name, which the condition then reads.
+  const { value, bindings } = BaseCompiler.withConditionOperands(
+    decidability.test.operands,
+    target,
+    true,
+    (conjuncts) => {
+      const code = compileCond(cond);
+      if (hasElse) {
+        const inner = `${suite(`if ${code}:`, branch(1))}\n${suite(
+          'else:',
+          branch(2)
+        )}`;
+        // With an else branch the decidedness test has to guard BOTH arms, so
+        // it is a second `if` wrapped around the selection.
+        return conjuncts.length === 0
+          ? inner
+          : suite(`if ${conjuncts.join(' and ')}:`, inner);
+      }
+      // With no else branch the two tests guard the same statement, so they
+      // join one `if`. The condition is parenthesized when it joins the test,
+      // because `and` binds tighter than the `or` a condition may contain.
+      const test =
+        conjuncts.length === 0
+          ? code
+          : [...conjuncts, `(${code})`].join(' and ');
+      return suite(`if ${test}:`, branch(1));
+    },
+    PYTHON_CONDITION_DIALECT
+  );
+  if (bindings.length === 0) return value;
+  return `${bindings.map(([n, c]) => `${n} = ${c}`).join('\n')}\n${value}`;
 }
 
 const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
@@ -2045,16 +2311,30 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           `Norm: the norm type "${p.string}" has no numpy spelling. ` +
             `Fail closed (D6).`
         );
-      // `'fro'` is a MATRIX-only order: `np.linalg.norm(v, 'fro')` raises a
-      // ValueError on a 1-D input, so it may only be emitted for a statically
-      // rank-2 operand. A rank-1 or statically-unknown operand fails closed
-      // rather than compile "successfully" to code that raises at run time.
+      // The Frobenius norm is the entry-wise `√(Σ|xᵢ|²)` at EVERY rank — the
+      // definition sums over every cell and does not mention the rank — which
+      // is exactly `np.linalg.norm`'s default order: with no `ord` argument
+      // numpy flattens the array and takes the entry-wise L2 norm. So a
+      // statically known rank other than 2 drops the order argument instead
+      // of failing closed. The interpreter answers the same value at rank 1
+      // (`vectorNorm`) and at rank ≥ 3 (the `flatten()` branch), and so does
+      // the JavaScript target.
+      if (p.string === 'Frobenius' && rank !== undefined && rank !== 2)
+        return `np.linalg.norm(${compile(args[0])})`;
+      // The numpy SPELLING `'fro'` is nevertheless matrix-only:
+      // `np.linalg.norm(v, 'fro')` raises a ValueError on anything but a 2-D
+      // input, so it may only be emitted for a statically rank-2 operand. An
+      // operand whose rank is not statically known fails closed rather than
+      // compile "successfully" to code that raises at run time.
       if (p.string === 'Frobenius' && rank !== 2)
         throw new Error(
-          `Norm: the "Frobenius" norm type is matrix-only — ` +
-            `\`np.linalg.norm(v, 'fro')\` raises a ValueError unless the ` +
-            `operand is statically rank 2. Fail closed (D6).`
+          `Norm: the numpy spelling of the "Frobenius" norm type is ` +
+            `matrix-only — \`np.linalg.norm(v, 'fro')\` raises a ValueError ` +
+            `unless the operand is 2-D — and the rank of this operand is not ` +
+            `statically known, so neither that spelling nor the rankless ` +
+            `default order can be emitted. Fail closed (D6).`
         );
+      assertPythonNormRankAtMost2(rank);
       return `np.linalg.norm(${compile(args[0])}, ${ord})`;
     }
     // Order 2 names a DIFFERENT norm on a matrix in each system: the
@@ -2062,11 +2342,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // (`library/linear-algebra.ts`), while `np.linalg.norm(m, 2)` is the
     // SPECTRAL norm (largest singular value) — on `[[3,4],[5,12]]` that is
     // 13.9283… vs 13.8806…, a silent wrong value. The two agree on a vector,
-    // so only a statically rank-2 operand is respelled `'fro'`. When the rank
-    // is not statically 1 or 2 there is no single numpy order that matches the
-    // interpreter for both ranks, so this fails closed (D6).
+    // so only a statically rank-2 operand is respelled `'fro'`. Above rank 2
+    // the interpreter reads the order 2 as the entry-wise Frobenius norm over
+    // the flattened cells, which is numpy's DEFAULT order (no `ord`
+    // argument) — `np.linalg.norm(t, 2)` raises on a 3-D input instead. When
+    // the rank is not statically known there is no single numpy order that
+    // matches the interpreter for every rank, so this fails closed (D6).
     if (p.isSame(2)) {
       if (rank === 2) return `np.linalg.norm(${compile(args[0])}, 'fro')`;
+      if (rank !== undefined && rank >= 3)
+        return `np.linalg.norm(${compile(args[0])})`;
       if (rank !== 1)
         throw new Error(
           `Norm: the order-2 norm of an operand whose rank is not statically ` +
@@ -2117,6 +2402,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           `2/Frobenius and +Infinity — \`np.linalg.norm\` would raise or ` +
           `diverge for this order. Fail closed (D6).`
       );
+    assertPythonNormRankAtMost2(rank);
     return `np.linalg.norm(${compile(args[0])}, ${compile(p)})`;
   },
   Determinant: 'np.linalg.det',
@@ -2169,6 +2455,20 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // expressions (`a if cond else b`) and `float('nan')`.
   If: (args, compile, target) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
+    // An arm with no Python EXPRESSION form — an assignment, a loop, a
+    // multi-statement block — makes the whole selection a statement: emit the
+    // `if:`/`else:` block instead of a conditional expression. In an
+    // expression position that block is a multi-line fragment, which the
+    // target's own statement gates (`bareStatementBlocks`,
+    // `pythonAssertExpressionOnly`) then refuse — where the conditional
+    // expression used to hand back `((r = 1) if … else (r = 2))` behind
+    // `success: true`.
+    if (pythonArmIsStatement(args[1]) || pythonArmIsStatement(args[2]))
+      return compilePythonIfStatement(
+        args,
+        target,
+        BaseCompiler.cseParentNode()
+      );
     // Both arms are conditionally evaluated: their operand indices go to the
     // compile callback, which opens the matching CSE region (`OperandCompiler`).
     // A condition that is not exactly `True` or `False` takes neither arm and
@@ -2993,6 +3293,20 @@ export class PythonTarget implements LanguageTarget<Expression> {
         // produce `return for …:` (a SyntaxError). Emit it as-is and make the
         // block evaluate to `None` (the Loop's `Nothing` value).
         if (/^(for|while)\b/.test(stmts[last])) stmts.push('return None');
+        // A selection whose branches are statements lowers to an `if:`/`else:`
+        // block (`compilePythonIfStatement`), which cannot be returned either —
+        // and unlike a `Loop` it HAS a value (the branch's), so falling through
+        // to `None` would be a silent wrong answer rather than the right one.
+        // The root-body route says the same thing with a fuller message
+        // (`pythonAssertReturnableBody`); this catches a nested block.
+        else if (/^if\b/.test(stmts[last]))
+          throw new Error(
+            `Block: the block's value statement is a selection whose branches ` +
+              `are statements, which Python writes as an \`if:\`/\`else:\` ` +
+              `block — a block cannot be returned, and its value is not ` +
+              `\`None\`. Give the block a VALUE statement after the ` +
+              `selection. Fail closed (D6).`
+          );
         else stmts[last] = `return ${stmts[last]}`;
         return stmts.join('\n');
       },

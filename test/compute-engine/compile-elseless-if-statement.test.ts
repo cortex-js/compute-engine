@@ -221,7 +221,10 @@ describe('the admission is plain-JavaScript only', () => {
     ]);
     const r = compile(expr, { to: 'python', fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatch(/if \(?2 < i\)?:/);
+    // The loop-body `If` carries the same decidedness conjunct as every
+    // other statement-form `If` (an undecided condition runs neither
+    // branch), so the emitted test is guarded by `i == i`.
+    expect(r.code).toMatch(/if i == i and \(2 < i\):/);
   });
 
   test('INTERVAL JavaScript still declines — the emission would be WRONG', () => {

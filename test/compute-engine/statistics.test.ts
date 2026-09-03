@@ -275,12 +275,24 @@ describe('Bivariate statistics reject non-real data', () => {
     expect(lr.toString()).toMatch(NON_REAL);
   });
 
-  test('an element that is not data at all still reports the shape', () => {
+  test('an element that is not a number at all names the number constraint', () => {
+    // A string element is not data of any kind, and the shape it appears in
+    // is correct — two equal-length collections — so blaming the shape (which
+    // this used to do) was a false diagnosis in the same way blaming it for a
+    // complex datum is. The constraint is `number`, not `real`: what is wrong
+    // with `"a"` is not that it is off the real line.
     const r = ce
       .box(['Covariance', L([1, { str: 'a' }]), L([2, 3])] as any)
       .evaluate();
     expect(r.isValid).toBe(false);
-    expect(r.toString()).toMatch(/expects two equal-length collections/);
+    expect(r.toString()).toMatch(/incompatible-type", "number", "string"/);
+    // The least-squares fits share `shapeError`, so they gained the same
+    // diagnosis.
+    const lr = ce
+      .box(['LinearRegression', L([1, { str: 'a' }, 5]), L([2, 3, 9])] as any)
+      .evaluate();
+    expect(lr.isValid).toBe(false);
+    expect(lr.toString()).toMatch(/incompatible-type", "number", "string"/);
   });
 
   test('genuinely constant real data still reports zero variance', () => {

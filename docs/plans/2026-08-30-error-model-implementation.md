@@ -1517,6 +1517,638 @@ tests, snapshot delta 0.
 Final full-suite gate (main tree, post-review, box lock held): 647/647
 suites, 31,317 tests, snapshot delta 0.
 
+**Batch 11 — the arithmetic core (`Divide`, `Negate`, `Square`, `Clamp`,
+`ElementMax`, `ElementMin`) — IMPLEMENTED 2026-09-02.** Survey first
+(every head, every exceptional point, box and parse routes; the survey
+table is reproduced by the family pin block "the arithmetic core declares
+its domains" in `test/compute-engine/error-model.test.ts`), then the
+declarations, decided by precedent (the session ran without a ruling
+round; each decision names the precedent it follows, for ratification):
+
+1. **`Divide: (complex | infinity, (complex | infinity)+) -> number`,
+   `nanBehavior: 'propagate'`** — the `Power` base-slot carrier in every
+   slot. Every pair of admitted operands has a value (`1/0 = ~oo`,
+   `x/±∞ = 0`, `±∞/finite = ±∞`, `~oo/2 = ~oo`, `2/~oo = 0`, `∞/i = ~oo`)
+   or is an indeterminate FORM whose value is `NaN` (`0/0`, `∞/∞`,
+   `~oo/~oo`, `~oo/∞`, `∞/~oo`) — the `Power` arrangement for `0^0`, so
+   no `definedWhen`. The result stays the wide `number` (the compiled
+   lanes' kind preservation relies on it). No answer changes.
+2. **`Negate: (complex | infinity) -> number`, `propagate`, `total`** —
+   negation is total on the extended plane (`−(±∞) = ∓∞`, `−~oo = ~oo`).
+   The explicit `missingBehavior: 'propagate'` is gone: with a numeric
+   carrier it DERIVES (`resolvedMissingBehavior`), and `Negate(Missing)`
+   is still `NaN`. `Quantity` and `Measurement` operands (typed `value`)
+   keep working because the enforcement seam is `checkNumericArgs` in the
+   `canonical` handler, not the signature. No answer changes.
+3. **`Square` keeps its wide declaration** — the `Exp` arrangement: it
+   canonicalizes to `Power(x, 2)`, so `Power`'s base carrier governs every
+   exceptional point and a carrier declared here would be consulted by
+   nothing. A comment at the definition says so.
+4. **`Clamp`, `ElementMax`, `ElementMin` take the EXTENDED REAL line in
+   every slot** (`real | signed_infinity`, result the same), `propagate`,
+   `total` — the `Floor` family's carrier, because an extremum is defined
+   by the order of the real line. A non-real operand or `~oo` is an
+   `incompatible-type` error at BOXING now (`Clamp(i, 0, 1)`,
+   `Clamp(~oo, 0, 1)`, `ElementMax(i, 1)`, `ElementMax(~oo, 1)` used to
+   stay inert forever); the signed infinities keep their values; `lo > hi`
+   is inside the total order (`Clamp(5, 1, 0) = 0`). The wide
+   `numericTypeHandler` is replaced by a slim declining one,
+   `elementExtremumType` (`library/type-handlers-types.ts`): these heads
+   SELECT an operand, so all-finite-integer operands claim `integer`,
+   all-finite-real claim `real`, anything else declines to the declared
+   union (per cell under the broadcast lift). `~oo`'s asymmetry across the
+   core is deliberate: `Divide`/`Negate`/`Square` admit it (their values
+   are genuine), the extremum family rejects it (no order).
+
+Two decisions of the brief were REFUTED by the mechanism and reverted,
+with the evidence written at the code:
+
+- **The boxing-time `NaN` fold of `canonicalDivide` stays.** The brief
+  asked to leave `Divide(NaN, 2)` unfolded like `Power`/`Multiply`/`Add`
+  so the framework's `nan` claim would show. Measured: it does not —
+  `applyContractB` early-returns for a declared result that already
+  admits `nan` (`number` does), so the unfolded node typed the WIDE
+  `number` where the folded literal types `NaN`; and the unfold opened a
+  route divergence, `NaN / NaN` reaching `simplifyDivide`'s `a/a → 1`
+  rule (guards exclude 0 and the infinities, not `NaN`) and simplifying
+  to `1` against evaluation's `NaN`. The fold is not an error fold (the
+  carrier has no off-carrier point), so no seam is bypassed. The type
+  handler still DECLINES for a proven-NaN operand (equivalent today,
+  correct discipline). `Negate`'s fold is kept for the same reasons.
+- The handler's `integer` arm is SHARPER than the brief's `real` floor
+  and was kept (it mirrors `roundingFunctionType`).
+
+Seams, per head: `Divide` and `Negate` are DECLARATION-ONLY flips — both
+have `canonical` handlers, so neither the boxing signature validation
+nor the dispatch conformance re-test consults the carrier, and the
+carrier has no error point that would need an in-handler arm; fresh-symbol
+inference still comes from `checkNumericArgs` (`Divide(v, 2)` infers
+`v: number`). The extremum family has no `canonical` handler: boxing is
+the seam and the re-test refutes a later-arriving value. Simplify twins
+checked: no rule rewrites the extremum heads; `simplify-divide.ts` and
+`simplify-infinity.ts` already agree with evaluate at the indeterminate
+forms.
+
+One defect fixed alongside: `canonicalDivide` had the `never`-operand
+hole `canonicalPower` closed in batch 6 — a symbol declared with an
+empty range (`integer<2<..<3>`) answers every type predicate `true`, so
+`Divide(m, 2)` folded to `NaN` and `Divide(2, m)` to `0`, losing the
+`never` claim `Multiply`/`Add`/`Power` keep. Early-out added; rows added
+to the `never` pin of `interval-division.test.ts`. Reported, not fixed
+(cosmetic, outside the batch): the type serializer prints a variadic
+union without its parentheses (`complex | infinity+`); the round trip is
+semantically stable.
+
+Pins swept: `element-max-min-clamp.test.ts` (`ElementMin(2, 5)` claims
+`integer`, was `real`; an infinite operand claims
+`list<real | signed_infinity^2>`, was `vector<2>`; a new off-carrier
+boxing-error pin); `non-finite-typing.test.ts` (the extremum heads claim
+`real | signed_infinity`, was `number`; `Max`/`Min` unchanged);
+`compile.test.ts` `FLIPPED` gains the three extremum heads;
+`type-variables-arithmetic.test.ts` (`sig('Negate')`); the shadow-parity
+legacy table and corpus no longer list the three extremum heads (a
+deliberately diverging handler is not shadow-compared — the batch-3/10
+precedent). Declaration pins in `error-model-declarations.test.ts`.
+Targeted suites in the worktree: 86 suite runs across four batches, all
+green, snapshot delta 0; compiled-lane agreement measured at every new
+point that compiles (JS, GPU, Python, interval targets).
+
+Full-suite gate: run together with batch 13 — see the batch 13 record.
+
+**Batch 13 — the linear-algebra scalars (`Norm`, `Trace`, `MatrixPower`,
+`Determinant`) — IMPLEMENTED 2026-09-02** (in parallel with batch 11, its
+own worktree; pins in the new file
+`test/compute-engine/error-model-linear-algebra.test.ts`). Survey first
+(every head, every exceptional point, box and parse routes: `\|v\|`,
+`\operatorname{tr}`, `\det`), then the declarations, decided by precedent
+(no ruling round; each decision names its precedent, for ratification):
+
+1. **`Norm: (number | tensor | tuple | list<tuple>, real | +oo | string?)
+   -> real | +oo | nan`, `nanBehavior: ['handle', 'reject']`, `requires`
+   on the order.** The operand is a scalar, a numeric tensor (`tensor` is
+   the dimensionless numeric list, so a vector and a matrix are subtypes —
+   measured), a point, or a list of points; a string, a boolean or a list
+   with a non-numeric element is an `incompatible-type` error at boxing
+   (`Norm("a")`, `Norm(True)`, `Norm([1, "a"])` used to stay inert). The
+   scalar arm is the whole of `number` because the policy is `handle`
+   (the `IsPrime`/`Hypot` arrangement: NaN rides in and the handler answers
+   `|NaN| = NaN`, and the 2026-09-02 infinity-dominance rule needs the
+   handler). The result is `Hypot`'s spelling. The order is a positive
+   real, `+oo`, or `"Frobenius"`/`"Infinity"`: `requires` decides an
+   in-carrier literal (`Norm([3,4], 0)`, `(…, -1)`, `(…, "foo")` are the
+   precondition Error, were inert), a NaN order is a boxing error, an
+   off-carrier order (`i`, `-oo`, `~oo`) is the carrier error. The type
+   handler DECLINES where `euclideanNormType` falls back to `number` (a
+   symbol, a matrix), so the declared union applies (`declineWideNormType`).
+   Two value fixes rode along: `Norm([]) = 0` (every order; the empty
+   list never reached the rank-1 branch) and `Norm(v, "Frobenius")` for a
+   VECTOR is the L2 norm (the Frobenius norm is the entry-wise L2 norm at
+   any rank; the vector branch treated it as an unsupported order while
+   the JavaScript target already answered 5). Fresh-symbol inference:
+   `Norm(x)` declares `x` with the four-arm union (the `Distance`
+   precedent).
+2. **`Trace: (number | tensor, integer?, integer?) -> number | tensor`,
+   `nanBehavior: ['handle', 'reject', 'reject']`.** A string or a boolean
+   is a boxing error (was inert); a scalar NaN is the trace of the 1×1
+   matrix `[NaN]`, and NaN cells sum by IEEE (`Trace([[1, NaN], [3, 4]]) =
+   5`, `Trace([[NaN, 1], [3, 4]]) = NaN`). The handler's own Errors
+   (vector operand, bad axes, unequal extents) stay: they are Error-channel
+   answers already, and a `requires` would replace their specific codes
+   with the generic precondition message — the rule for every head of this
+   batch. The type handler declines instead of answering `value`.
+3. **`MatrixPower: (matrix, real) -> matrix`, `nanBehavior: 'reject'`.**
+   The exponent is a real: `MatrixPower(M, i)` used to return the IDENTITY
+   (the handler read `exponent.re`, which is 0) — a boxing error now, as
+   are `NaN`, `±oo` and `~oo` exponents (were inert). The half-integer test
+   is `2n` being an integer, not a read of `denominator` — under `.N()` the
+   driver numericizes the exponent and the denominator of a float is 1, so
+   `MatrixPower([[4,0],[0,9]], 1/2).N()` stayed inert where `evaluate()`
+   answered `[[2,0],[0,3]]`; exact test, no tolerance (a nearby in-domain
+   exponent would be a silent coercion). Any other non-integer exponent
+   stays inert (no closed form; the `Round(1, 500001)` precedent, so no
+   `partiality: 'total'`). The compiled lane: `_SYS.matpow(m, 0.5)` returned
+   NaN behind `success: true` — a statically non-integer exponent now fails
+   closed and the engine interprets.
+4. **`Determinant: (matrix) -> number`, `nanBehavior: 'reject'`** (spells
+   the derived default; NaN and infinite CELLS are ordinary entries computed
+   by IEEE — `det [[1, ∞], [3, 4]] = −∞`, `det [[∞, 1], [1, ∞]] = +∞`,
+   cross-checked against the literal expansion at five matrices), plus a
+   `'types'` handler: a determinant is a polynomial in the entries, so it
+   stays in the entries' tier (`integer`/`rational`/`real`/`complex`, tested
+   narrowest first); it declines for an entry type admitting an infinity or
+   NaN, for a symbolic entry, for the bottom type (`never` matches every
+   tier), and for a statically non-square shape.
+
+Pins swept: `linear-algebra.test.ts` (`Norm(p)` for a tuple-typed symbol,
+`Norm(matrix)`, `Norm((u, 1))`, `Norm((NaN, 1))` claim `+oo | nan | real`,
+were `number`); `error-model.test.ts` (an unsupported order `Norm([1], 0)`
+is the precondition Error, was inert — the pin's principle, that the
+entries never decide the order, is kept); `list-parameter-indexing.test.ts`
+(the lambda body types the declared union); `compile-python.test.ts` and
+`compile-python-arity.test.ts` (a vector `"Frobenius"` norm lowers to
+`np.linalg.norm(v)`; the numpy spelling `'fro'` stays matrix-only and a
+statically-unknown rank still fails closed); a new `compile.test.ts` pin
+for the `MatrixPower` decline. Targeted suites in the worktree: 53 files,
+53 suites, all green, snapshot delta 0. Numeric verification: matrix
+square roots squared back for three matrices and the `3/2`, `5/2`, `−1/2`
+powers of `diag(4, 9)`; vector p-norms against a direct `(Σ|xᵢ|^p)^(1/p)`
+at two vectors and four orders.
+
+Residue, recorded in `ROADMAP.md`: `Norm(v, p)` does not round-trip
+through LaTeX (the order operand is dropped by the serializer; the remedy
+is a notation, `\|x\|_p`, and a ruling); `Norm` of a rank-3 tensor and a
+matrix p-norm for `p ∉ {1, 2, ∞}` stay inert (unimplemented, not a domain
+question); a compiled `Norm(v, 0)` answers NaN where the interpreter
+answers the precondition Error (an Error has no float representation —
+the compiled `If`/`Which` precedent).
+
+Dual review of batches 11 + 13 together (Codex 1 high + 5 medium + 1 nit;
+Claude 2 high + 1 medium; no overlap), every finding applied:
+
+1. FIXED (Claude, high): the `Determinant` type handler claimed `integer`
+   for a `matrix<never>` — the bottom element type is a subtype of every
+   tier; it declines for a `never` element type now (the declared `number`
+   applies; the framework does not narrow the application to `never`).
+2. FIXED (Claude, high): `elementExtremumType` claimed `list<integer>` for
+   a `list<never>` operand for the same reason, one wrapper deeper than the
+   framework's generic `never` guard reads; it declines for a `never` cell.
+3. FIXED (Codex, high): the compiled `MatrixPower` still lowered a
+   `real`-typed SYMBOL exponent to `_SYS.matpow`, which answers NaN at a
+   run-time 0.5 where the interpreter answers the matrix square root; the
+   lowering now requires a statically integer exponent (a literal integer
+   or an `integer`-typed operand) and fails closed otherwise.
+4. FIXED (Claude, medium): the new pin file
+   `error-model-linear-algebra.test.ts` had not reached the main tree —
+   `git diff HEAD` omits UNTRACKED files, and the worktree had been
+   removed; the batch-13 agent re-created it from its own context (30
+   pins, green). Rule for every later delivery: copy `??` files by hand
+   before removing a worktree, and compare the suite count with the path
+   count of every run (the 11-path run had reported 10 suites).
+5. FIXED (Codex, medium): the half-integer test read the rounded double
+   `exponent.re` for an EXACT rational (`(2^54+1)/2^55` rounds to 0.5);
+   an exact exponent reads `numerator`/`denominator`, an inexact one the
+   doubled value.
+6. FIXED (Codex, medium): under `.N()` the driver numericizes the matrix
+   before the handler, so a rational matrix's square root still declined;
+   the handler re-derives the root from the original operand
+   (`EvaluateHandlerOptions.expression`) and numericizes the result.
+7. FIXED (Codex, medium): `Norm(5, p)` and `Norm([], p)` discarded a
+   symbolic order at the scalar and empty-vector shortcuts; an explicit
+   order that does not resolve keeps the application inert.
+8. FIXED (Codex, medium): `Norm(("a", 3), "Infinity")` answered 3 — the
+   bare `tuple` arm admits non-numeric components and the L∞ branch
+   skipped a magnitude whose `re` is NaN; every branch now refuses a
+   provably non-numeric component (`incompatible-type`), the L∞ branch
+   declines for an unresolved one and answers NaN for a NaN one, and a
+   COLLECTION component is exempt (it is the broadcasting point of
+   `Hypot(([1,2],3),4)`). The same drop existed in the rank-2 L1 and L∞
+   branches for a SYMBOLIC entry (`Norm([[x,1],[2,3]], 1)` answered NaN);
+   fixed alongside.
+9. FIXED (Codex, medium): the Frobenius norm of a rank ≥ 3 tensor was
+   inert although the carrier admits it and the comment claimed any rank;
+   implemented over the flattened entries (`Norm([[[1,2],[3,4]],[[5,6],[7,8]]])
+   = 2√51`), with the infinity dominance rule. The ROADMAP residue line
+   for it is withdrawn.
+10. FIXED (Codex, nit): rollout labels ("Phase F batch 13", dates) in the
+    new comments replaced by the record's subject; the plan-doc path
+    stays.
+
+Tooling defect fixed alongside (found by the batch-B fixer):
+`scripts/typecheck.sh`'s explicit-`any` check invoked `rg` under
+`|| true`, so on a machine without ripgrep it printed its success line
+without searching; it now falls back to `grep -rE` when `rg` is absent.
+
+Full-suite gate for batches 11 + 13 (main tree, post-review, box lock
+held, load 5.2 at acquire): 653/653 suites, 31,597 tests, 4,238
+snapshots unchanged (delta 0), exit 0.
+
+**Batch 14a — the data-consuming statistics heads (`Mean`, `Median`,
+`Variance`, `PopulationVariance`, `StandardDeviation`,
+`PopulationStandardDeviation`, `Kurtosis`, `Skewness`, `Mode`,
+`Quartiles`, `InterquartileRange`, `Covariance`, `PopulationCovariance`,
+`Correlation`) — IMPLEMENTED 2026-09-02** (own worktree; pins in the new
+file `test/compute-engine/error-model-statistics.test.ts`, 39 of them,
+each confirmed to fail on the pre-change tree). Decided by precedent, for
+ratification:
+
+1. **The operand carriers stay** (`(collection<any> | number | distribution)+`
+   and the paired `(collection<any>, collection<any>?)`): `collection<any>`
+   is the absence-admitting top, and `[1, Missing, 3]` must reach the
+   handler for the §3.C rule (absent datum or empty input → `NaN`). What
+   the flip adds is the POLICY — every head declares `nanBehavior: 'handle'`
+   (the derived policy for a carrier that admits `nan` is `inert`, which
+   misdescribed what these heads do) and `missingBehavior: 'handle'` — and
+   the RESULT, the narrowest claim the handlers keep: `Mean -> number`
+   (complex data has a complex mean, infinite data an infinite one);
+   `Median`, `Mode -> real | signed_infinity | nan`; the variance family
+   `-> real<0..> | nan` (real even for complex data, `Variance([1, 1+2i,
+   3]) = 8/3`; `∞ − ∞` gives NaN); `Kurtosis`, `Skewness -> real | nan`;
+   `InterquartileRange -> real<0..> | +oo | nan`; `Quartiles` the named
+   tuple of `real | signed_infinity | nan`; the paired heads `-> real | nan`.
+   The ten constant `type: () => 'number'` handlers were RETIRED: measured
+   inert (the no-handler narrowing their comments feared fires only for a
+   declared bare `number` with NUMERIC parameters, and these take
+   collections); `pairedStatisticType` declines instead of widening.
+2. **`Correlation` is NOT `real<-1..1>`**: a 3000-sample fuzz at machine
+   precision measured `max |r| = 1.0000000000063` (cancellation in the
+   `Σxy − ΣxΣy/n` kernel on a two-point sample). Declared `real | nan`;
+   the pin re-derives the overshoot so it fails if the kernel is ever made
+   accurate enough (a two-pass or Welford accumulation would also close the
+   ROADMAP question about the paired kernels' sums — its own item).
+3. **`Correlation` of constant data keeps its `zero variance` Error** (a
+   genuine zero variance is distinguishable from an overflow NaN — the
+   existing pin), and the `real<0..>` claims of the variance family stand
+   under ruling L6(a): machine overflow saturating to `+oo`
+   (`Variance([1e200, −1e200, 3]).N()`) does not falsify a mathematical
+   claim.
+
+Defects fixed: a STRING datum (`[1, "a", 3]`), a whole string operand
+(`Mean("abc")` — a string is a collection and was walked by characters),
+a boolean datum and a nested collection (`Mean([[1,2],[3,4]])`) left
+every head inert — one refusal in `collectData`/`shapeError` (a new
+`'number'` data constraint, since `real` would misdiagnose `Mean`, which
+accepts complex data) makes each an `incompatible-type` Error, inherited
+by `LinearRegression`/`PolynomialFit` through the shared helper; a
+one-point sample is its own quartiles (`Quartiles(5) = (5, 5, 5)`,
+`InterquartileRange(5) = 0` — were `Error("missing")`; the compiled lane
+reads the same kernel and moved with it); `Quartiles`' declared tuple
+NAMES were attached to the wrong components (`mid` read the LOWER
+quartile) — renamed `lower, mid, upper` to match the handler; an absent
+datum in paired data (`Covariance([1,2,3], [1, Missing, 3])`) was refused
+as mis-shaped while the same input spelled with `NaN` answered `NaN` —
+admitted as data (opt-in, so the regression heads keep their shape
+Error) and absorbed AFTER the shape checks, so an Error still beats NaN.
+
+Pins swept: `statistics.test.ts` (a non-data element names the `number`
+constraint, not the shape), `missing-value.test.ts` (the aggregates admit
+`nan` in their result — the I6 content of the old "all type `number`"
+pin), `eager-collection-enumerability.test.ts` (a one-point sample's
+quartiles), `compile.test.ts` (`InterquartileRange(x)` and `Quartiles(x)`
+at one datum), `type-handler-parity.test.ts` (the paired heads answer
+`nan | real` for a NaN datum), the shadow-parity legacy table (ten
+statistics entries removed — behavior corrections, not the
+behavior-preserving retired set). Targeted suites in the worktree: 38
+files, 38 suites, 3053 tests green; no snapshot references any of the 14
+heads. Residue: `Mean([Missing, "a"])` answered `NaN` before the Error
+(`aggregateAbsence` ran before `collectData`) — fixed in the review round
+below with a single materialization pass, so ruling B8's one walk is
+kept; `Variance(PoissonDistribution(s))` with
+`s := −3` answers `−3` (distribution parameter validation does not fire on
+symbols — batch 14b's file); the paired kernels' accuracy (above);
+`src/math-json/OPERATORS.json` is stale repo-wide (ROADMAP item 5). Do not
+run prettier on `test/**` (the checked-in test files are not formatted;
+the agent had to undo ~700 lines of churn).
+
+**Batch 12 — the combinatorial and regularized special functions
+(`Binomial`, `Choose`, `Pochhammer`, `GammaRegularized`,
+`BetaRegularized`) — IMPLEMENTED 2026-09-02** (own worktree; pins in the
+new file `test/compute-engine/error-model-combinatorics.test.ts`, 34 rows
+on both routes, each failing on the pre-change tree). The batch-8 Γ-family
+convention applied by precedent, for ratification: every numeric slot
+`complex | infinity`, `nanBehavior: 'propagate'`, result `number`, the
+type handlers declining for a proven-NaN operand; a point with no limit
+answers `NaN` on both routes; a capability gap (a complex operand, a real
+region the kernel does not cover) stays symbolic on both routes — `.N()`
+no longer misreports it as NaN. `Choose` moved with `Binomial` (it shares
+the evaluator and is documented to agree; left on `(number, number)` it
+would have inferred a different type for a fresh symbol). Every exceptional
+point is decided by the handler's own arm (`binomialValueAtInfinity`,
+`binomialPoleValue`, `pochhammerValueAtInfinity`, `pochhammerProduct`,
+`gammaRegularizedValueAtInfinity`, `gammaRegularizedSeries`,
+`betaRegularizedValueAtInfinity`) before any kernel sees an `Infinity`.
+
+Every limit was verified with mpmath at 50 digits at 10², 10⁴, 10⁶, at
+five offsets between consecutive Γ-poles where the approach crosses a pole
+line, and along five directions for `~oo`. Four entries of the brief's
+table were REFUTED by the numbers and encoded as measured:
+
+1. `C(n, +∞)` is `0` iff `n > −1` (not "unless n is a negative integer"):
+   `C(−2.5, 10⁶) = 7.5·10⁸` and growing while `C(−2.5, 10⁶ + ½) = 0` —
+   no limit, `NaN`; the same asymptotic (`|Γ(n+1)/π|·|sin π(n−k+1)|·k^{−n−1}`)
+   holds at `k = −∞`.
+2. A negative-integer `k` makes `C(·, k)` and `(·)_k` the zero function
+   (`1/Γ(k+1) = 0`), so the value is `0` at every infinity, `~oo`
+   included.
+3. `(a)_{−∞}` is `0` iff `a` is a non-positive integer (the brief had it
+   inverted): `Γ(a+k)` has a pole at every `k` with `a+k` a non-positive
+   integer, cancelled only when `1/Γ(a) = 0` — `(0.5)_{−10⁶}` is tiny but
+   `(0.5)_{−10⁶−½}` is infinite.
+4. `BetaRegularized` outside `x ∈ [0,1], a > 0, b > 0` stays SYMBOLIC at
+   every point, infinite ones included (`I_x(2,3) = 3x⁴ − 8x³ + 6x²` is
+   `+3·10²⁴` at `x = ±10⁶`, so `NaN` would misreport a defined value); only
+   `I_x(a, +∞) = 1` (x > 0), `I_x(+∞, b) = 0` (x < 1) and the both-`+∞`
+   indeterminate (`NaN`) are encoded. This is the batch's one deviation
+   from the "anonymous infinity ⇒ NaN uniformly" convention of batch 8,
+   recorded for a ruling.
+
+Value defects fixed: `C(2.5, −2) = −2.14·10⁻⁵¹` (a Γ-pole in the
+denominator; `0`), `C(−3, ½) = −8.86·10⁴⁸` (a pole in the numerator;
+`~oo`), `C(−2.5, −1.5) = NaN` (`0`); `(3)_{−2}` inert (`1/2` — the
+negative-integer product), `(2.5)_{1.5}` inert even under `.N()` (`4.5135…`,
+the Γ-ratio numericization `Binomial` already had), `(3)_{100}` inert under
+`.N()` (past the exact cap; `4.807·10¹⁶¹`), `(3)_{NaN}` inert (`NaN`),
+`(i)_2 = i·(i+1)` unevaluated (`−1 + i`); `Q(a, 0) = 1` folded for every
+`a` — `Q(−1, 0)` and `Q(0, 0)` are `∞/∞` (`NaN`), `Q(−½, 0)` and a symbolic
+`a` stay symbolic — while `Q(−1, 2)`, `Q(0, 2)`, `Q(2, −1)` were inert or
+NaN (`0`: a Γ-pole of `Γ(a)`; and `Q(n, z) = e^{−z}Σ_{k<n} z^k/k!` for a
+positive integer `n` at ANY real `z`, verified against `gammainc` at four
+points), `Q(−½, 2) = NaN` (a finite negative real; symbolic — the kernel
+gap); `I_0(a, b) = 0` and `I_1(a, b) = 1` folded for a symbolic or
+non-positive `a`, `b` (guarded: provably positive). The infinities:
+`C(+∞, k>0) = +∞`, `C(±∞, 0) = 1`, `C(+∞, k<0) = 0`, `C(−∞, k) = (−1)^k∞`
+for a positive integer `k`, `C(~oo, k) = ~oo` for a positive integer `k`;
+`(+∞)_k`/`(−∞)_k` alike, `(a)_{+∞} = +∞` for `a > 0`, `sign(Γ(a))·∞` for a
+negative non-integer `a`, `0` for a non-positive integer `a`;
+`Q(a, +∞) = 0`, `Q(+∞, z) = 1`, `Q(a, −∞)` and `Q(−∞, z)` `NaN` (both
+alternate through the poles). The `CDF` delegations (`Poisson` → `Q`,
+`Binomial` → `I`) keep their finite values to the digit; `CDF(Poisson(2),
+3)` now evaluates exactly to `19/(3e²)`.
+
+Pins swept: `type-handler-audit.test.ts` (`Binomial(2, +∞).N()` is `0`,
+was the kernel's NaN), `distributions.test.ts` (the `I_0`/`I_1` folds need
+positive parameters; `Q(3, 10)` evaluates exactly to `61/e¹⁰`),
+`compile-glsl.test.ts` (the interpreter values at an infinite operand; the
+GLSL decline itself stands), the shadow-parity legacy table (the three
+combinatorial heads removed, the batch-8 precedent), a stale
+`gpu-target.ts` comment ("the interpreter returns NaN" — no longer true;
+the decline stays because `~oo` has no float spelling). Targeted suites in
+the worktree: 48 files across five runs, all green, snapshot delta 0. The
+nightly grids (`CE_NIGHTLY=1`) show 7 pre-existing failures on
+`Add`/`Multiply`/`Power`/`Root` range types that mention none of these
+heads. The simplify twins (`symbolic/simplify-factorial.ts`) were swept
+in the same delivery (the batch-5 rule): `C(n, n) → 1` no longer fires
+at a non-finite literal (`±∞`, `~oo`, NaN, an anonymous infinity —
+`infinitePoint`, since an anonymous infinity reports `isFinite === true`),
+`C(n, 0) → 1` skips only NaN and the anonymous infinity (`C(±∞, 0)` and
+`C(~oo, 0)` ARE `1` under evaluate), and the operand-returning rewrites
+(`C(n, 1) → n`) agree everywhere and stay unguarded. The guard exposed a
+second defect, fixed and verified over the whole `−6…0` square against
+mpmath: `binomialBigint` short-circuited `k < 0 → 0` "regardless of n",
+but with both operands negative integers the two Γ-poles cancel —
+`C(−3, −3) = 1`, `C(−2, −4) = 3`, `C(−1, −5) = 1` — so the value is `0`
+only when `n ≥ 0` or `n < k`, and `(−1)^(n−k)·C(−k−1, −n−1)` otherwise
+(`simplify()` had answered `1` there against `evaluate()`'s `0`). Residue:
+past the exact-expansion caps (`SYMBOLIC_EXPANSION_CAP` = 20 for the
+Pochhammer product, `MAX_GAMMA_Q_SERIES_ORDER` = 20 for the `Q(n, z<0)`
+series) a few points stay symbolic — honest gaps, never NaN; `Q(a, 0)` for
+a negative non-integer `a` is a decided divergence (`sign(Γ(a))·∞`) left
+symbolic for uniformity with the surrounding `a < 0` gap; a four-line
+`isNonPositiveIntegerLiteral` predicate is duplicated in
+`combinatorics.ts` and `distributions.ts` rather than adding an import
+edge between them.
+
+**Batch 14b — the distributions (`NormalDistribution`,
+`BinomialDistribution`, `PoissonDistribution`, `UniformDistribution`,
+`ExponentialDistribution`, `PDF`, `CDF`, `Quantile`) — IMPLEMENTED
+2026-09-02** (own worktree; pins in the new file
+`test/compute-engine/error-model-distributions.test.ts`, 29 of them, 23
+failing on the pre-change tree). Decided by precedent, for ratification:
+
+1. **Constructor carriers are the parameter domains**: `NormalDistribution:
+   (real, real)`, `BinomialDistribution: (integer, real<0..1>)`,
+   `PoissonDistribution`/`ExponentialDistribution: (real)`,
+   `UniformDistribution: (real, real)`, `nanBehavior: 'reject'` on every
+   slot (the derived default for a non-numeric result, spelled). The
+   literal inequality checks (`σ > 0`, `λ > 0`, `a < b`, `n ≥ 0`) stay as
+   `out-of-range` errors at canonicalization. MEASURED: a `canonical`-handler
+   head gets NO boxing signature validation — `applyOperatorDefinition`
+   re-runs only the lenient `checkNumericArgs` on the handler's result,
+   which refuses a string but admits `NaN`, `±oo`, `~oo` and `i` — so the
+   handler enforces the carrier itself (`carrierError`, whose comment names
+   the seam): `NormalDistribution(NaN, 1)`, `(+oo, 1)`, `(i, 1)`,
+   `PoissonDistribution(+oo)`, `ExponentialDistribution(i)`,
+   `UniformDistribution(-oo, +oo)`, `BinomialDistribution(10, NaN)` are
+   `incompatible-type` errors (were admitted and inert-valid). A fresh
+   symbol at a constructor slot still infers `number` (the seam again).
+2. **`PDF`, `CDF: (distribution, real | signed_infinity)`**, results
+   `real<0..> | nan` and `real<0..1> | nan`, `nanBehavior: ['reject',
+   'propagate']`; **`Quantile: (distribution | collection<any>,
+   real<0..1>) -> real | signed_infinity | nan`**, the range carrier
+   (`Rationalize`'s tolerance precedent): `Quantile(D, 1.5)` is a boxing
+   error (was `out-of-range` at evaluate; the literal check is dead and
+   removed — the dispatch re-test refuses a symbol's held value too), and
+   so are a complex or `~oo` argument of `PDF`/`CDF` (were complex garbage
+   or an `Error` nested inside an expression) and `Quantile(Exponential(2),
+   +oo)` (was `−½ ln(−oo)`).
+
+Value defects fixed: `PDF(Uniform(0,1), ±oo) = 1` (`0`), `PDF(Uniform(0,1),
+NaN) = 1` (`NaN`), the symbolic `PDF(Uniform(a,b), x) = 1/(b−a)`
+unconditionally — now the piecewise `Which(a ≤ x ∧ x ≤ b, 1/(b−a), ⊤, 0)`
+— and `CDF(Uniform, x) = x` (now clamped piecewise; `CDF(Uniform, +oo)`
+was `+oo`, `(−oo)` was `−oo`); `PDF(Exponential, −oo) = +oo` (`0`) and its
+symbolic form (`Which(x < 0, 0, ⊤, λe^{−λx})`; `CDF(Exponential, −oo) =
+−oo` → `0`); `PDF(Poisson, +oo) = +oo` (`0`), `PDF(Poisson, −1) = 1/(~oo·e²)`
+(`0` — a negative integer lowered to a division by `(−1)!`; `.N()` hid it
+at `−1` only); `PDF(Binomial, ±oo) = NaN` (`0`); `CDF(Poisson, ±oo)` and
+`CDF(Binomial, ±oo)` inert delegations (`1`/`0`, decided before
+delegating); the discrete quantiles `Quantile(Binomial(10, ½), ½).N() = 5`
+and `Quantile(Poisson(2), ½).N() = 2` (an integer search over the support
+under `.N()`; the exact route stays symbolic — the review found the
+search reads a tolerance-fudged float CDF, so an exact integer must not be
+read off it, and a sound exact route for the Poisson would compare a
+transcendental CDF against a rational `p`); `Quantile(Binomial, NaN)`
+inert (`NaN`); `Quantile([], ½)` inert (`NaN`); `Quantile("abc", ½)` and
+`Quantile([1, "a", 3], ½)` inert (`incompatible-type` by value —
+`dataConstraintError(…, 'number')` for a datum that is not a number at
+all, `'real'` for a complex one). Headline
+consequence: `Integrate(PDF(Uniform(0,1), x), x, −1, 2)` was `3`, is `1`.
+Numeric verification: 66 pointwise checks (densities and CDFs at three
+points per distribution, both routes; binomial and Poisson CDFs against
+direct pmf sums; discrete quantiles at five `p` against cumulative sums;
+quantile→CDF round trips).
+
+Pins swept: `distributions.test.ts` (the discrete quantile answers under
+`evaluate()`), `string-collection.test.ts` (`Quantile` of a string is a
+type error, not inert; still never a character). The batch-14a residue
+"`Variance(PoissonDistribution(s))` with `s := −3` answers `−3`" did NOT
+reproduce (evaluating the application re-canonicalizes with the literal
+and answers `out-of-range`) — pinned; a distribution built and left
+unevaluated still keeps an off-carrier held parameter (the constructors'
+handler cannot see a symbol's value), so that ROADMAP item is narrowed,
+not closed. Targeted suites in the worktree: 26 paths, 26 suites, 2400
+tests, snapshot delta 0. Residue (ROADMAP): the discrete pmfs at a
+SYMBOLIC point stay unguarded (`PDF(Poisson(2), x)` at `x = 0.5` through
+`subs` is `0.216` while the literal route answers `0`; `CDF(Poisson(2),
+x)` omits the `Floor` the literal route applies) — guarding would change
+the bare `GammaRegularized(x+1, λ)` form the compile-parity pin relies on;
+`D` of the new piecewise forms is inert (the differentiator has no `Which`
+arm) — fixed in the review round that follows.
+
+Dual review of batches 12 + 14a + the connective lowering together
+(Codex 4 high + 4 medium; Claude 1 low; no overlap):
+
+1. APPLIED (Codex, high, half): `betaRegularizedValueAtInfinity` answered
+   `NaN` for `I_0(+∞, +∞)` and `I_1(+∞, +∞)` — the endpoint values `0`
+   and `1` hold for every positive parameter, limits included, so the
+   endpoint test now precedes the both-infinite arm. The other half (the
+   polynomial limits at `x = ±∞`) stays a ruling question (ROADMAP).
+2. DEFERRED TO A RULING (Codex, high): the compiled connective answers
+   NaN at a NaN operand where the interpreter takes the else arm (IEEE
+   `Greater(NaN, 0) = False`) — the lane divergence recorded in
+   `docs/ERROR-MODEL.md` §7 and `ROADMAP.md`; the compiled semantics
+   follow the 2026-09-02 ruling as written.
+3. DEFERRED TO A RULING (Codex, high): an IMPURE connective keeps
+   truthiness selection. A lone impure relation behaves the same today by
+   the ruling's own exemption (its operands would be named three times);
+   extending single-evaluation to impure conditions is a scope change
+   beyond that ruling.
+4. APPLIED (Codex, high): the absence gate (`aggregateAbsence`) ran before
+   the datum validation (`collectData`), so `Mean([Missing, "a"])` answered
+   `NaN` where the string's `incompatible-type` error must win; the two are
+   now one materialization pass (data | absence | datum error, the error
+   first) so ruling B8's single walk is kept. The batch-14a record's
+   "residue" line for it is withdrawn.
+5. REFUTED (Codex, medium): the GPU pins "enshrine" truthiness selection —
+   that is the standing 2026-09-02 ruling (NaN propagation is not
+   guaranteed on every driver).
+6. APPLIED (Codex, medium): the Python target still failed closed for a
+   statically rank ≥ 3 Frobenius norm although `np.linalg.norm(x)`
+   flattens any rank, matching the interpreter's new rank ≥ 3 branch.
+7. DEFERRED TO A RULING (Codex, medium): a vars-object member read (`_.x`)
+   is repeated inside a Kleene leaf; the pre-existing single-relation guard
+   (`_.x === _.x && _.x !== undefined ? (0 < _.x) : …`) repeats it the
+   same way — `ATOMIC_FRAGMENT` treats a member read as free. Binding every
+   read would change every emission; a vars object with side-effecting
+   getters is outside the compiled contract today.
+8. APPLIED (Codex, medium): the `Correlation` overshoot pin drew 2000
+   unseeded samples; it pins a fixed counterexample now.
+9. APPLIED (Claude, low): `isNonPositiveIntegerLiteral` was duplicated in
+   `combinatorics.ts` and `distributions.ts`; it and
+   `isNegativeIntegerLiteral` live in `boxed-expression/infinite-point.ts`
+   next to `isRealLiteral`.
+
+Two defects carried into the same fix round from the deliveries' own
+reports: `D` of a `Which` was inert (the piecewise CDFs had lost their
+derivative — `D(CDF(ExponentialDistribution(2), x).evaluate(), x)` stayed
+`D(Which(…), x)`); the differentiator gained the piecewise arm
+`D(Which(c₁, v₁, …), x) = Which(c₁, D(v₁, x), …)`. And the Python target
+emitted `(r = 1)` inside a conditional EXPRESSION for a statement-form
+`If` with an else inside a `Block` (invalid Python, pre-existing); it
+emits an `if … else` statement now.
+
+Dual review of batch 14b (Codex 4 high + 2 medium + 1 low; Claude 1
+medium + 1 low; one overlap):
+
+1. APPLIED (Codex, high): the discrete quantile's exact `evaluate()`
+   route ran the float helper, which subtracts `1e-12` from `p`, and boxed
+   the answer as an exact integer — an exact `p` just above a CDF jump
+   selected the previous support point; the exact route now compares
+   exact or bignum CDF values without a tolerance (the float helper stays
+   behind `.N()`).
+2. APPLIED (Codex, high): `signedInfinitySign` classified through `x.re`,
+   which a finite bignum beyond the double range also projects to
+   `Infinity` (the batch-7 trap); it uses `infinitePoint`.
+3. APPLIED (Codex, high; batch-12 code): `Q(a, -oo)` answered NaN before
+   the integer-order identities — `Q(1, -oo) = e^{+oo} = +oo`, and for a
+   positive integer `n` the closed form diverges with the sign of its
+   leading term, `Q(n, -oo) = (-1)^{n-1}·∞`; a non-integer order keeps NaN.
+4. APPLIED (Codex, high; batch-12 code): `Q(a, +oo) = 0` and `Q(+oo, z) =
+   1` folded when the partner's finiteness was merely unknown
+   (`isFinite !== false`); they require a finiteness proof now.
+5. DEFERRED TO A RULING (Codex, medium): the constructor carriers skip a
+   symbol's held value (recorded in ROADMAP; needs either value-reading at
+   canonicalization, which the canonical-handler discipline forbids, or
+   signature validation for canonical-handler heads).
+6. APPLIED (Codex, medium): the both-`+oo` `BetaRegularized` arm answered
+   NaN for a symbolic, complex or out-of-interval `x`; NaN is answered only
+   for a literal `x` in `(0, 1)`.
+7. APPLIED (Both, medium): `empiricalQuantile` named the `real` constraint
+   for a datum that is not a number at all; it names `number`, like
+   `shapeError` in `statistics.ts`.
+8. DEFERRED TO A RULING (Claude, low): the discrete pmfs at a symbolic
+   point are unguarded (ROADMAP, with a recommendation).
+
+Dual review of the fix rounds themselves (every source the fixers touched,
+plus `scripts/typecheck.sh`; Codex 4 high + 3 medium; Claude 1 high + 2 low
++ 1 nit; no overlap):
+
+1. APPLIED (Claude, high): the `Q(a, -oo)` branch answered NaN for a
+   SYMBOLIC `a`; it declines now, mirroring the `+oo` arm, answers `0` for
+   a non-positive-integer literal (the finite branch is identically 0
+   there — Codex, medium, applied together) and NaN only for a literal
+   that is provably not an integer.
+2. APPLIED (Codex, high): `UniformDistribution(10^400, 10^500)` with bignum
+   literals was `out-of-range` — the constructor's `a.isLess(b)` reads the
+   double projections (the numeric-layer defect in ROADMAP); the literal
+   range checks use `litOrder` / exact predicates.
+3. APPLIED (Codex, high): `empiricalQuantile` treated every non-literal
+   datum as provably non-numeric — `Quantile([1, y, 3], ½)` for a valueless
+   `y` and `Quantile([1, Missing, 3], ½)` both errored; an absent datum is
+   `NaN`, an unresolved one keeps the application inert, only a datum
+   whose type is disjoint from `number` is refused.
+4. APPLIED (Codex, high): the Poisson pmf answered exact `0` on the
+   `evaluate()` route for an off-scale index (`Factorial(10^400)` does not
+   return, so the closed form is unreachable); it stays symbolic there.
+5. DEFERRED TO A RULING (Codex, high): the symbolic discrete pmfs
+   (ROADMAP). 6. DEFERRED TO A RULING (Codex, medium): held-symbol
+   constructor parameters (ROADMAP).
+7. APPLIED (Codex, medium, refuted on this platform but cheap): the
+   typecheck script's fallback pattern used `\s` and `\b` — BSD and GNU
+   grep both honour them, but the pattern is spelled in strict POSIX ERE
+   now (`[[:space:]]`, an explicit identifier boundary); `rg` and `grep`
+   report the same nine comment-only hits.
+8. REFUTED by measurement (Codex, medium): `BetaRegularized(0.3, -0.5, 3)`
+   "numericizes to NaN" — it stays symbolic on both routes.
+9. APPLIED (Claude, low): `litOrder` took equal doubles as exact equality;
+   it confirms with `isSame` or the exact-difference sign, so an exact
+   rational within an ulp of a support boundary is classified correctly.
+10. APPLIED (Claude, low): `pythonArmIsStatement` did not see a
+    single-statement `Block` wrapping `Break`/`Continue`/`Return`/`Loop`
+    as a statement arm.
+11. APPLIED (Claude, nit): `carrierError` names the constructor in the
+    error location, like `dataConstraintError`.
+
+Full-suite gate for batches 12 + 14a + 14b + the connective lowering
+(main tree, after all four review rounds, box lock held, load 1.4 at
+acquire): 656/657 suites, 31,784 tests, 4,238 snapshots unchanged (delta
+0). The one failure was a stale Epsil pin: the Python lowering of a
+desugared `while` exit test (`If(Not(k < 5), Break)`) now carries the
+statement-form decidedness guard, `if k == k and (not (k < 5)):`, which
+is what the JavaScript target already emitted (`if (k === k &&
+(!(k < 5))) { break }`); the pin moved, its suite re-run green. The
+consequence — an undecided loop condition never breaks — is recorded in
+`ROADMAP.md` under the undecided-condition items.
+
 ### Phase F — signature flips, operator-by-operator
 
 Each flip (e.g. `Heaviside: (real) -> rational<0..1>`, `total`) is its
@@ -1528,7 +2160,10 @@ radius and decide the extended-value spelling explicitly. Not part of the
 machinery phases; batches 2–10 are recorded above.
 
 **Batches 11–14 SCHEDULED 2026-09-02 (Arno), each its own measured
-session.** Measured before scheduling by walking the library scope: 384
+session — ALL IMPLEMENTED the same day (records above: batches 11, 13,
+14a, 12, 14b, plus the four dual-review records; decided by precedent,
+awaiting ratification of the decisions each record lists).** Measured
+before scheduling by walking the library scope: 384
 numeric-carrier heads, 93 with an explicit `nanBehavior`, the rest on the
 derived default; the heads below still sit on a bare `(number)` or
 `(value)` carrier where a precise domain exists.
@@ -1553,16 +2188,45 @@ derived default; the heads below still sit on a bare `(number)` or
   keep their bespoke NaN meaning and must declare `nanBehavior: 'handle'`
   in the same change whenever they flip (the "known hazards" entry
   below).
-- **After batches 11 and 13 — the three-valued lowering of compiled
-  `And`/`Or`/`Not` (scheduled 2026-09-02, Arno).** A compiled connective
-  in condition position still short-circuits by JavaScript logic when
-  every reached operand is undecided (`If(x > 0 && y > 0, a, b)` at
-  `x = 1, y = NaN` takes the else arm), while a lone relation now yields
-  NaN. Operands must compile to true/false/undefined and combine by the
-  Kleene tables, which the one-pass emitter cannot do without rebuilding
-  operands outside their CSE regions: a compiler design change, its own
-  session. ROADMAP entry: "Open items from the undecided-condition ruling
-  (2026-09-02)".
+- **The three-valued lowering of compiled `And`/`Or`/`Not` — IMPLEMENTED
+  2026-09-02** (scheduled the same day; own worktree; pins in the new
+  file `test/compute-engine/compile-three-valued-connectives.test.ts`, 47
+  of them, 24 failing with the lowering neutered). A branch condition
+  whose tree contains a connective compiles to ONE three-valued VALUE —
+  `true`/`false`/`undefined` in JavaScript, `True`/`False`/`None` in
+  Python — built with short-circuit and selected through the value-shaped
+  test that already existed (`exactSelect`'s value branch, the statement
+  form's block-scoped `_CND`, Python's `pythonIsBoolean` lambda), so no
+  new selection shape exists. A relation leaf is `(d ? comparison :
+  undefined)` with its operands bound as parameters of that leaf; a value
+  leaf is `(c === true ? true : c === false ? false : undefined)`; `Not`
+  maps `undefined` to itself; `And(p, q)` binds `k(p)` and evaluates `q`
+  only when `k(p)` is not `false` (`Or` mirrors with `true`), so a
+  decided-false guard never evaluates what follows it — `If(x ≠ 0 ∧ 1/x
+  > 1, a, b)` at `x = 0` takes the else arm without touching `1/x` on
+  both targets (Python would raise) — while an UNDECIDED guard still
+  reaches the second operand (Kleene: `And(undecided, false)` is `false`).
+  Later operands of a connective are compiled inside the same
+  conditionally-evaluated CSE regions the `Which` clauses use, so a
+  common-subexpression temporary lands inside the arrow that may not run
+  (measured on the `compile-cse` guard edge: one `Math.sin`, zero reads at
+  `x = 0`). A connective whose every leaf is decidable by construction,
+  a lone relation, a lone value, and `Not` over one of those emit
+  byte-for-byte what they emitted before (17 shapes diffed on both
+  targets); the GPU and interval-JS targets are untouched (pinned). The
+  ROADMAP's stated blocker — "the one-pass emitter cannot rebuild an
+  operand outside its CSE region" — did not bind: the operands are
+  compiled inside their own regions and the lazy shape rebuilds nothing.
+  A first, EAGER version (every guarded operand bound before the test)
+  was rejected before delivery because it broke the guard idiom above.
+  Residue: the emitted condition is larger (one arrow or lambda per
+  connective operand) and compile-time cost was not measured (no
+  compile-time harness; `compile-performance` measures run time and is
+  perf-gated); `Xor`/`Implies` have no JavaScript lowering, so their
+  value-shaped leaves cannot yet mis-answer; and the lane DIVERGENCE at a
+  literal NaN condition operand (interpreter IEEE else-arm vs compiled
+  NaN) surfaced during this work — recorded in `docs/ERROR-MODEL.md` §7
+  and `ROADMAP.md`, ruling pending.
 
 ## Known hazards, recorded before they bite
 

@@ -1131,16 +1131,25 @@ document's history):
   the same day: a STATEMENT-form `If` in a loop or block body executes no
   branch on an undecided condition and the body continues (the
   interpreter's inertness; "throw" and "keep truthiness" were weighed and
-  not taken); and the `And`/`Or`/`Not` connectives, which still
-  short-circuit by JavaScript logic when every reached operand is
-  undecided, get a three-valued (Kleene) lowering in a session of their
-  own after Phase F batches 11 and 13 — SCHEDULED, not fixed, because the
-  one-pass emitter cannot rebuild an operand outside its CSE region. A
-  third follow-up ruling the same day settles the other compile targets:
+  not taken); and the `And`/`Or`/`Not` connectives, which short-circuited
+  by JavaScript logic when every reached operand was undecided, now get a
+  three-valued (Kleene) lowering — FIXED 2026-09-02, the same day: the
+  condition compiles to a short-circuiting three-valued value (a
+  decided-false guard never evaluates what follows it; an undecided one
+  still does) and is selected through the value-shaped test, on the
+  JavaScript and Python targets; `If(x > 0 ∧ y > 0, 1, -1)` at `x = 1,
+  y = NaN` is `NaN`, at `x = -1, y = NaN` it is `-1`. A third follow-up
+  ruling the same day settles the other compile targets:
   the Python target, which has a real NaN, takes the same operand guard;
   the GPU targets (GLSL/WGSL) keep JavaScript-style selection for now,
   because NaN propagation is not guaranteed on every driver, and stay on
-  the ROADMAP item that records that reason.
+  the ROADMAP item that records that reason. CORRECTION (measured
+  2026-09-02): "the interpreter holds such an application inert" is true
+  of an UNKNOWN operand (a free symbol), where the interpreter is Kleene;
+  for a NaN VALUE the interpreter's ordered comparison answers `False`
+  (IEEE) and `If(NaN > 0, 1, -1)` evaluates to `-1`, so the two lanes
+  disagree at a literal NaN — recorded in `ROADMAP.md` under the
+  undecided-condition items, ruling pending.
 - **FIXED 2026-09-02 (ruled the same day): a provably non-boolean
   condition is refused at boxing.** The 2026-08-31 inertness ruling
   removed the host throw that carried the only diagnostic for

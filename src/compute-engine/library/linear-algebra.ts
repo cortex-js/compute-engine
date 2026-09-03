@@ -33,6 +33,7 @@ import {
   guardedTypeHandlerCall,
 } from '../boxed-expression/operand-descriptor.js';
 import {
+  isCharacter,
   isFunction,
   isNumber,
   isString,
@@ -41,6 +42,7 @@ import {
 import { asRational, toInteger } from '../boxed-expression/numerics.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
+import { admissionOf } from '../boxed-expression/value-membership.js';
 import { euclideanNormType, pointNormType } from './utils.js';
 
 // Total number of elements (m·n) at or below which a constant matrix
@@ -91,6 +93,27 @@ export function hasInfiniteMagnitudeComponent(
   components: readonly Expression[]
 ): boolean {
   return components.some((c) => infinitePoint(c) !== undefined);
+}
+
+/**
+ * The `Norm` type handler's verdict for a scalar norm claim computed by
+ * `euclideanNormType`: the claim itself when it says something, and a
+ * DECLINE (`undefined`) when it falls back to the wide `number`.
+ *
+ * `euclideanNormType` answers `number` both when it read components it
+ * cannot bound and when there was nothing to read at all (a symbol, a
+ * matrix, whose elements are rows rather than numbers). `Norm` declares
+ * `real | +oo | nan`, which is strictly sharper than `number` — it excludes
+ * every complex value and every negative infinity — and a type-handler
+ * answer is authoritative, never widened and never intersected with the
+ * declaration. Returning `number` here would therefore REPLACE the declared
+ * union with a wider one; declining lets it apply.
+ *
+ * `euclideanNormType` itself keeps the `number` fallback because `Hypot` and
+ * `Distance` share it and declare differently.
+ */
+function declineWideNormType(claim: string): string | undefined {
+  return claim === 'number' ? undefined : claim;
 }
 
 /**
@@ -709,6 +732,50 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Determinant of a square matrix.',
       complexity: 8200,
       signature: '(matrix) -> number',
+      // The carrier already excludes `nan` (a scalar is not a matrix), so
+      // this only spells out the derived default. Infinite and NaN CELLS are
+      // ordinary matrix entries and are computed by IEEE inside the handler:
+      // `det [[1, ∞], [3, 4]]` is `1·4 − ∞·3 = −∞`, `det [[∞, 1], [1, ∞]]`
+      // is `+∞`, and a NaN entry makes the determinant NaN. Ruling recorded
+      // in the linear-algebra scalars record of
+      // `docs/plans/2026-08-30-error-model-implementation.md`.
+      nanBehavior: 'reject',
+      // A determinant is a polynomial in the entries — sums of products — so
+      // it stays inside the ring or field the entries live in: an integer
+      // matrix has an integer determinant, a rational one a rational, and so
+      // on. The tiers are tested from the narrowest outwards. Anything else
+      // DECLINES so the declared `number` applies: an entry type admitting an
+      // infinity or NaN can give `∞ − ∞`, and a symbolic entry gives an
+      // expression whose type this cannot read. The empty bottom type is
+      // excluded first — `never` matches every type, so a claim keyed on a
+      // subtype test alone would let a `never`-typed operand claim `integer`.
+      type: ([m]) => {
+        if (m === undefined || m.type.matches('never')) return undefined;
+        const t = m.type.type;
+        if (typeof t === 'string' || t.kind !== 'list') return undefined;
+        // The bottom type has to be excluded on the ELEMENTS too, and not
+        // only on the operand as a whole: `matrix<never>` is an ordinary
+        // (inhabited) list type whose cells are the empty type. `never` is a
+        // subtype of every type, so the tier loop below would let such a
+        // matrix claim the narrowest tier, `integer`. Only `never` is a
+        // subtype of `never`, which is what makes this test exact.
+        if (isSubtype(t.elements, 'never')) return undefined;
+        // A matrix whose two extents are known and unequal has no
+        // determinant at all — the handler answers `expected-square-matrix`
+        // — so claim no numeric tier for it. A negative extent is the
+        // "unknown" marker the `matrix` type uses (`[-1, -1]`).
+        const dims = t.dimensions;
+        if (
+          dims?.length === 2 &&
+          dims[0] >= 0 &&
+          dims[1] >= 0 &&
+          dims[0] !== dims[1]
+        )
+          return undefined;
+        for (const tier of ['integer', 'rational', 'real', 'complex'] as const)
+          if (isSubtype(t.elements, tier)) return tier;
+        return undefined;
+      },
       evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0];
 
@@ -926,22 +993,40 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Trace: {
       description: 'Trace of a matrix or pair of tensor axes.',
       complexity: 8200,
-      signature: '(value, axis1: integer?, axis2: integer?) -> value',
-      // The trace of a rank-2 matrix (or a scalar 1×1) is a scalar `number`;
-      // tracing a pair of axes of a higher-rank tensor reduces two axes and
-      // stays a collection, so only claim `number` for the matrix/scalar case
-      // and otherwise defer to the general `value`.
+      // The operand is a scalar (the 1×1 matrix) or a numeric tensor; a
+      // string or a boolean has no trace, so it is an `incompatible-type`
+      // error at boxing rather than an inert application. The result is the
+      // scalar for a matrix and a reduced tensor for a higher-rank operand
+      // (the batch trace over the last two axes). The axis slots are
+      // administrative indices and keep their derived `reject` policy.
+      // Ruling recorded in the linear-algebra scalars record of
+      // `docs/plans/2026-08-30-error-model-implementation.md`.
+      signature:
+        '(number | tensor, axis1: integer?, axis2: integer?) -> number | tensor',
+      // Explicit on the operand, because the derived policy for a carrier
+      // that ADMITS `nan` is `inert`: `NaN` is the trace of the 1×1 matrix
+      // `[NaN]`, and NaN cells inside a matrix sum by IEEE in the handler —
+      // `Trace([[1, NaN], [3, 4]])` is 5 (the NaN is off the diagonal) while
+      // `Trace([[NaN, 1], [3, 4]])` is NaN.
+      nanBehavior: ['handle', 'reject', 'reject'],
+      // The trace of a rank-2 matrix (or a scalar 1×1) is a scalar `number`.
+      // Tracing a pair of axes of a higher-rank tensor reduces two axes and
+      // stays a collection, and there is nothing cheap to claim about its
+      // shape, so this DECLINES there and the declared `number | tensor`
+      // applies. It declines for anything it cannot read too: a type-handler
+      // answer is authoritative, never widened, so answering the old wide
+      // `value` would replace the declared union with a wider type.
       type: ([m]) => {
-        if (m === undefined) return 'value';
+        if (m === undefined) return undefined;
         const t = m.type.type;
         if (typeof t !== 'string' && t.kind === 'list') {
           // A matrix carries 2 dimensions (e.g. `matrix` = `[-1, -1]`); a
           // vector (rank-1 list) has no `dimensions` and has no trace.
           if (t.dimensions?.length === 2) return 'number';
-          return 'value';
+          return undefined;
         }
         if (m.isNumber) return 'number';
-        return 'value';
+        return undefined;
       },
       evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0];
@@ -1559,8 +1644,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'matrix product; a half-integer power (e.g. 1/2) of an exact 2×2 ' +
         'positive-semidefinite matrix is the principal matrix square root.',
       complexity: 8300,
-      signature: '(matrix, number) -> matrix',
-      evaluate: ([mat, exponent], { engine: ce, numericApproximation }) => {
+      // The exponent is a REAL: `A^z` for a complex `z` has no closed form
+      // here, and the handler used to read `exponent.re`, so `MatrixPower(A,
+      // i)` silently returned the identity (`i.re` is 0). `real` also puts
+      // the infinities out of the domain — `A^{+oo}` has no value — so each
+      // of those is now an `incompatible-type` error at boxing. The NaN
+      // policy is `reject` in both slots (the derived default for this
+      // carrier, spelled out): the result is a matrix, so a NaN cannot speak
+      // the codomain's vocabulary. Ruling recorded in the linear-algebra
+      // scalars record of
+      // `docs/plans/2026-08-30-error-model-implementation.md`.
+      signature: '(matrix, real) -> matrix',
+      nanBehavior: 'reject',
+      evaluate: (
+        [mat, exponent],
+        { engine: ce, numericApproximation, expression }
+      ) => {
         const A = mat;
         if (!isTensorValue(A)) return undefined;
         const aTensor = packTensor(ce, A, { numeric: numericApproximation });
@@ -1576,16 +1675,60 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // A^{1/2}, then raise to the odd integer p. Only for exact 2×2
         // positive-semidefinite matrices, where the closed form stays exact.
         if (!Number.isInteger(n)) {
-          const den = exponent.denominator?.re;
-          const p = exponent.numerator?.re;
-          if (den !== 2 || p === undefined || !Number.isInteger(p))
-            return undefined;
+          // `p`, the numerator of a half-integer exponent `p/2`, or
+          // `undefined` when the exponent is not a half-integer at all.
+          //
+          // An EXACT exponent is read through its exact numerator and
+          // denominator, because `n` is a ROUNDED double and rounding
+          // invents half-integers that are not there: `(2^54 + 1)/2^55` is
+          // not 1/2, yet it reads back as exactly 0.5.
+          //
+          // An INEXACT exponent has no exact pair to read — the denominator
+          // of the float `0.5` is 1, not 2 — so the test there is that
+          // doubling it gives an integer. That is the route a float literal
+          // takes, and the route every exponent takes under `.N()`, where
+          // the driver numericizes the operands before the handler sees
+          // them; without it `MatrixPower([[4, 0], [0, 9]], 1/2).N()` stayed
+          // inert where its `evaluate()` answered `[[2, 0], [0, 3]]`.
+          //
+          // Neither test has a tolerance: inventing a nearby in-domain
+          // exponent for `2.4999999` would be a silent coercion. Any other
+          // non-integer exponent has no closed form here and stays inert.
+          let p: number | undefined;
+          if (isNumber(exponent) && exponent.isExact) {
+            const den = exponent.denominator?.re;
+            const num = exponent.numerator?.re;
+            if (den === 2 && num !== undefined && Number.isInteger(num))
+              p = num;
+          } else if (Number.isInteger(2 * n)) p = 2 * n;
+          if (p === undefined) return undefined;
           if (size !== 2) return undefined;
-          const root = matrixSqrt2x2Exact(A, ce);
+          // `matrixSqrt2x2Exact` needs exact rational entries, and under
+          // `.N()` the matrix operand reaching this handler has already been
+          // turned into floats, so it would decline there. The
+          // un-numericized node is available on the handler options
+          // (`EvaluateHandlerOptions.expression`): re-evaluate its matrix
+          // operand EXACTLY, compute the root from that, and float the
+          // result at the end. The exact re-evaluation is what unwraps a
+          // `Matrix(…)` node into the plain `List` of lists this needs. The
+          // operand count is checked first because `expression.ops[i]` is
+          // the provenance of `ops[i]` only when nothing reindexed the
+          // operands.
+          let root = matrixSqrt2x2Exact(A, ce);
+          if (
+            root === undefined &&
+            numericApproximation &&
+            expression !== undefined &&
+            isFunction(expression) &&
+            expression.nops === 2
+          )
+            root = matrixSqrt2x2Exact(expression.op1.evaluate(), ce);
           if (root === undefined) return undefined;
-          if (p === 1) return root;
+          if (p === 1) return numericApproximation ? root.N() : root;
           // (√A)^p reuses the integer branch (including the negative case).
-          return ce.function('MatrixPower', [root, ce.number(p)]).evaluate();
+          return ce
+            .function('MatrixPower', [root, ce.number(p)])
+            .evaluate({ numericApproximation });
         }
 
         if (n === 0)
@@ -1863,23 +2006,62 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Norm: {
       description: 'Vector or matrix norm.',
       complexity: 8200,
-      signature: '(value, number|string?) -> number',
+      // The operand is a scalar, a numeric tensor (a vector or a matrix), a
+      // POINT (a tuple), or a LIST of points. A string, a boolean or a list
+      // with a non-numeric element has no norm, so it is an
+      // `incompatible-type` error at boxing rather than an inert
+      // application. The scalar arm is the whole of `number` — not
+      // `complex | infinity` — because the NaN policy below is `handle`:
+      // `NaN` rides in on the carrier and the handler answers `|NaN| = NaN`,
+      // the same arrangement `IsPrime` and `Hypot` use.
+      //
+      // The result is `real | +oo | nan`, the `Hypot` spelling: `+oo` is the
+      // only infinite value a norm takes (a norm is non-negative), and the
+      // `nan` arm is the codomain vocabulary the `handle` policy needs. The
+      // order is a positive real, `+oo`, or one of the strings
+      // `"Frobenius"` / `"Infinity"`; `requires` below decides that for a
+      // literal. Ruling recorded in the linear-algebra scalars record of
+      // `docs/plans/2026-08-30-error-model-implementation.md`.
+      signature:
+        '(number | tensor | tuple | list<tuple>, real | +oo | string?) -> real | +oo | nan',
+      // Explicit, because the derived policy for a carrier that ADMITS
+      // `nan` is `inert`, and the order slot must reject: a NaN order is an
+      // administrative slot with no meaning, so it is an `Error` at boxing,
+      // while a NaN operand is an ordinary numeric argument the handler
+      // answers for.
+      nanBehavior: ['handle', 'reject'],
+      requires: ([, p]) => {
+        // Decided for an IN-CARRIER literal only. An off-carrier order (a
+        // complex number, `-oo`, `~oo`) is refused by the carrier itself,
+        // and the dispatch conformance re-test answers that AFTER this
+        // gate — a `false` here would replace the `incompatible-type`
+        // error with the generic precondition message. A symbol or an
+        // absent order is undecidable and falls through to the handler.
+        if (p === undefined) return undefined;
+        if (isString(p))
+          return p.string === 'Frobenius' || p.string === 'Infinity';
+        if (isNumber(p) && p.type.matches('real | +oo')) return (p.re ?? 0) > 0;
+        return undefined;
+      },
       // A point with a broadcasting collection component zips into one norm
       // per element — the honest type is then `list<number>` (Tycho item 74).
       // `isTuple` is type-based so tuple-typed symbols route too. A LIST of
       // points broadcasts to one norm per point (Tycho item 138).
       //
       // Otherwise the norm is the real scalar `euclideanNormType` describes,
-      // read off the elements a literal vector exposes. A matrix's elements
-      // are rows, whose `isFinite` is `false`, so nested operands fall to the
-      // wide `number` — as does anything with no elements to read.
+      // read off the elements a literal vector exposes. Where there is
+      // nothing to read — a symbol, or a matrix, whose elements are rows —
+      // `euclideanNormType` answers the wide `number`; this handler DECLINES
+      // there instead, so the declared `real | +oo | nan` applies. A handler
+      // answer is never widened, so answering `number` would hide the sharp
+      // declared union.
       type: ([x]) => {
-        if (x && isTuple(x)) return pointNormType(x);
-        if (x && isPointListValue(x))
-          return { kind: 'list', elements: 'number' };
-        if (x && isFunction(x) && x.operator === 'List')
-          return euclideanNormType(x.ops);
-        return 'number';
+        if (x === undefined) return undefined;
+        if (isTuple(x)) return declineWideNormType(pointNormType(x));
+        if (isPointListValue(x)) return { kind: 'list', elements: 'number' };
+        if (isFunction(x) && x.operator === 'List')
+          return declineWideNormType(euclideanNormType(x.ops));
+        return undefined;
       },
       evaluate: (
         ops,
@@ -1888,12 +2070,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
         const normTypeExpr = ops.length > 1 ? ops[1] : undefined;
 
-        // Scalar: |x| (absolute value)
-        if (x.isNumber) {
-          return ce.expr(['Abs', x]).evaluate({ numericApproximation });
-        }
-
-        // Determine norm type
+        // Determine norm type. This runs BEFORE the scalar and empty-vector
+        // shortcuts below, because those answer without consulting the order
+        // at all: `‖5‖_p` used to be 5 and `‖[]‖_p` used to be 0 whatever
+        // `p` turned out to be, so an order that the operator has no value
+        // for — an unassigned symbol — was silently discarded, and a later
+        // `p = -1` never reached `Norm`'s precondition.
         let normType: number | string = 2; // Default to L2/Frobenius
         if (normTypeExpr) {
           const normStr = isString(normTypeExpr)
@@ -1902,17 +2084,40 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const normSym = isSymbol(normTypeExpr)
             ? normTypeExpr.symbol
             : undefined;
+          let order: number | string | undefined = undefined;
           if (
             normStr === 'Infinity' ||
             normSym === 'Infinity' ||
             normTypeExpr.re === Infinity
           ) {
-            normType = 'infinity';
+            order = 'infinity';
           } else if (normStr === 'Frobenius') {
-            normType = 'frobenius';
+            // The Frobenius norm IS the entry-wise L2 norm — `√(Σ|xᵢ|²)` at
+            // any rank — so it is the order `2` at every branch below, and
+            // naming it separately only made the vector branch treat it as
+            // an order it does not compute: `‖(3, 4)‖_Frobenius` stayed
+            // inert where `‖(3, 4)‖₂` is 5.
+            order = 2;
           } else if (normTypeExpr.re !== undefined) {
-            normType = normTypeExpr.re;
+            order = normTypeExpr.re;
           }
+          // An explicit order this handler cannot read — an unassigned
+          // symbol, an expression with no numeric value, a string other than
+          // the two named above — leaves the whole application inert, and so
+          // does an order outside the p-norms (`p > 0`) and the L∞ maximum.
+          // A non-positive LITERAL order is refused earlier still, by the
+          // `requires` precondition above.
+          if (
+            order === undefined ||
+            (typeof order === 'number' && !(order > 0))
+          )
+            return undefined;
+          normType = order;
+        }
+
+        // Scalar: |x| (absolute value)
+        if (x.isNumber) {
+          return ce.expr(['Abs', x]).evaluate({ numericApproximation });
         }
 
         // Compute a rank-1 (vector) norm from a list of element expressions.
@@ -1935,6 +2140,27 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             normType === 'infinity' ||
             (typeof normType === 'number' && normType > 0);
           if (!supportedOrder) return undefined;
+
+          // Every branch below reads each component as a number: it takes
+          // the component's `Abs` and then either folds it or compares it.
+          // A component that is provably NOT a number — a string, a boolean
+          // — therefore has no norm at all, and the answer is the
+          // `incompatible-type` error rather than an inert application. The
+          // test covers every order, because the L∞ branch below could not
+          // see such a component at all: `Abs` of a string has `re = NaN`,
+          // every comparison with NaN is false, and the component was
+          // silently DROPPED — `‖("a", 3)‖_∞` answered 3.
+          //
+          // A COLLECTION component is exempt: it is the broadcast case,
+          // where `‖([1, 2], 3)‖` is one norm per element (Tycho item 74),
+          // and the folds below zip it. Text has to be tested before that
+          // exemption, because a string IS a collection — of characters —
+          // and would otherwise slip through it.
+          for (const el of elements) {
+            if (!isString(el) && !isCharacter(el) && el.isCollection) continue;
+            if (admissionOf(el, 'number') === 'refute')
+              return ce.typeError('number', el.type, el);
+          }
 
           // An infinite component makes the norm `+∞` for each of those orders
           // (each of `Σ|xᵢ|`, `√(Σ|xᵢ|²)`, `(Σ|xᵢ|^p)^(1/p)` and `max |xᵢ|` is
@@ -1976,8 +2202,19 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               // `.re` is NaN, so the component would be silently DROPPED).
               // Stay symbolic rather than return a wrong scalar.
               if (absEl.isCollection) return undefined;
-              // Compare: use numeric comparison
-              const absNum = absEl.re ?? 0;
+              // Compare: use numeric comparison. A magnitude that is not a
+              // resolved real number cannot take part in the maximum, and
+              // the `>` test below cannot see it: it would leave the
+              // component out and answer the maximum of the REST. A
+              // magnitude that is still symbolic (`|x|` for an unassigned
+              // `x`) leaves the whole norm undecided; a NaN magnitude makes
+              // it NaN, the answer the matrix branches below give for the
+              // same reason. The literal test is what separates the two:
+              // `.re` reads NaN for BOTH a NaN literal and a symbolic
+              // magnitude.
+              const absNum = isNumber(absEl) ? absEl.re : undefined;
+              if (absNum === undefined) return undefined;
+              if (Number.isNaN(absNum)) return ce.NaN;
               const maxNum = maxVal.re ?? 0;
               if (absNum > maxNum) {
                 maxVal = absEl;
@@ -2031,6 +2268,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return ce.function('List', norms);
         }
 
+        // The norm of an EMPTY vector is 0, whatever the order: every one of
+        // `Σ|xᵢ|`, `√(Σ|xᵢ|²)`, `(Σ|xᵢ|^p)^(1/p)` and `max |xᵢ|` is the sum
+        // or maximum of no terms. `vectorNorm` says so, but the rank-1
+        // branch below never reaches it for `[]`: an empty list carries no
+        // shape, so `isTensorValue` refuses it and the application stayed
+        // inert on a question it can decide.
+        if (x.isFiniteCollection === true && x.count === 0) return ce.Zero;
+
         if (!isTensorValue(x)) return undefined;
         const xTensor = packTensor(ce, x);
         if (!xTensor) return undefined;
@@ -2059,12 +2304,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // `Norm([[+oo]], 3)` would answer `+oo` where `Norm([[1]], 3)` stays
           // inert, and the data would be what makes an unsupported order
           // supported.
-          if (
-            normType !== 1 &&
-            normType !== 2 &&
-            normType !== 'frobenius' &&
-            normType !== 'infinity'
-          )
+          if (normType !== 1 && normType !== 2 && normType !== 'infinity')
             return undefined;
 
           // The entries, row-major: `entries[i * n + j]` is the entry at row
@@ -2089,7 +2329,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             return ce.PositiveInfinity;
 
           // Frobenius norm (default for matrices): √(ΣΣ|aij|²)
-          if (normType === 2 || normType === 'frobenius') {
+          if (normType === 2) {
             let sumSq: Expression = ce.Zero;
             for (const el of entries) {
               const absEl = ce.expr(['Abs', el]).evaluate();
@@ -2105,6 +2345,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               let colSum = 0;
               for (let i = 0; i < m; i++) {
                 const absEl = ce.expr(['Abs', entries[i * n + j]]).evaluate();
+                // A magnitude that is still symbolic (`|x|` for an
+                // unassigned `x`) has no place in a numeric column sum: `.re`
+                // reads NaN for it, exactly as it does for a NaN literal, so
+                // adding it in would report the wrong answer (NaN) for a
+                // question this branch cannot decide. The whole norm is
+                // undecided instead.
+                if (!isNumber(absEl)) return undefined;
                 colSum += absEl.re ?? 0;
               }
               // With no infinite entry left, a NaN column sum comes from a NaN
@@ -2127,6 +2374,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               let rowSum = 0;
               for (let j = 0; j < n; j++) {
                 const absEl = ce.expr(['Abs', entries[i * n + j]]).evaluate();
+                // A still-symbolic magnitude leaves the norm undecided, for
+                // the reason the L1 branch above states.
+                if (!isNumber(absEl)) return undefined;
                 rowSum += absEl.re ?? 0;
               }
               // A NaN row sum is the norm, for the reason the L1 branch above
@@ -2140,7 +2390,30 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         }
 
-        // Higher-rank tensors: not supported yet
+        // Higher-rank tensors (rank ≥ 3). The Frobenius norm — the order 2,
+        // which is also the default and the `"Frobenius"` spelling — is the
+        // ENTRY-WISE L2 norm `√(Σ|xᵢ|²)`, and that definition does not
+        // mention the rank: it is the same sum over every cell of the
+        // tensor, read in whatever order. So it is computed here from the
+        // flattened cells. The other orders are operator norms defined
+        // through a matrix acting on vectors; they have no rank-≥3 reading
+        // in this handler and stay inert.
+        if (normType === 2) {
+          const entries = xTensor
+            .flatten()
+            .map((v) => (v !== undefined ? ce.expr(v) : ce.Zero));
+          // An infinite entry dominates the sum of squares, exactly as it
+          // does at rank 1 and rank 2, so the scan runs before any folding.
+          if (hasInfiniteMagnitudeComponent(entries))
+            return ce.PositiveInfinity;
+          let sumSq: Expression = ce.Zero;
+          for (const el of entries) {
+            const absEl = ce.expr(['Abs', el]).evaluate();
+            sumSq = sumSq.add(absEl.mul(absEl));
+          }
+          return ce.expr(['Sqrt', sumSq]).evaluate({ numericApproximation });
+        }
+
         return undefined;
       },
     },

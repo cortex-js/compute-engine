@@ -3688,10 +3688,14 @@ const gpuBinomial: CompiledFunction<Expression> = ([n, k], compile, target) => {
       `Binomial: a complex first operand has no GPU lowering. ` +
         `Fail closed (D6).`
     );
-  // A statically non-finite first operand: the interpreter returns NaN for
-  // BOTH `Binomial(∞, 0)` (probed — the `k = 0 → 1` fold below does NOT hold
-  // there) and `Binomial(∞, k)`. Check before the `k` special cases so neither
-  // fold can emit a diverging value. Only a STATICALLY provable non-finite
+  // A statically non-finite first operand declines. The interpreter answers
+  // every infinite point from its own limit table — `C(±∞, 0) = 1`,
+  // `C(+∞, k) = +∞`, `C(−∞, k) = (−1)^k·∞`, `C(~oo, k) = ~oo` — and NaN for a
+  // NaN operand. The shader unroll cannot reproduce two of those: `~oo` has
+  // no float spelling, and the `k = 0 → 1` fold below would emit `1.0` where
+  // a NaN operand must propagate. Check before the `k` special cases so
+  // neither fold can emit a value the interpreter does not give. Only a
+  // STATICALLY provable non-finite
   // operand declines: a runtime ±∞ reaching a finite-typed binding still
   // unrolls (the documented static-assert class), as no runtime finite guard
   // is emitted — that would change every pure emission.

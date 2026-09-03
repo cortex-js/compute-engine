@@ -785,16 +785,20 @@ describe('GLSL COMPILATION', () => {
     });
 
     it('fails closed on a statically non-finite first operand', () => {
-      // Probed: the interpreter gives NaN for `Binomial(∞, 0)` — the `k = 0`
-      // fold to `1` does NOT hold there — and NaN for `Binomial(∞, 2)`, while
-      // the unroll emitted `1.0` and an ∞-valued falling factorial.
+      // The interpreter answers every infinite point from its own limit
+      // table, and the unroll cannot reproduce all of them: `~oo` has no
+      // float spelling, and the `k = 0` fold would emit `1.0` where a NaN
+      // operand must propagate. The decline covers all of them at once.
       for (const n of ['PositiveInfinity', 'NegativeInfinity', 'NaN'])
         for (const k of [0, 1, 2])
           expect(() =>
             glsl.compile(ce.expr(['Binomial', n, k]), NO_FOLD)
           ).toThrow(/statically non-finite first operand/);
-      expect(ce.box(['Binomial', 'PositiveInfinity', 0]).N().re).toBeNaN();
-      expect(ce.box(['Binomial', 'PositiveInfinity', 2]).N().re).toBeNaN();
+      expect(ce.box(['Binomial', 'PositiveInfinity', 0]).N().isSame(1)).toBe(
+        true
+      );
+      expect(ce.box(['Binomial', 'PositiveInfinity', 2]).N().re).toBe(Infinity);
+      expect(ce.box(['Binomial', 'NaN', 0]).N().re).toBeNaN();
       // A finite literal or symbol is unaffected (byte-identical).
       expect(glsl.compile(ce.expr(['Binomial', 'x', 2])).code).toBe(
         '(((x) * ((x) - 1.0)) / 2.0)'

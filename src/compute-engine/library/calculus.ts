@@ -769,6 +769,40 @@ function bareFunctionSystem(
 const DERIVATIVE_HEADS = ['D', 'Derivative', 'ND'] as const;
 
 /**
+ * Fold the raw output of the symbolic differentiator into the form the `D`
+ * operator answers with.
+ *
+ * The fold is a plain `evaluate()`, skipped when the result carries a symbolic
+ * transcendental (`ln(2)`) so the exactness contract keeps that symbolic.
+ *
+ * A piecewise result is folded ARM BY ARM instead. `Which` and `If` are
+ * selectors: a condition that cannot be decided (the usual case for a
+ * derivative, whose variable is free) leaves the node evaluating to itself
+ * with its held arms untouched. A single `evaluate()` on the whole node
+ * therefore leaves each arm exactly as the differentiation rules wrote it — a
+ * `2·ln(e)·e^(-2x)` where the same derivative written without a condition
+ * reads `2·e^(-2x)`. The conditions are boolean operands, not values, so they
+ * are carried over unchanged.
+ */
+function foldDerivativeResult(f: Expression): Expression {
+  if (isFunction(f)) {
+    // `Which` operands are strictly paired `(condition, value)`, so a value
+    // arm sits at every odd position; an `If` has one condition followed by
+    // its branches. An odd `Which` operand count is a malformed call — leave
+    // it to the ordinary fold rather than guessing how to pair it.
+    const isWhich = f.operator === 'Which' && f.nops % 2 === 0;
+    if (isWhich || f.operator === 'If')
+      return f.engine.function(
+        f.operator,
+        f.ops.map((op, i) =>
+          (isWhich ? i % 2 === 1 : i > 0) ? foldDerivativeResult(op) : op
+        )
+      );
+  }
+  return hasSymbolicTranscendental(f) ? f : f.evaluate();
+}
+
+/**
  * Target-agnostic compile lowering for the derivative heads (`D`,
  * `Derivative`, `ND`): the differentiation itself is a symbolic operation with
  * no runtime counterpart on any target, but its *result* is an ordinary
@@ -1494,10 +1528,11 @@ volumes
             f.op1?.operator === 'Derivative'
           )
             return f;
-          // If the result contains symbolic transcendentals (like ln(2)),
-          // return it without full evaluation to preserve the symbolic form
-          if (f && hasSymbolicTranscendental(f)) return f;
-          return f?.evaluate();
+          // Fold the raw rule output: a plain `evaluate()`, except that a
+          // result carrying symbolic transcendentals (like `ln(2)`) is
+          // returned as it stands to preserve the symbolic form, and a
+          // piecewise result is folded arm by arm.
+          return f === undefined ? undefined : foldDerivativeResult(f);
         });
 
         // A derivative is an OPEN expression in the differentiation variable,

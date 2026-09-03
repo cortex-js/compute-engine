@@ -730,6 +730,59 @@ function differentiateNode(
     return ce.function(expr.operator, elements);
   }
 
+  // Piecewise definitions (`Which`, and its two-branch form `If`): each value
+  // arm holds on its own region, so the derivative is the piecewise function
+  // of the arms' derivatives, with the conditions carried over unchanged:
+  //
+  //     d/dv Which(c₁, u₁, …, cₙ, uₙ) = Which(c₁, u₁′, …, cₙ, uₙ′)
+  //     d/dv If(c, a, b)              = If(c, a′, b′)
+  //
+  // The jump at a region boundary is NOT represented — a piecewise function
+  // that is discontinuous there has no derivative at that point, and the
+  // answer above is the derivative on the interior of every region. That is
+  // the convention every CAS uses for a piecewise derivative.
+  //
+  // Without this arm the lazy-operator decline further down left `D` inert,
+  // which reached ordinary user input through the distributions: a CDF or PDF
+  // evaluates to a closed form written as a `Which`
+  // (`CDF(ExponentialDistribution(2), x)` is
+  // `Which(x < 0, 0, True, 1 - e^(-2x))`), so differentiating an evaluated CDF
+  // answered nothing instead of the density.
+  //
+  // The conditions are held operands and are never differentiated: they are
+  // boolean, not values. The arms may still be UNBOUND on the box and parse
+  // routes, because a lazy operator holds its operands, so canonicalize each
+  // arm before differentiating it (`.canonical` binds structure without
+  // substituting assigned symbol values).
+  if (expr.operator === 'Which' || expr.operator === 'If') {
+    // `Which` operands are strictly paired `(condition, value)`; an odd count
+    // is a malformed call that the `Which` canonical handler reports as an
+    // error, so decline rather than guess how to pair them.
+    const isWhich = expr.operator === 'Which';
+    if (isWhich && expr.nops % 2 !== 0) return undefined;
+    // A value arm sits at every odd position of a `Which`, and at every
+    // position but the first (the condition) of an `If`.
+    const isValueArm = (i: number) => (isWhich ? i % 2 === 1 : i > 0);
+    const ops = expr.ops.map((op, i) => {
+      if (!isValueArm(i)) return op;
+      const arm = op.canonical;
+      return (
+        differentiate(arm, v, depth + 1, trace) ??
+        ce._fn('D', [arm, ce.symbol(v)])
+      );
+    });
+    if (ops.some((e) => !e.isValid)) return undefined;
+    recordD(trace, expr, v, 'derivative.piecewise-rule', () =>
+      ce.function(
+        expr.operator,
+        expr.ops.map((op, i) =>
+          isValueArm(i) ? dPlaceholder(op.canonical, v) : op
+        )
+      )
+    );
+    return ce.function(expr.operator, ops);
+  }
+
   // D - evaluate the derivative first, then differentiate the result
   if (expr.operator === 'D') {
     const evaluated = expr.evaluate();

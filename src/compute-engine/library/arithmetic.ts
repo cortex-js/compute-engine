@@ -198,6 +198,7 @@ import {
   elementaryFunctionType as elementaryFunctionTypeOnTypes,
   gammaPoleType as gammaPoleTypeOnTypes,
   extremumType as extremumTypeOnTypes,
+  elementExtremumType as elementExtremumTypeOnTypes,
   roundingFunctionType as roundingFunctionTypeOnTypes,
   measurementType as measurementTypeOnTypes,
   bigOpResultType as bigOpResultTypeOnTypes,
@@ -1193,9 +1194,32 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // fanned into a List by the generic broadcast machinery.
       broadcastExemptions: ['tuples'],
 
+      // The carrier is the whole extended complex plane, in every slot: a
+      // quotient has a value at every pair of admitted operands, or the
+      // pair is an indeterminate FORM whose value is `NaN` (`0/0`, `∞/∞`,
+      // `~oo/~oo`, `~oo/∞`, `∞/~oo`) — the same arrangement `Power` makes
+      // for `0^0`. There is therefore NO off-carrier point and no error
+      // this declaration adds. `NaN` propagates, declared explicitly
+      // because the extended carrier is not a subtype of `complex`, so the
+      // policy derived from the signature would be `reject` (see
+      // `docs/ERROR-MODEL.md` §4). The RESULT stays the wide `number`: the
+      // compiled lanes' kind-preservation discipline relies on it
+      // (`resultIsComplexValued`, javascript-target.ts), and the per-call
+      // sharpness lives in the type handler below.
+      //
+      // What actually enforces the operand kinds is NOT this signature.
+      // `Divide` has a custom `canonical` handler (and `canonicalDivide` is
+      // called directly by the box route and by the `.div()` method), so
+      // neither the boxing-time signature validation nor the dispatch-time
+      // conformance re-test runs for it — the same seam `Power` documents.
+      // `checkNumericArgs` is what refuses a string or a boolean operand,
+      // at canonicalization. Since the carrier has no error point, no
+      // evaluate-handler refusal is needed to replace them.
+      //
       // - if numer product of numbers, or denom product of numbers,
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
-      signature: '(number, number+) -> number',
+      signature: '(complex | infinity, (complex | infinity)+) -> number',
+      nanBehavior: 'propagate',
       type: (ops) => {
         const [num, den] = ops;
         if (den.isSame(1)) return num.type;
@@ -1273,7 +1297,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               elements: quotientShapeType(nt.elements, den),
             };
         }
-        if (den.isNaN || num.isNaN) return 'number';
+        // A proven-NaN operand: DECLINE, so the claim comes from the
+        // declaration and the Contract B derivation rather than from this
+        // handler. A handler answer is never widened NOR sharpened by the
+        // framework, so answering `number` here would hide whatever the
+        // derivation makes of the propagated `NaN` (the `Power`/`Sqrt`
+        // precedent). With the declared result already the top numeric
+        // type the two answers coincide today; declining is what keeps
+        // them from diverging if that result ever narrows.
+        if (den.isNaN || num.isNaN) return undefined;
         // Division by zero: k/0 = ~oo, 0/0 = NaN — indeterminate.
         if (den.isSame(0)) return 'number';
         // A non-finite operand: `x/±∞ = 0`, `±∞/finite = ±∞`, but `∞/∞`,
@@ -3341,10 +3373,40 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // passes a collection operand's own type through — the generic
       // broadcast machinery must not fan the tuple out or re-wrap the type.
       broadcastExemptions: ['tuples', 'collection-result'],
-      signature: '(value) -> value',
-      // `value`-typed signature defaults to `pass-through`; declare `propagate`
-      // (§3.A/§5) so `Negate(Missing)` yields `NaN`.
-      missingBehavior: 'propagate',
+      // Negation is TOTAL on the extended complex plane: every finite
+      // complex number has an additive inverse, `−(±∞) = ∓∞`, and
+      // `−~oo = ~oo` (an unsigned infinity is its own negation). So there
+      // is no off-carrier point, no domain condition, and no error this
+      // declaration adds — `partiality: 'total'`. `NaN` propagates,
+      // declared explicitly because the extended carrier is not a subtype
+      // of `complex`, so the policy derived from the signature would be
+      // `reject` (see `docs/ERROR-MODEL.md` §4). With every parameter
+      // numeric, the missing-value behavior now DERIVES to `propagate`
+      // (`resolvedMissingBehavior`, boxed-operator-definition.ts), so the
+      // former explicit `missingBehavior: 'propagate'` declaration — which
+      // the old `(value) -> value` signature needed, since a `value`
+      // carrier derives `pass-through` — is no longer written here;
+      // `Negate(Missing)` still yields `NaN`.
+      //
+      // The enforcement seam is the `canonical` handler's
+      // `checkNumericArgs`, not this signature: a head with a custom
+      // `canonical` handler bypasses both the boxing-time signature
+      // validation and the dispatch-time conformance re-test (the `Power`
+      // and `Divide` arrangement). That is also what admits a `Quantity`
+      // or a `Measurement` operand, which type `value` and would be
+      // disjoint from this carrier.
+      //
+      // That handler folds a literal `NaN` operand to `NaN` at
+      // canonicalization (through `.neg()`), rather than letting the node
+      // survive to the propagation gate as `Power`/`Multiply`/`Add` do.
+      // The fold is kept for the reason `canonicalDivide` keeps its own
+      // (see the note there): the carrier has no off-carrier point, so no
+      // enforcement seam is being bypassed, the folded literal types more
+      // sharply than the unfolded node, and the folded value is exactly
+      // what the gate would answer.
+      signature: '(complex | infinity) -> number',
+      nanBehavior: 'propagate',
+      partiality: 'total',
       // The echo must REFLECT any range the operand type carries: `−|x|`
       // echoing `real<0..>` verbatim claimed a sign the value contradicts.
       // Ranges reflect about zero, tiers are their own negation
@@ -4456,6 +4518,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q3075175',
       complexity: 3100,
       broadcastable: true,
+      // Deliberately NOT given a precise domain signature of its own, for
+      // the same reason as `Exp` above: the `canonical` handler below
+      // rewrites `Square(x)` to `Power(x, 2)`, so no well-formed unary
+      // `Square` application survives to be validated or evaluated (only
+      // an arity error keeps the head, which is why the `sgn` handler
+      // below is effectively unreachable). `Power`'s BASE slot carrier —
+      // `complex | infinity` with `nanBehavior: 'propagate'` — governs
+      // every exceptional point: `Square(NaN)` propagates to `NaN`,
+      // `Square(±∞) = +∞`, and `Square(~oo) = ~oo` (a positive power of
+      // `~oo` is `~oo` in every direction of approach). A precise carrier
+      // declared here would be a claim nothing consults.
       signature: '(number) -> number',
       sgn: ([x]) => {
         if (x.isSame(0)) return 'zero';
@@ -5142,14 +5215,38 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // collection's elements) to a single scalar — these broadcast: a scalar and
     // a collection give a collection of the per-element extremum, two
     // collections zip, two scalars give a scalar.
+    //
+    // `ElementMax`, `ElementMin` and `Clamp` share one Contract B
+    // declaration, because they are one piece of mathematics: an extremum
+    // (and the `min(max(x, lo), hi)` clamp built from two of them) is
+    // defined by the ORDER of the real line, which the complex numbers
+    // lack — the criterion `docs/ERROR-MODEL.md` §4 gives for the
+    // real-vs-complex choice. So the carrier is the EXTENDED real line in
+    // every slot: `±∞` are ordinary values here (`max(+∞, 1) = +∞`,
+    // `clamp(−∞, 0, 1) = 0`), while a non-real operand and `~oo` are
+    // off-carrier — an `incompatible-type` error at BOXING, where they
+    // used to leave the application inert forever. These heads have no
+    // `canonical` handler and no fast path, so the boxing-time signature
+    // validation is the seam, and the dispatch-time conformance re-test
+    // refutes an off-carrier value that only arrives later (a symbol
+    // assigned `i` after boxing). The order is total on the whole carrier,
+    // `lo > hi` included (`Clamp(5, 1, 0) = 0`), so there is no domain
+    // condition: `partiality: 'total'`. `NaN` propagates — declared
+    // explicitly, since the extended carrier is not a subtype of `complex`
+    // and the derived policy would be `reject` — and the framework's gate,
+    // not `scalarExtremum`'s own NaN test, is what answers it now.
     ElementMax: {
       description:
         'Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic.',
       complexity: 1200,
       broadcastable: true,
-      signature: '(number, number+) -> number',
+      // See the shared note above the `ElementMax` entry for the carrier.
+      signature:
+        '(real | signed_infinity, (real | signed_infinity)+) -> real | signed_infinity',
+      nanBehavior: 'propagate',
+      partiality: 'total',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops) => elementExtremumTypeOnTypes(ops),
       evaluate: (ops, { numericApproximation }) =>
         foldExtremum(ops, true, numericApproximation === true),
     },
@@ -5159,9 +5256,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         'Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic.',
       complexity: 1200,
       broadcastable: true,
-      signature: '(number, number+) -> number',
+      // See the shared note above the `ElementMax` entry for the carrier.
+      signature:
+        '(real | signed_infinity, (real | signed_infinity)+) -> real | signed_infinity',
+      nanBehavior: 'propagate',
+      partiality: 'total',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops) => elementExtremumTypeOnTypes(ops),
       evaluate: (ops, { numericApproximation }) =>
         foldExtremum(ops, false, numericApproximation === true),
     },
@@ -5171,9 +5272,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         'Clamp a value to the range [lo, hi] = min(max(x, lo), hi). Broadcasts over collection arguments.',
       complexity: 1200,
       broadcastable: true,
-      signature: '(number, number, number) -> number',
+      // See the shared note above the `ElementMax` entry for the carrier.
+      signature:
+        '(real | signed_infinity, real | signed_infinity, real | signed_infinity) -> real | signed_infinity',
+      nanBehavior: 'propagate',
+      partiality: 'total',
       typeHandlerKind: 'types',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops) => elementExtremumTypeOnTypes(ops),
       evaluate: ([x, lo, hi], { numericApproximation }) => {
         // max(x, lo) then min(·, hi). Keep the intermediate exact; numericize
         // only the final result. Stays symbolic if any comparison is undecided.

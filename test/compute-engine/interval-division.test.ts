@@ -203,6 +203,13 @@ describe('INTERVAL DIVISION — an empty-range operand (found alongside)', () =>
     expect(e.box(['Power', 2, 'm']).type.toString()).toBe('never');
     expect(e.box(['Add', 'm', 1]).type.toString()).toBe('never');
     expect(e.box(['Sin', 'm']).type.toString()).toBe('never');
+    // `canonicalDivide` had the same hole (found by the arithmetic-core
+    // signature-flip batch, 2026-09-02) and now carries the same
+    // early-out: the NaN arm folded `m / 2` to `NaN` and the `a/∞` arm
+    // folded `2 / m` to `0`.
+    expect(e.box(['Divide', 'm', 2]).type.toString()).toBe('never');
+    expect(e.box(['Divide', 2, 'm']).type.toString()).toBe('never');
+    expect(e.box(['Divide', 'm', 'm']).type.toString()).toBe('never');
     // Genuine matrices still take the rewrites.
     e.declare('M', 'matrix');
     expect(e.box(['Power', 'M', 2]).operator).toBe('MatrixPower');

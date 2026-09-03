@@ -898,6 +898,42 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   const ce = op1.engine;
   if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
 
+  // An operand with the EMPTY type `never` (for example a symbol declared
+  // with an empty range, `integer<2<..<3>`) has no value — but the bottom
+  // type is a subtype of every type, so it answers TRUE to every
+  // type-channel predicate. Without this early-out the folds below, which
+  // are keyed on exactly such predicates (`isNaN`, `isInfinity`, the sign
+  // reads), all fire for it: `Divide(m, 2)` folded to `NaN` through the
+  // NaN arm and `Divide(2, m)` to `0` through the `a/∞` arm. No fold
+  // applies to a valueless operand, so the node is left unchanged and its
+  // type stays `never`. `canonicalPower` carries the same guard, for the
+  // same reason.
+  if (op1.type.type === 'never' || op2.type.type === 'never')
+    return ce._fn('Divide', [op1, op2]);
+
+  // A `NaN` operand folds to `NaN` HERE, at canonicalization, unlike the
+  // other arithmetic hubs (`Power`, `Multiply`, `Add` all leave such a node
+  // unfolded and let the dispatch-time NaN gate propagate at evaluation).
+  // The divergence is deliberate, and was measured before it was kept
+  // (the arithmetic-core record in
+  // `docs/plans/2026-08-30-error-model-implementation.md`):
+  // - This is not an ERROR fold. `Divide` declares
+  //   `nanBehavior: 'propagate'`, and the value this fold produces is
+  //   exactly what the gate would produce, so nothing an enforcement seam
+  //   would report is being swallowed — the carrier
+  //   `(complex | infinity, (complex | infinity)+)` has no off-carrier
+  //   point at all. `canonicalPower` keeps the analogous in-carrier folds
+  //   (`0^0`, `1^∞`) for the same reason; what it had to stop folding was
+  //   the OFF-carrier points, which do carry an error.
+  // - The fold is SHARPER. `Divide` declares the top numeric result
+  //   `number` (the compiled lanes' kind preservation relies on it), and
+  //   the Contract B derivation leaves a result that already admits `nan`
+  //   untouched, so an unfolded `Divide(NaN, 2)` types the wide `number`
+  //   where the folded literal types `NaN`.
+  // - Removing the fold introduced a route divergence: `NaN / NaN` reached
+  //   the `a/a -> 1` rule of `simplifyDivide` (symbolic/simplify-divide.ts),
+  //   whose guards exclude 0 and the infinities but not `NaN`, and
+  //   simplified to `1` against evaluation's `NaN`.
   if (op1.isNaN || op2.isNaN) return ce.NaN;
 
   // Tuples (points/vectors in ℝⁿ): `tuple / scalar` scales component-wise;

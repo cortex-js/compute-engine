@@ -1142,6 +1142,10 @@ describe('D over lazy operators stays symbolic (Tycho item 115)', () => {
   // its evaluate handler on nonsense operands (`Which` used to THROW
   // "Condition must evaluate to..." out of evaluate() on the symbolic
   // condition). Expected: the `D` stays inert.
+  //
+  // `Which` and `If` are the exception: they are piecewise definitions, and
+  // the piecewise rule below differentiates each value arm on its own region.
+  // The point kept here is that the symbolic condition still does not throw.
   it('D over Which with a symbolic condition does not throw', () => {
     const expr = engine.expr([
       'D',
@@ -1149,7 +1153,9 @@ describe('D over lazy operators stays symbolic (Tycho item 115)', () => {
       'x',
     ]);
     expect(() => expr.evaluate()).not.toThrow();
-    expect(expr.evaluate().operator).toEqual('D');
+    expect(expr.evaluate().toString()).toEqual(
+      'Which(x < 0, 2x, "True", 3x^2)'
+    );
   });
 
   it('D over an explicit Sum stays inert (no bound-variable leak)', () => {
@@ -1483,5 +1489,190 @@ describe('Derivative order operand', () => {
         .evaluate()
         .toString()
     ).toBe('(x) => x^2');
+  });
+});
+
+describe('D over a piecewise definition (Which / If)', () => {
+  // A piecewise function is differentiated arm by arm, each arm on its own
+  // region, and the conditions are carried over unchanged. The jump at a
+  // region boundary is not represented — that is the convention every CAS
+  // uses for a piecewise derivative.
+  //
+  // A central difference of the piecewise function, taken at two interior
+  // points of each region, is what verifies each of these.
+  const centralDifference = (
+    f: (x: number) => number,
+    x: number,
+    h = 1e-6
+  ): number => (f(x + h) - f(x - h)) / (2 * h);
+
+  const valueAt = (expr: Expression, x: number): number =>
+    expr.subs({ x }).N().re;
+
+  it('differentiates each arm of a Which', () => {
+    const result = engine
+      .expr([
+        'D',
+        [
+          'Which',
+          ['Less', 'x', 0],
+          ['Power', 'x', 2],
+          'True',
+          ['Power', 'x', 3],
+        ],
+        'x',
+      ])
+      .evaluate();
+    expect(result.toString()).toEqual('Which(x < 0, 2x, "True", 3x^2)');
+
+    const f = (x: number) => (x < 0 ? x ** 2 : x ** 3);
+    for (const x of [-3, -0.7, 0.4, 2.1])
+      expect(valueAt(result, x)).toBeCloseTo(centralDifference(f, x), 5);
+  });
+
+  it('differentiates both branches of an If', () => {
+    const result = engine
+      .expr([
+        'D',
+        ['If', ['Less', 'x', 0], ['Sin', 'x'], ['Exp', 'x']],
+        'x',
+      ])
+      .evaluate();
+    expect(result.toString()).toEqual('If(x < 0, cos(x), e^x)');
+
+    const f = (x: number) => (x < 0 ? Math.sin(x) : Math.exp(x));
+    for (const x of [-2.2, -0.4, 0.6, 1.3])
+      expect(valueAt(result, x)).toBeCloseTo(centralDifference(f, x), 5);
+  });
+
+  it('differentiates a `cases` environment', () => {
+    const result = engine
+      .expr([
+        'D',
+        engine.parse('\\begin{cases} x^2 & x>0 \\\\ -x \\end{cases}'),
+        'x',
+      ])
+      .evaluate();
+    expect(result.toString()).toEqual('Which(0 < x, 2x, "True", -1)');
+  });
+
+  // The distributions answer piecewise closed forms, so differentiating an
+  // evaluated CDF is the route ordinary user input takes into this rule.
+  // Without the piecewise arm the `D` stayed inert.
+  it('differentiates an evaluated CDF back to its density', () => {
+    const ce = new ComputeEngine();
+    const cdf = ce
+      .parse('\\mathrm{CDF}(\\mathrm{ExponentialDistribution}(2), x)')
+      .evaluate();
+    const result = ce.function('D', [cdf, ce.symbol('x')]).evaluate();
+    expect(result.toString()).toEqual('Which(x < 0, 0, "True", 2e^(-2x))');
+    // The density of Exponential(2) at x = 1 is 2·e^(-2) = 0.2706705664732254.
+    expect(result.subs({ x: 1 }).N().re).toBeCloseTo(2 * Math.exp(-2), 12);
+    expect(result.subs({ x: 0.5 }).N().re).toBeCloseTo(2 * Math.exp(-1), 12);
+    expect(result.subs({ x: -1 }).N().re).toBe(0);
+  });
+
+  it('differentiates an evaluated PDF to zero on every region', () => {
+    const ce = new ComputeEngine();
+    const pdf = ce
+      .parse('\\mathrm{PDF}(\\mathrm{UniformDistribution}(0, 1), x)')
+      .evaluate();
+    const result = ce.function('D', [pdf, ce.symbol('x')]).evaluate();
+    expect(result.toString()).toEqual(
+      'Which(0 <= x && x <= 1, 0, "True", 0)'
+    );
+  });
+
+  // A held operand of a lazy operator arrives UNBOUND on the box and parse
+  // routes, so the rule canonicalizes each arm before differentiating it.
+  it('answers the same on the box and parse routes', () => {
+    const expected = 'Which(x < 0, 0, "True", 2e^(-2x))';
+    const boxed = engine.box([
+      'Which',
+      ['Less', 'x', 0],
+      0,
+      'True',
+      ['Subtract', 1, ['Exp', ['Negate', ['Multiply', 2, 'x']]]],
+    ]);
+    expect(
+      engine.function('D', [boxed, engine.symbol('x')]).evaluate().toString()
+    ).toEqual(expected);
+
+    const parsed = engine.parse(
+      '\\mathrm{Which}(x<0, 0, \\mathrm{True}, 1-e^{-2x})'
+    );
+    expect(
+      engine.function('D', [parsed, engine.symbol('x')]).evaluate().toString()
+    ).toEqual(expected);
+  });
+
+  it('keeps an arm that carries a symbolic transcendental exact', () => {
+    const result = engine
+      .expr([
+        'D',
+        ['Which', ['Less', 'x', 0], 0, 'True', ['Multiply', ['Ln', 2], 'x']],
+        'x',
+      ])
+      .evaluate();
+    expect(result.toString()).toEqual('Which(x < 0, 0, "True", ln(2))');
+  });
+
+  it('leaves an arm with no closed form symbolic, and differentiates the rest', () => {
+    const result = engine
+      .expr([
+        'D',
+        ['Which', ['Less', 'x', 0], ['f', 'x'], 'True', ['Power', 'x', 3]],
+        'x',
+      ])
+      .evaluate();
+    expect(result.toString()).toEqual(
+      'Which(x < 0, Apply(Derivative(f, 1), x), "True", 3x^2)'
+    );
+  });
+
+  it('applies the product rule to a piecewise factor', () => {
+    const result = engine
+      .expr([
+        'D',
+        [
+          'Multiply',
+          'x',
+          [
+            'Which',
+            ['Less', 'x', 0],
+            ['Power', 'x', 2],
+            'True',
+            ['Power', 'x', 3],
+          ],
+        ],
+        'x',
+      ])
+      .evaluate();
+    expect(result.operator).toEqual('Which');
+
+    const f = (x: number) => x * (x < 0 ? x ** 2 : x ** 3);
+    for (const x of [-3, -0.7, 0.4, 2.1])
+      expect(valueAt(result, x)).toBeCloseTo(centralDifference(f, x), 5);
+  });
+
+  // The differentiation variable is bound by `D`, so a same-named global
+  // assignment must not substitute into an arm.
+  it('does not substitute an assigned value for the bound variable', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    const result = ce
+      .box([
+        'D',
+        [
+          'Which',
+          ['Less', 'x', 0],
+          ['Power', 'x', 2],
+          'True',
+          ['Power', 'x', 3],
+        ],
+        'x',
+      ])
+      .evaluate();
+    expect(result.toString()).toEqual('Which(x < 0, 2x, "True", 3x^2)');
   });
 });

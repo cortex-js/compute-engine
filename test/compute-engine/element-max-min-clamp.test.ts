@@ -68,12 +68,42 @@ describe('ElementMax / ElementMin — type', () => {
     });
   });
   test('scalar⊗scalar is a scalar type', () => {
-    expect(ce.box(['ElementMax', 2, 5]).type.toString()).toBe('real');
+    // The slim handler of the Contract B flip claims the operands' common
+    // tier, and an extremum returns one of its operands, so two integer
+    // literals give `integer` (it used to answer the looser `real`).
+    expect(ce.box(['ElementMax', 2, 5]).type.toString()).toBe('integer');
   });
-  test('a non-finite operand widens to number (non-finite convention)', () => {
+  test('a non-finite operand keeps the declared extended-real claim', () => {
+    // `±∞` are ordinary values of the declared carrier
+    // (`real | signed_infinity`), so the handler declines the finite-tier
+    // claim and the declared result shows, lifted per cell by the
+    // broadcast. It used to widen to the shape-only `vector<2>`.
     expect(
       ce.box(['ElementMax', ['List', 1, 2], 'PositiveInfinity']).type.toString()
-    ).toBe('vector<2>');
+    ).toBe('list<real | signed_infinity^2>');
+  });
+  test('a non-real operand is off-carrier — an error at boxing', () => {
+    // An extremum is defined by the ORDER of the real line, so `i` and
+    // `~oo` are outside the declared carrier. These used to be admitted
+    // and stay inert forever.
+    expect(ce.box(['ElementMax', 'ImaginaryUnit', 1]).isValid).toBe(false);
+    expect(ce.box(['Clamp', 'ComplexInfinity', 0, 1]).isValid).toBe(false);
+  });
+  test('a valueless cell does not get a finite-tier claim', () => {
+    // An empty range makes the CELL type the bottom type `never`, which is
+    // a subtype of every type and so answers TRUE to every tier test. The
+    // handler must decline for it, or it claims `list<integer>` for an
+    // operand that cannot hold a value. A local engine keeps the
+    // declaration out of the shared one.
+    const ce2 = new ComputeEngine();
+    ce2.declare('v', 'list<integer<2<..<3>>');
+    expect(ce2.box('v').type.toString()).toBe('list<never>');
+    expect(ce2.box(['ElementMax', 'v', 5]).type.toString()).toBe(
+      'list<real | signed_infinity>'
+    );
+    expect(ce2.box(['Clamp', 'v', 0, 1]).type.toString()).toBe(
+      'list<real | signed_infinity>'
+    );
   });
 });
 

@@ -3127,14 +3127,18 @@ describe('Euclidean norms: an infinite leg dominates a NaN leg', () => {
   test('an unsupported norm order is inert whatever the entries are', () => {
     // The infinity dominance belongs INSIDE the orders the handler computes:
     // an entry must never be what makes an order the handler does not
-    // implement answer. `p = 0` is not a norm, and the matrix branch computes
-    // only the Frobenius norm, the max column sum and the max row sum — so
-    // `Norm([+oo], 0)` and `Norm([[+oo]], 3)` stay the inert application
-    // their finite counterparts stay.
+    // implement answer. The matrix branch computes only the Frobenius norm,
+    // the max column sum and the max row sum, so `Norm([[+oo]], 3)` stays
+    // the inert application `Norm([[1]], 3)` stays.
+    //
+    // `p = 0` is not a norm at any rank, and that is now a declared
+    // precondition of the operator (`requires`), so it is an Error for
+    // every operand — the infinite entry included. The entry is still never
+    // what decides the order.
     const ce = new ComputeEngine();
     const op = (expr: any) => ce.box(expr).evaluate().operator;
-    expect(op(['Norm', ['List', 1], 0])).toBe('Norm');
-    expect(op(['Norm', ['List', INF], 0])).toBe('Norm');
+    expect(op(['Norm', ['List', 1], 0])).toBe('Error');
+    expect(op(['Norm', ['List', INF], 0])).toBe('Error');
     expect(op(['Norm', ['List', ['List', 1]], 3])).toBe('Norm');
     expect(op(['Norm', ['List', ['List', INF]], 3])).toBe('Norm');
     // Every SUPPORTED order answers `+oo` for that same infinite entry: the
@@ -3360,5 +3364,331 @@ describe('Euclidean norms: an infinite leg dominates a NaN leg', () => {
     expect(
       isErrorValue(operand(ce.box(['Hypot', 'ImaginaryUnit', 1]), 1))
     ).toBe(true);
+  });
+});
+
+//
+// Phase F batch 11 — the arithmetic core
+//
+
+describe('the arithmetic core declares its domains', () => {
+  // Signature flips of 2026-09-02 (Phase F batch 11), decided by the
+  // precedent of the earlier batches:
+  //
+  // - `Divide` and `Negate` take the EXTENDED COMPLEX plane in every slot
+  //   (`complex | infinity`). Every point of that carrier has a value, or
+  //   is an indeterminate FORM whose value is `NaN` (`0/0`, `∞/∞`,
+  //   `~oo/~oo`, `~oo/∞`, `∞/~oo`) — the arrangement `Power` makes for
+  //   `0^0` — so neither head has an off-carrier point and neither flip
+  //   changes any answer. Both declarations are enforced by their
+  //   `canonical` handler's `checkNumericArgs` rather than by the boxing
+  //   signature validation, which a head with a `canonical` handler
+  //   bypasses (with the dispatch-time conformance re-test).
+  // - `Square` is NOT flipped: it canonicalizes to `Power(x, 2)`, so
+  //   `Power`'s own base carrier governs every exceptional point (the
+  //   `Exp` arrangement).
+  // - `Clamp`, `ElementMax` and `ElementMin` take the EXTENDED REAL line
+  //   (`real | signed_infinity`), because an extremum is defined by the
+  //   ORDER of the real line. That is the batch's one behavior change: a
+  //   non-real operand or `~oo` is an `incompatible-type` error at boxing
+  //   where it used to leave the application inert forever, and `NaN` now
+  //   propagates through the framework gate with the sharp `nan` type.
+  //
+  // Every value pin below holds on the box route and the parse route.
+
+  const isNaNv = (ce: ComputeEngine, v: Expression) => isNaNValue(ce, v);
+
+  test('Divide: the extended complex plane in every slot, no error point', () => {
+    const ce = new ComputeEngine();
+    const NANQ = ce.NaN;
+    const OO = ce.PositiveInfinity;
+    const NOO = ce.NegativeInfinity;
+    const COO = ce.ComplexInfinity;
+    // [numerator LaTeX, denominator LaTeX, MathJSON numerator, MathJSON
+    // denominator, expected value]. `~oo` is an ordinary value of the
+    // carrier, never governed by the NaN policy.
+    const rows: [string, string, any, any, Expression][] = [
+      ['1', '0', 1, 0, COO],
+      ['0', '0', 0, 0, NANQ],
+      ['\\infty', '\\infty', 'PositiveInfinity', 'PositiveInfinity', NANQ],
+      ['\\infty', '0', 'PositiveInfinity', 0, COO],
+      ['0', '\\infty', 0, 'PositiveInfinity', ce.Zero],
+      ['1', '\\infty', 1, 'PositiveInfinity', ce.Zero],
+      ['\\infty', '2', 'PositiveInfinity', 2, OO],
+      ['\\infty', '-2', 'PositiveInfinity', -2, NOO],
+      ['\\tilde\\infty', '2', 'ComplexInfinity', 2, COO],
+      ['2', '\\tilde\\infty', 2, 'ComplexInfinity', ce.Zero],
+      [
+        '\\tilde\\infty',
+        '\\tilde\\infty',
+        'ComplexInfinity',
+        'ComplexInfinity',
+        NANQ,
+      ],
+      ['\\tilde\\infty', '0', 'ComplexInfinity', 0, COO],
+      ['0', '\\tilde\\infty', 0, 'ComplexInfinity', ce.Zero],
+      [
+        '\\tilde\\infty',
+        '\\infty',
+        'ComplexInfinity',
+        'PositiveInfinity',
+        NANQ,
+      ],
+      [
+        '\\infty',
+        '\\tilde\\infty',
+        'PositiveInfinity',
+        'ComplexInfinity',
+        NANQ,
+      ],
+      ['i', '\\infty', 'ImaginaryUnit', 'PositiveInfinity', ce.Zero],
+      ['\\infty', 'i', 'PositiveInfinity', 'ImaginaryUnit', COO],
+      ['i', '0', 'ImaginaryUnit', 0, COO],
+    ];
+    for (const [nTex, dTex, nJson, dJson, expected] of rows) {
+      const boxed = ce.box(['Divide', nJson, dJson]);
+      const parsed = ce.parse(`\\frac{${nTex}}{${dTex}}`);
+      for (const e of [boxed, parsed]) {
+        expect(e.evaluate().isSame(expected)).toBe(true);
+        expect(e.N().isSame(expected)).toBe(true);
+      }
+    }
+
+    // The enforcement seam is `checkNumericArgs` in the `canonical`
+    // handler, not the signature: a non-numeric operand is refused at
+    // canonicalization, as before the flip.
+    for (const bad of [{ str: 'a' }, 'True'])
+      expect(ce.box(['Divide', bad, 2]).isValid).toBe(false);
+
+    // A `NaN` operand propagates. `canonicalDivide` folds it to the
+    // literal at canonicalization instead of leaving the node for the
+    // dispatch-time gate (the divergence from `Power`/`Multiply`/`Add` is
+    // deliberate — see the note at that fold), so the type is the sharp
+    // literal rather than the wide declared result.
+    for (const nan of [
+      ce.box(['Divide', 'NaN', 2]),
+      ce.box(['Divide', 2, 'NaN']),
+      ce.parse('\\frac{\\operatorname{NaN}}{2}'),
+    ]) {
+      expect(isNaNv(ce, nan.evaluate())).toBe(true);
+      expect(nan.type.matches('nan')).toBe(true);
+    }
+
+    // Shapes the `Divide` handlers own are untouched by the flip: a point
+    // scales component-wise, a list broadcasts, and a `Quantity` keeps its
+    // unit (it types `value`, which only the canonical handler's own
+    // admission lets through).
+    expect(ce.box(['Divide', ['Tuple', 1, 2], 2]).evaluate().toString()).toBe(
+      '(1/2, 1)'
+    );
+    expect(ce.box(['Divide', ['List', 1, 2], 2]).evaluate().toString()).toBe(
+      '[1/2,1]'
+    );
+    expect(
+      ce.box(['Divide', ['List', 1, 'NaN'], 2]).evaluate().toString()
+    ).toBe('[1/2,NaN]');
+    expect(
+      ce
+        .box(['Divide', ['Quantity', 5, { str: 'Meter' }], 2])
+        .evaluate()
+        .toString()
+    ).toBe('2.5 Meter');
+
+    // A fresh symbol is still inferred `number`, not the declared carrier:
+    // the inference comes from `checkNumericArgs`, which the canonical
+    // handler runs in place of the signature validation.
+    expect(ce.box(['Divide', 'vB11', 2]).type.toString()).toBe('number');
+    expect(ce.box('vB11').type.toString()).toBe('number');
+    // A pole at a symbolic numerator is unchanged.
+    expect(ce.box(['Divide', 'xB11', 0]).evaluate().isSame(COO)).toBe(true);
+  });
+
+  test('Negate: total on the extended complex plane', () => {
+    const ce = new ComputeEngine();
+    const rows: [any, string, Expression][] = [
+      ['PositiveInfinity', '-\\infty', ce.NegativeInfinity],
+      ['NegativeInfinity', '-(-\\infty)', ce.PositiveInfinity],
+      // `−~oo = ~oo`: an unsigned infinity is its own negation, which is
+      // why the carrier admits it and `partiality` is `total`.
+      ['ComplexInfinity', '-\\tilde\\infty', ce.ComplexInfinity],
+      ['NaN', '-\\operatorname{NaN}', ce.NaN],
+    ];
+    for (const [json, tex, expected] of rows) {
+      for (const e of [ce.box(['Negate', json]), ce.parse(tex)]) {
+        expect(e.evaluate().isSame(expected)).toBe(true);
+        expect(e.N().isSame(expected)).toBe(true);
+      }
+    }
+
+    // The admission seam is the canonical handler's `checkNumericArgs`,
+    // exactly as before the flip.
+    for (const bad of [{ str: 'a' }, 'True'])
+      expect(ce.box(['Negate', bad]).isValid).toBe(false);
+
+    // The missing-value behavior is no longer declared: with every
+    // parameter numeric it DERIVES to `propagate`, so an absent operand
+    // still yields `NaN` (§3.A of the missing-value typing design).
+    expect(isNaNv(ce, ce.box(['Negate', 'Missing']).evaluate())).toBe(true);
+
+    // A `Quantity` and a `Measurement` type `value` — disjoint from the
+    // declared carrier — and keep working because the canonical handler,
+    // not the signature validation, is what admits them.
+    expect(
+      ce
+        .box(['Negate', ['Quantity', 5, { str: 'Meter' }]])
+        .evaluate()
+        .toString()
+    ).toBe('-5 Meter');
+    expect(
+      ce
+        .box(['Negate', ['Measurement', 5, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('-5.0 ± 1.0');
+
+    // The type handler's echo — component-wise for a tuple, element-wise
+    // for a collection, ranges reflected about zero — is unchanged.
+    expect(ce.box(['Negate', ['Tuple', 1, 2]]).evaluate().toString()).toBe(
+      '(-1, -2)'
+    );
+    expect(ce.box(['Negate', ['List', 1, 2]]).type.toString()).toBe(
+      'vector<integer^2>'
+    );
+    expect(ce.box(['Negate', 'ImaginaryUnit']).type.toString()).toBe(
+      'imaginary'
+    );
+  });
+
+  test('Square: no carrier of its own — it rides on Power', () => {
+    const ce = new ComputeEngine();
+    // `Square(x)` canonicalizes to `Power(x, 2)`, so `Power`'s BASE
+    // carrier (`complex | infinity`, `nanBehavior: 'propagate'`) decides
+    // every exceptional point and no `Square` node survives to consult a
+    // carrier declared here.
+    expect(ce.box(['Square', 'sqB11']).json).toEqual(['Power', 'sqB11', 2]);
+    const rows: [any, string, Expression][] = [
+      ['NaN', '\\operatorname{Square}(\\operatorname{NaN})', ce.NaN],
+      ['PositiveInfinity', '\\infty^2', ce.PositiveInfinity],
+      ['NegativeInfinity', '(-\\infty)^2', ce.PositiveInfinity],
+      // A positive power of `~oo` is `~oo` in every direction of approach.
+      ['ComplexInfinity', '(\\tilde\\infty)^2', ce.ComplexInfinity],
+    ];
+    for (const [json, tex, expected] of rows) {
+      for (const e of [ce.box(['Square', json]), ce.parse(tex)]) {
+        expect(e.evaluate().isSame(expected)).toBe(true);
+        expect(e.N().isSame(expected)).toBe(true);
+      }
+    }
+    expect(ce.box(['Square', 'ImaginaryUnit']).evaluate().isSame(-1)).toBe(
+      true
+    );
+  });
+
+  test('Clamp / ElementMax / ElementMin: the extended REAL line', () => {
+    const ce = new ComputeEngine();
+    const OO = 'PositiveInfinity';
+    const NOO = 'NegativeInfinity';
+    const COO = 'ComplexInfinity';
+    const both = (json: any, tex: string, check: (v: Expression) => boolean) => {
+      for (const e of [ce.box(json), ce.parse(tex)]) {
+        expect(check(e.evaluate())).toBe(true);
+        expect(check(e.N())).toBe(true);
+      }
+    };
+    const is = (n: any) => (v: Expression) => v.isSame(n);
+
+    // The infinities are ordinary values of the carrier and keep theirs.
+    both(['Clamp', OO, 0, 1], '\\operatorname{Clamp}(\\infty,0,1)', is(1));
+    both(['Clamp', NOO, 0, 1], '\\operatorname{Clamp}(-\\infty,0,1)', is(0));
+    both(
+      ['Clamp', 0.5, NOO, OO],
+      '\\operatorname{Clamp}(0.5,-\\infty,\\infty)',
+      is(0.5)
+    );
+    both(
+      ['ElementMax', OO, 1],
+      '\\operatorname{ElementMax}(\\infty,1)',
+      (v) => v.isSame(ce.PositiveInfinity)
+    );
+    both(['ElementMax', NOO, 1], '\\operatorname{ElementMax}(-\\infty,1)', is(1));
+    both(['ElementMin', OO, 1], '\\operatorname{ElementMin}(\\infty,1)', is(1));
+    // The order is total on the whole carrier, `lo > hi` included, which
+    // is why `partiality` is `total`: `Clamp(5, 1, 0)` is `min(max(5, 1), 0)`.
+    both(['Clamp', 5, 1, 0], '\\operatorname{Clamp}(5,1,0)', is(0));
+
+    // `NaN` propagates through the framework gate, and the declared
+    // NaN-free result lets the sharp `nan` claim show (the old wide
+    // `number` handler answer hid it).
+    for (const [json, tex] of [
+      [['Clamp', 'NaN', 0, 1], '\\operatorname{Clamp}(\\operatorname{NaN},0,1)'],
+      [
+        ['ElementMax', 'NaN', 1],
+        '\\operatorname{ElementMax}(\\operatorname{NaN},1)',
+      ],
+      [
+        ['ElementMin', 'NaN', 1],
+        '\\operatorname{ElementMin}(\\operatorname{NaN},1)',
+      ],
+    ] as [any, string][]) {
+      for (const e of [ce.box(json), ce.parse(tex)]) {
+        expect(isNaNv(ce, e.evaluate())).toBe(true);
+        expect(e.type.toString()).toBe('nan');
+      }
+    }
+
+    // A non-real operand and `~oo` are OFF the carrier — an
+    // `incompatible-type` error at boxing, where each used to be admitted
+    // and stay inert forever. These heads have no `canonical` handler and
+    // no fast path, so the boxing signature validation is the seam.
+    for (const [json, tex] of [
+      [['Clamp', COO, 0, 1], '\\operatorname{Clamp}(\\tilde\\infty,0,1)'],
+      [['Clamp', 'ImaginaryUnit', 0, 1], '\\operatorname{Clamp}(i,0,1)'],
+      [
+        ['ElementMax', COO, 1],
+        '\\operatorname{ElementMax}(\\tilde\\infty,1)',
+      ],
+      [['ElementMax', 'ImaginaryUnit', 1], '\\operatorname{ElementMax}(i,1)'],
+      [['ElementMin', 'ImaginaryUnit', 1], '\\operatorname{ElementMin}(i,1)'],
+    ] as [any, string][]) {
+      for (const e of [ce.box(json), ce.parse(tex)]) {
+        expect(e.isValid).toBe(false);
+        expect(errorCode(e.evaluate())).toBe('incompatible-type');
+      }
+    }
+    // The re-test refutes an off-carrier value that only arrives later:
+    // a symbol assigned `i` after the application was built.
+    ce.assign('hB11', ce.box('ImaginaryUnit'));
+    expect(
+      errorCode(ce.function('ElementMax', [ce.box('hB11'), ce.box(1)]).evaluate())
+    ).toBe('incompatible-type');
+
+    // The slim type handler claims the operands' common tier — these heads
+    // SELECT one of their operands, they never compute — and declines
+    // wherever finiteness or realness is not proven, so the declared
+    // `real | signed_infinity` shows instead of the old blanket `number`.
+    expect(ce.box(['ElementMin', 2, 5]).type.toString()).toBe('integer');
+    expect(ce.box(['Clamp', 5, 1, 0]).type.toString()).toBe('integer');
+    expect(ce.box(['ElementMax', OO, 1]).type.toString()).toBe(
+      'real | signed_infinity'
+    );
+    // Under the broadcast lift the handler reads the CELL type, so a list
+    // of integers keeps a sharp per-cell claim.
+    expect(ce.box(['Clamp', ['List', 1, 2], 0, 1]).type.toString()).toBe(
+      'vector<integer^2>'
+    );
+    expect(
+      ce.box(['Clamp', ['List', -1, 0.5, 2], 0, 1]).evaluate().toString()
+    ).toBe('[0,0.5,1]');
+    expect(
+      ce.box(['ElementMax', ['List', 1, 'NaN'], 3]).evaluate().toString()
+    ).toBe('[3,NaN]');
+
+    // A fresh symbol IS inferred from the declared carrier here, unlike
+    // `Divide`: these heads have no `canonical` handler, so the signature
+    // validation — which is what infers — actually runs.
+    expect(ce.box(['Clamp', 'cB11', 0, 1]).type.toString()).toBe(
+      'real | signed_infinity'
+    );
+    expect(ce.box('cB11').type.toString()).toBe('real | signed_infinity');
   });
 });

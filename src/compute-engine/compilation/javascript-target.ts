@@ -3471,11 +3471,34 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.diagonal(${collArg('Diagonal', args[0], compile)})`;
   },
-  // Integer matrix power (`M^0` identity, negative → inverse). A non-integer
-  // exponent or non-square matrix yields NaN at run time.
+  // Integer matrix power (`M^0` identity, negative → inverse). A non-square
+  // matrix yields NaN at run time; a non-integer exponent never reaches run
+  // time (see the guard below).
   MatrixPower: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('MatrixPower: missing argument');
+    // `_SYS.matpow` computes integer powers only, but the interpreter also
+    // answers a HALF-integer power of an exact 2×2 positive-semidefinite
+    // matrix through the principal matrix square root
+    // (`library/linear-algebra.ts`). Emitting `_SYS.matpow(m, 0.5)` there
+    // would return NaN behind `success: true` — a silently wrong value, not
+    // a missing one.
+    //
+    // So the lowering is emitted only when the exponent is STATICALLY
+    // PROVEN an integer: a literal integer, or an operand whose type is
+    // `integer`. Anything else fails closed (D6) and the engine falls back
+    // to interpretation. Proving it on the literal alone is not enough — a
+    // `real`-typed symbol holding 0.5 at run time reaches `_SYS.matpow` and
+    // returns NaN for a case the interpreter answers.
+    const exponentIsInteger =
+      (isNumber(args[1]) && args[1].isInteger === true) ||
+      args[1].type.matches('integer');
+    if (!exponentIsInteger)
+      throw new Error(
+        'MatrixPower: an exponent that is not statically an integer may be ' +
+          'the principal matrix square root in the interpreter, which ' +
+          '`_SYS.matpow` does not compute. Fail closed (D6).'
+      );
     return `_SYS.matpow(${collArg('MatrixPower', args[0], compile)}, ${compile(
       args[1]
     )})`;
@@ -6533,9 +6556,14 @@ const SYS_HELPERS = {
     // p-norms for `p > 0`; with no `p` the order is 2. Any other order —
     // `p = 0`, a negative `p`, a NaN `p` — has no value here, so the result is
     // NaN, which is how compiled code spells an absent number. An unsupported
-    // matrix order above answers the same way, and the interpreter leaves such
-    // an application unevaluated (`vectorNorm`,
-    // `library/linear-algebra.ts`). Without this line the general accumulator
+    // matrix order above answers the same way. The interpreter is stricter
+    // there: a non-positive order violates `Norm`'s declared precondition and
+    // answers an `evaluation-error` (the `requires` clause,
+    // `library/linear-algebra.ts`), while an order it merely does not compute
+    // for the operand's rank — a matrix p-norm for `p ∉ {1, 2, ∞}` — leaves
+    // the application unevaluated. An `Error` has no float representation, so
+    // the compiled lane degrades both to NaN. Without this line the general
+    // accumulator
     // returns whatever `(Σ|xᵢ|^p)^(1/p)` happens to produce, which for `p = 0`
     // is `+∞` on a two-element vector and for a negative `p` an ordinary
     // number.

@@ -556,6 +556,47 @@ describe('COMPILE', () => {
           expect(inv[i][j]).toBeCloseTo(expected[i][j], 10);
     });
 
+    it('MatrixPower fails closed unless the exponent is statically an integer (D6)', () => {
+      // The interpreter answers a HALF-integer power of an exact 2×2
+      // positive-semidefinite matrix through the principal matrix square
+      // root, which `_SYS.matpow` does not compute — it returns NaN for any
+      // non-integer exponent. Emitting the call would be a silently wrong
+      // value behind `success: true`, so the lowering is emitted only when
+      // the exponent is PROVEN an integer and the engine interprets
+      // otherwise.
+      const D = ['List', ['List', 4, 0], ['List', 0, 9]];
+      expect(() =>
+        compile(ce.box(['MatrixPower', D, ['Divide', 1, 2]] as any), {
+          fallback: false,
+        })
+      ).toThrow(/statically an integer.*Fail closed \(D6\)/s);
+      // A `real`-typed symbol can hold 0.5 at run time, which is exactly the
+      // case the interpreter answers and `_SYS.matpow` does not, so an
+      // exponent proven only to be real declines as well.
+      const real = new ComputeEngine();
+      real.declare('mpK', 'real');
+      expect(() =>
+        compile(real.box(['MatrixPower', D, 'mpK'] as any), {
+          fallback: false,
+        })
+      ).toThrow(/statically an integer.*Fail closed \(D6\)/s);
+      // An `integer`-typed symbol is proven, so the lowering is emitted.
+      const int = new ComputeEngine();
+      int.declare('mpN', 'integer');
+      expect(
+        compile(int.box(['MatrixPower', D, 'mpN'] as any), {
+          fallback: false,
+        }).code
+      ).toBe('_SYS.matpow([[4, 0], [0, 9]], _.mpN)');
+      // So is a literal integer.
+      const lit = new ComputeEngine();
+      expect(
+        compile(lit.box(['MatrixPower', D, 2] as any), {
+          fallback: false,
+        }).code
+      ).toBe('_SYS.matpow([[4, 0], [0, 9]], 2)');
+    });
+
     it('Rank is the TENSOR rank (ndim), not the linear-algebra rank', () => {
       expect(run(['Rank', 5])).toBe(0);
       expect(run(['Rank', V])).toBe(1);
@@ -1223,7 +1264,11 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
     // their carrier) declare the extended-real carrier and `Mod` the finite
     // real one, so a statically non-real operand is already a boxing error
     // and compile refuses the invalid expression — still fail-closed, at an
-    // earlier seam. The wide-carrier heads keep the compile-time decline.
+    // earlier seam. `Clamp`/`ElementMax`/`ElementMin` joined them with the
+    // arithmetic-core flip (batch 11): an extremum is defined by the ORDER
+    // of the real line, so they declare the extended-real carrier too.
+    // The wide-carrier heads — `Max`/`Min`, which reduce collections, and
+    // `Remainder`/`GCD`/`LCM` — keep the compile-time decline.
     const FLIPPED = new Set([
       'Floor',
       'Round',
@@ -1231,6 +1276,9 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       'Ceil',
       'Fract',
       'Mod',
+      'Clamp',
+      'ElementMax',
+      'ElementMin',
     ]);
     test.each(HEADS)(
       '%s over a STATICALLY non-real operand still declines',
@@ -1369,7 +1417,6 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       ['StandardDeviation'],
       ['Kurtosis'],
       ['Skewness'],
-      ['InterquartileRange'],
     ])('%s(x) is NaN, as the interpreter answers', (h) => {
       const engine = new ComputeEngine();
       const r = compile(engine.box([h, 'x'] as any), { constantFold: false });
@@ -1377,13 +1424,28 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       expect(r.run!(AT_4 as any)).toBeNaN();
     });
 
-    it('Quartiles(x) is (NaN, 4, NaN)', () => {
+    // The quartile heads are NOT in that list: a single datum is its own
+    // lower quartile, median and upper quartile, so the range is `0`, not
+    // unknown. Both lanes read the same `quartiles()` kernel
+    // (`numerics/statistics.ts`), so they moved together off the old
+    // `(NaN, 4, NaN)` / `NaN` answers, which came from taking the median of
+    // the two empty halves the Moore–McCabe split leaves for one datum.
+    it('InterquartileRange(x) is 0, as the interpreter answers', () => {
+      const engine = new ComputeEngine();
+      const r = compile(engine.box(['InterquartileRange', 'x'] as any), {
+        constantFold: false,
+      });
+      expect(r.success).toBe(true);
+      expect(r.run!(AT_4 as any)).toBe(0);
+    });
+
+    it('Quartiles(x) is (4, 4, 4)', () => {
       const engine = new ComputeEngine();
       const r = compile(engine.box(['Quartiles', 'x'] as any), {
         constantFold: false,
       });
       expect(r.success).toBe(true);
-      expect(r.run!(AT_4 as any)).toEqual([NaN, 4, NaN]);
+      expect(r.run!(AT_4 as any)).toEqual([4, 4, 4]);
     });
 
     it('a COLLECTION operand is unaffected — the wrap is runtime-shaped', () => {

@@ -276,6 +276,142 @@ type DecidedNumberTest = (x: TargetSource) => TargetSource;
 const DECIDED_NUMBER_JS: DecidedNumberTest = (x) => `${x} === ${x}`;
 
 /**
+ * How a target spells the pieces a branch condition's decidedness analysis is
+ * built from: whether a numeric fragment holds a value a comparison can
+ * decide, the three-valued constants and the tests against them, and the two
+ * forms — a conditional expression and a binding of one value to a name — the
+ * three-valued lowering of the connectives is assembled out of.
+ *
+ * Only the WORDING is the target's business. Which tests are emitted, and how
+ * a connective combines its operands, is the shared analysis in
+ * `BaseCompiler.conditionDecidability` — see the "Branch conditions that
+ * cannot be decided" comment there. The JavaScript family's spellings are the
+ * default ({@link CONDITION_DIALECT_JS}); Python passes its own, because it
+ * spells the undecided value `None`, negation `not`, and a binding a `lambda`
+ * rather than an arrow.
+ */
+export interface ConditionDialect {
+  /** "`x` holds a value a comparison can DECIDE": `x` is not this target's NaN. */
+  readonly decidedNumber: DecidedNumberTest;
+  /** The infix conjunction, between two already-parenthesized fragments. */
+  readonly and: string;
+  /**
+   * The prefix negation, written immediately before its operand. A spelling
+   * that is a word rather than a sign carries its own trailing space.
+   */
+  readonly not: string;
+  /** The value a condition has when it is neither true nor false. */
+  readonly undecided: TargetSource;
+  /** The two decided values. */
+  readonly trueValue: TargetSource;
+  readonly falseValue: TargetSource;
+  /**
+   * The tests a three-valued fragment takes. `x` is always a name bound by
+   * {@link bind}, so each may spell it more than once.
+   */
+  readonly isTrue: (x: TargetSource) => TargetSource;
+  readonly isFalse: (x: TargetSource) => TargetSource;
+  readonly isUndecided: (x: TargetSource) => TargetSource;
+  /**
+   * The three-valued value of a fragment that may not be a boolean at all —
+   * `true`/`false` when it is exactly one of them, the undecided value
+   * otherwise. `negate` exchanges the two decided answers, which is how a
+   * `Not` over such a fragment is lowered: an emitted negation would turn the
+   * undecided value into a confident boolean.
+   */
+  readonly kleeneOfValue: (x: TargetSource, negate: boolean) => TargetSource;
+  /** A conditional expression, parenthesized. */
+  readonly ternary: (
+    test: TargetSource,
+    then: TargetSource,
+    otherwise: TargetSource
+  ) => TargetSource;
+  /**
+   * Bind `args` to `params` for the duration of `body`, as one expression:
+   * an immediately-applied arrow on the JavaScript family, a `lambda` on
+   * Python. This is what makes the lowering LAZY — a value inside the body
+   * runs only when the body is reached.
+   */
+  readonly bind: (
+    params: ReadonlyArray<string>,
+    body: TargetSource,
+    args: ReadonlyArray<TargetSource>
+  ) => TargetSource;
+}
+
+/** The JavaScript-family spellings of {@link ConditionDialect}. */
+export const CONDITION_DIALECT_JS: ConditionDialect = {
+  decidedNumber: DECIDED_NUMBER_JS,
+  and: '&&',
+  not: '!',
+  undecided: 'undefined',
+  trueValue: 'true',
+  falseValue: 'false',
+  isTrue: (x) => `${x} === true`,
+  isFalse: (x) => `${x} === false`,
+  isUndecided: (x) => `${x} === undefined`,
+  kleeneOfValue: (x, negate) =>
+    `(${x} === true ? ${negate ? 'false' : 'true'} : ${x} === false ? ${
+      negate ? 'true' : 'false'
+    } : undefined)`,
+  ternary: (test, then, otherwise) => `(${test} ? ${then} : ${otherwise})`,
+  bind: (params, body, args) =>
+    `((${params.join(', ')}) => ${body})(${args.join(', ')})`,
+};
+
+/**
+ * The decidedness analysis of a branch condition, as a tree over the logical
+ * connectives it is built from. Produced by
+ * `BaseCompiler.conditionDecidability` and consumed by
+ * `BaseCompiler.kleeneCondition`.
+ *
+ * A node stands for one sub-expression of the condition; `test` says how the
+ * emitted code establishes whether that sub-expression is decided, and what
+ * its value then is.
+ */
+export interface ConditionNode {
+  /**
+   * True when the sub-expression sat under an ODD number of `Not`s. The
+   * negation is recorded here rather than left in `test`, because it must be
+   * applied to a DECIDED value: `!undefined` is a confident `true`, an answer
+   * from no evidence.
+   */
+  readonly negate: boolean;
+  readonly test: ConditionTest;
+}
+
+type ConditionTest =
+  /**
+   * The compiled value is not necessarily a boolean at all: a
+   * `boolean`-declared symbol the caller left unsupplied is `undefined`, and
+   * a caller may pass any value. Inspect `expr` — the sub-expression with its
+   * `Not`s stripped off — for being exactly a boolean.
+   */
+  | { readonly kind: 'value'; readonly expr: Expression }
+  /**
+   * `expr` is a relation whose compiled value is a genuine boolean, so an
+   * undecided comparison has already collapsed into it (see
+   * `BRANCH_RELATIONS`). Test these operands of it for NaN instead. An EMPTY
+   * operand list means the relation is decided by construction.
+   */
+  | {
+      readonly kind: 'operands';
+      readonly expr: Expression;
+      readonly operands: ReadonlyArray<Expression>;
+    }
+  /**
+   * `expr` is an `And` or an `Or`. It is decided when one operand already
+   * settles the result — a `false` operand for an `And`, a `true` one for an
+   * `Or` — or when every operand is decided.
+   */
+  | {
+      readonly kind: 'connective';
+      readonly expr: Expression;
+      readonly op: 'And' | 'Or';
+      readonly operands: ReadonlyArray<ConditionNode>;
+    };
+
+/**
  * A branch condition compiled together with everything the selection around it
  * needs, so that an `If`/`Which` takes an arm only when the condition is
  * exactly decided. Built by `BaseCompiler.compileExactCondition` and consumed
@@ -9293,28 +9429,42 @@ export class BaseCompiler {
       // (`conditionDecidability`), and so is the reason for it: a comparison
       // with a NaN or missing operand gives an ordinary `false` in JavaScript,
       // so a condition that cannot be decided looks the same as one decided to
-      // be false, and the difference has to be read off its operands.
+      // be false, and the difference has to be read off its operands — and,
+      // for a condition built from `&&`/`||`/`!`, off the Kleene combination
+      // of its leaves' verdicts.
       const decidability = BaseCompiler.conditionDecidability(expr.ops[0]);
       // A `Not` over a value-shaped condition is lowered by exchanging the two
       // constants the decided tests compare against, never by an emitted `!`:
       // `!undefined` is a confident `true` (see `peelNegations`).
+      //
+      // A condition that reaches a connective is compiled to its three-valued
+      // value and then inspected the same way, so it takes the value-shaped
+      // branch below with no negation of its own (`kleeneCondition`).
+      const kind = decidability?.test.kind;
+      const valueShaped = kind === 'value' || kind === 'connective';
       const { expr: condExpr, negate } =
-        decidability === 'value'
+        kind === 'value'
           ? BaseCompiler.peelNegations(expr.ops[0])
           : { expr: expr.ops[0], negate: false };
       const compileCond = (): string =>
-        BaseCompiler.compileOp(expr, 0, condTarget, 0, condExpr);
+        kind === 'connective'
+          ? BaseCompiler.withCseOperand(expr, 0, condTarget, () =>
+              BaseCompiler.kleeneCondition(decidability!, condTarget)
+            )
+          : BaseCompiler.compileOp(expr, 0, condTarget, 0, condExpr);
       let cond: string;
       let conjuncts: ReadonlyArray<TargetSource> = [];
       let bindings: Array<[string, TargetSource]> = [];
-      if (decidability === null || decidability === 'value') {
+      if (decidability === null || valueShaped) {
         cond = compileCond();
       } else {
         // A non-trivial operand is bound to a block-scoped constant, so its
         // computation runs once instead of once in the condition and twice
         // more in the decidedness test (`withConditionOperands`).
         const bound = BaseCompiler.withConditionOperands(
-          decidability,
+          decidability.test.kind === 'operands'
+            ? decidability.test.operands
+            : [],
           condTarget,
           true,
           (c) => {
@@ -9338,7 +9488,7 @@ export class BaseCompiler {
       // A condition whose VALUE has to be inspected (it may not be a boolean
       // at all) is bound to a block-scoped constant first, so an application
       // is evaluated once.
-      if (decidability === 'value') {
+      if (valueShaped) {
         const [then, otherwise] = negate
           ? ['false', 'true']
           : ['true', 'false'];
@@ -9360,7 +9510,9 @@ export class BaseCompiler {
       // the one `if` rather than nesting a second one inside it: the two guard
       // the same statement, and one `if` is easier to read. The condition is
       // parenthesized when it joins the test, because `&&` binds tighter than
-      // the `||` a condition may contain.
+      // the `||` a condition may contain — and a connective's decidedness test
+      // is a disjunction too, which is why `withConditionTest` hands that one
+      // over already parenthesized.
       const test =
         conjuncts.length === 0
           ? cond
@@ -11721,6 +11873,45 @@ export class BaseCompiler {
   // evidence: `NaN > 0` is `false`, so `If(x > 0, 1, -1)` would give `-1` at
   // `x = NaN`; an unset `b` is `undefined` and `"a"` is truthy, so
   // `If(b, 1, -1)` would give `-1` for the first and `1` for the second.
+  //
+  // A condition built from the logical connectives is decided by the
+  // three-valued (Kleene) tables, not by the emitted `&&`/`||`/`!`, which
+  // answer `false` for an undecided operand and so decide from no evidence.
+  // The analysis is a TREE (`ConditionNode`), and the tree compiles to one
+  // three-valued VALUE (`kleeneCondition`) — `true`, `false`, or the target's
+  // undecided literal (`undefined` in JavaScript, `None` in Python). The
+  // selection around it then reuses the shape a condition inspected by its
+  // value already had: bind the value once, take an arm when it is exactly
+  // `true` or exactly `false`, and answer the absence marker otherwise.
+  //
+  // The lowering is LAZY, and that is the point of its shape. Each operand's
+  // three-valued value is bound to a parameter before the next operand is
+  // even written, so:
+  //
+  //   `And(p, q)`  →  k(p) bound as k; k false ⇒ false — q NEVER RUNS;
+  //                   else k(q) bound as k2; k true ⇒ k2; else k2 false ⇒
+  //                   false, else undecided.
+  //   `Or(p, q)`   →  the mirror image, with `true` as the settling value.
+  //   `Not(p)`     →  k(p) bound as k; k undecided ⇒ undecided, else `!k`.
+  //
+  // A decided-FALSE first conjunct therefore short-circuits exactly as `&&`
+  // did, which is what the guard idiom `x ≠ 0 ∧ 1/x > 1` depends on: at
+  // `x = 0` the division is never evaluated (in Python it would raise).
+  // An UNDECIDED first conjunct still evaluates the second, because Kleene
+  // needs it — `And(undecided, false)` is `false`.
+  //
+  // A leaf's own value is three-valued too: a relation is
+  // `d ? <comparison> : undecided`, where `d` is the operand test above, and
+  // a value-shaped leaf is `c === true ? true : c === false ? false :
+  // undecided`. A `Not` over either exchanges the two decided answers instead
+  // of emitting a `!`.
+  //
+  // A connective whose every leaf is decided by construction reports `null`
+  // and keeps the plain conditional expression it always had, so the common
+  // path emits exactly the code it emitted before. So does a lone relation, a
+  // lone value-shaped condition, and a `Not` over either: those keep the
+  // guard-and-compare lowering below, which is smaller than the three-valued
+  // one and needs no laziness, having only one operand position.
   // ───────────────────────────────────────────────────────────────────────
 
   /**
@@ -11776,45 +11967,112 @@ export class BaseCompiler {
   }
 
   /**
-   * How the emitted code must test that a branch condition is DECIDED:
+   * How the emitted code must test that a branch condition is DECIDED, as the
+   * tree described in the "Branch conditions that cannot be decided" comment
+   * above.
    *
-   * - `null` — decidable by construction. Emit the plain conditional
-   *   expression, with no extra code on the common path.
-   * - `'value'` — the compiled value is not necessarily a boolean at all. A
-   *   `boolean`-declared symbol the caller left unsupplied is `undefined`, and
-   *   a caller may pass any JavaScript value. Test that value for `=== true`
-   *   and `=== false`.
-   * - an operand list — the compiled value is a genuine boolean, but an
-   *   undecided comparison has already collapsed into it (see
-   *   `BRANCH_RELATIONS`). Test these operands for NaN instead.
+   * `null` means the condition needs no test: it is decided by construction —
+   * every leaf it reaches compares values that can never be the undecided one
+   * — or the analysis declines it (an impure or collection-valued operand
+   * under a connective). Both answers keep the plain conditional expression
+   * the compiler emitted before this analysis existed, so nothing is added on
+   * the common path.
    *
-   * `And` and `Or` report `null`, so they are tested for truth as they always
-   * were. An `And` with one operand decided `false` is `false` whatever its
-   * other operands do, and the emitted `&&` gives that answer already. The
-   * remaining case, where no operand the connective reaches can be decided,
-   * would need three-valued `And` and `Or` of their own. That work is tracked
-   * in `ROADMAP.md` under "Open items from the undecided-condition ruling".
-   *
-   * The operands are named again inside the test, so an impure condition
-   * reports `null`: an operand cheap enough to stay inline is emitted a second
-   * and third time, which would run its effects again.
+   * Otherwise the root node's `test` says which lowering the caller uses:
+   * `'value'` inspects the condition's own value for `true`/`false`,
+   * `'operands'` tests a relation's operands for NaN, and `'connective'`
+   * combines its operands' pairs by the Kleene tables.
    */
-  static conditionDecidability(
-    cond: Expression
-  ): 'value' | ReadonlyArray<Expression> | null {
-    if (isSymbol(cond, 'True') || isSymbol(cond, 'False')) return null;
-    if (!isFunction(cond)) return 'value';
+  static conditionDecidability(cond: Expression): ConditionNode | null {
+    const node = BaseCompiler.conditionNode(cond);
+    if (node === null || BaseCompiler.isDecidedByConstruction(node)) return null;
+    return node;
+  }
+
+  /**
+   * The decidedness analysis of one sub-expression of a branch condition, or
+   * `null` when it cannot be analyzed (an impure relation, or a connective the
+   * analysis declines). Unlike `conditionDecidability`, a sub-expression that
+   * is decided by construction still gets a node: its VALUE takes part in the
+   * test of the connective above it.
+   */
+  private static conditionNode(cond: Expression): ConditionNode | null {
+    if (isSymbol(cond, 'True') || isSymbol(cond, 'False'))
+      return {
+        negate: false,
+        test: { kind: 'operands', expr: cond, operands: [] },
+      };
+    if (!isFunction(cond))
+      return { negate: false, test: { kind: 'value', expr: cond } };
     const h = cond.operator;
-    // `Not` is decided exactly when its operand is. The negation itself is
-    // applied by `peelNegations` — never by the emitted `!`, which would turn
-    // an undecided value into a confident boolean.
-    if (h === 'Not' && cond.nops === 1)
-      return BaseCompiler.conditionDecidability(cond.ops[0]);
-    if (h === 'And' || h === 'Or') return null;
-    if (!BaseCompiler.BRANCH_RELATIONS.has(h)) return 'value';
+    // `Not` is decided exactly when its operand is, so the node keeps the
+    // operand's test and records the negation separately. The negation is
+    // then applied to a DECIDED value — by exchanging the two answers of a
+    // leaf, or by a guarded negation over a connective — never by an emitted
+    // `!` over the condition itself, which would turn an undecided value into
+    // a confident `true`.
+    if (h === 'Not' && cond.nops === 1) {
+      const inner = BaseCompiler.conditionNode(cond.ops[0]);
+      return inner === null ? null : { ...inner, negate: !inner.negate };
+    }
+    if (h === 'And' || h === 'Or') return BaseCompiler.connectiveNode(cond, h);
+    if (!BaseCompiler.BRANCH_RELATIONS.has(h))
+      return { negate: false, test: { kind: 'value', expr: cond } };
+    // The operands are named again inside the test, so an impure relation is
+    // declined: an operand cheap enough to stay inline is emitted a second and
+    // third time, which would run its effects again.
     if (cond.isPure !== true) return null;
-    const operands = cond.ops.filter((op) => BaseCompiler.mayBeUndecided(op));
-    return operands.length === 0 ? null : operands;
+    return {
+      negate: false,
+      test: {
+        kind: 'operands',
+        expr: cond,
+        operands: cond.ops.filter((op) => BaseCompiler.mayBeUndecided(op)),
+      },
+    };
+  }
+
+  /**
+   * The decidedness analysis of an `And`/`Or`, or `null` when the connective
+   * is declined and the caller keeps the plain truthiness test.
+   *
+   * Two operands are declined. An IMPURE one, for the reason a relation's is:
+   * the test names every leaf again, which would run its effects a second
+   * time — and `isPure` on the connective answers for the whole subtree at
+   * once. And a COLLECTION-valued one, because a connective over a collection
+   * broadcasts element-wise; that lowering is the target's `selection` hook
+   * (`_SYS.select`), which the `If`/`Which` compilation consults before this
+   * analysis and which has its own no-match marker per cell.
+   */
+  private static connectiveNode(
+    cond: Expression & FunctionInterface,
+    op: 'And' | 'Or'
+  ): ConditionNode | null {
+    if (cond.nops === 0 || cond.isPure !== true) return null;
+    const operands: ConditionNode[] = [];
+    for (const operand of cond.ops) {
+      if (operand.type.matches('collection<any>')) return null;
+      const node = BaseCompiler.conditionNode(operand);
+      if (node === null) return null;
+      operands.push(node);
+    }
+    return {
+      negate: false,
+      test: { kind: 'connective', expr: cond, op, operands },
+    };
+  }
+
+  /**
+   * True when nothing this node reaches can carry an undecided value, so no
+   * run-time test is needed. A relation over operands that are never NaN
+   * (strings, complex `{ re, im }` objects) is one; so is a connective every
+   * one of whose operands is.
+   */
+  private static isDecidedByConstruction(node: ConditionNode): boolean {
+    const t = node.test;
+    if (t.kind === 'value') return false;
+    if (t.kind === 'operands') return t.operands.length === 0;
+    return t.operands.every((n) => BaseCompiler.isDecidedByConstruction(n));
   }
 
   /**
@@ -11933,6 +12191,201 @@ export class BaseCompiler {
   }
 
   /**
+   * Compile a branch condition to its three-valued (Kleene) VALUE: the
+   * target's `true`, `false`, or its undecided literal. See the "Branch
+   * conditions that cannot be decided" comment above for the tables.
+   *
+   * Only a condition whose tree contains a connective comes through here. A
+   * lone relation and a lone value-shaped condition keep the smaller
+   * guard-and-compare lowering they always had.
+   *
+   * Every operand's source appears EXACTLY ONCE in the result, and every
+   * operand after the first of a connective sits inside a binding that is
+   * entered only when that operand is reached. So a decided-`false` first
+   * conjunct still short-circuits the rest, which is what the guard idiom
+   * `x ≠ 0 ∧ 1/x > 1` needs: at `x = 0` the division must not run.
+   */
+  static kleeneCondition(
+    node: ConditionNode,
+    target: CompileTarget<Expression>,
+    dialect: ConditionDialect = CONDITION_DIALECT_JS
+  ): TargetSource {
+    const t = node.test;
+    if (t.kind === 'value')
+      return BaseCompiler.kleeneValueLeaf(t.expr, node.negate, target, dialect);
+    if (t.kind === 'operands')
+      return BaseCompiler.kleeneRelationLeaf(t, node.negate, target, dialect);
+    return BaseCompiler.kleeneConnective(t, node.negate, target, dialect);
+  }
+
+  /**
+   * The three-valued value of a leaf whose own value has to be inspected: it
+   * is `true`/`false` when it is exactly one of them, and undecided
+   * otherwise.
+   *
+   * The value is inspected twice and answered once, so anything that is not
+   * already a name is bound first and evaluated once. A name or a constant
+   * stays inline: naming it again evaluates nothing.
+   */
+  private static kleeneValueLeaf(
+    expr: Expression,
+    negate: boolean,
+    target: CompileTarget<Expression>,
+    dialect: ConditionDialect
+  ): TargetSource {
+    const code = BaseCompiler.compile(expr, target);
+    if (BaseCompiler.ATOMIC_FRAGMENT.test(code))
+      return dialect.kleeneOfValue(code, negate);
+    const name = BaseCompiler.tempVar(target);
+    return dialect.bind([name], dialect.kleeneOfValue(name, negate), [code]);
+  }
+
+  /**
+   * The three-valued value of a relation leaf: the comparison itself when its
+   * operands can decide it, and the undecided value otherwise.
+   *
+   * An operand whose emitted source is not already a name or a constant is
+   * bound to a parameter first, and the comparison then reads that parameter
+   * (`_codeOverrides`, the same substitution the real-operand runtime guard
+   * uses). Without it the operand's computation runs THREE times: the
+   * comparison embeds it once and the decidedness test names it twice more.
+   * Common-subexpression elimination cannot remove those copies — it analyzes
+   * the expression tree, where the operand occurs once, while the copies are
+   * made at code-generation time.
+   *
+   * The binding is a PARAMETER of this leaf rather than a temporary around
+   * the whole selection, so it is evaluated only when the leaf is reached.
+   *
+   * A relation under an odd number of `Not`s negates the comparison, which is
+   * safe here and only here: the negation sits inside the decided branch, so
+   * the value it negates is a real boolean.
+   */
+  private static kleeneRelationLeaf(
+    test: { readonly expr: Expression; readonly operands: ReadonlyArray<Expression> },
+    negate: boolean,
+    target: CompileTarget<Expression>,
+    dialect: ConditionDialect
+  ): TargetSource {
+    const params: string[] = [];
+    const args: TargetSource[] = [];
+    const installed: Expression[] = [];
+    try {
+      const conjuncts: TargetSource[] = [];
+      for (const op of test.operands) {
+        const code = BaseCompiler.compile(op, target);
+        const inline = BaseCompiler.operandDecidedConjuncts(
+          code,
+          target,
+          dialect.decidedNumber
+        );
+        // No test at all: the operand is a constant the compiler already
+        // folded, so it decides every comparison it takes part in.
+        if (inline.length === 0) continue;
+        if (
+          BaseCompiler.ATOMIC_FRAGMENT.test(code) ||
+          BaseCompiler._codeOverrides.has(op)
+        ) {
+          conjuncts.push(...inline);
+          continue;
+        }
+        const name = BaseCompiler.tempVar(target);
+        params.push(name);
+        args.push(code);
+        BaseCompiler._codeOverrides.set(op, name);
+        installed.push(op);
+        conjuncts.push(
+          ...BaseCompiler.operandDecidedConjuncts(
+            name,
+            target,
+            dialect.decidedNumber
+          )
+        );
+      }
+      const compare = BaseCompiler.compile(test.expr, target);
+      const value = negate ? `${dialect.not}(${compare})` : `(${compare})`;
+      const body =
+        conjuncts.length === 0
+          ? value
+          : dialect.ternary(
+              conjuncts.join(` ${dialect.and} `),
+              value,
+              dialect.undecided
+            );
+      return params.length === 0 ? body : dialect.bind(params, body, args);
+    } finally {
+      for (const op of installed) BaseCompiler._codeOverrides.delete(op);
+    }
+  }
+
+  /**
+   * The three-valued value of an `And`/`Or`, folded left over its operands.
+   *
+   * Each step binds the value so far, answers at once when that value settles
+   * the connective — `false` settles an `And`, `true` settles an `Or` — and
+   * only otherwise reaches the next operand. An UNDECIDED value so far does
+   * reach it, because `And(undecided, false)` is `false`: it is a settling
+   * operand anywhere in the list that decides the result, not its position.
+   *
+   * Every operand after the first is a conditionally-evaluated position, so
+   * it is compiled inside the common-subexpression region of that edge
+   * (`withCseOperand`) — the same regions the `Which` clauses and the
+   * element-wise connective lowering use. A temporary bound for such an
+   * operand then lands inside the binding that may not be entered.
+   */
+  private static kleeneConnective(
+    test: {
+      readonly expr: Expression;
+      readonly op: 'And' | 'Or';
+      readonly operands: ReadonlyArray<ConditionNode>;
+    },
+    negate: boolean,
+    target: CompileTarget<Expression>,
+    dialect: ConditionDialect
+  ): TargetSource {
+    const settled = test.op === 'And' ? dialect.falseValue : dialect.trueValue;
+    const settles = test.op === 'And' ? dialect.isFalse : dialect.isTrue;
+    const decidedOther = test.op === 'And' ? dialect.isTrue : dialect.isFalse;
+    let value = BaseCompiler.kleeneCondition(test.operands[0], target, dialect);
+    for (let i = 1; i < test.operands.length; i++) {
+      const soFar = BaseCompiler.tempVar(target);
+      const next = BaseCompiler.withCseOperand(test.expr, i, target, () =>
+        BaseCompiler.kleeneCondition(test.operands[i], target, dialect)
+      );
+      const nextName = BaseCompiler.tempVar(target);
+      // The value so far is decided the other way: the answer is the next
+      // operand's. It is undecided: the answer is `false` for an `And` when
+      // the next operand is `false`, and undecided otherwise.
+      const combined = dialect.bind(
+        [nextName],
+        dialect.ternary(
+          decidedOther(soFar),
+          nextName,
+          dialect.ternary(settles(nextName), settled, dialect.undecided)
+        ),
+        [next]
+      );
+      value = dialect.bind(
+        [soFar],
+        dialect.ternary(settles(soFar), settled, combined),
+        [value]
+      );
+    }
+    if (!negate) return value;
+    // A `Not` leaves an undecided value undecided; the emitted negation runs
+    // only on a decided one.
+    const name = BaseCompiler.tempVar(target);
+    return dialect.bind(
+      [name],
+      dialect.ternary(
+        dialect.isUndecided(name),
+        dialect.undecided,
+        `${dialect.not}${name}`
+      ),
+      [value]
+    );
+  }
+
+  /**
    * Compile the operands a relation's decidedness test reads, then run `fn`
    * with the run-time tests those operands take.
    *
@@ -11953,13 +12406,18 @@ export class BaseCompiler {
    * them — and only the caller knows whether that selection is an expression
    * or a statement. `canBind` is false for a target with no way to bind a
    * value in expression position, which then keeps the inline form.
+   *
+   * Only a LONE relation comes through here. A relation inside a connective is
+   * compiled by `kleeneRelationLeaf`, which binds its operands to parameters
+   * of the leaf instead, so that an operand a sibling short-circuits away is
+   * never evaluated.
    */
   static withConditionOperands<T>(
     operands: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
     canBind: boolean,
     fn: (conjuncts: ReadonlyArray<TargetSource>) => T,
-    decided: DecidedNumberTest = DECIDED_NUMBER_JS
+    dialect: ConditionDialect = CONDITION_DIALECT_JS
   ): { value: T; bindings: Array<[string, TargetSource]> } {
     const bindings: Array<[string, TargetSource]> = [];
     const installed: Expression[] = [];
@@ -11970,7 +12428,7 @@ export class BaseCompiler {
         const inline = BaseCompiler.operandDecidedConjuncts(
           code,
           target,
-          decided
+          dialect.decidedNumber
         );
         // No test at all: the operand is a constant the compiler already
         // folded, so it decides every comparison it takes part in.
@@ -11988,7 +12446,11 @@ export class BaseCompiler {
         BaseCompiler._codeOverrides.set(op, name);
         installed.push(op);
         conjuncts.push(
-          ...BaseCompiler.operandDecidedConjuncts(name, target, decided)
+          ...BaseCompiler.operandDecidedConjuncts(
+            name,
+            target,
+            dialect.decidedNumber
+          )
         );
       }
       return { value: fn(conjuncts), bindings };
@@ -12056,11 +12518,11 @@ export class BaseCompiler {
    */
   private static compileExactCondition(
     cond: Expression,
-    decidability: 'value' | ReadonlyArray<Expression>,
+    decidability: ConditionNode,
     target: CompileTarget<Expression>
   ): CompiledCondition {
     BaseCompiler.assertScalarCondition(cond);
-    if (decidability === 'value') {
+    if (decidability.test.kind === 'value') {
       const { expr, negate } = BaseCompiler.peelNegations(cond);
       return {
         code: BaseCompiler.compile(expr, target),
@@ -12069,8 +12531,20 @@ export class BaseCompiler {
         negate,
       };
     }
+    // A condition that reaches a connective compiles to its three-valued
+    // VALUE, which the selection then inspects against `true` and `false` —
+    // the same shape a value-tested condition takes, so no new one is
+    // introduced. The negation, and every binding the lowering needs, are
+    // inside that value.
+    if (decidability.test.kind === 'connective')
+      return {
+        code: BaseCompiler.kleeneCondition(decidability, target),
+        conjuncts: 'value',
+        bindings: [],
+        negate: false,
+      };
     const { value, bindings } = BaseCompiler.withConditionOperands(
-      decidability,
+      decidability.test.operands,
       target,
       target.bindExpr !== undefined,
       (conjuncts) => ({ code: BaseCompiler.compile(cond, target), conjuncts })

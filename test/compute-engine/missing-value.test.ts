@@ -564,9 +564,20 @@ describe('P3 — aggregate absent-datum / empty-input gate (§3.C)', () => {
     expect(ce.box(['Mode', ['List']]).evaluate().isNaN).toBe(true);
   });
 
-  test('the 11 numeric aggregates type as `number`, not `real`', () => {
-    for (const op of AGGREGATES)
-      expect(ce.box([op, ['List', 1, 2, 3]]).type.toString()).toBe('number');
+  test('every numeric aggregate admits `nan` in its result type', () => {
+    // The point of this pin is I6 absorption: an absent datum or empty input
+    // makes the answer `NaN`, so no aggregate may claim a result type that
+    // excludes it — a bare `real` would be the unsound claim. It used to be
+    // spelled as "they all type `number`", which the Contract B flip of the
+    // statistics heads (`docs/plans/2026-08-30-error-model-implementation.md`)
+    // made too strong: those results are now the narrowest sound claims
+    // (`real<0..> | nan` for the variance family,
+    // `real | signed_infinity | nan` for the order-based heads), each of which
+    // still carries the `nan` arm this pin is really about.
+    for (const op of AGGREGATES) {
+      const t = ce.box([op, ['List', 1, 2, 3]]).type;
+      expect(`${op}: ${t.couldMatch('nan')}`).toBe(`${op}: true`);
+    }
   });
 
   test('an ordinary (absence-free) aggregate is unchanged', () => {

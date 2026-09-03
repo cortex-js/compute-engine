@@ -23,6 +23,7 @@ import { erfComplex, erfiComplex } from '../numerics/numeric-complex.js';
 import { apply, shouldNumericize } from '../boxed-expression/apply.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import {
+  isAbsentValue,
   isFunction,
   isNumber,
   isString,
@@ -32,8 +33,8 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
   canEnumerateFiniteSource,
   groundEnumerationOperand,
+  typeCouldBeCollection,
 } from '../collection-utils.js';
-import { aggregateAbsence } from './missing-data.js';
 import {
   enumerationDeclinedAfterWalk,
   innerRun,
@@ -245,34 +246,46 @@ const FINITE_REAL_PAIRS = parseType('collection<tuple<real, real>>')!;
  * Each is a sum of products of deviations from a mean, divided by a count, so
  * a single non-finite data value poisons the whole result: with `NaN` or `±∞`
  * anywhere in the data the answer is `NaN`
- * (`Covariance([1, NaN], [2, 3])` evaluates to `NaN`), and only the top type
- * `number` admits that — the unconditional `real` these three definitions
- * used to claim was unsound. The gate therefore narrows to `real` only when
- * the operand types PROVE every data value is a finite real, in whichever of
- * the two input forms was used, and keeps the wide `number` otherwise.
+ * (`Covariance([1, NaN], [2, 3])` evaluates to `NaN`). That is why the
+ * DECLARED result of all three carries a `nan` arm. This gate drops the arm —
+ * narrowing to the bare `real` — only when the operand types PROVE every data
+ * value is a finite real, in whichever of the two input forms was used.
+ *
+ * Otherwise it DECLINES, and the declared `real | nan` stands. Answering the
+ * wide `number` here instead, as it used to, would have HIDDEN that sharper
+ * declaration: a type-handler answer is never widened, and it is never
+ * narrowed either, so a handler that answers `number` is what the application
+ * reports.
  *
  * That claim describes the numeric answer only. An input the operator rejects
  * — fewer than two data points, two collections of different lengths, a
- * complex data value, or (for `Correlation`) zero variance — satisfies the
- * type gate but evaluates to an `Error(...)`, whose own type is outside the
- * numeric lattice, so it neither confirms nor contradicts a `real` result
- * type.
+ * complex or non-numeric data value, or (for `Correlation`) zero variance —
+ * satisfies the type gate but evaluates to an `Error(...)`, whose own type is
+ * outside the numeric lattice, so it neither confirms nor contradicts a
+ * `real` result type.
  *
- * The narrowing has one hole the operand types cannot close: finite real data
- * large enough to overflow the sums of squares (values around `1e200` at
- * machine precision) makes all three answer `NaN`, which `real` does not
- * admit. Closing it needs a decision recorded in `ROADMAP.md`, under the
- * items left open by the type-handler retirement sweep.
+ * The `real` narrowing has one gap the operand types cannot close: finite real
+ * data large enough to overflow the sums of squares (values around `1e200` at
+ * machine precision) saturates to `+oo`. It is not a soundness hole — the
+ * engine-wide convention is that a declared type describes the MATHEMATICAL
+ * value and a machine-precision artifact does not falsify it (`Exp(1000)` is
+ * typed finite while its machine-precision `.N()` is `+oo`; ruling L6(a),
+ * `docs/SIGNATURE-GUIDELINES.md` §2.4). What is left open is the numeric path
+ * itself, recorded in `ROADMAP.md` under the items left open by the
+ * type-handler retirement sweep: whether these kernels should scale their
+ * sums so machine-range data gets a finite answer at machine precision too.
  */
-function pairedStatisticType(ops: ReadonlyArray<OperandDescriptor>): Type {
+function pairedStatisticType(
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
   const [xs, ys] = ops;
-  if (xs === undefined) return 'number';
+  if (xs === undefined) return undefined;
   if (ys === undefined)
-    return typeFact(xs.type, FINITE_REAL_PAIRS) === true ? 'real' : 'number';
+    return typeFact(xs.type, FINITE_REAL_PAIRS) === true ? 'real' : undefined;
   return typeFact(xs.type, FINITE_REAL_DATA) === true &&
     typeFact(ys.type, FINITE_REAL_DATA) === true
     ? 'real'
-    : 'number';
+    : undefined;
 }
 
 export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
@@ -502,15 +515,19 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '((collection<any>|number|distribution)+) -> number',
       // A data-consuming aggregate (§3.C): result type is the numeric base
       // with NO `| missing` arm (I6 absorption) — `number`, NOT `real`,
-      // for two reasons: an absent datum or empty input evaluates to `NaN`,
-      // and complex data has a complex mean (`Mean([1, 1+2i])` is `1 + i`),
-      // which only the wide `number` admits.
-      // The handler itself stays: deleting it would activate the
-      // no-handler fallback, which derives a NARROWER type than this
-      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
-      // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
-      type: () => 'number',
+      // because every arm of the wide type is reachable. An absent datum or
+      // empty input evaluates to `NaN` (`Mean([1, NaN, 3])`, `Mean([])`);
+      // infinite data keeps its limit (`Mean([1, +oo, 3])` is `+oo`); and
+      // complex data has a complex mean (`Mean([1, 1+2i])` is `1 + i`).
+      // Three named arms would be needed to say less, so the base type says
+      // it in one token.
+      //
+      // The operand carrier stays `collection<any>` — the ABSENCE-admitting
+      // top — because the §3.C rule requires `[1, Missing, 3]` to REACH this
+      // handler: the bare spelling `collection` is the values-only
+      // `collection<unknown>`, which `list<integer|missing>` does not match,
+      // so it would refuse the very input the rule is about.
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
       description: 'Arithmetic mean (average) of a collection of numbers.',
       keywords: ['average'],
@@ -519,12 +536,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const r = distributionMean(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
-        const absent = aggregateAbsence(engine, ops);
-        if (absent) return absent;
-        // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `collectData`. One walk feeds both paths below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts — an absent datum
+        // or empty input (`NaN`), a provably non-numeric datum (an error), or
+        // symbolic data (stay inert rather than fold a valueless symbol to
+        // `NaN`) — and feeds both paths below. See `collectData`.
+        const xs = collectData(engine, 'Mean', ops);
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         // Complex data: the arithmetic mean is linear over the complex
         // numbers, so no convention has to be chosen and the answer is the
         // complex mean — `Mean([1, 1+2i])` is `1 + i`. The boxed accumulation
@@ -550,26 +568,33 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     Median: {
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> number',
-      // Complex data is REJECTED here (`nonRealUnivariateError`), and the
-      // resulting `Error(...)` has a type outside the numeric lattice, so it
-      // neither confirms nor contradicts this `number` claim.
-      // The handler itself stays: deleting it would activate the
-      // no-handler fallback, which derives a NARROWER type than this
-      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
-      // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
-      type: () => 'number',
+      signature: '((collection<any>|number)+) -> real | signed_infinity | nan',
+      // Complex data is REJECTED here (`nonRealUnivariateError`) and a
+      // non-numeric datum with it (`collectData`); an `Error(...)` has a type
+      // outside the numeric lattice, so it neither confirms nor contradicts
+      // this claim. The three arms are each witnessed: a real answer for
+      // ordinary data, an infinite one for infinite data
+      // (`Median([+oo, +oo])` is `+oo`), and `NaN` for an absent datum or empty
+      // input (§3.C). The `handle` policies below say so: the derived NaN
+      // policy for a carrier that already admits `nan` is `inert`, which
+      // would leave unsaid that this head ANSWERS `NaN` for absent data.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
       description: 'Median of a collection of numbers.',
       examples: ['Mode([1, 2, 2, 3])  // Returns 2'],
       evaluate: (ops, { engine, numericApproximation }) => {
-        const absent = aggregateAbsence(engine, ops);
-        if (absent) return absent;
-        // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `collectData`. One walk feeds both paths below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts — an absent datum
+        // or empty input (`NaN`), a provably non-numeric datum (an error), or
+        // symbolic data (stay inert rather than fold a valueless symbol to
+        // `NaN`) — and feeds both paths below. See `collectData`.
+        const xs = collectData(engine, 'Median', ops);
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         const nonReal = nonRealUnivariateError(engine, 'Median', xs);
         if (nonReal) return nonReal;
         // A datum with no real value leaves the sort with nothing to order by
@@ -591,25 +616,47 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Sample variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number|distribution)+) -> number',
-      // The handler itself stays: deleting it would activate the
-      // no-handler fallback, which derives a NARROWER type than this
-      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
-      // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
-      type: () => 'number',
+      signature: '((collection<any>|number|distribution)+) -> real<0..> | nan',
+      // The variance is a mean of SQUARED deviations, so it is real and
+      // non-negative even for complex data (`Variance([1, 1+2i, 3])` is
+      // `8/3` — see `complexVariance`), and infinite data has no variance at
+      // all: every infinite datum makes the deviations `∞ − ∞` and the
+      // answer `NaN` (`Variance([1, +oo, 3])` and `Variance([+oo, +oo])` are
+      // both `NaN`, measured). Absent data and empty input are `NaN` too
+      // (§3.C), which is the second arm. The `handle` policies say so: the
+      // derived NaN policy for a carrier that already admits `nan` is
+      // `inert`, which would leave unsaid that this head ANSWERS `NaN`.
+      //
+      // Two documented gaps in the `real<0..>` half, neither a value the
+      // claim contradicts. Data large enough to overflow the machine sums of
+      // squares saturates to `+oo` at `ce.precision = 'machine'`; the
+      // engine-wide convention is that a declared type describes the
+      // MATHEMATICAL value and a machine-precision artifact does not falsify
+      // it (`Exp(1000)` settles it — see ruling L6(a) in
+      // `docs/SIGNATURE-GUIDELINES.md` §2.4). And a DISTRIBUTION operand with
+      // a symbolic parameter answers a symbolic expression whose static type
+      // is wider (`Variance(ExponentialDistribution(l))` is `l^-2`, typed
+      // `real | infinity | nan`); its VALUE is non-negative for every legal
+      // parameter, which is what the declaration describes.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
           const r = distributionVariance(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
-        const absent = aggregateAbsence(engine, ops);
-        if (absent) return absent;
-        // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `collectData`. One walk feeds both paths below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts — an absent datum
+        // or empty input (`NaN`), a provably non-numeric datum (an error), or
+        // symbolic data (stay inert rather than fold a valueless symbol to
+        // `NaN`) — and feeds both paths below. See `collectData`.
+        const xs = collectData(engine, 'Variance', ops);
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         // Complex data: the variance is E[|X − μ|²] — a real, non-negative
         // number (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -633,21 +680,39 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Population variance of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> number',
-      // The handler itself stays: deleting it would activate the
-      // no-handler fallback, which derives a NARROWER type than this
-      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
-      // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
-      type: () => 'number',
+      signature: '((collection<any>|number)+) -> real<0..> | nan',
+      // The population variance is the same mean of SQUARED deviations the
+      // sample variance is, over the divisor `n`: real and non-negative even
+      // for complex data (`PopulationVariance([1, 1+2i, 3])` is `16/9` — see
+      // `complexVariance`).
+      // Infinite data has no variance at all: every infinite datum makes the
+      // deviations `∞ − ∞` and the answer `NaN`, which is also the answer for
+      // absent data and empty input (§3.C). That is the second arm. The
+      // `handle` policies say so: the derived NaN policy for a carrier that
+      // already admits `nan` is `inert`, which would leave unsaid that this
+      // head ANSWERS `NaN`.
+      //
+      // Data large enough to overflow the machine sums of squares saturates
+      // to `+oo` at `ce.precision = 'machine'`. That does not falsify
+      // `real<0..>`: the engine-wide convention is that a declared type
+      // describes the MATHEMATICAL value, and a machine-precision artifact
+      // does not (`Exp(1000)` settles it — ruling L6(a),
+      // `docs/SIGNATURE-GUIDELINES.md` §2.4).
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
-        const absent = aggregateAbsence(engine, ops);
-        if (absent) return absent;
-        // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `collectData`. One walk feeds both paths below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts — an absent datum
+        // or empty input (`NaN`), a provably non-numeric datum (an error), or
+        // symbolic data (stay inert rather than fold a valueless symbol to
+        // `NaN`) — and feeds both paths below. See `collectData`.
+        const xs = collectData(engine, 'PopulationVariance', ops);
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         // Complex data: the variance is E[|X − μ|²] — a real, non-negative
         // number (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -672,25 +737,48 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       description: 'Sample Standard Deviation of a collection of numbers.',
       keywords: ['stdev', 'std'],
-      signature: '((collection<any>|number|distribution)+) -> number',
-      // The handler itself stays: deleting it would activate the
-      // no-handler fallback, which derives a NARROWER type than this
-      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
-      // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
-      type: () => 'number',
+      signature: '((collection<any>|number|distribution)+) -> real<0..> | nan',
+      // The standard deviation is the square root of a mean of SQUARED
+      // deviations, so it is real and non-negative even for complex data
+      // (`StandardDeviation([1, 1+2i, 3])` is `2/3·√6` — see
+      // `complexVariance`).
+      // Infinite data has no standard deviation at all: every infinite datum makes the
+      // deviations `∞ − ∞` and the answer `NaN`, which is also the answer for
+      // absent data and empty input (§3.C). That is the second arm. The
+      // `handle` policies say so: the derived NaN policy for a carrier that
+      // already admits `nan` is `inert`, which would leave unsaid that this
+      // head ANSWERS `NaN`.
+      //
+      // Data large enough to overflow the machine sums of squares saturates
+      // to `+oo` at `ce.precision = 'machine'`. That does not falsify
+      // `real<0..>`: the engine-wide convention is that a declared type
+      // describes the MATHEMATICAL value, and a machine-precision artifact
+      // does not (`Exp(1000)` settles it — ruling L6(a),
+      // `docs/SIGNATURE-GUIDELINES.md` §2.4).
+      // A DISTRIBUTION operand with a symbolic parameter is the other gap:
+      // the answer is then a symbolic expression whose static type is wider
+      // (`StandardDeviation(NormalDistribution(0, s))` is `s`, typed `real`),
+      // while its VALUE is non-negative for every legal parameter — which is
+      // what the declaration describes.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
           const r = distributionStandardDeviation(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
-        const absent = aggregateAbsence(engine, ops);
-        if (absent) return absent;
-        // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `collectData`. One walk feeds both paths below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts — an absent datum
+        // or empty input (`NaN`), a provably non-numeric datum (an error), or
+        // symbolic data (stay inert rather than fold a valueless symbol to
+        // `NaN`) — and feeds both paths below. See `collectData`.
+        const xs = collectData(engine, 'StandardDeviation', ops);
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         // Complex data: the standard deviation is the square root of
         // E[|X − μ|²], which is real and non-negative (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -719,21 +807,40 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       description: 'Population Standard Deviation of a collection of numbers.',
-      signature: '((collection<any>|number)+) -> number',
-      // The handler itself stays: deleting it would activate the
-      // no-handler fallback, which derives a NARROWER type than this
-      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
-      // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
-      type: () => 'number',
+      signature: '((collection<any>|number)+) -> real<0..> | nan',
+      // The population standard deviation is the square root of a mean of
+      // SQUARED deviations over the divisor `n`, so it is real and
+      // non-negative even for complex data
+      // (`PopulationStandardDeviation([1, 1+2i, 3])` is `4/3` — see
+      // `complexVariance`).
+      // Infinite data has no standard deviation at all: every infinite datum makes the
+      // deviations `∞ − ∞` and the answer `NaN`, which is also the answer for
+      // absent data and empty input (§3.C). That is the second arm. The
+      // `handle` policies say so: the derived NaN policy for a carrier that
+      // already admits `nan` is `inert`, which would leave unsaid that this
+      // head ANSWERS `NaN`.
+      //
+      // Data large enough to overflow the machine sums of squares saturates
+      // to `+oo` at `ce.precision = 'machine'`. That does not falsify
+      // `real<0..>`: the engine-wide convention is that a declared type
+      // describes the MATHEMATICAL value, and a machine-precision artifact
+      // does not (`Exp(1000)` settles it — ruling L6(a),
+      // `docs/SIGNATURE-GUIDELINES.md` §2.4).
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
-        const absent = aggregateAbsence(engine, ops);
-        if (absent) return absent;
-        // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `collectData`. One walk feeds both paths below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts — an absent datum
+        // or empty input (`NaN`), a provably non-numeric datum (an error), or
+        // symbolic data (stay inert rather than fold a valueless symbol to
+        // `NaN`) — and feeds both paths below. See `collectData`.
+        const xs = collectData(engine, 'PopulationStandardDeviation', ops);
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         // Complex data: the standard deviation is the square root of
         // E[|X − μ|²], which is real and non-negative (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -762,24 +869,32 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Kurtosis of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> number',
-      // Complex data is REJECTED here (`nonRealUnivariateError`), and the
-      // resulting `Error(...)` has a type outside the numeric lattice, so it
-      // neither confirms nor contradicts this `number` claim.
-      // The handler itself stays: deleting it would activate the
-      // no-handler fallback, which derives a NARROWER type than this
-      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
-      // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
-      type: () => 'number',
+      signature: '((collection<any>|number)+) -> real | nan',
+      // Complex data is REJECTED here (`nonRealUnivariateError`) and a
+      // non-numeric datum with it (`collectData`); an `Error(...)` has a type
+      // outside the numeric lattice, so it neither confirms nor contradicts
+      // this claim. A standardized moment divides by a power of the standard
+      // deviation, so an infinite datum makes both parts non-finite and the
+      // answer `NaN` (`Kurtosis([1, +oo, 3])` is `NaN`, measured) — there is
+      // no infinite arm. Absent data and empty input are `NaN` too (§3.C).
+      // The `handle` policies say so: the derived NaN policy for a carrier
+      // that already admits `nan` is `inert`, which would leave unsaid that
+      // this head ANSWERS `NaN` for absent data.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
-        const absent = aggregateAbsence(engine, ops);
-        if (absent) return absent;
-        // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `collectData`. One walk feeds both paths below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts — an absent datum
+        // or empty input (`NaN`), a provably non-numeric datum (an error), or
+        // symbolic data (stay inert rather than fold a valueless symbol to
+        // `NaN`) — and feeds both paths below. See `collectData`.
+        const xs = collectData(engine, 'Kurtosis', ops);
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         const nonReal = nonRealUnivariateError(engine, 'Kurtosis', xs);
         if (nonReal) return nonReal;
         if (!numericApproximation) {
@@ -798,24 +913,32 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Skewness of a collection of numbers.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> number',
-      // Complex data is REJECTED here (`nonRealUnivariateError`), and the
-      // resulting `Error(...)` has a type outside the numeric lattice, so it
-      // neither confirms nor contradicts this `number` claim.
-      // The handler itself stays: deleting it would activate the
-      // no-handler fallback, which derives a NARROWER type than this
-      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
-      // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
-      type: () => 'number',
+      signature: '((collection<any>|number)+) -> real | nan',
+      // Complex data is REJECTED here (`nonRealUnivariateError`) and a
+      // non-numeric datum with it (`collectData`); an `Error(...)` has a type
+      // outside the numeric lattice, so it neither confirms nor contradicts
+      // this claim. A standardized moment divides by a power of the standard
+      // deviation, so an infinite datum makes both parts non-finite and the
+      // answer `NaN` (`Skewness([1, +oo, 3])` is `NaN`, measured) — there is
+      // no infinite arm. Absent data and empty input are `NaN` too (§3.C).
+      // The `handle` policies say so: the derived NaN policy for a carrier
+      // that already admits `nan` is `inert`, which would leave unsaid that
+      // this head ANSWERS `NaN` for absent data.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
-        const absent = aggregateAbsence(engine, ops);
-        if (absent) return absent;
-        // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `collectData`. One walk feeds both paths below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts — an absent datum
+        // or empty input (`NaN`), a provably non-numeric datum (an error), or
+        // symbolic data (stay inert rather than fold a valueless symbol to
+        // `NaN`) — and feeds both paths below. See `collectData`.
+        const xs = collectData(engine, 'Skewness', ops);
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         const nonReal = nonRealUnivariateError(engine, 'Skewness', xs);
         if (nonReal) return nonReal;
         if (!numericApproximation) {
@@ -834,24 +957,31 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Most frequently occurring value in a collection.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> number',
-      // Complex data is REJECTED here (`nonRealUnivariateError`), and the
-      // resulting `Error(...)` has a type outside the numeric lattice, so it
-      // neither confirms nor contradicts this `number` claim.
-      // The handler itself stays: deleting it would activate the
-      // no-handler fallback, which derives a NARROWER type than this
-      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
-      // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
-      type: () => 'number',
+      signature: '((collection<any>|number)+) -> real | signed_infinity | nan',
+      // Complex data is REJECTED here (`nonRealUnivariateError`) and a
+      // non-numeric datum with it (`collectData`); an `Error(...)` has a type
+      // outside the numeric lattice, so it neither confirms nor contradicts
+      // this claim. The three arms are each witnessed: a real answer for
+      // ordinary data, an infinite one for infinite data
+      // (`Mode([+oo, +oo])` is `+oo`), and `NaN` for an absent datum or empty
+      // input (§3.C). The `handle` policies below say so: the derived NaN
+      // policy for a carrier that already admits `nan` is `inert`, which
+      // would leave unsaid that this head ANSWERS `NaN` for absent data.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
-        const absent = aggregateAbsence(engine, ops);
-        if (absent) return absent;
-        // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `collectData`. One walk feeds both paths below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts — an absent datum
+        // or empty input (`NaN`), a provably non-numeric datum (an error), or
+        // symbolic data (stay inert rather than fold a valueless symbol to
+        // `NaN`) — and feeds both paths below. See `collectData`.
+        const xs = collectData(engine, 'Mode', ops);
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         const nonReal = nonRealUnivariateError(engine, 'Mode', xs);
         if (nonReal) return nonReal;
         // A datum with no real value leaves the counting key undefined — see
@@ -879,8 +1009,25 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       keywords: ['percentile'],
       complexity: 1200,
       broadcastable: false,
+      // Each component carries the same claim `Median` does, for the same
+      // reasons: it IS a median, of the sample or of one of its halves. Real
+      // for ordinary data, infinite for infinite data
+      // (`Quartiles([1, +oo, 3])` is `(1, 3, +oo)`), and `NaN` for an absent
+      // datum or empty input (§3.C), which fills the whole triple.
+      //
+      // The component names run in the order the tuple does — lower quartile,
+      // median, upper quartile. They used to read `mid, lower, upper` while
+      // the handler built `(Q1, Q2, Q3)`, so every name was attached to the
+      // wrong component and `Quartiles([1,2,3,4]).mid` read the LOWER
+      // quartile.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
       signature:
-        '((collection<any>|number)+) -> tuple<mid:number, lower:number, upper:number>',
+        '((collection<any>|number)+) -> tuple<lower: real | signed_infinity | nan, mid: real | signed_infinity | nan, upper: real | signed_infinity | nan>',
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
       examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)'],
       // Decline-only: a definitively-unavailable datum (a valueless symbol)
@@ -894,17 +1041,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: (ops, { engine, numericApproximation }) => {
-        // Absent datum or empty input ⇒ `(NaN, NaN, NaN)` (§3.C).
-        if (aggregateAbsence(engine, ops))
-          return engine.tuple(engine.NaN, engine.NaN, engine.NaN);
-        // SYMBOLIC data (a valueless symbol, an unresolved expression) has no
-        // numeric reading: stay inert rather than sort NaN placeholders into
-        // the quantile split and bake a definite `(…, NaN, …)` tuple that a
-        // later assignment contradicts. See `collectData`, which is the rule
-        // the whole aggregate family shares — and whose single walk feeds both
-        // the exact and the float path below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts. An absent datum or
+        // empty input fills the whole triple with `NaN` (§3.C), which is why
+        // this head passes its own absent answer. A provably non-numeric datum
+        // is an error. And SYMBOLIC data (a valueless symbol, an unresolved
+        // expression) has no numeric reading: stay inert rather than sort NaN
+        // placeholders into the quantile split and bake a definite
+        // `(…, NaN, …)` tuple that a later assignment contradicts. See
+        // `collectData`, which is the rule the whole aggregate family shares —
+        // and whose single walk feeds both the exact and the float path below.
+        const xs = collectData(engine, 'Quartiles', ops, (ce) =>
+          ce.tuple(ce.NaN, ce.NaN, ce.NaN)
+        );
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         const nonReal = nonRealUnivariateError(engine, 'Quartiles', xs);
         if (nonReal) return nonReal;
         // A datum with no real value leaves the sort with nothing to order by
@@ -919,12 +1069,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return engine.tuple(q1, q2, q3);
           }
         }
-        const [mid, lower, upper] = (
+        const [lower, mid, upper] = (
           bignumPreferred(engine)
             ? bigQuartiles(bigScalarsOf(xs))
             : quartiles(scalarsOf(xs))
         ).map((v) => engine.number(v));
-        return engine.tuple(mid, lower, upper);
+        return engine.tuple(lower, mid, upper);
       },
     },
 
@@ -932,25 +1082,36 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Interquartile range (Q3 - Q1) of a collection.',
       complexity: 1200,
       broadcastable: false,
-      signature: '((collection<any>|number)+) -> number',
-      // Complex data is REJECTED here (`nonRealUnivariateError`), and the
-      // resulting `Error(...)` has a type outside the numeric lattice, so it
-      // neither confirms nor contradicts this `number` claim.
-      // The handler itself stays: deleting it would activate the
-      // no-handler fallback, which derives a NARROWER type than this
-      // constant claim. Only its SHAPE moved to `'types'` — the claim reads
-      // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
-      type: () => 'number',
+      signature: '((collection<any>|number)+) -> real<0..> | +oo | nan',
+      // Complex data is REJECTED here (`nonRealUnivariateError`) and a
+      // non-numeric datum with it (`collectData`); an `Error(...)` has a type
+      // outside the numeric lattice, so it neither confirms nor contradicts
+      // this claim. Q3 − Q1 over a sorted sample is never negative, and the
+      // only infinity it can reach is `+oo`, from a sample whose quartiles
+      // straddle an infinite datum (`InterquartileRange([1, +oo, 3])` is
+      // `+oo`, and so is `InterquartileRange([1, -oo, 3])`). Two infinities
+      // of the SAME sign cancel to `NaN` instead
+      // (`InterquartileRange([+oo, +oo])`), which is also the answer for an
+      // absent datum or empty input (§3.C). The `handle` policies say so: the
+      // derived NaN policy for a carrier that already admits `nan` is
+      // `inert`, which would leave unsaid that this head ANSWERS `NaN` for
+      // absent data.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
       missingBehavior: 'handle',
 
       evaluate: (ops, { engine, numericApproximation }) => {
-        const absent = aggregateAbsence(engine, ops);
-        if (absent) return absent;
-        // Symbolic data: stay inert rather than fold a valueless symbol to
-        // `NaN` — see `collectData`. One walk feeds both paths below.
-        const xs = collectData(ops);
+        // ONE walk of the data decides all three verdicts — an absent datum
+        // or empty input (`NaN`), a provably non-numeric datum (an error), or
+        // symbolic data (stay inert rather than fold a valueless symbol to
+        // `NaN`) — and feeds both paths below. See `collectData`.
+        const xs = collectData(engine, 'InterquartileRange', ops);
         if (xs === null) return undefined;
+        if (!Array.isArray(xs)) return xs;
         const nonReal = nonRealUnivariateError(
           engine,
           'InterquartileRange',
@@ -1118,7 +1279,21 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'equal-length collections or one collection of (x, y) pairs.',
       complexity: 1200,
       broadcastable: false,
-      signature: '(collection<any>, collection<any>?) -> number',
+      signature: '(collection<any>, collection<any>?) -> real | nan',
+      // A data-consuming aggregate (§3.C). The `nan` arm is the codomain
+      // vocabulary the `handle` policies need: a `NaN` or an infinite datum,
+      // an absent (`Missing`) datum, and empty input all make the answer
+      // `NaN`, and the derived policies would say otherwise — the derived NaN
+      // policy for a `collection` slot is `reject` and the derived missing
+      // policy `pass-through`, neither of which describes a head that ANSWERS
+      // `NaN` for such data.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
+      missingBehavior: 'handle',
       typeHandlerKind: 'types',
       type: (ops) => pairedStatisticType(ops),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
@@ -1131,7 +1306,21 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'equal-length collections or one collection of (x, y) pairs.',
       complexity: 1200,
       broadcastable: false,
-      signature: '(collection<any>, collection<any>?) -> number',
+      signature: '(collection<any>, collection<any>?) -> real | nan',
+      // A data-consuming aggregate (§3.C). The `nan` arm is the codomain
+      // vocabulary the `handle` policies need: a `NaN` or an infinite datum,
+      // an absent (`Missing`) datum, and empty input all make the answer
+      // `NaN`, and the derived policies would say otherwise — the derived NaN
+      // policy for a `collection` slot is `reject` and the derived missing
+      // policy `pass-through`, neither of which describes a head that ANSWERS
+      // `NaN` for such data.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
+      missingBehavior: 'handle',
       typeHandlerKind: 'types',
       type: (ops) => pairedStatisticType(ops),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
@@ -1144,7 +1333,26 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'equal-length collections or one collection of (x, y) pairs.',
       complexity: 1200,
       broadcastable: false,
-      signature: '(collection<any>, collection<any>?) -> number',
+      signature: '(collection<any>, collection<any>?) -> real | nan',
+      // Pearson's r lies in [−1, 1] mathematically, and the range is
+      // deliberately NOT declared: at `ce.precision = 'machine'` the kernel's
+      // cancellation exceeds it on ORDINARY data — a random two-point sample,
+      // whose r is exactly ±1, measured 1.0000000000063 — so a declared
+      // `real<-1..1>` would be a bound the head's own values break.
+      // A data-consuming aggregate (§3.C). The `nan` arm is the codomain
+      // vocabulary the `handle` policies need: a `NaN` or an infinite datum,
+      // an absent (`Missing`) datum, and empty input all make the answer
+      // `NaN`, and the derived policies would say otherwise — the derived NaN
+      // policy for a `collection` slot is `reject` and the derived missing
+      // policy `pass-through`, neither of which describes a head that ANSWERS
+      // `NaN` for such data.
+      //
+      // The operand carrier stays `collection<any>` — the absence-admitting
+      // top — because §3.C requires `[1, Missing, 3]` to reach this handler;
+      // the bare spelling `collection` is the values-only
+      // `collection<unknown>` and would not match it.
+      nanBehavior: 'handle',
+      missingBehavior: 'handle',
       typeHandlerKind: 'types',
       type: (ops) => pairedStatisticType(ops),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
@@ -1309,8 +1517,34 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
  * The data an aggregate consumes, flattened ONCE: each operand contributes
  * either its elements (a finite collection) or itself (a scalar).
  *
- * Returns `null` when some datum has no numeric reading, in which case the
- * aggregate must stay INERT rather than fold. Two shapes qualify:
+ * This single walk decides all three of the verdicts a data-consuming
+ * aggregate can reach, so its return value is either the flattened data or the
+ * answer the head must give instead:
+ *
+ * - An `Expression[]`: the numeric data, ready for the exact and float paths.
+ * - An `Expression`: the answer. Either the `Error(incompatible-type)` a
+ *   provably non-numeric datum earns, or the ABSENT answer — `NaN` by default,
+ *   or whatever `absentAnswer` builds for a head whose codomain is not a
+ *   number (`Quartiles` answers the triple `(NaN, NaN, NaN)`).
+ * - `null`: no verdict, so the aggregate must stay INERT.
+ *
+ * A datum is refused when its type proves it is NOT a number — a string, a
+ * character, a boolean, a nested collection. Such a datum used to fall in with
+ * the symbolic ones below and leave every head inert, so `Mean([1, "a", 3])`
+ * and `Mean("a")` reported themselves back with no diagnosis. A string OPERAND
+ * is refused whole rather than one character at a time: a string is an indexed
+ * collection of its characters, so the walk would otherwise blame `"a"` for
+ * input the caller spelled `"abc"`.
+ *
+ * The ABSENT verdict is §3.C of `docs/ERROR-MODEL.md`: an aggregate over data
+ * that contains a `Missing` symbol or a `NaN`, and an aggregate over EMPTY
+ * input, is itself absent, normalized to `NaN` in a numeric result cell (I6
+ * absorption — there is no `| missing` arm). A non-finite collection operand,
+ * and one that DECLINES to enumerate, make the empty-input half undecidable:
+ * the head stays inert instead of claiming its input was empty.
+ *
+ * An aggregate stays INERT when some datum has no numeric reading yet. Two
+ * shapes qualify:
  *
  * - A valueless symbol — declared scalar (`y`), or declared `list<number>` and
  *   not yet assigned — flattens to itself, and every numeric kernel reads it as
@@ -1321,39 +1555,114 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
  *   DECLINED to enumerate: `Linspace(a, 1, 3)` has three elements, but with a
  *   symbolic endpoint none of them has a numeric reading. The kernels fold that
  *   empty flatten to a definite `NaN` too (`Mean(Linspace(a, 1, 3))` answered
- *   `NaN`). A genuinely EMPTY collection is not "declined" and is left to the
- *   caller, which folds it to `NaN` by the absent-datum rule.
+ *   `NaN`). A genuinely EMPTY collection is not "declined": it is empty input,
+ *   and empty input is absent.
  *
- * A `NaN` LITERAL is a number and still flows through, which is what keeps
- * absent-datum semantics (§3.C) intact: `aggregateAbsence` runs first and owns
- * the `Missing`/`NaN`/empty-input cases, and this only sees what it let past.
+ * The three verdicts are ranked ERROR > ABSENT > INERT, and the ranking is why
+ * the walk runs to the end instead of answering the first thing it finds. The
+ * Error channel beats a quiet marker (`docs/ERROR-MODEL.md`): a datum whose
+ * type is statically wrong must be diagnosed even when an absent datum sits
+ * beside it, so `Mean([Missing, "a"])` is the `incompatible-type` error, not
+ * `NaN`. Absence in turn beats inertness, so a `Missing` alongside a valueless
+ * symbol still answers `NaN`.
  *
  * Collecting the data ONCE is load-bearing, not a tidiness measure. The
- * validation walk, the exact-path walk and the float-path walk used to be
- * three separate enumerations of the same operand, so `Mean(Map(f, xs))` ran
- * `f` twice per element on top of the gate's own walk. With mutation in the
- * language the number of callback runs is observable — ruling B8 ("pinned
+ * absence gate, the validation walk, the exact-path walk and the float-path
+ * walk used to be separate enumerations of the same operand, so
+ * `Mean(Map(f, xs))` ran `f` two or three times per element. With mutation in
+ * the language the number of callback runs is observable — ruling B8 ("pinned
  * everywhere operands evaluate", `docs/TYPE_SYSTEM_ROADMAP.md` Appendix B)
  * requires lazy materialization not to duplicate evaluations. Counts are
  * pinned in `test/compute-engine/lazy-callback-count.test.ts`.
  */
-function collectData(ops: ReadonlyArray<Expression>): Expression[] | null {
+function collectData(
+  ce: ComputeEngine,
+  name: string,
+  ops: ReadonlyArray<Expression>,
+  absentAnswer?: (ce: ComputeEngine) => Expression
+): Expression[] | Expression | null {
   const data: Expression[] = [];
+  // An absent datum was seen: the head answers absent unless a refused datum
+  // outranks it later in the walk.
+  let absent = false;
+  // Some datum has no numeric reading: the head stays inert unless something
+  // that outranks inertness is found.
+  let inert = false;
+  // At least one operand contributed a datum, so the input is not empty.
+  let sawData = false;
+  // An operand may hold data this walk cannot see, so an input that looks
+  // empty must not be judged empty.
+  let undecidable = false;
   for (const op of ops) {
+    if (isString(op)) return dataConstraintError(ce, name, op, 'number');
+    if (op.isCollection && op.isFiniteCollection !== true) {
+      // A non-finite collection (a symbolic-length range) cannot be
+      // flattened. It supplies no data, and it is not evidence of emptiness.
+      inert = true;
+      undecidable = true;
+      continue;
+    }
     if (op.isFiniteCollection) {
       let walked = 0;
       for (const v of op.each()) {
         walked += 1;
-        if (!isNumber(v)) return null;
-        data.push(v);
+        sawData = true;
+        if (isAbsentValue(v)) absent = true;
+        else if (!isNumber(v)) {
+          if (isNonNumericDatum(v))
+            return dataConstraintError(ce, name, v, 'number');
+          inert = true;
+        } else data.push(v);
       }
-      if (enumerationDeclinedAfterWalk(op, walked)) return null;
+      if (enumerationDeclinedAfterWalk(op, walked)) {
+        inert = true;
+        undecidable = true;
+      }
     } else {
-      if (!isNumber(op)) return null;
-      data.push(op);
+      sawData = true;
+      if (isAbsentValue(op)) absent = true;
+      else if (!isNumber(op)) {
+        // A COLLECTION-typed operand is a container, not a datum, even when
+        // it has no value yet to enumerate: `Mean(L)` for a declared but
+        // unassigned `L: list<number>` stays inert so a later assignment can
+        // answer it. Only an operand that can be neither a number nor a
+        // collection is refused.
+        if (isNonNumericDatum(op) && !typeCouldBeCollection(op.type.type))
+          return dataConstraintError(ce, name, op, 'number');
+        inert = true;
+      } else data.push(op);
     }
   }
+  // Empty input is absent — but only when every operand was decidably finite
+  // and enumerable, since an undecidable one may yet hold the data.
+  if (!sawData && !undecidable) absent = true;
+  if (absent) return absentAnswer?.(ce) ?? ce.NaN;
+  if (inert) return null;
   return data;
+}
+
+/**
+ * True when a datum's own type proves it can never be a number, so no
+ * statistic has a reading for it: a string, a character, a boolean, a nested
+ * collection.
+ *
+ * The test is DISJOINTNESS, not "is a number literal": a datum that merely
+ * has no literal reading yet — a valueless symbol, or a numeric expression
+ * such as `Sqrt(-2)` that stays symbolic under `evaluate()` — overlaps
+ * `number` and must leave the aggregate inert instead, so that a later
+ * assignment or a `.N()` can still answer.
+ *
+ * An ABSENT datum is never reached here: `Missing` is the Kleene absence
+ * marker, which `collectData` absorbs into `NaN` for this whole family (§3.C
+ * of `docs/ERROR-MODEL.md`), not a wrong KIND of value to refuse. The guard
+ * below keeps that true for any other caller. An `error`
+ * datum is exempt for the same reason in the other direction — it already
+ * speaks the Error channel and the engine propagates it on its own.
+ */
+function isNonNumericDatum(v: Expression): boolean {
+  if (isAbsentValue(v)) return false;
+  if (v.type.matches('error')) return false;
+  return v.type.isDisjointFrom('number');
 }
 
 // The float and bignum kernels read each datum's REAL PART, so these two
@@ -1570,13 +1879,15 @@ function sortExact(vals: Expression[]): Expression[] {
 
 // Same Moore–McCabe convention as `quartiles()`/`bigQuartiles()` in
 // `numerics/statistics.ts`: exclude the overall median from both the lower
-// and upper half when the sample size is odd, so Q1/Q3 are symmetric.
+// and upper half when the sample size is odd, so Q1/Q3 are symmetric — the
+// one-point sample included, where a single datum is all three quartiles.
 function exactQuartiles(
   ce: ComputeEngine,
   vals: Expression[]
 ): [Expression, Expression, Expression] {
   const sorted = sortExact(vals);
   const n = sorted.length;
+  if (n === 1) return [sorted[0], sorted[0], sorted[0]];
   const mid = Math.floor(n / 2);
   const upperStart = mid + (n % 2);
   return [
@@ -1663,15 +1974,29 @@ function allExact(vals: ReadonlyArray<Expression>): boolean {
  *
  * `walked` collects every element this walk materializes, INCLUDING the ones
  * that made it fail. The error path needs to know whether some datum was
- * complex before it blames the shape, and re-enumerating the operands to find
- * out would run a lazy element callback a second time (ruling B8, pinned in
+ * complex or not a number at all before it blames the shape, and
+ * re-enumerating the operands to find out would run a lazy element callback a
+ * second time (ruling B8, pinned in
  * `test/compute-engine/lazy-callback-count.test.ts`). Handing the already
  * materialized elements to `shapeError` keeps the enumeration single.
+ *
+ * `admitAbsent` accepts an ABSENT datum — the `Missing` symbol — as data
+ * alongside the numbers. `Covariance`, `PopulationCovariance` and
+ * `Correlation` pass it because §3.C makes an absent datum their answer's
+ * `NaN`, the same as an explicit `NaN` datum; admitting it here is what puts
+ * that verdict AFTER the shape checks, so a length mismatch still wins the
+ * Error channel (`Covariance([1,2,3,4], [1, Missing, 3])` is the
+ * `incompatible-dimensions` error, not `NaN`). The least-squares fits do NOT
+ * pass it: a fit has no absent-datum convention, and mis-shaped data is what
+ * its `Error` reports.
  */
 function extractPairs(
   ops: ReadonlyArray<Expression>,
-  walked?: Expression[]
+  walked?: Expression[],
+  admitAbsent = false
 ): { xs: Expression[]; ys: Expression[] } | null {
+  const isDatum = (v: Expression): boolean =>
+    isNumber(v) || (admitAbsent && isAbsentValue(v));
   if (ops.length === 1) {
     const arg = ops[0];
     if (!arg.isFiniteCollection) return null;
@@ -1685,7 +2010,7 @@ function extractPairs(
       const pair = [...el.each()];
       walked?.push(...pair);
       if (pair.length !== 2) return null;
-      if (!isNumber(pair[0]) || !isNumber(pair[1])) return null;
+      if (!isDatum(pair[0]) || !isDatum(pair[1])) return null;
       xs.push(pair[0]);
       ys.push(pair[1]);
     }
@@ -1697,7 +2022,7 @@ function extractPairs(
     const xs = [...a.each()];
     const ys = [...b.each()];
     walked?.push(...xs, ...ys);
-    if (!xs.every(isNumber) || !ys.every(isNumber)) return null;
+    if (!xs.every(isDatum) || !ys.every(isDatum)) return null;
     return { xs, ys };
   }
   return null;
@@ -1731,7 +2056,14 @@ function bigProjection(v: Expression) {
  * literals, and `Sqrt(-2)` is a function expression — so the data is scanned
  * for one before the shape is blamed. Otherwise
  * `Covariance([1, Sqrt(-2)], [2, 3])` would be told its collections are
- * mis-shaped, which is not true of the input.
+ * mis-shaped, which is not true of the input. A datum that is provably not a
+ * number at all — a string, a character, a boolean, a nested collection — is
+ * scanned for in the same pass and named the same way
+ * (`Covariance([1,2,3], [1, "a", 3])` used to be blamed on the shape), as is a
+ * data operand that is itself a STRING: a string is an indexed collection of
+ * its characters, so `Covariance("abc", "abc")` walked three characters per
+ * side and would otherwise blame the first character for input the caller
+ * spelled `"abc"`.
  *
  * `dataOps` are the operands that carry data, and ONLY those: a
  * `PolynomialFit` degree or a trailing variable symbol is not a datum, and
@@ -1749,6 +2081,15 @@ function shapeError(
   walked: ReadonlyArray<Expression>,
   message = `${name} expects two equal-length collections or one collection of (x, y) pairs`
 ): Expression {
+  for (const op of dataOps)
+    if (isString(op)) return dataConstraintError(ce, name, op, 'number');
+  // Only the ELEMENTS are scanned. An OPERAND of a bivariate statistic is a
+  // container, not a datum: its own type (`list<integer>`, or the
+  // `collection<any>` a bare symbol is inferred to hold) is disjoint from
+  // `number`, so scanning it would refuse every well-formed input and turn
+  // `Covariance(xs, ys)` over undeclared symbols into a type error.
+  const nonNumeric = walked.find(isNonNumericDatum);
+  if (nonNumeric) return dataConstraintError(ce, name, nonNumeric, 'number');
   const nonReal = nonRealOperand(dataOps, walked);
   if (nonReal) return nonRealDataError(ce, name, nonReal);
   return ce.error('unexpected-argument', message);
@@ -1778,18 +2119,26 @@ function nonRealOperand(
 }
 
 /**
- * True if some datum makes the statistic `NaN`: the datum is `NaN` itself, or
- * it is the complex infinity `~oo`, whose imaginary part is infinite and whose
- * real part carries no information (see `realProjection` in
- * `library/statistics-data.ts`).
+ * True if some datum makes the statistic `NaN`: the datum is `NaN` itself, it
+ * is ABSENT (the `Missing` symbol), or it is the complex infinity `~oo`, whose
+ * imaginary part is infinite and whose real part carries no information (see
+ * `realProjection` in `library/statistics-data.ts`).
+ *
+ * The absent case is §3.C — an aggregate over data with an absent datum is
+ * itself absent, normalized to `NaN` in a numeric cell (I6 absorption). It is
+ * reached only because `extractPairs` was asked to admit such a datum; before
+ * that, `Covariance([1,2,3], [1, Missing, 3])` was refused as MIS-SHAPED data
+ * while the identical input spelled with a `NaN` answered `NaN`.
  */
 function hasNaNDatum(
   ...data: ReadonlyArray<ReadonlyArray<Expression>>
 ): boolean {
   for (const vals of data)
-    for (const v of vals)
+    for (const v of vals) {
+      if (isAbsentValue(v)) return true;
       if (isNumber(v) && (v.isNaN === true || !Number.isFinite(v.im)))
         return true;
+    }
   return false;
 }
 
@@ -1834,7 +2183,9 @@ function evaluateCovariance(
   // Every operand of a covariance is data, so the whole list is scanned when
   // the shape is rejected.
   const walked: Expression[] = [];
-  const pairs = extractPairs(ops, walked);
+  // `true`: an absent (`Missing`) datum is admitted as data so the §3.C
+  // verdict below is reached, AFTER the shape checks — see `extractPairs`.
+  const pairs = extractPairs(ops, walked, true);
   if (!pairs) return shapeError(ce, name, ops, walked);
   const { xs, ys } = pairs;
   // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`):
@@ -1877,7 +2228,9 @@ function evaluateCorrelation(
   // Every operand of a correlation is data, so the whole list is scanned when
   // the shape is rejected.
   const walked: Expression[] = [];
-  const pairs = extractPairs(ops, walked);
+  // `true`: as in `evaluateCovariance` — an absent datum is data here, and
+  // §3.C makes it the answer's `NaN`.
+  const pairs = extractPairs(ops, walked, true);
   if (!pairs) return shapeError(ce, 'Correlation', ops, walked);
   const { xs, ys } = pairs;
   // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`).
