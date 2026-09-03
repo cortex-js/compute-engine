@@ -916,6 +916,25 @@ answer and the fix landed. An entry with no FIXED date is still open.
   would answer `number` for `integer ⊔ nan`, losing the element tier
   again. Values did not move — an out-of-band numeric access is still
   `NaN`, and `Missing` is still the non-numeric marker.
+- **FIXED 2026-09-03: a user function answers with the error value its
+  body evaluates to.** Application of a function literal (`makeLambda`,
+  `src/compute-engine/function-utils.ts`) DECLINED when the body's result
+  was invalid — a gate from 2024 that predates this model — so the call
+  stayed inert: `len := x ↦ Length(x); len(5)` answered `len(5)` where
+  `Length(5)` is the `incompatible-type` error, an Epsil
+  `function head(xs: list) { match xs { [h, ...] => h } }` applied to `[]`
+  answered `head([])` instead of the `match-no-case` error, and no Epsil
+  function could ever return an error value. §3's rule — "Error values
+  propagate through ordinary function application", as
+  `docs/LANGUAGE-MODEL.md` states it — now holds for user functions: an `Error` result — or one embedding an error reachable without
+  crossing a selecting operator or a collection literal — is the
+  application's value; a frozen container or an undecided selection is
+  returned as it is, with its diagnostic in place (`bodyResultValue`).
+  Pinned by `test/compute-engine/user-function-error-result.test.ts`. Still
+  OPEN, and a ruling: a WRITTEN `Error(…)` in a function body makes the
+  literal itself invalid (type `error`), so the declaration never takes
+  effect — see `ROADMAP.md`, "a written `Error(…)` literal in a function
+  body".
 - **FIXED 2026-09-02 (ruled the same day): native handler faults carry
   the `internal-error` code with the stack.** A `TypeError`, `RangeError`
   or `ReferenceError` thrown inside a built-in, non-lazy handler used to

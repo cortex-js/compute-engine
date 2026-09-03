@@ -482,10 +482,13 @@ describe('a destructuring assign the interpreter would refuse fails closed', () 
     const r = compile(expr);
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/destructuring assignment/);
-    // The refused assignment's error value now short-circuits the body (it
-    // used to be discarded every iteration, and the call answered 1); an
-    // application whose body faults declines and stays inert.
-    expect(expr.evaluate().toString()).toBe('g(1)');
+    // The refused assignment's error value short-circuits the body (it
+    // used to be discarded every iteration, and the call answered 1), and
+    // the application answers with that error: a user function bubbles the
+    // error value its body produces (it used to decline and stay inert).
+    const refused = expr.evaluate().toString();
+    expect(refused).toContain('incompatible-type');
+    expect(refused).toContain('"v"');
   });
 
   test('an UNTYPED / inferred target still compiles, byte-identically', () => {
@@ -609,10 +612,13 @@ describe('an annotated PARAMETER as a destructuring-assign target', () => {
     expect(r?.error).toMatch(/declared type|declared as a constant/);
     expect(r?.error).toMatch(/Fail closed \(D6\)/);
     // The interpreter refuses the assignment atomically: neither parameter
-    // moves. Compiled, it ran to 704.5. The refusal's error value now
+    // moves. Compiled, it ran to 704.5. The refusal's error value
     // short-circuits the body (it used to be discarded, and the call
-    // answered 102); an application whose body faults declines, inert.
-    expect(expr.evaluate().toString()).toBe('f(1, 2)');
+    // answered 102) and is the application's answer: a user function bubbles
+    // the error value its body produces (it used to decline and stay inert).
+    const refused = expr.evaluate().toString();
+    expect(refused).toContain('incompatible-type');
+    expect(refused).toContain('"y"');
   });
 
   test('an annotated parameter NOT targeted by the pattern still compiles', () => {
@@ -652,10 +658,13 @@ describe('an annotated PARAMETER as a destructuring-assign target', () => {
     expect(r?.success).toBe(false);
     expect(r?.error).toMatch(/destructuring assignment/);
     // Every iteration's assignment is refused whole, so neither `x` nor `j`
-    // moves. The refusal's error value now stops the loop on iteration 1 and
+    // moves. The refusal's error value stops the loop on iteration 1,
     // short-circuits the body (it used to be discarded, and the call
-    // answered 101); an application whose body faults declines, inert.
-    expect(expr.evaluate().toString()).toBe('f(1, 1)');
+    // answered 101) and is the application's answer: a user function bubbles
+    // the error value its body produces (it used to decline and stay inert).
+    const refused = expr.evaluate().toString();
+    expect(refused).toContain('incompatible-type');
+    expect(refused).toContain('"x"');
   });
 
   test('an UNANNOTATED parameter target still compiles (state threading)', () => {

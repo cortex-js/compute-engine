@@ -642,9 +642,32 @@ deliberately left out of that change.
   semantically stable (`parseType(typeToString(t))` equals `t`), so this
   is a readability defect in hovers and error messages only.
 
-### A function literal whose body contains an `Error(…)` literal types `error`, so its declaration is inert (OPEN, error-model — found 2026-09-03 implementing Epsil `if let`)
+### A user function declined an application whose body evaluated to an error value, leaving the call inert (FIXED 2026-09-03 — found 2026-09-03 implementing Epsil `if let`)
 
-An Epsil program cannot construct an error value of its own. With
+`makeLambda` (`src/compute-engine/function-utils.ts`) returned `undefined`
+whenever the body's result was invalid (`result.isValid ? result :
+undefined`, a gate from 2024 that predates the error model), and `apply()`
+turned that decline into the call as written. So `len := x ↦ Length(x);
+len(5)` answered the inert `len(5)` where `Length(5)` itself is the
+`incompatible-type` error; the Epsil `function head(xs: list) { match xs {
+[h, ...] => h } }` applied to `[]` answered `head([])` instead of the
+`match-no-case` error; and no Epsil function could ever return an error
+value, engine-raised or not. The language model states the opposite ("Error
+values propagate through ordinary function application",
+`docs/LANGUAGE-MODEL.md`; `docs/ERROR-MODEL.md` §3 is the rule), and the
+inert answer to a decided failure is what §1 forbids. Fixed by
+`bodyResultValue`: an `Error` result — or a result embedding an error
+reachable without crossing a selecting operator or a collection literal —
+is the application's value; a frozen container or an undecided selection
+is returned as it is, with its diagnostic in place. Pinned by
+`test/compute-engine/user-function-error-result.test.ts` and the `if let`
+typed-binding test. The `if let v: !error = head(xs) { … }` example in
+`src/epsil/docs/control-flow.md` had "worked" only because `MatchesType` is
+undecided on an inert call; it now works because the subject is the error.
+
+### A written `Error(…)` literal in a function body types the literal `error`, so the declaration never takes effect (OPEN, ruling needed — found 2026-09-03 implementing Epsil `if let`)
+
+An Epsil program still cannot construct an error value of its own. With
 `function g(x) { if x > 0 { x } else { Error("neg") } }`, the definition
 statement reports a `runtime-error` diagnostic (breadcrumb "in If argument 3,
 in DefineFunction argument 2") and `g` is never defined: `g(1)` stays
@@ -652,22 +675,38 @@ unevaluated. The same happens for `Error(ErrorCode("neg"))`, for a lambda
 (`let g = x => Error("neg")`) and for a plain value (`let e = Error("neg")`
 leaves `e` unbound). The mechanism is engine-level, not Epsil's:
 `ce.box(['Function', ['If', ['Greater', 'x', 0], 'x', ['Error', "'neg'"]], 'x'])`
-has type `error` and `isValid === false` — the invalidity of the written
-`Error` node propagates through the `If` and the held `Function` body to the
-literal itself — so `Declare(g, {value -> literal})` evaluates to itself, and
-`ce.declare('g2', { value: literal })` succeeds but leaves `g2` with type
-`error` rather than a function type, so `g2(1)` is inert. The selecting
-operator rule already keeps EVALUATION right (`If(True, 5, err)` is `5`,
-`docs/ERROR-MODEL.md` §3); what is wrong is the validity and type derivation
-of the enclosing function literal, and the assignment refusing an
-`error`-typed value. Expected: a literal `Error(…)` inside a held body is a
-value the function may return (`(any) -> error | …`), and the declaration
-takes effect. Decision needed before a fix: whether a written `Error(…)` is
-a value (the language's "errors are values") or an invalid subtree (the
-document-diagnostics reading), since both readings are load-bearing today.
-Consequence for Epsil: the `if let v: !error = f(x) { … }` idiom
-(`src/epsil/docs/control-flow.md` §`if let`) works only for engine-raised
-failures, such as a `match-no-case`. Probe:
+has type `error` and `isValid === false` — a written `Error` node makes every
+tree above it invalid (`docs/ERROR-MODEL.md` §2, "any invalid tree reports
+type `error`"), the held `Function` body included — so
+`Declare(g, {value -> literal})` freezes (its attributes dictionary is a
+collection, which keeps a failed cell in place) and never declares, and
+`ce.declare('g2', { value: literal })` leaves `g2` with type `error` rather
+than a function type, so `g2(1)` is inert. Every rule in that chain is a
+documented one, and the model lists "an explicitly constructed `Error(…)`"
+as a member of the out-of-band diagnostic channel: a source-level `Error(…)`
+is a diagnostic node, not a value. The decision is therefore a language one,
+with two candidates measured 2026-09-03:
+
+1. **A runtime constructor, no change to validity.** An operator (name to be
+   chosen — `Fail(code, where?)` was probed) whose EVALUATION mints the error
+   value, typed `(string, expression?) -> never`. The source tree stays
+   valid, so the literal types from its successes — `(x) => If(x > 0, x,
+   Fail("neg"))` is `(unknown) -> number`, exactly Contract B — and with the
+   decline gate fixed `g(-1)` is `Error("neg")`, `let e = Fail("x")` binds
+   `e` to the error, and `if let v: !error = g(-1)` takes the `else`. One
+   library definition plus an Epsil doc section; a written `Error(…)` keeps
+   its document-diagnostic meaning, and a lint could point a user who writes
+   `Error(…)` in a body at the constructor.
+2. **A held body is a validity boundary.** A `Function` literal ignores its
+   body's `Error` nodes for `isValid`, and `type()` reads the body's
+   successes through the selecting heads instead of answering `error` for
+   the invalid tree. Touches the `isValid` rule ("false for any tree
+   containing an `Error` node"), `type()`, the absorption rungs and the
+   `Declare` freeze; blast radius unmeasured; the same `Error(…)` node would
+   then mean a diagnostic at top level and a value inside a lambda.
+
+Recommendation: (1). Consequence until ruled: the `if let v: !error =
+f(x) { … }` idiom works for engine-raised failures only. Probe:
 `executeEpsil(ce, 'let g = x => Error("neg")\ng(1)')` (diagnostic, `g(1)`
 inert).
 

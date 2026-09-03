@@ -270,6 +270,11 @@ describe('EPSIL IF LET — evaluation', () => {
     // error value; `h: !error` does not bind it. (The parameter is typed
     // `list` so the call is not broadcast over the list's elements.)
     const HEAD = 'function head(xs: list) { match xs { [h, ...] => h } }\n';
+    // The subject really is an error VALUE — a user function bubbles the
+    // error its body evaluates to — so the guard decides on it rather than
+    // falling through on an inert call.
+    const subject = run(HEAD + 'head([])');
+    expect(subject.value?.operator).toBe('Error');
     const miss = run(HEAD + 'if let h: !error = head([]) { h } else { "empty" }');
     expect(miss.diagnostics).toEqual([]);
     expect(miss.value?.toString()).toBe('"empty"');

@@ -107,10 +107,16 @@ describe('the Appendix A lexicographic-list example, end to end', () => {
   test('an EMPTY list conforms vacuously (P40: `never` conforms)', () => {
     const ce = setup();
     // `[]` synthesizes `list<never>`, so the clause is satisfied vacuously and
-    // the implementation runs (and finds no element 1).
-    expect(value(ce, 'compare([], [])')).not.toContain(
-      'protocol-implementation-missing'
-    );
+    // the implementation runs: it reads element 1 of each empty list
+    // (`Missing`) and dispatches the nested `compare(Missing, Missing)`, for
+    // which no implementation exists. That nested failure is the answer — a
+    // user function bubbles the error value its body produces — and it names
+    // the ELEMENT type `missing`, not the list: the outer dispatch on
+    // `list<never>` succeeded.
+    const v = value(ce, 'compare([], [])');
+    expect(v).toContain('protocol-implementation-missing');
+    expect(v).toContain('`missing`');
+    expect(v).not.toContain('list<');
   });
 });
 

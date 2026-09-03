@@ -1693,10 +1693,12 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
  * - the symbol for a function, e.g. `Sin`.
  *
  * When the literal DECLINES the application — it is not unrolled because it
- * re-entered itself with a symbolic argument (`SymbolicRecursion`), or its
- * body produced an invalid result — the answer is `declined` when the caller
- * supplies one (the application as the caller wrote it, `R(3, x, y)`, for a
- * symbol bound to a literal), and otherwise an inert `Apply` of the literal.
+ * re-entered itself with a symbolic argument (`SymbolicRecursion`), or a
+ * strict engine was handed an invalid collection argument — the answer is
+ * `declined` when the caller supplies one (the application as the caller
+ * wrote it, `R(3, x, y)`, for a symbol bound to a literal), and otherwise an
+ * inert `Apply` of the literal. A body that evaluates to an error value does
+ * NOT decline: that error is the answer (`bodyResultValue`).
  */
 export function apply(
   fn: Expression,
@@ -2559,7 +2561,7 @@ function makeLambda(
         bodyScope.parent = savedParent;
         restoreBodyScopeParams(bodyScope, hiddenBindings);
       }
-      return result.isValid ? result : undefined;
+      return bodyResultValue(result);
     });
   }
 
@@ -2756,8 +2758,9 @@ function makeLambda(
       if (err !== undefined) return err;
       // Not dead: `errorValue` does NOT descend into collection values, so an
       // argument like `[1, "a" + 1]` is invalid without yielding an error to
-      // bubble. This keeps the body from running for it (the result would be
-      // discarded by the `result.isValid` gate at the end of `invoke` anyway).
+      // bubble. Such an application FREEZES — a collection keeps its failed
+      // cell in place, and the application of a function to it stays as
+      // written (`docs/ERROR-MODEL.md` §3) — so the body does not run for it.
       if (ce.strict && !args.every((x) => x.isValid)) return undefined;
     }
 
@@ -3213,10 +3216,36 @@ function makeLambda(
       }
       memo.results.set(memoKey, result);
     }
-    return result.isValid ? result : undefined;
+    return bodyResultValue(result);
   };
 
   return wrapRecursion(ce, guardSymbolicRecursion(fnExpr, invoke));
+}
+
+/**
+ * The value a function application answers with, given what its body
+ * evaluated to.
+ *
+ * A valid result is the answer. A body that evaluated to an `Error` value —
+ * or to a tree that embeds one reachable without crossing a selecting
+ * operator or a collection literal — answers with that error: a user
+ * function bubbles the error values its body produces, exactly as a library
+ * operator does — "Error values propagate through ordinary function
+ * application" (`docs/LANGUAGE-MODEL.md`), the rule `docs/ERROR-MODEL.md` §3
+ * lays out. Any other invalid result is a frozen
+ * container (`[1, <error>]`) or an undecided selection (`If(x == 4, 5,
+ * <error>)`), and is the answer with its diagnostic in place.
+ *
+ * Nothing here DECLINES the application. Until 2026-09-03 an invalid result
+ * declined it (`result.isValid ? result : undefined`), which left the call
+ * inert: `len(5)` for `len := x ↦ Length(x)` answered `len(5)` where
+ * `Length(5)` itself is the `incompatible-type` error, and an Epsil
+ * function could never return the error values its body produced. The
+ * model forbids an inert answer to a decided failure (§1).
+ */
+function bodyResultValue(result: Expression): Expression {
+  if (result.isValid) return result;
+  return errorValue(result) ?? result;
 }
 
 /**
@@ -3248,6 +3277,21 @@ export function applicable(
   xs: ReadonlyArray<Expression>,
   options?: ApplyOptions
 ) => Expression | undefined {
+  // A callee that IS an error — an `Error` node, or a tree embedding one
+  // reachable without crossing a selecting operator or a collection literal
+  // (a predicate the compatibility gate rejected at canonicalization arrives
+  // here as `Error(incompatible-type, literal)`) — is not applicable: every
+  // call answers `undefined`, so a consumer reports the callee's own
+  // diagnostic (`invalidPredicateError` in `library/collections.ts`) instead
+  // of reading an error VALUE as a per-element failure of a sound predicate.
+  // The walk is `errorValue`, the same one `apply()` bubbles on, so a literal
+  // whose only error sits under a selecting arm (`x ↦ If(x > 0, True,
+  // Length(x))`) stays applicable and answers per call. This is the one
+  // place the distinction is drawn: `makeLambda` no longer declines an
+  // application whose BODY produced an error value (`bodyResultValue`),
+  // which is what used to make an invalid callee answer `undefined` as a
+  // side effect.
+  if (errorValue(fn) !== undefined) return () => undefined;
   return (
     makeLambda(fn) ??
     ((xs, options) =>
@@ -3264,6 +3308,10 @@ export function applicable(
  *
  */
 export function applicableN1(fn: Expression): (x: number) => number {
+  // The same guard as `applicable()`: a callee that is an error has no
+  // numeric answer. Without it the closure would return the error VALUE and
+  // the `NaN` below would come only from `re` defaulting on a non-number.
+  if (errorValue(fn) !== undefined) return () => NaN;
   const lambda = makeLambda(fn);
   const ce = fn.engine;
 
