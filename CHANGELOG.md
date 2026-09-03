@@ -2,1487 +2,209 @@
 
 ### Breaking Changes
 
-- **The type `non_finite_number` is renamed `signed_infinity`.** The old
-  name was misleading: `~oo` (the unsigned complex infinity) and `∞ + i`
-  are non-finite numbers, but neither was a member — the type contains
-  exactly the two signed infinities `+∞` and `−∞`. The new name says
-  what the members are. `signed_infinity` is exactly the union
-  `+oo | -oo` (both spellings are accepted and mean the same type), and
-  a union containing both signed infinities prints under the name: a
-  type that used to display as `real | non_finite_number` now displays
-  as `real | signed_infinity`. Use `infinity` instead when any infinite
-  value is acceptable, including `~oo`. For one release cycle the old
-  name is still accepted in type strings; it is never printed. The
-  signed infinity value types themselves also print as `+oo` and `-oo`
-  now, instead of `Infinity` and `-Infinity`.
+- **Numeric types now distinguish finite values, infinities, and `NaN`.**
+  `integer`, `rational`, `real`, and `complex` contain only finite values;
+  `number` is now `complex | infinity | nan`. The new `infinity` type contains
+  `+oo`, `-oo`, and `~oo`, while `signed_infinity` contains only `+oo | -oo`.
+  The previous name `non_finite_number` is accepted temporarily as an alias for
+  `signed_infinity`, but is no longer emitted. The `finite_*` type names are
+  also deprecated aliases for their corresponding bare numeric types.
 
-- **Assumptions no longer write types.** An assumption is a fact about
-  the current scope; a declaration is a contract. `ce.assume(x > 3)` now
-  records a fact against `x`'s definition and `x.type` MERGES it at read
-  time (`real<3<..>`), instead of writing the range into the declaration.
-  The merge is keyed by definition identity, so a re-declared inner `x`
-  does not inherit facts about the outer one. Consequences: `forget()`
-  and a scope pop retract the type refinement with the fact (no rewind
-  machinery); `assume(x = 5)` installs its value in a per-scope overlay,
-  not in the definition; `assume(y ≠ 2)` refines `y.type` to
-  `real & !2`; a symbol with a stored value keeps the value's type
-  (`assign v 5; assume v ∈ ℝ` leaves `integer`); assigning a value that
-  refutes a fact in force throws, also for an already-valued symbol;
-  re-asserting an inherited fact against a re-declared symbol answers
-  `ok` rather than `tautology`; `declare s string; assume(Re(s) > 1)` is
-  a `contradiction`.
-  API: `TypeProvenanceEntry.previousType` and the `'assumed'` provenance
-  kind are removed (also from `InferenceWriteEvent.kind`);
-  `assumptionBindings` and `ContextAssumptions.bindings` are removed in
-  favor of `assumedValues`; `ce.context.assumptions` values are now
-  immutable arrays of fact records (`{ id, truth, subjects }`) instead of
-  booleans; `ExpressionMapInterface` gains `size` and `version`;
-  `BoxedValueDefinition` gains `declaredType`, `storedValue` and
-  `disposed`.
+  Update code to use `BoxedType.complex`, `BoxedType.integer`,
+  `BoxedType.real`, and `BoxedType.setInteger` instead of their `finite_*`
+  counterparts. Use `isExtendedReal` instead of the removed `isReal` property.
 
-- **A stored type or signature is now derived with the assumptions
-  hidden.** A definition's type is a contract, so every routine that
-  writes one — an assignment, a declaration that carries a value, a
-  lambda's signature derivation, each use-driven inference — runs its
-  whole derive-and-write phase in a window where the assumption store and
-  the assumed-value overlay read as empty. What it stores is therefore a
-  function of the declarations and the stored values alone, and it stays
-  true after a `forget()`. Behavior changes, all of them a stale answer
-  that is now correct at both ends:
+- **Infinity and `NaN` now have precise types and matching runtime behavior.**
+  Arithmetic, functions, assignments, collection accessors, and compiled code
+  now report or propagate `infinity`, `signed_infinity`, and `nan` where
+  appropriate. Bare finite numeric types no longer accept infinite arguments,
+  and infinite endpoints describe the extent of intervals and ranges without
+  being members themselves.
 
-  - `declare p real; assume(p > 3); f := x ↦ (p > 2)` stores
-    `(unknown) -> boolean`, not `(unknown) -> true`. The proof is still
-    visible in every direct read: `(p > 2).type` is `true`. A DECLARED
-    range is unchanged — `declare p real<3<..>` still gives
-    `(unknown) -> true`.
-  - `declare q number; assume(q > 0); r := t ↦ √q` stores
-    `(unknown) -> number`, not `(unknown) -> real`. The sign channel is
-    hidden at a write like the type channel.
-  - `assume(q > 3); d := {a: q}` stores `record{a: real}`;
-    `declare L list; assume(r > 3); L := [r]` stores `list<real>`;
-    `declare M {type: list, value: [q]}` stores `list<real>`; and
-    `declare c {value: q, isConstant: true}` stores `real`. Each of these
-    used to keep the assumed range for the lifetime of the engine,
-    including after `forget(q)`.
-  - `assume(q > 3); ce.box({a: q}).type` still answers
-    `record{a: real<3<..>}` while the fact holds, and now answers
-    `record{a: real}` after `forget(q)`. A dictionary literal's type was
-    computed once and returned forever.
+- **Assumptions refine values only while they are in scope.** They no longer
+  permanently change declarations or inferred signatures. `forget()` and
+  leaving a scope remove the corresponding refinement or assumed value, and
+  assignments that contradict active assumptions are rejected. Stored values
+  retain their declared or inferred type independently of temporary facts.
 
-  Callers who write a `canonical` or `evaluate` handler should know that
-  `assume()` and `forget()` THROW when they are called from inside such a
-  window: changing the facts while they are hidden is a program error. A
-  handler reached from a write — a generic instantiation, a dispatch
-  read — inherits the hiding, by design, because its answer feeds a
-  stored type.
+- **Numeric predicates are consistently three-valued.** `isNumber`,
+  `isInteger`, `isRational`, and `isExtendedReal` return `true` when membership
+  is proven, `false` when it is impossible, and `undefined` when the type does
+  not decide the question.
 
-- **Bare numeric types now contain only finite values.** The types `integer`,
-  `rational`, `real`, and `complex` do not contain infinity or `NaN`. The
-  numeric type hierarchy now defines `number` as
-  `complex | infinity | nan`.
+- **Mathematical functions now enforce their declared domains.** Operations
+  that require an ordered value, including `Heaviside`, `Sign`, rounding,
+  `Clamp`, `ElementMin`, and `ElementMax`, accept only finite reals and signed
+  infinities. Complex values and `~oo` are rejected where the operation has no
+  mathematical value. `NaN` propagates through numeric evaluation.
 
-  - `oo.matches('real')`, `oo.matches('integer')`, and
-    `oo.matches('complex')` now return `false`. Use
-    `real | non_finite_number` for an extended real type.
-  - The types of `+oo`, `-oo`, `~oo`, and `NaN` are now their corresponding
-    singleton types. These types widen to `infinity` or `nan`.
-  - The `isReal` property is removed. Use `isExtendedReal` to test for a
-    finite real number or signed infinity. `NaN` is not an extended real
-    number. The `isInteger` and `isRational` properties now return `false` for
-    non-finite values.
-  - An assignment of infinity gives the symbol the type `infinity`. An
-    assignment of `NaN` gives the symbol the type `nan`.
-  - An infinite endpoint specifies the extent of an `Interval` or a `Range`.
-    The endpoint is not a member. For example,
-    `Contains(Interval(0, oo), oo)` returns `False`.
-  - Functions with an `integer` or `real` parameter now reject infinite
-    arguments.
-  - The result type of a function that can return infinity now includes a
-    non-finite type.
-  - A compiled `real` parameter accepts only finite values. A clause with an
-    `infinity` or `nan` parameter cannot compile.
+- **Elementary and special functions now handle infinities consistently.**
+  Trigonometric, hyperbolic, logarithmic, root, power, error, gamma, Bessel,
+  Airy, elliptic, and related functions now return their defined limits at
+  infinities, reject arguments outside their mathematical domain, and remain
+  symbolic when a finite value exists but no supported numeric kernel can
+  compute it. `evaluate()`, `N()`, and simplification now agree more closely at
+  exceptional points. Notable changes include `Sqrt(~oo) = Ln(~oo) = ~oo`,
+  `(+oo)^(+oo) = +oo`, IEEE values for `Arctan2` at infinite corners, and
+  `NaN` for indeterminate forms.
 
-- **The `finite_*` type names are removed.** For this release, the type parser
-  accepts these names as aliases. It converts `finite_integer` to `integer`,
-  `finite_rational` to `rational`, `finite_real` to `real`, `finite_complex`
-  to `complex`, and `finite_number` to `complex`. Update stored type strings
-  to use the bare names.
+- **`Power` and `Root` use consistent extended-number semantics.** A base may
+  be any number, but `~oo` is not a valid exponent. `Root(x, n)` follows
+  `Power(x, 1/n)`; a zero root index is an error, and infinite indices and
+  operands resolve according to the same indeterminate-form rules as `Power`.
 
-  Generic numeric results now have the type `number` when the engine cannot
-  prove a more specific finite type. Use `matches('complex')` to test for a
-  finite number. The public static members also have new names:
+- **Arithmetic and number-theory operators now validate their domains.**
+  `Mod`, `Fract`, `Rationalize`, `ContinuedFraction`, parity predicates, prime
+  predicates, and numerator/denominator accessors reject invalid arguments
+  instead of silently using partial values or remaining indefinitely inert.
+  Continued fractions of inexact values are based on their best rational
+  approximation at the current precision. `IsEven` is now preserved as its
+  own operator.
 
-  - Use `BoxedType.complex` instead of `BoxedType.finite_number`.
-  - Use `BoxedType.integer` instead of `BoxedType.finite_integer`.
-  - Use `BoxedType.real` instead of `BoxedType.finite_real`.
-  - Use `BoxedType.setInteger` instead of `BoxedType.setFiniteInteger`.
+- **Linear-algebra operations now validate numeric inputs.** `Norm`, `Trace`,
+  `MatrixPower`, and `Determinant` reject incompatible operands and provide
+  more precise result types. Frobenius norms work for vectors and higher-rank
+  tensors, empty norms are `0`, and numerical half-integer matrix powers are
+  supported for suitable exact 2×2 positive-semidefinite matrices.
 
-  An assumption such as `assume(|x| < 1)` proves that `x` is finite. It does
-  not prove that `x` is real. Add a real-number assumption when an operation
-  requires a real value.
+- **Combinatorial and regularized functions have corrected domains and
+  exceptional values.** `Binomial`, `Choose`, `Pochhammer`,
+  `GammaRegularized`, and `BetaRegularized` now handle supported infinite
+  limits consistently and correct several results involving negative
+  arguments and gamma poles.
 
-- **Numeric functions now propagate `NaN` during `evaluate()`.** Examples
-  include `Sin`, `Ln`, `Gamma`, `Heaviside`, `Sign`, `Root`, `Mod`, `Binomial`,
-  `Power`, `Factorial`, `Factorial2`, `GCD`, and `LCM`. The property
-  `BoxedNumber.isExact` now returns `false` for `NaN`.
+- **Probability distributions validate their parameters and arguments.**
+  Normal, uniform, Poisson, exponential, and binomial distributions reject
+  invalid parameters. Their `PDF`, `CDF`, and `Quantile` functions use the
+  appropriate real domains. Uniform and exponential functions are correctly
+  piecewise, discrete distributions return the correct values outside their
+  support, and numerical binomial and Poisson quantiles are now computed by
+  `N()`.
 
-- **`Heaviside` and `Sign` now declare their mathematical domain in their
-  signatures.** Both operators are defined on the extended real line only,
-  and their signatures now say so: `Heaviside` is
-  `(real | signed_infinity) -> rational<0..1>` and `Sign` is
-  `(real | signed_infinity) -> integer<-1..1>`. Consequences:
-  - An argument that is provably not an extended real — a complex value
-    such as `i` or `1 + 2i`, or the unsigned `~oo` — is now an
-    `incompatible-type` error. It used to stay unevaluated.
-  - The values are unchanged where the operators are defined:
-    `Heaviside(±∞)` is `1`/`0`, `Sign(±∞)` is `±1`, and a `NaN` argument
-    still gives `NaN` (its type is now `nan`).
-  - The static types are sharper. For `x` of type `number`, `Sign(x)` has
-    the type `integer<-1..1> | nan` instead of `number`, and the same
-    per-element claim applies to a broadcast over a collection.
-  - The Fungrim identity `09c107` (`Sign(i) → i`, the complex sign
-    convention `z/|z|`) is removed from the bundled identity artifact: its
-    match side is not representable under the real-only `Sign`.
+- **Statistics functions reject invalid sample data and have sharper result
+  types.** Non-numeric or nested sample values now produce an
+  `incompatible-type` error. `NaN` and `Missing` propagate consistently,
+  single-value quartiles are supported, quartile tuple fields are ordered as
+  `lower`, `mid`, `upper`, and paired statistics distinguish missing data from
+  genuine shape errors.
 
-- **`Floor`, `Ceil`, `Round`, and `Truncate` are now defined on the
-  extended real line only.** Rounding depends on the order of the real
-  line, so each operator now declares the domain signature
-  `(real | signed_infinity) -> integer | signed_infinity` (`Round` takes
-  an optional integer precision argument and declares the result
-  `real | signed_infinity`). Consequences:
-  - A complex argument is now an `incompatible-type` error. The
-    component-wise (Gaussian) rounding of a complex number — for example
-    `Floor(1.5 + 2.7i)` — is removed. Compiled code was already
-    real-only for these operators (a complex value produced `NaN` or a
-    compile error), so the interpreter and the compiler now agree.
-    `~oo` is also an error (it was unevaluated before).
-  - The values are unchanged on the domain: `Floor(±∞)` is `±∞`, and a
-    `NaN` argument still gives `NaN` (its type is now `nan`).
-  - The static types are sharper and honest about infinities: a finite
-    real argument keeps the `integer` claim, while an argument that may
-    be infinite types `integer | signed_infinity` (plus `| nan` exactly
-    when the argument may be `NaN`).
-  - The comparison operators (`Less`, `LessEqual`, and the canonicalized
-    `Greater`/`GreaterEqual`) are unchanged: they keep their wide
-    signatures for chains, quantities, and `Missing`, and now declare
-    explicitly that they handle `NaN` themselves (an unordered `NaN`
-    makes the comparison `False`, per IEEE — the existing behavior).
+- **Selections are lazy and undecided conditions remain undecided.** `If`,
+  `Which`, `And`, and `Or` evaluate only operands needed for the result, so an
+  error in an unselected branch does not replace the selected value. A
+  provably non-boolean condition is an `incompatible-type` error; a condition
+  that may later become decidable remains unevaluated. A selection with no
+  matching/default branch returns `Missing`.
 
-- **`Sin`, `Arcsin`, `Sqrt`, `Ln`, and `Erf` now declare their
-  mathematical domains.** `Sqrt`, `Ln`, and `Erf` are defined on the
-  finite complex numbers and the two signed infinities
-  (`Sqrt(+∞) = +∞`, `Sqrt(−∞) = ~oo`, `Ln(+∞) = +∞`, `Ln(0) = −∞`,
-  `Erf(±∞) = ±1` — all unchanged). `Sin` and `Arcsin` are defined on the
-  finite complex numbers only: sine and arcsine have no value and no
-  limit at any infinity. Consequences:
-  - `Sin(±∞)`, `Arcsin(±∞)` are now `incompatible-type` errors. They
-    used to stay unevaluated symbolically and answer `NaN` under `N()`.
-  - A `~oo` (complex infinity) argument is now an `incompatible-type`
-    error for `Sin`, `Arcsin`, and `Erf`, which have no value there.
-    `Sqrt(~oo)` and `Ln(~oo)` answer `~oo` (see the `Abs`/`Log`/`Root`
-    entry below: their modulus is infinite in every direction of
-    approach). The previous behavior was inconsistent — `Sqrt(~oo)`
-    answered `NaN`, `Erf(~oo)` answered `~oo`, and `Ln(~oo)` answered
-    `NaN` on `evaluate()` but an arbitrary `∞ + iπ/4` on `.N()`. Each
-    answer is now identical on both routes.
-  - A `NaN` argument still gives `NaN` for all five.
-  - `Exp` is not changed: `Exp(x)` becomes `Power(e, x)` when the
-    expression is canonicalized, so its behavior at exceptional points
-    is `Power`'s.
-  - Depending on the operator, the error is reported when the expression
-    is created or when it is evaluated (`Erf` reports at creation;
-    `Sqrt`/`Ln`/`Sin`/`Arcsin` at evaluation). Two bounded exceptions: a
-    symbol that is merely DECLARED with a non-finite type but holds no
-    value stays symbolic (there is no value to report an error for), and
-    compiled code keeps its existing numeric behavior at these points
-    (compiled `sin(x)` at `x = Infinity` still returns `NaN` — the same
-    class of accepted divergence as compiled `Heaviside(~oo)`).
+- **Compiled branch conditions now preserve three-valued logic.** JavaScript
+  and Python compilation no longer choose a branch for `NaN`, absent inputs,
+  or otherwise undecided conditions. Compiled `And`, `Or`, and `Not` preserve
+  short-circuiting while following the same three-valued behavior.
 
-- **The remaining trigonometric, hyperbolic, and special-function
-  operators now declare their mathematical domains** (following the
-  `Sin`/`Sqrt`/`Ln`/`Erf` change above). Each operator's carrier is
-  decided from where the function has a genuine value:
+- **Compiled float-only targets represent `~oo` as `Infinity`.** These targets
+  preserve infinite magnitude but cannot retain the distinction between
+  signed and complex infinity. Functions that dispatch specifically on
+  non-finite types or values continue to use the interpreter.
 
-  - `Cos`, `Tan`, `Sec`, `Csc`, `Cot`, and `Arccos` are defined on the
-    finite complex numbers only. An infinite argument of any kind
-    (`±∞`, `~oo`) is now an `incompatible-type` error; it used to stay
-    unevaluated and answer `NaN` under `N()`. The poles (`Tan(π/2)`,
-    `Cot(0)`) are finite arguments and still answer `~oo`.
-  - The hyperbolics fold their genuine limits exactly, on `evaluate()`
-    and `N()` alike: `Sinh(±∞) = ±∞`, `Cosh(±∞) = +∞`, `Tanh(±∞) = ±1`,
-    `Coth(±∞) = ±1`, `Sech(±∞) = Csch(±∞) = 0`. A `~oo` argument is an
-    error for all six.
-  - `Arsinh(±∞) = ±∞` and `Arcoth(±∞) = 0` now answer their genuine
-    values (both used to answer `NaN` — an artifact of the numeric
-    kernels' formulas). `Artanh(±∞) = ∓(π/2)i` and
-    `Arsech(±∞) = (π/2)i` answer the finite imaginary limits of the
-    principal branch (matching Mathematica). `Arcosh(+∞) = +∞`, and
-    `Arcosh(−∞)` stays symbolic under `evaluate()` and answers
-    `∞ + iπ` under `N()`, like `Ln(−∞)`.
-  - `Arcsec`, `Arccsc`, `Arcoth`, and `Arcsch` accept EVERY infinity,
-    including `~oo`: they compose through `1/x`, so all directions of
-    infinity give the same value (`Arcsec(~oo) = π/2` — exact now; it
-    used to answer a machine float — `Arccsc(~oo) = Arcoth(~oo) =
-    Arcsch(~oo) = 0`).
-  - `Arccot(+∞) = 0` and `Arccot(−∞) = π` (the ends of the (0, π)
-    branch), but `Arccot(~oo)` is now an `incompatible-type` error: the
-    two real approaches disagree, so there is no value at complex
-    infinity. The old answer (`0`) contradicted `Arccot(−∞) = π`.
-  - `Erfc`, `Sinc`, `FresnelS`, and `FresnelC` keep their values at
-    `±∞` (`Erfc(−∞) = 2`, `Sinc(±∞) = 0`, `S(±∞) = C(±∞) = ±1/2`) and
-    now report an `incompatible-type` error for `~oo` when the
-    expression is created (they used to stay unevaluated).
-  - A `NaN` argument still answers `NaN` for every operator above, and
-    a provably-`NaN` argument now gives `Erfc`/`Sinc`/`FresnelS`/
-    `FresnelC` applications the sharp type `nan`.
-  - The simplification rules agree with these semantics now: simplify
-    folds the same values (`Artanh(+∞)` simplifies to `−iπ/2`, not the
-    previous `NaN`) and declines where the function has no value
-    (`Cos(∞)` stays unevaluated under `simplify()`; the evaluate route
-    reports the error).
-  - Inverse-circular values at an infinite argument are angles in the
-    current `angularUnit`, like the finite folds: in degree mode
-    `Arctan(∞)` now answers `90` (it used to answer the radian `π/2`),
-    and the new `Arccot`/`Arcsec` values convert the same way.
-  - As with the previous batch: the error is reported at evaluation for
-    the trig-factory heads and at creation for
-    `Erfc`/`Sinc`/`FresnelS`/`FresnelC`; a valueless symbol declared
-    with a non-finite type stays symbolic; compiled code keeps its
-    numeric behavior at these points.
-
-- **`Power` now declares its mathematical domain, per operand** (closing
-  out the domain-declaration batches above; `Exp` and `Exp2` follow
-  along, since they canonicalize to `Power`). The base accepts every
-  number, including all three infinities; the exponent accepts the
-  finite complex numbers and `±∞`, but not `~oo` — `b^z` has no value
-  at `z = ~oo` for any base, because the result depends on the
-  direction of approach. Consequences:
-
-  - `2^~oo`, `0^~oo`, `(~oo)^~oo`, `Exp(~oo)`, and `Exp2(~oo)` are now
-    `incompatible-type` errors, reported at evaluation on both routes.
-    They all used to answer `NaN`.
-  - `(~oo)^{-1}` now answers `0`, agreeing with `(~oo)^{-2} = 0` and
-    with `1/~oo = 0`. It used to answer `NaN` — an internal
-    inconsistency.
-  - A non-real base raised to `±∞` is decided by its modulus, on both
-    routes: `(1+i)^{+∞} = ~oo` (the modulus grows without bound while
-    the argument rotates), `(1+i)^{-∞} = 0`, and a base on the unit
-    circle other than 1 has no limit — `i^{+∞} = NaN`. These used to
-    stay unevaluated under `evaluate()` and answer `NaN` under `N()`.
-  - Everything else is unchanged: the indeterminate forms (`0^0`,
-    `1^{±∞}`, `(±∞)^0`) still answer `NaN`, `NaN` in either operand
-    still propagates — including `NaN^{~oo}`, where the `NaN` wins over
-    the domain error, matching IEEE `pow(NaN, x) = NaN` — and all the
-    real extended values (`2^{+∞} = +∞`, `0^{-1} = ~oo`,
-    `(+∞)^{+∞} = +∞`, …) keep their values.
-  - The simplification rules for `Sqrt` and `Ln` no longer rewrite a
-    `~oo` argument to `NaN` (a leftover from before their own domain
-    declarations): they decline, and the evaluate route reports the
-    error, like the other declared-domain operators.
-
-- **`isNumber`, `isInteger` and `isRational` are three-valued on every
-  expression.** `true` means the value is certainly a member, `false` that
-  it certainly is not, and `undefined` that the claimed type does not
-  decide it. A function expression used to answer `false` whenever its
-  claimed type was not a subtype of the target, so `Divide(k, 2)` for an
-  integer `k` (claimed `real`) reported "certainly not an integer"
-  although it is one for an even `k`, and `Sqrt(x)` for a real `x`
-  (claimed `complex`, a hedge for an unknown sign) reported the same. Both
-  are `undefined` now; a claim provably disjoint from the target — a
-  list, a string, `imaginary` for `isInteger` — still answers `false`. A
-  symbol declared `number | string` or `any` answers `undefined` to
-  `isNumber` (it answered `false`), and a symbol declared `complex`
-  answers `undefined` to `isInteger` and `isRational` (it answered
-  `false`: `complex` contains the integers). `isExtendedReal` follows the
-  same rule: a bare `complex` claim — a declared symbol, or `Sqrt(x)` for
-  a real `x` of unknown sign — is undecided (it answered `false`), while
-  `imaginary`, `NaN`, `~oo`, a string or a list still answer `false`. The
-  `Power` and `Square` sign folds now require that proof: `Sqrt(x)^2`
-  for such an `x` is no longer reported non-zero (it is 0 at `x = 0`); a
-  pure-imaginary base still is.
-
-- **The arithmetic core now declares its mathematical domains**:
-  `Divide`, `Negate`, `Clamp`, `ElementMax` and `ElementMin`.
-
-  - `Clamp(x, lo, hi)`, `ElementMax` and `ElementMin` take the EXTENDED
-    REAL line — `real | signed_infinity` in every slot — because an
-    extremum is defined by the order of the real line, which the complex
-    numbers lack. A non-real operand or `~oo` is an `incompatible-type`
-    error at boxing now: `Clamp(i, 0, 1)`, `Clamp(~oo, 0, 1)`,
-    `ElementMax(i, 1)` and `ElementMax(~oo, 1)` used to be admitted and
-    stay unevaluated forever. The signed infinities keep their values
-    (`Clamp(+oo, 0, 1) = 1`, `ElementMax(+oo, 1) = +oo`), and `NaN`
-    propagates. Application types are sharper: `ElementMin(2, 5)` is
-    typed `integer` (was `real`), `Clamp([1, 2], 0, 1)` is typed
-    `vector<integer^2>` (was `vector<2>`), `Clamp(NaN, 0, 1)` exactly
-    `nan`, and an application with an infinite operand claims
-    `real | signed_infinity` (was `number`). Compiling one of these heads
-    over a statically non-real operand now fails on the invalid
-    expression rather than on the compiler's own real-only decline —
-    still fail-closed, at an earlier seam. `Max` and `Min`, which reduce
-    collections rather than broadcast, are unchanged.
-  - `Divide` and `Negate` take the extended complex plane
-    (`complex | infinity`) in every slot, with `NaN` propagating.
-    **No answer changes**: every point of that carrier has a value, or is
-    an indeterminate form whose value is `NaN` (`0/0`, `∞/∞`, `~oo/~oo`,
-    `~oo/∞`, `∞/~oo`), so the declaration only records what these two
-    operators already did. Both are enforced by their canonicalization
-    (which refuses a string or a boolean operand, as before), not by the
-    signature.
-  - `Square` is deliberately left with its wide declaration: it
-    canonicalizes to `Power(x, 2)`, so `Power`'s base carrier already
-    governs every exceptional point.
-  - One defect found alongside: an operand whose type is the EMPTY type
-    `never` (a symbol declared with an empty range, `integer<2<..<3>`)
-    made `Divide(m, 2)` fold to `NaN` and `Divide(2, m)` fold to `0`, so
-    the application lost the `never` claim its operand carries. The
-    bottom type answers every type test, and the folds are keyed on
-    those; canonicalization leaves such a quotient alone now, as
-    `Power`, `Multiply` and `Add` already did.
-
-- **The linear-algebra scalars now declare their mathematical domains**:
-  `Norm`, `Trace`, `MatrixPower` and `Determinant`.
-
-  - `Norm` takes a number, a numeric vector or matrix, a point, or a list
-    of points, and an order that is a positive real, `+oo`, `"Frobenius"`
-    or `"Infinity"`. A string or boolean operand (`Norm("a")`,
-    `Norm(True)`, `Norm([1, "a"])`) is an `incompatible-type` error at
-    boxing — it used to stay unevaluated forever — and so is a complex,
-    `NaN` or negative-infinite order. A non-positive or unknown order
-    (`Norm([3, 4], 0)`, `Norm([3, 4], "foo")`) violates the declared
-    precondition and answers an evaluation error instead of staying inert.
-    Several values were wrong: `Norm([])` is `0` for every order (was
-    inert); `Norm(v, "Frobenius")` of a VECTOR is its L2 norm (was inert;
-    the Frobenius norm is the entry-wise L2 norm at any rank), and the
-    Frobenius norm of a rank-3 or higher tensor is computed over its
-    entries (was inert); `Norm(("a", 3), "Infinity")` used to answer `3`
-    by silently dropping the string component — a non-numeric component is
-    an `incompatible-type` error in every order now; and `Norm(5, p)` with
-    a not-yet-known order `p` used to answer `5` and forget the order — it
-    stays unevaluated until `p` is known. The result is
-    declared `real | +oo | nan`, so a norm whose components cannot be read
-    (a vector-typed symbol, a matrix) types that union instead of `number`.
-    A `NaN` component still gives `NaN`, and an infinite one `+oo`.
-  - `Trace` takes a number or a numeric tensor; a string or a boolean is a
-    boxing error (was inert). Its result is declared `number | tensor`.
-  - `MatrixPower` takes a REAL exponent. `MatrixPower(M, i)` used to return
-    the identity matrix (the handler read only the real part of the
-    exponent, which is 0); it is an `incompatible-type` error now, as are
-    `NaN`, `+oo`, `-oo` and `~oo` exponents (were inert). A half-integer
-    power of an exact 2×2 positive-semidefinite matrix now also works
-    under `.N()` and with a float exponent
-    (`MatrixPower([[4, 0], [0, 9]], 0.5)` is `[[2, 0], [0, 3]]`, and
-    `MatrixPower([[1/4, 0], [0, 9]], 1/2).N()` is `[[0.5, 0], [0, 3]]`;
-    both used to stay inert). The compiled JavaScript used to return `NaN`
-    behind a successful compile for any exponent that is not an integer at
-    run time; it now compiles `MatrixPower` only for an exponent that is
-    statically an integer and otherwise declines, so the expression is
-    interpreted.
-  - `Determinant` of a matrix with integer, rational, real or complex
-    entries is typed in that tier (`Determinant([[1, 2], [3, 4]])` is
-    `integer`, was `number`). Infinite and `NaN` entries are computed by
-    IEEE, as before.
-  - The Python target lowers `Norm(v, "Frobenius")` of a vector to
-    `np.linalg.norm(v)` instead of refusing to compile it; the numpy
-    spelling `'fro'` stays matrix-only.
-
-- **`D` differentiates a piecewise definition.** `D(Which(c₁, v₁, …,
-  cₙ, vₙ), x)` is `Which(c₁, D(v₁, x), …, cₙ, D(vₙ, x))` — each arm on its
-  own region, the conditions unchanged — and the same for `If`. It used to
-  stay unevaluated, so the piecewise densities above had no derivative:
-  `D(CDF(ExponentialDistribution(2), x).evaluate(), x)` is
-  `Which(x < 0, 0, True, 2e^(-2x))` now.
-
-- **The Python target emits a statement `if` for a statement-form `If`
-  with an else inside a block.** It used to emit `(r = 1) if … else
-  (r = 2)`, which is not valid Python. The statement form takes the same
-  decidedness guard as the expression form (an undecided condition runs
-  neither branch), including inside a loop body; a statement `If` in a
-  value-returning position, and a rank-3 tensor norm with an order numpy
-  cannot take, now decline to compile instead of producing code that
-  raises at run time. A rank-3 or higher Frobenius norm compiles to
-  `np.linalg.norm(t)`.
-
-- **A compiled `And`/`Or`/`Not` in a branch condition is now
-  three-valued.** `If(x > 0 ∧ y > 0, 1, -1)` compiled to
-  `(0 < _.x && 0 < _.y) ? 1 : -1`, so at `x = 1, y = NaN` the `&&`
-  answered `false` and the else arm was taken — an answer from no
-  evidence, where a lone `x > 0` at `NaN` already yields `NaN` under the
-  undecided-condition rule. The connectives now combine the decidedness
-  and the value of their operands by the Kleene tables on the JavaScript
-  and Python targets: that expression is `NaN` at `x = 1, y = NaN`, `-1`
-  at `x = -1, y = NaN` (a decided `false` still decides an `And`), and
-  `1` at `x = 1, y = 2`. Short-circuiting is preserved: a decided-false
-  guard never evaluates the operands after it (`If(x ≠ 0 ∧ 1/x > 1, …)`
-  at `x = 0` takes the else arm without computing `1/x`), and a condition
-  made only of comparisons that cannot be undecided compiles exactly as
-  before. The GPU targets keep JavaScript-style selection, as ruled.
-
-- **`Binomial`, `Choose`, `Pochhammer`, `GammaRegularized` and
-  `BetaRegularized` now declare their mathematical domains** — the
-  extended complex plane in every slot, `NaN` propagating, following the
-  Γ family — and answer their limits at the infinities instead of staying
-  unevaluated under `evaluate()` while `.N()` answered `NaN`:
-  `Binomial(+oo, 2)` is `+oo`, `Binomial(5, +oo)` is `0`,
-  `Binomial(-oo, 3)` is `-oo`, `Pochhammer(3, +oo)` is `+oo`,
-  `GammaRegularized(a, +oo)` is `0`, `GammaRegularized(+oo, z)` is `1`,
-  `BetaRegularized(x, a, +oo)` is `1` for `x > 0`, and a point with no
-  limit (`Binomial(-oo, 2.5)`, `GammaRegularized(2, -oo)`) is `NaN` on both
-  routes. Wrong finite values fixed alongside: `Binomial(2.5, -2)` and
-  `Binomial(-2.5, -1.5)` are `0` (a Γ-pole in the denominator; they were a
-  tiny float and `NaN`), `Binomial(-3, 1/2)` is `~oo` (was `-8.86e48`),
-  and `Binomial(n, k)` for two negative integers is no longer `0` when
-  the two Γ-poles cancel (`Binomial(-3, -3)` is `1`, `Binomial(-2, -4)`
-  is `3`; the simplifier already answered these); `simplify()` no longer
-  folds `Binomial(n, n)` to `1` at an infinite or NaN `n`;
-  `Pochhammer(3, -2)` is `1/2` (the negative-index product; it stayed
-  unevaluated), `Pochhammer(2.5, 1.5).N()` numericizes through the Γ ratio
-  (stayed unevaluated), `Pochhammer(i, 2)` evaluates to `-1 + i`;
-  `GammaRegularized(a, 0)` no longer folds to `1` for every `a`
-  (`GammaRegularized(-1, 0)` is `NaN`), `GammaRegularized(-1, 2)` and
-  `GammaRegularized(0, 2)` are `0` (a pole of `Γ(a)`), and
-  `GammaRegularized(n, z)` for a positive integer `n` is the exact
-  `e^{-z} Σ_{k<n} z^k/k!` at any real `z`, negative included (it used to
-  answer `NaN` under `.N()`); `GammaRegularized(-1/2, 2)`, a finite
-  negative real the kernel does not compute, stays symbolic instead of
-  answering `NaN`. `BetaRegularized(0, a, b)` and `BetaRegularized(1, a,
-  b)` fold to `0` and `1` only for provably positive `a` and `b`. A
-  complex operand stays symbolic (no complex kernel).
-
-- **The distributions now declare their parameter and argument domains.**
-  `NormalDistribution(μ, σ)`, `UniformDistribution(a, b)`,
-  `PoissonDistribution(λ)` and `ExponentialDistribution(λ)` take real
-  parameters and `BinomialDistribution(n, p)` an integer `n` and a
-  probability `p` in `[0, 1]`: a `NaN`, infinite or complex parameter is
-  an `incompatible-type` error (it used to be admitted silently). `PDF`
-  and `CDF` take a real or signed-infinite argument and are typed
-  `real<0..> | nan` and `real<0..1> | nan`; `Quantile` takes a probability
-  in `[0, 1]`, so `Quantile(D, 1.5)` is refused at boxing. Values fixed
-  alongside:
-  - The uniform and exponential densities and cumulative functions are
-    piecewise now. `PDF(UniformDistribution(0, 1), x)` used to be `1` for
-    every `x` (and `1` at `±oo`, at `NaN` and at `i`); it is
-    `1` on `[0, 1]` and `0` outside, `0` at `±oo`, `NaN` at `NaN`.
-    `CDF(UniformDistribution(0, 1), +oo)` was `+oo` (now `1`) and
-    `CDF(ExponentialDistribution(2), -oo)` was `-oo` (now `0`). As a
-    result `Integrate(PDF(UniformDistribution(0, 1), x), x, -1, 2)` is `1`;
-    it used to be `3`.
-  - `PDF(PoissonDistribution(2), +oo)` was `+oo` and
-    `PDF(PoissonDistribution(2), -1)` a division by `(-1)!`; both are `0`.
-    `PDF(BinomialDistribution(10, 0.5), ±oo)` was `NaN`, is `0`; the
-    binomial and Poisson `CDF` at `±oo` are `1` and `0` instead of an
-    unevaluated regularized function.
-  - The discrete quantiles are computed under `.N()`:
-    `Quantile(BinomialDistribution(10, 0.5), 0.5).N()` is `5` and
-    `Quantile(PoissonDistribution(2), 0.5).N()` is `2`; under plain
-    `evaluate()` they stay symbolic, because the search compares
-    floating-point cumulative probabilities and an exact answer must not
-    be read off a tolerance. `Quantile(D, NaN)` is `NaN` for every
-    distribution, `Quantile([], p)` is `NaN`, and `Quantile` of a string
-    or of a list with a non-numeric element is an `incompatible-type`
-    error instead of an unevaluated expression.
-
-- **The statistics aggregates now declare how they treat absent data and
-  what they return**: `Mean`, `Median`, `Variance`, `PopulationVariance`,
-  `StandardDeviation`, `PopulationStandardDeviation`, `Kurtosis`,
-  `Skewness`, `Mode`, `Quartiles`, `InterquartileRange`, `Covariance`,
-  `PopulationCovariance` and `Correlation` declare that a `NaN` or
-  `Missing` datum is handled (the aggregate is `NaN`), and their result
-  types are the narrowest sound claims instead of `number`: the variance
-  family is `real<0..> | nan`, `Median` and `Mode` are
-  `real | signed_infinity | nan`, `Kurtosis`, `Skewness`, `Covariance`,
-  `PopulationCovariance` and `Correlation` are `real | nan`,
-  `InterquartileRange` is `real<0..> | +oo | nan`; `Mean` keeps `number`
-  because complex data has a complex mean. Values fixed alongside:
-  - A string, boolean or nested-collection datum (`Mean([1, "a", 3])`,
-    `Mean([1, True, 3])`, `Mean([[1, 2], [3, 4]])`) and a whole string
-    operand (`Mean("abc")`, which was walked character by character) used
-    to leave every aggregate unevaluated; each is an `incompatible-type`
-    error now. `LinearRegression` and `PolynomialFit` report the same
-    diagnosis for such data.
-  - A one-point sample is its own quartiles: `Quartiles(5)` is `(5, 5, 5)`
-    and `InterquartileRange(5)` is `0` (both used to report a missing
-    value). The compiled code moved with it.
-  - `Quartiles`' result tuple named its components in the wrong order
-    (`mid` read the lower quartile); the names are `lower`, `mid`, `upper`
-    now, matching the values.
-  - An absent datum in paired data (`Covariance([1, 2, 3], [1, Missing,
-    3])`) answers `NaN`, as the same input spelled with `NaN` already did,
-    instead of a shape error. A genuine shape error still wins over `NaN`.
-
-- **The rational and parity family now declares its mathematical
-  domains**: `Mod`, `Fract`, `Rationalize`, `ContinuedFraction`, `IsOdd`,
-  `IsEven`, `Numerator`, `Denominator` and `NumeratorDenominator`. Every
-  point below is answered the same way by `evaluate()` and `.N()`:
-
-  - `Mod(x, m)` takes two finite reals, the declaration `docs/ERROR-MODEL.md`
-    gives as its worked example. An infinite or non-real operand in either
-    slot is an `incompatible-type` error at boxing (`Mod(+oo, 3)`,
-    `Mod(7, ~oo)` and `Mod(7, 2 + 3i)` all answered `NaN`). A zero modulus
-    stays the marker `NaN`, and `NaN` propagates in either slot. The type
-    of an application is sharper: `Mod(7, 0)` and `Mod(NaN, 3)` are typed
-    exactly `nan` (they were typed `number`), `Mod(k, m)` for a modulus
-    that may be zero is typed `real | nan`, and a broadcast over a list
-    claims per cell (`Mod([0, 1, 2, 3, 4], 2)` is typed `vector<integer^5>`,
-    was `vector<5>`).
-  - `Fract(x)` takes `real | signed_infinity`, the carrier of `Floor`. The
-    fractional part has no limit at either infinity (it sweeps `[0, 1)`
-    forever), so `Fract(±oo)` is `NaN`, typed exactly `nan`; a non-real
-    operand or `~oo` is an `incompatible-type` error (`Fract(2 + 3i)`
-    answered `0`). The declared result is `real<0..1>`: `Fract(x)` for a
-    real `x` is typed `real<0..1>` (it was `real`), and for a `number` it
-    is `real<0..1> | nan` (it was `number`). The sign of `Fract(x)` is
-    `non-negative` for every finite real `x`, negative ones included, and
-    `unsigned` for `NaN` and the infinities (`Fract(+oo)` reported
-    `non-negative` while its value is `NaN`).
-  - `Rationalize(x, tolerance?)` takes a finite real `x` and a
-    non-negative finite real tolerance, spelled as the range type
-    `real<0..>`. `Rationalize(+oo)` answered `+oo` under a `rational`
-    claim; every infinity and every non-real value is an
-    `incompatible-type` error now, and `Rationalize(NaN)` is `NaN`, typed
-    `nan`. A negative tolerance is refused at boxing (it was read as its
-    absolute value), and so are a `NaN` or an infinite tolerance (a `NaN`
-    tolerance was ignored).
-  - `ContinuedFraction(x, n?)` takes a finite real `x`: `NaN`, every
-    infinity and every non-real value are `incompatible-type` errors
-    (`ContinuedFraction(2 + 3i)` answered `[2]`, from the real part). A
-    term count below 1 fails the operator's precondition — an evaluation
-    error (it stayed inert). **An inexact `x` is expanded as its best
-    rational approximation at working precision** (the `Rationalize`
-    value), then exactly: `ContinuedFraction(7/3).N()` answers `[2, 3]`,
-    as `evaluate()` does (it answered `[2, 2, 1]`), and `π` to machine
-    precision answers thirteen terms, every one a term of π's own
-    expansion (it answered twenty, the last seven rounding noise). The
-    final term of an irrational's expansion is written in canonical form:
-    `Sqrt(23)` ends `…, 8, 1, 4` where the twenty-term prefix
-    `…, 8, 1, 3, 1` is the same number.
-  - `IsOdd` and `IsEven` follow the `IsPrime` arrangement: they keep the
-    wide numeric carrier and answer `False` for every non-integer — `2.5`,
-    `-7/2`, `2 + 3i` and `NaN` included (they stayed inert for a
-    non-integer real and for `NaN`); an infinity is an `incompatible-type`
-    error. **`IsOdd(x)` for an unknown `x` answered `False`** (and
-    `IsEven(x)` `True`): the handler read a symbol as a non-real. Both stay
-    inert for a symbol whose parity is not decided, and answer through an
-    assigned value or an assumption. **`IsEven` is its own operator**: it
-    canonicalized to `Not(IsOdd(x))`, which answered `True` for `2.5`,
-    `NaN` and `2 + 3i` and printed `IsEven(3)` as `\lnot\mathrm{IsOdd}(3)`.
-  - `Numerator`, `Denominator` and `NumeratorDenominator` are structural
-    accessors: a number that is not a quotient is its own numerator over
-    the denominator `1`, `NaN` and the infinities included
-    (`NumeratorDenominator(NaN)` is `(NaN, 1)`), and they declare that
-    `NaN` policy explicitly (`handle`). **They now evaluate a held
-    operand**: with `y := 1/2`, `Numerator(y)` answers `1` and
-    `Denominator(y)` `2` (they answered `y` and `1`), and the canonical
-    form of `NumeratorDenominator(y)` no longer depends on the current
-    assignment (it evaluated at canonicalization and boxed as `(1, 2)`).
-    A held operand that evaluates to a non-number is an
-    `incompatible-type` error (a symbol holding a string was returned as
-    its own numerator).
-  - **An operator with no type handler answers `never` for a `never`-typed
-    operand**, as the operators with a handler already did: `Fract(x)` for
-    an `x` declared with an empty range is typed `never`, not `real<0..1>`.
-  - **A proven `NaN` operand types `nan` ahead of a declared partiality
-    condition.** The derived application type consulted a declared
-    `definedWhen` before the NaN evidence, so a predicate that cannot
-    classify a `NaN` operand reported the undischarged `S | nan` where
-    the runtime NaN gate answers the bare `NaN` first: `Fract(NaN)` is
-    typed exactly `nan` now.
-
-- **The complex part extractors, `Conjugate`, `AbsArg`, `ComplexRoots`,
-  `Erfi` and `ErfInv` now declare their mathematical domains**, and a
-  type-variable parameter stops rejecting `NaN`:
-
-  - `Real`, `Imaginary`, `Argument` (with the aliases `Re`, `Im`, `Arg`)
-    and `AbsArg` take the carrier `complex | infinity`; `Conjugate` keeps
-    its generic signature and declares the `NaN` policy explicitly. The
-    unsigned complex infinity `~oo` has a modulus but no direction, so it
-    has no real part, no imaginary part and no phase angle: `Real(~oo)`,
-    `Imaginary(~oo)` and `Argument(~oo)` answer `NaN` (`Real` and
-    `Imaginary` used to answer `+oo`). The signed infinities keep their
-    axis (`Real(-oo) = -oo`, `Imaginary(±oo) = 0`, `Argument(-oo) = π`),
-    and a complex literal with an infinite real component reads its
-    components (`Real(∞ + i) = +oo`, `Imaginary(∞ + i) = 1`,
-    `Argument(-∞ + 2i) = π`, `Conjugate(∞ + i) = ∞ − i`). A `NaN` operand
-    propagates: `Imaginary(NaN)` is `NaN` (it answered `0`),
-    `Conjugate(NaN)` is `NaN` (it answered an `unexpected-argument`
-    error), and `AbsArg(NaN)` is the bare `NaN` (it answered the pair
-    `(NaN, NaN)`).
-  - `ComplexRoots(z, n)` takes a finite complex radicand and an integer
-    root count: an infinite radicand is an `incompatible-type` error
-    (`ComplexRoots(+oo, 2)` answered `[NaN, ~oo]`), a `NaN` radicand
-    propagates (it stayed inert), and a root count below 1 fails the
-    operator's precondition — an evaluation error (it stayed inert).
-  - `Erfi` takes `complex | signed_infinity`, like `Erf`: `Erfi(±oo) =
-    ±oo` as before, while `~oo` and a complex literal with an infinite
-    component are `incompatible-type` errors now. Erfi is bounded on the
-    imaginary axis (`erfi(iy) = i·erf(y)`), so it has no limit at complex
-    infinity (`Erfi(~oo)` answered `~oo`).
-  - `ErfInv` takes `complex | infinity`. Every infinity answers `NaN`
-    (`ErfInv(~oo)` and `ErfInv(∞ + i)` stayed inert). Where the value
-    exists but the engine's real kernel cannot compute it — a real
-    argument outside `[-1, 1]`, or a non-real finite argument — the
-    application stays symbolic on `evaluate()` and `.N()` alike:
-    `ErfInv(2)` used to answer `NaN`.
-  - **A type-variable parameter no longer rejects `NaN`.** The NaN policy
-    derived from a signature such as `(T) -> T where T: number` compared
-    the bare variable `T` against the numeric carriers, and every such
-    head answered an `unexpected-argument` error for a `NaN` operand:
-    `Chop(NaN)`, `Remainder(NaN, 2)`, `BaseForm(NaN)` and `Identity(NaN)`
-    answer `NaN` now. The variable's bound is its carrier.
-  - **A declared tuple or list codomain takes its `| nan` arm as a
-    whole.** For a scalar operand that may be `NaN`, the derived
-    application type widened such a codomain per cell
-    (`tuple<real | nan, real | nan>`) while the value is the bare `NaN`.
-    `AbsArg(u)` for `u: number` is typed `tuple<real | +oo, real> | nan`
-    now, and a proven `NaN` operand types exactly `nan`. Per-cell widening
-    remains the rule for a broadcast over a collection operand, where the
-    `NaN` lands in the cells.
-  - **A matrix of unknowns typed with a numeric union keeps its shape.**
-    A symbol used under a declared-domain operator infers that operator's
-    carrier (`Abs(a)` types `a` as `complex | infinity`), and a literal
-    list of such symbols lost its shape claim — `Determinant([[a, b],
-    [c, d]])` answered an `incompatible-type` error instead of
-    `a·d − b·c`. A union of numeric types is a homogeneous numeric
-    population and the shape claim stands.
-  - **A tuple-valued operator broadcast over a list keeps the tuple in
-    its type.** `AbsArg([1, 2])` evaluates to `[(1, 0), (2, 0)]` but was
-    typed `list<+oo | real^2>`, and `NumeratorDenominator([1/2, 3/4])`
-    was typed `vector<2>` for a list of pairs: the broadcast lift
-    unwrapped the declared tuple result as if it were a leaked list
-    rank. Both are typed as lists of tuples now
-    (`list<tuple<+oo | real, real>^2>`).
-
-- **The Γ family and the special functions now declare their
-  mathematical domains**: `Gamma` (both forms), `GammaLn`, `Factorial`,
-  `Factorial2`, `Digamma`, `Trigamma`, `PolyGamma`, `Zeta`, `Beta`,
-  `LambertW`, `BesselJ`/`BesselY`/`BesselI`/`BesselK`,
-  `AiryAi`/`AiryBi`/`AiryAiPrime`/`AiryBiPrime`, `SinIntegral`,
-  `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `ExpIntegralEi`,
-  `LogIntegral`, `EllipticK`/`EllipticE`/`EllipticF`/`EllipticPi`, `AGM`,
-  `Hypergeometric2F1`, `Hypergeometric1F1`, `AppellF1`, `PolyLog`,
-  `JacobiTheta`, `DedekindEta` and `EisensteinE`. Every numeric slot takes
-  the carrier `complex | infinity` (the Γ-family convention: a point with
-  no limit answers `NaN` and is never a boxing error), except the Bessel
-  ORDER slot, which is finite-only — `BesselJ(∞, x)` is now an
-  `incompatible-type` error. The values at the exceptional points, each
-  verified numerically before it was encoded, and each answered the same
-  way by `evaluate()` and `.N()`:
-
-  - **The polygammas**: `Digamma(+∞) = +∞`; `Trigamma(+∞)` and
-    `PolyGamma(n ≥ 1, +∞)` are 0; every pole (a non-positive integer) is
-    `~oo` for every known non-negative order, on both routes
-    (`Digamma(0)` folded only under `.N()`, and `Trigamma(0)`,
-    `PolyGamma(2, 0)` answered `NaN`); a symbolic order stays symbolic at
-    a pole, and a negative order (not implemented by the kernels) stays
-    symbolic everywhere instead of answering `NaN`; `−∞`, `~oo` and an
-    anonymous infinity such as `∞ + i` answer `NaN` (no limit).
-  - **`Zeta(1)` is `~oo` on both routes** (`.N()` answered `+∞`; the pole
-    of `1/(s − 1)` has no sign); `Zeta(+∞) = 1` (was `NaN`); `Zeta(−∞)`
-    and `Zeta(~oo)` are `NaN`.
-  - **`LambertW`**: `W(+∞) = +∞` under `evaluate()` too; `W(−∞)` follows
-    `Ln(−∞)` — symbolic under `evaluate()`, `∞ + iπ` under `.N()` (it
-    answered `−∞`); `W(~oo) = ~oo`. Outside a real branch (`W₀(−1)`,
-    `W₋₁(0.5)`) the value is a finite complex number the real kernels
-    cannot compute, so the application now stays symbolic instead of
-    answering `NaN`.
-  - **Bessel**: `J_n(±∞) = Y_n(±∞) = K_n(+∞) = 0`, `I_n(+∞) = +∞`,
-    `I_n(−∞) = ±∞` by the parity of n, `K_n(−∞) = ~oo`; the poles
-    `Y₀(0) = −∞`, `K₀(0) = +∞`, `Y_n(0) = K_n(0) = ~oo` for n ≠ 0; `~oo`
-    answers `NaN`. All of these answered `NaN` before. A non-integer
-    order, a non-real argument, and a negative real argument of `Y`/`K`
-    (a complex value) now stay symbolic — the kernels are real,
-    integer-order kernels — instead of answering `NaN`.
-  - **Airy**: `Ai(±∞) = Bi(−∞) = Ai′(+∞) = 0`, `Bi(+∞) = Bi′(+∞) = +∞`,
-    `Ai′(−∞)` and `Bi′(−∞)` are `NaN` (the amplitude grows), `~oo` is
-    `NaN`. All answered `NaN` before.
-  - **`CosIntegral` and `CoshIntegral` take the PRINCIPAL value on the
-    negative axis**: `Ci(−x) = Ci(x) + iπ` and `Chi(−x) = Chi(x) + iπ`
-    (Mathematica's values; the machine kernels returned the real part
-    alone), so `CosIntegral(−2).N()` is `0.423 + 3.142i`,
-    `CosIntegral(−∞) = iπ` (was 0 under `.N()`), and `CoshIntegral(−∞)`
-    follows `Ln(−∞)` (was `+∞`). A real argument of unknown sign therefore
-    types `number` for these two heads; a proven non-negative one keeps
-    `real | signed_infinity`. `~oo` and an anonymous infinity answer
-    `NaN` for all four trigonometric integrals (`SinhIntegral(∞ + i)`
-    answered `~oo`).
-  - `ExpIntegralEi(~oo)` is `NaN` (was symbolic); `LogIntegral(−∞) = ~oo`
-    (both components of `Ei(ln x + iπ)` diverge; was symbolic).
-  - **Elliptic**: `EllipticK` is 0 at `±∞` and `~oo` (stayed symbolic
-    under `evaluate()`); the complete `EllipticE(−∞) = +∞` and
-    `EllipticE(+∞) = ~oo` (the value tends to `i·∞`, an infinite value in
-    a non-real direction, which the engine spells `~oo`); the incomplete
-    forms stay symbolic at an infinite operand (`EllipticF(~oo, m)`
-    answered `~oo` through the kernel).
-  - **`AGM(a, +∞) = +∞`** for a positive real a, now under `evaluate()`
-    too; `AGM(a, −∞)` and `AGM(a, ~oo)` are `~oo` (non-real direction /
-    the modulus rule); `AGM(0, ∞) = 0` (zero annihilates the AGM); two
-    infinite operands are `NaN`.
-  - **`Beta`**: 0 at every infinity (including `~oo`, which answered
-    `NaN`) against a positive-integer partner, 0 at `+∞` against a finite
-    partner with a positive real part, `NaN` otherwise. The incomplete
-    `Gamma(+∞, z) = +∞` for a positive finite z; `Gamma(−∞, z)` is 0 for
-    z ≥ 1 and `+∞` for 0 < z < 1 (the `z^s` factor decides);
-    `Gamma(s, −∞)` and `Gamma(∞, ∞)` are `NaN` (the latter stayed
-    symbolic). `PolyLog(s, 0) = 0` for an infinite order too.
-  - **The parameter-heavy heads** (`Hypergeometric2F1`,
-    `Hypergeometric1F1`, `AppellF1`, `PolyLog` at an infinite argument,
-    the incomplete elliptic integrals, `JacobiTheta`) stay symbolic at an
-    infinite operand: their limits depend on the parameters through
-    connection formulas the engine does not implement
-    (`Hypergeometric1F1(1, 2, +∞).N()` answered `+∞` by kernel overflow).
-    Two exceptions, the cusp values of the modular heads:
-    `DedekindEta(i∞) = 0` and `EisensteinE(2k, i∞) = 1` (the engine boxes
-    `i·∞` as `~oo`).
-  - **A complex operand no longer loses its imaginary part** in the
-    two-argument numeric dispatcher: `Beta(1 + 2i, 2).N()` answered
-    `B(1, 2)`, `PolyGamma(2, 1 + 2i).N()` answered ψ₂(1), and
-    `BesselJ(0, 1 + 2i).N()` answered `J₀(1)`. A head without a complex
-    kernel now stays symbolic for a non-real operand (`Beta`, the
-    polygammas, the Bessel and Airy functions, `Zeta`, `LambertW`).
-  - A `NaN` argument answers `NaN` for every operator above
-    (`PolyLog(NaN, z)` stayed inert).
-
-- **`Abs`, `Log` (with `Log2`, `Log10`, `Lb`, `Lg`), `Arctan`, `Arctan2`,
-  `Root`, and `Sqrt`/`Ln` at complex infinity now declare their
-  mathematical domains**, completing the elementary functions. The values
-  at the exceptional points follow four rules:
-
-  - **The modulus rule for `~oo`.** A function whose modulus grows without
-    bound in every direction of approach has the value `~oo` at complex
-    infinity: `Sqrt(~oo)`, `Root(~oo, n)`, `Ln(~oo)`, and `Log(~oo, b)` all
-    answer `~oo` (consistent with `Power(~oo, 1/2) = ~oo`). `Sqrt(~oo)` and
-    `Ln(~oo)` were `incompatible-type` errors in the previous entry;
-    `Root(~oo, 3)` answered `NaN`. `Abs` accepts every number; `Abs(~oo)`
-    is `+∞` as before.
-  - **`Log(x, b)` is `Ln(x) / Ln(b)` at every point**, computed with the
-    engine's extended arithmetic: `Log(8, 1) = ~oo`, `Log(8, 0) = 0`,
-    `Log(8, ±∞) = Log(8, ~oo) = 0`, `Log(0, 1/2) = +∞`, `Log(+∞, +∞) =
-    NaN`, `Log(0, 0) = NaN`, `Log(1, 1) = NaN`, and a negative base gives
-    a finite complex number (`Log(8, −2).N() = 0.139 − 0.631i`).
-    `evaluate()`, `.N()` and `simplify()` disagreed at most of these
-    points before; three `evaluate()` answers were wrong (`Log(0, 1/2)`
-    gave `−∞`, `Log(+∞, +∞)` gave `1`, `Log(0, 0)` gave `−∞`), and `.N()`
-    gave `NaN` for a negative base. `Ln(+∞)` now evaluates to `+∞` (it
-    stayed symbolic under `evaluate()`). `Log(−∞, b)` follows `Ln(−∞)`:
-    symbolic under `evaluate()`, `∞ + i·π/ln b` under `.N()`.
-  - **`Root(x, n)` is `Power(x, 1/n)` at every point**: `Root(x, 0)` is an
-    error (the exponent `1/0 = ~oo` is outside `Power`'s domain; it used
-    to answer `NaN` under `.N()` and stay symbolic under `evaluate()`);
-    `Root(x, ±∞)` is `x^0` — `1` for a finite non-zero `x`, `NaN` for
-    `Root(0, ±∞)` and `Root(±∞, ±∞)`; `Root(±∞, 3)` folds to `±∞` and
-    `Root(2, 1/2)` to `4` under `evaluate()` (both stayed symbolic).
-  - **`Arctan2` takes IEEE `atan2`'s values at the infinite corners**:
-    `Arctan2(+∞, +∞) = π/4`, `(+∞, −∞) = 3π/4`, `(−∞, +∞) = −π/4`,
-    `(−∞, −∞) = −3π/4` (they answered `NaN`; the compiled code already
-    answered these), and `Arctan2(y, −∞)` is `−π` for a negative `y`
-    (`evaluate()` answered `π`). The values are angles in the current
-    `angularUnit`, under `simplify()` as well (which answered radians in
-    degree mode). `Argument(~oo)` stays `NaN` (complex infinity has no
-    direction) — it guards the point itself instead of reading it as the
-    diagonal corner.
-  - `Arctan(~oo)` and any `Arctan2` with a `~oo` or non-real operand are
-    now `incompatible-type` errors, reported when the expression is
-    created (`Arctan2` used to stay unevaluated). `Arctan(±i)` evaluates
-    to `~oo` (it stayed symbolic; `.N()` already answered `~oo`).
-  - A `NaN` argument still answers `NaN` for every operator above.
-
-- **`IsPrime` and `IsComposite` now use positive-integer definitions.**
-  `IsPrime` returns `False` for a decidable value that is not a positive
-  integer greater than 1. It reports an `incompatible-type` error for an
-  infinite argument. An unknown value that can be an integer stays
-  unevaluated. `IsComposite` returns `False` for `0`, `1`, negative integers,
-  and non-integers.
-
-- **Selecting operators evaluate only the operands that they need.** An error
-  in an unselected operand does not become the result. For example,
-  `If(True, 5, <error>)` returns `5`, and `And(False, <error>)` returns
-  `False`. An error in a selected operand still becomes the result. The
-  diagnostic stays in the boxed expression, and `isValid` stays `false`.
-  Custom lazy operators can use the `selectsOperands` option for this
-  behavior. If the condition is unknown, the selection stays unevaluated.
-  Operand order can change the result. For example, `And(False, 1)` returns
-  `False`, but `And(1, False)` returns an `incompatible-type` error.
-
-- **Collection accessors now preserve the element type when they can return
-  `NaN`.** For example, `At([1,2,3], 99)`, `First([1,2,3])`, and
-  `Last([1,2,3])` have the type `integer | nan` instead of `number`. An
-  out-of-range literal tuple index has the type `missing | nan`.
+- **Result types now reflect possible exceptional results more accurately.**
+  Partial numeric operations can include `nan` or `infinity`; non-numeric
+  domain failures return `Missing`. Division and negative powers report
+  possible non-finite results when zero is possible, collection operations
+  preserve their shape, and expressions with an empty-range operand retain
+  the type `never`.
 
 ### New Features
 
-- **Documented: a result type describes the successes.** `docs/ERROR-MODEL.md`
-  now states the rule the engine has followed since the error-model work
-  began: an operator that declares no `partiality` keeps its sharp result
-  type (`Length(xs)` types `integer`), even though at runtime the value may
-  be the absence marker of its codomain — `NaN` for a numeric result, the
-  IEEE expectation that any numeric value may be `NaN`, or `Missing` for a
-  non-numeric one — in the same way every application may produce an error
-  without its type saying so. The marker appears in a type only when an
-  operator declares its partiality (`partiality: 'may-marker'` or a
-  `definedWhen` condition the arguments do not discharge) or when an
-  argument is provably `NaN`. No behavior changed.
+- **Operator definitions can declare their error behavior.** Definitions can
+  specify how `NaN` is handled, whether an operation is partial, its
+  mathematical domain, and required preconditions. Application types use
+  these declarations to include `nan` or `missing` only when appropriate.
 
-- **`Hypot` accepts infinite arguments, with IEEE semantics.** The declared
-  signature is now
-  `(real | signed_infinity, real | signed_infinity) -> real | +oo | nan`
-  with `nanBehavior: 'handle'`: `Hypot(2, oo)` evaluates to `+oo` instead
-  of rejecting at the signature, an infinite leg dominates a NaN leg
-  (`Hypot(+oo, NaN)` is `+oo`, both orders, matching IEEE `Math.hypot`, so
-  the interpreted and compiled lanes agree), and `Hypot(NaN, 1)` stays
-  `NaN`. A point leg with a signed-infinite component and no NaN component
-  counts as infinite (`Hypot((+oo, 3), NaN)` is `+oo`), matching `Norm`'s
-  own answers. `euclideanNormType` (the norm-type helper shared by
-  `Norm`/`Abs`/`Distance`) claims `real | +oo` when component finiteness
-  is unproven (sharper than the previous `number`), and its finiteness
-  proof now also accepts a type-level proof, so compound real-typed
-  components stay sharp (`Hypot(Norm((3,4)), 1)` is still `real`). Two
-  consumer-visible notes: a stored/inferred result reads
-  `real | signed_infinity` (the engine's value-widening rule: a contract
-  inferred from one observed `+∞` must not reject a later `−∞`), and
-  undeclared symbols used as `Hypot` arguments now infer
-  `real | signed_infinity` instead of `real`.
+- **`Hypot` accepts infinite arguments with IEEE semantics.** An infinite leg
+  produces `+oo` even when another leg is `NaN`; without an infinite leg,
+  `NaN` propagates. Euclidean norms and distances follow the same rule.
 
-- **`Factorial`, `Factorial2`, `Gamma` and `GammaLn` now resolve infinite
-  arguments.** `Factorial(+oo)` evaluates to `+oo` (the limit exists);
-  `Factorial(-oo)` evaluates to `NaN` (Gamma oscillates through poles as
-  x → −∞ — no value); same for the other three heads, on the evaluate,
-  evaluateAsync and parse routes. `Factorial2(~oo)` now answers `NaN` like
-  the rest of the family instead of staying inert (`Factorial2(∞ + i)`
-  stays inert — a mixed infinity is not an infinity value and is out of
-  this scope). `Digamma`/`Trigamma`/`PolyGamma` are unchanged (their limit
-  shapes differ per head; tracked in `ROADMAP.md`).
+- **`Factorial`, `Factorial2`, `Gamma`, and `GammaLn` resolve signed-infinite
+  arguments.** Positive infinity produces `+oo`; negative infinity produces
+  `NaN`.
 
-- **Operator definitions can declare their error-model contract.** Four new
-  declaration fields implement the ratified error model
-  (`docs/ERROR-MODEL.md` §4, Contract B):
-  - `nanBehavior: 'propagate' | 'handle' | 'reject'` — how a `NaN` argument
-    is treated, per parameter slot or for the whole operator. Without a
-    declaration the policy is derived from the signature: a slot whose type
-    still admits `nan` (such as bare `number`) keeps its current behavior;
-    a slot with a precise numeric type propagates (`NaN` in → `NaN` out)
-    when the result is numeric, and rejects otherwise. `IsPrime` and
-    `IsComposite` declare `handle` (they answer `False`).
-  - `partiality: 'total' | 'may-marker'` — whether membership in the
-    parameter types proves the operation succeeds. Omitted means
-    `may-marker`, the sound default.
-  - `definedWhen(args)` — the named mathematical domain condition. A
-    provably false condition returns `NaN` for a numeric result type,
-    before the handler runs. `Mod` declares it: the operands must be finite
-    reals and the divisor must not be zero.
-  - `requires(args)` — a contract precondition. A provably false
-    precondition returns an error.
+- **Piecewise expressions can be differentiated.** `D` differentiates each
+  value branch of `If` and `Which` while preserving its condition.
 
-  One behavior change follows from the derived policy: an operator that
-  already declares a precise numeric parameter type — such as
-  `Degrees: (real) -> real` — now accepts a `NaN` argument and returns
-  `NaN`, where it used to report an `incompatible-type` error.
+- **Componentwise functions broadcast over tuples in the interpreter.** For
+  example, `Sin((1, 2))` evaluates componentwise. Operations that treat tuples
+  as points, such as `Abs`, retain their existing behavior.
 
-- **The type of an application reflects its error-model contract.** For an
-  operator without a custom type handler, the result type now carries a
-  `| nan` arm when a `NaN` argument can propagate into it, or when a
-  declared `partiality`/`definedWhen` condition is not discharged for the
-  given arguments, and it is exactly `nan` when the `definedWhen`
-  condition is provably false. A broadcast application widens the element
-  type (`list<real | nan>`), not the collection. The adjustment is
-  invisible for result types that already include `NaN`, such as bare
-  `number`, so existing types do not change unless an operator declares
-  the new contract fields. User-defined functions are not affected: a
-  lambda or a multi-clause function owns its own argument handling and
-  dispatch, so neither the runtime behavior nor the type of its
-  applications changes.
+- **JavaScript compilation supports more user functions.** Bounded generic
+  functions, tuple-returning functions, runtime broadcasting of array
+  arguments, complex-valued callbacks, and element-wise selections with
+  complex-valued branches are now supported.
 
-- **A domain failure in a non-numeric operation returns `Missing`.** When
-  a declared `definedWhen` condition is provably false and the result
-  type is not numeric — a boolean, a string, a collection — the
-  application returns `Missing` instead of an unevaluated expression, and
-  its type is `missing`. `NaN` remains the marker for numeric result
-  types. For an operator with several signatures, the marker follows the
-  signature the call resolved to, and a `NaN` argument is propagated or
-  rejected according to that signature's parameter types.
+- **Python compilation supports statement-form conditionals.** `If` with an
+  `else` branch emits valid statement syntax inside blocks and loops, while
+  unsupported value-returning forms decline compilation safely.
 
-- **`interval-js` target: a second lowering batch** (Tycho item 237, the
-  item-220 mold). `Choose` lowers to the existing `_IA.binomial` runtime
-  helper; `Apply` of a function literal — the `f'` prime-derivative
-  spelling — compiles to a direct call of the compiled arrow;
-  `WithRandomSeed`/`Random()` are enclosed by the draw's SUPPORT
-  (`[0, 1]`), which is a sound band for any draw on any evaluation — the
-  seeded sequence is deliberately NOT threaded through, since the interval
-  lane samples at different points than the scalar lane and its draws
-  would not enclose the plotted values; and the index-less `Sum` over a
-  collection body (the Desmos sum-a-list spelling) folds its elements with
-  `_IA.add` — a literal list, a literal `Range`, a `Map` over one, or an
-  element-wise head over one decomposes statically, an
-  indexed-collection-typed operand folds at run time, and anything else
-  fails closed (D6). `Random(source)` (an interval, range, or collection
-  source) also fails closed rather than guess its support.
+- **The `interval-js` target supports more expressions.** Added support
+  includes `Choose`, direct application of function literals, bounded random
+  draws, and sums over supported collections. Finite jump discontinuities now
+  retain a sound enclosure, allowing downstream comparisons and integration
+  to continue without treating every jump as an unbounded pole.
 
-- **Bounded generic user functions compile on the `javascript` target.** A
-  function declared with a bounded quantified signature — for example
-  `(x: T) -> T where T: number` — used to take the whole-function decline
-  (a polytype has no ground parameter type), and a call boundary that
-  slipped past it lost its coercion and broadcast wraps: `gd([1,2,3])` ran
-  to a wrong value. Each quantified parameter is now read at its declared
-  BOUND — the same reading the interpreter's broadcast gate performs — so
-  the function is emitted once at that ground signature and every call
-  site gets the wraps it earns. A variable with no ground bound
-  (`where T`) still declines, as does every other target.
+- **Predicates can produce boolean value types.** When operand types prove a
+  predicate, its type is `true` or `false`; otherwise it remains `boolean`.
+  Compilers can use proven predicates to eliminate unreachable branches.
 
-- **Tuple-returning user functions compile on the `javascript` target.** A
-  function whose result is a tuple — written directly, through a
-  broadcast whose result carries its arity in its type, or through a
-  transparent tuple ALIAS — now compiles and runs to the point value. A
-  NOMINAL type over a tuple still declines, with a diagnostic saying why.
+- **Numeric ranges support open endpoints.** For example, `real<0<..>` means
+  `x > 0`, `real<..<3>` means `x < 3`, and `real<0<..<3>` means
+  `0 < x < 3`. Assumptions and arithmetic preserve strict bounds, and empty
+  ranges produce `never`.
 
-- **Componentwise functions broadcast over tuples in the interpreter.**
-  `Sin((1, 2))` evaluates to `(sin 1, sin 2)`, matching what the compiled
-  lane already did for point-valued expressions. Point-family readings are
-  unchanged: `Abs` of a tuple is still its norm (`Abs((-1, 2))` is `√5`),
-  not a componentwise map.
+- **Numeric result types include computed bounds.** `Add`, `Multiply`, `Abs`,
+  `Divide`, and integer powers preserve useful interval bounds. Inexact
+  literals also receive compact enclosing range types.
 
-- **Boolean value types.** A predicate whose operands' TYPES prove its
-  verdict now carries that verdict as its type: `1 < 2` types `true`,
-  `Equal(a, a)` types `true` for a NaN-free real `a`, `p > q` types `true`
-  for `p: real<3<..>` and `q: real<..<2>`, `IsPrime(7)` types `true`,
-  `3 ∈ [1, 2, 3]` types `true`, and `And`/`Or`/`Not`/`Xor` fold by the
-  truth table. A comparison the types do not decide keeps the bare
-  `boolean`, and so does one that would be unsound to decide (`Equal(n, n)`
-  with `n: number`, since `NaN ≠ NaN`; `Equal(True, False)`, since both
-  constants type the bare `boolean`). Assigning such a value to a symbol
-  stores `boolean`, not the proof. The compiler uses the claim: a proven
-  `If` or `Which` clause compiles to its arm alone (`If(a = a, x, y)` →
-  `_.x`), and a proven test inside a connective compiles to the target's
-  own `true`/`false` literal, on every target.
+- **Added `infinity` and `nan` primitive types.** They are supported in type
+  strings, declarations, signatures, `matches()`, and `isSubtype()`; `~oo`
+  and `~∞` can be used as the singleton complex-infinity type.
 
-- **Numeric ranges can have open endpoints.** Use an inequality marker to
-  exclude an endpoint. For example, `real<0<..>` means `x > 0`,
-  `real<..<3>` means `x < 3`, and `real<0<..<3>` means `0 < x < 3`.
-  `real<0..3>` is still a closed range. The old intersection syntax still
-  parses, but the serializer uses the new syntax. Integer ranges convert an
-  open endpoint to the next closed integer. An empty range has the type
-  `never`.
-
-- **Assumptions preserve strict bounds.** For example, `assume(x > 2)` gives
-  `x` the type `real<2<..>`. The engine rounds inexact bounds outward so that
-  the type includes all permitted values.
-
-- **Arithmetic result types include computed bounds.** This applies to
-  `Add`, `Multiply`, `Abs`, `Divide`, and `Power` with a literal integer
-  exponent. The result preserves an open endpoint when the result cannot
-  equal that endpoint. The engine rounds inexact bounds outward.
-
-  For example, if `x: real<2<..<3>` and `y: real<1<..<2>`, then `x / y` has
-  the type `real<1<..<3>`. Also, `x^-2` has the type
-  `real<0.1111..<0.25>`. If `z` is a finite real number with no bounds, then
-  `0 * z` has the type `real<0..0>`.
-
-- **Inexact number literals now have compact range types.** The bounds contain
-  the exact value and use two significant digits. For example, `1/3` has the
-  type `rational<0.33..0.34>`, and `sqrt(2)` has the type
-  `real<1.4..1.5>`. These bounds can improve domain checks.
-
-- **The type system has new `infinity` and `nan` primitive types.** The
-  `infinity` type contains `+oo`, `-oo`, and `~oo`. The `nan` type contains
-  only `NaN`. You can use both types in type strings, declarations,
-  signatures, `matches()`, and `isSubtype()`. Code that has a list of
-  primitive type names must include these two names.
-
-  The unsigned complex infinity also has the singleton type spelling `~oo`
-  or `~∞`. It is a subtype of `infinity`, but it is not a subtype of
-  `non_finite_number`, `complex`, or `real`. In a type string, the lowercase
-  words `infinity` and `nan` name primitive types. Other value spellings do
-  not change.
-
-- **`BigDecimal.toPrecisionToward(n, direction)` provides directed rounding.**
-  The method rounds to `n` significant digits. Use `'floor'` to round toward
-  negative infinity. Use `'ceiling'` to round toward positive infinity.
+- **Added directed decimal rounding.**
+  `BigDecimal.toPrecisionToward(n, direction)` rounds to `n` significant
+  digits toward either negative or positive infinity.
 
 ### Bug Fixes
 
-- **A provably non-boolean `If`/`Which` condition is reported at boxing.**
-  Since the 2026-08-31 inertness change, `Which(10, 1, True, 2)` or
-  `If(n, a, b)` with `n: integer` boxed with no diagnostic and evaluated to
-  itself, so a typo or a wrong operand in condition position was silent. A
-  condition whose static type is disjoint from `boolean` — a number, a
-  string, a `NaN` literal, a symbol declared with such a type — is now an
-  `incompatible-type` error operand at boxing, exactly as a wrong-typed
-  argument to `Sin` is, and evaluation propagates it as the condition's
-  error (`errors` lists it; no host exception). Everything that may still
-  resolve is unchanged and stays inert: a symbol of unknown type (a
-  misspelled `Tru` is a free variable), a relation with free variables, a
-  `boolean | missing` condition, and a collection whose cells could be
-  condition values (a list of booleans selects element-wise). A collection
-  that can never select — a tuple, a set, a string, a list of numbers — is
-  refused like a scalar. A later `Which` clause with such a condition is
-  reported at boxing but
-  never demanded when an earlier clause selects. The check exposed a
-  parser defect, fixed with it: a `\begin{cases}` row written with a
-  trailing `&` and an empty condition cell (`3x^2 & \\`) parsed to a
-  `Nothing` condition, a dead row that never selected; it is now the
-  `True` default clause, like the same row without the `&`.
-
-- **Native handler faults carry the `internal-error` code and a stack.** A
-  `TypeError`, `RangeError` or `ReferenceError` thrown inside a built-in
-  handler used to be converted to `Error("evaluation-error", message)`,
-  the same code a legitimate domain failure reports, so an engine bug was
-  indistinguishable from bad input and the stack was lost. It now converts
-  to `Error(ErrorCode("internal-error", message, stack))`, with the first
-  frames of the stack as the third part; the conversion itself (no host
-  exception) is unchanged. Consumers that matched the `evaluation-error`
-  code on such faults should match `internal-error`.
-
-- **`Length` and `Count` refuse a decided non-collection.** Asking for
-  the size of something that is not a collection is a violated contract,
-  not an open question. `Length(5)`, `Length(True)` and `Length(Missing)`
-  stayed inert and reported the type `integer`; `Count` refused a literal
-  at boxing but let an operand that only became `Missing` at evaluation
-  (`Count(First([]))`) stand as `Count(Error(...))`. Both operators now
-  answer one bare `Error(ErrorCode("incompatible-type", "collection",
-  ...))` for any operand whose value or type is provably disjoint from
-  `collection<any>` — a number, a boolean, a function literal, or the
-  `Missing` absence marker — on the `ce.box`, `ce.parse` and
-  `ce.function` routes alike, and for `Count` in its one-argument and
-  both two-argument forms. Strings are collections of characters, so
-  `Length("abc")` is still 3. An operand about which nothing is decided
-  keeps the inert form: an undeclared symbol, or a valueless symbol
-  declared `list<number>`, may still turn out to hold a collection. The
-  rule is that a decided question is never answered by inertness
-  (`docs/ERROR-MODEL.md` §1).
-
-- **An infinite leg now dominates a NaN leg in every Euclidean norm, and
-  `~oo` counts as infinite.** `Norm` and `Hypot` disagreed in both
-  corners: `Norm((+oo, NaN))` and `Norm([+oo, NaN])` answered `NaN`
-  while `Hypot(+oo, NaN)` answered `+oo`, and `Hypot(~oo, 3)` was an
-  `incompatible-type` error although `Norm((~oo, 3))` was already `+oo`.
-  One rule now covers them both: an infinite leg — the signed `±∞`, the
-  unsigned `~oo`, or a directed infinity such as `∞ + i`, each of
-  modulus `+∞` — makes the norm `+oo` whatever the other legs are; with
-  no infinite leg, a NaN leg makes it `NaN`. IEEE 754 states the same
-  precedence for the primitive the compiled lane emits
-  (`Math.hypot(Infinity, NaN)` is `Infinity`). This reaches `Norm` of a
-  point, of a list, of a list of points and of a matrix, `Abs` of a
-  point (which is that norm under the single-bar spelling), and every
-  `Norm` order (L1, L2/Frobenius, Lp, L∞). `Hypot`'s parameter type
-  widens from `real | signed_infinity` to `real | infinity`; a finite
-  complex leg is still refused. The compiled `Norm` lowering was
-  corrected to match, since its accumulator turned `∞² + NaN²` into
-  `NaN`. Also fixed alongside: a matrix operator norm (`Norm(M, 1)`,
-  `Norm(M, Infinity)`) silently skipped a column or row whose sum was
-  `NaN` and answered the maximum of the remaining ones —
-  `Norm([[NaN, 1], [2, 3]], 1)` read 4 — where the compiled lane
-  propagated the `NaN`; both routes now answer `NaN`.
-  `Distance` joins the family, since `Distance(p, q)` is `Norm(p − q)`.
-  It answered `Error("expected-value")` at every non-finite coordinate
-  and now gives the in-band value: `Distance((+oo, 0), (0, 0))` and
-  `Distance((~oo, 0), (0, 0))` are `+oo`, `Distance((+oo, NaN), (0, 0))`
-  is `+oo`, `Distance((NaN, 0), (0, 0))` is `NaN`, and a finite pair is
-  unchanged. The rule reads the coordinate DIFFERENCES, so two equal
-  infinite coordinates cancel to `∞ − ∞` and give `NaN`; a distance
-  between coordinates that are not proven finite therefore types the
-  wide `number`, where a plain norm of the same components can still say
-  `real | +oo`. A non-numeric coordinate is still the malformed-point
-  error.
-
-- **A compiled `If`/`Which` no longer picks a branch on an undecided
-  condition.** `compile(If(x > 0, 1, -1))` answered `-1` at `x = NaN`,
-  because JavaScript answers an ordinary `false` for `NaN > 0` and the
-  ternary read that as "take the else arm"; `compile(If(b, 1, -1))`
-  answered `-1` when the caller supplied no `b` and `1` for `b = "a"`,
-  reading the condition by JavaScript truthiness. The interpreter holds
-  all of these unevaluated. A compiled `If`/`Which` now takes a branch
-  only when its condition is exactly `true` or `false` at run time;
-  otherwise it answers `NaN` — the numeric codomain's absence marker,
-  and the same value the element-wise `Which` lowering already gives a
-  cell no clause matched. A result outside the numeric domain (a string,
-  a list) answers the target's object absence value (`undefined` on
-  JavaScript) instead.
-
-  The same applies when the caller leaves a variable out of the vars
-  object: `compile(If(x > 0, 1, -1)).run({})` answered `-1`, although
-  `compile(x + 1).run({})` has always answered `NaN`. It now answers
-  `NaN` too, for a variable of any declared numeric type, and so does a
-  condition that COMPUTES over an absent variable (`If(2r > 0, 1, -1)`).
-
-  A STATEMENT-form `If` — the `if (…) { … } else { … }` a loop or block
-  body emits — has no value to answer with, so the rule reads there as
-  "run NEITHER branch, and carry on with the next statement". An
-  assignment guarded by an undecided condition leaves its variable
-  untouched, a guarded `Break` does not fire, and the loop completes.
-  Both match the interpreter, which holds an undecidable `If` inert.
-
-  Because a comparison collapses an undecided answer into a genuine
-  `false`, the tests are on the comparison's OPERANDS: `x === x` (false
-  only for NaN) for every numeric operand the compiler has not already
-  reduced to a literal, and `x !== undefined` where the operand is a bare
-  variable read, the only emitted fragment a caller can leave absent. The
-  NaN test is deliberately not gated on the operand's type: a static
-  `real` type promises no NaN, but that promise does not survive an
-  absent input. A condition that is not a comparison is tested for
-  `=== true` / `=== false` on its own value. Measured cost in a warm
-  kernel: below noise, within 0.09 ns on a 3.8 ns/call loop body.
-
-  Not covered, and tracked in `ROADMAP.md`: a condition built with
-  `And`/`Or` (its short-circuit cases already agree with the
-  interpreter), and the Python, GPU and interval-JavaScript targets,
-  which lower `If`/`Which` themselves.
-
-- **The broadcast lift now sees through a transparent collection alias,
-  and a lifted result is typed by its structure, never by the alias
-  name.** With `ce.declareType('nums', 'list<number>', { alias: true })`
-  and `ce.declare('L', 'nums')`, a valueless `L` was not a broadcast
-  trigger for the type derivation: `Sin(L)` typed the scalar `number` and
-  `Mod(L, 2)` the scalar `real`, while both evaluate to a list once `L`
-  holds one. With a value assigned, `Multiply(2, L)` and `Negate(L)` typed
-  `list<nums>` (a list of lists the value contradicts), and for an alias of
-  `list<integer>` the cell-scaling handlers echoed the alias although the
-  cells changed kind (`0.5 · L` typed the alias; its cells are reals).
-  `At(L, 1)` and `First(L)` typed `unknown`. Every seam of the lift path
-  now unfolds a transparent alias before reading its structure — the
-  triggers, the element and dimension readers, the per-cell result, the
-  handler echoes of `Add`/`Multiply`/`Negate`, and the tuple scaling — and
-  the result is the structure it builds: `Sin(L)` is `list<number>`,
-  `Sin(v)` for an alias of `vector<3>` is `vector<3>`, `0.5 · L` for an
-  alias of `list<integer>` is `list<real>`, `-p` for an alias of a tuple is
-  the tuple. The symbol itself still reports its alias (`ce.box('L').type`
-  is `nums`), and a scalar alias is not a lift and keeps its name (`m + 1`
-  for `m: meters` is `meters`). A nominal type is still refused at the
-  operand gate. Consequence: `Multiply(2, L)` for `L: nums` now types
-  `list<number>` where it used to type `nums`. The same change closes a
-  stack overflow: arithmetic over a symbol declared with a
-  self-referential alias (`type alias json = list<json> | integer`,
-  `type alias nest = list<nest>`) threw `Maximum call stack size exceeded`
-  out of `.type`, because the admission predicates unfolded the alias
-  afresh at every level. Every structural walker now runs under one
-  descent guard, so `2j` for `j: json` types `list<number> | number` and
-  evaluates `[2, [4, 6]]` for `j := [1, [2, 3]]`, while an alias with no
-  numeric member (`nest`) is refused at the operand gate.
-
-- **Interval arithmetic: a jump discontinuity now carries its enclosure.**
-  The interval kernel (the `interval-js` compilation target and the
-  `IntervalArithmetic` library) reported every discontinuity as
-  `{ kind: 'singular' }`, whether the function was unbounded there (`1/x`
-  across 0, a pole) or merely not continuous (`floor(x)` across an
-  integer, a finite jump). A consumer that only needs a bound, such as an
-  implicit-curve sign test, could do nothing with a jump but treat it as
-  a pole. A jump is now `singular` WITH a `value`: a sound finite
-  enclosure of the function over the input (`floor` over `[0.5, 1.5]`
-  answers `value: [0, 1]`, `mod(x, 6.3)` across a period boundary answers
-  `[0, 6.3]`, `sign` across 0 answers `[-1, 1]`), with `at` and
-  `continuity` kept. A pole is still `singular` without a `value`. Every
-  operation propagates a jump by computing over its enclosure and
-  re-tagging the result, so `mod(100/(x²+y²), 6.3) − 3` over a cell that
-  spans one ring is `singular` with `value: [-3, 3.3]` instead of an
-  unbounded `singular`; a result that comes out unbounded (`1/floor(x)`
-  across 0) degrades to a pole. Comparisons, `unionResults` and
-  `integrate` use the enclosure, so `∫₀³ ⌊t⌋ dt` is now a bounded
-  interval around 3 instead of `singular`. Producers: `Floor`, `Ceil`,
-  `Round`, `Fract`, `Trunc`, `Mod`, `Heaviside`, `Sign`. Also fixed on the
-  same path: those step functions reported a discontinuity "at NaN" for a
-  NaN input; they now propagate a NaN interval like the arithmetic
-  kernels. (Tycho item 239.)
-
-- **An `If` or `Which` condition that cannot be decided no longer throws a
-  host exception.** `ce.box(['If', 'x', 5]).evaluate()` with `x` undeclared
-  used to throw `Error: Condition must evaluate to "True" or "False"` out
-  of `evaluate()`; the expression now stays inert (returned unevaluated,
-  with the condition evaluated in place), so it can resolve later if the
-  condition becomes decidable. This also covers conditions that evaluate to
-  a non-boolean value. Consumer code that caught that exception should test
-  for an unevaluated `If`/`Which` result instead. Compiled targets still
-  fail closed by throwing; neither route ever picks a branch on an
-  undecided condition. An absent (`Missing`) condition still produces a
-  catchable error expression — absence is decided and can never resolve.
-  Note: the spell-check hint for a misspelled condition symbol
-  (`Which(Tru, …)`) rode on the removed throw and no longer fires.
-
-- **`(+∞)^(+∞)` canonicalizes to `+oo`, not `~oo`.** The direction is
-  knowable, so the sharper answer is correct. `(-∞)^(+∞)` still answers
-  `~oo` (the sign alternates — direction genuinely lost), and `(±∞)^(−∞)`
-  still answers `0`.
-
-- **Type inference no longer widens through a nominal type alias.**
-  `provablyDisjoint` resolves nominal `reference` types through their
-  definitions (positive direction only — opacity for subtyping is
-  unchanged), so a parameter annotated with an object ALIAS now behaves
-  like the equivalent structural spelling. What kind of consumer code to
-  re-measure: an inferred arrow whose parameter is object/nominal-typed
-  now keeps its exact result type (`-> integer` where it used to widen to
-  `-> number`), and argument-type errors previously dropped for
-  nominal-typed parameters are now kept (a sound tightening).
-
-- **An annotated (`Typed`-wrapped) function-literal parameter named after
-  a library constant (`i`, `e`) now shadows the constant**, like a plain
-  parameter does. `Tabulate(['Typed','i',"'integer'"] ↦ …)` used to
-  canonicalize the body's `i` to the imaginary unit, so `IdentityMatrix`
-  built that way evaluated to an all-zero matrix. The same root cause
-  (a canonical symbol lookup returning the imaginary-unit literal) also
-  made the signature-string sugar (`"'(i: integer) -> integer'"`) report
-  `expected-a-symbol` for a parameter named `i` — also fixed. The
-  library's lazy constant matrices now annotate their index parameters, so
-  `IdentityMatrix(1e6)`'s lazy element type is `integer` (was `number`).
-
-- **`assume()` rollback leaves the scope as it found it.** Ownership is
-  decided by an entry snapshot: a contradictory assumption removes exactly
-  the bindings the `assume()` call itself created — the string and
-  raw-MathJSON routes leave no residual declaration (the string route used
-  to leave `p` declared after `assume('p > 0 \\land p < -5')`), while a
-  binding that existed at entry is never disposed, so an expression the
-  caller already holds keeps its symbol identity (a placeholder created by
-  the caller's own `ce.parse` survives a contradiction as the same empty
-  placeholder a bare `ce.parse` would leave).
-
-- **`assume(Element(m, Union(Range(1,3), Range(5,7))))` now types `m` as
-  `integer`** (was `unknown`): the set operand is normalized once and the
-  normalized form is both decomposed and recorded, so the recorded fact
-  itself proves the tier. Same through a `SetMinus` wrapper
-  (`x ∈ S∖T ⇒ x ∈ S` — the base proves the tier; the exclusion is carried
-  by the disequality facts recorded alongside), which also keeps a large
-  difference symbolic instead of materializing it into a set literal.
-
-- **A partially rolled-back compound assumption records its facts against
-  live definitions.** When one conjunct is refused and another re-declares
-  the same symbol, the recorded fact's symbol nodes now resolve to the
-  surviving definition instead of the disposed one.
-
-- **An element-wise `Which`/`If` selection no longer refuses a
-  complex-TYPED branch.** The JavaScript lowering declined any selection
-  arm whose static type was complex, on the premise that a compiled
-  complex value (a `{re, im}` object) had no cell convention inside a
-  selection array. The premise was wrong twice over: an arm such as
-  `Sqrt(x)` over an unknown-sign `x` TYPES complex while every runtime
-  value is real, and where a cell IS complex the convention already exists
-  — compiled arrays mix plain numbers with `{re, im}` objects wherever a
-  complex helper runs element-wise. The blanket refusal is removed;
-  selections with complex-typed and genuinely complex arms compile with
-  interpreter parity. (Tycho item 236.)
-
-- **A built-in operator used as an element callback keeps the complex
-  lane.** `Map(Abs, zs)` eta-expands a bare operator symbol into a shared
-  wrapper whose synthesized parameter carried no type, so the wrapper body
-  compiled in the REAL lane: `Math.abs` received a `{re, im}` element and
-  answered `NaN` behind `success: true`, where the interpreter answers the
-  modulus. The source's element complexness is now projected into the
-  callback parameter, so the callback compiles through the same complex
-  lane an inline `x ↦ Abs(x)` already reached.
-
-- **A compiled user-function call broadcasts an array argument at run
-  time.** A call site whose arguments were all STATICALLY scalar emitted a
-  bare direct call — but that static reading is usually an inference from
-  the callee's declared parameter, not a fact about the value: with
-  `f(x: number) = 2x + 1`, `run({y: [1, 2, 3]})` handed the bare
-  `_fn_f(_.y)` an array and computed `NaN` where the interpreter
-  broadcasts to `[3, 5, 7]`. Such calls now carry a runtime
-  `Array.isArray` guard that keeps the direct call on the scalar branch
-  and dispatches through the broadcast helper otherwise; a literal
-  argument cannot be an array at run time and pays neither. A function
-  literal with a complex-declared parameter spliced in value position is
-  also lifted correctly now.
-
-- **A constant limit compiles to its closed value again — symbolically.**
-  The fold-determinism change made every `Limit` decline constant folding,
-  so `lim_{x→0} sin(x)/x` inside a compiled kernel paid a runtime
-  `_SYS.limit` evaluation per call. The `javascript` target's `Limit`
-  lowering now attempts a plain symbolic evaluation first — the exact,
-  depth-capped route only, never the numeric extrapolation — inside an
-  isolation scope and behind the same gates that protect compile-time
-  constant folding (`constantFold: false`, `vars` mappings,
-  caller-overridden operators, impure bodies, non-radian angular units,
-  an operand-size cap); it emits the closed value when one exists, and an
-  undecided or free-variable limit keeps the runtime call. Also fixed on
-  the same line: the DIRECTION operand of a one-sided limit was dropped
-  from the runtime emission, so a compiled `lim_{x→0⁻}` silently computed
-  the right-sided limit; it now rides along.
-
-- **One-sided limits at jump discontinuities are resolved per direction.**
-  Direct substitution claimed the value AT the point for a
-  jump-discontinuous subterm, so `lim_{x→0⁻} |x|/x` — which reaches
-  `sgn(x)` through L'Hôpital — answered `sgn(0) = 0` where the one-sided
-  limits are ∓1. A subterm of `Sign`, `Heaviside`, `Floor`, `Ceil`,
-  `Round` (one-operand form), or `Mod` (constant real modulus, either
-  sign) sitting ON its jump is now replaced by its one-sided value — the
-  side read from the offset's leading Laurent sign, nested jumps resolved
-  innermost first — and a two-sided limit over a jump combines the two
-  directions: equal sides are the limit (`lim_{x→0} sgn(x)² = 1`),
-  unequal sides stay inert (`lim_{x→0} |x|/x`). Anything the classifier
-  cannot decide (a two-operand `Round`, a symbolic modulus, a non-real
-  argument value) declines rather than guesses, and off its jump such a
-  subterm substitutes directly, as before.
-
-- **Compiling the same expression always produces the same code, whatever
-  the machine load.** Compile-time constant folding evaluated each
-  constant subtree under a 2-second wall-clock deadline whose expiry was a
-  silent decline, so on a busy machine the same source could compile to
-  the folded constant on one call and to the unfolded expression on the
-  next — values that can differ in the last digits, since a folded value
-  comes from bignum evaluation while the structural lowering computes in
-  doubles. The wall-clock is removed; eligibility now rests entirely on
-  the deterministic work estimate, which gains a price for the one
-  evaluation class it could not see: a definite integral is charged its
-  adaptive-quadrature worst case (~22 500 integrand evaluations per
-  nesting level), so a cheap constant integral still folds to its value
-  while an iterated integral deterministically compiles through its
-  numeric emitter instead; a numeric `Limit` (whose non-settling fallback
-  is a million-evaluation extrapolation) never folds — instead, the
-  `Limit` lowering resolves a constant limit symbolically (see the entry
-  above). A caller-armed ambient deadline still cancels the whole
-  compilation.
-
-  The same audit closed four value-scaled library loops that ran
-  unbounded on any route with no deadline armed: `NthPrime` and
-  `NextPrime` now stop with an `iteration-limit-exceeded` cancellation
-  after 10⁷ candidate steps (the `PrimePi` convention), and `LucasL` and
-  `CatalanNumber` stay symbolic when the exact result would exceed a
-  million digits (the `Fibonacci` convention — a step counter cannot
-  bound a loop whose bigint operands grow with every iteration, so
-  `LucasL(10⁹)` now answers symbolically at once instead of grinding
-  toward a deadline).
-
-- **Setting a symbol's type to a signature no longer corrupts the stored
-  signature.** `f.type = '(integer) -> integer'` on a symbol that already
-  had an operator definition stored the raw type node in the signature
-  slot instead of a `BoxedType`. Every later read of `f.type` then
-  returned a bare object: `toString()` gave `[object Object]` and
-  `matches()` threw "is not a function".
-
-- **A use-driven type inference no longer depends on what is assumed.**
-  Several operators read an operand's EFFECTIVE type to decide whether to
-  record a use as type evidence — `Length(x)` narrowing `x` to a
-  collection, a loop index taking the iterated collection's element type,
-  `x ∈ [q]` narrowing a parameter, the scalar numeric context of an
-  arithmetic argument list, `Derivative`'s symbolic order. An assumption
-  in force at boxing time could change what was recorded, and the record
-  outlived the assumption. Those decisions are now made with the
-  assumptions hidden, so the evidence a use contributes is the same
-  whether or not anything is assumed.
-
-- **A `Block`-bound local keeps its declared and assigned type on the
-  compilation routes.** `Declare` and `Assign` register their binding at
-  evaluation time, so on any route that never evaluates — compilation in
-  particular — a block-local stayed `unknown`-typed and the operand type
-  gates failed closed: `Block(Declare(d, "list<number>"), Assign(d,
-  [4,5,4]), Length(d))` refused with "operand is not an indexed
-  collection", while the same binding through a function parameter
-  compiled. The binding a `Block` hoists for its locals now carries the
-  statically-readable `Declare` type, and each `Assign` canonicalized
-  against an inferred, valueless binding records the assigned value's
-  (widened) type — joined over all assignments, so a local reassigned a
-  different kind of value reads as the union and shape-sensitive
-  lowerings still fail closed rather than emit wrong code. Evaluation
-  behavior is unchanged. (Tycho item 235.)
-
-- **A symbol's assigned value is compiled once and read by name.** Compiled
-  source is text, so a value that referenced another symbol's value from
-  several places was written out once per reference path: `f(k) := f(k-1) +
-  2 f(k-1)` quadrupled per level, and the fold-size guard refused it from
-  depth 13, degrading the compile to the (also exponential) interpreter. The
-  `javascript` and `interval-js` targets now emit each folded compound pure
-  value once as a local (`const _val_f7 = …;`) beside the user-function
-  definitions and read it by name; the same tower compiles at depth 30 in
-  milliseconds. A leaf value, an impure value (`Random()` must re-sample at
-  each reference) and a value read under a binder that shadows one of its
-  names (a `Sum` index) keep the inline fold, and so does a collection-valued
-  symbol when the compile carries caller-supplied `functions` (which may keep
-  or mutate an array they receive). Python keeps the inline fold and the
-  guard. The constant-folding pre-pass on the same expressions was
-  also exponential: it could not see a free symbol, or an impure operation,
-  reachable only through an assigned value, and priced a value-carrying
-  symbol as a leaf — so it evaluated the tower at every level until its
-  budget expired, and baked ONE sample of `r + r` with `r := Random()` into
-  the artifact where the interpreter draws two fresh ones. It now looks
-  through assigned values. A value that refers to its own symbol
-  (`b := b + 1`, storable raw) overflowed the stack in the compiler; it now
-  fails closed ("refers to itself"). Tycho item 225.
-
-- **A point added to a list of points compiles element-wise on the
-  `javascript` target.** With `P: list<tuple<number, number>>`, the sum
-  `4P + 0.3(t, t)` is a broadcast over the list in the interpreter (the
-  point is added to every element). The JavaScript target used to fail
-  closed on the numeric-tuple spelling (`P + (1, 2)`), and — worse — to
-  zip a tuple whose components are undeclared symbols FLAT against the
-  list, which is right only when both components happen to be equal
-  (`4P + 0.3(t, 2t)` ran to `(4x + 0.3t, 4y + 0.3t)` per point). The point
-  is now kept atomic and the list walked one level deep, as `Multiply`'s
-  point-family shape already did; a point plus a list of SCALARS still
-  fails closed, since the interpreter errors per element there. The sum
-  also types as `list<tuple<…>>` instead of the union
-  `list<tuple<…>> | tuple<…>`, which made `PointX`/`PointY` over it read
-  the whole list as a single point. And the interpreter fallback's `run`
-  now accepts a JavaScript array argument as a collection value (guided by
-  the parameter's declared type) instead of reading it as MathJSON.
-  (Tycho item 234.)
-
-- **OKLCh hues are folded into `[0, 360)`.** The color conversions returned
-  the raw `atan2` angle, so `AsOklch(Hsv(180, 1, 1))` and the compiled
-  `Hsv` emission answered `H = -165.2°` where the GPU target's
-  `_gpu_oklab_to_oklch` — and every color reference — says `194.8°`. Fixed
-  upstream in `@arnog/colors` 0.7.0, which this release adopts. A hue the
-  user writes in an `Oklch(…)` literal is left as written. (Tycho item
-  233.)
-
-- **Numeric integration of a complex-valued integrand kept only the real
-  part.** `Integrate(e^{ix}, x, 0, π).N()` returned `0`; it now returns the
-  complex `Measurement` `2i`, for single and iterated integrals. `Real`,
-  `Imaginary`, `Abs` and `Conjugate` of a `Measurement` propagate the value
-  and keep the error bound.
-- **`Limit` rewrote the argument of a fast-growing function.** The
-  leading-order pass dropped a dominated additive term inside every function
-  argument, so `Limit(Fibonacci(n+1)/Fibonacci(n), n → ∞)` answered `1` and
-  `Limit(Γ(x+1)/(x·Γ(x)), x → ∞)` answered `0`. The rewrite now enters an
-  argument only under a slowly varying head (`Ln`, roots, x-free powers,
-  products and quotients); the Gamma ratio is `1` and the Fibonacci ratio
-  stays an inert `Limit` instead of a wrong value.
-- **Division and negative powers now report possible non-finite results.** A
-  quotient with a divisor that can be zero has the type
-  `real | infinity | nan`. A negative power has this type when its base can be
-  zero. A quotient also has this type when its numerator can be infinite. If
-  the divisor or base cannot be zero, the result has finite bounds.
-
-- **The reciprocal of an unbounded non-finite value can include zero.** For
-  example, the reciprocal of `+oo` is exactly `0`. The reciprocal of an
-  unbounded finite real range still uses an open endpoint at zero.
-
-- **An expression with an empty-range operand keeps the type `never`.** Such
-  an expression no longer changes to a matrix operation.
-
-- **Compiled `Heaviside(NaN)` and `Sign(NaN)` now return `NaN`.** JavaScript
-  and interval compile targets propagate `NaN`. GPU targets make a best
-  effort to propagate `NaN` when fast-math is active.
-
-- **Float-only compile targets now represent `~oo` as `Infinity`.** Folded and
-  runtime division by zero now give the same infinite magnitude. Indeterminate
-  forms such as `0/0` and `0 * Infinity` still give `NaN`. Only the magnitude
-  is guaranteed. The sign can differ between a folded expression and an
-  equivalent expression that is evaluated at runtime. The same projection
-  applies to arguments: a `~oo` value passed to a compiled function becomes
-  `Infinity` at the boundary instead of causing an error. As a consequence,
-  compiled `Heaviside(~oo)` returns `1` and compiled `~oo > 0` returns
-  `true`, where the interpreter keeps both symbolic. Function clauses that
-  match on a non-finite type (`infinity`, `nan`, `non_finite_number`) or on
-  a non-finite literal value still cause the whole function to fall back to
-  the interpreter, because float arithmetic cannot keep these classes
-  distinct.
-
-- **A selection with no selected branch now returns `Missing`.** This applies
-  to `Which` and to `If` without an `else` branch. A result type includes
-  `missing` only when the selection has no default branch.
-
-- **A union that contains `broadcastable<T>` now supports broadcasting.** For
-  example, arithmetic with `number | broadcastable<number>` has the result
-  type `broadcastable<number>`.
-
-- **Literal exactness no longer depends on the configured precision.** An
-  exact value that is close to a machine number no longer gets an incorrect
-  singleton type. Short exact decimals keep their singleton types.
-
-- **Zero times a non-finite value now returns `NaN` in scalar and collection
-  operations.** For example, `[0,1] * ~oo` returns `[NaN, ~oo]`.
-
-- **Division preserves the shape of a collection numerator.** For example,
-  `[1,2] / 0` returns `[~oo, ~oo]`, `[0,1] / 0` returns `[NaN, ~oo]`, and
-  `[1,2] / oo` returns `[0, 0]`.
-
-- **Serialization of very large integers uses less temporary memory.** Calls
-  to `.json` and `.toString()` no longer risk a `RangeError` when the fixed
-  decimal form is very large. The output does not change.
+- Fixed `Length` and `Count` returning inert expressions for values known not
+  to be collections.
+- Fixed Euclidean norms and distances involving infinities and `NaN`, including
+  matrix norms that previously ignored a `NaN` row or column.
+- Fixed transparent collection aliases in broadcasting, element access, and
+  result types, including recursive aliases that could overflow the stack.
+- Fixed assumptions leaving declarations behind after rollback, losing strict
+  set-membership inference, or attaching facts to an obsolete binding.
+- Fixed an annotated function parameter named `i` or `e` failing to shadow the
+  corresponding library constant.
+- Fixed one-sided limits at jump discontinuities and incorrect rewrites inside
+  fast-growing functions. Constant symbolic limits compile to their resolved
+  value again, including their direction.
+- Made compile-time constant folding deterministic and added prompt limits for
+  extremely large prime, Lucas, and Catalan computations.
+- Fixed assignment of a function signature through `.type` corrupting later
+  type reads.
+- Fixed type inference and compiled block locals depending on temporary
+  assumptions or losing declared and assigned types.
+- Fixed repeated expansion of assigned values during JavaScript compilation,
+  including recursion failures for self-referential assignments.
+- Fixed JavaScript compilation of a point added to a list of points and of
+  collection arguments passed through the interpreter fallback.
+- Fixed OKLCh conversion producing negative hue angles; generated hues are now
+  normalized to `[0, 360)`.
+- Fixed numerical integration discarding the imaginary part of complex-valued
+  integrands. Complex measurements now preserve their value and error bound.
+- Fixed non-finite arithmetic in scalar and collection operations, including
+  zero times infinity, division of collections by zero or infinity, and the
+  reciprocal of infinity.
+- Fixed compiled `Heaviside(NaN)` and `Sign(NaN)` returning non-`NaN` results.
+- Fixed exact literal types changing with configured precision.
+- Reduced temporary memory use when serializing very large integers.
 
 ## 0.120.0 _2026-08-27_
 

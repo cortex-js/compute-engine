@@ -278,7 +278,7 @@ function buildCategories(payload: ReturnType<typeof buildPayload>) {
 const here = dirname(fileURLToPath(import.meta.url));
 const outputPath = process.argv[2]
   ? resolve(process.cwd(), process.argv[2])
-  : resolve(here, 'OPERATORS.json');
+  : resolve(here, '..', 'OPERATORS.json');
 const categoriesOutputPath = resolve(dirname(outputPath), 'CATEGORIES.json');
 const payload = buildPayload();
 const categoriesPayload = buildCategories(payload);
