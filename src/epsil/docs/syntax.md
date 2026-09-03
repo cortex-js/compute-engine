@@ -245,7 +245,8 @@ over the definition only, and each must be used in it. Types are global, so
 a _type-declaration_ is only valid at the top level of a program — inside a
 block or function body it is the `type-declaration-not-top-level` error
 
-_while-statement_ → **`while`** _expression_ _block_
+_while-statement_ → **`while`** (_expression_ | **`let`** _pattern_ **`=`**
+_expression_) _block_
 
 _for-statement_ → **`for`** _symbol_ **`in`** _expression_ _block_
 

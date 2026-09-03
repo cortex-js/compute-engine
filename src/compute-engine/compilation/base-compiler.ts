@@ -13144,6 +13144,24 @@ export class BaseCompiler {
         `Match: an or-alternative binds the name '${plan.errorAlt.toString()}'; not compilable. Fail closed (D6).`
       );
 
+    // The emission below is an arrow function, so a `break`/`continue` (or a
+    // `Return`) in a case body cannot reach the loop or function that
+    // encloses the `Match`: the interpreter lets a `match` arm inside a loop
+    // body `break` (Epsil's `while let` lowers to exactly that shape), but
+    // emitted inside the arrow it is a syntax error that would surface only
+    // when the whole unit is instantiated. Decline here, naming the cause.
+    for (const caseExpr of args.slice(1)) {
+      if (!isFunction(caseExpr, 'MatchCase') || caseExpr.ops.length < 2)
+        continue;
+      const body = caseExpr.ops[caseExpr.ops.length - 1];
+      const control = BaseCompiler.escapingControl(body);
+      if (control !== undefined)
+        throw new Error(
+          `Match: a case body contains \`${control}\`, which cannot leave the ` +
+            `compiled match (an arrow function). Fail closed (D6).`
+        );
+    }
+
     const s = BaseCompiler.tempVar(target);
     const nl = target.ws('\n');
     const stmts: string[] = [];
@@ -13176,6 +13194,29 @@ export class BaseCompiler {
 
     const subjCode = BaseCompiler.compile(args[0], target);
     return `((${s}) => {${nl}${stmts.join(nl)}${nl}})(${subjCode})`;
+  }
+
+  /** The head of the first `Break`, `Continue` or `Return` in `expr` that
+   * would leave the expression, or `undefined` when there is none. A `Loop`
+   * owns the `Break`/`Continue` inside it but passes a `Return` through (the
+   * interpreter's `Loop` propagates a `Return` unchanged), so the walk keeps
+   * looking for a `Return` under a nested loop; a `Function` literal owns
+   * all three. */
+  private static escapingControl(
+    expr: Expression,
+    inLoop = false
+  ): string | undefined {
+    if (!isFunction(expr)) return undefined;
+    const h = expr.operator;
+    if (h === 'Return') return h;
+    if ((h === 'Break' || h === 'Continue') && !inLoop) return h;
+    if (h === 'Function') return undefined;
+    const nested = inLoop || h === 'Loop';
+    for (const op of expr.ops) {
+      const found = BaseCompiler.escapingControl(op, nested);
+      if (found !== undefined) return found;
+    }
+    return undefined;
   }
 
   /** Emit one non-irrefutable case as a guarded early-return `if`. */

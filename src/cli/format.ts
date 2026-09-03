@@ -550,6 +550,10 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `Expected "=" after the "if let" pattern, followed by the value to match`;
     case 'if-let-irrefutable':
       return `The pattern "${args[0]}" matches every value, so this "if let" cannot fail (an "else" branch would never run); use "let" to bind unconditionally`;
+    case 'while-let-equal-expected':
+      return `Expected "=" after the "while let" pattern, followed by the value to match`;
+    case 'while-let-irrefutable':
+      return `The pattern "${args[0]}" matches every value, so this "while let" can only end on a "break" in its body; write "while true" with a "let" in the body instead`;
     case 'conditional-if-line-start':
       return `An "if" at the start of a line begins a new if-statement; for a conditional expression ("a if c else b"), keep "if" on the same line as the value before it`;
     case 'mapsto-arrow-expected':

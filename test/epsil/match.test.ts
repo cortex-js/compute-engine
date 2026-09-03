@@ -809,3 +809,65 @@ describe('EPSIL MATCH — parameterized nominal subjects (§6)', () => {
     expect(r.value?.type.toString()).toBe('tree<integer>');
   });
 });
+
+describe('EPSIL MATCH — lazy list subjects', () => {
+  // A list VALUE is often lazy: `Rest(xs)`, `Drop(xs, 1)` or `Range(1, 3)`
+  // evaluate to a finite indexed collection whose operator is not `List`. A
+  // list pattern is structural and needs list elements to descend into, so
+  // a case that holds a list pattern reads such a subject as a list
+  // (`lazyListLength` in src/compute-engine/boxed-expression/match-dispatch.ts).
+  // Before that, `match Rest([1, 2, 3]) { [h, ...] => h; _ => "no" }` took
+  // the wildcard.
+  test('Rest, Drop and Range subjects match a list pattern', () => {
+    expect(
+      run('match Rest([1, 2, 3]) { [h, ...] => h; _ => "no" }').value.re
+    ).toBe(2);
+    expect(
+      run('match Drop([1, 2, 3], 1) { [a, b] => a * b; _ => "no" }').value.re
+    ).toBe(6);
+    expect(
+      run('match Range(1, 3) { [a, b, c] => a + b + c; _ => "no" }').value.re
+    ).toBe(6);
+  });
+
+  test('the rest binding of a lazy subject is itself matchable', () => {
+    expect(
+      run(
+        'match Rest([1, 2, 3]) { [_, ...t] => match [t] { [x] => x; _ => "no-inner" }; _ => "no" }'
+      ).value.re
+    ).toBe(3);
+  });
+
+  test('a string is text, not a list, and a tuple stays atomic', () => {
+    expect(
+      run('match "abc" { [h, ...] => h; _ => "no" }').value.string
+    ).toBe('no');
+    expect(
+      run('match (1, 2) { [a, b] => a; (a, b) => b; _ => "no" }').value.re
+    ).toBe(2);
+  });
+
+  test('an earlier case still sees the subject as it is', () => {
+    // Only the case that holds the list pattern reads the subject as a list:
+    // a pin ahead of it compares the lazy value verbatim and wins, and the
+    // order of the two cases decides.
+    expect(
+      run(
+        'let r = Range(1, 3)\nmatch r { == r => "pinned"; [a, b, c] => a; _ => "no" }'
+      ).value.string
+    ).toBe('pinned');
+    expect(
+      run(
+        'let r = Range(1, 3)\nmatch r { [a, b, c] => a; == r => "pinned"; _ => "no" }'
+      ).value.re
+    ).toBe(1);
+  });
+
+  test('a case without a list pattern leaves the subject alone', () => {
+    // No materialization is needed to take the wildcard, and a lazy subject
+    // handed to the body is still the collection it was.
+    expect(
+      run('match Rest([1, 2, 3]) { 0 => "zero"; x => Length(x) }').value.re
+    ).toBe(2);
+  });
+});

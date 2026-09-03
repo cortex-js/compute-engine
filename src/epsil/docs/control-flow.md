@@ -414,6 +414,13 @@ symbolic (unbound) `x` as the subject above, `match` selects the `_` case: `x`
 is structurally not `0`, even though it *could* be zero semantically. Use
 `if`/`Which` when you want that kind of semantic case-split instead.
 
+A list pattern matches a list *value* whatever produced it: `Rest(xs)`,
+`Drop(xs, 1)` or `Range(1, 3)` evaluate to a lazy collection rather than a
+list literal, and the case holding the list pattern reads it as a list —
+element by element for the positions the pattern names, with a copy only for
+a named `...rest`. (A lazy list of more than 100 000 elements is left as it
+is, and then matches only the wildcard.)
+
 The final catch-all may also be spelled `otherwise`, a synonym for a bare
 `_` pattern (it takes a guard the same way, and binds nothing):
 
@@ -805,6 +812,29 @@ Value-producing iteration over a collection belongs to the library functions
 ```epsil
 while x > 0 { x }
 ```
+
+`while let pattern = subject { … }` is the loop form of [`if let`](#if-let):
+each turn matches the subject against the pattern and runs the body with the
+pattern's bindings in scope, and the first turn on which the subject does not
+match ends the loop. It consumes a list one element at a time:
+
+```epsil-live
+let xs = [1, 2, 3]
+let s = 0
+while let [h, ...t] = xs { s = s + h; xs = [t] }
+s
+// ➔ 6
+```
+
+The pattern is any `match` pattern, so a typed binding drains a function that
+may fail: `while let h: !error = head(xs) { … }` runs while `head(xs)` is not
+an error value. `break` and `continue` in the body apply to this loop. It is
+sugar over `while` and `match`: the loop above is
+`while true { match xs { [h, ...t] => do { s = s + h; xs = [t] }; _ => do { break } } }`,
+and the two forms lower to the same expression. A pattern that cannot fail —
+a bare name or `_` with no type — makes the loop end only on a `break`; that
+is `while true` with a `let` in the body, and it is reported as a
+`while-let-irrefutable` warning.
 
 `for x in xs { … }` binds the loop variable to each element in turn:
 

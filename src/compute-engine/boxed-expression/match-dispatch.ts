@@ -17,6 +17,11 @@ import {
 } from './type-guards.js';
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
 import { errorOpsWithoutTrace } from './error-value.js';
+import {
+  isFiniteIndexedCollection,
+  isTextAtom,
+  isTuple,
+} from '../collection-utils.js';
 
 /**
  * `Match` dispatch — Epsil structural pattern matching
@@ -202,6 +207,63 @@ const planCache = new WeakMap<ReadonlyArray<Expression>, MatchPlan>();
 //
 
 /** Evaluate a `["Match", subject, …cases]` expression. */
+/** Cap on the length of a lazy list value the matcher reads as a list (see
+ * `lazyListLength`). Beyond it the subject is matched as it is — a lazy
+ * collection, which no list pattern matches — so a pathological subject
+ * (`Range(1, 10^9)`) never forces an unbounded walk or copy. */
+const MAX_MATCH_LIST_MATERIALIZATION = 100_000;
+
+/**
+ * The length of `subject` when it is a lazy list value a list pattern may be
+ * matched against, `undefined` otherwise.
+ *
+ * Matching is structural, and a list pattern (`[h, ...t]`) needs list
+ * elements to descend into — but a list VALUE is often lazy: `Rest(xs)`,
+ * `Drop(xs, 1)`, `Range(1, 3)` or a `Map` evaluate to a finite indexed
+ * collection whose operator is not `List`, printing as `[2, 3]` and typing
+ * `list<integer>` while structurally staying `Rest(…)`. Both the fixed-shape
+ * tier (`matchShape` compared operators) and the generic matcher then
+ * refused it, so `match Rest(xs) { [h, ...] => … }` silently took the
+ * wildcard, and a `while let [h, ...] = xs { xs = Rest(xs) }` loop ended
+ * after one turn.
+ *
+ * So a finite, indexed, non-`List` collection of at most
+ * `MAX_MATCH_LIST_MATERIALIZATION` elements is read as a list — by the case
+ * that holds a list pattern, and only by it: a fixed-shape case reads the
+ * elements it names through `at()` and copies only a named rest
+ * (`matchShape`), while a tier-3 list pattern gets a `List` copy
+ * (`matchPattern`). An earlier case sees the subject as it is, so a pin of
+ * `Range(1, 3)` still compares verbatim, and nothing is enumerated when an
+ * earlier case wins. Tuples stay atomic and a string is text, not a list, so
+ * neither qualifies; a subject that is already a `List` needs nothing. Only
+ * the TOP level is read this way: a lazy list nested inside a list literal
+ * (`[Rest(xs), 1]`) is still matched structurally.
+ */
+function lazyListLength(subject: Expression): number | undefined {
+  if (!isFunction(subject) || subject.operator === 'List') return undefined;
+  if (isTuple(subject) || isTextAtom(subject)) return undefined;
+  if (!isFiniteIndexedCollection(subject)) return undefined;
+  const count = subject.count;
+  if (
+    typeof count !== 'number' ||
+    !Number.isFinite(count) ||
+    count > MAX_MATCH_LIST_MATERIALIZATION
+  )
+    return undefined;
+  return count;
+}
+
+/** Whether a raw case pattern is a list pattern at its top level, or an
+ * or-alternative one of whose branches is — the patterns for which a lazy
+ * list subject is read as a list (`lazyListLength`). */
+function patternWantsList(raw: Expression): boolean {
+  if (isFunction(raw, 'List')) return true;
+  return (
+    isFunction(raw, 'Alternatives') &&
+    raw.ops.some((a) => isFunction(a, 'List'))
+  );
+}
+
 export function evaluateMatch(
   ops: ReadonlyArray<Expression>,
   options: HandlerOptions
@@ -446,24 +508,43 @@ function matchShape(
   sub: Substitution
 ): boolean {
   if (node.kind === 'dict') return matchDictShape(ce, node, subject, sub);
-  if (!isFunction(subject) || subject.operator !== node.operator) return false;
+  if (!isFunction(subject)) return false;
 
-  const ops = subject.ops;
+  // The elements a `List` shape is matched against: the operands of a
+  // `List`, or — for a lazy list value (`lazyListLength`) — the collection
+  // read in place through its 1-based `at()`, so a `[h, ...]` case touches
+  // one element and a `[h, ...t]` case copies only the tail it binds.
+  let length: number;
+  let at: (i: number) => Expression | undefined;
+  if (subject.operator === node.operator) {
+    const ops = subject.ops;
+    length = ops.length;
+    at = (i) => ops[i];
+  } else if (node.operator === 'List') {
+    const lazyLength = lazyListLength(subject);
+    if (lazyLength === undefined) return false;
+    length = lazyLength;
+    at = (i) => subject.at(i + 1);
+  } else return false;
+
   const fixed = node.prefix.length + node.suffix.length;
   if (node.rest === undefined) {
-    if (ops.length !== fixed) return false;
-  } else if (ops.length < fixed) return false;
+    if (length !== fixed) return false;
+  } else if (length < fixed) return false;
 
+  const element = (i: number): Expression => at(i) ?? ce.Nothing;
   for (let i = 0; i < node.prefix.length; i++)
-    if (!matchElement(ce, node.prefix[i], ops[i], sub)) return false;
+    if (!matchElement(ce, node.prefix[i], element(i), sub)) return false;
 
   const sLen = node.suffix.length;
   for (let j = 0; j < sLen; j++)
-    if (!matchElement(ce, node.suffix[j], ops[ops.length - sLen + j], sub))
+    if (!matchElement(ce, node.suffix[j], element(length - sLen + j), sub))
       return false;
 
   if (node.rest !== undefined && node.rest.key !== null) {
-    const middle = ops.slice(node.prefix.length, ops.length - sLen);
+    const middle: Expression[] = [];
+    for (let i = node.prefix.length; i < length - sLen; i++)
+      middle.push(element(i));
     sub[node.rest.key] = wrapRest(ce, middle);
   }
 
@@ -1089,6 +1170,12 @@ function matchPattern(
   const range = rangePatternBounds(raw);
   if (range !== undefined)
     return rangeContains(subject, range.lo, range.hi) ? {} : null;
+
+  // A lazy list value is copied into a `List` for a list pattern, once per
+  // case that asks (`lazyListLength` says when; the fixed-shape tier reads
+  // elements in place instead, see `matchShape`).
+  if (patternWantsList(raw) && lazyListLength(subject) !== undefined)
+    subject = ce.function('List', [...subject.each()]);
 
   const pattern = resolvePins(ce, raw);
   if (!patternHasDict(pattern))

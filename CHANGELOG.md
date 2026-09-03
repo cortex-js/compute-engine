@@ -55,9 +55,46 @@
   shape back as `if let`. A pattern that cannot fail (a bare name or `_` with
   no type) is reported by the new `if-let-irrefutable` warning; a missing `=`
   is `if-let-equal-expected`.
+- **Epsil `while let`.** `while let pattern = subject { … }` is the loop form
+  of `if let`: each turn matches the subject and runs the body with the
+  pattern's bindings, and the first refutation ends the loop —
+  `while let [h, ...t] = xs { s = s + h; xs = [t] }` consumes a list, and
+  `while let h: !error = head(xs) { … }` drains a function that may fail.
+  `break` and `continue` in the body apply to this loop. It is sugar over
+  `Loop` and `Match` (the wildcard arm breaks) and the serializer spells that
+  shape back as `while let`. A pattern that cannot fail is the
+  `while-let-irrefutable` warning; a missing `=` is `while-let-equal-expected`.
+  Neither compile target lowers the shape yet: the JavaScript target declines
+  it (a `Match` arm cannot break out of its compiled arrow) and the program
+  runs in the interpreter, and the Python target fails closed on the `Match`.
+
 
 ### Resolved Issues
 
+- Fixed a user-defined function whose body evaluates to an error value
+  leaving the call unevaluated. `len := x ↦ Length(x)` then `len(5)` answered
+  `len(5)`, where `Length(5)` itself is the `incompatible-type` error, and an
+  Epsil function could never return an error value (a `match` with no
+  matching case inside a function body answered the call, not the
+  `match-no-case` error). A user function now answers with the error its
+  body produced, as a library operator does; a result that merely embeds an
+  error inside a collection or an undecided `If` is returned as it is.
+- **`match` sees a lazy list value.** A list pattern (`[h, ...t]`) needs a
+  `List` node to descend into, but `Rest(xs)`, `Drop(xs, 1)` or `Range(1, 3)`
+  evaluate to a lazy collection whose operator is not `List`, so
+  `match Rest([1, 2, 3]) { [h, ...] => h; _ => "no" }` took the wildcard (and
+  a `while let [h, ...] = xs { xs = Rest(xs) }` loop ended after one turn).
+  The case holding the list pattern now reads such a finite subject (up to
+  100 000 elements) as a list: a fixed-shape pattern reads the positions it
+  names in place and copies only a named `...rest`, and an earlier case still
+  sees the subject as it is, so a pin ahead of the list case compares
+  verbatim. Tuples stay atomic and a string is text, not a list.
+- **Compiling a `Match` whose arm breaks fails closed with a named cause.**
+  The JavaScript `Match` emission is an arrow function, so a `break`,
+  `continue` or `Return` in a case body cannot reach the enclosing loop; it
+  used to surface as a late `Unexpected token 'break'` syntax error when the
+  unit was instantiated. The target now declines the `Match` up front, naming
+  the control operator, and the fallback runs the program in the interpreter.
 - **A scalar function over a list of points keeps the point shape in its
   type.** With `P: list<tuple<number, number>>`, `Sqrt(P)`, `Sin(P)`,
   `Exp(P)` and `Power(P, 2)` typed `list<number>` while their values are

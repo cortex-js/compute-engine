@@ -3054,44 +3054,27 @@ export class Parser {
   }
 
   /**
-   * `if let pattern = subject { … } [else { … } | else if …]` — a refutable
-   * binding: the subject is matched against ONE `match` pattern, and the
-   * `then` block runs with the pattern's bindings in scope when it matches.
-   * It is surface sugar over `Match` (no head of its own):
-   *
-   *   if let p = s { a } else { b }   →   ["Match", s,
-   *                                         ["MatchCase", p, ["Block", a]],
-   *                                         ["MatchCase", "_", ["Block", b]]]
-   *
-   * The pattern grammar is exactly the `match` case grammar
-   * (`parseCasePattern`: bindings, literals, destructuring, pins, typed
-   * bindings, or-alternatives, range patterns), so `if let v: !error = f(x)
-   * { … }` binds `v` only when the call did not fail, and `if let [x, ...rest]
-   * = xs { … }` destructures a non-empty list. A typed binding's implicit
-   * `MatchesType` guard lands in the case's guard slot, as in `match`. There
-   * is no explicit `if` guard: nest an `if` in the block instead.
-   *
-   * The fallback arm is what the `else` provides — a `Block`, or the nested
-   * `If`/`Match` of an `else if` chain. Without an `else` the arm's body is
-   * the symbol `Missing`, so a refuted `if let` evaluates to the same
-   * position-preserving absent datum a false `if` without an `else` does
-   * (`library/control-structures.ts`, the `If` definition). The wildcard arm
-   * also keeps the `Match` total: it can never produce a `match-no-case`
-   * error. Since `parseIf` re-enters here for `else if let`, both mixed
-   * chains (`if c { } else if let p = s { }` and the reverse) nest naturally.
-   *
-   * A pattern that cannot be refuted (`if let x = s`, a bare binding or `_`
-   * with no type guard) makes the `else` dead: that is what a plain `let`
-   * is for, so it is reported as a warning.
+   * The head `if let` and `while let` share, read after the keyword:
+   * `let pattern = subject`, up to the `{` of the block (whose presence is
+   * checked here, not consumed). Returns the pattern, the implicit
+   * `MatchesType` guards its typed bindings collected, the subject, and the
+   * pattern's source span — or `null` once an error is reported. `kw` is the
+   * `if` or `while` token; it selects the diagnostic for a missing `=`.
    */
-  private parseIfLet(kw: Token): MathJsonExpression | null {
+  private parseLetPatternHead(kw: Token): {
+    pattern: MathJsonExpression;
+    typeGuards: MathJsonExpression[];
+    subject: MathJsonExpression;
+    patternStart: number;
+    patternEnd: number;
+  } | null {
     this.advance(); // 'let'
     // The type-guard collector is one shared field, and a pin inside the
-    // pattern parses an ordinary expression that may itself be a `match` or
-    // an `if let`, each of which installs its own collector. Save the
-    // enclosing collector and restore it once this pattern's guards are
-    // captured, so a nested construct cannot orphan the guards collected so
-    // far (`parseMatchCase` does the same).
+    // pattern parses an ordinary expression that may itself be a `match`, an
+    // `if let` or a `while let`, each of which installs its own collector.
+    // Save the enclosing collector and restore it once this pattern's guards
+    // are captured, so a nested construct cannot orphan the guards collected
+    // so far (`parseMatchCase` does the same).
     const outerTypeGuards = this.matchTypeGuards;
     this.matchTypeGuards = [];
     const patternStart = this.current.start;
@@ -3121,7 +3104,15 @@ export class Parser {
 
     const eq = this.current;
     if (eq.type !== 'OPERATOR' || eq.text !== '=') {
-      this.error(['if-let-equal-expected'], eq.start, eq.end);
+      this.error(
+        [
+          kw.text === 'while'
+            ? 'while-let-equal-expected'
+            : 'if-let-equal-expected',
+        ],
+        eq.start,
+        eq.end
+      );
       return null;
     }
     this.advance(); // '='
@@ -3139,6 +3130,45 @@ export class Parser {
       );
       return null;
     }
+    return { pattern, typeGuards, subject, patternStart, patternEnd };
+  }
+
+  /**
+   * `if let pattern = subject { … } [else { … } | else if …]` — a refutable
+   * binding: the subject is matched against ONE `match` pattern, and the
+   * `then` block runs with the pattern's bindings in scope when it matches.
+   * It is surface sugar over `Match` (no head of its own):
+   *
+   *   if let p = s { a } else { b }   →   ["Match", s,
+   *                                         ["MatchCase", p, ["Block", a]],
+   *                                         ["MatchCase", "_", ["Block", b]]]
+   *
+   * The head is read by `parseLetPatternHead`, shared with `while let`. The
+   * pattern grammar is exactly the `match` case grammar
+   * (`parseCasePattern`: bindings, literals, destructuring, pins, typed
+   * bindings, or-alternatives, range patterns), so `if let v: !error = f(x)
+   * { … }` binds `v` only when the call did not fail, and `if let [x, ...rest]
+   * = xs { … }` destructures a non-empty list. A typed binding's implicit
+   * `MatchesType` guard lands in the case's guard slot, as in `match`. There
+   * is no explicit `if` guard: nest an `if` in the block instead.
+   *
+   * The fallback arm is what the `else` provides — a `Block`, or the nested
+   * `If`/`Match` of an `else if` chain. Without an `else` the arm's body is
+   * the symbol `Missing`, so a refuted `if let` evaluates to the same
+   * position-preserving absent datum a false `if` without an `else` does
+   * (`library/control-structures.ts`, the `If` definition). The wildcard arm
+   * also keeps the `Match` total: it can never produce a `match-no-case`
+   * error. Since `parseIf` re-enters here for `else if let`, both mixed
+   * chains (`if c { } else if let p = s { }` and the reverse) nest naturally.
+   *
+   * A pattern that cannot be refuted (`if let x = s`, a bare binding or `_`
+   * with no type guard) makes the `else` dead: that is what a plain `let`
+   * is for, so it is reported as a warning.
+   */
+  private parseIfLet(kw: Token): MathJsonExpression | null {
+    const head = this.parseLetPatternHead(kw);
+    if (head === null) return null;
+    const { pattern, typeGuards, subject, patternStart, patternEnd } = head;
     const thenBlock = this.parseBlock();
     let end = this.localEnd(thenBlock) ?? this.previousEnd();
 
@@ -3243,6 +3273,9 @@ export class Parser {
    * `["Block", …]`. */
   private parseWhile(): MathJsonExpression | null {
     const kw = this.advance(); // 'while'
+    // `while let pattern = subject { … }` — the refutable-binding loop.
+    if (this.check('SYMBOL') && this.current.text === 'let')
+      return this.parseWhileLet(kw);
     const cond = this.parseExpression(0);
     if (cond === null) {
       this.error(['expression-expected'], this.current.start, this.current.end);
@@ -3267,6 +3300,73 @@ export class Parser {
       body,
     ] as MathJsonExpression[];
     return this.wrap(['Loop', loopBody] as MathJsonExpression[], kw.start, end);
+  }
+
+  /**
+   * `while let pattern = subject { … }` — the loop form of the refutable
+   * binding: each turn matches the subject against ONE `match` pattern and
+   * runs the body with the pattern's bindings in scope while it matches; the
+   * first refutation ends the loop. Like `while`, it lowers to the engine's
+   * imperative `Loop` with no head of its own:
+   *
+   *   while let p = s { a }   →   ["Loop", ["Match", s,
+   *                                 ["MatchCase", p, ["Block", a]],
+   *                                 ["MatchCase", "_", ["Break"]]]]
+   *
+   * The head is the `if let` head (`parseLetPatternHead`): the same pattern
+   * grammar, the same implicit `MatchesType` guard for a typed binding, and
+   * the subject read at the enclosing depth, before the body's loop
+   * context opens (so a `break` in a pin inside the pattern belongs to an
+   * OUTER loop, as a `while` condition's does). The wildcard arm's body is a
+   * `Break`, which a `Match` arm returns like any value and the enclosing
+   * `Loop` then acts on — as a `match` arm inside a `for` body can `break` —
+   * so the loop needs no exit test of its own. A `break` or `continue` in the
+   * body targets this loop.
+   *
+   * A pattern that cannot be refuted (a bare binding or `_` with no type
+   * guard) makes the loop end only on a `break` in its body: that is
+   * `while true { let x = s … }`, so it is reported as a warning.
+   */
+  private parseWhileLet(kw: Token): MathJsonExpression | null {
+    const head = this.parseLetPatternHead(kw);
+    if (head === null) return null;
+    const { pattern, typeGuards, subject, patternStart, patternEnd } = head;
+    const body = this.inLoopContext(this.loopDepth + 1, () =>
+      this.parseBlock()
+    );
+    const end = this.localEnd(body) ?? this.previousEnd();
+
+    const guard = this.combineGuards(
+      typeGuards,
+      null,
+      patternStart,
+      patternEnd
+    );
+    if (guard === null && isIrrefutablePattern(pattern))
+      this.error(
+        ['while-let-irrefutable', bindingName(pattern)],
+        patternStart,
+        patternEnd,
+        'warning'
+      );
+
+    const matchOps: MathJsonExpression[] = ['MatchCase', pattern];
+    if (guard !== null) matchOps.push(guard);
+    matchOps.push(body);
+    const matchArm = this.wrap(matchOps, patternStart, end);
+    // The wildcard and its `Break` have no source of their own, so — like the
+    // `Break` the `while` lowering synthesizes — they carry no offsets.
+    const breakArm = this.wrap(
+      ['MatchCase', '_', ['Break']] as MathJsonExpression[],
+      patternStart,
+      end
+    );
+    const match = this.wrap(
+      ['Match', subject, matchArm, breakArm] as MathJsonExpression[],
+      kw.start,
+      end
+    );
+    return this.wrap(['Loop', match] as MathJsonExpression[], kw.start, end);
   }
 
   /** `for x in xs { … }` → `["Loop", body, ["Element", "x", "xs"]]` (engine

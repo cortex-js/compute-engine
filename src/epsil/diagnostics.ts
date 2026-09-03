@@ -65,6 +65,8 @@ export type DiagnosticCode =
   | 'match-irrefutable-case' // %0 = binding name — a non-final case that matches anything
   | 'if-let-equal-expected' // an `if let` head is missing the `=` between its pattern and its subject
   | 'if-let-irrefutable' // (warning) %0 = binding name — an `if let` pattern that matches anything (a bare binding or `_`, no type guard), so the statement cannot fail and an `else` would never run; a plain `let` binds unconditionally
+  | 'while-let-equal-expected' // a `while let` head is missing the `=` between its pattern and its subject
+  | 'while-let-irrefutable' // (warning) %0 = binding name — a `while let` pattern that matches anything (a bare binding or `_`, no type guard), so the loop can only end on a `break` in its body; `while true` with a `let` in the body says so plainly
   | 'type-pattern-unsupported' // %0 = annotation text — a typed pattern's annotation is not a simple named type (it never resolves, so the case can never match)
   | 'range-pattern-bounds' // a range pattern bound is not a numeric literal
   | 'range-pattern-step' // a stepped / non-binary range in pattern position

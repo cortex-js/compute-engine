@@ -26,6 +26,9 @@ Surface `match` lowers to `Match` and ordered `MatchCase` nodes. Surface
 `if let pattern = subject { … } else { … }` lowers to a two-case `Match` whose
 final case is the wildcard (its body is `Missing` when there is no `else`); it
 has no head of its own, and the serializer spells that shape back as `if let`.
+Surface `while let pattern = subject { … }` is the loop form of the same shape:
+it lowers to `Loop(Match(subject, MatchCase(pattern, body), MatchCase(_,
+Break())))`, and the serializer spells that shape back as `while let`.
 Matching is total and first-match. Literal, type, tuple/record, constructor, wildcard, pin,
 and binding patterns all use the engine classification ladder. Alternatives
 must bind the same names. A pattern-bound name is scoped to its case body.

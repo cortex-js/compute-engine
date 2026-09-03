@@ -196,6 +196,15 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   A complex-valued CONDITION still declines (the complex numbers are
   unordered), and the GPU target keeps its own genuinely different
   decline (homogeneous `vec2` arrays).
+  OPEN 2026-09-03: the two "what still declines" pins of that suite (a
+  complex-valued condition; scalar arithmetic over a list-valued
+  selection) no longer throw `Fail closed` — `compile(..., { fallback:
+  false })` succeeds — on a clean checkout of 8f47a863 and of c2124c9d
+  alike, so the change that admitted them is an earlier commit in the
+  compile lane, not the type-handler retirement (measured by running the
+  file on both checkouts). Either the admission is now intended and the
+  pins must move, or the decline regressed; the `base-compiler.ts` work in
+  flight on 2026-09-03 is the place to settle it.
 - **Tycho item 239 — `interval-js`: a jump discontinuity reported as an
   unbounded `singular`** (RESOLVED 2026-09-02, the day it was filed).
   `Floor`, `Ceil`, `Round`, `Fract`, `Trunc`, `Mod`, `Heaviside` and
@@ -709,6 +718,37 @@ Recommendation: (1). Consequence until ruled: the `if let v: !error =
 f(x) { … }` idiom works for engine-raised failures only. Probe:
 `executeEpsil(ce, 'let g = x => Error("neg")\ng(1)')` (diagnostic, `g(1)`
 inert).
+
+### A list pattern reads a lazy list subject only up to 100 000 elements, and only at the top level (OPEN, ruling needed — found 2026-09-03 implementing Epsil `while let`)
+
+`match Rest([1, 2, 3]) { [h, ...] => h; _ => "no" }` took the wildcard: a
+list pattern is matched structurally and needs list elements to descend
+into, while `Rest(xs)`, `Drop(xs, 1)`, `Range(1, 3)` or a `Map` evaluate to
+a finite indexed collection whose operator is not `List`. Fixed 2026-09-03:
+the case that holds the list pattern now reads such a subject as a list
+(`lazyListLength` in `boxed-expression/match-dispatch.ts`) — a fixed-shape
+pattern reads the positions it names through `at()` and copies only a named
+`...rest`; a tier-3 list pattern gets a `List` copy. Two limits remain, and
+both are semantic, not just cost:
+
+- **A cap of 100 000 elements** (`MAX_MATCH_LIST_MATERIALIZATION`). A lazy
+  list value of 100 001 elements matches no list pattern while one of
+  100 000 does. The cap exists so a `Range(1, 10^9)` subject never forces an
+  unbounded walk; both the laddered path and the reference path apply it,
+  so they agree. Options: keep the cap (document it, as `control-flow.md`
+  now does); raise it; or remove it for the fixed-shape tier, whose reads
+  are O(pattern size) and need no cap, keeping it only where a copy is
+  unavoidable (a named rest, a tier-3 pattern).
+- **Only the top level.** A lazy list nested inside a list literal
+  (`[Rest(xs), 1]` against `[[h, ...], 1]`) is still matched structurally
+  and fails. Reading nested positions lazily means teaching `matchElement`
+  and the generic matcher's `List` arm the same `at()`-based access.
+
+Also open: the JavaScript target declines every `while let` (and any
+`match` arm that `break`s), because `compileMatchJS` emits an arrow
+function a `break` cannot leave. It fails closed naming the control
+operator; a statement-form `Match` emission for loop bodies would close it
+(`docs/epsil/ROADMAP.md`, "Compilation tails").
 
 ### A scalar handler lifted over a list of points drops the tuple level: `Sqrt(P)`, `Sin(P)`, `Power(P, 2)` type `list<number>` for a value that is a list of points (FIXED 2026-09-03 — found 2026-09-03 while fixing Tycho items 245/246)
 

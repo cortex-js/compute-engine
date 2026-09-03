@@ -1118,7 +1118,10 @@ export function serializeEpsil(
       // `ifLetParts`). That shape is spelled back as `if let`, exactly as the
       // `while` lowering is spelled back as `while`. A hand-written `match`
       // of that shape — two cases, `do { … }` bodies, a final `_` — is the
-      // same expression, so it takes the `if let` spelling too.
+      // same expression, so it takes the `if let` spelling too. (The
+      // `while let` lowering is the same two-case shape with a `Break` in the
+      // wildcard arm, but it lives under a `Loop`, so `serializeLoop` claims
+      // it before this entry sees the `Match`.)
       const ifLet = serializeIfBlockForm(expr);
       if (ifLet !== null) return ifLet;
 
@@ -1932,25 +1935,25 @@ export function serializeEpsil(
     }
   }
 
-  /** The `if let` lowering (`parseIfLet`) taken apart:
+  /** The two-case `Match` both `let`-headed statements lower to, taken
+   * apart:
    *
    *   Match(subject,
    *     MatchCase(pattern, [guard], Block(…)),
-   *     MatchCase(_, fallback))
+   *     MatchCase(_, fallbackBody))
    *
-   * or `null` when the `Match` does not have exactly that shape. `fallback`
-   * is the `else` — a `Block`, or the nested `If`/`Match` of an `else if`
-   * chain (checked by the caller) — and `null` for the symbol `Missing`, the
-   * body the parser gives the wildcard arm when there is no `else`. A guard
+   * or `null` when the `Match` does not have exactly that shape. What the
+   * wildcard arm's body may be is the caller's test: `ifLetParts` admits the
+   * `else` shapes and `Missing`, `whileLetParts` a bare `Break`. A guard
    * must fold back into `name: type` annotations on the pattern's bindings
-   * (`typed`); any other guard has no `if let` spelling, so the `Match` keeps
-   * its `match` spelling. */
-  function ifLetParts(node: MathJsonExpression): {
+   * (`typed`); any other guard has no `let`-headed spelling, so the `Match`
+   * keeps its `match` spelling. */
+  function letMatchParts(node: MathJsonExpression): {
     subject: MathJsonExpression;
     pattern: MathJsonExpression;
     typed: ReadonlyMap<string, string>;
     body: MathJsonExpression;
-    fallback: MathJsonExpression | null;
+    fallbackBody: MathJsonExpression;
   } | null {
     if (operator(node) !== 'Match' || nops(node) !== 3) return null;
     const subject = operand(node, 1);
@@ -1973,6 +1976,25 @@ export function serializeEpsil(
     if (symbol(operand(wildcardArm, 1)) !== '_') return null;
     const fallbackBody = operand(wildcardArm, 2);
     if (fallbackBody === null) return null;
+    return { subject, pattern, typed, body, fallbackBody };
+  }
+
+  /** The `if let` lowering (`parseIfLet`): `letMatchParts` whose wildcard
+   * arm holds the `else` — a `Block`, or the nested `If`/`Match` of an
+   * `else if` chain (checked by the caller) — returned as `fallback`, or the
+   * symbol `Missing`, the body the parser gives the arm when there is no
+   * `else`, returned as `null`. Any other wildcard body is not this
+   * statement. */
+  function ifLetParts(node: MathJsonExpression): {
+    subject: MathJsonExpression;
+    pattern: MathJsonExpression;
+    typed: ReadonlyMap<string, string>;
+    body: MathJsonExpression;
+    fallback: MathJsonExpression | null;
+  } | null {
+    const parts = letMatchParts(node);
+    if (parts === null) return null;
+    const { subject, pattern, typed, body, fallbackBody } = parts;
     let fallback: MathJsonExpression | null;
     if (symbol(fallbackBody) === 'Missing') fallback = null;
     else if (
@@ -1984,6 +2006,24 @@ export function serializeEpsil(
     else return null;
 
     return { subject, pattern, typed, body, fallback };
+  }
+
+  /** The `while let` lowering (`parseWhileLet`) — the operand of a
+   * single-operand `Loop` — taken apart: `letMatchParts` whose wildcard arm
+   * is a bare `Break`, the exit the parser synthesizes. Any other wildcard
+   * body is not this statement. */
+  function whileLetParts(loopBody: MathJsonExpression): {
+    subject: MathJsonExpression;
+    pattern: MathJsonExpression;
+    typed: ReadonlyMap<string, string>;
+    body: MathJsonExpression;
+  } | null {
+    const parts = letMatchParts(loopBody);
+    if (parts === null) return null;
+    const { subject, pattern, typed, body, fallbackBody } = parts;
+    if (operator(fallbackBody) !== 'Break' || nops(fallbackBody) !== 0)
+      return null;
+    return { subject, pattern, typed, body };
   }
 
   /** The `name: type` annotations a case guard folds back into, as a map from
@@ -2187,9 +2227,9 @@ export function serializeEpsil(
     return { cond, body };
   }
 
-  /** `Loop` in one of its two Epsil statement spellings — `for … in … { … }`
-   * and `while … { … }` — or `null` for a shape that has neither (the caller
-   * then emits the generic call form). */
+  /** `Loop` in one of its three Epsil statement spellings — `for … in … { … }`,
+   * `while … { … }` and `while let … = … { … }` — or `null` for a shape that
+   * has none of them (the caller then emits the generic call form). */
   function serializeLoop(expr: MathJsonExpression): FormattingBlock | null {
     // The head expressions sit where the parser resumes at precedence 0 and
     // then requires a `{`, so they are parenthesized on the same rule as an
@@ -2236,13 +2276,32 @@ export function serializeEpsil(
     // `while`: no iterator clause, and a body that opens with the break guard.
     if (args.length === 1) {
       const parts = whileParts(args[0]);
-      if (parts === null) return null;
-      // As in the `for` case, the condition belongs to the enclosing loop
-      // context: `parseWhile` parses it before entering the body's context.
-      const head = fmt.line('while ', headOperand(parts.cond));
-      return inLoopContext(loopDepth + 1, () =>
-        serializeHeadedBlock(head, parts.body)
-      );
+      if (parts !== null) {
+        // As in the `for` case, the condition belongs to the enclosing loop
+        // context: `parseWhile` parses it before entering the body's context.
+        const head = fmt.line('while ', headOperand(parts.cond));
+        return inLoopContext(loopDepth + 1, () =>
+          serializeHeadedBlock(head, parts.body)
+        );
+      }
+
+      // `while let`: no iterator clause, and a two-case `Match` body whose
+      // wildcard arm breaks.
+      const letParts = whileLetParts(args[0]);
+      if (letParts !== null) {
+        const { pattern, typed, subject, body } = letParts;
+        // The pattern (a pin holds an expression) and the subject are read
+        // at the enclosing depth, before the body's loop context opens.
+        const head = fmt.line(
+          'while let ',
+          serializePattern(pattern, typed),
+          ' = ',
+          headOperand(subject)
+        );
+        return inLoopContext(loopDepth + 1, () =>
+          serializeHeadedBlock(head, body)
+        );
+      }
     }
 
     return null;

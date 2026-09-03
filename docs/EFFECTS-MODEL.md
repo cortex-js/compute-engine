@@ -1860,8 +1860,8 @@ Two boundaries of the ruling, stated so it is not over-read:
 
 The forward-looking reason is the strongest: failure-handling ergonomics
 are **narrowing** operations, and only the value representation narrows.
-The planned Epsil refutable binding (`if let x = parse(s) { … } else
-{ … }` — see the "Refutable binding" item in `docs/epsil/ROADMAP.md`)
+The Epsil refutable binding (`if let x = parse(s) { … } else { … }`, and
+its loop form `while let`; see `src/epsil/docs/control-flow.md`)
 binds `x` at type `typeOf(scrutinee) & !error` via the existing
 `NegationType`, and its `else` arm knows the scrutinee is `error` — all
 expressible today because failure lives in the lattice. An effect bit has

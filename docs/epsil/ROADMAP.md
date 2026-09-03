@@ -9,22 +9,15 @@ Items are demand-gated unless another roadmap gives them higher priority.
 
 ## Language design
 
-- **`while let`.** `if let pattern = subject { … } else { … }` shipped
-  (2026-09-03) as surface sugar over a two-case `Match` with a wildcard
-  fallback; the typed pattern decides the failure family (`v: !error` refuses
-  error values, `v: !missing` refuses absence), so no dedicated failure type
-  was needed. The loop form is not implemented. It would lower to
-  `Loop(Match(subject, MatchCase(pattern, body), MatchCase(_, Break())))` —
-  a `Break` returned by a match arm already ends the enclosing `Loop`, since
-  a `match` arm inside a `for` body can `break` today — and the serializer
-  would need to recognize that shape, as it does the `while` lowering.
-  Demand-gated.
 - **Constructing an error value.** A function whose body writes a literal
   `Error(…)` cannot be declared: the function literal types `error` and the
   declaration is inert (`ROADMAP.md`, "A function literal whose body contains
-  an `Error(…)` literal types `error`"). Until that is ruled, an Epsil program
-  can only pass on the errors the engine produces, which limits the
-  `if let v: !error = f(x) { … }` idiom to engine-raised failures.
+  an `Error(…)` literal types `error`", with two candidate designs; a
+  runtime constructor such as `Fail("code")` is the recommended one). Until
+  that is ruled, an Epsil program can only pass on the errors the engine
+  produces — a user function does return the error value its body evaluates
+  to (fixed 2026-09-03) — which limits the `if let v: !error = f(x) { … }`
+  idiom to engine-raised failures.
 - **Unit literals.** Units currently enter through LaTeX islands or
   `Quantity(value, unit)`. Native unit notation needs a grammar and
   round-trip decision before implementation.
@@ -51,10 +44,16 @@ Items are demand-gated unless another roadmap gives them higher priority.
   recipe. Prefer documenting `Map`/`Fold` for value construction; an engine
   optimization may flatten materialized operands only after preserving lazy
   `Join`, tuple atomicity, effects, and size limits.
-- **Python compilation tails.** Epsil programs using `Comprehension`,
+- **Compilation tails.** Epsil programs using `Comprehension`,
   stepped/descending `Range`, or multi-`Element` `Loop` still depend on target
   support. The Python target must continue to fail closed until it implements
-  equivalent lowering.
+  equivalent lowering. `while let` — and any `match` arm that `break`s — is
+  not lowered by the JavaScript target either: its `Match` emission is an
+  arrow function, so a `break` in an arm cannot reach the loop. The target
+  declines the `Match` (naming the control operator) and the program runs in
+  the interpreter. A statement-form `Match` emission for loop bodies —
+  `while (true) { if (!<shape test>) break; <bindings>; <body> }` for the
+  `while let` shape — would close it.
 
 ## Tooling and documentation
 
