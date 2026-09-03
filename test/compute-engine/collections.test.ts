@@ -5076,7 +5076,8 @@ describe('BARE `_` IS THE IDENTITY FUNCTION SHORTHAND (regression)', () => {
 // semantics are `Join`'s: any non-tuple collection splices; a TUPLE does not
 // spread (tuples are units; `ListFrom` is the explicit converter) — provably
 // a tuple is a loud `spread-tuple` error, a runtime tuple contributes itself
-// as one element, and a scalar is `Join`'s `incompatible-type` error. The
+// as one element, and a scalar contributes itself as one element too (ruled
+// 2026-09-03: `Join` appends a scalar operand as one element). The
 // box.ts `List`/`Dictionary` fast paths defer to the canonical handlers
 // whenever a `Spread` operand is present.
 describe('COLLECTION-LITERAL SPREAD (box route)', () => {
@@ -5115,8 +5116,8 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
         .evaluate()
         .toString()
     ).toBe('[1,2,3,4]');
-    // A scalar spread is Join's loud incompatible-type error.
-    expect(ce2.box(['List', ['Spread', 5]]).evaluate().isValid).toBe(false);
+    // A scalar spread is one element: `Join(5)` is `[5]`.
+    expect(ce2.box(['List', ['Spread', 5]]).evaluate().toString()).toBe('[5]');
   });
 
   test('an infinite spread stays lazy', () => {

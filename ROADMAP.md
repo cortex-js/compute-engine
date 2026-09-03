@@ -642,6 +642,22 @@ deliberately left out of that change.
   semantically stable (`parseType(typeToString(t))` equals `t`), so this
   is a readability defect in hovers and error messages only.
 
+### A valueless collection-typed operand is silently dropped by the lazy collection operators (OPEN, semantics — found 2026-09-03 while implementing the `Join` scalar-operand ruling)
+
+With `ce.declare('v', 'list<number>')` and no value, `Join([1], v).evaluate()`
+is `[1]` and `Append(v, 2).evaluate()` is `[2]`: the lazy handlers enumerate
+`v` as an EMPTY source, so a symbol that is merely not bound yet contributes
+nothing, where `Length(v)` correctly stays symbolic. The expected answer is the
+unevaluated call (as for `Length`), or an error naming the valueless operand —
+never a shorter list. The drop is independent of the operand's spelling (a
+declared `list`, a union `number | list<number>`) and of the `Join` scalar
+wrap, which leaves such operands untouched. Probe:
+`ce.declare('v','list<number>'); ce.box(['Join',['List',1],'v']).evaluate()`.
+The fix belongs with the valueless-collection round's enumeration gate
+(`isEnumerableCollection` of a valueless symbol should not be `true`), and
+must be measured against the lazy-pipeline suites, which lean on empty
+enumeration for `Nothing`-like operands.
+
 ### `ce.declare({ f: {…} })` cannot type an inline `type` handler that omits `typeHandlerKind` (OPEN, design — found 2026-09-03 while fixing the `declare()` signature for boxed definitions)
 
 In the map form of `ce.declare()` an entry is a `Type`, a type string, or a

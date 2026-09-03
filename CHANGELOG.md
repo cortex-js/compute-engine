@@ -1,21 +1,31 @@
 ## [Unreleased]
 
+### New Features
+
+- **`Join` accepts scalar operands.** A scalar operand is appended as a single
+  element, like a tuple: `Join([1, 2], 3)` is `[1, 2, 3]` and `Join(1, 2, 3)` is
+  `[1, 2, 3]`. The scalar is wrapped as a one-element list at canonicalization
+  (`Join(L, 5)` canonicalizes to `Join(L, [5])`); it used to be an
+  `incompatible-type` error. The `javascript` and `python` targets append a
+  tuple operand as one element too (it used to be spread into its components on
+  those targets).
+
 ### Resolved Issues
 
 - Fixed a compiled coordinate accessor (`PointX`/`PointY`/`PointZ`) reading an
   operand of undecided shape as a single point. The parameter of a function
-  literal such as `f(v) := PointX(v) + 1` types `collection<any> | tuple`, and
-  a call `f(P)` over a list of points compiled to the first point's components
+  literal such as `f(v) := PointX(v) + 1` types `collection<any> | tuple`, and a
+  call `f(P)` over a list of points compiled to the first point's components
   (`[2, 3, 4]` where the interpreter answers `[2, 5]`), or threw inside a
   `PointList` body. The `javascript` target now decides at run time, as the
-  interpreter does, and a `PointList` component of `broadcastable` type is a
-  zip source or a scalar slot by its value instead of being replaced by `NaN`.
+  interpreter does, and a `PointList` component of `broadcastable` type is a zip
+  source or a scalar slot by its value instead of being replaced by `NaN`.
   (Tycho item 238.)
-- Base-10 and base-2 logarithms now compile through one kernel per base on
-  every path of a target (`Math.log10`/`Math.log2` on `javascript`, on both the
-  real and the complex lane; `np.log10`/`np.log2`; the shader `log2`;
-  `_IA.log10`/`_IA.log2`). A runtime `Log(x)` was spelled `ln(x) / ln(10)`,
-  one ulp away from the folded `Log(2)`, so `log(x) / log(2)` at `x = 4` ran to
+- Base-10 and base-2 logarithms now compile through one kernel per base on every
+  path of a target (`Math.log10`/`Math.log2` on `javascript`, on both the real
+  and the complex lane; `np.log10`/`np.log2`; the shader `log2`;
+  `_IA.log10`/`_IA.log2`). A runtime `Log(x)` was spelled `ln(x) / ln(10)`, one
+  ulp away from the folded `Log(2)`, so `log(x) / log(2)` at `x = 4` ran to
   `1.9999999999999996` and a "power of two" selector kept only `i = 1`. (Tycho
   item 240.)
 - A broadcastable operator applied to an operand of unproven shape no longer
@@ -37,9 +47,9 @@
   DAG-shaped value: a binder's bound-name gatherer walked a shared
   sub-expression once per path, so a comprehension whose range bound read a
   deeply shared value threw `Invalid array length` inside `compile()` after
-  minutes and gigabytes, where the fold-size refusal used to answer in
-  seconds. The purity and mention walkers over a value, and the size memo,
-  had the same per-path cost. (Tycho item 225.)
+  minutes and gigabytes, where the fold-size refusal used to answer in seconds.
+  The purity and mention walkers over a value, and the size memo, had the same
+  per-path cost. (Tycho item 225.)
 
 ## 0.121.0 _2026-09-03_
 

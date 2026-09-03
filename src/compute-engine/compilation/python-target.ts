@@ -1,5 +1,8 @@
 import type { Expression } from '../global-types.js';
-import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
 
@@ -37,7 +40,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { isPointListValue } from '../collection-utils.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
   collectionElementType,
   resolveTypeForCompilation,
@@ -2774,8 +2777,21 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Join: (args, compile) => {
     if (args.length === 0) return '[]';
+    // A tuple (through an alias or an all-tuple union:
+    // `isProvablyTupleParticipant`), or a scalar whose type proves it is not
+    // a collection, is one ELEMENT, as the interpreter's `isAtomicJoinOperand`
+    // reads it (`Join([1, 2], 3)` is `[1, 2, 3]`); only a collection is
+    // unpacked.
+    const atomic = (a: Expression): boolean =>
+      isProvablyTupleParticipant(a) ||
+      !couldMatch(
+        resolveTypeForCompilation(a.type.type),
+        COLLECTION_SHAPE_TYPE
+      );
     return `[${args
-      .map((a, i) => `*${pyCollArg('Join', a, compile, i + 1)}`)
+      .map((a, i) =>
+        atomic(a) ? compile(a) : `*${pyCollArg('Join', a, compile, i + 1)}`
+      )
       .join(', ')}]`;
   },
   // Variadic, like the interpreter and the JavaScript target

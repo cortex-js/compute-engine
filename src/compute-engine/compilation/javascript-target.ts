@@ -1656,6 +1656,19 @@ function compileJSPointList(
 }
 
 /**
+ * Is this `Join` operand one ELEMENT of the result rather than a collection
+ * to splice? Mirrors the interpreter's `isAtomicJoinOperand`
+ * (`library/collections.ts`): a tuple — through an alias, and a union whose
+ * every arm is a tuple (`isProvablyTupleParticipant`) — or an operand whose
+ * static type proves it is not a collection. An `unknown`-typed operand keeps
+ * the collection route, where `collArg` fails closed.
+ */
+function isAtomicJSJoinOperand(a: Expression): boolean {
+  if (isProvablyTupleParticipant(a)) return true;
+  return !couldMatch(jsType(a), COLLECTION_SHAPE_TYPE);
+}
+
+/**
  * Codegen shared by `Characters` and its synonym `GraphemeClusters` — see the
  * `Characters` entry in `JAVASCRIPT_FUNCTIONS` for the semantics.
  */
@@ -2323,8 +2336,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `([${args
         .map((a) => `_SYS.ct(${compile(a)})`)
         .join(', ')}].join("").normalize())`;
+    // An ATOMIC operand — a tuple (a point is one value, never spliced) or
+    // a scalar whose type proves it is not a collection — is one element,
+    // as the interpreter's `isAtomicJoinOperand` reads it: `Join([1, 2], 3)`
+    // is `[1, 2, 3]`. A tuple used to be spread into its components here.
     return `[${args
-      .map((a, i) => `...(${collArg('Join', a, compile, i + 1)})`)
+      .map((a, i) =>
+        isAtomicJSJoinOperand(a)
+          ? compile(a)
+          : `...(${collArg('Join', a, compile, i + 1)})`
+      )
       .join(', ')}]`;
   },
   // Split a string into a list of user-perceived characters. The interpreter

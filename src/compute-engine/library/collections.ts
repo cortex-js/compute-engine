@@ -5786,6 +5786,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: [
       'Join the elements of some collections into a flat collection.',
       'A tuple operand is appended as a single element, not spliced.',
+      'A scalar operand is appended as a single element too: `Join([1, 2], 3)` is `[1, 2, 3]`.',
       'When every operand is a string, the result is their concatenation as a string: `Join` is the variadic string concatenation.',
     ],
     complexity: 8200,
@@ -5812,6 +5813,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // ACCENT produces ONE character, not two. That is inherent to Unicode
     // grapheme segmentation, not a defect (`docs/STRING_ROADMAP.md`, design
     // constraint 3).
+    // A SCALAR operand satisfies the generic arm too: the `canonical`
+    // handler wraps it in a one-element `List` before validation
+    // (`wrapScalarJoinOperand`), so `Join(L, 5)` and `Join(1, 2, 3)` are
+    // accepted without widening the arm to `value` — which would have
+    // inferred an undeclared operand as `value` instead of a collection.
     signature:
       '((T+) -> T where T: string) & ((collection<any>*) -> collection)',
     // Same-head flatten: `Join(Join(…inner), …outer)` → `Join(…inner, …outer)`
@@ -5825,6 +5831,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Run the framework's default flatten step (Sequence-splice + Nothing-
       // drop) that this custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
+      // A provably scalar operand is one element: wrapped as a one-element
+      // list BEFORE validation, so the signature admits it and the type and
+      // collection handlers see only collections and tuples.
+      ops = ops.map((op) => wrapScalarJoinOperand(ce, op));
       const args =
         validateArguments(ce, ops, JOIN_SIGNATURE, false, false) ?? ops;
       if (args.some((x) => !x.isValid)) return ce._fn('Join', args);
@@ -10772,8 +10782,9 @@ function canonicalList(
   // spread — tuples are units, and `ListFrom` is the explicit converter —
   // so a provably-tuple operand is a loud `spread-tuple` error, and one
   // that only turns out to be a tuple at evaluation contributes itself as
-  // ONE element (`Join`'s atomic-tuple convention). A scalar or string
-  // operand is `Join`'s `incompatible-type` error at evaluation.
+  // ONE element (`Join`'s atomic-tuple convention). A provably SCALAR
+  // operand is one element too (`[...5]` is `[5]` — `Join`'s scalar rule);
+  // a string is a collection of characters and splices.
   if (ops.some((op) => isFunction(op, 'Spread') && op.nops === 1)) {
     const segments: Expression[] = []; // `Join` operands
     let run: Expression[] = []; // current run of ordinary elements
@@ -10807,6 +10818,9 @@ function canonicalList(
         // Tuples do not spread. The error is an ELEMENT, so the list
         // freezes with the error cell in place (error-propagation §6a.2).
         run.push(ce.error(['spread-tuple'], x.toString()));
+      } else if (isProvablyScalarJoinOperand(x)) {
+        // A scalar spread is the element itself, eagerly.
+        run.push(x);
       } else {
         flushRun();
         // A set/dictionary/record-kind segment must materialize through
@@ -10854,7 +10868,8 @@ function canonicalSet(
   // Spread elements: `{a, ...s, b}` — the set form of the list-literal
   // spread (same 2026-08-14 rulings as `canonicalList` above: non-tuple
   // collections splice, a provable tuple is a loud `spread-tuple` error, a
-  // runtime tuple is one element, a scalar is `Join`'s error). Lowered to
+  // runtime tuple is one element, a provably scalar operand is one element
+  // — `Join`'s scalar rule). Lowered to
   // `SetFrom(Join(…))`: `Join` concatenates the segments, `SetFrom`
   // deduplicates into a set. Handled BEFORE the generic operand
   // canonicalization below — `Spread`'s own canonical handler would rewrite
@@ -10880,6 +10895,7 @@ function canonicalSet(
       if (isFunction(x, 'List') || isFunction(x, 'Set')) run.push(...x.ops);
       else if (isFunction(x, 'Tuple') || x.type.matches('tuple'))
         run.push(engine.error(['spread-tuple'], x.toString()));
+      else if (isProvablyScalarJoinOperand(x)) run.push(x);
       else {
         flushRun();
         segments.push(x);
@@ -11296,9 +11312,56 @@ export function* reduceCollection<T>(
  * point-list accumulation idiom `L → Join(L, P)`.
  *
  * Keyed on the static type, so a tuple-typed symbol routes too.
+ *
+ * A SCALAR operand never reaches this predicate: the `canonical` handler
+ * wraps it in a one-element `List` (`wrapScalarJoinOperand`), so
+ * `Join([1, 2], 3)` is `Join([1, 2], [3])` and every handler here sees only
+ * collections and tuples.
  */
 function isAtomicJoinOperand(op: Expression): boolean {
   return op.type.matches('tuple');
+}
+
+/**
+ * A `Join` operand that is provably a SCALAR — one value, not a collection —
+ * wrapped as the one-element list it contributes, so `Join([1, 2], 3)` is
+ * `[1, 2, 3]` and `Join(1, 2, 3)` is `[1, 2, 3]`: the Desmos reading of
+ * `join`, and consistent with list-versus-scalar arithmetic (pinned in
+ * `test/compute-engine/join-scalar-operand.test.ts`). Every other operand is
+ * returned unchanged: a tuple is atomic
+ * already (`isAtomicJoinOperand`), a string is a collection of characters,
+ * and an operand whose type says nothing (`unknown`, `any`, `value` — an
+ * undeclared symbol) may hold a list at evaluation, so it keeps the
+ * collection route and its `collection<any>` inference.
+ */
+function wrapScalarJoinOperand(ce: ComputeEngine, op: Expression): Expression {
+  return isProvablyScalarJoinOperand(op) ? ce.function('List', [op]) : op;
+}
+
+/**
+ * Is this operand PROVABLY one value that `Join` must not splice, and not
+ * already routed as a tuple? True for a scalar — a type that is neither a
+ * collection nor a tuple, nor one that says nothing (`unknown`, `any`,
+ * `value`) — and for a union whose every arm is a scalar or a tuple with at
+ * least one scalar arm (`integer | tuple<number, number>`): such an operand
+ * can only ever be one element, but neither the tuple route
+ * (`isAtomicJoinOperand`, which needs EVERY arm to be a tuple) nor the
+ * collection signature admits it. Wrapping a tuple arm in a one-element list
+ * changes nothing: it was one element either way. These are the operands
+ * `wrapScalarJoinOperand` wraps, and the spread operands a list or set
+ * literal keeps as one element (`[...5]` is `[5]`).
+ */
+function isProvablyScalarJoinOperand(op: Expression): boolean {
+  if (!op.isValid) return false;
+  if (op.type.matches('tuple')) return false;
+  const atomic = (t: Type): boolean => {
+    if (t === 'unknown' || t === 'any' || t === 'value') return false;
+    if (typeof t !== 'string' && t.kind === 'union')
+      return t.types.every(atomic);
+    if (isSubtype(t, 'tuple')) return true;
+    return !typeCouldBeCollection(t);
+  };
+  return atomic(op.type.type);
 }
 
 /** The undeduplicated element enumeration of a `Map` node.
