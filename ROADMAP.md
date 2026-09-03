@@ -627,6 +627,15 @@ deliberately left out of that change.
   `If`/`Which` ruling), so the lane degrades the error to `NaN` rather
   than refusing to compile a whole program for one bad order. Recorded,
   not planned.
+- **NEEDS A RULING — `Mean` of a nested collection and of an empty
+  string are errors now.** `Mean([[1, 2], [3, 4]])` is an
+  `incompatible-type` error (a matrix has no mean under
+  `broadcastable: false`; it used to stay inert — numpy would flatten and
+  answer 2.5), and `Mean("")` is the same error (a string is never data,
+  empty or not; it used to answer `NaN` because the absence gate saw a
+  collection of zero characters). Options: keep the errors (recommended —
+  the literal and the general rule agree), or flatten nested collections
+  and treat an empty string as empty data.
 - **The type serializer drops the parentheses around a variadic union.**
   `(complex | infinity, (complex | infinity)+) -> number` prints as
   `(complex | infinity, complex | infinity+) -> number`. The round trip is
@@ -673,6 +682,23 @@ form (`BaseCompiler.conditionDecidability`). Two reaches of it are open.
   same `If` and relies on its iteration cap. Recorded 2026-09-02 as a
   consequence of the ruling; a desugared exit test could be exempted (a
   synthesized `If` is not a user selection) if that is preferred.
+- **NEEDS A RULING — an IMPURE connective in condition position still
+  selects by truthiness.** `conditionDecidability` answers `null` for any
+  condition with an impure leaf, so `If(Random() > 0.5 ∧ x > 0, a, b)` at
+  `x = NaN` takes the else arm. A lone impure relation behaves the same
+  way by the ruling's own exemption (its operands would have been named
+  three times); the lazy lowering binds every leaf exactly once, so the
+  exemption's reason no longer holds for connectives — but extending
+  single-evaluation to impure conditions (lone relations included) is a
+  scope change beyond the ruling. Options: extend, or keep the exemption.
+- **NEEDS A RULING — a vars-object member read is repeated inside a
+  Kleene leaf.** `_.x` appears in the decidedness test and in the
+  comparison (`_.x === _.x && _.x !== undefined ? (0 < _.x) : …`), exactly
+  as the pre-existing single-relation guard repeats it; `ATOMIC_FRAGMENT`
+  treats a member read as free. A vars object with a side-effecting getter
+  therefore observes several reads. Options: keep the convention (a getter
+  on the vars object is outside the compiled contract), or bind every
+  member read to a temporary (changes every guarded emission).
 - **The GPU targets keep JavaScript-style selection.** Python IS aligned:
   its `If`/`Which` entries share the compiler's decidability analysis and
   answer `float('nan')` for an undecided condition

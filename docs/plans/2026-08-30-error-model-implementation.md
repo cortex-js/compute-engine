@@ -1,6 +1,24 @@
 # Error-model implementation (Contract B) — plan
 
-**Status:** in progress. Phase A started 2026-08-30.
+**Status (2026-09-03): the machinery phases A–E and every scheduled
+Phase F batch (1–14) are SHIPPED; the three-valued lowering of compiled
+`And`/`Or`/`Not` is shipped; the plan is complete.** What remains is a
+list of ruling questions the work surfaced, kept in `ROADMAP.md` under
+"Open items from the Phase F batches 11, 12, 13 and 14 (2026-09-02)" and
+"Open items from the undecided-condition ruling (2026-09-02)" — none of
+them blocks a release. Milestones:
+
+| When | What | Gate |
+| --- | --- | --- |
+| 2026-08-30/31 | Phases A–E (declaration surface, NaN gates, derived type, partiality channels, higher-order floor) | 644/644, snapshot delta 0 |
+| 2026-08-31 | `non_finite_number` retired (`signed_infinity`); batch 1 `Heaviside` pilot; batches 2–3 | 645/645 · 647/647 |
+| 2026-08-31 → 09-01 | batches 4–6 (complex-extension family, `Power`) | 647/647 |
+| 2026-09-01/02 | batches 7–10 (elementary remainder, Γ family, complex accessors, rational/parity) | 647–648/648 |
+| 2026-09-02 | the residue round (size operators, norms, compiled `If`/`Which`, condition diagnostic, internal-error code) | committed |
+| 2026-09-02, committed 09-03 as `40f7a8d8` | batches 11–14 (arithmetic core, linear-algebra scalars, statistics aggregates, combinatorial/regularized functions, distributions) and the Kleene connective lowering; decided by precedent, ratified 2026-09-03 | 653/653 then 656/657 (one stale pin moved), snapshot delta 0 |
+
+Each batch's record below names its decisions, the seams, the pins that
+moved, the defects fixed alongside, and what the dual reviews found.
 
 The design is `docs/ERROR-MODEL.md`. Contract B was ratified 2026-08-27 as
 ruling R-A of the numeric-lattice ratification package
@@ -2157,37 +2175,45 @@ precise carrier changes admission: post-flip `real` excludes `±oo`, so
 `Heaviside(±oo)` (today `1`/`0`) becomes an `Error` unless the carrier is
 spelled `real | +oo | -oo`. Every flip must measure its snapshot blast
 radius and decide the extended-value spelling explicitly. Not part of the
-machinery phases; batches 2–10 are recorded above.
+machinery phases. Every batch is recorded above; this is the index.
 
-**Batches 11–14 SCHEDULED 2026-09-02 (Arno), each its own measured
-session — ALL IMPLEMENTED the same day (records above: batches 11, 13,
-14a, 12, 14b, plus the four dual-review records; decided by precedent,
-awaiting ratification of the decisions each record lists).** Measured
-before scheduling by walking the library scope: 384
-numeric-carrier heads, 93 with an explicit `nanBehavior`, the rest on the
-derived default; the heads below still sit on a bare `(number)` or
-`(value)` carrier where a precise domain exists.
+| Batch | Heads | Status |
+| --- | --- | --- |
+| 1 (pilot) | `Heaviside` | shipped 2026-08-31 |
+| 2 | `Sign` | shipped 2026-08-31 |
+| 3 | `Floor`, `Ceil`, `Round`, `Truncate`; comparisons declare `handle` | shipped 2026-08-31 |
+| 4 | `Sin`, `Sqrt`, `Ln`, `Arcsin`, `Erf` | shipped 2026-08-31 |
+| 5 | the 21 remaining trig-factory heads, `Erfc`, `Sinc`, `FresnelS`, `FresnelC` | committed 2026-09-01 |
+| 6 | `Power` (`Exp`, `Exp2` ride along) | shipped 2026-09-01 |
+| 7 | `Abs`, `Log` family, `Arctan`, `Arctan2`, `Root`; `Sqrt`/`Ln` re-ruled at `~oo` | shipped 2026-09-02 |
+| 8 | the Γ and special-function family (36 heads) | committed 2026-09-02 |
+| 9 | `Real`, `Imaginary`, `Argument`, `Conjugate`, `AbsArg`, `ComplexRoots`, `Erfi`, `ErfInv` | shipped 2026-09-02 |
+| 10 | `Mod`, `Fract`, `Rationalize`, `ContinuedFraction`, `IsOdd`, `IsEven`, `Numerator`, `Denominator`, `NumeratorDenominator` | committed 2026-09-02 |
+| 11 | `Divide`, `Negate`, `Square`, `Clamp`, `ElementMax`, `ElementMin` | committed 2026-09-03 (`40f7a8d8`) |
+| 12 | `Binomial`, `Choose`, `Pochhammer`, `GammaRegularized`, `BetaRegularized` | committed 2026-09-03 |
+| 13 | `Norm`, `Trace`, `MatrixPower`, `Determinant` | committed 2026-09-03 |
+| 14a | `Mean` … `Correlation` (14 aggregates) | committed 2026-09-03 |
+| 14b | the 5 distribution constructors, `PDF`, `CDF`, `Quantile` | committed 2026-09-03 |
 
-- **Batch 11 — the arithmetic core**: `Divide`, `Negate`, `Square`,
-  `Clamp`, `ElementMax`, `ElementMin`. Canonical-handler heads: the
-  enforcement seam is the evaluate handler, as with `Power` (batch 6), and
-  `canonicalDivide`/`canonicalNegate` must stop folding off-carrier points
-  at boxing.
-- **Batch 12 — combinatorial and regularized special functions**:
-  `Binomial`, `Pochhammer`, `GammaRegularized`, `BetaRegularized`. Each
-  limit at an infinite argument verified numerically before encoding (the
-  batch-8 discipline: one sample is a lapse).
-- **Batch 13 — linear-algebra scalars**: `Norm`, `Trace`, `MatrixPower`,
-  `Determinant`. `Norm` carries the 2026-09-02 ruling that an infinite
-  leg dominates a NaN leg and `~oo` counts as infinite (shipped for the
-  value the same day; the carrier flip is this batch).
-- **Batch 14 — statistics and distributions**: `Mean` … `Correlation` on
-  `(collection)`, `NormalDistribution` … `ExponentialDistribution`,
-  `PDF`, `CDF`, `Quantile`.
-- The color heads (`Rgb`, `Hsv`, `Hsl`, `Oklab`, `Oklch`, `ColorMix`)
-  keep their bespoke NaN meaning and must declare `nanBehavior: 'handle'`
-  in the same change whenever they flip (the "known hazards" entry
-  below).
+Batches 11–14 were scheduled 2026-09-02 after a survey of the library
+scope (384 numeric-carrier heads, 93 with an explicit `nanBehavior`, the
+rest on the derived default) and implemented the same day, each in its own
+worktree with its own targeted run, then gated together and dual-reviewed
+in four rounds; their carriers were decided by precedent and ratified
+2026-09-03.
+
+Heads that keep a wide carrier ON PURPOSE, with the reason at the
+definition: `Add`, `Multiply`, `Subtract` (the broadcast and quantity hubs;
+every extended point has a value or an indeterminate form, like `Divide`,
+and nothing enforces a carrier on a `canonical`-handler head); `Square`
+and `Exp`/`Exp2` (they canonicalize to `Power`, whose slots govern);
+`Max`/`Min` (they reduce collections, `handle`); the membership predicates
+(`IsPrime` family, `handle`); the statistics aggregates' operand slots
+(`collection<any>` must admit an absent datum for the §3.C rule). The
+color heads (`Rgb`, `Hsv`, `Hsl`, `Oklab`, `Oklch`, `ColorMix`) keep their
+bespoke NaN meaning and must declare `nanBehavior: 'handle'` in the same
+change whenever they flip (the "known hazards" entry below); they have not
+been flipped and nothing schedules them.
 - **The three-valued lowering of compiled `And`/`Or`/`Not` — IMPLEMENTED
   2026-09-02** (scheduled the same day; own worktree; pins in the new
   file `test/compute-engine/compile-three-valued-connectives.test.ts`, 47
@@ -2231,9 +2257,20 @@ derived default; the heads below still sit on a bare `(number)` or
 ## Known hazards, recorded before they bite
 
 - **Operators with canonical handlers bypass declared-signature
-  validation** (§4 names this the migration hazard). The Phase B boxing
-  seam must claim that class too, or migrated operators with canonical
-  handlers stay in the drift population.
+  validation** (§4 names this the migration hazard) — CONFIRMED, not yet
+  closed. Measured in batch 14b: `applyOperatorDefinition` re-runs only
+  the lenient `checkNumericArgs` on a `canonical` handler's result, and
+  the dispatch conformance re-test skips such heads too, so a flipped
+  carrier on one of them is enforced by nothing unless the handler does
+  it. Every flipped canonical-handler head therefore carries its own
+  seam: `Power`'s evaluate arm (batch 6), the trig factory's arm (batch
+  5), the distribution constructors' `carrierError` (batch 14b);
+  `Divide` and `Negate` need none (their carriers have no error point).
+  Two consequences stay open in `ROADMAP.md`: a fresh symbol at such a
+  slot still infers `number`, and a symbol's HELD value is never
+  validated (the handler cannot read it without a value leak). A uniform
+  boxing seam for canonical-handler heads is the fix; its ruling is
+  pending.
 - **`Rgb`-style bespoke NaN meanings.** The step-4a missing gate's
   comment records that some operators give a literal `NaN` operand its
   own meaning. Such operators keep working while their carriers admit
