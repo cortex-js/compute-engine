@@ -100,19 +100,43 @@ function factsFromType(t: Type): {
 /**
  * The nested dimensions of a literal `List` whose rows are themselves
  * literal `List`s of equal length: `[[1,2,3],[4,5,6]]` answers `[2, 3]`.
- * Descent stops at the first level that is not uniformly list-literal.
+ * Descent stops at the first depth that is not uniformly list-literal: a
+ * depth counts only when every node at that depth, across the whole
+ * literal, is a `List` of the same length.
+ *
+ * Computed per node as its own length followed by the longest common prefix
+ * of its children's shapes (a non-`List` child has the empty shape), which
+ * is the same answer: a depth survives the prefix exactly when every node
+ * at that depth agrees. The per-node result is memoized by node identity. A
+ * boxed expression is a DAG — a list built from one sub-list referenced
+ * twice holds the same object twice — so a walk that collected each
+ * occurrence doubled with every nesting of `List(t, t)` and reached 2^26
+ * entries for a 26-level tower of 27 distinct nodes (the `Hold` type handler
+ * reads this structure); the memo makes the walk linear in the distinct
+ * nodes, whatever depths share them.
  */
 function listLiteralShape(op: Expression): number[] {
-  const shape: number[] = [];
-  let level: ReadonlyArray<Expression> = [op];
-  while (level.length > 0 && level.every((x) => isFunction(x, 'List'))) {
-    const rows = level.map((x) => (x as Expression & { nops: number }).nops);
-    const n = rows[0];
-    if (!rows.every((r) => r === n)) break;
-    shape.push(n);
-    level = level.flatMap((x) => (isFunction(x) ? x.ops : []));
-  }
-  return shape;
+  const memo = new Map<Expression, number[]>();
+  const shapeOf = (x: Expression): number[] => {
+    if (!isFunction(x, 'List')) return [];
+    const cached = memo.get(x);
+    if (cached !== undefined) return cached;
+    let prefix: number[] | undefined;
+    for (const child of x.ops) {
+      const s = shapeOf(child);
+      if (prefix === undefined) prefix = s;
+      else {
+        let k = 0;
+        while (k < prefix.length && k < s.length && prefix[k] === s[k]) k++;
+        if (k < prefix.length) prefix = prefix.slice(0, k);
+      }
+      if (prefix.length === 0) break;
+    }
+    const shape = [x.nops, ...(prefix ?? [])];
+    memo.set(x, shape);
+    return shape;
+  };
+  return shapeOf(op);
 }
 
 /** The inert structural view of an operand — see `OperandStructure`. Reads

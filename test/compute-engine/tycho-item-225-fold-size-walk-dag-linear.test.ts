@@ -79,3 +79,56 @@ describe('a binder whose bound reads a shared tower', () => {
     expect(String(ce.parse('a_{6} + x').evaluate())).toBe('4097x');
   });
 });
+
+describe('canonicalizing over a shared list tower', () => {
+  // The list counterpart of `sharedTower`: `List(t, t)` nested `depth` times.
+  // Its type is the dimensioned `list<number^(2x2x…)>`, so every reader of
+  // the shape must stay linear in the number of DISTINCT nodes.
+  function sharedListTower(ce: ComputeEngine, depth: number) {
+    let t = ce.parse('x + 1');
+    for (let k = 0; k < depth; k++) t = ce.function('List', [t, t]);
+    return t;
+  }
+
+  test('Length, Element and Hold over a 2^26-path list stay linear', () => {
+    const ce = new ComputeEngine();
+    // 27 distinct nodes, 2^26 paths. The `List` type handler analyzed the
+    // shape once per PATH and spread every leaf cell into one `widen` call:
+    // at 18 levels that overflowed the stack, the canonical handler logged
+    // `error canonicalizing \`Length\`` and the result devolved to
+    // `unknown`. The `Hold` type handler's structure read collected each
+    // level once per path too.
+    const errors: unknown[] = [];
+    const spy = jest
+      .spyOn(console, 'error')
+      .mockImplementation((...args) => void errors.push(args));
+    try {
+      const tower = sharedListTower(ce, 26);
+      const t0 = Date.now();
+      const length = ce.function('Length', [tower]);
+      const element = ce.function('Element', [ce.symbol('n'), tower]);
+      const held = ce.function('Hold', [tower]);
+      // A type is computed on first read, so every read the walks serve
+      // happens inside the timed window.
+      const types = [tower, length, element, held].map((x) =>
+        x.type.toString()
+      );
+      const elapsed = Date.now() - t0;
+
+      expect(length.isCanonical).toBe(true);
+      expect(element.isCanonical).toBe(true);
+      expect(types).toEqual([
+        `list<number^(${Array(26).fill('2').join('x')})>`,
+        'integer',
+        'boolean',
+        'unknown',
+      ]);
+      expect(errors).toEqual([]);
+      // Milliseconds when linear; the per-path walks doubled with every
+      // level (a quarter second at 22 levels for `Hold` alone).
+      expect(elapsed).toBeLessThan(1500);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

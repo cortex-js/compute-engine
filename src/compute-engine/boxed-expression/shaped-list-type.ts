@@ -12,10 +12,36 @@ import { computeBroadcastCell } from './broadcast-cell-widening.js';
 
 /**
  * The result of analyzing one level of a (possibly nested) literal-`List`
- * structure: the dimensions rooted at this level, and the flat list of every
- * leaf cell type reachable underneath it.
+ * structure: the dimensions rooted at this level. The leaf cell types are
+ * not part of the result; the walk appends them to the shared `cells` list
+ * of the `ShapeWalk` as it reaches them.
  */
-type ShapeAnalysis = { dims: number[]; cells: Type[] };
+type ShapeAnalysis = { dims: number[] };
+
+/**
+ * The state of one `shapedListType` call.
+ *
+ * `memo` holds the analysis of every nested `List` node already visited, by
+ * node identity; a blocked level records `null`. `cells` collects the
+ * distinct leaf cell types in the order the walk first reaches them, and
+ * `seen` is the set behind that list. Each distinct node contributes its
+ * cells once, so the list is bounded by the number of leaf nodes rather than
+ * by the number of paths.
+ *
+ * The cells are widened ONCE, in that order, at the end. This reproduces the
+ * fold the analysis made when it collected one entry per path: `widen` folds
+ * left to right, its running result is a supertype of every cell folded so
+ * far, and folding a cell again into a supertype of itself changes nothing —
+ * so dropping the repeats leaves the result unchanged. Widening level by
+ * level would NOT: for unrelated cell types `widen` answers a union whose
+ * members depend on the grouping (`integer, integer, color, real` gives
+ * `integer | color | real` folded flat but `color | real` folded by level).
+ */
+type ShapeWalk = {
+  memo: Map<Expression, ShapeAnalysis | null>;
+  cells: Type[];
+  seen: Set<Type>;
+};
 
 /**
  * The **honest** shape-derived `Type` of a literal `List` node whose children
@@ -51,13 +77,19 @@ type ShapeAnalysis = { dims: number[]; cells: Type[] };
  * The honest widening satisfies the contract by construction.
  */
 export function shapedListType(ops: ReadonlyArray<Expression>): Type | null {
-  const analysis = analyzeLevel(ops);
+  const walk: ShapeWalk = { memo: new Map(), cells: [], seen: new Set() };
+  const analysis = analyzeLevel(ops, walk);
   if (analysis === null) return null;
 
-  const { dims, cells } = analysis;
+  const { dims } = analysis;
+  const { cells } = walk;
   if (cells.length === 0) return null;
 
-  const widened = widen(...cells);
+  // Folded pairwise rather than spread into one call: a wide literal has as
+  // many distinct leaves as it has elements, and a spread of that many
+  // arguments would exceed the call stack.
+  let widened: Readonly<Type> = cells[0];
+  for (let i = 1; i < cells.length; i++) widened = widen(widened, cells[i]);
 
   // A heterogeneous cell population (`widen(number, color) = number | color`)
   // makes no kernel or signature sense — no shape claim. But the ANALYZED
@@ -91,33 +123,53 @@ export function shapedListType(ops: ReadonlyArray<Expression>): Type | null {
 /**
  * Analyze one level of a literal-`List` structure whose children are `ops`.
  * Returns `null` if this level (or anything nested under it) blocks a shape
- * claim; otherwise the dimensions and the flat list of leaf cell types.
+ * claim; otherwise the dimensions. The leaf cell types are appended to
+ * `walk.cells`.
+ *
+ * A boxed expression is a DAG: a list built from one sub-list referenced
+ * twice holds the same object twice, and `List(t, t)` nested 26 times has
+ * 27 distinct nodes but 2^26 paths to the leaf. The analysis is therefore
+ * memoized per nested `List` node (`walk.memo`), so a shared node is
+ * analyzed once and its cells are collected once. Walking the tree once per
+ * path, and spreading every leaf into one `widen(...cells)` call, overflowed
+ * the stack at 18 levels while canonicalizing `Length` over such a list.
  */
-function analyzeLevel(ops: ReadonlyArray<Expression>): ShapeAnalysis | null {
+function analyzeLevel(
+  ops: ReadonlyArray<Expression>,
+  walk: ShapeWalk
+): ShapeAnalysis | null {
   // No empty level: a zero-length axis is never claimed.
   if (ops.length === 0) return null;
 
   const childShapes: ShapeAnalysis[] = [];
-  const cellTypes: Type[] = [];
+  let cellCount = 0;
 
   for (const op of ops) {
     // A literal `List` child (a plain `List` function) is a nested axis.
     if (isFunction(op, 'List')) {
-      const sub = analyzeLevel(op.ops);
+      let sub = walk.memo.get(op);
+      if (sub === undefined) {
+        sub = analyzeLevel(op.ops, walk);
+        walk.memo.set(op, sub);
+      }
       if (sub === null) return null;
       childShapes.push(sub);
     } else {
       const cell = classifyCell(op);
       if (cell === null) return null;
-      cellTypes.push(cell);
+      cellCount++;
+      if (!walk.seen.has(cell)) {
+        walk.seen.add(cell);
+        walk.cells.push(cell);
+      }
     }
   }
 
   // No level mixing cells and nested Lists.
-  if (childShapes.length > 0 && cellTypes.length > 0) return null;
+  if (childShapes.length > 0 && cellCount > 0) return null;
 
   // All cells → a rank-1 level.
-  if (childShapes.length === 0) return { dims: [ops.length], cells: cellTypes };
+  if (childShapes.length === 0) return { dims: [ops.length] };
 
   // All nested Lists → rank ≥ 2. Every child must have identical dimensions
   // (cell types need not match row-to-row).
@@ -125,10 +177,7 @@ function analyzeLevel(ops: ReadonlyArray<Expression>): ShapeAnalysis | null {
   for (let i = 1; i < childShapes.length; i++)
     if (!sameDims(childShapes[i].dims, firstDims)) return null;
 
-  const cells: Type[] = [];
-  for (const cs of childShapes) cells.push(...cs.cells);
-
-  return { dims: [ops.length, ...firstDims], cells };
+  return { dims: [ops.length, ...firstDims] };
 }
 
 /**

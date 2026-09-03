@@ -682,7 +682,7 @@ under 5 ms. Pinned in
 `test/compute-engine/tycho-item-225-fold-size-walk-dag-linear.test.ts`
 ("canonicalizing over a shared list tower").
 
-### Operations over a DAG-shaped nested TUPLE are proportional to the tuple type's size, which is the number of leaf slots (OPEN — measured 2026-09-03 while fixing the list-tower overflow above)
+### Type-level readers walk a DAG-shaped TYPE once per path: a shared nested tuple, or a shared RAGGED list, is exponential in its depth (OPEN — measured 2026-09-03 while fixing the list-tower overflow above)
 
 A tuple literal built the same way (`t = Tuple(t, t)` repeated) does not
 overflow, but every canonical operation over it doubles with each level:
@@ -694,10 +694,20 @@ type of a 20-level tower has 2^20 slots, and every type-level reader
 (`typeToString`, `hasFreeVariables`, `isSubtype`, `typeCouldBeNumericTuple`
 in `collection-utils.ts`) is linear in that size. A dimensioned `list` type
 describes the same shape in 20 numbers, which is why the list tower is fast.
-A fix would need the tuple type to share, or to summarize, repeated
-component types — a representation decision, not a visited set. The
+The same happens to a shared list that is not shape-regular: with
+`L_k = List(L_{k-1}, L_{k-2})` (one node per level, Fibonacci-many paths)
+the `List` type handler declines the shape claim and falls back to
+`list<widen(child types)>`, so the type is `list<list<…> | list<…>>` with
+the child types shared by object identity — a DAG-shaped type — and reading
+`.type`, `Length` or `Hold` over it takes 0.1 s at 20 levels, 3 to 5 s at 26
+and over a minute at 32. `widen` itself is one of the per-path readers
+(`widen2` calls `isSubtype` on the element types). A fix is a memo keyed by
+type-object identity inside the type-lattice readers (`isSubtype`,
+`typeToString`, `hasFreeVariables`, `typeCouldBeNumericTuple`, …), or a
+type representation that shares or summarizes repeated component types — a
+type-system decision, not a visited set in a collection walker. The
 evaluate path (`evaluate`, `.N()`, `simplify`, `match`) is proportional to
-the leaf count for both towers, which is the size of its result.
+the leaf count for every such value, which is the size of its result.
 
 ### The LaTeX round-trip gate (`npm run check:roundtrip`, part of `ci:corpus-pipeline`) is red at the 0.121.0 release commit (FIXED 2026-09-03, unreleased — measured 2026-09-03 on a clean worktree at `1ce34ecb`)
 
