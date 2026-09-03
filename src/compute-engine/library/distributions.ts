@@ -388,7 +388,8 @@ function betaRegularizedValueAtInfinity(
   const px = infinitePoint(x);
   const pa = infinitePoint(a);
   const pb = infinitePoint(b);
-  if (px === undefined && pa === undefined && pb === undefined) return undefined;
+  if (px === undefined && pa === undefined && pb === undefined)
+    return undefined;
   if (px !== undefined) return undefined;
   if (pa !== undefined && pb !== undefined) {
     if (pa !== '+oo' || pb !== '+oo') return undefined;

@@ -302,8 +302,7 @@ function jumpOffsetAt(
   if (op === 'Round') {
     if (arity !== 1) return 'unknown';
     if (Math.abs(at.re) >= 2 ** 52) return 'unknown';
-    if (Number.isInteger(at.re) || !Number.isInteger(at.re * 2))
-      return 'off';
+    if (Number.isInteger(at.re) || !Number.isInteger(at.re * 2)) return 'off';
     return ce.function('Subtract', [
       u,
       ce.box(['Rational', Math.round(at.re * 2), 2]),
@@ -471,7 +470,6 @@ function replaceSubterm(
   });
   return changed ? e.engine.function(e.operator, next) : e;
 }
-
 
 function limitAtFinite(
   e: Expression,

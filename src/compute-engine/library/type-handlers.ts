@@ -1,4 +1,7 @@
-import { SIGNED_INFINITY_TYPE } from '../../common/type/primitive.js';
+import {
+  SIGNED_INFINITY_TYPE,
+  EXTENDED_REAL_TYPE,
+} from '../../common/type/primitive.js';
 import type { Expression, Sign } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
@@ -15,7 +18,6 @@ import {
   signOfType,
   widen,
 } from '../../common/type/utils.js';
-import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
 import {
   negativeSign,
@@ -50,9 +52,7 @@ import {
  * — and the bare name `complex` cannot carry the pole because it denotes
  * the finite complex numbers alone. Parsed once at module load.
  */
-const COMPLEX_OR_SIGNED_INFINITY_TYPE = parseType(
-  'complex | +oo | -oo'
-);
+const COMPLEX_OR_SIGNED_INFINITY_TYPE = parseType('complex | +oo | -oo');
 
 /**
  * The join of the non-negative FINITE reals with the two signed infinities.
@@ -280,8 +280,7 @@ function poleReciprocalType(
   // pole — must be disproven; the rest of the pole set has measure zero
   // (generic-point convention).
   const s = operandSgn(x);
-  if (positiveSign(s) === true || negativeSign(s) === true)
-    return 'real';
+  if (positiveSign(s) === true || negativeSign(s) === true) return 'real';
   return 'number';
 }
 
@@ -423,8 +422,7 @@ export function boundedInverseTrigType(
   if (provablyIn(x, domain.complex)) return 'complex';
   // Magnitude unknown: the join of what remains. A pole that is provably
   // avoided (or a head with no real pole) drops the non-finite arm.
-  if (domain.poles.every((p) => x.isEqual(p) === false))
-    return 'complex';
+  if (domain.poles.every((p) => x.isEqual(p) === false)) return 'complex';
   // The join of `complex` with the pole value. `complex` denotes the
   // FINITE complex numbers, so it cannot absorb the pole: a signed-infinity
   // pole (`poleType: SIGNED_INFINITY_TYPE`) is spelled out in the union, and
@@ -755,18 +753,12 @@ export function elementaryFunctionType(
     // kept because it also decides an operand that has no value to probe.)
     case 'Sinh':
     case 'Cosh':
-      if (
-        ops[0]?.isFinite === false &&
-        ops[0].type.matches(EXTENDED_REAL_TYPE)
-      )
+      if (ops[0]?.isFinite === false && ops[0].type.matches(EXTENDED_REAL_TYPE))
         return SIGNED_INFINITY_TYPE;
       return numericTypeHandler(ops);
     case 'Tanh':
     case 'Sech':
-      if (
-        ops[0]?.isFinite === false &&
-        ops[0].type.matches(EXTENDED_REAL_TYPE)
-      )
+      if (ops[0]?.isFinite === false && ops[0].type.matches(EXTENDED_REAL_TYPE))
         return 'real';
       return numericTypeHandler(ops);
 

@@ -1,4 +1,7 @@
-import { SIGNED_INFINITY_TYPE } from '../../common/type/primitive.js';
+import {
+  SIGNED_INFINITY_TYPE,
+  EXTENDED_REAL_TYPE,
+} from '../../common/type/primitive.js';
 import type {
   SymbolDefinitions,
   Expression,
@@ -29,7 +32,6 @@ import {
 } from './type-handlers-types.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { signOfType } from '../../common/type/utils.js';
-import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { nonNegativeSign } from '../boxed-expression/sgn.js';
 import {
   ellipticK,
@@ -166,11 +168,7 @@ function agmValueAtInfinity(
   if (!isNumber(partner)) return undefined;
   if (partner.isSame(0)) return ce.Zero;
   if (point === '~oo') return ce.ComplexInfinity;
-  if (
-    point === '+oo' &&
-    partner.im === 0 &&
-    partner.isPositive === true
-  )
+  if (point === '+oo' && partner.im === 0 && partner.isPositive === true)
     return ce.PositiveInfinity;
   return ce.ComplexInfinity;
 }

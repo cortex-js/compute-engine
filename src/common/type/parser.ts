@@ -66,14 +66,16 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
  * `constructor`, `toString` or any other `Object.prototype` member with the
  * inherited value instead of "not an alias".
  */
-const RETIRED_NUMERIC_ALIASES: Readonly<Record<string, string>> =
-  Object.assign(Object.create(null), {
+const RETIRED_NUMERIC_ALIASES: Readonly<Record<string, string>> = Object.assign(
+  Object.create(null),
+  {
     finite_number: 'complex',
     finite_complex: 'complex',
     finite_real: 'real',
     finite_rational: 'rational',
     finite_integer: 'integer',
-  });
+  }
+);
 
 /**
  * BNF grammar for the type parser:

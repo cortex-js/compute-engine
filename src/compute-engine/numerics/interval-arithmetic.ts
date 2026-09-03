@@ -81,11 +81,7 @@ export const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
  * (`+oo | -oo` is the signed pair `±∞`, ordered; the new
  * `infinity` primitive is NOT here — it admits the unordered complex
  * infinity `~oo` — and neither is `nan`.) */
-const NAN_FREE_REAL_TIERS = new Set<string>([
-  'integer',
-  'rational',
-  'real',
-]);
+const NAN_FREE_REAL_TIERS = new Set<string>(['integer', 'rational', 'real']);
 
 /**
  * The interval a numeric type claims, or `undefined` when the type makes
@@ -126,7 +122,8 @@ export function intervalOfType(
   }
   switch (t.kind) {
     case 'value': {
-      if (typeof t.value !== 'number' || Number.isNaN(t.value)) return undefined;
+      if (typeof t.value !== 'number' || Number.isNaN(t.value))
+        return undefined;
       const iv: Interval = { lo: t.value, hi: t.value };
       // A finite literal is finite; `±∞` value types are not.
       if (Number.isFinite(t.value)) iv.finite = true;
@@ -134,7 +131,10 @@ export function intervalOfType(
     }
     case 'numeric': {
       if (!NAN_FREE_REAL_TIERS.has(t.type)) return undefined;
-      const iv: Interval = { lo: t.lower ?? -Infinity, hi: t.upper ?? Infinity };
+      const iv: Interval = {
+        lo: t.lower ?? -Infinity,
+        hi: t.upper ?? Infinity,
+      };
       if (t.lowerOpen) iv.loOpen = true;
       if (t.upperOpen) iv.hiOpen = true;
       // Every base this reader admits is a finite tier (see the set above).
@@ -693,7 +693,7 @@ export function powIntervalSigned(
  * (`(±∞)^n` is the signed infinity). */
 function dirPow(x: number, n: number, dir: -1 | 1): number {
   if (x >= 0) return dirPowAbs(x, n, dir);
-  const m = dirPowAbs(-x, n, n % 2 === 0 ? dir : ((-dir) as -1 | 1));
+  const m = dirPowAbs(-x, n, n % 2 === 0 ? dir : (-dir as -1 | 1));
   return n % 2 === 0 ? m : -m;
 }
 
@@ -831,8 +831,10 @@ export function compareIntervals(
   a: Interval,
   b: Interval
 ): 'less' | 'greater' | 'equal' | 'lessOrEqual' | 'greaterOrEqual' | undefined {
-  const aPoint = a.lo === a.hi && !a.loOpen && !a.hiOpen && Number.isFinite(a.lo);
-  const bPoint = b.lo === b.hi && !b.loOpen && !b.hiOpen && Number.isFinite(b.lo);
+  const aPoint =
+    a.lo === a.hi && !a.loOpen && !a.hiOpen && Number.isFinite(a.lo);
+  const bPoint =
+    b.lo === b.hi && !b.loOpen && !b.hiOpen && Number.isFinite(b.lo);
   if (aPoint && bPoint && a.lo === b.lo) return 'equal';
   if (a.hi < b.lo) return 'less';
   if (b.hi < a.lo) return 'greater';
@@ -855,10 +857,7 @@ export function compareIntervals(
  * has none); anything else, an unbounded-on-both-sides interval, or a
  * degenerate `lo > hi` returns the tier unchanged.
  */
-export function attachInterval(
-  tier: Type,
-  iv: Interval | undefined
-): Type {
+export function attachInterval(tier: Type, iv: Interval | undefined): Type {
   if (iv === undefined) return tier;
   if (typeof tier !== 'string' || !NAN_FREE_REAL_TIERS.has(tier)) return tier;
   const hasLo = Number.isFinite(iv.lo);

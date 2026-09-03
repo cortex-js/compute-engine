@@ -729,7 +729,8 @@ export function functionLiteralSignatureType(expr: Expression): Type {
     bodyTypeSource.matches('complex') &&
     args.some(
       (a) =>
-        !provablyDisjoint(a.type, 'infinity') || !provablyDisjoint(a.type, 'nan')
+        !provablyDisjoint(a.type, 'infinity') ||
+        !provablyDisjoint(a.type, 'nan')
     )
   )
     bodyType = 'number';

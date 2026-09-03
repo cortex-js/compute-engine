@@ -140,11 +140,7 @@ function lazyConstantMatrix(
   n: number,
   cell: ExpressionInput
 ): Expression {
-  const index = (name: string): ExpressionInput => [
-    'Typed',
-    name,
-    "'integer'",
-  ];
+  const index = (name: string): ExpressionInput => ['Typed', name, "'integer'"];
   return ce.expr([
     'Tabulate',
     ['Function', ['Tabulate', ['Function', cell, index('j')], n], index('i')],

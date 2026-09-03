@@ -51,11 +51,7 @@ function isComplexInfinityLiteral(x: Expression): boolean {
  */
 function exactModulusSquaredVsOne(nv: ExactNumericValue): number | undefined {
   const toBig = (x: number | bigint): bigint | undefined =>
-    typeof x === 'bigint'
-      ? x
-      : Number.isSafeInteger(x)
-        ? BigInt(x)
-        : undefined;
+    typeof x === 'bigint' ? x : Number.isSafeInteger(x) ? BigInt(x) : undefined;
   const p = toBig(nv.rational[0]);
   const q = toBig(nv.rational[1]);
   const r = toBig(nv.imRational[0]);
@@ -116,8 +112,7 @@ function complexBaseAtInfiniteExponent(
     // The literal itself is finite — the caller handles infinite operands
     // — so a non-finite double read means an exact component OVERFLOWED
     // the double range: the modulus is far above 1.
-    if (a.isFinite === true)
-      return expPositive ? ce.ComplexInfinity : ce.Zero;
+    if (a.isFinite === true) return expPositive ? ce.ComplexInfinity : ce.Zero;
     return undefined;
   }
   const m2 = a.re * a.re + a.im * a.im;

@@ -1068,7 +1068,9 @@ export class ComputeEngine implements IComputeEngine {
     // than hand back a value derived under conditions the caller did not
     // ask for — after detaching the orphaned promise's rejection, so the
     // refusal does not also surface an unhandled-rejection warning later.
-    if (typeof (result as { then?: unknown } | undefined)?.then === 'function') {
+    if (
+      typeof (result as { then?: unknown } | undefined)?.then === 'function'
+    ) {
       void Promise.resolve(result as PromiseLike<unknown>).then(
         undefined,
         () => {}

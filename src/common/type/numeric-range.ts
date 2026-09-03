@@ -58,7 +58,10 @@ export function makeNumericRangeType(
   if (lo === hi && (lowerOpen || upperOpen)) return 'never';
   if (lo === -Infinity && hi === Infinity) return tier;
 
-  const node: Extract<Type, { kind: 'numeric' }> = { kind: 'numeric', type: tier };
+  const node: Extract<Type, { kind: 'numeric' }> = {
+    kind: 'numeric',
+    type: tier,
+  };
   if (lo !== -Infinity) node.lower = lo;
   if (hi !== Infinity) node.upper = hi;
   if (lowerOpen) node.lowerOpen = true;

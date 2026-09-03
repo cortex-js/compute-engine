@@ -154,9 +154,7 @@ export function errorValue(
  * No breadcrumb is built here — the frames a caller wants are the ones on the
  * RETURNED error, not the ones this walk happens to cross.
  */
-export function potentialErrorValue(
-  expr: Expression
-): Expression | undefined {
+export function potentialErrorValue(expr: Expression): Expression | undefined {
   if (expr.isValid) return undefined;
   return firstEmbeddedError(expr, [], false);
 }

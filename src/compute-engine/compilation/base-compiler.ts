@@ -3248,7 +3248,11 @@ export class BaseCompiler {
       // 2026-08-28), the same spelling the literal-emission path and the
       // runtime division produce — see the `~oo` arm of the number-literal
       // emission below.
-      return BaseCompiler.emitFoldedValue(engine.PositiveInfinity, target, prec);
+      return BaseCompiler.emitFoldedValue(
+        engine.PositiveInfinity,
+        target,
+        prec
+      );
 
     // Emit through the ordinary number-literal path so the target's own
     // spelling applies (float formatting, complex support, negative-literal
@@ -3766,8 +3770,7 @@ export class BaseCompiler {
     // Decline the fold; the structural lowering (`_SYS.limit`) evaluates at
     // run time, where the caller's deadline governs. `Residue` reaches the
     // same numeric limit machinery through its evaluation.
-    if (op === 'Limit' || op === 'NLimit' || op === 'Residue')
-      return Infinity;
+    if (op === 'Limit' || op === 'NLimit' || op === 'Residue') return Infinity;
 
     if (op === 'Integrate' || op === 'NIntegrate') {
       if (op === 'NIntegrate') return Infinity;
@@ -5468,8 +5471,7 @@ export class BaseCompiler {
           BaseCompiler.framedLaneByOwnScope(name, node)
         );
         const selfFramed = ownLane.every((lane) => lane !== undefined);
-        if (selfFramed)
-          ownLane.forEach((lane, i) => (complexParam[i] = lane!));
+        if (selfFramed) ownLane.forEach((lane, i) => (complexParam[i] = lane!));
         if (leaked || (boundDerived && !selfFramed))
           params.forEach((name, i) => {
             // The parameter's own lane, from its annotation or from the
@@ -7137,8 +7139,7 @@ export class BaseCompiler {
           if (elt.kind !== 'tuple') return false;
           if (
             !elt.elements.every(
-              (c) =>
-                isSubtype(c.type, 'number') && !isNonRealNumber(c.type)
+              (c) => isSubtype(c.type, 'number') && !isNonRealNumber(c.type)
             )
           )
             return false;
@@ -7500,7 +7501,9 @@ export class BaseCompiler {
       };
       // The loop variable stands for ONE element, so it is not
       // collection-typed and the Python guard above does not fire again.
-      const elementArgs = args.map((a, i) => (i === index ? engine.expr(v) : a));
+      const elementArgs = args.map((a, i) =>
+        i === index ? engine.expr(v) : a
+      );
       return BaseCompiler.compileExpr(engine, h, elementArgs, 0, innerTarget);
     };
     const out = target.broadcastUnary(
@@ -10892,8 +10895,7 @@ export class BaseCompiler {
       return false;
     };
     return (
-      foreign(BaseCompiler._localComplex) ||
-      foreign(BaseCompiler._localVector)
+      foreign(BaseCompiler._localComplex) || foreign(BaseCompiler._localVector)
     );
   }
 
@@ -11824,7 +11826,11 @@ export class BaseCompiler {
   static booleanClaim(cond: Expression): boolean | undefined {
     if (cond.isPure !== true) return undefined;
     const t = cond.type.type;
-    if (typeof t === 'object' && t.kind === 'value' && typeof t.value === 'boolean')
+    if (
+      typeof t === 'object' &&
+      t.kind === 'value' &&
+      typeof t.value === 'boolean'
+    )
       return t.value;
     return undefined;
   }
@@ -11985,7 +11991,8 @@ export class BaseCompiler {
    */
   static conditionDecidability(cond: Expression): ConditionNode | null {
     const node = BaseCompiler.conditionNode(cond);
-    if (node === null || BaseCompiler.isDecidedByConstruction(node)) return null;
+    if (node === null || BaseCompiler.isDecidedByConstruction(node))
+      return null;
     return node;
   }
 
@@ -12261,7 +12268,10 @@ export class BaseCompiler {
    * the value it negates is a real boolean.
    */
   private static kleeneRelationLeaf(
-    test: { readonly expr: Expression; readonly operands: ReadonlyArray<Expression> },
+    test: {
+      readonly expr: Expression;
+      readonly operands: ReadonlyArray<Expression>;
+    },
     negate: boolean,
     target: CompileTarget<Expression>,
     dialect: ConditionDialect
@@ -13389,7 +13399,8 @@ export class BaseCompiler {
     // storable in raw form) would recurse without end. Refuse it the same way
     // the bound route does.
     const inProgress = BaseCompiler._inlineFoldInProgress;
-    if (inProgress.has(id)) throw new Error(BaseCompiler.selfReferenceRefusal(id));
+    if (inProgress.has(id))
+      throw new Error(BaseCompiler.selfReferenceRefusal(id));
     inProgress.add(id);
     try {
       return BaseCompiler.compile(
@@ -13458,8 +13469,7 @@ export class BaseCompiler {
   ): boolean {
     const registry = target.userFunctions;
     if (!registry || registry.lowering !== undefined) return false;
-    if (!isFunction(value) || BaseCompiler.foldValueImpure(value))
-      return false;
+    if (!isFunction(value) || BaseCompiler.foldValueImpure(value)) return false;
     // A caller-supplied function (`functions` option; its names are
     // `foldExcludedOps`) receives an array itself and may keep or mutate it,
     // and the compiler never optimizes around such a call: every reference
@@ -13473,8 +13483,7 @@ export class BaseCompiler {
       return false;
     const ownerBound = (registry.valueRoot ?? registry.root)?.boundVars;
     if (bound === ownerBound) return true;
-    if ((bound?.size ?? 0) === 0 && (ownerBound?.size ?? 0) === 0)
-      return true;
+    if ((bound?.size ?? 0) === 0 && (ownerBound?.size ?? 0) === 0) return true;
     if (bound === undefined) return true;
     const mentions = BaseCompiler.foldValueMentions(value);
     for (const name of bound) if (mentions.has(name)) return false;
@@ -13607,8 +13616,10 @@ export class BaseCompiler {
                 // The bound value compiles in the preamble owner's scope.
                 boundTotal += walk(
                   v,
-                  (target.userFunctions?.valueRoot ?? target.userFunctions?.root)
-                    ?.boundVars
+                  (
+                    target.userFunctions?.valueRoot ??
+                    target.userFunctions?.root
+                  )?.boundVars
                 );
               }
             } else size = walk(v, bound);
@@ -15634,7 +15645,9 @@ export class BaseCompiler {
     target: CompileTarget<Expression>
   ): string {
     const params = complexParam.map(() => BaseCompiler.tempVar(target));
-    const args = params.map((p, i) => (complexParam[i] ? `_SYS.cplx(${p})` : p));
+    const args = params.map((p, i) =>
+      complexParam[i] ? `_SYS.cplx(${p})` : p
+    );
     return `(${params.join(', ')}) => ${callee}(${args.join(', ')})`;
   }
 

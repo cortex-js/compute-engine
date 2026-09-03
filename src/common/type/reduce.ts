@@ -390,8 +390,8 @@ function meet2(a: Type, b: Type): Type | undefined {
     const exs = excludedNumbers(excluded);
     const rng = asNumericRange(other);
     if (exs !== undefined && rng !== null && typeof other === 'object') {
-      let lo = rng.lower ?? -Infinity;
-      let hi = rng.upper ?? Infinity;
+      const lo = rng.lower ?? -Infinity;
+      const hi = rng.upper ?? Infinity;
       let lowerOpen = rng.lowerOpen === true;
       let upperOpen = rng.upperOpen === true;
       const interior: number[] = [];
@@ -402,7 +402,13 @@ function meet2(a: Type, b: Type): Type | undefined {
         else if (ex === hi) upperOpen = true;
         else interior.push(ex);
       }
-      const range = makeNumericRangeType(rng.type, lo, hi, lowerOpen, upperOpen);
+      const range = makeNumericRangeType(
+        rng.type,
+        lo,
+        hi,
+        lowerOpen,
+        upperOpen
+      );
       if (interior.length === 0) return range;
       // Interior holes keep the intersection spelling (no range syntax
       // for them), with the endpoint exclusions already absorbed.

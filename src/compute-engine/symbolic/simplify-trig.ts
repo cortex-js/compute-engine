@@ -464,10 +464,16 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     // Arctan with infinity -> ±π/2
     if (op === 'Arctan') {
       if (arg.isInfinity === true && arg.isPositive === true) {
-        return { value: halfTurnAngle(ce).div(2), because: 'arctan(+inf) -> π/2' };
+        return {
+          value: halfTurnAngle(ce).div(2),
+          because: 'arctan(+inf) -> π/2',
+        };
       }
       if (arg.isInfinity === true && arg.isNegative === true) {
-        return { value: halfTurnAngle(ce).div(-2), because: 'arctan(-inf) -> -π/2' };
+        return {
+          value: halfTurnAngle(ce).div(-2),
+          because: 'arctan(-inf) -> -π/2',
+        };
       }
     }
 

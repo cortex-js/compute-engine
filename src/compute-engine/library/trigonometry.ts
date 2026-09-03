@@ -575,7 +575,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // propagates (explicit: the carriers are not subtypes of
       // `complex`). The values at infinity are IEEE `atan2`'s, which the
       // compiled lane (`Math.atan2`) already answers (ruled 2026-09-01).
-      signature: '(y: real | signed_infinity, x: real | signed_infinity) -> real',
+      signature:
+        '(y: real | signed_infinity, x: real | signed_infinity) -> real',
       nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: (ops) => numericTypeHandlerOnTypes(ops),
@@ -1156,7 +1157,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // argument back to the real kernel, which would drop the offset).
         return apply(
           x,
-          (v) => (v < 0 ? ce.complex(cosIntegral(-v), Math.PI) : cosIntegral(v)),
+          (v) =>
+            v < 0 ? ce.complex(cosIntegral(-v), Math.PI) : cosIntegral(v),
           undefined,
           cosIntegralComplex
         );
@@ -1585,7 +1587,10 @@ function trigFunction(
   // to the MOST RESTRICTIVE carrier (TypeScript disallows a required
   // parameter after the optional ones above) so an omitted argument fails
   // loudly at the first infinity instead of silently admitting one.
-  carrier: 'complex' | 'complex | signed_infinity' | 'complex | infinity' = 'complex'
+  carrier:
+    | 'complex'
+    | 'complex | signed_infinity'
+    | 'complex | infinity' = 'complex'
 ): OperatorDefinition {
   // Parsed once per head at module load, for the incompatible-type error
   // value the evaluate seam produces.

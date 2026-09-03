@@ -9380,10 +9380,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // ruling 2026-08-28), so it forces the GLSL Infinity helper for the same
     // reason `_gpu_at*` forces the NaN helper: these scans read the EMITTED
     // code and never a helper body.
-    if (
-      code.includes('_gpu_inf') ||
-      (!isWGSL && code.includes('_gpu_gamma'))
-    )
+    if (code.includes('_gpu_inf') || (!isWGSL && code.includes('_gpu_gamma')))
       preamble += GPU_INF_PREAMBLE_GLSL;
     // AFTER the NaN branches, and that ORDER is load-bearing: GLSL requires a
     // declaration before its use, and these bodies call `_gpu_nan()`. The

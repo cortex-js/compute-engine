@@ -1,4 +1,9 @@
-import { SIGNED_INFINITY_TYPE } from '../../common/type/primitive.js';
+import {
+  SIGNED_INFINITY_TYPE,
+  EXTENDED_REAL_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+  NUMERIC_TYPES_SET,
+} from '../../common/type/primitive.js';
 import type { OperandDescriptor, Sign } from '../global-types.js';
 import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -8,11 +13,6 @@ import {
   intervalOfType,
   type Interval,
 } from '../numerics/interval-arithmetic.js';
-import {
-  EXTENDED_REAL_TYPE,
-  INDEXED_COLLECTION_SHAPE_TYPE,
-  NUMERIC_TYPES_SET,
-} from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
 import {
   collectionElementType,
@@ -92,9 +92,7 @@ import {
  * — and the bare name `complex` cannot carry the pole because it denotes
  * the finite complex numbers alone. Parsed once at module load.
  */
-const COMPLEX_OR_SIGNED_INFINITY_TYPE = parseType(
-  'complex | +oo | -oo'
-);
+const COMPLEX_OR_SIGNED_INFINITY_TYPE = parseType('complex | +oo | -oo');
 
 /**
  * The join of the non-negative FINITE reals with the two signed infinities.
@@ -498,9 +496,7 @@ export function kindClosureType(ops: ReadonlyArray<OperandDescriptor>): Type {
       !NUMERIC_TYPES_SET.has(t as NumericPrimitiveType)
     )
       return 'number';
-    kinds.push(
-      t === 'imaginary' ? 'complex' : (t as NumericPrimitiveType)
-    );
+    kinds.push(t === 'imaginary' ? 'complex' : (t as NumericPrimitiveType));
   }
   return widen(...kinds);
 }
@@ -615,9 +611,7 @@ function poleReciprocalType(
   if (isNumberLiteral(x)) {
     // A literal whose exact value no machine number holds (`1/3`, `√2`) has
     // no value here — and is not 0 either, so it is off every pole.
-    return poleAtZero && operandLiteralValue(x) === 0
-      ? 'number'
-      : 'real';
+    return poleAtZero && operandLiteralValue(x) === 0 ? 'number' : 'real';
   }
   // A non-literal CONSTANT (π/2, 2π/3, …) can sit exactly on a circular pole
   // — `Tan(π/2) = ~oo`, `Csc(π) = ~oo` — so it keeps `number`. The
@@ -637,8 +631,7 @@ function poleReciprocalType(
   // pole — must be disproven; the rest of the pole set has measure zero
   // (generic-point convention).
   const s = operandSgn(x);
-  if (positiveSign(s) === true || negativeSign(s) === true)
-    return 'real';
+  if (positiveSign(s) === true || negativeSign(s) === true) return 'real';
   return 'number';
 }
 

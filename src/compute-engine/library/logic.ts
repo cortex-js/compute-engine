@@ -313,13 +313,14 @@ function finishShortCircuit(
   return reduce(values, { engine: ce });
 }
 
-
 /** The boolean VALUE an operand's type proves: `true`/`false` for a value
  * type, `undefined` otherwise (boolean value types,
  * `docs/plans/2026-08-29-boolean-value-types.md` §3.1). */
 function booleanClaim(x: Expression): boolean | undefined {
   const t = x.type.type;
-  return typeof t === 'object' && t.kind === 'value' && typeof t.value === 'boolean'
+  return typeof t === 'object' &&
+    t.kind === 'value' &&
+    typeof t.value === 'boolean'
     ? t.value
     : undefined;
 }

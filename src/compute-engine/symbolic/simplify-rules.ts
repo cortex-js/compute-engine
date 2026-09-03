@@ -2,6 +2,8 @@ import {
   constructibleValues,
   isConstructible,
   processInverseFunction,
+  arctan2AtInfinity,
+  halfTurnAngle,
 } from '../boxed-expression/trigonometry.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
 import { simplifyLogicFunction } from './simplify-logic.js';
@@ -40,10 +42,6 @@ import {
 } from './simplify-abs.js';
 import { simplifyInfinity } from './simplify-infinity.js';
 import { simplifyLog } from './simplify-log.js';
-import {
-  arctan2AtInfinity,
-  halfTurnAngle,
-} from '../boxed-expression/trigonometry.js';
 import { simplifyPower } from './simplify-power.js';
 import { simplifyTrig } from './simplify-trig.js';
 import { simplifyHyperbolic } from './simplify-hyperbolic.js';

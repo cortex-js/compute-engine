@@ -406,8 +406,7 @@ registerStepLabels({
   'derivative.rewrite': 'Rewrite in an equivalent differentiable form',
   'derivative.piecewise-rule':
     'Differentiate each piece on its own region; the conditions are unchanged',
-  'derivative.tuple-norm':
-    'Differentiate a norm: ‖p‖′ = (Σ Re(c̄ᵢ·cᵢ′)) / ‖p‖',
+  'derivative.tuple-norm': 'Differentiate a norm: ‖p‖′ = (Σ Re(c̄ᵢ·cᵢ′)) / ‖p‖',
   'derivative.expand-definition': 'Expand the definition of the function',
   'derivative.zero': 'The expression is locally constant: its derivative is 0',
   'derivative.simplify': 'Simplify the result',

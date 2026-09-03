@@ -445,14 +445,12 @@ function quotientComponentType(el: Type, den: Expression): Type {
   if (provablyNonFiniteNumber(den)) {
     // The scalar path's symmetric claim: a provably finite real component
     // over a provably non-finite REAL denominator is exactly 0.
-    if (isSubtype(el, 'real') && den.isExtendedReal === true)
-      return 'integer';
+    if (isSubtype(el, 'real') && den.isExtendedReal === true) return 'integer';
     return 'number';
   }
   if (den.isInteger && isSubtype(el, 'integer')) return 'rational';
   if (den.isExtendedReal && isSubtype(el, 'real')) return 'real';
-  if (den.type.matches('complex') && isSubtype(el, 'complex'))
-    return 'complex';
+  if (den.type.matches('complex') && isSubtype(el, 'complex')) return 'complex';
   return 'number';
 }
 
@@ -596,7 +594,6 @@ function scaleTupleComponents(
     ),
   };
 }
-
 
 /** A literal-only boolean claim for a number-theory predicate: when the
  * operand is a number LITERAL, the verdict is a type fact (boolean value
@@ -770,8 +767,7 @@ function evaluateBessel(
   const special = besselValueAtExceptionalPoint(kind, order, x, ce);
   if (special !== undefined) return special;
   if (!isRealLiteral(x)) return undefined;
-  if ((kind === 'Y' || kind === 'K') && x.isNegative === true)
-    return undefined;
+  if ((kind === 'Y' || kind === 'K') && x.isNegative === true) return undefined;
   if (!shouldNumericize(numericApproximation, n, x)) return undefined;
   const kernel =
     kind === 'J'
@@ -807,9 +803,7 @@ function airyValueAtInfinity(
   const point = infinitePoint(x);
   if (point === undefined) return undefined;
   if (point === '+oo')
-    return kind === 'Ai' || kind === 'AiPrime'
-      ? ce.Zero
-      : ce.PositiveInfinity;
+    return kind === 'Ai' || kind === 'AiPrime' ? ce.Zero : ce.PositiveInfinity;
   if (point === '-oo') return kind === 'Ai' || kind === 'Bi' ? ce.Zero : ce.NaN;
   return ce.NaN;
 }
@@ -848,11 +842,17 @@ function betaValueAtInfinity(
     x.im === 0 &&
     x.isInteger === true &&
     x.isPositive === true;
-  if ((pa !== undefined && positiveInteger(b)) || (pb !== undefined && positiveInteger(a)))
+  if (
+    (pa !== undefined && positiveInteger(b)) ||
+    (pb !== undefined && positiveInteger(a))
+  )
     return ce.Zero;
   const positiveRealPart = (x: Expression): boolean =>
     isNumber(x) && infinitePoint(x) === undefined && x.re > 0;
-  if ((pa === '+oo' && positiveRealPart(b)) || (pb === '+oo' && positiveRealPart(a)))
+  if (
+    (pa === '+oo' && positiveRealPart(b)) ||
+    (pb === '+oo' && positiveRealPart(a))
+  )
     return ce.Zero;
   return ce.NaN;
 }
@@ -925,7 +925,6 @@ function specialFunctionType(
     ops.filter((d): d is OperandDescriptor => d !== undefined)
   );
 }
-
 
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   {
@@ -1136,12 +1135,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x]) =>
-        apply(
-          x,
-          Math.ceil,
-          (x) => x.ceil()
-        ),
+      evaluate: ([x]) => apply(x, Math.ceil, (x) => x.ceil()),
     },
 
     Chop: {
@@ -1372,7 +1366,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           (den.isInteger && num.isInteger) ||
           (den.isExtendedReal && num.isExtendedReal)
         ) {
-          const tier: Type = den.isInteger && num.isInteger ? 'rational' : 'real';
+          const tier: Type =
+            den.isInteger && num.isInteger ? 'rational' : 'real';
           const dIv = intervalOfType(den.type.type);
           const denSgn = operandSgn(den);
           const provablyNonZero =
@@ -1394,7 +1389,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const nIv = intervalOfType(num.type.type);
           if (nIv === undefined) return tier;
           const q = divIntervals(nIv, dIv);
-          return q === undefined ? tier : attachInterval(tier, finalizeInterval(q));
+          return q === undefined
+            ? tier
+            : attachInterval(tier, finalizeInterval(q));
         }
         // Real/pure-imaginary quotients (mirrors the Multiply type handler;
         // `imaginary`-typed operands are non-zero and non-real by type —
@@ -1415,10 +1412,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               : 'complex';
           }
           // A quotient of finite complex operands is a finite complex number.
-          if (
-            num.type.matches('complex') &&
-            den.type.matches('complex')
-          )
+          if (num.type.matches('complex') && den.type.matches('complex'))
             return 'complex';
         }
         return 'number';
@@ -1831,12 +1825,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonNegative) return 'non-negative';
         return undefined;
       },
-      evaluate: ([x]) =>
-        apply(
-          x,
-          Math.floor,
-          (x) => x.floor()
-        ),
+      evaluate: ([x]) => apply(x, Math.floor, (x) => x.floor()),
     },
 
     Fract: {
@@ -2528,7 +2517,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // the signature would be `reject`). The optional base slot is a
       // pass-through: `Ln(a, b)` canonicalizes to `Log(a, b)`, whose base
       // carrier applies.
-      signature: '(complex | infinity, base: complex | infinity?) -> complex | infinity',
+      signature:
+        '(complex | infinity, base: complex | infinity?) -> complex | infinity',
       nanBehavior: 'propagate',
       typeHandlerKind: 'types',
       type: (ops) => elementaryFunctionTypeOnTypes('Ln', ops),
@@ -2548,12 +2538,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // The exceptional points answer the same exact values on the
         // numeric route (`Ln(+∞) = +∞`, `Ln(~oo) = ~oo`), and `Ln(−∞)` its
         // machine complex `∞ + iπ`.
-        const special = logarithmAtExceptionalPoint(
-          engine,
-          z,
-          undefined,
-          true
-        );
+        const special = logarithmAtExceptionalPoint(engine, z, undefined, true);
         if (special !== undefined) return special;
 
         return apply(
@@ -2672,7 +2657,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           (z, b) => {
             const lz = lnOf(z);
             const lb = lnOf(b);
-            if (typeof lz === 'number' && typeof lb === 'number') return lz / lb;
+            if (typeof lz === 'number' && typeof lb === 'number')
+              return lz / lb;
             return ce.complex(lz).div(lb);
           },
           (z, b) =>
@@ -2767,8 +2753,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         if (isNumber(divisor)) return !divisor.isSame(0);
         const s = divisor.sgn;
-        if (positiveSign(s) === true || negativeSign(s) === true)
-          return true;
+        if (positiveSign(s) === true || negativeSign(s) === true) return true;
         return s === 'not-zero' ? true : undefined;
       },
       type: ([a, b]) => {
@@ -3209,8 +3194,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           );
         if (ops.every((x) => x.isInteger)) return refineMul('integer');
         if (ops.every((x) => x.isExtendedReal)) return refineMul('real');
-        if (ops.every((x) => x.isRational))
-          return refineMul('rational');
+        if (ops.every((x) => x.isRational)) return refineMul('rational');
 
         // Real × pure-imaginary products: at least one factor is typed
         // `imaginary` and every other factor is provably real. Since
@@ -3244,8 +3228,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A product of finite complex factors is itself a finite complex
         // number (e.g. `√2·(1+i)`): claim `complex` rather than the
         // complex-unaware top type `number`.
-        if (ops.every((x) => x.type.matches('complex')))
-          return 'complex';
+        if (ops.every((x) => x.type.matches('complex'))) return 'complex';
 
         return 'number';
       },
@@ -4076,9 +4059,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Root(0, n): 0 for n>0, a pole (±∞) for n≤0, NaN for a complex index.
         const rootExpSgn = operandSgn(exp);
         if (base.isSame(0))
-          return positiveSign(rootExpSgn) === true
-            ? 'integer'
-            : 'number';
+          return positiveSign(rootExpSgn) === true ? 'integer' : 'number';
         if (base.isExtendedReal && exp.isExtendedReal) {
           const rootBaseSgn = operandSgn(base);
           // A positive base always gives a positive real root.
@@ -4251,11 +4232,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([x, n], { engine: ce }) => {
         const roundToInteger = (v: Expression) =>
-          apply(
-            v,
-            Math.round,
-            (v) => v.round()
-          );
+          apply(v, Math.round, (v) => v.round());
         if (n === undefined) return roundToInteger(x);
         // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places.
         if (!isNumber(n) || n.isFinite !== true) return undefined;
@@ -4441,9 +4418,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // unchanged. See the §5.4 `Sqrt` row of
           // `docs/plans/2026-08-22-type-handlers-on-types.md`.
           if (nonNegativeSign(operandSgn(x)) === true)
-            return finiteOperand
-              ? 'real'
-              : 'real | +oo | -oo';
+            return finiteOperand ? 'real' : 'real | +oo | -oo';
           return finiteOperand ? 'complex' : 'number';
         }
         // An operand that is not on the extended real line keeps the generic-
@@ -4609,12 +4584,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x]) =>
-        apply(
-          x,
-          Math.trunc,
-          (x) => x.trunc()
-        ),
+      evaluate: ([x]) => apply(x, Math.trunc, (x) => x.trunc()),
     },
   },
   {
@@ -4845,7 +4815,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
   {
     IsPrime: {
-      type: (ops) => literalPredicateType(ops, (n) => Number.isInteger(n) && isPrimeNumber(n)),
+      type: (ops) =>
+        literalPredicateType(
+          ops,
+          (n) => Number.isInteger(n) && isPrimeNumber(n)
+        ),
       description: '`IsPrime(n)` returns `True` if `n` is a prime number',
       wikidata: 'Q49008',
       complexity: 1200,
@@ -4878,7 +4852,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
     },
     IsComposite: {
-      type: (ops) => literalPredicateType(ops, (n) => Number.isInteger(n) && n > 3 && !isPrimeNumber(n)),
+      type: (ops) =>
+        literalPredicateType(
+          ops,
+          (n) => Number.isInteger(n) && n > 3 && !isPrimeNumber(n)
+        ),
       description:
         '`IsComposite(n)` returns `True` if `n` is a composite number',
       complexity: 1200,
@@ -4902,7 +4880,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     IsOdd: {
-      type: (ops) => literalPredicateType(ops, (n) => Number.isInteger(n) && Math.abs(n % 2) === 1),
+      type: (ops) =>
+        literalPredicateType(
+          ops,
+          (n) => Number.isInteger(n) && Math.abs(n % 2) === 1
+        ),
       description: '`IsOdd(n)` returns `True` if `n` is an odd number',
       complexity: 1200,
       broadcastable: true,
@@ -4916,7 +4898,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine }) => parityPredicate(engine, n, 'odd'),
     },
     IsEven: {
-      type: (ops) => literalPredicateType(ops, (n) => Number.isInteger(n) && n % 2 === 0),
+      type: (ops) =>
+        literalPredicateType(ops, (n) => Number.isInteger(n) && n % 2 === 0),
       description: '`IsEven(n)` returns `True` if `n` is an even number',
       complexity: 1200,
       broadcastable: true,
@@ -4939,8 +4922,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(any*) -> number',
       // Integer operands → a positive integer; polynomial operands → a
       // (monic) polynomial whose type and sign aren't known statically.
-      type: (ops) =>
-        ops.every((x) => x.isInteger) ? 'integer' : 'number',
+      type: (ops) => (ops.every((x) => x.isInteger) ? 'integer' : 'number'),
       // gcd ≥ 0, and positive iff some argument is nonzero (gcd(0,…,0) = 0).
       sgn: (ops) => {
         if (!ops.every((x) => x.isInteger)) return undefined;
@@ -4973,8 +4955,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Integer operands → a positive integer; non-integer real operands →
       // a (non-negative) real via the tolerant float LCM.
       signature: '(any*) -> number',
-      type: (ops) =>
-        ops.every((x) => x.isInteger) ? 'integer' : 'number',
+      type: (ops) => (ops.every((x) => x.isInteger) ? 'integer' : 'number'),
       // lcm ≥ 0; zero as soon as ANY argument is zero (lcm(0, n) = 0), and
       // positive only when every argument is provably nonzero.
       sgn: (ops) => {

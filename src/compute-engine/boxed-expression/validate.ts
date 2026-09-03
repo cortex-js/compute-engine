@@ -829,9 +829,7 @@ export function runtimeConformanceError(
    * the carrier at boxing, so re-testing it here must not refute what the
    * policy admitted — the policy gate (dispatch step 4a-0) and the handler
    * own it. Mirrors `nanPolicyAdmitsParam` on the static route. */
-  nanPolicyAt?: (
-    index: number
-  ) => 'reject' | 'propagate' | 'handle' | 'inert'
+  nanPolicyAt?: (index: number) => 'reject' | 'propagate' | 'handle' | 'inert'
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
   const allArms = runtimeConformanceArms(cacheKey, signature);
@@ -1518,9 +1516,7 @@ function strippedMatchesParam(
 function nanPolicyAdmitsParam(
   op: Expression,
   idx: number,
-  nanPolicyAt?: (
-    index: number
-  ) => 'reject' | 'propagate' | 'handle' | 'inert'
+  nanPolicyAt?: (index: number) => 'reject' | 'propagate' | 'handle' | 'inert'
 ): boolean {
   if (!nanPolicyAt) return false;
   if (op.isNaN !== true) return false;
@@ -1545,9 +1541,7 @@ export interface ValidateArgumentsInternals {
    * {@link nanPolicyAdmitsParam}. Passed by the operator boxing sites,
    * which have the definition in hand; ad-hoc library validations against
    * literal signatures do not pass it and keep plain carrier semantics. */
-  nanPolicyAt?: (
-    index: number
-  ) => 'reject' | 'propagate' | 'handle' | 'inert';
+  nanPolicyAt?: (index: number) => 'reject' | 'propagate' | 'handle' | 'inert';
   /** Second-pass trial: the R1 overlap admission is active inside this
    * trial. The FIRST resolution pass keeps trials strict, so an arm that
    * strictly accepts always beats one that merely overlaps — a declared

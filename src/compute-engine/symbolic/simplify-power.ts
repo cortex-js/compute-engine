@@ -402,7 +402,10 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
         return { value: ce.Zero, because: 'root(0, n) -> 0 when n > 0' };
       }
       if (rootIndex.isNegative === true) {
-        return { value: ce.ComplexInfinity, because: 'root(0, n) -> ~oo when n < 0' };
+        return {
+          value: ce.ComplexInfinity,
+          because: 'root(0, n) -> ~oo when n < 0',
+        };
       }
       return undefined;
     }

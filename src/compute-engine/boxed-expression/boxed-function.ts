@@ -5542,7 +5542,8 @@ function skipBroadcastForVectorOps(
     (ops[0].isCollection ||
       (!ops[0].type.isUnknown &&
         ops[0].type.type !== 'any' &&
-        ops[0].type.type !== 'never' && ops[0].type.matches('collection<any>')))
+        ops[0].type.type !== 'never' &&
+        ops[0].type.matches('collection<any>')))
   )
     return true;
   return false;
@@ -6024,7 +6025,8 @@ function type(expr: BoxedFunction): Type {
         // source). The handler's own answer is wrong for `never`: the
         // bottom type matches every type, `matrix` included, so shape arms
         // fire vacuously.
-        if (descriptors.some((d) => d.type === 'never')) calculatedType = 'never';
+        if (descriptors.some((d) => d.type === 'never'))
+          calculatedType = 'never';
       } else {
         // Derive every operand's type BEFORE the handler runs, making the
         // derivation point singular and deterministic for this shape too —

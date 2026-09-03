@@ -940,8 +940,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // No undischarged partiality claim: the only possible adjustment is
     // the NaN arm — a `propagate` slot whose argument may carry a `NaN`.
     for (let i = 0; i < ops.length; i++) {
-      if (this.resolvedNanBehaviorAt(i, armSignature) !== 'propagate')
-        continue;
+      if (this.resolvedNanBehaviorAt(i, armSignature) !== 'propagate') continue;
       const opT = ops[i].type.type;
       // A PROVEN NaN in a propagating slot makes the application's value
       // NaN — the sharp type is exactly the marker, not a widened union

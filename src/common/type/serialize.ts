@@ -159,7 +159,8 @@ export function typeToString(type: Type, precedence = 0): string {
       const hi = Number.isFinite(type.upper)
         ? `${type.upperOpen ? '<' : ''}${type.upper}`
         : '';
-      result = lo === '' && hi === '' ? `${type.type}` : `${type.type}<${lo}..${hi}>`;
+      result =
+        lo === '' && hi === '' ? `${type.type}` : `${type.type}<${lo}..${hi}>`;
       break;
     }
 

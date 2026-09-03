@@ -642,10 +642,13 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // different computation from the join above, and sound where the join
   // is not (`x, y > 2` puts `x + y` above 4). The claim attaches only to
   // a NaN-free real tier, and aborts if any operand carries no interval.
-  return attachInterval(t, foldIntervalsOfTypes(
-    args.map((x) => x.type.type),
-    addIntervals
-  ));
+  return attachInterval(
+    t,
+    foldIntervalsOfTypes(
+      args.map((x) => x.type.type),
+      addIntervals
+    )
+  );
 }
 
 export function add(...xs: ReadonlyArray<Expression>): Expression {

@@ -101,7 +101,8 @@ function rationalEqualsDecimal(r: Rational, re: number): boolean {
   if (m === null) return false;
   const digits = BigInt(m[2] + (m[3] ?? ''));
   const num = m[1] === '-' ? -digits : digits;
-  const exp = (m[4] !== undefined ? parseInt(m[4], 10) : 0) - (m[3]?.length ?? 0);
+  const exp =
+    (m[4] !== undefined ? parseInt(m[4], 10) : 0) - (m[3]?.length ?? 0);
   // num·10^exp == r[0]/r[1]  (denominators are positive by convention)
   const rn = BigInt(r[0]);
   const rd = BigInt(r[1]);
@@ -776,9 +777,7 @@ export class BoxedNumber
       // must therefore accept `infinity` and `+oo | -oo` alike.
       if (Number.isNaN(this._value)) return BoxedType.nan;
       if (!Number.isFinite(this._value)) return BoxedType.signed_infinity;
-      return Number.isInteger(this._value)
-        ? BoxedType.integer
-        : BoxedType.real;
+      return Number.isInteger(this._value) ? BoxedType.integer : BoxedType.real;
     }
 
     // A signed-infinity KERNEL value claims its value singleton, exactly
