@@ -29,6 +29,14 @@ function diagnosticsOf(source: string, typeNames?: readonly string[]) {
   return diagnostics.map((d) => d.message);
 }
 
+// Several batches below call `print(…)`, whose `Print` operator writes to the
+// console by design; silence it so the suite output carries only results.
+let consoleLog: jest.SpyInstance;
+beforeAll(() => {
+  consoleLog = jest.spyOn(console, 'log').mockImplementation(() => {});
+});
+afterAll(() => consoleLog.mockRestore());
+
 /** Diagnostic codes of an `executeEpsil` batch, in order. */
 function runCodes(ce: ComputeEngine, source: string): string[] {
   return executeEpsil(ce, source).diagnostics.map((d) =>

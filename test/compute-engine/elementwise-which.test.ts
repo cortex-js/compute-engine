@@ -912,14 +912,15 @@ describe('perf smoke', () => {
     // per-position lazy regime this guards against is an order of magnitude
     // worse, so the bound below sits comfortably between the two.
     const canaryUnits = elapsed / canary;
-    // eslint-disable-next-line no-console
-    console.log(
-      `[elementwise-which] witness 3×900: ${elapsed.toFixed(
-        2
-      )} ms = ${canaryUnits.toFixed(0)} canary units (box canary ${canary.toFixed(
-        4
-      )} ms/iter)`
-    );
+    // The measurement is printed on request only (`BENCH_VERBOSE=1`), so the
+    // suite output carries results, not readings.
+    if (process.env.BENCH_VERBOSE)
+      // eslint-disable-next-line no-console
+      console.log(
+        `[elementwise-which] witness 3×900: ${elapsed.toFixed(2)} ms = ` +
+          `${canaryUnits.toFixed(0)} canary units (box canary ` +
+          `${canary.toFixed(4)} ms/iter)`
+      );
     expect(canaryUnits).toBeLessThan(5000);
   });
 });
