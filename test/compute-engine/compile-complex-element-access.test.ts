@@ -278,7 +278,7 @@ describe('complexPromotion over a collection-valued body (ROADMAP 2026-08-15)', 
     (head) => {
       const ce = withFn('w', RADICALS(head));
       const r = compile(ce.box(CHAIN('w') as any), {
-        complexPromotion: true,
+        mode: 'complex',
       })!;
       expect(r.success).toBe(true);
       expect(r.run!({ t: 0.3 } as any)).toBeCloseTo(PROMOTED, 12);
@@ -307,7 +307,7 @@ describe('complexPromotion over a collection-valued body (ROADMAP 2026-08-15)', 
     // reading it must not inherit element 1's promotion.
     const ce = withFn('g', ['List', ['Sqrt', ['Subtract', 't', 1]], 1]);
     const r = compile(ce.box(['Add', ['At', ['g', 't'], 2], 1] as any), {
-      complexPromotion: true,
+      mode: 'complex',
     })!;
     expect(r.success).toBe(true);
     expect(r.run!({ t: 0.3 } as any)).toEqual(2);
@@ -372,9 +372,9 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
   const IN = { t: 3 };
   const OUT = { t: 0.3 };
 
-  const compiled = (body: unknown, mj: unknown, complexPromotion: boolean) => {
+  const compiled = (body: unknown, mj: unknown, mode: 'complex' | 'auto') => {
     const ce = withFn('w', body);
-    return compile(ce.box(mj as any), { complexPromotion })!;
+    return compile(ce.box(mj as any), { mode })!;
   };
 
   test.each([
@@ -382,15 +382,15 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
     ['w(t)+1', ['Add', ['w', 't'], 1]],
     ['w(t)/2', ['Divide', ['w', 't'], 2]],
   ])('ON: %s compiles', (_label, mj) => {
-    expect(compiled(W, mj, true).success).toBe(true);
-    expect(compiled(W, mj, false).success).toBe(true);
+    expect(compiled(W, mj, 'complex').success).toBe(true);
+    expect(compiled(W, mj, 'auto').success).toBe(true);
   });
 
   test('ON: the values match the interpreter at both ends of the domain', () => {
     // `w(3) = [√2, 1]`, so `2·w(3) = [2√2, 2]`; `w(0.3) = [√−0.7, √−1.7]`,
     // which the opt-in promotes, so `2·w(0.3) = [1.673…i, 2.607…i]` — the
     // interpreter's answer, now reproduced element by element.
-    const r = compiled(W, ['Multiply', 2, ['w', 't']], true);
+    const r = compiled(W, ['Multiply', 2, ['w', 't']], 'complex');
     expect(r.success).toBe(true);
     // In-domain the elements are real: the result convention (design §5,
     // applied element by element) hands them back as plain numbers, never as
@@ -405,10 +405,10 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
 
   test('the out-of-domain elements come back complex whether the opt-in is on or off', () => {
     const mj = ['Multiply', 2, ['w', 't']];
-    for (const complexPromotion of [true, false]) {
+    for (const mode of ['complex', 'auto'] as const) {
       const ce = withFn('w', W);
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-      const r = compile(ce.box(mj as any), { complexPromotion })!;
+      const r = compile(ce.box(mj as any), { mode })!;
       warn.mockRestore();
       expect(r.success).toBe(true);
       expect(r.run!(IN as any)).toEqual([2 * Math.SQRT2, 2]);
@@ -428,14 +428,14 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
     const mj = ['Multiply', 2, ['w', 't']];
     const P = ['List', ['Multiply', 2, 't'], ['Add', 't', 1]];
     const strict = compile(withFn('w', P).box(mj as any), { mode: 'strict' })!;
-    expect(compiled(P, mj, false).code).toBe(strict.code);
+    expect(compiled(P, mj, 'auto').code).toBe(strict.code);
   });
 
   test('CONTROL: a collection body with NO radical compiles under both flag states', () => {
     const P = ['List', ['Multiply', 2, 't'], ['Add', 't', 1]];
     const mj = ['Multiply', 2, ['w', 't']];
-    for (const complexPromotion of [true, false]) {
-      const r = compiled(P, mj, complexPromotion);
+    for (const mode of ['complex', 'auto'] as const) {
+      const r = compiled(P, mj, mode);
       expect(r.success).toBe(true);
       expect(r.run!(IN as any)).toEqual([12, 8]);
     }
@@ -444,8 +444,8 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
   test('CONTROL: a SCALAR radical body compiles under both flag states', () => {
     const Z = ['Sqrt', ['Subtract', 't', 1]];
     const mj = ['Multiply', 2, ['w', 't']];
-    expect(compiled(Z, mj, false).success).toBe(true);
-    const on = compiled(Z, mj, true);
+    expect(compiled(Z, mj, 'auto').success).toBe(true);
+    const on = compiled(Z, mj, 'complex');
     expect(on.success).toBe(true);
     expect(on.run!(OUT as any)).toEqual({
       re: 0,
@@ -455,8 +455,8 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
 
   test('CONTROL: the INDEXED read keeps compiling — it was never scalar-over-a-list', () => {
     const mj = ['Multiply', 2, ['At', ['w', 't'], 1]];
-    expect(compiled(W, mj, false).success).toBe(true);
-    const on = compiled(W, mj, true);
+    expect(compiled(W, mj, 'auto').success).toBe(true);
+    const on = compiled(W, mj, 'complex');
     expect(on.success).toBe(true);
     expect(on.run!(OUT as any)).toEqual({ re: 0, im: 2 * Math.sqrt(0.7) });
   });
@@ -470,7 +470,7 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
     const r = compiled(
       W,
       ['Add', ['At', ['Multiply', 2, ['w', 't']], 1], 1],
-      true
+      'complex'
     );
     expect(r.success).toBe(true);
     const v = r.run!(OUT as any) as unknown as { re: number; im: number };
@@ -479,7 +479,7 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
   });
 
   test('a broadcast wrapped around a broadcast stays element-wise', () => {
-    const r = compiled(W, ['Multiply', 2, ['Add', ['w', 't'], 1]], true);
+    const r = compiled(W, ['Multiply', 2, ['Add', ['w', 't'], 1]], 'complex');
     expect(r.success).toBe(true);
     const out = r.run!(OUT as any) as unknown as { re: number; im: number }[];
     expect(out.map((e) => e.re)).toEqual([2, 2]);
@@ -495,7 +495,7 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
     const r = compiled(
       ['List', ['Sqrt', ['Subtract', 't', 1]], 1],
       ['Multiply', 2, ['w', 't']],
-      true
+      'complex'
     );
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/list-valued operand/);

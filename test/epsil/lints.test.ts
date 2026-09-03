@@ -9,6 +9,15 @@ function parseCodes(source: string): string[] {
   );
 }
 
+// The print-hint tests below call `print(…)`, whose `Print` operator writes
+// to the console by design; silence it so the suite output carries only
+// results.
+let consoleLog: jest.SpyInstance;
+beforeAll(() => {
+  consoleLog = jest.spyOn(console, 'log').mockImplementation(() => {});
+});
+afterAll(() => consoleLog.mockRestore());
+
 function execDiagnostics(source: string): string[][] {
   const ce = new ComputeEngine();
   return executeEpsil(ce, source).diagnostics.map((d) =>
