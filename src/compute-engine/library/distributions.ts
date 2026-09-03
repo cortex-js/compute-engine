@@ -447,7 +447,6 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       // the unconditional `real` this definition used to claim was unsound.
       // Both gates NARROW on `true`, so the descriptor sign channel errs on
       // the wide side: an unproven sign claims `number`.
-      typeHandlerKind: 'types',
       type: ([a, z]) => {
         // A provably-NaN operand DECLINES: a handler answer is never widened,
         // so answering `number` here would suppress any sharper claim the
@@ -548,7 +547,6 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       // definition used to claim was unsound outside it. As for
       // `GammaRegularized` above, every gate narrows on `true`, so an
       // unproven fact claims the wide `number`.
-      typeHandlerKind: 'types',
       type: ([x, a, b]) => {
         // A provably-NaN operand declines, as `GammaRegularized` does.
         if (

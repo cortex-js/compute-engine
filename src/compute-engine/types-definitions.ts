@@ -463,6 +463,15 @@ export type OperandFacts = {
    * handlers read it constantly and a literal-`List` channel can join it
    * later. */
   readonly shape?: readonly number[];
+  /** The element type the operand's own collection handler proves for THIS
+   * instance (the `elttype` handler of its operator's `collection`
+   * definition), when the operator has one and it answers. This is the
+   * per-instance channel the type cannot carry: a `Range` whose endpoints
+   * are all integers has `integer` elements while its static type says
+   * only `real`. Absent when the operand is not an application of an
+   * operator with such a handler, or the handler declines; a consumer then
+   * reads the element type the TYPE proves (`collectionElementType`). */
+  readonly elementType?: Type;
 };
 
 /**
@@ -478,6 +487,12 @@ export type OperandStructure =
   | {
       kind: 'symbol';
       name: string;
+      /** Present (`true`) when the symbol resolves to the definition the
+       * engine's SYSTEM scope binds under this name — the library constant
+       * or operator, not a user or local declaration that shadows it. The
+       * ring arms of `At` and `Subscript` read it: `Integers[k]` is a
+       * quotient-ring adjunction only for the library `Integers`. */
+      system?: boolean;
       /** Present (`true`) when the symbol's recorded type was INFERRED
        * (subject to revision) rather than declared — the fact the
        * `Multiply` and `List`-fold handlers consult when deciding how much
@@ -486,7 +501,19 @@ export type OperandStructure =
       inferred?: boolean;
     }
   | { kind: 'string'; text: string }
-  | { kind: 'number'; literal?: 0 | 1 }
+  | {
+      kind: 'number';
+      literal?: 0 | 1;
+      /** The literal's exact value as a REDUCED fraction, when it is a
+       * rational with no radical part: `[numerator, denominator]`, the
+       * denominator positive. A literal's handler-visible type carries only
+       * an outward-rounded range for a rational no double represents
+       * exactly, so a handler that needs the exact terms (the parity of a
+       * power's exponent denominator decides real against complex) reads
+       * them here. Absent for a float, a complex, a radical, or a
+       * non-finite literal. */
+      rational?: readonly [bigint, bigint];
+    }
   | {
       kind: 'application';
       head: string;
@@ -497,8 +524,20 @@ export type OperandStructure =
       parameters: ReadonlyArray<{ name: string; annotated?: Type }>;
       body: OperandStructure;
     }
-  | { kind: 'tuple'; arity: number }
-  | { kind: 'list-literal'; shape: readonly number[] };
+  | {
+      kind: 'tuple';
+      arity: number;
+      /** One descriptor per component, in order. */
+      elements: ReadonlyArray<OperandDescriptor>;
+    }
+  | {
+      kind: 'list-literal';
+      shape: readonly number[];
+      /** One descriptor per top-level element, in order. A nested row is
+       * itself a `list-literal` structure, reachable through its
+       * descriptor's `structureOf()`. */
+      elements: ReadonlyArray<OperandDescriptor>;
+    };
 
 /**
  * What a `type` handler in the `'types'` shape receives in place of an
@@ -559,46 +598,48 @@ export interface PureEngineView {
   type(type: Type | TypeString | BoxedType): BoxedType;
   readonly _typeResolver: TypeResolver;
   lookupDefinition(id: string): ReadonlyDefinitionView | undefined;
+  /** The engine's numeric tolerance, a read-only configuration value a
+   * membership handler consults (`Element` declines rather than refute a
+   * near-match inside it). */
+  readonly tolerance: number;
+  /** The protocol registry, keyed by protocol name. Its records are typed
+   * opaquely here because the record type lives in `types-engine.ts`,
+   * which imports this file; the protocol readers in `engine-protocols.ts`
+   * (`protocolOfName`, `protocolMemberSignature`,
+   * `protocolPropertyTypeOfReceiver`) take this view and know the records'
+   * real shape. Read-only from a handler. */
+  readonly _protocolRegistry: Readonly<Record<string, object>>;
 }
 
 /**
  * The context argument of a `type` handler in the `'types'` shape.
  *
- * A `derive(operator, operands)` member — the recursive entry point a
- * handler such as `Map` needs to type an application it does not have in
- * hand — is part of the design
- * (`docs/plans/2026-08-22-type-handlers-on-types.md` §5.2) and will be
- * added when those handlers migrate; it is absent until then.
+ * `derive(operator, operands)` is the recursive entry point a handler needs
+ * to type an application it does not have in hand — the body of a mapping
+ * literal over the source's element type, say. It runs the named operator's
+ * own `type` handler on the given descriptors, falling back to the declared
+ * (instantiated) signature result, and reads nothing but definitions and
+ * types (`deriveApplicationType`, `boxed-expression/derive-application-type.ts`).
+ * It answers `undefined` for an unknown operator.
  *
  * @category Definitions
  */
 export type TypeHandlerContext = {
   engine: PureEngineView;
+  derive: (
+    operator: string,
+    operands: ReadonlyArray<OperandDescriptor>
+  ) => Type | undefined;
 };
 
 /**
- * The legacy `type` handler shape: a function of the operand EXPRESSIONS.
- *
- * @category Definitions
- */
-export type OperatorTypeHandlerOnExpressions = (
-  ops: ReadonlyArray<Expression>,
-  options: {
-    engine: ComputeEngine;
-    /** Strip-before-validate override (§3.B of the missing-value typing
-     * design): for a stripped parameter position with an absent operand,
-     * the operand's `missing`-stripped type; `undefined` where no override
-     * applies. A handler consults `operandTypes[i]` before `ops[i].type`. */
-    operandTypes?: ReadonlyArray<Type | undefined>;
-  }
-) => Type | TypeString | BoxedType | undefined;
-
-/**
- * The `type` handler shape selected by `typeHandlerKind: 'types'`: a
- * function of operand DESCRIPTORS. Such a handler never sees an operand
- * expression, so deriving a type cannot declare, canonicalize, or evaluate
- * anything — the state-purity contract of
- * `docs/plans/2026-08-22-type-handlers-on-types.md`.
+ * The `type` handler of an operator definition: a function of operand
+ * DESCRIPTORS. Such a handler never sees an operand expression, so
+ * deriving a type cannot declare, canonicalize, or evaluate anything — the
+ * state-purity contract of
+ * `docs/plans/2026-08-22-type-handlers-on-types.md`. Under test, and with
+ * `CE_TYPE_PURITY_GUARD` set elsewhere, a handler that writes engine state
+ * throws.
  *
  * @category Definitions
  */
@@ -607,59 +648,19 @@ export type OperatorTypeHandlerOnTypes = (
   context: TypeHandlerContext
 ) => Type | TypeString | BoxedType | undefined;
 
-/**
- * The two `type`-handler shapes, discriminated by the `typeHandlerKind`
- * flag — the flag selects the shape; the shape is never guessed from the
- * handler's parameter count. Omitting the flag (every pre-existing
- * definition) keeps the legacy expressions shape.
- *
- * The flag travels WITH the handler: a definition update that supplies a
- * new `type` handler and omits `typeHandlerKind` resets the stored shape
- * to `'expressions'`, even when the previous handler was declared
- * `'types'`. When re-declaring a `'types'`-shape operator, always restate
- * the flag next to the handler — a descriptor-consuming handler filed
- * under the expressions shape is silently called with expressions and
- * derives wrong types.
- *
- * @category Definitions
- */
-export type OperatorTypeHandlerVariant =
-  | {
-      typeHandlerKind?: 'expressions';
-
-      /**
-       * The type of the result (return type) based on the type of
-       * the arguments.
-       *
-       * Should be a subtype of the type indicated by the signature.
-       *
-       * For example, if the signature is `(number) -> real`, the type of the
-       * result could be `real` or `integer`, but not `complex`.
-       *
-       * :::info[Note]
-       * Do not evaluate the arguments.
-       *
-       * However, the type of the arguments can be used to determine the type of
-       * the result.
-       * :::
-       *
-       */
-      type?: OperatorTypeHandlerOnExpressions;
-    }
-  | {
-      typeHandlerKind: 'types';
-
-      /**
-       * The type of the result (return type) as a function of the operand
-       * DESCRIPTORS — their types and facts, never the operand expressions.
-       * See {@link OperatorTypeHandlerOnTypes}.
-       */
-      type?: OperatorTypeHandlerOnTypes;
-    };
-
 export type OperatorDefinition = Partial<BaseDefinition> &
-  Partial<OperatorDefinitionFlags> &
-  OperatorTypeHandlerVariant & {
+  Partial<OperatorDefinitionFlags> & {
+    /**
+     * The type of the result (return type) as a function of the operand
+     * DESCRIPTORS — their types, facts and structure, never the operand
+     * expressions. See {@link OperatorTypeHandlerOnTypes}.
+     *
+     * Should be a subtype of the type indicated by the signature: for a
+     * signature `(number) -> real` the result may be `real` or `integer`,
+     * never `complex`.
+     */
+    type?: OperatorTypeHandlerOnTypes;
+
     /**
      * The function signature, describing the type of the arguments and the
      * return type.
@@ -1165,31 +1166,21 @@ export type ExplainOptions = SimplifyOptions & {
 export type SymbolDefinition = OneOf<[ValueDefinition, OperatorDefinition]>;
 
 /**
- * `Partial` distributed over the {@link SymbolDefinition} union, except that
- * the `typeHandlerKind: 'types'` discriminant stays REQUIRED on its arm.
- * A plain `Partial` would make the discriminant optional, at which point an
- * object literal with an unannotated `type: (ops) => …` handler matches both
- * handler shapes and TypeScript can no longer contextually type the
- * handler's parameters — every legacy definition in the library would stop
- * type-checking.
+ * `Partial` distributed over the {@link SymbolDefinition} union (a plain
+ * `Partial<A | B>` would merge the arms into one loose object type).
  *
  * @category Definitions
  */
-export type PartialSymbolDefinition<T = SymbolDefinition> = T extends {
-  typeHandlerKind: 'types';
-}
-  ? Partial<T> & { typeHandlerKind: 'types' }
-  : Partial<T>;
+export type PartialSymbolDefinition<T = SymbolDefinition> = T extends unknown
+  ? Partial<T>
+  : never;
 
 /**
  * A definition as `ce.declare()` accepts it: a partial definition, or the
  * boxed operator definition read back from `expr.operatorDefinition`.
  *
- * A boxed definition records the shape of its `type` handler as the wide
- * `'expressions' | 'types'` flag, so it fits neither arm of
- * {@link OperatorTypeHandlerVariant}. Admitting it here is what lets an
- * operator be re-declared from its existing definition with some handlers
- * replaced:
+ * Admitting the boxed definition is what lets an operator be re-declared
+ * from its existing definition with some handlers replaced:
  *
  * ```ts
  * const sqrt = ce.expr('Sqrt').operatorDefinition!;
@@ -1198,20 +1189,6 @@ export type PartialSymbolDefinition<T = SymbolDefinition> = T extends {
  *   evaluate: (ops, options) => sqrt.evaluate!(ops, options),
  * });
  * ```
- *
- * The boxed definition's update routine reads `typeHandlerKind` off the
- * incoming definition, so the stored `type` handler keeps its shape across
- * such a re-declaration.
- *
- * Limitation of the map form `ce.declare({ f: {…} })`: its entry type also
- * admits a `Type` or a type string. Those members have no `typeHandlerKind`
- * property, and TypeScript discriminates an object literal that OMITS a
- * property only when every union member declares it, so an inline
- * `type: (ops) => …` handler without `typeHandlerKind` gets implicitly-`any`
- * parameters in that form. State `typeHandlerKind: 'expressions'` next to
- * the handler, or annotate its parameters. The two-argument form
- * `ce.declare('f', {…})` keeps the type and the definition in separate
- * overloads and has no such limit.
  *
  * @category Definitions
  */
@@ -2536,21 +2513,11 @@ export interface BoxedOperatorDefinition
    * @internal */
   _lambdaLiteral?: Expression;
 
-  /** Which shape the `type` handler takes: `'expressions'` (the legacy
-   * shape — a function of the operand expressions) or `'types'` (a function
-   * of operand descriptors, which cannot touch engine state). The flag is
-   * what the dispatch reads; the handler's parameter count is never
-   * inspected. */
-  readonly typeHandlerKind: 'expressions' | 'types';
-
-  /** If present, this handler can be used to more precisely determine the
-   * return type based on the type of the arguments. The arguments themselves
-   * should *not* be evaluated, only their types should be used.
-   *
-   * The shape of the stored handler is recorded by {@link typeHandlerKind};
-   * a caller must dispatch on that flag before invoking it.
+  /** If present, this handler determines the result type more precisely
+   * than the signature, from the operand DESCRIPTORS (types, facts and
+   * structure — never the operand expressions).
    */
-  type?: OperatorTypeHandlerOnExpressions | OperatorTypeHandlerOnTypes;
+  type?: OperatorTypeHandlerOnTypes;
 
   /** If present, this handler can be used to determine the sign of the
    *  return value of the function, based on the sign and type of its

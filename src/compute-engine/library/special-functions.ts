@@ -8,28 +8,22 @@ import type {
   IComputeEngine,
 } from '../global-types.js';
 import { applyN, shouldNumericize } from '../boxed-expression/apply.js';
-import {
-  asSmallInteger,
-  provablyNonFiniteNumber,
-} from '../boxed-expression/numerics.js';
+import { asSmallInteger } from '../boxed-expression/numerics.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
-import {
-  numericTypeHandler,
-  boundedInverseTrigType,
-  iv,
-  type RealDomain,
-  operandLiteralValue,
-} from './type-handlers.js';
-// The `'types'`-shape twins of the helpers above, wired to the definitions
-// that declare `typeHandlerKind: 'types'`. Both modules export the same
-// names on purpose (a converted call site otherwise changes only its import
-// path), so the twins carry an `OnTypes` suffix here to keep the two shapes
-// readable side by side while the migration runs.
+// Every `type` handler in this file is on the `'types'` (operand-descriptor)
+// shape, so the helpers all come from the descriptor-shape module. The
+// `OnTypes` suffixes are kept while the expression-shape module still
+// exports the same names, so that the two shapes read apart at a glance.
 import {
   broadcastOperandType,
   numericTypeHandler as numericTypeHandlerOnTypes,
-} from './type-handlers-types.js';
+  boundedInverseTrigType as boundedInverseTrigTypeOnTypes,
+  operandLiteralValue,
+  iv,
+  type RealDomain,
+} from './type-handlers.js';
+import { intervalOfType } from '../numerics/interval-arithmetic.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { signOfType } from '../../common/type/utils.js';
 import { nonNegativeSign } from '../boxed-expression/sgn.js';
@@ -197,7 +191,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // Real for m < 1, the +∞ pole at m = 1 (mirroring the `evaluate`
       // special case below), and a finite complex value for m > 1
       // (`K(2) = 1.311… − 1.311…i`).
-      type: (ops) => boundedInverseTrigType(ops, ELLIPTIC_K_DOMAIN),
+      type: (ops) => boundedInverseTrigTypeOnTypes(ops, ELLIPTIC_K_DOMAIN),
       evaluate: ([m], { numericApproximation, engine }) => {
         // K(1) = +∞ exactly (Fungrim 45b157)
         if (isNumber(m) && m.im === 0 && m.isSame(1))
@@ -247,7 +241,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // one changes nothing.
       type: (ops) =>
         ops.length === 1
-          ? boundedInverseTrigType(ops, ELLIPTIC_E_DOMAIN)
+          ? boundedInverseTrigTypeOnTypes(ops, ELLIPTIC_E_DOMAIN)
           : 'number',
       evaluate: (ops, { numericApproximation, engine }) => {
         if (ops.length === 2) {
@@ -307,7 +301,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `F(φ|m) = ∫₀^φ dθ/√(1 − m·sin²θ)` has a pole at m = 1, θ = π/2, so
       // `F(π/2|1)` is infinite. A finiteness claim is therefore unsound too,
       // even for operands that are themselves finite.
-      typeHandlerKind: 'types',
       type: () => 'number',
       evaluate: ([phi, m], { numericApproximation, engine }) => {
         // F(0|m) = 0 exactly
@@ -387,10 +380,12 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // Real and finite for non-negative real operands; a negative operand
       // takes the complex AGM (`AGM(1, −2) = −0.4229… + 0.6612…i`).
       type: (ops) => {
-        if (ops.some((x) => provablyNonFiniteNumber(x))) return 'number';
+        if (ops.some((x) => x.facts.finite === false)) return 'number';
         if (
           ops.every(
-            (x) => x.isExtendedReal === true && x.isNonNegative === true
+            (x) =>
+              typeFact(x.type, EXTENDED_REAL_TYPE) === true &&
+              nonNegativeSign(x.facts.sgn) === true
           )
         )
           return 'real';
@@ -417,7 +412,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(complex | infinity, complex | infinity, complex | infinity, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      typeHandlerKind: 'types',
       type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: (ops, { numericApproximation, engine }) => {
         // ₂F₁(a, b; c; 0) = 1 exactly
@@ -449,7 +443,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(complex | infinity, complex | infinity, complex | infinity, complex | infinity, complex | infinity, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      typeHandlerKind: 'types',
       type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: (ops, { numericApproximation, engine }) => {
         // F₁(a; b₁, b₂; c; 0, 0) = 1 exactly
@@ -485,23 +478,24 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       // Liₛ(1) = ζ(s) is finite for s > 1 but a pole (value `~oo`, only
       // representable by `number`) for s ≤ 1; likewise Li₀/Li₋₁ at z = 1.
+      //
+      // The pole arm asks about the ORDER's real value, so it is restricted
+      // to an order written as a real number literal: the exact value of a
+      // literal such as `1/3` is not a machine number, but its
+      // handler-visible type still encloses it (`rational<0.33..0.34>`), and
+      // an upper bound of that enclosure at or below 1 is the proof the arm
+      // needs.
       type: ([s, z]) => {
-        // The order's value is read through the literal's handler-visible
-        // type first (`operandLiteralValue` — the channel that survives
-        // when the value reads are unavailable to a type handler), then
-        // the value channel.
-        const sRe =
-          s === undefined ? undefined : (operandLiteralValue(s) ?? s.re);
         if (
-          z?.isSame(1) === true &&
           s !== undefined &&
-          isNumber(s) &&
-          s.im === 0 &&
-          typeof sRe === 'number' &&
-          sRe <= 1
+          z !== undefined &&
+          operandLiteralValue(z) === 1 &&
+          s.structureOf?.()?.kind === 'number' &&
+          typeFact(s.type, 'real') === true &&
+          (intervalOfType(s.type)?.hi ?? Infinity) <= 1
         )
           return 'number';
-        return numericTypeHandler([s, z]);
+        return numericTypeHandlerOnTypes([s, z]);
       },
       evaluate: (ops, { numericApproximation, engine }) => {
         const [s, z] = ops;
@@ -539,7 +533,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(complex | infinity, complex | infinity, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      typeHandlerKind: 'types',
       type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: (ops, { numericApproximation, engine }) => {
         // ₁F₁(a; b; 0) = 1 exactly
@@ -577,7 +570,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // no-handler fallback, which derives a NARROWER type than this
       // constant claim. Only its SHAPE moved to `'types'` — the claim reads
       // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
       type: () => 'number',
       evaluate: (ops, { numericApproximation, engine }) => {
         // The index and the derivative order are validated first: an
@@ -622,7 +614,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // no-handler fallback, which derives a NARROWER type than this
       // constant claim. Only its SHAPE moved to `'types'` — the claim reads
       // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
       type: () => 'number',
       evaluate: ([tau], { numericApproximation, engine }) => {
         const point = infinitePoint(tau);
@@ -660,7 +651,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // no-handler fallback, which derives a NARROWER type than this
       // constant claim. Only its SHAPE moved to `'types'` — the claim reads
       // no operand, so the flip changes nothing it derives.
-      typeHandlerKind: 'types',
       type: () => 'number',
       evaluate: (ops, { numericApproximation, engine }) => {
         // The weight is validated first: an invalid weight leaves the
@@ -703,11 +693,20 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // the claim has to spell the signed infinities out — the bare name
       // `real` denotes the finite reals and would exclude both. A finite
       // complex argument → finite complex value.
-      type: (ops) => {
-        const x = ops[0];
-        if (!x || x.isNaN) return 'number';
-        if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'complex' : 'number';
+      //
+      // NaN is on neither line, so it has to be excluded before the extended
+      // real claim. A NaN LITERAL is refuted as an extended real by its own
+      // type and leaves through the complex arm; a NaN held behind a wider
+      // declaration is caught by the fact pair below — no finiteness and no
+      // sign — which also catches `~oo` held the same way, where `number` is
+      // right as well (`Ei(~oo)` is NaN).
+      type: ([x]) => {
+        if (!x) return 'number';
+        const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
+        if (extendedReal === false)
+          return x.facts.finite === true ? 'complex' : 'number';
+        if (x.facts.finite === false && x.facts.sgn === 'unsigned')
+          return 'number';
         return EXTENDED_REAL_TYPE;
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -766,7 +765,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // Reading the operand's own sign there answers `undefined` for the
       // whole collection and needlessly widens `broadcastable<real<0..>>` to
       // `broadcastable<number>`.
-      typeHandlerKind: 'types',
       type: ([x]) => {
         if (x === undefined) return 'number';
         const t = broadcastOperandType(x);

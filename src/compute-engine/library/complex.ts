@@ -3,7 +3,8 @@
 
 import type {
   Expression,
-  OperatorTypeHandlerOnExpressions,
+  OperandDescriptor,
+  OperatorTypeHandlerOnTypes,
   Sign,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
@@ -14,7 +15,10 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
-import { infinitePoint } from '../boxed-expression/infinite-point.js';
+import {
+  infinitePoint,
+  type InfinitePoint,
+} from '../boxed-expression/infinite-point.js';
 import { groundEnumerationOperand } from '../collection-utils.js';
 import {
   type SubjectPart,
@@ -22,7 +26,12 @@ import {
   signFromBounds,
 } from '../boxed-expression/constraint-subject.js';
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
-import type { BoxedType } from '../../common/type/boxed-type.js';
+import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import type { Type } from '../../common/type/types.js';
+import {
+  INDEXED_COLLECTION_SHAPE_TYPE,
+  SIGNED_INFINITY_TYPE,
+} from '../../common/type/primitive.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { broadcastCellType } from '../../common/type/utils.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -96,74 +105,126 @@ export function signFromAssumedPart(
 // `[0, NaN]`) and no finite claim is honest: the top numeric type then. A
 // type handler's answer is authoritative, so this is the one place the
 // per-cell NaN is accounted for.
-function collectionPartClaim(t: BoxedType): 'real' | 'number' {
-  const el = broadcastCellType(t.type);
+function collectionPartClaim(t: Type): 'real' | 'number' {
+  const el = broadcastCellType(t);
   return isSubtype('nan', el) ? 'number' : 'real';
+}
+
+/**
+ * Is the operand provably NaN, as far as an operand descriptor can tell?
+ *
+ * A descriptor reports NaN and complex infinity identically — both are not
+ * finite and both have the sign `unsigned` — so the FACTS alone cannot
+ * separate them. The TYPE can, whenever it carries the value: the `~oo`
+ * singleton and the `infinity` tier are subtypes of `infinity` and the NaN
+ * singleton is not, so the infinity test runs first and only what it
+ * refuses is treated as NaN. What stays conflated is a wide-declared
+ * SYMBOL holding `~oo` (`w: number := ~oo`), whose type carries nothing:
+ * it is read as possibly-NaN here and the handler declines, which leaves
+ * the declared `number` result standing — the same claim the operand's
+ * type would have produced anyway.
+ */
+function provablyNaN(d: OperandDescriptor): boolean {
+  return (
+    d.facts.finite === false &&
+    d.facts.sgn === 'unsigned' &&
+    typeFact(d.type, 'infinity') !== true
+  );
+}
+
+/**
+ * Which infinite point a number LITERAL operand is, read from its
+ * value-carrying type: the descriptor twin of `infinitePoint`
+ * (`boxed-expression/infinite-point.ts`).
+ *
+ * The literal gate is the twin of that function's `isNumber` gate: a
+ * symbol or a compound expression answers `undefined` even when its type
+ * proves it infinite, and the type-channel arms of the handlers below
+ * decide for it instead. A literal at one of the three named infinities
+ * carries the matching singleton type; an anonymous infinity (`∞ + i`)
+ * carries the `infinity` tier, which is the arm left once the three
+ * singletons have been tested.
+ */
+function infinitePointOfDescriptor(
+  d: OperandDescriptor
+): InfinitePoint | undefined {
+  if (d.structureOf?.()?.kind !== 'number') return undefined;
+  const t = d.type;
+  if (isSubtype(t, '~oo')) return '~oo';
+  if (isSubtype(t, SIGNED_INFINITY_TYPE)) {
+    return isSubtype(t, { kind: 'value', value: Infinity }) ? '+oo' : '-oo';
+  }
+  return isSubtype(t, 'infinity') ? 'anonymous' : undefined;
 }
 
 // Re follows the operand's finiteness: a finite number has a finite real
 // part, a signed or anonymous infinity has an infinite one, and `~oo` has
 // none. A proven-NaN literal declines, so the framework's proven-NaN arm
 // answers for it.
-const realPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
+const realPartType: OperatorTypeHandlerOnTypes = ([z]) => {
   if (!z) return 'number';
-  if (z.isNaN === true) return undefined;
-  const point = infinitePoint(z);
+  if (provablyNaN(z)) return undefined;
+  const point = infinitePointOfDescriptor(z);
   if (point === '~oo') return 'nan';
   if (point !== undefined) return '+oo | -oo';
   const t = z.type;
-  if (t.matches('complex')) return 'real';
-  if (t.matches('+oo | -oo')) return '+oo | -oo';
+  if (isSubtype(t, 'complex')) return 'real';
+  if (isSubtype(t, SIGNED_INFINITY_TYPE)) return '+oo | -oo';
   // Collection operand: scalar claim for the broadcast lift — elements
   // keep the generic finite-point convention (list-broadcast-typing).
-  if (t.matches('indexed_collection<any>')) return collectionPartClaim(t);
+  if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE))
+    return collectionPartClaim(t);
   // A real-typed operand is its own real part. The bare name `real` is
   // finite and excludes `~oo` and NaN, so this claim is exact; a
   // `number`-typed operand may be either of those and keeps the top type.
-  return t.matches('real') ? 'real' : 'number';
+  return isSubtype(t, 'real') ? 'real' : 'number';
 };
 
 // Im of a finite number is a finite real, a real ±∞ and an anonymous
 // infinity have a finite imaginary part, and `~oo` has none.
-const imaginaryPartType: OperatorTypeHandlerOnExpressions = ([z]) => {
+const imaginaryPartType: OperatorTypeHandlerOnTypes = ([z]) => {
   if (!z) return 'number';
-  if (z.isNaN === true) return undefined;
-  const point = infinitePoint(z);
+  if (provablyNaN(z)) return undefined;
+  const point = infinitePointOfDescriptor(z);
   if (point === '~oo') return 'nan';
   if (point !== undefined) return 'real';
   const t = z.type;
-  if (t.matches('complex') || t.matches('+oo | -oo')) return 'real';
-  if (t.matches('indexed_collection<any>')) return collectionPartClaim(t);
+  if (isSubtype(t, 'complex') || isSubtype(t, SIGNED_INFINITY_TYPE))
+    return 'real';
+  if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE))
+    return collectionPartClaim(t);
   // A real-typed operand has Im = 0. The bare name `real` is finite and
   // excludes `~oo` and NaN; a `number`-typed operand may be either, and
   // their imaginary part is not a finite real.
-  return t.matches('real') ? 'real' : 'number';
+  return isSubtype(t, 'real') ? 'real' : 'number';
 };
 
 // Arg of a finite number, of a real ±∞ (0 or π) or of an anonymous
 // infinity (0 or π as well) is a finite real; `~oo` has no phase angle.
-const argumentType: OperatorTypeHandlerOnExpressions = ([z]) => {
+const argumentType: OperatorTypeHandlerOnTypes = ([z]) => {
   if (!z) return 'number';
-  if (z.isNaN === true) return undefined;
-  const point = infinitePoint(z);
+  if (provablyNaN(z)) return undefined;
+  const point = infinitePointOfDescriptor(z);
   if (point === '~oo') return 'nan';
   if (point !== undefined) return 'real';
   const t = z.type;
-  if (t.matches('complex') || t.matches('+oo | -oo')) return 'real';
-  if (t.matches('indexed_collection<any>')) return collectionPartClaim(t);
+  if (isSubtype(t, 'complex') || isSubtype(t, SIGNED_INFINITY_TYPE))
+    return 'real';
+  if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE))
+    return collectionPartClaim(t);
   // A real-typed operand has Arg ∈ {0, π}. The bare name `real` is finite
   // and excludes `~oo` and NaN; a `number`-typed operand may be either,
   // where Arg is NaN.
-  return t.matches('real') ? 'real' : 'number';
+  return isSubtype(t, 'real') ? 'real' : 'number';
 };
 
 // `AbsArg` builds the pair `(Abs(z), Argument(z))`, so its cells follow the
 // two components: the modulus is a finite real or `+∞`, the angle a finite
 // real — except at `~oo`, whose angle is NaN. Only that literal needs a
 // claim sharper than the declared result.
-const absArgType: OperatorTypeHandlerOnExpressions = ([z]) => {
-  if (!z || z.isNaN === true) return undefined;
-  if (infinitePoint(z) === '~oo') return 'tuple<+oo, nan>';
+const absArgType: OperatorTypeHandlerOnTypes = ([z]) => {
+  if (!z || provablyNaN(z)) return undefined;
+  if (infinitePointOfDescriptor(z) === '~oo') return 'tuple<+oo, nan>';
   return undefined;
 };
 

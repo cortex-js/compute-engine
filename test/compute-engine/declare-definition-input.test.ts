@@ -7,10 +7,10 @@ import type { Expression } from '../../src/compute-engine';
 // proves only the runtime behavior.
 
 describe('ce.declare() with a boxed operator definition', () => {
-  test('re-declaring an operator from its boxed definition keeps the type-handler shape', () => {
+  test('re-declaring an operator from its boxed definition keeps its type handler', () => {
     const ce = new ComputeEngine();
     const original = ce.expr('Ln').operatorDefinition!;
-    expect(original.typeHandlerKind).toBe('types');
+    expect(typeof original.type).toBe('function');
 
     ce.declare('Ln', {
       ...original,
@@ -19,7 +19,6 @@ describe('ce.declare() with a boxed operator definition', () => {
     });
 
     const redeclared = ce.expr('Ln').operatorDefinition!;
-    expect(redeclared.typeHandlerKind).toBe('types');
     expect(redeclared.type).toBe(original.type);
     expect(ce.parse('\\ln(0)').evaluate().isNaN).toBe(true);
     expect(ce.parse('\\ln(e)').evaluate().isSame(1)).toBe(true);
@@ -38,7 +37,7 @@ describe('ce.declare() with a boxed operator definition', () => {
           x.is(0) ? ce.NaN : original.evaluate!([x], options),
       },
     });
-    expect(ce.expr('Ln').operatorDefinition!.typeHandlerKind).toBe('types');
+    expect(ce.expr('Ln').operatorDefinition!.type).toBe(original.type);
     expect(ce.parse('\\ln(0)').evaluate().isNaN).toBe(true);
   });
 
@@ -55,45 +54,33 @@ describe('ce.declare() with a boxed operator definition', () => {
 describe('ce.declare() inline type handlers', () => {
   test('the parameters of an inline `type` handler are contextually typed', () => {
     const ce = new ComputeEngine();
-    // Two-argument form, legacy shape: `ops` is `ReadonlyArray<Expression>`.
+    // Two-argument form: `ops` is a descriptor array, so the operand's type
+    // and facts are reachable without an annotation.
     ce.declare('f', {
       signature: '(number) -> number',
-      type: (ops) => ops[0].type,
+      type: (ops) => (ops[0].facts.finite === true ? ops[0].type : 'number'),
     });
     expect(ce.box(['f', 2]).type.matches('integer')).toBe(true);
 
-    // Two-argument form, descriptor shape: `ops` is a descriptor array.
-    ce.declare('g', {
-      signature: '(number) -> number',
-      typeHandlerKind: 'types',
-      type: (ops) => ops[0].type,
-    });
-    expect(ce.box(['g', 2]).type.matches('integer')).toBe(true);
-
-    // Map form: the entry type also admits a `Type` or a type string, so an
-    // omitted `typeHandlerKind` cannot be discriminated there — the flag must
-    // be stated (or the parameters annotated).
+    // Map form: the entry type also admits a `Type` or a type string, and an
+    // inline handler is still typed against the descriptor shape — the one
+    // handler shape there is.
     ce.declare({
       h: {
         signature: '(number) -> number',
-        typeHandlerKind: 'expressions',
         type: (ops) => ops[0].type,
       },
-      k: {
-        signature: '(number) -> number',
-        type: (ops: ReadonlyArray<Expression>) => ops[0].type,
-      },
+      k: 'integer',
     });
     expect(ce.box(['h', 2]).type.matches('integer')).toBe(true);
-    expect(ce.box(['k', 2]).type.matches('integer')).toBe(true);
+    expect(ce.box('k').type.matches('integer')).toBe(true);
 
-    // A `'types'`-shape handler written against expressions is rejected. The
-    // error is an overload failure, reported at the call, so the directive
-    // sits on the call.
-    // @ts-expect-error the descriptor shape does not receive expressions
+    // A handler written against expressions is rejected. The error is an
+    // overload failure, reported at the call, so the directive sits on the
+    // call.
+    // @ts-expect-error a type handler does not receive expressions
     ce.declare('m', {
       signature: '(number) -> number',
-      typeHandlerKind: 'types',
       type: (ops: ReadonlyArray<Expression>) => ops[0].type,
     });
   });

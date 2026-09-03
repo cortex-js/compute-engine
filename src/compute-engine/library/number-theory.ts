@@ -874,7 +874,6 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`.',
       signature: '(integer, integer?, integer?) -> integer | list<integer>',
-      typeHandlerKind: 'types',
       type: ([, , digit]) => (digit !== undefined ? 'integer' : 'list'),
       examples: ['DigitCount(122, 10, 2)  // 2'],
       evaluate: ([nOp, baseOp, digitOp], { engine: ce }) => {

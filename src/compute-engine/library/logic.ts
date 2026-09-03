@@ -1,6 +1,7 @@
 import type { Type } from '../../common/type/types.js';
 import type {
   Expression,
+  OperandDescriptor,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
   Scope,
@@ -20,6 +21,7 @@ import {
   toCNF,
   toDNF,
 } from '../symbolic/logic-utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards.js';
 import { limitsIndexSites } from '../boxed-expression/binding-sites.js';
 import { validateArguments } from '../boxed-expression/validate.js';
@@ -316,8 +318,8 @@ function finishShortCircuit(
 /** The boolean VALUE an operand's type proves: `true`/`false` for a value
  * type, `undefined` otherwise (boolean value types,
  * `docs/plans/2026-08-29-boolean-value-types.md` §3.1). */
-function booleanClaim(x: Expression): boolean | undefined {
-  const t = x.type.type;
+function booleanClaim(x: OperandDescriptor): boolean | undefined {
+  const t = x.type;
   return typeof t === 'object' &&
     t.kind === 'value' &&
     typeof t.value === 'boolean'
@@ -330,12 +332,15 @@ function booleanClaim(x: Expression): boolean | undefined {
  * `Or` the dual; `Not` flips; `Xor` folds when every operand is decided.
  * Anything undecided keeps `boolean`. An operand whose type is not a plain
  * `boolean` (it may be absent, or a collection) keeps the head's declared
- * answer: this refines only a result that is already the bare `boolean`. */
+ * answer: this refines only a result that is already the bare `boolean`.
+ *
+ * Reads operand DESCRIPTORS: everything it needs is in the operand's type,
+ * so the derivation touches no engine state. */
 function connectiveType(
   head: 'And' | 'Or' | 'Not' | 'Xor',
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<OperandDescriptor>
 ): Type {
-  if (!ops.every((x) => x.type.matches('boolean'))) return 'boolean';
+  if (!ops.every((x) => isSubtype(x.type, 'boolean'))) return 'boolean';
   const claims = ops.map(booleanClaim);
   const verdict = (v: boolean): Type => ({ kind: 'value', value: v });
   if (head === 'Not') {

@@ -18,13 +18,11 @@ import {
   elementCountOfFiniteSource,
   enumerableFromAllSources,
   enumerableFromSource,
-  hasAccessibleComponents,
   isBroadcastableCollection,
   isDeclaredScalarNumber,
   isEnumerableSource,
   isFiniteBroadcastParticipant,
   isUnresolvedCollectionOperand,
-  isPossiblyCollectionTyped,
   isTextAtom,
   isRecordShapedType,
   isTuple,
@@ -47,8 +45,6 @@ import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // (collections → compile-expression → base-compiler → library/utils → collections)
 import { kleeneAnd, kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
-import { typeToDedupKey } from '../../common/type/serialize.js';
-import { cachedValue, type CachedValue } from '../boxed-expression/cache.js';
 import { reduceType } from '../../common/type/reduce.js';
 import {
   isObjectType,
@@ -61,6 +57,7 @@ import {
   COLLECTION_SHAPE_TYPE,
   DICTIONARY_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
+  SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
@@ -78,8 +75,13 @@ import {
   containsBroadcastableType,
   functionResult,
   functionArity,
+  isAtomicValueType,
   narrowingPreservesEffects,
+  resolveTypeAlias,
   staticCollectionDims,
+  stripMissingFromType,
+  stripNumericRanges,
+  typeContainsMissing,
   widen,
 } from '../../common/type/utils.js';
 import {
@@ -105,18 +107,20 @@ import { sumVariantInfo } from '../sum-representation.js';
 import type {
   Expression,
   FunctionInterface,
+  OperandDescriptor,
+  OperandStructure,
   OperatorDefinition,
   ExpressionInput,
+  PureEngineView,
   SymbolDefinitions,
+  TypeHandlerContext,
   IComputeEngine as ComputeEngine,
   Scope,
 } from '../global-types.js';
-import { BoxedType } from '../types.js';
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { isValueDef } from '../boxed-expression/utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
-import { shapedListType } from '../boxed-expression/shaped-list-type.js';
 import {
   isAbsentValue,
   isDictionary,
@@ -130,15 +134,26 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { typeMembership } from './sets.js';
 import { isRingConstant } from './ring-constructions.js';
-import { adjoinType, operandLiteralValue } from './type-handlers.js';
+import { RING_CONSTANTS } from '../latex-syntax/utils.js';
+import {
+  adjoinType as adjoinTypeD,
+  operandLiteralValue as descriptorLiteralValue,
+} from './type-handlers.js';
+import {
+  describeBoundSymbol,
+  describe as describeOperand,
+  typeFact,
+} from '../boxed-expression/operand-descriptor.js';
+import { deriveApplicationType } from '../boxed-expression/derive-application-type.js';
 import {
   evaluateProtocolProperty,
   immutableValueAssignmentError,
   protocolFunctionMemberOwners,
   protocolMemberSignature,
   protocolMemberValue,
+  protocolOfName,
   protocolOfSymbol,
-  protocolPropertyType,
+  protocolPropertyTypeOfReceiver,
 } from '../engine-protocols.js';
 
 // From NumPy:
@@ -1073,41 +1088,6 @@ function canonicalCallbackOperand(
   return accept(fn);
 }
 
-/**
- * The RESULT type of a `Reduce`/`Scan` fold, for their `type:` handlers.
- *
- * A CUSTOM combiner contributes its result type through `callbackResultType`
- * — which resolves a bare symbol through its DEFINITION, so `Reduce(L, h, 0)`
- * with `h(a, x) := a + 2x` types `number` like the inline lambda does (a
- * held, unbound symbol reports `unknown`, and an unknown-typed fold then
- * failed closed under scalar arithmetic on the JavaScript target as
- * "possibly a collection").
- *
- * A BUILTIN combiner (`Add`, `Multiply`, `Min`, `Max`) is typed from the
- * SOURCE, not from the operator's own signature: `Add: (value+) -> value`,
- * and typing the fold `value` made `Add` itself reject `Reduce(L, Add, 0)`
- * as incompatible with `number`. The fold's value is an element combined
- * with the seed, so its type is the widening of the element type and the
- * seed's type — `integer` for a sum of integers seeded with `0`,
- * `complex` over a `list<complex>` — or `unknown` when the element type is
- * not numeric.
- */
-function foldResultType(
-  coll: Expression | undefined,
-  op: Expression | undefined,
-  init: Expression | undefined
-): Type | undefined {
-  if (op === undefined) return undefined;
-  if (isSymbol(op) && BUILTIN_FOLD_HEADS.has(op.symbol)) {
-    const elt = coll ? collectionElementType(coll.type.type) : undefined;
-    if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
-    if (init === undefined) return elt;
-    const seed = init.type.type;
-    return isSubtype(seed, 'number') ? widen(elt, seed) : undefined;
-  }
-  return callbackResultType(op);
-}
-
 /** The builtin combiners `Reduce`/`Scan` fold with natively (the JavaScript
  * target lowers exactly these — `builtinCombiner` in `javascript-target.ts`). */
 const BUILTIN_FOLD_HEADS: ReadonlySet<string> = new Set([
@@ -1297,49 +1277,6 @@ function withFirst(
 // delegate the literal (non-comprehension) cases.
 const SET_BASE_HANDLERS = basicIndexedCollectionHandlers();
 
-// Element type of `xs` at 1-based `position` (`-1` = last), used by the
-// `First`/`Second`/`Third`/`Last` type handlers. Prefers the operand's
-// collection element-type handler (covers literal collections); for a
-// symbolic operand with a statically-known tuple type, derives the type of
-// the element at `position`; otherwise falls back to the (widened) collection
-// element type.
-function componentType(
-  xs: Expression,
-  position: number,
-  // The stripped operand type at a `missingStrip` position (§3.B): the
-  // framework hands it via `operandTypes` so a `missing | tuple<…>` operand
-  // (an `At` access) types from its present arm.
-  typeOverride?: Type
-): Type {
-  const elt = xs.operatorDefinition?.collection?.elttype?.(xs);
-  if (elt) return elt;
-  const t = typeOverride ?? xs.type.type;
-  if (typeof t !== 'string' && t.kind === 'tuple' && position >= 1) {
-    const e = t.elements[position - 1]?.type;
-    if (e) return e;
-  }
-  return collectionElementType(t) ?? 'any';
-}
-
-// The result type of a `First`/`Second`/`Third`/`Last` access (§3.C:
-// `T | marker(T)` — the position may be out of band, e.g. an empty list or a
-// short tuple). An in-range literal tuple slot is exact (no marker); an
-// out-of-range literal tuple position misses to `marker(⊔S)`.
-function componentResultType(
-  xs: Expression,
-  position: number,
-  typeOverride?: Type
-): Type {
-  const t = typeOverride ?? xs.type.type;
-  if (typeof t !== 'string' && t.kind === 'tuple') {
-    const n = t.elements.length;
-    const i = position < 0 ? n + position + 1 : position;
-    if (i >= 1 && i <= n) return t.elements[i - 1].type;
-    return markerType(widen(...t.elements.map((x) => x.type)) as Type);
-  }
-  return withMarker(componentType(xs, position, typeOverride));
-}
-
 // Build the result type of `Map`: a collection with the same shape and
 // indexed-ness as the `source` collection, but whose elements are the
 // mapping lambda's result type (`elementType`) — not the source element
@@ -1389,23 +1326,165 @@ function mapResultType(
   return { kind: 'collection', elements: elementType as Type };
 }
 
-// The element type a source contributes to a mapping over it: the
-// collection's own `elttype` handler when it has one, else the element type
-// of its static type. `undefined` when that is indeterminate (`unknown`,
-// `any`, `never`, or not a collection type at all).
-function mappingSourceElementType(
-  x: Expression,
-  /** The source's static type, read only if the `elttype` handler declines —
-   * for a source that is itself a lazy `Map` that read is the expensive path,
-   * and an `elttype` answer makes it unnecessary. */
-  xType: () => BoxedType
-): Type | undefined {
-  const t =
-    x.operatorDefinition?.collection?.elttype?.(x) ??
-    collectionElementType(xType().type);
+/* ------------------------------------------------------------------------ *
+ * TYPE-HANDLER HELPERS
+ *
+ * Helpers for the `type` handlers below. A `type` handler receives one
+ * `OperandDescriptor` per operand instead of the operand expression, so
+ * deriving a type cannot canonicalize, declare, or evaluate anything.
+ *
+ * Translation notes that apply throughout:
+ *
+ * - A descriptor's `type` is the operand's handler-visible type, which is the
+ *   same type the expression shape read as `op.type.type`: a number literal's
+ *   public type already carries its value (`ce.box(21).type` IS `21`). So a
+ *   read of `op.type.type` translates unchanged, and `op.type.matches(T)`
+ *   becomes `isSubtype(descriptor.type, T)`.
+ * - `structureOf()` replaces the structural reads. Its kinds do not map
+ *   one-to-one onto operator names: a literal `List` is `list-literal`, a
+ *   literal `Tuple` is `tuple`, and a `Function` literal is
+ *   `function-literal`; every other application is `application` with a
+ *   `head`.
+ * - The per-instance element type an operand's own `elttype` collection
+ *   handler proves arrives as `facts.elementType`; a descriptor built from a
+ *   type alone has none, and the consumer falls back to what the type proves.
+ * ------------------------------------------------------------------------ */
+
+/** The absence-admitting `set` top, for shape gates on a descriptor's type.
+ * The bare name `set` is the values-only synonym and would refuse an
+ * absence-carrying element type, so a "is this operand set-shaped?" question
+ * has to be asked against this. */
+const SET_SHAPE_TYPE: Type = Object.freeze({
+  kind: 'set',
+  elements: 'any',
+}) as Type;
+
+/** Is this operand a function EXPRESSION of any head? The expression-shape
+ * `isFunction(op)` with no name, restated on the structural view: every
+ * structure kind but `symbol`, `string` and `number` describes an
+ * application, including the literal forms that carry their own kind. */
+function isApplicationOperand(d: OperandDescriptor): boolean {
+  const kind = d.structureOf?.()?.kind;
+  return (
+    kind === 'application' ||
+    kind === 'list-literal' ||
+    kind === 'tuple' ||
+    kind === 'function-literal'
+  );
+}
+
+/** The `string` a string-literal operand holds, or `undefined` for every
+ * other operand. The expression-shape `isString(op) ? op.string : undefined`. */
+function stringLiteralOf(d: OperandDescriptor): string | undefined {
+  const s = d.structureOf?.();
+  return s?.kind === 'string' ? s.text : undefined;
+}
+
+/** Descriptor twin of {@link tupleTypeOf}. */
+function tupleTypeOfD(ops: ReadonlyArray<OperandDescriptor>): Type {
+  return { kind: 'tuple', elements: ops.map((op) => ({ type: op.type })) };
+}
+
+/** Descriptor twin of {@link elementTypeOf}. */
+function elementTypeOfD(d: OperandDescriptor): Type {
+  const t = d.type;
+  return collectionElementType(resolveTypeReference(t) ?? t) ?? 'unknown';
+}
+
+/**
+ * The descriptor that stands for a mapping parameter (or a comprehension's
+ * bound variable) holding one element of its source.
+ *
+ * `describeType` alone is not faithful enough: a parameter is a declared
+ * SYMBOL, and a handler may read that. `Multiply`'s tuple branch is the case
+ * that matters — it scales a literal tuple's components by a scalar operand
+ * only when the operand is a DECLARED scalar number, which it reads off the
+ * symbol structure node, so a structure-less descriptor leaves the tuple as
+ * written and `(k/n)·(1, 0)` reports integer components for a view whose
+ * values are not integers. The expression shape declared a fresh stand-in
+ * symbol of the element type for exactly this reason; this is that stand-in
+ * without the declaration.
+ *
+ * The name is never read back as a binding — no scope holds it — so it only
+ * has to be one that cannot be mistaken for an operand the caller supplied.
+ */
+function describeBoundElement(
+  elementType: Type,
+  position: number
+): OperandDescriptor {
+  return describeBoundSymbol(elementType, `__boundElement${position}`);
+}
+
+/**
+ * Descriptor twin of {@link mappingSourceElementType}: the element type a
+ * source contributes to a mapping over it. The `elttype` handler the
+ * expression shape called on the source has already run — its answer is
+ * `facts.elementType`.
+ */
+function mappingSourceElementTypeD(x: OperandDescriptor): Type | undefined {
+  const t = x.facts.elementType ?? collectionElementType(x.type);
   if (t === undefined || t === 'unknown' || t === 'any' || t === 'never')
     return undefined;
   return t;
+}
+
+/** The head and operand descriptors of a structure that describes an
+ * APPLICATION. The two collection literals carry their own structure kinds
+ * but are ordinary applications for this purpose — the expression shape
+ * reached them through the same `isFunction(body)` test. */
+function applicationOfStructure(
+  s: OperandStructure | undefined
+): { head: string; children: ReadonlyArray<OperandDescriptor> } | undefined {
+  if (s === undefined) return undefined;
+  if (s.kind === 'application') return { head: s.head, children: s.children };
+  if (s.kind === 'list-literal') return { head: 'List', children: s.elements };
+  if (s.kind === 'tuple') return { head: 'Tuple', children: s.elements };
+  return undefined;
+}
+
+/** Look through a one-operand `wrapper` application (`Block`, `N`), which
+ * the mapping body may be wrapped in. Answers the structure unchanged when
+ * the wrapper is not there, and `undefined` when it is there but its
+ * operand has no structural view. */
+function lookThroughWrapper(
+  s: OperandStructure,
+  wrapper: string
+): OperandStructure | undefined {
+  if (s.kind !== 'application' || s.head !== wrapper || s.children.length !== 1)
+    return s;
+  return s.children[0].structureOf?.();
+}
+
+/** Does this operand mention any of the mapping literal's parameters? A
+ * structure the vocabulary cannot describe answers `true`: the caller
+ * declines on a mention, and an operand it cannot read through is exactly
+ * the case where a buried parameter cannot be ruled out. */
+function mentionsParameter(
+  d: OperandDescriptor,
+  parameters: ReadonlyMap<string, number>
+): boolean {
+  return structureMentionsParameter(d.structureOf?.(), parameters);
+}
+
+function structureMentionsParameter(
+  s: OperandStructure | undefined,
+  parameters: ReadonlyMap<string, number>
+): boolean {
+  if (s === undefined) return true;
+  switch (s.kind) {
+    case 'symbol':
+      return parameters.has(s.name);
+    case 'string':
+    case 'number':
+      return false;
+    case 'application':
+      return s.children.some((c) => mentionsParameter(c, parameters));
+    case 'tuple':
+    case 'list-literal':
+      return s.elements.some((c) => mentionsParameter(c, parameters));
+    case 'function-literal':
+      return structureMentionsParameter(s.body, parameters);
+  }
 }
 
 /**
@@ -1421,214 +1500,712 @@ function mappingSourceElementType(
  * and a source's static element type is not reliable enough to enforce. The
  * literal's own type is therefore computed with every parameter `unknown`,
  * which typed the zip of two point views `indexed_collection<number>` while
- * its values were tuples, and `PointY` over that view folded to a scalar
- * `NaN` on the strength of the type alone (Tycho item 212).
+ * its values were tuples, and a coordinate accessor over that view folded to
+ * a scalar `NaN` on the strength of the type alone.
  *
- * The derivation rebuilds the body — ONE operator application whose operands
- * are parameter references or parameter-free expressions, the only shape
- * handled — in a scratch scope where each parameter is DECLARED its source's
- * element type, and reads that application's type. The scratch scope is
- * popped before returning, no annotation is written onto the literal, and
- * the lambda's shape (which `projectLazyPointList` and the compile lowering
- * pattern-match) is untouched. A `Block` of one statement and the `N(…)`
- * wrap the `.N()` route adds are looked through; `N` types as its operand.
+ * The derivation asks what the body's operator would produce for one element
+ * from each source: one descriptor per body operand — a parameter reference
+ * stands for its source's element type, every other operand keeps its own
+ * descriptor — handed to `derive`. Only ONE operator application is handled,
+ * looking through a one-statement `Block` and the `N(…)` wrap the `.N()`
+ * route adds. Nothing is declared, canonicalized or evaluated, so no memo is
+ * needed: the whole derivation is type algebra over descriptors the call
+ * site already built.
  */
-function bareMappingElementType(
-  ce: ComputeEngine,
-  fn: Expression,
-  sources: ReadonlyArray<Expression>,
-  /** The type of `sources[i]`, read at most once per invocation and only on
-   * demand. An accessor rather than an array so the two cannot drift in
-   * length, and so a source whose `elttype` handler answers is never asked
-   * for its static type at all. */
-  sourceType: (i: number) => BoxedType
+function bareMappingElementTypeD(
+  fn: OperandDescriptor,
+  sources: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView,
+  derive: TypeHandlerContext['derive']
 ): Type | undefined {
-  // The cheap structural gate runs BEFORE the memo: a `Map` whose first
-  // operand is a symbol or an operator name is not a mapping literal at all,
-  // and admitting those would fill the map with entries whose lookup costs
-  // more than the `isFunction` test that rejects them.
-  if (!isFunction(fn, 'Function')) return undefined;
-  const params = fn.ops.slice(1);
+  const literal = fn.structureOf?.();
+  if (literal?.kind !== 'function-literal') return undefined;
+  const params = literal.parameters;
   if (params.length === 0 || params.length !== sources.length) return undefined;
-  const paramIndex = new Map<string, number>();
+  const parameters = new Map<string, number>();
   for (const [k, p] of params.entries()) {
-    if (!isSymbol(p)) return undefined;
-    paramIndex.set(p.symbol, k);
+    // An ANNOTATED parameter is not a bare one: its annotation is the
+    // literal's own contract and the literal's own result type already
+    // reflects it.
+    if (p.annotated !== undefined) return undefined;
+    parameters.set(p.name, k);
   }
-  let body = fn.op1;
-  if (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
-  if (isFunction(body, 'N') && body.nops === 1) body = body.op1;
-  if (!isFunction(body)) return undefined;
+
+  let bodyStructure: OperandStructure | undefined = literal.body;
+  bodyStructure = lookThroughWrapper(bodyStructure, 'Block');
+  if (bodyStructure === undefined) return undefined;
+  bodyStructure = lookThroughWrapper(bodyStructure, 'N');
+  const body = applicationOfStructure(bodyStructure);
+  if (body === undefined) return undefined;
+
   // A binder declares variables when canonicalized; only an operator that
-  // merely computes a value from its operands is rebuilt. (`lazy` is not a
+  // merely computes a value from its operands is derived. (`lazy` is not a
   // reason to decline — `Add` and `Multiply`, the operators every arithmetic
   // broadcast maps, are lazy.)
-  const def = body.operatorDefinition;
-  if (!def || def.scoped) return undefined;
-  const elementTypes = sources.map((x, i) =>
-    mappingSourceElementType(x, () => sourceType(i))
-  );
+  const def = engine.lookupDefinition(body.head)?.operator;
+  if (def === undefined || def.scoped) return undefined;
+
+  const elementTypes = sources.map((x) => mappingSourceElementTypeD(x));
+
   // Every operand is a parameter reference or mentions no parameter at all:
   // a parameter buried inside an operand would keep its `unknown` binding
-  // and the rebuilt application would not be the body's. And every parameter
+  // and the derived application would not be the body's. And every parameter
   // the body DOES reference must have a source element type: a referenced
   // parameter left `unknown` would not merely weaken the answer — an
   // arithmetic operator types an `unknown` co-operand as a scalar, so an
-  // integer source zipped with an unknown-element source would probe as a
+  // integer source zipped with an unknown-element source would derive as a
   // number while the unknown source may be supplying tuples.
   let referenced = false;
-  for (const arg of body.ops) {
-    if (isSymbol(arg) && paramIndex.has(arg.symbol)) {
-      if (elementTypes[paramIndex.get(arg.symbol)!] === undefined)
-        return undefined;
+  const args: OperandDescriptor[] = [];
+  for (const arg of body.children) {
+    const s = arg.structureOf?.();
+    if (s?.kind === 'symbol' && parameters.has(s.name)) {
+      const k = parameters.get(s.name)!;
+      const elementType = elementTypes[k];
+      if (elementType === undefined) return undefined;
       referenced = true;
+      args.push(describeBoundElement(elementType, k));
       continue;
     }
-    if (arg.symbols.some((name) => paramIndex.has(name))) return undefined;
+    if (mentionsParameter(arg, parameters)) return undefined;
+    args.push(arg);
   }
   if (!referenced) return undefined;
 
-  // Everything above is a cheap structural test; the probe below is the
-  // expensive part, and the only part memoized. Its inputs are exactly the
-  // body's operator, which parameter each operand references, and the element
-  // types just computed — so those, not the source expressions, are the key.
-  // Keying on source IDENTITY would be unsound: value-type inference
-  // (`inference{valueType}`) and a mutable-object field store
-  // (`object-store`) both change what a source's element type derives to
-  // while deliberately advancing no cache axis, so an identity-plus-generation
-  // entry would serve a pre-change answer. See `axisMaskOf`.
-  const probeKey = `${body.operator}\u0000${body.ops
-    .map((arg) => (isSymbol(arg) ? (paramIndex.get(arg.symbol) ?? -1) : -1))
-    .join(',')}\u0000${elementTypes.map((t) => typeToDedupKey(t!)).join(',')}`;
-  let entry = BARE_MAPPING_ELEMENT_TYPE.get(fn);
-  if (entry === undefined || entry.engine !== ce || entry.key !== probeKey) {
-    // A different engine or a different set of inputs is a different question:
-    // start a fresh slot rather than letting `cachedValue` serve the old one.
-    // The engine is part of the identity because the cache generation is
-    // per-engine and both counters start at zero, so a generation from one
-    // would spuriously validate against the other.
-    entry = {
-      engine: ce,
-      key: probeKey,
-      slot: { value: null, generation: undefined },
-    };
-    BARE_MAPPING_ELEMENT_TYPE.set(fn, entry);
+  const t = derive(body.head, args);
+  if (t === undefined || t === 'unknown' || t === 'any' || t === 'error')
+    return undefined;
+  return t;
+}
+
+/**
+ * Is this `Set` application a set-builder (a comprehension) rather than a
+ * literal set of its operands?
+ *
+ * Recognized STRUCTURALLY, from the operand descriptors alone: two operands
+ * whose second is a `Condition` application (every `Condition` spelling is a
+ * comprehension — an unrecognized predicate is a comprehension over an
+ * unknown domain), or an `Element` application whose first operand is a
+ * symbol the body mentions. Those are exactly the shapes
+ * {@link setComprehensionShape} matches on the expression side, and the two
+ * must stay in step: the `type` handler answers the bare `set` for a
+ * comprehension while the `elttype` handler derives its element type, so a
+ * shape one recognizes and the other does not would report an element type
+ * for a type that promises none.
+ */
+function isSetComprehensionShape(
+  ops: ReadonlyArray<OperandDescriptor>
+): boolean {
+  if (ops.length !== 2) return false;
+  const spec = ops[1].structureOf?.();
+  if (spec?.kind !== 'application') return false;
+  if (spec.head === 'Condition' && spec.children.length >= 1) return true;
+  if (spec.head !== 'Element' || spec.children.length < 2) return false;
+  const variable = spec.children[0].structureOf?.();
+  if (variable?.kind !== 'symbol') return false;
+  return mentionsParameter(ops[0], new Map([[variable.name, 0]]));
+}
+
+/**
+ * The body, bound variable and domain of a set-builder, read WITHOUT
+ * canonicalizing anything — the shape {@link parseSetComprehension} extracts,
+ * minus the canonicalization it performs so that the extracted pieces can be
+ * enumerated. A type read must not canonicalize, and the sub-expressions of a
+ * canonical `Set` node are canonical already, so nothing is lost here.
+ *
+ * `variable` or `domain` is `undefined` for a comprehension whose domain the
+ * shape does not name (`{x | x > 0}`); the element type is then undecided.
+ */
+function setComprehensionShape(ops: ReadonlyArray<Expression>): {
+  body: Expression;
+  variable: string | undefined;
+  domain: Expression | undefined;
+} | null {
+  if (ops.length !== 2) return null;
+  const [body, spec] = ops;
+
+  // Form A: ["Set", body, ["Element", v, domain, cond?]]
+  if (isFunction(spec, 'Element') && spec.nops >= 2) {
+    if (!isSymbol(spec.op1)) return null;
+    const v = spec.op1.symbol;
+    // The bound variable must occur in the body, else this is a literal set.
+    if (!body.has(v)) return null;
+    return { body, variable: v, domain: spec.op2 };
   }
-  // `cachedValue` keys on the generation observed on ENTRY and carries the
-  // object-dependency duties this memo would otherwise be missing: a field
-  // store advances no engine axis at all, so a generation-only cache is blind
-  // to mutation by construction (ruling B3, `object-deps.ts`). The probe
-  // reaches `elttype` and operator type handlers, either of which may read a
-  // field, so the entry records what it read, revalidates it on a hit, and
-  // merges it into any enclosing collector.
-  return cachedValue(
-    entry.slot,
-    ce._cacheGeneration(),
-    () => probeBareMappingElementType(ce, body, paramIndex, elementTypes),
-    undefined,
-    ce
+
+  if (isFunction(spec, 'Condition') && spec.nops >= 1) {
+    const pred = spec.op1;
+
+    // Form B: ["Set", ["Element", v, domain], ["Condition", pred]]
+    if (isFunction(body, 'Element') && body.nops === 2 && isSymbol(body.op1))
+      return {
+        body: body.op1,
+        variable: body.op1.symbol,
+        domain: body.op2,
+      };
+
+    // Form C: ["Set", body, ["Condition", ["Element", v, domain]]]
+    if (isFunction(pred, 'Element') && pred.nops === 2 && isSymbol(pred.op1)) {
+      const v = pred.op1.symbol;
+      if (body.has(v)) return { body, variable: v, domain: pred.op2 };
+    }
+
+    // Form C': the predicate is a conjunction including exactly one
+    // membership over a variable of the body.
+    if (isFunction(pred, 'And')) {
+      const memberships = pred.ops.filter(
+        (x) =>
+          isFunction(x, 'Element') &&
+          x.nops === 2 &&
+          isSymbol(x.op1) &&
+          body.has(x.op1.symbol)
+      );
+      const membership = memberships.length === 1 ? memberships[0] : undefined;
+      if (
+        membership &&
+        isFunction(membership, 'Element') &&
+        isSymbol(membership.op1)
+      )
+        return {
+          body,
+          variable: membership.op1.symbol,
+          domain: membership.op2,
+        };
+    }
+
+    // An unrecognized `Condition` form is still a comprehension (a
+    // `Condition` is not a value), but over a domain this shape does not
+    // name.
+    return {
+      body,
+      variable: isSymbol(body) ? body.symbol : undefined,
+      domain: undefined,
+    };
+  }
+
+  return null;
+}
+
+/** The type with every INFINITY arm removed — `never` when the type is
+ * nothing but infinities. An interval's endpoint carries its extent, not a
+ * member, so an infinite endpoint must not be read as evidence about the
+ * elements. */
+function withoutInfinity(t: Type): Type {
+  if (isSubtype(t, 'infinity')) return 'never';
+  if (typeof t !== 'string' && t.kind === 'union') {
+    const arms = t.types.filter((arm) => !isSubtype(arm, 'infinity'));
+    if (arms.length === 0) return 'never';
+    if (arms.length !== t.types.length)
+      return reduceType({ kind: 'union', types: arms });
+  }
+  return t;
+}
+
+/**
+ * The element type of a comprehension's domain.
+ *
+ * The domain is read as written. In the `Condition` spellings it sits inside
+ * an operator that HOLDS its operands, so it reaches here unbound and its own
+ * type says nothing — which is why the expression-shape recognizer
+ * canonicalized it. A type read must not, so when reading the domain's type
+ * directly decides nothing, the type is DERIVED from the domain's own
+ * operands instead.
+ */
+function domainElementType(
+  ce: ComputeEngine,
+  domain: Expression
+): Type | undefined {
+  const direct = collectionElementType(domain.type.type);
+  if (direct !== undefined) return direct;
+  if (!isFunction(domain)) return undefined;
+  const derived = deriveApplicationType(
+    ce,
+    domain.operator,
+    domain.ops.map((x) => describeOperand(x))
+  );
+  return derived === undefined ? undefined : collectionElementType(derived);
+}
+
+/**
+ * The element type of a set-builder: what its body produces for one element
+ * of its domain.
+ *
+ * Derived, never enumerated. The domain contributes its element type, the
+ * bound variable stands for one such element, and the body's operator is
+ * asked what it would produce — the same derivation `Map` performs for a
+ * mapping literal. `unknown` whenever a step cannot be decided: an unnamed
+ * or non-collection domain, a body that is neither the bound variable nor a
+ * single application of it, a body operand that BURIES the variable (its
+ * binding would stay unknown and the derived application would not be the
+ * body's), or a scoped head (a binder declares variables and cannot be
+ * derived from operand types).
+ */
+function setComprehensionElementType(
+  ce: ComputeEngine,
+  comp: NonNullable<ReturnType<typeof setComprehensionShape>>
+): Type {
+  const { body, variable, domain } = comp;
+  if (variable === undefined || domain === undefined) return 'unknown';
+  const elt = domainElementType(ce, domain);
+  if (
+    elt === undefined ||
+    elt === 'unknown' ||
+    elt === 'any' ||
+    elt === 'never'
+  )
+    return 'unknown';
+  if (isSymbol(body)) return body.symbol === variable ? elt : 'unknown';
+  if (!isFunction(body)) return body.type.type;
+
+  const def = ce.lookupDefinition(body.operator);
+  const opDef = def && 'operator' in def ? def.operator : undefined;
+  if (opDef === undefined || opDef.scoped) return 'unknown';
+
+  const args: OperandDescriptor[] = [];
+  for (const arg of body.ops) {
+    if (isSymbol(arg) && arg.symbol === variable) {
+      args.push(describeBoundElement(elt, 0));
+      continue;
+    }
+    if (arg.has(variable)) return 'unknown';
+    args.push(describeOperand(arg));
+  }
+  const t = deriveApplicationType(ce, body.operator, args);
+  if (t === undefined || t === 'unknown' || t === 'any' || t === 'error')
+    return 'unknown';
+  return t;
+}
+
+/** Descriptor twin of {@link componentType}. The `elttype` handler the
+ * expression shape called on the operand has already run: its answer is
+ * `facts.elementType`. */
+function componentTypeD(xs: OperandDescriptor, position: number): Type {
+  const elt = xs.facts.elementType;
+  if (elt !== undefined) return elt;
+  const t = xs.type;
+  if (typeof t !== 'string' && t.kind === 'tuple' && position >= 1) {
+    const e = t.elements[position - 1]?.type;
+    if (e) return e;
+  }
+  return collectionElementType(t) ?? 'any';
+}
+
+/** Descriptor twin of {@link componentResultType}. */
+function componentResultTypeD(xs: OperandDescriptor, position: number): Type {
+  const t = xs.type;
+  if (typeof t !== 'string' && t.kind === 'tuple') {
+    const n = t.elements.length;
+    const i = position < 0 ? n + position + 1 : position;
+    if (i >= 1 && i <= n) return t.elements[i - 1].type;
+    return markerType(widen(...t.elements.map((x) => x.type)) as Type);
+  }
+  return withMarker(componentTypeD(xs, position));
+}
+
+/**
+ * The operand type a `handle` accessor's `'types'` handler works from: the
+ * present-value arm of an operand that may be absent.
+ *
+ * An operator declared `missingBehavior: 'handle'` owns its absence
+ * semantics, so the framework does NOT fold the missing-strip into the
+ * descriptor's type the way it does for a `propagate` operator — the handler
+ * performs the strip itself. `First(L[n])` is why: an `At` access types
+ * `missing | T`, and the accessor must derive its result from the `T` arm and
+ * add its own position-preserving marker back.
+ */
+function presentArmOf(d: OperandDescriptor): OperandDescriptor {
+  const t = d.type;
+  if (!typeContainsMissing(t)) return d;
+  const stripped = stripMissingFromType(t);
+  // A BARE `missing` operand strips to `never`, the bottom type, which proves
+  // every claim vacuously. There is no present arm to type, so the operand
+  // keeps its own type and the absence machinery downstream owns the case.
+  if (stripped === 'never') return d;
+  return { type: stripped, facts: d.facts, structureOf: d.structureOf };
+}
+
+/** Descriptor twin of {@link isIndexSpan}.
+ *
+ * The literal reader is the type channel alone: a literal whose exact value
+ * no machine number holds — a bigint past ±2⁵³, an exact rational — carries
+ * only a rounded RANGE, so it answers `undefined` here where the expression
+ * shape could still read the value off the operand. The consequence is that
+ * such an endpoint declines the index-span narrowing and the call reports the
+ * wider `indexed_collection<integer>`, which `range` is a subtype of. */
+function isIndexSpanD(ops: ReadonlyArray<OperandDescriptor>): boolean {
+  if (ops.length === 0 || ops.length > 3) return false;
+
+  const literal = (op: OperandDescriptor | undefined): number | null => {
+    if (op === undefined || typeFact(op.type, 'integer') !== true) return null;
+    const v = descriptorLiteralValue(op);
+    if (v === undefined) return null;
+    return Number.isInteger(v) ? v : null;
+  };
+
+  if (ops.length === 3 && literal(ops[2]) !== 1) return false;
+
+  const lower = ops.length === 1 ? 1 : literal(ops[0]);
+  const upper = ops.length === 1 ? literal(ops[0]) : literal(ops[1]);
+  if (lower === null || upper === null) return false;
+
+  return lower >= 1 && lower <= upper;
+}
+
+/** Descriptor twin of {@link isAtomicJoinOperand}. */
+function isAtomicJoinOperandD(d: OperandDescriptor): boolean {
+  return isSubtype(d.type, 'tuple');
+}
+
+/** Descriptor twin of {@link joinResultType}. */
+function joinResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
+  if (ops.length > 0 && ops.every((op) => isSubtype(op.type, 'string')))
+    return 'string';
+  if (ops.some((op) => isRecordShapedType(op.type))) return 'record';
+  if (ops.some((op) => isSubtype(op.type, DICTIONARY_SHAPE_TYPE)))
+    return 'dictionary';
+  if (ops.some((op) => isSubtype(op.type, SET_SHAPE_TYPE))) return 'set';
+
+  const eltTypes: Type[] = [];
+  for (const op of ops) {
+    if (isAtomicJoinOperandD(op)) {
+      eltTypes.push(op.type);
+      continue;
+    }
+    const elt = collectionElementType(op.type);
+    if (elt === undefined) return 'list';
+    eltTypes.push(elt);
+  }
+  if (eltTypes.length === 0) return 'list';
+  return { kind: 'list', elements: widen(...eltTypes) };
+}
+
+/** Descriptor twin of {@link appendResultType}. */
+function appendResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
+  if (ops.length === 0) return 'list';
+  const source = ops[0].type;
+  if (isRecordShapedType(source)) return 'record';
+  if (isSubtype(source, DICTIONARY_SHAPE_TYPE)) return 'dictionary';
+  if (isSubtype(source, SET_SHAPE_TYPE)) return 'set';
+  const elements = collectionElementType(source);
+  if (elements === undefined) return 'list';
+  if (ops.length === 1) return { kind: 'list', elements };
+  return {
+    kind: 'list',
+    elements: widen(elements, ...ops.slice(1).map((op) => op.type)),
+  };
+}
+
+/** Descriptor twin of {@link sliceResultType}. */
+function sliceResultTypeD(
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  if (ops.length !== 2) return undefined;
+  if (!typeIsNothingOrAdmitsNothing(ops[1].type)) return undefined;
+
+  const valueType = ops[0].type;
+  const base: Type = isSubtype(valueType, 'string')
+    ? 'string'
+    : { kind: 'list', elements: collectionElementType(valueType) ?? 'any' };
+  return reduceType({ kind: 'union', types: [base, 'nothing'] });
+}
+
+/** Descriptor twin of {@link callbackResultType}. The declaration lookup is
+ * `PureEngineView.lookupDefinition`, the same side-effect-free route the
+ * expression shape took. */
+function callbackResultTypeD(
+  op: OperandDescriptor | undefined,
+  engine: PureEngineView
+): Type | undefined {
+  if (op === undefined) return undefined;
+  const direct = functionResult(op.type);
+  if (direct !== undefined) return direct;
+  const s = op.structureOf?.();
+  if (s?.kind !== 'symbol') return undefined;
+  const def = engine.lookupDefinition(s.name);
+  if (def === undefined) return undefined;
+  const declared =
+    def.operator !== undefined
+      ? def.operator.signature.type
+      : def.value?.type?.type;
+  return declared === undefined ? undefined : functionResult(declared);
+}
+
+/** Descriptor twin of {@link foldResultType}. */
+function foldResultTypeD(
+  coll: OperandDescriptor | undefined,
+  op: OperandDescriptor | undefined,
+  init: OperandDescriptor | undefined,
+  engine: PureEngineView
+): Type | undefined {
+  if (op === undefined) return undefined;
+  const s = op.structureOf?.();
+  if (s?.kind === 'symbol' && BUILTIN_FOLD_HEADS.has(s.name)) {
+    const elt = coll ? collectionElementType(coll.type) : undefined;
+    if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
+    if (init === undefined) return elt;
+    const seed = init.type;
+    return isSubtype(seed, 'number') ? widen(elt, seed) : undefined;
+  }
+  return callbackResultTypeD(op, engine);
+}
+
+/**
+ * Is this operand a collection that will be spliced but whose length is NOT
+ * known to be finite? Such an operand makes a `ListFrom`/`SetFrom` result
+ * unshaped, because there is no element type it can be trusted to contribute.
+ *
+ * The expression shape asked `isCollection && !isFiniteCollection`, where
+ * `isCollection` is a CAPABILITY question — can this operand be enumerated
+ * right now — that a valueless collection-TYPED symbol answers `false`. The
+ * descriptor's `collection` fact merges that capability with what the type
+ * proves, so it answers `true` for such a symbol too, and asking it alone
+ * would erase the element type of `ListFrom(xs)` for every declared
+ * `xs: list<integer>`. The two populations are told apart by the structural
+ * view: a valueless symbol is not an enumerable value, while an application
+ * is (its collection handlers are what `isCollection` consulted). A symbol
+ * whose HELD value is a provably infinite collection still qualifies,
+ * through the `finiteCollection === false` arm, which reads that value.
+ */
+function unboundedCollectionOperand(d: OperandDescriptor): boolean {
+  if (d.facts.finiteCollection === false) return true;
+  return (
+    d.facts.collection === true &&
+    d.facts.finiteCollection === undefined &&
+    isApplicationOperand(d)
   );
 }
 
-/**
- * Memo for the probe inside {@link bareMappingElementType}, keyed on the
- * mapping literal and validated by `key` (the probe's actual inputs), by the
- * owning engine, and — inside `cachedValue` — by the `any` generation and the
- * mutable objects the derivation read.
- */
-const BARE_MAPPING_ELEMENT_TYPE = new WeakMap<
-  Expression,
-  {
-    engine: ComputeEngine;
-    key: string;
-    slot: CachedValue<Type | undefined>;
-  }
->();
-
-/**
- * Build and type the probe application: the body's operator applied to one
- * stand-in per referenced parameter, each declared at its source's element
- * type. Returns `undefined` when the probe does not type to something better
- * than the literal's own answer.
- */
-function probeBareMappingElementType(
-  ce: ComputeEngine,
-  body: Expression & FunctionInterface,
-  paramIndex: Map<string, number>,
-  elementTypes: ReadonlyArray<Type | undefined>
-): Type | undefined {
-  // The scratch scope is REGISTERED, not just pushed: `declareSymbolValue`
-  // exempts a declaration from advancing the engine's `any` cache axis only
-  // when its resolved target scope is this one, so a declaration
-  // canonicalization aims at a longer-lived scope keeps its advance. The
-  // exemption is what keeps this derivation from retiring the `_type`/`_sgn`
-  // caches the enclosing walk is filling — which turned a chain of nested
-  // `Map` views into a fresh recursive descent per level. See `axisMaskOf`
-  // (`engine-configuration-lifecycle.ts`).
-  //
-  // The registration is popped BEFORE the scope, and both in a `finally`: a
-  // leaked registration would exempt every later declaration aimed at that
-  // scope object, and a leaked scope would leave the engine one frame deep.
-  ce.pushScope();
-  const scratch = ce.context.lexicalScope;
-  ce._scratchDeclarationScopes.push(scratch);
-  try {
-    // The stand-in for a parameter is a FRESH symbol declared in the scratch
-    // scope, never one named after the parameter: `ce.symbol(name)`
-    // short-circuits to the interned constant for `Pi`, `True`, `All`,
-    // `Nothing`, … before it consults any scope, so a user literal whose
-    // parameter carries one of those names would probe against the constant.
-    // The stand-in's name is never read back — it is spliced into the probe
-    // as an expression — so any name that cannot collide will do.
-    const standIns = new Map<string, Expression>();
-    const args = body.ops.map((arg) => {
-      if (!isSymbol(arg)) return arg;
-      const k = paramIndex.get(arg.symbol);
-      if (k === undefined) return arg;
-      let standIn = standIns.get(arg.symbol);
-      if (standIn === undefined) {
-        const name = `__mappingProbe${k}`;
-        ce.declare(name, elementTypes[k]!);
-        standIn = ce.symbol(name);
-        standIns.set(arg.symbol, standIn);
-      }
-      return standIn;
-    });
-    const probe = ce.function(body.operator, args);
-    if (!probe.isValid) return undefined;
-    const t = probe.type.type;
-    if (t === 'unknown' || t === 'any' || t === 'error') return undefined;
-    return t;
-  } catch {
-    return undefined;
-  } finally {
-    const top = ce._scratchDeclarationScopes.pop();
-    console.assert(top === scratch, 'scratch scope registration unbalanced');
-    ce.popScope();
-  }
-}
-
-/**
- * A `tuple<…>` result type, built STRUCTURALLY from the operand types.
+/** Descriptor twin of {@link isTextAtom}.
  *
- * Never serialize operand types into a `tuple<…>` string and reparse it: a
- * resolver-less `parseType()` cannot read back a user-declared type name
- * (`ce.declareType('point', …)`), and the type handlers have no resolver in
- * hand. Building the node directly is both resolver-proof and cheaper.
- */
-function tupleTypeOf(ops: ReadonlyArray<Expression>): Type {
-  return { kind: 'tuple', elements: ops.map((op) => ({ type: op.type.type })) };
+ * The expression shape has one channel more: a symbol whose recorded type
+ * does not say `string` but whose held VALUE is one (an inference-pending
+ * lambda parameter bound to a string at call time). A descriptor cannot
+ * dereference a symbol, so such an operand answers `false` here and the
+ * consumer takes its wider branch. */
+function isTextAtomD(d: OperandDescriptor): boolean {
+  return d.structureOf?.()?.kind === 'string' || isSubtype(d.type, 'string');
+}
+
+/** Descriptor twin of {@link isPossiblyCollectionTyped}. */
+function isPossiblyCollectionTypedD(d: OperandDescriptor): boolean {
+  const t = resolveTypeAlias(d.type);
+  if (t === 'unknown' || t === 'any' || t === 'value')
+    return isApplicationOperand(d);
+  if (typeof t === 'string') return false;
+  if (t.kind === 'broadcastable') return true;
+  if (t.kind !== 'union') return false;
+  return t.types.some((branch) => {
+    const b = resolveTypeAlias(branch);
+    return typeof b !== 'string' && b.kind === 'broadcastable';
+  });
+}
+
+/** Descriptor twin of {@link isPointLike}, for an operand that stands for one
+ * ELEMENT of a collection. */
+function isPointLikeD(d: OperandDescriptor): boolean {
+  const t = d.type;
+  if (
+    t === 'tuple' ||
+    (typeof t !== 'string' && t.kind === 'tuple') ||
+    d.structureOf?.()?.kind === 'tuple'
+  )
+    return true;
+  if (d.facts.finiteCollection === true && d.facts.indexed === true) {
+    const elt = collectionElementType(t);
+    if (elt !== undefined && isSubtype(elt, 'number')) return true;
+  }
+  return false;
+}
+
+/** Descriptor twin of {@link hasPointElementType}. */
+function hasPointElementTypeD(d: OperandDescriptor): boolean {
+  const elt = d.facts.elementType ?? collectionElementType(d.type);
+  if (elt === undefined) return false;
+  return elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple');
 }
 
 /**
- * The ELEMENT type of a collection-typed operand — what one `at()` of it
- * yields — or `unknown` when the type names no element (a bare `list`, an
- * unresolvable type reference). A type REFERENCE (a user alias for a list) is
- * unfolded first, since `collectionElementType` reads the structure only.
+ * Descriptor twin of {@link collectionBroadcastsPoints}.
+ *
+ * The expression shape peeked the FIRST element through `each()`. A
+ * descriptor cannot enumerate, so the peek is taken structurally where the
+ * operand is a literal `List` — the one shape the peek was there to rescue,
+ * a list literal whose type is wider than its content — and read off the
+ * element type otherwise. The element-type reading covers the two point
+ * spellings the peek recognized: a collection of tuples, and the
+ * list-of-lists spelling whose rows are numeric coordinate vectors.
  */
-function elementTypeOf(op: Expression): Type {
-  const t = op.type.type;
-  return collectionElementType(resolveTypeReference(t) ?? t) ?? 'unknown';
+function collectionBroadcastsPointsD(
+  xs: OperandDescriptor
+): boolean | undefined {
+  if (xs.facts.finiteCollection !== true) return undefined;
+  const s = xs.structureOf?.();
+  if (s?.kind === 'list-literal' && s.elements.length > 0)
+    return isPointLikeD(s.elements[0]);
+  if (hasPointElementTypeD(xs)) return true;
+  const elt = xs.facts.elementType ?? collectionElementType(xs.type);
+  if (elt !== undefined && isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE)) {
+    const inner = collectionElementType(elt);
+    if (inner !== undefined && isSubtype(inner, 'number')) return true;
+  }
+  return false;
+}
+
+/** Descriptor twin of {@link pointComponentType}. */
+function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
+  const t = xs.type;
+  if (typeof t !== 'string' && t.kind === 'tuple') {
+    const ct = componentTypeD(xs, position);
+    if (ct === 'unknown') {
+      // Fold only inference-pending SYMBOL/literal components; a
+      // possibly-collection APPLICATION component keeps its honest type (see
+      // the expression-shape twin for why).
+      const s = xs.structureOf?.();
+      if (s?.kind === 'tuple' && s.elements.length > 0) {
+        const comp = s.elements[position - 1];
+        if (comp !== undefined && isPossiblyCollectionTypedD(comp)) return ct;
+      }
+      return 'number';
+    }
+    return withMarker(ct);
+  }
+  if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) {
+    if (collectionBroadcastsPointsD(xs) === false)
+      return componentResultTypeD(xs, position);
+    if (
+      typeof t !== 'string' &&
+      t.kind === 'list' &&
+      (t.dimensions?.length ?? 0) > 1
+    )
+      return {
+        kind: 'list',
+        elements: 'number',
+        dimensions: [t.dimensions![0]],
+      };
+    return mapResultType(t, 'number');
+  }
+  if (collectionBroadcastsPointsD(xs) === true)
+    return { kind: 'list', elements: 'number' };
+  return componentResultTypeD(xs, position);
+}
+
+/**
+ * The cell type a NUMBER-LITERAL operand contributes to a literal-`List`
+ * shape claim.
+ *
+ * The expression shape reads the literal's type inside a broadcast-cell
+ * window, where a number literal reports its bare TIER instead of the
+ * value-carrying type a handler normally sees. A descriptor always carries
+ * the value-carrying type, so the tier is recovered here: every infinity
+ * reduces to `infinity` and everything else to the tier
+ * `stripNumericRanges` names.
+ */
+function numberLiteralCellType(t: Type): Type {
+  if (isSubtype(t, 'infinity')) return 'infinity';
+  return stripNumericRanges(t);
+}
+
+/** Descriptor twin of `classifyCell` (`boxed-expression/shaped-list-type.ts`). */
+function classifyCellD(op: OperandDescriptor): Type | null {
+  const s = op.structureOf?.();
+  const t = s?.kind === 'number' ? numberLiteralCellType(op.type) : op.type;
+
+  if (t === 'unknown' || t === 'any') {
+    if (t === 'unknown' && s?.kind === 'symbol') return 'number';
+    return null;
+  }
+  if (isAtomicValueType(t)) return t;
+  return null;
+}
+
+/** One level's analysis: its dimensions and the DISTINCT cell types it
+ * holds. Cells are deduplicated as they are collected, so a shared sub-list
+ * contributes its types once and `widen` never sees more spellings than the
+ * tower has distinct leaves. */
+type LevelShape = { dims: number[]; cells: Type[] };
+
+/**
+ * Descriptor twin of `analyzeLevel` (`boxed-expression/shaped-list-type.ts`).
+ *
+ * `memo` holds the analysis of every nested list already visited, by
+ * descriptor. A structure walk describes a shared node ONCE (the descriptor
+ * memo of `describe()`, `boxed-expression/operand-descriptor.ts`), so the
+ * memo makes this walk linear in the number of distinct nodes: a 26-level
+ * `List(t, t)` tower has 27 nodes and 2^26 paths, and the path-wise walk
+ * this replaces overflowed the stack spreading its cells into `widen`.
+ */
+function analyzeLevelD(
+  ops: ReadonlyArray<OperandDescriptor>,
+  memo: Map<OperandDescriptor, LevelShape | null>
+): LevelShape | null {
+  if (ops.length === 0) return null;
+
+  const childShapes: LevelShape[] = [];
+  const cellTypes: Type[] = [];
+
+  for (const op of ops) {
+    const structure = op.structureOf?.();
+    if (structure?.kind === 'list-literal') {
+      let sub = memo.get(op);
+      if (sub === undefined) {
+        sub = analyzeLevelD(structure.elements, memo);
+        memo.set(op, sub);
+      }
+      if (sub === null) return null;
+      childShapes.push(sub);
+    } else {
+      const cell = classifyCellD(op);
+      if (cell === null) return null;
+      cellTypes.push(cell);
+    }
+  }
+
+  if (childShapes.length > 0 && cellTypes.length > 0) return null;
+  if (childShapes.length === 0) return { dims: [ops.length], cells: cellTypes };
+
+  const firstDims = childShapes[0].dims;
+  for (let i = 1; i < childShapes.length; i++) {
+    const dims = childShapes[i].dims;
+    if (dims.length !== firstDims.length) return null;
+    for (let k = 0; k < dims.length; k++)
+      if (dims[k] !== firstDims[k]) return null;
+  }
+
+  // Distinct cell types only: a shared child's cells are already collected
+  // once, and two children with the same tier need one spelling.
+  const cells: Type[] = [];
+  const seen = new Set<Type>();
+  for (const cs of childShapes)
+    for (const c of cs.cells)
+      if (!seen.has(c)) {
+        seen.add(c);
+        cells.push(c);
+      }
+
+  return { dims: [ops.length, ...firstDims], cells };
+}
+
+/** Descriptor twin of `shapedListType`
+ * (`boxed-expression/shaped-list-type.ts`), whose contract — when a literal
+ * `List` may claim a dimensioned shape, and what its cell type is — that
+ * file's doc comment states in full. */
+function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
+  const analysis = analyzeLevelD(ops, new Map());
+  if (analysis === null) return null;
+
+  const { dims, cells } = analysis;
+  if (cells.length === 0) return null;
+
+  const widened = widen(...cells);
+
+  if (
+    typeof widened !== 'string' &&
+    widened.kind === 'union' &&
+    !isSubtype(widened, 'number')
+  )
+    return { kind: 'list', elements: widened };
+
+  return { kind: 'list', elements: widened as Type, dimensions: dims };
 }
 
 /** How many actual elements `absenceMarker()` probes when a collection's
@@ -2298,102 +2875,6 @@ function pointArityError(
   );
 }
 
-// Does a coordinate accessor BROADCAST over `xs` (its elements are points), or
-// element-INDEX it like First/Second/Third? The type-level counterpart of the
-// decision `pointComponentAt` makes at run time, peeked exactly the same way —
-// the FIRST element only, so a large lazy collection is never materialized —
-// and falling back to the declared element type for an empty collection, as it
-// does. `undefined` when the operand is not a finite collection, where the
-// decision cannot be made without evaluating it.
-function collectionBroadcastsPoints(xs: Expression): boolean | undefined {
-  if (xs.isFiniteCollection !== true) return undefined;
-  for (const e of xs.each()) return isPointLike(e);
-  return hasPointElementType(xs);
-}
-
-// Result type of a point-component accessor: a single point yields the
-// coordinate type; a collection of points broadcasts to a collection of
-// coordinates.
-function pointComponentType(
-  xs: Expression,
-  position: number,
-  typeOverride?: Type
-): Type {
-  const t = typeOverride ?? xs.type.type;
-  if (typeof t !== 'string' && t.kind === 'tuple') {
-    const ct = componentType(xs, position, typeOverride);
-    // An INFERENCE-PENDING component (`(x, y)` whose symbols get no numeric
-    // inference in tuple position types `unknown`) is a coordinate-to-be: point
-    // accessors read NUMERIC tuples, and a tuple component is atomic — never a
-    // broadcast collection. Fold `unknown` to `number` (mirroring the
-    // list-of-points fallback below) so downstream arithmetic doesn't type
-    // `broadcastable<…>` and JS-compile plot bodies through `_SYS.bcast`. An
-    // explicitly-declared `any` component is left as `any`: folding it would
-    // over-claim `number` for a `tuple<any, any>` that may hold non-numeric
-    // values.
-    if (ct === 'unknown') {
-      // Fold only inference-pending SYMBOL/literal components. When `xs` is a
-      // literal tuple expression whose component at `position` is a
-      // POSSIBLY-collection APPLICATION (`Tuple(h(1), y)` with
-      // `h: (number) -> unknown` — `h(1)` may return a list at run time), keep
-      // its honest type rather than over-claiming a scalar `number`. A symbol
-      // component (`Tuple(x, y)`) is not possibly-collection-typed, so it still
-      // folds. When `xs` is a tuple-TYPED symbol (no accessible components — the
-      // plot-body case), we can't inspect the operand, so keep the fold.
-      if (isFunction(xs) && hasAccessibleComponents(xs)) {
-        const comp = xs.ops?.[position - 1];
-        if (comp !== undefined && isPossiblyCollectionTyped(comp)) return ct;
-      }
-      return 'number';
-    }
-    // A point access is `slotType | marker(slotType)` (§3.C): a numeric
-    // coordinate gains a `| nan` arm, an out-of-band or non-numeric slot a
-    // `| missing` one.
-    return withMarker(ct);
-  }
-  // A list of points broadcasts. The coordinate type is not reliably
-  // recoverable (a literal list of tuples is often mis-typed as `vector<n>`
-  // with numeric elements), so use `number` — honest for the geometric point
-  // case, and it keeps the result an (honest) collection type, not a scalar.
-  if (
-    typeOverride !== undefined
-      ? isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
-      : xs.type.matches('indexed_collection<any>')
-  ) {
-    // Only a collection whose elements are POINTS broadcasts. One whose
-    // elements are scalars element-indexes like First/Second/Third, so the
-    // result is a single COMPONENT — the flat point spelling `PointX([3, 4])`
-    // included, which `pointComponentAt` answers with the scalar `3`. Reading
-    // the decision off the static type alone claimed the broadcast arm for
-    // every indexed collection, typing that `vector<2>`.
-    if (collectionBroadcastsPoints(xs) === false)
-      return componentResultType(xs, position, typeOverride);
-    // A rank ≥ 2 numeric tensor is a list of coordinate ROWS: projecting a
-    // coordinate drops the inner dimension (`matrix<3x2>` → `vector<3>`).
-    // `mapResultType` alone keeps every dimension, so it reported the SOURCE
-    // shape for the list-of-lists spelling.
-    if (
-      typeof t !== 'string' &&
-      t.kind === 'list' &&
-      (t.dimensions?.length ?? 0) > 1
-    )
-      return {
-        kind: 'list',
-        elements: 'number',
-        dimensions: [t.dimensions![0]],
-      };
-    return mapResultType(t, 'number');
-  }
-  // A NON-INDEXED collection of points broadcasts too — `pointComponentAt`
-  // peeks it through `each()` for exactly that reason (a Set of points was
-  // once misread as empty). It answers an eager `List` of coordinates, so the
-  // result is a list regardless of the source's own collection kind.
-  if (collectionBroadcastsPoints(xs) === true)
-    return { kind: 'list', elements: 'number' };
-  // Non-point-collection fallback follows the First/… row.
-  return componentResultType(xs, position, typeOverride);
-}
-
 // Project a coordinate straight out of the LAZY point-list transpose form —
 // `Map((p1, …, pk) ↦ Tuple(…), s1, …, sk)` as built by `lazyBroadcastMap` for
 // a large `PointList` — returning the source collection the projected slot
@@ -2637,10 +3118,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
 
     signature: '(any*) -> list',
-    type: (ops, { engine: _ce }) =>
-      shapedListType(ops) ?? {
+    type: (ops) =>
+      shapedListTypeD(ops) ?? {
         kind: 'list',
-        elements: BoxedType.widen(...ops.map((op) => op.type)).type,
+        elements: widen(...ops.map((op) => op.type)),
       },
     canonical: canonicalList,
     lazy: true,
@@ -2692,13 +3173,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
 
     signature: '(any*) -> set',
-    type: (ops, { engine: _ce }) => {
+    type: (ops) => {
       // A comprehension's element type is not the type of its syntactic
-      // operands (body + indexing set)
-      if (parseSetComprehension(ops) !== null) return parseType('set');
+      // operands (body + indexing set); the `elttype` handler below derives
+      // it, and the declared type stays the bare `set`.
+      if (isSetComprehensionShape(ops)) return parseType('set');
       return {
         kind: 'set',
-        elements: BoxedType.widen(...ops.map((op) => op.type)).type,
+        elements: widen(...ops.map((op) => op.type)),
       };
     },
 
@@ -2802,13 +3284,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (comp !== null) return setComprehensionContains(comp, target);
         return literalSetContains(expr.ops, target);
       },
+      // Derived from the domain's element type, never enumerated: this
+      // handler is reached from `describe()` for every `Set` operand a
+      // `'types'`-shape type handler receives, so it must not evaluate
+      // anything. The previous handler substituted the bound variable over
+      // the enumerated domain and widened the results, which decided nothing
+      // for a domain that is infinite or has no value yet.
       elttype: (expr) => {
         if (!isFunction(expr)) return SET_BASE_HANDLERS.elttype!(expr);
-        const comp = parseSetComprehension(expr.ops);
+        const comp = setComprehensionShape(expr.ops);
         if (comp === null) return SET_BASE_HANDLERS.elttype!(expr);
-        const elements = enumerateSetComprehension(comp);
-        if (elements === undefined || elements.length === 0) return 'unknown';
-        return widen(...elements.map((op) => op.type.type));
+        return setComprehensionElementType(expr.engine, comp);
       },
     },
   } as OperatorDefinition,
@@ -2839,12 +3325,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // infinite, and nothing is lost by it — the two spellings report the same
     // type once the widening has run, so there is no open question here about
     // exempting this result from that widening.
-    type: ([xs]) =>
-      xs !== undefined &&
-      isFunction(xs, 'Range') &&
-      xs.ops.some((op) => op.type.matches('infinity'))
+    type: ([xs]) => {
+      const source = xs?.structureOf?.();
+      return source?.kind === 'application' &&
+        source.head === 'Range' &&
+        source.children.some((op) => isSubtype(op.type, 'infinity'))
         ? COUNT_OR_INFINITE
-        : 'integer',
+        : 'integer';
+    },
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a length (see `peekCountPreserving`).
     canonical: (ops, { engine: ce }) => {
@@ -2924,7 +3412,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(any*) -> tuple',
-    type: (ops) => tupleTypeOf(ops),
+    type: (ops) => tupleTypeOfD(ops),
     // Run the framework's default flatten step, which a custom `canonical`
     // handler would otherwise short-circuit. It does two things here, and
     // both change the ARITY (and therefore the type) of the tuple:
@@ -3001,8 +3489,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) => {
       // A list component (for typing): an indexed-collection type that is not
       // itself a tuple. Mirrors the `evaluate` predicate, but type-based.
-      const isListType = (op: Expression): boolean => {
-        const t = op.type.type;
+      const isListType = (op: OperandDescriptor): boolean => {
+        const t = op.type;
         const isTupleKind = typeof t !== 'string' && t.kind === 'tuple';
         // A string is an indexed collection of characters, but it is ATOMIC
         // here for the same reason a tuple is: `PointList("ab", …)` must treat
@@ -3010,7 +3498,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // The `evaluate` predicate (`isFiniteBroadcastParticipant`) excludes
         // strings too, so type and value stay in agreement.
         if (t === 'string') return false;
-        return !isTupleKind && op.type.matches('indexed_collection<any>');
+        return !isTupleKind && isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE);
       };
       if (ops.some(isListType)) {
         // Every point has one coordinate per component, so the point ARITY is
@@ -3021,14 +3509,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // of 2-D points from a list of 3-D ones, and `PointList(x, y) / n`
         // (Tycho item 165) recovered an arity the constructor already knew.
         const coordinates = ops.map((op) => ({
-          type: isListType(op) ? elementTypeOf(op) : op.type.type,
+          type: isListType(op) ? elementTypeOfD(op) : op.type,
         }));
         return {
           kind: 'list',
           elements: { kind: 'tuple', elements: coordinates },
         };
       }
-      return tupleTypeOf(ops);
+      return tupleTypeOfD(ops);
     },
     evaluate: (ops, { engine: ce, numericApproximation }) => {
       const isListComponent = (op: Expression): boolean =>
@@ -3371,7 +3859,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(dictionary<any>) -> list',
     type: ([dict]) => {
-      const t = dict.type.type;
+      const t = dict.type;
       if (typeof t === 'object' && t.kind === 'dictionary')
         return { kind: 'list', elements: t.values };
       if (typeof t === 'object' && t.kind === 'record')
@@ -3442,14 +3930,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `isIndexSpan` and `docs/STRING_ROADMAP.md` ("The `range` type").
       // This is a NARROWING of the two results below, never a widening:
       // `range <: indexed_collection<integer>`.
-      if (isIndexSpan(ops)) return 'range';
+      if (isIndexSpanD(ops)) return 'range';
       // An infinite endpoint marks unbounded EXTENT; it does not name a last
       // element, so it says nothing about the elements and is dropped before
       // the tests below. Every element of `Range(1, +oo)` is a finite
       // integer, and the type must not leak the endpoint.
+      // A signed infinity is recognized by its TYPE (`+oo`, `-oo`, or the
+      // signed pair), with the sign fact as the fallback for a value held
+      // behind a wider declaration (`w: number := +oo`). The unsigned
+      // non-finite values (`NaN`, `~oo`) are not endpoints of an extent and
+      // stay in, as they did when this read the operand's real part.
       const elementOps = ops.filter((op) => {
-        const r = op.re;
-        return r !== Infinity && r !== -Infinity;
+        if (isSubtype(op.type, SIGNED_INFINITY_TYPE)) return false;
+        const { finite, sgn } = op.facts;
+        return !(
+          finite === false &&
+          (sgn === 'positive' || sgn === 'negative')
+        );
       });
       // The remaining operands decide the element type: an element is
       // `lower + k·step`, so it is an integer iff every one of them is
@@ -3457,9 +3954,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // integer), and a finite real iff every one of them is real. An operand
       // that could be complex or is not yet known — a symbolic step declared
       // `number` — keeps the wide `number`.
-      if (elementOps.every((op) => op.isInteger))
+      if (elementOps.every((op) => typeFact(op.type, 'integer') === true))
         return parseType('indexed_collection<integer>');
-      if (elementOps.every((op) => op.type.matches('real')))
+      if (elementOps.every((op) => isSubtype(op.type, 'real')))
         return parseType('indexed_collection<real>');
       return parseType('indexed_collection<number>');
     },
@@ -3968,14 +4465,34 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return undefined;
       },
 
+      // Read from the endpoints' TYPES, never from their values: this handler
+      // is reached from `describe()` for every `Interval` operand a
+      // `'types'`-shape type handler receives, and numericizing an endpoint
+      // to learn its value is exactly what a type derivation must not do.
       elttype: (expr) => {
-        const i = interval(expr);
-        if (!i) return 'never';
+        if (!isFunction(expr)) return 'never';
+        for (const op of expr.ops) {
+          // The endpoint may be wrapped in an `Open`/`Closed` marker.
+          const endpoint =
+            isFunction(op, 'Open') || isFunction(op, 'Closed') ? op.op1 : op;
+          // An INFINITE endpoint marks unbounded extent and is never itself a
+          // member, so it says nothing about the elements and is dropped
+          // before the test. An endpoint that is nothing BUT an infinity
+          // leaves the interval real-valued: `Interval(0, +oo)` reports the
+          // same elements as `Interval(0, 1)`.
+          const t = withoutInfinity(endpoint.type.type);
+          if (t === 'never') continue;
+          // Only a PROVABLY non-real endpoint empties the interval — a
+          // complex or boolean bound bounds nothing on the real line. An
+          // endpoint whose type merely fails to prove realness (a symbol
+          // declared `number`, an `unknown` operand) leaves the interval
+          // real-valued, which is what the canonical form's `number`
+          // parameter admits.
+          if (typeFact(t, 'real') === false) return 'never';
+        }
         // Every member of an interval is a finite real, whatever the
-        // endpoints are: an infinite endpoint marks unbounded extent and is
-        // never itself a member. The element type therefore does NOT widen
-        // with the endpoints — `Interval(0, +oo)` reports the same elements
-        // as `Interval(0, 1)`.
+        // endpoints are. The element type therefore does NOT widen with the
+        // endpoints.
         return 'real';
       },
     },
@@ -4191,8 +4708,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (ops.length !== 1) return 'integer';
       const xs = ops[0];
       if (xs !== undefined) {
-        if (isFunction(xs, 'List') || isFunction(xs, 'Set')) return 'integer';
-        const t = xs.type.type;
+        const source = xs.structureOf?.();
+        // A literal `List` carries its own structure kind; a literal `Set` is
+        // an ordinary application.
+        if (
+          source?.kind === 'list-literal' ||
+          (source?.kind === 'application' && source.head === 'Set')
+        )
+          return 'integer';
+        const t = xs.type;
         if (typeof t !== 'string' && t.kind === 'list' && t.dimensions)
           return 'integer';
       }
@@ -4438,32 +4962,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // (If the input collection is indexed, the output collection is indexed.)
     // For the multi-collection (zipWith) form the result is always an indexed
     // collection (like `Zip`) of the lambda's result type.
-    type: (ops, { engine }) => {
-      // Each source's type is read at most ONCE per invocation, on demand,
-      // and every consumer below goes through this accessor. Reading twice is
-      // not merely wasteful: `bareMappingElementType` declares stand-ins in a
-      // scratch scope, and while those no longer advance the engine's `any`
-      // cache axis (see `axisMaskOf`), anything else the probe's
-      // canonicalization legitimately advances would leave a second read
-      // unable to hit the source's own `_type` memo — and for a source that
-      // is itself a `Map`, that recomputation recurses. Measured before the
-      // two-read path was removed: 913 → 15073 handler invocations for a
-      // four-deep lazy view at depth 0 → 4. Lazy rather than eager so the
-      // `ops[1] === undefined` guard below still runs first, and so a source
-      // whose `elttype` handler answers is never asked for its static type.
-      const sourceTypeCache: (BoxedType | undefined)[] = [];
-      const boxedSourceType = (i: number): BoxedType =>
-        (sourceTypeCache[i] ??= ops[i + 1].type);
+    type: (ops, { engine, derive }) => {
       // Source type for shape propagation. When the source's STATIC type is
       // indeterminate (a declared-`unknown` symbol holding a collection
       // value — the lazy-broadcast `Map(…, L)` shape), fall back to its
       // value-aware indexed-ness so the Map types `indexed_collection<T>`
       // rather than shedding indexed-ness to `collection<T>`.
       const sourceType = (i: number): Type => {
-        const t = boxedSourceType(i).type;
+        const t = ops[i + 1].type;
         if (
           (t === 'unknown' || t === 'any' || t === 'value') &&
-          ops[i + 1].isIndexedCollection
+          ops[i + 1].facts.indexed === true
         )
           return 'indexed_collection';
         return t;
@@ -4473,8 +4982,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // it), but the type can be asked of the raw form.
         if (ops[1] === undefined) return 'indexed_collection';
         const resultType =
-          bareMappingElementType(engine, ops[0], [ops[1]], boxedSourceType) ??
-          functionResult(ops[0].type.type);
+          bareMappingElementTypeD(ops[0], [ops[1]], engine, derive) ??
+          functionResult(ops[0].type);
         if (!resultType || resultType === 'unknown' || resultType === 'any') {
           // Unknown element type: still preserve value-aware indexed-ness
           // (the `.N()` route wraps the body in `N`, whose lazy result types
@@ -4494,15 +5003,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // echoing `string` would promise a value the runtime never produces.
           // The element type is the unknown one this branch is handling.
           if (s === 'string') return 'list';
-          if (s === 'indexed_collection' && boxedSourceType(0).type !== s)
-            return s;
-          return boxedSourceType(0);
+          if (s === 'indexed_collection' && ops[1].type !== s) return s;
+          // The source type is echoed even when it is not a collection type
+          // at all. That is deliberate, and it is what the expressions shape
+          // did: wrapping a non-collection source in `collection<unknown>`
+          // here — which is what `mapResultType` would do with a KNOWN
+          // element type — makes an implicit map over a scalar element
+          // report a collection of collections, and the equivalence between
+          // `Pipe` and the explicit `Map` for the same stage and topic (the
+          // nested-stage row of `pipe-type-read-purity.test.ts`) is defined
+          // by this echo. A source that is provably not a collection is only
+          // reachable here through `derive`; a real `Map` application over
+          // one is refused at canonicalization.
+          return ops[1].type;
         }
         return mapResultType(sourceType(0), resultType);
       }
       const resultType =
-        bareMappingElementType(engine, ops[0], ops.slice(1), boxedSourceType) ??
-        functionResult(ops[0].type.type);
+        bareMappingElementTypeD(ops[0], ops.slice(1), engine, derive) ??
+        functionResult(ops[0].type);
       return mapResultType(
         'indexed_collection',
         !resultType || resultType === 'unknown' || resultType === 'any'
@@ -4745,9 +5264,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // reaches `string` through one arm — for those the runtime may well
       // produce a list, so claiming `string` would be a promise the
       // evaluation cannot keep.
-      if (t.matches('string')) return t;
-      if (!t.matches('indexed_collection<any>')) return t;
-      return { kind: 'list', elements: collectionElementType(t.type) ?? 'any' };
+      if (isSubtype(t, 'string')) return t;
+      if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return t;
+      return { kind: 'list', elements: collectionElementType(t) ?? 'any' };
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -5024,8 +5543,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('Reduce', [collection, fn]);
     },
 
-    type: (ops) =>
-      parseType(foldResultType(ops[0], ops[1], ops[2]) ?? 'unknown'),
+    type: (ops, { engine }) =>
+      parseType(foldResultTypeD(ops[0], ops[1], ops[2], engine) ?? 'unknown'),
 
     evaluate: (
       [collection, fn, initial],
@@ -5239,11 +5758,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
     // Same shape/indexed-ness as the source, but elements are the fold's
     // result type (mirrors Map).
-    type: (ops) => {
-      const resultType = foldResultType(ops[0], ops[1], ops[2]);
+    type: (ops, { engine }) => {
+      const resultType = foldResultTypeD(ops[0], ops[1], ops[2], engine);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
         return ops[0].type;
-      return mapResultType(ops[0].type.type, resultType);
+      return mapResultType(ops[0].type, resultType);
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -5333,7 +5852,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     signature: '(collection<any>) -> indexed_collection',
     type: (ops) => {
-      const elt = collectionElementType(ops[0].type.type) ?? 'number';
+      const elt = collectionElementType(ops[0].type) ?? 'number';
       // Each element is a SUBTRACTION of two source elements, so echoing the
       // source's element type is only honest when subtraction is closed over
       // it. For a numeric source it is. For a non-numeric one it is not:
@@ -5665,8 +6184,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // tolerance, and the scalar-result singleton lift is the `type:` handler's
     // calculation below (§7 rule 2).
     signature: '(collection<T>, mapping: (T) any -> U) -> list where T, U',
-    type: (ops) => {
-      const resultType = callbackResultType(ops[1]);
+    type: (ops, { engine }) => {
+      const resultType = callbackResultTypeD(ops[1], engine);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
         return parseType('list');
       // A `string` callback result is NOT peeled: the runtime splice keeps a
@@ -5853,7 +6372,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       return ce._fn('Join', args);
     },
-    type: joinResultType,
+    type: joinResultTypeD,
     collection: {
       isEnumerable: enumerableFromAllSources,
       isLazy: (_expr) => true,
@@ -6135,7 +6654,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       return ce._fn('Append', args);
     },
-    type: appendResultType,
+    type: appendResultTypeD,
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -6302,15 +6821,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // A QUALIFIED protocol member (P14): `Comparable.compare` is a function
       // VALUE, whose type is the requirement's signature (with `Self` left
       // opaque — the receiver is only known at the call site).
-      const protocol = protocolOfSymbol(ce, ops[0]);
+      //
+      // A symbol that HOLDS a value is that value, not a protocol name, so
+      // the registry lookup is gated on the symbol being valueless — the
+      // definition read that `protocolOfSymbol` makes on the operand
+      // expression.
+      const base = ops[0]?.structureOf?.();
+      const protocol =
+        base?.kind === 'symbol'
+          ? protocolOfName(
+              ce,
+              base.name,
+              ce.lookupDefinition(base.name)?.value?.value !== undefined
+            )
+          : undefined;
       if (protocol !== undefined) {
-        const name = isString(ops[1]) ? ops[1].string : undefined;
+        const name = ops[1] === undefined ? undefined : stringLiteralOf(ops[1]);
         if (name === undefined) return 'unknown';
         return protocolMemberSignature(ce, protocol, name) ?? 'error';
       }
-      const rt = fieldBearingType(ops[0].type.type);
+      const rt = fieldBearingType(ops[0].type);
       if (rt === undefined) return 'unknown';
-      const name = isString(ops[1]) ? ops[1].string : undefined;
+      const name = ops[1] === undefined ? undefined : stringLiteralOf(ops[1]);
       // The ORDINARY field routes. `undefined` means none of them answered —
       // a settled non-field-bearing operand, or a name the record/named-tuple
       // body does not carry — which is where a protocol PROPERTY gets its turn
@@ -6338,7 +6870,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       })();
       if (ordinary !== undefined) return ordinary;
       if (name !== undefined) {
-        const property = protocolPropertyType(ce, ops[0], name);
+        const property = protocolPropertyTypeOfReceiver(ce, ops[0].type, name);
         if (property !== undefined) return property;
       }
       return 'error';
@@ -6608,14 +7140,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // type it does. Without this, a STRUCTURAL `At(Integers, √2)` — which
       // never reaches `canonical` — fell through to the indexing analysis
       // below and claimed `number` instead of the adjunction's `set<…>`.
-      if (ops.length >= 2 && isRingConstant(ops[0])) return adjoinType(ops);
+      //
+      // `isRingConstant`, which the `canonical` handler uses, matches on the
+      // BINDING: it requires the operand's value definition to be the
+      // system-scope one, so that a scope shadowing `Integers` with a genuine
+      // user collection keeps the ordinary indexing reading. The symbol
+      // structure node carries the same test as its `system` flag.
+      const base = ops[0]?.structureOf?.();
+      if (
+        ops.length >= 2 &&
+        base?.kind === 'symbol' &&
+        RING_CONSTANTS.has(base.name) &&
+        base.system === true
+      )
+        return adjoinTypeD(ops);
 
       // The RAW type of the element(s) a single index selects (no absence
       // marker). Used as the inner element type of a gather and as the peeled
       // type of a chained step.
       const elementType = (): Type => {
         const xs = ops[0];
-        const t = xs.type.type;
+        const t = xs.type;
         // A dictionary/record is a keyed collection whose `At` returns the
         // VALUE, not the iteration pair `tuple<string, T>` that
         // `collectionElementType` reports (that is correct for iteration, but
@@ -6627,9 +7172,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         } else if (t.kind === 'record') {
           // A literal string index selecting a known field yields that field's
           // type; otherwise widen across all field value types.
-          const key = ops[1];
-          if (key && isString(key)) {
-            const fieldType = t.elements[key.string];
+          const key =
+            ops[1] === undefined ? undefined : stringLiteralOf(ops[1]);
+          if (key !== undefined) {
+            const fieldType = t.elements[key];
             if (fieldType) return fieldType;
           }
           return widen(...Object.values(t.elements)) as Type;
@@ -6638,22 +7184,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // negatives count from the end); otherwise `collectionElementType`
           // widens across all slot types.
           const key = ops[1];
-          if (ops.length === 2 && key?.isInteger === true) {
+          if (
+            ops.length === 2 &&
+            key !== undefined &&
+            typeFact(key.type, 'integer') === true
+          ) {
             const n = t.elements.length;
-            // The literal's handler-visible value first: the channel that
-            // survives when the value reads are unavailable.
-            const raw = operandLiteralValue(key) ?? key.re;
+            // The literal's handler-visible value. An exact integer no machine
+            // number holds — a bigint past ±2⁵³ — carries only a rounded
+            // range, so it selects no slot and the access widens across them.
+            const raw = descriptorLiteralValue(key);
             if (typeof raw === 'number' && Number.isFinite(raw)) {
               const i = raw < 0 ? n + raw + 1 : raw;
               if (i >= 1 && i <= n) return t.elements[i - 1].type;
             }
           }
         }
-        return (
-          xs.operatorDefinition?.collection?.elttype?.(xs) ??
-          collectionElementType(t) ??
-          'any'
-        );
+        return xs.facts.elementType ?? collectionElementType(t) ?? 'any';
       };
 
       // The result type of a single SCALAR/string index (§3.C access-mode
@@ -6662,8 +7209,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // an out-of-range literal misses to `marker(⊔S)`; a dynamic index gains
       // `T | marker(T)`.
       const scalarResultType = (): Type => {
-        const xs = ops[0];
-        const t = xs.type.type;
+        const t = ops[0].type;
         const key = ops[1];
         if (typeof t === 'string') {
           if (t === 'dictionary' || t === 'record') return withMarker('any');
@@ -6671,8 +7217,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return withMarker(t.values);
         } else if (t.kind === 'record') {
           const fields = widen(...Object.values(t.elements)) as Type;
-          if (key && isString(key)) {
-            const fieldType = t.elements[key.string];
+          const name = key === undefined ? undefined : stringLiteralOf(key);
+          if (name !== undefined) {
+            const fieldType = t.elements[name];
             if (fieldType) return fieldType; // present literal → exact
             return markerType(fields); // absent literal → marker(⊔V)
           }
@@ -6680,8 +7227,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         } else if (t.kind === 'tuple') {
           const n = t.elements.length;
           const slots = widen(...t.elements.map((x) => x.type)) as Type;
-          if (key?.isInteger === true) {
-            const raw = operandLiteralValue(key) ?? key.re;
+          if (key !== undefined && typeFact(key.type, 'integer') === true) {
+            const raw = descriptorLiteralValue(key);
             if (typeof raw === 'number' && Number.isFinite(raw)) {
               const i = raw < 0 ? n + raw + 1 : raw;
               if (i >= 1 && i <= n) return t.elements[i - 1].type; // in-range
@@ -6709,23 +7256,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       //    interpreter never produces.
       //  - the INDEX must be an indexed collection. A string index is a record
       //    key, not a gather, so it is excluded by the source test above and
-      //    by `isString`.
-      const isGatherIndex = (idx: Expression | undefined): boolean =>
+      //    by the string-literal test below.
+      const isGatherIndex = (idx: OperandDescriptor | undefined): boolean =>
         idx !== undefined &&
-        !isString(idx) &&
-        isSubtype(idx.type.type, INDEXED_COLLECTION_SHAPE_TYPE);
+        stringLiteralOf(idx) === undefined &&
+        isSubtype(idx.type, INDEXED_COLLECTION_SHAPE_TYPE);
 
       // A boolean MASK filters (in-range only, no marker); an integer gather is
       // POSITION-PRESERVING (each element `T | marker(T)`, §3.C).
-      const isMaskIndex = (idx: Expression | undefined): boolean => {
+      const isMaskIndex = (idx: OperandDescriptor | undefined): boolean => {
         if (!isGatherIndex(idx)) return false;
-        const et = collectionElementType(idx!.type.type);
+        const et = collectionElementType(idx!.type);
         return et !== undefined && isSubtype(et, 'boolean');
       };
 
       if (ops.length === 2) {
         if (
-          isSubtype(ops[0].type.type, INDEXED_COLLECTION_SHAPE_TYPE) &&
+          isSubtype(ops[0].type, INDEXED_COLLECTION_SHAPE_TYPE) &&
           isGatherIndex(ops[1])
         ) {
           const inner = elementType();
@@ -6754,7 +7301,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `indexed_collection`, but `elementType()` has slot-aware handling for
       // it that a plain `collectionElementType` walk (which widens across all
       // slots) would lose. Dictionaries/records likewise.
-      const sourceType = ops[0].type.type;
+      const sourceType = ops[0].type;
       const isTupleSource =
         typeof sourceType !== 'string' && sourceType.kind === 'tuple';
       if (
@@ -7259,8 +7806,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
-    type: ([xs], { operandTypes }) =>
-      componentResultType(xs, 1, operandTypes?.[0]),
+    type: ([xs]) => componentResultTypeD(presentArmOf(xs), 1),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 1, ce),
   },
 
@@ -7269,8 +7815,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
-    type: ([xs], { operandTypes }) =>
-      componentResultType(xs, 2, operandTypes?.[0]),
+    type: ([xs]) => componentResultTypeD(presentArmOf(xs), 2),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 2, ce),
   },
 
@@ -7279,8 +7824,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
-    type: ([xs], { operandTypes }) =>
-      componentResultType(xs, 3, operandTypes?.[0]),
+    type: ([xs]) => componentResultTypeD(presentArmOf(xs), 3),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 3, ce),
   },
 
@@ -7314,8 +7858,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: collection<any> | tuple) -> any',
     missingBehavior: 'propagate',
-    type: ([xs], { operandTypes }) =>
-      pointComponentType(xs, 1, operandTypes?.[0]),
+    type: ([xs]) => pointComponentTypeD(xs, 1),
     evaluate: ([xs], { engine: ce, numericApproximation }) =>
       pointComponentAt(xs, 1, ce, numericApproximation ?? false),
   },
@@ -7326,8 +7869,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: collection<any> | tuple) -> any',
     missingBehavior: 'propagate',
-    type: ([xs], { operandTypes }) =>
-      pointComponentType(xs, 2, operandTypes?.[0]),
+    type: ([xs]) => pointComponentTypeD(xs, 2),
     evaluate: ([xs], { engine: ce, numericApproximation }) =>
       pointComponentAt(xs, 2, ce, numericApproximation ?? false),
   },
@@ -7352,8 +7894,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       return ce._fn('PointZ', args);
     },
-    type: ([xs], { operandTypes }) =>
-      pointComponentType(xs, 3, operandTypes?.[0]),
+    type: ([xs]) => pointComponentTypeD(xs, 3),
     evaluate: ([xs], { engine: ce, numericApproximation }) => {
       // The type was not decisive (a bare `tuple`, `list<tuple>`, `unknown`),
       // but the concrete value is 2-D: the WHOLE application errors — a
@@ -7370,8 +7911,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
-    type: ([xs], { operandTypes }) =>
-      componentResultType(xs, -1, operandTypes?.[0]),
+    type: ([xs]) => componentResultTypeD(presentArmOf(xs), -1),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, -1, ce),
   },
 
@@ -7586,7 +8126,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // span makes the result possibly-`Nothing`. Returning `undefined` leaves
     // the resolver's arm in place, which is the whole mechanism for keeping
     // `Slice("abc", 2..3)` typed exactly `string`.
-    type: (ops, { operandTypes }) => sliceResultType(ops, operandTypes),
+    type: (ops) => sliceResultTypeD(ops),
     // `Slice(xs, Nothing)` folds to `Nothing`, which is why this handler
     // exists at all: the framework's DEFAULT canonicalization runs `flatten`
     // first, and `flatten` DROPS a `Nothing` operand outright — it is the
@@ -8508,7 +9048,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) =>
       reduceType({
         kind: 'union',
-        types: [collectionElementType(ops[0].type.type) ?? 'any', 'nothing'],
+        types: [collectionElementType(ops[0].type) ?? 'any', 'nothing'],
       }),
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
@@ -8712,7 +9252,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!collection.isValid || !fn) return null;
       return engine._fn('MaxBy', [collection, fn]);
     },
-    type: (ops) => collectionElementType(ops[0].type.type) ?? 'any',
+    type: (ops) => collectionElementType(ops[0].type) ?? 'any',
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = applicable(fn);
@@ -8740,7 +9280,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!collection.isValid || !fn) return null;
       return engine._fn('MinBy', [collection, fn]);
     },
-    type: (ops) => collectionElementType(ops[0].type.type) ?? 'any',
+    type: (ops) => collectionElementType(ops[0].type) ?? 'any',
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = applicable(fn);
@@ -8953,7 +9493,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) => {
       if (ops.length <= 1) return parseType('indexed_collection');
       if (ops.length === 2) {
-        const elt = functionResult(ops[0].type.type) ?? 'any';
+        const elt = functionResult(ops[0].type) ?? 'any';
         return { kind: 'indexed_collection', elements: elt };
       }
       return parseType('indexed_collection<list>');
@@ -9339,7 +9879,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // for it while the evaluated result held strings.
     //
     // Declining (returning `undefined`) falls back to the declared signature.
-    type: (ops) => (isTextAtom(ops[0]) ? 'list<string>' : undefined),
+    type: (ops) => (isTextAtomD(ops[0]) ? 'list<string>' : undefined),
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Partition', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
@@ -10134,8 +10674,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (ops.length === 0) return 'list';
       let type: Type = 'unknown';
       for (const xs of ops) {
-        if (xs.isCollection && !xs.isFiniteCollection) return 'list';
-        type = widen(type, collectionElementType(xs.type.type) ?? type);
+        if (unboundedCollectionOperand(xs)) return 'list';
+        type = widen(type, collectionElementType(xs.type) ?? type);
       }
       return { kind: 'list', elements: type };
     },
@@ -10209,8 +10749,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (ops.length === 0) return 'set';
       let type: Type = 'unknown';
       for (const xs of ops) {
-        if (xs.isCollection && !xs.isFiniteCollection) return 'set';
-        type = widen(type, collectionElementType(xs.type.type) ?? type);
+        if (unboundedCollectionOperand(xs)) return 'set';
+        type = widen(type, collectionElementType(xs.type) ?? type);
       }
       return { kind: 'set', elements: type };
     },
@@ -11910,46 +12450,6 @@ function distinctAt(
   return undefined;
 }
 
-function joinResultType(ops: ReadonlyArray<Expression>): Type {
-  // The string-preservation arm (`docs/STRING_ROADMAP.md`, "`Join` vs.
-  // `StringJoin`"): when EVERY operand is a string, the concatenation is a
-  // string, and `Join` is the variadic string concatenation. The runtime
-  // follows from this type alone — a lazy collection whose declared result
-  // type is `string` is walked once and its characters joined
-  // (`evaluateStringPreservingCollection` in
-  // `boxed-expression/boxed-function.ts`), so there is no `evaluate` handler
-  // to keep in step.
-  // Requiring EVERY operand to be a string is what keeps the rule readable
-  // from the operand kinds; a mixed call falls through to the element-widening
-  // path below and yields a `list<character>`. `character` is a SIBLING of
-  // `string`, not a subtype, so a character operand makes the call mixed.
-  if (ops.length > 0 && ops.every((op) => op.type.matches('string')))
-    return 'string';
-  if (ops.some((op) => isRecordShapedType(op.type.type))) return 'record';
-  if (ops.some((op) => op.type.matches('dictionary<any>'))) return 'dictionary';
-  if (ops.some((op) => op.type.matches('set<any>'))) return 'set';
-
-  // Carry the element type through, so a joined point list still MATCHES
-  // `list<tuple<…>>` and downstream type-directed dispatch keeps recognizing
-  // it. Each operand contributes either its own type (an atomic tuple, which
-  // becomes one element) or its element type (a collection, which is spliced).
-  // Any operand whose element type is unknown makes the whole result
-  // unknown-element, so fall back to the bare `list` rather than narrowing to
-  // something the value may not satisfy.
-  const eltTypes: Type[] = [];
-  for (const op of ops) {
-    if (isAtomicJoinOperand(op)) {
-      eltTypes.push(op.type.type);
-      continue;
-    }
-    const elt = collectionElementType(op.type.type);
-    if (elt === undefined) return 'list';
-    eltTypes.push(elt);
-  }
-  if (eltTypes.length === 0) return 'list';
-  return { kind: 'list', elements: widen(...eltTypes) };
-}
-
 /** Does this static type admit the value `Nothing`?
  *
  * `nothing` is a UNIT type here, not a bottom type, so it is admitted only
@@ -11965,78 +12465,6 @@ function typeIsNothingOrAdmitsNothing(t: Type): boolean {
   if (t.kind === 'union')
     return t.types.some((arm) => typeIsNothingOrAdmitsNothing(arm));
   return false;
-}
-
-/** The result type of `Slice(value, span)` when — and only when — the span
- * may be absent; `undefined` otherwise, leaving the declared overload set's
- * resolved arm in place.
- *
- * `Slice(xs, Nothing)` is `Nothing`, so a span whose static type admits
- * `Nothing` (`RangeOf`'s `range | nothing`) makes the whole call possibly
- * absent, and the honest result is `T | nothing`. The overload resolver will
- * not say so on its own: it admits the overlapping operand on trial and picks
- * the more specific `span: range` arm, reporting the bare `T`.
- *
- * Returning `undefined` for a span that statically EXCLUDES `nothing` is
- * deliberate and load-bearing, not just an optimization: the
- * string-preservation step requires the node's type to MATCH `string` exactly
- * (`evaluateStringPreservingCollection` in
- * `boxed-expression/boxed-function.ts`), so `Slice("abc", 2..3)` must keep
- * reporting `string`, never `string | nothing`, to evaluate to a string
- * VALUE. The positional `(value, start, end)` form always selects a window
- * and is left alone for the same reason. */
-function sliceResultType(
-  ops: ReadonlyArray<Expression>,
-  operandTypes: ReadonlyArray<Type | undefined> | undefined
-): Type | undefined {
-  if (ops.length !== 2) return undefined;
-  const spanType = operandTypes?.[1] ?? ops[1].type.type;
-  if (!typeIsNothingOrAdmitsNothing(spanType)) return undefined;
-
-  // Mirror the two families of arms in the signature: a string operand keeps
-  // the string (`Slice` is kind-preserving), anything else yields a list of
-  // the source's element type.
-  const valueType = operandTypes?.[0] ?? ops[0].type.type;
-  const base: Type = isSubtype(valueType, 'string')
-    ? 'string'
-    : { kind: 'list', elements: collectionElementType(valueType) ?? 'any' };
-  return reduceType({ kind: 'union', types: [base, 'nothing'] });
-}
-
-/**
- * The result type of a variadic `Append(c, v₁, …, vₖ)`.
- *
- * The source contributes its ELEMENT type; each trailing operand contributes
- * its OWN type, because it becomes one element
- * (`docs/COLLECTIONS-MODEL.md`, Q2.1). The
- * binary handler used to be `joinResultType([ops[0]])`, which ignored the
- * appended value's type entirely — so `Append([1,2], "x")` claimed
- * `list<integer>`. Folding the trailing types in fixes that, and makes
- * the flattened form agree with the nested one it replaces.
- *
- * The source contribution is computed HERE rather than deferred to
- * `joinResultType`, because that function applies `isAtomicJoinOperand`: a
- * tuple operand of `Join` is one element, but `Append` ENUMERATES its source
- * (`Append((1,2), 3)` has elements 1, 2, 3), so a tuple SOURCE must contribute
- * the union of its member types, not `tuple<…>`. A trailing tuple is still
- * atomic, so `Append([(1,2)], (3,4))` keeps `tuple<…>` as its element type.
- */
-function appendResultType(ops: ReadonlyArray<Expression>): Type {
-  if (ops.length === 0) return 'list';
-  const source = ops[0].type.type;
-  // A record/dictionary/set source: nothing to narrow, keep today's answer.
-  if (isRecordShapedType(ops[0].type.type)) return 'record';
-  if (ops[0].type.matches('dictionary<any>')) return 'dictionary';
-  if (ops[0].type.matches('set<any>')) return 'set';
-  // A source whose element type is unknown: fall back to the bare `list`
-  // rather than narrowing to something the value may not satisfy.
-  const elements = collectionElementType(source);
-  if (elements === undefined) return 'list';
-  if (ops.length === 1) return { kind: 'list', elements };
-  return {
-    kind: 'list',
-    elements: widen(elements, ...ops.slice(1).map((op) => op.type.type)),
-  };
 }
 
 function defaultCollectionEq(a: Expression, b: Expression) {
@@ -12662,60 +13090,4 @@ function isEmptySource(x: Expression): boolean | undefined {
   // `Infinity` correctly answers `false` here — an unbounded source is not
   // empty. Only a genuinely unknown count leaves the verdict open.
   return typeof n === 'number' ? n === 0 : undefined;
-}
-
-/**
- * Do these `Range` operands PROVE the value is an index span — the `range`
- * type: a contiguous, ascending, step-1 run of valid 1-based collection
- * indices?
- *
- * Operands are `[lower, upper?, step?]`, with the one-operand form meaning
- * `Range(n) = 1..n`. The qualification, per `docs/STRING_ROADMAP.md`
- * ("The `range` type"):
- *
- * - every present operand is an integer LITERAL with a readable value. Note
- *   `toInteger` alone is NOT that test: it ROUNDS (`Math.round`), so it maps
- *   the `Range(0.5, 2.5)` bounds — a sequence of halves, not indices — onto
- *   `1..3`. Hence the `isInteger` type check first, which is false for a
- *   non-integer literal. A symbolic `Range(a, b)` never qualifies either:
- *   `isInteger` may hold for a declared-integer symbol, but `toInteger`
- *   returns `null` for it. Assumption-based narrowing is deliberately out of
- *   scope; its absence is never unsound, since the result merely types wider;
- * - the step, if present, is exactly 1 (a stepped range is a GATHER, and
- *   gathering is `At(xs, r)`, not a span);
- * - `lower >= 1` — index 1 is the first element, so 0 and negatives are not
- *   index spans;
- * - `lower <= upper` — ascending. A descending `Range(6, 5)` is the pair
- *   `[6, 5]`, a real value with a real meaning, and not a span.
- *
- * Finiteness falls out: `toInteger` rejects a non-finite operand, so
- * `Range(1, oo)` does not qualify.
- *
- * There is deliberately no EMPTY index span: `Range(1, 0)` already means the
- * descending pair `[1, 0]`, so an empty span has no spelling, and operations
- * that can empty a range report `list` instead of `range`.
- */
-function isIndexSpan(ops: ReadonlyArray<Expression>): boolean {
-  if (ops.length === 0 || ops.length > 3) return false;
-
-  // An exact, finite integer LITERAL, or `null`. See the note above on why
-  // `toInteger` is guarded by `isInteger` rather than used bare. The
-  // handler-visible literal type is consulted first: it carries the same
-  // machine value and is the channel that survives when the value reads
-  // are unavailable to a type handler.
-  const literal = (op: Expression | undefined): number | null => {
-    if (op?.isInteger !== true) return null;
-    const v = operandLiteralValue(op);
-    if (v !== undefined) return Number.isInteger(v) ? v : null;
-    return toInteger(op);
-  };
-
-  if (ops.length === 3 && literal(ops[2]) !== 1) return false;
-
-  // `Range(n)` is `1..n`; `Range(lo, hi)` and `Range(lo, hi, 1)` are explicit.
-  const lower = ops.length === 1 ? 1 : literal(ops[0]);
-  const upper = ops.length === 1 ? literal(ops[0]) : literal(ops[1]);
-  if (lower === null || upper === null) return false;
-
-  return lower >= 1 && lower <= upper;
 }

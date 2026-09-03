@@ -12,7 +12,7 @@ import type { Type } from '../../common/type/types.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { negativeSign, nonNegativeSign } from '../boxed-expression/sgn.js';
-import { operandNonFiniteNumber, operandSgn } from './type-handlers-types.js';
+import { operandNonFiniteNumber, operandSgn } from './type-handlers.js';
 import { apply2, shouldNumericize } from '../boxed-expression/apply.js';
 import {
   infinitePoint,
@@ -602,7 +602,6 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // for what the carrier and the explicit `nanBehavior` say.
       signature: '(n:complex | infinity, m:complex | infinity) -> number',
       nanBehavior: 'propagate',
-      typeHandlerKind: 'types',
       type: ([n, k]) => binomialType(n, k),
 
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
@@ -674,7 +673,6 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // in the carrier, that seam only ever sees a non-number.
       signature: '(complex | infinity, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      typeHandlerKind: 'types',
       type: ([n, k]) => binomialType(n, k),
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
         evaluateBinomial(n, k, numericApproximation, ce),
@@ -698,7 +696,6 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // `sgn` handler on a compound operand — a proof the descriptor's sign
       // fact carries (open item O7 of
       // `docs/plans/2026-08-22-type-handlers-on-types.md`).
-      typeHandlerKind: 'types',
       type: ([a, k]) => {
         // A provably-NaN operand declines, as `binomialType` does and for the
         // same reason: a handler answer is never widened.

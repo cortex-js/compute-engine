@@ -25,7 +25,6 @@ import {
 
 import type {
   OperatorDefinition,
-  OperatorTypeHandlerOnExpressions,
   OperatorTypeHandlerOnTypes,
   Expression,
   BoxedOperatorDefinition,
@@ -112,7 +111,6 @@ const OPERATOR_DEF_KEYS = new Set([
   'inferredSignature',
   'signature',
   'type',
-  'typeHandlerKind',
   'sgn',
   'even',
   'complexity',
@@ -557,15 +555,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     return { parameters: functionLiteralParameters(canonical), body };
   }
 
-  /** Which shape the stored `type` handler takes — `'expressions'` (legacy,
-   * a function of the operand expressions) or `'types'` (a function of
-   * operand descriptors that cannot touch engine state). Dispatch reads
-   * this flag, never the handler's parameter count. Travels with the
-   * handler: an update that supplies a `type` handler resets the kind to
-   * what that update declares. */
-  typeHandlerKind: 'expressions' | 'types' = 'expressions';
-
-  type?: OperatorTypeHandlerOnExpressions | OperatorTypeHandlerOnTypes;
+  type?: OperatorTypeHandlerOnTypes;
 
   sgn?: (
     ops: ReadonlyArray<Expression>,
@@ -1238,7 +1228,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       _lambdaLiteral: this._lambdaLiteral,
       _isMultiClause: this._isMultiClause,
       type: this.type,
-      typeHandlerKind: this.typeHandlerKind,
       sgn: this.sgn,
       eq: this.eq,
       neq: this.neq,
@@ -1309,7 +1298,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this._lambdaLiteral = s._lambdaLiteral;
     this._isMultiClause = s._isMultiClause;
     this.type = s.type;
-    this.typeHandlerKind = s.typeHandlerKind;
     this.sgn = s.sgn;
     this.eq = s.eq;
     this.neq = s.neq;
@@ -1545,15 +1533,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       } else effects = legacy;
     }
 
-    // The handler-shape flag travels WITH the handler: an update that
-    // supplies a `type` handler resets the kind to what that update declares
-    // (absent flag = the legacy expressions shape), and an update that
-    // supplies none keeps both the stored handler and its kind.
-    if (def.type !== undefined) {
-      this.type = def.type;
-      this.typeHandlerKind =
-        def.typeHandlerKind === 'types' ? 'types' : 'expressions';
-    }
+    if (def.type !== undefined) this.type = def.type;
     this.evaluateAsync = def.evaluateAsync ?? this.evaluateAsync;
     this.canonical = def.canonical ?? this.canonical;
     this.evalDimension = def.evalDimension ?? this.evalDimension;

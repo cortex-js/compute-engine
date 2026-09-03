@@ -320,7 +320,7 @@ complex: (a, b?) => Complex;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~tolerance~~ {#tolerance-1}
+##### ExpressionComputeEngine.~~tolerance~~ {#tolerance-2}
 
 ```ts
 tolerance: number;
@@ -1406,66 +1406,15 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
   `effectsDeclared`: `boolean`;
-  `value`: ExpressionInput \| ((ce: ComputeEngine) =\> Expression \| null);
+  `value`:   \| [`ExpressionInput`](#expressioninput)
+     \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
   `eq`: (`a`) => `boolean` \| `undefined`;
   `neq`: (`a`) => `boolean` \| `undefined`;
   `cmp`: (`a`) => `"<"` \| `">"` \| `"="` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `subscriptEvaluate`: (`subscript`, `options`) => [`Expression`](#expression-5) \| `undefined`;
- \} & [`OperatorDefinition`](#operatordefinition)\>\>
-  \| `Partial`\<`Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
-  `typeHandlerKind`: `"expressions"`;
-  `type`: [`OperatorTypeHandlerOnExpressions`](#operatortypehandleronexpressions);
- \} & \{
-  `signature`:   \| `string`
-     \| [`AlgebraicType`](#algebraictype)
-     \| [`NegationType`](#negationtype)
-     \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
-     \| [`SetType`](#settype)
-     \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
-     \| [`ObjectType`](#objecttype)
-     \| [`DictionaryType`](#dictionarytype)
-     \| [`TupleType`](#tupletype)
-     \| [`SymbolType`](#symboltype)
-     \| [`ExpressionType`](#expressiontype)
-     \| [`NumericType`](#numerictype)
-     \| [`FunctionSignature`](#functionsignature)
-     \| [`ValueType`](#valuetype)
-     \| [`TypeVariable`](#typevariable)
-     \| [`TypeReference`](#typereference)
-     \| [`BoxedType`](#boxedtype);
-  `inferredSignature`: `boolean`;
-  `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
-  `isPositive`: `boolean`;
-  `isNonNegative`: `boolean`;
-  `isNegative`: `boolean`;
-  `isNonPositive`: `boolean`;
-  `even`: (`ops`, `options`) => `boolean` \| `undefined`;
-  `complexity`: `number`;
-  `canonical`: (`ops`, `options`) => [`Expression`](#expression-5) \| `null`;
-  `evaluate`:   \| [`Expression`](#expression-5)
-     \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
-  `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
-  `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
-  `neq`: (`a`, `b`) => `boolean` \| `undefined`;
-  `collection`: [`CollectionHandlers`](#collectionhandlers);
-  `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
-  `elementCount`: (`expr`) => `number` \| `undefined`;
- \} & \{
-  `holdUntil`: `undefined`;
-  `inferred`: `undefined`;
-  `value`: `undefined`;
-  `cmp`: `undefined`;
-  `subscriptEvaluate`: `undefined`;
- \}\>
-  \| `Partial`\<`Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
-  `typeHandlerKind`: `"types"`;
+ \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
   `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
- \} & \{
   `signature`:   \| `string`
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
@@ -1504,15 +1453,78 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
- \} & \{
-  `holdUntil`: `undefined`;
-  `inferred`: `undefined`;
-  `value`: `undefined`;
-  `cmp`: `undefined`;
-  `subscriptEvaluate`: `undefined`;
- \}\> & \{
-  `typeHandlerKind`: `"types"`;
- \}
+ \}\>\>
+  \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
+  `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
+  `type`:   \| `string`
+     \| [`AlgebraicType`](#algebraictype)
+     \| [`NegationType`](#negationtype)
+     \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
+     \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
+     \| [`RecordType`](#recordtype)
+     \| [`ObjectType`](#objecttype)
+     \| [`DictionaryType`](#dictionarytype)
+     \| [`TupleType`](#tupletype)
+     \| [`SymbolType`](#symboltype)
+     \| [`ExpressionType`](#expressiontype)
+     \| [`NumericType`](#numerictype)
+     \| [`FunctionSignature`](#functionsignature)
+     \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
+     \| [`TypeReference`](#typereference)
+     \| [`BoxedType`](#boxedtype);
+  `inferred`: `boolean`;
+  `effectsDeclared`: `boolean`;
+  `value`:   \| [`ExpressionInput`](#expressioninput)
+     \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
+  `eq`: (`a`) => `boolean` \| `undefined`;
+  `neq`: (`a`) => `boolean` \| `undefined`;
+  `cmp`: (`a`) => `"<"` \| `">"` \| `"="` \| `undefined`;
+  `collection`: [`CollectionHandlers`](#collectionhandlers);
+  `subscriptEvaluate`: (`subscript`, `options`) => [`Expression`](#expression-5) \| `undefined`;
+ \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
+  `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
+  `signature`:   \| `string`
+     \| [`AlgebraicType`](#algebraictype)
+     \| [`NegationType`](#negationtype)
+     \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
+     \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
+     \| [`RecordType`](#recordtype)
+     \| [`ObjectType`](#objecttype)
+     \| [`DictionaryType`](#dictionarytype)
+     \| [`TupleType`](#tupletype)
+     \| [`SymbolType`](#symboltype)
+     \| [`ExpressionType`](#expressiontype)
+     \| [`NumericType`](#numerictype)
+     \| [`FunctionSignature`](#functionsignature)
+     \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
+     \| [`TypeReference`](#typereference)
+     \| [`BoxedType`](#boxedtype);
+  `inferredSignature`: `boolean`;
+  `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
+  `isPositive`: `boolean`;
+  `isNonNegative`: `boolean`;
+  `isNegative`: `boolean`;
+  `isNonPositive`: `boolean`;
+  `even`: (`ops`, `options`) => `boolean` \| `undefined`;
+  `complexity`: `number`;
+  `canonical`: (`ops`, `options`) => [`Expression`](#expression-5) \| `null`;
+  `evaluate`:   \| [`Expression`](#expression-5)
+     \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
+  `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
+  `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
+  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
+  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
+  `neq`: (`a`, `b`) => `boolean` \| `undefined`;
+  `collection`: [`CollectionHandlers`](#collectionhandlers);
+  `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
+  `elementCount`: (`expr`) => `number` \| `undefined`;
+ \}\>\>
   \| [`BoxedOperatorDefinition`](#boxedoperatordefinition)
 
 ####### arg3?
@@ -3481,6 +3493,7 @@ type OperandFacts = {
   finiteCollection: Tri;
   indexed: Tri;
   shape: readonly number[];
+  elementType: Type;
 };
 ```
 
@@ -3519,6 +3532,7 @@ type OperandStructure =
   | {
   kind: "number";
   literal: 0 | 1;
+  rational: readonly [bigint, bigint];
  }
   | {
   kind: "application";
@@ -3536,10 +3550,12 @@ type OperandStructure =
   | {
   kind: "tuple";
   arity: number;
+  elements: ReadonlyArray<OperandDescriptor>;
  }
   | {
   kind: "list-literal";
   shape: readonly number[];
+  elements: ReadonlyArray<OperandDescriptor>;
 };
 ```
 
@@ -3577,7 +3593,23 @@ to trust an operand's type. Lives on the structure node, not in
 \{
   `kind`: `"number"`;
   `literal`: `0` \| `1`;
+  `rational`: readonly \[`bigint`, `bigint`\];
  \}
+
+#### OperandStructure.rational?
+
+```ts
+optional rational?: readonly [bigint, bigint];
+```
+
+The literal's exact value as a REDUCED fraction, when it is a
+rational with no radical part: `[numerator, denominator]`, the
+denominator positive. A literal's handler-visible type carries only
+an outward-rounded range for a rational no double represents
+exactly, so a handler that needs the exact terms (the parity of a
+power's exponent denominator decides real against complex) reads
+them here. Absent for a float, a complex, a radical, or a
+non-finite literal.
 
 \{
   `kind`: `"application"`;
@@ -3597,12 +3629,32 @@ to trust an operand's type. Lives on the structure node, not in
 \{
   `kind`: `"tuple"`;
   `arity`: `number`;
+  `elements`: `ReadonlyArray`\<[`OperandDescriptor`](#operanddescriptor)\>;
  \}
+
+#### OperandStructure.elements
+
+```ts
+elements: ReadonlyArray<OperandDescriptor>;
+```
+
+One descriptor per component, in order.
 
 \{
   `kind`: `"list-literal"`;
   `shape`: readonly `number`[];
+  `elements`: `ReadonlyArray`\<[`OperandDescriptor`](#operanddescriptor)\>;
  \}
+
+#### OperandStructure.elements
+
+```ts
+elements: ReadonlyArray<OperandDescriptor>;
+```
+
+One descriptor per top-level element, in order. A nested row is
+itself a `list-literal` structure, reachable through its
+descriptor's `structureOf()`.
 
 </MemberCard>
 
@@ -3675,6 +3727,37 @@ readonly _typeResolver: TypeResolver;
 
 <MemberCard>
 
+##### PureEngineView.tolerance {#tolerance}
+
+```ts
+readonly tolerance: number;
+```
+
+The engine's numeric tolerance, a read-only configuration value a
+membership handler consults (`Element` declines rather than refute a
+near-match inside it).
+
+</MemberCard>
+
+<MemberCard>
+
+##### PureEngineView.\_protocolRegistry {#_protocolregistry}
+
+```ts
+readonly _protocolRegistry: Readonly<Record<string, object>>;
+```
+
+The protocol registry, keyed by protocol name. Its records are typed
+opaquely here because the record type lives in `types-engine.ts`,
+which imports this file; the protocol readers in `engine-protocols.ts`
+(`protocolOfName`, `protocolMemberSignature`,
+`protocolPropertyTypeOfReceiver`) take this view and know the records'
+real shape. Read-only from a handler.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### PureEngineView.type() {#type-4}
 
 ```ts
@@ -3726,32 +3809,19 @@ lookupDefinition(id): ReadonlyDefinitionView | undefined
 ```ts
 type TypeHandlerContext = {
   engine: PureEngineView;
+  derive: (operator, operands) => Type | undefined;
 };
 ```
 
 The context argument of a `type` handler in the `'types'` shape.
 
-A `derive(operator, operands)` member — the recursive entry point a
-handler such as `Map` needs to type an application it does not have in
-hand — is part of the design
-(`docs/plans/2026-08-22-type-handlers-on-types.md` §5.2) and will be
-added when those handlers migrate; it is absent until then.
-
-</MemberCard>
-
-<MemberCard>
-
-### OperatorTypeHandlerOnExpressions {#operatortypehandleronexpressions}
-
-```ts
-type OperatorTypeHandlerOnExpressions = (ops, options) => 
-  | Type
-  | TypeString
-  | BoxedType
-  | undefined;
-```
-
-The legacy `type` handler shape: a function of the operand EXPRESSIONS.
+`derive(operator, operands)` is the recursive entry point a handler needs
+to type an application it does not have in hand — the body of a mapping
+literal over the source's element type, say. It runs the named operator's
+own `type` handler on the given descriptors, falling back to the declared
+(instantiated) signature result, and reads nothing but definitions and
+types (`deriveApplicationType`, `boxed-expression/derive-application-type.ts`).
+It answers `undefined` for an unknown operator.
 
 </MemberCard>
 
@@ -3767,85 +3837,13 @@ type OperatorTypeHandlerOnTypes = (operands, context) =>
   | undefined;
 ```
 
-The `type` handler shape selected by `typeHandlerKind: 'types'`: a
-function of operand DESCRIPTORS. Such a handler never sees an operand
-expression, so deriving a type cannot declare, canonicalize, or evaluate
-anything — the state-purity contract of
-`docs/plans/2026-08-22-type-handlers-on-types.md`.
-
-</MemberCard>
-
-<MemberCard>
-
-### OperatorTypeHandlerVariant {#operatortypehandlervariant}
-
-```ts
-type OperatorTypeHandlerVariant = 
-  | {
-  typeHandlerKind: "expressions";
-  type: OperatorTypeHandlerOnExpressions;
- }
-  | {
-  typeHandlerKind: "types";
-  type: OperatorTypeHandlerOnTypes;
-};
-```
-
-The two `type`-handler shapes, discriminated by the `typeHandlerKind`
-flag — the flag selects the shape; the shape is never guessed from the
-handler's parameter count. Omitting the flag (every pre-existing
-definition) keeps the legacy expressions shape.
-
-The flag travels WITH the handler: a definition update that supplies a
-new `type` handler and omits `typeHandlerKind` resets the stored shape
-to `'expressions'`, even when the previous handler was declared
-`'types'`. When re-declaring a `'types'`-shape operator, always restate
-the flag next to the handler — a descriptor-consuming handler filed
-under the expressions shape is silently called with expressions and
-derives wrong types.
-
-#### Type Declaration
-
-\{
-  `typeHandlerKind`: `"expressions"`;
-  `type`: [`OperatorTypeHandlerOnExpressions`](#operatortypehandleronexpressions);
- \}
-
-#### OperatorTypeHandlerVariant.type?
-
-```ts
-optional type?: OperatorTypeHandlerOnExpressions;
-```
-
-The type of the result (return type) based on the type of
-the arguments.
-
-Should be a subtype of the type indicated by the signature.
-
-For example, if the signature is `(number) -> real`, the type of the
-result could be `real` or `integer`, but not `complex`.
-
-:::info[Note]
-Do not evaluate the arguments.
-
-However, the type of the arguments can be used to determine the type of
-the result.
-:::
-
-\{
-  `typeHandlerKind`: `"types"`;
-  `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
- \}
-
-#### OperatorTypeHandlerVariant.type?
-
-```ts
-optional type?: OperatorTypeHandlerOnTypes;
-```
-
-The type of the result (return type) as a function of the operand
-DESCRIPTORS — their types and facts, never the operand expressions.
-See [OperatorTypeHandlerOnTypes](#operatortypehandlerontypes).
+The `type` handler of an operator definition: a function of operand
+DESCRIPTORS. Such a handler never sees an operand expression, so
+deriving a type cannot declare, canonicalize, or evaluate anything — the
+state-purity contract of
+`docs/plans/2026-08-22-type-handlers-on-types.md`. Under test, and with
+`CE_TYPE_PURITY_GUARD` set elsewhere, a handler that writes engine state
+throws.
 
 </MemberCard>
 
@@ -3960,20 +3958,11 @@ following rules are recommended:
 ### PartialSymbolDefinition {#partialsymboldefinition}
 
 ```ts
-type PartialSymbolDefinition<T> = T extends {
-  typeHandlerKind: "types";
- } ? Partial<T> & {
-  typeHandlerKind: "types";
-} : Partial<T>;
+type PartialSymbolDefinition<T> = T extends unknown ? Partial<T> : never;
 ```
 
-`Partial` distributed over the [SymbolDefinition](#symboldefinition) union, except that
-the `typeHandlerKind: 'types'` discriminant stays REQUIRED on its arm.
-A plain `Partial` would make the discriminant optional, at which point an
-object literal with an unannotated `type: (ops) => …` handler matches both
-handler shapes and TypeScript can no longer contextually type the
-handler's parameters — every legacy definition in the library would stop
-type-checking.
+`Partial` distributed over the [SymbolDefinition](#symboldefinition) union (a plain
+`Partial<A | B>` would merge the arms into one loose object type).
 
 #### Type Parameters
 
@@ -3994,11 +3983,8 @@ type SymbolDefinitionInput =
 A definition as `ce.declare()` accepts it: a partial definition, or the
 boxed operator definition read back from `expr.operatorDefinition`.
 
-A boxed definition records the shape of its `type` handler as the wide
-`'expressions' | 'types'` flag, so it fits neither arm of
-[OperatorTypeHandlerVariant](#operatortypehandlervariant). Admitting it here is what lets an
-operator be re-declared from its existing definition with some handlers
-replaced:
+Admitting the boxed definition is what lets an operator be re-declared
+from its existing definition with some handlers replaced:
 
 ```ts
 const sqrt = ce.expr('Sqrt').operatorDefinition!;
@@ -4007,20 +3993,6 @@ ce.declare('Sqrt', {
   evaluate: (ops, options) => sqrt.evaluate!(ops, options),
 });
 ```
-
-The boxed definition's update routine reads `typeHandlerKind` off the
-incoming definition, so the stored `type` handler keeps its shape across
-such a re-declaration.
-
-Limitation of the map form `ce.declare({ f: {…} })`: its entry type also
-admits a `Type` or a type string. Those members have no `typeHandlerKind`
-property, and TypeScript discriminates an object literal that OMITS a
-property only when every union member declares it, so an inline
-`type: (ops) => …` handler without `typeHandlerKind` gets implicitly-`any`
-parameters in that form. State `typeHandlerKind: 'expressions'` next to
-the handler, or annotate its parameters. The two-argument form
-`ce.declare('f', {…})` keeps the type and the definition in separate
-overloads and has no such limit.
 
 </MemberCard>
 
@@ -4912,36 +4884,15 @@ re-parsing or textually inlining its source.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.typeHandlerKind {#typehandlerkind}
-
-```ts
-readonly typeHandlerKind: "expressions" | "types";
-```
-
-Which shape the `type` handler takes: `'expressions'` (the legacy
-shape — a function of the operand expressions) or `'types'` (a function
-of operand descriptors, which cannot touch engine state). The flag is
-what the dispatch reads; the handler's parameter count is never
-inspected.
-
-</MemberCard>
-
-<MemberCard>
-
 ##### BoxedOperatorDefinition.type? {#type-8}
 
 ```ts
-optional type?: 
-  | OperatorTypeHandlerOnExpressions
-  | OperatorTypeHandlerOnTypes;
+optional type?: OperatorTypeHandlerOnTypes;
 ```
 
-If present, this handler can be used to more precisely determine the
-return type based on the type of the arguments. The arguments themselves
-should *not* be evaluated, only their types should be used.
-
-The shape of the stored handler is recorded by [typeHandlerKind](#typehandlerkind);
-a caller must dispatch on that flag before invoking it.
+If present, this handler determines the result type more precisely
+than the signature, from the operand DESCRIPTORS (types, facts and
+structure — never the operand expressions).
 
 </MemberCard>
 
@@ -8555,7 +8506,8 @@ A prototype-free [SymbolTable.ids](#ids) map — see the note there.
 ### OperatorDefinition {#operatordefinition}
 
 ```ts
-type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFlags> & OperatorTypeHandlerVariant & {
+type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFlags> & {
+  type: OperatorTypeHandlerOnTypes;
   signature:   | Type
      | TypeString
      | BoxedType;
@@ -8580,6 +8532,20 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   elementCount: (expr) => number | undefined;
 };
 ```
+
+#### OperatorDefinition.type?
+
+```ts
+optional type?: OperatorTypeHandlerOnTypes;
+```
+
+The type of the result (return type) as a function of the operand
+DESCRIPTORS — their types, facts and structure, never the operand
+expressions. See [OperatorTypeHandlerOnTypes](#operatortypehandlerontypes).
+
+Should be a subtype of the type indicated by the signature: for a
+signature `(number) -> real` the result may be `real` or `integer`,
+never `complex`.
 
 #### OperatorDefinition.signature?
 
@@ -9587,7 +9553,7 @@ complex: (a, b?) => Complex;
 
 <MemberCard>
 
-##### IComputeEngine.tolerance {#tolerance}
+##### IComputeEngine.tolerance {#tolerance-1}
 
 ```ts
 tolerance: number;
@@ -10673,66 +10639,15 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
   `effectsDeclared`: `boolean`;
-  `value`: ExpressionInput \| ((ce: ComputeEngine) =\> Expression \| null);
+  `value`:   \| [`ExpressionInput`](#expressioninput)
+     \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
   `eq`: (`a`) => `boolean` \| `undefined`;
   `neq`: (`a`) => `boolean` \| `undefined`;
   `cmp`: (`a`) => `"<"` \| `">"` \| `"="` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `subscriptEvaluate`: (`subscript`, `options`) => [`Expression`](#expression-5) \| `undefined`;
- \} & [`OperatorDefinition`](#operatordefinition)\>\>
-  \| `Partial`\<`Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
-  `typeHandlerKind`: `"expressions"`;
-  `type`: [`OperatorTypeHandlerOnExpressions`](#operatortypehandleronexpressions);
- \} & \{
-  `signature`:   \| `string`
-     \| [`AlgebraicType`](#algebraictype)
-     \| [`NegationType`](#negationtype)
-     \| [`CollectionType`](#collectiontype)
-     \| [`ListType`](#listtype)
-     \| [`SetType`](#settype)
-     \| [`BroadcastableType`](#broadcastabletype)
-     \| [`RecordType`](#recordtype)
-     \| [`ObjectType`](#objecttype)
-     \| [`DictionaryType`](#dictionarytype)
-     \| [`TupleType`](#tupletype)
-     \| [`SymbolType`](#symboltype)
-     \| [`ExpressionType`](#expressiontype)
-     \| [`NumericType`](#numerictype)
-     \| [`FunctionSignature`](#functionsignature)
-     \| [`ValueType`](#valuetype)
-     \| [`TypeVariable`](#typevariable)
-     \| [`TypeReference`](#typereference)
-     \| [`BoxedType`](#boxedtype);
-  `inferredSignature`: `boolean`;
-  `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
-  `isPositive`: `boolean`;
-  `isNonNegative`: `boolean`;
-  `isNegative`: `boolean`;
-  `isNonPositive`: `boolean`;
-  `even`: (`ops`, `options`) => `boolean` \| `undefined`;
-  `complexity`: `number`;
-  `canonical`: (`ops`, `options`) => [`Expression`](#expression-5) \| `null`;
-  `evaluate`:   \| [`Expression`](#expression-5)
-     \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
-  `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
-  `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
-  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
-  `neq`: (`a`, `b`) => `boolean` \| `undefined`;
-  `collection`: [`CollectionHandlers`](#collectionhandlers);
-  `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
-  `elementCount`: (`expr`) => `number` \| `undefined`;
- \} & \{
-  `holdUntil`: `undefined`;
-  `inferred`: `undefined`;
-  `value`: `undefined`;
-  `cmp`: `undefined`;
-  `subscriptEvaluate`: `undefined`;
- \}\>
-  \| `Partial`\<`Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
-  `typeHandlerKind`: `"types"`;
+ \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
   `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
- \} & \{
   `signature`:   \| `string`
      \| [`AlgebraicType`](#algebraictype)
      \| [`NegationType`](#negationtype)
@@ -10771,15 +10686,78 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
- \} & \{
-  `holdUntil`: `undefined`;
-  `inferred`: `undefined`;
-  `value`: `undefined`;
-  `cmp`: `undefined`;
-  `subscriptEvaluate`: `undefined`;
- \}\> & \{
-  `typeHandlerKind`: `"types"`;
- \}
+ \}\>\>
+  \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
+  `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
+  `type`:   \| `string`
+     \| [`AlgebraicType`](#algebraictype)
+     \| [`NegationType`](#negationtype)
+     \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
+     \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
+     \| [`RecordType`](#recordtype)
+     \| [`ObjectType`](#objecttype)
+     \| [`DictionaryType`](#dictionarytype)
+     \| [`TupleType`](#tupletype)
+     \| [`SymbolType`](#symboltype)
+     \| [`ExpressionType`](#expressiontype)
+     \| [`NumericType`](#numerictype)
+     \| [`FunctionSignature`](#functionsignature)
+     \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
+     \| [`TypeReference`](#typereference)
+     \| [`BoxedType`](#boxedtype);
+  `inferred`: `boolean`;
+  `effectsDeclared`: `boolean`;
+  `value`:   \| [`ExpressionInput`](#expressioninput)
+     \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
+  `eq`: (`a`) => `boolean` \| `undefined`;
+  `neq`: (`a`) => `boolean` \| `undefined`;
+  `cmp`: (`a`) => `"<"` \| `">"` \| `"="` \| `undefined`;
+  `collection`: [`CollectionHandlers`](#collectionhandlers);
+  `subscriptEvaluate`: (`subscript`, `options`) => [`Expression`](#expression-5) \| `undefined`;
+ \} & `Partial`\<[`BaseDefinition`](#basedefinition)\> & `Partial`\<[`OperatorDefinitionFlags`](#operatordefinitionflags)\> & \{
+  `type`: [`OperatorTypeHandlerOnTypes`](#operatortypehandlerontypes);
+  `signature`:   \| `string`
+     \| [`AlgebraicType`](#algebraictype)
+     \| [`NegationType`](#negationtype)
+     \| [`CollectionType`](#collectiontype)
+     \| [`ListType`](#listtype)
+     \| [`SetType`](#settype)
+     \| [`BroadcastableType`](#broadcastabletype)
+     \| [`RecordType`](#recordtype)
+     \| [`ObjectType`](#objecttype)
+     \| [`DictionaryType`](#dictionarytype)
+     \| [`TupleType`](#tupletype)
+     \| [`SymbolType`](#symboltype)
+     \| [`ExpressionType`](#expressiontype)
+     \| [`NumericType`](#numerictype)
+     \| [`FunctionSignature`](#functionsignature)
+     \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
+     \| [`TypeReference`](#typereference)
+     \| [`BoxedType`](#boxedtype);
+  `inferredSignature`: `boolean`;
+  `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
+  `isPositive`: `boolean`;
+  `isNonNegative`: `boolean`;
+  `isNegative`: `boolean`;
+  `isNonPositive`: `boolean`;
+  `even`: (`ops`, `options`) => `boolean` \| `undefined`;
+  `complexity`: `number`;
+  `canonical`: (`ops`, `options`) => [`Expression`](#expression-5) \| `null`;
+  `evaluate`:   \| [`Expression`](#expression-5)
+     \| ((`ops`, `options`) => [`Expression`](#expression-5) \| `undefined`);
+  `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
+  `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
+  `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
+  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
+  `neq`: (`a`, `b`) => `boolean` \| `undefined`;
+  `collection`: [`CollectionHandlers`](#collectionhandlers);
+  `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
+  `elementCount`: (`expr`) => `number` \| `undefined`;
+ \}\>\>
   \| [`BoxedOperatorDefinition`](#boxedoperatordefinition)
 
 ####### arg3?

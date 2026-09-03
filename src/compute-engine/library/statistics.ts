@@ -1,4 +1,9 @@
-import { operandLiteralValue } from './type-handlers.js';
+import {
+  operandLiteralValue,
+  provablyEquals,
+  provablyGreater,
+  provablyLess,
+} from './type-handlers.js';
 import {
   type DataConstraint,
   dataConstraintError,
@@ -75,17 +80,16 @@ import type {
 } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
-import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
+import {
+  EXTENDED_REAL_TYPE,
+  SIGNED_INFINITY_TYPE,
+} from '../../common/type/primitive.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import {
   bignumPreferred,
   withDrawRollback,
 } from '../boxed-expression/utils.js';
-import {
-  numberLiteralOf,
-  toInteger,
-  provablyNonFiniteNumber,
-} from '../boxed-expression/numerics.js';
+import { numberLiteralOf, toInteger } from '../boxed-expression/numerics.js';
 import { randomCount } from './random-utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { findFit } from '../nonlinear-fit.js';
@@ -288,6 +292,32 @@ function pairedStatisticType(
     : undefined;
 }
 
+/**
+ * Is this operand PROVABLY NaN, as far as an operand descriptor can tell?
+ *
+ * A descriptor carries FACTS, not a value: `facts.finite` is `false` and
+ * `facts.sgn` is `unsigned` for NaN and for complex infinity alike, so
+ * neither fact alone separates them. The TYPE closes the gap in both
+ * directions — the `nan` singleton proves NaN outright, and a type that
+ * proves the operand is an infinity refutes it — which decides every operand
+ * whose non-finiteness the type carries, and every NaN or `~oo` LITERAL,
+ * whose handler-visible type is its own value type.
+ *
+ * What is left undecided is a NON-literal operand holding `~oo` behind a
+ * wider declaration (`c: number := ~oo`): its facts are NaN's and its type
+ * says only `number`, so it is reported as NaN here. Every caller uses this
+ * to DECLINE, which hands the claim to the declared result, so the residue
+ * costs sharpness rather than soundness.
+ */
+function provablyNaNOperand(d: OperandDescriptor): boolean {
+  if (typeFact(d.type, 'nan') === true) return true;
+  return (
+    d.facts.finite === false &&
+    d.facts.sgn === 'unsigned' &&
+    typeFact(d.type, 'infinity') !== true
+  );
+}
+
 export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
   {
     //
@@ -319,16 +349,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // complex argument gives a finite complex value. An operand of unproven
       // realness (a `number`-typed symbol) keeps the generic finite hedge —
       // its value may be complex, so it must not claim real.
-      type: (ops) => {
-        const x = ops[0];
+      type: ([x]) => {
         // A proven-NaN operand: decline, so the framework's proven-NaN
         // arm answers the sharp `nan`.
-        if (!x || x.isNaN) return undefined;
-        if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'complex' : 'number';
-        if (x.isExtendedReal === true) return 'real';
-        // Unknown realness: exclude a non-finite value (~oo) before hedging.
-        if (provablyNonFiniteNumber(x)) return 'number';
+        if (!x || provablyNaNOperand(x)) return undefined;
+        const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
+        if (extendedReal === false)
+          return x.facts.finite === true ? 'complex' : 'number';
+        if (extendedReal === true) return 'real';
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -364,16 +392,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '(complex | signed_infinity) -> complex',
       nanBehavior: 'propagate',
       // Same shape as Erf: entire, bounded on the reals (Erfc(±∞) = 2, 0).
-      type: (ops) => {
-        const x = ops[0];
+      type: ([x]) => {
         // A proven-NaN operand: decline, so the framework's proven-NaN
         // arm answers the sharp `nan`.
-        if (!x || x.isNaN) return undefined;
-        if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'complex' : 'number';
-        if (x.isExtendedReal === true) return 'real';
-        // Unknown realness: exclude a non-finite value (~oo) before hedging.
-        if (provablyNonFiniteNumber(x)) return 'number';
+        if (!x || provablyNaNOperand(x)) return undefined;
+        const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
+        if (extendedReal === false)
+          return x.facts.finite === true ? 'complex' : 'number';
+        if (extendedReal === true) return 'real';
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -408,10 +434,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       type: ([x]) => {
         // A proven-NaN operand declines, so the framework's proven-NaN arm
         // answers; an infinite literal is a decided NaN.
-        if (!x || x.isNaN === true) return undefined;
-        if (infinitePoint(x) !== undefined) return 'nan';
-        if (provablyNonFiniteNumber(x)) return 'number';
-        if (x.isExtendedReal !== true) return 'number';
+        if (!x || provablyNaNOperand(x)) return undefined;
+        if (
+          x.structureOf?.()?.kind === 'number' &&
+          typeFact(x.type, 'infinity') === true
+        )
+          return 'nan';
+        if (x.facts.finite === false) return 'number';
+        if (typeFact(x.type, EXTENDED_REAL_TYPE) !== true) return 'number';
         // A literal's handler-visible value classifies exactly — and it is
         // never a rounded double, so it cannot put `1 − 10⁻³⁰` at a pole
         // (`operandLiteralValue` is the channel that survives when the
@@ -419,18 +449,16 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         const v = operandLiteralValue(x);
         if (v !== undefined) {
           if (v > -1 && v < 1) return 'real';
-          if (v === 1 || v === -1) return '+oo | -oo';
+          if (v === 1 || v === -1) return SIGNED_INFINITY_TYPE;
           return 'number';
         }
-        if (x.isGreater(-1) === true && x.isLess(1) === true) return 'real';
-        // Exact pole check for literals: `isEqual` is tolerance-based and
-        // would put `1 + 10⁻²⁰` (whose value is NaN, not ±∞) at the pole.
-        if (
-          isNumber(x)
-            ? x.isSame(1) || x.isSame(-1)
-            : x.isEqual(1) === true || x.isEqual(-1) === true
-        )
-          return '+oo | -oo';
+        if (provablyGreater(x, -1) && provablyLess(x, 1)) return 'real';
+        // The pole test is an EXACT one: an operand whose type merely
+        // encloses ±1 (`real<0.9..1.1>`) is not at the pole, and a value
+        // just past it (`1 + 10⁻²⁰`, whose erfinv is NaN, not ±∞) must not
+        // be pulled onto it.
+        if (provablyEquals(x, 1) || provablyEquals(x, -1))
+          return SIGNED_INFINITY_TYPE;
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -476,13 +504,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // finite complex value. Unproven realness → `number` (Erfi is unbounded,
       // so no finite hedge is available). A proven-NaN operand declines, so
       // the framework's proven-NaN arm answers the sharp `nan`.
-      type: (ops) => {
-        const x = ops[0];
-        if (!x || x.isNaN) return undefined;
-        if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'complex' : 'number';
-        if (x.isExtendedReal === true)
-          return x.isFinite === true ? 'real' : EXTENDED_REAL_TYPE;
+      type: ([x]) => {
+        if (!x || provablyNaNOperand(x)) return undefined;
+        const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
+        if (extendedReal === false)
+          return x.facts.finite === true ? 'complex' : 'number';
+        if (extendedReal === true)
+          return x.facts.finite === true ? 'real' : EXTENDED_REAL_TYPE;
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -1294,7 +1322,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `collection<unknown>` and would not match it.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      typeHandlerKind: 'types',
       type: (ops) => pairedStatisticType(ops),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCovariance(ce, ops, !!numericApproximation, false),
@@ -1321,7 +1348,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `collection<unknown>` and would not match it.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      typeHandlerKind: 'types',
       type: (ops) => pairedStatisticType(ops),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCovariance(ce, ops, !!numericApproximation, true),
@@ -1353,7 +1379,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `collection<unknown>` and would not match it.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      typeHandlerKind: 'types',
       type: (ops) => pairedStatisticType(ops),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCorrelation(ce, ops, !!numericApproximation),

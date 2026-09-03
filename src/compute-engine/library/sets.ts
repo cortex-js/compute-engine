@@ -27,11 +27,13 @@ import {
   subjectOf,
 } from '../boxed-expression/constraint-subject.js';
 import { domainToType } from '../boxed-expression/utils.js';
-// The `'types'`-shape twins of the shared type-handler helpers: they take
-// one `OperandDescriptor` per operand instead of the operand expression,
-// which is what the `typeHandlerKind: 'types'` flag on the two definitions
-// below selects.
-import { adjoinType, quotientRingType } from './type-handlers-types.js';
+// The shared type-handler helpers take one `OperandDescriptor` per operand,
+// never the operand expression.
+import {
+  adjoinType,
+  operandLiteralValue as descriptorLiteralValue,
+  quotientRingType,
+} from './type-handlers.js';
 import {
   declareTypeSaturatedSet,
   enumerableFromAllSources,
@@ -43,8 +45,10 @@ import {
 } from '../collection-utils.js';
 import type {
   Expression,
+  OperandDescriptor,
   Sign,
   SymbolDefinitions,
+  TypeHandlerContext,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import {
@@ -188,25 +192,153 @@ function signedMembership(
  * against a `Set` with a number member closer than the tolerance keeps
  * `boolean`. Any other operand shape (a symbol, a range, a type-style
  * membership, a filtered three-operand form) keeps the declared `boolean`. */
-function elementLiteralType(ops: ReadonlyArray<Expression>): Type {
+function elementLiteralType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  { engine }: TypeHandlerContext
+): Type {
   if (ops.length !== 2) return 'boolean';
   const [value, collection] = ops;
-  const isLiteral = (x: Expression): boolean => isNumber(x) || isString(x);
-  if (!isLiteral(value)) return 'boolean';
-  const isSet = isFunction(collection, 'Set');
-  if (!isSet && !isFunction(collection, 'List')) return 'boolean';
-  if (!collection.ops.every(isLiteral)) return 'boolean';
-  if (collection.ops.some((x) => x.isSame(value)))
-    return { kind: 'value', value: true };
-  if (isSet && isNumber(value)) {
-    const v = value.re;
-    const tol = value.engine.tolerance;
-    const near = collection.ops.some(
-      (x) => isNumber(x) && Math.abs(x.re - v) <= tol
+
+  const valueLiteral = literalStructure(value);
+  if (valueLiteral === undefined) return 'boolean';
+
+  // The two literal collection shapes: a `List` carries its own structure
+  // kind, a `Set` is an ordinary application.
+  const source = collection.structureOf?.();
+  const isSet = source?.kind === 'application' && source.head === 'Set';
+  const members =
+    source?.kind === 'list-literal'
+      ? source.elements
+      : isSet
+        ? source.children
+        : undefined;
+  if (members === undefined) return 'boolean';
+
+  const memberLiterals = members.map((x) => literalStructure(x));
+  if (memberLiterals.some((x) => x === undefined)) return 'boolean';
+
+  // A member the descriptor proves is the SAME value settles `true`. A
+  // `false` needs the opposite proof for EVERY member, so a single
+  // undecided comparison keeps the declared `boolean`.
+  let allDiffer = true;
+  for (let i = 0; i < members.length; i++) {
+    const same = sameLiteralValue(
+      value,
+      valueLiteral,
+      members[i],
+      memberLiterals[i]!
     );
-    if (near) return 'boolean';
+    if (same === true) return { kind: 'value', value: true };
+    if (same === undefined) allDiffer = false;
+  }
+  if (!allDiffer) return 'boolean';
+
+  if (isSet && valueLiteral.kind === 'number') {
+    // A `Set` also admits a number within the engine's tolerance of a
+    // member, so a `false` claim has to run that test as well
+    // (`literalSetContains`, `library/collections.ts`). Running it needs a
+    // machine value on both sides: a literal whose exact value no double
+    // holds (an exact rational such as `1/3`, a radical) carries none, and
+    // the near-match cannot be ruled out for it — so the claim is dropped
+    // rather than made without the test.
+    const v = approxLiteralValue(value, valueLiteral);
+    if (v === undefined) return 'boolean';
+    for (let i = 0; i < members.length; i++) {
+      const ms = memberLiterals[i]!;
+      if (ms.kind !== 'number') continue;
+      const e = approxLiteralValue(members[i], ms);
+      if (e === undefined) return 'boolean';
+      if (Math.abs(e - v) <= engine.tolerance) return 'boolean';
+    }
   }
   return { kind: 'value', value: false };
+}
+
+/** The structural view of an operand that is a number or string LITERAL
+ * (the population `isNumber(x) || isString(x)` selects on an expression),
+ * or `undefined` for anything else. */
+function literalStructure(
+  d: OperandDescriptor
+):
+  | { kind: 'number'; rational?: readonly [bigint, bigint] }
+  | { kind: 'string'; text: string }
+  | undefined {
+  const s = d.structureOf?.();
+  if (s?.kind === 'number') return s;
+  if (s?.kind === 'string') return s;
+  return undefined;
+}
+
+/**
+ * Are these two literals the same value? Three-valued: `undefined` when the
+ * descriptor channels cannot decide.
+ *
+ * Two strings compare by their text. Two numbers compare by their exact
+ * REDUCED terms when both are rationals, and by their machine value
+ * otherwise — a value type carries a double only when that double IS the
+ * literal's exact value, so the comparison is exact either way. Two literals
+ * that answer through DIFFERENT channels (an exact `1/3` against the float
+ * `0.5`), and a literal that answers through neither (a radical, whose type
+ * carries only an outward-rounded range), are undecided; the expression
+ * shape decided them by comparing the operands directly.
+ */
+function sameLiteralValue(
+  a: OperandDescriptor,
+  as: NonNullable<ReturnType<typeof literalStructure>>,
+  b: OperandDescriptor,
+  bs: NonNullable<ReturnType<typeof literalStructure>>
+): boolean | undefined {
+  if (as.kind === 'string' || bs.kind === 'string') {
+    if (as.kind !== 'string' || bs.kind !== 'string') return false;
+    return as.text === bs.text;
+  }
+  if (as.rational !== undefined && bs.rational !== undefined)
+    return (
+      as.rational[0] === bs.rational[0] && as.rational[1] === bs.rational[1]
+    );
+  const av = descriptorLiteralValue(a);
+  const bv = descriptorLiteralValue(b);
+  if (av !== undefined && bv !== undefined) return av === bv;
+  // The two literals answer through different channels (an exact `1/3`
+  // against the float `0.5`), so equality cannot be settled — but
+  // DISEQUALITY still can. Equal values have equal nearest doubles, so two
+  // different nearest doubles prove two different values; the converse does
+  // not hold, which is why an agreeing pair stays undecided.
+  const aa = approxLiteralValue(a, as);
+  const ba = approxLiteralValue(b, bs);
+  if (aa !== undefined && ba !== undefined && aa !== ba) return false;
+  return undefined;
+}
+
+/** The largest integer magnitude a double represents exactly. Beyond it a
+ * `BigInt` term loses information on the way to a `Number`, so the quotient
+ * below is no longer the correctly-rounded one and the reasoning that rests
+ * on it does not hold. */
+const MAX_EXACT_TERM = BigInt(Number.MAX_SAFE_INTEGER);
+
+/**
+ * The double NEAREST the literal's exact value, or `undefined` when the
+ * descriptor cannot produce one (a radical, a literal whose type carries
+ * only an outward-rounded range and that is not a rational).
+ *
+ * A value-carrying type answers directly. An exact rational answers from its
+ * reduced terms: IEEE division of two exactly representable integers is
+ * correctly rounded, so the quotient IS the nearest double to `n/q` while
+ * both terms stay inside the exact-integer range. The result is a function
+ * of the literal's VALUE alone — equal values have equal reduced terms —
+ * which is what lets a caller read a disagreement as a disproof.
+ */
+function approxLiteralValue(
+  d: OperandDescriptor,
+  s: NonNullable<ReturnType<typeof literalStructure>>
+): number | undefined {
+  const exact = descriptorLiteralValue(d);
+  if (exact !== undefined) return exact;
+  if (s.kind !== 'number' || s.rational === undefined) return undefined;
+  const [n, q] = s.rational;
+  const magnitude = n < 0n ? -n : n;
+  if (magnitude > MAX_EXACT_TERM || q > MAX_EXACT_TERM) return undefined;
+  return Number(n) / Number(q);
 }
 
 export const SETS_LIBRARY: SymbolDefinitions = {
@@ -891,7 +1023,6 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // undeclared free variable, and a narrower parameter type would INFER a
     // declaration for it (`\Z[x]` retyping `x` for the engine's lifetime).
     signature: '(set<any>, any+) -> set',
-    typeHandlerKind: 'types',
     type: adjoinType,
   },
 
@@ -916,7 +1047,6 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // `any` for the modulus: see the note on `Adjoin` — a narrower parameter
     // type would infer a declaration for a free `n`/`p`.
     signature: '(set<any>, any) -> set',
-    typeHandlerKind: 'types',
     type: quotientRingType,
   },
 

@@ -1378,7 +1378,25 @@ type?: (
    exact-comparison audit of §4.3. A conversion is proven by the parity
    harness (§5.5).
 
-   **Status: IN PROGRESS — batch 1 landed 2026-08-24, the constant-handler
+   **Status: COMPLETE 2026-09-03.** The user ruled (2026-09-03) to drop the
+   release N+1 warning step of step 2 and convert every remaining handler at
+   once: 129 handlers across `arithmetic`, `collections`, `sets`, `core`,
+   `control-structures`, `logic`, `linear-algebra`, `calculus`,
+   `relational-operator`, `complex`, `trigonometry`, `statistics`,
+   `special-functions` and the minted type constructors
+   (`type-constructors.ts`) converted in one round, each group with its own
+   verbatim legacy fixture and differential-parity suite, and a full-suite
+   run with every fixture installed as the final proof. Vocabulary added for
+   the round: `facts.elementType` (the operand's own `elttype` answer),
+   `tuple.elements` / `list-literal.elements` descriptors, the `number`
+   node's exact `rational` terms (`Power`'s branch decision), `PureEngineView`'s
+   `tolerance` and `_protocolRegistry`, `describeBoundSymbol()` (a declared
+   stand-in for a bound variable — `describeType()` alone has no symbol
+   node, so `Multiply`'s declared-scalar gate declined it), and
+   `context.derive` (step 4). The old shape and the flag are deleted in the
+   same delivery (step 6). Earlier history of the step follows.
+
+   **Earlier status: IN PROGRESS — batch 1 landed 2026-08-24, the constant-handler
    retirement sweep followed it, and batch 2 (the numeric families) landed
    the same day.** Batch 1 covered all of
    `library/number-theory.ts`, `library/distributions.ts` and
@@ -1765,11 +1783,28 @@ type?: (
    | `.ops`, `.op1`, `.nops`, `.operator` | `structureOf()` | Structural readers only (§5.1). |
 
 4. **Rewrite the seven handlers** (and the two `elttype` handlers) to the
-   contracts in §5.4.
+   contracts in §5.4. (DONE 2026-09-03. `context.derive` is
+   `deriveApplicationType` in `boxed-expression/derive-application-type.ts`:
+   the named operator's own `'types'` handler on the given descriptors,
+   else the declared signature result with a polytype arm instantiated
+   through the types-only solver `solveArmOverActuals`
+   (`generic-instantiation.ts`); it does not reproduce argument validation,
+   absence absorption, the Contract B widening or the threadable broadcast
+   wrap, and a declared function symbol derives from its function type.
+   `Map`, `Pipe`, `Set`'s two handlers and `Interval`'s `elttype` are
+   rewritten on it; `JacobianMatrix` reads structure and definitions;
+   `Sqrt` had already dropped its `.N()`. Rows that moved are listed in the
+   CHANGELOG entry and the group parity suites.)
 5. **Retire the exemption's callers.** Once `Map` and `Pipe` are pure,
    nothing declares into a scratch scope during a type read; the `scratch`
-   branch of `axisMaskOf` stays as a guard, with its tests.
-6. **Remove the old shape** in release N+2, per step 2.
+   branch of `axisMaskOf` stays as a guard, with its tests. (DONE
+   2026-09-03: `probeBareMappingElementType` is deleted and
+   `canonicalWithFreshPlaceholders` lost its `scratchDeclarations` option;
+   the guard branch stays.)
+6. **Remove the old shape** in release N+2, per step 2. (DONE 2026-09-03,
+   without the N+1 warning release, by ruling: the handler function had
+   never been documented in the public guide, so the audience for a
+   warning was near zero.)
 
 ### 5.4 Contracts for the handlers that change behavior
 

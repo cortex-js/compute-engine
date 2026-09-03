@@ -671,7 +671,18 @@ failures, such as a `match-no-case`. Probe:
 `executeEpsil(ce, 'let g = x => Error("neg")\ng(1)')` (diagnostic, `g(1)`
 inert).
 
-### A scalar handler lifted over a list of points drops the tuple level: `Sqrt(P)`, `Sin(P)`, `Power(P, 2)` type `list<number>` for a value that is a list of points (OPEN, typing — found 2026-09-03 while fixing Tycho items 245/246)
+### A scalar handler lifted over a list of points drops the tuple level: `Sqrt(P)`, `Sin(P)`, `Power(P, 2)` type `list<number>` for a value that is a list of points (FIXED 2026-09-03 — found 2026-09-03 while fixing Tycho items 245/246)
+
+**Fixed 2026-09-03.** The list arm of the lift (`boxed-function.ts`) now
+recognizes a list of points among its broadcasting operands
+(`pointListArity`) under a head that broadcasts component-wise over a tuple
+(the same predicate the tuple arm uses, `broadcastsOverTuples`), and builds
+the per-element result as a tuple of `arity` copies of the per-component
+result, so `Sqrt(P)` types `list<tuple<number, number>>`. A whole-point
+head (`Abs` of a point is its norm) fails the predicate and keeps its scalar
+cell. The cell binding in the solver is unchanged. Pinned in
+`test/compute-engine/point-list-lift-and-binder-authority.test.ts`. The
+original record follows.
 
 With `ce.declare('P', 'list<tuple<number, number>>')`, `Sqrt(P)`, `Sin(P)`
 and `Power(P, 2)` all type `list<number>`, while their values are lists of
@@ -696,7 +707,35 @@ on the type — the JavaScript target's `PointX`/`PointY` lowering, a
 layout classifier — reads such a list as a list of NUMBERS. Probe:
 `ce.declare('P','list<tuple<number, number>>'); ce.box(['Sqrt','P']).type`.
 
-### A comprehension binder is retyped by a use in the body, against the element type of the collection it iterates (OPEN, inference — found 2026-09-03 while fixing Tycho item 245)
+### A comprehension binder is retyped by a use in the body, against the element type of the collection it iterates (FIXED 2026-09-03, RULED — found 2026-09-03 while fixing Tycho item 245)
+
+**Ruled 2026-09-03 (Arno): a binding-site type is authoritative over the
+body's inference — a body use that contradicts it is a type error.** The
+retype was not the ordinary narrowing (`narrow(number, matrix)` is `never`,
+which `_infer` refuses): it was `repairFreshMatrixInference` (`validate.ts`),
+the repair that rewrites a symbol the scalar fast path guessed `real` for
+to `matrix` when a later operand slot wants a collection. The binder's
+`number` came from the source's element type inside the same boxing pass,
+so it sat in the fresh-inference set and the repair took it. The
+comprehension's canonical handler now removes the binder from that set
+after the element-type write (`canonicalLoopLike`,
+`control-structures.ts`), so `[q.x + 1 for q in L]` boxes invalid with `q`
+still `number`, as `PointX(q)` does anywhere else. The removal is
+journaled, so an open rollback frame re-adds the binding when it undoes the
+pass. `Sum`/`Product` indices were never eligible (declared, not inferred);
+function-literal parameters are typed by their annotation or by use and are
+unaffected. Pinned in
+`test/compute-engine/point-list-lift-and-binder-authority.test.ts`. The
+original record follows.
+
+**Remaining gap (open, typing): a destructuring binder has no binding-site
+type.** `[p + q for (p, q) in pairs]` declares its leaves `p` and `q` as
+`unknown` and never narrows them from the source's element type (the
+element-type write in `canonicalLoopLike` runs for a symbol binder only), so
+the leaves are typed by use and the fresh-matrix repair can still retype
+them. The rule above has nothing to enforce there until the leaves take
+their component types from the source's tuple element type; that is a
+typing improvement to make, with the same fresh-set removal.
 
 With `ce.declare('C', 'tuple<number, number>')`, the comprehension
 `[q.x + 1 for q in C]` (`Comprehension(Add(PointX(q), 1), Element(q, C))`)
@@ -830,7 +869,13 @@ no change to the exceptions file; the drifted entry returned to its recorded
 output. Pins: `serialization.test.ts`, `parser-list-range.test.ts`,
 `tycho-items-93-94.test.ts`.
 
-### `ce.declare({ f: {…} })` cannot type an inline `type` handler that omits `typeHandlerKind` (OPEN, design — found 2026-09-03 while fixing the `declare()` signature for boxed definitions)
+### `ce.declare({ f: {…} })` cannot type an inline `type` handler that omits `typeHandlerKind` (RESOLVED 2026-09-03 by the retirement of the flag — found 2026-09-03 while fixing the `declare()` signature for boxed definitions)
+
+Resolution: the expressions-shape handler and the `typeHandlerKind`
+discriminant were deleted the same day (the migration's step 6, see the
+type-handler entry below). With one handler shape there is nothing to
+discriminate, and an inline `type: (ops) => …` in the map form is typed
+against `OperatorTypeHandlerOnTypes` alone. The original finding follows.
 
 In the map form of `ce.declare()` an entry is a `Type`, a type string, or a
 definition. A `Type` and a string have no `typeHandlerKind` property, and
@@ -1589,7 +1634,29 @@ made `Coalesce(1, m)` with `m: integer | missing` falsely promise
 presence — the strip fold is now gated to `propagate` operators and the
 contract is pinned.
 
-Step 3 (mass conversion) is IN PROGRESS — batch 1 landed 2026-08-24: 39
+**RETIRED 2026-09-03: every step of §5.3 is done and the expressions shape
+is gone.** By ruling, the N+1 warning release was skipped and the 129
+handlers still on the old shape were converted in one round (five file
+groups, each with a verbatim legacy fixture and a parity suite, then a
+full-suite run with every fixture installed); the same delivery deletes
+`typeHandlerKind`, `OperatorTypeHandlerOnExpressions`, the `operandTypes`
+handler option, `library/type-handlers.ts`, the shadow registry and every
+fixture. Residues accepted in the round, all in the widening or
+"descriptor proves more" direction: radical literals decline in `Element`;
+NaN and `~oo` behind a wide declaration are indistinguishable to a
+descriptor (handlers decline instead of claiming); a symbol's held tuple
+behind a scalar declaration is invisible to `Abs`; the ring-constant arms
+of `Subscript`/`At` match by name and set shape rather than binding
+identity; a point accessor over a symbol whose declared element type is
+wider than its held content answers `unknown`. Two rows for a later
+ruling: `Pipe`'s static type is now tighter than the evaluated lazy `Map`
+node's declared type (`list<boolean^3>` against
+`list<broadcastable<boolean>^3>` in `functions.test.ts`, because the lazy
+node's canonicalized stage infers a wider parameter); and a `Map` whose
+element type cannot be derived still echoes a non-collection source
+unwrapped, as the old probe did. History of the migration follows.
+
+Step 3 (mass conversion) was IN PROGRESS — batch 1 landed 2026-08-24: 39
 handlers across `number-theory` (whole file), `distributions`, the
 nullary `combinatorics` handlers, and `DigitCount`/`Block`/`When`.
 Nullary constant handlers are RETIRED outright (user-suggested): the

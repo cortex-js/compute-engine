@@ -587,8 +587,33 @@ describe('Pipe — stage sugar (box route)', () => {
         'p',
       ],
     ]);
-    expect(table.type.toString()).toBe('list<broadcastable<boolean>^3>');
-    expect(table.type.toString()).toBe(table.evaluate().type.toString());
+    expect(table.type.toString()).toBe('list<boolean^3>');
+    // The static answer is the one the equivalent explicit `Map` reports —
+    // the equivalence the implicit-map typing is defined by.
+    expect(table.type.toString()).toBe(
+      ce
+        .box([
+          'Map',
+          ['Function', ['And', ['At', 'p', 1], ['At', 'p', 2]], 'p'],
+          [
+            'List',
+            ['Tuple', 'True', 'True'],
+            ['Tuple', 'True', 'False'],
+            ['Tuple', 'False', 'False'],
+          ],
+        ])
+        .type.toString()
+    );
+    // Evaluating the pipe yields a LAZY `Map` node whose stage has been
+    // canonicalized, and canonicalization infers the parameter from `At`'s
+    // signature (`dictionary | indexed_collection`), which makes the `And`
+    // over it broadcast. That node therefore reports the wider
+    // `broadcastable<boolean>` cell. The static answer binds the parameter to
+    // the topic's ELEMENT type instead, so it is the tighter of the two —
+    // sound, since a value of the static type is a value of the evaluated
+    // one.
+    expect(table.evaluate().type.matches(table.type)).toBe(false);
+    expect(table.type.matches(table.evaluate().type)).toBe(true);
 
     // A chain types through: the inner pipe is the outer one's collection
     // topic, so the outer gate needs the inner pipe's own mapped type.
@@ -599,7 +624,10 @@ describe('Pipe — stage sugar (box route)', () => {
     ]);
     // The outer `+1` stage joins bare tiers (a sum does not keep its
     // terms' ranges), so the inner stage's `<0..>` cells widen back.
-    expect(chained.type.toString()).toBe('vector<integer^3>');
+    // The outer stage's cell type is derived over the inner pipe's element
+    // type, so the inner `<0..>` range survives the `+1` as `<1..>` — the
+    // same answer the equivalent explicit `Map` of a `Map` reports.
+    expect(chained.type.toString()).toBe('list<integer<1..>^3>');
     expect(chained.type.toString()).toBe(chained.evaluate().type.toString());
   });
 

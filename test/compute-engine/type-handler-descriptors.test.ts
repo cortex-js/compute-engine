@@ -2,7 +2,7 @@
  * Unit pins for the operand-descriptor constructors (`describe`,
  * `describeType` in `boxed-expression/operand-descriptor.ts`) — the input a
  * `type` handler receives when its definition declares
- * `typeHandlerKind: 'types'`. Each block pins the FACTS a descriptor derives
+ * operand descriptors. Each block pins the FACTS a descriptor derives
  * from a concrete operand or type, and the structural view where one exists.
  *
  * Facts are pinned three-valued: `true`/`false` only where the source
@@ -12,6 +12,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { typeToString } from '../../src/common/type/serialize';
 import {
   describe as describeOperand,
   describeType,
@@ -43,11 +44,26 @@ describe('describe() on literals', () => {
     expect(describeOperand(ce.box(0)).structureOf?.()).toEqual({
       kind: 'number',
       literal: 0,
+      rational: [0n, 1n],
     });
     expect(describeOperand(ce.box(1)).structureOf?.()).toEqual({
       kind: 'number',
       literal: 1,
+      rational: [1n, 1n],
     });
+  });
+
+  test('a rational literal carries its exact reduced terms', () => {
+    // The handler-visible type of a rational no double represents exactly is
+    // an outward-rounded range; the structure node keeps the exact terms.
+    const s = describeOperand(ce.box(['Rational', 6, 4])).structureOf?.();
+    expect(s?.kind).toBe('number');
+    if (s?.kind === 'number') expect(s.rational).toEqual([3n, 2n]);
+    // A float, a radical and a non-finite literal carry none.
+    for (const x of [2.5, ['Sqrt', 2], { num: 'NaN' }]) {
+      const n = describeOperand(ce.box(x as any)).structureOf?.();
+      if (n?.kind === 'number') expect(n.rational).toBeUndefined();
+    }
   });
 
   test('non-finite literals', () => {
@@ -137,20 +153,49 @@ describe('describe() on compound operands', () => {
     expect(d.facts.collection).toBe(true);
     expect(d.facts.indexed).toBe(true);
     expect(d.facts.finiteCollection).toBe(true);
-    expect(d.structureOf?.()).toEqual({
-      kind: 'list-literal',
-      shape: [2, 2],
-    });
+    const s = d.structureOf?.();
+    expect(s?.kind).toBe('list-literal');
+    if (s?.kind === 'list-literal') {
+      expect(s.shape).toEqual([2, 2]);
+      // One descriptor per top-level row, each a list literal itself.
+      expect(s.elements).toHaveLength(2);
+      expect(s.elements[0].structureOf?.()?.kind).toBe('list-literal');
+    }
   });
 
   test('a ragged list stops its shape at the uniform depth', () => {
     const d = describeOperand(ce.box(['List', ['List', 1, 2], ['List', 3]]));
-    expect(d.structureOf?.()).toEqual({ kind: 'list-literal', shape: [2] });
+    const s = d.structureOf?.();
+    expect(s?.kind).toBe('list-literal');
+    if (s?.kind === 'list-literal') expect(s.shape).toEqual([2]);
   });
 
   test('a tuple literal', () => {
-    const d = describeOperand(ce.box(['Tuple', 1, 'two', 3]));
-    expect(d.structureOf?.()).toEqual({ kind: 'tuple', arity: 3 });
+    const d = describeOperand(ce.box(['Tuple', 1, { str: 'two' }, 3]));
+    const s = d.structureOf?.();
+    expect(s?.kind).toBe('tuple');
+    if (s?.kind === 'tuple') {
+      expect(s.arity).toBe(3);
+      // One descriptor per component, carrying the component's
+      // handler-visible type (a literal's value-carrying type included).
+      expect(s.elements.map((e) => typeToString(e.type))).toEqual([
+        '1',
+        'string',
+        '3',
+      ]);
+    }
+  });
+
+  test('a collection application carries the element type its handler proves', () => {
+    // `Range(1, 5)` has integer endpoints, so its own collection handler
+    // proves `integer` elements where the static type says only `real`.
+    const d = describeOperand(ce.box(['Range', 1, 5]));
+    expect(d.facts.elementType).toBe('integer');
+    // A symbol is no application, so there is no per-instance handler
+    // answer: a consumer reads the element type from the type alone.
+    ce.declare('Lint', 'list<integer>');
+    const l = describeOperand(ce.box('Lint'));
+    expect(l.facts.elementType).toBeUndefined();
   });
 
   test('a function literal: parameters, annotations, body', () => {

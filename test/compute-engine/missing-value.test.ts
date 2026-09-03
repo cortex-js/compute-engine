@@ -320,15 +320,16 @@ describe('P2 — strip & absorption (§3.B, propagate)', () => {
       for (const cell of row.each()) expect(cell.isNaN).toBe(true);
   });
 
-  test('the operandTypes override reaches a per-operator type handler', () => {
-    // A custom operator whose `type` handler reads `options.operandTypes[0]`.
+  test('the stripped operand type reaches a per-operator type handler', () => {
+    // A custom `propagate` operator whose `type` handler reads its operand's
+    // descriptor: the strip is folded into the descriptor's type.
     const e = new ComputeEngine();
     let seen: string | undefined;
     e.declare('Probe', {
       signature: '(number) -> number',
       missingBehavior: 'propagate',
-      type: (ops, { operandTypes }) => {
-        seen = operandTypes?.[0]?.toString();
+      type: ([x]) => {
+        seen = e.type(x.type).toString();
         return 'number';
       },
       evaluate: ([x]) => x,

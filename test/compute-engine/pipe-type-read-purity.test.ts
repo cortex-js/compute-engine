@@ -1,24 +1,21 @@
 /**
  * Reading the type of a `Pipe` whose stage is a shorthand-lambda literal
- * (`xs |> _^2`) canonicalizes that stage, and the placeholder declarations the
- * canonicalization needs used to advance the engine's `any` cache axis — the
- * axis `BoxedFunction.type` keys its memo on. Every advance retires the
+ * (`xs |> _^2`) used to canonicalize that stage, and the declarations the
+ * canonicalization needed advanced the engine's `any` cache axis — the axis
+ * `BoxedFunction.type` keys its memo on. Every advance retires the
  * `_type`/`_sgn` memo of every expression in the engine, so a type read that
  * advances the axis invalidates the caches the enclosing walk is filling.
- * `canonicalWithFreshPlaceholders` now registers its throwaway placeholder
- * scope in `ce._scratchDeclarationScopes` while it pre-declares into it, which
- * zero-masks exactly those declarations (`axisMaskOf`,
- * `engine-configuration-lifecycle.ts`).
+ *
+ * `Pipe`'s `type` handler is now on the descriptor shape
+ * (operand descriptors): it reads the operands' structure and types and
+ * canonicalizes nothing at all, so a re-derivation now advances NO axis. That
+ * is what the drift pin below records — it was 2 per read before the scratch
+ * registration of `canonicalWithFreshPlaceholders`, 1 after it (the literal's
+ * own parameter, declared into a scope the canonical stage kept), and 0 now
+ * that no declaration happens on the type path.
  *
  * The assertions are STRUCTURAL — a generation delta, an exact derived type, a
  * bracket back at its resting state — never a wall-clock threshold.
- *
- * One advance per re-derivation REMAINS, and is pinned as such rather than
- * driven to zero: canonicalizing the literal declares its own parameter into
- * the literal's `block.localScope`, a scope the canonical stage captures and
- * that therefore outlives the type read. A declaration aimed at a scope that
- * outlives the computation must keep its axis advance, or stale `_type`/`_sgn`
- * answers survive engine-wide.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -45,12 +42,13 @@ describe('a Pipe type read does not re-derive on every read', () => {
     expect(ce._anyVersion - before).toBe(0);
   });
 
-  test('a re-derivation costs at most one axis advance', () => {
+  test('a re-derivation advances no axis at all', () => {
     // An unrelated declaration between reads retires the memo, so each read
-    // re-derives — which is where the placeholder declarations used to double
-    // the churn. Measured over 10 such re-reads: 20 advances before the fix
-    // (the placeholder `_` plus the literal's own parameter), 10 after (the
-    // parameter alone, which must keep advancing: its scope outlives the read).
+    // re-derives — which is where the stage's canonicalization used to churn
+    // the axis. Measured over 10 such re-reads: 20 advances when the
+    // placeholder declarations still counted, 10 once they were registered as
+    // scratch (the literal's own parameter alone), and 0 now that the
+    // descriptor-shape handler canonicalizes nothing.
     const { ce, pipe } = pipeOverDeclaredList();
     pipe.type;
 
@@ -61,13 +59,10 @@ describe('a Pipe type read does not re-derive on every read', () => {
       pipe.type;
       drift += ce._anyVersion - before;
     }
-    // Exactly one advance per re-derivation, not "at most": the remaining
-    // advance is the literal's own parameter declared into a scope the
-    // canonical literal keeps, and the user ruled (2026-08-22) that it must
-    // keep advancing. A drift of 0 here would mean an over-broad scratch
-    // exemption that leaves stale `_type`/`_sgn` memos engine-wide — the
-    // unsound case this pin exists to reject as much as the 2-per-read one.
-    expect(drift).toBe(10);
+    // Exactly zero, not "at most": a non-zero drift would mean the type path
+    // had started declaring something again, which is what the descriptor
+    // handler shape exists to prevent.
+    expect(drift).toBe(0);
   });
 });
 
@@ -108,7 +103,21 @@ describe('the derived type is unchanged', () => {
       ['List', 1, 2, 3],
       ['Function', ['Map', ['Function', ['Power', 'k', 2], 'k'], '_1']],
     ]);
-    expect(pipe.type.toString()).toBe('list<collection<number>^3>');
+    // The mapping body is an inner `Map` over the piped ELEMENT, which is an
+    // integer rather than a collection. The pipe reports exactly what the
+    // equivalent explicit `Map` reports for the same shape — that equivalence
+    // is what the implicit-map typing is defined by — so this row moves
+    // whenever the inner head's own answer moves.
+    expect(pipe.type.toString()).toBe('vector<integer^3>');
+    expect(pipe.type.toString()).toBe(
+      ce
+        .box([
+          'Map',
+          ['Function', ['Map', ['Function', ['Power', 'k', 2], 'k'], '_1'], '_1'],
+          ['List', 1, 2, 3],
+        ])
+        .type.toString()
+    );
   });
 });
 
@@ -123,6 +132,8 @@ describe('the placeholder scope registration is balanced', () => {
     expect(ce._scratchDeclarationScopes).toHaveLength(0);
   });
 
+  // The descriptor-shape handler declares nothing, so this exercises the
+  // bracket only through the routes that still canonicalize (evaluation).
   test('a throw while declaring the placeholders leaves nothing registered', () => {
     const { ce, pipe } = pipeOverDeclaredList();
     const engine = ce as unknown as {
@@ -143,5 +154,20 @@ describe('the placeholder scope registration is balanced', () => {
       engine._declareSymbolValue = original;
     }
     expect(ce._scratchDeclarationScopes).toHaveLength(0);
+  });
+});
+
+describe('an implicit-map pipe types every stage body as a mapped collection', () => {
+  const ce = new ComputeEngine();
+  ce.declare('xs', 'list<integer>');
+  test('a constant body', () => {
+    expect(ce.box(['Pipe', 'xs', ['Function', 0, 'x']]).type.toString()).toMatch(/^list</);
+  });
+  test('a tuple body equals the explicit Map', () => {
+    expect(
+      ce.box(['Pipe', 'xs', ['Function', ['Tuple', 'x', 'x'], 'x']]).type.toString()
+    ).toBe(
+      ce.box(['Map', ['Function', ['Tuple', 'x', 'x'], 'x'], 'xs']).type.toString()
+    );
   });
 });

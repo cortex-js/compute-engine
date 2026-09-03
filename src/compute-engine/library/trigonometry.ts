@@ -1,5 +1,6 @@
 import { BigDecimal } from '../../big-decimal/index.js';
 
+import { euclideanNormType, pointNormBroadcasts } from './utils.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
 import {
   checkArity,
@@ -34,29 +35,25 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { nonNegativeSign } from '../boxed-expression/sgn.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
-import { isTuple } from '../collection-utils.js';
-import { euclideanNormType, pointNormBroadcasts } from './utils.js';
-import {
-  elementaryFunctionType,
-  boundedInverseTrigType,
-  iv,
-  type RealDomain,
-} from './type-handlers.js';
-// The `'types'`-shape twins of the helpers above, wired to the definitions
-// that declare `typeHandlerKind: 'types'`. Both modules export the same
-// names on purpose (a converted call site otherwise changes only its import
-// path), so the twins carry an `OnTypes` suffix here to keep the two shapes
-// readable side by side while the migration runs.
+import { isTuple, isTupleShapedType } from '../collection-utils.js';
+// Every `type` handler in this file is on the `'types'` (operand-descriptor)
+// shape, so the helpers all come from the descriptor-shape module. The
+// `OnTypes` suffixes are kept while the expression-shape module still
+// exports the same names, so that the two shapes read apart at a glance.
 import {
   broadcastOperandType,
   numericTypeHandler as numericTypeHandlerOnTypes,
   elementaryFunctionType as elementaryFunctionTypeOnTypes,
-} from './type-handlers-types.js';
+  boundedInverseTrigType as boundedInverseTrigTypeOnTypes,
+  operandSgn as operandSgnOnTypes,
+  iv,
+  type RealDomain,
+} from './type-handlers.js';
 import { isMeasurement, measurementTrig } from './measurement-arithmetic.js';
 import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite.js';
 import { getUnitScale } from './unit-data.js';
@@ -220,7 +217,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(real) -> real',
       // A non-real or non-finite argument flows through the linear conversion
       // (`Degrees(i) = iπ/180`), so the claim must follow the operand.
-      typeHandlerKind: 'types',
       type: (ops) => numericTypeHandlerOnTypes(ops),
       canonical: (ops, { engine }) => {
         const ce = engine;
@@ -290,7 +286,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     DMS: {
       description: 'Construct an angle from degrees, minutes, and seconds.',
       signature: '(real, real?, real?) -> real',
-      typeHandlerKind: 'types',
       type: (ops) => numericTypeHandlerOnTypes(ops),
       canonical: (ops, { engine: ce }) => {
         const deg = ops[0]?.re ?? NaN;
@@ -404,23 +399,25 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // a decided-but-wrong scalar (the Tycho item-44 class).
       type: ([x, y]) => {
         if (
-          (x && isTuple(x) && pointNormBroadcasts(x)) ||
-          (y && isTuple(y) && pointNormBroadcasts(y))
+          (x && isTupleShapedType(x.type) && pointNormBroadcasts(x)) ||
+          (y && isTupleShapedType(y.type) && pointNormBroadcasts(y))
         )
           return 'list<number>';
         // Both operands enter ONE sum of squares — a fixed-arity point
         // through its own norm — so the application is itself a Euclidean
-        // norm over the flattened components, and `euclideanNormType` is
-        // the claim for it. Flattening the point in is what keeps a tuple
+        // norm over the flattened components, and `euclideanNormType`
+        // is the claim for it. Flattening the point in is what keeps a tuple
         // from being silently dropped from the computation, which would
         // decide the type from the remaining scalar operands alone; a
-        // tuple-TYPED operand that is not a literal has no components to
-        // flatten and stands as itself, where the non-numeric arm of
-        // `euclideanNormType` widens it to `number`.
-        const components: Expression[] = [];
+        // tuple-TYPED operand that is not written out as a point has no
+        // components to flatten and stands as itself, where the non-numeric
+        // arm of `euclideanNormType` widens it to `number`.
+        const components: OperandDescriptor[] = [];
         for (const o of [x, y]) {
           if (o === undefined) continue;
-          if (isTuple(o) && isFunction(o)) components.push(...o.ops);
+          const structure = o.structureOf?.();
+          if (structure?.kind === 'tuple')
+            components.push(...structure.elements);
           else components.push(o);
         }
         return euclideanNormType(components);
@@ -477,7 +474,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // The definition of other trig functions may rely on Sin, so it is defined
     // first in this preliminary section
     Sin: {
-      ...trigFunction('Sin', 5000, 'Sine of an angle.', 'types', 'complex'),
+      ...trigFunction('Sin', 5000, 'Sine of an angle.', 'complex'),
       keywords: ['sine'],
       // The carrier is the FINITE complex numbers: sine is entire but has
       // no value and no limit at any infinity, so `Sin(±∞)` and
@@ -521,7 +518,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // complex value; the type handler carries the per-call sharpness).
       signature: '(complex | signed_infinity) -> number',
       nanBehavior: 'propagate',
-      typeHandlerKind: 'types',
       type: (ops) => elementaryFunctionTypeOnTypes('Arctan', ops),
       // arctan is odd and strictly increasing with arctan(0) = 0, so it
       // preserves the sign of its (real) argument; a non-real argument gives
@@ -578,7 +574,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(y: real | signed_infinity, x: real | signed_infinity) -> real',
       nanBehavior: 'propagate',
-      typeHandlerKind: 'types',
       type: (ops) => numericTypeHandlerOnTypes(ops),
       evaluate: ([y, x], { engine: ce, numericApproximation }) => {
         // NaN in → NaN out, in BOTH the evaluate and the N() paths. A NaN
@@ -655,7 +650,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Cos: {
       // Like `Sin`: no value at any infinity (oscillates toward the real
       // infinities, no limit at `~oo`).
-      ...trigFunction('Cos', 5050, 'Cosine of an angle.', 'types', 'complex'),
+      ...trigFunction('Cos', 5050, 'Cosine of an angle.', 'complex'),
       keywords: ['cosine'],
     },
 
@@ -663,7 +658,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // No value at any infinity. The POLES (odd multiples of π/2) are
       // in-carrier finite points whose VALUE is `~oo` — the carrier
       // restricts arguments, not results.
-      ...trigFunction('Tan', 5100, 'Tangent of an angle.', 'types', 'complex'),
+      ...trigFunction('Tan', 5100, 'Tangent of an angle.', 'complex'),
       keywords: ['tangent'],
     },
 
@@ -690,7 +685,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Arcosh',
       6200,
       'Inverse hyperbolic cosine (area hyperbolic cosine).',
-      'types',
       'complex | signed_infinity'
     ),
 
@@ -699,7 +693,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'Arcsin',
         5500,
         'Arcsine, the inverse sine function.',
-        'types',
         'complex'
       ),
       keywords: ['asin', 'inverse sine'],
@@ -719,7 +712,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Arsinh',
       6100,
       'Inverse hyperbolic sine (area hyperbolic sine).',
-      'types',
       'complex | signed_infinity'
     ),
 
@@ -731,7 +723,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Artanh',
       6300,
       'Inverse hyperbolic tangent (area hyperbolic tangent).',
-      'types',
       'complex | signed_infinity'
     ),
 
@@ -742,7 +733,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'Cosh',
         6050,
         'Hyperbolic cosine.',
-        'types',
         'complex | signed_infinity'
       ),
       keywords: ['hyperbolic cosine'],
@@ -754,7 +744,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Cot',
       5600,
       'Cotangent, the reciprocal of tangent.',
-      'types',
       'complex'
     ),
 
@@ -762,7 +751,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Csc',
       5600,
       'Cosecant, the reciprocal of sine.',
-      'types',
       'complex'
     ),
 
@@ -770,7 +758,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Sec',
       5600,
       'Secant, the reciprocal of cosine.',
-      'types',
       'complex'
     ),
 
@@ -780,7 +767,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'Sinh',
         6000,
         'Hyperbolic sine.',
-        'types',
         'complex | signed_infinity'
       ),
       keywords: ['hyperbolic sine'],
@@ -800,7 +786,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(real) -> number',
       // hav is entire (½(1−cos z)): finite real → [0,1] ⊂ finite real, but
       // `hav(±∞)` is NaN and a complex argument gives a complex value.
-      typeHandlerKind: 'types',
       type: (ops) => numericTypeHandlerOnTypes(ops),
       // Evaluate the constructed ½(1−cos z) so `.N()` returns a number, not the
       // unevaluated expression; exact arguments still stay symbolic under
@@ -822,7 +807,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // honest-join treatment as the Arcsin family (user ruling 2026-07-30):
       // a symbolic real of unknown magnitude claims `complex`, and
       // the compiled path emits complex code accordingly.
-      type: (ops) => boundedInverseTrigType(ops, INVERSE_HAVERSINE_DOMAIN),
+      type: (ops) =>
+        boundedInverseTrigTypeOnTypes(ops, INVERSE_HAVERSINE_DOMAIN),
       // Evaluate the constructed 2·arcsin(√z): under `.N()` it numericizes,
       // and under `evaluate()` the exact fold applies (`InverseHaversine(1/2) →
       // 2·arcsin(√2/2) → 2·(π/4) → π/2`).
@@ -839,7 +825,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Csch',
       6200,
       'Hyperbolic cosecant, the reciprocal of hyperbolic sine.',
-      'types',
       'complex | signed_infinity'
     ),
 
@@ -847,7 +832,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Sech',
       6200,
       'Hyperbolic secant, the reciprocal of hyperbolic cosine.',
-      'types',
       'complex | signed_infinity'
     ),
 
@@ -858,7 +842,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'Tanh',
         6200,
         'Hyperbolic tangent.',
-        'types',
         'complex | signed_infinity'
       ),
       keywords: ['hyperbolic tangent'],
@@ -872,7 +855,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         'Arccos',
         5550,
         'Arccosine, the inverse cosine function.',
-        'types',
         'complex'
       ),
       keywords: ['acos', 'inverse cosine'],
@@ -886,7 +868,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Arccot',
       5650,
       'Arccotangent, the inverse cotangent function.',
-      'types',
       'complex | signed_infinity'
     ),
 
@@ -899,7 +880,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Arcoth',
       6350,
       'Inverse hyperbolic cotangent (area hyperbolic cotangent).',
-      'types',
       'complex | infinity'
     ),
 
@@ -907,7 +887,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Arcsch',
       6250,
       'Inverse hyperbolic cosecant (area hyperbolic cosecant).',
-      'types',
       'complex | infinity'
     ),
 
@@ -915,7 +894,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Arcsec',
       5650,
       'Arcsecant, the inverse secant function.',
-      'types',
       'complex | infinity'
     ),
 
@@ -927,7 +905,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Arsech',
       6250,
       'Inverse hyperbolic secant (area hyperbolic secant).',
-      'types',
       'complex | signed_infinity'
     ),
 
@@ -935,7 +912,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Arccsc',
       5650,
       'Arccosecant, the inverse cosecant function.',
-      'types',
       'complex | infinity'
     ),
 
@@ -944,7 +920,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       'Coth',
       6300,
       'Hyperbolic cotangent, the reciprocal of hyperbolic tangent.',
-      'types',
       'complex | signed_infinity'
     ),
 
@@ -976,7 +951,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // `reject`).
       signature: '(complex | signed_infinity) -> complex',
       nanBehavior: 'propagate',
-      typeHandlerKind: 'types',
       type: ([x]) => boundedEntireRealType(x),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
@@ -1003,7 +977,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // (every value finite), `NaN` propagates by explicit declaration.
       signature: '(complex | signed_infinity) -> complex',
       nanBehavior: 'propagate',
-      typeHandlerKind: 'types',
       type: ([x]) => boundedEntireRealType(x),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
@@ -1030,7 +1003,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // (every value finite), `NaN` propagates by explicit declaration.
       signature: '(complex | signed_infinity) -> complex',
       nanBehavior: 'propagate',
-      typeHandlerKind: 'types',
       type: ([x]) => boundedEntireRealType(x),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
@@ -1073,16 +1045,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // Si is entire and odd: a real argument → finite real (including ±∞:
       // Si(±∞) = ±π/2); a finite complex argument → finite complex value. An
       // operand of unproven realness (a `number`-typed symbol) must not claim
-      // real — it keeps the generic finite-point hedge.
-      type: (ops) => {
-        const x = ops[0];
-        if (!x || x.isNaN) return 'number';
-        if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'complex' : 'number';
-        if (x.isExtendedReal === true) return 'real';
-        // Unknown realness: a non-finite value (~oo) escapes the finite
-        // hedge, so it must be excluded before claiming it.
-        if (provablyNonFiniteNumber(x)) return 'number';
+      // real — it keeps the generic finite-point hedge. A NaN operand is
+      // refuted as an extended real, so it takes the finite test below and
+      // reaches the same `number` an explicit NaN gate would give.
+      type: ([x]) => {
+        if (!x) return 'number';
+        const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
+        if (extendedReal === false)
+          return x.facts.finite === true ? 'complex' : 'number';
+        if (extendedReal === true) return 'real';
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -1129,13 +1100,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // argument. A negative real argument gives a COMPLEX value (`Ci(x) +
       // iπ`), so realness alone proves nothing and the claim is `number`.
       // A finite complex argument → finite complex value. Unproven realness
-      // → `number`.
-      type: (ops) => {
-        const x = ops[0];
-        if (!x || x.isNaN) return 'number';
-        if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'complex' : 'number';
-        return x.isExtendedReal === true && x.isNonNegative === true
+      // → `number`. A NaN operand is refuted as an extended real, so it takes
+      // the finite test and reaches `number` without a separate NaN gate.
+      type: ([x]) => {
+        if (!x) return 'number';
+        const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
+        if (extendedReal === false)
+          return x.facts.finite === true ? 'complex' : 'number';
+        return extendedReal === true &&
+          nonNegativeSign(operandSgnOnTypes(x)) === true
           ? EXTENDED_REAL_TYPE
           : 'number';
       },
@@ -1181,14 +1154,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // to be on the EXTENDED real line therefore needs the extended real line
       // as its claim — the bare name `real` denotes the finite reals and would
       // exclude ±∞. Unproven realness → `number` (Shi is unbounded, so no
-      // finite hedge is available).
-      type: (ops) => {
-        const x = ops[0];
-        if (!x || x.isNaN) return 'number';
-        if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'complex' : 'number';
-        if (x.isExtendedReal === true)
-          return x.isFinite === true ? 'real' : EXTENDED_REAL_TYPE;
+      // finite hedge is available). A NaN operand is refuted as an extended
+      // real, so it takes the finite test and reaches `number` without a
+      // separate NaN gate.
+      type: ([x]) => {
+        if (!x) return 'number';
+        const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
+        if (extendedReal === false)
+          return x.facts.finite === true ? 'complex' : 'number';
+        if (extendedReal === true)
+          return x.facts.finite === true ? 'real' : EXTENDED_REAL_TYPE;
         return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
@@ -1232,13 +1207,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // finite argument. A negative real argument gives a COMPLEX value
       // (`Chi(x) + iπ`), so realness alone proves nothing and the claim is
       // `number`. A finite complex argument → finite complex value.
-      // Unproven realness → `number`.
-      type: (ops) => {
-        const x = ops[0];
-        if (!x || x.isNaN) return 'number';
-        if (x.isExtendedReal === false)
-          return x.isFinite === true ? 'complex' : 'number';
-        return x.isExtendedReal === true && x.isNonNegative === true
+      // Unproven realness → `number`. A NaN operand is refuted as an extended
+      // real, so it takes the finite test and reaches `number` without a
+      // separate NaN gate.
+      type: ([x]) => {
+        if (!x) return 'number';
+        const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
+        if (extendedReal === false)
+          return x.facts.finite === true ? 'complex' : 'number';
+        return extendedReal === true &&
+          nonNegativeSign(operandSgnOnTypes(x)) === true
           ? EXTENDED_REAL_TYPE
           : 'number';
       },
@@ -1516,46 +1494,41 @@ function nonFiniteTrigValue(
 
 /**
  * The shared definition of the 23 one-argument trigonometric, hyperbolic and
- * inverse heads. Everything but the `type` handler is identical across them;
- * `typeHandlerKind` selects which SHAPE of `type` handler this head gets, and
- * that is a per-head decision because the two shapes do not yet agree
- * everywhere:
+ * inverse heads. Everything but the `type` handler is identical across them,
+ * and every head takes its type from the shared dispatcher
+ * (`elementaryFunctionType` of `library/type-handlers.ts`).
  *
- * - `Sin`, `Cos`, `Tan`, `Sec`, `Sinh`, `Cosh`, `Tanh`, `Sech`, `Arsinh` and
- *   `Arccot` derive the same type in both shapes, so they pass `'types'`.
- *   `Tan` and `Sec` are the two pole-reciprocal heads whose poles are all
- *   irrational (the odd multiples of π/2), so their handler returns before it
- *   ever reads a sign — which is what keeps them equal.
- * - `Cot`, `Csc`, `Coth` and `Csch` also pass `'types'`. Their poles include
- *   0, so the handler must disprove zero-ness through the operand's SIGN —
- *   for a compound operand (`2p` with `p` assumed positive, `p + 1`,
- *   `Sign(p)`, `π/2`) a proof only an operator `sgn` handler can give. The
- *   descriptor's sign fact carries it: `describe()` consults the (pure)
- *   operator `sgn` handlers for applications (open item O7 of
+ * Two notes on what that dispatcher can prove, because they were the reason
+ * the heads converted one family at a time:
+ *
+ * - `Cot`, `Csc`, `Coth` and `Csch` have a pole at 0, so the handler must
+ *   disprove zero-ness through the operand's SIGN — for a compound operand
+ *   (`2p` with `p` assumed positive, `p + 1`, `Sign(p)`, `π/2`) a proof only
+ *   an operator `sgn` handler can give. The descriptor's sign fact carries
+ *   it: `describe()` consults the (pure) operator `sgn` handlers for
+ *   applications (open item O7 of
  *   `docs/plans/2026-08-22-type-handlers-on-types.md`).
  * - The nine heads routed to `boundedInverseTrigType` (`Arcsin`, `Arccos`,
  *   `Arcsec`, `Arccsc`, `Artanh`, `Arcoth`, `Arsech`, `Arcsch`, `Arcosh`)
- *   also pass `'types'`, and are the one family whose conversion CHANGED
- *   derived types, by ruling (2026-08-25). Their in-domain proof differs
- *   between the shapes: the expression shape asks the numeric predicates,
- *   which answer from the assumptions system, while the descriptor shape
- *   reads the operand's ranged TYPE — so a range that came from a
- *   DECLARATION (`ce.declare('BIG', 'real<2..>')`, which records no
- *   assumption) or from a ranged RESULT type (`Sign(r)`, `Exp(r)`) now
- *   proves containment the old shape could not, narrowing those claims
- *   (`Arcosh(BIG)` types `real`, not `number`), while an exact
- *   literal with no machine value (`1/3`, `√2`, a bigint) loses the old
- *   `.re` float-projection proof and widens (accepted rational-literal
- *   residue, ruling O4 of the plan doc). Every changed row is recorded in
- *   `test/compute-engine/type-handler-twins.test.ts`, and these heads run
- *   NO shadow parity — the two shapes differ by design, so the differential
- *   would report the ruling, not a defect.
+ *   are the one family whose conversion CHANGED derived types, by ruling
+ *   (2026-08-25). Their in-domain proof differs between the shapes: the
+ *   expression shape asks the numeric predicates, which answer from the
+ *   assumptions system, while the descriptor shape reads the operand's
+ *   ranged TYPE — so a range that came from a DECLARATION
+ *   (`ce.declare('BIG', 'real<2..>')`, which records no assumption) or from
+ *   a ranged RESULT type (`Sign(r)`, `Exp(r)`) now proves containment the
+ *   old shape could not, narrowing those claims (`Arcosh(BIG)` types
+ *   `real`, not `number`), while an exact literal with no machine value
+ *   (`1/3`, `√2`, a bigint) loses the old `.re` float-projection proof and
+ *   widens (accepted rational-literal residue, ruling O4 of the plan doc).
+ *   The adopted claims are pinned in
+ *   `test/compute-engine/type-handler-parity.test.ts` ("bounded inverse
+ *   trig heads read ranged types").
  */
 function trigFunction(
   operator: string,
   complexity: number,
   description?: string,
-  typeHandlerKind: 'expressions' | 'types' = 'expressions',
   // Contract B carrier of the head, chosen from the head's mathematical
   // domain (rulings of 2026-08-31 and 2026-09-01, recorded in
   // `docs/plans/2026-08-30-error-model-implementation.md`):
@@ -1668,11 +1641,8 @@ function trigFunction(
     },
   };
 
-  if (typeHandlerKind === 'types')
-    return {
-      ...common,
-      typeHandlerKind: 'types',
-      type: (ops) => elementaryFunctionTypeOnTypes(operator, ops),
-    };
-  return { ...common, type: (ops) => elementaryFunctionType(operator, ops) };
+  return {
+    ...common,
+    type: (ops) => elementaryFunctionTypeOnTypes(operator, ops),
+  };
 }

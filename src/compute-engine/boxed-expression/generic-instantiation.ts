@@ -7,7 +7,7 @@ import {
   substituteTypeVariables,
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
-import { provablyDisjoint } from '../../common/type/subtype.js';
+import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import { widenValueTypes } from '../../common/type/widen-value.js';
 import {
   functionResult,
@@ -124,6 +124,50 @@ export interface ArmInferenceContext {
  * Solve `arm`'s `where` clause against `ops` (§4.3), mapping each §4.5
  * admission gate onto the solver's bound-contribution rules.
  */
+/**
+ * What the solver reads of one operand. The expression route builds one
+ * from each operand expression (`actualOfOperand`); the descriptor route
+ * (`deriveApplicationType`, `derive-application-type.ts`) builds one from an
+ * operand descriptor, so a `type` handler can instantiate a signature it
+ * does not hold an expression for. Every field is a pure read.
+ */
+export interface SolveActual {
+  /** The operand's public type (`.type.type`). */
+  readonly type: Type;
+  /** The operand is a number literal, whose type carries its value. */
+  readonly literal: boolean;
+  /** The operand is not an error. An invalid operand contributes no bound. */
+  readonly valid: boolean;
+  /** The operand is a symbol whose recorded type was INFERRED and is still
+   * a top type (`unknown` or `any`): it contributes no bound and stays
+   * eligible for post-solve narrowing. */
+  readonly inferable: boolean;
+  /** The operand could be an unkeyed collection at run time (a finite
+   * indexed collection value, or a type that admits one; never a string).
+   * Read ONLY at a threadable position: on a lazy collection value the
+   * answer walks the value's `count`, and the solver never needs it
+   * elsewhere. Implementations compute it on first read. */
+  readonly liftable: boolean;
+}
+
+/** The solver's view of an operand expression. `liftable` is computed on
+ * first read (see the field's contract). */
+export function actualOfOperand(op: Expression): SolveActual {
+  const type = op.type.type;
+  let liftable: boolean | undefined;
+  return {
+    type,
+    literal: op._literalType !== undefined,
+    valid: op.isValid,
+    inferable:
+      !!op.valueDefinition?.inferredType &&
+      (op.type.isUnknown || type === 'any'),
+    get liftable(): boolean {
+      return (liftable ??= couldBeUnkeyedCollectionOperand(op));
+    },
+  };
+}
+
 export function solveArm(
   arm: FunctionSignature,
   ops: ReadonlyArray<Expression>,
@@ -134,6 +178,24 @@ export function solveArm(
   // `skip` alone would be too late: building the actuals array reads `.type`
   // on every operand, and a lazy operator's operands arrive UNBOUND, so
   // forcing their type is both meaningless and a canonicalization side trip.
+  if (ctx?.lazy) return solveTypeArguments(arm, []);
+  return solveArmOverActuals(
+    arm,
+    ops.map((op) => (op ? actualOfOperand(op) : undefined)),
+    ctx
+  );
+}
+
+/**
+ * Solve `arm`'s `where` clause against the solver's view of the operands.
+ * `solveArm` is this function over operand expressions; the descriptor
+ * route calls it directly.
+ */
+export function solveArmOverActuals(
+  arm: FunctionSignature,
+  ops: ReadonlyArray<SolveActual | undefined>,
+  ctx?: ArmInferenceContext
+): TypeInferenceResult {
   if (ctx?.lazy) return solveTypeArguments(arm, []);
 
   // The LOOSEST reading of each parameter: every variable read as `any`. An
@@ -216,9 +278,9 @@ export function solveArm(
     // unaffected.
     ops.map((op) =>
       op
-        ? op._literalType !== undefined
-          ? stripNumericRanges(op.type.type)
-          : widenValueTypes(op.type.type)
+        ? op.literal
+          ? stripNumericRanges(op.type)
+          : widenValueTypes(op.type)
         : undefined
     ),
     {
@@ -230,28 +292,23 @@ export function solveArm(
         const op = ops[i];
         if (!op) return true;
         // An already-invalid operand: no bound, existing error path unchanged.
-        if (!op.isValid) return true;
+        if (!op.valid) return true;
         // Design E R-E3: no domain constraints from an arrow-slot operand
         // whose parameter variables are data-anchored (see `skippedArrowSlots`
         // above; the result-side flow runs after the solve).
         if (skippedArrowSlots[i] !== undefined) return true;
         // Missing-value stripping: stripped before inference, contributes
         // nothing.
-        if (ctx?.stripMissing?.(i) && typeContainsMissing(op.type.type))
-          return true;
+        if (ctx?.stripMissing?.(i) && typeContainsMissing(op.type)) return true;
         const skeleton = skeletons[i];
-        return skeleton !== undefined && !op.type.matches(skeleton);
+        return skeleton !== undefined && !isSubtype(op.type, skeleton);
       },
       inferable: (i) => {
         // An INFERABLE unknown/`any` symbol contributes no bound; it stays
         // eligible for post-solve narrowing to the instantiated ground
         // parameter. A NON-inferable unknown operand does contribute (and
         // absorbs, §4.3 table).
-        const op = ops[i];
-        return (
-          !!op?.valueDefinition?.inferredType &&
-          (op.type.isUnknown || op.type.type === 'any')
-        );
+        return ops[i]?.inferable === true;
       },
       lifted: (i) => {
         // D10 (re-ruled 2026-08-04): a lift-admitted operand at a
@@ -260,11 +317,7 @@ export function solveArm(
         // ordinary broadcast wrap re-lifts the instantiated result. Admission
         // stays checked at the scalar base by the lift gate itself.
         const op = ops[i];
-        return (
-          isThreadableAt(ctx?.threadable, i) &&
-          !!op &&
-          couldBeUnkeyedCollectionOperand(op)
-        );
+        return isThreadableAt(ctx?.threadable, i) && op?.liftable === true;
       },
     }
   );
@@ -284,7 +337,7 @@ export function solveArm(
 function refineResultSideFromCallbacks(
   solved: TypeInferenceResult,
   arrowSlots: ReadonlyArray<FunctionSignature | undefined>,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<SolveActual | undefined>
 ): TypeInferenceResult {
   let bindings: TypeInferenceResult['bindings'] | undefined;
   let unbound: Set<string> | undefined;
@@ -295,8 +348,8 @@ function refineResultSideFromCallbacks(
     if (typeof r !== 'object' || r.kind !== 'variable') continue;
     if (!(unbound ?? solved.unbound).has(r.name)) continue;
     const op = ops[i];
-    if (!op?.isValid) continue;
-    const fr = functionResult(op.type.type);
+    if (!op?.valid) continue;
+    const fr = functionResult(op.type);
     if (fr === undefined || hasFreeTypeVariables(fr)) continue;
     // A top-typed result says nothing; keep the ordinary `unknown` fallback.
     if (fr === 'unknown' || fr === 'any') continue;
@@ -553,6 +606,20 @@ export function instantiatedResultType(
   const poly = polytypeArm(arm);
   if (poly === undefined) return undefined;
   const solved = solveArm(poly, ops, ctx);
+  const result = substituteTypeVariables(poly.result, solved.bindings);
+  return freeTypeVariables(result).size === 0 ? result : 'unknown';
+}
+
+/** `instantiatedResultType` over the solver's view of the operands (the
+ * descriptor route). */
+export function instantiatedResultTypeOverActuals(
+  arm: Readonly<Type> | undefined,
+  ops: ReadonlyArray<SolveActual | undefined>,
+  ctx?: ArmInferenceContext
+): Type | undefined {
+  const poly = polytypeArm(arm);
+  if (poly === undefined) return undefined;
+  const solved = solveArmOverActuals(poly, ops, ctx);
   const result = substituteTypeVariables(poly.result, solved.bindings);
   return freeTypeVariables(result).size === 0 ? result : 'unknown';
 }

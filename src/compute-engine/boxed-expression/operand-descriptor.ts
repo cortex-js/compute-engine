@@ -4,15 +4,10 @@ import type {
   OperandDescriptor,
   OperandFacts,
   OperandStructure,
-  OperatorTypeHandlerOnExpressions,
   Sign,
   Tri,
 } from '../global-types.js';
-import type { Type, TypeString } from '../../common/type/types.js';
-import { BoxedType } from '../../common/type/boxed-type.js';
-import { parseType } from '../../common/type/parse.js';
-import { typeToString } from '../../common/type/serialize.js';
-import { widenValueTypes } from '../../common/type/widen-value.js';
+import type { Type } from '../../common/type/types.js';
 
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
@@ -21,14 +16,15 @@ import {
 } from '../../common/type/primitive.js';
 import { signOfType } from '../../common/type/utils.js';
 import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
+import { asRational } from './numerics.js';
 import {
   functionLiteralBody,
   functionLiteralParameters,
 } from './function-literal.js';
 
 /**
- * Operand descriptors: what a `type` handler in the `'types'` shape receives
- * in place of the operand expressions, so that deriving a type cannot
+ * Operand descriptors: what a `type` handler receives in place of the
+ * operand expressions, so that deriving a type cannot
  * declare, canonicalize, or evaluate anything. `describe()` builds one from
  * a real operand; `describeType()` builds a synthetic one from a type alone.
  * These two constructors are the only way a descriptor is made.
@@ -142,27 +138,63 @@ function listLiteralShape(op: Expression): number[] {
 /** The inert structural view of an operand — see `OperandStructure`. Reads
  * the operand as written (raw operands of a lazy operator included) and
  * never binds or canonicalizes anything. */
-function structureOfExpression(op: Expression): OperandStructure | undefined {
+/**
+ * One structure walk's descriptor memo, keyed by operand expression. A boxed
+ * expression is a DAG — a list built from one sub-list referenced twice holds
+ * the same object twice — so every child of a structure is described through
+ * this map: a shared node yields ONE descriptor, and a consumer that memoizes
+ * its own analysis by descriptor identity (`List`'s shape analysis) stays
+ * linear in the number of distinct nodes instead of the number of paths (a
+ * 26-level `List(t, t)` tower has 27 nodes and 2^26 paths). The call site
+ * hands one map to every operand of an application, so a node shared
+ * between two operands is described once as well. The map lives as long
+ * as the descriptor tree it belongs to — one type derivation — so a stale
+ * fact can never outlive the engine state it was read from.
+ */
+export type DescriptorMemo = Map<Expression, OperandDescriptor>;
+
+function structureOfExpression(
+  op: Expression,
+  memo: DescriptorMemo
+): OperandStructure | undefined {
   if (isSymbol(op)) {
-    // The inferred-type flag rides the symbol node (a property of THIS
-    // symbol, not of a type): present only when true, so a declared or
-    // unbound symbol's node stays `{ kind, name }`.
-    return op.valueDefinition?.inferredType === true
-      ? { kind: 'symbol', name: op.symbol, inferred: true }
-      : { kind: 'symbol', name: op.symbol };
+    // The inferred-type and system-binding flags ride the symbol node (a
+    // property of THIS symbol, not of a type): each is present only when
+    // true, so a plain declared or unbound symbol's node stays
+    // `{ kind, name }`. A symbol is system-bound when its value definition
+    // IS the one the engine's outermost scope binds under its name (the
+    // binding-identity test `isRingConstant` makes on an expression); an
+    // unbound symbol resolves to nothing and is never system-bound.
+    const node: OperandStructure = { kind: 'symbol', name: op.symbol };
+    const def = op.valueDefinition;
+    if (def !== undefined) {
+      if (def.inferredType === true) node.inferred = true;
+      const systemBinding =
+        op.engine.contextStack[0]?.lexicalScope.bindings.get(op.symbol);
+      if (
+        systemBinding !== undefined &&
+        'value' in systemBinding &&
+        systemBinding.value === def
+      )
+        node.system = true;
+    }
+    return node;
   }
   if (isString(op)) return { kind: 'string', text: op.string };
   if (isNumber(op)) {
     // `isSame` is strictly syntactic, so this reads the literal's own value
     // and never a symbol's assigned one.
-    if (op.isSame(0)) return { kind: 'number', literal: 0 };
-    if (op.isSame(1)) return { kind: 'number', literal: 1 };
-    return { kind: 'number' };
+    const literal = op.isSame(0) ? 0 : op.isSame(1) ? 1 : undefined;
+    const r = asRational(op);
+    const node: OperandStructure = { kind: 'number' };
+    if (literal !== undefined) node.literal = literal;
+    if (r !== undefined) node.rational = [BigInt(r[0]), BigInt(r[1])];
+    return node;
   }
   if (isFunction(op, 'Function')) {
     const body = functionLiteralBody(op);
     const bodyStructure =
-      body === undefined ? undefined : structureOfExpression(body);
+      body === undefined ? undefined : structureOfExpression(body, memo);
     // A literal whose body has no structural form yields no structure at
     // all, rather than a view with a hole where the body should be.
     if (bodyStructure === undefined) return undefined;
@@ -174,14 +206,23 @@ function structureOfExpression(op: Expression): OperandStructure | undefined {
       body: bodyStructure,
     };
   }
-  if (isFunction(op, 'Tuple')) return { kind: 'tuple', arity: op.nops };
+  if (isFunction(op, 'Tuple'))
+    return {
+      kind: 'tuple',
+      arity: op.nops,
+      elements: op.ops.map((x) => describe(x, undefined, memo)),
+    };
   if (isFunction(op, 'List'))
-    return { kind: 'list-literal', shape: listLiteralShape(op) };
+    return {
+      kind: 'list-literal',
+      shape: listLiteralShape(op),
+      elements: op.ops.map((x) => describe(x, undefined, memo)),
+    };
   if (isFunction(op))
     return {
       kind: 'application',
       head: op.operator,
-      children: op.ops.map((x) => describe(x)),
+      children: op.ops.map((x) => describe(x, undefined, memo)),
     };
   return undefined;
 }
@@ -211,30 +252,56 @@ function structureOfExpression(op: Expression): OperandStructure | undefined {
  */
 export function describe(
   op: Expression,
-  typeOverride?: Type
+  typeOverride?: Type,
+  walk?: DescriptorMemo
 ): OperandDescriptor {
+  // A child reached through a structure walk is described once per walk
+  // (see `DescriptorMemo`); a top-level operand with a type override is
+  // never shared, so it is never memoized.
+  if (typeOverride === undefined) {
+    const shared = walk?.get(op);
+    if (shared !== undefined) return shared;
+  }
   const type = typeOverride ?? op._literalType ?? op.type.type;
   const tf = factsFromType(type);
 
-  let collection = tf.collection;
-  if (collection !== true && op.isCollection === true) collection = true;
-  let indexed = tf.indexed;
-  if (indexed !== true && op.isIndexedCollection === true) indexed = true;
-  let finiteCollection = tf.finiteCollection;
-  if (collection !== false && finiteCollection === undefined)
-    finiteCollection = op.isFiniteCollection;
+  // Every fact beyond what the type proves is computed ON FIRST READ and
+  // memoized. The value-channel reads are not free: a collection value's
+  // finiteness or element type comes from its operator's collection
+  // handlers, and a `Range` whose bound is a `Sum` evaluates that bound to
+  // answer its `count`. Reading every fact eagerly made building a
+  // descriptor — which happens for every operand of every derivation —
+  // evaluate operands no handler was going to ask about, and moved that
+  // evaluation OUTSIDE the purity guard's window, where a state write went
+  // unreported (a `sgn` read of `Random(Range(1, Sum(…)))` advanced the
+  // cache axis through its type derivation). Lazily, a handler pays only
+  // for the facts it reads, and reads them inside the guarded window.
 
-  let finite = tf.finite;
-  if (finite === undefined) {
-    if (isNumber(op)) finite = op.isFinite;
-    else if (isSymbol(op)) {
+  const collectionOf = (): Tri => {
+    if (tf.collection === true) return true;
+    return op.isCollection === true ? true : tf.collection;
+  };
+  const indexedOf = (): Tri => {
+    if (tf.indexed === true) return true;
+    return op.isIndexedCollection === true ? true : tf.indexed;
+  };
+  const finiteCollectionOf = (): Tri => {
+    if (tf.finiteCollection !== undefined) return tf.finiteCollection;
+    return collectionOf() !== false ? op.isFiniteCollection : undefined;
+  };
+
+  const finiteOf = (): Tri => {
+    if (tf.finite !== undefined) return tf.finite;
+    if (isNumber(op)) return op.isFinite;
+    if (isSymbol(op)) {
       // Symmetric with the sign read below: a held NUMBER value is a pure
       // source, and a wide-typed symbol (`w: number`) can legitimately hold
       // `±∞` or `NaN` that its type does not reveal. A held non-number
       // value decides nothing.
       const held = op.valueDefinition?.value;
-      if (held !== undefined && isNumber(held)) finite = held.isFinite;
-    } else if (isFunction(op) && isSubtype(type, 'number')) {
+      return held !== undefined && isNumber(held) ? held.isFinite : undefined;
+    }
+    if (isFunction(op) && isSubtype(type, 'number')) {
       // The value channel is the REFUTATION backstop for the generic-point
       // convention. A result type is deliberately optimistic about
       // finiteness: an operator that is finite at a generic point claims a
@@ -254,9 +321,10 @@ export function describe(
       // `isFinite === false` also means "not a number at all", so a
       // `List`, a `Tuple` or an application of unknown result type answers
       // `false` there without being an infinity.
-      finite = op.isFinite;
+      return op.isFinite;
     }
-  }
+    return undefined;
+  };
 
   // Value channel first (a literal's value, a symbol's held value or
   // assumptions, an application's operator `sgn` handler), then the sign
@@ -266,39 +334,84 @@ export function describe(
   // symbol delegates to its held value — a held expression's operator
   // handler included, behind a cycle guard — and an application dispatches
   // its operator's `sgn` handler, memoized per node.
-  let sgn: Sign | undefined;
-  if (isNumber(op) || isSymbol(op) || isFunction(op)) sgn = op.sgn;
-  sgn ??= signOfType(type);
+  const sgnOf = (): Sign | undefined => {
+    let sgn: Sign | undefined;
+    if (isNumber(op) || isSymbol(op) || isFunction(op)) sgn = op.sgn;
+    return sgn ?? signOfType(type);
+  };
+
+  // The per-instance element type: the operand's own collection handler,
+  // consulted only for an application whose operator declares one. The
+  // `elttype` family reads literal operands and static types (the
+  // set-comprehension and interval handlers are rewritten to that
+  // contract with the handler migration), so the read is pure.
+  const elementTypeOf = (): Type | undefined => {
+    if (!isFunction(op) || collectionOf() === false) return undefined;
+    return op.operatorDefinition?.collection?.elttype?.(op);
+  };
 
   // No `valid`, `application`, or `inferred` field: an error operand's TYPE
   // is `'error'` (validity is a type read); whether the operand is an
   // application is a structural question (`structureOf()`); and the
   // inferred-type flag is an input to the engine's own derivation steps,
-  // not a handler fact — when `deriveApplicationType` lands it travels the
-  // primitive's private channel, like admission data.
+  // not a handler fact — it rides the `structureOf()` symbol node.
+  const memo: Partial<{
+    finite: Tri;
+    sgn: Sign | undefined;
+    closed: Tri;
+    collection: Tri;
+    finiteCollection: Tri;
+    indexed: Tri;
+    elementType: Type | undefined;
+  }> = {};
   const facts: OperandFacts = {
-    finite,
-    sgn,
-    closed: op.isConstant,
-    collection,
-    finiteCollection,
-    indexed,
+    get finite(): Tri {
+      if (!('finite' in memo)) memo.finite = finiteOf();
+      return memo.finite;
+    },
+    get sgn(): Sign | undefined {
+      if (!('sgn' in memo)) memo.sgn = sgnOf();
+      return memo.sgn;
+    },
+    get closed(): Tri {
+      if (!('closed' in memo)) memo.closed = op.isConstant;
+      return memo.closed;
+    },
+    get collection(): Tri {
+      if (!('collection' in memo)) memo.collection = collectionOf();
+      return memo.collection;
+    },
+    get finiteCollection(): Tri {
+      if (!('finiteCollection' in memo))
+        memo.finiteCollection = finiteCollectionOf();
+      return memo.finiteCollection;
+    },
+    get indexed(): Tri {
+      if (!('indexed' in memo)) memo.indexed = indexedOf();
+      return memo.indexed;
+    },
     shape: tf.shape,
+    get elementType(): Type | undefined {
+      if (!('elementType' in memo)) memo.elementType = elementTypeOf();
+      return memo.elementType;
+    },
   };
 
   let structureMemo: OperandStructure | undefined;
   let structureComputed = false;
-  return {
+  const descriptor: OperandDescriptor = {
     type,
     facts,
     structureOf: () => {
       if (!structureComputed) {
         structureComputed = true;
-        structureMemo = structureOfExpression(op);
+        structureMemo = structureOfExpression(op, (walk ??= new Map()));
       }
       return structureMemo;
     },
   };
+  if (typeOverride === undefined) walk?.set(op, descriptor);
+  return descriptor;
 }
 
 /**
@@ -321,6 +434,42 @@ export function describeType(t: Type): OperandDescriptor {
       indexed: tf.indexed,
       shape: tf.shape,
     },
+  };
+}
+
+/**
+ * Describe a BOUND VARIABLE of a given type — the stand-in a recursive
+ * derivation uses for a mapping literal's parameter, a comprehension's
+ * bound variable, a pipe stage's parameter — as the DECLARED symbol it
+ * stands for, not as a bare type.
+ *
+ * `describeType(t)` alone is not a faithful stand-in for such an operand: it
+ * has no structural view, and a handler that distinguishes a declared
+ * scalar symbol from an untyped one (`Multiply` scales a literal tuple's
+ * components only by a declared scalar number; `Add`, `Divide` and the
+ * `List` fold read the same symbol node) sees "no structure" and takes its
+ * conservative branch, so `Map(k ↦ k·(1, 0), R)` over a real `R` typed its
+ * elements `tuple<integer, integer>` instead of `tuple<number, number>`.
+ * The expression route never had that gap because it DECLARED a fresh
+ * symbol of the element type and spliced the symbol into a probe; this
+ * constructor reproduces that symbol's descriptor without the declaration.
+ * The name is never resolved (a descriptor holds no binding), so it only
+ * needs to be one no user symbol can carry.
+ */
+export function describeBoundSymbol(
+  t: Type,
+  name = '__boundSymbol'
+): OperandDescriptor {
+  const d = describeType(t);
+  return {
+    type: d.type,
+    // A bound variable is a free symbol, not a closed constant: `closed` is
+    // `false`, as `isConstant` is for the declared stand-in symbol the
+    // expression route spliced in, so a handler that widens a CLOSED
+    // operand at a possible pole (`Tan(π/2)`) keeps its claim for the
+    // element.
+    facts: { ...d.facts, closed: false },
+    structureOf: () => ({ kind: 'symbol', name }),
   };
 }
 
@@ -380,13 +529,54 @@ export function guardedTypeHandlerCall<T>(
   const world = engine._worldVersion;
   const callable = engine._callableVersion;
   const scratch = engine._scratchDeclarationScopes.length;
-  // The comparison runs in `finally` so a handler that mutates state AND
-  // throws is still reported as a purity violation — otherwise the
-  // incidental exception would mask the real defect (state written from a
-  // type-derivation path).
+  // The comparison runs after the call whether or not it threw, so a
+  // handler that mutates state AND throws is still reported as a purity
+  // violation. One exception: an error that IS a purity report from a
+  // nested handler call (`context.derive` guards its own call) passes
+  // through untouched, so the violation is blamed on the handler that
+  // wrote the state, not on every ancestor whose window also saw the axis
+  // move.
+  let threw: unknown = undefined;
+  let didThrow = false;
   try {
     return call();
+  } catch (e) {
+    threw = e;
+    didThrow = true;
+    throw e;
   } finally {
+    if (didThrow && isPurityViolation(threw)) {
+      // Re-thrown above; the outer report would only misattribute it.
+    } else {
+      reportAxisMovement(
+        engine,
+        operator,
+        any,
+        semantic,
+        world,
+        callable,
+        scratch
+      );
+    }
+  }
+}
+
+const PURITY_VIOLATION_MARK = 'modified engine state while deriving a type';
+
+function isPurityViolation(e: unknown): boolean {
+  return e instanceof Error && e.message.includes(PURITY_VIOLATION_MARK);
+}
+
+function reportAxisMovement(
+  engine: ComputeEngine,
+  operator: string,
+  any: number,
+  semantic: number,
+  world: number,
+  callable: number,
+  scratch: number
+): void {
+  {
     const moved: string[] = [];
     if (engine._anyVersion !== any) moved.push('any');
     if (engine._semanticVersion !== semantic) moved.push('semantic');
@@ -396,139 +586,9 @@ export function guardedTypeHandlerCall<T>(
       moved.push('scratch-scopes');
     if (moved.length > 0)
       throw new Error(
-        `The 'types'-shape type handler of "${operator}" modified engine state ` +
-          `while deriving a type (moved: ${moved.join(', ')}). A type handler ` +
-          `declared with typeHandlerKind: 'types' must not declare, ` +
+        `The type handler of "${operator}" ${PURITY_VIOLATION_MARK} ` +
+          `(moved: ${moved.join(', ')}). A type handler must not declare, ` +
           `canonicalize, or evaluate anything.`
       );
   }
-}
-
-/**
- * @fixme TEMPORARY MIGRATION APPARATUS — this MUST be removed, together
- * with every piece listed here, when the expressions-shape `type` handler
- * is retired (release N+2 of the migration plan,
- * `docs/plans/2026-08-22-type-handlers-on-types.md` §5.3 step 6): with a
- * single handler shape left there is nothing to differ against. The full
- * inventory to delete: this registry, `_shadowParityStats`,
- * `normalizeHandlerResult` and `checkShadowTypeParity` below; the
- * `checkShadowTypeParity` call in `boxed-function.ts`; the
- * `CE_TYPE_PARITY_SHADOW` install hook in `test/jest-config.ts`; and the
- * files `test/compute-engine/type-handler-shadow-legacy.ts` and
- * `test/compute-engine/type-handler-shadow-parity.test.ts`.
- *
- * Test-only differential-parity registry for the handler-shape migration.
- *
- * When an operator's `type` handler converts from the expressions shape to
- * the `'types'` shape, the conversion batch moves the LEGACY handler —
- * verbatim — into the test fixture that populates this map
- * (`test/compute-engine/type-handler-shadow-legacy.ts`). While an entry is
- * installed, the type-handler call site runs BOTH shapes on every
- * derivation for that operator and throws on divergence, so every type
- * read in every test executed with the shadow installed is a parity check
- * — the whole test suite becomes the parity corpus, covering the real
- * operand mix (raw held operands, missing-stripped positions, literals,
- * valueless symbols) that a synthetic replay would have to reconstruct.
- *
- * The map is empty outside those tests: production and ordinary test runs
- * pay one `Map.size` read per `'types'`-shape derivation and nothing else.
- * To make a FULL-SUITE run the corpus, set `CE_TYPE_PARITY_SHADOW=1` —
- * the jest per-file setup installs the fixture into every test
- * environment (each file has its own module registry, so installing from
- * one suite reaches that suite alone).
- *
- * Known limitation, accepted for the migration: descriptors built lazily
- * while a handler runs (a `structureOf()` call describing children) read
- * child types inside the ancestor handler's purity-guard window, so a
- * nested legacy shadow call executes there too. The purity guard would
- * attribute any state write from that nested legacy call to the ancestor.
- * The handlers eligible for the shadow are the 213 the side-effect audit
- * found pure (`docs/plans/2026-08-22-type-handlers-on-types.md` §2.5) —
- * the seven impure ones are REWRITTEN under new contracts, never
- * shadow-checked — so no state-writing legacy handler should ever enter
- * this registry; installing one would produce misattributed guard errors.
- */
-export const _legacyTypeHandlerShadow = new Map<
-  string,
-  OperatorTypeHandlerOnExpressions
->();
-
-/** Shadow-parity counters. A parity suite asserts `checks` moved — and that
- * every installed operator's own count moved — so an empty corpus, a broken
- * install, or a corpus that misses an operator fails loudly instead of
- * passing vacuously. */
-export const _shadowParityStats = {
-  checks: 0,
-  checksByOperator: new Map<string, number>(),
-};
-
-/** Both handler shapes may answer with a `BoxedType`, a structural `Type`,
- * or a type string; results are compared after the same normalization the
- * call site applies when storing them (parse against the engine's resolver,
- * then widen literal cargo to tiers). */
-function normalizeHandlerResult(
-  engine: ComputeEngine,
-  raw: Type | TypeString | BoxedType | undefined
-): Type | undefined {
-  if (raw === undefined) return undefined;
-  const t =
-    raw instanceof BoxedType ? raw.type : parseType(raw, engine._typeResolver);
-  return t === undefined ? undefined : widenValueTypes(t);
-}
-
-/**
- * Differential check between a converted `'types'`-shape handler's answer
- * and the legacy expressions-shape handler held in the shadow registry.
- * Equivalence is mutual subtyping after normalization — spelling
- * differences are fine, a widening or narrowing is a divergence. Throws
- * with both spellings so the failing operand mix is reproducible from the
- * test that tripped it.
- */
-export function checkShadowTypeParity(
-  engine: ComputeEngine,
-  operator: string,
-  ops: ReadonlyArray<Expression>,
-  operandTypes: ReadonlyArray<Type | undefined> | undefined,
-  newRaw: Type | TypeString | BoxedType | undefined
-): void {
-  if (_legacyTypeHandlerShadow.size === 0) return;
-  const legacy = _legacyTypeHandlerShadow.get(operator);
-  if (legacy === undefined) return;
-  _shadowParityStats.checks += 1;
-  _shadowParityStats.checksByOperator.set(
-    operator,
-    (_shadowParityStats.checksByOperator.get(operator) ?? 0) + 1
-  );
-  // The diagnostic is computed BEFORE the comparison: reading an operand's
-  // type inside the throw expression could itself re-enter a nested shadow
-  // check (or fail for an unrelated reason) and replace the divergence
-  // report with a different exception.
-  let operandSpelling: string;
-  try {
-    operandSpelling = ops
-      .map((x) =>
-        x._literalType !== undefined
-          ? typeToString(x._literalType)
-          : typeToString(x.type.type)
-      )
-      .join(', ');
-  } catch {
-    operandSpelling = '<unavailable>';
-  }
-  const oldNorm = normalizeHandlerResult(
-    engine,
-    legacy(ops, { engine, operandTypes })
-  );
-  const newNorm = normalizeHandlerResult(engine, newRaw);
-  const agree =
-    oldNorm === undefined || newNorm === undefined
-      ? oldNorm === newNorm
-      : isSubtype(oldNorm, newNorm) && isSubtype(newNorm, oldNorm);
-  if (!agree)
-    throw new Error(
-      `type-handler shadow parity: "${operator}" diverged — legacy shape ` +
-        `answered ${oldNorm === undefined ? 'undefined' : typeToString(oldNorm)}, ` +
-        `'types' shape answered ${newNorm === undefined ? 'undefined' : typeToString(newNorm)} ` +
-        `(operand types: ${operandSpelling})`
-    );
 }

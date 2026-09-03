@@ -114,21 +114,22 @@ describe('Tycho item 245 — point arithmetic the interpreter rejects fails clos
     expect(shadowed.run({ L: [1, 2, 3, 4] })).toEqual([6, 8]);
   });
 
-  test('a comprehension whose binder type contradicts the elements fails closed', () => {
-    // Over a single point `C`, the loop binds each COMPONENT (a number); the
-    // body's `PointX(q)` use typed the binder as a collection, and the
-    // emitted `q.map(…)` threw at run time. The interpreter errors per
-    // element.
-    const r = compile(
-      ce.box([
-        'Comprehension',
-        ['Add', ['PointX', 'q'], 1],
-        ['Element', 'q', 'C'],
-      ] as never),
-      { to: 'javascript' }
-    );
+  test('a comprehension whose body contradicts the binder type never compiles', () => {
+    // Over a single point `C`, the loop binds each COMPONENT (a number). The
+    // body's `PointX(q)` use once retyped the binder as a collection, and
+    // the emitted `q.map(…)` threw at run time. The binding-site type is
+    // authoritative now (ruled 2026-09-03): the form boxes INVALID, so the
+    // compiler never sees it. The compile-time guard on a binder type
+    // disjoint from the element type (`compileElementLoops`) stays as the
+    // backstop.
+    const e = ce.box([
+      'Comprehension',
+      ['Add', ['PointX', 'q'], 1],
+      ['Element', 'q', 'C'],
+    ] as never);
+    expect(e.isValid).toBe(false);
+    const r = compile(e, { to: 'javascript' });
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/binder `q` is typed/);
     // A scalar body over the same point iterates its components on both
     // routes, and keeps compiling.
     const ok = compile(

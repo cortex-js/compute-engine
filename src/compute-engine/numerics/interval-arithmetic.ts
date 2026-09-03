@@ -89,7 +89,7 @@ const NAN_FREE_REAL_TIERS = new Set<string>(['integer', 'rational', 'real']);
  * type, a contradictory intersection).
  *
  * This is THE bounds reader: `typeBounds`
- * (`library/type-handlers-types.ts`) delegates to it, so a domain proof
+ * (`library/type-handlers.ts`) delegates to it, so a domain proof
  * and a computed result range can never disagree about the same type.
  *
  * - A numeric VALUE type reads as a point. Value types hold JavaScript
@@ -789,10 +789,9 @@ export function foldIntervalsOfTypes(
 /**
  * The `Abs` result range for a chosen tier: the operand's interval put
  * through `absInterval` when one exists, and the plain non-negative
- * range `tier<0..>` otherwise. Both `absFunctionType` shapes (the
- * Expression shape in `library/type-handlers.ts` and the descriptor
- * twin in `library/type-handlers-types.ts`) call this, so their claims
- * cannot diverge. The lower bound is clamped at 0 AFTER finalization:
+ * range `tier<0..>` otherwise. `absFunctionType`
+ * (`library/type-handlers.ts`) calls this, so a domain proof and the
+ * computed range cannot diverge. The lower bound is clamped at 0 AFTER finalization:
  * `|x| ≥ 0` holds independently of the interval, so a bound the
  * subnormal veto dropped must not lose the sign fact the old
  * `tier<0..>` claim carried.

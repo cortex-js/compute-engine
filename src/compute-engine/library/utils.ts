@@ -1,6 +1,7 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
+  OperandDescriptor,
   Scope,
 } from '../global-types.js';
 
@@ -16,6 +17,8 @@ import { numericValueOf } from '../boxed-expression/numerics.js';
 
 import { checkDeadline } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { resolveTypeAlias } from '../../common/type/utils.js';
+import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import {
   EXTENDED_REAL_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
@@ -29,14 +32,35 @@ import {
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import {
   isPossiblyCollectionTyped,
-  isTuple,
   isValuelessCollectionTyped,
   unionMayHoldACollection,
 } from '../collection-utils.js';
 
+/** The element descriptors of a tuple or list literal, or the child
+ * descriptors of an application; `undefined` for a symbol, a literal or a
+ * function literal. */
+export function operandChildren(
+  d: OperandDescriptor
+): ReadonlyArray<OperandDescriptor> | undefined {
+  const s = d.structureOf?.();
+  if (s === undefined) return undefined;
+  if (s.kind === 'tuple' || s.kind === 'list-literal') return s.elements;
+  if (s.kind === 'application') return s.children;
+  return undefined;
+}
+
+/** Is this operand's TYPE a composite tuple — the descriptor half of
+ * `isTuple` (`collection-utils.ts`)? The value half of that predicate — a
+ * symbol whose HELD value is a tuple behind a scalar declaration — has no
+ * descriptor channel, so a tuple hidden that way is read as a scalar here. */
+export function isTupleTypedOperand(d: OperandDescriptor): boolean {
+  const t = resolveTypeAlias(d.type);
+  return typeof t !== 'string' && t.kind === 'tuple';
+}
+
 /**
- * Does the norm of this point BROADCAST — i.e. does a component carry a
- * collection that zips into one norm per element?
+ * Does this point operand carry a component that is itself an indexed
+ * collection, so that the norm zips into one result per element?
  *
  * `‖(x+[0.5, 1], y)‖` is one norm per element, so the honest type is
  * `list<number>`, not `number` (Tycho item 74: a `number`-typed expression
@@ -46,17 +70,20 @@ import {
  * collections in the type lattice but bind atomically): the norm of
  * `((3,4), 12)` takes the inner point's norm and stays scalar.
  *
- * A non-literal point (a tuple-TYPED symbol or parameter) has no operands to
- * walk — its declared element types are inspected instead, so
+ * A point that is not written out (a tuple-TYPED symbol or parameter) has no
+ * components to walk — its declared element types are inspected instead, so
  * `p: tuple<list<real>, real>` reports the same broadcast its evaluation
  * produces.
  */
-export function pointNormBroadcasts(point: Expression): boolean {
-  if (isFunction(point))
-    return point.ops.some(
-      (op) => op.type.matches('indexed_collection<any>') && !isTuple(op)
+export function pointNormBroadcasts(d: OperandDescriptor): boolean {
+  const children = operandChildren(d);
+  if (children !== undefined)
+    return children.some(
+      (c) =>
+        isSubtype(c.type, INDEXED_COLLECTION_SHAPE_TYPE) &&
+        !isTupleTypedOperand(c)
     );
-  const t = point.type.type;
+  const t = d.type;
   return (
     typeof t !== 'string' &&
     t.kind === 'tuple' &&
@@ -79,11 +106,12 @@ export function pointNormBroadcasts(point: Expression): boolean {
  * `incompatible-type('real', 'number')` on a value real by construction.
  *
  * The claim demands PROVEN finiteness of every component, because `real`
- * itself now means finite. A component that is non-finite, or whose
- * finiteness is merely unknown, therefore demotes the claim — `‖(∞, 1)‖`
- * is `+∞`, and `‖(x, 1)‖` with `x: number` may be `+∞` too.
+ * itself means finite. The proof comes from the value channel
+ * (`facts.finite`) or from the type: bare `complex` contains only finite
+ * values, so membership in it is itself a finiteness test.
  *
- * How far it demotes depends on what the components can be:
+ * How far an unproven component demotes depends on what the components can
+ * be:
  *
  * - Every component on the EXTENDED real line (a finite real, `+∞` or
  *   `−∞`) gives `real | +oo`. A norm is non-negative, so `+∞` is the only
@@ -103,44 +131,37 @@ export function pointNormBroadcasts(point: Expression): boolean {
  * norm for this claim to be about.
  *
  * `real` is the claim for every other component set, complex components
- * included: `|z|²` is real and finite for a finite complex `z`. No narrower
- * tier is: unlike `|·|` of a scalar, a norm does not preserve the integer or
- * rational tier — `‖(1, 1)‖ = √2`.
+ * included. No narrower tier is: unlike `|·|` of a scalar, a norm does not
+ * preserve the integer or rational tier — `‖(1, 1)‖ = √2`.
  */
 export function euclideanNormType(
-  components: ReadonlyArray<Expression>
+  components: ReadonlyArray<OperandDescriptor>
 ): string {
   if (components.length === 0) return 'number';
-  // Every component must be provably numeric for "the norm is real" to be a
-  // claim about anything: a `Norm` operand is declared `value`, so a string or
-  // an `unknown`-typed element can stand here, and those have no norm to type.
-  if (!components.every((c) => c.type.matches('number'))) return 'number';
-  // `real` is a finiteness promise, so it needs every component PROVEN
-  // finite. An unproven one (`x: number`, which admits `±∞`) demotes.
-  // The proof can come from the VALUE channel or from the TYPE: bare
-  // `complex` contains only finite values since the finite-by-default flip,
-  // so `matches('complex')` is itself a finiteness test, and it is the only
-  // proof a compound operand has — `isFinite` is `undefined` on an
-  // unevaluated `Norm((3, 4))` even though its type is `real`.
-  if (components.every((c) => c.isFinite === true || c.type.matches('complex')))
+  if (!components.every((c) => typeFact(c.type, 'number') === true))
+    return 'number';
+  if (
+    components.every(
+      (c) => c.facts.finite === true || typeFact(c.type, 'complex') === true
+    )
+  )
     return 'real';
-  // On the extended real line the demotion is exactly one step: the norm is
-  // a non-negative real, or `+∞` when a component is infinite.
-  if (components.every((c) => c.type.matches(EXTENDED_REAL_TYPE)))
+  if (components.every((c) => typeFact(c.type, EXTENDED_REAL_TYPE) === true))
     return 'real | +oo';
   return 'number';
 }
 
 /**
  * Result type of the Euclidean norm of a fixed-arity point (`Tuple` operand of
- * `Norm`/`Abs`): the scalar norm type, unless the point broadcasts.
+ * `Norm`/`Abs`): the scalar norm type, unless the point broadcasts. Only a
+ * point whose components the structural view exposes carries the scalar
+ * claim; a point-TYPED symbol keeps the wide `number`.
  */
-export function pointNormType(point: Expression): string {
-  if (pointNormBroadcasts(point)) return 'list<number>';
-  // Only a literal point exposes the components the scalar claim is derived
-  // from; a tuple-TYPED symbol keeps the wide `number`.
-  if (!isFunction(point)) return 'number';
-  return euclideanNormType(point.ops);
+export function pointNormType(d: OperandDescriptor): string {
+  if (pointNormBroadcasts(d)) return 'list<number>';
+  const children = operandChildren(d);
+  if (children === undefined) return 'number';
+  return euclideanNormType(children);
 }
 
 /**

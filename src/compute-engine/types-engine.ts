@@ -1572,12 +1572,9 @@ export interface IComputeEngine {
   declare(symbols: {
     [id: MathJsonSymbol]: Type | TypeString | SymbolDefinitionInput;
   }): IComputeEngine;
-  // The type and the definition are separate overloads on purpose. With a
-  // `Type` or a type string in the same union as the definition shapes,
-  // TypeScript cannot discriminate an object literal that omits
-  // `typeHandlerKind` (those members lack the property, and the
-  // missing-property rule needs it on every member), so an inline
-  // `type: (ops) => …` handler would get implicitly-`any` parameters.
+  // The type and the definition are separate overloads on purpose, so an
+  // inline `type: (ops) => …` handler is contextually typed against the
+  // definition alone and its parameters are never implicitly `any`.
   declare(
     id: MathJsonSymbol,
     type: Type | TypeString,

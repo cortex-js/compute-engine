@@ -1,9 +1,17 @@
-import { SIGNED_INFINITY_TYPE } from '../../common/type/primitive.js';
+import {
+  EXTENDED_REAL_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+  SIGNED_INFINITY_TYPE,
+} from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { widen } from '../../common/type/utils.js';
-import { ListType, Type, TypeString } from '../../common/type/types.js';
-import { BoxedType } from '../../common/type/boxed-type.js';
+import {
+  collectionElementType,
+  resolveTypeAlias,
+  resolveTypeForCompilation as resolveType,
+  widen,
+} from '../../common/type/utils.js';
+import { ListType, Type } from '../../common/type/types.js';
 import {
   isTensorValue,
   packTensor,
@@ -23,15 +31,15 @@ import {
   Expression,
   ExpressionInput,
   IComputeEngine as ComputeEngine,
-  OperatorTypeHandlerOnExpressions,
+  OperandDescriptor,
   OperatorTypeHandlerOnTypes,
+  PureEngineView,
   SymbolDefinitions,
   Sign,
+  TypeHandlerContext,
 } from '../global-types.js';
-import {
-  describe as describeOperand,
-  guardedTypeHandlerCall,
-} from '../boxed-expression/operand-descriptor.js';
+import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { operandLiteralValue } from './type-handlers.js';
 import {
   isCharacter,
   isFunction,
@@ -43,7 +51,6 @@ import { asRational, toInteger } from '../boxed-expression/numerics.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
-import { euclideanNormType, pointNormType } from './utils.js';
 
 // Total number of elements (m·n) at or below which a constant matrix
 // constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`, and the vector
@@ -116,6 +123,184 @@ function declineWideNormType(claim: string): string | undefined {
   return claim === 'number' ? undefined : claim;
 }
 
+/** The shape gate `list<any>`: "is this operand list-shaped?", asked with
+ * the absence-admitting top so that a list whose element type carries an
+ * absence marker still matches. Built once at module load. */
+const LIST_SHAPE_TYPE: Type = Object.freeze({
+  kind: 'list',
+  elements: 'any',
+}) as Type;
+
+/**
+ * The descriptors of an operand's own operands, for the structure kinds
+ * that carry them — a literal `Tuple`, a literal `List`, and any other
+ * application. `undefined` when the operand has no operands to read: a
+ * symbol, a number or a string literal, and any operand a synthetic
+ * descriptor stands for.
+ *
+ * This is the descriptor-shape reading of `isFunction(x) ? x.ops :
+ * undefined`, which several helpers below share.
+ */
+function operandOperands(
+  d: OperandDescriptor
+): ReadonlyArray<OperandDescriptor> | undefined {
+  const structure = d.structureOf?.();
+  if (structure === undefined) return undefined;
+  if (structure.kind === 'tuple' || structure.kind === 'list-literal')
+    return structure.elements;
+  if (structure.kind === 'application') return structure.children;
+  return undefined;
+}
+
+/**
+ * The type a SYMBOL operand's held value has, or `undefined` when the
+ * operand is not a symbol, holds nothing, or holds another symbol.
+ *
+ * A held value is a pure source (the descriptor's own sign and finiteness
+ * facts read it), and it is what lets a symbol declared more widely than
+ * its value still read as a point: `p := (3, 4)` under a bare `value`
+ * declaration. The definition is looked up by name, which is the same
+ * binding the operand itself resolves through.
+ */
+function heldValueType(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): Type | undefined {
+  const structure = d.structureOf?.();
+  if (structure?.kind !== 'symbol') return undefined;
+  const held = engine.lookupDefinition(structure.name)?.value?.value;
+  if (held === undefined || isSymbol(held)) return undefined;
+  return held.type.type;
+}
+
+/**
+ * Is this operand a POINT — a tuple by type, or a symbol holding one? The
+ * descriptor-shape reading of `isTuple` (`collection-utils.ts`); a
+ * transparent alias of a tuple counts, a nominal reference stays opaque.
+ */
+function isTupleOperand(d: OperandDescriptor, engine: PureEngineView): boolean {
+  const t = resolveTypeAlias(d.type);
+  if (typeof t !== 'string' && t.kind === 'tuple') return true;
+  const vt = heldValueType(d, engine);
+  if (vt === undefined) return false;
+  const resolved = resolveTypeAlias(vt);
+  return typeof resolved !== 'string' && resolved.kind === 'tuple';
+}
+
+/**
+ * Does the point BROADCAST — does one of its components carry a collection,
+ * so that the norm is one norm per element rather than a scalar? The
+ * descriptor-shape reading of `pointNormBroadcasts` (`library/utils.ts`).
+ */
+function pointNormBroadcastsOperand(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): boolean {
+  const components = operandOperands(d);
+  if (components !== undefined)
+    return components.some(
+      (c) =>
+        isSubtype(c.type, INDEXED_COLLECTION_SHAPE_TYPE) &&
+        !isTupleOperand(c, engine)
+    );
+  const t = d.type;
+  return (
+    typeof t !== 'string' &&
+    t.kind === 'tuple' &&
+    t.elements.some((el) => {
+      const et = el.type;
+      if (typeof et !== 'string' && et.kind === 'tuple') return false;
+      return isSubtype(et, INDEXED_COLLECTION_SHAPE_TYPE);
+    })
+  );
+}
+
+/**
+ * The result type of the Euclidean norm over `components` — the
+ * descriptor-shape reading of `euclideanNormType` (`library/utils.ts`).
+ * Every branch there is a question about a component's type, except the
+ * finiteness proof, which the descriptor answers from `facts.finite`.
+ */
+function euclideanNormTypeOf(
+  components: ReadonlyArray<OperandDescriptor>
+): string {
+  if (components.length === 0) return 'number';
+  if (!components.every((c) => typeFact(c.type, 'number') === true))
+    return 'number';
+  if (
+    components.every(
+      (c) => c.facts.finite === true || isSubtype(c.type, 'complex')
+    )
+  )
+    return 'real';
+  if (components.every((c) => isSubtype(c.type, EXTENDED_REAL_TYPE)))
+    return 'real | +oo';
+  return 'number';
+}
+
+/** The descriptor-shape reading of `pointNormType` (`library/utils.ts`):
+ * the scalar norm type of a fixed-arity point, unless the point
+ * broadcasts. Only a literal point exposes the components the scalar claim
+ * is derived from; a tuple-TYPED symbol keeps the wide `number`. */
+function pointNormTypeOf(d: OperandDescriptor, engine: PureEngineView): string {
+  if (pointNormBroadcastsOperand(d, engine)) return 'list<number>';
+  const components = operandOperands(d);
+  if (components === undefined) return 'number';
+  return euclideanNormTypeOf(components);
+}
+
+/**
+ * Is this operand a LIST OF POINTS (`[(0,0),(3,4)]`)? The descriptor-shape
+ * reading of `isPointListValue` (`collection-utils.ts`).
+ *
+ * The type arm is unchanged. The runtime-evidence arm — which enumerated
+ * the collection to look at its first element, because a list of 2-tuples
+ * is often typed as a matrix — reads the first element of a LITERAL
+ * collection instead. A lazily-built list of points therefore no longer
+ * qualifies; the handler then declines and the declared result stands,
+ * which is the widening direction.
+ */
+function isPointListOperand(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): boolean {
+  const elt = d.facts.elementType ?? collectionElementType(resolveType(d.type));
+  if (
+    elt !== undefined &&
+    (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
+  )
+    return true;
+  if (d.facts.finiteCollection === true && d.facts.indexed === true) {
+    const first = operandOperands(d)?.[0];
+    if (first !== undefined) return isTupleOperand(first, engine);
+  }
+  return false;
+}
+
+/**
+ * The `^`-suffix a `Reshape` target shape contributes to the result type,
+ * for example `2x3` in `list<number^2x3>`, or the empty string when no
+ * static extent list can be read.
+ *
+ * Only integer literals become extents. The expressions-shape handler
+ * serialized every shape operand instead, so a symbolic extent produced an
+ * unparseable type string (`list<number^"n"x2>`) and reading the type
+ * THREW; an unreadable extent now drops the whole shape claim, which is
+ * the same answer an empty target shape already gave.
+ */
+function targetShapeDimensions(shape: OperandDescriptor | undefined): string {
+  if (shape === undefined) return '';
+  const elements = operandOperands(shape);
+  if (elements === undefined) return '';
+  const extents: number[] = [];
+  for (const el of elements) {
+    const v = operandLiteralValue(el);
+    if (v === undefined || !Number.isInteger(v) || v < 0) return '';
+    extents.push(v);
+  }
+  return extents.join('x');
+}
+
 /**
  * Build an m×n matrix as a fully-lazy nested `Tabulate`: an outer 1-D
  * tabulation of `m` rows, each row itself a lazy 1-D tabulation of `n` cells.
@@ -157,26 +342,30 @@ function lazyConstantMatrix(
  * type handler — unusable inside `Multiply` (`incompatible-type`), while the
  * directly-nested `Determinant(JacobianMatrix(…))` worked.
  */
-function transposedType(
-  ops: ReadonlyArray<Expression>
-): Type | TypeString | BoxedType | undefined {
+const transposedType: OperatorTypeHandlerOnTypes = (ops) => {
   const m = ops[0];
   if (m === undefined) return 'value';
-  if (m.isNumber) return m.type;
-  const t = m.type.type;
+  if (typeFact(m.type, 'number') === true) return m.type;
+  const t = m.type;
   if (typeof t === 'string' || t.kind !== 'list') return 'value';
   const dims = t.dimensions;
   // Rank unknown: the element type is still preserved, but no shape claim.
   if (!dims) return { kind: 'list', elements: t.elements };
   // Scalar-ish or vector (rank ≤ 1): identity.
-  if (dims.length <= 1) return m.type;
+  if (dims.length <= 1) return t;
   let axis1 = dims.length - 1;
   let axis2 = dims.length;
   if (ops.length === 3) {
-    const a1 = ops[1].re;
-    const a2 = ops[2].re;
-    // Non-literal axes: keep the element type, drop the shape claim.
-    if (!Number.isInteger(a1) || !Number.isInteger(a2))
+    const a1 = operandLiteralValue(ops[1]);
+    const a2 = operandLiteralValue(ops[2]);
+    // An axis that is not a number literal: keep the element type, drop the
+    // shape claim.
+    if (
+      a1 === undefined ||
+      a2 === undefined ||
+      !Number.isInteger(a1) ||
+      !Number.isInteger(a2)
+    )
       return { kind: 'list', elements: t.elements };
     if (a1 <= 0 || a1 > dims.length || a2 <= 0 || a2 > dims.length)
       return 'value';
@@ -189,7 +378,7 @@ function transposedType(
     swapped[axis1 - 1],
   ];
   return { kind: 'list', elements: t.elements, dimensions: swapped };
-}
+};
 
 /**
  * The components of a rank-1 `Dot` operand — a point (`Tuple`/`PointList`/…)
@@ -199,10 +388,21 @@ function transposedType(
  * collection such as a `Range`, have a TYPE but no operands, which is the case
  * `innerProductType` declines on.
  */
-function rank1Components(x: Expression): ReadonlyArray<Expression> | undefined {
-  if (!isFunction(x)) return undefined;
-  if (!isTuple(x) && x.operator !== 'List') return undefined;
-  const ops = x.ops;
+function rank1Components(
+  d: OperandDescriptor
+): ReadonlyArray<OperandDescriptor> | undefined {
+  const structure = d.structureOf?.();
+  if (structure === undefined) return undefined;
+  let ops: ReadonlyArray<OperandDescriptor>;
+  if (structure.kind === 'tuple' || structure.kind === 'list-literal')
+    ops = structure.elements;
+  else if (structure.kind === 'application') {
+    // A point spelled with another head (`Pair`, `Point`, …) is a point by
+    // TYPE, which is how the operand gate above admitted it.
+    const t = resolveTypeAlias(d.type);
+    if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
+    ops = structure.children;
+  } else return undefined;
   return ops.length > 0 ? ops : undefined;
 }
 
@@ -224,10 +424,10 @@ function rank1Components(x: Expression): ReadonlyArray<Expression> | undefined {
  * accepts it, and `Hypot(Dot(p, p), Dot(q, q))` reported `incompatible-type`
  * on an expression that is real by construction.
  *
- * Nothing is BUILT to get there. `Multiply`'s ladder is applied to the two
- * component expressions directly (`componentProductType`) and the products are
- * joined by {@link innerProductSumType}, so a type read allocates no
- * expression, canonicalizes nothing and writes no engine state. Constructing
+ * Nothing is BUILT to get there. `derive` runs `Multiply`'s own type handler
+ * over the two component DESCRIPTORS and the products are joined by
+ * {@link innerProductSumType}, so a type read allocates no expression,
+ * canonicalizes nothing and writes no engine state. Constructing
  * `Multiply(aᵢ, bᵢ)` and one `Add` over them — the earlier shape — canonicalized
  * n+1 applications on every read that a generation change had un-cached, ~44 µs
  * for a three-component `Dot` against ~0.05 µs for a cached one.
@@ -242,25 +442,25 @@ function rank1Components(x: Expression): ReadonlyArray<Expression> | undefined {
  * does not claim, so that row widens to `real`.
  */
 function innerProductType(
-  a: Expression,
-  b: Expression
-): Type | BoxedType | undefined {
+  a: OperandDescriptor,
+  b: OperandDescriptor,
+  derive: TypeHandlerContext['derive']
+): Type | undefined {
   const as = rank1Components(a);
   const bs = rank1Components(b);
   // Unequal lengths are `incompatible-dimensions`, reported by the evaluate
   // handler; there is no inner product here to type.
   if (as === undefined || bs === undefined || as.length !== bs.length)
     return undefined;
-  const ce = a.engine;
   // Every component is statically a number here: the only caller is `Dot`'s
-  // type handler, which admits an operand only when `isNumericTuple` holds or
+  // type handler, which admits an operand only when it is a numeric tuple or
   // its type is a non-matrix `vector`, and `rank1Components` returns exactly
   // that operand's components. A non-numeric component (an undeclared symbol,
   // a boolean, a string, a nested tuple) therefore never reaches this
   // function — the handler answers `value` before it is called.
   const products: Type[] = [];
   for (let i = 0; i < as.length; i++) {
-    const t = componentProductType(ce, as[i], bs[i]);
+    const t = derive('Multiply', [as[i], bs[i]]);
     // A ladder that declines to sharpen leaves the whole sum at the operator's
     // declared `number`; there is no sound narrower join without it.
     if (t === undefined) return undefined;
@@ -270,58 +470,18 @@ function innerProductType(
 }
 
 /**
- * The type of one component-wise product `aᵢ·bᵢ`, obtained by running
- * `Multiply`'s own type handler over the two component expressions.
- *
- * The handler is called directly, with an operand array that belongs to no
- * expression: a type handler is contractually a function of its operands'
- * TYPES (`types-definitions.ts`: "The arguments themselves should *not* be
- * evaluated, only their types should be used"), so it needs no `Multiply`
- * application to run on, and building one is what made this path expensive.
- *
- * Calling the handler rather than restating its reasoning is deliberate:
- * `Multiply`'s numeric ladder — the integer/rational/real chain, the
- * imaginary-parity closure (`i·i` is real), the non-finite and NaN cases, the
- * tuple and tensor branches — is a hundred lines, and a copy of it here would
- * drift from the moment either side moved. A hand-written type-level ladder
- * was measured against it and lost two rows: it cannot tell a NaN literal from
- * a symbol declared `number` (both spell their type `number`, only the value
- * is provably NaN), nor prove the finite factor of `∞·3` non-zero, so it had
- * to widen both to the top type.
- *
- * Returns `undefined` when the definition or its handler is absent, which is
- * only possible on an engine whose standard library was replaced.
+ * Is this operand a PROVABLY numeric tuple — a point in ℝⁿ? The
+ * descriptor-shape reading of `isNumericTuple` (`collection-utils.ts`),
+ * which is a question about the operand's type alone. Strict on purpose: a
+ * point-list-shaped tuple (a collection component, or `broadcastable`
+ * elements that could refine to one) does not qualify, because claiming
+ * `number` on retractable evidence is how `Multiply` once mistyped a point
+ * list.
  */
-function componentProductType(
-  ce: ComputeEngine,
-  x: Expression,
-  y: Expression
-): Type | undefined {
-  const def = ce.lookupDefinition('Multiply');
-  const operatorDef = def && 'operator' in def ? def.operator : undefined;
-  const handler = operatorDef?.type;
-  if (typeof handler !== 'function') return undefined;
-  // Dispatch on the definition's declared handler shape, exactly as the
-  // type-handler call site in `boxed-function.ts` does: an expressions-shape
-  // handler gets the operand pair, a types-shape handler gets one descriptor
-  // per operand — and the same purity guard, so a state-writing handler
-  // reached through this secondary call site is caught like one reached
-  // through the primary.
-  const t =
-    operatorDef!.typeHandlerKind === 'types'
-      ? guardedTypeHandlerCall(ce, 'Multiply', () =>
-          (handler as OperatorTypeHandlerOnTypes)(
-            [describeOperand(x), describeOperand(y)],
-            { engine: ce }
-          )
-        )
-      : (handler as OperatorTypeHandlerOnExpressions)([x, y], { engine: ce });
-  if (t === undefined) return undefined;
-  // Same normalization as the type-handler call site in `boxed-function.ts`: a
-  // handler may answer with a `BoxedType`, a structural `Type`, or a type
-  // STRING that still has to be parsed against the engine's resolver.
-  if (t instanceof BoxedType) return t.type;
-  return parseType(t, ce._typeResolver);
+function isNumericTupleOperand(d: OperandDescriptor): boolean {
+  const t = resolveTypeAlias(d.type);
+  if (typeof t === 'string' || t.kind !== 'tuple') return false;
+  return t.elements.every((el) => isSubtype(el.type, 'number'));
 }
 
 /**
@@ -395,7 +555,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 9000,
       lazy: true,
       signature: '(matrix, string?, string?) -> matrix',
-      type: ([matrix]) => matrix.type,
+      // The constructor is transparent: the matrix it wraps keeps its own
+      // type. The arity guard is what the declared signature cannot supply
+      // on the raw box route, where a `Matrix` with no operand at all
+      // reaches the handler.
+      type: ([matrix]) => matrix?.type,
       canonical: canonicalMatrix,
       evaluate: (ops, options) => ops[0].evaluate(options),
     },
@@ -415,12 +579,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // numeric `vector<N>` for those would be an unsound type on the
       // structural tier, where the `Matrix` rewrite has not happened yet —
       // so non-numeric content falls back to the honest `list`.
-      type: (elements) =>
-        elements.every((op) => op.type.matches('number'))
-          ? parseType(
-              `vector<${elements.length}>`,
-              elements[0].engine._typeResolver
-            )
+      type: (elements, { engine }) =>
+        elements.every((op) => isSubtype(op.type, 'number'))
+          ? parseType(`vector<${elements.length}>`, engine._typeResolver)
           : 'list',
       canonical: (ops, { engine: ce }) => {
         return ce._fn('Matrix', [
@@ -469,23 +630,19 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value, tuple) -> value',
       type: ([value, shape]) => {
-        const shapeOps = isFunction(shape) ? shape.ops : undefined;
-        if (value.isNumber) {
+        const dims = targetShapeDimensions(shape);
+        if (typeFact(value.type, 'number') === true) {
           // Scalar input
-          return parseType(
-            `list<number^${shapeOps?.map((x) => x.toString()).join('x') ?? ''}>`
-          );
+          return parseType(`list<number^${dims}>`);
         }
         // When the operand is not a numeric list the evaluate handler
         // DECLINES (the call stays unevaluated), so the honest static type
         // is the declared result `value`, not `nothing` — `nothing` claimed
         // an absent value for an expression the runtime keeps intact.
-        if (!value.type.matches('list<any>')) return 'value';
-        const col = value.type.type as ListType;
+        if (!isSubtype(value.type, LIST_SHAPE_TYPE)) return 'value';
+        const col = value.type as ListType;
         if (!isSubtype(col.elements, 'number')) return 'value';
-        return parseType(
-          `list<number^${shapeOps?.map((x) => x.toString()).join('x') ?? ''}>`
-        );
+        return parseType(`list<number^${dims}>`);
       },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         let op1 = ops[0];
@@ -746,8 +903,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // excluded first — `never` matches every type, so a claim keyed on a
       // subtype test alone would let a `never`-typed operand claim `integer`.
       type: ([m]) => {
-        if (m === undefined || m.type.matches('never')) return undefined;
-        const t = m.type.type;
+        if (m === undefined || isSubtype(m.type, 'never')) return undefined;
+        const t = m.type;
         if (typeof t === 'string' || t.kind !== 'list') return undefined;
         // The bottom type has to be excluded on the ELEMENTS too, and not
         // only on the operand as a whole: `matrix<never>` is an ordinary
@@ -1014,14 +1171,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // `value` would replace the declared union with a wider type.
       type: ([m]) => {
         if (m === undefined) return undefined;
-        const t = m.type.type;
+        const t = m.type;
         if (typeof t !== 'string' && t.kind === 'list') {
           // A matrix carries 2 dimensions (e.g. `matrix` = `[-1, -1]`); a
           // vector (rank-1 list) has no `dimensions` and has no trace.
           if (t.dimensions?.length === 2) return 'number';
           return undefined;
         }
-        if (m.isNumber) return 'number';
+        if (typeFact(t, 'number') === true) return 'number';
         return undefined;
       },
       evaluate: (ops, { engine: ce }) => {
@@ -1373,19 +1530,18 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       //
       // With the components in hand the claim sharpens from `number` to the
       // type of the inner product written out (`innerProductType`).
-      type: ([a, b]) => {
+      type: ([a, b], { derive }) => {
         if (
           !a ||
           !b ||
           ![a, b].every(
             (x) =>
-              isNumericTuple(x) ||
-              (isSubtype(x.type.type, 'vector') &&
-                !isSubtype(x.type.type, 'matrix'))
+              isNumericTupleOperand(x) ||
+              (isSubtype(x.type, 'vector') && !isSubtype(x.type, 'matrix'))
           )
         )
           return 'value';
-        return innerProductType(a, b) ?? 'number';
+        return innerProductType(a, b, derive) ?? 'number';
       },
       // `Dot` is Mathematica's `.`: it reduces to the inner product for two
       // vectors and to the matrix product otherwise — exactly what
@@ -2051,12 +2207,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // there instead, so the declared `real | +oo | nan` applies. A handler
       // answer is never widened, so answering `number` would hide the sharp
       // declared union.
-      type: ([x]) => {
+      type: ([x], { engine }) => {
         if (x === undefined) return undefined;
-        if (isTuple(x)) return declineWideNormType(pointNormType(x));
-        if (isPointListValue(x)) return { kind: 'list', elements: 'number' };
-        if (isFunction(x) && x.operator === 'List')
-          return declineWideNormType(euclideanNormType(x.ops));
+        if (isTupleOperand(x, engine))
+          return declineWideNormType(pointNormTypeOf(x, engine));
+        if (isPointListOperand(x, engine))
+          return { kind: 'list', elements: 'number' };
+        if (x.structureOf?.()?.kind === 'list-literal')
+          return declineWideNormType(
+            euclideanNormTypeOf(operandOperands(x) ?? [])
+          );
         return undefined;
       },
       evaluate: (

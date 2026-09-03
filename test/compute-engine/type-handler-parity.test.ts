@@ -1,6 +1,6 @@
 /**
  * Behavior and contract pins for operator `type` handlers that take
- * operand DESCRIPTORS (`typeHandlerKind: 'types'`) and for the engine
+ * operand DESCRIPTORS and for the engine
  * invariant behind that shape: deriving an application's type never
  * modifies engine state. Everything in this file is durable regression
  * coverage. What each block guards:
@@ -46,9 +46,7 @@
  * by the staged handler-signature change recorded in
  * `docs/plans/2026-08-22-type-handlers-on-types.md`; the operator type
  * pins were first captured from the pre-descriptor handlers at commit
- * bca1105e and are unchanged since. The migration's own disposable
- * apparatus — the differential shadow — lives separately in
- * `type-handler-shadow-parity.test.ts` and its fixture.
+ * bca1105e and are unchanged since.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -503,13 +501,12 @@ describe("purity: deriving an application's type moves no cache axis", () => {
   });
 });
 
-describe("user-declared 'types'-shape handlers", () => {
-  test('ce.declare accepts the flag and the handler sees descriptors', () => {
+describe('user-declared type handlers', () => {
+  test('a declared handler sees descriptors', () => {
     const ce = new ComputeEngine();
     const seen: OperandDescriptor[][] = [];
     ce.declare('EchoT', {
       signature: '(any) -> unknown',
-      typeHandlerKind: 'types',
       type: (operands) => {
         seen.push([...operands]);
         return operands[0]?.type;
@@ -530,7 +527,6 @@ describe("user-declared 'types'-shape handlers", () => {
     let counter = 0;
     ce.declare('LeakyT', {
       signature: '(any) -> unknown',
-      typeHandlerKind: 'types',
       type: (_operands, { engine }) => {
         // Deliberate violation: the compile-time PureEngineView hides the
         // mutating surface, so the leak needs a cast — exactly the misuse
@@ -651,5 +647,25 @@ describe('bounded inverse trig heads read ranged types', () => {
     expect(ce.box(['Artanh', 'r']).type.toString()).toBe(
       'complex | signed_infinity'
     );
+  });
+});
+
+describe('descriptor reads that must match the value route', () => {
+  test('a Range endpoint that HOLDS a signed infinity is extent, not an element', () => {
+    const ce = new ComputeEngine();
+    ce.declare('w', 'number');
+    ce.assign('w', ce.box({ num: '+Infinity' }));
+    expect(ce.box(['Range', 1, 'w']).type.toString()).toBe(
+      ce.box(['Range', 1, { num: '+Infinity' }]).type.toString()
+    );
+  });
+
+  test('a ring constant is recognized by its binding, not by its name', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['At', 'Integers', 2]).type.toString()).toBe('set<integer>');
+    // A scope that shadows `Integers` with an ordinary set keeps the
+    // ordinary indexing reading, as the canonical route does.
+    ce.declare('Integers', 'set<string>');
+    expect(ce.box(['At', 'Integers', 2]).type.toString()).not.toBe('set<integer>');
   });
 });

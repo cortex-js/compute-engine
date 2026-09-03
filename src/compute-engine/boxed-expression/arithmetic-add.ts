@@ -2,24 +2,15 @@ import { getImaginaryFactor } from './utils.js';
 
 import { flatten } from './flatten.js';
 import { order, sortAddTerms } from './order.js';
-import type {
-  NamedElement,
-  TupleType,
-  Type,
-} from '../../common/type/types.js';
+import { Type } from '../../common/type/types.js';
 import {
-  broadcastResultType,
   collectionElementType,
   resolveTypeAlias,
   stripNumericRanges,
   widen,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import {
-  COLLECTION_SHAPE_TYPE,
-  SIGNED_INFINITY_TYPE,
-} from '../../common/type/primitive.js';
-import { BoxedType } from '../../common/type/boxed-type.js';
+import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import type {
   Expression,
   Tensor,
@@ -27,12 +18,6 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isTensorValue, packTensor } from './tensor-view.js';
-import { provablyNonFiniteNumber } from './numerics.js';
-import {
-  addIntervals,
-  attachInterval,
-  foldIntervalsOfTypes,
-} from '../numerics/interval-arithmetic.js';
 import {
   isNumber,
   isFunction,
@@ -40,11 +25,7 @@ import {
   isContinuationOperand,
 } from './type-guards.js';
 import {
-  isLinearAlgebraCollection,
-  isFixedShapeCollection,
   isBroadcastCollectionType,
-  broadcastSiblingType,
-  couldBeNumericTuple,
   isNumericTuple,
   isTuple,
   numericTupleArity,
@@ -57,8 +38,6 @@ import {
   broadcastLengthMismatch,
   lazyBroadcastMap,
   broadcastOverIndexedCollections,
-  isPossiblyCollectionTyped,
-  broadcastableResultTypeOf,
 } from '../collection-utils.js';
 
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
@@ -439,285 +418,6 @@ export function absorbScalarsIntoCells(
     return collectionType as Type;
   }
   return { kind: 'indexed_collection', elements: cell };
-}
-
-/** The tuple ELEMENT type of `x` when `x` is statically a list of points —
- *  a `list`/`indexed_collection` whose element type is a tuple — or
- *  `undefined`. The type must be DEFINITELY a rank-1 list: a union with a
- *  scalar branch (`number | list<tuple<…>>`) is not one, since that branch
- *  produces no list at run time. A literal point list carries a length
- *  (`list<tuple<integer, integer>^2>`); it qualifies like a dimensionless
- *  one, which is why this does not use `broadcastCollectionElementType`
- *  (that helper leaves every dimensioned list to tensor typing). */
-function pointListElementType(x: Expression): Type | undefined {
-  const t = resolveTypeAlias(x.type.type);
-  if (typeof t === 'string') return undefined;
-  if (t.kind !== 'list' && t.kind !== 'indexed_collection') return undefined;
-  if (t.kind === 'list' && (t.dimensions?.length ?? 0) > 1) return undefined;
-  const elt = t.elements;
-  return typeof elt !== 'string' && elt.kind === 'tuple' ? elt : undefined;
-}
-
-/**
- * The component-wise sum type of operands that are ALL tuples of one arity
- * when at least one component is a list-shaped collection, or `undefined`
- * when the operands are not that shape (a non-tuple operand, tuples of
- * different arities, or all-scalar components, which `widen` types exactly).
- *
- * At each position the component types combine the way `addType` combines
- * whole operands: a list-shaped component absorbs the scalar components at
- * that position into its cells (`number + list<number>` is `list<number>`),
- * and scalar-only positions widen. The result keeps the tuple kind, with the
- * component names dropped: a sum has no field names to preserve.
- */
-function tupleComponentwiseAddType(
-  args: ReadonlyArray<Expression>
-): Type | undefined {
-  const tuples: TupleType[] = [];
-  for (const x of args) {
-    const t = resolveTypeAlias(x.type.type);
-    if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
-    tuples.push(t);
-  }
-  const arity = tuples[0].elements.length;
-  if (tuples.some((t) => t.elements.length !== arity)) return undefined;
-  const isListShaped = (t: Type): boolean => {
-    const r = resolveTypeAlias(t);
-    return (
-      r === 'list' ||
-      (typeof r !== 'string' &&
-        (r.kind === 'list' || r.kind === 'indexed_collection'))
-    );
-  };
-  if (!tuples.some((t) => t.elements.some((e) => isListShaped(e.type))))
-    return undefined;
-  const elements: NamedElement[] = [];
-  for (let i = 0; i < arity; i++) {
-    const components = tuples.map((t) => stripNumericRanges(t.elements[i].type));
-    const lists = components.filter(isListShaped);
-    if (lists.length === 0) {
-      // A sum is not closed over `imaginary` (`i + (−i) = 0` is real):
-      // `complex` covers the closure — the same repair the scalar tail of
-      // `addType` applies, and `absorbScalarsIntoCells` applies to a cell.
-      const scalar = widen(...components);
-      elements.push({ type: scalar === 'imaginary' ? 'complex' : scalar });
-      continue;
-    }
-    const scalars = components.filter((c) => !isListShaped(c));
-    elements.push({ type: absorbScalarsIntoCells(widen(...lists), scalars) });
-  }
-  return { kind: 'tuple', elements };
-}
-
-export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
-  if (args.length === 0) return 'integer'; // = 0
-  if (args.length === 1) return args[0].type;
-  // Numeric tuples (points/vectors) add component-wise, preserving the tuple
-  // type. Handle ANY tuple presence before the NaN/finiteness early-returns: a
-  // tuple's `isFinite` is `false`, which would otherwise collapse the result to
-  // `number`. When every operand is a tuple the widened tuple type is exact;
-  // when a tuple is mixed with an unknown/scalar operand, `widen` reports the
-  // honest heterogeneous type (e.g. `any`) rather than claiming `number`.
-  // COULD-semantics (`couldBeNumericTuple`): a tuple whose elements type
-  // `unknown` (e.g. `(S(x,y,0), S(x,y,1))` with `S: (…) -> unknown`) is still
-  // statically a tuple, so its sums keep a tuple type too (Tycho item 30).
-  if (args.some((x) => couldBeNumericTuple(x))) {
-    // A point BROADCAST over a list of points: `[(0,0),(3,4)] + (1,2)` adds
-    // the point to every element, so the sum is a list of points, not the
-    // union `list<tuple<…>> | tuple<…>` the widen below would report. That
-    // union is not merely loose: a consumer that routes on the type — the
-    // `PointX`/`PointY` lowering of the JavaScript compile target — reads a
-    // non-list type as ONE point and indexes the list's first element
-    // (Tycho item 234). The result keeps the list kind and widens the point's
-    // component types with the list's element tuple. Only a list whose
-    // ELEMENT type is provably a tuple qualifies: a list of scalars plus a
-    // point is a per-element `incompatible-type` error in the value path
-    // and keeps the honest union.
-    const pointLists = args.filter(
-      (x) => !couldBeNumericTuple(x) && pointListElementType(x) !== undefined
-    );
-    if (
-      pointLists.length > 0 &&
-      args.every(
-        (x) => couldBeNumericTuple(x) || pointListElementType(x) !== undefined
-      )
-    )
-      return broadcastResultType(
-        widen(
-          ...args.map((x) =>
-            stripNumericRanges(
-              couldBeNumericTuple(x) ? x.type.type : pointListElementType(x)!
-            )
-          )
-        )
-      );
-    // Tuples of the same arity add COMPONENT-WISE, and a component that is a
-    // list broadcasts against the other operands' components at that
-    // position: `(g_x, g_y) + (L, L₂)` evaluates to the tuple
-    // `(g_x + L, g_y + L₂)` — a tuple of two lists. `widen` does not see
-    // positions, so it reported the union
-    // `tuple<list<number>, list<number>> | tuple<number, number>`, a type no
-    // evaluated value ever has; a consumer that routes on the type (a layout
-    // classifier over the JavaScript compile target's output) cannot admit a
-    // union of two layouts (Tycho item 246). Only a tuple with a list-shaped
-    // component takes this branch: for all-scalar tuples `widen` already
-    // answers the exact component-wise type.
-    const componentwise = tupleComponentwiseAddType(args);
-    if (componentwise !== undefined) return componentwise;
-    return widen(...args.map((x) => stripNumericRanges(x.type.type)));
-  }
-  // Element-wise sum of a single tensor (vector/matrix) with scalars keeps the
-  // tensor's shape/type. The list-broadcast wrapper is skip-listed for tensor
-  // Add (addTensors handles the value), so the honest list type must come from
-  // here — this also removes the `number | vector<n>` union artifact that the
-  // final `widen` used to produce.
-  const tensors = args.filter((x) => isTensorValue(x));
-  if (tensors.length === 1) {
-    const others = args.filter((x) => !isTensorValue(x));
-    // Only SCALAR co-operands fold into the cells: a collection-TYPED
-    // co-operand (an unevaluated matrix-valued `Multiply`, a declared
-    // matrix symbol) is a sibling collection, not a cell contributor —
-    // fall through to the collection branch below for those.
-    // `isBroadcastCollectionType` is asked as well because it is the only one
-    // of the two that descends a UNION: an operand typed
-    // `number | list<number>` is a sibling collection too, and folding its raw
-    // union into the cells claimed `list<number | list<number>>` for a sum
-    // whose every branch has plain `number` cells.
-    if (
-      others.every(
-        (x) => !isLinearAlgebraCollection(x) && !isBroadcastCollectionType(x)
-      )
-    ) {
-      // The scalar co-operands fold INTO the cells elementwise, so the
-      // honest result cell type widens the tensor's cells with the scalar
-      // types: `[1,2] + x` has `number` cells, not `integer` — the
-      // declared type must remain a sound UPPER bound of the evaluated
-      // value (the honest literal cell type made verbatim propagation
-      // over-narrow).
-      return absorbScalarsIntoCells(
-        tensors[0].type.type,
-        others.map((x) => x.type.type)
-      );
-    }
-  }
-  // Collection-typed operands (declared matrix/vector/list symbols, OR a
-  // `Multiply` etc. that the type handlers now type as a collection — e.g.
-  // `2Y`, `-1·Y` for `X-Y`, `3X`) widen to the collection type. Hoisted above
-  // the NaN/finiteness early-returns: a collection's `isFinite` is `false`
-  // (like a tuple's), which would otherwise collapse the sum to `number`
-  // (this is why `X-Y`/`3X+2Y` used to mis-type once their scaled terms
-  // became collection-typed). The final `widen` still produces the honest
-  // `integer | matrix` union for a scalar-plus-matrix mix like `X+1`.
-  if (args.some((x) => isLinearAlgebraCollection(x))) {
-    // A BROADCAST-shaped collection operand (list-kind: `vector<n>`, `matrix`,
-    // `list<E>`) absorbs scalar operands elementwise — `V+1`, `matrix+1`,
-    // `2·[1,2,3]+a` all evaluate to the collection, never to a scalar. Widen
-    // over the collection operands ONLY, so no unreachable scalar arm enters
-    // the result. This matters beyond tidiness: union matching is all-members,
-    // so a `integer | vector<3>` makes `type.matches('collection')`
-    // answer a confident `false` on a value that is always a collection
-    // (Tycho item 67 — consumers route on exactly that query; it also made
-    // `MatrixMultiply(row, aM₁+M₂)` reject a valid matrix operand).
-    // Generic `collection`/`indexed_collection`-kind operands are NOT included
-    // in the trigger: they may be a non-indexed `set` at runtime, which the
-    // value path never broadcasts, so those keep the honest widen.
-    const isBroadcastShaped = (x: Expression) =>
-      isFixedShapeCollection(x) || isBroadcastCollectionType(x);
-    const shaped = args.filter(isBroadcastShaped);
-    if (
-      shaped.length > 0 &&
-      args.every(
-        (x) => isBroadcastShaped(x) || isSubtype(x.type.type, 'number')
-      )
-    ) {
-      // `broadcastSiblingType` collapses a `scalar | list<E>` operand to the
-      // one collection type its every branch produces here; without it the
-      // raw union widened into the result and its collection branch ended up
-      // inside the cells.
-      // Strip range decorations from every contribution: with NO scalar
-      // co-operands the cell absorption below returns immediately, and a
-      // sum of two `list<real<-1..>>` operands must not keep the `-1`
-      // bound its cells can cross (see `stripNumericRanges`).
-      const collected = widen(
-        ...shaped.map((x) =>
-          stripNumericRanges(broadcastSiblingType(x.type.type))
-        )
-      );
-      // The scalar operands fold INTO the cells elementwise (no scalar arm
-      // in the result — item 67), so they widen the CELL type, keeping the
-      // declared type a sound upper bound: `2·[1,2,3] + a` has `number`
-      // cells (`vector<3>`), not `integer` — the evaluated value's
-      // elements include `a`.
-      const scalars = args.filter((x) => !isBroadcastShaped(x));
-      return absorbScalarsIntoCells(
-        collected,
-        scalars.map((x) => x.type.type)
-      );
-    }
-    return widen(...args.map((x) => stripNumericRanges(x.type.type)));
-  }
-  // An operand whose collection-ness is not statically visible (a top
-  // `unknown`/`any`/`value` leaf such as an undeclared `h(x)`, or an already-
-  // `broadcastable<…>` inner node) makes the sum `broadcastable<T>`: it might
-  // broadcast at runtime or stay scalar. Hoisted above the NaN/finiteness
-  // early-returns for the same reason as the collection branch — a
-  // broadcastable inner node has no meaningful `isFinite`, and an
-  // `unknown`-typed leaf's `isNaN`/`isFinite` are `undefined`, so it would
-  // otherwise fall through to the scalar `widen` tail and mis-type. The
-  // `imaginary` → `complex` closure is applied inside the helper.
-  if (args.some((x) => isPossiblyCollectionTyped(x)))
-    return broadcastableResultTypeOf(args);
-  if (args.some((x) => x.isNaN)) return 'number';
-  // A provably non-finite operand may be visible only in its static TYPE:
-  // `Ln(0)`, `Artanh(1)` and a symbol declared `+oo | -oo` have no
-  // value to probe before evaluation; `provablyNonFiniteNumber` reads that
-  // type path (see `BoxedFunction`/`BoxedSymbol` `isInfinity`). Its
-  // `matches('number')` qualifier also keeps a non-number operand the shape
-  // branches above did not take — a `set`-typed operand, a union — out of
-  // the non-finite arm (`isFinite === false` alone would admit it, since
-  // `isFinite` answers `false` for any non-number type).
-  // (+∞) + (−∞) = NaN: two or more non-finite operands can cancel to NaN.
-  const nonFinite = args.filter((x) => provablyNonFiniteNumber(x));
-  if (nonFinite.length >= 2) return 'number';
-  if (nonFinite.length === 1) {
-    // Exactly one provably non-finite term (non-finite typing convention):
-    // - a real ±∞ plus terms that are all real and not provably non-finite
-    //   (unknown finiteness = generic point) is provably ±∞;
-    // - a non-real non-finite term (`~oo`, `∞ + i`, …), or a non-real
-    //   companion term, can produce `~oo`/NaN/non-finite complex values that
-    //   only the top type `number` admits.
-    const nf = nonFinite[0];
-    if (
-      nf.isExtendedReal === true &&
-      args.every((x) => x === nf || x.isExtendedReal === true)
-    )
-      return SIGNED_INFINITY_TYPE;
-    return 'number';
-  }
-  // Ranges and sign exclusions are stripped from the join inputs: a sum
-  // does not lie in the union of its terms' ranges (`x, y > −1` does not
-  // put `x + y` above −1; `−|x| + |y|` is not non-negative). The bare tiers
-  // ARE closed under addition, so the join drops the unsound bound — and
-  // the SOUND bound is then recomputed separately, below, by interval
-  // arithmetic over the operands.
-  const t = widen(...args.map((x) => stripNumericRanges(x.type.type)));
-  // `imaginary + imaginary` is not closed under addition: the imaginary parts
-  // can cancel to 0, which is *real* (P0-13). 0 is `integer` and the
-  // non-cancelling sums stay `imaginary`, both covered by `complex`.
-  if (t === 'imaginary') return 'complex';
-  // Interval refinement (the interval-arithmetic half of ROADMAP "Ranged
-  // types…", plan doc `docs/plans/2026-08-27-interval-arithmetic-result-
-  // types.md`): fold the operands' intervals with interval ADDITION — a
-  // different computation from the join above, and sound where the join
-  // is not (`x, y > 2` puts `x + y` above 4). The claim attaches only to
-  // a NaN-free real tier, and aborts if any operand carries no interval.
-  return attachInterval(
-    t,
-    foldIntervalsOfTypes(
-      args.map((x) => x.type.type),
-      addIntervals
-    )
-  );
 }
 
 export function add(...xs: ReadonlyArray<Expression>): Expression {

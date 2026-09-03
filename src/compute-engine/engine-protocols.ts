@@ -60,6 +60,7 @@ import type {
 import type { Expression, ObjectInterface } from './types-expression.js';
 import type {
   BoxedDefinition,
+  OperandDescriptor,
   OperatorDefinition,
 } from './types-definitions.js';
 import type { Scope } from './types-evaluation.js';
@@ -94,6 +95,32 @@ import { journalDefinitionRecord } from './boxed-expression/boxed-value-definiti
 // enter `_typeRegistry`, `knownTypeNames`, or the type resolver.
 // `docs/TYPE-SYSTEM.md` records the full design.
 //
+
+/** The two engine members protocol RESOLUTION reads: the registry and the
+ * type resolver. Narrow on purpose so a `'types'`-shape `type` handler,
+ * which holds only the read-only engine view, can resolve a protocol
+ * member or property without the full engine. */
+export type ProtocolReadView = Pick<IComputeEngine, '_typeResolver'> & {
+  /** The engine's registry. Typed opaquely on the read-only engine view
+   * (`PureEngineView`, whose file cannot name `ProtocolRecord`); every
+   * value in it IS a `ProtocolRecord`, which `registryRecords` restores. */
+  readonly _protocolRegistry: Readonly<Record<string, object>>;
+};
+
+/** The registry's records with their real type. The registry is only ever
+ * written by `declareProtocol` in this file, so the assertion is exact. */
+function registryRecord(
+  ce: ProtocolReadView,
+  name: string
+): ProtocolRecord | undefined {
+  return ce._protocolRegistry[name] as ProtocolRecord | undefined;
+}
+
+/** Every record in the registry, with its real type — the iteration
+ * counterpart of {@link registryRecord}. */
+function registryRecords(ce: ProtocolReadView): ProtocolRecord[] {
+  return Object.values(ce._protocolRegistry) as ProtocolRecord[];
+}
 
 /** `Self` is a textual substitution token, never a declarable type. It must
  * not resolve through the engine's registry, so the only place it
@@ -758,7 +785,7 @@ function mutabilityGateProblem(
  * re-entrancy guard that keeps a self-referential conditional conformance
  * (`list<T> is P where T is P`) terminating. */
 function conformsToOracle(
-  ce: IComputeEngine
+  ce: ProtocolReadView
 ): (type: Type, protocol: string) => boolean {
   return (type, protocol) =>
     ce._typeResolver.conformsTo?.(type, protocol) ?? false;
@@ -835,7 +862,7 @@ function parseConditionalTarget(
  * head, and every extracted argument must satisfy the clause.
  */
 function edgeTargetAt(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   edge: ConformanceRecord,
   receiver: Type
 ): Type | null {
@@ -862,7 +889,7 @@ function edgeComparisonTarget(edge: ConformanceRecord): Type {
  * static advisory
  * verdicts, never to select an implementation. */
 function edgeCouldApply(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   edge: ConformanceRecord,
   receiver: Type
 ): boolean {
@@ -3532,11 +3559,11 @@ function dispatcherScope(ce: IComputeEngine): Scope {
 /** Every protocol that declares `member` as a FUNCTION requirement, in
  * registration order. */
 function protocolsWithMember(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   member: string
 ): ProtocolRecord[] {
   const records: ProtocolRecord[] = [];
-  for (const record of Object.values(ce._protocolRegistry))
+  for (const record of registryRecords(ce))
     if (record.members[member]?.kind === 'function') records.push(record);
   return records;
 }
@@ -3544,7 +3571,7 @@ function protocolsWithMember(
 /** A resolver in which `Self` is an opaque `any`: the shape a requirement has
  * when no receiver is known (the dispatcher's stored signature and effects). */
 function requirementShape(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   record: ProtocolRecord,
   member: string
 ): FunctionSignature | null {
@@ -3555,7 +3582,7 @@ function requirementShape(
  * substitution is performed by the resolver, so `Self` and the target's own
  * name reach the same type and diagnostics quote the substituted spelling). */
 function requirementAt(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   record: ProtocolRecord,
   member: string,
   selfType: Type
@@ -3891,13 +3918,8 @@ function dispatcherDefinition(
     lazy: false,
     signature,
     canonical: (ops, { engine }) => dispatcherCanonical(engine, member, ops),
-    // Annotated because the literal's leading conditional spread keeps
-    // TypeScript from contextually typing the handler against the
-    // definition's handler-shape union.
-    type: (
-      ops: ReadonlyArray<Expression>,
-      { engine }: { engine: IComputeEngine }
-    ) => dispatcherResultType(engine, member, null, ops),
+    type: (ops, { engine }) =>
+      dispatcherResultTypeOfDescriptors(engine, member, null, ops),
     evaluate: (ops, options) =>
       dispatchMember(options.engine, member, null, ops, options),
   };
@@ -3980,7 +4002,7 @@ function receiverType(ops: ReadonlyArray<Expression>): Type | undefined {
  * `protocol-implementation-missing`.
  */
 function candidateRecords(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   member: string,
   receiver: Type | undefined
 ): ProtocolRecord[] | null {
@@ -4123,31 +4145,34 @@ export function canonicalProtocolMember(
 }
 
 /**
- * The result type of a dispatched call: the requirement's result with `Self`
- * bound to the first argument's static type, joined across the protocols that
- * share the member name AND could apply to that receiver (any of them may be
- * the one that applies — but an inapplicable one must not widen the result).
+ * The static result of a dispatched member call, from operand DESCRIPTORS —
+ * the form a `'types'`-shape `type` handler holds. The expression-taking
+ * {@link dispatcherResultType} above is the same computation over described
+ * operands, kept for the bare dispatcher's own (expressions-shape) handler.
+ *
+ * Each read is the descriptor twin of the expression read it replaces: an
+ * invalid operand is one whose type is `error`, and a number literal is
+ * recognized from its structural view, its value travelling in the
+ * handler-visible type.
  */
-function dispatcherResultType(
-  ce: IComputeEngine,
+function dispatcherResultTypeOfDescriptors(
+  ce: ProtocolReadView,
   member: string,
   only: ProtocolRecord | null,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<OperandDescriptor>
 ): Type | undefined {
-  if (ops.some((x) => !x.isValid)) return 'error';
+  if (ops.some((x) => x.type === 'error')) return 'error';
   const records =
-    only !== null ? [only] : candidateRecords(ce, member, receiverType(ops));
+    only !== null
+      ? [only]
+      : candidateRecords(ce, member, receiverTypeOfDescriptors(ops));
   if (records === null || records.length === 0) return undefined;
 
   const self = ops[0];
   // Same tier-binding rule as `receiverType`: `Self` never binds a literal's
   // value type, and a literal projects to its bare tier.
   const selfType: Type =
-    self === undefined
-      ? 'unknown'
-      : self._literalType !== undefined
-        ? stripNumericRanges(self.type.type)
-        : widenValueTypes(self.type.type);
+    self === undefined ? 'unknown' : selfTypeOfDescriptor(self);
 
   const results: Type[] = [];
   for (const record of records) {
@@ -4157,6 +4182,26 @@ function dispatcherResultType(
   }
   if (results.length === 0) return undefined;
   return results.length === 1 ? results[0] : (widen(...results) as Type);
+}
+
+/** The tier a receiver DESCRIPTOR binds `Self` to — the descriptor twin of
+ * the projection {@link receiverType} performs. A number literal (which the
+ * structural view names) projects all the way to its tier; anything else has
+ * its embedded value types widened. */
+function selfTypeOfDescriptor(d: OperandDescriptor): Type {
+  return d.structureOf?.()?.kind === 'number'
+    ? stripNumericRanges(d.type)
+    : widenValueTypes(d.type);
+}
+
+/** {@link receiverType} over descriptors: `undefined` when there is no
+ * receiver, or the receiver is an error. */
+function receiverTypeOfDescriptors(
+  ops: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  const self = ops[0];
+  if (self === undefined || self.type === 'error') return undefined;
+  return selfTypeOfDescriptor(self);
 }
 
 /**
@@ -4346,7 +4391,7 @@ function argumentTypeError(
  * — which is also what keeps an open type out of `isSubtype`.
  */
 function bestCandidates(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   records: readonly ProtocolRecord[],
   implKey: string,
   runtime: Type
@@ -4455,7 +4500,7 @@ function boxHostResult(ce: IComputeEngine, value: unknown): Expression {
  * (never off a declaration): a protocol name is not a value, and a bare
  * `Comparable` elsewhere stays an ordinary undeclared symbol. */
 export function protocolOfSymbol(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   base: Expression
 ): ProtocolRecord | undefined {
   const name = sym(base);
@@ -4464,13 +4509,25 @@ export function protocolOfSymbol(
   // evaluate route never sees one (the operand evaluated to the value), and
   // this keeps the `type` route agreeing with it.
   if (base.valueDefinition?.value !== undefined) return undefined;
-  return ce._protocolRegistry[name];
+  return registryRecord(ce, name);
+}
+
+/** `protocolOfSymbol` for a caller that holds the symbol's NAME and knows
+ * whether it holds a value (a `'types'`-shape `type` handler reading a
+ * symbol structure and its definition), not the symbol expression. */
+export function protocolOfName(
+  ce: ProtocolReadView,
+  name: string,
+  holdsValue: boolean
+): ProtocolRecord | undefined {
+  if (holdsValue) return undefined;
+  return registryRecord(ce, name);
 }
 
 /** The signature of `P.m` — the requirement with `Self` left opaque. `null`
  * when `m` is not a FUNCTION member of `P`. */
 export function protocolMemberSignature(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   record: ProtocolRecord,
   member: string
 ): FunctionSignature | null {
@@ -4578,17 +4635,46 @@ export function evaluateProtocolMember(
   return dispatchMember(ce, parts.member, record, parts.args, options);
 }
 
+/** The name an operand DESCRIPTOR spells: a string literal's text, or a
+ * symbol's name — the descriptor twin of `isString(x) ? x.string : sym(x)`.
+ * Shared by the two `ProtocolMember`/`ProtocolProperty` descriptor readers
+ * below. */
+function nameOfDescriptor(
+  d: OperandDescriptor | undefined
+): string | undefined {
+  const s = d?.structureOf?.();
+  if (s?.kind === 'string') return s.text;
+  if (s?.kind === 'symbol') return s.name;
+  return undefined;
+}
+
+/** {@link protocolMemberOperandsOf} over descriptors. */
+function protocolMemberOperandsOfDescriptors(
+  ops: ReadonlyArray<OperandDescriptor>
+): { protocol: string; member: string; args: OperandDescriptor[] } | null {
+  const protocol = nameOfDescriptor(ops[0]);
+  const member = nameOfDescriptor(ops[1]);
+  if (protocol === undefined || member === undefined) return null;
+  return { protocol, member, args: ops.slice(2) };
+}
+
 /** `ProtocolMember`'s `type`: the requirement's result at `Self` = the static
- * type of the first argument. */
+ * type of the first argument. Reads operand DESCRIPTORS, so the derivation
+ * cannot canonicalize, declare or evaluate anything. */
 export function protocolMemberResultType(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<Expression>
+  ce: ProtocolReadView,
+  ops: ReadonlyArray<OperandDescriptor>
 ): Type | undefined {
-  const parts = protocolMemberOperandsOf(ops);
+  const parts = protocolMemberOperandsOfDescriptors(ops);
   if (parts === null) return undefined;
-  const record = ce._protocolRegistry[parts.protocol];
+  const record = registryRecord(ce, parts.protocol);
   if (record === undefined) return undefined;
-  return dispatcherResultType(ce, parts.member, record, parts.args);
+  return dispatcherResultTypeOfDescriptors(
+    ce,
+    parts.member,
+    record,
+    parts.args
+  );
 }
 
 //
@@ -4633,11 +4719,14 @@ type PropertyResolution =
  * in order to type-check it. `Assign` uses it to refuse a hopeless field target
  * before evaluating that right-hand side. */
 export function protocolsWithProperty(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   name: string,
   only?: ProtocolRecord
 ): ProtocolRecord[] {
-  const all = only !== undefined ? [only] : Object.values(ce._protocolRegistry);
+  const all =
+    only !== undefined
+      ? [only]
+      : (Object.values(ce._protocolRegistry) as ProtocolRecord[]);
   return all.filter((r) => {
     const m = r.members[name];
     return m !== undefined && m.kind !== 'function';
@@ -4694,7 +4783,7 @@ export function protocolFunctionMemberOwners(
  * winning edge.
  */
 function resolveProtocolProperty(
-  ce: IComputeEngine,
+  ce: ProtocolReadView,
   receiver: Type,
   name: string,
   only?: ProtocolRecord
@@ -4773,7 +4862,19 @@ export function protocolPropertyType(
   only?: ProtocolRecord
 ): Type | undefined {
   if (!base.isValid) return undefined;
-  const receiver = base.type.type;
+  return protocolPropertyTypeOfReceiver(ce, base.type.type, name, only);
+}
+
+/** `protocolPropertyType` for a caller that holds only the receiver's TYPE
+ * (a `'types'`-shape `type` handler). An `error`-typed receiver answers
+ * `undefined`, as an invalid receiver expression does. */
+export function protocolPropertyTypeOfReceiver(
+  ce: ProtocolReadView,
+  receiver: Type,
+  name: string,
+  only?: ProtocolRecord
+): Type | undefined {
+  if (receiver === 'error') return undefined;
   const resolved = resolveProtocolProperty(ce, receiver, name, only);
   if (resolved.status === 'undecided') return 'unknown';
   if (resolved.status === 'ambiguous') return 'error';
@@ -5143,14 +5244,34 @@ function protocolPropertyOperandsOf(ops: ReadonlyArray<Expression>): {
   return { protocol, name, base, value: ops[3] };
 }
 
-/** `ProtocolProperty`'s `type` handler. */
+/** {@link protocolPropertyOperandsOf} over descriptors. */
+function protocolPropertyOperandsOfDescriptors(
+  ops: ReadonlyArray<OperandDescriptor>
+): {
+  protocol: string;
+  name: string;
+  base: OperandDescriptor;
+  value?: OperandDescriptor;
+} | null {
+  const protocol = nameOfDescriptor(ops[0]);
+  const name = nameOfDescriptor(ops[1]);
+  const base = ops[2];
+  if (protocol === undefined || name === undefined || base === undefined)
+    return null;
+  return { protocol, name, base, value: ops[3] };
+}
+
+/** `ProtocolProperty`'s `type` handler. Reads operand DESCRIPTORS: the
+ * protocol and property names come from the operands' structural view, the
+ * receiver contributes only its type, and the registry is reached through the
+ * read-only engine view. */
 export function protocolPropertyResultType(
-  ce: IComputeEngine,
-  ops: ReadonlyArray<Expression>
+  ce: ProtocolReadView,
+  ops: ReadonlyArray<OperandDescriptor>
 ): Type | undefined {
-  const parts = protocolPropertyOperandsOf(ops);
+  const parts = protocolPropertyOperandsOfDescriptors(ops);
   if (parts === null) return undefined;
-  const record = ce._protocolRegistry[parts.protocol];
+  const record = registryRecord(ce, parts.protocol);
   if (record === undefined) return 'error';
   // A SET evaluates to the value ASSIGNED, not to whatever the `set` handler
   // returns (which is discarded) and not to the receiver — the same answer
@@ -5160,8 +5281,11 @@ export function protocolPropertyResultType(
   // not the `number` the property is declared as. (The value still has to FIT
   // the property, but that check belongs to evaluation, and widening the static
   // type to the declared one would throw away what the operand actually is.)
-  if (parts.value !== undefined) return parts.value.type.type;
-  return protocolPropertyType(ce, parts.base, parts.name, record) ?? 'error';
+  if (parts.value !== undefined) return parts.value.type;
+  return (
+    protocolPropertyTypeOfReceiver(ce, parts.base.type, parts.name, record) ??
+    'error'
+  );
 }
 
 /** `ProtocolProperty`'s `evaluate` handler: the qualified property READ

@@ -759,9 +759,7 @@ export function getPiTerm(
 
 // The predicate is `OperatorDefinition`, not `Partial<OperatorDefinition>`:
 // every member of `OperatorDefinition` is already optional, so `Partial` adds
-// nothing — except that distributing it over the definition's handler-shape
-// union would make the `typeHandlerKind: 'types'` discriminant optional and
-// the result no longer assignable where an `OperatorDefinition` is expected.
+// nothing.
 export function isValidOperatorDef(def: unknown): def is OperatorDefinition {
   if (!isRecord(def)) return false;
   if (isExpression(def)) return false;

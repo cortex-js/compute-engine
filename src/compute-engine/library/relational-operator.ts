@@ -1,5 +1,6 @@
 import type {
   Expression,
+  OperandDescriptor,
   OperatorDefinition,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
@@ -11,10 +12,9 @@ import {
   isFiniteBroadcastParticipant,
   isBroadcastableCollection,
   hasUnresolvedCollectionOperand,
+  isPossiblyCollectionTyped,
   broadcastLengthMismatch,
   isTextAtom,
-  isPossiblyCollectionTyped,
-  isValuelessCollectionTyped,
 } from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { eq, eqIdentical } from '../boxed-expression/compare.js';
@@ -26,6 +26,7 @@ import {
 import {
   typeContainsMissing,
   numericMissingSlot,
+  resolveTypeAlias,
 } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
@@ -33,7 +34,7 @@ import {
   compareIntervals,
   intervalOfType,
 } from '../numerics/interval-arithmetic.js';
-import { handlerTypeOf, operandLiteralValue } from './type-handlers.js';
+import { operandLiteralValue } from './type-handlers.js';
 import { toBigint } from '../boxed-expression/numerics.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
 import {
@@ -330,7 +331,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // the arm), `boolean` otherwise.
     missingBehavior: 'handle',
 
-    type: (ops) => comparisonType('Equal', comparisonResultType, ops),
+    type: (ops, { engine }) =>
+      comparisonType('Equal', comparisonResultType, ops, engine.tolerance),
 
     // Broadcast element-wise over a list operand (Desmos `L[d=4]` filtering).
     // Restricted to the list-vs-scalar case by the exemption below: with two
@@ -647,7 +649,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // stays off.
     missingBehavior: 'handle',
 
-    type: (ops) => comparisonType('NotEqual', comparisonResultType, ops),
+    type: (ops, { engine }) =>
+      comparisonType('NotEqual', comparisonResultType, ops, engine.tolerance),
 
     // Broadcast element-wise over a list operand (list-vs-scalar only; two or
     // more collection operands compare whole, as at `Equal` above).
@@ -775,7 +778,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // does NOT reshape these signatures.
     nanBehavior: 'handle',
 
-    type: (ops) => comparisonType('Less', relationalAbsenceType, ops),
+    type: (ops, { engine }) =>
+      comparisonType('Less', relationalAbsenceType, ops, engine.tolerance),
 
     lazy: true,
     // Broadcast element-wise over a list operand so `L > 0` (canonicalizes to
@@ -852,7 +856,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   Greater: {
-    type: (ops) => comparisonType('Greater', relationalAbsenceType, ops),
+    type: (ops, { engine }) =>
+      comparisonType('Greater', relationalAbsenceType, ops, engine.tolerance),
     description: 'Greater-than comparison (strictly greater than).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
@@ -891,7 +896,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // the wide chain carrier is deliberate.
     nanBehavior: 'handle',
 
-    type: (ops) => comparisonType('LessEqual', relationalAbsenceType, ops),
+    type: (ops, { engine }) =>
+      comparisonType('LessEqual', relationalAbsenceType, ops, engine.tolerance),
 
     lazy: true,
     // Broadcast element-wise over a list operand (see `Less`).
@@ -967,7 +973,13 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   },
 
   GreaterEqual: {
-    type: (ops) => comparisonType('GreaterEqual', relationalAbsenceType, ops),
+    type: (ops, { engine }) =>
+      comparisonType(
+        'GreaterEqual',
+        relationalAbsenceType,
+        ops,
+        engine.tolerance
+      ),
     description: 'Greater-than-or-equal comparison (greater than or equal to).',
     complexity: 11000,
     signature: '(any, any+) -> boolean',
@@ -1158,6 +1170,33 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 };
 
 /**
+ * May this operand turn out to be a collection at runtime? The
+ * descriptor-shape reading of `isPossiblyCollectionTyped`
+ * (`collection-utils.ts`): a top-typed APPLICATION may evaluate to one, a
+ * `broadcastable<…>` type says so outright, and a union with a
+ * `broadcastable` branch hides one the same way.
+ */
+function possiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
+  const t = resolveTypeAlias(d.type);
+  if (t === 'unknown' || t === 'any' || t === 'value') {
+    const kind = d.structureOf?.()?.kind;
+    return (
+      kind === 'application' ||
+      kind === 'tuple' ||
+      kind === 'list-literal' ||
+      kind === 'function-literal'
+    );
+  }
+  if (typeof t === 'string') return false;
+  if (t.kind === 'broadcastable') return true;
+  if (t.kind !== 'union') return false;
+  return t.types.some((branch) => {
+    const b = resolveTypeAlias(branch);
+    return typeof b !== 'string' && b.kind === 'broadcastable';
+  });
+}
+
+/**
  * Result-type handler for the absence-aware relational operators
  * (`IdenticallyEqual`, `Less`, `LessEqual`; `Equal` and `NotEqual` apply it
  * first, through `comparisonResultType`). Mirrors §3.D: a
@@ -1167,11 +1206,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
  * visible at the type level (its static type is `number`), so it does not
  * widen the result type — the IEEE `False`/`True` is a runtime-only outcome.
  */
-function relationalAbsenceType(ops: ReadonlyArray<Expression>) {
+function relationalAbsenceType(ops: ReadonlyArray<OperandDescriptor>) {
   let definite = false;
   let possible = false;
   for (const op of ops) {
-    const t = op.type.type;
+    const t = op.type;
     if (t === 'missing') definite = true;
     // A NUMERIC-domain `missing` arm (`number | missing`) does NOT widen the
     // result: that slot's absence representation is `NaN` (I6), and an IEEE
@@ -1216,7 +1255,8 @@ type ComparisonHead =
  */
 function comparisonValueType(
   head: ComparisonHead,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<OperandDescriptor>,
+  tolerance: number
 ): Type | undefined {
   if (ops.length !== 2) return undefined;
   const [a, b] = ops;
@@ -1226,8 +1266,8 @@ function comparisonValueType(
     const eq = literalEquality(a, b);
     if (eq !== undefined) return verdict(head === 'Equal' ? eq : !eq);
   }
-  const ia = intervalOfType(handlerTypeOf(a));
-  const ib = intervalOfType(handlerTypeOf(b));
+  const ia = intervalOfType(a.type);
+  const ib = intervalOfType(b.type);
   if (ia === undefined || ib === undefined) return undefined;
   const c = compareIntervals(ia, ib);
   if (c === undefined) return undefined;
@@ -1239,7 +1279,7 @@ function comparisonValueType(
   // the tolerance in force when the type is derived; the non-strict
   // claims (`LessEqual` is `true` when `a` ends where `b` starts) agree
   // with the tolerant evaluation as they stand.
-  const tol = a.engine.tolerance;
+  const tol = tolerance;
   const eq = c === 'equal';
   const lt = c === 'less' && ib.lo - ia.hi > tol;
   const gt = c === 'greater' && ia.lo - ib.hi > tol;
@@ -1266,9 +1306,14 @@ function comparisonValueType(
  * literals with different values are left to the interval proof, which
  * applies the tolerance gate (`comparisonValueType`): `0.3` and
  * `0.3 + 1e-12` are different values but evaluate as equal. */
-function literalEquality(a: Expression, b: Expression): boolean | undefined {
-  if (isSymbol(a) && isSymbol(b) && a.symbol === b.symbol)
-    return intervalOfType(a.type.type) !== undefined ? true : undefined;
+function literalEquality(
+  a: OperandDescriptor,
+  b: OperandDescriptor
+): boolean | undefined {
+  const sa = a.structureOf?.();
+  const sb = b.structureOf?.();
+  if (sa?.kind === 'symbol' && sb?.kind === 'symbol' && sa.name === sb.name)
+    return intervalOfType(a.type) !== undefined ? true : undefined;
   const va = operandLiteralValue(a);
   const vb = operandLiteralValue(b);
   if (va !== undefined && vb !== undefined && va === vb) return true;
@@ -1281,12 +1326,13 @@ function literalEquality(a: Expression, b: Expression): boolean | undefined {
  * for the ordering heads), whose non-`boolean` answers are kept as is. */
 function comparisonType(
   head: ComparisonHead,
-  base: (ops: ReadonlyArray<Expression>) => Type,
-  ops: ReadonlyArray<Expression>
+  base: (ops: ReadonlyArray<OperandDescriptor>) => Type,
+  ops: ReadonlyArray<OperandDescriptor>,
+  tolerance: number
 ): Type {
   const t = base(ops);
   if (t !== 'boolean') return t;
-  return comparisonValueType(head, ops) ?? 'boolean';
+  return comparisonValueType(head, ops, tolerance) ?? 'boolean';
 }
 
 /**
@@ -1322,18 +1368,20 @@ function comparisonType(
  * typing in `boxed-function.ts` lifts it to `list<boolean>` when a definite
  * collection is present.
  */
-function comparisonResultType(ops: ReadonlyArray<Expression>): Type {
+function comparisonResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
   const absence = relationalAbsenceType(ops);
   // An absent operand decides the result before broadcasting is even reached
   // (`missing`/`boolean | missing` per §3.D), so leave those answers alone.
   if (absence !== 'boolean') return absence;
-  if (!ops.some((op) => isPossiblyCollectionTyped(op))) return 'boolean';
+  if (!ops.some((op) => possiblyCollectionTypedOperand(op))) return 'boolean';
   // The DEFINITE half of the operand count `skipBroadcastForVectorOps` and
   // `broadcastableComparisonOperands` share — an enumerable collection value,
-  // or a valueless operand whose declared type is definitely a collection —
-  // spelled with the same helpers so the three sites cannot drift apart.
+  // or a valueless operand whose declared type is definitely a collection.
+  // The descriptor merges those two channels into one fact: `collection` is
+  // `true` exactly when the type proves the shape OR the value enumerates,
+  // which is the union those two predicates spell out separately.
   const definiteCollections = ops.filter(
-    (op) => op.isCollection || isValuelessCollectionTyped(op)
+    (op) => op.facts.collection === true
   ).length;
   if (definiteCollections >= 2) return 'boolean';
   return { kind: 'broadcastable', elements: 'boolean' };

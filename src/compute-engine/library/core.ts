@@ -19,9 +19,15 @@ import {
   expectsCharacterNotString,
 } from '../boxed-expression/validate.js';
 import { collectTuplePattern } from '../boxed-expression/tuple-pattern.js';
-import { instantiatedResultType } from '../boxed-expression/generic-instantiation.js';
+import { instantiatedResultTypeOverActuals } from '../boxed-expression/generic-instantiation.js';
+import { actualOfDescriptor } from '../boxed-expression/derive-application-type.js';
+import {
+  describeBoundSymbol,
+  describeType,
+} from '../boxed-expression/operand-descriptor.js';
 import { canonicalForm } from '../boxed-expression/canonical.js';
 import { asSmallInteger, toInteger } from '../boxed-expression/numerics.js';
+import { SMALL_INTEGER } from '../numerics/numeric.js';
 import {
   addSequenceBaseCase,
   addSequenceRecurrence,
@@ -45,6 +51,7 @@ import { fromDigits } from '../numerics/strings.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { randomCount } from './random-utils.js';
 import { isRingConstant } from './ring-constructions.js';
+import { RING_CONSTANTS } from '../latex-syntax/utils.js';
 import { operandLiteralValue, quotientRingType } from './type-handlers.js';
 import {
   settleTypeText,
@@ -92,11 +99,15 @@ import type {
   IComputeEngine as ComputeEngine,
   BoxedOperatorDefinition,
   Expression,
+  OperandDescriptor,
+  OperandStructure,
+  TypeHandlerContext,
   ValueDefinition,
   SymbolDefinitions,
   DictionaryInterface,
   CanonicalForm,
   ProtocolMembersInput,
+  Tri,
 } from '../global-types.js';
 import type { FunctionInterface } from '../types-expression.js';
 import type {
@@ -104,7 +115,7 @@ import type {
   TypeParameter,
   DeclarationOrigin,
 } from '../../common/type/types.js';
-import { provablyDisjoint } from '../../common/type/subtype.js';
+import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
   freeTypeVariables,
   substituteTypeVariables,
@@ -170,7 +181,6 @@ import {
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
   effectContractErrorValue,
-  functionLiteralSignatureType,
   isEffectContractError,
   matchesDeclaredTypeAxes,
   signatureEffects,
@@ -477,35 +487,6 @@ function pipeImplicitMap(
 }
 
 /**
- * Derivations of `pipeImplicitMapType`, keyed on the pipe stage (a held
- * operand, so a stable object for the lifetime of the canonical `Pipe`).
- *
- * The memo is what makes the derivation affordable on a type read, and it is
- * required for correctness, not only performance. Deriving the type
- * canonicalizes the stage, declares its parameter, and advances the engine's
- * `any` axis. `BoxedFunction.type` records the generation observed on entry,
- * leaving its fast path closed when the computation itself
- * bumped the generation — so an unmemoized derivation would recompute on every
- * single read, and each recompute would advance the axis again, retiring the
- * `_type` and `_sgn` caches of every other expression in the engine.
- *
- * Record the generation observed after the derivation, for the
- * same reason: keying on the entry generation would never match. An entry is
- * served only when the axis has not moved since (a later declaration or
- * assignment can change the answer) and the topic is the same object, since
- * the type depends on both operands while only the stage is the key.
- *
- * The generation is the COMPOSITE one (`ce._cacheGeneration()`): the derived
- * type can be narrowed by an assumption about a symbol the topic mentions, so
- * an answer derived while the engine was hiding its assumptions must not be
- * served to a read that can see them.
- */
-const PIPE_IMPLICIT_MAP_TYPE = new WeakMap<
-  Expression,
-  { generation: number; topic: Expression; type: Type | undefined }
->();
-
-/**
  * The arity check on a pipe STAGE: a pipe hands its stage exactly one value,
  * always, so a stage whose parameter count is statically readable and never 1
  * can never be applied. Returns the `Error` to put in the stage's place, or
@@ -551,6 +532,11 @@ function pipeStageArityError(stage: Expression): Expression | undefined {
   ]);
 }
 
+/** The absence-admitting collection family top, the shape gate the implicit
+ * `Map` of a pipe stage asks against: bare `collection` is the values-only
+ * `collection<unknown>` synonym. */
+const PIPE_COLLECTION_SHAPE_TYPE = parseType('collection<any>')!;
+
 /**
  * The static type of a `Pipe` whose stage implicitly MAPS — the collection
  * type of the `Map` the evaluate handler will build, or `undefined` when the
@@ -562,63 +548,279 @@ function pipeStageArityError(stage: Expression): Expression | undefined {
  * downstream inference lost both the shape and the element type that the
  * equivalent `Map(x ↦ f(x), xs)` reports.
  *
- * The operands are HELD (the `lazy` flag), so they arrive UNBOUND: a raw
- * `List` topic types `unknown` and answers `false` to `isCollection`, and the
- * decision cannot be made on them as they stand. They are therefore
- * canonicalized here — the same `.canonical` / `canonicalWithFreshPlaceholders`
- * pair the evaluate handler applies, so the gate sees exactly the operands the
- * implicit `Map` will be built from, and the reported type is exactly the
- * evaluated expression's type rather than a tighter guess. Canonicalizing also
- * DECLARES any free symbol in the topic — the same declaration evaluating the
- * pipe would make, and still refinable by a later explicit `declare` — which
- * is why the cheap structural pre-gate comes first: only a `Function` LITERAL
- * stage can map, so a named-function or call stage (`xs |> Sum`,
- * `xs |> Take(10)`) pays nothing at all. The arity is not pre-checked — the
- * placeholder shorthand `xs |> _^2` is a one-operand `Function` until
- * canonicalization supplies its parameter — so `pipeImplicitMap` makes the
- * final decision, including its string-topic and whole-collection-annotation
- * escapes.
+ * The gate is the evaluate-time `pipeImplicitMap`'s, restated on operand
+ * DESCRIPTORS so that deriving a `Pipe`'s type declares, canonicalizes and
+ * evaluates nothing: the stage must be a function LITERAL of exactly one
+ * parameter, the topic must not be a string, the topic must be
+ * collection-shaped, and the stage's parameter must carry no authored
+ * annotation the topic itself satisfies (that annotation is a contract that
+ * the lambda consumes the whole collection). There is no "does the parameter
+ * accept the element type" test.
  *
- * The placeholder declarations that canonicalization makes are asked to stay
- * off the `any` cache axis (`scratchDeclarations`): this runs inside a type
- * read, and an advance there retires the `_type`/`_sgn` memo of every
- * expression in the engine — including the memo below, which is validated on
- * that same generation. What still advances the axis is the declaration of the
- * literal's own parameter into its `block.localScope`, a scope the canonical
- * stage captures and that therefore outlives this read; exempting it would
- * leave stale answers behind, which is the failure the axis exists to prevent.
- * So a re-derivation costs ONE advance rather than two — measured on
- * `Pipe(L, (_) ↦ _^2)` re-read after an unrelated declaration.
+ * The result is the mapping body's type over the topic's ELEMENT type,
+ * wrapped back in the source's collection shape — the two steps `Map`
+ * performs, reached through `context.derive` instead of by building a `Map`
+ * expression and reading its type.
+ *
+ * `Pipe` is `lazy` and its `canonical` handler deliberately leaves the
+ * operands unbound, so both descriptors arrive RAW: the topic's own type is
+ * `unknown` and its collection facts are undecided. {@link heldOperandType}
+ * is what recovers a held operand's type from pure sources, where the
+ * expression shape recovered it by canonicalizing the operand inside the type
+ * read.
  */
 function pipeImplicitMapType(
-  ce: ComputeEngine,
-  topic: Expression | undefined,
-  stage: Expression
+  context: TypeHandlerContext,
+  topic: OperandDescriptor | undefined,
+  stage: OperandDescriptor
 ): Type | undefined {
   if (topic === undefined) return undefined;
-  if (!isFunction(stage, 'Function')) return undefined;
+  const st = stage.structureOf?.();
+  if (st?.kind !== 'function-literal') return undefined;
 
-  const memo = PIPE_IMPLICIT_MAP_TYPE.get(stage);
+  const param = pipeStageParameter(st);
+  if (param === undefined) return undefined;
+
+  const topicType = heldOperandType(context, topic);
+  if (isSubtype(topicType, 'string')) return undefined;
   if (
-    memo !== undefined &&
-    memo.generation === ce._cacheGeneration() &&
-    memo.topic === topic
+    !(
+      topic.facts.collection === true ||
+      isSubtype(topicType, PIPE_COLLECTION_SHAPE_TYPE)
+    )
   )
-    return memo.type;
+    return undefined;
+  if (param.annotated !== undefined && isSubtype(topicType, param.annotated))
+    return undefined;
 
-  const mapped = pipeImplicitMap(
-    ce,
-    topic.canonical,
-    canonicalWithFreshPlaceholders(stage, { scratchDeclarations: true }),
-    stage
+  const elementType =
+    topic.facts.elementType ?? collectionElementType(topicType) ?? 'unknown';
+  // Once the stage is known to map, the result is ALWAYS the mapped
+  // collection: a body the structural derivation cannot type (a literal, a
+  // tuple, a list, a nested function literal) takes the stage's own
+  // declared result type as its cell, and `unknown` when there is none.
+  const cell =
+    pipeStageBodyType(context, st.body, param.name, elementType) ??
+    functionResult(stage.type) ??
+    'unknown';
+  return pipeMapResultType(topicType, cell);
+}
+
+/**
+ * The single parameter of a pipe stage, or `undefined` when the stage is not
+ * unary.
+ *
+ * A written parameter (`x ↦ x^2`) is in the literal's parameter list. The
+ * SHORTHAND spelling (`_^2`, `_1^2`) has an empty parameter list until
+ * canonicalization supplies one, so the placeholders mentioned in the body
+ * are counted instead: exactly one distinct placeholder makes the stage
+ * unary, and only `_`/`_1` name the FIRST argument, which is the only one a
+ * pipe supplies.
+ */
+function pipeStageParameter(
+  st: OperandStructure & { kind: 'function-literal' }
+): { name: string; annotated?: Type } | undefined {
+  if (st.parameters.length === 1) return st.parameters[0];
+  if (st.parameters.length > 1) return undefined;
+  const placeholders = new Set<string>();
+  collectPlaceholderNames(st.body, placeholders);
+  if (placeholders.size !== 1) return undefined;
+  const name = [...placeholders][0];
+  return name === '_' || name === '_1' ? { name } : undefined;
+}
+
+/** Every shorthand placeholder symbol (`_`, `_1`, `_2`, …) mentioned in a
+ * stage body, without descending into a nested function literal, whose own
+ * placeholders belong to it. */
+function collectPlaceholderNames(
+  structure: OperandStructure | undefined,
+  out: Set<string>
+): void {
+  if (structure === undefined) return;
+  switch (structure.kind) {
+    case 'symbol':
+      if (/^_[0-9]*$/.test(structure.name)) out.add(structure.name);
+      return;
+    case 'application':
+      for (const c of structure.children)
+        collectPlaceholderNames(c.structureOf?.(), out);
+      return;
+    case 'tuple':
+    case 'list-literal':
+      for (const c of structure.elements)
+        collectPlaceholderNames(c.structureOf?.(), out);
+      return;
+    default:
+      return;
+  }
+}
+
+/**
+ * The type of a mapping body with its parameter bound to `elementType`, or
+ * `undefined` when the body has no derivable type here — a body that is
+ * neither an application, the parameter itself, a symbol with a declared
+ * type, nor a tuple or list of such bodies. The caller then falls back on
+ * the stage's declared result type.
+ */
+function pipeStageBodyType(
+  context: TypeHandlerContext,
+  body: OperandStructure,
+  param: string,
+  elementType: Type
+): Type | undefined {
+  if (body.kind === 'symbol') {
+    if (body.name === param) return elementType;
+    const t = context.engine.lookupDefinition(body.name)?.value?.type.type;
+    return t === undefined || t === 'unknown' ? undefined : t;
+  }
+  if (body.kind === 'string') return 'string';
+  if (body.kind === 'tuple' || body.kind === 'list-literal') {
+    const cells = body.elements.map(
+      (e) => bindStageParameter(context, e, param, elementType).type
+    );
+    if (body.kind === 'tuple')
+      return { kind: 'tuple', elements: cells.map((type) => ({ type })) };
+    return { kind: 'list', elements: widen(...cells) };
+  }
+  if (body.kind !== 'application') return undefined;
+  return context.derive(
+    body.head,
+    body.children.map((c) => bindStageParameter(context, c, param, elementType))
   );
-  const type = mapped?.type.type;
-  PIPE_IMPLICIT_MAP_TYPE.set(stage, {
-    generation: ce._cacheGeneration(),
-    topic,
-    type,
-  });
-  return type;
+}
+
+/**
+ * The descriptor of an application re-derived from substituted children:
+ * its type is the derived type, and it is CLOSED exactly when every child
+ * is (a handler that widens a closed operand at a possible pole, such as the
+ * circular reciprocals at `π/2`, must see that a constant body stays
+ * constant after substitution).
+ */
+function describeDerived(
+  type: Type,
+  children: ReadonlyArray<OperandDescriptor>
+): OperandDescriptor {
+  const d = describeType(type);
+  const closed: Tri = children.every((c) => c.facts.closed === true)
+    ? true
+    : children.some((c) => c.facts.closed === false)
+      ? false
+      : undefined;
+  return { type: d.type, facts: { ...d.facts, closed } };
+}
+
+/**
+ * `d` with every free occurrence of the stage parameter replaced by an
+ * operand of the element type. A nested application is re-derived from its
+ * substituted children, so the substitution reaches any depth; a nested
+ * function literal is left as it stands, since its own parameters shadow.
+ */
+function bindStageParameter(
+  context: TypeHandlerContext,
+  d: OperandDescriptor,
+  param: string,
+  elementType: Type
+): OperandDescriptor {
+  const s = d.structureOf?.();
+  if (s?.kind === 'symbol')
+    return s.name === param
+      ? describeBoundSymbol(elementType, param)
+      : d.type === 'unknown'
+        ? describeType(heldOperandType(context, d))
+        : d;
+  if (s?.kind === 'application') {
+    const children = s.children.map((c) =>
+      bindStageParameter(context, c, param, elementType)
+    );
+    return describeDerived(
+      context.derive(s.head, children) ?? 'unknown',
+      children
+    );
+  }
+  return d;
+}
+
+/**
+ * The type of a HELD operand — one a `lazy` operator received unbound, whose
+ * descriptor therefore carries `unknown` where a bound operand would carry a
+ * real type.
+ *
+ * Every branch is a pure read: a symbol's own binding through
+ * `lookupDefinition`, a literal's structural view, an application's derived
+ * type. An operand that already carries a type (the `ce.function` route boxes
+ * its arguments first) is reported as it stands.
+ */
+function heldOperandType(
+  context: TypeHandlerContext,
+  d: OperandDescriptor | undefined
+): Type {
+  if (d === undefined) return 'unknown';
+  if (d.type !== 'unknown') return d.type;
+  const s = d.structureOf?.();
+  if (s === undefined) return 'unknown';
+  switch (s.kind) {
+    case 'symbol': {
+      const def = context.engine.lookupDefinition(s.name);
+      if (def?.value !== undefined) return def.value.type.type;
+      if (def?.operator !== undefined) return def.operator.signature.type;
+      return 'unknown';
+    }
+    case 'string':
+      return 'string';
+    case 'number':
+    case 'function-literal':
+      return d.type;
+    case 'tuple':
+      return {
+        kind: 'tuple',
+        elements: s.elements.map((e) => ({
+          type: heldOperandType(context, e),
+        })),
+      };
+    case 'list-literal': {
+      const elements = widen(
+        ...s.elements.map((e) => heldOperandType(context, e))
+      );
+      return s.shape.length > 0
+        ? { kind: 'list', elements, dimensions: [...s.shape] }
+        : { kind: 'list', elements };
+    }
+    case 'application':
+      return context.derive(s.head, s.children) ?? 'unknown';
+  }
+}
+
+/**
+ * A mapped collection's type: the source's shape carrying the mapping's
+ * result as its element type. Mirrors the shaping `Map`'s own type handler
+ * performs (`mapResultType`, `library/collections.ts`): a dimensioned list
+ * keeps its dimensions, an index span widens (a `range` is unparameterized
+ * and its elements are indices by definition), a string yields a `list` even
+ * for a character-valued mapping, and anything else yields a plain
+ * `collection`.
+ */
+function pipeMapResultType(source: Readonly<Type>, elementType: Type): Type {
+  if (typeof source === 'string') {
+    if (source === 'list' || source === 'string')
+      return { kind: 'list', elements: elementType };
+    if (source === 'set') return { kind: 'set', elements: elementType };
+    if (source === 'indexed_collection' || source === 'collection')
+      return { kind: source, elements: elementType };
+    if (source === 'range')
+      return { kind: 'indexed_collection', elements: elementType };
+    return { kind: 'collection', elements: elementType };
+  }
+  if (source.kind === 'list')
+    return source.dimensions !== undefined
+      ? { kind: 'list', elements: elementType, dimensions: source.dimensions }
+      : { kind: 'list', elements: elementType };
+  if (
+    source.kind === 'indexed_collection' ||
+    source.kind === 'set' ||
+    source.kind === 'collection'
+  )
+    return { kind: source.kind, elements: elementType };
+  return { kind: 'collection', elements: elementType };
 }
 
 /**
@@ -1104,6 +1306,94 @@ function pickPositions(
 }
 
 /**
+ * The type NAME an operand spells, for the `Typed` ascription: a string
+ * literal's text, or a type-name symbol's name. `undefined` for anything
+ * else, which leaves the ascription unresolved.
+ */
+function typeTextOf(d: OperandDescriptor): string | undefined {
+  const s = d.structureOf?.();
+  if (s?.kind === 'string') return s.text;
+  if (s?.kind === 'symbol') return s.name;
+  return undefined;
+}
+
+/** The absence-admitting dictionary family top, the gate `isDictionary`
+ * (`boxed-expression/utils.ts`) asks against: bare `dictionary` is the
+ * values-only `dictionary<unknown>` synonym, and an attributes bag whose
+ * entry values carry an absence arm is still a dictionary. */
+const DICTIONARY_SHAPE_TYPE = parseType('dictionary<any>')!;
+
+/**
+ * Is this operand a dictionary — the shape `Declare` reads as its trailing
+ * attributes bag rather than as a value?
+ *
+ * The descriptor twin of `isDictionary` (`boxed-expression/utils.ts`), which
+ * is a TYPE test, not a value-kind test: any operand whose type is below the
+ * dictionary family top is one, a record type included.
+ */
+function isDictionaryOperand(d: OperandDescriptor): boolean {
+  return isSubtype(d.type, DICTIONARY_SHAPE_TYPE);
+}
+
+/**
+ * Is this operand one of the blackboard-bold ring constants as bound by the
+ * standard library (the `Subscript` reading `ℤ_n = ℤ/nℤ`)?
+ *
+ * The expression-shape test compares the operand's own value definition with
+ * the one the SYSTEM scope holds, so that a scope shadowing `Integers` with a
+ * user collection keeps the ordinary indexing reading. A descriptor carries
+ * the symbol's name but not its binding, so the test here is the name, the
+ * constness the library constants have (`facts.closed`), and the set-shaped
+ * type they declare. What that misses is a shadowing binding that is itself a
+ * constant of set type; such a binding reads as the ring constant here where
+ * the expression shape read it as a user collection.
+ */
+function isRingConstantOperand(d: OperandDescriptor | undefined): boolean {
+  const s = d?.structureOf?.();
+  // The binding-identity test `isRingConstant` makes on an expression: the
+  // symbol must resolve to the library definition, so a scope that shadows
+  // `Integers` keeps the ordinary reading.
+  return (
+    s?.kind === 'symbol' && RING_CONSTANTS.has(s.name) && s.system === true
+  );
+}
+
+/**
+ * The small non-negative integer an operand's handler-visible type carries,
+ * or `null`. The bound mirrors `asSmallInteger`, the value reader of the
+ * expression shape: a value outside it names no numeral base and no compound
+ * symbol part.
+ */
+function smallIntegerOperandValue(
+  d: OperandDescriptor | undefined
+): number | null {
+  const v = d === undefined ? undefined : operandLiteralValue(d);
+  if (v === undefined || !Number.isInteger(v)) return null;
+  return v >= -SMALL_INTEGER && v <= SMALL_INTEGER ? v : null;
+}
+
+/** A symbol's name, or a small integer's decimal spelling — the two operand
+ * shapes that fold into a compound symbol name. */
+function nameOrSmallInteger(
+  d: OperandDescriptor | undefined
+): string | undefined {
+  const s = d?.structureOf?.();
+  if (s?.kind === 'symbol') return s.name;
+  return smallIntegerOperandValue(d)?.toString();
+}
+
+/** The text a subscript operand contributes to a compound symbol name: a
+ * string literal's text (which may be empty), a symbol's name, or a small
+ * integer's spelling. */
+function compoundSymbolPart(
+  d: OperandDescriptor | undefined
+): string | undefined {
+  const s = d?.structureOf?.();
+  if (s?.kind === 'string') return s.text;
+  return nameOrSmallInteger(d);
+}
+
+/**
  * The element type of a `Random` DOMAIN, which is the type of one draw from
  * it.
  *
@@ -1116,8 +1406,8 @@ function pickPositions(
  * as narrow as the draw. Precision here is not just tidiness: an imprecise
  * element type pushes comparisons over a framed draw off the compile path.
  */
-function randomElementType(domain: Expression): Type {
-  return collectionElementType(domain.type.type) ?? 'any';
+function randomElementType(domain: OperandDescriptor): Type {
+  return collectionElementType(domain.type) ?? 'any';
 }
 
 /** `list<T^k>` from a domain's element type, or the unshaped `list<T>`.
@@ -1128,23 +1418,20 @@ function randomElementType(domain: Expression): Type {
  * (`randomElementType`) — a `RandomChoice` cell is a `Random` draw, so
  * `RandomChoice(Interval(0,1), 3)` is `list<real^3>`. */
 function randomListType(
-  domain: Expression | undefined,
-  kOp: Expression | undefined
+  domain: OperandDescriptor | undefined,
+  kOp: OperandDescriptor | undefined
 ): Type {
   // Built STRUCTURALLY, not by serializing the element type into a `list<…>`
   // string and reparsing it: the element type may name a user-declared type,
   // which a resolver-less `parseType()` cannot read back.
   const elt: Type = domain ? randomElementType(domain) : 'any';
-  // The count is read from the literal's handler-visible type first (the
-  // channel that survives when the value reads are unavailable to a type
-  // handler), then from the value.
+  // The count comes from the literal's handler-visible type — the only value
+  // channel a descriptor carries. A count that no machine number represents
+  // (an exact rational, a bigint past the double range) and a symbolic count
+  // both decline, and the result is then the unshaped `list<T>`.
   const litCount = kOp ? operandLiteralValue(kOp) : undefined;
   const count =
-    litCount !== undefined && Number.isInteger(litCount)
-      ? litCount
-      : kOp
-        ? asSmallInteger(kOp)
-        : null;
+    litCount !== undefined && Number.isInteger(litCount) ? litCount : null;
   if (count !== null && count > 0 && count <= MAX_RANDOM_ELEMENT_COUNT)
     return { kind: 'list', elements: elt, dimensions: [count] };
   return { kind: 'list', elements: elt };
@@ -2110,7 +2397,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // name (a resolver-less `parseType()` cannot read it back).
         return {
           kind: 'tuple',
-          elements: args.map((a) => ({ type: a.type.type })),
+          elements: args.map((a) => ({ type: a.type })),
         };
       },
       canonical: (args, { engine: ce }) => {
@@ -2129,6 +2416,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       complexity: 9000,
       lazy: true,
       signature: '(any, string?) -> any',
+      // Echoes the body operand's type; nothing but the type is read.
       type: (args) => {
         if (args.length === 0) return 'nothing';
         return args[0].type;
@@ -2293,7 +2581,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       //
       // `'types'`-shape handler: reads operand descriptors, never operand
       // expressions, so the derivation cannot touch engine state.
-      typeHandlerKind: 'types',
       type: (operands) => {
         if (operands.length === 0) return 'nothing';
         const arms = operands.map((op, i) =>
@@ -2362,7 +2649,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `isString`/`isNumber`/`isFunction` guards. Every application kind
       // (compound, tuple, list literal, function literal) lands in the
       // default arm, mirroring the old `isFunction` branch.
-      typeHandlerKind: 'types',
       type: ([x]) => {
         const s = x?.structureOf?.();
         if (s === undefined) return 'unknown';
@@ -2401,7 +2687,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // (the descriptor of the held operand's first child); anything else
       // keeps its own type. `'nothing'` for the degenerate argument-less
       // `Hold()`, matching what the expressions shape read off `op1`.
-      typeHandlerKind: 'types',
       type: ([x]) => {
         const s = x?.structureOf?.();
         if (s?.kind === 'application' && s.head === 'Hold')
@@ -2434,6 +2719,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Annotated: {
       description: 'Attach metadata or style annotations to an expression.',
       signature: '(expression, dictionary<any>) -> expression',
+      // Transparent to the type system: the annotated expression's own type.
       type: ([x]) => x.type,
       complexity: 9000,
       lazy: true,
@@ -2461,9 +2747,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // is not auto-declared as a variable).
       lazy: true,
       signature: '(any, string | symbol) -> unknown',
+      // The ascribed type is read from the second operand's inert structure —
+      // a string literal's text, or a type-name symbol's name — and resolved
+      // with the engine's type resolver, which is a pure read.
       type: ([x, t], { engine: ce }) => {
         if (!t) return x?.type ?? 'unknown';
-        const s = isString(t) ? t.string : sym(t);
+        const s = typeTextOf(t);
         let parsed: Type | undefined;
         try {
           parsed = parseType(s, ce._typeResolver);
@@ -2864,10 +3153,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `T` binds the collection itself, and there is no wrap on this route
       // to put a rank back. A ground callee yields `undefined` and falls
       // through to today's `functionResult`.
-      type: ([fn, ...args]) => {
-        const t = fn.type.type;
+      //
+      // The solve runs over the descriptors' solver view
+      // (`actualOfDescriptor`), which answers the same five reads off a
+      // descriptor that the expression route answers off an operand
+      // expression (`instantiatedResultTypeOverActuals`,
+      // `boxed-expression/generic-instantiation.ts`).
+      type: ([fn, ...args], { engine }) => {
+        const t = fn.type;
         return (
-          instantiatedResultType(t, args, { threadable: false }) ??
+          instantiatedResultTypeOverActuals(t, args.map(actualOfDescriptor), {
+            threadable: false,
+            resolver: engine._typeResolver,
+          }) ??
           functionResult(t) ??
           'unknown'
         );
@@ -2938,10 +3236,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `Pipe(x, f)` is `f(x)`, so its type is `f`'s result type — EXCEPT when
       // the stage implicitly maps (`pipeImplicitMapType`), where the pipe is a
       // collection of that result rather than the result itself.
-      type: ([x, f], { engine: ce }) =>
+      type: ([x, f], context) =>
         f
-          ? (pipeImplicitMapType(ce, x, f) ??
-            functionResult(f.type.type) ??
+          ? (pipeImplicitMapType(context, x, f) ??
+            functionResult(f.type) ??
             'unknown')
           : undefined,
       canonical: (ops, { engine: ce }) => {
@@ -3406,6 +3704,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // draw fires at whatever later invokes `f`. The operand's PRODUCTION
       // effects still count: `Assign(x, Random())` stays `{random, scope}`.
       invokes: false,
+      // The type of the assignment expression is the type of what it stores.
       type: ([_symbol, value]) => value.type,
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return null;
@@ -4126,7 +4425,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // otherwise to `Nothing`. (A trailing dictionary operand is the
       // attributes bag, not a value.)
       type: (ops) =>
-        ops[2] && !isDictionary(ops[2]) ? ops[2].type : 'nothing',
+        ops[2] && !isDictionaryOperand(ops[2]) ? ops[2].type : 'nothing',
       canonical: (args, { engine: ce }) => {
         // Note: we can't use checkType() because it canonicalized/bind the argument.
         // A `Tuple` first operand is a destructuring pattern (`let (x, y) = v`):
@@ -4697,6 +4996,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(protocol: string, member: string, arguments: any*) -> unknown',
       canonical: (ops, { engine: ce }) => canonicalProtocolMember(ce, ops),
+      // The handler reads the operands' names and types only, through the
+      // read-only engine view's protocol registry.
       type: (ops, { engine: ce }) => protocolMemberResultType(ce, ops),
       evaluate: (ops, options) =>
         evaluateProtocolMember(options.engine, ops, options),
@@ -4748,6 +5049,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'the runtime type of the receiver is invoked.',
       signature:
         '(protocol: string, property: string, receiver: any, value: any?) -> unknown',
+      // See `ProtocolMember`: names and types only, no operand expression.
       type: (ops, { engine: ce }) => protocolPropertyResultType(ce, ops),
       evaluate: (ops, options) =>
         evaluateProtocolPropertyOperator(options.engine, ops, options),
@@ -5190,7 +5492,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Evaluate a function at one point or between two bounds.',
       lazy: true,
       signature: '(function, lower:expression, upper:expression) -> unknown',
-      type: ([x]) => functionResult(x.type.type) ?? 'number',
+      type: ([x]) => functionResult(x.type) ?? 'number',
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0) return null;
         const fn = canonicalFunctionLiteral(ops[0]);
@@ -5276,17 +5578,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // A parameter is a bare symbol or an annotated `["Typed", symbol, type]`
       // expression, so parameters are `symbol | function`.
       signature: '(expression, (symbol | function)*) -> function',
-      // NOTE: for a `Function` *expression* the type is actually computed by
-      // the special case in `boxed-function.ts` (`type()`), which bypasses this
-      // handler. Both go through the SAME construction seam
-      // (`effects-inference.ts`) so a literal's arrow — parameters, result and
-      // effect specifier — has exactly one builder; see the guard test
-      // `test/compute-engine/effects-seam.test.ts`.
-      type: (ops, { engine: ce }) =>
-        functionLiteralSignatureType(
-          ce._fn('Function', ops, { canonical: false })
-        ),
-
+      // No `type` handler, deliberately: a `Function` literal's arrow —
+      // parameters, result and effect specifier — is built by
+      // `functionLiteralSignatureType`
+      // (`boxed-expression/effects-inference.ts`), which `type()` in
+      // `boxed-function.ts` calls directly for every expression whose
+      // operator is `Function`, before any definition handler is consulted.
+      // A handler here would be unreachable, and a second builder is what the
+      // single construction seam forbids
+      // (`test/compute-engine/effects-seam.test.ts`).
       canonical: (args, { engine }) =>
         canonicalFunctionLiteralOperands(engine, args) ?? null,
 
@@ -5325,6 +5625,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // simplifies the result — no throw, no assert.
       inspectsErrors: true,
       signature: '(any, any?) -> expression',
+      // Simplification is type-preserving in the handler's view: report the
+      // operand's own type.
       type: ([x]) => x?.type ?? undefined,
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0) return ce._fn('Simplify', checkArity(ce, ops, 1));
@@ -5907,24 +6209,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
 
       signature: '(collection<any>, any) -> any',
+      // Everything the handler needs is in the operands' types and their
+      // inert structure (is the base a string literal? a symbol? is the
+      // subscript a small integer, a name, or an `InvisibleOperator` of
+      // those?), so it is declared on the descriptor shape.
       type: ([op1, op2], { engine: ce }) => {
+        const base1 = op1?.structureOf?.();
         // A string base is read as a NUMERAL in base `op2` — the whole
-        // `isString(op1)` branch of the `canonical` handler below, never the
+        // string branch of the `canonical` handler below, never the
         // collection-element reading further down. Mirroring the same test
         // here matters now that a string is an indexed collection of
         // characters: a subscript that is not a usable base (`"abc"_x`) fell
         // through and reported `character`, while `canonical` produced the
         // `Baseform(…, Error("invalid-base"))` node — an error, not a
         // character.
-        if (isString(op1)) {
-          // The base's value is read through the literal's handler-visible
-          // type first (`operandLiteralValue` — the channel that survives
-          // when the value reads are unavailable to a type handler).
-          const lit = operandLiteralValue(op2);
-          const base =
-            lit !== undefined && Number.isInteger(lit)
-              ? lit
-              : asSmallInteger(op2);
+        if (base1?.kind === 'string') {
+          // The base's value comes from the literal's handler-visible type,
+          // the only value channel a descriptor carries.
+          const base = smallIntegerOperandValue(op2);
           return base !== null && base > 1 && base <= 36 ? 'integer' : 'error';
         }
 
@@ -5934,15 +6236,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `Subscript(Integers, n)` — which never reaches `canonical` — fell
         // through to `collectionElementType` and claimed `integer`:
         // the element type of ℤ, not the type of the quotient RING.
-        if (isRingConstant(op1)) return quotientRingType([op1, op2]);
+        if (isRingConstantOperand(op1)) return quotientRingType([op1, op2]);
 
-        if (op1.isIndexedCollection)
-          return collectionElementType(op1.type.type) ?? 'any';
+        if (op1?.facts.indexed === true)
+          return collectionElementType(op1.type) ?? 'any';
 
         // Check if the symbol is declared as a collection type
-        const op1Name = sym(op1);
+        const op1Name = base1?.kind === 'symbol' ? base1.name : undefined;
         if (op1Name) {
-          const eltType = collectionElementType(op1.type.type);
+          const eltType = collectionElementType(op1!.type);
           if (eltType) return eltType;
         }
 
@@ -5954,20 +6256,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // If the base symbol has subscriptEvaluate, the result will be a number
           // (or undefined, which keeps it as Subscript)
           const symbolDef = ce.lookupDefinition(op1Name);
-          if (isValueDef(symbolDef) && symbolDef.value.subscriptEvaluate) {
-            return 'number';
-          }
+          if (symbolDef?.value?.subscriptEvaluate) return 'number';
           // Check if this would become a compound symbol (simple subscript)
-          const sub =
-            (isString(op2) ? op2.string : undefined) ??
-            sym(op2) ??
-            asSmallInteger(op2)?.toString();
+          const sub = compoundSymbolPart(op2);
           if (sub) return 'symbol';
           // Check for InvisibleOperator of symbols/numbers (also becomes compound symbol)
-          if (isFunction(op2, 'InvisibleOperator')) {
-            const parts = op2.ops.map(
-              (x) => sym(x) ?? asSmallInteger(x)?.toString()
-            );
+          const sub2 = op2?.structureOf?.();
+          if (
+            sub2?.kind === 'application' &&
+            sub2.head === 'InvisibleOperator'
+          ) {
+            const parts = sub2.children.map((x) => nameOrSmallInteger(x));
             if (parts.every((p) => p !== undefined && p !== null))
               return 'symbol';
           }
@@ -6102,6 +6401,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       lazy: true,
       signature: 'function',
+      // Arity is all the handler reads.
       type: (args) => {
         if (args.length === 0) return 'nothing';
         return 'symbol';

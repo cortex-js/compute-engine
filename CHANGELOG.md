@@ -1,5 +1,47 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A `type` handler in an operator definition now receives operand
+  DESCRIPTORS, never operand expressions.** The handler signature is
+  `(operands: OperandDescriptor[], context: TypeHandlerContext) => Type`:
+  each descriptor carries the operand's handler-visible type, a small set of
+  three-valued facts (finiteness, sign, closedness, the collection facets, a
+  static shape, the element type its own collection handler proves) and an
+  on-demand structural view (`structureOf()`: symbol, string, number with
+  its exact rational terms, application with child descriptors, function
+  literal, tuple and list literal with element descriptors). The context
+  carries a read-only engine view (`engine.type()`, the type resolver,
+  `lookupDefinition()`, `tolerance`, the protocol registry) and
+  `derive(operator, operands)`, which types an application the handler does
+  not hold. A handler therefore cannot declare, canonicalize, evaluate, or
+  read a symbol's held value while deriving a type; under test, a handler
+  that writes engine state throws. The `typeHandlerKind` flag that selected
+  between the two handler shapes is gone (a definition that still sets it
+  fails to type-check), and so are `OperatorTypeHandlerOnExpressions` and the
+  `operandTypes` option the old shape received. Every built-in handler has
+  been converted and proven equivalent by a differential run of both shapes
+  across the test suite; a user-defined `type` handler must be rewritten
+  against the descriptor. Migration, read for read: `ops[i].type.type` →
+  `operands[i].type`; `isInteger`/`isReal` → `typeFact(type, 'integer')`
+  (three-valued); `isFinite` → `facts.finite`; `sgn` → `facts.sgn`;
+  `isSame(k)` → `operandLiteralValue`; `.ops`/`.operator`/`.string` →
+  `structureOf()`; an `elttype` read → `facts.elementType`.
+
+  Types that moved with the conversion, all in the narrowing-and-sound or
+  widening direction: a set comprehension's element type is now DERIVED
+  from its body instead of enumerated (`{n² : n ∈ ℤ}` has elements
+  `integer<0..>` where it had `unknown`; `{n/2 : n ∈ {1,2,3}}` has `real`
+  where enumeration saw `rational`); an `Interval` with a symbolic endpoint
+  has `real` elements instead of `never`; `JacobianMatrix` of an operand
+  neither its structure nor a definition decides types the declared
+  `value`; the static type of an implicit-map pipe (`xs |> p ↦ …`) binds
+  the stage parameter to the element type and equals the explicit `Map`'s
+  type; `Element` declines to `boolean` for a radical literal (`√2 ∈
+  [√2, 1]`) whose exact value the descriptor does not carry; a `Range` whose
+  bound is a `Sum` no longer evaluates that bound when its sign or type is
+  read.
+
 ### New Features
 
 - **Epsil `if let`.** `if let pattern = subject { … } else { … }` binds the
@@ -15,6 +57,26 @@
   is `if-let-equal-expected`.
 
 ### Resolved Issues
+
+- **A scalar function over a list of points keeps the point shape in its
+  type.** With `P: list<tuple<number, number>>`, `Sqrt(P)`, `Sin(P)`,
+  `Exp(P)` and `Power(P, 2)` typed `list<number>` while their values are
+  lists of points; they now type `list<tuple<number, number>>`, the arity
+  following the point. A head whose tuple semantics is whole-point (`Abs`
+  of a point is its norm) keeps its scalar cell. The JavaScript target's
+  `PointX`/`PointY` lowering, which routes on the type, read such a list as
+  a flat list of numbers.
+- **A comprehension binder's type is fixed by its binding site.** The
+  binder of `[q.x + 1 for q in L]` over `L: list<number>` was rewritten to
+  `matrix` by the body's `PointX(q)` use (through the fresh-inference
+  matrix repair), so the form boxed valid and failed only when evaluated.
+  A body use that contradicts the element type of the iterated collection
+  is now a type error at boxing, as it is for a `Sum` index.
+- Fixed `Reshape` with a non-literal target extent (`Reshape([1,2,3,4],
+  (n, 2))`) throwing `Failed to parse type` on any read of the result's
+  type: the handler serialized the extent into a type string. An extent that
+  is not a literal now drops the shape claim and the result types
+  `list<number>`.
 
 - **`toLatex({ materialization: false })` no longer evaluates anything.** On
   a lazy collection such as `Join(p)`, the opt-out still called `evaluate()`

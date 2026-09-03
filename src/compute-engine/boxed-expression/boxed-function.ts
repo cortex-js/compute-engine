@@ -24,15 +24,14 @@ import type {
   BoxedValueDefinition,
   ExpressionInput,
   FunctionInterface,
-  OperatorTypeHandlerOnExpressions,
-  OperatorTypeHandlerOnTypes,
 } from '../global-types.js';
 
 import {
-  checkShadowTypeParity,
   describe as describeOperand,
+  type DescriptorMemo,
   guardedTypeHandlerCall,
 } from './operand-descriptor.js';
+import { typeHandlerContext } from './derive-application-type.js';
 import {
   broadcastLengthMismatch,
   hasUnresolvedCollectionOperand,
@@ -5213,6 +5212,90 @@ function broadcastsOverTuples(
  *   application inert, so an empty-tuple type here would describe a value that
  *   never becomes a tuple.
  */
+/**
+ * The point arity at the LEAVES of the broadcasting operands, when they are
+ * COLLECTIONS OF POINTS: at least one operand is a list (of any rank) whose
+ * leaf element type is a tuple of scalar components, every other operand is
+ * either such a collection of the same arity or a collection of scalar
+ * numbers, and — when a scalar-element collection is among them — every
+ * operand is rank 1, so the value zips the collections element-wise and
+ * pairs each point with a scalar (`Power(P, E)` for `P: list<tuple<number,
+ * number>>`, `E: list<number>` is a list of points; a scalar-element
+ * operand imposes no inner shape). `undefined` in every other case: no
+ * point collection at all, disagreeing arities, a union whose arms
+ * disagree, a tuple component that could itself be a collection (a nested
+ * point of lists has no single component type — the could-be predicate, so
+ * a `number | list<number>` component declines too), or a point with no
+ * components. A scalar operand imposes no shape and is not consulted, so
+ * `ops` must be the broadcasting operands only.
+ */
+function pointListArity(ops: ReadonlyArray<Expression>): number | undefined {
+  let arity: number | undefined = undefined;
+  let scalarSibling = false;
+  let maxRank = 0;
+  for (const op of ops) {
+    const leaf = pointLeafArity(op.type.type, 0);
+    if (leaf === null) return undefined;
+    maxRank = Math.max(maxRank, leaf.rank);
+    if (leaf.arity === undefined) {
+      scalarSibling = true;
+      continue;
+    }
+    if (arity !== undefined && arity !== leaf.arity) return undefined;
+    arity = leaf.arity;
+  }
+  if (arity === undefined) return undefined;
+  if (scalarSibling && maxRank > 1) return undefined;
+  return arity;
+}
+
+/**
+ * The leaf of a collection type for {@link pointListArity}: its rank (list
+ * levels peeled, a dimensioned list counting one per dimension) and the point
+ * arity at the leaf — a number for a tuple of scalar components, `undefined`
+ * for a scalar-number leaf. `null` when the type is not a collection of
+ * either, or a union whose arms disagree.
+ */
+function pointLeafArity(
+  t: Type,
+  rank: number
+): { arity: number | undefined; rank: number } | null {
+  t = resolveTypeAlias(t);
+  if (typeof t === 'string') return null;
+  if (t.kind === 'union') {
+    let result: { arity: number | undefined; rank: number } | null = null;
+    for (const arm of t.types) {
+      const a = pointLeafArity(arm, rank);
+      if (a === null) return null;
+      if (result === null) result = a;
+      else if (result.arity !== a.arity || result.rank !== a.rank) return null;
+    }
+    return result;
+  }
+  if (t.kind !== 'list' && t.kind !== 'indexed_collection') return null;
+  const dims = t.kind === 'list' ? (t.dimensions?.length ?? 1) : 1;
+  const elt = resolveTypeAlias(t.elements);
+  if (typeof elt === 'string') {
+    return isSubtype(elt, 'number')
+      ? { arity: undefined, rank: rank + dims }
+      : null;
+  }
+  if (
+    elt.kind === 'list' ||
+    elt.kind === 'indexed_collection' ||
+    elt.kind === 'union'
+  )
+    return pointLeafArity(elt, rank + dims);
+  if (elt.kind === 'tuple') {
+    if (elt.elements.length === 0) return null;
+    if (elt.elements.some((c) => typeCouldBeCollection(c.type))) return null;
+    return { arity: elt.elements.length, rank: rank + dims };
+  }
+  return isSubtype(elt, 'number')
+    ? { arity: undefined, rank: rank + dims }
+    : null;
+}
+
 function tupleBroadcastArity(
   ops: ReadonlyArray<Expression>
 ): number | 'unknown-components' | undefined {
@@ -5960,13 +6043,9 @@ function type(expr: BoxedFunction): Type {
               : undefined
           )
         : undefined;
-      // Dual handler shapes (the staged signature change of
-      // `docs/plans/2026-08-22-type-handlers-on-types.md` §5.3 step 2): the
-      // definition's `typeHandlerKind` flag — never the handler's parameter
-      // count — selects the shape. A `'types'` handler receives one
-      // descriptor per operand and no expressions, so it cannot touch
-      // engine state; the guard turns any state write into an immediate
-      // error in tests.
+      // A `type` handler receives one descriptor per operand and no
+      // expressions, so it cannot touch engine state; the guard turns any
+      // state write into an immediate error in tests.
       //
       // The missing-strip override folds into the descriptor's type ONLY
       // for a `propagate` operator, where the handler must not see
@@ -5980,91 +6059,40 @@ function type(expr: BoxedFunction): Type {
       // handler's input, and a child operand's own type derivation during
       // `describe` must not be attributed to this handler.
       let calculatedType: Type | TypeString | BoxedType | undefined;
-      // Set when a missing-strip actually replaced an operand's type in the
-      // descriptors: the shadow parity check below must then be skipped —
-      // the two shapes are fed DIFFERENT inputs by design (`'types'` gets
-      // the stripped `integer`, the legacy expressions shape reads the raw
-      // `integer | missing` operand), so a divergence there reports the
-      // §3.A strip contract, not a translation defect.
-      let missingStripApplied = false;
-      if (def.typeHandlerKind === 'types') {
-        const strippedFor = (i: number) => {
-          if (def.resolvedMissingBehavior !== 'propagate') return undefined;
-          const stripped = operandTypes?.[i];
-          // A BARE `missing` operand strips to `never`, and a `never`-typed
-          // descriptor proves numeric claims vacuously (`never` is the
-          // bottom type, so it matches `real`): `Sin(Missing)` would claim
-          // `real` where the expressions shape — reading the
-          // unstripped `missing` — claims `number`. There is no
-          // present-value component to type for a bare marker, so the
-          // descriptor keeps the operand's own type and the absorption
-          // machinery downstream owns the absent case; the strip applies
-          // only to genuine unions (`integer | missing` → `integer`).
-          if (stripped === 'never') return undefined;
-          if (stripped !== undefined) missingStripApplied = true;
-          return stripped;
-        };
-        const descriptors = expr.ops.map((x, i) =>
-          describeOperand(x, strippedFor(i))
-        );
-        calculatedType = guardedTypeHandlerCall(
-          expr.engine,
-          expr.operator,
-          () =>
-            (def.type as OperatorTypeHandlerOnTypes)(descriptors, {
-              engine: expr.engine,
-            })
-        );
-        // An operand typed `never` (the EMPTY type — a symbol declared with
-        // an empty range, `integer<2<..<3>`) has no value, so no application
-        // of it has one: the result is `never`. Applied AFTER the handler,
-        // on the descriptors it already derived — never by reading operand
-        // types ahead of dispatch, which forced derivation in a different
-        // order and made the constant folder's memo, hence the COMPILED
-        // OUTPUT, run-dependent (measured: 2 distinct outputs of one
-        // source). The handler's own answer is wrong for `never`: the
-        // bottom type matches every type, `matrix` included, so shape arms
-        // fire vacuously.
-        if (descriptors.some((d) => d.type === 'never'))
-          calculatedType = 'never';
-      } else {
-        // Derive every operand's type BEFORE the handler runs, making the
-        // derivation point singular and deterministic for this shape too —
-        // exactly what building the descriptors does for the `'types'`
-        // shape. An expressions-shape handler may skip operands (the
-        // `Divide` handler returns on `ops.length !== 2` without reading
-        // `ops[2]`), so a post-handler `never` scan could otherwise be the
-        // FIRST derivation of an operand, in an order that depends on the
-        // handler's control flow — the run-dependent compiled output this
-        // narrowing must not reintroduce (dual-review catch).
-        const anyNever = expr.ops.some((x) => x.type.type === 'never');
-        calculatedType = anyNever
-          ? 'never'
-          : (def.type as OperatorTypeHandlerOnExpressions)(expr.ops, {
-              engine: expr.engine,
-              operandTypes,
-            });
-      }
-      // Differential parity for the migration: while a converted operator's
-      // legacy handler is installed in the test-only shadow registry, both
-      // shapes run and a divergence throws. No-op (one Map.size read) when
-      // the registry is empty — every run outside a parity suite. Skipped
-      // when a missing-strip replaced an operand's descriptor type (see
-      // `missingStripApplied` above): the shapes then read different inputs
-      // by design and their answers legitimately differ before the
-      // downstream absence absorption reconciles them.
-      // @fixme Temporary migration apparatus — MUST be removed when the
-      // expressions handler shape is retired; the shadow registry's doc
-      // comment (`_legacyTypeHandlerShadow`, operand-descriptor.ts) lists
-      // every piece to delete with it.
-      if (def.typeHandlerKind === 'types' && !missingStripApplied)
-        checkShadowTypeParity(
-          expr.engine,
-          expr.operator,
-          expr.ops,
-          operandTypes,
-          calculatedType
-        );
+      const strippedFor = (i: number) => {
+        if (def.resolvedMissingBehavior !== 'propagate') return undefined;
+        const stripped = operandTypes?.[i];
+        // A BARE `missing` operand strips to `never`, and a `never`-typed
+        // descriptor proves numeric claims vacuously (`never` is the
+        // bottom type, so it matches `real`): `Sin(Missing)` would claim
+        // `real` where the unstripped `missing` claims `number`. There is
+        // no present-value component to type for a bare marker, so the
+        // descriptor keeps the operand's own type and the absorption
+        // machinery downstream owns the absent case; the strip applies
+        // only to genuine unions (`integer | missing` → `integer`).
+        if (stripped === 'never') return undefined;
+        return stripped;
+      };
+      // One descriptor memo for the whole application: a node shared
+      // between two operands is described once (see `DescriptorMemo`).
+      const walk: DescriptorMemo = new Map();
+      const descriptors = expr.ops.map((x, i) =>
+        describeOperand(x, strippedFor(i), walk)
+      );
+      calculatedType = guardedTypeHandlerCall(expr.engine, expr.operator, () =>
+        def.type!(descriptors, typeHandlerContext(expr.engine))
+      );
+      // An operand typed `never` (the EMPTY type — a symbol declared with
+      // an empty range, `integer<2<..<3>`) has no value, so no application
+      // of it has one: the result is `never`. Applied AFTER the handler,
+      // on the descriptors it already derived — never by reading operand
+      // types ahead of dispatch, which forced derivation in a different
+      // order and made the constant folder's memo, hence the COMPILED
+      // OUTPUT, run-dependent (measured: 2 distinct outputs of one
+      // source). The handler's own answer is wrong for `never`: the
+      // bottom type matches every type, `matrix` included, so shape arms
+      // fire vacuously.
+      if (descriptors.some((d) => d.type === 'never')) calculatedType = 'never';
       if (calculatedType) {
         typeHandlerAnswered = true;
         if (calculatedType instanceof BoxedType)
@@ -6094,7 +6122,7 @@ function type(expr: BoxedFunction): Type {
     // per-operator fact, never an engine-wide default — the mean of two
     // integers is not an integer, and `BigO(3)` is never a number at all. An
     // operator for which the premise holds opts in with the shared
-    // `kindClosureType` handler (`library/type-handlers-types.ts`).
+    // `kindClosureType` handler (`library/type-handlers.ts`).
 
     // Honest typing for list broadcast: when this operator will broadcast
     // element-wise over a finite indexed collection operand, its value is a
@@ -6326,6 +6354,44 @@ function type(expr: BoxedFunction): Type {
             staticCollectionDims(sigResult) !== null
           )
             return maybeAbsorb(resolveTypeAlias(sigResult));
+
+          // A LIST OF POINTS under a head that broadcasts component-wise
+          // over a tuple (the same predicate as arm 0 above): the value is
+          // a list of points, one per element, each the tuple of
+          // per-component results — `Sqrt(P)` for `P := [(1, 4), (9, 16)]`
+          // evaluates to `[(1, 2), (3, 4)]`. The cell the handler was asked
+          // about is the tuple's COMPONENT type (`broadcastCellType` unwraps
+          // through the tuple, which is atomic under broadcast), so the
+          // scalar `cellResult` is the per-component result and the
+          // per-element result is a tuple of `arity` copies of it, exactly
+          // as arm 0 builds for one point. Without this the lift re-wrapped
+          // the scalar as `list<number>`: a list of points typed as a list
+          // of numbers, which a consumer that routes on the type (the
+          // JavaScript target's `PointX` lowering) read as a flat list. A
+          // head whose tuple semantics is whole-point (`Abs` of a point is
+          // its norm) fails the predicate and keeps the scalar cell. The
+          // tuple cell goes through the same shape-aware re-wrap as a
+          // scalar cell below, so a fixed-length or rank-2 collection of
+          // points keeps its dimensions (`list<tuple<…>^2x3>`).
+          if (
+            broadcastsOverTuples(expr.operator, def) &&
+            !hasTupleBranch(cellResult) &&
+            !isSubtype(cellResult, COLLECTION_SHAPE_TYPE)
+          ) {
+            const arity = pointListArity(broadcastingOps);
+            if (arity !== undefined)
+              return maybeAbsorb(
+                broadcastShapedResultType(
+                  broadcastingOps.map((x) => x.type.type),
+                  {
+                    kind: 'tuple',
+                    elements: Array.from({ length: arity }, () => ({
+                      type: cellResult as Type,
+                    })),
+                  }
+                )
+              );
+          }
 
           // Rank/shape-aware lift (§D6.1): mirror the operands'
           // statically-provable structure — `Sqrt(M)` with `M: matrix<2x2>`

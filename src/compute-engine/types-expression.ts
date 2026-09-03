@@ -312,12 +312,13 @@ type OperandFactsMirror = {
   readonly finiteCollection: boolean | undefined;
   readonly indexed: boolean | undefined;
   readonly shape?: readonly number[];
+  readonly elementType?: Type;
 };
 
 type OperandStructureMirror =
-  | { kind: 'symbol'; name: string; inferred?: boolean }
+  | { kind: 'symbol'; name: string; system?: boolean; inferred?: boolean }
   | { kind: 'string'; text: string }
-  | { kind: 'number'; literal?: 0 | 1 }
+  | { kind: 'number'; literal?: 0 | 1; rational?: readonly [bigint, bigint] }
   | {
       kind: 'application';
       head: string;
@@ -328,8 +329,16 @@ type OperandStructureMirror =
       parameters: ReadonlyArray<{ name: string; annotated?: Type }>;
       body: OperandStructureMirror;
     }
-  | { kind: 'tuple'; arity: number }
-  | { kind: 'list-literal'; shape: readonly number[] };
+  | {
+      kind: 'tuple';
+      arity: number;
+      elements: ReadonlyArray<OperandDescriptorMirror>;
+    }
+  | {
+      kind: 'list-literal';
+      shape: readonly number[];
+      elements: ReadonlyArray<OperandDescriptorMirror>;
+    };
 
 type OperandDescriptorMirror = {
   readonly type: Type;
@@ -343,6 +352,8 @@ type OperandDescriptorMirror = {
 interface PureEngineViewMirror {
   type(type: Type | TypeString | BoxedType): BoxedType;
   readonly _typeResolver: import('../common/type/types.js').TypeResolver;
+  readonly tolerance: number;
+  readonly _protocolRegistry: Readonly<Record<string, object>>;
   lookupDefinition(id: string):
     | {
         readonly value?: Readonly<BoxedValueDefinition>;
@@ -419,22 +430,16 @@ interface BoxedOperatorDefinition
    * See `types-definitions.ts`. */
   readonly invokesNone: boolean;
   readonly lambda: LambdaDefinition | undefined;
-  /** Which shape the stored `type` handler takes — see
-   * `BoxedOperatorDefinition.typeHandlerKind` in `types-definitions.ts`.
-   * Dispatch on this flag, never on the handler's parameter count. */
-  readonly typeHandlerKind: 'expressions' | 'types';
-  type?:
-    | ((
-        ops: ReadonlyArray<Expression>,
-        options: {
-          engine: ExpressionComputeEngine;
-          operandTypes?: ReadonlyArray<Type | undefined>;
-        }
-      ) => Type | TypeString | BoxedType | undefined)
-    | ((
-        operands: ReadonlyArray<OperandDescriptorMirror>,
-        context: { engine: PureEngineViewMirror }
-      ) => Type | TypeString | BoxedType | undefined);
+  type?: (
+    operands: ReadonlyArray<OperandDescriptorMirror>,
+    context: {
+      engine: PureEngineViewMirror;
+      derive: (
+        operator: string,
+        operands: ReadonlyArray<OperandDescriptorMirror>
+      ) => Type | undefined;
+    }
+  ) => Type | TypeString | BoxedType | undefined;
   sgn?: (
     ops: ReadonlyArray<Expression>,
     options: { engine: ExpressionComputeEngine }

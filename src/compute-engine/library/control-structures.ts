@@ -40,6 +40,7 @@ import {
 } from '../../common/interruptible.js';
 import type {
   Expression,
+  OperandStructure,
   SymbolDefinitions,
   EvaluateOptions,
   IComputeEngine as ComputeEngine,
@@ -62,6 +63,7 @@ import {
 import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
 import { assignLoopIndex } from './utils.js';
 import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
+import { activeRollbackFrame } from '../inference-rollback.js';
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
@@ -96,7 +98,6 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // precedent (`List`, `If`, `Which`, `Assign`, `Declare`), and releases a
       // seed frame that a surviving build-and-return block owes no draws to.
       invokes: false,
-      typeHandlerKind: 'types',
       type: (args) => {
         if (args.length === 0) return 'nothing';
         return args[args.length - 1].type;
@@ -144,12 +145,22 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // never `Nothing`, whose splicing erasure must not answer a failed
       // selection (ERROR-MODEL §1; no-selection ruling 2026-08-27, shared
       // with `Which`).
+      // The handler reads only the operands' TYPES, so it is declared on the
+      // descriptor shape and cannot touch engine state while deriving.
       type: ([cond, ifTrue, ifFalse]) => {
+        // A type read must never crash, whatever the application looks like.
+        // The parse and box routes both admit a malformed `If` with no
+        // branch at all, which reaches this handler with `ifTrue`
+        // undefined; it answers `unknown` rather than dereferencing a
+        // missing operand — the same hardening `When` carries.
+        if (ifTrue === undefined) return 'unknown';
         // A condition that is provably a boolean indexed collection selects
         // element-wise (see `evaluateElementwiseSelection`): the result is a
         // list of the branches' element types.
-        const shape = elementwiseConditionShape([cond]);
-        const armList = [ifTrue, ifFalse].filter((x) => x !== undefined);
+        const shape = elementwiseConditionShape([cond?.type]);
+        const armList = [ifTrue, ifFalse]
+          .filter((x) => x !== undefined)
+          .map((x) => x.type);
         if (shape)
           return elementwiseResultType(
             armList,
@@ -163,7 +174,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // for the others, so the honest result is `broadcastable` of the
         // element-wise cell type. Without an else branch the scalar outcome is
         // `Missing`, which `broadcastable` does not cover, so keep that arm.
-        if (possiblyElementwiseCondition([cond])) {
+        if (possiblyElementwiseCondition([cond?.type])) {
           const broadcast: Type = {
             kind: 'broadcastable',
             elements: elementwiseCellType(armList, ifFalse !== undefined),
@@ -179,9 +190,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         if (ifFalse === undefined)
           return reduceType({
             kind: 'union',
-            types: [ifTrue.type.type, 'missing'],
+            types: [ifTrue.type, 'missing'],
           });
-        return widen(ifTrue.type.type, ifFalse.type.type);
+        return widen(ifTrue.type, ifFalse.type);
       },
       canonical: (ops, { engine }) =>
         engine._fn(
@@ -279,11 +290,16 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // before the clauses and body are canonicalized against it.
       scoped: indexingSetSites(1),
       signature: '(body:expression, iterators:expression*) -> any',
+      // The handler reads the body's inert STRUCTURE (does it contain a
+      // value-carrying `Return`/`Break`?), never the body expression, so it is
+      // declared on the descriptor shape.
       type: ([body]) => {
         if (!body) return 'nothing';
         // A `Loop` is evaluated for effect: its value is `Nothing` unless the
         // body can short-circuit with a value (`Break v` / `Return`).
-        return loopBodyYieldsValue(body) ? 'unknown' : 'nothing';
+        return loopBodyYieldsValue(body.structureOf?.())
+          ? 'unknown'
+          : 'nothing';
       },
       canonical: (ops, options) => canonicalLoopLike('Loop', ops, options),
       evaluate: (ops, { engine: ce }) =>
@@ -313,12 +329,13 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       scoped: indexingSetSites(1),
       signature:
         '(body:expression, iterators:expression+) -> indexed_collection',
+      // The handler reads the body operand's type and nothing else.
       type: ([body]) => {
         if (!body) return 'nothing';
         // Result is an indexed collection of body.type values. The body's
         // type may itself be parametric (e.g. a tuple) — wrap in
         // indexed_collection<...>.
-        return { kind: 'indexed_collection', elements: body.type.type };
+        return { kind: 'indexed_collection', elements: body.type };
       },
       canonical: (ops, options) =>
         canonicalLoopLike('Comprehension', ops, options),
@@ -359,7 +376,6 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.',
       lazy: true,
       signature: '(expression, boolean) -> any',
-      typeHandlerKind: 'types',
       type: ([expr, cond]) => {
         // A list/vector-of-booleans condition broadcasts: the result is a
         // list whose element type is `expr`'s type (see the broadcast branch
@@ -430,7 +446,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             conds.length > 0 &&
             conds.every(
               (ci) =>
-                ci.type.matches('boolean') || possiblyElementwiseCondition([ci])
+                ci.type.matches('boolean') ||
+                possiblyElementwiseCondition([ci.type.type])
             )
           ) {
             // If `expr` itself evaluates to a finite indexed collection, zip
@@ -533,6 +550,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // evaluated and RETURNED, and no position applies a function-valued
       // operand. Held-position (production) effects are unaffected.
       invokes: false,
+      // The handler reads the operands' types plus one structural fact — a
+      // literal `True` condition names the default clause — so it is declared
+      // on the descriptor shape and cannot touch engine state.
       type: (args) => {
         // The operands are strictly PAIRED, so an odd count is a malformed
         // call, and the `canonical` handler below turns such a call into an
@@ -552,7 +572,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // stop there too, or `Which(True, 1, [True, False], 2)` — which
         // evaluates to the scalar `1` — would be typed element-wise by a
         // condition that is never even evaluated.
-        const dflt = conds.findIndex((c) => sym(c) === 'True');
+        const dflt = conds.findIndex((c) => {
+          const st = c?.structureOf?.();
+          return st?.kind === 'symbol' && st.name === 'True';
+        });
         if (dflt >= 0) {
           conds = conds.slice(0, dflt + 1);
           arms = arms.slice(0, dflt + 1);
@@ -560,10 +583,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // A condition that is provably a boolean indexed collection selects
         // element-wise (see `evaluateElementwiseSelection`): the result is a
         // list of the arms' element types.
-        const shape = elementwiseConditionShape(conds);
+        const shape = elementwiseConditionShape(conds.map((c) => c?.type));
         if (shape)
           return elementwiseResultType(
-            arms,
+            arms.map((x) => x.type),
             shape.length,
             // A literal `True` condition is the default clause: it matches
             // every position, so the `NaN` no-match cell is unreachable.
@@ -580,17 +603,20 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // possibly-element-wise branch carries the arm too: such a condition
         // may resolve to a scalar `False` at runtime, and the `Which` then
         // answers the scalar `Missing`.
-        if (possiblyElementwiseCondition(conds)) {
+        if (possiblyElementwiseCondition(conds.map((c) => c?.type))) {
           const broadcast: Type = {
             kind: 'broadcastable',
-            elements: elementwiseCellType(arms, dflt >= 0),
+            elements: elementwiseCellType(
+              arms.map((x) => x.type),
+              dflt >= 0
+            ),
           };
           return dflt >= 0
             ? broadcast
             : reduceType({ kind: 'union', types: [broadcast, 'missing'] });
         }
         if (arms.length === 0) return 'missing';
-        const armType = widen(...arms.map((x) => x.type.type));
+        const armType = widen(...arms.map((x) => x.type));
         if (dflt >= 0) return armType;
         return reduceType({ kind: 'union', types: [armType, 'missing'] });
       },
@@ -647,6 +673,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // literal/shape case and falls through to `_`, a binding, or `...`.
       inspectsErrors: true,
       signature: '(expression, expression+) -> unknown',
+      // The handler reads each case's inert structure (its head and the type
+      // of its last child), never an operand expression.
       type: (ops) => {
         // Result is the widened type of the case bodies (the last operand of
         // each `MatchCase`), mirroring `If`/`Which`. Bodies reference capture
@@ -654,8 +682,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // best-effort hint.
         const bodyTypes: Type[] = [];
         for (const c of ops.slice(1)) {
-          if (!isFunction(c, 'MatchCase') || c.nops < 2) continue;
-          bodyTypes.push(c.ops[c.nops - 1].type.type);
+          const st = c?.structureOf?.();
+          if (st?.kind !== 'application' || st.head !== 'MatchCase') continue;
+          if (st.children.length < 2) continue;
+          bodyTypes.push(st.children[st.children.length - 1].type);
         }
         if (bodyTypes.length === 0) return 'nothing';
         return widen(...bodyTypes);
@@ -1101,16 +1131,15 @@ function evaluateElementwiseSelection(
  * supertype both are checked against.
  */
 function elementwiseConditionShape(
-  conds: ReadonlyArray<Expression | undefined>
+  conds: ReadonlyArray<Type | undefined>
 ): { length?: number } | undefined {
   let found = false;
   let length: number | undefined;
-  for (const cond of conds) {
-    if (!cond?.type.matches(BOOLEAN_COLLECTION_TYPE)) continue;
+  for (const t of conds) {
+    if (t === undefined || !isSubtype(t, BOOLEAN_COLLECTION_TYPE)) continue;
     // A tuple is a subtype of `indexed_collection`, but runtime lifts tuples
     // whole (tuple-atomic): a tuple-typed condition never activates the
     // element-wise path, so it must not flip the static shape either.
-    const t = cond.type.type;
     if (typeof t !== 'string' && t.kind === 'tuple') continue;
     found = true;
     if (typeof t === 'string' || t.kind !== 'list') continue;
@@ -1158,10 +1187,10 @@ function armElementType(t: Readonly<Type>): Type {
  * dispatch.
  */
 function elementwiseCellType(
-  arms: ReadonlyArray<Expression>,
+  arms: ReadonlyArray<Type>,
   hasDefault: boolean
 ): Type {
-  const armTypes = arms.map((x) => armElementType(x.type.type));
+  const armTypes = arms.map((t) => armElementType(t));
   return hasDefault ? widen(...armTypes) : widen(...armTypes, 'number');
 }
 
@@ -1184,10 +1213,9 @@ function elementwiseCellType(
  * of the union that `broadcastable<T>` abbreviates.
  */
 function possiblyElementwiseCondition(
-  conds: ReadonlyArray<Expression | undefined>
+  conds: ReadonlyArray<Type | undefined>
 ): boolean {
-  return conds.some((cond) => {
-    const t = cond?.type.type;
+  return conds.some((t) => {
     return (
       t !== undefined &&
       typeof t !== 'string' &&
@@ -1203,7 +1231,7 @@ function possiblyElementwiseCondition(
  * not provable, which yields an unbounded `list`).
  */
 function elementwiseResultType(
-  arms: ReadonlyArray<Expression>,
+  arms: ReadonlyArray<Type>,
   length: number | undefined,
   hasDefault: boolean
 ): Type {
@@ -1560,11 +1588,31 @@ function canonicalStatement(ce: ComputeEngine, op: Expression): Expression {
  * contains a `Return`, or a `Break` carrying an operand. Used by the `Loop`
  * type handler: a for-effect loop is otherwise `nothing`.
  */
-function loopBodyYieldsValue(expr: Expression): boolean {
-  if (!isFunction(expr)) return false;
-  if (expr.operator === 'Return') return true;
-  if (expr.operator === 'Break' && expr.ops.length > 0) return true;
-  return expr.ops.some((op) => loopBodyYieldsValue(op));
+function loopBodyYieldsValue(structure: OperandStructure | undefined): boolean {
+  if (structure === undefined) return false;
+  switch (structure.kind) {
+    case 'application':
+      if (structure.head === 'Return') return true;
+      if (structure.head === 'Break' && structure.children.length > 0)
+        return true;
+      return structure.children.some((c) =>
+        loopBodyYieldsValue(c.structureOf?.())
+      );
+    // A `Tuple` and a `List` literal are applications of `Tuple`/`List` in
+    // the expression tree, so their elements are searched too — neither head
+    // is a short-circuit, only their contents can be.
+    case 'tuple':
+    case 'list-literal':
+      return structure.elements.some((c) =>
+        loopBodyYieldsValue(c.structureOf?.())
+      );
+    // A nested function literal's parameters are bare symbols, so only its
+    // body can carry a short-circuit.
+    case 'function-literal':
+      return loopBodyYieldsValue(structure.body);
+    default:
+      return false;
+  }
 }
 
 /**
@@ -1690,8 +1738,36 @@ function canonicalLoopLike(
         const elt = collectionElementType(
           resolveTypeForCompilation(collCanonical.type.type)
         );
-        if (elt !== undefined && elt !== 'any' && elt !== 'unknown')
+        if (elt !== undefined && elt !== 'any' && elt !== 'unknown') {
           idxCanonical._infer(() => elt, 'narrow');
+          // The binding site is AUTHORITATIVE for the index's type (ruled
+          // 2026-09-03): the element type is evidence from the collection,
+          // not a guess. The write above lands in the fresh-inference set,
+          // which exists for one repair — `repairFreshMatrixInference`
+          // (`validate.ts`) rewrites a symbol the scalar fast path guessed
+          // `real` for to `matrix` when a later operand slot wants a
+          // collection. Left in the set, the binder took that repair:
+          // `[q.x + 1 for q in L]` over `L: list<number>` boxed VALID with
+          // `q: matrix`, while `PointX(q)` over a `number`-typed `q` is a
+          // type error anywhere else. Removing the binding from the set
+          // makes a body use that contradicts the element type an error, as
+          // it is for a `Sum` index. Membership of that set is journaled
+          // state: an open rollback frame (the Epsil static-checking pass
+          // wraps a whole canonicalization in one) must be able to undo
+          // this removal exactly as it undoes the repair's own add, so the
+          // undo re-adds the definition. A destructuring binder (`(p, q)`
+          // over a list of pairs) takes no element type here — its leaves
+          // are declared `unknown` and typed by use — so the rule has no
+          // binding-site type to enforce for it yet (see `ROADMAP.md`).
+          const def = idxCanonical.valueDefinition;
+          const fresh = ce._freshlyInferred;
+          if (def !== undefined && fresh?.has(def)) {
+            const frame = activeRollbackFrame(ce);
+            if (frame !== undefined)
+              frame.record({ undo: () => void fresh.add(def) });
+            fresh.delete(def);
+          }
+        }
       }
     });
     return ce._fn('Element', [idxCanonical, collCanonical]);

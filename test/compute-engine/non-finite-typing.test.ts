@@ -65,7 +65,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     test('Round/Floor of a real ±∞', () => {
       // Rounding a signed infinity gives that same infinity back. The
       // rounding type handler proves realness against the EXTENDED real line
-      // (`roundingFunctionType`, `library/type-handlers-types.ts`), which is
+      // (`roundingFunctionType`, `library/type-handlers.ts`), which is
       // what makes this arm reachable: a signed infinity does not match the
       // bare name `real`, which denotes the finite reals.
       expect(typeOf(['Round', 'PositiveInfinity'])).toBe('signed_infinity');

@@ -1,10 +1,15 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
+  OperandDescriptor,
+  PureEngineView,
   SymbolDefinitions,
+  TypeHandlerContext,
 } from '../global-types.js';
 
+import type { Type } from '../../common/type/types.js';
 import { functionResult } from '../../common/type/utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { checkType } from '../boxed-expression/validate.js';
 import {
   rebindEscaping,
@@ -57,8 +62,8 @@ import {
 } from '../numerics/numeric.js';
 import { derivative, differentiate } from '../symbolic/derivative.js';
 import {
-  couldBeNumericTuple,
   typeCouldBeNumericCollection,
+  typeCouldBeNumericTuple,
 } from '../collection-utils.js';
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
 import '../symbolic/explain-derivative.js';
@@ -604,6 +609,84 @@ function transitiveUnknowns(
 
 /** No names are bound: used at a definition boundary that binds none. */
 const NO_BOUND_NAMES: ReadonlySet<string> = new Set<string>();
+
+/**
+ * The shape gate `list<any>` that `JacobianMatrix`'s type handler asks its
+ * operand: "does this denote a SYSTEM of functions?". Asked with the
+ * absence-admitting top so that a list whose element type carries an
+ * absence marker still matches. Built once at module load.
+ */
+const JACOBIAN_LIST_SHAPE_TYPE: Type = Object.freeze({
+  kind: 'list',
+  elements: 'any',
+}) as Type;
+
+/**
+ * The type a SYMBOL operand's held value has, or `undefined` when the
+ * operand is not a symbol, holds nothing, or holds another symbol.
+ *
+ * A held value is a pure source, and it carries what a wide declaration
+ * does not: a head declared as a bare `function` and only then assigned a
+ * lambda keeps `function` as its contract, while the lambda itself has a
+ * signature whose codomain `Derivative` wants. The definition is looked up
+ * by name, which is the binding the operand itself resolves through.
+ */
+function heldValueTypeOf(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): Type | undefined {
+  const structure = d.structureOf?.();
+  if (structure?.kind !== 'symbol') return undefined;
+  const held = engine.lookupDefinition(structure.name)?.value?.value;
+  if (held === undefined || isSymbol(held)) return undefined;
+  return held.type.type;
+}
+
+/**
+ * The type of the VALUE an operand denotes, for an operand that a lazy
+ * operator receives raw.
+ *
+ * A held operand is unbound, so its own type is `unknown` — even for
+ * `Sin(x)` or for a symbol declared with a signature. Two pure channels
+ * recover the answer: an application is typed by `derive`, which runs the
+ * head's own `type` handler and otherwise instantiates its declared
+ * signature; a symbol is read from its definition, and where that names a
+ * function, from what the function RETURNS (its declaration first, then the
+ * lambda it holds, which is the only codomain a head declared as a bare
+ * `function` has).
+ */
+function denotedTypeOf(
+  d: OperandDescriptor,
+  { engine, derive }: TypeHandlerContext
+): Type {
+  const structure = d.structureOf?.();
+  if (structure?.kind === 'application')
+    return derive(structure.head, structure.children) ?? d.type;
+  if (structure?.kind === 'symbol') {
+    // Four places a symbol's codomain can live, in decreasing precision: the
+    // operand's own type (a bound symbol carries its signature there, while
+    // a RAW held one is still `unknown`), the value declaration, the lambda
+    // the symbol holds — the only codomain a head declared as a bare
+    // `function` has — and, for a symbol that a lambda assignment made
+    // CALLABLE, the operator half's signature, which is where that
+    // assignment records the inferred codomain.
+    const binding = engine.lookupDefinition(structure.name);
+    const def = binding?.value;
+    for (const t of [
+      d.type,
+      def?.type.type,
+      def?.value?.type.type,
+      binding?.operator?.signature.type,
+    ]) {
+      if (t === undefined) continue;
+      const result = functionResult(t);
+      if (result !== undefined && result !== 'any' && result !== 'unknown')
+        return result;
+    }
+    return def?.type.type ?? d.type;
+  }
+  return d.type;
+}
 
 /**
  * Collect the dependent-function symbol name(s) from the second argument of
@@ -1199,7 +1282,7 @@ volumes
         // derives (same parameters and codomain). Preserving it lets an
         // application — `Apply(Derivative(f, 1), x)`, the parse of `f'(x)` —
         // type as the function's return type instead of `any`.
-        const t = fn?.type.type;
+        const t = fn?.type;
         const result = t !== undefined ? functionResult(t) : undefined;
         if (result !== undefined && result !== 'any' && result !== 'unknown')
           return engine.type(t!);
@@ -1214,7 +1297,7 @@ volumes
         // returned a 3-tuple, and every type-strict consumer (`Cross`, `Dot`)
         // rejected the call with `incompatible-type` (Tycho item 210).
         const valueType =
-          fn !== undefined && isSymbol(fn) ? fn.value?.type.type : undefined;
+          fn !== undefined ? heldValueTypeOf(fn, engine) : undefined;
         if (
           valueType !== undefined &&
           typeof valueType !== 'string' &&
@@ -1384,12 +1467,12 @@ volumes
       scoped: operandsFrom(1),
       lazy: true,
       signature: '(expression, variables:symbol*) -> expression',
-      type: ([body]) => {
+      type: ([body], { engine }) => {
         if (!body) return undefined;
         const t = body.type;
         // The derivative of a numeric expression is numeric — preserve the
         // concrete numeric type (e.g. `number` for `D(Sin(x),x)`).
-        if (t.matches('number')) return t;
+        if (isSubtype(t, 'number')) return t;
         // A numeric TUPLE or COLLECTION body differentiates component-wise and
         // the result keeps that shape: `D((cos t, sin 2t, t), t)` evaluates to
         // `(-sin t, 2cos 2t, 1)`, and `D([cos t, sin t], t)` to a list. The
@@ -1398,7 +1481,7 @@ volumes
         // type-strict consumer (`Cross`, `Dot`) rejected the derivative of a
         // parametric curve outright (Tycho item 210). Echoing the body's type
         // follows the same tier convention as the numeric branch above.
-        if (couldBeNumericTuple(body) || typeCouldBeNumericCollection(t.type))
+        if (typeCouldBeNumericTuple(t) || typeCouldBeNumericCollection(t))
           return t;
         // A derivative is otherwise scalar-valued: report `number` rather than
         // the signature's `expression`. This covers the derivative of an
@@ -1410,7 +1493,7 @@ volumes
         // corrupting parsed input like `y''(x) + y(x) = 0` before `DSolve`
         // ever runs — and leaving inconsistent trees (a bare application
         // `y(x)` already reports `any` and composes fine there).
-        return body.engine.type('number');
+        return engine.type('number');
       },
       canonical: (ops, { engine: ce, scope }) => {
         // Guard against a malformed `D` with no operand. This can arise when
@@ -1599,25 +1682,31 @@ volumes
       // A system of functions yields a matrix; a single function yields the
       // gradient vector. Reported from the operand's *shape*, which is
       // available before evaluation; the element type is left to the value.
-      type: ([fs], { engine: ce }) => {
+      //
+      // "System or gradient?" is a question about what the operand DENOTES,
+      // not about its syntax: a user function `F` that returns a list is a
+      // system, so `Determinant(JacobianMatrix(F(x, y, z)))` must type-check.
+      // The expressions-shape handler answered it by canonicalizing the
+      // operand and reducing it to a `List`, which a type derivation may not
+      // do — canonicalizing writes engine state. The two channels below
+      // answer the same question without it: a literal list, or a function
+      // literal whose body is one, is a system by STRUCTURE; otherwise the
+      // type of what the operand denotes decides — a list makes it a system,
+      // a scalar number the gradient case. What neither decides keeps the
+      // declared `value`, where the old handler guessed `vector`.
+      type: ([fs], context) => {
         if (!fs) return undefined;
-        // System (matrix) vs gradient (vector) must be decided on what the
-        // operand *denotes* — the same semantic test the evaluate handler
-        // uses. A syntactic `List` check alone typed `JacobianMatrix(F(x,y,z),
-        // …)` for a list-returning user function `F` as a `vector`, so a
-        // directly-nested `Determinant(JacobianMatrix(…))` failed typecheck
-        // (the `let`-bound value path worked, masking it).
-        let operand = fs.canonical;
-        // A bare function reference (`JacobianMatrix(F)`) denotes its body.
-        const lambda = bareFunctionLambda(operand);
-        if (lambda) operand = lambda.body;
-        if (!isFunction(operand, 'List')) {
-          const reduced = resolveToList(operand);
-          if (isFunction(reduced, 'List')) operand = reduced;
-        }
-        return isFunction(operand, 'List')
-          ? ce.type('matrix')
-          : ce.type('vector');
+        const structure = fs.structureOf?.();
+        if (
+          structure?.kind === 'list-literal' ||
+          (structure?.kind === 'function-literal' &&
+            structure.body.kind === 'list-literal')
+        )
+          return 'matrix';
+        const denoted = denotedTypeOf(fs, context);
+        if (isSubtype(denoted, JACOBIAN_LIST_SHAPE_TYPE)) return 'matrix';
+        if (isSubtype(denoted, 'number')) return 'vector';
+        return 'value';
       },
 
       evaluate: (ops, { engine: ce }) => {
@@ -2764,7 +2853,6 @@ volumes
       // result's honest type is the operand's own type: a truncated series
       // stays numeric, and a non-numeric value (which `normalStrip` returns
       // unchanged) keeps its own type instead of a false `number` claim.
-      typeHandlerKind: 'types',
       type: ([x]) => x?.type ?? 'value',
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;
