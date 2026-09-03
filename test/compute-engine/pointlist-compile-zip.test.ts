@@ -428,7 +428,15 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     // type-check time instead of reaching the ABI. `bt` preserves this pin's
     // subject: an out-of-range access whose arity is not statically known.)
     expect(js.compile(ce.box(['PointY', 'p'])).code).toContain('?? NaN');
-    expect(js.compile(ce.box(['PointZ', 'bt'])).code).toContain('?? NaN');
+    // A bare `tuple` states neither its arity nor whether the value is one
+    // point or a list of points, so the access is decided at run time by
+    // `_SYS.pointComponent`, which answers the same `NaN` marker for an absent
+    // coordinate (and one `NaN` for the whole application when the point
+    // turns out to be 2-D, as the interpreter's `incompatible-dimensions`
+    // projects).
+    expect(js.compile(ce.box(['PointZ', 'bt'])).code).toContain(
+      '_SYS.pointComponent(_.bt, 2)'
+    );
   });
 
   it('a symbol DECLARED `list<tuple>` broadcasts the accessor (widened operand test)', () => {

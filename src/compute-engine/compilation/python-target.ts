@@ -2058,10 +2058,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // See `Ln` above for why `cmath` is the wrong helper for a REAL operand:
     // `cmath.log(0)` raises where the interpreter answers `-∞`.
     const promoted = BaseCompiler.promotesRadicalToComplex('Log', args);
-    if (args.length === 1)
+    // Base 10 (the one-argument form) and base 2 take numpy's dedicated
+    // kernel, which is what the interpreter's constant fold uses too;
+    // `log(x) / log(2)` is one ulp off it at the powers of two (Tycho item
+    // 240).
+    const base = BaseCompiler.fixedLogBase(args);
+    if (base !== undefined)
       return promoted
-        ? `np.emath.log10(${compile(args[0])})`
-        : `np.log10(${compile(args[0])})`;
+        ? `np.emath.log${base}(${compile(args[0])})`
+        : `np.log${base}(${compile(args[0])})`;
     if (args.length === 2) {
       const fn = promoted ? 'np.emath.log' : 'np.log';
       return `(${fn}(${compile(args[0])}) / ${fn}(${compile(args[1])}))`;

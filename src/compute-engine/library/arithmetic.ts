@@ -2655,6 +2655,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           ops[0],
           ops[1],
           (z, b) => {
+            // One kernel per base, shared with the compile targets
+            // (`BaseCompiler.fixedLogBase`): a base of 10 or 2 with a
+            // non-negative argument goes through `Math.log10` / `Math.log2`,
+            // so a folded `Log(x, 2)` and a compiled runtime one agree to the
+            // last bit. `ln(x) / ln(b)` differs from those kernels on about
+            // one argument in ten, and is one ulp off at the powers of the
+            // base (Tycho item 240). A zero argument answers `-oo` on both
+            // spellings.
+            if (z >= 0 && b === 10) return Math.log10(z);
+            if (z >= 0 && b === 2) return Math.log2(z);
             const lz = lnOf(z);
             const lb = lnOf(b);
             if (typeof lz === 'number' && typeof lb === 'number')

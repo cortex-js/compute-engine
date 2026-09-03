@@ -1564,6 +1564,31 @@ export function isDeclaredScalarNumber(expr: Expression): boolean {
 }
 
 /**
+ * Is `expr` PROVABLY a scalar number — proof enough to REJECT a sum of it
+ * with a tuple at canonicalization, where the error is baked into the
+ * expression for good?
+ *
+ * `isDeclaredScalarNumber` is the typing-grade reading: a call whose operator
+ * declares a numeric result counts, whatever its operands, which is what the
+ * `Multiply` type handler wants when it combines a scalar factor's tier into
+ * a tuple's component types (an inferred tier there is harmless — if the
+ * inference is later retracted the product is invalid anyway). Rejection
+ * needs more. A BROADCASTABLE operator maps over a tuple operand
+ * component-wise (`Negate((1, 2))` is `(-1, -2)`, `2·(1, 2)` is `(2, 4)`),
+ * so its declared `number` result describes only the scalar reading, and the
+ * call is proven scalar exactly when every operand is. `Negate(q)` with `q`
+ * an untyped function-literal parameter is not: rejecting `-q + (1, 2)` at
+ * boxing committed `q` to a number on evidence the enclosing sum contradicts,
+ * while `q + (1, 2)` stayed symbolic and bound (Tycho item 241).
+ */
+export function isProvablyScalarNumber(expr: Expression): boolean {
+  if (!isDeclaredScalarNumber(expr)) return false;
+  if (isFunction(expr) && expr.operatorDefinition?.broadcastable)
+    return expr.ops.every((op) => isProvablyScalarNumber(op));
+  return true;
+}
+
+/**
  * Is `x` an operand that makes an application ELEMENT-WISE, read from its
  * TYPE rather than its value — so the answer is known before the operand is
  * evaluated, and a `list<boolean>`-typed call, a symbol bound to a list, and a

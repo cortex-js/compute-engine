@@ -50,9 +50,20 @@ function normalizeAlpha(a: number | undefined): number | undefined {
  * non-finite). Used by `As*` short-circuits so that e.g. `AsRgb(Rgb(1,0,0,1))`
  * returns the 3-component form, consistent with how every other emit site
  * handles alpha. Symbolic alphas (variables, expressions) are left in place.
+ *
+ * A numeric channel that is not finite is rejected here exactly as the
+ * conversion path rejects it (`readColorExpr`): the same-head shortcut must
+ * not admit a color that changing the head would refuse, or
+ * `AsRgb(Rgb(~oo, 0, 0))` echoed its argument while `AsRgb(Hsv(90, 1, ~oo))`
+ * was an error. Symbolic channels are left in place.
  */
 function normalizeColorHead(ce: any, expr: any): any {
-  if (!isFunction(expr) || !expr.ops || expr.ops.length < 4) return expr;
+  if (!isFunction(expr) || !expr.ops || expr.ops.length < 3) return expr;
+  if (
+    expr.ops.slice(0, 3).some((c: any) => isNumber(c) && !Number.isFinite(c.re))
+  )
+    return ce.error('incompatible-type');
+  if (expr.ops.length < 4) return expr;
   const alphaExpr = expr.ops[3];
   if (!isNumber(alphaExpr)) return expr;
   if (normalizeAlpha(alphaExpr.re) === undefined) {

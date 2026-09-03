@@ -1950,3 +1950,21 @@ export function signOfType(
   }
   return undefined;
 }
+
+/**
+ * Does `type` admit a `broadcastable<T>` value — directly, through a
+ * transparent alias, or as one member of a union? Such a value is a `T` or an
+ * indexed collection of `T`, decided only at run time, so a consumer that
+ * must know which (the `PointList` lowerings, which zip a list but splice a
+ * scalar) treats the whole type as undecided. The routing decision in the
+ * `PointList` definition handler and the run-time role in the JavaScript zip
+ * lowering both use this one predicate, so neither can admit a shape the
+ * other rejects.
+ */
+export function containsBroadcastableType(type: Readonly<Type>): boolean {
+  const t = resolveTypeAlias(type);
+  if (typeof t === 'string') return false;
+  if (t.kind === 'broadcastable') return true;
+  if (t.kind === 'union') return t.types.some(containsBroadcastableType);
+  return false;
+}

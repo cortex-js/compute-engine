@@ -22,6 +22,7 @@ import {
 } from './constant-folding.js';
 import {
   collectionElementType,
+  containsBroadcastableType,
   finitePartOfType,
   isNonRealNumber,
   resolveTypeAlias,
@@ -1311,13 +1312,68 @@ function compilePointComponent(
   // which is the same `[idx]` access as the single-point case.
   const eltType = collectionElementType(t);
   if (isPointListOperand(arg) || isCoordinateRowListOperand(arg)) {
+    // `PointZ` over points whose arity the type does not state: the
+    // interpreter measures the first point and errors on the WHOLE
+    // application when it is 2-D (`runtimePointArity`), so the run-time
+    // helper decides — a per-point `NaN` is not that answer. A stated arity
+    // below three never reaches here: the `PointZ` canonical handler already
+    // rejected it.
+    if (idx === 2 && staticPointArityOf(t) === undefined)
+      return `_SYS.pointComponent(${compiled}, ${idx})`;
     const coord =
       eltType !== undefined && typeof eltType !== 'string'
         ? tupleElementType(eltType, idx)
         : undefined;
     return `(${compiled}).map((_pt) => _pt[${idx}]${pointComponentAbsence(coord)})`;
   }
+  // The static type settles NEITHER reading: an `unknown`-typed operand, or a
+  // type that admits a list of points beside a single point — the parameter
+  // type a function literal infers from a `PointX(v)` use is
+  // `collection<any> | tuple` (`f(v) := PointX(v) + 1`), and a call `f(P)`
+  // may hand it one point or a list of them. The interpreter's
+  // `pointComponentAt` decides at the VALUE, so the emitted code does too
+  // (`_SYS.pointComponent`). Reading such an operand as one point took the
+  // first POINT of the list for its x coordinate — the minimal
+  // `PointX(v) + 1` over a two-point list answered `[2, 3, 4]` where the
+  // interpreter answers `[2, 5]`, and a `PointList` body threw at run time
+  // (Tycho item 238).
+  if (mayBePointList(t)) return `_SYS.pointComponent(${compiled}, ${idx})`;
   return `(${compiled}[${idx}]${pointComponentAbsence(eltType)})`;
+}
+
+/**
+ * The point arity a collection type states for its elements, or `undefined`
+ * when it states none: the element count of a parameterized tuple element
+ * type, or the last dimension of a rank-2 numeric list (the coordinate-row
+ * spelling). Mirrors the interpreter's `staticPointArity`
+ * (`library/collections.ts`) for the list shapes the point accessors take.
+ */
+function staticPointArityOf(t: Type): number | undefined {
+  if (typeof t === 'string') return undefined;
+  if (t.kind === 'list' && (t.dimensions?.length ?? 0) > 1) {
+    const inner = t.dimensions![t.dimensions!.length - 1];
+    return inner > 0 ? inner : undefined;
+  }
+  const elt = collectionElementType(t);
+  if (elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple')
+    return elt.elements?.length;
+  return undefined;
+}
+
+/**
+ * Could a value of type `t` be a LIST OF POINTS as well as a single point, so
+ * that a coordinate accessor over it has to dispatch at run time? True for an
+ * untyped operand and for any type that admits an indexed collection whose
+ * element type is not provably a scalar number — a union such as
+ * `collection<any> | tuple`, a bare `list`, a `list<any>`. A `list<number>`
+ * is a single point spelled flat (`PointX([3, 4])` is `3`) and answers false,
+ * as does every non-collection type.
+ */
+function mayBePointList(t: Type): boolean {
+  if (t === 'unknown' || t === 'any') return true;
+  if (!couldMatch(t, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
+  const elt = collectionElementType(t);
+  return elt === undefined || !isSubtype(elt, 'number');
 }
 
 /** The type of a tuple's `idx`-th element, or `undefined` when `t` is not a
@@ -1502,6 +1558,9 @@ function compileJSPointList(
   const idx = BaseCompiler.tempVar(target);
   const bindings: string[] = [];
   const sources: string[] = [];
+  // Components whose type is `broadcastable<T>`: a source or a scalar slot,
+  // decided at run time by `Array.isArray`.
+  const maybeSources: string[] = [];
   // The per-point component expressions, in operand order.
   const parts: string[] = [];
 
@@ -1534,9 +1593,24 @@ function compileJSPointList(
           `Fail closed (D6).`
       );
     const name = BaseCompiler.tempVar(target);
+    const t = jsType(a);
     if (a.type.matches('number')) {
       // Provably scalar numeric: the slot value, verbatim.
       bindings.push(`const ${name} = ${compile(a)};`);
+    } else if (containsBroadcastableType(t)) {
+      // A `broadcastable<T>` component is a `T` OR an indexed collection of
+      // `T`, and — unlike an opaque slot — the type says exactly that, so the
+      // role is decided at run time: an array is a zip SOURCE, anything else
+      // a scalar slot. `2·PointX(v)` inside a function literal has this type
+      // when the parameter `v` may be a point or a list of points; the opaque
+      // route below turned its list value into `NaN` (Tycho item 238). The
+      // predicate is the one the `PointList` definition handler routes by,
+      // so a union arm or an alias reaches here whenever it was declined
+      // there.
+      bindings.push(`const ${name} = ${compile(a)};`);
+      maybeSources.push(name);
+      parts.push(`(Array.isArray(${name}) ? ${name}[${idx}] : ${name})`);
+      continue;
     } else {
       // Opaque (`unknown`, `value`, any other non-collection type): guarded.
       const raw = BaseCompiler.tempVar(target);
@@ -1549,16 +1623,30 @@ function compileJSPointList(
   // No source: the definition handler owns the all-scalar path, so this is
   // unreachable today. Emit the plain point anyway rather than invalid source —
   // through the IIFE, since `parts` names the temporaries `bindings` declares.
-  if (sources.length === 0)
+  if (sources.length === 0 && maybeSources.length === 0)
     return `(() => { ${bindings.join(' ')} return [${parts.join(', ')}]; })()`;
 
   const lengths = sources.map((s) => `${s}.length`);
+  // A run-time source joins the shortest-zip length only when it IS an array;
+  // as a scalar it contributes no bound.
+  for (const s of maybeSources)
+    lengths.push(`(Array.isArray(${s}) ? ${s}.length : Infinity)`);
   const budget = target.iterationBudget;
   if (budget !== undefined) lengths.push(String(Math.floor(budget)));
   const n = BaseCompiler.tempVar(target);
   const out = BaseCompiler.tempVar(target);
+  // With no static source and every run-time source a scalar, there is
+  // nothing to zip: the value is the single point, as the interpreter's
+  // all-scalar `PointList` is. Decided on the sources themselves, not on the
+  // zip length, which an iteration budget would bound even then.
+  const allScalar =
+    sources.length === 0
+      ? `if (![${maybeSources.join(', ')}].some(Array.isArray)) ` +
+        `{ const ${idx} = 0; return [${parts.join(', ')}]; } `
+      : '';
   return (
     `(() => { ${bindings.join(' ')} ` +
+    allScalar +
     `const ${n} = Math.min(${lengths.join(', ')}); ` +
     `const ${out} = new Array(${n}); ` +
     `for (let ${idx} = 0; ${idx} < ${n}; ${idx}++) ` +
@@ -3547,6 +3635,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // lowering. Without the opt-in an unknown-sign operand keeps the real
     // kernel (pinned; `promotesToComplexLane` mirrors the `isComplexValued`
     // Sqrt/Ln/Log carve-out, which makes the parent agree on the shape).
+    //
+    // ONE KERNEL PER BASE. Base 10 (the one-argument form) and base 2 have
+    // a dedicated, correctly rounded kernel on this target — `Math.log10`,
+    // `Math.log2` — and the interpreter folds a constant argument through
+    // the same kernel. Spelling a RUNTIME `Log(x)` as `ln(x) / ln(10)`
+    // instead put the two paths one ulp apart: `log(x) / log(2)` at `x = 4`
+    // ran to `1.9999999999999996` while the fold of `log(2)` was exact, so a
+    // Desmos "power of two" selector (`log(i)/log(2) mod 1 = 0`) kept only
+    // `i = 1` (Tycho item 240). The complex lane goes through `_SYS.clog10`
+    // / `_SYS.clog2`, whose real part is the same kernel applied to the
+    // modulus, so the two lanes agree on the real axis as well. Any other
+    // base keeps the `ln(x) / ln(b)` quotient, which is also how the
+    // interpreter folds it at machine precision.
+    const base = BaseCompiler.fixedLogBase(args);
     if (
       args.some((a) => BaseCompiler.isComplexValued(a)) ||
       promotesToComplexLane('Log', args)
@@ -3554,10 +3656,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // Recorded for the `promoted` report when the operand is complex only
       // by wideness (a no-op otherwise; the lowering below is the same).
       BaseCompiler.recordPromotion('Log', args);
+      if (base !== undefined)
+        return `_SYS.clog${base}(${complexOperandCode(args[0], compile)})`;
       const n = BaseCompiler.tempVar(target);
       const num = `const ${n} = _SYS.cln(${complexOperandCode(args[0], compile)});`;
-      if (args.length === 1)
-        return `(() => { ${num} return { re: ${n}.re / Math.LN10, im: ${n}.im / Math.LN10 }; })()`;
       // `ln(x) / ln(b)`, as a complex quotient: the base may itself be complex,
       // or real-but-negative (whose own `ln` is complex).
       const d = BaseCompiler.tempVar(target);
@@ -3568,7 +3670,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `return { re: (${n}.re * ${d}.re + ${n}.im * ${d}.im) / ${m}, im: (${n}.im * ${d}.re - ${n}.re * ${d}.im) / ${m} }; })()`
       );
     }
-    if (args.length === 1) return `Math.log10(${compile(args[0])})`;
+    if (base !== undefined) return `Math.log${base}(${compile(args[0])})`;
     return `(Math.log(${compile(args[0])}) / Math.log(${compile(args[1])}))`;
   },
   GammaLn: '_SYS.lngamma',
@@ -4610,6 +4712,16 @@ function toRI(c: Complex): { re: number; im: number } {
 }
 
 /**
+ * `|z|`. A purely real `z` reads `Math.abs` rather than `Math.hypot(x, 0)`,
+ * which is not guaranteed to return `|x|` to the last bit — and the base-10
+ * and base-2 complex logarithms (`_SYS.clog10`, `_SYS.clog2`) need the exact
+ * real argument so that their real-axis value matches the real lane's.
+ */
+function complexModulus(z: ComplexResult): number {
+  return z.im === 0 ? Math.abs(z.re) : Math.hypot(z.re, z.im);
+}
+
+/**
  * Folding a constant that has no real value (`√-2`, `(-2)^0.3`).
  *
  * Such a constant is folded rather than refused. Failing closed prevents
@@ -4768,6 +4880,21 @@ function normalizeAlpha(a: number | undefined): number | undefined {
   if (!Number.isFinite(a)) return undefined;
   if (Math.abs(a - 1) < 1e-9) return undefined;
   return a;
+}
+
+/** Are all three color channels finite numbers? The interpreter's
+ * `readColorExpr` (`library/colors.ts`) admits a color only when they are. */
+function finiteChannels(c0: number, c1: number, c2: number): boolean {
+  return Number.isFinite(c0) && Number.isFinite(c1) && Number.isFinite(c2);
+}
+
+/** The compiled value of a color with a non-finite channel: the `NaN`
+ * triple, the numeric projection of the interpreter's `incompatible-type`
+ * error, keeping the alpha slot when one was given so the arity matches the
+ * finite case. */
+function nonFiniteColor(alpha: number | undefined): number[] {
+  const a = normalizeAlpha(alpha);
+  return a !== undefined ? [NaN, NaN, NaN, a] : [NaN, NaN, NaN];
 }
 
 /**
@@ -5089,31 +5216,46 @@ const colorHelpers = {
   // -----------------------------------------------------------------------
   // Color constructors. Each accepts components in its colorspace's natural
   // units and returns the canonical OKLCh array `[L, C, H]` (or with alpha).
+  //
+  // A NON-FINITE channel yields the `NaN` triple. The interpreter's
+  // `readColorExpr` (`library/colors.ts`) rejects an infinite or `NaN`
+  // channel with `incompatible-type`, and `NaN` is that error's projection
+  // on a numeric target. An infinite value or saturation used to be CLAMPED
+  // into `[0, 1]` by the sRGB conversion, so `Hsv(90, 1, ~oo)` compiled to
+  // the same finite color as `Hsv(90, 1, 1)` while the interpreter refused
+  // it (Tycho item 243). A finite out-of-range channel still clamps, on
+  // both routes. Alpha is separate: a non-finite alpha reads as opaque on
+  // both routes (`normalizeAlpha`).
   // -----------------------------------------------------------------------
   rgb(r: number, g: number, b: number, alpha?: number): number[] {
+    if (!finiteChannels(r, g, b)) return nonFiniteColor(alpha);
     // Inputs are 0-1 sRGB; `rgbToOklch` expects 0-255 channels.
     const c = rgbToOklch({ r: r * 255, g: g * 255, b: b * 255 });
     const a = normalizeAlpha(alpha);
     return a !== undefined ? [c.L, c.C, c.H, a] : [c.L, c.C, c.H];
   },
   hsv(h: number, s: number, v: number, alpha?: number): number[] {
+    if (!finiteChannels(h, s, v)) return nonFiniteColor(alpha);
     const rgb = hsvToRgb(h, s, v);
     const c = rgbToOklch(rgb);
     const a = normalizeAlpha(alpha);
     return a !== undefined ? [c.L, c.C, c.H, a] : [c.L, c.C, c.H];
   },
   hsl(h: number, s: number, l: number, alpha?: number): number[] {
+    if (!finiteChannels(h, s, l)) return nonFiniteColor(alpha);
     const rgb = hslToRgb(h, s, l);
     const c = rgbToOklch({ r: rgb.r, g: rgb.g, b: rgb.b });
     const a = normalizeAlpha(alpha);
     return a !== undefined ? [c.L, c.C, c.H, a] : [c.L, c.C, c.H];
   },
   oklab(L: number, a: number, b: number, alpha?: number): number[] {
+    if (!finiteChannels(L, a, b)) return nonFiniteColor(alpha);
     const c = oklabToOklch({ L, a, b });
     const al = normalizeAlpha(alpha);
     return al !== undefined ? [c.L, c.C, c.H, al] : [c.L, c.C, c.H];
   },
   oklch(L: number, C: number, H: number, alpha?: number): number[] {
+    if (!finiteChannels(L, C, H)) return nonFiniteColor(alpha);
     const a = normalizeAlpha(alpha);
     return a !== undefined ? [L, C, H, a] : [L, C, H];
   },
@@ -6687,6 +6829,41 @@ const SYS_HELPERS = {
   // it, which the compiled form cannot know to do, and a silently-wrong point
   // is worse than an absent one.
   pointSlot: (v: unknown): unknown => (Array.isArray(v) ? NaN : v),
+  /**
+   * Coordinate `k` (0-based) of a point-shaped value whose static type did
+   * not settle whether it is ONE point or a LIST of points. Mirrors the
+   * interpreter's `pointComponentAt` and `runtimePointArity`
+   * (`library/collections.ts`) under the JavaScript erasure, where a tuple
+   * and a list are both arrays:
+   *
+   *  - a list whose first element is a NUMERIC coordinate row (an array that
+   *    is empty or starts with a number or a `{ re, im }`) is a list of
+   *    points and yields the list of coordinates. A row of strings is not a
+   *    point in the interpreter (`isPointLike` admits numeric rows and
+   *    tuples), so such a list is indexed like `First`/`Second`/`Third`
+   *    instead; the tuple-of-strings spelling is erased to the same array and
+   *    takes the same reading;
+   *  - the third coordinate of a point (or of a list whose first point) has
+   *    fewer than three components is the interpreter's `incompatible-
+   *    dimensions` error, projected to a single `NaN` for the whole
+   *    application — never a `NaN` per point;
+   *  - an absent coordinate otherwise, an empty list, and a non-array value
+   *    (the interpreter's `incompatible-type` error) answer `NaN`.
+   */
+  pointComponent: (v: unknown, k: number): unknown => {
+    if (!Array.isArray(v)) return NaN;
+    const first = v[0];
+    const rows =
+      Array.isArray(first) &&
+      (first.length === 0 ||
+        typeof first[0] === 'number' ||
+        (typeof first[0] === 'object' &&
+          first[0] !== null &&
+          're' in first[0]));
+    if (k === 2 && (rows ? first.length : v.length) < 3) return NaN;
+    if (rows) return v.map((p) => (Array.isArray(p) ? (p[k] ?? NaN) : NaN));
+    return v[k] ?? NaN;
+  },
   // Positional access for compiled `At`. CE `At` is 1-based; a negative index
   // counts from the end. A zero or out-of-range index yields NaN (the
   // interpreter returns `Nothing`, projected to NaN on a real target).
@@ -6938,6 +7115,22 @@ const SYS_HELPERS = {
     toRI(new Complex(z.re, z.im).sqrt().asin().mul(2)),
   cexp: (z: ComplexResult) => toRI(new Complex(z.re, z.im).exp()),
   cln: (z: ComplexResult) => toRI(new Complex(z.re, z.im).log()),
+  // Base-10 and base-2 complex logarithms. The real part is `Math.log10` /
+  // `Math.log2` of the MODULUS rather than `ln|z| / ln(b)`: on the real axis
+  // the modulus is the argument itself, so this lane, the real lane's
+  // `Math.log10(x)` and the interpreter's constant fold agree bit for bit
+  // (Tycho item 240). The imaginary part is the argument of `z` rescaled,
+  // exactly as `cln(z).im / ln(b)` was. A purely real operand reads its
+  // modulus as `Math.abs` — `Math.hypot(x, 0)` is not guaranteed to return
+  // `|x|` exactly.
+  clog10: (z: ComplexResult) => ({
+    re: Math.log10(complexModulus(z)),
+    im: Math.atan2(z.im, z.re) / Math.LN10,
+  }),
+  clog2: (z: ComplexResult) => ({
+    re: Math.log2(complexModulus(z)),
+    im: Math.atan2(z.im, z.re) / Math.LN2,
+  }),
   cpow: (z: number | ComplexResult, w: number | ComplexResult) => {
     const zz =
       typeof z === 'number' ? new Complex(z, 0) : new Complex(z.re, z.im);

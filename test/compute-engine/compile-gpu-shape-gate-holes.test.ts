@@ -212,14 +212,19 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
   });
 
   it('a matrix or array operand of a compound lowering declines', () => {
-    // `(cos(mat2) / sin(mat2))`, `(log(float[5]) / log(2.0))` — the shader
+    // `(cos(mat2) / sin(mat2))`, `(log(float[5]) / log(3.0))` — the shader
     // transcendentals have no `matN` overload and arrays have no operators.
+    // (Base 2 is no longer a compound lowering: it takes the `log2` builtin,
+    // whose own shape gate declines with the builtin's diagnostic.)
     for (const emit of [g, w]) {
       expect(() => emit(['Cot', M2])).toThrow(
         /^Cot: the compound shader lowering .* have no `matN` reading.* Fail closed \(D6\)\.$/s
       );
-      expect(() => emit(['Lb', ['List', 1, 2, 3, 4, 5]])).toThrow(
+      expect(() => emit(['Log', ['List', 1, 2, 3, 4, 5], 3])).toThrow(
         /the compound shader lowering .* have no array reading/
+      );
+      expect(() => emit(['Lb', ['List', 1, 2, 3, 4, 5]])).toThrow(
+        /`log2` .* has no array overload/
       );
     }
   });

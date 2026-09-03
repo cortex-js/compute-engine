@@ -697,8 +697,11 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Floor: (args, compile) => `_IA.floor(${compile(args[0])})`,
   Ln: (args, compile) => `_IA.ln(${compile(args[0])})`,
   Log: (args, compile) => {
-    if (args.length === 1) return `_IA.log10(${compile(args[0])})`;
-    // Log with custom base: log_b(x) = ln(x) / ln(b)
+    // Base 10 (the one-argument form) and base 2 take the dedicated
+    // enclosure, matching the point kernels of the `javascript` target
+    // (Tycho item 240); any other base is `ln(x) / ln(b)`.
+    const base = BaseCompiler.fixedLogBase(args);
+    if (base !== undefined) return `_IA.log${base}(${compile(args[0])})`;
     return `_IA.div(_IA.ln(${compile(args[0])}), _IA.ln(${compile(args[1])}))`;
   },
   Lb: (args, compile) => `_IA.log2(${compile(args[0])})`,

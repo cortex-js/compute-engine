@@ -391,7 +391,7 @@ canonical = ["Log", "Pi", 2]
 eval-auto = log(pi, 2)
 eval-mach = log(pi, 2)
 N-auto    = 1.65149612947231879804
-N-mach    = 1.651496129472319
+N-mach    = 1.6514961294723187
 `;
 
 exports[`LB Lb ['Complex', 1.1, 1.1] 1`] = `

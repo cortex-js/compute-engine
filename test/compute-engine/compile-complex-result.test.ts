@@ -155,7 +155,9 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
     it('Log of a real-typed symbol promotes; strict keeps the real lowering', () => {
       const ce = engineWithNegativeAssignment();
       const result = compile(ce.parse('\\log(r)'), { fallback: false });
-      expect(result.code).toContain('_SYS.cln(({ re: _.r, im: 0 }))');
+      // Base 10 has its own complex kernel, whose real-axis value is the
+      // real lane's `Math.log10` (Tycho item 240).
+      expect(result.code).toContain('_SYS.clog10(({ re: _.r, im: 0 }))');
       expect(result.run!({ r: 100 })).toBe(2);
       // log₁₀(−1) = πi / ln 10.
       const neg = result.run!({ r: -1 }) as { re: number; im: number };
@@ -565,7 +567,7 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
       ],
       [
         '\\log(u)',
-        '_SYS.cln(({ re: _.u, im: 0 }))',
+        '_SYS.clog10(({ re: _.u, im: 0 }))',
         100,
         2,
         { re: 0, im: Math.PI / Math.LN10 },

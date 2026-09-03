@@ -2409,6 +2409,25 @@ export class BaseCompiler {
   }
 
   /**
+   * The base of a `Log` call when it is one the targets spell with a
+   * DEDICATED kernel: `10` for the one-argument form and for a literal base
+   * `10`, `2` for a literal base `2`, `undefined` for every other base. The
+   * dedicated kernels (`Math.log10`/`Math.log2`, `np.log10`/`np.log2`, the
+   * shader `log2`, `_IA.log10`/`_IA.log2`) are what the interpreter's
+   * constant fold uses, so a runtime `Log` spelled through them agrees with
+   * a folded one to the last bit; spelled as `ln(x) / ln(b)` it was one ulp
+   * off at the powers of the base (Tycho item 240).
+   */
+  static fixedLogBase(args: ReadonlyArray<Expression>): 10 | 2 | undefined {
+    if (args.length === 1) return 10;
+    const b = args[1];
+    if (b === undefined || !isNumber(b)) return undefined;
+    if (b.isSame(10)) return 10;
+    if (b.isSame(2)) return 2;
+    return undefined;
+  }
+
+  /**
    * Whether applying `head` to `args` takes the COMPLEX lane purely because
    * the caller opted in to complex promotion (`complexPromotion`).
    *
@@ -3341,11 +3360,17 @@ export class BaseCompiler {
     let impure = !expr.isPure;
     if (!impure) {
       const engine = expr.engine;
+      // A node reached twice inside ONE value (a boxed expression is a DAG)
+      // is visited once: the answer for it is the same on every path, and
+      // walking it per path is exponential in the sharing depth.
+      const seen = new Set<Expression>();
       const visit = (node: Expression): boolean => {
         if (isSymbol(node)) {
           const v = engine._getSymbolValue(node.symbol);
           return v !== undefined && BaseCompiler.foldValueImpure(v);
         }
+        if (seen.has(node)) return false;
+        seen.add(node);
         if (isDictionary(node)) {
           for (const v of node.values) if (visit(v)) return true;
           return false;
@@ -3381,15 +3406,23 @@ export class BaseCompiler {
     memo.set(expr, EMPTY);
     const out = new Set<string>();
     const engine = expr.engine;
+    // A node reached twice inside ONE value (a boxed expression is a DAG)
+    // contributes its names once; walking it per path is exponential in the
+    // sharing depth.
+    const seen = new Set<Expression>();
     const visit = (node: Expression): void => {
       if (isSymbol(node)) {
         out.add(node.symbol);
         const v = engine._getSymbolValue(node.symbol);
         if (v !== undefined)
           for (const n of BaseCompiler.foldValueMentions(v)) out.add(n);
+      } else if (seen.has(node)) {
+        return;
       } else if (isDictionary(node)) {
+        seen.add(node);
         for (const v of node.values) visit(v);
       } else if (isFunction(node)) {
+        seen.add(node);
         for (const op of node.ops) visit(op);
       }
     };
@@ -13590,7 +13623,28 @@ export class BaseCompiler {
     target: CompileTarget<Expression>
   ): number {
     type Bound = ReadonlySet<string> | undefined;
-    const memos = new Map<Bound, Map<Expression, number>>();
+    // Memoized per bound-name ENVIRONMENT, keyed by the names it binds rather
+    // than by the set object: every binder node builds its own set
+    // (`binderBoundNames`), so two `Sum` nodes binding the same index would
+    // otherwise size the sub-value beneath them twice, and a tower of binders
+    // once per path. The preamble owner's own environment keeps a key of its
+    // own: `bindsFoldedValue` answers differently there (it recognizes that
+    // set by identity), so a nested frame binding the same names must not
+    // share its memo.
+    const ownerBound = (
+      target.userFunctions?.valueRoot ?? target.userFunctions?.root
+    )?.boundVars;
+    const memos = new Map<string, Map<Expression, number>>();
+    const boundKeys = new Map<Bound, string>();
+    const keyOf = (bound: Bound): string => {
+      let key = boundKeys.get(bound);
+      if (key === undefined) {
+        const names = bound === undefined ? [] : [...bound].sort();
+        key = `${bound === ownerBound ? 'owner' : 'inner'}:${JSON.stringify(names)}`;
+        boundKeys.set(bound, key);
+      }
+      return key;
+    };
     const inProgress = new Set<Expression>();
     // Values the preamble would hold once, by symbol; their sizes accumulate
     // here.
@@ -13598,8 +13652,9 @@ export class BaseCompiler {
     let boundTotal = 0;
 
     const walk = (node: Expression, bound: Bound): number => {
-      let memo = memos.get(bound);
-      if (memo === undefined) memos.set(bound, (memo = new Map()));
+      const key = keyOf(bound);
+      let memo = memos.get(key);
+      if (memo === undefined) memos.set(key, (memo = new Map()));
       const cached = memo.get(node);
       if (cached !== undefined) return cached;
       if (inProgress.has(node)) return 1;
@@ -13655,13 +13710,34 @@ export class BaseCompiler {
   ): ReadonlySet<string> | undefined {
     const isLiteral = node.operator === 'Function';
     if (!isLiteral && !node.operatorDefinition?.scoped) return bound;
-    const names: string[] = [];
+    // The operands are walked once per DISTINCT node. A boxed expression is a
+    // DAG — a value built from one sub-expression referenced twice holds the
+    // same object twice — and walking it as a tree visits a shared node once
+    // per path. A bound such as `Range(1, Length(T))` over a 30-level tower of
+    // shared tuples has a billion paths; the unguarded walk pushed every
+    // symbol occurrence onto an array until `Array.push` threw
+    // `Invalid array length` past 2^32 entries, minutes and gigabytes later
+    // (Tycho item 225). A set of names, and a set of visited nodes, keep the
+    // walk linear.
+    const names = new Set<string>();
+    const seen = new Set<Expression>();
     const collect = (e: Expression): void => {
-      if (isSymbol(e)) names.push(e.symbol);
-      else if (isFunction(e)) for (const op of e.ops) collect(op);
+      if (isSymbol(e)) names.add(e.symbol);
+      else if (isFunction(e)) {
+        if (seen.has(e)) return;
+        seen.add(e);
+        for (const op of e.ops) collect(op);
+      }
     };
     for (const op of node.ops.slice(1)) collect(op);
-    if (names.length === 0) return bound;
+    if (names.size === 0) return bound;
+    // A binder that names anything is a NEW lexical frame, even when every
+    // name it binds is already bound outside — exactly as the emitter builds
+    // its frames (`withBoundNames`). `bindsFoldedValue` recognizes the
+    // preamble owner's environment by the identity of its set, so returning
+    // the inherited set for a shadowing binder would let the size walk count
+    // a value as bound once where the emitter, seeing a fresh frame, inlines
+    // it per path.
     const out = new Set(bound);
     for (const n of names) out.add(n);
     return out;

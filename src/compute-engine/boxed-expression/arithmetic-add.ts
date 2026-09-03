@@ -45,7 +45,7 @@ import {
   isTuple,
   numericTupleArity,
   hasAccessibleComponents,
-  isDeclaredScalarNumber,
+  isProvablyScalarNumber,
   isFiniteBroadcastParticipant,
   isBroadcastableCollection,
   isUnknownLengthBroadcast,
@@ -154,10 +154,11 @@ export function canonicalAdd(
   // `scalar + tuple` at canonicalization when provable: some operand is a
   // numeric tuple and another is a *declared/literal* scalar number (not a
   // tuple). Unknown/`any`-typed operands — and operands whose numeric type was
-  // merely INFERRED — stay symbolic (inference is retractable evidence).
+  // merely INFERRED, or that a broadcastable operator computed from one —
+  // stay symbolic (inference is retractable evidence; `isProvablyScalarNumber`).
   if (
     ops.some((x) => isNumericTuple(x)) &&
-    ops.some((x) => isDeclaredScalarNumber(x))
+    ops.some((x) => isProvablyScalarNumber(x))
   )
     return ce.error(['incompatible-type', 'tuple', 'number']);
 
@@ -877,8 +878,8 @@ function addTuples(
 ): Expression {
   // A declared/literal scalar cannot be added to a point. A merely-inferred
   // scalar stays symbolic (inference is retractable — see
-  // `isDeclaredScalarNumber`), falling through to the symbolic `Add` below.
-  if (ops.some((x) => isDeclaredScalarNumber(x)))
+  // `isProvablyScalarNumber`), falling through to the symbolic `Add` below.
+  if (ops.some((x) => isProvablyScalarNumber(x)))
     return ce.error(['incompatible-type', 'tuple', 'number']);
 
   // Enforce equal arity when statically known.

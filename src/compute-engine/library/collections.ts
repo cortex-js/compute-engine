@@ -75,6 +75,7 @@ import {
 } from '../../common/type/types.js';
 import {
   collectionElementType,
+  containsBroadcastableType,
   functionResult,
   functionArity,
   narrowingPreservesEffects,
@@ -3144,6 +3145,35 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return isSubtype(t, COLLECTION_SHAPE_TYPE);
       };
       const nonScalar = args.findIndex((a) => isProvablyNonScalar(a.type.type));
+      // A `broadcastable<T>` component is a scalar OR a list of `T`, decided
+      // by its value — `2·PointX(v)` inside a function literal whose
+      // parameter may be a point or a list of points. On `javascript` the
+      // target table's zip lowering (`compileJSPointList`) dispatches on the
+      // value at run time; the all-scalar emission below would replace the
+      // list with `NaN` (Tycho item 238). Decline by fall-through so that
+      // lowering is consulted. On the other languages this handler lowers, a
+      // point has scalar components only and there is no run-time dispatch to
+      // hand the value to: fail closed with the shape diagnostic, rather than
+      // splice a list into the emitted point. The same predicate decides the
+      // routing here and the run-time role in `compileJSPointList`, so a
+      // union arm or an alias cannot be routed by one and missed by the
+      // other.
+      const undecided = args.findIndex((a) =>
+        containsBroadcastableType(a.type.type)
+      );
+      if (nonScalar < 0 && undecided >= 0) {
+        if (language === 'javascript') return undefined;
+        if (POINT_LIST_COMPILE_LANGUAGES.has(language))
+          throw new Error(
+            `PointList: cannot compile — component ${undecided + 1} (type ` +
+              `\`${args[undecided].type.toString()}\`) is a scalar or a list ` +
+              `depending on its run-time value, and a point value on target ` +
+              `'${language}' has scalar components only. Evaluate it in the ` +
+              `interpreter, or give the operand a type that settles its ` +
+              `shape. Fail closed (D6).`
+          );
+        return undefined;
+      }
       if (nonScalar >= 0) {
         // On `javascript`, every non-all-scalar shape is lowered (or declined,
         // with its own diagnostic) by `JAVASCRIPT_FUNCTIONS.PointList`: a list

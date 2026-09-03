@@ -2800,7 +2800,43 @@ function compilePointSwizzle(
         `— no ${['first', 'second', 'third'][idx]} coordinate. ` +
         `Fail closed (D6).`
     );
-  return `${compile(arg)}.${comp}`;
+  return gpuSwizzle(compile(arg), comp);
+}
+
+/**
+ * Append the swizzle `sw` to the emission `code` so that it selects from the
+ * WHOLE value. A postfix swizzle binds tighter than every infix and prefix
+ * operator, so a single primary — an identifier, a literal, or ONE function
+ * call whose parentheses close at the end (`vec2(x, y)`) — takes the suffix
+ * directly, and anything else is parenthesized first. Splicing the suffix
+ * onto an infix emission bound it to the LAST term alone:
+ * `PointX((x, y) + (1, 2))` emitted `vec2(x, y) + vec2(1.0, 2.0).x`, legal
+ * shader source (a float broadcasts into a `vec2`) that computes
+ * `(x + 1, y + 1)` behind `success: true` (Tycho item 242).
+ */
+function gpuSwizzle(code: string, sw: string): string {
+  const s = code.trim();
+  if (gpuIsAtomicEmission(s)) return `${s}.${sw}`;
+  const call = /^[A-Za-z_]\w*\(/.exec(s);
+  if (call !== null && s.endsWith(')')) {
+    // One call is a primary only when the parenthesis opened by its name is
+    // the one closed by the final character: `f(a) + g(b)` also starts with
+    // a call and ends with `)`.
+    let depth = 0;
+    let single = true;
+    for (let i = call[0].length - 1; i < s.length; i++) {
+      if (s[i] === '(') depth += 1;
+      else if (s[i] === ')') {
+        depth -= 1;
+        if (depth === 0 && i !== s.length - 1) {
+          single = false;
+          break;
+        }
+      }
+    }
+    if (single) return `${s}.${sw}`;
+  }
+  return `(${s}).${sw}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -4205,9 +4241,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // to `float[N]` arrays, swizzle access is invalid GLSL and the shader
   // will fail to compile; that's an edge case `First`/`Second`/`Third`
   // aren't designed for. Vec swizzles are identical between GLSL and WGSL.
-  First: (args, compile) => `${compile(args[0])}.x`,
-  Second: (args, compile) => `${compile(args[0])}.y`,
-  Third: (args, compile) => `${compile(args[0])}.z`,
+  First: (args, compile) => gpuSwizzle(compile(args[0]), 'x'),
+  Second: (args, compile) => gpuSwizzle(compile(args[0]), 'y'),
+  Third: (args, compile) => gpuSwizzle(compile(args[0]), 'z'),
   // Point-coordinate accessors. On the GPU a point is a `vec2`/`vec3`/`vec4`,
   // so a single point maps to the same swizzle as First/Second/Third. A list of
   // points is not a GPU value: emitting a swizzle on it produces invalid shader
@@ -4940,6 +4976,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_cdiv(${num}, _gpu_cln(${gpuComplexOperand(args[1], compile, target)}))`;
     }
     if (args.length === 1) return `(log(${compile(args[0])}) / log(10.0))`;
+    // Base 2 has a shader builtin, exact at the powers of two like the
+    // interpreter's fold (`Log(8, 2)` is `3`); `log(x) / log(2.0)` is not
+    // (Tycho item 240). Shaders have no `log10`, so base 10 keeps the
+    // quotient.
+    if (BaseCompiler.fixedLogBase(args) === 2)
+      return `log2(${compile(args[0])})`;
     return `(log(${compile(args[0])}) / log(${compile(args[1])}))`;
   },
   Log10: ([x], compile) => {
