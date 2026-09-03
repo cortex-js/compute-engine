@@ -92,7 +92,7 @@ import type {
   IComputeEngine as ComputeEngine,
   BoxedOperatorDefinition,
   Expression,
-  SymbolDefinition,
+  ValueDefinition,
   SymbolDefinitions,
   DictionaryInterface,
   CanonicalForm,
@@ -4350,7 +4350,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               )._isConstant = true;
           } else {
             // Fresh declaration.
-            const def: Partial<SymbolDefinition> = {};
+            const def: Partial<ValueDefinition> = {};
             if (hasType) {
               def.type = type;
               // Only ever set it TRUE: `ce.declare` reads a non-empty

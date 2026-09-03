@@ -642,6 +642,22 @@ deliberately left out of that change.
   semantically stable (`parseType(typeToString(t))` equals `t`), so this
   is a readability defect in hovers and error messages only.
 
+### `ce.declare({ f: {…} })` cannot type an inline `type` handler that omits `typeHandlerKind` (OPEN, design — found 2026-09-03 while fixing the `declare()` signature for boxed definitions)
+
+In the map form of `ce.declare()` an entry is a `Type`, a type string, or a
+definition. A `Type` and a string have no `typeHandlerKind` property, and
+TypeScript discriminates an object literal that OMITS a property only when
+every member of the contextual union declares it. So the `type: (ops) => …`
+handler of a map entry is typed against both handler shapes at once and its
+parameters fall to implicit `any` (`TS7006` under `strict`). The two-argument
+form `ce.declare('f', {…})` is fixed by keeping the type and the definition in
+separate overloads; the map form has no overload seam per entry. Workarounds,
+documented on `SymbolDefinitionInput`: state `typeHandlerKind: 'expressions'`
+next to the handler, or annotate the handler's parameters. A fix needs an API
+decision: drop the type-shorthand entries from the map form (breaking), or add
+a definitions-only map method. Pinned in
+`test/compute-engine/declare-definition-input.test.ts`.
+
 ### Open items from the undecided-condition ruling (2026-09-02)
 
 The ruling ("a compiled `If`/`Which` whose condition is not exactly `true`

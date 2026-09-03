@@ -36,5 +36,13 @@ ce.declare('Ln', {
   },
 });
 
+// An inline `type` handler in the two-argument form: its parameters must be
+// contextually typed. They were implicitly `any` while the type and the
+// definition shared one parameter union.
+ce.declare('f', {
+  signature: '(number) -> number',
+  type: (ops) => ops[0].type,
+});
+
 const expr = ce.parse('x^2 + 2x + 1');
 console.log(expr.toString());

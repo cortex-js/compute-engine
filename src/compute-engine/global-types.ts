@@ -34,6 +34,8 @@ export type {
   SimplifyOptions,
   ExplainOptions,
   SymbolDefinition,
+  SymbolDefinitionInput,
+  PartialSymbolDefinition,
   SymbolDefinitions,
   LibraryDefinition,
   AngularUnit,

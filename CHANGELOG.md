@@ -185,6 +185,12 @@
 
 ### Resolved Issues
 
+- Fixed the TypeScript signature of `ce.declare()` rejecting a boxed operator
+  definition, so re-declaring an operator from its existing definition
+  (`ce.declare('Sqrt', { ...ce.expr('Sqrt').operatorDefinition!, evaluate })`)
+  type-checks again. An inline `type` handler passed to the two-argument form
+  now gets typed parameters instead of implicit `any`. The accepted definition
+  shape is exported as `SymbolDefinitionInput`.
 - Unexpected failures during built-in evaluation now use the `internal-error`
   code and retain a useful stack trace instead of appearing as ordinary
   `evaluation-error` results.

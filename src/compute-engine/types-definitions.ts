@@ -1165,10 +1165,6 @@ export type ExplainOptions = SimplifyOptions & {
 export type SymbolDefinition = OneOf<[ValueDefinition, OperatorDefinition]>;
 
 /**
- * @category Definitions
- *
- */
-/**
  * `Partial` distributed over the {@link SymbolDefinition} union, except that
  * the `typeHandlerKind: 'types'` discriminant stays REQUIRED on its arm.
  * A plain `Partial` would make the discriminant optional, at which point an
@@ -1176,12 +1172,52 @@ export type SymbolDefinition = OneOf<[ValueDefinition, OperatorDefinition]>;
  * handler shapes and TypeScript can no longer contextually type the
  * handler's parameters — every legacy definition in the library would stop
  * type-checking.
+ *
+ * @category Definitions
  */
-type PartialSymbolDefinition<T = SymbolDefinition> = T extends {
+export type PartialSymbolDefinition<T = SymbolDefinition> = T extends {
   typeHandlerKind: 'types';
 }
   ? Partial<T> & { typeHandlerKind: 'types' }
   : Partial<T>;
+
+/**
+ * A definition as `ce.declare()` accepts it: a partial definition, or the
+ * boxed operator definition read back from `expr.operatorDefinition`.
+ *
+ * A boxed definition records the shape of its `type` handler as the wide
+ * `'expressions' | 'types'` flag, so it fits neither arm of
+ * {@link OperatorTypeHandlerVariant}. Admitting it here is what lets an
+ * operator be re-declared from its existing definition with some handlers
+ * replaced:
+ *
+ * ```ts
+ * const sqrt = ce.expr('Sqrt').operatorDefinition!;
+ * ce.declare('Sqrt', {
+ *   ...sqrt,
+ *   evaluate: (ops, options) => sqrt.evaluate!(ops, options),
+ * });
+ * ```
+ *
+ * The boxed definition's update routine reads `typeHandlerKind` off the
+ * incoming definition, so the stored `type` handler keeps its shape across
+ * such a re-declaration.
+ *
+ * Limitation of the map form `ce.declare({ f: {…} })`: its entry type also
+ * admits a `Type` or a type string. Those members have no `typeHandlerKind`
+ * property, and TypeScript discriminates an object literal that OMITS a
+ * property only when every union member declares it, so an inline
+ * `type: (ops) => …` handler without `typeHandlerKind` gets implicitly-`any`
+ * parameters in that form. State `typeHandlerKind: 'expressions'` next to
+ * the handler, or annotate its parameters. The two-argument form
+ * `ce.declare('f', {…})` keeps the type and the definition in separate
+ * overloads and has no such limit.
+ *
+ * @category Definitions
+ */
+export type SymbolDefinitionInput =
+  | PartialSymbolDefinition
+  | BoxedOperatorDefinition;
 
 export type SymbolDefinitions = Readonly<{
   [id: string]: PartialSymbolDefinition;

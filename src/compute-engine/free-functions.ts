@@ -2,7 +2,7 @@ import type {
   Expression,
   ExpressionInput,
   AssignValue,
-  SymbolDefinition,
+  SymbolDefinitionInput,
   IComputeEngine,
   FormOption,
   Scope,
@@ -115,18 +115,17 @@ export function N(
   return toExpression(expr, options).N();
 }
 
-export function declare(
-  id: string,
-  def: Type | TypeString | Partial<SymbolDefinition>
-): void;
+// Two `(id, …)` overloads: a `Type`/type string in the same union as the
+// definition shapes would stop TypeScript from typing the parameters of an
+// inline `type: (ops) => …` handler (see `IComputeEngine.declare`).
+export function declare(id: string, type: Type | TypeString): void;
+export function declare(id: string, def: SymbolDefinitionInput): void;
 export function declare(symbols: {
-  [id: string]: Type | TypeString | Partial<SymbolDefinition>;
+  [id: string]: Type | TypeString | SymbolDefinitionInput;
 }): void;
 export function declare(
-  arg1:
-    | string
-    | { [id: string]: Type | TypeString | Partial<SymbolDefinition> },
-  arg2?: Type | TypeString | Partial<SymbolDefinition>
+  arg1: string | { [id: string]: Type | TypeString | SymbolDefinitionInput },
+  arg2?: Type | TypeString | SymbolDefinitionInput
 ): void {
   getDefaultEngine().declare(arg1 as any, arg2 as any);
 }

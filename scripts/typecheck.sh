@@ -51,7 +51,8 @@ echo "Checking type-level pins in the test suite..."
   --skipLibCheck --allowImportingTsExtensions true --noEmit --ignoreConfig \
   ./test/compute-engine/compile-free-function-typing.test.ts \
   ./test/compute-engine/compile-mode-plumbing.test.ts \
-  ./test/compute-engine/user-collection-handlers.test.ts
+  ./test/compute-engine/user-collection-handlers.test.ts \
+  ./test/compute-engine/declare-definition-input.test.ts
 
 # Circular dependency check
 MAX_CYCLES=0

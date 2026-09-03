@@ -75,7 +75,7 @@ import type {
   BoxedDefinition,
   BoxedValueDefinition,
   DefinitionSearchResult,
-  SymbolDefinition,
+  SymbolDefinitionInput,
   IComputeEngine,
   Scope,
 } from './global-types.js';
@@ -1894,9 +1894,9 @@ export function declareFn(
   arg1:
     | string
     | {
-        [id: string]: Type | TypeString | Partial<SymbolDefinition>;
+        [id: string]: Type | TypeString | SymbolDefinitionInput;
       },
-  arg2?: Type | TypeString | Partial<SymbolDefinition>,
+  arg2?: Type | TypeString | SymbolDefinitionInput,
   scope?: Scope
 ): IComputeEngine {
   //

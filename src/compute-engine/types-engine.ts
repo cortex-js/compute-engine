@@ -45,7 +45,7 @@ import type {
 } from './types-serialization.js';
 import type {
   AngularUnit,
-  SymbolDefinition,
+  SymbolDefinitionInput,
   OperatorDefinition,
   ValueDefinition,
   BoxedDefinition,
@@ -1570,20 +1570,31 @@ export interface IComputeEngine {
   ): void;
 
   declare(symbols: {
-    [id: MathJsonSymbol]: Type | TypeString | Partial<SymbolDefinition>;
+    [id: MathJsonSymbol]: Type | TypeString | SymbolDefinitionInput;
   }): IComputeEngine;
+  // The type and the definition are separate overloads on purpose. With a
+  // `Type` or a type string in the same union as the definition shapes,
+  // TypeScript cannot discriminate an object literal that omits
+  // `typeHandlerKind` (those members lack the property, and the
+  // missing-property rule needs it on every member), so an inline
+  // `type: (ops) => …` handler would get implicitly-`any` parameters.
   declare(
     id: MathJsonSymbol,
-    def: Type | TypeString | Partial<SymbolDefinition>,
+    type: Type | TypeString,
+    scope?: Scope
+  ): IComputeEngine;
+  declare(
+    id: MathJsonSymbol,
+    def: SymbolDefinitionInput,
     scope?: Scope
   ): IComputeEngine;
   declare(
     arg1:
       | MathJsonSymbol
       | {
-          [id: MathJsonSymbol]: Type | TypeString | Partial<SymbolDefinition>;
+          [id: MathJsonSymbol]: Type | TypeString | SymbolDefinitionInput;
         },
-    arg2?: Type | TypeString | Partial<SymbolDefinition>,
+    arg2?: Type | TypeString | SymbolDefinitionInput,
     arg3?: Scope
   ): IComputeEngine;
 

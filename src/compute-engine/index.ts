@@ -52,7 +52,7 @@ import type {
   IntegrationProvider,
   ILatexSyntax,
   BoxedDefinition,
-  SymbolDefinition,
+  SymbolDefinitionInput,
   SequenceDefinition,
   SequenceStatus,
   SequenceInfo,
@@ -2620,21 +2620,25 @@ export class ComputeEngine implements IComputeEngine {
    *
    *
    */
+  // Two `(id, …)` overloads: a `Type`/type string in the same union as the
+  // definition shapes would stop TypeScript from typing the parameters of an
+  // inline `type: (ops) => …` handler (see `IComputeEngine.declare`).
+  declare(id: string, type: Type | TypeString, scope?: Scope): IComputeEngine;
   declare(
     id: string,
-    def: Type | TypeString | Partial<SymbolDefinition>,
+    def: SymbolDefinitionInput,
     scope?: Scope
   ): IComputeEngine;
   declare(symbols: {
-    [id: string]: Type | TypeString | Partial<SymbolDefinition>;
+    [id: string]: Type | TypeString | SymbolDefinitionInput;
   }): IComputeEngine;
   declare(
     arg1:
       | string
       | {
-          [id: string]: Type | TypeString | Partial<SymbolDefinition>;
+          [id: string]: Type | TypeString | SymbolDefinitionInput;
         },
-    arg2?: Type | TypeString | Partial<SymbolDefinition>,
+    arg2?: Type | TypeString | SymbolDefinitionInput,
     scope?: Scope
   ): IComputeEngine {
     return declareFnImpl(this, arg1, arg2, scope);
