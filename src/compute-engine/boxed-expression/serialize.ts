@@ -278,8 +278,17 @@ function serializePrettyJsonFunction(
       const result = new _Product(ce, args, {
         canonical: false,
       }).asRationalExpression();
-      if (result.operator === 'Divide') {
-        const ops = (result as Expression & FunctionInterface).ops;
+      // `canonicalDivide` strips a denominator of `1`, so a `Divide` here has
+      // a real denominator — except when a guard in `canonicalDivide` left the
+      // node inert (an invalid operand, for one). A `Divide(Multiply, 1)`
+      // would send this rewrite back into the same `Multiply` forever, so it
+      // is not a fraction worth displaying: fall through and serialize the
+      // product as it is.
+      const ops =
+        result.operator === 'Divide'
+          ? (result as Expression & FunctionInterface).ops
+          : null;
+      if (ops && !(isNumber(ops[1]) && ops[1].isSame(1))) {
         return serializeJsonFunction(
           ce,
           result.operator,

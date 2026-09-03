@@ -908,8 +908,22 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // applies to a valueless operand, so the node is left unchanged and its
   // type stays `never`. `canonicalPower` carries the same guard, for the
   // same reason.
-  if (op1.type.type === 'never' || op2.type.type === 'never')
+  //
+  // A divisor that is the literal `1` or `-1` is stripped FIRST: removing it
+  // reads nothing from the numerator's value, so it is sound for a `never`
+  // operand, and an inert `Divide(never-typed, 1)` is not harmless — the
+  // pretty-JSON serializer rewrites every `Multiply` through
+  // `asRationalExpression()`, which reaches this function with a denominator
+  // of `1`, and the `Divide(same Multiply, 1)` it got back was rewritten
+  // again, without end (a `Maximum call stack size exceeded` on
+  // `ce.parse("f(f(b)) - f(f(a)) = (f'(c))^2 (b - a)").latex`, where `f`
+  // types `never`). The tuple branch below strips the same divisors for the
+  // same reason.
+  if (op1.type.type === 'never' || op2.type.type === 'never') {
+    if (isLiteral(op2, 1)) return op1;
+    if (isLiteral(op2, -1)) return op1.neg();
     return ce._fn('Divide', [op1, op2]);
+  }
 
   // A `NaN` operand folds to `NaN` HERE, at canonicalization, unlike the
   // other arithmetic hubs (`Power`, `Multiply`, `Add` all leave such a node

@@ -916,3 +916,34 @@ describe('Tycho item 145 — a non-canonical tree keeps its shape (prettify)', (
     ]);
   });
 });
+
+// The pretty-JSON serializer displays a `Multiply` with negative degrees as a
+// fraction by way of `Product.asRationalExpression()`, which calls
+// `canonicalDivide(numerator, 1)` for a product with no denominator. The
+// `never` early-out of `canonicalDivide` returned that `Divide(product, 1)`
+// unstripped, and the serializer rewrote the same product without end
+// (`RangeError: Maximum call stack size exceeded`). The corpus row makes `f`
+// type `never`: the left side reads `f(f(b))` as the product `b·f·f` while
+// `f'(c)` declares `f` a function.
+describe('a product with a `never`-typed factor serializes', () => {
+  const CORPUS_ROW = "f(f(b)) - f(f(a)) = (f'(c))^2 (b - a)";
+
+  test('the corpus row serializes and round-trips', () => {
+    const ce = new ComputeEngine();
+    const t = ce.parse(CORPUS_ROW);
+    expect(ce.symbol('f').type.toString()).toBe('never');
+    const latex = t.latex;
+    expect(latex).toBe('bff-aff=(b-a)f^{\\prime}(c)^2');
+    expect(ce.parse(latex).isSame(t)).toBe(true);
+  });
+
+  test('`canonicalDivide` strips a trivial divisor of a `never` operand', () => {
+    const ce = new ComputeEngine();
+    ce.declare('m', 'integer<2<..<3>');
+    expect(ce.box(['Divide', 'm', 1]).json).toEqual('m');
+    expect(ce.box(['Divide', 'm', -1]).json).toEqual(['Negate', 'm']);
+    // Any other divisor stays an inert `Divide`, as before.
+    expect(ce.box(['Divide', 'm', 2]).json).toEqual(['Divide', 'm', 2]);
+    expect(ce.box(['Multiply', 'm', 'x']).latex).toBe('mx');
+  });
+});

@@ -1,3 +1,31 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- Fixed the LaTeX serializer recursing without end (`RangeError: Maximum call
+  stack size exceeded`) on a product with a factor of the empty type `never`,
+  such as `f(f(b)) - f(f(a)) = (f'(c))^2 (b - a)`, where the left side reads
+  `f` as a symbol and the right side declares it a function. `Divide(x, 1)`
+  and `Divide(x, -1)` now reduce to `x` and `-x` for a `never`-typed `x`, and
+  the serializer no longer rewrites a product as a fraction over `1`.
+- Fixed an ellipsis over an indexed family being read as an arithmetic
+  progression. `\{\frac{x_1}{1+x_1}, \frac{x_2}{1+x_1+x_2}, \dots,
+  \frac{x_n}{1+\dots+x_n}\}` parsed to a `Range` whose step was the
+  difference of the first two terms; it now stays a set with a
+  `ContinuationPlaceholder`, like `\{x_1, x_2, \dots, x_n\}`. Two ellipsis
+  anchors form a progression only when they mention the same subscripted
+  symbols.
+- Fixed a two-element `Tuple` in a set position (the right side of `\in`,
+  an operand of `\cup`, …) serializing as `(a, b)`, which reads back as an
+  open interval. It is now spelled `\operatorname{Tuple}(a, b)`, as a
+  two-element `List` is already spelled `\operatorname{List}(a, b)` there.
+- Fixed a stack overflow when canonicalizing `Length`, `Element` or any other
+  operation over a nested list literal whose sub-lists are shared objects (a
+  list built as `List(t, t)` 18 or more levels deep). The `List` type handler
+  analyzed the shape once per path and spread every leaf into one call;
+  it now visits each distinct sub-list once. The `Hold` type handler's
+  structure read of such a list is linear too.
+
 ## 0.121.1 _2026-09-03_
 
 ### New Features

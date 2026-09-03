@@ -4345,6 +4345,25 @@ function numericSampleValue(expr: MathJsonExpression): number | null {
  *    families rather than read off one. This is the cheap structural stand-in
  *    for "the shared part cancels", available on raw MathJSON with no
  *    simplifier.
+ * 4. **The second anchor does not move through an indexed family of the
+ *    first.** A subscripted symbol (`x_1`, `a_n`) names one member of an
+ *    indexed family, and an ellipsis whose anchors move through that family —
+ *    `x_1` in the first, `x_2` in the second — enumerates the family, the way
+ *    `[x_1, x_2, ..., x_n]` does; the arithmetic around the members does not
+ *    turn it into a progression. Gate 3 alone does not catch the cumulative
+ *    shapes, where the second anchor KEEPS the first member and adds the
+ *    next: `\{\frac{x_1}{1+x_1}, \frac{x_2}{1+x_1+x_2}, \dots,
+ *    \frac{x_n}{1+x_1+\dots+x_n}\}` abandons no symbol, and its "step"
+ *    `\frac{x_2}{1+x_1+x_2} - \frac{x_1}{1+x_1}` was fabricated the same
+ *    way. Only a gained member of a family the FIRST anchor already mentions
+ *    is rejected — the family is the name before the first `_` — so a gained
+ *    symbol of another family is still a step, subscripted or not:
+ *    `[2a_1, 2a_1+h, ..., 2a_1+nh]` steps by `h` and
+ *    `[2a_1, 2a_1+h_2, ..., 2a_1+10h_2]` by `h_2` (both anchors mention
+ *    exactly `a_1`; the leading `2` gives the first anchor the arithmetic root
+ *    gate 1 requires). Symbol names also carry font styles after an `_`
+ *    (`x_bold` for `\mathbf{x}`); a style variant of a family member gained
+ *    by the second anchor is rejected like a member, which is the safe side.
  */
 function tryTwoSampleSymbolicRange(
   samples: readonly MathJsonExpression[],
@@ -4366,6 +4385,18 @@ function tryTwoSampleSymbolicRange(
     rawSampleSymbols(s0, before);
     rawSampleSymbols(s1, after);
     for (const name of before) if (!after.has(name)) return null;
+    // Gate 4: the second anchor gains no member of a family the first one
+    // already mentions.
+    const families = new Set<string>();
+    for (const name of before) {
+      const family = symbolFamily(name);
+      if (family !== null) families.add(family);
+    }
+    for (const name of after) {
+      if (before.has(name)) continue;
+      const family = symbolFamily(name);
+      if (family !== null && families.has(family)) return null;
+    }
   }
   // `start === 0` lets the step be `s1` itself rather than `s1 - 0`; it is an
   // exactness-preserving shortcut for the numeric arm and simply does not
@@ -4373,6 +4404,16 @@ function tryTwoSampleSymbolicRange(
   const step: MathJsonExpression =
     start === 0 ? s1 : (addedTerms(s0, s1) ?? ['Subtract', s1, s0]);
   return ['Range', s0, endExpr, step];
+}
+
+/**
+ * The indexed family a subscripted symbol name belongs to: the part of the
+ * name before its first `_` (`x` for `x_1`, `x_n`, `x_{i+1}`). A plain name
+ * has no family and answers `null`.
+ */
+function symbolFamily(name: string): string | null {
+  const i = name.indexOf('_');
+  return i > 0 ? name.slice(0, i) : null;
 }
 
 /**

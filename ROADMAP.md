@@ -658,21 +658,48 @@ The fix belongs with the valueless-collection round's enumeration gate
 must be measured against the lazy-pipeline suites, which lean on empty
 enumeration for `Nothing`-like operands.
 
-### Canonicalizing `Length` or `Element` over a DAG-shaped nested list overflows the stack (OPEN — found 2026-09-03 by the item-225 regression test)
+### Canonicalizing `Length` or `Element` over a DAG-shaped nested list overflows the stack (FIXED 2026-09-03 — found 2026-09-03 by the item-225 regression test)
 
 A list literal built so that both elements are the SAME object, nested 18
-levels (`t = List(t, t)` repeated; 19 distinct nodes, 2^18 paths), makes
+levels (`t = List(t, t)` repeated; 19 distinct nodes, 2^18 paths), made
 `ce.function('Length', [t])` and `ce.function('Element', [n, t])` log
 `ComputeEngine: error canonicalizing \`Length\`: Maximum call stack size
-exceeded` and devolve the result to `unknown`; 12 levels canonicalize in
-milliseconds. A recursion that is bounded by the DEPTH of the value cannot
-overflow at 18 levels, so some step of the canonical handler (or the
-`flatten`/validation it runs) recurses once per PATH. Probe:
-`let t = ce.parse('x+1'); for (let k = 0; k < 18; k++) t = ce.function('List', [t, t]); ce.function('Length', [t])`.
-The fix is a visited set in that walk, as the fold-size walk received for
-Tycho item 225 (`binderBoundNames`, `foldValueMentions`, `foldValueImpure`).
+exceeded` and devolve the result to `unknown`. The cause was the `List` type
+handler's shape analysis (`shapedListType`,
+`boxed-expression/shaped-list-type.ts`): it walked the nested lists once per
+PATH, collected every leaf cell type into one flat array, and spread that
+array into a single `widen(...cells)` call — 2^18 arguments overflow the
+stack. The analysis is now memoized per nested `List` node and carries one
+widened cell type per level (`widen` is a pairwise lattice join, so the
+answer is unchanged). The `Hold`/`ReleaseHold` structure read
+(`listLiteralShape`, `boxed-expression/operand-descriptor.ts`) collected each
+level once per path as well (a quarter second and a 4-million-entry array at
+22 levels); it now keeps the distinct nodes of each level. Every canonical
+operation probed over a 26-level list tower (`Length`, `Element`, `Count`,
+`At`, `Shape`, `Flatten`, `Reverse`, `Join`, `Map`, `Hold`, `Add`,
+`Multiply`, `Negate`, `Norm`, `Determinant`, the `.type` read) now answers in
+under 5 ms. Pinned in
+`test/compute-engine/tycho-item-225-fold-size-walk-dag-linear.test.ts`
+("canonicalizing over a shared list tower").
 
-### The LaTeX round-trip gate (`npm run check:roundtrip`, part of `ci:corpus-pipeline`) is red at the 0.121.0 release commit (OPEN — measured 2026-09-03 on a clean worktree at `1ce34ecb`)
+### Operations over a DAG-shaped nested TUPLE are proportional to the tuple type's size, which is the number of leaf slots (OPEN — measured 2026-09-03 while fixing the list-tower overflow above)
+
+A tuple literal built the same way (`t = Tuple(t, t)` repeated) does not
+overflow, but every canonical operation over it doubles with each level:
+at 20 levels `Length` takes 0.3 s, `Element` 1.6 s, `Reverse` 2.2 s and
+`Negate` 14 s (`Negate` distributes component-wise, and the distribution
+rebuilds the tower once per path). The cost is not in an expression walker:
+the tuple TYPE `tuple<tuple<…>, tuple<…>>` names one slot per leaf, so the
+type of a 20-level tower has 2^20 slots, and every type-level reader
+(`typeToString`, `hasFreeVariables`, `isSubtype`, `typeCouldBeNumericTuple`
+in `collection-utils.ts`) is linear in that size. A dimensioned `list` type
+describes the same shape in 20 numbers, which is why the list tower is fast.
+A fix would need the tuple type to share, or to summarize, repeated
+component types — a representation decision, not a visited set. The
+evaluate path (`evaluate`, `.N()`, `simplify`, `match`) is proportional to
+the leaf count for both towers, which is the size of its result.
+
+### The LaTeX round-trip gate (`npm run check:roundtrip`, part of `ci:corpus-pipeline`) is red at the 0.121.0 release commit (FIXED 2026-09-03, unreleased — measured 2026-09-03 on a clean worktree at `1ce34ecb`)
 
 Three corpus entries fail the round-trip property and one drifts; none is
 caused by the 2026-09-03 commits (the same four fail at the release commit).
@@ -702,10 +729,21 @@ Each is its own defect:
   set-valued position should serialize as a set literal, or record the two
   entries in `docs/mathnet/roundtrip-exceptions.json` as documented-lossy.
 
-Until these are fixed the corpus pipeline's last step fails, so a release
-must run the Fungrim gates individually (`validate.ts --check`,
-`artifact-freshness.ts`, `apply-solve-templates.ts --check`,
-`recompile-drift.ts`, `compile-properties.ts --check`), which all pass.
+Resolution (2026-09-03): the crash was the `never` early-out of
+`canonicalDivide` returning an inert `Divide(product, 1)`, which the
+pretty-JSON serializer rewrote as the same product without end — trivial
+divisors are now stripped before that early-out and the serializer declines a
+fraction over `1`. The ellipsis heuristic gained a fourth gate in
+`tryTwoSampleSymbolicRange`: two anchors form a progression only when they
+mention the same subscripted symbols (a symbolic step over PLAIN symbols is
+kept — Tycho item 134's `[1+\frac{4}{d}, 1+\frac{8}{d}...5]` witness depends
+on it, so the "never a symbolic `second − first`" wording above was too
+strong). A two-element `Tuple` (or its `Pair` shorthand) in a set position
+now spells `\operatorname{Tuple}(a, b)`, the sibling of the existing
+`\operatorname{List}(a, b)` (`serializeListDomain`). The gate is green with
+no change to the exceptions file; the drifted entry returned to its recorded
+output. Pins: `serialization.test.ts`, `parser-list-range.test.ts`,
+`tycho-items-93-94.test.ts`.
 
 ### `ce.declare({ f: {…} })` cannot type an inline `type` handler that omits `typeHandlerKind` (OPEN, design — found 2026-09-03 while fixing the `declare()` signature for boxed definitions)
 

@@ -869,6 +869,92 @@ describe('Parser: list range ellipsis', () => {
       expect(parse('\\{1, 2, 3\\}')).toEqual(['Set', 1, 2, 3]);
     });
   });
+
+  // Gate 4 of the two-sample fusion: subscripted symbols name members of an
+  // indexed family, and anchors that move through the family (`x_1` in the
+  // first, `x_2` in the second) enumerate it, whatever arithmetic wraps the
+  // members. The cumulative shape is the one the abandoned-symbol gate (gate
+  // 3) lets through: the second anchor KEEPS `x_1` and adds `x_2`. The row is
+  // from docs/mathnet/parser-test-cases.json, where it round-tripped as a
+  // `Range` whose "step" was the difference of two unrelated fractions.
+  describe('an indexed family with cumulative anchors is not a progression', () => {
+    test('the corpus `\\max` set keeps its ContinuationPlaceholder', () => {
+      expect(
+        parse(
+          '\\max\\left\\{\\frac{x_1}{1+x_1}, \\frac{x_2}{1+x_1+x_2}, \\dots, \\frac{x_n}{1+x_1+x_2+\\dots+x_n}\\right\\}'
+        )
+      ).toEqual([
+        'Max',
+        [
+          'Set',
+          ['Divide', 'x_1', ['Add', 'x_1', 1]],
+          ['Divide', 'x_2', ['Add', 'x_1', 'x_2', 1]],
+          'ContinuationPlaceholder',
+          ['Divide', 'x_n', ['Add', 1, 'x_1', 'x_2', 'ContinuationPlaceholder', 'x_n']],
+        ],
+      ]);
+    });
+
+    // The two tests below read the NON-canonical parse: the step of a
+    // symbolic-anchor range is emitted as `Subtract(s1, s0)`, and its
+    // canonical spelling is not what is under test here.
+    test('the bracket form is a placeholder List', () => {
+      expect(
+        ce.parse(
+          '[1+\\frac{a_1}{2}, 1+\\frac{a_1}{2}+\\frac{a_2}{2}, ..., 9]',
+          { canonical: false }
+        ).json
+      ).toEqual([
+        'List',
+        ['Add', 1, ['Divide', 'a_1', 2]],
+        ['Add', 1, ['Divide', 'a_1', 2], ['Divide', 'a_2', 2]],
+        'ContinuationPlaceholder',
+        9,
+      ]);
+    });
+
+    test('a gained PLAIN symbol is still a step', () => {
+      // Both anchors mention exactly the member `a_1`; `h` is the step.
+      const raw = ce.parse('[2a_1, 2a_1+h, ..., 2a_1+nh]', {
+        canonical: false,
+      }).json;
+      expect(operatorOf(raw)).toBe('Range');
+      expect((raw as Expression[])[3]).toEqual([
+        'Subtract',
+        ['Add', ['InvisibleOperator', 2, 'a_1'], 'h'],
+        ['InvisibleOperator', 2, 'a_1'],
+      ]);
+    });
+
+    test('a gained member of ANOTHER family is still a step', () => {
+      // `h_2` is subscripted, but the first anchor mentions no `h_…`.
+      const raw = ce.parse('[2a_1, 2a_1+h_2, ..., 2a_1+10h_2]', {
+        canonical: false,
+      }).json;
+      expect(operatorOf(raw)).toBe('Range');
+    });
+
+    test('a gained member of the SAME family is an enumeration', () => {
+      expect(
+        ce.parse('[2x_1, 2x_1+x_2, ..., 2x_1+x_n]', { canonical: false }).json
+      ).toEqual([
+        'List',
+        ['InvisibleOperator', 2, 'x_1'],
+        ['Add', ['InvisibleOperator', 2, 'x_1'], 'x_2'],
+        'ContinuationPlaceholder',
+        ['Add', ['InvisibleOperator', 2, 'x_1'], 'x_n'],
+      ]);
+    });
+
+    test('numeric offsets on one member are still a progression', () => {
+      expect(parse('[a_1+1, a_1+2, ..., a_1+9]')).toEqual([
+        'Range',
+        ['Add', 'a_1', 1],
+        ['Add', 'a_1', 9],
+        1,
+      ]);
+    });
+  });
 });
 
 describe('Range under arithmetic parents round-trips (Tycho item 48)', () => {

@@ -307,6 +307,54 @@ describe('a two-element `List` domain survives a LaTeX round-trip', () => {
     expect(ce.parse(once, { canonical: false }).latex).toBe(once);
   });
 
+  // A LaTeX group with a comma (`{a, b}`, plain braces) parses as a `Tuple`,
+  // and a two-element `Tuple` has the same collision as a two-element `List`:
+  // its notation `(a, b)` reads back as an OPEN interval under `\in`/`\cup`.
+  // The `[S] ∈ {2m-2, 2m-1}` and `[0, 1) ∪ {3, 4} ∪ (5, +∞)` rows of
+  // docs/mathnet/parser-test-cases.json failed the round-trip gate on it.
+  describe('a two-element `Tuple` domain uses the same named spelling', () => {
+    test.each([
+      [
+        'Element',
+        ['Element', 'n', ['Tuple', 1, 2]],
+        'n\\in\\operatorname{Tuple}(1, 2)',
+      ],
+      [
+        'Union',
+        ['Union', ['Tuple', 3, 4], ['Set', 5]],
+        '\\operatorname{Tuple}(3, 4)\\cup\\lbrace5\\rbrace',
+      ],
+      [
+        'symbolic elements',
+        ['Element', 'n', ['Tuple', 'a', 'b']],
+        'n\\in\\operatorname{Tuple}(a, b)',
+      ],
+    ])('%s', (_label, json, expected) => {
+      const ce = new ComputeEngine();
+      expect(ce.box(json, { canonical: false }).latex).toBe(expected);
+      expect(roundTrip(ce, json)).toEqual(json);
+    });
+
+    test('the corpus rows round-trip on the canonical route', () => {
+      for (const input of [
+        '[S] ∈ {2 m - 2, 2 m - 1}',
+        '[0, 1) ∪ {3, 4} ∪ (5, +∞)',
+      ]) {
+        const ce = new ComputeEngine();
+        const t = ce.parse(input);
+        expect(ce.parse(t.latex).isSame(t)).toBe(true);
+      }
+    });
+
+    test('a tuple of any other length keeps paren notation', () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce.box(['Element', 'n', ['Tuple', 1, 2, 3]], { canonical: false })
+          .latex
+      ).toBe('n\\in(1,2,3)');
+    });
+  });
+
   test('the round-tripped membership keeps the list VALUE class', () => {
     // The point of the fix: 1.5 is between 1 and 2 but is not one of them.
     const ce = new ComputeEngine();

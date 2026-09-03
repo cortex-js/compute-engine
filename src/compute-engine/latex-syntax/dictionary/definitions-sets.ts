@@ -272,24 +272,32 @@ function serializeSetOperand(
 }
 
 /**
- * The spelling of a two-element `List` sitting in a set position (the rhs of
- * `\in`, a big-op indexing set, either side of `\cup`/`\subset`/…):
- * `\operatorname{List}(a, b)`.
+ * The spelling of a two-element `List` or `Tuple` sitting in a set position
+ * (the rhs of `\in`, a big-op indexing set, either side of
+ * `\cup`/`\subset`/…): `\operatorname{List}(a, b)` /
+ * `\operatorname{Tuple}(a, b)`.
  *
- * Its bracket notation `[a, b]` is not available there — a set position reads
- * a bracket pair back as an `Interval` (see `parsedIntervalOperand()`), a
- * different value class. Lists of any other length are unambiguous and keep
- * bracket notation, so this returns `null` for them (and for any other
- * expression): the caller serializes as usual.
+ * Their bracket notations are not available there — a set position reads a
+ * bracket pair `[a, b]` back as a closed `Interval` and a paren pair `(a, b)`
+ * as an open one (see `parsedIntervalOperand()`), a different value class.
+ * The `Tuple` case is how a LaTeX group with a comma reaches a set operator:
+ * `[S] \in {2m-2, 2m-1}` (plain braces, not `\{ \}`) parses its rhs as a
+ * `Tuple`. The pretty-JSON stage that runs before this serializer renames a
+ * two-element `Tuple` to `Pair`, so the `Pair` head is accepted too and spelled
+ * `Tuple`, the head both spellings parse back to. Lists and tuples of any
+ * other length are unambiguous and keep their bracket notation, so this
+ * returns `null` for them (and for any other expression): the caller
+ * serializes as usual.
  */
 export function serializeListDomain(
   serializer: Serializer,
   expr: MathJsonExpression | null
 ): LatexString | null {
-  if (expr === null || operator(expr) !== 'List' || nops(expr) !== 2)
-    return null;
+  if (expr === null || nops(expr) !== 2) return null;
+  const head = operator(expr);
+  if (head !== 'List' && head !== 'Tuple' && head !== 'Pair') return null;
   return joinLatex([
-    '\\operatorname{List}(',
+    `\\operatorname{${head === 'List' ? 'List' : 'Tuple'}}(`,
     serializer.serialize(operand(expr, 1)),
     ', ',
     serializer.serialize(operand(expr, 2)),
