@@ -1113,6 +1113,15 @@ export function serializeEpsil(
     // `Alternatives` → ` | `-joined). See the Epsil `match` design §2–3.
     //
     Match: (expr: MathJsonExpression): FormattingBlock => {
+      // The `if let` statement has no head of its own: it lowers to a
+      // two-case `Match` whose fallback arm is the wildcard (see
+      // `ifLetParts`). That shape is spelled back as `if let`, exactly as the
+      // `while` lowering is spelled back as `while`. A hand-written `match`
+      // of that shape — two cases, `do { … }` bodies, a final `_` — is the
+      // same expression, so it takes the `if let` spelling too.
+      const ifLet = serializeIfBlockForm(expr);
+      if (ifLet !== null) return ifLet;
+
       const subject = operand(expr, 1);
       const cases = operands(expr).slice(1);
       const head = fmt.line('match ', serializeExpression(subject), ' {');
@@ -1156,8 +1165,14 @@ export function serializeEpsil(
   }
 
   // Serialize a MathJSON pattern back to Epsil pattern syntax. The inverse of
-  // the parser's `patternize` pass.
-  function serializePattern(p: MathJsonExpression): FormattingBlock {
+  // the parser's `patternize` pass. `typed` maps a binding name to the type
+  // text of its `name: type` annotation — the `if let` spelling folds a
+  // case's `MatchesType` guard conjuncts back onto their bindings this way
+  // (see `typedBindingAnnotations`); a `match` case keeps printing the guard.
+  function serializePattern(
+    p: MathJsonExpression,
+    typed?: ReadonlyMap<string, string>
+  ): FormattingBlock {
     const h = operator(p);
     if (h === 'Pin') return fmt.line('== ', serializeExpression(operand(p, 1)));
     if (h === 'Alternatives') {
@@ -1165,7 +1180,7 @@ export function serializeEpsil(
       const parts: (string | FormattingBlock)[] = [];
       alts.forEach((a, i) => {
         if (i > 0) parts.push(' | ');
-        parts.push(serializePattern(a));
+        parts.push(serializePattern(a, typed));
       });
       return fmt.line(...parts);
     }
@@ -1177,23 +1192,23 @@ export function serializeEpsil(
     // `..-` into one token.
     if (h === 'Range' && operands(p).length === 2)
       return fmt.line(
-        serializePattern(operand(p, 1) ?? 'Nothing'),
+        serializePattern(operand(p, 1) ?? 'Nothing', typed),
         fmt.infixOperator('..'),
-        serializePattern(operand(p, 2) ?? 'Nothing')
+        serializePattern(operand(p, 2) ?? 'Nothing', typed)
       );
     if (h === 'List')
       return fmt.fencedList(
         '[',
         fmt.separator(','),
         ']',
-        operands(p).map(serializePattern)
+        operands(p).map((x) => serializePattern(x, typed))
       );
     if (h === 'Tuple')
       return fmt.fencedList(
         '(',
         fmt.separator(','),
         ')',
-        operands(p).map(serializePattern)
+        operands(p).map((x) => serializePattern(x, typed))
       );
     if (h === 'Dictionary') {
       const entries = operands(p);
@@ -1211,7 +1226,7 @@ export function serializeEpsil(
           fmt.line(
             serializeExpression(operand(kv, 1)),
             fmt.relationalOperator('->'),
-            serializePattern(operand(kv, 2) ?? 'Nothing')
+            serializePattern(operand(kv, 2) ?? 'Nothing', typed)
           )
         )
       );
@@ -1225,7 +1240,15 @@ export function serializeEpsil(
       if (s === 'True') return fmt.text('true');
       if (s === 'False') return fmt.text('false');
       if (s.startsWith('___')) return fmt.text('...' + s.slice(3));
-      if (s.startsWith('_')) return fmt.text(escapeSymbol(s.slice(1)));
+      if (s.startsWith('_')) {
+        const name = s.slice(1);
+        const annotation = typed?.get(name);
+        return fmt.text(
+          annotation === undefined
+            ? escapeSymbol(name)
+            : escapeSymbol(name) + ': ' + annotation
+        );
+      }
       return fmt.line('== ', fmt.text(escapeSymbol(s)));
     }
 
@@ -1846,44 +1869,205 @@ export function serializeEpsil(
   const isBlock = (x: MathJsonExpression | null): boolean =>
     x !== null && operator(x) === 'Block';
 
-  /** Flatten a block-form `If` and its `else if` chain into a list of
-   * `cond`/`body` clauses plus a final `else` body, or `null` when the node is
-   * not that shape (a branch that is not a `Block`, an arity outside 2…3, or an
-   * `else` that is neither a `Block` nor a block-form `If`). Flattening the
-   * chain here is what lets the stacked layout below put every `} else if …` at
-   * the same column instead of nesting each one a level deeper. */
+  /** One clause of a block-form `if` chain: what stands between the keyword
+   * and the `{` — a condition (`if c {`) or an `if let` head
+   * (`if let p = s {`) — and the clause's body block. The head is a thunk so
+   * each layout serializes it afresh (the inline and the stacked layout are
+   * both built, and a formatting block belongs to one tree). */
+  type IfClause = { head: () => FormattingBlock; body: MathJsonExpression };
+
+  /** Flatten a block-form `If` (or an `if let` `Match`) and its `else if`
+   * chain into a list of clauses plus a final `else` body, or `null` when the
+   * node is not that shape (a branch that is not a `Block`, an arity outside
+   * 2…3, a `Match` that is not the `if let` lowering, or an `else` that is
+   * none of a `Block`, a block-form `If`, or an `if let`). Flattening the
+   * chain here is what lets the stacked layout below put every `} else if …`
+   * at the same column instead of nesting each one a level deeper. */
   function ifBlockClauses(expr: MathJsonExpression): {
-    clauses: { cond: MathJsonExpression; body: MathJsonExpression }[];
+    clauses: IfClause[];
     elseBody: MathJsonExpression | null;
   } | null {
-    const clauses: { cond: MathJsonExpression; body: MathJsonExpression }[] =
-      [];
+    const clauses: IfClause[] = [];
     let node: MathJsonExpression = expr;
     for (;;) {
-      const count = nops(node);
-      if (count !== 2 && count !== 3) return null;
-      const cond = operand(node, 1);
-      const body = operand(node, 2);
-      const alternative = count === 3 ? operand(node, 3) : null;
-      if (cond === null || body === null || !isBlock(body)) return null;
-      clauses.push({ cond, body });
+      let alternative: MathJsonExpression | null;
+      if (operator(node) === 'If') {
+        const count = nops(node);
+        if (count !== 2 && count !== 3) return null;
+        const cond = operand(node, 1);
+        const body = operand(node, 2);
+        alternative = count === 3 ? operand(node, 3) : null;
+        if (cond === null || body === null || !isBlock(body)) return null;
+        clauses.push({
+          head: () =>
+            serializeConditionalOperand(cond, CONDITIONAL_PRECEDENCE + 1),
+          body,
+        });
+      } else {
+        const parts = ifLetParts(node);
+        if (parts === null) return null;
+        const { pattern, typed, subject, body } = parts;
+        clauses.push({
+          head: () =>
+            fmt.line(
+              'let ',
+              serializePattern(pattern, typed),
+              ' = ',
+              serializeConditionalOperand(subject, CONDITIONAL_PRECEDENCE + 1)
+            ),
+          body,
+        });
+        alternative = parts.fallback;
+      }
 
       if (alternative === null) return { clauses, elseBody: null };
       if (isBlock(alternative)) return { clauses, elseBody: alternative };
-      // Only a block-form `If` can chain into `else if`. Anything else in
-      // `else` position has no block spelling, so the whole node falls back to
-      // the generic call form rather than emitting a half-block hybrid.
-      if (operator(alternative) !== 'If') return null;
+      // Only a block-form `If` or an `if let` can chain into `else if`.
+      // Anything else in `else` position has no block spelling, so the whole
+      // node falls back to its generic spelling rather than emitting a
+      // half-block hybrid.
+      const h = operator(alternative);
+      if (h !== 'If' && h !== 'Match') return null;
       node = alternative;
     }
+  }
+
+  /** The `if let` lowering (`parseIfLet`) taken apart:
+   *
+   *   Match(subject,
+   *     MatchCase(pattern, [guard], Block(…)),
+   *     MatchCase(_, fallback))
+   *
+   * or `null` when the `Match` does not have exactly that shape. `fallback`
+   * is the `else` — a `Block`, or the nested `If`/`Match` of an `else if`
+   * chain (checked by the caller) — and `null` for the symbol `Missing`, the
+   * body the parser gives the wildcard arm when there is no `else`. A guard
+   * must fold back into `name: type` annotations on the pattern's bindings
+   * (`typed`); any other guard has no `if let` spelling, so the `Match` keeps
+   * its `match` spelling. */
+  function ifLetParts(node: MathJsonExpression): {
+    subject: MathJsonExpression;
+    pattern: MathJsonExpression;
+    typed: ReadonlyMap<string, string>;
+    body: MathJsonExpression;
+    fallback: MathJsonExpression | null;
+  } | null {
+    if (operator(node) !== 'Match' || nops(node) !== 3) return null;
+    const subject = operand(node, 1);
+    const arm = operand(node, 2);
+    const wildcardArm = operand(node, 3);
+    if (subject === null || arm === null || wildcardArm === null) return null;
+
+    if (operator(arm) !== 'MatchCase') return null;
+    const armCount = nops(arm);
+    if (armCount !== 2 && armCount !== 3) return null;
+    const pattern = operand(arm, 1);
+    const guard = armCount === 3 ? operand(arm, 2) : null;
+    const body = operand(arm, armCount);
+    if (pattern === null || body === null || !isBlock(body)) return null;
+    const typed = typedBindingAnnotations(pattern, guard);
+    if (typed === null) return null;
+
+    if (operator(wildcardArm) !== 'MatchCase' || nops(wildcardArm) !== 2)
+      return null;
+    if (symbol(operand(wildcardArm, 1)) !== '_') return null;
+    const fallbackBody = operand(wildcardArm, 2);
+    if (fallbackBody === null) return null;
+    let fallback: MathJsonExpression | null;
+    if (symbol(fallbackBody) === 'Missing') fallback = null;
+    else if (
+      isBlock(fallbackBody) ||
+      operator(fallbackBody) === 'If' ||
+      operator(fallbackBody) === 'Match'
+    )
+      fallback = fallbackBody;
+    else return null;
+
+    return { subject, pattern, typed, body, fallback };
+  }
+
+  /** The `name: type` annotations a case guard folds back into, as a map from
+   * binding name to type text, or `null` when the guard is not purely typed
+   * bindings. The guard the parser builds for typed bindings is a conjunction
+   * (`And`, or a single conjunct) of `MatchesType(name, TypeFrom("T"))`
+   * terms, one per annotated binding, in pattern order — so a guard folds
+   * exactly when every conjunct has that form, names a binding that occurs
+   * ONCE in the pattern at a position `serializePattern` prints as a binding
+   * leaf, and no binding is named twice. `guard === null` folds to the empty
+   * map. */
+  function typedBindingAnnotations(
+    pattern: MathJsonExpression,
+    guard: MathJsonExpression | null
+  ): ReadonlyMap<string, string> | null {
+    const typed = new Map<string, string>();
+    if (guard === null) return typed;
+    const conjuncts = operator(guard) === 'And' ? operands(guard) : [guard];
+    for (const conjunct of conjuncts) {
+      if (operator(conjunct) !== 'MatchesType' || nops(conjunct) !== 2)
+        return null;
+      const name = symbol(operand(conjunct, 1));
+      const typeFrom = operand(conjunct, 2);
+      if (name === null || operator(typeFrom) !== 'TypeFrom') return null;
+      if (nops(typeFrom) !== 1) return null;
+      const text = stringValue(operand(typeFrom, 1));
+      if (text === null || typed.has(name)) return null;
+      if (!isAnnotationText(text)) return null;
+      if (bindingLeafCount(pattern, name) !== 1) return null;
+      typed.set(name, text);
+    }
+    return typed;
+  }
+
+  /** Whether `text` can stand as the type of a `name: type` annotation in an
+   * `if let` head. A guard the parser built carries the annotation's own
+   * source slice, but a guard can also be written by hand —
+   * `MatchesType(v, TypeFrom("boolean = true"))` — and folding that text into
+   * the head verbatim would let the string rewrite the statement (its `=`
+   * would be read as the head's separator). So the text must parse as a type
+   * on its own (the permissive resolver admits user-declared names, and the
+   * type grammar rejects trailing input) and must stay on one line, since a
+   * line break inside the head ends the statement. Anything else keeps the
+   * `match` spelling. */
+  function isAnnotationText(text: string): boolean {
+    if (/[\r\n\u2028\u2029]/.test(text)) return false;
+    try {
+      parseType(text, PERMISSIVE_TYPE_RESOLVER);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** How many times the binding `_name` occurs in `pattern` at a position
+   * `serializePattern` prints itself as a binding leaf — the top level, or
+   * nested through `List`/`Tuple` elements and `Dictionary` values. A binding
+   * inside an operator or call pattern (`a + b`, `f(x)`) is printed by the
+   * ordinary expression path, which has no place for an annotation, so it is
+   * not counted. */
+  function bindingLeafCount(pattern: MathJsonExpression, name: string): number {
+    if (symbol(pattern) === '_' + name) return 1;
+    const h = operator(pattern);
+    if (h === 'List' || h === 'Tuple')
+      return operands(pattern).reduce(
+        (n: number, op) => n + bindingLeafCount(op, name),
+        0
+      );
+    if (h === 'Dictionary')
+      return operands(pattern).reduce(
+        (n: number, kv) =>
+          n + bindingLeafCount(operand(kv, 2) ?? 'Nothing', name),
+        0
+      );
+    return 0;
   }
 
   /** The statements of a `Block`, one per element. */
   const blockStatements = (block: MathJsonExpression): FormattingBlock[] =>
     mapArgs<FormattingBlock>(block, serializeExpression) ?? [];
 
-  /** The block form — `if c { … }`, `if c { … } else { … }`, and the `else if`
-   * chain — or `null` when the node is not that shape.
+  /** The block form — `if c { … }`, `if c { … } else { … }`, the `else if`
+   * chain, and the `if let p = s { … }` clauses that may stand anywhere in it
+   * — or `null` when the node is not that shape.
    *
    * Two layouts, and the formatter picks the cheaper: everything on one line,
    * or the conventional stacked form. The stacked one is built as an OUTER
@@ -1901,14 +2085,11 @@ export function serializeEpsil(
     if (parsed === null) return null;
     const { clauses, elseBody } = parsed;
 
-    const condition = (cond: MathJsonExpression): FormattingBlock =>
-      serializeConditionalOperand(cond, CONDITIONAL_PRECEDENCE + 1);
-
     // Inline: `if c { … } else if d { … } else { … }`.
     const inlineParts: (string | FormattingBlock)[] = [];
-    clauses.forEach(({ cond, body }, i) => {
+    clauses.forEach(({ head, body }, i) => {
       inlineParts.push(i === 0 ? 'if ' : ' else if ');
-      inlineParts.push(condition(cond), ' ', serializeBraceBlockInline(body));
+      inlineParts.push(head(), ' ', serializeBraceBlockInline(body));
     });
     if (elseBody !== null)
       inlineParts.push(' else ', serializeBraceBlockInline(elseBody));
@@ -1923,10 +2104,8 @@ export function serializeEpsil(
       if (statements.length > 0)
         rows.push(fmt.indent(fmt.stack(...statements)));
     };
-    clauses.forEach(({ cond, body }, i) => {
-      rows.push(
-        fmt.line(i === 0 ? 'if ' : '} else if ', condition(cond), ' {')
-      );
+    clauses.forEach(({ head, body }, i) => {
+      rows.push(fmt.line(i === 0 ? 'if ' : '} else if ', head(), ' {'));
       pushBody(body);
     });
     if (elseBody !== null) {
@@ -2313,6 +2492,12 @@ function escapeSymbol(s: string): string {
   // has no plain spelling — emit the verbatim form so it re-parses as a symbol.
   // Merely *reserved* words are ordinary identifiers and are emitted as-is.
   if (HARD_RESERVED_WORDS.has(s)) return `\`${s}\``;
+  // `let` is contextual in the grammar (it can name a binding), but it heads
+  // a construct wherever a statement or an `if` condition begins: `let = 5`
+  // is read as a declaration and `if let == x { … }` as an `if let`. A symbol
+  // NAMED `let` therefore has no plain spelling that re-parses in every
+  // position; the verbatim form does.
+  if (s === 'let') return `\`${s}\``;
 
   // Shortcut common case: all alphanumeric symbol => nothing to escape
   if (/^[a-zA-Z][a-zA-Z\d_]*$/.test(s)) return s;

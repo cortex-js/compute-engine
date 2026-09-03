@@ -642,6 +642,35 @@ deliberately left out of that change.
   semantically stable (`parseType(typeToString(t))` equals `t`), so this
   is a readability defect in hovers and error messages only.
 
+### A function literal whose body contains an `Error(…)` literal types `error`, so its declaration is inert (OPEN, error-model — found 2026-09-03 implementing Epsil `if let`)
+
+An Epsil program cannot construct an error value of its own. With
+`function g(x) { if x > 0 { x } else { Error("neg") } }`, the definition
+statement reports a `runtime-error` diagnostic (breadcrumb "in If argument 3,
+in DefineFunction argument 2") and `g` is never defined: `g(1)` stays
+unevaluated. The same happens for `Error(ErrorCode("neg"))`, for a lambda
+(`let g = x => Error("neg")`) and for a plain value (`let e = Error("neg")`
+leaves `e` unbound). The mechanism is engine-level, not Epsil's:
+`ce.box(['Function', ['If', ['Greater', 'x', 0], 'x', ['Error', "'neg'"]], 'x'])`
+has type `error` and `isValid === false` — the invalidity of the written
+`Error` node propagates through the `If` and the held `Function` body to the
+literal itself — so `Declare(g, {value -> literal})` evaluates to itself, and
+`ce.declare('g2', { value: literal })` succeeds but leaves `g2` with type
+`error` rather than a function type, so `g2(1)` is inert. The selecting
+operator rule already keeps EVALUATION right (`If(True, 5, err)` is `5`,
+`docs/ERROR-MODEL.md` §3); what is wrong is the validity and type derivation
+of the enclosing function literal, and the assignment refusing an
+`error`-typed value. Expected: a literal `Error(…)` inside a held body is a
+value the function may return (`(any) -> error | …`), and the declaration
+takes effect. Decision needed before a fix: whether a written `Error(…)` is
+a value (the language's "errors are values") or an invalid subtree (the
+document-diagnostics reading), since both readings are load-bearing today.
+Consequence for Epsil: the `if let v: !error = f(x) { … }` idiom
+(`src/epsil/docs/control-flow.md` §`if let`) works only for engine-raised
+failures, such as a `match-no-case`. Probe:
+`executeEpsil(ce, 'let g = x => Error("neg")\ng(1)')` (diagnostic, `g(1)`
+inert).
+
 ### A valueless collection-typed operand is silently dropped by the lazy collection operators (OPEN, semantics — found 2026-09-03 while implementing the `Join` scalar-operand ruling)
 
 With `ce.declare('v', 'list<number>')` and no value, `Join([1], v).evaluate()`

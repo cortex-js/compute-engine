@@ -154,8 +154,8 @@ _pragma_ → **`#line`** | **`#column`** | **`#url`** | **`#filename`** |
 _pragma-call_ → (**`#env`** | **`#navigator`** | **`#warning`** |
 **`#error`**) **`(`** \[(_expression_)#**`,`**\] **`)`**
 
-_if-expression_ → **`if`** _expression_ _block_
-\[**`else`** (_block_ | _if-expression_)\]
+_if-expression_ → **`if`** (_expression_ | **`let`** _pattern_ **`=`**
+_expression_) _block_ \[**`else`** (_block_ | _if-expression_)\]
 
 _match-expression_ → **`match`** _expression_ **`{`** _match-case_+ **`}`**
 

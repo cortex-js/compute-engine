@@ -701,6 +701,58 @@ match 3 {
 
 Evaluating this expression yields `Error("match-no-case", 3)`.
 
+### `if let` {#if-let}
+
+When one case is what matters and everything else is the fallback, `if let`
+spells the test as a conditional. The pattern is any `match` pattern; the
+block runs with the pattern's bindings in scope when the subject matches, and
+the `else` branch — optional, and chainable with `else if` — when it does not:
+
+```epsil-live
+let point = (2, 5)
+if let (x, y) = point { x * y } else { 0 }
+// ➔ 10
+```
+
+It is sugar over `match`: the statement above is
+`match point { (x, y) => do { x * y }; _ => do { 0 } }`, and the two forms
+lower to the same expression. Without an `else`, a subject that does not
+match evaluates to `Missing`, as a false `if` without an `else` does.
+
+The form earns its keep with a typed binding, which is how a result that may
+have failed is taken apart without a `match` block:
+
+```epsil-live
+function head(xs: list) {
+  match xs {
+    [h, ...] => h
+  }
+}
+if let h: !error = head([]) { h } else { "empty" }
+// ➔ "empty"
+```
+
+`head([])` has no matching case, so it evaluates to a `match-no-case` error
+value; the typed binding `h: !error` refuses it and the `else` branch runs.
+With `head([4, 5])`, `4` binds to `h`. The same test reads absence:
+`if let v: !missing = First(xs) { … }` binds `v` only when the list has a
+first element.
+
+`if let` chains with `else if` in either direction, and a plain `if` can
+follow an `if let`:
+
+```epsil-live
+let v = [1]
+if let [] = v { "empty" } else if let [x] = v { x } else { "many" }
+// ➔ 1
+```
+
+A pattern that cannot fail — a bare name or `_` with no type — makes the
+`else` branch dead code; that is what `let` is for, and it is reported as an
+`if-let-irrefutable` warning. There is no guard slot: to test a condition on
+the bound values, nest an `if` in the block. Bindings are scoped to the
+block, as in a `match` case.
+
 ### `if`, `a if c else b`, or `match`? {#choosing-a-conditional}
 
 All three produce a value, so the choice is about what you are branching *on*.
@@ -729,6 +781,10 @@ match v {
 }
 // ➔ "several items"
 ```
+
+When only one shape matters — a non-empty list, a value that is not an
+error — [`if let`](#if-let) tests it as a conditional, and the `else` takes
+everything else.
 
 Two differences are worth remembering when the subject may be symbolic.
 `match` is **structural**: a symbolic `x` is not `0`, even though it might turn

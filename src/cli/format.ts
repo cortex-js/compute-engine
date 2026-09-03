@@ -546,6 +546,10 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `Expected closing string delimiter ${JSON.stringify(args[0])}`;
     case 'match-case-separator':
       return `Match cases are separated by a newline or ";", not a comma`;
+    case 'if-let-equal-expected':
+      return `Expected "=" after the "if let" pattern, followed by the value to match`;
+    case 'if-let-irrefutable':
+      return `The pattern "${args[0]}" matches every value, so this "if let" cannot fail (an "else" branch would never run); use "let" to bind unconditionally`;
     case 'conditional-if-line-start':
       return `An "if" at the start of a line begins a new if-statement; for a conditional expression ("a if c else b"), keep "if" on the same line as the value before it`;
     case 'mapsto-arrow-expected':

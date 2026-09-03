@@ -22,8 +22,11 @@ overload resolution cannot discard names before the mapping is complete.
 
 ## Pattern matching
 
-Surface `match` lowers to `Match` and ordered `MatchCase` nodes. Matching is
-total and first-match. Literal, type, tuple/record, constructor, wildcard, pin,
+Surface `match` lowers to `Match` and ordered `MatchCase` nodes. Surface
+`if let pattern = subject { … } else { … }` lowers to a two-case `Match` whose
+final case is the wildcard (its body is `Missing` when there is no `else`); it
+has no head of its own, and the serializer spells that shape back as `if let`.
+Matching is total and first-match. Literal, type, tuple/record, constructor, wildcard, pin,
 and binding patterns all use the engine classification ladder. Alternatives
 must bind the same names. A pattern-bound name is scoped to its case body.
 

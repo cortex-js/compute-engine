@@ -475,6 +475,16 @@ export class Parser {
    */
   private mapstoStops: number[] = [];
 
+  /** Bracket depths at which a bare `=` ends a pattern instead of being read
+   * as an operator — the depths at which an `if let` head's PATTERN is being
+   * parsed. In `if let [x, y] = point { … }` the `=` separates the pattern
+   * from the subject; without this stop the pattern infix loop would consume
+   * it and read `[x, y] = point` as one comparison-shaped pattern. Depth-gated
+   * exactly like `mapstoStops`: an `=` nested inside brackets within the
+   * pattern (`(a = b)`) is deeper than the recorded depth and is left to the
+   * pattern grammar. Popped before the subject is parsed. */
+  private assignStops: number[] = [];
+
   /** Type names this program may refer to in an annotation: the host-supplied
    * names (`typeNames`, seeded from the engine's type resolver) plus every name
    * declared by a `type` statement parsed so far. Consulted by `typeResolver`,
@@ -2984,6 +2994,11 @@ export class Parser {
    * `else if` chains into a nested `If`. */
   private parseIf(): MathJsonExpression | null {
     const kw = this.advance(); // 'if'
+    // `if let pattern = subject { … }` — the refutable-binding form. Reached
+    // for an `else if let …` too, since the `else if` chain below re-enters
+    // `parseIf`.
+    if (this.check('SYMBOL') && this.current.text === 'let')
+      return this.parseIfLet(kw);
     const cond = this.parseExpression(0);
     if (cond === null) {
       this.error(['expression-expected'], this.current.start, this.current.end);
@@ -3036,6 +3051,155 @@ export class Parser {
     }
 
     return this.wrap(parts, kw.start, end);
+  }
+
+  /**
+   * `if let pattern = subject { … } [else { … } | else if …]` — a refutable
+   * binding: the subject is matched against ONE `match` pattern, and the
+   * `then` block runs with the pattern's bindings in scope when it matches.
+   * It is surface sugar over `Match` (no head of its own):
+   *
+   *   if let p = s { a } else { b }   →   ["Match", s,
+   *                                         ["MatchCase", p, ["Block", a]],
+   *                                         ["MatchCase", "_", ["Block", b]]]
+   *
+   * The pattern grammar is exactly the `match` case grammar
+   * (`parseCasePattern`: bindings, literals, destructuring, pins, typed
+   * bindings, or-alternatives, range patterns), so `if let v: !error = f(x)
+   * { … }` binds `v` only when the call did not fail, and `if let [x, ...rest]
+   * = xs { … }` destructures a non-empty list. A typed binding's implicit
+   * `MatchesType` guard lands in the case's guard slot, as in `match`. There
+   * is no explicit `if` guard: nest an `if` in the block instead.
+   *
+   * The fallback arm is what the `else` provides — a `Block`, or the nested
+   * `If`/`Match` of an `else if` chain. Without an `else` the arm's body is
+   * the symbol `Missing`, so a refuted `if let` evaluates to the same
+   * position-preserving absent datum a false `if` without an `else` does
+   * (`library/control-structures.ts`, the `If` definition). The wildcard arm
+   * also keeps the `Match` total: it can never produce a `match-no-case`
+   * error. Since `parseIf` re-enters here for `else if let`, both mixed
+   * chains (`if c { } else if let p = s { }` and the reverse) nest naturally.
+   *
+   * A pattern that cannot be refuted (`if let x = s`, a bare binding or `_`
+   * with no type guard) makes the `else` dead: that is what a plain `let`
+   * is for, so it is reported as a warning.
+   */
+  private parseIfLet(kw: Token): MathJsonExpression | null {
+    this.advance(); // 'let'
+    // The type-guard collector is one shared field, and a pin inside the
+    // pattern parses an ordinary expression that may itself be a `match` or
+    // an `if let`, each of which installs its own collector. Save the
+    // enclosing collector and restore it once this pattern's guards are
+    // captured, so a nested construct cannot orphan the guards collected so
+    // far (`parseMatchCase` does the same).
+    const outerTypeGuards = this.matchTypeGuards;
+    this.matchTypeGuards = [];
+    const patternStart = this.current.start;
+    // The pattern ends at the bare `=` (see `assignStops`); the subject after
+    // it is ordinary expression position, where `=` compares.
+    this.assignStops.push(this.brackets.length);
+    let pattern: MathJsonExpression | null;
+    let typeGuards: MathJsonExpression[] = [];
+    try {
+      pattern = this.parseCasePattern();
+      typeGuards = this.matchTypeGuards;
+    } finally {
+      this.assignStops.pop();
+      this.matchTypeGuards = outerTypeGuards;
+    }
+    if (pattern === null) {
+      if (!(this.current.diagnostics && this.current.diagnostics.length))
+        this.error(
+          ['expression-expected'],
+          this.current.start,
+          this.current.end
+        );
+      return null;
+    }
+    this.checkRangePatterns(pattern);
+    const patternEnd = this.localEnd(pattern) ?? this.previousEnd();
+
+    const eq = this.current;
+    if (eq.type !== 'OPERATOR' || eq.text !== '=') {
+      this.error(['if-let-equal-expected'], eq.start, eq.end);
+      return null;
+    }
+    this.advance(); // '='
+
+    const subject = this.parseExpression(0);
+    if (subject === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+    if (!this.check('OPEN_BRACE')) {
+      this.error(
+        ['opening-bracket-expected', '{'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    const thenBlock = this.parseBlock();
+    let end = this.localEnd(thenBlock) ?? this.previousEnd();
+
+    const guard = this.combineGuards(
+      typeGuards,
+      null,
+      patternStart,
+      patternEnd
+    );
+    if (guard === null && isIrrefutablePattern(pattern))
+      this.error(
+        ['if-let-irrefutable', bindingName(pattern)],
+        patternStart,
+        patternEnd,
+        'warning'
+      );
+
+    const matchOps: MathJsonExpression[] = ['MatchCase', pattern];
+    if (guard !== null) matchOps.push(guard);
+    matchOps.push(thenBlock);
+    const matchArm = this.wrap(matchOps, patternStart, end);
+
+    // The fallback arm: the `else` branch, or `Missing` when there is none.
+    // A dangling `else` binds to this `if let`, even across a linebreak.
+    let fallback: MathJsonExpression = 'Missing';
+    let fallbackStart = patternStart;
+    if (this.check('SYMBOL') && this.current.text === 'else') {
+      const elseTok = this.advance(); // 'else'
+      fallbackStart = elseTok.start;
+      const next = this.current;
+      if (next.type === 'SYMBOL' && next.text === 'if') {
+        const nested = this.parseIf();
+        if (nested !== null) {
+          fallback = nested;
+          end = this.localEnd(nested) ?? end;
+        }
+      } else if (this.check('OPEN_BRACE')) {
+        const elseBlock = this.parseBlock();
+        fallback = elseBlock;
+        end = this.localEnd(elseBlock) ?? end;
+      } else {
+        this.error(
+          ['opening-bracket-expected', '{'],
+          this.current.start,
+          this.current.end
+        );
+      }
+    }
+    // The wildcard has no source of its own, so — like the `Break` the
+    // `while` lowering synthesizes — it carries no offsets.
+    const fallbackArm = this.wrap(
+      ['MatchCase', '_', fallback] as MathJsonExpression[],
+      fallbackStart,
+      end
+    );
+
+    return this.wrap(
+      ['Match', subject, matchArm, fallbackArm] as MathJsonExpression[],
+      kw.start,
+      end
+    );
   }
 
   /**
@@ -3310,6 +3474,13 @@ export class Parser {
     end: number;
   } | null {
     const start = this.current.start;
+    // The type-guard collector is one shared field: a pin inside this case's
+    // pattern parses an ordinary expression that may itself be a `match` or
+    // an `if let`, each of which installs its own collector. Save the
+    // enclosing collector (an outer case's, when this `match` is itself
+    // nested in a pattern) and restore it once the head is parsed, so the
+    // guards collected so far are never orphaned.
+    const outerTypeGuards = this.matchTypeGuards;
     this.matchTypeGuards = [];
     // Everything up to the case arrow — the pattern and the optional `if`
     // guard — is parsed with `=>` reserved for this case (see `mapstoStops`).
@@ -3325,6 +3496,7 @@ export class Parser {
       head = this.parseMatchCaseHead();
     } finally {
       this.mapstoStops.pop();
+      this.matchTypeGuards = outerTypeGuards;
     }
     if (head === null) return null;
     const { pattern, typeGuards, explicitGuard } = head;
@@ -3446,6 +3618,16 @@ export class Parser {
     return (
       this.mapstoStops.length > 0 &&
       this.mapstoStops[this.mapstoStops.length - 1] === this.brackets.length
+    );
+  }
+
+  /** Whether a bare `=` at the current position ends an `if let` pattern
+   * rather than continuing it — true while the pattern is being parsed at the
+   * very bracket depth the `if let` started at. See `assignStops`. */
+  private atAssignStop(): boolean {
+    return (
+      this.assignStops.length > 0 &&
+      this.assignStops[this.assignStops.length - 1] === this.brackets.length
     );
   }
 
@@ -3663,6 +3845,9 @@ export class Parser {
       // The `=>` that follows a case pattern is the CASE arrow — it ends the
       // pattern instead of building a lambda out of it. See `mapstoStops`.
       if (op.def.name === 'MapsTo' && this.atMapstoStop()) break;
+      // The `=` that follows an `if let` pattern separates it from the
+      // subject — it ends the pattern. See `assignStops`.
+      if (op.def.name === 'AssignOrEqual' && this.atAssignStop()) break;
 
       if (op.asymmetric) this.emitAsymmetric(this.current, op.def.symbol);
       for (let i = 0; i < op.tokenCount; i++) this.advance();

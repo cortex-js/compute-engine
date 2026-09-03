@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### New Features
+
+- **Epsil `if let`.** `if let pattern = subject { … } else { … }` binds the
+  pattern's names when the subject matches and runs the `else` branch
+  otherwise. The pattern is any `match` pattern, so a typed binding takes
+  apart a result that may have failed:
+  `if let v: !error = f(x) { v } else { 0 }`. The statement chains with
+  `else if` in either direction, and without an `else` a refuted `if let`
+  evaluates to `Missing`, like a false `if`. It is sugar over `match` (a
+  two-case `Match` with a wildcard fallback) and the serializer spells that
+  shape back as `if let`. A pattern that cannot fail (a bare name or `_` with
+  no type) is reported by the new `if-let-irrefutable` warning; a missing `=`
+  is `if-let-equal-expected`.
+
 ### Resolved Issues
 
 - Fixed the LaTeX serializer recursing without end (`RangeError: Maximum call

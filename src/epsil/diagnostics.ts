@@ -63,6 +63,8 @@ export type DiagnosticCode =
   | 'match-alternative-binding' // a named binding appears inside an or-alternative
   | 'match-multiple-rest' // more than one `...rest` in a single list/tuple pattern
   | 'match-irrefutable-case' // %0 = binding name — a non-final case that matches anything
+  | 'if-let-equal-expected' // an `if let` head is missing the `=` between its pattern and its subject
+  | 'if-let-irrefutable' // (warning) %0 = binding name — an `if let` pattern that matches anything (a bare binding or `_`, no type guard), so the statement cannot fail and an `else` would never run; a plain `let` binds unconditionally
   | 'type-pattern-unsupported' // %0 = annotation text — a typed pattern's annotation is not a simple named type (it never resolves, so the case can never match)
   | 'range-pattern-bounds' // a range pattern bound is not a numeric literal
   | 'range-pattern-step' // a stepped / non-binary range in pattern position

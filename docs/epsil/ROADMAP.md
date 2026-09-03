@@ -9,10 +9,22 @@ Items are demand-gated unless another roadmap gives them higher priority.
 
 ## Language design
 
-- **Refutable binding.** Design `if let` and possibly `while let` as surface
-  sugar over `Match`/`MatchCase`. The prerequisite is a typed pattern that can
-  resolve compound and negation types such as `x: !error`; the failure family
-  must also decide whether it includes only `error` or absence values.
+- **`while let`.** `if let pattern = subject { … } else { … }` shipped
+  (2026-09-03) as surface sugar over a two-case `Match` with a wildcard
+  fallback; the typed pattern decides the failure family (`v: !error` refuses
+  error values, `v: !missing` refuses absence), so no dedicated failure type
+  was needed. The loop form is not implemented. It would lower to
+  `Loop(Match(subject, MatchCase(pattern, body), MatchCase(_, Break())))` —
+  a `Break` returned by a match arm already ends the enclosing `Loop`, since
+  a `match` arm inside a `for` body can `break` today — and the serializer
+  would need to recognize that shape, as it does the `while` lowering.
+  Demand-gated.
+- **Constructing an error value.** A function whose body writes a literal
+  `Error(…)` cannot be declared: the function literal types `error` and the
+  declaration is inert (`ROADMAP.md`, "A function literal whose body contains
+  an `Error(…)` literal types `error`"). Until that is ruled, an Epsil program
+  can only pass on the errors the engine produces, which limits the
+  `if let v: !error = f(x) { … }` idiom to engine-raised failures.
 - **Unit literals.** Units currently enter through LaTeX islands or
   `Quantity(value, unit)`. Native unit notation needs a grammar and
   round-trip decision before implementation.
