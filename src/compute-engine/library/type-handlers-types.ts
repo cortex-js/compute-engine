@@ -16,7 +16,6 @@ import {
 import { parseType } from '../../common/type/parse.js';
 import {
   collectionElementType,
-  nonNegativeRangeType,
   stripNumericRanges,
   widen,
 } from '../../common/type/utils.js';

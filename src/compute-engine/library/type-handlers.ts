@@ -14,7 +14,6 @@ import { provablyNonFiniteNumber } from '../boxed-expression/numerics.js';
 import { absRange } from '../numerics/interval-arithmetic.js';
 import {
   collectionElementType,
-  nonNegativeRangeType,
   signOfType,
   widen,
 } from '../../common/type/utils.js';

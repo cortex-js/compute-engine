@@ -22,7 +22,6 @@ import {
   signFromBounds,
 } from '../boxed-expression/constraint-subject.js';
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
-import type { Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { broadcastCellType } from '../../common/type/utils.js';
