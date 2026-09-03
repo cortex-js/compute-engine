@@ -1,6 +1,6 @@
 {
-  "generated": "2026-08-29T20:17:00.680Z",
-  "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
+  "generated": "2026-09-03T18:18:03.129Z",
+  "corpus": "/Users/arno/dev/ce-wt-sign/data/fungrim",
   "stage1": {
     "total": 2551,
     "ok": 2547,
@@ -8,7 +8,7 @@
     "unknownSymbol": 0,
     "timeout": 0,
     "passRate": 0.9984,
-    "elapsedMs": 2685,
+    "elapsedMs": 15470,
     "failureBuckets": [
       {
         "error": "[\"Error\",[\"ErrorCode\",\"'expected-function'\",\"'chi'\",\"'integer'\"],\"'chi'\"]",
@@ -411,28 +411,5 @@
         ]
       }
     ]
-  },
-  "stage2": {
-    "seed": 42,
-    "slice": [
-      "none",
-      "real-simple"
-    ],
-    "entries": 1227,
-    "entriesWithInstances": 720,
-    "entriesSkipped": {
-      "shell-head": 482,
-      "directed-infinity": 17
-    },
-    "entriesNoAcceptedAssignment": 8,
-    "instances": 2091,
-    "outcomes": {
-      "True": 1666,
-      "False": 0,
-      "Unknown": 20,
-      "not-evaluable": 405
-    },
-    "falseEntries": [],
-    "elapsedMs": 64879
   }
 }

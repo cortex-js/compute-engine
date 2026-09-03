@@ -1075,8 +1075,10 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
     expect(run('let xs = [1,2]\n[...xs]').value.toString()).toBe('[1,2]');
   });
 
-  test('a scalar spread is a loud error', () => {
-    expect(run('[...5]').value.isValid).toBe(false);
+  test('a scalar spread is one element', () => {
+    // `Join`'s scalar rule: a provably scalar operand contributes itself as
+    // one element, so `[...5]` is `[5]` (it used to be a loud error).
+    expect(run('[...5]').value.toString()).toBe('[5]');
   });
 
   test('a STRING spread expands to its characters', () => {

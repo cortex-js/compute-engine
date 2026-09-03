@@ -585,9 +585,9 @@ of an anecdote.
 operators the criterion is crisp: *does the definition depend on the
 order of the real line?* Order is exactly what the complex numbers lack,
 so order-dependent operators (`Heaviside`, `Max`/`Min`,
-`Floor`/`Ceil`/`Round`, comparisons, `Sign` while it declines off-real)
-declare `(real)`, and operators with a genuine complex extension (`Sin`,
-`Sqrt`, `Ln`, `Exp`, `Arcsin`, `Erf`) declare `(complex)`.
+`Floor`/`Ceil`/`Round`, comparisons) declare `(real)`, and operators with a
+genuine complex extension (`Sin`, `Sqrt`, `Ln`, `Exp`, `Arcsin`, `Erf`, and
+`Sign`, whose complex extension is `z/|z|`) declare `(complex)`.
 
 The carrier is not "the narrowest interesting input" — it can push the
 other way. **Predicates declare wide**: a membership-style predicate

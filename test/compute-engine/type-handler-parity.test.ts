@@ -246,9 +246,10 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     expect(ce.box(['Heaviside', 'u'] as any).type.toString()).toBe(
       '(rational<0..1>) | nan'
     );
-    // `Sign` is the second Phase F flip (after the Heaviside pilot above):
-    // same declared domain signature shape,
-    // `(real | signed_infinity) -> integer<-1..1>`, same consequences.
+    // `Sign` keeps the ranged tier for a proven extended real, and takes the
+    // complex sign `z/|z|` off the real line (carrier
+    // `complex | signed_infinity`, result `complex` there); `~oo` has no
+    // direction and stays a boxing error.
     expect(ce.box(['Sign', -2] as any).type.toString()).toBe(
       'integer<-1..1>'
     );
@@ -257,9 +258,11 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     );
     expect(ce.box(['Sign', NAN] as any).type.toString()).toBe('nan');
     expect(ce.box(['Sign', 'ComplexInfinity'] as any).isValid).toBe(false);
-    expect(ce.box(['Sign', ['Complex', 1, 2]] as any).isValid).toBe(false);
+    expect(ce.box(['Sign', ['Complex', 1, 2]] as any).type.toString()).toBe(
+      'complex'
+    );
     expect(ce.box(['Sign', 'u'] as any).type.toString()).toBe(
-      '(integer<-1..1>) | nan'
+      'complex | nan'
     );
     // Broadcast: the per-element claim is wrapped in the operand's shape.
     expect(ce.box(['Sign', ['List', 1, -2]] as any).type.toString()).toBe(
@@ -272,10 +275,12 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     ).toBe('real');
     // A collection whose ELEMENT type may carry a NaN gains the propagated
     // arm per CELL, exactly as the scalar operand `u: number` does — the
-    // NaN evidence is read off the element type under a broadcast.
+    // NaN evidence is read off the element type under a broadcast. A
+    // `number` element may also be off the real line, so the cell claim is
+    // the complex sign's.
     ce.declare('L', 'list<number>');
     expect(ce.box(['Sign', 'L'] as any).type.toString()).toBe(
-      'list<(integer<-1..1>) | nan>'
+      'list<complex | nan>'
     );
   });
 

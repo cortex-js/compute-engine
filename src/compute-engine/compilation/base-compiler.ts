@@ -6638,7 +6638,12 @@ export class BaseCompiler {
    * here would put parent and child on different conventions.
    */
   private static readonly COMPLEX_PROPAGATING_HEADS: ReadonlySet<string> =
-    new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate']);
+    // `Sign` is here for the same reason: on the real line its value is
+    // ±1 or 0 and off it the complex `z/|z|`, so the value is complex exactly
+    // when the operand is. Its node TYPE for an operand of unknown kind is
+    // `complex | nan`, which would otherwise put the parent on the complex
+    // lane while the emitter, choosing from the operand, wrote `Math.sign`.
+    new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Sign']);
 
   /**
    * The ORDERING relational heads — the ones whose lowering needs a total

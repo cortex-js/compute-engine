@@ -9,6 +9,13 @@
   `incompatible-type` error. The `javascript` and `python` targets append a
   tuple operand as one element too (it used to be spread into its components on
   those targets).
+- **`Sign` extends to the complex plane.** `Sign(z)` is `z/|z|`, the point of
+  the unit circle in the direction of `z`: `Sign(i)` is `i` and `Sign(3 + 4i)`
+  is `3/5 + 4i/5`, the convention Fungrim, SymPy and Mathematica share. On the
+  extended real line the result stays exactly −1, 0 or 1 with its ranged
+  integer type; `Sign(~oo)` remains an error and `Sign(NaN)` is `NaN`. A
+  complex operand used to be an `incompatible-type` error. The `javascript`
+  target compiles the complex case.
 
 ### Resolved Issues
 

@@ -4161,7 +4161,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       ? `_SYS.chars(${compile(args[0])})[1]`
       : `${compile(args[0])}[1]`,
   Heaviside: '_SYS.heaviside',
-  Sign: 'Math.sign',
+  // A complex operand takes the complex sign `z/|z|` (`_SYS.csign`), the
+  // interpreter's reading off the real line; a real one keeps `Math.sign`.
+  Sign: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.csign(${compile(args[0])})`;
+    return `Math.sign(${compile(args[0])})`;
+  },
   Sinc: '_SYS.sinc',
   FresnelS: '_SYS.fresnelS',
   FresnelC: '_SYS.fresnelC',
@@ -7136,6 +7142,24 @@ const SYS_HELPERS = {
     toRI(new Complex(z.re, z.im).sqrt().asin().mul(2)),
   cexp: (z: ComplexResult) => toRI(new Complex(z.re, z.im).exp()),
   cln: (z: ComplexResult) => toRI(new Complex(z.re, z.im).log()),
+  // The complex sign `z/|z|`: the point of the unit circle in the direction
+  // of `z`, and `0` for `0` — the interpreter's `Sign` off the real line. A
+  // real value in `{re, im: 0}` form reads its modulus as `Math.abs`
+  // (`complexModulus`), so its sign is exactly ±1; otherwise the components
+  // are scaled by the larger one first, so a direction near the top of the
+  // double range is not lost to an overflowing modulus.
+  csign: (z: ComplexResult): ComplexResult => {
+    if (Number.isNaN(z.re) || Number.isNaN(z.im)) return { re: NaN, im: NaN };
+    if (z.im === 0) {
+      const m = complexModulus(z);
+      return m === 0 ? { re: 0, im: 0 } : { re: z.re / m, im: 0 };
+    }
+    const s = Math.max(Math.abs(z.re), Math.abs(z.im));
+    const a = z.re / s;
+    const b = z.im / s;
+    const m = Math.hypot(a, b);
+    return { re: a / m, im: b / m };
+  },
   // Base-10 and base-2 complex logarithms. The real part is `Math.log10` /
   // `Math.log2` of the MODULUS rather than `ln|z| / ln(b)`: on the real axis
   // the modulus is the argument itself, so this lane, the real lane's

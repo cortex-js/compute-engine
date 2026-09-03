@@ -17,11 +17,14 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
-/** A value whose two components are the SAME object, nested `depth` times:
- * 2^depth paths, `depth + 1` distinct nodes. */
+/** A value whose two elements are the SAME object, nested `depth` times:
+ * 2^depth paths, `depth + 1` distinct nodes. A `List` rather than a `Tuple`:
+ * a tuple's TYPE spells every component, so it would be 2^depth nodes itself
+ * and dominate the timing, while a list type names one element type per
+ * level. */
 function sharedTower(ce: ComputeEngine, depth: number) {
   let t = ce.parse('x + 1');
-  for (let k = 0; k < depth; k++) t = ce.function('Tuple', [t, t]);
+  for (let k = 0; k < depth; k++) t = ce.function('List', [t, t]);
   return t;
 }
 
@@ -29,7 +32,7 @@ describe('a binder whose bound reads a shared tower', () => {
   test('is sized in linear time and refused by the size guard', () => {
     const ce = new ComputeEngine();
     const n = ce.symbol('n');
-    const tower = sharedTower(ce, 22);
+    const tower = sharedTower(ce, 26);
     ce.assign(
       'a',
       ce.function('Sum', [
@@ -44,10 +47,10 @@ describe('a binder whose bound reads a shared tower', () => {
     expect(() =>
       compile(ce.parse('a + 1'), { to: 'javascript', fallback: false })
     ).toThrow(/expands to \d+ nodes of generated source/);
-    // The unguarded walk took about 3 s here and doubled with every level;
-    // the linear walk is a few milliseconds, so a wide bound still catches
-    // the regression on a loaded machine.
-    expect(Date.now() - t0).toBeLessThan(2000);
+    // The unguarded walk took about 25 s at this depth on a quiet machine
+    // and doubled with every level; the linear walk is a few milliseconds,
+    // so a wide bound still catches the regression under a loaded suite.
+    expect(Date.now() - t0).toBeLessThan(5000);
   });
 
   test('a tower of values under binders still compiles and evaluates', () => {

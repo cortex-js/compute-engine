@@ -235,11 +235,10 @@ describe('artifact inverse-pair invariant', () => {
     // that type can no longer be an infinity and native canonicalization
     // folds `z^0` to `1` on its own. The compiler therefore skips the entry
     // as `wildcard-loss` — the canonical match pattern has no `_z` left in
-    // it — which is what the artifact records. Phase F `Sign` flip: −1
-    // (09c107, `Sign(i) → i`, the complex sign convention) — its match
-    // side is a boxing error under the declared extended-real carrier,
-    // ledgered as a `box-error` disposition in the manifest.
-    expect(FUNGRIM_CORE.rules.length).toBe(1443);
+    // it — which is what the artifact records. 09c107 (`Sign(i) → i`, the
+    // complex sign convention) is carried again since `Sign` extends to the
+    // complex plane.
+    expect(FUNGRIM_CORE.rules.length).toBe(1444);
     expect(FUNGRIM_CORE.rules.filter((r) => r.target === 'solve').length).toBe(
       10
     );

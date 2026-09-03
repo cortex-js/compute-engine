@@ -658,6 +658,41 @@ The fix belongs with the valueless-collection round's enumeration gate
 must be measured against the lazy-pipeline suites, which lean on empty
 enumeration for `Nothing`-like operands.
 
+### The LaTeX round-trip gate (`npm run check:roundtrip`, part of `ci:corpus-pipeline`) is red at the 0.121.0 release commit (OPEN — measured 2026-09-03 on a clean worktree at `1ce34ecb`)
+
+Three corpus entries fail the round-trip property and one drifts; none is
+caused by the 2026-09-03 commits (the same four fail at the release commit).
+Each is its own defect:
+
+- **A serializer crash.** `ce.parse("f(f(b)) - f(f(a)) = (f'(c))^2 (b - a)").latex`
+  throws `RangeError: Maximum call stack size exceeded` in a
+  `canonicalNegate → _fn → _bind → lookupApplicable` cycle. Every sub-expression
+  serializes on its own (`f(f(b)) - f(f(a)) = (f'(c))^2`, `(f'(c))^2 (b - a)`);
+  only the full equation recurses. Note the left side parses `f(f(b))` as the
+  product `b·f·f` because `f` is undeclared, while `f'(c)` declares `f` a
+  function — after the parse `f` types `never` (the two readings are
+  contradictory) and the cycle needs both in one expression: re-boxing the
+  `Negate` during serialization binds against the `never`-typed head and
+  never terminates.
+- **The ellipsis heuristic turns a set of symbolic terms into a `Range`.**
+  `\max\{\frac{x_1}{1+x_1}, \frac{x_2}{1+x_1+x_2}, \dots, \frac{x_n}{1+\dots+x_n}\}`
+  parses to `Max(Range(first, last, second − first))`, where `{x_1, x_2, \dots, x_n}`
+  correctly keeps a `ContinuationPlaceholder`. The arithmetic-progression
+  reading must be limited to terms that are provably in progression (numeric
+  literals, or a literal step), never a symbolic `second − first`.
+- **A `Tuple` serializes as `(a, b)`, which reparses as an open `Interval` in a
+  set context.** The corpus entries `[S] ∈ {2m-2, 2m-1}` and
+  `[0,1) ∪ {3,4} ∪ (5,+∞)` were captured (v0.67.0) with `Tuple` nodes where
+  today's parser produces `Set`; serializing those `Tuple`s as `(…)` under
+  `\in` and `\cup` reparses them as intervals. Decide whether a tuple in a
+  set-valued position should serialize as a set literal, or record the two
+  entries in `docs/mathnet/roundtrip-exceptions.json` as documented-lossy.
+
+Until these are fixed the corpus pipeline's last step fails, so a release
+must run the Fungrim gates individually (`validate.ts --check`,
+`artifact-freshness.ts`, `apply-solve-templates.ts --check`,
+`recompile-drift.ts`, `compile-properties.ts --check`), which all pass.
+
 ### `ce.declare({ f: {…} })` cannot type an inline `type` handler that omits `typeHandlerKind` (OPEN, design — found 2026-09-03 while fixing the `declare()` signature for boxed definitions)
 
 In the map form of `ce.declare()` an entry is a `Type`, a type string, or a

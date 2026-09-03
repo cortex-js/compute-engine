@@ -136,7 +136,7 @@ import {
   stripNumericRanges,
   widen,
 } from '../../common/type/utils.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
   negativeSign,
   nonNegativeSign,
@@ -204,6 +204,7 @@ import {
   bigOpResultType as bigOpResultTypeOnTypes,
   operandLiteralValue as operandLiteralValueOnTypes,
   operandSgn as operandSgnOnTypes,
+  broadcastOperandType,
 } from './type-handlers-types.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import {
@@ -924,6 +925,24 @@ function specialFunctionType(
   return numericTypeHandlerOnTypes(
     ops.filter((d): d is OperandDescriptor => d !== undefined)
   );
+}
+
+/** `Sign`'s result on the extended real line: exactly {−1, 0, 1}. Off that
+ * line the result is the complex sign `z/|z|`. The `| nan` forms are the
+ * same claims for an operand that may be NaN. */
+const SIGN_RANGE_TYPE = parseType('integer<-1..1>');
+const SIGN_RANGE_NAN_TYPE = parseType('integer<-1..1> | nan');
+const COMPLEX_NAN_TYPE = parseType('complex | nan');
+
+/** `t` without its `nan` member: the type of the values an operand has when
+ * it is not NaN, so a claim about them can be tested on a union such as
+ * `real | nan`. A type that is not a union is returned unchanged. */
+function withoutNaN(t: Type): Type {
+  if (typeof t === 'string' || t.kind !== 'union') return t;
+  const rest = t.types.filter((m) => !isSubtype(m, 'nan'));
+  if (rest.length === t.types.length) return t;
+  if (rest.length === 1) return rest[0];
+  return { kind: 'union', types: rest };
 }
 
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
@@ -4300,25 +4319,50 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Sign: {
-      description: 'Sign of a number: -1, 0, or 1.',
+      description:
+        'Sign of a number: -1, 0, or 1 for a real; `z/|z|`, the point of the unit circle in its direction, for a complex `z`.',
       complexity: 1200,
       broadcastable: true,
-      // The carrier is exactly where the sign is defined — the extended
-      // real line, `Sign(±∞)` = ±1 included — and the result is exactly
-      // its values {−1, 0, 1}, the finitely-valued tier WITH its range so
-      // type-channel consumers read the bounds without consulting the sgn
-      // handler. Off the real line the usual convention `z/|z|` is
-      // complex and this operator declines, so a PROVEN off-carrier
-      // operand (`Sign(i)`, `Sign(~oo)`) is a boxing error; the
-      // application type is the derived `integer<-1..1>` for a proven
-      // extended-real argument and `integer<-1..1> | nan` for a maybe-NaN
-      // one — no hand-written type handler. (Same domain-signature
-      // doctrine as `Heaviside` above: `docs/ERROR-MODEL.md` §4.)
-      signature: '(real | signed_infinity) -> integer<-1..1>',
-      // Explicit: the DERIVED default answers `reject` for this carrier
-      // (an extended-real carrier is not a subtype of `complex`, which is
-      // the mechanical propagate test), and `Sign(NaN)` must be `NaN` —
-      // the conformed §4 behavior.
+      // The carrier is every point where the sign is defined: the finite
+      // complex plane, and the signed infinities (`Sign(±∞)` = ±1). On the
+      // extended real line the result is exactly {−1, 0, 1}, the
+      // finitely-valued tier WITH its range so type-channel consumers read
+      // the bounds without consulting the sgn handler; off the real line
+      // it is the usual convention `z/|z|` — `Sign(i)` is `i`,
+      // `Sign(3 + 4i)` is `3/5 + 4i/5` — the reading Fungrim (entry
+      // 09c107), SymPy and Mathematica share. `~oo` has no direction and
+      // stays off the carrier, so `Sign(~oo)` is a boxing error. The type
+      // handler keeps the sharp ranged tier for a proven extended-real
+      // argument and answers `complex` otherwise; the generic policy gate
+      // adds the `nan` arm exactly where the argument can carry one.
+      // (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4.)
+      signature: '(complex | signed_infinity) -> complex',
+      typeHandlerKind: 'types',
+      type: ([x]) => {
+        if (x === undefined) return 'complex';
+        // Under a broadcast the handler describes ONE element and the call
+        // site re-wraps the operand's shape (`broadcastOperandType`).
+        const t = broadcastOperandType(x);
+        // A NaN operand is the policy gate's answer (`nanBehavior:
+        // 'propagate'` below makes it `nan`); `never` is a subtype of
+        // everything and means "no value", not a proven NaN. A MAYBE-NaN
+        // operand — a symbol typed `number`, a `real | nan` result — carries
+        // the `nan` arm beside the sign's own type, which is read off the
+        // NaN-free part: the NaN member alone must not turn a real operand
+        // into a complex one.
+        if (t !== 'never' && isSubtype(t, 'nan')) return undefined;
+        const maybeNaN = couldMatch(t, 'nan');
+        const real = isSubtype(
+          maybeNaN ? withoutNaN(t) : t,
+          EXTENDED_REAL_TYPE
+        );
+        if (!maybeNaN) return real ? SIGN_RANGE_TYPE : 'complex';
+        return real ? SIGN_RANGE_NAN_TYPE : COMPLEX_NAN_TYPE;
+      },
+      // Explicit: the DERIVED default for this carrier would propagate
+      // already (a finite complex carrier is the mechanical propagate test),
+      // and `Sign(NaN)` must be `NaN` — the conformed §4 behavior. Stated
+      // so the declaration reads without deriving it.
       nanBehavior: 'propagate',
       // The sign is defined at EVERY point of the carrier and its three
       // values are exactly machine-representable, so the numeric route
@@ -4336,13 +4380,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // extended real — the sign channel answers `unsigned`/`undefined`,
       // never a direction, for an operand not proven on the real line.
       sgn: ([x]) => x.sgn,
-      evaluate: ([x], { engine }) => {
+      evaluate: ([x], { engine, numericApproximation }) => {
         // Only mathematics: the NaN arm this handler used to carry is the
         // generic policy gate's job now (`nanBehavior: 'propagate'`
         // above), and an off-carrier operand never reaches this handler.
         if (x.isSame(0)) return engine.Zero;
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.NegativeOne;
+        // A complex number literal off the real line: `z/|z|`, exact when
+        // the modulus is (`Sign(3 + 4i)` is `3/5 + 4i/5`). A symbolic
+        // operand stays symbolic.
+        if (isNumber(x) && x.im !== 0) {
+          const unit = engine.function('Divide', [
+            x,
+            engine.function('Abs', [x]),
+          ]);
+          return numericApproximation ? unit.N() : unit.evaluate();
+        }
         return undefined;
       },
     },
