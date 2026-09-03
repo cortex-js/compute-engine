@@ -658,6 +658,20 @@ The fix belongs with the valueless-collection round's enumeration gate
 must be measured against the lazy-pipeline suites, which lean on empty
 enumeration for `Nothing`-like operands.
 
+### Canonicalizing `Length` or `Element` over a DAG-shaped nested list overflows the stack (OPEN — found 2026-09-03 by the item-225 regression test)
+
+A list literal built so that both elements are the SAME object, nested 18
+levels (`t = List(t, t)` repeated; 19 distinct nodes, 2^18 paths), makes
+`ce.function('Length', [t])` and `ce.function('Element', [n, t])` log
+`ComputeEngine: error canonicalizing \`Length\`: Maximum call stack size
+exceeded` and devolve the result to `unknown`; 12 levels canonicalize in
+milliseconds. A recursion that is bounded by the DEPTH of the value cannot
+overflow at 18 levels, so some step of the canonical handler (or the
+`flatten`/validation it runs) recurses once per PATH. Probe:
+`let t = ce.parse('x+1'); for (let k = 0; k < 18; k++) t = ce.function('List', [t, t]); ce.function('Length', [t])`.
+The fix is a visited set in that walk, as the fold-size walk received for
+Tycho item 225 (`binderBoundNames`, `foldValueMentions`, `foldValueImpure`).
+
 ### The LaTeX round-trip gate (`npm run check:roundtrip`, part of `ci:corpus-pipeline`) is red at the 0.121.0 release commit (OPEN — measured 2026-09-03 on a clean worktree at `1ce34ecb`)
 
 Three corpus entries fail the round-trip property and one drifts; none is

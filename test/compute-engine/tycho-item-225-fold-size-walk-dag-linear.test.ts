@@ -12,45 +12,53 @@
  * The sibling walkers over a value (`foldValueImpure`, `foldValueMentions`)
  * re-visited shared nodes the same way, and the size memo was keyed by the
  * identity of a bound-name set that every binder rebuilt.
+ *
+ * The walk is timed DIRECTLY on a built value: routing a value with 2^22
+ * paths through `compile()` would also canonicalize `Length` over it, which
+ * has its own recursion cost on such a shape and would dominate the timing.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 
-/** A value whose two elements are the SAME object, nested `depth` times:
- * 2^depth paths, `depth + 1` distinct nodes. A `List` rather than a `Tuple`:
- * a tuple's TYPE spells every component, so it would be 2^depth nodes itself
- * and dominate the timing, while a list type names one element type per
- * level. */
+/** A value whose two components are the SAME object, nested `depth` times:
+ * 2^depth paths, `depth + 1` distinct nodes. */
 function sharedTower(ce: ComputeEngine, depth: number) {
   let t = ce.parse('x + 1');
-  for (let k = 0; k < depth; k++) t = ce.function('List', [t, t]);
+  for (let k = 0; k < depth; k++) t = ce.function('Tuple', [t, t]);
   return t;
 }
 
 describe('a binder whose bound reads a shared tower', () => {
-  test('is sized in linear time and refused by the size guard', () => {
+  test('is sized in linear time, and the size counts every path', () => {
     const ce = new ComputeEngine();
     const n = ce.symbol('n');
-    const tower = sharedTower(ce, 26);
-    ce.assign(
-      'a',
-      ce.function('Sum', [
+    const tower = sharedTower(ce, 22);
+    const sum = ce.function('Sum', [
+      n,
+      ce.function('Element', [
         n,
-        ce.function('Element', [
-          n,
-          ce.function('Range', [ce.number(1), ce.function('Length', [tower])]),
-        ]),
-      ])
-    );
+        ce.function('Range', [ce.number(1), ce.function('Length', [tower])]),
+      ]),
+    ]);
+    // Reaching into the compiler's size walk on purpose: the property under
+    // test is the walk's own cost, not what the compile does after it.
+    const walk = (BaseCompiler as any).expandedFoldSize as (
+      engine: ComputeEngine,
+      value: unknown,
+      target: object
+    ) => number;
     const t0 = Date.now();
-    expect(() =>
-      compile(ce.parse('a + 1'), { to: 'javascript', fallback: false })
-    ).toThrow(/expands to \d+ nodes of generated source/);
-    // The unguarded walk took about 25 s at this depth on a quiet machine
-    // and doubled with every level; the linear walk is a few milliseconds,
-    // so a wide bound still catches the regression under a loaded suite.
-    expect(Date.now() - t0).toBeLessThan(5000);
+    const size = walk(ce, sum, {});
+    const elapsed = Date.now() - t0;
+    // 2^22 leaves plus the tuple and binder nodes: the emitter would write
+    // the shared value once per path, and that is what the size counts.
+    expect(size).toBeGreaterThan(2 ** 22);
+    // The unguarded walk took about 3 s here and doubled with every level;
+    // the linear walk is a few milliseconds, so a wide bound still catches
+    // the regression under a loaded suite.
+    expect(elapsed).toBeLessThan(1500);
   });
 
   test('a tower of values under binders still compiles and evaluates', () => {
