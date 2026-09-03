@@ -178,17 +178,28 @@ describe('element-wise selection: absence and no-match (R4/R4′)', () => {
     expect(parity(expr)).toEqual([]);
   });
 
-  test('a NON-boolean condition cell fails closed at run time', () => {
-    // `Which([10, 20], …)`: not a condition value in any cell. The compiled
-    // artifact throws rather than picking a branch. The interpreter has no
-    // branch to pick either, but it can hold the expression instead of
-    // failing, which is what it does (undecidable-condition ruling
-    // 2026-08-31); the shared requirement is that NEITHER lane answers 0.
+  test('a NON-boolean condition cell fails closed', () => {
+    // `Which([10, 20], …)`: not a condition value in any cell, and the
+    // literal's type says so, so the condition is an `incompatible-type`
+    // error operand at boxing (provably non-boolean condition ruling): the
+    // invalid expression never compiles, and the interpreter answers the
+    // condition's error. The shared requirement stands: NEITHER lane
+    // answers 0.
     const expr = ce.box(['Which', ['List', 10, 20], 1, 'True', 0] as any);
-    const r = compile(expr, { fallback: false })!;
+    expect(expr.errors).toHaveLength(1);
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /invalid expression/
+    );
+    expect(expr.evaluate().operator).toBe('Error');
+    // A condition whose cells are knowable only at run time still compiles,
+    // and the compiled artifact throws rather than picking a branch.
+    ce.declare('runtimeCells', 'list');
+    const late = ce.box(['Which', 'runtimeCells', 1, 'True', 0] as any);
+    const r = compile(late, { fallback: false })!;
     expect(r.success).toBe(true);
-    expect(() => r.run!()).toThrow(/Condition must evaluate/);
-    expect(expr.evaluate().operator).toBe('Which');
+    expect(() => r.run!({ runtimeCells: [10, 20] })).toThrow(
+      /Condition must evaluate/
+    );
   });
 });
 
@@ -413,16 +424,26 @@ describe('element-wise selection: the Game-of-Life witness (Tycho item 102)', ()
 });
 
 describe('element-wise selection: what stays unchanged', () => {
-  test('an all-scalar `Which` compiles to the same ternary chain as before', () => {
+  // A scalar condition still compiles to a ternary CHAIN, never to
+  // `_SYS.select` — that is what these two cases exist to pin. The chain now
+  // carries the operand NaN test the undecided-condition ruling (2026-09-02)
+  // added: `x` is declared `number` here, so `x > 2` is undecided at
+  // `x = NaN`, and the compiled artifact must answer NaN rather than pick the
+  // else arm. See the "compiled If/Which take no branch on an undecided
+  // condition" describe below.
+  test('an all-scalar `Which` compiles to a ternary chain, not `_SYS.select`', () => {
     const expr = ce.parse(
       '\\begin{cases} 1 & x > 2 \\\\ 2 & x > 1 \\\\ 0 & \\text{otherwise}\\end{cases}'
     );
-    expect(code(expr)).toBe('((2 < _.x) ? (1) : ((1 < _.x) ? (2) : (0)))');
+    expect(code(expr)).toBe(
+      '((_.x === _.x && _.x !== undefined) ? ((2 < _.x) ? (1) : ((_.x === _.x && _.x !== undefined) ? ((1 < _.x) ? (2) : (0)) : NaN)) : NaN)'
+    );
+    expect(code(expr)).not.toContain('_SYS.select');
   });
 
-  test('an all-scalar `If` compiles to the same ternary as before', () => {
+  test('an all-scalar `If` compiles to a ternary, not `_SYS.select`', () => {
     expect(code(ce.box(['If', ['Greater', 'x', 2], 1, 0] as any))).toBe(
-      '((2 < _.x) ? (1) : (0))'
+      '((_.x === _.x && _.x !== undefined) ? ((2 < _.x) ? (1) : (0)) : NaN)'
     );
   });
 
@@ -480,5 +501,230 @@ describe('element-wise selection: what stays unchanged', () => {
     expect(typeof new JavaScriptTarget().createTarget().selection).toBe(
       'function'
     );
+  });
+});
+
+/**
+ * An UNDECIDED scalar condition (ruling 2026-09-02).
+ *
+ * A compiled `If`/`Which` whose condition is not exactly `true` or `false` at
+ * run time takes NO branch and answers NaN — the numeric codomain's absence
+ * marker, the same value the element-wise lowering above gives a no-match cell
+ * (R4). The interpreter holds such an application inert, so neither lane
+ * answers an arm.
+ *
+ * Before the ruling the compiled lane chose an arm by JavaScript truthiness:
+ * `If(x > 0, 1, -1)` answered `-1` at `x = NaN` (because `NaN > 0` is an
+ * ordinary `false`), `If(b, 1, -1)` answered `-1` for an unsupplied `b` and
+ * `1` for `b = "a"`.
+ */
+describe('compiled If/Which take no branch on an undecided condition', () => {
+  /** A private engine: `b` is used as a boolean, which retypes it for the
+   * engine's lifetime, and the suite above shares one engine across cases. */
+  function make(): ComputeEngine {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'number');
+    engine.declare('b', 'boolean');
+    return engine;
+  }
+
+  function run(expr: BoxedExpression, vars: object): unknown {
+    const r = compile(expr, { fallback: false })!;
+    expect(r.success).toBe(true);
+    return r.run!(vars);
+  }
+
+  test('a NaN operand makes `If(x > 0, 1, -1)` answer NaN, not the else arm', () => {
+    const engine = make();
+    const expr = engine.box(['If', ['Greater', 'x', 0], 1, -1]);
+    expect(run(expr, { x: NaN })).toBeNaN();
+    // The interpreter holds the application rather than choosing an arm.
+    expect(expr.evaluate().operator).toBe('If');
+  });
+
+  test('a decided condition still picks the right arm', () => {
+    const engine = make();
+    const expr = engine.box(['If', ['Greater', 'x', 0], 1, -1]);
+    expect(run(expr, { x: 2 })).toBe(1);
+    expect(run(expr, { x: -2 })).toBe(-1);
+  });
+
+  test('`Which(x > 0, 1, True, 2)` answers NaN at NaN, not the default arm', () => {
+    const engine = make();
+    const expr = engine.box(['Which', ['Greater', 'x', 0], 1, 'True', 2]);
+    expect(run(expr, { x: NaN })).toBeNaN();
+    expect(run(expr, { x: 2 })).toBe(1);
+    expect(run(expr, { x: -2 })).toBe(2);
+  });
+
+  test('a `Which` whose conditions are all undecided answers NaN', () => {
+    const engine = make();
+    const expr = engine.box([
+      'Which',
+      ['Greater', 'x', 0],
+      1,
+      ['Less', 'x', 0],
+      2,
+    ]);
+    expect(run(expr, { x: NaN })).toBeNaN();
+    expect(run(expr, { x: 3 })).toBe(1);
+    expect(run(expr, { x: -3 })).toBe(2);
+  });
+
+  test('an unsupplied boolean condition answers NaN, not the else arm', () => {
+    const engine = make();
+    const expr = engine.box(['If', 'b', 1, -1]);
+    expect(run(expr, {})).toBeNaN();
+  });
+
+  test('an unsupplied NUMERIC variable answers NaN, not the else arm', () => {
+    // `_.x` is `undefined`, and `0 < undefined` is an ordinary `false`, so the
+    // comparison used to hand the else arm a confident wrong answer — while
+    // `x + 1` on the same vars object has always answered NaN.
+    const engine = make();
+    expect(run(engine.box(['If', ['Greater', 'x', 0], 1, -1]), {})).toBeNaN();
+    expect(
+      run(engine.box(['Which', ['Greater', 'x', 0], 1, 'True', 2]), {})
+    ).toBeNaN();
+  });
+
+  test('a non-boolean condition value answers NaN, not JavaScript truthiness', () => {
+    const engine = make();
+    const expr = engine.box(['If', 'b', 1, -1]);
+    // `"a"` is truthy in JavaScript; the compiled artifact used to answer 1.
+    expect(run(expr, { b: 'a' } as any)).toBeNaN();
+    expect(run(expr, { b: 0 } as any)).toBeNaN();
+    expect(run(expr, { b: true })).toBe(1);
+    expect(run(expr, { b: false })).toBe(-1);
+  });
+
+  test('the NaN propagates out of the arithmetic the `If` sits in', () => {
+    const engine = make();
+    const expr = engine.box(['Add', 1, ['If', ['Greater', 'x', 0], 1, -1]]);
+    expect(run(expr, { x: NaN })).toBeNaN();
+    expect(run(expr, { x: 2 })).toBe(2);
+  });
+
+  test('a condition that is an application is EVALUATED once', () => {
+    // The `=== true` / `=== false` pair inspects the condition twice. A
+    // variable read is simply emitted twice; anything else is bound to an
+    // arrow parameter first, so its effects and its cost happen once.
+    const engine = new ComputeEngine();
+    engine.declare('x', 'number');
+    const source =
+      compile(engine.box(['If', ['IsMissing', 'x'], 1, -1]), {
+        fallback: false,
+      })!.code ?? '';
+    expect(source).toContain('(_CND)');
+    expect(source.split('Number.isNaN').length - 1).toBe(1);
+  });
+
+  test('an unsupplied variable answers NaN whatever its declared type', () => {
+    // `real` excludes NaN in the type lattice, but that says nothing about
+    // what the caller supplies: `r` may be left out of the vars object, and
+    // every comparison against `undefined` is `false`. So a `real`-declared
+    // operand carries the same pair of tests a `number`-declared one does.
+    const engine = new ComputeEngine();
+    engine.declare('r', 'real');
+    const r = compile(engine.box(['If', ['Greater', 'r', 0], 1, -1]), {
+      fallback: false,
+    })!;
+    expect(r.code).toBe(
+      '((_.r === _.r && _.r !== undefined) ? ((0 < _.r) ? (1) : (-1)) : NaN)'
+    );
+    expect(r.run!({} as any)).toBeNaN();
+    expect(r.run!({ r: 2 })).toBe(1);
+    expect(r.run!({ r: -2 })).toBe(-1);
+  });
+
+  test('the same for `Which`, and for a `number`-declared variable', () => {
+    const engine = new ComputeEngine();
+    engine.declare('r', 'real');
+    engine.declare('x', 'number');
+    const w = compile(engine.box(['Which', ['Greater', 'r', 0], 1, 'True', 2]), {
+      fallback: false,
+    })!;
+    expect(w.run!({} as any)).toBeNaN();
+    expect(w.run!({ r: 2 })).toBe(1);
+    const n = compile(engine.box(['Which', ['Greater', 'x', 0], 1, 'True', 2]), {
+      fallback: false,
+    })!;
+    expect(n.run!({} as any)).toBeNaN();
+    expect(n.run!({ x: NaN })).toBeNaN();
+    expect(n.run!({ x: 2 })).toBe(1);
+  });
+
+  test('a COMPUTED operand over an unsupplied variable answers NaN too', () => {
+    // `2r` is `real`-typed, so the type promises it is never NaN — but the
+    // promise does not survive an absent input: `2 * undefined` is NaN at run
+    // time and `0 < NaN` is an ordinary `false`. The NaN test is therefore
+    // emitted for every numeric operand, not only for the NaN-admitting types
+    // (ruled 2026-09-02). The operand is not a vars-object read, so it takes
+    // no `!== undefined` test — and, not being a bare name either, it is bound
+    // to a temporary so the product is computed once (see the case below).
+    const engine = new ComputeEngine();
+    engine.declare('r', 'real');
+    const r = compile(
+      engine.box(['If', ['Greater', ['Multiply', 2, 'r'], 0], 1, -1]),
+      { fallback: false }
+    )!;
+    expect(r.code).toBe(
+      '((_tv1) => ((_tv1 === _tv1) ? ((0 < _tv1) ? (1) : (-1)) : NaN))(2 * _.r)'
+    );
+    expect(r.run!({} as any)).toBeNaN();
+    expect(r.run!({ r: 2 })).toBe(1);
+    expect(r.run!({ r: -2 })).toBe(-1);
+  });
+
+  test('a literal operand takes no test', () => {
+    // A fragment the compiler already reduced to a finite number decides every
+    // comparison it takes part in, so `x > 0` guards `x` and not the `0`.
+    const engine = make();
+    const source =
+      compile(engine.box(['If', ['Greater', 'x', 0], 1, -1]), {
+        fallback: false,
+      })!.code ?? '';
+    expect(source).toBe(
+      '((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? (1) : (-1)) : NaN)'
+    );
+  });
+
+  test('a computed operand is EVALUATED once, not three times', () => {
+    // The condition embeds the operand and the decidedness test names it twice
+    // more, so an unbound `Sin(x)` would be computed three times per call.
+    // Common-subexpression elimination cannot see those copies: it analyzes the
+    // expression tree, where `Sin(x)` occurs once, while the copies are made at
+    // code-generation time. The operand is therefore bound to a temporary.
+    const engine = make();
+    const expr = engine.box(['If', ['Greater', ['Sin', 'x'], 0], 1, -1]);
+    const r = compile(expr, { fallback: false })!;
+    expect(r.code!.split('Math.sin').length - 1).toBe(1);
+    expect(r.run!({ x: 1 })).toBe(1);
+    expect(r.run!({ x: 4 })).toBe(-1);
+    expect(r.run!({ x: NaN })).toBeNaN();
+    expect(r.run!({} as any)).toBeNaN();
+  });
+
+  test('`Not` over a boolean value is decided three-valued', () => {
+    // `Not` is lowered by exchanging the two constants the decided tests
+    // compare against, never by an emitted `!`: `!undefined` is a confident
+    // `true`, so the `!` used to hand `If(Not(b), 1, 2)` the first arm for an
+    // unsupplied `b` — and the second arm for a truthy non-boolean.
+    const engine = make();
+    const expr = engine.box(['If', ['Not', 'b'], 1, 2]);
+    expect(run(expr, {})).toBeNaN();
+    expect(run(expr, { b: 'a' } as any)).toBeNaN();
+    expect(run(expr, { b: true })).toBe(2);
+    expect(run(expr, { b: false })).toBe(1);
+  });
+
+  test('`Not` over a relation keeps the operand test', () => {
+    // `Not` changes neither operand of the comparison under it, so the
+    // decidedness test is the one the bare relation takes.
+    const engine = make();
+    const expr = engine.box(['If', ['Not', ['Greater', 'x', 0]], 1, 2]);
+    expect(run(expr, { x: NaN })).toBeNaN();
+    expect(run(expr, { x: -1 })).toBe(1);
+    expect(run(expr, { x: 1 })).toBe(2);
   });
 });

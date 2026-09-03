@@ -165,36 +165,72 @@ describe('COMPILE Which', () => {
     });
   });
 
-  // CO-P2-24: a non-boolean condition (notably one that evaluates to NaN) must
-  // never take the default branch. A compiled ternary would silently treat it
-  // as falsy and return 9. The JS target guards a non-provably-boolean
-  // condition with `_SYS.cond`, which throws; the interpreter holds the
-  // `Which` unevaluated (undecidable-condition ruling 2026-08-31). The two
-  // lanes agree on what matters: neither answers the default arm (D6).
-  describe('non-boolean condition (JS) fails closed like the interpreter', () => {
-    it('throws at run time on a NaN condition instead of taking the default', () => {
-      // The condition x/y is numeric, not boolean; at (0,0) it is NaN.
+  // CO-P2-24: a condition that is not exactly `true` or `false` must never take
+  // the default branch. A compiled ternary used to treat it as falsy and
+  // return 9. Two later rulings settled the shape of the answer, and a
+  // condition now meets whichever of them applies first:
+  //
+  //  - a condition whose static TYPE proves it is not a boolean (`x / y` is a
+  //    number) is an `incompatible-type` error operand at boxing, so the whole
+  //    `Which` is invalid and never compiles (ruling 2026-09-02, restoring the
+  //    diagnostic the 2026-08-31 inertness ruling removed);
+  //  - a condition the type admits but the run-time VALUE leaves undecided
+  //    takes no branch and answers NaN (ruling 2026-09-02). The interpreter
+  //    holds such a `Which` unevaluated, so neither lane answers the default
+  //    arm (D6).
+  describe('a condition that is not True or False never takes a branch', () => {
+    it('a provably non-boolean condition is rejected at boxing', () => {
+      // The condition x/y is numeric, so it can never select a clause.
       const expr = ce.expr(['Which', ['Divide', 'x', 'y'], 5, 'True', 9]);
-      const result = compile(expr, { fallback: false })!;
-      expect(result.success).toBe(true);
-      expect(result.code).toContain('_SYS.cond(');
-      // The interpreter holds a NaN / numeric condition rather than deciding …
+      expect(expr.isValid).toBe(false);
+      expect(expr.toString()).toContain('incompatible-type');
+      // The interpreter does not answer the default arm either.
       expect(
         ce.box(['Which', ['Divide', 0, 0], 5, 'True', 9]).N().operator
-      ).toBe('Which');
-      // … and the compiled function throws (rather than returning 9).
-      expect(() => result.run!({ x: 0, y: 0 })).toThrow();
-      // A finite-but-numeric (non-boolean) condition also throws, matching the
-      // interpreter's "must be True or False" contract.
-      expect(() => result.run!({ x: 1, y: 1 })).toThrow();
+      ).not.toBe('Number');
     });
 
-    it('leaves a provably-boolean condition unguarded (no overhead)', () => {
-      const expr = ce.expr(['Which', ['Greater', 'x', 0], 1, 'True', -1]);
+    it('a boolean-typed condition that is undecided at run time answers NaN', () => {
+      // `b` is declared `boolean`, so the boxing check passes; the VALUE the
+      // caller supplies still need not be a boolean, and an unsupplied one is
+      // `undefined`.
+      const engine = new ComputeEngine();
+      engine.declare('b', 'boolean');
+      const expr = engine.expr(['Which', 'b', 5, 'True', 9]);
+      const result = compile(expr, { fallback: false })!;
+      expect(result.success).toBe(true);
+      expect(result.run!({ b: true })).toBe(5);
+      expect(result.run!({ b: false })).toBe(9);
+      expect(result.run!({} as any)).toBeNaN();
+      expect(result.run!({ b: 'a' } as any)).toBeNaN();
+    });
+
+    it('needs no `_SYS.cond` guard, and answers NaN for an unsupplied operand', () => {
+      // A relation is boolean-valued, so it never needed the throwing
+      // `_SYS.cond` guard; what it needs is the operand test, because a NaN
+      // or absent operand makes the comparison answer an ordinary `false`.
+      // `2r` is `real`-typed and the type says it is never NaN, but that
+      // promise does not survive an absent `r`: `2 * undefined` IS NaN.
+      // The operand is not a bare name, so it is bound to a temporary: the
+      // condition and the operand test would otherwise compute the product
+      // three times per call.
+      const engine = new ComputeEngine();
+      engine.declare('r', 'real');
+      const expr = engine.expr([
+        'Which',
+        ['Greater', ['Multiply', 2, 'r'], 0],
+        1,
+        'True',
+        -1,
+      ]);
       const result = compile(expr, { fallback: false })!;
       expect(result.code).not.toContain('_SYS.cond');
-      expect(result.run!({ x: 5 })).toBe(1);
-      expect(result.run!({ x: -3 })).toBe(-1);
+      expect(result.code).toBe(
+        '((_tv1) => ((_tv1 === _tv1) ? ((0 < _tv1) ? (1) : (-1)) : NaN))(2 * _.r)'
+      );
+      expect(result.run!({ r: 5 })).toBe(1);
+      expect(result.run!({ r: -3 })).toBe(-1);
+      expect(result.run!({} as any)).toBeNaN();
     });
   });
 });

@@ -270,13 +270,19 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
     });
 
     it('declines a non-boolean literal list condition', () => {
+      // A list of numbers can never select: its type says so at boxing, so
+      // the condition is an `incompatible-type` error operand and the
+      // invalid expression is refused before any target sees it.
       expect(() => g(['Which', ['List', 1, 0], 1, 'True', 0])).toThrow(
-        /needs provably boolean scalar cells/
+        /invalid expression/
       );
     });
 
     it('declines a numeric collection used directly as a condition', () => {
-      expect(() => g(['Which', 'N2', 1, 'True', 0])).toThrow(/not of booleans/);
+      // Same refusal for a symbol declared `list<number>` (`N2`).
+      expect(() => g(['Which', 'N2', 1, 'True', 0])).toThrow(
+        /invalid expression/
+      );
     });
 
     it('declines `When` with a collection condition', () => {

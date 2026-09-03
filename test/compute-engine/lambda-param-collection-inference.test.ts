@@ -26,9 +26,15 @@ import { takeProvisionalDependents } from '../../src/compute-engine/boxed-expres
 //    nothing. `narrowArgsFromInferredSignature` (box.ts) now propagates a
 //    collection-only callee parameter type onto an unknown symbol argument.
 //
-// 3. `Length`'s parameter is deliberately `any` (Length(5) stays symbolic),
-//    so validation contributes no inference; its canonical handler now treats
-//    `Length(x)` on a not-yet-typed symbol as collection evidence.
+// 3. `Length`'s parameter is deliberately `any` — a declared parameter type
+//    is also what an undeclared argument symbol is inferred FROM, so
+//    declaring `collection<any>` would type a caller's own symbol as a
+//    collection at canonicalization time. Validation therefore contributes no
+//    inference, and the canonical handler treats `Length(x)` on a
+//    not-yet-typed symbol as collection evidence instead. The tolerant
+//    parameter is a CANONICALIZATION-time choice only: `Length(5)` no longer
+//    stays symbolic — the evaluate handler answers an `incompatible-type`
+//    error for a value that refutes the collection contract.
 //
 // The sibling mechanism — a CALL SITE annotating an inline callback literal's
 // parameter with the element type of the collection it is applied to — lives

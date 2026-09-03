@@ -1502,6 +1502,102 @@ function pyFnArg(
 // target defined it. That made `Add(toString, 1)` refuse to compile as a
 // bogus "built-in operator with no fixed arity" instead of compiling
 // `toString` as an ordinary free symbol.
+/**
+ * Python’s way of asking whether a fragment holds a value a comparison can
+ * decide — that is, whether it is not NaN. `x == x` is false for exactly one
+ * value in Python, as `x === x` is in JavaScript.
+ */
+const PYTHON_DECIDED_NUMBER = (x: string): string => `${x} == ${x}`;
+
+/** A fragment that is already a name or a constant, so naming it again costs
+ * nothing and evaluates nothing. The base compiler applies the same test. */
+const PYTHON_ATOM = /^[\w.]+$/;
+
+/**
+ * Python’s test that a branch condition’s value is exactly a boolean.
+ *
+ * `is True` alone would be wrong: a comparison compiles to a NumPy call, whose
+ * result is a `np.bool_` rather than the Python singleton. `== True` would be
+ * wrong the other way, because `1 == True` is true in Python, and a value of
+ * `1` must decide nothing.
+ */
+const pythonIsBoolean = (x: string): string =>
+  `isinstance(${x}, (bool, np.bool_))`;
+
+/**
+ * Produce a Python conditional expression that takes an arm only when its
+ * condition is exactly `True` or `False` when the function runs. A condition
+ * that is anything else takes neither arm and the value is `float('nan')`.
+ * The JavaScript target applies the same rule.
+ *
+ * The analysis behind it is the compiler’s, shared with the JavaScript code
+ * (`BaseCompiler.conditionDecidability`), and so is the reason for it: a
+ * comparison against NaN gives an ordinary `False` in Python exactly as it
+ * does in JavaScript, so a condition that cannot be decided looks the same as
+ * one decided to be false, and the difference has to be read off the
+ * comparison’s operands. Only the wording of the tests is Python’s.
+ *
+ * One case does not arise in Python. A compiled JavaScript function reads its
+ * free symbols out of an object, where a missing entry is `undefined` and
+ * every comparison against it is `false`, so the JavaScript tests include an
+ * extra `!== undefined`. A compiled Python function takes its free symbols as
+ * parameters, so a caller who omits one gets a `TypeError` at the call and no
+ * value ever reaches a comparison. There is nothing to test, and the base
+ * compiler adds no such test because this target has no such object.
+ *
+ * `thenCode` and `elseCode` arrive already parenthesized by the caller.
+ */
+function compilePythonBranch(
+  cond: Expression,
+  thenCode: string,
+  elseCode: string,
+  compileCond: (c: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const decidability = BaseCompiler.conditionDecidability(cond);
+  // The condition is decidable by construction, so it needs no extra test.
+  if (decidability === null)
+    return `((${thenCode}) if (${compileCond(cond)}) else (${elseCode}))`;
+
+  if (decidability === 'value') {
+    // `Not` is applied by exchanging the two constants the tests compare
+    // against, never by emitting `np.logical_not`: negating a value that is
+    // not a boolean would produce a confident answer from no evidence.
+    const { expr, negate } = BaseCompiler.peelNegations(cond);
+    const code = compileCond(expr);
+    // The value is inspected twice (once for its kind, once for its truth), so
+    // anything that is not already a name is bound to a lambda parameter and
+    // evaluated once. Both arms stay inside the lambda, so an unselected arm
+    // still never runs.
+    const body = (v: string): string =>
+      `((${thenCode}) if (${pythonIsBoolean(v)} and ${
+        negate ? `not ${v}` : v
+      }) else ((${elseCode}) if ${pythonIsBoolean(v)} else float('nan')))`;
+    if (PYTHON_ATOM.test(code)) return body(code);
+    return `(lambda _CND: ${body('_CND')})(${code})`;
+  }
+
+  // A comparison always produces a real boolean, so whether it could be
+  // decided has to be read off its operands. An operand that costs something
+  // to compute is bound to a name, which the condition then reads: the
+  // condition contains the operand once and the tests name it twice more.
+  const { value, bindings } = BaseCompiler.withConditionOperands(
+    decidability,
+    target,
+    target.bindExpr !== undefined,
+    (conjuncts) => {
+      const code = compileCond(cond);
+      if (conjuncts.length === 0)
+        return `((${thenCode}) if (${code}) else (${elseCode}))`;
+      return `(((${thenCode}) if (${code}) else (${elseCode})) if (${conjuncts.join(
+        ' and '
+      )}) else float('nan'))`;
+    },
+    PYTHON_DECIDED_NUMBER
+  );
+  return bindings.length === 0 ? value : target.bindExpr!(bindings, value);
+}
+
 const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   // Basic arithmetic (for when they're called as functions)
@@ -2071,22 +2167,24 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Control flow — the base compiler's default emits JS ternaries and a bare
   // `NaN`, both of which are Python SyntaxErrors. Emit Python conditional
   // expressions (`a if cond else b`) and `float('nan')`.
-  If: (args, compile) => {
+  If: (args, compile, target) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
     // Both arms are conditionally evaluated: their operand indices go to the
     // compile callback, which opens the matching CSE region (`OperandCompiler`).
-    return `((${compile(args[1], 1)}) if (${compile(args[0])}) else (${compile(
-      args[2],
-      2
-    )}))`;
+    // A condition that is not exactly `True` or `False` takes neither arm and
+    // the value is `float('nan')` — see `compilePythonBranch`.
+    return compilePythonBranch(
+      args[0],
+      compile(args[1], 1),
+      compile(args[2], 2),
+      (c) => compile(c),
+      target
+    );
   },
-  // DIVERGENCE (documented, CO-P2-24): a *non-boolean* condition (e.g. one that
-  // evaluates to NaN) makes the interpreter throw ("Condition must evaluate to
-  // True or False"), whereas this Python conditional expression treats it by
-  // truthiness and takes the else branch. Aligning would require an inline
-  // Python raise (no clean expression-position form) — left documented. The JS
-  // target aligns via `_SYS.cond`; conditions built from relational/logical
-  // operators (the common case) are already boolean, so no divergence arises.
+  // `When` tests its condition for truth rather than for being a boolean,
+  // because it has only one arm to withhold. A condition that is not a boolean
+  // takes the else path and the value is `float('nan')`, which is the same
+  // answer a two-armed selection gives when it takes neither arm.
   When: (args, compile) => {
     if (args.length !== 2)
       throw new Error('When: expected exactly 2 arguments (expr, cond)');
@@ -2102,14 +2200,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       args[1]
     )}) else float('nan'))`;
   },
-  // See the divergence note on `When` above (non-boolean condition → else
-  // branch here vs interpreter throw).
-  Which: (args, compile) => {
+  Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
       throw new Error('Which: expected condition/value pairs');
-    // Same guard as `When`: this handler bypasses the base compiler's
-    // per-condition `guardCondition` assert, and Python truthiness would turn
-    // a collection condition into a silent whole-expression pick.
+    // This handler bypasses the base compiler's per-condition
+    // `guardCondition` assert, and Python truthiness would turn a collection
+    // condition into a silent whole-expression pick.
     for (let i = 0; i < args.length; i += 2)
       BaseCompiler.assertScalarCondition(args[i]);
     // Every value arm, and every condition after the first, is conditionally
@@ -2120,9 +2216,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       const val = args[i + 1];
       // `True` marks the default (else) branch.
       if (isSymbol(cond, 'True')) return `(${compile(val, i + 1)})`;
-      return `((${compile(val, i + 1)}) if (${
-        i === 0 ? compile(cond) : compile(cond, i)
-      }) else ${build(i + 2)})`;
+      // A clause whose condition cannot be decided selects no clause and ends
+      // the search, with the same value as a search that matched nothing.
+      return compilePythonBranch(
+        cond,
+        compile(val, i + 1),
+        build(i + 2),
+        (c) => (i === 0 ? compile(c) : compile(c, i)),
+        target
+      );
     };
     return build(0);
   },

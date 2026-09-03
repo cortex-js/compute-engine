@@ -37,7 +37,12 @@ describe('boolean value types — comparison producers', () => {
     // An open bound at the tested value has a gap of zero: the tolerant
     // evaluation would call `3 + 1e-12 > 3` False, so no claim is made.
     ['p > 3 (open lower bound at 3)', 'p > 3', 'boolean', 'p > 3'],
-    ['0.5 = 1/2 (value node vs rational singleton)', '0.5 = \\frac{1}{2}', 'true', '"True"'],
+    [
+      '0.5 = 1/2 (value node vs rational singleton)',
+      '0.5 = \\frac{1}{2}',
+      'true',
+      '"True"',
+    ],
   ])('%s', (_label, latex, expectedType, _expectedEval) => {
     const e = ce.parse(latex);
     expect(typeOf(e)).toBe(expectedType);
@@ -146,9 +151,7 @@ describe('boolean value types — connectives and literal predicates', () => {
     expect(typeOf(near)).toBe('boolean');
     expect(evalOf(near)).toBe('"True"');
     expect(typeOf(fn('Element', [ce.number(0.5), set]))).toBe('false');
-    expect(typeOf(fn('Element', [ce.number(0.3 + 1e-12), list]))).toBe(
-      'false'
-    );
+    expect(typeOf(fn('Element', [ce.number(0.3 + 1e-12), list]))).toBe('false');
   });
 
   test('IsPrime claims on a large literal without trial division', () => {
@@ -189,8 +192,11 @@ describe('boolean value types — compiler consumption', () => {
   });
 
   test('an unproven If keeps the runtime test', () => {
+    // The test is kept, and the operand it reads is guarded against NaN and
+    // an unsupplied binding (a compiled `If` takes no branch on an undecided
+    // condition, ruling 2026-09-02).
     expect(code(fn('If', [ce.parse('a<3'), sym('x'), sym('y')]))).toBe(
-      '((_.a < 3) ? (_.x) : (_.y))'
+      '((_.a === _.a && _.a !== undefined) ? ((_.a < 3) ? (_.x) : (_.y)) : NaN)'
     );
   });
 

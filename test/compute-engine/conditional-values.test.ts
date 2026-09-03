@@ -22,9 +22,7 @@ const whichX = ['Which', gtx, 1, ['Less', 'x', 0], -1];
 describe('CONDITIONAL VALUES — When threading (T1–T5)', () => {
   it('T1: threads a scalar function through a When guard', () => {
     // sin(When(x, x>0)) → When(sin(x), x>0)
-    expect(ce.box(['Sin', whenX]).evaluate().toString()).toBe(
-      'sin(x) {0 < x}'
-    );
+    expect(ce.box(['Sin', whenX]).evaluate().toString()).toBe('sin(x) {0 < x}');
   });
 
   it('T2: absorbs a plain operand into the guard', () => {
@@ -49,16 +47,14 @@ describe('CONDITIONAL VALUES — When threading (T1–T5)', () => {
 
   it('T4: a decidable-False guard masks to Undefined', () => {
     // When(5, 3<0) → Undefined (masking rule)
-    expect(
-      ce.box(['When', 5, ['Less', 3, 0]]).evaluate().symbol
-    ).toBe('Undefined');
+    expect(ce.box(['When', 5, ['Less', 3, 0]]).evaluate().symbol).toBe(
+      'Undefined'
+    );
   });
 
   it('numericizes a When with a True guard, passing options through', () => {
     // Opportunistic fix: When(Pi, True).N() must produce a float, not stay `pi`.
-    expect(ce.box(['When', 'Pi', 'True']).N().toString()).toMatch(
-      /^3\.14159/
-    );
+    expect(ce.box(['When', 'Pi', 'True']).N().toString()).toMatch(/^3\.14159/);
   });
 });
 
@@ -178,9 +174,7 @@ describe('CONDITIONAL VALUES — Undefined conditions (decision 9)', () => {
     // and falls through. What changed is the END value when no clause is
     // selected — `Missing`, the position-preserving absent datum
     // (no-selection ruling 2026-08-27), where it used to be `Undefined`.
-    const r = ce
-      .box(['Which', 'Undefined', 1, ['Less', 3, 0], 2])
-      .evaluate();
+    const r = ce.box(['Which', 'Undefined', 1, ['Less', 3, 0], 2]).evaluate();
     expect(r.symbol).toBe('Missing');
   });
 
@@ -190,14 +184,27 @@ describe('CONDITIONAL VALUES — Undefined conditions (decision 9)', () => {
     );
   });
 
-  it('a non-boolean Which condition stays inert', () => {
-    // A condition the engine cannot read as `True` or `False` — here the
-    // number 5 — leaves the whole `Which` unevaluated instead of raising a
-    // host exception (user ruling 2026-08-31). The later clauses are NOT
-    // consulted: `Greater(3, 0)` is True, yet the answer is not 2.
-    const r = ce.box(['Which', 5, 1, ['Greater', 3, 0], 2]).evaluate();
+  it('a provably non-boolean Which condition is an error operand', () => {
+    // A condition whose type proves it is not a boolean — here the number
+    // 5 — is replaced at boxing by an `incompatible-type` error operand
+    // (user ruling 2026-09-02, restoring the diagnostic the 2026-08-31
+    // inertness ruling removed with the host throw). The later clauses are
+    // NOT consulted: `Greater(3, 0)` is True, yet the answer is not 2 — the
+    // condition's error is the value. Never a host exception.
+    const boxed = ce.box(['Which', 5, 1, ['Greater', 3, 0], 2]);
+    expect(boxed.errors).toHaveLength(1);
+    expect(boxed.errors[0].toString()).toContain('incompatible-type');
+    const r = boxed.evaluate();
+    expect(r.operator).toBe('Error');
+  });
+
+  it('an undecided Which condition stays inert', () => {
+    // A symbol of unknown type may still be assigned a boolean, so the
+    // `Which` is returned unevaluated (user ruling 2026-08-31).
+    const r = ce
+      .box(['Which', 'undecidedCond', 1, ['Greater', 3, 0], 2])
+      .evaluate();
     expect(r.operator).toBe('Which');
-    expect(r.op1.isSame(5)).toBe(true);
   });
 });
 
@@ -218,22 +225,23 @@ describe('CONDITIONAL VALUES — Which operand pairing', () => {
 
   it('a literal True condition is how a default clause is written', () => {
     expect(
-      ce.box(['Which', ['Less', 3, 0], 1, 'True', 2]).evaluate().isSame(2)
+      ce
+        .box(['Which', ['Less', 3, 0], 1, 'True', 2])
+        .evaluate()
+        .isSame(2)
     ).toBe(true);
   });
 
   it('an EVEN, unmatched Which is Missing', () => {
-    expect(
-      ce.box(['Which', 'False', 1, 'False', 2]).evaluate().symbol
-    ).toBe('Missing');
+    expect(ce.box(['Which', 'False', 1, 'False', 2]).evaluate().symbol).toBe(
+      'Missing'
+    );
     // The no-operand case is the same rule with no clauses to try.
     expect(ce.box(['Which']).evaluate().symbol).toBe('Missing');
   });
 
   it('a condition-less LaTeX cases row becomes an explicit True clause', () => {
-    const cases = ce.parse(
-      '\\begin{cases} x & x>0 \\\\ -x \\end{cases}'
-    );
+    const cases = ce.parse('\\begin{cases} x & x>0 \\\\ -x \\end{cases}');
     expect(cases.ops!.length).toBe(4);
     expect(cases.ops![2].symbol).toBe('True');
   });
@@ -397,9 +405,9 @@ describe('Convergence guards (Phase 3a)', () => {
   it('an assumption a > 0 discharges the guard to a bare 1/a', () => {
     const engine = new ComputeEngine();
     engine.assume(engine.parse('a > 0'));
-    expect(engine.parse('\\int_0^\\infty e^{-a x} dx').evaluate().toString()).toBe(
-      '1 / a'
-    );
+    expect(
+      engine.parse('\\int_0^\\infty e^{-a x} dx').evaluate().toString()
+    ).toBe('1 / a');
   });
 
   // ── Fail-closed: no indeterminate form leaks ───────────────────────────
@@ -489,7 +497,11 @@ describe('Phase 3b', () => {
   });
 
   it('∫ e^(−2x) dx → −e^(−2x)/2 (D-verified)', () => {
-    dVerify('\\int e^{-2x} dx', 'e^{-2x}', [{ x: 0.2 }, { x: 1.4 }, { x: -0.9 }]);
+    dVerify('\\int e^{-2x} dx', 'e^{-2x}', [
+      { x: 0.2 },
+      { x: 1.4 },
+      { x: -0.9 },
+    ]);
   });
 
   it('∫ e^(3−2x) dx → closed form (D-verified)', () => {

@@ -2414,18 +2414,27 @@ describe('ERROR-MODEL §1 — an UNDECIDABLE condition is inert, never a host th
     }
   });
 
-  test('a condition that is not a boolean AT ALL is inert too, not a throw', () => {
-    // The number 10, a list of numbers, and a `NaN` condition can never be
-    // read as `True`/`False`. They used to raise a host exception carrying a
-    // spell-check hint; the ruling makes every undecidable condition inert.
+  test('a condition that is provably not a boolean is an error operand, never a throw', () => {
+    // The number 10 and a `NaN` literal can never be read as `True`/`False`,
+    // and their TYPE says so at boxing: the condition is an
+    // `incompatible-type` error operand, propagated as the condition's error
+    // at evaluation, never a host exception. A list of numbers is refused
+    // too: its cells can never be condition values, so it can never select
+    // element-wise, while a list of booleans selects and is never refused.
     const ce = new ComputeEngine();
-    expect(ce.box(['If', 10, 1, 2]).evaluate().operator).toBe('If');
+    const ten = ce.box(['If', 10, 1, 2]);
+    expect(ten.errors).toHaveLength(1);
+    expect(ten.evaluate().operator).toBe('Error');
     expect(
       ce.box(['Which', ['List', 10, 20], 1, 'True', 0]).evaluate().operator
-    ).toBe('Which');
+    ).toBe('Error');
     expect(
-      ce.box(['Which', ['Divide', 0, 0], 5, 'True', 9]).N().operator
-    ).toBe('Which');
+      ce.box(['Which', ['List', 'True', 'False'], 1, 'True', 0]).evaluate()
+        .operator
+    ).toBe('List');
+    const nan = ce.box(['Which', ['Divide', 0, 0], 5, 'True', 9]);
+    expect(nan.errors).toHaveLength(1);
+    expect(nan.N().operator).toBe('Error');
   });
 
   test('a PARTIALLY decidable Which holds as a whole, keeping its earlier clauses', () => {
@@ -2823,5 +2832,533 @@ describe('ERROR-MODEL §5 — the absence marker of a numeric slot types `nan`',
         .box(['At', ['List', ce.string('a'), ce.string('b')], 9])
         .type.toString()
     ).toBe('missing | string');
+  });
+});
+
+//
+// §1 — a decided question is never answered by inertness: the size operators
+//
+
+describe('ERROR-MODEL §1 — the size operators refuse a decided non-collection', () => {
+  // `Length` and `Count` answer the SAME `incompatible-type` diagnostic for an
+  // operand that refutes the collection contract — a number, a boolean, or the
+  // `Missing` absence marker (absence is decided, ERROR-MODEL §1). The two
+  // mint it at different seams and that is deliberate: `Count` declares a
+  // `collection<any>` parameter, so `validateArguments` wraps a statically
+  // decided operand at BOXING, while `Length` declares the tolerant `(any)`
+  // and its EVALUATE handler mints the error. `Length`'s parameter stays `any`
+  // because a declared parameter type is also what an undeclared argument
+  // symbol is inferred FROM, and its canonical handler does its own collection
+  // narrowing (`test/compute-engine/lambda-param-collection-inference.test.ts`).
+  // Either way the ANSWER after evaluation is one bare `Error` node with the
+  // same code and the same expected type, which is what these rows pin.
+  const operands: { name: string; json: any; latex: string }[] = [
+    { name: '5', json: 5, latex: '5' },
+    { name: 'True', json: 'True', latex: '\\operatorname{True}' },
+    { name: 'Missing', json: 'Missing', latex: '\\operatorname{Missing}' },
+    // `First([])` is decided only at EVALUATION: it boxes as an ordinary
+    // application and evaluates to `Missing`, so the refusal cannot come from
+    // the boxing-time argument check on either operator.
+    {
+      name: 'First([])',
+      json: ['First', ['List']],
+      latex: '\\operatorname{First}(\\bigl\\lbrack\\bigr\\rbrack)',
+    },
+  ];
+
+  for (const head of ['Length', 'Count']) {
+    for (const operand of operands) {
+      describe(`${head}(${operand.name})`, () => {
+        const ce = new ComputeEngine();
+        for (const { route, expr } of routes(
+          ce,
+          [head, operand.json],
+          `\\operatorname{${head}}(${operand.latex})`,
+          head,
+          () => [ce.box(operand.json)]
+        )) {
+          test(`[${route}] evaluates to Error(incompatible-type, collection)`, () => {
+            const result = expr.evaluate();
+            expect(isErrorValue(result)).toBe(true);
+            expect(errorCode(result)).toBe('incompatible-type');
+            expect(result.type.toString()).toBe('error');
+            // The expected type in the diagnostic is spelled `collection` by
+            // both operators, so the two never drift apart.
+            expect(result.toString()).toContain('"collection"');
+            // Never a number, and never the inert form.
+            expect(isUnreduced(result, head)).toBe(false);
+          });
+        }
+      });
+    }
+  }
+
+  test('the two operators produce the identical diagnostic', () => {
+    const ce = new ComputeEngine();
+    for (const operand of operands) {
+      expect(ce.box(['Count', operand.json]).evaluate().toString()).toBe(
+        ce.box(['Length', operand.json]).evaluate().toString()
+      );
+    }
+  });
+
+  test("Count's 2-arg forms refuse the same sources", () => {
+    const ce = new ComputeEngine();
+    // The value form and the predicate form both read the SOURCE operand, so
+    // the refusal is on `ops[0]` and is independent of the second operand.
+    for (const second of [3, ['Function', ['Greater', '_', 2]]]) {
+      expect(errorCode(ce.box(['Count', 5, second]).evaluate())).toBe(
+        'incompatible-type'
+      );
+      expect(
+        errorCode(ce.box(['Count', ['First', ['List']], second]).evaluate())
+      ).toBe('incompatible-type');
+    }
+  });
+
+  test('a string IS a collection — of characters', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Length', ce.string('abc')]).evaluate().re).toBe(3);
+    expect(ce.box(['Count', ce.string('abc')]).evaluate().re).toBe(3);
+    expect(ce.parse('\\operatorname{Length}(\\text{abc})').evaluate().re).toBe(
+      3
+    );
+  });
+
+  test('an UNDECLARED symbol stays inert — nothing about it is decided yet', () => {
+    // Rule 7 inertness, not a refusal: `x` has no value and no declared type,
+    // so it may still turn out to be a collection. `Length`'s canonical
+    // handler in fact narrows it TO `collection` on this evidence, which is
+    // the opposite of a refutation.
+    const ce = new ComputeEngine();
+    expect(isUnreduced(ce.box(['Length', 'x']).evaluate(), 'Length')).toBe(
+      true
+    );
+    const ce2 = new ComputeEngine();
+    expect(isUnreduced(ce2.box(['Count', 'y']).evaluate(), 'Count')).toBe(true);
+  });
+
+  test('a VALUELESS collection-typed symbol stays inert', () => {
+    // `L` is declared a collection but holds no value, so its LENGTH is
+    // undecided while its KIND is settled. Inertness is the right answer:
+    // assigning a value later decides it.
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<number>');
+    expect(isUnreduced(ce.box(['Length', 'L']).evaluate(), 'Length')).toBe(
+      true
+    );
+    expect(isUnreduced(ce.box(['Count', 'L']).evaluate(), 'Count')).toBe(true);
+  });
+});
+
+//
+// Euclidean norms — an infinite leg dominates a NaN leg
+//
+
+describe('Euclidean norms: an infinite leg dominates a NaN leg', () => {
+  // One rule covers every Euclidean norm the library computes: an infinite
+  // leg makes the norm `+oo` whatever the other legs are, a NaN leg included;
+  // with NO infinite leg, a NaN leg makes the norm NaN. "Infinite" means any
+  // infinity — the signed `±∞`, the unsigned `~oo`, and an anonymous directed
+  // infinity such as `∞ + i` — because the modulus of each of them is `+∞`.
+  //
+  // IEEE 754 states the same precedence for the primitive the compiled lane
+  // emits: `Math.hypot(Infinity, NaN)` is `Infinity`, not NaN. Before the
+  // ruling of 2026-09-02 the two norms disagreed in both corners —
+  // `Norm((+oo, NaN))` answered NaN while `Hypot(+oo, NaN)` answered `+oo`,
+  // and `Hypot(~oo, 3)` was an `incompatible-type` error although
+  // `Norm((~oo, 3))` was already `+oo`.
+  //
+  // `Abs` of a fixed-arity point is the same norm under the single-bar
+  // spelling, so it follows.
+
+  const INF = { num: '+Infinity' };
+  const NEG_INF = { num: '-Infinity' };
+
+  /** Both evaluation routes of a probe answer `+oo`. */
+  const expectPositiveInfinity = (expr: Expression, route: string) => {
+    expect(`${route}: ${expr.evaluate().toString()}`).toBe(`${route}: +oo`);
+    expect(`${route}: ${expr.N().toString()}`).toBe(`${route}: +oo`);
+  };
+
+  /** Both evaluation routes of a probe answer NaN. */
+  const expectNaN = (ce: ComputeEngine, expr: Expression, route: string) => {
+    expect(`${route}: ${isNaNValue(ce, expr.evaluate())}`).toBe(
+      `${route}: true`
+    );
+    expect(`${route}: ${isNaNValue(ce, expr.N())}`).toBe(`${route}: true`);
+  };
+
+  test('Norm of a POINT with an infinite component is +oo, on all three routes', () => {
+    const ce = new ComputeEngine();
+    for (const { route, expr } of routes(
+      ce,
+      ['Norm', ['Tuple', INF, 'NaN']],
+      '\\operatorname{Norm}((\\infty, \\operatorname{NaN}))',
+      'Norm',
+      () => [ce.box(['Tuple', INF, 'NaN'])]
+    ))
+      expectPositiveInfinity(expr, route);
+  });
+
+  test('the sign of the infinite component does not matter', () => {
+    // A norm is non-negative, so `-∞` norms to `+∞` exactly as `+∞` does.
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Norm', ['Tuple', NEG_INF, 'NaN']])
+        .evaluate()
+        .toString()
+    ).toBe('+oo');
+  });
+
+  test('`~oo` counts as an infinite component: its modulus is +oo', () => {
+    const ce = new ComputeEngine();
+    // Already true before the ruling, with no NaN sibling.
+    expect(
+      ce
+        .box(['Norm', ['Tuple', 'ComplexInfinity', 3]])
+        .evaluate()
+        .toString()
+    ).toBe('+oo');
+    // New: a NaN sibling no longer defeats it.
+    for (const { route, expr } of routes(
+      ce,
+      ['Norm', ['Tuple', 'ComplexInfinity', 'NaN']],
+      '\\operatorname{Norm}((\\tilde\\infty, \\operatorname{NaN}))',
+      'Norm',
+      () => [ce.box(['Tuple', 'ComplexInfinity', 'NaN'])]
+    ))
+      expectPositiveInfinity(expr, route);
+  });
+
+  test('Norm of a LIST follows the same rule as Norm of a point', () => {
+    const ce = new ComputeEngine();
+    for (const { route, expr } of routes(
+      ce,
+      ['Norm', ['List', INF, 'NaN']],
+      '\\operatorname{Norm}(\\lbrack \\infty, \\operatorname{NaN}\\rbrack)',
+      'Norm',
+      () => [ce.box(['List', INF, 'NaN'])]
+    ))
+      expectPositiveInfinity(expr, route);
+  });
+
+  test('Abs of a point is that norm, so it follows too', () => {
+    // `|(x, y)|` is the single-bar spelling of the vector magnitude, and the
+    // `Abs` handler delegates to `Norm` for a fixed-arity point.
+    const ce = new ComputeEngine();
+    for (const { route, expr } of routes(
+      ce,
+      ['Abs', ['Tuple', INF, 'NaN']],
+      '\\left|(\\infty, \\operatorname{NaN})\\right|',
+      'Abs',
+      () => [ce.box(['Tuple', INF, 'NaN'])]
+    ))
+      expectPositiveInfinity(expr, route);
+    expect(
+      ce
+        .box(['Abs', ['Tuple', 'ComplexInfinity', 'NaN']])
+        .evaluate()
+        .toString()
+    ).toBe('+oo');
+  });
+
+  test('Hypot agrees with Norm in every corner', () => {
+    const ce = new ComputeEngine();
+    // Unchanged by the ruling, and the behavior the other norms were aligned
+    // to: this is what `Math.hypot(Infinity, NaN)` answers.
+    for (const { route, expr } of routes(
+      ce,
+      ['Hypot', INF, 'NaN'],
+      '\\operatorname{Hypot}(\\infty, \\operatorname{NaN})',
+      'Hypot',
+      () => [ce.box(INF), ce.NaN]
+    ))
+      expectPositiveInfinity(expr, route);
+    // New: `~oo` is inside the carrier now (`real | infinity`), where it used
+    // to be refused as `incompatible-type`, and it norms to `+oo`.
+    for (const { route, expr } of routes(
+      ce,
+      ['Hypot', 'ComplexInfinity', 3],
+      '\\operatorname{Hypot}(\\tilde\\infty, 3)',
+      'Hypot',
+      () => [ce.box('ComplexInfinity'), ce.box(3)]
+    )) {
+      expect(`${route}: ${isErrorValue(expr.evaluate())}`).toBe(
+        `${route}: false`
+      );
+      expectPositiveInfinity(expr, route);
+    }
+    // A `~oo` leg with a NaN leg: the infinite leg wins.
+    expect(
+      ce.box(['Hypot', 'ComplexInfinity', 'NaN']).evaluate().toString()
+    ).toBe('+oo');
+    expect(
+      ce.box(['Hypot', 'NaN', 'ComplexInfinity']).evaluate().toString()
+    ).toBe('+oo');
+    // A point leg enters the sum of squares through its own norm, so it
+    // carries the same precedence.
+    expect(
+      ce
+        .box(['Hypot', ['Tuple', INF, 'NaN'], 2])
+        .evaluate()
+        .toString()
+    ).toBe('+oo');
+  });
+
+  test('a NaN INSIDE a point leg makes Hypot NaN, and the sign says so', () => {
+    // A point leg enters the sum of squares through its own norm, so a NaN
+    // component makes the hypotenuse NaN exactly as a NaN scalar leg does —
+    // there is no infinite sibling to dominate it here. The sign handler must
+    // read the components too: `isNaN` is `false` for a tuple whatever it
+    // holds, so a sign handler testing the top-level operands alone claimed
+    // the non-negative sign of a `√(…)` for an application that answers NaN.
+    const ce = new ComputeEngine();
+    const nanPoint = ce.box(['Hypot', ['Tuple', 'NaN', 3], 5]);
+    expectNaN(ce, nanPoint, 'Hypot');
+    expect(nanPoint.sgn).toBe('unsigned');
+    // The infinite component still dominates, and there the sign stands.
+    const infPoint = ce.box(['Hypot', ['Tuple', INF, 'NaN'], 5]);
+    expectPositiveInfinity(infPoint, 'Hypot');
+    expect(infPoint.sgn).toBe('non-negative');
+  });
+
+  test('an unsupported norm order is inert whatever the entries are', () => {
+    // The infinity dominance belongs INSIDE the orders the handler computes:
+    // an entry must never be what makes an order the handler does not
+    // implement answer. `p = 0` is not a norm, and the matrix branch computes
+    // only the Frobenius norm, the max column sum and the max row sum — so
+    // `Norm([+oo], 0)` and `Norm([[+oo]], 3)` stay the inert application
+    // their finite counterparts stay.
+    const ce = new ComputeEngine();
+    const op = (expr: any) => ce.box(expr).evaluate().operator;
+    expect(op(['Norm', ['List', 1], 0])).toBe('Norm');
+    expect(op(['Norm', ['List', INF], 0])).toBe('Norm');
+    expect(op(['Norm', ['List', ['List', 1]], 3])).toBe('Norm');
+    expect(op(['Norm', ['List', ['List', INF]], 3])).toBe('Norm');
+    // Every SUPPORTED order answers `+oo` for that same infinite entry: the
+    // default L2, the L1 sum, a general Lp and the L∞ maximum, in both
+    // spellings of the last one.
+    const value = (expr: any) => ce.box(expr).evaluate().toString();
+    expect(value(['Norm', ['List', INF]])).toBe('+oo');
+    expect(value(['Norm', ['List', INF], 1])).toBe('+oo');
+    expect(value(['Norm', ['List', INF], 3])).toBe('+oo');
+    expect(value(['Norm', ['List', INF], INF])).toBe('+oo');
+    expect(value(['Norm', ['List', INF], { str: 'Infinity' }])).toBe('+oo');
+  });
+
+  test('a NaN leg with NO infinite sibling still makes the norm NaN', () => {
+    // The control for every row above: the ruling gives infinity precedence
+    // over NaN, it does not retire NaN from the norms.
+    const ce = new ComputeEngine();
+    for (const { route, expr } of routes(
+      ce,
+      ['Norm', ['Tuple', 1, 'NaN']],
+      '\\operatorname{Norm}((1, \\operatorname{NaN}))',
+      'Norm',
+      () => [ce.box(['Tuple', 1, 'NaN'])]
+    ))
+      expectNaN(ce, expr, route);
+    for (const { route, expr } of routes(
+      ce,
+      ['Hypot', 'NaN', 1],
+      '\\operatorname{Hypot}(\\operatorname{NaN}, 1)',
+      'Hypot',
+      () => [ce.NaN, ce.box(1)]
+    ))
+      expectNaN(ce, expr, route);
+    expect(ce.box(['Norm', ['List', 1, 'NaN']]).evaluate().isNaN).toBe(true);
+    expect(ce.box(['Abs', ['Tuple', 1, 'NaN']]).evaluate().isNaN).toBe(true);
+    // A FINITE point leg withholds the proof for `Hypot` too.
+    expect(ce.box(['Hypot', ['Tuple', 3, 4], 'NaN']).evaluate().isNaN).toBe(
+      true
+    );
+  });
+
+  test('a matrix norm follows the same precedence', () => {
+    // The Frobenius norm is the Euclidean norm of the flattened matrix, and a
+    // column or row sum is infinite as soon as one term is, so an infinite
+    // entry dominates for every matrix norm the handler computes.
+    const ce = new ComputeEngine();
+    const M = ['List', ['List', INF, 'NaN'], ['List', 1, 2]];
+    expect(ce.box(['Norm', M]).evaluate().toString()).toBe('+oo');
+    expect(ce.box(['Norm', M, 1]).evaluate().toString()).toBe('+oo');
+    // With no infinite entry, a NaN entry makes the operator norms NaN. They
+    // used to answer the maximum of the REMAINING columns/rows — 4 and 5 here
+    // — because every comparison with NaN is false, so the NaN column was
+    // silently skipped; the compiled lane propagated the NaN all along.
+    const N = ['List', ['List', 'NaN', 1], ['List', 2, 3]];
+    expect(ce.box(['Norm', N, 1]).evaluate().isNaN).toBe(true);
+    expect(ce.box(['Norm', N, INF]).evaluate().isNaN).toBe(true);
+    expect(ce.box(['Norm', N]).evaluate().isNaN).toBe(true);
+    // The finite operator norms are unchanged: max column sum, max row sum.
+    const F = ['List', ['List', 1, 2], ['List', 3, 4]];
+    expect(ce.box(['Norm', F, 1]).evaluate().toString()).toBe('6');
+    expect(ce.box(['Norm', F, INF]).evaluate().toString()).toBe('7');
+  });
+
+  test('Distance follows Norm at a non-finite point', () => {
+    // `Distance(p, q)` is `Norm(p − q)`, so the same rule decides it: an
+    // infinite coordinate difference — signed or `~oo` — makes the distance
+    // `+oo` whatever the other differences are; otherwise a NaN difference
+    // makes it NaN. Each of these used to answer the out-of-band
+    // `Error("expected-value")`, from a `!isFinite` guard on the coordinates
+    // (user ruling 2026-09-02: in-band values, not an error).
+    const ce = new ComputeEngine();
+    const at = (p: any, q: any) => ce.box(['Distance', p, q]);
+    for (const [p, q] of [
+      [
+        ['Tuple', INF, 0],
+        ['Tuple', 0, 0],
+      ],
+      [
+        ['Tuple', NEG_INF, 0],
+        ['Tuple', 0, 0],
+      ],
+      [
+        ['Tuple', INF, 'NaN'],
+        ['Tuple', 0, 0],
+      ],
+      [
+        ['Tuple', 'ComplexInfinity', 0],
+        ['Tuple', 0, 0],
+      ],
+    ] as any[]) {
+      expect(at(p, q).evaluate().toString()).toBe('+oo');
+      expect(at(p, q).N().toString()).toBe('+oo');
+    }
+    // A NaN coordinate with no infinite sibling: NaN, not an error.
+    expect(at(['Tuple', 'NaN', 0], ['Tuple', 0, 0]).evaluate().isNaN).toBe(
+      true
+    );
+    expect(at(['Tuple', 'NaN', 0], ['Tuple', 0, 0]).N().isNaN).toBe(true);
+    // Two EQUAL infinite coordinates cancel to `∞ − ∞`, which is NaN — the
+    // difference, not the coordinate, is what the rule reads. This is why the
+    // type handler demotes to the top numeric type as soon as a coordinate is
+    // not proven finite: a norm of extended-real components can claim
+    // `real | +oo`, but a distance between them can be NaN.
+    const cancel = at(['Tuple', INF, 0], ['Tuple', INF, 0]);
+    expect(cancel.evaluate().isNaN).toBe(true);
+    expect(cancel.type.matches('number')).toBe(true);
+    expect(cancel.type.toString()).toBe('number');
+    // The flat `List` spelling of a point, and the point-list broadcast,
+    // follow too.
+    expect(at(['List', INF, 0], ['List', 0, 0]).evaluate().toString()).toBe(
+      '+oo'
+    );
+    expect(
+      at(['List', ['Tuple', INF, 0], ['Tuple', 3, 4]], ['Tuple', 0, 0])
+        .evaluate()
+        .toString()
+    ).toBe('[+oo,5]');
+    // A finite pair is unchanged, exact under `evaluate()`.
+    expect(at(['Tuple', 0, 0], ['Tuple', 3, 4]).evaluate().toString()).toBe(
+      '5'
+    );
+    expect(at(['Tuple', 0, 0], ['Tuple', 1, 1]).evaluate().toString()).toBe(
+      'sqrt(2)'
+    );
+    expect(at(['Tuple', 0, 0], ['Tuple', 1, 1]).N().re).toBeCloseTo(
+      Math.SQRT2,
+      12
+    );
+    // A non-NUMERIC coordinate is still a malformed point, and still the
+    // out-of-band error: the ruling moved the non-finite case in-band, not
+    // this one.
+    const malformed = at(
+      ['Tuple', { str: 'x' }, 0],
+      ['Tuple', 0, 0]
+    ).evaluate();
+    expect(isErrorValue(malformed)).toBe(true);
+    expect(errorCode(malformed)).toBe('expected-value');
+  });
+
+  test('the COMPILED lane answers the same in every corner', () => {
+    // `Hypot` lowers to `Math.hypot`, which already carried the IEEE rule;
+    // `Norm` lowers to `_SYS.norm`, whose accumulator turned `∞² + NaN²` into
+    // `NaN` and had to gain the same infinite-entry scan. Constant folding is
+    // disabled so the lowering is what runs, not the interpreter.
+    const ce = new ComputeEngine();
+    const run = (json: any) => {
+      const r = compile(ce.box(json), { fallback: false, constantFold: false });
+      if (r === undefined) throw new Error('compile() returned undefined');
+      expect(r.success).toBe(true);
+      return r.run!();
+    };
+    expect(run(['Norm', ['Tuple', INF, 'NaN']])).toBe(Infinity);
+    expect(run(['Norm', ['List', INF, 'NaN']])).toBe(Infinity);
+    expect(run(['Abs', ['Tuple', INF, 'NaN']])).toBe(Infinity);
+    expect(run(['Hypot', INF, 'NaN'])).toBe(Infinity);
+    expect(run(['Hypot', 'ComplexInfinity', 3])).toBe(Infinity);
+    expect(run(['Norm', ['List', ['List', INF, 'NaN'], ['List', 1, 2]]])).toBe(
+      Infinity
+    );
+    // The NaN controls, on the compiled lane too.
+    expect(run(['Norm', ['List', 1, 'NaN']])).toBeNaN();
+    expect(run(['Hypot', 'NaN', 1])).toBeNaN();
+    expect(
+      run(['Norm', ['List', ['List', 'NaN', 1], ['List', 2, 3]], 1])
+    ).toBeNaN();
+    // A matrix order this lane does not implement is NaN whatever the entries
+    // are: the infinite-entry scan applies inside the orders it does, as it
+    // does in the interpreter, so an entry cannot make an unsupported order
+    // answer.
+    expect(run(['Norm', ['List', ['List', 1, 2], ['List', 3, 4]], 3])).toBeNaN();
+    expect(
+      run(['Norm', ['List', ['List', INF, 2], ['List', 3, 4]], 3])
+    ).toBeNaN();
+    // A VECTOR order this lane does not implement is NaN for the same reason.
+    // The orders it implements are the L∞ maximum and the p-norms for `p > 0`;
+    // `p = 0` used to answer `+∞` for a two-element vector, and a negative `p`
+    // a confident ordinary number, where the interpreter leaves the
+    // application inert. The order decides before the infinite-entry scan, so
+    // an entry cannot make an unsupported order answer.
+    expect(run(['Norm', ['List', 1, 1], 0])).toBeNaN();
+    expect(run(['Norm', ['List', 2], -1])).toBeNaN();
+    expect(run(['Norm', ['List', INF], 0])).toBeNaN();
+    // The orders it DOES implement are unchanged, including a fractional one.
+    expect(run(['Norm', ['List', 3, 4], 1])).toBe(7);
+    expect(run(['Norm', ['List', 3, 4], INF])).toBe(4);
+    expect(run(['Norm', ['List', 1], 0.5])).toBe(1);
+    // `Distance` lowers to `_SYS.distance`, whose accumulator had the same
+    // problem as `_SYS.norm`'s.
+    const D = (p: any, q: any) => run(['Distance', p, q]);
+    expect(D(['Tuple', INF, 0], ['Tuple', 0, 0])).toBe(Infinity);
+    expect(D(['Tuple', INF, 'NaN'], ['Tuple', 0, 0])).toBe(Infinity);
+    expect(D(['Tuple', 'ComplexInfinity', 0], ['Tuple', 0, 0])).toBe(Infinity);
+    expect(D(['Tuple', 'NaN', 0], ['Tuple', 0, 0])).toBeNaN();
+    // And the finite values.
+    expect(run(['Norm', ['List', 3, 4]])).toBe(5);
+    expect(run(['Hypot', 3, 4])).toBe(5);
+    expect(D(['Tuple', 0, 0], ['Tuple', 3, 4])).toBe(5);
+  });
+
+  test('the finite norms are unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Norm', ['Tuple', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('5');
+    expect(
+      ce
+        .box(['Norm', ['List', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('5');
+    expect(
+      ce
+        .box(['Abs', ['Tuple', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('5');
+    expect(ce.box(['Hypot', 3, 4]).evaluate().toString()).toBe('5');
+    // A finite COMPLEX leg is still outside `Hypot`'s carrier: the carrier
+    // gained the infinities, not the finite complex plane.
+    expect(
+      isErrorValue(operand(ce.box(['Hypot', 'ImaginaryUnit', 1]), 1))
+    ).toBe(true);
   });
 });

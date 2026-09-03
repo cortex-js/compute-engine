@@ -62,6 +62,7 @@ import {
   DICTIONARY_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
+import { admissionOf } from '../boxed-expression/value-membership.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
   DictionaryType,
@@ -550,6 +551,50 @@ const peekMembershipPreserving = (
 // before it reaches the caller; see the comments on those two `type:`
 // handlers. One constant so the two cannot drift apart.
 const COUNT_OR_INFINITE = parseType('integer | +oo');
+
+/**
+ * The `incompatible-type` error a size operator (`Length`, `Count`) answers
+ * for an operand that is decidably NOT a collection, or `undefined` when the
+ * operand is a collection or when nothing about it is decided yet.
+ *
+ * Asking for the size of a number, a boolean, a function literal or the
+ * `Missing` absence marker is a violated contract, not an open question, and
+ * an inert form is not an acceptable terminal answer to a decided question
+ * (see `docs/ERROR-MODEL.md` §1 "The response channels"). Only a REFUTATION
+ * errors: an undeclared symbol, or a valueless symbol declared `list<number>`,
+ * contradicts nothing yet, so the call stays unevaluated and can still be
+ * decided later.
+ *
+ * `COLLECTION_SHAPE_TYPE` is the absence-admitting `collection<any>` top, not
+ * the bare name: bare `collection` means `collection<unknown>`, which excludes
+ * `list<any>` and `list<integer|missing>` — spellings a shape question must
+ * accept.
+ *
+ * Strings ARE collections (of characters), so `Length("abc")` is 3 and never
+ * reaches this refusal.
+ *
+ * The error is minted in the evaluate handlers rather than declared in
+ * `Length`'s signature because a declared parameter type is also what an
+ * undeclared argument symbol is inferred FROM — declaring `collection<any>`
+ * would type a caller's own symbol as a collection at canonicalization time.
+ * The expected-type string is spelled `'collection'` so the diagnostic reads
+ * exactly like the one `validateArguments` mints from `Count`'s declared
+ * `collection<any>` parameter.
+ */
+function nonCollectionSizeOperandError(
+  ce: ComputeEngine,
+  xs: Expression
+): Expression | undefined {
+  if (xs.isCollection) return undefined;
+  // An operand that is ALREADY an error is left to the ordinary error
+  // channel. `admissionOf` refutes it (an error value is a member of no
+  // type), but re-diagnosing it as the wrong KIND would replace a precise
+  // diagnostic with a misleading one — the operand's fault is not that it is
+  // not a collection.
+  if (!xs.isValid) return undefined;
+  if (admissionOf(xs, COLLECTION_SHAPE_TYPE) !== 'refute') return undefined;
+  return ce.typeError('collection', xs.type, xs);
+}
 
 const LENGTH_SIGNATURE = parseType('(any) -> integer | infinity');
 const COUNT_SIGNATURE = parseType(
@@ -2769,7 +2814,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Length: {
     description:
-      'Number of elements in a collection. Returns +oo for an unbounded Range, and undefined for non-collections and for other infinite collections.',
+      'Number of elements in a collection. Returns +oo for an unbounded Range, an `incompatible-type` error for an operand that is decidably not a collection, and stays unevaluated for an infinite collection whose length is not decided.',
     keywords: ['size'],
     complexity: 4000,
     signature: '(any) -> integer | infinity',
@@ -2806,8 +2851,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // drop) that this custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
       const stripped = withFirst(peekCountPreserving(ops[0]), ops);
-      // The declared parameter is `any` — deliberately tolerant, so
-      // `Length(5)` stays symbolic instead of erroring — which means
+      // The declared parameter is `any` — deliberately tolerant, because a
+      // declared parameter type is also what an undeclared argument symbol is
+      // inferred FROM, and declaring `collection<any>` here would type the
+      // caller's own symbol as a collection at CANONICALIZATION time, before
+      // anything is known about it. A non-collection operand is refused by the
+      // `evaluate` handler below instead. Because the parameter is `any`,
       // validation contributes no type inference. Yet `Length(x)` on a
       // not-yet-typed symbol is collection evidence in the same way `x[i]`
       // is: narrow it, so a function parameter whose only use is
@@ -2836,8 +2885,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return ce._fn('Length', adjusted ?? stripped);
     },
     evaluate: ([xs], { engine }) => {
-      // Guard non-collection inputs (e.g. Length(5), Length(x+y)).
-      if (!xs.isCollection) return undefined;
+      // `Length(5)`, `Length(True)` and `Length(Missing)` are decided
+      // non-collections and answer an `incompatible-type` error; an operand
+      // that is merely not decided yet keeps the inert form (see
+      // `nonCollectionSizeOperandError`).
+      if (!xs.isCollection) return nonCollectionSizeOperandError(engine, xs);
       // `count` is asked FIRST and `isEmptyCollection` only as its fallback.
       // Both facets walk a lazy collection — `Filter.count` to the end,
       // `Filter.isEmpty` to the first match — so asking emptiness first ran
@@ -4169,6 +4221,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return ce._fn('Count', adjusted ?? stripped);
     },
     evaluate: ([xs, what], { engine }) => {
+      // A decided non-collection source is refused the same way `Length` is,
+      // in both the 1-arg and the 2-arg form. The declared `collection<any>`
+      // parameter makes `validateArguments` wrap a STATICALLY decided operand
+      // at canonicalization, which covers `Count(5)`. It does not cover an
+      // operand that only REACHES a refuting value at evaluation —
+      // `Count(First([]))`, where `First([])` evaluates to `Missing`. Minting
+      // the refusal here keeps every form answering one bare `Error`,
+      // identical to `Length`'s, instead of an `Error` nested inside an
+      // application that never evaluates.
+      const wrongKind = nonCollectionSizeOperandError(engine, xs);
+      if (wrongKind !== undefined) return wrongKind;
+
       if (xs.isEmptyCollection) return engine.Zero;
 
       // 1-arg cardinality form. An indeterminate count (e.g. a set-builder

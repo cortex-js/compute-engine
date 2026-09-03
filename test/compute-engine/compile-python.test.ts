@@ -647,14 +647,86 @@ describe('PYTHON TARGET', () => {
       const code = python.compile(
         ce.box(['If', ['Greater', 'x', 0], 1, ['Negate', 'x']])
       ).code;
-      expect(code).toBe('((1) if (0 < x) else (-x))');
+      // The conditional expression sits behind the operand test the
+      // undecided-condition rule adds: `0 < nan` is an ordinary `False` in
+      // Python, so an undecided comparison is invisible in the condition's own
+      // value and the arm would be taken on no evidence.
+      expect(code).toBe(
+        "(((1) if (0 < x) else (-x)) if (x == x) else float('nan'))"
+      );
     });
 
     it('Which emits nested Python conditional expressions', () => {
       const code = python.compile(
         ce.box(['Which', ['Less', 'x', 0], -1, 'True', 1])
       ).code;
-      expect(code).toBe('((-1) if (x < 0) else (1))');
+      expect(code).toBe(
+        "(((-1) if (x < 0) else ((1))) if (x == x) else float('nan'))"
+      );
+    });
+
+    it('an undecided condition takes NO arm and answers float(nan)', () => {
+      // The ruling: the Python target follows the same undecided-condition
+      // rule as the JavaScript one. `0 < nan` is an ordinary `False` in
+      // Python, so the else arm used to be handed a confident wrong answer.
+      // There is no Python execution harness in this suite, so the pins are on
+      // the emitted SOURCE; its behavior was checked by running the emitted
+      // shapes under CPython.
+      const e = new ComputeEngine();
+      e.declare('x', 'number');
+      const code = (json: any): string => python.compile(e.box(json)).code!;
+      expect(code(['If', ['Greater', 'x', 0], 1, -1])).toBe(
+        "(((1) if (0 < x) else (-1)) if (x == x) else float('nan'))"
+      );
+      // A costly operand is bound to a lambda parameter and computed ONCE:
+      // the condition embeds it and the test names it twice more.
+      const sin = code(['If', ['Greater', ['Sin', 'x'], 0], 1, -1]);
+      expect(sin).toBe(
+        "(lambda _tv1: (((1) if (0 < _tv1) else (-1)) if (_tv1 == _tv1) else float('nan')))(np.sin(x))"
+      );
+      expect(sin.split('np.sin').length - 1).toBe(1);
+    });
+
+    it('a condition whose VALUE may not be a boolean is tested for its kind', () => {
+      // A Python `1` is not a condition, and `1 == True` is true in Python —
+      // so the test is on the value's KIND, not on `== True`. A NumPy boolean
+      // (what a relation lowers to) counts as a boolean.
+      const e = new ComputeEngine();
+      e.declare('b', 'boolean');
+      expect(python.compile(e.box(['If', 'b', 1, -1])).code).toBe(
+        "((1) if (isinstance(b, (bool, np.bool_)) and b) else ((-1) if isinstance(b, (bool, np.bool_)) else float('nan')))"
+      );
+    });
+
+    it('`Not` negates a DECIDED verdict, never an undecided value', () => {
+      // `np.logical_not` of a non-boolean would answer a confident boolean,
+      // which is the answer the ruling forbids. The `Not` is lowered by
+      // exchanging the arms of the decided test instead, so it is not emitted.
+      const e = new ComputeEngine();
+      e.declare('b', 'boolean');
+      e.declare('x', 'number');
+      const notB = python.compile(e.box(['If', ['Not', 'b'], 1, 2])).code!;
+      expect(notB).toBe(
+        "((1) if (isinstance(b, (bool, np.bool_)) and not b) else ((2) if isinstance(b, (bool, np.bool_)) else float('nan')))"
+      );
+      expect(notB).not.toContain('logical_not');
+      // A `Not` over a RELATION keeps the operand test: `Not` changes neither
+      // operand of the comparison under it.
+      expect(
+        python.compile(e.box(['If', ['Not', ['Greater', 'x', 0]], 1, 2])).code
+      ).toBe("(((1) if (not (0 < x)) else (2)) if (x == x) else float('nan'))");
+    });
+
+    it('a condition decided by construction emits no extra test', () => {
+      // `And`/`Or` keep the behavior they had: their three-valued lowering is
+      // scheduled separately (see ROADMAP, the undecided-condition ruling).
+      const e = new ComputeEngine();
+      e.declare('x', 'number');
+      expect(
+        python.compile(
+          e.box(['If', ['And', ['Greater', 'x', 0], ['Less', 'x', 2]], 1, 2])
+        ).code
+      ).toBe('((1) if (0 < x and x < 2) else (2))');
     });
 
     it('When with no default uses float(nan), not a bare NaN', () => {
@@ -1330,11 +1402,17 @@ describe('PYTHON TARGET', () => {
       ).toThrow(/branch condition is a collection-valued expression/);
     });
 
-    it('keeps the scalar Which emission byte-identical', () => {
+    it('keeps the scalar Which on the ordinary conditional-expression path', () => {
+      // A scalar condition still lowers to nested Python conditional
+      // expressions — never to the collection helper this describe is about.
+      // The outer test is the undecided-condition rule's, not a fail-closed
+      // guard: it selects no clause when the comparison cannot be decided.
       const code = python.compile(
         ce.box(['Which', ['Less', 'x', 3], 1, 'True', 0])
       ).code;
-      expect(code).toBe('((1) if (x < 3) else (0))');
+      expect(code).toBe(
+        "(((1) if (x < 3) else ((0))) if (x == x) else float('nan'))"
+      );
     });
   });
 });

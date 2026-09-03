@@ -135,10 +135,14 @@ describe('COMPILE', () => {
   });
 
   describe('Conditionals / Ifs', () => {
+    // `x` is declared `number` in this suite, so `x > 0` is undecided at
+    // `x = NaN` and the emitted ternary is wrapped in the operand NaN test the
+    // undecided-condition ruling (2026-09-02) added. See the "compiled
+    // If/Which take no branch on an undecided condition" describe below.
     it('should compile an if statement', () => {
       const expr = ce.expr(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(
-        `((0 < _.x) ? (_.x) : (-_.x))`
+        `((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? (_.x) : (-_.x)) : NaN)`
       );
     });
 
@@ -150,7 +154,7 @@ describe('COMPILE', () => {
         ['Block', ['Negate', 'x']],
       ]);
       expect(compile(expr)?.code ?? '').toMatchInlineSnapshot(
-        `((0 < _.x) ? (_.x) : (-_.x))`
+        `((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? (_.x) : (-_.x)) : NaN)`
       );
     });
   });
@@ -1632,18 +1636,23 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(r.run!()).toEqual([10, 20, 30]);
   });
 
-  it('If over a NON-boolean collection condition fails closed at run time', () => {
-    // `d` is `[10, 20, 30]`: not a condition value in any cell. The compile
-    // succeeds (the shape is only knowable at run time), and `_SYS.select`
-    // then throws rather than picking a branch. The interpreter cannot pick a
-    // branch either; it holds the `If` unevaluated instead of throwing
-    // (undecidable-condition ruling 2026-08-31).
+  it('If over a NON-boolean collection condition fails closed', () => {
+    // `d` is `[10, 20, 30]`: not a condition value in any cell, and its TYPE
+    // says so, so the condition is an `incompatible-type` error operand at
+    // boxing (provably non-boolean condition ruling) and the invalid
+    // expression never compiles. Neither lane ever picks a branch.
     const e = mkEngine();
     const js = new JavaScriptTarget();
-    const r = js.compile(e.box(['If', 'd', 1, 2]));
+    const boxed = e.box(['If', 'd', 1, 2]);
+    expect(boxed.errors).toHaveLength(1);
+    expect(() => js.compile(boxed)).toThrow(/invalid expression/);
+    expect(boxed.evaluate().operator).toBe('Error');
+    // A condition whose collection shape is knowable only at run time still
+    // compiles, and `_SYS.select` then throws rather than picking a branch.
+    e.declare('dd', 'list');
+    const r = js.compile(e.box(['If', 'dd', 1, 2]));
     expect(r.success).toBe(true);
-    expect(() => r.run!()).toThrow(/Condition must evaluate/);
-    expect(e.box(['If', 'd', 1, 2]).evaluate().operator).toBe('If');
+    expect(() => r.run!({ dd: [10, 20] })).toThrow(/Condition must evaluate/);
   });
 
   it('the free-function compile() converts the throw to success:false + fallback', () => {

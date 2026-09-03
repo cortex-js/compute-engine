@@ -116,6 +116,7 @@ import {
   pointNormType,
   euclideanNormType,
 } from './utils.js';
+import { hasInfiniteMagnitudeComponent } from './linear-algebra.js';
 import { inferContinuationPattern } from '../symbolic/interpret.js';
 import {
   canonicalPower,
@@ -5246,8 +5247,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // complex) is refused by every `real`-declared slot. Read off the
         // coordinates both literal points expose; a point-TYPED symbol has
         // none, and keeps the wide `number`.
-        if (isFunction(a) && isFunction(b))
-          return euclideanNormType([...a.ops, ...b.ops]);
+        //
+        // Every coordinate must be PROVEN finite for the norm claim to carry
+        // over to a distance. `euclideanNormType` says `real | +oo` for
+        // components on the extended real line, on the grounds that a norm
+        // takes the modulus of each component and so can never be NaN. A
+        // distance norms the DIFFERENCES instead, and `∞ − ∞` is NaN — which
+        // `real | +oo` excludes — so an unproven coordinate demotes to the top
+        // numeric type here where a plain `Norm` may still be sharp.
+        if (isFunction(a) && isFunction(b)) {
+          const coords = [...a.ops, ...b.ops];
+          if (
+            !coords.every(
+              (c) => c.isFinite === true || c.type.matches('complex')
+            )
+          )
+            return 'number';
+          return euclideanNormType(coords);
+        }
         return 'number';
       },
       evaluate: ([a, b], { engine: ce, numericApproximation }) => {
@@ -5280,8 +5297,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ce,
             numericApproximation
           );
-          // A malformed point (a dimension mismatch, a non-finite coordinate)
-          // is the whole call's error, not one element of the result list.
+          // A malformed point (a dimension mismatch, a non-numeric coordinate)
+          // is the whole call's error, not one element of the result list. A
+          // non-finite coordinate is not malformed and has an in-band value,
+          // so it produces an ordinary element (`+oo` or NaN).
           if (isFunction(d, 'Error')) return d;
           results.push(d);
         }
@@ -6020,21 +6039,34 @@ function pointDistance(
 ): Expression {
   if (a.length !== b.length || a.length === 0)
     return ce.error('incompatible-dimensions');
-  const terms: Expression[] = [];
+  // The coordinate differences — `Distance(p, q)` is `Norm(p − q)`, so these
+  // are the legs the norm is taken of. They are evaluated here for two
+  // reasons: the infinite-leg test below reads a number literal, and `∞ − ∞`
+  // is NaN, a cancellation only the difference shows and never the two
+  // coordinates on their own.
+  const legs: Expression[] = [];
   for (let i = 0; i < a.length; i++) {
     const ai = a[i];
     const bi = b[i];
-    if (
-      !isNumber(ai) ||
-      !isNumber(bi) ||
-      ai.isFinite === false ||
-      bi.isFinite === false
-    )
-      return ce.error('expected-value');
-    terms.push(
-      ce.function('Power', [ce.function('Subtract', [ai, bi]), ce.number(2)])
-    );
+    // A coordinate that is not a number at all is a malformed point — a
+    // violated contract rather than a value — so it is an error. A non-finite
+    // coordinate is not malformed and is not an error: it has an in-band
+    // answer, given below.
+    if (!isNumber(ai) || !isNumber(bi)) return ce.error('expected-value');
+    legs.push(ce.function('Subtract', [ai, bi]).evaluate());
   }
+  // Because a distance is the norm of the difference, it obeys the norm rule:
+  // an infinite leg — signed, the unsigned `~oo`, or a directed infinity such
+  // as `∞ + i`, each of modulus `+∞` — makes the distance `+oo` whatever the
+  // other legs are, a NaN leg included; with no infinite leg, a NaN leg makes
+  // it NaN, which the arithmetic below reaches on its own. The test comes
+  // before the sum of squares for two reasons: folding `∞² + NaN` answers NaN
+  // and would lose the domination, and `(~oo)²` is `~oo`, whose square root is
+  // `~oo` rather than the `+oo` a norm must be. The compiled code answers
+  // the same way: it emits `Math.hypot`, and `Math.hypot(Infinity, NaN)` is
+  // `Infinity`.
+  if (hasInfiniteMagnitudeComponent(legs)) return ce.PositiveInfinity;
+  const terms = legs.map((leg) => ce.function('Power', [leg, ce.number(2)]));
   return ce
     .function('Sqrt', [ce.function('Add', terms)])
     .evaluate({ numericApproximation });

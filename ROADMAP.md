@@ -417,6 +417,48 @@ deliberately left out of that change.
   `Norm((~oo, 3))` is `+oo` while a `~oo` component never counts as
   infinite for `Hypot`'s precedence. Needs a ruling; both current
   boundaries are pinned in `test/compute-engine/type-handler-audit.test.ts`.
+  (RULED AND FIXED 2026-09-02, "IEEE everywhere": an infinite leg makes a
+  Euclidean norm `+oo` whatever the other legs are, a NaN leg included;
+  with no infinite leg, a NaN leg makes it NaN. "Infinite" means any
+  infinity — the signed `±∞`, the unsigned `~oo`, and a directed
+  infinity such as `∞ + i` — because the modulus of each is `+∞`. IEEE
+  754 states the same precedence for `Math.hypot(Infinity, NaN)`, which
+  is what the compiled lane emits. Sites: the `Norm` evaluate handler in
+  `src/compute-engine/library/linear-algebra.ts` short-circuits on the
+  shared helper `hasInfiniteMagnitudeComponent` before the norm-type
+  dispatch and before any folding, for the vector, list-of-points and
+  matrix branches; `Abs` of a point already delegates to `Norm`
+  (`library/arithmetic.ts`, unchanged); `Hypot` in
+  `src/compute-engine/library/trigonometry.ts` gains the shared helper
+  `hypotLegIsInfinite`, used by its evaluate AND `sgn` handlers, and its
+  parameter type widens from `real | signed_infinity` to
+  `real | infinity` so `Hypot(~oo, 3)` is admitted; `_SYS.norm` in
+  `src/compute-engine/compilation/javascript-target.ts` gains the same
+  scan, because its accumulator turned `∞² + NaN²` into `NaN` and the
+  compiled lane therefore disagreed. Pins: the `Hypot` corners in
+  `test/compute-engine/type-handler-audit.test.ts` moved to the new
+  values, and a new describe "Euclidean norms: an infinite leg dominates
+  a NaN leg" in `test/compute-engine/error-model.test.ts` covers `Norm`
+  of a tuple, a list and a matrix, `Abs` of a point and `Hypot`, over
+  `evaluate()`, `.N()` and the three construction routes. Fixed in the
+  same pass: a matrix operator norm silently skipped a column or row
+  whose sum was NaN — `Norm([[NaN, 1], [2, 3]], 1)` read 4, because
+  every comparison with NaN is false — where the compiled lane
+  propagated the NaN; both routes now answer NaN.
+  `Distance` was ruled into the same family later the same day, because
+  `Distance(p, q)` is `Norm(p − q)`: the `!isFinite` guard in
+  `pointDistance` (`library/arithmetic.ts`) answered
+  `Error("expected-value")` at every non-finite coordinate and is
+  removed, so `Distance((+oo, 0), (0, 0))` and `Distance((~oo, 0), (0,
+  0))` are `+oo`, `Distance((+oo, NaN), (0, 0))` is `+oo` and
+  `Distance((NaN, 0), (0, 0))` is NaN. The rule reads the coordinate
+  DIFFERENCES, so two equal infinite coordinates cancel to `∞ − ∞` and
+  give NaN; the type handler therefore demotes to the top numeric type
+  as soon as a coordinate is not proven finite, where `euclideanNormType`
+  may still say `real | +oo` for a plain norm. A non-NUMERIC coordinate
+  is still the malformed-point error. `_SYS.distance`'s scalar leg in
+  `compilation/javascript-target.ts` gained the same infinite-difference
+  scan, which it needed for the `(+oo, NaN)` corner alone.)
 - **No LaTeX parse route exists for annotated lambda parameters.**
   `ce.parse('(i: integer) \\mapsto 2i')` produces `Colon`/
   `unexpected-operator` output instead of an annotated parameter — a
@@ -429,6 +471,15 @@ deliberately left out of that change.
   `Which` with no diagnostic. Candidate fix: a validation-time `Error`
   operand for a provably-non-boolean condition, which would restore the
   diagnostic without reintroducing the throw.
+  (RULED AND FIXED 2026-09-02: the candidate fix, restricted to a
+  condition whose static type PROVES it is not a boolean — a number, a
+  string, a `NaN` literal, a symbol declared with such a type — which
+  becomes an `incompatible-type` error operand at boxing
+  (`conditionOperand`, `library/control-structures.ts`). A symbol of
+  unknown type stays inert by the 2026-08-31 ruling, so a misspelled
+  `Tru` is still a free variable and gets no hint; the hint returns for
+  every condition whose type refutes it. Pins in
+  `test/compute-engine/condition-diagnostic.test.ts`.)
 - **Interpreted and compiled `If`/`Which` fail closed differently.** The
   interpreter holds an undecidable condition inert; a compiled artifact
   still throws at run time (a compiled function must return a concrete
@@ -436,7 +487,83 @@ deliberately left out of that change.
   ever picked on an undecided condition — the divergence is only in the
   failure channel. Pinned as the shared requirement in
   `test/compute-engine/compile-elementwise-which.test.ts`. Aligning the
-  channels, if wanted, is a ruling.
+  channels, if wanted, is a ruling. (RULED AND FIXED 2026-09-02: the
+  entry misread the compiled lane, which did not throw — it picked a
+  branch by JavaScript truthiness. `If(x > 0, 1, -1)` answered `-1` at
+  `x = NaN`, because `NaN > 0` is an ordinary `false`; `If(b, 1, -1)`
+  answered `-1` for an unsupplied `b` and `1` for `b = "a"`. Only the
+  `_SYS.cond` guard on a NOT-provably-boolean condition threw, and a
+  comparison never reached it. A compiled `If`/`Which` whose condition is
+  not exactly `true` or `false` at run time now takes NO branch and
+  answers `NaN` — the numeric codomain's absence marker, the same value
+  the element-wise lowering gives a no-match cell. A STATEMENT-form `If`
+  — the `if (…) { … } else { … }` a loop or block body emits — has no
+  value to answer with, so the same rule reads there as "run NEITHER
+  branch and carry on with the next statement": no assignment inside it
+  happens and no `Break` under it fires, which is the interpreter's
+  inertness (ruled 2026-09-02 alongside the expression form).
+
+  Since a comparison answers a genuine `false` for a NaN operand, the
+  test is on the comparison's OPERANDS: `x === x` for every numeric
+  operand the compiler has not already reduced to a literal, plus
+  `x !== undefined` where the operand is a bare read of the vars object,
+  the only emitted fragment a caller can leave absent — an unsupplied `x`
+  used to take the else arm of `If(x > 0, 1, -1)` while `x + 1` on the
+  same vars object already answered `NaN`. The NaN test is NOT gated on
+  the operand's type: a static `real` promises no NaN, but the promise
+  does not survive an absent input, since `2 * undefined` is NaN and
+  `If(2r > 0, 1, -1)` then answered the else arm (ruled 2026-09-02, after
+  the exemption shipped and was measured worthless). A condition that is
+  not a relation is tested for `=== true` / `=== false` on its value.
+  Measured cost of the tests in a warm kernel: below noise, within
+  0.09 ns on a 3.8 ns/call loop body. `And`/`Or` are NOT guarded: a
+  decided `false` operand decides an `And` however its siblings turn out,
+  which the emitted `&&` already reproduces, but the case where every
+  operand a connective reaches is undecided still picks a branch — see
+  the open item below.)
+
+### Open items from the undecided-condition ruling (2026-09-02)
+
+The ruling ("a compiled `If`/`Which` whose condition is not exactly `true`
+or `false` at run time takes no branch") is implemented for the
+JavaScript-family lowering of both the expression form and the statement
+form (`BaseCompiler.conditionDecidability`). Two reaches of it are open.
+
+- **A logical connective in condition position is still decided by
+  truthiness.** SCHEDULED 2026-09-02 (Arno): a three-valued lowering of
+  the connectives, its own session after the Phase F batches 11 and 13.
+  `If(x > 0 && y > 0, 1, -1)` at `x = 1, y = NaN` compiles to
+  `(0 < _.x && 0 < _.y) ? 1 : -1`, whose `&&` answers `false`, so the
+  else arm is taken; the interpreter holds the `If`. The short-circuit
+  cases already agree (a decided `false` operand decides an `And`
+  whatever its siblings do), so only the "every operand reached is
+  undecided" case diverges. Closing it needs the value AND the
+  decidedness of each operand combined by the Kleene table, which the
+  current one-pass emitter cannot build without recompiling the operands
+  outside their CSE regions.
+- **The GPU targets keep JavaScript-style selection.** Python IS aligned:
+  its `If`/`Which` entries share the compiler's decidability analysis and
+  answer `float('nan')` for an undecided condition
+  (`compilePythonBranch`, `compilation/python-target.ts`). GLSL and WGSL
+  are deliberately NOT aligned — the rule answers with NaN, and NaN
+  propagation is not guaranteed on every driver (a shader compiler may
+  assume operands are never NaN under fast-math, which is why the shader
+  targets already omit the `isAbsent` capability), so a NaN-valued
+  no-branch answer cannot be relied on there. Interval-JavaScript lowers
+  `If` to its own `_IA.piecewise` helper and is unaffected. `When` keeps
+  the truthiness test on every target: it is not a two-armed selection,
+  so the ruling has no arm to withhold.
+- **A compiled `Hypot` over a point whose component is a list does not
+  compile.** `Hypot(([1,2], 3), 4)` is one hypotenuse per element —
+  `[√26, √29]`, and the application declares `list<number>` — because
+  the inner list distributes into two points. A single `Math.hypot` call
+  cannot produce that, so the JavaScript target refuses the expression and
+  the engine falls back to interpretation, which answers correctly; a
+  fixed-arity point compiles normally, as one leg. Compiling the
+  broadcasting form needs the nested emission that keeps a point atomic,
+  which `Add` and `Multiply` already use for a point summed with a list of
+  points (`atomicTuple` in `BaseCompiler.tryCompileBroadcast`). `Norm`
+  refuses the same operand for the same reason.
 
 ### Open items from the Power signature flip and the may-marker ruling (2026-09-01)
 
@@ -454,6 +581,15 @@ deliberately left out of that change.
   `src/compute-engine/library/collections.ts` (`Length`) and sweep the
   sibling size operators (`Count`, `Dimensions`) for the same shape.
   Found while writing the 2026-09-01 may-marker ruling.
+  (RULED AND FIXED 2026-09-02: the Error channel. `Length` and `Count` of
+  a decided non-collection or of `Missing` answer one identical
+  `incompatible-type` Error, minted by the evaluate handler
+  (`nonCollectionSizeOperandError`, `library/collections.ts`) so that
+  `Length`'s `(any)` carrier — and the collection inference it gives an
+  undeclared argument — is unchanged; `Length(First([]))` is that Error.
+  `Dimensions` turned out not to exist as an operator (the measured
+  inertness was that of any undeclared head), and `Shape(5) = ()` keeps
+  its documented APL semantics. Pins in `error-model.test.ts`.)
 
 ### Doc-sweep triage (2026-08-29)
 

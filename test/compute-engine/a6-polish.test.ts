@@ -103,12 +103,15 @@ describe('A6 polish — operatorInfo gaps', () => {
     expect(ce.operatorInfo('Length')?.kind).toEqual('function');
   });
 
-  test('Length on a non-collection returns unevaluated', () => {
+  test('Length on a decided non-collection is an incompatible-type error', () => {
     const ce = new ComputeEngine();
     const expr = ce.expr(['Length', 5]).evaluate();
-    // Either stays unevaluated as ['Length', 5], or is an error expression.
-    // Critical: it must NOT be a finite integer result like 0 or NaN.
-    expect(expr.operator === 'Length' || expr.operator === 'Error').toBe(true);
+    // The number 5 refutes the collection contract, and a decided question
+    // may not be answered by staying inert (docs/ERROR-MODEL.md §1), so the
+    // answer is the same `incompatible-type` error `Count(5)` gives. It must
+    // NOT be a finite integer result like 0, nor NaN, nor the inert form.
+    expect(expr.operator).toEqual('Error');
+    expect(expr.toString()).toContain('incompatible-type');
   });
 
   test('Length on an infinite collection returns unevaluated', () => {

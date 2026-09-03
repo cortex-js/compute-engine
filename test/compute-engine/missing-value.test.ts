@@ -202,9 +202,9 @@ describe('P1 — out-of-band access markers (§3.C)', () => {
 
   test('First / Last of an empty or out-of-band position is the marker', () => {
     expect(isMarker(ce.box(['First', ['List']]).evaluate())).toBe(true);
-    expect(
-      isMarker(ce.box(['Third', ['List', { str: 'a' }]]).evaluate())
-    ).toBe(true);
+    expect(isMarker(ce.box(['Third', ['List', { str: 'a' }]]).evaluate())).toBe(
+      true
+    );
   });
 
   test('First(list<integer>) : integer | nan (T | marker(T), additive)', () => {
@@ -309,7 +309,11 @@ describe('P2 — strip & absorption (§3.B, propagate)', () => {
   });
 
   test('Add(Missing, matrix) — every cell NaN', () => {
-    const m = ce.box(['Add', 'Missing', ['List', ['List', 1, 2], ['List', 3, 4]]]);
+    const m = ce.box([
+      'Add',
+      'Missing',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+    ]);
     expect(m.type.toString()).toBe('matrix<2x2>');
     const v = m.evaluate();
     for (const row of v.each())
@@ -369,7 +373,9 @@ describe('P2 — runtime gate: element level & short path (§3.E)', () => {
 
   test('short-path parity: box / function / _fn all give NaN', () => {
     expect(ce.box(['Add', 'Missing', 1]).evaluate().isNaN).toBe(true);
-    expect(ce.function('Add', [ce.Missing, ce.One]).evaluate().isNaN).toBe(true);
+    expect(ce.function('Add', [ce.Missing, ce.One]).evaluate().isNaN).toBe(
+      true
+    );
     expect(ce._fn('Add', [ce.Missing, ce.One]).evaluate().isNaN).toBe(true);
   });
 
@@ -418,7 +424,9 @@ describe('P2 — pass-through does not strip (§3.A)', () => {
 
 describe('P2 — compile: absence capability & gates (§3.F)', () => {
   // Import lazily to keep the P0/P1 sections dependency-free.
-  const { compile } = require('../../src/compute-engine/compilation/compile-expression');
+  const {
+    compile,
+  } = require('../../src/compute-engine/compilation/compile-expression');
 
   test('Add(x:number|missing, 1) compiles guard-free to native x+1', () => {
     const e = new ComputeEngine();
@@ -509,13 +517,13 @@ describe('P3 — aggregate absent-datum / empty-input gate (§3.C)', () => {
 
   test('a scalar Missing datum ⇒ NaN (both call shapes)', () => {
     expect(ce.box(['Max', 1, 'Missing', 3]).evaluate().isNaN).toBe(true);
-    expect(
-      ce.box(['Max', ['List', 1, 'Missing', 3]]).evaluate().isNaN
-    ).toBe(true);
+    expect(ce.box(['Max', ['List', 1, 'Missing', 3]]).evaluate().isNaN).toBe(
+      true
+    );
     expect(ce.box(['Mean', 1, 'Missing', 3]).evaluate().isNaN).toBe(true);
-    expect(
-      ce.box(['Mean', ['List', 1, 'Missing', 3]]).evaluate().isNaN
-    ).toBe(true);
+    expect(ce.box(['Mean', ['List', 1, 'Missing', 3]]).evaluate().isNaN).toBe(
+      true
+    );
   });
 
   test('a NaN datum ⇒ NaN', () => {
@@ -563,9 +571,12 @@ describe('P3 — aggregate absent-datum / empty-input gate (§3.C)', () => {
 
   test('an ordinary (absence-free) aggregate is unchanged', () => {
     expect(ce.box(['Max', 2, 3]).evaluate().toString()).toBe('3');
-    expect(ce.box(['Mean', ['List', 1, 2, 3, 4]]).evaluate().toString()).toBe(
-      '5/2'
-    );
+    expect(
+      ce
+        .box(['Mean', ['List', 1, 2, 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('5/2');
     // Exact non-absent data stays exact (no numericization).
     expect(ce.box(['Max', 2, 3]).evaluate().isExact).toBe(true);
   });
@@ -637,7 +648,10 @@ describe('P3 — Coalesce (§3.D)', () => {
 
     // Flat: neither tail operand runs.
     expect(
-      e.box(['Coalesce', 'u', ['trace', 1], ['trace', 2]]).evaluate().toString()
+      e
+        .box(['Coalesce', 'u', ['trace', 1], ['trace', 2]])
+        .evaluate()
+        .toString()
     ).toBe('Coalesce(u, trace(1), trace(2))');
     expect(ran).toEqual([]);
 
@@ -654,7 +668,10 @@ describe('P3 — Coalesce (§3.D)', () => {
     // A DECIDED first operand still short-circuits the whole tail.
     ran.length = 0;
     expect(
-      e.box(['Coalesce', 7, ['trace', 1], ['trace', 2]]).evaluate().toString()
+      e
+        .box(['Coalesce', 7, ['trace', 1], ['trace', 2]])
+        .evaluate()
+        .toString()
     ).toBe('7');
     expect(ran).toEqual([]);
   });
@@ -674,7 +691,10 @@ describe('P3 — Coalesce (§3.D)', () => {
 
   test('box AND parse routes both work (lazy + canonical trap)', () => {
     expect(
-      ce.box(['Coalesce', ['At', ['List', 10, 20], 9], 0]).evaluate().toString()
+      ce
+        .box(['Coalesce', ['At', ['List', 10, 20], 9], 0])
+        .evaluate()
+        .toString()
     ).toBe('0');
     expect(
       ce
@@ -687,7 +707,10 @@ describe('P3 — Coalesce (§3.D)', () => {
   test('Coalesce over an out-of-band access discharges the hole', () => {
     // numeric hole (NaN) discharged to 0
     expect(
-      ce.box(['Coalesce', ['At', ['List', 10, 20], 9], 0]).evaluate().toString()
+      ce
+        .box(['Coalesce', ['At', ['List', 10, 20], 9], 0])
+        .evaluate()
+        .toString()
     ).toBe('0');
     // object hole (Missing) discharged to "d"
     expect(
@@ -711,7 +734,9 @@ describe('P3 — relational absence: IEEE over NaN, Kleene over Missing (§3.D, 
   });
 
   test('NotEqual: Missing is Kleene (Missing), NaN is IEEE (True)', () => {
-    expect(ce.box(['NotEqual', 'Missing', 1]).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['NotEqual', 'Missing', 1]).evaluate().symbol).toBe(
+      'Missing'
+    );
     expect(ce.box(['NotEqual', 'NaN', 'NaN']).evaluate().symbol).toBe('True');
     expect(ce.box(['NotEqual', 'NaN', 2]).evaluate().symbol).toBe('True');
     expect(ce.box(['NotEqual', 2, 3]).evaluate().symbol).toBe('True');
@@ -856,7 +881,10 @@ describe('P3 — compile discharge (§3.F)', () => {
     );
 
     // GPU: compiles guard-free (previously failed closed on the result's arm).
-    const r = compile(e.box(['Equal', 'a', 'b']), { to: 'glsl', fallback: true });
+    const r = compile(e.box(['Equal', 'a', 'b']), {
+      to: 'glsl',
+      fallback: true,
+    });
     expect(r.success).toBe(true);
     expect(r.code).not.toMatch(/isnan/);
   });
@@ -907,7 +935,10 @@ describe('P3 — compile discharge (§3.F)', () => {
   test('IsMissing on a GPU target (no isAbsent) is a compile error', () => {
     const e = new ComputeEngine();
     e.declare('x', 'number | missing');
-    const r = compile(e.box(['IsMissing', 'x']), { to: 'glsl', fallback: true });
+    const r = compile(e.box(['IsMissing', 'x']), {
+      to: 'glsl',
+      fallback: true,
+    });
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/isAbsent|absence|Fail closed/i);
   });
@@ -944,18 +975,20 @@ describe('P3 — absent If/Which condition is a catchable error expression (reso
     expect(r.re).toBe(2);
   });
 
-  test('a not-a-boolean-at-all condition holds the If, and does not crash the host', () => {
+  test('a not-a-boolean-at-all condition is an error operand, and does not crash the host', () => {
     // Absence is not the only condition the engine refuses to branch on: a
-    // condition that can never BE a boolean — the number 3, a misspelled
-    // symbol — is held instead (undecidable-condition ruling 2026-08-31).
-    // This used to raise a host exception carrying a spell-check hint; that
-    // hint is gone, and the two kinds of unbranchable condition now differ
-    // only in channel. `Missing` is a decided data state that can never
-    // resolve, so it is an error EXPRESSION; a non-boolean may still become
-    // one under substitution, so it is inertness.
-    const r = ce.box(['If', 3, 1, 2]).evaluate();
-    expect(r.operator).toBe('If');
-    expect(r.op1.isSame(3)).toBe(true);
+    // condition whose TYPE proves it can never be a boolean — the number 3
+    // — is an `incompatible-type` error operand at boxing (ruling
+    // 2026-09-02), propagated as the condition's error at evaluation. This
+    // used to raise a host exception carrying a spell-check hint, then (ruling
+    // 2026-08-31) stayed inert. `Missing` is a decided data state that can
+    // never resolve, so it is an error EXPRESSION at evaluation; a symbol of
+    // unknown type may still become a boolean, so it alone keeps inertness.
+    const boxed = ce.box(['If', 3, 1, 2]);
+    expect(boxed.errors).toHaveLength(1);
+    const r = boxed.evaluate();
+    expect(r.operator).toBe('Error');
+    expect(ce.box(['If', 'stillUnknown', 1, 2]).evaluate().operator).toBe('If');
   });
 
   test('an undecided symbolic condition still holds the If (unchanged)', () => {

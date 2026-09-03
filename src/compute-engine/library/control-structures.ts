@@ -9,8 +9,10 @@ import {
   tuplePatternNames,
 } from '../boxed-expression/tuple-pattern.js';
 import {
+  broadcastCellType,
   broadcastElementType,
   collectionElementType,
+  resolveTypeAlias,
   resolveTypeForCompilation,
   widen,
 } from '../../common/type/utils.js';
@@ -22,11 +24,13 @@ import {
   isUnresolvedCollectionOperand,
   isTuple,
   isTupleShapedType,
+  typeCouldBeCollection,
+  typeCouldBeUnkeyedCollection,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { isValidType } from '../../common/type/primitive.js';
 import { reduceType } from '../../common/type/reduce.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
@@ -182,11 +186,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       canonical: (ops, { engine }) =>
         engine._fn(
           'If',
-          // The condition (op 0) is an ordinary expression; the then/else
+          // The condition (op 0) is an ordinary expression, checked for a
+          // provably non-boolean type (`conditionOperand`); the then/else
           // branches (ops 1+) are statement positions, so reject a bare
           // `Break`/`Continue` symbol there.
           ops.map((op, i) =>
-            i === 0 ? op.canonical : canonicalStatement(engine, op)
+            i === 0
+              ? conditionOperand(engine, op.canonical)
+              : canonicalStatement(engine, op)
           )
         ),
       evaluate: (ops, options) => {
@@ -605,9 +612,16 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               'needs an even number of operands. Write an unconditional ' +
               'default clause as a `True` condition: `Which(cond, a, True, b)`'
           );
+        // The even positions are conditions, checked for a provably
+        // non-boolean type (`conditionOperand`); the odd positions are the
+        // values, canonicalized as written.
         return options.engine._fn(
           'Which',
-          args.map((x) => x.canonical)
+          args.map((x, i) =>
+            i % 2 === 0
+              ? conditionOperand(options.engine, x.canonical)
+              : x.canonical
+          )
         );
       },
       evaluate: (ops, options) => evaluateWhich(ops, options),
@@ -807,6 +821,66 @@ function whenCollectionHandlers(): CollectionHandlers {
  * decidable, so branching on it is a genuine fault and yields an error
  * expression the host can render or catch.
  */
+/**
+ * The canonical form of an `If`/`Which` condition: the condition itself, or
+ * an `incompatible-type` error operand when its static type PROVES it is
+ * not a boolean.
+ *
+ * A condition that is a number, a string, or a symbol declared with a type
+ * disjoint from `boolean` (`If(10, a, b)`, `Which("banana", 1, True, 2)`,
+ * `If(n, a, b)` for `n: integer`) can never select a branch, so the mistake
+ * is reported at boxing, exactly as a wrong-typed argument to `Sin` is: the
+ * condition becomes `Error(incompatible-type, boolean, <type>)`, which the
+ * evaluate handlers then propagate as the condition's error, because the
+ * condition is a demanded operand (`docs/ERROR-MODEL.md` §3 "Propagation").
+ *
+ * Everything that is NOT proven non-boolean is left alone, because it may
+ * still resolve: a symbol of unknown type (an undeclared `Tru` is a free
+ * variable that may be assigned later), a relation with free variables, a
+ * `missing`-admitting type (an absent condition is a catchable runtime
+ * error, not a boxing error), and a collection or possibly-collection type
+ * whose cells could be condition values (a list of booleans selects
+ * element-wise, `docs/BROADCAST-MODEL.md` §"The rule").
+ *
+ * The element-wise carrier is narrow — an indexed or broadcastable
+ * collection whose cells are `True`/`False`/`Missing` (`conditionCells`) —
+ * so a collection type is exempt only when its cell type could overlap
+ * `boolean | missing`. A tuple (a point binds whole and never selects), a
+ * set, a dictionary or a record, a string (its cells are characters), and an
+ * indexed collection with provably non-boolean cells (`list<number>`,
+ * `range`, `number | list<number>`) are refused like a scalar. A bare kind
+ * or an `unknown`-element collection (`list`, `list<unknown>`) stays inert.
+ */
+function conditionOperand(ce: ComputeEngine, cond: Expression): Expression {
+  const t = cond.type;
+  if (!cond.isValid || t.isUnknown) return cond;
+  const type = t.type;
+  const refuse = () => ce.typeError('boolean', t, cond);
+  if (isSubtype(type, 'string') || isTupleShapedType(type)) return refuse();
+  if (typeCouldBeCollection(type) || typeCouldBeUnkeyedCollection(type)) {
+    const r = resolveTypeAlias(type);
+    const kind = typeof r === 'string' ? r : r.kind;
+    if (kind === 'set' || kind === 'dictionary' || kind === 'record')
+      return refuse();
+    // The cell type, every rank unwrapped and a union descended per arm; a
+    // bare kind answers `unknown`, which nothing is disjoint from. An EMPTY
+    // collection types its cells `never`, which is disjoint from everything,
+    // yet it has no cell to contradict a condition and broadcasts to an
+    // empty result, so it is not refused.
+    const cell = broadcastCellType(type);
+    if (
+      cell !== 'never' &&
+      provablyDisjoint(cell, 'boolean') &&
+      provablyDisjoint(cell, 'missing')
+    )
+      return refuse();
+    return cond;
+  }
+  if (isSubtype('missing', type)) return cond;
+  if (!provablyDisjoint(type, 'boolean')) return cond;
+  return refuse();
+}
+
 function absentConditionError(ce: ComputeEngine): Expression {
   return ce.error(
     'The condition is absent (`Missing`). Discharge absence with ' +
@@ -1363,8 +1437,7 @@ function canonicalBlock(
         if (source !== undefined) {
           try {
             const parsed = parseType(source, ce._typeResolver);
-            if (isValidType(parsed))
-              declaredTypes.set(nameExpr.symbol, parsed);
+            if (isValidType(parsed)) declaredTypes.set(nameExpr.symbol, parsed);
           } catch {
             // Not a type expression (e.g. a mistyped name): leave the
             // binding `unknown`; the `Declare` evaluate handler reports the

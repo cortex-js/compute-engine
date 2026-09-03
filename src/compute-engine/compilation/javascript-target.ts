@@ -242,7 +242,14 @@ const JAVASCRIPT_CONSTANTS: Record<string, string> = {
  * `CompileTarget.reservedEmittedNames`. (The vars object `_` is handled
  * separately — `varsObjectName` — because it needs a narrower rename rule.)
  */
-const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set(['_SYS']);
+const JS_RESERVED_EMITTED_NAMES: ReadonlySet<string> = new Set([
+  '_SYS',
+  // The arrow parameter an `If`/`Which` binds its condition to when the
+  // condition must be inspected twice — once against `true`, once against
+  // `false` (`BaseCompiler.exactSelect`). A user parameter of the same name
+  // inside an arm would be shadowed by it, so it is renamed on the way in.
+  '_CND',
+]);
 
 /**
  * The compile modes the JavaScript target offers (`CompileMode`): all three.
@@ -4239,7 +4246,49 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Trigonometric
   Arctan2: 'Math.atan2',
-  Hypot: 'Math.hypot',
+  // A point operand is one leg of the hypotenuse, not a pair of legs: it
+  // enters the sum of squares through its own norm, so `Hypot((3, 4), 1)` is
+  // √(‖(3,4)‖² + 1²) = √26. That is what the interpreter computes — its
+  // `Hypot` handler builds `Square(Norm(point))` (`library/trigonometry.ts`)
+  // — and passing the point's norm as a leg reproduces it, because
+  // `Math.hypot(‖p‖, y)` is √(‖p‖² + y²).
+  //
+  // The norm is computed by `_SYS.norm` rather than by splicing the point's
+  // components into the call, for two reasons: it also serves an operand
+  // typed as a point without being a literal one, and it already treats an
+  // infinite component as dominating a NaN one. `Math.hypot` treats the
+  // remaining legs the same way, so the two agree — `Hypot((+∞, NaN), 5)` is
+  // `+∞` and `Hypot((NaN, 3), 5)` is NaN.
+  //
+  // A point reaches this handler only because
+  // `BaseCompiler.tryCompileBroadcast` leaves a point in `Hypot` position
+  // alone; otherwise each component would be paired with the other leg. When
+  // the element-wise broadcast does apply — a list operand, or a point whose
+  // component is a list — this handler is invoked on the closure's element
+  // parameters instead, which are plain numbers, and it produces an ordinary
+  // `Math.hypot(...)` call.
+  Hypot: (args, compile) => {
+    const leg = (a: Expression): string => {
+      const t = jsType(a);
+      const code = compile(a);
+      if (typeof t === 'string' || t.kind !== 'tuple') return code;
+      // A point whose component is itself a collection produces one point per
+      // element at evaluation, and therefore one hypotenuse per element. The
+      // call below computes a single number, which would disagree with both
+      // the interpreter and the `list<number>` type this application declares.
+      // Refuse to compile it, exactly as `Norm` refuses the same operand, so
+      // the engine falls back to interpretation. Compiling it needs the nested
+      // broadcast that keeps a point atomic, which `Add` and `Multiply` use
+      // for a point summed with a list of points.
+      if (pointHasBroadcastComponent(a))
+        throw new Error(
+          'Hypot: cannot compile a point with a broadcasting component. ' +
+            'Fail closed (D6).'
+        );
+      return `_SYS.norm(${code})`;
+    };
+    return `Math.hypot(${args.map(leg).join(', ')})`;
+  },
   Degrees: ([x], compile) => {
     if (x === null) throw new Error('Degrees: no argument');
     return `(${compile(x)} * Math.PI / 180)`;
@@ -5128,6 +5177,17 @@ const colorHelpers = {
       if (typeof a[i] !== 'number' || typeof b[i] !== 'number')
         throw new Error('Distance: expected points (flat numeric arrays)');
       const d = a[i] - b[i];
+      // An infinite coordinate difference makes the distance `+∞` whatever
+      // the other differences are, a NaN one included. Every Euclidean norm
+      // follows that rule, and `Math.hypot(Infinity, NaN)` answers `Infinity`
+      // for the same reason. The test must be explicit because the sum below
+      // cannot express it: `Infinity² + NaN²` is `NaN`, so without this line
+      // `Distance((∞, NaN), (0, 0))` is `NaN` and disagrees with the
+      // interpreter. Summing the squares by hand rather than calling
+      // `Math.hypot` is deliberate — this helper runs once per point over a
+      // point cloud, and the loop is cheaper. `_SYS.norm` repeats the same
+      // test for the same reason.
+      if (d === Infinity || d === -Infinity) return Infinity;
       sumSq += d * d;
     }
     return Math.sqrt(sumSq);
@@ -6428,8 +6488,27 @@ const SYS_HELPERS = {
   norm: (x: unknown, p?: number): number => {
     if (typeof x === 'number') return Math.abs(x);
     if (!Array.isArray(x)) return NaN;
+    const flat = x.flat(Infinity) as number[];
+    // An infinite entry makes the norm `+∞` whatever the other entries are, a
+    // NaN entry included: `|±∞|` is `+∞`, and it dominates every sum and every
+    // maximum below. The test must be explicit because the accumulators cannot
+    // express it — `Infinity² + NaN²` is `NaN`, and `Math.max(Infinity, NaN)`
+    // is `NaN` — so without it the result is `NaN` where the interpreter and
+    // `Math.hypot(Infinity, NaN)` both answer `Infinity`. It applies to the
+    // matrix operator norms too, so that the column or row carrying the
+    // infinity never decides the answer on its own. Each order consults it
+    // only after accepting the order, so that an entry cannot turn an order
+    // this helper does not implement into one it answers. The rule is recorded
+    // in `docs/ERROR-MODEL.md`.
+    const hasInfiniteEntry = flat.some(
+      (v) => v === Infinity || v === -Infinity
+    );
     if (Array.isArray(x[0]) && p !== undefined) {
       const m = x as number[][];
+      // The matrix orders below are the max column sum and the max row sum;
+      // any other one is NaN whatever the entries are.
+      if (p !== 1 && p !== Infinity) return NaN;
+      if (hasInfiniteEntry) return Infinity;
       if (p === 1) {
         let best = 0;
         for (let j = 0; j < m[0].length; j++) {
@@ -6450,7 +6529,23 @@ const SYS_HELPERS = {
       }
       return NaN;
     }
-    const flat = x.flat(Infinity) as number[];
+    // The vector orders this helper implements are the L∞ maximum and the
+    // p-norms for `p > 0`; with no `p` the order is 2. Any other order —
+    // `p = 0`, a negative `p`, a NaN `p` — has no value here, so the result is
+    // NaN, which is how compiled code spells an absent number. An unsupported
+    // matrix order above answers the same way, and the interpreter leaves such
+    // an application unevaluated (`vectorNorm`,
+    // `library/linear-algebra.ts`). Without this line the general accumulator
+    // returns whatever `(Σ|xᵢ|^p)^(1/p)` happens to produce, which for `p = 0`
+    // is `+∞` on a two-element vector and for a negative `p` an ordinary
+    // number.
+    //
+    // The order is checked before the infinite-entry test above, for the same
+    // reason the matrix branch checks it first: otherwise the data would be
+    // what makes an unsupported order answer, and `norm([+∞], 0)` would be
+    // `+∞` while `norm([1], 0)` is NaN.
+    if (p !== undefined && !(p === Infinity || p > 0)) return NaN;
+    if (hasInfiniteEntry) return Infinity;
     if (p === Infinity) {
       let m = 0;
       for (const v of flat) m = Math.max(m, Math.abs(v));

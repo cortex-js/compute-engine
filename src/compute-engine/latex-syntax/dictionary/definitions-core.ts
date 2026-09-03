@@ -4962,8 +4962,15 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
       result.push(row[0]);
     } else if (row.length === 2) {
       const s = stringValue(row[1]);
-      // If a string, probably 'else' or 'otherwise'
-      result.push(s ? 'True' : (stripText(row[1]) ?? 'True'));
+      // A text cell (`otherwise`, `else`) is the default clause. So is an
+      // empty condition cell — a row written `3x^2 & \\` with a trailing
+      // `&` — which the tabular parser hands over as `Nothing`, the erasure
+      // marker, not as an absent element. `Nothing` is not a boolean, so a
+      // row that keeps it gives `Which` a condition that never holds, and
+      // boxing reports an `incompatible-type` error. Map it to `True`, the
+      // default clause the notation means.
+      const cond = s ? null : stripText(row[1]);
+      result.push(cond === null || cond === 'Nothing' ? 'True' : cond);
       result.push(row[0]);
     }
   }

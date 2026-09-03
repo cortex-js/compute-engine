@@ -134,9 +134,15 @@ main tree as unstaged changes). Pins:
       pass unchanged; new pins exercise precise-carrier pilots
       (propagate admission+evaluation, derived reject, explicit handle,
       reject-beats-propagate composition, sibling evaluation counts).
-- [ ] Full-suite blast radius measured and reported (expected ~0: no
-      shipped signature uses precise carriers yet). BLOCKED on the box
-      lock at the time of writing; run before staging is called done.
+- [x] Full-suite blast radius measured and reported. The "~0" premise was
+      wrong (the Claude review leg caught it): already-shipped precise
+      carriers bound the derived policy, and `Degrees(NaN)`,
+      `Haversine`/`InverseHaversine`/`Hypot`/`PrimePi × NaN` flipped from
+      an `incompatible-type` Error to NaN. Pinned as intended in
+      `error-model-declarations.test.ts`; the fuzz gained a
+      `nan-propagated` outcome; CHANGELOG names the change. Every later
+      phase re-measured the full suite (Phase C: 641/641, snapshot delta
+      0; Phase E: 644/644).
 
 ### Phase C — the derived application type
 
@@ -1518,8 +1524,45 @@ own measured change governed by `docs/SIGNATURE-GUIDELINES.md`, because a
 precise carrier changes admission: post-flip `real` excludes `±oo`, so
 `Heaviside(±oo)` (today `1`/`0`) becomes an `Error` unless the carrier is
 spelled `real | +oo | -oo`. Every flip must measure its snapshot blast
-radius and decide the extended-value spelling explicitly. Not started —
-and deliberately not part of the machinery phases.
+radius and decide the extended-value spelling explicitly. Not part of the
+machinery phases; batches 2–10 are recorded above.
+
+**Batches 11–14 SCHEDULED 2026-09-02 (Arno), each its own measured
+session.** Measured before scheduling by walking the library scope: 384
+numeric-carrier heads, 93 with an explicit `nanBehavior`, the rest on the
+derived default; the heads below still sit on a bare `(number)` or
+`(value)` carrier where a precise domain exists.
+
+- **Batch 11 — the arithmetic core**: `Divide`, `Negate`, `Square`,
+  `Clamp`, `ElementMax`, `ElementMin`. Canonical-handler heads: the
+  enforcement seam is the evaluate handler, as with `Power` (batch 6), and
+  `canonicalDivide`/`canonicalNegate` must stop folding off-carrier points
+  at boxing.
+- **Batch 12 — combinatorial and regularized special functions**:
+  `Binomial`, `Pochhammer`, `GammaRegularized`, `BetaRegularized`. Each
+  limit at an infinite argument verified numerically before encoding (the
+  batch-8 discipline: one sample is a lapse).
+- **Batch 13 — linear-algebra scalars**: `Norm`, `Trace`, `MatrixPower`,
+  `Determinant`. `Norm` carries the 2026-09-02 ruling that an infinite
+  leg dominates a NaN leg and `~oo` counts as infinite (shipped for the
+  value the same day; the carrier flip is this batch).
+- **Batch 14 — statistics and distributions**: `Mean` … `Correlation` on
+  `(collection)`, `NormalDistribution` … `ExponentialDistribution`,
+  `PDF`, `CDF`, `Quantile`.
+- The color heads (`Rgb`, `Hsv`, `Hsl`, `Oklab`, `Oklch`, `ColorMix`)
+  keep their bespoke NaN meaning and must declare `nanBehavior: 'handle'`
+  in the same change whenever they flip (the "known hazards" entry
+  below).
+- **After batches 11 and 13 — the three-valued lowering of compiled
+  `And`/`Or`/`Not` (scheduled 2026-09-02, Arno).** A compiled connective
+  in condition position still short-circuits by JavaScript logic when
+  every reached operand is undecided (`If(x > 0 && y > 0, a, b)` at
+  `x = 1, y = NaN` takes the else arm), while a lone relation now yields
+  NaN. Operands must compile to true/false/undefined and combine by the
+  Kleene tables, which the one-pass emitter cannot do without rebuilding
+  operands outside their CSE regions: a compiler design change, its own
+  session. ROADMAP entry: "Open items from the undecided-condition ruling
+  (2026-09-02)".
 
 ## Known hazards, recorded before they bite
 

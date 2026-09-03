@@ -119,9 +119,10 @@ describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
   // handler (ruling L9(a) of the numeric-lattice ratification:
   // signature-level rejection is the declared contract doing its job).
   // `Hypot` is the exception, and the reason the exception exists: its value
-  // at an infinite argument is well defined, so it declares the extended real
-  // line instead (see its own test below). The finite-argument claims below
-  // are unchanged, and they are what these heads exist to describe.
+  // at an infinite argument is well defined, so it declares the finite reals
+  // plus every infinity instead (see its own test below). The finite-argument
+  // claims below are unchanged, and they are what these heads exist to
+  // describe.
   it('Haversine rejects a non-finite argument at the signature', () => {
     expect(typeOf(['Haversine', 'PositiveInfinity'])).toBe('error');
     expect(typeOf(['Haversine', 2])).toBe('real');
@@ -142,12 +143,14 @@ describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
     expectSound(['InverseHaversine', 2.5]);
   });
 
-  it('Hypot admits a signed infinity: its carrier is the extended real line', () => {
+  it('Hypot admits every infinity: its carrier is `real | infinity`', () => {
     // `Hypot(2, ∞) = +∞` is a well-defined value, so the old `(real, real)`
     // parameters — finite since the lattice flip — cost a real capability
-    // rather than correcting a domain. The carrier is the extended real line
-    // now (user ruling 2026-08-31), so an infinite leg is admitted and makes
-    // the hypotenuse infinite whatever the other leg is.
+    // rather than correcting a domain. The carrier gained the signed
+    // infinities first (user ruling 2026-08-31), so an infinite leg is
+    // admitted and makes the hypotenuse infinite whatever the other leg is.
+    // The unsigned `~oo` joined them on 2026-09-02 ("IEEE everywhere"):
+    // `|~oo| = +∞`, so the hypotenuse is defined there too.
     expect(typeOf(['Hypot', 2, 'PositiveInfinity'])).toBe(
       'real | signed_infinity'
     );
@@ -195,24 +198,30 @@ describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
     expect(ce.box(['Hypot', ['Tuple', 3, 4], 'NaN']).evaluate().isNaN).toBe(
       true
     );
-    // A point that carries the NaN itself withholds it too: `Norm((∞, NaN))`
-    // answers `NaN` — the point's own NaN is not resolved inside the norm —
-    // and `Hypot` agrees with the norm it is defined through.
-    expect(
-      ce.box(['Hypot', ['Tuple', 'PositiveInfinity', 'NaN'], 2]).evaluate()
-        .isNaN
-    ).toBe(true);
-    // `~oo` proves nothing in a point either: it is not a signed real, so
-    // such a leg goes to the ordinary norm construction, unchanged.
-    expect(
-      ce.box(['Hypot', ['Tuple', 'ComplexInfinity', 3], 'NaN']).evaluate().isNaN
-    ).toBe(true);
+    // A point that carries a NaN alongside the infinity is infinite too:
+    // `Norm((∞, NaN))` is `+oo`, because an infinite component dominates a
+    // NaN component in every Euclidean norm (user ruling 2026-09-02), and
+    // `Hypot` agrees with the norm it is defined through.
+    expect(value(['Hypot', ['Tuple', 'PositiveInfinity', 'NaN'], 2])).toBe(
+      '+oo'
+    );
+    // `~oo` counts as an infinite component for the same reason: its modulus
+    // is `+∞`.
+    expect(value(['Hypot', ['Tuple', 'ComplexInfinity', 3], 'NaN'])).toBe(
+      '+oo'
+    );
     // The finite claim is unchanged, and it is what this head exists to
     // describe.
     expect(typeOf(['Hypot', 2, 3])).toBe('real');
-    // The carrier stops at the SIGNED infinities: `~oo` is not a signed real,
-    // so it is still refused at the signature.
-    expect(typeOf(['Hypot', 2, 'ComplexInfinity'])).toBe('error');
+    // A bare `~oo` leg is admitted by the carrier and norms to `+∞`.
+    expect(value(['Hypot', 2, 'ComplexInfinity'])).toBe('+oo');
+    expect(value(['Hypot', 'ComplexInfinity', 'NaN'])).toBe('+oo');
+    expect(ce.box(['Hypot', 2, 'ComplexInfinity']).type.toString()).not.toBe(
+      'error'
+    );
+    // The carrier stops at the infinities: a FINITE complex leg has no
+    // real-valued hypotenuse and is still refused at the signature.
+    expect(typeOf(['Hypot', 2, 'ImaginaryUnit'])).toBe('error');
   });
 
   it('Degrees of a non-real argument does not claim real', () => {

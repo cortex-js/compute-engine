@@ -62,10 +62,20 @@ describe('SCALAR NEWTYPE — pure erasure (D11 step A)', () => {
     ce.declareType('meters', 'number');
     ce.declare('x', 'number');
     ce.declare('y', 'number');
-    const tagged = ['If', ['Greater', 'x', 0], ['meters', 'x'], ['meters', 'y']];
+    const tagged = [
+      'If',
+      ['Greater', 'x', 0],
+      ['meters', 'x'],
+      ['meters', 'y'],
+    ];
     const plain = ['If', ['Greater', 'x', 0], 'x', 'y'];
     expect(jsCode(ce, tagged)).toBe(jsCode(ce, plain));
-    expect(jsCode(ce, tagged)).toBe('((0 < _.x) ? (_.x) : (_.y))');
+    // The condition operand is guarded against NaN and an unsupplied
+    // binding (compiled `If` takes no branch on an undecided condition,
+    // ruling 2026-09-02); the erasure of `meters` is what this pin is about.
+    expect(jsCode(ce, tagged)).toBe(
+      '((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? (_.x) : (_.y)) : NaN)'
+    );
     expect(glslCode(ce, tagged)).toBe(glslCode(ce, plain));
     expect(glslCode(ce, tagged)).toBe('((0.0 < x) ? (x) : (y))');
   });
@@ -484,9 +494,7 @@ describe('PARAMETERIZED NOMINAL — erasure at the INSTANTIATED body', () => {
     ce.declareType('tree', 'tuple<value: T, children: list<tree<T>>>', {
       typeParams: ['T'],
     });
-    expect(ce.box(['tree', 1, ['List']]).type.toString()).toBe(
-      'tree<integer>'
-    );
+    expect(ce.box(['tree', 1, ['List']]).type.toString()).toBe('tree<integer>');
     expect(jsCode(ce, ['tree', 1, ['List']])).toBe(
       jsCode(ce, ['Tuple', 1, ['List']])
     );
@@ -650,9 +658,12 @@ describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', ()
       ['Function', ['Add', ['Multiply', 4, 't'], 1], 't'],
     ] as never).evaluate();
     // The interpreter's answer for the same values.
-    expect(ce.box(['q', ['List', 1, 2, 3]] as never).evaluate().toString()).toBe(
-      '[5,9,13]'
-    );
+    expect(
+      ce
+        .box(['q', ['List', 1, 2, 3]] as never)
+        .evaluate()
+        .toString()
+    ).toBe('[5,9,13]');
     ce.declare('L', 'mylist');
     expect(ce.box('L').type.toString()).toBe('mylist');
     const r = compile(ce.box(['q', 'L'] as never), { fallback: false });
@@ -758,7 +769,10 @@ describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', ()
     ce.declare('B', 'bag');
     // The interpreter answers `incompatible-type`; no emitted form says that.
     expect(
-      ce.box(['k', ['bag', ['List', 1, 2, 3]]] as never).evaluate().toString()
+      ce
+        .box(['k', ['bag', ['List', 1, 2, 3]]] as never)
+        .evaluate()
+        .toString()
     ).toContain('incompatible-type');
     expect(() =>
       compile(ce.box(['k', 'B'] as never), { fallback: false })

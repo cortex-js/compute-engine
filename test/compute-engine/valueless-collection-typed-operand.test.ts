@@ -217,15 +217,22 @@ describe('a collection-TYPED but valueless operand', () => {
       expect(result.isCollection).toBe(true);
     });
 
-    // A condition that can never be boolean is held too — the same answer the
-    // undecided cases get, so the two cannot diverge (ruling 2026-08-31). What
-    // matters is that the `Which` does NOT fall through to the `True` clause
-    // and answer 2.
-    it('holds a condition that is not booleanish at all', () => {
+    // A condition whose TYPE proves it can never be boolean — a list of
+    // numbers has no cell that could be a condition value — is refused at
+    // boxing as an `incompatible-type` error operand, and evaluation answers
+    // that error. What matters is that the `Which` does NOT fall through to
+    // the `True` clause and answer 2. A collection whose cells could still be
+    // booleans (`list<unknown>`) is held, like every undecided condition.
+    it('refuses a condition that is not booleanish at all', () => {
       const ce = new ComputeEngine();
       ce.declare('N', 'list<number>');
-      const r = ce.box(['Which', 'N', 1, 'True', 2]).evaluate();
-      expect(r.operator).toBe('Which');
+      const boxed = ce.box(['Which', 'N', 1, 'True', 2]);
+      expect(boxed.errors).toHaveLength(1);
+      expect(boxed.evaluate().operator).toBe('Error');
+      ce.declare('U', 'list<unknown>');
+      expect(ce.box(['Which', 'U', 1, 'True', 2]).evaluate().operator).toBe(
+        'Which'
+      );
     });
   });
 

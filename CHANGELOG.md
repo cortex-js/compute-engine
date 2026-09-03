@@ -789,6 +789,133 @@
 
 ### Bug Fixes
 
+- **A provably non-boolean `If`/`Which` condition is reported at boxing.**
+  Since the 2026-08-31 inertness change, `Which(10, 1, True, 2)` or
+  `If(n, a, b)` with `n: integer` boxed with no diagnostic and evaluated to
+  itself, so a typo or a wrong operand in condition position was silent. A
+  condition whose static type is disjoint from `boolean` — a number, a
+  string, a `NaN` literal, a symbol declared with such a type — is now an
+  `incompatible-type` error operand at boxing, exactly as a wrong-typed
+  argument to `Sin` is, and evaluation propagates it as the condition's
+  error (`errors` lists it; no host exception). Everything that may still
+  resolve is unchanged and stays inert: a symbol of unknown type (a
+  misspelled `Tru` is a free variable), a relation with free variables, a
+  `boolean | missing` condition, and a collection whose cells could be
+  condition values (a list of booleans selects element-wise). A collection
+  that can never select — a tuple, a set, a string, a list of numbers — is
+  refused like a scalar. A later `Which` clause with such a condition is
+  reported at boxing but
+  never demanded when an earlier clause selects. The check exposed a
+  parser defect, fixed with it: a `\begin{cases}` row written with a
+  trailing `&` and an empty condition cell (`3x^2 & \\`) parsed to a
+  `Nothing` condition, a dead row that never selected; it is now the
+  `True` default clause, like the same row without the `&`.
+
+- **Native handler faults carry the `internal-error` code and a stack.** A
+  `TypeError`, `RangeError` or `ReferenceError` thrown inside a built-in
+  handler used to be converted to `Error("evaluation-error", message)`,
+  the same code a legitimate domain failure reports, so an engine bug was
+  indistinguishable from bad input and the stack was lost. It now converts
+  to `Error(ErrorCode("internal-error", message, stack))`, with the first
+  frames of the stack as the third part; the conversion itself (no host
+  exception) is unchanged. Consumers that matched the `evaluation-error`
+  code on such faults should match `internal-error`.
+
+- **`Length` and `Count` refuse a decided non-collection.** Asking for
+  the size of something that is not a collection is a violated contract,
+  not an open question. `Length(5)`, `Length(True)` and `Length(Missing)`
+  stayed inert and reported the type `integer`; `Count` refused a literal
+  at boxing but let an operand that only became `Missing` at evaluation
+  (`Count(First([]))`) stand as `Count(Error(...))`. Both operators now
+  answer one bare `Error(ErrorCode("incompatible-type", "collection",
+  ...))` for any operand whose value or type is provably disjoint from
+  `collection<any>` — a number, a boolean, a function literal, or the
+  `Missing` absence marker — on the `ce.box`, `ce.parse` and
+  `ce.function` routes alike, and for `Count` in its one-argument and
+  both two-argument forms. Strings are collections of characters, so
+  `Length("abc")` is still 3. An operand about which nothing is decided
+  keeps the inert form: an undeclared symbol, or a valueless symbol
+  declared `list<number>`, may still turn out to hold a collection. The
+  rule is that a decided question is never answered by inertness
+  (`docs/ERROR-MODEL.md` §1).
+
+- **An infinite leg now dominates a NaN leg in every Euclidean norm, and
+  `~oo` counts as infinite.** `Norm` and `Hypot` disagreed in both
+  corners: `Norm((+oo, NaN))` and `Norm([+oo, NaN])` answered `NaN`
+  while `Hypot(+oo, NaN)` answered `+oo`, and `Hypot(~oo, 3)` was an
+  `incompatible-type` error although `Norm((~oo, 3))` was already `+oo`.
+  One rule now covers them both: an infinite leg — the signed `±∞`, the
+  unsigned `~oo`, or a directed infinity such as `∞ + i`, each of
+  modulus `+∞` — makes the norm `+oo` whatever the other legs are; with
+  no infinite leg, a NaN leg makes it `NaN`. IEEE 754 states the same
+  precedence for the primitive the compiled lane emits
+  (`Math.hypot(Infinity, NaN)` is `Infinity`). This reaches `Norm` of a
+  point, of a list, of a list of points and of a matrix, `Abs` of a
+  point (which is that norm under the single-bar spelling), and every
+  `Norm` order (L1, L2/Frobenius, Lp, L∞). `Hypot`'s parameter type
+  widens from `real | signed_infinity` to `real | infinity`; a finite
+  complex leg is still refused. The compiled `Norm` lowering was
+  corrected to match, since its accumulator turned `∞² + NaN²` into
+  `NaN`. Also fixed alongside: a matrix operator norm (`Norm(M, 1)`,
+  `Norm(M, Infinity)`) silently skipped a column or row whose sum was
+  `NaN` and answered the maximum of the remaining ones —
+  `Norm([[NaN, 1], [2, 3]], 1)` read 4 — where the compiled lane
+  propagated the `NaN`; both routes now answer `NaN`.
+  `Distance` joins the family, since `Distance(p, q)` is `Norm(p − q)`.
+  It answered `Error("expected-value")` at every non-finite coordinate
+  and now gives the in-band value: `Distance((+oo, 0), (0, 0))` and
+  `Distance((~oo, 0), (0, 0))` are `+oo`, `Distance((+oo, NaN), (0, 0))`
+  is `+oo`, `Distance((NaN, 0), (0, 0))` is `NaN`, and a finite pair is
+  unchanged. The rule reads the coordinate DIFFERENCES, so two equal
+  infinite coordinates cancel to `∞ − ∞` and give `NaN`; a distance
+  between coordinates that are not proven finite therefore types the
+  wide `number`, where a plain norm of the same components can still say
+  `real | +oo`. A non-numeric coordinate is still the malformed-point
+  error.
+
+- **A compiled `If`/`Which` no longer picks a branch on an undecided
+  condition.** `compile(If(x > 0, 1, -1))` answered `-1` at `x = NaN`,
+  because JavaScript answers an ordinary `false` for `NaN > 0` and the
+  ternary read that as "take the else arm"; `compile(If(b, 1, -1))`
+  answered `-1` when the caller supplied no `b` and `1` for `b = "a"`,
+  reading the condition by JavaScript truthiness. The interpreter holds
+  all of these unevaluated. A compiled `If`/`Which` now takes a branch
+  only when its condition is exactly `true` or `false` at run time;
+  otherwise it answers `NaN` — the numeric codomain's absence marker,
+  and the same value the element-wise `Which` lowering already gives a
+  cell no clause matched. A result outside the numeric domain (a string,
+  a list) answers the target's object absence value (`undefined` on
+  JavaScript) instead.
+
+  The same applies when the caller leaves a variable out of the vars
+  object: `compile(If(x > 0, 1, -1)).run({})` answered `-1`, although
+  `compile(x + 1).run({})` has always answered `NaN`. It now answers
+  `NaN` too, for a variable of any declared numeric type, and so does a
+  condition that COMPUTES over an absent variable (`If(2r > 0, 1, -1)`).
+
+  A STATEMENT-form `If` — the `if (…) { … } else { … }` a loop or block
+  body emits — has no value to answer with, so the rule reads there as
+  "run NEITHER branch, and carry on with the next statement". An
+  assignment guarded by an undecided condition leaves its variable
+  untouched, a guarded `Break` does not fire, and the loop completes.
+  Both match the interpreter, which holds an undecidable `If` inert.
+
+  Because a comparison collapses an undecided answer into a genuine
+  `false`, the tests are on the comparison's OPERANDS: `x === x` (false
+  only for NaN) for every numeric operand the compiler has not already
+  reduced to a literal, and `x !== undefined` where the operand is a bare
+  variable read, the only emitted fragment a caller can leave absent. The
+  NaN test is deliberately not gated on the operand's type: a static
+  `real` type promises no NaN, but that promise does not survive an
+  absent input. A condition that is not a comparison is tested for
+  `=== true` / `=== false` on its own value. Measured cost in a warm
+  kernel: below noise, within 0.09 ns on a 3.8 ns/call loop body.
+
+  Not covered, and tracked in `ROADMAP.md`: a condition built with
+  `And`/`Or` (its short-circuit cases already agree with the
+  interpreter), and the Python, GPU and interval-JavaScript targets,
+  which lower `If`/`Which` themselves.
+
 - **The broadcast lift now sees through a transparent collection alias,
   and a lifted result is typed by its structure, never by the alias
   name.** With `ce.declareType('nums', 'list<number>', { alias: true })`

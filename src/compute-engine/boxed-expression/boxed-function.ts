@@ -7275,7 +7275,16 @@ function handlerThrowToErrorValue(
   // to `never` past the negation (the predicate names the whole class).
   const isUserFn: boolean = isUserFunctionDef(def);
   if (def.lazy === true || isUserFn) throw e;
-  return ce.error(['evaluation-error', e.message], operator);
+  // A native fault is an engine defect, never a property of the input, so it
+  // carries its own code, `internal-error`, distinct from the
+  // `evaluation-error` that a legitimate domain failure reports. It also
+  // carries the stack, so a bug report can be traced without re-running the
+  // crash. The stack is the third part of the `ErrorCode`, trimmed to its
+  // first frames: the full trace repeats the engine's dispatch frames and
+  // adds nothing to a report. See `docs/ERROR-MODEL.md` §1 "The response
+  // channels".
+  const stack = (e.stack ?? '').split('\n').slice(0, 8).join('\n');
+  return ce.error(['internal-error', e.message, stack], operator);
 }
 
 /**

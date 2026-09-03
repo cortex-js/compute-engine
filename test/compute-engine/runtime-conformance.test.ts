@@ -140,7 +140,13 @@ describe('handler crashes become error values (§4.4 hardening)', () => {
     });
     const result = ce.box(['crashy', 1]).evaluate();
     expect(result.isValid).toBe(false);
-    expect(result.toString()).toContain('evaluation-error');
+    // An engine fault carries its own code and its stack (user ruling
+    // 2026-09-02), distinct from the `evaluation-error` a domain failure
+    // reports, so a bug report can be told apart from bad input.
+    const text = result.toString();
+    expect(text).toContain('internal-error');
+    expect(text).not.toContain('evaluation-error');
+    expect(text).toContain('TypeError');
   });
 
   test('a deliberate plain-Error diagnostic still throws (predicate contract)', () => {

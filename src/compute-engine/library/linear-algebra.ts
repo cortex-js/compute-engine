@@ -40,6 +40,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { asRational, toInteger } from '../boxed-expression/numerics.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
+import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { euclideanNormType, pointNormType } from './utils.js';
 
 // Total number of elements (m·n) at or below which a constant matrix
@@ -61,6 +62,36 @@ const MAX_SIZE_EAGER_TENSOR = 10000;
  *  operator stays symbolic rather than materialize an unbounded list — the
  *  same bound `Distance`'s broadcast uses. */
 const MAX_POINT_LIST_NORM = 10000;
+
+/**
+ * Whether some component of a norm has an infinite magnitude, which makes the
+ * norm `+∞` whatever the other components are — a NaN component included.
+ *
+ * A norm sums the squared moduli of its components. `|·|` of any infinity is
+ * `+∞` (`|~∞| = +∞` by definition of the point at infinity, and `|∞ + i| = +∞`
+ * too), and an infinite magnitude dominates in the sum: IEEE 754 makes
+ * `Math.hypot(Infinity, NaN)` return `Infinity` for the same reason, and the
+ * compiled code follows that rule, so any other answer here would make the
+ * interpreter and the compiled code disagree. This test therefore runs BEFORE
+ * the sum of squares is formed: folding `∞² + NaN` would answer NaN and lose
+ * the domination.
+ *
+ * `infinitePoint` reads the numeric VALUE, so it accepts every infinity —
+ * `±∞`, `~∞` and an anonymous directed infinity such as `∞ + i` — and it
+ * answers `undefined` for NaN, for a finite literal, and for a component that
+ * is not a number literal at all (a symbol, a collection). A component whose
+ * infiniteness is merely unknown proves nothing and leaves the ordinary
+ * computation to decide.
+ *
+ * Exported because `Distance` obeys the same rule: `Distance(p, q)` is
+ * `Norm(p − q)`, so `pointDistance` (`library/arithmetic.ts`) asks this of the
+ * coordinate DIFFERENCES.
+ */
+export function hasInfiniteMagnitudeComponent(
+  components: readonly Expression[]
+): boolean {
+  return components.some((c) => infinitePoint(c) !== undefined);
+}
 
 /**
  * Build an m×n matrix as a fully-lazy nested `Tabulate`: an outer 1-D
@@ -1892,6 +1923,26 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // The norm of an empty vector is 0 for every norm type.
           if (elements.length === 0) return ce.Zero;
 
+          // A norm order this handler does not compute has no value, whatever
+          // the elements are, so the order is decided BEFORE the infinity
+          // dominance below: otherwise `Norm([+oo], 0)` would answer `+oo`
+          // where `Norm([1], 0)` stays inert, and the data would be what makes
+          // an unsupported order supported. The orders below are the p-norms
+          // for `p > 0` and the L∞ maximum; every other one reaches the
+          // `undefined` at the end of this function, which is what returns
+          // early here.
+          const supportedOrder =
+            normType === 'infinity' ||
+            (typeof normType === 'number' && normType > 0);
+          if (!supportedOrder) return undefined;
+
+          // An infinite component makes the norm `+∞` for each of those orders
+          // (each of `Σ|xᵢ|`, `√(Σ|xᵢ|²)`, `(Σ|xᵢ|^p)^(1/p)` and `max |xᵢ|` is
+          // infinite as soon as one term is), so the test comes before any
+          // folding.
+          if (hasInfiniteMagnitudeComponent(elements))
+            return ce.PositiveInfinity;
+
           if (normType === 1) {
             // L1 norm: sum of absolute values (one n-ary `add()` — an
             // incremental accumulator is quadratic in the element count)
@@ -2001,16 +2052,48 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (shape.length === 2) {
           const [m, n] = shape;
 
+          // A matrix norm order this handler does not compute — anything but
+          // the Frobenius norm (the default, and `p = 2`), the max column sum
+          // (`p = 1`) and the max row sum (`p = ∞`) — has no value, whatever
+          // the entries are, so the order is decided first: otherwise
+          // `Norm([[+oo]], 3)` would answer `+oo` where `Norm([[1]], 3)` stays
+          // inert, and the data would be what makes an unsupported order
+          // supported.
+          if (
+            normType !== 1 &&
+            normType !== 2 &&
+            normType !== 'frobenius' &&
+            normType !== 'infinity'
+          )
+            return undefined;
+
+          // The entries, row-major: `entries[i * n + j]` is the entry at row
+          // `i`, column `j`. They are read once here because all three norms
+          // below walk the whole matrix, and reading a cell through the tensor
+          // re-wraps it.
+          const entries: Expression[] = [];
+          for (let i = 0; i < m; i++)
+            for (let j = 0; j < n; j++) {
+              const val = xTensor.at(i + 1, j + 1);
+              entries.push(val !== undefined ? ce.expr(val) : ce.Zero);
+            }
+
+          // Every matrix norm below is dominated by an infinite entry: the
+          // Frobenius sum of squares, a column sum and a row sum are all
+          // infinite as soon as one term is. The scan runs over the WHOLE
+          // matrix, so that the answer does not depend on which column or row
+          // carries the infinity and which carries a NaN — an infinite entry
+          // dominates a NaN entry, the same rule the vector norms follow
+          // above.
+          if (hasInfiniteMagnitudeComponent(entries))
+            return ce.PositiveInfinity;
+
           // Frobenius norm (default for matrices): √(ΣΣ|aij|²)
           if (normType === 2 || normType === 'frobenius') {
             let sumSq: Expression = ce.Zero;
-            for (let i = 0; i < m; i++) {
-              for (let j = 0; j < n; j++) {
-                const val = xTensor.at(i + 1, j + 1);
-                const el = val !== undefined ? ce.expr(val) : ce.Zero;
-                const absEl = ce.expr(['Abs', el]).evaluate();
-                sumSq = sumSq.add(absEl.mul(absEl));
-              }
+            for (const el of entries) {
+              const absEl = ce.expr(['Abs', el]).evaluate();
+              sumSq = sumSq.add(absEl.mul(absEl));
             }
             return ce.expr(['Sqrt', sumSq]).evaluate({ numericApproximation });
           }
@@ -2021,11 +2104,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let j = 0; j < n; j++) {
               let colSum = 0;
               for (let i = 0; i < m; i++) {
-                const val = xTensor.at(i + 1, j + 1);
-                const el = val !== undefined ? ce.expr(val) : ce.Zero;
-                const absEl = ce.expr(['Abs', el]).evaluate();
+                const absEl = ce.expr(['Abs', entries[i * n + j]]).evaluate();
                 colSum += absEl.re ?? 0;
               }
+              // With no infinite entry left, a NaN column sum comes from a NaN
+              // entry, and the norm is NaN. The test is explicit because every
+              // comparison with NaN is false: the `>` below skips such a
+              // column and answers the maximum of the REMAINING ones, which
+              // makes `‖[[NaN, 1], [2, 3]]‖₁` read 4 instead of NaN. The
+              // compiled code propagates the NaN (`_SYS.norm`,
+              // `compilation/javascript-target.ts`).
+              if (Number.isNaN(colSum)) return ce.NaN;
               if (colSum > maxColSum) maxColSum = colSum;
             }
             return ce.number(maxColSum);
@@ -2037,11 +2126,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let i = 0; i < m; i++) {
               let rowSum = 0;
               for (let j = 0; j < n; j++) {
-                const val = xTensor.at(i + 1, j + 1);
-                const el = val !== undefined ? ce.expr(val) : ce.Zero;
-                const absEl = ce.expr(['Abs', el]).evaluate();
+                const absEl = ce.expr(['Abs', entries[i * n + j]]).evaluate();
                 rowSum += absEl.re ?? 0;
               }
+              // A NaN row sum is the norm, for the reason the L1 branch above
+              // states: the `>` test cannot see a NaN and would drop the row.
+              if (Number.isNaN(rowSum)) return ce.NaN;
               if (rowSum > maxRowSum) maxRowSum = rowSum;
             }
             return ce.number(maxRowSum);

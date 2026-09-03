@@ -4231,9 +4231,17 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
   });
 
   // Operand validation is preserved: a non-collection operand still errors.
+  // `Count`'s declared `collection<any>` parameter refuses the number 5 at
+  // boxing, and evaluating surfaces that error as the whole answer — the same
+  // `incompatible-type` diagnostic `Length(5)` mints from its own evaluate
+  // handler.
   test('non-collection operand still errors (validation preserved)', () => {
     const expr = ce.box(['Count', 5]);
     expect(expr.isValid).toBe(false);
+    expect(expr.evaluate().operator).toEqual('Error');
+    expect(expr.evaluate().toString()).toEqual(
+      ce.box(['Length', 5]).evaluate().toString()
+    );
   });
 
   // The peek handlers must run the framework's default flatten step

@@ -48,7 +48,7 @@ describe('an else-less If as a block statement', () => {
     expect(r.code).toMatchInlineSnapshot(`
       "(() => {
       let s = 1;
-      if (0 < _.x) { s = -1 };
+      if (_.x === _.x && _.x !== undefined && (0 < _.x)) { s = -1 };
       return s
       })()"
     `);
@@ -149,7 +149,12 @@ describe('an else-less If as a block statement', () => {
     expect(r.error).toMatch(/If: wrong number of arguments/);
   });
 
-  test('an If WITH an else is untouched (the ternary, byte for byte)', () => {
+  // The `If` still lowers to the expression-position TERNARY, not to the
+  // `if (…) { … }` statement the else-less shape gets — that is what this case
+  // pins. The ternary now sits inside the undecided-condition guard (ruling
+  // 2026-09-02): `x` is declared `number`, so `x > 0` is undecided at
+  // `x = NaN` and neither assignment may run.
+  test('an If WITH an else stays the ternary', () => {
     ce.declare('x', 'number');
     const expr = ce.box([
       'Block',
@@ -162,12 +167,14 @@ describe('an else-less If as a block statement', () => {
     expect(r.code).toMatchInlineSnapshot(`
       "(() => {
       let s = 1;
-      ((0 < _.x) ? (s = -1) : (s = 2));
+      ((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? (s = -1) : (s = 2)) : NaN);
       return s
       })()"
     `);
     expect(r.run!({ x: 3 })).toBe(-1);
     expect(r.run!({ x: -3 })).toBe(2);
+    // Undecided: neither assignment runs, so `s` keeps its initial value.
+    expect(r.run!({ x: NaN })).toBe(1);
   });
 });
 
@@ -253,5 +260,117 @@ describe('the admission is plain-JavaScript only', () => {
       const r = compile(elselessBlock(e), { to });
       expect(r.success).toBe(false);
     }
+  });
+});
+
+/**
+ * A STATEMENT-form `If` under an undecided condition (ruling 2026-09-02).
+ *
+ * The expression form answers NaN when its condition is not exactly `true` or
+ * `false`. A statement has no value, so the same rule reads: run NEITHER
+ * branch, and carry on with the next statement. That is the interpreter's
+ * inertness — it holds an undecidable `If` rather than choosing an arm, so no
+ * assignment inside it happens and no `Break` under it fires.
+ *
+ * The condition is undecided for the two reasons a comparison can be: a NaN
+ * operand, and an operand the caller left out of the vars object. JavaScript
+ * answers an ordinary `false` for a comparison against either, so before the
+ * ruling the else-less `if` simply did not run and the else-FUL one ran its
+ * else branch — in both cases a decision the condition did not support.
+ */
+describe('a statement-form If takes no branch on an undecided condition', () => {
+  /** `Block(Declare(s, 1), Loop(Block(k := k+1, <guarded>, exit at k = 3)), (s, k))`. */
+  function loopOver(engine: ComputeEngine, guarded: unknown): BoxedExpression {
+    return engine.box([
+      'Block',
+      ['Declare', 's', { str: 'unknown' }, 0],
+      ['Declare', 'k', { str: 'unknown' }, 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['Assign', 'k', ['Add', 'k', 1]],
+          guarded,
+          ['If', ['GreaterEqual', 'k', 3], ['Break']],
+        ],
+      ],
+      ['List', 's', 'k'],
+    ] as any);
+  }
+
+  test('an else-less assignment in a Loop is skipped, and the loop completes', () => {
+    ce.declare('x', 'number');
+    const expr = loopOver(ce, ['If', ['Greater', 'x', 0], ['Assign', 's', ['Add', 's', 1]]]);
+    const r = compile(expr, { fallback: false });
+    expect(r.success).toBe(true);
+    // Decided: the assignment runs on each of the three iterations, or none.
+    expect((r.run as any)({ x: 3 })).toEqual([3, 3]);
+    expect((r.run as any)({ x: -3 })).toEqual([0, 3]);
+    // Undecided: `s` is untouched and the loop still completes its 3 rounds.
+    expect((r.run as any)({ x: NaN })).toEqual([0, 3]);
+    expect((r.run as any)({})).toEqual([0, 3]);
+  });
+
+  test('an else-FUL assignment in a Loop runs NEITHER branch', () => {
+    ce.declare('x', 'number');
+    const expr = loopOver(ce, [
+      'If',
+      ['Greater', 'x', 0],
+      ['Assign', 's', ['Add', 's', 1]],
+      ['Assign', 's', ['Subtract', 's', 1]],
+    ]);
+    const r = compile(expr, { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain(
+      'if (_.x === _.x && _.x !== undefined) { if (0 < _.x)'
+    );
+    expect((r.run as any)({ x: 3 })).toEqual([3, 3]);
+    expect((r.run as any)({ x: -3 })).toEqual([-3, 3]);
+    expect((r.run as any)({ x: NaN })).toEqual([0, 3]);
+    expect((r.run as any)({})).toEqual([0, 3]);
+  });
+
+  test('a Break under an undecided condition does not fire', () => {
+    ce.declare('x', 'number');
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'k', { str: 'unknown' }, 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['Assign', 'k', ['Add', 'k', 1]],
+          ['If', ['Greater', 'x', 0], ['Break']],
+          ['If', ['GreaterEqual', 'k', 5], ['Break']],
+        ],
+      ],
+      'k',
+    ] as any);
+    const r = compile(expr, { fallback: false });
+    expect(r.success).toBe(true);
+    // Decided true: the guarded `Break` fires on the first round.
+    expect((r.run as any)({ x: 3 })).toBe(1);
+    // Decided false, and undecided: only the counting exit at k = 5 fires.
+    expect((r.run as any)({ x: -3 })).toBe(5);
+    expect((r.run as any)({ x: NaN })).toBe(5);
+    expect((r.run as any)({})).toBe(5);
+  });
+
+  test('a statement If over a non-boolean condition value runs neither branch', () => {
+    // The `'value'` shape in statement position: the condition is bound to a
+    // block-scoped constant, so an application is evaluated once.
+    ce.declare('b', 'boolean');
+    const expr = ce.box([
+      'Block',
+      ['Declare', 's', { str: 'unknown' }, 1],
+      ['If', 'b', ['Assign', 's', -1]],
+      's',
+    ] as any);
+    const r = compile(expr, { fallback: false });
+    expect(r.success).toBe(true);
+    expect((r.run as any)({ b: true })).toBe(-1);
+    expect((r.run as any)({ b: false })).toBe(1);
+    expect((r.run as any)({})).toBe(1);
+    expect((r.run as any)({ b: 'a' })).toBe(1);
   });
 });

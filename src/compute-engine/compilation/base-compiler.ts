@@ -261,6 +261,53 @@ const MONTE_CARLO_FOLD_EXCLUSIONS: ReadonlySet<string> = new Set([
  */
 const CONSTANT_FOLD_MAX_INLINE_ELEMENTS = 49;
 
+/**
+ * How a target spells "the numeric fragment `x` holds a value a comparison can
+ * DECIDE" — equivalently, "`x` is not this target's NaN".
+ *
+ * The default is the JavaScript family's `x === x`, which is false for exactly
+ * one value. A target whose equality does not have that property, or which
+ * spells it differently, passes its own (Python's `x == x`). The fragment
+ * arrives already parenthesized when it needs to be.
+ */
+type DecidedNumberTest = (x: TargetSource) => TargetSource;
+
+/** The JavaScript-family spelling of {@link DecidedNumberTest}. */
+const DECIDED_NUMBER_JS: DecidedNumberTest = (x) => `${x} === ${x}`;
+
+/**
+ * A branch condition compiled together with everything the selection around it
+ * needs, so that an `If`/`Which` takes an arm only when the condition is
+ * exactly decided. Built by `BaseCompiler.compileExactCondition` and consumed
+ * by `BaseCompiler.exactSelect`.
+ */
+interface CompiledCondition {
+  /**
+   * The condition's own source. For the `'value'` shape it is the condition
+   * with its `Not`s stripped off — the negation lives in `negate` instead.
+   */
+  readonly code: TargetSource;
+  /**
+   * How to test that the condition is decided: `'value'` inspects `code`
+   * itself for `true`/`false`, a list of source fragments tests the relation's
+   * operands, and an empty list means the condition is decided by
+   * construction.
+   */
+  readonly conjuncts: ReadonlyArray<TargetSource> | 'value';
+  /**
+   * Temporaries the condition's operands were bound to, in the order they must
+   * be evaluated. They wrap the whole selection: both the condition and the
+   * decidedness test read them.
+   */
+  readonly bindings: Array<[name: string, value: TargetSource]>;
+  /**
+   * True when the condition sat under an odd number of `Not`s. The selection
+   * then exchanges the constants its two decided tests compare against, which
+   * negates a decided verdict and leaves an undecided one undecided.
+   */
+  readonly negate: boolean;
+}
+
 /** Accumulate every symbol name of `expr` into `names`. One walk by node
  * object (a shared subtree is visited once — the set is a union either way). */
 function collectSymbolNames(
@@ -4587,6 +4634,9 @@ export class BaseCompiler {
             // ordinary scalar code. Same exemption as the sibling gates
             // (`compilesToArray`, `isArrayOperand`) carry.
             !isProvablyStringOperand(a) &&
+            // Nor is a `Hypot` point leg, for the same reason: the head's own
+            // codegen consumes it whole, as one leg (`isHypotPointLeg`).
+            !BaseCompiler.isHypotPointLeg(h, a) &&
             (a.isCollection ||
               // The COLLECTION shape top, not the list/indexed spellings: a
               // SET-typed operand matches neither `list<any>` nor
@@ -5522,10 +5572,30 @@ export class BaseCompiler {
           .map((x) => BaseCompiler.compile(x, target))
           .join(', ')})`;
       }
-      return `((${BaseCompiler.compile(
+      // A condition that is not exactly `true` or `false` when the compiled
+      // function runs selects neither arm; the value is then the absence
+      // marker for the result type, which for a number is NaN. See the
+      // "Branch conditions that cannot be decided" comment on
+      // `conditionDecidability`. A condition decidable by construction reports
+      // `null` and gets the plain conditional expression below.
+      const decidability = BaseCompiler.conditionDecidability(args[0]);
+      if (decidability === null)
+        return `((${BaseCompiler.compile(
+          args[0],
+          target
+        )}) ? (${arm(args[1], 1)}) : (${arm(args[2], 2)}))`;
+      const compiledCond = BaseCompiler.compileExactCondition(
         args[0],
+        decidability,
         target
-      )}) ? (${arm(args[1], 1)}) : (${arm(args[2], 2)}))`;
+      );
+      return BaseCompiler.exactSelect(
+        compiledCond,
+        `(${arm(args[1], 1)})`,
+        `(${arm(args[2], 2)})`,
+        BaseCompiler.noBranchValue(node, target, coerce !== undefined),
+        target
+      );
     }
 
     if (h === 'Which') {
@@ -5565,11 +5635,19 @@ export class BaseCompiler {
         args.filter((_x, i) => i % 2 === 1),
         target
       );
+      // A position no clause matched, and a position whose condition is
+      // undecided, answer the same thing: the codomain's absence marker (see
+      // `noBranchValue`).
+      const noBranch = BaseCompiler.noBranchValue(
+        node,
+        target,
+        coerce !== undefined
+      );
       // Every value arm, and every condition after the first, sits behind a
       // ternary test: each is its own region (§5.1(b)), so nothing binds
       // across an arm that may not be evaluated.
       const compilePair = (i: number): string => {
-        if (i >= args.length) return coerce ? '({ re: NaN, im: NaN })' : 'NaN';
+        if (i >= args.length) return noBranch;
         const cond = args[i];
         const val = args[i + 1];
         // A condition proven `false` by its TYPE skips its clause BEFORE
@@ -5585,13 +5663,39 @@ export class BaseCompiler {
         if (isSymbol(cond, 'True') || claim === true) {
           return `(${valCode})`;
         }
-        const condCode =
-          i === 0
-            ? BaseCompiler.guardCondition(cond, target)
-            : BaseCompiler.withCseOperand(node, i, target, () =>
-                BaseCompiler.guardCondition(cond, target)
-              );
-        return `((${condCode}) ? (${valCode}) : ${compilePair(i + 2)})`;
+        // A condition that is not exactly `true` or `false` when the
+        // compiled function runs selects no clause and ends the search. See
+        // the "Branch conditions that cannot be decided" comment on
+        // `conditionDecidability`. A condition decidable by construction
+        // reports `null` and gets the plain chain of conditional
+        // expressions below.
+        const decidability = BaseCompiler.conditionDecidability(cond);
+        if (decidability === null) {
+          const condCode =
+            i === 0
+              ? BaseCompiler.guardCondition(cond, target)
+              : BaseCompiler.withCseOperand(node, i, target, () =>
+                  BaseCompiler.guardCondition(cond, target)
+                );
+          return `((${condCode}) ? (${valCode}) : ${compilePair(i + 2)})`;
+        }
+        // The remaining clauses are compiled BEFORE the region below is
+        // opened: they belong to sibling regions, and a temporary they bind
+        // must not land in this clause's wrapper. The condition and its
+        // decidedness test, in contrast, must both be built inside that
+        // wrapper — see `compileExactCondition`.
+        const rest = compilePair(i + 2);
+        const build = (): string =>
+          BaseCompiler.exactSelect(
+            BaseCompiler.compileExactCondition(cond, decidability, target),
+            `(${valCode})`,
+            rest,
+            noBranch,
+            target
+          );
+        return i === 0
+          ? build()
+          : BaseCompiler.withCseOperand(node, i, target, build);
       };
       return compilePair(0);
     }
@@ -6256,6 +6360,11 @@ export class BaseCompiler {
   private static readonly REAL_ONLY_CODEGEN_HEADS: ReadonlySet<string> =
     new Set([
       'Floor',
+      // `Hypot` compiles to `Math.hypot`, which cannot take a complex value.
+      // The check above covers a head named by a plain string automatically;
+      // `Hypot` is named by a function instead, so that it can take a point
+      // operand as one leg, and it needs this list to be covered.
+      'Hypot',
       'Ceil',
       'Ceiling',
       'Round',
@@ -6407,6 +6516,27 @@ export class BaseCompiler {
    * emits the matching lowering. Only an operand whose elements DISAGREE about
    * being complex declines, because one closure is emitted for all of them.
    */
+  /**
+   * True when `a` is a point in `Hypot` position.
+   *
+   * A point is a single leg of the hypotenuse: it enters the sum of squares
+   * through its own norm, so `Hypot((3, 4), 1)` is √(‖(3,4)‖² + 1²). Two
+   * checks would otherwise claim such an operand because a point is a
+   * collection, and both must stand aside for it: the element-wise broadcast,
+   * which would pair each component with the other leg and produce a list of
+   * hypotenuses, and the check that refuses scalar arithmetic over a
+   * collection, which would refuse to compile the expression at all. Both ask
+   * this one question, so they cannot disagree.
+   *
+   * Standing aside is not acceptance. A point whose component is itself a
+   * collection has one norm per element, and the JavaScript target does not
+   * compile that; its `Hypot` handler says so. Keeping that decision in the
+   * handler is why this test asks only whether the operand is a point.
+   */
+  private static isHypotPointLeg(h: string, a: Expression): boolean {
+    return h === 'Hypot' && isTuple(a);
+  }
+
   private static tryCompileBroadcast(
     engine: ComputeEngine,
     h: string,
@@ -6841,6 +6971,16 @@ export class BaseCompiler {
     // over a list of points ran to `[(4x + 0.3t, 4y + 0.3t), …]` — the
     // SECOND component scaled by the first — behind `success: true` (Tycho
     // item 234).
+    // A point is a single leg of a hypotenuse, not a set of legs to pair with
+    // the other operand: it enters the sum of squares through its own norm, so
+    // `Hypot((3, 4), 1)` is √(‖(3,4)‖² + 1²) = √26. The interpreter computes
+    // it that way (`library/trigonometry.ts`, the `Hypot` handler). Pairing
+    // each component with the other leg would instead produce the list
+    // `[hypot(3,1), hypot(4,1)]` and report success. Leave the operand to the
+    // target's own `Hypot` code, which takes the point as one leg, or refuses
+    // the expression when the point's component is itself a list.
+    if (args.some((a) => BaseCompiler.isHypotPointLeg(h, a))) return null;
+
     if (h === 'Add' || h === 'Divide') {
       const tuples = args.filter((a) => couldBeNumericTuple(a));
       const lists = args.filter(
@@ -9138,18 +9278,94 @@ export class BaseCompiler {
       // The condition is a value expression (its own bindable region); each
       // branch is a statement list again (§5.1(c)).
       const condTarget = BaseCompiler.scalarConditionTarget(target);
-      const cond = BaseCompiler.compileOp(expr, 0, condTarget, 0, expr.ops[0]);
       const branch = (i: number): string =>
         BaseCompiler.withCseScope(expr, i, target, () =>
           BaseCompiler.compileLoopBody(expr.ops[i], target)
         );
-      const thenBranch = branch(1);
-      if (expr.ops.length > 2) {
-        const elseBranch = branch(2);
-        if (elseBranch)
-          return `if (${cond}) { ${thenBranch} } else { ${elseBranch} }`;
+      // A condition that is not exactly `true` or `false` when the compiled
+      // function runs runs neither branch, and execution continues with the
+      // next statement. This is the statement form of the rule the conditional
+      // expression follows: the interpreter leaves such an `If` unevaluated,
+      // so no assignment inside it happens and no `Break` under it fires. A
+      // statement has no value, so running neither branch is the whole answer.
+      //
+      // The analysis is shared with the conditional expression
+      // (`conditionDecidability`), and so is the reason for it: a comparison
+      // with a NaN or missing operand gives an ordinary `false` in JavaScript,
+      // so a condition that cannot be decided looks the same as one decided to
+      // be false, and the difference has to be read off its operands.
+      const decidability = BaseCompiler.conditionDecidability(expr.ops[0]);
+      // A `Not` over a value-shaped condition is lowered by exchanging the two
+      // constants the decided tests compare against, never by an emitted `!`:
+      // `!undefined` is a confident `true` (see `peelNegations`).
+      const { expr: condExpr, negate } =
+        decidability === 'value'
+          ? BaseCompiler.peelNegations(expr.ops[0])
+          : { expr: expr.ops[0], negate: false };
+      const compileCond = (): string =>
+        BaseCompiler.compileOp(expr, 0, condTarget, 0, condExpr);
+      let cond: string;
+      let conjuncts: ReadonlyArray<TargetSource> = [];
+      let bindings: Array<[string, TargetSource]> = [];
+      if (decidability === null || decidability === 'value') {
+        cond = compileCond();
+      } else {
+        // A non-trivial operand is bound to a block-scoped constant, so its
+        // computation runs once instead of once in the condition and twice
+        // more in the decidedness test (`withConditionOperands`).
+        const bound = BaseCompiler.withConditionOperands(
+          decidability,
+          condTarget,
+          true,
+          (c) => {
+            conjuncts = c;
+            return compileCond();
+          }
+        );
+        cond = bound.value;
+        bindings = bound.bindings;
       }
-      return `if (${cond}) { ${thenBranch} }`;
+      const thenBranch = branch(1);
+      const elseBranch = expr.ops.length > 2 ? branch(2) : undefined;
+      // A block is a statement, so it splices in where the `if` did, and
+      // `break`/`continue` inside a branch still reach the enclosing loop.
+      const withBindings = (body: string): string =>
+        bindings.length === 0
+          ? body
+          : `{ ${bindings
+              .map(([name, code]) => `const ${name} = ${code};`)
+              .join(' ')} ${body} }`;
+      // A condition whose VALUE has to be inspected (it may not be a boolean
+      // at all) is bound to a block-scoped constant first, so an application
+      // is evaluated once.
+      if (decidability === 'value') {
+        const [then, otherwise] = negate
+          ? ['false', 'true']
+          : ['true', 'false'];
+        const tail =
+          elseBranch === undefined || elseBranch === ''
+            ? ''
+            : ` else if (_CND === ${otherwise}) { ${elseBranch} }`;
+        return `{ const _CND = (${cond}); if (_CND === ${then}) { ${thenBranch} }${tail} }`;
+      }
+      if (elseBranch !== undefined && elseBranch !== '') {
+        const body = `if (${cond}) { ${thenBranch} } else { ${elseBranch} }`;
+        return withBindings(
+          conjuncts.length === 0
+            ? body
+            : `if (${conjuncts.join(' && ')}) { ${body} }`
+        );
+      }
+      // With no else branch, the test that the condition is decidable joins
+      // the one `if` rather than nesting a second one inside it: the two guard
+      // the same statement, and one `if` is easier to read. The condition is
+      // parenthesized when it joins the test, because `&&` binds tighter than
+      // the `||` a condition may contain.
+      const test =
+        conjuncts.length === 0
+          ? cond
+          : [...conjuncts, `(${cond})`].join(' && ');
+      return withBindings(`if (${test}) { ${thenBranch} }`);
     }
 
     if (h === 'Block') {
@@ -11489,6 +11705,377 @@ export class BaseCompiler {
     if (target.assertBoolean && !BaseCompiler.isBooleanValued(cond))
       return target.assertBoolean(code);
     return code;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Branch conditions that cannot be decided
+  //
+  // A compiled `If` or `Which` whose condition is not exactly `true` or
+  // `false` when the function runs takes no branch, and the value is the
+  // absence marker for the result type — NaN for a number. The interpreter
+  // does the same: it leaves such an application unevaluated rather than
+  // choosing an arm. So does the element-wise `Which` code, for a position no
+  // clause matched (`_SYS.select`).
+  //
+  // Choosing a branch by JavaScript truthiness instead would answer from no
+  // evidence: `NaN > 0` is `false`, so `If(x > 0, 1, -1)` would give `-1` at
+  // `x = NaN`; an unset `b` is `undefined` and `"a"` is truthy, so
+  // `If(b, 1, -1)` would give `-1` for the first and `1` for the second.
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * The relations a branch condition can be built from. Their compiled value
+   * is always a genuine boolean, so an undecided comparison is INVISIBLE in
+   * that value: JavaScript answers `false` both for `NaN > 0` and for
+   * `NaN <= 0`, and the tolerant equality lowering (`Math.abs(a - b) <= tol`)
+   * answers `false` for a NaN operand as well. Decidedness is therefore read
+   * off the comparison's OPERANDS — a NaN operand makes the relation
+   * undecided — which is what `conditionDecidability` returns for these heads.
+   */
+  private static readonly BRANCH_RELATIONS = new Set([
+    'Less',
+    'LessEqual',
+    'Greater',
+    'GreaterEqual',
+    'Equal',
+    'NotEqual',
+  ]);
+
+  /**
+   * An emitted fragment that is already a NAME or a bare constant — an
+   * identifier, a member read off one (`_.x`), or a numeric literal. Repeating
+   * such a fragment costs nothing and evaluates nothing, so a decidedness test
+   * names it inline; anything else is bound to a temporary first (see
+   * `withConditionOperands`). It also needs no parentheses in an `===` test,
+   * which is the other place this is asked.
+   */
+  private static readonly ATOMIC_FRAGMENT = /^[\w$.]+$/;
+
+  /**
+   * True when an operand of a branch comparison may carry a value the
+   * comparison cannot decide.
+   *
+   * Every operand that holds a number qualifies, whatever its declared type.
+   * A `real` or `integer` type does not survive a missing input: the caller
+   * may leave a free symbol out of the object the compiled function reads its
+   * variables from, `undefined` becomes NaN as soon as it enters arithmetic,
+   * and `2 * undefined > 0` is an ordinary `false`. So `If(2r > 0, 1, -1)`
+   * must test `2r` even though `r` is declared `real` and a `real` is never
+   * NaN. Testing every numeric operand adds one comparison per operand, whose
+   * cost is not measurable, so there is nothing to gain by exempting the types
+   * that exclude NaN.
+   *
+   * An operand that does not hold a number — a string, a list — is never the
+   * NaN value, and neither is a complex one: the JavaScript target represents
+   * it as a `{ re, im }` object. Neither needs a test.
+   */
+  private static mayBeUndecided(expr: Expression): boolean {
+    const t = expr.type;
+    if (!t || !t.couldMatch('number')) return false;
+    return !BaseCompiler.isComplexValued(expr);
+  }
+
+  /**
+   * How the emitted code must test that a branch condition is DECIDED:
+   *
+   * - `null` — decidable by construction. Emit the plain conditional
+   *   expression, with no extra code on the common path.
+   * - `'value'` — the compiled value is not necessarily a boolean at all. A
+   *   `boolean`-declared symbol the caller left unsupplied is `undefined`, and
+   *   a caller may pass any JavaScript value. Test that value for `=== true`
+   *   and `=== false`.
+   * - an operand list — the compiled value is a genuine boolean, but an
+   *   undecided comparison has already collapsed into it (see
+   *   `BRANCH_RELATIONS`). Test these operands for NaN instead.
+   *
+   * `And` and `Or` report `null`, so they are tested for truth as they always
+   * were. An `And` with one operand decided `false` is `false` whatever its
+   * other operands do, and the emitted `&&` gives that answer already. The
+   * remaining case, where no operand the connective reaches can be decided,
+   * would need three-valued `And` and `Or` of their own. That work is tracked
+   * in `ROADMAP.md` under "Open items from the undecided-condition ruling".
+   *
+   * The operands are named again inside the test, so an impure condition
+   * reports `null`: an operand cheap enough to stay inline is emitted a second
+   * and third time, which would run its effects again.
+   */
+  static conditionDecidability(
+    cond: Expression
+  ): 'value' | ReadonlyArray<Expression> | null {
+    if (isSymbol(cond, 'True') || isSymbol(cond, 'False')) return null;
+    if (!isFunction(cond)) return 'value';
+    const h = cond.operator;
+    // `Not` is decided exactly when its operand is. The negation itself is
+    // applied by `peelNegations` — never by the emitted `!`, which would turn
+    // an undecided value into a confident boolean.
+    if (h === 'Not' && cond.nops === 1)
+      return BaseCompiler.conditionDecidability(cond.ops[0]);
+    if (h === 'And' || h === 'Or') return null;
+    if (!BaseCompiler.BRANCH_RELATIONS.has(h)) return 'value';
+    if (cond.isPure !== true) return null;
+    const operands = cond.ops.filter((op) => BaseCompiler.mayBeUndecided(op));
+    return operands.length === 0 ? null : operands;
+  }
+
+  /**
+   * The run-time tests that an already-emitted numeric operand holds a value a
+   * comparison can decide. There are two, and an operand takes only the ones
+   * it needs:
+   *
+   * - `a === a` is false for exactly one value, NaN. It is produced for every
+   *   numeric operand the compiler has not already reduced to a literal,
+   *   whatever its declared type — `mayBeUndecided` explains why a `real` type
+   *   earns no exemption.
+   * - `a !== undefined` catches a free symbol the caller left out of the
+   *   object the compiled function reads its variables from.
+   *   `undefined === undefined` is true, so the NaN test alone cannot see a
+   *   missing variable, and every comparison against `undefined` is `false` —
+   *   which would make `If(x > 0, 1, -1)` take the else arm for an unsupplied
+   *   `x`. It is produced only when the operand compiled to a read of that
+   *   object, the only fragment whose value can be `undefined`: arithmetic
+   *   over a missing variable is already NaN, and a literal is neither.
+   *
+   * Both are plain comparisons, with no function call, and together they cost
+   * no more than either one alone. `code` appears in the result up to three
+   * times, which is why the caller passes the NAME of a costly operand here
+   * rather than the operand's own source (`withConditionOperands`), and why
+   * only an operand without side effects reaches this function at all (see
+   * `conditionDecidability`). A fragment that is not a single token is
+   * parenthesized, because `===` binds looser than most operators an operand
+   * may contain.
+   */
+  private static operandDecidedConjuncts(
+    code: TargetSource,
+    target: CompileTarget<Expression>,
+    decided: DecidedNumberTest = DECIDED_NUMBER_JS
+  ): TargetSource[] {
+    // A fragment the compiler already reduced to a finite numeric literal
+    // holds that number at every call, so it can decide every comparison it
+    // takes part in and needs no test. This is what keeps `x > 0` down to one
+    // guarded operand.
+    if (code.length > 0 && Number.isFinite(Number(code))) return [];
+    const atom = BaseCompiler.ATOMIC_FRAGMENT.test(code) ? code : `(${code})`;
+    const conjuncts: TargetSource[] = [decided(atom)];
+    if (BaseCompiler.isVarsObjectRead(code, target))
+      conjuncts.push(`${atom} !== undefined`);
+    return conjuncts;
+  }
+
+  /**
+   * True when `code` is a plain read of one binding off the target's vars
+   * object (`_.x` on the JavaScript family). That is the only emitted fragment
+   * whose value can be `undefined` at run time: it is what an absent entry of
+   * the caller's vars object reads as. A target that binds free symbols some
+   * other way declares no `varsObjectName` and answers `false`.
+   */
+  private static isVarsObjectRead(
+    code: TargetSource,
+    target: CompileTarget<Expression>
+  ): boolean {
+    const vars = target.varsObjectName;
+    if (vars === undefined || !code.startsWith(`${vars}.`)) return false;
+    return /^[\w$]+$/.test(code.slice(vars.length + 1));
+  }
+
+  /**
+   * The value a compiled `If`/`Which` answers when it takes no branch — its
+   * condition is undecided, or (for `Which`) no clause matched.
+   *
+   * A numeric result is `NaN`, which is how every target that produces real
+   * numbers represents a missing one (`docs/ERROR-MODEL.md` describes the
+   * absence markers). A result that is not a number — a string, a list — has
+   * no NaN, so the value is the target's literal for a missing object,
+   * `undefined` in JavaScript. A target that declares no such literal uses
+   * `NaN` for both.
+   */
+  private static noBranchValue(
+    node: Expression | undefined,
+    target: CompileTarget<Expression>,
+    complexArms: boolean
+  ): TargetSource {
+    if (complexArms) return '({ re: NaN, im: NaN })';
+    const nullLiteral = target.absence?.object?.nullLiteral;
+    if (nullLiteral !== undefined && node !== undefined) {
+      const t = resolveTypeForCompilation(
+        stripMissingFromType(resolveTypeForCompilation(node.type.type))
+      );
+      if (t !== 'never' && !isSubtype(t, 'number')) return nullLiteral;
+    }
+    return 'NaN';
+  }
+
+  /**
+   * Strip the `Not`s a branch condition is wrapped in, and report whether an
+   * ODD number came off.
+   *
+   * A `Not` can be decided exactly when its operand can, but the negation
+   * cannot be left to an emitted `!`. A value that cannot be decided is one
+   * that is neither `true` nor `false`, and `!undefined` is a confident
+   * `true` — an answer from no evidence. So when the condition under the
+   * `Not`s is tested by its value, that inner value is decided first and the
+   * two constants the tests compare against are exchanged; no `!` is emitted.
+   *
+   * A `Not` over a comparison does not come through here. There the test reads
+   * the comparison's operands, which `Not` leaves alone, so the whole
+   * condition, `!` included, compiles as written.
+   */
+  static peelNegations(cond: Expression): {
+    expr: Expression;
+    negate: boolean;
+  } {
+    let expr = cond;
+    let negate = false;
+    while (isFunction(expr) && expr.operator === 'Not' && expr.nops === 1) {
+      expr = expr.ops[0];
+      negate = !negate;
+    }
+    return { expr, negate };
+  }
+
+  /**
+   * Compile the operands a relation's decidedness test reads, then run `fn`
+   * with the run-time tests those operands take.
+   *
+   * An operand whose emitted source is not already a name or a constant is
+   * bound to a temporary first, and the condition `fn` compiles reads that
+   * temporary instead (`_codeOverrides`, the same substitution the real-operand
+   * runtime guard uses). Without it the operand's computation runs THREE times
+   * per call: the condition embeds it once and the decidedness test names it
+   * twice more. Common-subexpression elimination cannot remove those copies —
+   * it analyzes the expression tree, where the operand occurs once, while the
+   * copies are made at code-generation time.
+   *
+   * A literal, a variable read, and a temporary an enclosing guard already
+   * bound stay inline: naming them again evaluates nothing.
+   *
+   * The bindings are RETURNED rather than emitted here, because they must wrap
+   * the whole selection — the decidedness test and the condition both read
+   * them — and only the caller knows whether that selection is an expression
+   * or a statement. `canBind` is false for a target with no way to bind a
+   * value in expression position, which then keeps the inline form.
+   */
+  static withConditionOperands<T>(
+    operands: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    canBind: boolean,
+    fn: (conjuncts: ReadonlyArray<TargetSource>) => T,
+    decided: DecidedNumberTest = DECIDED_NUMBER_JS
+  ): { value: T; bindings: Array<[string, TargetSource]> } {
+    const bindings: Array<[string, TargetSource]> = [];
+    const installed: Expression[] = [];
+    try {
+      const conjuncts: TargetSource[] = [];
+      for (const op of operands) {
+        const code = BaseCompiler.compile(op, target);
+        const inline = BaseCompiler.operandDecidedConjuncts(
+          code,
+          target,
+          decided
+        );
+        // No test at all: the operand is a constant the compiler already
+        // folded, so it decides every comparison it takes part in.
+        if (inline.length === 0) continue;
+        if (
+          !canBind ||
+          BaseCompiler.ATOMIC_FRAGMENT.test(code) ||
+          BaseCompiler._codeOverrides.has(op)
+        ) {
+          conjuncts.push(...inline);
+          continue;
+        }
+        const name = BaseCompiler.tempVar(target);
+        bindings.push([name, code]);
+        BaseCompiler._codeOverrides.set(op, name);
+        installed.push(op);
+        conjuncts.push(
+          ...BaseCompiler.operandDecidedConjuncts(name, target, decided)
+        );
+      }
+      return { value: fn(conjuncts), bindings };
+    } finally {
+      for (const op of installed) BaseCompiler._codeOverrides.delete(op);
+    }
+  }
+
+  /**
+   * Produce a branch selection that takes an arm only when its condition can
+   * be decided. See the "Branch conditions that cannot be decided" comment
+   * above.
+   *
+   * `thenCode` and `elseCode` arrive already parenthesized the way the caller
+   * wants them, so the `null` case produces a plain conditional expression.
+   *
+   * The `'value'` case inspects the condition's value twice, once against
+   * `true` and once against `false`. A condition that is a single token — the
+   * common case, a variable read such as `_.b` — is written twice; a
+   * condition that is a function call is bound to an arrow parameter first, so
+   * that it is evaluated once. Both arms stay inside the arrow, so an arm that
+   * is not selected still never runs. `_CND` matches the name the numeric
+   * `coalesce` code binds; a variable of that exact name in an enclosing scope
+   * would be hidden inside the arms, which is why the name is upper case and
+   * unlikely to be written by hand.
+   *
+   * A condition under an odd number of `Not`s exchanges the two constants the
+   * tests compare against, so the arms keep their order (see
+   * `peelNegations`).
+   */
+  private static exactSelect(
+    cond: CompiledCondition,
+    thenCode: TargetSource,
+    elseCode: TargetSource,
+    noBranch: TargetSource,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    const { code, conjuncts, negate, bindings } = cond;
+    const [then, otherwise] = negate ? ['false', 'true'] : ['true', 'false'];
+    let select: TargetSource;
+    if (conjuncts === 'value') {
+      select = BaseCompiler.ATOMIC_FRAGMENT.test(code)
+        ? `((${code}) === ${then} ? ${thenCode} : (${code}) === ${otherwise} ? ${elseCode} : ${noBranch})`
+        : `((_CND) => _CND === ${then} ? ${thenCode} : _CND === ${otherwise} ? ${elseCode} : ${noBranch})(${code})`;
+    } else if (conjuncts.length === 0) {
+      select = `((${code}) ? ${thenCode} : ${elseCode})`;
+    } else {
+      select = `((${conjuncts.join(
+        ' && '
+      )}) ? ((${code}) ? ${thenCode} : ${elseCode}) : ${noBranch})`;
+    }
+    return bindings.length === 0 ? select : target.bindExpr!(bindings, select);
+  }
+
+  /**
+   * Compile a branch condition together with its decidedness test, inside
+   * whatever CSE region the caller has opened. Both have to be built in the
+   * same region: the region's wrapper binds the temporaries the condition
+   * introduced, and a test emitted outside that wrapper would reference names
+   * nothing defines.
+   *
+   * The operands are compiled BEFORE the condition, because a non-trivial one
+   * is bound to a temporary the condition must then read instead of recomputing
+   * it (`withConditionOperands`).
+   */
+  private static compileExactCondition(
+    cond: Expression,
+    decidability: 'value' | ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): CompiledCondition {
+    BaseCompiler.assertScalarCondition(cond);
+    if (decidability === 'value') {
+      const { expr, negate } = BaseCompiler.peelNegations(cond);
+      return {
+        code: BaseCompiler.compile(expr, target),
+        conjuncts: 'value',
+        bindings: [],
+        negate,
+      };
+    }
+    const { value, bindings } = BaseCompiler.withConditionOperands(
+      decidability,
+      target,
+      target.bindExpr !== undefined,
+      (conjuncts) => ({ code: BaseCompiler.compile(cond, target), conjuncts })
+    );
+    return { ...value, bindings, negate: false };
   }
 
   /** True if the expression is provably integer-typed. */

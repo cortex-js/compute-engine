@@ -110,14 +110,18 @@ throw-friendly than this model proposes, in two distinct ways:
   built-in, non-lazy `evaluate` handler is deliberately converted to a
   boxed error value (`boxed-function.ts`, the crash-conversion wrapper) —
   a shipped fix for real host crashes: an engine bug must not kill the
-  embedding editor mid-evaluation. *Proposed amendment:* keep the
-  conversion (host resilience is right) but give it a distinct
-  `internal-error` code carrying the stack, so an engine fault is never
-  disguised as a user mistake.
+  embedding editor mid-evaluation. Amended and shipped 2026-09-02 (ruled
+  the same day): the conversion is kept (host resilience is right), and
+  the boxed error carries the distinct `internal-error` code with the
+  message and the first frames of the stack as the parts of its
+  `ErrorCode`, so an engine fault is never disguised as a user mistake and
+  a bug report can be traced without re-running the crash
+  (`handlerThrowToErrorValue`, `boxed-function.ts`; pinned in
+  `test/compute-engine/runtime-conformance.test.ts`).
 - **A set of language-level contractual throws exists and is
   test-pinned**: the `Assign` redefinition discipline, function
-  over-application ("Too many arguments"), the `If`-condition
-  spell-check, a predicate returning a non-boolean (`Count`/`Filter`), a
+  over-application ("Too many arguments"), a predicate returning a
+  non-boolean (`Count`/`Filter`), a
   mistyped key function (`GroupBy`), element-wise failures enriched with
   broadcast context. *Proposed amendment (2026-08-25 review, pending
   ratification):* convert these to `Error` values; the inventory above is
@@ -796,7 +800,8 @@ numericization (§1) — it is not rule-7 inertness.
 | `Sin("banana")`, `Sin(True)` | `Sin(Error(incompatible-type))` | `Error` | `Error` | conforms (rule 1) |
 | `"banana" + 1` | `Error(…) + 1` | `Error` | `Error` | conforms (rules 1, §3) |
 | `Sum(["a", "b"])` | inert (element type indeterminate) | `Error(incompatible-type)` | `Error` | conforms (rules 2, 6) |
-| `1/0`, `Factorial(-2)` | `~oo` | `~oo` | `~oo` | conforms (rule 3) |
+| `1/0` | `~oo` | `~oo` | `~oo` | conforms (rule 3) |
+| `Factorial(-2)` | inert | `~oo` | `~oo` | conforms (rule 3) |
 | `Arcsin(2)` | exact, unreduced | exact, unreduced | complex value | conforms (rule 3) |
 | `Ln(0)` | exact, unreduced | `-oo` | `-oo` | conforms (rule 3) |
 | `Mod(1, 0)` | inert | `NaN` | `NaN` | conforms (rule 4) |
@@ -911,10 +916,15 @@ answer and the fix landed. An entry with no FIXED date is still open.
   would answer `number` for `integer ⊔ nan`, losing the element tier
   again. Values did not move — an out-of-band numeric access is still
   `NaN`, and `Missing` is still the non-numeric marker.
-- **Native handler faults are converted to plain user-facing errors
-  today** (`boxed-function.ts` crash-conversion); under the §1 amendment
-  they should carry a distinct `internal-error` code with the stack. NOT
-  part of the ratified package — still open.
+- **FIXED 2026-09-02 (ruled the same day): native handler faults carry
+  the `internal-error` code with the stack.** A `TypeError`, `RangeError`
+  or `ReferenceError` thrown inside a built-in, non-lazy handler used to
+  be converted to `Error(evaluation-error, message)` — the same code a
+  legitimate domain failure reports, so an engine bug was
+  indistinguishable from bad input and the stack was lost. It now converts
+  to `Error(ErrorCode("internal-error", message, stack))` with the first
+  frames of the stack; the conversion itself (no host exception) is
+  unchanged (`handlerThrowToErrorValue`, `boxed-function.ts`).
 - **FIXED 2026-08-28: `compile(Heaviside)(NaN)` answers `NaN`** under
   ratified Contract B's derived `propagate` default (it answered `1` — a
   fail-closed violation, confirmed 2026-08-26: both comparisons in the
@@ -949,10 +959,6 @@ answer and the fix landed. An entry with no FIXED date is still open.
   `ROADMAP.md`: compiled `Heaviside(~oo)` → `1` and compiled
   `~oo > 0` → `true`, both symbolic in the interpreter. Details in
   `docs/COMPILATION-MODEL.md`.
-- **The table above conflates two boxing behaviors**: `1/0` folds to `~oo`
-  AT BOXING, but `Factorial(-2)` boxes as an unevaluated application and
-  reaches `~oo` only at `evaluate()`. Both conform to rule 3; the shared
-  "Boxed: `~oo`" cell is wrong for `Factorial`.
 
 Open questions (each phrased so it can be answered without this
 document's history):
@@ -971,13 +977,22 @@ document's history):
   representation (next item) remains an open implementation design item,
   and the ROADMAP defects gated on the NaN policy (compiled
   `Heaviside(NaN)`, the compiled-lane pole encodings) are now unblocked.
-- **How do callables carry their policies?** (Implementation design,
-  §4.) Options: policies as effects/refinements in the function type;
-  definition metadata attached to callable values; or only the
-  conservative floor (an unknown or user-defined callable is
-  `may-marker` with unknown NaN behavior). The floor is mandatory under
-  any representation; the question is how much precision higher-order
-  code — `Map`, callback validation, compilation — can recover.
+- **RULED 2026-09-02: callables carry NO policy metadata — the
+  conservative floor is the representation.** A user function (a lambda,
+  a declared-then-assigned function, a multi-clause definition) is
+  `may-marker` with unknown NaN behavior at every consumer, and the
+  precision a caller wants comes only from a DECLARED signature with
+  precise carriers (`(real) -> real`), which the derivation already reads.
+  Weighed and not taken: inferring `nanBehavior`/`partiality` from a
+  literal's body (a new inference pass with its own soundness questions —
+  a body that branches on `IsNaN(x)` must infer `handle`), and policies
+  as effects in the function type (`(real) -> real ! nan-propagate`; the
+  type grammar, parser, printer and subtyping would all grow). Measured
+  before ruling: at the VALUE level a user function already behaves like
+  a library one (`g := x ↦ √x`; `g(NaN)` is NaN; `Map(g, [1, NaN])` is
+  `[1, NaN]`), and only the sharper static claim (`nan` instead of
+  `number`) is lost, which no higher-order consumer needs today. Revisit
+  only when one does.
 - **RULED 2026-09-01: the omitted `may-marker` default is a runtime
   contract only — it does not add `| nan` or `| missing` to the result
   type** (§4, with the derived-type block amended).
@@ -1059,10 +1074,94 @@ document's history):
   the element-wise no-match cell (`NaN` for numeric cells — `Missing`
   absorbed into a numeric domain, per the absence ruling). Pinned in the
   conformance suite (`test/compute-engine/error-model.test.ts`).
-- **Container vs. cell validity (§3)** — should a collection whose cells
-  include errors eventually be a *valid* container of partially-invalid
-  cells, with a type that says so? Favored eventually by the 2026-08-25
-  review; not current behavior; needs a design.
+- **Container vs. cell validity (§3) — DEFERRED by ruling 2026-09-02.**
+  Should a collection whose cells include errors eventually be a *valid*
+  container of partially-invalid cells, with a type that says so
+  (`list<number | error>`; `Length` answers the length, `Sum` demands
+  every cell and answers the error, a plot draws the good cells)? Today
+  one error cell makes the whole tree invalid: `[1, Sin("a"), 3]` has
+  `isValid === false` and type `error`, and `Length` of it stays inert,
+  while a NaN or `~oo` cell is an ordinary value (`[1, 1/0, 3]` is the
+  valid `[1, ~oo, 3]`). Favored eventually by the 2026-08-25 review; it is
+  a design touching the type lattice (an `error` cell type) and every
+  collection consumer's per-cell demand, and no consumer has asked for it,
+  so it stays open with no change scheduled.
+- **FIXED 2026-09-02 (ruled the same day): `Length` and `Count` refuse a
+  decided non-collection.** `Length(5)` and `Length(Missing)` — what
+  `Length(First([]))` receives for an empty list — stayed inert on a
+  decided question, which §1 forbids, while `Count(5)` already answered an
+  `incompatible-type` Error and `Count(First([]))` answered that Error
+  nested inside an unevaluated `Count`. Both now answer the bare Error, with
+  one identical diagnostic: a number has no length, so asking for one is a
+  defect in the program, not a partial function. The declared carrier of
+  `Length` stays `(any)` (the IsPrime precedent: a declared parameter type
+  is also what an undeclared argument symbol is inferred from); the
+  evaluate handler mints the error for a value that refutes the collection
+  contract (`nonCollectionSizeOperandError`, `collections.ts`). Strings
+  keep their length; an undeclared or valueless collection-typed symbol
+  stays inert; an operand that is already an error is not re-diagnosed.
+  The ruling had named a third head, `Dimensions`; there is no such
+  operator (the measured inertness was that of any undeclared head), and
+  `Shape(5) = ()` keeps its documented APL semantics — a scalar has the
+  empty shape — which is a design, not a defect.
+- **FIXED 2026-09-02 (ruled the same day): an infinite leg dominates a NaN
+  leg in every Euclidean norm, and `~oo` counts as infinite.**
+  `Norm((+oo, NaN))` and `Abs` of that point answered NaN while
+  `Hypot(+oo, NaN)` answered `+oo` under the IEEE rule ruled 2026-08-31;
+  `Hypot(~oo, 3)` was an `incompatible-type` Error while `Norm((~oo, 3))`
+  was `+oo`. One rule now: an infinite leg — signed or `~oo`, whose
+  modulus is `+oo` by definition — makes the norm `+oo`; otherwise a NaN
+  leg makes it NaN. `Hypot`'s carrier admits `~oo`. `Distance` follows
+  the same rule by a follow-up ruling the same day: `Distance(p, q)` is
+  `Norm(p − q)`, so `Distance((+oo, 0), (0, 0))` is `+oo` and
+  `Distance((NaN, 0), (0, 0))` is NaN, in band, where a `!isFinite` guard
+  used to answer an out-of-band `Error("expected-value")`.
+- **FIXED 2026-09-02 (ruled the same day): a compiled `If`/`Which` takes
+  no branch on an undecided condition.** The compiled JavaScript picked a
+  branch by JavaScript truthiness — `If(x > 0, 1, -1)` at `x = NaN`
+  returned `-1`, an unset boolean parameter returned the else arm — while
+  the interpreter holds such an application inert. A compiled condition
+  that is not exactly `true`/`false` now yields `NaN`, the numeric
+  codomain marker, which is what the compiled element-wise `Which` already
+  answers for a no-match cell. Weighed and not taken: throwing (a NaN
+  sample in a drawing loop would abort the plot) and documenting the
+  truthiness (a silently selected branch). An unsupplied variable reads
+  as `undefined` whatever its declared type, so every numeric condition
+  operand is guarded, `real`-typed ones included. Two follow-up rulings
+  the same day: a STATEMENT-form `If` in a loop or block body executes no
+  branch on an undecided condition and the body continues (the
+  interpreter's inertness; "throw" and "keep truthiness" were weighed and
+  not taken); and the `And`/`Or`/`Not` connectives, which still
+  short-circuit by JavaScript logic when every reached operand is
+  undecided, get a three-valued (Kleene) lowering in a session of their
+  own after Phase F batches 11 and 13 — SCHEDULED, not fixed, because the
+  one-pass emitter cannot rebuild an operand outside its CSE region. A
+  third follow-up ruling the same day settles the other compile targets:
+  the Python target, which has a real NaN, takes the same operand guard;
+  the GPU targets (GLSL/WGSL) keep JavaScript-style selection for now,
+  because NaN propagation is not guaranteed on every driver, and stay on
+  the ROADMAP item that records that reason.
+- **FIXED 2026-09-02 (ruled the same day): a provably non-boolean
+  condition is refused at boxing.** The 2026-08-31 inertness ruling
+  removed the host throw that carried the only diagnostic for
+  `Which(10, …)`. A condition whose static type is disjoint from `boolean`
+  — a number, a string, a symbol declared with such a type — now becomes
+  an `incompatible-type` error OPERAND at boxing, as a wrong-typed argument
+  to `Sin` does, and the evaluate handlers propagate it as the demanded
+  condition's error. A symbol of unknown type (a misspelled `Tru` is a
+  free variable), a relation with free variables, a `missing`-admitting
+  type, and a collection whose cells could be condition values (a list of
+  booleans selects element-wise; a bare or `unknown`-element collection
+  may) stay inert. A collection that can never select — a tuple, which
+  binds whole; a set, a dictionary or a record; a string; an indexed
+  collection with provably non-boolean cells such as `list<number>` or
+  `range` — is refused like a scalar; an empty collection (`list<never>`)
+  is not, since it has no cell to contradict and broadcasts to an empty
+  result (`conditionOperand`, `control-structures.ts`; pinned in
+  `test/compute-engine/condition-diagnostic.test.ts`). The check exposed
+  one parser defect, fixed with it: a `\begin{cases}` row with a trailing
+  `&` and an empty condition cell parsed to a `Nothing` condition — a dead
+  row — and now parses to the `True` default clause.
 - **The executable conformance suite EXISTS** (built 2026-08-26;
   146 tests as of 2026-08-29): `test/compute-engine/error-model.test.ts`
   — every row of the table above across the three construction routes

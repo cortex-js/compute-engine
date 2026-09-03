@@ -154,15 +154,7 @@ describe('R1 — selection semantics', () => {
   test('a scalar False condition never selects (it lifts to no position)', () => {
     const ce = engine();
     const r = ce
-      .box([
-        'Which',
-        'False',
-        99,
-        ['List', 'True', 'False'],
-        1,
-        'True',
-        0,
-      ])
+      .box(['Which', 'False', 99, ['List', 'True', 'False'], 1, 'True', 0])
       .evaluate();
     expect(cells(r)).toEqual(['1', '0']);
   });
@@ -208,9 +200,7 @@ describe('R2 — arm evaluation', () => {
     ce.assign('count', ce.number(0));
     ce.assign('n', ce.box(['List', 3, 2, 1, 3]));
     const arm = ['Block', ['Assign', 'count', ['Add', 'count', 1]], 42];
-    const r = ce
-      .box(['Which', ['Equal', 'n', 3], arm, 'True', 0])
-      .evaluate();
+    const r = ce.box(['Which', ['Equal', 'n', 3], arm, 'True', 0]).evaluate();
     expect(cells(r)).toEqual(['42', '0', '0', '42']);
     // Two positions selected the arm, but it ran once (whole-arm contract).
     expect(ce.box('count').evaluate().re).toBe(1);
@@ -312,7 +302,11 @@ describe('R3 — length policy (strict, lifted regime)', () => {
   test('an unknown-length condition is not compared — the expression stays inert', () => {
     const ce = engine();
     ce.declare('m', 'integer');
-    const unknown = ['Map', ['Function', ['Greater', '_', 2], '_'], ['Range', 1, 'm']];
+    const unknown = [
+      'Map',
+      ['Function', ['Greater', '_', 2], '_'],
+      ['Range', 1, 'm'],
+    ];
     const r = ce
       .box(['Which', ['List', 'False', 'False'], 1, unknown, 2, 'True', 0])
       .evaluate();
@@ -322,7 +316,11 @@ describe('R3 — length policy (strict, lifted regime)', () => {
   test('an unknown-length selected arm leaves the expression inert', () => {
     const ce = engine();
     ce.declare('m', 'integer');
-    const unknown = ['Map', ['Function', ['Greater', '_', 2], '_'], ['Range', 1, 'm']];
+    const unknown = [
+      'Map',
+      ['Function', ['Greater', '_', 2], '_'],
+      ['Range', 1, 'm'],
+    ];
     const r = ce.box(['Which', ['List', 'True', 'False'], unknown]).evaluate();
     expect(r.operator).toBe('Which');
   });
@@ -381,7 +379,7 @@ describe('R4 — the no-match cell is NaN, uniformly', () => {
   });
 });
 
-describe("R4′ — a Missing condition cell is an error cell at that position", () => {
+describe('R4′ — a Missing condition cell is an error cell at that position', () => {
   test('other positions are unaffected', () => {
     const ce = engine();
     const r = ce
@@ -404,9 +402,7 @@ describe("R4′ — a Missing condition cell is an error cell at that position",
 
   test('an absent cell does not fall through to a later clause', () => {
     const ce = engine();
-    const r = ce
-      .box(['Which', ['List', 'Missing'], 1, 'True', 99])
-      .evaluate();
+    const r = ce.box(['Which', ['List', 'Missing'], 1, 'True', 99]).evaluate();
     expect(cells(r)[0]).toMatch(/absent/);
   });
 
@@ -547,14 +543,16 @@ describe('activation gate', () => {
     expect(r.toString()).toMatch(/Infinity/);
   });
 
-  test('a collection of non-booleans is not reinterpreted (held, not selected)', () => {
-    // The cells are numbers, so the element-wise gate does not open. The
-    // conditional is then held whole rather than raising a host exception
-    // (undecidable-condition ruling 2026-08-31).
+  test('a collection of non-booleans is refused at boxing (never selected)', () => {
+    // The cells are numbers, so the element-wise gate can never open, and
+    // the type says so at boxing: the condition is an `incompatible-type`
+    // error operand (provably non-boolean condition ruling), propagated as
+    // the condition's error — never a host exception, never a selection.
     const ce = engine();
-    const r = ce.box(['Which', ['List', 1, 2], 1, 'True', 0]).evaluate();
-    expect(r.operator).toBe('Which');
-    expect(r.op2.isSame(1)).toBe(true);
+    const boxed = ce.box(['Which', ['List', 1, 2], 1, 'True', 0]);
+    expect(boxed.errors).toHaveLength(1);
+    expect(boxed.errors[0].toString()).toContain('incompatible-type');
+    expect(boxed.evaluate().operator).toBe('Error');
   });
 
   test('a Set of booleans (not indexed) does not activate', () => {
@@ -607,18 +605,21 @@ describe('scalar behavior is unchanged', () => {
   test('scalar Missing condition is the catchable error', () => {
     const ce = engine();
     expect(ce.box(['If', 'Missing', 1, 2]).evaluate().operator).toBe('Error');
-    expect(
-      ce.box(['Which', 'Missing', 1, 'True', 2]).evaluate().operator
-    ).toBe('Error');
+    expect(ce.box(['Which', 'Missing', 1, 'True', 2]).evaluate().operator).toBe(
+      'Error'
+    );
   });
 
-  test('the scalar typo path is held, not thrown', () => {
-    // `3` can never be a condition, but an undecidable condition is answered
-    // with inertness rather than a host exception (ruling 2026-08-31).
+  test('the scalar typo path is an error operand, not a throw', () => {
+    // `3` can never be a condition, and its type says so at boxing: the
+    // condition is an `incompatible-type` error operand (ruling 2026-09-02),
+    // never a host exception. An undecidable condition of unknown type keeps
+    // its inertness (ruling 2026-08-31).
     const ce = engine();
-    const r = ce.box(['If', 3, 1, 2]).evaluate();
-    expect(r.operator).toBe('If');
-    expect(r.op1.isSame(3)).toBe(true);
+    const boxed = ce.box(['If', 3, 1, 2]);
+    expect(boxed.errors).toHaveLength(1);
+    expect(boxed.evaluate().operator).toBe('Error');
+    expect(ce.box(['If', 'stillUnknown', 1, 2]).evaluate().operator).toBe('If');
   });
 });
 
@@ -702,12 +703,15 @@ describe('type handler', () => {
 
   test('a tuple-typed condition does NOT flip the static shape (tuple-atomic)', () => {
     // `tuple` is a subtype of `indexed_collection`, but runtime lifts tuples
-    // whole and never activates the elementwise path — the type must agree.
+    // whole and never activates the elementwise path — so a tuple can never
+    // be a condition, and it is refused at boxing as an `incompatible-type`
+    // error operand (provably non-boolean condition ruling). The static
+    // shape does not flip to a list either way.
     const ce = engine();
     const e = ce.box(['Which', ['Tuple', 'True', 'False'], 1, 'True', 0]);
-    expect(e.type.matches(parseType('integer'))).toBe(true);
+    expect(e.errors).toHaveLength(1);
     expect(e.type.matches(parseType('list<integer>'))).toBe(false);
-    expect(e.evaluate().operator).toBe('Which'); // inert at runtime
+    expect(e.evaluate().operator).toBe('Error');
   });
 
   test('a list-valued arm contributes its ELEMENT type, not its list type', () => {
@@ -795,16 +799,12 @@ describe('type handler', () => {
   test('If without an else branch widens; with one it does not', () => {
     const ce = engine();
     const noElse = ce.box(['If', ['List', 'True', 'False'], 1]);
-    expect(noElse.type.matches(parseType('list<integer^2>'))).toBe(
-      false
-    );
+    expect(noElse.type.matches(parseType('list<integer^2>'))).toBe(false);
     expect(noElse.type.matches(parseType('list<number^2>'))).toBe(true);
     expect(noElse.evaluate().type.matches(noElse.type)).toBe(true);
 
     const withElse = ce.box(['If', ['List', 'True', 'False'], 1, 0]);
-    expect(withElse.type.matches(parseType('list<integer^2>'))).toBe(
-      true
-    );
+    expect(withElse.type.matches(parseType('list<integer^2>'))).toBe(true);
   });
 
   test('the walk stops at the first literal True: later conditions are unreachable', () => {
@@ -846,9 +846,9 @@ describe('type handler', () => {
     ]);
     const v = e.evaluate();
     expect(cells(v)).toEqual(['(1, 2)', '(0, 0)']);
-    expect(
-      e.type.matches(parseType('list<tuple<integer, integer>^2>'))
-    ).toBe(true);
+    expect(e.type.matches(parseType('list<tuple<integer, integer>^2>'))).toBe(
+      true
+    );
     expect(v.type.matches(e.type)).toBe(true);
   });
 

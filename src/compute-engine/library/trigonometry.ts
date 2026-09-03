@@ -79,6 +79,54 @@ import {
   coshIntegralComplex,
 } from '../numerics/numeric-complex.js';
 
+/**
+ * Whether a `Hypot` leg has an infinite magnitude, which makes the hypotenuse
+ * `+∞` whatever the other leg is — a NaN leg included.
+ *
+ * A leg is infinite when it is a number literal at any infinite point — `±∞`,
+ * the unsigned `~oo`, or an anonymous directed infinity such as `∞ + i`, all
+ * of which have modulus `+∞` — or when it is a fixed-arity point with such a
+ * component: a point enters the sum of squares through its own norm, and an
+ * infinite component makes that norm `+∞`, so `Hypot((∞, NaN), 2)` is `+∞`
+ * exactly as `Norm((∞, NaN))` is. One rule holds for every Euclidean norm: an
+ * infinite leg dominates a NaN leg. IEEE 754 agrees —
+ * `Math.hypot(Infinity, NaN)` is `Infinity` — and the compiled code emits
+ * `Math.hypot`, so any other answer here would make the interpreter and the
+ * compiled code disagree.
+ *
+ * `infinitePoint` reads the numeric value, so it answers `undefined` for NaN
+ * and for an operand that is not a number literal, where a bare `!isFinite`
+ * would be true for both.
+ */
+function hypotLegIsInfinite(v: Expression | undefined): boolean {
+  if (v === undefined) return false;
+  if (infinitePoint(v) !== undefined) return true;
+  if (!isTuple(v) || !isFunction(v)) return false;
+  return v.ops.some((c) => infinitePoint(c) !== undefined);
+}
+
+/**
+ * Whether a `Hypot` leg is NaN, which makes the hypotenuse NaN when no leg is
+ * infinite.
+ *
+ * The shape of the test mirrors `hypotLegIsInfinite`: a leg is NaN when it is
+ * the NaN literal, or when it is a fixed-arity point with a NaN component — a
+ * point enters the sum of squares through its own norm, and `Norm((NaN, 3))`
+ * is NaN. The component scan is what the point needs: `isNaN` is `false` for a
+ * tuple, whatever it holds, so a sign handler reading `isNaN` alone would
+ * claim `non-negative` for `Hypot((NaN, 3), 5)` while the evaluate handler
+ * answers NaN. Both handlers call this function so that they cannot disagree.
+ *
+ * An operand whose value is not yet known reports `isNaN` as `undefined` and
+ * is not NaN here, which leaves the ordinary computation to decide.
+ */
+function hypotLegIsNaN(v: Expression | undefined): boolean {
+  if (v === undefined) return false;
+  if (v.isNaN === true) return true;
+  if (!isTuple(v) || !isFunction(v)) return false;
+  return v.ops.some((c) => c.isNaN === true);
+}
+
 //
 // Note: The name of trigonometric functions follow NIST DLMF
 // - https://dlmf.nist.gov/4.14
@@ -317,30 +365,39 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     Hypot: {
       description: 'Hypotenuse length: sqrt(x^2 + y^2).',
       broadcastable: true,
-      // The carrier is the EXTENDED real line, because `√(x² + y²)` has a
-      // value at an infinite operand: an infinite leg makes the hypotenuse
-      // infinite, whatever the other leg is (`Math.hypot(∞, 2)` is
-      // `Infinity`, and `hypot(2, y)` for y = 10⁵, 10¹⁰⁰, 10³⁰⁰ is y to
-      // within the rounding of the small leg). Spelling the carrier `real`
-      // rejected `Hypot(2, +oo)` as `incompatible-type` although its value
-      // is well defined. The result is `real | +oo` for the same reason:
-      // `+∞` is the ONLY infinite value a norm can take — it is
-      // non-negative — and `-oo` is admitted as an OPERAND only. The `nan`
-      // arm is the codomain vocabulary the `handle` policy below needs: a
-      // `NaN` leg enters through the NaN policy channel rather than
-      // through the carrier, and the handler answers `NaN` for it. The
-      // sharp claim for an application still comes from the type handler,
-      // which reports `real` for two finite legs.
-      signature:
-        '(real | signed_infinity, real | signed_infinity) -> real | +oo | nan',
+      // The carrier is the finite reals plus EVERY infinity, because
+      // `√(x² + y²)` has a value at an infinite operand: an infinite leg
+      // makes the hypotenuse infinite, whatever the other leg is
+      // (`Math.hypot(∞, 2)` is `Infinity`, and `hypot(2, y)` for y = 10⁵,
+      // 10¹⁰⁰, 10³⁰⁰ is y to within the rounding of the small leg).
+      // Spelling the carrier `real` rejected `Hypot(2, +oo)` as
+      // `incompatible-type` although its value is well defined. The
+      // unsigned complex infinity `~oo` is admitted for the same reason,
+      // and it is why the carrier is `infinity` rather than the signed
+      // pair: `|~oo| = +∞` by definition of the point at infinity, so
+      // `Hypot(~oo, 3)` is `+∞`, the answer every Euclidean norm gives an
+      // infinite component. The `infinity` type also brings in an anonymous
+      // directed infinity such as `∞ + i`, whose modulus is `+∞` as well.
+      // Finite complex operands stay OUT of the carrier.
+      //
+      // The result is `real | +oo`: `+∞` is the ONLY infinite value a norm
+      // can take — it is non-negative — and `-oo` is admitted as an
+      // OPERAND only. The `nan` arm is the codomain vocabulary the
+      // `handle` policy below needs: a `NaN` leg enters through the NaN
+      // policy channel rather than through the carrier, and the handler
+      // answers `NaN` for it. The sharp claim for an application still
+      // comes from the type handler, which reports `real` for two finite
+      // legs.
+      signature: '(real | infinity, real | infinity) -> real | +oo | nan',
       // Explicit, because neither policy the framework can derive is right
       // here: the DERIVED Contract B default for this carrier is `reject`
-      // (an extended-real carrier is not a subtype of `complex`, which is
-      // the mechanical propagate test — `docs/ERROR-MODEL.md` §4), and
-      // `propagate` answers `NaN` from the generic gate BEFORE the handler
-      // runs, which loses the infinity precedence below (`Hypot(∞, NaN)`
-      // is `+∞`, not `NaN`). With `handle` the gate stands down and the
-      // handler owns every non-finite operand, on both routes.
+      // (a carrier that admits the infinities is not a subtype of
+      // `complex`, which is the mechanical propagate test —
+      // `docs/ERROR-MODEL.md` §4), and `propagate` answers `NaN` from the
+      // generic gate BEFORE the handler runs, which loses the infinity
+      // precedence below (`Hypot(∞, NaN)` is `+∞`, not `NaN`). With
+      // `handle` the gate stands down and the handler owns every
+      // non-finite operand, on both routes.
       nanBehavior: 'handle',
       // A point argument with a broadcasting component zips into one result
       // per element (via its norm below) — report the honest list type, not
@@ -368,7 +425,25 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         }
         return euclideanNormType(components);
       },
-      sgn: () => 'non-negative',
+      // A hypotenuse is `√(…)` of a sum of squares, so it is non-negative
+      // — `+∞` included. The one exception is the NaN the handler answers
+      // for a NaN leg with NO infinite sibling: NaN has no sign, so the
+      // claim must stand down there, as it does in the `Abs` and `Add`
+      // sign handlers. The infinite-leg test comes first for the same
+      // reason it does in the handler below — an infinite leg dominates a
+      // NaN leg, so `Hypot(+oo, NaN)` is the non-negative `+∞`. Both tests
+      // read the same two helpers the evaluate handler reads, so the sign
+      // cannot claim `non-negative` for an application that answers NaN;
+      // a NaN inside a POINT leg is what makes that a real risk, since
+      // `isNaN` is `false` for a tuple. An operand whose value is not yet
+      // known is neither infinite nor NaN here and keeps the non-negative
+      // claim.
+      sgn: ([x, y]) => {
+        if (hypotLegIsInfinite(x) || hypotLegIsInfinite(y))
+          return 'non-negative';
+        if (hypotLegIsNaN(x) || hypotLegIsNaN(y)) return 'unsigned';
+        return 'non-negative';
+      },
       // Evaluate the constructed √(x²+y²) so `.N()` returns a number, not an
       // unevaluated expression (the handler result is not re-driven otherwise).
       // Under `evaluate()` the exact folding still applies (`Hypot(1/2,1/3) →
@@ -377,46 +452,20 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // bare `Tuple` is inert): Hypot((3,4), 1) = √(‖(3,4)‖² + 1²).
       evaluate: ([x, y], { engine, numericApproximation }) => {
         // An infinite leg makes the hypotenuse infinite whatever the other
-        // leg is, NaN included — so this test comes before the NaN one.
-        // IEEE says the same (`Math.hypot(Infinity, NaN)` is `Infinity`),
-        // and the compiled lane emits `Math.hypot`, so any other answer
-        // here would be a route divergence. The test asks for a signed
-        // infinity: `~oo` is refused at the carrier, and a bare
-        // `!isFinite` would also be true for a non-number operand.
-        const isSignedInfinity = (v: Expression | undefined): boolean =>
-          v !== undefined &&
-          isNumber(v) &&
-          v.isInfinity === true &&
-          (v.isPositive === true || v.isNegative === true);
-        // A leg is infinite in MAGNITUDE when it is a signed infinity, or
-        // when it is a fixed-arity point whose norm is `+oo` — a point
-        // enters the sum of squares through that norm, so an infinite norm
-        // makes the hypotenuse infinite exactly as an infinite scalar does
-        // (`Hypot((∞, 3), NaN) = +∞`). The point test mirrors what `Norm`
-        // itself answers: `Norm((∞, 3))` is `+oo`, but `Norm((∞, NaN))` is
-        // `NaN` — the point's own NaN is not resolved inside the norm — so
-        // a NaN component withholds the proof here too and `Hypot` keeps
-        // agreeing with the norm it is defined through. `~oo` proves
-        // nothing in either position: the carrier refuses it as a scalar,
-        // and a `~oo` component leaves the point to the construction
-        // below, unchanged.
-        const isInfiniteMagnitude = (v: Expression | undefined): boolean => {
-          if (v === undefined) return false;
-          if (isSignedInfinity(v)) return true;
-          if (!isTuple(v) || !isFunction(v)) return false;
-          return (
-            v.ops.some((c) => isSignedInfinity(c)) &&
-            !v.ops.some((c) => c.isNaN === true)
-          );
-        };
+        // leg is, NaN included — so this test comes before the NaN one
+        // (`hypotLegIsInfinite` states the rule and its IEEE grounding).
         // `+oo` is the same value on both routes, so `numericApproximation`
         // changes nothing here.
-        if (isInfiniteMagnitude(x) || isInfiniteMagnitude(y))
+        if (hypotLegIsInfinite(x) || hypotLegIsInfinite(y))
           return engine.PositiveInfinity;
         // With no infinite leg, a NaN leg makes the result NaN. The
         // operator declares `nanBehavior: 'handle'`, so this handler is
-        // where that answer comes from on both routes.
-        if (x?.isNaN === true || y?.isNaN === true) return engine.NaN;
+        // where that answer comes from on both routes. A NaN inside a
+        // point leg counts, which is why the test is `hypotLegIsNaN` and
+        // not `isNaN`: the construction below would answer NaN for it
+        // anyway (through the point's own norm), and the sign handler
+        // reads the same helper, so all three agree.
+        if (hypotLegIsNaN(x) || hypotLegIsNaN(y)) return engine.NaN;
         const sq = (v: Expression): Expression =>
           engine.expr(isTuple(v) ? ['Square', ['Norm', v]] : ['Square', v]);
         return engine
