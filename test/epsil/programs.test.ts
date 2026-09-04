@@ -153,6 +153,66 @@ fact(10)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('3628800');
   });
+
+  // MUTUAL recursion needs no `let` ceremony in any definition form: a call
+  // to a name that a LATER statement defines registers a forward reference
+  // (`engine-declarations.ts`), which the later definition fulfils in place.
+  // The three spellings — `function`, math-style `f(n) = …`, and a `=>`
+  // lambda assigned to a bare name — are pinned separately because each
+  // reaches the definition through a different canonical head.
+  const MUTUAL_FORMS: [string, string][] = [
+    [
+      '`function` form',
+      `
+function even(n) -> boolean { if n == 0 { true } else { odd(n - 1) } }
+function odd(n) -> boolean { if n == 0 { false } else { even(n - 1) } }
+[even(4), even(7), odd(7)]`,
+    ],
+    [
+      'math form',
+      `
+even(n) = true if n == 0 else odd(n - 1)
+odd(n) = false if n == 0 else even(n - 1)
+[even(4), even(7), odd(7)]`,
+    ],
+    [
+      'lambda assigned to a bare name',
+      `
+even = n => true if n == 0 else odd(n - 1)
+odd = n => false if n == 0 else even(n - 1)
+[even(4), even(7), odd(7)]`,
+    ],
+  ];
+
+  test.each(MUTUAL_FORMS)(
+    'mutually recursive one-step definitions, %s',
+    (_label, source) => {
+      const { text, diagnostics } = run(source);
+      expect(diagnostics).toEqual([]);
+      expect(text).toBe('["True","False","True"]');
+    }
+  );
+
+  test('mutual recursion inside a block and one statement at a time', () => {
+    // Nested in a function body, the sibling definitions are block locals.
+    const nested = run(`
+function outer(k) -> boolean {
+  even(n) = true if n == 0 else odd(n - 1)
+  odd(n) = false if n == 0 else even(n - 1)
+  even(k)
+}
+[outer(4), outer(7)]`);
+    expect(nested.diagnostics).toEqual([]);
+    expect(nested.text).toBe('["True","False"]');
+    // Defined across separate programs on one engine (the REPL route), the
+    // first definition's forward reference is fulfilled by the second.
+    const ce = new ComputeEngine();
+    const first = executeEpsil(ce, 'even = n => true if n == 0 else odd(n - 1)');
+    const second = executeEpsil(ce, 'odd = n => false if n == 0 else even(n - 1)');
+    const call = executeEpsil(ce, 'even(4)');
+    expect([...first.diagnostics, ...second.diagnostics, ...call.diagnostics]).toEqual([]);
+    expect(call.value.toString()).toBe('"True"');
+  });
 });
 
 describe('EPSIL PROGRAMS — numeric methods', () => {

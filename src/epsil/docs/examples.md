@@ -240,9 +240,16 @@ Map(fib, 1..10)
 
 A single-clause spelling with a conditional is equivalent
 (`fact(n) = 1 if n <= 1 else n * fact(n - 1)`), as is the two-step form —
-declare with `let`, then assign a `=>` lambda. Note that *mutually*
-recursive functions still require declaring all the names with `let` before
-defining any of them.
+declare with `let`, then assign a `=>` lambda. *Mutually* recursive functions
+need no declaration ceremony either: a call to a name that a later statement
+defines is resolved when that definition runs, in every form above.
+
+```epsil
+even(n) = true if n == 0 else odd(n - 1)
+odd(n) = false if n == 0 else even(n - 1)
+[even(4), odd(7)]
+// ➔ [True, True]
+```
 
 ## Higher-Order Functions
 
