@@ -552,17 +552,28 @@ describe('Conforms: the outcome matrix (phase 2)', () => {
 });
 
 describe('compile fail-closed: the phase-2 operators', () => {
-  test('non-ground MatchesType and Conforms reject on every target', () => {
+  test('non-ground MatchesType and Conforms reject on every target but the JavaScript one', () => {
     // The shared gate lists all three comparison heads; ground calls fold.
+    // The one exemption: a `MatchesType` with a literal type compiles on the
+    // JavaScript target when the type has a faithful JS test (the compiled
+    // typed-binding route, `match-compile.test.ts`) — every other target,
+    // and a type without such a test, still fail closed.
     const eng = new ComputeEngine();
     eng.declare('gx', 'integer');
     const mt = eng.box(['MatchesType', 'gx', { str: 'integer' }]);
-    for (const name of ['javascript', 'glsl', 'wgsl', 'python'])
+    for (const name of ['glsl', 'wgsl', 'python'])
       expect(() =>
         (eng as any)._getCompilationTarget(name).compile(mt)
       ).toThrow(/cannot compile/i);
+    const js = (eng as any)._getCompilationTarget('javascript').compile(mt);
+    expect(js.success).toBe(true);
+    expect(js.code).toContain('Number.isInteger(');
     const r = (eng as any)._getCompilationTarget('interval-js').compile(mt);
     expect(r.success).toBe(false);
+    const untestable = eng.box(['MatchesType', 'gx', { str: 'list<integer>' }]);
+    expect(() =>
+      (eng as any)._getCompilationTarget('javascript').compile(untestable)
+    ).toThrow(/cannot compile/i);
     // ...and the same for `Conforms`: a SYMBOL subject is not a ground
     // operand (the gate exempts only calls whose operands are all literal
     // type text or settled type values), so the call must fail closed too.

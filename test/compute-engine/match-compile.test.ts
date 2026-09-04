@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 import type { MathJsonExpression } from '../../src/math-json/types';
 
@@ -479,5 +481,207 @@ describe('COMPILE Match — rest captures in guards, nested shapes, and shadowin
     );
     expect(r.success).toBe(true);
     expect(r.run!({ xs: [1, 2, 3] })).toEqual([[9]]);
+  });
+});
+
+describe('COMPILE Match — typed bindings (`MatchesType` with a literal type)', () => {
+  // A typed binding `v: T => …` lowers to the binding plus a
+  // `MatchesType(v, TypeFrom("T"))` guard. On the JavaScript target the type
+  // is resolved at compile time and its test is baked into the code — the
+  // same test the multi-clause parameter guards and the sum constructor
+  // patterns use — so the three agree about which JS values inhabit a type.
+  const typed = (
+    name: string,
+    type: string,
+    body: MathJsonExpression
+  ): MathJsonExpression => [
+    'MatchCase',
+    `_${name}`,
+    ['MatchesType', name, ['TypeFrom', { str: type }]],
+    body,
+  ];
+
+  it('machine types dispatch as the interpreter does', () => {
+    const cases: MathJsonExpression[] = [
+      typed('n', 'integer', ['Multiply', 'n', 10]),
+      typed('s', 'string', 2),
+      typed('b', 'boolean', 3),
+      ['MatchCase', '_', 4],
+    ];
+    const r = compile(ce.box(['Match', 'x', ...cases]), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('Number.isInteger(');
+    expect(r.code).toContain('typeof');
+    const probes: [MathJsonExpression, unknown][] = [
+      [4, 4],
+      [{ str: 'a' }, 'a'],
+      ['True', true],
+      [2.5, 2.5],
+    ];
+    for (const [expr, js] of probes) {
+      const interpreted = ce.box(['Match', expr, ...cases]).evaluate();
+      const compiled = r.run!({ x: js });
+      expect(compiled).toBe(interpreted.re);
+    }
+  });
+
+  it('numeric ranges and unions of machine types compile', () => {
+    const r = compile(
+      ce.box([
+        'Match',
+        'x',
+        typed('d', 'integer<0..9>', 1),
+        typed('t', 'integer | string', 2),
+        ['MatchCase', '_', 0],
+      ]),
+      { fallback: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: 7 })).toBe(1);
+    expect(r.run!({ x: 12 })).toBe(2);
+    expect(r.run!({ x: 'a' })).toBe(2);
+    expect(r.run!({ x: 2.5 })).toBe(0);
+  });
+
+  it('an explicit guard conjoined with the type test compiles', () => {
+    const r = compile(
+      ce.box([
+        'Match',
+        'x',
+        [
+          'MatchCase',
+          '_n',
+          [
+            'And',
+            ['MatchesType', 'n', ['TypeFrom', { str: 'integer' }]],
+            ['Greater', 'n', 2],
+          ],
+          1,
+        ],
+        ['MatchCase', '_', 0],
+      ]),
+      { fallback: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: 3 })).toBe(1);
+    expect(r.run!({ x: 1 })).toBe(0);
+    // A string never reaches the comparison: the type test is first.
+    expect(r.run!({ x: 'a' })).toBe(0);
+  });
+
+  it('a tagged sum variant and a whole tagged sum test their tag', () => {
+    // `light` and `shape` are TAGGED sums: their variants share a JS
+    // representation, so each value carries a `_tag` only its constructor
+    // produces — a faithful membership test for any subject.
+    const engine = new ComputeEngine();
+    executeEpsil(
+      engine,
+      'type light = red | green | yellow\ntype shape = circle(r: number) | square(side: number)'
+    );
+    const lightCases: MathJsonExpression[] = [
+      typed('g', 'green', 1),
+      typed('l', 'light', 2),
+      ['MatchCase', '_', 3],
+    ];
+    for (const [subject, expected] of [
+      [['green'], 1],
+      [['red'], 2],
+      [5, 3],
+    ] as [MathJsonExpression, number][]) {
+      const expr: MathJsonExpression = ['Match', subject, ...lightCases];
+      const r = compile(engine.box(expr), { fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.run!({})).toBe(expected);
+      expect(engine.box(expr).evaluate().re).toBe(expected);
+    }
+    // A payload variant: the constructed value carries its tag, and the
+    // whole-sum test is the disjunction of the variants' tests.
+    const r = compile(
+      engine.box([
+        'Match',
+        ['circle', 2],
+        typed('c', 'shape', 1),
+        ['MatchCase', '_', 0],
+      ]),
+      { fallback: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_tag === "circle"');
+    expect(r.run!({})).toBe(1);
+  });
+
+  it('a tagged-sum subject of a ROOT test compiles (only the boolean crosses the boundary)', () => {
+    // A tagged value never crosses the compiled unit's boundary, but here it
+    // is consumed by the test inside the unit: the subject compiles as an
+    // operand, not as a root result.
+    const engine = new ComputeEngine();
+    executeEpsil(engine, 'type shape = circle(r: number) | square(side: number)');
+    const r = compile(
+      engine.box(['MatchesType', ['circle', 2], { str: 'shape' }]),
+      { fallback: false, constantFold: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toBe(true);
+  });
+
+  it('an erased sum and a generic sum fail closed', () => {
+    // `json` is ERASED (its variants have distinct JS representations), so
+    // `jnum(5)` compiles to the plain `5` — which a free-standing `x is json`
+    // could not tell from any other number (the interpreter says `5` is not
+    // a `json`). `tree<T>` is generic: a tag carries no type arguments,
+    // while the interpreter compares them.
+    const engine = new ComputeEngine();
+    executeEpsil(
+      engine,
+      'type json = jbool(boolean) | jnum(number)\ntype tree<T> = leaf | node(value: T, children: list<tree<T>>)'
+    );
+    for (const type of ['json', 'jnum', 'tree<integer>', 'node<integer>', 'leaf'])
+      expect(() =>
+        compile(
+          engine.box(['Match', 'x', typed('v', type, 1), ['MatchCase', '_', 0]]),
+          { fallback: false }
+        )
+      ).toThrow(/MatchesType: cannot compile/);
+  });
+
+  it('a negated test is parenthesized', () => {
+    const r = compile(ce.box(['Not', ['MatchesType', 'x', { str: 'string' }]]), {
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: 'a' })).toBe(false);
+    expect(r.run!({ x: 3 })).toBe(true);
+  });
+
+  it('a standalone `MatchesType` (the `x is T` test) compiles, binding a compound subject once', () => {
+    const r = compile(
+      ce.box(['MatchesType', ['Add', 'x', 1], { str: 'integer' }]),
+      { fallback: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toMatch(/\(\(_tv\d+\) => Number\.isInteger\(_tv\d+\)\)\(/);
+    expect(r.run!({ x: 3 })).toBe(true);
+    expect(r.run!({ x: 2.5 })).toBe(false);
+  });
+
+  it('a type with no faithful JS test still fails closed', () => {
+    // `!error`: a compiled `match` with no matching case yields NaN, not an
+    // error value, so nothing in compiled code can be told apart as an error.
+    // `list<integer>`: `Array.isArray` cannot see element types.
+    for (const type of ['!error', 'error', 'list<integer>', 'nothing']) {
+      expect(() =>
+        compile(
+          ce.box(['Match', 'x', typed('v', type, 1), ['MatchCase', '_', 0]]),
+          { fallback: false }
+        )
+      ).toThrow(/MatchesType: cannot compile/);
+    }
+  });
+
+  it('the interval target keeps failing closed (its values are intervals)', () => {
+    const r = new IntervalJavaScriptTarget().compile(
+      ce.box(['MatchesType', 'x', { str: 'integer' }])
+    );
+    expect(r.success).toBe(false);
   });
 });

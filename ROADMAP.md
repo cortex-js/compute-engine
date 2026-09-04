@@ -833,9 +833,17 @@ Ruled 2026-09-03 and closed the same day:
   splicing (`CompileTarget.sequenceVars`); a bare binding with a guard
   failed closed.
 
-Still failing closed on purpose: a typed binding (`v: !error`) on the
-JavaScript target, since `MatchesType` has no compiled type registry; every
-`Match` on the Python target.
+A typed binding compiles on the JavaScript target since 2026-09-03 when its
+type has a faithful test on the JS value model — the machine numbers, strings
+and booleans, literal value types, numeric ranges, unions of those, and the
+variants and sums of a TAGGED, non-generic sum (`compileMatchesTypeJS` in
+`base-compiler.ts`, which bakes the registry's answer into the code the way a
+constructor pattern does). An erased sum declines — a plain `5` cannot be told
+from an erased `jnum(5)` — and so does a generic sum, whose tag carries no
+type arguments. Still failing closed on purpose: `v: !error` — a
+compiled `match` with no matching case yields `NaN`, not an error value, so
+nothing in compiled code can be told apart as an error; collections and
+records; every `Match` on the Python target.
 
 ### A compiled block lets a `let` redeclare a capture or a parameter that the interpreter refuses (OPEN, compile — found 2026-09-03 reviewing the `while let` compile work)
 

@@ -14,6 +14,20 @@
   A case covers a value only when it matches it unconditionally; a guarded
   case, a literal operand, or a pin counts for nothing. See `epsil doc
   match-not-exhaustive`.
+- **Compiled typed `match` bindings and `is` tests.** On the JavaScript
+  target, `MatchesType(v, T)` with a literal type — the form a typed `match`
+  binding (`n: integer => …`), a `while let v: T = …`, and the `x is T` test
+  lower to — now compiles when `T` has a faithful test on the JS value
+  model: the machine numbers, strings and booleans, literal value types,
+  numeric ranges, unions of those, and the variants and sums of a tagged,
+  non-generic sum (an erased sum's value is its payload's plain JS value,
+  which any other value of that shape also is, so it declines). The
+  type is resolved at compile time and its test is baked into the code, the
+  same test the multi-clause parameter guards and the sum constructor
+  patterns already use. A type with no faithful test — `error` and `!error`
+  (compiled code has no error value), collections, records, opaque nominals,
+  the non-finite numeric types — still fails closed, and so does every other
+  target.
 
 ### Resolved Issues
 

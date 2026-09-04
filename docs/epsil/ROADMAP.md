@@ -37,8 +37,13 @@ Items are demand-gated unless another roadmap gives them higher priority.
   support. The Python target must continue to fail closed until it implements
   equivalent lowering. A `match` on the JavaScript target compiles natively
   in statement position (a `while let`, or a `match` arm that `break`s a
-  `for`) and in value position; a typed binding (`v: !error`) still fails
-  closed there, because `MatchesType` has no compiled type registry.
+  `for`) and in value position, and a typed binding compiles when its type
+  has a faithful test on the JS value model (machine types, value types,
+  numeric ranges, unions of those, and the variants and sums of a tagged,
+  non-generic sum). `v: !error` still
+  fails closed there: compiled code has no error value to test for — a
+  compiled `match` with no matching case yields `NaN` — so it needs an error
+  representation in the compiled lane first.
 
 ## Tooling and documentation
 

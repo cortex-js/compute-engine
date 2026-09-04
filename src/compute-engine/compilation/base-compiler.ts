@@ -99,7 +99,11 @@ import {
   wildcardName,
   wildcardType,
 } from '../boxed-expression/pattern-utils.js';
-import { sumVariantInfo, taggedSumInType } from '../sum-representation.js';
+import {
+  sumPolicy,
+  sumVariantInfo,
+  taggedSumInType,
+} from '../sum-representation.js';
 import type { SumBucket } from '../sum-representation.js';
 import {
   buildCaseClosure,
@@ -1432,8 +1436,16 @@ export class BaseCompiler {
     //    values or literal type text. A GROUND call is exempt on purpose:
     //    constant folding evaluates it through the interpreter to its
     //    correct boolean — right code, not wrong code — and the fold must
-    //    keep winning. (`MatchesType`/`Conforms` are listed ahead of their
-    //    phase-2 landing; the names are inert until then.)
+    //    keep winning.
+    //
+    // One exemption from check 2: a `MatchesType` whose TYPE operand is
+    // literal text compiles on the JavaScript target when the type has a
+    // faithful test on the JS value model (`matchesTypeLowerable` decides
+    // here; `compileMatchesTypeJS` emits, inside the compile frame below) —
+    // the registry is consulted at COMPILE time and the test is baked into
+    // the code, the same way a compiled `match` constructor pattern or a
+    // multi-clause parameter guard bakes its type test. A type with no
+    // faithful test still fails closed here.
     if (expr.type.toString() === 'type')
       throw new Error(
         `Cannot compile a type value (type 'type') to target ` +
@@ -1450,7 +1462,13 @@ export class BaseCompiler {
           isString(op) ||
           (isFunction(op, 'TypeFrom') && op.nops === 1 && isString(op.op1))
       );
-      if (!ground)
+      if (
+        !ground &&
+        !(
+          isFunction(expr, 'MatchesType') &&
+          BaseCompiler.matchesTypeLowerable(expr, target)
+        )
+      )
         throw new Error(
           `${expr.operator}: cannot compile — a non-constant type ` +
             `comparison needs the engine's type registry, which compiled ` +
@@ -1703,6 +1721,17 @@ export class BaseCompiler {
         if (folded !== undefined) {
           emitted = true;
           return folded;
+        }
+        // A `MatchesType` the gate above admitted (a ground one that did not
+        // fold reaches here too). Emitted INSIDE the frame so its subject
+        // compiles as an operand: at depth 0 a tagged-sum subject would trip
+        // the result-type boundary gate, although only the boolean crosses.
+        if (isFunction(expr, 'MatchesType')) {
+          const lowered = BaseCompiler.compileMatchesTypeJS(expr, target, prec);
+          if (lowered !== undefined) {
+            emitted = true;
+            return lowered;
+          }
         }
       }
       const compiled = BaseCompiler.compileWithCse(expr, target, prec);
@@ -17160,6 +17189,171 @@ export class BaseCompiler {
       return { implKey: h, member: h, args };
 
     return undefined;
+  }
+
+  /**
+   * The literal type text of a `MatchesType(subject, T)` call — a string
+   * operand, or a settled `TypeFrom("…")` — or `undefined` when the type
+   * operand is anything else (a symbol bound to a type value, a computed
+   * string): only literal text can be resolved at compile time.
+   */
+  private static matchesTypeText(expr: Expression): string | undefined {
+    if (!isFunction(expr, 'MatchesType') || expr.nops !== 2) return undefined;
+    const t = expr.ops[1];
+    if (isString(t)) return t.string;
+    if (isFunction(t, 'TypeFrom') && isString(t.op1)) return t.op1.string;
+    return undefined;
+  }
+
+  /**
+   * Whether `compileMatchesTypeJS` will compile `expr` on `target`: the
+   * JavaScript target, a literal type operand, and a type with a faithful
+   * test on the JS value model (`jsTypeTest`). Decided on a placeholder,
+   * before the subject is compiled, so the shared gate in `compile` can fail
+   * closed without paying for (or being confused by) the subject.
+   *
+   * JavaScript only: the interval target's values are intervals, so a
+   * `typeof` test would be unfaithful there, and the shader targets have no
+   * runtime type at all.
+   */
+  private static matchesTypeLowerable(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (target.language !== 'javascript') return false;
+    const text = BaseCompiler.matchesTypeText(expr);
+    if (text === undefined) return false;
+    let type: Type;
+    try {
+      type = expr.engine.type(text).type;
+    } catch {
+      return false;
+    }
+    return BaseCompiler.jsTypeTest(expr.engine, type, '_$x') !== undefined;
+  }
+
+  /**
+   * Compile `MatchesType(subject, T)` — the engine form of an Epsil `x is T`
+   * test and of a typed `match` binding (`v: T => …`) — on the JavaScript
+   * target, or `undefined` when `matchesTypeLowerable` declines it (the
+   * caller then falls through to the ordinary path, which fails closed).
+   *
+   * The type is resolved through the engine's registry at COMPILE time and
+   * the resulting test is baked into the code, which is the same snapshot
+   * model a compiled sum constructor pattern and a multi-clause parameter
+   * guard follow. The test itself is the one those two already use
+   * (`jsTypeTest`), so the three cannot disagree about which JS values
+   * inhabit a type. Types with no faithful test on the JS value model
+   * decline: `error` and `!error` (a compiled `match` with no matching case
+   * yields `NaN`, not an error value, so nothing in compiled code can be
+   * told apart as an error), collections and records (`Array.isArray`
+   * cannot see element types), opaque nominals, erased sums (a plain `5` is
+   * indistinguishable from an erased `jnum(5)`), generic sums (a `_tag`
+   * cannot see type arguments), and the non-finite numeric types.
+   *
+   * `prec` is the parent's binding power: the emitted test is a loose
+   * comparison chain (`typeof x === "string"`), so under a tighter parent
+   * (`Not` emits `!` at 14) it is parenthesized — `!typeof x === "string"`
+   * would parse as `(!typeof x) === "string"`.
+   */
+  private static compileMatchesTypeJS(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    prec: number
+  ): TargetSource | undefined {
+    if (!isFunction(expr) || !BaseCompiler.matchesTypeLowerable(expr, target))
+      return undefined;
+    const engine = expr.engine;
+    const type = engine.type(BaseCompiler.matchesTypeText(expr)!).type;
+    const code = BaseCompiler.compile(expr.ops[0], target);
+    // A plain reference (a variable, a capture accessor such as `s[0]`) can
+    // be repeated inside the test; anything else is bound once, since the
+    // test may read its operand several times.
+    let test: string;
+    if (/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*|\[\d+\])*$/.test(code))
+      test = BaseCompiler.jsTypeTest(engine, type, code) ?? 'true';
+    else {
+      const tv = BaseCompiler.tempVar(target);
+      test = `((${tv}) => ${BaseCompiler.jsTypeTest(engine, type, tv) ?? 'true'})(${code})`;
+    }
+    return prec > 0 ? `(${test})` : test;
+  }
+
+  /**
+   * The JavaScript test that the value in `x` inhabits `t`: a source
+   * string, `null` when every value does (`any`, `unknown`), or `undefined`
+   * when the type has no faithful test on the JS value model.
+   *
+   * A sum-declared type is testable only under the TAGGED policy, where a
+   * value is a `{_tag}` object that only its constructor produces: a variant
+   * tests its tag, a sum the disjunction of its variants' tags. An ERASED
+   * variant is its payload's plain JS value, which any other value of that
+   * shape also is, so a membership test on an arbitrary subject cannot tell
+   * `jnum(5)` from `5` and declines (the constructor-pattern lowering may
+   * trust the erased shape because its subject is already known to be the
+   * sum; a free-standing `x is T` has no such guarantee). A GENERIC sum or
+   * variant declines too — an applied reference (`tree<integer>`) and a
+   * variant declared with type parameters — because a tag carries no type
+   * arguments, while the interpreter compares them. An alias of a testable
+   * type follows the alias; a union tests each member. Everything else is
+   * the multi-clause parameter guard (`jsClauseParamGuard`): the machine
+   * numbers, strings and booleans, literal value types, and numeric ranges.
+   *
+   * `visited` holds the alias declaration records along the current path —
+   * the repo's standard guard for a `.def`-following walker — so a
+   * self-referential alias stops instead of looping.
+   */
+  private static jsTypeTest(
+    engine: ComputeEngine,
+    t: Type,
+    x: string,
+    visited?: ReadonlySet<TypeReference>
+  ): string | null | undefined {
+    if (typeof t === 'object') {
+      if (t.kind === 'reference') {
+        if (t.args !== undefined && t.args.length > 0) return undefined;
+        const decl = declarationOf(t);
+        if (decl._sumVariants !== undefined) {
+          if (sumPolicy(engine, decl.name) !== 'tagged') return undefined;
+          const parts: string[] = [];
+          for (const v of decl._sumVariants) {
+            if (v.typeParams.length > 0) return undefined;
+            parts.push(`${x}?._tag === ${JSON.stringify(v.name)}`);
+          }
+          return parts.length === 0 ? undefined : `(${parts.join(' || ')})`;
+        }
+        const info = sumVariantInfo(engine, decl.name);
+        if (info !== undefined) {
+          if (info.policy !== 'tagged') return undefined;
+          const sum = engine._typeResolver.resolve(info.sum);
+          const generic =
+            sum !== undefined &&
+            (declarationOf(sum)._sumVariants ?? []).some(
+              (v) => v.name === decl.name && v.typeParams.length > 0
+            );
+          if (generic) return undefined;
+          return `${x}?._tag === ${JSON.stringify(decl.name)}`;
+        }
+        // A transparent alias of something testable (`type alias L = light`).
+        if (decl.alias && decl.def !== undefined && !visited?.has(decl)) {
+          const seen = new Set(visited);
+          seen.add(decl);
+          return BaseCompiler.jsTypeTest(engine, decl.def, x, seen);
+        }
+        return undefined;
+      }
+      if (t.kind === 'union') {
+        const parts: string[] = [];
+        for (const member of t.types) {
+          const g = BaseCompiler.jsTypeTest(engine, member, x, visited);
+          if (g === undefined) return undefined;
+          if (g === null) return null;
+          parts.push(g);
+        }
+        return `(${parts.join(' || ')})`;
+      }
+    }
+    return BaseCompiler.jsClauseParamGuard(t, x);
   }
 
   /** The JS test that the receiver `x` takes a candidate's arm — the

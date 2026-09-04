@@ -691,7 +691,13 @@ match z {
 This is symbolic destructuring, evaluated by the engine's general pattern
 matcher — it works when evaluating a `match` expression, but such patterns
 are not supported by `compile()`; compiling a `match` with an operator
-pattern fails closed, naming the offending pattern in the error.
+pattern fails closed, naming the offending pattern in the error. A typed
+binding, by contrast, compiles when its type has a faithful test on the
+JavaScript value model — the machine numbers, strings and booleans, literal
+values, numeric ranges, unions of those, and the variants and sums a `type`
+statement declares when they are tagged and not generic; a binding typed
+`!error`, or with a collection, record, erased-sum or generic-sum type, keeps
+failing closed.
 
 ### No match
 
