@@ -16,6 +16,7 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { DictionaryValue, MathJsonExpression } from '../../math-json/types.js';
 import { stripNumericRanges, widen } from '../../common/type/utils.js';
 import { widenValueTypes } from '../../common/type/widen-value.js';
+import { boundTypeSize } from '../../common/type/size-cap.js';
 import type { Type } from '../../common/type/types.js';
 import { isFunction, isString, isSymbol, isNumber } from './type-guards.js';
 
@@ -350,14 +351,20 @@ export class BoxedDictionary
       // included.)
       for (const key of keys)
         elements[key] = storedCellType(this._keyValues[key]);
-      return new BoxedType({ kind: 'record', elements });
+      // A stored type is bounded in size, as a function node's is
+      // (`boundTypeSize`): a dictionary whose fields hold one shared
+      // dictionary value has a type with one field per PATH, and it is
+      // stored here, outside the function-node chokepoint.
+      return new BoxedType(boundTypeSize({ kind: 'record', elements }));
     }
     const eltType = widen(
       // Same storage rule as the record arm: `widen` is a JOIN and a join of
       // one literal type is that literal type, so project the cells first.
       ...Object.values(this._keyValues).map(storedCellType)
     );
-    return new BoxedType({ kind: 'dictionary', values: eltType });
+    return new BoxedType(
+      boundTypeSize({ kind: 'dictionary', values: eltType })
+    );
   }
 
   get isPure(): boolean {

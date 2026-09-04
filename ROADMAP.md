@@ -957,9 +957,10 @@ and over a minute at 32. `widen` itself is one of the per-path readers
 the one place it is stored, the `type` getter of `boxed-function.ts`
 (`boundTypeSize`, `src/common/type/size-cap.ts`, limit `TYPE_SIZE_LIMIT` =
 256 nodes). Past the limit every compound component keeps its kind and its
-arity and its own components become `unknown`: `tuple<tuple<A, B>,
-tuple<C, D>>` becomes `tuple<tuple<unknown, unknown>, tuple<unknown,
-unknown>>`. The bound is on the total size, because 256 copies of one child
+arity and its own components become `any`: `tuple<tuple<A, B>,
+tuple<C, D>>` becomes `tuple<tuple<any, any>, tuple<any, any>>` (`any`, not
+`unknown`: the absence markers are not values, so they are not `<: unknown`,
+and a stored type must stay a supertype). The bound is on the total size, because 256 copies of one child
 nested eight deep is a type of 256^8 slots that no depth cap or width cap
 catches alone; the top level is never flattened, so a wide flat tuple keeps
 every slot type (its type is linear in the literal, as the value is). The
@@ -968,12 +969,15 @@ width cap that was considered (a tuple past 256 elements becoming bare
 `tuple`) was not adopted: the engine's tuple gates (`isTuple` and its 38
 callers, the `tuples` broadcast exemption) recognize a tuple only by the
 compound spelling, and `2·t` over a bare-`tuple`-typed value evaluated to a
-list broadcast (`Map`) where the value is a point. A tuple with `unknown`
+list broadcast (`Map`) where the value is a point. A tuple with `any`
 components is the shape those gates already admit (Tycho item 30), and
 every arithmetic form over a flattened tower evaluates component-wise as it
 did under the limit. `Negate` over a shared tuple tower also rebuilt the
 tower once per path (`negateTupleComponents`, `negate.ts`); it now shares
-its result as the input does. Pins: `test/compute-engine/type-size-cap.test.ts`.
+its result as the input does. The bound is applied at both places a derived
+type is stored: the `type` getter of a function node and
+`BoxedDictionary._computeType` (a dictionary literal stores its own
+`record{…}` type). Pins: `test/compute-engine/type-size-cap.test.ts`.
 The evaluate path (`evaluate`, `.N()`, `simplify`, `match`) stays
 proportional to the leaf count, which is the size of its result.
 

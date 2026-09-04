@@ -82,6 +82,28 @@
 
 ### Resolved Issues
 
+- Fixed an operand that fails only when evaluated being embedded in the
+  enclosing expression instead of becoming its value. `Sin(Length(5))`
+  evaluated to `sin(Error(…))`, and `1 + Length(5)` to `1 + Error(…)`,
+  where an error present when the expression was built already propagated
+  (`Sin("banana")` is the error). Both cases now answer the error, with the
+  enclosing operator on its breadcrumb; a selecting operator still ignores an
+  arm it does not demand, and a collection still keeps a failed element in
+  place. The same holds on the asynchronous evaluation route, for a spread
+  argument that fails, and for a broadcast over a failing scalar operand. A
+  user function whose annotated parameter rejects its argument now answers
+  the error directly (it used to answer the inert application with the
+  argument marked), so an element-wise failure's cell is the error, with the
+  function's name on its breadcrumb.
+- Fixed operations over a deeply nested tuple, or a nested list that is not
+  shape-regular, whose sub-values are shared objects (a value built as
+  `Tuple(t, t)` twenty levels deep, the block form of a Hadamard matrix, a
+  fractal point set) taking seconds and printing a type with a million slots.
+  A derived type is now bounded in size: past 256 nodes, its components keep
+  their kind and arity and their own components become `any`. Arithmetic
+  over such a value is unchanged. `Negate` over such a tuple also rebuilt it
+  once per path and now shares its result.
+
 - Fixed a user-defined function whose body evaluates to an error value
   leaving the call unevaluated. `len := x ↦ Length(x)` then `len(5)` answered
   `len(5)`, where `Length(5)` itself is the `incompatible-type` error, and an

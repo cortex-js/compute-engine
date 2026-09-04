@@ -31,15 +31,35 @@ import {
  * The recursion terminates: a component's own `.neg()` returns an inert
  * `Negate` when it cannot distribute (for example a `Range` with symbolic
  * bounds), instead of calling back into this function.
+ *
+ * A nested tuple component is negated through `negated`, a memo by node
+ * identity for one top-level call, before falling back to its `.neg()`. A
+ * boxed expression is a DAG — a tuple built from one sub-tuple referenced
+ * twice holds the same object twice — and rebuilding each occurrence
+ * separately produced one new node per PATH: `t = Tuple(t, t)` nested 26
+ * times is 27 nodes, and negating it exhausted the heap building 2^26
+ * tuples. With the memo the result shares its components as the input did.
  */
-function negateTupleComponents(expr: Expression): Expression | undefined {
+function negateTupleComponents(
+  expr: Expression,
+  negated: Map<Expression, Expression> = new Map()
+): Expression | undefined {
+  // The memo is read before the gates: an entry exists only for a node that
+  // passed them, and the could-be-numeric gate walks the node's type, which
+  // is not free for a component reached through many paths.
+  const cached = negated.get(expr);
+  if (cached !== undefined) return cached;
   if (
     !couldBeNumericTuple(expr) ||
     !hasAccessibleComponents(expr) ||
     !isFunction(expr)
   )
     return undefined;
-  return expr.engine.tuple(...expr.ops.map((op) => op.neg()));
+  const result = expr.engine.tuple(
+    ...expr.ops.map((op) => negateTupleComponents(op, negated) ?? op.neg())
+  );
+  negated.set(expr, result);
+  return result;
 }
 
 export function canonicalNegate(expr: Expression): Expression {

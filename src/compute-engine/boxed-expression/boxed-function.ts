@@ -103,6 +103,7 @@ import { Type } from '../../common/type/types.js';
 import { widenValueTypes } from '../../common/type/widen-value.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
+import { boundTypeSize } from '../../common/type/size-cap.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -2064,8 +2065,13 @@ export class BoxedFunction
     // slots here never had: a hit also requires `_lazyValueEpoch` to equal
     // the engine's current `_worldVersion`, and a redefinition advances that
     // version, so its generation-independent entries do expire.
+    // The one place a derived type is stored: a type past `TYPE_SIZE_LIMIT`
+    // nodes is widened here (`boundTypeSize`), so no reader — this engine's
+    // or a hover's — ever walks a type with a slot per leaf of a shared
+    // value. Every other type in the engine descends from a stored one or
+    // from text the user wrote.
     const compute = (): BoxedType =>
-      new BoxedType(type(this), this.engine._typeResolver);
+      new BoxedType(boundTypeSize(type(this)), this.engine._typeResolver);
     const result =
       cachedValue(
         this._type,
