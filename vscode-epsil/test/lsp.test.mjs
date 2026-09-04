@@ -130,7 +130,7 @@ await scenario('signature notes', undefined, async (c) => {
   check(
     'the signature note appears in the hover instead',
     hover?.contents.value.includes(
-      '*note:* `Ln` has signature `(complex | infinity, base: complex | infinity?) -> complex | infinity`'
+      '*note:* `Ln` has signature `(complex | infinity, base: (complex | infinity)?) -> complex | infinity`'
     ) === true,
     JSON.stringify(hover)
   );
