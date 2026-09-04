@@ -3523,6 +3523,7 @@ type OperandStructure =
   | {
   kind: "symbol";
   name: string;
+  system: boolean;
   inferred: boolean;
  }
   | {
@@ -3570,8 +3571,21 @@ holding an expression.
 \{
   `kind`: `"symbol"`;
   `name`: `string`;
+  `system`: `boolean`;
   `inferred`: `boolean`;
  \}
+
+#### OperandStructure.system?
+
+```ts
+optional system?: boolean;
+```
+
+Present (`true`) when the symbol resolves to the definition the
+engine's SYSTEM scope binds under this name — the library constant
+or operator, not a user or local declaration that shadows it. The
+ring arms of `At` and `Subscript` read it: `Integers[k]` is a
+quotient-ring adjunction only for the library `Integers`.
 
 #### OperandStructure.inferred?
 
