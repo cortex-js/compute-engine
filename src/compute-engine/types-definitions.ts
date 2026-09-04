@@ -503,6 +503,16 @@ export type OperandStructure =
   | { kind: 'string'; text: string }
   | {
       kind: 'number';
+      /** The tier the literal contributes to a COMPOSITE type: `integer`,
+       * `rational`, `real`, `complex`, `imaginary`, `nan`, `infinity`, or
+       * the signed pair `+oo | -oo`. A literal's handler-visible type
+       * (`type` on the descriptor) carries its value or an enclosing range;
+       * a composite built from the literal — a tuple's component, a list's
+       * element, a record's field — is a stored contract and carries the
+       * tier instead, so a container handler reads it here and never
+       * builds the literal type only to widen it away. Read off the value
+       * (`numberLiteralTierType`, `boxed-expression/literal-tier.ts`). */
+      tier: Type;
       literal?: 0 | 1;
       /** The literal's exact value as a REDUCED fraction, when it is a
        * rational with no radical part: `[numerator, denominator]`, the

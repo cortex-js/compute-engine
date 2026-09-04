@@ -80,6 +80,17 @@ export const CACHE_STATS: boolean = (() => {
   return flag !== undefined && flag !== '0';
 })();
 
+/** True under the test runner (`NODE_ENV=test`, which jest sets) or when
+ * `CE_CACHE_STATS` is set. The plain call counters the cost pins read
+ * (`subtypeStats` in `common/type/subtype.ts`, `descriptorStats` in
+ * `boxed-expression/operand-descriptor.ts`) are incremented only when this
+ * is true, so a production hot path pays nothing for them. A test reads
+ * them through the module export because an ES-module export cannot be
+ * spied on. */
+export const COUNT_STATS: boolean =
+  CACHE_STATS ||
+  (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test');
+
 type CacheCounters = Record<CacheEvent, number>;
 
 function emptyCounters(): CacheCounters {

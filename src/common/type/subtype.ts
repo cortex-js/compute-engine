@@ -1,3 +1,4 @@
+import { COUNT_STATS } from '../cache-stats.js';
 import {
   BARE_COLLECTION_STRUCTURAL_TYPE,
   BARE_DICTIONARY_STRUCTURAL_TYPE,
@@ -948,11 +949,24 @@ function alphaEquivalentSignatures(
   return typeToDedupKey(renamed) === typeToDedupKey(stripped);
 }
 
+/**
+ * The number of `isSubtype` queries answered since the module loaded — a
+ * measurement counter for the load-immune cost pins in
+ * `test/compute-engine/composite-type-synthesis.test.ts`, which count the
+ * type-structure walks typing a list of tuples costs per element (a timing
+ * bound would depend on the load of the machine, a count does not). The
+ * pins read it through the module export because an ES-module export cannot
+ * be spied on. Incremented only under `COUNT_STATS` (the test runner, or
+ * `CE_CACHE_STATS`), never reset.
+ */
+export const subtypeStats = { queries: 0 };
+
 /** Return true if lhs is a subtype of rhs */
 export function isSubtype(
   lhs: Type | TypeString,
   rhs: Type | TypeString
 ): boolean {
+  if (COUNT_STATS) subtypeStats.queries++;
   if (typeof lhs === 'string' && !PRIMITIVE_TYPES_SET.has(lhs as PrimitiveType))
     lhs = parseType(lhs);
   if (typeof rhs === 'string' && !PRIMITIVE_TYPES_SET.has(rhs as PrimitiveType))

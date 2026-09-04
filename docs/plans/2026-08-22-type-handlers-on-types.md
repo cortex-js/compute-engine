@@ -2467,6 +2467,21 @@ Open items — genuine decisions, each with a default:
   "[object Object]"). Error messages now name a literal operand's literal
   type ("got `2.5`", not "got `finite_real`"). The remaining churn was
   test pins, converted under the Step-0 rule.
+  **Composite synthesis made tier-direct (ruled 2026-08-27, implemented
+  2026-09-04).** Literal value types belong to number-literal nodes only;
+  every composite type synthesized from a value (tuple, list, set,
+  sequence, point list, record/dictionary, mapping-stage body, held
+  literal) carries each numeric component's tier, read directly off the
+  literal's value (`numberLiteralTierType`, the `tier` of a descriptor's
+  number structure node) instead of materializing the literal type and
+  widening it back. This closed a hole the post-hoc walker could not: a
+  literal's ENCLOSURE range is shape-identical to a handler claim, so
+  `(√2, 1)` had typed `tuple<real<1.4..1.5>, integer>` and a 5,000-point
+  list of such tuples collapsed to `list<tuple<any, any>>`. Flat composite
+  types are interned (`common/type/intern.ts`); the dead expression-shape
+  twin `shaped-list-type.ts` was removed. Contract, interning and count
+  pins: `test/compute-engine/composite-type-synthesis.test.ts`; the rule is
+  stated in `docs/TYPE-SYSTEM.md` §"Composite types carry tiers".
   The original second-half framing (kept for the record): The user approved the session's
   recommended next-steps list ("sounds good — proceed autonomously"),
   whose second item was this recommendation; recorded on that assent, to

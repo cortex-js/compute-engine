@@ -17,6 +17,8 @@ import {
 import { signOfType } from '../../common/type/utils.js';
 import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
 import { asRational } from './numerics.js';
+import { numberLiteralTierType } from './literal-tier.js';
+import { COUNT_STATS } from '../../common/cache-stats.js';
 import {
   functionLiteralBody,
   functionLiteralParameters,
@@ -185,10 +187,24 @@ function structureOfExpression(
     // `isSame` is strictly syntactic, so this reads the literal's own value
     // and never a symbol's assigned one.
     const literal = op.isSame(0) ? 0 : op.isSame(1) ? 1 : undefined;
-    const r = asRational(op);
-    const node: OperandStructure = { kind: 'number' };
+    // The reduced fraction is read on demand: it converts both terms to
+    // `bigint`, and the container handlers that read a literal's structure
+    // for its `tier` alone (`Tuple`, `List`, `Set`) never ask for it.
+    let rational: readonly [bigint, bigint] | undefined;
+    let rationalComputed = false;
+    const node: OperandStructure = {
+      kind: 'number',
+      tier: numberLiteralTierType(op),
+      get rational(): readonly [bigint, bigint] | undefined {
+        if (!rationalComputed) {
+          rationalComputed = true;
+          const r = asRational(op);
+          if (r !== undefined) rational = [BigInt(r[0]), BigInt(r[1])];
+        }
+        return rational;
+      },
+    };
     if (literal !== undefined) node.literal = literal;
-    if (r !== undefined) node.rational = [BigInt(r[0]), BigInt(r[1])];
     return node;
   }
   if (isFunction(op, 'Function')) {
@@ -206,24 +222,45 @@ function structureOfExpression(
       body: bodyStructure,
     };
   }
-  if (isFunction(op, 'Tuple'))
+  // The operands of a compound are described on demand. A handler that
+  // reads a compound's structure for its KIND alone — the `List` cell
+  // classifier asks each cell "are you a number literal?" and a tuple cell
+  // answers no — must not pay for one descriptor per operand of every
+  // tuple in a 5,000-point list. The walk memo is captured, so a shared
+  // node is still described once per derivation whenever the read happens.
+  if (isFunction(op, 'Tuple')) {
+    const ops = op.ops;
+    let elements: ReadonlyArray<OperandDescriptor> | undefined;
     return {
       kind: 'tuple',
       arity: op.nops,
-      elements: op.ops.map((x) => describe(x, undefined, memo)),
+      get elements(): ReadonlyArray<OperandDescriptor> {
+        return (elements ??= ops.map((x) => describe(x, undefined, memo)));
+      },
     };
-  if (isFunction(op, 'List'))
+  }
+  if (isFunction(op, 'List')) {
+    const ops = op.ops;
+    let elements: ReadonlyArray<OperandDescriptor> | undefined;
     return {
       kind: 'list-literal',
       shape: listLiteralShape(op),
-      elements: op.ops.map((x) => describe(x, undefined, memo)),
+      get elements(): ReadonlyArray<OperandDescriptor> {
+        return (elements ??= ops.map((x) => describe(x, undefined, memo)));
+      },
     };
-  if (isFunction(op))
+  }
+  if (isFunction(op)) {
+    const ops = op.ops;
+    let children: ReadonlyArray<OperandDescriptor> | undefined;
     return {
       kind: 'application',
       head: op.operator,
-      children: op.ops.map((x) => describe(x, undefined, memo)),
+      get children(): ReadonlyArray<OperandDescriptor> {
+        return (children ??= ops.map((x) => describe(x, undefined, memo)));
+      },
     };
+  }
   return undefined;
 }
 
@@ -262,11 +299,22 @@ export function describe(
     const shared = walk?.get(op);
     if (shared !== undefined) return shared;
   }
-  const type = typeOverride ?? op._literalType ?? op.type.type;
-  const descriptor = new ExpressionOperandDescriptor(op, type, walk);
+  if (COUNT_STATS) descriptorStats.built++;
+  const descriptor = new ExpressionOperandDescriptor(op, typeOverride, walk);
   if (typeOverride === undefined) walk?.set(op, descriptor);
   return descriptor;
 }
+
+/**
+ * The number of descriptors `describe()` has built since the module loaded —
+ * a measurement counter for the load-immune cost pins in
+ * `test/compute-engine/composite-type-synthesis.test.ts` (one descriptor per
+ * operand of a derivation; a list of N tuples must cost O(N) of them, not
+ * O(N) per level). Read through the module export because an ES-module
+ * export cannot be spied on. Incremented only under `COUNT_STATS` (the test
+ * runner, or `CE_CACHE_STATS`), never reset.
+ */
+export const descriptorStats = { built: 0 };
 
 // The memo bits of `ExpressionOperandFacts`: one bit per fact that has been
 // computed. A fact's VALUE can legitimately be `undefined` (the undecided
@@ -311,7 +359,9 @@ class ExpressionOperandFacts implements OperandFacts {
   // ordinary property at runtime that a handler could read the operand
   // through.
   readonly #op: Expression;
-  readonly #type: Type;
+  // A thunk, not the type: a number literal's type is read on demand (see
+  // `ExpressionOperandDescriptor.type`), and the facts must not force it.
+  readonly #typeOf: () => Type;
   private _computed = 0;
   private _typeFacts: ReturnType<typeof factsFromType> | undefined;
   private _finite: Tri;
@@ -322,13 +372,13 @@ class ExpressionOperandFacts implements OperandFacts {
   private _indexed: Tri;
   private _elementType: Type | undefined;
 
-  constructor(op: Expression, type: Type) {
+  constructor(op: Expression, typeOf: () => Type) {
     this.#op = op;
-    this.#type = type;
+    this.#typeOf = typeOf;
   }
 
   private typeFacts(): ReturnType<typeof factsFromType> {
-    return (this._typeFacts ??= factsFromType(this.#type));
+    return (this._typeFacts ??= factsFromType(this.#typeOf()));
   }
 
   get finite(): Tri {
@@ -353,7 +403,7 @@ class ExpressionOperandFacts implements OperandFacts {
       const op = this.#op;
       let sgn: Sign | undefined;
       if (isNumber(op) || isSymbol(op) || isFunction(op)) sgn = op.sgn;
-      this._sgn = sgn ?? signOfType(this.#type);
+      this._sgn = sgn ?? signOfType(this.#typeOf());
     }
     return this._sgn;
   }
@@ -438,7 +488,7 @@ class ExpressionOperandFacts implements OperandFacts {
       const held = op.valueDefinition?.value;
       return held !== undefined && isNumber(held) ? held.isFinite : undefined;
     }
-    if (isFunction(op) && isSubtype(this.#type, 'number')) {
+    if (isFunction(op) && isSubtype(this.#typeOf(), 'number')) {
       // The value channel is the REFUTATION backstop for the generic-point
       // convention. A result type is deliberately optimistic about
       // finiteness: an operator that is finite at a generic point claims a
@@ -479,17 +529,37 @@ class ExpressionOperandDescriptor implements OperandDescriptor {
   readonly #op: Expression;
   #walk: DescriptorMemo | undefined;
   readonly facts: OperandFacts;
+  private _type: Type | undefined;
   private _structure: OperandStructure | undefined;
   private _structureComputed = false;
 
   constructor(
     op: Expression,
-    readonly type: Type,
+    typeOverride: Type | undefined,
     walk: DescriptorMemo | undefined
   ) {
     this.#op = op;
     this.#walk = walk;
-    this.facts = new ExpressionOperandFacts(op, type);
+    // A number literal's type is read on demand (see `type` below). Every
+    // other operand's type is read here, up front: a compound's type
+    // derivation may write state (an inferred symbol type), and that
+    // derivation belongs to the child, not to the handler whose guarded
+    // window would otherwise report it.
+    this._type = typeOverride;
+    if (typeOverride === undefined && !isNumber(op)) this._type = op.type.type;
+    this.facts = new ExpressionOperandFacts(op, () => this.type);
+  }
+
+  /**
+   * The operand's handler-visible type: a number literal's value-carrying
+   * `_literalType` when it has one, the public type otherwise. For a number
+   * literal it is computed on first read — its literal type is a pure memo
+   * on the node, so nothing about the guarded window changes when the read
+   * moves inside it — and a container handler (`Tuple`, `List`, `Set`) that
+   * reads the literal's TIER off its structure never asks for it at all.
+   */
+  get type(): Type {
+    return (this._type ??= this.#op._literalType ?? this.#op.type.type);
   }
 
   // An instance property, not a prototype method: two call sites copy the

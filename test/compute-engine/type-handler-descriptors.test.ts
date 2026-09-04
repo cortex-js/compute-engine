@@ -31,7 +31,7 @@ describe('describe() on literals', () => {
     expect(d.facts.closed).toBe(true);
     expect(d.facts.collection).toBe(false);
     expect(d.facts.indexed).toBe(false);
-    expect(d.structureOf?.()).toEqual({ kind: 'number' });
+    expect(d.structureOf?.()).toEqual({ kind: 'number', tier: 'real' });
   });
 
   test("an error operand's validity is a TYPE read — its type is 'error'", () => {
@@ -43,11 +43,13 @@ describe('describe() on literals', () => {
   test('the literals 0 and 1 carry their structural tag', () => {
     expect(describeOperand(ce.box(0)).structureOf?.()).toEqual({
       kind: 'number',
+      tier: 'integer',
       literal: 0,
       rational: [0n, 1n],
     });
     expect(describeOperand(ce.box(1)).structureOf?.()).toEqual({
       kind: 'number',
+      tier: 'integer',
       literal: 1,
       rational: [1n, 1n],
     });

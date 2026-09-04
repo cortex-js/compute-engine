@@ -104,6 +104,7 @@ import { widenValueTypes } from '../../common/type/widen-value.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { boundTypeSize } from '../../common/type/size-cap.js';
+import { internType, isInternedType } from '../../common/type/intern.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -2101,8 +2102,17 @@ export class BoxedFunction
       }
       key = undefined;
     }
-    const compute = (): BoxedType =>
-      new BoxedType(boundTypeSize(type(this)), this.engine._typeResolver);
+    // A flat composite result is INTERNED (`internType`): the 5,000 points
+    // of a point list then share one `tuple<real, real>` object, and the
+    // list's cell fold joins them by identity. An interned type is bounded
+    // by construction, so the size walk is skipped for it.
+    const compute = (): BoxedType => {
+      const t = type(this);
+      return new BoxedType(
+        isInternedType(t) ? t : internType(boundTypeSize(t)),
+        this.engine._typeResolver
+      );
+    };
     const result =
       cachedValue(
         this._type,
@@ -6381,7 +6391,14 @@ function type(expr: BoxedFunction): Type {
       // source). The handler's own answer is wrong for `never`: the
       // bottom type matches every type, `matrix` included, so shape arms
       // fire vacuously.
-      if (descriptors.some((d) => d.type === 'never')) calculatedType = 'never';
+      // A number literal is never `never`, and reading its descriptor type
+      // would build its literal type — which a container handler (`Tuple`,
+      // `List`) deliberately never asks for — so literal operands are
+      // skipped here.
+      if (
+        descriptors.some((d, i) => !isNumber(expr.ops[i]) && d.type === 'never')
+      )
+        calculatedType = 'never';
       if (calculatedType) {
         typeHandlerAnswered = true;
         if (calculatedType instanceof BoxedType)
@@ -6395,8 +6412,11 @@ function type(expr: BoxedFunction): Type {
         // store an over-specific contract nobody wrote (`tuple<1, 2>`), so
         // every handler result is widened back to ordinary types here — the
         // single place a handler result is stored. Ranges (`real<0..>`)
-        // pass through untouched.
-        sigResult = widenValueTypes(sigResult);
+        // pass through untouched. An INTERNED result (`internType`) holds
+        // primitive names only, so it is already widened and the walk is
+        // skipped — this is the container handlers' hot path, one result
+        // per point of a point list.
+        if (!isInternedType(sigResult)) sigResult = widenValueTypes(sigResult);
       }
     } else if (expr.ops.some((x) => x.type.type === 'never')) {
       // The same rule both handler shapes apply above, for a head with NO

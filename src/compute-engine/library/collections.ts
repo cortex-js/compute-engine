@@ -139,7 +139,9 @@ import { RING_CONSTANTS } from '../latex-syntax/utils.js';
 import {
   adjoinType as adjoinTypeD,
   operandLiteralValue as descriptorLiteralValue,
+  storedComponentTypeD,
 } from './type-handlers.js';
+import { internType } from '../../common/type/intern.js';
 import {
   describeBoundSymbol,
   describe as describeOperand,
@@ -1384,9 +1386,18 @@ function stringLiteralOf(d: OperandDescriptor): string | undefined {
   return s?.kind === 'string' ? s.text : undefined;
 }
 
-/** Descriptor twin of {@link tupleTypeOf}. */
+/**
+ * The type of a tuple built from `ops`: one component per operand, each
+ * the operand's stored-contract type (`storedComponentTypeD` — a number
+ * literal's tier, never its literal type). Interned, so every `(x, y)` of
+ * two reals in a 5,000-point list is typed by one `tuple<real, real>`
+ * object and the list's cells join by identity.
+ */
 function tupleTypeOfD(ops: ReadonlyArray<OperandDescriptor>): Type {
-  return { kind: 'tuple', elements: ops.map((op) => ({ type: op.type })) };
+  return internType({
+    kind: 'tuple',
+    elements: ops.map((op) => ({ type: storedComponentTypeD(op) })),
+  });
 }
 
 /** Descriptor twin of {@link elementTypeOf}. */
@@ -2094,25 +2105,23 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
 }
 
 /**
- * The cell type a NUMBER-LITERAL operand contributes to a literal-`List`
- * shape claim.
+ * Classify a non-`List` element of a literal `List` as a cell type, or
+ * `null` when it blocks a shape claim.
  *
- * The expression shape reads the literal's type inside a broadcast-cell
- * window, where a number literal reports its bare TIER instead of the
- * value-carrying type a handler normally sees. A descriptor always carries
- * the value-carrying type, so the tier is recovered here: every infinity
- * reduces to `infinity` and everything else to the tier
- * `stripNumericRanges` names.
+ * - A number literal is a cell of its TIER (`integer`, `real`, …), read off
+ *   its structure. The list's type is a stored contract, so the literal's
+ *   own value or enclosure type is never part of it, and never built here.
+ * - An inference-pending bare SYMBOL (a symbol typed `unknown`) is a cell of
+ *   type `number` — the generic-symbol fold; an application typed
+ *   `unknown`/`any` blocks, since it could return a collection.
+ * - Any other element whose type is atomic (`isAtomicValueType`) is a cell
+ *   of that type.
+ * - Anything else blocks.
  */
-function numberLiteralCellType(t: Type): Type {
-  if (isSubtype(t, 'infinity')) return 'infinity';
-  return stripNumericRanges(t);
-}
-
-/** Descriptor twin of `classifyCell` (`boxed-expression/shaped-list-type.ts`). */
 function classifyCellD(op: OperandDescriptor): Type | null {
   const s = op.structureOf?.();
-  const t = s?.kind === 'number' ? numberLiteralCellType(op.type) : op.type;
+  if (s?.kind === 'number') return s.tier;
+  const t = op.type;
 
   if (t === 'unknown' || t === 'any') {
     if (t === 'unknown' && s?.kind === 'symbol') return 'number';
@@ -2129,7 +2138,9 @@ function classifyCellD(op: OperandDescriptor): Type | null {
 type LevelShape = { dims: number[]; cells: Type[] };
 
 /**
- * Descriptor twin of `analyzeLevel` (`boxed-expression/shaped-list-type.ts`).
+ * Analyze one level of a literal-`List` structure whose elements are
+ * `ops`: `null` when this level (or anything nested under it) blocks a
+ * shape claim, otherwise its dimensions and distinct cell types.
  *
  * `memo` holds the analysis of every nested list already visited, by
  * descriptor. A structure walk describes a shared node ONCE (the descriptor
@@ -2137,6 +2148,11 @@ type LevelShape = { dims: number[]; cells: Type[] };
  * memo makes this walk linear in the number of distinct nodes: a 26-level
  * `List(t, t)` tower has 27 nodes and 2^26 paths, and the path-wise walk
  * this replaces overflowed the stack spreading its cells into `widen`.
+ *
+ * Leaf cells are collected by identity as well. Composite cell types are
+ * interned (`internType`), so the 5,000 points of a point list are one
+ * `tuple<real, real>` object and contribute one cell; without the
+ * identity fold, `widen` would join 5,000 equal types one by one.
  */
 function analyzeLevelD(
   ops: ReadonlyArray<OperandDescriptor>,
@@ -2146,6 +2162,7 @@ function analyzeLevelD(
 
   const childShapes: LevelShape[] = [];
   const cellTypes: Type[] = [];
+  const seenCells = new Set<Type>();
 
   for (const op of ops) {
     const structure = op.structureOf?.();
@@ -2160,7 +2177,10 @@ function analyzeLevelD(
     } else {
       const cell = classifyCellD(op);
       if (cell === null) return null;
-      cellTypes.push(cell);
+      if (!seenCells.has(cell)) {
+        seenCells.add(cell);
+        cellTypes.push(cell);
+      }
     }
   }
 
@@ -2189,10 +2209,31 @@ function analyzeLevelD(
   return { dims: [ops.length, ...firstDims], cells };
 }
 
-/** Descriptor twin of `shapedListType`
- * (`boxed-expression/shaped-list-type.ts`), whose contract — when a literal
- * `List` may claim a dimensioned shape, and what its cell type is — that
- * file's doc comment states in full. */
+/**
+ * The **honest** shape-derived type of a literal `List` whose elements are
+ * `ops` (§D3 of `docs/COLLECTIONS-MODEL.md`): a dimensioned `list` type
+ * (`list<C^2x3>`) when the list is shape-regular over atomic cells, or
+ * `null` (no shape claim) otherwise — the caller then falls back on the
+ * plain `list<widen(…)>` form.
+ *
+ * A shape claim requires: no blocked element (`classifyCellD`); no level
+ * mixing cells and nested lists; for rank ≥ 2 every child a literal `List`
+ * with identical dimensions (cell types need not match row to row); no
+ * empty level (a zero-length axis is never claimed); and a union-free
+ * widened cell type.
+ *
+ * The element type is the widened cell type reported honestly (`integer`,
+ * `real`, `color`, `tuple<…>`, …), never lifted to `number`: the broadcast
+ * typing contract requires an evaluated value's type to be a SUBTYPE of
+ * the statically declared `list<R>`, and lifting `real` cells past `R`
+ * would break it. A heterogeneous cell population (`number | color`) makes
+ * no kernel or signature sense, so no shape is claimed, but the widened
+ * type is still the honest element type and is returned unshaped rather
+ * than `null` — the raw fallback would let `widen(unknown, color)` absorb
+ * the unknown and unsoundly claim `list<color>` for `[x, Rgb]`. A NUMERIC
+ * union (`real | +oo | -oo`, the carrier a declared-domain operator infers
+ * into a fresh symbol) is not heterogeneous, and keeps its shape claim.
+ */
 function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
   const analysis = analyzeLevelD(ops, new Map());
   if (analysis === null) return null;
@@ -2207,9 +2248,13 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
     widened.kind === 'union' &&
     !isSubtype(widened, 'number')
   )
-    return { kind: 'list', elements: widened };
+    return internType({ kind: 'list', elements: widened });
 
-  return { kind: 'list', elements: widened as Type, dimensions: dims };
+  return internType({
+    kind: 'list',
+    elements: widened as Type,
+    dimensions: dims,
+  });
 }
 
 /** How many actual elements `absenceMarker()` probes when a collection's
@@ -3123,10 +3168,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     signature: '(any*) -> list',
     type: (ops) =>
-      shapedListTypeD(ops) ?? {
+      shapedListTypeD(ops) ??
+      internType({
         kind: 'list',
-        elements: widen(...ops.map((op) => op.type)),
-      },
+        elements: widen(...ops.map((op) => storedComponentTypeD(op))),
+      }),
     canonical: canonicalList,
     lazy: true,
     evaluate: (ops, { engine, numericApproximation, materialization }) => {
@@ -3212,10 +3258,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // operands (body + indexing set); the `elttype` handler below derives
       // it, and the declared type stays the bare `set`.
       if (isSetComprehensionShape(ops)) return parseType('set');
-      return {
+      return internType({
         kind: 'set',
-        elements: widen(...ops.map((op) => op.type)),
-      };
+        elements: widen(...ops.map((op) => storedComponentTypeD(op))),
+      });
     },
 
     canonical: canonicalSet,
@@ -3573,7 +3619,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // of 2-D points from a list of 3-D ones, and `PointList(x, y) / n`
         // (Tycho item 165) recovered an arity the constructor already knew.
         const coordinates = ops.map((op) => ({
-          type: isListType(op) ? elementTypeOfD(op) : op.type,
+          type: isListType(op) ? elementTypeOfD(op) : storedComponentTypeD(op),
         }));
         return {
           kind: 'list',

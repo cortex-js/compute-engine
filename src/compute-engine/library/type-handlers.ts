@@ -1300,3 +1300,25 @@ export function quotientRingType(ops: ReadonlyArray<OperandDescriptor>): Type {
     (base ? collectionElementType(base.type) : undefined) ?? 'unknown';
   return { kind: 'set', elements };
 }
+
+/**
+ * The type an operand contributes to a COMPOSITE type a handler builds from
+ * its operands — a tuple's component, a list's or set's element, a
+ * sequence's slot.
+ *
+ * A composite type synthesized from operands is a STORED contract, and a
+ * stored contract carries a number literal's TIER, never its literal type:
+ * `(√2, 1)` types `tuple<real, integer>`, not `tuple<real<1.4..1.5>,
+ * integer>`. (Literal value types belong to number-literal nodes only —
+ * ruling of 2026-08-27, stated in `docs/TYPE-SYSTEM.md` §"Number literal
+ * types".) The tier is read off the literal's structure, which reads the
+ * value and never builds the literal type. Every other operand contributes
+ * its handler-visible type as it stands: a range claim on an application
+ * (`Abs(x)` → `real<0..>`) or on a declared constant (`Pi`) is a claim
+ * about a value, not literal cargo, and stays; a value node a handler
+ * echoes is widened once more at the storage seam (`widenValueTypes`).
+ */
+export function storedComponentTypeD(d: OperandDescriptor): Type {
+  const s = d.structureOf?.();
+  return s?.kind === 'number' ? s.tier : d.type;
+}

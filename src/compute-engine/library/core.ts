@@ -52,7 +52,11 @@ import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { randomCount } from './random-utils.js';
 import { isRingConstant } from './ring-constructions.js';
 import { RING_CONSTANTS } from '../latex-syntax/utils.js';
-import { operandLiteralValue, quotientRingType } from './type-handlers.js';
+import {
+  operandLiteralValue,
+  quotientRingType,
+  storedComponentTypeD,
+} from './type-handlers.js';
 import {
   settleTypeText,
   settledTypeText,
@@ -83,6 +87,7 @@ import {
   stripMissingFromType,
   widen,
   containsSignatureArm,
+  resolveTypeAlias,
 } from '../../common/type/utils.js';
 import {
   parseType,
@@ -709,9 +714,15 @@ function pipeStageBodyType(
   }
   if (body.kind === 'string') return 'string';
   if (body.kind === 'tuple' || body.kind === 'list-literal') {
-    const cells = body.elements.map(
-      (e) => bindStageParameter(context, e, param, elementType).type
-    );
+    // A composite body's type is a stored contract: a number literal cell
+    // contributes its tier, never its literal type (`storedComponentTypeD`),
+    // and only a non-literal cell is typed with the parameter bound.
+    const cells = body.elements.map((e) => {
+      const s = e.structureOf?.();
+      return s?.kind === 'number'
+        ? s.tier
+        : bindStageParameter(context, e, param, elementType).type;
+    });
     if (body.kind === 'tuple')
       return { kind: 'tuple', elements: cells.map((type) => ({ type })) };
     return { kind: 'list', elements: widen(...cells) };
@@ -804,16 +815,20 @@ function heldOperandType(
     case 'number':
     case 'function-literal':
       return d.type;
+    // A held tuple or list literal is typed as a stored contract: a number
+    // literal component contributes its tier, never its literal type
+    // (`storedComponentTypeD`); any other component is typed as a held
+    // operand in its own right.
     case 'tuple':
       return {
         kind: 'tuple',
         elements: s.elements.map((e) => ({
-          type: heldOperandType(context, e),
+          type: heldComponentType(context, e),
         })),
       };
     case 'list-literal': {
       const elements = widen(
-        ...s.elements.map((e) => heldOperandType(context, e))
+        ...s.elements.map((e) => heldComponentType(context, e))
       );
       return s.shape.length > 0
         ? { kind: 'list', elements, dimensions: [...s.shape] }
@@ -822,6 +837,17 @@ function heldOperandType(
     case 'application':
       return context.derive(s.head, s.children) ?? 'unknown';
   }
+}
+
+/** The type a component of a HELD tuple or list literal contributes to the
+ * literal's stored type: a number literal's tier, otherwise the component's
+ * own held-operand type. */
+function heldComponentType(
+  context: TypeHandlerContext,
+  d: OperandDescriptor
+): Type {
+  const s = d.structureOf?.();
+  return s?.kind === 'number' ? s.tier : heldOperandType(context, d);
 }
 
 /**
@@ -1469,6 +1495,71 @@ function randomListType(
   if (count !== null && count > 0 && count <= MAX_RANDOM_ELEMENT_COUNT)
     return { kind: 'list', elements: elt, dimensions: [count] };
   return { kind: 'list', elements: elt };
+}
+
+/**
+ * Record ASSIGNMENT EVIDENCE at canonicalization time: the binding `name`,
+ * when it is an inferred, valueless, non-constant one — the hoisted
+ * block-local `canonicalBlock` creates, or an auto-declared symbol — takes
+ * the JOIN of its recorded type and the widened type of the value assigned
+ * to it. `Assign` only writes its binding at evaluation time, so without this
+ * a block-local bound by assignment (`Block(Assign(d, [4,5,4]), Length(d))`)
+ * stays `unknown`-typed on every route that never evaluates — compilation in
+ * particular, whose operand type gates then fail closed on a local whose type
+ * is manifest in the program (Tycho item 235).
+ *
+ * The recorded type is the join over every `Assign` canonicalized against
+ * this binding (each pass widens through the same `widenAssignedType` table
+ * the evaluation-time assignment uses), so a read placed between two
+ * assignments of different kinds sees a type that admits both — reads resolve
+ * the binding lazily, so every read in the block observes the final joined
+ * type, including re-reads in a loop body after a reassignment. The binding
+ * stays `inferred` and valueless: evaluation still creates the runtime
+ * binding afresh and type-checks the assigned value there. Shared by the
+ * plain-symbol and the destructuring targets of the `Assign` canonical
+ * handler, the latter calling it once per pattern leaf.
+ */
+function joinAssignmentEvidence(
+  ce: ComputeEngine,
+  name: string,
+  assignedType: Type
+): void {
+  const def = ce.lookupDefinition(name);
+  if (
+    !def ||
+    !isValueDef(def) ||
+    !def.value.inferredType ||
+    def.value.isConstant ||
+    def.value.value !== undefined
+  )
+    return;
+  const widened = widenAssignedType(ce, assignedType);
+  const recorded = def.value.type;
+  const next = recorded.isUnknown
+    ? widened
+    : reduceType({ kind: 'union', types: [recorded.type, widened] });
+  if (next === undefined) return;
+  // Rollback journal (family 1), as in the `Function` branch of the `Assign`
+  // canonical handler: the binding may pre-exist the rollback frame, and the
+  // static checking pass must be able to undo the write.
+  const frame = activeRollbackFrame(ce);
+  if (frame !== undefined) {
+    const target = def.value;
+    const slots = target._typeSlotSnapshot();
+    frame.record({ undo: () => target._restoreTypeSlots(slots) });
+  }
+  const wasCallable = containsSignatureArm(recorded.type);
+  def.value.type = ce.type(next);
+  // The `_type` expression caches key on the engine's `any` axis, which a
+  // bare definition-type write does not advance: without the event, an
+  // expression typed before this join — a lambda body canonicalized earlier
+  // in the same block — keeps its stale narrower type for the rest of the
+  // generation.
+  ce._noteStateEvent({
+    kind: 'type-write',
+    callableBefore: wasCallable,
+    callableAfter: containsSignatureArm(def.value.type.type),
+  });
 }
 
 /**
@@ -2428,10 +2519,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (args.length === 1) return args[0].type;
         // Built STRUCTURALLY: serializing the operand types into a
         // `tuple<…>` string and reparsing it loses any user-declared type
-        // name (a resolver-less `parseType()` cannot read it back).
+        // name (a resolver-less `parseType()` cannot read it back). Each
+        // slot carries the operand's stored-contract type — a number
+        // literal's tier, never its literal type (`storedComponentTypeD`).
         return {
           kind: 'tuple',
-          elements: args.map((a) => ({ type: a.type })),
+          elements: args.map((a) => ({ type: storedComponentTypeD(a) })),
         };
       },
       canonical: (args, { engine: ce }) => {
@@ -3957,70 +4050,47 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           }
         }
 
-        // A DATA-valued RHS records assignment evidence on an inferred,
-        // valueless target binding at CANONICALIZATION time, mirroring the
-        // `Function`-valued branch above. `Assign` only writes its binding at
-        // evaluation time, so without this a block-local bound by assignment
-        // (`Block(Assign(d, [4,5,4]), Length(d))`, and the hoisted binding
-        // `canonicalBlock` creates for it) stays `unknown`-typed on every
-        // route that never evaluates — compilation in particular, whose
-        // operand type gates then fail closed on a local whose type is
-        // manifest in the program (Tycho item 235).
-        //
-        // The recorded type is the JOIN over every `Assign` canonicalized
-        // against this binding (each pass widens through the same
-        // `widenAssignedType` table the evaluation-time assignment uses), so
-        // a read placed between two assignments of different kinds sees a
-        // type that admits both — reads resolve the binding lazily, so every
-        // read in the block observes the final joined type, including
-        // re-reads in a loop body after a reassignment. The binding stays
-        // `inferred` and valueless: evaluation still creates the runtime
-        // binding afresh and type-checks the assigned value there.
-        if (symbolName !== undefined && !isFunction(canonRhs, 'Function')) {
-          const def = ce.lookupDefinition(symbolName);
-          if (
-            def &&
-            isValueDef(def) &&
-            def.value.inferredType &&
-            !def.value.isConstant &&
-            def.value.value === undefined
-          ) {
-            const rhsType = canonRhs.type;
-            if (!rhsType.isUnknown && canonRhs.isValid) {
-              const widened = widenAssignedType(ce, rhsType.type);
-              const recorded = def.value.type;
-              const next = recorded.isUnknown
-                ? widened
-                : reduceType({
-                    kind: 'union',
-                    types: [recorded.type, widened],
-                  });
-              if (next !== undefined) {
-                // Rollback journal (family 1), as in the `Function` branch
-                // above: the binding may pre-exist the rollback frame, and
-                // the static checking pass must be able to undo the write.
-                const frame = activeRollbackFrame(ce);
-                if (frame !== undefined) {
-                  const target = def.value;
-                  const slots = target._typeSlotSnapshot();
-                  frame.record({ undo: () => target._restoreTypeSlots(slots) });
-                }
-                const wasCallable = containsSignatureArm(recorded.type);
-                def.value.type = ce.type(next);
-                // The `_type` expression caches key on the engine's `any`
-                // axis, which a bare definition-type write does not advance:
-                // without the event, an expression typed before this join —
-                // a lambda body canonicalized earlier in the same block —
-                // keeps its stale narrower type for the rest of the
-                // generation.
-                ce._noteStateEvent({
-                  kind: 'type-write',
-                  callableBefore: wasCallable,
-                  callableAfter: containsSignatureArm(def.value.type.type),
-                });
-              }
-            }
-          }
+        // A DATA-valued RHS records assignment evidence on the target's
+        // binding at canonicalization time (`joinAssignmentEvidence`, which
+        // owns the join rule), mirroring the `Function`-valued branch above.
+        if (
+          symbolName !== undefined &&
+          !isFunction(canonRhs, 'Function') &&
+          canonRhs.isValid &&
+          !canonRhs.type.isUnknown
+        )
+          joinAssignmentEvidence(ce, symbolName, canonRhs.type.type);
+        // A destructuring target `(x, y) := v` records the same evidence on
+        // each pattern leaf, from the matching position of the RHS's static
+        // tuple type: `(xs, n) := ([1, 2, 3], 2)` types `xs` a list and `n` an
+        // integer, so `Length(xs)` later in the block compiles. Nested
+        // patterns descend into nested tuple types; a `_` position binds
+        // nothing. The evaluation-time write is atomic — a shape mismatch
+        // anywhere in the pattern writes no leaf at all (`bindTuplePattern`)
+        // — and so is the evidence: the pairs are collected over the whole
+        // pattern first, and an RHS type that is not a tuple of the pattern's
+        // arity at any level (a symbol of unknown type, an arity mismatch the
+        // evaluation will report) records nothing, leaving every leaf
+        // `unknown`.
+        if (isFunction(symbol, 'Tuple') && canonRhs.isValid) {
+          const pairs: [name: string, type: Type][] = [];
+          const collect = (pattern: Expression, t: Type): boolean => {
+            const rt = resolveTypeAlias(t);
+            if (typeof rt === 'string' || rt.kind !== 'tuple') return false;
+            if (!isFunction(pattern, 'Tuple')) return false;
+            if (rt.elements.length !== pattern.nops) return false;
+            return pattern.ops.every((leaf, i) => {
+              const leafType = rt.elements[i].type;
+              if (isFunction(leaf, 'Tuple')) return collect(leaf, leafType);
+              const name = sym(leaf);
+              if (name === undefined) return false;
+              if (name === '_' || name === 'Nothing') return true;
+              if (leafType !== 'unknown') pairs.push([name, leafType]);
+              return true;
+            });
+          };
+          if (collect(symbol, canonRhs.type.type))
+            for (const [name, t] of pairs) joinAssignmentEvidence(ce, name, t);
         }
 
         const result = ce._fn('Assign', [symbol, canonRhs]);

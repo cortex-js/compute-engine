@@ -1422,7 +1422,8 @@ function elementwiseResultType(
   // The union-free clause (tensor-unification design §D3 rule 2): a
   // dimensioned `list` type IS the tensor claim (`isTensor` is exactly
   // `dimensions !== undefined`), and a heterogeneous cell population never
-  // qualifies — `shapedListType` declines the shape for it. Claiming a
+  // qualifies — the `List` shape analysis (`shapedListTypeD`,
+  // `collections.ts`) declines the shape for it. Claiming a
   // dimension here for a union element type would promise a shape no
   // evaluated value can ever carry, breaking the value-vs-declared
   // assignability invariant (`evaluated.type.matches(declared)`) for the
@@ -1700,10 +1701,26 @@ function canonicalBlock(
     }
     for (const op of ops) {
       if (!isFunction(op, 'Assign')) continue;
-      const name = sym(op.ops[0]);
-      if (!name || name === 'Nothing') continue;
-      if (scope.bindings.has(name) || ce.lookupDefinition(name)) continue;
-      ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
+      const target = op.ops[0];
+      // A destructuring assignment `(x, y) := v` binds one local per pattern
+      // leaf (nested patterns included, `_` positions bind nothing), on the
+      // same rule as a plain symbol target: each leaf that is not visible in
+      // the scope chain is a block-local. Without this the leaves were never
+      // hoisted, so a read of one on a route that never evaluates — a
+      // compile — saw no binding at all, and the `Assign` canonical handler
+      // had no binding to record the leaf's type on.
+      const names = isFunction(target, 'Tuple')
+        ? tuplePatternNames(target)
+        : [sym(target)];
+      for (const name of names) {
+        if (!name || name === 'Nothing') continue;
+        if (scope.bindings.has(name) || ce.lookupDefinition(name)) continue;
+        ce._declareSymbolValue(
+          name,
+          { type: 'unknown', inferred: true },
+          scope
+        );
+      }
     }
     // A one-step function definition written inside a block —
     // `DefineFunction(name, Function(…))`, the surface form `name(x) = …` —

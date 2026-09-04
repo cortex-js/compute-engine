@@ -318,7 +318,12 @@ type OperandFactsMirror = {
 type OperandStructureMirror =
   | { kind: 'symbol'; name: string; system?: boolean; inferred?: boolean }
   | { kind: 'string'; text: string }
-  | { kind: 'number'; literal?: 0 | 1; rational?: readonly [bigint, bigint] }
+  | {
+      kind: 'number';
+      tier: Type;
+      literal?: 0 | 1;
+      rational?: readonly [bigint, bigint];
+    }
   | {
       kind: 'application';
       head: string;

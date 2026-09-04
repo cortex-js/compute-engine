@@ -41,9 +41,11 @@ claim available at that expression. `ce.box(21).type` is `21` and
   magnitude outside the range of normal doubles has no sound compact
   enclosure and falls back to a sign-only claim: `10⁴⁰⁰` types
   `(integer<0..>) & !0`.
-- `NaN`, `±∞` and complex literals have no literal type, because
-  their tier already carries all the information. String and boolean
-  literals are not affected: they report `string` and `boolean`.
+- `NaN` and `±∞` are singleton value types like any other exactly held
+  value: `ce.box(NaN).type` is `NaN` and `ce.box(Infinity).type` is
+  `+oo`. A complex literal has no literal type, because its tier already
+  carries all the information. String and boolean literals are not
+  affected: they report `string` and `boolean`.
 
 Consumers may read the bounds of an enclosing range as a type fact. A domain
 check does exactly that, which is why `Arcsin(1/3)` types `real`.
@@ -58,6 +60,38 @@ the name of the type.
 
 The implementation is `_computeLiteralType` and `literalEnclosureType` in
 `src/compute-engine/boxed-expression/boxed-number.ts`.
+
+### Composite types carry tiers
+
+A literal value type belongs to a number-literal NODE only. Every composite
+type synthesized from a value — a tuple, a list, a set, a sequence, a point
+list, a record or dictionary, the body of a mapping stage, a held literal —
+is a stored contract, and a stored contract carries each numeric component's
+TIER: `(√2, 1)` types `tuple<real, integer>`, `{x: 1/3}` types
+`record{x: rational}`, `[0.5, 1]` types `vector<real^2>`. The component
+nodes keep their literal types (`(√2, 1)` has `op1.type` equal to
+`real<1.4..1.5>`). The tier is read directly off the literal's value
+(`numberLiteralTierType`, `boxed-expression/literal-tier.ts`; a container
+type handler reads it as the `tier` of the literal's structure node), so a
+composite of many literals is typed without building one literal type per
+component only to widen it away.
+
+The rule applies to number LITERALS. A non-literal component contributes its
+own type as it stands: an application's range claim (`Abs(r)` claims
+`real<0..>`, so `(|r|, 1)` types `tuple<real<0..>, integer>`), a declared
+constant's ranged type (`Pi`), a symbol's declared or inferred type.
+
+The tier of a non-finite literal follows `widenValueTypes`: `NaN` is `nan`,
+a signed infinity is the pair `+oo | -oo` (never the lone singleton, so a
+contract inferred from one observed `+∞` does not reject a later `−∞`, and
+never `infinity`, which would also admit `~oo`), and `~oo` is `infinity`.
+
+Flat composite types — a tuple, list, set, dictionary or record whose
+components are all primitive names or other flat composites — are interned
+(`common/type/intern.ts`): equal types are one frozen object, so the 5,000
+cells of a point list are one `tuple<real, real>` and the list's element
+fold joins them by identity. The contract and its cost are pinned in
+`test/compute-engine/composite-type-synthesis.test.ts`.
 
 ## Polymorphism
 

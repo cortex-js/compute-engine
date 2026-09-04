@@ -697,9 +697,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /**
    * The *resolved* missing-value behavior (§3.A of the missing-value typing
    * design). Computed from the declared `missingBehavior` flag of
-   * {@link OperatorDefinitionFlags} and the current
-   * signature on every access — never cached, so a signature mutation
-   * (`_update()`, `BoxedFunction._infer()`) is reflected immediately.
+   * {@link OperatorDefinitionFlags} and the current signature.
+   *
+   * The signature-derived answer is memoized against the IDENTITY of the
+   * signature type object and the `inferredSignature` flag. A signature
+   * mutation (`_update()`, `BoxedFunction._infer()`) replaces that object,
+   * so it is still reflected immediately; what the memo saves is the
+   * subtype query per parameter the numeric-parameter scan costs, which
+   * every type derivation paid — once per point of a 5,000-point list,
+   * where that scan was the whole of the per-element subtype work.
    */
   get resolvedMissingBehavior():
     | 'reject'
@@ -707,14 +713,33 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     | 'handle'
     | 'pass-through' {
     if (this.missingBehavior) return this.missingBehavior;
-    // undeclared ∧ ¬inferredSignature ∧ allParamsNumeric(sig) → propagate
+    const signature = this.signature.type;
+    const inferred = this.inferredSignature === true;
+    const memo = this._resolvedMissingBehaviorMemo;
     if (
-      !this.inferredSignature &&
-      signatureAllParamsNumeric(this.signature.type)
+      memo !== undefined &&
+      memo.signature === signature &&
+      memo.inferred === inferred
     )
-      return 'propagate';
-    return 'pass-through';
+      return memo.behavior;
+    // undeclared ∧ ¬inferredSignature ∧ allParamsNumeric(sig) → propagate
+    const behavior =
+      !inferred && signatureAllParamsNumeric(signature)
+        ? 'propagate'
+        : 'pass-through';
+    this._resolvedMissingBehaviorMemo = { signature, inferred, behavior };
+    return behavior;
   }
+
+  /** Memo of `resolvedMissingBehavior`, keyed by the signature object and
+   * the `inferredSignature` flag it was computed from. */
+  private _resolvedMissingBehaviorMemo:
+    | {
+        signature: Type;
+        inferred: boolean;
+        behavior: 'propagate' | 'pass-through';
+      }
+    | undefined = undefined;
 
   stripsMissingAt(i: number): boolean {
     const b = this.resolvedMissingBehavior;

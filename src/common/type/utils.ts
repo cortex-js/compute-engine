@@ -1204,7 +1204,8 @@ export function numericMissingSlot(t: Readonly<Type>): boolean {
  * tensor. One deliberate exception, per §D5: `unknown`/`any` ARE atomic —
  * atomicity governs *cell classification* only, and whether an
  * unknown-typed element supports a *shape claim* is the stricter, separate
- * rule in `shapedListType` (bare symbols fold to `number`; applications
+ * rule in the `List` shape analysis (`shapedListTypeD`,
+ * `library/collections.ts`: bare symbols fold to `number`; applications
  * block). Callers must apply that second gate — do not use this predicate
  * alone to justify a shape.
  */

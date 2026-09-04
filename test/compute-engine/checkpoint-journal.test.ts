@@ -586,6 +586,11 @@ describe('snapshot completeness — the drift guard', () => {
     'name', // identity
     'engine', // identity
     'signature', // the accessor; `_signature` is captured instead
+    // A memo of `resolvedMissingBehavior` keyed by the identity of the
+    // signature object it was computed from: restoring `_signature` either
+    // restores that same object (the memo still answers for it) or another
+    // one (the memo misses and recomputes), so it needs no snapshot.
+    '_resolvedMissingBehaviorMemo',
   ]);
 
   test('every mutable field of a value definition is in its snapshot', () => {

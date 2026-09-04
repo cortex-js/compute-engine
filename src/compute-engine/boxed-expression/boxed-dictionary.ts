@@ -14,7 +14,9 @@ import { hashCode } from './utils.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { DictionaryValue, MathJsonExpression } from '../../math-json/types.js';
-import { stripNumericRanges, widen } from '../../common/type/utils.js';
+import { widen } from '../../common/type/utils.js';
+import { internType } from '../../common/type/intern.js';
+import { numberLiteralTierType } from './literal-tier.js';
 import { widenValueTypes } from '../../common/type/widen-value.js';
 import { boundTypeSize } from '../../common/type/size-cap.js';
 import type { Type } from '../../common/type/types.js';
@@ -36,14 +38,14 @@ function isRecordKey(key: string): boolean {
 }
 
 /** The type a dictionary CELL contributes to the synthesized (stored)
- * record/dictionary type. A number literal projects all the way to its tier
- * (`stripNumericRanges` — its value type, singleton range, enclosure range,
- * or sign range is literal cargo; ruling O9); any other cell keeps its
- * stored type through `widenValueTypes`, which preserves a handler's
- * deliberate range claim. */
+ * record/dictionary type. A number literal contributes its tier, read off
+ * its value (`numberLiteralTierType`) — its value type, singleton range,
+ * enclosure range or sign range is literal cargo, and is never built here;
+ * any other cell keeps its stored type through `widenValueTypes`, which
+ * preserves a handler's deliberate range claim. */
 function storedCellType(op: Expression): Type {
-  return op._literalType !== undefined
-    ? stripNumericRanges(op.type.type)
+  return isNumber(op)
+    ? numberLiteralTierType(op)
     : widenValueTypes(op.type.type);
 }
 
@@ -355,7 +357,11 @@ export class BoxedDictionary
       // (`boundTypeSize`): a dictionary whose fields hold one shared
       // dictionary value has a type with one field per PATH, and it is
       // stored here, outside the function-node chokepoint.
-      return new BoxedType(boundTypeSize({ kind: 'record', elements }));
+      // Interned (`internType`) so equal record types built from different
+      // dictionaries are one object and join by identity downstream.
+      return new BoxedType(
+        internType(boundTypeSize({ kind: 'record', elements }))
+      );
     }
     const eltType = widen(
       // Same storage rule as the record arm: `widen` is a JOIN and a join of
@@ -363,7 +369,7 @@ export class BoxedDictionary
       ...Object.values(this._keyValues).map(storedCellType)
     );
     return new BoxedType(
-      boundTypeSize({ kind: 'dictionary', values: eltType })
+      internType(boundTypeSize({ kind: 'dictionary', values: eltType }))
     );
   }
 
