@@ -544,7 +544,9 @@ describe('a collection-TYPED but valueless operand', () => {
     });
 
     // Tuples and strings are atomic under broadcast whether or not they have a
-    // value, so the veto must not reach them.
+    // value, so the veto must not reach them. (The first cell is `t`, not
+    // `1t`: the symbolic tuple product drops a unit scalar factor, see
+    // `bare-tuple-typed-symbol.test.ts`.)
     it('still scales a list by a valueless TUPLE-typed symbol', () => {
       const ce = new ComputeEngine();
       ce.declare('t', 'tuple<number, number>');
@@ -553,7 +555,7 @@ describe('a collection-TYPED but valueless operand', () => {
           .box(['Multiply', ['List', 1, 2, 3], 't'])
           .evaluate()
           .toString()
-      ).toBe('[1t,2t,3t]');
+      ).toBe('[t,2t,3t]');
     });
 
     // An ordinary symbolic product has no broadcast to decline: with no
@@ -1312,5 +1314,112 @@ describe('a lambda applied to a LONE union-typed argument', () => {
     declaredCe.assign('g', declaredCe.parse('x \\mapsto 3x'));
     declaredCe.assign('u', declaredCe.box(['List', 1, 2]));
     expect(declaredCe.box(['g', 'u']).evaluate().toString()).toBe('[3,6]');
+  });
+});
+
+/**
+ * The lazy collection operators walk their operands through `each()`, and a
+ * collection-typed symbol with no value yields NOTHING from that walk. A walk
+ * over nothing is indistinguishable from a walk that found nothing, so the
+ * literal that `materialize()` built from it silently DROPPED the operand:
+ * `Join([1], v)` answered `[1]` and `Append(v, 2)` answered `[2]`, where the
+ * same expressions answer `[1, 7, 8]` and `[7, 8, 2]` once `v := [7, 8]`.
+ *
+ * The facets were already honest — `v.isEnumerableCollection` is `false`, and
+ * `Join`/`Append` propagate that — but `materialize()` (the lazy-collection
+ * step of `BoxedFunction.evaluate`, `boxed-expression/boxed-function.ts`)
+ * only gated on emptiness, and a `Join` with one non-empty literal operand is
+ * provably non-empty. It now keeps the lazy form when the node reports itself
+ * non-enumerable, which is what `Length(v)` and `Reverse(v)` already did.
+ */
+describe('a valueless collection-typed operand of a lazy collection operator', () => {
+  function withV(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('v', 'list<number>');
+    return ce;
+  }
+
+  it('is not dropped from Join', () => {
+    const ce = withV();
+    const result = ce.box(['Join', ['List', 1], 'v']).evaluate();
+    expect(result.operator).toBe('Join');
+    expect(result.isLazyCollection).toBe(true);
+    expect(result.toString()).toBe('Join([1], v)');
+  });
+
+  it('is not dropped from Join whatever its position', () => {
+    const ce = withV();
+    expect(ce.box(['Join', 'v', ['List', 1]]).evaluate().operator).toBe('Join');
+  });
+
+  it('is not dropped from Append', () => {
+    const ce = withV();
+    const result = ce.box(['Append', 'v', 2]).evaluate();
+    expect(result.operator).toBe('Append');
+    expect(result.toString()).toBe('Append(v, 2)');
+  });
+
+  it('is not dropped when its type only ADMITS a collection', () => {
+    const ce = new ComputeEngine();
+    ce.declare('u', 'number | list<number>');
+    expect(ce.box(['Join', ['List', 1], 'u']).evaluate().operator).toBe('Join');
+  });
+
+  it('is not dropped from a keyed Join', () => {
+    const ce = new ComputeEngine();
+    ce.declare('d', 'dictionary<number>');
+    const result = ce
+      .box(['Join', ['Dictionary', ['Tuple', "'a'", 1]], 'd'])
+      .evaluate();
+    expect(result.operator).toBe('Join');
+  });
+
+  it('is not dropped when it is an undeclared symbol', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Join', ['List', 1], 'x']).evaluate().operator).toBe('Join');
+  });
+
+  it('keeps every consumer of the view honest', () => {
+    const ce = withV();
+    const view = ['Join', ['List', 1], 'v'];
+    expect(ce.box(['Length', view]).evaluate().operator).toBe('Length');
+    expect(ce.box(['Sum', view]).evaluate().operator).toBe('Sum');
+    expect(ce.box(['ListFrom', view]).evaluate().operator).toBe('ListFrom');
+    expect(ce.box(['Reverse', view]).evaluate().operator).toBe('Reverse');
+    // The first element does not depend on `v`, so a positional read of it
+    // is decidable and stays so.
+    expect(ce.box(['First', view]).evaluate().toString()).toBe('1');
+  });
+
+  it('materializes once the symbol is assigned', () => {
+    const ce = withV();
+    ce.assign('v', ce.box(['List', 7, 8]));
+    expect(ce.box(['Join', ['List', 1], 'v']).evaluate().toString()).toBe(
+      '[1,7,8]'
+    );
+    expect(ce.box(['Append', 'v', 2]).evaluate().toString()).toBe('[7,8,2]');
+    expect(ce.box(['Sum', ['Join', ['List', 1], 'v']]).evaluate().toString()).toBe(
+      '16'
+    );
+  });
+
+  it('still materializes a view that is provably empty', () => {
+    // `Zip([], v)` cannot be walked until `v` holds a value, but one empty
+    // source makes it empty whatever `v` holds, so its literal is `[]`.
+    const ce = withV();
+    expect(ce.box(['Zip', ['List'], 'v']).evaluate().toString()).toBe('[]');
+  });
+
+  it('still materializes over an absent or empty operand', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Join', ['List', 1], 'Nothing']).evaluate().toString()).toBe(
+      '[1]'
+    );
+    expect(ce.box(['Join', ['List', 1], ['List']]).evaluate().toString()).toBe(
+      '[1]'
+    );
+    expect(ce.box(['Join', ['List', 1], ['List', 2]]).evaluate().toString()).toBe(
+      '[1,2]'
+    );
   });
 });

@@ -304,9 +304,17 @@ describe('lazy collection evaluate memo', () => {
     // is already in flight, evaluated directly it is not. Freezing either as
     // the node's value would make the result depend on which route ran first,
     // so nothing is memoized — each evaluate rebuilds.
+    //
+    // The result stays the lazy `Append` view: the inner `xs` re-enters its
+    // own enumerability query, which fails closed, so the view is not
+    // enumerable and `materialize()` keeps it. It used to answer `[1]`, built
+    // from the EMPTY walk the cycle guard yields — the same silent drop a
+    // valueless collection-typed operand suffered (`Append(v, 2)` answered
+    // `[2]`), closed by the enumerability gate in `materialize()`.
     const node = ce.symbol('xs').evaluate();
-    expect(node.toString()).toBe('[1]');
-    expect(ce.symbol('xs').evaluate().toString()).toBe('[1]');
+    expect(node.operator).toBe('Append');
+    expect(node.isLazyCollection).toBe(true);
+    expect(ce.symbol('xs').evaluate().operator).toBe('Append');
 
     const value = (ce.symbol('xs') as any).valueDefinition.value;
     expect(value.operator).toBe('Append');

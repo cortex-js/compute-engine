@@ -32,6 +32,7 @@ import {
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import {
   isPossiblyCollectionTyped,
+  isTupleShapedType,
   isValuelessCollectionTyped,
   unionMayHoldACollection,
 } from '../collection-utils.js';
@@ -49,13 +50,13 @@ export function operandChildren(
   return undefined;
 }
 
-/** Is this operand's TYPE a composite tuple — the descriptor half of
- * `isTuple` (`collection-utils.ts`)? The value half of that predicate — a
- * symbol whose HELD value is a tuple behind a scalar declaration — has no
- * descriptor channel, so a tuple hidden that way is read as a scalar here. */
+/** Is this operand's TYPE a tuple — the bare `tuple` primitive or a composite
+ * `tuple<…>` — the descriptor half of `isTuple` (`collection-utils.ts`)? The
+ * value half of that predicate — a symbol whose HELD value is a tuple behind
+ * a scalar declaration — has no descriptor channel, so a tuple hidden that
+ * way is read as a scalar here. */
 export function isTupleTypedOperand(d: OperandDescriptor): boolean {
-  const t = resolveTypeAlias(d.type);
-  return typeof t !== 'string' && t.kind === 'tuple';
+  return isTupleShapedType(d.type);
 }
 
 /**

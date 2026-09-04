@@ -2185,8 +2185,15 @@ function mulTuples(
   const tuple = tuples[0];
 
   // No accessible components (symbolic tuple, e.g. `2·z`): stay symbolic.
-  if (!hasAccessibleComponents(tuple) || !isFunction(tuple))
-    return ce._fn('Multiply', sortProductOperands([...xs]));
+  // A unit scalar factor is dropped first, so the cell a list broadcast
+  // builds for `[1, 2] · p` is `p`, not `1p`: `_fn` bypasses the `1 · x`
+  // fold the canonical `Multiply` applies. With every scalar a unit the
+  // product IS the tuple.
+  if (!hasAccessibleComponents(tuple) || !isFunction(tuple)) {
+    const factors = xs.filter((x) => !isLiteral(x, 1));
+    if (factors.length === 1) return factors[0];
+    return ce._fn('Multiply', sortProductOperands(factors));
+  }
 
   // Combine the scalar factors (commutative). `scalars` is non-empty because
   // `mul`/`mulN` short-circuit single-operand calls before reaching here.

@@ -512,12 +512,13 @@ export function isUnresolvedCollectionOperand(x: Expression): boolean {
  * broadcast.
  *
  * The tuple exclusion is asked of the RESOLVED static type as well as of
- * `isTuple`, which reads the type STRUCTURE and therefore sees neither the
- * bare `tuple` primitive nor a transparent alias for a tuple (`type pt =
- * tuple<number, number>`). Without that, a symbol declared `tuple` — which is
- * a collection, so it satisfies `isValuelessCollectionTyped` — would be
- * vetoed, and `[1, 2, 3] · r` would stop scaling the list by the tuple
- * component-wise the way it does for a tuple that has a value.
+ * `isTuple`: `isTuple` sees the bare `tuple` primitive and a transparent
+ * alias for a tuple (`type pt = tuple<number, number>`), but it does not
+ * unfold a NOMINAL reference to a tuple type, which `resolveTypeReference`
+ * does. Without the second test, a symbol declared with such a nominal type
+ * — which is a collection, so it satisfies `isValuelessCollectionTyped` —
+ * would be vetoed, and `[1, 2, 3] · r` would stop scaling the list by the
+ * tuple component-wise the way it does for a tuple that has a value.
  */
 function isUnresolvedCollectionShape(x: Expression): boolean {
   if (isTuple(x) || isTextAtom(x)) return false;
@@ -1792,16 +1793,14 @@ export function typeMayCarryQuotientShape(t: Type): boolean {
  * body's arithmetic would broadcast the point into a list.
  */
 export function isTuple(expr: Expression): boolean {
-  // A transparent alias of a tuple IS a tuple (see
-  // `typeCouldBeNumericCollection`); a nominal reference stays opaque.
-  const t = resolveTypeAlias(expr.type.type);
-  if (typeof t !== 'string' && t.kind === 'tuple') return true;
+  // The bare `tuple` primitive counts: a symbol declared `w: tuple` has no
+  // component types to read, but every value it can hold IS a tuple, so a
+  // product `2w` must be scaled component-wise and typed as a tuple, never
+  // as a scalar. `isTupleShapedType` is the same test on a type alone.
+  if (isTupleShapedType(expr.type.type)) return true;
   if (isSymbol(expr)) {
     const v = expr.value;
-    if (v !== undefined && !isSymbol(v)) {
-      const vt = resolveTypeAlias(v.type.type);
-      return typeof vt !== 'string' && vt.kind === 'tuple';
-    }
+    if (v !== undefined && !isSymbol(v)) return isTupleShapedType(v.type.type);
   }
   return false;
 }

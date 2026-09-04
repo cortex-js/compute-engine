@@ -1,3 +1,31 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A valueless collection-typed operand was silently dropped by the lazy
+  collection operators.** With `v` declared `list<number>` and not yet
+  assigned, `Join([1], v)` evaluated to `[1]` and `Append(v, 2)` to `[2]`,
+  where the same expressions answer `[1, 7, 8]` and `[7, 8, 2]` once
+  `v := [7, 8]`. The lazy operators walk their operands, a valueless symbol
+  yields nothing from that walk, and the literal built from the walk lost the
+  operand. Such an application now stays the unevaluated `Join`/`Append` view
+  until the symbol holds a value, as `Length(v)` and `Reverse(v)` already did;
+  a positional read that does not depend on the valueless operand, such as
+  `First(Join([1], v))`, still answers. A self-referential binding
+  `xs := Append(xs, 1)` used to display `[1]` for the same reason and now
+  stays the `Append` view.
+- **A symbol declared with the bare `tuple` type was not a tuple to the
+  arithmetic.** With `ce.declare('w', 'tuple')`, `w · w` typed `number` where
+  a `tuple<number, number>` symbol answers the `no-product-between-points`
+  error, and `Sin(w)`, `Sqrt(w)` and `w^2` typed `number` although with
+  `w := (1, 2)` they evaluate component-wise to `(sin 1, sin 2)`, `(1, √2)`
+  and `(1, 4)`. They now type `tuple`, `Abs(w)` takes the norm, and a product
+  of two such tuples is the same error the compound spelling gives. A literal
+  tuple was never affected; only a declared symbol carries the bare spelling.
+- **A list scaled by a symbolic tuple kept a unit factor in its first cell.**
+  `[1, 2, 3] · p` for a tuple-typed `p` evaluated to `[1p, 2p, 3p]`; it now
+  evaluates to `[p, 2p, 3p]`.
+
 ## 0.123.0 _2026-09-04_
 
 ### New Features

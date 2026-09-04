@@ -5478,10 +5478,23 @@ function tupleBroadcastArity(
 ): number | 'unknown-components' | undefined {
   let arity: number | undefined;
   let unknownComponents = false;
+  let bareTuple = false;
   for (const op of ops) {
     // A transparent alias of a tuple supplies its components like the tuple
     // it names (`Sin(p)` for `p: pt`, an alias of `tuple<number, number>`).
     const t = resolveTypeAlias(op.type.type);
+    // A symbol declared with the bare `tuple` type names neither its arity
+    // nor its component types, but every value it can hold is a tuple, and
+    // once it holds one the value arm broadcasts over its components
+    // (`Sin(w)` for `w := (1, 2)` is `(sin 1, sin 2)`). The scalar handler
+    // type would therefore be a lie; the wide bare `tuple` is the honest
+    // claim, the same one an unnameable-component tuple gets below. The scan
+    // goes on, because a list sibling still supplies the cells and makes the
+    // result a list whatever the operand order (`Power(w, L)`).
+    if (t === 'tuple') {
+      bareTuple = true;
+      continue;
+    }
     if (typeof t !== 'string' && t.kind === 'tuple') {
       if (t.elements.some((el) => isSubtype(el.type, COLLECTION_SHAPE_TYPE)))
         unknownComponents = true;
@@ -5497,6 +5510,7 @@ function tupleBroadcastArity(
     )
       return undefined;
   }
+  if (bareTuple) return 'unknown-components';
   if (arity === undefined || arity === 0) return undefined;
   return unknownComponents ? 'unknown-components' : arity;
 }
@@ -7754,6 +7768,19 @@ function materialize(
   // collection cannot be enumerated, so fabricating a literal would collapse
   // it (previously to the 1-element list [1]). Keep the lazy form.
   if (expr.isEmptyCollection === undefined) return expr;
+
+  // A source that provably cannot be walked yet — a collection-typed symbol
+  // with no value (`Join([1], v)` for a declared, unassigned `v`) — yields
+  // nothing from `each()`, and a walk over nothing is indistinguishable from
+  // a walk that found nothing: the literal built from it would silently DROP
+  // that operand (`Join([1], v)` answered `[1]`, `Append(v, 2)` answered
+  // `[2]`). The emptiness gate above does not catch this, because a `Join`
+  // with one literal non-empty operand is provably non-empty. Keep the lazy
+  // form, exactly as `Length(v)` and `Reverse(v)` stay symbolic. A view that
+  // is provably EMPTY is exempt: `Zip([], v)` cannot be walked either, but
+  // its literal is `[]` whatever `v` turns out to hold.
+  if (expr.isEmptyCollection !== true && expr.isEnumerableCollection === false)
+    return expr;
 
   let materialization = options?.materialization ?? false;
   if (typeof materialization === 'boolean')

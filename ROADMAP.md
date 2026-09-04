@@ -986,7 +986,7 @@ needed: should a binding-site type be authoritative over the body's
 inference (the body's use becomes a type error), and does the same apply
 to `Sum`/`Product` indices and function-literal parameters?
 
-### A valueless collection-typed operand is silently dropped by the lazy collection operators (OPEN, semantics — found 2026-09-03 while implementing the `Join` scalar-operand ruling)
+### A valueless collection-typed operand is silently dropped by the lazy collection operators (FIXED 2026-09-04 — found 2026-09-03 while implementing the `Join` scalar-operand ruling)
 
 With `ce.declare('v', 'list<number>')` and no value, `Join([1], v).evaluate()`
 is `[1]` and `Append(v, 2).evaluate()` is `[2]`: the lazy handlers enumerate
@@ -1001,6 +1001,21 @@ The fix belongs with the valueless-collection round's enumeration gate
 (`isEnumerableCollection` of a valueless symbol should not be `true`), and
 must be measured against the lazy-pipeline suites, which lean on empty
 enumeration for `Nothing`-like operands.
+
+RESOLUTION (2026-09-04): the facets were already honest — the valueless
+symbol reports `isEnumerableCollection === false`, and `Join`/`Append`
+propagate it — but `materialize()` (the lazy-collection step of
+`BoxedFunction.evaluate`, `boxed-expression/boxed-function.ts`) gated only on
+emptiness, and a `Join` with one non-empty literal operand is provably
+non-empty, so it walked `each()` and built the literal from the empty walk.
+It now keeps the lazy form when the node reports itself non-enumerable, the
+same inertness `Length(v)` and `Reverse(v)` had. `Join([1], Nothing)` and
+`Join([1], [])` still materialize (both operands enumerable). One pin moved:
+a self-referential `xs := Append(xs, 1)` used to display `[1]`, built from
+the empty walk the cycle guard yields, and now stays the lazy `Append` view
+(`lazy-collection-regimes.test.ts`). Pins in
+`valueless-collection-typed-operand.test.ts`, "a valueless collection-typed
+operand of a lazy collection operator".
 
 ### Canonicalizing `Length` or `Element` over a DAG-shaped nested list overflows the stack (FIXED 2026-09-03 — found 2026-09-03 by the item-225 regression test)
 
@@ -1073,7 +1088,7 @@ type is stored: the `type` getter of a function node and
 The evaluate path (`evaluate`, `.N()`, `simplify`, `match`) stays
 proportional to the leaf count, which is the size of its result.
 
-### A symbol declared with the bare `tuple` type is not treated as a tuple by arithmetic (OPEN, semantics — found 2026-09-03 while bounding derived types)
+### A symbol declared with the bare `tuple` type is not treated as a tuple by arithmetic (FIXED 2026-09-04 — found 2026-09-03 while bounding derived types)
 
 With `ce.declare('w', 'tuple')`, `ce.parse('2w').type` is `number`: the
 `Multiply` type handler and the `tuples` broadcast exemption recognize a tuple
@@ -1085,6 +1100,25 @@ derived type keeps its arity even past the size bound), so only declared
 symbols are affected. The fix is to admit the bare `tuple` in `isTuple` and
 to measure the 38 call sites, most of which then keep a bare-typed symbol out
 of the list broadcast, which is the correct reading.
+
+RESOLUTION (2026-09-04): `isTuple` admits the bare primitive through
+`isTupleShapedType`, and so does its descriptor twin `isTupleTypedOperand`
+(`library/utils.ts`, which `Abs` uses to take the norm). By the time this
+was fixed `2w` already typed `tuple` (the type-handler retirement had moved
+the `Multiply` type handler onto `typeCouldBeNumericTuple`), but `w · w`
+typed `number` where the compound spelling answers the
+`no-product-between-points` error, and the component-wise lift
+(`tupleBroadcastArity`, `boxed-expression/boxed-function.ts`) typed `Sin(w)`,
+`Sqrt(w)` and `Power(w, 2)` as `number` — claims no value of `w` satisfies,
+since with `w := (1, 2)` they evaluate to `(sin 1, sin 2)`, `(1, √2)` and
+`(1, 4)`. The lift now claims the wide `tuple` for a bare-typed operand, the
+same claim it makes for a tuple whose components it cannot name. Fixed in the
+same pass: the symbolic tuple product (`mulTuples`, `arithmetic-mul-div.ts`)
+built the cell a list broadcast makes for the factor `1` as `1p` through
+`_fn`, bypassing the canonical `1 · x` fold, for the compound spelling too —
+`[1, 2, 3] · p` answered `[1p, 2p, 3p]` and now answers `[p, 2p, 3p]`. No
+other call site changed behavior on the targeted suites. Pins in
+`bare-tuple-typed-symbol.test.ts`.
 
 
 ### The LaTeX round-trip gate (`npm run check:roundtrip`, part of `ci:corpus-pipeline`) is red at the 0.121.0 release commit (FIXED 2026-09-03, unreleased — measured 2026-09-03 on a clean worktree at `1ce34ecb`)
