@@ -75,7 +75,27 @@ a lane mismatch. The result records its effective mode, promotion, escalation,
 and diagnostic.
 
 Unknown-sign radical operations are the promotion trigger. Real-only kernels
-guard and project only where the model explicitly permits it. The deprecated
+guard and project only where the model explicitly permits it.
+
+A real-only head (an ordering comparison, `Floor`, `Mod`, `Min`, `Erf`, …)
+over an operand that may be complex at run time takes the runtime rule in the
+`auto` and `complex` modes: the operand is bound once, the head's real
+lowering runs on its real part when the imaginary part is exactly zero, and
+the value is `NaN` (or `false`, for an ordering) otherwise. A statically
+non-real operand (`i`, `2i`, an `imaginary`-typed symbol, a list literal every
+element of which is non-real) is a compile-time decline. When such an operand
+is an ARRAY at run time — `√L` over a real list `L`, a `list<complex>` symbol,
+a selection with such an arm — the rule is element-wise: every maybe-complex
+operand of the head is replaced by its element-wise real projection (each
+exactly-real element as its real part, every other element as `NaN`), and the
+real lowering broadcasts or reduces over the projections. `⌊√L⌋` floors each
+real root and answers `NaN` at a complex one; `min(√L)` is `NaN` as soon as
+one root is complex; `√L < 1` is `false` at a complex root; `L < w` at a
+complex scalar `w` is `false` at every element (the value keeps the head's
+shape). In `strict` mode nothing changes: such an operand fails closed.
+Targets provide the projection through the `complexRealElements` hook
+(`_SYS.crealElements` on JavaScript, `_ce_creal_elems` on Python); a target
+without it keeps the compile-time decline. The deprecated
 `complexPromotion` option is a compatibility shim, not separate semantics. The
 `realOnly` option, which projected a compiled unit's RESULT to a real number
 (or `NaN`) after the kernel had run, is removed: a compiled value whose

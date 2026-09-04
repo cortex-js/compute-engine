@@ -1306,15 +1306,18 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
       ).toThrow(/real-only/);
     });
 
-    // The gate above sits on `compileExpr`'s SCALAR branch, which the JavaScript
-    // broadcast path returns before reaching. A list operand therefore needs the
-    // same rule inside `tryCompileBroadcast`: the closure it builds comes from
-    // the head's own scalar codegen, which for these heads is `Math.floor` /
-    // `Math.max` / … whatever the element parameter is declared to hold.
-    // Measured without that second gate: `Floor([1+i, 2+i])` emitted
-    // `_SYS.bcast((_tv1) => Math.floor(_tv1), [{re, im}, {re, im}])` and ran to
-    // `[NaN, NaN]` behind `success: true`, where the interpreter leaves the
-    // elements inert at `[1+i, 2+i]`.
+    // A list literal EVERY element of which is statically non-real is the
+    // list form of the statically non-real scalar: the head has no real value
+    // at any position, so it is the same compile-time decline
+    // (`isProvablyNonReal` walks the literal's elements). This is the only
+    // shape of a complex-element list that still declines — a list with a
+    // real or maybe-real element (`[1+i, 2]`, `√L`, a `list<complex>` symbol)
+    // takes the ELEMENT-WISE runtime rule instead, pinned in
+    // `compile-mode-complex.test.ts` ("the element-wise form"). Before that
+    // rule existed, the broadcast closure declined every complex element
+    // lane; measured without any gate at all, `Floor([1+i, 2+i])` emitted
+    // `_SYS.bcast((_tv1) => Math.floor(_tv1), [{re, im}, {re, im}])` and ran
+    // to `[NaN, NaN]` behind `success: true`.
     const COMPLEX_LIST = ['List', ['Complex', 1, 1], ['Complex', 2, 1]];
     test.each([
       ['Floor', [COMPLEX_LIST]],
@@ -1347,7 +1350,10 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
     // The STATISTICS reducers are real-only for the same reason: `_SYS.mean` &
     // co. sum and compare plain numbers. Measured before the gate reached them:
     // `Mean([i, 2i])` compiled to `NaN` where the interpreter answers the
-    // complex mean.
+    // complex mean. `[i, 2i]` is uniformly non-real, so it is the compile-time
+    // decline; over a list with a real or maybe-real element the reducers take
+    // the element-wise runtime rule and answer `NaN` as soon as one element is
+    // complex at run time.
     test.each([
       ['Mean'],
       ['Median'],

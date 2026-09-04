@@ -405,6 +405,168 @@ describe('complex mode — D2/D6 runtime rules', () => {
     }
   });
 
+  // The ELEMENT-WISE form of the runtime rule (`docs/COMPILATION-MODEL.md`,
+  // "Complex modes"): a real-only head over an ARRAY operand whose elements
+  // may be complex projects each operand element-wise — an exactly-real
+  // element as its real part, every other element as NaN — and runs its real
+  // lowering over the projections. Before it, such an operand fell back to
+  // the fail-closed decline (Tycho item 251), and an ORDERING over such an
+  // operand broadcast a raw `<` over `{re, im}` roots behind `success: true`.
+  describe('the element-wise form over an array operand', () => {
+    const e = new ComputeEngine();
+    e.declare('L', 'list<real>');
+    e.declare('Z', 'list<complex>');
+    e.declare('w', 'complex');
+    const AUTO = { mode: 'auto', fallback: false } as const;
+
+    it('Tycho item 251: Min over a list-valued piecewise with a Sqrt arm compiles in every promoting mode', () => {
+      // The histogram row's body: `P : list<real>` (10 000 elements in the
+      // report), `m`, `V` real. `strict` compiled it all along (the real
+      // kernel); `auto` and `complex` declined it as "real-only … cannot
+      // represent a complex-valued argument".
+      const ce2 = new ComputeEngine();
+      ce2.declare('P', 'list<real>');
+      ce2.declare('m', 'real');
+      ce2.declare('V', 'real');
+      const body = ce2.parse(
+        '\\min\\left(\\left\\{P\\le0:0, P\\le\\frac{m^2}{V}:\\sqrt{PV}, P\\le1:1-\\sqrt{V(1-P)}, 1\\right\\}\\right)'
+      );
+      const at = { P: [0.1, 0.5, 0.9], m: 0.38, V: 0.4712 };
+      const ref = body
+        .subs({ P: ce2.box(['List', 0.1, 0.5, 0.9]), m: 0.38, V: 0.4712 })
+        .N().re;
+      for (const mode of ['auto', 'complex', 'strict'] as const) {
+        const r = compile(body, { mode, fallback: false });
+        expect(r.success).toBe(true);
+        expect(r.run!(at)).toBeCloseTo(ref, 12);
+        if (mode !== 'strict')
+          expect(r.code).toContain('_SYS.crealElements(');
+      }
+    });
+
+    it('Floor/Mod/Min over a promoted radical list: the real lowering per element, NaN at a complex root', () => {
+      const floor = compile(e.box(['Floor', ['Sqrt', 'L']]), AUTO);
+      expect(floor.run!({ L: [4, -1, 2.25] })).toEqual([2, NaN, 1]);
+      const mod = compile(e.box(['Mod', ['Sqrt', 'L'], 2]), AUTO);
+      expect(mod.run!({ L: [9, -1] })).toEqual([1, NaN]);
+      // A reducer is NaN as soon as one element is complex.
+      const min = compile(e.box(['Min', ['Sqrt', 'L']]), AUTO);
+      expect(min.run!({ L: [4, 9] })).toBe(2);
+      expect(min.run!({ L: [4, -9] })).toBeNaN();
+      // (The real-only STRING helpers — `Erf`, `Gamma`, … — are not
+      // `broadcastable` in the library, so a list operand is refused at
+      // boxing time and never reaches the compiler.)
+    });
+
+    it('an ordering over a promoted radical list compares the real roots and is false at a complex one', () => {
+      // Measured before the element-wise form: `√L < 1` broadcast a raw `<`
+      // over `{re, im}` roots and ran to `[false, false]` at `L = [0.5, 2]`.
+      const r = compile(e.parse('\\sqrt{L} < 1'), AUTO);
+      expect(r.run!({ L: [0.5, 2] })).toEqual([true, false]);
+      expect(r.run!({ L: [-1, 0.25] })).toEqual([false, true]);
+      // A CHAIN over an array operand is one closure over the projections.
+      const chain = compile(e.parse('0 < \\sqrt{L} < 2'), AUTO);
+      expect(chain.run!({ L: [1, -1, 9] })).toEqual([true, false, false]);
+    });
+
+    it('a list<complex> symbol: each real element takes the real lowering, each complex one NaN', () => {
+      // `Z : list<complex>` was invisible to the scalar analysis (its type
+      // admits no scalar complex), so `Min(Z)` folded `Math.min` over objects
+      // (NaN at every point) and `Z < 2` compared objects, behind
+      // `success: true`.
+      const less = compile(e.parse('Z < 2'), AUTO);
+      expect(less.run!({ Z: [1, { re: 2, im: 3 }, { re: 1, im: 0 }] })).toEqual(
+        [true, false, true]
+      );
+      const min = compile(e.box(['Min', 'Z']), AUTO);
+      expect(min.run!({ Z: [{ re: 1, im: 0 }, 3] })).toBe(1);
+      expect(min.run!({ Z: [{ re: 1, im: 1 }, 3] })).toBeNaN();
+      const floor = compile(e.box(['Floor', 'Z']), AUTO);
+      expect(floor.run!({ Z: [1.5, { re: 2, im: 1 }] })).toEqual([1, NaN]);
+    });
+
+    it('a complex scalar beside an array operand keeps the head\'s shape', () => {
+      // The whole-value guard would answer a scalar `false`/NaN for the
+      // list-shaped result; the element-wise form projects the scalar too, so
+      // the broadcast keeps one value per element.
+      const less = compile(e.parse('L < w'), AUTO);
+      expect(less.run!({ L: [0.5, 2], w: { re: 2, im: 0 } })).toEqual([
+        true,
+        false,
+      ]);
+      expect(less.run!({ L: [0.5, 2], w: { re: 2, im: 3 } })).toEqual([
+        false,
+        false,
+      ]);
+      const mod = compile(e.parse('L \\bmod w'), AUTO);
+      expect(mod.run!({ L: [5, 7], w: 3 })).toEqual([2, 1]);
+      expect(mod.run!({ L: [5, 7], w: { re: 3, im: 1 } })).toEqual([NaN, NaN]);
+      // A reducer over both answers the scalar NaN, as the scalar rule does.
+      const max = compile(e.box(['Max', ['Sqrt', 'L'], 'w']), AUTO);
+      expect(max.run!({ L: [4, 9], w: 5 })).toBe(5);
+      expect(max.run!({ L: [4, 9], w: { re: 5, im: 1 } })).toBeNaN();
+    });
+
+    it('in strict mode nothing changes: the promoted forms use the real kernel, a list<complex> fails closed', () => {
+      const STRICT = { mode: 'strict', fallback: false } as const;
+      // No promotion in strict mode: `√L` is the real kernel, so the head is
+      // not guarded at all and a negative element is NaN from `Math.sqrt`.
+      const floor = compile(e.box(['Floor', ['Sqrt', 'L']]), STRICT);
+      expect(floor.code).not.toContain('_SYS.crealElements(');
+      expect(floor.run!({ L: [4, -1] })).toEqual([2, NaN]);
+      for (const expr of [e.parse('Z < 2'), e.box(['Min', 'Z'])]) {
+        const r = compile(expr, { mode: 'strict' });
+        expect(r.success).toBe(false);
+      }
+    });
+
+    it('what keeps declining: a set operand, an undecided element lane; a color head keeps its NaN-filled shape', () => {
+      // A set has no positional array lowering, so there is nothing the
+      // element-wise projection could map over.
+      expect(
+        compile(e.box(['Min', ['Set', ['Complex', 1, 1], 2]]), {
+          mode: 'auto',
+          constantFold: false,
+        }).success
+      ).toBe(false);
+      // A `broadcastable<complex>` parameter is an array or a scalar at run
+      // time and its element lane is undecided; it would reach the re-emitted
+      // real lowering unprojected beside the guarded scalar, so the whole
+      // form keeps its compile-time decline.
+      const e2 = new ComputeEngine();
+      e2.declare('w', 'complex');
+      e2.declare('bc', 'broadcastable<complex>');
+      expect(
+        compile(e2.box(['Less', 'w', 'bc']), { mode: 'auto' }).success
+      ).toBe(false);
+      // A color constructor's failing value has a statically known shape:
+      // its complex scalar channel keeps the whole-value guard even beside a
+      // list channel, so the value is the documented NaN-filled color.
+      const rgb = compile(e.box(['Rgb', 'w', 'L', 1]), AUTO);
+      expect(rgb.code).toContain('_SYS.cisreal(');
+      expect(rgb.run!({ w: { re: 0.5, im: 1 }, L: [0.2, 0.4] })).toEqual([
+        NaN,
+        NaN,
+        NaN,
+      ]);
+    });
+
+    it('a list literal every element of which is non-real is still the compile-time decline', () => {
+      const r = compile(
+        e.box(['Floor', ['List', ['Complex', 1, 1], ['Complex', 2, 1]]]),
+        { mode: 'auto', constantFold: false }
+      );
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.kind).toBe('capability');
+      // …while a list with one real element takes the element-wise rule.
+      const mixed = compile(
+        e.box(['Floor', ['List', ['Complex', 1, 1], 2.5]]),
+        { mode: 'auto', fallback: false, constantFold: false }
+      );
+      expect(mixed.run!({})).toEqual([NaN, 2]);
+    });
+  });
+
   it('a statically non-real operand is a compile-time capability decline in every mode', () => {
     for (const mode of ['strict', 'auto', 'complex'] as const) {
       for (const expr of [

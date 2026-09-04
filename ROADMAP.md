@@ -215,33 +215,118 @@ fixed in that change. One item remains.
   ruling), so the lane degrades the error to `NaN` rather than refusing to
   compile a whole program for one bad order. Recorded, not planned.
 
-### Growing a list one element per loop turn costs seconds by a few hundred turns (OPEN, perf — found 2026-09-04 writing the Epsil style guide)
+### Growing a list one element per loop turn costs seconds by a few hundred turns (FIXED 2026-09-04 — found 2026-09-04 writing the Epsil style guide)
 
 `let xs = []; for k in 1..n { xs = Join(xs, [k]) }` — the idiom the Epsil docs
-recommended until 2026-09-04 — evaluates to a variadic `Join` with one `[k]`
-operand per turn (`Join` canonicalization flattens the nesting), and each turn
-re-canonicalizes the whole recipe. Measured on a loaded box (load average 30–80,
-so the absolute numbers are inflated; the ratios are the finding): `Length(xs)`
-after the loop took about 1.4 s at n = 250, 6 s at n = 500 and 30 s at n = 1000
-— a factor of 4 to 5 per doubling, worse than quadratic. `Append(xs, k)` (a
-variadic `Append`) and the spread literal `[...xs, k]` (which evaluates to the
-same `Join`, not to a snapshot) scale the same way. Materializing each turn,
-`xs = ListFrom(Join(xs, [k]))`, stores a flat list but still took 2 s at n = 250
-and 6.7 s at n = 500 in the same run: re-boxing an n-element list costs tens of
-microseconds PER ELEMENT, so the per-turn O(n) has a constant large enough to
-make any element-per-turn growth unusable beyond a few hundred elements. By
-comparison `ListFrom(Map(k => k, 1..n))` took 16 ms at n = 250 and 18 ms at n =
-500 in the same run, and a plain scalar loop of 4000 turns 51 ms.
+recommended until 2026-09-04 — took 2.9 s at n = 400 on a quiet box, growing
+four-fold per doubling; `Append(xs, k)` and the spread literal `[...xs, k]`
+scaled the same way. The cause was typing and re-validation, not boxing (boxing
+a fresh 400-element list costs about 1 µs per element). The loop's value was a
+lazy `Join` view with one operand PER TURN, and each turn's evaluation walked
+all of them six to eight times (canonical validation, overload resolution for
+the node's type, finiteness, purity, a per-operand NaN check, then the rebuilt
+result's type and memo checks again) at 3 to 15 µs per operand. Materializing
+each turn was slow for a second reason: typing a fresh n-element `List` cost 6
+to 12 µs per element, almost all in `describe`
+(`boxed-expression/operand-descriptor.ts`), which built a closure-heavy
+descriptor per element and eagerly ran six lattice checks the `List` type
+handler never reads.
 
-Two questions before any engine change, both from the Epsil roadmap's original
-gating (lazy `Join` semantics, tuple atomicity, effects and size limits must be
-preserved): whether `Join` over materialized operands should fold them into one
-literal at canonicalization time (that alone does not remove the per-element
-re-boxing cost the `ListFrom` variant shows), and where the per-element cost of
-canonicalizing an n-element `List` comes from (the likelier lever). The docs now
-steer to `Map`/`Fold` and keep growing loops short (`src/epsil/docs/style.md`,
-"Building a list one element at a time"); the measurement should be repeated on
-a quiet box before the lever is chosen.
+Four changes, all in the same round:
+
+- `Join` over list literals, and `Append` to a list literal, fold into ONE list
+  literal at canonicalization (`foldLiteralListJoin` / `foldLiteralListAppend`,
+  `library/collections.ts`), bounded by `ce.maxCollectionSize`. Laziness is an
+  optimization, not a contract (ruled 2026-09-04): a view over materialized
+  literals always costs more than the literal. The accumulator therefore holds a
+  flat list and a turn costs one typed copy of it. Pinned in
+  `test/compute-engine/join-append-literal-fold.test.ts`.
+- The operand descriptor is a class with prototype getters and bit-flag memo
+  slots, and the type facts are computed on first read: 1.61 µs → 0.22 µs per
+  descriptor, 2.13 µs → 0.61 µs per element to type a fresh list.
+- `BoxedFunction`'s `type` derivation resolves the overload and solves the
+  signature's generic arms only when the `type` handler declines: both walked
+  every operand and their result was discarded whenever a handler answered (27%
+  of a `Join`'s typing cost before the fold).
+- The type cache of a LITERAL LIST TREE (a `List` whose elements are number or
+  string literals or such lists, `_isLiteralListTree`) is keyed on the world
+  version alone, not on the engine generation (`BoxedFunction.type`). `Assign`
+  advances the generation every turn, and the accumulator's list was re-typed
+  four times PER TURN through four readers (the symbol's type revision, the
+  assignment's type derivation, the operand descriptor, the operand NaN check):
+  13 ms a turn at 300 elements on the `Assign` route where the same loop without
+  the assignment cost 0.2 ms. A literal list tree's type depends on no
+  definition, symbol or assumption, and every configuration change advances the
+  world version, so the constant key is sound where the general constant key the
+  comment there records as removed was not. Pinned in
+  `test/compute-engine/type-cache-literal-list.test.ts`.
+
+Measured on a quiet box, build time of the interpreter loop on the boxed route:
+`Join` 2.9 s → 89 ms at 400 turns and about 30 s → 379 ms at 1000 turns;
+`Append` 0.92 s → 85 ms at 400 turns. The Epsil loop
+(`let xs = []; for k in 1..n { xs = Join(xs, [k]) }`, the `Assign` route): 127
+ms at 250 turns, 276 ms at 500 and 857 ms at 1000, against 4.7 s, 16.6 s and
+about 30 s before. The loop stays quadratic (an immutable append copies the
+list) at about 0.5 µs per element per turn; the compiled route was already a
+native array copy per turn. Levers not taken, for a later round if interpreted
+loops of many thousands of turns matter: a growable backing buffer with prefix
+views (amortized O(1) append, safe without ownership analysis because every
+holder of an older value keeps its own prefix) paired with an incremental type
+for the new node, and a per-node descriptor cache on the type cache's
+invalidation axis.
+
+The dual review of the round found two more defects, both fixed in it: a `List`
+or `Set` literal never awaited an element whose operator has only an
+`evaluateAsync` handler (`[1, AsyncOnly()]` stayed unevaluated on the async
+route, and the fold routed `Append([1], AsyncOnly())` into that gap) — both
+literals now have an `evaluateAsync` handler that awaits the elements in order;
+and the descriptor classes carried the operand as a TypeScript-private property,
+readable by a type handler at runtime — they are ECMAScript private fields now.
+A second review pass on the async handlers found two more, also fixed: the base
+`evaluateAsync` of a leaf dropped its options, so
+`[1/3].evaluateAsync({ numericApproximation: true })` — and `Add(1/3, 1)` on the
+same route — kept the exact value (it now forwards them); and the set
+comprehension branch enumerated synchronously — it now awaits the domain, every
+extracted value, the condition at every value and each substituted body, with
+the caller's options (`enumerateSetComprehensionAsync`; an undecidable condition
+keeps the comprehension symbolic, as on the synchronous route). The synchronous
+enumeration now evaluates an extracted value too (`{k : k ∈ {x, 2}}` with
+`x := 5` produced `Set(x, 2)`) and forwards `numericApproximation` to the body.
+Two gaps the review uncovered are open entries below: the LaTeX form of a
+comprehension with a condition, and asynchronous-only operators inside held
+operands.
+
+The Epsil style guide (`src/epsil/docs/style.md`, "Building a list one element
+at a time") now presents the growing loop as acceptable for lists of a few
+thousand elements and keeps steering to `Map`/`Fold` when the list has a
+formula; its measured table was refreshed.
+
+### The LaTeX form of a set comprehension with a condition is not a comprehension (OPEN, parser — found 2026-09-04 by the review of the growing-list round)
+
+`\{ k : k \in \{1, 2, 3\}, k > 1 \}` parses to
+`["Set", ["Colon", "k", ["Element", "k", ["Set", 1, 2, 3]]], ["Less", 1, "k"]]`
+— the condition is a SECOND operand of the `Set` — and `parseSetComprehension`
+(`library/collections.ts`) reads only form A,
+`["Set", body, ["Element", v, domain, cond?]]`, and form B,
+`["Set", ["Element", v, domain], ["Condition", pred]]`. So the expression
+evaluates to itself on both routes, where the MathJSON form A evaluates to
+`Set(2, 3)`. Either the LaTeX parser should produce form A (the condition inside
+the `Element`) or the reader should accept the parsed shape; the parser is the
+better place, since the parsed shape is a two-element set literal to every other
+reader too.
+
+### An asynchronous-only operator inside a held operand is not awaited (OPEN, async — found 2026-09-04 by the review of the growing-list round)
+
+`Less(15, AsyncOnly(2)).evaluateAsync()` answers `15 < AsyncOnly(2)` for an
+`AsyncOnly` declared with only an `evaluateAsync` handler: a comparison holds
+its operands and evaluates them synchronously inside its own handler, and the
+asynchronous route has no hook to await a held operand before the handler runs.
+The same holds for every `lazy` operator that evaluates its operands itself.
+`List` and `Set` literals got an `evaluateAsync` handler for this reason on
+2026-09-04; the comparison and logic operators, `Which`, `If` and the big
+operators have none. A general fix is an asynchronous pre-pass that awaits the
+asynchronous-only descendants of a held operand, so a handler that evaluates its
+operands synchronously finds them already evaluated.
 
 ### A compiled block lets a `let` redeclare a capture or a parameter that the interpreter refuses (OPEN, compile — found 2026-09-03 reviewing the `while let` compile work)
 
@@ -290,6 +375,7 @@ lowering of both the expression form and the statement form
   lowers `If` to its own `_IA.piecewise` helper and is unaffected. `When` keeps
   the truthiness test on every target: it is not a two-armed selection, so the
   ruling has no arm to withhold.
+
 ### Doc-sweep triage (2026-08-29)
 
 Found by checking published examples and reference prose against the engine,

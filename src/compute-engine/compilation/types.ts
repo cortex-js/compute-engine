@@ -778,6 +778,22 @@ export interface CompileTarget<Expr = unknown> {
   complexReal?: (code: TargetSource) => TargetSource;
 
   /**
+   * The ELEMENT-WISE real projection, as target source: given code for a
+   * value that is a plain number, a `{re, im}` object, or a (possibly
+   * nested) array of such values, return code yielding the same shape with
+   * every exactly-real element replaced by its real part and every other
+   * element by the target's NaN (`_SYS.crealElements(x)` on JavaScript,
+   * `_ce_creal_elems(x)` on Python). Used by the element-wise form of the
+   * D2/D6 runtime rule: a real-only head over an array operand whose
+   * elements may be complex (`⌊√L⌋`, `min(√L)`, `√L < 1`) runs its real
+   * lowering over this projection, so a complex element yields NaN (or
+   * `false`, for an ordering) at its own position and nowhere else.
+   * Optional; a target without it keeps the compile-time fail-closed
+   * decline for such an operand.
+   */
+  complexRealElements?: (code: TargetSource) => TargetSource;
+
+  /**
    * The conditional the D2/D6 runtime rule is emitted through, in the
    * target's own syntax: `guards` are boolean source expressions (each a
    * `complexIsReal` test; possibly empty — then the body is unconditional),

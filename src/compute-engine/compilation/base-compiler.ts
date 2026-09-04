@@ -2192,6 +2192,18 @@ export class BaseCompiler {
       return v !== undefined && BaseCompiler.isProvablyNonReal(v);
     }
     if (isFunction(expr)) {
+      // A list literal EVERY visible element of which is statically non-real
+      // (`[1+i, 2+i]`, `[i, 2i]`) has no real value at any position: a
+      // real-only head over it is certainly NaN throughout (a reducer's
+      // value, a broadcast's every element), so it takes the same
+      // compile-time decline as the scalar `i`. A list with SOME real or
+      // maybe-real element (`[1+i, 2]`, `[√x, 1]`) is not statically
+      // non-real: the element-wise runtime rule answers per position.
+      if (expr.operator === 'List')
+        return (
+          expr.ops.length > 0 &&
+          expr.ops.every((e) => BaseCompiler.isProvablyNonReal(e))
+        );
       const t = expr.type;
       return t !== undefined && isSubtype(t.type, 'imaginary');
     }
@@ -2219,17 +2231,49 @@ export class BaseCompiler {
    * no compiled value, exactly as the interpreter leaves it unevaluated —
    * raised here as a `capability` diagnostic (`code: 'non-real-operand'`).
    *
+   * THE ELEMENT-WISE FORM. When some maybe-complex operand is an ARRAY at
+   * run time — a list whose elements may be complex (`√L` over `L:
+   * list<real>`, a `list<complex>` symbol, a selection with such an arm) —
+   * the rule is applied per ELEMENT instead of per value: every maybe-complex
+   * operand of the head, the scalar ones included, is bound once and replaced
+   * by the target's element-wise real projection (`complexRealElements`: each
+   * exactly-real element as its real part, every other element as the
+   * target's NaN, nested arrays recursed), and the real lowering is emitted
+   * UNCONDITIONALLY over the projections. The real lowering then broadcasts
+   * or reduces over the projected array: `⌊√L⌋` floors each real root and
+   * answers NaN where the root is complex, `min(√L)` reduces to NaN as soon
+   * as one root is complex, `√L < 1` compares each real root and answers
+   * false at a complex one. A scalar operand takes the same projection there
+   * (rather than the whole-value guard) so that the failing value keeps the
+   * head's SHAPE — `L < w` at a complex `w` is `[false, false]`, one per
+   * element, not a scalar `false` — which relies on every real lowering
+   * propagating NaN (`Math.floor`, `%`, `Math.max`, the helpers, and `<`,
+   * which answers `false` on NaN; measured for each head of
+   * `REAL_ONLY_CODEGEN_HEADS` before this form was written). An operand the
+   * analysis has already projected (present in `_codeOverrides`) answers
+   * "real" to `isComplexValued` and `operandElementLane`, so the re-emission
+   * lowers the head on the real lane (`tryCompileBroadcast` emits its plain
+   * closure over the projected arrays). Before this form existed, a
+   * collection-typed maybe-complex operand fell back to the caller's
+   * fail-closed decline — Tycho item 251: a histogram row's `Min` over a
+   * 10 000-element piecewise with a `Sqrt` arm declined in the default mode
+   * and the interpreted fallback ran past the consumer's time budget.
+   *
    * Returns `undefined` — the caller then applies its pre-existing
    * fail-closed decline — when no operand may be complex, when a maybe-
-   * complex operand is definitely a collection (a list of maybe-complex
-   * elements has no per-element rule here), or when the target lacks the
-   * hooks the rule is emitted through (`bindExpr`, `complexIsReal`,
-   * `complexReal`: the shader targets, a custom target without them).
+   * complex operand is a collection WITHOUT a positional array lowering (a
+   * set, a dictionary: `complexRealElements` maps arrays), when an array
+   * operand's element lane is undecided (`operandElementLane` answers
+   * `undefined`: it would reach the real lowering unprojected), or when the target
+   * lacks the hooks the rule is emitted through (`bindExpr`, `complexIsReal`,
+   * `complexReal`, `realGuard`, and `complexRealElements` for the
+   * element-wise form: the shader targets, a custom target without them).
    *
    * `emit` re-emits the head with the overrides active; the gate that called
    * this must skip an operand present in `_codeOverrides` on re-entry.
    */
   private static realOperandGuard(
+    engine: ComputeEngine,
     h: string,
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
@@ -2252,11 +2296,7 @@ export class BaseCompiler {
     // once.
     const maybe = [
       ...new Set(
-        args.filter(
-          (a) =>
-            BaseCompiler.isComplexValued(a) &&
-            !BaseCompiler._codeOverrides.has(a)
-        )
+        args.filter((a) => BaseCompiler.realGuardCandidate(a, engine, target))
       ),
     ];
     if (maybe.length === 0) return undefined;
@@ -2270,39 +2310,130 @@ export class BaseCompiler {
           `the value is certainly not a real number, so the head has no ` +
           `compiled value (the interpreter leaves it unevaluated). Fail closed (D6).`,
       });
-    // A DEFINITELY-collection operand (a `list<complex>` literal or symbol)
-    // has no per-element rule here and keeps the caller's decline; a wide
-    // operand (`unknown`, `number`) is what the rule exists for.
     if (
       !target.bindExpr ||
       !target.complexIsReal ||
       !target.complexReal ||
-      !target.realGuard ||
-      maybe.some((a) => a.type.matches('collection<any>'))
+      !target.realGuard
     )
       return undefined;
+    // An operand with a POSITIONAL array lowering: an array operand that is
+    // not a set or a dictionary (those are collections without a positional
+    // lowering, so there is nothing `complexRealElements` could map over).
+    const positional = (a: Expression): boolean =>
+      BaseCompiler.isArrayOperand(a) &&
+      (!a.isCollection || a.isIndexedCollection);
+    // A maybe-complex collection with no positional lowering keeps the
+    // caller's decline.
+    if (
+      maybe.some((a) => !positional(a) && a.type.matches('collection<any>'))
+    )
+      return undefined;
+    // An array operand whose element lane is UNDECIDED (`undefined`: a
+    // `broadcastable<complex>` parameter) is not a candidate — it keeps its
+    // compile-time decline (see `_operandElementLane`) — yet it would be
+    // handed, unprojected, to the re-emitted real lowering alongside the
+    // projected candidates. Keep the decline for the whole form.
+    if (
+      args.some(
+        (a) =>
+          BaseCompiler.isArrayOperand(a) &&
+          BaseCompiler.operandElementLane(a, engine, target) === undefined
+      )
+    )
+      return undefined;
+    // The element-wise form (see above) applies as soon as one operand of
+    // the head — maybe-complex or not — is an array at run time: the value
+    // the head returns is then array-shaped (or a reduction of one), and the
+    // per-element projection of every maybe-complex operand, scalars
+    // included, is what keeps that shape. The exception is a head whose
+    // failing value has a statically known array shape (`resultKind`
+    // `{ array: n }`: the color constructors): its scalar operands keep the
+    // whole-value guard, so a complex scalar channel still yields the
+    // documented NaN-filled color rather than a raw NaN fed to the color
+    // kernel.
+    const elementwise = args.some(positional);
+    const projectScalars = elementwise && typeof resultKind !== 'object';
+    const projectElements = target.complexRealElements;
+    if (elementwise && projectElements === undefined) return undefined;
     const bindings: Array<[string, string]> = [];
     const guards: string[] = [];
     const bound: Expression[] = [];
+    // A fresh memo layer for the re-emission: an answer computed while an
+    // operand is overridden (it reads "real") must not survive the override.
+    BaseCompiler._pushComplexMemoLayer();
     try {
       for (const a of maybe) {
         const t = BaseCompiler.tempVar(target);
         bindings.push([t, BaseCompiler.compileValueOperand(a, target)]);
-        guards.push(target.complexIsReal(t));
-        BaseCompiler._codeOverrides.set(a, target.complexReal(t));
+        if (
+          projectElements !== undefined &&
+          (positional(a) || projectScalars)
+        ) {
+          BaseCompiler._codeOverrides.set(a, projectElements(t));
+        } else {
+          guards.push(target.complexIsReal(t));
+          BaseCompiler._codeOverrides.set(a, target.complexReal(t));
+        }
         bound.push(a);
       }
       const body = emit();
       // The conditional and its "else" literal are the TARGET's spelling
       // (`realGuard`): JavaScript `((g) ? (body) : NaN)`, Python
-      // `((body) if (g) else float('nan'))`.
+      // `((body) if (g) else float('nan'))`. The element-wise form has no
+      // guards, so the body is emitted unconditionally.
       return target.bindExpr(
         bindings,
         target.realGuard(guards, body, resultKind)
       );
     } finally {
       for (const a of bound) BaseCompiler._codeOverrides.delete(a);
+      BaseCompiler._popComplexMemoLayer();
     }
+  }
+
+  /**
+   * Whether operand `a` of a real-only head takes the D2/D6 runtime rule
+   * (`realOperandGuard`): it is not already projected (`_codeOverrides`), and
+   * it may hold a complex value at run time — as a SCALAR (`isComplexValued`:
+   * a `complex`-typed symbol, a wide binding under the complex discipline, a
+   * promoted radical) or as an ARRAY some element of which may be complex
+   * (`operandElementLane` answers `true` or `'mixed'`: `√L`, a
+   * `list<complex>` symbol, a list literal with a complex element). An array
+   * operand whose lane is UNDECIDED (`undefined`: a `broadcastable<complex>`
+   * parameter, a top-typed call with complex evidence) is not a candidate —
+   * that shape keeps its compile-time decline, for the reason given in
+   * `_operandElementLane`.
+   */
+  private static realGuardCandidate(
+    a: Expression,
+    engine: ComputeEngine,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (BaseCompiler._codeOverrides.has(a)) return false;
+    const lane = BaseCompiler.operandElementLane(a, engine, target);
+    return lane === true || lane === 'mixed';
+  }
+
+  /**
+   * Whether operand `a` lowers to a positional array at run time — a
+   * concrete collection, a list- or indexed-collection-typed binding, or a
+   * binding that may be a collection (`isBoundPossiblyCollectionTyped`). A
+   * string is an indexed collection in the type lattice but lowers to a
+   * scalar string, so it is excluded. The shared operand test of the
+   * broadcast closure (`tryCompileBroadcast`), the element-lane analysis
+   * (`operandElementLane`) and the element-wise runtime rule
+   * (`realOperandGuard`): the three must agree on which operands are seen
+   * element-wise.
+   */
+  private static isArrayOperand(a: Expression): boolean {
+    return (
+      !isProvablyStringOperand(a) &&
+      (a.isCollection ||
+        a.type.matches('list<any>') ||
+        a.type.matches('indexed_collection<any>') ||
+        isBoundPossiblyCollectionTyped(a))
+    );
   }
 
   /**
@@ -3194,16 +3325,16 @@ export class BaseCompiler {
     engine: ComputeEngine,
     target: CompileTarget<Expression>
   ): ElementLane {
+    // An operand the D2/D6 runtime rule has projected onto the real lane
+    // (`realOperandGuard`, element-wise form) holds plain numbers or NaN at
+    // every position while its override is active: the code emitted for it
+    // IS the projection. Answered before the memo so the verdict never
+    // outlives the override.
+    if (BaseCompiler._codeOverrides.has(a)) return false;
     // The same operand predicate `tryCompileBroadcast` uses to decide which
     // operands the closure sees element-wise (`isArrayOperand`); everything
     // else is a scalar it sees whole.
-    const isArray =
-      !isProvablyStringOperand(a) &&
-      (a.isCollection ||
-        a.type.matches('list<any>') ||
-        a.type.matches('indexed_collection<any>') ||
-        isBoundPossiblyCollectionTyped(a));
-    if (!isArray) return BaseCompiler.isComplexValued(a);
+    if (!BaseCompiler.isArrayOperand(a)) return BaseCompiler.isComplexValued(a);
     const memo = BaseCompiler._compileDepth > 0;
     const stack = BaseCompiler._elementLaneMemoStack;
     if (memo) {
@@ -5085,6 +5216,45 @@ export class BaseCompiler {
         target
       );
       if (broadcast !== null) return broadcast;
+      // The broadcast closure declines a REAL-ONLY head (`Floor`, `Mod`,
+      // `Erf`, …) whose array operand has a complex element lane, and the
+      // list-arithmetic residue below would then fail the form closed before
+      // the real-only gates further down (`REAL_ONLY_CODEGEN_HEADS`, the
+      // string-helper rule) ever see it. Apply the element-wise D2/D6 rule
+      // here: the operands are projected onto the real lane and the head is
+      // re-emitted, which re-enters the closure above with real element
+      // lanes — `⌊√L⌋` at `L = [4, -1]` compiles to `[2, NaN]`.
+      // (A form without an array operand is left to those gates, so its
+      // scalar emission is unchanged.)
+      if (
+        (BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(h) ||
+          BaseCompiler.isRealOnlyHelperHead(h)) &&
+        args.some((a) => BaseCompiler.isArrayOperand(a))
+      ) {
+        const guardArgs = BaseCompiler.realOnlyGuardOperands(h, args);
+        if (
+          guardArgs.some((a) =>
+            BaseCompiler.realGuardCandidate(a, engine, target)
+          )
+        ) {
+          const guarded = BaseCompiler.realOperandGuard(
+            engine,
+            h,
+            guardArgs,
+            target,
+            () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+            BaseCompiler.realOnlyResultKind(h, args)
+          );
+          if (guarded !== undefined) return guarded;
+          // The rule declined (a maybe-complex set or dictionary operand, an
+          // undecided element lane): fail closed here rather than fall
+          // through to the later gate, which would repeat the same analysis
+          // before reaching the same decline.
+          throw new Error(
+            `${h}: the target's lowering for this head is real-only and cannot represent a complex-valued argument. Fail closed (D6).`
+          );
+        }
+      }
     }
 
     // A declaration CONTRADICTED by its body, sitting in a scalar-consuming
@@ -5327,11 +5497,17 @@ export class BaseCompiler {
       // is the compile-time decline, raised inside `realOperandGuard`.
       // A CHAIN (`a < b < c`) binds each operand at its own edge so a later
       // operand is never evaluated when an earlier edge already failed — the
-      // interpreter's short-circuit order (`realOperandChain`).
+      // interpreter's short-circuit order (`realOperandChain`). A chain with
+      // an ARRAY operand is element-wise: every operand is an argument of
+      // one broadcast closure (evaluated exactly once, the edges conjoined
+      // per element), so it takes the element-wise form of
+      // `realOperandGuard`, which projects the operands and re-emits the
+      // closure over the projections.
       const guarded =
-        args.length > 2
+        args.length > 2 && !args.some((a) => BaseCompiler.isArrayOperand(a))
           ? BaseCompiler.realOperandChain(h, args, target)
           : BaseCompiler.realOperandGuard(
+              engine,
               h,
               args,
               target,
@@ -5340,9 +5516,8 @@ export class BaseCompiler {
               'boolean'
             );
       if (guarded !== undefined) return guarded;
-      const complexOperand = args.find(
-        (a) =>
-          BaseCompiler.isComplexValued(a) && !BaseCompiler._codeOverrides.has(a)
+      const complexOperand = args.find((a) =>
+        BaseCompiler.realGuardCandidate(a, engine, target)
       );
       if (complexOperand !== undefined)
         throw new Error(
@@ -6617,10 +6792,8 @@ export class BaseCompiler {
         // INSIDE its literal components tuple (`realOnlyGuardOperands`).
         const guardArgs = BaseCompiler.realOnlyGuardOperands(h, args);
         if (
-          guardArgs.some(
-            (a) =>
-              BaseCompiler.isComplexValued(a) &&
-              !BaseCompiler._codeOverrides.has(a)
+          guardArgs.some((a) =>
+            BaseCompiler.realGuardCandidate(a, engine, target)
           )
         ) {
           // D2/D6 runtime rule (see `realOperandGuard`): each maybe-complex
@@ -6628,8 +6801,11 @@ export class BaseCompiler {
           // real part when every imaginary part is exactly zero; otherwise
           // the failing branch has the SAME shape the head returns — scalar
           // NaN for the scalar heads, an equally-sized NaN-filled array for
-          // the color constructors (`realOnlyResultKind`).
+          // the color constructors (`realOnlyResultKind`). An ARRAY operand
+          // whose elements may be complex takes the element-wise form: the
+          // real lowering broadcasts or reduces over the projected array.
           const guarded = BaseCompiler.realOperandGuard(
+            engine,
             h,
             guardArgs,
             target,
@@ -6709,16 +6885,16 @@ export class BaseCompiler {
       target.language !== undefined &&
       !target.language.startsWith('interval') &&
       !BaseCompiler.COMPLEX_TRANSPARENT_HEADS.has(h) &&
-      args.some(
-        (a) =>
-          BaseCompiler.isComplexValued(a) && !BaseCompiler._codeOverrides.has(a)
-      )
+      args.some((a) => BaseCompiler.realGuardCandidate(a, engine, target))
     ) {
       // D6 runtime rule (design §8): `Erf(x)` for a maybe-complex `x` runs
       // the real helper on the real part when the imaginary part is exactly
       // zero and answers `NaN` otherwise; a statically non-real operand is
-      // the compile-time decline (inside `realOperandGuard`).
+      // the compile-time decline (inside `realOperandGuard`). Over an array
+      // operand (`Erf(√L)`) the rule is element-wise and the helper
+      // broadcasts over the projected array.
       const guarded = BaseCompiler.realOperandGuard(
+        engine,
         h,
         args,
         target,
@@ -7517,14 +7693,9 @@ export class BaseCompiler {
     // OR a top-typed application (`unknown`/`any`/`value` call such as `h(x)`),
     // both scalar OR array at run time, which `_SYS.bcast` handles either way.
     // If none is, this is ordinary scalar code — leave it be.
-    const isArrayOperand = (a: Expression): boolean =>
-      // A string matches `indexed_collection` but is not array-shaped — see
-      // `compilesToArray` above.
-      !isProvablyStringOperand(a) &&
-      (a.isCollection ||
-        a.type.matches('list<any>') ||
-        a.type.matches('indexed_collection<any>') ||
-        isBoundPossiblyCollectionTyped(a));
+    // (A string matches `indexed_collection` but is not array-shaped — see
+    // `compilesToArray` above; `isArrayOperand` excludes it.)
+    const isArrayOperand = BaseCompiler.isArrayOperand;
     if (!args.some(isArrayOperand)) return null;
 
     // A numeric tuple SUMMED with, or DIVIDED by/into, a list is not a
@@ -7705,6 +7876,16 @@ export class BaseCompiler {
     // elements inert at `[1+i, 2+i]`. Returning null hands the form to the
     // fail-closed D6 guard, which is where the scalar shape ends up too.
     if (BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(h) && anyComplex) return null;
+    // Same decline for an ORDERING over a complex element lane: the scalar
+    // body below is the target's raw comparison over the element
+    // parameters, which has no realness guard — `√L < 1` compiled to
+    // `_SYS.bcast((a, b) => a < b, …)` over `{re, im}` roots and ran to
+    // `[false, false]` where the interpreter answers `[true, false]` at
+    // `L = [0.5, 2]`, and `L < w` at `w = {re: 2, im: 0}` compared each
+    // element against an object (`1 < 2` read as `1 < NaN`). The ordering
+    // gate in `compileExpr` projects the operands element-wise
+    // (`realOperandGuard`) and re-enters here on the real lane.
+    if (BaseCompiler.ORDERING_HEADS.has(h) && anyComplex) return null;
 
     // Bind one element parameter per operand and build the scalar body by
     // re-invoking the head's own scalar codegen with those parameters (shadow
@@ -11147,6 +11328,12 @@ export class BaseCompiler {
   private static readonly _complexValueInProgress = new Set<string>();
 
   static isComplexValued(expr: Expression): boolean {
+    // An operand the D2/D6 runtime rule has projected onto the real lane
+    // (`realOperandGuard`): while its override is active, the code emitted
+    // for it is the real projection — a plain number or NaN — so it is not
+    // complex-valued. Answered before the memo so the verdict never outlives
+    // the override.
+    if (BaseCompiler._codeOverrides.has(expr)) return false;
     if (isNumber(expr)) {
       // `~oo` is not complex-valued, even though the value carries an
       // infinite imaginary part: the non-finite typing convention

@@ -6515,6 +6515,24 @@ const SYS_HELPERS = {
     typeof (x as { re: unknown }).re === 'number'
       ? (x as { re: number }).re
       : x,
+  // The ELEMENT-WISE real projection (`CompileTarget.complexRealElements`):
+  // an array — nested arrays recursed — with every exactly-real element
+  // (`cisreal`) replaced by its real part and every other element by NaN; a
+  // scalar takes the same rule whole. The element-wise form of the D2/D6
+  // runtime rule (`BaseCompiler.realOperandGuard`) hands a real-only head's
+  // array operand through this, so the real lowering that follows sees plain
+  // numbers and answers NaN (or `false`, for an ordering) exactly at the
+  // complex positions: `⌊√L⌋` at `L = [4, -1]` is `[2, NaN]`.
+  crealElements: function crealElements(x: unknown): unknown {
+    if (Array.isArray(x)) return x.map(crealElements);
+    if (typeof x === 'number') return x;
+    return typeof x === 'object' &&
+      x !== null &&
+      (x as { im: unknown }).im === 0 &&
+      typeof (x as { re: unknown }).re === 'number'
+      ? (x as { re: number }).re
+      : NaN;
+  },
   // Element-wise addition, mirroring the interpreter's `Add` broadcast
   // (`addTensors`/`broadcastOverIndexedCollections`): scalar+scalar is ordinary
   // addition; over (possibly nested) arrays it recurses element-wise. Used as
@@ -7985,6 +8003,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       complexLift: (code) => `_SYS.cplx(${code})`,
       complexIsReal: (code) => `_SYS.cisreal(${code})`,
       complexReal: (code) => `_SYS.creal(${code})`,
+      complexRealElements: (code) => `_SYS.crealElements(${code})`,
       realGuard: (guards, body, kind) =>
         guards.length === 0
           ? `(${body})`

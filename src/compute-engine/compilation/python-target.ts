@@ -990,13 +990,33 @@ function assertPythonNormRankAtMost2(rank: number | undefined): void {
  * leaves a non-number (a bool, a string, a list held by a wide binding)
  * untouched, the exact realness test, and the real projection. A Python
  * `bool` is a subclass of `int`, so it is excluded explicitly.
+ * `_ce_creal_elems` is the element-wise projection
+ * (`CompileTarget.complexRealElements`): a list, tuple or NumPy array —
+ * nested ones recursed — with every exactly-real element replaced by its real
+ * part and every other element by `nan`; a scalar takes the same rule whole.
+ * The element-wise form of the D2/D6 runtime rule runs a real-only head over
+ * this projection so a complex element yields `nan` at its own position.
+ *
+ * A NumPy complex scalar (a `complex64` value, for example) is not a subclass
+ * of the built-in `complex`, so the realness test and the real projection
+ * accept `np.complexfloating` too. A 0-dimensional NumPy array is also not a
+ * scalar, so `_ce_creal_elems` unwraps it with `item()` and then applies the
+ * scalar rule to the value it holds.
  */
 const PYTHON_COMPLEX_HELPERS = `def _ce_cplx(_v):
     return complex(_v) if isinstance(_v, (int, float)) and not isinstance(_v, bool) else _v
 def _ce_cisreal(_v):
-    return _v.imag == 0 if isinstance(_v, complex) else True
+    return _v.imag == 0 if isinstance(_v, (complex, np.complexfloating)) else True
 def _ce_creal(_v):
-    return _v.real if isinstance(_v, complex) else _v`;
+    return _v.real if isinstance(_v, (complex, np.complexfloating)) else _v
+def _ce_creal_elems(_v):
+    if isinstance(_v, (list, tuple)):
+        return [_ce_creal_elems(_x) for _x in _v]
+    if hasattr(_v, 'ndim') and _v.ndim > 0:
+        return np.asarray([_ce_creal_elems(_x) for _x in _v])
+    if hasattr(_v, 'ndim') and _v.ndim == 0:
+        _v = _v.item()
+    return _ce_creal(_v) if _ce_cisreal(_v) else float('nan')`;
 
 /**
  * Runtime broadcasting for `ElementMax`, `ElementMin`, and `Clamp`. Scalars
@@ -1235,7 +1255,8 @@ function withPythonHelpers(code: string): string {
   if (
     out.includes('_ce_cplx(') ||
     out.includes('_ce_cisreal(') ||
-    out.includes('_ce_creal(')
+    out.includes('_ce_creal(') ||
+    out.includes('_ce_creal_elems(')
   )
     out = `${PYTHON_COMPLEX_HELPERS}\n${out}`;
   if (out.includes('_ce_rref(')) out = `${PYTHON_RREF_HELPER}\n${out}`;
@@ -3348,6 +3369,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       complexLift: (code) => `_ce_cplx(${code})`,
       complexIsReal: (code) => `_ce_cisreal(${code})`,
       complexReal: (code) => `_ce_creal(${code})`,
+      complexRealElements: (code) => `_ce_creal_elems(${code})`,
       realGuard: (guards, body, kind) =>
         guards.length === 0
           ? `(${body})`
@@ -3708,6 +3730,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
 
     // Emit the runtime helpers (once, at module level) when the body routed
     // through them.
+    if (
+      body.includes('_ce_cplx(') ||
+      body.includes('_ce_cisreal(') ||
+      body.includes('_ce_creal(') ||
+      body.includes('_ce_creal_elems(')
+    )
+      code += `${PYTHON_COMPLEX_HELPERS}\n`;
     if (body.includes('_ce_rref(')) code += `${PYTHON_RREF_HELPER}\n`;
     if (body.includes('_ce_bcast(')) code += `${PYTHON_BCAST_HELPER}\n`;
     if (body.includes('_ce_eqcoll(')) code += `${PYTHON_EQCOLL_HELPER}\n`;
@@ -3808,12 +3837,21 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // closed rather than emit a reference to an undefined name. (`_ce_bcast` is
     // the collection-operand ElementMax/ElementMin/Clamp lowering; `_ce_indexof`
     // is IndexOf's element test; `_ce_eqcoll` is collection/tuple equality;
-    // `_ce_ord` is the ordering shape guard.)
+    // `_ce_ord` is the ordering shape guard; `_ce_cplx`, `_ce_cisreal`,
+    // `_ce_creal` and `_ce_creal_elems` are the complex-value helpers of the
+    // complex modes.)
     for (const [helper, what] of [
       ['_ce_bcast(', 'ElementMax/ElementMin/Clamp over a collection operand'],
       ['_ce_indexof(', 'IndexOf'],
       ['_ce_eqcoll(', 'equality over a collection or tuple operand'],
       ['_ce_ord(', 'an ordering over a collection operand'],
+      ['_ce_cplx(', 'the complex lift of the complex modes'],
+      ['_ce_cisreal(', 'the realness test of the complex modes'],
+      ['_ce_creal(', 'the real projection of the complex modes'],
+      [
+        '_ce_creal_elems(',
+        'the element-wise real projection of the complex modes',
+      ],
     ] as const)
       if (body.includes(helper))
         throw new Error(

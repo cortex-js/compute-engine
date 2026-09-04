@@ -231,10 +231,16 @@ describe('an arm that is genuinely complex at run time', () => {
   });
 });
 
-describe('what still declines', () => {
-  test('a complex-valued CONDITION operand fails closed', () => {
-    // The complex numbers are not ordered, so the interpreter leaves the
-    // comparison symbolic; lifting the arm refusal does not reach conditions.
+describe('a complex-valued CONDITION and arithmetic over a complex arm', () => {
+  test('a complex-valued CONDITION operand takes the element-wise runtime rule', () => {
+    // The complex numbers are not ordered, so the interpreter leaves each
+    // comparison symbolic. The compiled ordering takes the D2/D6 runtime rule
+    // element-wise (`docs/COMPILATION-MODEL.md`, "Complex modes"): the roots
+    // are projected onto the real lane, a complex root projects to NaN, and
+    // `NaN < 10` is `false` — so every element selects the `True` arm. Before
+    // the element-wise rule, this form broadcast a raw `<` over the `{re, im}`
+    // roots (silently `false` for the wrong reason) after an earlier version
+    // had declined it.
     const expr = ce.box([
       'Which',
       ['Less', ['Sqrt', ['Negate', L]], 10],
@@ -242,22 +248,27 @@ describe('what still declines', () => {
       'True',
       0,
     ] as any);
-    expect(() =>
-      compile(expr, { fallback: false, constantFold: false })
-    ).toThrow(/Fail closed/);
+    const r = compile(expr, { fallback: false, constantFold: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.crealElements(');
+    expect(r.run!({})).toEqual([0, 0, 0]);
   });
 
-  test('scalar arithmetic over a list-valued selection still fails closed', () => {
-    // The JavaScript target has no list arithmetic; a complex arm does not
-    // change that, and the bare arm declines the same way.
+  test('scalar arithmetic over a list-valued selection with a complex arm broadcasts', () => {
+    // `Add` over a list whose elements may be complex dispatches on the
+    // runtime shape of each element (`_SYS.sadd`), so the sum keeps the
+    // complex cells and the real one alike — interpreter parity. (This form
+    // once declined as "no list arithmetic".)
     const expr = ce.box([
       'Add',
       ['Which', listCondition, ['Sqrt', ['Negate', L]], 'True', 0],
       1,
     ] as any);
-    expect(() =>
-      compile(expr, { fallback: false, constantFold: false })
-    ).toThrow(/Fail closed/);
+    expect(parity(expr)).toEqual([
+      { re: 1, im: 2 },
+      { re: 1, im: 3 },
+      1,
+    ]);
   });
 
   test('a SCALAR complex `Which` keeps its ternary lowering', () => {

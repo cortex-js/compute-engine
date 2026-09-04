@@ -475,6 +475,32 @@ describe('PYTHON TARGET', () => {
       expect(python.compile(expr, { mode: 'strict' }).code).toBe('np.sqrt(x)');
     });
 
+    it('a real-only head over a promoted radical LIST takes the element-wise runtime rule', () => {
+      // The element-wise form of the D2/D6 runtime rule
+      // (`docs/COMPILATION-MODEL.md`, "Complex modes"): the promoted roots
+      // are projected element-wise (`_ce_creal_elems`: an exactly-real root
+      // as its real part, a complex one as `nan`) and the real lowering runs
+      // over the projection. Same rule for an ordering; `strict` keeps the
+      // real kernel and no projection.
+      const e = new ComputeEngine();
+      e.declare('L', 'list<real>');
+      const floor = python.compile(e.box(['Floor', ['Sqrt', 'L']]), {
+        mode: 'auto',
+      });
+      expect(floor.success).toBe(true);
+      expect(floor.code).toContain('def _ce_creal_elems(_v):');
+      expect(floor.code).toContain(
+        '(lambda _tv1: (np.floor(_ce_creal_elems(_tv1))))(np.emath.sqrt(L))'
+      );
+      const less = python.compile(e.parse('\\sqrt{L} < 1'), { mode: 'auto' });
+      expect(less.code).toContain(
+        '(lambda _tv1: (_ce_ord(np.less, _ce_creal_elems(_tv1), 1)))(np.emath.sqrt(L))'
+      );
+      expect(
+        python.compile(e.box(['Floor', ['Sqrt', 'L']]), { mode: 'strict' }).code
+      ).toBe('np.floor(np.sqrt(L))');
+    });
+
     it('should use ** for complex power', () => {
       // Use an inexact complex base: since D12-A an exact Gaussian power
       // folds at canonicalization ((1+i)² → 2i), leaving no Power to compile.

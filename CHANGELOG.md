@@ -1,73 +1,152 @@
 ## [Unreleased]
 
+### Improvements
+
+- **Typing a large list of tuples is about three times faster.** The tier of a
+  literal component is read directly off its value instead of building the
+  literal's own type and widening it back; equal flat composite types are one
+  interned object, so a list's cells join by identity; and an operator
+  definition no longer re-scans its signature's parameters on every type
+  derivation. Typing a list of 5,000 pairs of radicals is about ten times
+  faster.
+- **Growing a list one element per loop turn is two orders of magnitude
+  faster.** `xs = Join(xs, [k])`, `xs = Append(xs, k)` and `xs = [...xs, k]` in
+  a loop built a lazy `Join`/`Append` view with one operand per turn, and each
+  turn re-validated and re-typed all of them: 2.9 s for 400 turns, about 30 s
+  for 1000. A `Join` whose operands are all list literals, and an `Append` to a
+  list literal, now fold into one list literal at canonicalization
+  (`Join([1, 2], [3])` is `[1, 2, 3]`, as the spread form `[...[1, 2], 3]`
+  already was), bounded by the engine's collection size cap; a tuple, symbol or
+  lazy operand keeps the view. Typing a fresh list is also three to four times
+  cheaper: the operand descriptor the type handlers receive is built lazily, and
+  the overload is resolved only when the type handler declines; and a list
+  literal of number or string literals keeps its type across assignments instead
+  of being re-typed after every one. The 400-turn loop takes 89 ms, the
+  1000-turn loop 379 ms; the same loop written in Epsil, where each turn
+  assigns, takes 127 ms at 250 turns and 857 ms at 1000 (4.7 s and about 30 s
+  before). A folded literal carries the shape in its type (`Join([1, 2, 3], 10)`
+  types `vector<integer^4>` where the view typed `list<integer>`), and a `Join`
+  of literals is no longer a lazy collection.
+
 ### Resolved Issues
 
+- **A real-only head over a list whose elements may be complex now compiles in
+  the `auto` and `complex` modes, element by element.** `Min`, `Max`, `Floor`,
+  `Mod`, the statistics reducers and the ordering comparisons lower through
+  real-only code on the JavaScript and Python targets. Over a scalar operand
+  that may be complex at run time (a `complex`-typed symbol, a square root of
+  unknown sign), the compiled code already ran the real lowering when the value
+  is real and answered `NaN` (or `false`, for a comparison) otherwise; over a
+  LIST operand of the same kind (`√L` for `L: list<real>`, a `list<complex>`
+  symbol, a piecewise with a radical arm), the compilation was refused as
+  "real-only … cannot represent a complex-valued argument" in the default
+  mode, and the interpreted fallback could run past a consumer's time budget
+  (a histogram row of a 10 000-element list drew nothing — Tycho item 251).
+  The rule is now applied per element: each exactly-real element takes the
+  real lowering and every other element is `NaN`, so `⌊√L⌋` at `L = [4, -1]`
+  is `[2, NaN]`, `min(√L)` is `NaN` as soon as one root is complex, and
+  `√L < 1` at `L = [0.5, 2]` is `[true, false]`. Two silent wrong results
+  behind `success: true` are closed by the same change: `√L < 1` broadcast a
+  raw `<` over complex roots and answered `[false, false]` at `L = [0.5, 2]`;
+  and a `list<complex>` symbol `Z` was invisible to the analysis, so `min(Z)`
+  folded `Math.min` over `{re, im}` objects (`NaN` at every point) and `Z < 2`
+  compared objects. A complex scalar beside a list operand keeps the list
+  shape: `L < w` at a complex `w` is `false` at every element, not a scalar
+  `false`. A list literal every element of which is non-real (`[1+i, 2+i]`)
+  is still refused at compile time, as the scalar `i` is; `strict` mode is
+  unchanged. A custom target opts in through the new `complexRealElements`
+  hook.
+- **A list or set literal never awaited an asynchronous element.** With an
+  operator declared with only an `evaluateAsync` handler,
+  `[1, AsyncOnly()].evaluateAsync()` answered `[1, AsyncOnly()]`: the literal
+  evaluated its elements synchronously on the async route too. Both literals now
+  await their elements, in order.
+- **The async route ignored `numericApproximation` on a leaf.**
+  `[1/3].evaluateAsync({ numericApproximation: true })` and
+  `Add(1/3, 1).evaluateAsync({ numericApproximation: true })` kept the exact
+  value: the default asynchronous evaluation of a number, symbol or string
+  dropped its options. They are forwarded now, and a set comprehension evaluated
+  asynchronously awaits its domain, its values, its condition and its body. On
+  both routes a comprehension now evaluates the values of a literal domain
+  (`{k : k ∈ {x, 2}}` with `x := 5` answered `Set(x, 2)`) and floats its body
+  under `N()`.
+- **A tuple, set or sequence built from a literal no double holds exactly
+  carried the literal's enclosure range in its type.** `(√2, 1)` typed
+  `tuple<real<1.4..1.5>, integer>` and `{√2}` typed `set<real<1.4..1.5>>`, where
+  `(0.5, 1)` types `tuple<real, integer>`; a list of 5,000 such points, whose
+  cells all differ in their ranges, collapsed to `list<tuple<any, any>>`. A
+  composite type is a stored contract and now carries each numeric component's
+  tier for every composite kind — tuple, list, set, sequence, point list, record
+  and dictionary, the body of a mapping stage, a held literal — so `(√2, 1)`
+  types `tuple<real, integer>` and the point list types
+  `list<tuple<real, real>^5000>`. The component nodes keep their literal types.
+  A record holding `~oo` typed `record{x: ~oo}` and now types
+  `record{x: infinity}`, and a record or list holding `±∞` now types the signed
+  pair `+oo | -oo` as a tuple already did.
 - **A point whose component is a list now compiles under `Norm`, `Abs` and
   `Hypot`.** `Norm(([1, 2], 3))` is one norm per element (`[√10, √13]`) and
   `Hypot(([1, 2], 3), 4)` one hypotenuse per element (`[√26, √29]`); the
   JavaScript target used to refuse both and fall back to interpretation. The
-  emission broadcasts over the point's list components and evaluates every
-  other component once; beside a list leg the norms zip with it
-  (`Hypot(([1, 2], 3), [4, 5])` is `[√26, √38]`). A point whose component is
-  a list of points still fails closed.
-- **`Hypot` with a point leg and a list leg paired the point's components
-  with the list's elements.** `Hypot((3, 4), [1, 2])` answered `[√10, √20]`
-  on both lanes; a point is one leg of every hypotenuse, so it is `[√26, √29]`
-  now — the list supplies the cells and the point's norm is the other leg.
-  `Abs` follows the same rule. Component-wise heads are unchanged:
-  `Power((1, 2), [3, 4])` is still `[1, 16]`.
+  emission broadcasts over the point's list components and evaluates every other
+  component once; beside a list leg the norms zip with it
+  (`Hypot(([1, 2], 3), [4, 5])` is `[√26, √38]`). A point whose component is a
+  list of points still fails closed.
+- **`Hypot` with a point leg and a list leg paired the point's components with
+  the list's elements.** `Hypot((3, 4), [1, 2])` answered `[√10, √20]` on both
+  lanes; a point is one leg of every hypotenuse, so it is `[√26, √29]` now — the
+  list supplies the cells and the point's norm is the other leg. `Abs` follows
+  the same rule. Component-wise heads are unchanged: `Power((1, 2), [3, 4])` is
+  still `[1, 16]`.
 - **Destructured Block locals compile.** `(xs, n) := ([1, 2, 3], 2)` inside a
   block declares its leaves as block-locals with the type of the matching
   position of the tuple, so a type-gated read later in the block — `Length(xs)`,
   `At(xs, n)` — compiles instead of failing closed on an `unknown`-typed local.
-  Nested patterns and `_` positions follow the same rule, and a reassignment
-  of a different kind joins into the leaf's type as it does for a plain local.
+  Nested patterns and `_` positions follow the same rule, and a reassignment of
+  a different kind joins into the leaf's type as it does for a plain local.
 - **A literal list times a point typed as the point.** `[1, 2] · (3, 4)`
   evaluates to `[(3, 4), (6, 8)]` but typed `tuple<integer, integer>`; it now
   types `list<tuple<integer, integer>^2>`, and a matrix times a point — every
   cell scales the point — keeps the matrix's shape
-  (`list<tuple<integer, integer>^(2x2)>`). `Range(1, 3) · (3, 4)` already
-  typed as a list of points.
+  (`list<tuple<integer, integer>^(2x2)>`). `Range(1, 3) · (3, 4)` already typed
+  as a list of points.
 
 ## 0.123.1 _2026-09-04_
 
 ### Resolved Issues
 
-- **A bare single-letter builtin name in an OPTIONAL or VARIADIC slot
-  devolves to a variable, as it does in a required slot.** `Range(1, N)`,
-  `Range(1, 10, N)`, `Max(1, N)` and `Min(2, N, M)` boxed an
-  `incompatible-type` error on the `N` (its type is the builtin's
-  `(any, integer?) -> unknown`) where `N + 1`, `Range(N)` and
-  `Element(n, N)` read it as a variable: the "un-applied standard-library
-  operator used as a value means a variable" repair ran only at the
-  required-parameter gate of argument validation. The optional and variadic
-  gates now run the same two construction-level repairs (this devolution
-  and the fresh matrix inference repair), and a trial validation admits
-  them by precondition as the required gate does. A user-declared function
-  in such a slot is still refused. Reached the boxing seam of 0.123.0 first:
-  `Range` had no signature validation before it, so `[1, \\ldots, N]`
-  with an undeclared `N` boxed on 0.122.0 and was refused on 0.123.0
-  (Tycho item 250).
+- **A bare single-letter builtin name in an OPTIONAL or VARIADIC slot devolves
+  to a variable, as it does in a required slot.** `Range(1, N)`,
+  `Range(1, 10, N)`, `Max(1, N)` and `Min(2, N, M)` boxed an `incompatible-type`
+  error on the `N` (its type is the builtin's `(any, integer?) -> unknown`)
+  where `N + 1`, `Range(N)` and `Element(n, N)` read it as a variable: the
+  "un-applied standard-library operator used as a value means a variable" repair
+  ran only at the required-parameter gate of argument validation. The optional
+  and variadic gates now run the same two construction-level repairs (this
+  devolution and the fresh matrix inference repair), and a trial validation
+  admits them by precondition as the required gate does. A user-declared
+  function in such a slot is still refused. Reached the boxing seam of 0.123.0
+  first: `Range` had no signature validation before it, so `[1, \\ldots, N]`
+  with an undeclared `N` boxed on 0.122.0 and was refused on 0.123.0 (Tycho item
+  250).
 - **A valueless collection-typed operand was silently dropped by the lazy
-  collection operators.** With `v` declared `list<number>` and not yet
-  assigned, `Join([1], v)` evaluated to `[1]` and `Append(v, 2)` to `[2]`,
-  where the same expressions answer `[1, 7, 8]` and `[7, 8, 2]` once
-  `v := [7, 8]`. The lazy operators walk their operands, a valueless symbol
-  yields nothing from that walk, and the literal built from the walk lost the
-  operand. Such an application now stays the unevaluated `Join`/`Append` view
-  until the symbol holds a value, as `Length(v)` and `Reverse(v)` already did;
-  a positional read that does not depend on the valueless operand, such as
-  `First(Join([1], v))`, still answers. A self-referential binding
-  `xs := Append(xs, 1)` used to display `[1]` for the same reason and now
-  stays the `Append` view.
+  collection operators.** With `v` declared `list<number>` and not yet assigned,
+  `Join([1], v)` evaluated to `[1]` and `Append(v, 2)` to `[2]`, where the same
+  expressions answer `[1, 7, 8]` and `[7, 8, 2]` once `v := [7, 8]`. The lazy
+  operators walk their operands, a valueless symbol yields nothing from that
+  walk, and the literal built from the walk lost the operand. Such an
+  application now stays the unevaluated `Join`/`Append` view until the symbol
+  holds a value, as `Length(v)` and `Reverse(v)` already did; a positional read
+  that does not depend on the valueless operand, such as `First(Join([1], v))`,
+  still answers. A self-referential binding `xs := Append(xs, 1)` used to
+  display `[1]` for the same reason and now stays the `Append` view.
 - **A symbol declared with the bare `tuple` type was not a tuple to the
-  arithmetic.** With `ce.declare('w', 'tuple')`, `w · w` typed `number` where
-  a `tuple<number, number>` symbol answers the `no-product-between-points`
-  error, and `Sin(w)`, `Sqrt(w)` and `w^2` typed `number` although with
-  `w := (1, 2)` they evaluate component-wise to `(sin 1, sin 2)`, `(1, √2)`
-  and `(1, 4)`. They now type `tuple`, `Abs(w)` takes the norm, and a product
-  of two such tuples is the same error the compound spelling gives. A literal
-  tuple was never affected; only a declared symbol carries the bare spelling.
+  arithmetic.** With `ce.declare('w', 'tuple')`, `w · w` typed `number` where a
+  `tuple<number, number>` symbol answers the `no-product-between-points` error,
+  and `Sin(w)`, `Sqrt(w)` and `w^2` typed `number` although with `w := (1, 2)`
+  they evaluate component-wise to `(sin 1, sin 2)`, `(1, √2)` and `(1, 4)`. They
+  now type `tuple`, `Abs(w)` takes the norm, and a product of two such tuples is
+  the same error the compound spelling gives. A literal tuple was never
+  affected; only a declared symbol carries the bare spelling.
 - **A list scaled by a symbolic tuple kept a unit factor in its first cell.**
   `[1, 2, 3] · p` for a tuple-typed `p` evaluated to `[1p, 2p, 3p]`; it now
   evaluates to `[p, 2p, 3p]`.
@@ -76,465 +155,446 @@
 
 ### New Features
 
-- **Epsil: `match` exhaustiveness lint.** A `match` whose subject is
-  annotated with a closed type — a sum declared with
-  `type light = red | green | yellow`, or `boolean` — now reports a
-  `match-not-exhaustive` warning when some value of that type reaches no
-  case, spelling each uncovered value as the pattern that would match it
-  (`yellow()`, `node(_, _)`, `false`). The check runs in the static pass, so
-  `epsil check` and a program run both report it, and it only ever claims a
-  type it can enumerate from a declaration: an unannotated subject, an
-  ordinary type, or a union with a member that is not a variant stays silent.
-  A case covers a value only when it matches it unconditionally; a guarded
-  case, a literal operand, or a pin counts for nothing. See `epsil doc
-  match-not-exhaustive`.
-- **Compiled typed `match` bindings and `is` tests.** On the JavaScript
-  target, `MatchesType(v, T)` with a literal type — the form a typed `match`
-  binding (`n: integer => …`), a `while let v: T = …`, and the `x is T` test
-  lower to — now compiles when `T` has a faithful test on the JS value
-  model: the machine numbers, strings and booleans, literal value types,
-  numeric ranges, unions of those, and the variants and sums of a tagged,
-  non-generic sum (an erased sum's value is its payload's plain JS value,
-  which any other value of that shape also is, so it declines). The
-  type is resolved at compile time and its test is baked into the code, the
-  same test the multi-clause parameter guards and the sum constructor
-  patterns already use. A type with no faithful test — `error` and `!error`
-  (compiled code has no error value), collections, records, opaque nominals,
-  the non-finite numeric types — still fails closed, and so does every other
-  target.
+- **Epsil: `match` exhaustiveness lint.** A `match` whose subject is annotated
+  with a closed type — a sum declared with `type light = red | green | yellow`,
+  or `boolean` — now reports a `match-not-exhaustive` warning when some value of
+  that type reaches no case, spelling each uncovered value as the pattern that
+  would match it (`yellow()`, `node(_, _)`, `false`). The check runs in the
+  static pass, so `epsil check` and a program run both report it, and it only
+  ever claims a type it can enumerate from a declaration: an unannotated
+  subject, an ordinary type, or a union with a member that is not a variant
+  stays silent. A case covers a value only when it matches it unconditionally; a
+  guarded case, a literal operand, or a pin counts for nothing. See
+  `epsil doc match-not-exhaustive`.
+- **Compiled typed `match` bindings and `is` tests.** On the JavaScript target,
+  `MatchesType(v, T)` with a literal type — the form a typed `match` binding
+  (`n: integer => …`), a `while let v: T = …`, and the `x is T` test lower to —
+  now compiles when `T` has a faithful test on the JS value model: the machine
+  numbers, strings and booleans, literal value types, numeric ranges, unions of
+  those, and the variants and sums of a tagged, non-generic sum (an erased sum's
+  value is its payload's plain JS value, which any other value of that shape
+  also is, so it declines). The type is resolved at compile time and its test is
+  baked into the code, the same test the multi-clause parameter guards and the
+  sum constructor patterns already use. A type with no faithful test — `error`
+  and `!error` (compiled code has no error value), collections, records, opaque
+  nominals, the non-finite numeric types — still fails closed, and so does every
+  other target.
 
-- **Destructuring loop binders compile.** `for (p, q) in pairs { … }` — and
-  the same tuple pattern as a `Comprehension` binder — now compiles on the
+- **Destructuring loop binders compile.** `for (p, q) in pairs { … }` — and the
+  same tuple pattern as a `Comprehension` binder — now compiles on the
   JavaScript target (`for (const [p, q] of …)`) and the Python target
   (`for (p, q) in …:`), nested patterns and `_` positions included. The
-  interpreter binds such a pattern only to a tuple of the pattern's arity
-  and answers a shape-mismatch error value for anything else, a list of the
-  right length included; compiled code cannot tell a tuple from a list, so
-  the pattern compiles only when the source's static element type proves
-  tuples of the matching arity at every nesting — a `Zip`, a literal list of
-  tuples, a `list<tuple<…>>` annotation — and fails closed otherwise.
-- **The Python target lowers the remaining loop forms.** A `Loop` over
-  several `Element` clauses nests one `for` under another; a `Range` with
-  integer literal bounds and step is a native `range` in either direction
+  interpreter binds such a pattern only to a tuple of the pattern's arity and
+  answers a shape-mismatch error value for anything else, a list of the right
+  length included; compiled code cannot tell a tuple from a list, so the pattern
+  compiles only when the source's static element type proves tuples of the
+  matching arity at every nesting — a `Zip`, a literal list of tuples, a
+  `list<tuple<…>>` annotation — and fails closed otherwise.
+- **The Python target lowers the remaining loop forms.** A `Loop` over several
+  `Element` clauses nests one `for` under another; a `Range` with integer
+  literal bounds and step is a native `range` in either direction
   (`Range(10, 1, -3)` → `range(10, 0, -3)`); and a `Comprehension` is a list
   comprehension (`[i * j for i in range(1, 4) for j in range(1, 3)]`). A
   comprehension whose body is several statements fails closed.
-- **`Zip` types its elements.** `Zip(xs, ys)` now types
-  `list<tuple<X, Y>>` from its sources' element types (a source with an
-  unknown element type keeps the bare `list`), which is what lets a
-  destructuring loop over it compile.
+- **`Zip` types its elements.** `Zip(xs, ys)` now types `list<tuple<X, Y>>` from
+  its sources' element types (a source with an unknown element type keeps the
+  bare `list`), which is what lets a destructuring loop over it compile.
 
 - **Epsil: a generated standard-library index.** `src/epsil/docs/library.md`
   (published at `/epsil/library/`) lists every function and constant of the
-  standard library by category, with its signature, the first sentence of
-  its description, and — for the definitions that declare `examples` — one
-  executable example block each, annotated with the value it evaluates to.
-  The page is generated by `npm run doc` from the same describer `epsil doc`
-  prints and the editor shows as a hover, and the documentation test
-  executes its examples, so neither the index nor the examples can drift
-  from the engine.
+  standard library by category, with its signature, the first sentence of its
+  description, and — for the definitions that declare `examples` — one
+  executable example block each, annotated with the value it evaluates to. The
+  page is generated by `npm run doc` from the same describer `epsil doc` prints
+  and the editor shows as a hover, and the documentation test executes its
+  examples, so neither the index nor the examples can drift from the engine.
 
 - **Epsil: a style guide.** `src/epsil/docs/style.md` (published at
-  `/epsil/style/`) states the idioms of well-written Epsil with their
-  reasons and an executed example each: `const` versus `let` and when to
-  annotate, math-style versus block-style functions and recursion without
-  ceremony, pipelines over loops, building a list without growing a lazy
-  recipe, 1-based indexing, errors as values, effects at the edges, pattern
-  matching, strings, and naming. The examples and agent guide now point at
-  it, and their "build a list with `Join` in a loop" idiom — which grows a
-  lazy recipe one operand per turn and takes tens of seconds by a thousand
-  elements — is replaced by `Map`/`Fold`, or `ListFrom` around the growth
-  step when a loop must extend a list.
+  `/epsil/style/`) states the idioms of well-written Epsil with their reasons
+  and an executed example each: `const` versus `let` and when to annotate,
+  math-style versus block-style functions and recursion without ceremony,
+  pipelines over loops, building a list without growing a lazy recipe, 1-based
+  indexing, errors as values, effects at the edges, pattern matching, strings,
+  and naming. The examples and agent guide now point at it, and their "build a
+  list with `Join` in a loop" idiom — which grows a lazy recipe one operand per
+  turn and takes tens of seconds by a thousand elements — is replaced by
+  `Map`/`Fold`, or `ListFrom` around the growth step when a loop must extend a
+  list.
 
 ### Resolved Issues
 
 - **A head with a `canonical` handler is validated against its declared
-  signature at boxing.** Such a head used to get no signature validation
-  at all (the handler was the only gate, and most only check arity), so
-  `PoissonDistribution(s)` with `s := -3` boxed silently where a literal
-  `-3` is refused, and an ill-typed call slipped through as valid. The
-  handler's result is now checked against the declaration as a gate: a
-  provably off-carrier operand becomes the same error operand a plain
-  head mints, and a symbol whose held value lies outside a ranged
-  parameter is refused. The check infers nothing — a fresh symbol keeps
-  the type it had. The distribution constructors declare their carriers
-  as ranged types (`real<0<..>` for a rate or a deviation, `integer<0..>`
-  for a count), and the declarations that were narrower than their
-  handlers were widened: `Apply` takes any callee (a function literal, and
-  the shorthands `Apply(3, 5)` and `Apply(x + 1, 2)`), every relation
-  accepts a single operand as the degenerate chain (`Less(3)` is `True`),
-  `At` takes a base of any type, `DMS` a complex component, and the set
-  relations and constructors take any operand (a geometry label such as
-  `AC` in `P = AC ∩ BD` stays inert, as before). A provable off-carrier
-  operand of the trigonometric family, such as `Sin(+oo)`, is now refused
-  at boxing instead of at evaluation, and so is a range used as a range
-  bound. The check is skipped for a call it could not refuse (valueless
-  symbols and in-range number literals), so a constructor such as
-  `PoissonDistribution(lam)` boxes within about half a microsecond of
-  what it cost before. At this seam, threadable validation now checks a collection's element
-  carrier itself, so canonical numeric heads no longer need a second
-  `checkNumericArgs` validation pass; the arithmetic fast paths continue to
-  perform their existing single numeric check.
+  signature at boxing.** Such a head used to get no signature validation at all
+  (the handler was the only gate, and most only check arity), so
+  `PoissonDistribution(s)` with `s := -3` boxed silently where a literal `-3` is
+  refused, and an ill-typed call slipped through as valid. The handler's result
+  is now checked against the declaration as a gate: a provably off-carrier
+  operand becomes the same error operand a plain head mints, and a symbol whose
+  held value lies outside a ranged parameter is refused. The check infers
+  nothing — a fresh symbol keeps the type it had. The distribution constructors
+  declare their carriers as ranged types (`real<0<..>` for a rate or a
+  deviation, `integer<0..>` for a count), and the declarations that were
+  narrower than their handlers were widened: `Apply` takes any callee (a
+  function literal, and the shorthands `Apply(3, 5)` and `Apply(x + 1, 2)`),
+  every relation accepts a single operand as the degenerate chain (`Less(3)` is
+  `True`), `At` takes a base of any type, `DMS` a complex component, and the set
+  relations and constructors take any operand (a geometry label such as `AC` in
+  `P = AC ∩ BD` stays inert, as before). A provable off-carrier operand of the
+  trigonometric family, such as `Sin(+oo)`, is now refused at boxing instead of
+  at evaluation, and so is a range used as a range bound. The check is skipped
+  for a call it could not refuse (valueless symbols and in-range number
+  literals), so a constructor such as `PoissonDistribution(lam)` boxes within
+  about half a microsecond of what it cost before. At this seam, threadable
+  validation now checks a collection's element carrier itself, so canonical
+  numeric heads no longer need a second `checkNumericArgs` validation pass; the
+  arithmetic fast paths continue to perform their existing single numeric check.
 - **`Norm(v, p)` round-trips through LaTeX.** The serializer wrote
-  `\left\Vert v\right\Vert` and dropped the order, so a 1-norm reparsed
-  as the 2-norm. An order now serializes as a subscript — `\|v\|_1`,
-  `\|v\|_\infty`, `\|v\|_F`, `\|v\|_3` — and parses back from every
-  norm spelling (`\|…\|`, `\left\Vert…\right\Vert`, `\lVert…\rVert`,
-  `||…||`, the `Vmatrix` environment); `F` is the Frobenius order. No
-  subscript, and the order 2, stay the plain 2-norm.
-- **A variadic or optional argument whose type is a union prints with
-  its parentheses, and an atomic type never does.** `(complex | infinity,
-  (complex | infinity)+) -> number` printed as `(complex | infinity,
-  complex | infinity+) -> number` in hovers and error messages, while a
-  ranged number, an `expression<…>`, a `symbol<…>` or a named type was
-  parenthesized wherever it was nested: `(real<0..>) | nan`. Both are
-  fixed; the round trip was already stable. Because a union sorts its
-  members by their printed form, a union that carried such a parenthesis
-  may now print its members in a different order (`nan | real<0..>`).
-- **A discrete pmf or CDF at a symbolic point agrees with the literal
-  route.** `PDF(PoissonDistribution(2), x)` evaluated to the bare closed
-  form `2^x / (x!·e²)`, the continuous interpolation of the mass: with
-  `x := 0.5` afterwards it answered `0.216` where the literal
-  `PDF(PoissonDistribution(2), 0.5)` answers `0`, and the symbolic CDF
-  omitted the `Floor` the literal route applies (`0.261` against `0.135`
-  at `x = 0.5`, `NaN` against `0` at `x = −1`). The symbolic forms now
-  carry the support guard: `Which(⌊x⌋ = x ∧ x ≥ 0, closed, True, 0)` for
-  the Poisson pmf (with `x ≤ n` for the binomial), and `Which(x < 0, 0,
-  True, GammaRegularized(⌊x⌋ + 1, λ))` for the CDF (with `x ≥ n → 1` for
-  the binomial). Each clause the point's type already proves is left
-  out, so a point declared `integer<0..>` keeps the bare closed form. The
-  guarded forms compile, and match the literal route at integer,
-  non-integer and negative points on both lanes.
-- **A compiled operand that is a scalar OR a collection by its static type
-  is no longer claimed by the scalar code paths.** On the `javascript`
-  target, an operand typed `integer | vector<integer^2>` — a `Which` whose
-  arms return a 2-element list or the scalar `-1`, or a helper returning
-  either — made `Sum(x)` / `Product(x)` (Desmos `.total`) fail closed with
-  "no indexing set", while `2·x`, `x + 1`, `sin(x)` and `x < 1` compiled to
-  the bare scalar operators and returned wrong values behind
-  `success: true` (`NaN`, or the string `"1,21"`); an indexed `Sum` over such
-  a body concatenated the arrays. Such a union now takes the lowerings that
-  dispatch on the run-time shape: the `Array.isArray`-guarded reduce for the
-  collection big ops, `_SYS.bcast` for arithmetic and comparisons, and the
-  element-wise fold for an indexed big op, so a scalar answers as a scalar
-  and an array element-wise, as interpreted (Tycho item 249). The TYPING of
-  arithmetic over a union whose collection branch is a dimensioned list
-  (`integer | vector<integer^2>`) fell through to the scalar tiers and
-  typed `2·u` as `number`; it now types `number | vector<2>`, and a
-  dimensionless union (`integer | list<integer>`) is typed per branch as
-  before.
-- **A compiled branch condition with an impure operand is three-valued
-  like any other.** `If(Random() > 0.5 ∧ x > 0, a, b)` compiled to a
-  plain truthiness test and took the else arm at `x = NaN`, because the
-  decidedness analysis declined any condition with an effectful operand
-  (its tests used to name an operand three times). The lowering binds
-  every leaf once, so the exemption is gone: the draw happens once per
-  call, or not at all when a decided sibling short-circuits it, and the
-  no-branch answer `NaN` is given at NaN, for a lone relation, a
-  connective, a `Which` guard and a statement-form `If` alike. Two shapes
-  keep the truthiness lowering, because binding would change what they
-  evaluate: an impure chain (`Less(5, 1, Random())`) and one impure node
-  written in two positions.
-- **The Python target emitted JavaScript for a `Comprehension`.** With no
-  Python lowering of its own, `Comprehension(body, Element(x, …))` went
-  through the shared emission and produced the JavaScript arrow-function
-  IIFE behind `success: true`. It now has the list-comprehension lowering
-  above.
+  `\left\Vert v\right\Vert` and dropped the order, so a 1-norm reparsed as the
+  2-norm. An order now serializes as a subscript — `\|v\|_1`, `\|v\|_\infty`,
+  `\|v\|_F`, `\|v\|_3` — and parses back from every norm spelling (`\|…\|`,
+  `\left\Vert…\right\Vert`, `\lVert…\rVert`, `||…||`, the `Vmatrix`
+  environment); `F` is the Frobenius order. No subscript, and the order 2, stay
+  the plain 2-norm.
+- **A variadic or optional argument whose type is a union prints with its
+  parentheses, and an atomic type never does.**
+  `(complex | infinity, (complex | infinity)+) -> number` printed as
+  `(complex | infinity, complex | infinity+) -> number` in hovers and error
+  messages, while a ranged number, an `expression<…>`, a `symbol<…>` or a named
+  type was parenthesized wherever it was nested: `(real<0..>) | nan`. Both are
+  fixed; the round trip was already stable. Because a union sorts its members by
+  their printed form, a union that carried such a parenthesis may now print its
+  members in a different order (`nan | real<0..>`).
+- **A discrete pmf or CDF at a symbolic point agrees with the literal route.**
+  `PDF(PoissonDistribution(2), x)` evaluated to the bare closed form
+  `2^x / (x!·e²)`, the continuous interpolation of the mass: with `x := 0.5`
+  afterwards it answered `0.216` where the literal
+  `PDF(PoissonDistribution(2), 0.5)` answers `0`, and the symbolic CDF omitted
+  the `Floor` the literal route applies (`0.261` against `0.135` at `x = 0.5`,
+  `NaN` against `0` at `x = −1`). The symbolic forms now carry the support
+  guard: `Which(⌊x⌋ = x ∧ x ≥ 0, closed, True, 0)` for the Poisson pmf (with
+  `x ≤ n` for the binomial), and
+  `Which(x < 0, 0, True, GammaRegularized(⌊x⌋ + 1, λ))` for the CDF (with
+  `x ≥ n → 1` for the binomial). Each clause the point's type already proves is
+  left out, so a point declared `integer<0..>` keeps the bare closed form. The
+  guarded forms compile, and match the literal route at integer, non-integer and
+  negative points on both lanes.
+- **A compiled operand that is a scalar OR a collection by its static type is no
+  longer claimed by the scalar code paths.** On the `javascript` target, an
+  operand typed `integer | vector<integer^2>` — a `Which` whose arms return a
+  2-element list or the scalar `-1`, or a helper returning either — made
+  `Sum(x)` / `Product(x)` (Desmos `.total`) fail closed with "no indexing set",
+  while `2·x`, `x + 1`, `sin(x)` and `x < 1` compiled to the bare scalar
+  operators and returned wrong values behind `success: true` (`NaN`, or the
+  string `"1,21"`); an indexed `Sum` over such a body concatenated the arrays.
+  Such a union now takes the lowerings that dispatch on the run-time shape: the
+  `Array.isArray`-guarded reduce for the collection big ops, `_SYS.bcast` for
+  arithmetic and comparisons, and the element-wise fold for an indexed big op,
+  so a scalar answers as a scalar and an array element-wise, as interpreted
+  (Tycho item 249). The TYPING of arithmetic over a union whose collection
+  branch is a dimensioned list (`integer | vector<integer^2>`) fell through to
+  the scalar tiers and typed `2·u` as `number`; it now types
+  `number | vector<2>`, and a dimensionless union (`integer | list<integer>`) is
+  typed per branch as before.
+- **A compiled branch condition with an impure operand is three-valued like any
+  other.** `If(Random() > 0.5 ∧ x > 0, a, b)` compiled to a plain truthiness
+  test and took the else arm at `x = NaN`, because the decidedness analysis
+  declined any condition with an effectful operand (its tests used to name an
+  operand three times). The lowering binds every leaf once, so the exemption is
+  gone: the draw happens once per call, or not at all when a decided sibling
+  short-circuits it, and the no-branch answer `NaN` is given at NaN, for a lone
+  relation, a connective, a `Which` guard and a statement-form `If` alike. Two
+  shapes keep the truthiness lowering, because binding would change what they
+  evaluate: an impure chain (`Less(5, 1, Random())`) and one impure node written
+  in two positions.
+- **The Python target emitted JavaScript for a `Comprehension`.** With no Python
+  lowering of its own, `Comprehension(body, Element(x, …))` went through the
+  shared emission and produced the JavaScript arrow-function IIFE behind
+  `success: true`. It now has the list-comprehension lowering above.
 - **A `Range` bound that is not a number compiled to an empty range.** The
   chained spelling `1..10..2` parses as `Range(Range(1, 10), 2)`, which the
-  interpreter leaves inert; the JavaScript lowering coerced the inner array
-  to `NaN` and emitted `[]` — `Sum(1..10..2)` compiled to `0`. A bound whose
-  static type is a collection or a string now fails closed.
+  interpreter leaves inert; the JavaScript lowering coerced the inner array to
+  `NaN` and emitted `[]` — `Sum(1..10..2)` compiled to `0`. A bound whose static
+  type is a collection or a string now fails closed.
 - **A compiled `Sum`, `Product` or `Comprehension` loop no longer re-runs a
-  loop-invariant list reduction or list construction on every iteration.**
-  On the `javascript` target, a body reading `Min(P)`, `Max(P)` or
-  `Length(P)` over a list `P` that does not depend on the loop index
-  re-ran the full reduction at every iteration, and a list-valued operand
-  expression such as `(1 - v)·P_0 + v·P_1` was rebuilt at every `At`,
-  `Min` and `Max` site, so the run was quadratic in the list length: a
-  10 000-element histogram row (a `Comprehension` over 300 bins whose body
-  sums over the list) took 25 s of emitted-code time, and the interpolated
-  twin of the row did not finish. The loop-form `Sum`/`Product` and the
-  `Comprehension` now bind the body's invariant subexpressions once — a
-  collection-valued subexpression, a reduction over one, or an invariant
-  nested binder whole — before the loop (behind the empty-range return) or
-  on the first iteration, so a body that never runs evaluates nothing new;
-  a structurally equal node in a conditionally-evaluated position reads the
-  same binding. A common-subexpression temporary bound by an ENCLOSING
-  region is now reused inside a binder body or a conditional arm instead of
-  being recomputed there, and the `Comprehension` body compiles through its
-  own CSE region. Both histogram rows now run in under 0.1 s at 16 000
-  elements, with unchanged values. `cse: false` turns the hoisting off with
+  loop-invariant list reduction or list construction on every iteration.** On
+  the `javascript` target, a body reading `Min(P)`, `Max(P)` or `Length(P)` over
+  a list `P` that does not depend on the loop index re-ran the full reduction at
+  every iteration, and a list-valued operand expression such as
+  `(1 - v)·P_0 + v·P_1` was rebuilt at every `At`, `Min` and `Max` site, so the
+  run was quadratic in the list length: a 10 000-element histogram row (a
+  `Comprehension` over 300 bins whose body sums over the list) took 25 s of
+  emitted-code time, and the interpolated twin of the row did not finish. The
+  loop-form `Sum`/`Product` and the `Comprehension` now bind the body's
+  invariant subexpressions once — a collection-valued subexpression, a reduction
+  over one, or an invariant nested binder whole — before the loop (behind the
+  empty-range return) or on the first iteration, so a body that never runs
+  evaluates nothing new; a structurally equal node in a conditionally-evaluated
+  position reads the same binding. A common-subexpression temporary bound by an
+  ENCLOSING region is now reused inside a binder body or a conditional arm
+  instead of being recomputed there, and the `Comprehension` body compiles
+  through its own CSE region. Both histogram rows now run in under 0.1 s at 16
+  000 elements, with unchanged values. `cse: false` turns the hoisting off with
   the rest of the sharing.
-- **A NaN operand of a branch condition selects no arm in the
-  interpreter.** `If(NaN > 0, 1, -1).evaluate()` answered `-1` (the
-  comparison follows IEEE 754, so `NaN > 0` is `False` and the else arm
-  was taken) while the compiled JavaScript and Python answered `NaN`. A
-  comparison with NaN carries no evidence for either arm, so the
-  interpreter now selects none: the `If` or `Which` evaluates to
-  `Missing`, its no-selection value, of which the compiled `NaN` is the
-  numeric spelling. The comparison itself keeps its IEEE value
-  (`Greater(NaN, 0)` is still `False`); `And`/`Or`/`Not` (and `Nand`,
-  `Nor`, `Implies`) combine three-valued with their short circuit kept, so
+- **A NaN operand of a branch condition selects no arm in the interpreter.**
+  `If(NaN > 0, 1, -1).evaluate()` answered `-1` (the comparison follows IEEE
+  754, so `NaN > 0` is `False` and the else arm was taken) while the compiled
+  JavaScript and Python answered `NaN`. A comparison with NaN carries no
+  evidence for either arm, so the interpreter now selects none: the `If` or
+  `Which` evaluates to `Missing`, its no-selection value, of which the compiled
+  `NaN` is the numeric spelling. The comparison itself keeps its IEEE value
+  (`Greater(NaN, 0)` is still `False`); `And`/`Or`/`Not` (and `Nand`, `Nor`,
+  `Implies`) combine three-valued with their short circuit kept, so
   `If(NaN > 0 ∧ False, 1, -1)` is still `-1` and a guarded operand is never
   evaluated; a condition with a free variable beside the NaN stays inert; a
-  reached
-  `Which` guard with a NaN operand ends the selection instead of falling
-  through; a statement-form `If` in a block runs neither branch. An
-  element-wise condition is unchanged: a NaN cell takes the else cell on
-  both lanes.
-- **Exact number literals are ordered exactly.** `Less(10^400, 10^500)`
-  and `Greater(10^500, 10^400)` were both `False`, and `a.isLess(b)`
-  disagreed with `b.isGreater(a)`: the exact numeric lane compared the
-  machine projections of its operands, and a magnitude outside the double
-  range has no double to compare. Two rationals within an ulp of each other
-  (`1 + 10^(-20)` against `1`) compared equal for the same reason. The exact
-  lane now orders `(a/b)√c` against `(d/e)√f` from the signs and the bigint
-  squares of the magnitudes, with an allocation-free fast path for the
-  small integers and rationals, and the machine lane defers to it for an
-  exact operand so the two lanes agree from either side.
+  reached `Which` guard with a NaN operand ends the selection instead of falling
+  through; a statement-form `If` in a block runs neither branch. An element-wise
+  condition is unchanged: a NaN cell takes the else cell on both lanes.
+- **Exact number literals are ordered exactly.** `Less(10^400, 10^500)` and
+  `Greater(10^500, 10^400)` were both `False`, and `a.isLess(b)` disagreed with
+  `b.isGreater(a)`: the exact numeric lane compared the machine projections of
+  its operands, and a magnitude outside the double range has no double to
+  compare. Two rationals within an ulp of each other (`1 + 10^(-20)` against
+  `1`) compared equal for the same reason. The exact lane now orders `(a/b)√c`
+  against `(d/e)√f` from the signs and the bigint squares of the magnitudes,
+  with an allocation-free fast path for the small integers and rationals, and
+  the machine lane defers to it for an exact operand so the two lanes agree from
+  either side.
 - **`Factorial` of an integer whose factorial is impractically large stays
-  symbolic instead of never returning.** `Factorial(10^400)` — about
-  4·10^402 digits — hung; above one million digits the exact route now
-  keeps `Factorial(n)` and `.N()` answers `+oo`. `Factorial2` takes the
-  same cap, and its machine kernel no longer spins through `n/2` steps
-  after its product has overflowed (`Factorial2(10^15)`).
-- **Dividing an exact rational at the edge of the double range no longer
-  loses it.** `Divide(1/10^400, 3)` boxed as `0` and
-  `Divide(99999999999999999999/10^20, 1)` as `1`: the integer extraction
-  behind the `Divide` fold accepted an exact non-integer whose float
-  projection happened to be integer-valued. `CDF(UniformDistribution(0, 1),
-  10^-400)` is `10^-400` and `CDF(UniformDistribution(0, 1), 1 - 10^-20)`
-  is `1 - 10^-20`; both answered the rounded endpoint.
+  symbolic instead of never returning.** `Factorial(10^400)` — about 4·10^402
+  digits — hung; above one million digits the exact route now keeps
+  `Factorial(n)` and `.N()` answers `+oo`. `Factorial2` takes the same cap, and
+  its machine kernel no longer spins through `n/2` steps after its product has
+  overflowed (`Factorial2(10^15)`).
+- **Dividing an exact rational at the edge of the double range no longer loses
+  it.** `Divide(1/10^400, 3)` boxed as `0` and
+  `Divide(99999999999999999999/10^20, 1)` as `1`: the integer extraction behind
+  the `Divide` fold accepted an exact non-integer whose float projection
+  happened to be integer-valued. `CDF(UniformDistribution(0, 1), 10^-400)` is
+  `10^-400` and `CDF(UniformDistribution(0, 1), 1 - 10^-20)` is `1 - 10^-20`;
+  both answered the rounded endpoint.
 
 ## 0.122.0 _2026-09-03_
 
 ### Breaking Changes
 
-- **A `type` handler in an operator definition now receives operand
-  DESCRIPTORS, never operand expressions.** The handler signature is
-  `(operands: OperandDescriptor[], context: TypeHandlerContext) => Type`:
-  each descriptor carries the operand's handler-visible type, a small set of
+- **A `type` handler in an operator definition now receives operand DESCRIPTORS,
+  never operand expressions.** The handler signature is
+  `(operands: OperandDescriptor[], context: TypeHandlerContext) => Type`: each
+  descriptor carries the operand's handler-visible type, a small set of
   three-valued facts (finiteness, sign, closedness, the collection facets, a
   static shape, the element type its own collection handler proves) and an
-  on-demand structural view (`structureOf()`: symbol, string, number with
-  its exact rational terms, application with child descriptors, function
-  literal, tuple and list literal with element descriptors). The context
-  carries a read-only engine view (`engine.type()`, the type resolver,
+  on-demand structural view (`structureOf()`: symbol, string, number with its
+  exact rational terms, application with child descriptors, function literal,
+  tuple and list literal with element descriptors). The context carries a
+  read-only engine view (`engine.type()`, the type resolver,
   `lookupDefinition()`, `tolerance`, the protocol registry) and
-  `derive(operator, operands)`, which types an application the handler does
-  not hold. A handler therefore cannot declare, canonicalize, evaluate, or
-  read a symbol's held value while deriving a type; under test, a handler
-  that writes engine state throws. The `typeHandlerKind` flag that selected
-  between the two handler shapes is gone (a definition that still sets it
-  fails to type-check), and so are `OperatorTypeHandlerOnExpressions` and the
-  `operandTypes` option the old shape received. Every built-in handler has
-  been converted and proven equivalent by a differential run of both shapes
-  across the test suite; a user-defined `type` handler must be rewritten
-  against the descriptor. Migration, read for read: `ops[i].type.type` →
-  `operands[i].type`; `isInteger`/`isReal` → `typeFact(type, 'integer')`
-  (three-valued); `isFinite` → `facts.finite`; `sgn` → `facts.sgn`;
-  `isSame(k)` → `operandLiteralValue`; `.ops`/`.operator`/`.string` →
-  `structureOf()`; an `elttype` read → `facts.elementType`.
+  `derive(operator, operands)`, which types an application the handler does not
+  hold. A handler therefore cannot declare, canonicalize, evaluate, or read a
+  symbol's held value while deriving a type; under test, a handler that writes
+  engine state throws. The `typeHandlerKind` flag that selected between the two
+  handler shapes is gone (a definition that still sets it fails to type-check),
+  and so are `OperatorTypeHandlerOnExpressions` and the `operandTypes` option
+  the old shape received. Every built-in handler has been converted and proven
+  equivalent by a differential run of both shapes across the test suite; a
+  user-defined `type` handler must be rewritten against the descriptor.
+  Migration, read for read: `ops[i].type.type` → `operands[i].type`;
+  `isInteger`/`isReal` → `typeFact(type, 'integer')` (three-valued); `isFinite`
+  → `facts.finite`; `sgn` → `facts.sgn`; `isSame(k)` → `operandLiteralValue`;
+  `.ops`/`.operator`/`.string` → `structureOf()`; an `elttype` read →
+  `facts.elementType`.
 
   Types that moved with the conversion, all in the narrowing-and-sound or
-  widening direction: a set comprehension's element type is now DERIVED
-  from its body instead of enumerated (`{n² : n ∈ ℤ}` has elements
-  `integer<0..>` where it had `unknown`; `{n/2 : n ∈ {1,2,3}}` has `real`
-  where enumeration saw `rational`); an `Interval` with a symbolic endpoint
-  has `real` elements instead of `never`; `JacobianMatrix` of an operand
-  neither its structure nor a definition decides types the declared
-  `value`; the static type of an implicit-map pipe (`xs |> p ↦ …`) binds
-  the stage parameter to the element type and equals the explicit `Map`'s
-  type; `Element` declines to `boolean` for a radical literal (`√2 ∈
-  [√2, 1]`) whose exact value the descriptor does not carry; a `Range` whose
-  bound is a `Sum` no longer evaluates that bound when its sign or type is
-  read.
+  widening direction: a set comprehension's element type is now DERIVED from its
+  body instead of enumerated (`{n² : n ∈ ℤ}` has elements `integer<0..>` where
+  it had `unknown`; `{n/2 : n ∈ {1,2,3}}` has `real` where enumeration saw
+  `rational`); an `Interval` with a symbolic endpoint has `real` elements
+  instead of `never`; `JacobianMatrix` of an operand neither its structure nor a
+  definition decides types the declared `value`; the static type of an
+  implicit-map pipe (`xs |> p ↦ …`) binds the stage parameter to the element
+  type and equals the explicit `Map`'s type; `Element` declines to `boolean` for
+  a radical literal (`√2 ∈ [√2, 1]`) whose exact value the descriptor does not
+  carry; a `Range` whose bound is a `Sum` no longer evaluates that bound when
+  its sign or type is read.
 
 ### New Features
 
 - **`RuntimeError(code)` constructs an error value at run time.** A written
-  `Error(…)` is a static diagnostic node that marks the expression around it
-  as invalid, so a function whose body spelled `Error("neg")` was never
-  defined. `RuntimeError("neg")` is an ordinary application whose evaluation
-  yields `Error("neg")`, so
-  `function g(x) { if x > 0 { x } else { RuntimeError("neg") } }` defines
-  `g`, and `g(-1)` is an error value that `if let v: !error = g(-1)` refuses
-  and `match g(-1) { Error(c) => c }` reads. The operator takes the code
-  only — a string or an `ErrorCode(…)` — and its result type is `never`, so
-  `g` types `(unknown) -> number`. The `javascript` target fails closed on
-  it, naming the operator.
+  `Error(…)` is a static diagnostic node that marks the expression around it as
+  invalid, so a function whose body spelled `Error("neg")` was never defined.
+  `RuntimeError("neg")` is an ordinary application whose evaluation yields
+  `Error("neg")`, so
+  `function g(x) { if x > 0 { x } else { RuntimeError("neg") } }` defines `g`,
+  and `g(-1)` is an error value that `if let v: !error = g(-1)` refuses and
+  `match g(-1) { Error(c) => c }` reads. The operator takes the code only — a
+  string or an `ErrorCode(…)` — and its result type is `never`, so `g` types
+  `(unknown) -> number`. The `javascript` target fails closed on it, naming the
+  operator.
 - **Epsil `if let`.** `if let pattern = subject { … } else { … }` binds the
-  pattern's names when the subject matches and runs the `else` branch
-  otherwise. The pattern is any `match` pattern, so a typed binding takes
-  apart a result that may have failed:
-  `if let v: !error = f(x) { v } else { 0 }`. The statement chains with
-  `else if` in either direction, and without an `else` a refuted `if let`
-  evaluates to `Missing`, like a false `if`. It is sugar over `match` (a
-  two-case `Match` with a wildcard fallback) and the serializer spells that
-  shape back as `if let`. A pattern that cannot fail (a bare name or `_` with
-  no type) is reported by the new `if-let-irrefutable` warning; a missing `=`
-  is `if-let-equal-expected`.
-- **Epsil `while let`.** `while let pattern = subject { … }` is the loop form
-  of `if let`: each turn matches the subject and runs the body with the
-  pattern's bindings, and the first refutation ends the loop —
+  pattern's names when the subject matches and runs the `else` branch otherwise.
+  The pattern is any `match` pattern, so a typed binding takes apart a result
+  that may have failed: `if let v: !error = f(x) { v } else { 0 }`. The
+  statement chains with `else if` in either direction, and without an `else` a
+  refuted `if let` evaluates to `Missing`, like a false `if`. It is sugar over
+  `match` (a two-case `Match` with a wildcard fallback) and the serializer
+  spells that shape back as `if let`. A pattern that cannot fail (a bare name or
+  `_` with no type) is reported by the new `if-let-irrefutable` warning; a
+  missing `=` is `if-let-equal-expected`.
+- **Epsil `while let`.** `while let pattern = subject { … }` is the loop form of
+  `if let`: each turn matches the subject and runs the body with the pattern's
+  bindings, and the first refutation ends the loop —
   `while let [h, ...t] = xs { s = s + h; xs = [t] }` consumes a list, and
   `while let h: !error = head(xs) { … }` drains a function that may fail.
-  `break` and `continue` in the body apply to this loop. It is sugar over
-  `Loop` and `Match` (the wildcard arm breaks) and the serializer spells that
-  shape back as `while let`. A pattern that cannot fail is the
-  `while-let-irrefutable` warning; a missing `=` is `while-let-equal-expected`.
-  The JavaScript target compiles it natively (a `Match` standing as a loop
-  statement is emitted as an `if`/`else` chain whose wildcard arm is a real
-  `break`); the Python target fails closed on the `Match`.
-
+  `break` and `continue` in the body apply to this loop. It is sugar over `Loop`
+  and `Match` (the wildcard arm breaks) and the serializer spells that shape
+  back as `while let`. A pattern that cannot fail is the `while-let-irrefutable`
+  warning; a missing `=` is `while-let-equal-expected`. The JavaScript target
+  compiles it natively (a `Match` standing as a loop statement is emitted as an
+  `if`/`else` chain whose wildcard arm is a real `break`); the Python target
+  fails closed on the `Match`.
 
 ### Resolved Issues
 
-- The lazy `Map` a pipe evaluates to now carries the same element-typed
-  stage parameter as the pipe's static type. `xs |> p ↦ p[1] ∧ p[2]` over a
-  list of boolean pairs types `list<boolean^3>` before and after
-  evaluation; the evaluated node used to report
-  `list<broadcastable<boolean>^3>`, because the stage was canonicalized on
-  its own and inferred its parameter from the body's operators.
+- The lazy `Map` a pipe evaluates to now carries the same element-typed stage
+  parameter as the pipe's static type. `xs |> p ↦ p[1] ∧ p[2]` over a list of
+  boolean pairs types `list<boolean^3>` before and after evaluation; the
+  evaluated node used to report `list<broadcastable<boolean>^3>`, because the
+  stage was canonicalized on its own and inferred its parameter from the body's
+  operators.
 - Fixed an operand that fails only when evaluated being embedded in the
-  enclosing expression instead of becoming its value. `Sin(Length(5))`
-  evaluated to `sin(Error(…))`, and `1 + Length(5)` to `1 + Error(…)`,
-  where an error present when the expression was built already propagated
-  (`Sin("banana")` is the error). Both cases now answer the error, with the
-  enclosing operator on its breadcrumb; a selecting operator still ignores an
-  arm it does not demand, and a collection still keeps a failed element in
-  place. The same holds on the asynchronous evaluation route, for a spread
-  argument that fails, and for a broadcast over a failing scalar operand. A
-  user function whose annotated parameter rejects its argument now answers
-  the error directly (it used to answer the inert application with the
-  argument marked), so an element-wise failure's cell is the error, with the
-  function's name on its breadcrumb.
+  enclosing expression instead of becoming its value. `Sin(Length(5))` evaluated
+  to `sin(Error(…))`, and `1 + Length(5)` to `1 + Error(…)`, where an error
+  present when the expression was built already propagated (`Sin("banana")` is
+  the error). Both cases now answer the error, with the enclosing operator on
+  its breadcrumb; a selecting operator still ignores an arm it does not demand,
+  and a collection still keeps a failed element in place. The same holds on the
+  asynchronous evaluation route, for a spread argument that fails, and for a
+  broadcast over a failing scalar operand. A user function whose annotated
+  parameter rejects its argument now answers the error directly (it used to
+  answer the inert application with the argument marked), so an element-wise
+  failure's cell is the error, with the function's name on its breadcrumb.
 - Fixed operations over a deeply nested tuple, or a nested list that is not
   shape-regular, whose sub-values are shared objects (a value built as
   `Tuple(t, t)` twenty levels deep, the block form of a Hadamard matrix, a
-  fractal point set) taking seconds and printing a type with a million slots.
-  A derived type is now bounded in size: past 256 nodes, its components keep
-  their kind and arity and their own components become `any`. Arithmetic
-  over such a value is unchanged. `Negate` over such a tuple also rebuilt it
-  once per path and now shares its result.
+  fractal point set) taking seconds and printing a type with a million slots. A
+  derived type is now bounded in size: past 256 nodes, its components keep their
+  kind and arity and their own components become `any`. Arithmetic over such a
+  value is unchanged. `Negate` over such a tuple also rebuilt it once per path
+  and now shares its result.
 
-- Fixed a user-defined function whose body evaluates to an error value
-  leaving the call unevaluated. `len := x ↦ Length(x)` then `len(5)` answered
-  `len(5)`, where `Length(5)` itself is the `incompatible-type` error, and an
-  Epsil function could never return an error value (a `match` with no
-  matching case inside a function body answered the call, not the
-  `match-no-case` error). A user function now answers with the error its
-  body produced, as a library operator does; a result that merely embeds an
-  error inside a collection or an undecided `If` is returned as it is.
+- Fixed a user-defined function whose body evaluates to an error value leaving
+  the call unevaluated. `len := x ↦ Length(x)` then `len(5)` answered `len(5)`,
+  where `Length(5)` itself is the `incompatible-type` error, and an Epsil
+  function could never return an error value (a `match` with no matching case
+  inside a function body answered the call, not the `match-no-case` error). A
+  user function now answers with the error its body produced, as a library
+  operator does; a result that merely embeds an error inside a collection or an
+  undecided `If` is returned as it is.
 - **`match` sees a lazy list value.** A list pattern (`[h, ...t]`) needs a
   `List` node to descend into, but `Rest(xs)`, `Drop(xs, 1)` or `Range(1, 3)`
   evaluate to a lazy collection whose operator is not `List`, so
-  `match Rest([1, 2, 3]) { [h, ...] => h; _ => "no" }` took the wildcard (and
-  a `while let [h, ...] = xs { xs = Rest(xs) }` loop ended after one turn).
-  The case holding the list pattern now reads such a finite subject as a
-  list: a fixed-shape pattern reads the positions it names in place, at any
-  nesting, and copies only a named `...rest`; an earlier case still sees the
-  subject as it is, so a pin ahead of the list case compares verbatim. Only
-  a copy is capped (100 000 elements; past it the case does not match).
-  Tuples stay atomic and a string is text, not a list.
-- **A `match` arm can `break` or `continue` in compiled code.** The
-  JavaScript `Match` emission is an arrow function, so a `break` in a case
-  body could not reach the enclosing loop; it surfaced as a late
-  `Unexpected token 'break'` syntax error when the unit was instantiated. A
-  `Match` that stands as a statement in a loop body — a `match` arm that
-  breaks a `for`, or the `while let` lowering — is now emitted as an
-  `if`/`else` statement chain with native control flow. A `Match` in value
-  position keeps the arrow form and declines a `break`, `continue` or
-  `Return` up front, naming the control operator.
-- **A compiled `...rest` capture splices into a list.** The interpreter
-  binds the rest of a list pattern to a `Sequence` that splices into the
-  list holding it, so `[h, ...t] => [t]` is the tail; the compiled rest is an
-  array and `[t]` compiled to a list holding the tail — a silent wrong
-  answer, and a `while let [h, ...t] = xs { xs = [t] }` loop that never
-  ended. The list and tuple emitters now spread a rest capture.
-- **A bare binding with a guard compiles.** `n if n > 3 => …` is classified
-  for the generic matcher and failed closed on the JavaScript target; it now
+  `match Rest([1, 2, 3]) { [h, ...] => h; _ => "no" }` took the wildcard (and a
+  `while let [h, ...] = xs { xs = Rest(xs) }` loop ended after one turn). The
+  case holding the list pattern now reads such a finite subject as a list: a
+  fixed-shape pattern reads the positions it names in place, at any nesting, and
+  copies only a named `...rest`; an earlier case still sees the subject as it
+  is, so a pin ahead of the list case compares verbatim. Only a copy is capped
+  (100 000 elements; past it the case does not match). Tuples stay atomic and a
+  string is text, not a list.
+- **A `match` arm can `break` or `continue` in compiled code.** The JavaScript
+  `Match` emission is an arrow function, so a `break` in a case body could not
+  reach the enclosing loop; it surfaced as a late `Unexpected token 'break'`
+  syntax error when the unit was instantiated. A `Match` that stands as a
+  statement in a loop body — a `match` arm that breaks a `for`, or the
+  `while let` lowering — is now emitted as an `if`/`else` statement chain with
+  native control flow. A `Match` in value position keeps the arrow form and
+  declines a `break`, `continue` or `Return` up front, naming the control
+  operator.
+- **A compiled `...rest` capture splices into a list.** The interpreter binds
+  the rest of a list pattern to a `Sequence` that splices into the list holding
+  it, so `[h, ...t] => [t]` is the tail; the compiled rest is an array and `[t]`
+  compiled to a list holding the tail — a silent wrong answer, and a
+  `while let [h, ...t] = xs { xs = [t] }` loop that never ended. The list and
+  tuple emitters now spread a rest capture.
+- **A bare binding with a guard compiles.** `n if n > 3 => …` is classified for
+  the generic matcher and failed closed on the JavaScript target; it now
   compiles as the guard alone with the name bound to the subject.
-- **A scalar function over a list of points keeps the point shape in its
-  type.** With `P: list<tuple<number, number>>`, `Sqrt(P)`, `Sin(P)`,
-  `Exp(P)` and `Power(P, 2)` typed `list<number>` while their values are
-  lists of points; they now type `list<tuple<number, number>>`, the arity
-  following the point. A head whose tuple semantics is whole-point (`Abs`
-  of a point is its norm) keeps its scalar cell. The JavaScript target's
-  `PointX`/`PointY` lowering, which routes on the type, read such a list as
-  a flat list of numbers.
-- **A comprehension binder's type is fixed by its binding site.** The
-  binder of `[q.x + 1 for q in L]` over `L: list<number>` was rewritten to
-  `matrix` by the body's `PointX(q)` use (through the fresh-inference
-  matrix repair), so the form boxed valid and failed only when evaluated.
-  A body use that contradicts the element type of the iterated collection
-  is now a type error at boxing, as it is for a `Sum` index.
-- Fixed `Reshape` with a non-literal target extent (`Reshape([1,2,3,4],
-  (n, 2))`) throwing `Failed to parse type` on any read of the result's
-  type: the handler serialized the extent into a type string. An extent that
-  is not a literal now drops the shape claim and the result types
+- **A scalar function over a list of points keeps the point shape in its type.**
+  With `P: list<tuple<number, number>>`, `Sqrt(P)`, `Sin(P)`, `Exp(P)` and
+  `Power(P, 2)` typed `list<number>` while their values are lists of points;
+  they now type `list<tuple<number, number>>`, the arity following the point. A
+  head whose tuple semantics is whole-point (`Abs` of a point is its norm) keeps
+  its scalar cell. The JavaScript target's `PointX`/`PointY` lowering, which
+  routes on the type, read such a list as a flat list of numbers.
+- **A comprehension binder's type is fixed by its binding site.** The binder of
+  `[q.x + 1 for q in L]` over `L: list<number>` was rewritten to `matrix` by the
+  body's `PointX(q)` use (through the fresh-inference matrix repair), so the
+  form boxed valid and failed only when evaluated. A body use that contradicts
+  the element type of the iterated collection is now a type error at boxing, as
+  it is for a `Sum` index.
+- Fixed `Reshape` with a non-literal target extent
+  (`Reshape([1,2,3,4], (n, 2))`) throwing `Failed to parse type` on any read of
+  the result's type: the handler serialized the extent into a type string. An
+  extent that is not a literal now drops the shape claim and the result types
   `list<number>`.
 
-- **`toLatex({ materialization: false })` no longer evaluates anything.** On
-  a lazy collection such as `Join(p)`, the opt-out still called `evaluate()`
-  with materialization off, which evaluated the operands' bound values: with
-  `p` bound to an unevaluated chain `m(m(m(p_0)))`, printing the
-  18-character `\mathrm{Join}(p)` cost seconds, then minutes, per level of
-  the chain. The option now serializes the expression as it stands
-  (Tycho item 247).
+- **`toLatex({ materialization: false })` no longer evaluates anything.** On a
+  lazy collection such as `Join(p)`, the opt-out still called `evaluate()` with
+  materialization off, which evaluated the operands' bound values: with `p`
+  bound to an unevaluated chain `m(m(m(p_0)))`, printing the 18-character
+  `\mathrm{Join}(p)` cost seconds, then minutes, per level of the chain. The
+  option now serializes the expression as it stands (Tycho item 247).
 - **The `javascript` target refuses the point arithmetic the interpreter
-  rejects.** A product of two point lists (`P·P`), a point list plus or minus
-  a scalar or a list of scalars (`P + 2`, `P − L`), and a scalar divided by a
-  point list compiled to plausible values (`[(1,2),(3,4)]·[(1,2),(3,4)]` ran
-  to `[(1,4),(9,16)]`) where `evaluate()` answers an error per element. They
-  now fail closed to the interpreter. A comprehension whose binder occurs in
-  the collection it iterates (`[P.x + 1 for P in P]`) and one whose binder
-  type contradicts the collection's element type used to compile and then
-  throw at run time; both are refused at compile time (Tycho item 245).
-- **A radical or logarithm over a list is a list operand of the
-  `javascript` target's list arithmetic.** `L + √L`, `−√L`, `2·√L`,
-  `L + ln L` and `L + L^{0.5}` failed closed ("cannot compile scalar
-  arithmetic over a list-valued operand") while `√L` alone and `L + sin L`
-  compiled: the element analysis could not attribute the radical's complex
-  verdict to its elements. A broadcast emission's elements now share its
-  closure's lane, so a list body with a square root inside a sum compiles
+  rejects.** A product of two point lists (`P·P`), a point list plus or minus a
+  scalar or a list of scalars (`P + 2`, `P − L`), and a scalar divided by a
+  point list compiled to plausible values (`[(1,2),(3,4)]·[(1,2),(3,4)]` ran to
+  `[(1,4),(9,16)]`) where `evaluate()` answers an error per element. They now
+  fail closed to the interpreter. A comprehension whose binder occurs in the
+  collection it iterates (`[P.x + 1 for P in P]`) and one whose binder type
+  contradicts the collection's element type used to compile and then throw at
+  run time; both are refused at compile time (Tycho item 245).
+- **A radical or logarithm over a list is a list operand of the `javascript`
+  target's list arithmetic.** `L + √L`, `−√L`, `2·√L`, `L + ln L` and
+  `L + L^{0.5}` failed closed ("cannot compile scalar arithmetic over a
+  list-valued operand") while `√L` alone and `L + sin L` compiled: the element
+  analysis could not attribute the radical's complex verdict to its elements. A
+  broadcast emission's elements now share its closure's lane, so a list body
+  with a square root inside a sum compiles (Tycho item 246).
+- **List arithmetic over elements that mix real and complex values compiles.**
+  `Add`, `Subtract`, `Multiply` and `Negate` over a list whose elements disagree
+  about being complex — `2·[1+i, 2]`, a declared `list<complex>` parameter, a
+  point list whose column carries `√-1` as Desmos's "undefined vertex" separator
+  — lower through the run-time dispatching helpers (`_SYS.sadd`, `_SYS.smul`)
+  instead of failing closed. Other heads over such a list still fail closed
   (Tycho item 246).
-- **List arithmetic over elements that mix real and complex values
-  compiles.** `Add`, `Subtract`, `Multiply` and `Negate` over a list whose
-  elements disagree about being complex — `2·[1+i, 2]`, a declared
-  `list<complex>` parameter, a point list whose column carries `√-1` as
-  Desmos's "undefined vertex" separator — lower through the run-time
-  dispatching helpers (`_SYS.sadd`, `_SYS.smul`) instead of failing closed.
-  Other heads over such a list still fail closed (Tycho item 246).
 - **`point + (list, list)` types as a tuple of lists.** With
-  `G: tuple<number, number>` and `L`, `L₂: list<number>`, `G + (L, L₂)`
-  typed the union `tuple<list<number>, list<number>> | tuple<number,
-  number>`, a type no evaluated value has; it is now the component-wise
+  `G: tuple<number, number>` and `L`, `L₂: list<number>`, `G + (L, L₂)` typed
+  the union `tuple<list<number>, list<number>> | tuple<number, number>`, a type
+  no evaluated value has; it is now the component-wise
   `tuple<list<number>, list<number>>` (Tycho item 246).
-- Fixed the LaTeX serializer recursing without end (`RangeError: Maximum call
-  stack size exceeded`) on a product with a factor of the empty type `never`,
-  such as `f(f(b)) - f(f(a)) = (f'(c))^2 (b - a)`, where the left side reads
-  `f` as a symbol and the right side declares it a function. `Divide(x, 1)`
-  and `Divide(x, -1)` now reduce to `x` and `-x` for a `never`-typed `x`, and
-  the serializer no longer rewrites a product as a fraction over `1`.
+- Fixed the LaTeX serializer recursing without end
+  (`RangeError: Maximum call stack size exceeded`) on a product with a factor of
+  the empty type `never`, such as `f(f(b)) - f(f(a)) = (f'(c))^2 (b - a)`, where
+  the left side reads `f` as a symbol and the right side declares it a function.
+  `Divide(x, 1)` and `Divide(x, -1)` now reduce to `x` and `-x` for a
+  `never`-typed `x`, and the serializer no longer rewrites a product as a
+  fraction over `1`.
 - Fixed an ellipsis over an indexed family being read as an arithmetic
-  progression. `\{\frac{x_1}{1+x_1}, \frac{x_2}{1+x_1+x_2}, \dots,
-  \frac{x_n}{1+\dots+x_n}\}` parsed to a `Range` whose step was the
-  difference of the first two terms; it now stays a set with a
-  `ContinuationPlaceholder`, like `\{x_1, x_2, \dots, x_n\}`. Two ellipsis
-  anchors form a progression only when they mention the same subscripted
-  symbols.
-- Fixed a two-element `Tuple` in a set position (the right side of `\in`,
-  an operand of `\cup`, …) serializing as `(a, b)`, which reads back as an
-  open interval. It is now spelled `\operatorname{Tuple}(a, b)`, as a
-  two-element `List` is already spelled `\operatorname{List}(a, b)` there.
+  progression.
+  `\{\frac{x_1}{1+x_1}, \frac{x_2}{1+x_1+x_2}, \dots, \frac{x_n}{1+\dots+x_n}\}`
+  parsed to a `Range` whose step was the difference of the first two terms; it
+  now stays a set with a `ContinuationPlaceholder`, like
+  `\{x_1, x_2, \dots, x_n\}`. Two ellipsis anchors form a progression only when
+  they mention the same subscripted symbols.
+- Fixed a two-element `Tuple` in a set position (the right side of `\in`, an
+  operand of `\cup`, …) serializing as `(a, b)`, which reads back as an open
+  interval. It is now spelled `\operatorname{Tuple}(a, b)`, as a two-element
+  `List` is already spelled `\operatorname{List}(a, b)` there.
 - Fixed a stack overflow when canonicalizing `Length`, `Element` or any other
   operation over a nested list literal whose sub-lists are shared objects (a
   list built as `List(t, t)` 18 or more levels deep). The `List` type handler
-  analyzed the shape once per path and spread every leaf into one call;
-  it now visits each distinct sub-list once. The `Hold` type handler's
-  structure read of such a list is linear too.
+  analyzed the shape once per path and spread every leaf into one call; it now
+  visits each distinct sub-list once. The `Hold` type handler's structure read
+  of such a list is linear too.
 
 ## 0.121.1 _2026-09-03_
 
@@ -550,10 +610,10 @@
 - **`Sign` extends to the complex plane.** `Sign(z)` is `z/|z|`, the point of
   the unit circle in the direction of `z`: `Sign(i)` is `i` and `Sign(3 + 4i)`
   is `3/5 + 4i/5`, the convention Fungrim, SymPy and Mathematica share. On the
-  extended real line the result stays exactly −1, 0 or 1 with its ranged
-  integer type; `Sign(~oo)` remains an error and `Sign(NaN)` is `NaN`. A
-  complex operand used to be an `incompatible-type` error. The `javascript`
-  target compiles the complex case.
+  extended real line the result stays exactly −1, 0 or 1 with its ranged integer
+  type; `Sign(~oo)` remains an error and `Sign(NaN)` is `NaN`. A complex operand
+  used to be an `incompatible-type` error. The `javascript` target compiles the
+  complex case.
 
 ### Resolved Issues
 
