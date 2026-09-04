@@ -1220,7 +1220,25 @@ document's history):
   vars-object member read inside a guard stays free (a getter with
   effects is outside the compiled contract); a desugared `while` exit
   test keeps the no-arm rule (an undecided loop condition runs to the
-  iteration cap).
+  iteration cap). FIXED 2026-09-03: the `If`/`Which` evaluate handlers
+  read their condition through `evaluateCondition`
+  (`library/control-structures.ts`), which reads the NaN evidence on the
+  OPERANDS of a relational head (`Less`, `LessEqual`, `Greater`,
+  `GreaterEqual`, `Equal`, `NotEqual`) before the relation's own value
+  has lost it, and combines `And`/`Or`/`Not` (and `Nand`/`Nor`/`Implies`
+  through their `And`/`Or` spelling) three-valued as the compiled lowering
+  does, keeping the short circuit: an operand a decided one guards is
+  never evaluated, an error operand propagates, a still-symbolic sibling
+  holds the connective inert with its original sub-conditions, and a
+  collection-shaped operand takes the element-wise path unflagged. A condition decided by a NaN operand selects no arm and
+  the application answers `Missing` — the no-selection value an else-less
+  `If` and an unselected `Which` already answer — where the compiled lane
+  answers `NaN`, its spelling of the same marker. A reached `Which` guard
+  with a NaN operand ends the selection (no fall-through). A
+  statement-form `If` in a block runs neither branch and the block
+  continues. An element-wise condition is unchanged: a NaN CELL takes the
+  else cell on both lanes (measured). Pinned in
+  `test/compute-engine/condition-nan-undecided.test.ts`.
 - **FIXED 2026-09-02 (ruled the same day): a provably non-boolean
   condition is refused at boxing.** The 2026-08-31 inertness ruling
   removed the host throw that carried the only diagnostic for

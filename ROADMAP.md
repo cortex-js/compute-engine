@@ -1121,7 +1121,7 @@ or `false` at run time takes no branch") is implemented for the
 JavaScript-family lowering of both the expression form and the statement
 form (`BaseCompiler.conditionDecidability`). Two reaches of it are open.
 
-- **RULED 2026-09-03 (Arno): option (a) — the interpreter treats a NaN branch operand as undecided.** The interpreter and the compiled lane DISAGREE today at a
+- **RULED 2026-09-03 (Arno): option (a) — the interpreter treats a NaN branch operand as undecided. FIXED 2026-09-03 (unstaged, awaiting release): `evaluateCondition` in `library/control-structures.ts` reads the NaN evidence on the relation's operands and combines `And`/`Or`/`Not`/`Nand`/`Nor`/`Implies` three-valued with the short circuit kept (a guarded operand is never evaluated, an error propagates, a symbolic sibling holds the connective inert with its original sub-conditions, a collection-shaped operand takes the element-wise path); the `If`/`Which` answer `Missing` (their no-selection value; the compiled lane's `NaN` is the numeric spelling of the same marker), a reached NaN guard ends a `Which`, a statement-form `If` runs neither branch, element-wise selection is unchanged (a NaN cell already took the else cell on both lanes). Record in `docs/ERROR-MODEL.md` §7; pins in `test/compute-engine/condition-nan-undecided.test.ts`.** The interpreter and the compiled lane DISAGREE today at a
   literal `NaN` operand.** Measured 2026-09-02 while lowering the
   connectives: `If(NaN > 0, 1, -1).evaluate()` is `-1` (the interpreter's
   ordered comparisons follow IEEE, `Greater(NaN, 0)` is `False`, so the

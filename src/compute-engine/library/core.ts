@@ -2610,7 +2610,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'True if the value is ABSENT — the `Missing` symbol, or a `NaN` ' +
         'number (regardless of provenance). R’s `is.na` (`TRUE` for both `NA` ' +
-        'and `NaN`); `IsNaN` remains a NaN-specific test (R’s `is.nan`).',
+        'and `NaN`). There is no NaN-specific test operator (R’s `is.nan`).',
       complexity: 500,
       signature: '(any) -> boolean',
       evaluate: ([x], { engine: ce }) =>

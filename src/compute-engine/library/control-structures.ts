@@ -26,6 +26,7 @@ import {
   isTupleShapedType,
   typeCouldBeCollection,
   typeCouldBeUnkeyedCollection,
+  isCollectionShaped,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { isValidType } from '../../common/type/primitive.js';
@@ -210,7 +211,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, options) => {
         const [cond, ifTrue, ifFalse] = ops;
         const engine = options.engine;
-        const evaluated = cond.canonical.evaluate();
+        const { value: evaluated, undecided } = evaluateCondition(cond);
         // The condition is the one operand `If` ALWAYS demands, so an error
         // in it propagates — the dual obligation of the demanded-operands
         // rule (`docs/ERROR-MODEL.md` §3), which this handler owns because a
@@ -221,6 +222,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // as a host exception.
         const condError = errorValue(evaluated);
         if (condError !== undefined) return condError;
+        // A condition decided by a NaN operand (`evaluateCondition`) selects
+        // no arm: the value is `Missing`, the position-preserving absent
+        // datum that an else-less `If` and a `Which` with no selected clause
+        // already answer (no-selection ruling 2026-08-27). The compiled
+        // lanes answer their numeric spelling of the same marker, `NaN`.
+        // Unlike a free-variable condition this can never resolve, so the
+        // node is not held inert; unlike an absent condition it is not a
+        // program defect, so it is not an error.
+        if (undecided) return engine.Missing;
         const evaluatedCond = sym(evaluated);
         if (evaluatedCond === 'True')
           return ifTrue?.evaluate() ?? engine.Missing;
@@ -852,6 +862,179 @@ function whenCollectionHandlers(): CollectionHandlers {
  * expression the host can render or catch.
  */
 /**
+ * The relational heads whose operands a branch condition compares. A `NaN`
+ * operand of one of these is UNDECIDED evidence for the branch: IEEE 754
+ * answers `False` to every ordered comparison with NaN and `True` to
+ * `NotEqual`, and neither answer says anything about which arm applies.
+ */
+const BRANCH_RELATIONS: ReadonlySet<string> = new Set([
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'Equal',
+  'NotEqual',
+]);
+
+/**
+ * A branch condition after evaluation: `value` is what the condition
+ * evaluates to — exactly what `cond.canonical.evaluate()` answers, errors,
+ * element-wise lists and inert symbolic forms included — and `undecided` is
+ * `true` when that value is a scalar `True`/`False` that rests on a NaN
+ * operand and therefore selects no arm.
+ */
+type EvaluatedCondition = { value: Expression; undecided: boolean };
+
+/**
+ * Evaluate the condition of an `If`/`Which` for branch selection.
+ *
+ * A comparison with NaN carries no evidence for either arm, so a condition
+ * decided by a NaN operand selects none (ruled 2026-09-03; the compiled
+ * lanes answer their numeric absence marker there,
+ * `BaseCompiler.conditionDecidability`). The comparison itself keeps its
+ * IEEE value everywhere else — `Greater(NaN, 0)` still evaluates to
+ * `False` — only the branch selection changes, which is why the NaN
+ * evidence is read where it still exists, on the relation's OPERANDS, and
+ * reported beside the value rather than in place of it.
+ *
+ * The walk reproduces the ordinary evaluation of the condition and adds
+ * nothing but the flag:
+ * - A relation evaluates its operands left to right and then itself over
+ *   the values; an error in an operand propagates through the relation as
+ *   it always did, and a collection-shaped operand gives the element-wise
+ *   list the relation always gave (a NaN CELL then takes the else cell on
+ *   both lanes, measured 2026-09-03 — `evaluateElementwiseSelection` owns
+ *   that contract). Only a scalar `True`/`False` over a NaN operand is
+ *   flagged.
+ * - `And`/`Or` keep their short-circuit contract (`evaluateShortCircuit`,
+ *   `library/logic.ts`): operands are evaluated left to right and the walk
+ *   stops at the first decider (`False` for `And`, `True` for `Or`) or the
+ *   first error, so an operand a decided one guards is never evaluated. A
+ *   decider that itself rests on NaN does not stop the walk: it decides
+ *   nothing. The survivors are then combined three-valued, as the compiled
+ *   lowering does: a decided `False` decides an `And` whatever its siblings
+ *   are, a decided `True` decides an `Or`; all-decided survivors fold with a
+ *   flag if any of them rested on NaN; a survivor that is still symbolic (a
+ *   relation with a free variable) keeps the whole connective inert, spelled
+ *   with the ORIGINAL sub-conditions so that a later binding can still
+ *   decide it and the NaN evidence is not folded away; a collection-shaped
+ *   survivor hands the connective to its ordinary element-wise evaluation.
+ *   `Nand`, `Nor` and `Implies` are the same walk through their `And`/`Or`
+ *   spelling, `Not` flips its operand and keeps the flag.
+ * - Anything else evaluates as before, unflagged. `Xor` and the remaining
+ *   heads are not three-valued here: a NaN evidence under them is lost as
+ *   it was before the ruling.
+ */
+function evaluateCondition(cond: Expression): EvaluatedCondition {
+  const c = cond.canonical;
+  const ce = c.engine;
+  if (!isFunction(c)) return { value: c.evaluate(), undecided: false };
+  const op = c.operator;
+
+  if (BRANCH_RELATIONS.has(op)) {
+    const ops: Expression[] = [];
+    for (const x of c.ops) {
+      const v = x.evaluate();
+      ops.push(v);
+      // An error operand decides the relation (it propagates); the
+      // remaining operands are not demanded.
+      if (errorValue(v) !== undefined) break;
+    }
+    const value = ce.function(op, ops).evaluate();
+    const s = sym(value);
+    const decided = s === 'True' || s === 'False';
+    return {
+      value,
+      undecided: decided && ops.some((x) => x.isNaN === true),
+    };
+  }
+
+  if (op === 'And' || op === 'Or') return evaluateConnective(c, op, c.ops);
+  if (op === 'Nand' && c.nops >= 1)
+    return negateCondition(evaluateConnective(c, 'And', c.ops));
+  if (op === 'Nor' && c.nops >= 1)
+    return negateCondition(evaluateConnective(c, 'Or', c.ops));
+  if (op === 'Implies' && c.nops === 2)
+    return evaluateConnective(c, 'Or', [ce.function('Not', [c.op1]), c.op2]);
+  if (op === 'Not' && c.nops === 1)
+    return negateCondition(evaluateCondition(c.op1));
+
+  return { value: c.evaluate(), undecided: false };
+}
+
+/** `Not` of an evaluated condition: the flag survives a decided value. */
+function negateCondition(inner: EvaluatedCondition): EvaluatedCondition {
+  const ce = inner.value.engine;
+  if (errorValue(inner.value) !== undefined) return inner;
+  const value = ce.function('Not', [inner.value]).evaluate();
+  const s = sym(value);
+  return {
+    value,
+    undecided: inner.undecided && (s === 'True' || s === 'False'),
+  };
+}
+
+/**
+ * The three-valued, short-circuiting walk of an `And`/`Or` branch condition
+ * — see `evaluateCondition`. `node` is the connective as written (its
+ * original operands are kept for the inert spelling); `ops` are the
+ * operands to walk, which differ from `node.ops` only for the `Implies`
+ * spelling.
+ */
+function evaluateConnective(
+  node: Expression,
+  op: 'And' | 'Or',
+  ops: ReadonlyArray<Expression>
+): EvaluatedCondition {
+  const ce = node.engine;
+  const decider = op === 'And' ? 'False' : 'True';
+  const survivors: { original: Expression; result: EvaluatedCondition }[] = [];
+  for (const x of ops) {
+    const r = evaluateCondition(x);
+    if (errorValue(r.value) !== undefined) return r;
+    if (sym(r.value) === decider && !r.undecided)
+      return { value: ce.symbol(decider), undecided: false };
+    survivors.push({ original: x, result: r });
+  }
+  // A collection-shaped survivor: the element-wise contract of the
+  // connective, over the evaluated values, unflagged.
+  if (survivors.some((s) => isCollectionShaped(s.result.value)))
+    return {
+      value: ce
+        .function(
+          op,
+          survivors.map((s) => s.result.value)
+        )
+        .evaluate(),
+      undecided: false,
+    };
+  // A symbolic survivor keeps the connective inert, spelled with the
+  // original sub-conditions (a NaN-decided survivor folded to its IEEE
+  // value would decide the connective the wrong way).
+  const symbolic = survivors.some((s) => {
+    const v = sym(s.result.value);
+    return v !== 'True' && v !== 'False';
+  });
+  if (symbolic)
+    return {
+      value: ce.function(
+        op,
+        survivors.map((s) =>
+          s.result.undecided ? s.original.canonical : s.result.value
+        )
+      ),
+      undecided: false,
+    };
+  // Every survivor is the non-deciding value (`True` for `And`, `False`
+  // for `Or`), or a NaN-decided value: the connective folds to the
+  // non-deciding value, flagged if any survivor rested on NaN.
+  return {
+    value: ce.symbol(op === 'And' ? 'True' : 'False'),
+    undecided: survivors.some((s) => s.result.undecided),
+  };
+}
+
+/**
  * The canonical form of an `If`/`Which` condition: the condition itself, or
  * an `incompatible-type` error operand when its static type PROVES it is
  * not a boolean.
@@ -1258,7 +1441,7 @@ function evaluateWhich(
 ): Expression | undefined {
   let i = 0;
   while (i < args.length - 1) {
-    const evaluated = args[i].canonical.evaluate();
+    const { value: evaluated, undecided } = evaluateCondition(args[i]);
     // A guard `Which` reaches is DEMANDED, so an error in it propagates —
     // the same obligation `If` discharges for its condition (see the comment
     // there): a lazy operator owns propagation for what it demands, and an
@@ -1266,6 +1449,12 @@ function evaluateWhich(
     // exception rather than as a value.
     const condError = errorValue(evaluated);
     if (condError !== undefined) return condError;
+    // A guard decided by a NaN operand (`evaluateCondition`) selects no
+    // clause, and falling through to a later clause would decide what the
+    // NaN left undecided: the whole `Which` answers `Missing`, its
+    // no-selection value (see the `If` handler for the reasoning and the
+    // compiled lanes' `NaN` spelling of it).
+    if (undecided) return options.engine.Missing;
     const cond = sym(evaluated);
     if (cond === 'True') {
       // A selected clause with no arm has no value to answer: `Missing`, the

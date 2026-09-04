@@ -31,6 +31,23 @@
 
 ### Resolved Issues
 
+- **A NaN operand of a branch condition selects no arm in the
+  interpreter.** `If(NaN > 0, 1, -1).evaluate()` answered `-1` (the
+  comparison follows IEEE 754, so `NaN > 0` is `False` and the else arm
+  was taken) while the compiled JavaScript and Python answered `NaN`. A
+  comparison with NaN carries no evidence for either arm, so the
+  interpreter now selects none: the `If` or `Which` evaluates to
+  `Missing`, its no-selection value, of which the compiled `NaN` is the
+  numeric spelling. The comparison itself keeps its IEEE value
+  (`Greater(NaN, 0)` is still `False`); `And`/`Or`/`Not` (and `Nand`,
+  `Nor`, `Implies`) combine three-valued with their short circuit kept, so
+  `If(NaN > 0 ∧ False, 1, -1)` is still `-1` and a guarded operand is never
+  evaluated; a condition with a free variable beside the NaN stays inert; a
+  reached
+  `Which` guard with a NaN operand ends the selection instead of falling
+  through; a statement-form `If` in a block runs neither branch. An
+  element-wise condition is unchanged: a NaN cell takes the else cell on
+  both lanes.
 - **Exact number literals are ordered exactly.** `Less(10^400, 10^500)`
   and `Greater(10^500, 10^400)` were both `False`, and `a.isLess(b)`
   disagreed with `b.isGreater(a)`: the exact numeric lane compared the
