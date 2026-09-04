@@ -779,18 +779,18 @@ export interface IComputeEngine {
    * by a `withTimeLimit` span.
    * @internal
    */
-  readonly _deadline?: number;
+  readonly _deadline?: number | undefined;
 
   /** The full deadline frame (effective deadline plus attribution).
    * @internal
    */
-  _deadlineFrame?: DeadlineFrame;
+  _deadlineFrame?: DeadlineFrame | undefined;
 
   /** The innermost active `WithRandomSeed` frame (see
    * `withRandomSeedFrame`), or `undefined` when random draws are live.
    * @internal
    */
-  _randomFrame?: RandomSeedFrame;
+  _randomFrame?: RandomSeedFrame | undefined;
 
   /** Time remaining before _deadline
    * @internal
