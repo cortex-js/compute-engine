@@ -1820,13 +1820,23 @@ descriptor (handlers decline instead of claiming); a symbol's held tuple
 behind a scalar declaration is invisible to `Abs`; the ring-constant arms
 of `Subscript`/`At` match by name and set shape rather than binding
 identity; a point accessor over a symbol whose declared element type is
-wider than its held content answers `unknown`. Two rows for a later
-ruling: `Pipe`'s static type is now tighter than the evaluated lazy `Map`
-node's declared type (`list<boolean^3>` against
-`list<broadcastable<boolean>^3>` in `functions.test.ts`, because the lazy
-node's canonicalized stage infers a wider parameter); and a `Map` whose
-element type cannot be derived still echoes a non-collection source
-unwrapped, as the old probe did. History of the migration follows.
+wider than its held content answers `unknown`. Two rows were put to a
+ruling the same day. (1) `Pipe`'s static type was tighter than the
+evaluated lazy `Map` node's type (`list<boolean^3>` against
+`list<broadcastable<boolean>^3>`): RULED (b), one source of truth — the
+pipe now builds its implicit `Map` from the RAW stage and canonicalizes it
+as a whole, so the `Map` stamps the parameter with the element type and
+both types agree (`pipeImplicitMap`, `library/core.ts`; pinned in
+`functions.test.ts`). Still OPEN on the parse route: a LaTeX shorthand
+stage (`[1,2,3] |> \_^2`) reaches the handler as a bare application
+mentioning `_`, not as a function literal, so the static type is `unknown`
+while evaluation maps to `vector<integer^3>`; the static handler could read
+such a stage as the shorthand literal the evaluate route treats it as. (2) A `Map` whose element type cannot be derived
+echoes a non-collection source unwrapped: RULED keep (a). The only program
+that reaches it is a `Map` over a scalar, which evaluation refuses, and the
+pipe's and the explicit `Map`'s evaluated nodes already disagree on its
+type, so no derivation has a target to match. History of the migration
+follows.
 
 Step 3 (mass conversion) was IN PROGRESS — batch 1 landed 2026-08-24: 39
 handlers across `number-theory` (whole file), `distributions`, the

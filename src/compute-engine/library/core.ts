@@ -467,11 +467,31 @@ function pipeStageWithImplicitTopic(
 function pipeImplicitMap(
   ce: ComputeEngine,
   topic: Expression,
-  f: Expression,
-  rawStage: Expression
+  rawStage: Expression,
+  stageForMap: Expression
 ): Expression | undefined {
-  if (!isFunction(f, 'Function')) return undefined;
-  if (f.nops !== 2) return undefined; // body + exactly one parameter
+  // The decision reads the RAW stage: a written literal with one parameter,
+  // or the shorthand spelling — a literal with no parameter list whose body
+  // mentions exactly one placeholder, `_` or `_1` (the first argument, the
+  // only one a pipe supplies). Nothing is canonicalized to decide.
+  if (!isFunction(stageForMap, 'Function')) return undefined;
+  let stage: Expression = stageForMap;
+  if (stageForMap.nops === 1) {
+    const usesUnderscore = stageForMap.has('_');
+    const usesFirst = stageForMap.has('_1');
+    if (usesUnderscore === usesFirst || stageForMap.has('_2')) return undefined;
+    // Give the shorthand literal its parameter explicitly, so the `Map`
+    // below can stamp it: the contextual typing of a callback slot stamps a
+    // WRITTEN parameter and leaves a parameterless literal to infer its own.
+    stage = ce._fn(
+      'Function',
+      [
+        stageForMap.op1,
+        ce.symbol(usesUnderscore ? '_' : '_1', { canonical: false }),
+      ],
+      { canonical: false }
+    );
+  } else if (stageForMap.nops !== 2) return undefined; // body + one parameter
   if (isString(topic) || topic.type.matches('string')) return undefined;
   if (!(topic.isCollection || topic.type.matches('collection<any>')))
     return undefined;
@@ -483,7 +503,21 @@ function pipeImplicitMap(
     const ts = isString(t) ? t.string : undefined;
     if (ts !== undefined && topic.type.matches(ts)) return undefined;
   }
-  return ce._fn('Map', [f, topic]);
+  // The `Map` is built from the raw stage and canonicalized as a whole.
+  // Canonicalizing the literal inside the `Map` lets the `Map` stamp the
+  // stage's parameter with the topic's ELEMENT type, exactly as an
+  // explicitly written `Map(p ↦ …, xs)` does; canonicalized alone, the
+  // literal infers its parameter from the body's operators (`p[1]` reads
+  // `p` as "dictionary or indexed collection"), and the lazy `Map` the pipe
+  // evaluates to would then carry a wider cell type than the pipe's own
+  // static type — `list<broadcastable<boolean>^3>` against
+  // `list<boolean^3>` for `xs |> p ↦ p[1] ∧ p[2]`. The canonicalization
+  // runs in a fresh placeholder scope, built the same way as the one the
+  // direct-application branch uses for its stage, so a global named `_` or
+  // `_1` is shadowed for the whole literal here too.
+  return canonicalWithFreshPlaceholders(
+    ce._fn('Map', [stage, topic], { canonical: false })
+  );
 }
 
 /**
@@ -3327,9 +3361,21 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // rewritten stage is raw, exactly like the held operand, so the
         // shorthand machinery below binds the topic to the placeholder as
         // usual.
-        const f = canonicalWithFreshPlaceholders(
-          pipeStageWithImplicitTopic(ce, rawStage, x) ?? rawStage
-        );
+        const stageForMap =
+          pipeStageWithImplicitTopic(ce, rawStage, x) ?? rawStage;
+
+        // Implicit `Map`: a unary LITERAL lambda stage over a collection
+        // topic maps instead of applying — `xs |> x ↦ x^2` and `xs |> _^2`
+        // are `Map(x ↦ x^2, xs)` (see `pipeImplicitMap` for the escapes:
+        // named functions, string topics, whole-collection parameter
+        // annotations). Decided on the raw stage, before the stage is
+        // canonicalized for direct application below, so the stage is
+        // canonicalized exactly once, on whichever branch is taken.
+        const mapped = pipeImplicitMap(ce, x, rawStage, stageForMap);
+        if (mapped !== undefined)
+          return mapped.evaluate({ numericApproximation });
+
+        const f = canonicalWithFreshPlaceholders(stageForMap);
 
         // The right operand must be applicable. A statically-refutable rhs — a
         // literal number, string, or boolean — can never be a function, so
@@ -3343,15 +3389,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // stays inert (returns `undefined`).
         if (isRefutablePipeTarget(f))
           return ce.typeError('function', f.type, f.toString());
-
-        // Implicit `Map`: a unary LITERAL lambda stage over a collection
-        // topic maps instead of applying — `xs |> x ↦ x^2` and `xs |> _^2`
-        // are `Map(x ↦ x^2, xs)` (see `pipeImplicitMap` for the escapes:
-        // named functions, string topics, whole-collection parameter
-        // annotations).
-        const mapped = pipeImplicitMap(ce, x, f, rawStage);
-        if (mapped !== undefined)
-          return mapped.evaluate({ numericApproximation });
 
         // `Nothing` is ERASED from the call argument list, uniformly on every
         // application route (error-propagation design §4): `Nothing |> f` is

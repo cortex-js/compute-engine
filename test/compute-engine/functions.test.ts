@@ -604,16 +604,22 @@ describe('Pipe — stage sugar (box route)', () => {
         ])
         .type.toString()
     );
-    // Evaluating the pipe yields a LAZY `Map` node whose stage has been
-    // canonicalized, and canonicalization infers the parameter from `At`'s
-    // signature (`dictionary | indexed_collection`), which makes the `And`
-    // over it broadcast. That node therefore reports the wider
-    // `broadcastable<boolean>` cell. The static answer binds the parameter to
-    // the topic's ELEMENT type instead, so it is the tighter of the two —
-    // sound, since a value of the static type is a value of the evaluated
-    // one.
-    expect(table.evaluate().type.matches(table.type)).toBe(false);
-    expect(table.type.matches(table.evaluate().type)).toBe(true);
+    // Evaluating the pipe yields a LAZY `Map` node. The `Map` is built from
+    // the raw stage and canonicalized as a whole, so its parameter is
+    // stamped with the topic's element type exactly as the static answer
+    // binds it, and the two types agree (ruled 2026-09-03: one source of
+    // truth for the parameter type).
+    expect(table.evaluate().type.toString()).toBe(table.type.toString());
+    // The shorthand spellings agree the same way: the shorthand literal is
+    // given its `_` parameter explicitly before the `Map` is built.
+    for (const stage of [
+      ['Function', ['And', ['At', '_', 1], ['At', '_', 2]]],
+      ['Function', ['And', ['At', '_1', 1], ['At', '_1', 2]]],
+    ]) {
+      const shorthand = ce.box(['Pipe', table.op1, stage] as any);
+      expect(shorthand.type.toString()).toBe('list<boolean^3>');
+      expect(shorthand.evaluate().type.toString()).toBe('list<boolean^3>');
+    }
 
     // A chain types through: the inner pipe is the outer one's collection
     // topic, so the outer gate needs the inner pipe's own mapped type.

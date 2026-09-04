@@ -82,6 +82,12 @@
 
 ### Resolved Issues
 
+- The lazy `Map` a pipe evaluates to now carries the same element-typed
+  stage parameter as the pipe's static type. `xs |> p ↦ p[1] ∧ p[2]` over a
+  list of boolean pairs types `list<boolean^3>` before and after
+  evaluation; the evaluated node used to report
+  `list<broadcastable<boolean>^3>`, because the stage was canonicalized on
+  its own and inferred its parameter from the body's operators.
 - Fixed an operand that fails only when evaluated being embedded in the
   enclosing expression instead of becoming its value. `Sin(Length(5))`
   evaluated to `sin(Error(…))`, and `1 + Length(5)` to `1 + Error(…)`,
