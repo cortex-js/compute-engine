@@ -28,18 +28,28 @@ Items are demand-gated unless another roadmap gives them higher priority.
   recipe. Prefer documenting `Map`/`Fold` for value construction; an engine
   optimization may flatten materialized operands only after preserving lazy
   `Join`, tuple atomicity, effects, and size limits.
-- **Compilation tails.** Epsil programs using `Comprehension`,
-  stepped/descending `Range`, or multi-`Element` `Loop` still depend on target
-  support. The Python target must continue to fail closed until it implements
-  equivalent lowering. A `match` on the JavaScript target compiles natively
-  in statement position (a `while let`, or a `match` arm that `break`s a
+- **Compilation tails.** Epsil has no comprehension syntax (`Map`/`Filter`
+  and the pipe are the idiom), and the engine's `Comprehension`, stepped or
+  descending `Range`, multi-`Element` `Loop`, and destructuring `for (p, q)
+  in pairs` loop binder all compile on the JavaScript target; the Python
+  target lowers the same forms to nested `for` statements, a native `range`
+  for integer literal bounds, a tuple pattern, and a list comprehension. A
+  destructuring binder compiles only when the source's static element type
+  proves tuples of the pattern's arity (the interpreter refuses any other
+  element with an error value, which compiled code cannot reproduce): a
+  `Zip`, a literal list of tuples, or a `list<tuple<…>>` annotation
+  qualifies; a bare `list` declines. Still failing closed: a `match` on the
+  Python target, a symbolic descending `Range` in a Python `for` header (it
+  reads ascending), and a `Comprehension` whose body is several statements
+  on Python. A `match` on the JavaScript target compiles natively in
+  statement position (a `while let`, or a `match` arm that `break`s a
   `for`) and in value position, and a typed binding compiles when its type
   has a faithful test on the JS value model (machine types, value types,
   numeric ranges, unions of those, and the variants and sums of a tagged,
-  non-generic sum). `v: !error` still
-  fails closed there: compiled code has no error value to test for — a
-  compiled `match` with no matching case yields `NaN` — so it needs an error
-  representation in the compiled lane first.
+  non-generic sum). `v: !error` still fails closed there: compiled code has
+  no error value to test for — a compiled `match` with no matching case
+  yields `NaN` — so it needs an error representation in the compiled lane
+  first.
 
 ## Tooling and documentation
 

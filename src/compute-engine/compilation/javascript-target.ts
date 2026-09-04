@@ -3,6 +3,7 @@ import type {
   FunctionInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
+import { typeToString } from '../../common/type/serialize.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { entryIsPure, entrySource } from './function-purity.js';
@@ -148,6 +149,7 @@ import { checkDeadline } from '../../common/interruptible.js';
 
 import {
   BaseCompiler,
+  compilationType,
   couldBeCollectionParticipant,
   isFlatAllStringComparisonParticipant,
   isNumericTupleParticipant,
@@ -3948,6 +3950,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // target) — not 0..n-1. Canonicalization normally rewrites the
     // 1-argument form to `Range(1, n)`, so this branch is a rarely-reached
     // fallback for non-canonical input.
+    // A bound that is provably not a number — a collection, a string, a
+    // boolean — has no range: the interpreter leaves `Range(Range(1, 10),
+    // 2)` (the chained `1..10..2` spelling) inert, while the arithmetic
+    // below would coerce the array to NaN and emit an EMPTY range behind
+    // `success: true`. Fail closed instead, on every operand count. A bound
+    // of unknown type stays a run-time matter, as before.
+    for (const a of args) {
+      const t = compilationType(a);
+      if (!couldMatch(t, 'number'))
+        throw new Error(
+          `Range: the bound \`${a.toString()}\` is a \`${typeToString(t)}\`, not a number, so the range never materializes. Fail closed (D6).`
+        );
+    }
     if (args.length === 1)
       return `Array.from({length: ${compile(args[0])}}, (_e, i) => i + 1)`;
 

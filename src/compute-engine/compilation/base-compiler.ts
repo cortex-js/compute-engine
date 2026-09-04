@@ -516,6 +516,29 @@ function collectUsedNames(
  * Exported for the compile targets, which ask the same layout questions
  * (`gpuType` in gpu-target.ts).
  */
+/**
+ * One validated `Element` clause of a loop (`BaseCompiler.elementClauseBinders`):
+ * the clause itself, the names its binder introduces (a `_` position binds
+ * nothing), the binder spelled for each target, and each bound leaf with the
+ * static type of the source component it receives (`undefined` when the
+ * source's element type is unknown).
+ */
+export interface ElementBinder {
+  clause: Expression & {
+    ops: ReadonlyArray<Expression>;
+    op1: Expression;
+    op2: Expression;
+  };
+  names: string[];
+  /** `x`, or an array pattern such as `[a, , [b, c]]`. */
+  jsPattern: string;
+  /** `x`, or a tuple pattern such as `(a, _, (b, c))`. */
+  pyPattern: string;
+  leaves: Array<
+    [leaf: Expression & { symbol: string }, type: Type | undefined]
+  >;
+}
+
 export function compilationType(expr: Expression): Type {
   return resolveTypeForCompilation(expr.type.type);
 }
@@ -9520,6 +9543,7 @@ export class BaseCompiler {
         `${lang.toUpperCase()}: a multi-Element or non-Range Loop is not supported.`
       );
 
+    BaseCompiler.assertBreakLeavesWholeLoop(elements, body);
     const inner = BaseCompiler.compileElementLoops(
       elements,
       target,
@@ -9575,9 +9599,8 @@ export class BaseCompiler {
     // never ran must not have its subexpressions evaluated (an error they
     // raise would be new). The flag test costs one boolean read per body
     // evaluation.
-    const binderNames = elements.flatMap((e) =>
-      isFunction(e, 'Element') && isSymbol(e.ops[0]) ? [e.ops[0].symbol] : []
-    );
+    const binders = BaseCompiler.elementClauseBinders(elements, target);
+    const binderNames = binders.flatMap((b) => b.names);
     let flag: string | undefined;
     const { bindings, result: inner } = BaseCompiler.hoistLoopInvariants(
       body,
@@ -9596,7 +9619,8 @@ export class BaseCompiler {
           target,
           (bodyTarget) =>
             `result.push(${BaseCompiler.compileOp(node, 0, bodyTarget, 0, body)});`,
-          prelude
+          prelude,
+          binders
         );
       }
     );
@@ -9605,6 +9629,206 @@ export class BaseCompiler {
         ? ''
         : `let ${flag} = false; let ${bindings.map(([name]) => name).join(', ')}; `;
     return `(() => { const result = []; ${declarations}${inner} return result; })()`;
+  }
+
+  /**
+   * The validated binders of a loop's `Element` clauses — what a `for`
+   * header binds on each turn, in a form every target can spell. Shared by
+   * the JavaScript lowerings (`compileElementLoops`) and the Python ones
+   * (`compilePythonLoop`, `compilePythonComprehension`), so the two targets
+   * accept the same clauses and refuse the same ones.
+   *
+   * A binder is a bare name, or a DESTRUCTURING tuple pattern (`for (p, q) in
+   * pairs`): a `Tuple` of names, `_` positions, and nested patterns. The
+   * interpreter binds such a pattern only to a TUPLE of the pattern's arity
+   * and answers a shape-mismatch error value for anything else — a list of
+   * the right length included. Compiled code cannot make that distinction
+   * (a tuple and a list are both arrays), so a pattern compiles only when
+   * the source's STATIC element type is a tuple of the matching arity, at
+   * every nesting: then no mismatch can happen at run time and the emitted
+   * destructuring is faithful. Anything else declines.
+   *
+   * Two binder shapes the emitted loops cannot carry decline as well (Tycho
+   * item 245); both compiled and then THREW at run time, where a refusal at
+   * compile time is the honest answer (D6):
+   *
+   * - A binder that occurs in its own source, or in the source of an OUTER
+   *   clause: `[P.x + 1 for P in P]` emitted `for (const P of P)`, a
+   *   temporal-dead-zone read of the loop variable it declares. The
+   *   interpreter leaves the form inert. An outer source is emitted before
+   *   this clause's binding exists, so a mention there is the same read.
+   *   Only a FREE occurrence counts: a source whose own lambda reuses the
+   *   name (`Filter(A, x ↦ x > 0)` under a binder `x`) binds it afresh and
+   *   never reads the loop variable.
+   * - A binder whose static type contradicts the source's element type. The
+   *   body was typed under the binder's type, so its lowering assumes that
+   *   shape; the loop hands it the source's elements instead. Measured:
+   *   `[q.x + 1 for q in C]` over a point `C: tuple<number, number>` typed
+   *   the binder `matrix` (the body's `PointX(q)` use retyped it), lowered
+   *   `PointX(q)` as a list-of-points read, and threw `q.map is not a
+   *   function` at run time on the number the loop bound. A binder type
+   *   NARROWER than the element type is the ordinary inference of a use and
+   *   is kept when it keeps the element's VALUE SHAPE: a binder inferred
+   *   `integer` over `number` elements lowers the same JavaScript. A
+   *   non-real binder over real elements does not — `complex <: number`, but
+   *   the body then reads `.re`/`.im` off the plain numbers the loop binds —
+   *   so that narrowing declines with the disjoint case.
+   */
+  static elementClauseBinders(
+    elements: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): ElementBinder[] {
+    const binders: ElementBinder[] = [];
+    for (let i = 0; i < elements.length; i++) {
+      const elem = elements[i];
+      if (!isFunction(elem, 'Element'))
+        throw new Error(
+          `Loop: argument ${i + 1} must be an Element clause, got ${(elem as Expression & { operator?: string }).operator ?? '?'}`
+        );
+      const clause = elem as ElementBinder['clause'];
+      const pattern = clause.ops[0];
+      const source = clause.ops[1];
+      const eltType = collectionElementType(compilationType(source));
+      let binder: ElementBinder;
+      if (isSymbol(pattern)) {
+        binder = {
+          clause,
+          names: [pattern.symbol],
+          jsPattern: pattern.symbol,
+          pyPattern: pattern.symbol,
+          leaves: [[pattern, eltType]],
+        };
+      } else if (isFunction(pattern, 'Tuple')) {
+        const spelled = BaseCompiler.spellTuplePattern(
+          pattern,
+          eltType,
+          i,
+          target
+        );
+        // A name bound twice in one pattern (`(a, a)`) is a JavaScript
+        // syntax error in a `const` destructuring; the interpreter binds the
+        // leaves in order and the last one wins. Decline rather than emit a
+        // header that does not parse.
+        if (new Set(spelled.names).size !== spelled.names.length)
+          throw new Error(
+            `Loop: the destructuring binder \`${pattern.toString()}\` binds a ` +
+              `name more than once. Fail closed (D6) — the interpreter ` +
+              `evaluates it.`
+          );
+        binder = { clause, ...spelled };
+      } else
+        throw new Error(
+          `Loop: Element index (argument ${i + 1}) must be a symbol or a tuple pattern`
+        );
+
+      for (const [leaf, componentType] of binder.leaves) {
+        const name = leaf.symbol;
+        for (let j = 0; j <= i; j++)
+          if (
+            BaseCompiler.symbolOccursFree(
+              binders[j]?.clause.ops[1] ?? source,
+              name
+            )
+          )
+            throw new Error(
+              `Loop: the binder \`${name}\` occurs in the collection it (or an ` +
+                `enclosing clause) iterates, which the emitted loop would read ` +
+                `before binding it. Fail closed (D6) — the interpreter ` +
+                `evaluates it.`
+            );
+        const binderType = compilationType(leaf);
+        if (
+          componentType !== undefined &&
+          !isSubtype(componentType, binderType) &&
+          (!isSubtype(binderType, componentType) ||
+            (isNonRealNumber(binderType) && !isNonRealNumber(componentType)))
+        )
+          throw new Error(
+            `Loop: the binder \`${name}\` is typed \`${typeToString(binderType)}\` ` +
+              `but iterates elements of type \`${typeToString(componentType)}\`; the ` +
+              `body's lowering assumes a shape the loop never binds. ` +
+              `Fail closed (D6) — the interpreter evaluates it.`
+          );
+      }
+      binders.push(binder);
+    }
+    return binders;
+  }
+
+  /**
+   * The spellings and leaves of a destructuring tuple pattern whose source
+   * elements have the static type `eltType`, or a fail-closed throw when the
+   * type does not prove a tuple of the pattern's arity at every nesting (see
+   * `elementClauseBinders`). A `_` position binds nothing: it spells as an
+   * array hole in JavaScript, and as a generated temporary in Python, where
+   * a literal `_` would be an ordinary assignment target and overwrite an
+   * enclosing variable of that name on every turn. A one-position Python
+   * pattern needs its trailing comma (`(x,)`): `(x)` is the bare name and
+   * would bind the whole one-tuple.
+   */
+  private static spellTuplePattern(
+    pattern: Expression & { ops: ReadonlyArray<Expression> },
+    eltType: Type | undefined,
+    clauseIndex: number,
+    target: CompileTarget<Expression>
+  ): Omit<ElementBinder, 'clause'> {
+    const decline = (why: string): never => {
+      throw new Error(
+        `Loop: the destructuring binder \`${pattern.toString()}\` of Element ` +
+          `clause ${clauseIndex + 1} ${why}. A tuple pattern compiles only ` +
+          `when the source's elements are provably tuples of the pattern's ` +
+          `arity: the interpreter refuses any other element with an error ` +
+          `value, which compiled code cannot reproduce. Fail closed (D6) — ` +
+          `the interpreter evaluates it.`
+      );
+    };
+    const t = eltType === undefined ? undefined : resolveTypeAlias(eltType);
+    if (typeof t !== 'object' || t.kind !== 'tuple')
+      return decline(
+        `iterates elements of type \`${eltType === undefined ? 'unknown' : typeToString(eltType)}\`, not a tuple`
+      );
+    if (t.elements.length !== pattern.ops.length)
+      return decline(
+        `has ${pattern.ops.length} positions but the elements are tuples of ${t.elements.length}`
+      );
+    const names: string[] = [];
+    const leaves: ElementBinder['leaves'] = [];
+    const js: string[] = [];
+    const py: string[] = [];
+    for (let i = 0; i < pattern.ops.length; i++) {
+      const p = pattern.ops[i];
+      const componentType = t.elements[i].type;
+      if (isFunction(p, 'Tuple')) {
+        const nested = BaseCompiler.spellTuplePattern(
+          p,
+          componentType,
+          clauseIndex,
+          target
+        );
+        names.push(...nested.names);
+        leaves.push(...nested.leaves);
+        js.push(nested.jsPattern);
+        py.push(nested.pyPattern);
+        continue;
+      }
+      if (!isSymbol(p))
+        return decline(`has a position that is neither a name nor a pattern`);
+      if (p.symbol === '_') {
+        js.push('');
+        py.push(BaseCompiler.tempVar(target));
+        continue;
+      }
+      names.push(p.symbol);
+      leaves.push([p, componentType]);
+      js.push(p.symbol);
+      py.push(p.symbol);
+    }
+    return {
+      names,
+      leaves,
+      jsPattern: `[${js.join(', ')}]`,
+      pyPattern: py.length === 1 ? `(${py[0]},)` : `(${py.join(', ')})`,
+    };
   }
 
   /**
@@ -9620,94 +9844,32 @@ export class BaseCompiler {
     elements: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
     makeInner: (bodyTarget: CompileTarget<Expression>) => string,
-    prelude = ''
+    prelude = '',
+    /** The clauses' binders when the caller has validated them already
+     * (`compileComprehension` needs their names before it emits). */
+    validated?: ReadonlyArray<ElementBinder>
   ): string {
-    // Validate all Element clauses and narrow their types.
-    type NarrowedElement = Expression & {
-      ops: ReadonlyArray<Expression>;
-      op1: Expression;
-      op2: Expression;
-    };
-    const narrowedElements: NarrowedElement[] = [];
-    for (let i = 0; i < elements.length; i++) {
-      const elem = elements[i];
-      if (!isFunction(elem, 'Element'))
-        throw new Error(
-          `Loop: argument ${i + 1} must be an Element clause, got ${(elem as Expression & { operator?: string }).operator ?? '?'}`
-        );
-      if (!isSymbol(elem.ops[0]))
-        throw new Error(
-          `Loop: Element index (argument ${i + 1}) must be a symbol`
-        );
-      narrowedElements.push(elem as unknown as NarrowedElement);
-    }
-
-    // Two binder shapes the emitted `for (const x of …)` loops cannot carry
-    // (Tycho item 245); both compiled and then THREW at run time, where a
-    // refusal at compile time is the honest answer (D6).
-    for (let i = 0; i < narrowedElements.length; i++) {
-      const binder = narrowedElements[i].ops[0] as Expression & {
-        symbol: string;
-      };
-      const name = binder.symbol;
-      // A binder that occurs in its own source, or in the source of an OUTER
-      // clause: `[P.x + 1 for P in P]` emitted `for (const P of P)`, a
-      // temporal-dead-zone read of the loop variable it declares. The
-      // interpreter leaves the form inert. An outer source is emitted
-      // before this clause's binding exists, so a mention there is the same
-      // read. Only a FREE occurrence counts: a source whose own lambda reuses
-      // the name (`Filter(A, x ↦ x > 0)` under a binder `x`) binds it afresh
-      // and never reads the loop variable.
-      for (let j = 0; j <= i; j++)
-        if (BaseCompiler.symbolOccursFree(narrowedElements[j].ops[1], name))
-          throw new Error(
-            `Loop: the binder \`${name}\` occurs in the collection it (or an ` +
-              `enclosing clause) iterates, which the emitted loop would read ` +
-              `before binding it. Fail closed (D6) — the interpreter ` +
-              `evaluates it.`
-          );
-      // A binder whose static type contradicts the source's element type. The
-      // body was typed under the binder's type, so its lowering assumes that
-      // shape; the loop hands it the source's elements instead. Measured:
-      // `[q.x + 1 for q in C]` over a point `C: tuple<number, number>` typed
-      // the binder `matrix` (the body's `PointX(q)` use retyped it), lowered
-      // `PointX(q)` as a list-of-points read, and threw `q.map is not a
-      // function` at run time on the number the loop bound. A binder type
-      // NARROWER than the element type is the ordinary inference of a use and
-      // is kept when it keeps the element's VALUE SHAPE: a binder inferred
-      // `integer` over `number` elements lowers the same JavaScript. A
-      // non-real binder over real elements does not — `complex <: number`,
-      // but the body then reads `.re`/`.im` off the plain numbers the loop
-      // binds — so that narrowing declines with the disjoint case.
-      const eltType = collectionElementType(
-        compilationType(narrowedElements[i].ops[1])
-      );
-      const binderType = compilationType(binder);
-      if (
-        eltType !== undefined &&
-        !isSubtype(eltType, binderType) &&
-        (!isSubtype(binderType, eltType) ||
-          (isNonRealNumber(binderType) && !isNonRealNumber(eltType)))
-      )
-        throw new Error(
-          `Loop: the binder \`${name}\` is typed \`${typeToString(binderType)}\` ` +
-            `but iterates elements of type \`${typeToString(eltType)}\`; the ` +
-            `body's lowering assumes a shape the loop never binds. ` +
-            `Fail closed (D6) — the interpreter evaluates it.`
-        );
-    }
+    const binders =
+      validated ?? BaseCompiler.elementClauseBinders(elements, target);
+    const narrowedElements = binders.map((b) => b.clause);
 
     // For wrapping targets (e.g. interval-js where `target.number(0)` is
     // `_IA.point(0)`), each loop variable must be wrapped wherever it appears
     // in the body or in an inner collection expression. Without this, code
     // like `_IA.add(x, y)` is invoked with raw numbers and produces incorrect
     // intervals.
-    const loopVarSet = new Set(
-      narrowedElements.map(
-        (e) => (e.ops[0] as Expression & { symbol: string }).symbol
-      )
-    );
+    const loopVarSet = new Set(binders.flatMap((b) => b.names));
     const needsWrap = target.number(0) !== '0';
+    // The wrap rule below re-wraps each loop variable as a NUMBER; a
+    // destructured leaf is a component of a tuple value, whose wrapping on
+    // such a target this lowering does not know. Decline rather than
+    // guess.
+    if (needsWrap && binders.some((b) => b.jsPattern !== b.names[0]))
+      throw new Error(
+        `Loop: a destructuring binder is not supported on target ` +
+          `'${target.language ?? '?'}'. Fail closed (D6) — the interpreter ` +
+          `evaluates it.`
+      );
     // Always shadow the loop variables in the body's target: a loop variable
     // is bound to the bare emitted identifier (wrapped only for wrapping
     // targets like interval-js). Without this, a loop variable that collides
@@ -9731,7 +9893,9 @@ export class BaseCompiler {
     let inner = prelude + makeInner(bodyTarget);
     for (let i = narrowedElements.length - 1; i >= 0; i--) {
       const elem = narrowedElements[i];
-      const name = (elem.ops[0] as Expression & { symbol: string }).symbol;
+      // A destructuring binder spells as an array pattern (`[a, , [b, c]]`,
+      // a hole where the pattern skips a position).
+      const name = binders[i].jsPattern;
       const collExpr = elem.ops[1];
       let collection: string;
       if (isFunction(collExpr, 'Range'))
@@ -13307,6 +13471,28 @@ export class BaseCompiler {
    * interpreter's `Loop` propagates a `Return` unchanged), so the walk keeps
    * looking for a `Return` under a nested loop; a `Function` literal owns
    * all three. */
+  /**
+   * Refuse a `Loop` over SEVERAL `Element` clauses whose body can `break`:
+   * the interpreter runs the clauses as one loop and a `Break` stops the
+   * whole traversal, while the nested `for` statements every target emits
+   * would leave only the innermost one and go on with the outer turns. A
+   * `Continue` resumes the innermost turn on both, so it is fine; a `Break`
+   * inside a nested `Loop` or a function literal belongs to that construct
+   * (`escapingControl`).
+   */
+  static assertBreakLeavesWholeLoop(
+    elements: ReadonlyArray<Expression>,
+    body: Expression
+  ): void {
+    if (elements.length > 1 && BaseCompiler.escapingControl(body) === 'Break')
+      throw new Error(
+        'Loop: a `break` inside a loop over several Element clauses stops ' +
+          'the whole loop in the interpreter, but would leave only the ' +
+          'innermost emitted loop. Fail closed (D6) — the interpreter ' +
+          'evaluates it.'
+      );
+  }
+
   private static escapingControl(
     expr: Expression,
     inLoop = false

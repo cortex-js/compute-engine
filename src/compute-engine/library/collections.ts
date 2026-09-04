@@ -10305,6 +10305,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Combine multiple collections element-wise into a list of tuples. The result has the length of the shortest input.',
     complexity: 8200,
     signature: '(indexed_collection<any>+) -> list',
+    // Each element is a tuple of one element from every source, so the
+    // result is `list<tuple<e₁, …, eₙ>>` when every source's element type is
+    // known; a source with an unknown element type leaves the bare `list`
+    // of the signature. The precise type is what lets a destructuring
+    // `for (a, b) in Zip(xs, ys)` prove its elements are pairs.
+    type: (ops) => {
+      const elements = ops.map((x) => mappingSourceElementTypeD(x));
+      if (elements.length === 0 || elements.some((t) => t === undefined))
+        return 'list';
+      return {
+        kind: 'list',
+        elements: {
+          kind: 'tuple',
+          elements: elements.map((t) => ({ type: t as Type })),
+        },
+      };
+    },
     collection: {
       isEnumerable: enumerableFromAllSources,
       isLazy: (_expr) => true,

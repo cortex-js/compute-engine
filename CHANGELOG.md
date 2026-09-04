@@ -29,8 +29,39 @@
   the non-finite numeric types — still fails closed, and so does every other
   target.
 
+- **Destructuring loop binders compile.** `for (p, q) in pairs { … }` — and
+  the same tuple pattern as a `Comprehension` binder — now compiles on the
+  JavaScript target (`for (const [p, q] of …)`) and the Python target
+  (`for (p, q) in …:`), nested patterns and `_` positions included. The
+  interpreter binds such a pattern only to a tuple of the pattern's arity
+  and answers a shape-mismatch error value for anything else, a list of the
+  right length included; compiled code cannot tell a tuple from a list, so
+  the pattern compiles only when the source's static element type proves
+  tuples of the matching arity at every nesting — a `Zip`, a literal list of
+  tuples, a `list<tuple<…>>` annotation — and fails closed otherwise.
+- **The Python target lowers the remaining loop forms.** A `Loop` over
+  several `Element` clauses nests one `for` under another; a `Range` with
+  integer literal bounds and step is a native `range` in either direction
+  (`Range(10, 1, -3)` → `range(10, 0, -3)`); and a `Comprehension` is a list
+  comprehension (`[i * j for i in range(1, 4) for j in range(1, 3)]`). A
+  comprehension whose body is several statements fails closed.
+- **`Zip` types its elements.** `Zip(xs, ys)` now types
+  `list<tuple<X, Y>>` from its sources' element types (a source with an
+  unknown element type keeps the bare `list`), which is what lets a
+  destructuring loop over it compile.
+
 ### Resolved Issues
 
+- **The Python target emitted JavaScript for a `Comprehension`.** With no
+  Python lowering of its own, `Comprehension(body, Element(x, …))` went
+  through the shared emission and produced the JavaScript arrow-function
+  IIFE behind `success: true`. It now has the list-comprehension lowering
+  above.
+- **A `Range` bound that is not a number compiled to an empty range.** The
+  chained spelling `1..10..2` parses as `Range(Range(1, 10), 2)`, which the
+  interpreter leaves inert; the JavaScript lowering coerced the inner array
+  to `NaN` and emitted `[]` — `Sum(1..10..2)` compiled to `0`. A bound whose
+  static type is a collection or a string now fails closed.
 - **A compiled `Sum`, `Product` or `Comprehension` loop no longer re-runs a
   loop-invariant list reduction or list construction on every iteration.**
   On the `javascript` target, a body reading `Min(P)`, `Max(P)` or

@@ -681,15 +681,113 @@ function compilePythonStatements(
 }
 
 /**
+ * The Python iterable a loop's `Element` clause runs over, for the source
+ * `coll`, compiled in `target` (which already binds the outer clauses'
+ * names).
+ *
+ * A `Range` with INTEGER LITERAL bounds (and an integer literal step, when
+ * one is written) becomes a native `range`, with the engine's inclusive
+ * upper bound mapped to Python's exclusive one in the step's direction:
+ * `Range(1, 10)` → `range(1, 11)`, `Range(10, 1)` → `range(10, 0, -1)`,
+ * `Range(1, 10, 3)` → `range(1, 11, 3)`, `Range(10, 1, -3)` →
+ * `range(10, 0, -3)`. A two-bound `Range` whose bounds are not literals
+ * picks its direction at run time from the sign of `hi - lo`, as the
+ * interpreter does. Any other `Range` — a fractional bound, a symbolic step
+ * — and any other collection compile as a VALUE, and the loop iterates the
+ * materialized list, whose elements then carry the value lowering's float
+ * representation. A string, or a collection of characters, declines: its
+ * elements are grapheme clusters this target cannot produce.
+ */
+function pythonElementSource(
+  coll: Expression,
+  target: CompileTarget<Expression>
+): string {
+  if (isFunction(coll, 'Range') && coll.nops >= 2 && coll.nops <= 3) {
+    const [lo, hi, step] = coll.ops;
+    // Safe integers only: a larger magnitude stringifies in exponent form
+    // (`1e+21`), which Python reads as a float and `range` refuses.
+    const literalInteger = (x: Expression | undefined): number | undefined =>
+      x !== undefined && isNumber(x) && x.im === 0 && Number.isSafeInteger(x.re)
+        ? x.re
+        : undefined;
+    const l = literalInteger(lo);
+    const h = literalInteger(hi);
+    const st = step === undefined ? undefined : literalInteger(step);
+    if (
+      l !== undefined &&
+      h !== undefined &&
+      (step === undefined || st !== undefined)
+    ) {
+      const s = st ?? (h >= l ? 1 : -1);
+      if (s === 0) return '[]';
+      if (s === 1) return `range(${l}, ${h + 1})`;
+      return s > 0
+        ? `range(${l}, ${h + 1}, ${s})`
+        : `range(${l}, ${h - 1}, ${s})`;
+    }
+    if (step === undefined) {
+      // The direction is the run-time sign of `hi - lo`, as the interpreter
+      // reads it; the bounds are bound once so an impure bound is evaluated
+      // once.
+      const l = compilePythonBound(lo, target);
+      const h = compilePythonBound(hi, target);
+      return `(lambda _a, _b: range(_a, _b + 1) if _b >= _a else range(_a, _b - 1, -1))(${l}, ${h})`;
+    }
+  }
+  // A STRING iterates its grapheme clusters in the interpreter, and a
+  // collection of characters holds one cluster per element; Python's `for`
+  // walks code points and has no stdlib segmentation, so both decline — the
+  // rule `pyCollArg` applies to every other collection operand.
+  if (coll.type.matches('string'))
+    throw new Error(
+      'Loop: cannot iterate a string on this target — its elements are ' +
+        'UAX #29 grapheme clusters and Python has no stdlib grapheme ' +
+        'segmentation, so the emitted loop would walk code points instead. ' +
+        'Fail closed (D6) — the interpreter evaluates it.'
+    );
+  assertPyNoCharacterOperand('Loop', [coll]);
+  return BaseCompiler.compile(coll, target);
+}
+
+/**
+ * The nested `for` headers of a loop's `Element` clauses, outermost first,
+ * and the target that binds every clause's names for the body. Each clause's
+ * source compiles under the names of the clauses before it, so an inner
+ * source may mention an outer binder. The binders are the ones
+ * `BaseCompiler.elementClauseBinders` validated — a name, or a destructuring
+ * tuple pattern spelled `(a, _, (b, c))`.
+ */
+function pythonElementHeaders(
+  elements: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): { headers: string[]; bodyTarget: CompileTarget<Expression> } {
+  const binders = BaseCompiler.elementClauseBinders(elements, target);
+  const headers: string[] = [];
+  let scope = target;
+  for (const b of binders) {
+    const source = pythonElementSource(b.clause.ops[1], scope);
+    headers.push(`for ${b.pyPattern} in ${source}:`);
+    const prev = scope;
+    const bound = new Set(b.names);
+    scope = {
+      ...prev,
+      var: (id) => (bound.has(id) ? id : prev.var(id)),
+      boundVars: BaseCompiler.withBoundNames(prev, b.names),
+    };
+  }
+  return { headers, bodyTarget: scope };
+}
+
+/**
  * Compile a `Loop` — imperative control flow, for effect (evaluates to
  * `Nothing`). Emits a Python statement loop (not a JS IIFE):
  *
  * - `Loop(body)` → `while True:` with the body indented beneath it.
- * - `Loop(body, Element(i, Range(lo, hi)))` (single ascending step-1 Range) →
- *   `for i in range(<lo>, <hi> + 1):` with the body indented beneath it.
- *
- * Other shapes the generic loop compiler accepts (multiple Element clauses, a
- * non-`Range` collection, a stepped/descending Range) fail closed here.
+ * - `Loop(body, Element(i, coll), …)` → one `for` header per `Element`
+ *   clause, each nested one level under the previous, with the body
+ *   indented beneath the innermost (`pythonElementHeaders`; a `Range`
+ *   source with integer literal bounds is a native `range`, see
+ *   `pythonElementSource`).
  *
  * The body is compiled as *statements* — a `Block` body is joined by newlines
  * WITHOUT the block hook's trailing `return` (a loop body has no return value),
@@ -706,47 +804,74 @@ function compilePythonLoop(
   const body = args[0];
   const elements = args.slice(1);
 
-  let header: string;
+  let headers: string[];
   let bodyTarget = target;
-
-  if (elements.length === 0) {
-    header = 'while True:';
-  } else {
-    if (elements.length > 1)
-      throw new Error(
-        'Loop: multiple Element clauses are not supported by the Python target'
-      );
-    const indexing = elements[0];
-    if (!isFunction(indexing, 'Element'))
-      throw new Error('Loop: expected Element(index, Range(lo, hi))');
-    const indexExpr = indexing.ops[0];
-    const rangeExpr = indexing.ops[1];
-    if (!isSymbol(indexExpr)) throw new Error('Loop: index must be a symbol');
-    if (!isFunction(rangeExpr, 'Range') || rangeExpr.ops.length > 2)
-      throw new Error(
-        'Loop: only a single ascending step-1 Range(lo, hi) is supported by the Python target'
-      );
-    const index = indexExpr.symbol;
-    const lowerCode = compilePythonBound(rangeExpr.ops[0], target);
-    const upperCode = compilePythonUpperBound(rangeExpr.ops[1], target);
-    header = `for ${index} in range(${lowerCode}, ${upperCode}):`;
-    const prev = target;
-    bodyTarget = {
-      ...prev,
-      var: (id) => (id === index ? index : prev.var(id)),
-      boundVars: BaseCompiler.withBoundNames(prev, [index]),
-    };
+  if (elements.length === 0) headers = ['while True:'];
+  else {
+    BaseCompiler.assertBreakLeavesWholeLoop(elements, body);
+    ({ headers, bodyTarget } = pythonElementHeaders(elements, target));
   }
 
   // Compile the body as statements — statement-form control flow
   // (`If`/`Break`/`Continue`/`Return`), a flattened `Block`, and nested `Loop`s
   // all compose, for effect (no trailing `return`).
-  const indented = indentPythonStatements(
+  let code = indentPythonStatements(
     BaseCompiler.withCseScope(node, 0, bodyTarget, () =>
       compilePythonStatements(body, bodyTarget)
     )
   );
-  return `${header}\n${indented}`;
+  for (let i = headers.length - 1; i >= 0; i--)
+    code =
+      i === headers.length - 1
+        ? `${headers[i]}\n${code}`
+        : `${headers[i]}\n${indentPythonStatements(code)}`;
+  return code;
+}
+
+/**
+ * Compile a `Comprehension` — the value-producing loop — to a Python list
+ * comprehension: `Comprehension(body, Element(x, c1), Element(y, c2))` →
+ * `[<body> for x in <c1> for y in <c2>]`, the clauses in source order so an
+ * inner source may mention an outer binder, exactly as the interpreter
+ * nests them.
+ *
+ * The body must be a single EXPRESSION: a list comprehension has no
+ * statement slot, so a body that is a `Block` of several statements fails
+ * closed (a one-statement `Block` unwraps, as a lambda body does). Without
+ * this lowering the shared `Comprehension` emission produced the JavaScript
+ * IIFE and reported success — wrong code, not a decline.
+ */
+function compilePythonComprehension(
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  node?: Expression
+): string {
+  if (!args[0]) throw new Error('Comprehension: no body');
+  if (!args[1]) throw new Error('Comprehension: no indexing set');
+  let body = args[0];
+  if (isFunction(body, 'Block')) {
+    if (body.nops !== 1)
+      throw new Error(
+        'Comprehension: a multi-statement body has no Python list-comprehension form. Fail closed (D6).'
+      );
+    body = body.ops[0];
+  }
+  // The slot takes an EXPRESSION: an assignment, a declaration, `break`,
+  // `continue`, `return`, a loop, or a statement-form `If` has no place in
+  // it (`pythonArmIsStatement` is the classifier the statement lowerings
+  // share; a declaration is caught by the expression-body assertion).
+  if (pythonArmIsStatement(body))
+    throw new Error(
+      'Comprehension: the body is a statement, which has no place in a Python list comprehension. Fail closed (D6).'
+    );
+  pythonAssertExpressionBody('Comprehension', body);
+  const { headers, bodyTarget } = pythonElementHeaders(args.slice(1), target);
+  const bodyCode = BaseCompiler.withCseScope(node, 0, bodyTarget, () =>
+    BaseCompiler.compile(body, bodyTarget)
+  );
+  // A header reads `for x in src:`; the comprehension clause drops the colon.
+  const clauses = headers.map((h) => h.slice(0, -1)).join(' ');
+  return `[${bodyCode} ${clauses}]`;
 }
 
 /**
@@ -2551,6 +2676,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // compilePythonLoop for the supported shapes.
   Loop: (args, _compile, target) =>
     compilePythonLoop(args, target, BaseCompiler.cseParentNode()),
+  Comprehension: (args, _compile, target) =>
+    compilePythonComprehension(args, target, BaseCompiler.cseParentNode()),
 
   // Special functions
   Erf: 'scipy.special.erf',
