@@ -16,6 +16,12 @@
   now — the list supplies the cells and the point's norm is the other leg.
   `Abs` follows the same rule. Component-wise heads are unchanged:
   `Power((1, 2), [3, 4])` is still `[1, 16]`.
+- **Destructured Block locals compile.** `(xs, n) := ([1, 2, 3], 2)` inside a
+  block declares its leaves as block-locals with the type of the matching
+  position of the tuple, so a type-gated read later in the block — `Length(xs)`,
+  `At(xs, n)` — compiles instead of failing closed on an `unknown`-typed local.
+  Nested patterns and `_` positions follow the same rule, and a reassignment
+  of a different kind joins into the leaf's type as it does for a plain local.
 - **A literal list times a point typed as the point.** `[1, 2] · (3, 4)`
   evaluates to `[(3, 4), (6, 8)]` but typed `tuple<integer, integer>`; it now
   types `list<tuple<integer, integer>^2>`, and a matrix times a point — every

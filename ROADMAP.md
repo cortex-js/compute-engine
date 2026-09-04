@@ -140,18 +140,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   a by-design ruling is an acceptable answer for heads outside the
   scalar-interval-domain contract. Repro: tycho
   `scripts/repros/2026-08-30-ce-interval-lowering-batch-probe.mts`.
-- **Destructured Block locals stay `unknown`-typed on the compilation routes.**
-  The Tycho item 235 fix (2026-08-30) gives a `Block`-hoisted local its
-  statically-readable `Declare` type and joins `Assign` evidence into an
-  inferred, valueless binding — but only for a plain symbol target. A name bound
-  by a destructuring assignment (`(x, y) := v` — a `Tuple` first operand) is
-  excluded by the same `sym()`-based guard in both the `canonicalBlock` hoist
-  loop and the `Assign` canonical handler, so such a local still types `unknown`
-  and a compile reading it fails closed, as it did before the fix. Not silently
-  wrong — the interpreter fallback answers correctly — just uncompiled.
-  Extending the fix wants `tuplePatternNames()` (already used for
-  `Loop`/`Comprehension` index patterns) plus a per-leaf type derived from the
-  corresponding position of the RHS tuple type.
 
 ### Open items from the finite-by-default flip (Phase 1, 2026-08-27)
 

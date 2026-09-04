@@ -185,3 +185,83 @@ describe('Tycho item 235 — Block-local types on the JavaScript target', () => 
     expect(r.run()).toBe(3);
   });
 });
+
+describe('destructured Block locals take their types from the pattern position', () => {
+  // `(x, y) := v` binds one block-local per pattern leaf. The item-235 fix
+  // hoisted a plain-symbol target only, so a destructured local stayed
+  // `unknown` and a type-gated read of it (`Length`, `At`) failed closed on
+  // the compile routes. The hoist now declares every leaf, and the `Assign`
+  // canonical handler joins each leaf's type from the matching position of
+  // the RHS tuple type.
+  test('Length over a destructured list local compiles and runs', () => {
+    const e = ce().box([
+      'Block',
+      ['Assign', ['Tuple', 'xs', 'n'], ['Tuple', ['List', 1, 2, 3], 2]],
+      ['Length', 'xs'],
+    ]);
+    expect(e.evaluate().toString()).toBe('3');
+    const r = compile(e, { to: 'javascript' });
+    expect(r.success).toBe(true);
+    expect(r.run()).toBe(3);
+  });
+
+  test('At with a destructured index compiles', () => {
+    const e = ce().box([
+      'Block',
+      ['Assign', ['Tuple', 'xs', 'n'], ['Tuple', ['List', 1, 2, 3], 2]],
+      ['At', 'xs', 'n'],
+    ]);
+    const r = compile(e, { to: 'javascript' });
+    expect(r.success).toBe(true);
+    expect(r.run()).toBe(2);
+  });
+
+  test('a nested pattern and a `_` position', () => {
+    const nested = ce().box([
+      'Block',
+      [
+        'Assign',
+        ['Tuple', 'a', ['Tuple', 'b', 'c']],
+        ['Tuple', 1, ['Tuple', ['List', 5, 6], 3]],
+      ],
+      ['Add', 'a', ['Length', 'b'], 'c'],
+    ]);
+    expect(nested.evaluate().toString()).toBe('6');
+    const r1 = compile(nested, { to: 'javascript' });
+    expect(r1.success).toBe(true);
+    expect(r1.run()).toBe(6);
+    const skipped = ce().box([
+      'Block',
+      ['Assign', ['Tuple', '_', 'ys'], ['Tuple', 1, ['List', 7, 8]]],
+      ['Length', 'ys'],
+    ]);
+    const r2 = compile(skipped, { to: 'javascript' });
+    expect(r2.success).toBe(true);
+    expect(r2.run()).toBe(2);
+  });
+
+  test('a reassignment of a different kind joins, as for a plain local', () => {
+    const e = ce().box([
+      'Block',
+      ['Assign', ['Tuple', 'x', 'y'], ['Tuple', 1, 2]],
+      ['Assign', ['Tuple', 'x', 'y'], ['Tuple', ['List', 1], 2]],
+      ['Length', 'x'],
+    ]);
+    // `x` may hold a number at run time, so `Length` fails closed.
+    const r = compile(e, { to: 'javascript' });
+    expect(r.success).toBe(false);
+  });
+
+  test('the leaves are block-local: nothing escapes the block', () => {
+    const engine = ce();
+    engine
+      .box([
+        'Block',
+        ['Assign', ['Tuple', 'x', 'y'], ['Tuple', 1, 2]],
+        ['Add', 'x', 'y'],
+      ])
+      .evaluate();
+    expect(engine.symbol('x').value).toBeUndefined();
+    expect(engine.symbol('y').value).toBeUndefined();
+  });
+});
