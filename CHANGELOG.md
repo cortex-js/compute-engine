@@ -31,6 +31,27 @@
 
 ### Resolved Issues
 
+- **A compiled `Sum`, `Product` or `Comprehension` loop no longer re-runs a
+  loop-invariant list reduction or list construction on every iteration.**
+  On the `javascript` target, a body reading `Min(P)`, `Max(P)` or
+  `Length(P)` over a list `P` that does not depend on the loop index
+  re-ran the full reduction at every iteration, and a list-valued operand
+  expression such as `(1 - v)·P_0 + v·P_1` was rebuilt at every `At`,
+  `Min` and `Max` site, so the run was quadratic in the list length: a
+  10 000-element histogram row (a `Comprehension` over 300 bins whose body
+  sums over the list) took 25 s of emitted-code time, and the interpolated
+  twin of the row did not finish. The loop-form `Sum`/`Product` and the
+  `Comprehension` now bind the body's invariant subexpressions once — a
+  collection-valued subexpression, a reduction over one, or an invariant
+  nested binder whole — before the loop (behind the empty-range return) or
+  on the first iteration, so a body that never runs evaluates nothing new;
+  a structurally equal node in a conditionally-evaluated position reads the
+  same binding. A common-subexpression temporary bound by an ENCLOSING
+  region is now reused inside a binder body or a conditional arm instead of
+  being recomputed there, and the `Comprehension` body compiles through its
+  own CSE region. Both histogram rows now run in under 0.1 s at 16 000
+  elements, with unchanged values. `cse: false` turns the hoisting off with
+  the rest of the sharing.
 - **A NaN operand of a branch condition selects no arm in the
   interpreter.** `If(NaN > 0, 1, -1).evaluate()` answered `-1` (the
   comparison follows IEEE 754, so `NaN > 0` is `False` and the else arm

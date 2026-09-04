@@ -268,6 +268,17 @@ export type CseSession = {
 
   /** The emission-time region instance stack, innermost last. */
   instances: CseRegionInstance[];
+
+  /**
+   * The lowest index of `instances` whose bound temporaries the code being
+   * emitted can reference (default `0`). A user-defined function's body is
+   * emitted as a module-level preamble definition, OUTSIDE the wrappers of
+   * the instances that were on the stack when its emission began, so while
+   * it is emitted the floor is raised to its own root instance: a temporary
+   * bound below the floor is in scope for the call site, not for the
+   * definition.
+   */
+  availabilityFloor?: number;
 };
 
 /**

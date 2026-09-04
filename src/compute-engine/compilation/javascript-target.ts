@@ -9790,14 +9790,21 @@ function emitSumProduct(
       };
 
       // Every index the unrolled terms vary — this clause's plus the nested
-      // clauses', which the terms unroll or loop over in turn. A body
-      // subexpression free of all of them has the same value in every term.
+      // clauses', which the terms unroll or loop over in turn.
       const indexNames = [index, ...rest.map((c) => extractLimits(c).index)];
 
+      // Only the INNERMOST clause hoists (`rest` empty): its terms are the
+      // body itself, and an unrolled clause runs every one of them, so a
+      // binding emitted before the terms is evaluated exactly when the body
+      // is. An outer clause's terms are nested sums whose own ranges may be
+      // empty at run time, so a binding hoisted above them could be
+      // evaluated when the body never runs — an error it raises would be
+      // new. The nested clause hoists for itself, once per outer term.
       const asStatements = termCount >= UNROLL_STATEMENT_MIN_TERMS;
-      const { bindings, result: terms } = asStatements
-        ? BaseCompiler.hoistLoopInvariants(body, indexNames, target, emitTerms)
-        : { bindings: [], result: emitTerms() };
+      const { bindings, result: terms } =
+        asStatements && rest.length === 0
+          ? BaseCompiler.hoistLoopInvariants(body, [index], target, emitTerms)
+          : { bindings: [], result: emitTerms() };
 
       const hoisted = bindings
         .map(([name, code]) => `const ${name} = ${code}; `)
@@ -9873,11 +9880,44 @@ function emitSumProduct(
   const lowerCode = compileBound(lowerExpr, lowerNum, target);
   const upperCode = compileBound(upperExpr, upperNum, target);
 
-  const bodyCode = compileTerm({
+  // Loop-invariant subexpressions of the body — a collection it rebuilds, a
+  // reduction over one (`Min(P)`, `Length(P)`) — are computed once before
+  // the loop, not once per iteration (Tycho item 248: a body reading
+  // `Min(P_0)` at every iteration ran a full pass over the 10 000-element
+  // list per iteration, so the loop was quadratic). A subexpression free of
+  // this clause's index has the same value in every iteration.
+  //
+  // Only the INNERMOST clause hoists (`rest` empty). Its empty-range return
+  // below is exactly the test for "the body runs zero times", so a binding
+  // placed after it is evaluated exactly when the body is. An outer clause's
+  // term is a nested sum whose own range may be empty at run time, so a
+  // binding hoisted above it could be evaluated when the body never runs —
+  // an error it raises would be new. The nested clause hoists for itself,
+  // once per outer iteration; an expression invariant in every index is then
+  // recomputed once per outer iteration, never per innermost one.
+  const innerTarget: CompileTarget<Expression> = {
     ...target,
     var: (id) => (id === index ? index : target.var(id)),
     boundVars: BaseCompiler.withBoundNames(target, [index]),
-  });
+  };
+  const { bindings: hoistedBindings, result: bodyCode } =
+    rest.length === 0
+      ? BaseCompiler.hoistLoopInvariants(body, [index], target, () =>
+          compileTerm(innerTarget)
+        )
+      : { bindings: [], result: compileTerm(innerTarget) };
+  // The bindings follow the loop-entry guard and an EMPTY-RANGE return: a
+  // range that runs zero iterations never evaluated the body, so it must not
+  // evaluate the body's subexpressions either (an error they raise would be
+  // new). `empty` is what the loop answers for an empty range — its identity,
+  // in the arm's own shape. With no bindings the emission is unchanged.
+  const hoistPrelude = (empty: string): string =>
+    hoistedBindings.length === 0
+      ? ''
+      : `if (!(${index} <= _upper)) return ${empty}; ` +
+        hoistedBindings
+          .map(([name, code]) => `const ${name} = ${code}; `)
+          .join('');
 
   const acc = BaseCompiler.tempVar(target);
 
@@ -9947,22 +9987,22 @@ function emitSumProduct(
     );
     const fold = `${acc} = ${acc} === null ? (Array.isArray(${val}) ? ${val}.slice() : ${val}) : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val});`;
     if (elementwiseExit)
-      return `(() => { let ${acc} = null; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${fold} if (${acc} !== ${acc}) return NaN; ${index}++; } return ${acc} === null ? ${identity} : ${acc}; })()`;
+      return `(() => { let ${acc} = null; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}${hoistPrelude(identity)}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${fold} if (${acc} !== ${acc}) return NaN; ${index}++; } return ${acc} === null ? ${identity} : ${acc}; })()`;
     // The flag, not the accumulator, carries the verdict to the end: once the
     // fold has collapsed to a scalar NaN the following iteration broadcasts it
     // back over the next term's shape, so `${acc}` is an array again by the
     // time the loop finishes and cannot be re-tested for it.
     const latched = BaseCompiler.tempVar(target);
-    return `(() => { let ${acc} = null; let ${latched} = false; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${fold} if (${acc} !== ${acc}) ${latched} = true; ${index}++; } return ${latched} ? NaN : (${acc} === null ? ${identity} : ${acc}); })()`;
+    return `(() => { let ${acc} = null; let ${latched} = false; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}${hoistPrelude(identity)}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${fold} if (${acc} !== ${acc}) ${latched} = true; ${index}++; } return ${latched} ? NaN : (${acc} === null ? ${identity} : ${acc}); })()`;
   }
 
   if (bodyIsComplex) {
     const val = BaseCompiler.tempVar(target);
     const guard = guardNaN('{ re: NaN, im: NaN }');
     if (isSum) {
-      return `(() => { let ${acc} = { re: 0, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guard}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } return ${acc}; })()`;
+      return `(() => { let ${acc} = { re: 0, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guard}${hoistPrelude('{ re: 0, im: 0 }')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } return ${acc}; })()`;
     }
-    return `(() => { let ${acc} = { re: 1, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guard}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } return ${acc}; })()`;
+    return `(() => { let ${acc} = { re: 1, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guard}${hoistPrelude('{ re: 1, im: 0 }')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } return ${acc}; })()`;
   }
 
   // The scalar loop's NaN exit, the same one the unrolled statement form and
@@ -9989,7 +10029,7 @@ function emitSumProduct(
     ? `if (${acc} !== ${acc}) return NaN; `
     : '';
 
-  return `(() => { let ${acc} = ${identity}; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { ${acc} ${op}= ${bodyCode}; ${loopExit}${index}++; } return ${acc}; })()`;
+  return `(() => { let ${acc} = ${identity}; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}${hoistPrelude(identity)}while (${index} <= _upper) { ${acc} ${op}= ${bodyCode}; ${loopExit}${index}++; } return ${acc}; })()`;
 }
 
 /**

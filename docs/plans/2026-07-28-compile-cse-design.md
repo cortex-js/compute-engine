@@ -123,7 +123,26 @@ own design doc before any implementation.
   with no expandable arity (`Random`, `Less`), which emission now refuses at
   compile time.
 - **Cross-region and cross-term hoisting** (PRE, LICM, sharing across
-  unrolled terms): v2 (§11).
+  unrolled terms): v2 (§11). **Amended 2026-09-03 (Tycho item 248)**: two
+  narrow forms shipped at emission level, outside the harvest. (1)
+  Loop-invariant hoisting: the loop-form `Sum`/`Product` and the
+  `Comprehension` bind the body's subexpressions that mention no loop
+  index — collection-valued ones, reductions over a collection, and
+  invariant nested binders whole — once before the loop
+  (`BaseCompiler.hoistLoopInvariants`, which the unrolled binders already
+  used for collection-valued subexpressions); the bindings follow the
+  empty-range return (or a first-iteration initialization, for the
+  comprehension) so a loop that runs zero times evaluates nothing new, and a
+  structurally equal node in a lazy position reads the binding. (2) Reuse of
+  an enclosing instance's already-`'bound'` temporary from inside a binder
+  body or a conditional arm (`BaseCompiler.availableCseBinding`): the
+  binding is evaluated whether or not the inner position runs, so §7.3 and
+  §7.4 hold; a name rebound between the two positions (a region's
+  `boundNames`) refuses the reuse, a blind or selector-less opaque-scope
+  instance is a barrier, and a nested definition-body harvest raises the
+  availability floor because its code is emitted as a module-level
+  definition. The `Comprehension` body is now wired through its harvested
+  region (`compileOp`), so it no longer compiles under a blind instance.
 - **Alpha-invariant merging**: `Sum(x², x)` and `Sum(y², y)` do not merge.
   `isSame` is binding-identity by name; the region rules make name-keyed
   matching capture-sound. Not worth the alpha-invariant hash migration for

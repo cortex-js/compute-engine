@@ -885,7 +885,13 @@ describe('COMPILE CSE — DAG sharing', () => {
     parity(arm, { u: 0.3 });
   });
 
-  it('gives one shared node object a separate temporary in each region', () => {
+  it('reads the enclosing temporary of one shared node object from inside an arm', () => {
+    // The shared node is a candidate of the root region (bound `_cse1`) AND
+    // of the arm region. Harvest keeps the two apart — no binding crosses a
+    // region boundary — but at emission the arm sits inside the root's
+    // wrapper, and `_cse1` was evaluated whether or not the arm runs, so the
+    // arm reads it instead of binding the same structure a second time
+    // (`BaseCompiler.availableCseBinding`, Tycho item 248).
     const { s, arm } = shared();
     const expr = ce.function('Add', [
       ce.function('Square', [s]),
@@ -900,12 +906,12 @@ describe('COMPILE CSE — DAG sharing', () => {
     ]);
     const result = compile(expr, { fallback: false });
 
-    expect(occurrences(result.code, 'const _cse')).toBe(2);
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
     expect(result.code).toContain('const _cse1 = Math.sin(6 * _.u)');
-    expect(result.code).toContain('const _cse2 = Math.sin(6 * _.u)');
-    // The arm's temporary is bound INSIDE the ternary branch.
+    expect(occurrences(result.code, 'Math.sin(')).toBe(1);
+    // The arm, after the ternary test, reads the root's temporary.
     expect(result.code.indexOf('?')).toBeLessThan(
-      result.code.indexOf('const _cse2')
+      result.code.lastIndexOf('_cse1')
     );
     parity(expr, { u: 0.3, x: 1 });
     parity(expr, { u: 0.3, x: -1 });

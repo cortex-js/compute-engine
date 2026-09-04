@@ -127,6 +127,7 @@ import type {
   CompiledRunner,
   ComplexResult,
   CseRegionInstance,
+  CseSession,
   NamingContext,
   OperandCompiler,
   TargetSource,
@@ -134,13 +135,18 @@ import type {
 import { CompileDeclineError, LaneMismatchError } from './diagnostics.js';
 import {
   candidateAt,
-  childRegionAt,
+  descendantRegionAt,
   harvestCse,
   isCallerMapped,
   isCseAdmissible,
   lazyOperandRegions,
 } from './cse.js';
-import type { CseHarvest, CseHarvestOptions, CseRegion } from './cse.js';
+import type {
+  CseCandidate,
+  CseHarvest,
+  CseHarvestOptions,
+  CseRegion,
+} from './cse.js';
 import {
   builtinCallbackArity,
   builtinOperatorDefinition,
@@ -5952,7 +5958,7 @@ export class BaseCompiler {
           (expr) => BaseCompiler.compileValueOperand(expr, target),
           target
         );
-      return BaseCompiler.compileComprehension(args, target);
+      return BaseCompiler.compileComprehension(args, target, node);
     }
 
     if (h === 'If') {
@@ -9539,7 +9545,14 @@ export class BaseCompiler {
    */
   private static compileComprehension(
     args: ReadonlyArray<Expression>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    /** The `Comprehension` node itself: the body is its operand 0, whose
+     * harvested region (a binder body, design §5.1(a)) the emission enters
+     * through `compileOp`, so candidates repeated inside the body bind once
+     * per iteration and a temporary an enclosing instance already holds is
+     * reused instead of recomputed. Without the node the body compiles
+     * under a blind instance. */
+    node?: Expression
   ): TargetSource {
     if (!args[0]) throw new Error('Comprehension: no body');
     if (!args[1]) throw new Error('Comprehension: no indexing set');
@@ -9554,24 +9567,60 @@ export class BaseCompiler {
           'TODO(E3-GLSL): unroll or use a fixed-size array.'
       );
 
-    const inner = BaseCompiler.compileElementLoops(
-      elements,
-      target,
-      (bodyTarget) => `result.push(${BaseCompiler.compile(body, bodyTarget)});`
+    // Loop-invariant subexpressions of the body — a collection it rebuilds,
+    // a reduction over one — are computed once, not once per element (Tycho
+    // item 248). The bindings are INITIALIZED ON THE FIRST ITERATION, inside
+    // the INNERMOST loop, rather than before the loops: any source may be
+    // empty (an inner one even when the outer ones are not), and a body that
+    // never ran must not have its subexpressions evaluated (an error they
+    // raise would be new). The flag test costs one boolean read per body
+    // evaluation.
+    const binderNames = elements.flatMap((e) =>
+      isFunction(e, 'Element') && isSymbol(e.ops[0]) ? [e.ops[0].symbol] : []
     );
-    return `(() => { const result = []; ${inner} return result; })()`;
+    let flag: string | undefined;
+    const { bindings, result: inner } = BaseCompiler.hoistLoopInvariants(
+      body,
+      binderNames,
+      target,
+      (hoisted) => {
+        let prelude = '';
+        if (hoisted.length > 0) {
+          flag = BaseCompiler.tempVar(target);
+          prelude = `if (!${flag}) { ${flag} = true; ${hoisted
+            .map(([name, code]) => `${name} = ${code};`)
+            .join(' ')} } `;
+        }
+        return BaseCompiler.compileElementLoops(
+          elements,
+          target,
+          (bodyTarget) =>
+            `result.push(${BaseCompiler.compileOp(node, 0, bodyTarget, 0, body)});`,
+          prelude
+        );
+      }
+    );
+    const declarations =
+      bindings.length === 0
+        ? ''
+        : `let ${flag} = false; let ${bindings.map(([name]) => name).join(', ')}; `;
+    return `(() => { const result = []; ${declarations}${inner} return result; })()`;
   }
 
   /**
    * Build nested `for (const name of collection) { … }` loops from a list of
    * `Element` clauses. `makeInner` produces the innermost statement given the
-   * loop-variable-aware `bodyTarget`. Shared by `compileForLoop` (general
-   * for-each) and `compileComprehension`.
+   * loop-variable-aware `bodyTarget`. `prelude` is emitted at the top of the
+   * INNERMOST loop's body, just before the statement `makeInner` produced —
+   * where a statement that must run only once the body is actually reached
+   * belongs (an inner source may be empty while the outer ones are not).
+   * Shared by `compileForLoop` (general for-each) and `compileComprehension`.
    */
   private static compileElementLoops(
     elements: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
-    makeInner: (bodyTarget: CompileTarget<Expression>) => string
+    makeInner: (bodyTarget: CompileTarget<Expression>) => string,
+    prelude = ''
   ): string {
     // Validate all Element clauses and narrow their types.
     type NarrowedElement = Expression & {
@@ -9679,7 +9728,7 @@ export class BaseCompiler {
     // Build nested for-of loops from innermost to outermost. Inner collections
     // are compiled with `bodyTarget` so that references to outer loop variables
     // are wrapped consistently.
-    let inner = makeInner(bodyTarget);
+    let inner = prelude + makeInner(bodyTarget);
     for (let i = narrowedElements.length - 1; i >= 0; i--) {
       const elem = narrowedElements[i];
       const name = (elem.ops[0] as Expression & { symbol: string }).symbol;
@@ -18616,7 +18665,7 @@ export class BaseCompiler {
   ): TargetSource {
     const top = BaseCompiler.cseTop(target);
     if (top === undefined || parent === undefined) return fn();
-    const region = childRegionAt(
+    const region = descendantRegionAt(
       BaseCompiler.cseRegionOf(top),
       parent,
       opIndex
@@ -18640,7 +18689,7 @@ export class BaseCompiler {
   ): T {
     const top = BaseCompiler.cseTop(target);
     if (top === undefined || parent === undefined) return fn();
-    const region = childRegionAt(
+    const region = descendantRegionAt(
       BaseCompiler.cseRegionOf(top),
       parent,
       opIndex
@@ -18735,29 +18784,40 @@ export class BaseCompiler {
   }
 
   /**
-   * Emit, once and up front, the COLLECTION-valued subexpressions of `expr`
-   * whose value is the same in every repetition of `expr` that `emit`
-   * produces, then run `emit` with each of them replaced by a reference to
-   * its binding.
+   * Emit, once and up front, the subexpressions of `expr` whose value is the
+   * same in every repetition of `expr` that `emit` produces, then run `emit`
+   * with each of them replaced by a reference to its binding.
    *
-   * This is what an UNROLLED binder needs and ordinary CSE cannot give it: an
-   * unrolled `Sum` compiles the same body nodes once per index value, and each
-   * of those compilations pushes a fresh CSE region instance (deliberately —
-   * a node-keyed reuse across instances would emit the first index's
-   * temporary for every later index). Subexpressions that do not mention the
-   * index are the exception: their value cannot differ between repetitions, so
-   * one binding serves them all.
+   * This is what a binder needs and ordinary CSE cannot give it. An UNROLLED
+   * `Sum` compiles the same body nodes once per index value, and each of
+   * those compilations pushes a fresh CSE region instance (deliberately — a
+   * node-keyed reuse across instances would emit the first index's temporary
+   * for every later index). A LOOP-form `Sum` or a `Comprehension` compiles
+   * the body once, but the emitted loop RUNS it once per iteration, and a CSE
+   * temporary bound at the body region's top is re-evaluated on every
+   * iteration with it. Subexpressions that mention none of the loop's own
+   * names are the exception: their value cannot differ between repetitions,
+   * so one binding, emitted before the loop, serves them all.
    *
    * `varyingNames` are the names whose binding differs from one repetition to
-   * the next (the unrolled indices). A subexpression that mentions one of them
-   * anywhere is not invariant.
+   * the next (the unrolled or looped indices). A subexpression that mentions
+   * one of them anywhere is not invariant. Neither is one that mentions a
+   * symbol `expr` ASSIGNS anywhere (`Assign`/`Declare`): the assignment runs
+   * inside the loop, so a read of that symbol can change between iterations
+   * even though the reading node is itself pure.
    *
-   * Only COLLECTION-valued subexpressions are hoisted. Those are the ones
-   * whose duplication is expensive in both dimensions: a collection operand's
+   * Two kinds of subexpression are hoisted, both chosen because their
+   * duplication is expensive: a COLLECTION-valued subexpression, whose
    * emission materializes the whole collection (a `Range` lowers to an
-   * `Array.from` plus one `.map()` per element-wise step), so re-emitting it
-   * multiplies the source size AND re-runs the construction at run time. A
-   * scalar subexpression lowers to a few tokens that the target language's own
+   * `Array.from` plus one `.map()` per element-wise step, so re-emitting it
+   * multiplies the source size AND re-runs the construction at run time); and
+   * a scalar-valued application that CONSUMES a collection operand — a
+   * reduction such as `Min(P)`, `Max(P)` or `Length(P)` — whose run-time cost
+   * is a pass over the whole collection. A loop body that reads `Min(P)` at
+   * every iteration otherwise runs a full pass over `P` per iteration, so
+   * the loop is quadratic in the length of `P` (Tycho item 248: a 10 000
+   * element histogram row took 25 s). A scalar subexpression that consumes
+   * no collection lowers to a few tokens that the target language's own
    * compiler folds better than this pass could, and hoisting it would churn
    * emission for no measurable gain.
    *
@@ -18770,28 +18830,35 @@ export class BaseCompiler {
    * binder's own body: the names it binds do not exist at the point the
    * bindings are emitted.
    *
-   * Returns the bindings — mutually independent, so any order works — together
-   * with `emit`'s result. The caller emits them where its own construct
-   * declares locals, and must emit them ALL: a binding whose name the emitted
-   * code references but nothing declares is not valid source.
+   * Returns the bindings in DEPENDENCY order — a binding whose right-hand
+   * side references an earlier binding comes after it — together with
+   * `emit`'s result; `emit` receives the same list, so a caller that places
+   * the bindings inside the code it emits can do so. The caller emits them
+   * where its own construct declares locals, in the returned order, and must
+   * emit them ALL: a binding whose name the emitted code references but
+   * nothing declares is not valid source. A caller whose loop may run ZERO
+   * times must also make sure the bindings are not evaluated in that case
+   * (an early return before them, or a first-iteration initialization): the
+   * loop body never ran them, so evaluating them anyway could raise an error
+   * the unhoisted code never raised.
    */
   static hoistLoopInvariants<T>(
     expr: Expression,
     varyingNames: ReadonlyArray<string>,
     target: CompileTarget<Expression>,
-    emit: () => T
+    emit: (bindings: ReadonlyArray<[name: string, code: string]>) => T
   ): { bindings: Array<[name: string, code: string]>; result: T } {
-    const nodes = BaseCompiler.loopInvariantCollections(
+    const classes = BaseCompiler.loopInvariantHoistCandidates(
       expr,
       new Set(varyingNames),
       target
     );
-    if (nodes.length === 0) return { bindings: [], result: emit() };
+    if (classes.length === 0) return { bindings: [], result: emit([]) };
 
     const bindings: Array<[name: string, code: string]> = [];
     const installed: Expression[] = [];
     try {
-      for (const node of nodes) {
+      for (const nodes of classes) {
         // Compiled under the ENCLOSING target, never a repetition's: the node
         // mentions none of the varying names, so the only thing a repetition's
         // target changes for it is the mapping of names it does not use.
@@ -18805,16 +18872,22 @@ export class BaseCompiler {
         // the decline itself.
         let code: TargetSource;
         try {
-          code = BaseCompiler.compile(node, target);
+          code = BaseCompiler.compile(nodes[0], target);
         } catch {
           continue;
         }
         const name = BaseCompiler.tempVar(target);
         bindings.push([name, code]);
-        BaseCompiler._codeOverrides.set(node, name);
-        installed.push(node);
+        // Every node of the structural class emits as the one name: the class
+        // members are distinct node objects with the same structure, and the
+        // pass never descends into a lambda or a binder, so they all sit in
+        // the same scope and denote the same value.
+        for (const node of nodes) {
+          BaseCompiler._codeOverrides.set(node, name);
+          installed.push(node);
+        }
       }
-      return { bindings, result: emit() };
+      return { bindings, result: emit(bindings) };
     } finally {
       for (const node of installed) BaseCompiler._codeOverrides.delete(node);
     }
@@ -18915,18 +18988,28 @@ export class BaseCompiler {
   }
 
   /**
-   * The maximal subexpressions of `expr` that {@link hoistLoopInvariants} may
-   * bind: collection-valued, mentioning none of `varying`, pure, and
-   * admissible to emit once. Maximal because a hoisted node is never
-   * descended into — binding both a node and a subexpression of it would emit
-   * the inner one twice, once on its own and once inside the outer binding's
-   * right-hand side.
+   * The subexpressions of `expr` that {@link hoistLoopInvariants} may bind,
+   * grouped into STRUCTURAL classes (nodes that are `isSame`, so one binding
+   * serves every member) and ordered so that a class contained in another
+   * class's right-hand side comes first.
+   *
+   * A candidate mentions none of `varying`, is pure, and is admissible to
+   * emit once; it is either collection-valued, or a scalar-valued application
+   * with a collection-valued operand (a reduction). A collection-valued
+   * candidate is MAXIMAL: it is never descended into, because binding both a
+   * node and a subexpression of it would emit the inner one twice, once on
+   * its own and once inside the outer binding's right-hand side. A reduction
+   * IS descended into first, so that a collection-valued operand it shares
+   * with other candidates (`Min(L)`, `Max(L)` and `At(L, j)` over the same
+   * list-valued `L`) is bound once and the reduction's right-hand side
+   * references that binding — which is why the classes come out in
+   * dependency order: an operand's class is recorded before its consumer's.
    */
-  private static loopInvariantCollections(
+  private static loopInvariantHoistCandidates(
     expr: Expression,
     varying: ReadonlySet<string>,
     target: CompileTarget<Expression>
-  ): Expression[] {
+  ): Expression[][] {
     // Hoisting replaces many emissions of a subexpression with one binding
     // referenced by name — the CSE transform, applied where CSE's own
     // node-keyed reuse cannot reach. `cse: false` turns that sharing off here
@@ -18936,13 +19019,54 @@ export class BaseCompiler {
     const admission = BaseCompiler.cseAdmission(target, varying);
     if (admission === undefined) return [];
 
+    // A symbol assigned anywhere in the repeated code changes between
+    // repetitions, exactly as a loop index does (the same rule the CSE
+    // harvest applies through a region's `assignedNames`). A destructuring
+    // target (`Declare(Tuple(a, b), …)`) writes every leaf symbol of the
+    // pattern.
+    const assigned = new Set<string>();
+    const recordAssignedTarget = (t: Expression | undefined): void => {
+      if (t === undefined) return;
+      if (isSymbol(t)) assigned.add(t.symbol);
+      else if (isFunction(t, 'Tuple'))
+        for (const leaf of t.ops) recordAssignedTarget(leaf);
+    };
+    const collectAssigned = (node: Expression): void => {
+      if (!isFunction(node)) return;
+      if (node.operator === 'Assign' || node.operator === 'Declare')
+        recordAssignedTarget(node.ops[0]);
+      for (const op of node.ops) collectAssigned(op);
+    };
+    collectAssigned(expr);
+
     const mentionsVarying = (node: Expression): boolean => {
-      if (isSymbol(node)) return varying.has(node.symbol);
+      if (isSymbol(node))
+        return varying.has(node.symbol) || assigned.has(node.symbol);
       if (!isFunction(node)) return false;
       return node.ops.some(mentionsVarying);
     };
 
-    const out: Expression[] = [];
+    const isCollectionShaped = (node: Expression): boolean =>
+      node.type.matches('collection<any>');
+
+    // Structural classes, in dependency order. `byHash` finds the class a
+    // node belongs to without an `isSame` against every class.
+    const classes: Expression[][] = [];
+    const byHash = new Map<number, Expression[][]>();
+    const record = (node: Expression): void => {
+      const bucket = byHash.get(node.hash);
+      if (bucket !== undefined)
+        for (const cls of bucket)
+          if (cls[0].isSame(node)) {
+            cls.push(node);
+            return;
+          }
+      const cls = [node];
+      classes.push(cls);
+      if (bucket === undefined) byHash.set(node.hash, [cls]);
+      else bucket.push(cls);
+    };
+
     const seen = new Set<Expression>();
 
     const visit = (node: Expression): void => {
@@ -18956,13 +19080,13 @@ export class BaseCompiler {
       //
       // A node that already carries a code override emits as that NAME: its
       // operands are not compiled at this site at all. The traversal reaches
-      // one when the same tree is walked twice — a multi-index unrolled
-      // binder walks its body once per clause level — and descending would
-      // discover an operand of an already-hoisted node as a fresh candidate,
-      // emitting a `const` binding that nothing ever references. (An override
-      // is also what the D2/D6 runtime real-operand rule installs on a
-      // maybe-complex operand; the `isComplexValued` clause below keeps this
-      // pass from installing one over it and dropping its real guard.)
+      // one when the same tree is walked twice — a multi-index binder walks
+      // its body once per clause level — and descending would discover an
+      // operand of an already-hoisted node as a fresh candidate, emitting a
+      // `const` binding that nothing ever references. (An override is also
+      // what the D2/D6 runtime real-operand rule installs on a maybe-complex
+      // operand; the `isComplexValued` clause below keeps this pass from
+      // installing one over it and dropping its real guard.)
       //
       // A caller-mapped node — an operator re-mapped through
       // `functions`/`operators`, or one carrying a caller-supplied `compile`
@@ -18975,28 +19099,91 @@ export class BaseCompiler {
       if (BaseCompiler._codeOverrides.has(node)) return;
       if (isCallerMapped(node, admission)) return;
 
+      // Only an APPLICATION is worth a binding: a bare symbol or a literal is
+      // one read wherever it appears.
+      if (!isFunction(node)) return;
+
+      // A node an ENCLOSING region instance has already bound as a CSE
+      // temporary emits as that name (`availableCseBinding`), operands
+      // uncompiled: neither it nor anything below it needs a binding here,
+      // and a reduction hoisted from under it would be evaluated and never
+      // read.
       if (
-        node.type.matches('collection<any>') &&
+        target.cse !== undefined &&
+        BaseCompiler.availableCseBinding(target.cse, node, true) !== undefined
+      )
+        return;
+
+      const invariant =
         !mentionsVarying(node) &&
         node.isPure === true &&
         !BaseCompiler.isComplexValued(node) &&
-        isCseAdmissible(node, admission)
-      ) {
-        out.push(node);
+        isCseAdmissible(node, admission);
+
+      if (invariant && isCollectionShaped(node)) {
+        record(node);
         return;
       }
-      if (!isFunction(node)) return;
       // A binder's operands are written in terms of the names the binder
-      // introduces, which are out of scope where the bindings are emitted.
-      if (node.operator === 'Function' || node.operatorDefinition?.scoped)
+      // introduces, which are out of scope where the bindings are emitted —
+      // so a binder is never descended into. An invariant binder that LOOPS
+      // (a `Sum` over an indexing set, an integral over its limits, a fold
+      // over a collection) is bound whole: it runs its own loop on every
+      // repetition otherwise, and it mentions none of the names the
+      // repetitions vary.
+      if (node.operator === 'Function') return;
+      if (node.operatorDefinition?.scoped) {
+        if (
+          invariant &&
+          node.ops.some(
+            (op) =>
+              isCollectionShaped(op) ||
+              isFunction(op, 'Limits') ||
+              isFunction(op, 'Element')
+          )
+        )
+          record(node);
         return;
+      }
       const lazy = lazyOperandRegions(node);
       for (let i = 0; i < node.ops.length; i++)
         if (!lazy.some((site) => site.index === i)) visit(node.ops[i]);
+      // A reduction: recorded AFTER its operands so a shared collection
+      // operand is bound first and this right-hand side references it.
+      if (invariant && node.ops.some(isCollectionShaped)) record(node);
     };
 
     visit(expr);
-    return out;
+    if (classes.length === 0) return classes;
+
+    // Second pass: a node in a CONDITIONALLY evaluated position (a `Which`
+    // arm, a short-circuited `And` operand) that has the same structure as a
+    // recorded class joins that class. The binding is computed
+    // unconditionally either way — a member in an unconditional position
+    // already forced it — so referencing it from the arm evaluates nothing
+    // new, and the arm stops recomputing what the binding already holds
+    // (`Min(P)` in both halves of `a ≤ x ∧ x < b`, where only the first half
+    // is unconditional). The pass reads the whole tree except lambdas and
+    // binders (their names may rebind a symbol) and the opaque nodes above;
+    // a node that joins a class is not descended into, since it emits as the
+    // class's name.
+    const attach = (node: Expression): void => {
+      if (!isFunction(node)) return;
+      if (BaseCompiler._codeOverrides.has(node)) return;
+      if (isCallerMapped(node, admission)) return;
+      const bucket = byHash.get(node.hash);
+      if (bucket !== undefined)
+        for (const cls of bucket)
+          if (cls[0].isSame(node)) {
+            if (!cls.includes(node)) cls.push(node);
+            return;
+          }
+      if (node.operator === 'Function' || node.operatorDefinition?.scoped)
+        return;
+      for (const op of node.ops) attach(op);
+    };
+    attach(expr);
+    return classes;
   }
 
   /**
@@ -19038,10 +19225,16 @@ export class BaseCompiler {
     });
     BaseCompiler.mergeUsedNames(target, nested.usedNames);
     session.harvest = nested;
+    // The body is emitted as a module-level definition, outside every
+    // wrapper the enclosing instances will emit, so their temporaries are
+    // out of its scope (`CseSession.availabilityFloor`).
+    const outerFloor = session.availabilityFloor;
+    session.availabilityFloor = session.instances.length;
     try {
       return BaseCompiler.withCseRegion(target, nested.root, fn);
     } finally {
       session.harvest = outer;
+      session.availabilityFloor = outerFloor;
     }
   }
 
@@ -19075,6 +19268,112 @@ export class BaseCompiler {
       opIndex === undefined
         ? BaseCompiler.compileValueOperand(expr, target)
         : BaseCompiler.compileOpValue(parent, opIndex, target, 0, expr);
+  }
+
+  /**
+   * The name of a temporary already bound, by an instance ENCLOSING the
+   * innermost one, for a node with the same structure as `expr`, or
+   * `undefined` when there is none that may be used here.
+   *
+   * Candidates are attributed to their innermost region, so the same
+   * structure occurring at the root and again inside a binder body or a
+   * conditional arm is two candidates, and the inner one is bound (or
+   * inlined) again where the outer one's temporary is already in scope. The
+   * reuse is what the region rules cannot give and is sound on its own terms:
+   * the outer binding is evaluated whether or not the inner position runs
+   * (its own occurrence forced it), so the inner reference changes no
+   * evaluation count and no selection laziness; and every instance on the
+   * stack has its wrapper around the code being emitted now, so the name is
+   * in scope — except across a user-defined function's body, which is emitted
+   * as a module-level definition (`CseSession.availabilityFloor`).
+   *
+   * The one thing that can make the same STRUCTURE denote a different VALUE
+   * is a name rebound between the two positions: a nested `Sum` reusing the
+   * index name of the outer one, a lambda parameter shadowing an outer
+   * symbol. Each region records the names its site binds (`boundNames`), so
+   * the walk from the innermost instance outward accumulates them and refuses
+   * a temporary whose structure mentions one. An instance with no region — a
+   * blind instance, pushed where emission entered a binding scope the wiring
+   * does not describe — or one whose binder declares no binding sites
+   * (`opaque-scope`) binds names the walk cannot see, so it is a barrier:
+   * nothing bound below it is reused. A symbol ASSIGNED anywhere below a
+   * binding's region needs no check here: the harvest already refused the
+   * candidate at that region (`assignedNames`).
+   *
+   * The innermost instance is excluded by default: its own candidates go
+   * through the occurrence state machine in `compileWithCse`. The hoist
+   * pass asks with `includeTop`, because it runs BEFORE the loop body's
+   * instance is pushed and wants to know whether a body node will emit as a
+   * name the current instance already holds.
+   */
+  private static availableCseBinding(
+    session: CseSession,
+    expr: Expression,
+    includeTop = false
+  ): string | undefined {
+    const instances = session.instances;
+    const floor = session.availabilityFloor ?? 0;
+    const outermost = includeTop ? instances.length - 1 : instances.length - 2;
+    let quick = false;
+    for (let i = outermost; i >= floor; i--)
+      if (instances[i].names.size > 0) {
+        quick = true;
+        break;
+      }
+    if (!quick) return undefined;
+
+    const hash = expr.hash;
+    const rebound = new Set<string>();
+    for (let i = outermost; i >= floor; i--) {
+      if (i < instances.length - 1) {
+        // `instances[i + 1]` is strictly inside the instance examined now:
+        // its site's names are rebound for everything the inner one emits.
+        const inner = BaseCompiler.cseRegionOf(instances[i + 1]);
+        if (inner === undefined) return undefined;
+        // An `opaque-scope` region is a `scoped` operator's operand where the
+        // harvest found no binding site: either the definition declares no
+        // site selector at all — its bound names are unknown, a barrier — or
+        // the selector answered with no site for this node
+        // (`Sum(collection)`, no `Limits`), which binds nothing.
+        if (inner.kind === 'opaque-scope') {
+          const site = inner.site?.node;
+          if (
+            !isFunction(site) ||
+            site.operatorDefinition?.bindingSites === undefined
+          )
+            return undefined;
+        }
+        for (const name of inner.boundNames) rebound.add(name);
+      }
+
+      const outer = instances[i];
+      if (outer.names.size === 0) continue;
+      for (const [candidate, name] of outer.names) {
+        if (outer.state.get(candidate) !== 'bound') continue;
+        const representative = (candidate as CseCandidate).representative;
+        if (representative.hash !== hash || !representative.isSame(expr))
+          continue;
+        // A rebound name inside `expr` makes every enclosing binding of this
+        // structure the wrong value, so stop rather than look further out.
+        if (rebound.size > 0 && BaseCompiler.mentionsAnySymbol(expr, rebound))
+          return undefined;
+        return name;
+      }
+    }
+    return undefined;
+  }
+
+  /** Whether any symbol of `names` occurs anywhere in `expr` — including
+   * inside its own binders and lambdas, which over-approximates: a symbol a
+   * nested binder of `expr` rebinds itself also counts, and the only effect
+   * is a lost reuse. */
+  private static mentionsAnySymbol(
+    expr: Expression,
+    names: ReadonlySet<string>
+  ): boolean {
+    if (isSymbol(expr)) return names.has(expr.symbol);
+    if (!isFunction(expr)) return false;
+    return expr.ops.some((op) => BaseCompiler.mentionsAnySymbol(op, names));
   }
 
   /**
@@ -19112,6 +19411,13 @@ export class BaseCompiler {
       return BaseCompiler.withCseRegion(target, undefined, () =>
         BaseCompiler._compileInner(expr, target, prec)
       );
+
+    // A temporary an ENCLOSING instance has already bound for this structure
+    // is in scope here and already evaluated: referencing it evaluates
+    // nothing new, so it is preferred over binding (or inlining) the
+    // structure again in this instance.
+    const available = BaseCompiler.availableCseBinding(session, expr);
+    if (available !== undefined) return available;
 
     const candidate = candidateAt(BaseCompiler.cseRegionOf(top), expr);
     if (candidate === undefined)

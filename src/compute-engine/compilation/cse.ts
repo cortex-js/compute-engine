@@ -511,6 +511,62 @@ export function childRegionAt(
   return (region as MutableRegion)._childByKey.get(regionKey(node, opIndex));
 }
 
+/**
+ * {@link childRegionAt}, also reaching a region below intermediate regions
+ * that emission SKIPPED — regions harvest opened on edges the emitter
+ * compiled without passing through `compileOp`, so no instance of them was
+ * pushed. `Sum(Comprehension(…))` is the common case: the collection-reduce
+ * form of `Sum` opens an `opaque-scope` region on its operand (a `scoped`
+ * operator whose site selector finds no `Limits`) that its emitter never
+ * pushes, so the comprehension's body region was not the top instance's
+ * child and the body compiled under a blind instance.
+ *
+ * An intermediate region may be skipped only when it BINDS NO NAMES: its
+ * `boundNames` are empty, and it is not an `opaque-scope` region of a
+ * definition without a site selector (whose names are unknown). Skipping a
+ * region that binds a name would let a temporary of an enclosing instance be
+ * reused across that binding (`availableCseBinding` walks the instances,
+ * not the static regions). A skipped region's own candidates simply never
+ * bind, as before.
+ *
+ * The reachable descendants are indexed once per region, on first use.
+ */
+export function descendantRegionAt(
+  region: CseRegion | undefined,
+  node: Expression,
+  opIndex: number
+): CseRegion | undefined {
+  if (region === undefined) return undefined;
+  return reachableByKey(region as MutableRegion).get(regionKey(node, opIndex));
+}
+
+function reachableByKey(region: MutableRegion): Map<string, CseRegion> {
+  if (region._reachableByKey !== undefined) return region._reachableByKey;
+  const map = new Map<string, CseRegion>(region._childByKey);
+  for (const child of region.children) {
+    if (!bindsNoNames(child)) continue;
+    for (const [key, r] of reachableByKey(child as MutableRegion))
+      if (!map.has(key)) map.set(key, r);
+  }
+  region._reachableByKey = map;
+  return map;
+}
+
+/** Whether emission may pass through `region` without pushing an instance of
+ * it, as far as name binding is concerned. */
+function bindsNoNames(region: CseRegion): boolean {
+  if (region.boundNames.length > 0) return false;
+  if (region.kind === 'lambda-params' || region.kind === 'lambda-body')
+    return false;
+  if (region.kind === 'opaque-scope') {
+    const site = region.site?.node;
+    return (
+      isFunction(site) && site.operatorDefinition?.bindingSites !== undefined
+    );
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
@@ -524,6 +580,9 @@ type MutableRegion = {
   candidateByNode: Map<Expression, CseCandidate>;
   /** `${nodeId}:${opIndex}` → child region. */
   _childByKey: Map<string, CseRegion>;
+  /** `_childByKey` extended through descendants that bind no names; built on
+   * first use by {@link descendantRegionAt}. */
+  _reachableByKey?: Map<string, CseRegion>;
 };
 
 type MutableOccurrence = {
@@ -1103,12 +1162,12 @@ class Harvester {
     const def: BoxedOperatorDefinition | undefined = node.operatorDefinition;
     if (def?.scoped === true) {
       // Harvest opens a bindable body region for EVERY scoped binder, but
-      // emission only wires three of them through `compileOp`: `Sum`,
-      // `Product` and the `Function` literal. Every other binder body
-      // (`Integrate`, the comprehensions, …) is emitted under a target whose
-      // `boundVars` the enclosing instance does not describe, so the
-      // blind-instance guard in `compileWithCse` emits it without CSE. This is
-      // sound but wastes the harvested candidate.
+      // emission only wires four of them through `compileOp`: `Sum`,
+      // `Product`, `Comprehension` and the `Function` literal. Every other
+      // binder body (`Integrate`, the imperative loops, …) is emitted under a
+      // target whose `boundVars` the enclosing instance does not describe, so
+      // the blind-instance guard in `compileWithCse` emits it without CSE.
+      // This is sound but wastes the harvested candidate.
       const { firstClause, boundNames } = binderSplit(def, node);
       for (let i = 0; i < node.nops; i++)
         plans[i] =
