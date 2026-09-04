@@ -50,7 +50,7 @@ export function negativeRangeType(tier: NumericPrimitiveType): Type {
 
 /**
  * Widen every range, sign or value decoration on a numeric type back to its
- * bare tier: `real<0..>` → `real`, `(real<0..>) & !0` → `real`, the value
+ * bare tier: `real<0..>` → `real`, `real<0..> & !0` → `real`, the value
  * type `21` → `integer`. Structural nodes (unions, collections, tuple
  * components, `broadcastable`) are descended; everything else — including a
  * non-numeric intersection — is returned as is, by identity when nothing
@@ -85,7 +85,7 @@ export function stripNumericRanges(t: Type): Type {
     case 'intersection': {
       // The intersection is a subset of each member, so any single member's
       // strip is a sound upper bound; take the first that reaches a numeric
-      // tier (`(real<0..>) & !0` → `real`). A non-numeric intersection is not
+      // tier (`real<0..> & !0` → `real`). A non-numeric intersection is not
       // this function's business.
       for (const m of t.types) {
         const st = stripNumericRanges(m);

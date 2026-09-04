@@ -179,7 +179,7 @@ describe('alias lift: cell-scaling handlers type the structure they build', () =
     [['At', 'L', 1], 'integer | nan'],
     [['First', 'L'], 'integer | nan'],
     // Other lifted heads.
-    [['Abs', 'L'], 'list<(real<0..>) | signed_infinity>'],
+    [['Abs', 'L'], 'list<real<0..> | signed_infinity>'],
     [['Sqrt', 'L'], 'list<number>'],
   ])('%j', (expr, type) => {
     const alias = ce.box(expr as any);
@@ -309,6 +309,6 @@ describe('alias lift: a scalar alias survives the cell readers', () => {
     );
     expect(
       typeToString(widenNumericCellsWithNan(ce.type('list<len>').type))
-    ).toBe('list<(len) | nan>');
+    ).toBe('list<len | nan>');
   });
 });

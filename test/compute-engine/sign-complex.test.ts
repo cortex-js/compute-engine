@@ -57,8 +57,8 @@ describe('the result type', () => {
     // `Fract(x)` types `real<0..1> | nan`: the NaN member must not read as
     // "may be complex".
     ce.declare('t', 'number');
-    expect(String(ce.box(['Fract', 't']).type)).toBe('(real<0..1>) | nan');
-    expect(String(ce.box(['Sign', ['Fract', 't']]).type)).toBe('(integer<-1..1>) | nan');
+    expect(String(ce.box(['Fract', 't']).type)).toBe('nan | real<0..1>');
+    expect(String(ce.box(['Sign', ['Fract', 't']]).type)).toBe('integer<-1..1> | nan');
   });
 
   test('the compiled lane follows the operand, so a parent reads the right shape', () => {

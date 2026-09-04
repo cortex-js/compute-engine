@@ -43,9 +43,9 @@ import { subtypingVarianceOf } from './variance.js';
  * literal representation (ruling O9) and widens to its tier like a value
  * node; singleton ranges on other tiers are author/derivation narrowings and
  * pass through. A literal's ENCLOSURE range (`real<1.4..1.5>` for √2 — or the
- * sign range `(integer<0..>) & !0` it falls back to beyond the double range)
+ * sign range `integer<0..> & !0` it falls back to beyond the double range)
  * is shape-identical to a deliberate handler claim (`Heaviside`'s
- * `rational<0..1>`, `Exp`'s `(real<0..>) & !0`), so
+ * `rational<0..1>`, `Exp`'s `real<0..> & !0`), so
  * this walker cannot tell them apart and keeps both — call sites that
  * store an OPERAND's type distinguish by the operand (`_literalType`
  * defined) and project literal cargo through `stripNumericRanges` instead

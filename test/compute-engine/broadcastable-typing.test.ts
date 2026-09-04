@@ -268,7 +268,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     // apply the generic-point convention to an operand of unproven
     // finiteness — `|±∞| = +∞` — so the cell names that outcome.
     expect(ce.box(['Abs', arg]).type.toString()).toBe(
-      'broadcastable<(real<0..>) | signed_infinity>'
+      'broadcastable<real<0..> | signed_infinity>'
     );
   });
 

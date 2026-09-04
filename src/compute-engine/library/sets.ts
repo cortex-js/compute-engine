@@ -691,13 +691,21 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   //
   // Predicates
   //
+  // The set relations and constructors declare `any` operands: their
+  // canonical handlers keep a LABEL operand inert — a single-letter symbol,
+  // or an implicit product of them, where olympiad geometry (`P = AC ∩ BD`)
+  // and group theory (`x ∈ G ∖ H`, `|H ∩ xH|`) write a set — and decide a
+  // provably wrong operand themselves (`Subset(3, {1})` is `False`). A
+  // `collection<any>` declaration would refuse those labels at the boxing
+  // validation seam that checks a `canonical`-handler head against its
+  // declaration.
   Element: {
     type: elementLiteralType,
     complexity: 11200,
     keywords: ['element of', 'member'],
     // EL-3: Extended signature to support optional condition for filtered iteration
     // The condition is used by Sum/Product to filter values when iterating
-    signature: '(value, collection<any>, boolean?) -> boolean',
+    signature: '(any, any, boolean?) -> boolean',
     description:
       'Test whether a value is an element of a collection. ' +
       'Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.\n\n' +
@@ -849,7 +857,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotElement: {
     complexity: 11200,
-    signature: '(value, collection<any>) -> boolean',
+    signature: '(any, any) -> boolean',
     description: 'Test whether a value is not an element of a collection.',
     canonical: (args, { engine: ce }) => {
       // Same collection leniency as `Element` (which accepts `K_a \in BC`):
@@ -874,7 +882,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   Subset: {
     complexity: 11200,
-    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
+    signature: '(lhs:any, rhs: any) -> boolean',
     description:
       'Test whether the first collection is a strict subset of the second.',
     canonical: (args, { engine: ce }) => {
@@ -891,7 +899,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   SubsetEqual: {
     complexity: 11200,
-    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
+    signature: '(lhs:any, rhs: any) -> boolean',
     description:
       'Test whether the first collection is a subset (possibly equal) of the second.',
     canonical: (args, { engine: ce }) => {
@@ -908,7 +916,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotSubset: {
     complexity: 11200,
-    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
+    signature: '(lhs:any, rhs: any) -> boolean',
     description:
       'Test whether the first collection is not a strict subset of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
@@ -921,7 +929,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   Superset: {
     complexity: 11200,
-    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
+    signature: '(lhs:any, rhs: any) -> boolean',
     description:
       'Test whether the first collection is a strict superset of the second.',
     canonical: (args, { engine: ce }) => {
@@ -938,7 +946,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   SupersetEqual: {
     complexity: 11200,
-    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
+    signature: '(lhs:any, rhs: any) -> boolean',
     description:
       'Test whether the first collection is a superset (possibly equal) of the second.',
     canonical: (args, { engine: ce }) => {
@@ -956,7 +964,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotSuperset: {
     complexity: 11200,
-    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
+    signature: '(lhs:any, rhs: any) -> boolean',
     description:
       'Test whether the first collection is not a strict superset of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
@@ -969,7 +977,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   NotSupersetEqual: {
     complexity: 11200,
-    signature: '(lhs:collection<any>, rhs: collection<any>) -> boolean',
+    signature: '(lhs:any, rhs: any) -> boolean',
     description:
       'Test whether the first collection is not a superset (possibly equal) of the second.',
     evaluate: ([lhs, rhs], { engine: ce }) => {
@@ -1086,7 +1094,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // list operands are coerced to a set (deduped) by `intersection`, so
     // `Intersection([1,2,3], [2,3,4])` works without building sets by hand.
     wikidata: 'Q185837',
-    signature: '(collection<any>+) -> set',
+    signature: '(any+) -> set',
     description: 'Return the intersection of one or more collections as a set.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');
@@ -1121,7 +1129,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   Union: {
     // Works on set, but can also work on lists
     wikidata: 'Q185359',
-    signature: '(collection<any>+) -> set',
+    signature: '(any+) -> set',
     description: 'Return the union of two or more collections as a set.',
     canonical: (args, { engine: ce }) => {
       if (args.length === 0) return ce.symbol('EmptySet');

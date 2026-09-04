@@ -38,9 +38,10 @@ describe('TYPE VARIABLES / core — declared signatures', () => {
     expect(sig('Identity')).toBe('(T) -> T where T');
     expect(sig('Prime')).toBe('(T, integer?) -> T where T');
     // The optional second parameter keeps its union spelling (the serializer
-    // orders the members, `(string|number)?` → `number | string?`).
+    // orders the members, and parenthesizes the union so the `?` cannot be
+    // read as applying to `string` alone).
     expect(sig('BaseForm')).toBe(
-      '(T, number | string?) -> T where T: number'
+      '(T, (number | string)?) -> T where T: number'
     );
   });
 });

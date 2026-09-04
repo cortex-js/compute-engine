@@ -73,7 +73,11 @@ import { BoxedString } from './boxed-string.js';
 import { BoxedDictionary } from './boxed-dictionary.js';
 import { canonicalForm } from './canonical.js';
 import { sortOperands } from './order.js';
-import { validateArguments, checkNumericArgs } from './validate.js';
+import {
+  validateArguments,
+  checkNumericArgs,
+  inferNumericArgs,
+} from './validate.js';
 import {
   overloadArms,
   paramAt,
@@ -651,6 +655,18 @@ export function endInferenceTransaction(ce: ComputeEngine): void {
   if (ce._inferenceTxDepth === 0) ce._freshlyInferred = null;
 }
 
+/** True when every declared parameter of `signature` is numeric. */
+function allParamsNumeric(signature: Type): boolean {
+  if (typeof signature === 'string' || signature.kind !== 'signature')
+    return false;
+  const params = [
+    ...(signature.args ?? []),
+    ...(signature.optArgs ?? []),
+    ...(signature.variadicArg ? [signature.variadicArg] : []),
+  ];
+  return params.length > 0 && params.every((p) => isSubtype(p.type, 'number'));
+}
+
 const EMPTY_FRESHLY_INFERRED: ReadonlySet<BoxedValueDefinition> = new Set();
 
 /** Stringify an offending input for an error's context, truncating if huge.
@@ -972,27 +988,6 @@ function boxInternal(
   }
 
   return ce.symbol('Undefined');
-}
-
-/**
- * True when every declared parameter of a signature (required, optional and
- * variadic) is a numeric type (a subtype of `number`). Used to restrict the
- * post-canonical argument re-validation in `makeCanonicalFunction` to the
- * pure-numeric operators (`Sin`, `Factorial`, …) whose custom canonical
- * handlers historically only checked arity. A signature with no parameters, or
- * any non-numeric parameter, returns `false` so structural/higher-order
- * operators are left untouched.
- */
-function allParamsNumeric(signature: Type): boolean {
-  if (typeof signature === 'string') return false;
-  if (signature.kind !== 'signature') return false;
-  const params: Type[] = [
-    ...(signature.args?.map((x) => x.type) ?? []),
-    ...(signature.optArgs?.map((x) => x.type) ?? []),
-    ...(signature.variadicArg ? [signature.variadicArg.type] : []),
-  ];
-  if (params.length === 0) return false;
-  return params.every((t) => isSubtype(t, 'number'));
 }
 
 /**
@@ -2449,48 +2444,97 @@ function applyOperatorDefinition(
     try {
       const result = opDef.canonical(xs, { engine: ce, scope });
       if (result) {
-        // In strict mode, validate the operands against the operator's declared
-        // signature *after* the canonical handler runs. Historically a custom
-        // canonical handler was the sole gate on argument validity, and most
-        // only check arity — so ill-typed calls such as `Sin("hello")` or
-        // `Factorial("x")` slipped through as `isValid`.
+        // In strict mode, validate the operands against the operator's
+        // declared signature *after* the canonical handler runs — the
+        // boxing validation seam of a canonical-handler head. A custom
+        // canonical handler used to be the sole gate on argument validity,
+        // and most only check arity, so an ill-typed call (`Sin("hello")`,
+        // `Factorial("x")`, `PoissonDistribution("a")`) slipped through as
+        // `isValid`, a fresh symbol handed to such a head inferred nothing
+        // from the declared parameter, and a symbol whose held value lies
+        // outside a ranged parameter (`PoissonDistribution(s)` with
+        // `s := -3` against `real<0<..>`) was admitted where the same
+        // argument to a head WITHOUT a canonical handler is refused.
         //
-        // The re-validation is deliberately narrow, gated on all of:
+        // The seam is gated on all of:
         //  - the handler returned an expression with the *same* operator (a
         //    handler that rewrote the head — `Rational`→`Divide`,
         //    `Sqrt`→`Power` — or folded to a number made its own decision);
         //  - that result is still valid (don't second-guess a handler that
-        //    already flagged an argument);
+        //    already flagged an argument — its own error, such as a
+        //    distribution constructor's `out-of-range`, stands);
         //  - the signature is not inferred (an inferred signature carries no
-        //    constraints; inference narrows it later);
-        //  - every declared parameter is numeric (subtype of `number`). This
-        //    restricts the check to the pure-numeric operators the finding
-        //    targets and leaves higher-order/structural operators — `Apply`
-        //    (`symbol` param), `Equivalent` (`boolean`), the big-ops — alone,
-        //    since their declared signatures are looser than what their
-        //    handlers legitimately accept.
+        //    constraints; inference narrows it later).
         //
-        // The check uses `checkNumericArgs` (not the exact-typed
-        // `validateArguments`) so it matches the leniency of the fast-path
-        // numeric operators: unknown symbols, `number | list` unions, tensors
-        // and numeric collections are all accepted (a numeric operator is
-        // threadable), and only a *provably* non-numeric operand — a string,
-        // a boolean — is rejected.
-        if (
+        // It is the same `validateArguments` call the non-handler path
+        // below makes, with the same options — threadable slots, absence
+        // stripping, the NaN policy, the overload resolution attached to the
+        // call — so a canonical-handler head admits exactly what a plain
+        // head with the same signature admits. A handler that accepts more
+        // than its declared signature therefore needs the signature widened
+        // to say so, which is the seam's purpose: the declaration is the
+        // contract the caller can read.
+        const sameHeadValid =
           ce.strict &&
           !opDef.inferredSignature &&
           isFunction(result, name) &&
-          result.isValid &&
-          allParamsNumeric(opDef.signature.type)
-        ) {
-          const checked = checkNumericArgs(ce, result.ops);
-          if (checked.some((x) => !x.isValid))
+          result.isValid;
+        const numericParams =
+          sameHeadValid && allParamsNumeric(opDef.signature.type);
+        if (sameHeadValid) {
+          // The validation runs in CHECK-ONLY mode: every verdict, repair
+          // and substitution of the plain path — an unapplied operator
+          // symbol devolved to a variable, a fresh matrix inference, a
+          // string literal narrowed to a character — but none of its
+          // inference on a valueless symbol. The head's own handler has
+          // typed what it types (`Sin(x)` gives `x` the `number` of its
+          // numeric check, never the declared `complex`), and the seam is a
+          // gate on the declaration, not a second source of types.
+          const seamResolution: { resolution?: OverloadResolution } = {};
+          const checked = validateArguments(
+            ce,
+            result.ops,
+            opDef.signature.type,
+            opDef.lazy,
+            threadableGate(opDef.signature.type, opDef.broadcastable === true),
+            ce._inferenceTxDepth > 0
+              ? (ce._freshlyInferred ?? EMPTY_FRESHLY_INFERRED)
+              : undefined,
+            (i) => opDef.stripsMissingAt(i),
+            {
+              resolutionOut: seamResolution,
+              operatorName: name,
+              nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
+              noInference: true,
+              checkNumericCollections: numericParams,
+            }
+          );
+          if (checked && checked.some((x) => !x.isValid)) {
+            const fn = new BoxedFunction(ce, name, checked, {
+              metadata,
+              canonical: true,
+              scope,
+            });
+            fn._resolvedOverload = seamResolution.resolution;
+            return fn;
+          }
+          // A substituted operand (a devolved symbol, a narrowed literal)
+          // replaces the handler's, position for position, as on the plain
+          // path; an unchanged operand list keeps the handler's node. The
+          // overload resolution is not attached either way: the call's
+          // typing stays exactly what the handler built.
+          if (checked && checked.some((x, i) => x !== result.ops[i]))
             return new BoxedFunction(ce, name, checked, {
               metadata,
               canonical: true,
               scope,
             });
         }
+        // Preserve the numeric context the former `checkNumericArgs()`
+        // fallback inferred onto fresh operands, without repeating its type
+        // validation. Collection element validation now belongs to the
+        // threadable admission inside `validateArguments()` itself.
+        if (numericParams) inferNumericArgs(ce, result.ops);
         return withSourceOffsets(result, metadata);
       }
     } catch (e) {

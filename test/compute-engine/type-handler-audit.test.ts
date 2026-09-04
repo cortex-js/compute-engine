@@ -88,10 +88,17 @@ describe('TYPE AUDIT: pole reciprocals (Tan/Sec/Csc/Cot/Coth/Csch)', () => {
     expect(e2.box(['Csc', 's']).type.toString()).toBe('real');
   });
 
-  it('coth/csch are finite at real ±∞; circular give NaN → number', () => {
+  it('coth/csch are finite at real ±∞; a circular function refuses ∞', () => {
     expect(typeOf(['Coth', 'PositiveInfinity'])).toBe('real');
     expect(typeOf(['Csch', 'NegativeInfinity'])).toBe('real');
-    expect(typeOf(['Tan', 'PositiveInfinity'])).toBe('number');
+    // `Tan`'s carrier is the finite complex numbers (no value and no limit
+    // at any infinity), and the boxing validation seam enforces it at
+    // boxing: the operand is an `incompatible-type` error, so the
+    // application types `error`. It used to type `number` and error only
+    // at evaluation, because a `canonical` handler skipped boxing
+    // validation.
+    expect(typeOf(['Tan', 'PositiveInfinity'])).toBe('error');
+    expect(ce.box(['Tan', 'PositiveInfinity']).isValid).toBe(false);
     expect(ce.box(['Coth', 'PositiveInfinity']).N().re).toBe(1);
   });
 });
@@ -344,7 +351,9 @@ describe('TYPE AUDIT: Binomial / Pochhammer / Rank', () => {
     // k^(−n−1)); the old `NaN` was the Γ-ratio kernel's answer to an
     // `Infinity` argument, not a limit. The claim stays the wide `number`:
     // for n ≤ −1 the same point is `NaN`.
-    expect(ce.box(['Binomial', 2, 'PositiveInfinity']).N().isSame(0)).toBe(true);
+    expect(ce.box(['Binomial', 2, 'PositiveInfinity']).N().isSame(0)).toBe(
+      true
+    );
     expectSound(['Binomial', 0.5, 2.5]);
   });
 
@@ -486,7 +495,7 @@ describe('TYPE AUDIT: Abs (magnitude)', () => {
     // infinite outcome. (`number` also admits NaN, which this claim does
     // NOT cover — a hole the pre-flip `real<0..>` had as well, since NaN
     // was never a member of `real`.)
-    expect(typeOf(['Abs', 'u'])).toBe('(real<0..>) | signed_infinity');
+    expect(typeOf(['Abs', 'u'])).toBe('real<0..> | signed_infinity');
     // The claim admits `+∞`, the value `Abs` of such an operand can reach.
     expect(
       isSubtype(

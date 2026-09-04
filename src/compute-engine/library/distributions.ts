@@ -153,15 +153,13 @@ function rangeError(ce: ComputeEngine, expected: string, x: Expression) {
  * `dataConstraintError` (`library/statistics-data.ts`) does for a datum: an
  * error read on its own has to say which head raised it.
  *
- * The five constructors have a `canonical` handler, and a head with one is
- * NOT validated against its declared signature: `applyOperatorDefinition`
- * (`boxed-expression/box.ts`) re-runs only the lenient `checkNumericArgs` on
- * the handler's result, which rejects a provably non-numeric operand
- * (`NormalDistribution("a", 1)` errors today) but admits `NaN`, the signed
- * infinities, `~oo` and the complex numbers. The handler is therefore the
- * enforcement seam for the carriers these definitions declare — the same
- * arrangement as `Power` (`library/arithmetic.ts`), and a tracked timing
- * deviation of `docs/SIGNATURE-GUIDELINES.md` §4.
+ * The five constructors keep this handler-side check for literal-specific
+ * diagnostics (`out-of-range` and a constructor-qualified location). A
+ * same-head result is also checked against the declared signature by
+ * `applyOperatorDefinition`, which is what catches a symbol whose held value
+ * violates a ranged carrier. The two checks therefore have distinct jobs:
+ * the handler decides exact literal conditions before returning, and the
+ * framework enforces the readable declaration on the surviving call.
  */
 function carrierError(
   ce: ComputeEngine,
@@ -609,17 +607,18 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
     // contract violations rather than values to carry: `nanBehavior` is
     // `reject` in every slot — spelled out, though it is also the policy
     // derived from a carrier below `complex` with a non-numeric result. See
-    // `carrierError` above for why the handler, not the boxing seam,
-    // enforces this. The remaining conditions are inequalities the carrier
-    // cannot express (σ > 0, λ > 0, n ≥ 0, a < b) and stay `out-of-range`
-    // checks. Recorded in
+    // `carrierError` above for why literal diagnostics remain in the handler.
+    // The boxing seam enforces the same carriers for non-literal evidence.
+    // Literal range checks stay here for their specific `out-of-range`
+    // diagnostics (and `a < b` is a cross-parameter condition no carrier can
+    // express). Recorded in
     // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F, the
     // distributions record.
     //
     NormalDistribution: {
       description:
         'Normal (Gaussian) distribution with mean μ and standard deviation σ.',
-      signature: '(real, real) -> expression<NormalDistribution>',
+      signature: '(real, real<0<..>) -> expression<NormalDistribution>',
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 2) return null;
@@ -645,7 +644,8 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Binomial distribution: number of successes in n independent trials, ' +
         'each with success probability p.',
-      signature: '(integer, real<0..1>) -> expression<BinomialDistribution>',
+      signature:
+        '(integer<0..>, real<0..1>) -> expression<BinomialDistribution>',
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 2) return null;
@@ -677,7 +677,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
 
     PoissonDistribution: {
       description: 'Poisson distribution with rate parameter λ.',
-      signature: '(real) -> expression<PoissonDistribution>',
+      signature: '(real<0<..>) -> expression<PoissonDistribution>',
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 1) return null;
@@ -717,7 +717,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
 
     ExponentialDistribution: {
       description: 'Exponential distribution with rate parameter λ.',
-      signature: '(real) -> expression<ExponentialDistribution>',
+      signature: '(real<0<..>) -> expression<ExponentialDistribution>',
       nanBehavior: 'reject',
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 1) return null;
@@ -773,7 +773,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: ['reject', 'propagate'],
       evaluate: ([dist, x], { numericApproximation, engine: ce }) => {
         if (!dist || !x || !isDistributionExpression(dist)) return undefined;
-        const r = distributionCDF(ce, dist, x);
+        const r = distributionCDF(ce, dist, x, !!numericApproximation);
         if (!r) return undefined;
         return numericApproximation ? r.N() : r.evaluate();
       },
@@ -821,6 +821,98 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
 // caller (exact under `evaluate`, float under `.N()`).
 //
 
+/** The claim a declared index type must prove for the `k ≥ 0` clause of a
+ * support guard to be left out. */
+const NON_NEGATIVE_REAL_TYPE = parseType('real<0..>');
+
+/**
+ * The support guard of a discrete distribution at a SYMBOLIC index `k`: the
+ * conjunction of `k` is an integer (`Floor(k) = k`), `k ≥ 0`, and — when the
+ * support has a top — `k ≤ upper`; or `undefined` when no clause is needed.
+ * The first two clauses are left out when the index's declared TYPE proves
+ * them (`integer<0..>`); the `k ≤ upper` clause is always written, because
+ * a top `n` has no spelling in the index's own type.
+ *
+ * The reads are on the index's TYPE, which is what a declaration says and,
+ * while an assumption such as `x > 0` is active, what that assumption
+ * narrows it to. A form built under an assumption keeps the shape the
+ * assumption gave it after the assumption is forgotten — the same contract
+ * every evaluation under an assumption has (`Abs(x)` evaluates to `x`
+ * under `x > 0` and stays `x`), not a property of this guard.
+ *
+ * A LITERAL index is decided in the caller before the closed form is built
+ * (the mass is `0` off the support). A symbolic index used to reach the bare
+ * closed form, which then disagreed with the literal route once the symbol
+ * was bound: `PDF(PoissonDistribution(2), x)` at `x = 0.5` answered the
+ * continuous interpolation `0.216` where `PDF(PoissonDistribution(2), 0.5)`
+ * answers `0`. The guard makes the two routes one value, at the cost of a
+ * visible `Which` around the closed form. An index declared `integer<0..>`
+ * keeps the bare form.
+ */
+function discreteSupportGuard(
+  ce: ComputeEngine,
+  k: Expression,
+  upper?: Expression
+): Expression | undefined {
+  const clauses: Expression[] = [];
+  if (typeFact(k.type.type, 'integer') !== true)
+    clauses.push(ce.function('Equal', [ce.function('Floor', [k]), k]));
+  if (typeFact(k.type.type, NON_NEGATIVE_REAL_TYPE) !== true)
+    clauses.push(ce.function('GreaterEqual', [k, ce.Zero]));
+  if (upper !== undefined) clauses.push(ce.function('LessEqual', [k, upper]));
+  if (clauses.length === 0) return undefined;
+  return clauses.length === 1 ? clauses[0] : ce.function('And', clauses);
+}
+
+/**
+ * The closed form of a discrete CDF at a SYMBOLIC point `x`, with the
+ * support tests the literal route applies: `0` below the support, `1` at or
+ * above its top (`upper`, when the support has one). The `x < 0` clause is
+ * left out when the point's TYPE proves `x ≥ 0` (a declaration, or an
+ * active assumption — see `discreteSupportGuard`), so a point declared
+ * `integer<0..>` keeps the bare closed form for a Poisson CDF.
+ */
+function discreteCDFGuard(
+  ce: ComputeEngine,
+  x: Expression,
+  closed: Expression,
+  numericApproximation: boolean,
+  upper?: Expression
+): Expression {
+  const clauses: Expression[] = [];
+  if (typeFact(x.type.type, NON_NEGATIVE_REAL_TYPE) !== true)
+    clauses.push(ce.function('Less', [x, ce.Zero]), ce.Zero);
+  if (upper !== undefined)
+    clauses.push(ce.function('GreaterEqual', [x, upper]), ce.One);
+  if (clauses.length === 0) return closed;
+  // The held arm is evaluated in the caller's mode — see `guardedMass`.
+  return ce.function('Which', [
+    ...clauses,
+    ce.True,
+    numericApproximation ? closed.N() : closed.evaluate(),
+  ]);
+}
+
+/** `closed` on the support of a discrete pmf, `0` off it — see
+ * `discreteSupportGuard`. */
+function guardedMass(
+  ce: ComputeEngine,
+  guard: Expression | undefined,
+  closed: Expression,
+  numericApproximation: boolean
+): Expression {
+  if (guard === undefined) return closed;
+  // `Which` holds its arms, so the caller's evaluation of the result would
+  // leave the closed form as written; it is evaluated here, in the caller's
+  // mode, so the guarded form reads as the bare form did.
+  return ce.function('Which', [
+    guard,
+    numericApproximation ? closed.N() : closed.evaluate(),
+    ce.True,
+    ce.Zero,
+  ]);
+}
+
 function distributionPDF(
   ce: ComputeEngine,
   dist: Expression,
@@ -867,11 +959,20 @@ function distributionPDF(
         if (litOrder(ce, x, n) === 1) return ce.Zero;
       }
       const k = x;
-      return mul([
+      const closed = mul([
         fn('Binomial', [n, k]),
         pow(p, k),
         pow(sub(ce.One, p), sub(n, k)),
       ]);
+      // A symbolic index takes the support guard the literal route decided
+      // above (`discreteSupportGuard`).
+      if (isFiniteRealLiteral(x)) return closed;
+      return guardedMass(
+        ce,
+        discreteSupportGuard(ce, k, n),
+        closed,
+        numericApproximation
+      );
     }
 
     case 'PoissonDistribution': {
@@ -897,9 +998,18 @@ function distributionPDF(
       if (isFiniteRealLiteral(x) && litVal(x) === undefined)
         return numericApproximation ? ce.Zero : undefined;
       const k = x;
-      return div(
+      const closed = div(
         mul([pow(lambda, k), fn('Exp', [neg(lambda)])]),
         fn('Factorial', [k])
+      );
+      // A symbolic index takes the support guard the literal route decided
+      // above (`discreteSupportGuard`).
+      if (isFiniteRealLiteral(x)) return closed;
+      return guardedMass(
+        ce,
+        discreteSupportGuard(ce, k),
+        closed,
+        numericApproximation
       );
     }
 
@@ -939,7 +1049,8 @@ function distributionPDF(
 function distributionCDF(
   ce: ComputeEngine,
   dist: Expression,
-  x: Expression
+  x: Expression,
+  numericApproximation: boolean
 ): Expression | undefined {
   const add = (a: Expression[]) => ce.function('Add', a);
   const mul = (a: Expression[]) => ce.function('Multiply', a);
@@ -969,29 +1080,43 @@ function distributionCDF(
       if (isFiniteRealLiteral(x) && x.isNegative === true) return ce.Zero;
       const rel = litOrder(ce, x, n);
       if (rel === 0 || rel === 1) return ce.One;
-      // Use ⌊k⌋ only for a numeric non-integer point; symbolic/integer k pass
-      // through directly.
-      const k =
-        isFiniteRealLiteral(x) && x.isInteger !== true
-          ? fn('Floor', [x]).evaluate()
-          : x;
+      // `⌊k⌋`: evaluated for a numeric non-integer point, written for a
+      // symbolic one; an index proven integer passes through directly.
+      const k = isFiniteRealLiteral(x)
+        ? x.isInteger === true
+          ? x
+          : fn('Floor', [x]).evaluate()
+        : typeFact(x.type.type, 'integer') === true
+          ? x
+          : fn('Floor', [x]);
       // CDF(k) = I_{1−p}(n−k, k+1)
-      return fn('BetaRegularized', [
+      const closed = fn('BetaRegularized', [
         sub(ce.One, p),
         sub(n, k),
         add([k, ce.One]),
       ]);
+      if (isFiniteRealLiteral(x)) return closed;
+      // A symbolic point takes the support tests the literal route decided
+      // above, so the two routes agree once the symbol is bound: `0` below
+      // the support, `1` at or above its top.
+      return discreteCDFGuard(ce, x, closed, numericApproximation, n);
     }
 
     case 'PoissonDistribution': {
       const [lambda] = distOps(dist);
       if (isFiniteRealLiteral(x) && x.isNegative === true) return ce.Zero;
-      const k =
-        isFiniteRealLiteral(x) && x.isInteger !== true
-          ? fn('Floor', [x]).evaluate()
-          : x;
+      // `⌊k⌋` as in the binomial case above.
+      const k = isFiniteRealLiteral(x)
+        ? x.isInteger === true
+          ? x
+          : fn('Floor', [x]).evaluate()
+        : typeFact(x.type.type, 'integer') === true
+          ? x
+          : fn('Floor', [x]);
       // CDF(k) = Q(⌊k⌋+1, λ)
-      return fn('GammaRegularized', [add([k, ce.One]), lambda]);
+      const closed = fn('GammaRegularized', [add([k, ce.One]), lambda]);
+      if (isFiniteRealLiteral(x)) return closed;
+      return discreteCDFGuard(ce, x, closed, numericApproximation);
     }
 
     case 'UniformDistribution': {

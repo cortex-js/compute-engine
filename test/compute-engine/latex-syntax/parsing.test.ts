@@ -405,7 +405,10 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('<=> maps to Equivalent', () => {
-      expect(ce.parse('p <=> q', { strict: false })).toMatchInlineSnapshot(
+      // A fresh engine: the shared one has used `q` as a function above,
+      // and `Equivalent` refuses a function-typed operand at boxing.
+      const e = new ComputeEngine();
+      expect(e.parse('p <=> q', { strict: false })).toMatchInlineSnapshot(
         `["Equivalent", "p", "q"]`
       );
     });

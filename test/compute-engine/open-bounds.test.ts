@@ -93,7 +93,7 @@ describe('OPEN BOUNDS — the normal form', () => {
     // stop at `!(0 | 1) & real<0..1>`).
     expect(R('!0 & !1 & real<0..1>')).toBe('real<0<..<1>');
     // A merged exclusion with an INTERIOR value keeps that hole.
-    expect(R('!0 & !0.5 & real<0..1>')).toBe('(real<0<..1>) & !0.5');
+    expect(R('!0 & !0.5 & real<0..1>')).toBe('real<0<..1> & !0.5');
   });
 
   it('a closed non-integral bound on an integer tier tightens inward', () => {
@@ -107,7 +107,7 @@ describe('OPEN BOUNDS — the normal form', () => {
   it('drops redundant and outside exclusions, keeps interior ones', () => {
     expect(R('(real<0<..>) & !0')).toBe('real<0<..>');
     expect(R('(real<0..1>) & !5')).toBe('real<0..1>');
-    expect(R('(real<0..1>) & !0.5')).toBe('(real<0..1>) & !0.5');
+    expect(R('(real<0..1>) & !0.5')).toBe('real<0..1> & !0.5');
   });
 
   it('empties normalize to never', () => {

@@ -1759,13 +1759,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (`resultIsComplexValued`, javascript-target.ts), and the per-call
       // sharpness lives in the type handler below.
       //
-      // What actually enforces the operand kinds is NOT this signature.
-      // `Divide` has a custom `canonical` handler (and `canonicalDivide` is
-      // called directly by the box route and by the `.div()` method), so
-      // neither the boxing-time signature validation nor the dispatch-time
-      // conformance re-test runs for it — the same seam `Power` documents.
-      // `checkNumericArgs` is what refuses a string or a boolean operand,
-      // at canonicalization. Since the carrier has no error point, no
+      // The hot box route and `.div()` call `canonicalDivide` through the
+      // numeric fast path, whose single `checkNumericArgs` pass enforces the
+      // operand kinds. The definition handler below is only the generic
+      // fallback; on that route its numeric check protects the rewrite, and
+      // a surviving same-head result is checked against this signature by
+      // the canonical-handler seam. Since the carrier has no error point, no
       // evaluate-handler refusal is needed to replace them.
       //
       // - if numer product of numbers, or denom product of numbers,
@@ -2124,11 +2123,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // the policy derived from the signature would be `reject`). The
       // result stays the wide `number`: the compiled lanes' kind-preservation
       // discipline reads it (`resultIsComplexValued`), and the type handler
-      // carries the per-call sharpness. This head has a `canonical`
-      // handler, so boxing validation and the dispatch-time conformance
-      // re-test never see it: the evaluate handler is the only seam, and
-      // with every numeric point in the carrier it enforces nothing but
-      // the NaN arm.
+      // carries the per-call sharpness. Its same-head canonical result is
+      // checked against this signature by the boxing seam; with every
+      // numeric point in the carrier, the evaluate handler then has nothing
+      // to enforce but the NaN arm.
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
       // The negative-integer branch widens the claim to `number` on the
@@ -3956,13 +3954,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // carrier derives `pass-through` — is no longer written here;
       // `Negate(Missing)` still yields `NaN`.
       //
-      // The enforcement seam is the `canonical` handler's
-      // `checkNumericArgs`, not this signature: a head with a custom
-      // `canonical` handler bypasses both the boxing-time signature
-      // validation and the dispatch-time conformance re-test (the `Power`
-      // and `Divide` arrangement). That is also what admits a `Quantity`
-      // or a `Measurement` operand, which type `value` and would be
-      // disjoint from this carrier.
+      // The hot box route runs `checkNumericArgs` once in
+      // `makeNumericFunction()` and bypasses the definition handler and its
+      // post-handler signature seam. That fast path is also what admits a
+      // `Quantity` or a `Measurement` operand, which type `value` and would
+      // be disjoint from this carrier. The handler below remains the guarded
+      // generic fallback for routes that do reach the definition.
       //
       // That handler folds a literal `NaN` operand to `NaN` at
       // canonicalization (through `.neg()`), rather than letting the node
@@ -4123,13 +4120,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //   `Exp(~oo)`/`Exp2(~oo)` (which canonicalize to `Power`) are
       //   incompatible-type errors. Indeterminate FORMS between admitted
       //   operands keep their NaN value (`0^0`, `1^∞`, `(±∞)^0`).
-      // The error surfaces at EVALUATION, inside the `evaluate` handler
-      // below: because this operator has a custom `canonical` handler,
-      // neither the boxing-time signature validation nor the dispatch-time
-      // conformance re-test runs for it, so the handler itself is the
-      // enforcement seam — the same arrangement as the trigonometric
-      // heads' factory (`trigFunction`, trigonometry.ts), and a tracked
-      // timing deviation of `docs/SIGNATURE-GUIDELINES.md` §4.
+      // A PROVABLE violation errors at boxing, through the validation
+      // seam that checks a `canonical`-handler head against its
+      // declaration; a violation only a VALUE reveals surfaces at
+      // evaluation, inside the `evaluate` handler below, which is the
+      // enforcement seam for it — the same arrangement as the
+      // trigonometric heads' factory (`trigFunction`, trigonometry.ts).
       // `canonicalPower` deliberately leaves the off-carrier points
       // unfolded so the node survives to that seam. `NaN` in either slot
       // propagates (declared explicitly: these extended carriers are not
@@ -5015,7 +5011,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // finiteness test:
         // every bare name under `number` denotes finite values alone, and
         // `complex` is the widest of them. It separates an operand whose type NAMES a non-finite
-        // disjunct — the `(real<0..>) | +oo | -oo` that `Abs` claims
+        // disjunct — the `real<0..> | +oo | -oo` that `Abs` claims
         // for a `number` operand — from one that is finite outright, and the
         // extended-real arm below needs that distinction: `√(+∞) = +∞`, so a
         // `finite_*` claim over a type that spells out `+oo | -oo`

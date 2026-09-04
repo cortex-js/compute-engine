@@ -116,6 +116,74 @@ function excludedFromScalarInference(op: Expression): boolean {
 }
 
 /**
+ * Validate the element carrier of an operand admitted through a threadable
+ * numeric parameter.
+ *
+ * Threadability admits a collection where the declared parameter describes
+ * one scalar cell. That admission must still reject a collection whose static
+ * element type is provably non-numeric (`list<string>` at a `complex` slot).
+ * The canonical-handler seam opts into this check to avoid a second
+ * `checkNumericArgs()` walk after it has already validated every operand.
+ * The ordinary broadcast path deliberately remains fail-open so evaluation
+ * can report a mismatch per cell with its broadcast context.
+ *
+ * An unknown/weak element type remains fail-open, as elsewhere in argument
+ * validation: the evaluate-time numeric gate decides once values are known.
+ */
+function validateThreadableOperand(
+  ce: ComputeEngine,
+  op: Expression,
+  param: Type,
+  displayParam?: Type
+): Expression {
+  // Missing cells are owned by the operator's propagation policy and remain
+  // valid broadcast input (`Sin(list<missing>) -> list<number>`).
+  if (typeContainsMissing(op.type.type)) return op;
+  if (
+    isSubtype(param, 'number') &&
+    typeIsProvablyNonNumericCollection(op.type.type)
+  )
+    return ce.typeError(displayParam ?? param, op.type, op);
+  return op;
+}
+
+/**
+ * Apply the numeric-context inference performed by `checkNumericArgs()` after
+ * validation has already succeeded. This is intentionally validation-free:
+ * the canonical-handler seam uses it to preserve the historical `number`
+ * inference of a fresh operand without paying for a second type-checking pass.
+ */
+export function inferNumericArgs(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): void {
+  ce._withoutFacts(() => {
+    let inferredType: Type = 'real';
+    for (const x of ops)
+      if (couldBeNonRealNumber(x.type.type)) {
+        inferredType = 'number';
+        break;
+      }
+    for (const x of ops)
+      if (isFiniteIndexedCollection(x)) {
+        // `.each()` on a lazy collection materializes every element, so never
+        // walk one merely to perform inference. Eager literals already store
+        // their cells and still need the walk: a contained inferred function
+        // call may have a result signature to narrow.
+        if (x.isLazyCollection) continue;
+        // A nested collection is consumed by nested broadcast rather than as
+        // a scalar cell; do not push scalar numeric inference into it.
+        for (const y of x.each())
+          if (!excludedFromScalarInference(y)) y._infer(() => inferredType);
+      } else if (!excludedFromScalarInference(x)) {
+        // A possibly-collection operand likewise must not have its shared
+        // result signature widened with a scalar numeric arm.
+        x._infer(() => inferredType);
+      }
+  });
+}
+
+/**
  * Check that the number of arguments is as expected.
  *
  * Converts the arguments to canonical, and flattens the sequence.
@@ -496,54 +564,7 @@ export function checkNumericArgs(
   // The whole pass — the scan that chooses the type and the writes that store
   // it — runs fact-blind, so an assumption narrowing one operand out of the
   // complex tier cannot decide what is inferred onto the others.
-  if (isValid) {
-    ce._withoutFacts(() => {
-      let inferredType: Type = 'real';
-      // If any of the arguments is a complex number, we'll infer the type as `number`
-      for (const x of xs)
-        if (couldBeNonRealNumber(x.type.type)) {
-          inferredType = 'number';
-          break;
-        }
-      for (const x of xs)
-        if (isFiniteIndexedCollection(x)) {
-          // `.each()` on a *lazy* collection (e.g. a large `Range`) materializes
-          // every element, so walking it just to run no-op inferences enumerates
-          // the whole collection at parse time (item 16: `\frac{[1...1e8]}{2}`
-          // hung `ce.parse`). Skip the walk for ANY lazy collection: the
-          // materialization cost is O(size) and does NOT depend on free variables,
-          // so a lazy source with a free variable (`Map(x ↦ x+k, Range(1,2e5))`)
-          // must be skipped just like a variable-free `Range` — walking it just to
-          // run element inferences that narrow nothing (`k` stays `unknown`) is
-          // pure overhead. Element validation/inference is deferred to evaluate
-          // time (fail-open), mirroring the admission-branch guard above. Eager
-          // collections (e.g. a literal `List`) already store their elements as
-          // operands, so walking them is cheap regardless of `unknowns`:
-          // `BoxedFunction._infer()` also narrows an inferred *result signature*
-          // (not just free symbols), so a concrete literal list containing an
-          // inferred function call still needs the walk.
-          if (x.isLazyCollection) continue;
-          // An ELEMENT that is itself a collection is consumed by NESTED
-          // broadcast, not as a scalar, so it gets the same exclusion the
-          // top-level operand gets on the branch below. Without it,
-          // `Multiply(2, [L, L])` with `L := [1, 2]` narrowed `L`'s value
-          // definition from `vector<integer^2>` to `real` while
-          // evaluating to the matrix `[[2, 4], [2, 4]]` — an unsound declared
-          // type for a value that is still a list, and one that made a second
-          // broadcast over the same symbol claim `vector<real^2>` for a
-          // `matrix<...^(2x2)>` result.
-          for (const y of x.each())
-            if (!excludedFromScalarInference(y)) y._infer(() => inferredType);
-        } else if (!excludedFromScalarInference(x))
-          x._infer(() => inferredType);
-      // A possibly-collection operand (a `vector<n>`-returning application,
-      // `number | list`, a tuple, a `dictionary<…>`-shaped signature) is not a
-      // scalar: inferring the scalar numeric context onto it would WIDEN a
-      // shared inferred result signature to `real | vector<…>` (Tycho item
-      // 121) — same guard as the signature-validation route above, and wider
-      // than broadcast admission (see `excludedFromScalarInference`).
-    });
-  }
+  if (isValid) inferNumericArgs(ce, xs);
 
   return xs;
 }
@@ -966,14 +987,17 @@ function distributeLiteralElementInference(op: Expression, param: Type): void {
 function evidenceGuardedNarrow(
   ce: ComputeEngine,
   op: Expression,
-  param: Type
+  param: Type,
+  noInference = false
 ): 'narrowed' | 'admitted' | 'fall-through' {
   const def = op.valueDefinition!;
   const held = def.value;
   const staticEvidence =
     held === undefined ? ce._staticAssignmentEvidence?.get(def) : undefined;
   if (held === undefined && staticEvidence === undefined) {
-    op._infer(() => param, 'narrow');
+    // A valueless symbol is admitted; in check-only mode it is admitted
+    // without the narrowing write.
+    if (!noInference) op._infer(() => param, 'narrow');
     return 'narrowed';
   }
   const evidenceType = held !== undefined ? held.type.type : staticEvidence!;
@@ -1566,6 +1590,20 @@ export interface ValidateArgumentsInternals {
    * SAME resolution the call was validated against instead of re-deriving
    * one with the trial-less prefilter. */
   resolutionOut?: { resolution?: OverloadResolution };
+  /** CHECK-ONLY mode: every verdict and every repair or substitution of the
+   * ordinary validation, but no inference — a valueless symbol is admitted
+   * where it would have been narrowed to the parameter, and the final
+   * narrowing pass is skipped. The boxing validation seam of a
+   * `canonical`-handler head runs in this mode: the head's own handler has
+   * already typed what it types, and the seam is a gate on the declaration,
+   * not a second source of types. */
+  noInference?: boolean;
+  /** Ask threadable numeric slots to reject a collection whose static element
+   * carrier is provably non-numeric. The canonical-handler seam uses this in
+   * place of its former second `checkNumericArgs()` pass. Ordinary broadcast
+   * validation stays fail-open so evaluation can report errors per cell with
+   * their broadcast context. */
+  checkNumericCollections?: boolean;
 }
 
 export function validateArguments(
@@ -1966,7 +2004,11 @@ export function validateArguments(
       isThreadableAt(threadable, idx) &&
       couldBeUnkeyedCollectionOperand(op)
     ) {
-      result.push(op);
+      const checked = internals?.checkNumericCollections
+        ? validateThreadableOperand(ce, op, param, displayParams[idx])
+        : op;
+      result.push(checked);
+      if (!checked.isValid) isValid = false;
       continue;
     }
     // D8 provisional admission (see `provisionalIdx`).
@@ -2054,7 +2096,7 @@ export function validateArguments(
       // whose own type fits is admitted with no write; one that does not
       // falls through to the ordinary `incompatible-type` error, minted at
       // canonicalization.
-      return evidenceGuardedNarrow(ce, op, param);
+      return evidenceGuardedNarrow(ce, op, param, internals?.noInference);
     });
     if (narrowVerdict !== 'fall-through') {
       result.push(op);
@@ -2234,7 +2276,16 @@ export function validateArguments(
       continue;
     }
     if (isThreadableAt(threadable, i) && couldBeUnkeyedCollectionOperand(op)) {
-      result.push(op);
+      const checked = internals?.checkNumericCollections
+        ? validateThreadableOperand(
+            ce,
+            op,
+            param,
+            displayOptParams[i - params.length]
+          )
+        : op;
+      result.push(checked);
+      if (!checked.isValid) isValid = false;
       i += 1;
       continue;
     }
@@ -2286,7 +2337,7 @@ export function validateArguments(
         )
       )
         return 'fall-through';
-      return evidenceGuardedNarrow(ce, op, param);
+      return evidenceGuardedNarrow(ce, op, param, internals?.noInference);
     });
     if (optNarrowVerdict !== 'fall-through') {
       result.push(op);
@@ -2412,7 +2463,11 @@ export function validateArguments(
         isThreadableAt(threadable, i - 1) &&
         couldBeUnkeyedCollectionOperand(op)
       ) {
-        result.push(op);
+        const checked = internals?.checkNumericCollections
+          ? validateThreadableOperand(ce, op, varParam, displayVarParam)
+          : op;
+        result.push(checked);
+        if (!checked.isValid) isValid = false;
         continue;
       }
       // D8 provisional admission (see `provisionalIdx`).
@@ -2459,7 +2514,7 @@ export function validateArguments(
           )
         )
           return 'fall-through';
-        return evidenceGuardedNarrow(ce, op, varParam);
+        return evidenceGuardedNarrow(ce, op, varParam, internals?.noInference);
       });
       if (varNarrowVerdict !== 'fall-through') {
         result.push(op);
@@ -2647,6 +2702,9 @@ export function validateArguments(
   // gives the operand a scalar tier must not suppress a narrowing which
   // outlives the assumption.
   const finalOps = substituted ? result : ops;
+  // Check-only mode (`noInference`): the verdicts above stand, the
+  // narrowing below is skipped.
+  if (internals?.noInference) return substituted ? result : null;
   ce._withoutFacts(() => {
     i = 0;
     for (const param of params) {

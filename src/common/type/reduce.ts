@@ -379,7 +379,7 @@ function meet2(a: Type, b: Type): Type | undefined {
     // the exclusion is vacuous and drops. Strictly inside the range it stays
     // an intersection member (no range spelling for an interior hole). The
     // pairwise fold re-offers a merged result to the remaining members, so
-    // `(real<0..1>) & !0 & !1` reaches `real<0<..<1>` in either order.
+    // `real<0..1> & !0 & !1` reaches `real<0<..<1>` in either order.
     // The exclusion may name SEVERAL values at once: two adjacent `!k`
     // members merge by De Morgan into `!(k₁ | k₂)` BEFORE the range is
     // offered to them (the fold keeps written order), so reading only a

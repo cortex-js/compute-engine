@@ -2,6 +2,7 @@ import { BigDecimal } from '../../big-decimal/index.js';
 
 import { euclideanNormType, pointNormBroadcasts } from './utils.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
+import { flatten } from '../boxed-expression/flatten.js';
 import {
   checkArity,
   nonNumericOperandError,
@@ -285,7 +286,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // DMS(degrees, minutes?, seconds?) — programmatic angle construction
     DMS: {
       description: 'Construct an angle from degrees, minutes, and seconds.',
-      signature: '(real, real?, real?) -> real',
+      // A complex component cannot be folded and leaves the call
+      // unevaluated rather than truncated (see the evaluate handler), so the
+      // declaration admits it; the type handler claims `real` when every
+      // component is provably real and the wide `number` otherwise, which
+      // is what the declared result says.
+      signature: '(number, number?, number?) -> number',
       type: (ops) => numericTypeHandlerOnTypes(ops),
       canonical: (ops, { engine: ce }) => {
         const deg = ops[0]?.re ?? NaN;
@@ -479,11 +485,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // The carrier is the FINITE complex numbers: sine is entire but has
       // no value and no limit at any infinity, so `Sin(±∞)` and
       // `Sin(~oo)` are incompatible-type errors (family-wide ruling,
-      // 2026-08-31 — they answered symbolic-then-NaN before). The factory
-      // `canonical` handler replaces boxing-time signature validation
-      // with an arity check, so the carrier is enforced by the
-      // dispatch-time conformance re-test at evaluation — the tracked
-      // timing deviation of `docs/SIGNATURE-GUIDELINES.md` §4. `NaN`
+      // 2026-08-31 — they answered symbolic-then-NaN before). A provable
+      // violation errors at boxing through the validation seam that
+      // checks a `canonical`-handler head against its declaration; the
+      // factory's evaluate handler enforces the same carrier for a
+      // non-finite value that only evaluation reveals. `NaN`
       // propagates by the mechanical default (finite complex carrier,
       // numeric result). The RESULT stays the wide `number` on purpose:
       // the compiled lanes' kind-preservation discipline documents its
@@ -699,10 +705,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // Same carrier and rationale as `Sin` above: arcsine extends to the
       // whole finite complex plane (`Arcsin(2)` is complex) but has no
       // value at any infinity, so a non-finite argument is an
-      // incompatible-type error, enforced in the factory's evaluate
-      // handler (its `canonical` handler bypasses boxing validation — the
-      // tracked timing deviation). The result stays the wide `number` for
-      // the same compiled-lane reason as `Sin` above.
+      // incompatible-type error — at boxing when provable (the validation
+      // seam of a `canonical`-handler head), and in the factory's evaluate
+      // handler for a value only evaluation reveals. The result stays the
+      // wide `number` for the same compiled-lane reason as `Sin` above.
       signature: '(complex) -> number',
     },
 
@@ -1545,13 +1551,13 @@ function trigFunction(
   //   continuous at 0, so every direction of infinity gives the same value
   //   (`Arcsec`, `Arccsc`, `Arcoth`, `Arcsch`).
   //
-  // The `canonical` handler below replaces boxing-time signature validation
-  // with an arity check, so the head enforces the carrier at EVALUATION
-  // instead: a concrete off-carrier non-finite operand gets the same
-  // incompatible-type error value boxing would have produced, and an
-  // in-carrier infinity folds to the head's value there
-  // (`nonFiniteTrigValue`) — the tracked timing deviation of
-  // `docs/SIGNATURE-GUIDELINES.md` §4. `NaN` is NOT an error — it
+  // The `canonical` handler below checks arity and folds; the declared
+  // carrier is enforced at boxing by the validation seam that checks a
+  // `canonical`-handler head against its declaration (a provable
+  // off-carrier operand becomes an incompatible-type error operand there),
+  // and again at EVALUATION by the head itself for a non-finite value only
+  // evaluation reveals, where an in-carrier infinity folds to the head's
+  // value (`nonFiniteTrigValue`). `NaN` is NOT an error — it
   // propagates: derived for the `complex` carrier, declared explicitly for
   // the extended carriers (which are not subtypes of `complex`, so the
   // mechanical default there would be `reject`).
@@ -1580,19 +1586,18 @@ function trigFunction(
         const radians = angularQuantityToRadians(ops[0]);
         if (radians) return ce._fn(operator, [radians]);
       }
-      // Validate arity (inserts error markers for missing args)
-      ops = checkArity(ce, ops, 1);
+      // Bind/canonicalize and splice sequence operands, but leave arity and
+      // type checking to the framework's signature-validation seam. The old
+      // `checkArity()` call mixed those two jobs and made every ordinary trig
+      // call pay a second validation pass.
+      ops = ce.strict ? flatten(ops) : checkArity(ce, ops, 1);
       return ce._fn(operator, ops);
     },
     evaluate: ([x], { numericApproximation, engine }) => {
-      // The `canonical` handler above replaces the default signature-based
-      // argument validation with an arity check, so an operand that is not a
-      // number reaches evaluation unreported. Left alone it stays inert
-      // (`sin("a")`), which reads as "symbolic, pending more information"
-      // rather than as the type mistake it is. This also covers the operand
-      // whose static type is a UNION that could still be numeric — the
-      // element type of a heterogeneous list, `Sin(At(["a", 2], 1))` — which
-      // no boxing-time check can settle.
+      // The boxing seam reports a statically provable carrier violation.
+      // This complements it for an operand whose static type is a UNION that
+      // could still be numeric — the element type of a heterogeneous list,
+      // `Sin(At(["a", 2], 1))` — which no boxing-time check can settle.
       const nonNumeric = nonNumericOperandError(engine, [x]);
       if (nonNumeric !== undefined) return nonNumeric;
       // The carrier, enforced at the evaluate seam (see the factory

@@ -26,6 +26,17 @@ const COLLECTION_PRECEDENCE = 9;
 const TUPLE_PRECEDENCE = 10;
 const VALUE_PRECEDENCE = 11;
 
+// The context an argument modifier (`?`, `*`, `+`) is emitted into. The
+// modifier is written after the whole argument type, so an argument built with
+// `|`, `&` or `->` reads as if the modifier applied only to the last member:
+// `complex | infinity+` looks like a union with a variadic `infinity` in it,
+// where the type is a variadic `complex | infinity`. The parser binds the
+// modifier to the whole element either way (`parseArgument()` reads the
+// element with `parseUnionType()` before it looks for a modifier), so the
+// parentheses this precedence adds are for the reader. A negation is a PREFIX
+// form and reads correctly without them.
+const ARGUMENT_MODIFIER_PRECEDENCE = NEGATION_PRECEDENCE;
+
 /**
  * While set, {@link typeToString} elides the ` pure` specifier of a STATED
  * empty effect set, emitting the bare arrow instead. See
@@ -312,12 +323,14 @@ export function typeToString(type: Type, precedence = 0): string {
         ? type.args.map((arg) => namedElement(arg)).join(', ')
         : '';
       const optArgs = type.optArgs
-        ? type.optArgs.map((arg) => namedElement(arg) + '?').join(', ')
+        ? type.optArgs
+            .map((arg) => namedElement(arg, ARGUMENT_MODIFIER_PRECEDENCE) + '?')
+            .join(', ')
         : '';
       const varArg = type.variadicArg
         ? type.variadicMin === 0
-          ? `${namedElement(type.variadicArg)}*`
-          : `${namedElement(type.variadicArg)}+`
+          ? `${namedElement(type.variadicArg, ARGUMENT_MODIFIER_PRECEDENCE)}*`
+          : `${namedElement(type.variadicArg, ARGUMENT_MODIFIER_PRECEDENCE)}+`
         : '';
       const argsList = [args, optArgs, varArg].filter((s) => s).join(', ');
       // The effect specifier slot. An ABSENT effect set has an empty slot and
@@ -371,13 +384,21 @@ export function typeToString(type: Type, precedence = 0): string {
   return result!;
 }
 
-function namedElement(el: NamedElement): string {
-  // The label of a tuple element or a function argument. Backticked when it is
-  // not a plain identifier, for the same reason a record key is: the type
-  // lexer reads only `[a-zA-Z_][a-zA-Z0-9_]*` bare, so `tuple<my x: integer>`
-  // would not parse back.
-  if (el.name) return `${symbolName(el.name)}: ${typeToString(el.type)}`;
-  return typeToString(el.type);
+/**
+ * A tuple element or a function argument.
+ *
+ * @param precedence The tightness of the context the element is emitted into,
+ * as in {@link typeToString}. An argument that carries a `?`, `*` or `+`
+ * modifier passes {@link ARGUMENT_MODIFIER_PRECEDENCE} so the modifier cannot
+ * be read as applying to part of the type.
+ */
+function namedElement(el: NamedElement, precedence = 0): string {
+  // A label that is not a plain identifier is backticked, for the same reason
+  // a record key is: the type lexer reads only `[a-zA-Z_][a-zA-Z0-9_]*` bare,
+  // so `tuple<my x: integer>` would not parse back.
+  if (el.name)
+    return `${symbolName(el.name)}: ${typeToString(el.type, precedence)}`;
+  return typeToString(el.type, precedence);
 }
 
 function symbolName(name: string): string {
@@ -422,6 +443,17 @@ function getPrecedence(kind: string): number {
     case 'value':
     // A type variable is an atom, like a primitive name: never parenthesized.
     case 'variable':
+    // A ranged numeric (`real<0..>`), an expression type (`expression<Add>`),
+    // a symbol type (`symbol<x>`) and a nominal reference (`tree<integer>`)
+    // are atoms too: each is one identifier, optionally followed by its own
+    // `<…>` brackets, so no surrounding operator can bind into it. Without a
+    // case here they fell to the `default` below, whose 0 is LOWER than every
+    // context and made the serializer wrap them everywhere they were nested —
+    // `(real<0..>) | string`, `(real<0..>)?`, `!(real<0..>)`.
+    case 'numeric':
+    case 'expression':
+    case 'symbol':
+    case 'reference':
       return VALUE_PRECEDENCE;
     default:
       return 0;

@@ -522,7 +522,7 @@ describe('Epsil CLI signature error notes', () => {
     // signature is asserted separately from the lead-in.
     expect(stderr()).toContain('`Ln` has signature');
     expect(stderr()).toContain(
-      '(complex | infinity, base: complex | infinity?) -> complex | infinity'
+      '(complex | infinity, base: (complex | infinity)?) -> complex | infinity'
     );
     expect(stderr()).not.toContain('is defined here');
   });

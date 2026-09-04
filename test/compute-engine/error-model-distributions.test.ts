@@ -48,21 +48,30 @@ describe('Contract B — distribution constructor carriers', () => {
   const ce = new ComputeEngine();
 
   test('the declared carriers are the mathematical parameter domains', () => {
+    // The carriers are RANGED where the domain is: a canonical-handler head
+    // is validated against its declaration at boxing (the boxing validation
+    // seam), so a symbol whose held value lies outside the range is refused
+    // there, as a literal is refused by the handler. `a < b` for the uniform
+    // distribution has no spelling in a type and stays the handler's.
     expect(
       ce.lookupDefinition('NormalDistribution')!.operator!.signature.toString()
-    ).toBe('(real, real) -> expression<NormalDistribution>');
+    ).toBe('(real, real<0<..>) -> expression<NormalDistribution>');
     expect(
-      ce.lookupDefinition('BinomialDistribution')!.operator!.signature.toString()
-    ).toBe('(integer, real<0..1>) -> expression<BinomialDistribution>');
+      ce
+        .lookupDefinition('BinomialDistribution')!
+        .operator!.signature.toString()
+    ).toBe('(integer<0..>, real<0..1>) -> expression<BinomialDistribution>');
     expect(
       ce.lookupDefinition('PoissonDistribution')!.operator!.signature.toString()
-    ).toBe('(real) -> expression<PoissonDistribution>');
+    ).toBe('(real<0<..>) -> expression<PoissonDistribution>');
     expect(
       ce.lookupDefinition('UniformDistribution')!.operator!.signature.toString()
     ).toBe('(real, real) -> expression<UniformDistribution>');
     expect(
-      ce.lookupDefinition('ExponentialDistribution')!.operator!.signature.toString()
-    ).toBe('(real) -> expression<ExponentialDistribution>');
+      ce
+        .lookupDefinition('ExponentialDistribution')!
+        .operator!.signature.toString()
+    ).toBe('(real<0<..>) -> expression<ExponentialDistribution>');
   });
 
   test('every parameter slot rejects NaN', () => {
@@ -188,8 +197,8 @@ describe('Contract B — PDF and CDF carriers', () => {
 
   test('the declared carriers and per-slot NaN policies', () => {
     for (const [name, result] of [
-      ['PDF', '(real<0..>) | nan'],
-      ['CDF', '(real<0..1>) | nan'],
+      ['PDF', 'nan | real<0..>'],
+      ['CDF', 'nan | real<0..1>'],
     ] as [string, string][]) {
       const def = ce.lookupDefinition(name)!.operator!;
       expect(def.signature.toString()).toBe(
@@ -258,7 +267,10 @@ describe('Contract B — PDF and CDF carriers', () => {
     expect(d).toMatch(/^3\.98942280401432\d*e-501$/);
     // And the CDF keeps the honest closed form rather than the `+∞` constant.
     expect(
-      e.box(['CDF', ['NormalDistribution', 0, 1], big]).evaluate().toString()
+      e
+        .box(['CDF', ['NormalDistribution', 0, 1], big])
+        .evaluate()
+        .toString()
     ).toContain('Erf');
   });
 
@@ -323,10 +335,22 @@ describe('Contract B — PDF and CDF carriers', () => {
       // The discrete CDFs used to leave an inert
       // `GammaRegularized(+oo, 2)` / `BetaRegularized(0.5, -oo, +oo)`; the
       // uniform answered the unclamped ramp (`+oo` / `-oo`).
-      expect([name, e.box(['CDF', d, 'PositiveInfinity'] as any).evaluate().re]).toEqual([name, 1]);
-      expect([name, e.box(['CDF', d, 'NegativeInfinity'] as any).evaluate().re]).toEqual([name, 0]);
-      expect([name, e.box(['CDF', d, 'PositiveInfinity'] as any).N().re]).toEqual([name, 1]);
-      expect([name, e.box(['CDF', d, 'NegativeInfinity'] as any).N().re]).toEqual([name, 0]);
+      expect([
+        name,
+        e.box(['CDF', d, 'PositiveInfinity'] as any).evaluate().re,
+      ]).toEqual([name, 1]);
+      expect([
+        name,
+        e.box(['CDF', d, 'NegativeInfinity'] as any).evaluate().re,
+      ]).toEqual([name, 0]);
+      expect([
+        name,
+        e.box(['CDF', d, 'PositiveInfinity'] as any).N().re,
+      ]).toEqual([name, 1]);
+      expect([
+        name,
+        e.box(['CDF', d, 'NegativeInfinity'] as any).N().re,
+      ]).toEqual([name, 0]);
     }
   });
 
@@ -430,9 +454,7 @@ describe('Contract B — PDF and CDF carriers', () => {
     // `Q(3, 2)` has the exact closed form `e^{-2}(1 + 2 + 2)` for a
     // positive-integer first operand, so the Poisson CDF evaluates to it;
     // `.N()` is the same 0.6767… either way.
-    expect(e.box(['CDF', POISSON, 2.5]).evaluate().toString()).toBe(
-      '5 / e^2'
-    );
+    expect(e.box(['CDF', POISSON, 2.5]).evaluate().toString()).toBe('5 / e^2');
     expect(e.box(['CDF', BINOMIAL, 2.5]).evaluate().re).toBe(0.0546875);
     expect(e.box(['CDF', NORMAL, 'x']).evaluate().toString()).toBe(
       '1/2 * (Erf(sqrt(2)/2 * x) + 1)'
@@ -452,7 +474,7 @@ describe('Contract B — Quantile carrier', () => {
   test('the declared carrier and per-slot NaN policies', () => {
     const def = ce.lookupDefinition('Quantile')!.operator!;
     expect(def.signature.toString()).toBe(
-      '((distribution) | collection<any>, real<0..1>) -> nan | real | signed_infinity'
+      '(collection<any> | distribution, real<0..1>) -> nan | real | signed_infinity'
     );
     expect(def.resolvedNanBehaviorAt(0)).toBe('reject');
     expect(def.resolvedNanBehaviorAt(1)).toBe('propagate');
@@ -482,8 +504,14 @@ describe('Contract B — Quantile carrier', () => {
     for (const [name, d] of ALL) {
       // `Quantile(BinomialDistribution(...), NaN)` and the Poisson one were
       // inert before the policy applied.
-      expect([name, e.box(['Quantile', d, 'NaN'] as any).evaluate().isNaN]).toEqual([name, true]);
-      expect([name, e.box(['Quantile', d, 'NaN'] as any).N().isNaN]).toEqual([name, true]);
+      expect([
+        name,
+        e.box(['Quantile', d, 'NaN'] as any).evaluate().isNaN,
+      ]).toEqual([name, true]);
+      expect([name, e.box(['Quantile', d, 'NaN'] as any).N().isNaN]).toEqual([
+        name,
+        true,
+      ]);
     }
   });
 
@@ -529,17 +557,23 @@ describe('Contract B — Quantile carrier', () => {
         p,
         'Quantile',
       ]);
-      expect([p, e.box(['Quantile', BINOMIAL, p]).evaluate().operator]).toEqual([
-        p,
-        'Quantile',
-      ]);
+      expect([p, e.box(['Quantile', BINOMIAL, p]).evaluate().operator]).toEqual(
+        [p, 'Quantile']
+      );
     }
   });
 
   test('the empirical quantile absorbs an absent datum and an empty sample', () => {
     const e = new ComputeEngine();
-    expect(e.box(['Quantile', ['List', 1, 2, 3, 4], 0.5]).evaluate().toString()).toBe('5/2');
-    expect(e.box(['Quantile', ['List', 1, 'NaN', 3], 0.5]).evaluate().isNaN).toBe(true);
+    expect(
+      e
+        .box(['Quantile', ['List', 1, 2, 3, 4], 0.5])
+        .evaluate()
+        .toString()
+    ).toBe('5/2');
+    expect(
+      e.box(['Quantile', ['List', 1, 'NaN', 3], 0.5]).evaluate().isNaN
+    ).toBe(true);
     // An empty sample has no order statistics: `NaN`, where the application
     // used to stay inert.
     expect(e.box(['Quantile', ['List'], 0.5]).evaluate().isNaN).toBe(true);
@@ -559,9 +593,7 @@ describe('Contract B — Quantile carrier', () => {
     expect(inert.operator).toBe('Quantile');
     // ...and a numeric expression with no literal reading yet, likewise.
     expect(
-      e
-        .box(['Quantile', ['List', 1, ['Sqrt', -2], 3], 0.5])
-        .evaluate().operator
+      e.box(['Quantile', ['List', 1, ['Sqrt', -2], 3], 0.5]).evaluate().operator
     ).toBe('Quantile');
     // ABSENT: `Missing` makes the whole aggregate `NaN` (§3.C), as the `NaN`
     // datum already did.
@@ -601,7 +633,9 @@ describe('Contract B — Quantile carrier', () => {
 
   test('a complex datum is still refused, and the boundary exits never hand one back', () => {
     const e = new ComputeEngine();
-    const x = e.box(['Quantile', ['List', 1, ['Complex', 1, 2], 3], 0.5]).evaluate();
+    const x = e
+      .box(['Quantile', ['List', 1, ['Complex', 1, 2], 3], 0.5])
+      .evaluate();
     expect(x.operator).toBe('Error');
     expect(x.toString()).toContain('"real"');
   });
@@ -642,5 +676,69 @@ describe('exact rationals at the edge of the double range in a CDF', () => {
     const cdf = e.box(['CDF', UNIFORM, below] as any).evaluate();
     expect(cdf.isSame(below)).toBe(true);
     expect(cdf.isSame(1)).toBe(false);
+  });
+});
+
+describe('a discrete pmf or CDF at a symbolic point agrees with the literal route', () => {
+  // The bare closed forms used to be the continuous interpolation: with
+  // `x := 0.5` afterwards, `PDF(PoissonDistribution(2), x)` answered `0.216`
+  // where the literal `PDF(PoissonDistribution(2), 0.5)` answers `0`, and the
+  // CDF omitted the `Floor` the literal route applies. The symbolic forms now
+  // carry the same support guard (`Which` on integrality and sign, `Floor`
+  // in the CDF), and drop each clause the point's type already proves.
+  const at = (form: any, x: number) =>
+    form.subs({ x: x }).N().re as number;
+
+  test('Poisson pmf', () => {
+    const e = new ComputeEngine();
+    const sym = e.box(['PDF', POISSON, 'x']).evaluate();
+    expect(sym.operator).toBe('Which');
+    for (const x of [0, 1, 3, 0.5, 2.5, -1]) {
+      const lit = e.box(['PDF', POISSON, x]).N().re as number;
+      expect(at(sym, x)).toBeCloseTo(lit, 12);
+    }
+    expect(at(sym, 0.5)).toBe(0);
+    expect(at(sym, -1)).toBe(0);
+  });
+
+  test('Poisson CDF', () => {
+    const e = new ComputeEngine();
+    const sym = e.box(['CDF', POISSON, 'x']).evaluate();
+    expect(sym.operator).toBe('Which');
+    for (const x of [0, 1, 3, 0.5, 2.5, -1, -0.5]) {
+      const lit = e.box(['CDF', POISSON, x]).N().re as number;
+      expect(at(sym, x)).toBeCloseTo(lit, 12);
+    }
+    expect(at(sym, -1)).toBe(0);
+  });
+
+  test('binomial pmf and CDF, with the top of the support', () => {
+    const e = new ComputeEngine();
+    const B = ['BinomialDistribution', 5, 0.5];
+    const pmf = e.box(['PDF', B, 'x']).evaluate();
+    const cdf = e.box(['CDF', B, 'x']).evaluate();
+    expect(pmf.operator).toBe('Which');
+    expect(cdf.operator).toBe('Which');
+    for (const x of [0, 2, 5, 2.5, 6, -1]) {
+      expect(at(pmf, x)).toBeCloseTo(e.box(['PDF', B, x]).N().re as number, 12);
+      expect(at(cdf, x)).toBeCloseTo(e.box(['CDF', B, x]).N().re as number, 12);
+    }
+    expect(at(pmf, 6)).toBe(0);
+    expect(at(cdf, 6)).toBe(1);
+    expect(at(cdf, -1)).toBe(0);
+  });
+
+  test('a point whose type proves the support keeps the bare closed form', () => {
+    const e = new ComputeEngine();
+    e.declare('m', 'integer<0..>');
+    expect(e.box(['PDF', POISSON, 'm']).evaluate().operator).not.toBe('Which');
+    expect(e.box(['CDF', POISSON, 'm']).evaluate().operator).toBe(
+      'GammaRegularized'
+    );
+    // An integer of unknown sign keeps only the sign clause, and no `Floor`.
+    e.declare('k', 'integer');
+    const cdf = e.box(['CDF', POISSON, 'k']).evaluate();
+    expect(cdf.operator).toBe('Which');
+    expect(cdf.toString()).not.toContain('floor');
   });
 });

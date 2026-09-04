@@ -74,6 +74,46 @@
 
 ### Resolved Issues
 
+- **A head with a `canonical` handler is validated against its declared
+  signature at boxing.** Such a head used to get no signature validation
+  at all (the handler was the only gate, and most only check arity), so
+  `PoissonDistribution(s)` with `s := -3` boxed silently where a literal
+  `-3` is refused, and an ill-typed call slipped through as valid. The
+  handler's result is now checked against the declaration as a gate: a
+  provably off-carrier operand becomes the same error operand a plain
+  head mints, and a symbol whose held value lies outside a ranged
+  parameter is refused. The check infers nothing — a fresh symbol keeps
+  the type it had. The distribution constructors declare their carriers
+  as ranged types (`real<0<..>` for a rate or a deviation, `integer<0..>`
+  for a count), and the declarations that were narrower than their
+  handlers were widened: `Apply` takes any callee (a function literal, and
+  the shorthands `Apply(3, 5)` and `Apply(x + 1, 2)`), every relation
+  accepts a single operand as the degenerate chain (`Less(3)` is `True`),
+  `At` takes a base of any type, `DMS` a complex component, and the set
+  relations and constructors take any operand (a geometry label such as
+  `AC` in `P = AC ∩ BD` stays inert, as before). A provable off-carrier
+  operand of the trigonometric family, such as `Sin(+oo)`, is now refused
+  at boxing instead of at evaluation, and so is a range used as a range
+  bound. At this seam, threadable validation now checks a collection's element
+  carrier itself, so canonical numeric heads no longer need a second
+  `checkNumericArgs` validation pass; the arithmetic fast paths continue to
+  perform their existing single numeric check.
+- **`Norm(v, p)` round-trips through LaTeX.** The serializer wrote
+  `\left\Vert v\right\Vert` and dropped the order, so a 1-norm reparsed
+  as the 2-norm. An order now serializes as a subscript — `\|v\|_1`,
+  `\|v\|_\infty`, `\|v\|_F`, `\|v\|_3` — and parses back from every
+  norm spelling (`\|…\|`, `\left\Vert…\right\Vert`, `\lVert…\rVert`,
+  `||…||`, the `Vmatrix` environment); `F` is the Frobenius order. No
+  subscript, and the order 2, stay the plain 2-norm.
+- **A variadic or optional argument whose type is a union prints with
+  its parentheses, and an atomic type never does.** `(complex | infinity,
+  (complex | infinity)+) -> number` printed as `(complex | infinity,
+  complex | infinity+) -> number` in hovers and error messages, while a
+  ranged number, an `expression<…>`, a `symbol<…>` or a named type was
+  parenthesized wherever it was nested: `(real<0..>) | nan`. Both are
+  fixed; the round trip was already stable. Because a union sorts its
+  members by their printed form, a union that carried such a parenthesis
+  may now print its members in a different order (`nan | real<0..>`).
 - **A discrete pmf or CDF at a symbolic point agrees with the literal
   route.** `PDF(PoissonDistribution(2), x)` evaluated to the bare closed
   form `2^x / (x!·e²)`, the continuous interpolation of the mass: with

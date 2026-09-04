@@ -51,11 +51,11 @@ To search the library by concept rather than by name, use
 | `About` | `(any) -> dictionary<any>` | Return information about an expression as a dictionary: its kind (symbol, constant, function, number, string, expression), its static type and, when applicable, its name, value, signature, clause listing, algebraic attributes, description,… |
 | `Angle` | `(any+) -> number` | Angle mark / measure (`\angle ABC`, `\varangle XYZ`, `∠ABC`) — opaque typed head; not evaluated. |
 | `Annotated` | `(expression, dictionary<any>) -> expression` | Attach metadata or style annotations to an expression. |
-| `Apply` | `(name: symbol, arguments: expression*) -> unknown` | Apply a function to a list of arguments |
+| `Apply` | `(name: any, arguments: any*) -> unknown` | Apply a function to a list of arguments |
 | `Arc` | `(any+) -> number` | Arc / wide-hat accent measure (`\widehat{ABC}`) — opaque typed head; not evaluated. |
 | `Assign` | `(expression \| symbol, any) scope -> any` | Assign a value to a symbol or define a sequence. |
 | `Assume` | `(any) scope -> string` | Record an assumption about a symbol. |
-| `BaseForm` | `(T, number \| string?) -> T where T: number` | `BaseForm(expr, base=10)` |
+| `BaseForm` | `(T, (number \| string)?) -> T where T: number` | `BaseForm(expr, base=10)` |
 | `BuiltinFunction` | `(string \| symbol) -> symbol` | Return a built-in function symbol by name. |
 | `CanonicalForm` | `(any, symbol*) -> any` | Return the canonical form of an expression |
 | `CaseFold` | `(string) -> string` | CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `CaseFold(a) == CaseFold(b)` tests equality ignoring case. |
@@ -64,20 +64,20 @@ To search the library by concept rather than by name, use
 | `Coalesce` | `(any+) -> unknown` | Return the first operand that is not ABSENT (`Missing` or `NaN`), evaluated left-to-right. |
 | `Colon` | `(any, any) -> expression` | Type annotation (`a : b`) — opaque typed head. |
 | `Conforms` | `(subject: any, protocols: string+) -> boolean` | True iff the subject conforms to EVERY named protocol. |
-| `Declare` | `(symbol, type: string \| symbol?, value: any?, attributes: dictionary<any>?) scope -> any` | Declare a symbol in the current scope, optionally assigning a type and an initial value. |
+| `Declare` | `(symbol, type: (string \| symbol)?, value: any?, attributes: dictionary<any>?) scope -> any` | Declare a symbol in the current scope, optionally assigning a type and an initial value. |
 | `DeclareConformance` | `(target: string \| symbol, protocols: any, whereClauseOrImplementation: any?, implementation: dictionary<any>?) scope -> nothing` | Declare that a type CONFORMS to one or more protocols — the lowering of the Epsil `type string is Hashable & Comparable` statement. |
 | `DeclareProtocol` | `(string \| symbol, members: dictionary<any>?) scope -> nothing` | Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. |
 | `DeclareSumType` | `(string \| symbol, any*) scope -> nothing` | Declare a SUM TYPE: N nominal variants plus the transparent union that names them, in one statement — the lowering of the Epsil sugar `type node = lit(num: number) \| plus(op1: node, op2: node)`. |
 | `DeclareType` | `(string \| symbol, type: string \| symbol \| type, attributes: dictionary<any>?) scope -> nothing` | Declare a type. |
 | `DefineFunction` | `(symbol, function, dictionary<any>?) scope -> nothing` | Define one clause of a (possibly multi-clause) function: `DefineFunction(f, Function(body, params…))`. |
 | `Delimiter` | `(any, string?) -> any` | Group expressions with explicit delimiters. |
-| `DigitsFrom` | `(string, integer \| string?) -> integer` | Return an integer representation of the string `s` in base `base`. |
-| `Error` | `((expression<ErrorCode>) \| string, expression?) -> nothing` | Represent an error expression. |
+| `DigitsFrom` | `(string, (integer \| string)?) -> integer` | Return an integer representation of the string `s` in base `base`. |
+| `Error` | `(expression<ErrorCode> \| string, expression?) -> nothing` | Represent an error expression. |
 | `ErrorCode` | `(string, any*) -> error` | Structured error code with optional arguments. |
 | `Evaluate` | `(any) -> unknown` | Evaluate an expression. |
 | `EvaluateAt` | `(function, lower: expression, upper: expression) -> unknown` | Evaluate a function at one point or between two bounds. |
 | `FindRoot` | `(any, any) -> dictionary` | FindRoot(equations, params): numerically find parameter values that |
-| `Function` | `(expression, function \| symbol*) -> function` | A function literal |
+| `Function` | `(expression, (function \| symbol)*) -> function` | A function literal |
 | `GeometricVector` | `(any, any) -> expression` | Geometric vector (directed segment between two points) — opaque typed head. |
 | `GraphemeClusters` | `(string) -> list<character>` | A collection of grapheme clusters from a string. |
 | `Head` | `(any) -> symbol` | Return the head of an expression, the name of the operator |
@@ -98,7 +98,7 @@ To search the library by concept rather than by name, use
 | `N` | `(any, integer?) -> unknown` | N(expr): numerically evaluate an expression |
 | `NamedArgument` | `(string, any) -> nothing` | NamedArgument(name, value): one named argument of a call (Epsil |
 | `Nothing` | variable `nothing` | The absence of a value; the sole member of the unit type. |
-| `NumberFrom` | `(string, base: integer \| string?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN". |
+| `NumberFrom` | `(string, base: (integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN". |
 | `Object` | `(any, string?) -> unknown` | Provenance head for the snapshot of a mutable object: `["Object", <record>, "'TypeName'"]`. |
 | `OverParen` | `(any+) -> expression` | Over-paren accent (`\overparen{BC}`) — opaque typed head; not evaluated. |
 | `PadEnd` | `(string, n: integer, pad: string?) -> string` | PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
@@ -113,13 +113,13 @@ To search the library by concept rather than by name, use
 | `ProtocolMember` | `(protocol: string, member: string, arguments: any*) -> unknown` | Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, which parses as `Apply(Field(Comparable, "compare"), x, y)`). |
 | `ProtocolProperty` | `(protocol: string, property: string, receiver: any, value: any?) -> unknown` | Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). |
 | `Quadrilateral` | `(any+) -> expression` | Quadrilateral mark (`\square ABCD`) — opaque typed head; not evaluated. |
-| `Random` | `(collection<any> \| set<real>?) random -> any` | Random(): non-deterministic real in [0, 1) |
+| `Random` | `((collection<any> \| set<real>)?) random -> any` | Random(): non-deterministic real in [0, 1) |
 | `RandomChoice` | `(collection<any> \| set<real>, number) random -> list<any>` | RandomChoice(domain, k): a list of k independent draws from `domain`, with replacement. |
 | `RandomExpression` | `() entropy -> expression` | Generate a random expression. |
 | `ReleaseHold` | `(any) -> unknown` | Release an expression held by `Hold` |
 | `ReplaceAll` | `(any, any+) -> any` | ReplaceAll(expr, rules): apply one or more replacement rules to `expr`, |
 | `Rule` | `(match: expression, replace: expression, predicate: function?) -> expression` | Pattern replacement rule. |
-| `RuntimeError` | `((expression<ErrorCode>) \| string) -> never` | Construct an error value when evaluated: the runtime counterpart of a written `Error(…)`, which is a static diagnostic node. |
+| `RuntimeError` | `(expression<ErrorCode> \| string) -> never` | Construct an error value when evaluated: the runtime counterpart of a written `Error(…)`, which is a static diagnostic node. |
 | `Segment` | `(any+) -> expression` | Segment primitive — opaque typed head. |
 | `Sequence` | `function` | Ordered sequence of expressions. |
 | `Signature` | `(symbol) -> nothing \| string` | Return the signature string of an operator. |
@@ -144,9 +144,9 @@ To search the library by concept rather than by name, use
 | `ToLowerCase` | `(string) -> string` | ToLowerCase(s): the string `s` mapped to lower case using the Unicode default (locale-independent) mappings. |
 | `ToUpperCase` | `(string) -> string` | ToUpperCase(s): the string `s` mapped to upper case using the Unicode default (locale-independent) mappings. |
 | `Triangle` | `(any+) -> expression` | Triangle primitive — opaque typed head. |
-| `Trim` | `(string, chars: character \| collection<character \| string> \| string?) -> string` | Trim(s): remove leading and trailing whitespace (the Unicode White_Space characters). |
-| `TrimEnd` | `(string, chars: character \| collection<character \| string> \| string?) -> string` | TrimEnd(s): remove trailing whitespace (the Unicode White_Space characters). |
-| `TrimStart` | `(string, chars: character \| collection<character \| string> \| string?) -> string` | TrimStart(s): remove leading whitespace (the Unicode White_Space characters). |
+| `Trim` | `(string, chars: (character \| collection<character \| string> \| string)?) -> string` | Trim(s): remove leading and trailing whitespace (the Unicode White_Space characters). |
+| `TrimEnd` | `(string, chars: (character \| collection<character \| string> \| string)?) -> string` | TrimEnd(s): remove trailing whitespace (the Unicode White_Space characters). |
+| `TrimStart` | `(string, chars: (character \| collection<character \| string> \| string)?) -> string` | TrimStart(s): remove leading whitespace (the Unicode White_Space characters). |
 | `Type` | `(any) -> type` | The STATIC type of an expression, as a type value: `Type(3)` is `TypeFrom("integer")`. |
 | `TypeFrom` | `(text: string) -> type` | A type expression as a first-class value, constructed from its text: `TypeFrom("list<integer>")`. |
 | `Typed` | `(any, string \| symbol) -> unknown` | Ascribe a type to an expression. |
@@ -217,12 +217,12 @@ To search the library by concept rather than by name, use
 | Name | Signature | Summary |
 |:-----|:----------|:--------|
 | `Adjoin` | `(set<any>, any+) -> set` | The ring obtained by adjoining one or more elements to a base ring. |
-| `All` | `(collection<T>, predicate: (T) any -> boolean?) -> boolean where T` | Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given). |
-| `Any` | `(collection<T>, predicate: (T) any -> boolean?) -> boolean where T` | Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given). |
+| `All` | `(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T` | Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given). |
+| `Any` | `(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T` | Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given). |
 | `Append` | `(collection<any>, value+) -> collection` | Add one or more elements to the end of a collection. |
-| `ArgMax` | `(indexed_collection<T>, key: (T) any -> unknown?) -> integer where T` | Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given). |
-| `ArgMin` | `(indexed_collection<T>, key: (T) any -> unknown?) -> integer where T` | Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given). |
-| `At` | `(value: dictionary<any> \| indexed_collection<any>, index: boolean \| indexed_collection<any> \| number \| string+) -> unknown` | Access an element of an indexed collection. |
+| `ArgMax` | `(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given). |
+| `ArgMin` | `(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given). |
+| `At` | `(value: any, index: (boolean \| indexed_collection<any> \| number \| string)+) -> unknown` | Access an element of an indexed collection. |
 | `Chunk` | `((S, integer) -> list<string> where S: string) & ((collection, integer) -> list<list>)` | Split the collection into `k` nearly equal-sized groups. |
 | `ChunkBy` | `((S, key: (character) any -> unknown) -> list<string> where S: string) & ((collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)` | Split the collection into maximal runs of consecutive elements over which the key function yields the same value. |
 | `Complement` | `(set<any>+) -> set` | Return the elements of the first set that are not in any of the subsequent sets. |
@@ -239,7 +239,7 @@ To search the library by concept rather than by name, use
 | `Differences` | `(collection<any>) -> indexed_collection` | Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input. |
 | `Drop` | `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)` | Return the collection without the first n elements. |
 | `DropWhile` | `(collection<T>, predicate: (T) any -> boolean) -> collection where T` | Return the collection with its leading elements for which the predicate returns True removed; the remaining elements are returned unfiltered. |
-| `Element` | `(value, collection<any>, boolean?) -> boolean` | Test whether a value is an element of a collection. |
+| `Element` | `(any, any, boolean?) -> boolean` | Test whether a value is an element of a collection. |
 | `EmptySet` | constant `set` | The empty set, a set containing no elements. |
 | `EndsWith` | `(indexed_collection<T>, suffix: indexed_collection<T>) -> boolean where T` | Return `True` when the indexed collection ends with `suffix` as a contiguous subsequence. |
 | `ExtendedComplexNumbers` | constant `set<complex \| infinity>` | The set of all complex numbers, including infinities. |
@@ -259,7 +259,7 @@ To search the library by concept rather than by name, use
 | `IndexWhere` | `(collection<T>, predicate: (T) any -> boolean) -> integer where T` | Return the 1-based index of the first element satisfying the predicate, or 0 if not found. |
 | `Insert` | `(indexed_collection<T>, integer, T) -> list<T> where T` | Return a copy of the indexed collection with `value` inserted before the 1-based `index`. |
 | `Integers` | constant `set<integer>` | The set of all finite integers. |
-| `Intersection` | `(collection<any>+) -> set` | Return the intersection of one or more collections as a set. |
+| `Intersection` | `(any+) -> set` | Return the intersection of one or more collections as a set. |
 | `Interval` | `(number, number) -> set<real>` | A set of real numbers between two endpoints. |
 | `IsEmpty` | `(collection<any>) -> boolean` | Return True if the collection is empty, False otherwise. |
 | `Iterate` | `(function, initial: any?) -> list` | Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value. |
@@ -281,12 +281,12 @@ To search the library by concept rather than by name, use
 | `NonNegativeNumbers` | constant `set<real>` | The set of all non-negative real numbers. |
 | `NonPositiveIntegers` | constant `set<integer>` | The set of all non-positive integers. |
 | `NonPositiveNumbers` | constant `set<real>` | The set of all non-positive real numbers. |
-| `NotElement` | `(value, collection<any>) -> boolean` | Test whether a value is not an element of a collection. |
-| `NotSubset` | `(lhs: collection<any>, rhs: collection<any>) -> boolean` | Test whether the first collection is not a strict subset of the second. |
-| `NotSuperset` | `(lhs: collection<any>, rhs: collection<any>) -> boolean` | Test whether the first collection is not a strict superset of the second. |
-| `NotSupersetEqual` | `(lhs: collection<any>, rhs: collection<any>) -> boolean` | Test whether the first collection is not a superset (possibly equal) of the second. |
+| `NotElement` | `(any, any) -> boolean` | Test whether a value is not an element of a collection. |
+| `NotSubset` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is not a strict subset of the second. |
+| `NotSuperset` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is not a strict superset of the second. |
+| `NotSupersetEqual` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is not a superset (possibly equal) of the second. |
 | `Numbers` | constant `set<number>` | The set of all numbers. |
-| `Ordering` | `(indexed_collection<T>, order: ((T) any -> unknown) \| ((any, any) any -> boolean \| number)?) -> list<integer> where T` | Return the indexes that would sort the collection. |
+| `Ordering` | `(indexed_collection<T>, order: (((T) any -> unknown) \| ((any, any) any -> boolean \| number))?) -> list<integer> where T` | Return the indexes that would sort the collection. |
 | `Pair` | `(first: T, second: U) -> tuple<T, U> where T, U` | A tuple of two elements |
 | `Partition` | `(collection<T>, ((T) any -> boolean) \| integer, integer?) -> list<list<T>> where T` | Partition a collection into consecutive chunks each of size `n`; the trailing chunk may be shorter when `n` does not divide the length. |
 | `PointList` | `(any+) -> any` | A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection. |
@@ -316,12 +316,12 @@ To search the library by concept rather than by name, use
 | `SetMinus` | `(set<any>, value*) -> set` | Return the set difference between the first set and subsequent values. |
 | `Single` | `(value: T) -> tuple<T> where T` | A tuple with a single element |
 | `Slice` | `((value: T, span: range) -> T where T: string) & ((value: T, span: nothing \| range) -> T \| nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, span: nothing \| range) -> list<T> \| nothing where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)` | Return a contiguous run of elements from an indexed collection. |
-| `Sort` | `((T, order: ((character) any -> unknown) \| ((character, character) any -> boolean \| number)?) -> T where T: string) & ((indexed_collection<T>, order: ((T) any -> unknown) \| ((any, any) any -> boolean \| number)?) -> list<T> where T)` | Return the elements of the collection sorted according to the given comparison function. |
+| `Sort` | `((T, order: (((character) any -> unknown) \| ((character, character) any -> boolean \| number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) \| ((any, any) any -> boolean \| number))?) -> list<T> where T)` | Return the elements of the collection sorted according to the given comparison function. |
 | `StartsWith` | `(indexed_collection<T>, prefix: indexed_collection<T>) -> boolean where T` | Return `True` when the indexed collection begins with `prefix` as a contiguous subsequence. |
-| `Subset` | `(lhs: collection<any>, rhs: collection<any>) -> boolean` | Test whether the first collection is a strict subset of the second. |
-| `SubsetEqual` | `(lhs: collection<any>, rhs: collection<any>) -> boolean` | Test whether the first collection is a subset (possibly equal) of the second. |
-| `Superset` | `(lhs: collection<any>, rhs: collection<any>) -> boolean` | Test whether the first collection is a strict superset of the second. |
-| `SupersetEqual` | `(lhs: collection<any>, rhs: collection<any>) -> boolean` | Test whether the first collection is a superset (possibly equal) of the second. |
+| `Subset` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is a strict subset of the second. |
+| `SubsetEqual` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is a subset (possibly equal) of the second. |
+| `Superset` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is a strict superset of the second. |
+| `SupersetEqual` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is a superset (possibly equal) of the second. |
 | `SymmetricDifference` | `(set<any>, set<any>) -> set` | Return the symmetric difference of two sets (elements in either set but not both). |
 | `Table` | `(function, integer, integer?) -> collection` | An alias for `Tabulate` (the preferred name) that additionally accepts |
 | `Tabulate` | `(generator: function, integer, integer?) -> indexed_collection` | Create a collection by applying a function to each index in the specified dimensions. |
@@ -332,7 +332,7 @@ To search the library by concept rather than by name, use
 | `Triple` | `(first: T, second: U, third: V) -> tuple<T, U, V> where T, U, V` | A tuple of three elements |
 | `Tuple` | `(any*) -> tuple` | A fixed number of heterogeneous elements |
 | `TupleFrom` | `(value*) -> tuple` | Create a tuple from the elements of a collection. |
-| `Union` | `(collection<any>+) -> set` | Return the union of two or more collections as a set. |
+| `Union` | `(any+) -> set` | Return the union of two or more collections as a set. |
 | `Unique` | `((T) -> T where T: string) & ((collection<T>) -> list<T> where T)` | Return a list of the unique elements of the collection. |
 | `Values` | `(dictionary<any>) -> list` | Return a list of the values of a dictionary. |
 | `Zip` | `(indexed_collection<any>+) -> list` | Combine multiple collections element-wise into a list of tuples. |
@@ -354,7 +354,7 @@ To search the library by concept rather than by name, use
 | `ColorToColorspace` | `(color \| string \| tuple, string) -> tuple` | Convert a color to components in a target color space |
 | `ColorToString` | `(color \| string \| tuple, string?) -> string` | Convert a color to a string in the specified format |
 | `Colormap` | `(string, number?) -> color \| list<color>` | Sample colors from a named palette |
-| `ContrastingColor` | `(color \| string \| tuple, color \| string \| tuple?, color \| string \| tuple?) -> color` | Choose the foreground color with better APCA contrast against a background |
+| `ContrastingColor` | `(color \| string \| tuple, (color \| string \| tuple)?, (color \| string \| tuple)?) -> color` | Choose the foreground color with better APCA contrast against a background |
 | `Hsl` | `(number, number, number, number?) -> color` | HSL color (hue degrees, saturation/lightness 0-1, optional alpha) |
 | `Hsv` | `(number, number, number, number?) -> color` | HSV color (hue degrees, saturation/value 0-1, optional alpha) |
 | `Oklab` | `(number, number, number, number?) -> color` | OKLab color (L 0-1, a/b ~ -0.4..0.4, optional alpha) |
@@ -381,36 +381,36 @@ To search the library by concept rather than by name, use
 
 | Name | Signature | Summary |
 |:-----|:----------|:--------|
-| `Approx` | `(any, any+) -> boolean` | Approximate-equality relation (approximately equal). |
-| `ApproxEqual` | `(any, any+) -> boolean` | Approximately-equal relation. |
-| `ApproxNotEqual` | `(any, any+) -> boolean` | Approximately-not-equal relation. |
+| `Approx` | `(any, any*) -> boolean` | Approximate-equality relation (approximately equal). |
+| `ApproxEqual` | `(any, any*) -> boolean` | Approximately-equal relation. |
+| `ApproxNotEqual` | `(any, any*) -> boolean` | Approximately-not-equal relation. |
 | `Congruent` | `(number, number, modulo: number) -> boolean` | Indicate that two expressions are congruent modulo a number |
 | `Equal` | `(any, any) -> boolean` | Equality comparison (equal to). |
-| `Greater` | `(any, any+) -> boolean` | Greater-than comparison (strictly greater than). |
-| `GreaterEqual` | `(any, any+) -> boolean` | Greater-than-or-equal comparison (greater than or equal to). |
+| `Greater` | `(any, any*) -> boolean` | Greater-than comparison (strictly greater than). |
+| `GreaterEqual` | `(any, any*) -> boolean` | Greater-than-or-equal comparison (greater than or equal to). |
 | `IdenticallyEqual` | `(any, any) -> boolean` | Identity comparison (`\equiv`). |
 | `IsSame` | `(any, any) -> boolean` | Compare two expressions for structural equality |
-| `Less` | `(any, any+) -> boolean` | Less-than comparison (strictly less than). |
-| `LessEqual` | `(any, any+) -> boolean` | Less-than-or-equal comparison (less than or equal to). |
-| `NotApprox` | `(any, any+) -> boolean` | Negated approximate-equality relation (not approximately equal). |
+| `Less` | `(any, any*) -> boolean` | Less-than comparison (strictly less than). |
+| `LessEqual` | `(any, any*) -> boolean` | Less-than-or-equal comparison (less than or equal to). |
+| `NotApprox` | `(any, any*) -> boolean` | Negated approximate-equality relation (not approximately equal). |
 | `NotApproxEqual` | `(any*) -> unknown` | Negated approximately-equal relation. |
-| `NotApproxNotEqual` | `(any, any+) -> boolean` | Negated approximately-not-equal relation. |
+| `NotApproxNotEqual` | `(any, any*) -> boolean` | Negated approximately-not-equal relation. |
 | `NotEqual` | `(any, any) -> boolean` | Inequality comparison (not equal to). |
-| `NotGreater` | `(any, any+) -> boolean` | Negated greater-than relation (not greater than). |
-| `NotGreaterNotEqual` | `(any, any+) -> boolean` | Neither greater than nor equal to. |
-| `NotLess` | `(any, any+) -> boolean` | Negated less-than relation (not less than). |
-| `NotLessNotEqual` | `(any, any+) -> boolean` | Neither less than nor equal to. |
-| `NotPrecedes` | `(any, any+) -> boolean` | Negated precedes relation (does not precede). |
-| `NotSucceeds` | `(any, any+) -> boolean` | Negated succeeds relation (does not succeed). |
-| `NotTilde` | `(any, any+) -> boolean` | Negated similarity relation (not similar). |
-| `NotTildeEqual` | `(any, any+) -> boolean` | Negated approximately/asymptotically-equal relation (not approximately equal). |
-| `NotTildeFullEqual` | `(any, any+) -> boolean` | Negated isomorphism/congruence relation (not isomorphic or congruent). |
-| `Precedes` | `(any, any+) -> boolean` | Precedes relation in an ordering (comes before). |
-| `Same` | `(any, any+) -> boolean` | Structural identity comparison (Epsil `===`). |
-| `Succeeds` | `(any, any+) -> boolean` | Succeeds relation in an ordering (comes after). |
-| `Tilde` | `(any, any+) -> boolean` | Generic similarity relation (`\sim`): similar geometric figures, asymptotic equivalence, or "is distributed as". |
-| `TildeEqual` | `(any, any+) -> boolean` | Approximately or asymptotically equal |
-| `TildeFullEqual` | `(any, any+) -> boolean` | Indicate isomorphism, congruence and homotopic equivalence |
+| `NotGreater` | `(any, any*) -> boolean` | Negated greater-than relation (not greater than). |
+| `NotGreaterNotEqual` | `(any, any*) -> boolean` | Neither greater than nor equal to. |
+| `NotLess` | `(any, any*) -> boolean` | Negated less-than relation (not less than). |
+| `NotLessNotEqual` | `(any, any*) -> boolean` | Neither less than nor equal to. |
+| `NotPrecedes` | `(any, any*) -> boolean` | Negated precedes relation (does not precede). |
+| `NotSucceeds` | `(any, any*) -> boolean` | Negated succeeds relation (does not succeed). |
+| `NotTilde` | `(any, any*) -> boolean` | Negated similarity relation (not similar). |
+| `NotTildeEqual` | `(any, any*) -> boolean` | Negated approximately/asymptotically-equal relation (not approximately equal). |
+| `NotTildeFullEqual` | `(any, any*) -> boolean` | Negated isomorphism/congruence relation (not isomorphic or congruent). |
+| `Precedes` | `(any, any*) -> boolean` | Precedes relation in an ordering (comes before). |
+| `Same` | `(any, any*) -> boolean` | Structural identity comparison (Epsil `===`). |
+| `Succeeds` | `(any, any*) -> boolean` | Succeeds relation in an ordering (comes after). |
+| `Tilde` | `(any, any*) -> boolean` | Generic similarity relation (`\sim`): similar geometric figures, asymptotic equivalence, or "is distributed as". |
+| `TildeEqual` | `(any, any*) -> boolean` | Approximately or asymptotically equal |
+| `TildeFullEqual` | `(any, any*) -> boolean` | Indicate isomorphism, congruence and homotopic equivalence |
 
 ## Arithmetic
 
@@ -442,9 +442,9 @@ To search the library by concept rather than by name, use
 | `Denominator` | `(number) -> nothing \| number` | Denominator of an expression |
 | `Digamma` | `(complex \| infinity) -> number` | Digamma function, the logarithmic derivative of the gamma function |
 | `Distance` | `(list<list<number>> \| list<number> \| list<tuple> \| tuple, list<list<number>> \| list<number> \| list<tuple> \| tuple) -> number` | Euclidean distance between two points, broadcasting over a list of points. |
-| `Divide` | `(complex \| infinity, complex \| infinity+) -> number` | Quotient of a numerator and one or more denominators. |
-| `ElementMax` | `(real \| signed_infinity, real \| signed_infinity+) -> real \| signed_infinity` | Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
-| `ElementMin` | `(real \| signed_infinity, real \| signed_infinity+) -> real \| signed_infinity` | Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
+| `Divide` | `(complex \| infinity, (complex \| infinity)+) -> number` | Quotient of a numerator and one or more denominators. |
+| `ElementMax` | `(real \| signed_infinity, (real \| signed_infinity)+) -> real \| signed_infinity` | Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
+| `ElementMin` | `(real \| signed_infinity, (real \| signed_infinity)+) -> real \| signed_infinity` | Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
 | `EulerGamma` | constant `real<0.5772156649015328..0.5772156649015329>` = `0.577215664901532860607` | The Euler–Mascheroni constant γ ≈ 0.5772. |
 | `Exp` | `(number) -> number` | Natural exponential function: e^x. |
 | `Exp2` | `(number) -> number` | Base-2 exponential: 2^x |
@@ -454,7 +454,7 @@ To search the library by concept rather than by name, use
 | `Floor` | `(real \| signed_infinity) -> integer \| signed_infinity` | Rounds a number down to the nearest integer. |
 | `Fract` | `(real \| signed_infinity) -> real<0..1>` | Fractional part of a number: x - floor(x) |
 | `GCD` | `(any*) -> number` | Greatest Common Divisor |
-| `Gamma` | `(complex \| infinity, complex \| infinity?) -> number` | Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt. |
+| `Gamma` | `(complex \| infinity, (complex \| infinity)?) -> number` | Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt. |
 | `GammaLn` | `(complex \| infinity) -> number` | Natural logarithm of the gamma function. |
 | `GoldenRatio` | constant `real<1.618033988749894..1.618033988749895>` = `1/2 * (1 + sqrt(5))` | The golden ratio φ = (1+√5)/2 ≈ 1.618. |
 | `Half` | constant `rational` = `1/2` | The rational number one half (1/2). |
@@ -472,8 +472,8 @@ To search the library by concept rather than by name, use
 | `LambertW` | `(complex \| infinity, number?) -> number` | Lambert W function (product logarithm) |
 | `Lb` | `(number) -> number` | Base-2 Logarithm |
 | `Lg` | `(number) -> number` | Base-10 Logarithm |
-| `Ln` | `(complex \| infinity, base: complex \| infinity?) -> complex \| infinity` | Natural Logarithm |
-| `Log` | `(complex \| infinity, base: complex \| infinity?) -> number` | Log(z, b = 10) = Logarithm of base b |
+| `Ln` | `(complex \| infinity, base: (complex \| infinity)?) -> complex \| infinity` | Natural Logarithm |
+| `Log` | `(complex \| infinity, base: (complex \| infinity)?) -> number` | Log(z, b = 10) = Logarithm of base b |
 | `Log10` | `(number) -> number` | Base-10 Logarithm |
 | `Log2` | `(number) -> number` | Base-2 Logarithm |
 | `MachineEpsilon` | constant `real` = `2.220446049250313e-16` | The difference between 1 and the next larger floating point number (machine epsilon). |
@@ -550,7 +550,7 @@ Rationalize(Sqrt(3), 1/500)
 | `Coth` | `(complex \| signed_infinity) -> number` | Hyperbolic cotangent, the reciprocal of hyperbolic tangent. |
 | `Csc` | `(complex) -> number` | Cosecant, the reciprocal of sine. |
 | `Csch` | `(complex \| signed_infinity) -> number` | Hyperbolic cosecant, the reciprocal of hyperbolic sine. |
-| `DMS` | `(real, real?, real?) -> real` | Construct an angle from degrees, minutes, and seconds. |
+| `DMS` | `(number, number?, number?) -> number` | Construct an angle from degrees, minutes, and seconds. |
 | `Degrees` | `(real) -> real` | Convert an angle in degrees. |
 | `FresnelC` | `(complex \| signed_infinity) -> complex` | Fresnel cosine integral. |
 | `FresnelS` | `(complex \| signed_infinity) -> complex` | Fresnel sine integral. |
@@ -589,7 +589,7 @@ Rationalize(Sqrt(3), 1/500)
 | `ND` | `(function, at: number) -> number` | Numerical derivative evaluated at a point. |
 | `NDSolve` | `(expression, symbol, limits: symbol \| tuple, number, number?) -> list` | Numerical differential equation solver. |
 | `NDSolveFunction` | `(expression, symbol, limits: symbol \| tuple, number) -> function` | Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `InterpolatingFunction`), usable at any point of the integration interval. |
-| `NIntegrate` | `(function, limits: symbol \| tuple?) -> number` | Numerical approximation of a definite integral. |
+| `NIntegrate` | `(function, limits: (symbol \| tuple)?) -> number` | Numerical approximation of a definite integral. |
 | `NLimit` | `(function, point: number, direction: number?) -> number` | Numerical approximation of the limit of a function |
 | `Normal` | `(value) -> value` | Strip Big-O remainder terms from a series, yielding the truncated polynomial. |
 | `RSolve` | `(expression, symbol, symbol) -> expression` | Symbolic recurrence equation solver. |
@@ -876,14 +876,14 @@ StirlingS1(5, 2)
 
 | Name | Signature | Summary |
 |:-----|:----------|:--------|
-| `AGM` | `(complex \| infinity, complex \| infinity?) -> number` | Arithmetic-geometric mean. |
+| `AGM` | `(complex \| infinity, (complex \| infinity)?) -> number` | Arithmetic-geometric mean. |
 | `AppellF1` | `(complex \| infinity, complex \| infinity, complex \| infinity, complex \| infinity, complex \| infinity, complex \| infinity) -> number` | Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for \|x\|, \|y\| &lt; 1. |
 | `DedekindEta` | `(complex \| infinity) -> number` | Dedekind eta function η(τ), Im(τ) &gt; 0. |
 | `EisensteinE` | `(number, complex \| infinity) -> number` | Normalized Eisenstein series Eₛ(τ) of even weight s ≥ 2, Im(τ) &gt; 0. |
-| `EllipticE` | `(complex \| infinity, complex \| infinity?) -> number` | Elliptic integral of the second kind: complete E(m) with one argument, incomplete E(φ\|m) with two (amplitude first, parameter convention m = k², as in Mathematica). |
+| `EllipticE` | `(complex \| infinity, (complex \| infinity)?) -> number` | Elliptic integral of the second kind: complete E(m) with one argument, incomplete E(φ\|m) with two (amplitude first, parameter convention m = k², as in Mathematica). |
 | `EllipticF` | `(complex \| infinity, complex \| infinity) -> number` | Incomplete elliptic integral of the first kind F(φ\|m) (amplitude first, parameter convention m = k², as in Mathematica). |
 | `EllipticK` | `(complex \| infinity) -> number` | Complete elliptic integral of the first kind K(m), parameter convention m = k². |
-| `EllipticPi` | `(complex \| infinity, complex \| infinity, complex \| infinity?) -> number` | Elliptic integral of the third kind: complete Π(n\|m) with two arguments, incomplete Π(n; φ\|m) with three (characteristic first, amplitude second, parameter convention m = k², as in Mathematica). |
+| `EllipticPi` | `(complex \| infinity, complex \| infinity, (complex \| infinity)?) -> number` | Elliptic integral of the third kind: complete Π(n\|m) with two arguments, incomplete Π(n; φ\|m) with three (characteristic first, amplitude second, parameter convention m = k², as in Mathematica). |
 | `ExpIntegralEi` | `(complex \| infinity) -> number` | Exponential integral Ei(x) = PV ∫_&#123;−∞&#125;^x eᵗ/t dt. |
 | `Hypergeometric1F1` | `(complex \| infinity, complex \| infinity, complex \| infinity) -> number` | Kummer confluent hypergeometric function ₁F₁(a; b; z) = M(a, b, z). |
 | `Hypergeometric2F1` | `(complex \| infinity, complex \| infinity, complex \| infinity, complex \| infinity) -> number` | Gauss hypergeometric function ₂F₁(a, b; c; z). |
@@ -923,7 +923,7 @@ StirlingS1(5, 2)
 | `MatrixMultiply` | `(matrix \| vector, matrix \| vector) -> matrix \| vector` | Matrix and vector multiplication. |
 | `MatrixPower` | `(matrix, real) -> matrix` | Square matrix raised to a power. |
 | `MatrixRank` | `(value) -> integer` | Rank of a matrix (number of linearly independent rows/columns). |
-| `Norm` | `(list<number> \| list<tuple> \| number \| tuple, +oo \| real \| string?) -> +oo \| nan \| real` | Vector or matrix norm. |
+| `Norm` | `(list<number> \| list<tuple> \| number \| tuple, (+oo \| real \| string)?) -> +oo \| nan \| real` | Vector or matrix norm. |
 | `OnesMatrix` | `(integer, integer?) -> matrix` | Matrix filled with ones. |
 | `PseudoInverse` | `(matrix) -> matrix` | Moore-Penrose pseudoinverse of a matrix. |
 | `QRDecomposition` | `(matrix) -> tuple` | QR decomposition of a matrix. |
@@ -944,39 +944,39 @@ StirlingS1(5, 2)
 |:-----|:----------|:--------|
 | `BetaRegularized` | `(complex \| infinity, complex \| infinity, complex \| infinity) -> number` | Regularized incomplete beta function I_x(a, b) |
 | `BinCounts` | `(collection<any>, list<number> \| number) -> list<number>` | Count the number of elements falling into each bin. |
-| `BinomialDistribution` | `(integer, real<0..1>) -> expression<BinomialDistribution>` | Binomial distribution: number of successes in n independent trials, each with success probability p. |
-| `CDF` | `(distribution, real \| signed_infinity) -> (real<0..1>) \| nan` | Cumulative distribution function P(X ≤ x) of a distribution. |
+| `BinomialDistribution` | `(integer<0..>, real<0..1>) -> expression<BinomialDistribution>` | Binomial distribution: number of successes in n independent trials, each with success probability p. |
+| `CDF` | `(distribution, real \| signed_infinity) -> nan \| real<0..1>` | Cumulative distribution function P(X ≤ x) of a distribution. |
 | `Correlation` | `(collection<any>, collection<any>?) -> nan \| real` | Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
 | `Covariance` | `(collection<any>, collection<any>?) -> nan \| real` | Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
 | `Erf` | `(complex \| signed_infinity) -> complex` | Gauss error function |
 | `ErfInv` | `(complex \| infinity) -> number` | Inverse of the error function |
 | `Erfc` | `(complex \| signed_infinity) -> complex` | Complementary error function: 1 - Erf(x) |
 | `Erfi` | `(complex \| signed_infinity) -> complex \| signed_infinity` | Imaginary error function: -i·Erf(i·x) |
-| `ExponentialDistribution` | `(real) -> expression<ExponentialDistribution>` | Exponential distribution with rate parameter λ. |
+| `ExponentialDistribution` | `(real<0<..>) -> expression<ExponentialDistribution>` | Exponential distribution with rate parameter λ. |
 | `FindFit` | `(any, any, any, any) -> dictionary` | Nonlinear least-squares fit of a model to data. |
 | `GammaRegularized` | `(complex \| infinity, complex \| infinity) -> number` | Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a) |
 | `Histogram` | `(collection<any>, list<number> \| number) -> list<tuple<number, integer>>` | Compute a histogram of the values in a collection. |
-| `InterquartileRange` | `(collection<any> \| number+) -> (real<0..>) \| +oo \| nan` | Interquartile range (Q3 - Q1) of a collection. |
-| `Kurtosis` | `(collection<any> \| number+) -> nan \| real` | Kurtosis of a collection of numbers. |
+| `InterquartileRange` | `((collection<any> \| number)+) -> +oo \| nan \| real<0..>` | Interquartile range (Q3 - Q1) of a collection. |
+| `Kurtosis` | `((collection<any> \| number)+) -> nan \| real` | Kurtosis of a collection of numbers. |
 | `LinearRegression` | `(any+) -> tuple<number, number>` | Least-squares linear fit b0 + b1·x. |
-| `Mean` | `((distribution) \| collection<any> \| number+) -> number` | Arithmetic mean (average) of a collection of numbers. |
-| `Median` | `(collection<any> \| number+) -> nan \| real \| signed_infinity` | Median of a collection of numbers. |
-| `Mode` | `(collection<any> \| number+) -> nan \| real \| signed_infinity` | Most frequently occurring value in a collection. |
-| `NormalDistribution` | `(real, real) -> expression<NormalDistribution>` | Normal (Gaussian) distribution with mean μ and standard deviation σ. |
-| `PDF` | `(distribution, real \| signed_infinity) -> (real<0..>) \| nan` | Probability density (continuous) or mass (discrete) function of a distribution, evaluated at x. |
-| `PoissonDistribution` | `(real) -> expression<PoissonDistribution>` | Poisson distribution with rate parameter λ. |
+| `Mean` | `((collection<any> \| distribution \| number)+) -> number` | Arithmetic mean (average) of a collection of numbers. |
+| `Median` | `((collection<any> \| number)+) -> nan \| real \| signed_infinity` | Median of a collection of numbers. |
+| `Mode` | `((collection<any> \| number)+) -> nan \| real \| signed_infinity` | Most frequently occurring value in a collection. |
+| `NormalDistribution` | `(real, real<0<..>) -> expression<NormalDistribution>` | Normal (Gaussian) distribution with mean μ and standard deviation σ. |
+| `PDF` | `(distribution, real \| signed_infinity) -> nan \| real<0..>` | Probability density (continuous) or mass (discrete) function of a distribution, evaluated at x. |
+| `PoissonDistribution` | `(real<0<..>) -> expression<PoissonDistribution>` | Poisson distribution with rate parameter λ. |
 | `PolynomialFit` | `(any+) -> list<number>` | Least-squares polynomial fit of the given degree. |
 | `PopulationCovariance` | `(collection<any>, collection<any>?) -> nan \| real` | Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs. |
-| `PopulationStandardDeviation` | `(collection<any> \| number+) -> (real<0..>) \| nan` | Population Standard Deviation of a collection of numbers. |
-| `PopulationVariance` | `(collection<any> \| number+) -> (real<0..>) \| nan` | Population variance of a collection of numbers. |
-| `Quantile` | `((distribution) \| collection<any>, real<0..1>) -> nan \| real \| signed_infinity` | Quantile (inverse CDF): the least x with CDF(x) ≥ p, for p in [0, 1]. |
-| `Quartiles` | `(collection<any> \| number+) -> tuple<lower: nan \| real \| signed_infinity, mid: nan \| real \| signed_infinity, upper: nan \| real \| signed_infinity>` | Lower quartile, median, and upper quartile of a collection. |
+| `PopulationStandardDeviation` | `((collection<any> \| number)+) -> nan \| real<0..>` | Population Standard Deviation of a collection of numbers. |
+| `PopulationVariance` | `((collection<any> \| number)+) -> nan \| real<0..>` | Population variance of a collection of numbers. |
+| `Quantile` | `(collection<any> \| distribution, real<0..1>) -> nan \| real \| signed_infinity` | Quantile (inverse CDF): the least x with CDF(x) ≥ p, for p in [0, 1]. |
+| `Quartiles` | `((collection<any> \| number)+) -> tuple<lower: nan \| real \| signed_infinity, mid: nan \| real \| signed_infinity, upper: nan \| real \| signed_infinity>` | Lower quartile, median, and upper quartile of a collection. |
 | `RandomSample` | `((T, number) random -> T where T: string) & ((indexed_collection, number) random -> list)` | RandomSample(xs, k): a list of k elements drawn from the indexed collection `xs`, without replacement. "Without replacement" is over POSITIONS, not values: on a multiset, repeats are expected — RandomSample([1, 1, 2], 2) can return [1, 1]. |
-| `Skewness` | `(collection<any> \| number+) -> nan \| real` | Skewness of a collection of numbers. |
+| `Skewness` | `((collection<any> \| number)+) -> nan \| real` | Skewness of a collection of numbers. |
 | `SlidingWindow` | `((S, integer, integer?) -> list<string> where S: string) & ((collection, integer, integer?) -> list<list>)` | Return overlapping sliding windows of fixed size over the collection. |
-| `StandardDeviation` | `((distribution) \| collection<any> \| number+) -> (real<0..>) \| nan` | Sample Standard Deviation of a collection of numbers. |
+| `StandardDeviation` | `((collection<any> \| distribution \| number)+) -> nan \| real<0..>` | Sample Standard Deviation of a collection of numbers. |
 | `UniformDistribution` | `(real, real) -> expression<UniformDistribution>` | Continuous uniform distribution on the interval [a, b]. |
-| `Variance` | `((distribution) \| collection<any> \| number+) -> (real<0..>) \| nan` | Sample variance of a collection of numbers. |
+| `Variance` | `((collection<any> \| distribution \| number)+) -> nan \| real<0..>` | Sample variance of a collection of numbers. |
 
 ### Examples
 

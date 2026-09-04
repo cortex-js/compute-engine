@@ -140,12 +140,19 @@ describe('STEFNOTCH #13', () => {
     expect(parse('[1,2]')).toMatchInlineSnapshot(`["List", 1, 2]`);
   });
 
+  // The statement is ill-typed (`Equivalent` takes booleans, and `2/√n` is a
+  // number), and boxing says so: the operand is wrapped in an
+  // `incompatible-type` error, as `Sin("banana")` is.
   test('5/ \\frac{2}{\\sqrt{n}}\\Leftrightarrow n>\\frac{5}{n^2}', () => {
     expect(parse('\\frac{2}{\\sqrt{n}}\\Leftrightarrow n>\\frac{5}{n^2}'))
       .toMatchInlineSnapshot(`
       [
         "Equivalent",
-        ["Divide", 2, ["Sqrt", "n"]],
+        [
+          "Error",
+          ["ErrorCode", "incompatible-type", "'boolean'", "'number'"],
+          ["Divide", 2, ["Sqrt", "n"]]
+        ],
         ["Less", ["Divide", 5, ["Square", "n"]], "n"]
       ]
     `);

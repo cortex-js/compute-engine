@@ -39,6 +39,61 @@ import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 import { roundMeasurementForDisplay } from '../../numerics/strings.js';
 
 /**
+ * True when the expression is EXACTLY the number literal 2, the order the norm
+ * notation writes without a subscript.
+ *
+ * The test reads the literal rather than its machine value, because
+ * `machineValue()` rounds: it answers 2 for the exact
+ * `2.00000000000000000000000001`, and eliding the subscript there would
+ * silently turn one norm into another. A literal this does not recognize —
+ * `2e0`, say — keeps a `_2` subscript, which is redundant but reads back as
+ * the same order, so an unrecognized spelling costs nothing.
+ */
+function isExactlyTwo(expr: MathJsonExpression): boolean {
+  if (typeof expr === 'number') return expr === 2;
+  const literal =
+    typeof expr === 'object' && !Array.isArray(expr) && 'num' in expr
+      ? expr.num
+      : typeof expr === 'string'
+        ? expr
+        : undefined;
+  if (typeof literal !== 'string') return false;
+  // `2`, `+2`, `002`, `2.0` — a plain decimal with no exponent and no
+  // non-zero digit after the point.
+  return /^\+?0*2(\.0*)?$/.test(literal.trim());
+}
+
+/**
+ * The subscript that carries the order of a norm: `‖v‖_1`, `‖v‖_\infty`,
+ * `‖v‖_F`, `‖v‖_{3/2}`.
+ *
+ * The 2-norm is the notation without a subscript, so `Norm(v)` and
+ * `Norm(v, 2)` both serialize bare. The `Norm` operator spells the maximum
+ * norm as the symbol `PositiveInfinity` or the string `"Infinity"`, and the
+ * Frobenius norm as the string `"Frobenius"`. Every other order — a p-norm's
+ * `p`, or an expression the operator has no value for — is written as a
+ * general subscript, which is what the parser reads back. A number of large
+ * magnitude goes down that generic path too: `1e400` is a finite order, and
+ * projecting it to a machine infinity would write the maximum norm instead.
+ *
+ * @param order The second operand of `Norm`, or `null` when there is none.
+ */
+function serializeNormOrder(
+  serializer: Serializer,
+  order: MathJsonExpression | null
+): string {
+  if (order === null) return '';
+  if (isExactlyTwo(order)) return '';
+  if (symbol(order) === 'PositiveInfinity' || stringValue(order) === 'Infinity')
+    return '_\\infty';
+  if (stringValue(order) === 'Frobenius') return '_F';
+  const s = serializer.serialize(order);
+  // A single token needs no braces, and `‖v‖_1` is how an order of 1 is
+  // conventionally written.
+  return s.length === 1 ? `_${s}` : `_{${s}}`;
+}
+
+/**
  * If expression is a product, collect all the terms with a
  * negative exponents in the denominator, and all the terms
  * with a positive exponent (or no exponent) in the numerator.
@@ -2636,6 +2691,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       isEmptySequence(expr) ? null : (['Norm', expr] as MathJsonExpression),
     serialize: (serializer, expr) => {
       const arg = operand(expr, 1);
+      const order = serializeNormOrder(serializer, operand(expr, 2));
       if (operator(arg) === 'Matrix') {
         // Re-inject ‖‖ delimiters so the Matrix serializer outputs Vmatrix
         const data = operand(arg, 1);
@@ -2643,9 +2699,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
         const matrixWithDelims: MathJsonExpression = colSpec
           ? (['Matrix', data, { str: '‖‖' }, colSpec] as MathJsonExpression)
           : (['Matrix', data, { str: '‖‖' }] as MathJsonExpression);
-        return serializer.serialize(matrixWithDelims);
+        return serializer.serialize(matrixWithDelims) + order;
       }
-      return `\\left\\Vert ${serializer.serialize(arg)}\\right\\Vert`;
+      return `\\left\\Vert ${serializer.serialize(arg)}\\right\\Vert${order}`;
     },
   },
   {

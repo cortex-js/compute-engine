@@ -59,7 +59,7 @@ describe('Mean', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'Mean')).toBe(
-      '((distribution) | collection<any> | number+) -> number'
+      '((collection<any> | distribution | number)+) -> number'
     );
     expect(policiesOf(ce, 'Mean')).toBe('nan=handle missing=handle');
   });
@@ -114,7 +114,7 @@ describe('Median', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'Median')).toBe(
-      '(collection<any> | number+) -> nan | real | signed_infinity'
+      '((collection<any> | number)+) -> nan | real | signed_infinity'
     );
     expect(policiesOf(ce, 'Median')).toBe('nan=handle missing=handle');
   });
@@ -166,11 +166,9 @@ describe('the variance family', () => {
   test('declaration', () => {
     const ce = new ComputeEngine();
     for (const h of HEADS) {
-      const distribution = h.startsWith('Population')
-        ? ''
-        : '(distribution) | ';
+      const distribution = h.startsWith('Population') ? '' : 'distribution | ';
       expect(`${h}: ${signatureOf(ce, h)}`).toBe(
-        `${h}: (${distribution}collection<any> | number+) -> (real<0..>) | nan`
+        `${h}: ((collection<any> | ${distribution}number)+) -> nan | real<0..>`
       );
       expect(`${h}: ${policiesOf(ce, h)}`).toBe(
         `${h}: nan=handle missing=handle`
@@ -245,7 +243,7 @@ describe('Kurtosis and Skewness', () => {
   test('declaration', () => {
     for (const h of ['Kurtosis', 'Skewness']) {
       expect(`${h}: ${signatureOf(ce, h)}`).toBe(
-        `${h}: (collection<any> | number+) -> nan | real`
+        `${h}: ((collection<any> | number)+) -> nan | real`
       );
       expect(`${h}: ${policiesOf(ce, h)}`).toBe(
         `${h}: nan=handle missing=handle`
@@ -295,7 +293,7 @@ describe('Mode', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'Mode')).toBe(
-      '(collection<any> | number+) -> nan | real | signed_infinity'
+      '((collection<any> | number)+) -> nan | real | signed_infinity'
     );
     expect(policiesOf(ce, 'Mode')).toBe('nan=handle missing=handle');
   });
@@ -323,7 +321,7 @@ describe('Quartiles', () => {
     // They used to read `mid, lower, upper` against a handler that built
     // `(Q1, Q2, Q3)`, so every name was attached to the wrong component.
     expect(signatureOf(ce, 'Quartiles')).toBe(
-      '(collection<any> | number+) -> ' +
+      '((collection<any> | number)+) -> ' +
         'tuple<lower: nan | real | signed_infinity, ' +
         'mid: nan | real | signed_infinity, ' +
         'upper: nan | real | signed_infinity>'
@@ -369,7 +367,7 @@ describe('InterquartileRange', () => {
 
   test('declaration', () => {
     expect(signatureOf(ce, 'InterquartileRange')).toBe(
-      '(collection<any> | number+) -> (real<0..>) | +oo | nan'
+      '((collection<any> | number)+) -> +oo | nan | real<0..>'
     );
     expect(policiesOf(ce, 'InterquartileRange')).toBe(
       'nan=handle missing=handle'

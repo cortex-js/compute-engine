@@ -455,14 +455,19 @@ describe('GammaRegularized / BetaRegularized compile', () => {
     }
   });
 
-  test('evaluated Poisson CDF closed form (GammaRegularized) compiles and matches N()', () => {
-    // CDF(PoissonDistribution(4), x) evaluates to GammaRegularized(x+1, 4);
-    // verify the *evaluated* closed form — not the CDF wrapper — compiles.
+  test('evaluated Poisson CDF closed form compiles and matches N()', () => {
+    // CDF(PoissonDistribution(4), x) at a SYMBOLIC point evaluates to the
+    // guarded closed form `Which(x < 0, 0, True, GammaRegularized(⌊x⌋ + 1,
+    // 4))` — the support test and the floor the literal route applies, so
+    // the two routes agree once `x` is bound. Verify the *evaluated* form —
+    // not the CDF wrapper — compiles, and matches the literal route at
+    // integer, non-integer and negative points alike.
     const closedForm = ce.box(['CDF', ['PoissonDistribution', 4], 'x']).evaluate();
-    expect(closedForm.operator).toBe('GammaRegularized');
+    expect(closedForm.operator).toBe('Which');
+    expect(closedForm.toString()).toContain('GammaRegularized');
     const result = compile(closedForm);
     expect(result?.success).toBe(true);
-    for (const k of [0, 2, 4, 6, 10]) {
+    for (const k of [0, 2, 4, 6, 10, 2.5, 0.5, -1, -0.5]) {
       const want = ce.box(['CDF', ['PoissonDistribution', 4], k]).N().re;
       expect(result?.run?.({ x: k }) as number).toBeCloseTo(want, 9);
     }

@@ -118,12 +118,13 @@ function canonicalQuantifier(
  *
  * The lazy route needs a `canonical` handler (a lazy operator without one
  * receives RAW, unbound operands — see the "inert on box/parse" trap in
- * CLAUDE.md), and a canonical handler bypasses the framework's signature
- * validation, so the handler runs `validateArguments` itself: `And(1, 2)`
- * still reports `incompatible-type`, an unknown symbol operand is still
- * inferred `boolean`, and a possibly-absent operand (`boolean | missing`,
- * e.g. a comparison on an indexed read) is still admitted through the
- * strip-before-validate gate that `missingBehavior: 'handle'` enables.
+ * CLAUDE.md). Framework validation deliberately does not bind or type-check
+ * lazy operands, so the handler runs `validateArguments` with the now-bound
+ * operands itself: `And(1, 2)` still reports `incompatible-type`, an unknown
+ * symbol operand is still inferred `boolean`, and a possibly-absent operand
+ * (`boolean | missing`, e.g. a comparison on an indexed read) is still
+ * admitted through the strip-before-validate gate that
+ * `missingBehavior: 'handle'` enables.
  */
 function canonicalShortCircuit(
   name: ShortCircuitOperator,

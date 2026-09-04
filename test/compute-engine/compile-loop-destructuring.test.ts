@@ -69,9 +69,9 @@ describe('COMPILE Loop — destructuring binder (JavaScript)', () => {
       ce.box(['Zip', ['Range', 1, 3], ['Range', 4, 6]]).type.toString()
     ).toBe('list<tuple<integer, integer>>');
     // A source whose element type is unknown keeps the bare `list`.
-    expect(ce.box(['Zip', 'unknownSource', ['Range', 1, 3]]).type.toString()).toBe(
-      'list'
-    );
+    expect(
+      ce.box(['Zip', 'unknownSource', ['Range', 1, 3]]).type.toString()
+    ).toBe('list');
     const program = epsil(
       'let s = 0\nfor (i, j) in Zip(1..3, 4..6) { s = s + i * j }\ns'
     );
@@ -105,7 +105,9 @@ describe('COMPILE Loop — destructuring binder (JavaScript)', () => {
     // Lists of the right length: the interpreter refuses them, compiled code
     // could not.
     expect(() =>
-      js(epsil('let s = 0\nfor (i, j) in [[1, 4], [2, 5]] { s = s + i * j }\ns'))
+      js(
+        epsil('let s = 0\nfor (i, j) in [[1, 4], [2, 5]] { s = s + i * j }\ns')
+      )
     ).toThrow(/not a tuple/);
     // Arity mismatch.
     expect(() =>
@@ -125,7 +127,11 @@ describe('COMPILE Loop — destructuring binder (JavaScript)', () => {
     const r = js([
       'Comprehension',
       ['Multiply', 'p', 'q'],
-      ['Element', ['Tuple', 'p', 'q'], ['List', ['Tuple', 1, 4], ['Tuple', 2, 5]]],
+      [
+        'Element',
+        ['Tuple', 'p', 'q'],
+        ['List', ['Tuple', 1, 4], ['Tuple', 2, 5]],
+      ],
     ]);
     expect(r.success).toBe(true);
     expect(r.run!({})).toEqual([4, 10]);
@@ -138,7 +144,7 @@ describe('COMPILE Range — a bound that is provably not a number fails closed',
     // leaves inert; the arithmetic lowering coerced the inner array to NaN
     // and emitted `[]` behind `success: true`.
     expect(() => js(epsil('Sum(1..10..2)'))).toThrow(
-      /Range: the bound .* not a number/
+      /Range: the bound .* not a number|invalid expression/
     );
     // The three-operand form is the stepped range, and still compiles.
     const r = js(epsil('Sum(Range(1, 10, 2))'));
@@ -172,16 +178,18 @@ describe('COMPILE Loop / Comprehension — Python target', () => {
       ],
       's',
     ]);
-    expect(src).toMatch(/for i in range\(1, 4\):\n\s+for j in range\(1, 3\):\n\s+s =/);
+    expect(src).toMatch(
+      /for i in range\(1, 4\):\n\s+for j in range\(1, 3\):\n\s+s =/
+    );
   });
 
   it('a stepped or descending literal Range is a native `range`', () => {
-    expect(py(epsil('let s = 0\nfor k in Range(1, 10, 3) { s = s + k }\ns'))).toContain(
-      'for k in range(1, 11, 3):'
-    );
-    expect(py(epsil('let s = 0\nfor k in Range(10, 1, -3) { s = s + k }\ns'))).toContain(
-      'for k in range(10, 0, -3):'
-    );
+    expect(
+      py(epsil('let s = 0\nfor k in Range(1, 10, 3) { s = s + k }\ns'))
+    ).toContain('for k in range(1, 11, 3):');
+    expect(
+      py(epsil('let s = 0\nfor k in Range(10, 1, -3) { s = s + k }\ns'))
+    ).toContain('for k in range(10, 0, -3):');
     expect(py(epsil('let s = 0\nfor k in 10..1 { s = s + k }\ns'))).toContain(
       'for k in range(10, 0, -1):'
     );
@@ -189,10 +197,14 @@ describe('COMPILE Loop / Comprehension — Python target', () => {
 
   it('a destructuring binder spells as a tuple pattern', () => {
     expect(
-      py(epsil('let s = 0\nfor (i, j) in [(1, 4), (2, 5)] { s = s + i * j }\ns'))
+      py(
+        epsil('let s = 0\nfor (i, j) in [(1, 4), (2, 5)] { s = s + i * j }\ns')
+      )
     ).toContain('for (i, j) in [(1, 4), (2, 5)]:');
     expect(() =>
-      py(epsil('let s = 0\nfor (i, j) in [[1, 4], [2, 5]] { s = s + i * j }\ns'))
+      py(
+        epsil('let s = 0\nfor (i, j) in [[1, 4], [2, 5]] { s = s + i * j }\ns')
+      )
     ).toThrow(/not a tuple/);
   });
 
@@ -206,7 +218,11 @@ describe('COMPILE Loop / Comprehension — Python target', () => {
       ])
     ).toBe('[i * j for i in range(1, 4) for j in range(1, 3)]');
     expect(
-      py(['Comprehension', ['Multiply', 'x', 2], ['Element', 'x', ['List', 1, 2, 3]]])
+      py([
+        'Comprehension',
+        ['Multiply', 'x', 2],
+        ['Element', 'x', ['List', 1, 2, 3]],
+      ])
     ).toBe('[2 * x for x in [1, 2, 3]]');
     // A multi-statement body has no list-comprehension form.
     expect(() =>
@@ -264,25 +280,27 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
   });
 
   it('a one-position Python pattern keeps its trailing comma', () => {
-    const program = loopOver(['Tuple', 'x'], ['List', ['Tuple', 1], ['Tuple', 2]], [
-      'Assign',
-      's',
-      ['Add', 's', 'x'],
-    ]);
+    const program = loopOver(
+      ['Tuple', 'x'],
+      ['List', ['Tuple', 1], ['Tuple', 2]],
+      ['Assign', 's', ['Add', 's', 'x']]
+    );
     expect(py(program)).toContain('for (x,) in');
     expect(js(program).run!({})).toBe(3);
   });
 
   it('a `_` position is a generated temporary in Python, never the name `_`', () => {
-    const src = py(epsil('let s = 0\nfor (i, _) in [(1, 4), (2, 5)] { s = s + i }\ns'));
+    const src = py(
+      epsil('let s = 0\nfor (i, _) in [(1, 4), (2, 5)] { s = s + i }\ns')
+    );
     expect(src).toMatch(/for \(i, _tv\d+\) in/);
     expect(src).not.toContain('(i, _)');
   });
 
   it('a string source declines on Python (grapheme clusters)', () => {
-    expect(() => py(epsil('let s = 0\nfor c in "abc" { s = s + 1 }\ns'))).toThrow(
-      /grapheme/
-    );
+    expect(() =>
+      py(epsil('let s = 0\nfor c in "abc" { s = s + 1 }\ns'))
+    ).toThrow(/grapheme/);
   });
 
   it('a symbolic two-bound Range picks its direction at run time on Python', () => {
@@ -293,14 +311,24 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
       undefined,
       { constantFold: false }
     );
-    expect(src).toContain('range(_a, _b + 1) if _b >= _a else range(_a, _b - 1, -1)');
+    expect(src).toContain(
+      'range(_a, _b + 1) if _b >= _a else range(_a, _b - 1, -1)'
+    );
   });
 
   it('a statement-shaped comprehension body declines on Python', () => {
-    for (const body of [['Assign', 's', 'x'], ['Break'], ['Block', ['Assign', 's', 'x']]])
+    for (const body of [
+      ['Assign', 's', 'x'],
+      ['Break'],
+      ['Block', ['Assign', 's', 'x']],
+    ])
       expect(() =>
         python.compileToSource(
-          ce.box(['Comprehension', body as MathJsonExpression, ['Element', 'x', ['List', 1, 2]]]),
+          ce.box([
+            'Comprehension',
+            body as MathJsonExpression,
+            ['Element', 'x', ['List', 1, 2]],
+          ]),
           { constantFold: false }
         )
       ).toThrow(/statement|declaration/);
@@ -310,13 +338,27 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
     // A bound canonicalization lets through but whose static type is a
     // collection (a boolean or string bound is already an invalid
     // expression before the compiler sees it).
-    expect(() => js(['Range', ['Range', 1, 10]])).toThrow(/not a number/);
-    expect(() => js(['Range', ['Range', 1, 10], 2])).toThrow(/not a number/);
+    // A range as a bound is provably not a number, so boxing already wraps
+    // it in an `incompatible-type` error and the compiler refuses the
+    // invalid expression; a bound the types cannot refute still reaches
+    // the compiler's own bound check.
+    expect(() => js(['Range', ['Range', 1, 10]])).toThrow(
+      /not a number|invalid expression/
+    );
+    expect(() => js(['Range', ['Range', 1, 10], 2])).toThrow(
+      /not a number|invalid expression/
+    );
   });
 
   it('a destructuring binder declines on the interval target', () => {
     const r = new IntervalJavaScriptTarget().compile(
-      ce.box(loopOver(['Tuple', 'a', 'b'], ['List', ['Tuple', 1, 2]], ['Assign', 's', ['Add', 's', 'a']]))
+      ce.box(
+        loopOver(
+          ['Tuple', 'a', 'b'],
+          ['List', ['Tuple', 1, 2]],
+          ['Assign', 's', ['Add', 's', 'a']]
+        )
+      )
     );
     expect(r.success).toBe(false);
   });
@@ -338,60 +380,73 @@ const VENV_PYTHON =
 // venv's Python itself.
 const describeVenv = fs.existsSync(VENV_PYTHON) ? describe : describe.skip;
 
-describeVenv('COMPILE Loop / Comprehension — Python execution parity (venv)', () => {
-  const CASES: Array<{ name: string; expr: MathJsonExpression; expected: unknown }> = [
-    {
-      name: 'nested loops',
-      expr: epsil('let s = 0\nfor i in 1..3 { for j in 1..2 { s = s + i * j } }\ns'),
-      expected: 18,
-    },
-    {
-      name: 'descending stepped range',
-      expr: epsil('let s = 0\nfor k in Range(10, 1, -3) { s = s + k }\ns'),
-      expected: 22,
-    },
-    {
-      name: 'destructuring',
-      expr: epsil('let s = 0\nfor (i, j) in [(1, 4), (2, 5), (3, 6)] { s = s + i * j }\ns'),
-      expected: 32,
-    },
-    {
-      name: 'comprehension',
-      expr: [
-        'Comprehension',
-        ['Multiply', 'i', 'j'],
-        ['Element', 'i', ['Range', 1, 3]],
-        ['Element', 'j', ['Range', 1, 2]],
-      ],
-      expected: [1, 2, 2, 4, 3, 6],
-    },
-  ];
+describeVenv(
+  'COMPILE Loop / Comprehension — Python execution parity (venv)',
+  () => {
+    const CASES: Array<{
+      name: string;
+      expr: MathJsonExpression;
+      expected: unknown;
+    }> = [
+      {
+        name: 'nested loops',
+        expr: epsil(
+          'let s = 0\nfor i in 1..3 { for j in 1..2 { s = s + i * j } }\ns'
+        ),
+        expected: 18,
+      },
+      {
+        name: 'descending stepped range',
+        expr: epsil('let s = 0\nfor k in Range(10, 1, -3) { s = s + k }\ns'),
+        expected: 22,
+      },
+      {
+        name: 'destructuring',
+        expr: epsil(
+          'let s = 0\nfor (i, j) in [(1, 4), (2, 5), (3, 6)] { s = s + i * j }\ns'
+        ),
+        expected: 32,
+      },
+      {
+        name: 'comprehension',
+        expr: [
+          'Comprehension',
+          ['Multiply', 'i', 'j'],
+          ['Element', 'i', ['Range', 1, 3]],
+          ['Element', 'j', ['Range', 1, 2]],
+        ],
+        expected: [1, 2, 2, 4, 3, 6],
+      },
+    ];
 
-  it('the emitted Python evaluates to the interpreter value', () => {
-    let program = 'import cmath, math, json\n\n';
-    CASES.forEach((c, i) => {
-      program += `${python.compileFunction(ce.box(c.expr), `fn_${i}`, [])}\n`;
-    });
-    program += 'results = []\n';
-    CASES.forEach((_c, i) => {
-      program += `results.append(fn_${i}())\n`;
-    });
-    program += 'print(json.dumps(results))\n';
+    it('the emitted Python evaluates to the interpreter value', () => {
+      let program = 'import cmath, math, json\n\n';
+      CASES.forEach((c, i) => {
+        program += `${python.compileFunction(ce.box(c.expr), `fn_${i}`, [])}\n`;
+      });
+      program += 'results = []\n';
+      CASES.forEach((_c, i) => {
+        program += `results.append(fn_${i}())\n`;
+      });
+      program += 'print(json.dumps(results))\n';
 
-    const file = path.join(os.tmpdir(), `ce-py-loops-${process.pid}.py`);
-    fs.writeFileSync(file, program);
-    let out = '';
-    try {
-      out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
-    } finally {
-      fs.unlinkSync(file);
-    }
-    const actual = JSON.parse(out) as unknown[];
-    CASES.forEach((c, i) => {
-      expect([c.name, actual[i]]).toEqual([c.name, c.expected]);
-      expect(interpreted(c.expr)).toBe(
-        Array.isArray(c.expected) ? `[${c.expected.join(',')}]` : String(c.expected)
-      );
+      const file = path.join(os.tmpdir(), `ce-py-loops-${process.pid}.py`);
+      fs.writeFileSync(file, program);
+      let out = '';
+      try {
+        out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+      } finally {
+        fs.unlinkSync(file);
+      }
+      const actual = JSON.parse(out) as unknown[];
+      CASES.forEach((c, i) => {
+        expect([c.name, actual[i]]).toEqual([c.name, c.expected]);
+        expect(interpreted(c.expr)).toBe(
+          Array.isArray(c.expected)
+            ? `[${c.expected.join(',')}]`
+            : String(c.expected)
+        );
+      });
     });
-  });
-});
+  }
+);

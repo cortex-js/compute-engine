@@ -179,6 +179,70 @@ function parseIndexedSequence(expr: MathJsonExpression): MathJsonExpression {
     : ['IndexedSequence', term, index, lower, upper];
 }
 
+/** The single order expression a norm subscript carries, or `null` when the
+ * subscript is not one expression. A parenthesized order (`‖v‖_{(p+1)}`)
+ * arrives wrapped in a `Delimiter`, which holds a `Sequence` as soon as the
+ * parentheses contain several items (`‖v‖_{1,2}`); a bracketed `‖v‖_{[1,2]}`
+ * is a list, which is never an order. */
+function normOrderOperand(sub: MathJsonExpression): MathJsonExpression | null {
+  if (operator(sub) === 'List') return null;
+
+  let order = operator(sub) === 'Delimiter' ? operand(sub, 1) : sub;
+  if (order === null) return null;
+
+  if (operator(order) === 'Sequence') {
+    const items = operands(order) ?? [];
+    if (items.length !== 1) return null;
+    order = items[0];
+  }
+
+  return order;
+}
+
+/** Rewrite a subscripted norm into the two-operand `Norm` form: a subscript on
+ * `‖v‖` is the ORDER of the norm, not an index. `‖v‖_1` is the L1 norm,
+ * `‖v‖_\infty` the maximum norm, `‖v‖_F` the Frobenius norm and `‖v‖_p` the
+ * p-norm; `‖v‖` with no subscript stays the 2-norm. `Norm` spells the
+ * Frobenius order as the string `"Frobenius"`, so the `F` subscript is
+ * translated. All the delimiter spellings (`\Vert`, `\lVert`/`\rVert`, `\|`,
+ * `||` and the `Vmatrix` environment) reach this point as the same
+ * `["Subscript", ["Norm", v], order]` shape.
+ *
+ * A superscript is applied AFTER the subscript, so a raised norm arrives as
+ * `["Power", ["Subscript", ["Norm", v], order], exponent]`: the power is
+ * unwrapped and rebuilt around the rewritten norm, which is what makes
+ * `‖v‖_1^2` the square of the L1 norm rather than a norm with its order
+ * discarded. A norm that already carries an order is left alone. */
+function parseNormOrder(expr: MathJsonExpression): MathJsonExpression {
+  let exponent: MathJsonExpression | undefined;
+  let inner: MathJsonExpression = expr;
+  if (operator(expr) === 'Power') {
+    const base = operand(expr, 1);
+    const up = operand(expr, 2);
+    if (base === null || up === null) return expr;
+    inner = base;
+    exponent = up;
+  }
+
+  if (operator(inner) !== 'Subscript') return expr;
+  const norm = operand(inner, 1);
+  if (norm === null || operator(norm) !== 'Norm') return expr;
+  if ((operands(norm)?.length ?? 0) !== 1) return expr;
+
+  const sub = operand(inner, 2);
+  if (sub === null) return expr;
+  const order = normOrderOperand(sub);
+  if (order === null) return expr;
+
+  const result: MathJsonExpression = [
+    'Norm',
+    operand(norm, 1)!,
+    symbol(order) === 'F' ? { str: 'Frobenius' } : order,
+  ];
+
+  return exponent === undefined ? result : ['Power', result, exponent];
+}
+
 /** Tokens that cannot begin the braces-less argument of a LaTeX command
  * (e.g. `\frac12`). See `parseToken()`. */
 const PARSE_TOKEN_EXCLUDED = new Set<string>([
@@ -3570,6 +3634,13 @@ export class _Parser implements Parser {
     //     by an equation. Rewrite to the inert `IndexedSequence` head.
     //
     if (result !== null) result = parseIndexedSequence(result);
+
+    //
+    // 7c. Norm order notation: `‖v‖_1`, `‖v‖_\infty`, `‖v‖_F`.
+    //     A subscript on a norm is the order of the norm, so it becomes the
+    //     second operand of `Norm` rather than an index.
+    //
+    if (result !== null) result = parseNormOrder(result);
 
     //
     // 8. Are there postfix operators after subsup?

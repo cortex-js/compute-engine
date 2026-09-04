@@ -242,7 +242,7 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
       false
     );
     expect(ce.box(['Heaviside', 'u'] as any).type.toString()).toBe(
-      '(rational<0..1>) | nan'
+      'nan | rational<0..1>'
     );
     // `Sign` keeps the ranged tier for a proven extended real, and takes the
     // complex sign `z/|z|` off the real line (carrier

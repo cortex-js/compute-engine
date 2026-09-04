@@ -2454,6 +2454,88 @@ describe('Signature serialization round-trip', () => {
       'tuple<(number) -> real, string>'
     );
   });
+
+  // An argument modifier (`?`, `*`, `+`) is written after the whole argument
+  // type. Without parentheses, `complex | infinity+` reads as a union with a
+  // variadic member instead of a variadic union.
+  it('parenthesizes a modified argument built with `|`, `&` or `->`', () => {
+    expect(
+      roundTrips('(complex | infinity, (complex | infinity)+) -> number')
+    ).toBe('(complex | infinity, (complex | infinity)+) -> number');
+    expect(roundTrips('((complex | infinity)*) -> number')).toBe(
+      '((complex | infinity)*) -> number'
+    );
+    expect(roundTrips('((complex | infinity)?) -> number')).toBe(
+      '((complex | infinity)?) -> number'
+    );
+    expect(roundTrips('(x: (real & string)+) -> number')).toBe(
+      '(x: (real & string)+) -> number'
+    );
+    expect(roundTrips('(h: ((real) scope -> real)?) -> boolean')).toBe(
+      '(h: ((real) scope -> real)?) -> boolean'
+    );
+  });
+
+  it('does NOT parenthesize an atomic or prefix modified argument', () => {
+    // A negation is a prefix form, and a primitive is an atom: the modifier
+    // cannot attach to a part of either.
+    expect(roundTrips('(!string+) -> number')).toBe('(!string+) -> number');
+    expect(roundTrips('(number, string?) -> number')).toBe(
+      '(number, string?) -> number'
+    );
+    expect(roundTrips('(list<number | string>+) -> number')).toBe(
+      '(list<number | string>+) -> number'
+    );
+  });
+
+  it('does NOT parenthesize a union in a required argument', () => {
+    // No modifier follows it, so there is nothing to misread.
+    expect(roundTrips('(complex | infinity) -> number')).toBe(
+      '(complex | infinity) -> number'
+    );
+  });
+
+  // A ranged numeric, an expression type, a symbol type and a nominal
+  // reference are atoms: one identifier and its own brackets. Nothing can bind
+  // into them, so they are never wrapped, in any nested position.
+  it('never parenthesizes an atomic constructed type', () => {
+    for (const atom of ['real<0..>', 'expression<Add>', 'symbol<x>']) {
+      // Union member, intersection member, negation operand.
+      expect(roundTrips(`${atom} | string`)).toContain(atom);
+      expect(roundTrips(`${atom} | string`)).not.toContain(`(${atom})`);
+      expect(roundTrips(`${atom} & !0`)).toBe(`${atom} & !0`);
+      expect(roundTrips(`!${atom}`)).toBe(`!${atom}`);
+      // Required, optional and variadic argument positions.
+      expect(roundTrips(`(${atom}) -> number`)).toBe(`(${atom}) -> number`);
+      expect(roundTrips(`(${atom}?) -> number`)).toBe(`(${atom}?) -> number`);
+      expect(roundTrips(`(${atom}+) -> number`)).toBe(`(${atom}+) -> number`);
+      expect(roundTrips(`(${atom}*) -> number`)).toBe(`(${atom}*) -> number`);
+      // Bracketed constructors, which delimit their own arguments.
+      expect(roundTrips(`list<${atom}>`)).toBe(`list<${atom}>`);
+      expect(roundTrips(`tuple<${atom}, string>`)).toBe(
+        `tuple<${atom}, string>`
+      );
+    }
+  });
+
+  it('never parenthesizes a nominal reference', () => {
+    // A reference resolves against declared types, so it is built rather than
+    // parsed from a bare string here.
+    const ranged = typeToString({
+      kind: 'signature',
+      args: [],
+      optArgs: [{ type: { kind: 'reference', name: 'tree' } }],
+      result: 'number',
+    } as unknown as Parameters<typeof typeToString>[0]);
+    expect(ranged).toBe('(tree?) -> number');
+  });
+
+  it('the serialized form is the union sort key, so an atom sorts by its name', () => {
+    // The members are ordered by their SERIALIZED spelling. A spurious `(`
+    // sorted ahead of every letter, so `real<0..> | nan` used to come out as
+    // `(real<0..>) | nan` rather than in name order.
+    expect(roundTrips('real<0..> | nan')).toBe('nan | real<0..>');
+  });
 });
 
 describe('isSubtype with an intersection on the left', () => {

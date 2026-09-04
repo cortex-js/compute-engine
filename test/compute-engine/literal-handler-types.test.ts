@@ -213,9 +213,7 @@ describe('widenValueTypes — the §4.3 walker', () => {
     // REDUCER, not the walker, that rewrites `range & !endpoint` to the
     // open range `real<0<..>` since open-bound ranged types —
     // `parseType` alone builds the unreduced spelling).
-    expect(widenStr('(real<0..>) & !0')).toBe(
-      '(real<0..>) & !0'
-    );
+    expect(widenStr('(real<0..>) & !0')).toBe('real<0..> & !0');
   });
 
   it('open ranges are handler claims: they pass through', () => {

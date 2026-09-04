@@ -587,7 +587,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // n-ary `Same`). Documentary only: like the other `lazy` relations
     // (`Equal`, whose fixed `(any, any)` signature only works for the same
     // reason), argument validation is skipped.
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
 
     // `lazy`, so the operands are CANONICALIZED but never evaluated: `Same` is
     // strictly SYNTACTIC equality of the canonical forms. Canonicalization
@@ -755,10 +755,15 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     },
   } as OperatorDefinition,
 
+  // Every relation of this family accepts a single operand as the degenerate
+  // chain (`Less(3)` evaluates to `True`, `NotEqual(3)` to `False`), so the
+  // declarations say `any*`: the boxing validation seam checks a
+  // `canonical`-handler head against its declaration, and `any+` refused
+  // the one-operand call with a `missing` error.
   Less: {
     description: 'Less-than comparison (strictly less than).',
     complexity: 11000,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
 
     // Kleene over the `Missing` symbol, IEEE over `NaN` (§3.D, family coherence,
     // amended 2026-07-24): a `Missing` operand makes the ordering `Missing`; a
@@ -850,7 +855,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   NotLess: {
     description: 'Negated less-than relation (not less than).',
     complexity: 11000,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (ops, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'Less', ops)]),
   },
@@ -860,7 +865,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       comparisonType('Greater', relationalAbsenceType, ops, engine.tolerance),
     description: 'Greater-than comparison (strictly greater than).',
     complexity: 11000,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     // Same declared contract as `Less` (which this operator canonicalizes
     // into): the handler owns `NaN` — IEEE unordered → `False`.
     nanBehavior: 'handle',
@@ -878,7 +883,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   NotGreater: {
     description: 'Negated greater-than relation (not greater than).',
     complexity: 11000,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [ce._fn('Greater', args)]),
   },
@@ -886,7 +891,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   LessEqual: {
     description: 'Less-than-or-equal comparison (less than or equal to).',
     complexity: 11000,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
 
     // Kleene over the `Missing` symbol, IEEE over `NaN` (§3.D, family coherence,
     // amended 2026-07-24); see `Less`. Covers `GreaterEqual` too (canonicalizes
@@ -967,7 +972,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   NotLessNotEqual: {
     description: 'Neither less than nor equal to.',
     complexity: 11000,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (ops, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'LessEqual', ops)]),
   },
@@ -982,7 +987,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       ),
     description: 'Greater-than-or-equal comparison (greater than or equal to).',
     complexity: 11000,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     // Same declared contract as `LessEqual` (which this operator
     // canonicalizes into): the handler owns `NaN` — IEEE unordered →
     // `False`.
@@ -1001,14 +1006,14 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   NotGreaterNotEqual: {
     description: 'Neither greater than nor equal to.',
     complexity: 11000,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'GreaterEqual', args)]),
   },
 
   TildeFullEqual: {
     description: 'Indicate isomorphism, congruence and homotopic equivalence',
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
 
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'TildeFullEqual', args),
@@ -1019,7 +1024,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     description:
       'Negated isomorphism/congruence relation (not isomorphic or congruent).',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
 
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'TildeFullEqual', args)]),
@@ -1029,14 +1034,14 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     description:
       'Generic similarity relation (`\\sim`): similar geometric figures, asymptotic equivalence, or "is distributed as". Inert: stays symbolic.',
     complexity: 11000,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) => canonicalRelational(ce, 'Tilde', args),
   },
 
   NotTilde: {
     description: 'Negated similarity relation (not similar).',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'Tilde', args)]),
   },
@@ -1044,7 +1049,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   TildeEqual: {
     description: 'Approximately or asymptotically equal',
     complexity: 11000,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'TildeEqual', args),
     evaluate: (ops, { engine: ce }) => evaluateApproxChain(ops, ce),
@@ -1054,7 +1059,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     description:
       'Negated approximately/asymptotically-equal relation (not approximately equal).',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
 
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'TildeEqual', args)]),
@@ -1063,7 +1068,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   Approx: {
     description: 'Approximate-equality relation (approximately equal).',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    // A single operand is a degenerate chain and evaluates to `True`
+    // (`evaluateApproxChain`); the declaration admits it.
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'Approx', args),
     evaluate: (ops, { engine: ce }) => evaluateApproxChain(ops, ce),
@@ -1073,7 +1080,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     description:
       'Negated approximate-equality relation (not approximately equal).',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) =>
       ce._fn('Not', [canonicalRelational(ce, 'Approx', args)]),
   },
@@ -1081,7 +1088,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   ApproxEqual: {
     description: 'Approximately-equal relation.',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'ApproxEqual', args),
     evaluate: (ops, { engine: ce }) => evaluateApproxChain(ops, ce),
@@ -1097,7 +1104,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   ApproxNotEqual: {
     description: 'Approximately-not-equal relation.',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'ApproxNotEqual', args),
     evaluate: (ops, { engine: ce }) => {
@@ -1110,7 +1117,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   NotApproxNotEqual: {
     description: 'Negated approximately-not-equal relation.',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine }) =>
       engine._fn('Not', [canonicalRelational(engine, 'ApproxNotEqual', args)]),
   },
@@ -1118,7 +1125,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   Precedes: {
     description: 'Precedes relation in an ordering (comes before).',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'Precedes', args),
     evaluate: (ops, { engine: ce }) => {
@@ -1137,14 +1144,14 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   NotPrecedes: {
     description: 'Negated precedes relation (does not precede).',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine }) =>
       engine._fn('Not', [canonicalRelational(engine, 'Precedes', args)]),
   },
 
   Succeeds: {
     description: 'Succeeds relation in an ordering (comes after).',
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine }) =>
       canonicalRelational(engine, 'Succeeds', args),
     evaluate: (ops, { engine: ce }) => {
@@ -1163,7 +1170,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   NotSucceeds: {
     description: 'Negated succeeds relation (does not succeed).',
     complexity: 11100,
-    signature: '(any, any+) -> boolean',
+    signature: '(any, any*) -> boolean',
     canonical: (args, { engine }) =>
       engine._fn('Not', [canonicalRelational(engine, 'Succeeds', args)]),
   },

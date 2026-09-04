@@ -464,9 +464,12 @@ function canEnumerateCollectionOperands(expr: Expression): boolean | undefined {
   return undefined;
 }
 
-// Parsed form of the `At` signature (kept in sync with the `signature:` string
-// on the `At` definition), used by its custom canonical handler to delegate
-// operand validation to `validateArguments`.
+// The signature the `At` canonical handler validates its operands against
+// (through `validateArguments`). It is DELIBERATELY narrower than the
+// declared `signature:` string on the `At` definition, whose base is `any`:
+// the handler restores the collection-typed base for an operand that could
+// still be a collection (a bare `value`, an unknown symbol) and refuses a
+// provably scalar one with its own error, so the two are not meant to match.
 const AT_SIGNATURE = parseType(
   '(value: indexed_collection<any> | dictionary<any>, index: (number|string|boolean|indexed_collection<any>)+) -> unknown'
 );
@@ -7088,8 +7091,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Out-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `Missing` otherwise. It never yields `Nothing`, which would erase the position.',
     ],
     complexity: 8200,
+    // The base is declared `any`: a base whose static type is no evidence of
+    // scalar-ness (the bare `value` primitive, an unknown symbol) defers to
+    // runtime, and a provably scalar base is refused by the canonical handler
+    // with its own `incompatible-type` error — see the `lenient over-narrowed
+    // base` pins. A collection-typed declaration here would refuse the
+    // deferred bases at the boxing validation seam.
     signature:
-      '(value: indexed_collection<any> | dictionary<any>, index: (number|string|boolean|indexed_collection<any>)+) -> unknown',
+      '(value: any, index: (number|string|boolean|indexed_collection<any>)+) -> unknown',
     // `At` accepts absence into any position (base or index) and absorbs it at
     // runtime (§3.A/§3.C): declared `handle`, stripping ALL positions. This
     // subsumes the P1 operator-local carve-out — the general `missingStrip`

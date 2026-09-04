@@ -292,7 +292,7 @@ function mayBeNaN(d: OperandDescriptor): boolean {
  *
  * Range endpoints in the type lattice are inclusive; a strict bound is
  * carried separately, as an intersection with a negated value type —
- * `(real<0..>) & !0` is "positive", `(real<0..1>) & !0 & !1` the open unit
+ * `real<0..> & !0` is "positive", `real<0..1> & !0 & !1` the open unit
  * interval. The zero exclusion reaches the comparisons through the sign;
  * an exclusion at any other endpoint is read by `typeExcludesValue`, which
  * the `provably*` helpers combine with a closed bound AT that endpoint to
@@ -319,7 +319,7 @@ function typeBounds(t: Type): Interval {
 /**
  * Three-valued magnitude comparisons against a machine constant `k`, from
  * the operand's ranged type (a closed bound AT `k` combined with a type
- * exclusion of `k` — `(real<0..1>) & !1` — proves the strict comparison,
+ * exclusion of `k` — `real<0..1> & !1` — proves the strict comparison,
  * and so does an OPEN endpoint at `k`, the canonical spelling since
  * open-bound ranged types: `real<1<..>`), its literal value, and — for
  * `k = 0` only, the one comparison a sign decides — its sign.
@@ -328,7 +328,7 @@ function typeBounds(t: Type): Interval {
  */
 /**
  * Does the type PROVE the value is not `k`? A negated value type in an
- * intersection does (`(real<0..1>) & !1` excludes 1 — the lattice's
+ * intersection does (`real<0..1> & !1` excludes 1 — the lattice's
  * spelling of an open endpoint); a transparent alias answers for its
  * definition; a union excludes `k` only when every member does.
  * Deliberately conservative: `false` means "not proven", never "admits
@@ -341,7 +341,7 @@ function typeExcludesValue(t: Type, k: number, seen?: Set<object>): boolean {
       // Membership of `k` in the NEGATED type proves the exclusion — not
       // just the exact `!k` node: the type reducer folds sibling
       // exclusions by De Morgan (`!0 & !1` → `!(0 | 1)`), and a negated
-      // range (`!(real<1..2>)`) excludes every value it covers.
+      // range (`!real<1..2>`) excludes every value it covers.
       return isSubtype({ kind: 'value', value: k }, t.type);
     case 'intersection':
       return t.types.some((m) => typeExcludesValue(m, k, seen));
@@ -364,7 +364,7 @@ function typeExcludesValue(t: Type, k: number, seen?: Set<object>): boolean {
 // §3.3). An OPEN endpoint at `k` proves the strict comparison directly —
 // `real<1<..>` proves > 1 — which is what the retired descriptor
 // `facts.bounds` used to carry for assumption-derived bounds; a DECLARED
-// interior exclusion at `k` (`(real<0..1>) & !0.5`, no range spelling)
+// interior exclusion at `k` (`real<0..1> & !0.5`, no range spelling)
 // is still read by `typeExcludesValue`.
 export function provablyGreater(d: OperandDescriptor, k: number): boolean {
   const v = operandLiteralValue(d);

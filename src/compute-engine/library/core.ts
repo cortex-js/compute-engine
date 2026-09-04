@@ -3196,7 +3196,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // An application route: it decides what an `Error` argument means
       // (rung 2 — `apply()` bubbles it) instead of freezing with it.
       inspectsErrors: true,
-      signature: '(name:symbol, arguments:expression*) -> unknown',
+      // The callee may be a named function, a function literal, or — the
+      // constant-nullary shorthand `Apply(3, 5)` is `3`, and an expression
+      // is a shorthand literal (`Apply(x + 1, 2)` is `3`) — any expression
+      // at all (`apply()`, `boxed-expression/function-utils.ts`). The
+      // declared parameter says so, because the boxing validation seam
+      // checks a canonical-handler head against its declaration. The
+      // arguments are `any` as well: an argument that only EVALUATES to
+      // `Nothing` (a call typed `nothing`) is bound, never erased — erasure
+      // is a rule on the WRITTEN argument.
+      signature: '(name:any, arguments:any*) -> unknown',
       // An ANONYMOUS application instantiates its callee's `where` clause here
       // (generic-function-literals design §2.5). This is the one application
       // seam that crosses NO symbol/definition boundary — the callee is an

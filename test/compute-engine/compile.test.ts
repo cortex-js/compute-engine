@@ -1290,9 +1290,7 @@ describe('COMPILE complex into real-only helper fails closed (CO-P1-3)', () => {
             constantFold: false,
           })
         ).toThrow(
-          FLIPPED.has(h as string)
-            ? /invalid expression/
-            : /non-real operand/
+          FLIPPED.has(h as string) ? /invalid expression/ : /non-real operand/
         );
       }
     );
@@ -1654,9 +1652,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // The pairwise `&&` conjunction is only sound over scalar booleans.
     const e = mkEngine();
     const js = new JavaScriptTarget();
-    expect(() =>
-      js.compile(e.parse('d = m = m', { strict: false }))
-    ).toThrow(/Fail closed/);
+    expect(() => js.compile(e.parse('d = m = m', { strict: false }))).toThrow(
+      /Fail closed/
+    );
   });
 
   it('Same (Epsil `===`) has no lowering and fails closed (D6)', () => {
@@ -1836,15 +1834,15 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
     // Undeclared symbol
-    expect(() =>
-      js.compile(e.box(['Reduce', 'd', 'w', 0]))
-    ).toThrow(/Fail closed|invalid expression/);
+    expect(() => js.compile(e.box(['Reduce', 'd', 'w', 0]))).toThrow(
+      /Fail closed|invalid expression/
+    );
     // A value-bound (non-function) symbol must fail at COMPILE time, not
     // produce `.reduce(<non-function>)` that throws at runtime
     e.assign('v', e.box(['Add', 'x', 1]));
-    expect(() =>
-      js.compile(e.box(['Reduce', 'd', 'v', 0]))
-    ).toThrow(/Fail closed|invalid expression/);
+    expect(() => js.compile(e.box(['Reduce', 'd', 'v', 0]))).toThrow(
+      /Fail closed|invalid expression/
+    );
   });
 
   it('a binary mapping function over ONE collection is rejected outright', () => {
@@ -1904,32 +1902,26 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
 
   it('At compiles 1-based access with negative-from-end and NaN out-of-range', () => {
     const e = mkEngine();
-    expect(
-      compile(e.box(['At', 'd', 1]), { fallback: false })!
-        .run!()
-    ).toBe(10);
-    expect(
-      compile(e.box(['At', 'd', 3]), { fallback: false })!
-        .run!()
-    ).toBe(30);
-    expect(
-      compile(e.box(['At', 'd', -1]), { fallback: false })!
-        .run!()
-    ).toBe(30);
-    expect(
-      compile(e.box(['At', 'd', -3]), { fallback: false })!
-        .run!()
-    ).toBe(10);
+    expect(compile(e.box(['At', 'd', 1]), { fallback: false })!.run!()).toBe(
+      10
+    );
+    expect(compile(e.box(['At', 'd', 3]), { fallback: false })!.run!()).toBe(
+      30
+    );
+    expect(compile(e.box(['At', 'd', -1]), { fallback: false })!.run!()).toBe(
+      30
+    );
+    expect(compile(e.box(['At', 'd', -3]), { fallback: false })!.run!()).toBe(
+      10
+    );
     expect(
       Number.isNaN(
-        compile(e.box(['At', 'd', 0]), { fallback: false })!
-          .run!() as number
+        compile(e.box(['At', 'd', 0]), { fallback: false })!.run!() as number
       )
     ).toBe(true);
     expect(
       Number.isNaN(
-        compile(e.box(['At', 'd', 4]), { fallback: false })!
-          .run!() as number
+        compile(e.box(['At', 'd', 4]), { fallback: false })!.run!() as number
       )
     ).toBe(true);
   });
@@ -1964,9 +1956,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       // A `dictionary` base type slips through boxing (At accepts
       // `dictionary | indexed_collection`) but is not an indexed collection at
       // compile time — the handler fails closed (D6).
-      expect(() =>
-        js.compile(e.box(['At', 'd', 1]))
-      ).toThrow(/indexed collection.*Fail closed \(D6\)/);
+      expect(() => js.compile(e.box(['At', 'd', 1]))).toThrow(
+        /indexed collection.*Fail closed \(D6\)/
+      );
     });
 
     it('with fallback:true returns success:false + the D6 message, without throwing', () => {
@@ -2300,7 +2292,10 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // provisional admission, the application stays inert at evaluation —
     // so the compiler is the gate: its Slice arm fails CLOSED on a
     // non-`range` span, never a silent mis-slice.
-    for (const span of [['Range', 3, 2], ['Range', 1, 3, 2]] as const) {
+    for (const span of [
+      ['Range', 3, 2],
+      ['Range', 1, 3, 2],
+    ] as const) {
       const inert = e.box(['Slice', 'd', span as any]);
       expect(inert.isValid).toBe(true);
       expect(() =>
@@ -2446,9 +2441,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
     expect(() => js.compile(e.box(['Chunk', 'd', -2]))).toThrow(/Fail closed/);
-    expect(() =>
-      js.compile(e.box(['Partition', 'd', 0]))
-    ).toThrow(/Fail closed/);
+    expect(() => js.compile(e.box(['Partition', 'd', 0]))).toThrow(
+      /Fail closed/
+    );
   });
 
   // The compile-time bake path (`ce.randomSeed`) was removed by the
@@ -2479,9 +2474,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toThrow(/Fail closed/);
     // `Interval` and `Range` lower to descriptors and a literal list to the JS
     // array it already is; every other collection domain fails closed (D6).
-    expect(() =>
-      js.compile(e.box(['Random', ['Set', 1, 2, 3]]))
-    ).toThrow(/Fail closed/);
+    expect(() => js.compile(e.box(['Random', ['Set', 1, 2, 3]]))).toThrow(
+      /Fail closed/
+    );
   });
 
   // Higher-order collection operators (Any/All/TakeWhile/DropWhile/FlatMap/
@@ -2735,9 +2730,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // the compile handler's own check: `Last` declares an `indexed_collection`
     // parameter (like `Take`/`Drop`/`At`), so the set is refused at
     // canonicalization and the operand is an `Error`. Either way, closed.
-    expect(() =>
-      js.compile(e.box(['Last', ['Set', 1, 2, 3]]))
-    ).toThrow(/incompatible-type/);
+    expect(() => js.compile(e.box(['Last', ['Set', 1, 2, 3]]))).toThrow(
+      /incompatible-type/
+    );
     // A scalar operand is rejected earlier by the type system (still closed).
     expect(() => js.compile(e.box(['Reverse', 'm']))).toThrow();
   });
@@ -3374,9 +3369,9 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     for (const op of ['And', 'Or']) {
       const bad = e.box(['Reduce', L, op, 0]);
       expect(bad.isValid).toBe(false);
-      expect(() =>
-        js.compile(bad, { constantFold: false })
-      ).toThrow(/invalid expression/);
+      expect(() => js.compile(bad, { constantFold: false })).toThrow(
+        /invalid expression/
+      );
     }
     // A FIXED-arity operator symbol (`Negate`, `Not`) cannot take two
     // arguments at all, so it is rejected one stage earlier — the static
@@ -3417,13 +3412,14 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
         constantFold: false,
       })
     ).toThrow(/Fail closed/);
-    // `Less` requires at least two arguments, so it is refused one stage
-    // earlier: the static check rejects the call while it is canonicalized.
+    // `Less` accepts a single operand as the degenerate chain (`Less(x)` is
+    // `True`), so the static callback-arity check admits it and, like `Or`,
+    // it is refused at the compiler's own callback gate.
     expect(() =>
       js.compile(e.box(['Filter', L, 'Less']), {
         constantFold: false,
       })
-    ).toThrow(/invalid expression/);
+    ).toThrow(/Fail closed/);
     // …but a UNARY one is eta-expanded into a real callback rather than
     // refused: `Map(Negate, L)` is a valid application at `Negate`'s own
     // arity (it is only a *combiner* that needs two parameters). It compiles
@@ -3491,9 +3487,9 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // callback-arity check (2026-08-15) reports first, which would test the
     // wrong thing.
     const f2 = ['Function', ['Multiply', 'x', 'y'], 'x', 'y'];
-    expect(() =>
-      js.compile(e.box(['Tabulate', f2, 3, 0]))
-    ).toThrow(/Fail closed/);
+    expect(() => js.compile(e.box(['Tabulate', f2, 3, 0]))).toThrow(
+      /Fail closed/
+    );
     // A positive dimension still compiles.
     expect(
       compile(e.box(['Tabulate', f, 3]), { fallback: false })!.run!()
@@ -3632,13 +3628,19 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
     // `Math.min(<array>)` lowering answered `NaN < 3` → a silent `false`.
     const near = e.box(['Less', ['Min', ['Distance', 'S', P]], 3]);
     expect(
-      withValue.box(['Less', ['Min', ['Distance', 'S', P]], 3]).evaluate().toString()
+      withValue
+        .box(['Less', ['Min', ['Distance', 'S', P]], 3])
+        .evaluate()
+        .toString()
     ).toBe('"True"');
     expect(compile(near, { fallback: false })!.run!(S_DATA)).toBe(true);
     // …and a row that is genuinely false stays false (not a false-from-NaN).
     const far = e.box(['Less', ['Min', ['Distance', 'S', P]], 0.4]);
     expect(
-      withValue.box(['Less', ['Min', ['Distance', 'S', P]], 0.4]).evaluate().toString()
+      withValue
+        .box(['Less', ['Min', ['Distance', 'S', P]], 0.4])
+        .evaluate()
+        .toString()
     ).toBe('"False"');
     expect(compile(far, { fallback: false })!.run!(S_DATA)).toBe(false);
   });
@@ -3899,9 +3901,12 @@ describe('COMPILE built-in operator name as a callback', () => {
     // statically rejects it over integer elements) and pins the specific
     // refusal message.
     expect(() =>
-      compile(e.box(['Map', 'Random', ['List', ['List', 1, 2], ['List', 3, 4]]]), {
-        fallback: false,
-      })
+      compile(
+        e.box(['Map', 'Random', ['List', ['List', 1, 2], ['List', 3, 4]]]),
+        {
+          fallback: false,
+        }
+      )
     ).toThrow(
       /Random: cannot compile as a first-class function[\s\S]*Fail closed/
     );
@@ -4419,21 +4424,29 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
       e.declare('a', { signature: '(number) scope -> number' });
       e.assign('a', e.box(['Function', BODY, 't']));
     } else {
-      e.declare('a', { effects: ['scope'], evaluate: e.box(['Function', BODY, 't']) });
+      e.declare('a', {
+        effects: ['scope'],
+        evaluate: e.box(['Function', BODY, 't']),
+      });
     }
     return e;
   };
 
   it('the interpreter answers 3√10 (the reference)', () => {
     const e = new ComputeEngine();
-    e.declare('a', { effects: ['scope'], evaluate: e.box(['Function', BODY, 't']) });
+    e.declare('a', {
+      effects: ['scope'],
+      evaluate: e.box(['Function', BODY, 't']),
+    });
     expect(e.box(['a', 3]).evaluate().N().re).toBeCloseTo(EXPECTED, 12);
   });
 
   it('JS: the DECLARED user-function route runs to 3√10 (was undefined)', () => {
     const r = compile(engineWithA(true).box(['a', 'u']));
     expect(r?.success).toBe(true);
-    expect(r!.code).toBe('((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_a(_tv2), _tv1) : _fn_a(_tv1))(_.u)');
+    expect(r!.code).toBe(
+      '((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_a(_tv2), _tv1) : _fn_a(_tv1))(_.u)'
+    );
     expect(r!.run!({ u: 3 })).toBeCloseTo(EXPECTED, 12);
   });
 
@@ -5008,7 +5021,11 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     // own last line (`Block(s ≔ x; t ≔ s)` emitted `… return t = s;\n}`).
     expect(() =>
       wgsl.compileFunction(
-        engineWithX().box(['Block', ['Assign', 's', 'x'], ['Assign', 't', 's']]),
+        engineWithX().box([
+          'Block',
+          ['Assign', 's', 'x'],
+          ['Assign', 't', 's'],
+        ]),
         'f',
         'float',
         [['x', 'float']]
@@ -5029,7 +5046,11 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     ).toBe('float f(float x) {\n  return s = x;\n}');
     expect(
       glsl.compileFunction(
-        engineWithX().box(['Block', ['Assign', 's', 'x'], ['Assign', 't', 's']]),
+        engineWithX().box([
+          'Block',
+          ['Assign', 's', 'x'],
+          ['Assign', 't', 's'],
+        ]),
         'f',
         'float',
         [['x', 'float']]
@@ -5155,11 +5176,15 @@ describe('the expression-only Python route declines statement bodies', () => {
       expect(() => python.compileToSource(engineWithX().box(body))).toThrow(
         /compileToSource\(\): this route emits a single Python EXPRESSION, but the body is an assignment/
       );
-      expect(() => python.compileLambda(engineWithX().box(body), ['x'])).toThrow(
+      expect(() =>
+        python.compileLambda(engineWithX().box(body), ['x'])
+      ).toThrow(
         /compileLambda\(\): this route emits a single Python EXPRESSION, but the body is an assignment/
       );
     }
-    expect(() => python.compileToSource(engineWithX().box(ASSIGN_ONLY))).toThrow(
+    expect(() =>
+      python.compileToSource(engineWithX().box(ASSIGN_ONLY))
+    ).toThrow(
       /Python assignment is a STATEMENT \(this target does not emit the walrus operator\)/
     );
   });
@@ -5176,11 +5201,15 @@ describe('the expression-only Python route declines statement bodies', () => {
       expect(() => python.compileToSource(engineWithX().box(body))).toThrow(
         /compileToSource\(\): this route emits a single Python EXPRESSION, but the body is a declaration/
       );
-      expect(() => python.compileLambda(engineWithX().box(body), ['x'])).toThrow(
+      expect(() =>
+        python.compileLambda(engineWithX().box(body), ['x'])
+      ).toThrow(
         /compileLambda\(\): this route emits a single Python EXPRESSION, but the body is a declaration/
       );
     }
-    expect(() => python.compileToSource(engineWithX().box(DECLARE_ONLY))).toThrow(
+    expect(() =>
+      python.compileToSource(engineWithX().box(DECLARE_ONLY))
+    ).toThrow(
       /the declared name and its initializer would be silently DROPPED/
     );
   });
@@ -5197,7 +5226,10 @@ describe('the expression-only Python route declines statement bodies', () => {
   it('compileFunction() declines a statement body in either branch', () => {
     const python = new PythonTarget();
     // Single-line branch: emitted `def f(x):\n    return s = x\n` before.
-    for (const body of [ASSIGN_ONLY, ['Assign', 's', 'x'] as MathJsonExpression])
+    for (const body of [
+      ASSIGN_ONLY,
+      ['Assign', 's', 'x'] as MathJsonExpression,
+    ])
       expect(() =>
         python.compileFunction(engineWithX().box(body), 'f', ['x'])
       ).toThrow(
@@ -5207,7 +5239,11 @@ describe('the expression-only Python route declines statement bodies', () => {
     // emitted `def f(x):\n    s = x\n    return t = s\n`.
     expect(() =>
       python.compileFunction(
-        engineWithX().box(['Block', ['Assign', 's', 'x'], ['Assign', 't', 's']]),
+        engineWithX().box([
+          'Block',
+          ['Assign', 's', 'x'],
+          ['Assign', 't', 's'],
+        ]),
         'f',
         ['x']
       )
@@ -5216,7 +5252,10 @@ describe('the expression-only Python route declines statement bodies', () => {
     );
     // A declaration value statement: emitted `def f(x):\n    return \n` (root,
     // initializer dropped) and `def f(x):\n    return return s = x\n` (wrapped).
-    for (const body of [DECLARE_ONLY, ['Block', DECLARE_ONLY] as MathJsonExpression])
+    for (const body of [
+      DECLARE_ONLY,
+      ['Block', DECLARE_ONLY] as MathJsonExpression,
+    ])
       expect(() =>
         python.compileFunction(engineWithX().box(body), 'f', ['x'])
       ).toThrow(

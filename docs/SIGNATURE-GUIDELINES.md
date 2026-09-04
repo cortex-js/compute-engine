@@ -134,11 +134,14 @@ their deviations):
 - **At `.N()`**: numeric-route failures appear — non-representability
   produces the marker (`Sin(10000i).N()` → `NaN`), and float overflow
   may saturate to an infinity (ruling L6(a)).
-- **Deviations that exist today** and are tracked, not blessed: `lazy`
-  operators validate later than boxing (their operands arrive unbound);
-  operators with `canonical` handlers currently bypass declared-
-  signature validation (the §4.4 runtime-conformance work). A
-  definition relying on either timing states it in a comment.
+- **Deviation that exists today** and is tracked, not blessed: `lazy`
+  operators validate later than boxing (their operands arrive unbound).
+  A definition relying on it states it in a comment. (Operators with
+  `canonical` handlers used to bypass declared-signature validation as
+  well; since the boxing validation seam in `applyOperatorDefinition`
+  their same-head result is validated against the declaration as a
+  gate — provable violations error at boxing, nothing is inferred — so a
+  `canonical` handler no longer buys a later timing.)
 
 The general principle: **boxing errors are for what the types already
 prove; evaluation is for what only values decide.** Nothing should wait

@@ -268,7 +268,7 @@ export function solveArmOverActuals(
     // (`stripNumericRanges`): its type may be a value node (`5`), a
     // singleton range (`rational<0.5..0.5>`), an enclosure range
     // (`real<1.4..1.5>` for `√2`) or an over-double-range sign
-    // range (`(integer<0..>) & !0` for `10⁴⁰⁰`) — all literal
+    // range (`integer<0..> & !0` for `10⁴⁰⁰`) — all literal
     // cargo. Any other operand goes through `widenValueTypes`, which
     // widens embedded value nodes and rational singletons but PRESERVES a
     // handler's deliberate range claim (`identity(|x|)` still binds

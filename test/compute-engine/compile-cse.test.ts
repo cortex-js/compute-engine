@@ -476,7 +476,10 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     // collection-element source keeps the call valid and the emission gate
     // reachable.
     const engine = new ComputeEngine();
-    const mapped = ['Sum', ['Map', 'Random', ['List', ['List', 1, 2], ['List', 3, 4]]]];
+    const mapped = [
+      'Sum',
+      ['Map', 'Random', ['List', ['List', 1, 2], ['List', 3, 4]]],
+    ];
     const expr = engine.box(['Add', mapped, mapped] as any);
     expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
 
@@ -508,12 +511,13 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     const harvest = harvestCse(expr, { admitPureUserFunctions: true });
     expect(harvest.candidates).toHaveLength(0);
 
-    // The `Less` spelling is still refused, one stage earlier.
+    // The `Less` spelling is refused at the same stage: a relation accepts
+    // a single operand (`Less(x)` is the degenerate chain, `True`), so the
+    // static callback-arity gate no longer refuses `Less` as a one-argument
+    // callback at boxing, and the compiler's callback gate does.
     const bad = mappedTwice(new ComputeEngine(), 'Less');
-    expect(bad.isValid).toBe(false);
-    expect(() => compile(bad, { fallback: false })).toThrow(
-      /invalid expression/
-    );
+    expect(bad.isValid).toBe(true);
+    expect(() => compile(bad, { fallback: false })).toThrow(/Fail closed/);
     // …and the harvest of that INVALID tree is empty too: an `Error` node is
     // a diagnostic, not a computation, so no subtree containing one becomes a
     // candidate the emission gate would only refuse.
@@ -1579,7 +1583,9 @@ describe('COMPILE CSE — repeated pure calls at the ROOT (item 120 follow-up)',
     expect(callSites(result.code, '_fn_f_2')).toBe(1);
     // The binding's initializer IS the call site — a guarded one, so the
     // temporary is bound to the guard rather than to a bare `_fn_f_2(…)`.
-    expect(result.code).toMatch(/const _cse\d+ = \(\(_tv\d+\) => Array\.isArray/);
+    expect(result.code).toMatch(
+      /const _cse\d+ = \(\(_tv\d+\) => Array\.isArray/
+    );
 
     expect((result.run as (v: any) => number)({ x: 0.3 })).toBeCloseTo(
       compile(expr, { fallback: false, cse: false }).run!({

@@ -416,11 +416,11 @@ describe('phase 1: the single-clause single-collection family converts', () => {
     ],
     [
       'Any',
-      '(collection<T>, predicate: (T) any -> boolean?) -> boolean where T',
+      '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
     ],
     [
       'All',
-      '(collection<T>, predicate: (T) any -> boolean?) -> boolean where T',
+      '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
     ],
     [
       'TakeWhile',
@@ -531,7 +531,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
 
 describe('phase 1: `Any` / `All` — the OPTIONAL callback slot', () => {
   const ARM = parseType(
-    '(collection<T>, predicate: (T) any -> boolean?) -> boolean where T'
+    '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T'
   ) as FunctionSignature;
 
   it('the planner maps an OPTIONAL slot to its operand position', () => {
@@ -1616,7 +1616,7 @@ describe('runtime signature display is the HONEST declared polytype', () => {
     // string-preserving arm with Strings Phase 1 (a reordering of a string's
     // characters is a string); both arms still display their `where` clause.
     expect(ce.box('Sort').type.toString()).toBe(
-      '((T, order: ((character) any -> unknown) | ((character, character) any -> boolean | number)?) -> T where T: string) & ((indexed_collection<T>, order: ((T) any -> unknown) | ((any, any) any -> boolean | number)?) -> list<T> where T)'
+      '((T, order: (((character) any -> unknown) | ((character, character) any -> boolean | number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) | ((any, any) any -> boolean | number))?) -> list<T> where T)'
     );
   });
 
