@@ -49,6 +49,31 @@ function jsType(expr: Expression): Type {
   return resolveTypeForCompilation(expr.type.type);
 }
 
+/**
+ * Does this operand's TYPE say it is a point with a collection-shaped
+ * component — `tuple<list<number>, number>` — without the point being
+ * written out as a `Tuple` literal (a symbol bound to `([10, 20], 3)`, a
+ * declared parameter)? Such a point is one point PER ELEMENT at evaluation,
+ * so its norm is a list, and the literal-only emission (`pointHasBroadcastComponent`,
+ * which reads the `Tuple` node) cannot see its components. `_SYS.norm` would
+ * flatten the nested array to one wrong number (`Norm(p)` answered 22.56 for
+ * `[10.44, 20.22]`), so a lowering that consumes a point through `_SYS.norm`
+ * must fail closed on it. A nested tuple component is one leg of the norm,
+ * not a collection here.
+ */
+function isUnwrittenPointWithCollectionComponent(expr: Expression): boolean {
+  if (isFunction(expr, 'Tuple')) return false;
+  const t = jsType(expr);
+  if (typeof t === 'string' || t.kind !== 'tuple') return false;
+  const collectionShape = parseType('indexed_collection<any>');
+  return t.elements.some((el) => {
+    const et = resolveTypeForCompilation(el.type);
+    if (et === 'tuple' || (typeof et !== 'string' && et.kind === 'tuple'))
+      return false;
+    return isSubtype(et, collectionShape);
+  });
+}
+
 import {
   chop,
   ROUNDOFF_TOLERANCE,
@@ -3542,18 +3567,78 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Frobenius by default, vector p-norm or matrix 1-/∞-operator norm with a
   // numeric second operand (`"Frobenius"` is the default; any other named
   // norm fails closed).
-  Norm: (args, compile) => {
+  Norm: (args, compile, target) => {
     if (args[0] == null) throw new Error('Norm: missing argument');
-    // A point with a broadcasting (non-tuple collection) component zips into
-    // one norm per element at evaluation; `_SYS.norm` would flatten it into a
-    // single scalar that silently disagrees with the interpreter and with the
-    // declared `list<number>` type. Fail closed (D6) so the engine falls back
-    // to interpretation, which broadcasts correctly.
-    if (pointHasBroadcastComponent(args[0]))
+    // A point with a broadcasting (non-tuple collection) component is one
+    // point per element in the interpreter — `([1, 2], 3)` is `(1, 3)` and
+    // `(2, 3)` — so its norm is one number per element, and the application
+    // declares `list<number>`. `_SYS.norm` would flatten the point into a
+    // single scalar, so the point is broadcast over its list components
+    // instead: each list component is a source of `_SYS.bcast`, the point is
+    // rebuilt inside the closure from the element parameters, and the other
+    // components are bound once outside it so that an impure component draws
+    // once (the interpreter's evaluate-once rule). Lists of different
+    // lengths answer NaN from `_SYS.bcast`, the compiled spelling of the
+    // interpreter's `incompatible-dimensions` error. Only a component that
+    // provably holds NUMBERS is a source: a component that is a list of
+    // points would make `_SYS.bcast` descend into each point, so that shape
+    // fails closed (D6) and the interpreter answers.
+    if (isUnwrittenPointWithCollectionComponent(args[0]))
       throw new Error(
-        'Norm: cannot compile a point with a broadcasting component. ' +
-          'Fail closed (D6).'
+        'Norm: cannot compile a point with a collection component that is ' +
+          'not written out as a Tuple literal. Fail closed (D6).'
       );
+    if (pointHasBroadcastComponent(args[0])) {
+      if (args[1] != null && isString(args[1]) && args[1].string !== 'Frobenius')
+        throw new Error(
+          `Norm: the "${args[1].string}" norm does not compile. ` +
+            `Fail closed (D6).`
+        );
+      const point = args[0];
+      if (!isFunction(point, 'Tuple'))
+        throw new Error(
+          'Norm: cannot compile a point with a broadcasting component. ' +
+            'Fail closed (D6).'
+        );
+      const bound: string[] = [];
+      const values: string[] = [];
+      const bind = (code: string): string => {
+        const v = BaseCompiler.tempVar(target);
+        bound.push(v);
+        values.push(code);
+        return v;
+      };
+      const params: string[] = [];
+      const sources: string[] = [];
+      const components = point.ops.map((c) => {
+        // The same component test as `pointHasBroadcastComponent`, with the
+        // tuple exclusion read off the type: a nested point is one leg of
+        // the norm, never a source (this module does not import
+        // `collection-utils`, see `isNumericTupleParticipant` below).
+        const ct = jsType(c);
+        const isPoint = ct === 'tuple' || (typeof ct !== 'string' && ct.kind === 'tuple');
+        const broadcasts =
+          !isPoint &&
+          (c.isCollection || c.type.matches('indexed_collection<any>'));
+        if (!broadcasts) return bind(compile(c));
+        if (!c.type.matches('indexed_collection<number>'))
+          throw new Error(
+            'Norm: cannot compile a point whose component is a collection ' +
+              'of non-scalars. Fail closed (D6).'
+          );
+        const p = BaseCompiler.tempVar(target);
+        params.push(p);
+        sources.push(bind(compile(c)));
+        return p;
+      });
+      const ord =
+        args[1] != null && !isString(args[1]) ? `, ${bind(compile(args[1]))}` : '';
+      return (
+        `((${bound.join(', ')}) => _SYS.bcast((${params.join(', ')}) => ` +
+        `_SYS.norm([${components.join(', ')}]${ord}), ${sources.join(', ')}))` +
+        `(${values.join(', ')})`
+      );
+    }
     // A LIST of points: one norm per point, matching the interpreter (a point
     // binds atomically, so `_SYS.norm` — which FLATTENS — would return a
     // single scalar behind `success: true`). Tycho item 138. A list of numeric
@@ -4465,11 +4550,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // remaining legs the same way, so the two agree — `Hypot((+∞, NaN), 5)` is
   // `+∞` and `Hypot((NaN, 3), 5)` is NaN.
   //
-  // A point reaches this handler only because
-  // `BaseCompiler.tryCompileBroadcast` leaves a point in `Hypot` position
-  // alone; otherwise each component would be paired with the other leg. When
-  // the element-wise broadcast does apply — a list operand, or a point whose
-  // component is a list — this handler is invoked on the closure's element
+  // A point reaches this handler only when no leg broadcasts:
+  // `BaseCompiler.tryCompileBroadcast` leaves a point beside scalar legs
+  // alone, and rewrites the point to its `Norm` when a list leg or a list
+  // component is present, so that the norms broadcast like any list operand.
+  // Under a broadcast this handler is invoked on the closure's element
   // parameters instead, which are plain numbers, and it produces an ordinary
   // `Math.hypot(...)` call.
   Hypot: (args, compile) => {
@@ -4485,7 +4570,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // the engine falls back to interpretation. Compiling it needs the nested
       // broadcast that keeps a point atomic, which `Add` and `Multiply` use
       // for a point summed with a list of points.
-      if (pointHasBroadcastComponent(a))
+      if (
+        pointHasBroadcastComponent(a) ||
+        isUnwrittenPointWithCollectionComponent(a)
+      )
         throw new Error(
           'Hypot: cannot compile a point with a broadcasting component. ' +
             'Fail closed (D6).'

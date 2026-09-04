@@ -85,27 +85,102 @@ describe('a compiled Hypot consumes a point leg whole', () => {
     expect(value).toBe(5);
   });
 
-  test('a point whose component is a list does not compile', () => {
-    // `((1, 2), 3)` is two points once the inner list is distributed, so
-    // `Hypot(([1,2], 3), 4)` is one hypotenuse per element — [√26, √29] — and
-    // the application declares `list<number>`. A single `Math.hypot` call
-    // cannot produce that, so the JavaScript target refuses the expression and
-    // the engine falls back to interpretation, the same answer `Norm` gives
-    // for the same operand. Compiling it needs the nested broadcast that keeps
-    // a point atomic, which `Add` and `Multiply` use for a point summed with a
-    // list of points.
+  test('a point whose component is a list is one hypotenuse per element', () => {
+    // `([1, 2], 3)` is two points once the inner list is distributed, so
+    // `Hypot(([1,2], 3), 4)` is `[√26, √29]` and the application declares
+    // `list<number>`. The point leg lowers through `Norm`, which broadcasts
+    // the point over its list component and answers one norm per element,
+    // and that list of norms then broadcasts against the other leg.
     const json = ['Hypot', ['Tuple', ['List', 1, 2], 3], 4];
-    const r = ce
-      ._getCompilationTarget('javascript')
-      .compile(ce.box(json), { fallback: true, constantFold: false });
-    expect(r.success).toBe(false);
-    // The interpreter still answers, and its answer is the one a compiled
-    // form would have had to reproduce.
-    const value = ce.box(json).N();
-    expect(value.operator).toBe('List');
-    expect(value.ops!.map((x) => x.re)).toEqual([
+    const { value } = compiled(json);
+    expect(value).toEqual([
       expect.closeTo(Math.sqrt(26), 12),
       expect.closeTo(Math.sqrt(29), 12),
+    ]);
+    const interpretedValue = ce.box(json).N();
+    expect(interpretedValue.operator).toBe('List');
+    expect(interpretedValue.ops!.map((x) => x.re)).toEqual([
+      expect.closeTo(Math.sqrt(26), 12),
+      expect.closeTo(Math.sqrt(29), 12),
+    ]);
+    // Either leg position, and two list components zipped.
+    expect(compiled(['Hypot', 4, ['Tuple', ['List', 1, 2], 3]]).value).toEqual([
+      expect.closeTo(Math.sqrt(26), 12),
+      expect.closeTo(Math.sqrt(29), 12),
+    ]);
+    expect(
+      compiled(['Hypot', ['Tuple', ['List', 1, 2], ['List', 3, 4]], 4]).value
+    ).toEqual([expect.closeTo(Math.sqrt(26), 12), 6]);
+  });
+
+  test('every component is evaluated once', () => {
+    // The non-list components and the other leg are bound outside the
+    // broadcast closure, so an impure component draws once for the whole
+    // list, as the interpreter's evaluate-once rule requires.
+    const { code } = compiled(['Hypot', ['Tuple', ['List', 1, 2], ['Random']], 4]);
+    expect(code.match(/drawNextRandomNumber/g)).toHaveLength(1);
+    expect(code).toMatch(/^_SYS\.bcast\(/);
+  });
+
+  test('a point leg beside a LIST leg lifts the point whole', () => {
+    // The point is one leg of every hypotenuse — its norm — and the list
+    // supplies the cells: `[√26, √29]`, never the positional pairing of the
+    // point's components with the list's elements (`[√10, √20]`). Both lanes.
+    for (const json of [
+      ['Hypot', ['Tuple', 3, 4], ['List', 1, 2]],
+      ['Hypot', ['List', 1, 2], ['Tuple', 3, 4]],
+    ]) {
+      expect(compiled(json).value).toEqual([
+        expect.closeTo(Math.sqrt(26), 12),
+        expect.closeTo(Math.sqrt(29), 12),
+      ]);
+      expect(ce.box(json).N().ops!.map((x) => x.re)).toEqual([
+        expect.closeTo(Math.sqrt(26), 12),
+        expect.closeTo(Math.sqrt(29), 12),
+      ]);
+    }
+  });
+
+  test('a per-element point leg beside a list leg zips with it', () => {
+    // `([1, 2], 3)` is the two points `(1, 3)` and `(2, 3)`, so its norms are
+    // `[√10, √13]`, and the list leg pairs with them: `[√26, √38]`. Both lanes
+    // — the interpreter holds the point back from the list broadcast and its
+    // `Hypot` handler builds `√(Norm(P)² + y²)`, whose arithmetic zips.
+    const json = ['Hypot', ['Tuple', ['List', 1, 2], 3], ['List', 4, 5]];
+    expect(compiled(json).value).toEqual([
+      expect.closeTo(Math.sqrt(26), 12),
+      expect.closeTo(Math.sqrt(38), 12),
+    ]);
+    expect(ce.box(json).N().ops!.map((x) => x.re)).toEqual([
+      expect.closeTo(Math.sqrt(26), 12),
+      expect.closeTo(Math.sqrt(38), 12),
+    ]);
+  });
+
+  test('a point with a collection component that is not written out fails closed', () => {
+    // A symbol bound to `([10, 20], 3)`, or declared `tuple<list<number>,
+    // number>`, is one point per element too, but the per-element emission
+    // reads the components off a `Tuple` literal and cannot see a symbol's.
+    // `_SYS.norm` would flatten the nested array to one wrong number
+    // (22.56 for `[10.44, 20.22]`), so `Norm`, `Abs` and `Hypot` decline and
+    // the interpreter answers.
+    const engine = new ComputeEngine();
+    engine.assign('p', engine.box(['Tuple', ['List', 10, 20], 3]));
+    engine.declare('q', 'tuple<list<number>, number>');
+    for (const json of [
+      ['Norm', 'p'],
+      ['Abs', 'p'],
+      ['Hypot', 'p', 4],
+      ['Norm', 'q'],
+      ['Hypot', 'q', 4],
+    ]) {
+      expect(() =>
+        compile(engine.box(json), { fallback: false, constantFold: false })
+      ).toThrow(/Fail closed/);
+    }
+    expect(engine.box(['Norm', 'p']).N().ops!.map((x) => x.re)).toEqual([
+      expect.closeTo(Math.sqrt(109), 12),
+      expect.closeTo(Math.sqrt(409), 12),
     ]);
   });
 

@@ -3830,7 +3830,8 @@ export class BoxedFunction
         !isLambdaDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
-        !skipBroadcastForVectorOps(def, hasTensors, this.ops!);
+        !skipBroadcastForVectorOps(def, hasTensors, this.ops!) &&
+        !pointIsOneLegOf(this.operator, this.ops!);
       // An operand that is collection-TYPED but carries no collection value
       // yet would be spliced whole into every cell as a scalar, freezing an
       // outer product into the result (`hasUnresolvedCollectionOperand`).
@@ -4336,6 +4337,7 @@ export class BoxedFunction
           (def.broadcastable &&
             !def.broadcastExemptions.includes('evaluated-operands'))) &&
         !skipBroadcastForVectorOps(def, false, tail) &&
+        !pointIsOneLegOf(this.operator, tail) &&
         tail.some(isPostEvalBroadcastOperand);
       // The same veto as the pre-evaluation steps, decided here on the
       // EVALUATED `tail`: an operand that is collection-typed but still
@@ -4657,7 +4659,8 @@ export class BoxedFunction
         !isLambdaDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
-        !skipBroadcastForVectorOps(def, hasTensors, this.ops!);
+        !skipBroadcastForVectorOps(def, hasTensors, this.ops!) &&
+        !pointIsOneLegOf(this.operator, this.ops!);
       // The veto and the definite-mismatch exception of the sync step 2,
       // unchanged: an operand that is collection-TYPED but carries no
       // collection value yet would be spliced whole into every cell as a
@@ -5077,6 +5080,7 @@ export class BoxedFunction
             !def.broadcastExemptions.includes('evaluated-operands'))) &&
         isSyncApplicable &&
         !skipBroadcastForVectorOps(def, false, tail) &&
+        !pointIsOneLegOf(this.operator, tail) &&
         tail.some(isPostEvalBroadcastOperand);
       // The veto and the definite-mismatch exception of the sync step 4b,
       // unchanged: a collection-typed but still valueless operand must not be
@@ -5321,6 +5325,35 @@ function isBroadcastParticipant(op: Expression): boolean {
  * lowerings these heads still have and want.
  */
 const TUPLE_NORM_HEADS: ReadonlySet<string> = new Set(['Abs', 'Hypot']);
+
+/**
+ * Does a point operand hold the operator broadcast back, so that the head's
+ * own evaluate handler consumes it as ONE value?
+ *
+ * Under a head in {@link TUPLE_NORM_HEADS} a point is one leg — its norm —
+ * never a source of cells, so the list broadcast must not run over the
+ * application: with it, `Hypot((3, 4), [1, 2])` zipped the point's components
+ * against the list (`[√10, √20]`). Held back, the `Hypot` handler builds
+ * `√(Norm(P)² + y²)`, whose arithmetic broadcasts the list leg on its own:
+ * `[√26, √29]`, one hypotenuse per element with the point's norm as a leg. The
+ * same construction settles a point whose component is a LIST: `Norm(([1, 2],
+ * 3))` is the list `[√10, √13]` (one point per element), so
+ * `Hypot(([1, 2], 3), [4, 5])` is its zip with the other leg, `[√26, √38]` —
+ * which is what the compiled lane answers (`tryCompileBroadcast` rewrites the
+ * point leg to `Norm`). The participant test of the broadcast
+ * (`isFiniteBroadcastParticipant`) already excludes tuples; this keeps the
+ * broadcast's own gate in step with the `zip` that pulls the cells, which
+ * admits any collection. Component-wise heads are untouched: there a tuple
+ * beside a list still supplies cells positionally (`Power((1, 2), [3, 4])` is
+ * `[1, 16]`, pinned in `tuple-broadcast.test.ts`).
+ */
+function pointIsOneLegOf(
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): boolean {
+  if (!TUPLE_NORM_HEADS.has(operator)) return false;
+  return ops.some((x) => isTuple(x));
+}
 
 /**
  * Does an application of `operator` map a TUPLE operand component-wise?

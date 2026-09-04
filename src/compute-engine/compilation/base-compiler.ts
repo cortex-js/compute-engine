@@ -7079,6 +7079,34 @@ export class BaseCompiler {
     return h === 'Hypot' && isTuple(a);
   }
 
+  /**
+   * An array operand that PROVABLY holds scalars — the shape an outer
+   * `_SYS.bcast` may descend into while a point operand is kept whole (see
+   * `atomicTuple` in `tryCompileBroadcast`). A list of points, or a source
+   * whose element kind is unprovable (a top-typed call), is not one: the
+   * outer broadcast would descend into each point.
+   */
+  private static isScalarElementSource(a: Expression): boolean {
+    const t = compilationType(a);
+    if (typeof t !== 'string' && t.kind === 'broadcastable')
+      return isSubtype(t.elements, 'number');
+    // A top-typed application (`h(x)` with `h: (…) -> unknown`): its
+    // run-time shape is unknowable.
+    if (isBoundPossiblyCollectionTyped(a)) return false;
+    const elt = collectionElementType(t);
+    if (elt === undefined || !isSubtype(elt, 'number')) return false;
+    // A SYMBOL declared `indexed_collection<number>` may itself be bound to a
+    // point (a tuple inhabits that type); only a list-kind declaration proves
+    // a symbol holds a list of scalars.
+    if (isSymbol(a))
+      return (
+        t === 'list' ||
+        t === 'range' ||
+        (typeof t !== 'string' && t.kind === 'list')
+      );
+    return true;
+  }
+
   private static tryCompileBroadcast(
     engine: ComputeEngine,
     h: string,
@@ -7430,29 +7458,10 @@ export class BaseCompiler {
         const tuples = collection.filter((a) => isNumericTuple(a));
         if (tuples.length > 1) return null;
         if (tuples.length === 1) {
-          const isScalarElementSource = (a: Expression): boolean => {
-            const t = compilationType(a);
-            if (typeof t !== 'string' && t.kind === 'broadcastable')
-              return isSubtype(t.elements, 'number');
-            // A top-typed application (`h(x)` with `h: (…) -> unknown`): its
-            // run-time shape is unknowable.
-            if (isBoundPossiblyCollectionTyped(a)) return false;
-            const elt = collectionElementType(t);
-            if (elt === undefined || !isSubtype(elt, 'number')) return false;
-            // A SYMBOL declared `indexed_collection<number>` may itself be
-            // bound to a point (a tuple inhabits that type); only a list-kind
-            // declaration proves a symbol holds a list of scalars.
-            if (isSymbol(a))
-              return (
-                t === 'list' ||
-                t === 'range' ||
-                (typeof t !== 'string' && t.kind === 'list')
-              );
-            return true;
-          };
           if (
             !collection.every(
-              (a) => a === tuples[0] || isScalarElementSource(a)
+              (a) =>
+                a === tuples[0] || BaseCompiler.isScalarElementSource(a)
             )
           )
             return null;
@@ -7557,7 +7566,36 @@ export class BaseCompiler {
     // `[hypot(3,1), hypot(4,1)]` and report success. Leave the operand to the
     // target's own `Hypot` code, which takes the point as one leg, or refuses
     // the expression when the point's component is itself a list.
-    if (args.some((a) => BaseCompiler.isHypotPointLeg(h, a))) return null;
+    // When something broadcasts — a list leg, or a point whose component is
+    // a list — the point leg is rewritten to its NORM, `Hypot(Norm(P), y)`,
+    // and the rewritten application is compiled in its place: a plain point
+    // lowers through the `Norm` codegen to the scalar `_SYS.norm([3, 4])`,
+    // and a point whose component is a list — one point per element in the
+    // interpreter, so one norm per element — lowers to a LIST of norms, which
+    // then broadcasts here like any list leg (`Hypot(([1, 2], 3), 4)` is
+    // `[√26, √29]`, and with a list other leg `[4, 5]` it is `[√26, √38]`,
+    // the interpreter's zip of the two lists). The rewrite is applied once —
+    // a rewritten application has no point leg left — and the `Norm` codegen
+    // owns the per-element emission. With only scalar legs beside a plain
+    // point nothing broadcasts, and the target's own `Hypot` codegen takes
+    // the point as one leg (`Math.hypot(_SYS.norm([3, 4]), 1)`).
+    if (args.some((a) => BaseCompiler.isHypotPointLeg(h, a))) {
+      const broadcasts = args.some((a) =>
+        BaseCompiler.isHypotPointLeg(h, a)
+          ? pointHasBroadcastComponent(a)
+          : isArrayOperand(a)
+      );
+      if (!broadcasts) return null;
+      const legs = args.map((a) =>
+        BaseCompiler.isHypotPointLeg(h, a)
+          ? engine.function('Norm', [a], { form: 'structural' })
+          : a
+      );
+      return BaseCompiler.compile(
+        engine.function('Hypot', legs, { form: 'structural' }),
+        target
+      );
+    }
 
     // A list of POINTS summed with a SCALAR-shaped operand — a number, or a
     // list of numbers — is `point + scalar` at every element, which the

@@ -302,18 +302,6 @@ lowering of both the expression form and the statement form
   lowers `If` to its own `_IA.piecewise` helper and is unaffected. `When` keeps
   the truthiness test on every target: it is not a two-armed selection, so the
   ruling has no arm to withhold.
-- **A compiled `Hypot` over a point whose component is a list does not
-  compile.** `Hypot(([1,2], 3), 4)` is one hypotenuse per element —
-  `[√26, √29]`, and the application declares `list<number>` — because the inner
-  list distributes into two points. A single `Math.hypot` call cannot produce
-  that, so the JavaScript target refuses the expression and the engine falls
-  back to interpretation, which answers correctly; a fixed-arity point compiles
-  normally, as one leg. Compiling the broadcasting form needs the nested
-  emission that keeps a point atomic, which `Add` and `Multiply` already use for
-  a point summed with a list of points (`atomicTuple` in
-  `BaseCompiler.tryCompileBroadcast`). `Norm` refuses the same operand for the
-  same reason.
-
 ### Doc-sweep triage (2026-08-29)
 
 Found by checking published examples and reference prose against the engine,

@@ -1,3 +1,28 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A point whose component is a list now compiles under `Norm`, `Abs` and
+  `Hypot`.** `Norm(([1, 2], 3))` is one norm per element (`[√10, √13]`) and
+  `Hypot(([1, 2], 3), 4)` one hypotenuse per element (`[√26, √29]`); the
+  JavaScript target used to refuse both and fall back to interpretation. The
+  emission broadcasts over the point's list components and evaluates every
+  other component once; beside a list leg the norms zip with it
+  (`Hypot(([1, 2], 3), [4, 5])` is `[√26, √38]`). A point whose component is
+  a list of points still fails closed.
+- **`Hypot` with a point leg and a list leg paired the point's components
+  with the list's elements.** `Hypot((3, 4), [1, 2])` answered `[√10, √20]`
+  on both lanes; a point is one leg of every hypotenuse, so it is `[√26, √29]`
+  now — the list supplies the cells and the point's norm is the other leg.
+  `Abs` follows the same rule. Component-wise heads are unchanged:
+  `Power((1, 2), [3, 4])` is still `[1, 16]`.
+- **A literal list times a point typed as the point.** `[1, 2] · (3, 4)`
+  evaluates to `[(3, 4), (6, 8)]` but typed `tuple<integer, integer>`; it now
+  types `list<tuple<integer, integer>^2>`, and a matrix times a point — every
+  cell scales the point — keeps the matrix's shape
+  (`list<tuple<integer, integer>^(2x2)>`). `Range(1, 3) · (3, 4)` already
+  typed as a list of points.
+
 ## 0.123.1 _2026-09-04_
 
 ### Resolved Issues

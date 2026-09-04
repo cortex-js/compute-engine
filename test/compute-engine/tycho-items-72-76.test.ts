@@ -260,10 +260,12 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     );
   });
 
-  test('a point with a broadcasting component fails closed on compile', () => {
-    // Evaluation zips into one norm per element ([√10, √13]); a compiled
-    // scalar norm would silently flatten to the single value √14. The
-    // compile must fail closed (falling back to interpretation) instead.
+  test('a point with a broadcasting component is one norm per element', () => {
+    // Evaluation zips into one norm per element ([√10, √13]). A compiled
+    // scalar norm would silently flatten to the single value √14; the
+    // JavaScript target instead broadcasts over the list component (since
+    // 2026-09-04), and the targets with no per-element emission fail closed
+    // (falling back to interpretation).
     const expr = ce.parse('\\left|([1,2],3)\\right|');
     expect(expr.evaluate().operator).toEqual('List');
     // `constantFold: false` throughout: every component of the point is a
@@ -272,7 +274,11 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     const js = ce
       ._getCompilationTarget('javascript')
       .compile(expr, { fallback: true, constantFold: false });
-    expect(js.success).toBe(false);
+    expect(js.success).toBe(true);
+    expect(js.run!({})).toEqual([
+      expect.closeTo(Math.sqrt(10), 12),
+      expect.closeTo(Math.sqrt(13), 12),
+    ]);
     const iv = ce
       ._getCompilationTarget('interval-js')
       .compile(expr, { constantFold: false });

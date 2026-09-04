@@ -2691,3 +2691,55 @@ describe('A zero element times a non-finite factor is NaN on every route', () =>
     expect(ce.box('PositiveInfinity').mul(2).toString()).toBe('+oo');
   });
 });
+
+describe('a list times a point types as a list of points', () => {
+  // The value path scales the point at every cell of a numeric tensor, for a
+  // literal list (`[1, 2]` is a rank-1 tensor, `vector<2>`) exactly as for a
+  // dimensionless one (`Range`); the `Multiply` type handler used to skip its
+  // list-times-point arm for every literal and claim the point's own type.
+  test('literal list, either operand order, keeps the list shape', () => {
+    const ce = new ComputeEngine();
+    for (const json of [
+      ['Multiply', ['List', 1, 2], ['Tuple', 3, 4]],
+      ['Multiply', ['Tuple', 3, 4], ['List', 1, 2]],
+    ]) {
+      const expr = ce.box(json);
+      expect(expr.type.toString()).toBe('list<tuple<integer, integer>^2>');
+      expect(expr.evaluate().toString()).toBe('[(3, 4),(6, 8)]');
+    }
+  });
+
+  test('a matrix scales the point at every cell', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Multiply',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      ['Tuple', 3, 4],
+    ]);
+    expect(expr.type.toString()).toBe('list<tuple<integer, integer>^(2x2)>');
+    expect(expr.evaluate().toString()).toBe(
+      '[[(3, 4),(6, 8)],[(9, 12),(12, 16)]]'
+    );
+  });
+
+  test('a dimensionless list is unchanged', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Multiply', ['Range', 1, 3], ['Tuple', 3, 4]]);
+    expect(expr.type.toString()).toBe('list<tuple<integer, integer>>');
+    expect(expr.evaluate().toString()).toBe('[(3, 4),(6, 8),(9, 12)]');
+  });
+
+  test('a list of points is not a scaling tensor', () => {
+    // Point times point has no product; the value is that error at every
+    // element, and the arm must not claim a list of points for it.
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Multiply',
+      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+      ['Tuple', 5, 6],
+    ]);
+    const value = expr.evaluate();
+    expect(value.operator).toBe('List');
+    expect(value.ops!.every((x) => x.operator === 'Error')).toBe(true);
+  });
+});

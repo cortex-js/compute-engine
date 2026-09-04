@@ -151,7 +151,12 @@ import {
   INDEXED_COLLECTION_SHAPE_TYPE,
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
-import type { NamedElement, TupleType, Type } from '../../common/type/types.js';
+import type {
+  ListType,
+  NamedElement,
+  TupleType,
+  Type,
+} from '../../common/type/types.js';
 import {
   addIntervals,
   attachInterval,
@@ -849,6 +854,16 @@ function dimensionlessIndexedElementType(
 /** Twin of `isBroadcastCollectionType`. */
 function isBroadcastCollectionTypeOf(t: Type): boolean {
   return dimensionlessIndexedElementType(t) !== undefined;
+}
+
+/** The element type of a dimensioned list type whose elements are provably
+ * numbers (`vector<integer^2>`, `list<real^2x3>`), or `undefined` for any
+ * other type — a list of points, a list of strings, a dimensionless list. */
+function numericTensorElementType(t0: Type): Type | undefined {
+  const t = resolveTypeAlias(t0);
+  if (typeof t === 'string' || t.kind !== 'list') return undefined;
+  if (t.dimensions === undefined) return undefined;
+  return isSubtype(t.elements, 'number') ? t.elements : undefined;
 }
 
 /** Twin of `isTensorValue`: a literal `List` whose type carries dimensions.
@@ -3499,9 +3514,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // wrapper.) Tensors keep their matrix-product typing below.
         const couldBeTuple = (x: OperandDescriptor) =>
           typeCouldBeNumericTuple(x.type);
+        // A literal list is a TENSOR (`[1, 2]` types `vector<2>`,
+        // `[[1, 2], [3, 4]]` a 2×2 matrix), and `mulTensors` scales the point
+        // at every cell of it exactly as the dimensionless-list path does
+        // (`[1, 2] · (3, 4)` is `[(3, 4), (6, 8)]`; the matrix gives a 2×2
+        // nest of points) — a point is a scalar factor to the tensor kernel,
+        // never a matrix-product operand. So a numeric tensor of any rank
+        // takes this arm, and the result keeps the tensor's shape with the
+        // scaled point as its cell type. Without this the arm was skipped
+        // for every literal list and the single-tuple branch claimed
+        // `tuple<integer, integer>` for a value that is a list of points.
+        // Only a tensor of NUMBERS qualifies: a list of points is a point
+        // list, whose product with a point is the `no-product-between-points`
+        // error the value path answers.
+        const isNumericTensorOperand = (x: OperandDescriptor) =>
+          isTensorOperand(x) && numericTensorElementType(x.type) !== undefined;
+        const scalesPoint = (x: OperandDescriptor) =>
+          isBroadcastCollectionTypeOf(x.type) || isNumericTensorOperand(x);
         if (
-          !ops.some((x) => isTensorOperand(x)) &&
-          ops.some((x) => isBroadcastCollectionTypeOf(x.type)) &&
+          !ops.some((x) => isTensorOperand(x) && !isNumericTensorOperand(x)) &&
+          ops.some(scalesPoint) &&
           ops.some(couldBeTuple)
         ) {
           const tupleType = widen(
@@ -3522,8 +3554,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const factorTypes = ops
             .filter((x) => !couldBeTuple(x))
             .map((x) => {
-              if (isBroadcastCollectionTypeOf(x.type)) {
-                const elt = dimensionlessIndexedElementType(x.type);
+              if (scalesPoint(x)) {
+                const elt =
+                  dimensionlessIndexedElementType(x.type) ??
+                  numericTensorElementType(x.type);
                 return elt === undefined || elt === 'any' || elt === 'unknown'
                   ? 'number'
                   : elt;
@@ -3532,13 +3566,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 ? x.type
                 : undefined;
             });
-          if (
-            factorTypes.every((t) => t !== undefined && isSubtype(t, 'number'))
+          const scaled = factorTypes.every(
+            (t) => t !== undefined && isSubtype(t, 'number')
           )
-            return broadcastResultType(
-              scaleTupleComponents(tupleType, factorTypes as Type[])
-            );
-          return broadcastResultType(tupleType);
+            ? scaleTupleComponents(tupleType, factorTypes as Type[])
+            : tupleType;
+          // A tensor factor gives the result its own shape (a 2×2 matrix of
+          // scalars times a point is a 2×2 nest of points); a dimensionless
+          // list gives a dimensionless list of points.
+          const tensor = ops.find(isNumericTensorOperand);
+          const dims =
+            tensor === undefined
+              ? undefined
+              : (resolveTypeAlias(tensor.type) as ListType).dimensions;
+          if (dims !== undefined)
+            return { kind: 'list', elements: scaled, dimensions: dims };
+          return broadcastResultType(scaled);
         }
         // A numeric tuple (point/vector) scaled by scalars keeps the tuple
         // type. Hoisted above the NaN/finiteness early-returns (a tuple is
