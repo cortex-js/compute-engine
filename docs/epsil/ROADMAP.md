@@ -9,15 +9,6 @@ Items are demand-gated unless another roadmap gives them higher priority.
 
 ## Language design
 
-- **Constructing an error value.** A function whose body writes a literal
-  `Error(…)` cannot be declared: the function literal types `error` and the
-  declaration is inert (`ROADMAP.md`, "A function literal whose body contains
-  an `Error(…)` literal types `error`", with two candidate designs; a
-  runtime constructor such as `Fail("code")` is the recommended one). Until
-  that is ruled, an Epsil program can only pass on the errors the engine
-  produces — a user function does return the error value its body evaluates
-  to (fixed 2026-09-03) — which limits the `if let v: !error = f(x) { … }`
-  idiom to engine-raised failures.
 - **Unit literals.** Units currently enter through LaTeX islands or
   `Quantity(value, unit)`. Native unit notation needs a grammar and
   round-trip decision before implementation.

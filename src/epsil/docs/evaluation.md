@@ -228,6 +228,29 @@ a `runtime-error` diagnostic — for example an indexed assignment
 (`xs[2] = 9`, which is rejected: element assignment is not supported), or
 reassigning a `const` in the middle of a program.
 
+A program constructs an error value of its own with `RuntimeError`:
+
+```epsil-live
+function reciprocal(x) {
+  if x == 0 { RuntimeError("zero-has-no-reciprocal") } else { 1 / x }
+}
+[reciprocal(4), reciprocal(0)]
+// ➔ [1/4, Error("zero-has-no-reciprocal")]
+```
+
+The call evaluates to `Error("zero-has-no-reciprocal")`, which a caller takes
+apart with [`if let`](/epsil/control-flow/#if-let) or
+[`match`](/epsil/control-flow/#match) like any other error value. The
+argument is a code string, or an `ErrorCode("code", details…)` when the
+error carries data.
+
+Do not write `Error("…")` for this. A written `Error(…)` is a *static*
+diagnostic — the node the engine itself inserts where a program is wrong,
+such as a type mismatch — and it marks the whole expression around it as
+invalid: a function whose body spells `Error("neg")` never gets defined. The
+two spellings make the distinction explicit: `Error` is a problem *with the
+program*, `RuntimeError` is a failure *produced by running it*.
+
 ## Console input and output
 
 `print` writes its operands to the host console — the terminal for the

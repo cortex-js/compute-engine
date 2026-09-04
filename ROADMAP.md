@@ -651,6 +651,29 @@ deliberately left out of that change.
   semantically stable (`parseType(typeToString(t))` equals `t`), so this
   is a readability defect in hovers and error messages only.
 
+### A strict operator embeds an operand's EVALUATION-TIME error instead of bubbling it (OPEN, error-model — found 2026-09-03 implementing `RuntimeError`)
+
+`Sin(Length(5)).evaluate()` is `sin(Error(incompatible-type, …))` — an
+invalid tree, type `error` — and `1 + Length(5)` is `1 + Error(…)`; the same
+for `Sin(g(-1))` when `g` returns `RuntimeError("neg")`. §3 of
+`docs/ERROR-MODEL.md` says that evaluating an expression that demands an
+error-carrying operand yields the error (`Sin(err) → err`), and that is what
+happens when the error is present at BOXING time (`Sin("banana")`). When the
+operand only becomes an error by evaluating, the pre-handler absorption
+(`_invalidValue`, keyed on the boxed tree's `isValid`) does not see it, the
+handler declines on the error operand, and the fallback re-boxes the operator
+over the evaluated operands, embedding the error. Epsil's own wording
+("becomes an `Error` value embedded in the result", `evaluation.md`) describes
+the current behavior, so the two documents disagree; the `runtime-error`
+diagnostic still finds the embedded error, which is why nothing is lost in
+Epsil. Expected under §3: the evaluated error bubbles as the value, with the
+operator hop on its breadcrumb. Decision needed: whether §3 is meant to
+cover evaluation-time operand errors (then the post-evaluation path in
+`_computeValue` needs an absorption over the evaluated `tail`, with the
+selecting/collection/observer exceptions, and the blast radius measured) or
+whether embedding is the intended value-level behavior and §3 should say so.
+Probe: `ce.box(['Sin', ['Length', 5]]).evaluate()`.
+
 ### A user function declined an application whose body evaluated to an error value, leaving the call inert (FIXED 2026-09-03 — found 2026-09-03 implementing Epsil `if let`)
 
 `makeLambda` (`src/compute-engine/function-utils.ts`) returned `undefined`
@@ -674,9 +697,20 @@ typed-binding test. The `if let v: !error = head(xs) { … }` example in
 `src/epsil/docs/control-flow.md` had "worked" only because `MatchesType` is
 undecided on an inert call; it now works because the subject is the error.
 
-### A written `Error(…)` literal in a function body types the literal `error`, so the declaration never takes effect (OPEN, ruling needed — found 2026-09-03 implementing Epsil `if let`)
+### A written `Error(…)` literal in a function body types the literal `error`, so the declaration never takes effect (RULED and IMPLEMENTED 2026-09-03 — option 1, as `RuntimeError(code)`; found 2026-09-03 implementing Epsil `if let`)
 
-An Epsil program still cannot construct an error value of its own. With
+**Resolution (user-ruled 2026-09-03):** a written `Error(…)` keeps its
+static-diagnostic meaning, and the runtime constructor is `RuntimeError(code)`
+— `(string|expression<ErrorCode>) -> never`, evaluating to `Error(code)`
+(`library/core.ts`). The user dropped the `where` operand: it names the
+offending sub-expression of a static diagnostic, which a runtime failure does
+not have. Documented in `src/epsil/docs/evaluation.md` ("Errors are values")
+and `docs/ERROR-MODEL.md` §1/§7; pinned by
+`test/compute-engine/runtime-error.test.ts` and
+`test/epsil/runtime-error.test.ts`. Historical record of the problem and the
+two designs weighed follows.
+
+An Epsil program could not construct an error value of its own. With
 `function g(x) { if x > 0 { x } else { Error("neg") } }`, the definition
 statement reports a `runtime-error` diagnostic (breadcrumb "in If argument 3,
 in DefineFunction argument 2") and `g` is never defined: `g(1)` stays

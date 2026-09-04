@@ -45,7 +45,10 @@ thread `When` values while preserving their guards. Producers such as `Solve`
 may return guarded results rather than asserting a formula outside its domain.
 
 Error values propagate through ordinary function application and the pipe.
-Control-flow heads and explicit pattern matching may consume them. Host throws
+Control-flow heads and explicit pattern matching may consume them. A program
+constructs one with `RuntimeError(code)`, a valid application typed `never`
+that evaluates to `Error(code)`; a written `Error(…)` is a static diagnostic
+node and invalidates the expression around it. Host throws
 are reserved for API misuse, cancellation, or compiled runtime failures where
 the target cannot represent the boxed error value.
 

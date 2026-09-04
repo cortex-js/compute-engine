@@ -44,6 +44,17 @@
 
 ### New Features
 
+- **`RuntimeError(code)` constructs an error value at run time.** A written
+  `Error(…)` is a static diagnostic node that marks the expression around it
+  as invalid, so a function whose body spelled `Error("neg")` was never
+  defined. `RuntimeError("neg")` is an ordinary application whose evaluation
+  yields `Error("neg")`, so
+  `function g(x) { if x > 0 { x } else { RuntimeError("neg") } }` defines
+  `g`, and `g(-1)` is an error value that `if let v: !error = g(-1)` refuses
+  and `match g(-1) { Error(c) => c }` reads. The operator takes the code
+  only — a string or an `ErrorCode(…)` — and its result type is `never`, so
+  `g` types `(unknown) -> number`. The `javascript` target fails closed on
+  it, naming the operator.
 - **Epsil `if let`.** `if let pattern = subject { … } else { … }` binds the
   pattern's names when the subject matches and runs the `else` branch
   otherwise. The pattern is any `match` pattern, so a typed binding takes

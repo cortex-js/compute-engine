@@ -745,6 +745,17 @@ With `head([4, 5])`, `4` binds to `h`. The same test reads absence:
 `if let v: !missing = First(xs) { … }` binds `v` only when the list has a
 first element.
 
+A function that fails on purpose returns
+[`RuntimeError`](/epsil/evaluation/#errors-are-values):
+
+```epsil-live
+function reciprocal(x) {
+  if x == 0 { RuntimeError("zero-has-no-reciprocal") } else { 1 / x }
+}
+if let r: !error = reciprocal(0) { r } else { "no reciprocal" }
+// ➔ "no reciprocal"
+```
+
 `if let` chains with `else if` in either direction, and a plain `if` can
 follow an `if let`:
 

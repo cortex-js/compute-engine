@@ -2532,6 +2532,35 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    // The runtime counterpart of a written `Error(…)`. A written `Error` node
+    // is a STATIC diagnostic: it makes every tree above it invalid, so a
+    // function whose body spells `Error("neg")` never gets a function type
+    // and its declaration never takes effect. `RuntimeError("neg")` is an
+    // ordinary, VALID application whose EVALUATION produces the `Error`
+    // value — the same value shape `Length(5)` produces — so it flows through
+    // application, `match`, and Epsil's `if let v: !error = …` like any
+    // engine-raised failure. The result type is `never`: a signature describes
+    // the successes (Contract B, `docs/ERROR-MODEL.md` §4), and this operator
+    // has none, so `If(x > 0, x, RuntimeError("neg"))` types as `x` does.
+    // Only the code is taken — the `where` operand of `Error` names the
+    // offending sub-expression of a static diagnostic, which a runtime
+    // failure does not have (user ruling 2026-09-03).
+    RuntimeError: {
+      description:
+        'Construct an error value when evaluated: the runtime counterpart ' +
+        'of a written `Error(…)`, which is a static diagnostic node. ' +
+        'Evaluates to `Error(code)`.',
+      complexity: 500,
+      signature: '(string|expression<ErrorCode>) -> never',
+      evaluate: ([code], { engine: ce }) => {
+        if (code === undefined) return undefined;
+        if (isString(code)) return ce.error(code.string);
+        if (isFunction(code, 'ErrorCode')) return ce._fn('Error', [code]);
+        // A symbolic code (an unbound symbol) has no value yet: stay inert.
+        return undefined;
+      },
+    },
+
     Unevaluated: {
       description: 'Prevent an expression from being evaluated',
       // Unlike Hold, the argument is canonicalized

@@ -34,7 +34,11 @@ violation, a runtime conformance failure (a deferred type check that
 settles against the slot), a failed dispatch (a non-function callee), a
 violated precondition (an invalid option value, a dimension mismatch), or
 an explicitly constructed `Error(…)`. It is the channel for wrongness that
-is *about the program*, not about a mathematical value. Its consumer is a
+is *about the program*, not about a mathematical value. A WRITTEN
+`Error(…)` is therefore a static diagnostic node — it invalidates every
+tree above it — and a program that wants to *produce* an error value at
+run time calls `RuntimeError(code)` (ruled 2026-09-03), a valid application
+typed `never` whose evaluation yields the `Error(code)` value. Its consumer is a
 human or an IDE, so it carries provenance: an error code, the offending
 sub-expression, and (as it propagates) a breadcrumb of the operators it
 passed through. In the type lattice `error` is deliberately out-of-band as
@@ -916,6 +920,22 @@ answer and the fix landed. An entry with no FIXED date is still open.
   would answer `number` for `integer ⊔ nan`, losing the element tier
   again. Values did not move — an out-of-band numeric access is still
   `NaN`, and `Missing` is still the non-numeric marker.
+- **RULED and IMPLEMENTED 2026-09-03: `RuntimeError(code)` constructs an
+  error value at run time.** A written `Error(…)` stays what §1 says it is —
+  a static diagnostic node that invalidates its tree, so a function whose
+  body spells `Error("neg")` never gets a function type and its declaration
+  is inert (the trap Epsil's `if let` docs first hit). The ruling adds the
+  runtime counterpart instead of exempting held bodies from the validity
+  rule: `RuntimeError("neg")` is a valid application, typed `never` because
+  a signature describes the successes (§4) and it has none, whose evaluation
+  produces `Error("neg")`. So `(x) => If(x > 0, x, RuntimeError("neg"))`
+  types `(unknown) -> number`, is declarable, and answers `Error("neg")`
+  for a non-positive argument. Only the code is taken — the `where` operand
+  of `Error` names the offending sub-expression of a static diagnostic,
+  which a runtime failure does not have (user ruling). The `javascript`
+  target has no lowering and fails closed, naming the operator. Pinned by
+  `test/compute-engine/runtime-error.test.ts` and
+  `test/epsil/runtime-error.test.ts`.
 - **FIXED 2026-09-03: a user function answers with the error value its
   body evaluates to.** Application of a function literal (`makeLambda`,
   `src/compute-engine/function-utils.ts`) DECLINED when the body's result

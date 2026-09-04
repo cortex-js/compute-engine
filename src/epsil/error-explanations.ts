@@ -175,7 +175,9 @@ The mirror mistake, calling a property (\`area(b)\`), is reported as \`protocol-
 
 The parenthesized chain in the message ("in Characters argument 1, in Map argument 2") is the propagation path, innermost first — where the error was born, then the calls it traveled through. The caret in the report points at the innermost location the source can show.
 
-Only the last statement's value is a program's result, so an error produced by an EARLIER statement would vanish silently; that is why it is reported as a diagnostic. The final statement's error simply is the program's value.`,
+Only the last statement's value is a program's result, so an error produced by an EARLIER statement would vanish silently; that is why it is reported as a diagnostic. The final statement's error simply is the program's value.
+
+A program produces an error value of its own with \`RuntimeError("code")\` (or \`RuntimeError(ErrorCode("code", details))\`). Do not write \`Error("code")\` for that: a written \`Error\` is a STATIC diagnostic node and marks the expression around it as invalid, so a function whose body spells one is never defined.`,
 
   'static-type-error': `This problem was detected before anything ran, when the program was canonicalized — the same analysis \`epsil check\` performs.
 
