@@ -2,7 +2,7 @@
   "name": "epsil",
   "displayName": "Epsil",
   "description": "Language support for Epsil — syntax highlighting, diagnostics, and run commands for .epsil files",
-  "version": "0.122.0",
+  "version": "0.123.0",
   "publisher": "FarfieldStudio",
   "license": "MIT",
   "icon": "icon.png",
